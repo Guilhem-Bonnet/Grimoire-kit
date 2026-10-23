@@ -2,7 +2,10 @@
 
 Start with::
 
-    python -m grimoire.mcp.server
+    python -m grimoire.mcp.server            # stdio, one server per session
+    python -m grimoire.mcp.server --http     # shared streamable-http daemon (#723),
+                                             # project resolved per request — see
+                                             # `grimoire mcp start` / `grimoire mcp register`
 
 Or configure in your MCP client (Claude Desktop, VS Code, etc.)::
 
@@ -20,6 +23,7 @@ Or configure in your MCP client (Claude Desktop, VS Code, etc.)::
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
@@ -28,6 +32,9 @@ from grimoire.__version__ import __version__
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
 from grimoire.core.grounding import GROUNDING_RULE_EN
+from grimoire.mcp.project import project_scoped
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 # Le SDK a renommé sa façade en 2.0 : `mcp.server.fastmcp.FastMCP` est devenu
 # `mcp.server.mcpserver.MCPServer`. La surface qu'on utilise ici est identique
@@ -62,7 +69,6 @@ if TYPE_CHECKING:
     # 2.x, où ce module n'existe plus — mypy retombait sur `Any` et détypait
     # les douze outils d'un coup. Ce protocole est exactement ce que le test
     # `test_surface_utilisee_toujours_presente` vérifie au runtime.
-    _F = TypeVar("_F", bound=Callable[..., Any])
 
     class _ServerFacade(Protocol):
         """Ce que `FastMCP` (mcp 1.x) et `MCPServer` (mcp 2.x) ont en commun."""
@@ -191,8 +197,23 @@ def _tool_error(payload: dict[str, Any]) -> str:
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
+#
+# Issue #723 : chaque outil est enregistré derrière `project_scoped`, qui en
+# HTTP partagé résout le projet de la requête (`project_path` absolu, sinon la
+# racine déclarée par le client) et refuse sans projet — jamais le `cwd` du
+# démon. En stdio l'enveloppe est transparente. La fonction nue reste
+# l'attribut du module : la suite de tests l'appelle en direct.
 
-@mcp.tool(annotations=_reads())
+
+def _tool(annotations: ToolAnnotations) -> Callable[[_F], _F]:
+    def register(fn: _F) -> _F:
+        mcp.tool(annotations=annotations)(project_scoped(fn, error=_tool_error))
+        return fn
+
+    return register
+
+
+@_tool(_reads())
 def grimoire_project_context(project_path: str = ".") -> str:
     """Return the full project context (parsed project-context.yaml) as JSON.
 
@@ -227,7 +248,7 @@ def grimoire_project_context(project_path: str = ".") -> str:
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_status(project_path: str = ".") -> str:
     """Return project health status as JSON — config validity, structure, agents.
 
@@ -265,7 +286,7 @@ def grimoire_status(project_path: str = ".") -> str:
     }, indent=2)
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_agent_list(project_path: str = ".") -> str:
     """List all agents available in the project's archetype.
 
@@ -309,7 +330,7 @@ def grimoire_agent_list(project_path: str = ".") -> str:
         return _tool_error({"error": str(exc), "agents": []})
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_harmony_check(project_path: str = ".") -> str:
     """Run architecture harmony check and return score + dissonances.
 
@@ -324,7 +345,7 @@ def grimoire_harmony_check(project_path: str = ".") -> str:
     return json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_config(project_path: str = ".") -> str:
     """Return the raw parsed project-context.yaml as JSON.
 
@@ -344,7 +365,7 @@ def grimoire_config(project_path: str = ".") -> str:
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_writes(destructive=True, idempotent=False, open_world=True))
+@_tool(_writes(destructive=True, idempotent=False, open_world=True))
 def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".") -> str:
     """Store a memory entry in the project's configured memory backend.
 
@@ -372,7 +393,7 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".")
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_reads(open_world=True))
+@_tool(_reads(open_world=True))
 def grimoire_memory_search(
     query: str, user_id: str = "", limit: int = 5, project_path: str = ".", include_superseded: bool = False,
 ) -> str:
@@ -406,7 +427,7 @@ def grimoire_memory_search(
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_writes(destructive=True, idempotent=False))
+@_tool(_writes(destructive=True, idempotent=False))
 def grimoire_add_agent(agent_id: str, project_path: str = ".") -> str:
     """Create a custom agent as a real, installed file in the overrides tier.
 
@@ -445,7 +466,7 @@ def _standard_checks_json(checks: tuple[Any, ...] | list[Any]) -> list[dict[str,
     ]
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_standard_verify(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
     """Verify the project's governed agentic-standard artifacts (fail-closed).
 
@@ -476,7 +497,7 @@ def grimoire_standard_verify(project_path: str = ".", profile: str = "", task_id
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_standard_audit(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
     """Audit governed standard artifacts and propose remediation actions.
 
@@ -518,7 +539,7 @@ def grimoire_standard_audit(project_path: str = ".", profile: str = "", task_id:
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_writes(destructive=False, idempotent=True))
+@_tool(_writes(destructive=False, idempotent=True))
 def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id: str = "bootstrap") -> str:
     """Calculate and persist the standard compliance score (0-100 vs threshold).
 
@@ -551,7 +572,7 @@ def grimoire_standard_score(project_path: str = ".", profile: str = "", task_id:
 # ligne au journal d'événements du runtime. C'est voulu — une porte franchie
 # sans trace ne prouve rien — donc ce n'est pas une lecture. Non idempotent :
 # chaque appel ajoute une ligne.
-@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
+@_tool(_writes(destructive=False, idempotent=False))
 def grimoire_standard_gate(
     project_path: str = ".",
     task_id: str = "bootstrap",
@@ -595,7 +616,7 @@ def grimoire_standard_gate(
 # des sources à chaque appel et la compare à celle du reçu d'indexation.
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_codegraph_freshness(project_path: str = ".") -> str:
     """Tell whether the indexed code graph still matches the source (current/stale/unverified).
 
@@ -611,7 +632,7 @@ def grimoire_codegraph_freshness(project_path: str = ".") -> str:
         return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_writes(destructive=False, idempotent=True))
+@_tool(_writes(destructive=False, idempotent=True))
 def grimoire_codegraph_index(project_path: str = ".", source_dir: str = "src") -> str:
     """Index the Python sources and record the fingerprint receipt that `freshness` compares against.
 
@@ -691,7 +712,7 @@ def _task_error(exc: Exception) -> str:
     return _tool_error({"error": str(exc)})
 
 
-@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
+@_tool(_writes(destructive=False, idempotent=False))
 def task_add(
     title: str,
     acceptance: list[str],
@@ -740,7 +761,7 @@ def task_add(
         return _task_error(exc)
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def task_list_ready(
     project_path: str = ".", mission: str = "", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
@@ -761,7 +782,7 @@ def task_list_ready(
         return _task_error(exc)
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def task_waves(
     mission: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
@@ -784,7 +805,7 @@ def task_waves(
         return _task_error(exc)
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger") -> str:
     """Show one task: state, acceptance, claim, and what each next move will require.
 
@@ -819,7 +840,7 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
         return _task_error(exc)
 
 
-@mcp.tool(annotations=_writes(destructive=True, idempotent=False))
+@_tool(_writes(destructive=True, idempotent=False))
 def task_claim(
     task_id: str,
     actor: str = "mcp-agent",
@@ -851,7 +872,7 @@ def task_claim(
         return _task_error(exc)
 
 
-@mcp.tool(annotations=_writes(destructive=True, idempotent=False))
+@_tool(_writes(destructive=True, idempotent=False))
 def task_update(
     task_id: str,
     action: str,
@@ -1011,7 +1032,7 @@ def _task_steer(
 # appel (agentic_standard.py). Il était annoté `_reads()` — une annotation qui
 # ment est pire qu'une annotation absente, parce qu'un hôte auto-approuve sur sa
 # foi. Idempotent : le bundle est recalculé au même contenu pour la même tâche.
-@mcp.tool(annotations=_writes(destructive=False, idempotent=True))
+@_tool(_writes(destructive=False, idempotent=True))
 def task_context(
     task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
@@ -1051,7 +1072,7 @@ def task_context(
         return _task_error(exc)
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def task_recall(
     task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
@@ -1090,7 +1111,7 @@ def task_recall(
 # client the kit has no emitter for.
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_host_status(project_path: str = ".") -> str:
     """Report, per host, what this project declares and what the host executes.
 
@@ -1130,7 +1151,7 @@ def grimoire_host_status(project_path: str = ".") -> str:
     return json.dumps({"surface": surface.to_dict(), "hosts": hosts}, indent=2, ensure_ascii=False)
 
 
-@mcp.tool(annotations=_reads(open_world=True))
+@_tool(_reads(open_world=True))
 def grimoire_providers_status(project_path: str = ".") -> str:
     """Report LLM provider availability per cost tier (issue #310, lot 2).
 
@@ -1190,7 +1211,7 @@ def grimoire_providers_status(project_path: str = ".") -> str:
     )
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_skill(slug: str, project_path: str = ".") -> str:
     """Return a Grimoire skill body on demand, for hosts without native skills.
 
@@ -1212,7 +1233,7 @@ def grimoire_skill(slug: str, project_path: str = ".") -> str:
     return _tool_error({"error": f"Unknown skill: {slug}", "available": [s.slug for s in skills]})
 
 
-@mcp.tool(annotations=_reads())
+@_tool(_reads())
 def grimoire_command(slug: str, project_path: str = ".") -> str:
     """Return a Grimoire command body, for hosts without native slash commands.
 
@@ -1248,9 +1269,12 @@ def grimoire_command(slug: str, project_path: str = ".") -> str:
 # surface that is genuinely host-independent, and the kit was exposing a third
 # of it: fifteen tools, no prompt, no resource.
 #
-# Registration happens at import against the working directory, because that is
-# what an MCP server is launched with. Failure is never fatal: a server that
-# cannot read a project still serves its tools.
+# Registration happens at startup (`main`, stdio only) against the working
+# directory, because that is what a per-session MCP server is launched with.
+# The shared HTTP daemon (#723) registers nothing: its `cwd` is nobody's
+# project, and `grimoire_skill` / `grimoire_command` stay the per-request path.
+# Failure is never fatal: a server that cannot read a project still serves its
+# tools.
 
 _SKILL_URI = "grimoire://skill/{slug}"
 
@@ -1316,7 +1340,6 @@ def _guarded(register: Callable[..., None], *args: Any) -> int:
     return 1
 
 
-_register_surface()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1332,11 +1355,47 @@ def _find_kit_root(start: Path) -> Path | None:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def main() -> None:
-    """Run the MCP server."""
-    from grimoire.core.console_encoding import enable_utf8_output
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 7331
 
+
+def run_http(host: str = DEFAULT_HTTP_HOST, port: int = DEFAULT_HTTP_PORT) -> None:
+    """Servir en streamable-http (#723) — un processus pour toutes les sessions.
+
+    Les deux façades ne prennent pas l'adresse au même endroit : `FastMCP`
+    (1.x) la lit dans `settings`, `MCPServer` (2.x) en mots-clés de `run`.
+    Vérifié contre 1.28.1 et 2.3.0, pas supposé. Sessions avec état : le repli
+    `roots/list` est une requête serveur → client, impossible sans session.
+    """
+    settings = getattr(mcp, "settings", None)
+    if settings is not None and hasattr(settings, "host"):  # mcp 1.x (2.x a des settings sans adresse)
+        settings.host = host
+        settings.port = port
+        mcp.run(transport="streamable-http")
+        return
+    mcp.run(transport="streamable-http", host=host, port=port)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Run the MCP server: stdio by default, ``--http [--host H] [--port N]`` for the shared daemon."""
+    import argparse
+
+    from grimoire.core.console_encoding import enable_utf8_output
+    from grimoire.mcp.project import TRANSPORT_ENV, TRANSPORT_HTTP
+
+    parser = argparse.ArgumentParser(prog="grimoire-mcp", add_help=True)
+    parser.add_argument("--http", action="store_true", help="serve streamable-http (shared across sessions, #723)")
+    parser.add_argument("--host", default=DEFAULT_HTTP_HOST)
+    parser.add_argument("--port", type=int, default=DEFAULT_HTTP_PORT)
+    args = parser.parse_args(argv)
     enable_utf8_output()
+    if args.http:
+        # `grimoire-mcp --http` lancé à la main refuse le `cwd` exactement
+        # comme le démon de `grimoire mcp start` — et n'enregistre pas sa surface.
+        os.environ[TRANSPORT_ENV] = TRANSPORT_HTTP
+        run_http(args.host, args.port)
+        return
+    _register_surface()
     mcp.run()
 
 
