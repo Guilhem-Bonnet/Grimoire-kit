@@ -34,7 +34,7 @@
 // (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
-import { icon, STATE_ICON } from '../shell.js';
+import { badge, icon, kpiRow, spaceHead, STATE_ICON } from '../shell.js';
 
 const STYLE_ID = 'pl-styles';
 
@@ -44,41 +44,22 @@ function injectStyles() {
   style.id = STYLE_ID;
   style.textContent = `
     .pl-sheet { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .pl-sheet > h2 { margin: 0; }
     .pl-fleet-actions { display: flex; justify-content: flex-end; }
 .pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .pl-kpi { display: flex; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); overflow: hidden; }
-    .pl-kpi-item { flex: 1; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); border-top: 3px solid var(--tone, transparent); }
-    .pl-kpi-item:first-child { border-left: 0; }
-    .pl-kpi-val { font-family: var(--font); font-size: var(--t-xl); font-weight: 600; color: var(--ink); line-height: 1.25; }
-    .pl-kpi-lbl .ico { width: 14px; height: 14px; color: var(--tone, var(--ink3)); margin-right: 6px; vertical-align: -2px; }
     @media (max-width: 900px) {
       .pl-sheet, .pl-wrap { padding: var(--sp-3); }
-      .pl-kpi { flex-wrap: wrap; }
-      .pl-kpi-item { flex: 1 1 45%; border-left: 0; }
     }
-    .pl-kpi-item[data-tone="ok"] { --tone: var(--ok); }
-    .pl-kpi-item[data-tone="warn"] { --tone: var(--warn); }
-    .pl-kpi-item[data-tone="bad"] { --tone: var(--bad); }
-    .pl-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px;  display: flex; align-items: center; }
     .pl-section h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
     .pl-watch { display: flex; flex-direction: column; gap: 6px; }
     .pl-watch-row { display: flex; align-items: center; gap: var(--sp-2); padding: 8px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
     .pl-watch-txt { flex-grow: 1; }
     .pl-watch-name { font-weight: 500; }
     .pl-watch-reason { color: var(--ink2); margin-left: 8px; }
-    .pl-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
-    .pl-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); background: var(--e1); }
-    .pl-table th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); background: var(--bar); position: sticky; top: 0; }
-    .pl-table td { padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); height: 48px; vertical-align: middle; }
-    .pl-table tbody tr { cursor: pointer; }
-    .pl-table tbody tr:hover { background: var(--e2); }
-    .pl-table tbody tr[aria-current="true"] { background: var(--accsoft); }
     .pl-cards { display: none; flex-direction: column; gap: var(--sp-2); }
     .pl-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-3); cursor: pointer; }
     .pl-card-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
     @media (max-width: 760px) {
-      .pl-table-wrap { display: none; }
+      .pl-desktop { display: none; }
       .pl-cards { display: flex; }
     }
     .pl-insp-block { margin-bottom: var(--sp-4); }
@@ -95,15 +76,6 @@ function injectStyles() {
     .pl-markdown p { margin: 4px 0; }
     .pl-markdown pre { font-family: var(--mono); font-size: var(--t-min); background: var(--e2); border-radius: var(--r); padding: 8px; overflow-x: auto; white-space: pre; margin: 4px 0; }
     .pl-markdown code { font-family: var(--mono); }
-    .pl-badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: var(--t-min); border: 1px solid var(--line); color: var(--ink2); }
-    .pl-badge.overrides { color: var(--ink); border-color: var(--acc); }
-    /* --warn n'est jamais utilisé comme couleur de texte ailleurs dans la
-       coque (voir .dot.warn, toujours un fond) : ses deux variantes
-       clair/sombre ne garantissent pas 4.5:1 sur --e1. Texte en --ink
-       (contraste garanti), --warn réservé à la bordure. */
-    .pl-badge.stale { color: var(--ink); border-color: var(--warn); }
-    /* Informationnel, pas un avertissement : même traitement que .overrides. */
-    .pl-badge.fresh { color: var(--ink); border-color: var(--acc); }
     .pl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .pl-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--e2); font-size: var(--t-min); }
     .pl-chip button { border: 0; background: none; color: var(--ink3); cursor: pointer; padding: 0; font-size: var(--t-min); line-height: 1; }
@@ -266,23 +238,6 @@ function watchReasons(entry, health) {
   return reasons;
 }
 
-// ── KPI en une carte divisée ─────────────────────────────────────────────────
-
-function kpiCard(items) {
-  const card = document.createElement('div');
-  card.className = 'pl-kpi';
-  for (const item of items) {
-    const cell = document.createElement('div');
-    cell.className = 'pl-kpi-item';
-    if (item.tone) cell.dataset.tone = item.tone;
-    const lbl = text('div', 'pl-kpi-lbl', item.label);
-    if (item.icon) lbl.prepend(icon(item.icon));
-    cell.append(text('div', 'pl-kpi-val', item.value), lbl);
-    card.append(cell);
-  }
-  return card;
-}
-
 // ── Niveau Flotte (cockpit) ──────────────────────────────────────────────────
 //
 // Un seul appel `GET /api/fleet` (#541, backend #542) — chaque affichage
@@ -403,7 +358,7 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   const active = rows.filter((r) => r.health?.activity?.active).length;
   const watch = rows.flatMap((r) => watchReasons(r.entry, r.health).map((reason) => ({ ...r, reason })));
 
-  wrap.append(kpiCard([
+  wrap.append(kpiRow([
     { value: fmtInt(rows.length), label: 'projets', icon: 'folder-tree' },
     { value: fmtInt(aligned), label: 'kit aligné', icon: 'seal', tone: aligned === rows.length ? 'ok' : 'warn' },
     { value: fmtInt(watch.length), label: 'à traiter', icon: watch.length ? 'alert' : 'check', tone: watch.length ? 'warn' : 'ok' },
@@ -438,9 +393,9 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
   wrap.append(watchSection);
 
   const tableWrap = document.createElement('div');
-  tableWrap.className = 'pl-table-wrap';
+  tableWrap.className = 'tbl-wrap pl-desktop';
   const table = document.createElement('table');
-  table.className = 'pl-table';
+  table.className = 'tbl tbl-pick';
   const thead = document.createElement('thead');
   thead.innerHTML = '';
   const headRow = document.createElement('tr');
@@ -745,14 +700,15 @@ function freshnessWord(freshness) {
 function freshnessBadge(freshness) {
   if (!freshness || !freshness.judged) return null;
   if (freshness.too_recent) {
-    const badge = text('span', 'pl-badge fresh', 'trop récent');
-    badge.title = "Le fichier de définition de cet agent est plus jeune que le seuil de fraîcheur configuré — pas encore eu le temps d'être choisi.";
-    return badge;
+    return badge('trop récent', 'acc', "Le fichier de définition de cet agent est plus jeune que le seuil de fraîcheur configuré — pas encore eu le temps d'être choisi.");
   }
   if (!freshness.stale) return null;
-  const badge = text('span', 'pl-badge stale', 'périmé');
-  badge.title = 'Aucun agent.dispatch journalisé depuis le seuil de fraîcheur configuré (project-context.yaml: agents.freshness_threshold_days).';
-  return badge;
+  return badge('périmé', 'warn', 'Aucun agent.dispatch journalisé depuis le seuil de fraîcheur configuré (project-context.yaml: agents.freshness_threshold_days).');
+}
+
+/** La couche d'un agent : `overrides` se signale (accent), le reste est neutre. */
+function layerBadgeFor(agent) {
+  return badge(agent.layer, agent.layer === 'overrides' ? 'acc' : '');
 }
 
 function usageWord(agent) {
@@ -782,9 +738,9 @@ function renderAgentsTable(ctx, agentsPayload, selectedName, onSelect) {
   }
 
   const tableWrap = document.createElement('div');
-  tableWrap.className = 'pl-table-wrap';
+  tableWrap.className = 'tbl-wrap pl-desktop';
   const table = document.createElement('table');
-  table.className = 'pl-table';
+  table.className = 'tbl tbl-pick';
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   for (const label of ['Agent', 'Couche', 'Outils', 'Skills', 'Usage']) {
@@ -808,7 +764,7 @@ function renderAgentsTable(ctx, agentsPayload, selectedName, onSelect) {
     tr.append(nameCell);
 
     const layerCell = document.createElement('td');
-    const layerBadge = text('span', 'pl-badge ' + agent.layer, agent.layer);
+    const layerBadge = layerBadgeFor(agent);
     if (agent.layer === 'overrides') layerBadge.dataset.term = 'override';
     layerCell.append(layerBadge);
     tr.append(layerCell);
@@ -817,8 +773,8 @@ function renderAgentsTable(ctx, agentsPayload, selectedName, onSelect) {
     tr.append(text('td', 'lbl', agent.skills.length ? String(agent.skills.length) : '—'));
     const usageCell = document.createElement('td');
     usageCell.append(text('span', 'lbl', usageWord(agent)));
-    const badge = freshnessBadge(agent.freshness);
-    if (badge) usageCell.append(document.createTextNode(' '), badge);
+    const freshBadge = freshnessBadge(agent.freshness);
+    if (freshBadge) usageCell.append(document.createTextNode(' '), freshBadge);
     tr.append(usageCell);
     tbody.append(tr);
   }
@@ -841,7 +797,7 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   const block = document.createElement('div');
   block.className = 'pl-insp-block';
   block.dataset.agentInspector = 'true';
-  block.append(row(text('h4', null, agent.name), text('span', 'pl-badge ' + agent.layer, agent.layer)));
+  block.append(row(text('h4', null, agent.name), layerBadgeFor(agent)));
   const usageRow = row(text('span', 'lbl', usageWord(agent)));
   const inspBadge = freshnessBadge(agent.freshness);
   if (inspBadge) usageRow.append(inspBadge);
@@ -1313,9 +1269,9 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   wrap.className = 'pl-sheet';
   const { health, memory } = sheet;
 
-  wrap.append(text('h2', null, name || slug || ctx.host.project || 'Projet servi'));
+  wrap.append(spaceHead(name || slug || ctx.host.project || 'Projet servi'));
 
-  const kpi = kpiCard([
+  const kpi = kpiRow([
     { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit', icon: 'seal', tone: health?.kit?.scaffolded ? kitStatus(health.kit).dot : 'warn' },
     { value: ciWord(health?.ci_status), label: 'CI', icon: 'check', tone: ciDotClass(health?.ci_status) },
     { value: fmtInt(health?.commits_total), label: 'commits', icon: 'branch' },
@@ -1378,7 +1334,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     kitRow.className = 'chip pill warn';
     kitRow.textContent = 'mis à niveau, checkpoint destructif en attente';
     if (runId) kitRow.title = `grimoire flow status ${runId}`;
-    const kitCell = kpi.querySelector('.pl-kpi-item .pl-kpi-val');
+    const kitCell = kpi.querySelector('.kpi-item .kpi-val');
     if (kitCell) kitCell.textContent = 'checkpoint en attente';
     if (behindBlock) { behindBlock.remove(); behindBlock = null; }
   }
@@ -1823,7 +1779,7 @@ export async function mount(root, ctx) {
     shell.className = 'pl-wrap';
     if (level === 'projet') {
       const knownTitle = cockpit ? selected : ctx.host.status?.slug;
-      if (knownTitle) shell.append(text('h2', null, knownTitle));
+      if (knownTitle) shell.append(spaceHead(knownTitle));
     }
     shell.append(...ctx.loading('Chargement…', 3));
     root.replaceChildren(shell);
