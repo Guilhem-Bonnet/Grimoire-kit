@@ -38,6 +38,13 @@ def _run_steps(job: dict[str, Any]) -> str:
     return "\n".join(str(s.get("run", "")) for s in job["steps"])
 
 
+_PR_ONLY_WINDOWS_GATE = "matrix.os == 'windows-latest' && github.event_name == 'pull_request'"
+
+
+def _pytest_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [s for s in job["steps"] if "pytest" in str(s.get("run", ""))]
+
+
 def _strict_module() -> ModuleType:
     spec = importlib.util.spec_from_file_location("e2e_strict_under_test", _STRICT)
     assert spec and spec.loader
@@ -52,10 +59,30 @@ def test_matrix_runs_the_three_systems() -> None:
 
 
 def test_one_command_for_every_system_no_windows_subset() -> None:
-    run = _run_steps(_job("test"))
+    """La commande pytest est la même sur les trois systèmes : aucun sous-ensemble Windows."""
+    steps = _pytest_steps(_job("test"))
+    assert len(steps) == 1, [s.get("name") for s in steps]
+    run = str(steps[0]["run"])
     assert "runner.os" not in run and "Windows" not in run
     assert "tests/unit/" in run
     assert "test_app.py::" not in run
+
+
+def test_windows_leg_is_skipped_on_pull_requests_only() -> None:
+    """Décision du 2026-10-23 : la jambe Windows (~1 h) est écartée des PR, pas de main.
+
+    Les étapes qui installent et lancent la suite portent toutes la même garde,
+    et cette garde ne vise que l'événement ``pull_request`` : un push sur main
+    exécute encore la suite complète sous Windows (#857 reste observable).
+    """
+    job = _job("test")
+    gated = [s for s in job["steps"] if _PR_ONLY_WINDOWS_GATE in str(s.get("if", ""))]
+    assert gated, "garde PR-only de la jambe Windows absente"
+    for step in _pytest_steps(job) + [s for s in job["steps"] if "pip install" in str(s.get("run", ""))]:
+        assert _PR_ONLY_WINDOWS_GATE in str(step.get("if", "")), step.get("name")
+    for step in gated:
+        cond = str(step["if"])
+        assert "pull_request" in cond and "push" not in cond, cond
 
 
 def test_no_fail_fast_flag_in_the_test_job() -> None:
@@ -127,7 +154,14 @@ def test_a_skip_becomes_a_failure_under_strict_mode(tmp_path: Path) -> None:
         env = {**os.environ, "GRIMOIRE_E2E_STRICT": strict, "PYTHONUTF8": "1"}  # sortie en UTF-8 sous Windows aussi
         return subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", str(tmp_path)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=tmp_path, timeout=120, check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            cwd=tmp_path,
+            timeout=120,
+            check=False,
         )
 
     lax = run("0")
@@ -169,7 +203,14 @@ def _run_e2e(tmp_path: Path, fake: Path, strict: str) -> subprocess.CompletedPro
     env = {**os.environ, "GRIMOIRE_E2E_STRICT": strict, "PYTHONPATH": str(fake), "PYTHONUTF8": "1"}
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", "e2e"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=tmp_path, timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        cwd=tmp_path,
+        timeout=120,
+        check=False,
     )
 
 
@@ -197,9 +238,7 @@ def test_real_e2e_conftest_fails_without_playwright_in_strict_mode(tmp_path: Pat
 def test_e2e_conftest_wiring_is_structural() -> None:
     """Garde bon marché : le branchement existe dans le fichier réel, sous la bonne forme."""
     tree = ast.parse((_E2E / "conftest.py").read_text(encoding="utf-8"))
-    imported = {
-        a.name for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == "_strict" for a in n.names
-    }
+    imported = {a.name for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == "_strict" for a in n.names}
     assert {"promote_skip", "strict_mode"} <= imported
     hooks = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "pytest_runtest_makereport"]
     assert len(hooks) == 1 and "promote_skip" in ast.unparse(hooks[0])
@@ -207,7 +246,5 @@ def test_e2e_conftest_wiring_is_structural() -> None:
     guarded = [n for n in tree.body if isinstance(n, ast.If) and "strict_mode" in ast.unparse(n.test)]
     assert guarded and "importorskip" in ast.unparse(guarded[0].orelse[0])
     assert "importorskip" not in ast.unparse(guarded[0].body[0])
-    top_level_skips = [
-        n for n in tree.body if isinstance(n, ast.Expr) and "importorskip" in ast.unparse(n)
-    ]
+    top_level_skips = [n for n in tree.body if isinstance(n, ast.Expr) and "importorskip" in ast.unparse(n)]
     assert not top_level_skips
