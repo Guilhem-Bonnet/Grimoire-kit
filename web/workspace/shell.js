@@ -1011,11 +1011,11 @@ const live = createLive({
 });
 
 // « mis à jour il y a 4 s » : écrit par le minuteur d'une seconde (aucune requête),
-// donc vrai entre deux sondages. Un onglet masqué ou une API muette se disent.
+// donc vrai entre deux pouls, poussés ou sondés. Un onglet masqué ou une API muette se disent.
 function renderLiveStamp() {
   const text = $('st-live-text');
   const box = $('st-live');
-  const { status, lastOkAt, failingSince, intervalMs } = live.state;
+  const { status, lastOkAt, failingSince, intervalMs, transport } = live.state;
   box.dataset.state = status;
   // `pre` : ce qu'un petit écran délaisse (`.live-pre`) ; `tail` : ce qui reste, seul, sous 900 px.
   let pre = '';
@@ -1027,11 +1027,17 @@ function renderLiveStamp() {
   } else if (status === 'error') {
     pre = 'API ';
     tail = `injoignable ${agoText(Date.now() - (failingSince || Date.now()))}`;
-    box.title = "Le dernier sondage a échoué ; l'affichage n'est plus garanti à jour.";
+    box.title = transport === 'stream'
+      ? "Le flux est coupé, reconnexion en cours ; l'affichage n'est plus garanti à jour."
+      : "Le dernier sondage a échoué ; l'affichage n'est plus garanti à jour.";
   } else if (lastOkAt) {
     pre = 'mis à jour ';
     tail = agoText(Date.now() - lastOkAt);
-    box.title = `Sondage toutes les ${Math.round(intervalMs / 1000)} s, dernier à ${new Date(lastOkAt).toLocaleTimeString('fr-FR')}`;
+    const seconds = Math.round(intervalMs / 1000);
+    const at = new Date(lastOkAt).toLocaleTimeString('fr-FR');
+    box.title = transport === 'stream'
+      ? `Flux en direct, confirmé au moins toutes les ${seconds} s, dernier à ${at}`
+      : `Sondage toutes les ${seconds} s, dernier à ${at}`;
   }
   const lead = document.createElement('span');
   lead.className = 'live-pre';
