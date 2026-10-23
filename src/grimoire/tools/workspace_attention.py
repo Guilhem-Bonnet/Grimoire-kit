@@ -35,11 +35,12 @@ seule.
 
 from __future__ import annotations
 
+import copy
 import json
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -195,7 +196,7 @@ class ServiceWatch:
         with self._lock:
             watch = self._watches.setdefault((service, url), _Watch())
             if watch.probed_at is not None and now - watch.probed_at < self.min_interval:
-                return replace(watch)
+                return copy.copy(watch)
             state = probe(service, url)
             watch.probed_at = now
             watch.state = state
@@ -209,7 +210,7 @@ class ServiceWatch:
                     watch.first_failure_at = now
                 if watch.failures >= self.alert_after:
                     watch.alerted, watch.resolved_at = True, None
-            return replace(watch)
+            return copy.copy(watch)
 
 
 _WATCH = ServiceWatch()
