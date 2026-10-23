@@ -78,3 +78,48 @@ def test_commit_message_quoting_a_dangerous_shape_is_not_destructive() -> None:
 
 def test_pipeline_through_tee_is_not_read_only() -> None:
     assert is_read_only_command("cat f | tee out") is False
+
+
+# ── issue #875 : les lectures courantes ne sont pas des écritures ──────────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd x && grep -rn y .",
+        "sed -n 1,20p f",
+        "awk '{print $1}' f | sort | uniq -c",
+        "git grep -n x origin/main -- src",
+        "command -v gh",
+        "git -C repo log --oneline",
+        "git remote get-url origin",
+        "git branch --show-current",
+        "cat f | cut -d: -f1 | tr a-z A-Z | jq .",
+        "for f in a b; do cat $f; done",
+        "gh pr view 12",
+    ],
+)
+def test_lectures_courantes_sont_read_only(command: str) -> None:
+    assert is_read_only_command(command) is True
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed -i s/a/b/ f",
+        "sed --in-place s/a/b/ f",
+        "sed -n 's/a/b/w out' f",
+        "awk -i inplace '{print}' f",
+        "awk '{print > \"out\"}' f",
+        "cd x && rm f",
+        "sort -o out f",
+        "sort f --output=out",
+        "uniq in out",
+        "cd x && grep y . > out",
+        "for f in a b; do rm $f; done",
+        "git branch -d topic",
+        "git remote add o url",
+    ],
+)
+def test_formes_qui_ecrivent_restent_des_mutations(command: str) -> None:
+    assert is_read_only_command(command) is False
