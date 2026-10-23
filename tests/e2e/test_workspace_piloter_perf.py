@@ -63,11 +63,11 @@ def test_fiche_piloter_un_seul_appel_sheet_et_interactive_sous_400ms(
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
         page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
         page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-        page.wait_for_selector(".pl-table tbody tr")
+        page.wait_for_selector(".tbl tbody tr")
 
         seen = _instrument_api(page)
         start = time.monotonic()
-        page.locator(".pl-table tbody tr", has_text=slug_b).first.click()
+        page.locator(".tbl tbody tr", has_text=slug_b).first.click()
         page.wait_for_selector("button:has-text('Mettre à jour')")
         elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -125,10 +125,10 @@ def test_flotte_un_seul_appel_fleet_et_interactive_sous_900ms(
         start = time.monotonic()
         page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.wait_for_selector(".pl-table tbody tr")
+        page.wait_for_selector(".tbl tbody tr")
         elapsed_ms = (time.monotonic() - start) * 1000
 
-        assert page.locator(".pl-table tbody tr").count() == 3
+        assert page.locator(".tbl tbody tr").count() == 3
         assert len(fleet_calls) == 1, (
             f"Flotte : {len(fleet_calls)} appel(s) /api/fleet, attendu 1 — {fleet_calls}"
         )
@@ -168,7 +168,7 @@ def test_refresh_de_la_flotte_ne_double_jamais_les_appels_en_vol(
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
         page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
         page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-        page.wait_for_selector(".pl-table tbody tr")
+        page.wait_for_selector(".tbl tbody tr")
 
         fleet_calls: list[str] = []
 
@@ -200,7 +200,7 @@ def test_refresh_de_la_flotte_ne_double_jamais_les_appels_en_vol(
                 btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
             }"""
         )
-        page.wait_for_selector(".pl-table tbody tr", timeout=10_000)
+        page.wait_for_selector(".tbl tbody tr", timeout=10_000)
         page.wait_for_timeout(600)
 
         assert len(fleet_calls) == 1, (
