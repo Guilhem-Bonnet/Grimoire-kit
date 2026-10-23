@@ -36,6 +36,7 @@ from grimoire.cli.env_checks import EnvCheck
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
+from grimoire.hosts.hook_launcher import expand_project_dir, path_without_active_venv
 
 # NOTE (issue #405): cmd_init/core.scaffold/hosts.sync are only needed by the
 # actual `up`/`--fix` code paths below, not by `run_env_checks` — which
@@ -416,7 +417,9 @@ def check_mcp_json(target: Path) -> list[EnvCheck]:
         launcher = _launcher_name(command) if command else ""
         is_package_launcher = launcher in _PACKAGE_LAUNCHERS
         if command:
-            command_ok = shutil.which(command) is not None or _resolve_ref(target, command)
+            # Ce que voit l'hôte qui lance le serveur : PATH sans le venv actif (#760).
+            command = expand_project_dir(command, target)
+            command_ok = shutil.which(command, path=path_without_active_venv()) is not None or _resolve_ref(target, command)
             if not command_ok:
                 if is_package_launcher:
                     broken.append(f"launcher '{command}' not found on PATH")
@@ -442,8 +445,8 @@ def check_mcp_json(target: Path) -> list[EnvCheck]:
                 f"install {launcher} (it is not on PATH) or fix the '{server_name}' entry in .mcp.json"
                 if is_package_launcher
                 else (
-                    f"install the missing tool (e.g. pip install grimoire-kit for grimoire-mcp) "
-                    f"or fix the '{server_name}' entry in .mcp.json"
+                    f"install the missing tool globally (e.g. uv tool install grimoire-kit for grimoire-mcp) "
+                    f"or fix the '{server_name}' entry in .mcp.json (docs/troubleshooting.md §18)"
                 )
             )
             checks.append(EnvCheck(
