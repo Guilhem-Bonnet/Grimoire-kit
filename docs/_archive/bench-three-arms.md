@@ -1458,3 +1458,27 @@ revient à Guilhem.
 campagne ») ne peut pas encore s'appliquer. Le coût médian d'une tâche K reste inconnu ; l'estimation de 1,20 $ n'est pas mesurée.
 Données : `_scratch/bench-lot-m-sieve/` de la Forge (`dry-run.log`, `probe/A/probe.stream.jsonl`, `budget-ledger.jsonl`,
 `review/` pour la relecture).
+
+### 17.9 Tamis du lot M : passe interrompue, bras `nu` (2026-10-20)
+
+**Statut : passe interrompue avant les tâches `k10` à `k17`, bancs payants suspendus.** Le tamis a été rejoué après l'isolation de l'hôte de chaque
+`claude -p` (B-08, `scripts/bench/host_isolation.py`) : MCP vide strict et workspace hors de l'arbre de la Forge, ce qui applique le correctif du §17.8.
+
+| | Valeur |
+|---|---|
+| Runs écrits | 141 sur 148 tâches tirées (bras `nu`, k = 1, Claude Code 2.1.304) |
+| Réussis | 140 sur 141 ; seul échec : `python/tree-building` |
+| Exercices polyglottes | 131 sur 132 |
+| Bloc K (défauts réels du kit) | 9 sur 9 (`k01` à `k09`) |
+| Coût connu | 21,68 $, dont 0,38 $ de sondes et de contrôle d'isolation |
+
+Limites :
+
+- l'appel de `k10` est ouvert au journal de budget sans ligne de fin : son coût est inconnu, il n'est pas compté pour zéro ;
+- 4 transcriptions sont signalées `invalid` par le contrôle de transcription (`go/two-bucket`, `k01`, `k06`, `k09`) et n'ont pas été relues ; les taux ci-dessus comptent tous les runs ;
+- aucun autre bras n'a tourné sur ce lot : le tamis ne mesure pas de différence entre bras, il dit que les tâches sont presque toutes résolues par Claude seul ;
+- les données brutes (`results.jsonl`, journal de budget) sont hors dépôt.
+
+**Décision du mainteneur, 2026-10-20 : les bancs payants sont suspendus.** Ils consomment le quota d'abonnement pour un rendement faible (lot M saturé : 140 réussis sur 141).
+Aucun run payant n'est lancé sans demande explicite de Guilhem.
+
