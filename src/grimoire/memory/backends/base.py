@@ -24,10 +24,6 @@ class MemoryEntry:
     created_at: str = ""
     updated_at: str = ""
     score: float = 0.0
-    source: str = ""
-    provenance: dict[str, Any] = field(default_factory=dict)
-    freshness: str = "current"
-    task_ref: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,10 +35,6 @@ class MemoryEntry:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "score": self.score,
-            "source": self.source,
-            "provenance": dict(self.provenance),
-            "freshness": self.freshness,
-            "task_ref": self.task_ref,
         }
 
 

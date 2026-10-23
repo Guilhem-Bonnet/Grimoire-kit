@@ -26,6 +26,7 @@ from typing import Any, ClassVar, cast
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.changes import append_change, fingerprint, resolve_provenance
 from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
 from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
@@ -606,6 +607,10 @@ class MemoryManager:
         metadata: dict[str, Any] | None = None,
         emitter: str = "",
         content_origin: str = "authored",
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
     ) -> MemoryEntry:
         """Écrire une mémoire, après la frontière de confiance.
 
@@ -615,16 +620,40 @@ class MemoryManager:
         :class:`~grimoire.memory.validation.MemoryWriteRefusedError` nommée. La
         redaction, quand la politique du projet la déclare ``required``,
         s'exécute ici et laisse sa trace dans les métadonnées.
+
+        *actor*, *session_id* et *task_ref* (sinon la session et le claim
+        actifs) sont posés dans les métadonnées ; l'écriture est journalisée.
         """
+        provenance = self._provenance(actor, session_id, task_ref)
         validated = self._validated(
-            text, user_id=user_id, tags=tags, metadata=metadata,
+            text, user_id=user_id, tags=tags, metadata={**(metadata or {}), **provenance},
             emitter=emitter, content_origin=content_origin,
         )
         entry = self._backend.store(
             validated.text, user_id=user_id, tags=tags, metadata=validated.metadata
         )
         self._sync_memory(entry)
+        self._journal("store", provenance, [], [entry.id], fingerprint(entry.text), reason)
         return entry
+
+    def _provenance(self, actor: str, session_id: str, task_ref: str) -> dict[str, str]:
+        return resolve_provenance(
+            self._project_root, actor=actor, session_id=session_id, task_ref=task_ref,
+        )
+
+    def _journal(
+        self,
+        op: str,
+        provenance: dict[str, str],
+        ids_before: list[str],
+        ids_after: list[str],
+        digest: str,
+        reason: str,
+    ) -> None:
+        append_change(
+            self._project_root, op=op, provenance=provenance,
+            ids_before=ids_before, ids_after=ids_after, digest=digest, reason=reason,
+        )
 
     def recall(self, entry_id: str) -> MemoryEntry | None:
         return self._backend.recall(entry_id)
@@ -846,7 +875,16 @@ class MemoryManager:
             return fetch(limit)
         return search_live(fetch, limit, self.recall)
 
-    def supersede(self, old_id: str, new_id: str) -> MemoryEntry | None:
+    def supersede(
+        self,
+        old_id: str,
+        new_id: str,
+        *,
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> MemoryEntry | None:
         """Marque ``old_id`` comme remplacé par ``new_id`` (métadonnées conservées).
 
         Refuse un remplaçant inconnu, identique, déjà remplacé lui-même (le
@@ -864,7 +902,13 @@ class MemoryManager:
         existing = self._backend.recall(old_id)
         if existing is None:
             return None
-        return self.update(old_id, metadata={**existing.metadata, SUPERSEDED_KEY: new_id})
+        provenance = self._provenance(actor, session_id, task_ref)
+        updated = self._apply_update(
+            old_id, existing, metadata={**existing.metadata, SUPERSEDED_KEY: new_id, **provenance},
+        )
+        if updated is not None:
+            self._journal("supersede", provenance, [old_id], [new_id], fingerprint(updated.text), reason)
+        return updated
 
     def _refuse_cycle_or_replaced(self, old_id: str, replacement: MemoryEntry) -> None:
         """Lève si viser ``replacement`` fermerait un cycle ou viserait un souvenir déjà remplacé."""
@@ -1028,20 +1072,61 @@ class MemoryManager:
     def consolidate(self) -> int:
         return self._backend.consolidate()
 
-    def delete(self, entry_id: str) -> bool:
+    def delete(
+        self,
+        entry_id: str,
+        *,
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> bool:
+        provenance = self._provenance(actor, session_id, task_ref)
+        existing = self._backend.recall(entry_id)
         deleted = self._backend.delete(entry_id)
         if deleted:
             self._sync_delete_memory(entry_id)
+            digest = fingerprint(existing.text) if existing is not None else fingerprint(entry_id)
+            self._journal("delete", provenance, [entry_id], [], digest, reason)
         return deleted
 
-    def update(self, entry_id: str, *, text: str | None = None, tags: tuple[str, ...] | None = None, metadata: dict[str, Any] | None = None) -> MemoryEntry | None:
-        """Modifier une entrée — même frontière que la créer.
+    def update(
+        self,
+        entry_id: str,
+        *,
+        text: str | None = None,
+        tags: tuple[str, ...] | None = None,
+        metadata: dict[str, Any] | None = None,
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> MemoryEntry | None:
+        """Modifier une entrée — même frontière que la créer, même journal.
 
         Une écriture qui remplace le texte d'une mémoire existante est une
         écriture : la valider seulement à la création laisserait la porte de
         derrière ouverte.
         """
-        existing = self._backend.recall(entry_id) if (metadata is not None or text is not None) else None
+        provenance = self._provenance(actor, session_id, task_ref)
+        existing = self._backend.recall(entry_id)
+        if provenance and existing is not None:
+            metadata = {**existing.metadata, **(metadata or {}), **provenance}
+        updated = self._apply_update(entry_id, existing, text=text, tags=tags, metadata=metadata)
+        if updated is not None:
+            self._journal("update", provenance, [entry_id], [updated.id], fingerprint(updated.text), reason)
+        return updated
+
+    def _apply_update(
+        self,
+        entry_id: str,
+        existing: MemoryEntry | None,
+        *,
+        text: str | None = None,
+        tags: tuple[str, ...] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryEntry | None:
+        """Validation puis écriture d'une modification, sans journal (celui de l'appelant)."""
         normalized = metadata
         if self._auto_enrich and metadata is not None:
             merged = dict(existing.metadata) if existing is not None else {}
@@ -1157,11 +1242,25 @@ class MemoryManager:
         self._sync_fact(fact)
         return fact
 
-    def invalidate_fact(self, subject: str, predicate: str, object_: str, *, ended: str = "") -> int:
+    def invalidate_fact(
+        self,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        ended: str = "",
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> int:
+        provenance = self._provenance(actor, session_id, task_ref)
         ended_at = ended or time.strftime("%Y-%m-%d")
         count = self._require_sidecar().invalidate_fact(subject, predicate, object_, ended=ended_at)
         if count:
             self._sync_invalidate_fact(subject, predicate, object_, ended=ended_at)
+            fact_key = f"{subject}|{predicate}|{object_}"
+            self._journal("invalidate_fact", provenance, [fact_key], [], fingerprint(subject, predicate, object_, ended_at), reason)
         return count
 
     def query_facts(self, entity: str, *, as_of: str = "", direction: str = "both") -> list[KnowledgeFact]:

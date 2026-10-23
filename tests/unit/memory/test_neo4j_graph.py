@@ -106,7 +106,6 @@ def test_upsert_memory_writes_node_and_tag_edges(fake_graph: tuple[type[Any], _F
         tags=("decision", "graph"),
         metadata={"room": "decisions"},
         created_at="2026-05-08T00:00:00",
-        provenance={"source": "test"},
     )
 
     graph.upsert_memory(entry)
@@ -115,7 +114,6 @@ def test_upsert_memory_writes_node_and_tag_edges(fake_graph: tuple[type[Any], _F
     assert memory_call.kwargs["id"] == "mem-1"
     assert memory_call.kwargs["tags"] == ["decision", "graph"]
     assert json.loads(memory_call.kwargs["metadata_json"]) == {"room": "decisions"}
-    assert json.loads(memory_call.kwargs["provenance_json"]) == {"source": "test"}
     assert _find_call(driver, "UNWIND $tags AS tag_name").kwargs["tags"] == ["decision", "graph"]
 
 
