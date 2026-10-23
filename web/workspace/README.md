@@ -139,13 +139,19 @@ Deux règles opposables :
 
 ## Actualisation sans rechargement (UI-3)
 
-La coque se met à jour seule : `live.js` sonde `/api/workspace/pulse` à
-l'intervalle que **le serveur déclare** (`interval_seconds`) et, quand
-l'empreinte change, appelle les espaces inscrits par `ctx.live.on`. Quatre règles,
-chacune gardée par `tests/e2e/test_workspace_live_pilot.py` :
+La coque se met à jour seule : `live.js` ouvre le flux `/api/workspace/stream`
+(Server-Sent Events, P10) que le serveur nourrit dès que l'empreinte bouge — une
+écriture dans le ledger, un journal de session ou une proposition arrive en moins
+de 2 s (`tests/unit/tools/test_workspace_stream.py`). Sans `EventSource`, ou si
+l'hôte ne sert pas le flux, elle sonde `/api/workspace/pulse` à l'intervalle que
+**le serveur déclare** (`interval_seconds`). Dans les deux cas, quand l'empreinte
+change, elle appelle les espaces inscrits par `ctx.live.on`. Quatre règles,
+gardées par `tests/e2e/test_workspace_live_pilot.py` (sondage) et
+`tests/e2e/test_workspace_live_stream.py` (flux) :
 
-1. **Un onglet masqué ne fait aucune requête** (`visibilitychange` : requête en
-   cours annulée, minuteur coupé) ; revenu visible, un sondage part tout de suite.
+1. **Un onglet masqué ne fait aucune requête** (`visibilitychange` : flux fermé,
+   requête en cours annulée, minuteur coupé) ; revenu visible, le flux se rouvre
+   (ou un sondage part) tout de suite.
 2. **Sans changement, rien n'est relu** : le pouls répond `changed: false` et le
    DOM de l'espace n'est pas touché.
 3. **Rien n'est jeté sous les doigts** : une réponse en cours de saisie (champ actif,
@@ -187,6 +193,7 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `GET /api/workspace/glossary` | `{schema, source, count, entries[]}` — `entries[]` : `{id, nom, definition, raccourci, termes[], doc}` |
 | `GET /api/workspace/tasks?mission=&status=` | `{columns[8], states[9], ledger, count, tasks[], note?}` — chaque carte porte `session` (vivacité K5, `updated_at` = dernier signe de vie, `duration_s` du premier au dernier signe, `cost` de session) et `cost` (dispatch : `{usd, status exact\|lower_bound\|unknown, unpriced_calls, calls, scope}`, `usd: null` quand rien n'est chiffré, jamais `0`) |
 | `GET /api/workspace/pulse?since=&scope=` | Le pouls (UI-3) : `{fingerprint, changed, interval_seconds, scope, decisions?}`. L'empreinte est calculée par `stat` seulement ; avec `since` identique, `changed: false` et aucun détail ; sinon `decisions: {pending, oldest_at, projects[], unreadable?}` (la lecture de `grimoire status`). `scope=portfolio` agrège le registre du cockpit. `interval_seconds` : `GRIMOIRE_PULSE_SECONDS`, borné à 1..300, défaut 5 |
+| `GET /api/workspace/stream?since=&scope=` | Le même pouls en flux `text/event-stream` (P10) : un événement `pulse` (charge utile de `pulse`, `id` = empreinte) tout de suite, puis à chaque changement d'empreinte (recalculée toutes les 0,5 s, ledger, baux, journaux de session et propositions), et un battement `changed: false` par `interval_seconds` sans changement. Pas une entrée de `GET_ROUTES` : l'hôte recopie le générateur `workspace_stream()` |
 | `GET /api/workspace/tasks/<id>` | La tâche + `board` + `next_moves_require: {colonne: [preuves]}` |
 | `GET /api/workspace/tasks/<id>/trace` | `{task_id, task, sources{ledger,hooks,runtime,evidence}, entries[], causes[]}` |
 | `GET /api/workspace/files?tier=` | `{projectRoot, tiers[]}` — `tiers[]` : `{id, term, label, note, roots[], editable, exists, truncated, count, files[]}` |

@@ -44,6 +44,11 @@ __all__ = [
 EVENT_SOURCES: tuple[tuple[str, Path], ...] = (
     ("hook-runtime", Path("_grimoire-runtime-output") / "hook-runtime" / "events.jsonl"),
     ("task-flow", Path("_grimoire-runtime-output") / "task-flow" / "events.jsonl"),
+    # Le journal du Mission Ledger (claims, transitions, refus de gate) : sans
+    # lui, Observer annonçait « Aucune trace » sur un projet dont une seule
+    # tâche portait des milliers d'événements. Aucun de ses types n'est dans
+    # `_SPANNABLE` : il nourrit l'activité, jamais l'export OTel.
+    ("ledger", Path("_grimoire-runtime-output") / "ledger" / "events.jsonl"),
 )
 
 #: Root under which per-session or per-run subdirectories may each carry
