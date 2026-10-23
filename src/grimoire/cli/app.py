@@ -22,7 +22,7 @@ from grimoire.__version__ import __version__
 from grimoire.cli._condensed_help import _RootHelpGroup
 from grimoire.cli._lazy import LazyCommandSpec, LazyGroupSpec, LazyTyperGroup
 from grimoire.cli._shared import _AUDIT_FILENAME, _log_operation, _status_spinner
-from grimoire.cli.cmd_self_update import self_update_command
+from grimoire.cli.cmd_self_update import register_self_update_commands, self_update_command
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -91,7 +91,6 @@ def _suggest_command() -> None:
         raise SystemExit(2)
 
 
-
 app = typer.Typer(
     name="grimoire",
     cls=_RootHelpGroup,
@@ -118,7 +117,6 @@ app = typer.Typer(
 )
 
 console = Console(stderr=True)
-
 
 
 # ── Semantic exit codes ────────────────────────────────────────────────────────
@@ -1281,9 +1279,8 @@ app.command("update", rich_help_panel="Info")(self_update_command)  # alias de `
 # real dispatch, or that command's own `--help`. `grimoire --version` and
 # `grimoire doctor .` never touch any of these modules.
 #
-# Name, rich_help_panel and hidden must match what the corresponding
-# `add_typer`/`command` call passed before — they are what `grimoire --help`
-# renders without importing anything.
+# Name, rich_help_panel and hidden must match what the corresponding `add_typer`/`command` call passed
+# before — they are what `grimoire --help` renders without importing anything.
 
 LazyTyperGroup.configure(
     groups={
@@ -1319,6 +1316,9 @@ LazyTyperGroup.configure(
         "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
         "autonomy": LazyGroupSpec("grimoire.cli.cmd_autonomy", "autonomy_app", rich_help_panel="Project"),
+        "mcp": LazyGroupSpec("grimoire.cli.cmd_mcp", "mcp_app", rich_help_panel="Project"),
+        "onboard": LazyGroupSpec("grimoire.cli.cmd_onboard", "onboard_app", rich_help_panel="Project"),
+        "team": LazyGroupSpec("grimoire.cli.cmd_team", "team_app", rich_help_panel="Project"),
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
@@ -1340,7 +1340,7 @@ LazyTyperGroup.configure(
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
         "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "web",
-        "autonomy",
+        "autonomy", "mcp", "onboard", "team",
         "config", "completion", "self", "plugins",
     ],
 )
@@ -2060,7 +2060,7 @@ def self_version(ctx: typer.Context) -> None:
         console.print("  [dim]Could not check for updates[/dim]")
 
 
-self_app.command("update")(self_update_command)
+register_self_update_commands(self_app)
 
 
 @self_app.command("diagnose")

@@ -162,6 +162,10 @@ hôtes activés.
   explicite, jamais par défaut. Les fusions JSON (`.claude/settings.json`,
   `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
   propre du projet.
+- Une entrée `type: http` de `.mcp.json` (le serveur partagé de
+  `grimoire mcp start`, voir [la référence CLI](cli/tableau-de-bord.md#serveur-mcp-partagé))
+  est portée telle quelle vers les hôtes qui distinguent local et distant
+  (OpenCode : `type: remote`).
 
 `grimoire doctor` complète ce tableau : INFO pour les fichiers orphelins d'un
 hôte désactivé, WARN si un hôte activé n'a encore rien émis (généralement :
@@ -207,17 +211,25 @@ réglages utilisateur (`~/.claude/settings.json`) et d'organisation ne sont pas 
 ## Persona d'entrée
 
 Chaque projet désigne une persona d'entrée — `concierge` par défaut — celle qui
-tranche quand une demande ne désigne pas clairement un rôle. Aucun hôte ne sait
-ouvrir une session *à l'intérieur* d'un agent : Claude Code n'instancie un
-sous-agent que par son outil Agent, Copilot que par le sélecteur de chat. Ce
-n'est pas un réglage manquant, c'est une propriété des hôtes, et le catalogue
-la déclare : `agent_autostart` est faux sur les cinq profils, et
-`grimoire host list` le remonte comme une dégradation avec son substitut.
+tranche quand une demande ne désigne pas clairement un rôle. Un seul hôte sait
+ouvrir une session *à l'intérieur* d'un agent nommé : Claude Code, par
+`claude --agent <nom>` ([CLI reference](https://code.claude.com/docs/en/cli-reference)),
+`claude --agent <nom> --bg` ([agent view](https://code.claude.com/docs/en/agent-view))
+et la clé de réglage `agent` ([settings](https://code.claude.com/docs/en/settings-reference)) ;
+ses hooks portent alors `agent_type` au `SessionStart`, et `agent_id` /
+`agent_type` dans un appel de sous-agent ([hooks](https://code.claude.com/docs/en/hooks)).
+Copilot n'instancie un agent que par le sélecteur de chat, les autres hôtes
+n'ont pas d'équivalent. Le catalogue le déclare : `agent_autostart` est vrai
+pour Claude Code, faux sur les quatre autres profils, et `grimoire host list`
+remonte ce manque comme une dégradation avec son substitut (#716).
 
 Le substitut est fourni là où un hook `session_start` s'exécute : le hook remet
 la persona à la boucle principale, avant la directive du standard. La session
 n'est pas ouverte dans l'agent — elle en adopte la persona en gardant toute la
-surface d'outils de l'hôte, et dispatcher un sous-agent reste un choix.
+surface d'outils de l'hôte, et dispatcher un sous-agent reste un choix. Sur
+Claude Code, une session déjà ouverte dans un agent (`agent_type` renseigné)
+ne reçoit ni la persona d'entrée ni la politique de dispatch de la boucle
+principale : elle a déjà son identité.
 
 ```text
 [Grimoire — persona d'entrée]
@@ -243,6 +255,33 @@ Un projet qui porte déjà son propre point d'entrée — un orchestrateur charg
 par `CLAUDE.md`, par exemple — déclare `entry: ""` et n'en reçoit pas un
 second. `grimoire host status` montre la persona retenue, et signale une clé
 qui nomme un agent que le projet n'a pas plutôt que d'en inventer un.
+
+## Scan des fichiers d'instructions
+
+Issue #667 (phase 5, lot 5.4) : au `SessionStart`, le kit énumère les
+fichiers d'instructions que l'hôte charge sans qu'on le lui demande —
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`,
+`.github/copilot-instructions.md` et `.github/{instructions,agents,prompts,skills,rules,commands}/`,
+tout `.md`/`.mdc` sous `.claude/`, `.cursor/`, `.codex/`, `.gemini/`,
+`.windsurf/` (400 fichiers et 256 Ko par fichier au plus) — et les classe par
+provenance : `kit-owned` (digest au catalogue des fichiers livrés,
+`registry/kit-file-hashes.json`, embarqué dans la wheel), `project-owned`
+(suivi par git et propre, donc relu par un humain à un commit),
+`unrecognised` (non suivi, modifié depuis le dernier commit, ou dépôt sans
+git). Seul ce dernier cas passe par des motifs déterministes — annulation
+des instructions précédentes, action cachée à l'utilisateur, exfiltration
+(`.env`, `.ssh`, jetons vers une URL de collecte), exécution d'un contenu
+distant (`curl … | sh`, « à chaque session, lance… »), texte invisible
+(largeur nulle, tags Unicode, bidi), directive dans un commentaire HTML.
+Même entrée, même sortie, aucun modèle.
+
+Silencieux par défaut : une ligne `[Grimoire — fichiers d'instructions]`
+n'apparaît que pour un fichier non reconnu qui porte un motif, et nomme le
+fichier et les codes. Le résultat est mis en cache dans l'état de session
+(empreinte de l'énumération par chemin, taille et mtime — jamais un extrait
+de contenu) ; `grimoire doctor` porte le même contrôle, `instruction_files`
+(`FAIL` nommant le fichier et le motif ; le remède est de relire, puis de
+committer si c'est voulu — le fichier devient alors du projet).
 
 ## Gouvernance
 
@@ -544,6 +583,41 @@ _grimoire/standard/policies.yaml"`. Cette recommandation est elle-même
 couverte par l'exemption de réparation ("Exemption de réparation"
 ci-dessus) : un refus ne nomme jamais une commande qu'il refuserait
 lui-même. Le cockpit n'a pas de vue équivalente pour l'instant.
+
+### Règles d'armement
+
+Issue #666 (phase 5) : aucune règle ci-dessus ne juge une *composition*
+d'appels. Éditer un manifeste Flux puis `kubectl apply`, `chmod +x` puis
+exécuter, `git remote set-url` puis `git push`, `rm_target=…` puis `rm -rf
+"$rm_target"` — chaque appel isolé est sûr, la séquence ne l'est pas. Une
+règle `arms` déclare une action qui *arme* et l'action armée :
+
+```yaml
+rules:
+  - id: flux-then-apply
+    description: "éditer un manifeste Flux puis kubectl apply demande confirmation"
+    verdict_on_match: warn          # warn → ask côté hôte ; block → refus ; allow refusé au chargement
+    reason_template: "Un manifeste Flux vient d'être édité : confirme l'apply"
+    arms: {pattern: "Write(*flux/*)", then: "Bash(kubectl apply:*)", minutes: 10}
+```
+
+`pattern` et `then` parlent le langage de `tool_pattern` (ci-dessus). Un
+appel qui correspond à `pattern` pose `armed[<id>] = now + minutes` dans
+l'état de session ; tant que l'échéance n'est pas passée, un appel qui
+correspond à `then` reçoit `verdict_on_match`. L'appel courant arme *avant*
+d'être comparé à `then`, et pour un `Bash` chaque segment (`&&`, `;`, `|`)
+est comparé en plus de la ligne entière : `chmod +x s.sh && ./s.sh` est jugé
+armé d'un coup. Les antislashs d'un chemin Windows sont lus comme des `/`
+pour le motif. Fail-closed : une échéance illisible vaut armement et est
+réécrite. Une règle d'armement n'a ni compteur, ni empreinte, ni
+refroidissement — seul le couple identifiant/échéance est écrit, jamais la
+commande ni la cible qui a armé — et le calcul reste en Python (rien ne
+traverse le cœur Rust, qui reste l'oracle des compteurs).
+
+**Le kit ne livre aucune règle d'armement** (décision du 2026-10-20) : la
+première fausse alerte tuerait la confiance dans tous les budgets et
+refroidissements. Un projet déclare les siennes ; `pattern` ou `then` à `*`,
+`minutes` ≤ 0 ou une clé inconnue échouent au chargement (`GR-POL-002`).
 
 ## Coût des hooks
 

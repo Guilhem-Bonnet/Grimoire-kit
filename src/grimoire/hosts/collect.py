@@ -776,10 +776,13 @@ def collect_mcp_servers(project_root: Path) -> tuple[McpServerSpec, ...]:
                     name=str(name),
                     command=str(spec.get("command", "")) if isinstance(spec, dict) else "",
                     args=tuple(str(a) for a in spec.get("args", [])) if isinstance(spec, dict) else (),
+                    url=str(spec.get("url", "")) if isinstance(spec, dict) else "",
                 )
                 for name, spec in servers.items()
             )
-    return (McpServerSpec(name="grimoire", command="grimoire-mcp"),)
+    from grimoire.hosts.hook_launcher import mcp_command
+
+    return (McpServerSpec(name="grimoire", command=mcp_command(project_root)),)
 
 
 def _is_override(agent: AgentSpec) -> bool:

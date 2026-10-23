@@ -49,6 +49,7 @@ __all__ = [
     "classify",
     "classify_criteria",
     "explain",
+    "is_bare_command",
     "reason_for_criteria",
 ]
 
@@ -281,6 +282,11 @@ def _est_commande_nue(texte: str) -> bool:
         if not all(_COMMANDE_ARG.match(jeton) for jeton in segment[tete.end() :].split()):
             return False
     return True
+
+
+def is_bare_command(texte: str) -> bool:
+    """Public (W6-07b) : le critère n'est qu'une commande d'outil de vérification — voir :func:`_est_commande_nue`."""
+    return _est_commande_nue(texte)
 
 
 def _classer_critere(texte: str) -> _Verdict:

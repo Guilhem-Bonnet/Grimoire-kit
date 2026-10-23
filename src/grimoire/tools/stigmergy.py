@@ -755,3 +755,28 @@ def board_view(project_root: Path) -> dict[str, Any]:
             "promotionReady": bool(board.total_emitted >= min_emitted and useful_ratio >= target_ratio),
         },
     }
+
+
+def sense_context(project_root: Path, *, limit: int = 6, now: datetime | None = None) -> str:
+    """Compact summary of the active signals, for a host's ``additionalContext``.
+
+    Same wording as ``format_sense`` in the embedded
+    ``framework/tools/stigmergy_hooks/scripts/stigmergy_hook.py`` (the Copilot
+    hook), so a session reads the same lines whichever host injects them
+    (issue #703: on Claude Code nothing injected them at ``SessionStart``).
+    Empty when there is no board or no signal above the detection threshold.
+    """
+    board = load_board(project_root)
+    active = sense_pheromones(board, now=now)
+    if not active:
+        return ""
+    lines = ["Signaux de coordination actifs (stigmergie) :"]
+    for pheromone, intensity in active[:limit]:
+        line = f"- {pheromone.pheromone_type} @ {pheromone.location or '—'} ({int(intensity * 100)}%)"
+        if pheromone.text:
+            line += f" : {pheromone.text}"
+        lines.append(line)
+    extra = len(active) - limit
+    if extra > 0:
+        lines.append(f"- (+{extra} autre·s)")
+    return "\n".join(lines)

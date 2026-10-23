@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from grimoire.tools.context_pack import build_context_pack, default_output_path
+from grimoire.tools.context_pack import build_context_pack, default_output_path, ensure_output_ignored
 
 console = Console()
 
@@ -35,8 +35,11 @@ def context_pack_command(
     out_path.write_text(
         json.dumps(pack, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    ignored_via = ensure_output_ignored(root, out_path)
     score = pack["scorecard"]
     console.print(f"[green]context-pack écrit[/green] : {out_path}")
+    if ignored_via is not None:
+        console.print(f"  [dim]ajouté à {ignored_via} (sortie générée, non suivie par git — #701)[/dim]")
     console.print(
         f"  {score['included']} sources incluses · suffisance : {score['sufficiency']}"
     )

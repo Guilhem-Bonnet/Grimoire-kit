@@ -60,16 +60,18 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
 sys.path.append(str(Path(__file__).resolve().parent))
+import host_isolation
 import three_arms as ta
+from budget_guard import BudgetError, BudgetGuard, _now, budget_args, parse_cap, session_call_cost
 from cost_gate import filter_tasks
 from hidden_reads import check_transcript
 from model_pin import ModelMismatchError, detect_claude_code_version, ensure_results_match_model
 from results_io import read_results_rows
+from task_lot import resolve_task_lot
 from task_repo import (
     ContaminatedTaskRepoError,
     assert_task_repo_clean,
@@ -148,146 +150,8 @@ class InstallError(RuntimeError):
     """Installation ou configuration d'AI-DLC impossible (aucun modèle lancé)."""
 
 
-class BudgetError(RuntimeError):
-    """Le garde-fou de budget refuse l'appel suivant."""
-
-
 class PreregistrationError(RuntimeError):
     """``--run`` sans pré-enregistrement, ou avec une configuration différente."""
-
-
-# ── Garde-fou de budget (fermé par défaut) ───────────────────────────────────
-
-
-def parse_cap(raw: object) -> float:
-    """Le plafond en dollars, ou :class:`BudgetError` : absent, non numérique, non fini ou ≤ 0."""
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        raise BudgetError("plafond en dollars absent : --max-total-usd est obligatoire pour lancer un run payant")
-    if isinstance(raw, bool):
-        raise BudgetError(f"plafond invalide : {raw!r}")
-    try:
-        cap = float(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        raise BudgetError(f"plafond invalide : {raw!r} n'est pas un montant en dollars") from None
-    if not math.isfinite(cap) or cap <= 0:
-        raise BudgetError(f"plafond invalide : {raw!r} (attendu : un montant fini strictement positif)")
-    return cap
-
-
-@dataclass
-class BudgetGuard:
-    """Cumul des coûts d'appels ``claude -p`` du bras, adossé à un journal append-only.
-
-    Chaque appel est encadré par deux lignes (``begin`` puis ``end``). À la
-    relecture, un ``begin`` sans ``end`` (processus tué pendant l'appel) et un
-    ``end`` sans coût connu valent *inconnu* ; une ligne illisible aussi. Un
-    seul inconnu bloque tout appel suivant : il ne compte jamais pour 0.
-    """
-
-    cap_usd: float
-    ledger_path: Path | None = None
-    spent_usd: float = 0.0
-    unknown_calls: list[str] = field(default_factory=list)
-    calls: int = 0
-
-    @classmethod
-    def open(cls, cap: object, ledger_path: Path | None) -> BudgetGuard:
-        guard = cls(cap_usd=parse_cap(cap), ledger_path=ledger_path)
-        if ledger_path is not None and ledger_path.is_file():
-            guard._replay(ledger_path)
-        return guard
-
-    def _replay(self, path: Path) -> None:
-        open_calls: dict[str, int] = {}
-        for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                self.unknown_calls.append(f"{path.name}:{lineno} (ligne illisible)")
-                continue
-            if not isinstance(row, dict):
-                self.unknown_calls.append(f"{path.name}:{lineno} (ligne non objet)")
-                continue
-            call_id = str(row.get("call_id"))
-            if row.get("event") == "begin":
-                open_calls[call_id] = lineno
-            elif row.get("event") == "end":
-                open_calls.pop(call_id, None)
-                self.calls += 1
-                cost = row.get("cost_usd")
-                if (
-                    row.get("cost_known") is True
-                    and isinstance(cost, (int, float))
-                    and not isinstance(cost, bool)
-                    and math.isfinite(cost)
-                ):
-                    self.spent_usd += float(cost)
-                else:
-                    self.unknown_calls.append(call_id)
-            else:
-                self.unknown_calls.append(f"{path.name}:{lineno} (événement inconnu)")
-        for call_id in open_calls:
-            self.unknown_calls.append(f"{call_id} (commencé, jamais terminé)")
-
-    def check_before_call(self) -> None:
-        if self.unknown_calls:
-            raise BudgetError(
-                f"coût inconnu pour {len(self.unknown_calls)} appel(s) ({', '.join(self.unknown_calls[:3])}) : "
-                "un coût inconnu ne compte pas pour 0, aucun appel de plus n'est lancé"
-            )
-        if self.spent_usd >= self.cap_usd:
-            raise BudgetError(
-                f"plafond atteint : {self.spent_usd:.4f} $ dépensés pour un plafond de {self.cap_usd:.2f} $"
-            )
-
-    def _append(self, row: Mapping[str, Any]) -> None:
-        if self.ledger_path is None:
-            return
-        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.ledger_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
-            f.flush()
-            with contextlib.suppress(OSError):
-                os.fsync(f.fileno())
-
-    def begin(self, call_id: str, **meta: Any) -> None:
-        self.check_before_call()
-        self._append({"event": "begin", "call_id": call_id, "at": _now(), **meta})
-
-    def record(self, call_id: str, cost_usd: float, cost_known: bool) -> None:
-        self.calls += 1
-        known = bool(cost_known) and math.isfinite(cost_usd)
-        if known:
-            self.spent_usd += cost_usd
-        else:
-            self.unknown_calls.append(call_id)
-        self._append(
-            {
-                "event": "end",
-                "call_id": call_id,
-                "at": _now(),
-                "cost_usd": cost_usd if known else None,
-                "cost_known": known,
-            }
-        )
-
-    def remaining_usd(self) -> float:
-        return max(0.0, self.cap_usd - self.spent_usd)
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "cap_usd": self.cap_usd,
-            "spent_usd": round(self.spent_usd, 6),
-            "calls": self.calls,
-            "unknown_calls": list(self.unknown_calls),
-            "blocked": bool(self.unknown_calls) or self.spent_usd >= self.cap_usd,
-        }
-
-
-def _now() -> str:
-    return datetime.now(tz=UTC).isoformat()
 
 
 # ── Épinglage et installation (aucun modèle) ─────────────────────────────────
@@ -480,14 +344,18 @@ def claude_invoker(
 
 def _extra_args(*, resume: str | None, max_budget_usd: float | None) -> list[str]:
     """``--max-budget-usd`` (le reste du plafond, appliqué par Claude Code pendant l'appel), puis ``--resume``."""
-    args = ["--max-budget-usd", f"{max_budget_usd:.4f}"] if max_budget_usd is not None else []
+    args = budget_args(max_budget_usd)
     return [*args, "--resume", resume] if resume else args
 
 
 def planned_claude_command(
-    prompt: str, *, model: str | None, resume: str | None, max_budget_usd: float | None = None
+    prompt: str, *, model: str | None, resume: str | None, max_budget_usd: float | None = None, task_dir: Path | None = None
 ) -> list[str]:
-    """La commande que :func:`claude_invoker` lancerait (affichée par ``--dry-run``, jamais exécutée)."""
+    """La commande que :func:`claude_invoker` lancerait (affichée par ``--dry-run``, jamais exécutée).
+
+    B-08 (§17.8) : comme :func:`three_arms.run_claude_headless`, config MCP stricte, limitée au ``.mcp.json`` qu'AI-DLC
+    aurait écrit dans *task_dir* (``--mcp none`` : aucun).
+    """
     cmd = [
         "claude",
         "-p",
@@ -502,6 +370,8 @@ def planned_claude_command(
     ]
     if model:
         cmd.extend(["--model", model])
+    servers = host_isolation.declared_mcp_servers(ARM, task_dir) if task_dir is not None else {}
+    cmd.extend(host_isolation.mcp_isolation_args(servers))
     cmd.extend(_extra_args(resume=resume, max_budget_usd=max_budget_usd))
     return cmd
 
@@ -587,18 +457,6 @@ class DriveResult:
                     else:
                         slot.setdefault(key, value)
         return merged
-
-
-def session_call_cost(session_total: float, previous_total: float | None) -> float:
-    """Coût d'un appel : son total moins le total précédent de la session reprise.
-
-    Sans total précédent (premier appel), ou si le total baisse (copie de
-    session, compteur remis à zéro), l'appel compte en entier : jamais un
-    delta négatif, au pire un surcompte.
-    """
-    if previous_total is None or session_total < previous_total:
-        return session_total
-    return session_total - previous_total
 
 
 def drive_run(
@@ -854,10 +712,21 @@ def ensure_preregistered(state_dir: Path, expected: Mapping[str, Any]) -> None:
 
 
 def _task_list(
-    workspace: Path, *, bench_root: Path | None, seed: int, subset: Path | None, limit: int | None
+    workspace: Path,
+    *,
+    bench_root: Path | None,
+    seed: int,
+    subset: Path | None,
+    limit: int | None,
+    task_lot: Path | None = None,
 ) -> list[ta.TaskMeta]:
     root = bench_root or ta.ensure_polyglot_benchmark(workspace)
-    tasks = filter_tasks(ta.sample_tasks(ta.discover_catalog(root), seed=seed), subset)
+    catalog = ta.discover_catalog(root)
+    if task_lot is not None:  # B-07 : lot nommé ; ses identifiants entrent dans le pré-enregistrement (task_ids)
+        drawn, _commit = resolve_task_lot(task_lot, catalog, root)
+    else:
+        drawn = ta.sample_tasks(catalog, seed=seed)
+    tasks = filter_tasks(drawn, subset)
     return tasks[:limit] if limit else tasks
 
 
@@ -1099,6 +968,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--k", type=int, default=ta.K_REPLAY)
     parser.add_argument("--seed", type=int, default=ta.DEFAULT_SEED)
     parser.add_argument("--subset", type=Path, default=None)
+    parser.add_argument(
+        "--task-lot",
+        type=Path,
+        default=None,
+        help="B-07 : tâches nommées (grimoire.bench.task-lot.v1) au lieu du tirage",
+    )
     parser.add_argument("--tasks", type=int, default=None, help="ne garder que les N premières tâches du tirage")
     parser.add_argument("--run-timeout-s", type=int, default=DEFAULT_RUN_TIMEOUT_S)
     parser.add_argument("--max-person-replies", type=int, default=DEFAULT_MAX_PERSON_REPLIES)
@@ -1112,6 +987,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-install", action="store_true", help="--dry-run seulement : ne pas installer ni configurer AI-DLC"
     )
+    parser.add_argument(host_isolation.ALLOW_OPTION, action="store_true", help="B-08 : workspace sous un projet accepté, §3")
     parser.add_argument("--n", type=str, default="20,99,393", help="--estimate : tailles de suite (tâches par bras)")
     return parser
 
@@ -1146,6 +1022,11 @@ def main(argv: Sequence[str] | None = None, *, invoke: Invoker = claude_invoker,
         parser.error("--aidlc-clone est obligatoire : chemin du clone de référence d'aidlc-workflows")
     args.model = args.model.strip() if args.model else None
     workspace = (args.workspace or ta._default_workspace()).resolve()
+    try:  # B-08 (§17.8) : workspace hors de tout projet, comme three_arms.py
+        host_isolation.refuse_project_ancestors(workspace, allow=args.allow_project_ancestors)
+    except host_isolation.IsolationError as exc:
+        print(f"[isolation] {exc}", file=sys.stderr)
+        return 1
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -1153,7 +1034,14 @@ def main(argv: Sequence[str] | None = None, *, invoke: Invoker = claude_invoker,
     except PinError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    tasks = _task_list(workspace, bench_root=args.bench_root, seed=args.seed, subset=args.subset, limit=args.tasks)
+    tasks = _task_list(
+        workspace,
+        bench_root=args.bench_root,
+        seed=args.seed,
+        subset=args.subset,
+        limit=args.tasks,
+        task_lot=args.task_lot,
+    )
     prereg = preregistration(
         scope=args.scope,
         driver=args.driver,

@@ -108,7 +108,8 @@ _INTROS: dict[str, str] = {
     ),
     "exigences": (
         "Le QUOI, jamais le COMMENT. Chaque exigence Must porte au moins un "
-        "critère d'acceptation vérifiable."
+        "critère d'acceptation vérifiable. Identifiez-les (« - REQ-001 [Must] : … », "
+        "critères en sous-liste) : `grimoire cadrage plan` en tire les tâches."
     ),
     "cahier-des-charges": (
         "La consolidation opposable : ce document est ce qu'on s'engage à "

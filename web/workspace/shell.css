@@ -66,6 +66,19 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
+/* Matrice contrôle × état (issue 536), mesurée sur le rendu : le select natif
+ * faisait 21 px de haut (cible minimale 24 px, WCAG 2.5.8) et le placeholder
+ * gardait l'encre du navigateur — 3,55:1 sur --card en sombre. */
+select,
+input:not([type="checkbox"]):not([type="radio"]) {
+  min-height: 24px;
+}
+
+::placeholder {
+  color: var(--ink3);
+  opacity: 1;
+}
+
 /* Un bouton désactivé ne ressemble pas à un bouton actif : fond retiré,
  * bordure en tirets, encre secondaire (--ink3, 4,5:1 minimum sur --card). */
 .btn:disabled,

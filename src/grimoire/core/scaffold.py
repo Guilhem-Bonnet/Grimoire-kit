@@ -1411,11 +1411,14 @@ class ProjectScaffolder:
 
     def _plan_mcp_config(self, p: ScaffoldPlan) -> None:
         """Register the Grimoire MCP server in a portable ``.mcp.json`` (read by
-        Claude Code, Cursor and other MCP clients). OS-neutral: relies on the
-        ``grimoire-mcp`` console entrypoint on PATH after ``pip install``."""
+        Claude Code, Cursor and other MCP clients). The command is resolved
+        like the hooks' (issue #760): the bare ``grimoire-mcp`` when the host
+        finds it on PATH, else a path into the venv."""
+        from grimoire.hosts.hook_launcher import mcp_command
+
         dst = self._target / ".mcp.json"
         content = json.dumps(
-            {"mcpServers": {"grimoire": {"command": "grimoire-mcp", "args": [], "env": {}}}},
+            {"mcpServers": {"grimoire": {"command": mcp_command(self._target), "args": [], "env": {}}}},
             indent=2,
         )
         # Seed, not kit: the file also carries the project's own MCP servers, so

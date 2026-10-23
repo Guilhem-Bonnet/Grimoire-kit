@@ -158,6 +158,7 @@ nav:
       - Créer un agent: guides/creer-un-agent.md
       - Choisir un archétype: guides/choisir-un-archetype.md
       - Cadrage produit: guides/cadrage-produit.md
+      - Travail en équipe: guides/travail-en-equipe.md
       - L'atelier de blueprints: guides/atelier-blueprints.md
       - Évaluer un flow: guides/evaluer-un-flow.md
       - Dépanner: guides/depannage.md
@@ -193,6 +194,7 @@ nav:
           - standard/index.md
           - Le refus de preuve, ligne par ligne: explications/le-refus-de-preuve.md
       - Les limites: explications/les-limites.md
+      - Comparaison avec AWS AI-DLC: explications/comparaison-ai-dlc.md
       - Concepts: explications/concepts.md
       - Les flows:
           - nodal/index.md

@@ -18,6 +18,10 @@ CHECK_DIMENSIONS: dict[str, str] = {
     # Cadrage produit (B4, issue #173) — voir verifiers._verify_cadrage.
     "cadrage.gate_incomplete": "artifacts",
     "cadrage.phase_incomplete": "artifacts",
+    # Cadrage face au ledger (W6-07b) — voir cadrage_ledger_check.verify_cadrage_ledger.
+    "cadrage.question_open": "artifacts",
+    "cadrage.requirement_uncovered": "artifacts",
+    "cadrage.task_orphan": "artifacts",
     "compliance.owner_missing": "artifacts",
     "compliance.unknown_status": "artifacts",
     "compliance.traceability_missing": "artifacts",
@@ -332,6 +336,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "providers.hosted_forbidden_missing": "provider_policy",
     "providers.id_missing": "provider_policy",
     "providers.invalid_entry": "provider_policy",
+    "providers.invocation_prompt_missing": "provider_policy",
     "providers.model_id_missing": "provider_policy",
     "providers.model_tier_invalid": "provider_policy",
     "providers.models_missing": "provider_policy",
