@@ -62,11 +62,13 @@ class HostProfile:
     #: Hooks can refuse a tool call or a turn closure, not merely inject text.
     blocking_hooks: bool = False
     #: Can be told to open a session *inside* a named agent.
-    #: False everywhere on purpose: Claude Code instantiates a sub-agent file
-    #: only through its Agent tool, Copilot only through the chat dropdown.
-    #: The field exists so the substitute below is a declared degradation
-    #: rather than folklore — and so the day a host ships the capability, the
-    #: emitters read a flag instead of being rewritten.
+    #: True only where the host documents it (issue #716): Claude Code with
+    #: ``claude --agent <name>`` (CLI reference, "Specify an agent for the
+    #: current session"), ``claude --agent <name> --bg`` (agent view) and the
+    #: ``agent`` setting ("Run the main thread as a named subagent"); its hooks
+    #: then carry ``agent_type``. Copilot instantiates an agent file only
+    #: through the chat dropdown, the others have no equivalent — for them the
+    #: substitute below is a declared degradation rather than folklore.
     agent_autostart: bool = False
     #: Has a declarative allow/deny/ask permission table.
     permissions_native: bool = False
@@ -118,11 +120,17 @@ CLAUDE_CODE_PROFILE = HostProfile(
     skills_native=True,
     commands_native=True,
     blocking_hooks=True,
+    agent_autostart=True,
     permissions_native=True,
     mcp_native=True,
     plugin_packaging=True,
     instructions_entrypoint="CLAUDE.md",
-    notes="Every surface has a native counterpart except starting inside an agent, which no host offers.",
+    notes=(
+        "Every surface has a native counterpart. Starting inside an agent: `claude --agent <name>` "
+        "(code.claude.com/docs/en/cli-reference) and the `agent` setting "
+        "(code.claude.com/docs/en/settings-reference); SessionStart then carries `agent_type` "
+        "(code.claude.com/docs/en/hooks) and the session_start hook skips the entry persona (#716)."
+    ),
 )
 
 COPILOT_PROFILE = HostProfile(
@@ -262,7 +270,8 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
     if not profile.commands_native:
         gaps.append(CapabilityGap("commands", "commands listed as CLI invocations the agent must run"))
     if not profile.agent_autostart:
-        # A host that cannot enter an agent can still be handed its persona.
+        # A host that cannot enter an agent can still be handed its persona
+        # (#716: Claude Code can — `claude --agent` — and has no gap here).
         # Where session_start runs, the hook injects it into the main loop;
         # where it does not, the entrypoint file is the only place left.
         if profile.supports_event(HookEvent.SESSION_START):

@@ -2274,6 +2274,10 @@
    "version": "3.4.2",
    "path": "framework/tools/decision-log.py"
   },
+  "93031a4579166e4f0936fafc4e72e22e6edbb8768e40b269d51766635ddf7fb0": {
+   "version": "3.64.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
+  },
   "9365803b83da8a53c569b96b1440f7e27ae422fa3fb01867ba3b4802e78bdd4b": {
    "version": "3.64.0",
    "path": "framework/mcp/grimoire-mcp-server.md"
