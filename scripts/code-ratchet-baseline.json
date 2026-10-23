@@ -78,6 +78,6 @@
   },
   "src_oversized": {
     "src/grimoire/cli/app.py": 2801,
-    "src/grimoire/core/agentic_standard.py": 1808
+    "src/grimoire/core/agentic_standard.py": 1810
   }
 }
