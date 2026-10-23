@@ -8,11 +8,32 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from grimoire.cli.env_checks import EnvCheck
-from grimoire.hosts.hook_launcher import hook_program_resolves
+from grimoire.hosts.hook_launcher import command_program, hook_program_problem
+
+_HOOK_PROGRAMS = frozenset({"grimoire-hook", "grimoire-hook.exe"})
+
+
+def _program(command: str) -> str:
+    """Le programme d'une commande de hook du kit.
+
+    Avant ``--host`` quand il y est (chemin non guillemeté avec espaces) ; sinon
+    le premier mot : un script de gateway porte d'autres arguments.
+    """
+    if " --host " in command:
+        return command.partition(" --host ")[0].strip()
+    return command_program(command)
+
+
+def _launches_grimoire_hook(command: str) -> bool:
+    """Le programme lancé est-il ``grimoire-hook`` ? Un hook maison qui le cite
+    seulement (``grimoire-hook-gateway.sh --hook-id …``) n'est pas un hook du kit."""
+    name = re.split(r"[\\/]", _program(command).replace('"', "").replace("'", ""))[-1]
+    return name in _HOOK_PROGRAMS
 
 
 def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
@@ -42,7 +63,7 @@ def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
                     if not isinstance(spec, dict):
                         continue
                     command = str(spec.get(os_key) or spec.get("command") or "")
-                    if "grimoire-hook" in command:
+                    if _launches_grimoire_hook(command):
                         found.append((path.relative_to(target).as_posix(), command))
     return found
 
@@ -57,19 +78,19 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
     commands = _generated_hook_commands(target)
     if not commands:
         return []
-    broken = sorted(
-        {
-            f"{relpath}: {command.partition(' --host ')[0]}"
-            for relpath, command in commands
-            if not hook_program_resolves(command.partition(" --host ")[0], target)
-        }
-    )
+    problems: set[str] = set()
+    for relpath, command in commands:
+        program = _program(command)
+        reason = hook_program_problem(program, target)
+        if reason:
+            problems.add(f"{relpath}: {program} ({reason})")
+    broken = sorted(problems)
     if broken:
         return [EnvCheck(
             "hook_commands",
             passed=False,
             level="fail",
-            detail="hook program not found outside the active venv: " + "; ".join(broken),
+            detail="hook program not launchable outside the active venv: " + "; ".join(broken),
             remedy=(
                 "install the kit for the host (uv tool install grimoire-kit, or pipx), "
                 "or run `grimoire host sync` to write the venv path into the hooks"

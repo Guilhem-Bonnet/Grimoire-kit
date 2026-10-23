@@ -65,6 +65,29 @@ partagées avec l'atelier) reste servie mais redirige vers l'espace
 correspondant ; `?legacy=1` sur l'ancienne URL l'ouvre sans redirection. Voir
 [l'ADR de la vue de travail](../../explications/decisions/adr-006-vue-de-travail.md).
 
+## Serveur MCP partagé
+
+Par défaut, chaque session d'hôte lance son propre serveur MCP en stdio
+(entrée `grimoire` de `.mcp.json`, commande `grimoire-mcp`) : avec dix
+sessions ouvertes, dix processus. `grimoire mcp` propose un seul démon
+streamable-http sur la loopback, et le projet est résolu **par requête** —
+`project_path` absolu, sinon la racine que le client déclare (`roots/list`) ;
+sans projet résolu, l'appel est refusé (`isError`,
+`code: mcp.project_unresolved`), jamais servi sur le dossier du démon.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire mcp serve [--http] [--port 7331]` | Servir au premier plan : stdio (défaut) ou HTTP partagé |
+| `grimoire mcp start` / `stop` / `status` | Démon HTTP en arrière-plan, arrêt, état et compte des serveurs stdio vivants |
+| `grimoire mcp register [projet] [--url] [--remove]` | Ajouter à `.mcp.json` l'entrée `grimoire-http` (`type: http`) — l'entrée stdio reste |
+
+`grimoire doctor` avertit (`mcp_processes`) quand plus de trois serveurs stdio
+tournent sur le poste (lecture de `/proc`, « non mesuré » ailleurs) et vérifie
+qu'une entrée `type: http` de `.mcp.json` répond (WARN sinon, jamais FAIL :
+l'entrée stdio continue de fonctionner). Ce qui reste du côté des hôtes : une
+session ne devrait charger qu'une des deux entrées ; la bascule stdio → http
+est encore manuelle (issue #723).
+
 ---
 
 ## `grimoire serve` *(alias déprécié)*

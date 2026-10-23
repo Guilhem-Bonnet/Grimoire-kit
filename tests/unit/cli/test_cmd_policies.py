@@ -371,3 +371,69 @@ rules:
     payload = json.loads(result.output)
     names = [c["name"] for c in payload["checks"]]
     assert "policy_budget_duration_guard" not in names
+
+
+# ── Issue #844: an invalid enum value in a rule is a named error, not a crash ─
+
+
+def test_invalid_verdict_on_match_is_a_named_policy_error(tmp_path: Path) -> None:
+    """`VerdictKind("nope")` used to escape `load_custom_rules` as a bare
+    `ValueError`; the error must name the rule, the field and the value."""
+    from grimoire.core.exceptions import GrimoirePolicyError
+
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: typo-verdict
+    verdict_on_match: nope
+""",
+    )
+    with pytest.raises(GrimoirePolicyError) as excinfo:
+        load_custom_rules(tmp_path)
+    message = str(excinfo.value)
+    assert "typo-verdict" in message
+    assert "verdict_on_match" in message
+    assert "'nope'" in message
+    assert "allow" in message and "block" in message
+
+
+@pytest.mark.parametrize(
+    ("field_name", "yaml_value"),
+    [("action_kinds", "[frobnicate]"), ("mutation_classes", "[explosive]")],
+)
+def test_invalid_enum_list_values_are_named_policy_errors(tmp_path: Path, field_name: str, yaml_value: str) -> None:
+    from grimoire.core.exceptions import GrimoirePolicyError
+
+    _write_policies_yaml(
+        tmp_path,
+        f"""
+rules:
+  - id: typo-list
+    verdict_on_match: warn
+    {field_name}: {yaml_value}
+""",
+    )
+    with pytest.raises(GrimoirePolicyError) as excinfo:
+        load_custom_rules(tmp_path)
+    assert field_name in str(excinfo.value)
+    assert "typo-list" in str(excinfo.value)
+
+
+def test_doctor_fails_instead_of_crashing_on_an_invalid_verdict(tmp_path: Path) -> None:
+    runner.invoke(app, ["init", str(tmp_path)])
+    _write_policies_yaml(
+        tmp_path,
+        """
+rules:
+  - id: typo-verdict
+    verdict_on_match: nope
+""",
+    )
+    result = runner.invoke(app, ["doctor", "-o", "json", str(tmp_path)])
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.output
+    payload = json.loads(result.output)
+    guard = next(c for c in payload["checks"] if c["name"] == "policy_budget_guard")
+    assert guard["passed"] is False
+    assert "typo-verdict" in guard["detail"]
+    assert "nope" in guard["detail"]

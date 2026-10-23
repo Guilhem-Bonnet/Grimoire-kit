@@ -161,9 +161,16 @@ def normalize_input(
         tool_input=_as_dict(_pick(payload, "tool_input", "toolInput", "input", "arguments")),
         tool_response=_as_dict(_pick(payload, "tool_response", "toolResponse", "result")),
         prompt=str(_pick(payload, "prompt", "userPrompt", "user_prompt", default="") or ""),
-        agent_name=str(_pick(payload, "agent_name", "agentName", "subagent", default="") or ""),
-        session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
+        # Issue #716 : ``agent_type`` (session ouverte par ``claude --agent``,
+        # ou événement d'un sous-agent) est l'identité que l'hôte fournit
+        # réellement ; ``agent_name`` la reprend quand rien de plus explicite
+        # n'est envoyé, pour que la trace nomme l'agent en jeu.
+        agent_name=str(
+            _pick(payload, "agent_name", "agentName", "subagent", "agent_type", "agentType", default="") or ""
+        ),
+        agent_type=str(_pick(payload, "agent_type", "agentType", default="") or ""),
         agent_id=str(_pick(payload, "agent_id", "agentId", default="") or ""),
+        session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
         stop_active=stop_active,
         host=host_id.value if host_id is not None and host_id is not HostId.UNKNOWN else "",
         tool_use_id=str(_pick(payload, "tool_use_id", "toolUseId", "tool_call_id", "toolCallId", default="") or ""),
@@ -209,6 +216,12 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
         elif decision.reason:
             # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
+        if decision.context and decision.outcome is Outcome.ALLOW:
+            # Issue #724 : un avertissement non bloquant (code interprété non
+            # lu) accompagne un `allow` — `additionalContext` pour l'agent,
+            # `systemMessage` pour l'humain, puisque rien d'autre ne le porte.
+            specific["additionalContext"] = decision.context
+            payload["systemMessage"] = decision.context
         payload["hookSpecificOutput"] = specific
         return payload
 

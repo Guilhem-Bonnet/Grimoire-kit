@@ -31,6 +31,7 @@ from grimoire.core.standard_checks.base import (
     _require_keys,
     _text_file,
 )
+from grimoire.core.standard_checks.cadrage_ledger_check import verify_cadrage_ledger
 from grimoire.core.standard_checks.claim_ledger_verify import v0_non_governed
 from grimoire.core.standard_checks.claim_ledger_verify import verify_claim_ledger as _verify_claim_ledger
 from grimoire.core.standard_checks.controls import (
@@ -161,6 +162,19 @@ def _verify_provider_currency_and_tiers(
     inconnue romprait silencieusement ``grimoire providers status`` et
     ``choose()``, qui les comparent par égalité de chaîne.
     """
+    invocation = provider.get("invocation")
+    if invocation is not None and "{prompt}" not in str(invocation):
+        # Issue #700 : ``render_invocation`` substitue ``{prompt}`` token par
+        # token ; sans le marqueur, le prompt n'est jamais transmis et la
+        # commande ouvre une session interactive ou échoue à l'appel.
+        _add_check(
+            result,
+            "providers.invocation_prompt_missing",
+            "error",
+            f"Provider {provider_id!r} invocation {str(invocation)!r} has no {{prompt}} placeholder: "
+            "the prompt would never reach the command.",
+            path=rel_path,
+        )
     currency = provider.get("currency")
     if currency is not None and currency not in SUPPORTED_CURRENCIES:
         _add_check(
@@ -1328,6 +1342,7 @@ def run_verifiers(root: Path, profile: StandardProfile, task_id: str, result: St
     _verify_provider_registry(root, profile, result)
     _verify_dispatch_cost_slo(root, result)
     _verify_cadrage(root, result)
+    verify_cadrage_ledger(root, profile, result)
     _verify_knowledge_registry(root, profile, result)
     _verify_task_envelope(root, profile, task_id, result)
     _verify_evidence_pack(root, task_id, result)
