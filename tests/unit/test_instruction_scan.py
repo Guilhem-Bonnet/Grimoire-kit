@@ -9,7 +9,6 @@ positif sur les fichiers du kit.
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 import time
 from pathlib import Path
@@ -52,7 +51,8 @@ def _catalogued_kit_files(limit: int) -> list[Path]:
     found: list[Path] = []
     for entry in catalog.values():
         path = ROOT / entry["path"]
-        if path.suffix == ".md" and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() in catalog:
+        # Empreinte normalisée : un checkout Windows (autocrlf) livre ces fichiers en CRLF.
+        if path.suffix == ".md" and path.is_file() and normalised_digest(path.read_bytes()) in catalog:
             found.append(path)
             if len(found) >= limit:
                 break
