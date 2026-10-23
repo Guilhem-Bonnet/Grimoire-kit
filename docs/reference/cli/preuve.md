@@ -79,6 +79,25 @@ distante ; une tête locale peut encore être réécrite.
 
 ---
 
+## Journal de preuve rompu : `grimoire evidence chain explain`
+
+Le journal `evidence-log.jsonl` est chaîné (chaque ligne porte le `prev` de la précédente). `standard verify` distingue deux cas :
+
+- **Ligne sans `prev` intercalée, la chaîne continue autour** (`evidence.chain_broken`, message « sans `prev` intercalée(s) ») : ce qu'écrit le hook d'une version antérieure du kit pendant un `pip install -U`. La ligne suivante prolonge la ligne non chaînée.
+- **Toute autre rupture** (ligne chaînée modifiée ou supprimée, lignes manquantes en fin de journal, ancre qui ne suit plus, ligne non chaînée en queue) : ambiguë, donc rupture. Elle ne s'explique pas.
+
+Seul le premier cas s'explique, jamais en réécrivant ni en rechaînant le journal. L'humain tape, comme message entier :
+
+```text
+Explain Chain <task_id> line <n>: <raison>
+```
+
+La phrase n'est reçue que d'un tour humain d'un hôte nommé (hors `GRIMOIRE_UNATTENDED=1`), comme `Override Gate` ; aucune tâche tenue n'est exigée, la rupture du repli `bootstrap` s'explique aussi. Le CLI ne peut pas attester une origine humaine (un agent le lance par Bash) : `grimoire evidence chain explain --task-id <id> --line <n> [--reason "<texte>"]` n'écrit rien, il diagnostique la ligne (code 1 si elle n'est pas explicable) et imprime la phrase à taper.
+
+L'acquittement va dans `_grimoire-output/.runs/evidence/<tâche>/evidence-chain-acks.authority.jsonl`, protégé par la garde d'autorité (Write, Edit et Bash qui l'écrivent sont refusés). Il porte la raison, l'auteur (utilisateur, hôte, session), la date et l'empreinte de la ligne et de ses deux voisines : une autre rupture, ou une voisine modifiée, n'est pas couverte. Effet : `evidence.chain_broken` (erreur) devient `evidence.chain_break_explained` (avertissement qui cite raison, auteur et date) dans `standard verify`, `gate check` et le gate `Stop`. La rupture reste listée. L'ancre, figée à la première ligne non chaînée, est dite par `evidence.chain_anchor_frozen`.
+
+Limite : un agent qui exécute du code arbitraire peut écrire ce fichier par une voie que la garde de chemin ne prévoit pas ; l'acquittement rend l'explication visible, pas infalsifiable. Il ne dit pas que la ligne est innocente.
+
 ## Hooks git
 
 | Commande | Description |

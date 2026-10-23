@@ -29,6 +29,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 from grimoire.__version__ import __version__
+from grimoire.cli.init_memory import memory_step_summary
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
 from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan, ScaffoldResult
 from grimoire.core.scanner import ScanResult, StackScanner
@@ -792,57 +793,20 @@ def _display_composition_preview(archetypes: list[str]) -> None:
 # ── Rich summary report ─────────────────────────────────────────────────────
 
 
-def _memory_step_summary(target: Path, *, applied_profile: str, reason: str) -> dict[str, Any]:
-    """Close the Memory step: a cheap, structural health check plus the
-    upgrade path — the equivalent of `grimoire memory up --profile X --apply`
-    already ran during scaffolding; this only reports on it.
 
-    Deliberately never loads an embedding model (that first-use cost belongs
-    to an explicit memory operation, e.g. `grimoire memory status`, not to
-    `init` — see the module docstring of :mod:`grimoire.memory.embedding`).
-    ``healthy`` only asserts the config landed on a profile this version
-    knows, never that a remote service actually answers right now.
+def brownfield_offer(target: Path) -> dict[str, Any] | None:
+    """Proposition (jamais imposée) de documenter un projet qui a déjà du code.
+
+    ``None`` pour un projet neuf, ou quand la base existe déjà.
     """
-    from grimoire.core.config import GrimoireConfig
-    from grimoire.core.exceptions import GrimoireConfigError
-    from grimoire.tools.memory_setup import (
-        docker_daemon_reachable,
-        local_embedding_available,
-        unreached_configured_services,
-    )
+    from grimoire.core.project_kind import detect_project_kind
+    from grimoire.onboarding.brownfield import KNOWLEDGE_JSON
 
-    served = applied_profile
-    backend = ""
-    not_started: list[str] = []
-    with contextlib.suppress(GrimoireConfigError, OSError):
-        # A reporting step must never break `init`: a config-read failure falls back to what was applied.
-        cfg = GrimoireConfig.from_yaml(target / "project-context.yaml")
-        served = cfg.memory.layer_profile or applied_profile
-        backend = cfg.memory.backend
-        # `complet`/`graphe` can be configured yet never started (no consent, arbitrage #619):
-        # the gap `grimoire doctor` names "memory stack not started".
-        not_started = unreached_configured_services(cfg.memory)
-
-    if not local_embedding_available():
-        feasible = "lexical"
-    elif docker_daemon_reachable():
-        feasible = "complet"
-    else:
-        feasible = "standard"
-
-    order = memory_profiles.PROFILE_ORDER
-    served_rank = order.index(served) if served in order else 0
-    upgrade_to = feasible if order.index(feasible) > served_rank else ""
-
-    return {
-        "served": served,
-        "backend": backend,
-        "reason": reason,
-        "not_started": not_started,
-        "healthy": served in order,
-        "feasible": feasible,
-        "upgrade_to": upgrade_to,
-    }
+    kind = detect_project_kind(target)
+    if kind.kind != "brownfield" or (target / KNOWLEDGE_JSON).is_file():
+        return None
+    return {"project_kind": kind.to_dict(), "command": "grimoire onboard brownfield",
+            "writes": KNOWLEDGE_JSON.parent.as_posix(), "model_calls": 0}
 
 
 def _display_report(
@@ -961,11 +925,18 @@ def _display_report(
         no_cockpit=no_cockpit,
         layer_profile=(memory_summary or {}).get("served", ""),
     )
+    offer = brownfield_offer(target)
     body_lines = [
         "[bold]Project ready.[/bold]\n",
         f"  {panel.headline}\n",
-        f"  [bold cyan]Open it:[/bold cyan] [cyan]code {target.name}[/cyan]\n",
     ]
+    if offer:
+        body_lines.append(
+            "  [bold cyan]Code existant détecté[/bold cyan] "
+            f"([dim]{', '.join(offer['project_kind']['evidence'])}[/dim])\n"
+            "           Le documenter, sans modèle : [cyan]grimoire onboard brownfield[/cyan]\n"
+        )
+    body_lines.append(f"  [bold cyan]Open it:[/bold cyan] [cyan]code {target.name}[/cyan]\n")
     for action in panel.actions:
         body_lines.append(f"  {action}")
     if panel.unexploited_line:
@@ -1088,6 +1059,9 @@ def _display_json(
         "files_copied": len(result.copied_files),
         "configs_generated": len(result.rendered_files),
     }
+    offer = brownfield_offer(target)
+    if offer:
+        data["onboard"] = offer
     if qdrant_docker is not None:
         data["qdrant_docker"] = qdrant_docker
     if collection:
@@ -1451,7 +1425,7 @@ def run_init(
             for message in memory_stack_messages:
                 console.print(f"[dim]{message}[/dim]")
 
-    memory_summary = _memory_step_summary(
+    memory_summary = memory_step_summary(
         target, applied_profile=memory_profile or "lexical", reason=memory_default_reason,
     )
 
@@ -1493,5 +1467,11 @@ def run_init(
         )
 
     _maybe_register_cockpit(target, project_name, fmt, no_cockpit=no_cockpit)
+    if is_interactive and brownfield_offer(target) and typer.confirm(
+        "Documenter le code existant maintenant (sans modèle, quelques secondes) ?", default=False,
+    ):
+        from grimoire.cli.cmd_onboard import brownfield
+
+        brownfield(target, check=False, as_json=False, no_memory=False)
 
 
