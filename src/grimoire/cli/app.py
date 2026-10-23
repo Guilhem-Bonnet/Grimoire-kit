@@ -91,7 +91,6 @@ def _suggest_command() -> None:
         raise SystemExit(2)
 
 
-
 app = typer.Typer(
     name="grimoire",
     cls=_RootHelpGroup,
@@ -118,7 +117,6 @@ app = typer.Typer(
 )
 
 console = Console(stderr=True)
-
 
 
 # ── Semantic exit codes ────────────────────────────────────────────────────────
@@ -292,17 +290,26 @@ def init(
         help=(
             "Memory backend (auto, local, lexical, tantivy-local, qdrant-local, "
             "qdrant-server, weaviate-server, mempalace, ollama). 'auto' never attaches "
-            "silently to a service detected on this machine — it falls back to "
-            "'lexical' and only suggests the detected service in the report "
-            "(issue #496)."
+            "silently to a service detected on this machine (issue #496) — it applies "
+            "the richest private, consent-free composition this machine can serve "
+            "('complet' when Docker answers, 'qdrant-local' with a local embedding engine, "
+            "'lexical' otherwise) and only suggests a detected external service in the report."
         ),
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Express mode: skip the wizard, auto-detect everything."),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i",
+        help="Force the init wizard even without a real TTY (e.g. piped stdin).",
+    ),
     memory_profile: str = typer.Option("", "--memory-profile", "-m", help="Memory composition (lexical, standard, graphe, complet). Inferred when omitted."),
     no_cockpit: bool = typer.Option(False, "--no-cockpit", help="Do not enrol this project in the local cockpit registry (~/.grimoire/cockpit/registry.json). Same effect as the GRIMOIRE_NO_COCKPIT env var."),
-    lite: bool = typer.Option(False, "--lite", help="Profil léger : mémoire lexicale (aucun service), pas de cockpit, standard non activé — pour un dépôt sans CI ni tests."),
-    profile: str = typer.Option("", "--profile", help="Profil d'init nommé. Seule valeur reconnue aujourd'hui : 'lite' (équivalent à --lite)."),
+    lite: bool = typer.Option(False, "--lite",
+        help="Deprecated — the light profile no longer exists (the installed experience is complete; the core adapts to each task). Behaves exactly like the default.",
+    ),
+    profile: str = typer.Option("", "--profile",
+        help="Deprecated. 'lite' is accepted for backward compatibility and behaves like the default; no other value is recognized.",
+    ),
     memory_collection: str = typer.Option(
         "", "--memory-collection",
         help=(
@@ -310,6 +317,15 @@ def init(
             "(qdrant-local, qdrant-server, weaviate-server). Sans cette option, la "
             "collection est nommée d'après le projet (slug) ; l'attachement à une "
             "collection existante et non vide exige ce drapeau."
+        ),
+    ),
+    memory_stack: str = typer.Option(
+        "", "--memory-stack",
+        help=(
+            "'up' starts (Docker) the services the recommended/chosen memory profile "
+            "needs and this machine does not yet serve. -y already gives that consent "
+            "(`complet` starts when Docker answers); --memory-stack up gives the same "
+            "consent without -y (script, CI). No other value is recognized."
         ),
     ),
 ) -> None:
@@ -323,26 +339,29 @@ def init(
     throwaway project (scratch, `/tmp`, a recipe) that should not show up in
     [cyan]grimoire cockpit[/cyan] (issue #305).
 
-    [cyan]--lite[/cyan] (alias: [cyan]--profile lite[/cyan]) sets memory backend to
-    lexical (no service), skips cockpit enrolment, and picks the [cyan]minimal[/cyan]
-    archetype by default — a fast, service-free setup for a throwaway or
-    exploratory repo (no CI, no tests).
+    [cyan]--lite[/cyan]/[cyan]--profile lite[/cyan] are deprecated: the light profile no
+    longer exists — the installed experience is complete, the core adapts to
+    each task by class of work. Both flags are still accepted and now behave
+    exactly like the default (a deprecation notice is printed once).
 
-    Without an explicit [cyan]--backend[/cyan], a project always gets an isolated
-    [cyan]lexical[/cyan] memory — a service found on this machine (Weaviate, Qdrant,
-    Ollama) is only suggested, never attached to silently (issue #496). On a
-    shared backend chosen explicitly, the collection is named after the
-    project; attaching to one that already holds data requires
-    [cyan]--memory-collection[/cyan].
+    A Memory step picks the richest composition this machine can serve
+    without ever attaching to a service it merely found running (issue
+    #496): [cyan]standard[/cyan] (local vector embeddings, no server) when a local
+    embedding engine (fastembed/sentence-transformers) is installed,
+    [cyan]lexical[/cyan] otherwise. [cyan]complet[/cyan] (Weaviate + Neo4j + Redis) is picked
+    whenever Docker answers: [cyan]-y[/cyan] is the consent to start it (Docker Compose,
+    the kit's templates), and [cyan]--memory-stack up[/cyan] gives that same consent
+    without [cyan]-y[/cyan]. Without either (script, CI), [cyan]complet[/cyan] is configured
+    but nothing is started, and [cyan]grimoire doctor[/cyan] says so.
 
     [dim]Examples:[/dim]
       [cyan]grimoire init .[/cyan]                               Interactive wizard
-      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all) — isolated, lexical memory
+      [cyan]grimoire init . -y[/cyan]                            Express (auto-detect all) — starts `complet` if Docker answers
       [cyan]grimoire init . -a infra-ops -b weaviate-server[/cyan]  Explicit archetype & backend
       [cyan]grimoire init . -a web-app,infra-ops[/cyan]         Multiple archetypes
       [cyan]grimoire init --dry-run[/cyan]                       Show plan without writing
       [cyan]grimoire init . -y --no-cockpit[/cyan]               Express, skip cockpit enrolment
-      [cyan]grimoire init . --lite[/cyan]                        Profil léger (lexical, sans cockpit)
+      [cyan]grimoire init . --memory-stack up[/cyan]             Non-interactive, starts the `complet` stack without -y
       [cyan]grimoire init . -b weaviate-server --memory-collection team-x[/cyan]  Attach to an existing shared collection
     """
     from grimoire.cli.cmd_init import run_init, validate_init_flags
@@ -355,6 +374,18 @@ def init(
         console.print("Available: lite")
         raise typer.Exit(1)
     lite = lite or normalized_profile == "lite"
+
+    if memory_stack and memory_stack != "up":
+        console.print(f"[red]Unknown --memory-stack value:[/red] {memory_stack}")
+        console.print("Available: up")
+        raise typer.Exit(1)
+
+    if lite:
+        console.print(
+            "[yellow]--lite/--profile lite is deprecated:[/yellow] the light profile no "
+            "longer exists — the installed experience is complete, the core adapts to "
+            "each task. Behaving like the default."
+        )
 
     if yes:
         # The global --yes lives on the app callback (grimoire -y init …); this
@@ -374,6 +405,8 @@ def init(
         no_cockpit=no_cockpit,
         lite=lite,
         memory_collection=memory_collection,
+        interactive=interactive,
+        memory_stack=memory_stack,
     )
 
 
@@ -601,92 +634,13 @@ def doctor(
                 console.print(f"  {tag}  {detail}")
 
     # 4sexies. Design guard (defect 5 of the 2026-09-12 session-budget
-    # incident, issue #463) — a `per_session` rule with no `tool_pattern`
-    # (so `"*"`, every tool) and `verdict_on_match: block` can end up
-    # refusing every tool in the session, hard-coded repair exemptions
-    # aside (see `grimoire.policies.temporal`). Never FAIL: a project may
-    # want exactly this and accept the risk — but `doctor` names the shape
-    # instead of leaving it silent, which is what let the real incident
-    # reach production undetected.
+    # incident, issue #463) — extracted to core/policy_budget_guard_check.py
+    # to keep this ratchet-frozen file from growing (see that module's
+    # docstring for the full rationale).
     with _timed_phase("policy_budget_guard"):
-        from grimoire.core.exceptions import GrimoirePolicyError
-        from grimoire.policies.rules_config import load_custom_rules
-        from grimoire.policies.schemas import VerdictKind as _VerdictKind
+        from grimoire.core.policy_budget_guard_check import apply_policy_budget_guard_check
 
-        try:
-            budget_rules = [r for r in load_custom_rules(target) if r.per_session is not None]
-        except GrimoirePolicyError as exc:
-            guard_entry: dict[str, Any] = {
-                "name": "policy_budget_guard",
-                "passed": False,
-                "detail": f"_grimoire/standard/policies.yaml invalide : {exc}",
-            }
-            results.append(guard_entry)
-            if fmt != "json":
-                console.print(f"  [red]FAIL[/red]  {guard_entry['detail']}")
-        else:
-            blocking_global = [
-                r.id for r in budget_rules if r.tool_pattern == "*" and r.verdict_on_match is _VerdictKind.BLOCK
-            ]
-            if blocking_global:
-                detail = (
-                    f"budget global bloquant ({', '.join(blocking_global)}) : une règle `per_session` sans "
-                    "`tool_pattern` en `verdict_on_match: block` refuse tout outil de la session une fois "
-                    "le plafond atteint — préférez un `tool_pattern` ciblé ou `verdict_on_match: warn` "
-                    "(voir docs/reference/hotes.md)"
-                )
-                guard_entry = {
-                    "name": "policy_budget_guard",
-                    "passed": True,
-                    "detail": detail,
-                    "level": "warn",
-                }
-                results.append(guard_entry)
-                if fmt != "json":
-                    console.print(f"  [yellow]WARN[/yellow]  {detail}")
-            elif budget_rules:
-                _record(
-                    "policy_budget_guard",
-                    passed=True,
-                    detail="Aucun budget de session globalement bloquant.",
-                )
-
-            # Relapse of the 2026-09-12 incident, found 2026-09-14 on
-            # Grimoire-Forge (issue #481): `max_duration_min` measures the
-            # duration since `SessionStart`, not "time actually spent
-            # working" — a Claude Code session left open for a few days
-            # (weekends, a paused task) crosses even a generous-looking
-            # window long before any real runaway. 2880 min (48h) is the
-            # threshold below which that is a live risk for a `block`
-            # verdict with no `tool_pattern` to narrow its blast radius; the
-            # repair exemption (`grimoire.policies.temporal._is_repair_exempt`)
-            # limits the damage but a project should still see this named,
-            # exactly like `blocking_global` above.
-            short_duration_global = [
-                r.id
-                for r in budget_rules
-                if r.tool_pattern == "*"
-                and r.verdict_on_match is _VerdictKind.BLOCK
-                and r.per_session is not None
-                and r.per_session.max_duration_min is not None
-                and r.per_session.max_duration_min < 2880
-            ]
-            if short_duration_global:
-                duration_detail = (
-                    f"fenêtre de durée courte ({', '.join(short_duration_global)}) : `max_duration_min` "
-                    "< 2880 (48h) sans `tool_pattern`, en `verdict_on_match: block` — une session Claude "
-                    "Code laissée ouverte plusieurs jours dépasse cette fenêtre bien avant toute vraie "
-                    "dérive (voir docs/reference/hotes.md)"
-                )
-                duration_entry: dict[str, Any] = {
-                    "name": "policy_budget_duration_guard",
-                    "passed": True,
-                    "detail": duration_detail,
-                    "level": "warn",
-                }
-                results.append(duration_entry)
-                if fmt != "json":
-                    console.print(f"  [yellow]WARN[/yellow]  {duration_detail}")
+        apply_policy_budget_guard_check(target, results, fmt=fmt, console=console)
 
     with _timed_phase("task_unification"):  # 4septies. Board/ledger divergence (ADR-007, #559).
         from grimoire.core.task_unification_doctor import apply_task_unification_check
@@ -739,6 +693,26 @@ def doctor(
                     results.append({"name": f"host_orphan_{alias}", "passed": True, "detail": detail, "level": "info"})
                     if fmt != "json":
                         console.print(f"  [dim]○[/dim]  {detail}")
+
+    # 5ter. Memory stack configured but not started (2026-09-18 arbitrage on
+    # #619) — `grimoire init` can write a `complet`/`graphe` composition
+    # (backend pinned, connection settings written) without ever starting
+    # the containers it names, when no consent was given (bare non-TTY run,
+    # no `-y`, no `--memory-stack up`). Never FAIL: an unstarted stack is a
+    # gap to close, not a broken project.
+    if cfg:
+        with _timed_phase("memory_stack_check"):
+            from grimoire.tools.memory_setup import unreached_configured_services
+
+            missing = unreached_configured_services(cfg.memory)
+            if missing:
+                detail = (
+                    f"memory stack not started ({', '.join(missing)}): "
+                    f"grimoire memory up --profile {cfg.memory.layer_profile} --start --apply"
+                )
+                results.append({"name": "memory_stack_started", "passed": True, "detail": detail, "level": "warn"})
+                if fmt != "json":
+                    console.print(f"  [yellow]WARN[/yellow]  {detail}")
 
     # 6. Optional dependencies
     with _timed_phase("dependency_scan"):
@@ -835,6 +809,17 @@ def doctor(
         if fixed:
             console.print(f"\n[green]Fixed {len(fixed)} issue(s):[/green] {', '.join(fixed)}")
         console.print(f"\n[bold]{ok_count}/{ok_count + fail_count} checks passed[/bold]")
+        if cfg:
+            from grimoire.core.project_capabilities import discover_footer_line, unexploited_hints
+
+            footer = discover_footer_line(
+                unexploited_hints(
+                    target, archetype=cfg.agents.archetype, backend=cfg.memory.backend,
+                    layer_profile=cfg.memory.layer_profile, no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
+                )
+            )
+            if footer:
+                console.print(f"[dim]{footer}[/dim]")
 
     if fixed:
         _log_operation("doctor", {"fixed": fixed})
@@ -932,6 +917,17 @@ def status(
         console.print("  [dim]`grimoire task decisions` les liste ; `grimoire task answer` y répond.[/dim]")
     for failure in pending["notify_failures"]:
         console.print(f"  [red]notification échouée[/red] {failure['task_id']} : {failure['error']}")
+
+    from grimoire.core.project_capabilities import discover_footer_line, unexploited_hints
+
+    footer = discover_footer_line(
+        unexploited_hints(
+            target, archetype=cfg.agents.archetype, backend=cfg.memory.backend,
+            layer_profile=cfg.memory.layer_profile, no_cockpit=bool(os.environ.get("GRIMOIRE_NO_COCKPIT")),
+        )
+    )
+    if footer:
+        console.print(f"\n[dim]{footer}[/dim]")
 
     console.print()
 
@@ -1316,9 +1312,12 @@ LazyTyperGroup.configure(
         "proposals": LazyGroupSpec("grimoire.cli.cmd_proposals", "proposals_app", rich_help_panel="Agents"),
         "upgrade-flow": LazyGroupSpec("grimoire.cli.cmd_upgrade_flow", "upgrade_flow_app", rich_help_panel="Project"),
         "agent": LazyGroupSpec("grimoire.cli.cmd_agent", "agent_app", rich_help_panel="Agents"),
+        "expertise": LazyGroupSpec("grimoire.cli.cmd_expertise", "expertise_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
         "autonomy": LazyGroupSpec("grimoire.cli.cmd_autonomy", "autonomy_app", rich_help_panel="Project"),
         "mcp": LazyGroupSpec("grimoire.cli.cmd_mcp", "mcp_app", rich_help_panel="Project"),
+        "onboard": LazyGroupSpec("grimoire.cli.cmd_onboard", "onboard_app", rich_help_panel="Project"),
+        "team": LazyGroupSpec("grimoire.cli.cmd_team", "team_app", rich_help_panel="Project"),
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
@@ -1339,8 +1338,8 @@ LazyTyperGroup.configure(
         "repair",
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
-        "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "web",
-        "autonomy", "mcp",
+        "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "expertise", "web",
+        "autonomy", "mcp", "onboard", "team",
         "config", "completion", "self", "plugins",
     ],
 )

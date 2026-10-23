@@ -1,0 +1,20 @@
+{
+  "host": "claude-code",
+  "host_version": "2.1.301",
+  "point": 10,
+  "capability": "agent_autostart",
+  "captured_on": null,
+  "source": "documented shape, not captured: https://code.claude.com/docs/en/hooks (SessionStart: `agent_type` is present when you start Claude Code with `claude --agent <name>`) ; https://code.claude.com/docs/en/cli-reference (`--agent`)",
+  "setup": "session opened with `claude --agent task-worker` in a governed project (issue #716).",
+  "payloads": {
+    "SessionStart": {
+      "session_id": "00000000-0000-4000-8000-000000000020",
+      "transcript_path": "<HOME>/.claude/projects/<PROJECT-SLUG>/00000000-0000-4000-8000-000000000020.jsonl",
+      "cwd": "<PROJECT>",
+      "permission_mode": "default",
+      "hook_event_name": "SessionStart",
+      "source": "startup",
+      "agent_type": "task-worker"
+    }
+  }
+}

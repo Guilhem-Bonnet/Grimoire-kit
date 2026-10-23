@@ -60,6 +60,7 @@ plugins:
         config-reference.md: reference/configuration.md
         creating-agents.md: guides/creer-un-agent.md
         evals-protocol.md: guides/evaluer-un-flow.md
+        expertises.md: guides/expertises.md
         extensions-marketplace.md: guides/extensions.md
         faq.md: guides/faq.md
         getting-started.en.md: tutoriels/premier-projet.md
@@ -157,7 +158,9 @@ nav:
       - Développer un plugin: guides/developper-un-plugin.md
       - Créer un agent: guides/creer-un-agent.md
       - Choisir un archétype: guides/choisir-un-archetype.md
+      - Catalogue d'expertises: guides/expertises.md
       - Cadrage produit: guides/cadrage-produit.md
+      - Travail en équipe: guides/travail-en-equipe.md
       - L'atelier de blueprints: guides/atelier-blueprints.md
       - Évaluer un flow: guides/evaluer-un-flow.md
       - Dépanner: guides/depannage.md

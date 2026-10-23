@@ -211,17 +211,25 @@ réglages utilisateur (`~/.claude/settings.json`) et d'organisation ne sont pas 
 ## Persona d'entrée
 
 Chaque projet désigne une persona d'entrée — `concierge` par défaut — celle qui
-tranche quand une demande ne désigne pas clairement un rôle. Aucun hôte ne sait
-ouvrir une session *à l'intérieur* d'un agent : Claude Code n'instancie un
-sous-agent que par son outil Agent, Copilot que par le sélecteur de chat. Ce
-n'est pas un réglage manquant, c'est une propriété des hôtes, et le catalogue
-la déclare : `agent_autostart` est faux sur les cinq profils, et
-`grimoire host list` le remonte comme une dégradation avec son substitut.
+tranche quand une demande ne désigne pas clairement un rôle. Un seul hôte sait
+ouvrir une session *à l'intérieur* d'un agent nommé : Claude Code, par
+`claude --agent <nom>` ([CLI reference](https://code.claude.com/docs/en/cli-reference)),
+`claude --agent <nom> --bg` ([agent view](https://code.claude.com/docs/en/agent-view))
+et la clé de réglage `agent` ([settings](https://code.claude.com/docs/en/settings-reference)) ;
+ses hooks portent alors `agent_type` au `SessionStart`, et `agent_id` /
+`agent_type` dans un appel de sous-agent ([hooks](https://code.claude.com/docs/en/hooks)).
+Copilot n'instancie un agent que par le sélecteur de chat, les autres hôtes
+n'ont pas d'équivalent. Le catalogue le déclare : `agent_autostart` est vrai
+pour Claude Code, faux sur les quatre autres profils, et `grimoire host list`
+remonte ce manque comme une dégradation avec son substitut (#716).
 
 Le substitut est fourni là où un hook `session_start` s'exécute : le hook remet
 la persona à la boucle principale, avant la directive du standard. La session
 n'est pas ouverte dans l'agent — elle en adopte la persona en gardant toute la
-surface d'outils de l'hôte, et dispatcher un sous-agent reste un choix.
+surface d'outils de l'hôte, et dispatcher un sous-agent reste un choix. Sur
+Claude Code, une session déjà ouverte dans un agent (`agent_type` renseigné)
+ne reçoit ni la persona d'entrée ni la politique de dispatch de la boucle
+principale : elle a déjà son identité.
 
 ```text
 [Grimoire — persona d'entrée]

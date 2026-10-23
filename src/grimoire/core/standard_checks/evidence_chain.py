@@ -49,8 +49,10 @@ __all__ = [
     "GENESIS",
     "HEAD_SUFFIX",
     "ChainReport",
+    "InsertedLine",
     "analyze_chain",
     "append_chained",
+    "digest_of",
     "dropped_writes",
     "head_path",
     "process_dropped_writes",
@@ -84,6 +86,11 @@ def head_path(log_path: Path) -> Path:
 
 def _digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def digest_of(raw: bytes) -> str:
+    """Empreinte d'une ligne du journal (octets exacts, sans saut de ligne) : celle que ``prev`` porte."""
+    return _digest(raw)
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +265,17 @@ class ChainReport:
     lesquelles la chaîne ne tient plus : l'une des deux a été modifiée, ou une
     ligne a été supprimée ou insérée entre elles. ``truncated`` est le nombre
     de lignes chaînées que l'ancre connaît et que le fichier n'a plus.
+
+    ``kind`` nomme le cas d'une rupture : ``unchained_inserted`` (des lignes sans
+    ``prev`` intercalées entre des lignes chaînées, et la chaîne continue autour :
+    chaque ligne qui suit prolonge celle qui la précède, ce qu'écrit un hook d'une
+    version antérieure du kit) ; ``truncated`` (lignes chaînées manquantes en fin de
+    journal) ; ``chain_broken`` (ligne chaînée modifiée, supprimée ou insérée, ancre
+    qui ne suit plus, journal illisible : toute ambiguïté). Seul le premier cas
+    peut être expliqué par un humain (:mod:`grimoire.hosts.decisions.chain_ack`).
+    ``inserted`` liste ces lignes avec l'empreinte de leurs voisines ;
+    ``anchor_frozen`` dit que l'ancre est restée là où la première ligne non
+    chaînée l'a figée (``append_chained`` ne la fait pas avancer après une rupture).
     """
 
     status: str
@@ -270,6 +288,26 @@ class ChainReport:
     anchored: bool = False
     dropped_writes: int = 0
     message: str = ""
+    kind: str = ""
+    inserted: tuple[InsertedLine, ...] = ()
+    anchor_frozen: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class InsertedLine:
+    """Une ligne sans ``prev`` intercalée entre des lignes chaînées, et l'empreinte de ses voisines.
+
+    ``prev_sha256`` / ``next_sha256`` : empreintes des lignes physiques voisines (``""`` si
+    aucune ligne ne suit). ``chained_before`` : lignes chaînées qui la précèdent.
+    """
+
+    line: int
+    prev_line: int
+    next_line: int
+    sha256: str
+    prev_sha256: str
+    next_sha256: str
+    chained_before: int
 
 
 def analyze_chain(path: Path) -> ChainReport:
@@ -290,9 +328,12 @@ def analyze_chain(path: Path) -> ChainReport:
     prev_raw: bytes | None = None
     prev_line = 0
     broken: tuple[int, int, str] | None = None
+    inserted: list[dict[str, Any]] = []
     for number, line in enumerate(raw.split(b"\n"), 1):
         if not line.strip():
             continue
+        if inserted and not inserted[-1]["next_line"]:
+            inserted[-1]["next_line"], inserted[-1]["next_sha256"] = number, _digest(line)
         try:
             parsed = json.loads(line)
         except ValueError:  # silent-ok — ligne illisible : comptée, sa voisine dira si la chaîne tient
@@ -306,15 +347,32 @@ def analyze_chain(path: Path) -> ChainReport:
             chained_hashes.append(_digest(line))
             chained_lines.append(number)
         elif chained_hashes:
-            if parsed is not None and broken is None:
-                broken = (prev_line, number, "n'est pas chaînée alors qu'elle suit une ligne chaînée")
+            if parsed is not None:
+                inserted.append(
+                    {
+                        "line": number,
+                        "prev_line": prev_line,
+                        "next_line": 0,
+                        "sha256": _digest(line),
+                        "prev_sha256": _digest(prev_raw) if prev_raw is not None else "",
+                        "next_sha256": "",
+                        "chained_before": len(chained_hashes),
+                    }
+                )
         else:
             legacy += 1
         prev_raw, prev_line = line, number
 
     chained = len(chained_hashes)
     truncated = 0
-    if broken is None and head is not None:
+    frozen = False
+    if broken is None and inserted and not inserted[-1]["next_line"]:
+        # Rien ne prolonge la dernière ligne non chaînée : indiscernable d'une ligne ajoutée à la main en queue.
+        broken = (inserted[-1]["prev_line"], inserted[-1]["line"], "n'est pas chaînée et aucune ligne ne la prolonge")
+    if broken is None and inserted and head is not None:
+        before = inserted[0]["chained_before"]
+        frozen = head.count == before and chained_hashes[before - 1] == head.head
+    if broken is None and head is not None and not frozen:
         if head.count > chained:
             truncated = head.count - chained
             broken = (chained_lines[-1] if chained_lines else 0, 0, "")
@@ -326,6 +384,18 @@ def analyze_chain(path: Path) -> ChainReport:
             where = chained_lines[chained - 1]
             broken = (where, where, f"n'est pas annoncée par l'ancre (elle connaît {head.count} ligne(s) chaînée(s), le fichier {chained})")
 
+    if broken is None and inserted:
+        lines = tuple(InsertedLine(**item) for item in inserted)
+        numbers = ", ".join(str(item.line) for item in lines)
+        message = (
+            f"ligne(s) {numbers} sans `prev` intercalée(s) entre des lignes chaînées, la chaîne continue autour "
+            "(chaque ligne suivante prolonge la précédente) : écriture d'un écrivain sans chaînage, par exemple une "
+            "version antérieure du kit ; ce n'est ni une ligne chaînée modifiée ni une suppression."
+        )
+        return ChainReport(
+            "broken", chained, legacy, tuple(unreadable), lines[0].prev_line, lines[0].line, 0, head is not None,
+            dropped, message, "unchained_inserted", lines, frozen,
+        )
     if broken is not None:
         after, line_no, why = broken
         if truncated:
@@ -341,13 +411,62 @@ def analyze_chain(path: Path) -> ChainReport:
                 f"ou une ligne a été supprimée ou insérée entre les lignes {after} et {line_no}."
             )
         return ChainReport(
-            "broken", chained, legacy, tuple(unreadable), after, line_no or None, truncated, head is not None, dropped, message
+            "broken", chained, legacy, tuple(unreadable), after, line_no or None, truncated, head is not None, dropped, message,
+            "truncated" if truncated else "chain_broken",
         )
     if raw == b"" and head is None:
         return ChainReport(status="absent", dropped_writes=dropped)
     if chained == 0 and (head is None or head.count == 0):
         return ChainReport("legacy", 0, legacy, tuple(unreadable), anchored=head is not None, dropped_writes=dropped)
     return ChainReport("intact", chained, legacy, tuple(unreadable), anchored=head is not None, dropped_writes=dropped)
+
+
+def _verify_inserted_lines(root: Path, task_id: str, report: ChainReport, relpath: Path, result: StandardVerificationResult) -> None:
+    """Lignes non chaînées intercalées : expliquées par un humain (avertissement) ou non (erreur). Jamais masquées."""
+    from grimoire.core.standard_checks.base import _add_check
+    from grimoire.hosts.decisions.chain_ack import covering_ack, explain_phrase, read_acks
+
+    acks = read_acks(root, task_id)
+    open_lines = []
+    for item in report.inserted:
+        ack = covering_ack(acks, task_id, item)
+        if ack is None:
+            open_lines.append(item.line)
+            continue
+        raw_author = ack.get("author")
+        author: dict[str, Any] = raw_author if isinstance(raw_author, dict) else {}
+        who = ", ".join(f"{key} {author[key]}" for key in ("user", "host", "session_id") if author.get(key)) or "auteur inconnu"
+        _add_check(
+            result,
+            "evidence.chain_break_explained",
+            "warning",
+            f"Rupture du journal de preuve expliquée par un humain, ligne {item.line} : ligne sans `prev` intercalée entre "
+            f"des lignes chaînées (la chaîne continue autour). Raison : « {ack.get('reason', '')} » — {who}, le "
+            f"{ack.get('ts', '?')} ({ack.get('ack_id', '?')}). La ligne reste dans le journal : explication, pas effacement.",
+            path=relpath,
+        )
+    if open_lines:
+        first = open_lines[0]
+        _add_check(
+            result,
+            "evidence.chain_broken",
+            "error",
+            f"Journal de preuve rompu : ligne(s) {', '.join(map(str, open_lines))} sans `prev` intercalée(s) entre des lignes "
+            "chaînées, la chaîne continue autour (écriture d'un écrivain sans chaînage, par exemple une version antérieure du "
+            "kit). Ne rechaîne ni ne réécris le journal. Si l'origine est connue, l'humain l'explique en tapant dans son "
+            f"prompt `{explain_phrase(task_id, first)}` (`grimoire evidence chain explain --task-id {task_id} --line {first}`) ; "
+            "tant que la rupture n'est pas expliquée, le journal n'est pas une preuve d'inventaire.",
+            path=relpath,
+        )
+    if report.anchor_frozen:
+        _add_check(
+            result,
+            "evidence.chain_anchor_frozen",
+            "warning",
+            "L'ancre du journal (evidence-log.head.json) est restée figée à la première ligne non chaînée : les lignes "
+            "suivantes ne sont pas ancrées, la suppression de la dernière ligne ne serait pas détectée.",
+            path=relpath,
+        )
 
 
 def verify_evidence_chain(root: Path, task_id: str, result: StandardVerificationResult) -> None:
@@ -362,7 +481,9 @@ def verify_evidence_chain(root: Path, task_id: str, result: StandardVerification
     relpath = evidence_log_relpath(task_id)
     report = analyze_chain(root / relpath)
     process = process_dropped_writes(root / relpath)
-    if report.status == "broken":
+    if report.status == "broken" and report.kind == "unchained_inserted":
+        _verify_inserted_lines(root, task_id, report, relpath, result)
+    elif report.status == "broken":
         _add_check(
             result,
             "evidence.chain_broken",
