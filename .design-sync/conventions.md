@@ -23,20 +23,21 @@ Ce design system est la **vue de travail** de grimoire-kit (`grimoire serve`, `g
 - `.btn` (modificateurs `.pri` = action primaire, `.on` ou `aria-pressed="true"` = actif), `.chip` (et `.chip-pick` avec `.chevron` pour un sélecteur), `.chip.pill` + `.ok|.warn|.bad|.acc|.s1|.s2|.s3` = pastille pleine avec texte `--onfill`.
 - `.dot` + `.ok|.warn|.bad|.acc|.s1|.s2|.s3` = point d'état, toujours suivi d'un mot.
 - `.seg` (groupe de `button`, actif par `aria-pressed="true"`), `.tab` (`.on` ou `aria-selected="true"`), `.kbd` (raccourci), `.input` / `.field`, `.tree` (explorateur ; sélection `.sel` ou `aria-current="true"`), `.tip` (infobulle épinglable), `.empty` (état vide avec `h2` et `code`).
+- Composants partagés des espaces (une seule implémentation, `shell.css` et `shell.js`) : `.badge` (+ `.ok|.warn|.bad|.acc`, neutre sans modificateur ; une ligne, ellipse), `.kpi` > `.kpi-item` (`data-tone`, `data-kind="word"` pour un statut) avec `.kpi-lbl` puis `.kpi-val`, `.tbl` (dans `.tbl-wrap` hors panneau ; `.tbl-pick` si la ligne ouvre quelque chose), `.space-head` (`.space-title`, `.space-sub`, `.space-head-actions`).
 - Utilitaires : `.row`, `.grow`, `.soft`, `.lbl`, `.mono`, `.ico`, `.pin`, `.ev-row` / `.ev-id` / `.ev-title` / `.ev-msg` (ligne de preuve ou d'événement).
 
 ## 4. Contenu des espaces (`tokens/spaces.css`)
 
-Chaque espace préfixe ses classes : `pl-` Piloter (KPI `.pl-kpi`, `.pl-kpi-item`, tables `.pl-table`), `cv-` Concevoir, `ex-` Exécuter, `ob-` Observer (`.ob-kpi`, `.ob-panel`), `me-` Mémoire, `sr-` Source (éditeur, `.sr-editor`, `.sr-diff`, jetons `.tok-key`, `.tok-string`…). Réutilise ces classes pour un écran d'espace ; pour un nouveau bloc, compose les primitives de §3 et les tokens de §2.
+Chaque espace préfixe ses classes propres : `pl-` Piloter, `cv-` Concevoir, `ex-` Exécuter, `ob-` Observer (`.ob-panel`), `me-` Mémoire, `sr-` Source (éditeur, `.sr-editor`, `.sr-diff`, jetons `.tok-key`, `.tok-string`…). Un badge, une tuile KPI, un tableau, un état vide ou un en-tête d'espace n'a jamais de copie préfixée : il prend le composant partagé de §3. Pour un nouveau bloc, compose les primitives de §3 et les tokens de §2.
 
 ## 5. Exemple idiomatique
 
 ```html
 <html data-theme="dark" data-density="decouverte">
 <body data-active-space="observer">
-  <div class="ob-kpi">
-    <div class="ob-kpi-item"><div class="ob-kpi-val mono">96,7 %</div><div class="ob-kpi-lbl">succès</div></div>
-    <div class="ob-kpi-item"><div class="ob-kpi-val mono">6,0</div><div class="ob-kpi-lbl">tours médians</div></div>
+  <div class="kpi">
+    <div class="kpi-item"><div class="kpi-lbl"><span>succès</span></div><div class="kpi-val">96,7 %</div></div>
+    <div class="kpi-item"><div class="kpi-lbl"><span>tours médians</span></div><div class="kpi-val">6,0</div></div>
   </div>
   <div class="row" style="gap:var(--sp-2);margin-top:var(--sp-4)">
     <span class="chip pill ok">gate vert</span>

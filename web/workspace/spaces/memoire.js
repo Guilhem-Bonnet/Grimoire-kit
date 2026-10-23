@@ -26,7 +26,7 @@
 // API consommées : api.memoryStatus(), api.memoryOverview(projects),
 // api.memorySearch(q, projects).
 
-import { icon, STATE_ICON, stateIcon } from '../shell.js';
+import { kpiRow, STATE_ICON, stateIcon } from '../shell.js';
 
 const STYLE_ID = 'me-styles';
 
@@ -36,22 +36,10 @@ function injectStyles() {
   style.id = STYLE_ID;
   style.textContent = `
     .me-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .me-kpi { display: flex; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); overflow: hidden; }
-    .me-kpi-item { flex: 1; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); border-top: 3px solid var(--tone, transparent); }
-    .me-kpi-item:first-child { border-left: 0; }
-    .me-kpi-val { font-family: var(--font); font-size: var(--t-xl); font-weight: 600; color: var(--ink); line-height: 1.25; }
-    .me-kpi-lbl .ico { width: 14px; height: 14px; color: var(--tone, var(--ink3)); margin-right: 6px; vertical-align: -2px; }
-    .me-kpi-item[data-tone="ok"] { --tone: var(--ok); }
-    .me-kpi-item[data-tone="warn"] { --tone: var(--warn); }
-    .me-kpi-item[data-tone="bad"] { --tone: var(--bad); }
-    .me-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px;  display: flex; align-items: center; }
     .me-graph { display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
     .me-graph-node { flex: 1; text-align: center; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); }
     .me-graph-node .val { font-family: var(--mono); font-size: var(--t-l); color: var(--ink); }
     .me-graph-arrow { color: var(--ink3); font-size: var(--t-l); }
-    .me-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
-    .me-table th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px; border-bottom: 1px solid var(--line); }
-    .me-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
     .me-arch p { max-width: 640px; color: var(--ink2); }
     .me-search { display: flex; gap: var(--sp-2); max-width: 480px; }
     .me-search input { flex: 1; }
@@ -80,23 +68,8 @@ const STATE_WORD = {
   partial: 'partiel', planned: 'planifié', disabled: 'désactivé', uninitialized: 'non initialisée',
 };
 
-function kpiCard(items) {
-  const card = document.createElement('div');
-  card.className = 'me-kpi';
-  for (const item of items) {
-    const cell = document.createElement('div');
-    cell.className = 'me-kpi-item';
-    if (item.tone) cell.dataset.tone = item.tone;
-    const lbl = text('div', 'me-kpi-lbl', item.label);
-    if (item.icon) lbl.prepend(icon(item.icon));
-    cell.append(text('div', 'me-kpi-val', item.value), lbl);
-    card.append(cell);
-  }
-  return card;
-}
-
 function renderStore(wrap, ctx, memory) {
-  wrap.append(kpiCard([
+  wrap.append(kpiRow([
     { value: memory.entries == null ? '—' : String(memory.entries), label: 'entrées', icon: 'inbox' },
     { value: memory.configuredBackend || '—', label: 'backend configuré', icon: 'server' },
     { value: memory.resolvedBackend || '—', label: 'backend résolu', icon: 'plug' },
@@ -113,7 +86,7 @@ function renderStore(wrap, ctx, memory) {
 
   if (memory.detail && Object.keys(memory.detail).length) {
     const table = document.createElement('table');
-    table.className = 'me-table';
+    table.className = 'tbl';
     const tbody = document.createElement('tbody');
     for (const [key, value] of Object.entries(memory.detail)) {
       const tr = document.createElement('tr');
@@ -170,7 +143,7 @@ function renderLayers(wrap, ctx, memory) {
     return;
   }
   const table = document.createElement('table');
-  table.className = 'me-table';
+  table.className = 'tbl';
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   for (const label of ['Couche', 'État', 'Backend', 'Objet', 'Écarts']) headRow.append(text('th', null, label));
@@ -230,7 +203,7 @@ function fleetOverviewTable(ctx, data) {
     return wrap;
   }
   const table = document.createElement('table');
-  table.className = 'me-table';
+  table.className = 'tbl';
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   for (const label of ['Projet', 'Backend configuré', 'Backend résolu', 'Entrées', 'Dernière écriture', 'Index lexical', 'État']) {
