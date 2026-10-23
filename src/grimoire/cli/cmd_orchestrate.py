@@ -189,6 +189,8 @@ def _render_tick(report: TickReport) -> None:
         console.print(
             f"{'Plan' if report.mode == 'plan' else 'Tick'} : {len(report.reaped)} récolte(s), "
             f"{sum(1 for w in report.woken if w.action == 'wake')} réveil(s), {reconciled} effet(s) constaté(s), "
+            f"{sum(1 for o in report.ci if o.action == 'finished')} créneau(x) CI rendu(s), "
+            f"{sum(1 for o in report.ci if o.action == 'released')} orphelin(s) libéré(s), "
             f"{admitted} admise(s), {deferred} différée(s)."
         )
     for attention in report.attention:

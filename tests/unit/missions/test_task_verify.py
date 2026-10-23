@@ -282,3 +282,18 @@ def test_acceptance_run_de_flow_garde_aiguille_et_delai_dans_la_tache(tmp_path: 
     assert task.checks[0].expect_stdout_contains == "ALL OK"
     assert task.checks[0].timeout_s == 30.0
     assert not verify_task(task, tmp_path, tmp_path / EVIDENCE).passed
+
+
+def test_cli_task_add_affiche_la_classe_et_nomme_les_criteres_non_reconnus(tmp_path: Path) -> None:
+    res = runner.invoke(
+        app,
+        [
+            "task", "add", "t", "-a", "tests/unit/test_x.py passe", "-a", "le code est élégant",
+            "--check", "pytest tests/unit/test_x.py", "--project-root", str(tmp_path),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "vérifiabilité : V2" in res.output
+    assert "non reconnu" in res.output
+    assert "le code est élégant" in res.output
+    assert "tests/unit/test_x.py passe" not in res.output.split("non reconnu", 1)[1]

@@ -838,3 +838,20 @@ def test_the_tick_lock_fallback_is_kept_fresh_while_a_tick_runs(projet: Path, mo
     assert run_tick(projet, apply=True).status == "ran"
     assert seen == ["busy"], "un second tick est entré pendant le premier"
     assert run_tick(projet, apply=True).status == "ran", "le verrou est rendu à la fin du tick"
+
+
+def test_preview_and_plan_never_probe_the_host(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une sonde lance l'hôte (deux appels modèle, #876) : seule la récolte appliquée la déclenche."""
+    import grimoire.hosts.contract_probe as contract_probe
+
+    probed: list[tuple[str, str]] = []
+    monkeypatch.setattr(contract_probe, "ensure_probed", lambda host, version: probed.append((str(host), version)))
+    service = TaskService(projet)
+    tid = _running(service, "bail perdu sur une version jamais sondée", version="2.1.309")
+    _expire(service, tid)
+
+    service.reap(apply=False)
+    run_tick(projet, apply=False)
+    assert probed == []
+    service.reap(apply=True)
+    assert [version for _, version in probed] == ["2.1.309"]
