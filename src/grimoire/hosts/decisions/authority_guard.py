@@ -83,13 +83,14 @@ _HOOK_MODULE_MARKERS = (
     "cli.cmd_host",
     "run_hook",
     "record_override_request",
+    "record_chain_ack_request",
 )
 #: Le module qui écrit le journal des contournements (W2-06), nommé seul : un
 #: ``from grimoire.hosts.decisions import gate_override`` ne contient ni
 #: ``hosts.decisions.gate_override`` ni ``record_override_request``, mais
 #: ``gate_override._append`` suffit à écrire une paire forgée. Le mot entier,
 #: sans identifiant collé devant (``test_gate_override.py`` n'est pas le module).
-_GATE_OVERRIDE_WORD = re.compile(r"(?<![A-Za-z0-9_])gate_override(?![A-Za-z0-9])")
+_GATE_OVERRIDE_WORD = re.compile(r"(?<![A-Za-z0-9_])(?:gate_override|chain_ack)(?![A-Za-z0-9])")
 #: Le paquet des décisions de hook, nommé par n'importe quelle importation
 #: (``grimoire.hosts.decisions``, ``from grimoire.hosts import decisions``,
 #: ``importlib.import_module(...)``). ``decide_task_context`` appelle

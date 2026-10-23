@@ -225,6 +225,8 @@ class TaskAdded:
 
 #: Titre de la mission ouverte d'office quand le ledger n'en a aucune.
 DEFAULT_MISSION_TITLE = "Travaux courants"
+#: Borne de ``TaskService.add(description=…)`` (#714) : assez pour un brief, jamais un document.
+MAX_DESCRIPTION_CHARS = 4000
 
 
 @dataclass(frozen=True, slots=True)
@@ -431,6 +433,7 @@ class TaskService:
         checks: tuple[TaskCheck, ...] = (),
         files: tuple[str, ...] = (),
         test_depth: str = "",
+        description: str = "",
         priority: str = "",
         extra: Mapping[str, Any] | None = None,
     ) -> TaskAdded:
@@ -444,10 +447,18 @@ class TaskService:
         ``proposed → ready`` par :meth:`transition`, donc par le gate
         ``proposed_to_ready`` — en profil gouverné, il exige un ``owner``.
         *test_depth* (W6-01) : ``floor``, ``standard`` ou ``strict`` ; le gate de
-        fermeture refuse tant que le dernier verdict ne l'atteint pas. *priority* (échelle
+        fermeture refuse tant que le dernier verdict ne l'atteint pas.
+        *description* (#714) : le contexte, le pourquoi, les pistes — texte brut
+        borné à :data:`MAX_DESCRIPTION_CHARS` ; vide, la tâche ne porte que son
+        titre et ses critères, comme avant. *priority* (échelle
         :data:`PRIORITIES`) et *extra* (champs portés tels quels, ex. ``covers`` de ``cadrage plan``,
         W6-07b) sont posés à la création.
         """
+        description = description.strip()
+        if len(description) > MAX_DESCRIPTION_CHARS:
+            raise GrimoireMissionError(
+                f"description trop longue : {len(description)} caractères (maximum {MAX_DESCRIPTION_CHARS})"
+            )
         if priority and priority not in PRIORITIES:
             raise ValueError(f"priorité inconnue : {priority!r} — parmi {', '.join(PRIORITIES)}")
         if test_depth:
@@ -478,7 +489,8 @@ class TaskService:
             fields["files"] = [f for f in (x.strip() for x in files) if f]
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
-            risk_profile=risk, checks=checks, test_depth=test_depth, priority=priority, extra=fields or None,
+            risk_profile=risk, checks=checks, test_depth=test_depth, description=description,
+            priority=priority, extra=fields or None,
         )
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task

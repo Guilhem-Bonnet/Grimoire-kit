@@ -2812,13 +2812,36 @@ def test_an_unwritable_trace_ledger_never_breaks_recording_a_miss(project: Path)
     assert written is False
 
 
-def test_no_host_can_open_a_session_inside_an_agent(project: Path) -> None:
-    """Le manque est déclaré, pas commenté — et chaque hôte nomme son substitut."""
+#: Issue #716 : `agent_autostart` par hôte, avec la source documentaire de
+#: chaque valeur. Vrai seulement là où l'hôte documente l'ouverture d'une
+#: session dans un agent nommé.
+_AGENT_AUTOSTART_BY_HOST: dict[HostId, tuple[bool, str]] = {
+    HostId.CLAUDE_CODE_CLI: (
+        True,
+        "`claude --agent <name>` (code.claude.com/docs/en/cli-reference), clé `agent` "
+        "(code.claude.com/docs/en/settings-reference), `agent_type` au SessionStart (code.claude.com/docs/en/hooks)",
+    ),
+    HostId.GITHUB_COPILOT: (False, "un agent `.github/agents/*.agent.md` ne s'ouvre que par le sélecteur de chat"),
+    HostId.CODEX: (False, "`codex` n'a pas d'option d'agent nommé (AGENTS.md seulement)"),
+    HostId.CURSOR: (False, "Cursor charge des règles et des sous-agents, pas une session dans un agent"),
+    HostId.GEMINI_CLI: (False, "`gemini` n'a pas d'option d'agent nommé (GEMINI.md seulement)"),
+    HostId.OPENCODE: (False, "opencode charge des agents par `opencode.json`, pas une session dans un agent"),
+}
+
+
+def test_agent_autostart_is_declared_per_host_with_its_source(project: Path) -> None:
+    """#716 : le catalogue dit vrai hôte par hôte — Claude Code sait démarrer dans un agent, les
+    autres non — et chaque hôte sans la capacité nomme son substitut."""
     del project
     for host_id in supported_hosts():
         profile = profile_for(host_id)
-        assert not profile.agent_autostart, f"{host_id.value} prétend démarrer dans un agent"
+        expected, source = _AGENT_AUTOSTART_BY_HOST.get(host_id, (False, "hôte sans documentation d'agent nommé"))
+        assert profile.agent_autostart is expected, f"{host_id.value} : agent_autostart attendu {expected} ({source})"
         gap = next((g for g in gaps_for(profile) if g.surface == "agent_autostart"), None)
+        if expected:
+            assert gap is None, f"{host_id.value} dégrade une capacité qu'il a"
+            assert "--agent" in profile.notes
+            continue
         assert gap is not None, f"{host_id.value} tait le manque au lieu de le dégrader"
         if profile.supports_event(HookEvent.SESSION_START):
             assert "session_start" in gap.fallback

@@ -50,6 +50,14 @@ def run(projet: Path, *args: str):
     return runner.invoke(task_app, [*args, "--project-root", str(projet)])
 
 
+def run_json(projet: Path, *args: str) -> dict:
+    import json
+
+    res = runner.invoke(task_app, [*args, "--project-root", str(projet)], obj={"output": "json"})
+    assert res.exit_code == 0, res.output
+    return json.loads(res.stdout)
+
+
 def ajoute(projet: Path, owner: str = "amelia") -> str:
     res = run(projet, "add", "Ajouter /health", "-a", ACCEPTATION, "--owner", owner)
     assert res.exit_code == 0, res.output
@@ -300,3 +308,67 @@ def test_recall_fait_remonter_la_cause_d_une_jumelle_qui_a_echoue(projet: Path) 
     res = run(projet, "recall", jumelle)
     assert res.exit_code == 0, res.output
     assert "identifiants du service tiers invalides" in res.output
+
+
+# ── #714 : une tâche porte une description, de bout en bout ──────────────────
+
+
+def test_add_avec_description_et_show_la_rend(projet: Path) -> None:
+    res = run(projet, "add", "Brancher le cache", "-a", ACCEPTATION, "--owner", "amelia", "--description", "Le cache tombe\nsous charge : voir issue #12")
+    assert res.exit_code == 0, res.output
+    tid = next(mot for mot in res.output.split() if mot.startswith("GAO-"))
+
+    shown = run(projet, "show", tid)
+    assert shown.exit_code == 0, shown.output
+    assert "description : Le cache tombe" in shown.output
+    assert "sous charge : voir issue #12" in shown.output
+
+    assert run_json(projet, "show", tid)["description"] == "Le cache tombe\nsous charge : voir issue #12"
+
+
+def test_add_sans_description_ne_change_rien(projet: Path) -> None:
+    tid = ajoute(projet)
+    shown = run(projet, "show", tid)
+    assert "description :" not in shown.output
+    assert run_json(projet, "show", tid)["description"] == ""
+
+
+def test_add_description_file(projet: Path, tmp_path: Path) -> None:
+    brief = tmp_path / "brief.txt"
+    brief.write_text("Brief long\n\n- piste A\n- piste B\n", encoding="utf-8")
+    res = run(projet, "add", "Lire le brief", "-a", ACCEPTATION, "--owner", "amelia", "--description-file", str(brief))
+    assert res.exit_code == 0, res.output
+    tid = next(mot for mot in res.output.split() if mot.startswith("GAO-"))
+    assert run_json(projet, "show", tid)["description"] == "Brief long\n\n- piste A\n- piste B"
+
+
+def test_add_description_et_fichier_sont_exclusifs(projet: Path, tmp_path: Path) -> None:
+    brief = tmp_path / "brief.txt"
+    brief.write_text("x", encoding="utf-8")
+    res = run(projet, "add", "T", "-a", ACCEPTATION, "--description", "a", "--description-file", str(brief))
+    assert res.exit_code == 2
+    assert "exclusifs" in res.output
+
+
+def test_add_description_trop_longue_est_refusee(projet: Path) -> None:
+    from grimoire.missions.service import MAX_DESCRIPTION_CHARS
+
+    res = run(projet, "add", "T", "-a", ACCEPTATION, "--description", "x" * (MAX_DESCRIPTION_CHARS + 1))
+    assert res.exit_code == 1
+    assert "description trop longue" in res.output
+
+
+def test_la_description_suit_le_board_et_le_context_bundle(projet: Path) -> None:
+    from ruamel.yaml import YAML
+
+    from grimoire.core.agentic_standard import build_context_bundle
+
+    res = run(projet, "add", "Brancher le cache", "-a", ACCEPTATION, "--owner", "amelia", "-d", "le pourquoi")
+    assert res.exit_code == 0, res.output
+    tid = next(mot for mot in res.output.split() if mot.startswith("GAO-"))
+    board = YAML(typ="safe").load(projet / STANDARD / "task-board.yaml")
+    entry = next(t for t in board["tasks"] if t["task_id"] == tid)
+    assert entry["description"] == "le pourquoi"
+    (projet / STANDARD / "standard-profile.yaml").write_text("profile: governed\n", encoding="utf-8")
+    artifact = build_context_bundle(projet, task_id=tid)
+    assert artifact.data["task_summary"]["description"] == "le pourquoi"

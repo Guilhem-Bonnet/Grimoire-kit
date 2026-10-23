@@ -91,7 +91,6 @@ def _suggest_command() -> None:
         raise SystemExit(2)
 
 
-
 app = typer.Typer(
     name="grimoire",
     cls=_RootHelpGroup,
@@ -118,7 +117,6 @@ app = typer.Typer(
 )
 
 console = Console(stderr=True)
-
 
 
 # ── Semantic exit codes ────────────────────────────────────────────────────────
@@ -1319,6 +1317,8 @@ LazyTyperGroup.configure(
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
         "autonomy": LazyGroupSpec("grimoire.cli.cmd_autonomy", "autonomy_app", rich_help_panel="Project"),
         "mcp": LazyGroupSpec("grimoire.cli.cmd_mcp", "mcp_app", rich_help_panel="Project"),
+        "onboard": LazyGroupSpec("grimoire.cli.cmd_onboard", "onboard_app", rich_help_panel="Project"),
+        "team": LazyGroupSpec("grimoire.cli.cmd_team", "team_app", rich_help_panel="Project"),
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
@@ -1340,7 +1340,7 @@ LazyTyperGroup.configure(
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
         "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "web",
-        "autonomy", "mcp",
+        "autonomy", "mcp", "onboard", "team",
         "config", "completion", "self", "plugins",
     ],
 )
