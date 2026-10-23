@@ -39,6 +39,7 @@ from grimoire.hosts.emitters.base import (
 )
 from grimoire.hosts.emitters.copilot import _dispatch_policy_section
 from grimoire.hosts.emitters.rules import with_rule_layers
+from grimoire.hosts.hook_launcher import BARE, HookLauncher, expand_project_dir, resolve_hook_launcher
 from grimoire.hosts.secrets import secret_patterns
 from grimoire.hosts.surface import (
     AgentSpec,
@@ -164,7 +165,15 @@ const SECRET_PATTERNS = __SECRETS__.map((source) => new RegExp(source, "i"))
 const TIMEOUT_MS = __TIMEOUT__
 const BLOCKING_PROFILES = ["governed", "production"]
 const KNOWN_PROFILES = __PROFILES__
+// Programme de garde résolu à l'émission (issue #760) : nom nu s'il est dans le PATH de l'hôte,
+// sinon un chemin vers le venv — relatif à la racine du projet quand `windows` est renseigné.
+const HOOK = __HOOK__
 let warned = false
+
+function hookProgram(directory) {
+  if (!HOOK.windows) return HOOK.posix
+  return join(directory, process.platform === "win32" ? HOOK.windows : HOOK.posix)
+}
 
 // Fail closed in a blocking profile (read from the standard profile manifest, like the Python gates),
 // warn once otherwise. An unreadable manifest is not a blocking profile.
@@ -211,7 +220,7 @@ export const GrimoireGuard = async ({ directory }) => ({
       session_id: String(input.sessionID ?? ""),
       tool_use_id: String(input.callID ?? ""),
     })
-    const run = spawnSync("grimoire-hook", ["--host", "opencode", "--event", "PreToolUse"], {
+    const run = spawnSync(hookProgram(directory), ["--host", "opencode", "--event", "PreToolUse"], {
       input: payload,
       encoding: "utf8",
       timeout: TIMEOUT_MS,
@@ -238,7 +247,7 @@ export const GrimoireGuard = async ({ directory }) => ({
 """
 
 
-def _guard_plugin(hook: HookSpec) -> EmittedFile:
+def _guard_plugin(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
     tools: list[str] = []
     for family in hook.matcher or tuple(_GUARDED):
         for name in _GUARDED.get(family, ()):
@@ -250,6 +259,7 @@ def _guard_plugin(hook: HookSpec) -> EmittedFile:
         .replace("__SECRETS__", json.dumps(list(secret_patterns()), ensure_ascii=False))
         .replace("__TIMEOUT__", str(hook.timeout * 1000))
         .replace("__PROFILES__", json.dumps(list(PROFILE_LADDER)))
+        .replace("__HOOK__", json.dumps({"posix": launcher.posix, "windows": launcher.windows}))
     )
     return EmittedFile(relpath=PLUGIN_RELPATH, content=content)
 
@@ -287,7 +297,7 @@ def _instructions_file(surface: ProjectSurface, guarded: HookSpec | None, gaps: 
     return EmittedFile(relpath=Path(INSTRUCTIONS_REF), content="\n".join(lines))
 
 
-def _config_merge(surface: ProjectSurface) -> JsonMerge:
+def _config_merge(surface: ProjectSurface, project_root: Path) -> JsonMerge:
     servers = surface.mcp_servers
 
     def merge(data: dict[str, Any]) -> dict[str, Any]:
@@ -304,7 +314,13 @@ def _config_merge(surface: ProjectSurface) -> JsonMerge:
                 # A server the project already configured is its own; only add what is missing.
                 mcp.setdefault(
                     server.name,
-                    {"type": "local", "command": [server.command, *server.args], "enabled": True},
+                    # opencode ne documente ni ``${CLAUDE_PROJECT_DIR:-.}`` ni la résolution
+                    # d'un chemin relatif : la racine du projet est écrite en absolu (#760).
+                    {
+                        "type": "local",
+                        "command": [expand_project_dir(server.command, project_root), *server.args],
+                        "enabled": True,
+                    },
                 )
             data["mcp"] = mcp
         return data
@@ -325,10 +341,12 @@ class OpenCodeEmitter(Emitter):
         files.extend(_skill_file(skill) for skill in surface.skills if skill.slug not in attached)
         files.extend(_command_file(c) for c in surface.commands if c.source != "workflow")
         guarded = _guard_hook(surface)
+        launcher = resolve_hook_launcher(project_root) if guarded is not None else BARE
         if guarded is not None:
-            files.append(_guard_plugin(guarded))
+            files.append(_guard_plugin(guarded, launcher))
 
         degradations = [
+            *Emitter.launcher_degradations(launcher),
             Degradation(
                 surface="model affinity",
                 reason="Aucune sélection de modèle par palier n'a été sondée sur cet hôte.",
@@ -363,7 +381,7 @@ class OpenCodeEmitter(Emitter):
             EmitPlan(
                 host_id=self.host_id,
                 files=tuple(files),
-                merges=(_config_merge(surface),),
+                merges=(_config_merge(surface, project_root),),
                 degradations=tuple(degradations),
             ),
             project_root,

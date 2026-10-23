@@ -8,11 +8,26 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from grimoire.cli.env_checks import EnvCheck
 from grimoire.hosts.hook_launcher import hook_program_resolves
+
+_HOOK_PROGRAMS = frozenset({"grimoire-hook", "grimoire-hook.exe"})
+
+
+def _program(command: str) -> str:
+    """Le programme d'une commande de hook du kit : ce qui précède ``--host``."""
+    return command.partition(" --host ")[0].strip()
+
+
+def _launches_grimoire_hook(command: str) -> bool:
+    """Le programme lancé est-il ``grimoire-hook`` ? Un hook maison qui le cite
+    seulement (``grimoire-hook-gateway.sh --hook-id …``) n'est pas un hook du kit."""
+    name = re.split(r"[\\/]", _program(command).replace('"', "").replace("'", ""))[-1]
+    return name in _HOOK_PROGRAMS
 
 
 def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
@@ -42,7 +57,7 @@ def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
                     if not isinstance(spec, dict):
                         continue
                     command = str(spec.get(os_key) or spec.get("command") or "")
-                    if "grimoire-hook" in command:
+                    if _launches_grimoire_hook(command):
                         found.append((path.relative_to(target).as_posix(), command))
     return found
 
@@ -59,9 +74,9 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
         return []
     broken = sorted(
         {
-            f"{relpath}: {command.partition(' --host ')[0]}"
+            f"{relpath}: {_program(command)}"
             for relpath, command in commands
-            if not hook_program_resolves(command.partition(" --host ")[0], target)
+            if not hook_program_resolves(_program(command), target)
         }
     )
     if broken:

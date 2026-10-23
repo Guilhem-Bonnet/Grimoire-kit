@@ -3,9 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grimoire · Le teaser</title>
+<title>Grimoire : tableau de bord, tâches, mémoire et contrôle des preuves pour tes agents</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Des idées plein un carnet, trois commandes, et les idées devenues des choses. Puis l'explication, en vrai.">
+<meta name="description" content="Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à des agents (Claude Code, Copilot), un tableau de bord local, des tâches, la mémoire du projet et un contrôle des preuves.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23b4441d'/%3E%3Cpath d='M25 17l16 15-16 15' fill='none' stroke='%23fff' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://guilhem-bonnet.github.io/Grimoire-kit/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Grimoire">
+<meta property="og:title" content="Grimoire : tableau de bord, tâches, mémoire et contrôle des preuves pour tes agents">
+<meta property="og:description" content="Dashboard, task board, project memory and evidence check for code you delegate to agents (Claude Code, Copilot).">
+<meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/">
+<meta property="og:image" content="https://guilhem-bonnet.github.io/Grimoire-kit/media/teaser-poster.jpg">
+<meta property="og:image:alt" content="Image d'ouverture du film de présentation de Grimoire">
+<meta name="twitter:card" content="summary_large_image">
 <style>
 /* Douce : toile claire, une carte de terminal blanche par preuve, l'anneau à 2 segments comme seule signature */
 @font-face{font-family:"Instrument Sans";src:url(fonts/instrument-sans-400.woff2) format("woff2");font-weight:400;font-display:swap}
@@ -206,6 +216,30 @@ footer .sp{flex:1}
 .proof5 .legend{margin-left:2px}
 @media (prefers-reduced-motion:reduce){.film5 video{display:block}}
 @media (max-width:480px){.install{flex-wrap:wrap;justify-content:center;border-radius:18px;padding:10px 12px;gap:8px}.install code{white-space:normal;overflow-wrap:anywhere;font-size:15px;text-align:center}}
+
+/* partie basse : cinq blocs, installation, limites */
+.tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:18px;padding-block:32px 8px}
+.tool{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 24px 22px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.tool .pict{width:44px;height:44px;border-radius:12px;background:var(--accs);color:var(--acc);display:grid;place-items:center}
+.tool .pict svg{width:26px;height:26px}
+.tool h3{margin:6px 0 0;font-size:24px;letter-spacing:-.025em;font-weight:600;line-height:1.15}
+.tool p{margin:0;color:var(--ink2);font-size:17px;max-width:46ch}
+.tool .tag{align-self:flex-start;font-size:12.5px;font-weight:600;color:var(--acc);background:var(--accs);padding:2px 10px;border-radius:999px}
+.tool.wide{grid-column:1/-1}
+.replay{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+.replay>summary{cursor:pointer;font-size:15px;font-weight:500;color:var(--acc);list-style-position:inside}
+.replay[open]>summary{margin-bottom:14px}
+.replay .proof5{padding-block:0}
+.tool .cmds{max-width:none;margin-top:6px}
+.tool .more{margin-top:10px;font-size:15px}
+.tool .more>summary{cursor:pointer;color:var(--acc);font-weight:500}
+.tool .more .cmds{margin-top:10px}
+.hosts{text-align:center;font-size:16px;color:var(--ink2);margin:28px auto 0;max-width:60ch}
+.limits{list-style:none;margin:0;padding:0;display:grid;gap:10px;max-width:68ch}
+.limits li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 18px;font-size:16.5px;color:var(--ink2)}
+.cond{font-size:14px;color:var(--ink3);max-width:78ch;margin:20px 0 0}
+.capot{padding-block:48px 56px;border-top:1px solid var(--line)}
+.capot p{font-size:18px;color:var(--ink2);max-width:62ch;margin:0 0 14px}
 </style>
 </head>
 <body>
@@ -219,10 +253,22 @@ footer .sp{flex:1}
   <div class="install"><code><span class="p">$ </span>uv tool install grimoire-kit</code><button class="btn copy" type="button" id="copy-top" data-copy="uv tool install grimoire-kit"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
   <p class="micro">Open source · Claude Code · Copilot</p>
 </section>
-<h2 class="h5" id="capot">Ce que le film montre, en vrai</h2>
-<p class="h5s">Les trois commandes et leurs sorties sont celles de grimoire-kit 3.62.1. Le cockpit est une maquette de la refonte en cours. Le reste, ci-dessous, se rejoue tel quel.</p>
+<section class="capot" aria-labelledby="capot-t">
+<h2 class="h5" id="capot" style="margin-top:0"><span id="capot-t">Ce que tu as sous la main</span></h2>
+<p class="h5s">Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à des agents (Claude Code, Copilot), un tableau de bord local, des tâches, la mémoire du projet et un contrôle des preuves.</p>
+<div class="wrap tools">
+  <article class="tool"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="4.5" height="16" rx="1"/><rect x="9.75" y="4" width="4.5" height="11" rx="1"/><rect x="16" y="4" width="4.5" height="13.5" rx="1"/></svg></span><h3>Le tableau de bord</h3>
+    <p>Tes projets et leurs tâches sur une seule page, dans ton navigateur, sur ta machine. Tu vois où en est chaque tâche.</p>
+    <span class="tag">en cours de refonte</span></article>
+  <article class="tool"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13l2.4-7.2A2.5 2.5 0 0 1 7.8 4h8.4a2.5 2.5 0 0 1 2.4 1.8L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg></span><h3>Les tâches</h3>
+    <p>Tu écris une tâche. Une session d'agent la prend, avance seule dessus et te rend son travail à relire.</p></article>
+  <article class="tool"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/><path d="M6.5 8h2M15.5 8h2"/></svg></span><h3>La mémoire du projet</h3>
+    <p>Ce que le projet a décidé reste d'une session à l'autre. Sur Claude Code et Copilot, une session qui démarre le retrouve au lieu de repartir de zéro.</p></article>
+  <article class="tool wide"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V9a7 7 0 0 1 14 0v11M3.5 20h17M9.5 20v-5.5h5V20"/></svg></span><h3>Le contrôle des preuves</h3>
+    <p>Une tâche ne peut pas être déclarée finie sans sa preuve : un test qui passe, une relecture faite. Le contrôle refuse et dit ce qui manque. Il refuse pour de bon en profil governed, il prévient ailleurs.</p>
+    <details class="replay" id="replay-box"><summary>Voir un refus, rejoué tel quel dans un terminal</summary>
 <div class="proof5">
-<div class="wrap"><p class="legend">Premier passage : ton agent prend la tâche.</p>
+<div class="wrap"><p class="legend">Une tâche refusée faute de preuve, puis acceptée.</p>
       <div class="proof">
         <div class="ring live ok" id="ring" role="img" aria-label="Exigences du passage : 2 sur 2 satisfaites">
           <svg viewBox="0 0 150 150" aria-hidden="true">
@@ -247,63 +293,46 @@ footer .sp{flex:1}
           <figure class="capfig" id="capfig" hidden><img src="media/capture-reelle.png" alt="Capture d'écran réelle du refus dans un terminal Konsole : les deux exigences manquantes et leur remède" width="760" height="150"><figcaption>capture réelle · 17/10/2026 · Konsole, recadrée, sans retouche</figcaption></figure>
         </div>
       </div>
-    
 </div>
-<!-- 2. La délégation -->
-  <section class="blk" aria-labelledby="t2">
-    <h2 id="t2">Ni test ni relecteur ? Pas de délégation.</h2>
-    <p class="txt">Grimoire classe chaque tâche d'après ses critères d'acceptation. Vérifiable par un programme ou par une revue nommée : elle peut partir à un sous-agent. Sinon, elle reste dans ta session.</p>
-    <div class="lanes">
-      <div class="lane dim"><div><div class="card"><span class="okw">OK</span> GAO-corriger-l-e-001 — Corriger l'export CSV (ready → claimed) · V0 → haiku</div><div class="crit">critère : « pytest tests/test_export.py passe »</div></div><div class="dest out"><span class="i i-deleguer"></span>sous-agent</div></div>
-      <div class="lane dim"><div><div class="card"><span class="okw">OK</span> GAO-refondre-la-001 — Refondre la page de tarifs (ready → claimed) · V1 → sonnet</div><div class="crit">critère : « revue approuvée par Guilhem »</div></div><div class="dest out"><span class="i i-deleguer"></span>sous-agent</div></div>
-      <div class="lane"><div><div class="card"><span class="okw">OK</span> GAO-choisir-le-n-001 — Choisir le nom de la future offre (ready → claimed) · V2 → aucun — omets le paramètre model, garde celui de la session</div><div class="crit">critère : « le nom convient à l'équipe »</div></div><div class="dest stay"><span class="i i-session"></span>ta session</div></div>
-      <div class="src">claims réels · grimoire-kit 3.62.1 (PyPI) · projet de démonstration · 17/10/2026</div>
-    </div>
-  </section>
+</div>
+    </details></article>
+  <article class="tool wide" id="installer"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/></svg></span><h3>L'installation</h3>
+    <p>Trois commandes : installer le kit, équiper ton dépôt, rendre le contrôle bloquant. Tu commences petit et tu ajoutes le reste quand tu en as besoin. La mise à jour passe par le même outil.</p>
+    <div class="cmds"><div class="cmd"><code><span class="p">$ </span>uv tool install grimoire-kit</code><button class="btn copy" type="button" id="copy-1" data-copy="uv tool install grimoire-kit"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div></div>
+    <details class="more"><summary>Les deux autres commandes</summary>
+      <div class="cmds">
+        <div class="cmd"><code><span class="p">$ </span>grimoire init . --lite -y</code><button class="btn copy" type="button" id="copy-2" data-copy="grimoire init . --lite -y"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
+        <div class="cmd"><code><span class="p">$ </span>grimoire standard init . --profile governed</code><button class="btn copy" type="button" id="copy-3" data-copy="grimoire standard init . --profile governed"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
+      </div>
+    </details></article>
+</div>
+<p class="hosts">Claude Code · Copilot. Le manuel dit ce que prend en charge chaque outil.</p>
+</section>
 
-  <!-- 3. Où ça tourne -->
-  <section class="blk" id="hotes" aria-labelledby="t3">
-    <h2 id="t3">Dans tes outils. Sur ta machine.</h2>
-    <p class="txt">La même règle, écrite une fois, rendue pour chaque hôte. Ce qu'un hôte ne sait pas exécuter est déclaré, jamais caché.</p>
-    <div class="tbl">
-      <table>
-        <thead><tr><th scope="col">Hôte</th><th scope="col">Hooks bloquants</th><th scope="col">Sous-agents</th><th scope="col">Compétences</th><th scope="col">Commandes</th><th scope="col">Permissions</th></tr></thead>
-        <tbody>
-          <tr><th scope="row">Claude Code</th><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td></tr>
-          <tr><th scope="row">GitHub Copilot</th><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="oui">oui</td><td class="non">non</td></tr>
-          <tr><th scope="row">Codex</th><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td></tr>
-          <tr><th scope="row">Cursor</th><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td></tr>
-          <tr><th scope="row">Gemini CLI</th><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td><td class="non">non</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <ul class="notes">
-      <li>Sans hooks, la règle est écrite dans le fichier d'entrée et ne s'oppose qu'en CI.</li>
-      <li>Le kit et son cockpit tournent sur ta machine.</li>
-    </ul>
-  </section>
+<section class="blk wrap" aria-labelledby="limites">
+  <h2 id="limites">Ce qui n'est pas prouvé</h2>
+  <ul class="limits">
+    <li>Le kit ne crée pas de copie du dépôt et ne propose pas lui-même le travail à relire : c'est ton outil (Claude Code, Copilot) et git.</li>
+    <li>Le tableau de bord ne lance pas de session d'agent.</li>
+    <li>Une consigne que tu donnes est lue par la session au tour suivant, pas tout de suite.</li>
+    <li>La mémoire est celle d'un projet : elle n'est pas partagée entre projets, et le rappel au démarrage demande un outil qui sait exécuter des contrôles (Claude Code, Copilot).</li>
+    <li>Aucun gain n'est mesuré.</li>
+  </ul>
+  <p class="cond">Le tableau de bord est en cours de refonte : ce qu'en décrit ce bloc n'est pas entièrement dans la version publiée (3.62.1). Le contrôle des preuves refuse pour de bon seulement en profil governed. Le reste est dans la version 3.62.1, que tu peux installer maintenant.</p>
+</section>
 
-  <!-- 4. Installer -->
-  <section class="blk" id="installer" aria-labelledby="t4">
-    <h2 id="t4">Trois commandes.</h2>
-    <p class="txt">La première installe le kit, la deuxième équipe ton dépôt, la troisième rend le gate bloquant.</p>
-    <div class="cmds">
-      <div class="cmd"><code><span class="p">$ </span>uv tool install grimoire-kit</code><button class="btn copy" type="button" id="copy-1" data-copy="uv tool install grimoire-kit"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
-      <div class="cmd"><code><span class="p">$ </span>grimoire init . --lite -y</code><button class="btn copy" type="button" id="copy-2" data-copy="grimoire init . --lite -y"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
-      <div class="cmd"><code><span class="p">$ </span>grimoire standard init . --profile governed</code><button class="btn copy" type="button" id="copy-3" data-copy="grimoire standard init . --profile governed"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
-    </div>
-    <p class="alt">ou <code>pipx install grimoire-kit</code></p>
-  </section>
+<section class="blk wrap" aria-labelledby="capot-lien">
+  <h2 id="capot-lien">Sous le capot</h2>
+  <p class="txt">Les commandes, les fichiers et les règles exactes sont dans le manuel : <a href="docs/getting-started/">premiers pas</a>, <a href="docs/standard/">le contrôle des preuves</a>, <a href="docs/hosts/">les outils pris en charge</a>.</p>
+</section>
 
-  
+<div class="wrap">
 <footer>
-    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" rel="noopener">Ce qui n'est pas prouvé</a>
+    <a href="docs/">Manuel</a>
     <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" rel="noopener">Code source</a>
-    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" rel="noopener">CHANGELOG</a>
+    <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/CHANGELOG.md" rel="noopener">Ce qui a changé</a>
     <a href="https://github.com/Guilhem-Bonnet/Grimoire-kit/blob/main/LICENSE" rel="noopener">Licence MIT</a>
     <span class="sp"></span>
-    
-    
   </footer>
 </div>
 <script>
@@ -367,8 +396,8 @@ footer .sp{flex:1}
     pauseB.querySelector('.lbl').textContent=paused?'Reprendre':'Pause';pauseB.querySelector('.i').className=paused?'i i-play':'i i-pause'});
   replayB.addEventListener('click',play);
   replayB.hidden=false;
-  var term=document.querySelector('.proof');
-  if('IntersectionObserver' in window){var io=new IntersectionObserver(function(es){if(es[0].isIntersecting){io.disconnect();play()}},{threshold:.45});io.observe(term)}
+  var box=document.getElementById('replay-box'),played=false;
+  box.addEventListener('toggle',function(){if(box.open&&!played){played=true;play()}});
 })();
 
 (function(){

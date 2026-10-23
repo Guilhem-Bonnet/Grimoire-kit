@@ -134,4 +134,4 @@ Cinq mots suffisent pour lire n'importe quel blueprint :
   (`ORC-02`, `QUA-04`).
 
 Pour ouvrir l'atelier sur votre projet, voir
-[Atelier local & blueprints](../serve-blueprints.md).
+[Atelier local & blueprints](../guides/atelier-blueprints.md).

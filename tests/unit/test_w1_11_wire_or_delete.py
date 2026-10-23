@@ -23,7 +23,7 @@ runner = CliRunner()
 SRC = Path(__file__).resolve().parents[2] / "src" / "grimoire"
 
 # Exports de ``tools/`` encore sans appelant CLI/MCP, constatés le jour de W1-11.
-# Ce sont l'API SDK publique (docs/sdk-guide.md) : le cliquet mesure l'atteignabilité
+# Ce sont l'API SDK publique (docs/guides/sdk-python.md) : le cliquet mesure l'atteignabilité
 # CLI/MCP, il n'autorise PAS leur suppression. L'ensemble ne peut que rétrécir.
 _ORPHELINS_CONNUS = {"AgentForge", "ContextGuard", "ContextRouter", "PreflightCheck"}
 
@@ -90,12 +90,12 @@ def test_les_exports_se_lisent_par_ast_pas_par_texte() -> None:
 def test_les_noms_du_guide_sdk_restent_importables() -> None:
     import importlib
 
-    guide = (SRC.parents[1] / "docs" / "sdk-guide.md").read_text(encoding="utf-8")
+    guide = (SRC.parents[1] / "docs" / "guides" / "sdk-python.md").read_text(encoding="utf-8")
     tools = importlib.import_module("grimoire.tools")
     cites = {nom for nom in tools.__all__ if re.search(rf"\b{nom}\b", guide)}
-    assert cites, "docs/sdk-guide.md ne cite plus aucun export de grimoire.tools"
+    assert cites, "docs/guides/sdk-python.md ne cite plus aucun export de grimoire.tools"
     for nom in cites:
-        assert hasattr(tools, nom), f"{nom} cité dans docs/sdk-guide.md mais non importable"
+        assert hasattr(tools, nom), f"{nom} cité dans docs/guides/sdk-python.md mais non importable"
 
 
 def _memoire(racine: Path, contradiction: bool) -> None:

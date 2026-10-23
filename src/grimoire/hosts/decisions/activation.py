@@ -434,6 +434,13 @@ def decide_activation(hook: HookInput) -> Decision:
     proposals_line = _proposals_status_line(hook.project_root)
     decisions_line = _decisions_line(hook.project_root)
     pause_line = _pause_line(hook, task_id)
+    # #667 : les fichiers d'instructions que l'hôte charge, classés par
+    # provenance ; seule une paire (non reconnu, motif d'injection) parle.
+    from grimoire.hosts.decisions.instruction_scan import session_scan_line
+
+    instructions_line, scan_detail = session_scan_line(
+        hook.project_root, hook.session_id, now_iso=datetime.now(UTC).isoformat()
+    )
     context = "\n".join(
         part
         for part in (
@@ -449,6 +456,7 @@ def decide_activation(hook: HookInput) -> Decision:
             proposals_line,
             decisions_line,
             pause_line,
+            instructions_line,
         )
         if part
     )
@@ -468,6 +476,7 @@ def decide_activation(hook: HookInput) -> Decision:
             **scaffold_detail,
             **link,
             **steering_detail,
+            **scan_detail,
         },
     )
 
