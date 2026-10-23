@@ -73,23 +73,8 @@ def _attach_live_status(project_root: Path, runs: list[dict[str, Any]]) -> None:
         run["currentNode"] = current_node
 
 
-def list_flow_runs(
-    project_root: Path, *, blueprint_id: str | None = None, limit: int = 20
-) -> list[dict[str, Any]]:
-    """Les runs connus de ce projet, les plus récents d'abord.
-
-    Une lecture tolérante : un fichier de métadonnées absent, corrompu ou
-    incomplet est ignoré plutôt que de faire échouer toute la liste — un run
-    en cours d'écriture au moment précis de la lecture ne doit pas casser
-    l'affichage des autres. ``blueprint_id`` filtre (ex. ``"project-upgrade"``) ;
-    omis, tous les runs de flow du projet.
-
-    Chaque run rendu porte aussi `status` (``WorkflowStatus.value`` — ex.
-    ``"checkpointed"``) et `currentNode` (le node courant, ou ``None``),
-    lus depuis le kernel (issue #510/#513) : c'est ce qu'un badge « checkpoint
-    en attente » a besoin de savoir pour survivre à une navigation, plutôt
-    que de rester un état client perdu au premier rendu suivant.
-    """
+def _known_runs(project_root: Path, blueprint_id: str | None) -> list[dict[str, Any]]:
+    """Toutes les métadonnées de run lisibles, les plus récentes d'abord, aperçus exclus."""
     directory = _flows_dir(project_root)
     if not directory.is_dir():
         return []
@@ -101,6 +86,11 @@ def list_flow_runs(
             continue
         if not isinstance(data, dict):
             continue
+        # Un aperçu (`upgrade-flow run --dry-run`, `FlowRunMeta.preview`) n'est
+        # pas un run de flow : le compter repoussait le run précédent, resté
+        # non décidé au checkpoint, hors du « dernier run » que la fiche lisait.
+        if data.get("preview") is True:
+            continue
         run_bp = str(data.get("blueprint_id", ""))
         if blueprint_id is not None and run_bp != blueprint_id:
             continue
@@ -110,6 +100,43 @@ def list_flow_runs(
             "createdAt": data.get("created_at"),
         })
     runs.sort(key=lambda r: str(r.get("createdAt") or ""), reverse=True)
+    return runs
+
+
+def list_flow_runs(
+    project_root: Path, *, blueprint_id: str | None = None, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Les runs connus de ce projet, les plus récents d'abord.
+
+    Une lecture tolérante : un fichier de métadonnées absent, corrompu ou
+    incomplet est ignoré plutôt que de faire échouer toute la liste — un run
+    en cours d'écriture au moment précis de la lecture ne doit pas casser
+    l'affichage des autres. ``blueprint_id`` filtre (ex. ``"project-upgrade"``) ;
+    omis, tous les runs de flow du projet. Un aperçu (``preview``) n'y figure
+    jamais.
+
+    Chaque run rendu porte aussi `status` (``WorkflowStatus.value`` — ex.
+    ``"checkpointed"``) et `currentNode` (le node courant, ou ``None``),
+    lus depuis le kernel (issue #510/#513) : c'est ce qu'un badge « checkpoint
+    en attente » a besoin de savoir pour survivre à une navigation, plutôt
+    que de rester un état client perdu au premier rendu suivant.
+    """
+    runs: list[dict[str, Any]] = flow_runs_view(project_root, blueprint_id=blueprint_id, limit=limit)["runs"]
+    return runs
+
+
+def flow_runs_view(
+    project_root: Path, *, blueprint_id: str | None = None, limit: int = 20
+) -> dict[str, Any]:
+    """``{"runs": [...], "total": N}`` — la seule lecture des runs que le cockpit affiche.
+
+    ``GET /api/workspace/flows/runs`` (la liste d'Observer) et le KPI « runs de
+    flow » de la fiche Piloter (``sheet_view``) passent tous deux par ici : le
+    chiffre de l'un ne peut plus contredire la liste de l'autre. ``total``
+    compte tous les runs connus, ``runs`` n'en garde que les ``limit`` plus
+    récents.
+    """
+    runs = _known_runs(project_root, blueprint_id)
     sliced = runs[:limit]
     _attach_live_status(project_root, sliced)
-    return sliced
+    return {"runs": sliced, "total": len(runs)}

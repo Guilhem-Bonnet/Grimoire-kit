@@ -22,11 +22,19 @@ Refus délibérés, tenus ici plutôt que rappelés à chaque appelant :
   toujours du registre, jamais du corps de la requête HTTP ;
 - un projet dont la mémoire est absente ou illisible est listé avec sa
   raison, jamais compté comme un store vide en silence (leçon #264 : une
-  lecture ratée n'est pas un zéro).
+  lecture ratée n'est pas un zéro) ;
+- aucun store compté deux fois : des projets qui partagent la même
+  collection sur le même serveur (ou le même fichier) n'y ajoutent leurs
+  entrées qu'une fois dans ``totalEntries``.
+
+L'aperçu ouvre un seul ``MemoryManager`` par projet, réutilisé par la sonde,
+l'index lexical et la dernière écriture, et sonde les projets en parallèle :
+la durée suit le projet le plus lent, pas la somme des projets.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +47,9 @@ OVERVIEW_SCHEMA_VERSION = "grimoire-memory-overview/v1"
 SEARCH_SCHEMA_VERSION = "grimoire-memory-search/v1"
 
 _DEFAULT_SEARCH_LIMIT = 10
+# Borne du parallélisme de l'aperçu : chaque projet sonde déjà jusqu'à trois
+# services, une flotte entière ne doit pas ouvrir des dizaines de connexions.
+_OVERVIEW_MAX_WORKERS = 8
 
 
 def _default_scope(project_root: Path) -> str | None:
@@ -70,7 +81,7 @@ def _resolve_readable_root(entry: dict[str, str]) -> tuple[Path | None, str | No
     return project_root, None
 
 
-def _lexical_index_state(project_root: Path, status: dict[str, Any]) -> str:
+def _lexical_index_state(manager: Any, status: dict[str, Any]) -> str:
     """État de l'index lexical du projet, jamais déduit du seul backend
     configuré :
 
@@ -84,40 +95,64 @@ def _lexical_index_state(project_root: Path, status: dict[str, Any]) -> str:
     if status.get("resolvedBackend") == "lexical":
         return "primaire"
     try:
-        from grimoire.core.config import GrimoireConfig
-        from grimoire.memory.manager import MemoryManager
-
-        cfg = GrimoireConfig.from_yaml(project_root / "project-context.yaml")
-        mgr = MemoryManager.from_config(cfg, project_root=project_root)
-        return "compagnon" if mgr.prefers_hybrid else "absent"
+        return "compagnon" if manager.prefers_hybrid else "absent"
     except Exception:
         return "inconnu"
 
 
-def _last_write(project_root: Path, status: dict[str, Any]) -> str | None:
+def _last_write(manager: Any, status: dict[str, Any]) -> str | None:
     """Horodatage de la dernière écriture, best-effort.
 
     ``memory_link_status`` ne le porte pas — son ``detail`` vient de
     ``BackendStatus``, qui ne connaît que le compte d'entrées. Relire les
     entrées une fois ici évite d'étendre ce contrat pour un seul champ ;
-    mêmes imports tardifs, même tolérance aux erreurs que le reste du module.
+    même tolérance aux erreurs que le reste du module.
     """
     if not status.get("available") or not status.get("entries"):
         return None
     try:
-        from grimoire.core.config import GrimoireConfig
-        from grimoire.memory.manager import MemoryManager
-
-        cfg = GrimoireConfig.from_yaml(project_root / "project-context.yaml")
-        mgr = MemoryManager.from_config(cfg, project_root=project_root)
-        entries = mgr.get_all(limit=None)
+        entries = manager.get_all(limit=None)
     except Exception:
         return None
     stamps = [e.updated_at or e.created_at for e in entries if (e.updated_at or e.created_at)]
     return max(stamps) if stamps else None
 
 
-def _project_row(entry: dict[str, str]) -> dict[str, Any]:
+def _open_manager(project_root: Path) -> tuple[Any, Any, str | None]:
+    """``(config, manager, raison)`` — le seul ``MemoryManager`` du projet.
+
+    Config absente ou illisible : ``(None, None, None)``, ``memory_link_status``
+    nomme lui-même ce cas. Backend impossible à ouvrir : la raison, sans
+    nouvel essai plus loin.
+    """
+    config_path = project_root / "project-context.yaml"
+    if not config_path.is_file():
+        return None, None, None
+    try:
+        from grimoire.core.config import GrimoireConfig
+
+        cfg = GrimoireConfig.from_yaml(config_path)
+    except Exception:
+        return None, None, None
+    try:
+        from grimoire.memory.manager import MemoryManager
+
+        return cfg, MemoryManager.from_config(cfg, project_root=project_root), None
+    except Exception as exc:
+        return cfg, None, str(exc)
+
+
+def _store_key(cfg: Any, project_root: Path) -> tuple[str, str] | None:
+    try:
+        from grimoire.memory.manager import store_identity
+
+        return store_identity(cfg, project_root)
+    except Exception:
+        return None
+
+
+def _project_row(entry: dict[str, str]) -> tuple[dict[str, Any], tuple[str, str] | None]:
+    """Ligne d'aperçu d'un projet et l'identité de son store (dédoublonnage)."""
     slug = str(entry.get("slug", ""))
     row: dict[str, Any] = {
         "slug": slug,
@@ -134,19 +169,25 @@ def _project_row(entry: dict[str, str]) -> dict[str, Any]:
     project_root, reason = _resolve_readable_root(entry)
     if project_root is None:
         row["reason"] = reason
-        return row
+        return row, None
+    cfg, manager, manager_error = _open_manager(project_root)
+    if manager_error is not None:
+        row["state"] = "unavailable"
+        row["configuredBackend"] = cfg.memory.backend
+        row["reason"] = manager_error
+        return row, None
     try:
         # probe=True : cette vue est une action explicite et peu fréquente
         # (pas le pouls Piloter, sondé en continu) — l'utilisateur qui ouvre
         # l'aperçu mémoire veut le compte d'entrées réel, pas un état caché
         # potentiellement vide faute de sonde antérieure.
-        status = memory_link_status(project_root, probe=True)
+        status = memory_link_status(project_root, probe=True, manager=manager)
     except Exception as exc:
         # `memory_link_status` est déjà best-effort et ne devrait jamais
         # lever — mais une route d'agrégation qui casserait sur UN projet
         # de la flotte serait pire que ce qu'elle prévient (#264).
         row["reason"] = f"lecture impossible : {exc}"
-        return row
+        return row, None
     row["state"] = status.get("state", "unreadable")
     row["configuredBackend"] = status.get("configuredBackend")
     row["resolvedBackend"] = status.get("resolvedBackend")
@@ -155,10 +196,27 @@ def _project_row(entry: dict[str, str]) -> dict[str, Any]:
         row["reason"] = "projet non initialisé (pas de project-context.yaml)"
     elif status.get("error"):
         row["reason"] = status["error"]
-    if status.get("available"):
-        row["lexicalIndex"] = _lexical_index_state(project_root, status)
-        row["lastWrite"] = _last_write(project_root, status)
-    return row
+    if status.get("available") and manager is not None:
+        row["lexicalIndex"] = _lexical_index_state(manager, status)
+        row["lastWrite"] = _last_write(manager, status)
+    store_key = _store_key(cfg, project_root) if cfg is not None else None
+    return row, store_key
+
+
+def _total_entries(rows: list[tuple[dict[str, Any], tuple[str, str] | None]]) -> int:
+    """Somme des entrées lues, chaque store (emplacement + collection) une
+    seule fois. Une ligne sans identité connue compte pour elle-même."""
+    seen: set[tuple[str, str]] = set()
+    total = 0
+    for row, key in rows:
+        if not isinstance(row["entries"], int):
+            continue
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        total += row["entries"]
+    return total
 
 
 def memory_overview(project_root: Path, requested: str | None) -> dict[str, Any]:
@@ -169,9 +227,17 @@ def memory_overview(project_root: Path, requested: str | None) -> dict[str, Any]
     ``None``/vide pour « ce projet » (celui que l'hôte sert déjà).
     """
     entries = _select_entries(requested, project_root)
-    projects = [_project_row(e) for e in entries]
+    if entries:
+        with ThreadPoolExecutor(
+            max_workers=min(len(entries), _OVERVIEW_MAX_WORKERS),
+            thread_name_prefix="grimoire-memory-overview",
+        ) as pool:
+            rows = list(pool.map(_project_row, entries))
+    else:
+        rows = []
+    projects = [row for row, _ in rows]
     readable = [p for p in projects if p["state"] != "unreadable"]
-    total_entries = sum(p["entries"] for p in projects if isinstance(p["entries"], int))
+    total_entries = _total_entries(rows)
     return {
         "schemaVersion": OVERVIEW_SCHEMA_VERSION,
         "requested": requested or "",
