@@ -24,16 +24,27 @@ dont le ledger est illisible est nommé (``unreadable``), jamais compté pour z�
 
 L'intervalle de sondage est déclaré ici (``GRIMOIRE_PULSE_SECONDS``, borné), et
 l'interface le lit : elle n'a pas sa propre constante.
+
+Le flux (P10) : :func:`pulse_stream` pousse la même charge utile en Server-Sent
+Events. Le serveur recalcule l'empreinte toutes les :data:`STREAM_TICK_SECONDS`
+— une écriture du ledger, d'un journal de session ou d'une proposition part
+vers la page en moins de deux secondes, sans attendre l'intervalle. Ledger
+immobile, le flux ne dit rien de plus qu'un battement par intervalle déclaré :
+c'est lui qui garde « mis à jour il y a N s » vrai.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import time
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.standard_generation import PROPOSALS_DIR
 from grimoire.core.standard_state import LEDGER_RELPATH
 from grimoire.missions.lease import LEASES_DIRNAME, parse_instant
 from grimoire.tools.project_registry import load_registry, slug_for_path
@@ -45,7 +56,10 @@ __all__ = [
     "MAX_INTERVAL_SECONDS",
     "MIN_INTERVAL_SECONDS",
     "SCHEMA_VERSION",
+    "STREAM_RETRY_MS",
+    "STREAM_TICK_SECONDS",
     "pulse_interval",
+    "pulse_stream",
     "pulse_view",
 ]
 
@@ -54,6 +68,10 @@ INTERVAL_ENV = "GRIMOIRE_PULSE_SECONDS"
 DEFAULT_INTERVAL_SECONDS = 5
 MIN_INTERVAL_SECONDS = 1
 MAX_INTERVAL_SECONDS = 300
+#: Période de recalcul de l'empreinte dans le flux : bien sous les deux secondes promises.
+STREAM_TICK_SECONDS = 0.5
+#: Délai de reconnexion que le navigateur applique quand le flux se coupe.
+STREAM_RETRY_MS = 3000
 
 
 def pulse_interval() -> int:
@@ -74,11 +92,11 @@ _CONTENT_HASH_MAX_BYTES = 64 * 1024
 def _stat(path: Path) -> tuple[str, int, int, str] | None:
     try:
         info = path.stat()
-        # Un petit JSON réécrit en place (session, bail) peut garder taille et mtime : l'horloge
+        # Un petit JSON ou YAML réécrit en place (session, bail, proposition) peut garder taille et mtime : l'horloge
         # du système de fichiers est grossière sous Windows. Son contenu tranche ; le journal
         # d'événements, lui, ne fait que croître.
         content = ""
-        if path.suffix == ".json" and info.st_size <= _CONTENT_HASH_MAX_BYTES:
+        if path.suffix in (".json", ".yaml") and info.st_size <= _CONTENT_HASH_MAX_BYTES:
             content = hashlib.blake2b(path.read_bytes(), digest_size=8).hexdigest()
     except OSError:
         return None  # absent ou illisible : l'absence fait elle-même partie de l'empreinte
@@ -94,6 +112,9 @@ def _watched(root: Path) -> list[Path]:
     runs = root / RUNS_RELPATH
     if runs.is_dir():
         files.extend(sorted(runs.glob("session-*.json")))
+    proposals = root / PROPOSALS_DIR
+    if proposals.is_dir():
+        files.extend(sorted(proposals.glob("*.yaml")))
     return files
 
 
@@ -180,3 +201,40 @@ def pulse_view(
     if payload["changed"]:
         payload["decisions"] = _decisions(roots, portfolio=portfolio)
     return payload
+
+
+def _event(payload: dict[str, Any]) -> bytes:
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"event: pulse\nid: {payload['fingerprint']}\ndata: {data}\n\n".encode()
+
+
+def pulse_stream(
+    project_root: Path,
+    *,
+    since: str | None = None,
+    portfolio: bool = False,
+    tick: float = STREAM_TICK_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> Iterator[bytes]:
+    """Le pouls en Server-Sent Events, pour ``GET /api/workspace/stream`` (P10).
+
+    Chaque événement ``pulse`` porte la charge utile de :func:`pulse_view`. Le
+    premier part tout de suite (il fixe la fraîcheur côté page), puis un nouveau
+    dès que l'empreinte bouge, au plus tard *tick* secondes après l'écriture.
+    Sans changement, un événement ``changed: false`` par intervalle déclaré
+    confirme que le serveur répond toujours. Le générateur ne se termine pas :
+    l'hôte cesse de l'itérer quand le navigateur ferme la connexion.
+    """
+    yield f"retry: {STREAM_RETRY_MS}\n\n".encode()
+    known = since
+    view = pulse_view(project_root, since=known, portfolio=portfolio)
+    while True:
+        known = view["fingerprint"]
+        yield _event(view)
+        sent_at = clock()
+        while True:
+            sleep(tick)
+            view = pulse_view(project_root, since=known, portfolio=portfolio)
+            if view["changed"] or clock() - sent_at >= view["interval_seconds"]:
+                break

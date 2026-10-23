@@ -448,10 +448,12 @@ def test_un_etat_vide_dont_la_commande_est_ouverte_a_la_console_la_lance_d_un_bo
     assert "refusé" not in page.locator("#dock-body").inner_text()
 
 
-def test_un_etat_vide_dont_la_commande_demande_un_argument_n_a_pas_de_faux_bouton(empty_workspace: Page) -> None:
+def test_un_etat_vide_dont_la_commande_demande_un_argument_n_a_pas_de_faux_bouton(untouched_workspace: Page) -> None:
     """Pas de bouton quand la commande ne peut pas s'exécuter telle quelle
-    (`<id>` à fournir) : un bouton qui échouerait mentirait autant qu'un lien mort."""
-    page = empty_workspace
+    (`<id>` à fournir) : un bouton qui échouerait mentirait autant qu'un lien mort.
+
+    Projet que rien n'écrit : Observer n'est vide que sans ledger, hook ni run (P07)."""
+    page = untouched_workspace
     page.evaluate("() => window.GrimoireWorkspace.goto('observer')")
     page.wait_for_function("() => window.GrimoireWorkspace.space === 'observer'")
     _settle(page)

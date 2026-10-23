@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BOARD_LIFECYCLE",
     "PRIORITIES",
+    "blockers_of",
     "board_status_of",
     "build_board",
     "priority_of",
@@ -169,6 +170,11 @@ def _blockers(task: MissionTask, closed: frozenset[str] = frozenset()) -> list[d
         raw = task.raw_status or "?"
         out.append({"reason": f"état inconnu de cette version ({raw}) : mettre grimoire à jour", "target": task.id})
     return out
+
+
+def blockers_of(task: MissionTask, closed: frozenset[str] = frozenset()) -> list[dict[str, str]]:
+    """Les blocages d'une carte, tels que la projection du board les écrit (motif et cible)."""
+    return _blockers(task, closed)
 
 
 def _task_entry(task: MissionTask, closed: frozenset[str] = frozenset()) -> dict[str, Any]:

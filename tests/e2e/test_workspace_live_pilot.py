@@ -126,8 +126,13 @@ def service(live_project: Path):  # type: ignore[no-untyped-def]
     return TaskService(live_project)
 
 
-def _open(browser: Browser, url: str, *, viewport: dict[str, int] | None = None) -> tuple[Page, object]:
+def _open(
+    browser: Browser, url: str, *, viewport: dict[str, int] | None = None, poll: bool = False
+) -> tuple[Page, object]:
     context = browser.new_context(viewport=viewport or {"width": 1440, "height": 900}, reduced_motion="reduce")
+    if poll:
+        # Navigateur sans `EventSource` : la coque se replie sur le sondage (P10).
+        context.add_init_script("delete window.EventSource;")
     page = context.new_page()
     page.goto(f"{url}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
@@ -137,6 +142,16 @@ def _open(browser: Browser, url: str, *, viewport: dict[str, int] | None = None)
 @pytest.fixture
 def page(browser: Browser, live_url: str) -> Iterator[Page]:
     opened, context = _open(browser, live_url)
+    try:
+        yield opened
+    finally:
+        context.close()  # type: ignore[attr-defined]
+
+
+@pytest.fixture
+def poll_page(browser: Browser, live_url: str) -> Iterator[Page]:
+    """La coque en sondage : le contrat du repli, quand le flux (P10) n'est pas disponible."""
+    opened, context = _open(browser, live_url, poll=True)
     try:
         yield opened
     finally:
@@ -236,8 +251,10 @@ def test_un_changement_de_ledger_apparait_sans_rechargement_dans_l_intervalle_de
     assert page.evaluate("() => performance.getEntriesByType('navigation').length") == navigations
 
 
-def test_sans_changement_le_sondage_ne_redessine_rien(page: Page) -> None:
+def test_sans_changement_le_sondage_ne_redessine_rien(poll_page: Page) -> None:
     """Le pouls tourne mais, ledger immobile, le DOM de l'espace n'est pas touché (« sans charge si rien ne change »)."""
+    page = poll_page
+    assert page.evaluate("() => window.GrimoireWorkspace.live.state.transport") == "poll"
     _goto(page, "executer")
     page.wait_for_selector(".ex-card")
     page.wait_for_timeout(1500)  # laisser passer le sondage de référence
@@ -253,8 +270,9 @@ def test_sans_changement_le_sondage_ne_redessine_rien(page: Page) -> None:
     assert page.evaluate("() => document.querySelector('.ex-card').dataset.sentinelle") == "intacte"
 
 
-def test_un_onglet_cache_ne_fait_aucune_requete_puis_reprend(page: Page, service) -> None:  # type: ignore[no-untyped-def]
+def test_un_onglet_cache_ne_fait_aucune_requete_puis_reprend(poll_page: Page, service) -> None:  # type: ignore[no-untyped-def]
     """Onglet masqué ⇒ zéro requête ; revenu visible ⇒ un sondage part tout de suite et rattrape ce qui a changé."""
+    page = poll_page
     _goto(page, "executer")
     page.wait_for_selector(".ex-card")
     page.wait_for_timeout(1500)
@@ -275,8 +293,9 @@ def test_un_onglet_cache_ne_fait_aucune_requete_puis_reprend(page: Page, service
     assert any("/api/workspace/pulse" in u for u in requests), "le sondage reprend dès le retour"
 
 
-def test_l_horodatage_dit_depuis_quand_les_donnees_sont_a_jour(page: Page) -> None:
+def test_l_horodatage_dit_depuis_quand_les_donnees_sont_a_jour(poll_page: Page) -> None:
     """« mis à jour il y a Xs » avance seul, entre deux sondages, et nomme l'intervalle déclaré."""
+    page = poll_page
     text = page.locator("#st-live-text")
     page.wait_for_function("() => /mis à jour il y a \\d+ s/.test(document.getElementById('st-live-text').textContent)")
     assert "Sondage toutes les 1 s" in page.locator("#st-live").get_attribute("title")  # type: ignore[operator]
