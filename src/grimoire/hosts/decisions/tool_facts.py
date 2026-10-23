@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from dataclasses import dataclass
 from typing import Any
 
@@ -101,6 +102,12 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
         "which", "type", "date", "ps", "df", "du", "tree", "od", "hexdump", "xxd",
         "sha256sum", "sha1sum", "md5sum", "echo", "printf", "true", "false",
         "basename", "dirname", "readlink", "realpath", "nproc", "uptime", "id", "uname",
+        # Issue #875 : se déplacer et filtrer un flux ne modifient rien ; les
+        # formes qui écrivent (``sort -o``, ``uniq in out``, ``sed -i``,
+        # ``awk -i``) sont écartées par :func:`_raw_segments_read_only` et
+        # :func:`_is_read_only_segment`.
+        "cd", "pushd", "popd", "sort", "uniq", "cut", "tr", "jq", "column", "nl", "comm", "paste",
+        "sed", "awk", "gawk", "mawk",
     }
 )
 
@@ -110,7 +117,10 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
 #: would be the exact defect this classifier exists to fix, just moved one
 #: layer down. Only genuinely read-only-in-every-form subcommands qualify.
 _READ_ONLY_GIT_SUBCOMMANDS = frozenset(
-    {"status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog"}
+    {
+        "status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog",
+        "grep", "cat-file", "ls-tree",  # issue #875
+    }
 )
 
 #: ``find`` primaries that act instead of just reporting (issue #643): a bare
@@ -135,23 +145,299 @@ _LEADING_NEUTRAL_WORDS = frozenset({"sudo", "command", "time", "nice", "ionice",
 _WRITE_REDIRECTION_RE = re.compile(r">>?(?!=)|\btee\b")
 
 
+#: Mots-clés de structure du shell (issue #875) : ils précèdent une commande
+#: (``do cat f``, ``while read l``) ou la ferment (``done``) ; seule la commande
+#: qu'ils portent compte.
+_SHELL_LEADING_KEYWORDS = frozenset({"do", "then", "else", "elif", "while", "until", "if", "!"})
+_SHELL_CLOSING_KEYWORDS = frozenset({"done", "fi", "esac"})
+_SUBSTITUTION_RE = re.compile(r"\$\(|`")
+
+def _git_subcommand(words: list[str]) -> tuple[str, list[str]]:
+    """Sous-commande git et ses arguments, après ``-C <dir>`` / ``--no-pager``."""
+    i = 0
+    while i < len(words) and (words[i] in {"--no-pager", "-P", "--paginate"} or words[i] == "-C"):
+        i += 2 if words[i] == "-C" else 1
+    return (words[i], words[i + 1 :]) if i < len(words) else ("", [])
+
+
+def _is_read_only_git(words: list[str]) -> bool:
+    sub, args = _git_subcommand(words)
+    if sub == "grep":
+        return not any(a.startswith(("-O", "--open-files")) for a in args)
+    if sub == "remote":
+        # Liste blanche sur la liste COMPLÈTE des arguments : ``git remote -v add x y``
+        # ajoute un dépôt malgré son premier argument.
+        if not args or args in (["-v"], ["--verbose"]):
+            return True
+        if args[0] != "get-url":
+            return False
+        rest = args[1:]
+        names = [a for a in rest if not a.startswith("-")]
+        return len(names) == 1 and all(a in {"--push", "--all"} for a in rest if a.startswith("-"))
+    if sub == "branch":
+        return all(a in {"--show-current", "-a", "-r", "-v", "-vv", "--list", "--all", "--remotes"} for a in args)
+    return sub in _READ_ONLY_GIT_SUBCOMMANDS
+
+
 def _is_read_only_segment(segment: str) -> bool:
     words = segment.split()
     idx = 0
-    while idx < len(words) and (_ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _LEADING_NEUTRAL_WORDS):
+    while idx < len(words) and (
+        _ENV_ASSIGNMENT_RE.match(words[idx])
+        or words[idx] in _LEADING_NEUTRAL_WORDS
+        or words[idx] in _SHELL_LEADING_KEYWORDS
+    ):
+        if words[idx] == "command" and idx + 1 < len(words) and words[idx + 1] in {"-v", "-V"}:
+            return True  # ``command -v gh`` : une recherche, jamais une exécution
         idx += 1
     if idx >= len(words):
         return True  # nothing left but assignments/neutral words: nothing to mutate
     verb = words[idx]
+    args = words[idx + 1 :]
+    if verb in _SHELL_CLOSING_KEYWORDS:
+        return True
+    if verb == "for":
+        return not _SUBSTITUTION_RE.search(segment)  # ``for x in a b`` n'exécute que son corps
     if verb == "git":
-        sub = words[idx + 1] if idx + 1 < len(words) else ""
-        return sub in _READ_ONLY_GIT_SUBCOMMANDS
+        return _is_read_only_git(args)
     if verb == "gh":
         tail = words[idx + 1 : idx + 3]
         return any(word in _READ_ONLY_GH_VERBS for word in tail)
     if verb == "find":
-        return not any(word in _FIND_MUTATING_PRIMARIES for word in words[idx + 1 :])
+        return not any(word in _FIND_MUTATING_PRIMARIES for word in args)
+    # ``sed`` et ``awk`` : leur script est quoté donc invisible ici ; la liste
+    # blanche est appliquée sur la commande brute par :func:`_raw_segments_read_only`.
+    if verb == "sort":
+        return not any(
+            word.startswith(("--output", "--compress-program"))
+            or (word.startswith("-") and not word.startswith("--") and "o" in word)
+            for word in args
+        )
+    if verb == "uniq":
+        return len([word for word in args if not word.startswith("-")]) < 2  # ``uniq in out`` écrit ``out``
     return verb in _READ_ONLY_LEADING_COMMANDS
+
+
+# ── Passe sur la commande brute : substitutions, sed, awk ────────────────────
+#
+# La « surface » efface le contenu des guillemets, donc le script d'un ``sed`` ou
+# le programme d'un ``awk`` y est invisible, et une substitution ``"$(rm y)"``
+# aussi (le shell l'exécute pourtant dans des guillemets doubles). Cette passe
+# relit la commande brute avec un découpeur qui connaît les guillemets. Elle
+# fonctionne en liste blanche : tout ce qui n'est pas explicitement reconnu comme
+# une lecture est une mutation.
+
+_NEUTRAL_PREFIX = _LEADING_NEUTRAL_WORDS | _SHELL_LEADING_KEYWORDS
+_SED_FLAG_CLUSTER_RE = re.compile(r"^-[nErz]*e?$")
+_SED_ADDR_STEP_RE = re.compile(r"\d+(?:~\d+)?|\+\d+|~\d+")
+_SED_S_FLAGS = frozenset("gpiImM0123456789")
+_AWK_FORBIDDEN_RE = re.compile(r"system|getline|>|\||@load|close\s*\(")
+_AWK_FORBIDDEN_OPTIONS = ("-f", "-i", "-E", "-l", "--f", "--i", "--e", "--l")
+
+
+def _scan_raw(command: str) -> tuple[list[str], bool]:
+    """Découpe *command* en segments bruts et détecte une substitution de commande.
+
+    Les séparateurs (``&&``, ``||``, ``;``, ``|``, ``&``, retour à la ligne) ne
+    comptent que hors guillemets. Une substitution (``$(``, backtick, ``<(``,
+    ``>(``) est signalée hors guillemets simples, donc aussi dans des guillemets
+    doubles où le shell l'évalue.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    substitution = False
+    i, n = 0, len(command)
+
+    def flush() -> None:
+        text = "".join(current).strip()
+        if text:
+            segments.append(text)
+        current.clear()
+
+    while i < n:
+        c = command[i]
+        if c == "\\":
+            current.append(command[i : i + 2])
+            i += 2
+            continue
+        if c == "'":
+            end = command.find("'", i + 1)
+            end = n - 1 if end < 0 else end
+            current.append(command[i : end + 1])
+            i = end + 1
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n and command[j] != '"':
+                if command[j] == "\\":
+                    j += 1
+                elif command[j] == "`" or command[j : j + 2] == "$(":
+                    substitution = True
+                j += 1
+            current.append(command[i : j + 1])
+            i = j + 1
+            continue
+        if c == "`" or command[i : i + 2] in {"$(", "<(", ">("}:
+            substitution = True
+        if c in ";|&\n":
+            flush()
+            i += 2 if command[i : i + 2] in {"&&", "||"} else 1
+            continue
+        current.append(c)
+        i += 1
+    flush()
+    return segments, substitution
+
+
+def _sed_script_is_read_only(script: str) -> bool:
+    """Un script ``sed`` n'est une lecture que fait de commandes de la liste blanche."""
+    i, n = 0, len(script)
+
+    def skip_blank(pos: int, *, separators: bool = False) -> int:
+        chars = " \t\n;" if separators else " \t"
+        while pos < n and script[pos] in chars:
+            pos += 1
+        return pos
+
+    def regex_end(pos: int, delim: str) -> int:
+        """Indice du délimiteur fermant à partir de *pos*, ou -1."""
+        while pos < n:
+            if script[pos] == "\\":
+                pos += 2
+                continue
+            if script[pos] == delim:
+                return pos
+            pos += 1
+        return -1
+
+    def address(pos: int) -> int:
+        if pos < n and script[pos] == "$":
+            return pos + 1
+        m = _SED_ADDR_STEP_RE.match(script, pos)
+        if m:
+            return m.end()
+        if pos < n and script[pos] in "/\\":
+            if script[pos] == "\\":
+                pos += 1
+                if pos >= n:
+                    return -1
+            end = regex_end(pos + 1, script[pos])
+            if end < 0:
+                return -1
+            end += 1
+            while end < n and script[end] in "IM":
+                end += 1
+            return end
+        return pos  # pas d'adresse
+
+    while True:
+        i = skip_blank(i, separators=True)
+        if i >= n:
+            return True
+        start = i
+        i = address(i)
+        if i < 0:
+            return False
+        if i < n and script[i] == "," and i > start:
+            i = address(skip_blank(i + 1))
+            if i < 0:
+                return False
+        i = skip_blank(i)
+        while i < n and script[i] == "!":
+            i = skip_blank(i + 1)
+        if i >= n:
+            return False
+        cmd = script[i]
+        i += 1
+        if cmd in "{}":
+            continue
+        if cmd in "pP=dDnN":
+            pass
+        elif cmd in "lqQ":
+            while i < n and script[i].isdigit():
+                i += 1
+        elif cmd == "s":
+            if i >= n or script[i].isalnum() or script[i] in "\\\n; \t":
+                return False
+            delim = script[i]
+            mid = regex_end(i + 1, delim)
+            end = -1 if mid < 0 else regex_end(mid + 1, delim)
+            if end < 0:
+                return False
+            i = end + 1
+            while i < n and script[i] in _SED_S_FLAGS:
+                i += 1
+        else:
+            return False  # w, W, e, r, R, y, a, i, c, #, ... : mutation ou non analysé
+        j = skip_blank(i)
+        if j < n and script[j] not in ";\n}":
+            return False
+        i = j
+
+
+def _sed_is_read_only(args: list[str]) -> bool:
+    """``sed`` en lecture seule : options et scripts tous dans la liste blanche."""
+    scripts: list[str] = []
+    positional: list[str] = []
+    i = 0
+    while i < len(args):
+        word = args[i]
+        i += 1
+        if word == "-" or not word.startswith("-"):
+            positional.append(word)
+        elif word in {"--quiet", "--silent", "--regexp-extended"}:
+            continue
+        elif _SED_FLAG_CLUSTER_RE.match(word):
+            if word.endswith("e"):
+                if i >= len(args):
+                    return False
+                scripts.append(args[i])
+                i += 1
+        else:
+            return False  # -f, --file, -i*, --in*, -s, --expression=..., inconnu
+    if not scripts:
+        if not positional:
+            return False
+        scripts.append(positional.pop(0))
+    return all(_sed_script_is_read_only(script) for script in scripts)
+
+
+def _awk_is_read_only(args: list[str]) -> bool:
+    """``awk`` en lecture seule : ni fichier de programme, ni sortie, ni commande.
+
+    Un ``>`` de comparaison (``$1 > 3``) est lui aussi refusé : c'est le côté sûr.
+    """
+    for word in args:
+        if word.startswith(_AWK_FORBIDDEN_OPTIONS) and word.startswith("-"):
+            return False
+        if _AWK_FORBIDDEN_RE.search(word):
+            return False
+    return True
+
+
+def _raw_segments_read_only(command: str) -> bool:
+    """Vrai si la commande brute ne contient ni substitution ni sed/awk hors liste blanche."""
+    segments, substitution = _scan_raw(command)
+    if substitution:
+        return False
+    for segment in segments:
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            return False  # guillemet non fermé : incertain donc mutation
+        idx = 0
+        while idx < len(words) and (
+            _ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _NEUTRAL_PREFIX
+        ):
+            idx += 1
+        if idx >= len(words):
+            continue
+        verb, args = words[idx], words[idx + 1 :]
+        if verb == "sed" and not _sed_is_read_only(args):
+            return False
+        if verb in {"awk", "gawk", "mawk"} and not _awk_is_read_only(args):
+            return False
+    return True
 
 
 def is_read_only_command(command: str) -> bool:
@@ -180,7 +466,11 @@ def is_read_only_command(command: str) -> bool:
     surface = command_surface(command)
     if _WRITE_REDIRECTION_RE.search(surface):
         return False
-    segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\|", surface)]
+    if not _raw_segments_read_only(command):
+        return False
+    # ``&`` seul (arrière-plan) sépare aussi deux commandes : ``ls & rm f``.
+    # ``2>&1`` et ``&>`` n'arrivent jamais ici, toute redirection est refusée plus haut.
+    segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\||&|\n", surface)]
     segments = [seg for seg in segments if seg]
     return bool(segments) and all(_is_read_only_segment(seg) for seg in segments)
 

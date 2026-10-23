@@ -224,3 +224,205 @@ class TestFixturesAreSafeToCommit:
         assert not re.search(r"(sk-[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{8,}|eyJ[A-Za-z0-9_-]{10,}|Bearer\s+\S+)", text)
         for uuid in re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", text):
             assert uuid.startswith("00000000-0000-4000-8000-"), (uuid, path.name)
+
+
+# ── #876, verrou 5 : le contrat est resondé à chaque nouvelle version ─────────
+
+_FAKE_CLAUDE = '''#!{python}
+"""Faux binaire claude : --version, et un -p qui obéit aux hooks PreToolUse du projet courant."""
+import json, subprocess, sys
+VERSION = {version!r}
+MODE = {mode!r}
+if "--version" in sys.argv:
+    print(VERSION + " (Claude Code)")
+    sys.exit(0)
+if MODE == "hang":
+    import time; time.sleep(60)
+cfg = json.load(open(".claude/settings.json"))
+cmd = cfg["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+rc = subprocess.run(cmd, shell=True, input="{{}}", text=True, capture_output=True).returncode
+if MODE == "ignore-deny" or rc != 2:
+    open("EXECUTED.marker", "w").close()
+'''
+
+
+def _fake_claude(tmp_path: Path, version: str, mode: str = "honour") -> str:
+    import stat
+    import sys
+
+    path = tmp_path / "bin" / f"claude-{version}-{mode}"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(_FAKE_CLAUDE.format(python=sys.executable, version=version, mode=mode), encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return str(path)
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GRIMOIRE_HOST_PROBE", "1")  # le conftest le coupe ; ici seul un faux binaire est sondé
+    (tmp_path / "home").mkdir()
+    return tmp_path / "home"
+
+
+class TestProbeOnNewVersion:
+    def test_unknown_version_triggers_probe_and_records_exact_version(self, tmp_path: Path, home: Path) -> None:
+        from grimoire.hosts.contract_probe import ensure_probed, proof_for
+
+        claude = _fake_claude(tmp_path, "2.1.309")
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False  # avant la sonde
+
+        proof = ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude)
+
+        assert proof is not None and proof.ok and proof.version == "2.1.309" and proof.probed_at
+        assert proof_for(HostId.CLAUDE_CODE_CLI, "2.1.309") == proof
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is True
+        assert contract_for(HostId.CLAUDE_CODE_CLI, "2.1.309").verified("pretooluse_deny")
+        # La preuve vaut pour cette version exacte, jamais pour une plage.
+        for other in ("2.1.308", "2.1.310", "2.2.0"):
+            assert is_fenced(HostId.CLAUDE_CODE_CLI, other) is False
+
+    def test_probe_runs_once_per_version(self, tmp_path: Path, home: Path) -> None:
+        from grimoire.hosts.contract_probe import ensure_probed
+
+        claude = _fake_claude(tmp_path, "2.1.309")
+        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude) is not None
+        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude) is None
+
+    def test_captured_version_needs_no_probe(self, tmp_path: Path, home: Path) -> None:
+        from grimoire.hosts.contract_probe import ensure_probed
+
+        claude = _fake_claude(tmp_path, "2.1.301")
+        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.301", binary=claude) is None
+
+    def test_binary_of_another_version_proves_nothing(self, tmp_path: Path, home: Path) -> None:
+        from grimoire.hosts.contract_probe import probe_host, proof_for
+
+        claude = _fake_claude(tmp_path, "2.1.310")
+        proof = probe_host(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude)
+        assert proof.ok is False
+        assert proof_for(HostId.CLAUDE_CODE_CLI, "2.1.309") is None  # rien consigné pour 2.1.309
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False
+
+    @pytest.mark.parametrize("value", [None, "", "0", "true", "yes"])
+    def test_no_probe_without_opt_in_launches_no_claude_subprocess(
+        self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch, value: str | None
+    ) -> None:
+        """Les identifiants de l'utilisateur ne servent jamais sans ``GRIMOIRE_HOST_PROBE=1``."""
+        import subprocess
+
+        from grimoire.hosts.contract_probe import ensure_probed, proof_for
+
+        if value is None:
+            monkeypatch.delenv("GRIMOIRE_HOST_PROBE", raising=False)
+        else:
+            monkeypatch.setenv("GRIMOIRE_HOST_PROBE", value)
+        launched: list[object] = []
+        real = subprocess.run
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: launched.append(a) or real(*a, **k))
+        claude = _fake_claude(tmp_path, "2.1.309")
+        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude) is None
+        assert launched == [], "aucun sous-processus sans opt-in"
+        assert proof_for(HostId.CLAUDE_CODE_CLI, "2.1.309") is None
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False  # comportement sûr : reprise en waiting(human)
+
+    def test_unproven_question_says_how_to_opt_in(self) -> None:
+        from grimoire.missions.ledger_rules import unfenced_question
+
+        class _View:
+            session_id = "s1"
+            actor_id = "a"
+            host = "claude-code"
+            host_version = "2.1.309"
+
+        assert "GRIMOIRE_HOST_PROBE=1" in unfenced_question(_View())  # type: ignore[arg-type]
+
+    def test_installed_version_is_read_once_per_binary(
+        self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+
+        from grimoire.hosts.contract_probe import installed_version
+
+        launched: list[object] = []
+        real = subprocess.run
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: launched.append(a) or real(*a, **k))
+        claude = _fake_claude(tmp_path, "2.1.309")
+        assert [installed_version(HostId.CLAUDE_CODE_CLI, claude) for _ in range(3)] == ["2.1.309"] * 3
+        assert len(launched) == 1
+
+
+class TestProbeFailureIsNoBrake:
+    @pytest.mark.parametrize("mode", ["ignore-deny"])
+    def test_tool_executed_despite_deny_leaves_pretooluse_deny_false(self, tmp_path: Path, home: Path, mode: str) -> None:
+        from grimoire.hosts.contract_probe import ensure_probed
+
+        proof = ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=_fake_claude(tmp_path, "2.1.309", mode))
+        assert proof is not None and proof.ok is False and proof.reason
+        contract = contract_for(HostId.CLAUDE_CODE_CLI, "2.1.309")
+        assert contract.verified("pretooluse_deny") is False
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False
+
+    def test_timeout_is_a_recorded_failure_not_an_error(self, tmp_path: Path, home: Path) -> None:
+        from grimoire.hosts.contract_probe import probe_host
+
+        proof = probe_host(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=_fake_claude(tmp_path, "2.1.309", "hang"), timeout=1)
+        assert proof.ok is False
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False
+
+    def test_missing_binary_is_a_failure_without_range(self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.hosts.contract_probe import probe_host
+
+        monkeypatch.setenv("PATH", str(tmp_path / "vide"))
+        proof = probe_host(HostId.CLAUDE_CODE_CLI, "2.1.309")
+        assert proof.ok is False
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.310") is False
+
+    def test_failed_probe_is_not_replayed_before_the_delay(self, tmp_path: Path, home: Path) -> None:
+        from grimoire.hosts.contract_probe import ensure_probed
+
+        claude = _fake_claude(tmp_path, "2.1.309", "ignore-deny")
+        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude) is not None
+        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude) is None
+
+    def test_corrupt_proof_file_means_no_brake(self, home: Path) -> None:
+        from grimoire.hosts.contract_probe import proofs_path
+
+        proofs_path().parent.mkdir(parents=True)
+        proofs_path().write_text("{pas du json", encoding="utf-8")
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False
+
+
+class TestHostStatusShowsProof:
+    def _status(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str) -> dict:
+        from typer.testing import CliRunner
+
+        from grimoire.cli.app import app
+
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "project-context.yaml").write_text(
+            'project:\n  name: "Demo"\nagents:\n  archetype: "minimal"\nhosts:\n  enabled: ["claude"]\n', encoding="utf-8"
+        )
+        monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}:/usr/bin:/bin")
+        result = CliRunner().invoke(
+            app, ["-o", "json", "host", "status", "--host", "claude", "--project-root", str(project), *extra]
+        )
+        return json.loads(result.stdout)[0]
+
+    def test_status_shows_probed_version_and_date(self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        claude = _fake_claude(tmp_path, "2.1.309")
+        Path(claude).rename(tmp_path / "bin" / "claude")
+        item = self._status(tmp_path, monkeypatch, "--probe")
+        assert item["host_version"] == "2.1.309"
+        assert item["brake_proof"]["status"] == "verified"
+        assert item["brake_proof"]["source"] == "probe"
+        assert item["brake_proof"]["version"] == "2.1.309"
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.*", item["brake_proof"]["probed_at"])
+
+    def test_status_without_probe_reports_unverified(self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        Path(_fake_claude(tmp_path, "2.1.309")).rename(tmp_path / "bin" / "claude")
+        item = self._status(tmp_path, monkeypatch)
+        assert item["brake_proof"]["status"] == "unverified"
+        assert item["brake_proof"]["probed_at"] == ""

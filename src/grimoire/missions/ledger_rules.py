@@ -143,7 +143,11 @@ def unfenced_question(view: LeaseView) -> str:
     """La question de §2.4 : un hôte sans frein vérifié ne se relance pas, on demande (K3)."""
     who = f"la session {view.session_id}" if view.session_id else f"la session de {view.actor_id}"
     version = f" {view.host_version}" if view.host_version else ", version inconnue"
-    return f"{who} (hôte {view.host}{version}, sans frein) ne donne plus signe ; reprendre ?"
+    return (
+        f"{who} (hôte {view.host}{version}, sans frein) ne donne plus signe ; reprendre ? "
+        "Frein non prouvé pour cette version : GRIMOIRE_HOST_PROBE=1 la sonde au prochain tick "
+        "(deux appels payants à l'hôte), ou `grimoire host status --probe`."
+    )
 
 def unclosed_blockers(tasks: Mapping[str, MissionTask], task: MissionTask) -> list[str]:
     """Les dépendances ``blocks`` de *task* qui ne sont pas closes, chacune avec son état."""
