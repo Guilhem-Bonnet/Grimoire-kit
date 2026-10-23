@@ -175,3 +175,58 @@ def test_the_total_counts_every_run_beyond_the_returned_page(tmp_path: Path) -> 
     view = flow_runs_view(tmp_path, limit=2)
     assert len(view["runs"]) == 2
     assert view["total"] == 5
+
+
+def _write_upgrade_blueprint(tmp_path: Path) -> Path:
+    """Un `project-upgrade` minimal : une sauvegarde, puis le node `destructive`."""
+    blueprint = {
+        "blueprintVersion": 1,
+        "id": "project-upgrade",
+        "name": "Mise à niveau",
+        "nodes": [
+            {
+                "id": "backup", "kind": "pattern", "ref": "ORC-01", "label": "Sauvegarde",
+                "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
+            },
+            {
+                "id": "destructive", "kind": "pattern", "ref": "QUA-04", "label": "Destructif",
+                "pins": [{"id": "in", "direction": "in", "contract": "c1"}],
+            },
+        ],
+        "edges": [{"from": "backup.out", "to": "destructive.in", "contract": "c1"}],
+    }
+    path = tmp_path / "project-upgrade.blueprint.json"
+    path.write_text(json.dumps(blueprint), encoding="utf-8")
+    return path
+
+
+def test_three_upgrade_runs_are_all_rendered_with_exact_status_and_node(tmp_path: Path) -> None:
+    """Deux runs checkpointés au node `destructive` (non décidés) et un run plus
+
+    récent terminé : la vue rend les trois, chacun avec son état exact, pour que
+    la fiche Piloter retrouve le checkpoint pendant derrière le dernier run."""
+    bp = _write_upgrade_blueprint(tmp_path)
+    engine = _engine(tmp_path)
+    advance = {"pins": {"out": {"contract": "c1"}}}
+    executor = InteractiveNodeExecutor(stream=io.StringIO())
+
+    pending_ids = []
+    for _ in range(2):
+        wfi, _ = engine.run(bp, executor=executor)
+        engine.resume(wfi.id, output=advance)
+        pending_ids.append(wfi.id)
+
+    latest, _ = engine.run(bp, executor=executor)
+    engine.resume(latest.id, output=advance)
+    engine.resume(latest.id, output={"pins": {}})
+
+    view = flow_runs_view(tmp_path, blueprint_id="project-upgrade")
+    assert view["total"] == 3
+    by_id = {r["runId"]: r for r in view["runs"]}
+    assert set(by_id) == {*pending_ids, latest.id}
+    for run_id in pending_ids:
+        assert by_id[run_id]["status"] == "checkpointed"
+        assert by_id[run_id]["currentNode"] == "destructive"
+    assert by_id[latest.id]["status"] == "completed"
+    assert by_id[latest.id]["currentNode"] is None
+    assert view["runs"][0]["runId"] == latest.id

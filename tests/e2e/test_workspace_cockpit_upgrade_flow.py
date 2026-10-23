@@ -19,6 +19,7 @@ seul ne peut pas prouver.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -146,6 +147,48 @@ def test_un_apercu_apres_un_checkpoint_pendant_garde_le_signal_et_ne_compte_aucu
     workspace.wait_for_selector(".ob-runs", timeout=15_000)
     assert f"· {after['total']}" in workspace.locator(".ob-runs h4").inner_text()
     assert "Aucune trace" not in workspace.locator("#canvas").inner_text()
+
+
+def test_un_run_plus_recent_non_checkpointe_ne_masque_pas_le_checkpoint_pendant(
+    cockpit_upgrade_workspace: Page, served_cockpit_upgrade: tuple[str, str, Path]
+) -> None:
+    """P07 : le checkpoint `destructive` pendant d'un run ancien reste signalé
+    quand un run plus récent n'est pas checkpointé (cas qui régressait quand la
+    fiche ne lisait que `upgradeRuns[0]`). Le run ancien est celui laissé par le
+    test de confirmation (fixture de session partagée) ; le run récent est une
+    métadonnée sans kernel (`status` nul), retirée en fin de test.
+    """
+    served, slug, root = served_cockpit_upgrade
+    before = _flow_runs(cockpit_upgrade_workspace, served, slug)
+    assert any(r["status"] == "checkpointed" and r["currentNode"] == "destructive" for r in before["runs"]), (
+        f"le test de confirmation doit avoir laissé un checkpoint pendant : {before}"
+    )
+
+    newer = root / "_grimoire-runtime-output" / "flows" / "WFI-project-upgrade-recent-sans-checkpoint.json"
+    newer.write_text(
+        json.dumps({
+            "schema_version": "grimoire.flow_run_meta.v1",
+            "run_id": "WFI-project-upgrade-recent-sans-checkpoint",
+            "blueprint_id": "project-upgrade",
+            "blueprint_path": "whatever.yaml",
+            "order": ["backup", "preview"],
+            "created_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+    try:
+        after = _flow_runs(cockpit_upgrade_workspace, served, slug)
+        assert after["runs"][0]["runId"] == "WFI-project-upgrade-recent-sans-checkpoint"
+        assert after["runs"][0]["status"] != "checkpointed"
+
+        workspace = cockpit_upgrade_workspace
+        workspace.reload(wait_until="domcontentloaded")
+        workspace.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _open_project_sheet(workspace)
+        workspace.get_by_text("checkpoint destructif en attente").first.wait_for(timeout=15_000)
+        assert workspace.locator("button", has_text="Revoir dans l'IDE").count() == 1
+    finally:
+        newer.unlink(missing_ok=True)
 
 
 def test_observer_montre_le_run_de_flow_meme_traceledger_vide(
