@@ -172,9 +172,9 @@ class TestFastMode:
         calls = {"n": 0}
         real_probe = ml._probe_memory_link_status
 
-        def _counting_probe(root: Path, cfg: object) -> dict[str, object]:
+        def _counting_probe(root: Path, cfg: object, manager: object = None) -> dict[str, object]:
             calls["n"] += 1
-            return real_probe(root, cfg)
+            return real_probe(root, cfg, manager)
 
         monkeypatch.setattr(ml, "_probe_memory_link_status", _counting_probe)
 

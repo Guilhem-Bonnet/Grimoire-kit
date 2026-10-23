@@ -204,6 +204,44 @@ def _create_backend(config: GrimoireConfig, project_root: Path | None = None) ->
     raise GrimoireMemoryError(f"Unknown memory backend: {backend_id}")
 
 
+def store_identity(config: GrimoireConfig, project_root: Path | None = None) -> tuple[str, str]:
+    """Identité ``(emplacement, collection)`` du store que :func:`_create_backend`
+    ouvrirait — URL du serveur ou chemin résolu sur disque — sans rien ouvrir.
+
+    Deux projets qui partagent la même identité lisent le même store : un
+    agrégat de flotte ne doit compter ses entrées qu'une fois. Suit les mêmes
+    replis (variables d'environnement, chemins par défaut) que les backends.
+    """
+    mem = config.memory
+    backend_id = mem.backend if mem.backend != _BACKEND_AUTO else _resolve_auto(config)
+    root = (project_root or Path()).resolve()
+    memory_dir = root / "_grimoire" / "_memory"
+    prefix = mem.collection_prefix
+
+    def _qdrant_location(url: str) -> str:
+        url = url or os.environ.get("GRIMOIRE_QDRANT_URL", "")
+        if url:
+            return url.rstrip("/")
+        return str(Path(os.environ.get("GRIMOIRE_QDRANT_PATH", "./qdrant_data")).resolve())
+
+    if backend_id == _BACKEND_LOCAL:
+        return str(memory_dir / f"{prefix}.json"), prefix
+    if backend_id == _BACKEND_LEXICAL:
+        return str(memory_dir / f"{prefix}_lexical.sqlite3"), prefix
+    if backend_id == _BACKEND_TANTIVY:
+        return str(memory_dir / f"{prefix}_tantivy"), prefix
+    if backend_id == _BACKEND_QDRANT_LOCAL:
+        return _qdrant_location(""), prefix
+    if backend_id in (_BACKEND_QDRANT_SERVER, _BACKEND_OLLAMA):
+        return _qdrant_location(mem.qdrant_url), prefix
+    if backend_id == _BACKEND_WEAVIATE_SERVER:
+        return mem.weaviate_url.rstrip("/"), mem.weaviate_collection or prefix
+    if backend_id == _BACKEND_MEMPALACE:
+        palace_path = mem.mempalace_path or str(memory_dir / "mempalace")
+        return str(Path(palace_path).expanduser().resolve()), ""
+    return f"{backend_id}:{root}", prefix
+
+
 def _create_lexical_backend(collection_prefix: str, root: Path) -> MemoryBackend:
     """FTS5 lexical backend at the standard path, migrating any legacy JSON store."""
     from grimoire.memory.backends.lexical import LexicalMemoryBackend
@@ -406,8 +444,12 @@ class MemoryManager:
         write_policy: MemoryWritePolicy | None = None,
         project_root: Path | None = None,
         cooldown_backend_kind: str = "",
+        backend_id: str = "",
     ) -> None:
         self._backend = backend
+        # Identifiant résolu du backend (``auto`` déjà tranché) : c'est lui que
+        # porte un statut de sonde expirée, jamais le nom du projet.
+        self._backend_id = backend_id
         self._project_name = project_name
         self._auto_enrich = auto_enrich
         self._sidecar = sidecar
@@ -473,6 +515,7 @@ class MemoryManager:
             write_policy=MemoryWritePolicy.from_project(root),
             project_root=root,
             cooldown_backend_kind=_COOLDOWN_BACKEND_KIND.get(backend_id, ""),
+            backend_id=backend_id,
         )
 
     @classmethod
@@ -920,7 +963,7 @@ class MemoryManager:
                 status = backend_future.result(timeout=timeout)
             except FutureTimeoutError:
                 status = BackendStatus(
-                    backend=self._project_name,
+                    backend=self._backend_id or type(self._backend).__name__,
                     healthy=False,
                     entries=0,
                     detail={"reason": f"sonde backend expirée après {timeout}s"},
