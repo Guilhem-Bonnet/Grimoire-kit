@@ -83,6 +83,9 @@ class TestNameRules:
         assert [v.rule for v in violations] == ["name.format"]
         assert "bon_skill" in str(violations[0])
 
+    def test_trailing_newline_is_not_swallowed_by_the_anchor(self) -> None:
+        assert _rules(_skill(), slug="bon-skill\n") == ["name.format"]
+
     def test_name_longer_than_64_is_refused(self) -> None:
         slug = "a" * (NAME_MAX + 1)
         violations = validate_skill_text(_skill(), slug=slug)
@@ -147,10 +150,20 @@ class TestReferenceRules:
     def test_relative_single_level_reference_is_accepted(self, target: str) -> None:
         assert _rules(_skill(body=f"Voir [le guide]({target}).\n")) == []
 
-    def test_reference_two_levels_deep_is_refused(self) -> None:
-        violations = validate_skill_text(_skill(body="Voir [x](references/deep/guide.md).\n"), slug="bon-skill")
-        assert [v.rule for v in violations] == ["references.depth"]
-        assert "references/deep/guide.md" in str(violations[0])
+    def test_nested_path_is_still_one_level(self) -> None:
+        """La spec compte les sauts de référence, pas les segments du chemin."""
+        assert _rules(_skill(body="Voir [x](scripts/outils/run.py).\n")) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "```markdown\nVoir [x](/etc/guide.md).\n```\n",
+            "~~~\n[x](../autre.md)\n~~~\n",
+            "Écrire `[x](/abs.md)` ici.\n",
+        ],
+    )
+    def test_links_inside_code_are_examples_not_references(self, body: str) -> None:
+        assert _rules(_skill(body=body)) == []
 
     def test_absolute_reference_is_refused(self) -> None:
         violations = validate_skill_text(_skill(body="Voir [x](/etc/guide.md).\n"), slug="bon-skill")
@@ -173,6 +186,28 @@ class TestFileEntry:
         path.parent.mkdir()
         path.write_text(_skill(), encoding="utf-8")
         assert validate_skill_file(path) == ()
+
+    def test_reference_chain_from_skill_md_is_refused(self, tmp_path: Path) -> None:
+        skill = tmp_path / "bon-skill" / "SKILL.md"
+        (skill.parent / "references").mkdir(parents=True)
+        skill.write_text(_skill(body="Voir [guide](references/guide.md).\n"), encoding="utf-8")
+        (skill.parent / "references" / "guide.md").write_text("Suite : [détail](detail.md).\n", encoding="utf-8")
+        violations = validate_skill_file(skill)
+        assert [v.rule for v in violations] == ["references.depth"]
+        assert "references/guide.md" in str(violations[0])
+        assert "detail.md" in str(violations[0])
+
+    def test_referenced_file_without_links_is_one_level(self, tmp_path: Path) -> None:
+        skill = tmp_path / "bon-skill" / "SKILL.md"
+        (skill.parent / "references").mkdir(parents=True)
+        skill.write_text(_skill(body="Voir [guide](references/guide.md).\n"), encoding="utf-8")
+        (skill.parent / "references" / "guide.md").write_text("Rien de plus. [site](https://a.b/c)\n", encoding="utf-8")
+        assert validate_skill_file(skill) == ()
+
+    def test_unreadable_file_is_a_violation_not_an_exception(self, tmp_path: Path) -> None:
+        path = tmp_path / "bon-skill.md"
+        path.write_bytes(_skill(description="Caf\xe9").encode("latin-1"))
+        assert [v.rule for v in validate_skill_file(path)] == ["file.unreadable"]
 
     def test_flat_file_takes_its_stem_as_slug(self, tmp_path: Path) -> None:
         path = tmp_path / "Mauvais.md"

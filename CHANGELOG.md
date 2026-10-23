@@ -7,7 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- feat(hosts): contrôle de conformité des skills à la spec Agent Skills (#874) — `src/grimoire/hosts/skill_spec.py` vérifie `name` (charset, tirets, longueur, identique au dossier), `description` (1 à 1024), `compatibility` (1 à 500), corps (moins de 500 lignes) et références (relatives, un niveau). `grimoire doctor` signale un skill de projet non conforme en WARN, jamais en FAIL (`src/grimoire/cli/doctor_skills.py`). Les champs optionnels `license` et `compatibility` sont transmis à l'émission Claude Code et Copilot quand ils sont présents. Tests : `tests/unit/test_skill_spec_conformance.py` (dont tous les skills livrés) et `tests/unit/cli/test_doctor_skill_spec.py`.
+- feat(hosts): contrôle de conformité des skills à la spec Agent Skills (#874) — `src/grimoire/hosts/skill_spec.py` vérifie `name` (charset, tirets, longueur, identique au dossier), `description` (1 à 1024), `compatibility` (1 à 500), corps (moins de 500 lignes) et références (relatives, sans chaîne de références au-delà d'un niveau depuis `SKILL.md`, liens des blocs de code ignorés) ; un fichier illisible est un écart, pas une exception. `grimoire doctor` signale un skill de projet non conforme en WARN, jamais en FAIL (`src/grimoire/cli/doctor_skills.py`). Les champs optionnels `license` et `compatibility` sont transmis à l'émission Claude Code et Copilot quand ils sont présents. Tests : `tests/unit/test_skill_spec_conformance.py` (dont tous les skills livrés) et `tests/unit/cli/test_doctor_skill_spec.py`.
 
 ## [3.65.0] - 2026-10-23
 

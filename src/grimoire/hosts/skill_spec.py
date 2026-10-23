@@ -24,6 +24,8 @@ BODY_MAX_LINES = 500
 
 _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+_FENCE_RE = re.compile(r"^(`{3,}|~{3,})[^\n]*\n.*?^\1", re.MULTILINE | re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 
@@ -48,7 +50,7 @@ def _name_violations(name: str) -> list[SkillViolation]:
                 "name.length", name, f"name : {len(name)} caractères, {NAME_MAX} au maximum (valeur reçue « {name} »)"
             )
         )
-    if _NAME_RE.match(name) is not None:
+    if _NAME_RE.fullmatch(name) is not None:
         return found
     if any(c.isupper() for c in name):
         reason = "majuscule interdite, [a-z0-9-] seulement"
@@ -62,33 +64,58 @@ def _name_violations(name: str) -> list[SkillViolation]:
     return found
 
 
-def _reference_violations(body: str) -> list[SkillViolation]:
-    """Liens locaux du corps : relatifs, à un seul niveau de profondeur depuis ``SKILL.md``."""
-    found: list[SkillViolation] = []
-    for match in _LINK_RE.finditer(body):
+def _local_targets(body: str) -> list[str]:
+    """Cibles locales des liens du corps, hors blocs et spans de code (exemples, pas références)."""
+    prose = _INLINE_CODE_RE.sub("", _FENCE_RE.sub("", body))
+    targets: list[str] = []
+    for match in _LINK_RE.finditer(prose):
         target = match.group(1).split("#", 1)[0].split("?", 1)[0]
-        if not target or target.startswith("#") or _SCHEME_RE.match(target):
-            continue  # URL, ancre pure ou lien sans cible locale
+        if target and not _SCHEME_RE.match(target):
+            targets.append(target)  # ni URL, ni ancre pure
+    return targets
+
+
+def _reference_violations(body: str) -> list[SkillViolation]:
+    """Liens locaux du corps : relatifs, sans sortir du dossier du skill."""
+    found: list[SkillViolation] = []
+    for target in _local_targets(body):
         if target.startswith("/"):
             found.append(
                 SkillViolation(
                     "references.relative", target, f"références : chemin absolu « {target} » (relatif requis)"
                 )
             )
-            continue
-        parts = [p for p in target.split("/") if p not in ("", ".")]
-        if ".." in parts:
+        elif ".." in target.split("/"):
             found.append(
                 SkillViolation(
                     "references.escape", target, f"références : « {target} » remonte hors du dossier du skill"
                 )
             )
-        elif len(parts) > 2:
+    return found
+
+
+def _chain_violations(skill_file: Path, body: str) -> list[SkillViolation]:
+    """« Un seul niveau depuis SKILL.md » : un fichier référencé n'en référence pas un autre.
+
+    La spec vise les chaînes de références, pas le nombre de segments du chemin
+    (``scripts/x/y.py`` est un seul niveau). Seuls les ``.md`` présents sont lus.
+    """
+    found: list[SkillViolation] = []
+    for target in _local_targets(body):
+        referenced = skill_file.parent / target
+        if referenced.suffix != ".md" or not referenced.is_file():
+            continue
+        try:
+            nested = _local_targets(referenced.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if nested:
             found.append(
                 SkillViolation(
                     "references.depth",
                     target,
-                    f"références : « {target} » a plus d'un niveau de profondeur (un seul niveau requis)",
+                    f"références : « {target} » renvoie à son tour vers « {nested[0]} » "
+                    "(un seul niveau depuis SKILL.md)",
                 )
             )
     return found
@@ -151,4 +178,11 @@ def validate_skill_text(text: str, *, slug: str) -> tuple[SkillViolation, ...]:
 def validate_skill_file(path: Path) -> tuple[SkillViolation, ...]:
     """Contrôle un fichier de skill ; le slug est le nom du fichier, ou du dossier pour ``<slug>/SKILL.md``."""
     slug = path.parent.name if path.name == "SKILL.md" else path.stem
-    return validate_skill_text(path.read_text(encoding="utf-8"), slug=slug)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return (SkillViolation("file.unreadable", path.name, f"fichier illisible en UTF-8 ({exc.__class__.__name__})"),)
+    found = validate_skill_text(text, slug=slug)
+    if path.name != "SKILL.md":
+        return found
+    return found + tuple(_chain_violations(path, parse_frontmatter(text)[1]))
