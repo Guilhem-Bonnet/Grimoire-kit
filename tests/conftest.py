@@ -114,11 +114,12 @@ def _isolate_user_state(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
         # pour une raison qui n'a rien à voir avec ce qu'elle teste. On fixe la
         # largeur pour que la sortie soit la même partout.
         mp.setenv("COLUMNS", "200")
-        # Issue #760 : la commande de hook émise dépend de l'installation du
-        # kit (PATH, venv). On la fige au nom nu pour que les fichiers générés
-        # soient les mêmes sur chaque poste et en CI ; les tests du résolveur
-        # retirent cette variable.
+        # Issue #760 : les commandes de hook et de serveur MCP émises dépendent
+        # de l'installation du kit (PATH, venv). On les fige au nom nu pour que
+        # les fichiers générés soient les mêmes sur chaque poste et en CI ; les
+        # tests du résolveur retirent ces variables.
         mp.setenv("GRIMOIRE_HOOK_COMMAND", "grimoire-hook")
+        mp.setenv("GRIMOIRE_MCP_COMMAND", "grimoire-mcp")
         yield
 
 
