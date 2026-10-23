@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from grimoire.cli.env_checks import EnvCheck
-from grimoire.hosts.hook_launcher import hook_program_resolves
+from grimoire.hosts.hook_launcher import command_program, hook_program_problem
 
 
 def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
@@ -57,19 +57,21 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
     commands = _generated_hook_commands(target)
     if not commands:
         return []
-    broken = sorted(
-        {
-            f"{relpath}: {command.partition(' --host ')[0]}"
-            for relpath, command in commands
-            if not hook_program_resolves(command.partition(" --host ")[0], target)
-        }
-    )
+    problems: set[str] = set()
+    for relpath, command in commands:
+        # Avant ``--host`` quand il y est (chemin non guillemeté avec espaces) ;
+        # sinon le premier mot : un script de gateway porte d'autres arguments.
+        head = command.partition(" --host ")[0] if " --host " in command else command_program(command)
+        reason = hook_program_problem(head, target)
+        if reason:
+            problems.add(f"{relpath}: {head} ({reason})")
+    broken = sorted(problems)
     if broken:
         return [EnvCheck(
             "hook_commands",
             passed=False,
             level="fail",
-            detail="hook program not found outside the active venv: " + "; ".join(broken),
+            detail="hook program not launchable outside the active venv: " + "; ".join(broken),
             remedy=(
                 "install the kit for the host (uv tool install grimoire-kit, or pipx), "
                 "or run `grimoire host sync` to write the venv path into the hooks"
