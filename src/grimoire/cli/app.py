@@ -650,6 +650,10 @@ def doctor(
         from grimoire.core.profile_floor_doctor import apply_profile_floor_check
         apply_profile_floor_check(target, results, fmt=fmt, console=console)
 
+    with _timed_phase("skill_spec"):  # 4nonies. Conformité des skills à la spec Agent Skills (#874).
+        from grimoire.cli.doctor_skills import apply_skill_spec_check
+        apply_skill_spec_check(target, results, fmt=fmt, console=console)
+
     # 5. Config semantic validation
     if cfg:
         warnings = cfg.validate()
