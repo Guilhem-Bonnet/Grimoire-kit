@@ -633,13 +633,8 @@ def doctor(
                 tag = "[yellow]WARN[/yellow]" if level == "warn" else "[dim]○[/dim]"
                 console.print(f"  {tag}  {detail}")
 
-    # 4sexies. Design guard (defect 5 of the 2026-09-12 session-budget
-    # incident, issue #463) — extracted to core/policy_budget_guard_check.py
-    # to keep this ratchet-frozen file from growing (see that module's
-    # docstring for the full rationale).
-    with _timed_phase("policy_budget_guard"):
+    with _timed_phase("policy_budget_guard"):  # 4sexies. Design guard (#463), see that module's docstring.
         from grimoire.core.policy_budget_guard_check import apply_policy_budget_guard_check
-
         apply_policy_budget_guard_check(target, results, fmt=fmt, console=console)
 
     with _timed_phase("task_unification"):  # 4septies. Board/ledger divergence (ADR-007, #559).
