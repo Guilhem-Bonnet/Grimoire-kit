@@ -200,15 +200,25 @@ def test_le_client_rend_la_coupure_apres_trois_essais() -> None:
     assert server.accepted == _cockpit_http.ATTEMPTS
 
 
-def test_le_client_ne_retente_pas_un_refus_de_connexion() -> None:
+def test_le_client_ne_retente_pas_un_refus_de_connexion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un refus de connexion est rendu au premier essai : une seule ouverture,
+    aucun délai. (Compté, pas chronométré : sur un runner Windows saturé, un
+    ``connect`` refusé sur la loopback a pris 2 s.)"""
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))
     port = probe.getsockname()[1]
     probe.close()
-    started = time.monotonic()
+    opened: list[str] = []
+    slept: list[float] = []
+    real_urlopen = urllib.request.urlopen
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda req, **kw: (opened.append(req.full_url), real_urlopen(req, **kw))[1]
+    )
+    monkeypatch.setattr(time, "sleep", slept.append)
 
     with pytest.raises(urllib.error.URLError) as caught:
         _cockpit_http.get(port, "/api/x", timeout=5)
 
     assert isinstance(caught.value.reason, ConnectionRefusedError)
-    assert time.monotonic() - started < _cockpit_http.RETRY_DELAY_S * 2
+    assert len(opened) == 1
+    assert slept == []
