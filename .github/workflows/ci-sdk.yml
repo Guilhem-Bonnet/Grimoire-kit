@@ -159,14 +159,29 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
+      # Décision du 2026-10-23 : la jambe Windows (suite complète, ~1 h, un
+      # runner en série) est écartée des PR pour le moment ; elle tourne encore
+      # sur chaque push de main (#857 s'observe là). Le job garde son nom et
+      # rend vert en quelques secondes sur une PR, pour que la protection de
+      # branche ne l'attende pas indéfiniment. À réarmer plus tard.
+      - name: Windows écarté sur les PR (2026-10-23)
+        if: matrix.os == 'windows-latest' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          echo "### Windows écarté sur les PR" >> $GITHUB_STEP_SUMMARY
+          echo "La suite Windows ne tourne que sur main (décision du 2026-10-23)." >> $GITHUB_STEP_SUMMARY
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        if: ${{ !(matrix.os == 'windows-latest' && github.event_name == 'pull_request') }}
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package + dev deps
+        if: ${{ !(matrix.os == 'windows-latest' && github.event_name == 'pull_request') }}
         run: pip install -e ".[dev]"
 
       - name: Run unit tests with coverage
+        if: ${{ !(matrix.os == 'windows-latest' && github.event_name == 'pull_request') }}
         # La suite complète sur les trois systèmes (D-10) : l'ancien sous-ensemble
         # Windows et le `-x` (arrêt au premier échec, aussi posé par `addopts`)
         # cachaient chaque défaut derrière le précédent. xdist (`-n auto`) paie
