@@ -156,7 +156,7 @@ def _one_pass(
     """Récolte, réveils, effets, admission — les mêmes gestes en plan (sur la copie) et appliqués."""
     from grimoire.missions.effects import reconcile
 
-    report = service.reap(apply=True, now=now)
+    report = service.reap(apply=True, now=now, probe_hosts=mode == "apply")
     woken = tuple(service.wake_due(apply=True, now=now, pause=state))
     effects = tuple(reconcile(service, apply=True, probe=effect_probe))
     plan = service.queue_plan(now=now, pause=state)

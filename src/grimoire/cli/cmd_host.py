@@ -94,6 +94,9 @@ class _HostStatus:
     #: pour que l'écart soit visible.
     entry_agent: str = ""
     entry_agent_declared: str = ""
+    #: Version d'hôte installée et preuve du frein qui la couvre (#876) ; vides si l'hôte n'est pas sondable.
+    host_version: str = ""
+    brake_proof: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -110,7 +113,36 @@ class _HostStatus:
             "agents_with_inferred_tools": self.agents_with_inferred_tools,
             "entry_agent": self.entry_agent,
             "entry_agent_declared": self.entry_agent_declared,
+            "host_version": self.host_version,
+            "brake_proof": self.brake_proof,
         }
+
+
+def _brake_status(host_id: HostId, *, probe: bool) -> tuple[str, dict[str, Any]]:
+    """``(version installée, preuve du frein)`` pour *host_id* (#876) ; ``("", {})`` si non sondable.
+
+    ``probe`` lance la sonde si la version n'est couverte par aucune preuve.
+    """
+    from grimoire.hosts.capabilities import recorded_contract
+    from grimoire.hosts.contract_probe import installed_version, probe_host, proof_for
+
+    version = installed_version(host_id)
+    if not version:
+        return "", {}
+    if recorded_contract(host_id).host_version == version:
+        return version, {"status": "verified", "source": "fixtures", "version": version, "probed_at": ""}
+    proof = proof_for(host_id, version)
+    if proof is None and probe:
+        proof = probe_host(host_id, version)
+    if proof is None:
+        return version, {"status": "unverified", "source": "", "version": version, "probed_at": ""}
+    return version, {
+        "status": "verified" if proof.ok else "failed",
+        "source": "probe",
+        "version": version,
+        "probed_at": proof.probed_at,
+        "reason": proof.reason,
+    }
 
 
 def _detected_host() -> HostId:
@@ -286,6 +318,7 @@ def host_status(
     ctx: typer.Context,
     project_root: Path = _PROJECT_ROOT_OPTION,
     host: str = _HOST_OPTION,
+    probe: bool = typer.Option(False, "--probe", help="Sonder le frein de la version installée si aucune preuve ne la couvre."),
 ) -> None:
     """Comparer ce que le projet déclare à ce que l'hôte exécute vraiment."""
     surface = build_surface(project_root)
@@ -297,6 +330,7 @@ def host_status(
         profile = profile_for(host_id)
         plan = emitter.plan(surface, project_root)
         pending = apply_plan(plan, project_root, dry_run=True)
+        host_version, brake_proof = _brake_status(host_id, probe=probe)
         payload.append(
             _HostStatus(
                 host=host_id.value,
@@ -312,6 +346,8 @@ def host_status(
                 agents_with_inferred_tools=[a.name for a in surface.agents if a.tools_origin == "inferred"],
                 entry_agent=(entry.name if (entry := surface.entry_agent()) else ""),
                 entry_agent_declared=entry_agent_name(project_root),
+                host_version=host_version,
+                brake_proof=brake_proof,
             )
         )
 
@@ -359,6 +395,11 @@ def host_status(
         for label in item.conflicts:
             cause = _CONFLICT_TEXT.get(item.conflict_causes.get(label, ""), "conflit")
             console.print(f"  [yellow][!][/yellow] {label} — {cause}, au chemin géré")
+        if item.brake_proof:
+            proof = item.brake_proof
+            when = f", sondé le {proof['probed_at']}" if proof.get("probed_at") else ""
+            label = {"verified": "prouvé", "failed": "[red]sonde échouée[/red]", "unverified": "[yellow]non prouvé[/yellow]"}[proof["status"]]
+            console.print(f"  frein PreToolUse {label} pour la version {proof['version']}{when}")
         if item.blocking_hooks:
             console.print(f"  hooks bloquants : {', '.join(item.blocking_hooks)}")
         if item.unsupported_events:

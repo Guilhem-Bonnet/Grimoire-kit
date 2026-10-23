@@ -124,6 +124,12 @@ def _isolate_user_state(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
 
 
 @pytest.fixture(autouse=True)
+def _no_automatic_host_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La sonde du frein (#876) lance un vrai binaire d'hôte : jamais en test, sauf appel explicite avec un faux."""
+    monkeypatch.setenv("GRIMOIRE_HOST_PROBE", "0")
+
+
+@pytest.fixture(autouse=True)
 def _default_no_docker_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     """``grimoire init``'s express Memory step recommends ``complet`` whenever
     Docker's daemon actually answers (2026-09-18 arbitrage on #619,

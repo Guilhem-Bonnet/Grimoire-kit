@@ -1,0 +1,200 @@
+"""Sonde du contrat d'hôte, relancée à chaque nouvelle version (#876, verrou 5).
+
+Le frein (``pretooluse_deny`` : un refus au PreToolUse arrête réellement
+l'outil) n'est prouvé en dur que pour la version capturée à la main (Claude Code
+2.1.301). Une version de plus et toute reprise tombait en ``waiting(human)``.
+
+Ici la preuve se refait toute seule, pour la version **exacte** de l'hôte :
+deux passes contre le binaire (témoin : un hook qui laisse passer, l'outil
+s'exécute ; refus : un hook qui sort en 2, l'outil ne s'exécute pas). Le
+résultat est consigné dans l'état utilisateur
+(``~/.grimoire/control/host-contracts.json``), une entrée par ``hôte@version``.
+
+Jamais de plage présumée : une preuve ne vaut que pour la version qui l'a
+produite. Un échec (binaire absent, délai dépassé, témoin muet, outil exécuté
+malgré le refus) est consigné comme échec et vaut « pas de frein » ; il n'est
+rejoué qu'après :data:`RETRY_AFTER`. Aucune exception ne remonte à l'appelant.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from grimoire.bridges.schemas import HostId
+
+#: Capacité que la sonde établit.
+CAPABILITY = "pretooluse_deny"
+#: Désactive le déclenchement automatique (``0``) ; ``host status --probe`` reste possible.
+PROBE_ENV = "GRIMOIRE_HOST_PROBE"
+#: Délai maximal d'une passe de la sonde (secondes).
+PROBE_TIMEOUT = 90
+#: Un échec n'est rejoué qu'après ce délai.
+RETRY_AFTER = timedelta(days=1)
+
+_MARKER = "EXECUTED.marker"
+_VERSION = re.compile(r"\d+(?:\.\d+){1,3}")
+_HOSTS = {HostId.CLAUDE_CODE_CLI: "claude"}
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeProof:
+    """Résultat consigné d'une sonde : pour une version d'hôte exacte."""
+
+    host: str
+    version: str
+    ok: bool
+    probed_at: str
+    reason: str = ""
+
+    @property
+    def key(self) -> str:
+        return f"{self.host}@{self.version}"
+
+
+def proofs_path() -> Path:
+    return Path.home() / ".grimoire" / "control" / "host-contracts.json"
+
+
+def _load() -> dict[str, dict[str, object]]:
+    try:
+        data = json.loads(proofs_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def proof_for(host_id: HostId, version: str | None) -> ProbeProof | None:
+    """La preuve consignée pour *exactement* cette version, ``None`` si aucune."""
+    wanted = (version or "").strip()
+    if not wanted:
+        return None
+    entry = _load().get(f"{host_id.value}@{wanted}")
+    if not isinstance(entry, dict):
+        return None
+    return ProbeProof(
+        host=host_id.value,
+        version=wanted,
+        ok=entry.get("ok") is True,
+        probed_at=str(entry.get("probed_at", "")),
+        reason=str(entry.get("reason", "")),
+    )
+
+
+def _record(proof: ProbeProof) -> None:
+    data = _load()
+    data[proof.key] = {"ok": proof.ok, "probed_at": proof.probed_at, "reason": proof.reason}
+    path = proofs_path()
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+
+
+def installed_version(host_id: HostId, binary: str | None = None) -> str:
+    """Version du binaire de l'hôte (``--version``), ``""`` si illisible ou hôte non sondable."""
+    exe = binary or shutil.which(_HOSTS.get(host_id, ""))
+    if not exe or host_id not in _HOSTS:
+        return ""
+    try:
+        done = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    found = _VERSION.search(done.stdout or "")
+    return found.group(0) if found else ""
+
+
+def _leg(binary: str, *, deny: bool, timeout: int) -> tuple[bool, bool]:
+    """Une passe : ``(hook appelé, outil exécuté)``."""
+    with tempfile.TemporaryDirectory(prefix="grimoire-host-probe-") as tmp:
+        root = Path(tmp)
+        log = root / "hook.log"
+        body = f"cat >> '{log}'; " + ("echo 'GRIMOIRE-PROBE-DENY' >&2; exit 2" if deny else "exit 0")
+        settings = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": f"sh -c \"{body}\""}]}]}}
+        (root / ".claude").mkdir()
+        (root / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        command = [
+            binary, "-p", f"Run exactly: touch {_MARKER}. Do not retry if refused.",
+            "--model", "haiku", "--setting-sources", "project", "--max-turns", "4",
+            "--output-format", "json", "--allowedTools", "Bash(touch:*)",
+        ]  # fmt: skip
+        subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=timeout, check=False)
+        return log.is_file() and log.stat().st_size > 0, (root / _MARKER).exists()
+
+
+def probe_host(
+    host_id: HostId,
+    version: str,
+    *,
+    binary: str | None = None,
+    timeout: int = PROBE_TIMEOUT,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> ProbeProof:
+    """Sonde le frein de *host_id* à *version*, consigne et rend la preuve (jamais d'exception).
+
+    La sonde ne prouve que la version du binaire réellement lancé : si ``--version``
+    diffère de *version*, rien n'est lancé ni consigné pour *version*.
+    """
+    reason = ""
+    exe = binary or shutil.which(_HOSTS.get(host_id, "")) or ""
+    ok = False
+    if host_id not in _HOSTS:
+        reason = "hôte non sondable"
+    elif not exe:
+        reason = "binaire introuvable"
+    elif installed_version(host_id, exe) != version:
+        return ProbeProof(host_id.value, version, False, "", "le binaire installé n'est pas cette version")
+    else:
+        try:
+            control_hook, control_ran = _leg(exe, deny=False, timeout=timeout)
+            deny_hook, deny_ran = _leg(exe, deny=True, timeout=timeout)
+        except (OSError, subprocess.SubprocessError) as exc:
+            reason = f"sonde interrompue : {type(exc).__name__}"
+        else:
+            if not (control_hook and control_ran):
+                reason = "témoin muet : l'outil ne s'est pas exécuté sans refus"
+            elif not deny_hook:
+                reason = "le hook de refus n'a pas été appelé"
+            elif deny_ran:
+                reason = "l'outil s'est exécuté malgré le refus"
+            else:
+                ok = True
+    proof = ProbeProof(host_id.value, version, ok, now().isoformat(timespec="seconds"), reason)
+    _record(proof)
+    return proof
+
+
+def ensure_probed(host_id: HostId, version: str | None, *, binary: str | None = None) -> ProbeProof | None:
+    """Sonde la version si aucune preuve (en dur ou consignée) ne la couvre ; ``None`` si rien à faire.
+
+    Une fois par version : une preuve consignée, réussie ou non, n'est pas rejouée
+    avant :data:`RETRY_AFTER`. ``GRIMOIRE_HOST_PROBE=0`` désactive le déclenchement.
+    """
+    from grimoire.hosts.capabilities import recorded_contract
+
+    wanted = (version or "").strip()
+    if not wanted or host_id not in _HOSTS or os.environ.get(PROBE_ENV, "").strip() == "0":
+        return None
+    if recorded_contract(host_id).host_version == wanted:
+        return None
+    known = proof_for(host_id, wanted)
+    if known is not None:
+        if known.ok:
+            return None
+        with contextlib.suppress(ValueError):
+            if datetime.now(UTC) - datetime.fromisoformat(known.probed_at) < RETRY_AFTER:
+                return None
+    try:
+        return probe_host(host_id, wanted, binary=binary)
+    except Exception:
+        return None  # fail-closed : pas de frein, jamais d'erreur pour l'utilisateur
