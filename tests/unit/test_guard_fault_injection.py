@@ -527,6 +527,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "authority_guard": (GUARD, ""),
     "calibration": (SUPPORT, "journal d'observation (policy.hold) : ne change jamais une décision"),
     "context_capsule": (GUARD, ""),
+    "chain_ack": (SUPPORT, "phrase d'explication d'une rupture du journal de preuve, appelée par task_context (UserPromptSubmit) : une panne y est couverte par les cas task_context ; sans phrase tapée, elle ne fait rien"),
     "done_gate": (GUARD, ""),
     "enrolment": (GUARD, ""),
     "evidence_gate": (GUARD, ""),
