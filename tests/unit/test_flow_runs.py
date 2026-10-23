@@ -17,7 +17,7 @@ from pathlib import Path
 
 from grimoire.flows.engine import FlowEngine
 from grimoire.flows.executor import InteractiveNodeExecutor
-from grimoire.tools.flow_runs import list_flow_runs
+from grimoire.tools.flow_runs import flow_runs_view, list_flow_runs
 
 
 def _write_run(root: Path, run_id: str, blueprint_id: str, created_at: str) -> None:
@@ -127,3 +127,106 @@ def test_a_run_missing_from_the_kernel_has_a_null_status(tmp_path: Path) -> None
     runs = list_flow_runs(tmp_path)
     assert runs[0]["status"] is None
     assert runs[0]["currentNode"] is None
+
+
+# ── P07 : un aperçu n'est pas un run, et le checkpoint se lit sur tous les runs ──
+
+
+def _engine(tmp_path: Path) -> FlowEngine:
+    return FlowEngine(
+        kernel_root=tmp_path / "_grimoire-runtime-output" / "runtime",
+        flows_root=tmp_path / "_grimoire-runtime-output" / "flows",
+        project_root=tmp_path,
+    )
+
+
+def test_a_preview_run_is_marked_and_never_listed_nor_counted(tmp_path: Path) -> None:
+    """Revue UX B2 : l'aperçu (`confirm:false`, `upgrade-flow run --dry-run`)
+
+    créait un run ordinaire (WFI-022) qui devenait « le dernier run » et
+    masquait le checkpoint toujours pendant du run 021. Marqué `preview`, il
+    reste sur disque mais n'apparaît ni dans la liste ni dans le total."""
+    bp = _write_two_node_blueprint(tmp_path)
+    engine = _engine(tmp_path)
+    checkpointed, _ = engine.run(bp, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    engine.resume(checkpointed.id, output={"pins": {"out": {"contract": "c1"}}})
+    preview, _ = engine.run(bp, executor=InteractiveNodeExecutor(stream=io.StringIO()), preview=True)
+
+    meta = json.loads((tmp_path / "_grimoire-runtime-output" / "flows" / f"{preview.id}.json").read_text(encoding="utf-8"))
+    assert meta["preview"] is True
+
+    view = flow_runs_view(tmp_path)
+    assert [r["runId"] for r in view["runs"]] == [checkpointed.id]
+    assert view["total"] == 1
+    assert view["runs"][0]["status"] == "checkpointed"
+
+
+def test_an_ordinary_run_metadata_has_no_preview_key(tmp_path: Path) -> None:
+    """Une métadonnée de run ordinaire reste identique à celle d'avant le champ."""
+    bp = _write_two_node_blueprint(tmp_path)
+    wfi, _ = _engine(tmp_path).run(bp, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    meta = json.loads((tmp_path / "_grimoire-runtime-output" / "flows" / f"{wfi.id}.json").read_text(encoding="utf-8"))
+    assert "preview" not in meta
+
+
+def test_the_total_counts_every_run_beyond_the_returned_page(tmp_path: Path) -> None:
+    for i in range(5):
+        _write_run(tmp_path, f"run-{i}", "project-upgrade", f"2026-09-14T{10 + i:02d}:00:00+00:00")
+    view = flow_runs_view(tmp_path, limit=2)
+    assert len(view["runs"]) == 2
+    assert view["total"] == 5
+
+
+def _write_upgrade_blueprint(tmp_path: Path) -> Path:
+    """Un `project-upgrade` minimal : une sauvegarde, puis le node `destructive`."""
+    blueprint = {
+        "blueprintVersion": 1,
+        "id": "project-upgrade",
+        "name": "Mise à niveau",
+        "nodes": [
+            {
+                "id": "backup", "kind": "pattern", "ref": "ORC-01", "label": "Sauvegarde",
+                "pins": [{"id": "out", "direction": "out", "contract": "c1"}],
+            },
+            {
+                "id": "destructive", "kind": "pattern", "ref": "QUA-04", "label": "Destructif",
+                "pins": [{"id": "in", "direction": "in", "contract": "c1"}],
+            },
+        ],
+        "edges": [{"from": "backup.out", "to": "destructive.in", "contract": "c1"}],
+    }
+    path = tmp_path / "project-upgrade.blueprint.json"
+    path.write_text(json.dumps(blueprint), encoding="utf-8")
+    return path
+
+
+def test_three_upgrade_runs_are_all_rendered_with_exact_status_and_node(tmp_path: Path) -> None:
+    """Deux runs checkpointés au node `destructive` (non décidés) et un run plus
+
+    récent terminé : la vue rend les trois, chacun avec son état exact, pour que
+    la fiche Piloter retrouve le checkpoint pendant derrière le dernier run."""
+    bp = _write_upgrade_blueprint(tmp_path)
+    engine = _engine(tmp_path)
+    advance = {"pins": {"out": {"contract": "c1"}}}
+    executor = InteractiveNodeExecutor(stream=io.StringIO())
+
+    pending_ids = []
+    for _ in range(2):
+        wfi, _ = engine.run(bp, executor=executor)
+        engine.resume(wfi.id, output=advance)
+        pending_ids.append(wfi.id)
+
+    latest, _ = engine.run(bp, executor=executor)
+    engine.resume(latest.id, output=advance)
+    engine.resume(latest.id, output={"pins": {}})
+
+    view = flow_runs_view(tmp_path, blueprint_id="project-upgrade")
+    assert view["total"] == 3
+    by_id = {r["runId"]: r for r in view["runs"]}
+    assert set(by_id) == {*pending_ids, latest.id}
+    for run_id in pending_ids:
+        assert by_id[run_id]["status"] == "checkpointed"
+        assert by_id[run_id]["currentNode"] == "destructive"
+    assert by_id[latest.id]["status"] == "completed"
+    assert by_id[latest.id]["currentNode"] is None
+    assert view["runs"][0]["runId"] == latest.id

@@ -1125,7 +1125,7 @@ def sheet_view(project_root: Path) -> dict[str, Any]:
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from grimoire.tools.flow_runs import list_flow_runs
+    from grimoire.tools.flow_runs import flow_runs_view
     from grimoire.tools.memory_link import memory_link_status
     from grimoire.tools.project_health import project_health
     from grimoire.tools.project_setup import read_setup_run
@@ -1138,7 +1138,10 @@ def sheet_view(project_root: Path) -> dict[str, Any]:
         "agents": lambda: agents_view(root),
         "proposals": lambda: proposals_view(root),
         "setupRun": lambda: read_setup_run(root),
-        "upgradeRuns": lambda: {"runs": list_flow_runs(root, blueprint_id="project-upgrade")},
+        "upgradeRuns": lambda: flow_runs_view(root, blueprint_id="project-upgrade"),
+        # Même lecture que `GET /api/workspace/flows/runs` (la liste d'Observer) :
+        # le KPI de la fiche en dérive, jamais du nombre de blueprints présents.
+        "flowRuns": lambda: flow_runs_view(root),
         "name": lambda: _sheet_project_name(root),
     }
     results: dict[str, Any] = {"doctor": None}
