@@ -274,6 +274,18 @@ def task_add(
     if added.mission_created:
         console.print(f"[dim]Mission créée : {added.mission_id} (aucune n'existait).[/dim]")
     _emit_task(ctx, added.task, added.task.status.value)
+    _print_verifiability(added.task)
+
+
+def _print_verifiability(task: Any) -> None:
+    """Affiche la classe de vérifiabilité calculée et nomme chaque critère non reconnu (#876)."""
+    from grimoire.missions.verifiability import as_dict
+
+    verifiabilite = as_dict(task)
+    console.print(f"  vérifiabilité : {verifiabilite['class']} — {escape(verifiabilite['reason'])}")
+    for entree in verifiabilite["criteria"]:
+        if entree["pattern"] is None:
+            console.print(f"    [yellow]non reconnu[/yellow] : {escape(entree['criterion'])}")
 
 
 def _auto_test_depth(

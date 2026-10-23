@@ -308,3 +308,56 @@ def test_fichier_attendu_formulations_refusees() -> None:
         "le fichier docs/x.md est lisible",
     ):
         assert classify(tache(acceptance=(texte,))) is Verifiability.V2, texte
+
+
+# --- #876 lot 0, verrou 3 : un critère qui cite une commande --check déclarée est mécanique
+
+
+def _avec(cmd: str, *criteres: str) -> MissionTask:
+    return tache(acceptance=criteres, checks=(TaskCheck(cmd=cmd),))
+
+
+def test_critere_test_citant_le_fichier_du_check_est_v0() -> None:
+    t = _avec("pytest tests/unit/test_x.py -q", "Test : tests/unit/test_x.py::test_a")
+    assert classify(t) is Verifiability.V0
+    assert explain(t)[0][1] == "commande_declaree"
+
+
+def test_critere_citant_la_commande_entiere_est_v0() -> None:
+    t = _avec("make smoke-e2e", "Test : `make smoke-e2e`")
+    assert classify(t) is Verifiability.V0
+
+
+def test_exemple_reel_pr_fusionnee_avec_check_gh_est_v0() -> None:
+    t = _avec(
+        "gh pr view 763 --json state -q .state | grep -qx MERGED",
+        "PR #763 fusionnée sur main du kit",
+    )
+    assert classify(t) is Verifiability.V0
+
+
+def test_critere_sans_commande_citee_garde_sa_classe() -> None:
+    assert classify(_avec("pytest tests/unit/test_x.py", "le comportement est correct")) is Verifiability.V2
+    # outil seul, dossier nu, nombre sans # : trop de prose pour valoir couverture
+    assert classify(_avec("pytest tests/unit/test_x.py", "pytest est content")) is Verifiability.V2
+    assert classify(_avec("ruff check src/", "le code de src/ est propre")) is Verifiability.V2
+    assert classify(_avec("gh pr view 763", "763 lignes de doc")) is Verifiability.V2
+    assert classify(_avec("pytest tests/unit/test_x.py", "tests/unit/test_xy.py est bien")) is Verifiability.V2
+
+
+def test_couverture_par_commande_ne_masque_pas_une_revue() -> None:
+    t = _avec("pytest tests/unit/test_x.py", "revue de tests/unit/test_x.py par un pair")
+    assert classify(t) is Verifiability.V1
+
+
+def test_sans_check_declare_pas_de_couverture() -> None:
+    t = tache(acceptance=("Test : tests/unit/test_x.py",), checks=())
+    assert classify(t) is Verifiability.V2
+
+
+def test_as_dict_nomme_le_critere_non_reconnu_malgre_la_couverture_des_autres() -> None:
+    t = _avec("pytest tests/unit/test_x.py", "Test : tests/unit/test_x.py", "le code est élégant")
+    d = as_dict(t)
+    assert d["class"] == "V2"
+    assert "le code est élégant" in d["reason"]
+    assert [c["pattern"] for c in d["criteria"]] == ["commande_declaree", None]

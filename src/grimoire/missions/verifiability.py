@@ -32,6 +32,7 @@ cette montée reste un motif nommé plutôt qu'un ``if`` de plus quelque part.
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -289,7 +290,65 @@ def is_bare_command(texte: str) -> bool:
     return _est_commande_nue(texte)
 
 
-def _classer_critere(texte: str) -> _Verdict:
+#: Un jeton « fichier » : porte une extension (``tests/test_x.py``), ou un
+#: sélecteur ``::``. Un dossier nu (``src/``) n'en est pas un : « le code de
+#: src/ est propre » ne devient pas mécanique parce que ``ruff check src/``
+#: est déclaré.
+_JETON_FICHIER = re.compile(r"^[\w./\-]*[\w\-]\.\w+(?:::\S+)?$|^\S+::\S+$")
+
+#: Un identifiant numérique (``763`` dans ``gh pr view 763``) ; le critère doit
+#: le citer sous la forme ``#763`` — un « 3 » nu dans la prose ne compte pas.
+_JETON_NUMERO = re.compile(r"^\d{2,}$")
+
+
+def _normaliser(texte: str) -> str:
+    return " ".join(texte.replace("`", "").split()).casefold()
+
+
+def _cite(texte: str, jeton: str) -> bool:
+    """Vrai si *jeton* figure dans *texte* comme mot entier (pas comme fragment d'un autre)."""
+    return re.search(rf"(?<![\w./\-]){re.escape(jeton)}(?![\w\-]|\.\w)", texte) is not None
+
+
+def _couvert_par_commande(texte: str, commandes: Sequence[str]) -> str | None:
+    """Dit si une commande déclarée (``--check``) porte le critère — issue #876.
+
+    Règle, déterministe et prudente : le critère est couvert quand il **cite**
+    une commande déclarée, c'est-à-dire s'il contient, comme mots entiers,
+
+    - la commande entière (espaces normalisés, casse ignorée) ; ou
+    - un jeton fichier de la commande (extension ou sélecteur ``::``, par
+      exemple ``tests/unit/test_x.py``) ; ou
+    - un identifiant numérique de la commande (``763`` de ``gh pr view 763``)
+      écrit ``#763`` dans le critère.
+
+    Ni le nom d'un outil seul (« pytest »), ni un dossier nu (``src/``), ni
+    un nombre sans ``#`` ne suffisent : ils reviennent dans trop de prose. Cette
+    couverture ne relève QUE un critère ambigu — la revue (``JUDGE_PATTERNS``)
+    garde la priorité, et un critère qui ne cite aucune commande garde sa
+    classe. Retourne le jeton qui a fait la correspondance, ou ``None``.
+    """
+    brut = " ".join(texte.replace("`", "").split())
+    plat = _normaliser(texte)
+    for cmd in commandes:
+        entiere = _normaliser(cmd)
+        if entiere and entiere in plat:
+            return cmd.strip()
+        try:
+            jetons = shlex.split(cmd)
+        except ValueError:
+            jetons = cmd.split()
+        for jeton in jetons:
+            if jeton.startswith("-"):
+                continue
+            if _JETON_FICHIER.match(jeton) and _cite(plat, jeton.casefold()):
+                return jeton
+            if _JETON_NUMERO.match(jeton) and re.search(rf"#{jeton}\b", brut):
+                return f"#{jeton}"
+    return None
+
+
+def _classer_critere(texte: str, commandes: Sequence[str] = ()) -> _Verdict:
     """Classe un critère isolé — la revue prime sur le mécanique.
 
     Un critère qui mentionne à la fois une suite de tests et une relecture
@@ -306,8 +365,15 @@ def _classer_critere(texte: str) -> _Verdict:
     for motif, motif_re in MECHANICAL_PATTERNS:
         if motif_re.search(texte) and (motif in _MOTIFS_AUTO_VERDICT or VERDICT_MARKER.search(texte)):
             return _Verdict(_Categorie.MECANIQUE, motif)
+    if _couvert_par_commande(texte, commandes) is not None:
+        return _Verdict(_Categorie.MECANIQUE, "commande_declaree")
     # Outil nommé sans verdict, ou rien de reconnu : le silence ne vaut pas confiance.
     return _Verdict(_Categorie.AMBIGU, None)
+
+
+def _commandes(task: MissionTask) -> tuple[str, ...]:
+    """Les commandes exécutables déclarées de la tâche (``task.checks``, issue #772)."""
+    return tuple(getattr(c, "cmd", "") for c in (getattr(task, "checks", ()) or ()))
 
 
 def _criteres(task: MissionTask) -> tuple[str, ...]:
@@ -325,12 +391,12 @@ def _criteres(task: MissionTask) -> tuple[str, ...]:
     preuves = tuple(
         e
         for e in (getattr(task, "expected_evidence", ()) or ())
-        if _classer_critere(e).categorie is not _Categorie.AMBIGU
+        if _classer_critere(e, _commandes(task)).categorie is not _Categorie.AMBIGU
     )
     return acceptance + preuves
 
 
-def classify_criteria(criteria: Sequence[str]) -> Verifiability:
+def classify_criteria(criteria: Sequence[str], commands: Sequence[str] = ()) -> Verifiability:
     """Dérive la classe depuis du texte nu — le cœur de :func:`classify`, sans ``MissionTask``.
 
     Extrait pour l'issue #428 : le format de blueprint (``flows.blueprint_loader``)
@@ -342,8 +408,11 @@ def classify_criteria(criteria: Sequence[str]) -> Verifiability:
     construction. Un juge ne fait V1 que si rien n'est tombé en V2. L'absence
     totale de critère est elle-même un V2 : rien de muet sur ses critères
     n'est vérifiable par rien.
+
+    *commands* : les commandes déclarées (``--check``) ; un critère qui en cite
+    une est mécanique — règle dans :func:`_couvert_par_commande` (issue #876).
     """
-    verdicts = [_classer_critere(c) for c in criteria]
+    verdicts = [_classer_critere(c, commands) for c in criteria]
     if not verdicts:
         return Verifiability.V2
     if any(v.categorie is _Categorie.AMBIGU for v in verdicts):
@@ -353,7 +422,7 @@ def classify_criteria(criteria: Sequence[str]) -> Verifiability:
     return Verifiability.V0
 
 
-def reason_for_criteria(criteria: Sequence[str]) -> str:
+def reason_for_criteria(criteria: Sequence[str], commands: Sequence[str] = ()) -> str:
     """Dit POURQUOI la classe est celle-là, en citant le critère décisif.
 
     Pour V2, le premier critère sans verdict reconnu (ou l'absence de
@@ -363,7 +432,7 @@ def reason_for_criteria(criteria: Sequence[str]) -> str:
     """
     if not criteria:
         return "aucun critère déclaré : rien à vérifier mécaniquement"
-    verdicts = [(c, _classer_critere(c)) for c in criteria]
+    verdicts = [(c, _classer_critere(c, commands)) for c in criteria]
     for critere, v in verdicts:
         if v.categorie is _Categorie.AMBIGU:
             return f"critère sans verdict reconnu : {critere!r}"
@@ -405,7 +474,7 @@ def classify(task: MissionTask, *, commands_declared: bool = False) -> Verifiabi
     *commands_declared* : l'appelant détient lui-même une commande à lancer
     (le ``--check`` de ``task dispatch``) — elle vaut déclaration.
     """
-    klass = classify_criteria(_criteres(task))
+    klass = classify_criteria(_criteres(task), _commandes(task))
     if klass is Verifiability.V0 and (_risque_accepte(task) or not (commands_declared or _commande_declaree(task))):
         return Verifiability.V1
     return klass
@@ -419,7 +488,7 @@ def explain(task: MissionTask) -> list[tuple[str, str | None]]:
     le critère est celui qui a fait monter la classe : c'est précisément
     celui-là que l'utilisateur doit regarder pour la faire descendre.
     """
-    return [(c, _classer_critere(c).motif) for c in _criteres(task)]
+    return [(c, _classer_critere(c, _commandes(task)).motif) for c in _criteres(task)]
 
 
 def as_dict(task: MissionTask) -> dict[str, Any]:
@@ -434,10 +503,10 @@ def as_dict(task: MissionTask) -> dict[str, Any]:
     data: dict[str, Any] = {
         "class": klass.value,
         "explanation": klass.explanation,
-        "reason": reason_for_criteria(_criteres(task)),
+        "reason": reason_for_criteria(_criteres(task), _commandes(task)),
         "criteria": [{"criterion": critere, "pattern": motif} for critere, motif in explain(task)],
     }
-    textual = classify_criteria(_criteres(task))
+    textual = classify_criteria(_criteres(task), _commandes(task))
     if klass is not textual:
         if textual is Verifiability.V0 and not _commande_declaree(task):
             data["explanation"] = (
