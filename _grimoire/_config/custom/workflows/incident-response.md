@@ -19,7 +19,7 @@ TEMPLATE — Remplacer les {{placeholders}} avant utilisation :
  {{user_name}} - Nom de l'utilisateur principal
 -->
 
-# <img src="../../../../docs/assets/icons/shield-pulse.svg" width="32" height="32" alt=""> Workflow Incident Response
+# <img src="../../../../docs/assets/icons/shield.svg" width="32" height="32" alt=""> Workflow Incident Response
 
 **But :** Fournir un processus structuré de diagnostic et de post-mortem pour tout incident infra ou sécurité. Ce workflow est partagé entre tous les agents opérationnels.
 
@@ -28,7 +28,7 @@ TEMPLATE — Remplacer les {{placeholders}} avant utilisation :
 <img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../../../../docs/assets/icons/puzzle.svg" width="28" height="28" alt=""> VARIANTES
+## <img src="../../../../docs/assets/icons/layers.svg" width="28" height="28" alt=""> VARIANTES
 
 | Variante | Lead | Support | Quand |
 |----------|------|---------|-------|
@@ -38,7 +38,7 @@ TEMPLATE — Remplacer les {{placeholders}} avant utilisation :
 
 <img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> ÉTAPE 1 : DÉTECTION & TRIAGE (5 min max)
+## ÉTAPE 1 : DÉTECTION & TRIAGE (5 min max)
 
 ### 1.1 Contexte initial
 
@@ -70,7 +70,7 @@ Recueillir immédiatement :
 
 <img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../../docs/assets/icons/microscope.svg" width="28" height="28" alt=""> ÉTAPE 2 : DIAGNOSTIC SYSTÉMATIQUE
+## <img src="../../../../docs/assets/icons/search.svg" width="28" height="28" alt=""> ÉTAPE 2 : DIAGNOSTIC SYSTÉMATIQUE
 
 ### 2.1 Arbre de diagnostic
 
@@ -107,7 +107,7 @@ L'agent lead doit collecter et documenter :
 
 <img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../../docs/assets/icons/workflow.svg" width="28" height="28" alt=""> ÉTAPE 3 : POST-MORTEM
+## ÉTAPE 3 : POST-MORTEM
 
 ### 3.1 Template post-mortem
 
@@ -169,7 +169,7 @@ services_impacted: [liste]
 
 <img src="../../../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../../../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> NOTES DE MODÉRATION
+## <img src="../../../../docs/assets/icons/doc.svg" width="28" height="28" alt=""> NOTES DE MODÉRATION
 
 - Ce workflow ne remplace pas les compétences des agents — il structure le processus
 - L'agent lead a autorité sur les décisions techniques pendant l'incident

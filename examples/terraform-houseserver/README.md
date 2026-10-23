@@ -1,12 +1,12 @@
 <p align="right"><a href="../../README.md">README</a></p>
 
-# <img src="../../docs/assets/icons/grimoire.svg" width="32" height="32" alt=""> Exemple : Terraform-HouseServer
+# Exemple : Terraform-HouseServer
 
 > **Illustratif, non rejouable.** Les sorties ci-dessous sont mises en forme à la main : aucun script `replay.sh` ni `expected.json` ne les rejoue. Les exemples vérifiés en CI sont listés dans [`examples/README.md`](../README.md).
 
 Ce dossier montre comment le Grimoire Kit est utilisé dans le projet d'origine [Terraform-HouseServer](https://github.com/Guilhem-Bonnet/Terraform-HouseServer).
 
-## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> Contexte
+## <img src="../../docs/assets/icons/book.svg" width="28" height="28" alt=""> Contexte
 
 - **Infrastructure** : Proxmox VE homelab avec 6 LXC + cluster K3s
 - **Stack** : Terraform, Ansible, Docker Compose, K3s, FluxCD
@@ -15,7 +15,7 @@ Ce dossier montre comment le Grimoire Kit est utilisé dans le projet d'origine 
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/brain.svg" width="28" height="28" alt=""> `project-context.yaml`
+## <img src="../../docs/assets/icons/book.svg" width="28" height="28" alt=""> `project-context.yaml`
 
 ```yaml
 project:
@@ -82,7 +82,7 @@ agents:
 
 <img src="../../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Résultats
+## <img src="../../docs/assets/icons/board.svg" width="28" height="28" alt=""> Résultats
 
 - **10 agents** actifs avec mémoire sémantique partagée
 - **Health-check** automatique à chaque session (rate-limité 24h)

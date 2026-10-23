@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/network.svg" width="32" height="32" alt=""> Agent Mesh Network (AMN) — Réseau Maillé et Communication Peer-to-Peer
+# <img src="../docs/assets/icons/graph.svg" width="32" height="32" alt=""> Agent Mesh Network (AMN) — Réseau Maillé et Communication Peer-to-Peer
 
 > **BM-55** — Architecture de découverte de services et communication directe entre agents
 > sans passer systématiquement par l'orchestrateur.
@@ -20,7 +20,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -57,7 +57,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Service Registry — Découverte d'Agents
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Service Registry — Découverte d'Agents
 
 Fichier : `_grimoire-output/.agent-registry.yaml`
 
@@ -127,7 +127,7 @@ registry:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Protocole d'Enregistrement
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Protocole d'Enregistrement
 
 ```yaml
 registration_protocol:
@@ -161,7 +161,7 @@ registration_protocol:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/network.svg" width="28" height="28" alt=""> Communication Peer-to-Peer (P2P)
+## <img src="../docs/assets/icons/graph.svg" width="28" height="28" alt=""> Communication Peer-to-Peer (P2P)
 
 ### Types de Messages P2P
 
@@ -253,7 +253,7 @@ governance_rules:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/network.svg" width="28" height="28" alt=""> Découverte de Services
+## <img src="../docs/assets/icons/graph.svg" width="28" height="28" alt=""> Découverte de Services
 
 Un agent peut trouver le bon interlocuteur via le registry :
 
@@ -297,7 +297,7 @@ discovery_protocol:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/network.svg" width="28" height="28" alt=""> Load Balancing
+## <img src="../docs/assets/icons/graph.svg" width="28" height="28" alt=""> Load Balancing
 
 Quand plusieurs agents sont éligibles :
 
@@ -319,7 +319,7 @@ load_balancing:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/chart.svg" width="28" height="28" alt=""> Observabilité
+## <img src="../docs/assets/icons/board.svg" width="28" height="28" alt=""> Observabilité
 
 Toute communication mesh est observable via ELSS :
 
@@ -353,7 +353,7 @@ observability:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/integration.svg" width="28" height="28" alt=""> Intégration Grimoire Trace
+## Intégration Grimoire Trace
 
 ```
 [timestamp] [dev/Amelia]     [AMN:register]   status=online | cap=[impl,tdd,JWT-auth]
@@ -366,7 +366,7 @@ observability:
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence Croisée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Référence Croisée
 
 - Message Bus : [framework/tools/message-bus.py](tools/message-bus.py) — transport P2P
 - Agent Worker : [framework/tools/agent-worker.py](tools/agent-worker.py) — worker lifecycle

@@ -28,7 +28,10 @@ HISTORICAL = {
 
 # Les ADR consignent une décision à une date : on les annote quand le contexte
 # change, on ne réécrit pas leur contenu — sinon ce ne sont plus des archives.
-HISTORICAL_PREFIXES = ("docs/adr-", "docs/changelog-")  # détail intégral d'une version publiée
+HISTORICAL_PREFIXES = (
+    "docs/explications/decisions/adr-",  # ADR, déplacés depuis docs/adr-*
+    "docs/_archive/changelog-",  # détail intégral d'une version publiée
+)
 
 TOOL_REF = re.compile(r"`?\b([a-z][a-z0-9_-]*\.py)`?")
 

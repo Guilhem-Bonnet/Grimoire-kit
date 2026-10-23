@@ -1,6 +1,6 @@
 <p align="right"><a href="../README.md">README</a> · <a href="../docs">Docs</a></p>
 
-# <img src="../docs/assets/icons/network.svg" width="32" height="32" alt=""> Agent2Agent Protocol — Handoff Structuré Cross-Outils (BM-32)
+# <img src="../docs/assets/icons/graph.svg" width="32" height="32" alt=""> Agent2Agent Protocol — Handoff Structuré Cross-Outils (BM-32)
 
 > **BM-32** — Stub d'implémentation du protocole Agent2Agent (A2A) de Google (mars 2025).
 >
@@ -14,7 +14,7 @@
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
 
-## <img src="../docs/assets/icons/temple.svg" width="28" height="28" alt=""> Architecture
+## <img src="../docs/assets/icons/layers.svg" width="28" height="28" alt=""> Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -43,7 +43,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Format A2A Task Request (Grimoire Profile)
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Format A2A Task Request (Grimoire Profile)
 
 ```json
 {
@@ -103,7 +103,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/shield-pulse.svg" width="28" height="28" alt=""> Format A2A Task Response (Grimoire Profile)
+## <img src="../docs/assets/icons/shield.svg" width="28" height="28" alt=""> Format A2A Task Response (Grimoire Profile)
 
 ```json
 {
@@ -145,7 +145,7 @@
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/boomerang.svg" width="28" height="28" alt=""> Stub Python (`framework/tools/a2a-dispatcher.py`)
+## <img src="../docs/assets/icons/undo.svg" width="28" height="28" alt=""> Stub Python (`framework/tools/a2a-dispatcher.py`)
 
 ```python
 #!/usr/bin/env python3
@@ -200,7 +200,7 @@ if __name__ == "__main__":
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/team.svg" width="28" height="28" alt=""> Protocole pour les agents Grimoire
+## <img src="../docs/assets/icons/fleet.svg" width="28" height="28" alt=""> Protocole pour les agents Grimoire
 
 Quand un agent souhaite déléguer à un autre outil :
 
@@ -242,7 +242,7 @@ Quand je dois déléguer une tâche à un agent dans un autre outil :
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 
-## <img src="../docs/assets/icons/clipboard.svg" width="28" height="28" alt=""> Référence croisée
+## <img src="../docs/assets/icons/doc.svg" width="28" height="28" alt=""> Référence croisée
 
 - Serveur MCP (fiche obsolète, voir `docs/mcp-integration.md`) : [framework/mcp/grimoire-mcp-server.md](mcp/grimoire-mcp-server.md)
 - Subagent Orchestration : [framework/workflows/subagent-orchestration.md](workflows/subagent-orchestration.md)

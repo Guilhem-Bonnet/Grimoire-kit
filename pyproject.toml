@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "grimoire-kit"
 dynamic = ["version"]
-description = "Composable AI agent platform — personas, memory, workflows, and quality automation for any project."
+description = "Dashboard, task board, project memory and evidence check for code you delegate to agents (Claude Code, Copilot)."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
@@ -118,6 +118,9 @@ docs = [
     # (schéma, primitives, catalogue) : rien n'est commité, donc rien ne rote.
     "mkdocs-gen-files>=0.5",
     "mkdocs-literate-nav>=0.6",
+    # Les pages déplacées gardent leur ancienne adresse : sans redirection, un
+    # lien externe vers l'ancien manuel tomberait sur une 404.
+    "mkdocs-redirects>=1.2",
 ]
 
 [project.scripts]

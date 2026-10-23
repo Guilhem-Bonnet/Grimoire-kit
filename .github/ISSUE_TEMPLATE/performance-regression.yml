@@ -1,4 +1,4 @@
-name: "⚡ Régression de performance"
+name: "Régression de performance"
 description: Signaler une dégradation de performance.
 labels: ["type:core", "performance"]
 body:

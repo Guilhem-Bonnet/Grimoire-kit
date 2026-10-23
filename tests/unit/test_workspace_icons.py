@@ -1,9 +1,10 @@
 """Garde du sprite d'icônes du cockpit (web/workspace/icons.svg).
 
 Le sprite est généré par scripts/build-icon-sprite.py depuis docs/assets/icons
-(icônes maison normalisées) et docs/assets/cockpit-icons (chrome « Douce » :
-`i-space-*`, `i-ui-*`, grille 24, trait 1,75, un <title> par symbole, copiés
-tels quels). Chaque `icon('x')`, `icon: 'x'` ou `icons.svg#x` cité sous
+(famille Douce du site, sans leur <style>) et docs/assets/cockpit-icons (chrome
+« Douce » : `i-space-*`, `i-ui-*`, grille 24, trait 1,75, un <title> par
+symbole), plus un symbole par ancien nom encore cité par le cockpit (table
+`ALIASES` du script, dupliqué depuis son remplaçant Douce). Chaque `icon('x')`, `icon: 'x'` ou `icons.svg#x` cité sous
 web/workspace/ doit y avoir un symbole, aucun symbole ne porte de couleur
 littérale (le sprite suit `currentColor`, donc le thème), et la coque ne
 dessine plus d'icône en ligne.
@@ -11,6 +12,7 @@ dessine plus d'icône en ligne.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import subprocess
 import sys
@@ -22,6 +24,16 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = ROOT / "web" / "workspace"
 SPRITE = WORKSPACE / "icons.svg"
 SCRIPT = ROOT / "scripts" / "build-icon-sprite.py"
+
+
+def _aliases() -> dict[str, str]:
+    spec = importlib.util.spec_from_file_location("build_icon_sprite", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return dict(module.ALIASES)
+
+
 COCKPIT_ICONS = ROOT / "docs" / "assets" / "cockpit-icons"
 _SYMBOL_RE = re.compile(r'<symbol id="(i-[a-z0-9-]+)"([^>]*)>(.*?)</symbol>', re.DOTALL)
 _TAG_RE = re.compile(r"<([a-zA-Z]+)\b([^>]*)>")
@@ -81,8 +93,11 @@ def test_every_referenced_icon_exists_in_sprite() -> None:
 def test_every_source_icon_is_in_sprite() -> None:
     sources = {p.stem for p in (ROOT / "docs" / "assets" / "icons").glob("*.svg")}
     cockpit = {p.stem for p in COCKPIT_ICONS.glob("*.svg")}
+    aliases = _aliases()
     assert sources and cockpit and not (sources & cockpit)
-    assert sources | cockpit == _symbols()
+    assert not (set(aliases) & (sources | cockpit)), "un alias masque une icône réelle"
+    assert set(aliases.values()) <= sources, "un alias pointe hors de la famille"
+    assert sources | cockpit | set(aliases) == _symbols()
 
 
 def test_sprite_follows_current_color() -> None:
