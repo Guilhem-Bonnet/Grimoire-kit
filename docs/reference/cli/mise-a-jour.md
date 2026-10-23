@@ -10,6 +10,7 @@ audience: référence
 | --- | --- |
 | `grimoire context-pack` | Écrire un context-pack durable (contrat catalogue) pour le dépôt |
 | `grimoire update` | Mettre à jour grimoire-kit — alias de `grimoire self update` ; la wheel est vérifiée avant installation (`--channel stable\|preview`, `--check`, `--offline`, `--from <bundle>`) |
+| `grimoire self bundle <dossier>` | Construire le bundle hors ligne que `self update --from` installe (wheel, dépendances, `SHA256SUMS`, `PROVENANCE.json`) |
 | `grimoire verify-install` | Vérifier l'installation de grimoire-kit (`--online` : contre la wheel et le `SHA256SUMS` publiés) |
 | `grimoire debugger status` | État de la réalité et du débogage des agents |
 | `grimoire debugger claims` | Affirmations enregistrées par les agents |
@@ -44,9 +45,9 @@ qui refait une installation du registre est affichée.
 | `--offline` | Aucune requête réseau, pas même la sonde de connectivité. Avec `--check` : statut `offline`. Sans `--check` : exige `--from`. |
 | `--from <dossier\|wheel>` | Installe un bundle hors ligne. Aucune requête, index fermé (`--no-index` / `--offline`), wheels seulement (`--only-binary :all:` / `--no-build`). |
 
-Un bundle est un dossier contenant la wheel de grimoire-kit, son `SHA256SUMS` (celui de la release) et, si
-l'environnement n'a pas déjà les dépendances, leurs wheels (`pip download grimoire-kit==X -d <dossier>`, à faire une
-fois en ligne ; ajouter leurs empreintes à `SHA256SUMS`). Toute wheel du dossier doit figurer dans `SHA256SUMS` avec la
+Un bundle est un dossier contenant la wheel de grimoire-kit, un `SHA256SUMS` et, si l'environnement n'a pas déjà les
+dépendances, leurs wheels. `grimoire self bundle` le construit (voir ci-dessous) ; à la main, `pip download` puis les
+empreintes de chaque wheel dans `SHA256SUMS`. Toute wheel du dossier doit figurer dans `SHA256SUMS` avec la
 bonne empreinte, sinon le bundle entier est refusé. Le gestionnaire n'est jamais pointé sur le dossier du bundle : `self update`
 copie la wheel du kit et les autres wheels du dossier (toutes listées, hachées après copie) dans un dossier temporaire et ne
 donne que celui-là à `--find-links`. Le reste du dossier (une page `links.html`, un sous-dossier, tout fichier qui n'est pas
@@ -57,6 +58,37 @@ Limite écrite : le `SHA256SUMS` d'un bundle voyage avec ses fichiers, donc le n
 `verified` : il garantit l'intégrité du bundle, pas son origine. Les dépendances sont copiées puis hachées comme la wheel du kit :
 rien n'est lu dans le dossier du bundle après la vérification. Hors ligne,
 `gh attestation verify` n'est pas rejoué.
+
+#### Construire un bundle : `grimoire self bundle <dossier>`
+
+À faire une fois, en ligne ; l'installation, elle, ne touche pas au réseau.
+
+| Option | Effet |
+| --- | --- |
+| `--version X.Y.Z` | Wheel de PyPI (défaut : la plus haute stable). Confrontée à l'empreinte de PyPI **et** au `SHA256SUMS` de la release, comme `self update`. |
+| `--from-release vX.Y.Z[-rc1]` | Wheel de la release GitHub (pré-versions comprises), confrontée au `SHA256SUMS` de cette release. |
+| `--wheel <chemin>` | Wheel locale (build du dépôt) : aucune source à vérifier, `PROVENANCE.json` le dit. |
+| `--with-deps` | Télécharge aussi les dépendances (`pip download --only-binary=:all:`, jamais une source à compiler). |
+| `--platform`, `--python-version`, `--implementation`, `--abi` | Cible de `pip download` pour un bundle destiné à une autre machine (exigent `--with-deps`). |
+| `--index-url`, `--find-links` | Miroir ou dossier de wheels pour les dépendances. |
+| `--python <interpréteur>` | Interpréteur dont le `pip` télécharge (grimoire installé par `uv tool` n'a pas de `pip`). |
+| `--skip-attestation` | Ne rejoue pas `gh attestation verify` ; consigné `skipped`. |
+
+Le dossier est créé (absent ou vide, jamais écrasé) avec : la wheel du kit, les wheels des dépendances,
+`SHA256SUMS` (tout le dossier, LF) et `PROVENANCE.json` (source, empreintes, niveau de vérification à la construction,
+état de l'attestation, cible). Avant d'être rendu, le bundle est relu par le lecteur de `self update --from` : s'il
+serait refusé, rien n'est écrit. Les étapes ci-dessus se rejouent à tout moment avec
+`grimoire self update --from <dossier> --check`, qui lit et vérifie sans installer.
+
+Attestation : pour une wheel de PyPI ou de GitHub, `gh attestation verify` est rejoué à la construction. `gh` absent :
+l'attestation est marquée `unverified` (et la commande le répète). `gh` présent et vérification en échec : la
+construction est refusée. À l'installation le niveau reste `bundle` : la provenance est consignée, pas rejouée hors ligne.
+
+Limites : les dépendances viennent d'un index sans empreinte publiée par le kit (leurs sommes attestent l'intégrité du
+dossier, pas l'origine). Les marqueurs d'environnement des dépendances (`sys_platform`...) sont évalués par pip sur la
+machine qui construit : pour une autre plateforme, `--platform` change le choix des fichiers mais une dépendance
+réservée à la plateforme cible peut manquer ; si l'installation échoue pour cette raison, construire sur la plateforme
+cible (ou fournir la dépendance via `--find-links`).
 
 | `trust_level` | Sens |
 | --- | --- |

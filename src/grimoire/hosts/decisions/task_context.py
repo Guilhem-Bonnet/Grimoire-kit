@@ -90,7 +90,13 @@ def decide_task_context(hook: HookInput) -> Decision:
     from grimoire.hosts.decisions.gate_override import record_override_request
 
     override, override_detail = record_override_request(hook)
-    context = "\n".join(part for part in (context, pause, steering, override, lowering) if part)
+    # CHAIN-ACK : « Explain Chain <tâche> line <n>: <raison> », l'explication humaine d'une rupture du journal de preuve.
+    from grimoire.hosts.decisions.chain_ack import record_chain_ack_request
+
+    chain_ack, chain_ack_detail = record_chain_ack_request(hook)
+    context = "\n".join(part for part in (context, pause, steering, override, chain_ack, lowering) if part)
     return Decision(
-        outcome=Outcome.ALLOW, context=context, detail={**detail, **link, **steering_detail, **override_detail, **lowering_detail}
+        outcome=Outcome.ALLOW,
+        context=context,
+        detail={**detail, **link, **steering_detail, **override_detail, **chain_ack_detail, **lowering_detail},
     )

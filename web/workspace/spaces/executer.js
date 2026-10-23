@@ -949,6 +949,18 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
 
   renderSteering(ctx, detail, onWritten);
 
+  if (detail.description) {
+    const description = document.createElement('div');
+    description.className = 'ex-insp-block';
+    description.dataset.role = 'description-block';
+    description.append(text('h4', null, 'Description'));
+    const pre = document.createElement('pre');
+    pre.className = 'ex-recall';
+    pre.textContent = detail.description;
+    description.append(pre);
+    ctx.inspector.append(description);
+  }
+
   const acceptance = document.createElement('div');
   acceptance.className = 'ex-insp-block';
   acceptance.append(text('h4', null, "Critères d'acceptation"));

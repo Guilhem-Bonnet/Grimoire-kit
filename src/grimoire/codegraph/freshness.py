@@ -46,6 +46,8 @@ __all__ = [
     "Freshness",
     "check_freshness",
     "collect_sources",
+    "combine_hashes",
+    "diff_hashes",
     "fingerprint_sources",
     "hash_files",
     "record_index",
@@ -107,8 +109,16 @@ def _shown(rel: str) -> str:
     return rel.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
 
 
-def collect_sources(base: Path, sources: Iterable[Path], exclude: Collection[str] = EXCLUDED_DIRS) -> dict[str, Path]:
-    """``{clé relative à *base*: fichier}`` des ``.py`` de *sources* (fichiers ou dossiers).
+def collect_sources(
+    base: Path,
+    sources: Iterable[Path],
+    exclude: Collection[str] = EXCLUDED_DIRS,
+    suffixes: tuple[str, ...] = (".py",),
+) -> dict[str, Path]:
+    """``{clé relative à *base*: fichier}`` des fichiers de *sources* (fichiers ou dossiers).
+
+    *suffixes* : extensions retenues (``.py`` par défaut, celle du graphe ;
+    la base de connaissance d'onboarding y ajoute les autres langages).
 
     Une seule liste pour l'empreinte et pour l'indexation. Les exclusions
     portent sur les noms de dossiers *sous* chaque source : le dossier où vit
@@ -117,13 +127,13 @@ def collect_sources(base: Path, sources: Iterable[Path], exclude: Collection[str
     found: dict[str, Path] = {}
     for source in sources:
         if source.is_file():
-            if source.suffix == ".py":
+            if source.suffix in suffixes:
                 found[_key(source, base)] = source
             continue
         for dirpath, dirnames, filenames in os.walk(source):
             dirnames[:] = [d for d in dirnames if d not in exclude]
             for name in filenames:
-                if name.endswith(".py"):
+                if name.endswith(suffixes):
                     path = Path(dirpath) / name
                     found[_key(path, base)] = path
     return found
@@ -139,6 +149,18 @@ def _combine(hashes: dict[str, str]) -> str:
     for rel in sorted(hashes):
         digest.update(f"{rel}\0{hashes[rel]}\n".encode("utf-8", "surrogateescape"))
     return digest.hexdigest()
+
+
+#: Empreinte d'un ensemble ``{clé: sha256}`` (chemins et contenus), ordre indifférent.
+combine_hashes = _combine
+
+
+def diff_hashes(recorded: dict[str, str], current: dict[str, str]) -> tuple[tuple[str, ...], ...]:
+    """``(ajoutés, modifiés, supprimés)`` entre deux relevés, noms affichables, triés."""
+    added = tuple(sorted(_shown(r) for r in set(current) - set(recorded)))
+    removed = tuple(sorted(_shown(r) for r in set(recorded) - set(current)))
+    modified = tuple(sorted(_shown(r) for r in set(current) & set(recorded) if current[r] != recorded[r]))
+    return added, modified, removed
 
 
 def fingerprint_sources(source: Path) -> str:
@@ -246,11 +268,7 @@ def check_freshness(root: Path) -> Freshness:
     except (OSError, UnicodeError):
         return Freshness(verdict="unverified", reason="source_unreadable", source_dir=source_dir,
                          recorded_fingerprint=recorded, target=target)
-    added = tuple(sorted(_shown(r) for r in set(current_files) - set(recorded_files)))
-    removed = tuple(sorted(_shown(r) for r in set(recorded_files) - set(current_files)))
-    modified = tuple(sorted(
-        _shown(rel) for rel in set(current_files) & set(recorded_files) if current_files[rel] != recorded_files[rel]
-    ))
+    added, modified, removed = diff_hashes(recorded_files, current_files)
     verdict = "current" if current == recorded else "stale"
     return Freshness(
         verdict=verdict, source_dir=source_dir, recorded_fingerprint=recorded,
