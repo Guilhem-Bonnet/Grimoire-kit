@@ -618,7 +618,9 @@ class TaskService:
         self.ledger.note_progress(task_id, text, actor_id=actor)
         return self.require(task_id)
 
-    def reap(self, *, apply: bool = True, actor: str = "tick", now: datetime | None = None) -> ReapReport:
+    def reap(
+        self, *, apply: bool = True, actor: str = "tick", now: datetime | None = None, probe_hosts: bool = True
+    ) -> ReapReport:
         """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs.
 
         K3 (issue #768) : un hôte est fencé selon la table ``hosts.capabilities``
@@ -640,7 +642,9 @@ class TaskService:
 
         self.refresh()
         expired = self.ledger.expired_claims(now)
-        for view in expired:  # le frein de cette version d'hôte est-il prouvé ? sinon sonde (#876)
+        # Le frein de cette version d'hôte est-il prouvé ? sinon sonde (#876). Une sonde lance
+        # l'hôte (deux appels modèle) : jamais en aperçu ni sur la copie d'un plan.
+        for view in expired if apply and probe_hosts else ():
             host_id = resolve_host(view.host)
             if host_id is not None:
                 ensure_probed(host_id, view.host_version)
