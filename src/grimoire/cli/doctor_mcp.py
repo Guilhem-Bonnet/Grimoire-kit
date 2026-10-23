@@ -7,9 +7,18 @@ serveurs stdio tournent sur le poste.
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlparse
 
 from grimoire.cli.env_checks import EnvCheck
+
+
+def check_mcp_spec_http(server_name: str, spec: dict[str, Any]) -> EnvCheck | None:
+    """Le contrôle d'une entrée http pure (``url`` sans ``command``), sinon ``None``."""
+    url = str(spec.get("url", "")).strip()
+    if url and not str(spec.get("command", "")).strip():
+        return check_mcp_http_entry(server_name, url)
+    return None
 
 
 def check_mcp_http_entry(server_name: str, url: str) -> EnvCheck:

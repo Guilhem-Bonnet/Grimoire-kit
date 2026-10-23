@@ -22,10 +22,7 @@ vérifié contre un vrai ``_CockpitHandler`` — le même défaut qui a touché
 
 from __future__ import annotations
 
-import json
 import threading
-import urllib.error
-import urllib.request
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -35,25 +32,13 @@ import pytest
 from grimoire.cli import cmd_cockpit
 from grimoire.tools import project_registry
 
+from .. import _cockpit_http
+
 _BLUEPRINT = {"id": "demo", "nodes": [], "edges": []}
 
 
-def _post(port: int, path: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}",
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — loopback de test
-            return resp.status, json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        body = exc.read()
-        try:
-            return exc.code, json.loads(body)
-        except json.JSONDecodeError:
-            return exc.code, {"raw": body.decode("utf-8", "replace")}
+# Client unique des tests HTTP du cockpit (#857).
+_post = _cockpit_http.post
 
 
 def _project(tmp_path: Path, name: str) -> Path:

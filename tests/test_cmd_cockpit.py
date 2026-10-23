@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import threading
-import urllib.error
-import urllib.request
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -16,6 +15,16 @@ from typer.testing import CliRunner
 from grimoire.cli import cmd_cockpit
 from grimoire.cli.app import app
 from grimoire.tools import project_registry
+
+# ``tests/`` n'est pas un paquet : le client HTTP partagé des tests du cockpit
+# (#857) est chargé par chemin, comme le demande
+# ``tests/unit/test_no_tests_package_imports.py``.
+_spec = importlib.util.spec_from_file_location(
+    "_cockpit_http", Path(__file__).resolve().parent / "unit" / "_cockpit_http.py"
+)
+assert _spec is not None and _spec.loader is not None
+_cockpit_http = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_cockpit_http)
 
 
 @pytest.fixture
@@ -291,31 +300,11 @@ def test_init_hook_opt_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 def _post_path(port: int, path: str, payload: dict[str, Any]) -> int:
     """POST brut sur un chemin arbitraire — la query string comprise."""
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-            return int(resp.status)
-    except urllib.error.HTTPError as exc:
-        return int(exc.code)
+    return _cockpit_http.post(port, path, payload, timeout=5)[0]
 
 
 def _post_api(port: int, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}/api/memory",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-            return resp.status, json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read())
+    return _cockpit_http.post(port, "/api/memory", payload, timeout=5)
 
 
 @pytest.fixture
@@ -432,15 +421,9 @@ def test_api_sync_requires_confirm(api_server: int) -> None:
 
 
 def test_api_404_on_other_path(api_server: int) -> None:
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{api_server}/api/other", data=b"{}", method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        urllib.request.urlopen(req, timeout=5)  # noqa: S310
-        raise AssertionError("expected 404")
-    except urllib.error.HTTPError as exc:
-        assert exc.code == 404
+    status, _ = _cockpit_http.post(api_server, "/api/other", timeout=5)
+
+    assert status == 404
 
 
 def test_sync_site_copies_kit_layers_but_never_the_vitrine_snapshot(tmp_path: Path) -> None:

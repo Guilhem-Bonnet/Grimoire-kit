@@ -780,7 +780,9 @@ def collect_mcp_servers(project_root: Path) -> tuple[McpServerSpec, ...]:
                 )
                 for name, spec in servers.items()
             )
-    return (McpServerSpec(name="grimoire", command="grimoire-mcp"),)
+    from grimoire.hosts.hook_launcher import mcp_command
+
+    return (McpServerSpec(name="grimoire", command=mcp_command(project_root)),)
 
 
 def _is_override(agent: AgentSpec) -> bool:

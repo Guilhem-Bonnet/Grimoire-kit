@@ -18,17 +18,13 @@ exactement comme sur l'hôte mono-projet historique.
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 import threading
-import urllib.error
-import urllib.request
 from collections.abc import Iterator
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -44,6 +40,8 @@ from grimoire.tools.workspace_routes import (
     is_registry_scoped_write,
     workspace_get,
 )
+
+from . import _cockpit_http
 
 #: Routes de :data:`POST_ROUTES` qui suivent la même dérogation nommée que
 #: les décisions de proposition (:func:`is_proposal_decision`) plutôt que la
@@ -70,35 +68,10 @@ SHARED_READS = sorted(
 )
 
 
-def _get(port: int, path: str) -> tuple[int, Any]:
-    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}")
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 — loopback de test
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8")
-        try:
-            return exc.code, json.loads(body)
-        except json.JSONDecodeError:
-            return exc.code, {"raw": body}
-
-
-def _post(port: int, path: str, payload: dict[str, Any]) -> tuple[int, Any]:
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}{path}",
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 — loopback de test
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8")
-        try:
-            return exc.code, json.loads(body)
-        except json.JSONDecodeError:
-            return exc.code, {"raw": body}
+# Client unique des tests HTTP du cockpit (#857) : retente au plus trois fois
+# sur une connexion coupée avant la réponse, jamais sur un 4xx/5xx.
+_get = _cockpit_http.get
+_post = _cockpit_http.post
 
 
 @pytest.fixture
@@ -306,11 +279,10 @@ def test_une_route_inconnue_sous_le_prefixe_reste_un_404(atelier: int) -> None:
 
 def test_l_atelier_sert_la_coque_de_la_vue_de_travail(atelier: int) -> None:
     """`web/workspace/index.html` doit être atteignable : c'est la coque unique."""
-    req = urllib.request.Request(f"http://127.0.0.1:{atelier}/workspace/index.html")
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — loopback de test
-        body = resp.read().decode("utf-8")
+    status, page = _get(atelier, "/workspace/index.html")
+    body = page["raw"]
 
-    assert resp.status == 200
+    assert status == 200
     assert 'id="shell"' in body
     assert './shell.js' in body
 
@@ -452,13 +424,9 @@ def test_une_lecture_de_la_vue_de_travail_refuse_un_host_etranger(atelier: int) 
     """Le garde anti rebinding-DNS de `forge_http` est générique — ce test
     prouve qu'il couvre bien le préfixe `/api/workspace/`, pas seulement les
     routes héritées qui ont leur propre test dans `test_serve_hardening.py`."""
-    req = urllib.request.Request(f"http://127.0.0.1:{atelier}{PREFIX}glossary")
-    req.add_header("Host", "evil.example.com")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — loopback de test
-            code = resp.status
-    except urllib.error.HTTPError as exc:
-        code = exc.code
+    code, _ = _cockpit_http.request(
+        atelier, "GET", f"{PREFIX}glossary", headers={"Host": "evil.example.com"}, timeout=10
+    )
 
     assert code == 403
 

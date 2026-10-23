@@ -248,6 +248,33 @@ par `CLAUDE.md`, par exemple — déclare `entry: ""` et n'en reçoit pas un
 second. `grimoire host status` montre la persona retenue, et signale une clé
 qui nomme un agent que le projet n'a pas plutôt que d'en inventer un.
 
+## Scan des fichiers d'instructions
+
+Issue #667 (phase 5, lot 5.4) : au `SessionStart`, le kit énumère les
+fichiers d'instructions que l'hôte charge sans qu'on le lui demande —
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`,
+`.github/copilot-instructions.md` et `.github/{instructions,agents,prompts,skills,rules,commands}/`,
+tout `.md`/`.mdc` sous `.claude/`, `.cursor/`, `.codex/`, `.gemini/`,
+`.windsurf/` (400 fichiers et 256 Ko par fichier au plus) — et les classe par
+provenance : `kit-owned` (digest au catalogue des fichiers livrés,
+`registry/kit-file-hashes.json`, embarqué dans la wheel), `project-owned`
+(suivi par git et propre, donc relu par un humain à un commit),
+`unrecognised` (non suivi, modifié depuis le dernier commit, ou dépôt sans
+git). Seul ce dernier cas passe par des motifs déterministes — annulation
+des instructions précédentes, action cachée à l'utilisateur, exfiltration
+(`.env`, `.ssh`, jetons vers une URL de collecte), exécution d'un contenu
+distant (`curl … | sh`, « à chaque session, lance… »), texte invisible
+(largeur nulle, tags Unicode, bidi), directive dans un commentaire HTML.
+Même entrée, même sortie, aucun modèle.
+
+Silencieux par défaut : une ligne `[Grimoire — fichiers d'instructions]`
+n'apparaît que pour un fichier non reconnu qui porte un motif, et nomme le
+fichier et les codes. Le résultat est mis en cache dans l'état de session
+(empreinte de l'énumération par chemin, taille et mtime — jamais un extrait
+de contenu) ; `grimoire doctor` porte le même contrôle, `instruction_files`
+(`FAIL` nommant le fichier et le motif ; le remède est de relire, puis de
+committer si c'est voulu — le fichier devient alors du projet).
+
 ## Gouvernance
 
 Les hooks générés dépendent de l'enrôlement du projet dans le standard agentique.
@@ -548,6 +575,41 @@ _grimoire/standard/policies.yaml"`. Cette recommandation est elle-même
 couverte par l'exemption de réparation ("Exemption de réparation"
 ci-dessus) : un refus ne nomme jamais une commande qu'il refuserait
 lui-même. Le cockpit n'a pas de vue équivalente pour l'instant.
+
+### Règles d'armement
+
+Issue #666 (phase 5) : aucune règle ci-dessus ne juge une *composition*
+d'appels. Éditer un manifeste Flux puis `kubectl apply`, `chmod +x` puis
+exécuter, `git remote set-url` puis `git push`, `rm_target=…` puis `rm -rf
+"$rm_target"` — chaque appel isolé est sûr, la séquence ne l'est pas. Une
+règle `arms` déclare une action qui *arme* et l'action armée :
+
+```yaml
+rules:
+  - id: flux-then-apply
+    description: "éditer un manifeste Flux puis kubectl apply demande confirmation"
+    verdict_on_match: warn          # warn → ask côté hôte ; block → refus ; allow refusé au chargement
+    reason_template: "Un manifeste Flux vient d'être édité : confirme l'apply"
+    arms: {pattern: "Write(*flux/*)", then: "Bash(kubectl apply:*)", minutes: 10}
+```
+
+`pattern` et `then` parlent le langage de `tool_pattern` (ci-dessus). Un
+appel qui correspond à `pattern` pose `armed[<id>] = now + minutes` dans
+l'état de session ; tant que l'échéance n'est pas passée, un appel qui
+correspond à `then` reçoit `verdict_on_match`. L'appel courant arme *avant*
+d'être comparé à `then`, et pour un `Bash` chaque segment (`&&`, `;`, `|`)
+est comparé en plus de la ligne entière : `chmod +x s.sh && ./s.sh` est jugé
+armé d'un coup. Les antislashs d'un chemin Windows sont lus comme des `/`
+pour le motif. Fail-closed : une échéance illisible vaut armement et est
+réécrite. Une règle d'armement n'a ni compteur, ni empreinte, ni
+refroidissement — seul le couple identifiant/échéance est écrit, jamais la
+commande ni la cible qui a armé — et le calcul reste en Python (rien ne
+traverse le cœur Rust, qui reste l'oracle des compteurs).
+
+**Le kit ne livre aucune règle d'armement** (décision du 2026-10-20) : la
+première fausse alerte tuerait la confiance dans tous les budgets et
+refroidissements. Un projet déclare les siennes ; `pattern` ou `then` à `*`,
+`minutes` ≤ 0 ou une clé inconnue échouent au chargement (`GR-POL-002`).
 
 ## Coût des hooks
 
