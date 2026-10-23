@@ -11,10 +11,12 @@ Deux gestes, tous deux écrits **par événements du ledger**, jamais en écriva
   avec une sonde muette, rien n'est écrit : ce que l'on ne constate pas ne libère rien.
 - :func:`migrate_orphan_slots` (une seule fois par ledger) : un occupant qui n'est pas porté par une session
   vivante et n'a ni PR ni check en cours n'a rien à attendre : ``capacity.released`` (``pool: ci``) le libère.
-  Le marqueur ``capacity.ci_migrated`` rend le geste unique ; une sonde muette sur un occupant le diffère.
+  Le marqueur ``capacity.ci_migrated`` rend le geste unique ; une sonde muette (``unknown``) sur un occupant ne libère rien et diffère le marqueur au tick suivant.
 
-Le janitor de l'épopée n'a pas de code à part pour l'état terminal : :func:`~grimoire.missions.admission.derive_view`
-ne retient un créneau que pour un état ``_CI_HELD`` ; clôture, annulation, échec ou retour à ``ready`` le rendent.
+Le janitor de l'épopée n'a pas de code à part pour l'état terminal d'une réservation : :func:`~grimoire.missions.admission.derive_view`
+ne retient un créneau réservé que pour un état ``_CI_HELD`` ; clôture, annulation, échec ou retour à ``ready`` le rendent.
+Seul un push déjà vu (``task.ci_pushed``) survit à l'état : :func:`reconcile_ci` rend sans ``gh`` le créneau d'une
+tâche clôturée ou annulée (PR fusionnée, branche supprimée).
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from grimoire.missions.admission import (
     derive_view,
     load_capacity,
 )
+from grimoire.missions.schemas import TaskState
 
 if TYPE_CHECKING:
     from grimoire.missions.service import TaskService
@@ -53,7 +56,10 @@ _MIGRATION_ENTITY = "ci-slots"
 _BRANCH_PREFIX = "task/"
 _PROBE_TIMEOUT_S = 30
 #: ``gh pr checks`` rend 8 quand des checks sont en attente, 1 quand l'un échoue : le JSON reste valable.
+#: Le code 1 sans JSON n'est « aucune PR » que si stderr le dit (voir :func:`default_ci_probe`).
 _GH_JSON_EXIT = (0, 1, 8)
+#: Les états après lesquels aucun check n'est plus attendu ; un push vu sur une telle tâche ne tient plus de créneau.
+_TERMINAL = frozenset({TaskState.CLOSED, TaskState.CANCELLED})
 _PENDING_BUCKETS = frozenset({"pending"})
 NO_PR, PENDING, DONE, UNKNOWN = "no_pr", "pending", "done", "unknown"
 
@@ -86,21 +92,34 @@ def default_ci_probe(branch: str, repo: Path) -> CheckReading:
     """``gh pr checks <branche> --json name,bucket`` : pas de PR = ``no_pr`` ; un ``gh`` muet ou illisible = ``unknown``."""
     try:
         done = subprocess.run(  # arguments fixes, sans shell
-            ["gh", "pr", "checks", branch, "--json", "name,bucket"], cwd=repo, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=_PROBE_TIMEOUT_S, check=False,
+            ["gh", "pr", "checks", branch, "--json", "name,bucket"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_PROBE_TIMEOUT_S,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return CheckReading(UNKNOWN, "gh indisponible")
+    if done.returncode == 1 and "no pull requests found" in done.stderr.lower():
+        return CheckReading(NO_PR, "aucune PR pour cette branche")
     if done.returncode not in _GH_JSON_EXIT:
-        if "no pull requests found" in done.stderr.lower():
-            return CheckReading(NO_PR, "aucune PR pour cette branche")
         return CheckReading(UNKNOWN, f"gh pr checks a échoué ({done.returncode})")
-    return _reading(done.stdout)
+    reading = _reading(done.stdout)
+    if reading.status == NO_PR and done.returncode != 0:
+        # Un ``[]`` n'est « aucune PR » que pour un gh qui a réussi : en échec, c'est une panne muette.
+        return CheckReading(UNKNOWN, f"gh pr checks sort en {done.returncode} sans check")
+    return reading
 
 
 def _reading(raw: str) -> CheckReading:
+    """Lit le JSON de ``gh`` ; une sortie vide ou illisible est ``unknown`` (non authentifié, hors réseau, limite de débit)."""
+    if not raw.strip():
+        return CheckReading(UNKNOWN, "gh n'a rien répondu")
     try:
-        checks = json.loads(raw or "[]")
+        checks = json.loads(raw)
     except json.JSONDecodeError:
         return CheckReading(UNKNOWN, "réponse de gh illisible")
     if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
@@ -139,6 +158,13 @@ def reconcile_ci(
     occupants, _live, pushed = _occupants(service, now or datetime.now(UTC))
     outcomes: list[CiOutcome] = []
     for tid in occupants:
+        if tid in pushed and service.require(tid).status in _TERMINAL:
+            # PR fusionnée, branche supprimée : gh ne sait plus rien, la tâche est finie. Sans gh, on rend.
+            service.ledger.append_event(
+                CAPACITY_RELEASED_EVENT, tid, "task", actor, {"pool": "ci", "reason": "tâche terminale"}
+            )
+            outcomes.append(CiOutcome(tid, "released", "tâche terminale"))
+            continue
         branch = f"{_BRANCH_PREFIX}{tid}"
         reading = check(branch, service.project_root)
         if reading.status not in (PENDING, DONE):

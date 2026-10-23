@@ -104,7 +104,15 @@ def test_a_parked_task_whose_pr_checks_ended_no_longer_occupies_ci(
     first, second = _task(service, mission, "A"), _task(service, mission, "B")
     _park(service, first.id, how)
     assert _occupants(service, projet) == {first.id}
-    assert not isinstance(admit(service.require(second.id), None, load_capacity(projet), derive_view(service.ledger, load_capacity(projet), now=datetime.now(UTC))), Admit)
+    assert not isinstance(
+        admit(
+            service.require(second.id),
+            None,
+            load_capacity(projet),
+            derive_view(service.ledger, load_capacity(projet), now=datetime.now(UTC)),
+        ),
+        Admit,
+    )
     reconcile_ci(service, probe=FakeGh(**{first.id: CheckReading(ci_slots.DONE, "3 check(s) terminé(s)")}))
     capacity = load_capacity(projet)
     view = derive_view(service.ledger, capacity, now=datetime.now(UTC))
@@ -112,7 +120,9 @@ def test_a_parked_task_whose_pr_checks_ended_no_longer_occupies_ci(
     assert isinstance(admit(service.require(second.id), None, capacity, view), Admit)
 
 
-def test_a_parked_task_with_checks_still_running_keeps_its_slot(projet: Path, service: TaskService, mission: str) -> None:
+def test_a_parked_task_with_checks_still_running_keeps_its_slot(
+    projet: Path, service: TaskService, mission: str
+) -> None:
     first = _task(service, mission, "A")
     _park(service, first.id, "needs_verification")
     reconcile_ci(service, probe=FakeGh(**{first.id: CheckReading(ci_slots.PENDING, "1/3 check(s) en cours")}))
@@ -122,7 +132,9 @@ def test_a_parked_task_with_checks_still_running_keeps_its_slot(projet: Path, se
 # ── Critère 2 : le tick émet ci_pushed puis ci_finished d'après gh pr checks ───────
 
 
-def test_the_tick_emits_ci_pushed_then_ci_finished_from_the_checks(projet: Path, service: TaskService, mission: str) -> None:
+def test_the_tick_emits_ci_pushed_then_ci_finished_from_the_checks(
+    projet: Path, service: TaskService, mission: str
+) -> None:
     first = _task(service, mission, "A")
     _park(service, first.id, "needs_verification")
     pending = FakeGh(**{first.id: CheckReading(ci_slots.PENDING, "1/2 check(s) en cours")})
@@ -132,7 +144,9 @@ def test_the_tick_emits_ci_pushed_then_ci_finished_from_the_checks(projet: Path,
     assert _types(TaskService(projet), first.id) == [CI_PUSHED_EVENT]
     assert set(pending.calls) == {f"task/{first.id}"}
     run_tick(projet, apply=True, ci_probe=pending)
-    assert _types(TaskService(projet), first.id).count(CI_PUSHED_EVENT) == 1, "idempotent : un push n'est écrit qu'une fois"
+    assert _types(TaskService(projet), first.id).count(CI_PUSHED_EVENT) == 1, (
+        "idempotent : un push n'est écrit qu'une fois"
+    )
 
     report = run_tick(projet, apply=True, ci_probe=done)
     assert [o.action for o in report.ci] == ["finished"]
@@ -145,7 +159,9 @@ def test_the_tick_emits_ci_pushed_then_ci_finished_from_the_checks(projet: Path,
     assert _types(TaskService(projet), first.id) == seen, "un tick de plus n'écrit rien"
 
 
-def test_checks_found_already_done_write_pushed_before_finished(projet: Path, service: TaskService, mission: str) -> None:
+def test_checks_found_already_done_write_pushed_before_finished(
+    projet: Path, service: TaskService, mission: str
+) -> None:
     first = _task(service, mission, "A")
     _park(service, first.id, "waiting")
     reconcile_ci(service, probe=FakeGh(**{first.id: CheckReading(ci_slots.DONE)}))
@@ -172,12 +188,14 @@ def _completed(code: int, out: str = "", err: str = "") -> subprocess.CompletedP
         (_completed(1, json.dumps([{"name": "a", "bucket": "fail"}])), "done"),
         (_completed(8, json.dumps([{"name": "a", "bucket": "pass"}, {"name": "b", "bucket": "pending"}])), "pending"),
         (_completed(0, "[]"), "no_pr"),
-        (_completed(1, "", "no pull requests found for branch \"task/x\""), "no_pr"),
+        (_completed(1, "", 'no pull requests found for branch "task/x"'), "no_pr"),
         (_completed(4, "", "authentication required"), "unknown"),
         (_completed(0, "pas du json"), "unknown"),
     ],
 )
-def test_the_default_probe_reads_gh_pr_checks(monkeypatch: pytest.MonkeyPatch, result: subprocess.CompletedProcess[str], status: str) -> None:
+def test_the_default_probe_reads_gh_pr_checks(
+    monkeypatch: pytest.MonkeyPatch, result: subprocess.CompletedProcess[str], status: str
+) -> None:
     seen: list[list[str]] = []
 
     def fake_run(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
@@ -200,7 +218,9 @@ def test_a_missing_gh_binary_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None
 # ── Critère 3 : migration unique des créneaux orphelins ──────────────────────────
 
 
-def test_the_migration_frees_once_the_slots_without_pr_or_running_checks(projet: Path, service: TaskService, mission: str) -> None:
+def test_the_migration_frees_once_the_slots_without_pr_or_running_checks(
+    projet: Path, service: TaskService, mission: str
+) -> None:
     orphan, building, live = _task(service, mission, "A"), _task(service, mission, "B"), _task(service, mission, "C")
     _park(service, orphan.id, "needs_verification")
     _park(service, building.id, "waiting")
@@ -227,7 +247,9 @@ def test_the_migration_waits_when_a_probe_is_mute(projet: Path, service: TaskSer
     assert [o.task_id for o in migrate_orphan_slots(service, probe=FakeGh())] == [first.id]
 
 
-def test_a_demo_ledger_plan_admits_a_task_after_the_migration(projet: Path, service: TaskService, mission: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_demo_ledger_plan_admits_a_task_after_the_migration(
+    projet: Path, service: TaskService, mission: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     for title in ("A", "B", "C"):
         _park(service, _task(service, mission, title).id, "needs_verification")
     ready = _task(service, mission, "prête")
@@ -241,3 +263,69 @@ def test_a_demo_ledger_plan_admits_a_task_after_the_migration(projet: Path, serv
     assert [a["task_id"] for a in data["plan"]["admitted"]] == [ready.id]
     assert sorted(o["action"] for o in data["ci"]) == ["released"] * 3
     assert TaskService(projet).ledger.list_events("ci-slots") == [], "le plan ne touche pas au vrai ledger"
+
+
+# ── Revue #880 : un gh en échec n'est pas « aucune PR » ─────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        _completed(1, "", "error connecting to api.github.com"),
+        _completed(1, ""),
+        _completed(0, ""),
+        _completed(8, ""),
+        _completed(1, "pas du json"),
+        _completed(8, "[]"),
+    ],
+)
+def test_a_failing_gh_is_unknown_never_no_pr(
+    monkeypatch: pytest.MonkeyPatch, result: subprocess.CompletedProcess[str]
+) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: result)
+    assert default_ci_probe("task/x", Path()).status == "unknown"
+
+
+def test_no_pull_requests_found_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _completed(1, "", "No Pull Requests Found for branch"))
+    assert default_ci_probe("task/x", Path()).status == "no_pr"
+
+
+def test_a_gh_failing_offline_releases_nothing_and_does_not_mark_the_migration(
+    monkeypatch: pytest.MonkeyPatch, projet: Path, service: TaskService, mission: str
+) -> None:
+    first = _task(service, mission, "A")
+    _park(service, first.id, "needs_verification")
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _completed(1, "", "error connecting to api.github.com"))
+    assert migrate_orphan_slots(service) == []
+    assert reconcile_ci(service) == []
+    assert _occupants(service, projet) == {first.id}
+    assert not service.ledger.list_events("ci-slots")
+
+
+def test_one_unknown_reading_defers_the_marker_even_when_others_are_released(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    orphan, mute = _task(service, mission, "A"), _task(service, mission, "B")
+    _park(service, orphan.id, "needs_verification")
+    _park(service, mute.id, "waiting")
+    gh = FakeGh(**{mute.id: CheckReading(ci_slots.UNKNOWN, "gh muet")})
+    assert [o.task_id for o in migrate_orphan_slots(service, probe=gh)] == [orphan.id]
+    assert not service.ledger.list_events("ci-slots"), "retentée au tick suivant"
+    assert _occupants(service, projet) == {mute.id}
+
+
+@pytest.mark.parametrize("final", [TaskState.CANCELLED, TaskState.CLOSED])
+def test_a_pushed_task_in_a_terminal_state_releases_its_slot_without_gh(
+    projet: Path, service: TaskService, mission: str, final: TaskState
+) -> None:
+    first = _task(service, mission, "A")
+    _park(service, first.id, "needs_verification")
+    reconcile_ci(service, probe=FakeGh(**{first.id: CheckReading(ci_slots.PENDING, "1/2")}))
+    service.ledger.transition_task(first.id, final, actor_id="agent")
+    assert _occupants(service, projet) == {first.id}, "le push vu survit à l'état"
+    gh = FakeGh()
+    outcomes = reconcile_ci(service, probe=gh)
+    assert [(o.task_id, o.action) for o in outcomes] == [(first.id, "released")]
+    assert gh.calls == [], "aucun appel gh"
+    assert not _occupants(service, projet)
