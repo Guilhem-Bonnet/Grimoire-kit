@@ -67,9 +67,12 @@ fs.cpSync(path.dirname(path.dirname(src)), root, { recursive: true });
 fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
 const target = path.join(root, 'spaces', 'observer.js');
 // shell.js démarre la coque (DOM) dès l'import : seules les fonctions pures de
-// tarification sont sous test, on le remplace par un stub aux deux exports utilisés.
+// tarification sont sous test, on le remplace par un stub des exports que les
+// espaces importent (P21 : badge, kpiRow, spaceHead, STATE_ICON en plus).
 fs.writeFileSync(path.join(root, 'shell.js'),
-  'export const icon = () => null; export const stateIcon = () => null;');
+  'export const icon = () => null; export const stateIcon = () => null; ' +
+  'export const badge = () => null; export const kpiRow = () => null; ' +
+  'export const spaceHead = () => null; export const STATE_ICON = {};');
 import(require('url').pathToFileURL(target).href).then((m) => {
   const payload = JSON.parse(payloadJson);
   const span = (model) => ({ attributes: {
