@@ -141,8 +141,8 @@ def test_un_apercu_apres_un_checkpoint_pendant_garde_le_signal_et_ne_compte_aucu
     assert workspace.locator("button", has_text="Revoir dans l'IDE").count() == 1
 
     # Le KPI de la fiche et la liste d'Observer : une seule source.
-    kpi = workspace.locator(".pl-kpi-item", has_text="runs de flow")
-    assert kpi.locator(".pl-kpi-val").inner_text().strip() == str(after["total"])
+    kpi = workspace.locator(".kpi-item", has_text="runs de flow")
+    assert kpi.locator(".kpi-val").inner_text().strip() == str(after["total"])
     _goto(workspace, "observer")
     workspace.wait_for_selector(".ob-runs", timeout=15_000)
     assert f"· {after['total']}" in workspace.locator(".ob-runs h4").inner_text()
