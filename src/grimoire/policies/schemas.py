@@ -220,6 +220,54 @@ class CooldownRule:
             ) from exc
 
 
+@dataclass(frozen=True, slots=True)
+class ArmingRule:
+    """Une action anodine qui *arme* une action dangereuse ultérieure (issue #666).
+
+    Aucun appel isolé n'est dangereux : écrire un fichier Kustomize, puis
+    ``kubectl apply`` ; ``chmod +x`` d'un script, puis l'exécuter ; ``git
+    remote set-url``, puis ``git push``. C'est la *composition* qui l'est
+    (excessive agency, LLM08). ``pattern`` est la clé d'outil de l'action qui
+    arme (même langage que ``tool_pattern`` : ``Write(flux/*)``, ``Bash(chmod
+    +x:*)``) ; ``then`` celle de l'action armée (``Bash(kubectl apply:*)``).
+    Pendant ``minutes`` après un appel qui correspond à ``pattern``, tout appel
+    qui correspond à ``then`` reçoit le ``verdict_on_match`` de la règle
+    (``warn`` → ``ask`` côté hôte, ``block`` → refus) au lieu de passer
+    inaperçu. Pour un ``Bash``, chaque segment de la ligne (``&&``, ``;``,
+    ``|``) est comparé en plus de la ligne entière : une ligne qui arme et tire
+    d'un coup (``chmod +x s.sh && ./s.sh``) est jugée armée.
+
+    Le kit ne livre **aucune** règle d'armement : la première fausse alerte
+    tuerait la confiance dans tous les budgets temporels. Un projet déclare les
+    siennes dans ``_grimoire/standard/policies.yaml``.
+    """
+
+    pattern: str
+    then: str
+    minutes: float = 10.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"pattern": self.pattern, "then": self.then, "minutes": self.minutes}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ArmingRule:
+        _reject_unknown_keys(d, {"pattern", "then", "minutes"}, context="arms")
+        try:
+            rule = cls(pattern=str(d["pattern"]), then=str(d["then"]), minutes=float(d.get("minutes", 10.0)))
+        except KeyError as exc:
+            raise GrimoirePolicyError(f"arms: champ manquant {exc}", error_code="GR-POL-002") from exc
+        if not rule.pattern.strip() or not rule.then.strip():
+            raise GrimoirePolicyError("arms: pattern et then ne peuvent pas être vides", error_code="GR-POL-002")
+        if rule.pattern == "*" or rule.then == "*":
+            raise GrimoirePolicyError(
+                "arms: pattern et then doivent nommer une action (jamais '*' : tout armerait tout)",
+                error_code="GR-POL-002",
+            )
+        if rule.minutes <= 0:
+            raise GrimoirePolicyError("arms: minutes doit être strictement positif", error_code="GR-POL-002")
+        return rule
+
+
 def _reject_unknown_keys(d: dict[str, Any], known: set[str], *, context: str) -> None:
     """Raise a named error on any key ``d`` carries outside ``known``.
 
@@ -254,6 +302,7 @@ _POLICY_RULE_KEYS = {
     "per_session",
     "cooldown_after",
     "estimated_cost_usd",
+    "arms",
 }
 
 
@@ -316,6 +365,9 @@ class PolicyRule:
     per_session: SessionBudget | None = None
     cooldown_after: CooldownRule | None = None
     estimated_cost_usd: float = 0.0
+    #: Règle d'armement (issue #666) : évaluée par la couche temporelle
+    #: seule, jamais par le moteur de base — voir :class:`ArmingRule`.
+    arms: ArmingRule | None = None
 
     def matches(self, request: PolicyRequest) -> bool:
         kind_ok = not self.action_kinds or request.action.kind in self.action_kinds
@@ -324,9 +376,18 @@ class PolicyRule:
         return kind_ok and mutation_ok and profile_ok
 
     @property
-    def is_temporal(self) -> bool:
-        """Whether this rule carries any of the point-3 temporal constraints."""
+    def has_session_counters(self) -> bool:
+        """Whether this rule counts calls, writes, cost or cooldown hits per session
+        (the three point-3 constraints) — what the Python and Rust backends of
+        :func:`grimoire.policies.temporal.evaluate_temporal` evaluate."""
         return bool(self.require_approval or self.per_session is not None or self.cooldown_after is not None)
+
+    @property
+    def is_temporal(self) -> bool:
+        """Whether this rule needs a session: counters (point 3) or an arming
+        rule (issue #666). A temporal rule is never registered in the base
+        engine — see :mod:`grimoire.hosts.decisions.tool_policy`."""
+        return self.has_session_counters or self.arms is not None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -342,6 +403,7 @@ class PolicyRule:
             "per_session": self.per_session.to_dict() if self.per_session is not None else None,
             "cooldown_after": self.cooldown_after.to_dict() if self.cooldown_after is not None else None,
             "estimated_cost_usd": self.estimated_cost_usd,
+            "arms": self.arms.to_dict() if self.arms is not None else None,
         }
 
     @classmethod
@@ -360,6 +422,13 @@ class PolicyRule:
                 )
         per_session_raw = d.get("per_session")
         cooldown_raw = d.get("cooldown_after")
+        arms_raw = d.get("arms")
+        if arms_raw and VerdictKind(d["verdict_on_match"]) is VerdictKind.ALLOW:
+            raise GrimoirePolicyError(
+                f"PolicyRule {d['id']!r}: arms exige verdict_on_match warn ou block — "
+                "une règle d'armement en allow ne dirait rien",
+                error_code="GR-POL-002",
+            )
         return cls(
             id=d["id"],
             description=d.get("description", ""),
@@ -373,6 +442,7 @@ class PolicyRule:
             per_session=SessionBudget.from_dict(per_session_raw) if per_session_raw else None,
             cooldown_after=CooldownRule.from_dict(cooldown_raw) if cooldown_raw else None,
             estimated_cost_usd=float(d.get("estimated_cost_usd", 0.0)),
+            arms=ArmingRule.from_dict(arms_raw) if arms_raw else None,
         )
 
 

@@ -116,6 +116,16 @@ class SessionState:
     #: depuis elle approuverait une autre action. Ni commande ni argument ici,
     #: seulement l'empreinte (un hachage) et des identifiants de règles.
     pending_approvals: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Armements en cours (issue #666) : ``{rule_id: expiry_iso}``. Une action
+    #: qui correspond à ``arms.pattern`` pose l'échéance ; tant qu'elle n'est pas
+    #: passée, l'action ``arms.then`` reçoit le verdict de la règle. Jamais la
+    #: commande ni la cible qui a armé : l'identifiant de règle et une date.
+    armed: dict[str, str] = field(default_factory=dict)
+    #: Cache du scan des fichiers d'instructions (issue #667) : ``{"fingerprint",
+    #: "files": [...]}``, voir :mod:`grimoire.hosts.decisions.instruction_scan`.
+    #: Des chemins, des tailles, des digests et des codes de motif — jamais un
+    #: extrait de contenu.
+    instruction_scan: dict[str, Any] = field(default_factory=dict)
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -132,6 +142,8 @@ class SessionState:
             "unattached_work": dict(self.unattached_work),
             "mutations": self.mutations,
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
+            "armed": dict(self.armed),
+            "instruction_scan": dict(self.instruction_scan),
         }
 
     @classmethod
@@ -154,6 +166,10 @@ class SessionState:
                     "fingerprint": entry["fingerprint"],
                     "rules": [str(r) for r in rule_ids if isinstance(r, str)] if isinstance(rule_ids, list) else [],
                 }
+        armed_raw = d.get("armed", {})
+        armed = (
+            {str(k): v for k, v in armed_raw.items() if isinstance(v, str)} if isinstance(armed_raw, dict) else {}
+        )
         return cls(
             session_id=session_id,
             started_at=str(d.get("started_at") or started_at),
@@ -164,6 +180,8 @@ class SessionState:
             unattached_work=dict(d["unattached_work"]) if isinstance(d.get("unattached_work"), dict) else {},
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
             pending_approvals=pending,
+            armed=armed,
+            instruction_scan=dict(d["instruction_scan"]) if isinstance(d.get("instruction_scan"), dict) else {},
         )
 
     @classmethod
