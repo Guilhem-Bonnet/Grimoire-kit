@@ -312,16 +312,18 @@ def _config_merge(surface: ProjectSurface, project_root: Path) -> JsonMerge:
             mcp = mcp if isinstance(mcp, dict) else {}
             for server in servers:
                 # A server the project already configured is its own; only add what is missing.
-                mcp.setdefault(
-                    server.name,
-                    # opencode ne documente ni ``${CLAUDE_PROJECT_DIR:-.}`` ni la résolution
-                    # d'un chemin relatif : la racine du projet est écrite en absolu (#760).
-                    {
+                # opencode ne documente ni ``${CLAUDE_PROJECT_DIR:-.}`` ni la résolution
+                # d'un chemin relatif : la racine du projet est écrite en absolu (#760).
+                entry: dict[str, Any] = (
+                    {"type": "remote", "url": server.url, "enabled": True}
+                    if server.url and not server.command
+                    else {
                         "type": "local",
                         "command": [expand_project_dir(server.command, project_root), *server.args],
                         "enabled": True,
-                    },
+                    }
                 )
+                mcp.setdefault(server.name, entry)
             data["mcp"] = mcp
         return data
 

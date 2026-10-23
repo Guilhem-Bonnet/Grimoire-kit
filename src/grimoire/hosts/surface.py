@@ -387,9 +387,14 @@ class McpServerSpec:
     name: str
     command: str
     args: tuple[str, ...] = ()
+    # Serveur distant (``type: http``, #723) : ``command`` vide, ``url`` posée.
+    url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "command": self.command, "args": list(self.args)}
+        data: dict[str, Any] = {"name": self.name, "command": self.command, "args": list(self.args)}
+        if self.url:
+            data["url"] = self.url
+        return data
 
 
 @dataclass(frozen=True, slots=True)

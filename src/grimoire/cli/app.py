@@ -1279,9 +1279,8 @@ app.command("update", rich_help_panel="Info")(self_update_command)  # alias de `
 # real dispatch, or that command's own `--help`. `grimoire --version` and
 # `grimoire doctor .` never touch any of these modules.
 #
-# Name, rich_help_panel and hidden must match what the corresponding
-# `add_typer`/`command` call passed before — they are what `grimoire --help`
-# renders without importing anything.
+# Name, rich_help_panel and hidden must match what the corresponding `add_typer`/`command` call passed
+# before — they are what `grimoire --help` renders without importing anything.
 
 LazyTyperGroup.configure(
     groups={
@@ -1318,6 +1317,7 @@ LazyTyperGroup.configure(
         "expertise": LazyGroupSpec("grimoire.cli.cmd_expertise", "expertise_app", rich_help_panel="Agents"),
         "web": LazyGroupSpec("grimoire.cli.cmd_web", "web_app", rich_help_panel="Data"),
         "autonomy": LazyGroupSpec("grimoire.cli.cmd_autonomy", "autonomy_app", rich_help_panel="Project"),
+        "mcp": LazyGroupSpec("grimoire.cli.cmd_mcp", "mcp_app", rich_help_panel="Project"),
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
@@ -1339,7 +1339,7 @@ LazyTyperGroup.configure(
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
         "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "expertise", "web",
-        "autonomy",
+        "autonomy", "mcp",
         "config", "completion", "self", "plugins",
     ],
 )

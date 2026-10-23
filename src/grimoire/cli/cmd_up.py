@@ -33,6 +33,7 @@ from rich.table import Table
 from grimoire.cli import cmd_setup
 from grimoire.cli.doctor_hooks import check_hook_commands
 from grimoire.cli.doctor_instructions import check_instruction_files
+from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_spec_http
 from grimoire.cli.env_checks import EnvCheck
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
@@ -413,6 +414,9 @@ def check_mcp_json(target: Path) -> list[EnvCheck]:
                 optional=False,
             ))
             continue
+        if (http_check := check_mcp_spec_http(server_name, spec)) is not None:
+            checks.append(http_check)
+            continue
         broken: list[str] = []
         command = str(spec.get("command", "")).strip()
         launcher = _launcher_name(command) if command else ""
@@ -495,6 +499,7 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         check_ollama(),
         check_embedding_model(target),
         *check_mcp_json(target),
+        check_mcp_processes(),
         *check_hook_commands(target),
         *check_instruction_files(target),
     ]
