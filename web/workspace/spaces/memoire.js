@@ -27,6 +27,7 @@
 // api.memorySearch(q, projects).
 
 import { icon, STATE_ICON, stateIcon } from '../shell.js';
+import { formatScore } from '../score.js';
 
 const STYLE_ID = 'me-styles';
 
@@ -58,7 +59,8 @@ function injectStyles() {
     .me-results { display: flex; flex-direction: column; gap: var(--sp-2); }
     .me-result { border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2) var(--sp-3); background: var(--e1); cursor: pointer; }
     .me-result:hover, .me-result:focus-visible { background: var(--e2); outline: none; }
-    .me-result .me-result-head { justify-content: space-between; margin-bottom: 4px; }
+    .me-result .me-result-head { justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .me-result .me-result-head > .row { flex: 0 1 auto; justify-content: flex-start; }
     .me-result .me-result-text { color: var(--ink2); font-size: var(--t-s); }
     .me-summary { color: var(--ink3); font-size: var(--t-min); }
     .me-result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: 6px; color: var(--ink3); font-size: var(--t-min); }
@@ -384,7 +386,10 @@ function fleetSearchResults(ctx, data, canLink) {
     item.tabIndex = 0;
     item.setAttribute('role', 'button');
     const who = row(text('span', 'chip', entry.projectName || entry.projectSlug), freshnessBadge(entry));
-    const head = row(who, text('span', 'lbl mono', `score ${Number(entry.score || 0).toFixed(3)}`));
+    const shown = formatScore(entry.score, entry.scoreKind);
+    const scoreNode = text('span', 'lbl mono', shown.text);
+    scoreNode.title = shown.title;
+    const head = row(who, scoreNode);
     head.className += ' me-result-head';
     const replaced = entry.provenance && entry.provenance.cycle === 'remplacé';
     const body = text('div', 'me-result-text' + (replaced ? ' me-replaced' : ''), (entry.text || '').slice(0, 220));
@@ -401,7 +406,7 @@ function fleetSearchResults(ctx, data, canLink) {
         text('div', 'lbl mono', entry.id),
         text('p', null, entry.text || ''),
         factInspector(ctx, entry),
-        text('div', 'lbl', `score : ${Number(entry.score || 0).toFixed(3)} — tags : ${(entry.tags || []).join(', ') || '—'}`),
+        text('div', 'lbl', `${shown.text} — tags : ${(entry.tags || []).join(', ') || '—'}`),
       );
     };
     item.addEventListener('click', openInspector);

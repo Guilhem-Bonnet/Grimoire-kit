@@ -184,6 +184,13 @@ def memory_overview(project_root: Path, requested: str | None) -> dict[str, Any]
     }
 
 
+def _score_kind(mgr: Any) -> str:
+    """Ce que ``score`` mesure : ``rrf`` (rang fusionné), ``bm25`` (lexical) ou ``backend`` (brut)."""
+    if mgr.prefers_hybrid:
+        return "rrf"
+    return "bm25" if type(mgr.backend).__name__ in {"LexicalMemoryBackend", "TantivyMemoryBackend"} else "backend"
+
+
 def _search_project(
     entry: dict[str, str], query: str, limit: int, *, include_superseded: bool = False, include_stale: bool = False,
 ) -> dict[str, Any]:
@@ -212,7 +219,8 @@ def _search_project(
         )
     except (GrimoireConfigError, GrimoireMemoryError, ImportError, OSError, ValueError) as exc:
         return {"slug": slug, "name": name, "results": [], "reason": str(exc)}
-    results = [{**e.to_dict(), "projectSlug": slug, "projectName": name} for e in found]
+    kind = _score_kind(mgr)
+    results = [{**e.to_dict(), "projectSlug": slug, "projectName": name, "scoreKind": kind} for e in found]
     return {
         "slug": slug, "name": name, "results": results, "reason": None,
         "hiddenStale": int(getattr(mgr, "hidden_stale", 0) or 0),
