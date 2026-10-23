@@ -366,7 +366,7 @@ def grimoire_config(project_path: str = ".") -> str:
 
 
 @_tool(_writes(destructive=True, idempotent=False, open_world=True))
-def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".") -> str:
+def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".", source: str = "") -> str:
     """Store a memory entry in the project's configured memory backend.
 
     The write crosses the memory trust boundary first: content schema, size
@@ -377,6 +377,9 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".")
         text: The text to remember.
         user_id: Optional user ID to scope the memory.
         project_path: Path to project root (default: current directory).
+        source: Where the fact comes from: a file path (``path`` or ``path:line``),
+            ``task:<id>``, ``session:<id>`` or ``commit:<sha>``. Omitted, the
+            entry is free text and is never reported up to date.
     """
     from grimoire.memory.manager import MemoryManager
     from grimoire.memory.validation import MemoryWriteRefusedError
@@ -385,7 +388,9 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".")
     try:
         cfg = GrimoireConfig.find_and_load(target)
         mgr = MemoryManager.from_config(cfg, project_root=target)
-        entry = mgr.store(text, user_id=user_id, emitter="mcp")
+        entry = mgr.store(
+            text, user_id=user_id, emitter="mcp", metadata={"source_uri": source} if source else None,
+        )
         return json.dumps(entry.to_dict(), indent=2, ensure_ascii=False)
     except MemoryWriteRefusedError as exc:
         return _tool_error(exc.to_dict())
@@ -395,9 +400,18 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".")
 
 @_tool(_reads(open_world=True))
 def grimoire_memory_search(
-    query: str, user_id: str = "", limit: int = 5, project_path: str = ".", include_superseded: bool = False,
+    query: str, user_id: str = "", limit: int = 5, project_path: str = ".",
+    include_superseded: bool = False, include_stale: bool = False,
 ) -> str:
-    """Search project memories by keyword or semantic similarity.
+    """Search project memories; every result carries its source and freshness.
+
+    The kit never writes an answer: it returns sourced excerpts and the host
+    model drafts. Each result has ``source`` (a path, ``task:<id>``, ``saisie
+    libre`` or ``inconnue``), ``freshness`` (``a_jour``, ``perime``,
+    ``non_verifie``, ``hypothese``, ``source_disparue``) recomputed at read
+    time, and ``provenance`` (the ``grimoire.knowledge.fact/v1`` card: source
+    fingerprint, source/indexing/confirmation dates, cycle). A free-text memory
+    is never ``a_jour``.
 
     Args:
         query: Search query text.
@@ -406,8 +420,11 @@ def grimoire_memory_search(
         project_path: Path to project root (default: current directory).
         include_superseded: Also return memories replaced by a newer one
             (metadata ``superseded_by``); hidden by default.
+        include_stale: Also return memories whose source file is gone; hidden
+            by default, the count is reported in ``hidden_source_disparue``.
     """
     from grimoire.memory.manager import MemoryManager
+    from grimoire.memory.profiles import retrieval_in_service
 
     target = Path(project_path).resolve()
     try:
@@ -416,15 +433,47 @@ def grimoire_memory_search(
         # Agents read through this tool. Fusing the vector and BM25 rankings
         # here is what makes a composed memory observable to them at all;
         # hybrid_search falls back to plain search when there is nothing to fuse.
-        entries = mgr.hybrid_search(query, user_id=user_id, limit=limit, include_superseded=include_superseded)
+        entries = mgr.hybrid_search(
+            query, user_id=user_id, limit=limit,
+            include_superseded=include_superseded, include_stale=include_stale,
+        )
         return json.dumps({
             "query": query,
             "results": [e.to_dict() for e in entries],
             "count": len(entries),
             "retrieval": "hybrid" if mgr.prefers_hybrid else "single",
+            "retrieval_in_service": retrieval_in_service(mgr.prefers_hybrid, cfg.memory.layer_profile),
+            "hidden_source_disparue": mgr.hidden_stale,
         }, indent=2, ensure_ascii=False)
     except GrimoireError as exc:
         return _tool_error({"error": str(exc)})
+
+
+@_tool(_writes(destructive=False, idempotent=True))
+def grimoire_memory_supersede(old_id: str, new_id: str, project_path: str = ".") -> str:
+    """Replace a decision: ``old_id`` is no longer served, but stays readable.
+
+    The replaced memory is hidden from ``grimoire_memory_search`` unless
+    ``include_superseded`` is set. Refused when the replacement is unknown,
+    already replaced itself (point at the latest link) or closes a cycle.
+
+    Args:
+        old_id: ID of the memory being replaced.
+        new_id: ID of the memory that replaces it.
+        project_path: Path to project root (default: current directory).
+    """
+    from grimoire.memory.manager import MemoryManager
+
+    target = Path(project_path).resolve()
+    try:
+        cfg = GrimoireConfig.find_and_load(target)
+        mgr = MemoryManager.from_config(cfg, project_root=target)
+        updated = mgr.supersede(old_id, new_id)
+    except GrimoireError as exc:
+        return _tool_error({"error": str(exc)})
+    if updated is None:
+        return _tool_error({"error": f"Entry not found: {old_id!r}."})
+    return json.dumps({"superseded": True, "old_id": old_id, "new_id": new_id}, ensure_ascii=False)
 
 
 @_tool(_writes(destructive=True, idempotent=False))

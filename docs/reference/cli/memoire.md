@@ -13,9 +13,10 @@ et projections : [Système de mémoire](../../explications/memoire.md).
 | --- | --- |
 | `grimoire memory status` | Santé du backend, nombre d'entrées, configuration |
 | `grimoire memory up` | Mettre en place la stack mémoire complète, plan par plan |
-| `grimoire memory remember <texte>` | Écriture typée idempotente — même texte et même agent n'écrivent qu'une fois |
+| `grimoire memory remember <texte>` | Écriture typée idempotente — même texte et même agent n'écrivent qu'une fois ; `--source` (chemin, `task:<id>`, `session:<id>`, `commit:<sha>`) dit d'où vient le fait, sans quoi c'est une saisie libre, jamais « à jour » |
 | `grimoire memory recall <requête>` | Rechercher parmi les mémoires typées |
-| `grimoire memory search <requête>` | Recherche par mot-clé ou similarité sémantique — fusionne vectoriel et BM25 (RRF) dès que le projet possède les deux ; `--no-hybrid` force le backend seul |
+| `grimoire memory search <requête>` | Recherche par mot-clé ou similarité sémantique — fusionne vectoriel et BM25 (RRF) dès que le projet possède les deux ; `--no-hybrid` force le backend seul. Chaque résultat porte sa source, ses dates et sa fraîcheur (à jour, périmé, non vérifié, hypothèse) ; `--include-stale` ajoute les sources disparues, `--include-superseded` les décisions remplacées |
+| `grimoire memory supersede <ancien> <nouveau>` | Remplacer une décision : l'ancienne n'est plus servie mais reste lisible avec `--include-superseded` |
 | `grimoire memory list` | Lister les mémoires stockées, paginées |
 | `grimoire memory delete <id>` | Supprimer une entrée |
 | `grimoire memory gc` | Consolider et compacter |

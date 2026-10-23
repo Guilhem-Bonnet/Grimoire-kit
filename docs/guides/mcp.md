@@ -75,8 +75,9 @@ Dans `claude_desktop_config.json` :
 | `grimoire_agent_list` | Liste des agents installés | lecture |
 | `grimoire_harmony_check` | Exécute un Harmony Check et retourne le rapport | lecture |
 | `grimoire_config` | Configuration brute du projet | lecture |
-| `grimoire_memory_store` | Stocker un texte en mémoire sémantique | écriture, destructif, monde ouvert |
-| `grimoire_memory_search` | Recherche sémantique dans la mémoire | lecture, monde ouvert |
+| `grimoire_memory_store` | Stocker un texte en mémoire ; `source` (chemin, `task:<id>`…) dit d'où vient le fait, sans quoi c'est une saisie libre | écriture, destructif, monde ouvert |
+| `grimoire_memory_search` | Extraits sourcés de la mémoire : chaque résultat porte `source`, `freshness` (recalculée à la lecture) et la fiche `provenance` ; le kit ne génère jamais de réponse. `include_superseded`, `include_stale` | lecture, monde ouvert |
+| `grimoire_memory_supersede` | Remplacer une décision (l'ancienne n'est plus servie, reste lisible avec `include_superseded`) | écriture, idempotent |
 | `grimoire_add_agent` | Créer un agent dans `_grimoire/overrides/agents/` à partir du gabarit `custom-agent` | écriture, destructif |
 | `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates | lecture ; `_score` persiste le score et `_gate` journalise le passage |
 | `grimoire_host_status` / `grimoire_skill` / `grimoire_command` | Les surfaces hôtes, pour un client sans émetteur | lecture |
