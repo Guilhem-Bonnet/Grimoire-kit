@@ -83,9 +83,9 @@ def test_les_trois_vues_sont_proposees_au_niveau_projet(concevoir: tuple[Page, s
 def test_la_vue_liste_montre_les_six_colonnes_de_la_spec(concevoir: tuple[Page, str]) -> None:
     page, _ = concevoir
     page.locator('#view-seg button[data-value="liste"]').click()
-    page.wait_for_selector("table.cv-table")
+    page.wait_for_selector("table.tbl")
 
-    headers = [h.strip() for h in page.locator("table.cv-table th").all_inner_texts()]
+    headers = [h.strip() for h in page.locator("table.tbl th").all_inner_texts()]
     assert headers == ["Nom", "Genre", "Agents", "Équipe", "Validation", "Dernière modification"]
 
 

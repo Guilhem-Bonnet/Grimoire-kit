@@ -96,7 +96,7 @@ def test_lister_accepter_et_refuser_une_proposition(
 
     # La table des agents, juste au-dessus, montre le nouvel agent sans recharger la page.
     workspace.wait_for_function(
-        "(slug) => document.querySelector('.pl-table')?.textContent.includes(slug)",
+        "(slug) => document.querySelector('.tbl')?.textContent.includes(slug)",
         arg=accept_slug,
     )
 

@@ -33,7 +33,7 @@ def _goto(page: Page, space: str) -> None:
 def _open_agent(page: Page) -> None:
     _goto(page, "piloter")
     page.wait_for_selector(".pl-sheet")
-    row = page.locator(".pl-table tbody tr", has_text=AGENT)
+    row = page.locator(".tbl tbody tr", has_text=AGENT)
     row.wait_for()
     row.click()
     page.wait_for_selector("[data-agent-inspector]")
@@ -65,7 +65,7 @@ def test_assigner_un_skill_cree_l_override_vu_par_le_diagnostic(
     assert SKILL in content
 
     # La table de la fiche reflète aussi la nouvelle couche.
-    row = workspace.locator(".pl-table tbody tr", has_text=AGENT)
+    row = workspace.locator(".tbl tbody tr", has_text=AGENT)
     assert "overrides" in row.inner_text()
 
     # `grimoire host status` — la carte de routage — voit la même déclaration :

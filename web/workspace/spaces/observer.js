@@ -21,7 +21,7 @@
 // tâche dans l'espace Exécuter (`ctx.goto('executer', { task, view:
 // 'timeline' })`) — pure navigation, aucune lecture supplémentaire ici.
 
-import { icon, stateIcon } from '../shell.js';
+import { kpiRow, stateIcon } from '../shell.js';
 
 const STYLE_ID = 'ob-styles';
 
@@ -31,15 +31,6 @@ function injectStyles() {
   style.id = STYLE_ID;
   style.textContent = `
     .ob-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .ob-kpi { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); overflow: hidden; }
-    .ob-kpi-item { flex: 1; min-width: 140px; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--line); border-top: 3px solid var(--tone, transparent); }
-    .ob-kpi-item:first-child { border-left: 0; }
-    .ob-kpi-val { font-family: var(--font); font-size: var(--t-xl); font-weight: 600; color: var(--ink); line-height: 1.25; }
-    .ob-kpi-lbl .ico { width: 14px; height: 14px; color: var(--tone, var(--ink3)); margin-right: 6px; vertical-align: -2px; }
-    .ob-kpi-item[data-tone="ok"] { --tone: var(--ok); }
-    .ob-kpi-item[data-tone="warn"] { --tone: var(--warn); }
-    .ob-kpi-item[data-tone="bad"] { --tone: var(--bad); }
-    .ob-kpi-lbl { font-size: var(--t-min); color: var(--ink3); margin-top: 2px;  display: flex; align-items: center; }
     .ob-panels { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
     @media (max-width: 900px) { .ob-panels { grid-template-columns: 1fr; } }
     .ob-panel { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-3); }
@@ -52,11 +43,6 @@ function injectStyles() {
     .ob-legend { display: flex; gap: var(--sp-3); margin-top: 6px; }
     .ob-legend-item { display: flex; align-items: center; gap: 6px; font-size: var(--t-min); color: var(--ink3); }
     .ob-legend-dot { width: 8px; height: 8px; border-radius: 999px; }
-    .ob-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
-    .ob-table th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-    .ob-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
-    .ob-table tbody tr { cursor: pointer; }
-    .ob-table tbody tr:hover { background: var(--e2); }
     .ob-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
     .ob-runs { margin-top: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
     .ob-runs h4 { font-size: var(--t-min); text-transform: none; color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
@@ -115,21 +101,6 @@ function percentile(sorted, p) {
   if (!sorted.length) return null;
   const index = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
   return sorted[index];
-}
-
-function kpiCard(items) {
-  const card = document.createElement('div');
-  card.className = 'ob-kpi';
-  for (const item of items) {
-    const cell = document.createElement('div');
-    cell.className = 'ob-kpi-item';
-    if (item.tone) cell.dataset.tone = item.tone;
-    const lbl = text('div', 'ob-kpi-lbl', item.label);
-    if (item.icon) lbl.prepend(icon(item.icon));
-    cell.append(text('div', 'ob-kpi-val', item.value), lbl);
-    card.append(cell);
-  }
-  return card;
 }
 
 function costPanel(spans, modelRates) {
@@ -218,7 +189,7 @@ function slowSpansPanel(spans, ctx, onSelect) {
     return panel;
   }
   const table = document.createElement('table');
-  table.className = 'ob-table';
+  table.className = 'tbl tbl-pick';
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   for (const label of ['Span', 'Agent', 'Durée', 'Issue']) headRow.append(text('th', null, label));
@@ -372,7 +343,7 @@ function renderRuntime(root, ctx, { spans, modelRates, runs }) {
   const durations = spans.map(spanDurationMs).filter((d) => d != null);
   const avgLatency = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
 
-  wrap.append(kpiCard([
+  wrap.append(kpiRow([
     { value: String(spans.length), label: 'spans', icon: 'network' },
     { value: String(agents.size), label: 'agents', icon: 'team' },
     { value: String(models.size), label: 'modèles', icon: 'cognition' },

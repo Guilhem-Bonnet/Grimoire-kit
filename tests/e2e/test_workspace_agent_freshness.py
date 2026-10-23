@@ -53,7 +53,7 @@ def _open_agent(page: Page) -> None:
     page.wait_for_selector("body[data-ready='1']")
     page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
     page.wait_for_selector(".pl-sheet")
-    row = page.locator(".pl-table tbody tr", has_text=AGENT)
+    row = page.locator(".tbl tbody tr", has_text=AGENT)
     row.wait_for()
     row.click()
     page.wait_for_selector("[data-agent-inspector]")
@@ -80,7 +80,7 @@ def _write_stale_dispatch(project_root: Path, *, days_ago: int) -> None:
 def test_sans_journal_aucun_badge_perime(workspace: Page, real_project: Path) -> None:
     """Journal absent (ou pas encore assez d'historique) : pas de badge, pas d'affirmation."""
     _open_agent(workspace)
-    row = workspace.locator(".pl-table tbody tr", has_text=AGENT)
+    row = workspace.locator(".tbl tbody tr", has_text=AGENT)
     assert "périmé" not in row.inner_text()
 
 
@@ -92,7 +92,7 @@ def test_un_agent_perime_porte_le_badge_dans_la_table_et_l_inspecteur(
 
     _open_agent(workspace)
 
-    row = workspace.locator(".pl-table tbody tr", has_text=AGENT)
+    row = workspace.locator(".tbl tbody tr", has_text=AGENT)
     assert "périmé" in row.inner_text()
     assert "invoqué il y a 100 j" in row.inner_text()
 
