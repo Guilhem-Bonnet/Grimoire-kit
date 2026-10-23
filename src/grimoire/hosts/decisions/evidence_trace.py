@@ -22,6 +22,7 @@ before this issue.
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from grimoire.core.standard_checks.evidence_journal import (
@@ -268,6 +269,28 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
         return
 
 
+def _writes_outside_project(hook: HookInput, facts: ToolFacts) -> bool:
+    """Issue #875 : vrai si l'appel n'écrit que hors de ``project_root``.
+
+    Brouillon sous le répertoire temporaire, mémoire de l'utilisateur sous
+    ``~/.claude`` : ce n'est pas du travail du projet, ni pour le compteur de
+    ``Stop`` ni pour le rappel de preuve. Une cible relative se lit depuis
+    ``project_root`` ; une cible illisible reste comptée (fail-closed).
+    """
+    if facts.kind is not ActionKind.FILE_WRITE or not facts.targets:
+        return False
+    try:
+        root = hook.project_root.resolve()
+        for target in facts.targets:
+            path = Path(target).expanduser()
+            if not (path if path.is_absolute() else root / path).resolve().is_relative_to(root):
+                continue
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def _record_session_mutation(hook: HookInput, facts: ToolFacts, task_id: str) -> None:
     """Issue #638 lot A : la session compte ses écritures, jamais leur contenu.
 
@@ -277,7 +300,7 @@ def _record_session_mutation(hook: HookInput, facts: ToolFacts, task_id: str) ->
     ou édité, commande Bash mutante ou destructive — compte. Best-effort,
     comme le journal de preuve juste au-dessus.
     """
-    if facts.mutation is MutationClass.READ_ONLY or not hook.session_id:
+    if facts.mutation is MutationClass.READ_ONLY or not hook.session_id or _writes_outside_project(hook, facts):
         return
     try:
         from datetime import UTC, datetime
@@ -425,7 +448,7 @@ def decide_evidence_trace(hook: HookInput) -> Decision:
     _record_session_mutation(hook, facts, task_id)
     if _is_delegation_tool(hook.tool_name):
         _record_delegation(hook, task_id)
-    if facts.kind is not ActionKind.FILE_WRITE:
+    if facts.kind is not ActionKind.FILE_WRITE or _writes_outside_project(hook, facts):
         return _with_repetition(Decision(), repetition)
     touched = ", ".join(facts.targets[:3]) or "le fichier modifié"
     context = (
