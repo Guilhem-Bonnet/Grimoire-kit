@@ -4,7 +4,7 @@ Le frein (``pretooluse_deny`` : un refus au PreToolUse arrête réellement
 l'outil) n'est prouvé en dur que pour la version capturée à la main (Claude Code
 2.1.301). Une version de plus et toute reprise tombait en ``waiting(human)``.
 
-Ici la preuve se refait toute seule, pour la version **exacte** de l'hôte :
+Ici la preuve se refait, sur opt-in (``GRIMOIRE_HOST_PROBE=1``), pour la version **exacte** de l'hôte :
 deux passes contre le binaire (témoin : un hook qui laisse passer, l'outil
 s'exécute ; refus : un hook qui sort en 2, l'outil ne s'exécute pas). Le
 résultat est consigné dans l'état utilisateur
@@ -35,7 +35,9 @@ from grimoire.core.fsio import atomic_write
 
 #: Capacité que la sonde établit.
 CAPABILITY = "pretooluse_deny"
-#: Désactive le déclenchement automatique (``0``) ; ``host status --probe`` reste possible.
+#: Opt-in du déclenchement automatique (``1``) : la sonde lance l'hôte deux fois avec les
+#: identifiants de l'utilisateur (appels payants), donc rien ne part sans lui. Sans opt-in,
+#: ``host status --probe`` reste le geste explicite.
 PROBE_ENV = "GRIMOIRE_HOST_PROBE"
 #: Délai maximal d'une passe de la sonde (secondes).
 PROBE_TIMEOUT = 90
@@ -45,6 +47,9 @@ RETRY_AFTER = timedelta(days=1)
 _MARKER = "EXECUTED.marker"
 _VERSION = re.compile(r"\d+(?:\.\d+){1,3}")
 _HOSTS = {HostId.CLAUDE_CODE_CLI: "claude"}
+#: ``(binaire, mtime_ns, taille)`` → version lue : ``claude --version`` ne se relance pas à chaque
+#: bail et à chaque tick pendant la vie du processus ; un binaire remplacé change de clé.
+_VERSION_CACHE: dict[tuple[str, int, int], str] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,11 +110,21 @@ def installed_version(host_id: HostId, binary: str | None = None) -> str:
     if not exe or host_id not in _HOSTS:
         return ""
     try:
+        stat = Path(exe).stat()
+        key = (exe, stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        key = None
+    if key is not None and key in _VERSION_CACHE:
+        return _VERSION_CACHE[key]
+    try:
         done = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15, check=False)
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return ""  # un échec n'est pas mémorisé : le binaire peut revenir
     found = _VERSION.search(done.stdout or "")
-    return found.group(0) if found else ""
+    version = found.group(0) if found else ""
+    if key is not None and version:
+        _VERSION_CACHE[key] = version
+    return version
 
 
 def _leg(binary: str, *, deny: bool, timeout: int) -> tuple[bool, bool]:
@@ -118,7 +133,7 @@ def _leg(binary: str, *, deny: bool, timeout: int) -> tuple[bool, bool]:
         root = Path(tmp)
         log = root / "hook.log"
         body = f"cat >> '{log}'; " + ("echo 'GRIMOIRE-PROBE-DENY' >&2; exit 2" if deny else "exit 0")
-        settings = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": f"sh -c \"{body}\""}]}]}}
+        settings = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": f'sh -c "{body}"'}]}]}}
         (root / ".claude").mkdir()
         (root / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
         command = [
@@ -176,12 +191,14 @@ def ensure_probed(host_id: HostId, version: str | None, *, binary: str | None = 
     """Sonde la version si aucune preuve (en dur ou consignée) ne la couvre ; ``None`` si rien à faire.
 
     Une fois par version : une preuve consignée, réussie ou non, n'est pas rejouée
-    avant :data:`RETRY_AFTER`. ``GRIMOIRE_HOST_PROBE=0`` désactive le déclenchement.
+    avant :data:`RETRY_AFTER`. Opt-in : sans ``GRIMOIRE_HOST_PROBE=1`` rien n'est lancé
+    (la sonde coûte deux appels payants) et la version non prouvée garde le comportement sûr,
+    une reprise en ``waiting(human)``.
     """
     from grimoire.hosts.capabilities import recorded_contract
 
     wanted = (version or "").strip()
-    if not wanted or host_id not in _HOSTS or os.environ.get(PROBE_ENV, "").strip() == "0":
+    if not wanted or host_id not in _HOSTS or os.environ.get(PROBE_ENV, "").strip() != "1":
         return None
     if recorded_contract(host_id).host_version == wanted:
         return None

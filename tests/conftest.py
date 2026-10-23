@@ -125,7 +125,7 @@ def _isolate_user_state(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
 
 @pytest.fixture(autouse=True)
 def _no_automatic_host_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    """La sonde du frein (#876) lance un vrai binaire d'hôte : jamais en test, sauf appel explicite avec un faux."""
+    """La sonde du frein (#876) est opt-in et lance un vrai binaire d'hôte : jamais en test, sauf appel explicite avec un faux."""
     monkeypatch.setenv("GRIMOIRE_HOST_PROBE", "0")
 
 

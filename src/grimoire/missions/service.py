@@ -643,7 +643,8 @@ class TaskService:
         self.refresh()
         expired = self.ledger.expired_claims(now)
         # Le frein de cette version d'hôte est-il prouvé ? sinon sonde (#876). Une sonde lance
-        # l'hôte (deux appels modèle) : jamais en aperçu ni sur la copie d'un plan.
+        # l'hôte (deux appels modèle payants) : jamais en aperçu ni sur la copie d'un plan, et seulement
+        # sur opt-in (``GRIMOIRE_HOST_PROBE=1``) ; sinon ``ensure_probed`` ne fait rien et la reprise reste humaine.
         for view in expired if apply and probe_hosts else ():
             host_id = resolve_host(view.host)
             if host_id is not None:

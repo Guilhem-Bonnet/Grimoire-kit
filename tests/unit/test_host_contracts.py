@@ -304,11 +304,52 @@ class TestProbeOnNewVersion:
         assert proof_for(HostId.CLAUDE_CODE_CLI, "2.1.309") is None  # rien consigné pour 2.1.309
         assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False
 
-    def test_automatic_trigger_can_be_disabled(self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from grimoire.hosts.contract_probe import ensure_probed
+    @pytest.mark.parametrize("value", [None, "", "0", "true", "yes"])
+    def test_no_probe_without_opt_in_launches_no_claude_subprocess(
+        self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch, value: str | None
+    ) -> None:
+        """Les identifiants de l'utilisateur ne servent jamais sans ``GRIMOIRE_HOST_PROBE=1``."""
+        import subprocess
 
-        monkeypatch.setenv("GRIMOIRE_HOST_PROBE", "0")
-        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=_fake_claude(tmp_path, "2.1.309")) is None
+        from grimoire.hosts.contract_probe import ensure_probed, proof_for
+
+        if value is None:
+            monkeypatch.delenv("GRIMOIRE_HOST_PROBE", raising=False)
+        else:
+            monkeypatch.setenv("GRIMOIRE_HOST_PROBE", value)
+        launched: list[object] = []
+        real = subprocess.run
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: launched.append(a) or real(*a, **k))
+        claude = _fake_claude(tmp_path, "2.1.309")
+        assert ensure_probed(HostId.CLAUDE_CODE_CLI, "2.1.309", binary=claude) is None
+        assert launched == [], "aucun sous-processus sans opt-in"
+        assert proof_for(HostId.CLAUDE_CODE_CLI, "2.1.309") is None
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False  # comportement sûr : reprise en waiting(human)
+
+    def test_unproven_question_says_how_to_opt_in(self) -> None:
+        from grimoire.missions.ledger_rules import unfenced_question
+
+        class _View:
+            session_id = "s1"
+            actor_id = "a"
+            host = "claude-code"
+            host_version = "2.1.309"
+
+        assert "GRIMOIRE_HOST_PROBE=1" in unfenced_question(_View())  # type: ignore[arg-type]
+
+    def test_installed_version_is_read_once_per_binary(
+        self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+
+        from grimoire.hosts.contract_probe import installed_version
+
+        launched: list[object] = []
+        real = subprocess.run
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: launched.append(a) or real(*a, **k))
+        claude = _fake_claude(tmp_path, "2.1.309")
+        assert [installed_version(HostId.CLAUDE_CODE_CLI, claude) for _ in range(3)] == ["2.1.309"] * 3
+        assert len(launched) == 1
 
 
 class TestProbeFailureIsNoBrake:
