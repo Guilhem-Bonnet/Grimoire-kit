@@ -21,6 +21,8 @@ metadata:
 # seulement). Re-waiver du 2026-09-04 (#174) : bornes au 2027-02-28, a
 # re-evaluer a cette date — ou avant, si OSV publie un correctif.
 # DEPAUDIT-2026-005..039 (pillow 12.3.0, 35 identifiants) : ajoutes le 2026-10-23.
+# DEPAUDIT-2026-040/041 (pillow 12.3.0, CVE-2026-112398 et CVE-2026-114501,
+# publiees le 2026-10-24, meme correctif 13.0.0) : meme motif, meme echeance.
 # pip-audit signale 35 vulnerabilites corrigees en pillow 13.0.0 (publie le
 # 2026-10-16). fastembed (extras qdrant/weaviate, plancher >=0.8) declare
 # pillow<13.0,>=10.3.0 : la montee est impossible tant que fastembed ne
@@ -675,3 +677,37 @@ waivers:
       - "https://github.com/qdrant/fastembed/issues/829"
       - "https://github.com/qdrant/fastembed/pull/830"
       - "https://osv.dev/vulnerability/GHSA-78g4-xqwv-q3g8"
+  - waiver_id: "DEPAUDIT-2026-040"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112398"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0, publiee apres les
+      35 dérogations du 2026-10-23), non applicable ici : fastembed impose
+      pillow<13.0 (qdrant/fastembed#829). grimoire-kit n'importe pas PIL et
+      n'utilise que fastembed.TextEmbedding ; le chemin de decodage d'image de
+      fastembed n'est jamais appele et aucun fichier d'entree du kit n'est
+      decode comme image. Levee : fastembed accepte pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112398"
+  - waiver_id: "DEPAUDIT-2026-041"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-114501"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0, publiee apres les
+      35 dérogations du 2026-10-23), non applicable ici : fastembed impose
+      pillow<13.0 (qdrant/fastembed#829). grimoire-kit n'importe pas PIL et
+      n'utilise que fastembed.TextEmbedding ; le chemin de decodage d'image de
+      fastembed n'est jamais appele et aucun fichier d'entree du kit n'est
+      decode comme image. Levee : fastembed accepte pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-114501"
