@@ -77,13 +77,6 @@ function injectStyles() {
     .cv-board-col { flex: 1; min-width: 220px; }
     .cv-board-col h3 { font-size: var(--t-min); color: var(--ink2); font-weight: 500; margin: 0 0 var(--sp-2); }
     .cv-board-col .cv-cards { grid-template-columns: 1fr; }
-    table.cv-table { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
-    table.cv-table th { text-align: left; color: var(--ink3); font-weight: 500; font-size: var(--t-min);
-      padding: 6px var(--sp-2); border-bottom: 1px solid var(--line); }
-    table.cv-table td { padding: 7px var(--sp-2); border-bottom: 1px solid var(--line); }
-    table.cv-table tbody tr { cursor: pointer; }
-    table.cv-table tbody tr:hover { background: var(--e1); }
-    table.cv-table tbody tr[aria-selected="true"] { background: var(--accsoft); }
     .cv-graph { position: relative; min-height: 100%; padding: var(--sp-4); }
     .cv-toolbar { position: sticky; top: 0; z-index: 6; display: flex; align-items: center;
       gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bar);
@@ -545,7 +538,7 @@ export async function mount(root, ctx) {
   }
 
   function renderListe() {
-    const table = el('table', { class: 'cv-table' },
+    const table = el('table', { class: 'tbl tbl-pick' },
       el('thead', {}, el('tr', {},
         el('th', { text: 'Nom' }), el('th', { text: 'Genre' }), el('th', { text: 'Agents' }),
         el('th', { text: 'Équipe' }), el('th', { text: 'Validation' }), el('th', { text: 'Dernière modification' }),

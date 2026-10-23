@@ -104,6 +104,46 @@ export function stateIcon(cls) {
   return span;
 }
 
+// ── Composants partagés des espaces (P21) ───────────────────────────────────
+// Une seule implémentation chacun, stylée par shell.css : un espace les
+// compose, il n'en recopie jamais le CSS sous son préfixe.
+
+/** Badge d'état : `tone` ∈ ok | warn | bad | acc, neutre sinon. Le texte
+ *  complet reste lisible au survol même quand l'ellipse le coupe. */
+export function badge(label, tone, title) {
+  const span = mk('span', { class: 'badge' + (tone ? ' ' + tone : ''), text: label });
+  span.title = title || label;
+  return span;
+}
+
+/** Rangée de tuiles KPI : `items` = [{ value, label, icon?, tone? }]. Une
+ *  valeur sans chiffre (« absent », « verte ») est un statut, pas un
+ *  indicateur : la tuile la pose en mot d'état (`data-kind="word"`). */
+export function kpiRow(items) {
+  const rowNode = mk('div', { class: 'kpi' });
+  for (const item of items) {
+    const value = String(item.value);
+    const cell = mk('div', { class: 'kpi-item' });
+    if (item.tone) cell.dataset.tone = item.tone;
+    if (!/\d/.test(value) && value !== '—') cell.dataset.kind = 'word';
+    const lbl = mk('div', { class: 'kpi-lbl' }, item.icon ? icon(item.icon) : null, mk('span', { text: item.label }));
+    const val = mk('div', { class: 'kpi-val', text: value });
+    val.title = value;
+    cell.append(lbl, val);
+    rowNode.append(cell);
+  }
+  return rowNode;
+}
+
+/** En-tête d'espace : titre, sous-titre d'une ligne (facultatif), actions. */
+export function spaceHead(title, sub, ...actions) {
+  const head = mk('header', { class: 'space-head' },
+    mk('div', null, mk('h2', { class: 'space-title', text: title }), sub ? mk('p', { class: 'space-sub', text: sub }) : null));
+  const kept = actions.filter(Boolean);
+  if (kept.length) head.append(mk('div', { class: 'space-head-actions' }, ...kept));
+  return head;
+}
+
 // ── État mémorisé par espace et par projet (spec §3.1) ──────────────────────
 
 const stateKey = () => `grimoire.workspace.${host.project || 'atelier'}`;
@@ -769,7 +809,9 @@ function segment(el, items, active, onPick) {
     button.type = 'button';
     button.textContent = item.label || item;
     button.dataset.value = item.id || item;
-    button.setAttribute('aria-pressed', String((item.id || item) === active));
+    // Un segment désactivé n'est jamais pressé : la vue active d'un espace
+    // vide se lit à l'état vide de la toile, pas à un bouton inerte allumé.
+    button.setAttribute('aria-pressed', String(!item.disabled && (item.id || item) === active));
     if (item.disabled) {
       button.disabled = true;
       if (item.disabledReason) button.title = item.disabledReason;
