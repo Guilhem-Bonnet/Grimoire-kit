@@ -244,9 +244,9 @@ voies, pour chaque `claude -p` du banc (`three_arms.py`, `aidlc_arm.py` ; `live_
 
 | Voie | Mesure | Preuve |
 |---|---|---|
-| Serveurs MCP de l'opérateur ou d'un projet parent | `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` pour `nu`. Un autre bras ne déclare que le `.mcp.json` que son installation a écrit dans le dépôt de tâche (`kit` et `kit-gov` : `grimoire-mcp` ; `ecc` et `aidlc` : aucun au 2026-10-20). | `test_bench_host_isolation.py` ; `init` du contrôle |
+| Serveurs MCP de l'opérateur ou d'un projet parent | `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` pour `nu`. Un autre bras ne déclare que le `.mcp.json` que son installation a écrit dans le dépôt de tâche (`kit` et `kit-gov` : `grimoire-mcp` ; `ecc` et `aidlc` : aucun au 2026-10-20). | `tests/unit/test_bench_host_isolation.py` ; `init` du contrôle |
 | Connecteurs claude.ai du compte | `ENABLE_CLAUDEAI_MCP_SERVERS=false` | `init` du contrôle |
-| Environnement d'une session parente | retirés : `CLAUDECODE`, `CLAUDE_CODE_*` (dont le jeton de messagerie entre sessions), `VSCODE_*`, `GIT_CONFIG_*` (assistant d'identifiants GitHub), `GH_*`, `GITHUB_*`, `SSH_AUTH_SOCK`, et tout nom en `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` ou `_KEY` sauf `ANTHROPIC_API_KEY` (mode `api-key`) ; `TMPDIR` sous `<workspace>/tmp` | `test_bench_host_isolation.py` |
+| Environnement d'une session parente | retirés : `CLAUDECODE`, `CLAUDE_CODE_*` (dont le jeton de messagerie entre sessions), `VSCODE_*`, `GIT_CONFIG_*` (assistant d'identifiants GitHub), `GH_*`, `GITHUB_*`, `SSH_AUTH_SOCK`, et tout nom en `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` ou `_KEY` sauf `ANTHROPIC_API_KEY` (mode `api-key`) ; `TMPDIR` sous `<workspace>/tmp` | `tests/unit/test_bench_host_isolation.py` |
 | `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.mcp.json` d'un répertoire parent | le workspace est refusé si lui-même ou un ancêtre en porte un. Défaut : `/mnt/Travail/Projets/Dev/_bench-grimoire` (aucun marqueur dans ses ancêtres), ou `GRIMOIRE_BENCH_WORKSPACE`. Un workspace sous le `HOME` réel est refusé : `~/.claude/` est un marqueur. `--allow-project-ancestors` lève le refus en connaissance de cause. | `test_workspace_under_a_project_is_refused` |
 
 **Contrôle avant dépense.** Avant la première tâche de `--pilot` ou `--full`, un run de contrôle par bras, dans l'environnement
