@@ -459,7 +459,23 @@ def contract_for(host_id: HostId, host_version: str | None) -> HostContract:
     wanted = (host_version or "").strip()
     if wanted and recorded.host_version and wanted == recorded.host_version:
         return recorded
-    return _unverified_contract(host_id)
+    return _probed_contract(host_id, wanted) or _unverified_contract(host_id)
+
+
+def _probed_contract(host_id: HostId, version: str) -> HostContract | None:
+    """Contrat issu d'une sonde réussie sur *version* exacte (#876) ; ``None`` sinon.
+
+    Seul ``pretooluse_deny`` est établi par la sonde ; le reste demeure non vérifié.
+    Un échec de sonde, ou une version jamais sondée, ne donne rien.
+    """
+    from grimoire.hosts.contract_probe import CAPABILITY, proof_for
+
+    proof = proof_for(host_id, version) if version else None
+    if proof is None or not proof.ok:
+        return None
+    evidence = {key: ContractEvidence() for key in CONTRACT_KEYS}
+    evidence[CAPABILITY] = ContractEvidence(_V, (f"probe:{proof.key}",), f"sonde du {proof.probed_at}")
+    return HostContract(host_id=host_id, host_version=version, evidence=evidence)
 
 
 def is_fenced(host_id: HostId, host_version: str | None) -> bool:

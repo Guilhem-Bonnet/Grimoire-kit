@@ -633,12 +633,18 @@ class TaskService:
         sur les baux perdus à cet instant, et sont gardés par (tâche, epoch). Sous le verrou, un bail dont
         l'epoch a changé depuis n'est pas jugé à ce tick (:class:`UnjudgedClaimError`) ; le suivant le jugera.
         """
-        from grimoire.hosts.capabilities import claim_host_is_fenced
+        from grimoire.hosts.capabilities import claim_host_is_fenced, resolve_host
+        from grimoire.hosts.contract_probe import ensure_probed
         from grimoire.missions.ledger_rules import UnjudgedClaimError
         from grimoire.missions.task_worktree import unpushed_work
 
         self.refresh()
-        held = {(v.task_id, v.epoch): unpushed_work(self, v.task_id) for v in self.ledger.expired_claims(now)}
+        expired = self.ledger.expired_claims(now)
+        for view in expired:  # le frein de cette version d'hôte est-il prouvé ? sinon sonde (#876)
+            host_id = resolve_host(view.host)
+            if host_id is not None:
+                ensure_probed(host_id, view.host_version)
+        held = {(v.task_id, v.epoch): unpushed_work(self, v.task_id) for v in expired}
 
         def branch_hold(task: MissionTask) -> str:
             key = (task.id, task.claim.lease_epoch if task.claim is not None else -1)
