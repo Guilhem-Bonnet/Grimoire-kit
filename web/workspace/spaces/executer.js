@@ -57,7 +57,7 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
-import { icon, stateIcon } from '../shell.js';
+import { badge, icon, stateIcon } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 
 const COLUMN_LABEL = {
@@ -195,7 +195,6 @@ function injectStyles() {
     .ex-card-project { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .ex-card-project .chip { font-size: var(--t-s); }
     .ex-session-cmd { margin: 6px 0 0; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); font-family: var(--mono); font-size: var(--t-s); white-space: pre-wrap; word-break: break-all; }
-    .ex-badge { font-size: var(--t-min); border: 1px solid var(--acc); color: var(--acc); border-radius: var(--r); padding: 0 6px; }
     .ex-directive { display: flex; flex-direction: column; gap: 2px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); margin-bottom: 6px; font-size: var(--t-s); }
     .ex-directive.unread { border-color: var(--acc); }
     .ex-directive-meta { font-size: var(--t-min); color: var(--ink3); display: flex; gap: 6px; align-items: center; }
@@ -380,11 +379,11 @@ function taskCard(task, onSelect, portfolio = false) {
   const priority = task.effective_priority || 'medium';
   meta.append(dot(PRIORITY_DOT[priority] || ''), text('span', null, PRIORITY_LABEL[priority] || priority));
   if (task.directives_pending > 0) {
-    const badge = text('span', 'ex-badge', `consigne non lue (${task.directives_pending})`);
-    badge.dataset.role = 'directive-badge';
-    meta.append(badge);
+    const unread = badge(`consigne non lue (${task.directives_pending})`, 'acc');
+    unread.dataset.role = 'directive-badge';
+    meta.append(unread);
   } else if (task.directives_unacknowledged > 0) {
-    meta.append(text('span', 'ex-badge', `consigne non accusée (${task.directives_unacknowledged})`));
+    meta.append(badge(`consigne non accusée (${task.directives_unacknowledged})`, 'acc'));
   }
   card.append(meta);
   if (task.board === 'blocked' && task.status !== 'waiting') {

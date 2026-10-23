@@ -55,13 +55,13 @@ def test_le_changement_de_projet_n_interroge_que_le_projet_cible(
         # Flotte par défaut (#351) : le chargement initial lit les 3 projets
         # en UN appel `/api/fleet` (#541) — un coût attendu et non mesuré
         # ici, qui n'a rien à voir avec le défaut de l'issue.
-        page.wait_for_selector(".pl-table tbody tr")
-        assert page.locator(".pl-table tbody tr").count() == 3
+        page.wait_for_selector(".tbl tbody tr")
+        assert page.locator(".tbl tbody tr").count() == 3
 
         # Le changement de projet lui-même : cliquer la ligne d'un AUTRE
         # projet ouvre sa fiche. Le compteur n'écoute qu'à partir d'ici.
         seen = _sheet_requests(page)
-        page.locator(".pl-table tbody tr", has_text=slug_b).first.click()
+        page.locator(".tbl tbody tr", has_text=slug_b).first.click()
         page.wait_for_selector("button:has-text('Mettre à jour')")
 
         assert seen == [f"{served}/api/workspace/sheet?project={slug_b}"], (
@@ -87,14 +87,14 @@ def test_revenir_sur_la_flotte_sert_le_cache_dans_la_fenetre_de_60s(
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
         page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
         page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-        page.wait_for_selector(".pl-table tbody tr")
+        page.wait_for_selector(".tbl tbody tr")
 
-        page.locator(".pl-table tbody tr", has_text=slug_b).first.click()
+        page.locator(".tbl tbody tr", has_text=slug_b).first.click()
         page.wait_for_selector("button:has-text('Mettre à jour')")
 
         seen = _fleet_requests(page)
         page.locator('#zoom-seg button[data-value="flotte"]').click()
-        page.wait_for_selector(".pl-table tbody tr")
+        page.wait_for_selector(".tbl tbody tr")
 
         assert seen == [], (
             f"retour sur la Flotte dans la fenêtre de cache : {len(seen)} requête(s) /api/fleet "
@@ -107,7 +107,7 @@ def test_revenir_sur_la_flotte_sert_le_cache_dans_la_fenetre_de_60s(
         seen_refresh = _fleet_requests(page)
         page.locator("button", has_text="Rafraîchir la flotte").click()
         page.wait_for_timeout(500)
-        page.wait_for_selector(".pl-table tbody tr")
+        page.wait_for_selector(".tbl tbody tr")
 
         assert len(seen_refresh) == 1, (
             f"« Rafraîchir la flotte » : {len(seen_refresh)} requête(s) /api/fleet, attendu 1 — {seen_refresh}"

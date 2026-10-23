@@ -41,7 +41,7 @@ def test_piloter_cockpit_flotte_montre_un_tableau_avec_inconnue(cockpit_workspac
     workspace = cockpit_workspace
     _goto(workspace, "piloter")
 
-    workspace.locator(".pl-table-wrap, .pl-cards").first.wait_for()
+    workspace.locator(".tbl-wrap, .pl-cards").first.wait_for()
     body_text = workspace.locator("#canvas").inner_text().lower()
     assert "inconnue" in body_text
     assert "à traiter" in body_text
@@ -297,8 +297,8 @@ def test_ouvrir_ce_projet_reste_sur_l_ecran_projet_sans_recharger(
         # Défaut : Flotte, puisque `?project=` vient de l'URL (#351) — le clic
         # sur la ligne du projet B ouvre sa fiche sans recharger (mécanisme
         # déjà correct, `onSelect` dans `renderFleet`).
-        page.wait_for_selector(".pl-table tbody tr")
-        page.locator(".pl-table tbody tr", has_text=slug_b).first.click()
+        page.wait_for_selector(".tbl tbody tr")
+        page.locator(".tbl tbody tr", has_text=slug_b).first.click()
         open_button = page.locator("button", has_text="Ouvrir ce projet")
         open_button.wait_for(state="visible", timeout=15_000)
 
