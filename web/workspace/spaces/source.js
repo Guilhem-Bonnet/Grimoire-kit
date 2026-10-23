@@ -119,16 +119,29 @@ function baseName(path) {
   return idx === -1 ? path : path.slice(idx + 1);
 }
 
+// Le statut d'un fichier en lettre façon git (P30), jamais en pastille sans
+// mot : la lettre se lit sans la couleur, le `title` la dit en clair. Le kit
+// joue le rôle de la révision de base ; tout se déduit des champs du serveur
+// (`masks_kit`, `diverges`, `shipped_by_kit`, `overridden`), rien n'est deviné.
+//   M  override modifié : diverge du kit, contenu jamais livré par le kit
+//   U  override à fusionner : copie d'une version livrée, le kit a changé depuis
+//   O  override identique au kit, ou fichier du kit masqué par un override
+//   D  le kit ne livre plus ce chemin (l'override en garde une version livrée)
+//   A  ajouté par le projet : aucun équivalent dans le kit, ni livré
 function fileBadge(entry) {
-  // Le badge de dérive (spec §4, « livrer »·1) : un override qui masque un
-  // fichier du kit toujours présent, mais dont le contenu a divergé.
   if (entry.tier === 'overrides') {
-    if (entry.diverges) return { cls: 'dot warn', title: 'diverge du kit — ' + (entry.kit_counterpart || '') };
-    if (entry.masks_kit) return { cls: 'dot ok', title: 'identique au kit' };
-    return { cls: 'dot bad', title: 'le kit ne livre plus ce chemin' };
+    const counterpart = entry.kit_counterpart || '';
+    if (entry.diverges && entry.shipped_by_kit) {
+      const copy = entry.kit_version ? `copie du kit ${entry.kit_version}` : 'copie du kit';
+      return { letter: 'U', tone: 'warn', title: `à fusionner : ${copy}, le kit a changé depuis — ${counterpart}` };
+    }
+    if (entry.diverges) return { letter: 'M', tone: 'warn', title: 'modifié : diverge du kit — ' + counterpart };
+    if (entry.masks_kit) return { letter: 'O', tone: 'ok', title: 'override identique au kit' };
+    if (entry.shipped_by_kit) return { letter: 'D', tone: 'bad', title: 'le kit ne livre plus ce chemin' };
+    return { letter: 'A', tone: 'acc', title: 'ajouté par le projet : aucun équivalent dans le kit' };
   }
   if (entry.tier === 'kit' && entry.overridden) {
-    return { cls: 'dot acc', title: 'masqué par un override du projet' };
+    return { letter: 'O', tone: 'acc', title: 'masqué par un override du projet' };
   }
   return null;
 }
@@ -187,10 +200,12 @@ function renderExplorer(ctx, root) {
         row.append(name);
         const badge = fileBadge(file);
         if (badge) {
-          const dot = stateIcon(badge.cls.split(' ')[1]);
-          dot.classList.add('sr-badge');
-          dot.title = badge.title;
-          row.append(dot);
+          const letter = document.createElement('span');
+          letter.className = `sr-badge sr-git ${badge.tone}`;
+          letter.textContent = badge.letter;
+          letter.title = badge.title;
+          letter.setAttribute('aria-label', badge.title);
+          row.append(letter);
         }
         row.addEventListener('click', () => openFile(ctx, root, file.path));
         ctx.explorer.append(row);

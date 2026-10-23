@@ -407,6 +407,8 @@ export async function mount(root, ctx) {
         'Concevoir — Flotte',
         "Aucun projet enregistré auprès du cockpit. Un projet s'enregistre au premier `grimoire init`.",
         'grimoire init',
+        undefined,
+        { art: 'i-empty-fleet' },
       ));
       return;
     }
@@ -482,6 +484,8 @@ export async function mount(root, ctx) {
         'Concevoir',
         "Ce projet n'a pas encore de blueprint. La toile se peuplera dès qu'il en aura un.",
         'grimoire blueprint new <id>',
+        undefined,
+        { art: 'i-empty-blueprints' },
       ));
       return;
     }

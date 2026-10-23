@@ -3,7 +3,9 @@
 et docs/assets/cockpit-icons/*.svg.
 
 Les deux dossiers suivent la même grammaire (direction « Douce » : grille 24,
-trait 1,75, `stroke="currentColor"` porté par la racine <svg>). Le script
+trait 1,75, `stroke="currentColor"` porté par la racine <svg>). Seules
+exceptions : les compositions d'état vide `i-empty-*` (grille 96 × 64), dont le
+trait d'encre vient du CSS et dont seul l'accent porte `currentColor`. Le script
 retire le bloc <style> clair/sombre des icônes maison (il sert au rendu
 `<img>` dans le manuel, mais ses règles globales fuiraient hors du sprite) et
 reporte les attributs de la racine sur le <symbol> : le sprite suit la couleur
@@ -79,7 +81,7 @@ def build() -> str:
             raise SystemExit(f"alias {old} → {new} : icône absente de {SRC.relative_to(ROOT)}")
         attrs, body = family[new]
         parts.append(f'  <symbol id="{old}" {attrs}>{body}</symbol>')
-    parts.append("  <!-- Chrome du cockpit (docs/assets/cockpit-icons), copié tel quel. -->")
+    parts.append("  <!-- Icônes Douce du cockpit (docs/assets/cockpit-icons), copiées telles quelles. -->")
     for path in sorted(SRC_COCKPIT.glob("*.svg")):
         attrs, body = _symbol(path.read_text(encoding="utf-8"))
         parts.append(f'  <symbol id="{path.stem}" {attrs}>{body}</symbol>')

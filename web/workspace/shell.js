@@ -13,7 +13,8 @@
 //   ctx.docbar     { setBreadcrumb, setZoom, setViews, setValidation }
 //   ctx.dock       { log, setTab, echo } — `echo` affiche la commande équivalente
 //   ctx.explorer   l'élément de l'arbre gauche
-//   ctx.empty      (titre, phrase, commande) → le bloc d'état vide unique
+//   ctx.empty      (titre, phrase, commande, action?, { art? }) → le bloc d'état
+//                  vide unique ; `art` nomme une composition `i-empty-*` du sprite
 //   ctx.signal     un AbortSignal annulé au démontage de l'espace
 //   ctx.params     ce que l'appelant de `goto(id, params)` a demandé pour ce
 //                  montage (ex. `{ file }` depuis ⌘K) — jamais persistant,
@@ -101,6 +102,53 @@ export function stateIcon(cls) {
   const span = document.createElement('span');
   span.className = 'sico' + (cls ? ' ' + cls : '');
   span.append(icon(STATE_ICON[cls] ?? 'info'));
+  return span;
+}
+
+// ── Fin du point polysémique (P30) ──────────────────────────────────────────
+// Un point ne porte plus qu'une présence ou une quantité : une catégorie prend
+// son icône, une échelle ses barres, une identité son monogramme. Le mot reste
+// toujours lisible (texte voisin ou `title`) : jamais la forme seule.
+
+/** Icône de catégorie avec son libellé au survol ; `tone` (ok | warn | bad |
+ *  acc) ne sert qu'aux glyphes qui disent un état (vivacité de session).
+ *  `alone` : aucun mot voisin ne la double, l'icône porte alors le libellé
+ *  pour les lecteurs d'écran. */
+export function glyph(name, label, tone, { alone = false } = {}) {
+  const span = mk('span', { class: 'glyph' + (tone ? ' ' + tone : '') });
+  span.title = label;
+  span.append(alone ? icon(name, label) : icon(name));
+  return span;
+}
+
+/** Deux lettres d'un nom : initiales des deux premiers mots, sinon ses deux
+ *  premières lettres (« Grimoire-Forge » → GF, « kit » → KI). Calculé ici,
+ *  rien n'est demandé au serveur. */
+export function monogramText(name) {
+  const words = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!words.length) return '?';
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2);
+  return letters.toUpperCase();
+}
+
+/** Monogramme d'une identité (projet) : remplace le point d'accent. Le nom
+ *  complet suit en texte, le monogramme est donc décoratif. */
+export function monogram(name) {
+  const span = mk('span', { class: 'mgram', text: monogramText(name) });
+  span.setAttribute('aria-hidden', 'true');
+  return span;
+}
+
+/** Échelle ordinale en barres (1 à 3 pleines sur 3) : la priorité se lit « plus
+ *  ou moins », ce qu'un point de couleur ne dit pas. `tone` = bad pour la plus
+ *  haute marche (critique). */
+export function levelBars(level, label, tone) {
+  const span = mk('span', { class: 'bars' + (tone ? ' ' + tone : '') });
+  span.dataset.level = String(level);
+  span.setAttribute('role', 'img');
+  span.setAttribute('aria-label', label);
+  span.title = label;
+  for (let i = 1; i <= 3; i += 1) span.append(mk('i', { class: i <= level ? 'on' : '' }));
   return span;
 }
 
@@ -844,11 +892,19 @@ function consoleArgv(command) {
   return null;
 }
 
-function empty(title, sentence, command, action, { compact = false } = {}) {
+// `art` : une composition d'état vide du sprite (`i-empty-*`, 96 × 64) posée
+// au-dessus du titre, à la place de la petite icône de bac.
+function empty(title, sentence, command, action, { compact = false, art = '' } = {}) {
   const block = document.createElement('div');
   block.className = compact ? 'empty empty-compact' : 'empty';
+  if (art) {
+    const scene = icon(art);
+    scene.setAttribute('class', 'empty-art');
+    block.dataset.art = art;
+    block.append(scene);
+  }
   const heading = document.createElement('h2');
-  heading.append(icon('inbox'), mk('span', { text: title }));
+  heading.append(...(art ? [] : [icon('inbox')]), mk('span', { text: title }));
   block.append(heading);
   const paragraph = document.createElement('p');
   paragraph.textContent = sentence;

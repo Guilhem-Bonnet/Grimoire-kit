@@ -380,6 +380,8 @@ function renderActivite(root, ctx, { events }) {
       "Aucun flux d'événements : ni hook-runtime/events.jsonl ni task-flow/events.jsonl "
       + "n'ont encore de ligne pour ce projet.",
       'grimoire task trace',
+      undefined,
+      { art: 'i-empty-hooks' },
     ));
     ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucun flux à inspecter.'));
     return;
