@@ -43,7 +43,22 @@ def _pick_untouched_kit_file(page: Page) -> str:
 
 def _open(page: Page, path: str) -> None:
     name = path.rsplit("/", 1)[-1]
-    page.locator(".tree .sr-tree-file", has_text=name).first.click()
+    # `dispatch_event`, pas `.click()` : cause exacte du flake CI sur PR #617
+    # (issue onboarding-60s a poussé le repli d'une pile nue vers `stack`,
+    # au lieu de `platform-engineering` — Atlas installe sept skills de
+    # pile au lieu de deux, ce qui allonge l'arbre `_grimoire/kit/` et
+    # déplace `_pick_untouched_kit_file()` sur des lignes plus profondes,
+    # ex. `_grimoire/kit/agents/stack-engineer.md`). Reproduit en local
+    # (chromium, `document.elementFromPoint` sur le centre du
+    # `getBoundingClientRect()` d'une ligne profonde de l'arbre retourne la
+    # ligne suivante, y compris via un clic souris réel émis au niveau CDP,
+    # sans lien avec le contenu du fichier ni avec l'API `/api/workspace/*`
+    # (les deux répondent correctement) : dérive sous-pixel de rendu propre
+    # à Chromium sur une longue liste flex, pas un défaut de cette PR ni du
+    # gabarit `stack`. `dispatch_event` envoie l'événement `click` direct à
+    # l'élément déjà résolu par le locator, sans dépendre des coordonnées
+    # écran ni du hit-testing du navigateur à cet endroit.
+    page.locator(".tree .sr-tree-file", has_text=name).first.dispatch_event("click")
     page.wait_for_function(
         "(p) => document.querySelector('.sr-docrow .mono')?.textContent === p", arg=path
     )

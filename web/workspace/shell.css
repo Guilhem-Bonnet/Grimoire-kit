@@ -5,10 +5,12 @@
  * tests/unit/test_workspace_tokens.py le vérifie).
  *
  * Ce que possède ce fichier : la grille de la coque, les trois états de
- * panneau, le dock, la palette, les infobulles, et les primitives (.btn,
- * .chip, .seg, .kbd, .tab, .dot, .input, .tree). Ce qu'il ne possède pas : le
- * contenu des six espaces — chaque module d'espace apporte sa propre feuille
- * ou ses classes sous `.space-<id>`.
+ * panneau, le dock, la palette, les infobulles, les primitives (.btn,
+ * .chip, .seg, .kbd, .tab, .dot, .input, .tree) et les composants partagés
+ * des espaces (.badge, .kpi, .tbl, .space-head, .empty). Ce qu'il ne possède
+ * pas : le contenu des six espaces — chaque module d'espace apporte sa propre
+ * feuille ou ses classes sous `.space-<id>`, mais jamais sa copie d'un
+ * composant partagé.
  */
 
 /* ── Réinitialisation minimale ─────────────────────────────────────────────*/
@@ -303,6 +305,50 @@ th .th-hint {
   border-color: transparent;
 }
 
+/* ── Badge (.badge) : la seule pastille de statut des espaces ──────────────
+ * Remplace les copies par espace (P21, direction Douce). Neutre par
+ * défaut (filet --line, encre --ink2) ; un état prend son fond doux et son
+ * encre d'état (≥4,5:1, test_workspace_tokens.py). Toujours une ligne : un
+ * texte trop long s'ellipse au lieu de passer dessous — son texte complet va
+ * dans `title`, et un message long n'a rien à faire dans un badge. */
+.badge {
+  display: inline-block;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--t-min);
+  font-weight: 500;
+  line-height: 20px;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+  color: var(--ink2);
+}
+.badge.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: transparent;
+}
+.badge.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: transparent;
+}
+.badge.bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+  border-color: transparent;
+}
+.badge.acc {
+  background: var(--acc-soft);
+  color: var(--acc);
+  border-color: transparent;
+}
+
 .btn {
   height: var(--h-ctl);
   display: inline-flex;
@@ -427,10 +473,18 @@ body[data-active-space="source"] {
 
 /* Espace vide (pas encore de Mission Ledger / blueprint) : les vues restent
    visibles, désactivées, plutôt que disparaître — l'utilisateur voit ce que
-   l'espace offrira dès qu'il aura des données. */
+   l'espace offrira dès qu'il aura des données. Jamais pressé et désactivé à
+   la fois : `shell.js::segment()` ne pose pas `aria-pressed="true"` sur un
+   bouton désactivé, et si un appel le fait quand même, le désactivé l'emporte
+   (le cumul des deux sortait à 1,66:1, revue UI d'octobre 2026). */
 .seg > button:disabled {
   color: var(--ink3);
   cursor: not-allowed;
+}
+
+.seg > button[aria-pressed="true"]:disabled {
+  background: none;
+  color: var(--ink3);
 }
 
 /* Désactivé sans transparence : l'opacité faisait tomber --ink3 sous 4,5:1
@@ -566,14 +620,13 @@ body[data-active-space="source"] {
   color: var(--ink3);
 }
 
-/* Le seul bloc d'état vide : il dit d'où viendra la donnée. */
+/* Le seul bloc d'état vide : il dit d'où viendra la donnée. Douce : aligné à
+ * gauche dans la toile, sans cadre ni fond — un vide n'est pas une carte —,
+ * et la commande qui le remplira dans un bloc copiable. */
 .empty {
-  margin: var(--sp-6) auto;
-  max-width: 520px;
-  padding: var(--sp-5);
-  border: 1px dashed var(--line);
-  border-radius: var(--r);
-  background: var(--e1);
+  margin: var(--sp-6) var(--sp-5);
+  max-width: 560px;
+  padding: 0;
   color: var(--ink2);
 }
 
@@ -582,20 +635,27 @@ body[data-active-space="source"] {
   align-items: center;
   gap: var(--sp-2);
   margin: 0 0 var(--sp-2);
-  font-size: var(--t-l);
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--ink);
 }
 
 .empty h2 .ico {
-  width: 22px;
-  height: 22px;
-  color: var(--ink2);
+  width: 24px;
+  height: 24px;
+  color: var(--id-current, var(--ink2));
 }
 
 .empty code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
   font-family: var(--mono);
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 .empty-actions {
@@ -620,6 +680,183 @@ body[data-active-space="source"] {
   height: auto;
   cursor: default;
   white-space: normal;
+}
+
+/* ── En-tête d'espace (.space-head) ────────────────────────────────────────
+ * Ouvre la toile d'un espace : titre, sous-titre d'une ligne, actions à
+ * droite. Construit par `shell.js::spaceHead()`, jamais à la main. */
+.space-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-3) var(--sp-4);
+}
+
+.space-title {
+  margin: 0;
+  font-size: var(--t-xl);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.space-sub {
+  margin: 4px 0 0;
+  color: var(--ink2);
+}
+
+.space-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ── Tuile KPI (.kpi) : une seule implémentation pour tous les espaces ─────
+ * Remplace les trois copies par espace (P21). Des tuiles séparées, pas
+ * une carte divisée ; libellé en haut, valeur dessous. Construite par
+ * `shell.js::kpiRow()`. Un statut (« absent », « verte ») n'est pas un
+ * chiffre : `data-kind="word"` le pose en mot d'état, sur le fond doux de son
+ * état, au lieu d'un mot géant en gras. */
+.kpi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+}
+
+.kpi-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.kpi-lbl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-min);
+  font-weight: 500;
+  color: var(--ink2);
+  white-space: nowrap;
+}
+
+.kpi-lbl > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpi-lbl .ico {
+  width: 16px;
+  height: 16px;
+  color: var(--tone, var(--ink3));
+}
+
+.kpi-val {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpi-item[data-kind="word"] .kpi-val {
+  font-size: 15px;
+  line-height: 34px;
+  letter-spacing: 0;
+  color: var(--tone, var(--ink));
+}
+
+.kpi-item[data-tone="ok"] {
+  --tone: var(--ok);
+}
+.kpi-item[data-tone="warn"] {
+  --tone: var(--warn);
+}
+.kpi-item[data-tone="bad"] {
+  --tone: var(--bad);
+}
+.kpi-item[data-kind="word"][data-tone="ok"] {
+  background: var(--ok-soft);
+}
+.kpi-item[data-kind="word"][data-tone="warn"] {
+  background: var(--warn-soft);
+}
+.kpi-item[data-kind="word"][data-tone="bad"] {
+  background: var(--bad-soft);
+}
+
+/* ── Tableau (.tbl) : un seul pour les cinq espaces ────────────────────────
+ * Remplace les quatre copies par espace (P21). Le
+ * cadre (.tbl-wrap) est facultatif : un tableau posé dans un panneau garde le
+ * cadre du panneau. En-tête collant, survol --hover, sélection --acc-soft
+ * (`aria-current` ou `aria-selected`, selon le rôle de la ligne). */
+.tbl-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-s);
+}
+
+.tbl th {
+  position: sticky;
+  top: 0;
+  height: 36px;
+  padding: 0 var(--sp-3);
+  text-align: left;
+  font-size: var(--t-min);
+  font-weight: 500;
+  color: var(--ink2);
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.tbl td {
+  padding: 8px var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.tbl tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+:root[data-density="concentration"] .tbl td {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+/* Ligne qui ouvre quelque chose : `.tbl-pick` sur la table. */
+.tbl-pick tbody tr {
+  cursor: pointer;
+}
+
+.tbl-pick tbody tr:hover {
+  background: var(--hover);
+}
+
+.tbl tbody tr[aria-current="true"],
+.tbl tbody tr[aria-selected="true"] {
+  background: var(--acc-soft);
 }
 
 /* ── Chargement : squelettes ───────────────────────────────────────────────

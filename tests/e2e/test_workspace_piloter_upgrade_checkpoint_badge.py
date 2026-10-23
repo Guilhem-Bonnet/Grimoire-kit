@@ -187,9 +187,9 @@ def test_the_checkpoint_badge_survives_a_fleet_then_project_navigation(
 
     page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
     page.get_by_role("button", name="Flotte").click()
-    page.wait_for_selector(".pl-table-wrap")
+    page.wait_for_selector(".tbl-wrap")
 
-    row = page.locator(".pl-table tbody tr", has_text="projet-checkpoint-badge")
+    row = page.locator(".tbl tbody tr", has_text="projet-checkpoint-badge")
     row.wait_for(timeout=15_000)
     row.click()
 
@@ -202,8 +202,8 @@ def test_the_checkpoint_badge_survives_a_fleet_then_project_navigation(
     # exactement le rechargement de fiche qui perdait le badge avant ce
     # correctif (`renderSheet` reconstruit tout l'inspecteur à chaque appel).
     page.get_by_role("button", name="Flotte").click()
-    page.wait_for_selector(".pl-table-wrap")
-    row = page.locator(".pl-table tbody tr", has_text="projet-checkpoint-badge")
+    page.wait_for_selector(".tbl-wrap")
+    row = page.locator(".tbl tbody tr", has_text="projet-checkpoint-badge")
     row.click()
 
     page.wait_for_selector(f"text={_BADGE_TEXT}", timeout=15_000)
