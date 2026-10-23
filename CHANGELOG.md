@@ -28,6 +28,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - Changement : vision (questions sourcées et datées, un ou plusieurs projets), modèle conceptuel (briques EKP, trois modes CAG, RAG et KAG, routeur à règles sans modèle), tableau existant/cible brique par brique avec fichiers, architecture à trois niveaux au même contrat, gouvernance (fiche de fait, fraîcheur calculée à la lecture, « inconnu ≠ vrai », oubli, frontières entre projets après #172), évaluation déterministe sans banc payant, lots E0 à E9, treize décisions avec recommandation, sources classées publié / indépendant / éditeur. Lien depuis `docs/index.md` et la nav (Explications › Cadrages).
   - Vérification : `check-doc-audience`, `check-doc-claims`, `check-doc-commands`, `test_no_dangling_tool_refs`, `mkdocs build --strict`, `grimoire gates repo`.
   - Non fait : aucun code ; aucune mesure (les gains de qualité entre niveaux restent à mesurer par le lot E3) ; les décisions D1 à D13 attendent Guilhem.
+- fix(doctor): un serveur MCP distant en https sans port explicite n'est plus un FAIL « has no port ». Constat sur la Forge après passage en 3.65.0 : `context7` (`https://mcp.context7.com/mcp`) et `github` (`https://api.githubcopilot.com/mcp/`) sortaient en échec, avec une remédiation `grimoire mcp register` hors sujet pour un serveur tiers.
+  - Changement : `cli/doctor_mcp.py` — sans port dans l'URL, le port est celui du schéma (80 pour http, 443 pour https) ; seule une URL inutilisable (port illisible, schéma autre que http(s), hôte absent) reste un FAIL, nommé « invalid url » ; un serveur injoignable reste un WARN, avec la remédiation `grimoire mcp` seulement pour un hôte local.
+  - Rouge-avant / vert-après : `tests/unit/tools/test_mcp_processes.py` (2 cas rouges sur origin/main, 43 verts avec `test_cmd_mcp.py` et `test_hosts_opencode.py`).
 
 ## [3.65.0] - 2026-10-23
 
