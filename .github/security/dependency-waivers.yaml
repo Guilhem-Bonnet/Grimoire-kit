@@ -20,6 +20,18 @@ metadata:
 # rien et ajouterait CVE-2026-45829 (injection pre-authentification, 1.x
 # seulement). Re-waiver du 2026-09-04 (#174) : bornes au 2027-02-28, a
 # re-evaluer a cette date — ou avant, si OSV publie un correctif.
+# DEPAUDIT-2026-005..039 (pillow 12.3.0, 35 identifiants) : ajoutes le 2026-10-23.
+# pip-audit signale 35 vulnerabilites corrigees en pillow 13.0.0 (publie le
+# 2026-10-16). fastembed (extras qdrant/weaviate, plancher >=0.8) declare
+# pillow<13.0,>=10.3.0 : la montee est impossible tant que fastembed ne
+# l'accepte pas (qdrant/fastembed#829, PR #830 ouverte au 2026-10-23).
+# Exposition : pillow n'a qu'un seul dependant (fastembed). Le kit n'importe
+# jamais PIL et n'instancie que fastembed.TextEmbedding
+# (src/grimoire/memory/embedding.py) ; le chemin image (ImageEmbedding,
+# late_interaction_multimodal) n'est jamais appele, aucun decodeur n'est
+# atteint (PIL est seulement importe par fastembed/common/types.py pour un
+# alias de type). Aucun fichier d'entree du kit n'est decode comme image.
+# Echeance 2027-01-31 ; levee des que fastembed accepte pillow>=13.
 waivers:
   - waiver_id: "DEPAUDIT-2026-002"
     check_id: "pip-audit"
@@ -68,3 +80,598 @@ waivers:
       - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/20"
       - "https://api.osv.dev/v1/vulns/CVE-2026-45833"
       - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/174"
+  - waiver_id: "DEPAUDIT-2026-005"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112390"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112390"
+  - waiver_id: "DEPAUDIT-2026-006"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112391"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112391"
+  - waiver_id: "DEPAUDIT-2026-007"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112392"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112392"
+  - waiver_id: "DEPAUDIT-2026-008"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112393"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112393"
+  - waiver_id: "DEPAUDIT-2026-009"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112395"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112395"
+  - waiver_id: "DEPAUDIT-2026-010"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112396"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112396"
+  - waiver_id: "DEPAUDIT-2026-011"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112397"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112397"
+  - waiver_id: "DEPAUDIT-2026-012"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112399"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112399"
+  - waiver_id: "DEPAUDIT-2026-013"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112400"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112400"
+  - waiver_id: "DEPAUDIT-2026-014"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112401"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112401"
+  - waiver_id: "DEPAUDIT-2026-015"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112402"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112402"
+  - waiver_id: "DEPAUDIT-2026-016"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112404"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112404"
+  - waiver_id: "DEPAUDIT-2026-017"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112405"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112405"
+  - waiver_id: "DEPAUDIT-2026-018"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112406"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112406"
+  - waiver_id: "DEPAUDIT-2026-019"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112891"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112891"
+  - waiver_id: "DEPAUDIT-2026-020"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112892"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112892"
+  - waiver_id: "DEPAUDIT-2026-021"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112893"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112893"
+  - waiver_id: "DEPAUDIT-2026-022"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112894"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112894"
+  - waiver_id: "DEPAUDIT-2026-023"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112895"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112895"
+  - waiver_id: "DEPAUDIT-2026-024"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112896"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112896"
+  - waiver_id: "DEPAUDIT-2026-025"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112897"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112897"
+  - waiver_id: "DEPAUDIT-2026-026"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112899"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112899"
+  - waiver_id: "DEPAUDIT-2026-027"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112900"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112900"
+  - waiver_id: "DEPAUDIT-2026-028"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112901"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-112901"
+  - waiver_id: "DEPAUDIT-2026-029"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96636"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96636"
+  - waiver_id: "DEPAUDIT-2026-030"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96637"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96637"
+  - waiver_id: "DEPAUDIT-2026-031"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96638"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96638"
+  - waiver_id: "DEPAUDIT-2026-032"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96639"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96639"
+  - waiver_id: "DEPAUDIT-2026-033"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96640"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96640"
+  - waiver_id: "DEPAUDIT-2026-034"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96641"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96641"
+  - waiver_id: "DEPAUDIT-2026-035"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96642"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96642"
+  - waiver_id: "DEPAUDIT-2026-036"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96643"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96643"
+  - waiver_id: "DEPAUDIT-2026-037"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96644"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96644"
+  - waiver_id: "DEPAUDIT-2026-038"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96778"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/CVE-2026-96778"
+  - waiver_id: "DEPAUDIT-2026-039"
+    check_id: "pip-audit"
+    vulnerability_id: "GHSA-78g4-xqwv-q3g8"
+    package: "pillow"
+    reason: >-
+      Vulnerabilite de pillow 12.3.0 (corrigee en 13.0.0), non applicable ici :
+      fastembed impose pillow<13.0 (qdrant/fastembed#829). grimoire-kit
+      n'importe pas PIL et n'utilise que fastembed.TextEmbedding ; le chemin de
+      decodage d'image de fastembed n'est jamais appele et aucun fichier
+      d'entree du kit n'est decode comme image. Levee : fastembed accepte
+      pillow>=13.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2027-01-31"
+    evidence_refs:
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+      - "https://osv.dev/vulnerability/GHSA-78g4-xqwv-q3g8"
