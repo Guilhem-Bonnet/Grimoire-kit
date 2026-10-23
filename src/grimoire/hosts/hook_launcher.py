@@ -136,7 +136,14 @@ def resolve_hook_launcher(
 #: de projet : la variable n'existe que dans l'environnement du serveur, d'où
 #: le défaut obligatoire (https://code.claude.com/docs/en/mcp).
 MCP_PROJECT_DIR = "${CLAUDE_PROJECT_DIR:-.}"
-_PROJECT_DIR_VARS = (MCP_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "$CLAUDE_PROJECT_DIR", "%CLAUDE_PROJECT_DIR%")
+_PROJECT_DIR_VARS = (
+    MCP_PROJECT_DIR,
+    "${CLAUDE_PROJECT_DIR}",
+    "$CLAUDE_PROJECT_DIR",
+    "%CLAUDE_PROJECT_DIR%",
+    "${workspaceFolder}",
+    "${workspaceRoot}",
+)
 
 
 def mcp_command(
@@ -176,24 +183,60 @@ def expand_project_dir(command: str, project_root: Path) -> str:
     return command
 
 
-def hook_program_resolves(program: str, project_root: Path, *, environ: Mapping[str, str] | None = None) -> bool:
-    """Le *program* d'une commande de hook se lance-t-il hors du venv actif ?
+def command_program(command: str) -> str:
+    """Le programme d'une ligne de commande de hook, sans ses arguments.
+
+    Un programme entre guillemets (ou ``"$CLAUDE_PROJECT_DIR"/chemin``) peut
+    contenir des espaces ; hors guillemets, le programme s'arrête au premier
+    blanc. Les antislashs sont conservés (chemins Windows).
+    """
+    text = command.strip()
+    quote = ""
+    end = len(text)
+    for index, char in enumerate(text):
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "\"'":
+            quote = char
+        elif char.isspace():
+            end = index
+            break
+    return text[:end]
+
+
+def hook_program_problem(program: str, project_root: Path, *, environ: Mapping[str, str] | None = None) -> str | None:
+    """Pourquoi *program* ne se lance pas hors du venv actif, ou ``None`` s'il se lance.
 
     Un nom nu doit se résoudre dans le PATH sans le venv actif (ce que voit
-    l'hôte) ; un chemin, relatif ou absolu, doit exister. ``$CLAUDE_PROJECT_DIR``
-    est remplacé par la racine du projet.
+    l'hôte). Un chemin non absolu se résout contre la racine du projet (là où
+    l'hôte lance la commande : ``$CLAUDE_PROJECT_DIR`` pour Claude Code, le
+    workspace pour Copilot) et reste confiné à cette racine ; un chemin doit
+    exister *et* être exécutable. Les variables de racine
+    (``$CLAUDE_PROJECT_DIR``, ``${workspaceFolder}``) sont remplacées par la
+    racine du projet.
     """
     env = os.environ if environ is None else environ
     program = expand_project_dir(program.strip().strip("\"'"), project_root)
     if "/" not in program and "\\" not in program:
-        return shutil.which(program, path=path_without_active_venv(env)) is not None
-    # ``shutil.which`` sur un chemin : il doit exister *et* être exécutable,
-    # sans ouvrir le fichier. Un chemin relatif reste confiné à la racine.
+        found = shutil.which(program, path=path_without_active_venv(env)) is not None
+        return None if found else "not found"
     native = program.replace("\\", os.sep) if os.sep != "\\" else program
     if Path(native).is_absolute():
-        return shutil.which(native) is not None
-    root = project_root.resolve()
-    candidate = (root / native).resolve()
-    if not candidate.is_relative_to(root):
-        return False
-    return shutil.which(str(candidate)) is not None
+        candidate = Path(native)
+    else:
+        root = project_root.resolve()
+        candidate = (root / native).resolve()
+        if not candidate.is_relative_to(root):
+            return "outside the project"
+    if not candidate.is_file():
+        return "not found"
+    if shutil.which(str(candidate)) is not None:
+        return None
+    if os.name == "nt" and candidate.suffix.lower() == ".sh" and shutil.which("bash") is not None:
+        return None  # un script shell se lance par bash (Git Bash) sous Windows
+    return "not launchable on this OS" if os.name == "nt" else "not executable"
+
+
+def hook_program_resolves(program: str, project_root: Path, *, environ: Mapping[str, str] | None = None) -> bool:
+    """Le *program* d'une commande de hook se lance-t-il hors du venv actif ?"""
+    return hook_program_problem(program, project_root, environ=environ) is None

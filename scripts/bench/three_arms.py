@@ -46,10 +46,12 @@ from typing import Any
 
 # Gardes du dépôt de tâche (W1-08a) : module voisin, aussi quand ce script est chargé par chemin.
 sys.path.append(str(Path(__file__).resolve().parent))
+import host_isolation
+import kit_lot
 from bare_guard import refuse_bare_for_governed_arms
-from cost_gate import cost_from_result, cost_known_fields, filter_tasks, partial_cost_notes
+from budget_guard import BudgetError, BudgetGuard, budget_args, cap_coverage, estimate_plan, parse_cap, positive_int
+from cost_gate import cost_from_result, cost_known_fields, filter_tasks, partial_cost_notes, row_cost_known
 from hidden_reads import (
-    check_transcript,
     invalid_run_alert,
     invalid_runs_rows,
     render_invalid_runs,
@@ -57,6 +59,7 @@ from hidden_reads import (
     unevaluated_run_alert,
     unevaluated_runs_rows,
 )
+from host_isolation import verify_arms as verify_host_isolation
 from model_pin import (
     ModelMismatchError,
     detect_claude_code_version,
@@ -797,6 +800,8 @@ def run_environment(
 
     if npm_cache_dir is not None:
         env["npm_config_cache"] = str(npm_cache_dir)
+    env["TMPDIR"] = str(workspace / "tmp")  # B-08 : jamais /tmp ni le TMPDIR d'une session parente
+    (workspace / "tmp").mkdir(parents=True, exist_ok=True)
 
     return env
 
@@ -1594,7 +1599,8 @@ def run_claude_headless(
     if arm is not None:
         refuse_bare_for_governed_arms([arm], auth_mode, bare=bare)  # B-06, avant tout appel payant
     log_path = log_path or (task_dir.parent / f"{task_dir.name}.stream.jsonl")
-    effective_env = dict(env) if env is not None else {**os.environ, "HOME": str(home)}
+    # B-08 (§17.8) : rien de la session de l'opérateur (jetons, MCP claude.ai), et seuls les serveurs MCP déclarés.
+    effective_env = host_isolation.without_operator_session(env if env is not None else {**os.environ, "HOME": str(home)})
     cmd = [
         "claude",
         "-p",
@@ -1612,6 +1618,7 @@ def run_claude_headless(
     if model:
         # B-01 : sans ``--model`` le modèle est celui par défaut de l'outil, qui change d'une version à l'autre.
         cmd.extend(["--model", model])
+    cmd.extend(host_isolation.mcp_isolation_args(host_isolation.declared_mcp_servers(arm, task_dir)))
     cmd.extend(extra_args)
 
     outcome = RunOutcome()
@@ -1714,6 +1721,8 @@ def run_hidden_tests(
     processus harnais, pour les appelants existants (tests, ``--dry-run``)
     qui n'en fournissent pas.
     """
+    if kit_lot.is_k(task):  # B-08 : tâche du bloc K, pytest dans le venv de test sans grimoire-kit
+        return kit_lot.run_hidden_tests(task, task_dir, hidden_dir, env=env)
     for rel_str in task.test_files:
         src = hidden_dir / rel_str
         if not src.is_file():
@@ -2149,11 +2158,12 @@ BUILD_PROMPT_TEMPLATE = (
 
 
 def build_prompt(task: TaskMeta) -> str:
-    return BUILD_PROMPT_TEMPLATE.format(solution_files=", ".join(task.solution_files))
+    return kit_lot.K_PROMPT if kit_lot.is_k(task) else BUILD_PROMPT_TEMPLATE.format(solution_files=", ".join(task.solution_files))
 
 
 def _default_workspace() -> Path:
-    return Path(os.environ.get("GRIMOIRE_BENCH_WORKSPACE", "bench-workspace")).resolve()
+    return Path(os.environ.get("GRIMOIRE_BENCH_WORKSPACE") or host_isolation.DEFAULT_WORKSPACE).resolve()
+
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -2178,6 +2188,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--subset", type=Path, default=None, help="B-00 : ne rejoue que les tâches de ce fichier (docs/bench/cost-gate-subset.json)")
     parser.add_argument("--task-lot", type=Path, default=None, help="B-07 : tâches nommées (grimoire.bench.task-lot.v1), pas de tirage")
     parser.add_argument("--label", type=str, default=None, help="étiquette libre reprise dans report.md")
+    parser.add_argument("--k", type=positive_int, default=None, help="B-08 : runs par tâche et par bras (défaut : 1 en --pilot, 3 sinon)")
+    parser.add_argument("--max-total-usd", type=str, default=None, help="B-08 : plafond de la campagne en dollars, obligatoire pour --pilot et --full")
+    parser.add_argument("--budget-ledger", type=Path, default=None, help="B-08 : journal de budget partagé (défaut : state/three-arms-budget.jsonl)")
+    parser.add_argument("--kit-repo", type=Path, default=None, help="B-08 : clone de grimoire-kit (lu) qui charge le bloc K du lot M")
+    parser.add_argument("--kit-tasks", type=Path, default=kit_lot.DEFAULT_TASKS_FILE, help="B-08 : tâches K (grimoire.bench.kit-tasks.v1)")
+    parser.add_argument("--kit-test-venv", type=Path, default=None, help="B-08 : venv de test K sans grimoire-kit (défaut : <workspace>/kit-test-venv)")
+    parser.add_argument(host_isolation.ALLOW_OPTION, action="store_true", help="B-08 : accepte un workspace sous un projet (CLAUDE.md, .mcp.json… chargés), §3")
     parser.add_argument(
         "--model",
         type=str,
@@ -2223,6 +2240,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.model = args.model.strip() if args.model else None
     if (args.pilot or args.full) and not args.model:
         parser.error("--model est obligatoire pour --pilot et --full : un run payant ne part pas sur le modèle par défaut")
+    try:  # B-08 : refus avant tout travail, comme aidlc_arm.py ; plafond facultatif en --dry-run (couverture affichée)
+        cap = parse_cap(args.max_total_usd) if (args.pilot or args.full or args.max_total_usd is not None) else None
+    except BudgetError as exc:
+        parser.error(str(exc))
+    k_runs = args.k or (1 if args.pilot else K_REPLAY)
 
     if args.report_only:
         workspace = args.workspace or _default_workspace()
@@ -2236,15 +2258,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     workspace = args.workspace or _default_workspace()
+    try:  # B-08 (§17.8) : avant tout travail, un workspace dont un ancêtre est un projet est refusé
+        host_isolation.refuse_project_ancestors(workspace, allow=args.allow_project_ancestors)
+    except host_isolation.IsolationError as exc:
+        print(f"[isolation] {exc}", file=sys.stderr)
+        return 1
     workspace.mkdir(parents=True, exist_ok=True)
 
     grimoire_bin = resolve_grimoire_bin(args.grimoire_bin)
 
     bench_root = ensure_polyglot_benchmark(workspace)
-    ecc_repo, ecc_commit = ensure_ecc_repo(workspace)
-    catalog = discover_catalog(bench_root)
+    ecc_repo, ecc_commit = ensure_ecc_repo(workspace) if "ecc" in selected_arms else (workspace / "ecc", None)
+    k_root = kit_lot.catalog_root(workspace, args.kit_repo, args.kit_tasks)  # B-08 : bloc K, si --kit-repo
+    catalog = discover_catalog(bench_root) + (discover_catalog(k_root, (kit_lot.LANGUAGE,)) if k_root else [])
     drawn, polyglot_commit = resolve_task_lot(args.task_lot, catalog, bench_root) if args.task_lot else (sample_tasks(catalog, seed=args.seed), None)
     tasks = filter_tasks(drawn, args.subset)
+    kit_lot.refuse_governed_arms(tasks, selected_arms)
 
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -2263,6 +2292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "ecc_commit": ecc_commit,
                 "task_lot": str(args.task_lot) if args.task_lot else None,  # B-07 : lot nommé, None pour un tirage
                 "polyglot_commit": polyglot_commit,
+                "k": k_runs,
                 **selection_pin(state_dir / "selection.json", args.model, claude_code_version),
                 "tasks": [t.to_dict() for t in tasks],
             },
@@ -2276,9 +2306,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ensure_isolated_home(home)
 
     go_bin = ensure_go_toolchain(workspace) if any(t.language == "go" for t in tasks) else None
+    k_check = kit_lot.prepare_block(tasks, workspace=workspace, kit_repo=args.kit_repo, tasks_file=args.kit_tasks, test_venv=args.kit_test_venv)
 
     if args.dry_run:
-        return _do_dry_run(tasks, workspace=workspace, ecc_repo=ecc_repo, homes=homes, grimoire_bin=grimoire_bin)
+        print(json.dumps({"k_block_check": k_check, "estimate": (plan := estimate_plan([t.language for t in tasks], selected_arms, k_runs)), "cap_coverage": cap and cap_coverage(cap, plan)}, indent=2, ensure_ascii=False))
+        return _do_dry_run(tasks, workspace=workspace, ecc_repo=ecc_repo, homes=homes, grimoire_bin=grimoire_bin, arms=selected_arms)
 
     # Lot J (#582) : résolu avant tout appel `claude -p`, jamais recalculé
     # par run — voir `resolve_auth_mode`. Lève `SystemExit` si `--auth
@@ -2313,7 +2345,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ensure_system_toolchains_present(languages_present)
     try:
         toolchain_check = verify_agent_toolchain_environment(
-            tasks, workspace=workspace, grimoire_bin=grimoire_bin, go_bin=go_bin, npm_cache_dir=npm_cache_dir
+            [t for t in tasks if not kit_lot.is_k(t)], workspace=workspace, grimoire_bin=grimoire_bin, go_bin=go_bin, npm_cache_dir=npm_cache_dir
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
@@ -2329,27 +2361,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     recorded_keys = {(row["task_id"], row["arm"], row["run_index"]) for row in previous_rows}
     already_done = recorded_keys if args.resume else set()
-
-    if args.pilot:
-        selected = tasks[:2]
-        k = 1
-    else:
-        selected = tasks
-        k = K_REPLAY
+    try:  # B-08 : même garde-fou que aidlc_arm.py, journal rejoué (une campagne relancée repart du cumul)
+        guard = BudgetGuard.open(cap, args.budget_ledger or state_dir / "three-arms-budget.jsonl")
+    except BudgetError as exc:
+        parser.error(str(exc))
+    selected, k = (tasks[:2] if args.pilot else tasks), k_runs
+    try:  # B-08 (§17.8) : un contrôle d'isolation par bras avant toute tâche, compté au journal ; rouge = refus (W1-08a)
+        controls = verify_host_isolation(selected_arms, root=workspace / "isolation-control", homes=homes, guard=guard, runner=run_claude_headless, provision=credentials_provisioned, budget_args=budget_args, auth_mode=auth_mode, model=args.model, env_for=lambda arm, repo: run_environment(repo, arm, home=homes[arm], grimoire_bin=grimoire_bin, workspace=workspace, go_bin=go_bin, npm_cache_dir=npm_cache_dir))  # fmt: skip
+    except (BudgetError, host_isolation.IsolationError) as exc:
+        controls = [{"arm": "?", "ok": False, "problems": [str(exc)]}]
+    (state_dir / "isolation_control.json").write_text(json.dumps(controls, indent=2, ensure_ascii=False), encoding="utf-8")
+    if failed := [c for c in controls if not c["ok"]]:
+        print("\n".join(f"[isolation] contrôle {c['arm']} refusé : {'; '.join(c['problems'])} — aucune tâche lancée." for c in failed), file=sys.stderr)
+        return 1
 
     records: list[RunRecord] = []
     if args.resume:
         records.extend(RunRecord(**row) for row in previous_rows)
 
-    disk_exhausted = False
-    contaminated = False
+    disk_exhausted = contaminated = budget_stopped = False
     with open(results_path, "a", encoding="utf-8") as results_f:
         for task in selected:
-            if disk_exhausted or contaminated:
+            if disk_exhausted or contaminated or budget_stopped:
                 break
             order = [arm for arm in select_run_order(ARMS, task_id=task.task_id, seed=args.seed) if arm in selected_arms]
             for arm in order:
-                if disk_exhausted or contaminated:
+                if disk_exhausted or contaminated or budget_stopped:
                     break
                 for run_index in range(k):
                     key = (task.task_id, arm, run_index)
@@ -2371,6 +2408,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "rejoué) ; la ligne d'origine reste, la clé aura une ligne en double.",
                             file=sys.stderr,
                         )
+                    call_id = f"{task.task_id}/{arm}/run{run_index}"
+                    try:
+                        guard.begin(call_id)  # coût inconnu ou plafond atteint : aucun appel de plus
+                    except BudgetError as exc:
+                        print(f"[budget] arrêt de la campagne avant {call_id} : {exc}", file=sys.stderr)
+                        budget_stopped = True
+                        break
                     try:
                         record = _run_one(
                             task,
@@ -2385,8 +2429,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                             auth_mode=auth_mode,
                             model=args.model,
                             claude_code_version=claude_code_version,
+                            max_budget_usd=guard.remaining_usd(),
                         )
                     except ContaminatedTaskRepoError as exc:
+                        guard.record(call_id, 0.0, True)  # refusé avant tout appel modèle : 0 $ connu
                         # W1-08a : arrêt à 0 $, comme la garde du lot H. Rien n'est
                         # écrit pour ce run : sa clé reste rejouable avec ``--resume``.
                         print(
@@ -2401,6 +2447,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         print(invalid_run_alert(record), file=sys.stderr)
                     elif record.transcript_check == "unevaluated":
                         print(unevaluated_run_alert(record), file=sys.stderr)
+                    guard.record(call_id, record.total_cost_usd, row_cost_known(record.to_dict()))
                     records.append(record)
                     results_f.write(json.dumps(record.to_dict()) + "\n")
                     results_f.flush()
@@ -2414,7 +2461,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # déclencherait un arrêt immédiat (« les 20 tâches ont été
             # rejouées ») dès la première tâche kit. Le critère ne s'applique
             # donc qu'à une campagne qui rejoue bien les trois bras.
-            if not (disk_exhausted or contaminated) and args.full and selected_arms == ARMS:
+            if not (disk_exhausted or contaminated or budget_stopped) and args.full and selected_arms == ARMS:
                 stop, reason = should_stop_early(records, total_tasks=len(tasks), seed=args.seed)
                 print(f"[stop-check] {reason}")
                 if stop:
@@ -2491,8 +2538,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif auth_mode == "api-key":
         print("[sécurité] aucune fuite d'ANTHROPIC_API_KEY détectée sous un HOME isolé ou un journal.")
 
+    print(f"[budget] {json.dumps(guard.snapshot(), ensure_ascii=False)}")
     # Contamination : gardes de sécurité passées, mais la campagne est un échec.
-    return 1 if contaminated else saturation_rc
+    return 1 if contaminated else (3 if budget_stopped else saturation_rc)
 
 
 def _do_report_only(
@@ -2543,12 +2591,12 @@ def _do_report_only(
 
 
 def _do_dry_run(
-    tasks: Sequence[TaskMeta], *, workspace: Path, ecc_repo: Path, homes: dict[str, Path], grimoire_bin: str
+    tasks: Sequence[TaskMeta], *, workspace: Path, ecc_repo: Path, homes: dict[str, Path], grimoire_bin: str, arms: Sequence[str] = ARMS
 ) -> int:
     tasks_root = workspace / "tasks"
     npm_cache_dir = workspace / "npm-cache"
     for task in tasks:
-        for arm in ARMS:
+        for arm in arms:
             task_dir = tasks_root / task.task_id.replace("/", "__") / arm / "prep"
             reset_run_dir(task_dir)
             prepare_task_repo(task, task_dir)
@@ -2573,7 +2621,7 @@ def _do_dry_run(
                     npm_cache_dir=npm_cache_dir,
                 )
             print(f"[dry-run] préparé {task.task_id} / {arm} -> {task_dir}")
-    print(f"[dry-run] {len(tasks)} tâches x {len(ARMS)} bras préparées sous {tasks_root}")
+    print(f"[dry-run] {len(tasks)} tâches x {len(arms)} bras préparées sous {tasks_root}")
     return 0
 
 
@@ -2591,6 +2639,7 @@ def _run_one(
     auth_mode: str = "oauth-copy",
     model: str | None = None,
     claude_code_version: str | None = None,
+    max_budget_usd: float | None = None,
 ) -> RunRecord:
     run_dir = run_dir_for(workspace, task, arm, run_index)
     reset_run_dir(run_dir)
@@ -2644,6 +2693,8 @@ def _run_one(
         go_bin=go_bin,
         npm_cache_dir=npm_cache_dir,
     )
+    env = kit_lot.run_environment_for(task, run_dir, env)  # B-08 : venv de test K, pip hors ligne, proxys fermés
+    extra = [*budget_args(max_budget_usd), *kit_lot.claude_extra_args(task)]
 
     if auth_mode == "api-key":
         # Lot J (#582) : AUCUNE copie d'identifiant — l'agent s'authentifie
@@ -2653,7 +2704,7 @@ def _run_one(
         # précisément ce qui élimine le bug de rotation OAuth partagée :
         # rien n'est jamais écrit dans `home`.
         outcome = run_claude_headless(
-            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
+            run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm, extra_args=extra
         )
     else:
         # Les identifiants ne vivent dans `home` que le temps de cet appel : le
@@ -2668,16 +2719,12 @@ def _run_one(
                     "ou passe --auth api-key avec ANTHROPIC_API_KEY exportée."
                 )
             outcome = run_claude_headless(
-                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm
+                run_dir, build_prompt(task), home=home, env=env, timeout_s=run_timeout_s, auth_mode=auth_mode, model=model, arm=arm, extra_args=extra
             )
 
     # W1-08b : ce que l'agent a réellement lu, y compris pour un run tué (timeout, boucle).
-    transcript_check, hidden_test_reads = check_transcript(
-        run_dir.parent / f"{run_dir.name}.stream.jsonl",
-        test_files=task.test_files,
-        run_dir=run_dir,
-        hidden_dir=hidden_dir,
-        canonical_dirs=(task.exercise_dir,),
+    transcript_check, hidden_test_reads = kit_lot.check_k_transcript(  # B-08 : + fuite de la solution publiée (bloc K)
+        run_dir.parent / f"{run_dir.name}.stream.jsonl", task, run_dir=run_dir, hidden_dir=hidden_dir
     )
 
     if outcome.terminated_reason in ("timeout", "loop"):
