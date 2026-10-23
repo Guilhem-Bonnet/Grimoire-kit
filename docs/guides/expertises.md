@@ -19,7 +19,7 @@ Le kit livre par archétype un agent généraliste (`stack-engineer`, `ops-engin
 qu'il attache d'emblée. Le catalogue d'expertises ajoute une troisième couche, optionnelle : un
 langage bas niveau, un patron d'architecture, un fournisseur cloud — que l'utilisateur choisit
 explicitement ou que la détection recommande, jamais attaché d'office. La raison est chiffrée dans
-[la doctrine des artefacts](../explications/quand-creer-un-artefact.md#-décisions-déjà-prises) : un skill non référencé
+[la doctrine des artefacts](../explications/quand-creer-un-artefact.md#decisions-deja-prises) : un skill non référencé
 par un agent devient **transversal** (chargé à chaque tour de la session, par tous les agents),
 alors qu'un skill attaché ne coûte que sur les tours où son agent porteur travaille.
 

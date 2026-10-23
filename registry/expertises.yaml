@@ -7,7 +7,7 @@ version: "1.0.0"
 # défaut. Chaque entrée référence un skill existant (les sept `stack-*`
 # ne sont pas dupliqués) et un agent porteur recommandé ; l'attachement
 # effectif se fait à la demande via `grimoire expertise add <id>`, qui
-# écrit un override projet (voir docs/expertises.md).
+# écrit un override projet (voir docs/guides/expertises.md).
 #
 # `porteur` est l'agent visé par défaut ; `porteur_fallback`, quand
 # présent, est utilisé si `porteur` n'existe pas dans le projet (cas
