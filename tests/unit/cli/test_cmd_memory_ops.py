@@ -18,6 +18,8 @@ from grimoire.cli.app import app
 from grimoire.core.config import GrimoireConfig
 from grimoire.memory.backends.base import MemoryEntry
 
+pytestmark = pytest.mark.covers("cli:memory doctor")
+
 runner = CliRunner()
 
 
@@ -64,6 +66,58 @@ class TestMemoryUpVocabulary:
         data = json.loads(result.output)
         assert data["config"]["layer_profile"] == "lexical"
         assert data["config"]["retrieval_mode"] == "lexical"
+
+
+# ── grimoire memory up --start (issue Grimoire-kit#616, PR2) ──────────────────
+
+
+class TestMemoryUpStart:
+    """``--start`` is the only path that may launch a container — and only on
+    this explicit flag. Real Docker is never invoked in this suite."""
+
+    def test_without_the_flag_the_stack_helper_is_never_called(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        with patch("grimoire.tools.memory_setup.start_memory_stack") as mock_start:
+            result = runner.invoke(app, ["-o", "json", "memory", "up", "--profile", "complet"])
+        assert result.exit_code == 0, result.output
+        mock_start.assert_not_called()
+
+    def test_the_flag_calls_the_stack_helper_before_planning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        with patch(
+            "grimoire.tools.memory_setup.start_memory_stack",
+            return_value=["Weaviate : démarré"],
+        ) as mock_start:
+            result = runner.invoke(
+                app, ["-o", "json", "memory", "up", "--profile", "complet", "--start"],
+            )
+        assert result.exit_code == 0, result.output
+        mock_start.assert_called_once()
+        data = json.loads(result.output)
+        assert data["started"] == ["Weaviate : démarré"]
+
+    def test_start_is_a_no_op_for_standard_and_never_touches_docker(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        def _fail_if_called(*a: object, **k: object) -> None:
+            raise AssertionError("docker must not be invoked for `standard`")
+
+        monkeypatch.setattr("grimoire.tools.memory_setup.subprocess.run", _fail_if_called)
+        result = runner.invoke(
+            app, ["-o", "json", "memory", "up", "--profile", "standard", "--start"],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["started"] == []
 
 
 # ── grimoire memory graph purge-orphans ───────────────────────────────────────
@@ -131,3 +185,201 @@ class TestPurgeOrphans:
         _mgr, graph = purge_context
         runner.invoke(app, ["memory", "graph", "purge-orphans"])
         graph.close.assert_called_once()
+
+
+# ── grimoire memory doctor (issue Grimoire-kit#616/#619) ─────────────────────
+
+
+@pytest.fixture
+def doctor_context(tmp_path: Path):
+    """Patch config/manager/graph the way ``memory doctor`` reads them."""
+    from grimoire.memory.backends.base import BackendStatus
+
+    mgr = MagicMock()
+    mgr.get_all.return_value = [_entry("kept-1")]
+    mgr.health_check.return_value = BackendStatus(backend="weaviate-server", healthy=True, entries=1)
+
+    cfg = GrimoireConfig.from_dict({
+        "project": {"name": "test", "type": "generic", "stack": []},
+        "memory": {
+            "backend": "weaviate-server",
+            "weaviate_url": "http://localhost:8080",
+            "weaviate_collection": "ProjectMemory",
+            "neo4j_uri": "bolt://localhost:7687",
+            "knowledge_graph": "neo4j",
+            "layer_profile": "graphe",
+        },
+        "agents": {"archetype": "minimal"},
+    })
+
+    graph = MagicMock()
+    graph.find_orphan_memory_nodes.return_value = [{"id": "orphan-1", "collection": "GrimoireMemory"}]
+    graph.purge_memory_nodes.return_value = 1
+
+    with (
+        patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tmp_path)),
+        patch("grimoire.cli.cmd_memory_ops.MemoryManager.from_config", return_value=mgr),
+        patch("grimoire.cli.cmd_memory_ops._load_neo4j_graph", return_value=graph),
+        patch("grimoire.tools.memory_setup._tcp_reachable", return_value=True),
+    ):
+        yield mgr, graph
+
+
+class TestMemoryDoctor:
+    def test_dry_run_reports_orphans_without_purging(self, doctor_context) -> None:
+        _mgr, graph = doctor_context
+        result = runner.invoke(app, ["-o", "json", "memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["applied"] is False
+        assert data["graph_drift"]["candidates"] == 1
+        assert data["graph_drift"]["purged"] == 0
+        graph.purge_memory_nodes.assert_not_called()
+
+    def test_apply_purges_reusing_the_same_probe_as_purge_orphans(self, doctor_context) -> None:
+        _mgr, graph = doctor_context
+        result = runner.invoke(app, ["-o", "json", "memory", "doctor", "--apply"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["applied"] is True
+        assert data["graph_drift"]["purged"] == 1
+        graph.purge_memory_nodes.assert_called_once_with(["orphan-1"])
+
+    def test_report_names_the_started_stack(self, doctor_context) -> None:
+        """Every configured service is reachable (mocked) — nothing to flag."""
+        result = runner.invoke(app, ["-o", "json", "memory", "doctor"])
+        data = json.loads(result.output)
+        assert data["not_started"] == []
+
+    def test_not_started_stack_is_reported_with_the_start_command(
+        self, doctor_context, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("grimoire.tools.memory_setup._tcp_reachable", lambda *a, **k: False)
+        result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Pile non démarrée" in result.output
+        assert "grimoire memory up --profile graphe --start --apply" in result.output
+
+    def test_never_fails_when_the_backend_is_unavailable(self, tmp_path: Path) -> None:
+        from grimoire.core.exceptions import GrimoireMemoryError
+
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "test", "type": "generic", "stack": []},
+            "memory": {"backend": "weaviate-server", "weaviate_url": "http://localhost:8080"},
+            "agents": {"archetype": "minimal"},
+        })
+        with (
+            patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tmp_path)),
+            patch(
+                "grimoire.cli.cmd_memory_ops.MemoryManager.from_config",
+                side_effect=GrimoireMemoryError("backend down"),
+            ),
+        ):
+            result = runner.invoke(app, ["-o", "json", "memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["healthy"] is False
+        assert "backend down" in data["backend_error"]
+
+    def test_never_fails_when_no_graph_is_configured(self, tmp_path: Path) -> None:
+        mgr = MagicMock()
+        mgr.get_all.return_value = []
+        from grimoire.memory.backends.base import BackendStatus
+
+        mgr.health_check.return_value = BackendStatus(backend="lexical", healthy=True, entries=0)
+        cfg = GrimoireConfig.from_dict({
+            "project": {"name": "test", "type": "generic", "stack": []},
+            "memory": {"backend": "lexical"},
+            "agents": {"archetype": "minimal"},
+        })
+        with (
+            patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tmp_path)),
+            patch("grimoire.cli.cmd_memory_ops.MemoryManager.from_config", return_value=mgr),
+        ):
+            result = runner.invoke(app, ["-o", "json", "memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["graph_drift"] is None
+
+
+class TestMemoryUpStartRefusal:
+    """Un gabarit compose illisible (`GrimoireRuntimeError`) est un refus nommé, en texte comme en JSON."""
+
+    @pytest.mark.parametrize("as_json", [True, False])
+    def test_unreadable_template_exits_one_with_the_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, as_json: bool
+    ) -> None:
+        from grimoire.core.exceptions import GrimoireRuntimeError
+
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        def _boom(*a: object, **k: object) -> None:
+            raise GrimoireRuntimeError("gabarit illisible pour le test")
+
+        monkeypatch.setattr("grimoire.tools.memory_setup.start_memory_stack", _boom)
+        args = ["-o", "json"] if as_json else []
+        result = runner.invoke(app, [*args, "memory", "up", "--profile", "complet", "--start"])
+        assert result.exit_code == 1
+        if as_json:
+            assert json.loads(result.output) == {"ok": False, "error": "gabarit illisible pour le test"}
+        else:
+            assert "gabarit illisible pour le test" in result.output
+
+    def test_text_mode_echoes_the_started_lines(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        with patch("grimoire.tools.memory_setup.start_memory_stack", return_value=["Weaviate : démarré"]):
+            result = runner.invoke(app, ["memory", "up", "--profile", "complet", "--start"])
+        assert result.exit_code == 0, result.output
+        assert "Weaviate : démarré" in result.output
+
+
+class TestMemoryDoctorTextBranches:
+    def test_text_report_dry_run_names_candidates_and_the_backup(self, doctor_context) -> None:
+        result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Dérive du graphe" in result.output
+        assert "export-bundle" in result.output
+        assert "--apply" in result.output
+
+    def test_text_report_apply_says_purged(self, doctor_context) -> None:
+        result = runner.invoke(app, ["memory", "doctor", "--apply"])
+        assert result.exit_code == 0, result.output
+        assert "Purgés" in result.output
+        assert "1/1" in result.output
+
+    def test_text_report_with_no_orphan(self, doctor_context) -> None:
+        _mgr, graph = doctor_context
+        graph.find_orphan_memory_nodes.return_value = []
+        result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Aucun nœud orphelin" in result.output
+
+    def test_graph_loader_failure_is_reported_not_raised(self, doctor_context) -> None:
+        with patch("grimoire.cli.cmd_memory_ops._load_neo4j_graph", side_effect=RuntimeError("bolt KO")):
+            result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Non vérifiable" in result.output
+        assert "bolt KO" in result.output
+
+    def test_probe_failure_closes_the_graph_and_is_reported(self, doctor_context) -> None:
+        mgr, graph = doctor_context
+        mgr.get_all.side_effect = RuntimeError("store KO")
+        result = runner.invoke(app, ["-o", "json", "memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["graph_drift"] is None
+        assert "store KO" in data["graph_drift_error"]
+        graph.close.assert_called_once()
+
+    def test_unavailable_backend_is_printed_in_text(self, doctor_context) -> None:
+        from grimoire.core.exceptions import GrimoireMemoryError
+
+        with patch(
+            "grimoire.cli.cmd_memory_ops.MemoryManager.from_config", side_effect=GrimoireMemoryError("backend KO")
+        ):
+            result = runner.invoke(app, ["memory", "doctor"])
+        assert result.exit_code == 0, result.output
+        assert "Indisponible" in result.output
+        assert "backend KO" in result.output
