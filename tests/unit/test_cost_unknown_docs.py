@@ -5,13 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-CLI_REFERENCE = Path(__file__).resolve().parents[2] / "docs" / "cli-reference.md"
+CLI_REFERENCE = Path(__file__).resolve().parents[2] / "docs" / "reference" / "cli" / "taches.md"
 
 
 def _flow_cost_unknown_paragraph() -> str:
     text = " ".join(CLI_REFERENCE.read_text(encoding="utf-8").split())
     match = re.search(r"Dans un flow, `cost_unknown` .*?\. ", text)
-    assert match, "la phrase « Dans un flow, `cost_unknown` ... » a disparu de docs/cli-reference.md"
+    assert match, "la phrase « Dans un flow, `cost_unknown` ... » a disparu de docs/reference/cli/taches.md"
     return match.group(0)
 
 
