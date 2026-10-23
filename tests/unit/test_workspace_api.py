@@ -788,3 +788,59 @@ def test_proposals_view_n_est_pas_reinvalide_par_sa_propre_lecture(real_project:
 
     assert second == first
     assert mtimes_after_second == mtimes_after_first
+
+
+# ── P07 : le KPI de la fiche et la liste d'Observer lisent la même source ───
+
+
+def test_le_kpi_runs_de_flow_de_la_fiche_lit_la_route_d_observer(tmp_path: Path) -> None:
+    """Revue UX M4 : le KPI « 0 flows » (nombre de blueprints, `health.flows`)
+
+    contredisait les « 20 runs de flow » listés par Observer. La fiche porte
+    désormais `flowRuns`, rendu par la même fonction que `GET
+    /api/workspace/flows/runs` : les deux réponses sont identiques."""
+    import json
+
+    from grimoire.tools.workspace_routes import GET_ROUTES, PREFIX
+
+    flows_dir = tmp_path / "_grimoire-runtime-output" / "flows"
+    flows_dir.mkdir(parents=True)
+    for i, bp in enumerate(("project-upgrade", "autre-flow", "project-upgrade")):
+        (flows_dir / f"run-{i}.json").write_text(json.dumps({
+            "run_id": f"run-{i}", "blueprint_id": bp, "blueprint_path": "x.json",
+            "order": ["a"], "created_at": f"2026-10-0{i + 1}T10:00:00+00:00",
+        }), encoding="utf-8")
+    (flows_dir / "apercu.json").write_text(json.dumps({
+        "run_id": "apercu", "blueprint_id": "project-upgrade", "blueprint_path": "x.json",
+        "order": ["a"], "created_at": "2026-10-09T10:00:00+00:00", "preview": True,
+    }), encoding="utf-8")
+
+    sheet = wa.sheet_view(tmp_path)
+    observer = GET_ROUTES[f"{PREFIX}flows/runs"](tmp_path, {})
+
+    assert sheet["flowRuns"] == observer
+    assert sheet["flowRuns"]["total"] == 3, "l'aperçu n'est pas un run de flow"
+    assert [r["runId"] for r in sheet["upgradeRuns"]["runs"]] == ["run-2", "run-0"]
+
+
+def test_une_carte_bloquee_porte_la_raison_ecrite_au_blocage(tmp_path: Path) -> None:
+    """Revue UX M1 : une carte bloquée ne disait ni le mot ni la raison — le
+
+    motif d'un `task block --reason` vit dans l'événement de transition, jamais
+    sur la tâche. `tasks_view` le rend sur la carte (`blocked_reason`)."""
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Chantier", origin="test", created_by="test")
+    blocked = service.ledger.create_task(mission.id, "Attendre la clé", acceptance=("la clé est là",))
+    running = service.ledger.create_task(mission.id, "Avancer", acceptance=("ça avance",))
+    for task_id in (blocked.id, running.id):
+        service.transition(task_id, TaskState.READY, "test")
+    service.transition(blocked.id, TaskState.BLOCKED, "test", "attend la clé d'API du fournisseur")
+
+    cards = {c["id"]: c for c in wa.tasks_view(tmp_path)["tasks"]}
+
+    assert cards[blocked.id]["board"] == "blocked"
+    assert cards[blocked.id]["blocked_reason"] == "attend la clé d'API du fournisseur"
+    assert "blocked_reason" not in cards[running.id]

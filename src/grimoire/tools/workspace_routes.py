@@ -218,9 +218,9 @@ def _flow_runs(project_root: Path, query: _Query) -> Any:
     Observer affichait « TraceLedger vide » même juste après un run réel.
     ``blueprint`` filtre (ex. ``project-upgrade``) ; omis, tous les flows.
     """
-    from grimoire.tools.flow_runs import list_flow_runs
+    from grimoire.tools.flow_runs import flow_runs_view
 
-    return {"runs": list_flow_runs(project_root, blueprint_id=_one(query, "blueprint"))}
+    return flow_runs_view(project_root, blueprint_id=_one(query, "blueprint"))
 
 
 def _file_usage(project_root: Path, query: _Query) -> Any:

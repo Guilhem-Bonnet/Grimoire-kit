@@ -62,16 +62,22 @@ import { agoText, costText, durationText } from '../live.js';
 
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
-  review: 'Revue', accepted: 'Acceptée', released: 'Publiée', archived: 'Archivée',
+  // `archived` ne reçoit que des tâches annulées (`_TO_BOARD` : CANCELLED → archived).
+  review: 'Revue', accepted: 'Acceptée', released: 'Publiée', archived: 'Annulée',
 };
 // Board à 4 colonnes : regroupement des 8 états du standard. Les colonnes
-// repliées sont nommées sous le titre, jamais tues (revue §4.3).
+// repliées sont nommées sous le titre, jamais tues (revue §4.3). Une tâche
+// annulée n'est pas faite : elle a sa propre colonne, repliée par défaut.
 const GROUPS4 = [
   { id: 'todo', icon: 'clipboard', label: 'À faire', cols: ['proposed', 'ready'] },
   { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'] },
   { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
-  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released', 'archived'] },
+  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'] },
+  { id: 'cancelled', icon: 'archive', label: 'Annulées', cols: ['archived'], folded: true },
 ];
+// Colonne repliée dépliée ou non — au niveau du module, comme `scope` : revenir
+// sur l'espace garde le dernier réglage.
+const unfolded = new Set();
 // Board → état ledger, pour appeler `move` (grimoire.missions.board._FROM_BOARD).
 const BOARD_TO_STATE = {
   proposed: 'proposed', ready: 'ready', in_progress: 'running', blocked: 'blocked',
@@ -145,6 +151,7 @@ function injectStyles() {
     .ex-col-title .ico { width: 16px; height: 16px; color: var(--ink2); }
     .ex-col-gate { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
     .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
+    .ex-col-body[hidden] { display: none; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
     .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-2) var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
     .ex-card:hover { background: var(--e2); }
@@ -245,10 +252,32 @@ function sessionLine(task, { full = false } = {}) {
   return line;
 }
 
-function nextColumn(column) {
-  const index = LIFECYCLE.indexOf(column);
-  return index >= 0 && index < LIFECYCLE.length - 1 ? LIFECYCLE[index + 1] : null;
+// La suite d'une carte, lue sur le graphe réel du ledger
+// (`grimoire.missions.ledger._TASK_TRANSITIONS`) projeté sur le board — jamais
+// la colonne suivante de `LIFECYCLE`, qui faisait de « Bloquée » la suite de
+// toute carte en cours. Bloquer n'est pas une étape : c'est un geste à part,
+// qui demande une raison.
+const FORWARD = {
+  proposed: 'ready', ready: 'in_progress', in_progress: 'review',
+  blocked: 'ready', review: 'accepted', accepted: 'released',
+};
+// READY, CLAIMED et RUNNING peuvent passer à BLOCKED ; rien d'autre.
+const BLOCKABLE = new Set(['ready', 'in_progress']);
+function nextMoves(task) {
+  // Une attente nommée (K6) repart en cours (WAITING → RUNNING), pas en « Prête ».
+  const forward = task.board === 'blocked' && task.status === 'waiting' ? 'in_progress' : (FORWARD[task.board] || null);
+  return { forward, canBlock: BLOCKABLE.has(task.board) };
 }
+function nextMovesText(task, none) {
+  const { forward, canBlock } = nextMoves(task);
+  const parts = [];
+  if (forward) parts.push(`→ ${COLUMN_LABEL[forward]}`);
+  if (canBlock) parts.push('Bloquer…');
+  return parts.length ? parts.join(' · ') : none;
+}
+// « Bloquer… » depuis une carte : l'inspecteur qui s'ouvre met le curseur dans
+// le champ de raison (posé par le clic, consommé par `renderInspector`).
+let focusBlockReason = false;
 
 // Priorité effective (lot B la calcule côté serveur : `effective_priority`) — point + mot.
 const PORTFOLIO_PRIORITY_LABEL = { low: 'priorité basse', medium: 'priorité moyenne', high: 'priorité haute', critical: 'priorité critique' };
@@ -357,6 +386,16 @@ function taskCard(task, onSelect, portfolio = false) {
     meta.append(badge(`consigne non accusée (${task.directives_unacknowledged})`, 'acc'));
   }
   card.append(meta);
+  if (task.board === 'blocked' && task.status !== 'waiting') {
+    // Le mot ET la raison, jamais la seule couleur (une attente nommée a déjà
+    // sa propre ligne juste en dessous).
+    const line = document.createElement('div');
+    line.className = 'ex-wait';
+    line.dataset.role = 'blocked';
+    line.append(dot('bad'), text('span', null, 'Bloquée'));
+    line.append(text('span', 'lbl', task.blocked_reason || 'raison non écrite'));
+    card.append(line);
+  }
   if (task.status === 'waiting' && task.waiting) {
     const human = isHumanWait(task);
     const line = document.createElement('div');
@@ -384,16 +423,29 @@ function taskCard(task, onSelect, portfolio = false) {
   const cost = costRow(task);
   if (cost) card.append(cost);
 
-  const next = nextColumn(task.board);
+  const { forward, canBlock } = nextMoves(task);
   const nextRow = document.createElement('div');
   nextRow.className = 'ex-card-next';
-  nextRow.append(text('span', null, next ? `→ ${COLUMN_LABEL[next]}` : 'colonne terminale'));
+  nextRow.dataset.role = 'next-moves';
+  nextRow.append(text('span', null, forward ? `→ ${COLUMN_LABEL[forward]}` : 'colonne terminale'));
+  const actions = document.createElement('span');
+  actions.className = 'row';
+  if (canBlock) {
+    const blockBtn = document.createElement('button');
+    blockBtn.type = 'button';
+    blockBtn.className = 'btn';
+    blockBtn.textContent = 'Bloquer…';
+    blockBtn.title = 'Ouvre la tâche ; bloquer demande une raison.';
+    blockBtn.addEventListener('click', (e) => { e.stopPropagation(); focusBlockReason = true; onSelect(task); });
+    actions.append(blockBtn);
+  }
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn';
   btn.textContent = 'Voir la porte';
   btn.addEventListener('click', (e) => { e.stopPropagation(); onSelect(task); });
-  nextRow.append(btn);
+  actions.append(btn);
+  nextRow.append(actions);
   card.append(nextRow);
   return card;
 }
@@ -408,8 +460,10 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
   }
   for (const group of groups) {
     const col = document.createElement('div');
-    col.className = 'ex-col';
+    col.className = 'ex-col' + (group.folded ? ' ex-col-folded' : '');
+    col.dataset.group = group.id;
     const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
+    const folded = group.folded && !unfolded.has(group.id);
 
     const head = document.createElement('div');
     head.className = 'ex-col-head';
@@ -418,7 +472,21 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
     title.append(icon(group.icon), text('span', null, group.label), text('span', 'mono lbl', String(inColumn.length)));
     if (group.cols.length > 1) title.dataset.term = 'porte-de-preuve';
     head.append(title);
-    if (group.cols.length > 1) {
+    if (group.folded) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn';
+      toggle.textContent = folded ? 'Afficher' : 'Replier';
+      toggle.setAttribute('aria-expanded', String(!folded));
+      toggle.addEventListener('click', () => {
+        if (unfolded.has(group.id)) unfolded.delete(group.id); else unfolded.add(group.id);
+        const fresh = document.createElement('div');
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio);
+        board.replaceWith(fresh.firstElementChild);
+      });
+      head.append(toggle);
+      head.append(text('div', 'ex-col-gate', 'tâches annulées : ni faites, ni à reprendre'));
+    } else if (group.cols.length > 1) {
       head.append(text('div', 'ex-col-gate', 'colonnes repliées : ' + group.cols.map((c) => COLUMN_LABEL[c]).join(', ')));
     } else {
       const evidences = [...new Set(inColumn.flatMap((t) => t.expected_evidence || []))];
@@ -428,6 +496,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
 
     const body = document.createElement('div');
     body.className = 'ex-col-body' + (inColumn.length ? '' : ' empty');
+    body.hidden = folded;
     if (!inColumn.length) {
       body.append(text('span', null, 'vide'));
     } else {
@@ -500,8 +569,7 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
     }
     // Coût : « inconnu » reste lisible, et une tâche jamais démarrée garde un tiret.
     tr.append(text('td', 'lbl', costRow(task) ? costLabel(task.cost).replace(/^coût /, '') : '—'));
-    const next = nextColumn(task.board);
-    tr.append(text('td', 'lbl', next ? `→ ${COLUMN_LABEL[next]}` : '—'));
+    tr.append(text('td', 'lbl', nextMovesText(task, '—')));
     tbody.append(tr);
   }
   table.append(tbody);
@@ -1018,6 +1086,10 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   gateBlock.append(gateHead);
   const requirements = detail.next_moves_require || {};
   const targets = Object.keys(requirements);
+  // Le ledger permet de bloquer une tâche prête ou en cours même quand le
+  // fichier de portes ne déclare aucune transition vers `blocked` : le geste
+  // reste offert (avec sa raison), sans preuve requise par une porte.
+  if (nextMoves(detail).canBlock && !targets.includes('blocked')) targets.push('blocked');
   if (!targets.length) {
     gateBlock.append(text('p', 'lbl', 'colonne terminale : aucune transition déclarée depuis ici'));
   }
@@ -1025,7 +1097,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   for (const target of targets) {
     const gateRow = document.createElement('div');
     gateRow.className = 'ex-gate-row';
-    gateRow.append(row(text('span', null, `→ ${COLUMN_LABEL[target] || target}`)));
+    gateRow.append(row(text('span', null, target === 'blocked' ? 'Bloquer…' : `→ ${COLUMN_LABEL[target] || target}`)));
     const required = requirements[target] || [];
     gateRow.append(text('div', 'ex-gate-req', required.length ? `requiert : ${required.join(', ')}` : 'aucune preuve requise'));
 
@@ -1035,6 +1107,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
       reasonInput.type = 'text';
       reasonInput.className = 'input';
       reasonInput.placeholder = 'raison du blocage';
+      reasonInput.dataset.role = 'block-reason';
       gateRow.append(reasonInput);
     }
 
@@ -1046,7 +1119,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn pri';
-    btn.textContent = locked ? 'Écriture désactivée (cockpit)' : `Réaliser : → ${COLUMN_LABEL[target] || target}`;
+    btn.textContent = locked ? 'Écriture désactivée (cockpit)' : (target === 'blocked' ? 'Réaliser : bloquer' : `Réaliser : → ${COLUMN_LABEL[target] || target}`);
     btn.disabled = locked;
     if (locked) {
       gateRow.append(text('div', 'lbl', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
@@ -1075,6 +1148,11 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   }
   gateBlock.append(feedback);
   ctx.inspector.append(gateBlock);
+  if (focusBlockReason) {
+    focusBlockReason = false;
+    const reasonField = gateBlock.querySelector('[data-role="block-reason"]');
+    if (reasonField) reasonField.focus();
+  }
 }
 
 // ── Pilotage humain (issue #638, lot B) ───────────────────────────────────
