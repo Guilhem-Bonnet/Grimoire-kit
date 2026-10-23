@@ -13,14 +13,20 @@ import sys
 from pathlib import Path
 
 from grimoire.cli.env_checks import EnvCheck
-from grimoire.hosts.hook_launcher import hook_program_resolves
+from grimoire.hosts.hook_launcher import command_program, hook_program_problem
 
 _HOOK_PROGRAMS = frozenset({"grimoire-hook", "grimoire-hook.exe"})
 
 
 def _program(command: str) -> str:
-    """Le programme d'une commande de hook du kit : ce qui précède ``--host``."""
-    return command.partition(" --host ")[0].strip()
+    """Le programme d'une commande de hook du kit.
+
+    Avant ``--host`` quand il y est (chemin non guillemeté avec espaces) ; sinon
+    le premier mot : un script de gateway porte d'autres arguments.
+    """
+    if " --host " in command:
+        return command.partition(" --host ")[0].strip()
+    return command_program(command)
 
 
 def _launches_grimoire_hook(command: str) -> bool:
@@ -72,19 +78,19 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
     commands = _generated_hook_commands(target)
     if not commands:
         return []
-    broken = sorted(
-        {
-            f"{relpath}: {_program(command)}"
-            for relpath, command in commands
-            if not hook_program_resolves(_program(command), target)
-        }
-    )
+    problems: set[str] = set()
+    for relpath, command in commands:
+        program = _program(command)
+        reason = hook_program_problem(program, target)
+        if reason:
+            problems.add(f"{relpath}: {program} ({reason})")
+    broken = sorted(problems)
     if broken:
         return [EnvCheck(
             "hook_commands",
             passed=False,
             level="fail",
-            detail="hook program not found outside the active venv: " + "; ".join(broken),
+            detail="hook program not launchable outside the active venv: " + "; ".join(broken),
             remedy=(
                 "install the kit for the host (uv tool install grimoire-kit, or pipx), "
                 "or run `grimoire host sync` to write the venv path into the hooks"

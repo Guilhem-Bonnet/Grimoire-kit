@@ -85,6 +85,22 @@ def _release_wheel(assets: object, tag: str, version: Version) -> WheelRef | Non
     return found[0] if found else None
 
 
+def release_wheel(release: object) -> ReleaseRef | None:
+    """La wheel d'une release GitHub quelconque (stable ou pré-version), ou ``None``.
+
+    Mêmes garde-fous que :func:`select_preview` : tag lisible, wheel du dépôt du kit
+    qui porte le numéro du tag, hôte et chemin de téléchargement vérifiés.
+    """
+    if not isinstance(release, dict) or release.get("draft"):
+        return None
+    tag = release.get("tag_name")
+    parsed = _parse(tag)
+    if parsed is None or not isinstance(tag, str):
+        return None
+    wheel = _release_wheel(release.get("assets"), tag, parsed)
+    return ReleaseRef(str(parsed), tag, wheel) if wheel is not None else None
+
+
 def select_preview(releases: object, version: str | None = None) -> ReleaseRef | None:
     """La plus haute pré-version publiée (ou exactement *version*) dans la liste des releases GitHub.
 
