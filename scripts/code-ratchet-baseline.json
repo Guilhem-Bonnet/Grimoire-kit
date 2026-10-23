@@ -60,7 +60,7 @@
     "framework/tools/reasoning-stream.py": 679,
     "framework/tools/schema-validator.py": 614,
     "framework/tools/session-lifecycle.py": 553,
-    "framework/tools/stigmergy.py": 1011,
+    "framework/tools/stigmergy.py": 1010,
     "framework/tools/stigmergy_hooks/scripts/stigmergy-emit-post-edit.sh": 12,
     "framework/tools/stigmergy_hooks/scripts/stigmergy-emit-stop.sh": 12,
     "framework/tools/stigmergy_hooks/scripts/stigmergy-sense.sh": 12,
@@ -69,7 +69,7 @@
     "framework/tools/synapse-trace.py": 810,
     "framework/tools/token-budget.py": 783,
     "framework/tools/tool-registry.py": 706,
-    "framework/tools/tool-resolver.py": 1212,
+    "framework/tools/tool-resolver.py": 1211,
     "framework/tools/vision-judge.py": 712,
     "framework/tools/web-browser.py": 1033,
     "grimoire-init.sh": 3823,
@@ -78,6 +78,6 @@
   },
   "src_oversized": {
     "src/grimoire/cli/app.py": 2801,
-    "src/grimoire/core/agentic_standard.py": 1916
+    "src/grimoire/core/agentic_standard.py": 1808
   }
 }

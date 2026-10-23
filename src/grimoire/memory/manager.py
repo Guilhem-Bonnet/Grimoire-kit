@@ -21,7 +21,7 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
@@ -1237,72 +1237,3 @@ class MemoryManager:
     def _record_graph_sync_issue(self, operation: str, exc: Exception) -> None:
         self._graph_sync_issue = f"Neo4j graph sync failed during {operation}: {exc}"
         logger.warning(self._graph_sync_issue)
-
-    # ── Progressive Disclosure (3-layer search) ───────────────────────────
-    #
-    # Inspired by claude-mem's 3-layer MCP search architecture:
-    #   L1 = ultra-compact summaries (~50 tokens) — for quick orientation
-    #   L2 = standard detail (~200 tokens) — for working context
-    #   L3 = full observations (~500+ tokens) — for deep dives
-    #
-    # This reduces token usage by ~10x on average: start with L1, only
-    # drill into L2/L3 when the compact result is insufficient.
-
-    _TOKEN_LIMITS: ClassVar[dict[str, int]] = {"L1": 50, "L2": 200, "L3": 2000}
-
-    def progressive_search(
-        self,
-        query: str,
-        *,
-        layer: str = "L1",
-        user_id: str = "",
-        limit: int = 5,
-    ) -> list[dict[str, Any]]:
-        """Search with progressive disclosure — returns results trimmed to layer budget.
-
-        Parameters
-        ----------
-        query :
-            Search query.
-        layer :
-            Disclosure layer: ``"L1"`` (compact), ``"L2"`` (standard),
-            ``"L3"`` (full).
-        user_id :
-            Optional user scope.
-        limit :
-            Max results.
-
-        Returns
-        -------
-        list[dict[str, Any]]
-            Each dict has ``id``, ``text``, ``tags``, ``score``, ``layer``.
-        """
-        if layer not in self._TOKEN_LIMITS:
-            msg = f"Invalid layer '{layer}'. Valid: L1, L2, L3"
-            raise ValueError(msg)
-
-        token_budget = self._TOKEN_LIMITS[layer]
-        raw_results = self.search(query, user_id=user_id, limit=limit)
-
-        disclosed: list[dict[str, Any]] = []
-        for entry in raw_results:
-            text = entry.text
-            trimmed = self._trim_to_budget(text, token_budget)
-            disclosed.append({
-                "id": entry.id,
-                "text": trimmed,
-                "tags": list(entry.tags),
-                "score": getattr(entry, "score", 0.0),
-                "layer": layer,
-                "truncated": len(trimmed) < len(text),
-            })
-
-        return disclosed
-
-    @staticmethod
-    def _trim_to_budget(text: str, token_budget: int) -> str:
-        """Trim text to approximate token budget (4 chars ≈ 1 token)."""
-        char_budget = token_budget * 4
-        if len(text) <= char_budget:
-            return text
-        return text[:char_budget].rsplit(" ", 1)[0] + "…"

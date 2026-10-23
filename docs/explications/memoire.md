@@ -578,16 +578,6 @@ Les couches `code_graph` et `task_memory` utilisent des producteurs explicites :
 9. Les commandes `memory vector` projettent code et task memory vers Weaviate avec des IDs stables et des hashes de contenu.
 10. Les commandes `taxonomy`, `search` et `list` réutilisent les champs `wing`, `hall` et `room` pour agréger et filtrer les résultats.
 
-## Progressive search
-
-Le manager expose aussi `progressive_search()` avec trois niveaux de restitution :
-
-- `L1` : aperçu compact
-- `L2` : contexte de travail
-- `L3` : texte complet ou quasi complet
-
-Ces couches concernent le format de réponse, pas la persistance. Elles ne remplacent ni le backend principal ni le sidecar.
-
 ## Commandes CLI
 
 La surface publique passe par `grimoire memory`.
