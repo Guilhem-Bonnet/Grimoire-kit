@@ -317,45 +317,79 @@ function renderSpanInspector(ctx, span) {
   }
 }
 
-function renderRuntime(root, ctx, { spans, modelRates, runs }) {
+// Statut kernel d'un run (`flow_runs._attach_live_status`), en clair.
+const RUN_STATUS_WORD = {
+  checkpointed: 'checkpoint en attente', running: 'en cours', completed: 'terminé',
+  failed: 'en échec', aborted: 'abandonné',
+};
+
+function runsBlockNode(runs, runsTotal) {
+  const runsBlock = document.createElement('div');
+  runsBlock.className = 'ob-runs';
+  runsBlock.append(text('h4', null, `Runs de flow (hors TraceLedger) · ${runsTotal}`));
+  for (const run of runs.slice(0, 10)) {
+    const line = document.createElement('div');
+    line.className = 'row';
+    line.style.justifyContent = 'space-between';
+    const status = run.status ? (RUN_STATUS_WORD[run.status] || run.status) : 'statut inconnu';
+    line.append(
+      text('span', 'mono', run.runId),
+      text('span', 'lbl', `${run.blueprintId || '?'} · ${status} · ${run.createdAt || 'date inconnue'}`),
+    );
+    runsBlock.append(line);
+  }
+  return runsBlock;
+}
+
+function renderRuntime(root, ctx, { spans, modelRates, runs, runsTotal, streams, onActivite }) {
   if (!spans.length) {
+    // Aucun span OTel n'est pas « rien n'a tourné » : le ledger (claims,
+    // transitions, refus de gate), les hooks et les runs de flow écrivent
+    // ailleurs que dans le TraceLedger. « Aucune trace » n'est dit que si
+    // aucune de ces sources ne porte un seul événement pour ce projet.
+    if (runs.length || streams.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ob-wrap';
+      const panel = document.createElement('div');
+      panel.className = 'ob-panel';
+      panel.dataset.role = 'activity-without-spans';
+      panel.append(text('h3', null, 'Activité enregistrée, aucun span OTel'));
+      panel.append(text('p', 'lbl', "Aucun appel de modèle ou d'outil instrumenté (span OTel) pour l'instant. "
+        + 'Ce projet porte pourtant des événements :'));
+      for (const [name, entries] of streams) {
+        panel.append(text('div', null, `${name} : ${entries.length} évènement(s) lu(s)`));
+      }
+      if (streams.length && onActivite) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn';
+        btn.style.marginTop = '8px';
+        btn.textContent = "Voir l'activité";
+        btn.addEventListener('click', onActivite);
+        panel.append(btn);
+      }
+      wrap.append(panel);
+      if (runs.length) wrap.append(runsBlockNode(runs, runsTotal));
+      root.append(wrap);
+      ctx.inspector.replaceChildren(text('p', 'lbl',
+        `${streams.length} flux d'événements, ${runsTotal} run(s) de flow, aucun span OTel.`));
+      ctx.dock.log('traces', ...streams.map(([name, entries]) => `${name} : ${entries.length} évènement(s)`),
+        ...(runs.length ? [`${runsTotal} run(s) de flow enregistré(s)`] : []));
+      // `grimoire upgrade-flow status` n'existe pas (restes #510/#513) —
+      // `grimoire flow status <run_id>` (cmd_flow.py) est la vraie commande.
+      ctx.dock.echo(runs.length ? `grimoire flow status ${runs[0].runId}` : 'grimoire task trace <id>');
+      return;
+    }
     root.append(ctx.empty(
       'Observer',
       "Aucune trace : ce projet n'a pas encore exécuté de workflow instrumenté. "
-      + 'La donnée viendra de _grimoire-runtime-output/hook-runtime/events.jsonl et '
-      + 'task-flow/events.jsonl dès qu\'un blueprint aura tourné — lancez-en un puis '
-      + 'ouvrez cet espace à nouveau.',
+      + 'La donnée viendra de _grimoire-runtime-output/hook-runtime/events.jsonl, '
+      + 'task-flow/events.jsonl et ledger/events.jsonl dès qu\'un blueprint ou une tâche aura tourné — '
+      + 'lancez-en un puis ouvrez cet espace à nouveau.',
       'grimoire task trace <id>',
     ));
-    if (runs.length) {
-      // Le TraceLedger est bien vide, mais ce n'est pas la même chose que
-      // « rien n'a tourné » : au moins un flow (souvent `project-upgrade`,
-      // lancé depuis Piloter → Mettre à jour) a un run enregistré.
-      const runsBlock = document.createElement('div');
-      runsBlock.className = 'ob-runs';
-      runsBlock.append(text('h4', null, 'Runs de flow (hors TraceLedger)'));
-      for (const run of runs.slice(0, 10)) {
-        const line = document.createElement('div');
-        line.className = 'row';
-        line.style.justifyContent = 'space-between';
-        line.append(
-          text('span', 'mono', run.runId),
-          text('span', 'lbl', `${run.blueprintId || '?'} · ${run.createdAt || 'date inconnue'}`),
-        );
-        runsBlock.append(line);
-      }
-      root.append(runsBlock);
-      ctx.inspector.replaceChildren(text('p', 'lbl', `${runs.length} run(s) de flow enregistré(s), aucun span OTel.`));
-      ctx.dock.log('traces', `TraceLedger vide, mais ${runs.length} run(s) de flow enregistré(s) (ex. project-upgrade).`);
-      // `grimoire upgrade-flow status` n'existe pas (`grimoire upgrade-flow
-      // --help` n'a pas de sous-commande `status`, restes #510/#513) —
-      // `grimoire flow status <run_id>` (cmd_flow.py) est la vraie commande,
-      // citée avec l'id du run le plus récent plutôt qu'un exemple muet.
-      ctx.dock.echo(`grimoire flow status ${runs[0].runId}`);
-      return;
-    }
     ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucun span à inspecter.'));
-    ctx.dock.log('traces', 'Aucune trace dans le TraceLedger de ce projet.');
+    ctx.dock.log('traces', 'Aucune trace dans le TraceLedger, le ledger ni les hooks de ce projet.');
     ctx.dock.echo('grimoire task trace');
     return;
   }
@@ -463,6 +497,10 @@ export async function mount(root, ctx) {
   const spans = Array.isArray(otel?.spans) ? otel.spans : [];
   const modelRates = costModel?.modelRates || null;
   const runs = Array.isArray(flowRuns?.runs) ? flowRuns.runs : [];
+  // Même lecture que le KPI « runs de flow » de la fiche Piloter
+  // (`flow_runs_view`) : le total, pas seulement les runs rendus.
+  const runsTotal = Number.isFinite(flowRuns?.total) ? flowRuns.total : runs.length;
+  const streams = Object.entries(events || {}).filter(([, entries]) => Array.isArray(entries) && entries.length);
 
   if (ctx.signal.aborted) return;
 
@@ -501,7 +539,7 @@ export async function mount(root, ctx) {
       );
       return;
     }
-    renderRuntime(root, ctx, { spans, modelRates, runs });
+    renderRuntime(root, ctx, { spans, modelRates, runs, runsTotal, streams, onActivite: () => setView('activite') });
   }
 
   draw();

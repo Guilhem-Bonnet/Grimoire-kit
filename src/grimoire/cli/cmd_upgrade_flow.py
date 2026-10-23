@@ -654,7 +654,7 @@ def upgrade_flow_run(
         return InteractiveNodeExecutor(json_output=False, stream=io.StringIO())
 
     try:
-        wfi, contract = engine.run(blueprint, executor=_silent_executor())
+        wfi, contract = engine.run(blueprint, executor=_silent_executor(), preview=dry_run)
     except GrimoireRuntimeError as exc:
         _fail(ctx, str(exc), json_flag=json_flag)
         return

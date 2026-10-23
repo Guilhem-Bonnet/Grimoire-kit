@@ -180,7 +180,9 @@ def test_executer_propose_trois_vues_et_le_board_par_defaut(
     assert {"Board 4", "Board 8", "Liste", "Timeline"} <= labels
 
     workspace.wait_for_selector(".ex-col")
-    assert workspace.locator(".ex-col").count() == 4, "Board 4 : quatre colonnes par défaut"
+    # Quatre colonnes de travail ; les tâches annulées ont la leur, repliée (P07).
+    assert workspace.locator(".ex-col:not(.ex-col-folded)").count() == 4, "Board 4 : quatre colonnes par défaut"
+    assert workspace.locator(".ex-col.ex-col-folded").count() == 1, "Board 4 : les annulées à part, repliées"
 
     views.filter(has_text="Liste").click()
     workspace.wait_for_selector(".ex-list-wrap")
@@ -402,20 +404,39 @@ def test_executer_timeline_montre_dispatch_et_refus_et_se_filtre_par_source(
 # ── Observer — état vide honnête, jamais un mur de zéros ni une erreur ─────
 
 
-def test_observer_sans_trace_rend_un_seul_bloc_vide_sans_erreur_console(workspace: Page) -> None:
+def test_observer_sans_trace_rend_un_seul_bloc_vide_sans_erreur_console(untouched_workspace: Page) -> None:
+    """Le projet vide que rien n'écrit (`served_untouched`) : ni ledger, ni
+    hook, ni run de flow — le seul cas où « Aucune trace » est vrai."""
     errors: list[str] = []
-    workspace.on("pageerror", lambda exc: errors.append(str(exc)))
-    workspace.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
+    untouched_workspace.on("pageerror", lambda exc: errors.append(str(exc)))
+    untouched_workspace.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
 
-    _goto(workspace, "observer")
-    workspace.wait_for_selector(".empty")
+    _goto(untouched_workspace, "observer")
+    untouched_workspace.wait_for_selector(".empty")
 
-    body_text = workspace.locator("#canvas").inner_text()
+    body_text = untouched_workspace.locator("#canvas").inner_text()
     assert "Aucune trace" in body_text
     # Correction due (revue §4.4) : jamais un mur de zéros à la place de l'état vide.
     assert "$0.0000" not in body_text
     assert "0.0/min" not in body_text
     assert not errors, f"erreurs console à l'ouverture d'Observer : {errors}"
+
+
+def test_observer_ne_dit_pas_aucune_trace_quand_le_ledger_porte_des_evenements(
+    workspace: Page, project_with_task: tuple[Path, str]
+) -> None:
+    """P07 (revue UX M4) : Observer annonçait « Aucune trace » alors que le
+    ledger du projet portait des milliers d'événements. `real_project` a un
+    Mission Ledger (tâche `bootstrap` de `standard init`, plus celle de
+    `project_with_task`) mais aucun span OTel."""
+    root, _task_id = project_with_task
+    assert (root / "_grimoire-runtime-output" / "ledger" / "events.jsonl").is_file()
+
+    _goto(workspace, "observer")
+    panel = workspace.locator("[data-role='activity-without-spans']")
+    panel.wait_for(timeout=15_000)
+    assert "ledger" in panel.inner_text()
+    assert "Aucune trace" not in workspace.locator("#canvas").inner_text()
 
 
 # ── Mémoire — le store d'abord, l'architecture derrière un onglet ──────────

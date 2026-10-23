@@ -76,6 +76,31 @@ def test_a_dry_run_reports_the_backup_path(fresh_project: Path) -> None:
     assert tarball.name.startswith("grimoire-state")
 
 
+def test_a_dry_run_is_a_preview_run_never_listed_as_a_flow_run(fresh_project: Path) -> None:
+    """P07 (revue UX B2) : l'aperçu écrivait un run ordinaire qui devenait le
+
+    « dernier run » de la fiche Piloter et y masquait un checkpoint toujours
+    pendant. Le run d'un `--dry-run` est marqué `preview` sur disque et
+    `list_flow_runs` ne le rend pas."""
+    from grimoire.cli.app import app
+    from grimoire.tools.flow_runs import flow_runs_view
+
+    before = flow_runs_view(fresh_project)["total"]
+    result = CliRunner().invoke(
+        app, ["upgrade-flow", "run", "--project-root", str(fresh_project), "--dry-run", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    run_id = _last_json_line(result.output)["run_id"]
+
+    meta = json.loads(
+        (fresh_project / "_grimoire-runtime-output" / "flows" / f"{run_id}.json").read_text(encoding="utf-8")
+    )
+    assert meta["preview"] is True
+    view = flow_runs_view(fresh_project)
+    assert view["total"] == before
+    assert run_id not in {r["runId"] for r in view["runs"]}
+
+
 def test_a_node_failure_reports_done_and_the_failed_node(
     fresh_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

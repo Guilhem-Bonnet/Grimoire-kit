@@ -535,7 +535,7 @@ async function loadSheet(ctx, slug) {
   return (
     sheet || {
       health: null, memory: null, doctor: null, agents: null,
-      proposals: null, setupRun: null, upgradeRuns: null, name: null,
+      proposals: null, setupRun: null, upgradeRuns: null, flowRuns: null, name: null,
     }
   );
 }
@@ -1319,7 +1319,11 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit', icon: 'seal', tone: health?.kit?.scaffolded ? kitStatus(health.kit).dot : 'warn' },
     { value: ciWord(health?.ci_status), label: 'CI', icon: 'check', tone: ciDotClass(health?.ci_status) },
     { value: fmtInt(health?.commits_total), label: 'commits', icon: 'branch' },
-    { value: fmtInt((health?.flows || []).length), label: 'flows', icon: 'workflow' },
+    // Les runs de flow — même lecture que la liste d'Observer (`sheet.flowRuns`
+    // et `GET /api/workspace/flows/runs` passent par `flow_runs_view`), jamais
+    // le nombre de blueprints présents (`health.flows`), qui disait « 0 flows »
+    // à côté des runs qu'Observer listait.
+    { value: Number.isFinite(sheet.flowRuns?.total) ? fmtInt(sheet.flowRuns.total) : 'inconnu', label: 'runs de flow', icon: 'workflow' },
   ]);
   wrap.append(kpi);
 
@@ -1383,18 +1387,17 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     if (behindBlock) { behindBlock.remove(); behindBlock = null; }
   }
 
-  // Le dernier run `project-upgrade` de CE projet (route `flows/runs`,
-  // #513) : `status`/`currentNode` viennent du kernel réel (issue
-  // #510/#513, `flow_runs.list_flow_runs`), jamais d'un état client posé
-  // après un clic — c'est ce qui permet au badge de survivre à un
-  // rechargement de la fiche.
+  // Les runs `project-upgrade` de CE projet (route `flows/runs`, #513) :
+  // `status`/`currentNode` viennent du kernel réel (issue #510/#513,
+  // `flow_runs.list_flow_runs`), jamais d'un état client posé après un clic
+  // — c'est ce qui permet au badge de survivre à un rechargement de la fiche.
+  // Le checkpoint se cherche sur TOUS les runs rendus, pas seulement le
+  // dernier : un run plus récent (une mise à jour en échec, par exemple) ne
+  // décide pas à votre place celui qui attend toujours au checkpoint.
   const upgradeRuns = Array.isArray(sheet.upgradeRuns?.runs) ? sheet.upgradeRuns.runs : [];
   const latestUpgradeRun = upgradeRuns[0] || null;
-  let checkpointPendingRunId = (
-    latestUpgradeRun
-    && latestUpgradeRun.status === 'checkpointed'
-    && latestUpgradeRun.currentNode === 'destructive'
-  ) ? latestUpgradeRun.runId : null;
+  const pendingRun = upgradeRuns.find((r) => r.status === 'checkpointed' && r.currentNode === 'destructive');
+  let checkpointPendingRunId = pendingRun ? pendingRun.runId : null;
   if (checkpointPendingRunId) markKitCheckpointPending(checkpointPendingRunId);
 
   const standardBlock = document.createElement('div');
@@ -1496,7 +1499,10 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     try {
       const report = await ctx.api.updateProject(slug, false);
       preview.replaceChildren();
-      preview.append(text('div', null, report.ok ? "Aperçu réussi (sauvegarde + preview, rien d'autre écrit)." : (report.error || 'Aperçu en échec.')));
+      // L'aperçu écrit bien une sauvegarde (et son rapport `preview.md`) : le
+      // message le dit, plutôt qu'un « rien d'autre écrit » démenti par le
+      // disque. Son run est marqué aperçu et n'est compté nulle part.
+      preview.append(text('div', null, report.ok ? 'Aperçu : sauvegarde créée, aucun fichier du projet modifié.' : (report.error || 'Aperçu en échec.')));
       if (report.nodes) preview.append(renderNodeList(report.nodes));
       if (report.backupPath) preview.append(text('div', 'lbl', `Sauvegarde : ${report.backupPath}`));
       appendPreviewMarkdown(preview, report.preview || report.output);
