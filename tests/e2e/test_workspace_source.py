@@ -52,7 +52,16 @@ def _pick_untouched_kit_file(page: Page) -> str:
 
 def _open(page: Page, path: str) -> None:
     name = path.rsplit("/", 1)[-1]
-    page.locator(".tree .sr-tree-file", has_text=name).first.click()
+    # `dispatch_event`, pas `.click()` — même correctif que
+    # `test_workspace_source_language.py::_open` (PR #617) : une dérive
+    # sous-pixel de rendu Chromium sur une longue liste flex peut faire
+    # atterrir le clic-coordonnées de Playwright (voire un vrai clic souris
+    # émis au niveau CDP) sur la ligne suivante de l'arbre au lieu de celle
+    # visée, une fois l'arbre assez long — reproduit sur
+    # `_grimoire/kit/agents/stack-engineer.md` (repli `stack` de l'issue
+    # onboarding-60s, sept skills de pile au lieu de deux). Sans lien avec
+    # le contenu servi par `/api/workspace/*`, qui répond correctement.
+    page.locator(".tree .sr-tree-file", has_text=name).first.dispatch_event("click")
     page.wait_for_function(
         "(p) => document.querySelector('.sr-docrow .mono')?.textContent === p", arg=path
     )
