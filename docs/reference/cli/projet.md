@@ -44,6 +44,53 @@ s'attacher à une collection déjà peuplée, `--memory-collection` est requis. 
 | `graphe` | Standard + graphes Neo4j : connaissances, souvenirs, code, tâches |
 | `complet` | Graphe + mémoire chaude Redis (TTL, baux, coordination multi-agents) |
 
+Sur un projet qui a déjà du code, le rapport d'`init` propose
+`grimoire onboard brownfield` (et la clé `onboard` en sortie JSON) ; en mode
+interactif, une confirmation (non par défaut) le lance tout de suite.
+
+### `grimoire onboard brownfield`
+
+Documente un projet existant à partir de son code, sans modèle ni réseau, et
+de façon déterministe (deux appels sur le même code écrivent les mêmes
+octets).
+
+```bash
+grimoire onboard brownfield .            # écrit la base
+grimoire onboard brownfield . --check    # à jour ? (code 1 si périmée ou invérifiable)
+grimoire onboard brownfield . --json     # résumé machine
+```
+
+Écrit `_grimoire-output/knowledge/project-knowledge.md` (vue courte) et
+`project-knowledge.json` (détail) : composants et responsabilité déclarée
+(docstring), points d'entrée (scripts `pyproject.toml`, garde `__main__`,
+serveurs, scripts et `bin` de `package.json`), commandes de test, lint,
+typage et build, dépendances déclarées et importées, conventions observées,
+zones à risque (gros modules, composants qu'aucun test n'importe, couverture
+lue dans `coverage.xml`) et carte des tests.
+
+- **Sources.** Chaque fait cite `fichier:ligne` et porte l'empreinte des
+  fichiers cités. Une commande est *déclarée* (`project-context.yaml`),
+  *observée* (script, cible `Makefile`, configuration d'outil) ou *supposée*
+  (défaut d'un marqueur) ; sinon elle reste inconnue. Une couverture sans
+  `coverage.xml` est « non mesurée », jamais nulle.
+- **Fraîcheur.** `--check` recalcule les empreintes avec la mécanique du
+  graphe de code (`codegraph/freshness.py`) : `current`, `stale` (fichiers
+  ajoutés, modifiés, supprimés et faits touchés) ou `unverified` (base
+  absente ou illisible). Rien n'est écrit.
+- **Questions ouvertes.** L'intention métier, la responsabilité d'un
+  composant sans docstring, la raison d'un gros module et une commande
+  supposée ne sont pas devinées : elles sont listées comme questions non
+  bloquantes, au format des questions structurées
+  (`grimoire task ask <tâche> --from _grimoire-output/knowledge/project-knowledge.json`).
+- **Agents.** Si `_grimoire/_memory/shared-context.md` existe, un bloc court
+  balisé y renvoie vers la base et vers `--check` (remplacé à chaque
+  génération, le reste du fichier intact) ; `--no-memory` s'en abstient.
+- **Limites.** Le graphe ne lit que Python : JS/TS est lu par motifs
+  (fichiers, imports relatifs et nus, serveurs), sans symboles ni
+  responsabilité. Un composant testé seulement par sous-processus apparaît
+  comme non testé. L'installation du kit (`_grimoire*`), les dossiers cachés
+  et les dépendances installées ne sont pas lus.
+
 ### `grimoire doctor`
 
 Diagnostique la santé du projet (8 vérifications).
