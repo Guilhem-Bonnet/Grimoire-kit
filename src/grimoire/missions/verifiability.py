@@ -238,6 +238,16 @@ VERDICT_MARKER: re.Pattern[str] = re.compile(
     re.IGNORECASE,
 )
 
+#: Marqueur d'un verdict pour un critère qui CITE une commande déclarée (``--check``) : ceux de
+#: :data:`VERDICT_MARKER`, plus ce que dit une commande qui ne teste pas (PR fusionnée, sortie 0).
+#: Citer la commande dit sur QUOI porte le critère, pas ce qui en est attendu.
+_VERDICT_COMMANDE: re.Pattern[str] = re.compile(
+    VERDICT_MARKER.pattern + r"|\b(?:fusionn[ée]e?s?|merg[ée]e?s?|merged|"
+    r"(?:sortie|exit(?:\s+(?:code|status))?)\s*(?:=\s*)?(?:0|z[ée]ro|nulle?)|"
+    r"code de sortie\s+(?:0|z[ée]ro|nul(?:le)?))\b",
+    re.IGNORECASE,
+)
+
 #: Outils dont l'invocation nue rend un code de sortie : lancer la commande
 #: EST le verdict (docstring du module : « code de sortie d'une commande »).
 #: Volontairement une liste fermée d'outils de vérification, pas « tout ce qui
@@ -327,6 +337,9 @@ def _couvert_par_commande(texte: str, commandes: Sequence[str]) -> str | None:
     couverture ne relève QUE un critère ambigu — la revue (``JUDGE_PATTERNS``)
     garde la priorité, et un critère qui ne cite aucune commande garde sa
     classe. Retourne le jeton qui a fait la correspondance, ou ``None``.
+
+    La citation est une condition nécessaire, jamais suffisante : l'appelant
+    (:func:`_classer_critere`) exige en plus un marqueur de verdict (:data:`_VERDICT_COMMANDE`).
     """
     brut = " ".join(texte.replace("`", "").split())
     plat = _normaliser(texte)
@@ -365,7 +378,9 @@ def _classer_critere(texte: str, commandes: Sequence[str] = ()) -> _Verdict:
     for motif, motif_re in MECHANICAL_PATTERNS:
         if motif_re.search(texte) and (motif in _MOTIFS_AUTO_VERDICT or VERDICT_MARKER.search(texte)):
             return _Verdict(_Categorie.MECANIQUE, motif)
-    if _couvert_par_commande(texte, commandes) is not None:
+    # Citer la commande ne suffit pas : « tests/unit/test_x.py est bien conçu » cite un fichier
+    # sans énoncer de verdict. Il faut aussi un marqueur de verdict (passe, vert, sortie 0...).
+    if _VERDICT_COMMANDE.search(texte) and _couvert_par_commande(texte, commandes) is not None:
         return _Verdict(_Categorie.MECANIQUE, "commande_declaree")
     # Outil nommé sans verdict, ou rien de reconnu : le silence ne vaut pas confiance.
     return _Verdict(_Categorie.AMBIGU, None)

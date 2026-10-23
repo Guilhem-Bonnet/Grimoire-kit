@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 from grimoire.missions.schemas import MissionTask, RiskProfile, TaskCheck, TaskState, TaskType
 from grimoire.missions.verifiability import Verifiability, as_dict, classify, explain
 
@@ -318,13 +320,13 @@ def _avec(cmd: str, *criteres: str) -> MissionTask:
 
 
 def test_critere_test_citant_le_fichier_du_check_est_v0() -> None:
-    t = _avec("pytest tests/unit/test_x.py -q", "Test : tests/unit/test_x.py::test_a")
+    t = _avec("python scripts/verif_x.py", "scripts/verif_x.py::cas_a passe")
     assert classify(t) is Verifiability.V0
     assert explain(t)[0][1] == "commande_declaree"
 
 
 def test_critere_citant_la_commande_entiere_est_v0() -> None:
-    t = _avec("make smoke-e2e", "Test : `make smoke-e2e`")
+    t = _avec("make smoke-e2e", "Test : `make smoke-e2e` réussit")
     assert classify(t) is Verifiability.V0
 
 
@@ -356,8 +358,38 @@ def test_sans_check_declare_pas_de_couverture() -> None:
 
 
 def test_as_dict_nomme_le_critere_non_reconnu_malgre_la_couverture_des_autres() -> None:
-    t = _avec("pytest tests/unit/test_x.py", "Test : tests/unit/test_x.py", "le code est élégant")
+    t = _avec("python scripts/verif_x.py", "scripts/verif_x.py passe", "le code est élégant")
     d = as_dict(t)
     assert d["class"] == "V2"
     assert "le code est élégant" in d["reason"]
     assert [c["pattern"] for c in d["criteria"]] == ["commande_declaree", None]
+
+
+# --- Revue #880 : citer un fichier ou une PR ne suffit pas, il faut aussi un marqueur de verdict
+
+
+@pytest.mark.parametrize("cmd", ["pytest tests/unit/test_x.py", "gh pr view 763 --json state"])
+@pytest.mark.parametrize(
+    "critere",
+    [
+        "tests/unit/test_x.py couvre les cas métier pertinents",
+        "Le comportement affiché par tests/unit/test_x.py est clair pour un nouvel utilisateur",
+        "Guilhem valide visuellement tests/unit/test_x.py",
+        "La PR #763 est jugée satisfaisante par Guilhem",
+        "L'UX de la PR #763 est agréable",
+        "Le nom de tests/unit/test_x.py est bien choisi",
+        "tests/unit/test_x.py est bien conçu",
+        "Les tests de tests/unit/test_x.py sont pertinents",
+        "pytest tests/unit/test_x.py est suffisant pour la sécurité",
+    ],
+)
+def test_citer_la_commande_sans_verdict_ne_fait_pas_v0(cmd: str, critere: str) -> None:
+    assert classify(_avec(cmd, critere)) in {Verifiability.V1, Verifiability.V2}
+
+
+@pytest.mark.parametrize(
+    "critere",
+    ["Les tests de tests/unit/test_x.py passent", "Les tests passent et la tâche reste needs_verification"],
+)
+def test_un_critere_avec_verdict_reste_v0(critere: str) -> None:
+    assert classify(_avec("pytest tests/unit/test_x.py", critere)) is Verifiability.V0

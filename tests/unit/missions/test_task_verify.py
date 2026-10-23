@@ -288,7 +288,7 @@ def test_cli_task_add_affiche_la_classe_et_nomme_les_criteres_non_reconnus(tmp_p
     res = runner.invoke(
         app,
         [
-            "task", "add", "t", "-a", "Test : tests/unit/test_x.py", "-a", "le code est élégant",
+            "task", "add", "t", "-a", "tests/unit/test_x.py passe", "-a", "le code est élégant",
             "--check", "pytest tests/unit/test_x.py", "--project-root", str(tmp_path),
         ],
     )
@@ -296,4 +296,4 @@ def test_cli_task_add_affiche_la_classe_et_nomme_les_criteres_non_reconnus(tmp_p
     assert "vérifiabilité : V2" in res.output
     assert "non reconnu" in res.output
     assert "le code est élégant" in res.output
-    assert "Test : tests/unit/test_x.py" not in res.output.split("non reconnu", 1)[1]
+    assert "tests/unit/test_x.py passe" not in res.output.split("non reconnu", 1)[1]
