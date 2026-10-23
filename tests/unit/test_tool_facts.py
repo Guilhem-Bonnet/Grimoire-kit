@@ -119,6 +119,9 @@ def test_lectures_courantes_sont_read_only(command: str) -> None:
         "for f in a b; do rm $f; done",
         "git branch -d topic",
         "git remote add o url",
+        "ls & rm f",
+        "sed p f & rm f",
+        "cat f |& rm f",
     ],
 )
 def test_formes_qui_ecrivent_restent_des_mutations(command: str) -> None:

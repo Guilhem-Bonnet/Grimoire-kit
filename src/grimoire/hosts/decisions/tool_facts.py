@@ -468,7 +468,9 @@ def is_read_only_command(command: str) -> bool:
         return False
     if not _raw_segments_read_only(command):
         return False
-    segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\||\n", surface)]
+    # ``&`` seul (arrière-plan) sépare aussi deux commandes : ``ls & rm f``.
+    # ``2>&1`` et ``&>`` n'arrivent jamais ici, toute redirection est refusée plus haut.
+    segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\||&|\n", surface)]
     segments = [seg for seg in segments if seg]
     return bool(segments) and all(_is_read_only_segment(seg) for seg in segments)
 
