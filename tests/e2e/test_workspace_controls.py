@@ -131,7 +131,9 @@ def test_observer_activite_rtk_bench_ne_restent_jamais_muets(workspace: Page) ->
 # ── Couverture élargie : les autres segments de la coque ────────────────────
 
 
-def test_executer_view_seg_bascule_correctement(workspace: Page, project_with_task: tuple) -> None:
+def test_executer_view_seg_bascule_correctement(project_with_task: tuple, workspace: Page) -> None:
+    # La tâche AVANT la page : écrite après, le flux du pouls (P10) la pousse en
+    # moins d'une seconde et l'actualisation redessine `#view-seg` entre deux clics.
     _goto(workspace, "executer")
     workspace.wait_for_selector("#view-seg button")
     _assert_segment_toggles(workspace, "#view-seg button")

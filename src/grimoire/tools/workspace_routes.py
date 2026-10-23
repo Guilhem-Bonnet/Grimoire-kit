@@ -55,6 +55,11 @@ Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche
 par le chemin historique, créer un override — reste strictement
 ``_HOME_SLUG`` : chaque dérogation est nommée, jamais générale.
 
+Le flux du pouls (``GET /api/workspace/stream``, P10) n'est pas une entrée de
+:data:`GET_ROUTES` : celles-ci rendent une charge utile, lui un flux sans fin.
+:func:`workspace_stream` rend le générateur, l'hôte le recopie sur la socket
+avec :data:`STREAM_HEADERS`.
+
 Ajouter une lecture : une entrée dans :data:`GET_ROUTES`. Ajouter une écriture :
 une entrée dans :data:`POST_ROUTES`. Les deux tables sont énumérées par les
 tests, donc une route ajoutée sans test de cible se voit.
@@ -65,7 +70,7 @@ from __future__ import annotations
 import re
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -84,11 +89,14 @@ __all__ = [
     "GET_ROUTES",
     "POST_ROUTES",
     "PREFIX",
+    "STREAM_HEADERS",
+    "STREAM_PATH",
     "WORKSPACE_UNHANDLED",
     "is_proposal_decision",
     "is_registry_scoped_write",
     "workspace_get",
     "workspace_post",
+    "workspace_stream",
 ]
 
 #: Tout ce que la vue de travail ajoute vit sous ce préfixe : aucune collision
@@ -361,6 +369,32 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
 }
+
+
+#: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
+#: poussée dès qu'elle change au lieu d'être sondée.
+STREAM_PATH = f"{PREFIX}stream"
+
+#: En-têtes de la réponse du flux. Pas de ``Content-Length`` : la réponse dure
+#: tant que la page reste ouverte.
+STREAM_HEADERS: tuple[tuple[str, str], ...] = (
+    ("Content-Type", "text/event-stream; charset=utf-8"),
+    ("Cache-Control", "no-store"),
+    ("X-Accel-Buffering", "no"),
+)
+
+
+def workspace_stream(project_root: Path, query: _Query) -> Iterator[bytes]:
+    """Le flux du pouls pour *project_root*, servi par l'hôte sur :data:`STREAM_PATH`.
+
+    Mêmes paramètres que ``pulse`` : ``since`` (l'empreinte connue) et
+    ``scope=portfolio`` (le registre du cockpit).
+    """
+    return workspace_pulse.pulse_stream(
+        project_root,
+        since=_one(query, "since") or None,
+        portfolio=_one(query, "scope") == "portfolio",
+    )
 
 
 def _task_id(path: str, suffix: str = "") -> str:
