@@ -7,13 +7,22 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  font: false                     # polices auto-hébergées (docs/assets/fonts), aucune ressource tierce
   palette:
-    scheme: slate
-    primary: custom
-    accent: custom
-  font:
-    text: Geist
-    code: Geist Mono
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Passer en mode sombre
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Passer en mode clair
+  logo: assets/brand/mark.svg     # le chevron seul, recoloré en rouille par douce.css
+  favicon: assets/brand/favicon.svg
   features:
     - navigation.instant
     - navigation.tabs
@@ -120,11 +129,7 @@ markdown_extensions:
   - md_in_html
 
 extra_css:
-  - stylesheets/forge-theme.css
-  - stylesheets/presentation-onepager.css
-
-extra_javascript:
-  - javascripts/presentation-onepager.js
+  - stylesheets/douce.css
 
 # Le manuel suit Diátaxis : tutoriels (apprendre), guides (atteindre un but),
 # référence (consulter), explications (comprendre). Les plans cibles, bancs et
