@@ -1358,6 +1358,8 @@ def _emitted_check_ids() -> set[str]:
                core / "standard_checks" / "dispatch_cost_slo.py",
                # W6-03 : règles parsables par couche, extrait de verifiers.py (ratchet de taille).
                core / "standard_checks" / "rules_check.py",
+               # W6-07b : le cadrage face au ledger (questions bloquantes, couverture).
+               core / "standard_checks" / "cadrage_ledger_check.py",
                # #636 : les quatre patterns qui n'avaient aucun vérificateur.
                core / "standard_checks" / "runtime_journal_check.py",
                core / "standard_checks" / "observability_check.py",

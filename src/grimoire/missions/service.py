@@ -431,6 +431,8 @@ class TaskService:
         checks: tuple[TaskCheck, ...] = (),
         files: tuple[str, ...] = (),
         test_depth: str = "",
+        priority: str = "",
+        extra: Mapping[str, Any] | None = None,
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -442,8 +444,12 @@ class TaskService:
         ``proposed → ready`` par :meth:`transition`, donc par le gate
         ``proposed_to_ready`` — en profil gouverné, il exige un ``owner``.
         *test_depth* (W6-01) : ``floor``, ``standard`` ou ``strict`` ; le gate de
-        fermeture refuse tant que le dernier verdict ne l'atteint pas.
+        fermeture refuse tant que le dernier verdict ne l'atteint pas. *priority* (échelle
+        :data:`PRIORITIES`) et *extra* (champs portés tels quels, ex. ``covers`` de ``cadrage plan``,
+        W6-07b) sont posés à la création.
         """
+        if priority and priority not in PRIORITIES:
+            raise ValueError(f"priorité inconnue : {priority!r} — parmi {', '.join(PRIORITIES)}")
         if test_depth:
             from grimoire.missions.ceremony import DepthLevel
 
@@ -467,10 +473,12 @@ class TaskService:
         risk = RiskProfile(proposed)
         if _RISK_ORDER.index(risk) < _RISK_ORDER.index(RiskProfile.STANDARD):
             risk = RiskProfile.STANDARD
+        fields: dict[str, Any] = dict(extra or {})
+        if any(x.strip() for x in files):
+            fields["files"] = [f for f in (x.strip() for x in files) if f]
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
-            risk_profile=risk, checks=checks, test_depth=test_depth,
-            extra={"files": [f for f in (x.strip() for x in files) if f]} if any(x.strip() for x in files) else None,
+            risk_profile=risk, checks=checks, test_depth=test_depth, priority=priority, extra=fields or None,
         )
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task

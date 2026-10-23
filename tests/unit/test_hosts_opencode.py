@@ -110,6 +110,20 @@ class TestEmission:
         data = json.loads((governed / "opencode.json").read_text(encoding="utf-8"))
         assert data["mcp"]["grimoire"] == {"type": "local", "command": ["grimoire-mcp"], "enabled": True}
 
+    def test_http_mcp_entry_becomes_a_remote_server(self, governed: Path) -> None:
+        """Le serveur partagé de `.mcp.json` (#723) est un serveur distant pour OpenCode, pas une commande vide."""
+        (governed / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {
+                "grimoire": {"command": "grimoire-mcp", "args": []},
+                "grimoire-http": {"type": "http", "url": "http://127.0.0.1:7331/mcp"},
+            }}),
+            encoding="utf-8",
+        )
+        _emit(governed)
+        data = json.loads((governed / "opencode.json").read_text(encoding="utf-8"))
+        assert data["mcp"]["grimoire"] == {"type": "local", "command": ["grimoire-mcp"], "enabled": True}
+        assert data["mcp"]["grimoire-http"] == {"type": "remote", "url": "http://127.0.0.1:7331/mcp", "enabled": True}
+
     def test_plugin_refuses_by_throwing_in_tool_execute_before(self, governed: Path) -> None:
         _emit(governed)
         plugin = (governed / ".opencode/plugin/grimoire-guard.js").read_text(encoding="utf-8")
