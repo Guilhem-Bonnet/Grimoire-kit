@@ -1,4 +1,4 @@
-"""``grimoire task ask|answer|wait|resume|wake|note|decisions|lint-decisions`` — l'attente nommée (K6, issue #771).
+"""``grimoire task ask|answer|accept|wait|resume|wake|note|decisions|lint-decisions`` — l'attente nommée (K6, issue #771).
 
 Ces commandes s'enregistrent sur ``task_app`` (:func:`register`, appelée en fin de
 ``cmd_task``) : le module des tâches dépasse déjà de quoi se relire. Elles ne
@@ -103,6 +103,53 @@ def register(task_app: typer.Typer) -> None:
         """Répond à la question en attente — canal humain seulement ; la tâche est rendue (`ready`)."""
         run(ctx, project_root, ledger_root, task_id,
             lambda s: s.answer(task_id, text, actor, origin=ct._comment_origin(), question_id=question))
+
+    @task_app.command("accept")
+    def task_accept(
+        ctx: typer.Context,
+        task_id: Annotated[str, typer.Argument()],
+        reason: Annotated[str, typer.Option("--reason", help="Ce qui a été relu, et pourquoi la preuve suffit.")],
+        close: Annotated[
+            bool, typer.Option("--close/--no-close", help="Fermer la tâche une fois le verdict rangé.")
+        ] = True,
+        project_root: _PROJECT_ROOT = Path(),
+        ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+        evidence_root: Annotated[
+            Path, typer.Option("--evidence-root", help="Racine de l'EvidenceService.")
+        ] = Path("_grimoire-runtime-output/evidence"),
+        actor: _ACTOR = "cli",
+    ) -> None:
+        """Accepte la preuve déclarative d'une tâche en revue — canal humain seulement — puis la ferme (#865)."""
+        from grimoire.core.exceptions import GrimoireError
+        from grimoire.missions.human_acceptance import accept_task
+        from grimoire.missions.schemas import TaskState
+
+        service = ct._service(project_root, ledger_root)
+        task = ct._require_task(service, task_id)
+        root = project_root.resolve()
+        origin = ct._comment_origin()
+        try:
+            outcome = accept_task(
+                task, root, evidence_root if evidence_root.is_absolute() else root / evidence_root, reason, actor,
+                origin=origin,
+            )
+        except (GrimoireError, ValueError) as exc:
+            console.print(f"[red]✗[/red] {exc}")
+            raise typer.Exit(1) from exc
+        service.comment(
+            task_id, f"Acceptation humaine ({outcome.verdict.id}, pack {outcome.pack.id}) : {reason.strip()}",
+            actor, origin=origin,
+        )
+        if _fmt(ctx) == "json":
+            if not close:  # avec --close, la sortie JSON est celle de la transition
+                typer.echo(json.dumps(outcome.to_dict(), indent=2, ensure_ascii=False))
+        else:
+            console.print(
+                f"[green]ACCEPTÉ[/green] {task_id} — verdict {outcome.verdict.id} (passed, "
+                f"{outcome.verdict.created_by}), pack {outcome.pack.id}"
+            )
+        if close:
+            ct._transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
 
     @task_app.command("wait")
     def task_wait(

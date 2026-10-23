@@ -51,6 +51,11 @@ def _kit_version(name: str) -> Version | None:
     return version if canonicalize_name(dist) == canonicalize_name(DIST_NAME) else None
 
 
+def is_kit_wheel(name: str) -> bool:
+    """Ce nom de fichier est-il une wheel ``grimoire-kit`` ? (même règle pour lire et pour construire un bundle)"""
+    return _kit_version(name) is not None
+
+
 def open_bundle(source: Path) -> Bundle:
     """Lit un bundle (dossier ou wheel seule). Lève :class:`TrustError` si rien d'installable n'y est."""
     if not source.exists():
