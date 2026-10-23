@@ -4,7 +4,8 @@ audience: décision
 
 # Cadrage : le portail de connaissance local (EKP, RAG, CAG, KAG)
 
-- **Statut** : proposé. Les choix ouverts sont au §8 et attendent Guilhem.
+- **Statut** : accepté le 2026-10-23. Guilhem a retenu les treize
+  recommandations du §8 ; E0 et E1 sont lancés.
 - **Date** : 2026-10-23.
 - **Base lue** : `origin/main` au commit `bb42966f8` (version 3.64.0). Chaque
   fichier cité au §3 a été relu à ce commit. `S/` abrège `src/grimoire/`.
@@ -491,7 +492,9 @@ Hors plan : l'extraction d'entités par modèle, les résumés de communautés
 (GraphRAG) et Contextual Retrieval. Ils ne viendront qu'au niveau 2, en opt-in,
 avec un devis affiché avant toute indexation qui appelle un modèle.
 
-## 8. Décisions à trancher
+## 8. Décisions
+
+Tranchées le 2026-10-23 : chaque décision suit sa recommandation.
 
 1. **D1 : la surface.**
    - Options : (a) étendre « La mémoire du projet », avec `memory ask` et
