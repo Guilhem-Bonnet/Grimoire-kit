@@ -1,7 +1,10 @@
 name: Deploy site
 
 # Publie un seul artefact Pages composé de deux surfaces :
-#   /            → web/ (vitrine + atelier statique, servi tel quel)
+#   /            → web/ : seulement index.html, workspace/ et leurs ressources
+#                  (media/, fonts/, teaser/) ; les pages de l'ancien atelier
+#                  restent dans le dépôt (le paquet les embarque) mais ne sont
+#                  pas publiées
 #   /docs/       → site/ (manuel construit par mkdocs, --strict)
 #
 # Avant, seul web/ était publié : `mkdocs build` tournait en CI mais son
@@ -69,7 +72,10 @@ jobs:
       - name: Compose Pages artifact
         run: |
           mkdir -p _site
-          cp -r web/. _site/
+          # Liste blanche : une page de web/ n'est publiée que si elle est ici.
+          cp web/index.html _site/
+          cp -r web/workspace web/media web/fonts _site/
+          if [ -d web/teaser ]; then cp -r web/teaser _site/; fi
           test ! -e _site/docs || (echo "web/docs entrerait en collision avec le manuel" && exit 1)
           cp -r site _site/docs
           test -f _site/index.html

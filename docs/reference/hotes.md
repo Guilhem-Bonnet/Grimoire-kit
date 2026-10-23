@@ -1,0 +1,698 @@
+---
+audience: référence
+---
+
+# Surfaces hôtes
+
+Un projet Grimoire décrit des personas, des compétences, des commandes et une
+gouvernance. Chaque hôte agentique — Claude Code, GitHub Copilot, opencode, Codex, Cursor,
+Gemini CLI — expose une part de cela sous forme **exécutable** : fichiers de
+sous-agents chargés dans leur propre fenêtre de contexte, compétences chargées à
+la demande, commandes utilisateur, hooks de cycle de vie capables de refuser une
+action ou une clôture, table de permissions déclarative.
+
+Décrire un projet en prose et laisser chaque hôte la lire plafonne tout le monde
+au plus petit dénominateur commun. La couche « surfaces hôtes » fait l'inverse :
+**une description host-neutre du projet, un émetteur par hôte**.
+
+```text
+projet (agents, standard, mémoire)
+        │
+        ▼
+  ProjectSurface  ← description host-neutre, construite une fois
+        │
+        ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
+        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}
+        ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
+        └──▶ émetteur prose        → AGENTS.md · GEMINI.md · .cursor/rules
+```
+
+La règle de gouvernance, elle, n'est écrite qu'une fois. Le module de décisions
+est du Python host-neutre ; le module de wire format le traduit dans le JSON de
+chaque hôte. Un refus formulé sous Claude Code est **le même texte** que sous
+Copilot, parce que c'est la même décision.
+
+## Commandes
+
+| Commande | Effet |
+|---|---|
+| `grimoire host list` | Hôtes connus, ce que chacun sait exécuter, hôte détecté |
+| `grimoire host surface` | Description host-neutre du projet |
+| `grimoire host sync --host all` | Génère les surfaces (ajouter `--dry-run` pour voir sans écrire) |
+| `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
+| `grimoire host matrix` | Matrice règle × hôte calculée depuis ce que chaque émetteur écrit ; sort en 1 si une règle n'est ni appliquée ni déclarée dégradée |
+| `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main (hors fichier déclaré `hosts.preserve`, rendu `user-owned`), ou si les hooks sont coupés par `disableAllHooks` |
+| `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
+
+`grimoire init`, `grimoire up --fix` et `grimoire standard init` appellent la
+synchronisation automatiquement. Un appel manuel n'est nécessaire qu'après avoir
+ajouté ou modifié une persona.
+
+## Ce que chaque hôte exécute
+
+| Hôte | Sous-agents | Compétences | Commandes | Hooks bloquants | Permissions |
+|---|---|---|---|---|---|
+| Claude Code | oui | oui | oui | oui | oui |
+| GitHub Copilot | oui | oui | oui | oui | non |
+| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, vérifié) | non (non prouvé) |
+| Codex | non | non | non | non | non |
+| Cursor | non | non | non | non | non |
+| Gemini CLI | non | non | non | non | non |
+
+Rien n'est abandonné en silence. Ce qu'un hôte ne sait pas exécuter est déclaré
+comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
+
+- Copilot n'a pas de table de permissions déclarative : les mêmes règles sont
+  appliquées par le hook `PreToolUse`, avec la même formulation de refus.
+- opencode n'a ni table de permissions prouvée ni autre hook sondé que
+  `tool.execute.before` : exécution, écriture et lecture de secrets passent par
+  le plugin `.opencode/plugin/grimoire-guard.js` (même décision, même
+  formulation de refus) ; une décision `ask` y est refusée avec son motif, un
+  plugin ne pouvant pas interroger l'utilisateur ; si `grimoire-hook` est
+  introuvable, le plugin refuse l'outil en profil `governed`/`production` (lu dans
+  `_grimoire/standard/standard-profile.yaml`) et se contente d'un avertissement
+  unique sur stderr sinon.
+- Les hôtes en prose n'ont pas de hooks : la gouvernance y est énoncée comme
+  règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
+  dit explicitement plutôt que de laisser croire à une protection.
+
+## Ce que le kit a observé (contrats réels)
+
+Le tableau ci-dessus dit ce que le kit sait **écrire** pour un hôte. Il ne dit pas
+ce que l'hôte **fait** : « Hooks bloquants : oui » pour Copilot est une
+documentation, pas une observation. Le fencing d'un bail (refuser les effets
+d'une session périmée) ne s'appuie donc pas sur ce tableau mais sur
+`grimoire.hosts.capabilities.contract_for`, rempli **uniquement** depuis des
+captures versées sous `tests/fixtures/hosts/<hôte>/` (un `manifest.json` par
+hôte, une fixture par point). Règle unique : une capacité sans fixture vaut
+`false`, et un hôte dont `pretooluse_deny` n'est pas vérifié est **non fencé**.
+Une preuve vaut pour la version d'hôte sur laquelle elle a été capturée :
+`contract_for(host, version)` et `is_fenced(host, version)` exigent la version
+et rendent un contrat entièrement non vérifié (donc non fencé) si elle est
+absente, inconnue ou différente de la version capturée. `recorded_contract(host)`
+ne sert qu'à auditer la table.
+
+| Capacité | Claude Code 2.1.301 | opencode 1.17.11 | Copilot, Codex, Cursor, Gemini |
+|---|---|---|---|
+| `pretooluse_deny` : un refus arrête l'outil | vérifiée (exit 2 + stderr, ou `permissionDecision: deny` ; l'agent reçoit le motif) | **vérifiée** : un plugin lève une `Error` dans `tool.execute.before`, l'outil ne s'exécute pas, l'agent reçoit le motif (fixture) | non vérifié |
+| `session_end` | vérifiée, sortie propre de `claude -p` seulement (kill non observé) | non vérifié | non vérifié |
+| `quota_signal` : un hook reçoit l'échec de forfait | **non vérifiée** (aucun forfait épuisé observé ; `rate_limit_event` du flux vu en `allowed`, date en epoch secondes) | non vérifié | non vérifié |
+| `liveness_probe` | vérifiée : `claude agents --json` (`pid`, `kind`, `sessionId`, `status` idle/busy ; ni `state` ni `waitingFor` sur les sessions interactives) | non vérifié | non vérifié |
+| `subagent_model` | vérifiée **par le journal du sous-agent** (`agent_transcript_path`) : la charge utile de `SubagentStop` n'a aucun champ modèle | non vérifié | non vérifié |
+| `resume_after_quota` | non vérifiée (forfait épuisé non provoqué) | non vérifié | non vérifié |
+| `bg_workspace_trust` | vérifiée : `claude --bg` refuse un dossier non approuvé (code 1), alors que `claude -p` ne demande rien | non vérifié | non vérifié |
+| `bg_cost_source`, `bg_wake` | non vérifiées (aucune session `--bg` démarrée) | non vérifié | non vérifié |
+| `local_token_usage` | vérifiée : `usage` et `modelUsage` du flux stream-json, `message.usage` du journal de session | non vérifié | non vérifié |
+| `systemd_user_linger` | vérifiée sur le poste de capture (`Linger=yes`, minuteur utilisateur déclenché, session ouverte) | non vérifié | non vérifié |
+
+Les captures Claude Code ont été faites sans opérateur, par des appels `claude -p`
+d'un mot dans un projet jetable. Celles d'opencode (17 octobre 2026) l'ont été
+avec un fournisseur HTTP local factice (compatible OpenAI, aucun modèle réel) qui
+demande un appel d'outil `bash` : le refus vient de l'hôte, pas du modèle. Le
+palier gratuit d'opencode exige 1.18.0 ou plus (1.17.11 installée) : aucun appel
+de modèle réel n'a été fait. Ce qui est chargé par l'hôte (instructions via
+`opencode.json` > `instructions`, agents, skills, commandes, MCP `type: local`) a
+été vérifié avec `opencode debug config|agent|skill` et une requête réelle vers le
+fournisseur factice ; ce qui ne l'est pas : le plugin sur les sous-agents, une
+table `permission` (un refus de lecture en glob n'a pas arrêté une lecture), les
+autres événements de cycle de vie, un MCP effectivement lancé. Copilot (VS Code), Codex, Cursor et Gemini n'ont pas été
+lancés : leurs manifestes disent « non vérifié » et la capture reste à faire au
+poste. Les fixtures remplacent les chemins personnels, l'utilisateur et les
+identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
+ou jeton.
+
+## Hôtes activés
+
+`grimoire host sync` émettait, par défaut, la surface des cinq hôtes connus —
+une équipe qui n'utilise que Claude Code recevait quand même le catalogue
+Gemini, les règles Cursor, etc. (issue #177). Une alternative « canal plugin »
+pour Claude Code a été envisagée puis écartée par décision (2026-09-12) : la
+solution retenue est purement déclarative, sans mécanisme d'installation
+séparé.
+
+`project-context.yaml` porte la déclaration :
+
+```yaml
+hosts:
+  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini, opencode
+```
+
+**Absence de la clé** : le comportement bascule en détection — un hôte est
+émis s'il a déjà des fichiers dans le dépôt (`.claude/` → claude,
+`.github/copilot-instructions.md` ou `.github/agents/` → copilot, `GEMINI.md`
+→ gemini, `.cursor/` → cursor, `.opencode/` ou `opencode.json` → opencode, `AGENTS.md` **et** `.codex` → codex), et
+`claude` seul si rien n'est détecté. Un projet existant qui n'a jamais connu
+cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
+supprime au premier `grimoire up` qui suit une mise à jour du kit.
+`grimoire init` écrit la clé avec le résultat de cette détection, pour que le
+comportement soit explicite dès le premier jour : un répertoire vierge
+n'obtient que `claude` et son pont `CLAUDE.md`.
+
+**Émission** : `grimoire host sync` (et donc `grimoire up`) n'écrit que les
+hôtes activés.
+
+- `--host all` (le défaut) se filtre sur `hosts.enabled`.
+- `--host <x>` sur un hôte connu mais non activé est un refus nommé :
+  *« Hôte gemini non activé — ajoute-le à `hosts.enabled`… »* — sauf
+  `--force-host`, qui synchronise quand même sans toucher à la déclaration.
+- Les fichiers déjà émis pour un hôte qu'on vient de désactiver ne sont
+  **jamais** supprimés automatiquement : ce sont des « orphelins d'un hôte
+  désactivé », listés par `grimoire host status --host all` (JSON : clé
+  `orphans`). `grimoire host sync --prune-disabled` les retire — opt-in
+  explicite, jamais par défaut. Les fusions JSON (`.claude/settings.json`,
+  `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
+  propre du projet.
+- Une entrée `type: http` de `.mcp.json` (le serveur partagé de
+  `grimoire mcp start`, voir [la référence CLI](cli/tableau-de-bord.md#serveur-mcp-partagé))
+  est portée telle quelle vers les hôtes qui distinguent local et distant
+  (OpenCode : `type: remote`).
+
+`grimoire doctor` complète ce tableau : INFO pour les fichiers orphelins d'un
+hôte désactivé, WARN si un hôte activé n'a encore rien émis (généralement :
+`grimoire host sync` n'a pas tourné), et **FAIL** (`host_sync_<hôte>`) si un
+fichier hôte est préservé sans avoir été déclaré (voir ci-dessous) — `doctor` ne
+peut pas répondre « tout va bien » quand `grimoire up` échoue.
+
+### Un fichier hôte qui est à vous : `hosts.preserve`
+
+Le kit n'écrase jamais un fichier de chemin géré qu'il n'a pas écrit (un
+`.claude/agents/concierge.md` à vous, un `.claude/settings.json` avec commentaires
+ou virgule finale) ni un fichier du kit que vous avez modifié. Un tel fichier n'est
+pas synchronisé : `grimoire up` (étape `host_sync`), `grimoire doctor` et
+`grimoire upgrade-flow apply` échouent, à chaque passage, et nomment les deux issues.
+
+- **Garder le fichier** (non destructif, durable) : le déclarer dans
+  `project-context.yaml`.
+
+  ```yaml
+  hosts:
+    preserve: [".claude/agents/concierge.md"]
+  ```
+
+  Chemins relatifs à la racine, avec `/`, sans `..`. Le fichier n'est jamais écrit
+  (`--force` compris). `up` passe (code 0) en listant « user-owned (hosts.preserve) » ;
+  `host probe` le rend `user-owned`, jamais `applied` ; `host matrix` ajoute une ligne
+  `file:<chemin>` au statut `preserved` — et tout hook ou règle que ce fichier aurait
+  porté passe aussi `preserved` : l'élément du kit n'est **pas livré** sur cet hôte
+  (dégradation déclarée, à vous d'en assurer l'équivalent).
+- **Laisser le kit l'écraser** : `grimoire host sync --force` (destructif).
+
+Le choix « échec » plutôt qu'« avertissement » sans déclaration est volontaire : un
+avertissement permanent s'ignore, et un fichier préservé ne doit jamais passer pour
+synchronisé. La déclaration est ce qui transforme le conflit en décision.
+
+### Hooks coupés par l'hôte
+
+`grimoire host probe` lit `disableAllHooks` dans `.claude/settings.json` et
+`.claude/settings.local.json`. À `true`, les hooks câblés sont rendus `disabled` et la
+sonde sort en 1 : les hooks sont dans le fichier, l'hôte ne les exécute pas. Limite : les
+réglages utilisateur (`~/.claude/settings.json`) et d'organisation ne sont pas lus.
+
+## Persona d'entrée
+
+Chaque projet désigne une persona d'entrée — `concierge` par défaut — celle qui
+tranche quand une demande ne désigne pas clairement un rôle. Aucun hôte ne sait
+ouvrir une session *à l'intérieur* d'un agent : Claude Code n'instancie un
+sous-agent que par son outil Agent, Copilot que par le sélecteur de chat. Ce
+n'est pas un réglage manquant, c'est une propriété des hôtes, et le catalogue
+la déclare : `agent_autostart` est faux sur les cinq profils, et
+`grimoire host list` le remonte comme une dégradation avec son substitut.
+
+Le substitut est fourni là où un hook `session_start` s'exécute : le hook remet
+la persona à la boucle principale, avant la directive du standard. La session
+n'est pas ouverte dans l'agent — elle en adopte la persona en gardant toute la
+surface d'outils de l'hôte, et dispatcher un sous-agent reste un choix.
+
+```text
+[Grimoire — persona d'entrée]
+Cette session adopte la persona d'entrée du projet dans sa boucle principale,
+sans sous-agent : **concierge** — Concierge — Triage, clarification, routage…
+
+1. Lis `_grimoire/kit/agents/concierge.md` en entier avant de répondre…
+2. Tiens sa frontière d'outils pour ce que tu fais toi-même : read, search, edit, execute.
+3. Tu restes la boucle principale : dispatcher un sous-agent reste un choix.
+```
+
+Sur un hôte sans hook `session_start`, la persona d'entrée est nommée dans le
+fichier d'instructions ; c'est le seul endroit qui reste.
+
+La persona d'entrée se déclare dans `project-context.yaml` :
+
+```yaml
+agents:
+  entry: "concierge"   # défaut ; une autre persona du projet ; "" pour aucune
+```
+
+Un projet qui porte déjà son propre point d'entrée — un orchestrateur chargé
+par `CLAUDE.md`, par exemple — déclare `entry: ""` et n'en reçoit pas un
+second. `grimoire host status` montre la persona retenue, et signale une clé
+qui nomme un agent que le projet n'a pas plutôt que d'en inventer un.
+
+## Gouvernance
+
+Les hooks générés dépendent de l'enrôlement du projet dans le standard agentique.
+
+| Événement | Décision | Portée |
+|---|---|---|
+| `session_start` | directive de session | toujours |
+| `pre_tool_use` | politique d'outils (destructif, secrets) | toujours, **bloquant** |
+| `user_prompt_submit` | nomme la tâche courante, ou l'absence de tâche et son remède ; rattache la session au claim actif | projet enrôlé |
+| `post_tool_use` | rappel de preuve après écriture ; compte les écritures de la session | projet enrôlé |
+| `pre_compact` | capsule de gouvernance avant compaction | projet enrôlé |
+| `subagent_stop` | état des gates, sans bloquer | projet enrôlé |
+| `stop` | gates de preuve ; clôture hors tâche après une écriture | projet enrôlé, **bloquant** |
+
+Un projet non enrôlé ne reçoit aucun hook de gate : un gate inexistant ne peut
+pas être rouge, et bloquer sur son absence ferait du hook un piège.
+
+Le vocabulaire host-neutre reconnaît aussi `subagent_start` et
+`post_tool_use_failure` (`SubagentStart`, `PostToolUseFailure` côté Claude
+Code) : un hook qui les cible est câblé par `grimoire host sync` comme les
+sept ci-dessus, mais aucun hook du kit ne les utilise par défaut aujourd'hui.
+`HostHooks.subagent_start` / `.post_tool_use_failure` disent, par hôte, si
+l'événement est documenté ; l'absence d'entrée dans `.claude/settings.json`
+n'était pas un choix mais un oubli — la table du wire format ne les
+connaissait pas encore.
+
+### Le hook `stop`
+
+C'est le seul endroit où la règle du kit — « une clôture sans gates verts est une
+tâche non terminée » — devient une contrainte plutôt qu'une consigne. Sur les
+profils `governed` et `production`, une tâche dont les gates sont rouges voit sa
+clôture refusée, avec la liste de ce qui manque.
+
+Trois garde-fous encadrent ce refus :
+
+1. **Pas de boucle** — si l'hôte relance déjà l'agent à cause d'un blocage
+   précédent, le hook laisse passer.
+2. **Pas de blocage à vide** — un projet non enrôlé, un profil `starter`, ou une
+   tâche encore à l'état `proposed` ne bloquent jamais. Ce dernier cas est
+   signalé : un gate vert parce que rien n'est encore exigé ne protège rien, et
+   le hook le dit au lieu de laisser croire le contraire.
+3. **Pas de panne fatale** — un `task-board.yaml` cassé ou une exception dans une
+   décision sortent en « autorisé », avec l'erreur en contexte. Un hook qui
+   plante ne doit pas rendre une session inutilisable.
+
+### Travailler hors tâche (issue #638)
+
+`bootstrap` est un repli, pas une tâche : quand rien ne désigne de tâche —
+ni `GRIMOIRE_TASK_ID`, ni claim actif du Mission Ledger, ni carte
+`in_progress` du board — le travail de la session n'apparaît nulle part dans
+le ledger. Depuis le lot A de l'issue #638 :
+
+- `session_start` (profils `governed` et `production`) et
+  `user_prompt_submit` (tout projet enrôlé) disent qu'aucune tâche n'est en
+  cours et donnent le remède copiable : `grimoire task add "<titre>" -a
+  "<critère>" --owner <nom> --ready`, `grimoire task context <id>`,
+  `grimoire task claim <id> --actor <nom>` — ou les outils MCP `task_add`,
+  `task_context`, `task_claim`, ou `GRIMOIRE_TASK_ID` ;
+- `post_tool_use` compte dans `session-<session_id>.json` (champ `mutations`)
+  chaque outil dont la classification n'est pas lecture seule — fichier
+  écrit ou édité, commande Bash mutante ou destructive ; jamais le contenu ;
+- `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
+  compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
+  sur les profils `governed` et `production` ; les autres profils reçoivent
+  le même texte en `systemMessage`, sans blocage. Une session qui n'a fait
+  que lire ou répondre n'est jamais bloquée, pas plus qu'un hôte qui n'envoie
+  pas de `session_id` (aucun journal, compteur à zéro). `stop_hook_active`
+  laisse toujours passer le second `Stop`.
+- une session qui a lâché sa tâche n'est pas « hors tâche » (D-12) : si le
+  journal de session nomme une tâche dont le claim est le sien et qui est
+  `waiting`, `blocked`, `failed`, `cancelled` ou `closed`, `stop` la laisse
+  sortir en le disant ; `needs_verification` (tâche rendue) est jugée sur ses
+  gates de preuve, et un refus nomme la tâche et ce qui manque. Une tâche
+  encore `claimed` reçoit la consigne `task move --to running` puis
+  `--to needs_verification` (le ledger refuse `claimed → needs_verification`).
+  Chaque refus porte son motif au TraceLedger (`refusal:task_unparked`,
+  `refusal:no_active_task`, `refusal:gates_red`, `refusal:guard_error`).
+
+Dès que la tâche résolue est un claim du ledger, `user_prompt_submit` (et
+`session_start`) rattachent la session à ce claim par un événement
+`task.session_attached` — `claim.session_id` et `claim.session_host`
+apparaissent au rejeu, l'historique n'est jamais réécrit, et un claim déjà
+rattaché à une autre session n'est pas volé. Le journal `session-<id>.json`
+porte alors `task_id`. Le cockpit (espace Exécuter) montre sur la carte la
+session et l'hôte, et dans l'inspecteur la commande de reprise quand l'hôte
+en a une (`claude --resume <session_id>` pour Claude Code ; identifiant seul
+pour les autres).
+
+### Politique d'outils
+
+La décision `pre_tool_use` fait passer chaque appel mutant par le moteur de
+politique du kit. Le nom de l'outil est lu dans le vocabulaire de n'importe quel
+hôte (`Bash` comme `run_in_terminal`, `Edit` comme `replace_string_in_file`),
+puis classé en famille neutre.
+
+| Constat | Verdict |
+|---|---|
+| Suppression récursive, force push, `terraform destroy`, `kubectl delete`… | refus sous les profils non stricts, confirmation demandée en strict |
+| Lecture d'un fichier de secrets (`.env`, clés privées, `credentials.json`…) | refus à tous les profils |
+| Appel en lecture seule | autorisé sans traitement |
+
+### Politiques temporelles
+
+Point 3 de l'audit de positionnement 2026-09-12
+(`docs/audits/positionnement-2026-09-12.md`) : les règles ci-dessus jugent
+une requête isolée, sans notion de session. `_grimoire/standard/policies.yaml`
+ajoute des règles *temporelles*, portées par les mêmes champs
+`PolicyRule` (voir `src/grimoire/policies/schemas.py`) — rétro-compatibles :
+un projet qui ne crée pas ce fichier n'est pas affecté.
+
+```yaml
+rules:
+  - id: rm-requires-approval
+    description: "rm/rf demande une confirmation, une fois par session"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn
+    reason_template: "Suppression demandant une approbation explicite"
+    tool_pattern: "Bash(rm:*)"       # clé d'outil façon permissions Claude Code — voir plus bas
+    require_approval: true            # ask à la 1re occurrence de la session, allow ensuite
+    cooldown_after: {pattern: "Bash(rm:*)", count: 5, minutes: 10}
+  - id: session-write-budget
+    description: "Pas plus de 50 écritures par session, alerte au-delà"
+    action_kinds: []
+    mutation_classes: []
+    risk_profiles: []
+    verdict_on_match: warn   # jamais "block" sans tool_pattern — voir le garde-fou plus bas
+    reason_template: "Budget d'écritures de session dépassé"
+    per_session: {max_writes: 50, max_tool_calls: 200, max_cost_usd: 2.0, max_duration_min: 60}
+```
+
+**Règles.** Quatre clés nouvelles, toutes optionnelles : `tool_pattern`,
+`require_approval` (booléen), `per_session`
+(`max_tool_calls`/`max_writes`/`max_cost_usd`/`max_duration_min`/`subagents`,
+chacun optionnel) et `cooldown_after` (`pattern`/`count`/`minutes`). Une clé
+inconnue sous `PolicyRule`, `per_session` ou `cooldown_after` échoue au
+chargement avec une `GrimoirePolicyError` nommée (`GR-POL-002`) — jamais
+silencieusement ignorée.
+
+**Comptage (`max_tool_calls` vs `max_writes`).** Corrigé le 2026-09-12
+(#463) : `max_writes` ne compte que les appels réellement mutants —
+`Write`/`Edit`/`NotebookEdit`, et un `Bash` dont la commande n'est pas
+reconnue comme lecture seule (`grimoire.hosts.decisions.tool_facts.is_read_only_command` :
+`cat`, `grep`, `find`, `git status`, `gh pr view`… reconnus, tout le reste
+resté conservateur — classé mutation par défaut). `max_tool_calls`, lui,
+compte tout, lectures comprises : c'est sa raison d'être, un budget de
+volume total d'appels plutôt que de mutation.
+
+**Clé d'outil (`tool_pattern` / `cooldown_after.pattern`).** Corrigé le
+2026-09-12 (#449) : ces motifs n'étaient comparés qu'au nom nu de l'outil
+(`Bash`, `Write`…), donc un motif de la forme `Tool(...)` — celle utilisée
+dans les exemples ci-dessus et dans les permissions Claude Code — ne
+correspondait jamais. `Bash(git push:*)` était comparé à la seule chaîne
+`"Bash"` et ne matchait rien ; `require_approval: true` répondait `allow` dès
+le premier `git push`.
+
+Un motif sans parenthèses (`"*"`, `"Bash"`) reste comparé au seul nom
+d'outil — rétro-compatible avec toute règle écrite avant ce correctif. Un
+motif `Tool(corps)` compare `Tool` au nom d'outil, puis `corps` à un second
+terme, la *clé* de l'appel : la commande shell complète pour `Bash` (et tout
+outil qui exécute une commande), le chemin cible pour `Write`/`Edit`/`Read`,
+et le nom nu de l'outil (donc aucune clé additionnelle) pour un outil MCP
+tant qu'aucune convention d'arguments n'existe. Dans `corps`, un `:` suivi
+d'un `*` final (`rm:*`, `git push:*`) sépare le préfixe de commande du
+joker — exactement la convention des permissions Claude Code : `Bash(git
+push:*)` matche toute commande qui *commence par* `git push` (mot entier :
+`git pushx` ne compte pas), pas une commande contenant littéralement un
+`:`. Ailleurs, `corps` reste un glob simple (`*` seul joker) contre la clé,
+comme dans `Write(_grimoire/standard/*)`.
+
+**État de session.** Les compteurs vivent dans
+`_grimoire-output/.runs/session-<session_id>.json` (écriture atomique, comme
+le cache d'état de standard #422), un fichier par session, jamais de secret ni
+de contenu d'outil — seulement des compteurs et des horodatages. `SessionStart`
+le réinitialise ; un fichier absent, tronqué ou d'une version de schéma
+inconnue redevient une session neuve, jamais une erreur. Le même fichier porte
+`task_id` (la tâche du ledger que la session travaille) et `mutations` (le
+nombre d'écritures observées), voir « Travailler hors tâche » plus haut.
+
+**Décision et hôtes.** Un budget atteint (au *N+1*ᵉ appel, pas avant) ou un
+refroidissement actif rendent `block` (`deny` côté hôte). Une règle
+`require_approval` non encore approuvée rend `warn`, traduit en
+`permissionDecision: "ask"` sur un hôte qui sait demander (Claude Code) ou en
+refus motivé sinon (`docs/hosts-reference` de la Forge documente cette
+distinction par hôte). Le calcul lui-même (règle + état de session → verdict)
+est porté à l'identique en Python
+(`src/grimoire/policies/temporal.py`) et en Rust
+(`rust/grimoire-policies-core/src/lib.rs`, fonction
+`evaluate_one_temporal_rule`) — le Rust est l'oracle, testé en parité
+(`tests/unit/test_policies_rust_parity.py`) ; la persistance de l'état reste
+Python dans les deux cas.
+
+**Exemption de réparation.** Ajoutée le 2026-09-12 (#463) après un incident
+réel : une règle `per_session` en `block` n'atteint jamais
+`Read`/`Glob`/`Grep` (ni un `Bash` classé lecture seule), ni une écriture qui
+cible `_grimoire/standard/policies.yaml` ou
+`_grimoire-output/.runs/session-*.json` — les deux seuls fichiers qui
+permettent de lever le blocage. L'exemption est codée en dur (pas une clé de
+configuration désactivable), mirée à l'identique en Rust, et ne compte pas
+dans les compteurs de la règle qu'elle contourne. Sans elle, un budget global
+en `block` pouvait refuser jusqu'à l'édition du fichier qui le portait.
+S'applique aux quatre dimensions de `per_session` alike
+(`max_tool_calls`/`max_writes`/`max_cost_usd`/`max_duration_min`) : c'est le
+même appel qui les protège toutes.
+
+Rechute constatée le 2026-09-14 sur Grimoire-Forge (#481) : l'exemption
+couvrait déjà tout appel non mutant et l'édition des deux fichiers ci-dessus,
+mais pas **la commande de remise à zéro elle-même**. `grimoire policies
+reset-session` est un appel `Bash` dont le premier mot (`grimoire`) n'est
+reconnu ni lecture seule (`is_read_only_command`) ni comme ciblant l'un des
+deux fichiers exemptés — sa ligne de commande, pas un chemin. Résultat :
+une session dont la durée avait dépassé `max_duration_min` refusait la
+commande que son propre message de refus recommandait. Corrigé en
+reconnaissant l'invocation de `grimoire policies` (peu importe le
+sous-verbe — `status` ou `reset-session`), dans ses trois formes documentées
+(`grimoire policies …`, `<venv>/bin/grimoire policies …`, `python -m
+grimoire policies …`), sans élargir l'exemption à toute commande qui se
+contente de la *nommer* (`echo grimoire policies …` reste refusé).
+
+**Sous-agents.** Le payload de hook de Claude Code envoie le même
+`session_id` pour un appel d'outil fait par un sous-agent (son outil `Task`)
+que pour un appel de la session parente, et ne documente aucun champ
+(`agent_id`, `parent_session_id`…) pour les distinguer. Tout sous-agent
+lancé depuis une session **partage donc le budget de sa session parente** —
+`per_session.subagents` le nomme explicitement : `"shared"` (défaut, seule
+valeur supportée) assume ce partage ; `"separate"` échoue au chargement
+(`GrimoirePolicyError`, `GR-POL-003`) plutôt que de laisser croire à une
+isolation qui n'existe pas dans les hôtes actuels.
+
+**Garde-fou de conception.** `grimoire doctor` signale (`WARN`,
+`policy_budget_guard`) toute règle `per_session` sans `tool_pattern` (donc
+`"*"`, tous les outils) déclarée en `verdict_on_match: block` : une fois son
+plafond atteint, une telle règle refuse tout le reste de la session, exemption
+de réparation mise à part. Ce n'est jamais un `FAIL` — un projet peut
+l'assumer — mais ce n'est plus silencieux. L'exemple ci-dessus utilise
+délibérément `warn` plutôt que `block` ; un budget en `block` doit cibler un
+`tool_pattern` précis (`Bash(rm:*)`, `Write`…), jamais `*`.
+
+**`max_duration_min` mesure depuis `SessionStart`, pas depuis le dernier
+appel.** Le compteur part de `started_at` (l'horodatage de la première
+initialisation de l'état de session, voir "État de session" ci-dessus) et ne
+se réinitialise jamais tout seul — ni sur une pause, ni sur une nuit, ni sur
+un week-end. Une session Claude Code peut rester ouverte plusieurs jours
+(reprise d'une tâche en pause, session longue laissée en arrière-plan) : une
+fenêtre qui paraît généreuse en heures de travail réelles (24h, `1440`) est
+en pratique dépassée par la seule durée écoulée, pas par l'activité. Depuis
+le 2026-09-14 (#481), `grimoire doctor` signale (`WARN`,
+`policy_budget_duration_guard`, au même endroit que `policy_budget_guard`
+ci-dessus) toute règle `per_session` sans `tool_pattern` en
+`verdict_on_match: block` dont `max_duration_min` est inférieur à `2880`
+(48h) — le seuil en-deçà duquel une session multi-jours franchit la fenêtre
+sans qu'aucune vraie dérive ne se soit produite.
+
+`require_approval` ne se marque **jamais** approuvée depuis `PreToolUse` :
+demander (`ask`) n'est pas une preuve que l'humain a dit oui, donc rien dans
+le chemin de décision de `PreToolUse` ne met `approved` à `true` — une
+tentative refusée puis rejouée redemande, exactement comme la première fois.
+Seul `PostToolUse` — l'événement qu'un hôte n'émet que si l'outil a
+réellement tourné, donc que le `ask` précédent a été accordé — enregistre
+l'approbation, via `record_post_tool_use_approval`
+(`grimoire.policies.temporal`), appelée depuis la décision `PostToolUse`
+existante (`grimoire.hosts.decisions.evidence_trace`). L'approbation porte
+sur l'empreinte de l'action exécutée (outil + entrée complète de l'outil —
+toutes les cibles, arguments et contenu —, la commande n'étant normalisée que
+par ses blancs hors guillemets, et pas du tout dès que le shell lit lui-même
+ces blancs : `${...}`, `$[`, `[`, motifs extglob, ni dès qu'un caractère hors
+ASCII (guillemets typographiques) apparaît ; `description` et `timeout` du
+Bash natif, `explanation` et `goal` du `run_in_terminal` de Copilot sont
+ignorés) :
+seule une action identique passe en `allow` silencieux, toute autre action
+correspondant au motif redemande. Les empreintes sont conservées dans
+`approved_fingerprints` (64 au plus par règle, les plus anciennes sortent) ; un
+état hérité sans empreinte redemande, et une session neuve aussi. Un hook peut
+réécrire l'entrée de l'outil entre `PreToolUse` et `PostToolUse` (RTK :
+`git status` devient `rtk git status`, et `PostToolUse` reçoit l'entrée
+réécrite) : quand l'hôte envoie un `tool_use_id`, `PreToolUse` retient
+l'empreinte et les règles concernées dans `pending_approvals`
+(`remember_pending_approval`) et `PostToolUse` les reprend par cet identifiant
+au lieu de les recalculer ; sans identifiant, il retombe sur sa propre entrée
+(une entrée réécrite redemande alors, jamais plus lâche). Sans cette étape, un garde `require_approval`
+échouait ouvert (la version initiale de ce chantier faisait cette erreur,
+corrigée en revue le 2026-09-12).
+
+**Visibilité et remise à zéro.** `grimoire policies status [--session-id ...]
+[--json]` affiche les compteurs et budgets restants de la session courante
+(ou la plus récente si aucune n'est précisée), et signale désormais
+(`ATTENTION`) tout budget à moins de 10 % de son plafond restant — avant le
+refus, pas seulement au moment du refus. `grimoire policies reset-session
+[--session-id ...] [--json]` supprime l'état d'une session (la courante par
+défaut), avec confirmation nommant le fichier supprimé ; un fichier d'état
+absent, tronqué ou d'une version de schéma inconnue redevenant une session
+neuve (voir plus haut), c'est suffisant pour lever un blocage sans attendre
+une session neuve. Le message de refus d'un budget nomme systématiquement
+cette commande et le fichier de règles :
+`"... ; grimoire policies reset-session ou relever per_session dans
+_grimoire/standard/policies.yaml"`. Cette recommandation est elle-même
+couverte par l'exemption de réparation ("Exemption de réparation"
+ci-dessus) : un refus ne nomme jamais une commande qu'il refuserait
+lui-même. Le cockpit n'a pas de vue équivalente pour l'instant.
+
+## Coût des hooks
+
+Un hook s'exécute une fois par appel d'outil : son coût est une propriété de
+conception, pas un détail d'implémentation.
+
+- Les configurations générées invoquent `grimoire-hook`, un script console
+  dédié. Passer par `grimoire host hook` construit tout l'arbre de commandes
+  avant d'en résoudre une seule — 391 ms par appel contre 102 ms. La
+  sous-commande reste disponible pour un usage humain.
+- Le chemin de décision n'importe pas le moteur du standard au chargement :
+  évaluer des gates en a besoin, décider d'un appel d'outil non. Un test échoue
+  si cette frontière est franchie.
+- Sur un hôte doté d'une table de permissions, `Read` ne figure pas dans le
+  matcher : les fichiers de credentials y sont déjà refusés déclarativement, à
+  coût nul. L'accès par commande shell reste couvert par `Bash`.
+
+## Ce que la gouvernance enregistre
+
+Chaque appel d'outil réellement évalué et chaque décision de clôture sont
+consignés dans `_grimoire-output/traces/traces.jsonl`. Un refus qui ne laisse
+pas de trace ne peut pas être mesuré, et un garde-fou non mesuré reste une
+affirmation.
+
+```bash
+grimoire -o json standard verify .   # l'état déclaré
+```
+
+Le ledger répond à une autre question : ce qui s'est réellement passé.
+`TraceLedger.policy_block_rate()` donne la fraction des appels évalués qui ont
+été refusés.
+
+Trois limites assumées :
+
+- **les appels en lecture seule n'écrivent rien** — ils sortent avant toute
+  évaluation, et le chemin le plus chaud reste libre ;
+- **les arguments sont hachés**, jamais stockés tels quels : le fichier part sur
+  disque et s'exporte en OTel, une trace qui cite une commande devient une fuite ;
+- **un ledger illisible n'interrompt rien** — l'observabilité ne vaut jamais une
+  session cassée.
+
+Le choix de la persona d'entrée y laisse aussi un fait dédié : `hosts.decisions`
+enregistre quel agent a été retenu, quand, dans quel projet — rien du contenu
+échangé (#366). `grimoire registry dispatches` relit ce fait, agrégé par agent,
+avec le nombre de choix observés et la date du dernier.
+
+### Non-choix
+
+Le choix n'est que la moitié du signal : le concierge cherche parfois un
+spécialiste sans en trouver, ou se rabat sur un généraliste faute de mieux.
+C'est ce non-choix qui indique un besoin non couvert — sans lui, aucun
+déclencheur ne peut proposer la création d'un agent qui manque (#355).
+
+Cette résolution se fait dans le raisonnement de la persona concierge
+(`archetypes/meta/agents/concierge.md`), pas dans du code du kit qui pourrait
+l'observer lui-même. La persona appelle donc `grimoire agent-miss` à chaque
+non-choix :
+
+```bash
+grimoire agent-miss --category tests
+grimoire agent-miss --category infra --specialty terraform \
+  --fallback backend-engineer --reason "aucun agent terraform déclaré"
+```
+
+`--category` et `--specialty` classent la demande, ils n'en portent jamais le
+contenu — la persona ne transmet qu'une étiquette, jamais ce qui a été dit.
+Le fait rejoint le même journal que le choix (`agent.miss` au lieu de
+`agent.dispatch`), écrit best-effort de la même façon : un journal
+indisponible ou illisible ne fait jamais échouer la commande.
+
+`grimoire registry dispatches` montre les deux côte à côte : les choix
+d'agent, et les non-choix agrégés par spécialité manquante, avec leur
+compte et la date du plus récent — de quoi répondre à « quelle spécialité a
+manqué, et combien de fois ».
+
+## Frontière d'outils des personas
+
+Chaque persona est projetée avec une frontière d'outils. Elle vient du champ
+`tools:` de son frontmatter quand il existe :
+
+```yaml
+---
+name: "scribe"
+description: "Scribe — documentation"
+tools: ["read", "search", "edit"]
+---
+```
+
+Sans ce champ, la frontière est **déduite** du texte de la persona : lecture et
+recherche toujours, écriture et exécution seulement sur un signal explicite.
+`grimoire host status` liste les personas dont la frontière est déduite —
+l'ajout d'un `tools:` explicite est la façon de la figer.
+
+Verbes disponibles : `read`, `search`, `edit`, `execute`, `web`. Chaque émetteur
+les traduit dans le vocabulaire de son hôte.
+
+## Fichiers générés et fichiers à vous
+
+Les fichiers générés portent un marqueur `grimoire:managed`. La synchronisation
+ne réécrit qu'eux :
+
+- un fichier écrit à la main à un chemin géré est **préservé** et signalé comme
+  conflit (`--force` pour l'écraser sciemment). Le marqueur porte l'empreinte du
+  fichier émis (`grimoire:managed sha256=…`) : un fichier généré puis modifié à la
+  main est un conflit `edited`, un fichier que le kit n'a jamais écrit un conflit
+  `foreign` (`host status --json` : `conflict_causes`) ;
+- `AGENTS.md` et `GEMINI.md` sont partagés : le kit n'y possède que le bloc
+  `<!-- grimoire:begin … -->` … `<!-- grimoire:end -->`, tout ce qui l'entoure est
+  préservé à l'octet près, `--force` compris (fins de ligne CRLF
+  comprises : le bloc suit le style du fichier). Un bloc abîmé (`END` absent ou
+  altéré) est un conflit `edited` que `--force` ne tranche pas : corrigez-le à la
+  main ;
+- un lien symbolique (`GEMINI.md` vers `AGENTS.md`, `settings.json` vers un dépôt
+  de dotfiles) reste un lien : la cible reçoit l'écriture, et le retour arrière
+  rétablit la cible ;
+- la synchronisation est transactionnelle : toutes les décisions sont prises
+  avant la première écriture, et une panne en cours de route rétablit l'arbre
+  (tous hôtes confondus). Un processus tué net n'est pas rétabli ;
+- `.claude/settings.json` n'est jamais réécrit en bloc : seules les entrées de
+  hooks appartenant au kit sont remplacées, le reste de la configuration est
+  conservé tel quel ;
+- une synchronisation répétée ne produit aucune écriture si rien n'a changé.
+
+Pour personnaliser durablement, modifier la source — la persona dans
+`_grimoire/`, la compétence ou la commande du kit — puis resynchroniser.
+
+Chaque chemin a un seul propriétaire. `.github/agents/` appartient à l'émetteur
+Copilot, `.github/prompts/` au scaffolder pour les workflows du kit, et
+`.claude/**` à l'émetteur Claude Code. Deux générateurs sur un même fichier
+produisent un conflit permanent, jamais un contenu stable.
+
+## Hôtes sans émetteur
+
+Un hôte sans émetteur n'est pas pour autant sans surface : **MCP est le seul
+canal que tous partagent**, et le serveur Grimoire y expose les trois primitives.
+
+| Primitive | Contenu | Ce que le client en fait |
+|---|---|---|
+| Prompts | les commandes du projet | des slash commands, sans émetteur |
+| Resources | les compétences, sous `grimoire://skill/<slug>` | un corps chargeable à la demande |
+| Tools | `grimoire_host_status`, `grimoire_skill`, `grimoire_command`, `task_list_ready`, `task_claim`, … | l'inventaire, l'état, et les tâches du ledger |
+
+C'est la réponse à « peu importe l'hôte » — pour le **contenu**. La
+**contrainte** (hooks, permissions) reste l'affaire des émetteurs : MCP
+n'intercepte rien.
+
+Ajouter un hôte se fait en écrivant un émetteur et un profil de capacités ; ni la
+description du projet, ni les règles de gouvernance ne changent.
