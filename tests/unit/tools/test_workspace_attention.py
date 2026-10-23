@@ -484,7 +484,9 @@ class TestServiceState:
             listener.listen()
             port = listener.getsockname()[1]
             assert service_state("qdrant", f"http://127.0.0.1:{port}") == SERVICE_ONLINE
-        assert service_state("qdrant", f"http://127.0.0.1:{port}") == SERVICE_STOPPED
+        # Sous Windows, un refus local n'arrive qu'après les relances SYN (~2 s) :
+        # un délai large garde le test sur « refusé » et non sur « délai dépassé ».
+        assert service_state("qdrant", f"http://127.0.0.1:{port}", timeout=5.0) == SERVICE_STOPPED
 
     def test_une_url_illisible_est_inconnue(self) -> None:
         assert service_state("qdrant", "http://[::1") == SERVICE_UNKNOWN
