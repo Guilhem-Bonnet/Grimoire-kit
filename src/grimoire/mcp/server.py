@@ -1019,7 +1019,10 @@ def _task_wait(
             result = service.wait(task_id, to, actor, note=reason)
         else:
             result = service.resume(task_id, actor)
-        return json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+        payload = result.to_dict()
+        if action in ("ask", "wait") and (warnings := service.parking_warnings(task_id)):
+            payload["warnings"] = list(warnings)
+        return json.dumps(payload, indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 

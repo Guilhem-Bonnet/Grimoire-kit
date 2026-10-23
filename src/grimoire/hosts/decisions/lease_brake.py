@@ -4,17 +4,16 @@ Un titulaire périmé — session reprise ailleurs, tâche annulée, bail rendu 
 récolté — ne doit plus écrire. Le ledger le refuse déjà pour ses propres
 événements (K2) ; ce frein le refuse pour les *outils* : un ``Edit``, un
 ``git push``, un appel MCP lancé par une session dont le bail n'est plus le
-sien. Trois refus, dans l'ordre où on les lit :
+sien. Les refus, dans l'ordre où on les lit :
 
 - **annulation** : la tâche de la session a été annulée ;
 - **epoch périmé** : le fichier de bail porte un autre epoch que celui que la
   session tient, ou plus de titulaire ;
 - **``--no-verify``** : tant que la session tient un bail, elle ne contourne
   pas le ``pre-push`` du worktree (:mod:`grimoire.missions.prepush_fence`) ;
-- **tâche garée** (``waiting``, KAN-FRICTIONS) : le bail est gardé pour la reprise mais ne se
-  renouvelle pas ; un outil qui dépasse le TTL est refusé, sauf la reprise et la lecture de
-  *cette* tâche (``grimoire task resume|show|attach|renew <id>``), sans quoi la session ne
-  pouvait plus reprendre sa propre tâche.
+- **tâche garée** (``waiting``, WAIT-SCOPE) : *pas* un refus. Le bail est gardé pour la reprise mais ne
+  se renouvelle pas ; la session est jugée comme une session sans tâche (voir ``lease_brake``), pour
+  qu'une attente ne gèle ni la session ni ses sous-agents.
 
 Le contrôle d'epoch lit le fichier de bail, jamais le journal : un ``stat`` et
 une lecture, et aucune dépendance à l'horloge. Le fichier absent renvoie au
@@ -66,40 +65,6 @@ _GRIMOIRE_TASK = re.compile(r"^\s*(?:\S*/)?grimoire\s+task\b")
 _SHELL_COMPOSITION = re.compile(r"[;&|<>`\r\n]|\$\(")
 #: ``2>&1`` : une redirection de descripteur, pas une écriture de fichier.
 _FD_DUP = re.compile(r"\d*>&\d")
-
-
-#: KAN-FRICTIONS : ce qu'une session garée lance encore pour SA tâche — reprendre ou lire, rien d'autre.
-_OWN_TASK_VERBS = frozenset({"resume", "show", "attach", "renew"})
-#: Les seules options admises, et la forme de leur valeur ; ``--project-root``/``--ledger-root`` viseraient un autre ledger.
-_OWN_TASK_OPTIONS = {"--epoch": re.compile(r"\d{1,9}"), "--actor": re.compile(r"[\w.@:-]{1,80}"), "--session-id": re.compile(r"[\w.:-]{1,120}")}
-#: Une commande d'un seul tenant : mots séparés d'espaces, sans guillemet, ``$``, accent grave, saut de ligne ni opérateur.
-_PLAIN_COMMAND = re.compile(r"[\w./:=@+ -]+")
-
-
-def _own_task_command(command: str, task_id: str) -> bool:
-    """``True`` pour ``grimoire task resume|show|attach|renew <task_id>`` et ses seules options sûres.
-
-    Fail-closed : une forme que ce parseur ne reconnaît pas en entier (guillemets, substitution,
-    autre tâche, option inconnue, argument en trop, option globale avant ``task``) n'est pas exemptée.
-    """
-    if not _PLAIN_COMMAND.fullmatch(command.strip()):
-        return False
-    words = command.split()
-    if len(words) < 4 or words[0].rsplit("/", 1)[-1] != "grimoire" or words[1] != "task":
-        return False
-    if words[2] not in _OWN_TASK_VERBS or words[3] != task_id:
-        return False
-    rest = iter(words[4:])
-    for word in rest:
-        name, eq, value = word.partition("=")
-        pattern = _OWN_TASK_OPTIONS.get(name)
-        if pattern is None:
-            return False
-        if not eq:
-            value = next(rest, "")
-        if not pattern.fullmatch(value):
-            return False
-    return True
 
 
 def _simple_grimoire_task(command: str) -> bool:
@@ -263,36 +228,6 @@ def _deny(hook: HookInput, task_id: str, epoch: int, what: str, detail_kind: str
     )
 
 
-def _parked(hook: HookInput, facts: ToolFacts, task_id: str, epoch: int, cached: LeaseFile) -> Decision | None:
-    """La tâche de la session est garée (``waiting``) : son bail est gardé, mais ne se renouvelle pas.
-
-    Avant (KAN-FRICTIONS), le frein demandait au ledger de repousser le bail d'un outil qui dépassait
-    le TTL ; le ledger refusait (« tâche waiting, aucun bail ») et toute commande Bash de la session
-    l'était, ``grimoire task resume`` compris : seule une personne dans un terminal pouvait reprendre.
-    Désormais rien n'est renouvelé pendant l'attente ; un outil qui tient dans le bail passe comme
-    avant, et au-delà seules la reprise et la lecture de cette tâche passent.
-    """
-    timeout_ms = _declared_timeout_ms(hook, facts)
-    if timeout_ms <= 0:
-        return None
-    lost_at = cached.lost_at()
-    if lost_at is not None and datetime.now(UTC) + timedelta(milliseconds=timeout_ms) <= lost_at:
-        return None
-    if facts.command and _own_task_command(facts.command, task_id):
-        return None
-    resume = f"grimoire task resume {task_id} --epoch {epoch}"
-    return Decision(
-        outcome=Outcome.DENY,
-        reason=(
-            f"[Grimoire lease] {hook.tool_name or 'action'} refusé — la tâche {task_id} est garée (waiting) "
-            "et son bail ne se renouvelle pas tant qu'elle l'est. Reprends-la d'abord : "
-            f"`{resume}` (seules la reprise et la lecture de cette tâche passent : "
-            f"`grimoire task resume|show|attach|renew {task_id}`, sans enchaînement)."
-        ),
-        detail={"tool": hook.tool_name, "lease_brake": "parked", "task_id": task_id, "lease_epoch": epoch},
-    )
-
-
 def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
     """Le refus du bail pour cet appel d'outil, ou ``None`` : la session tient son bail (ou n'en tient aucun).
 
@@ -319,7 +254,18 @@ def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
             return _deny(hook, task_id, epoch, f"{bypass} alors que la session tient le bail de {task_id}", "no_verify")
         cached = read_lease(lease_path(root, task_id))
         if cached is not None and cached.waiting:
-            return _parked(hook, facts, task_id, epoch, cached)
+            # WAIT-SCOPE : tâche garée (ci, quota, paused, question humaine) — le frein se tait. Une
+            # attente porte sur *sa* tâche, jamais sur la session. Avant, passé le TTL du bail (qui ne se
+            # renouvelle pas en ``waiting``), toute commande Bash était refusée sauf la reprise de cette
+            # tâche ; or une question humaine ne se lève que par l'humain, la reprise est refusée à juste
+            # titre, et la session ne pouvait plus rattacher une autre tâche, lancer le cockpit pour que
+            # l'humain réponde, ni laisser travailler ses sous-agents (même journal de session).
+            # Le bail gardé n'ouvre plus aucun droit d'écriture : ``held_task_id`` et ``resolve_active_task``
+            # ne nomment pas une tâche garée, le moteur de règles juge la session comme une session
+            # *sans tâche* (consignes du repli normal : prendre ou rattacher une tâche). Reste protégé :
+            # aucune écriture au nom de la tâche garée, et la question humaine n'est levée que par
+            # l'humain (``ledger_rules``, inchangé).
+            return None
         refused = _mark_busy(root, task_id, epoch, cached, _declared_timeout_ms(hook, facts))
         if refused:
             return _deny(hook, task_id, epoch, refused, "stale_epoch")
