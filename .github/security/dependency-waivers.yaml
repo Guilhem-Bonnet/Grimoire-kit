@@ -68,3 +68,539 @@ waivers:
       - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/20"
       - "https://api.osv.dev/v1/vulns/CVE-2026-45833"
       - "https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/174"
+# DEPAUDIT-2026-005 a -039 (pillow 12.3.0) : 35 avis publies entre le 2026-10-16
+# et le 2026-10-22, tous corriges dans pillow 13.0.0 (PyPI, 2026-10-16). Le kit
+# ne peut pas monter : pillow n'est pas une dependance directe, il est tire par
+# fastembed (extras qdrant/weaviate, donc [all] et [dev]) qui plafonne
+# pillow<13.0 dans toutes ses versions, 0.9.0 comprise (qdrant/fastembed#829,
+# PR #830 ouverte). Exposition : grimoire-kit n'importe jamais PIL (grep src,
+# tests, scripts : 0 occurrence) et n'utilise fastembed que pour des embeddings
+# de texte ; les decodeurs d'images vises (GIF, TIFF, PDF, BMP, PNG, APNG, MSP,
+# XBM, SPIDER, EMF/WMF, JPEG, openjp2) ne sont jamais appeles. Bornes au
+# 2026-12-31 : a lever des que fastembed publie une version acceptant pillow 13
+# (alors plancher pillow>=13.0.0 dans les extras, comme pour torch en 2026-07).
+  - waiver_id: "DEPAUDIT-2026-005"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112390"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112390"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-006"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112391"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112391"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-007"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112392"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112392"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-008"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112393"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112393"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-009"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112395"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112395"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-010"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112396"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112396"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-011"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112397"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112397"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-012"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112399"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112399"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-013"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112400"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112400"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-014"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112401"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112401"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-015"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112402"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112402"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-016"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112404"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112404"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-017"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112405"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112405"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-018"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112406"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112406"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-019"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112891"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112891"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-020"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112892"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112892"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-021"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112893"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112893"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-022"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112894"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112894"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-023"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112895"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112895"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-024"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112896"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112896"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-025"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112897"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112897"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-026"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112899"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112899"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-027"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112900"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112900"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-028"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-112901"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-112901"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-029"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96636"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96636"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-030"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96637"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96637"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-031"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96638"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96638"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-032"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96639"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96639"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-033"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96640"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96640"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-034"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96641"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96641"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-035"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96642"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96642"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-036"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96643"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96643"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-037"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96644"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96644"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-038"
+    check_id: "pip-audit"
+    vulnerability_id: "CVE-2026-96778"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/CVE-2026-96778"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
+  - waiver_id: "DEPAUDIT-2026-039"
+    check_id: "pip-audit"
+    vulnerability_id: "GHSA-78g4-xqwv-q3g8"
+    package: "pillow"
+    reason: >-
+      Defaut d'un decodeur ou encodeur d'images de pillow 12.3.0, corrige en
+      13.0.0. grimoire-kit n'importe pas PIL ; pillow n'arrive que par
+      fastembed (embeddings de texte seulement), qui plafonne pillow<13.0
+      (qdrant/fastembed#829). Aucun chemin du kit n'ouvre ni n'ecrit d'image.
+    approved_by: "Guilhem-Bonnet"
+    expires_at: "2026-12-31"
+    evidence_refs:
+      - "https://api.osv.dev/v1/vulns/GHSA-78g4-xqwv-q3g8"
+      - "https://github.com/qdrant/fastembed/issues/829"
+      - "https://github.com/qdrant/fastembed/pull/830"
