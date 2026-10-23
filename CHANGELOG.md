@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(doctor): un serveur MCP distant en https sans port explicite n'est plus un FAIL « has no port ». Constat sur la Forge après passage en 3.65.0 : `context7` (`https://mcp.context7.com/mcp`) et `github` (`https://api.githubcopilot.com/mcp/`) sortaient en échec, avec une remédiation `grimoire mcp register` hors sujet pour un serveur tiers.
+  - Changement : `cli/doctor_mcp.py` — sans port dans l'URL, le port est celui du schéma (80 pour http, 443 pour https) ; seule une URL inutilisable (port illisible, schéma autre que http(s), hôte absent) reste un FAIL, nommé « invalid url » ; un serveur injoignable reste un WARN, avec la remédiation `grimoire mcp` seulement pour un hôte local.
+  - Rouge-avant / vert-après : `tests/unit/tools/test_mcp_processes.py` (2 cas rouges sur origin/main, 43 verts avec `test_cmd_mcp.py` et `test_hosts_opencode.py`).
+
 ## [3.65.0] - 2026-10-23
 
 - feat(workspace): composants partagés des espaces du cockpit, direction Douce (P21). Le badge, la tuile KPI, le tableau, l'état vide et l'en-tête d'espace n'ont plus qu'une implémentation chacun, dans `web/workspace/shell.css` (`.badge`, `.kpi`, `.tbl`, `.empty`, `.space-head`) et `shell.js` (`badge()`, `kpiRow()`, `spaceHead()`) ; les copies préfixées de Piloter, Exécuter, Observer, Mémoire et Concevoir sont retirées.
