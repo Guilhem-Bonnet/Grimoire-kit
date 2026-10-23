@@ -1062,6 +1062,8 @@ def build_context_bundle(
             "title": task.get("title", "Undeclared task"),
             "status": task.get("status", "proposed"),
             "acceptance_criteria": task.get("acceptance_criteria", []),
+            # #714 : le brief de la tâche suit le bundle, pas seulement son titre.
+            "description": str(task.get("description") or ""),
         },
         "selected_sources": [
             {"source": "mission_brief", "path": (STANDARD_DIR / "mission-brief.md").as_posix()},

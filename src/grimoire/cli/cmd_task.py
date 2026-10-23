@@ -218,6 +218,14 @@ def task_add(
             help="Profondeur de test exigée à la fermeture : floor, standard, strict, ou auto (celle de `ceremony suggest`).",
         ),
     ] = "",
+    description: Annotated[
+        str,
+        typer.Option("--description", "-d", help="Contexte, pourquoi, pistes : ce que l'agent qui réclame la tâche doit savoir au-delà du titre (#714)."),
+    ] = "",
+    description_file: Annotated[
+        Path | None,
+        typer.Option("--description-file", help="Même chose, lue depuis un fichier texte (brief long)."),
+    ] = None,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -233,6 +241,15 @@ def task_add(
     from grimoire.missions.schemas import TaskCheck
     from grimoire.missions.service import TaskRefusedError
 
+    if description and description_file is not None:
+        console.print("[red]✗[/red] --description et --description-file sont exclusifs")
+        raise typer.Exit(2)
+    if description_file is not None:
+        try:
+            description = description_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            console.print(f"[red]✗[/red] --description-file illisible : {exc}")
+            raise typer.Exit(2) from exc
     service = _service(project_root, ledger_root)
     checks = tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip())
     if test_depth == "auto":
@@ -244,6 +261,7 @@ def task_add(
             checks=tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip()),
             files=tuple(files or ()),
             test_depth=test_depth,
+            description=description,
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
@@ -373,6 +391,11 @@ def task_show(
         return
     console.print(f"[bold]{task.id}[/bold] — {task.title}")
     console.print(f"  état    : {task.status_label} (board : {board_status_of(task.status)})")
+    if task.description:
+        first, *rest = task.description.splitlines()
+        console.print(f"  description : {escape(first)}")
+        for line in rest:
+            console.print(f"                {escape(line)}")
     console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
     console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")

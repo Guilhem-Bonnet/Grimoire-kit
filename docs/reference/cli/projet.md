@@ -281,9 +281,9 @@ automatiquement ; l'appel manuel sert après l'ajout ou la modification d'une
 persona.
 
 `host list` remonte aussi ce qu'un hôte ne sait pas exécuter, avec le substitut
-retenu — dont l'ouverture d'une session dans un agent, qu'aucun hôte ne sait
-faire : la persona d'entrée est alors remise à la boucle principale par le hook
-`session_start`. Voir [Persona d'entrée](../hotes.md#persona-dentree).
+retenu — dont l'ouverture d'une session dans un agent, que seul Claude Code sait
+faire (`claude --agent <nom>`) : ailleurs la persona d'entrée est remise à la
+boucle principale par le hook `session_start`. Voir [Persona d'entrée](../hotes.md#persona-dentree).
 
 ## Cadrage produit
 

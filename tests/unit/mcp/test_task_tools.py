@@ -415,3 +415,28 @@ def test_task_update_prioritise_commente_accuse_et_annule_avec_raison(projet: Pa
     annule = _json(task_update(tid, "cancel", reason="chantier abandonné", actor="guilhem", force=True, project_path=str(projet)))
     assert annule["transition"] == "claimed → cancelled"
     assert board_status(projet, tid) == "archived"
+
+
+# ── #714 : `task_add(description=…)` la conserve, `task_show` et `task_context` la rendent ──
+
+
+def test_task_add_mcp_conserve_la_description(projet: Path) -> None:
+    async def scenario(session: ClientSession) -> None:
+        added = await call(
+            session, "task_add", title="Brancher le cache", acceptance=[ACCEPTATION], owner="amelia",
+            description="Le cache tombe sous charge : voir issue #12", project_path=str(projet),
+        )
+        assert added["description"] == "Le cache tombe sous charge : voir issue #12"
+        vue = await call(session, "task_show", task_id=added["id"], project_path=str(projet))
+        assert vue["description"] == "Le cache tombe sous charge : voir issue #12"
+        ctx = await call(session, "task_context", task_id=added["id"], project_path=str(projet))
+        assert ctx["task"]["description"] == "Le cache tombe sous charge : voir issue #12"
+        assert ctx["context_bundle"]["task_summary"]["description"] == "Le cache tombe sous charge : voir issue #12"
+
+        sans = await call(session, "task_add", title="Sans brief", acceptance=[ACCEPTATION], project_path=str(projet))
+        assert sans["description"] == ""
+
+        trop = await call(session, "task_add", title="Trop", acceptance=[ACCEPTATION], description="x" * 4001, project_path=str(projet))
+        assert "description trop longue" in json.dumps(trop)
+
+    via_client(scenario)

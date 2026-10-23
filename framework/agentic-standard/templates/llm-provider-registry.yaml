@@ -10,7 +10,8 @@ metadata:
 #   currency    : "quota" (consommé sur un abonnement/CLI) | "api" (facturé à
 #                 l'appel) | "local" (calcul local, pas de facturation).
 #   invocation  : commande headless pour appeler ce fournisseur hors chat,
-#                 avec {prompt} et {model} comme gabarits littéraux.
+#                 avec {prompt} et {model} comme gabarits littéraux ; {prompt}
+#                 est obligatoire (providers.invocation_prompt_missing).
 #   models      : liste de {id, tier}, tier ∈ "cheap" | "mid" | "strong" — la
 #                 base sur laquelle `grimoire providers status`/`choose()`
 #                 route par palier de coût plutôt que par nom de modèle.
@@ -57,12 +58,15 @@ providers:
     default_models: []
     # currency: "quota"  # abonnement Claude, appelé en CLI headless
     # invocation: "claude -p {prompt} --model {model}"
+    # Les alias de la CLI (haiku / sonnet / opus) suivent la dernière version
+    # de chaque famille ; un id versionné casse à la première dépréciation
+    # (issue #700).
     # models:
-    #   - id: "claude-haiku-4.5"
+    #   - id: "haiku"
     #     tier: "cheap"
-    #   - id: "claude-sonnet-4.6"
+    #   - id: "sonnet"
     #     tier: "mid"
-    #   - id: "claude-opus-4.7"
+    #   - id: "opus"
     #     tier: "strong"
     data_policy:
       allowed_data_classes: []
@@ -100,7 +104,9 @@ providers:
     allowed_capabilities: ["chat", "code", "embeddings"]
     default_models: []
     # currency: "local"  # calcul local (Ollama), pas de facturation externe
-    # invocation: "ollama run {model}"
+    # {prompt} est obligatoire : sans lui, `ollama run {model}` n'a jamais reçu
+    # le prompt et ouvrait une session interactive (issue #700).
+    # invocation: "ollama run {model} {prompt}"
     # models:
     #   - id: "qwen3-coder"
     #     tier: "mid"

@@ -127,3 +127,56 @@ def default_output_path(root: Path) -> Path:
     return (
         root / "_grimoire-runtime-output" / "repo-contexts" / f"{root.name}.context-pack.json"
     )
+
+
+GITIGNORE_MARKER = "# --- Grimoire context-pack ---"
+
+
+def ensure_output_ignored(root: Path, out_path: Path) -> Path | None:
+    """Make sure *out_path* is ignored by the git repository at *root* (issue #701).
+
+    The default output lives *inside* the targeted repository
+    (``<repo>/_grimoire-runtime-output/repo-contexts/``), so a plain
+    ``git add .`` used to embark a generated, potentially large and
+    sensitive, summary of the repo. When *root* is a git checkout and git
+    does not already ignore *out_path*, the directory holding it is
+    appended to ``<root>/.gitignore`` under a marker. Returns the
+    ``.gitignore`` written, or ``None`` when nothing had to change (not a
+    git repo, output outside the repo, already ignored, or unwritable —
+    best-effort, never raises).
+    """
+    if not (root / ".git").exists():
+        return None
+    try:
+        rel_dir = out_path.resolve().parent.relative_to(root.resolve())
+    except ValueError:
+        return None
+    if not rel_dir.parts:
+        return None
+    try:
+        probe = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "-q", "--", str(out_path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        probe = None
+    if probe is not None and probe.returncode == 0:
+        return None
+    pattern = f"{rel_dir.as_posix()}/"
+    gitignore = root / ".gitignore"
+    try:
+        existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    except OSError:
+        return None
+    if pattern in {line.strip() for line in existing.splitlines()}:
+        return None
+    block = f"{GITIGNORE_MARKER}\n# Context-pack généré par `grimoire context-pack` — jamais à commiter\n{pattern}\n"
+    content = existing.rstrip() + "\n\n" + block if existing.strip() else block
+    try:
+        gitignore.write_text(content, encoding="utf-8")
+    except OSError:
+        return None
+    return gitignore
