@@ -15,7 +15,6 @@ from pathlib import Path
 from grimoire.cli.env_checks import EnvCheck
 from grimoire.hosts.hook_launcher import hook_program_resolves
 
-
 _HOOK_PROGRAMS = frozenset({"grimoire-hook", "grimoire-hook.exe"})
 
 
