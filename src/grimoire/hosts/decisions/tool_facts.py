@@ -101,6 +101,11 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
         "which", "type", "date", "ps", "df", "du", "tree", "od", "hexdump", "xxd",
         "sha256sum", "sha1sum", "md5sum", "echo", "printf", "true", "false",
         "basename", "dirname", "readlink", "realpath", "nproc", "uptime", "id", "uname",
+        # Issue #875 : se déplacer et filtrer un flux ne modifient rien ; les
+        # formes qui écrivent (``sort -o``, ``uniq in out``, ``sed -i``,
+        # ``awk -i``) sont écartées dans :func:`_is_read_only_segment`.
+        "cd", "pushd", "popd", "sort", "uniq", "cut", "tr", "jq", "column", "nl", "comm", "paste",
+        "sed", "awk", "gawk", "mawk",
     }
 )
 
@@ -110,7 +115,10 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
 #: would be the exact defect this classifier exists to fix, just moved one
 #: layer down. Only genuinely read-only-in-every-form subcommands qualify.
 _READ_ONLY_GIT_SUBCOMMANDS = frozenset(
-    {"status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog"}
+    {
+        "status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog",
+        "grep", "cat-file", "ls-tree",  # issue #875
+    }
 )
 
 #: ``find`` primaries that act instead of just reporting (issue #643): a bare
@@ -135,22 +143,83 @@ _LEADING_NEUTRAL_WORDS = frozenset({"sudo", "command", "time", "nice", "ionice",
 _WRITE_REDIRECTION_RE = re.compile(r">>?(?!=)|\btee\b")
 
 
+#: Mots-clés de structure du shell (issue #875) : ils précèdent une commande
+#: (``do cat f``, ``while read l``) ou la ferment (``done``) ; seule la commande
+#: qu'ils portent compte.
+_SHELL_LEADING_KEYWORDS = frozenset({"do", "then", "else", "elif", "while", "until", "if", "!"})
+_SHELL_CLOSING_KEYWORDS = frozenset({"done", "fi", "esac"})
+_SUBSTITUTION_RE = re.compile(r"\$\(|`")
+
+#: Un script ``sed`` qui écrit ou exécute malgré l'absence de ``-i`` : drapeau
+#: ``w``/``e`` de ``s///`` ou commande ``w fichier``. Lu sur la commande brute,
+#: car les scripts quotés sont effacés de la surface — un faux positif (motif
+#: ``/w x/``) coûte une mutation de trop, jamais une lecture manquée.
+_SED_WRITING_SCRIPT_RE = re.compile(r"/[0-9gIiMmp]*[we](?=[\s'\"};]|$)|(?:^|[\s;{'\"])w\s+\S")
+#: Un programme ``awk`` qui écrit, redirige vers une commande ou en lance une.
+_AWK_WRITING_RE = re.compile(r">|\bsystem\s*\(|\|\s*[\"']|\bgetline\b.*<")
+
+
+def _git_subcommand(words: list[str]) -> tuple[str, list[str]]:
+    """Sous-commande git et ses arguments, après ``-C <dir>`` / ``--no-pager``."""
+    i = 0
+    while i < len(words) and (words[i] in {"--no-pager", "-P", "--paginate"} or words[i] == "-C"):
+        i += 2 if words[i] == "-C" else 1
+    return (words[i], words[i + 1 :]) if i < len(words) else ("", [])
+
+
+def _is_read_only_git(words: list[str]) -> bool:
+    sub, args = _git_subcommand(words)
+    if sub == "grep":
+        return not any(a.startswith(("-O", "--open-files")) for a in args)
+    if sub == "remote":
+        return not args or args[0] in {"-v", "--verbose", "get-url"}
+    if sub == "branch":
+        return all(a in {"--show-current", "-a", "-r", "-v", "-vv", "--list", "--all", "--remotes"} for a in args)
+    return sub in _READ_ONLY_GIT_SUBCOMMANDS
+
+
 def _is_read_only_segment(segment: str) -> bool:
     words = segment.split()
     idx = 0
-    while idx < len(words) and (_ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _LEADING_NEUTRAL_WORDS):
+    while idx < len(words) and (
+        _ENV_ASSIGNMENT_RE.match(words[idx])
+        or words[idx] in _LEADING_NEUTRAL_WORDS
+        or words[idx] in _SHELL_LEADING_KEYWORDS
+    ):
+        if words[idx] == "command" and idx + 1 < len(words) and words[idx + 1] in {"-v", "-V"}:
+            return True  # ``command -v gh`` : une recherche, jamais une exécution
         idx += 1
     if idx >= len(words):
         return True  # nothing left but assignments/neutral words: nothing to mutate
     verb = words[idx]
+    args = words[idx + 1 :]
+    if verb in _SHELL_CLOSING_KEYWORDS:
+        return True
+    if verb == "for":
+        return not _SUBSTITUTION_RE.search(segment)  # ``for x in a b`` n'exécute que son corps
     if verb == "git":
-        sub = words[idx + 1] if idx + 1 < len(words) else ""
-        return sub in _READ_ONLY_GIT_SUBCOMMANDS
+        return _is_read_only_git(args)
     if verb == "gh":
         tail = words[idx + 1 : idx + 3]
         return any(word in _READ_ONLY_GH_VERBS for word in tail)
     if verb == "find":
-        return not any(word in _FIND_MUTATING_PRIMARIES for word in words[idx + 1 :])
+        return not any(word in _FIND_MUTATING_PRIMARIES for word in args)
+    if verb == "sed":
+        return not any(
+            word.startswith("--in-place") or (word.startswith("-") and not word.startswith("--") and "i" in word)
+            for word in args
+        )
+    if verb in {"awk", "gawk", "mawk"}:
+        return not any(word.startswith(("-i", "--in-place")) for word in args)
+    if verb == "sort":
+        return not any(
+            word == "--output"
+            or word.startswith("--output=")
+            or (word.startswith("-") and not word.startswith("--") and "o" in word)
+            for word in args
+        )
+    if verb == "uniq":
+        return len([word for word in args if not word.startswith("-")]) < 2  # ``uniq in out`` écrit ``out``
     return verb in _READ_ONLY_LEADING_COMMANDS
 
 
@@ -180,7 +249,11 @@ def is_read_only_command(command: str) -> bool:
     surface = command_surface(command)
     if _WRITE_REDIRECTION_RE.search(surface):
         return False
-    segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\|", surface)]
+    if re.search(r"\bsed\b", surface) and _SED_WRITING_SCRIPT_RE.search(command):
+        return False
+    if re.search(r"\b[gm]?awk\b", surface) and _AWK_WRITING_RE.search(command):
+        return False
+    segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\||\n", surface)]
     segments = [seg for seg in segments if seg]
     return bool(segments) and all(_is_read_only_segment(seg) for seg in segments)
 
