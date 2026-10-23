@@ -195,6 +195,7 @@ nav:
           - standard/index.md
           - Le refus de preuve, ligne par ligne: explications/le-refus-de-preuve.md
       - Les limites: explications/les-limites.md
+      - Comparaison avec AWS AI-DLC: explications/comparaison-ai-dlc.md
       - Concepts: explications/concepts.md
       - Les flows:
           - nodal/index.md

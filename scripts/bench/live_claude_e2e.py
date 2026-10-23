@@ -141,6 +141,7 @@ def clean_env(
         "GRIMOIRE_NO_COCKPIT": "1",
         "DISABLE_AUTOUPDATER": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "ENABLE_CLAUDEAI_MCP_SERVERS": "false",  # B-08 (§17.8) : --strict-mcp-config ne dit rien des connecteurs claude.ai
     }
     if unattended:
         env["GRIMOIRE_UNATTENDED"] = "1"

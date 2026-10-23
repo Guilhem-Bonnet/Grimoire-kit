@@ -39,3 +39,11 @@ def self_update_command(
         online=online, console=cli.console, channel=channel, check=check,
         offline=offline, source=source, as_json=json_output,
     )
+
+
+def register_self_update_commands(self_app: typer.Typer) -> None:
+    """Branche ``self update`` et ``self bundle`` (sa moitié « construire ») sur le groupe ``self``."""
+    from grimoire.cli.cmd_self_bundle import self_bundle_command
+
+    self_app.command("update")(self_update_command)
+    self_app.command("bundle")(self_bundle_command)
