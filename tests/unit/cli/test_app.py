@@ -150,9 +150,13 @@ class TestInit:
     # ── Archetype option ──
 
     def test_init_default_archetype(self, tmp_path: Path) -> None:
+        """Decision 2026-09-18 (Guilhem, corrected same day): an empty/
+        undetected project never gets `minimal` automatically — `stack`
+        (Atlas, the kit's generalist for any stack without an asserted
+        domain) is applied, flagged as a best guess."""
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
-        assert 'archetype: "minimal"' in content
+        assert 'archetype: "stack"' in content
 
     def test_init_web_app_archetype(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--archetype", "web-app"])
@@ -175,10 +179,32 @@ class TestInit:
 
     def test_init_default_backend(self, tmp_path: Path) -> None:
         """Issue #496 : sans --backend explicite, jamais d'attachement silencieux
-        à un service détecté sur la machine — toujours `lexical`, isolé."""
+        à un service détecté sur la machine — toujours privé, isolé.
+
+        2026-09-18 (PR2) : le défaut express est désormais `qdrant-local`
+        (embarqué, sans service) quand un moteur d'embedding local est
+        installé — jamais `weaviate`/`qdrant-server`, jamais un service
+        détecté sur la machine.
+        """
         runner.invoke(app, ["init", str(tmp_path)])
         content = (tmp_path / "project-context.yaml").read_text(encoding="utf-8")
-        assert 'backend: "lexical"' in content
+        assert 'backend: "qdrant-local"' in content
+        assert "weaviate" not in content.lower()
+        assert "qdrant_url" not in content
+
+    def test_init_lite_flag_is_deprecated_and_behaves_like_the_default(self, tmp_path: Path) -> None:
+        """`--lite` no longer sets anything special — same output as no flag,
+        plus a deprecation notice (2026-09-18 onboarding decision, PR2)."""
+        plain = tmp_path / "plain"
+        lite = tmp_path / "lite"
+        runner.invoke(app, ["init", str(plain)])
+        result = runner.invoke(app, ["init", str(lite), "--lite"])
+        assert result.exit_code == 0, result.output
+        assert "deprecated" in result.output.lower()
+        plain_content = (plain / "project-context.yaml").read_text(encoding="utf-8")
+        lite_content = (lite / "project-context.yaml").read_text(encoding="utf-8")
+        assert ('backend: "qdrant-local"' in plain_content) == ('backend: "qdrant-local"' in lite_content)
+        assert ('backend: "lexical"' in plain_content) == ('backend: "lexical"' in lite_content)
 
     def test_init_local_backend(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["init", str(tmp_path), "--backend", "local"])
@@ -311,13 +337,20 @@ class TestStatus:
         assert "my-app" in result.output
 
     def test_status_shows_archetype(self, project: Path) -> None:
+        """Decision 2026-09-18 (corrected same day): an empty project's
+        auto-detected archetype is `stack`, never minimal (see
+        TestInit.test_init_default_archetype)."""
         result = runner.invoke(app, ["status", str(project)])
-        assert "minimal" in result.output
+        assert "Archetype: stack" in result.output
 
     def test_status_shows_memory(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
-        # backend "auto" resolves to the isolated `lexical` default (#496)
-        assert "lexical" in result.output
+        # backend "auto" resolves to a private, consent-free default (#496) —
+        # `qdrant-local` (embedded) with a local embedding engine installed,
+        # `lexical` otherwise; either way `status` names the real backend.
+        content = (project / "project-context.yaml").read_text(encoding="utf-8")
+        assert 'backend: "qdrant-local"' in content or 'backend: "lexical"' in content
+        assert ("qdrant-local" in result.output) or ("lexical" in result.output)
 
     def test_status_shows_structure(self, project: Path) -> None:
         result = runner.invoke(app, ["status", str(project)])
@@ -1861,9 +1894,14 @@ class TestInitJson:
         data = json.loads(result.output)
         assert data["ok"] is True
         assert data["project"] == "j-proj"
-        assert data["archetype"] == "minimal"
-        # backend "auto" resolves to the isolated `lexical` default (#496)
-        assert data["backend"] == "lexical"
+        # Decision 2026-09-18 (corrected same day): an empty project's
+        # auto-detected archetype is `stack`, never minimal.
+        assert data["archetype"] == "stack"
+        # backend "auto" resolves to a private, consent-free default (#496,
+        # PR2 2026-09-18): `qdrant-local` (embedded) with a local embedding
+        # engine installed.
+        assert data["backend"] == "qdrant-local"
+        assert data["memory_profile"]["served"] == "standard"
         assert "dirs_created" in data
 
     def test_init_json_already_exists(self, tmp_path: Path) -> None:
@@ -4163,3 +4201,85 @@ class TestR37EnvConflicts:
         assert result.exit_code == 0
         # Conflict warning should appear in text output
         assert "conflict" in result.output.lower() or "[!]" in result.output
+
+
+# ── Discover footer (onboarding audit 2026-09-18, level 1, row 4) ──────────────
+
+class TestDiscoverFooter:
+    """`grimoire doctor`/`status` name at least one unexploited capability
+    with its access command — silent once everything is already exploited."""
+
+    @pytest.fixture()
+    def fresh_project(self, tmp_path: Path) -> Path:
+        runner.invoke(app, ["-y", "init", str(tmp_path), "--no-cockpit"])
+        return tmp_path
+
+    def test_doctor_names_a_discovery_command_on_fresh_project(self, fresh_project: Path) -> None:
+        result = runner.invoke(app, ["doctor", str(fresh_project)])
+        assert result.exit_code == 0, result.output
+        assert "Discover" in result.output
+        assert "grimoire" in result.output.split("Discover")[1]
+
+    def test_status_names_a_discovery_command_on_fresh_project(self, fresh_project: Path) -> None:
+        result = runner.invoke(app, ["status", str(fresh_project)])
+        assert result.exit_code == 0, result.output
+        assert "Discover" in result.output
+
+    def test_doctor_footer_silent_when_everything_exploited(self, fresh_project: Path) -> None:
+        with patch(
+            "grimoire.core.project_capabilities.unexploited_hints",
+            return_value=[],
+        ):
+            result = runner.invoke(app, ["doctor", str(fresh_project)])
+        assert "Discover" not in result.output
+
+    def test_status_footer_silent_when_everything_exploited(self, fresh_project: Path) -> None:
+        with patch(
+            "grimoire.core.project_capabilities.unexploited_hints",
+            return_value=[],
+        ):
+            result = runner.invoke(app, ["status", str(fresh_project)])
+        assert "Discover" not in result.output
+
+    def test_doctor_json_has_no_footer_text(self, fresh_project: Path) -> None:
+        result = runner.invoke(app, ["doctor", "-o", "json", str(fresh_project)])
+        assert "Discover" not in result.output
+
+    def test_doctor_never_suggests_cockpit_when_env_opts_out(self, fresh_project: Path) -> None:
+        """Copilot review on PR #617: the footer must honour GRIMOIRE_NO_COCKPIT
+        like ``--no-cockpit`` — never suggest ``grimoire cockpit`` when the
+        opt-out is active for this invocation, even on an unregistered project
+        (which would otherwise always earn the cockpit hint)."""
+        result = runner.invoke(
+            app, ["doctor", str(fresh_project)], env={"GRIMOIRE_NO_COCKPIT": "1"}
+        )
+        assert result.exit_code == 0, result.output
+        assert "grimoire cockpit" not in result.output
+
+    def test_status_never_suggests_cockpit_when_env_opts_out(self, fresh_project: Path) -> None:
+        """Same as above for `grimoire status` (Copilot review on PR #617)."""
+        result = runner.invoke(
+            app, ["status", str(fresh_project)], env={"GRIMOIRE_NO_COCKPIT": "1"}
+        )
+        assert result.exit_code == 0, result.output
+        assert "grimoire cockpit" not in result.output
+
+
+class TestDoctorMemoryStackNotStarted:
+    """2026-09-18 arbitrage (#619) : une pile configurée mais jamais démarrée est un WARN nommé, jamais un FAIL."""
+
+    def test_doctor_warns_with_the_start_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        runner.invoke(app, ["-y", "init", str(tmp_path), "--no-cockpit"])
+        monkeypatch.setattr(
+            "grimoire.tools.memory_setup.unreached_configured_services", lambda *a, **k: ["weaviate", "neo4j"]
+        )
+        result = runner.invoke(app, ["doctor", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert "memory stack not started (weaviate, neo4j)" in result.output
+        assert "--start --apply" in result.output
+
+        as_json = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path)])
+        data = json.loads(as_json.output)
+        check = next(c for c in data["checks"] if c["name"] == "memory_stack_started")
+        assert check["passed"] is True
+        assert check["level"] == "warn"

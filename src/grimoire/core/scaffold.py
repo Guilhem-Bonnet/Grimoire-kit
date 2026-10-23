@@ -24,7 +24,9 @@ from grimoire.__version__ import __version__ as _grimoire_version
 from grimoire.archetypes import bundled_path as archetypes_path
 from grimoire.core import layout
 from grimoire.core.archetype_resolver import ResolvedArchetype
+from grimoire.core.expertises import _safe_skill_source
 from grimoire.core.scanner import ScanResult
+from grimoire.core.stack_skills import detected_stack_skill_slugs
 from grimoire.core.standard_generation import GITIGNORE_MARKER, GITIGNORE_SECTION
 from grimoire.data import framework_path
 from grimoire.hosts.detection import detect_enabled_hosts
@@ -60,6 +62,8 @@ def _render_placeholders(text: str, variables: dict[str, str]) -> str:
     """
     def _substitute(chunk: str) -> str:
         for key, value in variables.items():
+            if key == "stack_skills_yaml":  # a YAML list, not a string: drop its quotes too (#616)
+                chunk = chunk.replace('"{{' + key + '}}"', value)
             chunk = chunk.replace("{{" + key + "}}", value)
         return chunk
 
@@ -573,6 +577,10 @@ class ProjectScaffolder:
         "cicd": ("pipeline-architect", "deploy-orchestrator"),
     }
 
+    def _detected_stack_skill_slugs(self) -> tuple[str, ...]:
+        """Stack skills this project's detection warrants (see :mod:`grimoire.core.stack_skills`)."""
+        return detected_stack_skill_slugs(self._scan, self._agents_dir())
+
     def _archetype_render_vars(self, planned_agents: dict[str, str]) -> dict[str, str]:
         """Resolve the install-time placeholders for this project.
 
@@ -592,6 +600,7 @@ class ProjectScaffolder:
 
         stacks = [d.name for d in self._scan.stacks] if self._scan else []
         variables["tech_stack_list"] = ", ".join(stacks) if stacks else "stack non détectée"
+        variables["stack_skills_yaml"] = json.dumps(list(self._detected_stack_skill_slugs()))
         variables["user_name"] = self._user_name
         variables["project_name"] = self._project_name
         variables["init_date"] = date.today().isoformat()
@@ -845,10 +854,26 @@ class ProjectScaffolder:
             # as installable as the agents that reference them, and collected
             # from the same kit skills directory their `skills:` frontmatter
             # resolves against (grimoire.hosts.collect.collect_skills).
+            #
+            # `stack` is special-cased (issue #616): its seven skills used to
+            # copy in block regardless of what the project actually uses,
+            # which left the six not referenced by name in the agent's own
+            # `skills:` frontmatter transversal — loaded every turn of the
+            # session instead of costing nothing. Only the detected subset
+            # ships by default; the rest stays one `grimoire expertise add
+            # <id>` away (:mod:`grimoire.core.expertises`), its body read
+            # from the kit package rather than this project's own copy.
             skills_src = arch_dir / "skills"
             if skills_src.is_dir():
                 skills_dst = self._skills_dir()
-                for md in sorted(skills_src.glob("*.md")):
+                skill_files = (
+                    tuple(filter(None, (_safe_skill_source(skills_src, s) for s in self._detected_stack_skill_slugs())))
+                    if arch == "stack"
+                    else tuple(sorted(skills_src.glob("*.md")))
+                )
+                for md in skill_files:
+                    if not md.is_file():
+                        continue
                     dst = skills_dst / _strip_tpl_suffix(md.name)
                     if any(fc.dst == dst for fc in p.copies):
                         continue
@@ -929,15 +954,22 @@ class ProjectScaffolder:
                     label=f"stack/{agent_name}",
                 ))
                 planned = True
+        # Only the skills this project's own detection warrants (issue #616,
+        # see `_detected_stack_skill_slugs`) — not the whole directory: the
+        # ones it skips stay available on request via `grimoire expertise
+        # add <id>`, read from the kit package rather than this copy.
         skills_src = stack_dir / "skills"
         if planned and skills_src.is_dir():
             skills_dst = self._skills_dir()
-            for md in sorted(skills_src.glob("*.md")):
-                dst = skills_dst / _strip_tpl_suffix(md.name)
+            for slug in self._detected_stack_skill_slugs():
+                skill_src = _safe_skill_source(skills_src, slug)
+                if skill_src is None or not skill_src.is_file():
+                    continue
+                dst = skills_dst / _strip_tpl_suffix(skill_src.name)
                 if any(fc.dst == dst for fc in p.copies):
                     continue
                 p.copies.append(FileCopy(
-                    src=md,
+                    src=skill_src,
                     dst=dst,
                     label=f"stack/skills/{dst.stem}",
                 ))
