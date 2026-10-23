@@ -143,3 +143,19 @@ def test_un_pas_d_agent_devient_invoke_agent(tmp_path: Path) -> None:
     span = otel_spans(tmp_path)[0]
     assert span["attributes"]["gen_ai.operation.name"] == "invoke_agent"
     assert span["attributes"]["gen_ai.agent.name"] == "dev"
+
+
+def test_le_journal_du_ledger_est_un_flux_lu_mais_jamais_un_span(tmp_path: Path) -> None:
+    """P07 : Observer disait « Aucune trace » alors que le ledger portait des
+
+    milliers d'événements pour le projet. Le journal du Mission Ledger est un
+    flux de `read_events` ; ses types (`event_type`) ne deviennent pas des spans."""
+    path = tmp_path / "_grimoire-runtime-output" / "ledger" / "events.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({"event_type": "task.transitioned", "entity_id": "GAO-x-001"}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert read_events(tmp_path)["ledger"] == [{"event_type": "task.transitioned", "entity_id": "GAO-x-001"}]
+    assert otel_spans(tmp_path) == []

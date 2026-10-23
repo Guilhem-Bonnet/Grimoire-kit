@@ -18,6 +18,8 @@ seul ne peut pas prouver.
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -86,6 +88,107 @@ def test_confirmer_depuis_piloter_fait_apparaitre_une_proposition(
     assert "checkpoint destructif en attente" in workspace.locator("body").inner_text(), (
         "le badge Kit doit passer à un état explicite après un run arrêté au checkpoint"
     )
+
+
+def _flow_runs(page: Page, served: str, slug: str) -> dict:
+    response = page.request.get(f"{served}/api/workspace/flows/runs", params={"project": slug})
+    assert response.ok, response.status
+    return response.json()
+
+
+def _open_project_sheet(page: Page) -> None:
+    _goto(page, "piloter")
+    page.wait_for_selector("#zoom-seg button")
+    page.locator("#zoom-seg button", has_text="Projet").click()
+    page.locator("button", has_text="Mettre à jour — aperçu").wait_for(state="visible", timeout=15_000)
+
+
+def test_un_apercu_apres_un_checkpoint_pendant_garde_le_signal_et_ne_compte_aucun_run(
+    cockpit_upgrade_workspace: Page, served_cockpit_upgrade: tuple[str, str, Path]
+) -> None:
+    """P07 (revue UX B2) : après un run arrêté, non décidé, au checkpoint
+    `destructive` (test précédent, fixture de session partagée), un aperçu
+    créait un run ordinaire qui devenait « le dernier » — la pastille repassait
+    à « aligné » et « Revoir dans l'IDE » disparaissait au rechargement.
+    L'aperçu ne compte plus comme run, son message dit ce qu'il a écrit, et la
+    fiche rechargée signale toujours le checkpoint.
+    """
+    served, slug, root = served_cockpit_upgrade
+    before = _flow_runs(cockpit_upgrade_workspace, served, slug)
+    pending = [r for r in before["runs"] if r["status"] == "checkpointed" and r["currentNode"] == "destructive"]
+    assert pending, f"le test précédent doit avoir laissé un checkpoint pendant : {before}"
+
+    workspace = cockpit_upgrade_workspace
+    _open_project_sheet(workspace)
+    workspace.locator("button", has_text="Mettre à jour — aperçu").click()
+    preview = workspace.locator(".pl-preview")
+    preview.get_by_text("Aperçu : sauvegarde créée, aucun fichier du projet modifié.").wait_for(timeout=90_000)
+    assert "rien d'autre écrit" not in preview.inner_text()
+
+    after = _flow_runs(workspace, served, slug)
+    assert after["total"] == before["total"], "un aperçu n'est pas un run de flow compté"
+    assert [r["runId"] for r in after["runs"]] == [r["runId"] for r in before["runs"]]
+    previews = [
+        p for p in (root / "_grimoire-runtime-output" / "flows").glob("*.json")
+        if json.loads(p.read_text(encoding="utf-8")).get("preview") is True
+    ]
+    assert previews, "l'aperçu a bien tourné : son run marqué `preview` est sur disque"
+
+    workspace.reload(wait_until="domcontentloaded")
+    workspace.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    _open_project_sheet(workspace)
+    workspace.get_by_text("mis à niveau, checkpoint destructif en attente").wait_for(timeout=15_000)
+    assert workspace.locator("button", has_text="Revoir dans l'IDE").count() == 1
+
+    # Le KPI de la fiche et la liste d'Observer : une seule source.
+    kpi = workspace.locator(".kpi-item", has_text="runs de flow")
+    assert kpi.locator(".kpi-val").inner_text().strip() == str(after["total"])
+    _goto(workspace, "observer")
+    workspace.wait_for_selector(".ob-runs", timeout=15_000)
+    assert f"· {after['total']}" in workspace.locator(".ob-runs h4").inner_text()
+    assert "Aucune trace" not in workspace.locator("#canvas").inner_text()
+
+
+def test_un_run_plus_recent_non_checkpointe_ne_masque_pas_le_checkpoint_pendant(
+    cockpit_upgrade_workspace: Page, served_cockpit_upgrade: tuple[str, str, Path]
+) -> None:
+    """P07 : le checkpoint `destructive` pendant d'un run ancien reste signalé
+    quand un run plus récent n'est pas checkpointé (cas qui régressait quand la
+    fiche ne lisait que `upgradeRuns[0]`). Le run ancien est celui laissé par le
+    test de confirmation (fixture de session partagée) ; le run récent est une
+    métadonnée sans kernel (`status` nul), retirée en fin de test.
+    """
+    served, slug, root = served_cockpit_upgrade
+    before = _flow_runs(cockpit_upgrade_workspace, served, slug)
+    assert any(r["status"] == "checkpointed" and r["currentNode"] == "destructive" for r in before["runs"]), (
+        f"le test de confirmation doit avoir laissé un checkpoint pendant : {before}"
+    )
+
+    newer = root / "_grimoire-runtime-output" / "flows" / "WFI-project-upgrade-recent-sans-checkpoint.json"
+    newer.write_text(
+        json.dumps({
+            "schema_version": "grimoire.flow_run_meta.v1",
+            "run_id": "WFI-project-upgrade-recent-sans-checkpoint",
+            "blueprint_id": "project-upgrade",
+            "blueprint_path": "whatever.yaml",
+            "order": ["backup", "preview"],
+            "created_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+    try:
+        after = _flow_runs(cockpit_upgrade_workspace, served, slug)
+        assert after["runs"][0]["runId"] == "WFI-project-upgrade-recent-sans-checkpoint"
+        assert after["runs"][0]["status"] != "checkpointed"
+
+        workspace = cockpit_upgrade_workspace
+        workspace.reload(wait_until="domcontentloaded")
+        workspace.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        _open_project_sheet(workspace)
+        workspace.get_by_text("checkpoint destructif en attente").first.wait_for(timeout=15_000)
+        assert workspace.locator("button", has_text="Revoir dans l'IDE").count() == 1
+    finally:
+        newer.unlink(missing_ok=True)
 
 
 def test_observer_montre_le_run_de_flow_meme_traceledger_vide(

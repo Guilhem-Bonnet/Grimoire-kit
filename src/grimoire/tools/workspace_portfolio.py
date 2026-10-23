@@ -336,6 +336,25 @@ def _project_row(entry: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def block_reasons(ledger: Any) -> dict[str, str]:
+    """La raison écrite au dernier passage de chaque tâche en ``blocked`` (ou ``failed``).
+
+    Le motif d'un ``grimoire task block --reason`` vit dans l'événement
+    ``task.transitioned``, jamais sur la tâche : sans cette lecture, une carte
+    bloquée ne pouvait dire ni le mot ni la raison.
+    """
+    reasons: dict[str, str] = {}
+    for event in ledger.list_events():
+        if event.event_type != "task.transitioned":
+            continue
+        if event.payload.get("to_state") not in ("blocked", "failed"):
+            continue
+        reason = str(event.payload.get("reason") or "").strip()
+        if reason:
+            reasons[event.entity_id] = reason
+    return reasons
+
+
 def annotate_cards(
     project_root: Path,
     service: Any,
@@ -353,10 +372,13 @@ def annotate_cards(
     donc la même carte dit la même chose dans les deux. La sonde d'hôte n'est
     appelée qu'une fois par projet, et seulement si une tâche est tenue.
     """
+    from grimoire.missions.board import blockers_of
     from grimoire.missions.schemas import TaskState
 
     sessions = _sessions_index(project_root)
     costs = dispatch_costs(service.ledger)
+    reasons = block_reasons(service.ledger)
+    closed: frozenset[str] | None = None
     probed: Mapping[str, str] | None = None
     probe_done = False
     for task, card in zip(tasks, cards, strict=True):
@@ -374,6 +396,13 @@ def annotate_cards(
             claimed_at=claim_time(service.ledger, task.id) if held else None,
         )
         card["cost"] = cost_of(costs, task.id)
+        if card.get("board") == "blocked" and task.status is not TaskState.WAITING:
+            # Le motif écrit au blocage d'abord ; à défaut, celui que la
+            # projection du board pose (dépendance ouverte, échec, état inconnu).
+            if task.id not in reasons and closed is None:
+                closed = frozenset(t.id for t in service.ledger.list_tasks() if t.status is TaskState.CLOSED)
+            fallback = blockers_of(task, closed or frozenset())
+            card["blocked_reason"] = reasons.get(task.id) or (fallback[0]["reason"] if fallback else "")
 
 
 def _project_cards(

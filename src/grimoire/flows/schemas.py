@@ -201,9 +201,14 @@ class FlowRunMeta:
     #: réécrit ces champs et ``order`` (acte explicite de l'utilisateur).
     blueprint_sha256: str | None = None
     node_digests: dict[str, str] = field(default_factory=dict)
+    #: Un aperçu (``upgrade-flow run --dry-run``) : le run s'arrête avant toute
+    #: écriture dans le projet et ne compte pas comme un run de flow. Écrit
+    #: seulement quand il est vrai, pour qu'une métadonnée ordinaire reste
+    #: identique à celle d'avant ce champ.
+    preview: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "blueprint_id": self.blueprint_id,
@@ -215,6 +220,9 @@ class FlowRunMeta:
             "blueprint_sha256": self.blueprint_sha256,
             "node_digests": dict(self.node_digests),
         }
+        if self.preview:
+            out["preview"] = True
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FlowRunMeta:
@@ -229,6 +237,7 @@ class FlowRunMeta:
             parent_node_id=d.get("parent_node_id"),
             blueprint_sha256=d.get("blueprint_sha256"),
             node_digests=dict(d.get("node_digests") or {}),
+            preview=bool(d.get("preview", False)),
         )
 
 

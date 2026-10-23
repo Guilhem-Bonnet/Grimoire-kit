@@ -125,28 +125,9 @@ def served(real_project: Path, tmp_path_factory: pytest.TempPathFactory) -> Iter
         assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
 
 
-@pytest.fixture(scope="session")
-def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """Un projet fraîchement scaffoldé, jamais touché après `grimoire init` :
-    ni Mission Ledger (aucun `task add`), ni blueprint (aucun `blueprint
-    new`) — les deux états vides que Concevoir et Exécuter doivent savoir
-    montrer utilement (commande réelle affichée, boutons de vue rendus mais
-    désactivés plutôt qu'absents).
-
-    Depuis ADR-007 (issue #559, lot 4.1), `standard init` ouvre un Mission
-    Ledger dès l'init : le ledger fraîchement créé est retiré ci-dessous pour
-    que ce projet reste "sans ledger" comme documenté — ce qui en fait aussi,
-    sans rien y ajouter, le projet "enrôlé mais jamais migré" qu'utilise le
-    test du bouton « Migrer les tâches ».
-
-    Un projet DÉDIÉ, pas `real_project` : ce dernier est une fixture de
-    portée session partagée par toute la suite e2e, et plusieurs fixtures
-    ailleurs (`project_with_task`, `project_with_blueprint`,
-    `served_cockpit`) lui ajoutent une tâche ou un blueprint dès qu'elles
-    sont sollicitées — l'ordre de collecte des tests déciderait alors
-    silencieusement si `real_project` est encore vide au moment de ce test.
-    """
-    root = tmp_path_factory.mktemp("workspace-empty") / "projet-vide"
+def _serve_empty_project(tmp_path_factory: pytest.TempPathFactory, label: str) -> Iterator[str]:
+    """Un projet `init` + `standard init`, ledger retiré, servi par `grimoire serve`."""
+    root = tmp_path_factory.mktemp(label) / "projet-vide"
     root.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
     created = subprocess.run(
@@ -170,7 +151,7 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
     port = _free_port()
     env = dict(os.environ)
-    env["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path_factory.mktemp("cockpit-home-empty"))
+    env["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path_factory.mktemp(f"cockpit-home-{label}"))
     env["NO_COLOR"] = "1"
     process = subprocess.Popen(
         [
@@ -195,6 +176,54 @@ def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             process.kill()
             process.wait(timeout=10)
         assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
+
+
+@pytest.fixture(scope="session")
+def served_empty(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Un projet fraîchement scaffoldé, jamais touché après `grimoire init` :
+    ni Mission Ledger (aucun `task add`), ni blueprint (aucun `blueprint
+    new`) — les deux états vides que Concevoir et Exécuter doivent savoir
+    montrer utilement (commande réelle affichée, boutons de vue rendus mais
+    désactivés plutôt qu'absents).
+
+    Depuis ADR-007 (issue #559, lot 4.1), `standard init` ouvre un Mission
+    Ledger dès l'init : le ledger fraîchement créé est retiré ci-dessous pour
+    que ce projet reste "sans ledger" comme documenté — ce qui en fait aussi,
+    sans rien y ajouter, le projet "enrôlé mais jamais migré" qu'utilise le
+    test du bouton « Migrer les tâches ».
+
+    Un projet DÉDIÉ, pas `real_project` : ce dernier est une fixture de
+    portée session partagée par toute la suite e2e, et plusieurs fixtures
+    ailleurs (`project_with_task`, `project_with_blueprint`,
+    `served_cockpit`) lui ajoutent une tâche ou un blueprint dès qu'elles
+    sont sollicitées — l'ordre de collecte des tests déciderait alors
+    silencieusement si `real_project` est encore vide au moment de ce test.
+    """
+    yield from _serve_empty_project(tmp_path_factory, "workspace-empty")
+
+
+@pytest.fixture(scope="session")
+def served_untouched(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Le même projet vide que :func:`served_empty`, mais qu'aucun test n'écrit.
+
+    `served_empty` reçoit un Mission Ledger dès que le test du bouton « Migrer
+    les tâches » a tourné : un état vide qui doit dire « Aucune trace » (P07 :
+    Observer lit aussi le ledger) a besoin d'un projet que rien ne modifie.
+    """
+    yield from _serve_empty_project(tmp_path_factory, "workspace-untouched")
+
+
+@pytest.fixture
+def untouched_workspace(browser: Browser, served_untouched: str) -> Iterator[Page]:
+    """La coque, chargée et prête, sur le projet de :func:`served_untouched`."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    page.goto(f"{served_untouched}/workspace/index.html", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    try:
+        yield page
+    finally:
+        context.close()
 
 
 @pytest.fixture
