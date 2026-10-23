@@ -618,7 +618,9 @@ class TaskService:
         self.ledger.note_progress(task_id, text, actor_id=actor)
         return self.require(task_id)
 
-    def reap(self, *, apply: bool = True, actor: str = "tick", now: datetime | None = None) -> ReapReport:
+    def reap(
+        self, *, apply: bool = True, actor: str = "tick", now: datetime | None = None, probe_hosts: bool = True
+    ) -> ReapReport:
         """Récolte des baux perdus (:meth:`MissionLedger.reap`), quota lu dans l'état des fournisseurs.
 
         K3 (issue #768) : un hôte est fencé selon la table ``hosts.capabilities``
@@ -633,12 +635,21 @@ class TaskService:
         sur les baux perdus à cet instant, et sont gardés par (tâche, epoch). Sous le verrou, un bail dont
         l'epoch a changé depuis n'est pas jugé à ce tick (:class:`UnjudgedClaimError`) ; le suivant le jugera.
         """
-        from grimoire.hosts.capabilities import claim_host_is_fenced
+        from grimoire.hosts.capabilities import claim_host_is_fenced, resolve_host
+        from grimoire.hosts.contract_probe import ensure_probed
         from grimoire.missions.ledger_rules import UnjudgedClaimError
         from grimoire.missions.task_worktree import unpushed_work
 
         self.refresh()
-        held = {(v.task_id, v.epoch): unpushed_work(self, v.task_id) for v in self.ledger.expired_claims(now)}
+        expired = self.ledger.expired_claims(now)
+        # Le frein de cette version d'hôte est-il prouvé ? sinon sonde (#876). Une sonde lance
+        # l'hôte (deux appels modèle payants) : jamais en aperçu ni sur la copie d'un plan, et seulement
+        # sur opt-in (``GRIMOIRE_HOST_PROBE=1``) ; sinon ``ensure_probed`` ne fait rien et la reprise reste humaine.
+        for view in expired if apply and probe_hosts else ():
+            host_id = resolve_host(view.host)
+            if host_id is not None:
+                ensure_probed(host_id, view.host_version)
+        held = {(v.task_id, v.epoch): unpushed_work(self, v.task_id) for v in expired}
 
         def branch_hold(task: MissionTask) -> str:
             key = (task.id, task.claim.lease_epoch if task.claim is not None else -1)

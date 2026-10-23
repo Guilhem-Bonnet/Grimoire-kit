@@ -11,7 +11,8 @@ l'admission et leurs attentes ``paused`` ne sont pas rendues, les autres suivent
 
 Hors pause, le tick récolte les baux perdus, rend les attentes levées (dont les ``waiting(paused)`` dont la
 pause a pris fin, dans l'ordre de la file), constate sur la remote les effets externes restés sans trace
-(:mod:`.effects`), puis calcule le plan d'admission. Le dispatch est un point d'accroche (*dispatcher*),
+(:mod:`.effects`), constate les checks de PR des occupants d'un créneau CI et rend ces créneaux (:mod:`.ci_slots`,
+migration unique des créneaux orphelins comprise), puis calcule le plan d'admission. Le dispatch est un point d'accroche (*dispatcher*),
 appelé avec les seules tâches admises.
 
 K12 — **idempotent et rejouable** :
@@ -50,6 +51,7 @@ from grimoire.missions.pause import PAUSE_RELPATH, PauseState, home_root, read_p
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import Admit, QueuePlan
+    from grimoire.missions.ci_slots import CiOutcome, CiProbe
     from grimoire.missions.effects import EffectOutcome, Probe
     from grimoire.missions.service import TaskService, WakeDecision
 
@@ -77,6 +79,7 @@ class TickReport:
     notes: tuple[str, ...] = field(default_factory=tuple)
     effects: tuple[EffectOutcome, ...] = ()
     mode: str = "apply"
+    ci: tuple[CiOutcome, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +93,7 @@ class TickReport:
             "effects": [e.to_dict() for e in self.effects],
             "plan": self.plan.to_dict() if self.plan is not None else None,
             "dispatched": list(self.dispatched),
+            "ci": [o.to_dict() for o in self.ci],
         }
 
 
@@ -103,12 +107,13 @@ def run_tick(
     dispatcher: Callable[[tuple[Admit, ...]], None] | None = None,
     control_home: Path | None = None,
     effect_probe: Probe | None = None,
+    ci_probe: CiProbe | None = None,
 ) -> TickReport:
     """Un tick. Sous une pause de tout le périmètre : les drapeaux sont lus, le ledger ne l'est pas, rien n'est dispatché.
 
     *service_factory* est appelé avec ``(project_root[, ledger_root])`` pour ouvrir le service : c'est ce qu'une
     pause évite. *dispatcher* reçoit les tâches admises, jamais sous pause et jamais en plan (``apply=False``).
-    *effect_probe* vérifie un effet sur la remote (défaut : ``git ls-remote``, ``gh pr list``).
+    *effect_probe* vérifie un effet sur la remote (défaut : ``git ls-remote``, ``gh pr list``) ; *ci_probe* constate les checks d'une branche (défaut : ``gh pr checks``).
     """
     state = read_pause(home_root(project_root), control_home=control_home)
     if state.global_stop:
@@ -125,7 +130,7 @@ def run_tick(
     if not service.has_ledger:
         return TickReport("idle", state, state.attention(), notes=("aucun ledger : rien à faire",))
     if not apply:
-        return _planned(service_factory, service, state, now, effect_probe)
+        return _planned(service_factory, service, state, now, effect_probe, ci_probe)
 
     with contextlib.ExitStack() as stack:
         try:
@@ -141,7 +146,7 @@ def run_tick(
                 "sans lui, deux ticks pourraient récolter la même tâche"
             ) from exc
         _sweep_stale_plans(service.home_root / TICK_LOCK_RELPATH.parent)
-        return _one_pass(service, state, now, dispatcher, effect_probe, mode="apply")
+        return _one_pass(service, state, now, dispatcher, effect_probe, ci_probe, mode="apply")
 
 
 def _one_pass(
@@ -150,15 +155,18 @@ def _one_pass(
     now: datetime | None,
     dispatcher: Callable[[tuple[Admit, ...]], None] | None,
     effect_probe: Probe | None,
+    ci_probe: CiProbe | None,
     *,
     mode: str,
 ) -> TickReport:
     """Récolte, réveils, effets, admission — les mêmes gestes en plan (sur la copie) et appliqués."""
+    from grimoire.missions.ci_slots import migrate_orphan_slots, reconcile_ci
     from grimoire.missions.effects import reconcile
 
-    report = service.reap(apply=True, now=now)
+    report = service.reap(apply=True, now=now, probe_hosts=mode == "apply")
     woken = tuple(service.wake_due(apply=True, now=now, pause=state))
     effects = tuple(reconcile(service, apply=True, probe=effect_probe))
+    ci = (*reconcile_ci(service, probe=ci_probe, now=now), *migrate_orphan_slots(service, probe=ci_probe, now=now))
     plan = service.queue_plan(now=now, pause=state)
     dispatched: tuple[str, ...] = ()
     if mode == "apply" and dispatcher is not None and plan.admitted and not plan.capacity.errors:
@@ -179,7 +187,7 @@ def _one_pass(
             attention.append(f"effet {outcome.effect.label()} de {outcome.effect.task_id} {what} ({outcome.evidence})")
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
-        "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode
+        "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci
     )
 
 
@@ -189,6 +197,7 @@ def _planned(
     state: PauseState,
     now: datetime | None,
     effect_probe: Probe | None,
+    ci_probe: CiProbe | None,
 ) -> TickReport:
     """Le tick appliqué, sur une copie du ledger sous ``_grimoire-output/control/`` (jamais sous ``/tmp``), puis retirée."""
     parent = service.home_root / TICK_LOCK_RELPATH.parent
@@ -199,7 +208,7 @@ def _planned(
         _copy_ledger(service.ledger_root, shadow_root)
         shadow = factory(service.home_root, shadow_root)
         shadow.writes_projections = False
-        return _one_pass(shadow, state, now, None, effect_probe, mode="plan")
+        return _one_pass(shadow, state, now, None, effect_probe, ci_probe, mode="plan")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

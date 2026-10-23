@@ -426,3 +426,49 @@ def test_le_cli_task_add_ready_et_le_mcp_rendent_la_meme_forme(governed: Path) -
     assert data["status"] == "ready" and data["board"] == "ready"
     assert data["mission_created"] is False
     assert set(data) >= {"id", "mission_id", "claim", "board", "mission_created", "board_path"} - {"claim"}
+
+
+# ── issue #875 : lectures Bash et écritures hors projet ne comptent pas ──────
+
+
+def _bash(root: Path, command: str) -> None:
+    _hook(
+        root,
+        HookEvent.POST_TOOL_USE,
+        _payload(
+            "PostToolUse", root, tool_name="Bash", tool_input={"command": command}, tool_response={"exit_code": 0}
+        ),
+    )
+
+
+def test_une_session_aux_seules_commandes_de_lecture_cloture_sans_refus(governed: Path) -> None:
+    for command in (
+        "cd /tmp && grep -rn x .",
+        "sed -n 1,20p README.md",
+        "awk '{print $1}' f | sort | uniq -c",
+        "git grep -n x origin/main -- src",
+        "command -v gh",
+        "gh pr view 3",
+        "ls -la",
+    ):
+        _bash(governed, command)
+    rendered, decision = _stop(governed)
+    assert decision.outcome is Outcome.ALLOW
+    assert "decision" not in rendered
+
+
+def test_un_write_hors_du_projet_ne_compte_pas(governed: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    elsewhere = tmp_path_factory.mktemp("hors-projet") / "brouillon.md"
+    _hook(
+        governed,
+        HookEvent.POST_TOOL_USE,
+        _payload("PostToolUse", governed, tool_name="Write", tool_input={"file_path": str(elsewhere), "content": "x"}),
+    )
+    _, decision = _stop(governed)
+    assert decision.outcome is Outcome.ALLOW
+
+
+def test_un_write_dans_le_projet_compte_toujours(governed: Path) -> None:
+    _write(governed, "docs/notes.md")
+    _, decision = _stop(governed)
+    assert decision.outcome is Outcome.BLOCK
