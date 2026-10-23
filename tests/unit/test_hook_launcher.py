@@ -249,3 +249,15 @@ def test_doctor_mcp_check_ignores_the_active_venv(tmp_path: Path, monkeypatch: p
     (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"grimoire": {"command": project_cmd}}}), encoding="utf-8")
     (check,) = check_mcp_json(tmp_path)
     assert check.passed, check.detail
+
+
+def test_doctor_ignores_a_custom_hook_that_only_names_grimoire_hook(tmp_path: Path) -> None:
+    """Constat Forge (3.64.0) : ``grimoire-hook-gateway.sh --hook-id …`` était pris pour un hook du kit."""
+    hooks = tmp_path / ".github" / "hooks"
+    hooks.mkdir(parents=True)
+    gateway = ".github/hooks/scripts/grimoire-hook-gateway.sh --hook-id grimoire-pre-compact --event PreCompact"
+    (hooks / "forge-pre-compact.json").write_text(
+        json.dumps({"version": 1, "hooks": {"PreCompact": [{"type": "command", "command": gateway}]}}),
+        encoding="utf-8",
+    )
+    assert check_hook_commands(tmp_path) == []
