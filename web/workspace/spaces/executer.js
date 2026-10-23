@@ -429,7 +429,7 @@ function taskCard(task, onSelect, portfolio = false) {
     const line = document.createElement('div');
     line.className = 'ex-wait';
     line.dataset.role = 'blocked';
-    line.append(dot('bad'), text('span', null, 'Bloquée'));
+    line.append(stateIcon('bad'), text('span', null, 'Bloquée'));
     line.append(text('span', 'lbl', task.blocked_reason || 'raison non écrite'));
     card.append(line);
   }
