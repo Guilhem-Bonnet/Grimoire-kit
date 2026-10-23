@@ -299,7 +299,9 @@ def _memory_search(project_root: Path, query: _Query) -> Any:
     limit_raw = _one(query, "limit")
     limit = int(limit_raw) if limit_raw else 10
     return workspace_memory.memory_search(
-        project_root, _one(query, "q"), _one(query, "projects"), limit=limit
+        project_root, _one(query, "q"), _one(query, "projects"), limit=limit,
+        include_superseded=_one(query, "include_superseded") == "1",
+        include_stale=_one(query, "include_stale") == "1",
     )
 
 
