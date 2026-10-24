@@ -31,6 +31,14 @@ agentique gouverné (profil `starter`), puis diagnostic. Idempotent — relancez
 quand vous voulez, il ne touche que ce qui manque. Pour le wizard complet :
 `grimoire up . --interactive`.
 
+Le wizard ne demande pas d'archétype : il pose trois questions — quelle pile
+technique, qui travaille sur le projet, de quoi parle le projet — pré-remplies
+par la détection, et déduit l'archétype, le profil du standard, les skills de
+pile et les expertises à recommander. Le résumé avant installation montre la
+déduction et s'ajuste en une ligne (`domain=web who=team`). Détail des réponses
+et de ce qu'elles décident : [Catalogue d'expertises — le wizard en trois
+questions](../guides/expertises.md#le-wizard-en-trois-questions-larchetype-est-deduit).
+
 <details>
 <summary>Chemin shell legacy (mode maintenance, nécessite --legacy)</summary>
 
