@@ -93,6 +93,27 @@ prochain export l'écrase.
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 | `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
 
+### Une attente porte sur sa tâche, pas sur la session
+
+`grimoire task wait <id> --reason ci|quota|paused` et `grimoire task ask <id> "<question>"` garent
+**la tâche** (`waiting`). Ils ne gèlent ni la session ni ses sous-agents : le frein du bail
+(hook `PreToolUse`) se tait sur une session dont la tâche est garée, qui est jugée comme une session
+sans tâche — mêmes consignes que le repli normal (`grimoire task claim|attach <autre-tâche>`).
+Restent possibles `grimoire task …` sur n'importe quelle tâche et `grimoire cockpit serve` (pour que
+l'humain réponde). Ce qui ne change pas : aucune écriture ne se fait au nom de la tâche garée, et une
+question humaine bloquante ne se lève que par l'humain — `task resume` est refusé sur un
+`waiting(human)`. La réponse se donne ainsi, exécutable telle quelle (à lancer avec le binaire du
+projet, `.venv/bin/grimoire` si `grimoire` n'est pas dans le PATH) :
+
+```bash
+grimoire task answer <id> "<réponse>" --question <q-…>
+```
+
+`task wait` et `task ask` (et l'action MCP `wait` / `ask`) préviennent quand des sous-agents de la
+session tiennent encore leurs propres claims : garer le coordinateur ne les arrête pas. L'action MCP
+`task_update(action="resume")` reprend sans epoch quand la session de l'environnement est celle qui
+porte le claim (comme la CLI avec `--epoch` omis) ; sinon l'erreur « aucun epoch à présenter » reste.
+
 Sans ledger, la commande d'export refuse et sort en erreur plutôt que d'écrire un
 board vide — écraser le travail déclaré par du néant serait pire que ne rien faire.
 

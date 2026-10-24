@@ -222,6 +222,12 @@ def test_cross_project_search_labels_the_matching_project_only(memory_fleet_work
     # Un seul résultat : le terme n'existe QUE dans le projet A.
     assert page.locator(".me-result").count() == 1
 
+    # EKP-E1 : la fraîcheur et la source se lisent sur le résultat, et le score
+    # est nommé ou dit inconnu — jamais un « 0.000 » fabriqué.
+    assert page.locator(".me-result .chip.pill[data-freshness='non_verifie']").count() == 1
+    assert "saisie libre" in result.inner_text()
+    assert "score 0.000" not in results_text
+
     # Cliquer le résultat l'ouvre dans le panneau d'inspection, avec son
     # projet d'origine.
     result.click()
