@@ -78,6 +78,7 @@ from grimoire.missions.liveness import probe_claude_agents
 from grimoire.tools import (
     source_assist,
     workspace_api,
+    workspace_attention,
     workspace_exec,
     workspace_language,
     workspace_memory,
@@ -290,6 +291,23 @@ def _pulse(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _attention(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/attention`` — ce qui attend une décision humaine (P22).
+
+    Le projet servi seul ; ``scope=portfolio`` tout le registre, ``slug=`` un
+    projet du registre. ``probe=1`` relance la sonde mémoire (« Réessayer »)
+    au lieu de lire son cache. Sections par urgence :
+    :func:`workspace_attention.attention_order`.
+    """
+    return workspace_attention.attention_view(
+        project_root,
+        portfolio=_one(query, "scope") == "portfolio",
+        slug=_one(query, "slug") or None,
+        probe=_one(query, "probe") not in (None, "", "0", "false"),
+        host_probe=_host_probe,
+    )
+
+
 def _evidence(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
@@ -367,6 +385,7 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}evidence": _evidence,
     f"{PREFIX}portfolio/tasks": _portfolio_tasks,
     f"{PREFIX}pulse": _pulse,
+    f"{PREFIX}attention": _attention,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
