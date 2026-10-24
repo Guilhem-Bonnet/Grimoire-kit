@@ -918,3 +918,44 @@ def test_the_governing_policy_that_disappears_revokes_instead_of_delegating(proj
         MandateStore(project).authorize("answer", task, PROV)
     assert changed.value.code == md.POLICY_CHANGED
     assert not MandateStore(project).state().active
+
+
+def _human_turn(project: Path, session: str) -> None:
+    from grimoire.hosts.decisions import HookInput, run_decision
+    from grimoire.hosts.events import HookEvent
+
+    time.sleep(0.02)
+    run_decision(
+        "grimoire.task-context",
+        HookInput(
+            event=HookEvent.USER_PROMPT_SUBMIT,
+            project_root=project,
+            prompt="ok",
+            session_id=session,
+            host="host-claude-code-cli",
+        ),
+    )
+    time.sleep(0.02)
+
+
+def test_one_human_turn_grants_one_mandate_only_and_only_to_its_own_session(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un agent ne rejoue ni le tour humain d'un autre mandat, ni celui d'une autre session."""
+    store = MandateStore(project)
+    first = MandateRequest.build(("accept",), ("implementation",), 2, "+1h")
+    second = MandateRequest.build(("accept", "answer"), ("implementation",), 2, "+1h")
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    assert store.request_grant(first)[0] is None
+    _human_turn(project, "S2")  # le tour humain d'une autre session ne vaut pas
+    assert store.request_grant(first)[0] is None
+    _human_turn(project, "S1")
+    mandate, _ = store.request_grant(first)
+    assert mandate is not None
+    # Le même tour ne sert pas une seconde décision, même relancée : il faut un nouveau tour humain.
+    assert store.request_grant(second)[0] is None
+    refused, attestation = store.request_grant(second)
+    assert refused is None and not attestation.attested
+    assert store.state().mandate is not None and store.state().mandate.gestures == ("accept",)
+    _human_turn(project, "S1")
+    assert store.request_grant(second)[0] is not None
