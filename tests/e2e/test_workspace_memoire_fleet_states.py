@@ -132,7 +132,7 @@ def test_le_clic_sur_un_resultat_l_ouvre_dans_l_inspecteur(workspace: Page) -> N
     inspector = workspace.locator("#panel-inspector")
     assert "mem-001" in inspector.inner_text()
     assert "le cache de session bloque le ticket" in inspector.inner_text()
-    assert "score : 0.910" in inspector.inner_text()
+    assert "score 0.910" in inspector.inner_text()
 
 
 @pytest.mark.parametrize("key", ["Enter", " "])
