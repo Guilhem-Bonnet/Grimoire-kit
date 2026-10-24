@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import (
@@ -448,18 +449,33 @@ def recorded_contract(host_id: HostId) -> HostContract:
     return _CONTRACTS.get(host_id) or _unverified_contract(host_id)
 
 
-def contract_for(host_id: HostId, host_version: str | None) -> HostContract:
+def contract_for(host_id: HostId, host_version: str | None, *, project_root: Path | None = None) -> HostContract:
     """Contrat de *host_id* valable pour *host_version* ; rien de vérifié sinon.
 
     Une preuve vaut pour la version sur laquelle elle a été capturée, pas pour
     les autres. Version absente (``None``, vide), différente de la version
     capturée ou jamais capturée : contrat entièrement non vérifié.
+
+    Aucune preuve n'est retenue (capturée ou sondée) quand la configuration effective de l'hôte désactive
+    les hooks (#886) : la sonde teste un dossier temporaire, pas les réglages réels (voir
+    :func:`~grimoire.hosts.contract_probe.hooks_disabled_reason`). *project_root* : le dossier du projet,
+    par défaut le dossier courant (celui d'où l'hôte lance ses hooks).
     """
     recorded = recorded_contract(host_id)
     wanted = (host_version or "").strip()
-    if wanted and recorded.host_version and wanted == recorded.host_version:
-        return recorded
-    return _probed_contract(host_id, wanted) or _unverified_contract(host_id)
+    contract = (
+        recorded
+        if wanted and recorded.host_version and wanted == recorded.host_version
+        else _probed_contract(host_id, wanted)
+    )
+    if contract is None or not contract.fenced:
+        return contract or _unverified_contract(host_id)
+    if host_id is HostId.CLAUDE_CODE_CLI:
+        from grimoire.hosts.contract_probe import hooks_disabled_reason
+
+        if hooks_disabled_reason(project_root):
+            return _unverified_contract(host_id)
+    return contract
 
 
 def _probed_contract(host_id: HostId, version: str) -> HostContract | None:
@@ -478,13 +494,13 @@ def _probed_contract(host_id: HostId, version: str) -> HostContract | None:
     return HostContract(host_id=host_id, host_version=version, evidence=evidence)
 
 
-def is_fenced(host_id: HostId, host_version: str | None) -> bool:
+def is_fenced(host_id: HostId, host_version: str | None, *, project_root: Path | None = None) -> bool:
     """Un bail perdu peut-il être récolté sur cet hôte, à cette version ? Non, sauf preuve.
 
     La preuve est celle de la version capturée : toute autre version, ou une
     version inconnue (``None``), vaut ``False``.
     """
-    return contract_for(host_id, host_version).fenced
+    return contract_for(host_id, host_version, project_root=project_root).fenced
 
 
 def claim_host_is_fenced(host: str, host_version: str | None) -> bool:
