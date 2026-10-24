@@ -57,7 +57,7 @@ from grimoire.missions.ledger_rules import (
     unfenced_question,
     waiting_guard,
 )
-from grimoire.missions.questions import QUESTION_EVENTS
+from grimoire.missions.questions import ANSWER_ORIGINS, QUESTION_EVENTS
 from grimoire.missions.reclaim import release_lost_claim
 from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
@@ -1068,7 +1068,7 @@ class MissionLedger:
         # écrirait ``task.human_answered`` lui-même (``append_event`` est public) n'y gagne rien.
         answers = [
             i for i, e in enumerate(events)
-            if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == ORIGIN_HUMAN
+            if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") in ANSWER_ORIGINS
         ]
         return events[answers[-1] + 1 :] if answers else events
 

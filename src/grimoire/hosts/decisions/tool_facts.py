@@ -918,6 +918,15 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
         if secret_target:
             break
 
+    if not secret_target:
+        # #876 lot 1 : la clé du cockpit et le journal du mandat se lisent aussi par joker, `cd`, `..` ou lien.
+        try:
+            from grimoire.hosts.decisions.authority_guard import names_zone_secret
+
+            secret_target = names_zone_secret(command, tuple(targets))
+        except Exception:  # une classification qui échoue ne bloque pas tout appel d'outil
+            secret_target = ""
+
     destructive_reason = ""
     if command:
         surface = command_surface(command)
