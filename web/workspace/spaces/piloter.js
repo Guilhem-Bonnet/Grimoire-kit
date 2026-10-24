@@ -1000,14 +1000,22 @@ function renderRunReport(run) {
 // Champs partagés par les deux formulaires de setup — celui qui initialise le
 // projet déjà servi (`renderSetupWizard`) et celui qui en crée un nouveau
 // depuis le portefeuille (`renderCreateProjectForm`, #172). Un seul endroit
-// qui sait construire les sélecteurs archétype/backend/needs et lire leur
-// valeur : les deux formulaires ne diffèrent que par leur cible (le projet
-// servi, ou un chemin choisi) et leur appel API final.
-async function buildSetupFields(ctx, wrap) {
-  const [archetypes, backendsPayload, needsPayload] = await Promise.all([
+// qui sait construire les questions, le sélecteur de backend et les needs, et
+// lire leur valeur : les deux formulaires ne diffèrent que par leur cible (le
+// projet servi, ou un chemin choisi) et leur appel API final.
+//
+// #888 : l'archétype n'est plus demandé — trois questions (pile, qui
+// travaille, domaine) le déduisent, par le même module que `grimoire init`
+// (`GET /api/setup/questions`). `options.prefill === false` (nouveau projet,
+// autre dossier) ne lit pas la détection du projet servi. Sans réponse du
+// serveur (ancien hôte), le sélecteur d'archétype historique reste le repli.
+async function buildSetupFields(ctx, wrap, options = {}) {
+  const prefill = options.prefill !== false;
+  const [archetypes, backendsPayload, needsPayload, questionsPayload] = await Promise.all([
     ctx.api.archetypesCatalogue().catch(() => []),
     ctx.api.backendsCatalogue().catch(() => ({ backends: [] })),
     ctx.api.needsCatalogue().catch(() => ({ needs: [], suggested: [] })),
+    ctx.api.setupQuestions(null, prefill).catch(() => null),
   ]);
 
   const nameInput = document.createElement('input');
@@ -1017,6 +1025,7 @@ async function buildSetupFields(ctx, wrap) {
   userInput.type = 'text';
   userInput.placeholder = 'votre nom (artefacts)';
 
+  // Repli historique (hôte sans `/api/setup/questions`) : un sélecteur d'archétype.
   const archSelect = document.createElement('select');
   for (const a of (archetypes || [])) {
     const opt = document.createElement('option');
@@ -1030,6 +1039,78 @@ async function buildSetupFields(ctx, wrap) {
     opt.textContent = 'minimal';
     archSelect.append(opt);
   }
+
+  // Les trois questions (#888). `deduced` suit la dernière réponse du serveur.
+  const questions = questionsPayload && Array.isArray(questionsPayload.questions) ? questionsPayload : null;
+  let deduced = questions ? questions.deduction : null;
+  const stackChecks = {};
+  const whoSelect = document.createElement('select');
+  const domainSelect = document.createElement('select');
+  const deducedLine = text('p', 'lbl', '');
+  const questionRows = [];
+  if (questions) {
+    const byId = Object.fromEntries(questions.questions.map((q) => [q.id, q]));
+    const answers = questions.answers || {};
+    const stackWrap = document.createElement('div');
+    stackWrap.className = 'pl-tool-opts';
+    for (const o of (byId.stack ? byId.stack.options : [])) {
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = (answers.stack || []).includes(o.id);
+      if (o.hint) label.title = o.hint;
+      stackChecks[o.id] = cb;
+      label.append(cb, document.createTextNode(o.label));
+      stackWrap.append(label);
+    }
+    const fillSelect = (select, q, current) => {
+      for (const o of (q ? q.options : [])) {
+        const opt = document.createElement('option');
+        opt.value = o.id;
+        opt.textContent = o.hint ? `${o.label} — ${o.hint}` : o.label;
+        opt.selected = o.id === current;
+        select.append(opt);
+      }
+    };
+    fillSelect(whoSelect, byId.who, answers.who);
+    fillSelect(domainSelect, byId.domain, answers.domain);
+    questionRows.push(
+      fieldRow(byId.stack ? byId.stack.prompt : 'stack', stackWrap),
+      fieldRow(byId.who ? byId.who.prompt : 'who', whoSelect),
+      fieldRow(byId.domain ? byId.domain.prompt : 'domain', domainSelect),
+      deducedLine,
+    );
+  }
+  const currentAnswers = () => ({
+    stack: Object.keys(stackChecks).filter((id) => stackChecks[id].checked).join(','),
+    who: whoSelect.value,
+    domain: domainSelect.value,
+  });
+  const renderDeduced = () => {
+    if (!deduced) return;
+    const parts = [`archétype déduit : ${deduced.archetypes.join(' + ')}`, `profil du standard : ${deduced.standard_profile}`];
+    if ((deduced.stack_skills || []).length) parts.push(`skills : ${deduced.stack_skills.join(', ')}`);
+    if ((deduced.expertises || []).length) parts.push(`expertises à attacher : ${deduced.expertises.join(', ')}`);
+    deducedLine.textContent = parts.join(' · ');
+  };
+  const refreshDeduction = async () => {
+    try {
+      const payload = await ctx.api.setupQuestions(currentAnswers(), prefill);
+      if (payload && payload.deduction) {
+        deduced = payload.deduction;
+        renderDeduced();
+      }
+    } catch (_error) {
+      // la dernière déduction connue reste affichée
+    }
+  };
+  if (questions) {
+    renderDeduced();
+    for (const cb of Object.values(stackChecks)) cb.addEventListener('change', refreshDeduction);
+    whoSelect.addEventListener('change', refreshDeduction);
+    domainSelect.addEventListener('change', refreshDeduction);
+  }
+  const archetypeValue = () => (deduced ? deduced.archetype : archSelect.value);
 
   const backendSelect = document.createElement('select');
   const autoOpt = document.createElement('option');
@@ -1048,11 +1129,13 @@ async function buildSetupFields(ctx, wrap) {
   const needsWrap = document.createElement('div');
   needsWrap.className = 'pl-tool-opts';
   const needChecks = {};
+  // Précochés : suggestions du scan (B3) et besoins déduits de « qui travaille » (#888).
+  const deducedNeeds = new Set(deduced ? (deduced.needs || []) : []);
   for (const n of (needsPayload.needs || [])) {
     const label = document.createElement('label');
     const cb = document.createElement('input');
     cb.type = 'checkbox';
-    cb.checked = suggestedIds.has(n.id);
+    cb.checked = suggestedIds.has(n.id) || deducedNeeds.has(n.id);
     if (n.rationale) label.title = n.rationale;
     needChecks[n.id] = cb;
     label.append(cb, document.createTextNode(n.label || n.id));
@@ -1066,17 +1149,17 @@ async function buildSetupFields(ctx, wrap) {
   wrap.append(
     fieldRow('nom', nameInput),
     fieldRow('votre nom', userInput),
-    fieldRow('archétype', archSelect),
+    ...(questions ? questionRows : [fieldRow('archétype', archSelect)]),
     fieldRow('mémoire / BDD', backendSelect),
     fieldRow('needs (standard agentique)', needsWrap),
   );
 
   return {
-    summary: () => `--archetype ${archSelect.value} --backend ${backendSelect.value}`,
+    summary: () => `--archetype ${archetypeValue()} --backend ${backendSelect.value}`,
     payload: (extra) => ({
       name: nameInput.value.trim(),
       user: userInput.value.trim(),
-      archetype: archSelect.value,
+      archetype: archetypeValue(),
       backend: backendSelect.value,
       needs: Object.keys(needChecks).filter((id) => needChecks[id].checked),
       ...extra,
@@ -1164,7 +1247,8 @@ async function renderCreateProjectForm(ctx, onCreated) {
   pathInput.placeholder = '/chemin/absolu/du/nouveau-projet';
   wrap.append(fieldRow('chemin', pathInput));
 
-  const fields = await buildSetupFields(ctx, wrap);
+  // Autre dossier : la détection du projet servi ne vaut rien ici (#888).
+  const fields = await buildSetupFields(ctx, wrap, { prefill: false });
 
   const createBtn = document.createElement('button');
   createBtn.type = 'button';
