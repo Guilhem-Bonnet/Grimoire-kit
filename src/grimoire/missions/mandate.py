@@ -1102,6 +1102,7 @@ def register_orchestrator_session(project_root: Path, session_id: str, now: date
     À appeler par le lanceur du lot 2, avec l'identifiant de session qu'il a fixé au processus orchestrateur
     (``GRIMOIRE_SESSION_ID`` ou la variable de l'hôte). Exige un mandat actif ; refuse un identifiant vide.
     Un identifiant déjà inscrit comme worker ou relecteur ne peut pas devenir orchestrateur.
+    L'inscription vaut pour le mandat actif seulement : un nouveau mandat se réinscrit.
     """
     store = MandateStore(project_root)
     session = session_id.strip()
@@ -1142,7 +1143,7 @@ def require_authority(
         # Le mandat d'abord (son refus dit pourquoi : aucun mandat, expiré, hors périmètre), puis l'appelant,
         # puis le journal du geste : un geste refusé ensuite n'est jamais inscrit « pris ».
         auth = store.authorize(gesture, task, provenance, record=False)
-        _require_orchestrator_session(store, task)
+        _require_orchestrator_session(store, task, auth.mandate_id)
         if record:
             store.record_gesture(auth)
         return auth
@@ -1154,7 +1155,7 @@ def require_authority(
         ) from exc
 
 
-def _require_orchestrator_session(store: MandateStore, task: MissionTask | None) -> None:
+def _require_orchestrator_session(store: MandateStore, task: MissionTask | None, mandate_id: str) -> None:
     """Échec fermé : l'appelant est le code du tick, ou une session inscrite orchestrateur qui n'est pas celle d'un worker."""
     from grimoire.core.standard_state import current_session
 
@@ -1168,7 +1169,12 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None)
             "ne prouve rien ; le lanceur inscrit la session d'orchestrateur au journal d'autorité)",
         )
     registered = store.sessions()
-    if session not in {str(e["session_id"]) for e in registered if e.get("role") == "orchestrator"}:
+    orchestrators = {
+        str(e["session_id"])
+        for e in registered
+        if e.get("role") == "orchestrator" and e.get("mandate_id") == mandate_id
+    }
+    if session not in orchestrators:
         raise MandateRefusedError(
             "principal_unattested",
             "le principal orchestrator n'est pas attesté : la session appelante n'est pas inscrite orchestrateur au "

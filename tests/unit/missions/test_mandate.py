@@ -959,3 +959,21 @@ def test_one_human_turn_grants_one_mandate_only_and_only_to_its_own_session(
     assert store.state().mandate is not None and store.state().mandate.gestures == ("accept",)
     _human_turn(project, "S1")
     assert store.request_grant(second)[0] is not None
+
+
+def test_an_orchestrator_session_of_a_former_mandate_does_not_carry_over(
+    project: Path, monkeypatch: pytest.MonkeyPatch, no_tick: None
+) -> None:
+    """L'inscription d'une session vaut pour le mandat sous lequel elle a été faite, pas pour le suivant."""
+    store = MandateStore(project)
+    _grant(project)
+    md.register_orchestrator_session(project, "orch-old")
+    store.revoke(md.REVOKE_MANUAL, "fin")
+    _grant(project)
+    task = TaskService(project).require(_task(project))
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "orch-old")
+    with pytest.raises(MandateRefusedError) as stale:
+        require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV)
+    assert stale.value.code == "principal_unattested"
+    md.register_orchestrator_session(project, "orch-old")  # le lanceur la réinscrit sous le nouveau mandat
+    assert require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV) is not None
