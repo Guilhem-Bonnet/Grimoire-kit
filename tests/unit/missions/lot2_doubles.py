@@ -36,6 +36,7 @@ def make_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
     git(root, "remote", "add", "origin", str(remote))
     git(root, "push", "-q", "origin", "main")
+    git(root, "remote", "set-head", "origin", "main")  # origin/HEAD : la branche par défaut du remote
     return root
 
 

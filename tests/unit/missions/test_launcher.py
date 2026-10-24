@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from lot2_doubles import FakeHost, make_repo
+from lot2_doubles import FakeHost, git, make_repo
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
@@ -339,3 +339,53 @@ def test_fumee_reelle_une_tache_jouet_sur_l_hote(projet: Path, service: TaskServ
     cleaned = run_tick(projet, apply=True)
     assert any(o.action == "session" and o.status == "done" for o in cleaned.cleanup)
     assert LAUNCHED_EVENT in {e.event_type for e in TaskService(projet).ledger.events_for(tid)}
+
+
+# ── Revue adversariale du lot 2 : base et cible viennent de la politique ou d'origin/HEAD ─────────────
+
+
+def _checkout_elsewhere(projet: Path) -> str:
+    """Le poste est sur une autre branche, en avance sur main : un tick lancé d'ici ne doit pas en partir."""
+    git(projet, "checkout", "-q", "-b", "autre-travail")
+    (projet / "autre.txt").write_text("pas dans main\n", encoding="utf-8")
+    git(projet, "add", "--", "autre.txt")
+    git(projet, "commit", "-q", "-m", "autre")
+    return git(projet, "rev-parse", "HEAD")
+
+
+def test_hors_de_main_le_worktree_part_de_la_branche_par_defaut_du_remote(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "une")
+    elsewhere = _checkout_elsewhere(projet)
+    report = tick(projet, host)
+    assert [o.status for o in report.launches] == ["launched"], report.launches
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None
+    assert wt.into == "main" and wt.base_sha == git(projet, "rev-parse", "refs/remotes/origin/main") != elsewhere
+    assert not (wt.path / "autre.txt").exists()
+
+
+def test_la_cle_base_de_la_politique_prime_sur_origin_head(projet: Path, service: TaskService, host: FakeHost) -> None:
+    git(projet, "branch", "release", "main")
+    tid = ready(service, "une")
+    (projet / POLICY).write_text(
+        "orchestrator:\n  base: release\n  roles:\n    worker:\n      enabled: true\n", encoding="utf-8"
+    )
+    _checkout_elsewhere(projet)
+    report = tick(projet, host)
+    assert [o.status for o in report.launches] == ["launched"], report.launches
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None and wt.into == "release" and wt.base_sha == git(projet, "rev-parse", "refs/heads/release")
+
+
+def test_sans_base_ni_origin_head_rien_n_est_lance(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "une")
+    git(projet, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    report = tick(projet, host)
+    assert [o.status for o in report.launches] == ["failed"] and "origin/HEAD" in report.launches[0].detail
+    assert host.of("claude", "--bg") == [] and find_task_worktree(TaskService(projet), tid) is None
+    assert read_breaker(projet).open is False  # pas une panne de session
+
+
+def test_une_base_qui_n_est_pas_un_nom_de_branche_rend_la_politique_illisible(projet: Path) -> None:
+    (projet / POLICY).write_text("orchestrator:\n  base: '--upload-pack=x'\n", encoding="utf-8")
+    assert load_orchestrator_policy(projet).usable is False

@@ -115,6 +115,17 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
     return found
 
 
+def _git_out(cwd: Path, *args: str) -> str:
+    try:
+        done = subprocess.run(  # arguments fixes, sans shell
+            ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
 def _day(stamp: str) -> str:
     return stamp[:10]
 
@@ -183,8 +194,11 @@ class WorkerLauncher:
 
     def _launch(self, admit: Admit) -> LaunchOutcome:
         service, tid = self._service, admit.task_id
+        base, into, why = self._base()
+        if not base:
+            return LaunchOutcome(tid, "failed", f"préparation refusée : {why}")
         try:
-            wt = create_task_worktree(service, tid, repo=service.home_root, actor=WORKER_ACTOR)
+            wt = create_task_worktree(service, tid, repo=service.home_root, base=base, into=into, actor=WORKER_ACTOR)
             service.context(tid)
             service.claim(tid, WORKER_ACTOR, host=_HOST)
         except (GrimoireError, ValueError, OSError) as exc:
@@ -202,6 +216,26 @@ class WorkerLauncher:
             {"session": session, "name": f"grimoire-{tid}", "model": model, "cwd": str(wt.path), "branch": wt.branch},
         )
         return LaunchOutcome(tid, "launched", f"session {session} dans {wt.path}", session, model)
+
+    def _base(self) -> tuple[str, str, str]:
+        """``(base, cible, raison)`` : la clé ``orchestrator.base``, à défaut ``origin/HEAD`` ; jamais la branche extraite.
+
+        Les worktrees partent de la pointe du remote de cette branche (celle où les PR se fusionnent), à défaut de
+        la branche locale ; la cible de fusion est la branche locale du même nom.
+        """
+        repo = self._service.home_root
+        name = self._policy.base
+        if not name:
+            head = _git_out(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+            name = head.removeprefix("origin/") if head.startswith("origin/") else ""
+        if not name:
+            return "", "", (
+                "ni `orchestrator.base` dans la politique ni `origin/HEAD` : base introuvable "
+                "(`git remote set-head origin -a` ou poser la clé) — le lanceur ne prend jamais la branche extraite"
+            )
+        remote_ref = f"refs/remotes/origin/{name}"
+        base = remote_ref if _git_out(repo, "rev-parse", "--verify", "--quiet", f"{remote_ref}^{{commit}}") else f"refs/heads/{name}"
+        return base, name, ""
 
     def _failed(self, tid: str, detail: str) -> LaunchOutcome:
         """Rend le claim, note l'échec, et le compte au disjoncteur."""

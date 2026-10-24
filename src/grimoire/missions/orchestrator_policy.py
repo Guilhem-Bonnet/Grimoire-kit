@@ -7,6 +7,8 @@ janitor :
 .. code-block:: yaml
 
     orchestrator:
+      base: main                  # branche de départ des worktrees ET cible de fusion ; vide : la branche par défaut du remote
+                                  # (``origin/HEAD``), jamais la branche extraite du poste qui lance le tick
       roles:
         worker:
           enabled: false          # défaut : rien n'est lancé, le comportement actuel est inchangé
@@ -20,6 +22,8 @@ janitor :
       janitor:
         close_issue: false        # fermer l'issue liée (``Closes #N`` dans la description) une fois fusionnée
 
+Sans ``base`` et sans ``origin/HEAD`` (``git remote set-head origin -a``), le lanceur ne lance rien : il ne devine pas.
+
 Échec fermé : un fichier illisible, une clé inconnue ou une valeur hors type n'est jamais « corrigé » — la lecture
 rend l'erreur et le lanceur ne lance rien. Un fichier absent, ou sans bloc ``orchestrator``, vaut le défaut
 (rôle désactivé).
@@ -27,6 +31,7 @@ rend l'erreur et le lanceur ne lance rien. Un fichier absent, ou sans bloc ``orc
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -50,6 +55,7 @@ __all__ = [
 ORCHESTRATION_FILE = STANDARD_DIR / "orchestration-policy.yaml"
 DEFAULT_BREAKER_THRESHOLD = 3
 TIERS = ("cheap", "mid", "strong")
+_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _WORKER_KEYS = frozenset({"enabled", "model", "tier", "wip", "sessions_per_day", "permission_mode"})
 
 
@@ -74,11 +80,12 @@ class WorkerRole:
 @dataclass(frozen=True, slots=True)
 class OrchestratorPolicy:
     worker: WorkerRole = field(default_factory=WorkerRole)
+    base: str = ""
     breaker_threshold: int = DEFAULT_BREAKER_THRESHOLD
     close_issue: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {"worker": self.worker.to_dict(), "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue}
+        return {"worker": self.worker.to_dict(), "base": self.base, "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue}
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,15 +145,19 @@ def _parse_worker(raw: Any) -> WorkerRole:
 
 
 def _parse(block: Any) -> OrchestratorPolicy:
-    top = _table(block, "orchestrator", frozenset({"roles", "breaker", "janitor"}))
+    top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor"}))
     roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker"}))
     breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold"}))
     janitor = _table(top.get("janitor", {}), "orchestrator.janitor", frozenset({"close_issue"}))
     close_issue = janitor.get("close_issue", False)
     if not isinstance(close_issue, bool):
         raise _InvalidPolicyError(f"orchestrator.janitor.close_issue doit être un booléen, pas {close_issue!r}")
+    base = _text(top.get("base", ""), "orchestrator.base")
+    if base and not _BRANCH.fullmatch(base):
+        raise _InvalidPolicyError(f"orchestrator.base : {base!r} n'est pas un nom de branche simple (lettres, chiffres, . _ / -)")
     return OrchestratorPolicy(
         worker=_parse_worker(roles["worker"]) if "worker" in roles else WorkerRole(),
+        base=base,
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
         close_issue=close_issue,
     )
