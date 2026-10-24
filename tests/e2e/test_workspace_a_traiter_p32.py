@@ -435,11 +435,23 @@ def test_p63_detail_contexte_paires_action_existante_et_equivalent_cli(page: Pag
     )
 
 
-def test_p63_le_compteur_de_decisions_est_sur_l_onglet(page: Page, served_inbox: dict[str, str]) -> None:
+def test_p63_le_badge_de_l_onglet_est_la_somme_des_tuiles(page: Page, served_inbox: dict[str, str]) -> None:
+    for suffix in (f"?project={served_inbox['home']}#a-traiter", "?scope=all#a-traiter"):
+        _open(page, served_inbox, suffix)
+        assert page.locator("#decisions-pill").count() == 0
+        page.wait_for_function("() => !document.getElementById('decisions-count').hidden")
+        badge = int(page.locator("#tab-space-a-traiter #decisions-count").inner_text())
+        total = sum(int(v) for v in page.locator(".kpi .kpi-val").all_inner_texts())
+        count = page.evaluate("async () => (await (await fetch('/api/workspace/attention' + (new URLSearchParams(location.search).get('scope') === 'all' ? '?scope=portfolio' : ''))).json()).count")
+        assert badge == total == count > 0, (suffix, badge, total, count)
+
+
+def test_p63_le_badge_suit_l_espace_travail_aussi(page: Page, served_inbox: dict[str, str]) -> None:
     _open(page, served_inbox, f"?project={served_inbox['home']}#a-traiter")
-    assert page.locator("#decisions-pill").count() == 0
+    page.locator("#tab-space-travail").click()
+    page.wait_for_function("() => window.GrimoireWorkspace.space === 'travail'")
     page.wait_for_function("() => !document.getElementById('decisions-count').hidden")
-    assert page.locator("#tab-space-a-traiter #decisions-count").inner_text() == "1"
+    assert page.locator("#decisions-count").inner_text() == "3"
 
 
 # ── Captures pour la relecture ──────────────────────────────────────────────

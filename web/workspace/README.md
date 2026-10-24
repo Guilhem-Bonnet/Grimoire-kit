@@ -182,11 +182,10 @@ gardées par `tests/e2e/test_workspace_live_pilot.py` (sondage) et
    « 0 » (`costText`) ; une durée incalculable « inconnue ». Le coût d'une carte est
    celui des tentatives de dispatch ; celui de la session hôte n'est mesuré nulle part.
 
-Le compteur de décisions est un badge de l'onglet « À traiter » (`#decisions-count`,
-plus de pastille séparée) : global sur le cockpit (tout le registre), propre au projet
-sur l'atelier, caché à zéro. Il compte les décisions K6 en attente ; l'espace À traiter
-montre en plus propositions, blocages et maintenance. La vue Décisions de Travail
-s'ouvre depuis l'action de la question. La barre d'état dit « mis à jour il y a Xs », ou
+Le compteur de l'onglet « À traiter » (`#decisions-count`, plus de pastille séparée) est le
+`count` de `/api/workspace/attention` dans la portée courante (hors « résolu automatiquement »),
+caché à zéro, relu au premier pouls et quand l'empreinte du pouls change. Il égale la somme des
+tuiles de l'espace. La barre d'état dit « mis à jour il y a Xs », ou
 « actualisation suspendue » (onglet masqué), ou « API injoignable depuis Xs ».
 
 ## Citer un concept

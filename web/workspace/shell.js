@@ -1446,22 +1446,41 @@ function renderReadOnlyBanner() {
 
 // ── Pouls : actualisation, compteur de décisions, horodatage ────────────────
 
-// Le compteur de la barre du haut : les décisions que K6 met en attente d'un
-// humain, de tout le registre sur le cockpit. Caché à zéro (rien à faire), mais
-// un projet illisible reste dit : un compteur qui ignorerait ce qu'il ne peut
-// pas lire mentirait par omission.
-function renderDecisionsPill(decisions) {
+// Le compteur de l'onglet « À traiter » : le `count` de `/api/workspace/attention`
+// (hors « résolu automatiquement »), dans la portée courante — le nombre
+// d'éléments qui attendent dans l'espace, celui qui décide aussi de son état
+// vide. Lecture seule : relu au premier pouls et chaque fois que l'empreinte du
+// pouls change ; le pouls lui-même (décisions K6) n'est plus qu'un déclencheur.
+let attentionPrint = null;
+let attentionSeq = 0;
+
+function renderAttentionCount(count, unreadable = 0) {
   const badgeNode = $('decisions-count');
   const tab = $('tab-space-a-traiter');
-  const pending = Number(decisions && decisions.pending) || 0;
-  const unreadable = (decisions && decisions.unreadable) || [];
-  badgeNode.hidden = pending === 0 && unreadable.length === 0;
-  badgeNode.textContent = String(pending);
-  let label = `${pending} décision${pending > 1 ? 's' : ''} en attente`;
-  if (unreadable.length) label += ` — ${unreadable.length} projet(s) illisible(s) : ${unreadable.join(', ')}`;
+  badgeNode.hidden = count === 0;
+  badgeNode.textContent = String(count);
+  let label = `${count} élément${count > 1 ? 's' : ''} à traiter`;
+  if (unreadable) label += ` — ${unreadable} projet(s) illisible(s)`;
   badgeNode.title = label;
   tab.setAttribute('aria-label', badgeNode.hidden ? 'À traiter' : `À traiter — ${label}`);
-  badgeNode.dataset.pending = String(pending);
+  badgeNode.dataset.pending = String(count);
+}
+
+async function refreshAttentionCount() {
+  const seq = ++attentionSeq;
+  try {
+    const data = await api.attention(host.scopeAll);
+    if (seq !== attentionSeq) return;
+    const unreadable = (data.projects || []).filter((p) => p.state === 'unreadable').length;
+    renderAttentionCount(Number(data.count) || 0, unreadable);
+  } catch { /* le compteur garde sa dernière valeur : l'espace dit l'erreur */ }
+}
+
+function onPulseDecisions() {
+  const print = live.state.fingerprint;
+  if (print !== null && print === attentionPrint) return;
+  attentionPrint = print;
+  refreshAttentionCount();
 }
 
 function openDecisions() {
@@ -1472,7 +1491,7 @@ function openDecisions() {
 }
 
 const live = createLive({
-  onDecisions: renderDecisionsPill,
+  onDecisions: onPulseDecisions,
   onState: () => renderLiveStamp(),
 });
 
