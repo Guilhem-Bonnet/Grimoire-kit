@@ -79,6 +79,7 @@ from grimoire.tools import (
     source_assist,
     workspace_api,
     workspace_attention,
+    workspace_config,
     workspace_exec,
     workspace_language,
     workspace_memory,
@@ -215,6 +216,16 @@ def _blueprints(project_root: Path, _query: _Query) -> Any:
 
 def _agents(project_root: Path, _query: _Query) -> Any:
     return workspace_api.agents_view(project_root)
+
+
+def _hooks(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/hooks`` — le registre de sûreté des hooks (P66). Lecture pure."""
+    return workspace_config.hooks_view(project_root)
+
+
+def _providers(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/providers`` — les fournisseurs de modèles, état et palier (P66). Lecture pure."""
+    return workspace_config.providers_view(project_root)
 
 
 def _proposals(project_root: Path, _query: _Query) -> Any:
@@ -396,6 +407,8 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}assist": _assist_status,
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
+    f"{PREFIX}hooks": _hooks,
+    f"{PREFIX}providers": _providers,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,

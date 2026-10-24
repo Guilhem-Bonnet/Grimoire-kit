@@ -69,9 +69,15 @@ const SPACES = [
       { id: 'journal', module: 'observer', label: 'Journal' },
     ] },
   { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',
+    // Atterrit sur « Hôtes et hooks » (maquette Configuration) : l'arbre de
+    // fichiers est une rubrique parmi d'autres, pas l'écran d'arrivée.
+    landing: 'hotes',
     sections: [
+      { id: 'agents', module: 'configurer', label: 'Agents', count: (api) => api.agents().then((d) => (d.agents || []).length) },
       { id: 'fichiers', module: 'source', label: 'Fichiers' },
-      { id: 'blueprints', module: 'concevoir', label: 'Blueprints' },
+      { id: 'blueprints', module: 'concevoir', label: 'Blueprints', count: (api) => api.blueprintContainers().then((d) => d.count) },
+      { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', count: (api) => api.hooks().then((d) => d.total) },
+      { id: 'fournisseurs', module: 'configurer', label: 'Fournisseurs et budgets' },
       { id: 'preferences', module: null, label: 'Préférences' },
     ] },
 ];
@@ -92,7 +98,7 @@ const LEGACY_SECTION = {
  * rouvre la dernière rubrique vue dans cette session, sinon la première. */
 function resolveSection(target) {
   const space = SPACES.find((s) => s.id === target);
-  if (space) return SECTIONS.get(lastSection[space.id]) || space.sections[0];
+  if (space) return SECTIONS.get(lastSection[space.id]) || SECTIONS.get(space.landing) || space.sections[0];
   return SECTIONS.get(target) || SECTIONS.get(LEGACY_SECTION[target]) || SPACES[0].sections[0];
 }
 
@@ -1048,9 +1054,7 @@ function emptyPanelHint(which) {
   if (which === 'explorer') {
     return empty(
       "Pas d'arborescence ici",
-      current === 'fichiers'
-        ? "Aucun fichier à parcourir pour l'instant."
-        : "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Configuration › Fichiers.",
+      "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Configuration › Fichiers.",
       null,
       current === 'fichiers' ? null : { label: 'Ouvrir les fichiers', run: () => goto('fichiers') },
       { compact: true },
@@ -1146,6 +1150,22 @@ function buildSpaces() {
 }
 
 /** Les rubriques de l'espace courant ; masquées quand il n'en a qu'une. */
+/** Le compte d'une rubrique (« Agents 3 ») : lu une fois par portée, jamais
+ * deviné. Une lecture qui échoue laisse l'étiquette sans nombre. */
+const sectionCounts = new Map();
+
+function fillSectionCount(item, button) {
+  const show = (n) => {
+    if (!Number.isFinite(n) || !button.isConnected) return;
+    button.append(mk('span', { class: 'tab-count', text: String(n), 'data-count': item.id }));
+    button.setAttribute('aria-label', `${item.label}, ${n}`);
+  };
+  if (!sectionCounts.has(item.id)) {
+    sectionCounts.set(item.id, Promise.resolve(item.count(api)).catch(() => null));
+  }
+  sectionCounts.get(item.id).then(show);
+}
+
 function renderSectionTabs(space, section) {
   const list = $('section-tabs');
   list.replaceChildren();
@@ -1157,6 +1177,7 @@ function renderSectionTabs(space, section) {
     button.dataset.section = item.id;
     button.addEventListener('click', () => goto(item.id));
     list.append(button);
+    if (item.count) fillSectionCount(item, button);
   }
   markSelectedTab(list, list.querySelector(`[data-section="${section.id}"]`));
 }
@@ -1271,6 +1292,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   const ctx = {
     api, host, glossary, dock, docbar, empty, icon,
     canvas,
+    section: section.id,
     scope,
     setItem,
     inspector: $('inspector-body'),

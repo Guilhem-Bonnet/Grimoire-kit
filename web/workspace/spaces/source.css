@@ -463,3 +463,38 @@
   color: var(--ink3);
   font-size: var(--t-s);
 }
+
+/* L'arbre dans le contenu de la rubrique Fichiers : colonne à gauche, le
+   fichier ouvert à droite ; une seule colonne sous 900 px. */
+.sr-split {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.sr-tree {
+  overflow: auto;
+  padding: var(--sp-3);
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.sr-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .sr-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sr-tree {
+    max-height: 40vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

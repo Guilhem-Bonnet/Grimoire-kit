@@ -68,11 +68,9 @@ def test_chaque_espace_n_affiche_que_la_barre_le_contenu_et_le_detail(
     assert _visible(page, "#canvas")
     for selector in ATELIER:
         assert not _visible(page, selector), f"{selector} doit être masqué par défaut dans {space}"
-    # L'explorateur n'est là que pour l'arbre de la rubrique Fichiers (Configuration) :
-    # c'est sa navigation, pas un outil de diagnostic.
-    explorer = page.locator("#panel-explorer").get_attribute("data-detail")
-    assert _visible(page, "#panel-explorer") == (explorer == "on")
-    assert explorer == ("on" if page.evaluate("window.GrimoireWorkspace.section") == "fichiers" else "off")
+    # L'arbre de Fichiers vit dans le contenu de sa rubrique (P66) : l'explorateur
+    # n'est plus jamais là hors atelier.
+    assert not _visible(page, "#panel-explorer")
     # Le panneau de détail n'est là que si l'écran y a mis du contenu.
     detail = page.locator("#panel-inspector").get_attribute("data-detail")
     assert _visible(page, "#panel-inspector") == (detail == "on")
@@ -129,6 +127,9 @@ def test_la_palette_propose_d_afficher_les_panneaux_d_atelier(cockpit_workspace:
 def test_le_panneau_de_detail_suit_le_contenu_de_ctx_inspector(cockpit_workspace: Page) -> None:
     page = cockpit_workspace
     _goto(page, "configuration")
+    page.evaluate("window.GrimoireWorkspace.goto('preferences')")
+    page.wait_for_function("window.GrimoireWorkspace.section === 'preferences'")
+    page.wait_for_selector("#canvas[aria-busy='false']", timeout=30_000)
     page.evaluate("document.getElementById('inspector-body').replaceChildren()")
     page.wait_for_function("document.getElementById('panel-inspector').dataset.detail === 'off'")
     assert not _visible(page, "#panel-inspector")

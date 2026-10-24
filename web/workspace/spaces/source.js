@@ -42,6 +42,7 @@ function ensureStylesheet() {
 function freshState() {
   return {
     tree: null,
+    treeEl: null,
     dirsOpen: new Set(),
     currentPath: null,
     currentEntry: null,
@@ -85,6 +86,19 @@ export async function mount(root, ctx) {
     return;
   }
   state.tree = tree;
+  // L'arbre vit dans le contenu de la rubrique (P66), une colonne à gauche du
+  // fichier ouvert : l'explorateur d'atelier (⇧⌘L) reste celui de la coque.
+  const split = document.createElement('div');
+  split.className = 'sr-split';
+  const treeEl = document.createElement('nav');
+  treeEl.className = 'tree sr-tree';
+  treeEl.setAttribute('aria-label', 'Arborescence des fichiers');
+  const pane = document.createElement('div');
+  pane.className = 'sr-pane';
+  split.append(treeEl, pane);
+  root.replaceChildren(split);
+  state.treeEl = treeEl;
+  root = pane;
   renderExplorer(ctx, root);
   renderCanvas(root, ctx);
 
@@ -148,19 +162,19 @@ function fileBadge(entry) {
 }
 
 function renderExplorer(ctx, root) {
-  ctx.explorer.replaceChildren();
+  state.treeEl.replaceChildren();
   for (const tier of state.tree.tiers) {
     const head = document.createElement('div');
     head.className = 'sr-tree-tier';
     if (tier.term) head.dataset.term = tier.term;
     head.textContent = `${tier.label} · ${tier.count}${tier.truncated ? ' (+ )' : ''}`;
-    ctx.explorer.append(head);
+    state.treeEl.append(head);
 
     if (!tier.exists) {
       const note = document.createElement('div');
       note.className = 'sr-tree-file lbl';
       note.textContent = tier.note ? `aucun fichier — ${tier.note}` : 'aucun fichier';
-      ctx.explorer.append(note);
+      state.treeEl.append(note);
       continue;
     }
 
@@ -187,7 +201,7 @@ function renderExplorer(ctx, root) {
           else state.dirsOpen.delete('closed:' + dirKey);
           renderExplorer(ctx, root);
         });
-        ctx.explorer.append(dirBtn);
+        state.treeEl.append(dirBtn);
       }
       if (!open && dir) continue;
       for (const file of files.sort((a, b) => a.path.localeCompare(b.path))) {
@@ -209,7 +223,7 @@ function renderExplorer(ctx, root) {
           row.append(letter);
         }
         row.addEventListener('click', () => openFile(ctx, root, file.path));
-        ctx.explorer.append(row);
+        state.treeEl.append(row);
       }
     }
   }
@@ -291,11 +305,9 @@ function renderCanvas(root, ctx) {
     root.append(ctx.empty(
       'Source',
       total
-        ? `${total} fichier(s) répartis sur ${state.tree.tiers.length} étages. Choisissez un fichier dans l'explorateur.`
+        ? `${total} fichier(s) répartis sur ${state.tree.tiers.length} étages. Choisissez un fichier dans l'arborescence.`
         : "Aucun fichier trouvé. `grimoire init` puis `grimoire standard init` peuplent les étages.",
       'grimoire doctor --check-paths',
-      // Sous 900 px l'explorateur est un tiroir fermé : le bouton l'ouvre.
-      total ? { label: "Ouvrir l'explorateur", run: () => ctx.openPanel('explorer') } : undefined,
     ));
     return;
   }
