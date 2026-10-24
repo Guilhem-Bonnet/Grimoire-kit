@@ -17,6 +17,7 @@ import typer
 # `memory status`, `memory shared` sur memory_app, et `memory graph` /
 # `memory vector` sur leurs sous-apps.
 from grimoire.cli import (
+    cmd_memory_knowledge,  # noqa: F401
     cmd_memory_ops,  # noqa: F401
     cmd_memory_packs,  # noqa: F401
     cmd_memory_projections,  # noqa: F401

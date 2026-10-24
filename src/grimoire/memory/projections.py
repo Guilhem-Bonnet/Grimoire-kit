@@ -13,6 +13,7 @@ from grimoire.codegraph.graph import CodeGraph
 from grimoire.codegraph.parser import DEFAULT_EXCLUDE
 from grimoire.codegraph.schemas import CodeEdge, CodeNode, NodeKind
 from grimoire.evidence.service import EvidenceService
+from grimoire.memory.knowledge import projection_is_current, stamp_projection_entries
 from grimoire.missions.ledger import MissionLedger
 
 if TYPE_CHECKING:
@@ -484,7 +485,7 @@ def build_code_vector_entries(
                         rel_path=rel_path,
                     ),
                 ))
-    return entries
+    return stamp_projection_entries(root, entries)
 
 
 def sync_code_vector_projection(
@@ -501,7 +502,7 @@ def sync_code_vector_projection(
     upserted = 0
     for entry in entries:
         existing = actual_by_id.get(str(entry["id"]))
-        if existing is not None and existing.metadata.get("content_hash") == entry["metadata"].get("content_hash"):
+        if existing is not None and projection_is_current(existing.metadata, entry["metadata"]):
             continue
         memory.upsert(
             str(entry["id"]),
@@ -933,7 +934,7 @@ def build_docs_entries(
                 "truncated": len(content) > _DOCS_TEXT_MAX_CHARS,
             },
         ))
-    return entries
+    return stamp_projection_entries(root, entries)
 
 
 def sync_docs_projection(
@@ -949,7 +950,7 @@ def sync_docs_projection(
     upserted = 0
     for entry in entries:
         existing = actual_by_id.get(str(entry["id"]))
-        if existing is not None and existing.metadata.get("content_hash") == entry["metadata"]["content_hash"]:
+        if existing is not None and projection_is_current(existing.metadata, entry["metadata"]):
             continue
         memory.upsert(
             str(entry["id"]),
