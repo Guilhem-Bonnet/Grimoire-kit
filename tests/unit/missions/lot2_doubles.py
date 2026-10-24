@@ -47,6 +47,8 @@ class FakeHost:
         self.bg_fails = False
         self.stop_result = ExecResult(0, "stopped\n")
         self.prs: dict[str, str] = {}  # branche → état (MERGED, OPEN, CLOSED) ; absente : aucune PR
+        self.pr_heads: dict[str, str] = {}  # branche → headRefOid ; absente : la tête locale de la branche
+        self.pr_no_head = False  # JSON partiel : ni headRefOid
         self.gh_broken = False
         self.closed_issues: list[str] = []
         self._next = 0
@@ -56,7 +58,7 @@ class FakeHost:
         if argv[0] == "claude":
             return self._claude(list(argv))
         if argv[0] == "gh":
-            return self._gh(list(argv))
+            return self._gh(list(argv), cwd)
         return ExecResult(127, "", f"{argv[0]} : faux binaire inconnu")
 
     def _claude(self, argv: list[str]) -> ExecResult:
@@ -69,14 +71,17 @@ class FakeHost:
             return self.stop_result
         return ExecResult(2, "", "sous-commande inconnue")
 
-    def _gh(self, argv: list[str]) -> ExecResult:
+    def _gh(self, argv: list[str], cwd: Path) -> ExecResult:
         if self.gh_broken:
             return ExecResult(1, "", "gh : réseau indisponible")
         if argv[1:3] == ["pr", "view"]:
             state = self.prs.get(argv[3])
             if state is None:
                 return ExecResult(1, "", "no pull requests found for branch")
-            return ExecResult(0, json.dumps({"state": state, "number": 7}))
+            body: dict[str, object] = {"state": state, "number": 7}
+            if not self.pr_no_head:
+                body["headRefOid"] = self.pr_heads.get(argv[3]) or git(cwd, "rev-parse", f"refs/heads/{argv[3]}")
+            return ExecResult(0, json.dumps(body))
         if argv[1:3] == ["issue", "close"]:
             self.closed_issues.append(argv[3])
             return ExecResult(0, "")

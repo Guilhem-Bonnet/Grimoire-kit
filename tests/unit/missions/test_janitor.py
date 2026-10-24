@@ -358,3 +358,110 @@ def test_en_plan_le_janitor_dit_ce_qu_il_ferait_sans_rien_toucher(projet: Path, 
     assert [(o.task_id, o.status) for o in report.cleanup] == [(tid, "planned")]
     wt = find_task_worktree(TaskService(projet), tid)
     assert wt is not None and wt.path.is_dir() and host.calls == []
+
+
+# ── Revue adversariale du lot 2 ─────────────────────────────────────────────────
+
+
+def push_more(projet: Path, branch: str, *, remote_only: bool = False) -> str:
+    """Quelqu'un pousse un commit de plus sur la branche, après la fusion de la PR."""
+    clone = projet.parent / "autre-clone"
+    if not clone.exists():
+        git(projet, "fetch", "-q", "origin", branch)
+        git(projet.parent, "clone", "-q", str(projet.parent / "remote.git"), str(clone))
+        git(clone, "config", "user.name", "Autre")
+        git(clone, "config", "user.email", "autre@example.invalid")
+        git(clone, "config", "commit.gpgsign", "false")
+    git(clone, "checkout", "-q", branch)
+    (clone / "apres-fusion.txt").write_text("nouveau\n", encoding="utf-8")
+    git(clone, "add", "--", "apres-fusion.txt")
+    git(clone, "commit", "-q", "-m", "apres la fusion")
+    git(clone, "push", "-q", "origin", branch)
+    return git(clone, "rev-parse", "HEAD")
+
+
+def test_pr_fusionnee_puis_nouveaux_commits_en_distant_la_branche_distante_reste(projet: Path, host: FakeHost) -> None:
+    tid = worked_task(projet, host)
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None
+    host.prs[wt.branch] = "MERGED"  # headRefOid = la tête fusionnée (la locale)
+    merged_head = git(projet, "rev-parse", f"refs/heads/{wt.branch}")
+    host.pr_heads[wt.branch] = merged_head
+    pushed = push_more(projet, wt.branch)
+    finish(projet, tid, TaskState.CLOSED)
+    result = by_action(sweep(projet, host))
+    assert result["branch_remote"] == "refused"
+    assert git(projet, "ls-remote", "--heads", "origin", f"refs/heads/{wt.branch}").split()[0] == pushed  # les commits sont sauvés
+    assert result["branch_local"] == "done"  # la locale est bien la tête fusionnée
+
+
+def test_pr_fusionnee_puis_commits_locaux_la_branche_locale_reste(projet: Path, host: FakeHost) -> None:
+    tid = worked_task(projet, host)
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None
+    host.prs[wt.branch] = "MERGED"
+    host.pr_heads[wt.branch] = git(projet, "rev-parse", f"refs/heads/{wt.branch}")
+    (wt.path / "plus-tard.txt").write_text("x\n", encoding="utf-8")
+    git(wt.path, "add", "--", "plus-tard.txt")
+    git(wt.path, "commit", "-q", "-m", "après la fusion")
+    finish(projet, tid, TaskState.CLOSED)
+    result = by_action(sweep(projet, host))
+    assert result["branch_local"] == "refused" and local_has(projet, wt.branch)
+    assert result["branch_remote"] == "done"  # la distante est bien la tête fusionnée : seule la locale a avancé
+
+
+def test_json_partiel_sans_tete_fusionnee_aucune_branche_supprimee(projet: Path, host: FakeHost) -> None:
+    tid = worked_task(projet, host)
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None
+    host.prs[wt.branch] = "MERGED"
+    host.pr_no_head = True
+    finish(projet, tid, TaskState.CLOSED)
+    result = by_action(sweep(projet, host))
+    assert result["branch_local"] == "failed" and result["branch_remote"] == "failed"
+    assert local_has(projet, wt.branch) and remote_has(projet, wt.branch)
+
+
+def test_une_ancienne_pr_fusionnee_d_une_tentative_precedente_ne_couvre_pas_la_branche(projet: Path, host: FakeHost) -> None:
+    tid = worked_task(projet, host)
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None
+    host.prs[wt.branch] = "MERGED"
+    host.pr_heads[wt.branch] = "a" * 40  # la PR fusionnée porte une autre tête
+    finish(projet, tid, TaskState.CLOSED)
+    result = by_action(sweep(projet, host))
+    assert result["branch_local"] == "refused" and result["branch_remote"] == "refused"
+    assert local_has(projet, wt.branch) and remote_has(projet, wt.branch)
+
+
+@pytest.mark.parametrize("code", [124, 126, 127])
+def test_claude_stop_qui_ne_s_execute_pas_n_est_pas_une_session_absente(projet: Path, host: FakeHost, code: int) -> None:
+    tid = worked_task(projet, host)
+    host.stop_result = ExecResult(code, "", "claude : binaire introuvable")
+    finish(projet, tid, TaskState.CANCELLED)
+    result = by_action(sweep(projet, host))
+    assert result["session"] == "failed"
+
+
+def test_une_branche_task_que_le_lanceur_n_a_pas_posee_n_est_jamais_touchee(projet: Path, host: FakeHost) -> None:
+    """Une tâche close avec un créneau CI mais sans worktree noté : sa branche ``task/<id>`` est celle de quelqu'un d'autre."""
+    service = TaskService(projet)
+    mission = service.ledger.create_mission(title="x", origin="test")
+    task = service.ledger.create_task(mission.id, "manuelle", acceptance=("ok",), owner="amelia")
+    git(projet, "branch", f"task/{task.id}")
+    git(projet, "push", "-q", "origin", f"task/{task.id}")
+    service.ledger.transition_task(task.id, TaskState.READY)
+    service.ledger.append_event(CI_PUSHED_EVENT, task.id, "task", "test", {"branch": f"task/{task.id}"})
+    service.ledger.transition_task(task.id, TaskState.CANCELLED, actor_id="test")
+    host.prs[f"task/{task.id}"] = "MERGED"
+    result = by_action(sweep(projet, host))
+    assert result.get("branch_local") == "skipped" and result.get("branch_remote") == "skipped"
+    assert local_has(projet, f"task/{task.id}") and remote_has(projet, f"task/{task.id}")
+
+
+def test_une_simple_mention_d_issue_ne_la_ferme_pas(projet: Path, host: FakeHost) -> None:
+    write_policy(projet, close_issue=True)
+    tid = worked_task(projet, host, description="Voir aussi issue #42 pour le contexte")
+    host.prs[f"task/{tid}"] = "MERGED"
+    finish(projet, tid, TaskState.CLOSED)
+    assert by_action(sweep(projet, host))["issue"] == "skipped" and host.closed_issues == []

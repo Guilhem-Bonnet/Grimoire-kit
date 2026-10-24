@@ -51,7 +51,8 @@ JANITOR_ACTOR = "janitor"
 ARCHIVE_DIR = "_grimoire-output/archive/evidence"
 _TERMINAL = (TaskState.CLOSED, TaskState.CANCELLED, TaskState.FAILED)
 _FINAL = frozenset({"done", "skipped"})
-_ISSUE_LINK = re.compile(r"(?:closes|fixes|issue)\s*:?\s*#(\d+)", re.IGNORECASE)
+_ISSUE_LINK = re.compile(r"\b(?:closes|closed|fixes|fixed|resolves|resolved)\s*:?\s*#(\d+)", re.IGNORECASE)
+_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _GONE = ("no such", "not found", "unknown session", "introuvable", "no session")
 
 
@@ -155,9 +156,9 @@ class Janitor:
             str(e.payload.get("action")) for e in _window(self._service, tid)
             if e.event_type == ACTION_EVENT and e.payload.get("status") in _FINAL
         }
-        merged: list[tuple[str, str]] = []  # preuve de fusion, calculée une fois si une action en a besoin
+        merged: list[tuple[str, str, str]] = []  # preuve de fusion, calculée une fois si une action en a besoin
 
-        def proof() -> tuple[str, str]:
+        def proof() -> tuple[str, str, str]:
             if not merged:
                 merged.append(self._merged_proof(tid))
             return merged[0]
@@ -218,7 +219,8 @@ class Janitor:
         if result.returncode == 0:
             return "done", f"session {sid} arrêtée"
         text = (result.stderr + result.stdout).lower()
-        if any(word in text for word in _GONE):
+        # 124, 126, 127 : délai, non exécutable, binaire absent — la session n'est pas dite absente, elle est peut-être vivante.
+        if result.returncode not in (124, 126, 127) and any(word in text for word in _GONE):
             return "done", f"session {sid} déjà absente"
         return "failed", f"claude stop {sid} a échoué ({result.returncode}) : {(result.stderr or result.stdout).strip()[:200]}"
 
@@ -234,24 +236,36 @@ class Janitor:
         return "done", f"worktree {wt.path} retiré"
 
     def _branch(self, tid: str) -> str:
+        """La branche que le lanceur (ou ``task_worktree``) a créée, notée au ledger ; jamais un ``task/<id>`` qu'on n'a pas posé."""
         wt = find_task_worktree(self._service, tid)
-        return wt.branch if wt is not None else TASK_BRANCH_PREFIX + tid
+        if wt is None or wt.branch != TASK_BRANCH_PREFIX + tid:
+            return ""
+        return wt.branch
 
-    def _merged_proof(self, tid: str) -> tuple[str, str]:
-        """``("merged"|"unmerged"|"unknown", détail)`` : ``gh pr view`` d'abord, le reçu de fusion locale à défaut de PR."""
+    def _merged_proof(self, tid: str) -> tuple[str, str, str]:
+        """``("merged"|"unmerged"|"unknown", détail, sha)`` : ``gh pr view`` d'abord, le reçu de fusion locale à défaut de PR.
+
+        *sha* est la tête de branche que la fusion couvre (``headRefOid`` de la PR) : une branche qui a avancé depuis
+        n'est pas couverte, la supprimer perdrait des commits.
+        """
         branch = self._branch(tid)
-        result = self._exec(["gh", "pr", "view", branch, "--json", "state,number"], self._repo, None)
+        if not branch:
+            return "unmerged", "branche non créée par le lanceur", ""
+        result = self._exec(["gh", "pr", "view", branch, "--json", "state,number,headRefOid"], self._repo, None)
         if result.returncode == 0:
             try:
                 data = json.loads(result.stdout)
                 state = str(data["state"]).upper()
             except (ValueError, KeyError, TypeError):
-                return "unknown", "réponse de gh pr view illisible"
-            if state == "MERGED":
-                return "merged", f"PR #{data.get('number', '?')} fusionnée"
-            return "unmerged", f"PR #{data.get('number', '?')} à l'état {state}"
+                return "unknown", "réponse de gh pr view illisible", ""
+            if state != "MERGED":
+                return "unmerged", f"PR #{data.get('number', '?')} à l'état {state}", ""
+            oid = str(data.get("headRefOid") or "")
+            if not _SHA.fullmatch(oid):
+                return "unknown", "gh pr view ne donne pas la tête fusionnée (headRefOid)", ""
+            return "merged", f"PR #{data.get('number', '?')} fusionnée à {oid[:12]}", oid
         if "no pull requests found" not in result.stderr.lower():
-            return "unknown", f"gh pr view a échoué ({result.returncode}) : {result.stderr.strip()[:200]}"
+            return "unknown", f"gh pr view a échoué ({result.returncode}) : {result.stderr.strip()[:200]}", ""
         wt = find_task_worktree(self._service, tid)
         head = _git(self._repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}").stdout.strip()
         if wt is not None and head:
@@ -260,28 +274,35 @@ class Janitor:
             )
             contained = _git(self._repo, "merge-base", "--is-ancestor", head, f"refs/heads/{wt.into}").returncode == 0
             if receipt and contained:
-                return "merged", f"fusion locale attestée (task.merged), {branch} contenue dans {wt.into}"
-        return "unmerged", "aucune PR et aucune fusion locale attestée"
+                return "merged", f"fusion locale attestée (task.merged), {branch} contenue dans {wt.into}", head
+        return "unmerged", "aucune PR et aucune fusion locale attestée", ""
 
-    def _guard(self, proof: tuple[str, str]) -> tuple[str, str] | None:
-        status, detail = proof
+    def _guard(self, proof: tuple[str, str, str]) -> tuple[str, str] | None:
+        status, detail, _sha = proof
         if status == "merged":
             return None
         return ("refused", f"branche conservée : {detail}") if status == "unmerged" else ("failed", f"fusion non vérifiée, branche conservée : {detail}")
 
-    def _branch_local(self, tid: str, proof: tuple[str, str]) -> tuple[str, str]:
+    def _branch_local(self, tid: str, proof: tuple[str, str, str]) -> tuple[str, str]:
         branch = self._branch(tid)
-        if not _git(self._repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").stdout.strip():
+        if not branch:
+            return "skipped", "aucune branche posée par le lanceur"
+        head = _git(self._repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").stdout.strip()
+        if not head:
             return "skipped", f"{branch} n'existe pas en local"
         if (refused := self._guard(proof)) is not None:
             return refused
+        if head != proof[2]:
+            return "refused", f"branche conservée : {branch} est à {head[:12]}, la fusion couvre {proof[2][:12]} (commits postérieurs)"
         done = _git(self._repo, "branch", "-D", branch)
         if done.returncode != 0:
             return "failed", f"git branch -D {branch} refusé : {(done.stderr or done.stdout).strip()[:200]}"
         return "done", f"{branch} supprimée en local ({proof[1]})"
 
-    def _branch_remote(self, tid: str, proof: tuple[str, str]) -> tuple[str, str]:
+    def _branch_remote(self, tid: str, proof: tuple[str, str, str]) -> tuple[str, str]:
         branch = self._branch(tid)
+        if not branch:
+            return "skipped", "aucune branche posée par le lanceur"
         remotes = _git(self._repo, "remote").stdout.split()
         if self._remote not in remotes:
             return "skipped", f"aucun remote {self._remote}"
@@ -292,7 +313,11 @@ class Janitor:
             return "skipped", f"{branch} n'existe pas sur {self._remote}"
         if (refused := self._guard(proof)) is not None:
             return refused
-        done = _git(self._repo, "push", self._remote, "--delete", branch)
+        remote_head = listing.stdout.split()[0]
+        if remote_head != proof[2]:
+            return "refused", f"branche conservée : {branch} est à {remote_head[:12]} sur {self._remote}, la fusion couvre {proof[2][:12]} (commits postérieurs)"
+        # Le bail ferme la fenêtre entre le contrôle et la suppression : un push intermédiaire fait refuser la suppression.
+        done = _git(self._repo, "push", self._remote, f"--force-with-lease=refs/heads/{branch}:{proof[2]}", "--delete", branch)
         if done.returncode != 0:
             return "failed", f"git push --delete {branch} refusé : {(done.stderr or done.stdout).strip()[:200]}"
         return "done", f"{branch} supprimée sur {self._remote} ({proof[1]})"
@@ -308,7 +333,7 @@ class Janitor:
         shutil.copytree(source, target)
         return "done", f"preuve copiée sous {ARCHIVE_DIR}/{tid}"
 
-    def _issue(self, tid: str, proof: tuple[str, str]) -> tuple[str, str]:
+    def _issue(self, tid: str, proof: tuple[str, str, str]) -> tuple[str, str]:
         if not self._policy.close_issue:
             return "skipped", "janitor.close_issue désactivé"
         match = _ISSUE_LINK.search(self._service.require(tid).description or "")
