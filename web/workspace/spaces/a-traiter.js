@@ -358,6 +358,8 @@ export async function mount(root, ctx) {
         label: 'Réessayer', run: () => refresh(true),
       }));
       ctx.inspector.replaceChildren();
+      // Les lignes sont détachées : sans ça, j / k agiraient encore sur elles.
+      rows = [];
       return;
     }
     if (ctx.signal.aborted) return;
