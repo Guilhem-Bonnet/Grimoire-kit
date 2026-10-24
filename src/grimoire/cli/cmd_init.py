@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,6 +132,22 @@ def _looks_like_a_playground(target: Path) -> bool:
 
 # ── Memory backend detection ─────────────────────────────────────────────────
 
+# Un service local répond au SYN en quelques millisecondes (c'est le noyau
+# qui répond) ; un port fermé est refusé aussitôt sous Linux/macOS mais pas
+# sous Windows (SYN sans réponse) : chaque sonde HTTP y payait ses 2 s, soit
+# ~43 s par ``grimoire init -y`` mesurés sur windows-latest (#857).
+_LOOPBACK_CONNECT_TIMEOUT = 0.5
+
+
+def _port_answers(url: str, *, timeout: float = _LOOPBACK_CONNECT_TIMEOUT) -> bool:
+    """Vrai si quelque chose écoute sur le port de *url* — un ``connect`` TCP borné, rien de plus."""
+    parsed = urllib.parse.urlparse(url)
+    try:
+        with socket.create_connection((parsed.hostname or "localhost", parsed.port or 80), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
 
 def _http_ok(url: str, *, timeout: float = 2.0) -> bool:
     """Return True when a local HTTP probe responds successfully."""
@@ -145,12 +162,16 @@ def _http_ok(url: str, *, timeout: float = 2.0) -> bool:
 def _is_qdrant_reachable(qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
     """Probe Qdrant's local HTTP API."""
     base = qdrant_url.rstrip("/")
+    if not _port_answers(base):
+        return False
     return any(_http_ok(f"{base}{endpoint}") for endpoint in ("/readyz", "/collections", "/healthz"))
 
 
 def _is_weaviate_reachable(weaviate_url: str = _WEAVIATE_DEFAULT_URL) -> bool:
     """Probe Weaviate's local HTTP API."""
     base = weaviate_url.rstrip("/")
+    if not _port_answers(base):
+        return False
     return any(_http_ok(f"{base}{endpoint}") for endpoint in ("/v1/.well-known/ready", "/v1/meta"))
 
 
@@ -164,7 +185,8 @@ def _is_ollama_reachable(ollama_url: str = _OLLAMA_DEFAULT_URL) -> bool:
     nothing to patch it by — a test could stub the other two services but
     not this one (see ``tests/test_cmd_init.py::_stub_unreachable_memory_services``).
     """
-    return _http_ok(f"{ollama_url.rstrip('/')}/api/tags")
+    base = ollama_url.rstrip("/")
+    return _port_answers(base) and _http_ok(f"{base}/api/tags")
 
 
 def detect_memory_backend() -> str:
@@ -286,7 +308,7 @@ def _is_docker_available() -> bool:
 def _is_redis_reachable(host: str = "localhost", port: int = 6379) -> bool:
     """Probe a local Redis — the hot-memory layer cannot be composed without one."""
     try:
-        with socket.create_connection((host, port), timeout=1.0):
+        with socket.create_connection((host, port), timeout=_LOOPBACK_CONNECT_TIMEOUT):
             return True
     except OSError:
         return False
