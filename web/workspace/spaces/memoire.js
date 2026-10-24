@@ -26,7 +26,8 @@
 // API consommées : api.memoryStatus(), api.memoryOverview(projects),
 // api.memorySearch(q, projects).
 
-import { kpiRow, STATE_ICON, stateIcon } from '../shell.js';
+import { icon, kpiRow, STATE_ICON, stateIcon } from '../shell.js';
+import { formatScore } from '../score.js';
 
 const STYLE_ID = 'me-styles';
 
@@ -46,9 +47,25 @@ function injectStyles() {
     .me-results { display: flex; flex-direction: column; gap: var(--sp-2); }
     .me-result { border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2) var(--sp-3); background: var(--e1); cursor: pointer; }
     .me-result:hover, .me-result:focus-visible { background: var(--e2); outline: none; }
-    .me-result .me-result-head { justify-content: space-between; margin-bottom: 4px; }
+    .me-result .me-result-head { justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .me-result .me-result-head > .row { flex: 0 1 auto; justify-content: flex-start; }
     .me-result .me-result-text { color: var(--ink2); font-size: var(--t-s); }
     .me-summary { color: var(--ink3); font-size: var(--t-min); }
+    .me-result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: 6px; color: var(--ink3); font-size: var(--t-min); }
+    .me-src { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); color: var(--ink2); background: none; border: 0; padding: 0; }
+    button.me-src { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+    button.me-src:hover, button.me-src:focus-visible { color: var(--ink); outline: none; }
+    .me-src .ico { width: 13px; height: 13px; flex: none; }
+    .me-opts { gap: var(--sp-4); flex-wrap: wrap; }
+    .me-opt { display: inline-flex; align-items: center; gap: 6px; }
+    .me-replaced { text-decoration: line-through; }
+    .me-fact { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--sp-3); font-size: var(--t-s); }
+    .me-fact dt { color: var(--ink3); }
+    .me-fact dd { margin: 0; color: var(--ink2); word-break: break-word; }
+    @media (max-width: 640px) {
+      .me-wrap { padding: var(--sp-3); }
+      .me-search { max-width: none; }
+    }
   `;
   document.head.append(style);
 }
@@ -75,6 +92,15 @@ function renderStore(wrap, ctx, memory) {
     { value: memory.resolvedBackend || '—', label: 'backend résolu', icon: 'plug' },
     { value: STATE_WORD[memory.state] || memory.state, label: 'état', icon: STATE_ICON[STATE_DOT[memory.state] || ''], tone: STATE_DOT[memory.state] || '' },
   ]));
+  if (memory.retrieval) {
+    // Ce que la recherche fait réellement, pas ce que le profil annonce.
+    const r = memory.retrieval;
+    wrap.append(row(
+      dot(r.honored ? 'ok' : 'warn'),
+      text('span', null, `recherche : ${r.label}`),
+      text('span', 'lbl', `profil ${r.profile}`),
+    ));
+  }
 
   const status = document.createElement('div');
   status.append(row(dot(STATE_DOT[memory.state] || ''), text('span', null, `store ${STATE_WORD[memory.state] || memory.state}`)));
@@ -190,6 +216,81 @@ function renderArchitecture(wrap, ctx, memory) {
 // `mount()` le pilote : construit ici, il ne s'affiche que pendant que
 // l'onglet Flotte est actif.
 
+// ── Fraîcheur : le vocabulaire du badge ─────────────────────────────────────
+//
+// Calculée côté serveur, à chaque lecture (`memory/knowledge.py`) : le cockpit
+// n'en décide rien, il l'affiche. Mot + icône + teinte, jamais la teinte seule.
+const FRESH = {
+  a_jour:          { label: 'à jour',          cls: '',     icon: 'check' },
+  perime:          { label: 'périmé',          cls: 'warn', icon: 'alert' },
+  source_disparue: { label: 'source disparue', cls: 'bad',  icon: 'cross' },
+  non_verifie:     { label: 'non vérifié',     cls: 'acc',  icon: 'info' },
+  hypothese:       { label: 'hypothèse',       cls: '',     icon: 'clock' },
+};
+
+function freshnessBadge(entry) {
+  const spec = FRESH[entry.freshness] || { label: entry.freshness || 'inconnu', cls: 'acc', icon: 'info' };
+  const badge = document.createElement('span');
+  badge.className = `chip pill ${spec.cls}`.trim();
+  badge.dataset.freshness = entry.freshness || '';
+  badge.append(icon(spec.icon), document.createTextNode(spec.label));
+  const why = entry.provenance && entry.provenance.fraicheur_raison;
+  if (why) badge.title = why;
+  return badge;
+}
+
+function entryDate(entry) {
+  const fact = entry.provenance || {};
+  const pick = fact.date_source || fact.date_confirmation || fact.date_indexation || '';
+  const kind = fact.date_source ? 'source' : (fact.date_confirmation ? 'confirmé' : 'indexé');
+  return pick ? `${kind} ${String(pick).slice(0, 10)}` : '';
+}
+
+const FILE_KINDS = new Set(['fichier', 'doc', 'code']);
+
+function sourceNode(ctx, entry, canLink) {
+  const fact = entry.provenance || {};
+  const source = fact.source || {};
+  const label = entry.source || 'inconnue';
+  const linkable = canLink && FILE_KINDS.has(source.kind) && source.uri;
+  if (!linkable) {
+    const span = text('span', 'me-src', label);
+    span.prepend(icon(source.kind === 'tâche' ? 'board' : 'tag'));
+    span.title = `source : ${source.kind || 'inconnue'}`;
+    return span;
+  }
+  const [file, line] = String(source.uri).split(/:(\d+)$/);
+  const btn = text('button', 'me-src', label);
+  btn.type = 'button';
+  btn.prepend(icon('link'));
+  btn.title = 'Ouvrir dans Source';
+  btn.addEventListener('click', (evt) => {
+    evt.stopPropagation();
+    ctx.goto('source', line ? { file, line: Number(line) } : { file });
+  });
+  return btn;
+}
+
+function factInspector(ctx, entry) {
+  const fact = entry.provenance || {};
+  const source = fact.source || {};
+  const list = document.createElement('dl');
+  list.className = 'me-fact';
+  const add = (k, v) => { if (v) list.append(text('dt', null, k), text('dd', k === 'empreinte' ? 'mono' : null, v)); };
+  add('fraîcheur', (FRESH[entry.freshness] || {}).label || entry.freshness);
+  add('raison', fact.fraicheur_raison);
+  add('source', `${source.kind || 'inconnue'}${source.uri ? ' — ' + source.uri : ''}`);
+  add('empreinte', source.empreinte);
+  add('date de la source', fact.date_source);
+  add('date d’indexation', fact.date_indexation);
+  add('dernière confirmation', fact.date_confirmation);
+  add('changement constaté', fact.date_changement);
+  add('cycle', fact.cycle === 'remplacé' ? `remplacé par ${fact.remplace_par}` : fact.cycle);
+  add('producteur', fact.producteur);
+  add('schéma', fact.schema);
+  return list;
+}
+
 function fleetOverviewTable(ctx, data) {
   const wrap = document.createElement('div');
   if (!data || !data.projects.length) {
@@ -238,7 +339,7 @@ function fleetOverviewTable(ctx, data) {
   return wrap;
 }
 
-function fleetSearchResults(ctx, data) {
+function fleetSearchResults(ctx, data, canLink) {
   const wrap = document.createElement('div');
   wrap.className = 'me-results';
   if (!data) {
@@ -257,23 +358,37 @@ function fleetSearchResults(ctx, data) {
     item.className = 'me-result';
     item.tabIndex = 0;
     item.setAttribute('role', 'button');
-    const head = row(
-      text('span', 'chip', entry.projectName || entry.projectSlug),
-      text('span', 'lbl mono', `score ${Number(entry.score || 0).toFixed(3)}`),
-    );
+    const who = row(text('span', 'chip', entry.projectName || entry.projectSlug), freshnessBadge(entry));
+    const shown = formatScore(entry.score, entry.scoreKind);
+    const scoreNode = text('span', 'lbl mono', shown.text);
+    scoreNode.title = shown.title;
+    const head = row(who, scoreNode);
     head.className += ' me-result-head';
-    item.append(head, text('div', 'me-result-text', (entry.text || '').slice(0, 220)));
+    const replaced = entry.provenance && entry.provenance.cycle === 'remplacé';
+    const body = text('div', 'me-result-text' + (replaced ? ' me-replaced' : ''), (entry.text || '').slice(0, 220));
+    const meta = document.createElement('div');
+    meta.className = 'me-result-meta';
+    meta.append(sourceNode(ctx, entry, canLink));
+    const when = entryDate(entry);
+    if (when) meta.append(text('span', null, when));
+    if (replaced) meta.append(text('span', null, 'remplacé'));
+    item.append(head, body, meta);
     const openInspector = () => {
       ctx.inspector.replaceChildren(
         text('h3', null, entry.projectName || entry.projectSlug),
         text('div', 'lbl mono', entry.id),
         text('p', null, entry.text || ''),
-        text('div', 'lbl', `score : ${Number(entry.score || 0).toFixed(3)} — tags : ${(entry.tags || []).join(', ') || '—'}`),
+        factInspector(ctx, entry),
+        text('div', 'lbl', `${shown.text} — tags : ${(entry.tags || []).join(', ') || '—'}`),
       );
     };
     item.addEventListener('click', openInspector);
     item.addEventListener('keydown', (evt) => { if (evt.key === 'Enter' || evt.key === ' ') { evt.preventDefault(); openInspector(); } });
     wrap.append(item);
+  }
+  const hidden = data.projects.reduce((n, p) => n + (p.hiddenStale || 0), 0);
+  if (hidden) {
+    wrap.append(text('p', 'lbl', `${hidden} résultat(s) écarté(s) : source disparue.`));
   }
   const failed = data.projects.filter((p) => p.reason);
   if (failed.length) {
@@ -304,6 +419,23 @@ function renderFleet(wrap, ctx, state) {
   searchWrap.append(input, searchBtn);
   wrap.append(searchWrap);
 
+  // Ce qui n'est pas servi par défaut reste atteignable : une décision remplacée
+  // ou une source disparue ne s'efface pas, elle se demande.
+  const options = row();
+  options.classList.add('me-opts');
+  const toggle = (label) => {
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    const lbl = document.createElement('label');
+    lbl.className = 'lbl me-opt';
+    lbl.append(box, document.createTextNode(label));
+    options.append(lbl);
+    return box;
+  };
+  const superseded = toggle('Décisions remplacées');
+  const stale = toggle('Sources disparues');
+  wrap.append(options);
+
   const resultsHost = document.createElement('div');
   wrap.append(resultsHost);
 
@@ -322,12 +454,16 @@ function renderFleet(wrap, ctx, state) {
       return;
     }
     resultsHost.replaceChildren(text('p', 'lbl', 'Recherche…'));
-    const data = await ctx.api.memorySearch(q, projectsParam()).catch(() => null);
-    resultsHost.replaceChildren(fleetSearchResults(ctx, data));
+    const data = await ctx.api.memorySearch(q, projectsParam(), {
+      includeSuperseded: superseded.checked, includeStale: stale.checked,
+    }).catch(() => null);
+    resultsHost.replaceChildren(fleetSearchResults(ctx, data, state.scope === 'this'));
   };
 
   searchBtn.addEventListener('click', runSearch);
   input.addEventListener('keydown', (evt) => { if (evt.key === 'Enter') runSearch(); });
+  superseded.addEventListener('change', runSearch);
+  stale.addEventListener('change', runSearch);
 
   loadOverview();
   resultsHost.replaceChildren(fleetSearchResults(ctx, { query: '', results: [], projects: [] }));

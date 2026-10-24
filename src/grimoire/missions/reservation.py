@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from grimoire.missions.schemas import MissionTask, TaskClaim, TaskState
+from grimoire.missions.waiting import answer_hint
 
 __all__ = ["ReservationConflict", "find_conflict", "reservation_refusal"]
 
@@ -59,9 +60,10 @@ def find_conflict(tasks: Mapping[str, MissionTask], task: MissionTask, claim: Ta
                 + (f" ({waiting.reason})" if waiting is not None else "")
                 + (f" jusqu'à {due}" if due and due != "unknown" else "")
             )
+            asked = waiting.question.id if waiting is not None and waiting.question is not None else ""
             remedy = (
-                "répondre à sa question (`grimoire task answer`) ou attendre son réveil (`grimoire task wake`), "
-                "ou réclamer une autre tâche"
+                f"répondre à sa question ({answer_hint(other.id, asked)}) ou attendre son réveil "
+                "(`grimoire task wake`), ou réclamer une autre tâche"
             )
         else:
             reason = f"réservé par {other.id} ({held.actor_id}) jusqu'à {held.expires_at or 'sans expiration'}"
