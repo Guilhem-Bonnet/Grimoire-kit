@@ -182,3 +182,97 @@ def test_sed_awk_sort_remote_substitutions_sont_des_mutations(command: str) -> N
 )
 def test_formes_de_la_liste_blanche_restent_des_lectures(command: str) -> None:
     assert is_read_only_command(command) is True
+
+
+# ── Zone protégée ~/.grimoire/control/ (#886 d, #876 lot 1) ────────────────
+
+_ZONE = "/home/u/.grimoire/control"
+_JOURNAL = f"{_ZONE}/mandates.authority.jsonl"
+_PROOF = f"{_ZONE}/host-contracts.json"
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Write", {"file_path": _JOURNAL, "content": "{}\n"}),
+        ("Edit", {"file_path": _PROOF, "old_string": "false", "new_string": "true"}),
+        ("NotebookEdit", {"notebook_path": f"{_ZONE}/x.ipynb", "new_source": "x"}),
+        ("Write", {"file_path": "~/.grimoire/control/host-contracts.json", "content": "{}"}),
+        ("Bash", {"command": f"echo '{{}}' >> {_PROOF}"}),
+        ("Bash", {"command": "echo '{}' > $HOME/.grimoire/control/mandates.authority.jsonl"}),
+        ("Bash", {"command": f"cp /tmp/forged.json {_PROOF}"}),
+        ("Bash", {"command": f"mv /tmp/forged {_JOURNAL}"}),
+        ("Bash", {"command": f"tee {_PROOF} < /tmp/forged"}),
+        ("Bash", {"command": f"sed -i 's/false/true/' {_PROOF}"}),
+        ("Bash", {"command": f"python -c \"open('{_PROOF}', 'w').write('{{}}')\""}),
+        ("Bash", {"command": "cd ~/.grimoire && echo '{}' > control/host-contracts.json"}),
+        ("Bash", {"command": "rm -rf ~/.grimoire/control"}),
+    ],
+)
+def test_an_agent_write_in_the_control_zone_is_a_forgery_vector(tool: str, tool_input: dict[str, object]) -> None:
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    vector = forgery_vector(classify_tool(tool, tool_input))
+    assert vector is not None and vector.governed_only is False
+    assert vector.code in ("control-zone", "journal")
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Write", {"file_path": _JOURNAL, "content": "{}\n"}),
+        ("Edit", {"file_path": _PROOF, "old_string": "a", "new_string": "b"}),
+        ("Bash", {"command": f"echo ok >> {_PROOF}"}),
+    ],
+)
+def test_the_brake_denies_a_control_zone_write_in_any_profile(tmp_path, tool: str, tool_input: dict[str, object]) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions import HookInput, Outcome, run_decision
+    from grimoire.hosts.events import HookEvent
+
+    decision = run_decision(
+        "grimoire.tool-policy",
+        HookInput(event=HookEvent.PRE_TOOL_USE, project_root=tmp_path, tool_name=tool, tool_input=tool_input, session_id="S1"),
+    )
+    assert decision.outcome is Outcome.DENY
+    assert decision.detail["authority_vector"] in ("control-zone", "journal")
+    assert "Limite" in decision.reason  # la limite résiduelle est dite à chaque refus
+
+
+def test_a_control_zone_refusal_revokes_the_mandates(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions import HookInput, run_decision
+    from grimoire.hosts.events import HookEvent
+    from grimoire.missions.mandate import MandateRequest, MandateStore
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    project = tmp_path / "proj"
+    project.mkdir()
+    store = MandateStore(project)
+    store.grant(MandateRequest.build(("accept",), ("implementation",), 1, "+1h"), origin=ORIGIN_HUMAN, via="test")
+    assert store.state().active
+    run_decision(
+        "grimoire.tool-policy",
+        HookInput(
+            event=HookEvent.PRE_TOOL_USE, project_root=project, tool_name="Write",
+            tool_input={"file_path": _JOURNAL, "content": "{}"}, session_id="S1",
+        ),
+    )
+    assert not store.state().active
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [("Read", {"file_path": f"{_ZONE}/cockpit-key"}), ("Bash", {"command": f"cat {_ZONE}/cockpit-key"})],
+)
+def test_the_cockpit_key_cannot_be_read_by_an_agent(tool: str, tool_input: dict[str, object]) -> None:
+    assert classify_tool(tool, tool_input).secret_target.endswith("cockpit-key")
+
+
+def test_reading_the_control_zone_proof_stays_allowed() -> None:
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    assert forgery_vector(classify_tool("Bash", {"command": f"cat {_PROOF}"})) is None
+    assert forgery_vector(classify_tool("Read", {"file_path": _PROOF})) is None

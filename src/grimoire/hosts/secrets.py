@@ -73,6 +73,10 @@ SECRET_RULES: tuple[SecretRule, ...] = (
         rf"{_BEFORE}credentials(?:\.json|\.yaml|\.yml)?{_AFTER}",
         ("**/credentials", "**/credentials.json", "**/credentials.yaml", "**/credentials.yml"),
     ),
+    # #876 lot 1, verrou 15 : la clé qui, avec le jeton de session, autorise le cockpit à accorder un mandat à
+    # l'orchestrateur. Elle vit sous ``~/.grimoire/control/`` ; un agent ne la lit pas (la lire, c'est pouvoir
+    # se faire passer pour l'humain du cockpit).
+    SecretRule("cockpit-key", rf"{_BEFORE}cockpit-key{_AFTER}", ("**/cockpit-key",)),
     SecretRule(
         "service-account",
         rf"{_BEFORE}service-account[a-z0-9_-]*\.json{_AFTER}",

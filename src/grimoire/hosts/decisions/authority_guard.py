@@ -26,6 +26,11 @@ vecteurs connus pour fabriquer cette preuve :
   refusée en governed et production. ``claude -p`` seul ouvre une session
   neuve, d'un autre ``session_id`` : il n'ouvre aucun checkpoint et n'est pas
   refusé ;
+- ``control-zone`` (#886 d) — écrire sous ``~/.grimoire/control/`` : la preuve de contrat d'hôte, le journal
+  d'autorité du mandat de l'orchestrateur et la clé de contrôle du cockpit. Refusé quel que soit le profil, par
+  les mêmes voies d'écriture que le journal (Write, Edit, NotebookEdit, redirection, ``cp``/``mv``/``tee``/
+  ``sed -i``, ``python -c``). Le kit y écrit par son propre code, hors outil d'agent ; la limite résiduelle (un
+  script arbitraire) est écrite à :data:`CONTROL_ZONE` ;
 - ``ledger-snapshot`` (K13) — écrire ``ledger.snapshot.json``, l'instantané du rejeu du
   ledger : refusé quel que soit le profil. Ce n'est pas une preuve d'autorité, c'est un
   cache que le ledger restaure *sans rejouer* le préfixe qu'il couvre ; son hash ne lie que
@@ -54,7 +59,16 @@ from grimoire.hosts.decisions.tool_facts import (
 )
 from grimoire.policies.schemas import ActionKind, MutationClass
 
-__all__ = ["AUTHORITY_SUFFIX", "LIMIT_NOTE", "SNAPSHOT_FILENAME", "ForgeryVector", "forgery_vector"]
+__all__ = [
+    "AUTHORITY_SUFFIX",
+    "CONTROL_ZONE",
+    "CONTROL_ZONE_FILES",
+    "CONTROL_ZONE_MARKER",
+    "LIMIT_NOTE",
+    "SNAPSHOT_FILENAME",
+    "ForgeryVector",
+    "forgery_vector",
+]
 
 #: Suffixe des journaux de challenges et de décisions de checkpoint
 #: (:mod:`grimoire.flows.attestation`) — recopié ici plutôt qu'importé pour
@@ -63,6 +77,20 @@ AUTHORITY_SUFFIX = ".authority.jsonl"
 #: Nom de l'instantané du rejeu du ledger (:data:`grimoire.missions.ledger_snapshot.SNAPSHOT_FILENAME`),
 #: recopié ici pour la même raison ; un test fige l'égalité.
 SNAPSHOT_FILENAME = "ledger.snapshot.json"
+#: Zone de contrôle de l'utilisateur (#886 d, #876 lot 1) : ``~/.grimoire/control/``. Elle porte la preuve de
+#: contrat d'hôte (``host-contracts.json``), le journal d'autorité du mandat (``mandates.authority.jsonl``) et la
+#: clé de contrôle du cockpit (``cockpit-key``). Le kit y écrit par son propre code Python, hors outil d'agent ;
+#: un outil d'agent n'y écrit jamais (code ``control-zone``). Les noms de fichier sont refusés aussi hors du
+#: chemin complet (``cd ~/.grimoire && echo x > control/host-contracts.json``).
+#:
+#: **Limite résiduelle, écrite** : la garde lit des chemins et des commandes, pas du code. Un agent qui lance un
+#: script Python arbitraire (ou ``bash script.sh`` dont le corps écrit là) contourne cette garde ; ``LIMIT_NOTE``
+#: l'affiche à chaque refus. Le mandat n'en dépend pas seul : le journal est chaîné par hash et un mandat se
+#: révoque sur écriture refusée dans la zone (``MandateStore.revoke_on_protected_write``).
+CONTROL_ZONE = re.compile(r"\.grimoire/+control(?![A-Za-z0-9_.-])")
+CONTROL_ZONE_FILES = ("host-contracts.json", "mandates.authority.jsonl", "cockpit-key")
+#: Ce que :func:`_names_protected` rend pour la zone de contrôle.
+CONTROL_ZONE_MARKER = "~/.grimoire/control"
 _PROTECTED = (TURNS_FILENAME, AUTHORITY_SUFFIX, SNAPSHOT_FILENAME)
 
 #: La limite que tout refus de cette garde affiche (principe 7 du plan).
@@ -137,13 +165,22 @@ def _names_hook_module(text: str) -> bool:
 
 
 def _write_vector(marker: str, what: str) -> ForgeryVector:
-    """Le vecteur d'une écriture qui vise *marker* : l'instantané du ledger a son propre code (K13)."""
-    code = "ledger-snapshot" if marker == SNAPSHOT_FILENAME else "journal"
+    """Le vecteur d'une écriture qui vise *marker* : l'instantané du ledger (K13) et la zone de contrôle ont leur code."""
+    if marker == SNAPSHOT_FILENAME:
+        code = "ledger-snapshot"
+    elif marker == CONTROL_ZONE_MARKER:
+        code = "control-zone"
+    else:
+        code = "journal"
     return ForgeryVector(code, what, governed_only=False)
 
 
 def _names_protected(text: str) -> str:
     normalized = _norm(text)
+    # La zone de contrôle d'abord : le journal du mandat porte aussi le suffixe d'un journal d'autorité, mais
+    # c'est son emplacement qui déclenche la révocation des mandats.
+    if CONTROL_ZONE.search(normalized) or any(name in normalized for name in CONTROL_ZONE_FILES):
+        return CONTROL_ZONE_MARKER
     for marker in _PROTECTED:
         if marker in normalized:
             return marker
