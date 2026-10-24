@@ -663,14 +663,8 @@ def _step_init(
         # to stderr in text mode.
         ctx.obj["output"] = "text"
         run_init(
-            ctx,
-            target,
-            name=name,
-            archetype=",".join(archetypes),
-            backend=backend,
-            force=False,
-            dry_run=False,
-            no_cockpit=no_cockpit,
+            ctx, target, name=name, archetype=",".join(archetypes), backend=backend,
+            force=False, dry_run=False, no_cockpit=no_cockpit,
         )
     except typer.Abort:
         state.steps.append(StepResult("init", "failed", "init cancelled by user"))
@@ -1351,6 +1345,9 @@ def run_up_pipeline(
         no_cockpit=no_cockpit,
     )
     blocked = not has_config
+    # #888 — the interactive wizard deduced the standard needs from « who works on this
+    # project » and announced the profile; an explicit `--needs` still wins.
+    needs = needs or [str(n) for n in ((ctx.obj or {}).pop("init_deduced_needs", None) or [])]
 
     # 2. Structure reconciliation (idempotent).
     if not blocked:

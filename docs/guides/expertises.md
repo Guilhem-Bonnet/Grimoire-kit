@@ -31,6 +31,34 @@ détection réelle du projet (`grimoire.core.scanner.StackScanner`) décide du s
 par défaut ; le reste s'ajoute à la demande via ce même catalogue (voir
 `grimoire.core.stack_skills.detected_stack_skill_slugs`, appelé par `ProjectScaffolder` dans `src/grimoire/core/scaffold.py`).
 
+## <img src="../assets/icons/route.svg" width="28" height="28" alt=""> Le wizard en trois questions — l'archétype est déduit
+
+Depuis l'issue #888 (décision consignée dans #630), `grimoire init` interactif ne demande plus un
+archétype — c'est un vocabulaire interne du kit, pas celui d'un nouvel utilisateur — ni un choix
+libre de skills. Il pose trois questions, pré-remplies par la détection (`StackScanner`,
+`ArchetypeResolver`, marqueurs du registre), et déduit le reste :
+
+| Question | Réponses | Ce qu'elle décide |
+|---|---|---|
+| Quelle pile technique ? (plusieurs réponses) | Python, JavaScript/TypeScript, Go, Rust, Java/Kotlin, C#, Ruby, Docker, Terraform, Kubernetes, Ansible | les skills `stack-*` attachés à Atlas pour les piles qui en ont un ; les expertises du registre **recommandées** (pas attachées) pour les autres (`rust`, `java`…) ; la pile que le scaffold croit (une pile cochée sans marqueur est déclarée, une pile détectée mais décochée disparaît) |
+| Qui travaille sur le projet ? | moi seul (je connais ma pile), moi seul (j'apprends), une petite équipe, une équipe avec des gens ops/plateforme, surtout des agents que je supervise | le niveau d'accompagnement (`skill_level`) ; les besoins du standard agentique et le profil qu'ils imposent (`solo-prototyping` → `starter`, `hooks-skills-governance`, `multi-agent-orchestration`…) ; `infra-ops` ajouté quand des gens ops travaillent sur une pile infra déclarée |
+| De quoi parle le projet ? | une bibliothèque, un CLI, un service ; une application web ; de l'infrastructure ; une plateforme interne ; du contenu ; une maintenance avec boucle de correction certifiée ; le standard agentique lui-même | l'archétype : `stack`, `web-app`, `infra-ops`, `platform-engineering`, `creative-studio`, `fix-loop`, `agentic-standard` |
+
+Le résumé avant installation montre ce qui a été déduit — pile, archétype, niveau, profil du
+standard, skills, expertises, hôtes, cockpit, langue, mémoire — et s'ajuste en une ligne
+(`domain=web who=team stack=python,go`). `grimoire init -y` garde la détection seule, sans
+question : c'est exactement ce que les réponses pré-remplies auraient donné. Une supposition du
+résolveur (`is_best_guess`, décision du 2026-09-18) n'est jamais pré-remplie comme une détection.
+
+Un projet Python nu qui répond « Entrée » partout reçoit `stack` + `stack-python`, et rien
+d'autre : l'entrée `python` du registre est déjà ce skill, aucune expertise n'est attachée d'office.
+`grimoire up --interactive` reprend les besoins déduits pour le standard quand `--needs` n'est pas
+donné.
+
+La logique vit dans `src/grimoire/cli/init_questions.py` (fonctions pures, sans terminal) ; la CLI
+et l'assistant de configuration du cockpit (`GET /api/setup/questions`, espace Piloter) appellent
+les mêmes fonctions, donc une même réponse donne le même archétype des deux côtés.
+
 ## <img src="assets/icons/hexagon.svg" width="28" height="28" alt=""> Le registre — `registry/expertises.yaml`
 
 Trois familles, chacune une liste d'entrées :
