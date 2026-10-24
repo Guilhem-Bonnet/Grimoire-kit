@@ -322,8 +322,7 @@ class MissionLedger:
         self._root.mkdir(parents=True, exist_ok=True)
         self._events_path = root / "events.jsonl"
         self._incidents_path = root / "incidents.jsonl"
-        # In-memory projection caches (rebuilt lazily)
-        self._missions: dict[str, Mission] = {}
+        self._missions: dict[str, Mission] = {}  # caches de projection, reconstruits à la demande
         self._tasks: dict[str, MissionTask] = {}
         self._events: list[LedgerEvent] = []
         self._incidents: dict[str, Incident] = {}
@@ -337,8 +336,7 @@ class MissionLedger:
         self._unreadable: tuple[int, ...] = ()
         #: K10 : refus de claim posé par l'appelant (WIP), évalué sous le verrou ; ``""`` = accordé.
         self.claim_guard: Callable[..., str] | None = None
-        #: Le projet dont les réglages d'hôte jugent un frein (#886) ; ``None`` = dossier courant.
-        self.project_root: Path | None = None
+        self.project_root: Path | None = None  #: #886 : projet des réglages d'hôte du frein ; None = cwd
         self._loaded = False
         self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 
