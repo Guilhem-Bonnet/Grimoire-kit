@@ -51,14 +51,14 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 |---|---:|---:|---:|
 | Coque (shell.js) | 32 | 31 | 97% |
 | Piloter | 34 | 29 | 85% |
-| Concevoir | 23 | 16 | 70% |
+| Concevoir | 23 | 17 | 74% |
 | Executer | 18 | 12 | 67% |
 | Observer | 10 | 7 | 70% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
 | Contrôles × états (coque) | 80 | 80 | 100% |
 | Routes API | 26 | 26 | 100% |
-| **TOTAL** | **249** | **220** | **88%** |
+| **TOTAL** | **249** | **221** | **89%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -197,7 +197,7 @@ pour ce contrôle précis.
 | Onglet nœud (4 onglets) | `.tab` inspecteur nœud | change `_cvTab` | — | contenu change par onglet | `test_les_quatre_onglets_du_noeud_changent_le_contenu_affiche` | oui |
 | Aucun texte sous le plancher sombre | — | — | — | contraste/tailles du graphe | `test_aucun_texte_du_graphe_sous_le_plancher_dark` | oui |
 | Rail « Preuves » depuis Concevoir | `.rail-btn[data-panel=evidence]` | `togglePanel('evidence')` (corrigé par #534/PR #539, `evidence` tenu par la coque) | `GET /api/workspace/evidence` | ouvre le panneau Preuves comme dans les cinq autres espaces | `test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut` (couvre le comportement générique, pas un test dédié à Concevoir) | oui |
-| Zoom Flotte/Projet/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 3-4 niveaux selon hôte | — | non |
+| Zoom Flotte/Projet/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 4 niveaux (`grimoire serve` est un alias du cockpit) ; « Workflow » charge le blueprint sélectionné d'un simple clic (corrigé : restait sur « Chargement… ») | `tests/unit/test_concevoir_zoom_source.py::test_chaque_segment_du_zoom_passe_par_pick_zoom`, `tests/unit/test_concevoir_zoom_source.py::test_pick_zoom_charge_le_blueprint_selectionne_avant_workflow` | oui |
 | Trois vues au niveau Projet | `#view-seg` | — | — | présence des 3 vues | `test_les_trois_vues_sont_proposees_au_niveau_projet` | oui |
 | Blueprint réel s'ouvre | — | `mount` | `GET /api/workspace/blueprints` | rend un blueprint réel, jamais démo | `test_concevoir_s_ouvre_sur_le_blueprint_reel_du_projet` | oui |
 
