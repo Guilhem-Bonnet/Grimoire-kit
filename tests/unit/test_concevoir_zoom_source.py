@@ -20,7 +20,7 @@ def _text() -> str:
 
 
 def test_chaque_segment_du_zoom_passe_par_pick_zoom() -> None:
-    callbacks = re.findall(r"ctx\.docbar\.setZoom\(zoomLevels,\s*[^,]+,\s*(\w+)\)", _text())
+    callbacks = re.findall(r"ctx\.docbar\.setZoom\([^,]+,\s*[^,]+,\s*(\w+)\)", _text())
 
     assert len(callbacks) == 3, "trois sites posent le zoom du docbar"
     assert set(callbacks) == {"pickZoom"}, callbacks
