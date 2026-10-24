@@ -19,7 +19,7 @@ from grimoire.missions.lease import MAX_ATTEMPTS, backoff_delay
 from grimoire.missions.questions import QUESTION_EVENTS, replay_question
 from grimoire.missions.schemas import DEFAULT_CLAIM_TTL_SECONDS, DependencyKind, MissionTask, TaskDependency, TaskState
 from grimoire.missions.session_link import resume_command
-from grimoire.missions.waiting import Question, ResumeHint, Waiting, new_question_id
+from grimoire.missions.waiting import Question, ResumeHint, Waiting, answer_hint, new_question_id
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
@@ -102,7 +102,9 @@ def waiting_guard(
         asked = task.waiting.question.id if task.waiting.question is not None else "?"
         raise GrimoireMissionError(
             f"Reprise refusée pour {task.id} : waiting(human) attend la réponse de l'humain (question {asked}) ; "
-            "seule `grimoire task answer` (canal humain) la lève — un agent ne reprend pas sur sa propre question"
+            f"seul un humain la lève, par {answer_hint(task.id, asked if asked != '?' else '')} "
+            "— un agent ne reprend pas sur sa propre question (la session reste libre : "
+            "`grimoire task claim|attach <autre-tâche>`, `grimoire cockpit serve`)"
         )
     if task.status is TaskState.WAITING and to_state is TaskState.RUNNING and lease_epoch is None:
         raise GrimoireMissionError(

@@ -32,3 +32,4 @@ Le détail, pas à pas, est dans [Premier projet](tutoriels/premier-projet.md).
 - [Guides](guides/index.md) : atteindre un but précis.
 - [Référence](reference/index.md) : les commandes, la configuration, l'API, exactes et complètes.
 - [Explications](explications/index.md) : comprendre pourquoi les choses sont faites ainsi, et où elles s'arrêtent, dans [Les limites](explications/les-limites.md).
+- [Cadrages](cadrage/portail-connaissance.md) : les chantiers proposés, avant décision, à commencer par le portail de connaissance local.

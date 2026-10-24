@@ -183,7 +183,7 @@ PROFILES: dict[str, MemoryProfile] = {
     "standard": MemoryProfile(
         id="standard",
         label="Standard",
-        summary="Sémantique + BM25 fusionnés (RRF) et sidecar structuré.",
+        summary="BM25 lexical et sidecar structuré ; sémantique fusionnée (RRF) seulement quand un moteur vectoriel est en service.",
         retrieval_mode="hybrid",
     ),
     "graphe": MemoryProfile(
@@ -283,3 +283,22 @@ def infer(backend: str, *, offline: bool) -> MemoryProfile:
         # layer declared here would be a collection that can never be filled.
         return PROFILES["lexical"]
     return PROFILES[DEFAULT_PROFILE]
+
+
+def retrieval_in_service(fused: bool, profile_id: str) -> dict[str, object]:
+    """Ce que la recherche fait réellement, face à ce que le profil déclare.
+
+    ``fused`` vient du gestionnaire (``MemoryManager.prefers_hybrid`` : un
+    classement vectoriel ET un classement lexical à fusionner). Un profil qui
+    déclare l'hybride sans moteur vectoriel reste lexical : le dire, jamais
+    l'afficher comme fusionné.
+    """
+    declared = resolve(profile_id)
+    in_service = "hybrid" if fused else "lexical"
+    return {
+        "profile": declared.id,
+        "declared": declared.retrieval_mode,
+        "in_service": in_service,
+        "label": "vectoriel + lexical fusionnés (RRF)" if fused else "lexical seul (BM25), aucune fusion",
+        "honored": declared.retrieval_mode != "hybrid" or fused,
+    }
