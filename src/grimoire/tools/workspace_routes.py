@@ -195,6 +195,20 @@ def _file_diff(project_root: Path, query: _Query) -> Any:
     return workspace_api.file_diff(project_root, _one(query, "path"))
 
 
+def _upgrade_changes(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/upgrade/changes`` — ce qu'une mise à jour écrirait, par catégorie (P44). Lecture pure."""
+    from grimoire.tools import upgrade_changes
+
+    return upgrade_changes.changes_view(project_root)
+
+
+def _upgrade_diff(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/upgrade/diff?path=`` — le diff d'un fichier que la mise à jour toucherait (P44). Lecture pure."""
+    from grimoire.tools import upgrade_changes
+
+    return upgrade_changes.diff_view(project_root, _one(query, "path"))
+
+
 def _blueprints(project_root: Path, _query: _Query) -> Any:
     return workspace_api.blueprints_view(project_root)
 
@@ -374,6 +388,8 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}file/diff": _file_diff,
     f"{PREFIX}file/usage": _file_usage,
     f"{PREFIX}file/history": _file_history,
+    f"{PREFIX}upgrade/changes": _upgrade_changes,
+    f"{PREFIX}upgrade/diff": _upgrade_diff,
     f"{PREFIX}commands": _commands,
     f"{PREFIX}doctor": _doctor,
     f"{PREFIX}language": _language,
