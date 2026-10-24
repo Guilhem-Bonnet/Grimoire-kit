@@ -9,6 +9,10 @@ rien n'est posé sans la commande. Sans systemd, la ligne crontab équivalente e
 Limite écrite : sans ``loginctl enable-linger``, un minuteur utilisateur ne tourne pas tant que
 l'utilisateur ne s'est pas reconnecté après un redémarrage. Le tick ne fait aucun appel de LLM : il tourne
 même avec un forfait épuisé, et il sort tout de suite sous une pause.
+
+Lot 2 de #876 : le minuteur est le déclencheur du lanceur. Il lance ``orchestrate tick --apply`` qui, si le rôle
+``worker`` de la politique d'orchestration est activé, lance les sessions détachées ; l'unité reçoit donc le ``PATH`` du
+poste à l'installation, car l'environnement minimal d'un service utilisateur ne trouve ni ``claude`` ni ``gh``.
 """
 
 from __future__ import annotations
@@ -86,6 +90,12 @@ def _spec(value: str) -> str:
     return value.replace("%", "%%")
 
 
+def _path_line() -> str:
+    """``Environment="PATH=…"`` du poste qui installe (``claude`` et ``gh`` y sont) ; rien si ``PATH`` est vide."""
+    path = os.environ.get("PATH", "").strip()
+    return f"Environment={_systemd_quote('PATH=' + path)}\n" if path else ""
+
+
 def _command(project_root: Path, python: str) -> list[str]:
     return [python, "-m", "grimoire", "orchestrate", "tick", "--apply", "--project-root", str(project_root.resolve())]
 
@@ -141,6 +151,7 @@ def plan_timer(project_root: Path, interval: str = DEFAULT_INTERVAL, *, python: 
         "\n[Service]\n"
         "Type=oneshot\n"
         f"WorkingDirectory={_spec(str(root))}\n"
+        f"{_path_line()}"
         f"ExecStart={exec_start}\n"
     )
     timer = (
