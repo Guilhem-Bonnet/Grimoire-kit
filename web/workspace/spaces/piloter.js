@@ -449,7 +449,7 @@ const plural = (n, one, many) => `${fmtInt(n)} ${n > 1 ? many : one}`;
 // rafraîchissement de la flotte ne remet pas la recherche à zéro.
 const fleetFilter = { query: '', segment: 'all' };
 
-function renderFleet(root, ctx, rows, attention, onSelect, onRefresh) {
+function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-wrap pl-fleet';
 
@@ -463,7 +463,8 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh) {
   const sub = [plural(rows.length, 'projet suivi', 'projets suivis')];
   if (rows.length) {
     sub.push(`${plural(alignedCount, 'aligné', 'alignés')} sur le kit${installed ? ' ' + installed : ''}`);
-    sub.push(attention ? `${plural(askingCount, 'demande une action', 'demandent une action')}` : 'attention indisponible');
+    if (attention) sub.push(plural(askingCount, 'demande une action', 'demandent une action'));
+    else sub.push(pending ? 'attention en cours de lecture' : 'attention indisponible');
   }
 
   const formula = document.createElement('span');
@@ -529,7 +530,9 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh) {
     if (id !== 'all') button.append(text('span', 'pl-seg-n', String(count)));
     if (id === 'asking' && !attention) {
       button.disabled = true;
-      button.title = "La lecture d'attention n'a pas répondu : impossible de dire qui demande une action.";
+      button.title = pending
+        ? "Lecture d'attention en cours : le filtre s'active à sa réponse."
+        : "La lecture d'attention n'a pas répondu : impossible de dire qui demande une action.";
     }
     button.addEventListener('click', () => { fleetFilter.segment = id; paint(); });
     segButtons.set(id, button);
@@ -608,7 +611,7 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh) {
         list.append(...badges);
         attentionCell.append(list);
       } else {
-        attentionCell.append(text('span', 'lbl', '—'));
+        attentionCell.append(text('span', 'lbl', pending && !attention ? '…' : '—'));
       }
       const kitCell = document.createElement('td');
       kitCell.append(text('div', null, kit.main));
@@ -2327,20 +2330,35 @@ export async function mount(root, ctx) {
       // `forceFleet` ne vient que du bouton « Rafraîchir la flotte » — un
       // simple retour sur ce niveau (zoom, sélection d'un autre projet puis
       // retour) sert le cache de `loadFleet` (issue #510 point 5).
-      // L'attention (P22) se lit à côté, jamais en bloquant : sans elle la
-      // table s'affiche quand même, la colonne dit « indisponible ».
-      const [rows, attention] = await Promise.all([
-        loadFleet(ctx, { force: forceFleet }),
-        ctx.api.attention(true).catch(() => null),
-      ]);
+      // L'attention (P22) lit tout le registre : elle part en même temps que
+      // la flotte mais ne la retient jamais. La table se peint dès la flotte,
+      // puis se repeint avec les badges quand l'attention répond (le filtre
+      // vit dans `fleetFilter`, la saisie en cours garde son focus).
+      const attentionLoad = ctx.api.attention(true).catch(() => null);
+      const rows = await loadFleet(ctx, { force: forceFleet });
       if (ctx.signal.aborted) return;
-      root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
-      renderFleet(
-        root, ctx, rows, attention,
-        (slug) => ctx.scope.set(slug),
-        () => draw({ forceFleet: true }),
-      );
+      const paintFleet = (attention, pending) => {
+        const field = root.querySelector('.pl-search');
+        const caret = field && document.activeElement === field ? field.selectionStart : null;
+        root.replaceChildren(); // retire la coquille « Chargement… » ou le rendu précédent
+        renderFleet(
+          root, ctx, rows, attention,
+          (slug) => ctx.scope.set(slug),
+          () => draw({ forceFleet: true }),
+          { pending },
+        );
+        if (caret !== null) {
+          const next = root.querySelector('.pl-search');
+          if (next) { next.focus(); next.setSelectionRange(caret, caret); }
+        }
+        return root.firstElementChild;
+      };
+      const painted = paintFleet(null, true);
       ctx.dock.echo('grimoire cockpit list');
+      const attention = await attentionLoad;
+      // Un autre rendu (zoom sur un projet, rafraîchissement) a pris la main : on ne l'écrase pas.
+      if (ctx.signal.aborted || root.firstElementChild !== painted) return;
+      paintFleet(attention, false);
     } else {
       // #548 : `loadSheet()` porte désormais le nom du projet aussi (fiche
       // `sheet.name`, résolue côté serveur depuis le registre) — plus de

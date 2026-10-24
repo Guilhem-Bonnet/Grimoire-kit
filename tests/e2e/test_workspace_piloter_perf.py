@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import time
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, Route
 
 SHEET_MAX_INTERACTIVE_MS = 400
 FLEET_MAX_INTERACTIVE_MS = 900
@@ -132,6 +132,49 @@ def test_flotte_un_seul_appel_fleet_et_interactive_sous_900ms(
         assert elapsed_ms < FLEET_MAX_INTERACTIVE_MS, (
             f"Flotte interactive en {elapsed_ms:.0f} ms, attendu < {FLEET_MAX_INTERACTIVE_MS} ms"
         )
+    finally:
+        context.close()
+
+
+def test_la_flotte_ne_retient_jamais_sa_table_pour_la_lecture_d_attention(
+    browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
+) -> None:
+    """La lecture d'attention (P22) parcourt tout le registre : elle ne doit jamais retenir la table.
+
+    Les lectures d'attention sont tenues en suspens : la table se peint quand même,
+    la sous-ligne dit que l'attention est en cours de lecture, puis la Flotte se
+    repeint avec sa réponse. Avant ce correctif, `drawOnce` attendait flotte ET
+    attention ensemble, et la table restait vide tant que l'attention n'avait pas répondu.
+    """
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    held: list[Route] = []
+    released = {"now": False}
+
+    def _hold(route: Route) -> None:
+        if released["now"]:
+            route.continue_()
+        else:
+            held.append(route)
+
+    page.route("**/api/workspace/attention*", _hold)
+    try:
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
+        page.wait_for_selector(".tbl tbody tr", timeout=10_000)
+
+        assert page.locator(".tbl tbody tr").count() == 3
+        assert held, "la lecture d'attention est partie en même temps que la flotte"
+        assert "attention en cours de lecture" in page.locator(".pl-fleet").inner_text()
+
+        released["now"] = True
+        for route in held:
+            route.continue_()
+        page.wait_for_function(
+            "() => !document.querySelector('.pl-fleet')?.innerText.includes('attention en cours de lecture')",
+            timeout=10_000,
+        )
+        assert page.locator(".tbl tbody tr").count() == 3
     finally:
         context.close()
 
