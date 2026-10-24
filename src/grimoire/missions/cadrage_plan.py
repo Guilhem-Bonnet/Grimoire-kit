@@ -40,6 +40,7 @@ from grimoire.missions.verifiability import (
     is_bare_command,
     reason_for_criteria,
 )
+from grimoire.missions.waiting import answer_command
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -202,10 +203,6 @@ class QuestionState:
         if self.status in ("open", "unanswered") and self.task_id and self.question_id:
             data["answer_with"] = answer_command(self.task_id, self.question_id)
         return data
-
-
-def answer_command(task_id: str, question_id: str) -> str:
-    return f'grimoire task answer {task_id} "<réponse>" --question {question_id}'
 
 
 @dataclass(slots=True)

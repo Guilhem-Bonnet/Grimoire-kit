@@ -41,10 +41,12 @@ if TYPE_CHECKING:
             hall: str,
             room: str,
             include_superseded: bool,
+            include_stale: bool = False,
         ) -> list[MemoryEntry]: ...
 
         def hybrid_search(
-            self, query: str, *, user_id: str, limit: int, include_superseded: bool
+            self, query: str, *, user_id: str, limit: int, include_superseded: bool,
+            include_stale: bool = False,
         ) -> list[MemoryEntry]: ...
 
 __all__ = [
@@ -240,6 +242,7 @@ def run_memory_search(
     hall: str = "",
     room: str = "",
     include_superseded: bool = False,
+    include_stale: bool = False,
 ) -> list[MemoryEntry]:
     """Resolve a memory search, optionally fusing vector and lexical rankings.
 
@@ -249,15 +252,20 @@ def run_memory_search(
     is used directly. Les souvenirs remplacés (``superseded_by``) sont exclus
     sauf ``include_superseded``.
     """
+    # `include_stale` ne voyage que lorsqu'il est demandé : les doublures de
+    # test et les anciens gestionnaires sans ce paramètre restent appelables.
+    extra: dict[str, Any] = {"include_stale": True} if include_stale else {}
     if not hybrid:
         return mgr.search_taxonomy(
             query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room,
-            include_superseded=include_superseded,
+            include_superseded=include_superseded, **extra,
         )
 
     has_filters = bool(wing or hall or room)
     fetch = max(limit * 10, limit) if has_filters else limit
-    results = mgr.hybrid_search(query, user_id=user_id, limit=fetch, include_superseded=include_superseded)
+    results = mgr.hybrid_search(
+        query, user_id=user_id, limit=fetch, include_superseded=include_superseded, **extra,
+    )
     if has_filters:
         results = [
             entry for entry in results

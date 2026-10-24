@@ -415,6 +415,8 @@ def consolidate_task_memory(
     else:
         return None
     try:
-        return memory_manager.remember(type_, actor, text, tags=(task.id, task.mission_id, "task-recall"))
+        return memory_manager.remember(
+            type_, actor, text, tags=(task.id, task.mission_id, "task-recall"), source=f"task:{task.id}",
+        )
     except Exception:  # consolidation best-effort, jamais au prix de la transition déjà actée
         return None
