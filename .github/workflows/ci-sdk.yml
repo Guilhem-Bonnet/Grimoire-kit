@@ -175,10 +175,17 @@ jobs:
         if: ${{ !(matrix.os == 'windows-latest' && github.event_name == 'pull_request') }}
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
       - name: Install package + dev deps
         if: ${{ !(matrix.os == 'windows-latest' && github.event_name == 'pull_request') }}
         run: pip install -e ".[dev]"
+
+      - name: Diagnostic temporaire (#857) — coût d'un sous-processus grimoire
+        if: ${{ !(matrix.os == 'windows-latest' && github.event_name == 'pull_request') }}
+        shell: bash
+        run: |
+          python scripts/_diag_857.py 2>&1 | head -220
 
       - name: Run unit tests with coverage
         if: ${{ !(matrix.os == 'windows-latest' && github.event_name == 'pull_request') }}
@@ -192,7 +199,7 @@ jobs:
         shell: bash
         run: |
           pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto --dist loadfile \
-            --timeout=300 --durations=25 \
+            --timeout=300 --durations=0 \
             --cov=src/grimoire \
             --cov-report=xml \
             --cov-report=term-missing \
