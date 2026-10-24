@@ -44,19 +44,32 @@ function injectStyles() {
   style.id = STYLE_ID;
   style.textContent = `
     .pl-sheet { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .pl-fleet-actions { display: flex; justify-content: flex-end; }
-.pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .pl-fleet { padding: var(--sp-6); max-width: 1400px; width: 100%; box-sizing: border-box; margin: 0 auto; }
+    .pl-formula { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; }
+    .pl-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
+    .pl-filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+    .pl-search { width: 260px; max-width: 100%; box-sizing: border-box; border-radius: var(--r-pill); }
+    .pl-filterbar .seg { height: 32px; border-radius: var(--r-pill); }
+    .pl-seg-n { margin-left: 6px; color: var(--ink3); }
+    .seg > button[aria-pressed="true"] .pl-seg-n { color: inherit; }
+    .pl-fleet .tbl td { padding-top: 10px; padding-bottom: 10px; }
+    .pl-name { font-weight: 500; }
+    .pl-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+    .pl-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pl-fleet .tbl { table-layout: fixed; }
+    .pl-fleet .tbl th:nth-child(2) { width: 30%; }
+    .pl-fleet .tbl th:nth-child(3) { width: 170px; }
+    .pl-fleet .tbl th:nth-child(4) { width: 100px; }
+    .pl-fleet .tbl th:nth-child(5) { width: 120px; }
+    .pl-fleet .tbl th:nth-child(6) { width: 64px; }
+    .pl-none { margin: 0; }
     @media (max-width: 900px) {
-      .pl-sheet, .pl-wrap { padding: var(--sp-3); }
+      .pl-sheet, .pl-wrap, .pl-fleet { padding: var(--sp-3); }
     }
     .pl-section h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
-    .pl-watch { display: flex; flex-direction: column; gap: 6px; }
-    .pl-watch-row { display: flex; align-items: center; gap: var(--sp-2); padding: 8px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
-    .pl-watch-txt { flex-grow: 1; }
-    .pl-watch-name { font-weight: 500; }
-    .pl-watch-reason { color: var(--ink2); margin-left: 8px; }
     .pl-cards { display: none; flex-direction: column; gap: var(--sp-2); }
-    .pl-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-3); cursor: pointer; }
+    .pl-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); padding: var(--sp-3) var(--sp-4); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
     .pl-card-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
     @media (max-width: 760px) {
       .pl-desktop { display: none; }
@@ -270,21 +283,6 @@ function projectToolLine(kit) {
   return `outil du projet : ${toolWord}`;
 }
 
-// ── Signaux « à traiter » ────────────────────────────────────────────────────
-
-function watchReasons(entry, health) {
-  const reasons = [];
-  if (!entry.managed) {
-    reasons.push({ kind: 'kit', word: 'projet non initialisé', action: 'ouvrir' });
-  } else if (health && health.kit && health.kit.scaffolded && health.kit.catalogAvailable && !health.kit.upToDate) {
-    reasons.push({ kind: 'kit', word: `kit en retard (${health.kit.behind} fichier(s))`, action: 'update' });
-  }
-  if (health && health.ci_status === 'failure') {
-    reasons.push({ kind: 'ci', word: 'CI rouge', action: 'ouvrir' });
-  }
-  return reasons;
-}
-
 // ── Niveau Flotte (cockpit) ──────────────────────────────────────────────────
 //
 // Un seul appel `GET /api/fleet` (#541, backend #542) — chaque affichage
@@ -316,7 +314,7 @@ async function loadFleet(ctx, { force = false } = {}) {
   const payload = await ctx.api.fleet();
   // `_fleet_entry` (best-effort côté serveur) rend `{ error }` plutôt que
   // `null` pour un projet cassé — jamais le contrat qu'attendaient
-  // `renderFleet`/`watchReasons` (ex. `health.kit`, `memory.state`), qui
+  // `renderFleet` (ex. `health.kit`, `memory.state`), qui
   // lisaient jusqu'ici toujours soit un payload complet, soit `null` (`ctx.
   // api.health(slug).catch(() => null)`). On aligne ici sur ce contrat.
   const rows = (payload.projects || []).map((p) => ({
@@ -328,21 +326,23 @@ async function loadFleet(ctx, { force = false } = {}) {
   return rows;
 }
 
-// ── « Nouveau projet » (#172) : bouton + section repliable, Flotte ─────────
+// ── « Nouveau projet » (#172) : bouton d'en-tête + panneau repliable ───────
 //
 // Toujours visible, y compris sur un registre vide — c'est justement là que
-// le geste manque le plus. `onCreated` ferme la section et bascule sur le
-// projet créé, par le même chemin que cliquer une ligne du tableau (aucune
-// route dédiée à réinventer, et le sélecteur de projets — ce même tableau —
-// le montrera dès qu'on y revient, sans redémarrer le cockpit).
-function renderNewProjectSection(ctx, onCreated) {
-  const section = document.createElement('div');
-  section.className = 'pl-section';
+// le geste manque le plus. Le bouton prend place dans l'en-tête de la Flotte
+// (maquette Douce), le formulaire s'ouvre dessous, dans `panel`. `onCreated`
+// ferme le panneau et bascule sur le projet créé, par le même chemin que
+// cliquer une ligne du tableau (aucune route dédiée à réinventer, et le
+// sélecteur de projets — ce même tableau — le montrera dès qu'on y revient,
+// sans redémarrer le cockpit).
+function renderNewProject(ctx, onCreated) {
+  const panel = document.createElement('div');
+  panel.className = 'pl-section';
+  panel.hidden = true;
   const toggleBtn = document.createElement('button');
   toggleBtn.type = 'button';
   toggleBtn.className = 'btn pri';
-  toggleBtn.textContent = '+ Nouveau projet';
-  section.append(toggleBtn);
+  toggleBtn.append(icon('plus'), 'Nouveau projet');
 
   let open = false;
   let formHost = null;
@@ -350,27 +350,126 @@ function renderNewProjectSection(ctx, onCreated) {
     open = !open;
     if (!open) {
       if (formHost) { formHost.remove(); formHost = null; }
+      panel.hidden = true;
       return;
     }
+    panel.hidden = false;
     formHost = document.createElement('div');
     formHost.className = 'pl-card';
-    formHost.style.marginTop = 'var(--sp-3)';
     formHost.append(text('p', 'lbl', 'Chargement…'));
-    section.append(formHost);
+    panel.append(formHost);
     renderCreateProjectForm(ctx, (slug) => {
       open = false;
       if (formHost) { formHost.remove(); formHost = null; }
+      panel.hidden = true;
       onCreated(slug);
     }).then((node) => { if (formHost) formHost.replaceWith(node); formHost = node; });
   });
-  return section;
+  return { button: toggleBtn, panel };
 }
 
-function renderFleet(root, ctx, rows, onSelect, onRefresh) {
-  const wrap = document.createElement('div');
-  wrap.className = 'pl-wrap';
-  wrap.append(renderNewProjectSection(ctx, onSelect));
+// ── Attention par projet (P65) ───────────────────────────────────────────────
+//
+// Les badges de la colonne « Attention » sont les éléments que l'API
+// d'attention (`/api/workspace/attention`, P22) compte déjà pour chaque
+// projet — jamais une règle recalculée ici. Le retard du kit a sa propre
+// colonne, et un service « résolu » n'attend plus rien : ni l'un ni l'autre
+// ne fait un badge.
+const ATTENTION_WORDS = {
+  checkpoint: ['checkpoint à valider', 'checkpoints à valider', 'warn'],
+  question: ['question', 'questions', 'warn'],
+  proposal: ['proposition', 'propositions', 'warn'],
+  review_blocked: ['revue bloquée', 'revues bloquées', 'warn'],
+  task_blocked: ['tâche bloquée', 'tâches bloquées', 'bad'],
+  directive_unacked: ['consigne non accusée', 'consignes non accusées', 'warn'],
+  claim_orphaned: ['claim sans session', 'claims sans session', 'warn'],
+  service: ['service en échec', 'services en échec', 'bad'],
+  unreadable: ['projet illisible', 'projets illisibles', 'bad'],
+  probe_failed: ['sonde en échec', 'sondes en échec', 'bad'],
+};
+const ATTENTION_BADGES_MAX = 3;
 
+/** `slug` → éléments d'attention du projet (sans retard de kit ni résolus). */
+function attentionBySlug(payload) {
+  const map = new Map();
+  for (const section of payload?.sections || []) {
+    for (const item of section.items || []) {
+      if (!ATTENTION_WORDS[item.kind]) continue;
+      const slug = item.project?.slug;
+      if (!slug) continue;
+      if (!map.has(slug)) map.set(slug, []);
+      map.get(slug).push(item);
+    }
+  }
+  return map;
+}
+
+/** Les badges d'un projet : un par type, avec son compte, du plus grave au plus doux. */
+function attentionBadges(items) {
+  const counts = new Map();
+  for (const item of items) counts.set(item.kind, (counts.get(item.kind) || 0) + 1);
+  const badges = [...counts].map(([kind, n]) => {
+    const [one, many, tone] = ATTENTION_WORDS[kind];
+    return { tone, label: `${n} ${n === 1 ? one : many}` };
+  });
+  badges.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
+  const shown = badges.slice(0, ATTENTION_BADGES_MAX).map((b) => badge(b.label, b.tone));
+  if (badges.length > shown.length) {
+    const rest = badges.slice(ATTENTION_BADGES_MAX);
+    shown.push(badge(`+${rest.length}`, '', rest.map((b) => b.label).join(' · ')));
+  }
+  return shown;
+}
+
+// ── Kit d'un projet : version + écart (colonne « Kit ») ─────────────────────
+
+function kitCellOf(r) {
+  if (!r.health) return { main: 'indisponible', sub: 'lecture impossible', behind: false };
+  if (!r.entry.managed) return { main: 'non initialisé', sub: '', behind: false };
+  const kit = r.health.kit;
+  if (!kit || !kit.scaffolded) return { main: kit ? 'non initialisé' : 'indisponible', sub: '', behind: false };
+  const version = kit.aligned || kit.installed || 'version inconnue';
+  if (kit.upToDate) {
+    return { main: version, sub: kit.aligned && kit.installed && kit.aligned !== kit.installed ? 'aligné' : 'à jour', behind: false };
+  }
+  const n = kit.behind;
+  return { main: version, sub: `${fmtInt(n)} fichier${n > 1 ? 's' : ''} d’écart`, behind: kit.catalogAvailable !== false };
+}
+
+/** « 1 active », « 2 en cours » : les exécutions encore vivantes du projet. */
+function sessionsWord(health) {
+  const live = (health?.activity?.runs || []).filter((run) => !run.silent).length;
+  if (live) return `${live} en cours`;
+  return '—';
+}
+
+const plural = (n, one, many) => `${fmtInt(n)} ${n > 1 ? many : one}`;
+
+// Filtre de la table (texte + segment), gardé entre deux rendus : un
+// rafraîchissement de la flotte ne remet pas la recherche à zéro.
+const fleetFilter = { query: '', segment: 'all' };
+
+function renderFleet(root, ctx, rows, attention, onSelect, onRefresh) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pl-wrap pl-fleet';
+
+  const byProject = attentionBySlug(attention);
+  const asking = (r) => (byProject.get(r.entry.slug) || []).length > 0;
+  const lagging = (r) => kitCellOf(r).behind;
+  const alignedCount = rows.filter((r) => r.health?.kit?.upToDate).length;
+  const installed = rows.map((r) => r.health?.kit?.installed).find(Boolean);
+  const askingCount = rows.filter(asking).length;
+
+  const sub = [plural(rows.length, 'projet suivi', 'projets suivis')];
+  if (rows.length) {
+    sub.push(`${plural(alignedCount, 'aligné', 'alignés')} sur le kit${installed ? ' ' + installed : ''}`);
+    sub.push(attention ? `${plural(askingCount, 'demande une action', 'demandent une action')}` : 'attention indisponible');
+  }
+
+  const formula = document.createElement('span');
+  formula.className = 'pl-formula';
+  formula.append(text('b', null, '›'), 'grimoire cockpit list');
+  const actions = [formula];
   if (onRefresh) {
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
@@ -382,11 +481,11 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
       refreshBtn.replaceChildren(icon('refresh'), 'Rafraîchissement…');
       onRefresh();
     });
-    const actions = document.createElement('div');
-    actions.className = 'pl-fleet-actions';
-    actions.append(refreshBtn);
-    wrap.append(actions);
+    actions.push(refreshBtn);
   }
+  const create = renderNewProject(ctx, onSelect);
+  actions.push(create.button);
+  wrap.append(spaceHead('Flotte', sub.join(' · '), ...actions), create.panel);
 
   // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
   // flotte vide, pas une panne. Un tableau muet à zéro lignes se lisait comme
@@ -398,57 +497,54 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
       "Aucun projet enregistré. Ce cockpit lit un registre, il ne scanne pas le disque : "
       + "grimoire cockpit add <chemin> pour un projet, ou grimoire cockpit scan <racine> pour explorer un dossier.",
     ));
-    return wrap;
+    root.append(wrap);
+    return;
   }
 
-  const aligned = rows.filter((r) => r.health?.kit?.upToDate).length;
-  const active = rows.filter((r) => r.health?.activity?.active).length;
-  const watch = rows.flatMap((r) => watchReasons(r.entry, r.health).map((reason) => ({ ...r, reason })));
-
-  wrap.append(kpiRow([
-    { value: fmtInt(rows.length), label: 'projets', icon: 'folder-tree' },
-    { value: fmtInt(aligned), label: 'kit aligné', icon: 'seal', tone: aligned === rows.length ? 'ok' : 'warn' },
-    { value: fmtInt(watch.length), label: 'à traiter', icon: watch.length ? 'alert' : 'check', tone: watch.length ? 'warn' : 'ok' },
-    { value: fmtInt(active), label: 'actifs (15 min)', icon: 'bolt' },
-  ]));
-
-  const watchSection = document.createElement('div');
-  watchSection.className = 'pl-section';
-  watchSection.append(text('h3', null, 'À traiter'));
-  if (!watch.length) {
-    watchSection.append(text('p', 'lbl', 'Rien à traiter : chaque projet du registre est initialisé et son kit est aligné.'));
-  } else {
-    const list = document.createElement('div');
-    list.className = 'pl-watch';
-    for (const item of watch) {
-      const line = document.createElement('div');
-      line.className = 'pl-watch-row';
-      line.append(
-        dot('warn'),
-        row(text('span', 'pl-watch-name', item.entry.name || item.entry.slug), text('span', 'pl-watch-reason lbl', item.reason.word)),
-      );
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn';
-      btn.textContent = 'Ouvrir →';
-      btn.addEventListener('click', () => onSelect(item.entry.slug));
-      line.append(btn);
-      list.append(line);
+  // Filtre : champ texte (nom ou chemin) + segments Tous / Demandent une
+  // action / Kit en retard, avec leur compte réel.
+  const bar = document.createElement('div');
+  bar.className = 'pl-filterbar';
+  const field = document.createElement('input');
+  field.type = 'search';
+  field.className = 'input pl-search';
+  field.placeholder = 'Filtrer par nom ou chemin';
+  field.setAttribute('aria-label', 'Filtrer les projets');
+  field.value = fleetFilter.query;
+  const seg = document.createElement('div');
+  seg.className = 'seg';
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', 'Filtre');
+  const segments = [
+    ['all', 'Tous', () => true, rows.length],
+    ['asking', 'Demandent une action', asking, askingCount],
+    ['lagging', 'Kit en retard', lagging, rows.filter(lagging).length],
+  ];
+  const segButtons = new Map();
+  for (const [id, label, , count] of segments) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.segment = id;
+    button.append(label);
+    if (id !== 'all') button.append(text('span', 'pl-seg-n', String(count)));
+    if (id === 'asking' && !attention) {
+      button.disabled = true;
+      button.title = "La lecture d'attention n'a pas répondu : impossible de dire qui demande une action.";
     }
-    watchSection.append(list);
+    button.addEventListener('click', () => { fleetFilter.segment = id; paint(); });
+    segButtons.set(id, button);
+    seg.append(button);
   }
-  wrap.append(watchSection);
+  bar.append(field, seg);
+  wrap.append(bar);
 
-  const tableWrap = document.createElement('div');
-  tableWrap.className = 'tbl-wrap pl-desktop';
   const table = document.createElement('table');
   table.className = 'tbl tbl-pick';
-  const thead = document.createElement('thead');
-  thead.innerHTML = '';
   const headRow = document.createElement('tr');
-  const headTerms = { Projet: 'projet', Kit: 'kit', Antifragilité: 'antifragilite', Mémoire: 'memoire', Flows: 'workflow' };
-  for (const label of ['Projet', 'Kit', 'CI', 'Commits', 'Antifragilité', 'Mémoire', 'Flows', 'Dernier événement']) {
+  const headTerms = { Projet: 'projet', Kit: 'kit' };
+  for (const label of ['Projet', 'Attention', 'Kit', 'Sessions', 'Dernier signe', '']) {
     const th = text('th', null, label);
+    if (!label) th.setAttribute('aria-label', 'Ouvrir');
     if (headTerms[label]) {
       th.dataset.term = headTerms[label];
       const hint = icon('info');
@@ -457,64 +553,101 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
     }
     headRow.append(th);
   }
+  const thead = document.createElement('thead');
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
-  for (const r of rows) {
-    const tr = document.createElement('tr');
-    tr.tabIndex = 0;
-    tr.addEventListener('click', () => onSelect(r.entry.slug));
-    tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
-
-    const nameCell = document.createElement('td');
-    nameCell.append(text('div', null, r.entry.name || r.entry.slug), text('div', 'lbl mono', r.entry.path));
-    tr.append(nameCell);
-
-    const kitCell = document.createElement('td');
-    if (!r.entry.managed) kitCell.append(pill('warn', 'non initialisé'));
-    else if (!r.health) kitCell.append(pill('', 'indisponible'));
-    else kitCell.append(pill(r.health.kit.upToDate ? 'ok' : 'warn', r.health.kit.aligned || 'inconnue'));
-    tr.append(kitCell);
-
-    const ciCell = document.createElement('td');
-    const status = r.health?.ci_status;
-    ciCell.append(pill(ciDotClass(status), ciWord(status)));
-    tr.append(ciCell);
-
-    tr.append(text('td', 'mono', fmtInt(r.health?.commits_total)));
-
-    const afCell = document.createElement('td');
-    afCell.append(text('span', 'lbl', r.health?.antifragile == null ? (r.health?.antifragile_note || 'pas encore mesurée') : `${r.health.antifragile}/100`));
-    tr.append(afCell);
-
-    const memCell = document.createElement('td');
-    if (r.memory && r.memory.state === 'ok') memCell.append(pill('ok', `${fmtInt(r.memory.entries)} entrée(s)`));
-    else if (r.memory && r.memory.state === 'unavailable') memCell.append(pill('warn', 'indisponible'));
-    else memCell.append(pill('', 'non initialisée'));
-    tr.append(memCell);
-
-    tr.append(text('td', 'mono', fmtInt((r.health?.flows || []).length)));
-    tr.append(text('td', 'lbl', relativeAge(r.health?.activity?.ageMinutes)));
-    tbody.append(tr);
-  }
   table.append(tbody);
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'tbl-wrap pl-desktop';
   tableWrap.append(table);
-  wrap.append(tableWrap);
-
   const cards = document.createElement('div');
   cards.className = 'pl-cards';
-  for (const r of rows) {
-    const card = document.createElement('div');
-    card.className = 'pl-card';
-    card.addEventListener('click', () => onSelect(r.entry.slug));
-    card.append(text('div', null, r.entry.name || r.entry.slug));
-    card.append(pill(r.health?.kit?.upToDate ? 'ok' : 'warn', r.health?.kit?.aligned || (r.entry.managed ? 'inconnue' : 'non initialisé')));
-    card.append(pill(ciDotClass(r.health?.ci_status), 'CI ' + ciWord(r.health?.ci_status)));
-    card.append(text('div', 'pl-card-row lbl', `${fmtInt(r.health?.commits_total)} commits · ${fmtInt((r.health?.flows || []).length)} flow(s)`));
-    cards.append(card);
-  }
-  wrap.append(cards);
+  const none = text('p', 'lbl pl-none', 'Aucun projet ne correspond à ce filtre.');
+  none.hidden = true;
+  wrap.append(tableWrap, cards, none);
 
+  const openButton = (r) => {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'btn ghost pl-open';
+    open.setAttribute('aria-label', `Ouvrir ${r.entry.name || r.entry.slug}`);
+    open.append(icon('chevron'));
+    return open;
+  };
+
+  function paint() {
+    const query = fleetFilter.query.trim().toLowerCase();
+    const segment = segments.find(([id]) => id === fleetFilter.segment) || segments[0];
+    const shown = rows.filter((r) => segment[2](r)
+      && (!query || `${r.entry.name || ''} ${r.entry.slug} ${r.entry.path}`.toLowerCase().includes(query)));
+    for (const [id, button] of segButtons) button.setAttribute('aria-pressed', String(id === segment[0]));
+    tbody.replaceChildren();
+    cards.replaceChildren();
+    none.hidden = shown.length > 0;
+    tableWrap.hidden = shown.length === 0;
+    for (const r of shown) {
+      const name = r.entry.name || r.entry.slug;
+      const badges = attentionBadges(byProject.get(r.entry.slug) || []);
+      const kit = kitCellOf(r);
+
+      const tr = document.createElement('tr');
+      tr.tabIndex = 0;
+      tr.dataset.project = r.entry.slug;
+      tr.addEventListener('click', () => onSelect(r.entry.slug));
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
+
+      const nameCell = document.createElement('td');
+      const path = text('div', 'lbl mono pl-path', r.entry.path);
+      path.title = r.entry.path;
+      nameCell.append(text('div', 'pl-name', name), path);
+      const attentionCell = document.createElement('td');
+      if (badges.length) {
+        const list = document.createElement('div');
+        list.className = 'pl-badges';
+        list.append(...badges);
+        attentionCell.append(list);
+      } else {
+        attentionCell.append(text('span', 'lbl', '—'));
+      }
+      const kitCell = document.createElement('td');
+      kitCell.append(text('div', null, kit.main));
+      if (kit.sub) kitCell.append(text('div', 'lbl', kit.sub));
+      const openCell = document.createElement('td');
+      openCell.append(openButton(r));
+      tr.append(
+        nameCell, attentionCell, kitCell,
+        text('td', null, sessionsWord(r.health)),
+        text('td', 'lbl', relativeAge(r.health?.activity?.ageMinutes)),
+        openCell,
+      );
+      tbody.append(tr);
+
+      // Mobile : une carte par projet, mêmes données.
+      const card = document.createElement('div');
+      card.className = 'pl-card';
+      card.tabIndex = 0;
+      card.addEventListener('click', () => onSelect(r.entry.slug));
+      card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
+      const cardPath = text('div', 'lbl mono pl-path', r.entry.path);
+      cardPath.title = r.entry.path;
+      card.append(text('div', 'pl-name', name), cardPath);
+      if (badges.length) {
+        const list = document.createElement('div');
+        list.className = 'pl-badges';
+        list.append(...badges.map((b) => b.cloneNode(true)));
+        card.append(list);
+      }
+      card.append(text(
+        'div', 'pl-card-row lbl',
+        [kit.sub ? `${kit.main} · ${kit.sub}` : kit.main, relativeAge(r.health?.activity?.ageMinutes)].join(' · '),
+      ));
+      cards.append(card);
+    }
+  }
+
+  field.addEventListener('input', () => { fleetFilter.query = field.value; paint(); });
+  paint();
   root.append(wrap);
 }
 
@@ -2190,19 +2323,24 @@ export async function mount(root, ctx) {
     root.replaceChildren(shell);
 
     if (level === 'flotte') {
-      ctx.inspector.replaceChildren(document.createElement('div'));
+      ctx.inspector.replaceChildren(); // pas de détail : pas de colonne (P62)
       // `forceFleet` ne vient que du bouton « Rafraîchir la flotte » — un
       // simple retour sur ce niveau (zoom, sélection d'un autre projet puis
       // retour) sert le cache de `loadFleet` (issue #510 point 5).
-      const rows = await loadFleet(ctx, { force: forceFleet });
+      // L'attention (P22) se lit à côté, jamais en bloquant : sans elle la
+      // table s'affiche quand même, la colonne dit « indisponible ».
+      const [rows, attention] = await Promise.all([
+        loadFleet(ctx, { force: forceFleet }),
+        ctx.api.attention(true).catch(() => null),
+      ]);
       if (ctx.signal.aborted) return;
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderFleet(
-        root, ctx, rows,
+        root, ctx, rows, attention,
         (slug) => ctx.scope.set(slug),
         () => draw({ forceFleet: true }),
       );
-      ctx.dock.echo('grimoire status');
+      ctx.dock.echo('grimoire cockpit list');
     } else {
       // #548 : `loadSheet()` porte désormais le nom du projet aussi (fiche
       // `sheet.name`, résolue côté serveur depuis le registre) — plus de

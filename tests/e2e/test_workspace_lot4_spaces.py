@@ -38,16 +38,17 @@ def test_piloter_atelier_rend_ci_status_inconnue_en_gris(workspace: Page) -> Non
     assert "NaN" not in canvas_text
 
 
-def test_piloter_cockpit_flotte_montre_un_tableau_avec_inconnue(cockpit_workspace: Page) -> None:
-    """Portée « Tous les projets » : un tableau de projets, colonne CI rendue « inconnue »."""
+def test_piloter_cockpit_flotte_montre_un_tableau_de_projets(cockpit_workspace: Page) -> None:
+    """Portée « Tous les projets » : la table de la maquette Flotte (P65), sans
+    colonne CI (rien ne la mesure : elle ne disait qu'« inconnue ») ni valeur inventée."""
     workspace = cockpit_workspace
     open_scope_all(workspace)
     _goto(workspace, "piloter")
 
     workspace.locator(".tbl-wrap, .pl-cards").first.wait_for()
     body_text = workspace.locator("#canvas").inner_text().lower()
-    assert "inconnue" in body_text
-    assert "à traiter" in body_text
+    assert "demandent une action" in body_text
+    assert "undefined" not in body_text and "nan" not in body_text.split()
 
 
 def test_piloter_n_a_plus_de_zoom_flotte_projet_la_portee_decide(cockpit_workspace: Page) -> None:
