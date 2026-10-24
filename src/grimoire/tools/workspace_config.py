@@ -155,5 +155,8 @@ def providers_view(project_root: Path) -> dict[str, Any]:
         item["status"], item["tone"] = status, tone
         item["tiers"] = sorted({m["tier"] for m in item["models"] if m.get("tier")})
         providers.append(item)
-    next_choice = {tier: (spec.id if (spec := choose(root, tier, now=now)) else None) for tier in SUPPORTED_MODEL_TIERS}
+    next_choice: dict[str, str | None] = {}
+    for tier in SUPPORTED_MODEL_TIERS:
+        chosen = choose(root, tier, now=now)
+        next_choice[tier] = chosen.id if chosen is not None else None
     return {"registry": bool(specs), "error": None, "providers": providers, "next_choice": next_choice}

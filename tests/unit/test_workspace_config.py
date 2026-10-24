@@ -8,9 +8,10 @@ lieu de les rendre en liste vide.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from grimoire.providers.state import record_failure
+from grimoire.providers.state import record_failure, record_suspension
 from grimoire.tools import workspace_config as wc
 from grimoire.tools.workspace_routes import GET_ROUTES, PREFIX, workspace_get
 
@@ -155,3 +156,18 @@ def test_les_routes_repondent_par_workspace_get(tmp_path: Path) -> None:
     assert hooks["total"] == 1
     providers = workspace_get(tmp_path, f"{PREFIX}providers", {})
     assert providers["providers"] == []
+
+
+def test_providers_suspendu_n_a_aucun_prochain_choix(tmp_path: Path) -> None:
+    path = tmp_path / PROVIDERS
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "providers:\n  - id: seul\n    enabled: true\n    models:\n      - {id: m, tier: cheap}\n",
+        encoding="utf-8",
+    )
+    record_suspension(tmp_path, "seul", until=datetime.now(UTC) + timedelta(hours=1), source="test")
+    view = wc.providers_view(tmp_path)
+    assert view["providers"][0]["status"] == "suspendu"
+    assert view["providers"][0]["tone"] == "bad"
+    # Aucun fournisseur disponible : la clé existe, sa valeur est None (jamais un identifiant inventé).
+    assert view["next_choice"]["cheap"] is None

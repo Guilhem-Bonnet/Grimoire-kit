@@ -468,7 +468,10 @@
    fichier ouvert à droite ; une seule colonne sous 900 px. */
 .sr-split {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
+  /* Une rangée bornée : sans elle, `auto` la ferait grandir avec le fichier
+     et l'éditeur déborderait de la toile au lieu de défiler lui-même. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }

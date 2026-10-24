@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from playwright.sync_api import Browser, Page, Route
@@ -59,7 +61,7 @@ routing:
 
 
 @pytest.fixture
-def payloads(tmp_path: Path) -> dict[str, dict]:
+def payloads(tmp_path: Path) -> dict[str, dict[str, Any]]:
     hooks = {hook: {"event": event, "mode": "enforced"} for hook, event in EVENTS.items()}
     hooks.update({hook: {"event": event, "mode": mode} for hook, (event, mode) in MODES.items()})
     registry = tmp_path / workspace_config.REGISTRY_RELPATH
@@ -78,19 +80,19 @@ def payloads(tmp_path: Path) -> dict[str, dict]:
     }
 
 
-def _fulfiller(body: dict):
+def _fulfiller(body: dict[str, Any]) -> Callable[[Route], None]:
     def handler(route: Route) -> None:
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
     return handler
 
 
-def _serve(page: Page, payloads: dict[str, dict]) -> None:
+def _serve(page: Page, payloads: dict[str, dict[str, Any]]) -> None:
     for name, body in payloads.items():
         page.route(f"**/api/workspace/{name}*", _fulfiller(body))
 
 
-def _open_configuration(page: Page, payloads: dict[str, dict]) -> None:
+def _open_configuration(page: Page, payloads: dict[str, dict[str, Any]]) -> None:
     _serve(page, payloads)
     page.evaluate("() => { window.GrimoireWorkspace.goto('configuration'); }")
     page.wait_for_function("window.GrimoireWorkspace.section === 'hotes'")
@@ -98,7 +100,7 @@ def _open_configuration(page: Page, payloads: dict[str, dict]) -> None:
     page.wait_for_selector(".cf-wrap table.tbl tbody tr", timeout=30_000)
 
 
-def test_les_rubriques_sont_verticales_avec_leurs_comptes(cockpit_workspace: Page, payloads: dict[str, dict]) -> None:
+def test_les_rubriques_sont_verticales_avec_leurs_comptes(cockpit_workspace: Page, payloads: dict[str, dict[str, Any]]) -> None:
     page = cockpit_workspace
     _open_configuration(page, payloads)
     tabs = page.locator("#section-tabs .tab")
@@ -113,7 +115,7 @@ def test_les_rubriques_sont_verticales_avec_leurs_comptes(cockpit_workspace: Pag
     assert box is not None and box["height"] > 150 and box["width"] < 260
 
 
-def test_hotes_et_hooks_atterrissage_sans_explorateur(cockpit_workspace: Page, payloads: dict[str, dict]) -> None:
+def test_hotes_et_hooks_atterrissage_sans_explorateur(cockpit_workspace: Page, payloads: dict[str, dict[str, Any]]) -> None:
     page = cockpit_workspace
     _open_configuration(page, payloads)
     assert page.locator("#panel-explorer").is_hidden()
@@ -136,7 +138,7 @@ def test_hotes_et_hooks_atterrissage_sans_explorateur(cockpit_workspace: Page, p
         assert word not in page.locator("#canvas").inner_text()
 
 
-def test_le_segment_par_hote_filtre_le_tableau(cockpit_workspace: Page, payloads: dict[str, dict]) -> None:
+def test_le_segment_par_hote_filtre_le_tableau(cockpit_workspace: Page, payloads: dict[str, dict[str, Any]]) -> None:
     page = cockpit_workspace
     _open_configuration(page, payloads)
     seg = page.locator(".cf-wrap .seg")
@@ -148,7 +150,7 @@ def test_le_segment_par_hote_filtre_le_tableau(cockpit_workspace: Page, payloads
     assert page.locator(".cf-wrap tbody tr").count() == 8
 
 
-def test_les_fournisseurs_sont_dans_le_panneau_de_detail(cockpit_workspace: Page, payloads: dict[str, dict]) -> None:
+def test_les_fournisseurs_sont_dans_le_panneau_de_detail(cockpit_workspace: Page, payloads: dict[str, dict[str, Any]]) -> None:
     page = cockpit_workspace
     _open_configuration(page, payloads)
     panel = page.locator("#panel-inspector")
@@ -161,7 +163,7 @@ def test_les_fournisseurs_sont_dans_le_panneau_de_detail(cockpit_workspace: Page
     assert "Remettre à zéro" not in panel.inner_text()
 
 
-def test_fournisseurs_agents_et_fichiers_ont_leur_rubrique(cockpit_workspace: Page, payloads: dict[str, dict]) -> None:
+def test_fournisseurs_agents_et_fichiers_ont_leur_rubrique(cockpit_workspace: Page, payloads: dict[str, dict[str, Any]]) -> None:
     page = cockpit_workspace
     _open_configuration(page, payloads)
 
@@ -191,7 +193,7 @@ def test_fournisseurs_agents_et_fichiers_ont_leur_rubrique(cockpit_workspace: Pa
     assert page.locator("#panel-explorer").is_visible()
 
 
-def test_mobile_sans_debordement(browser: Browser, payloads: dict[str, dict], served_cockpit: tuple[str, str]) -> None:
+def test_mobile_sans_debordement(browser: Browser, payloads: dict[str, dict[str, Any]], served_cockpit: tuple[str, str]) -> None:
     served, slug = served_cockpit
     context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light", reduced_motion="reduce")
     page = context.new_page()
@@ -205,7 +207,7 @@ def test_mobile_sans_debordement(browser: Browser, payloads: dict[str, dict], se
         context.close()
 
 
-def test_captures_de_relecture(browser: Browser, payloads: dict[str, dict], served_cockpit: tuple[str, str]) -> None:
+def test_captures_de_relecture(browser: Browser, payloads: dict[str, dict[str, Any]], served_cockpit: tuple[str, str]) -> None:
     target = os.environ.get("GRIMOIRE_E2E_CAPTURES")
     if not target:
         return
