@@ -33,6 +33,10 @@ class _StubAPI:
     def archetypes(self) -> list[dict[str, Any]]:
         return [self._mark("archetypes")]
 
+    def setup_questions(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        self.query = query
+        return self._mark("setup_questions")
+
     def extensions_view(self) -> dict[str, Any]:
         return self._mark("extensions_view")
 
@@ -77,6 +81,7 @@ class _StubAPI:
         ("/api/otel", "otel_export"),
         ("/api/primitives", "primitives_view"),
         ("/api/memory/status", "memory_link_view"),
+        ("/api/setup/questions", "setup_questions"),
     ],
 )
 def test_each_route_reaches_its_method(path: str, method: str) -> None:
@@ -89,6 +94,13 @@ def test_cost_model_forwards_the_query_parameter() -> None:
     api = _StubAPI()
     api_get(api, "/api/cost-model", {"model": ["claude-opus-5"]})
     assert api.model == "claude-opus-5"
+
+
+def test_setup_questions_forwards_the_answers_query() -> None:
+    """#888 : les réponses passent en query (`?stack=python&who=team&domain=web`)."""
+    api = _StubAPI()
+    api_get(api, "/api/setup/questions", {"stack": ["python"], "who": ["team"], "domain": ["web"]})
+    assert api.query == {"stack": ["python"], "who": ["team"], "domain": ["web"]}
 
 
 def test_backends_needs_no_project() -> None:
