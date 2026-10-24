@@ -109,7 +109,7 @@ def _unit_path(raw: str) -> str:
     """
     import tempfile
 
-    temp = [Path(tempfile.gettempdir()), Path("/var/tmp")]
+    temp = [Path(tempfile.gettempdir()), Path("/var/tmp")]  # noqa: S108 - exclusion, pas un usage
     temp += [t.resolve() for t in temp]
     kept: list[str] = []
     for entry in raw.split(os.pathsep):
