@@ -39,7 +39,7 @@ def upgrade_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A really-initialised minimal project, module-scoped — `grimoire init` alone takes ~1s."""
     root = tmp_path_factory.mktemp("upgrade-project") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-project"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-project", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
     return root
@@ -219,7 +219,7 @@ def test_apply_upgrade_softens_a_preexisting_dead_reference_into_a_repair_propos
 
     root = tmp_path_factory.mktemp("upgrade-repair") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -255,7 +255,7 @@ def test_apply_upgrade_still_fails_on_a_regression_not_in_the_baseline(
 
     root = tmp_path_factory.mktemp("upgrade-regression") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-regression"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-regression", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -299,7 +299,7 @@ def test_apply_upgrade_softens_a_preexisting_non_paths_resolve_failure_into_a_re
 
     root = tmp_path_factory.mktemp("upgrade-repair-doctor") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair-doctor"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair-doctor", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -330,7 +330,7 @@ def test_apply_upgrade_still_fails_on_a_new_non_paths_resolve_doctor_regression(
 
     root = tmp_path_factory.mktemp("upgrade-doctor-regression") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-doctor-regression"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-doctor-regression", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -355,7 +355,7 @@ def test_repair_proposal_names_and_applies_an_evident_substitution(tmp_path_fact
 
     root = tmp_path_factory.mktemp("upgrade-repair-dna") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair-dna"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-repair-dna", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit" / "archetype.dna.yaml").is_file():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -500,7 +500,7 @@ def test_find_orphans_detects_a_ghost_managed_projection_with_no_source_anywhere
 
     root = tmp_path_factory.mktemp("upgrade-ghost-projection") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-ghost-projection"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-ghost-projection", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -538,7 +538,7 @@ def test_find_orphans_never_touches_an_unmanaged_host_file(tmp_path_factory: pyt
 
     root = tmp_path_factory.mktemp("upgrade-unmanaged-host-file") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-unmanaged-host-file"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-unmanaged-host-file", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -598,7 +598,7 @@ def test_propose_override_migrations_proposes_a_fresh_full_override_too(
 
     root = tmp_path_factory.mktemp("upgrade-fresh-full-override") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-fresh-full-override"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-fresh-full-override", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -644,7 +644,7 @@ def test_propose_override_migrations_skips_an_already_partial_override(
 
     root = tmp_path_factory.mktemp("upgrade-partial-override") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-partial-override"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-partial-override", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -1134,7 +1134,7 @@ def test_upgrade_flow_run_end_to_end(tmp_path_factory: pytest.TempPathFactory) -
     """
     root = tmp_path_factory.mktemp("upgrade-e2e") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-e2e"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-e2e", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -1199,7 +1199,7 @@ def test_upgrade_flow_run_verifies_against_a_suffixed_manifest_when_backup_is_pu
     like any other successful run."""
     root = tmp_path_factory.mktemp("upgrade-suffixed") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-suffixed"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-suffixed", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -1240,7 +1240,7 @@ def test_upgrade_flow_run_verifies_against_a_suffixed_manifest_when_backup_is_pu
 def test_upgrade_flow_run_dry_run_stops_after_preview(tmp_path_factory: pytest.TempPathFactory) -> None:
     root = tmp_path_factory.mktemp("upgrade-dry") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-dry"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-dry", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -1258,7 +1258,7 @@ def test_upgrade_flow_run_dry_run_stops_after_preview(tmp_path_factory: pytest.T
 def test_flow_extract_reproduces_an_incomplete_upgrade_run(tmp_path_factory: pytest.TempPathFactory) -> None:
     root = tmp_path_factory.mktemp("upgrade-extract") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-extract"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-extract", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
@@ -1285,7 +1285,7 @@ def test_projected_removals_voit_l_orphelin_puis_l_archive(tmp_path_factory: pyt
 
     root = tmp_path_factory.mktemp("upgrade-plan") / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "upgrade-plan"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "upgrade-plan", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 

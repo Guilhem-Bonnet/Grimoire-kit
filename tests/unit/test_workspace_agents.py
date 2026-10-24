@@ -33,7 +33,7 @@ def _init(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
     subprocess.run(
-        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-agents"],
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-agents", "--backend", "local"],
         cwd=str(root),
         check=False,
         capture_output=True,
