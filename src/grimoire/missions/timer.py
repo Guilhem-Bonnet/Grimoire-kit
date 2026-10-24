@@ -99,6 +99,11 @@ def _under(path: Path, roots: list[Path]) -> bool:
     return any(path == root or root in path.parents for root in roots)
 
 
+def _has_tool(directory: Path, tool: str) -> bool:
+    candidate = directory / tool
+    return candidate.is_file() and os.access(candidate, os.X_OK)
+
+
 def _unit_path(raw: str) -> str:
     """Le ``PATH`` de l'unité : seulement les dossiers du poste qui portent un outil utile, plus les dossiers système.
 
@@ -118,7 +123,7 @@ def _unit_path(raw: str) -> str:
         directory = Path(entry)
         if not directory.is_absolute() or not directory.is_dir() or _under(directory, temp) or _under(directory.resolve(), temp):
             continue
-        if entry not in kept and any(shutil.which(tool, path=entry) for tool in _TOOLS):
+        if entry not in kept and any(_has_tool(directory, tool) for tool in _TOOLS):
             kept.append(entry)
     kept += [d for d in _SYSTEM_DIRS if d not in kept]
     return os.pathsep.join(kept)
