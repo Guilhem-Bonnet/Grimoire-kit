@@ -245,7 +245,9 @@ def test_une_tache_porte_son_corps_reel_description_guardrails_dependances(
 
 
 def test_une_tache_inconnue_est_un_404_pas_un_500(real_project: Path) -> None:
-    """Le transport n'attrape que FileNotFoundError, PermissionError et ValueError."""
+    """Couche fonction : le transport n'attrape que FileNotFoundError, PermissionError
+    et ValueError. Le code HTTP (404) est prouvé sur un vrai cockpit par
+    ``tests/unit/cli/test_cmd_cockpit_workspace_errors.py``."""
     from grimoire.tools.workspace_routes import workspace_get
 
     with pytest.raises(FileNotFoundError):
