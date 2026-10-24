@@ -7,7 +7,6 @@ framework installation, and a rich summary report.
 
 from __future__ import annotations
 
-import contextlib
 import difflib
 import json
 import logging
@@ -31,9 +30,24 @@ from rich.prompt import Confirm, Prompt
 
 from grimoire.__version__ import __version__
 from grimoire.cli.init_memory import memory_step_summary
+from grimoire.cli.init_questions import (
+    DOMAIN_QUESTION,
+    STACK_QUESTION,
+    WHO_QUESTION,
+    Answers,
+    Deduction,
+    Question,
+    answers_to_scan,
+    apply_adjustment,
+    deduce,
+    parse_choice,
+    prefill,
+)
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
+from grimoire.core.expertises import detect_expertises
 from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan, ScaffoldResult
 from grimoire.core.scanner import ScanResult, StackScanner
+from grimoire.hosts.detection import enabled_host_ids
 from grimoire.hosts.sync import sync_host_surfaces
 from grimoire.memory import profiles as memory_profiles
 
@@ -539,6 +553,55 @@ def _choose_memory_profile(
     return chosen.id, backend, offline, qdrant_docker, start_stack
 
 
+def _ask_question(q: Question, defaults: Answers) -> tuple[str, ...]:
+    """Print one of the three questions, numbered, and read a valid answer.
+
+    The default is the detection's answer (issue #888): a bare Enter keeps
+    it. An unreadable answer is re-asked, never silently mapped to something
+    else; after three misses the default stands.
+    """
+    console.print()
+    console.print(f"  [bold]{q.prompt}[/bold]")
+    default_ids = parse_choice(q, "", defaults)
+    default_numbers = ",".join(str(q.index_of(oid)) for oid in default_ids)
+    for idx, option in enumerate(q.options, 1):
+        marker = " [cyan]← detected[/cyan]" if q.id == "stack" and option.id in default_ids else ""
+        hint = f" [dim]— {option.hint}[/dim]" if option.hint else ""
+        console.print(f"    [bold]{idx}[/bold]) {option.label}{hint}{marker}")
+    if q.multiple:
+        console.print("    [bold]0[/bold]) None of these")
+    label = "Choice (ex: 1,3)" if q.multiple else "Choice"
+    for _attempt in range(3):
+        raw = Prompt.ask(f"  [bold]{label}[/bold]", default=default_numbers or ("0" if q.multiple else "1"))
+        try:
+            return parse_choice(q, raw, defaults)
+        except ValueError as exc:
+            console.print(f"  [yellow]{exc}[/yellow]")
+    return default_ids
+
+
+def _print_deduction(answers: Answers, deduction: Deduction, target: Path, *, no_cockpit: bool) -> None:
+    """The « what was deduced » block of the summary — the user adjusts it in one line."""
+    stacks = ", ".join(answers.stacks) if answers.stacks else "none declared"
+    console.print(f"    Stack:       {stacks}")
+    console.print(f"    Archetype:   {' + '.join(deduction.archetypes)}")
+    console.print(f"    Skill level: {deduction.skill_level}")
+    needs = f" (needs: {', '.join(deduction.needs)})" if deduction.needs else ""
+    console.print(f"    Standard:    profile {deduction.standard_profile}{needs}")
+    if deduction.stack_skills:
+        console.print(f"    Skills:      {', '.join(deduction.stack_skills)} (attached to Atlas)")
+    if deduction.expertises:
+        console.print(
+            f"    Expertises:  {', '.join(deduction.expertises)} — recommended, attach with "
+            f"[cyan]grimoire expertise add {' '.join(deduction.expertises)}[/cyan]"
+        )
+    hosts = sorted(str(h) for h in enabled_host_ids(target)) or ["none detected"]
+    console.print(f"    Hosts:       {', '.join(hosts)}")
+    console.print(f"    Cockpit:     {'not enrolled (--no-cockpit)' if no_cockpit else 'enrolled in the local cockpit'}")
+    for reason in deduction.reasons:
+        console.print(f"    [dim]· {reason}[/dim]")
+
+
 def _run_wizard(
     target: Path,
     scan: ScanResult | None,
@@ -547,8 +610,9 @@ def _run_wizard(
     *,
     offer_qdrant_docker: bool = False,
     detected_service: str = "local",
+    no_cockpit: bool = False,
 ) -> dict[str, Any]:
-    """Interactive wizard — multi-select archetypes, returns config dict."""
+    """Interactive wizard — three questions, deduced archetype (issue #888)."""
     console.print()
     console.print(Panel.fit(
         f"[bold]Grimoire Kit v{__version__}[/bold] — Project Setup Wizard",
@@ -559,7 +623,6 @@ def _run_wizard(
     console.print()
     console.print("  [dim]\\[#----] 1/5 · Identity[/dim]")
 
-    # Show detected stacks
     if scan and scan.stacks:
         console.print("  [bold]Stack detected:[/bold]")
         for det in scan.stacks:
@@ -568,17 +631,9 @@ def _run_wizard(
             console.print(f"    [green][OK][/green] {det.name} ({conf_pct}) — {evidence}")
         console.print()
 
-    default_name = target.name
-    project_name = Prompt.ask(
-        "  [bold]Project name[/bold]",
-        default=default_name,
-    )
-
+    project_name = Prompt.ask("  [bold]Project name[/bold]", default=target.name)
     git_name = _git_user_name()
-    user_name = Prompt.ask(
-        "  [bold]Your name[/bold]",
-        default=git_name or "Developer",
-    )
+    user_name = Prompt.ask("  [bold]Your name[/bold]", default=git_name or "Developer")
 
     # ── Step 2/5 · Preferences ────────────────────────────────────────
     console.print()
@@ -586,21 +641,8 @@ def _run_wizard(
 
     _lang_choices = {"1": "Français", "2": "English"}
     console.print("  [bold]Language:[/bold]  1) Français  2) English")
-    lang_input = Prompt.ask(
-        "  [bold]Choose[/bold]",
-        default="1",
-        choices=["1", "2"],
-    )
+    lang_input = Prompt.ask("  [bold]Choose[/bold]", default="1", choices=["1", "2"])
     language = _lang_choices[lang_input]
-
-    _skill_choices = {"1": "beginner", "2": "intermediate", "3": "expert"}
-    console.print("  [bold]Skill:[/bold]    1) Débutant  2) Intermédiaire  3) Expert")
-    skill_input = Prompt.ask(
-        "  [bold]Choose[/bold]",
-        default="2",
-        choices=["1", "2", "3"],
-    )
-    skill_level = _skill_choices[skill_input]
 
     # ── Step 3/5 · Memory composition ─────────────────────────────────
     console.print()
@@ -614,77 +656,51 @@ def _run_wizard(
         detected_service=detected_service,
     )
 
-    # ── Step 4/5 · Archetypes (multi-select) ──────────────────────────
+    # ── Step 4/5 · Your project (three questions, #888) ───────────────
+    # The archetype is deduced, never asked (decision #630): it is the
+    # kit's internal vocabulary, not a newcomer's. Detection pre-fills every
+    # answer; a best-guess archetype is never pre-filled as if detected.
     console.print()
-    console.print("  [dim]\\[####-] 4/5 · Archetypes[/dim]")
-    console.print()
-    console.print("  [bold]minimal[/bold] is always included — it's the base.")
-    console.print("  Choose specializations to add:\n")
-
-    # Compute auto-detected defaults from resolver — a best-guess pick
-    # (decision 2026-09-18: resolve() never guesses `minimal`, but a guess is
-    # still not a confident rule match) is never pre-filled as if detected;
-    # the wizard falls through to guided discovery for it instead (below).
-    auto_suggested: list[str] = (
-        [] if resolved.is_best_guess
-        else (list(resolved.archetypes) if resolved.archetypes else [resolved.archetype])
+    console.print("  [dim]\\[####-] 4/5 · Your project[/dim]")
+    defaults = prefill(scan, resolved)
+    answers = Answers(
+        stacks=_ask_question(STACK_QUESTION, defaults),
+        who=_ask_question(WHO_QUESTION, defaults)[0],
+        domain=_ask_question(DOMAIN_QUESTION, defaults)[0],
     )
-    auto_indices: list[str] = []
-    for idx, key in enumerate(_ARCHETYPE_KEYS, 1):
-        label, agent_count, traits = _ARCHETYPE_INFO[key]
-        marker = " [cyan]← detected[/cyan]" if key in auto_suggested and key != "minimal" else ""
-        console.print(f"    [bold]{idx}[/bold]) {label:<22} {agent_count:<10} {traits}{marker}")
-        if key in auto_suggested and key != "minimal":
-            auto_indices.append(str(idx))
-
-    console.print()
-    console.print("    [bold]0[/bold]) Not sure — help me choose")
-    console.print()
-
-    # Onboarding audit 2026-09-18, constat #2: a blank default here used to
-    # be "none" (→ minimal, no specialization), even though guided discovery
-    # (option "0") already existed and worked. When a rule already detected
-    # a specialization, its numeric auto-selection stays the default; only
-    # the *no-signal* case (a bare Enter would previously install minimal in
-    # silence) now defaults to guided discovery instead.
-    default_input = ",".join(auto_indices) if auto_indices else "0"
-    arch_input = Prompt.ask(
-        "  [bold]Choice (ex: 1,3,5 or all)[/bold]",
-        default=default_input,
-    )
-
-    # Parse selection
-    selected_archetypes = _parse_archetype_selection(arch_input, scan)
-
-    # Show composition preview
-    _display_composition_preview(selected_archetypes)
-
-    # Allow adjustment
-    adjust = Prompt.ask(
-        "  [bold]Adjust? (new numbers, or Enter to confirm)[/bold]",
-        default="",
-    )
-    if adjust.strip():
-        selected_archetypes = _parse_archetype_selection(adjust, scan)
-        _display_composition_preview(selected_archetypes)
+    extra_expertises = tuple(
+        r.id for r in detect_expertises(target) if r.family == "cloud"
+    ) if target.is_dir() else ()
+    deduction = deduce(answers, extra_expertises=extra_expertises)
 
     # ── Step 5/5 · Confirm ────────────────────────────────────────────
     console.print()
     console.print("  [dim]\\[#####] 5/5 · Confirmation[/dim]")
-    arch_display = ", ".join(selected_archetypes) if selected_archetypes else "minimal"
-    console.print()
-    console.print("  [bold]Summary:[/bold]")
-    console.print(f"    Project:     {project_name}")
-    console.print(f"    User:        {user_name}")
-    console.print(f"    Language:    {language}")
-    console.print(f"    Skill level: {skill_level}")
-    console.print(f"    Archetypes:  {arch_display}")
     memory_profile = memory_profiles.resolve(profile_id)
-    console.print(f"    Memory:      {memory_profile.label} — {memory_profile.summary}")
-    console.print(f"    Backend:     {backend}")
-    if qdrant_docker:
-        console.print("    Qdrant:      Docker local auto-start")
-    console.print()
+    while True:
+        console.print()
+        console.print("  [bold]Summary:[/bold]")
+        console.print(f"    Project:     {project_name}")
+        console.print(f"    User:        {user_name}")
+        console.print(f"    Language:    {language}")
+        _print_deduction(answers, deduction, target, no_cockpit=no_cockpit)
+        console.print(f"    Memory:      {memory_profile.label} — {memory_profile.summary}")
+        console.print(f"    Backend:     {backend}")
+        if qdrant_docker:
+            console.print("    Qdrant:      Docker local auto-start")
+        console.print()
+        adjust = Prompt.ask(
+            "  [bold]Adjust? (ex: domain=web who=team stack=python,go — Enter to confirm)[/bold]",
+            default="",
+        )
+        if not adjust.strip():
+            break
+        try:
+            answers = apply_adjustment(answers, adjust)
+        except ValueError as exc:
+            console.print(f"  [yellow]{exc}[/yellow]")
+            continue
+        deduction = deduce(answers, extra_expertises=extra_expertises)
 
     if not Confirm.ask("  [bold]Proceed with installation?[/bold]", default=True):
         raise typer.Abort
@@ -693,123 +709,22 @@ def _run_wizard(
         "project_name": project_name,
         "user_name": user_name,
         "language": language,
-        "skill_level": skill_level,
-        "archetypes": selected_archetypes,
-        "archetype": selected_archetypes[0] if selected_archetypes else "minimal",
+        "skill_level": deduction.skill_level,
+        "archetypes": list(deduction.archetypes),
+        "archetype": deduction.archetype,
         "backend": backend,
         "qdrant_docker": qdrant_docker,
         "offline": offline,
         "memory_profile": profile_id,
         "start_memory_stack": start_stack,
+        "needs": list(deduction.needs),
+        "standard_profile": deduction.standard_profile,
+        "expertises": list(deduction.expertises),
+        "answers": answers.to_dict(),
+        # What the scaffold must believe about the stack: the confirmed
+        # answers, not the raw detection (a declared stack gets its skill).
+        "scan": answers_to_scan(answers, scan, target),
     }
-
-
-def _parse_archetype_selection(
-    raw: str,
-    scan: ScanResult | None = None,
-) -> list[str]:
-    """Parse user input like '1,3,5' or 'all' or '0' into archetype list."""
-    raw = raw.strip().lower()
-
-    if raw == "all":
-        return list(_ARCHETYPE_KEYS)
-
-    if raw in ("none", ""):
-        return ["minimal"]
-
-    if raw == "0":
-        return _guided_discovery(scan)
-
-    # Parse comma/space separated numbers
-    parts = raw.replace(" ", ",").split(",")
-    selected: list[str] = []
-    for p in parts:
-        p = p.strip()
-        if not p:
-            continue
-        try:
-            idx = int(p)
-        except ValueError:
-            # Try as archetype name directly
-            if p in _ARCHETYPE_KEYS and p not in selected:
-                selected.append(p)
-            continue
-        if 1 <= idx <= len(_ARCHETYPE_KEYS):
-            key = _ARCHETYPE_KEYS[idx - 1]
-            if key not in selected:
-                selected.append(key)
-
-    return selected or ["stack"]  # unreadable input never lands on `minimal` (2026-09-18); `none` is explicit
-
-
-def _guided_discovery(scan: ScanResult | None) -> list[str]:
-    """3-question guided flow for users who don't know which archetypes to pick."""
-    console.print()
-    console.print("  [bold]── Guided Discovery ──[/bold]\n")
-
-    # Detect defaults from scan
-    detected = {d.name for d in scan.stacks} if scan and scan.stacks else set()
-    has_frontend = bool(detected & {"react", "vue", "angular", "javascript", "typescript"})
-    has_infra = bool(detected & {"terraform", "kubernetes", "ansible", "docker"})
-
-    q1 = Confirm.ask(
-        "  Does your project have a [bold]web frontend[/bold] (React, Vue, Angular)?",
-        default=has_frontend,
-    )
-    q2 = Confirm.ask(
-        "  Do you manage [bold]infrastructure[/bold] (K8s, Terraform, CI/CD)?",
-        default=has_infra,
-    )
-    q3 = Confirm.ask(
-        "  Do you need a [bold]certified fix loop[/bold] (TDD proofs, incident response)?",
-        default=False,
-    )
-
-    result: list[str] = []
-    if q1:
-        result.append("web-app")
-    if q2:
-        result.append("infra-ops")
-    if q3:
-        result.append("fix-loop")
-
-    # Decision 2026-09-18 (Guilhem, corrected same day): even a "no" to all
-    # three questions never ends in `minimal` — no asserted domain (web,
-    # infra, fix-loop) means `stack` (Atlas, the kit's generalist for exactly
-    # this case), not `platform-engineering`.
-    if not result:
-        console.print(
-            "  [dim]No specialization selected — stack (Atlas, the kit's generalist "
-            "for a project with no asserted domain) covers this best.[/dim]"
-        )
-        return ["stack"]
-
-    names = ", ".join(result)
-    console.print(f"\n  [bold]Recommended:[/bold] {names}")
-    return result
-
-
-def _display_composition_preview(archetypes: list[str]) -> None:
-    """Show what the selected composition includes."""
-    console.print()
-    console.print("  [bold]── Composition ──[/bold]")
-    console.print("  Base : [bold]minimal[/bold] (3 meta-agents)")
-    total_agents = 3  # meta-agents
-    for key in archetypes:
-        if key == "minimal":
-            continue
-        if key == "stack":  # not in `_ARCHETYPE_INFO` (fallback, never a menu entry): one generalist agent
-            console.print("  Stack (Atlas)          → +1 agent · generalist, skills of the detected stack")
-            total_agents += 1
-            continue
-        info = _ARCHETYPE_INFO.get(key)
-        if info:
-            label, agent_count, traits = info
-            console.print(f"  {label:<22} → +{agent_count} · {traits}")
-            # Parse agent count
-            with contextlib.suppress(ValueError, IndexError):
-                total_agents += int(agent_count.split()[0])
-    console.print(f"\n  [dim]Total: ~{total_agents} agents[/dim]")
 
 
 # ── Rich summary report ─────────────────────────────────────────────────────
@@ -1325,6 +1240,7 @@ def run_init(
             backend,
             offer_qdrant_docker=offer_qdrant_docker,
             detected_service=detected_service,
+            no_cockpit=no_cockpit,
         )
         project_name = wizard_result["project_name"]
         user_name = wizard_result["user_name"]
@@ -1334,17 +1250,17 @@ def run_init(
         memory_profile = str(wizard_result.get("memory_profile", memory_profile))
         qdrant_docker_requested = qdrant_docker_requested or bool(wizard_result.get("qdrant_docker", False))
         start_memory_stack_consent = bool(wizard_result.get("start_memory_stack", False))
-        # Re-resolve if user changed archetypes or backend
+        # The three questions decided the archetype(s) and confirmed the
+        # stack (#888): re-resolve on the confirmed stack, always, so the
+        # stack agents and skills follow the answers, not the raw scan.
+        scan = wizard_result.get("scan", scan)
         new_archetypes = wizard_result.get("archetypes", [wizard_result.get("archetype", "minimal")])
-        new_backend = wizard_result["backend"]
-        current_archs = list(resolved.archetypes) if resolved.archetypes else [resolved.archetype]
-        if set(new_archetypes) != set(current_archs) or new_backend != backend:
-            resolved = resolver.resolve(
-                scan,
-                backend=new_backend,
-                archetypes_override=new_archetypes,
-            )
-        backend = new_backend
+        backend = wizard_result["backend"]
+        resolved = resolver.resolve(scan, backend=backend, archetypes_override=new_archetypes)
+        # `grimoire up --interactive` reads the deduced needs when no
+        # `--needs` was given: the standard profile the wizard announced.
+        if ctx.obj is not None:
+            ctx.obj["init_deduced_needs"] = list(wizard_result.get("needs", []))
     elif memory_profile and memory_profiles.REQ_DOCKER in memory_profiles.resolve(memory_profile).requires:
         # Consent to *start* (arbitrage #619), via `requires` so a `graphe` derived above gets it too.
         start_memory_stack_consent = yes or memory_stack == "up"
