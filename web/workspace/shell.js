@@ -21,7 +21,8 @@
 //   ctx.setItem    (params) : l'élément sélectionné entre dans l'URL (lien
 //                  profond), sans remonter la rubrique
 //   ctx.glossary   le glossaire chargé (get, open, missingTerms)
-//   ctx.inspector  l'élément du panneau droit — l'espace le remplit
+//   ctx.inspector  l'élément du panneau de détail (à droite) — l'espace le remplit ;
+//                  hors atelier (P62) il n'est affiché que s'il porte du contenu
 //   ctx.docbar     { setBreadcrumb, setZoom, setViews, setValidation } — le fil
 //                  d'Ariane reçoit seulement ce qui suit la portée et l'espace,
 //                  que la coque pose elle-même
@@ -310,6 +311,8 @@ function applyPreferences() {
   const saved = readState();
   root.dataset.density = DENSITIES[saved.density] || 'confortable';
   root.dataset.focus = root.dataset.focus === 'on' ? 'on' : 'off';
+  root.dataset.atelier = saved.atelier === 'on' ? 'on' : 'off';
+  $('st-atelier').setAttribute('aria-pressed', String(root.dataset.atelier === 'on'));
   applyTheme();
   // « Densité : » s'efface sous 900 px (`.st-pre`) : la barre d'état y est serrée.
   $('st-density').replaceChildren(
@@ -342,6 +345,40 @@ function setDensity(next) {
 
 function toggleDensity() {
   setDensity(root.dataset.density === 'compacte' ? 'confortable' : 'compacte');
+}
+
+// ── Panneaux d'atelier (P62) ────────────────────────────────────────────────
+//
+// Par défaut la coque ne montre que la barre du haut, le contenu et, quand
+// l'écran y met quelque chose, le panneau de détail (l'ancien Inspecteur). Rail,
+// explorateur, inspecteur permanent, preuves et dock servent au diagnostic : ils
+// restent là, derrière cette bascule (⇧⌘L, palette, pied de page), mémorisée par
+// projet comme le thème. Sous 900 px la coque garde ses tiroirs : le rail y est
+// la seule porte vers eux.
+function setAtelier(on) {
+  writeState({ atelier: on ? 'on' : 'off' });
+  applyPreferences();
+  fillEmptyPanels();
+}
+
+function toggleAtelier() {
+  setAtelier(root.dataset.atelier !== 'on');
+}
+
+/** Un panneau latéral n'existe, hors atelier, que si l'écran y a posé du
+ * contenu : les squelettes de chargement, l'indice vide de la coque et les
+ * phrases « Choisissez un élément » ne comptent pas. Vaut pour le panneau de
+ * détail (ancien Inspecteur) et pour l'arbre de la rubrique Fichiers, qui est
+ * sa navigation et non un outil de diagnostic. */
+function syncDetail() {
+  for (const [bodyId, panelId] of [['inspector-body', 'panel-inspector'], ['explorer-body', 'panel-explorer']]) {
+    const filled = [...$(bodyId).children].some((child) => (
+      !child.hasAttribute(PLACEHOLDER)
+      && !child.matches('p.lbl, p.cv-msg, .sr-only')
+      && (child.children.length || child.textContent.trim())
+    ));
+    $(panelId).dataset.detail = filled ? 'on' : 'off';
+  }
 }
 
 function toggleFocus() {
@@ -607,13 +644,13 @@ function mk(tag, attrs, ...children) {
 
 function bindTablist(list, { activate }) {
   list.addEventListener('keydown', (event) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
     const tabs = [...list.querySelectorAll('[role="tab"]')].filter((tab) => !tab.disabled);
     const index = tabs.indexOf(event.target.closest('[role="tab"]'));
     if (index < 0) return;
     let next = index;
-    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + tabs.length) % tabs.length;
     if (event.key === 'Home') next = 0;
     if (event.key === 'End') next = tabs.length - 1;
     event.preventDefault();
@@ -1022,7 +1059,7 @@ function emptyPanelHint(which) {
     'Rien à inspecter',
     "Choisissez un élément dans la zone centrale : son détail s'affiche ici.",
     null,
-    { label: 'Rechercher ou commander', run: () => openPalette() },
+    { label: 'Rechercher ou agir', run: () => openPalette() },
     { compact: true },
   );
 }
@@ -1030,6 +1067,9 @@ function emptyPanelHint(which) {
 /** Pose l'indication dans une zone latérale restée vide ; elle s'efface seule
  * dès que l'espace y écrit (`watchPlaceholders`). */
 function fillEmptyPanels() {
+  // Hors atelier (et hors tiroirs) ces panneaux sont masqués : leur indication
+  // le serait aussi, et ne doit pas répondre à la place du contenu de l'écran.
+  if (root.dataset.atelier !== 'on' && !isNarrow()) return;
   for (const [which, id] of [['explorer', 'explorer-body'], ['inspector', 'inspector-body']]) {
     const body = $(id);
     if (body.children.length) continue;
@@ -1353,6 +1393,10 @@ const scope = {
 
 function renderScopeChip() {
   $('project-name').textContent = scopeName();
+  // Maquettes : « Tous les projets 11 » — le nombre de projets du registre.
+  const count = $('project-count');
+  count.hidden = !(host.scopeAll && registry.length);
+  count.textContent = String(registry.length);
   $('project-chip').setAttribute('aria-label', `Portée : ${scopeName()} — changer de portée`);
 }
 
@@ -1453,6 +1497,9 @@ function renderLiveStamp() {
       ? `Flux en direct, confirmé au moins toutes les ${seconds} s, dernier à ${at}`
       : `Sondage toutes les ${seconds} s, dernier à ${at}`;
   }
+  const top = $('top-live');
+  top.dataset.state = status === 'error' ? 'error' : (status === 'paused' ? 'paused' : 'ok');
+  $('top-live-text').textContent = status === 'error' ? 'hors ligne' : (status === 'paused' ? 'en pause' : 'en direct');
   const lead = document.createElement('span');
   lead.className = 'live-pre';
   lead.textContent = pre;
@@ -1483,7 +1530,7 @@ let paletteOnly = false;
 
 // Ordre par défaut des sections titrées ; ne pas fusionner en une liste
 // plate (30+ entrées sans repère) comme avant.
-const PALETTE_SECTION_ORDER = ['Espaces', 'Commandes', 'Projets', 'Tâches', 'Workflows', 'Fichiers'];
+const PALETTE_SECTION_ORDER = ['Espaces', 'Affichage', 'Commandes', 'Projets', 'Tâches', 'Workflows', 'Fichiers'];
 const PALETTE_SECTION_CAP = 12;
 // Le sélecteur de portée n'a pas de plafond : un projet que l'on ne voit pas
 // sans le taper n'est pas choisissable (M6, 4 projets sur 16 cachés).
@@ -1563,6 +1610,18 @@ async function buildPalette() {
   paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks, ...files];
 }
 
+/** Entrée « Affichage » de la palette : son libellé suit l'état de la bascule. */
+function displayItems() {
+  const on = root.dataset.atelier === 'on';
+  return [{
+    section: 'Affichage',
+    label: on ? "Masquer les panneaux d'atelier" : "Afficher les panneaux d'atelier",
+    hint: 'Rail, explorateur, inspecteur, dock',
+    command: '⇧⌘L',
+    run: toggleAtelier,
+  }];
+}
+
 // `sectionFirst` : section à placer en tête. `only` : ne montrer qu'elle
 // (la puce de portée ouvre ainsi le sélecteur de projets). `null` garde
 // l'ordre par défaut.
@@ -1601,7 +1660,7 @@ function renderPalette(query) {
   list.replaceChildren();
 
   const bySection = new Map();
-  for (const item of paletteItems) {
+  for (const item of [...paletteItems, ...displayItems()]) {
     if (needle && !(item.label + ' ' + item.hint).toLowerCase().includes(needle)) continue;
     if (!bySection.has(item.section)) bySection.set(item.section, []);
     bySection.get(item.section).push(item);
@@ -1651,6 +1710,9 @@ function movePalette(delta) {
 // ── Console ─────────────────────────────────────────────────────────────────
 
 async function runCommand(argv) {
+  // La sortie vit dans la Console du dock : lancer une commande la montre, même
+  // quand les panneaux d'atelier sont fermés (sous 900 px le dock reste à part).
+  if (root.dataset.atelier !== 'on' && !isNarrow()) setAtelier(true);
   selectDockTab('console');
   setDock('pinned');
   dock.log('console', '$ grimoire ' + argv.join(' '));
@@ -1672,6 +1734,7 @@ function bindShortcuts() {
 
     if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); openPalette(); return; }
     if (meta && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); toggleFocus(); return; }
+    if (meta && event.shiftKey && event.key.toLowerCase() === 'l') { event.preventDefault(); toggleAtelier(); return; }
     if (meta && /^[1-5]$/.test(event.key)) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
 
     if ($('palette').hidden && event.key === 'Escape' && isNarrow() && leaveDrawer()) {
@@ -1724,8 +1787,14 @@ async function main() {
     narrowDockSeen = false;
     if (current) restorePanelsForSpace();
     syncDrawer();
+    fillEmptyPanels();
   });
   $('st-density').addEventListener('click', toggleDensity);
+  $('st-atelier').addEventListener('click', toggleAtelier);
+  for (const id of ['inspector-body', 'explorer-body']) {
+    new MutationObserver(syncDetail).observe($(id), { childList: true, subtree: true, characterData: true });
+  }
+  syncDetail();
   $('st-fullscreen').addEventListener('click', toggleFocus);
   $('palette-open').addEventListener('click', () => openPalette());
   $('decisions-pill').addEventListener('click', openDecisions);
@@ -1810,6 +1879,8 @@ async function main() {
     get theme() { return root.dataset.theme; },
     get themePref() { return root.dataset.themePref; },
     get density() { return root.dataset.density; },
+    get atelier() { return root.dataset.atelier; },
+    setAtelier,
     get paletteOpen() { return !$('palette').hidden; },
   };
   document.body.dataset.ready = '1';

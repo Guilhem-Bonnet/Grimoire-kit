@@ -242,9 +242,10 @@ def test_la_lecture_seule_s_annonce_en_tete_avec_le_geste_qui_la_leve(page: Page
     banner = page.locator("#readonly-banner")
     assert banner.is_visible()
     assert "Lecture seule" in banner.inner_text()
-    # En tête : au-dessus de la barre de document, au sommet du centre.
+    # En tête : au-dessus de la toile, au sommet du centre (la barre de document
+    # n'existe plus hors atelier quand l'écran n'a ni fil d'Ariane ni vue : P62).
     banner_top = banner.bounding_box()["y"]
-    assert banner_top < page.locator("#docbar").bounding_box()["y"]
+    assert banner_top < page.locator("#canvas").bounding_box()["y"]
     assert page.locator("#readonly-banner code").inner_text().startswith("grimoire cockpit serve --project-root")
 
     back = banner.locator("[data-ro-action='home']")

@@ -17,6 +17,8 @@ from collections.abc import Iterator
 import pytest
 from playwright.sync_api import Browser, Page
 
+from .conftest import open_atelier
+
 SPACES = ["a-traiter", "travail", "flotte", "savoir", "configuration"]
 
 PHONE = {"width": 390, "height": 844}
@@ -108,6 +110,9 @@ def phone(browser: Browser, served: str) -> Iterator[Page]:
 def _settle(page: Page) -> None:
     """Attend que l'espace ait fini de se monter."""
     page.wait_for_load_state("networkidle")
+    # Instrument Sans se charge en `swap` : mesurer avant elle, c'est mesurer la
+    # police de repli, plus large de quelques pixels (P62).
+    page.evaluate("() => document.fonts.ready")
     page.wait_for_function("() => document.getElementById('canvas').getAttribute('aria-busy') !== 'true'")
     page.wait_for_timeout(250)
 
@@ -223,6 +228,7 @@ def test_un_tiroir_se_ferme_d_un_appui_tactile_hors_de_lui_et_rend_le_focus(brow
 
 def test_a_1440_px_les_panneaux_restent_en_colonnes(workspace: Page) -> None:
     """Le bureau ne change pas : explorateur et inspecteur épinglés à côté du centre."""
+    open_atelier(workspace)
     assert workspace.evaluate("() => window.GrimoireWorkspace.panelState('explorer')") == "pinned"
     widths = workspace.evaluate(
         "() => ['panel-explorer', 'center', 'panel-inspector'].map((i) => document.getElementById(i).getBoundingClientRect().width)"
@@ -282,6 +288,7 @@ def test_la_toile_est_le_tabpanel_de_l_espace_courant(workspace: Page) -> None:
 
 def test_les_onglets_du_dock_s_activent_aux_fleches(workspace: Page) -> None:
     """Dans le dock, la flèche active l'onglet (le contenu est local, sans requête)."""
+    open_atelier(workspace)
     assert workspace.locator('#dock-tabs[role="tablist"]').count() == 1
     current = workspace.evaluate("() => document.querySelector('[data-dock-tab][aria-selected=\"true\"]').dataset.dockTab")
     workspace.locator(f'[data-dock-tab="{current}"]').focus()
@@ -395,6 +402,7 @@ def test_un_explorateur_vide_dit_pourquoi_et_propose_ou_aller(workspace: Page) -
     """Cinq espaces sur six ne remplissent pas l'explorateur : il restait un
     cadre muet. Il explique, et un bouton mène aux Fichiers de Configuration
     (ex-Source), où vit l'arborescence."""
+    open_atelier(workspace)
     workspace.evaluate("() => window.GrimoireWorkspace.goto('observer')")
     workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'observer'")
     _settle(workspace)

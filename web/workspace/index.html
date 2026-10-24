@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr" data-theme="dark" data-density="confortable" data-focus="off">
+<html lang="fr" data-theme="dark" data-density="confortable" data-focus="off" data-atelier="off">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,7 +23,7 @@
 
   <!-- Barre d'application : marque, portée, espaces, palette -->
   <header id="appbar">
-    <div id="brand"><svg class="ico" aria-hidden="true"><use href="icons.svg#grimoire"/></svg><span>GRIMOIRE</span></div>
+    <div id="brand"><span class="brand-mark" aria-hidden="true">›</span><span class="brand-name">Grimoire</span></div>
     <div class="row">
       <!-- La seule portée de la coque (P31) : « Tous les projets » ou un projet,
            appliquée à tous les espaces. Le nom du projet, jamais son slug. -->
@@ -31,6 +31,7 @@
               aria-haspopup="dialog" title="Changer de portée : tous les projets ou un seul">
         <span class="dot" id="project-dot"></span>
         <span id="project-name">—</span>
+        <span class="project-count" id="project-count" hidden></span>
         <span class="chevron" aria-hidden="true"></span>
       </button>
     </div>
@@ -39,6 +40,10 @@
     </nav>
     <div class="grow"></div>
     <div class="row">
+      <!-- Pouls de la barre du haut (maquettes) : le détail horodaté reste dans le pied. -->
+      <span class="top-live" id="top-live" data-state="ok" title="Actualisation automatique">
+        <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#pulse"/></svg><span id="top-live-text">en direct</span>
+      </span>
       <!-- Décisions en attente d'un humain (K6), de tout le registre sur le cockpit :
            visible quel que soit l'espace, un clic ouvre la vue Décisions d'Exécuter. -->
       <button class="chip pill warn" id="decisions-pill" type="button" hidden
@@ -46,8 +51,8 @@
         <svg class="ico" aria-hidden="true"><use href="icons.svg#inbox"/></svg>
         <span id="decisions-count">0</span><span class="pill-lbl" id="decisions-lbl"> décisions</span>
       </button>
-      <button class="chip" id="palette-open" type="button" aria-label="Rechercher ou commander">
-        <span class="row palette-what"><svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#search"/></svg><span class="palette-lbl">Rechercher ou commander</span></span><span class="kbd">⌘K</span>
+      <button class="chip" id="palette-open" type="button" aria-label="Rechercher ou agir">
+        <span class="row palette-what"><svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#search"/></svg><span class="palette-lbl">Rechercher ou agir</span></span><span class="kbd">⌘K</span>
       </button>
     </div>
   </header>
@@ -58,7 +63,7 @@
     <nav id="rail" aria-label="Panneaux"></nav>
 
     <!-- Panneau gauche : explorateur -->
-    <aside class="panel panel-left" id="panel-explorer" data-state="pinned" aria-label="Explorateur">
+    <aside class="panel panel-left" id="panel-explorer" data-state="pinned" data-detail="off" aria-label="Explorateur">
       <div class="panel-head">
         <span style="font-weight:500">Explorateur</span>
         <span class="grow"></span>
@@ -79,7 +84,7 @@
       <!-- Lecture seule (P31) : dit en tête, avec le geste qui rend l'écriture. -->
       <div id="readonly-banner" role="status" hidden></div>
       <!-- Rubriques de l'espace courant, quand il en a plusieurs. -->
-      <div id="section-tabs" role="tablist" aria-label="Rubriques" hidden></div>
+      <div id="section-tabs" role="tablist" aria-label="Rubriques" aria-orientation="vertical" hidden></div>
       <div id="docbar">
         <div class="row soft" id="breadcrumb"></div>
         <div class="grow"></div>
@@ -97,7 +102,7 @@
     </main>
 
     <!-- Panneau droit : inspecteur -->
-    <aside class="panel panel-right" id="panel-inspector" data-state="pinned" aria-label="Inspecteur">
+    <aside class="panel panel-right" id="panel-inspector" data-state="pinned" data-detail="off" aria-label="Inspecteur">
       <div class="panel-head">
         <span style="font-weight:500">Inspecteur</span>
         <span class="grow"></span>
@@ -143,6 +148,8 @@
       <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#refresh"/></svg><span id="st-live-text">actualisation…</span>
     </span>
     <span class="grow"></span>
+    <button class="chip" id="st-atelier" type="button" aria-pressed="false"
+            title="Afficher ou masquer les panneaux d'atelier : rail, explorateur, inspecteur, dock (⇧⌘L)">Atelier <span class="kbd">⇧⌘L</span></button>
     <button class="chip" id="st-density" type="button" data-term="densite"
             title="Basculer entre densité confortable et compacte">Densité</button>
     <div class="seg seg-s" id="st-theme" role="group" aria-label="Thème">

@@ -72,7 +72,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `shell.css` | Grille de la coque, trois états de panneau, primitives (`.btn`, `.chip`, `.seg`, `.kbd`, `.tab`, `.dot`, `.tree`, `.empty`) | lot 1 |
 | `shell.js` | Cinq espaces et leurs rubriques, portée, liens profonds, bandeau de lecture seule, panneaux, dock, palette, raccourcis, thème, densité, plein écran | lot 1, P31 |
 | `live.js` | Le pouls : une boucle de sondage pour toute la coque, suspendue onglet masqué ; les mots du temps relatif, de la durée et du coût (trois états) | UI-3 |
-| `fonts/` | Geist et Geist Mono en woff2 | lot 1 |
+| `fonts/` | Instrument Sans (variable) et Geist Mono en woff2, licences OFL | lot 1, P62 |
 | `glossary.js` | Chargement du glossaire et pile d'infobulles épinglables ; nom du 4e espace (`FOURTH_SPACE`) | lot 2, P31 |
 | `api.js` | **Le seul module qui appelle `fetch`.** Cible le bon projet sur les deux hôtes | figé par le squelette |
 | `spaces/a-traiter.js` | Accueil : ce qui attend une décision, groupé par urgence (`/api/workspace/attention`) ; une ligne par élément (projet, raison, ancienneté, action en ligne qui ouvre l'écran de décision, sélection posée), détail dans l'inspecteur, états vide / erreur partielle / lecture seule, clavier j / k / Entrée | P31, P32 |
@@ -104,7 +104,7 @@ directement dans le DOM de la coque :
 | `ctx.setItem` | `(params)` — la sélection entre dans l'URL (lien profond) sans remonter la rubrique |
 | `ctx.glossary` | Le glossaire chargé : `get`, `open`, `size`, `missingTerms` |
 | `ctx.explorer` | L'élément du panneau gauche — l'espace le remplit |
-| `ctx.inspector` | L'élément du panneau droit — idem |
+| `ctx.inspector` | L'élément du panneau de détail à droite — idem. Hors atelier (P62) le panneau n'est affiché que si l'espace y a posé du contenu : une phrase `p.lbl` seule ou un squelette ne comptent pas |
 | `ctx.docbar` | `setBreadcrumb`, `setZoom`, `setViews`, `setValidation` — le fil d'Ariane ne reçoit que ce qui suit portée, espace et rubrique, que la coque pose |
 | `ctx.dock` | `log(onglet, …lignes)`, `clear`, `setTab`, `echo(commande)` |
 | `ctx.empty` | `(titre, phrase, commande, action?)` → le bloc d'état vide unique ; `action` est `{ label, run }` (un bouton qui fait, pas une commande à recopier) ; sans `action`, une commande que la Console du dock sait exécuter (liste blanche, sans argument) reçoit un bouton « Lancer dans la Console » |
