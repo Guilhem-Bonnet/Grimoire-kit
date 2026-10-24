@@ -49,16 +49,16 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 <!-- BEGIN:cockpit-coverage-summary -->
 | Section | Lignes | Couvertes | % |
 |---|---:|---:|---:|
-| Coque (shell.js) | 32 | 31 | 97% |
-| Piloter | 34 | 29 | 85% |
-| Concevoir | 23 | 17 | 74% |
-| Executer | 18 | 12 | 67% |
-| Observer | 10 | 7 | 70% |
-| Mémoire | 9 | 4 | 44% |
-| Source | 17 | 15 | 88% |
+| Coque (shell.js) | 32 | 32 | 100% |
+| Piloter | 34 | 34 | 100% |
+| Concevoir | 23 | 23 | 100% |
+| Executer | 18 | 18 | 100% |
+| Observer | 10 | 10 | 100% |
+| Mémoire | 9 | 9 | 100% |
+| Source | 17 | 17 | 100% |
 | Contrôles × états (coque) | 80 | 80 | 100% |
 | Routes API | 26 | 26 | 100% |
-| **TOTAL** | **249** | **221** | **89%** |
+| **TOTAL** | **249** | **249** | **100%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -108,7 +108,7 @@ mais à garder en tête si Guilhem constate un jour « la palette ne voit pas ma
 | Raccourci panneau `1`/`4` | `document keydown` | `togglePanel(id)` | aucune | bascule explorer/inspector | `test_les_raccourcis_de_panneau_basculent` | oui |
 | Raccourci panneau `2` (bibliothèque) | `document keydown` | `triggerRailAction('library')` | aucune | délégué à Concevoir seul | `test_le_raccourci_2_du_rail_ouvre_la_bibliotheque_de_noeuds` | oui |
 | Raccourci panneau `3` (preuves) | `document keydown` | `togglePanel('evidence')` (`evidence` a rejoint `PANELS`, corrigé par #534/PR #539) | `GET /api/workspace/evidence` | ouvre le panneau Preuves, tenu par la coque comme Explorateur/Inspecteur | `test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut` | oui |
-| Raccourci panneau `5` (dock) | `document keydown` | bascule `#dock` pinned/collapsed | aucune | bascule | — | non |
+| Raccourci panneau `5` (dock) | `document keydown` | bascule `#dock` pinned/collapsed | aucune | bascule | `tests/e2e/test_workspace_shell.py::test_le_raccourci_5_bascule_le_dock_et_le_bouton_du_rail` | oui |
 | Raccourci backtick `` ` `` | `document keydown` | `selectDockTab('console')` + pin | aucune | ouvre le dock sur Console | `test_le_raccourci_accent_grave_ouvre_la_console_du_dock` | oui |
 | Mode concentration `⇧⌘F` | `document keydown` | `toggleFocus()` | aucune | replie tout, toile plein écran | `test_le_mode_concentration_replie_tout` | oui |
 | Palette : ouverture `⌘K` | `document keydown` | `openPalette()` | `GET /api/workspace/commands` `+projects+blueprints+tasks+files` | ouverte, sections visibles | `test_la_palette_s_ouvre_au_clavier_et_montre_les_commandes` | oui |
@@ -141,12 +141,12 @@ pour ce contrôle précis.
 | Zoom Flotte/Projet | `#zoom-seg button` | `setZoom` | — | bascule visuelle (aria-pressed) | `test_piloter_zoom_seg_bascule_correctement` | oui |
 | Rafraîchir la flotte | `.btn` « Rafraîchir » | `refreshBtn.click` → `forceFleet` | `GET /api/projects` (+ health par projet) | invalide le cache 60 s | `test_revenir_sur_la_flotte_sert_le_cache_dans_la_fenetre_de_60s`, `test_le_changement_de_projet_n_interroge_que_le_projet_cible` | oui |
 | Ligne projet (Flotte) | `tr`/`.card` | `onSelect(slug)` | — | ouvre le niveau Projet | `test_piloter_cockpit_flotte_montre_un_tableau_avec_inconnue` | oui |
-| Bouton « Ouvrir ce projet » | `.btn` texte « Ouvrir ce projet » | `ctx.goto('piloter', {openProject})` | — | affiché seulement si cockpit + slug ≠ projet servi | — | non |
+| Bouton « Ouvrir ce projet » | `.btn` texte « Ouvrir ce projet » | `ctx.goto('piloter', {openProject})` | — | affiché seulement si cockpit + slug ≠ projet servi | `tests/e2e/test_workspace_lot4_spaces.py::test_ouvrir_ce_projet_reste_sur_l_ecran_projet_sans_recharger` | oui |
 | Mettre à jour — aperçu | `.btn` texte « Mettre à jour — aperçu » | `updateProject(slug, false)` | `POST /api/projects/update` `{confirm:false}` | en cours → succès (preview.md rendu) | `test_mettre_a_jour_depuis_piloter_ne_repond_pas_404_sur_un_projet_selectionne` | oui |
 | Mettre à jour — aperçu | idem | idem | idem | échec (erreur affichée, bouton réactivé) | `test_apercu_en_echec_affiche_l_erreur_et_reactive_le_bouton` | oui |
 | Mettre à jour — aperçu | idem | idem | idem | projet hors registre → 404 | `test_the_cockpit_refuses_an_unknown_project` (route directe, `tests/unit/test_project_update.py`) | oui |
 | Confirmer la mise à jour | `.btn.pri` « Confirmer » | `updateProject(slug, true)` | `POST /api/projects/update` `{confirm:true}` | succès, `state=completed`/`upgraded-checkpoint-pending`, badge checkpoint posé | `test_confirmer_depuis_piloter_fait_apparaitre_une_proposition`, `test_the_checkpoint_badge_survives_a_fleet_then_project_navigation` | oui |
-| Confirmer la mise à jour | idem | idem | idem | échec `upgraded-but-failed` : `report.md`+`proposals` renvoyés par la route mais jamais lus par le handler `if (result.ok)` → pas de rafraîchissement des Propositions à l'écran | `test_confirmer_upgraded_but_failed_devrait_rafraichir_les_propositions` (**xfail strict — bug #538**) | non |
+| Confirmer la mise à jour | idem | idem | idem | échec `upgraded-but-failed` : `proposals` jointes par la route et lues par le handler (le nombre de propositions en attente est annoncé et la section se rafraîchit) ; `report.md` reste sur disque, volontairement non rendu (corrigé par #538, fermée) | `tests/e2e/test_workspace_cockpit_upgrade_flow_states.py::test_confirmer_upgraded_but_failed_devrait_rafraichir_les_propositions` | oui |
 | Revoir dans l'IDE | `.btn` texte « Revoir dans l'IDE » | copie presse-papiers du prompt `/grimoire-upgrade-review` | aucune écriture | absent sans travail en attente | `test_the_review_button_is_absent_with_nothing_pending` | oui |
 | Revoir dans l'IDE | idem | idem | aucune | présent avec proposition en attente | `test_the_review_button_appears_with_a_pending_proposal` | oui |
 | Revoir dans l'IDE | idem | idem | aucune | présent avec checkpoint en attente, nomme le run | `test_the_review_button_appears_with_a_pending_checkpoint_and_names_the_run` | oui |
@@ -158,9 +158,9 @@ pour ce contrôle précis.
 | Accepter une proposition | idem | idem | idem | type `override-migration` (refus « revue nécessaire ») | `test_accepter_une_proposition_override_migration_refusee_journalise_le_motif` | oui |
 | Accepter une proposition | idem | idem | idem | type `memory-link` (refus sans porteur) | `test_accepter_une_proposition_memory_link_refusee_sans_porteur` | oui |
 | Accepter une proposition | idem | idem | idem | type `needs-hosts` | `test_accepter_une_proposition_type_needs_hosts_declare_les_hotes_actives` | oui |
-| Accepter une proposition | idem | idem | idem | sur un projet non-home de la Flotte (dérogation #490) | `test_accept_works_on_a_non_home_project_even_when_another_is_home` (HTTP direct, pas via clic UI) | non |
+| Accepter une proposition | idem | idem | idem | sur un projet non-home de la Flotte (dérogation #490) | `test_accept_works_on_a_non_home_project_even_when_another_is_home` (HTTP direct) et, par le clic dans Piloter, `tests/e2e/test_workspace_piloter_proposal_gaps.py::test_accepter_une_proposition_depuis_un_projet_qui_n_est_pas_le_projet_de_lancement` | oui |
 | Refuser une proposition | `.btn` « Refuser » | `rejectBtn.click` | `POST /api/workspace/proposals/<slug>/reject` | disparaît de la liste « en attente » | `test_lister_accepter_et_refuser_une_proposition` | oui |
-| Ouvrir la référence (proposition `repair`) | `.btn` (bloc repair) | `ctx.goto('source', {file, line})` | — | ouvre le fichier citant à la ligne | — | non |
+| Ouvrir la référence (proposition `repair`) | `.btn` (bloc repair) | `ctx.goto('source', {file, line})` | — | ouvre le fichier citant à la ligne | `tests/e2e/test_workspace_piloter_proposal_gaps.py::test_ouvrir_le_fichier_d_une_reparation_selectionne_la_ligne_citee` | oui |
 | Ligne d'agent (table) | `tr` | `onSelect(agent.name)` | `GET /api/workspace/agents` | ouvre l'inspecteur agent | `test_la_vue_expose_la_clause_d_emploi_et_la_couche` | oui |
 | Sauver la clause d'emploi | `.btn` « Sauver » (clause) | `saveClauseBtn.click` | `POST /api/workspace/agents/<name>/fields` | succès + refus champ inconnu | `test_modifier_la_clause_d_emploi_et_les_outils`, `test_un_champ_non_modifiable_est_refuse` | oui |
 | Sauver les outils | `.btn` « Sauver » (outils) | `saveToolsBtn.click` | idem | succès + outil inconnu refusé | `test_un_outil_inconnu_est_refuse_sans_toucher_le_disque` | oui |
@@ -171,7 +171,7 @@ pour ce contrôle précis.
 | Créer un projet | idem | idem | idem | chemin déjà existant → 409 refusé | `test_creating_a_project_on_an_existing_path_is_refused` | oui |
 | Créer un projet | idem | idem | idem | archétype inconnu / chemin hors racines → 400/403 | `test_refuses_an_unknown_archetype_before_writing`, `test_refuses_a_path_outside_allowed_roots` (route directe, `tests/unit/cli/test_cmd_cockpit_create_project.py` — correction : marqué à tort « non » dans la première version de cette matrice) | oui |
 | Wizard — lancer une étape | `.btn` « Lancer » (wizard) | `runBtn.click` | `POST /api/setup` | succès bout en bout | `test_wizard_initializes_a_blank_project_end_to_end` | oui |
-| Wizard — repli (fallback) | `.btn` (fallback) | `fallbackBtn.click` | `POST /api/setup` | chemin d'erreur / archétype de repli | — | non |
+| Wizard — repli (fallback) | `.btn` (fallback) | `fallbackBtn.click` | `POST /api/setup` | plan écrit + commande à copier sans rien exécuter ; refus du serveur lisible, bouton réactivé | `tests/e2e/test_workspace_piloter_setup_wizard.py::test_wizard_fallback_rend_la_commande_sans_rien_executer`, `tests/e2e/test_workspace_piloter_setup_wizard.py::test_wizard_fallback_en_erreur_est_refuse_lisiblement` | oui |
 
 ### Espace : Concevoir
 
@@ -181,23 +181,23 @@ pour ce contrôle précis.
 | Vue — état vide | `#view-seg button` | idem | `GET /api/workspace/blueprints` (vide) | 3 boutons visibles mais désactivés | `test_concevoir_etat_vide_montre_la_commande_et_desactive_les_vues` | oui |
 | Carte de container (clic) | `.card`/`tr` | `selectContainer(id)` | `GET /api/blueprints/<id>` | remplit l'inspecteur | `test_la_selection_d_un_container_remplit_l_inspecteur` | oui |
 | Carte de container (double-clic) | idem | `zoomToWorkflow(id)` | idem + validate/simulate | dessine le graphe niveau Workflow | `test_le_double_clic_zoome_sur_le_workflow_et_dessine_le_graphe` | oui |
-| Carte de container (clavier `Enter`) | idem | idem | idem | même effet au clavier | — | non |
-| Carte projet (Flotte) | `.card` | `location.search = '?project='+slug` | rechargement | change de projet servi (légitime, contexte serveur) | — | non |
-| Ouvrir le workflow (bouton) | `.btn` « Ouvrir » | `zoomToWorkflow(id)` | idem | équivalent bouton du double-clic | — | non |
+| Carte de container (clavier `Enter`) | idem | idem | idem | même effet au clavier | `tests/e2e/test_workspace_concevoir_navigation.py::test_entree_sur_une_carte_ouvre_le_workflow` | oui |
+| Carte projet (Flotte) | `.card` | `location.search = '?project='+slug` | rechargement | change de projet servi (légitime, contexte serveur) | `tests/e2e/test_workspace_concevoir_navigation.py::test_la_carte_projet_de_la_flotte_ouvre_ce_projet` | oui |
+| Ouvrir le workflow (bouton) | `.btn` « Ouvrir le workflow → » (inspecteur) | `zoomToWorkflow(id)` | idem | équivalent bouton du double-clic | `tests/e2e/test_workspace_concevoir_navigation.py::test_le_bouton_ouvrir_le_workflow_de_l_inspecteur_equivaut_au_double_clic` | oui |
 | Valider (bouton) | `.btn` « Valider » | `runValidate` | `POST /api/blueprints/<id>/validate` | verdict écrit dans le dock Problèmes | `test_valider_ecrit_le_verdict_dans_le_dock_problemes` | oui |
-| Simuler (bouton) | `.btn` « Simuler » | `runSimulate` | `POST /api/blueprints/<id>/simulate` | résultat simulation | — | non |
+| Simuler (bouton) | `.btn` « Simuler » | `runSimulate` | `POST /api/blueprints/<id>/simulate` | verdict écrit dans le dock Problèmes ; refus du serveur dit (`simulation refusée`) | `tests/e2e/test_workspace_concevoir_navigation.py::test_simuler_ecrit_le_verdict_dans_le_dock_problemes`, `tests/e2e/test_workspace_concevoir_navigation.py::test_simuler_refuse_est_dit_dans_le_dock` | oui |
 | Compiler (bouton) | `.btn` « Compiler » | `runCompile` | `POST /api/blueprints/<id>/compile` | artefact nommé, câblée sur le cockpit depuis #546 (manquait — même défaut que `PUT` avant #543) | `tests/unit/cli/test_cmd_cockpit_blueprint_writes.py` | oui |
 | Bibliothèque (rail 2 / bouton toolbar) | `.rail-btn`/`btnLib` | ouvre/ferme `state.paletteOpen` | `GET /api/primitives` | 7 primitives listées | `test_la_bibliotheque_de_noeuds_liste_les_sept_primitives`, `test_le_raccourci_2_du_rail_ouvre_la_bibliotheque_de_noeuds` | oui |
 | Primitive de la Bibliothèque (clic) | `.cv-prim` | `addNode(name)` | `PUT /api/blueprints/<id>` via le bouton « Enregistrer » (corrigé par #535 — n'écrit plus automatiquement) | nœud ajouté au brouillon, indicateur « modifié », persiste après « Enregistrer » + rechargement | `test_ajouter_un_noeud_affiche_modifie_non_enregistre`, `test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement` | oui |
 | Enregistrer (bouton toolbar, nouveau — #535) | `.cv-toolbar button` « Enregistrer » | `saveBlueprint()` | `PUT /api/blueprints/<id>` | désactivé sans modification, écrit et retire l'indicateur « modifié » | `test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement` | oui |
 | Changer de blueprint avec modifications non enregistrées (nouveau — #535) | `.cv-card` double-clic | `zoomToWorkflow(id)` | — | confirmation avant d'écraser le brouillon (même mécanisme que Source) | `test_changer_de_blueprint_avec_des_modifications_non_enregistrees_demande_confirmation` | oui |
 | Nœud du graphe (clic) | `.node`/box | `selectedNodeId = id` | — | sélection + 4 onglets inspecteur | `test_le_niveau_noeud_montre_un_inspecteur_a_quatre_onglets` | oui |
-| Nœud du graphe (double-clic) | idem | `zoomToNode(id)` | — | zoom niveau Nœud | — | non |
-| Nœud du graphe (clavier `Enter`) | idem | idem | — | équivalent clavier | — | non |
+| Nœud du graphe (double-clic) | idem | `zoomToNode(id)` | — | zoom niveau Nœud | `tests/e2e/test_workspace_concevoir_navigation.py::test_le_double_clic_sur_un_noeud_zoome_au_niveau_noeud` | oui |
+| Nœud du graphe (clavier `Enter`) | idem | idem | — | équivalent clavier | `tests/e2e/test_workspace_concevoir_navigation.py::test_entree_sur_un_noeud_zoome_au_niveau_noeud` | oui |
 | Onglet nœud (4 onglets) | `.tab` inspecteur nœud | change `_cvTab` | — | contenu change par onglet | `test_les_quatre_onglets_du_noeud_changent_le_contenu_affiche` | oui |
 | Aucun texte sous le plancher sombre | — | — | — | contraste/tailles du graphe | `test_aucun_texte_du_graphe_sous_le_plancher_dark` | oui |
 | Rail « Preuves » depuis Concevoir | `.rail-btn[data-panel=evidence]` | `togglePanel('evidence')` (corrigé par #534/PR #539, `evidence` tenu par la coque) | `GET /api/workspace/evidence` | ouvre le panneau Preuves comme dans les cinq autres espaces | `test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut` (couvre le comportement générique, pas un test dédié à Concevoir) | oui |
-| Zoom Flotte/Projet/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 4 niveaux (`grimoire serve` est un alias du cockpit) ; « Workflow » charge le blueprint sélectionné d'un simple clic (corrigé : restait sur « Chargement… ») | `tests/unit/test_concevoir_zoom_source.py::test_chaque_segment_du_zoom_passe_par_pick_zoom`, `tests/unit/test_concevoir_zoom_source.py::test_pick_zoom_charge_le_blueprint_selectionne_avant_workflow` | oui |
+| Zoom Flotte/Projet/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 4 niveaux (`grimoire serve` est un alias du cockpit) ; « Workflow » charge le blueprint sélectionné d'un simple clic (corrigé : restait sur « Chargement… ») | `tests/e2e/test_workspace_concevoir_zoom.py::test_les_segments_du_zoom_changent_de_niveau`, `tests/unit/test_concevoir_zoom_source.py::test_chaque_segment_du_zoom_passe_par_pick_zoom`, `tests/unit/test_concevoir_zoom_source.py::test_pick_zoom_charge_le_blueprint_selectionne_avant_workflow` | oui |
 | Trois vues au niveau Projet | `#view-seg` | — | — | présence des 3 vues | `test_les_trois_vues_sont_proposees_au_niveau_projet` | oui |
 | Blueprint réel s'ouvre | — | `mount` | `GET /api/workspace/blueprints` | rend un blueprint réel, jamais démo | `test_concevoir_s_ouvre_sur_le_blueprint_reel_du_projet` | oui |
 
@@ -208,19 +208,19 @@ pour ce contrôle précis.
 | Vue (Carte/Liste/Board) | `#view-seg button` | `setView` | `GET /api/workspace/tasks` | bascule, Board par défaut | `test_executer_propose_trois_vues_et_le_board_par_defaut`, `test_executer_view_seg_bascule_correctement` | oui |
 | Vue — état vide | `#view-seg button` | idem | idem (0 tâche) | 4 vues visibles mais désactivées | `test_executer_etat_vide_montre_la_commande_et_desactive_les_vues` | oui |
 | Carte de tâche (clic/Enter) | `.card` | `onSelect(id)` | `GET /api/workspace/tasks/<id>` | ouvre l'inspecteur | (via `test_executer_l_inspecteur_ne_montre_pas_de_rappel_vide`) | oui |
-| Bouton d'action rapide sur carte | `.btn` (carte) | `onSelect` + `stopPropagation` | idem | ne déclenche pas le clic parent | — | non |
-| Ligne de tâche (Liste) | `tr` | `onSelect(id)` | idem | ouvre l'inspecteur | — | non |
+| Bouton d'action rapide sur carte | `.btn` (carte) | `onSelect` + `stopPropagation` | idem | ne déclenche pas le clic parent | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_les_boutons_d_action_rapide_d_une_carte_ne_propagent_pas_le_clic`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_un_clic_sur_la_carte_elle_meme_selectionne_la_tache` | oui |
+| Ligne de tâche (Liste) | `tr` | `onSelect(id)` | idem | ouvre l'inspecteur | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_cliquer_une_ligne_de_la_liste_ouvre_la_tache_dans_l_inspecteur` | oui |
 | Filtre timeline — source | `select` (source) | `timelineFilter.source` | `GET /api/workspace/tasks/<id>/trace` | filtre affiché | `test_executer_timeline_montre_dispatch_et_refus_et_se_filtre_par_source` | oui |
-| Filtre timeline — gravité | `select` (gravité) | `timelineFilter.gravite` | idem | filtre affiché | — | non |
+| Filtre timeline — gravité | `select` (gravité) | `timelineFilter.gravite` | idem | filtre affiché | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_le_filtre_de_gravite_ne_garde_que_les_causes` | oui |
 | Bouton Timeline | `.btn` « Timeline » | `onTimeline(taskId)` | idem | ouvre le dock Traces | `test_executer_timeline_montre_dispatch_et_refus_et_se_filtre_par_source` | oui |
 | Réaliser (transition de gate) | `.btn.pri` « Réaliser » | `taskAction(id, action)` | `POST /api/workspace/tasks/<id>/{claim,move,block,close}` | succès (transition) | `test_executer_un_move_reussi_deplace_la_carte_puis_un_claim_est_refuse` | oui |
 | Réaliser (transition de gate) | idem | idem | idem | refusé (`blocked:true`, preuve manquante) | `test_executer_un_move_reussi_deplace_la_carte_puis_un_claim_est_refuse` | oui |
 | Réaliser — lecture seule cockpit | idem | idem | idem | bouton désactivé, texte « Écriture désactivée » | `test_cockpit_desactive_les_ecritures_d_executer` | oui |
-| Champ « raison du blocage » | `input` (blocked) | valeur passée à `block` | `POST .../block` | requis pour la transition `blocked` | — | non |
+| Champ « raison du blocage » | `input` (blocked) | valeur passée à `block` | `POST .../block` | requis pour la transition `blocked` | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_bloquer_sans_raison_est_refuse_et_ne_bouge_pas_la_tache`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_bloquer_avec_une_raison_passe_la_tache_en_bloquee`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_bloquer_sans_raison_est_un_400_et_ne_bouge_pas_la_tache` (HTTP) | oui |
 | Board — changement de projet | — | `mount` re-fetch | `GET /api/workspace/tasks` | board se recharge par projet | `test_executer_le_board_change_quand_on_change_de_projet` | oui |
 | Review sans evidence pack | — | affichage refus | `GET /api/workspace/tasks/<id>` | nomme l'artefact manquant | `test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact` | oui |
-| Chips `expected_evidence` | `.chip` | affichage seul | — | tronqué à 3/4 selon le contexte | — | non |
-| Colonnes de gate (bandeau) | `.ex-col-gate` | affichage seul | — | nomme les preuves requises par colonne | — | non |
+| Chips `expected_evidence` | `.chip` | affichage seul | — | tronqué à 3/4 selon le contexte | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_les_pastilles_de_preuves_sont_tronquees_a_quatre_sur_la_carte_et_trois_dans_la_liste`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_une_carte_sans_preuve_declaree_le_dit` | oui |
+| Colonnes de gate (bandeau) | `.ex-col-gate` | affichage seul | — | nomme les preuves requises par colonne | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_le_bandeau_de_colonne_nomme_les_preuves_requises`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_une_colonne_sans_preuve_declaree_le_dit`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_une_colonne_repliee_du_board_4_nomme_ses_colonnes` | oui |
 | Migrer les tâches (ADR-007, #559) | `button` « Migrer les tâches » (état vide) | `migrateStandardTasks()` | `POST /api/workspace/tasks/migrate-standard` | board sans ledger enrôlé → bouton visible, migration réelle, board recharge | `test_executer_etat_non_migre_propose_le_bouton_migrer_les_taches` | oui |
 | Finition (lecture seule, lot 4.3, #561) | `.ex-insp-block` (inspecteur) | affichage seul | `GET /api/workspace/tasks/<id>` | absente tant que non posée, sinon libellé (Maquette/Peaufinée) | `test_task_view_expose_le_champ_finition_en_lecture_seule` (unitaire, pas d'e2e : aucun chemin d'écriture avant le lot 4.3) | oui |
 
@@ -232,9 +232,9 @@ pour ce contrôle précis.
 | Vue Activité/RTK/Bench — jamais muettes | idem | idem | idem | jamais un écran vide silencieux | `test_observer_activite_rtk_bench_ne_restent_jamais_muets` | oui |
 | Vue RTK — indisponible | idem | `renderUnavailable` | aucune route serveur | message + commande CLI de repli | (couvert par le test ci-dessus) | oui |
 | Vue Bench — indisponible | idem | idem | aucune | message + commande CLI de repli | (couvert par le test ci-dessus) | oui |
-| Span OTel (ligne, clic) | `tr` | `onSelect(span)` | `GET /api/otel` | sélection dans l'inspecteur | — | non |
-| Ligne d'événement (clic) | `.line` | `onSelect(list[0])` | `GET /api/events/log` | sélection | — | non |
-| Bouton « voir la tâche » | `.btn` | `goto('executer', {task, view})` | — | navigue vers Executer | — | non |
+| Span OTel (ligne, clic) | `tr` | `onSelect(span)` | `GET /api/otel` | sélection dans l'inspecteur | `tests/e2e/test_workspace_observer_selection.py::test_le_clic_sur_un_span_lent_le_montre_dans_l_inspecteur`, `tests/e2e/test_workspace_observer_selection.py::test_un_span_en_erreur_affiche_son_message` | oui |
+| Ligne d'agent (« Traces par agent », clic) | `.ob-bar-row` | `onSelect(list[0])` | `GET /api/otel` | sélectionne le premier span de l'agent | `tests/e2e/test_workspace_observer_selection.py::test_la_ligne_d_un_agent_selectionne_son_premier_span` | oui |
+| Bouton « Voir la timeline de <tâche> » (inspecteur de span) | `.btn` | `goto('executer', {task, view:'timeline'})` | — | navigue vers Executer sur la timeline ; absent sans `grimoire.task_id` | `tests/e2e/test_workspace_observer_selection.py::test_voir_la_timeline_d_une_tache_ouvre_executer_sur_la_timeline`, `tests/e2e/test_workspace_observer_selection.py::test_le_clic_sur_un_span_lent_le_montre_dans_l_inspecteur` | oui |
 | Run de flow visible sans TraceLedger | — | `mount` | `GET /api/workspace/flows/runs` | affiche le run même TraceLedger vide | `test_observer_montre_le_run_de_flow_meme_traceledger_vide` | oui |
 | Sans trace — bloc vide unique | — | `mount` | toutes routes vides | un seul bloc vide, 0 erreur console | `test_observer_sans_trace_rend_un_seul_bloc_vide_sans_erreur_console` | oui |
 | Aucune donnée de démo | — | — | — | jamais le mot « démo » | `test_chaque_espace_s_ouvre_sur_un_projet_reel` (paramétré) | oui |
@@ -246,12 +246,12 @@ pour ce contrôle précis.
 | Vue (zoom docbar) | `#view-seg button` | `setView` (dans `draw()`, bug historique corrigé) | `GET /api/memory/status` | bascule visuelle | `test_memoire_view_seg_bascule_correctement` | oui |
 | Zoom Flotte / Ce projet | `#zoom-seg button` | bascule agrégation | `GET /api/workspace/memory/overview?projects=` | Flotte = 2 lignes (registre) | `test_switching_to_all_projects_shows_two_rows` | oui |
 | Recherche croisée (bouton) | `searchBtn` | `runSearch` | `GET /api/workspace/memory/search` | résultats étiquetés par projet | `test_cross_project_search_labels_the_matching_project_only` | oui |
-| Recherche croisée (Entrée clavier) | `input` keydown | `runSearch` | idem | équivalent clavier au clic | — | non |
-| Recherche — requête vide | idem | idem | idem (`q` vide) | `results:[], count:0` sans requête lancée | — | non |
-| Item mémoire (clic) | `.item` | `openInspector` | — | ouvre le panneau d'inspection | — | non |
-| Item mémoire (clavier Enter/Espace) | idem | idem | — | équivalent clavier | — | non |
+| Recherche croisée (Entrée clavier) | `input` keydown | `runSearch` | idem | équivalent clavier au clic | `tests/e2e/test_workspace_memoire_fleet_states.py::test_la_touche_entree_lance_la_recherche_croisee` | oui |
+| Recherche — requête vide | idem | idem | idem (`q` vide) | aucun appel réseau, invite à saisir un terme | `tests/e2e/test_workspace_memoire_fleet_states.py::test_une_requete_vide_n_appelle_aucune_route_et_invite_a_saisir` | oui |
+| Item mémoire (clic) | `.item` | `openInspector` | — | ouvre le panneau d'inspection | `tests/e2e/test_workspace_memoire_fleet_states.py::test_le_clic_sur_un_resultat_l_ouvre_dans_l_inspecteur` | oui |
+| Item mémoire (clavier Enter/Espace) | idem | idem | — | équivalent clavier | `tests/e2e/test_workspace_memoire_fleet_states.py::test_le_clavier_ouvre_un_resultat_dans_l_inspecteur` | oui |
 | Store affiché avant l'architecture | — | `mount` | `GET /api/memory/status` | ordre d'affichage | `test_memoire_montre_le_store_avant_l_architecture` | oui |
-| Projet sans mémoire liée | — | `mount` | `GET /api/workspace/memory/overview` | état `unavailable`/`uninitialized`/`unreadable` nommé | — | non |
+| Projet sans mémoire liée | — | `mount` | `GET /api/workspace/memory/overview` | état `unavailable`/`uninitialized`/`unreadable` nommé | `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_sans_memoire_liee_est_nomme_dans_l_apercu`, `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_sans_memoire_propre_n_offre_que_la_flotte` | oui |
 
 ### Espace : Source
 
@@ -261,8 +261,8 @@ pour ce contrôle précis.
 | Fichier (ligne, clic) | `.sr-tree-file` | `openFile` | `GET /api/workspace/file?path=` | ouvre, bandeau lecture seule si étage kit | `test_ouvrir_un_fichier_du_kit_montre_le_bandeau_lecture_seule` | oui |
 | Prendre un override | `.sr-banner .btn.pri` | `createOverrideAndOpen` | `POST /api/workspace/file/override` | crée puis rend éditable | `test_editer_un_fichier_du_kit_cree_l_override_diffuse_et_laisse_doctor_vert` | oui |
 | Enregistrer (bouton) | `.btn` « Enregistrer » | `saveCurrent` | `POST /api/workspace/file/write` | succès | `test_l_enregistrement_reste_fonctionnel_avec_l_editeur_colore` | oui |
-| Enregistrer — conflit/étage non éditable | idem | idem | idem | 403 nommant l'override à créer | — | non |
-| Enregistrer — fichier hors racine | idem | idem | idem | chemin refusé (`WorkspacePathError`) | — | non |
+| Enregistrer — conflit/étage non éditable | idem | idem | idem | 403 nommant l'override à créer | `tests/e2e/test_workspace_source_save_refusals.py::test_enregistrer_vers_l_etage_kit_est_refuse_et_nomme_l_override`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_ecrire_dans_l_etage_kit_est_un_403_qui_nomme_l_override` (HTTP) | oui |
+| Enregistrer — fichier hors racine | idem | idem | idem | chemin refusé (`WorkspacePathError`) | `tests/e2e/test_workspace_source_save_refusals.py::test_enregistrer_hors_de_la_racine_est_refuse`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_ecrire_hors_de_la_racine_est_un_403_et_n_ecrit_rien` (HTTP) | oui |
 | Onglet inspecteur (Fichier/Usage/Historique) | `.tab` | change `inspectorTab` | `GET /api/workspace/file/{usage,history}` | contenu par onglet | `test_l_inspecteur_expose_fichier_usage_et_historique` | oui |
 | Console — commande autorisée | `input` console | `keydown` → exécute | `POST /api/workspace/command` | sortie affichée | `test_la_console_execute_grimoire_status_et_refuse_rm` | oui |
 | Console — commande refusée (`rm`) | idem | idem | idem | refus explicite | `test_la_console_execute_grimoire_status_et_refuse_rm` | oui |
