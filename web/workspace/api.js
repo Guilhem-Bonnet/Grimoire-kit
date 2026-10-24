@@ -191,8 +191,12 @@ export const api = {
   },
   glossary: () => get(WS + 'glossary'),
   // Ce qui attend une décision humaine (P22), rangé par urgence. `portfolio`
-  // lit tout le registre — la portée « Tous les projets ».
-  attention: (portfolio) => get(WS + 'attention', portfolio ? { scope: 'portfolio' } : undefined),
+  // lit tout le registre — la portée « Tous les projets » ; `probe` relance
+  // les sondes au lieu de lire leur cache (« Réessayer », P32).
+  attention: (portfolio, { probe = false } = {}) => {
+    const params = { ...(portfolio ? { scope: 'portfolio' } : {}), ...(probe ? { probe: '1' } : {}) };
+    return get(WS + 'attention', Object.keys(params).length ? params : undefined);
+  },
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
   // convention que `health()` : l'inspecteur du portefeuille (#638, lot C)

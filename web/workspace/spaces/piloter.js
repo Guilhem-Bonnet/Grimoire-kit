@@ -89,6 +89,7 @@ function injectStyles() {
     .pl-prop-head { display: flex; align-items: center; gap: var(--sp-2); }
     .pl-prop-facts { color: var(--ink2); font-size: var(--t-s); }
     .pl-prop-actions { display: flex; gap: var(--sp-2); }
+    [data-focused="true"] { border-radius: var(--r); background: var(--acc-soft); box-shadow: 0 0 0 2px var(--acc); }
   `;
   document.head.append(style);
 }
@@ -611,6 +612,7 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
   for (const proposal of pending) {
     const line = document.createElement('div');
     line.className = 'pl-watch-row pl-prop-row';
+    line.dataset.proposal = proposal.slug;
 
     const head = document.createElement('div');
     head.className = 'pl-prop-head';
@@ -1374,6 +1376,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   const kitBlock = document.createElement('div');
   kitBlock.className = 'pl-insp-block';
+  kitBlock.dataset.focus = 'kit';
   kitBlock.append(text('h4', null, 'Kit'));
   const kit = kitStatus(health?.kit);
   const kitRow = pill(kit.dot, kit.word);
@@ -1452,6 +1455,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   const memBlock = document.createElement('div');
   memBlock.className = 'pl-insp-block';
+  memBlock.dataset.focus = 'memory';
   memBlock.append(text('h4', null, 'Mémoire'));
   let memoryPayload = memory;
   let memPill = pill(memoryPayload?.state === 'ok' ? 'ok' : (memoryPayload?.state === 'unavailable' ? 'warn' : ''), memoryPayload?.configuredBackend ? `${memoryPayload.configuredBackend} · ${fmtInt(memoryPayload.entries)} entrée(s)` : 'non initialisée');
@@ -1498,6 +1502,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   const actionsBlock = document.createElement('div');
   actionsBlock.className = 'pl-insp-block pl-actions';
+  actionsBlock.dataset.focus = 'checkpoint';
   actionsBlock.append(text('h4', null, 'Actions'));
 
   if (!health?.kit?.scaffolded) {
@@ -1768,6 +1773,22 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   wrap.append(proposalsSection);
 }
 
+// À traiter (P32) ouvre la fiche sur ce qui attend : `#flotte?focus=kit`,
+// `memory`, `checkpoint`, ou `proposal&proposal=<slug>`. Le bloc visé est
+// marqué, amené à l'écran, et l'inspecteur s'ouvre s'il le porte.
+function revealFocus(root, ctx) {
+  const { focus, proposal } = ctx.params || {};
+  if (!focus) return;
+  const selector = focus === 'proposal' && proposal
+    ? `[data-proposal="${CSS.escape(proposal)}"]`
+    : `[data-focus="${CSS.escape(focus)}"]`;
+  const target = root.querySelector(selector) || ctx.inspector.querySelector(selector);
+  if (!target) return;
+  target.dataset.focused = 'true';
+  if (ctx.inspector.contains(target)) ctx.openPanel('inspector');
+  target.scrollIntoView({ block: 'center' });
+}
+
 export async function mount(root, ctx) {
   injectStyles();
   const cockpit = ctx.host.kind === 'cockpit';
@@ -1858,6 +1879,7 @@ export async function mount(root, ctx) {
       if (ctx.signal.aborted) return;
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderSheet(root, ctx, selected, name, sheet, { refresh: draw });
+      revealFocus(root, ctx);
       ctx.dock.echo('grimoire doctor');
     }
   };
