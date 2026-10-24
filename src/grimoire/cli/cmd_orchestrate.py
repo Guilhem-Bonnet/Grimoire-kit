@@ -193,10 +193,22 @@ def _render_tick(report: TickReport) -> None:
             f"{sum(1 for o in report.ci if o.action == 'released')} orphelin(s) libéré(s), "
             f"{admitted} admise(s), {deferred} différée(s)."
         )
+        _render_lot2(report)
     for attention in report.attention:
         console.print(f"[yellow]attention : {attention}[/yellow]")
     for note in report.notes:
         console.print(f"[dim]{note}[/dim]")
+
+
+def _render_lot2(report: TickReport) -> None:
+    """Lancements, nettoyages du janitor et état du disjoncteur (#876, lot 2)."""
+    for launch in report.launches:
+        console.print(f"Lancement {launch.status} : {launch.task_id} — {launch.detail}")
+    for outcome in report.cleanup:
+        console.print(f"Janitor {outcome.status} : {outcome.task_id} {outcome.action} — {outcome.detail}")
+    if report.breaker is not None:
+        colour = "red" if report.breaker.open else "dim"
+        console.print(f"[{colour}]Disjoncteur : {report.breaker.describe()}[/{colour}]")
 
 
 @orchestrate_app.command("tick")
@@ -210,7 +222,10 @@ def orchestrate_tick(
     ledger_root: Annotated[Path, _LEDGER_ROOT_OPTION] = _DEFAULT_LEDGER,
     json_output: Annotated[bool, _JSON_OPTION] = False,
 ) -> None:
-    """Un tick : lit les drapeaux de pause d'abord, puis récolte, rend les attentes levées, constate les effets, admet.
+    """Un tick : lit les drapeaux de pause d'abord, puis récolte, rend les attentes levées, constate les effets, nettoie, admet, lance.
+
+    Le lancement (`--apply`) n'a lieu que si le rôle `worker` est activé dans `orchestration-policy.yaml`
+    (`orchestrator.roles.worker.enabled`, désactivé par défaut) et que le disjoncteur est fermé.
 
     Sous une pause de tout le périmètre, il sort sans ouvrir le ledger, avec le code 0 : une pause n'est pas une
     panne, un minuteur ne doit pas la lire comme un échec. Un second tick pendant le premier saute (code 0).
@@ -278,3 +293,50 @@ def orchestrate_uninstall_timer(
         return
     for line in done:
         console.print(line)
+
+
+breaker_app = typer.Typer(help="Disjoncteur de l'orchestrateur : ouvert, aucune session n'est lancée.", no_args_is_help=True)
+orchestrate_app.add_typer(breaker_app, name="breaker")
+
+
+@breaker_app.command("status")
+def breaker_status(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """L'état du disjoncteur : ouvert ou fermé, pourquoi, et les derniers événements."""
+    from grimoire.missions.breaker import read_breaker
+    from grimoire.missions.pause import home_root
+
+    state = read_breaker(home_root(project_root.resolve()))
+    if _as_json(ctx, json_output):
+        typer.echo(json.dumps(state.to_dict(), indent=2, ensure_ascii=False))
+        return
+    console.print(f"Disjoncteur : {state.describe()}")
+    for entry in state.history[-5:]:
+        console.print(f"[dim]{entry.get('at', '')} {entry.get('event', '')} {entry.get('reason') or entry.get('detail') or ''}[/dim]")
+
+
+@breaker_app.command("trip")
+def breaker_trip(
+    reason: Annotated[str, typer.Argument(help="Pourquoi on ouvre le disjoncteur.")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+) -> None:
+    """Ouvre le disjoncteur à la main : plus aucun lancement jusqu'à `breaker reset`. Sans risque, donc sans origine exigée."""
+    from grimoire.missions.breaker import trip
+    from grimoire.missions.pause import home_root
+
+    state = trip(home_root(project_root.resolve()), reason, source="manual")
+    console.print(f"Disjoncteur : {state.describe()}")
+
+
+@breaker_app.command("reset")
+def breaker_reset(project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path()) -> None:
+    """Referme le disjoncteur et remet le compteur à zéro — un geste d'humain (l'origine humaine est exigée)."""
+    from grimoire.missions.breaker import reset
+    from grimoire.missions.pause import home_root
+
+    _require_human("breaker reset")
+    state = reset(home_root(project_root.resolve()))
+    console.print(f"Disjoncteur : {state.describe()}")
