@@ -217,7 +217,7 @@ export function badge(label, tone, title) {
   return span;
 }
 
-/** Rangée de tuiles KPI : `items` = [{ value, label, icon?, tone? }]. Une
+/** Rangée de tuiles KPI : `items` = [{ value, label, icon?, tone?, sub? }]. Une
  *  valeur sans chiffre (« absent », « verte ») est un statut, pas un
  *  indicateur : la tuile la pose en mot d'état (`data-kind="word"`). */
 export function kpiRow(items) {
@@ -231,6 +231,7 @@ export function kpiRow(items) {
     const val = mk('div', { class: 'kpi-val', text: value });
     val.title = value;
     cell.append(lbl, val);
+    if (item.sub) cell.append(mk('div', { class: 'kpi-sub', text: item.sub }));
     rowNode.append(cell);
   }
   return rowNode;
@@ -1131,6 +1132,13 @@ function buildSpaces() {
     button.setAttribute('aria-label', space.label);
     button.title = `${space.label} — ⌘${index + 1}`;
     button.addEventListener('click', () => goto(space.id));
+    if (space.id === 'a-traiter') {
+      // Le compteur de décisions vit sur l'onglet (maquette Douce), pas dans une pastille à part.
+      const count = badge('0', 'warn');
+      count.id = 'decisions-count';
+      count.hidden = true;
+      button.append(count);
+    }
     nav.append(button);
   });
   bindTablist(nav, { activate: 'manual' });
@@ -1443,17 +1451,17 @@ function renderReadOnlyBanner() {
 // un projet illisible reste dit : un compteur qui ignorerait ce qu'il ne peut
 // pas lire mentirait par omission.
 function renderDecisionsPill(decisions) {
-  const pill = $('decisions-pill');
+  const badgeNode = $('decisions-count');
+  const tab = $('tab-space-a-traiter');
   const pending = Number(decisions && decisions.pending) || 0;
   const unreadable = (decisions && decisions.unreadable) || [];
-  pill.hidden = pending === 0 && unreadable.length === 0;
-  $('decisions-count').textContent = String(pending);
-  $('decisions-lbl').textContent = pending > 1 ? ' décisions' : ' décision';
+  badgeNode.hidden = pending === 0 && unreadable.length === 0;
+  badgeNode.textContent = String(pending);
   let label = `${pending} décision${pending > 1 ? 's' : ''} en attente`;
   if (unreadable.length) label += ` — ${unreadable.length} projet(s) illisible(s) : ${unreadable.join(', ')}`;
-  pill.setAttribute('aria-label', label);
-  pill.title = `${label} — ouvrir la vue Décisions`;
-  pill.dataset.pending = String(pending);
+  badgeNode.title = label;
+  tab.setAttribute('aria-label', badgeNode.hidden ? 'À traiter' : `À traiter — ${label}`);
+  badgeNode.dataset.pending = String(pending);
 }
 
 function openDecisions() {
@@ -1797,7 +1805,6 @@ async function main() {
   syncDetail();
   $('st-fullscreen').addEventListener('click', toggleFocus);
   $('palette-open').addEventListener('click', () => openPalette());
-  $('decisions-pill').addEventListener('click', openDecisions);
   startStampTicker();
   // La puce de portée ouvre le sélecteur : la palette réduite à « Projets »,
   // sans plafond, « Tous les projets » en tête. Changer de portée recharge la
