@@ -41,7 +41,9 @@ DIRECTIVE_KINDS: tuple[str, ...] = ("comment", "directive")
 ORIGIN_HUMAN = "human"
 ORIGIN_AGENT = "agent"
 ORIGIN_UNVERIFIED = "unverified"
-DIRECTIVE_ORIGINS: tuple[str, ...] = (ORIGIN_HUMAN, ORIGIN_AGENT, ORIGIN_UNVERIFIED)
+#: Le principal ``orchestrator`` (#876, lot 1) : n'agit que sous un mandat valide (:mod:`grimoire.missions.mandate`).
+ORIGIN_ORCHESTRATOR = "orchestrator"
+DIRECTIVE_ORIGINS: tuple[str, ...] = (ORIGIN_HUMAN, ORIGIN_AGENT, ORIGIN_UNVERIFIED, ORIGIN_ORCHESTRATOR)
 
 
 def _int_or_zero(value: Any) -> int:
