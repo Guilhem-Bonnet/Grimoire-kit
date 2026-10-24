@@ -124,7 +124,7 @@ def test_sans_politique_le_comportement_est_inchange(projet: Path, service: Task
     tid = ready(service, "sans politique")
     report = tick(projet, host)
     assert host.calls == [] and report.launches == () and report.plan is not None
-    assert [a.task_id for a in report.plan.admitted] == [tid] and report.breaker is not None and not report.breaker.open
+    assert [a.task_id for a in report.plan.admitted] == [tid] and report.breaker is None
     assert TaskService(projet).require(tid).status is TaskState.READY
 
 
@@ -301,7 +301,7 @@ def test_cli_tick_affiche_le_disjoncteur_et_les_lancements(projet: Path, service
     cmd_orchestrate._render_tick(report)
     assert report.launches and report.launches[0].status == "launched"
     payload = report.to_dict()
-    assert payload["launches"][0]["status"] == "launched" and payload["breaker"]["open"] is False and payload["cleanup"] == []
+    assert payload["launches"][0]["status"] == "launched" and "breaker" not in payload and "cleanup" not in payload
 
 
 def test_cli_tick_plan_ne_lance_rien(projet: Path, service: TaskService) -> None:
@@ -309,7 +309,7 @@ def test_cli_tick_plan_ne_lance_rien(projet: Path, service: TaskService) -> None
     out = runner.invoke(app, ["--output", "json", "orchestrate", "tick", "--plan", "--project-root", str(projet)])
     assert out.exit_code == 0, out.output
     data = json.loads(out.output)
-    assert data["launches"] == [] and data["breaker"]["open"] is False
+    assert not {"launches", "cleanup", "breaker"} & set(data)  # rôle désactivé : la sortie d'avant, clé pour clé
     assert TaskService(projet).require(tid).status is TaskState.READY
 
 
@@ -436,3 +436,18 @@ def test_un_lancement_echoue_compte_au_plafond_du_jour(projet: Path, service: Ta
     report = tick(projet, host)
     assert [o.status for o in report.launches] == ["failed", "skipped"]
     assert "plafond" in report.launches[1].detail
+
+
+def test_sans_bloc_orchestrator_le_tick_ne_dit_rien_de_plus_qu_avant(projet: Path, service: TaskService, host: FakeHost, capsys: pytest.CaptureFixture[str]) -> None:
+    (projet / POLICY).unlink()
+    ready(service, "inchange")
+    from grimoire.cli import cmd_orchestrate
+
+    report = tick(projet, host)
+    cmd_orchestrate._render_tick(report)
+    assert "Disjoncteur" not in capsys.readouterr().out
+    assert not {"launches", "cleanup", "breaker"} & set(report.to_dict())
+    trip(projet, "essai")
+    opened = tick(projet, host)
+    cmd_orchestrate._render_tick(opened)
+    assert "Disjoncteur" in capsys.readouterr().out and "breaker" in opened.to_dict()  # ouvert : on le dit

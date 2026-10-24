@@ -94,7 +94,7 @@ class TickReport:
     breaker: BreakerState | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "status": self.status,
             "mode": self.mode,
             "pause": self.pause.to_dict(),
@@ -106,10 +106,15 @@ class TickReport:
             "plan": self.plan.to_dict() if self.plan is not None else None,
             "dispatched": list(self.dispatched),
             "ci": [o.to_dict() for o in self.ci],
-            "launches": [o.to_dict() for o in self.launches],
-            "cleanup": [o.to_dict() for o in self.cleanup],
-            "breaker": self.breaker.to_dict() if self.breaker is not None else None,
         }
+        # Lot 2 de #876 : ces clés n'existent que s'il y a quelque chose à dire, la sortie d'un projet qui n'active rien reste celle d'avant.
+        if self.launches:
+            payload["launches"] = [o.to_dict() for o in self.launches]
+        if self.cleanup:
+            payload["cleanup"] = [o.to_dict() for o in self.cleanup]
+        if self.breaker is not None:
+            payload["breaker"] = self.breaker.to_dict()
+        return payload
 
 
 def run_tick(
@@ -201,8 +206,9 @@ def _one_pass(
         dispatched = tuple(o.task_id for o in launches if o.status == "launched") if launches else tuple(a.task_id for a in plan.admitted)
     from grimoire.missions.breaker import read_breaker
 
-    breaker = read_breaker(service.home_root)
-    if breaker.open:
+    state_of_breaker = read_breaker(service.home_root)
+    breaker = state_of_breaker if (state_of_breaker.open or state_of_breaker.failures) else None  # fermé et intact : rien à dire
+    if breaker is not None and breaker.open:
         attention.append(f"disjoncteur {breaker.describe()}")
     for swept in cleanup:
         if swept.status in ("failed", "refused"):
