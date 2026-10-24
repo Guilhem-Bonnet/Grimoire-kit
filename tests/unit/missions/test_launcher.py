@@ -8,6 +8,7 @@ s'ouvre après des échecs répétés. Chaque garde échoue fermée.
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -313,11 +314,42 @@ def test_cli_tick_plan_ne_lance_rien(projet: Path, service: TaskService) -> None
     assert TaskService(projet).require(tid).status is TaskState.READY
 
 
-def test_le_minuteur_porte_le_path_du_poste(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _shim(directory: Path, *names: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        exe = directory / name
+        exe.write_text("#!/bin/sh\n", encoding="utf-8")
+        exe.chmod(0o755)
+    return directory
+
+
+def test_le_minuteur_porte_le_path_du_poste_reduit_aux_outils_utiles(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le PATH n'est pas figé tel quel : ni un dossier temporaire (session d'agent), ni un dossier sans outil utile, ni un chemin relatif."""
+    import tempfile
+
     from grimoire.missions.timer import plan_timer
 
-    monkeypatch.setenv("PATH", "/usr/local/bin:/opt/claude/bin")
-    assert 'Environment="PATH=/usr/local/bin:/opt/claude/bin"' in plan_timer(projet).service
+    good = _shim(tmp_path / "bin", "claude", "gh")
+    git_dir = _shim(tmp_path / "gitbin", "git")
+    agent_tmp = tmp_path / "scratch"
+    shim = _shim(agent_tmp / "claude-session-1a2b" / "bin", "claude", "gh")  # le PATH d'une session d'agent
+    secret = _shim(tmp_path / "secret-token-AKIA123" / "bin", "unrelated")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(agent_tmp))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(shim), "relatif/bin", str(secret), str(good), str(git_dir), str(tmp_path / "absent")]))
+    service = plan_timer(projet).service
+    line = next(row for row in service.splitlines() if row.startswith("Environment="))
+    assert str(good) in line and str(git_dir) in line  # claude, gh et git y sont
+    for banned in (str(shim), "relatif", "secret-token", "absent", "claude-session"):
+        assert banned not in line
+    assert "/usr/bin" in line  # les dossiers système restent
+
+
+def test_sans_aucun_outil_utile_le_minuteur_ne_fige_que_les_dossiers_systeme(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions.timer import plan_timer
+
+    monkeypatch.setenv("PATH", str(_shim(tmp_path / "vide", "autre")))
+    line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
+    assert "vide" not in line and "/usr/bin" in line
 
 
 # ── Fumée réelle, désactivée par défaut ─────────────────────────────────────────

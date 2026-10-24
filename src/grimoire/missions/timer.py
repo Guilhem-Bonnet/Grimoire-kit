@@ -11,8 +11,8 @@ l'utilisateur ne s'est pas reconnecté après un redémarrage. Le tick ne fait a
 même avec un forfait épuisé, et il sort tout de suite sous une pause.
 
 Lot 2 de #876 : le minuteur est le déclencheur du lanceur. Il lance ``orchestrate tick --apply`` qui, si le rôle
-``worker`` de la politique d'orchestration est activé, lance les sessions détachées ; l'unité reçoit donc le ``PATH`` du
-poste à l'installation, car l'environnement minimal d'un service utilisateur ne trouve ni ``claude`` ni ``gh``.
+``worker`` de la politique d'orchestration est activé, lance les sessions détachées ; l'unité reçoit donc un ``PATH`` réduit aux dossiers
+outils du poste à l'installation (:func:`_unit_path`), car l'environnement minimal d'un service utilisateur ne trouve ni ``claude`` ni ``gh``.
 """
 
 from __future__ import annotations
@@ -90,10 +90,43 @@ def _spec(value: str) -> str:
     return value.replace("%", "%%")
 
 
+#: Les outils que le tick lance : ``claude`` et ``gh`` (lanceur, janitor), ``git``, ``node`` (le script de ``claude``).
+_TOOLS = ("claude", "gh", "git", "node")
+_SYSTEM_DIRS = ("/usr/local/bin", "/usr/bin", "/bin")
+
+
+def _under(path: Path, roots: list[Path]) -> bool:
+    return any(path == root or root in path.parents for root in roots)
+
+
+def _unit_path(raw: str) -> str:
+    """Le ``PATH`` de l'unité : seulement les dossiers du poste qui portent un outil utile, plus les dossiers système.
+
+    Ce n'est pas le ``PATH`` du poste recopié tel quel : celui d'une session d'agent contient des dossiers temporaires
+    propres à la session (ils disparaissent, et un exécutable y a pu être posé), et n'importe quel PATH peut porter un
+    dossier qui n'a rien à faire dans un service persistant. Sont écartés : les chemins relatifs, les dossiers absents
+    ou temporaires, ceux sans ``claude``, ``gh``, ``git`` ni ``node``.
+    """
+    import tempfile
+
+    temp = [Path(tempfile.gettempdir()), Path("/var/tmp")]
+    temp += [t.resolve() for t in temp]
+    kept: list[str] = []
+    for entry in raw.split(os.pathsep):
+        if not entry or "\n" in entry or "\r" in entry:
+            continue
+        directory = Path(entry)
+        if not directory.is_absolute() or not directory.is_dir() or _under(directory, temp) or _under(directory.resolve(), temp):
+            continue
+        if entry not in kept and any(shutil.which(tool, path=entry) for tool in _TOOLS):
+            kept.append(entry)
+    kept += [d for d in _SYSTEM_DIRS if d not in kept]
+    return os.pathsep.join(kept)
+
+
 def _path_line() -> str:
-    """``Environment="PATH=…"`` du poste qui installe (``claude`` et ``gh`` y sont) ; rien si ``PATH`` est vide."""
-    path = os.environ.get("PATH", "").strip()
-    return f"Environment={_systemd_quote('PATH=' + path)}\n" if path else ""
+    """``Environment="PATH=…"`` pour l'unité : où trouver ``claude`` et ``gh`` (voir :func:`_unit_path`)."""
+    return f"Environment={_systemd_quote('PATH=' + _unit_path(os.environ.get('PATH', '')))}\n"
 
 
 def _command(project_root: Path, python: str) -> list[str]:
