@@ -1747,6 +1747,32 @@ body[data-active-space] .panel-head {
     display: none;
   }
 
+  /* Le fil d'Ariane prend sa ligne : les vues (« Recherche », « Board »…) passent
+     dessous au lieu de se loger à côté de lui, où un fil un peu long les
+     poussait de 10 px hors écran (Savoir, projet avec des entrées). */
+  #docbar > #breadcrumb {
+    flex: 1 0 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  #docbar > .seg,
+  #docbar > .chip {
+    max-width: 100%;
+  }
+
+  /* Un projet riche donne plus de vues que 390 px n'en tient (Savoir, Travail) :
+     le sélecteur défile dans sa propre boîte au lieu de rogner ses boutons. */
+  #docbar > .seg {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #docbar > .seg > button {
+    flex: none;
+    white-space: nowrap;
+  }
+
   #statusbar {
     gap: var(--sp-2);
     padding: 0 var(--sp-2);
