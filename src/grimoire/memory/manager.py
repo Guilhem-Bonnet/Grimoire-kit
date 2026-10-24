@@ -27,6 +27,7 @@ from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
 from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
+from grimoire.memory.journal import WriteContext, record_change, resolve_write_context
 from grimoire.memory.knowledge import FreshnessState, annotate, order_for_serving, stamp_write
 from grimoire.memory.profiles import VECTOR_BACKENDS
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
@@ -610,6 +611,10 @@ class MemoryManager:
         metadata: dict[str, Any] | None = None,
         emitter: str = "",
         content_origin: str = "authored",
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
     ) -> MemoryEntry:
         """Écrire une mémoire, après la frontière de confiance.
 
@@ -620,15 +625,26 @@ class MemoryManager:
         redaction, quand la politique du projet la déclare ``required``,
         s'exécute ici et laisse sa trace dans les métadonnées.
         """
+        context = self._write_context(actor, session_id, task_ref)
         validated = self._validated(
-            text, user_id=user_id, tags=tags, metadata=metadata,
+            text, user_id=user_id, tags=tags, metadata={**(metadata or {}), **context.as_metadata()},
             emitter=emitter, content_origin=content_origin,
         )
         entry = self._backend.store(
             validated.text, user_id=user_id, tags=tags, metadata=validated.metadata
         )
         self._sync_memory(entry)
+        record_change(
+            self._project_root, op="store", context=context, after_id=entry.id,
+            content=validated.text, reason=reason,
+        )
         return entry
+
+    def _write_context(self, actor: str, session_id: str, task_ref: str) -> WriteContext:
+        """Provenance de l'écriture : arguments explicites, sinon session et claim actifs."""
+        return resolve_write_context(
+            self._project_root, actor=actor, session_id=session_id, task_ref=task_ref,
+        )
 
     def recall(self, entry_id: str) -> MemoryEntry | None:
         return self._backend.recall(entry_id)
@@ -878,7 +894,16 @@ class MemoryManager:
         raw = fetch(limit) if include_superseded else search_live(fetch, limit, self.recall)
         return self._serve(raw, limit=limit, include_stale=include_stale)
 
-    def supersede(self, old_id: str, new_id: str) -> MemoryEntry | None:
+    def supersede(
+        self,
+        old_id: str,
+        new_id: str,
+        *,
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> MemoryEntry | None:
         """Marque ``old_id`` comme remplacé par ``new_id`` (métadonnées conservées).
 
         Refuse un remplaçant inconnu, identique, déjà remplacé lui-même (le
@@ -896,7 +921,17 @@ class MemoryManager:
         existing = self._backend.recall(old_id)
         if existing is None:
             return None
-        return self.update(old_id, metadata={**existing.metadata, SUPERSEDED_KEY: new_id})
+        context = self._write_context(actor, session_id, task_ref)
+        updated = self._apply_update(
+            old_id, text=None, tags=None, metadata={**existing.metadata, SUPERSEDED_KEY: new_id},
+            context=context,
+        )
+        if updated is not None:
+            record_change(
+                self._project_root, op="supersede", context=context, before_id=old_id,
+                after_id=new_id, content=updated.text, reason=reason,
+            )
+        return updated
 
     def _refuse_cycle_or_replaced(self, old_id: str, replacement: MemoryEntry) -> None:
         """Lève si viser ``replacement`` fermerait un cycle ou viserait un souvenir déjà remplacé."""
@@ -1060,19 +1095,70 @@ class MemoryManager:
     def consolidate(self) -> int:
         return self._backend.consolidate()
 
-    def delete(self, entry_id: str) -> bool:
+    def delete(
+        self,
+        entry_id: str,
+        *,
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> bool:
+        # L'empreinte est celle du contenu supprimé : après coup, il n'y a plus rien à hacher.
+        before = self._backend.recall(entry_id)
         deleted = self._backend.delete(entry_id)
         if deleted:
             self._sync_delete_memory(entry_id)
+            record_change(
+                self._project_root, op="delete", context=self._write_context(actor, session_id, task_ref),
+                before_id=entry_id, content=before.text if before is not None else "", reason=reason,
+            )
         return deleted
 
-    def update(self, entry_id: str, *, text: str | None = None, tags: tuple[str, ...] | None = None, metadata: dict[str, Any] | None = None) -> MemoryEntry | None:
+    def update(
+        self,
+        entry_id: str,
+        *,
+        text: str | None = None,
+        tags: tuple[str, ...] | None = None,
+        metadata: dict[str, Any] | None = None,
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> MemoryEntry | None:
         """Modifier une entrée — même frontière que la créer.
 
         Une écriture qui remplace le texte d'une mémoire existante est une
         écriture : la valider seulement à la création laisserait la porte de
         derrière ouverte.
         """
+        context = self._write_context(actor, session_id, task_ref)
+        updated = self._apply_update(entry_id, text=text, tags=tags, metadata=metadata, context=context)
+        if updated is not None:
+            record_change(
+                self._project_root, op="update", context=context, before_id=entry_id,
+                after_id=updated.id, content=updated.text, reason=reason,
+            )
+        return updated
+
+    def _apply_update(
+        self,
+        entry_id: str,
+        *,
+        text: str | None,
+        tags: tuple[str, ...] | None,
+        metadata: dict[str, Any] | None,
+        context: WriteContext,
+    ) -> MemoryEntry | None:
+        """Écrire la modification, sans journaliser : ``update`` et ``supersede`` journalisent chacun la leur."""
+        provenance = context.as_metadata()
+        if provenance:
+            base = metadata
+            if base is None:
+                current = self._backend.recall(entry_id)
+                base = dict(current.metadata) if current is not None else {}
+            metadata = {**base, **provenance}
         existing = self._backend.recall(entry_id) if (metadata is not None or text is not None) else None
         normalized = metadata
         if self._auto_enrich and metadata is not None:
@@ -1189,11 +1275,29 @@ class MemoryManager:
         self._sync_fact(fact)
         return fact
 
-    def invalidate_fact(self, subject: str, predicate: str, object_: str, *, ended: str = "") -> int:
+    def invalidate_fact(
+        self,
+        subject: str,
+        predicate: str,
+        object_: str,
+        *,
+        ended: str = "",
+        actor: str = "",
+        session_id: str = "",
+        task_ref: str = "",
+        reason: str = "",
+    ) -> int:
         ended_at = ended or time.strftime("%Y-%m-%d")
         count = self._require_sidecar().invalidate_fact(subject, predicate, object_, ended=ended_at)
         if count:
             self._sync_invalidate_fact(subject, predicate, object_, ended=ended_at)
+            record_change(
+                self._project_root, op="invalidate_fact",
+                context=self._write_context(actor, session_id, task_ref),
+                content=f"{subject}\x1f{predicate}\x1f{object_}", reason=reason,
+                extra={"fact": {"subject": subject, "predicate": predicate, "object": object_},
+                       "ended": ended_at, "invalidated": count},
+            )
         return count
 
     def query_facts(self, entity: str, *, as_of: str = "", direction: str = "both") -> list[KnowledgeFact]:
