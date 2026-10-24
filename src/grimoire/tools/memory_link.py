@@ -125,6 +125,7 @@ def _empty_status(project_root: Path) -> dict[str, Any]:
         "detail": {},
         "layers": [],
         "parity": {},
+        "retrieval": None,
         # Contrat de fraîcheur (issue de perf du cockpit) : un projet non
         # initialisé ou en erreur de config n'a jamais été sondé — ces trois
         # champs restent au même contrat que la branche sondée, pour qu'un
@@ -169,6 +170,9 @@ def _probe_memory_link_status(project_root: Path, cfg: Any, manager: Any | None 
             status["error"] = str(
                 health.detail.get("reason") or health.detail.get("error") or "backend indisponible"
             )
+        from grimoire.memory.profiles import retrieval_in_service
+
+        status["retrieval"] = retrieval_in_service(mgr.prefers_hybrid, cfg.memory.layer_profile)
     except (GrimoireMemoryError, ImportError, OSError, ValueError) as exc:
         status["state"] = "unavailable"
         status["error"] = str(exc)

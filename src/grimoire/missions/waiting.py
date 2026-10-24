@@ -38,6 +38,8 @@ __all__ = [
     "Question",
     "ResumeHint",
     "Waiting",
+    "answer_command",
+    "answer_hint",
     "attention_rank",
     "lint_decision_text",
     "new_question_id",
@@ -63,6 +65,25 @@ HUMAN_ANSWERED_EVENT = "task.human_answered"
 PROGRESS_NOTED_EVENT = "task.progress_noted"
 #: La commande de notification a été lancée pour cette question (au plus une fois par question).
 QUESTION_NOTIFIED_EVENT = "task.question_notified"
+
+
+def answer_command(task_id: str, question_id: str = "") -> str:
+    """La commande humaine qui répond à une question, exacte et exécutable telle quelle.
+
+    La CLI attend la réponse en argument positionnel et la question en option :
+    ``task answer <T> "<réponse>" --question <q-id>`` (sans ``--question``, la seule question ouverte).
+    """
+    base = f'grimoire task answer {task_id} "<réponse>"'
+    return f"{base} --question {question_id}" if question_id else base
+
+
+#: Où lancer ces commandes : le binaire du projet, pas un ``grimoire`` d'un autre venv ou d'un autre pipx.
+PROJECT_BINARY_HINT = "à lancer avec le binaire du projet, `.venv/bin/grimoire` si `grimoire` n'est pas dans le PATH"
+
+
+def answer_hint(task_id: str, question_id: str = "") -> str:
+    """``answer_command`` entre accents graves, suivi de la consigne sur le binaire à utiliser."""
+    return f"`{answer_command(task_id, question_id)}`, {PROJECT_BINARY_HINT}"
 
 
 def new_question_id() -> str:

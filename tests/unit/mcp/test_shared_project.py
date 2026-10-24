@@ -257,7 +257,7 @@ class TestStdioInchange:
 
         schemas = via_client(scenario)
         assert "grimoire_ctx" not in schemas["grimoire_memory_store"]
-        assert schemas["grimoire_memory_store"] == ["project_path", "text", "user_id"]
+        assert schemas["grimoire_memory_store"] == ["project_path", "source", "text", "user_id"]
         assert all("project_path" in props for props in schemas.values()), schemas
 
 
