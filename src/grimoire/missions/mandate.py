@@ -139,6 +139,7 @@ BREAKER_FORGED_VERDICT = "forged_verdict"
 BREAKER_WRITE_OUTSIDE_WORKTREE = "write_outside_worktree"
 
 _GENESIS = "0" * 64
+_MANDATE_ID = re.compile(r"^MND-[0-9a-f]{12}$")
 _ROLES = ("worker", "reviewer", "orchestrator")
 
 
@@ -215,14 +216,77 @@ def _link(prev: str, body: Mapping[str, Any]) -> str:
 
 
 class AuthorityJournal:
-    """Entrées chaînées par hash, ajout seul, sous verrou. Écrit par du code du kit, jamais par un outil d'agent."""
+    """Entrées chaînées par hash, ajout seul, sous verrou. Écrit par du code du kit, jamais par un outil d'agent.
+
+    La chaîne de hash ne voit pas la troncature de la queue (un préfixe d'une chaîne valide est valide). Deux
+    témoins hors de la chaîne la voient :
+
+    - la **tête** (``<journal>.head`` : ``seq`` et hash de la dernière entrée), mise à jour à chaque ajout ; un
+      journal plus court que sa tête, ou dont l'entrée ``seq`` n'a pas le hash de la tête, est rompu ; un journal
+      non vide sans tête aussi ; une tête sans journal aussi ;
+    - un **marqueur de révocation** (``revoked/<mandat>``), écrit avant l'entrée ``revoke`` : retirer la dernière
+      révocation ne rouvre pas le mandat, même si la tête est recalée à la main.
+
+    Limite : ces témoins vivent dans la même zone protégée ; un écrivain capable de forger la chaîne, la tête et de
+    supprimer les marqueurs réécrit tout. La garde de zone (``control-zone``) est ce qui l'en empêche, et celle-ci
+    ne lit que des commandes, pas du code.
+    """
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or control_dir() / JOURNAL_NAME
 
+    @property
+    def head_path(self) -> Path:
+        return self.path.parent / f"{self.path.name}.head"
+
+    @property
+    def revoked_dir(self) -> Path:
+        return self.path.parent / "revoked"
+
+    def _read_head(self) -> tuple[int, str] | None:
+        """``(seq, hash)`` de la tête ; absente : ``None`` ; illisible : :class:`JournalError`."""
+        try:
+            raw = self.head_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeDecodeError) as exc:
+            raise JournalError(f"tête du journal d'autorité illisible : {type(exc).__name__}") from exc
+        try:
+            data = json.loads(raw)
+            seq, digest = data["seq"], data["hash"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise JournalError("tête du journal d'autorité illisible : contenu invalide") from exc
+        if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0 or not isinstance(digest, str):
+            raise JournalError("tête du journal d'autorité illisible : contenu invalide")
+        return seq, digest
+
+    def _write_head(self, entry: Mapping[str, Any]) -> None:
+        tmp = self.head_path.with_name(self.head_path.name + ".tmp")
+        tmp.write_text(json.dumps({"seq": entry["seq"], "hash": entry["hash"]}), encoding="utf-8")
+        os.replace(tmp, self.head_path)
+
+    def mark_revoked(self, mandate_id: str, reason: str, ts: str) -> None:
+        """Écrit le marqueur de révocation de *mandate_id* (témoin hors chaîne, voir la docstring de la classe)."""
+        if not _MANDATE_ID.match(mandate_id):
+            return
+        self.revoked_dir.mkdir(parents=True, exist_ok=True)
+        (self.revoked_dir / mandate_id).write_text(f"{ts} {reason}\n", encoding="utf-8")
+
+    def is_marked_revoked(self, mandate_id: str) -> bool:
+        """Vrai si le marqueur existe ; un marqueur qu'on ne peut pas vérifier compte comme présent (échec fermé)."""
+        if not _MANDATE_ID.match(mandate_id):
+            return True
+        try:
+            return (self.revoked_dir / mandate_id).exists()
+        except OSError:
+            return True
+
     def read(self) -> list[dict[str, Any]]:
-        """Les entrées, chaîne vérifiée ; absent : ``[]`` ; illisible ou rompu : :class:`JournalError`."""
+        """Les entrées, chaîne et tête vérifiées ; ni journal ni tête : ``[]`` ; illisible, rompu ou tronqué : :class:`JournalError`."""
+        head = self._read_head()
         if not self.path.exists():
+            if head is not None:
+                raise JournalError("journal d'autorité absent alors que sa tête existe : journal effacé")
             return []
         try:
             raw = self.path.read_text(encoding="utf-8")
@@ -242,17 +306,24 @@ class AuthorityJournal:
                 raise JournalError(f"journal d'autorité : chaîne de hash rompue à la ligne {index + 1}")
             prev = str(entry["hash"])
             out.append(entry)
+        if out and head is None:
+            raise JournalError("journal d'autorité non vide sans tête : tête retirée ou journal remplacé")
+        if head is not None and (len(out) <= head[0] or out[head[0]]["hash"] != head[1]):
+            raise JournalError(
+                f"journal d'autorité tronqué : {len(out)} entrée(s) pour une tête à l'entrée {head[0] + 1}"
+            )
         return out
 
     def append(self, entry: Mapping[str, Any]) -> dict[str, Any]:
         with locked(self.path):
-            entries = self.read()  # un journal rompu n'est jamais prolongé
+            entries = self.read()  # un journal rompu ou tronqué n'est jamais prolongé
             prev = str(entries[-1]["hash"]) if entries else _GENESIS
             body = {**entry, "seq": len(entries), "prev": prev}
             full = {**body, "hash": _link(prev, body)}
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(full, ensure_ascii=True) + "\n")
+            self._write_head(full)
         return full
 
 
@@ -579,6 +650,9 @@ class MandateStore:
         return state.mandate
 
     def _write_revocation(self, mandate_id: str, reason: str, detail: str, moment: datetime) -> None:
+        # Le marqueur d'abord : si l'entrée ne s'écrit pas, ou si on la retire ensuite du journal, le mandat reste révoqué.
+        with contextlib.suppress(OSError):
+            self.journal.mark_revoked(mandate_id, reason, moment.isoformat())
         self.journal.append(
             {
                 "type": "revoke",
@@ -627,6 +701,10 @@ class MandateStore:
             (e for e in reversed(entries) if e.get("type") == "revoke" and e.get("mandate_id") == mandate.id), None
         )
         sessions = _sessions_on(entries, mandate.id, moment)
+        if revocation is None and self.journal.is_marked_revoked(mandate.id):
+            return MandateState(
+                mandate, REVOKED, "marqueur de révocation présent sans entrée au journal (journal tronqué ?)", sessions
+            )
         if revocation is not None:
             return MandateState(
                 mandate,

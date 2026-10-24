@@ -783,3 +783,67 @@ def test_the_tick_uses_the_in_process_api_never_the_environment(
         assert require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV) is not None
     with pytest.raises(MandateRefusedError, match="attesté"):  # la portée s'arrête avec le bloc
         require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV)
+
+
+# ── Troncature de la queue du journal : retirer la dernière révocation ne rouvre pas le mandat ───
+
+
+def _cut_last_line(store: MandateStore) -> None:
+    lines = store.journal.path.read_text(encoding="utf-8").splitlines()
+    store.journal.path.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+
+
+def test_removing_the_last_revocation_does_not_reopen_the_mandate(project: Path) -> None:
+    store = MandateStore(project)
+    mandate = _grant(project)
+    assert store.revoke(md.REVOKE_MANUAL, "fin") is not None
+    _cut_last_line(store)  # la chaîne de hash seule ne voit rien : le préfixe reste valide
+    state = store.state()
+    assert not state.active and state.reason == md.JOURNAL_UNREADABLE and "tronqu" in state.detail
+    task = TaskService(project).require(_task(project))
+    with pytest.raises(MandateRefusedError):
+        store.authorize("answer", task, PROV)
+    assert mandate.id  # le mandat n'est pas redevenu actif
+
+
+def test_a_truncation_with_a_forged_head_is_still_caught_by_the_revocation_marker(project: Path) -> None:
+    store = MandateStore(project)
+    mandate = _grant(project)
+    store.revoke(md.REVOKE_MANUAL, "fin")
+    _cut_last_line(store)
+    head = store.journal.head_path
+    last = json.loads(store.journal.path.read_text(encoding="utf-8").splitlines()[-1])
+    head.write_text(json.dumps({"seq": last["seq"], "hash": last["hash"]}), encoding="utf-8")  # tête recalée
+    state = store.state()
+    assert not state.active and state.reason == md.REVOKED, state
+    assert (store.journal.revoked_dir / mandate.id).is_file()
+
+
+def test_a_missing_head_or_a_deleted_journal_with_a_head_carries_no_mandate(project: Path) -> None:
+    store = MandateStore(project)
+    _grant(project)
+    head = store.journal.head_path
+    assert head.is_file()
+    kept = head.read_text(encoding="utf-8")
+    head.unlink()  # journal non vide sans tête : on ne sait plus ce qui a été coupé
+    assert store.state().reason == md.JOURNAL_UNREADABLE
+    head.write_text(kept, encoding="utf-8")
+    assert store.state().active
+    store.journal.path.unlink()  # journal effacé alors que sa tête existe
+    assert store.state().reason == md.JOURNAL_UNREADABLE
+    with pytest.raises(JournalError):
+        store.journal.append({"type": "revoke"})
+
+
+def test_a_head_ahead_of_a_cut_journal_or_with_a_wrong_hash_is_refused(project: Path) -> None:
+    store = MandateStore(project)
+    _grant(project)
+    store.register_session("s1", "worker", "T")
+    head = store.journal.head_path
+    good = json.loads(head.read_text(encoding="utf-8"))
+    head.write_text(json.dumps({**good, "hash": "0" * 64}), encoding="utf-8")
+    assert store.state().reason == md.JOURNAL_UNREADABLE
+    head.write_text("pas du json", encoding="utf-8")
+    assert store.state().reason == md.JOURNAL_UNREADABLE
+    head.write_text(json.dumps(good), encoding="utf-8")
+    assert store.state().active

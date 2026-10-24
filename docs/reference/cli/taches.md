@@ -416,6 +416,9 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
 - **Journal d'autorité** : `~/.grimoire/control/mandates.authority.jsonl`, chaîné par hash. Un journal
   illisible ou rompu ne porte aucun mandat. Chaque geste pris sous mandat y est inscrit avec
   `origin: orchestrator`, l'identifiant du mandat et sa provenance (règle, verdict ou reçu).
+  La troncature de la queue est vue par une tête (`<journal>.head`) et un marqueur par révocation
+  (`revoked/<mandat>`) : un journal plus court que sa tête, ou sans tête, est rompu. Pour repartir d'un journal
+  rompu, l'humain supprime lui-même les fichiers `mandates.*` et le dossier `revoked/` de `~/.grimoire/control/`.
 - **Jamais couverts** : modifier le mandat et modifier la politique d'escalade.
 - **Politique d'escalade** : section `escalation` de `_grimoire/standard/orchestration-policy.yaml`, par
   catégories génériques (`release`, `secrets`, `paid`, `security`, `merge`, `accept`), chacune `human` ou
