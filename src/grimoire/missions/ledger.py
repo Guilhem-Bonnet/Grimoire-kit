@@ -337,6 +337,8 @@ class MissionLedger:
         self._unreadable: tuple[int, ...] = ()
         #: K10 : refus de claim posé par l'appelant (WIP), évalué sous le verrou ; ``""`` = accordé.
         self.claim_guard: Callable[..., str] | None = None
+        #: Le projet dont les réglages d'hôte jugent un frein (#886) ; ``None`` = dossier courant.
+        self.project_root: Path | None = None
         self._loaded = False
         self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 

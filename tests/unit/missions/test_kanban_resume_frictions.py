@@ -291,7 +291,7 @@ def test_another_actor_reclaims_an_expired_claim_of_a_fenced_host(governed: Path
     service = TaskService(governed)
     tid = _ready(service, "Expiré").id
     _stale_claim(service, tid, "claude")
-    monkeypatch.setattr(caps, "claim_host_is_fenced", lambda host, version: True)
+    monkeypatch.setattr(caps, "claim_host_is_fenced", lambda host, version, **_kw: True)
     assert service.claim(tid, "codex").task.claim.actor_id == "codex"  # type: ignore[union-attr]
 
 
@@ -423,3 +423,63 @@ def test_admission_view_counts_only_live_claims(governed: Path) -> None:
     _stale_claim(service, tid, "claude")
     view = derive_view(service.ledger, load_capacity(governed), now=datetime.now(UTC))
     assert view.held == ()
+
+
+# ── #886 : la preuve de frein se juge sur les réglages du PROJET, pas du dossier courant ──
+
+
+def _fenced_stale_claim(service: TaskService, tid: str) -> None:
+    from dataclasses import replace
+
+    past = datetime.now(UTC) - timedelta(hours=8)
+    claim = replace(
+        TaskClaim.new("claude", "local", now=past), session_host="claude-code-cli", session_host_version="2.1.301"
+    )
+    service.ledger.transition_task(tid, TaskState.CLAIMED, actor_id="claude", claim=claim)
+
+
+@pytest.fixture
+def settings_roots(monkeypatch: pytest.MonkeyPatch) -> list[Path | None]:
+    """Enregistre le ``project_root`` avec lequel chaque jugement de frein lit les réglages de l'hôte."""
+    seen: list[Path | None] = []
+    monkeypatch.setattr(
+        "grimoire.hosts.contract_probe.hooks_disabled_reason", lambda root=None, **_kw: seen.append(root) or ""
+    )
+    return seen
+
+
+def test_reclaim_judges_the_brake_on_the_project_settings(
+    governed: Path, settings_roots: list[Path | None], monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    service = TaskService(governed)
+    tid = _ready(service, "Expiré").id
+    _fenced_stale_claim(service, tid)
+    monkeypatch.chdir(tmp_path_factory.mktemp("ailleurs"))
+    service.claim(tid, "codex")
+    assert settings_roots == [governed.resolve()]
+
+
+def test_reap_judges_the_brake_on_the_project_settings(
+    governed: Path, settings_roots: list[Path | None], monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    service = TaskService(governed)
+    tid = _ready(service, "Expiré").id
+    _fenced_stale_claim(service, tid)
+    monkeypatch.chdir(tmp_path_factory.mktemp("ailleurs"))
+    service.reap(apply=True, probe_hosts=False)
+    assert settings_roots and all(r == governed.resolve() for r in settings_roots)
+
+
+def test_hold_lines_judge_the_brake_on_the_project_settings(
+    governed: Path, settings_roots: list[Path | None], monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    from grimoire.cli.cmd_orchestrate import _hold_lines
+    from grimoire.missions.pause import HOLD, read_pause, write_pause
+
+    service = TaskService(governed)
+    tid = _ready(service, "Tenue").id
+    _fenced_stale_claim(service, tid)
+    write_pause(governed, mode=HOLD)
+    monkeypatch.chdir(tmp_path_factory.mktemp("ailleurs"))
+    _hold_lines(governed, service.ledger_root, read_pause(governed))
+    assert settings_roots == [governed]
