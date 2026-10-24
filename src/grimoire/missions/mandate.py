@@ -56,7 +56,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
-from grimoire.core.fsio import locked
+from grimoire.core.fsio import atomic_write, locked
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.missions.schemas import ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR
 
@@ -186,10 +186,11 @@ def ensure_control_key() -> Path:
     path = control_key_path()
     if path.is_file():
         return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(secrets.token_urlsafe(32) + "\n")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with locked(path.with_name(path.name + ".lock")):  # une seule clé, même à deux processus
+        if not path.is_file():
+            atomic_write(path, secrets.token_urlsafe(32) + "\n")
+            path.chmod(0o600)
     return path
 
 
@@ -261,9 +262,7 @@ class AuthorityJournal:
         return seq, digest
 
     def _write_head(self, entry: Mapping[str, Any]) -> None:
-        tmp = self.head_path.with_name(self.head_path.name + ".tmp")
-        tmp.write_text(json.dumps({"seq": entry["seq"], "hash": entry["hash"]}), encoding="utf-8")
-        tmp.replace(self.head_path)
+        atomic_write(self.head_path, json.dumps({"seq": entry["seq"], "hash": entry["hash"]}))
 
     def mark_revoked(self, mandate_id: str, reason: str, ts: str) -> None:
         """Écrit le marqueur de révocation de *mandate_id* (témoin hors chaîne, voir la docstring de la classe)."""
@@ -578,7 +577,10 @@ class MandateStore:
                 "ts": moment.isoformat(),
             }
         )
-        return _mandate_of(entry)
+        mandate = _mandate_of(entry)
+        if mandate is None:  # l'entrée qu'on vient d'écrire ne se relit pas : jamais un octroi muet
+            raise MandateRefusedError(JOURNAL_UNREADABLE, f"octroi {mandate_id} écrit mais illisible au journal")
+        return mandate
 
     def request_grant(
         self, request: MandateRequest, env: Mapping[str, str] | None = None, now: datetime | None = None
