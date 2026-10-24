@@ -14,49 +14,65 @@
 // raison écrite à côté). Clavier : j / k pour passer d'une ligne à l'autre,
 // Entrée pour l'action de la ligne.
 
-import { badge, glyph, spaceHead } from '../shell.js';
+import { glyph, kpiRow, spaceHead } from '../shell.js';
 import { agoText } from '../live.js';
 
 const STYLE_ID = 'at-styles';
 
 const CSS = `
-.at-wrap { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-5); max-width: 1120px; }
+.at-wrap { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-6); max-width: 1120px; }
+.at-formula { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; }
+.at-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
 .at-partial { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); padding: var(--sp-2) var(--sp-4);
   border: 1px dashed var(--line); border-radius: var(--r); color: var(--ink2); }
 .at-partial strong { color: var(--ink); font-weight: 600; }
 .at-partial .btn { margin-left: auto; }
 .at-ro { margin: 0; color: var(--ink2); }
-.at-section { border: 1px solid var(--line); border-radius: var(--r); background: var(--card); overflow: hidden; }
-.at-section-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); background: var(--panel); }
+.at-section { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow);
+  overflow: hidden; padding: var(--sp-1) 0 var(--sp-2); }
+.at-section-head { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
 .at-section-head h3 { margin: 0; font-size: var(--t-s); font-weight: 600; }
-.at-section-head .at-hint { margin-left: auto; color: var(--ink2); }
+.at-n { color: var(--rub); font-weight: 600; }
+.at-section-head .at-hint { margin-left: auto; color: var(--ink3); }
 .at-list { list-style: none; margin: 0; padding: 0; }
-.at-row { display: grid; grid-template-columns: 20px minmax(96px, 168px) minmax(0, 1fr) minmax(64px, auto) auto;
-  align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); cursor: pointer; }
+.at-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(64px, auto) auto;
+  align-items: center; gap: 14px; padding: var(--sp-3) var(--sp-4); margin: 2px var(--sp-2);
+  border-radius: 12px; cursor: pointer; }
 .at-row:hover { background: var(--hover); }
-.at-row[aria-current="true"] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.at-row[aria-current="true"] { background: var(--acc-soft); }
 .at-row:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-.at-project, .at-title, .at-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.at-project { font-weight: 500; }
+.at-rico { width: 32px; height: 32px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  background: var(--hover); color: var(--ink2); }
+.at-rico .glyph, .at-rico .glyph.warn, .at-rico .glyph.bad, .at-rico .glyph.ok { color: inherit; }
+.at-rico[data-tone="warn"] { background: var(--warn-soft); color: var(--warn); }
+.at-rico[data-tone="bad"] { background: var(--bad-soft); color: var(--bad); }
+.at-rico[data-tone="ok"] { background: var(--ok-soft); color: var(--ok); }
+.at-title, .at-reason, .at-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .at-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.at-title { font-weight: 500; }
-.at-reason, .at-since { color: var(--ink2); }
-.at-since { text-align: right; white-space: nowrap; }
+.at-title { font-weight: 600; }
+.at-sub { display: flex; gap: var(--sp-1); min-width: 0; color: var(--ink2); }
+.at-sub .at-project { flex: none; max-width: 40%; }
+.at-sub .at-sep { flex: none; }
+.at-since { color: var(--ink3); text-align: right; white-space: nowrap; font-size: var(--t-min); }
 .at-act { justify-self: end; text-decoration: none; white-space: nowrap; }
-.at-detail { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
-.at-detail h3 { margin: 0; font-size: var(--t-l); font-weight: 600; overflow-wrap: anywhere; }
+.at-detail { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+.at-eyebrow { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
+.at-detail h3 { margin: 0; font-size: 21px; line-height: 1.2; font-weight: 600; overflow-wrap: anywhere; }
 .at-detail p { margin: 0; overflow-wrap: anywhere; }
-.at-kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-2); margin: 0; }
-.at-kv dt { color: var(--ink2); }
-.at-kv dd { margin: 0; overflow-wrap: anywhere; }
+.at-lead { color: var(--ink2); font-size: 14px; line-height: 21px; }
+.at-kv { display: grid; grid-template-columns: 100px minmax(0, 1fr); margin: 0; }
+.at-kv dt, .at-kv dd { margin: 0; padding: var(--sp-2) 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
+.at-kv dt { color: var(--ink3); }
+.at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
 @media (max-width: 720px) {
   .at-wrap { padding: var(--sp-4); }
-  .at-row { grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
-  .at-project { grid-column: 2 / span 2; }
-  .at-text { grid-column: 2 / span 2; }
+  .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
+  .at-sub { flex-wrap: wrap; column-gap: var(--sp-1); }
+  .at-sub .at-project { max-width: 100%; }
   .at-since { grid-column: 2; text-align: left; }
-  .at-act { grid-column: 3; }
+  .at-act { grid-column: 3; grid-row: 1 / span 2; }
 }
 `;
 
@@ -86,6 +102,23 @@ const HINTS = {
   maintain: 'rien d’urgent',
   resolved: 'revenu seul, gardé une heure',
 };
+
+/** Les tuiles de comptes : une par section de l'API, son compte réel et son
+ *  icône ; « résolu » et « autre » n'en ont pas (rien n'attend l'humain). */
+const TILES = {
+  decide: { icon: 'gate', tone: 'warn' },
+  unblock: { icon: 'stop', tone: 'bad' },
+  repair: { icon: 'alert', tone: 'bad' },
+  maintain: { icon: 'seal', tone: '' },
+};
+
+/** L'équivalent en ligne de commande, quand le serveur en connaît un vrai. */
+function cliOf(item) {
+  const ref = item.ref || {};
+  if (ref.task_id) return `grimoire task show ${ref.task_id}`;
+  if (item.kind === 'checkpoint') return 'grimoire upgrade-flow review';
+  return '';
+}
 
 /** Où, sur la fiche du projet, se pose la sélection d'un élément sans tâche.
  *  Une sonde en échec suit la source qui n'a pas répondu (fin de son `id`). */
@@ -200,17 +233,18 @@ function kv(rows) {
   return list;
 }
 
-/** Le détail de l'élément choisi, dans l'inspecteur : ce qui attend, depuis
- *  quand, ce que le serveur sait de sa référence, et la même action. */
+/** Le détail de l'élément choisi, dans le panneau de droite : de quoi il
+ *  s'agit, depuis quand, ce que le serveur sait de sa référence, la même
+ *  action que la ligne (rien de nouveau ne s'écrit d'ici), et l'équivalent CLI. */
 function renderDetail(ctx, item) {
   const kind = kindOf(item);
   const ref = item.ref || {};
   const box = node('div', 'at-detail');
   box.dataset.item = item.id;
   box.append(
-    node('span', 'lbl', `${projectName(item)} · ${kind.word}`),
+    node('p', 'at-eyebrow', `${projectName(item)} · ${kind.word}`),
     node('h3', null, item.title || kind.word),
-    node('p', 'soft', item.reason || ''),
+    node('p', 'at-lead', item.reason || ''),
   );
   const at = Date.parse(item.since || '');
   box.append(kv([
@@ -229,14 +263,39 @@ function renderDetail(ctx, item) {
     for (const refusal of ref.refusals) {
       list.append(node('li', null, [refusal.evidence, refusal.reason, refusal.remedy && `remède : ${refusal.remedy}`].filter(Boolean).join(' — ')));
     }
-    box.append(node('span', 'lbl', 'Ce que le gate refuse'), list);
+    box.append(node('span', 'at-eyebrow', 'Ce que le gate refuse'), list);
   }
-  const actions = node('div', 'row');
+  const actions = node('div', 'at-actions');
   actions.append(actionNode(ctx, item, { primary: true }));
   box.append(actions);
-  if (ctx.host.readOnly) box.append(node('p', 'soft', readOnlyReason(ctx)));
+  if (ctx.host.readOnly) box.append(node('p', 'at-lead', readOnlyReason(ctx)));
+  const command = cliOf(item);
+  if (command) {
+    const formula = node('span', 'at-formula');
+    formula.append(node('b', null, '›'), command);
+    const equiv = node('div', 'at-equiv');
+    equiv.append(node('span', 'at-eyebrow', 'Équivalent'), formula);
+    box.append(equiv);
+  }
   ctx.inspector.replaceChildren(box);
-  ctx.dock.echo(ref.task_id ? `grimoire task show ${ref.task_id}` : '');
+  ctx.dock.echo(command);
+}
+
+/** Une tuile par section qui attend quelque chose : son compte, et l'ancienneté
+ *  de son plus vieil élément quand le serveur en donne une. */
+function tilesOf(sections) {
+  const tiles = [];
+  for (const section of sections) {
+    const tile = TILES[section.id];
+    if (!tile || !section.count) continue;
+    const times = (section.items || []).map((i) => Date.parse(i.since || '')).filter(Number.isFinite);
+    const oldest = times.length ? agoText(Date.now() - Math.min(...times)).replace(/^il y a /, '') : '';
+    tiles.push({
+      value: section.count, label: section.label, icon: tile.icon, tone: tile.tone,
+      sub: oldest ? `la plus ancienne : ${oldest}` : '',
+    });
+  }
+  return tiles;
 }
 
 function partialError(unreadable, retry) {
@@ -276,6 +335,9 @@ export async function mount(root, ctx) {
       const on = r === row;
       r.el.setAttribute('aria-current', String(on));
       r.el.tabIndex = on ? 0 : -1;
+      // L'action primaire est celle de la ligne choisie (maquette Douce).
+      const act = r.el.querySelector('a.at-act');
+      if (act) act.classList.toggle('pri', on);
     }
     renderDetail(ctx, row.item);
     if (focus) {
@@ -288,9 +350,12 @@ export async function mount(root, ctx) {
   const render = (data) => {
     const hadFocus = wrap.contains(document.activeElement) && document.activeElement.classList.contains('at-row');
     const summary = data.summary || {};
+    const count = summary.projects ?? 0;
+    const formula = node('span', 'at-formula');
+    formula.append(node('b', null, '›'), 'grimoire status');
     const head = spaceHead('À traiter', ctx.scope.all
-      ? `Ce qui attend une décision humaine, sur les ${summary.projects ?? 0} projet(s) du registre.`
-      : `Ce qui attend une décision humaine dans ${ctx.scope.name}.`);
+      ? `Ce qui attend une décision de toi, sur ${count} projet${count > 1 ? 's' : ''}.`
+      : `Ce qui attend une décision de toi dans ${ctx.scope.name}.`, formula);
     wrap.replaceChildren(head);
     rows = [];
 
@@ -310,6 +375,9 @@ export async function mount(root, ctx) {
     }
     if (items && ctx.host.readOnly) wrap.append(Object.assign(node('p', 'at-ro', readOnlyReason(ctx)), { id: 'at-ro-reason' }));
 
+    const tiles = tilesOf(data.sections || []);
+    if (tiles.length) wrap.append(kpiRow(tiles));
+
     for (const section of data.sections || []) {
       if (!section.count) continue;
       const block = node('section', 'at-section');
@@ -317,7 +385,7 @@ export async function mount(root, ctx) {
       const heading = node('div', 'at-section-head');
       const title = node('h3', null, section.label);
       title.id = `at-h-${section.id}`;
-      heading.append(title, badge(String(section.count)));
+      heading.append(title, node('span', 'at-n', String(section.count)));
       if (HINTS[section.id]) heading.append(node('span', 'at-hint', HINTS[section.id]));
       const list = node('ul', 'at-list');
       list.setAttribute('aria-labelledby', title.id);
@@ -327,16 +395,21 @@ export async function mount(root, ctx) {
         li.dataset.item = item.id;
         li.dataset.kind = item.kind;
         li.tabIndex = -1;
-        li.append(
-          glyph(kind.icon, kind.word, kind.tone, { alone: true }),
-          node('span', 'at-project', projectName(item)),
-        );
+        const pastille = node('span', 'at-rico');
+        if (kind.tone) pastille.dataset.tone = kind.tone;
+        pastille.append(glyph(kind.icon, kind.word, kind.tone, { alone: true }));
         const text = node('span', 'at-text');
-        text.append(node('span', 'at-title', item.title || kind.word), node('span', 'at-reason', item.reason || ''));
-        li.querySelector('.at-project').title = projectName(item);
-        text.firstChild.title = item.title || '';
-        text.lastChild.title = item.reason || '';
-        li.append(text, sinceNode(item), actionNode(ctx, item));
+        const sub = node('span', 'at-sub');
+        const project = node('span', 'at-project', projectName(item));
+        project.title = projectName(item);
+        const reason = node('span', 'at-reason', item.reason || '');
+        reason.title = item.reason || '';
+        sub.append(project);
+        if (item.reason) sub.append(node('span', 'at-sep', '·'), reason);
+        const title = node('span', 'at-title', item.title || kind.word);
+        title.title = item.title || '';
+        text.append(title, sub);
+        li.append(pastille, text, sinceNode(item), actionNode(ctx, item));
         li.addEventListener('click', () => select(item.id, { focus: true }));
         list.append(li);
         rows.push({ item, el: li });

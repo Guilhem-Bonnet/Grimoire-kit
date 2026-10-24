@@ -388,6 +388,72 @@ def test_un_lien_profond_rouvre_la_ligne_choisie(page: Page, served_inbox: dict[
     assert page.locator(".at-row[aria-current='true']").get_attribute("data-item") == item
 
 
+# ── Conformité à la maquette Douce (P63) ────────────────────────────────────
+
+
+def test_p63_tuiles_de_comptes_reelles_et_formule_en_tete(page: Page, served_inbox: dict[str, str]) -> None:
+    _open(page, served_inbox, f"?project={served_inbox['home']}#a-traiter")
+    assert page.locator(".space-title").inner_text() == "À traiter"
+    assert page.locator(".space-title").evaluate("e => getComputedStyle(e).fontSize") == "32px"
+    assert page.locator(".space-sub").inner_text().startswith("Ce qui attend une décision de toi")
+    assert page.locator(".space-head .at-formula").inner_text().replace("\n", "").strip() == "›grimoire status"
+    tiles = page.locator(".kpi .kpi-item")
+    # Atelier Nord : 2 à décider (question, proposition), 1 à débloquer — les comptes de l'API.
+    assert [tiles.nth(i).locator(".kpi-lbl").inner_text() for i in range(tiles.count())] == ["À décider", "À débloquer"]
+    assert [tiles.nth(i).locator(".kpi-val").inner_text() for i in range(tiles.count())] == ["2", "1"]
+    assert tiles.nth(0).locator(".kpi-sub").inner_text().startswith("la plus ancienne : ")
+
+
+def test_p63_pastille_teintee_et_action_primaire_sur_la_ligne_choisie(page: Page, served_inbox: dict[str, str]) -> None:
+    _open(page, served_inbox, f"?project={served_inbox['home']}#a-traiter")
+    blocked = _row(page, BLOCKED_TITLE)
+    assert blocked.locator(".at-rico").get_attribute("data-tone") == "bad"
+    assert blocked.locator(".at-rico").evaluate("e => getComputedStyle(e).width") == "32px"
+    assert _row(page, QUESTION_TITLE).locator(".at-rico").get_attribute("data-tone") == "warn"
+    assert _row(page, QUESTION_TITLE).locator(".at-act").get_attribute("class").split().count("pri") == 1
+    assert "pri" not in blocked.locator(".at-act").get_attribute("class").split()
+    blocked.click()
+    assert "pri" in blocked.locator(".at-act").get_attribute("class").split()
+    assert "pri" not in _row(page, QUESTION_TITLE).locator(".at-act").get_attribute("class").split()
+    # Aucun emoji : l'icône est un symbole du sprite.
+    assert blocked.locator(".at-rico use").get_attribute("href").startswith("icons.svg#")
+
+
+def test_p63_detail_contexte_paires_action_existante_et_equivalent_cli(page: Page, served_inbox: dict[str, str]) -> None:
+    _open(page, served_inbox, f"?project={served_inbox['home']}#a-traiter")
+    _row(page, BLOCKED_TITLE).click()
+    detail = page.locator("#inspector-body .at-detail")
+    assert detail.locator(".at-eyebrow").first.inner_text() == f"{HOME_NAME} · tâche bloquée"
+    assert detail.locator("h3").inner_text() == BLOCKED_TITLE
+    assert detail.locator(".at-lead").inner_text() == BLOCKED_REASON
+    keys = detail.locator(".at-kv dt").all_inner_texts()
+    assert "Tâche" in keys and "En attente" in keys
+    # Une seule action, celle de la ligne : rien de nouveau ne s'écrit depuis l'interface.
+    assert detail.locator(".at-actions a, .at-actions button").all_inner_texts() == ["Débloquer"]
+    assert detail.locator(".at-equiv .at-formula").inner_text().replace("\n", "").strip() == (
+        f"›grimoire task show {served_inbox['blocked']}"
+    )
+
+
+def test_p63_le_badge_de_l_onglet_est_la_somme_des_tuiles(page: Page, served_inbox: dict[str, str]) -> None:
+    for suffix in (f"?project={served_inbox['home']}#a-traiter", "?scope=all#a-traiter"):
+        _open(page, served_inbox, suffix)
+        assert page.locator("#decisions-pill").count() == 0
+        page.wait_for_function("() => !document.getElementById('decisions-count').hidden")
+        badge = int(page.locator("#tab-space-a-traiter #decisions-count").inner_text())
+        total = sum(int(v) for v in page.locator(".kpi .kpi-val").all_inner_texts())
+        count = page.evaluate("async () => (await (await fetch('/api/workspace/attention' + (new URLSearchParams(location.search).get('scope') === 'all' ? '?scope=portfolio' : ''))).json()).count")
+        assert badge == total == count > 0, (suffix, badge, total, count)
+
+
+def test_p63_le_badge_suit_l_espace_travail_aussi(page: Page, served_inbox: dict[str, str]) -> None:
+    _open(page, served_inbox, f"?project={served_inbox['home']}#a-traiter")
+    page.locator("#tab-space-travail").click()
+    page.wait_for_function("() => window.GrimoireWorkspace.space === 'travail'")
+    page.wait_for_function("() => !document.getElementById('decisions-count').hidden")
+    assert page.locator("#decisions-count").inner_text() == "3"
+
+
 # ── Captures pour la relecture ──────────────────────────────────────────────
 
 
@@ -418,3 +484,30 @@ def test_captures_de_relecture(browser: Browser, served_inbox: dict[str, str]) -
         finally:
             context.close()
     assert len(list(out.glob("p32-a-traiter-*.png"))) == len(shots)
+
+
+def test_p63_captures_de_relecture(browser: Browser, served_inbox: dict[str, str]) -> None:
+    """Captures de la maquette Douce (clair 1440x900, clair 390 px, tous les projets et un projet)."""
+    target = os.environ.get("GRIMOIRE_E2E_CAPTURES")
+    if not target:
+        return
+    out = Path(target)
+    out.mkdir(parents=True, exist_ok=True)
+    shots = (
+        ("p63-a-traiter-tous-clair", "?scope=all#a-traiter", (1440, 900)),
+        ("p63-a-traiter-projet-clair", f"?project={served_inbox['home']}#a-traiter", (1440, 900)),
+        ("p63-a-traiter-mobile", "?scope=all#a-traiter", (390, 844)),
+    )
+    for name, suffix, (width, height) in shots:
+        context = browser.new_context(
+            viewport={"width": width, "height": height}, color_scheme="light", reduced_motion="reduce"
+        )
+        shot = context.new_page()
+        try:
+            _open(shot, served_inbox, suffix)
+            shot.evaluate("() => document.querySelector(`#st-theme [data-theme-pref='light']`).click()")
+            shot.wait_for_function("() => !document.getElementById('decisions-count').hidden")
+            shot.screenshot(path=str(out / f"{name}.png"), full_page=False)
+        finally:
+            context.close()
+    assert len(list(out.glob("p63-a-traiter-*.png"))) == len(shots)
