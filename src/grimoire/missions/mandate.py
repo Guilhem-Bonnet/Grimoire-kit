@@ -263,7 +263,7 @@ class AuthorityJournal:
     def _write_head(self, entry: Mapping[str, Any]) -> None:
         tmp = self.head_path.with_name(self.head_path.name + ".tmp")
         tmp.write_text(json.dumps({"seq": entry["seq"], "hash": entry["hash"]}), encoding="utf-8")
-        os.replace(tmp, self.head_path)
+        tmp.replace(self.head_path)
 
     def mark_revoked(self, mandate_id: str, reason: str, ts: str) -> None:
         """Écrit le marqueur de révocation de *mandate_id* (témoin hors chaîne, voir la docstring de la classe)."""
