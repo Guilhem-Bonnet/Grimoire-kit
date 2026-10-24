@@ -81,6 +81,11 @@ grimoire up . --interactive
 grimoire up . --no-standard
 ```
 
+Le wizard interactif pose trois questions (pile technique, qui travaille sur le
+projet, domaine), pré-remplies par la détection, et en déduit l'archétype et le
+profil du standard — voir [le wizard en trois
+questions](../guides/expertises.md#le-wizard-en-trois-questions-larchetype-est-deduit).
+
 Archétypes disponibles : `minimal`, `web-app`, `infra-ops`, `platform-engineering`,
 `agentic-standard`, `creative-studio`, `fix-loop`.
 
