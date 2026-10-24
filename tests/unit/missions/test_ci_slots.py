@@ -215,7 +215,8 @@ _BUSY = {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": ""}
         (_completed(0, json.dumps([_pr("task/x", [{**_RUN, "conclusion": "FAILURE"}])])), "done"),
         (_completed(0, json.dumps([_pr("task/x", [_RUN, _BUSY])])), "pending"),
         (_completed(0, json.dumps([_pr("task/x", [{"state": "PENDING"}])])), "pending"),
-        (_completed(0, json.dumps([_pr("task/x", [])])), "no_pr"),
+        (_completed(0, json.dumps([_pr("task/x", [])])), "pending"),  # PR ouverte, checks pas encore posés
+        (_completed(0, json.dumps([_pr("task/x", None)])), "pending"),
         (_completed(0, json.dumps([_pr("task/autre", [_RUN])])), "no_pr"),
         (_completed(0, "[]"), "no_pr"),
         (_completed(4, "", "authentication required"), "unknown"),
@@ -271,6 +272,22 @@ def test_the_migration_frees_once_the_slots_without_pr_or_running_checks(
 
     assert migrate_orphan_slots(service, probe=FakeGh()) == [], "unique : le marqueur interdit de rejouer"
     assert _occupants(service, projet) == {building.id, live.id}
+
+
+def test_the_migration_keeps_the_slot_of_a_pr_whose_checks_are_not_posted_yet(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    """Une PR qui existe sans check encore rapporté n'est pas « sans PR » : elle va en avoir (#886)."""
+    first = _task(service, mission, "A")
+    _park(service, first.id, "needs_verification")
+
+    def gh(branches: tuple[str, ...], _repo: str, _cwd: Path) -> dict[str, CheckReading]:
+        return ci_slots._readings(json.dumps([_pr(f"task/{first.id}", [])]), branches)
+
+    assert migrate_orphan_slots(service, probe=gh) == []
+    assert _occupants(service, projet) == {first.id}
+    assert [o.action for o in reconcile_ci(service, probe=gh)] == ["pushed"], "en cours, pas terminé"
+    assert CI_FINISHED_EVENT not in _types(service, first.id)
 
 
 def test_the_migration_waits_when_a_probe_is_mute(projet: Path, service: TaskService, mission: str) -> None:

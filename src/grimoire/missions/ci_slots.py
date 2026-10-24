@@ -78,7 +78,7 @@ _REMOTE = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?(?P<host>[^:/]+)[:/](?P<path>
 
 @dataclass(frozen=True, slots=True)
 class CheckReading:
-    """Ce que la remote dit des checks d'une branche : ``no_pr`` (ou aucun check), ``pending``, ``done`` ou ``unknown``.
+    """Ce que la remote dit des checks d'une branche : ``no_pr`` (aucune PR), ``pending`` (checks en cours ou pas encore posés), ``done`` ou ``unknown``.
 
     ``head_sha`` est le commit de tête de la PR au moment de la lecture : sans lui, ``done`` ne libère rien.
     """
@@ -224,7 +224,9 @@ def _reading(pr: dict[str, Any]) -> CheckReading:
     if not isinstance(rollup, list) or not all(isinstance(c, dict) for c in rollup):
         return CheckReading(UNKNOWN, "checks de la PR illisibles", sha)
     if not rollup:
-        return CheckReading(NO_PR, "aucun check rapporté", sha)
+        # La PR existe : ses checks ne sont pas encore posés (gh les rend vides juste après un push), ils
+        # vont venir. « Aucune PR » n'est que l'absence de PR ; sinon la migration rendrait le créneau d'une PR vivante.
+        return CheckReading(PENDING, "PR sans check encore rapporté", sha)
     running = 0
     for check in rollup:
         if "status" in check:  # CheckRun : terminé seulement à COMPLETED
