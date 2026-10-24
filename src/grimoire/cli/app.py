@@ -633,13 +633,8 @@ def doctor(
                 tag = "[yellow]WARN[/yellow]" if level == "warn" else "[dim]○[/dim]"
                 console.print(f"  {tag}  {detail}")
 
-    # 4sexies. Design guard (defect 5 of the 2026-09-12 session-budget
-    # incident, issue #463) — extracted to core/policy_budget_guard_check.py
-    # to keep this ratchet-frozen file from growing (see that module's
-    # docstring for the full rationale).
-    with _timed_phase("policy_budget_guard"):
+    with _timed_phase("policy_budget_guard"):  # 4sexies. Design guard (#463), see that module's docstring.
         from grimoire.core.policy_budget_guard_check import apply_policy_budget_guard_check
-
         apply_policy_budget_guard_check(target, results, fmt=fmt, console=console)
 
     with _timed_phase("task_unification"):  # 4septies. Board/ledger divergence (ADR-007, #559).
@@ -649,6 +644,10 @@ def doctor(
     with _timed_phase("profile_floor"):  # 4octies. Plancher de profil committé (W2-07).
         from grimoire.core.profile_floor_doctor import apply_profile_floor_check
         apply_profile_floor_check(target, results, fmt=fmt, console=console)
+
+    with _timed_phase("skill_spec"):  # 4nonies. Conformité des skills à la spec Agent Skills (#874).
+        from grimoire.cli.doctor_skills import apply_skill_spec_check
+        apply_skill_spec_check(target, results, fmt=fmt, console=console)
 
     # 5. Config semantic validation
     if cfg:
