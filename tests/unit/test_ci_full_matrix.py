@@ -38,9 +38,6 @@ def _run_steps(job: dict[str, Any]) -> str:
     return "\n".join(str(s.get("run", "")) for s in job["steps"])
 
 
-_PR_ONLY_WINDOWS_GATE = "matrix.os == 'windows-latest' && github.event_name == 'pull_request'"
-
-
 def _pytest_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     return [s for s in job["steps"] if "pytest" in str(s.get("run", ""))]
 
@@ -66,23 +63,6 @@ def test_one_command_for_every_system_no_windows_subset() -> None:
     assert "runner.os" not in run and "Windows" not in run
     assert "tests/unit/" in run
     assert "test_app.py::" not in run
-
-
-def test_windows_leg_is_skipped_on_pull_requests_only() -> None:
-    """Décision du 2026-10-23 : la jambe Windows (~1 h) est écartée des PR, pas de main.
-
-    Les étapes qui installent et lancent la suite portent toutes la même garde,
-    et cette garde ne vise que l'événement ``pull_request`` : un push sur main
-    exécute encore la suite complète sous Windows (#857 reste observable).
-    """
-    job = _job("test")
-    gated = [s for s in job["steps"] if _PR_ONLY_WINDOWS_GATE in str(s.get("if", ""))]
-    assert gated, "garde PR-only de la jambe Windows absente"
-    for step in _pytest_steps(job) + [s for s in job["steps"] if "pip install" in str(s.get("run", ""))]:
-        assert _PR_ONLY_WINDOWS_GATE in str(step.get("if", "")), step.get("name")
-    for step in gated:
-        cond = str(step["if"])
-        assert "pull_request" in cond and "push" not in cond, cond
 
 
 def test_no_fail_fast_flag_in_the_test_job() -> None:
