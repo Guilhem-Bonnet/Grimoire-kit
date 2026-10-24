@@ -57,8 +57,8 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
 | Contrôles × états (coque) | 80 | 80 | 100% |
-| Routes API | 26 | 24 | 92% |
-| **TOTAL** | **249** | **218** | **88%** |
+| Routes API | 26 | 26 | 100% |
+| **TOTAL** | **249** | **220** | **88%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -395,10 +395,10 @@ rapport du lot.
 | GET catch-all /api/* | cmd_cockpit.py:302 | 404 | — | `tests/unit/test_workspace_routes.py::test_une_route_inconnue_sous_le_prefixe_reste_un_404` | oui |
 | GET /api/status, /api/setup, /api/archetypes, /api/needs, /api/setup/run, /api/extensions, /api/blueprints, /api/events/log, /api/stigmergy, /api/features, /api/cost-model, /api/otel, /api/primitives, /api/backends, /api/memory/status, /api/health | forge_routes.py (inchangé depuis 3.49.0, vérifié par diff) | 200 quasi toujours (repli interne documenté par module) | vides/partiels documentés par route (voir `forge_server.py`) | `tests/unit/test_workspace_api.py` (couverture large, non ligne-à-ligne ici) | oui |
 | GET /api/blueprints/<id>[/diff] | cmd_cockpit.py:311 | 200/404 | — | `test_concevoir_s_ouvre_sur_le_blueprint_reel_du_projet` (indirect) | oui |
-| GET collapse générique (OSError/PermissionError/FileNotFoundError → 500) | cmd_cockpit.py:299 | 500 au lieu de 404/403/400 documentés | toute lecture `/api/workspace/*` en erreur | — | non |
+| GET lectures `/api/workspace/*` en erreur (404/403/400, 500 réservé aux pannes) | cmd_cockpit.py `do_GET` | 404 `FileNotFoundError`, 403 `PermissionError`, 400 `ValueError`, 500 `OSError`/`RuntimeError`/`JSONDecodeError` (corrigé : tout tombait dans le 500 générique) | toute lecture `/api/workspace/*` en erreur | `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_une_tache_inconnue_est_un_404_pas_un_500`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_un_identifiant_de_tache_malforme_est_un_400`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_un_chemin_refuse_par_la_lecture_de_fichier_est_un_403` | oui |
 | GET /api/workspace/glossary | workspace_routes.py | 200 | vide / erreur dans le 200 | `test_le_glossaire_est_charge_depuis_l_api` | oui |
 | GET /api/workspace/tasks | workspace_routes.py | 200 (collapse 500 si erreur) | `ledger:false`, filtré par mission/statut | `test_un_projet_sans_ledger_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
-| GET /api/workspace/tasks/<id> | workspace_routes.py | 200/500 (id malformé, tâche inconnue) | `next_moves_require` | `test_une_tache_inconnue_est_un_404_pas_un_500` (nom du test contredit le code actuel — à vérifier en priorité, cf. Lot B) | non |
+| GET /api/workspace/tasks/<id> | workspace_routes.py | 200/404/400 (tâche inconnue → 404, id malformé → 400) | `next_moves_require` | `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_une_tache_connue_est_rendue_avec_son_etat_de_board`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_une_tache_inconnue_est_un_404_pas_un_500`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_un_identifiant_de_tache_malforme_est_un_400` | oui |
 | GET /api/workspace/flows/runs | workspace_routes.py (nouvelle route, issue #506) | 200 | filtrée par `blueprint` | `test_observer_montre_le_run_de_flow_meme_traceledger_vide` | oui |
 | GET /api/workspace/evidence | workspace_routes.py (nouvelle route, issue #534) | 200 | `enrolled:false` sans standard, sinon tâches + gates + pack par tâche du board | `test_le_standard_enrole_liste_ses_taches_avec_gates_et_pack`, `test_un_projet_sans_standard_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
 | GET /api/workspace/agents | workspace_routes.py | 200/500 (`collect_agents` en erreur → 500 réel) | `freshness` par agent | `test_lire_les_agents_a_travers_le_cockpit` | oui |
