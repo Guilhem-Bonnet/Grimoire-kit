@@ -11,6 +11,7 @@ et ``POST .../file/write`` (étage non éditable, chemin hors racine).
 
 from __future__ import annotations
 
+import json
 import threading
 from functools import partial
 from pathlib import Path
@@ -175,3 +176,35 @@ def test_ecrire_dans_l_etage_overrides_reussit(home_server: Any) -> None:
 
     assert status == 200, body
     assert (home / "_grimoire" / "overrides" / "note.md").read_text(encoding="utf-8") == "mien"
+
+
+# ── Les vraies pannes restent des 500 ───────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        json.JSONDecodeError("fichier d'état illisible", "{", 1),
+        RuntimeError("backend en panne"),
+        OSError("disque plein"),
+    ],
+    ids=["json-illisible", "runtime", "os"],
+)
+def test_une_vraie_panne_de_lecture_reste_un_500(
+    home_server: Any, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """La traduction ne doit pas tout ranger en 4xx : un fichier d'état illisible
+    (``JSONDecodeError`` est un ``ValueError``) ou une panne du système ne sont
+    pas des requêtes invalides."""
+    port, _home, _task_id = home_server
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise error
+
+    monkeypatch.setattr("grimoire.tools.forge_routes.api_get", _boom)
+
+    status, body = _get(port, "/api/status?project=home")
+
+    assert status == 500
+    assert body["ok"] is False
+    assert str(error) in body["error"]
