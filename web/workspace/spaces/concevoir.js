@@ -305,8 +305,20 @@ export async function mount(root, ctx) {
   function setZoom(id) {
     if (aborted()) return;
     state.zoom = id;
-    ctx.docbar.setZoom(zoomLevels, id, setZoom);
+    ctx.docbar.setZoom(zoomLevels, id, pickZoom);
     render();
+  }
+
+  // Clic sur un segment du zoom. Un blueprint SÉLECTIONNÉ (simple clic sur sa
+  // carte) n'est pas pour autant CHARGÉ : seul `zoomToWorkflow` appelle
+  // `loadBlueprint`. Sans ce détour, « Workflow » restait sur « Chargement du
+  // blueprint… » indéfiniment — le chargement ne partait jamais.
+  function pickZoom(id) {
+    if (id === 'workflow' && graphAvailable && state.selectedId && !state.blueprint) {
+      zoomToWorkflow(state.selectedId);
+      return;
+    }
+    setZoom(id);
   }
 
   function setView(id) {
@@ -890,7 +902,7 @@ export async function mount(root, ctx) {
 
   function render() {
     if (aborted()) return;
-    ctx.docbar.setZoom(zoomLevels, state.zoom, setZoom);
+    ctx.docbar.setZoom(zoomLevels, state.zoom, pickZoom);
     ctx.docbar.setBreadcrumb([
       ctx.host.project || 'projet', 'Concevoir',
       ...(state.zoom !== 'projet' && state.zoom !== 'flotte' && state.selectedId ? [state.selectedId] : []),
@@ -902,7 +914,7 @@ export async function mount(root, ctx) {
     renderNoeud();
   }
 
-  ctx.docbar.setZoom(zoomLevels, state.zoom, setZoom);
+  ctx.docbar.setZoom(zoomLevels, state.zoom, pickZoom);
 
   // Le cockpit peut s'ouvrir sans `?project=` (pure vue de Flotte) : lire les
   // blueprints échoue alors, et c'est attendu — le niveau Flotte n'en a pas
