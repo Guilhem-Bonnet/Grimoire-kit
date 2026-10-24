@@ -276,3 +276,101 @@ def test_reading_the_control_zone_proof_stays_allowed() -> None:
 
     assert forgery_vector(classify_tool("Bash", {"command": f"cat {_PROOF}"})) is None
     assert forgery_vector(classify_tool("Read", {"file_path": _PROOF})) is None
+
+
+# ── Évasions de la zone protégée : chemins déguisés, répertoire courant, liens, globs ───────────
+
+
+@pytest.fixture
+def real_home(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
+    """Un HOME réel (le sien, pas ``/home/u``) : les formes qui se résolvent sur le disque s'éprouvent dessus."""
+    home = tmp_path / "home"
+    (home / ".grimoire" / "control").mkdir(parents=True)
+    (home / ".grimoire" / "other").mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.chdir(work)
+    return home
+
+
+_ZONE_COMMANDS = [
+    "echo x > ~/.grimoire/x/../control/y",
+    "echo x > ${HOME}/.grimoire/./control/y",
+    "echo x > $HOME/.grimoire//control/y",
+    "echo x > ~/.grimoire/other/../control/y",
+    "cd ~/.grimoire && echo x > control/y",
+    "cd ~/.grimoire; echo x > control/y",
+    "cd ~/.grimoire && cd control && echo x > y",
+    "cd && cd .grimoire && echo x > control/y",
+    "cd ~ && echo x > .grimoire/control/y",
+    "echo x > ~/.grimoire/'control'/y",
+    'echo x > ~/.grimoire/con"trol"/y',
+    "echo x > ~/.grimoire/contr*/y",
+    "echo x > ~/.grimoire/*/y",
+    "tar -C ~/.grimoire -xf /tmp/a control/y",
+    "printf '{}' | tee ~/.grimoire/control/y",
+    "install -m 600 /tmp/f ~/.grimoire/control/y",
+    "rsync -a /tmp/f ~/.grimoire/control/y",
+    "dd if=/tmp/f of=$HOME/.grimoire/control/y",
+    "dd if=/tmp/f of=${HOME}/.grimoire/control/y",
+    "ln -sf /tmp/f ~/.grimoire/control/y",
+    "truncate -s 0 ~/.grimoire/control/y",
+    "chmod 777 ~/.grimoire/control/y",
+    "ln -s ~/.grimoire /tmp/elsewhere",
+    "ln -s ~ /tmp/elsewhere",
+    "mv ~/.grimoire /tmp/elsewhere",
+    "mv /tmp/elsewhere ~/.grimoire",
+    "rm -rf ~/.grimoire",
+    "python3 -c \"import pathlib; pathlib.Path.home().joinpath('.grimoire', 'control', 'y').write_text('1')\"",
+    "python3 -c \"from pathlib import Path; (Path.home() / '.grimoire' / 'control' / 'y').write_text('1')\"",
+]
+
+
+@pytest.mark.parametrize("command", _ZONE_COMMANDS)
+def test_disguised_control_zone_writes_are_a_forgery_vector(real_home, command: str) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    vector = forgery_vector(classify_tool("Bash", {"command": command}))
+    assert vector is not None and vector.code == "control-zone", command
+
+
+def test_a_symlink_made_elsewhere_does_not_hide_the_control_zone(real_home, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    (tmp_path / "zg").symlink_to(real_home / ".grimoire")
+    (tmp_path / "zc").symlink_to(real_home / ".grimoire" / "control")
+    for path in (f"{tmp_path}/zg/control/y", f"{tmp_path}/zc/y", f"{tmp_path}/zc"):
+        write = forgery_vector(classify_tool("Write", {"file_path": path, "content": "x"}))
+        shell = forgery_vector(classify_tool("Bash", {"command": f"echo x > {path}"}))
+        assert write is not None and write.code == "control-zone", path
+        assert shell is not None and shell.code == "control-zone", path
+
+
+@pytest.mark.parametrize(
+    "path", ["~/.grimoire/x/../control/y", "$HOME/.grimoire/./control/y", "${HOME}/.grimoire/other/../control/y"]
+)
+def test_disguised_control_zone_paths_of_the_write_tools_are_refused(real_home, path: str) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    for tool, key in (("Write", "file_path"), ("Edit", "file_path"), ("NotebookEdit", "notebook_path")):
+        vector = forgery_vector(classify_tool(tool, {key: path, "content": "x", "old_string": "a", "new_string": "b", "new_source": "x"}))
+        assert vector is not None and vector.code == "control-zone", (tool, path)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x > ~/.grimoire/other/y",
+        "cd ~/.grimoire && echo x > other/y",
+        "echo x > ./control/y",  # un dossier `control` du projet, pas celui de ~/.grimoire
+        "echo x > src/control/y",
+        "cp ~/.grimoire/other/a ~/.grimoire/other/b",
+        "echo x > ~/.grimoire/controller/y",
+    ],
+)
+def test_other_paths_are_not_taken_for_the_control_zone(real_home, command: str) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    assert forgery_vector(classify_tool("Bash", {"command": command})) is None, command

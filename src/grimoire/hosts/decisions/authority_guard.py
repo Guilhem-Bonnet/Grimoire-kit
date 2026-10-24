@@ -39,16 +39,21 @@ vecteurs connus pour fabriquer cette preuve :
   (même limite que les autres vecteurs, :data:`LIMIT_NOTE`) ; supprimer l'instantané se
   fait hors agent.
 
-Pure analyse de texte, sans E/S : le profil est lu par l'appelant
+Analyse de texte, avec une seule E/S : la résolution des chemins vers la zone de contrôle
+(``realpath``, pour qu'un lien symbolique ne la cache pas). Le profil est lu par l'appelant
 (:mod:`.tool_policy`), qui décide aussi du sort d'une exception ici (refus en
 governed, fail-closed).
 """
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from itertools import pairwise
+from pathlib import Path
 
 from grimoire.hosts.decisions.human_turns import TURNS_FILENAME
 from grimoire.hosts.decisions.tool_facts import (
@@ -87,7 +92,9 @@ SNAPSHOT_FILENAME = "ledger.snapshot.json"
 #: script Python arbitraire (ou ``bash script.sh`` dont le corps écrit là) contourne cette garde ; ``LIMIT_NOTE``
 #: l'affiche à chaque refus. Le mandat n'en dépend pas seul : le journal est chaîné par hash et un mandat se
 #: révoque sur écriture refusée dans la zone (``MandateStore.revoke_on_protected_write``).
-CONTROL_ZONE = re.compile(r"\.grimoire/+control(?![A-Za-z0-9_.-])")
+#: Le second membre attrape le chemin que du code assemble en morceaux cités
+#: (``Path.home().joinpath('.grimoire', 'control', ...)``, ``'.grimoire' / 'control'``).
+CONTROL_ZONE = re.compile(r"""\.grimoire(?:/+|['"][\s,+/()'"]*)control(?![A-Za-z0-9_.-])""")
 CONTROL_ZONE_FILES = ("host-contracts.json", "mandates.authority.jsonl", "cockpit-key")
 #: Ce que :func:`_names_protected` rend pour la zone de contrôle.
 CONTROL_ZONE_MARKER = "~/.grimoire/control"
@@ -185,6 +192,140 @@ def _names_protected(text: str) -> str:
         if marker in normalized:
             return marker
     return ""
+
+
+# ── Zone de contrôle par résolution de chemin ────────────────────────────────
+#
+# L'expression :data:`CONTROL_ZONE` lit du texte : ``.grimoire/x/../control``, ``${HOME}/.grimoire/./control``,
+# ``cd ~/.grimoire && echo > control/y``, ``.grimoire/'control'``, ``.grimoire/contr*`` ou un lien symbolique posé
+# ailleurs la contournent. Ici on résout : ``~``/``$HOME``/``${HOME}`` développés, ``..`` et ``//`` repliés, chemins
+# relatifs joints au répertoire courant et à chaque ``cd``/``-C``/``--directory`` de la commande, globs comparés
+# composant par composant, ``realpath`` pour les liens existants. Hors de portée, dit dans :data:`LIMIT_NOTE` : une
+# variable que le shell assemble (``$X``), un code exécuté (``python -c``) qui construit le chemin.
+
+_GLOB_CHARS = re.compile(r"[*?\[]")
+_REDIRECT_PREFIX = re.compile(r"^(?:[0-9]*>>?|[0-9]*<|&>>?|>&)+")
+_HOME_PREFIX = re.compile(r"^(?:~|\$HOME|\$\{HOME\})(?=/|$)")
+_DIR_FLAGS = frozenset({"-C", "--directory", "--target-directory", "-t"})
+_DIR_PROGRAMS = frozenset({"cd", "pushd"})
+#: Programmes qui déplacent, copient, lient ou suppriment : nommer ``~/.grimoire`` lui-même suffit à contourner
+#: la zone (déplacer le dossier, l'éditer ailleurs, le remettre ; ou le lier sous un autre nom).
+_RELOCATORS = frozenset({"mv", "cp", "rsync", "ln", "rm", "install", "rename", "chmod", "chown", "rmdir"})
+
+
+def _control_zones() -> tuple[list[str], str, str]:
+    """``(zones, .grimoire, home)`` : la zone, normalisée et résolue ; ``~/.grimoire`` ; le home."""
+    home = Path.home()
+    base = home / ".grimoire" / "control"
+    zones = {os.path.normpath(str(base))}
+    with contextlib.suppress(OSError):
+        zones.add(os.path.realpath(base))
+    return sorted(zones), os.path.normpath(str(home / ".grimoire")), os.path.normpath(str(home))
+
+
+def _cwd() -> str:
+    try:
+        return str(Path.cwd())
+    except OSError:  # répertoire courant supprimé : on retombe sur le home, où la zone se trouve
+        return str(Path.home())
+
+
+def _expand(word: str, home: str) -> str:
+    return _HOME_PREFIX.sub(lambda _m: home, word, count=1)
+
+
+def _inside(path: str, zone: str) -> bool:
+    return path == zone or path.startswith(zone.rstrip(os.sep) + os.sep)
+
+
+def _glob_reaches(pattern: str, zone: str) -> bool:
+    """Vrai si le motif *pattern* (avec jokers) peut désigner la zone ou ce qu'elle contient."""
+    parts, wanted = pattern.split("/"), zone.split("/")
+    return len(parts) >= len(wanted) and all(fnmatchcase(w, p) for w, p in zip(wanted, parts, strict=False))
+
+
+def _word_paths(word: str) -> list[str]:
+    """Les lectures d'un mot comme chemin : tel quel, sans redirection (``>f``), après ``clé=`` (``of=f``)."""
+    out = {word}
+    stripped = _REDIRECT_PREFIX.sub("", word)
+    out.add(stripped)
+    for candidate in (word, stripped):
+        if "=" in candidate:
+            out.add(candidate.split("=", 1)[1])
+        if "," in candidate and "=" not in candidate:
+            out.update(candidate.split(","))
+    return [c for c in out if c]
+
+
+def _resolutions(word: str, dirs: list[str], home: str) -> list[tuple[str, str]]:
+    """``(normalisé, résolu)`` de chaque lecture de *word* comme chemin, relative à chaque répertoire possible."""
+    found: list[tuple[str, str]] = []
+    for candidate in _word_paths(word):
+        expanded = _expand(candidate, home)
+        joined = [expanded] if Path(expanded).is_absolute() else [str(Path(d) / expanded) for d in dirs]
+        for path in joined:
+            normal = os.path.normpath(path)
+            real = normal
+            if not _GLOB_CHARS.search(normal):
+                with contextlib.suppress(OSError, ValueError):
+                    real = os.path.realpath(path)
+            found.append((normal, real))
+    return found
+
+
+def _without_neutral(words: list[str]) -> list[str]:
+    """Les mots d'un segment sans assignations d'environnement ni préfixes neutres (``sudo``, ``env``, ``nohup``…)."""
+    kept = [w for w in words if not _ENV_ASSIGNMENT.match(w)]
+    while kept and kept[0].rsplit("/", 1)[-1] in _NEUTRAL:
+        kept = kept[1:]
+    return kept
+
+
+def _names_control_zone_path(target: str) -> bool:
+    """Un chemin d'outil (Write, Edit, NotebookEdit) qui se résout dans la zone de contrôle."""
+    zones, _grimoire, home = _control_zones()
+    for normal, real in _resolutions(target, [_cwd()], home):
+        if any(_inside(normal, z) or _inside(real, z) or (_GLOB_CHARS.search(normal) and _glob_reaches(normal, z)) for z in zones):
+            return True
+    return False
+
+
+def _names_control_zone_command(command: str) -> bool:
+    """Une commande qui nomme la zone de contrôle, ou ``~/.grimoire`` pour le déplacer, par un chemin résolu."""
+    zones, grimoire, home = _control_zones()
+    bodies = [_strip_heredoc_bodies(command), *extract_c_bodies(command)]
+    segments = [seg for text in bodies for seg in _command_words(text)]
+    dirs = [_cwd()]
+    # Première passe : les répertoires où la commande peut se placer (cd, pushd, -C, --directory).
+    for words in segments:
+        launched = _without_neutral(words)
+        if launched and launched[0].rsplit("/", 1)[-1] in _DIR_PROGRAMS:
+            args = [w for w in launched[1:] if not w.startswith("-")]
+            targets = args[:1] or ["~"]
+            for target in targets:
+                dirs.extend(real for _normal, real in _resolutions(target, list(dirs), home))
+        for prev, word in pairwise(launched):
+            if prev in _DIR_FLAGS:
+                dirs.extend(real for _normal, real in _resolutions(word, list(dirs), home))
+        for word in launched:
+            if word.startswith(("--directory=", "--target-directory=")):
+                dirs.extend(real for _normal, real in _resolutions(word.split("=", 1)[1], list(dirs), home))
+    dirs = list(dict.fromkeys(dirs))
+    for words in segments:
+        launched = _without_neutral(words)
+        program = launched[0].rsplit("/", 1)[-1] if launched else ""
+        for word in launched[1:]:
+            for normal, real in _resolutions(word, dirs, home):
+                if any(
+                    _inside(normal, z) or _inside(real, z) or (_GLOB_CHARS.search(normal) and _glob_reaches(normal, z))
+                    for z in zones
+                ):
+                    return True
+                if program in _RELOCATORS and (normal == grimoire or real == grimoire):
+                    return True
+                if program == "ln" and (normal in (grimoire, home) or real in (grimoire, home)):
+                    return True
+    return False
 
 
 _OPERATORS = ("&&", "||", "$(", ";", "|", "\n", "`", "(", ")")
@@ -346,14 +487,14 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
     writes = facts.kind is ActionKind.FILE_WRITE or facts.mutation is not MutationClass.READ_ONLY
     if writes:
         for target in facts.targets:
-            marker = _names_protected(target)
+            marker = _names_protected(target) or (CONTROL_ZONE_MARKER if _names_control_zone_path(target) else "")
             if marker:
                 return _write_vector(marker, f"écriture de {target}")
     command = facts.command
     if not command:
         return None
     if facts.mutation is not MutationClass.READ_ONLY:
-        marker = _names_protected(command)
+        marker = _names_protected(command) or (CONTROL_ZONE_MARKER if _names_control_zone_command(command) else "")
         if marker:
             return _write_vector(marker, f"commande qui écrit un journal d'autorité ou l'instantané du ledger ({marker})")
     executed = [command_surface(command), *extract_c_bodies(command)]

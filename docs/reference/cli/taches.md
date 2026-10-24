@@ -438,8 +438,10 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
 - **Cockpit** : `GET /api/workspace/autonomy/mandate`, `POST …/mandate/grant` (jeton de session **et** clé de
   contrôle `~/.grimoire/control/cockpit-key`) et `POST …/mandate/revoke`.
 - **Zone protégée** : `~/.grimoire/control/` (journal d'autorité, preuve de contrat d'hôte, clé du cockpit) est
-  refusée en écriture aux outils d'agent par le frein `PreToolUse`, et la clé en lecture. Limite : un agent qui
-  lance un script arbitraire contourne une garde de chemin.
+  refusée en écriture aux outils d'agent par le frein `PreToolUse`, et la clé en lecture. Les chemins sont
+  résolus (`$HOME`, `..`, `cd` puis chemin relatif, globs, liens symboliques existants, composants cités).
+  Limite : un agent qui lance un script arbitraire, ou dont le chemin est assemblé par le shell (`$X`),
+  contourne une garde de chemin.
 
 ### Ce que le claim rappelle
 
