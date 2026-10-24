@@ -682,6 +682,43 @@ class TaskService:
             return claim.lease_epoch
         return None
 
+    def parking_warnings(self, task_id: str) -> tuple[str, ...]:
+        """Ce que garer *task_id* ne change pas pour le reste de la session (WAIT-SCOPE).
+
+        Les sous-agents d'une session réclament leurs propres tâches (``claim.agent_id``, issue #698) :
+        les garer côté coordinateur ne les arrête pas, et le frein du bail ne les refuse plus. Le dire
+        évite de croire le contraire. Vide si le ledger ne sait rien (claim sans session rattachée).
+        """
+        task = self.ledger.get_task(task_id)
+        session = task.claim.session_id if task is not None and task.claim is not None else ""
+        if not session:
+            return ()
+        running = sorted(
+            t.id for t in self.ledger.list_tasks()
+            if t.id != task_id and t.status in (TaskState.CLAIMED, TaskState.RUNNING)
+            and t.claim is not None and t.claim.session_id == session and t.claim.agent_id
+        )
+        if not running:
+            return ()
+        return (
+            f"{len(running)} sous-agent(s) de la session travaillent encore ({', '.join(running)}) : "
+            f"garer {task_id} ne les arrête pas, et leurs outils ne sont pas freinés pour autant.",
+        )
+
+    @staticmethod
+    def _session_epoch(task: MissionTask) -> int | None:
+        """L'epoch du claim quand la session de l'environnement est celle qui le porte (parité CLI / MCP).
+
+        Un outil MCP signe d'un acteur par défaut (``mcp-agent``) qui n'est pas celui du claim (``claude``…) :
+        l'acteur ne dit pas qui tient le bail, la session rattachée si. Sans session dans l'environnement,
+        ou claim d'une autre session, ``None`` : l'erreur nommée reste.
+        """
+        session_id, _host = current_session()
+        claim = task.claim
+        if session_id and claim is not None and claim.session_id == session_id and claim.lease_epoch > 0:
+            return claim.lease_epoch
+        return None
+
     def _hint_of(self, task: MissionTask, *, observe_head: bool = False) -> ResumeHint | None:
         """De quoi reprendre la session ; avec *observe_head* (point de reprise d'une pause, K11), la branche et le HEAD du worktree."""
         from grimoire.missions.session_link import session_fields
@@ -780,6 +817,8 @@ class TaskService:
         """
         task = self.require(task_id)
         signed = self._held_epoch(task, actor, epoch)
+        if signed is None:
+            signed = self._session_epoch(task)
         if signed is None:
             raise GrimoireMissionError(
                 f"Reprise refusée pour {task_id} : aucun epoch à présenter — `--epoch` (celui du claim de {actor})"

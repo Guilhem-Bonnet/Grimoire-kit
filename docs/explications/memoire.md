@@ -338,7 +338,7 @@ rapporte l'état des couches.
 | Profil | Sémantique | Récupération | Graphes | Mémoire chaude |
 |--------|-----------|--------------|---------|----------------|
 | `lexical` | aucune | BM25 (FTS5) | sidecar SQLite | SQLite |
-| `standard` | store détecté | vectoriel + BM25 fusionnés (RRF) | sidecar SQLite | SQLite |
+| `standard` | store détecté | BM25 ; vectoriel fusionné (RRF) seulement si un moteur vectoriel est en service | sidecar SQLite | SQLite |
 | `graphe` | Weaviate | vectoriel + BM25 fusionnés | Neo4j (connaissances, souvenirs, code, tâches) | SQLite |
 | `complet` | Weaviate | vectoriel + BM25 fusionnés | Neo4j | Redis (TTL, baux) |
 
@@ -365,6 +365,42 @@ il y a deux classements à fusionner — `grimoire memory search`, la recherche 
 serveur MCP qu'utilisent les agents. Elle était auparavant derrière un
 `--hybrid` optionnel : l'index compagnon était écrit à chaque `store` et
 interrogé par personne. `--no-hybrid` force le backend seul.
+
+Un profil annonce une composition ; la recherche dit ce qui tourne
+réellement. `grimoire memory status` (et l'espace Mémoire du cockpit) affiche
+« lexical seul (BM25), aucune fusion » tant qu'aucun moteur vectoriel n'est en
+service, même si le profil `standard` est déclaré : un classement unique n'est
+jamais présenté comme une fusion.
+
+### Provenance et fraîcheur d'un résultat
+
+Le noyau ne génère aucune réponse : il rend des extraits sourcés, et le modèle
+de l'hôte rédige. Chaque extrait porte sa fiche `grimoire.knowledge.fact/v1`
+(dans `provenance` de l'export JSON, qui garde ses clés historiques) :
+
+- `source` : `kind` (fichier, doc, code, tâche, session, commit, saisie libre,
+  inconnue), `uri` (chemin, `chemin:ligne`, `task:<id>`…) et `empreinte` (sha256
+  du contenu source au moment de l'indexation) ;
+- les dates de la source, de l'indexation et de la dernière confirmation, quand
+  elles sont connues ;
+- le cycle (`actif`, `remplacé` avec `remplace_par`) ;
+- la **fraîcheur**, recalculée à chaque lecture et jamais stockée :
+
+| État | Condition |
+|------|-----------|
+| `a_jour` (à jour) | la source se relit (fichier du projet, 4 Mio au plus, local) et son empreinte égale celle de l'indexation |
+| `perime` (périmé) | la source se relit mais son empreinte a changé ; la date du changement est donnée |
+| `source_disparue` | le fichier source n'existe plus ; non servi par défaut (`--include-stale`), le nombre écarté est annoncé |
+| `non_verifie` (non vérifié) | rien à relire (saisie libre, tâche, session), ou source non relisible (hors projet, trop grosse, illisible), ou empreinte d'indexation absente ; dernière confirmation de 270 jours au plus |
+| `hypothese` (hypothèse) | rien à relire et dernière confirmation de plus de 270 jours ; servi en dernier |
+
+Un fait sans source à relire n'est jamais `à jour`. Il n'y a pas de durée de
+vie : les paliers de 90 et 270 jours (repris de la mémoire transverse)
+déclassent, rien n'est supprimé. Une décision remplacée
+(`grimoire memory supersede <ancien> <nouveau>`, outil MCP
+`grimoire_memory_supersede`) n'est plus servie mais reste lisible avec
+`--include-superseded`. Pour qu'un fait écrit à la main porte une source :
+`grimoire memory remember … --source task:T-42` (ou un chemin de fichier).
 
 ## Choix à l'initialisation
 
@@ -577,16 +613,6 @@ Les couches `code_graph` et `task_memory` utilisent des producteurs explicites :
 8. Les commandes `memory graph` projettent code, missions, tâches, incidents et preuves vers Neo4j.
 9. Les commandes `memory vector` projettent code et task memory vers Weaviate avec des IDs stables et des hashes de contenu.
 10. Les commandes `taxonomy`, `search` et `list` réutilisent les champs `wing`, `hall` et `room` pour agréger et filtrer les résultats.
-
-## Progressive search
-
-Le manager expose aussi `progressive_search()` avec trois niveaux de restitution :
-
-- `L1` : aperçu compact
-- `L2` : contexte de travail
-- `L3` : texte complet ou quasi complet
-
-Ces couches concernent le format de réponse, pas la persistance. Elles ne remplacent ni le backend principal ni le sidecar.
 
 ## Commandes CLI
 

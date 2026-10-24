@@ -129,18 +129,19 @@ def test_parked_session_can_resume_its_own_task(governed: Path) -> None:
         "grimoire task close {tid}",
         "grimoire task resume {tid} --epoch 1 && touch EXECUTED.marker",
         "grimoire task resume {tid} --project-root /ailleurs",
-        "grimoire task resume {tid} --ledger-root ailleurs",
-        "grimoire task show \"$(touch EXECUTED.marker)\"",
-        "grimoire task resume {tid} {tid}",
-        "grimoire task resume '{tid}'",
         "grimoire --project-root /ailleurs task resume {tid}",
     ],
 )
-def test_parked_session_is_still_braked_for_anything_else(governed: Path, command: str) -> None:
+def test_parked_session_is_no_longer_frozen_by_its_parked_task(governed: Path, command: str) -> None:
+    """WAIT-SCOPE : avant, tout autre outil que la reprise de T était refusé (« reprends-la d'abord »).
+
+    Une attente porte sur sa tâche : la session est rendue à l'état « sans tâche » (aucune écriture au nom de T,
+    cf. ``test_wait_scope``), le frein du bail ne la gèle plus.
+    """
     tid = _parked_for_long(governed)
     decision, reason = _verdict(governed, _bash(governed, command.format(tid=tid)))
-    assert decision == "deny", reason
-    assert "garée" in reason and f"grimoire task resume {tid}" in reason, reason
+    assert decision == "allow", reason
+    assert "garée" not in reason
 
 
 def test_a_fresh_parked_lease_still_lets_the_session_work(governed: Path) -> None:
@@ -203,9 +204,8 @@ def test_e2e_parked_resume_through_the_real_hook_entry_point(governed: Path) -> 
 
     allowed = hook(f"grimoire task resume {tid} --epoch 1")
     assert allowed["permissionDecision"] == "allow", allowed
-    refused = hook("touch EXECUTED.marker")
-    assert refused["permissionDecision"] == "deny"
-    assert f"grimoire task resume {tid}" in refused["permissionDecisionReason"]
+    free = hook("touch EXECUTED.marker")  # WAIT-SCOPE : la session garée n'est plus gelée
+    assert free["permissionDecision"] == "allow", free
 
 
 # ── 2. MCP : l'état waiting et les états inconnus ────────────────────────────
