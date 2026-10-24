@@ -37,8 +37,9 @@ def verify_cadrage_ledger(root: Path, profile: StandardProfile, result: Standard
     if not (root / CADRAGE_DIR).is_dir():
         return
     # Import tardif : le standard ne charge pas le ledger pour un projet qui ne cadre pas.
-    from grimoire.missions.cadrage_plan import answer_command, build_plan
+    from grimoire.missions.cadrage_plan import build_plan
     from grimoire.missions.service import TaskService
+    from grimoire.missions.waiting import answer_command
 
     plan = build_plan(root, TaskService(root))
     if not plan.requirements.identified:

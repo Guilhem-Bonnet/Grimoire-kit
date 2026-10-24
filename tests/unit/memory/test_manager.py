@@ -6,7 +6,7 @@ import builtins
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 
@@ -54,7 +54,7 @@ class TestFromBackend:
     def test_store_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         result = mgr.store("hello")
-        mock_backend.store.assert_called_once_with("hello", user_id="", tags=(), metadata={"project_name": "grimoire", "source_kind": "memory"})
+        mock_backend.store.assert_called_once_with("hello", user_id="", tags=(), metadata={"project_name": "grimoire", "source_kind": "memory", "indexed_at": ANY})
         assert result.text == "stored"
 
     def test_recall_delegates(self, mock_backend: MagicMock) -> None:
@@ -120,14 +120,14 @@ class TestFromBackend:
         items = [{"text": "a"}, {"text": "b"}]
         results = mgr.store_many(items)
         mock_backend.store_many.assert_called_once_with(
-            [{"text": "a", "tags": [], "metadata": {"project_name": "grimoire", "source_kind": "memory"}}, {"text": "b", "tags": [], "metadata": {"project_name": "grimoire", "source_kind": "memory"}}]
+            [{"text": "a", "tags": [], "metadata": {"project_name": "grimoire", "source_kind": "memory", "indexed_at": ANY}}, {"text": "b", "tags": [], "metadata": {"project_name": "grimoire", "source_kind": "memory", "indexed_at": ANY}}]
         )
         assert len(results) == 2
 
     def test_store_with_tags_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
         mgr.store("tagged", tags=("t1", "t2"))
-        mock_backend.store.assert_called_once_with("tagged", user_id="", tags=("t1", "t2"), metadata={"project_name": "grimoire", "source_kind": "memory"})
+        mock_backend.store.assert_called_once_with("tagged", user_id="", tags=("t1", "t2"), metadata={"project_name": "grimoire", "source_kind": "memory", "indexed_at": ANY})
 
 
 # ── auto-resolution ──────────────────────────────────────────────────────────
