@@ -8,6 +8,12 @@ symbole), plus un symbole par ancien nom encore cité par le cockpit (table
 web/workspace/ doit y avoir un symbole, aucun symbole ne porte de couleur
 littérale (le sprite suit `currentColor`, donc le thème), et la coque ne
 dessine plus d'icône en ligne.
+
+P30 (fin du point polysémique) y ajoute les familles d'identité : types de
+tâche (`i-task-*`, un par valeur de `TaskType`), rôles de base (`i-store-*`),
+hôtes génériques sans logo (`i-host-*`), mémoire (`i-mem-*`), vivacité de
+session (`i-session-*`), profil de risque (`i-risk-*`) et huit compositions
+d'état vide (`i-empty-*`, grille 96 × 64).
 """
 
 from __future__ import annotations
@@ -53,6 +59,10 @@ _REFS = (
     re.compile(r"""\bicon\(\s*['"]([a-z0-9-]+)['"]"""),
     re.compile(r"""\bicon:\s*['"]([a-z0-9-]+)['"]"""),
     re.compile(r"""icons\.svg#([a-z0-9-]+)"""),
+    # Composition d'état vide passée à `ctx.empty(…, { art: 'i-empty-x' })`.
+    re.compile(r"""\bart:\s*['"]([a-z0-9-]+)['"]"""),
+    # Icônes nommées par `glyph('x', …)` (P30).
+    re.compile(r"""\bglyph\(\s*['"]([a-z0-9-]+)['"]"""),
 )
 # Noms d'icônes portés par des tables (`STATE_ICON`) ou des littéraux de
 # `kpiCard` : couverts par `icon:` ci-dessus ; les valeurs de STATE_ICON le sont ici.
@@ -115,18 +125,53 @@ def _douce_symbols() -> list[tuple[str, dict[str, str], str]]:
     return [(sid, dict(_ATTR_RE.findall(attrs)), body) for sid, attrs, body in _SYMBOL_RE.findall(text)]
 
 
+#: Familles Douce du sprite et leur effectif : chaque `i-*` en relève d'une.
+FAMILIES = {
+    "i-space-": 5,
+    "i-ui-": 9,
+    "i-task-": 9,
+    "i-store-": 8,
+    "i-host-": 5,
+    "i-mem-": 6,
+    "i-session-": 4,
+    "i-risk-": 4,
+    "i-empty-": 8,
+}
+
+
 def test_le_sprite_porte_cinq_icones_d_espace_et_neuf_de_chrome() -> None:
     ids = [sid for sid, _, _ in _douce_symbols()]
     assert len(ids) == len(set(ids)), "identifiants en double"
     assert sum(i.startswith("i-space-") for i in ids) == 5
     assert sum(i.startswith("i-ui-") for i in ids) == 9
-    assert all(i.startswith(("i-space-", "i-ui-")) for i in ids)
+    assert all(i.startswith(tuple(FAMILIES)) for i in ids)
+
+
+@pytest.mark.parametrize(("prefix", "count"), FAMILIES.items())
+def test_chaque_famille_douce_a_son_effectif(prefix: str, count: int) -> None:
+    ids = [sid for sid, _, _ in _douce_symbols()]
+    assert sum(i.startswith(prefix) for i in ids) == count
+
+
+def test_un_type_de_tache_une_icone() -> None:
+    """Une icône par valeur de `TaskType`, ni plus ni moins."""
+    from grimoire.missions.schemas import TaskType
+
+    ids = {sid for sid, _, _ in _douce_symbols() if sid.startswith("i-task-")}
+    assert ids == {f"i-task-{t.value}" for t in TaskType}
 
 
 @pytest.mark.parametrize("symbol", _douce_symbols(), ids=lambda s: s[0])
 def test_chaque_symbole_douce_respecte_la_grammaire(symbol: tuple[str, dict[str, str], str]) -> None:
-    _, attrs, body = symbol
-    assert attrs.get("viewBox") == "0 0 24 24"
+    sid, attrs, body = symbol
+    if sid.startswith("i-empty-"):
+        # Composition d'état vide : l'encre vient du CSS (`.empty-art`), seul
+        # l'accent porte `currentColor`, et il y en a au moins un.
+        assert attrs.get("viewBox") == "0 0 96 64"
+        assert "stroke" not in attrs
+        assert 'stroke="currentColor"' in body
+    else:
+        assert attrs.get("viewBox") == "0 0 24 24"
     assert attrs.get("stroke-width") == "1.75"
     titles = re.findall(r"<title>([^<]*)</title>", body)
     assert len(titles) == 1 and titles[0].strip(), "un <title> non vide par symbole"

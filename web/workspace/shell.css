@@ -223,6 +223,62 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .sico.bad { color: var(--bad); }
 .sico.acc { color: var(--acc); }
 
+/* Fin du point polysémique (P30) : une catégorie prend son icône (.glyph),
+   une échelle ses barres (.bars), une identité son monogramme (.mgram). */
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--ink2);
+}
+.glyph .ico {
+  width: 14px;
+  height: 14px;
+}
+.glyph.ok { color: var(--ok); }
+.glyph.warn { color: var(--warn); }
+.glyph.bad { color: var(--bad); }
+.glyph.acc { color: var(--acc); }
+
+.bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  flex: none;
+}
+.bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--ink3);
+  opacity: 0.4;
+}
+.bars i:nth-child(1) { height: 5px; }
+.bars i:nth-child(2) { height: 8px; }
+.bars i:nth-child(3) { height: 11px; }
+.bars i.on {
+  background: var(--ink2);
+  opacity: 1;
+}
+.bars.bad i.on { background: var(--bad); }
+
+.mgram {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 3px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
 /* En-tête de tableau sobre : pas de soulignement ; une infobulle (data-term)
  * s'indique par une icône discrète, pas par un pointillé de lien. */
 th[data-term] {
@@ -638,6 +694,17 @@ body[data-active-space="source"] {
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);
+}
+
+/* Composition d'état vide (`i-empty-*`) : trait d'encre discret, un seul
+   accent (la rubrique) porté par `currentColor`. */
+.empty-art {
+  display: block;
+  width: 96px;
+  height: 64px;
+  margin-bottom: var(--sp-3);
+  stroke: var(--ink3);
+  color: var(--rub);
 }
 
 .empty h2 .ico {

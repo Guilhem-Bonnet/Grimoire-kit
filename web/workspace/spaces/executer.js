@@ -40,7 +40,7 @@
 // Portefeuille (#638, lot C) : la portée « Tous les projets » lit
 // `api.portfolioTasks()` — toutes les tâches de tous les projets du registre
 // cockpit, agrégées côté serveur — avec une puce projet par carte, la session
-// qui la porte (point + mot : vivante / inactive / inconnue), sa priorité et ses
+// qui la porte (glyphe + mot : vivante / inactive / terminée / inconnue), sa priorité et ses
 // consignes non lues quand le champ existe. Les cartes se clé-ent par
 // (projet, id) : deux ledgers peuvent dériver le même identifiant d'un même
 // titre. Une action depuis le portefeuille passe par
@@ -57,7 +57,7 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
-import { badge, icon, stateIcon } from '../shell.js';
+import { badge, glyph, icon, levelBars, monogram, stateIcon } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 
 const COLUMN_LABEL = {
@@ -92,20 +92,36 @@ const DEP_LABEL = {
   blocks: 'bloque', relates: 'lié à', parent_child: 'parent / enfant',
   discovered_from: 'découverte depuis', supersedes: 'remplace',
 };
-// `risk_profile` (grimoire.missions.schemas.RiskProfile) rendait en texte nu
-// dans le méta de carte (revue 2026-09) — aucune couleur alors que c'est une
-// vraie échelle de sévérité (grimoire.missions.board._PRIORITY_BY_RISK :
-// light → low, standard → medium, le reste → high). Point + mot, comme tout
-// le reste des états — jamais la couleur seule.
-const RISK_DOT = {
-  light: 'ok', standard: 'warn', strict: 'bad', security_critical: 'bad', release: 'bad',
+// `risk_profile` (grimoire.missions.schemas.RiskProfile) : une vraie échelle de
+// sévérité (grimoire.missions.board._PRIORITY_BY_RISK : light → low, standard →
+// medium, le reste → high). Fin du point polysémique (P30) : un bouclier à 0, 1
+// ou 2 traits, un octogone pour security_critical, et le mot à côté.
+const RISK_ICON = {
+  light: 'i-risk-light', standard: 'i-risk-standard', strict: 'i-risk-strict',
+  security_critical: 'i-risk-critical', release: 'i-risk-strict',
 };
+// `type` (grimoire.missions.schemas.TaskType) : une icône par valeur, le
+// libellé français au survol — le mot brut (« implementation ») disparaît de la carte.
+const TYPE_LABEL = {
+  analysis: 'Analyse', architecture: 'Architecture', implementation: 'Implémentation',
+  test: 'Test', documentation: 'Documentation', migration: 'Migration',
+  security: 'Sécurité', operation: 'Opération', cleanup: 'Nettoyage',
+};
+function typeGlyph(type) {
+  return TYPE_LABEL[type] ? glyph(`i-task-${type}`, `type : ${TYPE_LABEL[type]}`, '', { alone: true }) : text('span', null, type);
+}
 // Échelle de priorité (grimoire.missions.board.PRIORITIES), la plus pressante
 // en dernier ; `tasks_view()` la renvoie aussi (`priorities`) — la constante
 // locale n'est que le repli si le serveur ne la donne pas.
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const PRIORITY_LABEL = { low: 'Basse', medium: 'Moyenne', high: 'Haute', critical: 'Critique' };
-const PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
+// Priorité en barres (1 à 3 sur 3) : critique garde trois barres et prend la
+// teinte d'erreur. Une valeur hors échelle n'a pas de barres, seulement son mot.
+const PRIORITY_BARS = { low: 1, medium: 2, high: 3, critical: 3 };
+function priorityBars(priority) {
+  if (!PRIORITY_BARS[priority]) return null;
+  return levelBars(PRIORITY_BARS[priority], `priorité ${(PRIORITY_LABEL[priority] || priority).toLowerCase()}`, priority === 'critical' ? 'bad' : '');
+}
 const priorityRank = (p) => PRIORITIES.indexOf(p);
 // Dans une colonne, la plus pressante d'abord ; à égalité, l'identifiant
 // garde un ordre stable (même règle que `build_board`).
@@ -115,8 +131,9 @@ const byPriority = (a, b) =>
   (Number(isHumanWait(b)) - Number(isHumanWait(a))) ||
   (priorityRank(b.effective_priority || 'medium') - priorityRank(a.effective_priority || 'medium')) ||
   String(a.id).localeCompare(String(b.id));
-// La raison d'une attente, en clair — point + mot, jamais la couleur seule.
+// La raison d'une attente, en clair — icône + mot, jamais la couleur seule.
 const WAIT_LABEL = { human: 'décision attendue', ci: 'attend la CI', quota: 'attend le quota', paused: 'en pause' };
+const waitGlyph = (waiting) => glyph(waiting.reason === 'human' ? 'user' : 'hourglass', 'attente');
 const QUESTION_KIND_LABEL = {
   merge: 'fusion', permission: 'permission', choice: 'choix', resume_branch: 'reprise de branche',
   resume_unfenced: 'reprise sans frein', retry_exhausted: 'tentatives épuisées',
@@ -157,7 +174,7 @@ function injectStyles() {
     .ex-card:hover { background: var(--e2); }
     .ex-card[aria-current="true"] { outline: 2px solid var(--acc); outline-offset: -2px; }
     .ex-card-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); }
-    .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
+    .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .ex-card-next { font-size: var(--t-s); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
     .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
@@ -217,6 +234,10 @@ function injectStyles() {
   document.head.append(style);
 }
 
+// Le glyphe d'état ne dit plus qu'un ÉTAT (colonne d'une tâche, échec d'une
+// ligne de timeline, ledger absent) : les catégories ont leur icône, la
+// priorité ses barres, le projet son monogramme (P30 ; garde :
+// tests/unit/test_workspace_polysemy.py).
 const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
@@ -225,10 +246,11 @@ function text(tag, className, value) {
   return node;
 }
 function row(...children) { const d = document.createElement('div'); d.className = 'row'; d.append(...children); return d; }
-function chip(label, present) {
+// Une preuve attendue : le sceau dit « preuve », le mot dit laquelle.
+function chip(label) {
   const c = document.createElement('span');
   c.className = 'chip';
-  c.append(dot(present ? 'ok' : ''), text('span', null, label));
+  c.append(glyph('seal', 'preuve attendue'), text('span', null, label));
   return c;
 }
 
@@ -237,6 +259,12 @@ function chip(label, present) {
 const HOST_LABEL = {
   'host-claude-code-cli': 'Claude Code', 'host-github-copilot': 'Copilot',
   'host-codex': 'Codex', 'host-cursor': 'Cursor', 'host-gemini-cli': 'Gemini CLI',
+};
+// Pictogramme générique de l'hôte, jamais un logo de marque : la forme dit le
+// genre d'outil (terminal, éditeur), le nom reste en texte.
+const HOST_ICON = {
+  'host-claude-code-cli': 'i-host-cli', 'host-codex': 'i-host-cli', 'host-gemini-cli': 'i-host-cli',
+  'host-opencode': 'i-host-cli', 'host-github-copilot': 'i-host-ide', 'host-cursor': 'i-host-caret',
 };
 
 // Une ligne « session » : identifiant (tronqué sur la carte, entier dans
@@ -248,7 +276,10 @@ function sessionLine(task, { full = false } = {}) {
   line.className = 'ex-session';
   const id = full ? task.session_id : `${task.session_id.slice(0, 8)}…`;
   line.append(text('span', 'lbl', 'session'), Object.assign(document.createElement('code'), { textContent: id, title: task.session_id }));
-  if (task.host) line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
+  if (task.host) {
+    if (HOST_ICON[task.host]) line.append(glyph(HOST_ICON[task.host], 'hôte'));
+    line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
+  }
   return line;
 }
 
@@ -279,31 +310,31 @@ function nextMovesText(task, none) {
 // le champ de raison (posé par le clic, consommé par `renderInspector`).
 let focusBlockReason = false;
 
-// Priorité effective (lot B la calcule côté serveur : `effective_priority`) — point + mot.
+// Priorité effective (lot B la calcule côté serveur : `effective_priority`) — barres + mot.
 const PORTFOLIO_PRIORITY_LABEL = { low: 'priorité basse', medium: 'priorité moyenne', high: 'priorité haute', critical: 'priorité critique' };
-const PORTFOLIO_PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
 
-// La ligne « portefeuille » d'une carte : projet, session (point + mot),
-// priorité, consignes non lues — chaque état est un point ET un mot, jamais
-// la couleur seule (revue 2026-09).
+// La ligne « portefeuille » d'une carte : projet (monogramme + nom), session
+// (glyphe de vivacité + mot), priorité (barres + mot), consignes non lues
+// (bulle + compteur) — une forme par sens, jamais la couleur seule (P30).
 function portfolioRow(task) {
   const line = document.createElement('div');
   line.className = 'ex-card-project';
   const project = document.createElement('span');
   project.className = 'chip';
-  project.append(dot('acc'), text('span', null, task.project?.name || task.project?.slug || 'projet'));
+  const projectName = task.project?.name || task.project?.slug || 'projet';
+  project.append(monogram(projectName), text('span', null, projectName));
   line.append(project);
   const session = task.session;
   if (session && session.id) {
-    line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
+    line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
   } else {
     line.append(text('span', 'lbl', 'aucune session'));
   }
   if (task.priority) {
-    line.append(row(dot(PORTFOLIO_PRIORITY_DOT[task.priority] || ''), text('span', null, PORTFOLIO_PRIORITY_LABEL[task.priority] || `priorité ${task.priority}`)));
+    line.append(row(priorityBars(task.priority) || '', text('span', null, PORTFOLIO_PRIORITY_LABEL[task.priority] || `priorité ${task.priority}`)));
   }
   if (task.unread_directives) {
-    line.append(row(dot('warn'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
+    line.append(row(glyph('chat', 'consignes'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
   }
   return line;
 }
@@ -326,7 +357,7 @@ function liveRow(session, { withState = true } = {}) {
   const line = document.createElement('div');
   line.className = 'ex-facts lbl';
   line.dataset.role = 'live-facts';
-  if (withState) line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
+  if (withState) line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
   if (session.updated_at && !Number.isNaN(Date.parse(session.updated_at))) {
     const sign = text('span', null, 'signe ');
     sign.append(sinceNode(session.updated_at));
@@ -371,13 +402,19 @@ function taskCard(task, onSelect, portfolio = false) {
   card.append(text('div', 'ex-card-title', task.title || task.id));
   if (portfolio) card.append(portfolioRow(task));
   const meta = text('div', 'ex-card-meta lbl', '');
-  if (task.risk_profile) meta.append(dot(RISK_DOT[task.risk_profile] || ''));
-  meta.append(text('span', null, [task.owner || 'sans owner', task.type, task.risk_profile].filter(Boolean).join(' · ')));
-  // Priorité effective (issue #638) : point + mot, comme le risque — jamais la
-  // couleur seule ; et le badge « consigne non lue » tant qu'une consigne de
-  // l'orchestrateur n'a pas été livrée à la session.
+  if (task.type) meta.append(typeGlyph(task.type));
+  meta.append(text('span', null, task.owner || 'sans owner'));
+  if (task.risk_profile) {
+    if (RISK_ICON[task.risk_profile]) meta.append(glyph(RISK_ICON[task.risk_profile], 'profil de risque'));
+    meta.append(text('span', null, task.risk_profile));
+  }
+  // Priorité effective (issue #638) : barres + mot, jamais la couleur seule ; et
+  // le badge « consigne non lue » tant qu'une consigne de l'orchestrateur n'a
+  // pas été livrée à la session.
   const priority = task.effective_priority || 'medium';
-  meta.append(dot(PRIORITY_DOT[priority] || ''), text('span', null, PRIORITY_LABEL[priority] || priority));
+  const bars = priorityBars(priority);
+  if (bars) meta.append(bars);
+  meta.append(text('span', null, PRIORITY_LABEL[priority] || priority));
   if (task.directives_pending > 0) {
     const unread = badge(`consigne non lue (${task.directives_pending})`, 'acc');
     unread.dataset.role = 'directive-badge';
@@ -392,7 +429,7 @@ function taskCard(task, onSelect, portfolio = false) {
     const line = document.createElement('div');
     line.className = 'ex-wait';
     line.dataset.role = 'blocked';
-    line.append(dot('bad'), text('span', null, 'Bloquée'));
+    line.append(stateIcon('bad'), text('span', null, 'Bloquée'));
     line.append(text('span', 'lbl', task.blocked_reason || 'raison non écrite'));
     card.append(line);
   }
@@ -401,7 +438,7 @@ function taskCard(task, onSelect, portfolio = false) {
     const line = document.createElement('div');
     line.className = 'ex-wait' + (human ? ' human' : '');
     line.dataset.role = 'waiting';
-    line.append(dot(human ? 'warn' : ''), text('span', null, waitingText(task.waiting)));
+    line.append(waitGlyph(task.waiting), text('span', null, waitingText(task.waiting)));
     if (human) line.append(text('span', 'lbl', QUESTION_KIND_LABEL[task.waiting.question.kind] || task.waiting.question.kind));
     card.append(line);
     if (human) card.append(text('div', 'lbl', task.waiting.question.text));
@@ -409,7 +446,7 @@ function taskCard(task, onSelect, portfolio = false) {
 
   const chips = document.createElement('div');
   chips.className = 'ex-card-chips';
-  for (const evidence of (task.expected_evidence || []).slice(0, 4)) chips.append(chip(evidence, false));
+  for (const evidence of (task.expected_evidence || []).slice(0, 4)) chips.append(chip(evidence));
   if (!(task.expected_evidence || []).length) chips.append(text('span', 'lbl', 'aucune preuve déclarée'));
   card.append(chips);
 
@@ -541,19 +578,19 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       const sessionCell = document.createElement('td');
       const session = task.session;
       if (session && session.id) {
-        sessionCell.append(row(dot(livenessDot(session)), text('span', null, livenessLabel(session))));
+        sessionCell.append(row(sessionGlyph(session), text('span', null, livenessLabel(session))));
       } else {
         sessionCell.append(text('span', 'lbl', '—'));
       }
       tr.append(sessionCell);
       const prioCell = document.createElement('td');
-      if (task.priority) prioCell.append(row(dot(PORTFOLIO_PRIORITY_DOT[task.priority] || ''), text('span', null, task.priority)));
+      if (task.priority) prioCell.append(row(priorityBars(task.priority) || '', text('span', null, task.priority)));
       else prioCell.append(text('span', 'lbl', '—'));
       tr.append(prioCell);
     } else {
       const prio = task.effective_priority || 'medium';
       const prioCell = document.createElement('td');
-      prioCell.append(row(dot(PRIORITY_DOT[prio] || ''), text('span', null, PRIORITY_LABEL[prio] || prio)));
+      prioCell.append(row(priorityBars(prio) || '', text('span', null, PRIORITY_LABEL[prio] || prio)));
       tr.append(prioCell);
     }
     tr.append(text('td', null, task.owner || '—'));
@@ -563,7 +600,7 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       else sessionCell.append(text('span', 'lbl', '—'));
       tr.append(sessionCell);
       const evCell = document.createElement('td');
-      evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e, false))));
+      evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e))));
       if (!(task.expected_evidence || []).length) evCell.append(text('span', 'lbl', '—'));
       tr.append(evCell);
     }
@@ -800,7 +837,7 @@ function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
   const wrap = document.createElement('div');
   wrap.className = 'ex-decisions';
   if (!pending.length) {
-    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions'));
+    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions', undefined, { art: 'i-empty-inbox' }));
   }
   for (const task of pending) wrap.append(decisionCard(ctx, task, portfolio, onWritten));
   root.append(wrap);
@@ -811,7 +848,7 @@ function decisionsBanner(count, onOpen) {
   const banner = document.createElement('div');
   banner.className = 'ex-banner';
   banner.dataset.role = 'decisions-banner';
-  banner.append(dot('warn'), text('span', null, `${count} décision${count > 1 ? 's' : ''} en attente d'un humain`));
+  banner.append(glyph('user', 'décisions'), text('span', null, `${count} décision${count > 1 ? 's' : ''} en attente d'un humain`));
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn pri';
@@ -832,9 +869,14 @@ function livenessLabel(session) {
   const word = { vivant: 'vivante', inactif: 'inactive', inconnu: 'inconnue', 'terminé': 'terminée' }[l.state] || l.state;
   return l.reason && l.state === 'inactif' ? `${word} (${l.reason})` : word;
 }
-function livenessDot(session) {
-  if (session.attention) return 'warn';
-  return (session.liveness || {}).state === 'vivant' ? 'ok' : '';
+// Glyphe de vivacité (P30) : une forme par valeur — anneau à moitié plein
+// (vivante), anneau vide (inactive), anneau coché (terminée), anneau en
+// tirets (inconnue) ; `attention` le teinte sans changer sa forme.
+const SESSION_ICON = { vivant: 'i-session-live', inactif: 'i-session-idle', 'terminé': 'i-session-done', inconnu: 'i-session-unknown' };
+function sessionGlyph(session) {
+  const state = (session.liveness || {}).state || 'inconnu';
+  const tone = session.attention ? 'warn' : (state === 'vivant' ? 'ok' : '');
+  return glyph(SESSION_ICON[state] || 'i-session-unknown', 'vivacité de la session', tone);
 }
 
 // « Reprendre la session » (#638) : copie la commande sur l'hôte Claude Code,
@@ -844,7 +886,7 @@ function sessionBlock(session, { resume = true } = {}) {
   block.className = 'ex-insp-block ex-session';
   block.append(text('h4', null, 'Session'));
   block.append(row(
-    dot(livenessDot(session)),
+    sessionGlyph(session),
     text('span', null, `${livenessLabel(session)} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
   ));
   if (session.attention) block.append(text('div', 'lbl', `attention : ${session.attention.reason}`));
@@ -1006,7 +1048,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     waitBlock.className = 'ex-insp-block';
     waitBlock.dataset.role = 'waiting-block';
     waitBlock.append(text('h4', null, 'En attente'));
-    waitBlock.append(row(dot(detail.waiting.reason === 'human' ? 'warn' : ''), text('span', null, waitingText(detail.waiting))));
+    waitBlock.append(row(waitGlyph(detail.waiting), text('span', null, waitingText(detail.waiting))));
     if (detail.waiting.since) waitBlock.append(text('div', 'lbl', ageText(detail.waiting.since)));
     if (isHumanWait(detail)) {
       waitBlock.append(decisionCard(ctx, { ...detail, project: task.project }, portfolio, onWritten));
@@ -1496,6 +1538,8 @@ export async function mount(root, ctx) {
       'Exécuter',
       board.note || "Ce projet n'a pas encore de Mission Ledger.",
       'grimoire task add "<titre>" --acceptance "<critère>"',
+      undefined,
+      { art: 'i-empty-tasks' },
     ));
     // ADR-007 (issue #559) : un board du standard scaffoldé avant le lot 4.1,
     // ou jamais migré, n'a pas encore de Mission Ledger — mais SES tâches
