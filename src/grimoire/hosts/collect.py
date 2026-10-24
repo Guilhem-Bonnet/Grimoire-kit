@@ -618,6 +618,8 @@ def collect_skills(project_root: Path, *, governed: bool | None = None) -> tuple
             description=str(meta.get("description") or slug),
             body=body.strip() + "\n",
             tools=_tool_verbs(meta.get("tools")),
+            license=str(meta.get("license") or ""),
+            compatibility=str(meta.get("compatibility") or ""),
         )
     return tuple(by_slug.values())
 
