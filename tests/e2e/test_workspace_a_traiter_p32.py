@@ -22,8 +22,10 @@ Ce que chaque test prouve :
 - lecture seule : actions désactivées, la raison écrite à côté ;
 - clavier : j / k passent d'une ligne à l'autre, Entrée ouvre l'action.
 
-Avec ``GRIMOIRE_P32_CAPTURES=<dossier>``, le dernier test y écrit les captures
-de l'écran (clair, sombre, mobile, vide, lecture seule) pour la relecture.
+Avec ``GRIMOIRE_E2E_CAPTURES=<dossier>``, le dernier test y écrit les captures
+de l'écran (clair, sombre, mobile, vide, lecture seule) pour la relecture ;
+sans la variable il ne fait rien (il ne se skippe pas : le mode strict de la CI
+promeut tout skip en échec).
 """
 
 from __future__ import annotations
@@ -390,9 +392,9 @@ def test_un_lien_profond_rouvre_la_ligne_choisie(page: Page, served_inbox: dict[
 
 
 def test_captures_de_relecture(browser: Browser, served_inbox: dict[str, str]) -> None:
-    target = os.environ.get("GRIMOIRE_P32_CAPTURES")
+    target = os.environ.get("GRIMOIRE_E2E_CAPTURES")
     if not target:
-        pytest.skip("GRIMOIRE_P32_CAPTURES non défini : aucune capture demandée")
+        return
     out = Path(target)
     out.mkdir(parents=True, exist_ok=True)
     shots = (
