@@ -60,6 +60,21 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
+def no_tick() -> None:
+    """Les tests qui l'ouvrent éprouvent l'appelant CLI (session inscrite), pas l'API en processus du tick."""
+
+
+@pytest.fixture(autouse=True)
+def _tick(request: pytest.FixtureRequest) -> Any:
+    """Par défaut l'appelant est le code du tick (``acting_as_orchestrator``) ; ``no_tick`` l'en retire."""
+    if "no_tick" in request.fixturenames:
+        yield
+        return
+    with md.acting_as_orchestrator():
+        yield
+
+
+@pytest.fixture
 def project(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     root.mkdir()
@@ -519,7 +534,9 @@ def test_require_authority_refuses_when_the_guard_itself_fails(project: Path, mo
     assert refused.value.code == "guard_error"
 
 
-def test_a_registered_orchestrator_session_binds_the_principal(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_registered_orchestrator_session_binds_the_principal(
+    project: Path, monkeypatch: pytest.MonkeyPatch, no_tick: None
+) -> None:
     store = MandateStore(project)
     _grant(project)
     store.register_session("orch-1", "orchestrator")
@@ -568,7 +585,15 @@ def _orchestrator(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(md.PROVENANCE_ENV, "rule:regle-test")
 
 
-def test_cli_resume_and_queue_release_follow_the_mandate(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _enroll(root: Path, monkeypatch: pytest.MonkeyPatch, session: str = "orch-session") -> None:
+    """Le lanceur inscrit la session d'orchestrateur ; le processus CLI la porte."""
+    md.register_orchestrator_session(root, session)
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", session)
+
+
+def test_cli_resume_and_queue_release_follow_the_mandate(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, no_tick: None
+) -> None:
     _orchestrator(monkeypatch)
     root = str(governed)
     task = _task(governed)
@@ -578,6 +603,7 @@ def test_cli_resume_and_queue_release_follow_the_mandate(governed: Path, monkeyp
         refused = runner.invoke(app, argv)
         assert refused.exit_code == 1, refused.output  # sans mandat : refus
     _grant(governed, gestures=("resume", "queue-release"))
+    _enroll(governed, monkeypatch)
     for argv in (resume, release):
         done = runner.invoke(app, argv)
         assert "geste d'humain" not in done.output, done.output
@@ -585,11 +611,12 @@ def test_cli_resume_and_queue_release_follow_the_mandate(governed: Path, monkeyp
 
 
 def test_cli_approve_check_under_mandate_refuses_a_free_command(
-    governed: Path, monkeypatch: pytest.MonkeyPatch
+    governed: Path, monkeypatch: pytest.MonkeyPatch, no_tick: None
 ) -> None:
     _orchestrator(monkeypatch)
     task = _sealed_task(governed)
     _grant(governed, gestures=("approve-check",))
+    _enroll(governed, monkeypatch)
     free = runner.invoke(app, ["task", "approve-check", task.id, "--project-root", str(governed), "--cmd", "rm -rf /"])
     assert free.exit_code == 2 and "--cmd" in free.output
     ok = runner.invoke(app, ["task", "approve-check", task.id, "--project-root", str(governed)])
@@ -674,3 +701,85 @@ def test_the_control_key_is_private_and_a_missing_key_never_verifies(project: Pa
     assert (path.stat().st_mode & 0o077) == 0 or path.stat().st_mode == 0  # 0600 hors Windows
     assert md.verify_control_key(path.read_text(encoding="utf-8").strip()) is True
     assert md.verify_control_key("") is False and md.verify_control_key(None) is False
+
+
+# ── Le principal ne se déclare pas par l'environnement (#876, verrou 6) ─────────────────────────
+
+
+def _release_argv(root: Path, task: str) -> list[str]:
+    return ["queue", "release", task, "--project-root", str(root), "--reason", "ci finie"]
+
+
+def test_the_env_variable_alone_never_makes_the_orchestrator(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, no_tick: None
+) -> None:
+    """Un worker qui pose GRIMOIRE_PRINCIPAL sous un mandat actif ne s'auto-valide pas."""
+    _orchestrator(monkeypatch)
+    task = _task(governed)
+    _grant(governed, gestures=("resume", "queue-release", "answer", "accept", "approve-check"))
+    for session in ("", "worker-x"):  # sans session identifiée, puis sous une session quelconque
+        if session:
+            monkeypatch.setenv("GRIMOIRE_SESSION_ID", session)
+        refused = runner.invoke(app, _release_argv(governed, task))
+        assert refused.exit_code == 1 and "attesté" in refused.output, refused.output
+        refused = runner.invoke(app, ["orchestrate", "resume", "--project-root", str(governed)])
+        assert refused.exit_code == 1 and "attesté" in refused.output, refused.output
+    assert MandateStore(governed).gestures_taken() == []
+    with pytest.raises(MandateRefusedError) as unattested:
+        require_authority(
+            governed, "answer", TaskService(governed).require(task), ORIGIN_ORCHESTRATOR, what="x", provenance=PROV
+        )
+    assert unattested.value.code == "principal_unattested"
+
+
+def test_a_worker_or_reviewer_session_is_never_the_orchestrator(
+    project: Path, monkeypatch: pytest.MonkeyPatch, no_tick: None
+) -> None:
+    store = MandateStore(project)
+    _grant(project)
+    task = _worker_task(project)
+    store.register_session("s-w", "worker", task.id)
+    store.register_session("s-r", "reviewer", task.id)
+    for session in ("s-w", "s-r"):
+        with pytest.raises(MandateRefusedError) as clash:
+            md.register_orchestrator_session(project, session)
+        assert clash.value.code == "principal_unattested"
+    md.register_orchestrator_session(project, "s-o")
+    with pytest.raises(MandateRefusedError) as clash:
+        store.register_session("s-o", "worker", task.id)  # l'inverse aussi
+    assert clash.value.code == "role_conflict"
+    # La session qui tient la tâche (claim) ne valide pas, même inscrite orchestrateur avant de la prendre.
+    held = replace(task, claim=replace(_claim(), session_id="s-o"))
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "s-o")
+    with pytest.raises(MandateRefusedError, match="worker ou d'un relecteur"):
+        require_authority(project, "answer", held, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV)
+    assert require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV) is not None
+
+
+def _claim() -> Any:
+    from grimoire.missions.schemas import TaskClaim
+
+    return TaskClaim(actor_id="w", host_id="h")
+
+
+def test_orchestrator_session_registration_needs_an_active_mandate(project: Path, no_tick: None) -> None:
+    with pytest.raises(MandateRefusedError, match="aucun mandat"):
+        md.register_orchestrator_session(project, "s-o")
+    _grant(project)
+    for bad in ("", "  "):
+        with pytest.raises(MandateRefusedError):
+            md.register_orchestrator_session(project, bad)
+
+
+def test_the_tick_uses_the_in_process_api_never_the_environment(
+    project: Path, monkeypatch: pytest.MonkeyPatch, no_tick: None
+) -> None:
+    _grant(project)
+    task = TaskService(project).require(_task(project))
+    monkeypatch.setenv(md.PRINCIPAL_ENV, "orchestrator")  # sans effet
+    with pytest.raises(MandateRefusedError, match="attesté"):
+        require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV)
+    with md.acting_as_orchestrator():
+        assert require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV) is not None
+    with pytest.raises(MandateRefusedError, match="attesté"):  # la portée s'arrête avec le bloc
+        require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="x", provenance=PROV)

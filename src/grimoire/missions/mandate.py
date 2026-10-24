@@ -40,6 +40,8 @@ rôle ``orchestrator``), cette déclaration ne vaut que par le mandat qu'elle ex
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import hmac
 import json
@@ -47,7 +49,7 @@ import os
 import re
 import secrets
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -82,11 +84,13 @@ __all__ = [
     "MandateRequest",
     "MandateState",
     "MandateStore",
+    "acting_as_orchestrator",
     "control_dir",
     "control_key_path",
     "ensure_control_key",
     "gesture_origin",
     "load_escalation",
+    "register_orchestrator_session",
     "require_authority",
     "revoke_every_mandate",
     "task_categories",
@@ -107,7 +111,11 @@ PROVENANCE_KINDS: tuple[str, ...] = ("rule", "verdict", "receipt")
 JOURNAL_NAME = "mandates.authority.jsonl"
 KEY_NAME = "cockpit-key"
 ORCHESTRATION_FILE = STANDARD_DIR / "orchestration-policy.yaml"
-#: Variable qui déclare le principal ``orchestrator`` (lot 2 : posée par le lanceur du tick).
+#: Variable qui *revendique* le principal ``orchestrator`` pour un geste CLI. Une revendication n'est jamais une
+#: preuve : n'importe quel processus peut poser une variable. :func:`require_authority` ne l'accepte que si la
+#: session appelante est inscrite au journal d'autorité en rôle ``orchestrator`` (:func:`register_orchestrator_session`)
+#: et n'est celle d'aucun worker ni relecteur de la tâche. Le tick, qui est du code et non une session, n'utilise
+#: pas cette variable : il passe par :func:`acting_as_orchestrator`.
 PRINCIPAL_ENV = "GRIMOIRE_PRINCIPAL"
 #: ``<kind>:<ref>`` : la provenance d'un geste pris par la CLI sous mandat.
 PROVENANCE_ENV = "GRIMOIRE_PROVENANCE"
@@ -659,6 +667,16 @@ class MandateStore:
             raise MandateRefusedError(
                 state.reason or NO_MANDATE, f"session non inscrite : aucun mandat actif ({state.reason or NO_MANDATE})"
             )
+        clash = next(
+            (e for e in self.sessions() if e.get("session_id") == session_id.strip() and e.get("role") != role), None
+        )
+        if (
+            clash is not None
+        ):  # une session tient un seul rôle : celui qui valide n'est jamais celui qui travaille ou relit
+            raise MandateRefusedError(
+                "role_conflict",
+                f"session {session_id.strip()!r} déjà inscrite en rôle {clash.get('role')!r} : pas {role!r}",
+            )
         if role == "worker" and state.sessions_today >= state.mandate.max_sessions_per_day:
             self._write_revocation(
                 state.mandate.id,
@@ -955,12 +973,13 @@ _MARKER = re.compile(r"^(rule|verdict|receipt):(.+)$")
 
 
 def gesture_origin(human_origin: str, env: Mapping[str, str] | None = None) -> tuple[str, dict[str, str]]:
-    """Le canal d'un geste CLI : ``(origine, provenance)``.
+    """Le canal d'un geste CLI : ``(origine, provenance)`` — une *revendication*, pas une preuve.
 
     *human_origin* est ce que :func:`grimoire.cli.cmd_task._comment_origin` a établi. Un humain établi
-    reste humain. Sinon, ``GRIMOIRE_PRINCIPAL=orchestrator`` déclare le principal orchestrateur (la
+    reste humain. Sinon, ``GRIMOIRE_PRINCIPAL=orchestrator`` revendique le principal orchestrateur (la
     provenance se lit dans ``GRIMOIRE_PROVENANCE``, ``<kind>:<ref>``) ; le reste garde son origine.
-    Déclarer le principal ne donne rien sans mandat : :func:`require_authority` le vérifie.
+    Revendiquer ne donne rien : :func:`require_authority` exige un mandat actif qui couvre le geste **et**
+    une session appelante inscrite en rôle ``orchestrator`` au journal d'autorité.
     """
     environ = os.environ if env is None else env
     if human_origin == ORIGIN_HUMAN:
@@ -969,6 +988,50 @@ def gesture_origin(human_origin: str, env: Mapping[str, str] | None = None) -> t
         return human_origin, {}
     found = _MARKER.match(str(environ.get(PROVENANCE_ENV, "")).strip())
     return ORIGIN_ORCHESTRATOR, ({"kind": found.group(1), "ref": found.group(2).strip()} if found else {})
+
+
+#: Vrai le temps d'un :func:`acting_as_orchestrator` : l'appelant est du code du kit (le tick), pas une session.
+_IN_PROCESS_ORCHESTRATOR: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "grimoire_in_process_orchestrator", default=False
+)
+
+
+@contextlib.contextmanager
+def acting_as_orchestrator() -> Iterator[None]:
+    """API en processus du tick : les gestes pris dans ce bloc avec ``origin="orchestrator"`` n'exigent pas de session.
+
+    Le tick (lot 2) est du code, pas une session d'agent : il n'a pas d'identifiant de session à inscrire.
+    Il passe l'origine par cette API Python, jamais par ``GRIMOIRE_PRINCIPAL`` (une variable d'environnement
+    n'atteste rien). Le mandat reste exigé : journal, bornes, politique d'escalade, provenance, tout s'applique.
+
+    ::
+
+        with acting_as_orchestrator():
+            service.answer(task_id, text, "tick", origin=ORIGIN_ORCHESTRATOR, provenance={"kind": "rule", "ref": "..."})
+
+    Portée : le processus courant seulement (``contextvars``) ; un sous-processus ne l'hérite pas.
+    """
+    token = _IN_PROCESS_ORCHESTRATOR.set(True)
+    try:
+        yield
+    finally:
+        _IN_PROCESS_ORCHESTRATOR.reset(token)
+
+
+def register_orchestrator_session(project_root: Path, session_id: str, now: datetime | None = None) -> None:
+    """Inscrit *session_id* au journal d'autorité en rôle ``orchestrator`` : la seule voie CLI du principal.
+
+    À appeler par le lanceur du lot 2, avec l'identifiant de session qu'il a fixé au processus orchestrateur
+    (``GRIMOIRE_SESSION_ID`` ou la variable de l'hôte). Exige un mandat actif ; refuse un identifiant vide.
+    Un identifiant déjà inscrit comme worker ou relecteur ne peut pas devenir orchestrateur.
+    """
+    store = MandateStore(project_root)
+    session = session_id.strip()
+    if any(e.get("session_id") == session for e in store.sessions() if e.get("role") in ("worker", "reviewer")):
+        raise MandateRefusedError(
+            "principal_unattested", f"session {session!r} déjà inscrite comme worker ou relecteur : pas orchestrateur"
+        )
+    store.register_session(session, "orchestrator")
 
 
 def require_authority(
@@ -984,8 +1047,10 @@ def require_authority(
     """Le contrôle d'origine d'un geste : ``None`` pour l'humain, une :class:`Authorization` sous mandat, sinon un refus.
 
     Remplace ``if origin != ORIGIN_HUMAN: raise`` : sans mandat valide qui couvre le geste et le type de
-    tâche, l'origine ``orchestrator`` est refusée comme toute autre origine non humaine. Une garde en
-    erreur refuse (échec fermé).
+    tâche, l'origine ``orchestrator`` est refusée comme toute autre origine non humaine. Avec un mandat, elle
+    exige encore un appelant attesté : le code du tick (:func:`acting_as_orchestrator`) ou une session inscrite
+    en rôle ``orchestrator`` (:func:`register_orchestrator_session`), qui n'est celle d'aucun worker ni relecteur.
+    Une garde en erreur refuse (échec fermé).
     """
     if origin == ORIGIN_HUMAN:
         return None
@@ -996,8 +1061,13 @@ def require_authority(
         )
     try:
         store = MandateStore(project_root)
-        _require_orchestrator_session(store)
-        return store.authorize(gesture, task, provenance, record=record)
+        # Le mandat d'abord (son refus dit pourquoi : aucun mandat, expiré, hors périmètre), puis l'appelant,
+        # puis le journal du geste : un geste refusé ensuite n'est jamais inscrit « pris ».
+        auth = store.authorize(gesture, task, provenance, record=False)
+        _require_orchestrator_session(store, task)
+        if record:
+            store.record_gesture(auth)
+        return auth
     except MandateRefusedError:
         raise
     except Exception as exc:  # une garde qui échoue ne laisse pas passer
@@ -1006,15 +1076,34 @@ def require_authority(
         ) from exc
 
 
-def _require_orchestrator_session(store: MandateStore) -> None:
-    """Si le lanceur a inscrit des sessions d'orchestrateur, l'appelant doit en être une."""
+def _require_orchestrator_session(store: MandateStore, task: MissionTask | None) -> None:
+    """Échec fermé : l'appelant est le code du tick, ou une session inscrite orchestrateur qui n'est pas celle d'un worker."""
     from grimoire.core.standard_state import current_session
 
-    registered = {str(e["session_id"]) for e in store.sessions(role="orchestrator")}
-    if registered and current_session()[0] not in registered:
+    if _IN_PROCESS_ORCHESTRATOR.get():
+        return
+    session = current_session()[0].strip()
+    if not session:
         raise MandateRefusedError(
             "principal_unattested",
-            "le principal orchestrator n'est pas attesté : la session appelante n'est pas celle que le kit a lancée",
+            "le principal orchestrator n'est pas attesté : aucune session identifiée (la variable GRIMOIRE_PRINCIPAL "
+            "ne prouve rien ; le lanceur inscrit la session d'orchestrateur au journal d'autorité)",
+        )
+    registered = store.sessions()
+    if session not in {str(e["session_id"]) for e in registered if e.get("role") == "orchestrator"}:
+        raise MandateRefusedError(
+            "principal_unattested",
+            "le principal orchestrator n'est pas attesté : la session appelante n'est pas inscrite orchestrateur au "
+            "journal d'autorité (la variable GRIMOIRE_PRINCIPAL ne prouve rien)",
+        )
+    held = {str(e["session_id"]) for e in registered if e.get("role") in ("worker", "reviewer")}
+    if task is not None and task.claim is not None:
+        held.add(task.claim.session_id)
+        held.add(task.claim.actor_id)
+    if session in held:
+        raise MandateRefusedError(
+            "principal_unattested",
+            f"la session {session!r} est celle d'un worker ou d'un relecteur : elle ne valide pas en orchestrateur",
         )
 
 

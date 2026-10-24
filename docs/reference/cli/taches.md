@@ -426,8 +426,12 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
 - **Sous mandat** : un reçu de revue ne vaut que si son relecteur diffère de l'auteur et si la session du
   relecteur figure au journal d'autorité ; les `--check` doivent être ceux scellés à la création de la
   tâche, un check modifié depuis ouvre un événement « disjoncteur ».
-- **Principal** : un appelant se déclare `orchestrator` par `GRIMOIRE_PRINCIPAL=orchestrator` et cite sa
-  provenance par `GRIMOIRE_PROVENANCE=<rule|verdict|receipt>:<réf>`.
+- **Principal** : en CLI, `GRIMOIRE_PRINCIPAL=orchestrator` *revendique* le principal et
+  `GRIMOIRE_PROVENANCE=<rule|verdict|receipt>:<réf>` cite la provenance ; la revendication ne vaut que si la
+  session appelante est inscrite au journal d'autorité en rôle `orchestrator`
+  (`register_orchestrator_session(projet, session_id)`, appelée par le lanceur) et n'est celle d'aucun worker ni
+  relecteur de la tâche. Sans session inscrite : refus. Le tick, qui est du code et non une session, appelle
+  l'API Python dans `with acting_as_orchestrator():` (`grimoire.missions.mandate`), jamais par l'environnement.
 - **Cockpit** : `GET /api/workspace/autonomy/mandate`, `POST …/mandate/grant` (jeton de session **et** clé de
   contrôle `~/.grimoire/control/cockpit-key`) et `POST …/mandate/revoke`.
 - **Zone protégée** : `~/.grimoire/control/` (journal d'autorité, preuve de contrat d'hôte, clé du cockpit) est
