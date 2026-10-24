@@ -401,7 +401,13 @@ def annotate(
             state, reason = _unlinked_state(confirmed, moment)
         fact = _fact(entry, source, state, reason, changed, project or str(meta.get("project_name") or ""))
         shown = source.uri or ("saisie libre" if source.kind == "saisie libre" else "inconnue")
-        annotated.append(replace(entry, provenance=fact, freshness=state, source=shown))
+        annotated.append(replace(
+            entry,
+            provenance=fact,
+            freshness=state,
+            source=shown,
+            task_ref=str(meta.get("task_ref") or ""),
+        ))
     return annotated
 
 
