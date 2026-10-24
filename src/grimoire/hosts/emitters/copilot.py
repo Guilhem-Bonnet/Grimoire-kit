@@ -176,7 +176,14 @@ Tu actives la persona Grimoire **{agent.name}** du projet {surface.project_name}
 
 
 def _skill_file(skill: SkillSpec) -> EmittedFile:
-    header = Emitter.frontmatter({"name": skill.slug, "description": skill.description})
+    header = Emitter.frontmatter(
+        {
+            "name": skill.slug,
+            "description": skill.description,
+            "license": skill.license,
+            "compatibility": skill.compatibility,
+        }
+    )
     content = f"{header}\n{managed_header('.md')}\n\n{skill.body}"
     return EmittedFile(relpath=GH_DIR / "skills" / skill.slug / "SKILL.md", content=content)
 

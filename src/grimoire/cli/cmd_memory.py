@@ -147,6 +147,10 @@ def _load_manager(path: Path = Path()) -> MemoryManager:
     return mgr
 
 
+def _hidden_stale_notice(hidden: int) -> str:
+    return f"{hidden} résultat(s) écarté(s) : source disparue (--include-stale pour les voir)."
+
+
 def _entry_payload(entry: Any) -> dict[str, Any]:
     return entry.to_dict() if hasattr(entry, "to_dict") else dict(entry)
 
@@ -783,8 +787,13 @@ def memory_search(
     room: str = typer.Option("", "--room", help="Filter by palace room."),
     hybrid: bool | None = typer.Option(None, "--hybrid/--no-hybrid", help="Fuse vector and lexical BM25 rankings (RRF). Default: on when the project has both."),
     include_superseded: bool = typer.Option(False, "--include-superseded", help="Also return memories replaced by a newer one (metadata superseded_by). Hidden by default."),
+    include_stale: bool = typer.Option(False, "--include-stale", help="Also return memories whose source file no longer exists. Hidden by default (the count is reported)."),
 ) -> None:
     """Search memories by keyword or semantic similarity.
+
+    Every result carries its source, its dates and its freshness (computed at
+    read time: up to date, outdated, source gone, unverified, hypothesis). A
+    free-text memory is never reported up to date.
 
     Memories whose metadata names a replacement (`superseded_by`) are not
     served unless --include-superseded is given.
@@ -795,41 +804,28 @@ def memory_search(
     """
     mgr = _load_manager()
     use_hybrid = mgr.prefers_hybrid if hybrid is None else hybrid
-    results = run_memory_search(mgr, query, hybrid=use_hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room, include_superseded=include_superseded)
+    results = run_memory_search(mgr, query, hybrid=use_hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room, include_superseded=include_superseded, include_stale=include_stale)
     fmt = _get_fmt(ctx)
+    raw_hidden = getattr(mgr, "hidden_stale", 0)
+    hidden = raw_hidden if isinstance(raw_hidden, int) else 0
 
     if fmt == "json":
         typer.echo(json.dumps([_entry_payload(e) for e in results], indent=2, default=str))
+        if hidden:
+            typer.echo(_hidden_stale_notice(hidden), err=True)
         return
 
     if not results:
         console.print(f"[yellow]No memories matching '{query}'.[/yellow]")
+        if hidden:
+            console.print(f"[yellow]{_hidden_stale_notice(hidden)}[/yellow]")
         return
 
-    tbl = Table(title=f"Search: {query}")
-    tbl.add_column("ID", style="dim", max_width=12)
-    tbl.add_column("Text", max_width=60)
-    tbl.add_column("Wing")
-    tbl.add_column("Hall")
-    tbl.add_column("Room")
-    tbl.add_column("Score", justify="right")
-    tbl.add_column("Tags")
+    from grimoire.cli.cmd_memory_knowledge import render_search_table
 
-    for entry in results:
-        score = f"{entry.score:.3f}" if entry.score else "—"
-        tags = ", ".join(entry.tags) if entry.tags else "—"
-        text = entry.text[:57] + "…" if len(entry.text) > 60 else entry.text
-        tbl.add_row(
-            entry.id[:12],
-            text,
-            str(entry.metadata.get("wing", "—")),
-            str(entry.metadata.get("hall", "—")),
-            str(entry.metadata.get("room", "—")),
-            score,
-            tags,
-        )
-
-    console.print(tbl)
+    console.print(render_search_table(query, results))
+    if hidden:
+        console.print(f"[yellow]{_hidden_stale_notice(hidden)}[/yellow]")
 
 
 # ── grimoire memory bench ─────────────────────────────────────────────────────
@@ -874,6 +870,7 @@ def memory_remember(
     type_: str = typer.Option(..., "--type", "-t", help="Memory type: shared-context | decisions | agent-learnings | failures | stories."),
     agent: str = typer.Option(..., "--agent", "-a", help="Emitting agent tag."),
     tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
+    source: str = typer.Option("", "--source", help="Where the fact comes from: a file path (path or path:line), task:<id>, session:<id>, commit:<sha>. Omitted: free text, never reported up to date."),
 ) -> None:
     """Typed idempotent memory write — same text + agent never duplicates.
 
@@ -885,7 +882,7 @@ def memory_remember(
     mgr = _load_manager()
     tag_tuple = tuple(t.strip() for t in tags.split(",") if t.strip())
     try:
-        entry = mgr.remember(type_, agent, text, tags=tag_tuple)
+        entry = mgr.remember(type_, agent, text, tags=tag_tuple, **({"source": source} if source else {}))
     except GrimoireMemoryError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None

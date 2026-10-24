@@ -36,7 +36,13 @@ def register(task_app: typer.Typer) -> None:
     """Pose les commandes d'attente sur ``grimoire task``."""
     from grimoire.cli import cmd_task as ct
 
-    def run(ctx: typer.Context, project_root: Path, ledger_root: Path, task_id: str, gesture: Any) -> None:
+    def run(ctx: typer.Context, project_root: Path, ledger_root: Path, task_id: str, gesture: Any, *, parking: bool = False) -> None:
+        if parking:
+            try:
+                for line in ct._service(project_root, ledger_root).parking_warnings(task_id):
+                    console.print(f"[yellow]![/yellow] {line}")
+            except Exception:  # noqa: S110 — un avertissement ne bloque jamais le geste
+                pass
         ct._steer(ctx, project_root, ledger_root, task_id, gesture)
 
     @task_app.command("ask")
@@ -65,7 +71,7 @@ def register(task_app: typer.Typer) -> None:
                 console.print("[red]✗[/red] une question (texte) ou un lot (`--from`)")
                 raise typer.Exit(1)
             run(ctx, project_root, ledger_root, task_id,
-                lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch))
+                lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch), parking=True)
             return
         from grimoire.cli.cmd_task_questions import emit_batch, read_specs
         from grimoire.core.exceptions import GrimoireError
@@ -170,7 +176,7 @@ def register(task_app: typer.Typer) -> None:
     ) -> None:
         """Gare la tâche avec une raison nommée (`waiting`), sans question."""
         run(ctx, project_root, ledger_root, task_id,
-            lambda s: s.wait(task_id, reason, actor, until=until, note=note, epoch=epoch))
+            lambda s: s.wait(task_id, reason, actor, until=until, note=note, epoch=epoch), parking=True)
 
     @task_app.command("resume")
     def task_resume(

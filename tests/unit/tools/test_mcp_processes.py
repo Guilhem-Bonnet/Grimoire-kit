@@ -96,15 +96,40 @@ def test_doctor_says_not_measured_without_proc(monkeypatch: pytest.MonkeyPatch) 
 def test_doctor_checks_the_http_entry_of_mcp_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".mcp.json").write_text(
         '{"mcpServers": {"grimoire-http": {"type": "http", "url": "http://127.0.0.1:7331/mcp"},'
-        ' "noport": {"type": "http", "url": "http://localhost/mcp"}}}',
+        ' "badport": {"type": "http", "url": "http://localhost:abc/mcp"},'
+        ' "ftp": {"type": "http", "url": "ftp://localhost:21/mcp"}}}',
         encoding="utf-8",
     )
     monkeypatch.setattr(cmd_up, "_tcp_reachable", lambda url, port, **k: port == 7331)
     by_name = {c.name: c for c in check_mcp_json(tmp_path)}
     assert by_name["mcp_grimoire-http"].level == "ok"
-    assert by_name["mcp_noport"].passed is False and "no port" in by_name["mcp_noport"].detail
+    assert by_name["mcp_badport"].passed is False and "invalid url" in by_name["mcp_badport"].detail
+    assert by_name["mcp_ftp"].passed is False and "invalid url" in by_name["mcp_ftp"].detail
 
     monkeypatch.setattr(cmd_up, "_tcp_reachable", lambda url, port, **k: False)
     chk = {c.name: c for c in check_mcp_json(tmp_path)}["mcp_grimoire-http"]
     assert chk.passed is True and chk.level == "warn"  # injoignable : l'entrée stdio reste, pas un FAIL
     assert "grimoire mcp start" in chk.remedy
+
+
+def test_doctor_takes_the_scheme_port_of_a_remote_http_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Constat sur la Forge (3.65.0) : context7 et github, servis en https sans port explicite,
+    # sortaient en FAIL « has no port » avec une remédiation grimoire hors sujet.
+    (tmp_path / ".mcp.json").write_text(
+        '{"mcpServers": {"context7": {"type": "streamable-http", "url": "https://mcp.context7.com/mcp"},'
+        ' "github": {"type": "http", "url": "https://api.githubcopilot.com/mcp/"},'
+        ' "plain": {"type": "http", "url": "http://localhost/mcp"}}}',
+        encoding="utf-8",
+    )
+    probed: list[tuple[str, int]] = []
+    monkeypatch.setattr(cmd_up, "_tcp_reachable", lambda url, port, **k: probed.append((url, port)) or url.startswith("https"))
+    by_name = {c.name: c for c in check_mcp_json(tmp_path)}
+    assert by_name["mcp_context7"].level == "ok" and by_name["mcp_github"].level == "ok"
+    assert ("https://mcp.context7.com/mcp", 443) in probed and ("http://localhost/mcp", 80) in probed
+    assert by_name["mcp_plain"].passed is True and by_name["mcp_plain"].level == "warn"
+    assert "grimoire mcp start" in by_name["mcp_plain"].remedy  # serveur local : remède grimoire
+
+    monkeypatch.setattr(cmd_up, "_tcp_reachable", lambda url, port, **k: False)
+    remote = {c.name: c for c in check_mcp_json(tmp_path)}["mcp_context7"]
+    assert remote.passed is True and remote.level == "warn"
+    assert "grimoire mcp" not in remote.remedy  # serveur tiers : rien à démarrer côté grimoire

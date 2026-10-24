@@ -52,7 +52,7 @@ et se comportent désormais exactement comme le défaut.
 | Profil | Composition |
 |--------|-------------|
 | `lexical` | BM25 SQLite seul — aucun modèle, aucun service, aucun réseau |
-| `standard` | Sémantique + BM25 fusionnés (RRF) et sidecar structuré |
+| `standard` | BM25 lexical et sidecar structuré ; sémantique fusionnée (RRF) seulement quand un moteur vectoriel est en service |
 | `graphe` | Standard + graphes Neo4j : connaissances, souvenirs, code, tâches |
 | `complet` | Graphe + mémoire chaude Redis (TTL, baux, coordination multi-agents) |
 

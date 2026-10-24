@@ -258,7 +258,12 @@ export const api = {
   // 'slug1,slug2', ou est omis pour « ce projet » seul — jamais toute la
   // flotte par défaut. Lecture seule, aucune fusion de stores.
   memoryOverview: (projects) => get(WS + 'memory/overview', projects ? { projects } : undefined),
-  memorySearch: (q, projects) => get(WS + 'memory/search', projects ? { q, projects } : { q }),
+  memorySearch: (q, projects, { includeSuperseded, includeStale } = {}) => {
+    const params = projects ? { q, projects } : { q };
+    if (includeSuperseded) params.include_superseded = '1';
+    if (includeStale) params.include_stale = '1';
+    return get(WS + 'memory/search', params);
+  },
 
   // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
   // Lecture, validation et simulation sont disponibles sur les deux hôtes
