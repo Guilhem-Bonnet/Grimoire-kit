@@ -374,3 +374,48 @@ def test_other_paths_are_not_taken_for_the_control_zone(real_home, command: str)
     from grimoire.hosts.decisions.authority_guard import forgery_vector
 
     assert forgery_vector(classify_tool("Bash", {"command": command})) is None, command
+
+
+# ── Lecture de la clé du cockpit et du journal du mandat : jokers, répertoire courant, liens ────
+# La clé, lue puis rejouée avec le jeton de session que le cockpit injecte dans ses pages, accorde un mandat ;
+# le journal porte les identifiants de session que le principal `orchestrator` doit prouver.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat ~/.grimoire/control/cockpit-k*",
+        "cat ~/.grimoire/control/cockp?t-key",
+        "cat ~/.grimoire/control/*",
+        "cat ~/.grimoire/*/cockpit-key",
+        "cd ~/.grimoire/control && cat cock*",
+        "cd ~/.grimoire && cat control/c*",
+        "cat ~/.grimoire/other/../control/cockpit-ke[y]",
+        "cat ${HOME}/.grimoire/./control/cockpit-key",
+        "cat $HOME/.grimoire/control/mandates.authority.jsonl",
+        "head -1 ~/.grimoire/control/mandates.*",
+    ],
+)
+def test_the_control_key_and_the_mandate_journal_cannot_be_read_by_any_form(real_home, command: str) -> None:  # type: ignore[no-untyped-def]
+    assert classify_tool("Bash", {"command": command}).secret_target, command
+
+
+def test_a_symlink_to_the_control_key_is_still_the_key(real_home, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    key = real_home / ".grimoire" / "control" / "cockpit-key"
+    key.write_text("k\n", encoding="utf-8")
+    (tmp_path / "k").symlink_to(key)
+    assert classify_tool("Read", {"file_path": str(tmp_path / "k")}).secret_target
+    assert classify_tool("Bash", {"command": f"cat {tmp_path}/k"}).secret_target
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat ~/.grimoire/control/host-contracts.json",
+        "cat ~/.grimoire/other/x",
+        "cd ~/.grimoire/other && cat x*",
+        "cat ./control/cockpit-notes",  # un dossier `control` du projet
+    ],
+)
+def test_other_reads_stay_allowed(real_home, command: str) -> None:  # type: ignore[no-untyped-def]
+    assert not classify_tool("Bash", {"command": command}).secret_target, command

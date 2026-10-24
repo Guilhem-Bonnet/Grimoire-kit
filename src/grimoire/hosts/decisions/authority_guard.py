@@ -73,6 +73,7 @@ __all__ = [
     "SNAPSHOT_FILENAME",
     "ForgeryVector",
     "forgery_vector",
+    "names_zone_secret",
 ]
 
 #: Suffixe des journaux de challenges et de décisions de checkpoint
@@ -284,25 +285,23 @@ def _without_neutral(words: list[str]) -> list[str]:
 def _names_control_zone_path(target: str) -> bool:
     """Un chemin d'outil (Write, Edit, NotebookEdit) qui se résout dans la zone de contrôle."""
     zones, _grimoire, home = _control_zones()
-    for normal, real in _resolutions(target, [_cwd()], home):
-        if any(_inside(normal, z) or _inside(real, z) or (_GLOB_CHARS.search(normal) and _glob_reaches(normal, z)) for z in zones):
-            return True
-    return False
+    return any(_reaches(normal, real, z) for normal, real in _resolutions(target, [_cwd()], home) for z in zones)
 
 
-def _names_control_zone_command(command: str) -> bool:
-    """Une commande qui nomme la zone de contrôle, ou ``~/.grimoire`` pour le déplacer, par un chemin résolu."""
-    zones, grimoire, home = _control_zones()
+def _command_paths(command: str, home: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """``(programme, [(normalisé, résolu)…])`` pour chaque segment de *command*.
+
+    Les répertoires où la commande peut se placer (``cd``, ``pushd``, ``-C``, ``--directory``) sont collectés
+    d'abord, puis chaque mot relatif est joint à chacun : une commande qui change de dossier n'est pas lue
+    comme si elle ne l'avait pas fait.
+    """
     bodies = [_strip_heredoc_bodies(command), *extract_c_bodies(command)]
-    segments = [seg for text in bodies for seg in _command_words(text)]
+    segments = [_without_neutral(seg) for text in bodies for seg in _command_words(text)]
     dirs = [_cwd()]
-    # Première passe : les répertoires où la commande peut se placer (cd, pushd, -C, --directory).
-    for words in segments:
-        launched = _without_neutral(words)
+    for launched in segments:
         if launched and launched[0].rsplit("/", 1)[-1] in _DIR_PROGRAMS:
             args = [w for w in launched[1:] if not w.startswith("-")]
-            targets = args[:1] or ["~"]
-            for target in targets:
+            for target in args[:1] or ["~"]:
                 dirs.extend(real for _normal, real in _resolutions(target, list(dirs), home))
         for prev, word in pairwise(launched):
             if prev in _DIR_FLAGS:
@@ -311,21 +310,52 @@ def _names_control_zone_command(command: str) -> bool:
             if word.startswith(("--directory=", "--target-directory=")):
                 dirs.extend(real for _normal, real in _resolutions(word.split("=", 1)[1], list(dirs), home))
     dirs = list(dict.fromkeys(dirs))
-    for words in segments:
-        launched = _without_neutral(words)
-        program = launched[0].rsplit("/", 1)[-1] if launched else ""
-        for word in launched[1:]:
-            for normal, real in _resolutions(word, dirs, home):
-                if any(
-                    _inside(normal, z) or _inside(real, z) or (_GLOB_CHARS.search(normal) and _glob_reaches(normal, z))
-                    for z in zones
-                ):
-                    return True
-                if program in _RELOCATORS and (normal == grimoire or real == grimoire):
-                    return True
-                if program == "ln" and (normal in (grimoire, home) or real in (grimoire, home)):
-                    return True
+    return [
+        (launched[0].rsplit("/", 1)[-1], [r for word in launched[1:] for r in _resolutions(word, dirs, home)])
+        for launched in segments
+        if launched
+    ]
+
+
+def _reaches(normal: str, real: str, target: str) -> bool:
+    """Vrai si le chemin (ou le motif) désigne *target*, ou ce qu'il contient."""
+    if _inside(normal, target) or _inside(real, target):
+        return True
+    return bool(_GLOB_CHARS.search(normal) and _glob_reaches(normal, target))
+
+
+def _names_control_zone_command(command: str) -> bool:
+    """Une commande qui nomme la zone de contrôle, ou ``~/.grimoire`` pour le déplacer, par un chemin résolu."""
+    zones, grimoire, home = _control_zones()
+    for program, resolved in _command_paths(command, home):
+        for normal, real in resolved:
+            if any(_reaches(normal, real, z) for z in zones):
+                return True
+            if program in _RELOCATORS and grimoire in (normal, real):
+                return True
+            if program == "ln" and (normal in (grimoire, home) or real in (grimoire, home)):
+                return True
     return False
+
+
+#: Ce que la zone de contrôle porte et qu'un agent ne lit pas : la clé du cockpit (avec le jeton de session que
+#: le cockpit injecte dans ses pages, elle accorde un mandat) et le journal du mandat (les identifiants de session
+#: que le principal ``orchestrator`` doit prouver). La preuve de contrat d'hôte, elle, reste lisible.
+_ZONE_SECRET_FILES = ("cockpit-key", "mandates.authority.jsonl")
+
+
+def names_zone_secret(command: str, targets: tuple[str, ...] = ()) -> str:
+    """Le fichier secret de la zone de contrôle qu'un appel lit — jokers, ``cd``, liens et ``..`` résolus ; ``""`` sinon."""
+    zones, _grimoire, home = _control_zones()
+    secrets = [(name, f"{z}/{name}") for z in zones for name in _ZONE_SECRET_FILES]
+    found: list[tuple[str, str]] = [r for t in targets for r in _resolutions(t, [_cwd()], home)]
+    if command:
+        found.extend(r for _program, resolved in _command_paths(command, home) for r in resolved)
+    for normal, real in found:
+        for name, path in secrets:
+            if _reaches(normal, real, path):
+                return f"{CONTROL_ZONE_MARKER}/{name}"
+    return ""
 
 
 _OPERATORS = ("&&", "||", "$(", ";", "|", "\n", "`", "(", ")")

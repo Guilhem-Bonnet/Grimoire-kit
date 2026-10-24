@@ -77,6 +77,11 @@ SECRET_RULES: tuple[SecretRule, ...] = (
     # l'orchestrateur. Elle vit sous ``~/.grimoire/control/`` ; un agent ne la lit pas (la lire, c'est pouvoir
     # se faire passer pour l'humain du cockpit).
     SecretRule("cockpit-key", rf"{_BEFORE}cockpit-key{_AFTER}", ("**/cockpit-key",)),
+    # Le journal d'autorité du mandat porte les identifiants de session que l'orchestrateur doit prouver : le lire,
+    # c'est pouvoir reprendre celui d'un orchestrateur ou d'un relecteur. Les autres journaux d'autorité restent lisibles.
+    SecretRule(
+        "mandate-journal", rf"{_BEFORE}mandates\.authority\.jsonl{_AFTER}", ("**/mandates.authority.jsonl",)
+    ),
     SecretRule(
         "service-account",
         rf"{_BEFORE}service-account[a-z0-9_-]*\.json{_AFTER}",
