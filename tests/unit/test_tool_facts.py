@@ -134,6 +134,10 @@ def test_lectures_courantes_sont_read_only(command: str) -> None:
         "git format-patch -1 --stdout",
         "git archive -o out.tar HEAD",
         "git archive --output=out.tar HEAD",
+        "git -c core.pager=./x log",  # un -c peut poser un pager, un alias ou un hook : jamais une lecture
+        "git -c diff.external=./x diff",
+        "git --git-dir=.git log",
+        "git diff -- --output=out",
         "ls & rm f",
         "sed p f & rm f",
         "cat f |& rm f",
