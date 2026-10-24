@@ -60,6 +60,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.missions.dispatch import CheckResult, _run_checks
 
@@ -78,6 +79,7 @@ __all__ = [
     "CheckSpec",
     "UnapprovedChecksError",
     "approve_checks",
+    "approve_checks_under_mandate",
     "command_sha256",
     "enforced",
     "hidden_characters",
@@ -247,7 +249,11 @@ def _approved_specs(project_root: Path, task_id: str) -> frozenset[str]:
         for e in _read(project_root / APPROVALS_RELPATH)
         if e.get("type") == "approval"
         and e.get("task_id") == task_id
-        and (e.get("attestation") == "attested" or e.get("allow_unattested") is True)
+        and (
+            e.get("attestation") == "attested"
+            or e.get("allow_unattested") is True
+            or (str(e.get("attestation", "")).startswith("granted:mandate:") and bool(e.get("mandate_id")))
+        )
     )
 
 
@@ -323,6 +329,17 @@ def approve_checks(
             "(journalisé comme non attesté ; ce n'est pas une preuve d'humain).",
         )
     journal.record_decision(node, "approve", "approve-check", attestation)
+    _write_approvals(
+        root, task_id, specs, actor, session_id=attestation.session_id, attestation=attestation.status,
+        attestation_reason=attestation.reason, allow_unattested=bool(allow_unattested and not attestation.attested),
+    )
+    return ApprovalOutcome(tuple(s.sha256 for s in specs), attestation.status, attestation.reason, actor)
+
+
+def _write_approvals(
+    root: Path, task_id: str, specs: Sequence[CheckSpec], actor: str, *, session_id: str, attestation: str,
+    attestation_reason: str, allow_unattested: bool, extra: Mapping[str, Any] | None = None,
+) -> None:
     approvals = root / APPROVALS_RELPATH
     approvals.parent.mkdir(parents=True, exist_ok=True)
     stamp = _now()
@@ -335,11 +352,12 @@ def approve_checks(
                 "command_sha256": command_sha256(spec.cmd),
                 "expect_exit": spec.expect_exit,
                 "actor": actor,
-                "session_id": attestation.session_id,
-                "attestation": attestation.status,
-                "attestation_reason": attestation.reason,
-                "allow_unattested": bool(allow_unattested and not attestation.attested),
+                "session_id": session_id,
+                "attestation": attestation,
+                "attestation_reason": attestation_reason,
+                "allow_unattested": allow_unattested,
                 "ts": stamp,
+                **(extra or {}),
             },
             ensure_ascii=True,
         )
@@ -347,7 +365,45 @@ def approve_checks(
     ]
     with locked(approvals), approvals.open("a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
-    return ApprovalOutcome(tuple(s.sha256 for s in specs), attestation.status, attestation.reason, actor)
+
+
+def approve_checks_under_mandate(
+    project_root: Path, task: MissionTask, *, actor: str, provenance: Mapping[str, Any] | None
+) -> ApprovalOutcome:
+    """Approuve les ``checks`` déclarés de *task* sous mandat (#876, verrou 9).
+
+    Le geste ``approve-check`` doit être couvert (:func:`grimoire.missions.mandate.require_authority`) ;
+    puis les checks de la tâche doivent être ceux scellés à sa création : un check modifié depuis n'est pas
+    approuvable sous mandat, et l'écart ouvre l'événement « disjoncteur » (``MandateStore.breaker_events``)
+    que le lot 2 consomme. Les caractères cachés sont refusés comme pour un humain.
+    """
+    from grimoire.missions.mandate import MandateStore, require_authority
+    from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR
+
+    root = project_root.resolve()
+    specs = specs_of_task(task)
+    if not specs:
+        raise ApprovalRefusedError("no_checks", f"{task.id} ne déclare aucune commande : rien à approuver")
+    for spec in specs:
+        found = hidden_characters(spec.cmd)
+        if found:
+            raise ApprovalRefusedError(
+                "hidden_characters", f"commande refusée ({', '.join(found)}) — {visible(spec.cmd)}"
+            )
+    authority = require_authority(
+        root, "approve-check", task, ORIGIN_ORCHESTRATOR, what=f"Approbation refusée pour {task.id}", provenance=provenance
+    )
+    assert authority is not None
+    try:
+        MandateStore(root).verify_seal(task.id, task.checks)
+    except GrimoireMissionError as exc:
+        raise ApprovalRefusedError("seal", str(exc)) from exc
+    status = f"granted:mandate:{authority.mandate_id}"
+    _write_approvals(
+        root, task.id, specs, authority.actor_label, session_id="", attestation=status, attestation_reason="mandat",
+        allow_unattested=False, extra={"mandate_id": authority.mandate_id, "provenance": dict(authority.provenance)},
+    )
+    return ApprovalOutcome(tuple(s.sha256 for s in specs), status, "mandat", authority.actor_label)
 
 
 class CheckGate:

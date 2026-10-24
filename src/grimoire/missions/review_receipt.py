@@ -141,6 +141,8 @@ class ReviewReceipt:
     evidence_pack_sha256: str | None
     written_at: str
     findings: tuple[ReviewFinding, ...] = field(default=())
+    #: Provenance (#876, verrou 7) : la session du relecteur, que le journal d'autorité atteste sous mandat.
+    reviewer_session: str = ""
 
     @property
     def grounded_findings(self) -> tuple[ReviewFinding, ...]:
@@ -157,6 +159,7 @@ class ReviewReceipt:
             "tree_fingerprint": self.tree_fingerprint,
             "evidence_pack_sha256": self.evidence_pack_sha256,
             "written_at": self.written_at,
+            **({"reviewer_session": self.reviewer_session} if self.reviewer_session else {}),
         }
 
     @classmethod
@@ -182,6 +185,7 @@ class ReviewReceipt:
             evidence_pack_sha256=pack if isinstance(pack, str) else None,
             written_at=str(data.get("written_at") or ""),
             findings=tuple(ReviewFinding.from_dict(f) for f in findings),
+            reviewer_session=str(data.get("reviewer_session") or ""),
         )
 
 
@@ -229,6 +233,7 @@ def write_receipt(
     findings: Sequence[ReviewFinding] = (),
     reviewer_id: str,
     model: str = "",
+    reviewer_session: str = "",
 ) -> ReviewReceipt:
     """Écrit le reçu, empreinte et hash du pack calculés maintenant ; rend ce qui a été écrit.
 
@@ -253,6 +258,7 @@ def write_receipt(
         evidence_pack_sha256=evidence_pack_digest(root, task_id),
         written_at=datetime.now(UTC).isoformat(),
         findings=findings,
+        reviewer_session=reviewer_session.strip(),
     )
     atomic_write(path, json.dumps(receipt.to_dict(), indent=2, ensure_ascii=False) + "\n")
     return receipt

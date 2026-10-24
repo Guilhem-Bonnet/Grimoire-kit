@@ -45,6 +45,7 @@ from grimoire.missions.board import PRIORITIES, board_status_of, build_board, pr
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
+from grimoire.missions.mandate import require_authority
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
 from grimoire.missions.question_gestures import BatchOutcome
 from grimoire.missions.questions import OPEN, QuestionSpec, group_settled, open_in_group, records_of
@@ -54,6 +55,7 @@ from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
     ORIGIN_AGENT,
     ORIGIN_HUMAN,
+    ORIGIN_ORCHESTRATOR,
     DependencyKind,
     MissionTask,
     RiskProfile,
@@ -492,9 +494,22 @@ class TaskService:
             risk_profile=risk, checks=checks, test_depth=test_depth, description=description,
             priority=priority, extra=fields or None,
         )
+        if checks:
+            self._seal_checks(task.id, checks, actor)
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task
         return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
+
+    def _seal_checks(self, task_id: str, checks: tuple[TaskCheck, ...], actor: str) -> None:
+        """Verrou 9 (#876) : l'empreinte des ``--check`` est scellée au journal d'autorité à la création.
+
+        Un scellé qui ne s'écrit pas n'empêche pas la tâche : elle n'aura simplement aucun scellé, donc ses
+        checks ne seront pas approuvables sous mandat (échec fermé côté mandat, pas côté création).
+        """
+        from grimoire.missions.mandate import MandateStore
+
+        with contextlib.suppress(Exception):
+            MandateStore(self.project_root).seal_checks(task_id, checks, actor)
 
     def link(self, task_id: str, depends_on: str, kind: DependencyKind = DependencyKind.BLOCKS, *, actor: str = "cli") -> MissionTask:
         """« *task_id* dépend de *depends_on* » ; un lien qui ferme un cycle ``blocks`` est refusé (W5-01)."""
@@ -787,7 +802,7 @@ class TaskService:
 
     def answer(
         self, task_id: str, text: str, actor: str, *, origin: str, question_id: str = "",
-        attested_by_flow: bool = False,
+        attested_by_flow: bool = False, provenance: Mapping[str, Any] | None = None,
     ) -> TaskMove:
         """Répond à la question en attente — **canal humain seulement** — puis réveille la tâche.
 
@@ -803,12 +818,12 @@ class TaskService:
         décision doit être attestée dans le flux (W2-01), et c'est le flux qui répond, avec
         *attested_by_flow*. Répondre à sa place réveillerait la tâche sans rien décider.
         """
-        if origin != ORIGIN_HUMAN:
-            raise GrimoireMissionError(
-                f"Réponse refusée pour {task_id} : origine {origin!r}. Seul le canal humain (cockpit, CLI interactive) "
-                "répond à une question — un agent ne tranche pas ce qu'il a demandé"
-            )
         task = self.require(task_id)
+        # Sous mandat (#876, verrou 6) : l'origine `orchestrator` répond si un mandat valide couvre ce geste
+        # et ce type de tâche ; sans mandat, elle est refusée comme toute origine non humaine.
+        authority = require_authority(
+            self.project_root, "answer", task, origin, what=f"Réponse refusée pour {task_id}", provenance=provenance
+        )
         question = self._question_to_answer(task, question_id)
         if question.origin == "flow" and not attested_by_flow:
             raise GrimoireMissionError(
@@ -821,10 +836,14 @@ class TaskService:
             raise ValueError("`text` requis : une réponse vide ne tranche rien")
         self.ledger.append_event(
             HUMAN_ANSWERED_EVENT, task_id, "task", actor,
-            {"task_id": task_id, "question_id": question.id, "answer": answer, "origin": origin, "actor_id": actor},
+            {
+                "task_id": task_id, "question_id": question.id, "answer": answer, "origin": origin, "actor_id": actor,
+                **({"mandate_id": authority.mandate_id, "provenance": dict(authority.provenance)} if authority else {}),
+            },
         )
         self.ledger.add_directive(
-            task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor, kind="directive", origin=origin
+            task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor,
+            kind="comment" if authority else "directive", origin=origin,
         )
         task = self.require(task_id)
         abandon = answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options)
@@ -979,7 +998,7 @@ class TaskService:
             if (
                 event.event_type == HUMAN_ANSWERED_EVENT
                 and event.payload.get("question_id") == waiting.question.id
-                and event.payload.get("origin") == ORIGIN_HUMAN
+                and event.payload.get("origin") in (ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR)
             ):
                 return str(event.payload.get("answer", ""))
         return None

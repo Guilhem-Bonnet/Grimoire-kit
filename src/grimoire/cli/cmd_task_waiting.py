@@ -101,8 +101,11 @@ def register(task_app: typer.Typer) -> None:
         actor: _ACTOR = "cli",
     ) -> None:
         """Répond à la question en attente — canal humain seulement ; la tâche est rendue (`ready`)."""
+        from grimoire.missions.mandate import gesture_origin
+
+        origin, provenance = gesture_origin(ct._comment_origin())
         run(ctx, project_root, ledger_root, task_id,
-            lambda s: s.answer(task_id, text, actor, origin=ct._comment_origin(), question_id=question))
+            lambda s: s.answer(task_id, text, actor, origin=origin, question_id=question, provenance=provenance))
 
     @task_app.command("accept")
     def task_accept(
@@ -127,11 +130,13 @@ def register(task_app: typer.Typer) -> None:
         service = ct._service(project_root, ledger_root)
         task = ct._require_task(service, task_id)
         root = project_root.resolve()
-        origin = ct._comment_origin()
+        from grimoire.missions.mandate import gesture_origin
+
+        origin, provenance = gesture_origin(ct._comment_origin())
         try:
             outcome = accept_task(
                 task, root, evidence_root if evidence_root.is_absolute() else root / evidence_root, reason, actor,
-                origin=origin,
+                origin=origin, provenance=provenance,
             )
         except (GrimoireError, ValueError) as exc:
             console.print(f"[red]✗[/red] {exc}")

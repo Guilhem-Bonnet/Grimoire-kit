@@ -42,6 +42,7 @@ def task_review(
     constat avec sa commande (`review.finding_ungrounded` sinon).
     """
     from grimoire.cli.cmd_task import _fmt, _require_task, _service, console
+    from grimoire.core.standard_state import current_session
     from grimoire.missions.review_receipt import ReviewFinding, ReviewReceiptError, write_receipt
 
     service = _service(project_root, ledger_root)
@@ -53,7 +54,7 @@ def task_review(
     try:
         receipt = write_receipt(
             service.project_root, task_id, verdict.strip().upper(), findings=findings,
-            reviewer_id=reviewer or actor, model=model,
+            reviewer_id=reviewer or actor, model=model, reviewer_session=current_session()[0],
         )
     except (ReviewReceiptError, ValueError) as exc:
         console.print(f"[red]✗[/red] {escape(str(exc))}")
