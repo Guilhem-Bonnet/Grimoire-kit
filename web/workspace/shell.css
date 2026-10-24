@@ -839,6 +839,14 @@ body[data-active-space="source"] {
   text-overflow: ellipsis;
 }
 
+.kpi-sub {
+  font-size: var(--t-min);
+  color: var(--ink3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .kpi-item[data-kind="word"] .kpi-val {
   font-size: 15px;
   line-height: 34px;
@@ -1427,9 +1435,16 @@ body[data-active-space] .panel-head {
   font-weight: 500;
 }
 
-#decisions-pill {
-  font-weight: 500;
-  white-space: nowrap;
+/* Le compteur de décisions : un badge sur l'onglet « À traiter ». */
+#decisions-count {
+  height: 18px;
+  padding: 0 6px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+#decisions-count[hidden] {
+  display: none;
 }
 
 /* ── Palette de commandes ──────────────────────────────────────────────────*/
@@ -1601,7 +1616,6 @@ body[data-active-space] .panel-head {
   #top-live,
   #appbar > .grow,
   .palette-lbl,
-  .pill-lbl,
   .live-pre,
   .st-pre,
   #palette-open .kbd,

@@ -182,9 +182,10 @@ gardées par `tests/e2e/test_workspace_live_pilot.py` (sondage) et
    « 0 » (`costText`) ; une durée incalculable « inconnue ». Le coût d'une carte est
    celui des tentatives de dispatch ; celui de la session hôte n'est mesuré nulle part.
 
-Le compteur de décisions de la barre du haut (`#decisions-pill`) est global sur le
-cockpit (tout le registre), propre au projet sur l'atelier, caché à zéro, et ouvre
-la vue Décisions de Travail (en portée « Tous les projets » sur le cockpit). La barre d'état dit « mis à jour il y a Xs », ou
+Le compteur de l'onglet « À traiter » (`#decisions-count`, plus de pastille séparée) est le
+`count` de `/api/workspace/attention` dans la portée courante (hors « résolu automatiquement »),
+caché à zéro, relu au premier pouls et quand l'empreinte du pouls change. Il égale la somme des
+tuiles de l'espace. La barre d'état dit « mis à jour il y a Xs », ou
 « actualisation suspendue » (onglet masqué), ou « API injoignable depuis Xs ».
 
 ## Citer un concept
