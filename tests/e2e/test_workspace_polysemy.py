@@ -111,6 +111,17 @@ def test_la_carte_porte_une_forme_par_sens(workspace: Page) -> None:
         route.fulfill(status=200, content_type="application/json", body=json.dumps(_board()))
 
     workspace.route(_TASKS, fulfil)
+
+    def fulfil_detail(route: Route) -> None:
+        # Le panneau de détail relit la tâche ouverte (P64) : même carte, aucune porte déclarée.
+        if route.request.method != "GET":
+            route.fallback()
+            return
+        task_id = route.request.url.split("/tasks/")[1].split("?")[0]
+        card = next(t for t in _board()["tasks"] if t["id"] == task_id)  # type: ignore[attr-defined]
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({**card, "next_moves_require": {}}))
+
+    workspace.route(re.compile(r".*/api/workspace/tasks/GAO-p30-carte-00\d(\?.*)?$"), fulfil_detail)
     _goto(workspace, "executer")
     workspace.wait_for_selector(".ex-card[data-task='GAO-p30-carte-001']", timeout=10_000)
     first = ".ex-card[data-task='GAO-p30-carte-001']"
@@ -145,8 +156,12 @@ def test_la_carte_porte_une_forme_par_sens(workspace: Page) -> None:
     assert "icons.svg#i-host-ide" in _hrefs(workspace, f"{second} .ex-session use")
     assert "Claude Code" in workspace.locator(f"{first} .ex-session").inner_text()
 
-    # La preuve attendue prend le sceau, plus une pastille « info » sans sens.
-    assert "icons.svg#seal" in _hrefs(workspace, f"{first} .ex-card-chips use")
+    # La preuve attendue prend le sceau, plus une pastille « info » sans sens. Depuis P64 la carte
+    # dit ses preuves par l'anneau (conditions du passage) ; les preuves attendues, avec leur
+    # sceau, sont dans le panneau de détail de la carte ouverte.
+    workspace.locator(first).click()
+    workspace.wait_for_selector("#inspector-body [data-role='gate-card']", state="attached")
+    assert "icons.svg#seal" in _hrefs(workspace, "#inspector-body .ex-card-chips use")
     _capture(workspace, "p30-cartes")
 
 
