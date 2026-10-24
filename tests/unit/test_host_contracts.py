@@ -426,3 +426,158 @@ class TestHostStatusShowsProof:
         item = self._status(tmp_path, monkeypatch)
         assert item["brake_proof"]["status"] == "unverified"
         assert item["brake_proof"]["probed_at"] == ""
+
+
+class TestEffectiveHostConfigDisablesProofs:
+    """#886 (e) : la sonde teste un dossier temporaire ; une preuve ne tient pas si la configuration réelle coupe les hooks."""
+
+    CAPTURED = "2.1.301"
+
+    @pytest.fixture
+    def env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+        """HOME, projet et dossier managé injectés : jamais le vrai ``~/.claude`` ni le vrai ``/etc``."""
+        from grimoire.hosts import contract_probe
+
+        home, project, managed = tmp_path / "home", tmp_path / "projet", tmp_path / "managed"
+        for d in (home / ".claude", project / ".claude", managed):
+            d.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+        monkeypatch.setattr(contract_probe, "MANAGED_DIR", managed)
+        return {"home": home, "project": project, "managed": managed}
+
+    @staticmethod
+    def _put(path: Path, data: object) -> None:
+        path.write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
+
+    def _fenced(self, env: dict[str, Path], version: str | None = None) -> bool:
+        return is_fenced(HostId.CLAUDE_CODE_CLI, version or self.CAPTURED, project_root=env["project"])
+
+    def test_without_any_settings_the_captured_proof_holds(self, env: dict[str, Path]) -> None:
+        assert self._fenced(env) is True
+
+    @pytest.mark.parametrize("where", ["home", "project", "local", "managed"])
+    def test_disable_all_hooks_in_any_level_drops_the_proof(self, env: dict[str, Path], where: str) -> None:
+        path = {
+            "home": env["home"] / ".claude" / "settings.json",
+            "project": env["project"] / ".claude" / "settings.json",
+            "local": env["project"] / ".claude" / "settings.local.json",
+            "managed": env["managed"] / "managed-settings.json",
+        }[where]
+        self._put(path, {"disableAllHooks": True})
+        assert self._fenced(env) is False
+        contract = contract_for(HostId.CLAUDE_CODE_CLI, self.CAPTURED, project_root=env["project"])
+        assert not any(contract.verified(key) for key in CONTRACT_KEYS)
+
+    def test_the_highest_level_wins_for_disable_all_hooks(self, env: dict[str, Path]) -> None:
+        self._put(env["home"] / ".claude" / "settings.json", {"disableAllHooks": True})
+        self._put(env["project"] / ".claude" / "settings.local.json", {"disableAllHooks": False})
+        assert self._fenced(env) is True, "le local (false) l'emporte sur l'utilisateur (true)"
+        self._put(env["managed"] / "managed-settings.json", {"disableAllHooks": True})
+        assert self._fenced(env) is False, "le managé l'emporte sur tout"
+
+    def test_a_quoted_boolean_is_ignored_like_claude_code_does(self, env: dict[str, Path]) -> None:
+        self._put(env["home"] / ".claude" / "settings.json", {"disableAllHooks": "true"})
+        assert self._fenced(env) is True
+
+    def test_managed_hooks_only_without_grimoire_hooks_drops_the_proof(self, env: dict[str, Path]) -> None:
+        self._put(env["managed"] / "managed-settings.json", {"allowManagedHooksOnly": True})
+        assert self._fenced(env) is False
+
+    def test_managed_hooks_only_keeps_the_proof_when_managed_carries_the_grimoire_hooks(
+        self, env: dict[str, Path]
+    ) -> None:
+        hooks = {"PreToolUse": [{"hooks": [{"type": "command", "command": "grimoire-hook pretooluse"}]}]}
+        self._put(env["managed"] / "managed-settings.json", {"allowManagedHooksOnly": True, "hooks": hooks})
+        assert self._fenced(env) is True
+
+    def test_a_managed_drop_in_counts(self, env: dict[str, Path]) -> None:
+        (env["managed"] / "managed-settings.d").mkdir()
+        self._put(env["managed"] / "managed-settings.d" / "50-hooks.json", {"disableAllHooks": True})
+        assert self._fenced(env) is False
+
+    def test_an_unreadable_settings_file_fails_closed(self, env: dict[str, Path]) -> None:
+        self._put(env["project"] / ".claude" / "settings.json", "{pas du json")
+        assert self._fenced(env) is False
+
+    def test_a_probed_proof_is_not_retained_either(
+        self, env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from grimoire.hosts.contract_probe import ProbeProof, _record
+
+        monkeypatch.setattr("grimoire.hosts.contract_probe.proofs_path", lambda: tmp_path / "proofs.json")
+        _record(ProbeProof(HostId.CLAUDE_CODE_CLI.value, "2.1.400", True, "2026-10-23T10:00:00+00:00"))
+        assert self._fenced(env, "2.1.400") is True
+        self._put(env["home"] / ".claude" / "settings.json", {"disableAllHooks": True})
+        assert self._fenced(env, "2.1.400") is False
+
+    def test_claude_config_dir_moves_the_user_settings(self, env: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+        elsewhere = env["home"].parent / "ailleurs"
+        elsewhere.mkdir()
+        self._put(elsewhere / "settings.json", {"disableAllHooks": True})
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(elsewhere))
+        assert self._fenced(env) is False
+
+    def test_the_check_never_raises_and_fails_closed(self, env: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+        """Un dossier courant supprimé ou un dossier managé non traversable ne font pas planter un tick."""
+        from grimoire.hosts import contract_probe
+
+        def denied(_path: Path) -> object:
+            raise PermissionError("refusé")
+
+        real = contract_probe._read_settings
+        monkeypatch.setattr(contract_probe, "_read_settings", denied)
+        assert self._fenced(env) is False
+        assert contract_probe.hooks_disabled_reason(env["project"])
+
+        def gone() -> Path:
+            raise FileNotFoundError("cwd supprimé")
+
+        monkeypatch.setattr(contract_probe, "_read_settings", real)
+        monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+        assert contract_probe.hooks_disabled_reason(None)
+        assert is_fenced(HostId.CLAUDE_CODE_CLI, self.CAPTURED) is False
+
+    @pytest.mark.parametrize(
+        ("command", "carried"),
+        [
+            ("echo grimoire", False),
+            ("/usr/bin/notgrimoire-hook --event PreToolUse", False),
+            ("python -c 'print(1)'  # grimoire-hook", False),
+            ("grimoire-hook --host claude-code --event PreToolUse", True),
+            ('"$CLAUDE_PROJECT_DIR"/.venv/bin/grimoire-hook --host claude-code --event PreToolUse', True),
+            ('"/home/a b/venv/bin/grimoire-hook" --host claude-code --event PreToolUse', True),
+            ("C:/venv/Scripts/grimoire-hook.exe --host claude-code --event PreToolUse", True),
+        ],
+    )
+    def test_managed_hooks_only_needs_a_managed_grimoire_hook_command(
+        self, env: dict[str, Path], command: str, carried: bool
+    ) -> None:
+        hooks = {"PreToolUse": [{"hooks": [{"type": "command", "command": command}]}]}
+        self._put(env["managed"] / "managed-settings.json", {"allowManagedHooksOnly": True, "hooks": hooks})
+        assert self._fenced(env) is carried
+
+
+class TestHostStatusFollowsTheEffectiveConfig:
+    def test_status_does_not_claim_a_proof_when_hooks_are_disabled(
+        self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from typer.testing import CliRunner
+
+        from grimoire.cli.app import app
+
+        (tmp_path / "bin").mkdir()
+        Path(_fake_claude(tmp_path, "2.1.301")).rename(tmp_path / "bin" / "claude")
+        project = tmp_path / "proj"
+        (project / ".claude").mkdir(parents=True)
+        (project / ".claude" / "settings.json").write_text('{"disableAllHooks": true}', encoding="utf-8")
+        (project / "project-context.yaml").write_text(
+            'project:\n  name: "Demo"\nagents:\n  archetype: "minimal"\nhosts:\n  enabled: ["claude"]\n', encoding="utf-8"
+        )
+        monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}:/usr/bin:/bin")
+        result = CliRunner().invoke(
+            app, ["-o", "json", "host", "status", "--host", "claude", "--project-root", str(project)]
+        )
+        proof = json.loads(result.stdout)[0]["brake_proof"]
+        assert proof["status"] == "unverified"
+        assert "disableAllHooks" in proof["reason"]
