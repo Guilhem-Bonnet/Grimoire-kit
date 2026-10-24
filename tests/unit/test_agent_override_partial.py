@@ -260,7 +260,7 @@ def drifted_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("override-427") / "projet"
     root.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
-    created = _grimoire(["init", ".", "-y", "--name", "projet-427"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "projet-427", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit" / "agents").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
 
