@@ -299,6 +299,9 @@ class SkillSpec:
     description: str
     body: str
     tools: tuple[ToolVerb, ...] = ()
+    # Champs optionnels de la spec Agent Skills (#874), émis seulement quand renseignés.
+    license: str = ""
+    compatibility: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
