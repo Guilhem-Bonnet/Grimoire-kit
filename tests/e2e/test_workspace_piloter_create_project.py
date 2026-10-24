@@ -134,7 +134,7 @@ def test_creating_a_project_from_the_fleet_makes_it_appear(
     open_scope_all(page)
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
 
-    new_btn = page.get_by_role("button", name="+ Nouveau projet")
+    new_btn = page.get_by_role("button", name="Nouveau projet")
     new_btn.wait_for(timeout=15_000)
     new_btn.click()
 
@@ -174,7 +174,7 @@ def test_creating_a_project_on_an_existing_path_is_refused(
 
     open_scope_all(page)
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
-    page.get_by_role("button", name="+ Nouveau projet").click()
+    page.get_by_role("button", name="Nouveau projet").click()
 
     path_input = page.locator("input[placeholder='/chemin/absolu/du/nouveau-projet']")
     path_input.wait_for(timeout=10_000)
