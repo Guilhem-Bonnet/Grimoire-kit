@@ -30,6 +30,8 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 from playwright.sync_api import Browser, Page
 
+from .conftest import open_scope_all
+
 #: Terme distinctif présent dans la mémoire du seul projet A — choisi assez
 #: rare pour ne matcher ni du bruit, ni l'autre projet.
 _DISTINCTIVE_TERM = "redis873"
@@ -59,7 +61,7 @@ def _wait_ready(port: int, deadline: float) -> None:
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 @pytest.fixture(scope="session")
@@ -181,11 +183,10 @@ def test_memoire_view_seg_bascule_correctement(memory_fleet_workspace: Page) -> 
 
 def test_switching_to_all_projects_shows_two_rows(memory_fleet_workspace: Page) -> None:
     page = memory_fleet_workspace
+    # La portée de la coque (P31) remplace le zoom « Ce projet / Tous les
+    # projets » de Mémoire : en « Tous les projets », la Recherche s'ouvre.
+    open_scope_all(page, "#savoir/memoire")
     _goto(page, "memoire")
-
-    page.get_by_role("button", name="Flotte").click()
-    page.wait_for_selector("#zoom-seg button")
-    page.get_by_role("button", name="Tous les projets").click()
 
     table = page.locator(".me-wrap table")
     table.wait_for(timeout=15_000)
@@ -202,11 +203,10 @@ def test_switching_to_all_projects_shows_two_rows(memory_fleet_workspace: Page) 
 
 def test_cross_project_search_labels_the_matching_project_only(memory_fleet_workspace: Page) -> None:
     page = memory_fleet_workspace
+    # La portée de la coque (P31) remplace le zoom « Ce projet / Tous les
+    # projets » de Mémoire : en « Tous les projets », la Recherche s'ouvre.
+    open_scope_all(page, "#savoir/memoire")
     _goto(page, "memoire")
-
-    page.get_by_role("button", name="Flotte").click()
-    page.wait_for_selector("#zoom-seg button")
-    page.get_by_role("button", name="Tous les projets").click()
     page.wait_for_selector(".me-wrap table")
 
     search_input = page.locator(".me-search input")

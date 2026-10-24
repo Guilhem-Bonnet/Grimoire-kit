@@ -32,7 +32,7 @@ from playwright.sync_api import Page
 def source(workspace: Page) -> Page:
     """La coque, déjà sur l'espace Source."""
     workspace.evaluate("() => window.GrimoireWorkspace.goto('source')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
     workspace.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
     return workspace
 

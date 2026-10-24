@@ -27,12 +27,12 @@ from playwright.sync_api import Browser, Page
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-SPACES = ["piloter", "concevoir", "executer", "observer", "memoire", "source"]
+SPACES = ["a-traiter", "travail", "flotte", "savoir", "configuration"]
 
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _open_palette(page: Page, query: str) -> None:
@@ -46,7 +46,7 @@ def _open_palette(page: Page, query: str) -> None:
 
 @pytest.mark.parametrize("index,space", list(enumerate(SPACES)))
 def test_le_raccourci_meta_chiffre_change_d_espace(workspace: Page, index: int, space: str) -> None:
-    """``⌘1``…``⌘6`` (``bindShortcuts``, ``shell.js``) — jamais pressé par un
+    """``⌘1``…``⌘5`` (``bindShortcuts``, ``shell.js``) — jamais pressé par un
     test jusqu'ici, seul ``GrimoireWorkspace.goto`` l'était directement."""
     workspace.locator("body").press(f"ControlOrMeta+{index + 1}")
     workspace.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
@@ -107,7 +107,7 @@ def test_choisir_un_workflow_dans_la_palette_va_sur_concevoir(
     row.wait_for(timeout=10_000)
     row.click()
 
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'concevoir'")
 
 
 def test_choisir_un_projet_dans_la_palette_recharge_sur_ce_projet(
@@ -122,14 +122,17 @@ def test_choisir_un_projet_dans_la_palette_recharge_sur_ce_projet(
 
         page.locator("#project-chip").click()
         page.wait_for_selector("#palette:not([hidden])")
-        row = page.locator("#palette-list li[role='option']").first
+        # « Tous les projets » d'abord, puis le registre (P31).
+        row = page.locator("#palette-list li[role='option']").nth(1)
         row.wait_for(timeout=10_000)
         row.click()
 
-        # `run()` de cette section pose `location.search`, un vrai rechargement
+        # `run()` de cette section change la portée, un vrai rechargement
         # (seul point de la palette qui n'est pas une navigation SPA) : on
-        # attend que la coque se réamorce sur ce paramètre.
+        # attend que la coque se réamorce sur ce paramètre — et sur la fiche
+        # du projet, pas la table de la Flotte.
+        page.wait_for_url(f"**project={slug}#flotte", timeout=15_000)
         page.wait_for_function("() => document.body.dataset.ready === '1'", timeout=15_000)
-        assert f"project={slug}" in page.url
+        assert page.evaluate("() => window.GrimoireWorkspace.space") == "flotte"
     finally:
         context.close()

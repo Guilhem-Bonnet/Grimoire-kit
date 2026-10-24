@@ -43,26 +43,30 @@ def test_le_changement_de_projet_n_interroge_que_le_projet_cible(
 ) -> None:
     """Critère d'acceptation de l'issue, à la lettre : un registre de 3 projets
     jetables, un changement de projet -> 1 requête `/api/workspace/sheet`, pas 3."""
-    served, slug_a, slug_b, _slug_c = served_cockpit_triple
+    served, _slug_a, slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
-        page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
+        page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
 
-        # Flotte par défaut (#351) : le chargement initial lit les 3 projets
+        # Portée « Tous les projets » : le chargement initial lit les 3 projets
         # en UN appel `/api/fleet` (#541) — un coût attendu et non mesuré
         # ici, qui n'a rien à voir avec le défaut de l'issue.
         page.wait_for_selector(".tbl tbody tr")
         assert page.locator(".tbl tbody tr").count() == 3
 
         # Le changement de projet lui-même : cliquer la ligne d'un AUTRE
-        # projet ouvre sa fiche. Le compteur n'écoute qu'à partir d'ici.
+        # projet change la portée (P31) et ouvre sa fiche. Le compteur
+        # n'écoute qu'à partir d'ici, rechargement compris.
         seen = _sheet_requests(page)
+        fleet = _fleet_requests(page)
         page.locator(".tbl tbody tr", has_text=slug_b).first.click()
+        page.wait_for_url(f"**project={slug_b}**")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
         page.wait_for_selector("button:has-text('Mettre à jour')")
+        assert fleet == [], f"la fiche d'un projet a relu la flotte : {fleet}"
 
         assert seen == [f"{served}/api/workspace/sheet?project={slug_b}"], (
             f"changement de projet : {len(seen)} requête(s) /api/workspace/sheet, attendu 1 (pas 3) — {seen}"
@@ -74,26 +78,27 @@ def test_le_changement_de_projet_n_interroge_que_le_projet_cible(
 def test_revenir_sur_la_flotte_sert_le_cache_dans_la_fenetre_de_60s(
     browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
 ) -> None:
-    """Un aller-retour Flotte -> Projet -> Flotte ne doit pas relancer le
+    """Un aller-retour Flotte -> autre espace -> Flotte ne doit pas relancer le
     balayage complet tant que le cache (60 s) n'a pas expiré : c'est
     justement ce qui produisait les 34 requêtes constatées sur 17 projets.
+    Depuis P31, ouvrir la fiche d'un projet change la portée (rechargement) ;
+    l'aller-retour qui reste dans la page est celui entre espaces.
     « Rafraîchir la flotte » reste la façon explicite de le court-circuiter —
     en UN appel `/api/fleet` (#541), plus jamais 3 `/api/health` séparés."""
-    served, slug_a, slug_b, _slug_c = served_cockpit_triple
+    served = served_cockpit_triple[0]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
-        page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
+        page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
         page.wait_for_selector(".tbl tbody tr")
 
-        page.locator(".tbl tbody tr", has_text=slug_b).first.click()
-        page.wait_for_selector("button:has-text('Mettre à jour')")
+        page.evaluate("() => window.GrimoireWorkspace.goto('travail')")
+        page.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
 
         seen = _fleet_requests(page)
-        page.locator('#zoom-seg button[data-value="flotte"]').click()
+        page.evaluate("() => window.GrimoireWorkspace.goto('flotte')")
         page.wait_for_selector(".tbl tbody tr")
 
         assert seen == [], (

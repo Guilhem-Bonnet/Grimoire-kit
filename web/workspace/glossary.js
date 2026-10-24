@@ -13,7 +13,13 @@
 //   Échap                → ferme toute la pile
 //   clic ailleurs         → ferme les bulles non épinglées, laisse les épinglées
 //   croix de la bulle     → ferme cette bulle épinglée (et ses enfants)
-//   Concentration         → nom et raccourci seulement, délai 800 ms
+//   densité compacte      → nom et raccourci seulement, délai 800 ms
+
+/** Le 4e espace de la coque (P31) : son nom n'est écrit qu'ici. « Savoir » ou
+ *  « Historique » reste à trancher (décision D2) : changer ces deux chaînes
+ *  suffit, la coque, le fil d'Ariane, la palette et les liens profonds les
+ *  relisent. L'icône garde son nom de sprite, qui n'est pas un libellé. */
+export const FOURTH_SPACE = Object.freeze({ id: 'savoir', label: 'Savoir', icon: 'i-space-savoir' });
 
 const MAX_DEPTH = 3;
 //: Balises déjà focusables nativement — les autres reçoivent tabindex="0" pour
@@ -49,12 +55,12 @@ export function missingTerms(root = document) {
   return [...cited].filter((id) => !entries.has(id)).sort();
 }
 
-function concentration() {
-  return document.documentElement.dataset.density === 'concentration';
+function compact() {
+  return document.documentElement.dataset.density === 'compacte';
 }
 
 function delay() {
-  return concentration() ? 800 : 500;
+  return compact() ? 800 : 500;
 }
 
 // Le cadenas de la maquette « Encre » (bulle épinglée) : un rectangle et son anse.
@@ -127,8 +133,8 @@ function build(entry, depth, pinned) {
   }
   tip.append(head);
 
-  // Concentration non épinglé : nom et raccourci seulement. Alt rouvre la définition.
-  if (!concentration() || pinned) {
+  // Densité compacte, non épinglée : nom et raccourci seulement. Alt rouvre la définition.
+  if (!compact() || pinned) {
     const body = document.createElement('div');
     body.style.marginTop = '6px';
     renderDefinition(body, entry, depth);
@@ -330,4 +336,4 @@ export function attach(root = document) {
   });
 }
 
-export default { load, get, size, open, closeAll, attach, missingTerms };
+export default { load, get, size, open, closeAll, attach, missingTerms, FOURTH_SPACE };

@@ -881,3 +881,16 @@ def workspace(browser: Browser, served: str) -> Iterator[Page]:
         yield page
     finally:
         context.close()
+
+
+def open_scope_all(page: Page, hash_: str = "#flotte") -> None:
+    """Rouvre la coque en portée « Tous les projets » (P31), sur *hash_*.
+
+    La portée est la seule sélection de la coque et vit dans l'URL : la table
+    de la Flotte, le portefeuille de Travail ou la recherche mémoire de tous
+    les projets s'atteignent par ``?scope=all``, plus par un zoom propre à
+    chaque espace.
+    """
+    base = page.url.split("?")[0].split("#")[0]
+    page.goto(f"{base}?scope=all{hash_}", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)

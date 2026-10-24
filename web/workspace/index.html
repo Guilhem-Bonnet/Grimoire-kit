@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr" data-theme="dark" data-density="decouverte" data-focus="off">
+<html lang="fr" data-theme="dark" data-density="confortable" data-focus="off">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,9 +10,9 @@
   structure : pas de couleur, pas de logique. Les tokens sont dans tokens.css,
   la géométrie dans shell.css, le comportement dans shell.js.
 
-  Le squelette est délibérément vide : chaque espace est monté par son module
-  (spaces/*.js), qui expose `mount(root, ctx)`. Cinq lots travaillent en
-  parallèle sur des fichiers disjoints — voir README.md.
+  Le squelette est délibérément vide : chaque rubrique d'un des cinq espaces
+  est montée par son module (spaces/*.js), qui expose `mount(root, ctx)` —
+  voir README.md.
 -->
 <link rel="stylesheet" href="./tokens.css">
 <link rel="stylesheet" href="./shell.css">
@@ -21,12 +21,14 @@
 
 <div id="shell">
 
-  <!-- Barre d'application : marque, projet, espaces, palette -->
+  <!-- Barre d'application : marque, portée, espaces, palette -->
   <header id="appbar">
     <div id="brand"><svg class="ico" aria-hidden="true"><use href="icons.svg#grimoire"/></svg><span>GRIMOIRE</span></div>
     <div class="row">
-      <button class="chip chip-pick" id="project-chip" type="button" data-term="projet"
-              title="Changer de projet ou naviguer (ouvre la palette)">
+      <!-- La seule portée de la coque (P31) : « Tous les projets » ou un projet,
+           appliquée à tous les espaces. Le nom du projet, jamais son slug. -->
+      <button class="chip chip-pick" id="project-chip" type="button" data-term="portee"
+              aria-haspopup="dialog" title="Changer de portée : tous les projets ou un seul">
         <span class="dot" id="project-dot"></span>
         <span id="project-name">—</span>
         <span class="chevron" aria-hidden="true"></span>
@@ -74,6 +76,10 @@
 
     <!-- Centre : barre de document, toile, dock -->
     <main id="center">
+      <!-- Lecture seule (P31) : dit en tête, avec le geste qui rend l'écriture. -->
+      <div id="readonly-banner" role="status" hidden></div>
+      <!-- Rubriques de l'espace courant, quand il en a plusieurs. -->
+      <div id="section-tabs" role="tablist" aria-label="Rubriques" hidden></div>
       <div id="docbar">
         <div class="row soft" id="breadcrumb"></div>
         <div class="grow"></div>
@@ -108,7 +114,7 @@
     </aside>
 
     <!-- Panneau droit : preuves (#534) — possédé par la coque, jamais par un
-         espace, pour rester utilisable depuis n'importe lequel des six. -->
+         espace, pour rester utilisable depuis n'importe lequel des cinq. -->
     <aside class="panel panel-right" id="panel-evidence" data-state="collapsed" aria-label="Preuves">
       <div class="panel-head">
         <span style="font-weight:500">Preuves</span>
@@ -137,7 +143,8 @@
       <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#refresh"/></svg><span id="st-live-text">actualisation…</span>
     </span>
     <span class="grow"></span>
-    <button class="chip" id="st-density" type="button" data-term="densite">Densité</button>
+    <button class="chip" id="st-density" type="button" data-term="densite"
+            title="Basculer entre densité confortable et compacte">Densité</button>
     <div class="seg seg-s" id="st-theme" role="group" aria-label="Thème">
       <button type="button" data-theme-pref="system" aria-pressed="false" aria-label="Système" title="Thème du système">
         <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#monitor"/></svg>
@@ -149,7 +156,8 @@
         <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#moon"/></svg>
       </button>
     </div>
-    <span class="row st-extra" style="gap:6px">Mode concentration <span class="kbd">⇧⌘F</span></span>
+    <button class="chip st-extra" id="st-fullscreen" type="button" data-term="plein-ecran" aria-pressed="false"
+            title="Donner la toile à l'écran entier (⇧⌘F)">Plein écran <span class="kbd">⇧⌘F</span></button>
   </footer>
 
 </div>

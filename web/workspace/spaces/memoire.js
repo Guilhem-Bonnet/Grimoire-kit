@@ -16,12 +16,11 @@
 // accès direct qui casserait sur l'absence (le `graph_stats` de l'observatoire
 // hérité).
 //
-// Onglet Flotte (#172, dernier volet de « du générateur statique au
+// Onglet Recherche (#172, dernier volet de « du générateur statique au
 // portefeuille actif ») : l'agrégation mémoire multi-projets que
-// `memory_link_status()` ne porte pas (mono-projet). Le sélecteur Zoom du
-// docbar (déjà utilisé par Piloter et Concevoir) porte « Ce projet / Tous les
-// projets » ; le tableau et la recherche croisée sont propres à cet onglet et
-// ne s'affichent que là.
+// `memory_link_status()` ne porte pas (mono-projet). Sa portée est celle de la
+// coque (P31) : « Tous les projets » ou le projet en portée ; le tableau et la
+// recherche croisée sont propres à cet onglet et ne s'affichent que là.
 //
 // API consommées : api.memoryStatus(), api.memoryOverview(projects),
 // api.memorySearch(q, projects).
@@ -208,13 +207,9 @@ function renderArchitecture(wrap, ctx, memory) {
   }
 }
 
-// ── Flotte : agrégation mémoire multi-projets (#172) ────────────────────────
+// ── Recherche : agrégation mémoire multi-projets (#172) ─────────────────────
 //
-// « Ce projet / Tous les projets » vit sur le sélecteur Zoom du docbar — le
-// même widget que Piloter (Flotte/Projet) et Concevoir (Projet/Workflow/
-// Nœud) — pour ne pas ajouter un second contrôle de portée dans la page.
-// `mount()` le pilote : construit ici, il ne s'affiche que pendant que
-// l'onglet Flotte est actif.
+// Aucun contrôle de portée dans la page : c'est la portée de la coque (P31).
 
 // ── Fraîcheur : le vocabulaire du badge ─────────────────────────────────────
 //
@@ -295,7 +290,7 @@ function fleetOverviewTable(ctx, data) {
   const wrap = document.createElement('div');
   if (!data || !data.projects.length) {
     wrap.append(ctx.empty(
-      'Flotte',
+      'Recherche',
       "Aucun projet lisible pour cette portée — le registre de la machine "
       + "(`grimoire cockpit list`) est peut-être vide, ou aucun projet "
       + "sélectionné ne s'y trouve.",
@@ -398,7 +393,7 @@ function fleetSearchResults(ctx, data, canLink) {
 }
 
 function renderFleet(wrap, ctx, state) {
-  const h3 = text('h3', null, 'Flotte — mémoire multi-projets');
+  const h3 = text('h3', null, state.scope === 'all' ? 'Recherche — mémoire de tous les projets' : 'Recherche — mémoire du projet');
   h3.dataset.term = 'cockpit';
   wrap.append(h3);
   wrap.append(text('p', 'lbl',
@@ -468,14 +463,13 @@ function renderFleet(wrap, ctx, state) {
   loadOverview();
   resultsHost.replaceChildren(fleetSearchResults(ctx, { query: '', results: [], projects: [] }));
 
-  // Le zoom du docbar pilote `state.scope` ; `draw()` (mount) rappelle
-  // `renderFleet` à chaque bascule, donc `loadOverview` ci-dessus reflète
-  // déjà la portée courante à chaque montage.
+  // `state.scope` suit la portée de la coque (P31) : changer de portée
+  // remonte l'espace, donc `loadOverview` ci-dessus la reflète déjà.
 }
 
 export async function mount(root, ctx) {
   injectStyles();
-  ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Mémoire']);
+  ctx.docbar.setBreadcrumb([]);
 
   const memory = await ctx.api.memoryStatus().catch(() => null);
 
@@ -496,15 +490,17 @@ export async function mount(root, ctx) {
   // Sans mémoire propre, ce projet ne montre ni Store, ni Graphe, ni Couches
   // — mais la Flotte reste utile : c'est peut-être exactement le projet
   // qu'on veut voir « en échec » depuis un AUTRE projet déjà initialisé.
+  // En portée « Tous les projets », la recherche multi-projets ouvre l'espace.
   const hasOwnMemory = memory.state !== 'uninitialized';
-  let view = hasOwnMemory ? 'store' : 'flotte';
-  const fleetState = { scope: 'this' };
+  const allProjects = Boolean(ctx.scope && ctx.scope.all);
+  let view = hasOwnMemory && !allProjects ? 'store' : 'flotte';
+  const fleetState = { scope: allProjects ? 'all' : 'this' };
 
   const views = hasOwnMemory
     ? [{ id: 'store', label: 'Store' }, { id: 'graphe', label: 'Graphe' },
        { id: 'couches', label: 'Couches' }, { id: 'architecture', label: 'Architecture' },
-       { id: 'flotte', label: 'Flotte' }]
-    : [{ id: 'flotte', label: 'Flotte' }];
+       { id: 'flotte', label: 'Recherche' }]
+    : [{ id: 'flotte', label: 'Recherche' }];
   const setView = (id) => { view = id; draw(); };
 
   const draw = () => {
@@ -523,16 +519,6 @@ export async function mount(root, ctx) {
     else if (view === 'architecture') renderArchitecture(wrap, ctx, memory);
     else if (view === 'flotte') renderFleet(wrap, ctx, fleetState);
     root.append(wrap);
-
-    if (view === 'flotte') {
-      ctx.docbar.setZoom(
-        [{ id: 'this', label: 'Ce projet' }, { id: 'all', label: 'Tous les projets' }],
-        fleetState.scope,
-        (id) => { fleetState.scope = id; draw(); },
-      );
-    } else {
-      ctx.docbar.setZoom([], null, () => {});
-    }
   };
 
   draw();
@@ -540,13 +526,13 @@ export async function mount(root, ctx) {
     // Aucune route ne sert le détail d'une entrée individuelle du store — seul
     // son statut agrégé (`/api/memory/status`) existe côté vue de travail. Le
     // dire honnêtement plutôt que fabriquer une liste d'entrées inspectables.
-    // L'onglet Flotte, lui, ouvre un vrai résultat de recherche dans ce même
+    // L'onglet Recherche, lui, ouvre un vrai résultat de recherche dans ce même
     // panneau (voir `fleetSearchResults`).
     ctx.inspector.replaceChildren(text('p', 'lbl',
       "L'inspecteur d'entrée individuelle n'a pas de route dédiée côté store — "
-      + "cliquez un résultat de l'onglet Flotte pour inspecter une entrée réelle."));
+      + "cliquez un résultat de l'onglet Recherche pour inspecter une entrée réelle."));
   } else {
-    ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucune entrée à inspecter — cliquez un résultat de recherche dans l’onglet Flotte.'));
+    ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucune entrée à inspecter — cliquez un résultat de recherche dans l’onglet Recherche.'));
   }
   ctx.dock.echo('grimoire memory status');
 }

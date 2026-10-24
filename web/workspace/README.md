@@ -2,9 +2,27 @@
 
 Squelette de la refonte décrite par
 [`web/DESIGN-SPEC-workspace-2026-09.md`](../DESIGN-SPEC-workspace-2026-09.md).
-Ce dossier contient **la coque et rien d'autre** : les six espaces sont des
-modules vides mais navigables, que cinq lots remplissent en parallèle sur des
-fichiers disjoints.
+Ce dossier contient **la coque et rien d'autre**. Depuis P31, la coque tient
+**cinq espaces** — À traiter, Travail, Flotte, le 4e (son nom n'est écrit que
+dans `glossary.js`, `FOURTH_SPACE`) et Configuration. Chaque espace a une ou
+plusieurs **rubriques**, et chaque rubrique monte un module de `spaces/` :
+
+| Espace | Rubriques → module |
+|---|---|
+| À traiter (⌘1, accueil) | À traiter → `a-traiter.js` |
+| Travail (⌘2) | Tâches → `executer.js` |
+| Flotte (⌘3) | Flotte → `piloter.js` (table en portée « Tous les projets », fiche en portée projet) |
+| 4e espace (⌘4) | Mémoire → `memoire.js`, Journal → `observer.js` |
+| Configuration (⌘5) | Fichiers → `source.js`, Blueprints → `concevoir.js`, Préférences (rendue par la coque) |
+
+**Une seule portée** : « Tous les projets » ou un projet, choisie par la puce en
+haut (`#project-chip`, palette réduite aux projets, sans plafond). Plus de zoom
+Flotte/Projet par espace. **L'URL dit tout** : `?project=<slug>` ou
+`?scope=all`, puis `#<espace>[/<rubrique>][?<élément>]` — par exemple
+`?project=grimoire-forge#travail?task=GAO-12`. Les anciens `#piloter`,
+`#executer`… mènent à la rubrique qui les remplace. Un projet consulté depuis
+un cockpit ouvert ailleurs est en **lecture seule** : un bandeau le dit en tête,
+avec « Revenir à … » et la commande qui l'ouvre en écriture.
 
 Décisions et alternatives écartées :
 [`docs/adr-006-vue-de-travail.md`](../../docs/adr-006-vue-de-travail.md).
@@ -52,11 +70,12 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `index.html` | La coque : barre d'application, rail, panneaux, dock, barre d'état, palette | lot 1 |
 | `tokens.css` | **La seule source de couleur.** Sombre et clair, densités, géométrie | lot 1 |
 | `shell.css` | Grille de la coque, trois états de panneau, primitives (`.btn`, `.chip`, `.seg`, `.kbd`, `.tab`, `.dot`, `.tree`, `.empty`) | lot 1 |
-| `shell.js` | Panneaux, dock, palette, raccourcis, thème, densité, routage des espaces | lot 1 |
+| `shell.js` | Cinq espaces et leurs rubriques, portée, liens profonds, bandeau de lecture seule, panneaux, dock, palette, raccourcis, thème, densité, plein écran | lot 1, P31 |
 | `live.js` | Le pouls : une boucle de sondage pour toute la coque, suspendue onglet masqué ; les mots du temps relatif, de la durée et du coût (trois états) | UI-3 |
 | `fonts/` | Geist et Geist Mono en woff2 | lot 1 |
-| `glossary.js` | Chargement du glossaire et pile d'infobulles épinglables | lot 2 |
+| `glossary.js` | Chargement du glossaire et pile d'infobulles épinglables ; nom du 4e espace (`FOURTH_SPACE`) | lot 2, P31 |
 | `api.js` | **Le seul module qui appelle `fetch`.** Cible le bon projet sur les deux hôtes | figé par le squelette |
+| `spaces/a-traiter.js` | Accueil : ce qui attend une décision, par urgence (`/api/workspace/attention`), et le lien profond de chaque élément | P31 (écran complet : P32) |
 | `spaces/piloter.js` | Flotte et projet, KPI, « À traiter », agents (clause d'emploi, outils, contexte, skills, usage — #374) | lot 4 |
 | `spaces/concevoir.js` | Toile, zoom, éditeur de graphe, bibliothèque, inspecteur de nœud | lot 3 |
 | `spaces/executer.js` | Board gouverné, portes, carte de tâche, timeline | lot 4 |
@@ -81,16 +100,18 @@ directement dans le DOM de la coque :
 |---|---|
 | `ctx.api` | Le client de `api.js`, déjà ciblé sur le bon projet |
 | `ctx.host` | `{ kind: 'atelier' \| 'cockpit', project, readOnly, status }` |
+| `ctx.scope` | `{ all, project, name, set(slug \| null, cible?) }` — la portée de la coque ; `name` est le nom du projet (jamais le slug) ; `set` change la portée partout (rechargement) |
+| `ctx.setItem` | `(params)` — la sélection entre dans l'URL (lien profond) sans remonter la rubrique |
 | `ctx.glossary` | Le glossaire chargé : `get`, `open`, `size`, `missingTerms` |
 | `ctx.explorer` | L'élément du panneau gauche — l'espace le remplit |
 | `ctx.inspector` | L'élément du panneau droit — idem |
-| `ctx.docbar` | `setBreadcrumb`, `setZoom`, `setViews`, `setValidation` |
+| `ctx.docbar` | `setBreadcrumb`, `setZoom`, `setViews`, `setValidation` — le fil d'Ariane ne reçoit que ce qui suit portée, espace et rubrique, que la coque pose |
 | `ctx.dock` | `log(onglet, …lignes)`, `clear`, `setTab`, `echo(commande)` |
 | `ctx.empty` | `(titre, phrase, commande, action?)` → le bloc d'état vide unique ; `action` est `{ label, run }` (un bouton qui fait, pas une commande à recopier) ; sans `action`, une commande que la Console du dock sait exécuter (liste blanche, sans argument) reçoit un bouton « Lancer dans la Console » |
 | `ctx.loading` | `(libellé, lignes?)` → `[squelette, texte pour lecteurs d'écran]` à poser dans une zone qui attend ses données (jamais un « Chargement… » nu) ; la coque en pose un sur la toile à chaque changement d'espace et le retire dès que l'espace y écrit du contenu |
 | `ctx.openPanel` | `(id)` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px |
 | `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté |
-| `ctx.goto` | `goto(id, params?)` — naviguer vers un autre espace ; `params` n'est vu qu'au montage qui suit (ex. `goto('source', { file })` depuis ⌘K), jamais persisté dans le hash |
+| `ctx.goto` | `goto(id, params?)` — naviguer vers un espace, une rubrique ou un ancien identifiant (`'source'`) ; `params` est vu au montage qui suit (ex. `goto('source', { file })` depuis ⌘K) et écrit dans le hash (lien profond) |
 | `ctx.params` | Ce que l'appelant de `goto()` a demandé pour CE montage — `{}` la plupart du temps |
 | `ctx.live` | `{ on(handler) }` — appelé quand le pouls annonce un changement du ledger ou des sessions (`live.js`) ; l'espace relit SES données, sans rien jeter de ce que l'utilisateur écrit ; remis à zéro par la coque à chaque changement d'espace |
 | `ctx.rail` | `{ on(id, handler) }` — enregistre ce que fait un rail sans panneau dédié (ex. « 2 », bibliothèque de Concevoir) tant que cet espace reste monté ; remis à zéro par la coque à chaque changement d'espace |
@@ -163,7 +184,7 @@ gardées par `tests/e2e/test_workspace_live_pilot.py` (sondage) et
 
 Le compteur de décisions de la barre du haut (`#decisions-pill`) est global sur le
 cockpit (tout le registre), propre au projet sur l'atelier, caché à zéro, et ouvre
-la vue Décisions d'Exécuter. La barre d'état dit « mis à jour il y a Xs », ou
+la vue Décisions de Travail (en portée « Tous les projets » sur le cockpit). La barre d'état dit « mis à jour il y a Xs », ou
 « actualisation suspendue » (onglet masqué), ou « API injoignable depuis Xs ».
 
 ## Citer un concept

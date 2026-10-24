@@ -32,6 +32,8 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 from playwright.sync_api import Browser, Page
 
+from .conftest import open_scope_all
+
 #: Le petit programme qui fabrique l'état — deux nodes, `project-upgrade`
 #: comme id de blueprint (jamais le vrai blueprint du registre, inutilement
 #: lourd pour ce que ce test observe), avancé jusqu'au checkpoint sur le
@@ -185,13 +187,16 @@ def test_the_checkpoint_badge_survives_a_fleet_then_project_navigation(
 ) -> None:
     page = checkpoint_badge_workspace
 
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-    page.get_by_role("button", name="Flotte").click()
+    open_scope_all(page)
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
     page.wait_for_selector(".tbl-wrap")
 
     row = page.locator(".tbl tbody tr", has_text="projet-checkpoint-badge")
     row.wait_for(timeout=15_000)
+    # Choisir la ligne change la portée (P31) : la fiche s'ouvre après rechargement.
     row.click()
+    page.wait_for_url(lambda url: "project=" in url, timeout=30_000)
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
 
     # Premier rendu de la fiche : le badge doit déjà être là, dérivé du
     # backend (`GET /api/workspace/flows/runs`) — jamais un état posé
@@ -201,9 +206,11 @@ def test_the_checkpoint_badge_survives_a_fleet_then_project_navigation(
     # Aller-retour Flotte → Projet, dans la même session navigateur : c'est
     # exactement le rechargement de fiche qui perdait le badge avant ce
     # correctif (`renderSheet` reconstruit tout l'inspecteur à chaque appel).
-    page.get_by_role("button", name="Flotte").click()
+    open_scope_all(page)
     page.wait_for_selector(".tbl-wrap")
     row = page.locator(".tbl tbody tr", has_text="projet-checkpoint-badge")
     row.click()
+    page.wait_for_url(lambda url: "project=" in url, timeout=30_000)
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
 
     page.wait_for_selector(f"text={_BADGE_TEXT}", timeout=15_000)

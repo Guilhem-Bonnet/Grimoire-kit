@@ -907,7 +907,7 @@ body[data-active-space="source"] {
   border-bottom: 0;
 }
 
-:root[data-density="concentration"] .tbl td {
+:root[data-density="compacte"] .tbl td {
   padding-top: 5px;
   padding-bottom: 5px;
 }
@@ -1061,7 +1061,7 @@ body[data-active-space="source"] {
   background: var(--accsoft);
 }
 
-/* En densité Découverte le rail porte ses libellés (spec §3.4).
+/* En densité confortable le rail porte ses libellés (spec §3.4).
  *
  * Le libellé est du texte : il tient le plancher typographique comme le reste,
  * donc le rail s'élargit au lieu de rétrécir la police. Un rail de 44 px avec
@@ -1071,18 +1071,18 @@ body[data-active-space="source"] {
   display: none;
 }
 
-:root[data-density="decouverte"] #rail {
+:root[data-density="confortable"] #rail {
   width: var(--w-rail-wide);
 }
 
-:root[data-density="decouverte"] .rail-btn {
+:root[data-density="confortable"] .rail-btn {
   width: var(--w-rail-wide);
   flex-direction: column;
   gap: 2px;
   height: 52px;
 }
 
-:root[data-density="decouverte"] .rail-lbl {
+:root[data-density="confortable"] .rail-lbl {
   display: block;
   max-width: 100%;
   padding: 0 4px;
@@ -1093,7 +1093,7 @@ body[data-active-space="source"] {
   white-space: nowrap;
 }
 
-:root[data-density="decouverte"] .panel[data-state="peek"].panel-left {
+:root[data-density="confortable"] .panel[data-state="peek"].panel-left {
   left: var(--w-rail-wide);
 }
 
@@ -1256,6 +1256,80 @@ body[data-active-space] .panel-head {
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
   flex: none;
+}
+
+/* ── Bandeau de lecture seule (P31) ───────────────────────────────────────
+ * En tête de la toile, au-dessus des rubriques : dit pourquoi on ne peut pas
+ * écrire, et porte le geste qui le rétablit. Jamais un aplat saturé. */
+#readonly-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) 14px;
+  background: var(--warn-soft);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+#readonly-banner[hidden] {
+  display: none;
+}
+#readonly-banner > .ico {
+  width: 16px;
+  height: 16px;
+  color: var(--warn);
+  flex: none;
+}
+.ro-text {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.ro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.ro-actions code {
+  overflow-wrap: anywhere;
+  color: var(--ink2);
+}
+
+/* ── Rubriques d'un espace (P31) : une rangée d'onglets sous la barre ─────── */
+#section-tabs {
+  display: flex;
+  align-items: stretch;
+  height: var(--h-doc);
+  padding: 0 14px;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  flex: none;
+}
+#section-tabs[hidden] {
+  display: none;
+}
+
+/* ── Préférences (rubrique de Configuration rendue par la coque) ──────────── */
+.pref-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-5);
+  max-width: 720px;
+}
+.pref-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.pref-title {
+  margin: 0;
+  font-size: var(--t-l);
+  font-weight: 600;
 }
 
 #canvas {
@@ -1488,7 +1562,7 @@ body[data-active-space] .panel-head {
   text-decoration: none;
 }
 
-/* ── Mode concentration ────────────────────────────────────────────────────*/
+/* ── Plein écran ──────────────────────────────────────────────────────────*/
 
 :root[data-focus="on"] .panel[data-state="pinned"] {
   display: none;
@@ -1524,6 +1598,7 @@ body[data-active-space] .panel-head {
   .palette-lbl,
   .pill-lbl,
   .live-pre,
+  .st-pre,
   #palette-open .kbd,
   #project-chip .chevron {
     display: none;

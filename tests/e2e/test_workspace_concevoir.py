@@ -31,7 +31,7 @@ def concevoir(workspace: Page, project_with_blueprint: tuple[Path, str]) -> tupl
     """La coque, avec un blueprint réel déjà sur disque, ouverte sur Concevoir."""
     _root, bp_id = project_with_blueprint
     workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'concevoir'")
     workspace.wait_for_selector(".cv-card", timeout=15_000)
     return workspace, bp_id
 
@@ -57,7 +57,7 @@ def concevoir_scratch_blueprint(workspace: Page, real_project: Path) -> tuple[Pa
     if not target.is_file():
         pytest.skip(f"`grimoire blueprint new` n'a pas produit de fichier ici : {result.stderr[-400:]}")
     workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'concevoir'")
     workspace.wait_for_selector(f'.cv-card[data-container-id="{bp_id}"]', timeout=15_000)
     return workspace, bp_id
 
@@ -289,7 +289,7 @@ def test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement(
     page.reload(wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'concevoir'")
     page.wait_for_selector(f'.cv-card[data-container-id="{bp_id}"]', timeout=15_000)
     page.locator(f'.cv-card[data-container-id="{bp_id}"]').dblclick()
     page.wait_for_selector(".cv-node", timeout=15_000)
@@ -321,11 +321,11 @@ def test_changer_de_blueprint_avec_des_modifications_non_enregistrees_demande_co
     # Revenir au niveau Projet ne relit rien (`setZoom` seul) : aucune
     # confirmation attendue ici. C'est rouvrir un blueprint — même celui-ci —
     # qui relirait le disque et écraserait le brouillon.
-    page.locator("#zoom-seg button", has_text="Projet").click()
+    page.locator("#zoom-seg button", has_text="Blueprints").click()
     page.locator(f'.cv-card[data-container-id="{bp_id}"]').dblclick()
     page.wait_for_timeout(300)
 
     assert dialog_messages, "rouvrir un blueprint modifié doit demander confirmation avant d'écraser le brouillon"
     # `dismiss()` = Annuler : `zoomToWorkflow` doit s'être arrêté avant son
-    # propre `setZoom('workflow')` — le zoom reste sur Projet, pas Workflow.
-    assert page.locator("#zoom-seg button[aria-pressed='true']").inner_text().strip() == "Projet"
+    # propre `setZoom('workflow')` — le zoom reste sur Blueprints, pas Workflow.
+    assert page.locator("#zoom-seg button[aria-pressed='true']").inner_text().strip() == "Blueprints"

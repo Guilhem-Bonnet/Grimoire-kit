@@ -198,10 +198,18 @@ def test_la_coque_appelle_le_sprite_et_ne_dessine_plus_en_ligne() -> None:
     assert "<path" not in shell
     assert not re.search(r"^\s*path:\s*'", shell, re.MULTILINE)
     assert "<rect" not in html and "<path" not in html
-    rail_icons = re.findall(r"icon:\s*'(i-[a-z-]+)'", shell)
+    rail = shell[shell.index("const RAIL = [") :]
+    rail_icons = re.findall(r"icon:\s*'(i-[a-z-]+)'", rail[: rail.index("];")])
     assert len(rail_icons) == 5, "le rail appelle cinq icônes Douce"
+    # Les cinq espaces (P31) : quatre icônes dans shell.js, celle du 4e espace
+    # dans glossary.js, à côté de son libellé.
+    spaces = shell[shell.index("const SPACES = [") :]
+    space_icons = re.findall(r"icon:\s*'(i-space-[a-z-]+)'", spaces[: spaces.index("\n];")])
+    glossary_js = (WORKSPACE / "glossary.js").read_text(encoding="utf-8")
+    space_icons += re.findall(r"FOURTH_SPACE = .*icon:\s*'(i-space-[a-z-]+)'", glossary_js)
+    assert len(set(space_icons)) == 5, "les cinq espaces appellent chacun leur icône i-space-*"
     assert html.count("icons.svg#i-ui-pin") == 3, "les trois boutons d'épinglage appellent i-ui-pin"
-    called = set(rail_icons) | set(re.findall(r"icons\.svg#(i-[a-z-]+)", html))
+    called = set(rail_icons) | set(space_icons) | set(re.findall(r"icons\.svg#(i-[a-z-]+)", html))
     assert called <= known, f"symboles appelés mais absents : {called - known}"
 
 

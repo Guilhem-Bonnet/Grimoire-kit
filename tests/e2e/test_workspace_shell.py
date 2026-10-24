@@ -19,7 +19,18 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page
 
-SPACES = ["piloter", "concevoir", "executer", "observer", "memoire", "source"]
+#: Les cinq espaces de la coque (P31), et chacune de leurs rubriques.
+SPACES = ["a-traiter", "travail", "flotte", "savoir", "configuration"]
+SECTIONS = {
+    "a-traiter": "a-traiter",
+    "travail": "travail",
+    "flotte": "flotte",
+    "memoire": "savoir",
+    "journal": "savoir",
+    "fichiers": "configuration",
+    "blueprints": "configuration",
+    "preferences": "configuration",
+}
 
 #: Le contraste minimal exigé par la spec §2.2 et le critère §6.2.
 MIN_RATIO = 4.5
@@ -98,29 +109,30 @@ def _apply(page: Page, *, theme: str | None = None, density: str | None = None) 
     )
 
 
-# ── Critère 1 : les six espaces s'ouvrent sur un projet réel ────────────────
+# ── Critère 1 : chaque rubrique des cinq espaces s'ouvre sur un projet réel ─
 
 
-@pytest.mark.parametrize("space", SPACES)
-def test_chaque_espace_s_ouvre_sur_un_projet_reel(workspace: Page, space: str) -> None:
-    """Le premier test que la spec demande : six espaces, aucune donnée de démo.
+@pytest.mark.parametrize("section", list(SECTIONS))
+def test_chaque_espace_s_ouvre_sur_un_projet_reel(workspace: Page, section: str) -> None:
+    """Le premier test que la spec demande : toutes les rubriques, aucune donnée de démo.
 
     Il échoue si un module d'espace lève, si son import casse, ou si la coque
     n'affiche plus l'onglet actif — donc il couvre le contrat `mount(root, ctx)`
-    pour les cinq lots à la fois.
+    pour tous les modules à la fois.
     """
-    workspace.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    workspace.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    workspace.evaluate("(id) => window.GrimoireWorkspace.goto(id)", section)
+    workspace.wait_for_function("(id) => window.GrimoireWorkspace.section === id", arg=section)
 
+    space = SECTIONS[section]
     assert workspace.locator(f'[data-space="{space}"][aria-selected="true"]').count() == 1
-    assert workspace.locator("#canvas").inner_text().strip(), f"l'espace {space} rend une toile vide"
+    assert workspace.locator("#canvas").inner_text().strip(), f"la rubrique {section} rend une toile vide"
     # Aucun écran ne doit annoncer de la donnée de démonstration (spec §5).
     assert "démo" not in workspace.locator("#canvas").inner_text().lower()
 
 
-def test_la_coque_annonce_les_six_espaces_et_pas_un_de_plus(workspace: Page) -> None:
+def test_la_coque_annonce_les_cinq_espaces_et_pas_un_de_plus(workspace: Page) -> None:
     assert workspace.evaluate("() => window.GrimoireWorkspace.spaces") == SPACES
-    assert workspace.locator("#spaces .tab").count() == 6
+    assert workspace.locator("#spaces .tab").count() == 5
 
 
 def test_aucune_erreur_de_console_a_l_amorcage(browser, served: str) -> None:
@@ -243,9 +255,9 @@ def test_les_surfaces_voisines_s_ecartent_assez_pour_se_distinguer(workspace: Pa
     assert not offenders, "surfaces trop proches :\n  " + "\n  ".join(offenders)
 
 
-@pytest.mark.parametrize("density", ["decouverte", "concentration"])
+@pytest.mark.parametrize("density", ["confortable", "compacte"])
 @pytest.mark.parametrize("theme", ["dark", "light"])
-def test_les_six_espaces_s_ouvrent_dans_les_deux_themes_et_les_deux_densites(
+def test_les_cinq_espaces_s_ouvrent_dans_les_deux_themes_et_les_deux_densites(
     workspace: Page, theme: str, density: str
 ) -> None:
     """Critère 1, dans ses quatre combinaisons."""
@@ -256,7 +268,7 @@ def test_les_six_espaces_s_ouvrent_dans_les_deux_themes_et_les_deux_densites(
         assert workspace.locator("#canvas").inner_text().strip()
 
 
-# ── Critère 3 : panneaux, raccourcis, palette, concentration ───────────────
+# ── Critère 3 : panneaux, raccourcis, palette, plein écran ─────────────────
 
 
 def test_les_trois_etats_de_panneau_repondent(workspace: Page) -> None:
@@ -330,13 +342,13 @@ def test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut(workspace: 
     ``test_workspace_concevoir.py``) : le rail annonce « 3 » pour les Preuves
     (``shell.js``, ``RAIL``), mais aucun espace ne l'enregistrait — ni le clic
     sur l'icône, ni le raccourci clavier ne faisaient quoi que ce soit, sur
-    aucun des six espaces (issue 534). Possédé par la coque elle-même,
+    aucun des espaces (issue 534). Possédé par la coque elle-même,
     contrairement à « 2 »/bibliothèque qui reste propre à Concevoir : le
-    panneau doit répondre depuis Piloter, l'espace par défaut, sans qu'aucun
-    espace ne s'en charge.
+    panneau doit répondre depuis À traiter, l'espace par défaut (P31), sans
+    qu'aucun espace ne s'en charge.
     """
     api = "window.GrimoireWorkspace"
-    assert workspace.evaluate(f"() => {api}.space") == "piloter"
+    assert workspace.evaluate(f"() => {api}.space") == "a-traiter"
     workspace.evaluate(f"() => {api}.setPanel('evidence', 'collapsed')")
 
     workspace.locator("body").press("3")
@@ -359,7 +371,7 @@ def test_le_clic_sur_une_tache_de_preuves_ouvre_le_pack_dans_source(workspace: P
 
     row.click()
 
-    workspace.wait_for_function(f"() => {api}.space === 'source'")
+    workspace.wait_for_function(f"() => {api}.module === 'source'")
 
 
 def test_le_cadenas_epingle_dans_la_grille(workspace: Page) -> None:
@@ -414,7 +426,7 @@ def test_les_raccourcis_de_panneau_basculent(workspace: Page, key: str, panel: s
     assert before != after
 
 
-def test_le_mode_concentration_replie_tout(workspace: Page) -> None:
+def test_le_plein_ecran_replie_tout(workspace: Page) -> None:
     """⇧⌘F : la toile prend l'écran. Sans ça, le mode n'est qu'un libellé."""
     workspace.evaluate("() => window.GrimoireWorkspace.setPanel('explorer', 'pinned')")
     before = workspace.locator("#canvas").bounding_box()
@@ -448,12 +460,12 @@ def test_la_palette_execute_l_entree_selectionnee_a_l_entree(workspace: Page) ->
     """Entrée déclenche exactement ce que le clavier vient de mettre en évidence."""
     workspace.locator("body").press("ControlOrMeta+k")
     workspace.wait_for_selector("#palette:not([hidden])")
-    workspace.locator("#palette-input").fill("Observer")
+    workspace.locator("#palette-input").fill("Journal")
     workspace.wait_for_function("() => document.querySelectorAll('#palette-list li').length > 0")
 
     workspace.locator("body").press("Enter")
 
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'observer'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'observer'")
     assert workspace.evaluate("() => window.GrimoireWorkspace.paletteOpen") is False
 
 
@@ -504,7 +516,7 @@ def test_choisir_un_fichier_dans_la_palette_l_ouvre_dans_source(workspace: Page)
     chosen_path = workspace.locator('#palette-list li[role="option"]').first.locator("span").first.inner_text()
     workspace.locator("body").press("Enter")
 
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
     workspace.wait_for_selector(".sr-docrow .mono", timeout=10_000)
     assert workspace.locator(".sr-docrow .mono").inner_text() == chosen_path
 
@@ -523,12 +535,13 @@ def test_le_theme_et_la_densite_se_choisissent_et_survivent_au_rechargement(work
 def test_la_densite_se_choisit_et_survit_au_rechargement(workspace: Page, served: str) -> None:
     """Le second réglage de la spec §3.4, mémorisé comme le thème."""
     workspace.locator("#st-density").click()
-    assert workspace.evaluate("() => window.GrimoireWorkspace.density") == "concentration"
+    assert workspace.evaluate("() => window.GrimoireWorkspace.density") == "compacte"
+    assert workspace.locator("#st-density").inner_text() == "Densité : compacte"
 
     workspace.reload(wait_until="domcontentloaded")
     workspace.wait_for_selector("body[data-ready='1']")
 
-    assert workspace.evaluate("() => window.GrimoireWorkspace.density") == "concentration"
+    assert workspace.evaluate("() => window.GrimoireWorkspace.density") == "compacte"
 
 
 def test_l_etat_des_panneaux_est_memorise_par_espace_et_survit_au_rechargement(workspace: Page, served: str) -> None:
@@ -536,11 +549,11 @@ def test_l_etat_des_panneaux_est_memorise_par_espace_et_survit_au_rechargement(w
     espaces gardent chacun leur propre état de panneau, y compris après recharge."""
     api = "window.GrimoireWorkspace"
     workspace.evaluate(f"(id) => {api}.goto(id)", "piloter")
-    workspace.wait_for_function(f"(id) => {api}.space === id", arg="piloter")
+    workspace.wait_for_function(f"(id) => {api}.module === id", arg="piloter")
     workspace.evaluate(f"() => {api}.setPanel('explorer', 'collapsed')")
 
     workspace.evaluate(f"(id) => {api}.goto(id)", "concevoir")
-    workspace.wait_for_function(f"(id) => {api}.space === id", arg="concevoir")
+    workspace.wait_for_function(f"(id) => {api}.module === id", arg="concevoir")
     workspace.evaluate(f"() => {api}.setPanel('explorer', 'pinned')")
 
     workspace.reload(wait_until="domcontentloaded")
@@ -549,7 +562,7 @@ def test_l_etat_des_panneaux_est_memorise_par_espace_et_survit_au_rechargement(w
     assert workspace.evaluate(f"() => {api}.panelState('explorer')") == "pinned"
 
     workspace.evaluate(f"(id) => {api}.goto(id)", "piloter")
-    workspace.wait_for_function(f"(id) => {api}.space === id", arg="piloter")
+    workspace.wait_for_function(f"(id) => {api}.module === id", arg="piloter")
     assert workspace.evaluate(f"() => {api}.panelState('explorer')") == "collapsed", (
         "l'état de piloter ne doit pas avoir été écrasé par celui de concevoir"
     )
@@ -611,7 +624,7 @@ def test_le_survol_ouvre_une_bulle_apres_le_delai(workspace: Page) -> None:
 
     workspace.wait_for_selector(".tip", timeout=2_000)
     assert workspace.locator(".tip").count() == 1
-    assert workspace.locator(".tip .t").inner_text() == "Projet"
+    assert workspace.locator(".tip .t").inner_text() == "Portée"
     assert workspace.locator(".tip .lbl").first.inner_text() == "Alt · épingler"
 
 
@@ -691,18 +704,18 @@ def test_echap_ferme_toute_la_pile_quelle_que_soit_sa_hauteur(workspace: Page, s
     assert workspace.locator(".tip").count() == 0
 
 
-def test_densite_concentration_reduit_la_bulle_et_attend_800ms(workspace: Page) -> None:
+def test_densite_compacte_reduit_la_bulle_et_attend_800ms(workspace: Page) -> None:
     """Spec §3.4 : nom et raccourci seulement, 800 ms. Alt rouvre la définition.
 
     `[data-panel="inspector"]` cite `inspecteur`, qui a un raccourci (« 4 ») —
     contrairement à `#project-chip`, la bulle réduite a donc quelque chose à
     montrer *et* quelque chose à taire.
     """
-    _apply(workspace, density="concentration")
+    _apply(workspace, density="compacte")
 
     workspace.hover('[data-panel="inspector"]')
     workspace.wait_for_timeout(600)
-    assert workspace.locator(".tip").count() == 0, "800 ms en Concentration, pas 500"
+    assert workspace.locator(".tip").count() == 0, "800 ms en densité compacte, pas 500"
 
     workspace.wait_for_selector(".tip", timeout=2_000)
     reduced = workspace.locator(".tip").inner_text()
@@ -726,6 +739,9 @@ def test_navigation_clavier_le_focus_ouvre_sans_delai_et_alt_epingle(workspace: 
     qu'Alt ne soit lu — exactement le défaut qu'un test au clavier doit
     surprendre, pas contourner.
     """
+    # Le zoom n'existe plus que dans Blueprints (P31) : on s'y rend d'abord.
+    workspace.evaluate("() => window.GrimoireWorkspace.goto('blueprints')")
+    workspace.wait_for_selector(f"{_NON_FOCUSABLE_ANCHOR} button")
     assert workspace.evaluate(f"() => document.querySelector('{_NON_FOCUSABLE_ANCHOR}').tabIndex") == 0, (
         "ensureFocusable doit rendre le segment de zoom atteignable au clavier"
     )
