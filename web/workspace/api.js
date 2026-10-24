@@ -357,6 +357,13 @@ export const api = {
   archetypesCatalogue: () => get('/api/archetypes'),
   backendsCatalogue: () => get('/api/backends'),
   needsCatalogue: () => get('/api/needs'),
+  // Les trois questions du wizard (#888) — pile, qui travaille, domaine —
+  // pré-remplies par la détection du projet servi, et l'archétype déduit par
+  // le même module que la CLI (`grimoire.cli.init_questions`). `answers`
+  // ({ stack: 'a,b', who, domain }) remplace les défauts ; `prefill: false`
+  // ignore la détection (formulaire « nouveau projet », autre dossier).
+  setupQuestions: (answers, prefill = true) =>
+    get('/api/setup/questions', { ...(answers || {}), ...(prefill ? {} : { prefill: '0' }) }),
   // Exécute réellement le plan (même mécanique que `grimoire up`, jamais un
   // sous-processus — voir project_setup.execute_setup_plan). Refusé côté
   // serveur, fail-closed, avant toute écriture si le plan ne peut pas

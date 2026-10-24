@@ -660,70 +660,6 @@ class TestInitMemoryCollectionNaming:
         assert "collection_prefix" not in content
 
 
-class TestParseArchetypeSelection:
-    """Tests for _parse_archetype_selection helper."""
-
-    def test_all_returns_all_keys(self) -> None:
-        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
-        result = _parse_archetype_selection("all")
-        assert result == list(_ARCHETYPE_KEYS)
-
-    def test_none_returns_minimal(self) -> None:
-        from grimoire.cli.cmd_init import _parse_archetype_selection
-        assert _parse_archetype_selection("none") == ["minimal"]
-
-    def test_unreadable_input_never_falls_back_to_minimal(self) -> None:
-        """Décision 2026-09-18 : `minimal` ne s'obtient que sur demande (`none`),
-        jamais par défaut — une saisie illisible retombe sur `stack` (Atlas)."""
-        from grimoire.cli.cmd_init import _parse_archetype_selection
-        assert _parse_archetype_selection("zzz") == ["stack"]
-        assert _parse_archetype_selection("99") == ["stack"]
-
-    def test_empty_returns_minimal(self) -> None:
-        from grimoire.cli.cmd_init import _parse_archetype_selection
-        assert _parse_archetype_selection("") == ["minimal"]
-
-    def test_single_number(self) -> None:
-        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
-        result = _parse_archetype_selection("1")
-        assert result == [_ARCHETYPE_KEYS[0]]
-
-    def test_multiple_numbers(self) -> None:
-        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
-        result = _parse_archetype_selection("1,3,5")
-        assert result == [_ARCHETYPE_KEYS[0], _ARCHETYPE_KEYS[2], _ARCHETYPE_KEYS[4]]
-
-    def test_numbers_with_spaces(self) -> None:
-        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
-        result = _parse_archetype_selection("1 3 5")
-        assert result == [_ARCHETYPE_KEYS[0], _ARCHETYPE_KEYS[2], _ARCHETYPE_KEYS[4]]
-
-    def test_deduplication(self) -> None:
-        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
-        result = _parse_archetype_selection("1,1,1")
-        assert result == [_ARCHETYPE_KEYS[0]]
-
-    def test_archetype_names_directly(self) -> None:
-        from grimoire.cli.cmd_init import _parse_archetype_selection
-        result = _parse_archetype_selection("web-app")
-        assert result == ["web-app"]
-
-    def test_out_of_range_ignored(self) -> None:
-        from grimoire.cli.cmd_init import _ARCHETYPE_KEYS, _parse_archetype_selection
-        result = _parse_archetype_selection("1,99")
-        assert result == [_ARCHETYPE_KEYS[0]]
-
-    def test_zero_triggers_guided(self) -> None:
-        # "0" calls _guided_discovery which needs user input — for unit test, we mock
-        from unittest.mock import patch
-
-        from grimoire.cli.cmd_init import _parse_archetype_selection
-
-        with patch("grimoire.cli.cmd_init._guided_discovery", return_value=["web-app"]):
-            result = _parse_archetype_selection("0")
-        assert result == ["web-app"]
-
-
 class TestInitNoCockpit:
     """#305 — `init` enrôlait chaque projet dans le registre cockpit réel, même
     les jetables, sans option pour l'éviter (seule la variable d'environnement
@@ -846,13 +782,12 @@ class TestInitNoCockpit:
         assert "GRIMOIRE_NO_COCKPIT" in (init_cmd.help or "")
 
 
-class TestWizardArchetypeStepDefaultsToDiscovery:
-    """Onboarding audit 2026-09-18, constat #2: bare Enter at the archetype
-    step always installed 'minimal' via the numeric multi-select's 'none'
-    default. Guided discovery (option '0') existed and worked, but was never
-    the default — a user who only answers the 3 guided yes/no questions
-    (never a number) should land on a specialized archetype when the project
-    warrants one."""
+class TestWizardThreeQuestionsBareEnter:
+    """Onboarding audit 2026-09-18, constat #2 (bare Enter used to install
+    'minimal'), kept under the three-question wizard (#888): a user who
+    presses Enter on every question gets the detection's deduction — a
+    specialized archetype when the project warrants one, `stack` (Atlas)
+    otherwise, never `minimal`."""
 
     @staticmethod
     def _echo_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -862,7 +797,7 @@ class TestWizardArchetypeStepDefaultsToDiscovery:
         monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(lambda *a, **kw: kw.get("default", "")))
         monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(lambda *a, **kw: kw.get("default", False)))
 
-    def test_python_naked_bare_enter_gets_specialized_via_guided_discovery(
+    def test_python_naked_bare_enter_lands_on_stack_not_minimal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from grimoire.cli.cmd_init import _run_wizard
@@ -879,7 +814,7 @@ class TestWizardArchetypeStepDefaultsToDiscovery:
         result = _run_wizard(tmp_path, scan, resolved, "lexical")
         assert result["archetype"] != "minimal"
 
-    def test_node_naked_bare_enter_gets_specialized_via_guided_discovery(
+    def test_node_naked_bare_enter_lands_on_stack_not_minimal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from grimoire.cli.cmd_init import _run_wizard
@@ -896,11 +831,11 @@ class TestWizardArchetypeStepDefaultsToDiscovery:
         result = _run_wizard(tmp_path, scan, resolved, "lexical")
         assert result["archetype"] != "minimal"
 
-    def test_numeric_list_still_reachable_when_auto_detected(
+    def test_confident_rule_match_prefills_the_domain(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A rule-matched stack keeps its numeric auto-selection as the
-        default — guided discovery only replaces the *blank* default."""
+        """A rule-matched stack (React → web-app) pre-fills the domain
+        question, so a bare Enter keeps the detected archetype."""
         from grimoire.cli.cmd_init import _run_wizard
         from grimoire.core.archetype_resolver import ArchetypeResolver
         from grimoire.core.scanner import ScanResult, StackDetection
@@ -1105,14 +1040,12 @@ class TestDynamicNextStepsPanel:
 
 class TestWizardNeverPreFillsABestGuess:
     """Decision 2026-09-18 (Guilhem, corrected same day): a naked Python
-    project now resolves to `stack` (Atlas) — a deliberate pick, not a
-    'best guess' (`is_best_guess` is False). But `stack` is not one of the
-    wizard's selectable specializations either (it's the kit's internal
-    generalist, not a numbered menu item) — so it is never pre-filled as
-    'detected' regardless, and the wizard still falls through to guided
-    discovery for it. A weak-signal pick (bundler → web-app) *is* in the
-    menu and *is* flagged `is_best_guess` — that's what actually exercises
-    the gate."""
+    project resolves to `stack` (Atlas) — a deliberate pick, not a 'best
+    guess'. Under the three-question wizard (#888) the gate lives on the
+    *domain* question: a confident rule match pre-fills the domain (bare
+    Enter keeps its archetype), a weak-signal guess (bundler → web-app) is
+    never pre-filled — the default stays « no asserted domain » → `stack`,
+    and the summary says so."""
 
     @staticmethod
     def _echo_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1121,7 +1054,7 @@ class TestWizardNeverPreFillsABestGuess:
         monkeypatch.setattr(cmd_init.Prompt, "ask", staticmethod(lambda *a, **kw: kw.get("default", "")))
         monkeypatch.setattr(cmd_init.Confirm, "ask", staticmethod(lambda *a, **kw: kw.get("default", False)))
 
-    def test_naked_python_wizard_does_not_prefill_stack(
+    def test_naked_python_wizard_deduces_stack(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     ) -> None:
         from grimoire.cli.cmd_init import _run_wizard
@@ -1137,15 +1070,16 @@ class TestWizardNeverPreFillsABestGuess:
         resolved = ArchetypeResolver().resolve(scan)
         assert resolved.archetype == "stack"
         assert resolved.is_best_guess is False
-        _run_wizard(tmp_path, scan, resolved, "lexical")
+        result = _run_wizard(tmp_path, scan, resolved, "lexical")
+        assert result["archetypes"] == ["stack"]
         printed = capsys.readouterr().err
-        assert "← detected" not in printed
+        assert "Archetype:   stack" in printed
 
     def test_weak_signal_pick_is_flagged_best_guess_and_not_prefilled(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The actual is_best_guess gate, exercised on an archetype that IS
-        in the wizard's menu (web-app, via the bundler weak signal)."""
+        """The actual is_best_guess gate: a bundler-only Node project is
+        resolved to web-app as a guess — the wizard does not pre-fill it."""
         import json as _json
 
         from grimoire.cli.cmd_init import _run_wizard
@@ -1164,12 +1098,12 @@ class TestWizardNeverPreFillsABestGuess:
         resolved = ArchetypeResolver().resolve(scan)
         assert resolved.archetype == "web-app"
         assert resolved.is_best_guess is True
-        _run_wizard(tmp_path, scan, resolved, "lexical")
-        printed = capsys.readouterr().err
-        assert "← detected" not in printed
+        result = _run_wizard(tmp_path, scan, resolved, "lexical")
+        assert result["archetype"] == "stack"
+        assert result["answers"]["domain"] == "none"
 
     def test_confident_rule_match_still_prefills(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from grimoire.cli.cmd_init import _run_wizard
         from grimoire.core.archetype_resolver import ArchetypeResolver
@@ -1183,6 +1117,6 @@ class TestWizardNeverPreFillsABestGuess:
         )
         resolved = ArchetypeResolver().resolve(scan)
         assert resolved.is_best_guess is False
-        _run_wizard(tmp_path, scan, resolved, "lexical")
-        printed = capsys.readouterr().err
-        assert "← detected" in printed
+        result = _run_wizard(tmp_path, scan, resolved, "lexical")
+        assert result["answers"]["domain"] == "web"
+        assert result["archetype"] == "web-app"

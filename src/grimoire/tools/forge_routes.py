@@ -56,6 +56,9 @@ class ReadableForgeAPI(Protocol):
     def needs_view(self) -> dict[str, Any]:
         """Catalogue des needs + suggestions pour le projet servi."""
 
+    def setup_questions(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        """Trois questions du wizard, réponses pré-remplies et archétype déduit (#888)."""
+
     def setup_run(self) -> dict[str, Any]:
         """Dernier journal d'exécution du wizard (``_grimoire/setup-run.json``)."""
 
@@ -107,6 +110,8 @@ def api_get(api: ReadableForgeAPI, path: str, query: dict[str, list[str]]) -> An
         return api.needs_view()
     if path == "/api/setup/run":
         return api.setup_run()
+    if path == "/api/setup/questions":
+        return api.setup_questions(query)
     if path == "/api/extensions":
         return api.extensions_view()
     if path == "/api/blueprints":
