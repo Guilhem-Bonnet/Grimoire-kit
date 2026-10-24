@@ -22,7 +22,7 @@ TITRE = "Lot de questions depuis Exécuter"
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _tache_en_attente(real_project: Path) -> tuple[str, str, str]:

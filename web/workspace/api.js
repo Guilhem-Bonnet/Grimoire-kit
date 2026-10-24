@@ -2,7 +2,7 @@
 //
 // Deux hôtes, une coque : `grimoire serve` sert un projet, `grimoire cockpit
 // serve` en sert N et attend `?project=<slug>` sur chaque lecture. Ce module
-// porte cette différence pour que les six modules d'espace ne l'aient jamais à
+// porte cette différence pour que les modules d'espace ne l'aient jamais à
 // connaître : ils appellent `api.tasks()`, et la cible est déjà bonne.
 //
 // Aucun module d'espace ne doit appeler `fetch` directement. Une route qui
@@ -28,6 +28,10 @@ export const host = {
   // `project` (voir piloter.js : Flotte reste le point d'entrée par défaut du
   // pilotage de flotte, sauf lancement direct).
   projectFromUrl: false,
+  /** La portée de la coque (P31) : vrai = « Tous les projets » (`?scope=all`,
+   *  ou cockpit sans aucun projet résolu). `project` reste alors le projet
+   *  servi, celui auquel les lectures sans cible explicite s'adressent. */
+  scopeAll: false,
   status: null,
 };
 
@@ -123,6 +127,8 @@ export async function boot() {
   host.projectFromUrl = host.kind === 'cockpit' && Boolean(wanted);
   if (host.kind === 'cockpit') host.project = host.project || status.project || status.slug;
   else host.project = null;
+  // `?project=` l'emporte : un lien vers un projet ouvre ce projet.
+  host.scopeAll = host.kind === 'cockpit' && ((params.get('scope') === 'all' && !wanted) || !host.project);
   return status;
 }
 
@@ -184,6 +190,9 @@ export const api = {
     return withProject(WS + 'stream' + (query ? '?' + query : ''));
   },
   glossary: () => get(WS + 'glossary'),
+  // Ce qui attend une décision humaine (P22), rangé par urgence. `portfolio`
+  // lit tout le registre — la portée « Tous les projets ».
+  attention: (portfolio) => get(WS + 'attention', portfolio ? { scope: 'portfolio' } : undefined),
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
   // convention que `health()` : l'inspecteur du portefeuille (#638, lot C)

@@ -55,6 +55,9 @@ const STYLE_ID = 'ex-styles';
 // `timelineFilter` : revenir sur l'espace garde le dernier réglage.
 const scope = { mode: 'project', state: '', slug: '', live: false };
 
+// Les vues que l'URL peut demander (`#travail?view=liste`).
+const VIEW_IDS = ['board4', 'board8', 'liste', 'timeline', 'decisions'];
+
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
 import { badge, glyph, icon, levelBars, monogram, stateIcon } from '../shell.js';
@@ -1371,79 +1374,61 @@ function actionFor(target, task, reason) {
   return ['move', { to: state }, `grimoire task move ${task.id} --to ${state}`];
 }
 
-// La barre de portée et de filtres du portefeuille (#638). Sur un hôte qui
-// n'est pas le cockpit, la portée « Tous les projets » reste visible mais
-// désactivée avec sa raison : l'atelier mono-projet ne résout pas `?project=`,
-// donc il ne saurait ni lire ni router vers un autre projet du registre.
+// Les filtres du portefeuille (#638). La portée elle-même n'est plus choisie
+// ici (P31) : c'est celle de la coque, « Tous les projets » ou un projet —
+// `ctx.scope`. Hors portefeuille il n'y a rien à filtrer : pas de barre.
 function scopeToolbar(ctx, portfolio, onChange) {
+  if (scope.mode !== 'portfolio' || !portfolio) return null;
   const bar = document.createElement('div');
   bar.className = 'ex-toolbar';
-  const scopeLabel = document.createElement('label');
-  scopeLabel.append(text('span', null, 'Portée'));
-  const scopeSelect = document.createElement('select');
-  scopeSelect.className = 'input';
-  scopeSelect.dataset.role = 'scope';
-  for (const [value, label] of [['project', 'Ce projet'], ['portfolio', 'Tous les projets']]) {
+  const stateLabel = document.createElement('label');
+  stateLabel.append(text('span', null, 'État'));
+  const stateSelect = document.createElement('select');
+  stateSelect.className = 'input';
+  stateSelect.dataset.role = 'state';
+  const stateOptions = [['', 'Tous les états'], ...LIFECYCLE.map((c) => [c, COLUMN_LABEL[c]])];
+  for (const [value, label] of stateOptions) {
     const option = document.createElement('option');
     option.value = value;
     option.textContent = label;
-    if (value === scope.mode) option.selected = true;
-    if (value === 'portfolio' && ctx.host.kind !== 'cockpit') {
-      option.disabled = true;
-      option.title = 'portefeuille : cockpit seulement (grimoire cockpit serve)';
-    }
-    scopeSelect.append(option);
+    if (value === scope.state) option.selected = true;
+    stateSelect.append(option);
   }
-  scopeSelect.addEventListener('change', () => { scope.mode = scopeSelect.value; onChange(); });
-  scopeLabel.append(scopeSelect);
-  bar.append(scopeLabel);
+  stateSelect.addEventListener('change', () => { scope.state = stateSelect.value; onChange(); });
+  stateLabel.append(stateSelect);
 
-  if (scope.mode === 'portfolio' && portfolio) {
-    const stateLabel = document.createElement('label');
-    stateLabel.append(text('span', null, 'État'));
-    const stateSelect = document.createElement('select');
-    stateSelect.className = 'input';
-    stateSelect.dataset.role = 'state';
-    const stateOptions = [['', 'Tous les états'], ...LIFECYCLE.map((c) => [c, COLUMN_LABEL[c]])];
-    for (const [value, label] of stateOptions) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      if (value === scope.state) option.selected = true;
-      stateSelect.append(option);
-    }
-    stateSelect.addEventListener('change', () => { scope.state = stateSelect.value; onChange(); });
-    stateLabel.append(stateSelect);
-
-    const projectLabel = document.createElement('label');
-    projectLabel.append(text('span', null, 'Projet'));
-    const projectSelect = document.createElement('select');
-    projectSelect.className = 'input';
-    projectSelect.dataset.role = 'project';
-    const projectOptions = [['', 'Tous les projets'], ...(portfolio.projects || []).map((p) => [p.slug, p.name || p.slug])];
-    for (const [value, label] of projectOptions) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      if (value === scope.slug) option.selected = true;
-      projectSelect.append(option);
-    }
-    projectSelect.addEventListener('change', () => { scope.slug = projectSelect.value; onChange(); });
-    projectLabel.append(projectSelect);
-
-    const liveLabel = document.createElement('label');
-    const liveBox = document.createElement('input');
-    liveBox.type = 'checkbox';
-    liveBox.dataset.role = 'live';
-    liveBox.checked = scope.live;
-    liveBox.addEventListener('change', () => { scope.live = liveBox.checked; onChange(); });
-    liveLabel.append(liveBox, text('span', null, `Sessions vivantes (< ${portfolio.live_minutes} min)`));
-
-    const summary = portfolio.summary || {};
-    const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${(summary.liveness || {}).vivant ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
-    bar.append(stateLabel, projectLabel, liveLabel, count);
+  const projectLabel = document.createElement('label');
+  projectLabel.append(text('span', null, 'Projet'));
+  const projectSelect = document.createElement('select');
+  projectSelect.className = 'input';
+  projectSelect.dataset.role = 'project';
+  const projectOptions = [['', 'Tous les projets'], ...(portfolio.projects || []).map((p) => [p.slug, p.name || p.slug])];
+  for (const [value, label] of projectOptions) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    if (value === scope.slug) option.selected = true;
+    projectSelect.append(option);
   }
+  projectSelect.addEventListener('change', () => { scope.slug = projectSelect.value; onChange(); });
+  projectLabel.append(projectSelect);
+
+  const liveLabel = document.createElement('label');
+  const liveBox = document.createElement('input');
+  liveBox.type = 'checkbox';
+  liveBox.dataset.role = 'live';
+  liveBox.checked = scope.live;
+  liveBox.addEventListener('change', () => { scope.live = liveBox.checked; onChange(); });
+  liveLabel.append(liveBox, text('span', null, `Sessions vivantes (< ${portfolio.live_minutes} min)`));
+
+  const summary = portfolio.summary || {};
+  const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${(summary.liveness || {}).vivant ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
+  bar.append(stateLabel, projectLabel, liveLabel, count);
   return bar;
+}
+
+function appendIf(host, child) {
+  if (child) host.append(child);
 }
 
 // Les projets du registre que le portefeuille n'a pas pu lire — nommés avec
@@ -1493,17 +1478,17 @@ export async function mount(root, ctx) {
   wrap.className = 'ex-wrap';
   root.append(wrap);
 
-  // `ctx.params` porte ce qu'un `goto('executer', { task, view })` a demandé —
-  // Observer s'en sert pour ouvrir directement la timeline d'une tâche depuis
-  // un span OTel qui en porte l'identifiant (#139). `scope: 'portfolio'`
-  // ouvre directement le portefeuille (#638).
-  // `decisions` : le compteur de la barre du haut (UI-3) ouvre directement la vue.
-  let view = ['timeline', 'decisions'].includes(ctx.params.view) ? ctx.params.view : 'board4';
-  // Sélection par (projet, id) : en portée projet, `project` reste vide.
-  let selected = ctx.params.task ? { id: ctx.params.task, project: '' } : null;
-  if (ctx.params.scope === 'portfolio' && ctx.host.kind === 'cockpit') scope.mode = 'portfolio';
-  else if (ctx.params.scope === 'project') scope.mode = 'project';
-  if (ctx.host.kind !== 'cockpit') scope.mode = 'project';
+  // `ctx.params` porte ce qu'un `goto('travail', { task, view })` — ou un lien
+  // profond `#travail?task=…` — a demandé. Observer s'en sert pour ouvrir
+  // directement la timeline d'une tâche depuis un span OTel qui en porte
+  // l'identifiant (#139) ; `decisions` : le compteur de la barre du haut
+  // (UI-3) ouvre directement la vue.
+  let view = VIEW_IDS.includes(ctx.params.view) ? ctx.params.view : 'board4';
+  // Sélection par (projet, id) : en portée projet, `project` reste vide ; en
+  // portefeuille, `of` dit le projet de la tâche.
+  let selected = ctx.params.task ? { id: ctx.params.task, project: ctx.params.of || '' } : null;
+  // La portée de la coque (P31) : « Tous les projets » = le portefeuille.
+  scope.mode = ctx.host.kind === 'cockpit' && ctx.scope && ctx.scope.all ? 'portfolio' : 'project';
   let board = await ctx.api.tasks();
 
   const VIEW_LABELS = [
@@ -1518,7 +1503,7 @@ export async function mount(root, ctx) {
   const redraw = () => { selected = null; draw(); };
 
   function renderNoLedger() {
-    ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Exécuter']);
+    ctx.docbar.setBreadcrumb([]);
     // Avant cette issue, un early-return ici évitait tout appel à
     // `setViews` : les boutons de vue disparaissaient purement et
     // simplement plutôt que rester visibles (désactivés) — l'utilisateur ne
@@ -1533,7 +1518,7 @@ export async function mount(root, ctx) {
       null,
       () => {},
     );
-    wrap.append(scopeToolbar(ctx, null, redraw));
+    appendIf(wrap, scopeToolbar(ctx, null, redraw));
     wrap.append(ctx.empty(
       'Exécuter',
       board.note || "Ce projet n'a pas encore de Mission Ledger.",
@@ -1617,7 +1602,7 @@ export async function mount(root, ctx) {
       tasks = fresh.tasks || [];
     }
     if (ctx.signal.aborted || seq !== drawSeq) return;
-    ctx.docbar.setBreadcrumb([portfolioMode ? 'Tous les projets' : (ctx.host.project || 'projet'), 'Exécuter']);
+    ctx.docbar.setBreadcrumb(selected ? [selected.id] : []);
     ctx.docbar.setViews(VIEW_LABELS, view, setView);
 
     // Les données sont là : on remplace d'un geste synchrone, en gardant le
@@ -1625,7 +1610,7 @@ export async function mount(root, ctx) {
     // pas renvoyer l'utilisateur au début ni lui voler le focus).
     const kept = captureView(wrap);
     wrap.replaceChildren();
-    wrap.append(scopeToolbar(ctx, portfolio, redraw));
+    appendIf(wrap, scopeToolbar(ctx, portfolio, redraw));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);
       if (notice) wrap.append(notice);
@@ -1671,6 +1656,11 @@ export async function mount(root, ctx) {
     if (opts.skipInspector) return;
 
     const current = tasks.find(same);
+    // L'URL suit la sélection (lien profond, P31) : vue et tâche.
+    ctx.setItem?.({
+      ...(view !== 'board4' ? { view } : {}),
+      ...(current ? { task: current.id, ...(portfolioMode && current.project?.slug ? { of: current.project.slug } : {}) } : {}),
+    });
     if (current) {
       const sig = JSON.stringify(current);
       if (opts.live && sig === inspectedSig) return;

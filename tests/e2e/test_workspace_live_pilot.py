@@ -74,7 +74,7 @@ def _capture(page: Page, name: str) -> None:
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 @pytest.fixture(scope="module")
@@ -349,7 +349,10 @@ def test_le_compteur_de_decisions_est_exact_visible_partout_et_cliquable(page: P
     _capture(page, "decisions-compteur-memoire")
 
     pill.click()
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'executer'")
+    # Le compteur est global : il rouvre la coque en portée « Tous les projets » (P31).
+    page.wait_for_url("**scope=all**")
+    page.wait_for_selector("body[data-ready='1']")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     page.wait_for_selector(".ex-decision")
     assert page.locator(".ex-decision").count() == 2, "le compteur et la vue disent la même chose"
     assert page.locator("#docbar [aria-pressed='true']").filter(has_text="Décisions").count() == 1
@@ -459,7 +462,9 @@ def test_a_390_px_le_compteur_et_l_horodatage_ne_font_rien_deborder(phone: Page,
     assert measured["pillWidth"] > 0 and measured["pillRight"] <= measured["iw"], measured
     _capture(phone, "mobile-compteur")
     phone.locator("#decisions-pill").click()
-    phone.wait_for_function("() => window.GrimoireWorkspace.space === 'executer'")
+    phone.wait_for_url("**scope=all**")
+    phone.wait_for_selector("body[data-ready='1']")
+    phone.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     phone.wait_for_selector(".ex-decision")
     _capture(phone, "mobile-decisions")
     _answer_all(service)

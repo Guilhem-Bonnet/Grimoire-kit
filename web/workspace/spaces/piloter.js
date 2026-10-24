@@ -1353,7 +1353,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   wrap.className = 'pl-sheet';
   const { health, memory } = sheet;
 
-  wrap.append(spaceHead(name || slug || ctx.host.project || 'Projet servi'));
+  wrap.append(spaceHead(name || (ctx.scope && ctx.scope.name) || 'Projet servi'));
 
   const kpi = kpiRow([
     { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit', icon: 'seal', tone: health?.kit?.scaffolded ? kitStatus(health.kit).dot : 'warn' },
@@ -1697,23 +1697,6 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     reviewPreview.append(cliCode);
   });
 
-  if (ctx.host.kind === 'cockpit' && slug && slug !== ctx.host.project) {
-    const openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.className = 'btn';
-    openBtn.textContent = 'Ouvrir ce projet';
-    // Naviguer via `ctx.goto` (une seule page, un seul montage de Piloter),
-    // jamais `location.search = ...` (issue #506) : ce dernier rechargeait
-    // le navigateur en entier, et le `?project=` qui en résultait retombait
-    // sur la vue Flotte par défaut (`projectFromUrl`, voir le docstring de
-    // `mount` plus bas) — le clic n'ouvrait jamais l'écran Projet qu'il
-    // promettait, il fallait recliquer « Projet » à la main. `ctx.params.
-    // openProject`, lu par `mount`, sélectionne directement ce projet au
-    // niveau Projet, sans reconstruire toute la coque.
-    openBtn.addEventListener('click', () => ctx.goto('piloter', { openProject: slug }));
-    actionsBlock.append(openBtn);
-  }
-
   ctx.inspector.append(actionsBlock);
 
   // ── Agents (#374) : table dans la fiche, détail éditable dans l'inspecteur ─
@@ -1788,30 +1771,12 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 export async function mount(root, ctx) {
   injectStyles();
   const cockpit = ctx.host.kind === 'cockpit';
-  // Flotte reste le point d'entrée du pilotage multi-projets — y compris
-  // quand une navigation cockpit délibérée a un projet en `?project=` — SAUF
-  // quand ce projet vient du lancement direct depuis son dossier (#351) :
-  // `ctx.host.projectFromUrl` distingue les deux (voir api.js). Sans cette
-  // exception, `cockpit serve` lancé dans un projet — seul serveur restant
-  // depuis #356 — n'ouvrait plus jamais Piloter sur sa propre fiche.
-  const directLaunch = ctx.host.project && !ctx.host.projectFromUrl;
-  let level = cockpit && !directLaunch ? 'flotte' : 'projet';
-  let selected = ctx.host.project || null;
-
-  // `ctx.goto('piloter', { openProject: slug })` (bouton « Ouvrir ce
-  // projet », issue #506) : une navigation EXPLICITE vers la fiche d'un
-  // projet précis prime sur la Flotte par défaut, y compris pour un hôte non
-  // home — c'est tout le sens du clic, contrairement à `?project=` dans
-  // l'URL au chargement (`directLaunch` ci-dessus), qui reste une
-  // navigation de flotte par défaut (#351).
-  if (ctx.params && ctx.params.openProject) {
-    selected = ctx.params.openProject;
-    level = 'projet';
-  }
-
-  const zoomLevels = cockpit
-    ? [{ id: 'flotte', label: 'Flotte' }, { id: 'projet', label: 'Projet' }]
-    : [{ id: 'projet', label: 'Projet' }];
+  // La portée de la coque décide seule (P31) : « Tous les projets » montre la
+  // table de la Flotte, un projet montre sa fiche. Plus de zoom Flotte/Projet
+  // propre à cet espace, plus de projet « prévisualisé » distinct du projet
+  // servi : choisir une ligne de la Flotte change la portée (`ctx.scope.set`).
+  const level = cockpit && ctx.scope && ctx.scope.all ? 'flotte' : 'projet';
+  const selected = ctx.host.project || null;
 
   // Un seul tour réseau en vol à la fois (#541 point 4) : un double-clic sur
   // « Rafraîchir », ou une action qui appelle `options.refresh()` pendant
@@ -1853,13 +1818,7 @@ export async function mount(root, ctx) {
   };
 
   const drawOnce = async ({ forceFleet = false } = {}) => {
-    ctx.docbar.setBreadcrumb([ctx.host.project || 'flotte', 'Piloter', level === 'flotte' ? 'Flotte' : 'Projet']);
-    // Un clic sur le niveau déjà actif ne redessine pas (#850) : `draw()`
-    // repeignait la coquille « Chargement… », rechargeait la fiche, puis
-    // `renderSheet` vidait l'Inspecteur — y compris l'aperçu qu'un clic parti
-    // sur l'ANCIEN bouton « Mettre à jour » venait d'y écrire. Un zoom inchangé
-    // est un non-événement, comme pour `stateKey()` côté file d'attente.
-    ctx.docbar.setZoom(zoomLevels, level, (id) => { if (id === level) return; level = id; draw(); });
+    ctx.docbar.setBreadcrumb([]);
 
     // Coquille immédiate (#541 point 3) : jamais d'écran vide le temps que
     // les appels réseau reviennent — un état « chargement… » se peint tout
@@ -1868,8 +1827,8 @@ export async function mount(root, ctx) {
     const shell = document.createElement('div');
     shell.className = 'pl-wrap';
     if (level === 'projet') {
-      const knownTitle = cockpit ? selected : ctx.host.status?.slug;
-      if (knownTitle) shell.append(spaceHead(knownTitle));
+      // Le nom du projet (accents compris), jamais son slug (P31).
+      shell.append(spaceHead(ctx.scope ? ctx.scope.name : 'Projet servi'));
     }
     shell.append(...ctx.loading('Chargement…', 3));
     root.replaceChildren(shell);
@@ -1884,7 +1843,7 @@ export async function mount(root, ctx) {
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderFleet(
         root, ctx, rows,
-        (slug) => { selected = slug; level = 'projet'; draw(); },
+        (slug) => ctx.scope.set(slug),
         () => draw({ forceFleet: true }),
       );
       ctx.dock.echo('grimoire status');

@@ -35,6 +35,8 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 from playwright.sync_api import Browser, Page
 
+from .conftest import open_scope_all
+
 
 def _free_port() -> int:
     with socket.socket() as sock:
@@ -127,10 +129,10 @@ def test_creating_a_project_from_the_fleet_makes_it_appear(
     page = fleet_workspace
     target = root / "nouveau-jetable"
 
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
     # Lancement bare (sans --project-root) sur un registre déjà peuplé : la
-    # fiche du projet existant s'ouvre par défaut, la Flotte est un onglet.
-    page.get_by_role("button", name="Flotte").click()
+    # table de la Flotte est la portée « Tous les projets » (P31).
+    open_scope_all(page)
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
 
     new_btn = page.get_by_role("button", name="+ Nouveau projet")
     new_btn.wait_for(timeout=15_000)
@@ -142,7 +144,10 @@ def test_creating_a_project_from_the_fleet_makes_it_appear(
     page.get_by_role("button", name="Créer le projet").click()
 
     # Navigation directe sur la fiche du projet créé — la même mécanique que
-    # cliquer une ligne du tableau (`onSelect`), pas une route dédiée.
+    # cliquer une ligne du tableau (`onSelect`, qui change la portée), pas une
+    # route dédiée.
+    page.wait_for_url(lambda url: "project=" in url, timeout=30_000)
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.wait_for_function(
         "() => document.querySelector('.pl-sheet h2')?.textContent.includes('nouveau-jetable')",
         timeout=30_000,
@@ -152,8 +157,8 @@ def test_creating_a_project_from_the_fleet_makes_it_appear(
     assert (target / "project-context.yaml").is_file()
 
     # Le sélecteur de projets (le tableau Flotte) le montre, sans redémarrer
-    # le cockpit : retour au niveau Flotte, dans la MÊME session navigateur.
-    page.get_by_role("button", name="Flotte").click()
+    # le cockpit : retour à la portée « Tous les projets », même navigateur.
+    open_scope_all(page)
     page.wait_for_selector(".tbl-wrap")
     table_text = page.locator(".tbl-wrap").inner_text()
     assert "nouveau-jetable" in table_text
@@ -167,8 +172,8 @@ def test_creating_a_project_on_an_existing_path_is_refused(
     page = fleet_workspace
     existing = root / "projet-existant"
 
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-    page.get_by_role("button", name="Flotte").click()
+    open_scope_all(page)
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
     page.get_by_role("button", name="+ Nouveau projet").click()
 
     path_input = page.locator("input[placeholder='/chemin/absolu/du/nouveau-projet']")

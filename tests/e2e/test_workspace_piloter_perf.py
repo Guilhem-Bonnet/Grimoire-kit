@@ -55,19 +55,18 @@ def test_fiche_piloter_un_seul_appel_sheet_et_interactive_sous_400ms(
     """Ouvrir la fiche d'un projet depuis la Flotte : UN SEUL appel réseau
     (``GET /api/workspace/sheet``) — pas les huit routes d'avant #548 —
     fiche interactive en moins de 400 ms (issue #548)."""
-    served, slug_a, slug_b, _slug_c = served_cockpit_triple
+    served, _slug_a, slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        # Depuis P31, choisir B dans la Flotte change la portée (rechargement) ;
+        # ce qui se mesure ici est le montage de la fiche dans la portée B.
+        page.goto(f"{served}/workspace/index.html?project={slug_b}#a-traiter", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
-        page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-        page.wait_for_selector(".tbl tbody tr")
 
         seen = _instrument_api(page)
         start = time.monotonic()
-        page.locator(".tbl tbody tr", has_text=slug_b).first.click()
+        page.evaluate("() => window.GrimoireWorkspace.goto('flotte')")
         page.wait_for_selector("button:has-text('Mettre à jour')")
         elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -106,16 +105,14 @@ def test_flotte_un_seul_appel_fleet_et_interactive_sous_900ms(
     """Le niveau Flotte d'un cockpit à 3 projets ne déclenche plus qu'UN
     appel `/api/fleet` (remplace le balayage 2×N), interactif en < 900 ms.
 
-    Piloter/Flotte est l'espace par défaut de la coque
-    (``location.hash || '#piloter'``, ``shell.js::main``) : avec
-    ``?project=<slug>`` mais sans lancement direct, elle s'affiche dès
-    l'amorçage, AVANT que `body[data-ready='1']` ne soit posé — écouter les
+    La Flotte en portée « Tous les projets » (``?scope=all#flotte``, P31)
+    s'affiche dès l'amorçage, AVANT que `body[data-ready='1']` ne soit posé — écouter les
     requêtes et démarrer le chronomètre APRÈS ce marqueur serait donc trop
     tard pour observer l'appel `/api/fleet` initial. On écoute et on
     chronomètre dès `page.goto`, pas de navigation explicite séparée à
     déclencher ensuite.
     """
-    served, slug_a, _slug_b, _slug_c = served_cockpit_triple
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
@@ -123,7 +120,7 @@ def test_flotte_un_seul_appel_fleet_et_interactive_sous_900ms(
         page.on("request", lambda req: fleet_calls.append(req.url) if "/api/fleet" in req.url else None)
 
         start = time.monotonic()
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
         page.wait_for_selector(".tbl tbody tr")
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -160,14 +157,13 @@ def test_refresh_de_la_flotte_ne_double_jamais_les_appels_en_vol(
     pour rendre la fenêtre de chevauchement déterministe plutôt que
     dépendante de la vitesse du disque du harnais.
     """
-    served, slug_a, _slug_b, _slug_c = served_cockpit_triple
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
-        page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
+        page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
         page.wait_for_selector(".tbl tbody tr")
 
         fleet_calls: list[str] = []

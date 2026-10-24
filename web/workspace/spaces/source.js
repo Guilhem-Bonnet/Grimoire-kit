@@ -62,7 +62,7 @@ export async function mount(root, ctx) {
   bindConsoleOnce(ctx);
   populateProblems(ctx);
 
-  ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Source']);
+  ctx.docbar.setBreadcrumb([]);
   ctx.docbar.setViews(
     [
       { id: 'source', label: 'Source' },
@@ -96,7 +96,8 @@ export async function mount(root, ctx) {
   // vient de Piloter → Propositions → « Ouvrir le fichier » pour une
   // réparation (#490) : la ligne citée dans `artifact_ref`.
   if (ctx.params && ctx.params.file) {
-    await openFile(ctx, root, ctx.params.file, ctx.params.line);
+    // Venue d'un lien profond, la ligne est du texte (`#…?line=12`).
+    await openFile(ctx, root, ctx.params.file, Number(ctx.params.line) || undefined);
   }
 }
 
@@ -233,6 +234,8 @@ async function openFile(ctx, root, path, line) {
     return;
   }
   state.draft = state.currentEntry.text || '';
+  // Le fichier ouvert entre dans l'URL : un lien copié le rouvre (P31).
+  ctx.setItem?.({ file: path, ...(line ? { line } : {}) });
   renderExplorer(ctx, root);
   renderCanvas(root, ctx);
   renderInspector(ctx);
