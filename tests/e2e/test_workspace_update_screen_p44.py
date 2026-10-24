@@ -70,11 +70,41 @@ def test_l_apercu_s_ouvre_en_plein_canevas_et_les_etapes_non_jouees_le_disent(
         "l'aperçu ne doit plus vivre dans l'inspecteur"
     )
     assert page.locator("#canvas .pl-sheet").is_hidden(), "la fiche cède la place à l'écran de mise à jour"
-    assert screen.locator("h2").inner_text().startswith("Mise à jour — ")
+    assert screen.locator("h2").inner_text().startswith("Mise à jour du kit")
 
     text = screen.inner_text()
     assert "non exécutée en aperçu" in text
     assert "jamais atteint" not in text
+
+    # Maquette : les neuf étapes tiennent en UNE barre compacte, sur une seule rangée.
+    steps = screen.locator("ol.pl-steps > li")
+    assert steps.count() == 9
+    tops = {round(steps.nth(i).bounding_box()["y"]) for i in range(9)}
+    assert len(tops) == 1, f"les étapes doivent partager une rangée : {tops}"
+    bar = steps.first.locator(".pl-step-bar").bounding_box()
+    assert bar["height"] == 4
+    columns = page.evaluate(
+        "() => getComputedStyle(document.querySelector('#canvas .pl-update .pl-steps')).gridTemplateColumns.split(' ').length"
+    )
+    assert columns == 9
+
+    # Deux colonnes : « Ce que la mise à jour écrirait » à gauche, tableaux de `up` à droite.
+    left = screen.locator(".pl-up-cols > .pl-changes")
+    right = screen.locator(".pl-up-cols > .pl-preview-tables")
+    assert left.is_visible() and right.is_visible()
+    lbox, rbox = left.bounding_box(), right.bounding_box()
+    assert lbox["x"] + lbox["width"] <= rbox["x"] + 1, "deux colonnes côte à côte"
+    assert abs(lbox["y"] - rbox["y"]) < 2
+    assert "Ce que la mise à jour écrirait" in left.inner_text()
+
+    # En-tête : fil, titre, sous-ligne du run ; pied : sauvegarde et commande équivalente.
+    assert screen.locator(".pl-up-crumb").inner_text().startswith("Flotte › ")
+    assert "Run " in screen.locator(".pl-up-sub").inner_text()
+    foot = screen.locator(".pl-up-foot")
+    assert foot.is_visible()
+    assert "Sauvegarde" in foot.inner_text()
+    assert "grimoire upgrade-flow run --dry-run" in foot.locator(".pl-up-formula").inner_text()
+    assert foot.get_by_role("button").count() == 0, "pas de bouton Restaurer : c'est une écriture"
 
     page.get_by_role("button", name="Retour à la fiche").click()
     assert page.locator("#canvas .pl-update").is_hidden()
@@ -105,8 +135,7 @@ def test_la_sortie_de_up_dry_run_est_un_vrai_tableau_francais_au_nom_du_projet(
 
     assert "Project: x" not in dom_text
     _served, slug, _root = served_cockpit_upgrade
-    assert f"Projet : {slug}" in dom_text, "le nom réel du projet doit être affiché"
-    assert screen.locator("h2").inner_text() == f"Mise à jour — {slug}"
+    assert screen.locator(".pl-up-crumb").inner_text() == f"Flotte › {slug}", "le nom réel du projet doit être affiché"
 
 
 def test_changements_par_categorie_diff_au_clic_et_confirmation_conservee(
@@ -122,8 +151,9 @@ def test_changements_par_categorie_diff_au_clic_et_confirmation_conservee(
     _capture(page, "p44-apercu-sombre")
 
     changes = screen.locator(".pl-changes")
-    changes.locator(".pl-cat-head").first.wait_for(state="visible", timeout=30_000)
-    category = changes.locator(".pl-cat-head").first
+    changes.locator(".pl-cat-diff").first.wait_for(state="visible", timeout=30_000)
+    category = changes.locator(".pl-cat-diff").first
+    assert category.inner_text() == "Diff"
     files = changes.locator(".pl-cat-files").first
     assert category.get_attribute("aria-expanded") == "false"
     assert files.is_hidden(), "la liste d'une catégorie n'apparaît qu'au clic"

@@ -90,19 +90,51 @@ function injectStyles() {
     .pl-prop-facts { color: var(--ink2); font-size: var(--t-s); }
     .pl-prop-actions { display: flex; gap: var(--sp-2); }
     /* Un display d auteur l emporte sur l attribut hidden : on le rend explicite. */
-    .pl-sheet[hidden], .pl-wrap[hidden], .pl-cat-files[hidden] { display: none; }
+    .pl-sheet[hidden], .pl-wrap[hidden], .pl-cat-files[hidden], .pl-up-foot[hidden] { display: none; }
+    .pl-update { max-width: 1360px; width: 100%; box-sizing: border-box; margin: 0 auto; }
     .pl-update .pl-preview { margin: 0; padding: 0; border: 0; font-size: var(--t-s); color: var(--ink); display: flex; flex-direction: column; gap: var(--sp-4); }
-    .pl-update h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
-    .pl-cats { display: flex; flex-direction: column; gap: var(--sp-2); }
-    .pl-cat-head, .pl-file-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--t-s); color: var(--ink); background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: 8px var(--sp-3); cursor: pointer; }
-    .pl-cat-head:hover, .pl-file-head:hover { background: var(--hover); }
-    .pl-cat-files { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 0 var(--sp-4); }
-    .pl-file-head .mono { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pl-up-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+    .pl-up-head > div { display: flex; flex-direction: column; gap: 4px; }
+    .pl-up-head h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); display: flex; align-items: center; gap: var(--sp-3); }
+    .pl-up-delta { font-weight: 500; color: var(--ink2); }
+    .pl-up-crumb, .pl-up-sub { color: var(--ink3); font-size: var(--t-min); }
+    .pl-up-sub { color: var(--ink2); font-size: var(--t-s); }
+    .pl-up-aside { display: flex; align-items: center; gap: var(--sp-2); }
+    .pl-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 6px; }
+    .pl-steps li { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .pl-step-bar { height: 4px; border-radius: 2px; background: var(--line); }
+    .pl-step-bar[data-tone="ok"] { background: var(--ok); }
+    .pl-step-bar[data-tone="warn"] { background: var(--warn); }
+    .pl-step-bar[data-tone="bad"] { background: var(--bad); }
+    .pl-step-bar[data-tone="acc"] { background: var(--acc); }
+    .pl-step-name { font-size: var(--t-min); font-weight: 500; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pl-up-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+    @media (max-width: 900px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
+    .pl-upcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; min-width: 0; }
+    .pl-upcard-h { padding: 12px 16px; display: flex; align-items: center; gap: var(--sp-2); background: var(--e1); }
+    .pl-upcard-h h3 { margin: 0; font-size: var(--t-s); font-weight: 600; color: var(--ink); }
+    .pl-upcard-h .lbl { margin-left: auto; }
+    .pl-upcard .tbl-wrap { border: 0; border-radius: 0; background: transparent; }
+    .pl-upcard h4 { margin: 0; padding: 10px 16px 4px; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
+    .pl-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); padding: 12px 16px; border-top: 1px solid var(--line); }
+    .pl-cat-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .pl-cat-title b { font-weight: 500; }
+    .pl-cat-title span { color: var(--ink3); font-size: var(--t-min); }
+    .pl-cat-diff { background: transparent; border-color: transparent; color: var(--ink2); }
+    .pl-cat-diff:hover { background: var(--hover); }
+    .pl-cat-files { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 12px; }
+    .pl-file-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--t-s); color: var(--ink); background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: 8px var(--sp-3); cursor: pointer; }
+    .pl-file-head:hover { background: var(--hover); }
+    .pl-file-head .lbl, .pl-file-head .badge { flex: none; white-space: nowrap; }
+    .pl-file-head .mono { min-width: 0; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pl-diff { font-family: var(--mono); font-size: var(--t-min); background: var(--e2); border-radius: var(--r); padding: 8px; overflow-x: auto; margin: 4px 0 0; }
     .pl-diff span { display: block; white-space: pre; }
     .pl-diff .add { background: var(--ok-soft); color: var(--ok); }
     .pl-diff .del { background: var(--bad-soft); color: var(--bad); }
     .pl-diff .hunk { color: var(--ink3); }
+    .pl-up-foot { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: 12px 16px; background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); color: var(--ink2); }
+    .pl-up-formula { margin-left: auto; font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); white-space: nowrap; }
+    .pl-up-formula b { color: var(--rub); font-weight: 500; }
     [data-focused="true"] { border-radius: var(--r); background: var(--acc-soft); box-shadow: 0 0 0 2px var(--acc); }
   `;
   document.head.append(style);
@@ -1331,19 +1363,23 @@ const NODE_STATUS_DOT = {
 const NODE_SKIPPED_IN_PREVIEW = 'non exécutée en aperçu';
 
 function renderNodeList(nodes, { dryRun = false } = {}) {
-  const list = document.createElement('div');
-  list.className = 'pl-watch pl-nodes';
+  // Une barre compacte (P44, maquette Mise à jour) : neuf traits de 4 px sur
+  // une seule rangée, le nom de l'étape dessous. L'état est dit en toutes
+  // lettres à qui ne voit pas la couleur (`sr-only`) et à l'infobulle.
+  const list = document.createElement('ol');
+  list.className = 'pl-steps pl-nodes';
+  list.setAttribute('aria-label', 'Étapes');
   for (const node of nodes) {
-    const nodeRow = document.createElement('div');
-    nodeRow.className = 'pl-watch-row';
-    nodeRow.append(
-      text('span', 'pl-watch-name', NODE_LABELS[node.id] || node.id),
-      pill(
-        NODE_STATUS_DOT[node.status] ?? '',
-        dryRun && node.status === 'sauté' ? NODE_SKIPPED_IN_PREVIEW : (NODE_STATUS_WORD[node.status] || node.status),
-      ),
-    );
-    list.append(nodeRow);
+    const word = dryRun && node.status === 'sauté' ? NODE_SKIPPED_IN_PREVIEW : (NODE_STATUS_WORD[node.status] || node.status);
+    const item = document.createElement('li');
+    item.title = `${NODE_LABELS[node.id] || node.id} — ${word}`;
+    const bar = document.createElement('span');
+    bar.className = 'pl-step-bar';
+    bar.dataset.tone = NODE_STATUS_DOT[node.status] || '';
+    const name = text('span', 'pl-step-name', NODE_LABELS[node.id] || node.id);
+    name.append(text('span', 'sr-only', ` — ${word}`));
+    item.append(bar, name);
+    list.append(item);
   }
   return list;
 }
@@ -1403,11 +1439,23 @@ function htmlTable(headers, rows) {
   return wrapper;
 }
 
+function upCard(title, note) {
+  const card = document.createElement('section');
+  card.className = 'pl-upcard';
+  const head = document.createElement('div');
+  head.className = 'pl-upcard-h';
+  head.append(text('h3', null, title));
+  if (note) head.append(text('span', 'lbl', note));
+  card.append(head);
+  return card;
+}
+
+// Colonne de droite (P44, sans décision de checkpoint) : la lecture de
+// `up --dry-run` et des surfaces d'hôtes, en vrais tableaux.
 function renderPreviewTables(table) {
-  const section = document.createElement('div');
-  section.className = 'pl-section pl-preview-tables';
-  section.append(text('h3', null, 'Étapes de la mise à jour'));
-  section.append(htmlTable(
+  const card = upCard('Étapes de la mise à jour', 'grimoire up --dry-run');
+  card.classList.add('pl-preview-tables');
+  card.append(htmlTable(
     ['Étape', 'Statut', 'Détail'],
     table.steps.map((step) => [
       document.createTextNode(step.label),
@@ -1416,8 +1464,8 @@ function renderPreviewTables(table) {
     ]),
   ));
   if (table.hosts && table.hosts.length) {
-    section.append(text('h3', null, "Surfaces d'hôtes"));
-    section.append(htmlTable(
+    card.append(text('h4', null, "Surfaces d'hôtes"));
+    card.append(htmlTable(
       ['Hôte', 'Écrirait', 'Inchangé'],
       table.hosts.map((h) => [
         document.createTextNode(h.host),
@@ -1426,7 +1474,7 @@ function renderPreviewTables(table) {
       ]),
     ));
   }
-  return section;
+  return card;
 }
 
 function renderDiff(unified) {
@@ -1443,47 +1491,69 @@ function renderDiff(unified) {
   return pre;
 }
 
+const CATEGORY_NOTE = {
+  agents: 'agents fournis par le kit',
+  kit: 'fichiers du kit sous _grimoire/',
+  copilot: 'instructions et prompts Copilot',
+  hotes: "surfaces des hôtes et configuration MCP",
+  autres: 'autres fichiers du projet',
+};
+
+// Colonne de gauche : une ligne par catégorie (titre, sous-titre, compte,
+// « Diff » qui déplie les fichiers ; un clic sur un fichier charge son diff).
 function renderChangesSection(ctx) {
-  const section = document.createElement('div');
-  section.className = 'pl-section pl-changes';
-  section.append(text('h3', null, 'Changements par catégorie'));
+  const card = upCard('Ce que la mise à jour écrirait', "rien n'est écrit en aperçu");
+  card.classList.add('pl-changes');
   const body = document.createElement('div');
   body.className = 'pl-cats';
   body.append(text('div', 'lbl', 'Chargement des changements…'));
-  section.append(body);
+  body.firstChild.style.padding = '12px 16px';
+  card.append(body);
 
   ctx.api.upgradeChanges().then((view) => {
     body.replaceChildren();
     if (!view.categories.length) {
-      body.append(text('div', 'lbl', `Aucun fichier à modifier (${view.unchanged} déjà à jour).`));
+      const empty = document.createElement('div');
+      empty.className = 'pl-cat-row';
+      empty.append(
+        text('span', 'pl-cat-title', `Rien à écrire (${view.unchanged} fichiers déjà à jour).`),
+        badge('inchangé', ''),
+      );
+      body.append(empty);
       return;
     }
-    body.append(text('div', 'lbl', `${view.total} fichier(s) seraient écrits, ${view.unchanged} déjà à jour.`));
     for (const category of view.categories) {
       const block = document.createElement('div');
       block.className = 'pl-cat';
-      const head = document.createElement('button');
-      head.type = 'button';
-      head.className = 'pl-cat-head';
-      head.dataset.category = category.id;
-      head.setAttribute('aria-expanded', 'false');
-      head.append(text('span', null, category.label), badge(String(category.files.length), 'acc'));
+      const rowEl = document.createElement('div');
+      rowEl.className = 'pl-cat-row';
+      const title = document.createElement('span');
+      title.className = 'pl-cat-title';
+      title.append(text('b', null, category.label), text('span', null, CATEGORY_NOTE[category.id] || ''));
+      const count = category.files.length;
+      const diffBtn = document.createElement('button');
+      diffBtn.type = 'button';
+      diffBtn.className = 'btn pl-cat-diff';
+      diffBtn.dataset.category = category.id;
+      diffBtn.setAttribute('aria-expanded', 'false');
+      diffBtn.textContent = 'Diff';
       const files = document.createElement('div');
       files.className = 'pl-cat-files';
       files.hidden = true;
-      head.addEventListener('click', () => {
+      diffBtn.addEventListener('click', () => {
         const open = files.hidden;
         files.hidden = !open;
-        head.setAttribute('aria-expanded', String(open));
+        diffBtn.setAttribute('aria-expanded', String(open));
       });
       for (const file of category.files) files.append(renderFileEntry(ctx, file));
-      block.append(head, files);
+      rowEl.append(title, badge(`${count} fichier${count > 1 ? 's' : ''}`, 'ok'), diffBtn);
+      block.append(rowEl, files);
       body.append(block);
     }
   }).catch((error) => {
     body.replaceChildren(text('div', 'lbl', `Changements indisponibles : ${error.message}`));
   });
-  return section;
+  return card;
 }
 
 function renderFileEntry(ctx, file) {
@@ -1728,13 +1798,36 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     screen.hidden = true;
     wrap.hidden = false;
   });
+  // En-tête de la maquette : fil, titre + delta de version, sous-ligne du run,
+  // badge d'attente à droite.
+  const kitInfo = health?.kit || {};
+  const versionDelta = kitInfo.upVersion && kitInfo.installed && kitInfo.upVersion !== kitInfo.installed
+    ? `${kitInfo.upVersion} → ${kitInfo.installed}`
+    : (kitInfo.installed || '');
+  const headSub = text('div', 'pl-up-sub', 'Aperçu en cours…');
+  const foot = document.createElement('footer');
+  foot.className = 'pl-up-foot';
+  foot.hidden = true;
+  const buildScreenHead = () => {
+    const title = document.createElement('h2');
+    title.className = 'space-title';
+    title.append('Mise à jour du kit');
+    if (versionDelta) title.append(' ', text('span', 'pl-up-delta', versionDelta));
+    const left = document.createElement('div');
+    left.append(text('span', 'pl-up-crumb', `Flotte › ${displayName}`), title, headSub);
+    const aside = document.createElement('div');
+    aside.className = 'pl-up-aside';
+    if (checkpointPendingRunId || pendingRun) aside.append(badge('Décision en attente', 'warn'));
+    aside.append(backBtn);
+    const head = document.createElement('div');
+    head.className = 'pl-up-head';
+    head.append(left, aside);
+    return head;
+  };
   const openScreen = () => {
     if (!screenBuilt) {
       screenBuilt = true;
-      screen.append(
-        spaceHead(`Mise à jour — ${displayName}`, "Aperçu : ce que la mise à jour ferait, avant que vous confirmiez.", backBtn),
-        preview,
-      );
+      screen.append(buildScreenHead(), preview, foot);
     }
     wrap.hidden = true;
     screen.hidden = false;
@@ -1758,15 +1851,39 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
       // message le dit, plutôt qu'un « rien d'autre écrit » démenti par le
       // disque. Son run est marqué aperçu et n'est compté nulle part.
       preview.append(text('div', null, report.ok ? 'Aperçu : sauvegarde créée, aucun fichier du projet modifié.' : (report.error || 'Aperçu en échec.')));
-      preview.append(text('div', 'lbl', `Projet : ${displayName}`));
+      const played = (report.nodes || []).filter((n) => n.status === 'fait' || n.status === 'proposition').length;
+      const when = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+      headSub.replaceChildren(
+        'Run ', text('span', 'mono', report.runId || 'aperçu'),
+        ` · lancé le ${when} · ${played} étape${played > 1 ? 's' : ''} jouée${played > 1 ? 's' : ''} sur ${(report.nodes || []).length || 9} (aperçu).`,
+      );
       if (report.nodes) preview.append(renderNodeList(report.nodes, { dryRun: true }));
-      if (report.backupPath) preview.append(text('div', 'lbl', `Sauvegarde : ${report.backupPath}`));
+      const cols = document.createElement('div');
+      cols.className = 'pl-up-cols';
+      if (report.ok) cols.append(renderChangesSection(ctx));
       if (report.previewTable) {
-        preview.append(renderPreviewTables(report.previewTable));
+        cols.append(renderPreviewTables(report.previewTable));
       } else {
-        appendPreviewMarkdown(preview, report.preview || report.output);
+        const fallback = upCard('Rapport de la mise à jour');
+        const inner = document.createElement('div');
+        inner.style.padding = '12px 16px';
+        appendPreviewMarkdown(inner, report.preview || report.output);
+        fallback.append(inner);
+        cols.append(fallback);
       }
-      if (report.ok) preview.append(renderChangesSection(ctx));
+      preview.append(cols);
+      // Pied : sauvegarde et commande équivalente — jamais de « Restaurer », qui écrit.
+      foot.replaceChildren();
+      if (report.backupPath) {
+        const backup = document.createElement('span');
+        backup.append('Sauvegarde ', text('span', 'mono', report.backupPath));
+        foot.append(backup);
+      }
+      const formula = document.createElement('span');
+      formula.className = 'pl-up-formula';
+      formula.append(text('b', null, '›'), ` grimoire upgrade-flow run --dry-run${slug ? ' # ' + slug : ''}`);
+      foot.append(formula);
+      foot.hidden = false;
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button';
       confirmBtn.className = 'btn pri';
