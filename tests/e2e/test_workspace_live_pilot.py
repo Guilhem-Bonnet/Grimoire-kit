@@ -319,7 +319,7 @@ def test_une_reponse_en_cours_de_saisie_n_est_pas_ecrasee_par_l_actualisation(pa
 
     assert area.input_value() == "ma réponse à moitié écrite", "la saisie a été perdue"
     page.locator("#brand").click()  # sort du champ : l'actualisation différée repart
-    page.locator("#view-seg button", has_text="Board 4").click()
+    page.locator("#view-seg button", has_text="Tableau").click()
     _card(page, title).wait_for(timeout=APPEAR_MS)
     _answer_all(service)
 
@@ -355,7 +355,7 @@ def test_le_compteur_de_decisions_est_exact_visible_partout_et_cliquable(page: P
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     page.wait_for_selector(".ex-decision")
     assert page.locator(".ex-decision").count() == 2, "le compteur et la vue disent la même chose"
-    assert page.locator("#docbar [aria-pressed='true']").filter(has_text="Décisions").count() == 1
+    assert page.locator("#view-seg [aria-pressed='true']").filter(has_text="Décisions").count() == 1
     _capture(page, "decisions-vue")
 
     from grimoire.missions.schemas import ORIGIN_HUMAN

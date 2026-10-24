@@ -212,6 +212,30 @@ def test_une_tache_reelle_porte_sa_colonne_et_sa_prochaine_porte(
     assert detail["next_moves_require"], "une tâche a toujours au moins un pas suivant déclaré"
 
 
+def test_une_carte_porte_la_classe_de_route_et_les_conditions_de_son_prochain_passage(
+    project_with_task: tuple[Path, str],
+) -> None:
+    """P64 : le verdict affiché sur la carte est celui du gate, pas une déduction de la vue.
+
+    Chaque condition est une preuve exigée par le fichier de gates ; elle est
+    verte seulement si le gate ne la refuse pas. Sans ``next_gate`` la vue ne
+    sait que nommer les preuves attendues, jamais dire lesquelles manquent.
+    """
+    root, task_id = project_with_task
+
+    card = next(t for t in wa.tasks_view(root)["tasks"] if t["id"] == task_id)
+    detail = wa.task_view(root, task_id)
+
+    assert card["verifiability_class"] in {"V0", "V1", "V2"}
+    gate = card["next_gate"]
+    assert gate["to"] in {"ready", "in_progress", "review", "accepted", "released"}
+    assert gate == detail["next_gate"]
+    required = detail["next_moves_require"].get(gate["to"], [])
+    assert [c["gate"] for c in gate["conditions"]][: len(required)] == required
+    for condition in gate["conditions"]:
+        assert condition["ok"] == (not condition["reason"]), "une condition rouge dit pourquoi, une verte se tait"
+
+
 def test_une_tache_porte_son_corps_reel_description_guardrails_dependances(
     tmp_path: Path,
 ) -> None:

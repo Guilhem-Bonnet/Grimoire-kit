@@ -182,7 +182,7 @@ def test_executer_propose_trois_vues_et_le_board_par_defaut(
     workspace.wait_for_selector("#view-seg button")
     views = workspace.locator("#view-seg button")
     labels = {views.nth(i).inner_text() for i in range(views.count())}
-    assert {"Board 4", "Board 8", "Liste", "Timeline"} <= labels
+    assert {"Tableau", "Huit colonnes", "Liste", "Chronologie"} <= labels
 
     workspace.wait_for_selector(".ex-col")
     # Quatre colonnes de travail ; les tâches annulées ont la leur, repliée (P07).
@@ -191,7 +191,7 @@ def test_executer_propose_trois_vues_et_le_board_par_defaut(
 
     views.filter(has_text="Liste").click()
     workspace.wait_for_selector(".ex-list-wrap")
-    views.filter(has_text="Board 8").click()
+    views.filter(has_text="Huit colonnes").click()
     workspace.wait_for_selector(".ex-col")
     assert workspace.locator(".ex-col").count() == 8, "Board 8 : les huit colonnes du standard"
 
