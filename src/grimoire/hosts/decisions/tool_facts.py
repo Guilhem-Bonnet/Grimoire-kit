@@ -160,8 +160,16 @@ def _git_subcommand(words: list[str]) -> tuple[str, list[str]]:
     return (words[i], words[i + 1 :]) if i < len(words) else ("", [])
 
 
+def _writes_to_file(arg: str) -> bool:
+    """``--output[=f]`` de ``git diff|log|show``, abréviations de git comprises (``--out``, ``--outpu=f``)."""
+    name = arg.split("=", 1)[0]
+    return name.startswith("--ou") and (name.startswith("--output") or "--output".startswith(name))
+
+
 def _is_read_only_git(words: list[str]) -> bool:
     sub, args = _git_subcommand(words)
+    if sub in {"diff", "log", "show"} and any(_writes_to_file(a) for a in args):
+        return False  # ``git log --output=f`` écrit ``f`` (``format-patch`` et ``archive`` ne sont pas dans la liste)
     if sub == "grep":
         return not any(a.startswith(("-O", "--open-files")) for a in args)
     if sub == "remote":
