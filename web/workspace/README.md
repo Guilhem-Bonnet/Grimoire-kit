@@ -220,6 +220,8 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `GET /api/workspace/files?tier=` | `{projectRoot, tiers[]}` — `tiers[]` : `{id, term, label, note, roots[], editable, exists, truncated, count, files[]}` |
 | `GET /api/workspace/file?path=` | Le fichier + `{tier, size, digest, shipped_by_kit, kit_version, editable, override_path?, overridden?, text, truncated, binary}` |
 | `GET /api/workspace/file/diff?path=` | `{path, against, comparable, identical, unified, added, removed}` ou `{comparable: false, reason}` |
+| `GET /api/workspace/upgrade/changes` | P44 : ce qu'une mise à jour écrirait, comparé au disque sans rien écrire : `{categories[], total, unchanged}` — `categories[]` : `{id, label, files[]}`, `files[]` : `{path, status nouveau\|modifie, label, added, removed}` |
+| `GET /api/workspace/upgrade/diff?path=` | P44 : `{path, status, label, added, removed, unified, truncated}` ; 400 pour un chemin que la mise à jour ne toucherait pas |
 | `GET /api/workspace/file/usage?path=` | `{path, projections[], loaded_by: {entries[], truncated}}` — inspecteur, onglet Utilisé par |
 | `GET /api/workspace/file/history?path=` | `{path, is_repo, commits[]}` — inspecteur, onglet Historique ; `is_repo: false` hors dépôt git |
 | `GET /api/workspace/commands` | Le catalogue des sous-commandes que la Console accepte |
