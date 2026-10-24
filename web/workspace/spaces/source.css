@@ -45,6 +45,25 @@
   flex: none;
 }
 
+/* Statut façon git (A, M, D, U, O) : une lettre mono dans une case de 16 px,
+   teintée par l'état ; la lettre se lit sans la couleur (P30). 12 px : le
+   plancher typographique tient aussi pour un glyphe d'une lettre. */
+.sr-git {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink2);
+}
+.sr-git.ok { color: var(--ok); }
+.sr-git.warn { color: var(--warn); }
+.sr-git.bad { color: var(--bad); }
+.sr-git.acc { color: var(--acc); }
+
 .sr-editor {
   display: flex;
   flex-direction: column;

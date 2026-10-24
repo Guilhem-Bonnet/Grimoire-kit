@@ -259,6 +259,26 @@ def recommend_profile(
     return "standard", "local vector embeddings (fastembed/sentence-transformers), no Docker or server needed"
 
 
+def configured_services(memory: MemoryConfig) -> list[tuple[str, str]]:
+    """``(service, url)`` de chaque service *memory* (une section
+    ``GrimoireConfig.memory``) déclare, sans rien sonder.
+
+    Les mêmes règles que :func:`unreached_configured_services`, qui en dérive :
+    le backend serveur (Weaviate ou Qdrant), le graphe Neo4j et la mémoire
+    courte Redis, chacun seulement si son URL est posée.
+    """
+    services: list[tuple[str, str]] = []
+    if memory.backend == "weaviate-server" and memory.weaviate_url:
+        services.append(("weaviate", memory.weaviate_url))
+    elif memory.backend == "qdrant-server" and memory.qdrant_url:
+        services.append(("qdrant", memory.qdrant_url))
+    if memory.knowledge_graph == "neo4j" and memory.neo4j_uri:
+        services.append(("neo4j", memory.neo4j_uri))
+    if memory.short_term_backend == "redis" and memory.redis_url:
+        services.append(("redis", memory.redis_url))
+    return services
+
+
 def unreached_configured_services(memory: MemoryConfig) -> list[str]:
     """Services *memory* (a ``GrimoireConfig.memory`` section) declares that
     do not actually answer right now.
@@ -275,24 +295,44 @@ def unreached_configured_services(memory: MemoryConfig) -> list[str]:
     Returns service ids (``"weaviate"``, ``"qdrant"``, ``"neo4j"``,
     ``"redis"``), empty when nothing configured is missing.
     """
-    missing: list[str] = []
-    if memory.backend == "weaviate-server" and memory.weaviate_url and not _tcp_reachable(
-        memory.weaviate_url, _DEFAULT_PORTS["weaviate"],
-    ):
-        missing.append("weaviate")
-    elif memory.backend == "qdrant-server" and memory.qdrant_url and not _tcp_reachable(
-        memory.qdrant_url, _DEFAULT_PORTS["qdrant"],
-    ):
-        missing.append("qdrant")
-    if memory.knowledge_graph == "neo4j" and memory.neo4j_uri and not _tcp_reachable(
-        memory.neo4j_uri, _DEFAULT_PORTS["neo4j"],
-    ):
-        missing.append("neo4j")
-    if memory.short_term_backend == "redis" and memory.redis_url and not _tcp_reachable(
-        memory.redis_url, _DEFAULT_PORTS["redis"],
-    ):
-        missing.append("redis")
-    return missing
+    return [
+        service for service, url in configured_services(memory)
+        if not _tcp_reachable(url, _DEFAULT_PORTS[service])
+    ]
+
+
+#: États d'un service vu par une sonde TCP — les mots que le cockpit affiche (Arrêté, En échec, Inconnu).
+SERVICE_ONLINE = "en_ligne"
+SERVICE_STOPPED = "arrete"
+SERVICE_FAILED = "en_echec"
+SERVICE_UNKNOWN = "inconnu"
+
+
+def service_state(service: str, url: str, *, timeout: float = _SOCKET_TIMEOUT) -> str:
+    """État d'un service mémoire à cet instant, par un connect TCP. Ne lève jamais.
+
+    Connexion acceptée : ``en_ligne`` ; refusée (rien n'écoute) : ``arrete`` ;
+    délai dépassé : ``inconnu`` — une sonde expirée ne dit pas que le service
+    est arrêté ; toute autre erreur (nom introuvable, réseau) : ``en_echec``.
+    """
+    raw = url if "//" in url else f"//{url}"
+    try:
+        parsed = urlparse(raw)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or _DEFAULT_PORTS.get(service, 0)
+    except ValueError:
+        return SERVICE_UNKNOWN
+    if not port:
+        return SERVICE_UNKNOWN
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return SERVICE_ONLINE
+    except ConnectionRefusedError:
+        return SERVICE_STOPPED
+    except TimeoutError:
+        return SERVICE_UNKNOWN
+    except OSError:
+        return SERVICE_FAILED
 
 
 def probe_services(urls: dict[str, str] | None = None) -> dict[str, ServiceProbe]:

@@ -165,7 +165,7 @@ function renderGraph(wrap, ctx, memory) {
 function renderLayers(wrap, ctx, memory) {
   const layers = memory.layers || [];
   if (!layers.length) {
-    wrap.append(ctx.empty('Couches', 'Aucune couche déclarée — la config mémoire du projet est absente ou illisible.', 'grimoire memory status'));
+    wrap.append(ctx.empty('Couches', 'Aucune couche déclarée — la config mémoire du projet est absente ou illisible.', 'grimoire memory status', undefined, { art: 'i-empty-memory' }));
     return;
   }
   const table = document.createElement('table');
@@ -300,6 +300,8 @@ function fleetOverviewTable(ctx, data) {
       + "(`grimoire cockpit list`) est peut-être vide, ou aucun projet "
       + "sélectionné ne s'y trouve.",
       'grimoire cockpit list',
+      undefined,
+      { art: 'i-empty-fleet' },
     ));
     return wrap;
   }
@@ -349,7 +351,7 @@ function fleetSearchResults(ctx, data, canLink) {
     return wrap;
   }
   if (!data.results.length) {
-    wrap.append(text('p', 'lbl', `Aucun résultat pour « ${data.query} ».`));
+    wrap.append(ctx.empty('Recherche', `Aucun résultat pour « ${data.query} ».`, '', undefined, { compact: true, art: 'i-empty-search' }));
   }
   for (const entry of data.results) {
     const item = document.createElement('div');
