@@ -23,7 +23,7 @@ from grimoire.missions.questions import (
     records_of,
 )
 from grimoire.missions.schemas import TaskState
-from grimoire.missions.waiting import QUESTION_ASKED_EVENT, Waiting
+from grimoire.missions.waiting import QUESTION_ASKED_EVENT, Waiting, answer_hint
 
 if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
@@ -122,7 +122,7 @@ def resolve_question(
         raise GrimoireMissionError(f"Question {question_id} inconnue pour {task_id} (`grimoire task questions {task_id}`)")
     if record.question.blocking:
         raise GrimoireMissionError(
-            f"Question {question_id} bloquante : seul un humain la tranche (cockpit ou `grimoire task answer`), "
+            f"Question {question_id} bloquante : seul un humain la tranche (cockpit ou {answer_hint(task_id, question_id)}), "
             "jamais une déduction de l'agent"
         )
     if record.base_status != OPEN:

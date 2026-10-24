@@ -311,6 +311,10 @@ def memory_status(ctx: typer.Context) -> None:
 
     architecture = build_memory_architecture_status(cfg, project_root=root, backend_status=health)
     parity = _store_graph_parity(mgr, total)
+    retrieval = (
+        memory_profiles.retrieval_in_service(mgr.prefers_hybrid, cfg.memory.layer_profile)
+        if mgr is not None else None
+    )
 
     if fmt == "json":
         typer.echo(json.dumps({
@@ -320,6 +324,7 @@ def memory_status(ctx: typer.Context) -> None:
             "detail": health.detail,
             "error": backend_error,
             "parity": parity,
+            "retrieval": retrieval,
             "facts": facts,
             "diary": diary,
             "architecture": architecture.to_dict(),
@@ -331,6 +336,9 @@ def memory_status(ctx: typer.Context) -> None:
     status_icon = r"[green]\[OK][/green]" if health.healthy else r"[red]\[XX][/red]"
     console.print(f"{status_icon} Backend: [bold]{health.backend}[/bold]")
     console.print(f"  Entries : {total}")
+    if retrieval:
+        note = "" if retrieval["honored"] else f" (le profil {retrieval['profile']} annonce l'hybride)"
+        console.print(f"  Recherche : {retrieval['label']}{note}")
     if backend_error:
         console.print(f"  [red]Backend unavailable:[/red] {backend_error}")
     if health.detail:
