@@ -269,6 +269,8 @@ def _skill_file(skill: SkillSpec) -> EmittedFile:
             "name": skill.slug,
             "description": skill.description,
             "allowed-tools": ", ".join(map_verbs(skill.tools, _TOOL_TABLE)),
+            "license": skill.license,
+            "compatibility": skill.compatibility,
         }
     )
     content = f"{header}\n{managed_header('.md')}\n\n{skill.body}"
