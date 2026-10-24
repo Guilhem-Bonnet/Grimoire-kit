@@ -4,16 +4,16 @@ audience: référence
 
 <p align="right"><a href="../README.md">README</a></p>
 
-# <img src="assets/icons/puzzle.svg" width="32" height="32" alt=""> Catalogue d'expertises — langages, ingénierie, cloud
+# <img src="../assets/icons/layers.svg" width="32" height="32" alt=""> Catalogue d'expertises — langages, ingénierie, cloud
 
 Issue [#616](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/616). Ce document est la
 référence API du mécanisme : ce qu'un appelant (le wizard d'onboarding de la PR 3, le cockpit, un
 script) peut attendre de `grimoire.core.expertises` et de `grimoire expertise`, et comment le
 mécanisme s'articule avec les tiers `kit`/`overrides` existants.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
-## <img src="assets/icons/lightbulb.svg" width="28" height="28" alt=""> Le principe : rien d'attaché par défaut, sauf choix ou détection
+## <img src="../assets/icons/info.svg" width="28" height="28" alt=""> Le principe : rien d'attaché par défaut, sauf choix ou détection
 
 Le kit livre par archétype un agent généraliste (`stack-engineer`, `ops-engineer`) plus les skills
 qu'il attache d'emblée. Le catalogue d'expertises ajoute une troisième couche, optionnelle : un
@@ -59,7 +59,7 @@ La logique vit dans `src/grimoire/cli/init_questions.py` (fonctions pures, sans 
 et l'assistant de configuration du cockpit (`GET /api/setup/questions`, espace Piloter) appellent
 les mêmes fonctions, donc une même réponse donne le même archétype des deux côtés.
 
-## <img src="assets/icons/hexagon.svg" width="28" height="28" alt=""> Le registre — `registry/expertises.yaml`
+## <img src="../assets/icons/database.svg" width="28" height="28" alt=""> Le registre — `registry/expertises.yaml`
 
 Trois familles, chacune une liste d'entrées :
 
@@ -92,7 +92,7 @@ un skill n'y devient effectif pour un projet que via `grimoire expertise add`.
 `porteur_fallback` couvre le cas cloud sur un projet sans `infra-ops` : `expertise add aws` sur un
 projet `stack`-seul attache le skill à `stack-engineer` plutôt que d'échouer.
 
-## <img src="assets/icons/microscope.svg" width="28" height="28" alt=""> API Python — `grimoire.core.expertises`
+## <img src="../assets/icons/code.svg" width="28" height="28" alt=""> API Python — `grimoire.core.expertises`
 
 ```python
 from pathlib import Path
@@ -126,7 +126,7 @@ sont la surface publique de ce module. Un appelant peut lister le catalogue, app
 puis appeler `attach_expertise` pour chaque id retenu — sans jamais lire ou écrire directement sous
 `_grimoire/`.
 
-## <img src="assets/icons/wrench.svg" width="28" height="28" alt=""> CLI — `grimoire expertise`
+## <img src="../assets/icons/wrench.svg" width="28" height="28" alt=""> CLI — `grimoire expertise`
 
 ```bash
 grimoire expertise list                              # tout le catalogue, groupé par famille
@@ -140,7 +140,7 @@ que `grimoire agent override convert`) — lancez-le ensuite pour projeter le ch
 hôtes configurés. `grimoire up` conserve la sélection : elle vit sous `_grimoire/overrides/`, un
 tier que `up` ne régénère jamais.
 
-## <img src="assets/icons/branch.svg" width="28" height="28" alt=""> Mécanique d'attachement — ce que `add`/`remove` écrivent
+## <img src="../assets/icons/branch.svg" width="28" height="28" alt=""> Mécanique d'attachement — ce que `add`/`remove` écrivent
 
 1. Le corps du skill est copié depuis le paquet kit (`archetypes/stack/skills/` ou
    `framework/expertises/skills/`) vers `_grimoire/overrides/skills/<slug>.md`.
@@ -152,7 +152,7 @@ tier que `up` ne régénère jamais.
 3. `detach_expertise` supprime aussi le fichier de skill de l'étape 1 — le garder sans qu'aucun
    agent le référence le rendrait transversal, un état pire que l'attachement qu'on voulait défaire.
 
-## <img src="assets/icons/clipboard.svg" width="28" height="28" alt=""> État de la couverture
+## <img src="../assets/icons/gauge.svg" width="28" height="28" alt=""> État de la couverture
 
 28 des 28 entrées ont un skill livré (25 nouveaux sous `framework/expertises/skills/`, plus
 `stack-python`/`stack-typescript`/`stack-go` réutilisés tels quels, issue #616). Une seule entrée
@@ -162,7 +162,7 @@ par nom de ressource Terraform, pas encore écrit) — le skill existe, l'attach
 (`grimoire expertise add kubernetes-managed`) fonctionne, seule la recommandation automatique reste
 une issue de suivi.
 
-<img src="assets/divider.svg" width="100%" alt="">
+<img src="../assets/divider.svg" width="100%" alt="">
 
 Voir aussi : [Doctrine — quand créer un artefact](../explications/quand-creer-un-artefact.md) (le coût d'un skill non
 attaché), [Créer un agent](creer-un-agent.md), `tests/unit/core/test_expertises_catalog.py` (le
