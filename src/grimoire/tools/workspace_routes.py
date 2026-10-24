@@ -591,7 +591,13 @@ def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     (``~/.grimoire/control/cockpit-key``), que l'humain lit depuis son terminal et que le frein refuse aux
     agents (règle ``cockpit-key`` des secrets). Sans clé valide : 403, rien n'est écrit.
     """
-    from grimoire.missions.mandate import MandateRefusedError, MandateRequest, MandateStore, verify_control_key
+    from grimoire.missions.mandate import (
+        JournalError,
+        MandateRefusedError,
+        MandateRequest,
+        MandateStore,
+        verify_control_key,
+    )
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
     if not verify_control_key(body.get("control_key")):
@@ -602,8 +608,8 @@ def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
             str(body.get("until") or ""),
         )
         mandate = MandateStore(project_root).grant(request, origin=ORIGIN_HUMAN, via="cockpit")
-    except MandateRefusedError as exc:
-        raise ValueError(str(exc)) from exc  # une demande invalide est un 400, pas un 404
+    except (MandateRefusedError, JournalError) as exc:
+        raise ValueError(str(exc)) from exc  # une demande invalide ou un journal rompu : un 400, pas un 404
     return {"granted": True, "mandate": mandate.to_dict()}
 
 

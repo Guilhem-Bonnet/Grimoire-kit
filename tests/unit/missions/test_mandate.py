@@ -847,3 +847,74 @@ def test_a_head_ahead_of_a_cut_journal_or_with_a_wrong_hash_is_refused(project: 
     assert store.state().reason == md.JOURNAL_UNREADABLE
     head.write_text(json.dumps(good), encoding="utf-8")
     assert store.state().active
+
+
+# ── Échec fermé de chaque garde devant un journal rompu ─────────────────────────────────────────
+
+
+def _break_journal(store: MandateStore) -> None:
+    store.journal.path.write_text("pas du json\n", encoding="utf-8")
+
+
+def test_a_broken_journal_refuses_every_guard(project: Path) -> None:
+    from grimoire.missions.check_gate import ApprovalRefusedError, approve_checks_under_mandate
+
+    store = MandateStore(project)
+    task = _sealed_task(project)  # scellé écrit, journal sain
+    _grant(project, gestures=("approve-check", "answer", "accept"))
+    receipt = write_receipt(project, task.id, READY, reviewer_id="agent:rev", reviewer_session="s-r")
+    _break_journal(store)
+    with pytest.raises(MandateRefusedError) as sealed:
+        store.verify_seal(task.id, task.checks)
+    assert sealed.value.code == md.JOURNAL_UNREADABLE
+    with pytest.raises((ApprovalRefusedError, MandateRefusedError)):
+        approve_checks_under_mandate(project, task, actor="orch", provenance=PROV)
+    with pytest.raises(MandateRefusedError) as unreadable:
+        store.check_receipt_provenance(task, receipt)
+    assert unreadable.value.code == md.JOURNAL_UNREADABLE
+    with pytest.raises(MandateRefusedError):
+        require_authority(project, "answer", task, ORIGIN_ORCHESTRATOR, what="Réponse", provenance=PROV)
+    with pytest.raises(JournalError):
+        store.seal_checks("T-9", task.checks)  # un scellé ne s'écrit pas sur un journal rompu
+    with pytest.raises(JournalError):
+        store.record_gesture(md.Authorization("MND-000000000000", "answer", "T"))
+
+
+def test_service_answer_and_accept_refuse_under_a_broken_journal(project: Path) -> None:
+    service = TaskService(project)
+    tid = service.add("Q", ACC, owner="w", actor="w", ready=True).task.id
+    service.context(tid)
+    service.claim(tid, "w")
+    service.transition(tid, TaskState.RUNNING, "w")
+    service.ask(tid, "Quelle voie ?", "w")
+    _grant(project)
+    _break_journal(MandateStore(project))
+    with pytest.raises(GrimoireMissionError):
+        service.answer(tid, "voie A", "orch", origin=ORIGIN_ORCHESTRATOR, provenance=PROV)
+    task = service.require(tid)
+    with pytest.raises(GrimoireMissionError):
+        accept_task(task, project, project / "ev", "ok", "orch", origin=ORIGIN_ORCHESTRATOR, provenance=PROV)
+
+
+def test_cockpit_grant_on_a_broken_journal_is_a_clean_refusal(project: Path) -> None:
+    from grimoire.tools.workspace_routes import workspace_post
+
+    store = MandateStore(project)
+    _grant(project)
+    _break_journal(store)
+    key = md.ensure_control_key().read_text(encoding="utf-8").strip()
+    body = {"gestures": ["accept"], "task_types": ["implementation"], "max_sessions_per_day": 2, "until": "+1h"}
+    with pytest.raises(ValueError, match="journal"):  # un 400 net, pas une connexion coupée
+        workspace_post(project, "/api/workspace/autonomy/mandate/grant", {**body, "control_key": key})
+    assert not store.state().active
+
+
+def test_the_governing_policy_that_disappears_revokes_instead_of_delegating(project: Path) -> None:
+    _policy(project, accept="orchestrator")
+    _grant(project, gestures=("answer",))
+    task = TaskService(project).require(_task(project))
+    (project / STANDARD / "orchestration-policy.yaml").unlink()  # politique retirée : plus rien n'est délégué
+    with pytest.raises(MandateRefusedError) as changed:
+        MandateStore(project).authorize("answer", task, PROV)
+    assert changed.value.code == md.POLICY_CHANGED
+    assert not MandateStore(project).state().active
