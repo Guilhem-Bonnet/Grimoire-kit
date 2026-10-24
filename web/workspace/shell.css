@@ -1748,8 +1748,18 @@ body[data-active-space] .panel-head {
   }
 
   #statusbar {
-    gap: var(--sp-3);
+    gap: var(--sp-2);
     padding: 0 var(--sp-2);
+    overflow: hidden;
+  }
+
+  /* Le pouls cède de la place avant que la barre ne déborde : son texte change
+     de longueur (« il y a 4 s », « injoignable depuis… ») et la police de Douce
+     est un peu plus large que l'ancienne — 2 px de trop sur le dernier bouton
+     du sélecteur de thème à 390 px. */
+  #statusbar > #st-live {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -2011,7 +2021,7 @@ body[data-active-space] .panel-head {
     display: flex;
   }
 
-  html[data-atelier="off"] #panel-explorer[data-detail="off"] {
+  html[data-atelier="off"] #panel-explorer:not(:has(#explorer-body > :not([data-shell-placeholder], p.lbl, p.cv-msg, .sr-only))) {
     display: none;
   }
 
@@ -2020,7 +2030,10 @@ body[data-active-space] .panel-head {
     display: flex;
   }
 
-  html[data-atelier="off"] #panel-inspector[data-detail="off"] {
+  /* `:has()` plutôt que l'attribut `data-detail` (posé par un MutationObserver,
+     donc après coup) : un espace qui remplit le panneau puis donne le focus à
+     un champ dans le même tour doit le trouver déjà affiché. */
+  html[data-atelier="off"] #panel-inspector:not(:has(#inspector-body > :not([data-shell-placeholder], p.lbl, p.cv-msg, .sr-only))) {
     display: none;
   }
 
