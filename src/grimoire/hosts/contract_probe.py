@@ -152,10 +152,54 @@ def hooks_disabled_reason(
     pages settings et hooks) : ``disableAllHooks`` vaut la valeur du niveau le plus haut qui la pose
     (managé > local > projet > utilisateur ; une valeur qui n'est pas un booléen est ignorée) ;
     ``allowManagedHooksOnly`` (managé seulement) bloque les hooks utilisateur, projet et local : les hooks
-    de Grimoire, posés dans ``.claude/settings.json``, ne tournent alors que si le niveau managé les porte.
-    Un fichier présent mais illisible ne permet rien d'affirmer : le motif est rendu (échec fermé).
-    ``--settings`` (ligne de commande) n'est pas observable d'ici.
+    de Grimoire, posés dans ``.claude/settings.json``, ne tournent alors que si le niveau managé porte une
+    commande ``grimoire-hook``. Un fichier présent mais illisible ne permet rien d'affirmer : le motif est
+    rendu (échec fermé), et aucune erreur ne sort d'ici — un dossier courant supprimé ou un dossier managé
+    non traversable donnent un motif, jamais une exception. ``--settings`` (ligne de commande) n'est pas
+    observable d'ici.
     """
+    try:
+        return _hooks_disabled_reason(project_root, home, managed_dir)
+    except Exception as exc:  # une garde qui ne sait pas lire ne prouve rien
+        return f"réglages de l'hôte illisibles ({type(exc).__name__})"
+
+
+#: Le programme d'un hook que Grimoire écrit : ``grimoire-hook`` (nu, chemin, entre guillemets, ``.exe``).
+_HOOK_PROGRAM = re.compile(r"^grimoire-hook(?:\.exe)?$")
+
+
+def _first_word(command: str) -> str:
+    """Le premier mot d'une commande shell, guillemets retirés (``"$DIR"/bin/x`` → ``$DIR/bin/x``)."""
+    word, quote = "", ""
+    for char in command.strip():
+        if quote:
+            if char == quote:
+                quote = ""
+            else:
+                word += char
+        elif char in "\"'":
+            quote = char
+        elif char.isspace():
+            break
+        else:
+            word += char
+    return word
+
+
+def _carries_grimoire_hook(hooks: object) -> bool:
+    """Une commande de hook dont le programme est ``grimoire-hook`` : pas une simple mention de « grimoire »."""
+    if not isinstance(hooks, dict):
+        return False
+    for entries in hooks.values():
+        for entry in entries if isinstance(entries, list) else ():
+            for hook in entry.get("hooks", ()) if isinstance(entry, dict) and isinstance(entry.get("hooks"), list) else ():
+                command = hook.get("command") if isinstance(hook, dict) else None
+                if isinstance(command, str) and _HOOK_PROGRAM.match(_first_word(command).replace("\\", "/").rsplit("/", 1)[-1]):
+                    return True
+    return False
+
+
+def _hooks_disabled_reason(project_root: Path | None, home: Path | None, managed_dir: Path | None) -> str:
     root = project_root or Path.cwd()
     try:
         user_dir = (
@@ -188,7 +232,7 @@ def hooks_disabled_reason(
         if level == "managé":
             if isinstance(data.get("allowManagedHooksOnly"), bool):
                 managed_only = data["allowManagedHooksOnly"] is True
-            managed_has_grimoire = managed_has_grimoire or "grimoire" in json.dumps(data.get("hooks", {})).lower()
+            managed_has_grimoire = managed_has_grimoire or _carries_grimoire_hook(data.get("hooks"))
     if disabled:
         return disabled
     if managed_only and not managed_has_grimoire:
