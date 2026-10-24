@@ -21,35 +21,47 @@ def check_mcp_spec_http(server_name: str, spec: dict[str, Any]) -> EnvCheck | No
     return None
 
 
-def check_mcp_http_entry(server_name: str, url: str) -> EnvCheck:
-    """Une entrée ``type: http`` (serveur partagé, #723) : le démon répond-il ?
+_SCHEME_PORTS = {"http": 80, "https": 443}
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
-    Injoignable n'est pas une panne : l'hôte échoue cette entrée et garde les
-    autres (l'entrée stdio ``grimoire`` reste le défaut). WARN, pas FAIL.
+
+def check_mcp_http_entry(server_name: str, url: str) -> EnvCheck:
+    """Une entrée ``type: http`` : le serveur répond-il ?
+
+    Sans port explicite, le port est celui du schéma (80, 443) : un serveur
+    tiers en https n'en écrit jamais. Injoignable n'est pas une panne : l'hôte
+    échoue cette entrée et garde les autres (l'entrée stdio ``grimoire`` reste
+    le défaut). WARN, pas FAIL. Seule une URL inutilisable est un FAIL.
     """
     try:
-        port = urlparse(url).port
+        parsed = urlparse(url)
+        port = parsed.port or _SCHEME_PORTS.get(parsed.scheme)
     except ValueError:
-        port = None
-    if port is None:
+        parsed, port = None, None
+    if parsed is None or port is None or parsed.scheme not in _SCHEME_PORTS or not parsed.hostname:
         return EnvCheck(
             f"mcp_{server_name}",
             passed=False,
             level="fail",
-            detail=f".mcp.json server '{server_name}': url '{url}' has no port",
-            remedy="grimoire mcp register . --url http://127.0.0.1:7331/mcp",
+            detail=f".mcp.json server '{server_name}': invalid url '{url}' (expected http(s)://host[:port]/path)",
+            remedy="fix the url in .mcp.json, or grimoire mcp register . --url http://127.0.0.1:7331/mcp",
             optional=False,
         )
     from grimoire.cli.cmd_up import _tcp_reachable  # résolu à l'appel : simulable sur cmd_up
 
     if _tcp_reachable(url, port):
         return EnvCheck(f"mcp_{server_name}", passed=True, level="ok", detail=f".mcp.json server '{server_name}' answers at {url}")
+    local = parsed.hostname in _LOCAL_HOSTS
     return EnvCheck(
         f"mcp_{server_name}",
         passed=True,
         level="warn",
         detail=f".mcp.json server '{server_name}' (http) is not reachable at {url}",
-        remedy="grimoire mcp start (shared MCP server), or grimoire mcp register . --remove",
+        remedy=(
+            "grimoire mcp start (shared MCP server), or grimoire mcp register . --remove"
+            if local
+            else "check the network or the server url; the host skips this entry until it answers"
+        ),
     )
 
 
