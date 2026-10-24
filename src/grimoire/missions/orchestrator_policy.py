@@ -16,11 +16,17 @@ janitor :
           tier: ""                # cheap | mid | strong (repli quand ni model ni route ne donnent de modèle)
           wip: 1                  # sessions de worker en même temps
           sessions_per_day: 5     # plafond de lancements par jour (UTC)
-          permission_mode: ""     # transmis à claude --permission-mode ; vide : réglages de l'hôte
+          permission_mode: ""     # OBLIGATOIRE quand enabled: true (acceptEdits, plan, bypassPermissions…) ; transmis à
+                                  # claude --permission-mode
       breaker:
         threshold: 3              # échecs consécutifs avant l'ouverture du disjoncteur
       janitor:
         close_issue: false        # fermer l'issue liée (``Closes #N`` dans la description) une fois fusionnée
+
+**Mode de permission explicite.** Sans ``--permission-mode``, une session de fond (``claude --bg``) n'a personne pour
+répondre à la première demande d'autorisation : elle se bloque en silence en tenant son claim. Plutôt que de choisir
+un mode à la place du projet (``bypassPermissions`` serait imprudent, ``default`` bloquerait), un rôle ``worker`` activé
+sans ``permission_mode`` rend la politique illisible : rien n'est lancé et la sortie dit pourquoi. Le projet choisit.
 
 Sans ``base`` et sans ``origin/HEAD`` (``git remote set-head origin -a``), le lanceur ne lance rien : il ne devine pas.
 
@@ -56,6 +62,8 @@ ORCHESTRATION_FILE = STANDARD_DIR / "orchestration-policy.yaml"
 DEFAULT_BREAKER_THRESHOLD = 3
 TIERS = ("cheap", "mid", "strong")
 _BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+_MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
+_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
 _WORKER_KEYS = frozenset({"enabled", "model", "tier", "wip", "sessions_per_day", "permission_mode"})
 
 
@@ -134,13 +142,24 @@ def _parse_worker(raw: Any) -> WorkerRole:
     tier = _text(data.get("tier", ""), "orchestrator.roles.worker.tier")
     if tier and tier not in TIERS:
         raise _InvalidPolicyError(f"orchestrator.roles.worker.tier : {tier!r} inconnu (admis : {', '.join(TIERS)})")
+    mode = _text(data.get("permission_mode", ""), "orchestrator.roles.worker.permission_mode")
+    if enabled and not mode:
+        raise _InvalidPolicyError(
+            "orchestrator.roles.worker.permission_mode est obligatoire quand le rôle est activé : sans mode explicite, "
+            "une session de fond se bloque à la première demande d'autorisation (par ex. acceptEdits)"
+        )
+    if mode and not _MODE.fullmatch(mode):
+        raise _InvalidPolicyError(f"orchestrator.roles.worker.permission_mode : {mode!r} n'est pas un nom de mode (lettres et chiffres)")
+    model = _text(data.get("model", ""), "orchestrator.roles.worker.model")
+    if model and not _MODEL.fullmatch(model):
+        raise _InvalidPolicyError(f"orchestrator.roles.worker.model : {model!r} n'est pas un alias ou un nom de modèle (jamais une option)")
     return WorkerRole(
         enabled=enabled,
-        model=_text(data.get("model", ""), "orchestrator.roles.worker.model"),
+        model=model,
         tier=tier,
         wip=_positive(data.get("wip", 1), "orchestrator.roles.worker.wip"),
         sessions_per_day=_positive(data.get("sessions_per_day", 5), "orchestrator.roles.worker.sessions_per_day"),
-        permission_mode=_text(data.get("permission_mode", ""), "orchestrator.roles.worker.permission_mode"),
+        permission_mode=mode,
     )
 
 

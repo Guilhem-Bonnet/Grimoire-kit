@@ -29,7 +29,7 @@ POLICY = Path("_grimoire/standard/orchestration-policy.yaml")
 def write_policy(root: Path, *, close_issue: bool = False, enabled: bool = True) -> None:
     (root / POLICY).parent.mkdir(parents=True, exist_ok=True)
     (root / POLICY).write_text(
-        f"orchestrator:\n  roles:\n    worker:\n      enabled: {str(enabled).lower()}\n      wip: 3\n"
+        f"orchestrator:\n  roles:\n    worker:\n      enabled: {str(enabled).lower()}\n      wip: 3\n      permission_mode: acceptEdits\n"
         f"  janitor:\n    close_issue: {str(close_issue).lower()}\n",
         encoding="utf-8",
     )

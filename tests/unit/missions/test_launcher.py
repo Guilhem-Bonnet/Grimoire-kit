@@ -32,6 +32,8 @@ runner = CliRunner()
 
 def write_policy(root: Path, *, enabled: bool = True, wip: int = 3, per_day: int = 5, extra: str = "", breaker: int = 3) -> None:
     (root / POLICY).parent.mkdir(parents=True, exist_ok=True)
+    if enabled and "permission_mode" not in extra:
+        extra += "      permission_mode: acceptEdits\n"  # explicite : un rôle activé sans mode est refusé
     (root / POLICY).write_text(
         "orchestrator:\n  roles:\n    worker:\n"
         f"      enabled: {str(enabled).lower()}\n      wip: {wip}\n      sessions_per_day: {per_day}\n{extra}"
@@ -368,7 +370,7 @@ def test_la_cle_base_de_la_politique_prime_sur_origin_head(projet: Path, service
     git(projet, "branch", "release", "main")
     tid = ready(service, "une")
     (projet / POLICY).write_text(
-        "orchestrator:\n  base: release\n  roles:\n    worker:\n      enabled: true\n", encoding="utf-8"
+        "orchestrator:\n  base: release\n  roles:\n    worker:\n      enabled: true\n      permission_mode: plan\n", encoding="utf-8"
     )
     _checkout_elsewhere(projet)
     report = tick(projet, host)
@@ -389,3 +391,48 @@ def test_sans_base_ni_origin_head_rien_n_est_lance(projet: Path, service: TaskSe
 def test_une_base_qui_n_est_pas_un_nom_de_branche_rend_la_politique_illisible(projet: Path) -> None:
     (projet / POLICY).write_text("orchestrator:\n  base: '--upload-pack=x'\n", encoding="utf-8")
     assert load_orchestrator_policy(projet).usable is False
+
+
+# ── Revue adversariale du lot 2 : mode de permission explicite, valeurs sûres, bornes ─────────────────
+
+
+def test_un_worker_active_sans_permission_mode_est_refuse(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Sans `--permission-mode`, une session de fond se bloque à la première demande : le mode doit être déclaré."""
+    (projet / POLICY).write_text("orchestrator:\n  roles:\n    worker:\n      enabled: true\n", encoding="utf-8")
+    read = load_orchestrator_policy(projet)
+    assert read.policy is None and "permission_mode" in read.error
+    ready(service, "sans mode")
+    report = tick(projet, host)
+    assert report.launches == () and host.of("claude", "--bg") == []
+    assert any("permission_mode" in a for a in report.attention)
+
+
+@pytest.mark.parametrize(("key", "value"), [("permission_mode", "--dangerously-skip-permissions"), ("model", "-x"), ("model", "a b")])
+def test_modele_et_mode_ne_peuvent_pas_etre_une_option(projet: Path, key: str, value: str) -> None:
+    extra = "      permission_mode: plan\n" if key == "model" else ""
+    (projet / POLICY).write_text(
+        f"orchestrator:\n  roles:\n    worker:\n      enabled: true\n{extra}      {key}: '{value}'\n", encoding="utf-8"
+    )
+    assert load_orchestrator_policy(projet).usable is False
+
+
+def test_le_wip_compte_aussi_les_sessions_bloquees_en_attente_de_verification(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, wip=1)
+    first = ready(service, "a")
+    tick(projet, host)
+    ledger = TaskService(projet).ledger
+    ledger.transition_task(first, TaskState.RUNNING, actor_id="worker")
+    ledger.transition_task(first, TaskState.NEEDS_VERIFICATION, actor_id="worker")  # la session vit encore, en attente de relecture
+    ready(TaskService(projet), "b")
+    again = tick(projet, host)
+    assert [o.status for o in again.launches] == ["skipped"] and len(host.of("claude", "--bg")) == 1
+
+
+def test_un_lancement_echoue_compte_au_plafond_du_jour(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Un `claude --bg` qui sort en délai dépassé a pu démarrer une session : la tentative compte."""
+    write_policy(projet, wip=9, per_day=1, breaker=9)
+    host.bg_fails = True
+    ready(service, "a"), ready(service, "b")
+    report = tick(projet, host)
+    assert [o.status for o in report.launches] == ["failed", "skipped"]
+    assert "plafond" in report.launches[1].detail

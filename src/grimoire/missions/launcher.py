@@ -126,6 +126,9 @@ def _git_out(cwd: Path, *args: str) -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
+_LIVE = (TaskState.CLAIMED, TaskState.RUNNING, TaskState.BLOCKED, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
+
+
 def _day(stamp: str) -> str:
     return stamp[:10]
 
@@ -146,15 +149,18 @@ class WorkerLauncher:
     # -- gardes -------------------------------------------------------------
 
     def _active(self) -> int:
-        """Les sessions de worker en cours : tâches portant un lancement, encore ``claimed`` ou ``running``."""
+        """Les sessions de worker vivantes : tâches portant un lancement et tenant encore leur claim.
+
+        Une session qui attend (``blocked``, ``waiting``, ``needs_verification``) est vivante : elle compte.
+        """
         sessions = launched_sessions(self._service)
-        return sum(1 for tid in sessions if self._service.require(tid).status in (TaskState.CLAIMED, TaskState.RUNNING))
+        return sum(1 for tid in sessions if self._service.require(tid).status in _LIVE)
 
     def _launched_today(self) -> int:
         today = _day((self._now or datetime.now(UTC)).isoformat())
         return sum(
             1 for e in self._service.ledger.list_events()
-            if e.event_type == LAUNCHED_EVENT and _day(e.created_at) == today
+            if e.event_type in (LAUNCHED_EVENT, LAUNCH_FAILED_EVENT) and _day(e.created_at) == today
         )
 
     def _model_for(self, admit: Admit) -> str:
