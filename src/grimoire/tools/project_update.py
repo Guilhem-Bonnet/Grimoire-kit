@@ -37,6 +37,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from grimoire.tools.upgrade_preview import parse_preview
+
 #: Un alignement complet lance sauvegarde, aperçu, orphelins, application,
 #: propositions et vérification — plus de nœuds qu'un `up` nu, même borne
 #: généreuse qu'avant (#490).
@@ -260,6 +262,11 @@ def _run_upgrade_flow(root: Path, *, dry_run: bool) -> dict[str, Any]:
     }
     if ok:
         report["preview"] = _read_report(root, "preview.md")
+        # P44 : le tableau de l'aperçu en données (français, sans caractères
+        # de boîte), pour que le cockpit le rende en tableau HTML. `None` si
+        # le rapport n'a pas la forme attendue : l'interface retombe alors
+        # sur le Markdown du rapport.
+        report["previewTable"] = parse_preview(report["preview"])
         if not dry_run:
             report["report"] = _read_report(root, "report.md")
             report["proposals"] = _pending_proposals(root)

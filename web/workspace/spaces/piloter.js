@@ -89,6 +89,20 @@ function injectStyles() {
     .pl-prop-head { display: flex; align-items: center; gap: var(--sp-2); }
     .pl-prop-facts { color: var(--ink2); font-size: var(--t-s); }
     .pl-prop-actions { display: flex; gap: var(--sp-2); }
+    /* Un display d auteur l emporte sur l attribut hidden : on le rend explicite. */
+    .pl-sheet[hidden], .pl-wrap[hidden], .pl-cat-files[hidden] { display: none; }
+    .pl-update .pl-preview { margin: 0; padding: 0; border: 0; font-size: var(--t-s); color: var(--ink); display: flex; flex-direction: column; gap: var(--sp-4); }
+    .pl-update h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
+    .pl-cats { display: flex; flex-direction: column; gap: var(--sp-2); }
+    .pl-cat-head, .pl-file-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--t-s); color: var(--ink); background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: 8px var(--sp-3); cursor: pointer; }
+    .pl-cat-head:hover, .pl-file-head:hover { background: var(--hover); }
+    .pl-cat-files { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 0 var(--sp-4); }
+    .pl-file-head .mono { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pl-diff { font-family: var(--mono); font-size: var(--t-min); background: var(--e2); border-radius: var(--r); padding: 8px; overflow-x: auto; margin: 4px 0 0; }
+    .pl-diff span { display: block; white-space: pre; }
+    .pl-diff .add { background: var(--ok-soft); color: var(--ok); }
+    .pl-diff .del { background: var(--bad-soft); color: var(--bad); }
+    .pl-diff .hunk { color: var(--ink3); }
     [data-focused="true"] { border-radius: var(--r); background: var(--acc-soft); box-shadow: 0 0 0 2px var(--acc); }
   `;
   document.head.append(style);
@@ -1311,7 +1325,12 @@ const NODE_STATUS_DOT = {
   fait: 'ok', proposition: 'acc', sauté: '', erreur: 'bad', 'checkpoint en attente': 'warn',
 };
 
-function renderNodeList(nodes) {
+// Un aperçu ne joue que `backup` et `preview` : les autres étapes n'ont pas
+// « manqué », elles n'ont pas été exécutées en aperçu (P44). « Jamais atteint »
+// reste réservé à un vrai run arrêté avant elles.
+const NODE_SKIPPED_IN_PREVIEW = 'non exécutée en aperçu';
+
+function renderNodeList(nodes, { dryRun = false } = {}) {
   const list = document.createElement('div');
   list.className = 'pl-watch pl-nodes';
   for (const node of nodes) {
@@ -1319,7 +1338,10 @@ function renderNodeList(nodes) {
     nodeRow.className = 'pl-watch-row';
     nodeRow.append(
       text('span', 'pl-watch-name', NODE_LABELS[node.id] || node.id),
-      pill(NODE_STATUS_DOT[node.status] ?? '', NODE_STATUS_WORD[node.status] || node.status),
+      pill(
+        NODE_STATUS_DOT[node.status] ?? '',
+        dryRun && node.status === 'sauté' ? NODE_SKIPPED_IN_PREVIEW : (NODE_STATUS_WORD[node.status] || node.status),
+      ),
     );
     list.append(nodeRow);
   }
@@ -1348,6 +1370,158 @@ function appendPreviewMarkdown(container, previewText) {
   if (truncated) {
     container.append(text('div', 'lbl', 'Aperçu tronqué — le rapport complet reste sur disque sous `_grimoire-output/upgrade/<date>/`.'));
   }
+}
+
+// ── Écran « Mise à jour » plein canevas (P44) : lecture seule ──────────────
+//
+// Tout ce qui suit lit : le tableau de `grimoire up --dry-run` (déjà dans la
+// réponse de l'aperçu), puis `GET upgrade/changes` et `GET upgrade/diff` au
+// clic. Aucune écriture ici — la seule écriture reste le bouton de
+// confirmation existant.
+
+function htmlTable(headers, rows) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'tbl-wrap';
+  const table = document.createElement('table');
+  table.className = 'tbl';
+  const head = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const label of headers) headRow.append(text('th', null, label));
+  head.append(headRow);
+  const body = document.createElement('tbody');
+  for (const cells of rows) {
+    const tr = document.createElement('tr');
+    for (const cell of cells) {
+      const td = document.createElement('td');
+      td.append(cell);
+      tr.append(td);
+    }
+    body.append(tr);
+  }
+  table.append(head, body);
+  wrapper.append(table);
+  return wrapper;
+}
+
+function renderPreviewTables(table) {
+  const section = document.createElement('div');
+  section.className = 'pl-section pl-preview-tables';
+  section.append(text('h3', null, 'Étapes de la mise à jour'));
+  section.append(htmlTable(
+    ['Étape', 'Statut', 'Détail'],
+    table.steps.map((step) => [
+      document.createTextNode(step.label),
+      badge(step.statusLabel, step.tone),
+      document.createTextNode(step.detail),
+    ]),
+  ));
+  if (table.hosts && table.hosts.length) {
+    section.append(text('h3', null, "Surfaces d'hôtes"));
+    section.append(htmlTable(
+      ['Hôte', 'Écrirait', 'Inchangé'],
+      table.hosts.map((h) => [
+        document.createTextNode(h.host),
+        document.createTextNode(String(h.wouldWrite)),
+        document.createTextNode(String(h.unchanged)),
+      ]),
+    ));
+  }
+  return section;
+}
+
+function renderDiff(unified) {
+  const pre = document.createElement('div');
+  pre.className = 'pl-diff';
+  for (const line of unified.split('\n')) {
+    if (!line) continue;
+    let kind = '';
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) kind = 'hunk';
+    else if (line.startsWith('+')) kind = 'add';
+    else if (line.startsWith('-')) kind = 'del';
+    pre.append(text('span', kind, line));
+  }
+  return pre;
+}
+
+function renderChangesSection(ctx) {
+  const section = document.createElement('div');
+  section.className = 'pl-section pl-changes';
+  section.append(text('h3', null, 'Changements par catégorie'));
+  const body = document.createElement('div');
+  body.className = 'pl-cats';
+  body.append(text('div', 'lbl', 'Chargement des changements…'));
+  section.append(body);
+
+  ctx.api.upgradeChanges().then((view) => {
+    body.replaceChildren();
+    if (!view.categories.length) {
+      body.append(text('div', 'lbl', `Aucun fichier à modifier (${view.unchanged} déjà à jour).`));
+      return;
+    }
+    body.append(text('div', 'lbl', `${view.total} fichier(s) seraient écrits, ${view.unchanged} déjà à jour.`));
+    for (const category of view.categories) {
+      const block = document.createElement('div');
+      block.className = 'pl-cat';
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'pl-cat-head';
+      head.dataset.category = category.id;
+      head.setAttribute('aria-expanded', 'false');
+      head.append(text('span', null, category.label), badge(String(category.files.length), 'acc'));
+      const files = document.createElement('div');
+      files.className = 'pl-cat-files';
+      files.hidden = true;
+      head.addEventListener('click', () => {
+        const open = files.hidden;
+        files.hidden = !open;
+        head.setAttribute('aria-expanded', String(open));
+      });
+      for (const file of category.files) files.append(renderFileEntry(ctx, file));
+      block.append(head, files);
+      body.append(block);
+    }
+  }).catch((error) => {
+    body.replaceChildren(text('div', 'lbl', `Changements indisponibles : ${error.message}`));
+  });
+  return section;
+}
+
+function renderFileEntry(ctx, file) {
+  const entry = document.createElement('div');
+  entry.className = 'pl-file';
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'pl-file-head';
+  head.dataset.path = file.path;
+  head.setAttribute('aria-expanded', 'false');
+  const path = text('span', 'mono', file.path);
+  path.title = file.path;
+  head.append(
+    path,
+    badge(file.label, file.status === 'nouveau' ? 'ok' : 'warn'),
+    text('span', 'lbl', `+${file.added} −${file.removed}`),
+  );
+  const detail = document.createElement('div');
+  detail.hidden = true;
+  let loaded = false;
+  head.addEventListener('click', async () => {
+    const open = detail.hidden;
+    detail.hidden = !open;
+    head.setAttribute('aria-expanded', String(open));
+    if (!open || loaded) return;
+    loaded = true;
+    detail.replaceChildren(text('div', 'lbl', 'Chargement du diff…'));
+    try {
+      const diff = await ctx.api.upgradeDiff(file.path);
+      detail.replaceChildren(renderDiff(diff.unified));
+      if (diff.truncated) detail.append(text('div', 'lbl', 'Diff tronqué — le fichier complet reste sur disque.'));
+    } catch (error) {
+      loaded = false;
+      detail.replaceChildren(text('div', 'lbl', `Diff indisponible : ${error.message}`));
+    }
+  });
+  entry.append(head, detail);
+  return entry;
 }
 
 function renderSheet(root, ctx, slug, name, sheet, options) {
@@ -1529,9 +1703,44 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   updateBtn.type = 'button';
   updateBtn.className = 'btn';
   updateBtn.textContent = 'Mettre à jour — aperçu';
+  // P44 : l'aperçu s'ouvre en plein canevas (écran `.pl-update`), pas dans
+  // l'inspecteur. `.pl-preview` reste le conteneur unique du déroulé : les
+  // parcours existants (aperçu, confirmation) le retrouvent sous ce nom.
+  const displayName = name || (ctx.scope && ctx.scope.name) || 'Projet servi';
+  const screen = document.createElement('div');
+  screen.className = 'pl-wrap pl-update';
+  screen.hidden = true;
   const preview = document.createElement('div');
   preview.className = 'pl-preview';
   preview.hidden = true;
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'btn';
+  backBtn.textContent = 'Retour à la fiche';
+  // Le titre n'existe qu'à l'ouverture : une fiche qui n'a pas lancé d'aperçu
+  // ne porte aucun second `h2` au nom du projet (les parcours qui attendent
+  // « le titre du projet » n'en trouvent qu'un).
+  let screenBuilt = false;
+  // Avant la fiche : après une confirmation, la fiche (et ses Propositions) revient
+  // SOUS le déroulé, qui peut donc dire « ci-dessous » sans mentir.
+  wrap.before(screen);
+  backBtn.addEventListener('click', () => {
+    screen.hidden = true;
+    wrap.hidden = false;
+  });
+  const openScreen = () => {
+    if (!screenBuilt) {
+      screenBuilt = true;
+      screen.append(
+        spaceHead(`Mise à jour — ${displayName}`, "Aperçu : ce que la mise à jour ferait, avant que vous confirmiez.", backBtn),
+        preview,
+      );
+    }
+    wrap.hidden = true;
+    screen.hidden = false;
+    const title = screen.querySelector('.space-title');
+    if (title) { title.tabIndex = -1; title.focus({ preventScroll: true }); }
+  };
   updateBtn.addEventListener('click', async () => {
     ctx.dock.echo(`grimoire upgrade-flow run --dry-run${slug ? ' # ' + slug : ''}`);
     // État « en cours » (issue #506) : le flow peut prendre jusqu'à une
@@ -1539,6 +1748,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     // l'écran passait de « cliqué » à « terminé » sans rien entre.
     updateBtn.disabled = true;
     updateBtn.textContent = 'Aperçu en cours…';
+    openScreen();
     preview.hidden = false;
     preview.replaceChildren(row(dot('acc'), text('span', 'lbl', "Aperçu en cours — jusqu'à une minute…")));
     try {
@@ -1548,9 +1758,15 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
       // message le dit, plutôt qu'un « rien d'autre écrit » démenti par le
       // disque. Son run est marqué aperçu et n'est compté nulle part.
       preview.append(text('div', null, report.ok ? 'Aperçu : sauvegarde créée, aucun fichier du projet modifié.' : (report.error || 'Aperçu en échec.')));
-      if (report.nodes) preview.append(renderNodeList(report.nodes));
+      preview.append(text('div', 'lbl', `Projet : ${displayName}`));
+      if (report.nodes) preview.append(renderNodeList(report.nodes, { dryRun: true }));
       if (report.backupPath) preview.append(text('div', 'lbl', `Sauvegarde : ${report.backupPath}`));
-      appendPreviewMarkdown(preview, report.preview || report.output);
+      if (report.previewTable) {
+        preview.append(renderPreviewTables(report.previewTable));
+      } else {
+        appendPreviewMarkdown(preview, report.preview || report.output);
+      }
+      if (report.ok) preview.append(renderChangesSection(ctx));
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button';
       confirmBtn.className = 'btn pri';
@@ -1584,6 +1800,8 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
           preview.append(text('div', 'lbl', `${result.proposals.length} proposition(s) en attente — voir la section Propositions ci-dessous.`));
         }
         confirmBtn.remove();
+        // La fiche réapparaît sous le déroulé : c'est là que vivent les Propositions.
+        wrap.hidden = false;
         if (result.ok) {
           markKitCheckpointPending(result.runId);
           // Un run complet s'arrête toujours, non décidé, au checkpoint
@@ -1621,7 +1839,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
       updateBtn.textContent = 'Mettre à jour — aperçu';
     }
   });
-  actionsBlock.append(updateBtn, preview);
+  actionsBlock.append(updateBtn);
 
   // ── Revoir dans l'IDE (issue #520, lot 2) ───────────────────────────────
   //

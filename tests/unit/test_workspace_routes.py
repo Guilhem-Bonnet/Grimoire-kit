@@ -63,7 +63,7 @@ SHARED_READS = sorted(
     set(GET_ROUTES)
     - {
         f"{PREFIX}file", f"{PREFIX}file/diff", f"{PREFIX}file/usage", f"{PREFIX}file/history",
-        f"{PREFIX}doctor", f"{PREFIX}language",
+        f"{PREFIX}doctor", f"{PREFIX}language", f"{PREFIX}upgrade/diff",
     }
 )
 

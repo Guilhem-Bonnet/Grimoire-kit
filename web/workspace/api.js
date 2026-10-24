@@ -217,6 +217,10 @@ export const api = {
   files: (tier) => get(WS + 'files', tier ? { tier } : undefined),
   file: (path) => get(WS + 'file', { path }),
   fileDiff: (path) => get(WS + 'file/diff', { path }),
+  // P44 : ce qu'une mise à jour écrirait (par catégorie), et le diff d'un
+  // fichier qu'elle toucherait — deux lectures pures, jamais la route qui écrit.
+  upgradeChanges: () => get(WS + 'upgrade/changes'),
+  upgradeDiff: (path) => get(WS + 'upgrade/diff', { path }),
   fileUsage: (path) => get(WS + 'file/usage', { path }),
   fileHistory: (path) => get(WS + 'file/history', { path }),
   commands: () => get(WS + 'commands'),
