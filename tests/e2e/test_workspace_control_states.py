@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 import pytest
 from playwright.sync_api import CDPSession, Page
 
+from .conftest import open_atelier
+
 MIN_TEXT = 4.5
 MIN_NON_TEXT = 3.0
 MIN_TARGET = 24
@@ -174,6 +176,7 @@ def _force(cdp: CDPSession, pseudo: tuple[str, ...]) -> None:
 @pytest.fixture
 def states_page(workspace: Page) -> tuple[Page, CDPSession]:
     """La coque avec l'explorateur épinglé (surfaces de panneau visibles) et une session CDP."""
+    open_atelier(workspace)
     workspace.evaluate("() => window.GrimoireWorkspace.setPanel('explorer', 'pinned')")
     cdp = workspace.context.new_cdp_session(workspace)
     cdp.send("DOM.enable")

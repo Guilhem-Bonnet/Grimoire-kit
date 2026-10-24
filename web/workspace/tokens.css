@@ -14,30 +14,19 @@
  */
 
 /* ── Fontes embarquées ────────────────────────────────────────────────────
- * Geist et Geist Mono, woff2, license SIL OFL 1.1 (fonts/OFL.txt), depuis la
- * release GitHub officielle de Vercel (vercel/geist-font v1.7.2). Seuls les
- * poids utilisés par la spec §2.3 sont embarqués : 400/500/600 pour Geist,
- * 400/500 pour Geist Mono — 260 Ko au total. `font-display: swap` évite un
- * texte invisible pendant le chargement ; le repli système s'affiche d'abord.
+ * Douce (décision du 2026-10-17, P62) : Instrument Sans pour le texte, Geist
+ * Mono pour le code. Toutes deux woff2, licence SIL OFL 1.1 (fonts/OFL.txt
+ * pour Geist, fonts/OFL-InstrumentSans.txt pour Instrument Sans), vendorisées :
+ * aucune requête vers un tiers (P05). Instrument Sans est la police variable
+ * officielle (google/fonts, ofl/instrumentsans), axe de largeur figé à 100 et
+ * réduite au latin : un seul fichier couvre 400 à 600, 35 Ko. `font-display:
+ * swap` évite un texte invisible pendant le chargement ; le repli système
+ * s'affiche d'abord.
  */
 @font-face {
-  font-family: "Geist";
-  src: url("./fonts/Geist-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Geist";
-  src: url("./fonts/Geist-Medium.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Geist";
-  src: url("./fonts/Geist-SemiBold.woff2") format("woff2");
-  font-weight: 600;
+  font-family: "Instrument Sans";
+  src: url("./fonts/InstrumentSans-Variable.woff2") format("woff2");
+  font-weight: 400 600;
   font-style: normal;
   font-display: swap;
 }
@@ -183,7 +172,7 @@
   --shadow-tip: 0 24px 48px rgba(0, 0, 0, 0.5);
 
   /* ── Typographie ──────────────────────────────────────────────────────── */
-  --font: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Mono", monospace;
   /* Plancher : 13 px en sombre, 12 px en clair (redéfini plus bas). */
   --t-min: 13px;
@@ -193,7 +182,13 @@
   --t-xl: 20px;
 
   /* ── Géométrie ────────────────────────────────────────────────────────── */
-  --r: 3px;
+  /* Rayons de Douce : 10 (contrôles, champs), 16 (cartes, tuiles, listes), 20
+     (panneau de détail), pilule (onglets, boutons, pastilles). */
+  --r: 10px;
+  --r-l: 16px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+  --t-title: 32px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -202,7 +197,7 @@
   --sp-6: 32px;
 
   /* ── Chrome : hauteurs fixées par la spec §3 ──────────────────────────── */
-  --h-app: 44px;
+  --h-app: 52px;
   --h-doc: 40px;
   --h-status: 26px;
   --w-rail: 44px;

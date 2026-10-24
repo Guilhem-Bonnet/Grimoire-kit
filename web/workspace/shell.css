@@ -412,7 +412,7 @@ th .th-hint {
   gap: 6px;
   padding: 0 var(--sp-3);
   border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-radius: var(--r-pill);
   font-size: var(--t-s);
   background: var(--e2);
   color: var(--ink);
@@ -584,7 +584,7 @@ body[data-active-space="source"] {
   padding: 0 5px;
   border: 1px solid var(--line);
   border-bottom-width: 2px;
-  border-radius: var(--r);
+  border-radius: 4px;
   font-size: 11px;
   color: var(--ink2);
   background: var(--e1);
@@ -801,7 +801,7 @@ body[data-active-space="source"] {
   min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--r-l);
   background: var(--card);
   box-shadow: var(--shadow);
 }
@@ -873,8 +873,9 @@ body[data-active-space="source"] {
 .tbl-wrap {
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--r-l);
   background: var(--card);
+  box-shadow: var(--shadow);
 }
 
 .tbl {
@@ -995,10 +996,13 @@ body[data-active-space="source"] {
 #brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  font-size: var(--t-min);
+  font-size: 15px;
+}
+
+.brand-mark {
+  color: var(--rub);
 }
 
 .spaces-nav {
@@ -1593,7 +1597,8 @@ body[data-active-space] .panel-head {
     padding: 0 var(--sp-2);
   }
 
-  #brand span,
+  #brand .brand-name,
+  #top-live,
   #appbar > .grow,
   .palette-lbl,
   .pill-lbl,
@@ -1758,7 +1763,8 @@ body[data-active-space] .panel-head {
     min-width: 0;
   }
 
-  .st-extra {
+  .st-extra,
+  #st-atelier {
     display: none;
   }
 
@@ -1791,5 +1797,266 @@ body[data-active-space] .panel-head {
     display: block;
     max-width: 100%;
     overflow-x: auto;
+  }
+}
+
+
+/* ═══ P62 — la coque des maquettes (Douce) ══════════════════════════════════
+ *
+ * Maquettes de référence : StyleDouce et les cinq écrans (À traiter, Travail,
+ * Flotte, Savoir, Configuration). Une barre du haut, le contenu, et selon
+ * l'écran un panneau de détail à droite ; Savoir et Configuration ajoutent un
+ * sous-menu à gauche (les rubriques). Rail, explorateur, preuves, dock et
+ * inspecteur permanent sont les panneaux d'atelier : masqués tant que
+ * `html[data-atelier="off"]`, rouverts par ⇧⌘L (shell.js::toggleAtelier).
+ *
+ * Les règles « masquées » ne valent qu'au-dessus de 900 px : dessous, la coque
+ * garde ses tiroirs, et le rail en est la seule porte.
+ */
+
+/* Barre du haut : blanche, un filet d'ombre plutôt qu'une bordure, 52 px. */
+#appbar {
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 0;
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.project-count {
+  color: var(--ink3);
+}
+
+.project-count[hidden] {
+  display: none;
+}
+
+#project-chip {
+  height: 30px;
+  border-radius: var(--r);
+}
+
+#palette-open {
+  height: 30px;
+  color: var(--ink3);
+  border-radius: var(--r);
+}
+
+.top-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-min);
+  color: var(--ok);
+  white-space: nowrap;
+}
+
+.top-live[data-state="paused"],
+.top-live[data-state="error"] {
+  color: var(--ink2);
+}
+
+.top-live[data-state="error"] {
+  font-weight: 500;
+}
+
+/* Onglets d'espace : pilules à icône. Actif = fond d'accent doux, texte et
+   icône d'accent ; le filet de l'identité d'espace disparaît (Douce n'a pas de
+   filet). */
+#spaces {
+  align-items: center;
+}
+
+#spaces .tab {
+  height: 34px;
+  gap: 7px;
+  border: 0;
+  border-radius: var(--r-pill);
+  font-weight: 500;
+}
+
+#spaces .tab .ico {
+  color: var(--ink3);
+}
+
+#spaces .tab:hover {
+  background: var(--hover);
+}
+
+#spaces .tab[aria-selected="true"],
+#spaces .tab.on {
+  background: var(--acc-soft);
+  color: var(--acc);
+  border: 0;
+}
+
+#spaces .tab[aria-selected="true"] .ico,
+#spaces .tab.on .ico {
+  color: var(--acc);
+}
+
+/* Titre d'espace : 32 px, serré (StyleDouce `.title`). */
+.space-title {
+  font-size: var(--t-title);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+/* Sous-menu à gauche : les rubriques d'un espace, en colonne. */
+#center {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+}
+
+#readonly-banner {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+#section-tabs {
+  grid-column: 1;
+  grid-row: 2 / span 4;
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  width: 200px;
+  padding: var(--sp-5) var(--sp-3);
+  gap: 4px;
+  border-bottom: 0;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  overflow-x: visible;
+  overflow-y: auto;
+}
+
+#section-tabs .tab {
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r);
+  font-weight: 500;
+}
+
+#section-tabs .tab[aria-selected="true"] {
+  background: var(--acc-soft);
+  color: var(--acc);
+  border: 0;
+}
+
+#docbar {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+#canvas {
+  grid-column: 2;
+  grid-row: 3 / span 2;
+  min-width: 0;
+}
+
+#dock {
+  grid-column: 2;
+  grid-row: 5;
+}
+
+@media (min-width: 901px) {
+  /* Le panneau de détail (l'ancien Inspecteur) : une carte arrondie à ombre,
+     détachée du bord, sans bandeau (StyleDouce `.aside`). */
+  html[data-atelier="off"] #panel-inspector {
+    width: 380px;
+    margin: 18px 18px 18px 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  html[data-atelier="off"] #panel-inspector .panel-head {
+    display: none;
+  }
+
+  html[data-atelier="off"] #panel-inspector .panel-body {
+    padding: var(--sp-5);
+  }
+
+  html[data-atelier="off"] #panel-inspector .panel-resize {
+    display: none;
+  }
+
+  html[data-atelier="off"] #panel-inspector:focus-within {
+    width: 380px;
+    margin: 18px 18px 18px 0;
+    border: 1px solid var(--line);
+  }
+
+  #spaces {
+    gap: 4px;
+    margin-left: 6px;
+  }
+
+  #spaces .tab {
+    padding: 0 12px;
+  }
+
+  /* Panneaux d'atelier : fermés par défaut, quel que soit l'état mémorisé. */
+  html[data-atelier="off"] #rail,
+  html[data-atelier="off"] #panel-evidence,
+  html[data-atelier="off"] #dock {
+    display: none;
+  }
+
+  /* L'explorateur ne reste que s'il porte l'arbre de la rubrique (Fichiers). */
+  html[data-atelier="off"] #panel-explorer {
+    display: flex;
+  }
+
+  html[data-atelier="off"] #panel-explorer[data-detail="off"] {
+    display: none;
+  }
+
+  /* Le détail n'existe que s'il y a quelque chose à détailler : pas de colonne vide. */
+  html[data-atelier="off"] #panel-inspector {
+    display: flex;
+  }
+
+  html[data-atelier="off"] #panel-inspector[data-detail="off"] {
+    display: none;
+  }
+
+  /* Une barre de document sans fil d'Ariane ni vue n'a rien à montrer. */
+  html[data-atelier="off"] #breadcrumb {
+    display: none;
+  }
+
+  html[data-atelier="off"] #docbar:not(:has(.seg:not([hidden]), #doc-validation:not([hidden]))) {
+    display: none;
+  }
+
+  /* Au plus un pied fin : version, API, pouls ; les réglages d'atelier restent
+     à portée mais les panneaux ne se devinent pas. */
+  html[data-atelier="off"] #statusbar {
+    height: 24px;
+  }
+}
+
+@media (max-width: 900px) {
+  #center {
+    display: flex;
+  }
+
+  #section-tabs {
+    flex-direction: row;
+    width: auto;
+    padding: 0 14px;
+    gap: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+
+  #section-tabs .tab {
+    height: 100%;
+    border-radius: var(--r) var(--r) 0 0;
   }
 }

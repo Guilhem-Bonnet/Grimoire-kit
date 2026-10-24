@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page
 
+from .conftest import open_atelier
+
 MIN_TARGET = 24
 
 _TARGETS_JS = """
@@ -47,6 +49,7 @@ def _apply_theme(page: Page, theme: str) -> None:
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
 def test_toute_cible_cliquable_mesure_au_moins_24_px(workspace: Page, theme: str) -> None:
+    open_atelier(workspace)
     _apply_theme(workspace, theme)
     # Le cadenas n'est visible que panneau ouvert : on s'assure qu'il est mesuré.
     workspace.evaluate("() => window.GrimoireWorkspace.setPanel('explorer', 'pinned')")
