@@ -8,6 +8,7 @@ fermée : journal absent, illisible ou à chaîne rompue ne porte aucun mandat.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -698,7 +699,8 @@ def test_the_control_key_is_private_and_a_missing_key_never_verifies(project: Pa
     assert md.verify_control_key("x") is False  # aucune clé : échec fermé
     path = md.ensure_control_key()
     assert md.ensure_control_key() == path
-    assert (path.stat().st_mode & 0o077) == 0 or path.stat().st_mode == 0  # 0600 hors Windows
+    if os.name != "nt":  # Windows n'applique pas les bits de mode : la clé y est protégée par l'ACL du profil
+        assert (path.stat().st_mode & 0o077) == 0
     assert md.verify_control_key(path.read_text(encoding="utf-8").strip()) is True
     assert md.verify_control_key("") is False and md.verify_control_key(None) is False
 
