@@ -15,10 +15,12 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Page
 
+from .conftest import open_scope_all
+
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 # ── Piloter — corrections de données §4.1 ───────────────────────────────────
@@ -36,23 +38,27 @@ def test_piloter_atelier_rend_ci_status_inconnue_en_gris(workspace: Page) -> Non
     assert "NaN" not in canvas_text
 
 
-def test_piloter_cockpit_flotte_montre_un_tableau_avec_inconnue(cockpit_workspace: Page) -> None:
-    """Niveau Flotte : un tableau de projets, colonne CI rendue « inconnue »."""
+def test_piloter_cockpit_flotte_montre_un_tableau_de_projets(cockpit_workspace: Page) -> None:
+    """Portée « Tous les projets » : la table de la maquette Flotte (P65), sans
+    colonne CI (rien ne la mesure : elle ne disait qu'« inconnue ») ni valeur inventée."""
     workspace = cockpit_workspace
+    open_scope_all(workspace)
     _goto(workspace, "piloter")
 
     workspace.locator(".tbl-wrap, .pl-cards").first.wait_for()
     body_text = workspace.locator("#canvas").inner_text().lower()
-    assert "inconnue" in body_text
-    assert "à traiter" in body_text
+    assert "demandent une action" in body_text
+    assert "undefined" not in body_text and "nan" not in body_text.split()
 
 
-def test_piloter_zoom_flotte_projet_est_disponible_sur_le_cockpit(cockpit_workspace: Page) -> None:
+def test_piloter_n_a_plus_de_zoom_flotte_projet_la_portee_decide(cockpit_workspace: Page) -> None:
+    """P31 : la portée de la coque remplace le zoom Flotte/Projet de Piloter."""
     _goto(cockpit_workspace, "piloter")
-    cockpit_workspace.wait_for_selector("#zoom-seg button")
-    zoom = cockpit_workspace.locator("#zoom-seg button")
-    assert zoom.count() == 2
-    assert {zoom.nth(i).inner_text() for i in range(2)} == {"Flotte", "Projet"}
+    cockpit_workspace.wait_for_selector(".pl-sheet")
+    assert cockpit_workspace.locator("#zoom-seg button").count() == 0
+    open_scope_all(cockpit_workspace)
+    cockpit_workspace.locator(".tbl-wrap, .pl-cards").first.wait_for()
+    assert cockpit_workspace.locator("#zoom-seg button").count() == 0
 
 
 def test_piloter_kit_reel_a_jour_dit_a_jour_avec_le_kit_du_dernier_up(workspace: Page) -> None:
@@ -177,7 +183,7 @@ def test_executer_propose_trois_vues_et_le_board_par_defaut(
     workspace.wait_for_selector("#view-seg button")
     views = workspace.locator("#view-seg button")
     labels = {views.nth(i).inner_text() for i in range(views.count())}
-    assert {"Board 4", "Board 8", "Liste", "Timeline"} <= labels
+    assert {"Tableau", "Huit colonnes", "Liste", "Chronologie"} <= labels
 
     workspace.wait_for_selector(".ex-col")
     # Quatre colonnes de travail ; les tâches annulées ont la leur, repliée (P07).
@@ -186,7 +192,7 @@ def test_executer_propose_trois_vues_et_le_board_par_defaut(
 
     views.filter(has_text="Liste").click()
     workspace.wait_for_selector(".ex-list-wrap")
-    views.filter(has_text="Board 8").click()
+    views.filter(has_text="Huit colonnes").click()
     workspace.wait_for_selector(".ex-col")
     assert workspace.locator(".ex-col").count() == 8, "Board 8 : les huit colonnes du standard"
 
@@ -276,48 +282,30 @@ def test_executer_le_board_change_quand_on_change_de_projet(
         context.close()
 
 
-def test_ouvrir_ce_projet_reste_sur_l_ecran_projet_sans_recharger(
+def test_choisir_un_projet_dans_la_flotte_change_la_portee_et_ouvre_sa_fiche(
     browser: Browser, served_cockpit_multi: tuple[str, str, str]
 ) -> None:
-    """Issue #506 : « Ouvrir ce projet », depuis la fiche d'un projet atteint
-    par un clic dans la Flotte, rechargeait toute la page
-    (`location.search = ...`). Le `?project=` qui en résultait retombait sur
-    la vue Flotte par défaut (`projectFromUrl`, #351) — il fallait recliquer
-    « Projet » à la main pour revoir l'écran qu'on venait de demander. Ce
-    bouton doit désormais rester sur l'écran Projet, sans recharger le
-    navigateur (même `document`, prouvé par un marqueur posé avant le clic)."""
-    served, slug_a, slug_b = served_cockpit_multi
+    """Issue #506, puis P31 : choisir un projet dans la Flotte ouvre SA fiche.
+
+    Avant, le clic montrait la fiche du projet B tandis que la puce et le fil
+    d'Ariane restaient sur A, et il fallait un second bouton « Ouvrir ce
+    projet ». Désormais un seul niveau de sélection : le clic change la portée
+    de la coque (URL `?project=<B>`), et la Flotte montre la fiche de B."""
+    served, _slug_a, slug_b = served_cockpit_multi
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        _goto(page, "piloter")
-
-        # Défaut : Flotte, puisque `?project=` vient de l'URL (#351) — le clic
-        # sur la ligne du projet B ouvre sa fiche sans recharger (mécanisme
-        # déjà correct, `onSelect` dans `renderFleet`).
         page.wait_for_selector(".tbl tbody tr")
         page.locator(".tbl tbody tr", has_text=slug_b).first.click()
-        open_button = page.locator("button", has_text="Ouvrir ce projet")
-        open_button.wait_for(state="visible", timeout=15_000)
 
-        page.evaluate("() => { window.__e2eMarker = 'still-here'; }")
-        open_button.click()
-
-        # La fiche se redessine de façon asynchrone (`loadSheet` refait un
-        # aller-retour réseau) : attendre le bouton plutôt qu'un délai fixe,
-        # sous peine de flake en CI où ce montage prend plus de temps qu'en
-        # local.
-        update_button = page.locator("button", has_text="Mettre à jour")
-        update_button.wait_for(state="visible", timeout=15_000)
-
-        assert page.evaluate("() => window.__e2eMarker") == "still-here", (
-            "un rechargement complet du document a eu lieu — le marqueur JS ne survit pas à ça"
-        )
-        assert page.locator('#zoom-seg button[data-value="projet"]').get_attribute("aria-pressed") == "true", (
-            "le zoom doit rester sur Projet, pas retomber sur Flotte"
-        )
+        page.wait_for_url(f"**project={slug_b}**")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        page.locator("button", has_text="Mettre à jour").first.wait_for(state="visible", timeout=15_000)
+        assert page.evaluate("() => window.GrimoireWorkspace.scope.project") == slug_b
+        assert page.locator("button", has_text="Ouvrir ce projet").count() == 0
+        assert page.locator("#zoom-seg button").count() == 0
     finally:
         context.close()
 

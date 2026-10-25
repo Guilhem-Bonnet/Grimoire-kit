@@ -63,7 +63,7 @@ SHARED_READS = sorted(
     set(GET_ROUTES)
     - {
         f"{PREFIX}file", f"{PREFIX}file/diff", f"{PREFIX}file/usage", f"{PREFIX}file/history",
-        f"{PREFIX}doctor", f"{PREFIX}language",
+        f"{PREFIX}doctor", f"{PREFIX}language", f"{PREFIX}upgrade/diff",
     }
 )
 
@@ -453,7 +453,7 @@ def agents_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[int]:
     root.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
     subprocess.run(
-        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-agents-home"],
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-agents-home", "--backend", "local"],
         cwd=str(root), check=False, capture_output=True, timeout=180,
     )
     if not (root / "_grimoire" / "kit" / "agents").is_dir():
@@ -563,7 +563,7 @@ def tasks_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[int, 
         root.mkdir(parents=True)
         subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
         subprocess.run(
-            [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", name],
+            [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", name, "--backend", "local"],
             cwd=str(root), check=False, capture_output=True, timeout=180,
         )
         subprocess.run(

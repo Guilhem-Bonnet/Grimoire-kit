@@ -1,4 +1,4 @@
-"""Catalogue de workflows — découverte, métadonnées et manifestes d'équipe.
+"""Catalogue de workflows — découverte et métadonnées.
 
 Un workflow n'est pas du câblage CLI : c'est un artefact avec une nature, des
 agents, parfois une équipe, et un tier de résolution. Ce paquet porte ce
@@ -10,21 +10,17 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-__all__ = ["WorkflowEntry", "load_team", "load_teams", "load_workflows"]
+__all__ = ["WorkflowEntry", "load_workflows"]
 
 if TYPE_CHECKING:
     from grimoire.workflows.registry import WorkflowEntry as WorkflowEntry
     from grimoire.workflows.registry import load_workflows as load_workflows
-    from grimoire.workflows.teams import load_team as load_team
-    from grimoire.workflows.teams import load_teams as load_teams
 
 #: Sous-module qui porte chaque export, pour que la résolution paresseuse sache
-#: où aller sans importer les deux.
+#: où aller sans importer le module.
 _ORIGIN = {
     "WorkflowEntry": "registry",
     "load_workflows": "registry",
-    "load_team": "teams",
-    "load_teams": "teams",
 }
 
 

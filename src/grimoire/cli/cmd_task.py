@@ -194,116 +194,9 @@ def _emit_task(ctx: typer.Context, task: Any, note: str = "") -> None:
     console.print(f"[green]OK[/green] {task.id} — {task.title}" + (f" [dim]({note})[/dim]" if note else ""))
 
 
-@task_app.command("add")
-def task_add(
-    ctx: typer.Context,
-    title: Annotated[str, typer.Argument(help="Ce que la tâche accomplit.")],
-    acceptance: Annotated[list[str], typer.Option("--acceptance", "-a", help="Critère d'acceptation (répétable).")],
-    mission: Annotated[str, typer.Option("--mission", help="Mission de rattachement.")] = "",
-    owner: Annotated[str, typer.Option("--owner", help="Qui en répond.")] = "",
-    evidence: Annotated[list[str] | None, typer.Option("--expect-evidence", help="Preuve attendue (répétable).")] = None,
-    ready: Annotated[bool, typer.Option("--ready", help="La rendre réclamable tout de suite (proposed → ready, gate compris).")] = False,
-    check: Annotated[
-        list[str] | None,
-        typer.Option("--check", help="Commande dont le code de sortie 0 rend le verdict (répétable) ; sans elle, jamais V0 (#772)."),
-    ] = None,
-    files: Annotated[
-        list[str] | None,
-        typer.Option("--file", help="Fichier que la tâche touchera (répétable) ; `task waves` signale ceux que deux tâches parallèles partagent."),
-    ] = None,
-    test_depth: Annotated[
-        str,
-        typer.Option(
-            "--test-depth",
-            help="Profondeur de test exigée à la fermeture : floor, standard, strict, ou auto (celle de `ceremony suggest`).",
-        ),
-    ] = "",
-    description: Annotated[
-        str,
-        typer.Option("--description", "-d", help="Contexte, pourquoi, pistes : ce que l'agent qui réclame la tâche doit savoir au-delà du titre (#714)."),
-    ] = "",
-    description_file: Annotated[
-        Path | None,
-        typer.Option("--description-file", help="Même chose, lue depuis un fichier texte (brief long)."),
-    ] = None,
-    project_root: _PROJECT_ROOT = Path(),
-    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
-    actor: _ACTOR = "cli",
-) -> None:
-    """Ouvre une tâche dans le Mission Ledger.
+from grimoire.cli.cmd_task_add import register_add_command  # noqa: E402
 
-    Un critère d'acceptation au moins est exigé — c'est le ledger qui le
-    réclame, pas cette commande : une tâche dont on ne sait pas dire quand
-    elle est finie ne peut pas être vérifiée, donc pas fermée. Le même
-    service sert l'outil MCP ``task_add`` (issue #638).
-    """
-    from grimoire.core.exceptions import GrimoireError
-    from grimoire.missions.schemas import TaskCheck
-    from grimoire.missions.service import TaskRefusedError
-
-    if description and description_file is not None:
-        console.print("[red]✗[/red] --description et --description-file sont exclusifs")
-        raise typer.Exit(2)
-    if description_file is not None:
-        try:
-            description = description_file.read_text(encoding="utf-8")
-        except OSError as exc:
-            console.print(f"[red]✗[/red] --description-file illisible : {exc}")
-            raise typer.Exit(2) from exc
-    service = _service(project_root, ledger_root)
-    checks = tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip())
-    if test_depth == "auto":
-        test_depth = _auto_test_depth(project_root, title, tuple(acceptance), tuple(evidence or ()), bool(checks))
-    try:
-        added = service.add(
-            title, tuple(acceptance), mission_id=mission, owner=owner,
-            expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
-            checks=tuple(TaskCheck(cmd=c) for c in (check or ()) if c.strip()),
-            files=tuple(files or ()),
-            test_depth=test_depth,
-            description=description,
-        )
-    except TaskRefusedError as refused:
-        _refuse(ctx, refused)
-    except GrimoireError as exc:
-        console.print(f"[red]✗[/red] {exc}")
-        raise typer.Exit(1) from exc
-    if _fmt(ctx) == "json":
-        typer.echo(json.dumps(added.to_dict(), indent=2, ensure_ascii=False))
-        return
-    if added.mission_created:
-        console.print(f"[dim]Mission créée : {added.mission_id} (aucune n'existait).[/dim]")
-    _emit_task(ctx, added.task, added.task.status.value)
-    _print_verifiability(added.task)
-
-
-def _print_verifiability(task: Any) -> None:
-    """Affiche la classe de vérifiabilité calculée et nomme chaque critère non reconnu (#876)."""
-    from grimoire.missions.verifiability import as_dict
-
-    verifiabilite = as_dict(task)
-    console.print(f"  vérifiabilité : {verifiabilite['class']} — {escape(verifiabilite['reason'])}")
-    for entree in verifiabilite["criteria"]:
-        if entree["pattern"] is None:
-            console.print(f"    [yellow]non reconnu[/yellow] : {escape(entree['criterion'])}")
-
-
-def _auto_test_depth(
-    project_root: Path, title: str, acceptance: tuple[str, ...], evidence: tuple[str, ...], has_checks: bool,
-) -> str:
-    """La profondeur de la route que `ceremony suggest` calcule pour cette tâche (W6-01).
-
-    Les fichiers touchés ne sont pas connus à la création : la route ne descend
-    pas sous `checked`, donc jamais sous `standard`.
-    """
-    from grimoire.core.execution_needs import resolve_need
-    from grimoire.missions.ceremony import inputs_for, suggest
-
-    inputs = inputs_for(
-        title=title, acceptance=acceptance, expected_evidence=evidence, has_checks=has_checks, files=None,
-        test_runner=resolve_need("test-runner", project_root.resolve()).command, impact_files=None,
-    )
-    return suggest(inputs).route.test_depth.value
+register_add_command(task_app)  # `add` : hors de ce module (plafond de taille), enregistré à sa place d'origine
 
 
 @task_app.command("list")
@@ -430,6 +323,8 @@ def task_show(
         for warning in last_dispatch.get("uncertainty_warnings") or ():
             console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
     console.print(f"  usage   : {_usage_line(usage)}")
+    if task.finition:
+        console.print(f"  finition : {task.finition}")
     if task.owner or task.claim:
         console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
@@ -1483,9 +1378,18 @@ from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
 
 register_review_commands(task_app)
 
+from grimoire.cli.cmd_task_import import register_import_command  # noqa: E402
+
+register_import_command(task_app)
+
 from grimoire.cli.cmd_task_wave import register_wave_commands  # noqa: E402
 
 register_wave_commands(task_app)
+
+# R03 : `task import-a2a`, dans son module (plafond de taille).
+from grimoire.cli.cmd_task_a2a import register_a2a_commands  # noqa: E402
+
+register_a2a_commands(task_app)
 
 # W4-01 : `task fold-usage` et l'usage affiché par `task show`, dans leur module (plafond de taille).
 from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402

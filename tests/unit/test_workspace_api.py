@@ -212,6 +212,111 @@ def test_une_tache_reelle_porte_sa_colonne_et_sa_prochaine_porte(
     assert detail["next_moves_require"], "une tâche a toujours au moins un pas suivant déclaré"
 
 
+def test_une_carte_porte_la_classe_de_route_et_les_conditions_de_son_prochain_passage(
+    project_with_task: tuple[Path, str],
+) -> None:
+    """P64 : le verdict affiché sur la carte est celui du gate, pas une déduction de la vue.
+
+    Chaque condition est une preuve exigée par le fichier de gates ; elle est
+    verte seulement si le gate ne la refuse pas. Sans ``next_gate`` la vue ne
+    sait que nommer les preuves attendues, jamais dire lesquelles manquent.
+    """
+    root, task_id = project_with_task
+
+    card = next(t for t in wa.tasks_view(root)["tasks"] if t["id"] == task_id)
+    detail = wa.task_view(root, task_id)
+
+    assert card["verifiability_class"] in {"V0", "V1", "V2"}
+    gate = card["next_gate"]
+    assert gate["to"] in {"ready", "in_progress", "review", "accepted", "released"}
+    assert gate == detail["next_gate"]
+    required = detail["next_moves_require"].get(gate["to"], [])
+    assert [c["gate"] for c in gate["conditions"]][: len(required)] == required
+    for condition in gate["conditions"]:
+        assert condition["ok"] == (not condition["reason"]), "une condition rouge dit pourquoi, une verte se tait"
+
+
+def test_sans_fichier_de_gates_lisible_aucune_carte_ne_porte_de_prochaine_porte(
+    project_with_task: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un fichier de gates illisible ne doit pas faire inventer des conditions à la vue."""
+    import grimoire.missions.gates as gates
+    from grimoire.core.exceptions import GrimoireError
+
+    def _illisible(_root: Path) -> dict[tuple[str, str], dict[str, object]]:
+        raise GrimoireError("fichier de gates illisible")
+
+    monkeypatch.setattr(gates, "declared_transitions", _illisible)
+    root, _task_id = project_with_task
+
+    assert all("next_gate" not in card for card in wa.tasks_view(root)["tasks"])
+
+
+def test_un_verdict_qui_ne_se_lit_pas_laisse_la_carte_sans_prochaine_porte(
+    project_with_task: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une erreur de lecture du verdict n'est jamais affichée comme une condition verte."""
+    import grimoire.missions.gates as gates
+
+    def _verdict_illisible(*_args: object, **_kwargs: object) -> object:
+        raise OSError("preuve illisible")
+
+    monkeypatch.setattr(gates, "check_transition", _verdict_illisible)
+    root, task_id = project_with_task
+
+    card = next(t for t in wa.tasks_view(root)["tasks"] if t["id"] == task_id)
+    assert "next_gate" not in card
+
+
+def test_une_attente_nommee_vise_en_cours_et_chaque_refus_dit_pourquoi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une tâche garée repart en cours : ses conditions sont celles de ce passage-là."""
+    from types import SimpleNamespace
+
+    import grimoire.missions.gates as gates
+    from grimoire.missions.schemas import TaskState
+
+    class _ToutesTransitions(dict[tuple[str, str], dict[str, object]]):
+        def get(self, _key: object, _default: object = None) -> dict[str, object]:
+            return {"required_evidence": ["context_bundle"]}
+
+    refus = SimpleNamespace(evidence="review_gate", reason="aucun verdict de revue", remedy="faire revoir le pack")
+    verdict = SimpleNamespace(transition_id="waiting_to_running", strictness="strict", refusals=[refus])
+    monkeypatch.setattr(gates, "declared_transitions", lambda _root: _ToutesTransitions())
+    monkeypatch.setattr(gates, "check_transition", lambda *_args, **_kwargs: verdict)
+    card: dict[str, object] = {}
+
+    wa.annotate_gates(tmp_path, [SimpleNamespace(status=TaskState.WAITING)], [card])
+
+    gate = card["next_gate"]
+    assert isinstance(gate, dict)
+    assert gate["to"] == "in_progress"
+    assert gate["conditions"] == [
+        {"gate": "context_bundle", "ok": True, "reason": "", "remedy": ""},
+        {"gate": "review_gate", "ok": False, "reason": "aucun verdict de revue", "remedy": "faire revoir le pack"},
+    ]
+
+
+def test_une_carte_en_colonne_terminale_n_a_pas_de_prochaine_porte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Au bout du board, il n'y a plus de passage à montrer."""
+    from types import SimpleNamespace
+
+    import grimoire.missions.board as board
+    import grimoire.missions.gates as gates
+    from grimoire.missions.schemas import TaskState
+
+    monkeypatch.setattr(gates, "declared_transitions", lambda _root: {})
+    monkeypatch.setattr(board, "board_status_of", lambda _state: "released")
+    card: dict[str, object] = {}
+
+    wa.annotate_gates(tmp_path, [SimpleNamespace(status=TaskState.CLOSED)], [card])
+
+    assert "next_gate" not in card
+
+
 def test_une_tache_porte_son_corps_reel_description_guardrails_dependances(
     tmp_path: Path,
 ) -> None:

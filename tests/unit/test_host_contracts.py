@@ -20,6 +20,7 @@ même table dans le code. Ces tests verrouillent trois choses :
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -228,6 +229,11 @@ class TestFixturesAreSafeToCommit:
 
 # ── #876, verrou 5 : le contrat est resondé à chaque nouvelle version ─────────
 
+# Le faux binaire est un script à shebang sans extension, le PATH est joint par
+# ``:`` et ``HOME`` est détourné (Windows lit ``USERPROFILE``) : harnais POSIX,
+# constaté rouge sur windows-latest (run 40042732352, 7 tests). À porter.
+_POSIX_HARNESS = pytest.mark.skipif(os.name == "nt", reason="faux binaire à shebang, PATH ':' et HOME : harnais POSIX")
+
 _FAKE_CLAUDE = '''#!{python}
 """Faux binaire claude : --version, et un -p qui obéit aux hooks PreToolUse du projet courant."""
 import json, subprocess, sys
@@ -265,6 +271,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "home"
 
 
+@_POSIX_HARNESS
 class TestProbeOnNewVersion:
     def test_unknown_version_triggers_probe_and_records_exact_version(self, tmp_path: Path, home: Path) -> None:
         from grimoire.hosts.contract_probe import ensure_probed, proof_for
@@ -352,6 +359,7 @@ class TestProbeOnNewVersion:
         assert len(launched) == 1
 
 
+@_POSIX_HARNESS
 class TestProbeFailureIsNoBrake:
     @pytest.mark.parametrize("mode", ["ignore-deny"])
     def test_tool_executed_despite_deny_leaves_pretooluse_deny_false(self, tmp_path: Path, home: Path, mode: str) -> None:
@@ -394,6 +402,7 @@ class TestProbeFailureIsNoBrake:
         assert is_fenced(HostId.CLAUDE_CODE_CLI, "2.1.309") is False
 
 
+@_POSIX_HARNESS
 class TestHostStatusShowsProof:
     def _status(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str) -> dict:
         from typer.testing import CliRunner

@@ -771,6 +771,7 @@ def task_add(
     actor: str = "mcp-agent",
     ready: bool = False,
     description: str = "",
+    finition: str = "",
     project_path: str = ".",
     ledger_root: str = "_grimoire-runtime-output/ledger",
 ) -> str:
@@ -790,6 +791,7 @@ def task_add(
         actor: Who acts (default: "mcp-agent").
         ready: Also move it `proposed → ready` so it can be claimed right away (through the gate).
         description: Context, rationale and leads for whoever claims the task — plain text, at most 4000 characters (#714). Shown by `task_show`, `task_context` and the cockpit card.
+        finition: `maquette` or `peaufine`. Empty string inherits the project phase declared in project-context.yaml (exploration → maquette, construction/exploitation → peaufine), or stays undeclared.
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
     """
@@ -804,6 +806,7 @@ def task_add(
             origin="mcp",
             ready=ready,
             description=description,
+            finition=finition,
         )
         return json.dumps(added.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
@@ -1113,6 +1116,7 @@ def task_context(
         task = service.ledger.get_task(resolved) if service.has_ledger else None
         if task is not None:
             payload["task"] = _task_json(task)
+            payload["mission_scope"] = service.mission_scope(task.mission_id)  # R25 : le périmètre posé à `mission open`
             artifact = service.context(resolved)
             payload["context_bundle_path"] = str(artifact.path)
             payload["context_bundle"] = artifact.data

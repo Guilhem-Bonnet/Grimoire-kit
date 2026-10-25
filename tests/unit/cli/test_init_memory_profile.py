@@ -224,3 +224,72 @@ class TestCapabilityProbing:
     def test_a_closed_port_is_not_a_capability(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """La sonde Redis ne doit pas déclarer une couche chaude absente."""
         assert cmd_init._is_redis_reachable(port=1) is False
+
+
+class TestLoopbackProbeBudget:
+    """#857 : une sonde vers un service absent coûte un ``connect`` TCP borné, jamais un délai HTTP.
+
+    Sous ``windows-latest`` un port fermé de la boucle locale ne refuse pas le
+    SYN : chaque ``urlopen`` payait ses 2 s, ~40 s par ``grimoire init -y``.
+    """
+
+    def test_a_listening_port_answers(self) -> None:
+        import socket
+
+        with socket.socket() as srv:
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+            port = srv.getsockname()[1]
+            assert cmd_init._port_answers(f"http://127.0.0.1:{port}") is True
+
+    def test_a_closed_port_does_not_answer_within_the_budget(self) -> None:
+        import socket
+        import time
+
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        t0 = time.perf_counter()
+        assert cmd_init._port_answers(f"http://127.0.0.1:{port}") is False
+        assert time.perf_counter() - t0 < 2 * cmd_init._LOOPBACK_CONNECT_TIMEOUT + 1.0
+
+    @pytest.mark.usefixtures("real_memory_service_probes")
+    @pytest.mark.parametrize("probe", ["_is_weaviate_reachable", "_is_qdrant_reachable", "_is_o" + "llama_reachable"])
+    def test_an_absent_service_never_reaches_the_http_probe(self, monkeypatch: pytest.MonkeyPatch, probe: str) -> None:
+        import socket
+
+        def _never(*a: Any, **k: Any) -> None:
+            raise AssertionError("urlopen appelé alors que le port ne répond pas")
+
+        monkeypatch.setattr(cmd_init.urllib.request, "urlopen", _never)
+        with socket.socket() as reserved:
+            reserved.bind(("127.0.0.1", 0))
+            port = reserved.getsockname()[1]
+        assert getattr(cmd_init, probe)(f"http://127.0.0.1:{port}") is False
+
+    @pytest.mark.usefixtures("real_memory_service_probes")
+    def test_a_listening_service_still_gets_the_http_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import socket
+
+        calls: list[str] = []
+
+        class _Ok:
+            status = 200
+
+            def __enter__(self) -> _Ok:
+                return self
+
+            def __exit__(self, *a: Any) -> None:
+                return None
+
+        def _fake_urlopen(req: Any, timeout: float = 0) -> _Ok:
+            calls.append(req.full_url)
+            return _Ok()
+
+        monkeypatch.setattr(cmd_init.urllib.request, "urlopen", _fake_urlopen)
+        with socket.socket() as srv:
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+            port = srv.getsockname()[1]
+            assert cmd_init._is_qdrant_reachable(f"http://127.0.0.1:{port}") is True
+        assert calls == [f"http://127.0.0.1:{port}/readyz"]

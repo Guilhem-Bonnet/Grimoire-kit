@@ -36,10 +36,12 @@ from grimoire.evidence.schemas import (
     VerificationVerdict,
 )
 from grimoire.evidence.service import EvidenceService
-from grimoire.missions.review_receipt import READY, ReviewReceipt, write_receipt
-from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
+from grimoire.missions.mandate import MandateStore, require_authority
+from grimoire.missions.review_receipt import READY, ReviewReceipt, read_receipt, write_receipt
+from grimoire.missions.schemas import TaskState
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from grimoire.missions.schemas import MissionTask
@@ -64,18 +66,25 @@ class HumanAcceptance:
 
 
 def accept_task(
-    task: MissionTask, project_root: Path, evidence_root: Path, reason: str, actor: str, *, origin: str
+    task: MissionTask, project_root: Path, evidence_root: Path, reason: str, actor: str, *, origin: str,
+    provenance: Mapping[str, Any] | None = None,
 ) -> HumanAcceptance:
     """Range le pack d'attestation, le verdict ``passed`` humain et le reçu ``READY`` de *task* ; lève si refusé.
 
     *origin* vient du canal d'appel (cockpit, CLI interactive), jamais d'un champ que l'appelant
     remplit : un agent n'accepte pas son propre travail.
+
+    Sous mandat (#876, verrou 6) l'origine ``orchestrator`` accepte aussi, si un mandat valide couvre le
+    geste ``accept`` et le type de la tâche, que la politique d'escalade du projet délègue ``accept``, et
+    que le reçu de revue déjà rangé vaut (verrou 7 : relecteur distinct de l'auteur, session attestée au
+    journal d'autorité). Le verdict et le reçu sont alors signés ``orchestrator:<mandat>``.
     """
-    if origin != ORIGIN_HUMAN:
-        raise GrimoireMissionError(
-            f"Acceptation refusée pour {task.id} : origine {origin!r}. Seul le canal humain (cockpit, CLI "
-            "interactive) accepte une preuve déclarative — un agent ne valide pas son propre travail"
-        )
+    authority = require_authority(
+        project_root, "accept", task, origin, what=f"Acceptation refusée pour {task.id}", provenance=provenance,
+        record=False,
+    )
+    if authority is not None:
+        _require_attested_review(task, project_root)
     if task.status is not TaskState.NEEDS_VERIFICATION:
         raise GrimoireMissionError(
             f"Acceptation refusée pour {task.id} : état {task.status.value}, il faut une tâche en revue "
@@ -93,12 +102,13 @@ def accept_task(
         )
     latest = packs[-1]
     criteria = " ; ".join(task.acceptance)
+    signer = authority.actor_label if authority else f"{HUMAN_VERIFIER_PREFIX}{actor}"
     attestation = EvidenceItem(
-        f"human-{len(packs) + 1:02d}",
+        f"{'orchestrator' if authority else 'human'}-{len(packs) + 1:02d}",
         EvidenceKind.DOC,
-        f"{HUMAN_VERIFIER_PREFIX}{actor}",
+        signer,
         f"sha256-{sha256(why.encode('utf-8')).hexdigest()}",
-        f"acceptation humaine par {actor} sur le pack {latest.id} : {why} — critères attestés : {criteria}",
+        f"acceptation {'sous mandat' if authority else 'humaine'} par {actor} sur le pack {latest.id} : {why} — critères attestés : {criteria}",
     )
     pack = service.create_pack(task.id, latest.profile, [*latest.items, attestation], acceptance=task.acceptance)
     verdict = VerificationVerdict(
@@ -107,11 +117,34 @@ def accept_task(
         evidence_pack_id=pack.id,
         verdict=VerdictResult.PASSED,
         profile=pack.profile,
-        checks=(VerificationCheck("human-acceptance", VerdictResult.PASSED, why),),
+        checks=(VerificationCheck("mandate-acceptance" if authority else "human-acceptance", VerdictResult.PASSED, why),),
         decision=VerdictDecision(close_task=True, reopen_task=False, create_incident=False),
         created_at=datetime.now(UTC).isoformat(),
-        created_by=f"{HUMAN_VERIFIER_PREFIX}{actor}",
+        created_by=signer,
     )
     service.record_verdict(verdict)
-    receipt = write_receipt(project_root, task.id, READY, reviewer_id=f"{HUMAN_VERIFIER_PREFIX}{actor}")
+    receipt = write_receipt(
+        project_root, task.id, READY, reviewer_id=signer,
+        reviewer_session=_reviewer_session(task, project_root) if authority else "",
+    )
+    if authority is not None:
+        MandateStore(project_root).record_gesture(authority)  # inscrit une fois le geste fait
     return HumanAcceptance(pack, verdict, receipt)
+
+
+def _require_attested_review(task: MissionTask, project_root: Path) -> None:
+    """Verrou 7 : sous mandat, l'acceptation s'appuie sur un reçu de revue d'un autre, de provenance attestée."""
+    try:
+        receipt = read_receipt(project_root, task.id)
+    except ValueError as exc:
+        raise GrimoireMissionError(f"Acceptation refusée pour {task.id} : reçu de revue illisible ({exc})") from exc
+    if receipt is None or receipt.verdict != READY:
+        raise GrimoireMissionError(
+            f"Acceptation refusée pour {task.id} : sous mandat, un reçu de revue READY d'un relecteur distinct est exigé"
+        )
+    MandateStore(project_root).check_receipt_provenance(task, receipt)
+
+
+def _reviewer_session(task: MissionTask, project_root: Path) -> str:
+    receipt = read_receipt(project_root, task.id)
+    return receipt.reviewer_session if receipt else ""

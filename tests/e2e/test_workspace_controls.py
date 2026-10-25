@@ -33,7 +33,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _computed_signature(page: Page, handle: object) -> str:
@@ -99,26 +99,25 @@ def test_observer_view_seg_bascule_correctement(workspace: Page) -> None:
     _goto(workspace, "observer")
     workspace.wait_for_selector("#view-seg button")
     labels = workspace.locator("#view-seg button").all_inner_texts()
-    assert [lbl.strip() for lbl in labels] == ["Runtime", "Activité", "RTK", "Bench"]
+    assert [lbl.strip() for lbl in labels] == ["Runtime", "Activité"]
     _assert_segment_toggles(workspace, "#view-seg button")
 
 
-def test_observer_activite_rtk_bench_ne_restent_jamais_muets(workspace: Page) -> None:
-    """Avant cette issue, ces trois onglets n'avaient tout simplement aucun
-    contenu de prévu (dead code) : cliquer dessus ne changeait rien à
-    `#canvas`, sans le dire. Chacun doit désormais rendre quelque chose de
-    lisible — une donnée réelle, ou l'aveu explicite qu'il n'y en a pas."""
+def test_observer_activite_ne_reste_jamais_muet(workspace: Page) -> None:
+    """Avant cette issue, les onglets secondaires n'avaient aucun contenu de
+    prévu (dead code) : cliquer dessus ne changeait rien à `#canvas`, sans le
+    dire. L'onglet restant doit rendre quelque chose de lisible — une donnée
+    réelle, ou l'aveu explicite qu'il n'y en a pas. (RTK et Bench, sans route
+    serveur, ont été retirés : tri R20.)"""
     _goto(workspace, "observer")
     workspace.wait_for_selector("#view-seg button")
-    for view_id in ("activite", "rtk", "bench"):
-        workspace.locator(f'#view-seg button[data-value="{view_id}"]').click()
-        workspace.wait_for_function(
-            "(v) => document.querySelector(`#view-seg button[data-value=\"${v}\"]`)"
-            ".getAttribute('aria-pressed') === 'true'",
-            arg=view_id,
-        )
-        body = workspace.locator("#canvas").inner_text()
-        assert body.strip(), f"onglet {view_id} : #canvas ne doit jamais rester vide"
+    workspace.locator('#view-seg button[data-value="activite"]').click()
+    workspace.wait_for_function(
+        "() => document.querySelector('#view-seg button[data-value=\"activite\"]')"
+        ".getAttribute('aria-pressed') === 'true'"
+    )
+    body = workspace.locator("#canvas").inner_text()
+    assert body.strip(), "onglet activite : #canvas ne doit jamais rester vide"
 
 
 # `test_memoire_view_seg_bascule_correctement` vit dans
@@ -145,12 +144,6 @@ def test_concevoir_view_seg_bascule_correctement(workspace: Page, project_with_b
     _assert_segment_toggles(workspace, "#view-seg button")
 
 
-def test_piloter_zoom_seg_bascule_correctement(cockpit_workspace: Page) -> None:
-    _goto(cockpit_workspace, "piloter")
-    cockpit_workspace.wait_for_selector("#zoom-seg button")
-    _assert_segment_toggles(cockpit_workspace, "#zoom-seg button")
-
-
 # ── #project-chip : jusqu'ici décoratif, aucun clic ne l'ouvrait ────────────
 
 
@@ -169,11 +162,15 @@ def test_le_chip_projet_ouvre_la_palette_sur_la_section_projets(cockpit_workspac
     # texte source — d'où la comparaison insensible à la casse.
     assert first_item.inner_text().strip().lower() == "projets"
 
-    # Au moins un projet du registre (`served_cockpit` en enrôle un réel) doit
-    # apparaître juste après l'en-tête « Projets », avant tout autre en-tête.
+    # « Tous les projets » d'abord, puis le registre (`served_cockpit` en
+    # enrôle un réel) — le projet en portée porte une coche, et sa ligne dit
+    # son dossier en texte secondaire (revue du 2026-10-25).
     second_item = page.locator("#palette-list li").nth(1)
     assert second_item.get_attribute("role") == "option"
-    assert second_item.locator(".lbl").inner_text().strip() == "Projet"
+    assert second_item.locator("span").first.inner_text().strip() == "Tous les projets"
+    third_item = page.locator("#palette-list li").nth(2)
+    assert third_item.locator(".lbl").get_attribute("title")
+    assert page.locator("#palette-list li[aria-current='true'] svg[aria-label='Portée actuelle']").count() == 1
 
     page.locator("body").press("Escape")
 

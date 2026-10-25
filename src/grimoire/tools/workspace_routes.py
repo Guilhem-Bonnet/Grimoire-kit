@@ -67,6 +67,7 @@ tests, donc une route ajoutée sans test de cible se voit.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 import time
@@ -78,6 +79,8 @@ from grimoire.missions.liveness import probe_claude_agents
 from grimoire.tools import (
     source_assist,
     workspace_api,
+    workspace_attention,
+    workspace_config,
     workspace_exec,
     workspace_language,
     workspace_memory,
@@ -194,12 +197,36 @@ def _file_diff(project_root: Path, query: _Query) -> Any:
     return workspace_api.file_diff(project_root, _one(query, "path"))
 
 
+def _upgrade_changes(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/upgrade/changes`` — ce qu'une mise à jour écrirait, par catégorie (P44). Lecture pure."""
+    from grimoire.tools import upgrade_changes
+
+    return upgrade_changes.changes_view(project_root)
+
+
+def _upgrade_diff(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/upgrade/diff?path=`` — le diff d'un fichier que la mise à jour toucherait (P44). Lecture pure."""
+    from grimoire.tools import upgrade_changes
+
+    return upgrade_changes.diff_view(project_root, _one(query, "path"))
+
+
 def _blueprints(project_root: Path, _query: _Query) -> Any:
     return workspace_api.blueprints_view(project_root)
 
 
 def _agents(project_root: Path, _query: _Query) -> Any:
     return workspace_api.agents_view(project_root)
+
+
+def _hooks(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/hooks`` — le registre de sûreté des hooks (P66). Lecture pure."""
+    return workspace_config.hooks_view(project_root)
+
+
+def _providers(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/providers`` — les fournisseurs de modèles, état et palier (P66). Lecture pure."""
+    return workspace_config.providers_view(project_root)
 
 
 def _proposals(project_root: Path, _query: _Query) -> Any:
@@ -290,6 +317,23 @@ def _pulse(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _attention(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/attention`` — ce qui attend une décision humaine (P22).
+
+    Le projet servi seul ; ``scope=portfolio`` tout le registre, ``slug=`` un
+    projet du registre. ``probe=1`` relance la sonde mémoire (« Réessayer »)
+    au lieu de lire son cache. Sections par urgence :
+    :func:`workspace_attention.attention_order`.
+    """
+    return workspace_attention.attention_view(
+        project_root,
+        portfolio=_one(query, "scope") == "portfolio",
+        slug=_one(query, "slug") or None,
+        probe=_one(query, "probe") not in (None, "", "0", "false"),
+        host_probe=_host_probe,
+    )
+
+
 def _evidence(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
@@ -347,7 +391,23 @@ def _language(project_root: Path, query: _Query) -> Any:
 #: Chemins exacts. Les routes paramétrées par un identifiant de tâche sont
 #: traitées à part dans :func:`workspace_get`, parce qu'un identifiant de ledger
 #: n'est pas un segment fixe.
+def _mandate_state(project_root: Path, _query: _Query) -> Any:
+    """État du mandat de l'orchestrateur pour ce projet (#876, lot 1) : lecture seule, jamais d'octroi ici."""
+    from grimoire.missions.mandate import GESTURES, MandateStore, control_key_path, ensure_control_key, load_escalation
+
+    with contextlib.suppress(OSError):
+        ensure_control_key()  # la clé existe dès la première lecture ; sa valeur ne sort jamais d'ici
+    policy = load_escalation(project_root.resolve())
+    return {
+        **MandateStore(project_root).state().to_dict(),
+        "gestures": list(GESTURES),
+        "escalation": {"delegated": sorted(policy.delegated), "error": policy.error},
+        "control_key_path": str(control_key_path()),
+    }
+
+
 GET_ROUTES: dict[str, _GetHandler] = {
+f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}tasks": _tasks,
     f"{PREFIX}waves": _waves,
@@ -356,17 +416,22 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}file/diff": _file_diff,
     f"{PREFIX}file/usage": _file_usage,
     f"{PREFIX}file/history": _file_history,
+    f"{PREFIX}upgrade/changes": _upgrade_changes,
+    f"{PREFIX}upgrade/diff": _upgrade_diff,
     f"{PREFIX}commands": _commands,
     f"{PREFIX}doctor": _doctor,
     f"{PREFIX}language": _language,
     f"{PREFIX}assist": _assist_status,
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
+    f"{PREFIX}hooks": _hooks,
+    f"{PREFIX}providers": _providers,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
     f"{PREFIX}portfolio/tasks": _portfolio_tasks,
     f"{PREFIX}pulse": _pulse,
+    f"{PREFIX}attention": _attention,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
@@ -567,8 +632,49 @@ def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
     return migrate_standard_tasks(project_root).to_dict()
 
 
+def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
+    """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
+
+    Le cockpit local, derrière le jeton de session, est le canal de l'humain pour ses commentaires et ses
+    réponses. Le jeton ne suffit pas pour un mandat : il est injecté dans toute page HTML servie sur la
+    loopback, qu'un processus local peut récupérer. L'octroi exige en plus la clé de contrôle
+    (``~/.grimoire/control/cockpit-key``), que l'humain lit depuis son terminal et que le frein refuse aux
+    agents (règle ``cockpit-key`` des secrets). Sans clé valide : 403, rien n'est écrit.
+    """
+    from grimoire.missions.mandate import (
+        JournalError,
+        MandateRefusedError,
+        MandateRequest,
+        MandateStore,
+        verify_control_key,
+    )
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
+    if not verify_control_key(body.get("control_key")):
+        raise PermissionError("clé de contrôle absente ou invalide : accorder un mandat est un geste d'humain")
+    try:
+        request = MandateRequest.build(
+            body.get("gestures") or (), body.get("task_types") or (), body.get("max_sessions_per_day") or 0,
+            str(body.get("until") or ""),
+        )
+        mandate = MandateStore(project_root).grant(request, origin=ORIGIN_HUMAN, via="cockpit")
+    except (MandateRefusedError, JournalError) as exc:
+        raise ValueError(str(exc)) from exc  # une demande invalide ou un journal rompu : un 400, pas un 404
+    return {"granted": True, "mandate": mandate.to_dict()}
+
+
+def _mandate_revoke(project_root: Path, body: dict[str, Any]) -> Any:
+    """Révoque le mandat actif — toujours permis derrière le jeton : retirer une autorité n'en demande aucune."""
+    from grimoire.missions.mandate import REVOKE_MANUAL, MandateStore
+
+    revoked = MandateStore(project_root).revoke(REVOKE_MANUAL, str(body.get("reason") or ""))
+    return {"revoked": revoked.to_dict() if revoked else None}
+
+
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
+    f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
+    f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,
     f"{PREFIX}file/write": _write_file,
     f"{PREFIX}command": _command,

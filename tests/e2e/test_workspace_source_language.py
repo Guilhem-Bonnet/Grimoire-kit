@@ -22,12 +22,14 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
+from .conftest import open_atelier
+
 
 @pytest.fixture
 def source(workspace: Page) -> Page:
     """La coque, déjà sur l'espace Source."""
     workspace.evaluate("() => window.GrimoireWorkspace.goto('source')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
     workspace.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
     return workspace
 
@@ -112,6 +114,7 @@ def test_un_diagnostic_apparait_sur_un_chemin_mort(source: Page) -> None:
     assert "introuvable" in source.locator(".sr-diag-tip").inner_text()
 
     # Et l'onglet Problèmes du dock reprend le même diagnostic.
+    open_atelier(source)
     source.locator("[data-dock-tab='problemes']").click()
     source.wait_for_function(
         "() => document.querySelector('#dock-body').textContent.includes('dead-path')"

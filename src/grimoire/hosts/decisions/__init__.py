@@ -9,8 +9,11 @@ without simulating any host at all.
 
 Every decision is defensive by construction:
 
-- it never raises into the host — a crashed hook must not brick a session, so
-  failures degrade to :data:`Outcome.ALLOW` with the error carried as context;
+- it never raises into the host — a crashed hook must not brick a session, but
+  it never turns a crash into an approval either (see ``_failed_decision``): on
+  ``PreToolUse`` a decision that crashed returns :data:`Outcome.ASK` (the call
+  goes back to the user, with the cause in the reason); on every other event it
+  returns :data:`Outcome.ALLOW` with the error carried as context;
 - it fails **open** when the project is not enrolled in the standard: gates
   that do not exist cannot be red, and blocking on their absence would make
   the hook a trap rather than a guardrail;
@@ -58,6 +61,7 @@ __all__ = [
     "command_surface",
     "decide_activation",
     "decide_context_capsule",
+    "decide_event_trace",
     "decide_evidence_gate",
     "decide_evidence_trace",
     "decide_subagent_gate",
@@ -79,6 +83,7 @@ _DECISION_FUNCS: dict[str, tuple[str, str]] = {
     "grimoire.evidence-gate": ("evidence_gate", "decide_evidence_gate"),
     "grimoire.subagent-gate": ("subagent_gate", "decide_subagent_gate"),
     "grimoire.context-capsule": ("context_capsule", "decide_context_capsule"),
+    "grimoire.event-trace": ("event_trace", "decide_event_trace"),
 }
 
 #: Which decision answers which event when the caller only names an event.
@@ -90,6 +95,10 @@ DEFAULT_DECISION_BY_EVENT: dict[HookEvent, str] = {
     HookEvent.SUBAGENT_STOP: "grimoire.subagent-gate",
     HookEvent.PRE_COMPACT: "grimoire.context-capsule",
     HookEvent.STOP: "grimoire.evidence-gate",
+    # R31 : décision minimale (une trace) pour les événements déclarés non émis.
+    HookEvent.TASK_CREATED: "grimoire.event-trace",
+    HookEvent.TASK_COMPLETED: "grimoire.event-trace",
+    HookEvent.INSTRUCTIONS_LOADED: "grimoire.event-trace",
 }
 
 
@@ -195,6 +204,7 @@ _NAME_OWNER: dict[str, str] = {
     "decide_task_context": "task_context",
     "decide_tool_policy": "tool_policy",
     "decide_evidence_trace": "evidence_trace",
+    "decide_event_trace": "event_trace",
     "_gate_summary": "gate_summary",
     "decide_evidence_gate": "evidence_gate",
     "_unevaluable_gate": "evidence_gate",

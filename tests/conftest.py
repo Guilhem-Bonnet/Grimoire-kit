@@ -163,6 +163,43 @@ def _default_no_docker_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _default_no_memory_service_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Aucun service mémoire sur la boucle locale, par défaut, pour tout ``init`` en process.
+
+    ``grimoire init -y`` sans ``--backend`` appelle ``detect_memory_backend()``
+    (Weaviate :8080, Qdrant :6333, Ollama :11434).
+    Sous Linux un port fermé est refusé aussitôt ; sous ``windows-latest`` le
+    SYN reste sans réponse et chaque sonde paie son délai complet — ~40 s par
+    ``init`` avant le pré-test TCP de ``cmd_init._port_answers`` (#857), encore
+    quelques secondes après. Même forme que ``_default_no_docker_daemon`` et
+    que l'autouse local de ``tests/test_cmd_init.py`` : un défaut déterministe
+    « rien ne tourne ici » pour les tests qui ne s'intéressent pas à la
+    détection ; ceux qui l'exercent (``TestDetectMemoryBackend``) repatchent
+    ces mêmes fonctions dans leur propre ``with`` et gagnent. In-process
+    seulement : les fixtures qui lancent un vrai sous-processus ``grimoire``
+    passent par le vrai code, borné par le pré-test TCP.
+    """
+    from grimoire.cli import cmd_init
+
+    for probe in _MEMORY_SERVICE_PROBES:
+        _REAL_MEMORY_SERVICE_PROBES.setdefault(probe, getattr(cmd_init, probe))
+        monkeypatch.setattr(cmd_init, probe, lambda *a, **k: False)
+
+
+_MEMORY_SERVICE_PROBES = ("_is_weaviate_reachable", "_is_qdrant_reachable", "_is_ollama_reachable")
+_REAL_MEMORY_SERVICE_PROBES: dict[str, object] = {}
+
+
+@pytest.fixture
+def real_memory_service_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rend les vraies sondes à un test qui les exerce (``_default_no_memory_service_on_localhost`` les éteint)."""
+    from grimoire.cli import cmd_init
+
+    for probe, real in _REAL_MEMORY_SERVICE_PROBES.items():
+        monkeypatch.setattr(cmd_init, probe, real)
+
+
+@pytest.fixture(autouse=True)
 def _default_local_embedding_available(monkeypatch: pytest.MonkeyPatch) -> None:
     """The express Memory step's other machine-dependent input: whether a
     local embedding engine (``fastembed``/``sentence-transformers``) is

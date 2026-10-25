@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import time
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, Route
 
 SHEET_MAX_INTERACTIVE_MS = 400
 FLEET_MAX_INTERACTIVE_MS = 900
@@ -55,19 +55,18 @@ def test_fiche_piloter_un_seul_appel_sheet_et_interactive_sous_400ms(
     """Ouvrir la fiche d'un projet depuis la Flotte : UN SEUL appel réseau
     (``GET /api/workspace/sheet``) — pas les huit routes d'avant #548 —
     fiche interactive en moins de 400 ms (issue #548)."""
-    served, slug_a, slug_b, _slug_c = served_cockpit_triple
+    served, _slug_a, slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        # Depuis P31, choisir B dans la Flotte change la portée (rechargement) ;
+        # ce qui se mesure ici est le montage de la fiche dans la portée B.
+        page.goto(f"{served}/workspace/index.html?project={slug_b}#a-traiter", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
-        page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-        page.wait_for_selector(".tbl tbody tr")
 
         seen = _instrument_api(page)
         start = time.monotonic()
-        page.locator(".tbl tbody tr", has_text=slug_b).first.click()
+        page.evaluate("() => window.GrimoireWorkspace.goto('flotte')")
         page.wait_for_selector("button:has-text('Mettre à jour')")
         elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -106,16 +105,14 @@ def test_flotte_un_seul_appel_fleet_et_interactive_sous_900ms(
     """Le niveau Flotte d'un cockpit à 3 projets ne déclenche plus qu'UN
     appel `/api/fleet` (remplace le balayage 2×N), interactif en < 900 ms.
 
-    Piloter/Flotte est l'espace par défaut de la coque
-    (``location.hash || '#piloter'``, ``shell.js::main``) : avec
-    ``?project=<slug>`` mais sans lancement direct, elle s'affiche dès
-    l'amorçage, AVANT que `body[data-ready='1']` ne soit posé — écouter les
+    La Flotte en portée « Tous les projets » (``?scope=all#flotte``, P31)
+    s'affiche dès l'amorçage, AVANT que `body[data-ready='1']` ne soit posé — écouter les
     requêtes et démarrer le chronomètre APRÈS ce marqueur serait donc trop
     tard pour observer l'appel `/api/fleet` initial. On écoute et on
     chronomètre dès `page.goto`, pas de navigation explicite séparée à
     déclencher ensuite.
     """
-    served, slug_a, _slug_b, _slug_c = served_cockpit_triple
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
@@ -123,7 +120,7 @@ def test_flotte_un_seul_appel_fleet_et_interactive_sous_900ms(
         page.on("request", lambda req: fleet_calls.append(req.url) if "/api/fleet" in req.url else None)
 
         start = time.monotonic()
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
         page.wait_for_selector(".tbl tbody tr")
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -135,6 +132,74 @@ def test_flotte_un_seul_appel_fleet_et_interactive_sous_900ms(
         assert elapsed_ms < FLEET_MAX_INTERACTIVE_MS, (
             f"Flotte interactive en {elapsed_ms:.0f} ms, attendu < {FLEET_MAX_INTERACTIVE_MS} ms"
         )
+    finally:
+        context.close()
+
+
+def test_la_flotte_ne_retient_jamais_sa_table_pour_la_lecture_d_attention(
+    browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
+) -> None:
+    """La lecture d'attention (P22) parcourt tout le registre : elle ne doit jamais retenir la table.
+
+    Les lectures d'attention sont tenues en suspens : la table se peint quand même,
+    la sous-ligne dit que l'attention est en cours de lecture, puis la Flotte se
+    repeint avec sa réponse. Avant ce correctif, `drawOnce` attendait flotte ET
+    attention ensemble, et la table restait vide tant que l'attention n'avait pas répondu.
+    """
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    held: list[Route] = []
+    released = {"now": False}
+
+    def _hold(route: Route) -> None:
+        if released["now"]:
+            route.continue_()
+        else:
+            held.append(route)
+
+    page.route("**/api/workspace/attention*", _hold)
+    try:
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
+        page.wait_for_selector(".tbl tbody tr", timeout=10_000)
+
+        assert page.locator(".tbl tbody tr").count() == 3
+        assert held, "la lecture d'attention est partie en même temps que la flotte"
+        assert "attention en cours de lecture" in page.locator(".pl-fleet").inner_text()
+
+        released["now"] = True
+        for route in held:
+            route.continue_()
+        page.wait_for_function(
+            "() => !document.querySelector('.pl-fleet')?.innerText.includes('attention en cours de lecture')",
+            timeout=10_000,
+        )
+        assert page.locator(".tbl tbody tr").count() == 3
+    finally:
+        context.close()
+
+
+def test_aucune_lecture_d_attention_ne_dispute_le_serveur_a_la_flotte(
+    browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
+) -> None:
+    """La lecture d'attention parcourt tout le registre côté serveur (GIL) : au
+    chargement de la Flotte, ni la Flotte ni le compteur de la barre ne la lancent
+    avant que `/api/fleet` ait répondu — sinon elle ralentit la table qu'on attend."""
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    events: list[tuple[str, float]] = []
+    page.on("request", lambda req: events.append(("attention", time.monotonic())) if "/api/workspace/attention" in req.url else None)
+    page.on("response", lambda resp: events.append(("fleet", time.monotonic())) if "/api/fleet" in resp.url else None)
+    try:
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
+        page.wait_for_selector(".tbl tbody tr", timeout=10_000)
+        page.wait_for_timeout(1_500)  # laisse partir la lecture différée du compteur
+
+        fleet_at = next(t for kind, t in events if kind == "fleet")
+        early = [t for kind, t in events if kind == "attention" and t < fleet_at]
+        assert not early, f"{len(early)} lecture(s) d'attention partie(s) avant la réponse de /api/fleet"
+        assert any(kind == "attention" for kind, _ in events), "l'attention finit bien par être lue"
     finally:
         context.close()
 
@@ -160,14 +225,13 @@ def test_refresh_de_la_flotte_ne_double_jamais_les_appels_en_vol(
     pour rendre la fenêtre de chevauchement déterministe plutôt que
     dépendante de la vitesse du disque du harnais.
     """
-    served, slug_a, _slug_b, _slug_c = served_cockpit_triple
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
     page = context.new_page()
     try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.evaluate("() => window.GrimoireWorkspace.goto('piloter')")
-        page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
+        page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
         page.wait_for_selector(".tbl tbody tr")
 
         fleet_calls: list[str] = []

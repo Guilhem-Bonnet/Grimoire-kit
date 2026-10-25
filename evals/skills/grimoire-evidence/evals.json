@@ -1,0 +1,11 @@
+{
+  "skill_name": "grimoire-evidence",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Modifie la config de déploiement dans un projet enrôlé (présence de _grimoire/standard/).",
+      "expected_output": "Ouvre le protocole de preuve avant la première modification, complète le pack pendant le travail et vérifie les gates avant de conclure.",
+      "files": []
+    }
+  ]
+}

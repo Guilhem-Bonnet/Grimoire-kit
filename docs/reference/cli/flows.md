@@ -462,9 +462,8 @@ catalogue indexe les deux.
 | `grimoire workflows list` | Lister les workflows — nature, agents, provenance |
 | `grimoire workflows list -k orchestration` | Ne garder que les workflows multi-agents |
 | `grimoire workflows list --all` | Inclure ceux qu'une commande CLI remplace |
-| `grimoire workflows teams` | Lister les équipes : membres, spécialité, chaîne de handoff |
 | `grimoire workflows search <terme>` | Chercher par slug, description, et optionnellement contenu |
-| `grimoire workflows show <slug>` | Afficher un workflow, l'équipe qu'il déclare, et son contenu |
+| `grimoire workflows show <slug>` | Afficher un workflow, ce qu'il déclare, et son contenu |
 | `grimoire workflows install <slug>` | Installer un workflow du framework — la destination suit sa nature |
 | `grimoire workflows sync` | Synchroniser les prompts du framework vers le projet |
 | `grimoire workflows diff` | Différences entre framework et projet |
@@ -501,13 +500,12 @@ frontmatter — pas en étant deviné depuis son emplacement, parce que sous
 kind: orchestration
 description: "Ce que fait ce workflow"
 agents: [sm, architect, dev, qa]
-team: team-build
 triggers:
   - la situation qui appelle ce workflow
 ---
 ```
 
-`agents`, `team` et `patterns` sont facultatifs ; `description` ne l'est pas en
+`agents` et `patterns` sont facultatifs ; `description` ne l'est pas en
 pratique, c'est ce que le catalogue affiche. Un fichier sans frontmatter reste
 sur disque et n'est pas listé.
 

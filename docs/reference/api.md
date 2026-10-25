@@ -95,12 +95,6 @@ Variable d'environnement : `GRIMOIRE_LOG_LEVEL` (override le niveau par défaut 
 
 ---
 
-### `@with_retry`
-
-::: grimoire.core.retry.with_retry
-
----
-
 ## `grimoire.registry`
 
 ### Plugin Discovery

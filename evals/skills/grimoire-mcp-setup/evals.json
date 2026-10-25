@@ -1,0 +1,11 @@
+{
+  "skill_name": "grimoire-mcp-setup",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Branche le serveur MCP du kit à mon client.",
+      "expected_output": "Écrit la configuration .mcp.json, liste les outils exposés et vérifie le périmètre (Trust Gate).",
+      "files": []
+    }
+  ]
+}

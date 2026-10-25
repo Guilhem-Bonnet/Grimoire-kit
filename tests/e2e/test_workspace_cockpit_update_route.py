@@ -26,7 +26,7 @@ from playwright.sync_api import Page
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def test_mettre_a_jour_depuis_piloter_ne_repond_pas_404_sur_un_projet_selectionne(
@@ -35,13 +35,9 @@ def test_mettre_a_jour_depuis_piloter_ne_repond_pas_404_sur_un_projet_selectionn
     workspace = cockpit_workspace
     _goto(workspace, "piloter")
 
-    # Le niveau Flotte est le défaut côté cockpit (`level = cockpit ? 'flotte' : 'projet'`
-    # dans `piloter.js`) — bien que l'URL porte déjà `?project=<slug>` depuis la
-    # fixture. Passer au niveau Projet est ce qu'un utilisateur ferait pour
-    # atteindre le bouton, et c'est ce qui exerce vraiment la route posée en
-    # query string.
-    workspace.wait_for_selector("#zoom-seg button")
-    workspace.locator("#zoom-seg button", has_text="Projet").click()
+    # L'URL de la fixture porte `?project=<slug>` : la portée de la coque est
+    # ce projet (P31), la Flotte montre donc sa fiche et le bouton — c'est ce
+    # qui exerce vraiment la route posée en query string.
 
     update_button = workspace.locator("button", has_text="Mettre à jour — aperçu")
     update_button.wait_for(state="visible", timeout=15_000)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from grimoire.core.exceptions import GrimoireRuntimeError
@@ -434,3 +436,45 @@ def test_runtime_package_exports_the_recipe_surface() -> None:
 
     for name in ("Recipe", "RecipeStep", "VerificationGate", "RecipeAdapter", "ImportReport", "slugify"):
         assert hasattr(runtime, name), name
+
+
+# --- R26 : arbre de spans et références d'entrée/sortie -------------------
+
+
+def _two_step_run(kernel):
+    ctx = _ctx()
+    wfi = kernel.create_instance(ctx, recipe_id="recipe.two", inputs_ref="registry/two.blueprint.json")
+    ctx = dataclasses.replace(ctx, workflow_instance_id=wfi.id)
+    kernel.start(wfi.id, ctx)
+    kernel.advance_step(wfi.id, ctx, step_id="a")
+    kernel.checkpoint(wfi.id, ctx, step_id="a", completed_steps=["a"], pending_steps=["b"])
+    kernel.advance_step(wfi.id, ctx, step_id="b")
+    kernel.checkpoint(wfi.id, ctx, step_id="b", completed_steps=["a", "b"], pending_steps=[])
+    return wfi.id, ctx
+
+
+def test_run_events_form_a_span_tree(kernel):
+    wfi_id, ctx = _two_step_run(kernel)
+    kernel.complete(wfi_id, ctx)
+    events = kernel.get_run_events(wfi_id)
+    by_type = {}
+    for e in events:
+        by_type.setdefault(e.event_type, []).append(e)
+    root = by_type[RunEventType.WORKFLOW_STARTED][0]
+    assert root.parent_span_id == ""
+    started = {e.payload["step_id"]: e for e in by_type[RunEventType.STEP_STARTED]}
+    assert started["a"].parent_span_id == root.span_id
+    saved = by_type[RunEventType.CHECKPOINT_SAVED]
+    assert [e.parent_span_id for e in saved] == [started["a"].span_id, started["b"].span_id]
+    assert by_type[RunEventType.WORKFLOW_COMPLETED][0].parent_span_id == root.span_id
+    # Hors événement racine, aucun span n'est orphelin.
+    assert all(e.parent_span_id for e in events if e is not root)
+
+
+def test_complete_sets_outputs_ref_and_create_keeps_inputs_ref(kernel):
+    wfi_id, ctx = _two_step_run(kernel)
+    assert kernel.get_instance(wfi_id).outputs_ref == ""
+    done = kernel.complete(wfi_id, ctx)
+    assert done.to_dict()["inputs_ref"] == "registry/two.blueprint.json"
+    assert done.to_dict()["outputs_ref"] == f"chk-{wfi_id}-b"
+    assert kernel.get_instance(wfi_id).outputs_ref == f"chk-{wfi_id}-b"

@@ -301,6 +301,16 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def log_message(self, *args: object) -> None:
         return  # quiet by default
 
+    def send_header(self, keyword: str, value: str) -> None:
+        super().send_header(keyword, value)
+        # Seuls les fichiers statiques portent ``Last-Modified``. Sans
+        # ``Cache-Control``, le navigateur gardait d'anciens modules JS/CSS
+        # après une mise à jour du kit ; icons.svg et polices prennent une
+        # minute (``no-cache`` y coûtait une requête par rendu d'icône).
+        if keyword.lower() == "last-modified":
+            js_css = Path(urlparse(self.path).path).suffix.lower() in {".js", ".mjs", ".css"}
+            super().send_header("Cache-Control", "no-cache" if js_css else "max-age=60")
+
     def setup(self) -> None:
         super().setup()
         self.rfile = _CountingReader(self.rfile)  # type: ignore[assignment]
@@ -531,12 +541,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # de lancement direct (``_HOME_SLUG``) les honore, exactement comme le
         # faisait l'ancien atelier avant que #351 ne l'y fasse succéder —
         # naviguer vers un AUTRE projet du registre reste en lecture seule.
+        # ``home`` nomme ce projet ouvert (P31) : le bandeau de lecture seule
+        # en tire le geste « Revenir à … », ``None`` si le cockpit n'en a pas.
         if path == "/api/status" and isinstance(payload, dict):
             payload = {
                 **payload,
                 "host": "cockpit",
                 "readOnly": not self._is_home_request(),
                 "project": self._query_slug(),
+                "home": _HOME_SLUG or None,
             }
         self._send_json(200, payload)
 

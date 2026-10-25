@@ -83,7 +83,13 @@ class EvidenceService:
         workflow_instance_id: str = "",
         acceptance: tuple[str, ...] = (),
         pack_id: str | None = None,
+        reviewed: tuple[str, ...] = (),
     ) -> EvidencePack:
+        """*reviewed* : les critères qu'un verdict structuré de relecteur juge tenus (#876, lot 3, verrou 8).
+
+        Ils sont couverts par ce verdict, pas par une sous-chaîne trouvée dans un résumé ; l'appelant
+        (:mod:`grimoire.missions.review_verdict`) les a validés contre les critères de la tâche.
+        """
         if not items:
             raise GrimoireEvidenceError("EvidencePack requires at least one item")
         # Auto-generate id matching EVD-GAO-<area>-<seq> pattern
@@ -97,6 +103,10 @@ class EvidenceService:
         missing: list[str] = list(acceptance)
         # Simple heuristic: an acceptance criterion is covered if any item summary mentions it
         for criterion in acceptance:
+            if criterion in reviewed:
+                covered.append(criterion)
+                missing.remove(criterion)
+                continue
             for item in items:
                 if criterion.lower() in item.summary.lower() or criterion.lower() in item.uri.lower():
                     covered.append(criterion)

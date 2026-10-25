@@ -36,13 +36,25 @@ def _as_json(ctx: typer.Context, flag: bool) -> bool:
     return flag or str((ctx.obj or {}).get("output", "text") or "text") == "json"
 
 
-def _require_human(what: str) -> None:
+def _require_human(what: str, *, gesture: str = "", project_root: Path | None = None) -> None:
+    """Exige l'origine humaine ; avec *gesture*, l'orchestrateur sous mandat qui le couvre passe aussi (#876, verrou 6)."""
     from grimoire.cli.cmd_task import _comment_origin
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.mandate import gesture_origin, require_authority
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
-    if _comment_origin() != ORIGIN_HUMAN:
-        typer.echo(f"{what} est un geste d'humain : l'origine humaine n'est pas établie.", err=True)
-        raise typer.Exit(1)
+    origin, provenance = gesture_origin(_comment_origin())
+    if origin == ORIGIN_HUMAN:
+        return
+    if gesture:
+        try:
+            require_authority((project_root or Path()).resolve(), gesture, None, origin, what=what, provenance=provenance)
+        except GrimoireError as exc:
+            typer.echo(f"{what} est un geste d'humain : {exc}", err=True)
+            raise typer.Exit(1) from exc
+        return
+    typer.echo(f"{what} est un geste d'humain : l'origine humaine n'est pas établie.", err=True)
+    raise typer.Exit(1)
 
 
 @orchestrate_app.command("pause")
@@ -101,7 +113,7 @@ def orchestrate_resume(
     """Lève le drapeau (geste d'humain). Le tick suivant repasse les `waiting(paused)` en `ready`, dans l'ordre de la file."""
     from grimoire.missions.pause import SCOPE_GLOBAL, SCOPE_PROJECT, PauseError, clear_pause
 
-    _require_human("Reprendre")
+    _require_human("Reprendre", gesture="" if global_scope else "resume", project_root=project_root)
     try:
         lifted = clear_pause(
             project_root.resolve(), scope=SCOPE_GLOBAL if global_scope else SCOPE_PROJECT, tasks=tuple(task or ())
@@ -193,10 +205,24 @@ def _render_tick(report: TickReport) -> None:
             f"{sum(1 for o in report.ci if o.action == 'released')} orphelin(s) libéré(s), "
             f"{admitted} admise(s), {deferred} différée(s)."
         )
+        _render_lot2(report)
     for attention in report.attention:
         console.print(f"[yellow]attention : {attention}[/yellow]")
     for note in report.notes:
         console.print(f"[dim]{note}[/dim]")
+
+
+def _render_lot2(report: TickReport) -> None:
+    """Lancements, nettoyages du janitor et état du disjoncteur (#876, lot 2)."""
+    for launch in report.launches:
+        console.print(f"Lancement {launch.status} : {launch.task_id} — {launch.detail}")
+    for review in report.reviews:
+        console.print(f"Relecture {review.action} {review.status} : {review.task_id} — {review.detail}")
+    for outcome in report.cleanup:
+        console.print(f"Janitor {outcome.status} : {outcome.task_id} {outcome.action} — {outcome.detail}")
+    if report.breaker is not None:
+        colour = "red" if report.breaker.open else "dim"
+        console.print(f"[{colour}]Disjoncteur : {report.breaker.describe()}[/{colour}]")
 
 
 @orchestrate_app.command("tick")
@@ -210,7 +236,10 @@ def orchestrate_tick(
     ledger_root: Annotated[Path, _LEDGER_ROOT_OPTION] = _DEFAULT_LEDGER,
     json_output: Annotated[bool, _JSON_OPTION] = False,
 ) -> None:
-    """Un tick : lit les drapeaux de pause d'abord, puis récolte, rend les attentes levées, constate les effets, admet.
+    """Un tick : lit les drapeaux de pause d'abord, puis récolte, rend les attentes levées, constate les effets, nettoie, admet, lance.
+
+    Le lancement (`--apply`) n'a lieu que si le rôle `worker` est activé dans `orchestration-policy.yaml`
+    (`orchestrator.roles.worker.enabled`, désactivé par défaut) et que le disjoncteur est fermé.
 
     Sous une pause de tout le périmètre, il sort sans ouvrir le ledger, avec le code 0 : une pause n'est pas une
     panne, un minuteur ne doit pas la lire comme un échec. Un second tick pendant le premier saute (code 0).
@@ -278,3 +307,50 @@ def orchestrate_uninstall_timer(
         return
     for line in done:
         console.print(line)
+
+
+breaker_app = typer.Typer(help="Disjoncteur de l'orchestrateur : ouvert, aucune session n'est lancée.", no_args_is_help=True)
+orchestrate_app.add_typer(breaker_app, name="breaker")
+
+
+@breaker_app.command("status")
+def breaker_status(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """L'état du disjoncteur : ouvert ou fermé, pourquoi, et les derniers événements."""
+    from grimoire.missions.breaker import read_breaker
+    from grimoire.missions.pause import home_root
+
+    state = read_breaker(home_root(project_root.resolve()))
+    if _as_json(ctx, json_output):
+        typer.echo(json.dumps(state.to_dict(), indent=2, ensure_ascii=False))
+        return
+    console.print(f"Disjoncteur : {state.describe()}")
+    for entry in state.history[-5:]:
+        console.print(f"[dim]{entry.get('at', '')} {entry.get('event', '')} {entry.get('reason') or entry.get('detail') or ''}[/dim]")
+
+
+@breaker_app.command("trip")
+def breaker_trip(
+    reason: Annotated[str, typer.Argument(help="Pourquoi on ouvre le disjoncteur.")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+) -> None:
+    """Ouvre le disjoncteur à la main : plus aucun lancement jusqu'à `breaker reset`. Sans risque, donc sans origine exigée."""
+    from grimoire.missions.breaker import trip
+    from grimoire.missions.pause import home_root
+
+    state = trip(home_root(project_root.resolve()), reason, source="manual")
+    console.print(f"Disjoncteur : {state.describe()}")
+
+
+@breaker_app.command("reset")
+def breaker_reset(project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path()) -> None:
+    """Referme le disjoncteur et remet le compteur à zéro — un geste d'humain (l'origine humaine est exigée)."""
+    from grimoire.missions.breaker import reset
+    from grimoire.missions.pause import home_root
+
+    _require_human("breaker reset")
+    state = reset(home_root(project_root.resolve()))
+    console.print(f"Disjoncteur : {state.describe()}")

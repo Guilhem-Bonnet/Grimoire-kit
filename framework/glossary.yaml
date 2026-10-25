@@ -28,20 +28,20 @@ entries:
   - id: espace-de-travail
     nom: Espace de travail
     définition: >-
-      Un des six regroupements de l'interface par intention — Piloter,
-      Concevoir, Exécuter, Observer, Mémoire, Source — chacun avec sa toile,
-      sa barre de document et son inspecteur.
-    raccourci: "⌘1 … ⌘6"
+      Un des cinq regroupements de l'interface par intention, d'À traiter à
+      Configuration, chacun avec sa toile, ses rubriques, sa barre de document
+      et son inspecteur.
+    raccourci: "⌘1 … ⌘5"
     termes: [toile, inspecteur, dock]
     doc: ""
 
   - id: toile
     nom: Toile
     définition: >-
-      La surface centrale d'un espace, où le document se manipule directement à
-      quatre niveaux de zoom, de la flotte au nœud.
-    raccourci: "Z puis F/P/W/N"
-    termes: [niveau-de-zoom, vue, flotte]
+      La surface centrale d'un espace, où le document de la portée courante se
+      manipule directement.
+    raccourci: ""
+    termes: [portee, vue, niveau-de-zoom]
     doc: ""
 
   - id: rail
@@ -60,7 +60,7 @@ entries:
       surimpression, épinglée dans la grille — dont l'état est mémorisé par
       espace de travail et par projet.
     raccourci: "1 … 5"
-    termes: [rail, mode-concentration, densite]
+    termes: [rail, plein-ecran, densite]
     doc: ""
 
   - id: explorateur
@@ -84,7 +84,7 @@ entries:
   - id: dock
     nom: Dock
     définition: >-
-      La bande basse commune aux six espaces : Console, Traces, Timeline,
+      La bande basse commune aux cinq espaces : Console, Traces, Timeline,
       Problèmes.
     raccourci: "5"
     termes: [console, trace, timeline, probleme]
@@ -125,7 +125,7 @@ entries:
       entrer, et dont les termes soulignés ouvrent une bulle enfant — trois
       niveaux au plus, Échap ferme la pile.
     raccourci: "Alt"
-    termes: [glossaire, mode-concentration]
+    termes: [glossaire, densite]
     doc: ""
 
   - id: glossaire
@@ -137,31 +137,31 @@ entries:
     termes: [infobulle]
     doc: ""
 
-  - id: mode-concentration
-    nom: Mode concentration
+  - id: plein-ecran
+    nom: Plein écran
     définition: >-
-      Le réglage qui replie tous les panneaux, réduit les infobulles au nom et
-      au raccourci et donne la toile à l'écran entier.
+      Le réglage qui efface les panneaux épinglés et le dock pour donner la
+      toile à l'écran entier, sans toucher à la densité.
     raccourci: "⇧⌘F"
-    termes: [densite, panneau, infobulle]
+    termes: [densite, panneau, toile]
     doc: ""
 
   - id: densite
     nom: Densité
     définition: >-
-      Un des deux réglages d'affichage — Découverte, aérée et bavarde, ou
-      Concentration, dense et muette — choisi par l'utilisateur, jamais deviné.
+      Un des deux réglages d'affichage — confortable, aérée et bavarde, ou
+      compacte, resserrée et muette — choisi par l'utilisateur, jamais deviné.
     raccourci: ""
-    termes: [mode-concentration]
+    termes: [plein-ecran, infobulle]
     doc: ""
 
   - id: niveau-de-zoom
     nom: Niveau de zoom
     définition: >-
-      Un des quatre grains de la toile — Flotte, Projet, Workflow, Nœud — qui
-      changent ce qui est montré, pas seulement sa taille.
-    raccourci: "Z puis F/P/W/N"
-    termes: [toile, flotte, workflow]
+      Un des trois grains de la toile des blueprints — Blueprints, Workflow,
+      Nœud — qui changent ce qui est montré, pas seulement sa taille.
+    raccourci: ""
+    termes: [toile, workflow, portee]
     doc: ""
 
   - id: vue
@@ -178,7 +178,7 @@ entries:
   - id: atelier
     nom: Atelier
     définition: >-
-      L'hôte mono-projet servi par `grimoire serve` : la vue de travail
+      L'hôte mono-projet servi par `grimoire cockpit serve` lancé depuis un projet : la vue de travail
       appliquée au projet courant.
     raccourci: ""
     termes: [cockpit, projet, kit]
@@ -188,18 +188,55 @@ entries:
     nom: Cockpit
     définition: >-
       L'hôte multi-projets servi par `grimoire cockpit serve` : la même coque
-      que l'atelier, plus le niveau de zoom Flotte et le sélecteur de projet.
+      que l'atelier, plus la portée « Tous les projets ».
     raccourci: ""
-    termes: [atelier, flotte, projet]
+    termes: [atelier, flotte, portee]
     doc: reference/cli/index.md
 
   - id: flotte
     nom: Flotte
     définition: >-
-      L'ensemble des projets enregistrés au registre local, et le niveau de
-      zoom que seul le cockpit ajoute.
-    raccourci: "Z puis F"
-    termes: [cockpit, projet, niveau-de-zoom]
+      L'ensemble des projets enregistrés au registre local, et l'espace qui
+      les liste en portée « Tous les projets » ou montre la fiche d'un seul.
+    raccourci: "⌘3"
+    termes: [cockpit, projet, portee]
+    doc: ""
+
+  - id: portee
+    nom: Portée
+    définition: >-
+      Le choix unique, en haut de la coque, entre « Tous les projets » et un
+      projet, appliqué à tous les espaces et écrit dans l'URL.
+    raccourci: ""
+    termes: [projet, flotte, lecture-seule]
+    doc: ""
+
+  - id: lecture-seule
+    nom: Lecture seule
+    définition: >-
+      L'état d'un projet consulté depuis un cockpit ouvert ailleurs : la coque
+      le dit en tête et offre de revenir au projet ouvert, seul à accepter
+      une écriture.
+    raccourci: ""
+    termes: [cockpit, portee]
+    doc: ""
+
+  - id: a-traiter
+    nom: À traiter
+    définition: >-
+      L'espace d'accueil, qui range par urgence ce qui attend une décision
+      humaine dans la portée courante.
+    raccourci: "⌘1"
+    termes: [portee, tache, porte-de-preuve]
+    doc: ""
+
+  - id: configuration
+    nom: Configuration
+    définition: >-
+      L'espace des réglages durables du projet et de l'écran : fichiers,
+      blueprints, préférences.
+    raccourci: "⌘5"
+    termes: [etage, blueprint, densite]
     doc: ""
 
   - id: projet

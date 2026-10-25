@@ -64,3 +64,15 @@ wip:
 # Sans cette clé, le dépôt est le remote origin du projet. Format : owner/repo (ou host/owner/repo).
 # ci:
 #   repository: owner/repo
+# Escalade (#876) : qui décide quoi quand l'orchestrateur agit sous un mandat (`grimoire autonomy mandate`).
+# `human` : le geste reste à un humain ; `orchestrator` : le mandat peut le couvrir. Valeurs prudentes livrées :
+# tout reste humain. Le dépôt qui veut déléguer `merge` et `accept` écrit ici `orchestrator` — `release`,
+# `secrets` et `paid` restent `human`. Modifier cette section révoque le mandat en cours : la politique
+# d'escalade n'est jamais couverte par un mandat.
+escalation:
+  release: human    # publication d'un artefact, tags de version
+  secrets: human    # identifiants, jetons, fichiers d'environnement
+  paid: human       # ressources payantes (bancs, cloud, API facturées)
+  security: human   # avis de sécurité, surfaces sensibles
+  merge: human      # fusion de la PR
+  accept: human     # acceptation de la tâche
