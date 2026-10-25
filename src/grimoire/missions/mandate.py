@@ -55,7 +55,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.exceptions import GrimoireMissionError, GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.missions.schemas import ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR
@@ -467,6 +467,8 @@ class Mandate:
     escalation_sha256: str
     granted_at: str
     via: str
+    #: Le projet dont le journal des tours a attesté l'octroi (``--attest-from``) ; vide : le projet lui-même.
+    attest_from: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -479,6 +481,7 @@ class Mandate:
             "escalation_sha256": self.escalation_sha256,
             "granted_at": self.granted_at,
             "via": self.via,
+            **({"attest_from": self.attest_from} if self.attest_from else {}),
         }
 
 
@@ -549,6 +552,7 @@ class MandateStore:
         via: str,
         attestation: Attestation | None = None,
         now: datetime | None = None,
+        mandate_id: str | None = None,
     ) -> Mandate:
         """Inscrit le mandat. *origin* vient du canal (cockpit derrière son jeton, tour humain attesté), jamais d'un champ libre."""
         if origin != ORIGIN_HUMAN:
@@ -559,7 +563,8 @@ class MandateStore:
         from grimoire.flows.autonomy import parse_until
 
         moment = now or _now()
-        mandate_id = f"MND-{uuid.uuid4().hex[:12]}"
+        if mandate_id is None or not _MANDATE_ID.match(mandate_id):
+            mandate_id = f"MND-{uuid.uuid4().hex[:12]}"
         until = parse_until(request.until_raw, moment).isoformat()
         entry = self.journal.append(
             {
@@ -574,6 +579,7 @@ class MandateStore:
                 "via": via,
                 "attestation": attestation.status if attestation else "",
                 "session_id": attestation.session_id if attestation else "",
+                **({"attest_from": attestation.source} if attestation and attestation.source else {}),
                 "ts": moment.isoformat(),
             }
         )
@@ -583,17 +589,26 @@ class MandateStore:
         return mandate
 
     def request_grant(
-        self, request: MandateRequest, env: Mapping[str, str] | None = None, now: datetime | None = None
+        self,
+        request: MandateRequest,
+        env: Mapping[str, str] | None = None,
+        now: datetime | None = None,
+        *,
+        attest_from: Path | None = None,
     ) -> tuple[Mandate | None, Attestation]:
         """Voie CLI : inscrit le mandat si la demande est attestée par un tour humain ; sinon émet son challenge.
 
         Même mécanisme que ``grimoire autonomy grant`` (:meth:`grimoire.flows.autonomy.GrantJournal.request`) :
         le challenge est celui de cette demande et de cette session, un refus ne le consomme pas, un
         tour humain ne sert qu'une décision (registre commun des tours consommés).
+        *attest_from* (``--attest-from``) : le projet dont le journal des tours atteste, quand la session tourne
+        dans un autre projet que celui-ci (:func:`grimoire.flows.attestation.attest_grant`). Le challenge et le
+        mandat restent ceux de ce projet ; le mandat nomme la source (``attest_from``).
         """
         from grimoire.core.standard_state import current_session
-        from grimoire.flows.attestation import CheckpointJournal, attest
+        from grimoire.flows.attestation import FLOWS_RELPATH, CheckpointJournal, attest_grant, turns_source
 
+        source = turns_source(attest_from) if attest_from is not None else None
         entries = self.journal.read()
         session_id, _host = current_session(env)
         used = {e.get("challenge_id") for e in entries if e.get("type") == "grant"}
@@ -621,12 +636,27 @@ class MandateStore:
                     "ts": (now or _now()).isoformat(),
                 }
             )
-        turns = CheckpointJournal(self.root / "_grimoire-runtime-output" / "flows", "autonomy-grants")
-        attestation = attest(self.root, challenge, env, turns.consumed_turns())
+        turns = CheckpointJournal(self.root / FLOWS_RELPATH, "autonomy-grants")
+        attestation, registry = attest_grant(self.root, turns, challenge, env, source)
         if not attestation.attested:
             return None, attestation
-        mandate = self.grant(request, origin=ORIGIN_HUMAN, via="attestation", attestation=attestation, now=now)
-        turns.consume_turn(mandate.id, attestation)
+        # Le tour est consommé AVANT l'inscription du mandat : un tour qu'on ne peut pas consommer (registre en
+        # lecture seule, décision concurrente qui l'a pris) n'inscrit rien ; un mandat qui échoue ensuite a brûlé
+        # son tour (échec fermé).
+        mandate_id = f"MND-{uuid.uuid4().hex[:12]}"
+        if registry is turns:
+            turns.consume_turn(mandate_id, attestation)
+        else:
+            try:
+                registry.consume_turn(mandate_id, attestation, for_project=self.project)
+            except OSError as exc:
+                raise GrimoireRuntimeError(
+                    f"--attest-from : le tour n'a pas pu être consommé dans {registry.consumed_path} "
+                    f"({type(exc).__name__}) ; aucun mandat inscrit"
+                ) from exc
+        mandate = self.grant(
+            request, origin=ORIGIN_HUMAN, via="attestation", attestation=attestation, now=now, mandate_id=mandate_id
+        )
         self.journal.append(
             {
                 "type": "grant_challenge_used",
@@ -1018,6 +1048,7 @@ def _mandate_of(entry: Mapping[str, Any]) -> Mandate | None:
             escalation_sha256=str(entry["escalation_sha256"]),
             granted_at=str(entry.get("ts", "")),
             via=str(entry.get("via", "")),
+            attest_from=str(entry.get("attest_from", "")),
         )
     except (KeyError, TypeError, ValueError):
         return None
