@@ -51,6 +51,14 @@ def test_un_module_du_cockpit_se_revalide_a_chaque_chargement(cockpit_base: str,
     assert headers.get("cache-control") == "no-cache", headers
 
 
+def test_les_icones_gardent_une_minute_de_fraicheur(cockpit_base: str) -> None:
+    """``no-cache`` sur icons.svg coûtait une requête par rendu d'icône ; une
+    minute suffit à reprendre les icônes d'une mise à jour."""
+    status, headers = _head(cockpit_base, "workspace/icons.svg")
+    assert status == 200
+    assert headers.get("cache-control") == "max-age=60", headers
+
+
 def test_une_revalidation_sans_changement_rend_un_304(cockpit_base: str) -> None:
     status, headers = _head(cockpit_base, "workspace/shell.js")
     assert status == 200
