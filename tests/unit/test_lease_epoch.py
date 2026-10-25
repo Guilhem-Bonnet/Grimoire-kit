@@ -32,6 +32,7 @@ from grimoire.missions.lease import (
     write_lease,
 )
 from grimoire.missions.ledger import MissionLedger
+from grimoire.missions.ledger_snapshot import SNAPSHOT_FILENAME
 from grimoire.missions.schemas import TaskClaim, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.waiting import parse_until
@@ -376,9 +377,11 @@ def test_attempts_derived_from_ledger(tmp_path: Path) -> None:
     ledger.append_event("task.human_answered", tid, "task", "guilhem", {"task_id": tid, "origin": "human"})
     assert ledger.attempts(tid) == 0 and ledger.backoff_until(tid) is None
     assert backoff_delay(0) == timedelta(0)
-    assert sorted(p.name for p in (tmp_path / "ledger").iterdir() if not p.name.startswith(".")) == [
-        "events.jsonl", "leases",
-    ]
+    # L'instantané du rejeu (K13) s'écrit dès qu'un rejeu dépasse SNAPSHOT_AFTER_MS : sur un runner lent,
+    # c'est un cache légitime, pas un compteur à côté du ledger.
+    assert sorted(
+        p.name for p in (tmp_path / "ledger").iterdir() if not p.name.startswith(".") and p.name != SNAPSHOT_FILENAME
+    ) == ["events.jsonl", "leases"]
 
 
 # ── CA : récolte sous quota ─────────────────────────────────────────────────
