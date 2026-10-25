@@ -8,6 +8,8 @@ Carte + verdicts validés (et rejetés, avec leur raison), regroupés par **acti
 - ``a_faire_par_theme`` — ``a_faire`` établis, rangés par ``theme`` ;
 - ``a_l_humain`` — ``humain`` établis ;
 - ``rejetes`` — verdicts dont la preuve ne s'est pas vérifiée, avec la raison ;
+- ``contradictions`` — un signal (conflit, branche orpheline, worktree sale, état antérieur) posé sur un
+  élément qui a pourtant un verdict établi : jamais masqué, montré à côté du verdict ;
 - ``signaux_sans_verdict`` — ce que la carte signale et qu'aucun verdict établi ne couvre.
 
 Étape 1 : une **proposition**. Le rapport ne ferme rien, ne fusionne rien, n'écrit ni au ledger ni sur GitHub.
@@ -24,7 +26,12 @@ from grimoire.steward import REPORT_SCHEMA
 from grimoire.steward.project_map import find_element
 from grimoire.steward.sources import ensure_output_dir
 
-__all__ = ["ACTIONS", "build_report", "render_text", "write_output"]
+__all__ = ["ACTIONS", "CONTRADICTING", "build_report", "render_text", "write_output"]
+
+#: Signaux qui contredisent un verdict établi sur le même élément (sauf un conflit jugé conflit).
+CONTRADICTING = frozenset(
+    {"conflit_changelog_seul", "conflit_autre", "branche_orpheline", "worktree_sale", "branche_etat_anterieur"}
+)
 
 ACTIONS = {
     "fermer_avec_preuve": ("livree", "obsolete", "doublon"),
@@ -39,6 +46,7 @@ _TITLES = {
     "a_faire_par_theme": "À faire, par thème",
     "a_l_humain": "À l'humain",
     "rejetes": "Verdicts rejetés (preuve non vérifiée)",
+    "contradictions": "Contradictions : un signal contredit un verdict établi",
     "signaux_sans_verdict": "Signaux sans verdict établi",
 }
 
@@ -65,8 +73,18 @@ def build_report(carte: Mapping[str, Any], validation: Mapping[str, Any] | None)
         for name, verdicts in ACTIONS.items():
             if verdict in verdicts:
                 groups[name].append(_item(entry, carte))
-    judged = {str(e.get("element")) for e in established}
-    signals = [s for s in carte.get("signaux") or [] if s.get("ref") not in judged]
+    judged = {str(e.get("element")): str(e.get("verdict")) for e in established}
+    signals: list[dict[str, Any]] = []
+    contradictions: list[dict[str, Any]] = []
+    for signal in carte.get("signaux") or []:
+        hits = [r for r in (signal.get("ref"), signal.get("branche")) if r and r in judged]
+        if not hits:
+            signals.append(dict(signal))
+            continue
+        verdict = judged[hits[0]]
+        both_conflicts = str(signal.get("type", "")).startswith("conflit_") and verdict.startswith("conflit_")
+        if signal.get("type") in CONTRADICTING and not both_conflicts:
+            contradictions.append({**signal, "element": hits[0], "verdict": verdict})
     return {
         "$schema": REPORT_SCHEMA,
         "genere_le": carte.get("genere_le"),
@@ -81,6 +99,7 @@ def build_report(carte: Mapping[str, Any], validation: Mapping[str, Any] | None)
             "a_l_humain": groups["a_l_humain"],
         },
         "rejetes": [_item(e, carte) for e in (validation or {}).get("rejetes") or []],
+        "contradictions": contradictions,
         "signaux_sans_verdict": signals,
         "limites": [
             "Le jugement reste celui d'un LLM : seule la preuve citée est vérifiée par du code.",
@@ -124,6 +143,11 @@ def render_text(report: Mapping[str, Any]) -> str:
         for item in report["rejetes"]:
             lines.append(f"  - {item.get('element')} [{item.get('verdict')}]")
             lines += [f"      raison : {reason}" for reason in item.get("raisons") or []]
+    if report.get("contradictions"):
+        lines += ["", f"{_TITLES['contradictions']} ({len(report['contradictions'])})"]
+        lines += [
+            f"  - {c['element']} [{c['verdict']}] contredit par {c['type']} : {c['detail']}" for c in report["contradictions"]
+        ]
     if report.get("signaux_sans_verdict"):
         lines += ["", f"{_TITLES['signaux_sans_verdict']} ({len(report['signaux_sans_verdict'])})"]
         lines += [f"  - {s['type']} {s['ref']} : {s['detail']}" for s in report["signaux_sans_verdict"]]

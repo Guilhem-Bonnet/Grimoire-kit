@@ -48,8 +48,9 @@ def _verdicts(scene: Scene, tmp_path: Path) -> Path:
                 "$schema": VERDICTS_SCHEMA,
                 "verdicts": [
                     {"element": "pr:31", "verdict": "conflit_simple"},
-                    {"element": f"tache:{scene.tasks['citee']}", "verdict": "livree", "preuves": [{"type": "commit", "sha": scene.shas["cite"]}]},
+                    {"element": f"tache:{scene.tasks['citee']}", "verdict": "livree", "preuves": [{"type": "commit", "sha": scene.shas["cite"], "message_contient": scene.tasks["citee"]}]},
                     {"element": "issue:50", "verdict": "a_faire", "theme": "rendu"},
+                    {"element": "branche:feat/changelog", "verdict": "a_faire", "theme": "rendu"},
                     {"element": f"tache:{scene.tasks['issue_fermee']}", "verdict": "livree", "preuves": [{"type": "note", "texte": "vu"}]},
                 ],
             }
@@ -62,7 +63,8 @@ def _verdicts(scene: Scene, tmp_path: Path) -> Path:
 def test_lecture_seule_stricte(scene: Scene, recorder: Recorder, tmp_path: Path) -> None:
     verdicts = _verdicts(scene, tmp_path)
     remote = tmp_path / "remote.git"
-    before = _snapshot(scene.root, remote)
+    assert scene.worktree is not None
+    before = _snapshot(scene.root, remote, scene.worktree)
     status_before = git(scene.root, "status", "--porcelain")
     common = ["--project-root", str(scene.root), "--sans-sonde"]
 
@@ -73,7 +75,7 @@ def test_lecture_seule_stricte(scene: Scene, recorder: Recorder, tmp_path: Path)
     done = runner.invoke(app, ["steward", "report", "--verdicts", str(verdicts), *common])
     assert done.exit_code == 0, done.output
 
-    after = _snapshot(scene.root, remote)
+    after = _snapshot(scene.root, remote, scene.worktree)
     steward = (scene.root / "_grimoire-output" / "steward").as_posix() + "/"
     changed = {p for p in set(before) | set(after) if before.get(p) != after.get(p)}
     assert changed, "les sorties de l'intendant auraient dû être écrites"
@@ -89,7 +91,7 @@ def test_map_json(scene: Scene, recorder: Recorder) -> None:
     assert done.exit_code == 0, done.output
     carte = json.loads(done.output)
     assert carte["$schema"] == "grimoire-steward-map/v1"
-    assert carte["resume"]["prs"] == 3
+    assert carte["resume"]["prs"] == 6
 
 
 def test_map_texte_et_locales_seulement(scene: Scene, recorder: Recorder) -> None:
@@ -106,7 +108,7 @@ def test_verdicts_json(scene: Scene, recorder: Recorder, tmp_path: Path) -> None
     )
     result = json.loads(done.output)
     assert result["$schema"] == VALIDATION_SCHEMA
-    assert result["resume"]["etablis"] == 3
+    assert result["resume"]["etablis"] == 4
     assert [e["element"] for e in result["rejetes"]] == [f"tache:{scene.tasks['issue_fermee']}"]
 
 
@@ -128,13 +130,15 @@ def test_report_regroupe_par_action(scene: Scene, recorder: Recorder, tmp_path: 
     assert [i["element"] for i in actions["fermer_avec_preuve"]] == [f"tache:{scene.tasks['citee']}"]
     assert [i["element"] for i in actions["realigner"]] == ["pr:31"]
     assert list(actions["a_faire_par_theme"]) == ["rendu"]
+    # Un signal qui contredit un verdict établi n'est pas masqué : il est montré comme contradiction.
+    assert [(c["element"], c["type"]) for c in report["contradictions"]] == [("branche:feat/changelog", "conflit_changelog_seul")]
     assert [i["element"] for i in report["rejetes"]] == [f"tache:{scene.tasks['issue_fermee']}"]
     # Le signal de la tâche citée est couvert par un verdict établi ; celui de la PR 31 aussi.
     refs = {s["ref"] for s in report["signaux_sans_verdict"]}
     assert f"tache:{scene.tasks['citee']}" not in refs and "pr:31" not in refs
     assert f"tache:{scene.tasks['issue_fermee']}" in refs
     text = (scene.root / "_grimoire-output" / "steward" / "report.txt").read_text(encoding="utf-8")
-    assert "Fermer avec preuve (1)" in text and "Limites :" in text
+    assert "Fermer avec preuve (1)" in text and "Limites :" in text and "Contradictions" in text
 
 
 def test_report_sans_verdicts(scene: Scene, recorder: Recorder) -> None:

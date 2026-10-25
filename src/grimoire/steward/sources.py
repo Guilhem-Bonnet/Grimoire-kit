@@ -6,6 +6,10 @@ doubles qui enregistrent chaque appel, et prouvent qu'aucun n'écrit.
 
 Ce que ces lectures ne peuvent pas mesurer (``gh`` absent, hors ligne, git trop ancien, référence
 introuvable) est rendu comme :data:`NON_MESURE`, jamais deviné ni compté comme un « non ».
+
+Ce qu'un agent écrit dans un fichier de verdicts (nom de branche, SHA, chemin) n'est jamais passé
+tel quel à git : un nom de branche est confiné à ``refs/heads/`` ou ``refs/remotes/<remote>/``
+(:func:`branch_ref`), un SHA doit désigner un objet et non une référence (:func:`resolve_sha`).
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import tempfile
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -26,13 +31,16 @@ from grimoire.steward import OUTPUT_DIR
 
 __all__ = [
     "CHANGELOG",
+    "LOG_LIMIT",
     "NON_MESURE",
+    "PARTIELLE",
     "BranchRef",
     "MergeProbe",
     "Probe",
     "Sources",
     "WorktreeEntry",
     "ahead_behind",
+    "branch_ref",
     "commit_on_target",
     "ensure_output_dir",
     "file_on_target",
@@ -42,20 +50,27 @@ __all__ = [
     "list_branches",
     "list_worktrees",
     "merge_probe",
+    "path_in_history",
     "resolve_commit",
+    "resolve_sha",
     "scratch_objects",
     "target_log",
 ]
 
 NON_MESURE = "non mesuré"
+#: Une liste lue jusqu'à sa limite : ce qui n'y figure pas n'est pas prouvé absent.
+PARTIELLE = "partielle"
 #: Un conflit limité à ce fichier se résout mécaniquement (les entrées s'empilent sous [Unreleased]).
 CHANGELOG = "CHANGELOG.md"
+#: Commits de la cible relus (arbres, citations d'identifiants).
+LOG_LIMIT = 5000
 
 #: Sonde d'hôte : ``{session_id: "busy" | "idle"}``, ou ``None`` si indisponible (cf. ``missions.liveness``).
 Probe = Callable[[], Mapping[str, str] | None]
 
 _HEX = re.compile(r"[0-9a-f]{7,64}")
-_SCRATCH = ".objets-git"
+#: Ce qui ferait d'un nom de branche une expression de révision (``main~1``, ``a..b``, ``@{u}``, ``x:chemin``).
+_UNSAFE_REF = re.compile(r"[~^:@\\\s*?\[]|\.\.|^-|^/|/$|\.lock$|//")
 
 
 @dataclass
@@ -69,6 +84,16 @@ class Sources:
     target: str = "origin/main"
     #: ``OWNER/REPO`` passé à ``gh -R`` ; vide = celui que ``gh`` déduit du remote.
     repo: str = ""
+
+    @property
+    def remote(self) -> str:
+        """Le remote de la cible (``origin`` pour ``origin/main``), vide pour une cible locale."""
+        return self.target.split("/", 1)[0] if "/" in self.target else ""
+
+    @property
+    def target_branch(self) -> str:
+        """Le nom de la branche cible côté GitHub (``main`` pour ``origin/main``)."""
+        return self.target.split("/", 1)[1] if "/" in self.target else self.target
 
     def git(self, *args: str, env: Mapping[str, str] | None = None) -> ExecResult:
         return self.exec_(["git", "-C", str(self.root), *args], self.root, env)
@@ -113,23 +138,49 @@ def hours_since(moment: datetime | None, now: datetime) -> float | None:
     return round(max((now - moment).total_seconds(), 0.0) / 3600, 1)
 
 
-# ── git : commits et fichiers de la cible ─────────────────────────────────────
+# ── git : références et commits ───────────────────────────────────────────────
 
 
 def resolve_commit(src: Sources, rev: str) -> str | None:
-    """Le SHA complet du commit *rev*, ou ``None`` s'il n'existe pas ici."""
+    """Le SHA complet du commit *rev* (une référence complète ou un SHA), ou ``None``."""
     if not rev or rev.startswith("-"):
         return None
-    done = src.git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
+    done = src.git("rev-parse", "--verify", "--quiet", "--end-of-options", f"{rev}^{{commit}}")
     sha = done.stdout.strip()
     return sha if done.returncode == 0 and _HEX.fullmatch(sha) else None
 
 
+def resolve_sha(src: Sources, sha: str) -> str | None:
+    """Le commit que désigne le SHA (abrégé) *sha* — jamais une référence homonyme (``deadbeef`` branche)."""
+    prefix = sha.lower()
+    if not _HEX.fullmatch(prefix):
+        return None
+    full = resolve_commit(src, prefix)
+    return full if full and full.startswith(prefix) else None
+
+
+def branch_ref(src: Sources, name: str) -> tuple[str | None, str]:
+    """``(référence complète, "")`` d'un nom de branche, ou ``(None, raison)``.
+
+    Seuls ``refs/heads/<nom>`` et, pour ``<remote>/<nom>`` avec le remote de la cible,
+    ``refs/remotes/<remote>/<nom>`` : jamais ``main~1``, ``a..b``, ``HEAD@{1}`` ni un SHA.
+    """
+    if not name or _UNSAFE_REF.search(name):
+        return None, f"nom de branche « {name} » refusé (pas d'expression de révision)"
+    candidates = [f"refs/heads/{name}"]
+    if src.remote and name.startswith(f"{src.remote}/"):
+        candidates.insert(0, f"refs/remotes/{name}")
+    for ref in candidates:
+        if resolve_commit(src, ref):
+            return ref, ""
+    return None, f"branche {name} introuvable (refs/heads/ ou refs/remotes/{src.remote or '<remote>'}/)"
+
+
 def commit_on_target(src: Sources, target_sha: str, sha: str) -> tuple[bool, str, str]:
-    """``(vrai, sha complet, "")`` si *sha* est un commit de la cible ; sinon ``(faux, …, raison)``."""
+    """``(vrai, sha complet, "")`` si le SHA *sha* est un commit de la cible ; sinon ``(faux, …, raison)``."""
     if not _HEX.fullmatch(sha.lower()):
         return False, "", f"« {sha} » n'est pas un SHA hexadécimal (7 à 64 caractères)"
-    full = resolve_commit(src, sha.lower())
+    full = resolve_sha(src, sha)
     if full is None:
         return False, "", f"commit {sha} absent du dépôt local"
     done = src.git("merge-base", "--is-ancestor", full, target_sha)
@@ -141,10 +192,12 @@ def commit_on_target(src: Sources, target_sha: str, sha: str) -> tuple[bool, str
 
 
 def file_on_target(src: Sources, target_sha: str, path: str, pattern: str = "") -> tuple[bool | None, str]:
-    """``(présent, détail)`` : le chemin (et le motif s'il est donné) est-il sur la cible ? ``None`` = non mesuré."""
-    exists = src.git("cat-file", "-e", f"{target_sha}:{path}")
-    if exists.returncode != 0:
+    """``(présent, détail)`` : le fichier (un blob, pas un dossier) et le motif sont-ils sur la cible ? ``None`` = non mesuré."""
+    kind = src.git("cat-file", "-t", f"{target_sha}:{path}")
+    if kind.returncode != 0:
         return False, f"{path} absent de la cible"
+    if kind.stdout.strip() != "blob":
+        return False, f"{path} est un {kind.stdout.strip() or 'objet inconnu'} sur la cible, pas un fichier"
     if not pattern:
         return True, f"{path} présent sur la cible"
     done = src.git("grep", "-q", "-F", "-e", pattern, target_sha, "--", path)
@@ -155,25 +208,34 @@ def file_on_target(src: Sources, target_sha: str, path: str, pattern: str = "") 
     return None, f"git grep : code {done.returncode}"
 
 
-def target_log(src: Sources, target_sha: str, *, limit: int = 5000) -> list[tuple[str, str, str]]:
-    """``(sha, sujet, corps)`` des *limit* derniers commits de la cible ; ``[]`` si git échoue."""
+def path_in_history(src: Sources, target_sha: str, path: str, pattern: str = "") -> bool | None:
+    """Le chemin (et le motif, par pioche ``-S``) a-t-il existé dans l'historique de la cible ?"""
+    args = ["log", "-1", "--format=%H", *([f"-S{pattern}"] if pattern else []), target_sha, "--", path]
+    done = src.git(*args)
+    if done.returncode != 0:
+        return None
+    return bool(done.stdout.strip())
+
+
+def target_log(src: Sources, target_sha: str, *, limit: int = LOG_LIMIT) -> tuple[list[tuple[str, str, str]], bool]:
+    """``((sha, sujet, corps)…, tronqué)`` des *limit* derniers commits de la cible ; ``([], False)`` si git échoue."""
     done = src.git("log", f"--max-count={limit}", "--format=%H%x1f%s%x1f%b%x1e", target_sha)
     if done.returncode != 0:
-        return []
+        return [], False
     out: list[tuple[str, str, str]] = []
     for record in done.stdout.split("\x1e"):
         parts = record.strip("\n").split("\x1f")
         if len(parts) == 3 and parts[0]:
             out.append((parts[0], parts[1], parts[2]))
-    return out
+    return out, len(out) >= limit
 
 
 def last_commit_at(src: Sources, rev: str) -> datetime | None:
-    done = src.git("log", "-1", "--format=%cI", rev)
+    done = src.git("log", "-1", "--format=%cI", "--end-of-options", rev)
     return parse_instant(done.stdout.strip()) if done.returncode == 0 else None
 
 
-# ── git : branches, worktrees, fusion par comparaison d'arbres ────────────────
+# ── git : branches, worktrees, fusion ─────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,11 +277,12 @@ def ahead_behind(src: Sources, target_sha: str, sha: str) -> tuple[int, int] | N
 
 @contextmanager
 def scratch_objects(src: Sources) -> Iterator[dict[str, str] | None]:
-    """Un magasin d'objets git jetable sous ``_grimoire-output/steward/`` pour ``git merge-tree``.
+    """Un magasin d'objets git jetable, propre à cette exécution, sous ``_grimoire-output/steward/``.
 
     ``merge-tree --write-tree`` écrit les arbres qu'il calcule : redirigés ici
     (``GIT_OBJECT_DIRECTORY``, le vrai magasin en alternate, lu seulement), ils
-    ne touchent jamais ``.git/objects`` du dépôt, et le dossier est retiré à la sortie.
+    ne touchent jamais ``.git/objects`` du dépôt. Un dossier par exécution
+    (``mkdtemp``) : deux intendants simultanés ne se retirent pas leurs objets.
     """
     done = src.git("rev-parse", "--git-path", "objects")
     raw = done.stdout.strip()
@@ -227,8 +290,7 @@ def scratch_objects(src: Sources) -> Iterator[dict[str, str] | None]:
         yield None
         return
     objects = Path(raw) if Path(raw).is_absolute() else src.root / raw
-    scratch = ensure_output_dir(src.root) / _SCRATCH
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix=".objets-git-", dir=ensure_output_dir(src.root)))
     try:
         yield {"GIT_OBJECT_DIRECTORY": str(scratch), "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(objects.resolve())}
     finally:
@@ -277,6 +339,20 @@ class WorktreeEntry:
     branch: str
     locked: bool
     prunable: bool
+    #: Fichiers modifiés ou non suivis ; ``None`` = non mesuré (dossier absent, git en échec).
+    dirty: bool | None = None
+
+
+def _dirty(src: Sources, path: str) -> bool | None:
+    """``git status --porcelain`` du worktree, sans verrou optionnel (aucune réécriture de l'index)."""
+    if not Path(path).is_dir():
+        return None
+    done = src.exec_(
+        ["git", "-C", path, "status", "--porcelain", "--untracked-files=normal"], Path(path), {"GIT_OPTIONAL_LOCKS": "0"}
+    )
+    if done.returncode != 0:
+        return None
+    return any(line.strip() and not line[3:].startswith("_grimoire-output/steward/") for line in done.stdout.splitlines())
 
 
 def list_worktrees(src: Sources) -> list[WorktreeEntry] | None:
@@ -291,13 +367,15 @@ def list_worktrees(src: Sources) -> list[WorktreeEntry] | None:
             fields[key] = value
         if "worktree" not in fields:
             continue
+        prunable = "prunable" in fields
         entries.append(
             WorktreeEntry(
                 path=fields["worktree"],
                 head=fields.get("HEAD", ""),
                 branch=fields.get("branch", "").removeprefix("refs/heads/"),
                 locked="locked" in fields,
-                prunable="prunable" in fields,
+                prunable=prunable,
+                dirty=None if prunable or "bare" in fields else _dirty(src, fields["worktree"]),
             )
         )
     return entries

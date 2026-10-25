@@ -27,29 +27,39 @@ from grimoire.missions.liveness import INACTIF, VIVANT, claimed_at, liveness
 from grimoire.missions.schemas import MissionTask, TaskState
 from grimoire.steward import MAP_SCHEMA
 from grimoire.steward.sources import (
+    LOG_LIMIT,
     NON_MESURE,
+    PARTIELLE,
     BranchRef,
     MergeProbe,
     Sources,
     ahead_behind,
+    commit_on_target,
     gh_json,
     hours_since,
     list_branches,
     list_worktrees,
     merge_probe,
     resolve_commit,
+    resolve_sha,
     scratch_objects,
     target_log,
 )
 
 __all__ = [
     "DEFAULT_INACTIVITY_HOURS",
+    "ISSUE_LIMIT",
+    "MERGED_LIMIT",
+    "PR_LIMIT",
     "LedgerView",
+    "MapContext",
     "build_map",
     "ci_state",
     "find_element",
+    "id_pattern",
     "issue_refs",
     "owners_of_branch",
+    "partial",
     "read_ledger",
     "session_alive",
     "summarize",
@@ -77,7 +87,7 @@ def issue_refs(*texts: str) -> list[int]:
     return sorted(found)
 
 
-def _id_pattern(task_id: str) -> re.Pattern[str]:
+def id_pattern(task_id: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![\w-]){re.escape(task_id)}(?![\w-])")
 
 
@@ -179,7 +189,7 @@ def owners_of_branch(view: LedgerView | None, branch: str, title: str = "", numb
     name = branch.split("/", 1)[1] if branch.startswith("origin/") else branch
     owners = []
     for task_id, task in view.tasks.items():
-        pattern = _id_pattern(task_id)
+        pattern = id_pattern(task_id)
         by_name = name == f"task/{task_id}" or pattern.search(name) or (title and pattern.search(title))
         if by_name or (number is not None and number in issue_refs(task.title, task.description)):
             owners.append(task_id)
@@ -238,9 +248,24 @@ def ci_state(rollup: Any) -> str:
 
 # ── Assemblage ────────────────────────────────────────────────────────────────
 
+#: Limites des listes ``gh`` : atteinte, la liste est « partielle » et son absence ne prouve rien.
+PR_LIMIT = 200
+ISSUE_LIMIT = 500
+MERGED_LIMIT = 1000
+
+
+def partial(items: list[Any], limit: int) -> bool:
+    return len(items) >= limit
+
 
 @dataclass
-class _Ctx:
+class MapContext:
+    """Ce que la carte et la validation partagent : la cible, ses arbres, les PR fusionnées, les fusions calculées.
+
+    :meth:`fusion` est la seule définition de « fusionnée » : la carte l'affiche, la validation
+    l'exige pour qu'une branche soit ``livree``.
+    """
+
     src: Sources
     view: LedgerView | None
     target_sha: str = ""
@@ -248,46 +273,93 @@ class _Ctx:
     env: Mapping[str, str] | None = None
     signals: list[dict[str, Any]] = field(default_factory=list)
     probes: dict[str, MergeProbe] = field(default_factory=dict)
-    #: Arbres des derniers commits de la cible : une branche dont l'arbre en fait partie y a été fusionnée.
-    target_trees: frozenset[str] = frozenset()
-    #: Tête d'une PR fusionnée → son numéro (``gh pr list --state merged``) ; vide si ``gh`` ne répond pas.
-    merged_heads: dict[str, int] = field(default_factory=dict)
+    #: Arbres des derniers commits de la cible (hors son arbre courant) → commit qui le porte.
+    older_trees: dict[str, str] = field(default_factory=dict)
+    #: Tête → PR fusionnée (``number``, ``baseRefName``, ``mergeCommit``) ; vide si ``gh`` ne répond pas.
+    merged: dict[str, dict[str, Any]] = field(default_factory=dict)
+    merged_ok: dict[str, int | None] = field(default_factory=dict)
+    #: Ce qui a été lu jusqu'à sa limite : l'absence n'y prouve rien.
+    truncations: list[str] = field(default_factory=list)
+
+    def prepare(self) -> None:
+        """Résout la cible, ses arbres et les PR fusionnées. Sans cible, tout ce qui en dépend reste non mesuré."""
+        target_sha = resolve_commit(self.src, self.src.target)
+        if not target_sha:
+            return
+        self.target_sha = target_sha
+        tree = self.src.git("rev-parse", f"{target_sha}^{{tree}}")
+        self.target_tree = tree.stdout.strip() if tree.returncode == 0 else ""
+        trees = self.src.git("log", f"--max-count={LOG_LIMIT}", "--format=%T %H", target_sha)
+        if trees.returncode == 0:
+            pairs = [line.split() for line in trees.stdout.splitlines() if len(line.split()) == 2]
+            for tree_id, commit in reversed(pairs):  # le plus récent gagne
+                self.older_trees[tree_id] = commit
+            self.older_trees.pop(self.target_tree, None)
+            if partial(pairs, LOG_LIMIT):
+                self.truncations.append(f"arbres de la cible : {LOG_LIMIT} derniers commits seulement")
+        fields = "number,headRefOid,baseRefName,mergeCommit"
+        data, _reason = gh_json(self.src, "pr", "list", "--state", "merged", "--limit", str(MERGED_LIMIT), "--json", fields)
+        if isinstance(data, list):
+            for pr in data:
+                if isinstance(pr, dict) and pr.get("headRefOid"):
+                    self.merged[str(pr["headRefOid"])] = pr
+            if partial(data, MERGED_LIMIT):
+                self.truncations.append(f"PR fusionnées : {MERGED_LIMIT} dernières seulement (une fusion plus ancienne n'est pas vue)")
 
     def probe(self, sha: str) -> MergeProbe:
         if sha not in self.probes:
             self.probes[sha] = merge_probe(self.src, self.target_sha, self.target_tree, sha, self.env)
         return self.probes[sha]
 
+    def merged_pr(self, sha: str) -> int | None:
+        """Le numéro de la PR fusionnée **dans la cible** dont *sha* est la tête — base = cible et commit de fusion sur la cible."""
+        if sha not in self.merged_ok:
+            pr = self.merged.get(sha)
+            number: int | None = None
+            if pr is not None and str(pr.get("baseRefName") or "") == self.src.target_branch:
+                merge = pr.get("mergeCommit") if isinstance(pr.get("mergeCommit"), dict) else {}
+                oid = str((merge or {}).get("oid") or "")
+                if oid and commit_on_target(self.src, self.target_sha, oid)[0]:
+                    number = int(pr.get("number") or 0) or None
+            self.merged_ok[sha] = number
+        return self.merged_ok[sha]
+
+    def fusion(self, sha: str) -> tuple[dict[str, Any], dict[str, Any], tuple[int, int] | None]:
+        """``(fusion, conflit, (avance, retard))`` d'un commit contre la cible.
+
+        ``fusion.etat`` : ``vide`` (aucun commit d'avance : rien à fusionner), ``fusionnee`` (``par`` :
+        ``pr #N`` fusionnée dans la cible avec cette tête, ou ``fusion_sans_apport`` : la fusion ne
+        changerait rien à la cible), ``etat_anterieur`` (son arbre est celui d'un commit **ancien** de
+        la cible : la fusionner reviendrait en arrière, ce n'est pas une preuve de livraison),
+        ``non_fusionnee`` ou :data:`NON_MESURE`.
+        """
+        none = {"etat": "aucun", "fichiers": []}
+        counts = ahead_behind(self.src, self.target_sha, sha) if self.target_sha else None
+        if counts is None:
+            return {"etat": NON_MESURE, "par": ""}, {"etat": NON_MESURE, "fichiers": []}, None
+        if counts[0] == 0:
+            return {"etat": "vide", "par": "aucun commit d'avance"}, none, counts
+        number = self.merged_pr(sha)
+        if number is not None:
+            return {"etat": "fusionnee", "par": f"pr #{number}"}, none, counts
+        probe = self.probe(sha)
+        conflict = {"etat": probe.conflict_kind, "fichiers": list(probe.files)}
+        if probe.status == NON_MESURE:
+            return {"etat": NON_MESURE, "par": "", "raison": probe.reason}, conflict, counts
+        if probe.same_tree:
+            return {"etat": "fusionnee", "par": "fusion_sans_apport"}, conflict, counts
+        tree = self.src.git("rev-parse", f"{sha}^{{tree}}").stdout.strip()
+        if tree in self.older_trees:
+            older = self.older_trees[tree]
+            return {"etat": "etat_anterieur", "par": f"revient à l'état de {older[:12]}"}, conflict, counts
+        return {"etat": "non_fusionnee", "par": ""}, conflict, counts
+
     def signal(self, kind: str, ref: str, detail: str, **extra: Any) -> None:
         self.signals.append({"type": kind, "ref": ref, "detail": detail, **extra})
 
 
-def _fusion(ctx: _Ctx, sha: str) -> tuple[dict[str, Any], dict[str, Any], tuple[int, int] | None]:
-    """``(fusion, conflit, (avance, retard))`` d'un commit contre la cible."""
-    counts = ahead_behind(ctx.src, ctx.target_sha, sha)
-    if counts is None:
-        return {"etat": NON_MESURE, "par": ""}, {"etat": NON_MESURE, "fichiers": []}, None
-    none = {"etat": "aucun", "fichiers": []}
-    if counts[0] == 0:
-        return {"etat": "fusionnee", "par": "ancetre"}, none, counts
-    tree = ctx.src.git("rev-parse", f"{sha}^{{tree}}").stdout.strip()
-    if tree and tree in ctx.target_trees:
-        # Fusion squash (ou rebase) d'une branche à jour : un commit de la cible porte exactement son arbre.
-        return {"etat": "fusionnee", "par": "arbre"}, none, counts
-    if sha in ctx.merged_heads:
-        return {"etat": "fusionnee", "par": f"pr #{ctx.merged_heads[sha]}"}, none, counts
-    probe = ctx.probe(sha)
-    conflict = {"etat": probe.conflict_kind, "fichiers": list(probe.files)}
-    if probe.status == NON_MESURE:
-        return {"etat": NON_MESURE, "par": "", "raison": probe.reason}, conflict, counts
-    if probe.same_tree:
-        # La fusion ne changerait rien à la cible : tout son contenu y est déjà.
-        return {"etat": "fusionnee", "par": "fusion_sans_apport"}, conflict, counts
-    return {"etat": "non_fusionnee", "par": ""}, conflict, counts
-
-
-def _branch_entry(ctx: _Ctx, ref: BranchRef) -> dict[str, Any]:
-    fusion, conflict, counts = _fusion(ctx, ref.sha)
+def _branch_entry(ctx: MapContext, ref: BranchRef, dirty: dict[str, bool | None]) -> dict[str, Any]:
+    fusion, conflict, counts = ctx.fusion(ref.sha)
     name = ref.name.split("/", 1)[1] if ref.remote and "/" in ref.name else ref.name
     task_id = name.removeprefix("task/") if name.startswith("task/") else ""
     orphan = bool(task_id) and ctx.view is not None and not ctx.view.is_live(task_id)
@@ -303,20 +375,24 @@ def _branch_entry(ctx: _Ctx, ref: BranchRef) -> dict[str, Any]:
         "conflit": conflict,
         "tache": task_id or None,
         "orpheline": orphan if ctx.view is not None or not task_id else NON_MESURE,
+        "worktree_sale": None if ref.remote else dirty.get(ref.name, False),
     }
     if orphan:
         ctx.signal("branche_orpheline", entry["ref"], f"branche de tâche sans tâche vivante ({task_id})", tache=task_id)
-    if fusion["etat"] == "fusionnee" and fusion["par"] != "ancetre":
+    if fusion["etat"] == "fusionnee":
         ctx.signal("branche_fusionnee_sans_etre_ancetre", entry["ref"], f"contenu déjà sur la cible ({fusion['par']})")
+    if fusion["etat"] == "etat_anterieur":
+        ctx.signal("branche_etat_anterieur", entry["ref"], f"la fusionner reviendrait en arrière ({fusion['par']})")
     if conflict["etat"] in ("changelog_seul", "autre") and not ref.remote:
         ctx.signal(f"conflit_{conflict['etat']}", entry["ref"], ", ".join(conflict["fichiers"]))
     return entry
 
 
-def _section_git(ctx: _Ctx, include_remote: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+def _section_git(ctx: MapContext, include_remote: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     branches: dict[str, Any] = {"mesure": False, "raison": "cible introuvable", "elements": []}
     worktrees: dict[str, Any] = {"mesure": False, "raison": "git worktree list a échoué", "elements": []}
     entries = list_worktrees(ctx.src)
+    dirty: dict[str, bool | None] = {}
     if entries is not None:
         worktrees = {
             "mesure": True,
@@ -328,13 +404,24 @@ def _section_git(ctx: _Ctx, include_remote: bool) -> tuple[dict[str, Any], dict[
                     "head": w.head,
                     "verrouille": w.locked,
                     "elagable": w.prunable,
+                    "sale": w.dirty if w.dirty is not None else NON_MESURE,
                 }
                 for w in sorted(entries, key=lambda w: w.path)
             ],
         }
+        for w in entries:
+            if w.branch:
+                dirty[w.branch] = True if dirty.get(w.branch) else w.dirty
         for w in worktrees["elements"]:
             if w["elagable"]:
                 ctx.signal("worktree_elagable", w["ref"], "dossier du worktree absent (git worktree prune le retirerait)")
+            if w["sale"] is True:
+                ctx.signal(
+                    "worktree_sale",
+                    w["ref"],
+                    "fichiers modifiés ou non suivis : du travail non commité",
+                    branche=f"branche:{w['branche']}" if w["branche"] else None,
+                )
     if not ctx.target_sha:
         return branches, worktrees
     refs = list_branches(ctx.src)
@@ -343,32 +430,38 @@ def _section_git(ctx: _Ctx, include_remote: bool) -> tuple[dict[str, Any], dict[
         return branches, worktrees
     # Les distantes du seul remote de la cible (``origin`` pour ``origin/main``) : un remote amont étranger
     # (historique sans ancêtre commun) n'est pas du travail de ce projet.
-    remote = ctx.src.target.split("/", 1)[0] + "/" if "/" in ctx.src.target else ""
+    remote = f"{ctx.src.remote}/" if ctx.src.remote else ""
     keep = [
         r
         for r in refs
         if r.name != ctx.src.target and (not r.remote or (include_remote and remote and r.name.startswith(remote)))
     ]
-    branches = {"mesure": True, "distantes_incluses": include_remote, "elements": [_branch_entry(ctx, r) for r in keep]}
+    branches = {
+        "mesure": True,
+        "distantes_incluses": include_remote,
+        "elements": [_branch_entry(ctx, r, dirty) for r in keep],
+    }
     return branches, worktrees
 
 
-def _pr_entry(ctx: _Ctx, pr: dict[str, Any], hours: int, branches: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _pr_entry(ctx: MapContext, pr: dict[str, Any], hours: int) -> dict[str, Any]:
     number = int(pr.get("number") or 0)
     head = str(pr.get("headRefName") or "")
     updated = parse_instant(pr.get("updatedAt"))
     owners = owners_of_branch(ctx.view, head, str(pr.get("title") or ""), number)
     alive, sessions = session_alive(ctx.view, owners)
     idle = hours_since(updated, ctx.src.now)
-    conflict: dict[str, Any] = {"etat": NON_MESURE, "fichiers": [], "source": ""}
     head_sha = str(pr.get("headRefOid") or "")
-    local = branches.get(f"branche:origin/{head}") or branches.get(f"branche:{head}")
-    sha = head_sha if head_sha and resolve_commit(ctx.src, head_sha) else str((local or {}).get("sha") or "")
-    if ctx.target_sha and sha:
-        probe = ctx.probe(sha)
-        conflict = {"etat": probe.conflict_kind, "fichiers": list(probe.files), "source": "git merge-tree local"}
-    elif str(pr.get("mergeable") or "") == "CONFLICTING":
-        conflict = {"etat": "conflit_non_detaille", "fichiers": [], "source": "gh mergeable"}
+    local_head = resolve_sha(ctx.src, head_sha) if head_sha else None
+    conflict: dict[str, Any]
+    if ctx.target_sha and local_head:
+        probe = ctx.probe(local_head)
+        conflict = {"etat": probe.conflict_kind, "fichiers": list(probe.files), "sha": local_head, "source": "git merge-tree local"}
+    else:
+        reason = "tête de la PR absente du dépôt local (git fetch)" if ctx.target_sha else "cible introuvable"
+        conflict = {"etat": NON_MESURE, "fichiers": [], "sha": head_sha or None, "raison": reason}
+        if str(pr.get("mergeable") or "") == "CONFLICTING":
+            conflict["gh_mergeable"] = "CONFLICTING"
     author = pr.get("author") if isinstance(pr.get("author"), dict) else {}
     entry: dict[str, Any] = {
         "ref": f"pr:{number}",
@@ -393,7 +486,7 @@ def _pr_entry(ctx: _Ctx, pr: dict[str, Any], hours: int, branches: dict[str, dic
         ctx.signal(
             "pr_inactive_sans_session_vivante",
             entry["ref"],
-            f"aucune activité depuis {idle} h, aucune session vivante",
+            f"aucune activité depuis {idle} h, aucune session vivante (un indice : « inconnu » n'est pas « morte »)",
             heures=idle,
         )
     if conflict["etat"] in ("changelog_seul", "autre"):
@@ -401,17 +494,18 @@ def _pr_entry(ctx: _Ctx, pr: dict[str, Any], hours: int, branches: dict[str, dic
     return entry
 
 
-def _section_github(ctx: _Ctx, hours: int, branches: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    by_ref = {b["ref"]: b for b in branches.get("elements", [])}
+def _section_github(ctx: MapContext, hours: int) -> tuple[dict[str, Any], dict[str, Any]]:
     prs: dict[str, Any] = {"mesure": False, "elements": []}
-    data, reason = gh_json(ctx.src, "pr", "list", "--state", "open", "--limit", "200", "--json", _PR_FIELDS)
+    data, reason = gh_json(ctx.src, "pr", "list", "--state", "open", "--limit", str(PR_LIMIT), "--json", _PR_FIELDS)
     if isinstance(data, list):
         items = sorted((p for p in data if isinstance(p, dict)), key=lambda p: int(p.get("number") or 0))
-        prs = {"mesure": True, "elements": [_pr_entry(ctx, p, hours, by_ref) for p in items]}
+        prs = {"mesure": True, "elements": [_pr_entry(ctx, p, hours) for p in items]}
+        if partial(data, PR_LIMIT):
+            prs.update(mesure=PARTIELLE, raison=f"{PR_LIMIT} PR lues, la limite : d'autres peuvent manquer")
     else:
         prs["raison"] = reason or "gh : réponse inattendue"
     issues: dict[str, Any] = {"mesure": False, "elements": []}
-    data, reason = gh_json(ctx.src, "issue", "list", "--state", "open", "--limit", "500", "--json", _ISSUE_FIELDS)
+    data, reason = gh_json(ctx.src, "issue", "list", "--state", "open", "--limit", str(ISSUE_LIMIT), "--json", _ISSUE_FIELDS)
     if isinstance(data, list):
         issues = {
             "mesure": True,
@@ -427,33 +521,39 @@ def _section_github(ctx: _Ctx, hours: int, branches: dict[str, Any]) -> tuple[di
                 for i in sorted((i for i in data if isinstance(i, dict)), key=lambda i: int(i.get("number") or 0))
             ],
         }
+        if partial(data, ISSUE_LIMIT):
+            issues.update(mesure=PARTIELLE, raison=f"{ISSUE_LIMIT} issues lues, la limite : d'autres peuvent manquer")
     else:
         issues["raison"] = reason or "gh : réponse inattendue"
     return prs, issues
 
 
-def _linked_states(ctx: _Ctx, numbers: set[int], open_numbers: set[int] | None) -> dict[int, dict[str, Any]]:
+def _linked_states(ctx: MapContext, numbers: set[int], open_numbers: set[int] | None) -> dict[int, dict[str, Any]]:
     """État des issues et PR liées (``gh issue view`` rend aussi une PR) ; une ouverte connue n'est pas relue."""
     states: dict[int, dict[str, Any]] = {}
     for number in sorted(numbers):
         if open_numbers is not None and number in open_numbers:
             states[number] = {"etat": "OPEN"}
             continue
-        data, reason = gh_json(ctx.src, "issue", "view", str(number), "--json", "number,state,closedAt,title")
+        data, reason = gh_json(ctx.src, "issue", "view", str(number), "--json", "number,state,stateReason,closedAt,title")
         states[number] = (
-            {"etat": str(data.get("state") or ""), "fermee_le": data.get("closedAt"), "titre": data.get("title") or ""}
+            {
+                "etat": str(data.get("state") or ""),
+                "raison_fermeture": data.get("stateReason") or "",
+                "fermee_le": data.get("closedAt"),
+                "titre": data.get("title") or "",
+            }
             if isinstance(data, dict)
             else {"etat": NON_MESURE, "raison": reason}
         )
     return states
 
 
-def _task_signals(ctx: _Ctx, tasks: list[dict[str, Any]], issues: dict[str, Any]) -> None:
+def _task_signals(ctx: MapContext, tasks: list[dict[str, Any]], issues: dict[str, Any]) -> None:
     open_tasks = [t for t in tasks if t["ouverte"]]
     open_numbers = {int(i["numero"]) for i in issues["elements"]} if issues["mesure"] else None
     linked = {n for t in open_tasks for n in t["liens"]["issues"]}
-    gh_ok = issues["mesure"]
-    states = _linked_states(ctx, linked, open_numbers) if gh_ok else {}
+    states = _linked_states(ctx, linked, open_numbers) if issues["mesure"] else {}
     for task in open_tasks:
         task["liens"]["etats"] = {str(n): states.get(n, {"etat": NON_MESURE}) for n in task["liens"]["issues"]}
         for n in task["liens"]["issues"]:
@@ -466,9 +566,11 @@ def _task_signals(ctx: _Ctx, tasks: list[dict[str, Any]], issues: dict[str, Any]
                 )
     if not ctx.target_sha:
         return
-    log = target_log(ctx.src, ctx.target_sha)
+    log, truncated = target_log(ctx.src, ctx.target_sha)
+    if truncated:
+        ctx.truncations.append(f"citations d'identifiants : {LOG_LIMIT} derniers commits de la cible seulement")
     for task in open_tasks:
-        pattern = _id_pattern(task["id"])
+        pattern = id_pattern(task["id"])
         hits = [{"sha": sha, "sujet": subject} for sha, subject, body in log if pattern.search(subject) or pattern.search(body)]
         task["commits_citant"] = hits[:20]
         if hits:
@@ -488,36 +590,26 @@ def build_map(
 ) -> dict[str, Any]:
     """La carte du projet. Aucune écriture hors du magasin d'objets temporaire (retiré à la sortie)."""
     view, ledger_reason = read_ledger(src)
-    ctx = _Ctx(src=src, view=view)
-    target_sha = resolve_commit(src, src.target)
-    if target_sha:
-        ctx.target_sha = target_sha
-        tree = src.git("rev-parse", f"{target_sha}^{{tree}}")
-        ctx.target_tree = tree.stdout.strip() if tree.returncode == 0 else ""
-        trees = src.git("log", "--max-count=5000", "--format=%T", target_sha)
-        ctx.target_trees = frozenset(trees.stdout.split()) if trees.returncode == 0 else frozenset()
-        merged, _reason = gh_json(src, "pr", "list", "--state", "merged", "--limit", "1000", "--json", "number,headRefOid")
-        if isinstance(merged, list):
-            ctx.merged_heads = {
-                str(p["headRefOid"]): int(p["number"]) for p in merged if isinstance(p, dict) and p.get("headRefOid")
-            }
+    ctx = MapContext(src=src, view=view)
+    ctx.prepare()
     tasks = [_task_entry(t, view) for t in sorted(view.tasks.values(), key=lambda t: t.id)] if view else []
     with scratch_objects(src) as env:
         ctx.env = env if ctx.target_tree else None
         branches, worktrees = _section_git(ctx, include_remote)
-        prs, issues = _section_github(ctx, inactivity_hours, branches)
+        prs, issues = _section_github(ctx, inactivity_hours)
     _task_signals(ctx, tasks, issues)
     payload: dict[str, Any] = {
         "$schema": MAP_SCHEMA,
         "genere_le": src.now.isoformat(),
         "projet": str(src.root),
-        "cible": {"ref": src.target, "sha": target_sha or NON_MESURE},
+        "cible": {"ref": src.target, "sha": ctx.target_sha or NON_MESURE},
         "parametres": {"inactivite_heures": inactivity_hours, "distantes_incluses": include_remote},
         "taches": {"mesure": view is not None, "elements": tasks, **({"raison": ledger_reason} if view is None else {})},
         "branches": branches,
         "worktrees": worktrees,
         "prs": prs,
         "issues": issues,
+        "troncatures": ctx.truncations,
         "signaux": sorted(ctx.signals, key=lambda s: (s["type"], s["ref"])),
     }
     payload["resume"] = summarize(payload)

@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
 from steward_doubles import Recorder, Scene
 
-from grimoire.steward import MAP_SCHEMA
+from grimoire.steward import MAP_SCHEMA, project_map
 from grimoire.steward.project_map import build_map, ci_state, issue_refs
 from grimoire.steward.sources import NON_MESURE
 
@@ -27,8 +28,8 @@ def test_la_carte_est_versionnee_et_stable(scene: Scene) -> None:
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
     for section in ("taches", "branches", "worktrees", "prs", "issues"):
         assert first[section]["mesure"] is True, section
-    assert first["resume"]["taches"] == 4
-    assert first["resume"]["taches_ouvertes"] == 3
+    assert first["resume"]["taches"] == 6
+    assert first["resume"]["taches_ouvertes"] == 5
 
 
 def test_taches_du_ledger(scene: Scene) -> None:
@@ -44,14 +45,61 @@ def test_taches_du_ledger(scene: Scene) -> None:
 def test_fusion_par_comparaison_d_arbres(scene: Scene) -> None:
     """Une fusion squash n'est pas ancêtre de la cible : seule la comparaison d'arbres la voit."""
     branches = _by_ref(build_map(scene.sources()), "branches")
-    assert branches["branche:feat/ancetre"]["fusion"] == {"etat": "fusionnee", "par": "ancetre"}
     squash = branches["branche:feat/squash"]
     assert squash["en_avance"] == 1
-    assert squash["fusion"] == {"etat": "fusionnee", "par": "arbre"}
+    assert squash["fusion"] == {"etat": "fusionnee", "par": "fusion_sans_apport"}
     assert branches["branche:feat/pr-fusionnee"]["fusion"] == {"etat": "fusionnee", "par": "pr #40"}
     assert branches["branche:feat/hors-cible"]["fusion"]["etat"] == "non_fusionnee"
     assert branches["branche:feat/hors-cible"]["conflit"]["etat"] == "aucun"
     assert "branche:origin/feat/squash" in branches  # les distantes du remote de la cible
+
+
+def test_une_branche_sans_commit_d_avance_est_vide_pas_fusionnee(scene: Scene) -> None:
+    branches = _by_ref(build_map(scene.sources()), "branches")
+    assert branches["branche:feat/vide"]["fusion"]["etat"] == "vide"
+    assert branches["branche:feat/ancetre"]["fusion"]["etat"] == "vide"
+
+
+def test_pr_empilee_ou_fusionnee_hors_cible_n_est_pas_une_fusion(scene: Scene) -> None:
+    """B1 : une PR fusionnée vers une autre base, ou dont le commit de fusion n'est pas sur la cible, ne fusionne rien."""
+    branches = _by_ref(build_map(scene.sources()), "branches")
+    assert branches["branche:feat/empilee"]["fusion"]["etat"] == "non_fusionnee"
+    assert branches["branche:feat/fusion-ailleurs"]["fusion"]["etat"] == "non_fusionnee"
+
+
+def test_un_arbre_ancien_de_la_cible_revient_en_arriere(scene: Scene) -> None:
+    carte = build_map(scene.sources())
+    retour = _by_ref(carte, "branches")["branche:feat/retour"]["fusion"]
+    assert retour["etat"] == "etat_anterieur"
+    assert retour["par"].startswith(f"revient à l'état de {scene.shas['init'][:12]}")
+    assert "branche:feat/retour" in _signals(carte, "branche_etat_anterieur")
+
+
+def test_worktree_sale(scene: Scene) -> None:
+    carte = build_map(scene.sources())
+    worktrees = _by_ref(carte, "worktrees")
+    assert worktrees[f"worktree:{scene.worktree}"]["sale"] is True
+    assert worktrees[f"worktree:{scene.root}"]["sale"] is False
+    assert _by_ref(carte, "branches")["branche:feat/sale"]["worktree_sale"] is True
+    sale = [s for s in carte["signaux"] if s["type"] == "worktree_sale"]
+    assert [s["branche"] for s in sale] == ["branche:feat/sale"]
+
+
+def test_conflit_d_une_pr_sur_sa_tete_locale(scene: Scene) -> None:
+    prs = _by_ref(build_map(scene.sources()), "prs")
+    assert prs["pr:31"]["conflit"]["sha"] == scene.shas["changelog"]
+    assert prs["pr:34"]["conflit"]["etat"] == NON_MESURE
+    assert "absente du dépôt local" in prs["pr:34"]["conflit"]["raison"]
+
+
+def test_listes_tronquees_partielles(scene: Scene, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(project_map, "PR_LIMIT", 2)
+    monkeypatch.setattr(project_map, "ISSUE_LIMIT", 1)
+    monkeypatch.setattr(project_map, "MERGED_LIMIT", 3)
+    carte = build_map(scene.sources())
+    assert carte["prs"]["mesure"] == "partielle" and "limite" in carte["prs"]["raison"]
+    assert carte["issues"]["mesure"] == "partielle"
+    assert any("PR fusionnées" in t for t in carte["troncatures"])
 
 
 def test_conflit_changelog_seul_ou_autre(scene: Scene) -> None:
@@ -75,14 +123,15 @@ def test_pr_inactive_sans_session_vivante(scene: Scene) -> None:
     carte = build_map(scene.sources())
     prs = _by_ref(carte, "prs")
     assert prs["pr:30"]["taches"] == [scene.tasks["tenue"]]
+    assert prs["pr:33"]["session_vivante"] is False
     assert prs["pr:30"]["session_vivante"] is True
     assert prs["pr:31"]["session_vivante"] is False
     assert prs["pr:31"]["ci"] == "succes"
     # 30 : vieille mais sa session est vivante ; 32 : récente ; 31 : vieille et sans session.
-    assert _signals(carte, "pr_inactive_sans_session_vivante") == {"pr:31"}
+    assert _signals(carte, "pr_inactive_sans_session_vivante") == {"pr:31", "pr:33", "pr:34", "pr:35"}
     # Sans signe de vie de la sonde, la session de 30 est « inconnue » : plus vivante, la PR monte.
     dead = build_map(scene.sources(alive=False))
-    assert _signals(dead, "pr_inactive_sans_session_vivante") == {"pr:30", "pr:31"}
+    assert "pr:30" in _signals(dead, "pr_inactive_sans_session_vivante")
 
 
 def test_seuil_d_inactivite_reglable(scene: Scene) -> None:

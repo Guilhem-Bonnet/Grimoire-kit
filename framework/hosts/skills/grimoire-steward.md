@@ -45,18 +45,26 @@ Verdicts : `a_faire`, `livree`, `obsolete`, `doublon`, `abandonnee`,
 
 | Type | Champs | Ce que le code vérifie |
 |---|---|---|
-| `commit` | `sha`, `message_contient` (facultatif) | le commit est sur la cible |
-| `fichier` | `chemin`, `motif` (facultatif), `absent` (facultatif) | le chemin et le motif sont sur la cible, ou n'y sont pas |
-| `issue` | `numero`, `etat` (`fermee` par défaut) | l'état lu par `gh` |
-| `pr` | `numero`, `etat` (`fusionnee` par défaut) | l'état lu par `gh` et le commit de fusion sur la cible |
-| `inactivite` | `heures` | dernière activité et vivacité des sessions recalculées |
-| `doublon_de` | `element` | l'autre élément existe |
+| `commit` | `sha`, `message_contient` | le commit est sur la cible, son message contient le texte |
+| `fichier` | `chemin`, `motif`, `absent` | le fichier et le motif sont sur la cible ; `absent` : n'y sont plus **après y avoir été** |
+| `issue` | `numero`, `etat` (`fermee` par défaut) | l'état et la raison de fermeture lus par `gh` |
+| `pr` | `numero`, `etat` (`fusionnee` par défaut) | fusionnée dans la cible (base et commit de fusion) |
+| `inactivite` | `heures` | dernière activité recalculée, sessions liées toutes terminées |
+| `doublon_de` | `element` | l'autre élément existe, reste ouvert, n'est pas lui-même jugé doublon |
 | `note` | `texte` | rien : une note seule ne suffit jamais |
 
-`livree` exige un `commit`, un `fichier`, une `pr` fusionnée ou une `issue`
-fermée ; `obsolete` un `commit`, `fichier`, `pr` ou `issue` ; `doublon` un
-`doublon_de` ; `abandonnee` une `inactivite`. `conflit_simple` et
-`conflit_semantique` sont recalculés sur la PR ou la branche.
+La preuve doit porter **sur l'élément jugé** :
+
+- `livree` d'une branche : seule sa fusion dans la cible compte (recalculée) ;
+- `livree` d'une tâche ou d'une issue : un `commit` avec `message_contient`
+  égal à l'identifiant (ou `#N`), une `pr` fusionnée qui le nomme (titre,
+  corps, branche), ou l'issue elle-même fermée comme terminée — fermée
+  `not_planned` ou `duplicate`, ce n'est pas livré ;
+- `abandonnee` : seulement si les sessions liées sont **terminées** ;
+  « inconnu » n'est pas « morte ». Sans tâche liée : aucun travail non
+  commité et un dernier commit au-delà du seuil ;
+- un worktree avec du travail non commité n'est jamais `livree`,
+  `obsolete` ni `abandonnee`.
 
 ```json
 {
