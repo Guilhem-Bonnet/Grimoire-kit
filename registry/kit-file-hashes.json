@@ -1938,6 +1938,10 @@
    "version": "3.32.0",
    "path": "framework/hooks/pre-commit-cc.sh"
   },
+  "7fb1d768c661a1bab8785a5f3997a0efac7029d304df57ccd61b8a5456ec0f9c": {
+   "version": "3.65.0",
+   "path": "framework/FREEZE.md"
+  },
   "7fd1201e6ff2ece8f128f4d09ec00c4cf565d3c0808fee2c443be052ae4d17f9": {
    "version": "3.38.0",
    "path": "framework/agentic-standard/templates/retention-registry.yaml"

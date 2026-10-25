@@ -61,7 +61,8 @@ L'inventaire régénéré le 2026-10-25 (47 fichiers `.py`, 35 475 lignes ; les 
 fichiers suivis sous `framework/tools/` comptent aussi 8 non-`.py`) porte, pour
 chaque outil, la décision de la politique ci-dessus dans sa colonne `décision` :
 
-- 41 REFERENCED : **geler**, porter vers `src/` à la demande ;
+- 41 REFERENCED : **geler**, porter vers `src/` à la demande ; « geler » est leur état présent, la suppression de
+  l'original suit le portage (tableau ci-dessus), pas avant ;
 - 6 TRANSITIVE (`rag-indexer.py`, `rag-retriever.py`, `memory-sync.py`,
   `llm-router.py`, `token-budget.py`, `incubator.py`) : **geler**, drainer
   l'appelant d'abord ;
