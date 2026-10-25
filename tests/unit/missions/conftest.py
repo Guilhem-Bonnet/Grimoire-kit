@@ -9,4 +9,10 @@ from grimoire.missions import ci_slots
 
 @pytest.fixture(autouse=True)
 def _mute_ci_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ci_slots, "default_ci_probe", lambda _branch, _repo: ci_slots.CheckReading(ci_slots.UNKNOWN, "muette"))
+    monkeypatch.setattr(
+        ci_slots,
+        "default_ci_probe",
+        lambda branches, _repo, _cwd: {b: ci_slots.CheckReading(ci_slots.UNKNOWN, "muette") for b in branches},
+    )
+    # Le dépôt vient de la politique ou du remote ``origin`` : aucun test ne lance le vrai ``git`` pour le trouver.
+    monkeypatch.setattr(ci_slots, "ci_repository", lambda _home, _project: "acme/kit")

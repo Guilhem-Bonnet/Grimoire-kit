@@ -952,3 +952,19 @@ def test_dispatch_resume_under_hold_launches_no_agent(
         de.resume_with_dispatch(engine, wfi.id, project_root=tmp_path)
     assert spy.return_value.execute.call_count == 0
     assert engine.status(wfi.id).status == "paused"  # et rien n'a été écrit
+
+
+def test_pause_brake_reads_the_project_settings_not_the_cwd(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """#886 : un hook lancé depuis un autre dossier juge le frein sur les réglages du projet."""
+    seen: list[Path | None] = []
+    monkeypatch.setattr(
+        "grimoire.hosts.contract_probe.hooks_disabled_reason", lambda root=None, **_kw: seen.append(root) or ""
+    )
+    _claimed(governed)
+    _prompt(governed)
+    write_pause(governed, mode=HOLD)
+    monkeypatch.chdir(tmp_path_factory.mktemp("ailleurs"))
+    assert _verdict(_pre(governed, **TOUCH)[0]) == "deny"
+    assert seen and all(r == governed for r in seen), seen
