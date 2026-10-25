@@ -288,7 +288,7 @@ exécuter. Détail et dégradations par hôte : [Surfaces hôtes](../hotes.md).
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 | `grimoire host hook --host <h> --event <e>` | Point d'entrée des hooks générés (stdin vers stdout) |
 
-`grimoire init`, `grimoire up --fix` et `grimoire standard init` synchronisent
+`grimoire init`, `grimoire up` et `grimoire standard init` synchronisent
 automatiquement ; l'appel manuel sert après l'ajout ou la modification d'une
 persona.
 

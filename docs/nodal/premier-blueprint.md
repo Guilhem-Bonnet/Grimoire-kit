@@ -173,7 +173,7 @@ pas](concepts/execution.md).
 
 ## La suite
 
-- Ouvrir le même fichier dans l'atelier : `grimoire serve`, puis la page
+- Ouvrir le même fichier dans l'atelier : `grimoire cockpit serve`, puis la page
   blueprints. Voir [Atelier local & blueprints](../guides/atelier-blueprints.md).
 - Ajouter une porte qui exige une preuve : [Les portes](concepts/portes.md).
 - Router les échecs ailleurs que le chemin nominal :
