@@ -1298,7 +1298,7 @@ class TraceLedger:
 
     # ── OTel GenAI JSONL export ────────────────────────────────────────────
 
-    def export_otel_jsonl(self, dest: Path, *, mission_id: str | None = None) -> int:
+    def export_otel_jsonl(self, dest: Path, *, mission_id: str | None = None, runtime_root: Path | None = None) -> int:
         """Export traces as OTel GenAI JSONL spans. Returns span count written.
 
         Format follows OpenTelemetry GenAI semantic conventions
@@ -1306,15 +1306,29 @@ class TraceLedger:
         ``invoke_agent`` parent span per trace, plus one ``execute_tool``
         child span per recorded tool call — so the count returned is spans,
         not traces, whenever a trace carries tool calls.
+        Avec ``runtime_root``, les événements du journal du RuntimeKernel
+        s'y ajoutent, un span chacun, avec leur ``parentSpanId`` (R26).
         No opentelemetry-sdk dependency required — pure JSONL output.
         """
-        lines = [json.dumps(span, ensure_ascii=False) for span in self.otel_spans(mission_id=mission_id)]
+        lines = [
+            json.dumps(span, ensure_ascii=False)
+            for span in self.otel_spans(mission_id=mission_id, runtime_root=runtime_root)
+        ]
         dest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         return len(lines)
 
-    def otel_spans(self, *, mission_id: str | None = None) -> list[dict[str, Any]]:
-        """Les spans ``grimoire.otel.v2`` du journal : source unique du JSONL et de l'export OTLP."""
-        return [span for trace in self.list_traces(mission_id=mission_id) for span in self._to_otel_spans(trace)]
+    def otel_spans(self, *, mission_id: str | None = None, runtime_root: Path | None = None) -> list[dict[str, Any]]:
+        """Les spans ``grimoire.otel.v2`` du journal : source unique du JSONL et de l'export OTLP.
+
+        ``runtime_root`` : la racine d'un RuntimeKernel dont le journal d'événements est lu
+        en plus, sans être recopié ici (R26) ; absent, le résultat est celui d'avant.
+        """
+        spans = [span for trace in self.list_traces(mission_id=mission_id) for span in self._to_otel_spans(trace)]
+        if runtime_root is not None:
+            from grimoire.traces.runtime_spans import runtime_otel_spans
+
+            spans.extend(runtime_otel_spans(runtime_root, mission_id=mission_id))
+        return spans
 
     # ── Langfuse JSONL export ──────────────────────────────────────────────
 

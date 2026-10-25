@@ -1079,10 +1079,12 @@ def task_trace_export(
     ``--format langfuse`` le contrat REST ``/api/public/traces`` de Langfuse ;
     ``--format otlp --endpoint URL`` envoie les mêmes spans à un collecteur
     OTLP/HTTP (JSON) et échoue si le collecteur ne les accepte pas.
-    Aucun SDK tiers requis.
+    Aucun SDK tiers requis. Les formats otel et otlp ajoutent les spans des runs
+    de flow, lus dans le journal du RuntimeKernel (``parentSpanId`` compris, R26).
     """
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.traces.ledger import TraceLedger
+    from grimoire.traces.runtime_spans import DEFAULT_RUNTIME_RELPATH
 
     if fmt not in {"otel", "langfuse", "otlp"}:
         console.print(f"[red]✗[/red] Format inconnu : {fmt} (attendu : otel, langfuse, otlp)")
@@ -1104,7 +1106,9 @@ def task_trace_export(
                 raise typer.Exit(2)
             headers[name.strip()] = value
         try:
-            sent = export_otlp(ledger, endpoint, mission_id=mission_id, headers=headers)
+            sent = export_otlp(
+                ledger, endpoint, mission_id=mission_id, headers=headers, runtime_root=root / DEFAULT_RUNTIME_RELPATH,
+            )
         except OtlpExportError as exc:
             console.print(f"[red]✗[/red] {escape(str(exc))}")
             raise typer.Exit(1) from exc
@@ -1113,7 +1117,7 @@ def task_trace_export(
     if dest is None:
         console.print(f"[red]✗[/red] Le format {fmt} écrit un fichier : passez le chemin de sortie.")
         raise typer.Exit(2)
-    count = ledger.export_otel_jsonl(dest, mission_id=mission_id) if fmt == "otel" else ledger.export_langfuse(dest, mission_id=mission_id)
+    count = ledger.export_otel_jsonl(dest, mission_id=mission_id, runtime_root=root / DEFAULT_RUNTIME_RELPATH) if fmt == "otel" else ledger.export_langfuse(dest, mission_id=mission_id)
     console.print(f"[green]OK[/green] {count} trace(s) exportée(s) au format {fmt} → {dest}")
 
 

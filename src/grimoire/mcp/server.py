@@ -814,6 +814,28 @@ def task_add(
 
 
 @_tool(_reads())
+def task_intake(text: str, project_path: str = ".") -> str:
+    """Propose type, risk and tasks for a request — without writing anything (R07).
+
+    The same proposal as `grimoire task add --intake "<text>"` (one shared
+    function, `missions.intake.intake_proposal`): mission type, risk profile,
+    scope, expected policy checks and proposed tasks, classified
+    deterministically without a model. Nothing is created: review it, then open
+    each retained task with `task_add`.
+
+    Args:
+        text: The request to classify.
+        project_path: Path to project root (accepted like every task tool; the classification does not depend on it).
+    """
+    from grimoire.missions.intake import intake_proposal
+
+    try:
+        return json.dumps(intake_proposal(text), indent=2, ensure_ascii=False)
+    except ValueError as exc:
+        return _tool_error({"error": str(exc)})
+
+
+@_tool(_reads())
 def task_list_ready(
     project_path: str = ".", mission: str = "", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:
