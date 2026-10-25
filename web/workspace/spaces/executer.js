@@ -215,6 +215,22 @@ function injectStyles() {
     .ex-kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
     .ex-event { font-size: var(--t-min); color: var(--ink2); padding: 2px 0; }
     .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+    /* Sur la carte (artboard Travail), une ligne par fait : rien ne se casse au
+       milieu d'un mot ou d'un identifiant — ce qui déborde s'élide, le texte
+       entier reste au survol. */
+    .ex-card .ex-card-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+    .ex-card .ex-card-meta > * { flex: none; }
+    .ex-card .ex-card-meta > .ex-card-owner { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .ex-card-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+    .ex-card .ex-session { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; color: var(--ink2); font-family: inherit; font-size: var(--t-min); }
+    .ex-card .ex-session > * { flex: none; }
+    .ex-card .ex-session code { border: 0; background: none; padding: 0; color: var(--ink); word-break: normal; }
+    .ex-card .ex-session .ex-session-lbl { display: none; }
+    .ex-card .ex-facts > * { white-space: nowrap; }
+    .ex-card .ex-wait { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; min-width: 0; }
+    .ex-card .ex-wait > * { flex: none; }
+    .ex-card .ex-wait > .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .ex-card .ex-wait.flag > span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .ex-card-next { font-size: var(--t-min); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
     .ex-card-next .btn { height: 24px; padding: 0 10px; font-size: var(--t-min); }
@@ -319,7 +335,7 @@ function sessionLine(task, { full = false } = {}) {
   const line = document.createElement('div');
   line.className = 'ex-session';
   const id = full ? task.session_id : `${task.session_id.slice(0, 8)}…`;
-  line.append(text('span', 'lbl', 'session'), Object.assign(document.createElement('code'), { textContent: id, title: task.session_id }));
+  line.append(text('span', 'lbl ex-session-lbl', 'session'), Object.assign(document.createElement('code'), { textContent: id, title: task.session_id }));
   if (task.host) {
     if (HOST_ICON[task.host]) line.append(glyph(HOST_ICON[task.host], 'hôte'));
     line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
@@ -397,11 +413,17 @@ function sinceNode(iso) {
   return node;
 }
 
-function liveRow(session, { withState = true } = {}) {
+// `compact` (carte) : la raison d'une inactivité (« sonde de l'hôte : au
+// repos ») passe au survol — sur la carte, elle cassait la ligne en deux.
+function liveRow(session, { withState = true, compact = false } = {}) {
   const line = document.createElement('div');
   line.className = 'ex-facts lbl';
   line.dataset.role = 'live-facts';
-  if (withState) line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
+  if (withState) {
+    const state = row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session, { reason: !compact })}`));
+    state.title = `session ${livenessLabel(session)}`;
+    line.append(state);
+  }
   if (session.updated_at && !Number.isNaN(Date.parse(session.updated_at))) {
     const sign = text('span', null, 'signe ');
     sign.append(sinceNode(session.updated_at));
@@ -496,32 +518,41 @@ function taskCard(task, onSelect, portfolio = false, selected = false) {
   if (portfolio) card.append(portfolioRow(task));
   const meta = text('div', 'ex-card-meta lbl', '');
   if (task.type) meta.append(typeGlyph(task.type));
-  meta.append(text('span', null, task.owner || 'sans owner'));
+  const owner = text('span', 'ex-card-owner', task.owner || 'sans owner');
+  owner.title = owner.textContent;
+  meta.append(owner);
   if (task.risk_profile) {
-    if (RISK_ICON[task.risk_profile]) meta.append(glyph(RISK_ICON[task.risk_profile], 'profil de risque'));
-    meta.append(text('span', null, task.risk_profile));
+    // Le profil par défaut garde son glyphe (forme + nom au survol) ; seul un
+    // profil qui s'écarte du défaut écrit son mot, la ligne tient sur une carte.
+    const riskGlyph = RISK_ICON[task.risk_profile] ? glyph(RISK_ICON[task.risk_profile], `profil de risque : ${task.risk_profile}`) : null;
+    if (riskGlyph) meta.append(riskGlyph);
+    if (task.risk_profile !== 'standard' || !riskGlyph) meta.append(text('span', null, task.risk_profile));
   }
-  // Priorité effective (issue #638) : barres + mot, jamais la couleur seule ; et
-  // le badge « consigne non lue » tant qu'une consigne de l'orchestrateur n'a
-  // pas été livrée à la session.
+  // Priorité effective (issue #638) : barres + mot, jamais la couleur seule.
   const priority = task.effective_priority || 'medium';
   const bars = priorityBars(priority);
   if (bars) meta.append(bars);
   meta.append(text('span', null, PRIORITY_LABEL[priority] || priority));
+  card.append(meta);
+  // Le badge « consigne non lue » tant qu'une consigne de l'orchestrateur n'a
+  // pas été livrée à la session — sur sa propre ligne, hors de la méta.
+  const flags = document.createElement('div');
+  flags.className = 'ex-card-flags';
   if (task.directives_pending > 0) {
     const unread = badge(`consigne non lue (${task.directives_pending})`, 'acc');
     unread.dataset.role = 'directive-badge';
-    meta.append(unread);
+    flags.append(unread);
   } else if (task.directives_unacknowledged > 0) {
-    meta.append(badge(`consigne non accusée (${task.directives_unacknowledged})`, 'acc'));
+    flags.append(badge(`consigne non accusée (${task.directives_unacknowledged})`, 'acc'));
   }
-  card.append(meta);
+  if (flags.childElementCount) card.append(flags);
   if (task.board === 'blocked' && task.status !== 'waiting') {
     // Le mot ET la raison, jamais la seule couleur (une attente nommée a déjà
     // sa propre ligne juste en dessous).
     const line = document.createElement('div');
     line.className = 'ex-wait flag bad';
     line.dataset.role = 'blocked';
+    line.title = `Bloquée : ${task.blocked_reason || 'raison non écrite'}`;
     line.append(stateIcon('bad'), text('span', null, 'Bloquée'));
     line.append(text('span', 'lbl', task.blocked_reason || 'raison non écrite'));
     card.append(line);
@@ -531,6 +562,7 @@ function taskCard(task, onSelect, portfolio = false, selected = false) {
     const line = document.createElement('div');
     line.className = 'ex-wait' + (human ? ' human' : '');
     line.dataset.role = 'waiting';
+    line.title = waitingText(task.waiting);
     line.append(waitGlyph(task.waiting), text('span', null, waitingText(task.waiting)));
     if (human) line.append(text('span', 'lbl', QUESTION_KIND_LABEL[task.waiting.question.kind] || task.waiting.question.kind));
     card.append(line);
@@ -555,15 +587,19 @@ function taskCard(task, onSelect, portfolio = false, selected = false) {
   // viennent du claim, posés par le hook UserPromptSubmit de la session —
   // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
   if (task.session_id) {
-    const sessionRow = sessionLine(task);
-    if (task.session && task.session.id) sessionRow.prepend(sessionGlyph(task.session));
-    card.append(sessionRow);
+    // La vivacité a son glyphe sur la ligne des faits, juste en dessous : pas
+    // de doublon ici.
+    card.append(sessionLine(task));
   }
   // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
   // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
-  if (task.session && task.session.id) card.append(liveRow(task.session, { withState: !portfolio }));
+  // Vivacité, signe, durée et coût sur une seule ligne de faits, chaque fait
+  // d'un bloc (le coût n'a sa propre ligne que sans session).
+  const facts = task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
+  if (facts) card.append(facts);
   const cost = costRow(task);
-  if (cost) card.append(cost);
+  if (cost && facts) facts.append(Object.assign(cost, { className: 'ex-cost' }));
+  else if (cost) card.append(cost);
 
   const { forward, canBlock } = nextMoves(task);
   const nextRow = document.createElement('div');
@@ -964,11 +1000,11 @@ function decisionsBanner(count, onOpen) {
 // Vivacité calculée à quatre valeurs (K5, #770) : jamais un booléen. `inconnu`
 // n'est pas « mort » ; `attention` (vivant sans progression, inconnu prolongé)
 // colore le point sans rien tuer.
-function livenessLabel(session) {
+function livenessLabel(session, { reason = true } = {}) {
   const l = session.liveness || { state: 'inconnu' };
   // Accord avec « session » : les valeurs stockées restent masculines.
   const word = { vivant: 'vivante', inactif: 'inactive', inconnu: 'inconnue', 'terminé': 'terminée' }[l.state] || l.state;
-  return l.reason && l.state === 'inactif' ? `${word} (${l.reason})` : word;
+  return reason && l.reason && l.state === 'inactif' ? `${word} (${l.reason})` : word;
 }
 // Glyphe de vivacité (P30) : une forme par valeur — anneau à moitié plein
 // (vivante), anneau vide (inactive), anneau coché (terminée), anneau en
