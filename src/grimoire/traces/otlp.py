@@ -30,6 +30,8 @@ from urllib import request as urlrequest
 from grimoire.core.exceptions import GrimoireRuntimeError
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from grimoire.traces.ledger import TraceLedger
 
 __all__ = ["OtlpExportError", "build_otlp_requests", "export_otlp"]
@@ -196,6 +198,7 @@ def export_otlp(
     headers: Mapping[str, str] | None = None,
     timeout: float = DEFAULT_TIMEOUT_S,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    runtime_root: Path | None = None,
 ) -> int:
     """Envoie les traces du *ledger* au collecteur OTLP/HTTP *endpoint*. Rend le nombre de spans acceptés.
 
@@ -205,7 +208,7 @@ def export_otlp(
     le nombre de spans envoyés avant l'échec.
     """
     url = _traces_url(endpoint)
-    spans = ledger.otel_spans(mission_id=mission_id)
+    spans = ledger.otel_spans(mission_id=mission_id, runtime_root=runtime_root)
     sent = 0
     for body in build_otlp_requests(spans, batch_size=batch_size):
         count = sum(len(s["spans"]) for rs in body["resourceSpans"] for s in rs["scopeSpans"])

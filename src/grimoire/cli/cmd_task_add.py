@@ -135,7 +135,7 @@ def task_add(
 
 def _emit_intake(text: str, *, title: str, acceptance: list[str] | None, console: Any) -> None:
     """Le JSON de l'intake sur stdout ; refusé, sans rien écrire, s'il se mêle à une création."""
-    from grimoire.missions.intake import IntakeRequest, MissionIntakeService
+    from grimoire.missions.intake import intake_proposal
 
     if title or acceptance:
         console.print("[red]✗[/red] --intake propose sans créer : ne se combine ni avec un titre ni avec --acceptance")
@@ -143,9 +143,7 @@ def _emit_intake(text: str, *, title: str, acceptance: list[str] | None, console
     if not text.strip():
         console.print("[red]✗[/red] --intake attend le texte de la demande")
         raise typer.Exit(2)
-    result = MissionIntakeService().analyze(IntakeRequest(raw_text=text))
-    payload = {**result.to_dict(), "written": False, "next": "`grimoire task add \"<titre>\" -a \"<critère>\"` pour chaque tâche retenue"}
-    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    typer.echo(json.dumps(intake_proposal(text), indent=2, ensure_ascii=False))
 
 
 def _print_verifiability(task: Any) -> None:
