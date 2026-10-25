@@ -711,6 +711,39 @@ def task_link(
     console.print(f"[green]OK[/green] {task.id} dépend de {depends_on} ({dependency_kind.value})")
 
 
+@task_app.command("unlink")
+def task_unlink(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument()],
+    depends_on: Annotated[str, typer.Option("--depends-on", help="Tâche dont celle-ci ne doit plus dépendre.")],
+    reason: Annotated[str, typer.Option("--reason", help="Pourquoi le lien tombe (journalisé).")],
+    kind: Annotated[str, typer.Option("--kind", help="Nature du lien.")] = "blocks",
+    project_root: _PROJECT_ROOT = Path(),
+    ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+    actor: _ACTOR = "cli",
+) -> None:
+    """Retire une dépendance — par exemple vers une tâche annulée et remplacée (#906)."""
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.schemas import DependencyKind
+
+    try:
+        dependency_kind = DependencyKind(kind)
+    except ValueError:
+        console.print(f"[red]✗[/red] Nature de lien inconnue : {kind}")
+        raise typer.Exit(1) from None
+    service = _service(project_root, ledger_root)
+    try:
+        task = service.unlink(task_id, depends_on, dependency_kind, reason=reason, actor=actor)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    if _fmt(ctx) == "json":
+        payload = {"task": task.id, "removed": depends_on, "kind": dependency_kind.value, "reason": reason.strip()}
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    console.print(f"[green]OK[/green] {task.id} ne dépend plus de {depends_on} ({dependency_kind.value})")
+
+
 @task_app.command("waves")
 def task_waves(
     ctx: typer.Context,
