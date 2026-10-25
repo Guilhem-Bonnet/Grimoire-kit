@@ -21,7 +21,7 @@ from playwright.sync_api import Page
 def concevoir(workspace: Page, project_with_blueprint: tuple[Path, str]) -> tuple[Page, str]:
     _root, bp_id = project_with_blueprint
     workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'concevoir'")
     workspace.wait_for_selector(".cv-card", timeout=15_000)
     return workspace, bp_id
 
@@ -33,12 +33,11 @@ def _zoom(page: Page) -> str:
 def test_les_segments_du_zoom_changent_de_niveau(concevoir: tuple[Page, str]) -> None:
     page, _bp = concevoir
     assert [b.inner_text().strip() for b in page.locator("#zoom-seg button").all()] == [
-        "Flotte",
-        "Projet",
+        "Blueprints",
         "Workflow",
         "Nœud",
-    ], "`grimoire serve` est un alias du cockpit : quatre niveaux"
-    assert _zoom(page) == "Projet"
+    ], "`grimoire serve` est un alias du cockpit : trois niveaux depuis P31"
+    assert _zoom(page) == "Blueprints"
     page.locator(".cv-card").first.click()
 
     page.locator("#zoom-seg button", has_text="Workflow").click()
@@ -50,6 +49,6 @@ def test_les_segments_du_zoom_changent_de_niveau(concevoir: tuple[Page, str]) ->
     page.wait_for_selector(".cv-tab")
     assert _zoom(page) == "Nœud"
 
-    page.locator("#zoom-seg button", has_text="Projet").click()
+    page.locator("#zoom-seg button", has_text="Blueprints").click()
     page.wait_for_selector(".cv-card")
-    assert _zoom(page) == "Projet"
+    assert _zoom(page) == "Blueprints"

@@ -2,7 +2,8 @@
 
 Complète ``test_workspace_concevoir.py`` (qui ne navigue qu'à la souris) :
 ``Enter`` sur une carte et sur un nœud, le bouton « Ouvrir le workflow » de
-l'inspecteur, « Simuler » et la carte projet du niveau Flotte du cockpit.
+l'inspecteur, et « Simuler ». (La carte projet de la Flotte a quitté Concevoir avec le zoom Flotte/Projet, P31 :
+elle est couverte par ``test_workspace_coque_p31.py``.)
 """
 
 from __future__ import annotations
@@ -13,16 +14,24 @@ import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais e2e ignoré")
 
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Page
+
+from .conftest import open_atelier
 
 
 @pytest.fixture
 def concevoir(workspace: Page, project_with_blueprint: tuple[Path, str]) -> tuple[Page, str]:
     _root, bp_id = project_with_blueprint
     workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'concevoir'")
     workspace.wait_for_selector(".cv-card", timeout=15_000)
     return workspace, bp_id
+
+
+def _open_problemes(page: Page) -> None:
+    """Rouvre l'atelier (le dock est replié par défaut, P62) puis choisit l'onglet Problèmes."""
+    open_atelier(page)
+    page.locator('[data-dock-tab="problemes"]').click()
 
 
 def _zoom(page: Page) -> str:
@@ -62,7 +71,7 @@ def test_simuler_ecrit_le_verdict_dans_le_dock_problemes(concevoir: tuple[Page, 
         page.get_by_role("button", name="Simuler").click()
 
     assert seen.value.status == 200
-    page.locator('[data-dock-tab="problemes"]').click()
+    _open_problemes(page)
     page.wait_for_function("() => document.querySelector('#dock-body')?.textContent.includes('verdict :')")
     dock = page.locator("#dock-body").inner_text()
     assert "blueprint simulate" in dock
@@ -82,7 +91,7 @@ def test_simuler_refuse_est_dit_dans_le_dock(concevoir: tuple[Page, str]) -> Non
 
     page.get_by_role("button", name="Simuler").click()
 
-    page.locator('[data-dock-tab="problemes"]').click()
+    _open_problemes(page)
     page.wait_for_function("() => document.querySelector('#dock-body')?.textContent.includes('simulation refusée')")
     assert "graphe invalide" in page.locator("#dock-body").inner_text()
 
@@ -116,27 +125,3 @@ def test_entree_sur_un_noeud_zoome_au_niveau_noeud(concevoir: tuple[Page, str]) 
         "Preuves",
     ]
 
-
-def test_la_carte_projet_de_la_flotte_ouvre_ce_projet(
-    browser: Browser, served_cockpit_multi: tuple[str, str, str]
-) -> None:
-    served, slug_a, slug_b = served_cockpit_multi
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
-    page = context.new_page()
-    try:
-        page.goto(f"{served}/workspace/index.html?project={slug_a}", wait_until="domcontentloaded")
-        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        page.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
-        page.wait_for_function("() => window.GrimoireWorkspace.space === 'concevoir'")
-        page.locator("#zoom-seg button", has_text="Flotte").click()
-        page.wait_for_selector(".cv-cards .cv-card")
-        slugs = [c.locator(".mono").inner_text() for c in page.locator(".cv-cards .cv-card").all()]
-        assert {slug_a, slug_b} <= set(slugs)
-
-        page.locator(".cv-cards .cv-card", has_text=slug_b).click()
-
-        page.wait_for_url(f"**?project={slug_b}*")
-        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-        assert page.evaluate("() => new URLSearchParams(location.search).get('project')") == slug_b
-    finally:
-        context.close()

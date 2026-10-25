@@ -53,7 +53,7 @@ def observer(workspace: Page) -> Page:
     workspace.route("**/api/workspace/flows/runs*", lambda route: _fulfill(route, {"runs": [], "total": 0}))
     workspace.route("**/api/events/log*", lambda route: _fulfill(route, {}))
     workspace.evaluate("(id) => window.GrimoireWorkspace.goto(id)", "observer")
-    workspace.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg="observer")
+    workspace.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg="observer")
     workspace.wait_for_selector("table.tbl-pick tbody tr")
     return workspace
 
@@ -89,7 +89,8 @@ def test_voir_la_timeline_d_une_tache_ouvre_executer_sur_la_timeline(observer: P
     button = observer.locator("#panel-inspector .btn", has_text="Voir la timeline de GAO-demo-001")
     button.click()
 
-    observer.wait_for_function("() => window.GrimoireWorkspace.space === 'executer'")
+    observer.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     observer.wait_for_selector("#view-seg button[aria-pressed='true']")
-    pressed = observer.locator("#view-seg button[aria-pressed='true']").inner_text()
-    assert pressed.strip().lower().startswith("timeline"), pressed
+    # La vue se lit sur sa valeur, pas sur son libellé (« Timeline » est devenu « Chronologie »).
+    pressed = observer.locator("#view-seg button[aria-pressed='true']")
+    assert pressed.get_attribute("data-value") == "timeline", pressed.inner_text()

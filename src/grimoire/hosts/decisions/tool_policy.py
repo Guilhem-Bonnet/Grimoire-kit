@@ -9,11 +9,13 @@ of it.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from grimoire.core.exceptions import GrimoirePolicyError
 from grimoire.core.standard_state import active_profile_id, active_task_id, profile_floor_id, state_writes_allowed
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.profile_floor import session_profile
@@ -300,12 +302,24 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         profile = session_profile(hook, journal=False)
         if vector.governed_only and profile not in _AUTHORITY_PROFILES:
             return None
+        if vector.code == "control-zone":
+            # #876 lot 1 : une écriture d'agent refusée dans la zone protégée révoque les mandats (best effort :
+            # le refus, lui, ne dépend pas de la révocation).
+            with contextlib.suppress(Exception):
+                from grimoire.missions.mandate import REVOKE_PROTECTED_WRITE, revoke_every_mandate
+
+                revoke_every_mandate(REVOKE_PROTECTED_WRITE, vector.what)
         why = (
             "L'instantané du ledger est un cache dérivé du journal, restauré sans rejouer le préfixe qu'il couvre : "
             "écrit à la main, il imposerait un état que le journal ne dit pas. Il ne s'écrit que par le ledger."
             if vector.code == "ledger-snapshot"
-            else "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
-            "le hook de l'hôte : c'est la preuve qu'un humain a décidé."
+            else (
+                "La zone de contrôle ~/.grimoire/control/ porte la preuve de contrat d'hôte, le journal d'autorité du "
+                "mandat et la clé du cockpit : elle ne s'écrit que par le code du kit, jamais par un outil d'agent."
+                if vector.code == "control-zone"
+                else "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
+                "le hook de l'hôte : c'est la preuve qu'un humain a décidé."
+            )
         )
         return Decision(
             outcome=Outcome.DENY,
@@ -406,7 +420,18 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     paused = pause_brake(hook, facts)
     if paused is not None:
         return paused
-    custom_rules = load_custom_rules(hook.project_root)
+    read_only = facts.mutation is MutationClass.READ_ONLY and not facts.secret_target
+    try:
+        custom_rules = load_custom_rules(hook.project_root)
+    except GrimoirePolicyError as exc:
+        # policies.yaml illisible : tout outil qui peut muter repart vers l'utilisateur (ASK, via
+        # run_decision) ; un outil en lecture seule passe avec l'avertissement — sinon l'agent ne
+        # pourrait plus lire le fichier fautif pour le réparer (et un run headless serait bloqué).
+        if not read_only:
+            raise
+        return _untrusted_escalation(hook, facts) or Decision(
+            context=f"[Grimoire] {exc}", detail={"error": "GR-POL-004", "tool": hook.tool_name}
+        )
     # A temporal rule (require_approval/per_session/cooldown_after) commonly
     # leaves action_kinds/mutation_classes/risk_profiles empty — it has no
     # opinion on those dimensions, only on the session. Registered as-is into
@@ -417,7 +442,6 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     # non-temporal rules; temporal ones are the temporal layer's alone.
     base_rules = tuple(rule for rule in custom_rules if not rule.is_temporal)
     has_temporal_rules = any(rule.is_temporal for rule in custom_rules)
-    read_only = facts.mutation is MutationClass.READ_ONLY and not facts.secret_target
     if read_only and not has_temporal_rules:
         return _untrusted_escalation(hook, facts) or Decision()
 

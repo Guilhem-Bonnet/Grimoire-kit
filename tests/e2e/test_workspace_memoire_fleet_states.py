@@ -22,10 +22,12 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 from playwright.sync_api import Page, Route
 
+from .conftest import open_scope_all
+
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _fulfill(route: Route, payload: dict) -> None:
@@ -73,9 +75,9 @@ _RESULTS = {
 
 
 def _open_fleet(page: Page) -> None:
+    """Le zoom « Flotte » de Mémoire est devenu la portée « Tous les projets » de la coque (P31)."""
+    open_scope_all(page, "#savoir/memoire")
     _goto(page, "memoire")
-    page.wait_for_selector("#view-seg button")
-    page.locator("#view-seg button", has_text="Flotte").click()
     page.wait_for_selector(".me-search input")
 
 
@@ -184,7 +186,7 @@ def test_un_projet_sans_memoire_liee_est_nomme_dans_l_apercu(workspace: Page) ->
     assert "4/5 projet(s) lisible(s)" in workspace.locator(".me-summary").inner_text()
 
 
-def test_un_projet_sans_memoire_propre_n_offre_que_la_flotte(workspace: Page) -> None:
+def test_un_projet_sans_memoire_propre_n_offre_que_la_recherche(workspace: Page) -> None:
     status = {
         "state": "uninitialized",
         "available": False,
@@ -203,5 +205,9 @@ def test_un_projet_sans_memoire_propre_n_offre_que_la_flotte(workspace: Page) ->
     workspace.wait_for_selector("#view-seg button")
 
     labels = [b.inner_text() for b in workspace.locator("#view-seg button").all()]
-    assert labels == ["Flotte"], "sans mémoire propre ni Store, ni Graphe, ni Couches"
+    assert labels == ["Recherche"], "sans mémoire propre ni Store, ni Graphe, ni Couches"
+
+    open_scope_all(workspace, "#savoir/memoire")
+    _goto(workspace, "memoire")
+    workspace.wait_for_selector(".me-wrap")
     assert "Aucun projet lisible" in workspace.locator(".me-wrap").inner_text()

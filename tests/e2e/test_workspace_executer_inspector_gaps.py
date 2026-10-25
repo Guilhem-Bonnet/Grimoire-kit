@@ -4,12 +4,11 @@ Un projet dédié (jamais ``real_project``, partagé par toute la suite) porte
 deux tâches posées par la CLI, donc par le même ``TaskService`` que
 l'interface :
 
-- « Preuves déclarées » : cinq preuves attendues, pour voir la troncature des
-  pastilles (4 sur une carte, 3 dans la Liste) et ce que dit l'en-tête de la
-  colonne (``porte : requiert …``) ;
+- « Preuves déclarées » : cinq preuves attendues, pour voir ce que dit l'en-tête
+  de la colonne (``porte : requiert …``) ;
 - « Prête à bloquer » : réclamable, pour le champ « raison du blocage ».
 
-Couvre : sélection d'une ligne de la Liste, pastilles ``expected_evidence``,
+Couvre : sélection d'une ligne de la Liste, anneau de porte des cartes,
 bandeau de porte par colonne, champ « raison du blocage » (refus sans raison,
 transition avec) et filtre de gravité de la Timeline.
 """
@@ -108,7 +107,7 @@ def exec_page(browser: Browser, served_inspector: tuple[str, Path, str]) -> Iter
     page.goto(f"{served_inspector[0]}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.evaluate("() => window.GrimoireWorkspace.goto('executer')")
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'executer'")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     page.wait_for_selector(".ex-card")
     try:
         yield page
@@ -138,27 +137,17 @@ def test_cliquer_une_ligne_de_la_liste_ouvre_la_tache_dans_l_inspecteur(exec_pag
 # ── Pastilles de preuves et bandeau de porte ────────────────────────────────
 
 
-def test_les_pastilles_de_preuves_sont_tronquees_a_quatre_sur_la_carte_et_trois_dans_la_liste(
-    exec_page: Page,
-) -> None:
-    card = exec_page.locator(".ex-card", has_text="Preuves déclarées").first
-    assert card.locator(".ex-card-chips .chip").count() == 4
-    assert _EVIDENCE[4] not in card.inner_text(), "la cinquième preuve est tronquée"
+def test_la_carte_rend_la_progression_de_sa_porte_en_anneau(exec_page: Page) -> None:
+    """Les anneau de porte des cartes ont cédé la place à un anneau « n/m » (#915) : il dit combien
+    de conditions de passage vers la colonne suivante sont réunies, et son titre nomme cette colonne."""
+    ring = exec_page.locator(".ex-card", has_text="Prête à bloquer").first.locator("[data-role='proof']")
 
-    _view(exec_page, "Liste")
-    row = exec_page.locator("tr[data-task]", has_text="Preuves déclarées")
-    row.wait_for()
-    assert row.locator(".chip").count() == 3
-
-
-def test_une_carte_sans_preuve_declaree_le_dit(exec_page: Page) -> None:
-    card = exec_page.locator(".ex-card", has_text="Prête à bloquer").first
-
-    assert "aucune preuve déclarée" in card.locator(".ex-card-chips").inner_text()
+    assert re.fullmatch(r"\d+/\d+", ring.inner_text().strip()), ring.inner_text()
+    assert "conditions de passage vers" in (ring.get_attribute("title") or "")
 
 
 def test_le_bandeau_de_colonne_nomme_les_preuves_requises(exec_page: Page) -> None:
-    _view(exec_page, "Board 8")
+    _view(exec_page, "Huit colonnes")
     exec_page.wait_for_function("() => document.querySelectorAll('.ex-col').length >= 8")
     column = exec_page.locator(".ex-col", has=exec_page.locator(".ex-card", has_text="Preuves déclarées")).first
 
@@ -171,7 +160,7 @@ def test_le_bandeau_de_colonne_nomme_les_preuves_requises(exec_page: Page) -> No
 
 
 def test_une_colonne_sans_preuve_declaree_le_dit(exec_page: Page) -> None:
-    _view(exec_page, "Board 8")
+    _view(exec_page, "Huit colonnes")
     exec_page.wait_for_function("() => document.querySelectorAll('.ex-col').length >= 8")
 
     gates = [g.inner_text() for g in exec_page.locator(".ex-col .ex-col-gate").all()]
@@ -265,7 +254,7 @@ def test_le_filtre_de_gravite_ne_garde_que_les_causes(exec_page: Page) -> None:
     exec_page.route("**/api/workspace/tasks/*/trace*", lambda route: _fulfill(route, trace))
     exec_page.locator(".ex-card", has_text="Preuves déclarées").first.click()
     exec_page.locator("#inspector-body").get_by_text("Preuves déclarées").first.wait_for()
-    _view(exec_page, "Timeline")
+    _view(exec_page, "Chronologie")
     exec_page.wait_for_selector(".ex-tl-count")
     assert exec_page.locator(".ex-tl-count").inner_text() == "3/3"
 
@@ -283,7 +272,7 @@ def test_le_filtre_de_gravite_ne_garde_que_les_causes(exec_page: Page) -> None:
 def test_les_boutons_d_action_rapide_d_une_carte_ne_propagent_pas_le_clic(
     exec_page: Page, served_inspector: tuple[str, Path, str]
 ) -> None:
-    """« Voir la porte » et « Bloquer… » vivent dans la carte, qui se
+    """« Bloquer… » vit dans la carte, qui se
     sélectionne elle-même au clic : le bouton doit arrêter la propagation, sinon
     le clic remonte à la carte et sélectionne la tâche une seconde fois. Un
     écouteur posé sur la carte (phase de bulle) le prouve sans dépendre d'un
@@ -294,7 +283,7 @@ def test_les_boutons_d_action_rapide_d_une_carte_ne_propagent_pas_le_clic(
         "(el) => { window.__parentClicks = 0; el.addEventListener('click', () => { window.__parentClicks += 1; }); }"
     )
 
-    card.get_by_role("button", name="Voir la porte").click()
+    card.get_by_role("button", name="Bloquer…").click()
     exec_page.locator("#inspector-body").get_by_text(task_id, exact=True).wait_for()
 
     assert exec_page.evaluate("() => window.__parentClicks") == 0

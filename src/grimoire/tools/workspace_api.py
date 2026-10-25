@@ -253,7 +253,68 @@ def _task_json(task: Any) -> dict[str, Any]:
     data["directives_unacknowledged"] = len(task.unacknowledged_directives)
     # Issue #638 lot A : la session qui porte la carte, et comment la reprendre.
     data.update(session_fields(task))
+    # P64 : la classe de route (V0/V1/V2), recalculée depuis le texte comme le
+    # board et `task show` — jamais stockée, jamais devinée côté vue.
+    from grimoire.missions.verifiability import classify
+
+    data["verifiability_class"] = classify(task).value
     return data
+
+
+# Colonne suivante d'une carte (miroir de FORWARD dans web/workspace/spaces/executer.js) :
+# le graphe réel du ledger projeté sur le board. Une attente nommée repart en cours.
+_FORWARD_BOARD: dict[str, str] = {
+    "proposed": "ready", "ready": "in_progress", "in_progress": "review",
+    "blocked": "ready", "review": "accepted", "accepted": "released",
+}
+
+
+def annotate_gates(project_root: Path, tasks: list[Any], cards: list[dict[str, Any]]) -> None:
+    """Pose `next_gate` sur chaque carte : les conditions du passage à la colonne suivante.
+
+    Lecture seule : c'est `gates.check_transition` (le même verdict que celui qui
+    refuse une écriture), jamais une transition. Chaque condition est une preuve
+    exigée par le fichier de gates, verte (`ok`) ou rouge avec sa raison et son
+    remède. Une transition non déclarée n'a aucune condition : `next_gate` porte
+    alors `conditions: []` et la vue n'invente rien. Une carte en colonne
+    terminale, ou dont le verdict ne se lit pas, n'a pas de `next_gate`.
+    """
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.board import board_status_of
+    from grimoire.missions.gates import check_transition, declared_transitions
+    from grimoire.missions.schemas import TaskState
+
+    try:
+        declared = declared_transitions(project_root)
+    except GrimoireError:
+        return
+    for task, card in zip(tasks, cards, strict=True):
+        here = board_status_of(task.status)
+        target = "in_progress" if task.status is TaskState.WAITING else _FORWARD_BOARD.get(here)
+        if target is None:
+            continue
+        try:
+            verdict = check_transition(project_root, task, here, target)
+        except (GrimoireError, OSError):
+            continue
+        entry = declared.get((here, target)) or {}
+        required = [n for n in (entry.get("required_evidence") or []) if isinstance(n, str)]
+        refused = {r.evidence: r for r in verdict.refusals}
+        names = required + [n for n in refused if n not in required]
+        card["next_gate"] = {
+            "to": target,
+            "transition_id": verdict.transition_id,
+            "strictness": verdict.strictness,
+            "conditions": [
+                {
+                    "gate": name,
+                    "ok": name not in refused,
+                    "reason": refused[name].reason if name in refused else "",
+                    "remedy": refused[name].remedy if name in refused else "",
+                }
+                for name in names
+            ],
+        }
 
 
 def tasks_view(
@@ -310,6 +371,7 @@ def tasks_view(
     from grimoire.tools.workspace_portfolio import annotate_cards
 
     annotate_cards(project_root, service, tasks, cards, now=now or datetime.now(UTC), probe=probe)
+    annotate_gates(service.project_root, tasks, cards)
     payload["tasks"] = cards
     payload["count"] = len(tasks)
     return payload
@@ -380,6 +442,7 @@ def task_view(project_root: Path, task_id: str) -> dict[str, Any]:
     task = service.require(task_id)
     here = board_status_of(task.status)
     payload = _task_json(task)
+    annotate_gates(service.project_root, [task], [payload])
     payload["next_moves_require"] = {
         to: list(entry.get("required_evidence", []) or [])
         for (src, to), entry in declared_transitions(service.project_root).items()
@@ -1063,15 +1126,18 @@ def proposals_view(project_root: Path) -> dict[str, Any]:
     naturellement le cache au prochain appel.
     """
     from grimoire.core.standard_generation import PROPOSALS_DIR
-    from grimoire.proposals import list_proposals
+    from grimoire.proposals import accept_blocker, list_proposals
     from grimoire.tools import view_cache
 
     root = project_root.resolve()
     signature = view_cache.path_signature([root / PROPOSALS_DIR])
+    # `accept_blocker` : le refus qu'« Accepter » rencontrerait à coup sûr
+    # (même texte que `accept_proposal`), pour que la fiche montre ce qu'il
+    # reste à faire à la main plutôt qu'un bouton qui échoue toujours.
     return view_cache.cached(
         f"proposals_view:{root}",
         signature,
-        lambda: {"proposals": [p.to_dict() for p in list_proposals(root)]},
+        lambda: {"proposals": [{**p.to_dict(), "accept_blocker": accept_blocker(p)} for p in list_proposals(root)]},
     )
 
 

@@ -29,7 +29,9 @@ contrôlé, la tête de branche. Ici, le SHA contrôlé *est* le commit de merge
 contenu intégré, pas seulement celui de l'enfant — et la cible ne peut avancer
 que jusqu'à lui.
 
-Limites écrites : aucun push ; le check est une commande déclarée (``--check``
+Limites écrites : aucun push, et le merge ne supprime pas la branche ``task/<id>`` (la file de fusion est au lot 4 de
+#876) ; le nettoyage — worktree, branche fusionnée en local et en distant, vérifiée par ``gh pr view`` — est celui du
+janitor du tick (:mod:`grimoire.missions.janitor`, lot 2) ; le check est une commande déclarée (``--check``
 ou le besoin ``test-runner`` du projet), pas encore une commande approuvée par
 empreinte (W3-03) — son empreinte est seulement notée au reçu ; le commit de
 merge est créé avec l'identité git configurée du dépôt ; un ``core.hooksPath``

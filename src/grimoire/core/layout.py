@@ -39,11 +39,16 @@ OVERRIDES_DIR = f"{GRIMOIRE_DIR}/overrides"
 AGENTS_SUBDIR = "agents"
 SKILLS_SUBDIR = "skills"
 WORKFLOWS_SUBDIR = "workflows"
-TEAMS_SUBDIR = "teams"
 PROMPT_TEMPLATES_SUBDIR = "prompt-templates"
 FRAMEWORK_SUBDIR = "framework"
 MEMORY_CODE_SUBDIR = "memory"
 TOOLS_SUBDIR = "tools"
+
+#: Sous-dossiers du tier kit que le kit ne livre plus. ``grimoire up`` n'élague pas le
+#: tier kit : ce que les versions précédentes y ont copié y reste. ``find_orphans`` les
+#: signale pour que l'archivage les retire (jamais une suppression silencieuse).
+#: ``teams`` : les manifestes d'équipe n'avaient aucun producteur dans le kit (R12).
+RETIRED_KIT_SUBDIRS: tuple[str, ...] = ("teams",)
 
 #: Pre-boundary locations, still read so an unmigrated project keeps working.
 #: Order matters: most recent layout first. Kept until ``grimoire migrate`` has

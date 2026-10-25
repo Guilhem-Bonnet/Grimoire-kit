@@ -34,6 +34,8 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Page
 
+from .conftest import open_scope_all
+
 # Recopiés de `tests/e2e/conftest.py` plutôt qu'importés : sans
 # `tests/__init__.py`, un `from tests.e2e.conftest import …` réexécuterait le
 # conftest sous un second nom de module (voir son en-tête sur `REAL_HOME`).
@@ -68,7 +70,7 @@ TITLE_B = "Beta — tâche libre, session éteinte (#638)"
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _capture(page: Page, name: str) -> None:
@@ -245,7 +247,9 @@ def _open_portfolio(page: Page) -> None:
     _goto(page, "executer")
     page.wait_for_selector(".ex-card, .empty")
     _capture(page, "01-executer-avant-ce-projet")
-    page.locator("select[data-role='scope']").select_option("portfolio")
+    # Le portefeuille est la portée « Tous les projets » de la coque (P31),
+    # plus un sélecteur propre à Travail.
+    open_scope_all(page, "#travail")
     page.wait_for_selector(".ex-card[data-project]")
     page.wait_for_function("() => document.querySelectorAll('.ex-card[data-project]').length >= 2")
 

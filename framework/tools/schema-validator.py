@@ -3,7 +3,7 @@
 schema-validator.py — Validateur structurel de configs Grimoire.
 ==============================================================
 
-Valide les fichiers YAML du kit (archetype.dna.yaml, team manifests,
+Valide les fichiers YAML du kit (archetype.dna.yaml,
 agent DNA) contre les schemas définis dans framework/.
 
 Checks effectués :
@@ -60,9 +60,6 @@ DNA_OPTIONAL_SECTIONS = [
 DNA_ENFORCEMENT_VALUES = {"hard", "soft"}
 DNA_PRIORITY_VALUES = {1, 2, 3, "1", "2", "3"}
 
-# Champs requis pour team manifest
-TEAM_REQUIRED_FIELDS = ["team"]
-TEAM_NESTED_REQUIRED = ["name", "display_name", "version", "description"]
 
 # Agent DNA required fields
 AGENT_DNA_REQUIRED_FIELDS = ["id", "name", "version", "description"]
@@ -294,70 +291,6 @@ def validate_dna(path: Path, data: dict) -> list[ValidationIssue]:
     return issues
 
 
-def validate_team(path: Path, data: dict) -> list[ValidationIssue]:
-    """Valide un fichier team manifest (team-*.yaml)."""
-    issues: list[ValidationIssue] = []
-    rel = str(path)
-    _issue_counter = [0]
-
-    def _add(severity: str, fld: str, msg: str, suggestion: str = "") -> None:
-        _issue_counter[0] += 1
-        issues.append(ValidationIssue(
-            issue_id=f"TEAM-{_issue_counter[0]:03d}",
-            severity=severity,
-            file=rel,
-            field=fld,
-            message=msg,
-            suggestion=suggestion,
-        ))
-
-    # Root 'team' key required
-    if "team" not in data:
-        _add(SEVERITY_ERROR, "team", "Clé racine 'team' manquante")
-        return issues
-
-    team = data["team"]
-    if not isinstance(team, dict):
-        _add(SEVERITY_ERROR, "team", "La clé 'team' doit être un mapping")
-        return issues
-
-    # Required nested fields
-    for fld in TEAM_NESTED_REQUIRED:
-        if fld not in team:
-            _add(SEVERITY_ERROR, f"team.{fld}",
-                 f"Champ requis manquant : team.{fld}")
-        elif not team[fld]:
-            _add(SEVERITY_WARNING, f"team.{fld}",
-                 f"Champ vide : team.{fld}")
-
-    # Agents list
-    if "agents" in team:
-        if not isinstance(team["agents"], list):
-            _add(SEVERITY_ERROR, "team.agents",
-                 "team.agents doit être une liste")
-        else:
-            for i, agent in enumerate(team["agents"]):
-                if isinstance(agent, dict):
-                    if "name" not in agent:
-                        _add(SEVERITY_ERROR, f"team.agents[{i}].name",
-                             f"Agent[{i}] sans champ 'name'")
-                    if "role" not in agent:
-                        _add(SEVERITY_WARNING, f"team.agents[{i}].role",
-                             f"Agent[{i}] sans champ 'role'")
-
-    # Inputs/outputs presence
-    if "inputs" not in team:
-        _add(SEVERITY_INFO, "team.inputs",
-             "Section 'inputs' manquante",
-             "Ajoutez inputs.required et inputs.optional")
-    if "outputs" not in team:
-        _add(SEVERITY_INFO, "team.outputs",
-             "Section 'outputs' manquante",
-             "Ajoutez outputs.deliverables")
-
-    return issues
-
-
 def validate_agent_dna(path: Path, data: dict) -> list[ValidationIssue]:
     """Valide un fichier agent DNA (*.dna.yaml dans stack/agents/)."""
     issues: list[ValidationIssue] = []
@@ -395,7 +328,7 @@ def discover_files(project_root: Path,
     """Découvre les fichiers à valider.
 
     Returns:
-        Liste de (path, type) où type est 'dna', 'team', ou 'agent_dna'.
+        Liste de (path, type) où type est 'dna' ou 'agent_dna'.
     """
     files: list[tuple[Path, str]] = []
 
@@ -413,13 +346,6 @@ def discover_files(project_root: Path,
         for dna in project_root.rglob("archetype.dna.yaml"):
             files.append((dna, "dna"))
 
-    # Team manifests
-    if file_type in (None, "team"):
-        teams_dir = project_root / "framework" / "teams"
-        if teams_dir.is_dir():
-            for tf in teams_dir.glob("team-*.yaml"):
-                files.append((tf, "team"))
-
     # Agent DNA files
     if file_type in (None, "agent_dna"):
         for agent_dna in project_root.rglob("*.dna.yaml"):
@@ -434,8 +360,6 @@ def _guess_type(path: Path) -> str:
     name = path.name
     if name == "archetype.dna.yaml":
         return "dna"
-    if name.startswith("team-") and name.endswith(".yaml"):
-        return "team"
     if name.endswith(".dna.yaml"):
         return "agent_dna"
     return "dna"  # default
@@ -451,7 +375,7 @@ def validate_all(project_root: Path | str,
 
     Args:
         project_root: racine du projet Grimoire
-        file_type: 'dna', 'team', 'agent_dna' ou None pour tout
+        file_type: 'dna', 'agent_dna' ou None pour tout
         single_file: chemin spécifique à valider
 
     Returns:
@@ -481,8 +405,6 @@ def validate_all(project_root: Path | str,
 
         if ftype == "dna":
             report.issues.extend(validate_dna(path, data))
-        elif ftype == "team":
-            report.issues.extend(validate_team(path, data))
         elif ftype == "agent_dna":
             report.issues.extend(validate_agent_dna(path, data))
 
@@ -583,7 +505,7 @@ def main():
     sub = parser.add_subparsers(dest="command", help="Commande")
 
     val_p = sub.add_parser("validate", help="Valider les fichiers YAML")
-    val_p.add_argument("--type", choices=["dna", "team", "agent_dna"],
+    val_p.add_argument("--type", choices=["dna", "agent_dna"],
                        default=None,
                        help="Type de fichiers à valider (défaut: tous)")
     val_p.add_argument("--file", default=None,

@@ -1,0 +1,11 @@
+{
+  "skill_name": "upgrade-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Que m'a laissé en attente le dernier `grimoire up` ?",
+      "expected_output": "Lit et explique le checkpoint destructif et les propositions en attente, recommande, et n'applique rien sans réponse explicite.",
+      "files": []
+    }
+  ]
+}

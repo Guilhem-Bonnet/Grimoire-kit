@@ -1,0 +1,11 @@
+{
+  "skill_name": "crewai-crew-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Prépare l'import de ce crew CrewAI dans un flow Grimoire.",
+      "expected_output": "Structure les tasks, fixe des schémas de sortie et mappe chaque rôle vers un pattern socle Grimoire.",
+      "files": []
+    }
+  ]
+}

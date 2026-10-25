@@ -1,0 +1,11 @@
+{
+  "skill_name": "autogen-conversation-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Conçois une équipe AutoGen de trois agents pour la revue de code.",
+      "expected_output": "Définit des rôles par responsabilité, une condition de terminaison et un protocole de désaccord avant de créer la conversation.",
+      "files": []
+    }
+  ]
+}

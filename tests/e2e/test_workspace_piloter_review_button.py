@@ -220,14 +220,16 @@ def _served_with_run_id(
 
 
 def _open_project(page: Page, served: str, project_name: str) -> None:
-    page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
+    page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
-    page.get_by_role("button", name="Flotte").click()
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
     page.wait_for_selector(".tbl-wrap")
     row = page.locator(".tbl tbody tr", has_text=project_name)
     row.wait_for(timeout=15_000)
+    # Choisir la ligne change la portée (P31) : la fiche s'ouvre après rechargement.
     row.click()
+    page.wait_for_url(lambda url: "project=" in url, timeout=30_000)
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.wait_for_selector("h2:has-text('" + project_name + "')", timeout=15_000)
 
 

@@ -2,7 +2,7 @@
 //
 // Deux hôtes, une coque : `grimoire serve` sert un projet, `grimoire cockpit
 // serve` en sert N et attend `?project=<slug>` sur chaque lecture. Ce module
-// porte cette différence pour que les six modules d'espace ne l'aient jamais à
+// porte cette différence pour que les modules d'espace ne l'aient jamais à
 // connaître : ils appellent `api.tasks()`, et la cible est déjà bonne.
 //
 // Aucun module d'espace ne doit appeler `fetch` directement. Une route qui
@@ -10,6 +10,11 @@
 // `src/grimoire/tools/workspace_routes.py`.
 
 const WS = '/api/workspace/';
+
+/** Lectures d'attention en vol, par portée : partagées entre lecteurs simultanés. */
+const attentionInFlight = new Map();
+/** Dernière réponse d'attention par portée, reprise seulement par qui le demande (`maxAgeMs`). */
+const attentionRecent = new Map();
 
 /** État de l'hôte, résolu une fois à l'amorçage. */
 export const host = {
@@ -28,6 +33,10 @@ export const host = {
   // `project` (voir piloter.js : Flotte reste le point d'entrée par défaut du
   // pilotage de flotte, sauf lancement direct).
   projectFromUrl: false,
+  /** La portée de la coque (P31) : vrai = « Tous les projets » (`?scope=all`,
+   *  ou cockpit sans aucun projet résolu). `project` reste alors le projet
+   *  servi, celui auquel les lectures sans cible explicite s'adressent. */
+  scopeAll: false,
   status: null,
 };
 
@@ -123,6 +132,8 @@ export async function boot() {
   host.projectFromUrl = host.kind === 'cockpit' && Boolean(wanted);
   if (host.kind === 'cockpit') host.project = host.project || status.project || status.slug;
   else host.project = null;
+  // `?project=` l'emporte : un lien vers un projet ouvre ce projet.
+  host.scopeAll = host.kind === 'cockpit' && ((params.get('scope') === 'all' && !wanted) || !host.project);
   return status;
 }
 
@@ -184,6 +195,29 @@ export const api = {
     return withProject(WS + 'stream' + (query ? '?' + query : ''));
   },
   glossary: () => get(WS + 'glossary'),
+  // Ce qui attend une décision humaine (P22), rangé par urgence. `portfolio`
+  // lit tout le registre — la portée « Tous les projets » ; `probe` relance
+  // les sondes au lieu de lire leur cache (« Réessayer », P32).
+  // Une lecture d'attention parcourt tout le registre côté serveur : deux
+  // lecteurs simultanés (compteur de la barre, Flotte, À traiter) partagent la
+  // même requête en vol au lieu d'en lancer deux. `probe` force une lecture neuve ;
+  // `maxAgeMs` accepte une réponse déjà reçue s'il n'est pas plus vieille.
+  attention: (portfolio, { probe = false, maxAgeMs = 0 } = {}) => {
+    const params = { ...(portfolio ? { scope: 'portfolio' } : {}), ...(probe ? { probe: '1' } : {}) };
+    const key = portfolio ? 'portfolio' : 'project';
+    if (!probe) {
+      const recent = attentionRecent.get(key);
+      if (maxAgeMs > 0 && recent && Date.now() - recent.at <= maxAgeMs) return Promise.resolve(recent.data);
+      if (attentionInFlight.has(key)) return attentionInFlight.get(key);
+    }
+    const request = get(WS + 'attention', Object.keys(params).length ? params : undefined);
+    request.then((data) => attentionRecent.set(key, { at: Date.now(), data })).catch(() => {});
+    if (!probe) {
+      attentionInFlight.set(key, request);
+      request.finally(() => attentionInFlight.delete(key)).catch(() => {});
+    }
+    return request;
+  },
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
   // convention que `health()` : l'inspecteur du portefeuille (#638, lot C)
@@ -204,6 +238,10 @@ export const api = {
   files: (tier) => get(WS + 'files', tier ? { tier } : undefined),
   file: (path) => get(WS + 'file', { path }),
   fileDiff: (path) => get(WS + 'file/diff', { path }),
+  // P44 : ce qu'une mise à jour écrirait (par catégorie), et le diff d'un
+  // fichier qu'elle toucherait — deux lectures pures, jamais la route qui écrit.
+  upgradeChanges: () => get(WS + 'upgrade/changes'),
+  upgradeDiff: (path) => get(WS + 'upgrade/diff', { path }),
   fileUsage: (path) => get(WS + 'file/usage', { path }),
   fileHistory: (path) => get(WS + 'file/history', { path }),
   commands: () => get(WS + 'commands'),
@@ -235,6 +273,11 @@ export const api = {
   // Concevoir (lot 3) : les containers enrichis (genre, agents, équipe,
   // dernière modification) que `/api/blueprints` seul ne porte pas.
   blueprintContainers: () => get(WS + 'blueprints'),
+  // Configuration (P66) : registre de sûreté des hooks et fournisseurs de
+  // modèles, deux lectures (jamais d'écriture : les gestes sont des commandes).
+  hooks: () => get(WS + 'hooks'),
+  providers: () => get(WS + 'providers'),
+
   // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
   // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue
   // disponible pour l'assignation, pas seulement ceux déjà attachés. `project`

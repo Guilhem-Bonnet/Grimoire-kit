@@ -72,9 +72,28 @@ def _capture(page: Page, name: str) -> None:
     page.screenshot(path=str(folder / f"{name}.png"), full_page=False)
 
 
+_BADGE_IS_API_COUNT = """async () => {
+  const b = document.getElementById('decisions-count');
+  const api = (await (await fetch('/api/workspace/attention?scope=portfolio')).json()).count;
+  return (b.hidden ? 0 : Number(b.textContent)) === api;
+}"""
+
+
+def _badge_is_api_count(page: Page) -> None:
+    """Le badge dit le `count` de l'API d'attention (réponses sans réponse humaine comprises)."""
+    page.wait_for_function(_BADGE_IS_API_COUNT, timeout=APPEAR_MS)
+
+
+def _badge(page: Page) -> int:
+    """Le compteur de l'onglet « À traiter » : 0 quand il est caché."""
+    return page.evaluate(
+        "() => { const b = document.getElementById('decisions-count'); return b.hidden ? 0 : Number(b.textContent); }"
+    )
+
+
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 @pytest.fixture(scope="module")
@@ -319,7 +338,7 @@ def test_une_reponse_en_cours_de_saisie_n_est_pas_ecrasee_par_l_actualisation(pa
 
     assert area.input_value() == "ma réponse à moitié écrite", "la saisie a été perdue"
     page.locator("#brand").click()  # sort du champ : l'actualisation différée repart
-    page.locator("#view-seg button", has_text="Board 4").click()
+    page.locator("#view-seg button", has_text="Tableau").click()
     _card(page, title).wait_for(timeout=APPEAR_MS)
     _answer_all(service)
 
@@ -335,35 +354,44 @@ def test_le_compteur_de_decisions_est_exact_visible_partout_et_cliquable(page: P
     """
     _answer_all(service)
     _goto(page, "memoire")  # un espace qui n'a rien à voir avec les décisions
-    pill = page.locator("#decisions-pill")
-    page.wait_for_function("() => document.getElementById('decisions-pill').hidden === true")
+    pill = page.locator("#decisions-count")  # le compteur est un badge de l'onglet « À traiter » (P63)
+    tab = page.locator("#tab-space-a-traiter")
+    page.wait_for_function("() => document.getElementById('decisions-count') !== null")
+    base = _badge(page)  # le badge compte tout ce qui attend dans À traiter, pas les seules questions
 
     first = _running(service, "Première carte qui attend un humain")
     second = _running(service, "Seconde carte qui attend un humain")
     _ask(service, first, "Fusionner la première PR ?")
     qid = _ask(service, second, "Fusionner la seconde PR ?")
 
-    page.wait_for_function("() => document.getElementById('decisions-count').textContent === '2'", timeout=APPEAR_MS)
+    page.wait_for_function(f"() => Number(document.getElementById('decisions-count').textContent) >= {base + 2}", timeout=APPEAR_MS)
+    _badge_is_api_count(page)
     assert pill.is_visible()
-    assert pill.get_attribute("aria-label") == "2 décisions en attente"
+    assert tab.get_attribute("aria-label").startswith("À traiter — ")
+    assert tab.locator("#decisions-count").count() == 1, "le compteur est porté par l'onglet"
+    assert page.locator("#decisions-pill").count() == 0, "plus de pastille séparée"
     _capture(page, "decisions-compteur-memoire")
 
-    pill.click()
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'executer'")
+    tab.click()
+    page.wait_for_function("() => window.GrimoireWorkspace.space === 'a-traiter'")
+    page.wait_for_selector(".at-row[data-kind='question']")
+    assert page.locator(".at-row[data-kind='question']").count() == 2, "l'espace dit les mêmes décisions que le compteur"
+    page.evaluate("() => window.GrimoireWorkspace.goto('travail', { view: 'decisions' })")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     page.wait_for_selector(".ex-decision")
     assert page.locator(".ex-decision").count() == 2, "le compteur et la vue disent la même chose"
-    assert page.locator("#docbar [aria-pressed='true']").filter(has_text="Décisions").count() == 1
+    assert page.locator("#view-seg [aria-pressed='true']").filter(has_text="Décisions").count() == 1
     _capture(page, "decisions-vue")
 
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
     service.answer(second, "attendre", "guilhem", origin=ORIGIN_HUMAN, question_id=qid)
-    page.wait_for_function("() => document.getElementById('decisions-count').textContent === '1'", timeout=APPEAR_MS)
+    _badge_is_api_count(page)
     page.wait_for_function("() => document.querySelectorAll('.ex-decision').length === 1", timeout=APPEAR_MS)
-    assert pill.get_attribute("aria-label") == "1 décision en attente"
+    assert tab.get_attribute("aria-label").startswith("À traiter — ")
 
     _answer_all(service)
-    page.wait_for_function("() => document.getElementById('decisions-pill').hidden === true", timeout=APPEAR_MS)
+    _badge_is_api_count(page)
 
 
 # ── Vivacité, dernier signe, durée, coût ────────────────────────────────────
@@ -432,9 +460,12 @@ def test_un_cout_jamais_mesure_s_affiche_inconnu_et_jamais_zero(page: Page, serv
 def test_a_390_px_le_compteur_et_l_horodatage_ne_font_rien_deborder(phone: Page, service) -> None:  # type: ignore[no-untyped-def]
     """Le compteur ajoute un contrôle à une barre déjà serrée : à 390 px elle ne déborde pas, le compteur reste cliquable."""
     _answer_all(service)
+    phone.wait_for_function("() => document.getElementById('decisions-count') !== null")
+    base = _badge(phone)
     tid = _running(service, "Carte à décider sur petit écran")
     _ask(service, tid, "Fusionner depuis le téléphone ?")
-    phone.wait_for_function("() => document.getElementById('decisions-count').textContent === '1'", timeout=APPEAR_MS)
+    phone.wait_for_function("() => !document.getElementById('decisions-count').hidden", timeout=APPEAR_MS)
+    _badge_is_api_count(phone)
 
     measured = phone.evaluate(
         """() => {
@@ -451,15 +482,17 @@ def test_a_390_px_le_compteur_et_l_horodatage_ne_font_rien_deborder(phone: Page,
             }
             if (box.right > iw + 1 && !scrolls) out.push((el.id || el.className.baseVal || el.className || el.tagName) + ':' + Math.round(box.right));
           }
-          const pill = document.getElementById('decisions-pill').getBoundingClientRect();
+          const pill = document.getElementById('decisions-count').getBoundingClientRect();
           return { out, pillRight: pill.right, pillWidth: pill.width, iw };
         }"""
     )
     assert not measured["out"], measured
     assert measured["pillWidth"] > 0 and measured["pillRight"] <= measured["iw"], measured
     _capture(phone, "mobile-compteur")
-    phone.locator("#decisions-pill").click()
-    phone.wait_for_function("() => window.GrimoireWorkspace.space === 'executer'")
+    phone.locator("#tab-space-a-traiter").click()
+    phone.wait_for_selector(".at-row[data-kind='question']")
+    phone.locator(".at-row[data-kind='question'] .at-act").first.click()
+    phone.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     phone.wait_for_selector(".ex-decision")
     _capture(phone, "mobile-decisions")
     _answer_all(service)

@@ -53,12 +53,12 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 | Piloter | 34 | 34 | 100% |
 | Concevoir | 23 | 23 | 100% |
 | Executer | 18 | 18 | 100% |
-| Observer | 10 | 10 | 100% |
+| Observer | 8 | 8 | 100% |
 | Mémoire | 9 | 9 | 100% |
 | Source | 17 | 17 | 100% |
 | Contrôles × états (coque) | 80 | 80 | 100% |
 | Routes API | 26 | 26 | 100% |
-| **TOTAL** | **249** | **249** | **100%** |
+| **TOTAL** | **247** | **247** | **100%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -182,7 +182,7 @@ pour ce contrôle précis.
 | Carte de container (clic) | `.card`/`tr` | `selectContainer(id)` | `GET /api/blueprints/<id>` | remplit l'inspecteur | `test_la_selection_d_un_container_remplit_l_inspecteur` | oui |
 | Carte de container (double-clic) | idem | `zoomToWorkflow(id)` | idem + validate/simulate | dessine le graphe niveau Workflow | `test_le_double_clic_zoome_sur_le_workflow_et_dessine_le_graphe` | oui |
 | Carte de container (clavier `Enter`) | idem | idem | idem | même effet au clavier | `tests/e2e/test_workspace_concevoir_navigation.py::test_entree_sur_une_carte_ouvre_le_workflow` | oui |
-| Carte projet (Flotte) | `.card` | `location.search = '?project='+slug` | rechargement | change de projet servi (légitime, contexte serveur) | `tests/e2e/test_workspace_concevoir_navigation.py::test_la_carte_projet_de_la_flotte_ouvre_ce_projet` | oui |
+| Carte projet (Flotte) | `.card` | `location.search = '?project='+slug` | rechargement | choisir un projet ouvre sa fiche, par son nom (le zoom Flotte/Projet a quitté Concevoir, P31) | `tests/e2e/test_workspace_coque_p31.py::test_choisir_un_projet_ouvre_sa_fiche_nom_et_non_slug` | oui |
 | Ouvrir le workflow (bouton) | `.btn` « Ouvrir le workflow → » (inspecteur) | `zoomToWorkflow(id)` | idem | équivalent bouton du double-clic | `tests/e2e/test_workspace_concevoir_navigation.py::test_le_bouton_ouvrir_le_workflow_de_l_inspecteur_equivaut_au_double_clic` | oui |
 | Valider (bouton) | `.btn` « Valider » | `runValidate` | `POST /api/blueprints/<id>/validate` | verdict écrit dans le dock Problèmes | `test_valider_ecrit_le_verdict_dans_le_dock_problemes` | oui |
 | Simuler (bouton) | `.btn` « Simuler » | `runSimulate` | `POST /api/blueprints/<id>/simulate` | verdict écrit dans le dock Problèmes ; refus du serveur dit (`simulation refusée`) | `tests/e2e/test_workspace_concevoir_navigation.py::test_simuler_ecrit_le_verdict_dans_le_dock_problemes`, `tests/e2e/test_workspace_concevoir_navigation.py::test_simuler_refuse_est_dit_dans_le_dock` | oui |
@@ -197,7 +197,7 @@ pour ce contrôle précis.
 | Onglet nœud (4 onglets) | `.tab` inspecteur nœud | change `_cvTab` | — | contenu change par onglet | `test_les_quatre_onglets_du_noeud_changent_le_contenu_affiche` | oui |
 | Aucun texte sous le plancher sombre | — | — | — | contraste/tailles du graphe | `test_aucun_texte_du_graphe_sous_le_plancher_dark` | oui |
 | Rail « Preuves » depuis Concevoir | `.rail-btn[data-panel=evidence]` | `togglePanel('evidence')` (corrigé par #534/PR #539, `evidence` tenu par la coque) | `GET /api/workspace/evidence` | ouvre le panneau Preuves comme dans les cinq autres espaces | `test_le_raccourci_3_ouvre_les_preuves_depuis_l_espace_par_defaut` (couvre le comportement générique, pas un test dédié à Concevoir) | oui |
-| Zoom Flotte/Projet/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 4 niveaux (`grimoire serve` est un alias du cockpit) ; « Workflow » charge le blueprint sélectionné d'un simple clic (corrigé : restait sur « Chargement… ») | `tests/e2e/test_workspace_concevoir_zoom.py::test_les_segments_du_zoom_changent_de_niveau`, `tests/unit/test_concevoir_zoom_source.py::test_chaque_segment_du_zoom_passe_par_pick_zoom`, `tests/unit/test_concevoir_zoom_source.py::test_pick_zoom_charge_le_blueprint_selectionne_avant_workflow` | oui |
+| Zoom Blueprints/Workflow/Nœud | `#zoom-seg button` | `setZoom` | — | 3 niveaux depuis P31 (Flotte et Projet ont quitté le zoom) ; « Workflow » charge le blueprint sélectionné d'un simple clic (corrigé : restait sur « Chargement… ») | `tests/e2e/test_workspace_concevoir_zoom.py::test_les_segments_du_zoom_changent_de_niveau`, `tests/unit/test_concevoir_zoom_source.py::test_chaque_segment_du_zoom_passe_par_pick_zoom`, `tests/unit/test_concevoir_zoom_source.py::test_pick_zoom_charge_le_blueprint_selectionne_avant_workflow` | oui |
 | Trois vues au niveau Projet | `#view-seg` | — | — | présence des 3 vues | `test_les_trois_vues_sont_proposees_au_niveau_projet` | oui |
 | Blueprint réel s'ouvre | — | `mount` | `GET /api/workspace/blueprints` | rend un blueprint réel, jamais démo | `test_concevoir_s_ouvre_sur_le_blueprint_reel_du_projet` | oui |
 
@@ -219,7 +219,7 @@ pour ce contrôle précis.
 | Champ « raison du blocage » | `input` (blocked) | valeur passée à `block` | `POST .../block` | requis pour la transition `blocked` | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_bloquer_sans_raison_est_refuse_et_ne_bouge_pas_la_tache`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_bloquer_avec_une_raison_passe_la_tache_en_bloquee`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_bloquer_sans_raison_est_un_400_et_ne_bouge_pas_la_tache` (HTTP) | oui |
 | Board — changement de projet | — | `mount` re-fetch | `GET /api/workspace/tasks` | board se recharge par projet | `test_executer_le_board_change_quand_on_change_de_projet` | oui |
 | Review sans evidence pack | — | affichage refus | `GET /api/workspace/tasks/<id>` | nomme l'artefact manquant | `test_executer_review_sans_evidence_pack_est_refuse_et_nomme_l_artefact` | oui |
-| Chips `expected_evidence` | `.chip` | affichage seul | — | tronqué à 3/4 selon le contexte | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_les_pastilles_de_preuves_sont_tronquees_a_quatre_sur_la_carte_et_trois_dans_la_liste`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_une_carte_sans_preuve_declaree_le_dit` | oui |
+| Anneau de porte d'une carte (`expected_evidence` en pastilles avant #915) | `[data-role='proof']` | affichage seul | — | « n/m » conditions de passage réunies, titre nommant la colonne suivante | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_la_carte_rend_la_progression_de_sa_porte_en_anneau` | oui |
 | Colonnes de gate (bandeau) | `.ex-col-gate` | affichage seul | — | nomme les preuves requises par colonne | `tests/e2e/test_workspace_executer_inspector_gaps.py::test_le_bandeau_de_colonne_nomme_les_preuves_requises`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_une_colonne_sans_preuve_declaree_le_dit`, `tests/e2e/test_workspace_executer_inspector_gaps.py::test_une_colonne_repliee_du_board_4_nomme_ses_colonnes` | oui |
 | Migrer les tâches (ADR-007, #559) | `button` « Migrer les tâches » (état vide) | `migrateStandardTasks()` | `POST /api/workspace/tasks/migrate-standard` | board sans ledger enrôlé → bouton visible, migration réelle, board recharge | `test_executer_etat_non_migre_propose_le_bouton_migrer_les_taches` | oui |
 | Finition (lecture seule, lot 4.3, #561) | `.ex-insp-block` (inspecteur) | affichage seul | `GET /api/workspace/tasks/<id>` | absente tant que non posée, sinon libellé (Maquette/Peaufinée) | `test_task_view_expose_le_champ_finition_en_lecture_seule` (unitaire, pas d'e2e : aucun chemin d'écriture avant le lot 4.3) | oui |
@@ -228,13 +228,11 @@ pour ce contrôle précis.
 
 | Contrôle | Sélecteur | Handler | Route | État | Test(s) | Couvert |
 |---|---|---|---|---|---|---|
-| Vue (Runtime/Activité/RTK/Bench) | `#view-seg button` | `setView` (callback repassé à chaque `draw`, bug historique corrigé) | `GET /api/otel`, `/api/workspace/flows/runs`, `/api/events/log` | bascule visuelle + contenu | `test_observer_view_seg_bascule_correctement` | oui |
-| Vue Activité/RTK/Bench — jamais muettes | idem | idem | idem | jamais un écran vide silencieux | `test_observer_activite_rtk_bench_ne_restent_jamais_muets` | oui |
-| Vue RTK — indisponible | idem | `renderUnavailable` | aucune route serveur | message + commande CLI de repli | (couvert par le test ci-dessus) | oui |
-| Vue Bench — indisponible | idem | idem | aucune | message + commande CLI de repli | (couvert par le test ci-dessus) | oui |
+| Vue (Runtime/Activité) | `#view-seg button` | `setView` (callback repassé à chaque `draw`, bug historique corrigé) | `GET /api/otel`, `/api/workspace/flows/runs`, `/api/events/log` | bascule visuelle + contenu | `test_observer_view_seg_bascule_correctement` | oui |
+| Vue Activité — jamais muette | idem | idem | idem | jamais un écran vide silencieux | `test_observer_activite_ne_reste_jamais_muet` | oui |
 | Span OTel (ligne, clic) | `tr` | `onSelect(span)` | `GET /api/otel` | sélection dans l'inspecteur | `tests/e2e/test_workspace_observer_selection.py::test_le_clic_sur_un_span_lent_le_montre_dans_l_inspecteur`, `tests/e2e/test_workspace_observer_selection.py::test_un_span_en_erreur_affiche_son_message` | oui |
 | Ligne d'agent (« Traces par agent », clic) | `.ob-bar-row` | `onSelect(list[0])` | `GET /api/otel` | sélectionne le premier span de l'agent | `tests/e2e/test_workspace_observer_selection.py::test_la_ligne_d_un_agent_selectionne_son_premier_span` | oui |
-| Bouton « Voir la timeline de <tâche> » (inspecteur de span) | `.btn` | `goto('executer', {task, view:'timeline'})` | — | navigue vers Executer sur la timeline ; absent sans `grimoire.task_id` | `tests/e2e/test_workspace_observer_selection.py::test_voir_la_timeline_d_une_tache_ouvre_executer_sur_la_timeline`, `tests/e2e/test_workspace_observer_selection.py::test_le_clic_sur_un_span_lent_le_montre_dans_l_inspecteur` | oui |
+| Bouton « Voir la timeline de <tâche> » (inspecteur de span) | `.btn` | `goto('executer', {task, view:'timeline'})` | — | navigue vers Exécuter sur la Chronologie ; absent sans `grimoire.task_id` | `tests/e2e/test_workspace_observer_selection.py::test_voir_la_timeline_d_une_tache_ouvre_executer_sur_la_timeline`, `tests/e2e/test_workspace_observer_selection.py::test_le_clic_sur_un_span_lent_le_montre_dans_l_inspecteur` (absence du bouton) | oui |
 | Run de flow visible sans TraceLedger | — | `mount` | `GET /api/workspace/flows/runs` | affiche le run même TraceLedger vide | `test_observer_montre_le_run_de_flow_meme_traceledger_vide` | oui |
 | Sans trace — bloc vide unique | — | `mount` | toutes routes vides | un seul bloc vide, 0 erreur console | `test_observer_sans_trace_rend_un_seul_bloc_vide_sans_erreur_console` | oui |
 | Aucune donnée de démo | — | — | — | jamais le mot « démo » | `test_chaque_espace_s_ouvre_sur_un_projet_reel` (paramétré) | oui |

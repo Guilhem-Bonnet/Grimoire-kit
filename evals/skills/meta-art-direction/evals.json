@@ -1,0 +1,11 @@
+{
+  "skill_name": "meta-art-direction",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Crée l'identité visuelle d'une nouvelle persona : ton, icône et gabarit de rapport.",
+      "expected_output": "Propose persona, ton, icône et un gabarit de sortie cohérents avec la palette d'icônes du projet.",
+      "files": []
+    }
+  ]
+}

@@ -22,7 +22,7 @@ from playwright.sync_api import Page
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _row(page: Page, specialty: str):
@@ -57,7 +57,7 @@ def test_ouvrir_le_fichier_d_une_reparation_selectionne_la_ligne_citee(workspace
 
         row.get_by_role("button", name="Ouvrir le fichier").click()
 
-        workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")
+        workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
         workspace.wait_for_selector(".sr-textarea")
         selected = workspace.evaluate(
             "() => { const t = document.querySelector('.sr-textarea');"
@@ -98,8 +98,6 @@ def test_accepter_une_proposition_depuis_un_projet_qui_n_est_pas_le_projet_de_la
     page.reload(wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     _goto(page, "piloter")
-    page.wait_for_selector("#zoom-seg button")
-    page.locator("#zoom-seg button", has_text="Projet").click()
     page.wait_for_selector(".pl-sheet", timeout=15_000)
     row = _row(page, skill)
     row.wait_for(timeout=15_000)

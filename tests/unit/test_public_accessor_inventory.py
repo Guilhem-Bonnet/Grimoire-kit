@@ -11,9 +11,10 @@ Reproduction manuelle d'un cas :
     grep -rn "NOM_SYMBOLE" --include='*.py' --include='*.md' . | grep -v "def "
 
 #275 a tranché 14 des 17 accesseurs trouvés par cette méthode (11 retirés,
-3 branchés sur un appelant réel + test). Les 3 restants (`MissionLedger.
-blocked_tasks`, `MissionLedger.events_for`,
-`missions.projections.build_cockpit_from_paths`) touchent `missions/`, zone
+3 branchés sur un appelant réel + test). Parmi les 3 restants, `missions.
+projections.build_cockpit_from_paths` a été retiré avec son module (tri R09,
+aucune route ne le servait) ; les 2 autres (`MissionLedger.blocked_tasks`,
+`MissionLedger.events_for`) touchent `missions/`, zone
 active en parallèle sur d'autres chantiers au moment de #275 — l'issue
 elle-même les a explicitement laissés de côté. `KNOWN_ORPHANS` les
 allowliste pour que ce garde-fou ne bloque pas dessus : un nom qui y entre
@@ -52,7 +53,6 @@ _FRAMEWORK_OVERRIDE_NAMES = frozenset({"log_message"})
 KNOWN_ORPHANS = frozenset({
     "blocked_tasks",
     "events_for",
-    "build_cockpit_from_paths",
 })
 
 

@@ -44,7 +44,7 @@ def fresh_project(tmp_path: Path) -> Path:
     """Un projet réellement initialisé, dédié à ce test — jamais partagé."""
     root = tmp_path / "projet"
     root.mkdir(parents=True)
-    created = _grimoire(["init", ".", "-y", "--name", "cmd-upgrade-flow-run-test"], root)
+    created = _grimoire(["init", ".", "-y", "--name", "cmd-upgrade-flow-run-test", "--backend", "local"], root)
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
     return root

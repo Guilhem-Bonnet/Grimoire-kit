@@ -715,3 +715,9 @@ def blueprint_evals(
     )
     if any(not d["passed"] for d in outcome["details"]):
         raise typer.Exit(code=1)
+
+
+# R04 : `blueprint import --from crewai|langgraph|gascity`, dans son module (taille).
+from grimoire.cli.cmd_blueprint_import import register_import_commands  # noqa: E402
+
+register_import_commands(blueprint_app)

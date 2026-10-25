@@ -57,7 +57,7 @@ from grimoire.missions.ledger_rules import (
     unfenced_question,
     waiting_guard,
 )
-from grimoire.missions.questions import QUESTION_EVENTS
+from grimoire.missions.questions import ANSWER_ORIGINS, QUESTION_EVENTS
 from grimoire.missions.reclaim import release_lost_claim
 from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
@@ -631,6 +631,7 @@ class MissionLedger:
         extra: dict[str, Any] | None = None,
         checks: tuple[TaskCheck, ...] = (),
         test_depth: str = "",
+        finition: str = "",
     ) -> MissionTask:
         self._load()
         if mission_id not in self._missions:
@@ -639,9 +640,7 @@ class MissionLedger:
             raise GrimoireMissionError("At least one acceptance criterion is required")
         slug = _slug(title, 12)
         if task_id is None:
-            area_tasks = [k for k in self._tasks if k.startswith(f"GAO-{slug}")]
-            seq = len(area_tasks) + 1
-            task_id = f"GAO-{slug}-{seq:03d}"
+            task_id = f"GAO-{slug}-{sum(k.startswith(f'GAO-{slug}') for k in self._tasks) + 1:03d}"
         task = MissionTask(
             id=task_id,
             mission_id=mission_id,
@@ -663,6 +662,7 @@ class MissionLedger:
             extra=extra or {},
             checks=checks,
             test_depth=test_depth,
+            finition=finition,
         )
         self._append_event("task.created", task.id, "task", owner or "system", task.to_dict())
         return task
@@ -1068,7 +1068,7 @@ class MissionLedger:
         # écrirait ``task.human_answered`` lui-même (``append_event`` est public) n'y gagne rien.
         answers = [
             i for i, e in enumerate(events)
-            if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == ORIGIN_HUMAN
+            if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") in ANSWER_ORIGINS
         ]
         return events[answers[-1] + 1 :] if answers else events
 

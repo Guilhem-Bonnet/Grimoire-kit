@@ -26,6 +26,8 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 from playwright.sync_api import Page, Route
 
+from .conftest import open_atelier
+
 
 @pytest.fixture
 def editable_file(real_project: Path) -> Iterator[str]:
@@ -42,7 +44,7 @@ def editable_file(real_project: Path) -> Iterator[str]:
 
 def _open_editable(page: Page, rel: str) -> None:
     page.evaluate("(file) => window.GrimoireWorkspace.goto('source', { file })", rel)
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
     page.wait_for_selector(".sr-textarea")
 
 
@@ -72,8 +74,14 @@ def _rewrite_path(page: Page, forged: str) -> list[int]:
     return statuses
 
 
-def _console_text(page: Page) -> str:
+def _open_console(page: Page) -> None:
+    """Rouvre l'atelier (le dock est replié par défaut, P62) puis choisit l'onglet Console."""
+    open_atelier(page)
     page.locator('[data-dock-tab="console"]').click()
+
+
+def _console_text(page: Page) -> str:
+    _open_console(page)
     return page.locator("#dock-body").inner_text()
 
 
@@ -87,7 +95,7 @@ def test_enregistrer_vers_l_etage_kit_est_refuse_et_nomme_l_override(
 
     workspace.locator(".sr-docrow button", has_text="Enregistrer").click()
 
-    workspace.locator('[data-dock-tab="console"]').click()
+    _open_console(workspace)
     workspace.wait_for_function("() => document.getElementById('dock-body')?.textContent.includes('refusé')")
     assert statuses == [403]
     text = _console_text(workspace)
@@ -106,7 +114,7 @@ def test_enregistrer_hors_de_la_racine_est_refuse(
 
     workspace.locator(".sr-docrow button", has_text="Enregistrer").click()
 
-    workspace.locator('[data-dock-tab="console"]').click()
+    _open_console(workspace)
     workspace.wait_for_function("() => document.getElementById('dock-body')?.textContent.includes('refusé')")
     assert statuses == [403]
     assert "chemin" in _console_text(workspace)

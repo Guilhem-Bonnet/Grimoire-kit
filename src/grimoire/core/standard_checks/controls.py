@@ -20,6 +20,7 @@ from grimoire.core.standard_checks.base import (
     _load_yaml_file,
     _text_file,
 )
+from grimoire.core.standard_checks.plan_then_execute_check import _verify_plan_then_execute
 from grimoire.core.standard_generation import EVIDENCE_DIR, STANDARD_DIR
 
 
@@ -350,6 +351,7 @@ def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: Standa
             "Instruction override by external content must be blocked.",
             path=rel_path,
         )
+    _verify_plan_then_execute(data, profile, strict_profile, result, rel_path)
     sources = data.get("untrusted_sources")
     if not isinstance(sources, list) or not sources:
         _add_check(result, "firewall.no_sources", "warning", "No untrusted content source is declared.", path=rel_path)

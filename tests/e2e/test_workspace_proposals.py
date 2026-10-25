@@ -27,7 +27,7 @@ REJECT_SPECIALTY = "quantum-annealing-ops"
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _write_pending_proposal(project: Path, specialty: str) -> str:

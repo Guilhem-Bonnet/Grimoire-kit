@@ -23,7 +23,6 @@ pytestmark = pytest.mark.covers(
     "cli:workflows list",
     "cli:workflows search",
     "cli:workflows show",
-    "cli:workflows teams",
 )
 
 runner = CliRunner()
@@ -78,42 +77,7 @@ class TestList:
         assert "orchestration" in result.output
 
 
-def _team(project: Path, name: str, body: str) -> Path:
-    path = project / layout.KIT_DIR / "teams" / f"{name}.yaml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8")
-    return path
-
-
 class TestShow:
-    def test_show_renders_the_declared_team(self, project: Path) -> None:
-        _team(
-            project, "equipe-atelier",
-            'team:\n  name: "equipe-atelier"\n  handoff:\n    to_team: "equipe-suivante"\n'
-            '  agents:\n    - name: "creative-toolsmith"\n      role: "lead"\n      required: true\n',
-        )
-        _installed(
-            project, "orchestree.md",
-            "---\nkind: orchestration\ndescription: 'x'\nteam: equipe-atelier\n---\n\nCorps.\n",
-        )
-        result = runner.invoke(app, ["-o", "json", "workflows", "show", "orchestree", str(project)])
-
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["team"] == "equipe-atelier"
-        assert data["team_manifest"]["handoff_to"] == "equipe-suivante"
-        assert "creative-toolsmith" in data["team_manifest"]["required_agents"]
-
-    def test_show_reports_a_team_that_is_not_installed(self, project: Path) -> None:
-        _installed(
-            project, "orpheline.md",
-            "---\nkind: orchestration\ndescription: 'x'\nteam: team-fantome\n---\n\nCorps.\n",
-        )
-        result = runner.invoke(app, ["workflows", "show", "orpheline", str(project)])
-
-        assert result.exit_code == 0
-        assert "team-fantome" in result.output
-
     def test_show_finds_an_orchestration_not_just_a_prompt(self, project: Path) -> None:
         """Elle résolvait en `<slug>.prompt.md` : une orchestration ne pouvait pas être trouvée."""
         result = runner.invoke(app, ["workflows", "show", "party-mode", str(project)])
@@ -126,40 +90,19 @@ class TestShow:
         assert result.exit_code == 1
 
 
-class TestTeams:
-    def test_teams_lists_the_chain(self, project: Path) -> None:
-        _team(
-            project, "equipe-vision",
-            'team:\n  name: "equipe-vision"\n  handoff:\n    to_team: "equipe-atelier"\n',
-        )
-        _team(
-            project, "equipe-atelier",
-            'team:\n  name: "equipe-atelier"\n  handoff:\n    to_team: "equipe-suivante"\n',
-        )
-        result = runner.invoke(app, ["-o", "json", "workflows", "teams", str(project)])
+class TestTeamsRetired:
+    def test_the_teams_command_no_longer_exists(self, project: Path) -> None:
+        """R12 : le kit n'embarque aucun manifeste d'équipe, la commande n'a plus d'objet."""
+        result = runner.invoke(app, ["workflows", "teams", str(project)])
+
+        assert result.exit_code != 0
+
+    def test_show_has_no_team_field(self, project: Path) -> None:
+        result = runner.invoke(app, ["-o", "json", "workflows", "show", "party-mode", str(project)])
 
         assert result.exit_code == 0
-        data = json.loads(result.output)
-        chain = {t["name"]: t["handoff_to"] for t in data["teams"]}
-        assert chain["equipe-vision"] == "equipe-atelier"
-        assert chain["equipe-atelier"] == "equipe-suivante"
+        assert "team" not in json.loads(result.output)
 
-
-    def test_a_broken_team_manifest_is_named_not_dropped(self, project: Path) -> None:
-        path = project / layout.KIT_DIR / "teams" / "cassee.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("team:\n  name: [non fermée\n", encoding="utf-8")
-
-        result = runner.invoke(app, ["-o", "json", "workflows", "teams", str(project)])
-        assert result.exit_code == 0, result.output
-        data = json.loads(result.stdout)
-        assert any("cassee.yaml" in item["path"] for item in data["unreadable"])
-        assert "cassee.yaml" in result.output
-
-        result = runner.invoke(app, ["workflows", "teams", str(project)])
-        assert result.exit_code == 0, result.output
-        assert "cassee.yaml" in result.output
-        assert "illisible" in result.output
 
 class TestInstall:
     def test_an_orchestration_lands_in_the_kit_workflows_dir(self, project: Path) -> None:

@@ -1,0 +1,11 @@
+{
+  "skill_name": "grimoire-memory",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Pourquoi avait-on écarté l'option Redis il y a trois semaines ?",
+      "expected_output": "Cherche d'abord en mémoire projet la décision passée et la cite, sans la reconstruire de tête.",
+      "files": []
+    }
+  ]
+}

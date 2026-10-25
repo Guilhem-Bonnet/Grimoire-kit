@@ -734,12 +734,13 @@ def _infer_resolved(target: Path, cfg: GrimoireConfig | None) -> Any:
     )
 
 
-def refresh_kit_tier(target: Path) -> Any:
-    """Regenerate the kit tier of *target* at the installed kit version.
+def _refresh_scaffolder(target: Path) -> Any:
+    """The :class:`~grimoire.core.scaffold.ProjectScaffolder` a kit refresh of *target* would run.
 
-    Returns the :class:`~grimoire.core.scaffold.ScaffoldResult`. Shared by
-    ``up`` and ``migrate`` so a migrated project lands on exactly what a normal
-    update produces.
+    One construction shared by :func:`refresh_kit_tier` (executes the plan),
+    :func:`fresh_kit_agent_roster` and :func:`kit_refresh_plan` (read it
+    without writing) — so what the cockpit previews is, by construction, what
+    ``up`` writes.
     """
     from grimoire.core.scaffold import ProjectScaffolder
 
@@ -754,7 +755,7 @@ def refresh_kit_tier(target: Path) -> Any:
         vals = cmd_setup.load_user_values(config_path)
     except OSError:
         vals = cmd_setup.UserValues()
-    scaffolder = ProjectScaffolder(
+    return ProjectScaffolder(
         target,
         project_name=vals.project_name or (cfg.project.name if cfg else "") or target.name,
         # No invented fallback for identity: a placeholder here would differ
@@ -767,7 +768,22 @@ def refresh_kit_tier(target: Path) -> Any:
         resolved=_infer_resolved(target, cfg),
         backend=(cfg.memory.backend if cfg else "") or "local",
     )
+
+
+def refresh_kit_tier(target: Path) -> Any:
+    """Regenerate the kit tier of *target* at the installed kit version.
+
+    Returns the :class:`~grimoire.core.scaffold.ScaffoldResult`. Shared by
+    ``up`` and ``migrate`` so a migrated project lands on exactly what a normal
+    update produces.
+    """
+    scaffolder = _refresh_scaffolder(target)
     return scaffolder.execute(scaffolder.plan())
+
+
+def kit_refresh_plan(target: Path) -> Any:
+    """The :class:`~grimoire.core.scaffold.ScaffoldPlan` a refresh of *target* would execute — nothing written."""
+    return _refresh_scaffolder(target).plan()
 
 
 def fresh_kit_agent_roster(target: Path) -> set[str]:
@@ -781,26 +797,7 @@ def fresh_kit_agent_roster(target: Path) -> set[str]:
     files actually on disk to find the ones a prior kit version left behind
     (``refresh_kit_tier`` never prunes; it only writes what still applies).
     """
-    from grimoire.core.scaffold import ProjectScaffolder
-
-    target = target.resolve()
-    cfg = _load_config_quiet(target)
-    config_path = target / "project-context.yaml"
-    try:
-        vals = cmd_setup.load_user_values(config_path)
-    except OSError:
-        vals = cmd_setup.UserValues()
-    scaffolder = ProjectScaffolder(
-        target,
-        project_name=vals.project_name or (cfg.project.name if cfg else "") or target.name,
-        user_name=vals.user_name or (cfg.user.name if cfg else ""),
-        language=vals.communication_language or (cfg.user.language if cfg else ""),
-        skill_level=vals.user_skill_level or (cfg.user.skill_level if cfg else ""),
-        scan=None,
-        resolved=_infer_resolved(target, cfg),
-        backend=(cfg.memory.backend if cfg else "") or "local",
-    )
-    plan = scaffolder.plan()
+    plan = kit_refresh_plan(target)
     roster: set[str] = set()
     for copy in plan.copies:
         if copy.dst.suffix == ".md" and copy.dst.parent.name == "agents":

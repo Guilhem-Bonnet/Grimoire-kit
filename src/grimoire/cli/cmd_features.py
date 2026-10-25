@@ -2,7 +2,7 @@
 
 Liste et bascule les features beta d'un projet. Le canal beta est l'espace
 de test des capacités candidates : fonctionnelles, testées, journalisées,
-opt-in — leur promotion en stable se décide sur métriques d'usage.
+opt-in — leur promotion en stable est une décision des mainteneurs (le kit ne compte pas l'usage).
 """
 
 from __future__ import annotations

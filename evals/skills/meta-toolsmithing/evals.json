@@ -1,0 +1,11 @@
+{
+  "skill_name": "meta-toolsmithing",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Forge un nouvel outil framework avec CLI, module et exposition MCP.",
+      "expected_output": "Conçoit l'outil triple-interface (CLI/MCP/module) avec ses tests, et le découpe plutôt que d'en faire un monolithe.",
+      "files": []
+    }
+  ]
+}

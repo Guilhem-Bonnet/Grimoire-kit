@@ -172,7 +172,10 @@ def test_an_unproven_snapshot_is_ignored(tmp_path: Path, always_snapshot: Callab
         assert "Alpha X" in got, "un instantané périmé aurait servi l'ancien titre"
 
 
-def test_no_snapshot_while_the_budget_holds(tmp_path: Path) -> None:
+def test_no_snapshot_while_the_budget_holds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Budget large par construction : sur un runner chargé, rejouer cinq tâches dépassait
+    # parfois le seuil réel et le test écrivait l'instantané qu'il interdit.
+    monkeypatch.setattr(ledger_snapshot, "SNAPSHOT_AFTER_MS", 60_000.0)
     service = TaskService(tmp_path)
     for i in range(5):
         service.add(f"Tâche {i}", ("ok",), owner="g", actor="claude", ready=True)

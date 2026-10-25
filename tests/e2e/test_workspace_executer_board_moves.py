@@ -147,7 +147,7 @@ def board_page(browser: Browser, served_board_moves: str) -> Iterator[Page]:
     page.goto(f"{served_board_moves}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.evaluate("() => window.GrimoireWorkspace.goto('executer')")
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'executer'")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
     page.wait_for_selector(".ex-card")
     try:
         yield page

@@ -51,7 +51,9 @@ def _age_agent_definition(project_root: Path, agent: str, *, days_ago: int) -> N
 def _open_agent(page: Page) -> None:
     page.reload(wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']")
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
+    # À traiter est l'accueil (P31) : la fiche du projet est dans Flotte.
+    page.evaluate("() => window.GrimoireWorkspace.goto('flotte')")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
     page.wait_for_selector(".pl-sheet")
     row = page.locator(".tbl tbody tr", has_text=AGENT)
     row.wait_for()

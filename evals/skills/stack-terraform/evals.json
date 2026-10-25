@@ -1,0 +1,11 @@
+{
+  "skill_name": "stack-terraform",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Ajoute un bucket de stockage dans main.tf.",
+      "expected_output": "Produit un plan avant tout apply, dans un module, en respectant l'état distant.",
+      "files": []
+    }
+  ]
+}

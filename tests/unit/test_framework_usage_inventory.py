@@ -80,3 +80,35 @@ def test_real_runtime_reference_still_wins(inventory, monkeypatch):
     verdict, counts = inventory.classify("framework/tools/live-tool.py")
     assert verdict == "REFERENCED"
     assert counts["runtime"] == 1
+
+
+def test_every_class_carries_a_decision(inventory):
+    """Chaque classe du classement a une décision (geler ou supprimer), jamais « à décider »."""
+    classes = ["UNREFERENCED", "INTERNAL", "DOCS_ONLY", "TEST_ONLY", "TRANSITIVE", "REFERENCED"]
+    for cls in classes:
+        assert inventory.decision(cls).startswith(("geler", "supprimer"))
+    assert set(inventory.DECISIONS) == set(classes)
+
+
+def test_each_generated_row_carries_the_decision_of_its_own_class(inventory, monkeypatch, tmp_path):
+    """Le rapport écrit, pas seulement la table : un outil mort porte « supprimer », un outil référencé « geler »."""
+    tools = ["framework/tools/dead-tool.py", "framework/tools/live-tool.py"]
+    for rel in tools:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("print('x')\n", encoding="utf-8")
+
+    def fake_git(*args: str) -> str:
+        if args[0] == "ls-files":
+            return "\n".join(tools) + "\n"
+        if "live-tool.py" in args and "src" in args:
+            return "src/grimoire/cli/app.py\n"
+        return ""
+
+    output = tmp_path / "inventory.md"
+    monkeypatch.setattr(inventory, "git", fake_git)
+    monkeypatch.setattr(inventory, "ROOT", tmp_path)
+    monkeypatch.setattr(inventory, "OUTPUT", output)
+    inventory.main()
+    rows = {line.split("|")[1].strip(): line.split("|")[-2].strip() for line in output.read_text(encoding="utf-8").splitlines()
+            if line.startswith("| framework/tools/")}
+    assert rows == {"framework/tools/dead-tool.py": "supprimer", "framework/tools/live-tool.py": "geler (porter vers src/ à la demande)"}

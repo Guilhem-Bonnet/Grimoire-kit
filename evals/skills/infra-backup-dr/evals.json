@@ -1,0 +1,11 @@
+{
+  "skill_name": "infra-backup-dr",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Revois notre stratégie de sauvegarde : snapshots Proxmox et backups Longhorn, quelle rétention ?",
+      "expected_output": "Audite les sauvegardes et la rétention, propose un test de restauration et traite la sécurisation des clés.",
+      "files": []
+    }
+  ]
+}

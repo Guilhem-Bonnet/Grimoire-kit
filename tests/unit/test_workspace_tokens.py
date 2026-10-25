@@ -485,3 +485,47 @@ def test_le_cadenas_d_epinglage_mesure_au_moins_24_px() -> None:
 
     assert float(rule["min-width"].removesuffix("px")) >= 24
     assert float(rule["min-height"].removesuffix("px")) >= 24
+
+
+# ── Douce dans la coque (P62) : fonte, rayons, titre ────────────────────────
+
+FONTS = WORKSPACE / "fonts"
+
+
+def test_instrument_sans_est_vendorisee_avec_sa_licence() -> None:
+    """La fonte de Douce est un fichier du kit, jamais une requête vers Google Fonts."""
+    font = FONTS / "InstrumentSans-Variable.woff2"
+    assert font.is_file()
+    assert font.read_bytes()[:4] == b"wOF2", "pas un vrai woff2"
+    licence = (FONTS / "OFL-InstrumentSans.txt").read_text(encoding="utf-8")
+    assert "SIL OPEN FONT LICENSE Version 1.1" in licence
+    assert "Instrument Sans" in licence
+
+
+def test_la_fonte_de_la_coque_est_instrument_sans_sans_requete_tierce() -> None:
+    text = _strip_comments(TOKENS.read_text(encoding="utf-8"))
+
+    assert re.search(r'--font:\s*"Instrument Sans"', text)
+    assert 'font-family: "Instrument Sans"' in text
+    assert "InstrumentSans-Variable.woff2" in text
+    assert not re.search(r"url\(\s*[\"']?https?:", text), "une fonte distante romprait la brique P05"
+    for source in _sources():
+        if source.suffix in {".css", ".html"}:
+            assert "fonts.googleapis.com" not in source.read_text(encoding="utf-8"), source.name
+
+
+def test_les_rayons_de_douce_sont_des_tokens() -> None:
+    """10 (contrôles), 16 (cartes), 20 (panneau de détail), pilule (onglets, boutons)."""
+    text = _strip_comments(TOKENS.read_text(encoding="utf-8"))
+
+    for name, value in (("--r", "10px"), ("--r-l", "16px"), ("--r-xl", "20px"), ("--r-pill", "999px"), ("--t-title", "32px")):
+        assert re.search(rf"^\s*{re.escape(name)}:\s*{value};", text, re.MULTILINE), f"{name} devrait valoir {value}"
+
+
+def test_la_coque_utilise_les_tokens_de_douce() -> None:
+    css = _strip_comments(SHELL_CSS.read_text(encoding="utf-8"))
+
+    assert "border-radius: var(--r-pill)" in css, "onglets et boutons en pilule"
+    assert re.search(r"\.space-title\s*\{[^}]*font-size:\s*var\(--t-title\)", css), "titre d'espace de 32 px"
+    assert "var(--r-xl)" in css, "panneau de détail arrondi"
+    assert 'html[data-atelier="off"] #rail' in css, "les panneaux d'atelier sont fermés par défaut"

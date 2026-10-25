@@ -16,6 +16,11 @@ la tâche sans que personne l'ait relue. Ce module rend la relecture opposable.
 - **Un finding sans commande exécutable reste une suggestion** : il ne fonde
   pas un ``NOT-READY`` (``review.finding_ungrounded``).
 
+- **Le verdict par critère** (#876, lot 3, verrou 8) : ``criteria[]`` porte un statut par critère
+  d'acceptation (``met``, ``unmet``, ``unverifiable``) avec sa preuve. Validé par du code
+  (:func:`validate_criteria`) : chaque critère de la tâche une fois, dans son texte ; ``READY`` si et
+  seulement si tous sont ``met``. Le gate refuse un reçu dont les critères ne sont plus ceux de la tâche.
+
 Pas de gel par hook. **Limite écrite** : entre le reçu et le gate, une
 modification passe sans être vue — le gate ne la voit qu'à la clôture, et
 c'est pourquoi il recalcule toujours. L'empreinte ignore l'état que le kit
@@ -45,10 +50,15 @@ from grimoire.core.standard_profile_manifest import read_profile
 from grimoire.missions.gates import GateRefusal
 
 __all__ = [
+    "CRITERION_MET",
+    "CRITERION_STATUSES",
+    "CRITERION_UNMET",
+    "CRITERION_UNVERIFIABLE",
     "INCONCLUSIVE",
     "PANEL_CLASSES",
     "RECEIPT_FINGERPRINT_EXCLUDES",
     "VERDICTS",
+    "CriterionVerdict",
     "PanelTally",
     "ReviewFinding",
     "ReviewReceipt",
@@ -60,6 +70,7 @@ __all__ = [
     "receipt_path",
     "receipt_required",
     "tally_panel",
+    "validate_criteria",
     "write_receipt",
 ]
 
@@ -76,6 +87,13 @@ STALE = "review.receipt_stale"
 UNGROUNDED = "review.finding_ungrounded"
 INVALID = "review.receipt_invalid"
 REFUSED = "review.not_ready"
+CRITERIA_CHANGED = "review.criteria_changed"
+
+#: Statut d'un critère dans le verdict du relecteur (verrou 8).
+CRITERION_MET = "met"
+CRITERION_UNMET = "unmet"
+CRITERION_UNVERIFIABLE = "unverifiable"
+CRITERION_STATUSES: tuple[str, ...] = (CRITERION_MET, CRITERION_UNMET, CRITERION_UNVERIFIABLE)
 
 #: Ce que le kit réécrit lui-même entre le reçu et le gate : le journal des
 #: tâches (``_grimoire-runtime-output``, refus et sessions compris), le board
@@ -113,10 +131,7 @@ class ReviewFinding:
     @property
     def grounded(self) -> bool:
         """Le constat porte-t-il une commande qu'on peut lancer pour le vérifier ?"""
-        try:
-            return bool(shlex.split(self.evidence_cmd))
-        except ValueError:  # silent-ok — guillemets non fermés : pas une commande, une suggestion
-            return False
+        return _grounded(self.evidence_cmd)
 
     def to_dict(self) -> dict[str, Any]:
         return {"summary": self.summary, "evidence_cmd": self.evidence_cmd, "severity": self.severity,
@@ -127,6 +142,92 @@ class ReviewFinding:
         if not isinstance(data, Mapping) or not isinstance(data.get("summary"), str):
             raise ValueError("finding sans `summary` texte")
         return cls(str(data["summary"]), str(data.get("evidence_cmd") or ""), str(data.get("severity") or ""))
+
+
+def _grounded(cmd: str) -> bool:
+    try:
+        return bool(shlex.split(cmd))
+    except ValueError:  # silent-ok — guillemets non fermés : pas une commande, une suggestion
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class CriterionVerdict:
+    """Le statut d'un critère d'acceptation selon le relecteur, et ce qui le montre (verrou 8).
+
+    *index* est la position du critère dans la tâche (à partir de 1) ; *criterion* son texte, recopié
+    pour que le reçu se lise seul et que le gate voie un critère réécrit depuis.
+    """
+
+    index: int
+    criterion: str
+    status: str
+    evidence_cmd: str = ""
+    note: str = ""
+
+    @property
+    def grounded(self) -> bool:
+        return _grounded(self.evidence_cmd)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"index": self.index, "criterion": self.criterion, "status": self.status,
+                "evidence_cmd": self.evidence_cmd, "note": self.note}
+
+    @classmethod
+    def from_dict(cls, data: Any) -> CriterionVerdict:
+        if not isinstance(data, Mapping):
+            raise ValueError("un critère du verdict n'est pas un objet")
+        index = data.get("index")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError(f"`index` d'un critère doit être un entier, pas {index!r}")
+        return cls(index, str(data.get("criterion") or ""), str(data.get("status") or ""),
+                   str(data.get("evidence_cmd") or ""), str(data.get("note") or ""))
+
+
+def validate_criteria(
+    acceptance: Sequence[str], criteria: Sequence[CriterionVerdict], verdict: str
+) -> tuple[CriterionVerdict, ...]:
+    """Le verdict par critère, vérifié par du code ; rend les critères complétés de leur texte.
+
+    Refuse (:class:`ReviewReceiptError`) : un critère de la tâche absent ou jugé deux fois, un index hors
+    de la tâche, un texte qui n'est pas celui de la tâche, un statut inconnu, un ``met`` sans preuve
+    (ni commande ni note), un ``unmet`` sans commande qui le montre, un ``unverifiable`` sans note, et
+    un verdict qui ne suit pas les critères (``READY`` si et seulement si tous sont ``met``).
+    """
+    expected = tuple(acceptance)
+    if not expected:
+        raise ReviewReceiptError(INVALID, "la tâche n'a aucun critère d'acceptation : rien à juger critère par critère")
+    seen: dict[int, CriterionVerdict] = {}
+    for item in criteria:
+        if not 1 <= item.index <= len(expected):
+            raise ReviewReceiptError(INVALID, f"critère {item.index} hors de la tâche (1 à {len(expected)})")
+        if item.index in seen:
+            raise ReviewReceiptError(INVALID, f"critère {item.index} jugé deux fois")
+        text = expected[item.index - 1]
+        if item.criterion and item.criterion.strip() != text.strip():
+            raise ReviewReceiptError(
+                INVALID, f"critère {item.index} : le texte jugé n'est pas celui de la tâche ({item.criterion!r} ≠ {text!r})"
+            )
+        if item.status not in CRITERION_STATUSES:
+            raise ReviewReceiptError(
+                INVALID, f"critère {item.index} : statut {item.status!r} — attendu {', '.join(CRITERION_STATUSES)}"
+            )
+        if item.status == CRITERION_MET and not (item.grounded or item.note.strip()):
+            raise ReviewReceiptError(UNGROUNDED, f"critère {item.index} `met` sans preuve : une commande ou une note qui le montre")
+        if item.status == CRITERION_UNMET and not item.grounded:
+            raise ReviewReceiptError(UNGROUNDED, f"critère {item.index} `unmet` sans commande qui le montre")
+        if item.status == CRITERION_UNVERIFIABLE and not item.note.strip():
+            raise ReviewReceiptError(INVALID, f"critère {item.index} `unverifiable` sans note : dire ce qui manque")
+        seen[item.index] = CriterionVerdict(item.index, text, item.status, item.evidence_cmd.strip(), item.note.strip())
+    missing = [str(i) for i in range(1, len(expected) + 1) if i not in seen]
+    if missing:
+        raise ReviewReceiptError(INVALID, f"critère(s) {', '.join(missing)} non jugé(s) : chaque critère de la tâche a un statut")
+    all_met = all(c.status == CRITERION_MET for c in seen.values())
+    if verdict == READY and not all_met:
+        raise ReviewReceiptError(INVALID, "READY alors qu'un critère n'est pas `met`")
+    if verdict == NOT_READY and all_met:
+        raise ReviewReceiptError(INVALID, "NOT-READY alors que tous les critères sont `met` : dire lequel ne tient pas")
+    return tuple(seen[i] for i in sorted(seen))
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,10 +242,19 @@ class ReviewReceipt:
     evidence_pack_sha256: str | None
     written_at: str
     findings: tuple[ReviewFinding, ...] = field(default=())
+    #: Provenance (#876, verrou 7) : la session du relecteur, que le journal d'autorité atteste sous mandat.
+    reviewer_session: str = ""
+    #: Le verdict par critère (#876, lot 3, verrou 8) ; vide pour un reçu d'avant.
+    criteria: tuple[CriterionVerdict, ...] = field(default=())
 
     @property
     def grounded_findings(self) -> tuple[ReviewFinding, ...]:
         return tuple(f for f in self.findings if f.grounded)
+
+    @property
+    def criteria_met(self) -> tuple[str, ...]:
+        """Le texte des critères jugés ``met`` : ce que la relecture couvre."""
+        return tuple(c.criterion for c in self.criteria if c.status == CRITERION_MET)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +267,8 @@ class ReviewReceipt:
             "tree_fingerprint": self.tree_fingerprint,
             "evidence_pack_sha256": self.evidence_pack_sha256,
             "written_at": self.written_at,
+            **({"reviewer_session": self.reviewer_session} if self.reviewer_session else {}),
+            **({"criteria": [c.to_dict() for c in self.criteria]} if self.criteria else {}),
         }
 
     @classmethod
@@ -173,6 +285,9 @@ class ReviewReceipt:
         if not isinstance(findings, list):
             raise ValueError("`findings` n'est pas une liste")
         pack = data.get("evidence_pack_sha256")
+        criteria = data.get("criteria") or []
+        if not isinstance(criteria, list):
+            raise ValueError("`criteria` n'est pas une liste")
         return cls(
             task_id=str(data.get("task_id") or ""),
             verdict=str(verdict),
@@ -182,6 +297,8 @@ class ReviewReceipt:
             evidence_pack_sha256=pack if isinstance(pack, str) else None,
             written_at=str(data.get("written_at") or ""),
             findings=tuple(ReviewFinding.from_dict(f) for f in findings),
+            reviewer_session=str(data.get("reviewer_session") or ""),
+            criteria=tuple(CriterionVerdict.from_dict(c) for c in criteria),
         )
 
 
@@ -229,11 +346,17 @@ def write_receipt(
     findings: Sequence[ReviewFinding] = (),
     reviewer_id: str,
     model: str = "",
+    reviewer_session: str = "",
+    criteria: Sequence[CriterionVerdict] = (),
+    acceptance: Sequence[str] | None = None,
 ) -> ReviewReceipt:
     """Écrit le reçu, empreinte et hash du pack calculés maintenant ; rend ce qui a été écrit.
 
     Refuse (:class:`ReviewReceiptError`) un verdict inconnu, un relecteur
-    anonyme, et un ``NOT-READY`` dont aucun constat n'a de commande.
+    anonyme, et un ``NOT-READY`` dont aucun constat n'a de commande. Avec
+    *criteria*, le verdict par critère est validé contre *acceptance*, les
+    critères de la tâche (:func:`validate_criteria`) ; un critère ``unmet``
+    montré par sa commande fonde un ``NOT-READY`` comme un constat.
     """
     root = root.resolve()
     if verdict not in VERDICTS:
@@ -241,7 +364,12 @@ def write_receipt(
     if not reviewer_id.strip():
         raise ReviewReceiptError(INVALID, "`reviewer_id` requis : un reçu dit qui a relu")
     findings = tuple(findings)
-    if verdict == NOT_READY and not any(f.grounded for f in findings):
+    judged: tuple[CriterionVerdict, ...] = ()
+    if criteria:
+        if acceptance is None:
+            raise ReviewReceiptError(INVALID, "un verdict par critère se valide contre les critères de la tâche")
+        judged = validate_criteria(acceptance, criteria, verdict)
+    if verdict == NOT_READY and not any(f.grounded for f in findings) and not _unmet_grounded(judged):
         raise ReviewReceiptError(UNGROUNDED, _ungrounded_message(findings))
     path = receipt_path(root, task_id)
     receipt = ReviewReceipt(
@@ -253,9 +381,15 @@ def write_receipt(
         evidence_pack_sha256=evidence_pack_digest(root, task_id),
         written_at=datetime.now(UTC).isoformat(),
         findings=findings,
+        reviewer_session=reviewer_session.strip(),
+        criteria=judged,
     )
     atomic_write(path, json.dumps(receipt.to_dict(), indent=2, ensure_ascii=False) + "\n")
     return receipt
+
+
+def _unmet_grounded(criteria: Sequence[CriterionVerdict]) -> tuple[CriterionVerdict, ...]:
+    return tuple(c for c in criteria if c.status == CRITERION_UNMET and c.grounded)
 
 
 def read_receipt(root: Path, task_id: str) -> ReviewReceipt | None:
@@ -312,14 +446,20 @@ def check_receipt(root: Path, task: Any) -> GateRefusal | None:
     if receipt.evidence_pack_sha256 != evidence_pack_digest(root, task_id):
         return GateRefusal(STALE, "le pack de preuve a changé depuis le reçu",
                            f"refaire relire avec le pack présent, puis : grimoire task review {task_id}")
+    acceptance = tuple(str(a) for a in (getattr(task, "acceptance", ()) or ()))
+    if receipt.criteria and tuple(c.criterion for c in receipt.criteria) != acceptance:
+        return GateRefusal(CRITERIA_CHANGED, "les critères d'acceptation ont changé depuis le reçu : la relecture jugeait les anciens",
+                           f"refaire relire sur les critères présents, puis : grimoire task review {task_id}")
     if receipt.verdict == NOT_READY:
         grounded = receipt.grounded_findings
-        if not grounded:
+        unmet = _unmet_grounded(receipt.criteria)
+        if not grounded and not unmet:
             return GateRefusal(UNGROUNDED, _ungrounded_message(receipt.findings),
                                "donner la commande qui montre chaque constat, ou rendre READY")
-        first = grounded[0]
-        return GateRefusal(REFUSED, f"relecture NOT-READY ({len(grounded)} constat(s)) : {first.summary}",
-                           f"corriger, vérifier par `{first.evidence_cmd}`, puis faire relire")
+        summary, cmd = (grounded[0].summary, grounded[0].evidence_cmd) if grounded else (
+            f"critère {unmet[0].index} non tenu : {unmet[0].criterion}", unmet[0].evidence_cmd)
+        return GateRefusal(REFUSED, f"relecture NOT-READY ({len(grounded) + len(unmet)} constat(s)) : {summary}",
+                           f"corriger, vérifier par `{cmd}`, puis faire relire")
     return None
 
 

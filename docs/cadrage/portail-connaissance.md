@@ -164,7 +164,6 @@ incomplet ou non branché), **absent**, **mort** (aucun appelant en production :
 | Droits de lecture | absent | `user_id` sert de filtre, pas de contrôle | exclusion par projet (E7) ; pas de rôles |
 | Évaluation de la récupération | partiel | `tests/unit/memory/test_retrieval_quality.py:128` : la fusion y est testée avec un faux vecteur | jeu de questions généré et mesures déterministes (E3) |
 | Pile RAG héritée | mort | `framework/tools/rag-indexer.py`, `rag-retriever.py`, `memory-sync.py`, zone gelée ; aucune référence depuis `src/` | à retirer quand E2 couvre l'indexation incrémentale (E8, D10) |
-| `ContextRouter`, `ContextGuard` | mort | orphelins tolérés par `tests/unit/test_w1_11_wire_or_delete.py:28` | hors périmètre ; le routeur de §2.3 ne les réutilise pas |
 
 Écarts relevés par rapport à l'inventaire d'entrée :
 

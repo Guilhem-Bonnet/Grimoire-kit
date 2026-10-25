@@ -8,6 +8,11 @@ intent: >
   Untrusted sources are quarantined and treated as data, never as directives.
 isolate_external_content: true
 instruction_override_blocked: true
+# Pattern plan-then-execute : le plan est figé AVANT de lire du contenu non fiable ;
+# une action hors plan est refusée ou soumise à confirmation (ask | deny).
+plan_then_execute:
+  freeze_plan_before_untrusted_read: true
+  actions_outside_plan: ask
 untrusted_sources:
   - id: web-fetch
     description: "Replace with a real untrusted content source."

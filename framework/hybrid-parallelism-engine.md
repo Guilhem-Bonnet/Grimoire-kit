@@ -2,6 +2,12 @@
 
 # Hybrid Parallelism Engine (HPE) — Orchestration Parallèle Adaptative
 
+> **Statut observer-only** : décrit ci-dessous, non instrumenté, aucune obligation. Aucun
+> exécuteur DAG ne lance de branches en parallèle : le seul morceau existant est
+> `FlowEngine.next_wave` (`src/grimoire/flows/engine.py`), qui liste en lecture seule les nodes
+> prêts d'un flow mais n'en lance aucun (le moteur n'ouvre qu'un node à la fois). L'agent peut
+> s'inspirer du reste ; rien ne le vérifie ni ne l'impose.
+>
 > **BM-58** — Moteur de parallélisme hybride qui combine exécution séquentielle, parallèle,
 > et opportuniste selon la nature des tâches et la disponibilité des agents.
 >

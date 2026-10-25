@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from grimoire.bridges.a2a_adapter import (
     A2AAdapter,
     A2AArtifact,
@@ -187,7 +189,42 @@ class TestA2AAdapterImport:
 
         report = adapter.import_task(task, mission_id="MIS-001")
 
-        assert report.grimoire_task_id == "GAO-a2a-my-task-id-123"
+        assert report.grimoire_task_id.startswith("GAO-a2a-my-task-id-123-")
+        # Stable : le même id A2A redonne le même id Grimoire.
+        assert adapter.import_task(task, mission_id="MIS-001").grimoire_task_id == report.grimoire_task_id
+
+    def test_deux_ids_a2a_distincts_ne_partagent_jamais_une_tache(self, tmp_path: Path) -> None:
+        """Casse et suffixe au-delà de 20 caractères : l'ancien id les confondait."""
+        ledger = _ledger(tmp_path)
+        adapter = A2AAdapter(ledger)
+        a = adapter.import_task(_a2a_task("legit-task-aaaaaaaaaaaa-1", A2ATaskState.WORKING), mission_id="M")
+        b = adapter.import_task(_a2a_task("LEGIT-TASK-AAAAAAAAAAAA-2", A2ATaskState.FAILED), mission_id="M")
+        assert a.grimoire_task_id != b.grimoire_task_id
+        assert ledger.get_task(a.grimoire_task_id).status == TaskState.RUNNING
+
+    def test_un_import_ancien_format_est_repris(self, tmp_path: Path) -> None:
+        ledger = _ledger(tmp_path)
+        adapter = A2AAdapter(ledger)
+        mission = ledger.create_mission("m", origin="test")
+        ledger.transition_mission(mission.id, MissionState.OPEN, actor_id="t")
+        ledger.create_task(
+            mission.id, "vieux", description="a2a_task_id: old-id | session: s",
+            acceptance=("x",), task_id="GAO-a2a-old-id",
+        )
+        report = adapter.import_task(_a2a_task("old-id", A2ATaskState.WORKING), mission_id=mission.id)
+        assert report.grimoire_task_id == "GAO-a2a-old-id"
+
+    def test_un_homonyme_de_l_ancien_format_n_est_pas_repris(self, tmp_path: Path) -> None:
+        ledger = _ledger(tmp_path)
+        adapter = A2AAdapter(ledger)
+        mission = ledger.create_mission("m", origin="test")
+        ledger.transition_mission(mission.id, MissionState.OPEN, actor_id="t")
+        ledger.create_task(
+            mission.id, "autre", description="a2a_task_id: Old-Id", acceptance=("x",), task_id="GAO-a2a-old-id"
+        )
+        report = adapter.import_task(_a2a_task("old-id", A2ATaskState.WORKING), mission_id=mission.id)
+        assert report.grimoire_task_id != "GAO-a2a-old-id"
+        assert ledger.get_task("GAO-a2a-old-id").status == TaskState.PROPOSED
 
     def test_uses_provided_mission_id_when_exists(self, tmp_path: Path) -> None:
         ledger = _ledger(tmp_path)
@@ -406,3 +443,94 @@ class TestA2ANormalizeTrace:
         raw = {"id": "t1", "status": {}}
         normalized = A2AAdapter.normalize_trace(raw)
         assert "input_digest" not in normalized
+
+
+# ── Commande `grimoire task import-a2a` (R03) ─────────────────────────────────
+
+def test_cli_import_a2a_complete_atterrit_en_needs_verification(tmp_path: Path) -> None:
+    import json
+
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+
+    fichier = tmp_path / "a2a.json"
+    fichier.write_text(
+        json.dumps({
+            "id": "ext-1",
+            "status": {"state": "completed"},
+            "input": {"role": "user", "parts": [{"type": "text", "text": "Fais un truc"}]},
+        }),
+        encoding="utf-8",
+    )
+    ledger_root = tmp_path / "ledger"
+    res = CliRunner().invoke(task_app, ["import-a2a", str(fichier), "--ledger-root", str(ledger_root)])
+    assert res.exit_code == 0, res.output
+    taches = MissionLedger(ledger_root).list_tasks()
+    assert [t.status for t in taches] == [TaskState.NEEDS_VERIFICATION]
+
+
+def test_cli_import_a2a_refuse_un_fichier_illisible(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+
+    fichier = tmp_path / "mauvais.json"
+    fichier.write_text("{pas du json", encoding="utf-8")
+    res = CliRunner().invoke(task_app, ["import-a2a", str(fichier), "--ledger-root", str(tmp_path / "ledger")])
+    assert res.exit_code == 2
+
+
+def test_cli_import_a2a_etat_inconnu_refuse_sans_rien_ecrire(tmp_path: Path) -> None:
+    import json
+
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+
+    fichier = tmp_path / "a2a.json"
+    fichier.write_text(json.dumps({"id": "x-1", "status": {"state": "bogus"}}), encoding="utf-8")
+    ledger_root = tmp_path / "ledger"
+    res = CliRunner().invoke(task_app, ["import-a2a", str(fichier), "--ledger-root", str(ledger_root)])
+    assert res.exit_code == 2, res.output
+    assert not ledger_root.exists() or MissionLedger(ledger_root).list_tasks() == []
+
+
+def test_cli_import_a2a_schema_illisible_donne_un_message_clair(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+
+    fichier = tmp_path / "a2a.json"
+    fichier.write_text('{"status": {"state": "working"}, "artifacts": 3}', encoding="utf-8")
+    res = CliRunner().invoke(task_app, ["import-a2a", str(fichier), "--ledger-root", str(tmp_path / "ledger")])
+    assert res.exit_code == 2
+    assert "`id`" in res.output and "artifacts" in res.output
+    assert "KeyError" not in res.output
+
+
+def test_cli_import_a2a_ledger_relatif_evidence_et_traces_a_cote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+
+    projet = tmp_path / "projet"
+    projet.mkdir()
+    ailleurs = tmp_path / "ailleurs"
+    ailleurs.mkdir()
+    monkeypatch.chdir(ailleurs)
+    fichier = tmp_path / "a2a.json"
+    fichier.write_text(
+        json.dumps({"id": "r-1", "status": {"state": "working"},
+                    "artifacts": [{"index": 0, "parts": [{"type": "text", "text": "ok"}]}]}),
+        encoding="utf-8",
+    )
+    res = CliRunner().invoke(
+        task_app, ["import-a2a", str(fichier), "--project-root", str(projet), "--ledger-root", "out/ledger"]
+    )
+    assert res.exit_code == 0, res.output
+    assert (projet / "out" / "ledger").is_dir()
+    assert (projet / "out" / "evidence").is_dir()
+    assert list(ailleurs.iterdir()) == []

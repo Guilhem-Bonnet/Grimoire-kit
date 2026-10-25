@@ -65,6 +65,9 @@ prochain export l'écrase.
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
 | `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
 | `grimoire task add "<titre>" -a "<critère>" --description "<brief>"` ou `--description-file <fichier>` | Donner à la tâche son contexte (pourquoi, pistes) au-delà du titre : texte brut, 4000 caractères au plus ; rendu par `task show`, l'outil MCP `task_show`, `task_context` (bundle) et la carte du cockpit (#714) |
+| `grimoire task add "<titre>" -a "<critère>" --finition maquette\|peaufine` | Poser la finition du livrable (R24). Sans l'option, la tâche hérite de la phase de `project-context.yaml` (clé `phase` ou `project.phase` : `exploration` → `maquette`, `construction` et `exploitation` → `peaufine`) ; sans phase déclarée ou reconnue, le champ reste vide (le kit ne devine pas). `task show` rend `finition`. La valeur machine est sans accent ; `peaufiné` est accepté en entrée. Une valeur inconnue est refusée avant toute écriture. L'outil MCP `task_add` porte le même paramètre `finition` |
+| `grimoire task add --intake "<texte>"` | Proposer, **sans rien écrire**, le type de mission, le risque, le périmètre, les contrôles de politique attendus et les tâches d'une demande (JSON sur stdout, classement déterministe sans modèle) ; ne se combine ni avec un titre ni avec `-a` (R07). Les tâches se créent ensuite une à une par `task add` |
+| `grimoire task import <plan.json> [--mission <id>] [--dry-run]` | Importer un plan JSON (P50) : crée les tâches (titre, critères, preuves, priorité) et leurs dépendances (`task link`), puis rend la table clé du plan → clé du ledger sur stdout (`clé<TAB>GAO-…<TAB>action`). Le champ `"plan"` (identité du plan, sans blanc) est obligatoire ; les clés de tâche n'ont ni blanc ni caractère de contrôle (100 caractères au plus) ; au plus 200 tâches et 1 Mo par fichier. Le plan est validé en entier avant d'écrire : toute anomalie (champ inconnu, critère manquant, clé en double, dépendance absente, cycle, mission inconnue, plafond) refuse tout, rien n'est écrit, code 1. **Idempotent et sûr en concurrence** : la relecture du ledger, les créations et les liens se font sous un verrou inter-processus, donc N imports simultanés d'un même plan créent un seul jeu de tâches ; une entrée déjà importée (`extra.import = {plan, key}`) n'est pas recréée. Si son titre ou ses critères diffèrent du ledger (plan modifié, ou autre plan qui réutilise l'identifiant), le plan entier est refusé (code 1, rien d'écrit) : aucune tâche n'est écrasée. Une entrée `{"key": …, "existing": "GAO-…"}` désigne une tâche déjà au ledger, sautée (jamais modifiée) mais utilisable comme cible de `depends_on`. La relance **complète les liens manquants** des tâches importées par ce plan (reprise après interruption) et ne touche à aucun autre champ. `--dry-run` montre ce qui serait créé sans toucher au ledger |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
 | `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
@@ -221,6 +224,19 @@ sinon le gate refuse avec `acceptance.depth_floor_unmet` (bloquant selon la
 sévérité du profil, comme les autres preuves). Une profondeur inconnue est un
 refus. Le routeur ne choisit pas de modèle : il choisit la cérémonie.
 
+### Ouvrir une mission
+
+| Commande | Description |
+| --- | --- |
+| `grimoire mission open "<titre>" [-d "<visée>"] [--scope-repo <dépôt>] [--scope-surface <surface>] [--scope-pack <pack>]` | Ouvre une mission dans le Mission Ledger et rend son identifiant (`MIS-…`) sur stdout ; les `--scope-*` sont répétables |
+
+`task add --mission <identifiant>` y rattache ensuite des tâches (une mission
+inconnue est refusée). Deux titres homonymes — à la casse et aux espaces près —
+sont refusés avec l'identifiant de la mission existante, y compris entre deux processus simultanés (la vérification et la création se font sous un même verrou) ; un titre vide aussi ; rien
+n'est écrit sur un refus (code 1). Le périmètre (`scope.repos`, `scope.surfaces`,
+`scope.packs`) est écrit au ledger sans doublon ni entrée blanche, et l'outil MCP
+`task_context` le rend sous `mission_scope` avec la tâche (R25, P49).
+
 ### Rapport de mission
 
 | Commande | Description |
@@ -247,6 +263,20 @@ et le `trace_id` de sa cascade ; chaque ligne nomme sa source (`ledger:`,
 - **Lecture seule et déterministe.** Aucun dossier n'est créé, aucune date de
   génération n'est écrite : deux exécutions sur les mêmes journaux donnent les
   mêmes octets. Mission inconnue ou ledger absent : sortie 1.
+
+### Registre des plans
+
+| Commande | Description |
+| --- | --- |
+| `grimoire plans list [--status active\|absorbed\|archive\|incubator] [--check] [--registry <fichier>]` | Lister les plans du registre (`deprecated-plans-registry.yaml`) : identifiant, statut, titre, et le plan qui absorbe un plan absorbé (R08) |
+
+Lecture seule. Le registre se cherche à
+`_grimoire-runtime-output/planning-artifacts/deprecated-plans-registry.yaml` sous la
+racine du projet (`--registry` en désigne un autre) ; absent ou illisible, la commande
+le dit et sort en 1, elle n'en invente pas un. La liste part sur stdout (colonnes
+séparées par une tabulation), `grimoire -o json plans list` rend le registre entier (l'option `-o json` est globale, il n'y a pas de `--json` propre à la commande). `--check` valide aussi
+le registre (ids uniques, statuts connus, `absorbed_by` renseigné, chemins présents,
+au moins un plan actif) et sort en 1 s'il est incohérent.
 
 ### Plafonds MAST par instance de workflow
 
@@ -418,6 +448,51 @@ un objet du bloc sans les trois clés est ignoré avec son propre avertissement,
 les autres objets du même bloc restent gardés. Rien de tout cela ne change le
 verdict ni le code de sortie du dispatch. `task show` affiche les incertitudes
 du dernier dispatch.
+
+### Mandat de l'orchestrateur (#876, lot 1)
+
+Les gestes de validation (`task accept`, `task answer`, `task approve-check`, `orchestrate resume`,
+`queue release`) exigent l'origine humaine. Un **mandat** ajoute un second principal, `orchestrator`, qui
+n'agit qu'à l'intérieur de ses bornes. Sans mandat, rien ne change.
+
+```bash
+grimoire autonomy mandate grant --gesture accept --gesture approve-check --task-type implementation \
+    --max-sessions-per-day 5 --until +7d       # attesté par un tour humain, comme `autonomy grant`
+grimoire autonomy mandate status
+grimoire autonomy mandate revoke --reason "fin du pilote"
+```
+
+- **Borné** : gestes couverts, types de tâche, plafond de sessions de worker par jour, durée. Un mandat
+  expiré, révoqué, hors plafond ou qui ne couvre pas le geste est refusé.
+- **Journal d'autorité** : `~/.grimoire/control/mandates.authority.jsonl`, chaîné par hash. Un journal
+  illisible ou rompu ne porte aucun mandat. Chaque geste pris sous mandat y est inscrit avec
+  `origin: orchestrator`, l'identifiant du mandat et sa provenance (règle, verdict ou reçu).
+  La troncature de la queue est vue par une tête (`<journal>.head`) et un marqueur par révocation
+  (`revoked/<mandat>`) : un journal plus court que sa tête, ou sans tête, est rompu. Pour repartir d'un journal
+  rompu, l'humain supprime lui-même les fichiers `mandates.*` et le dossier `revoked/` de `~/.grimoire/control/`.
+- **Jamais couverts** : modifier le mandat et modifier la politique d'escalade.
+- **Politique d'escalade** : section `escalation` de `_grimoire/standard/orchestration-policy.yaml`, par
+  catégories génériques (`release`, `secrets`, `paid`, `security`, `merge`, `accept`), chacune `human` ou
+  `orchestrator`. Le gabarit livré garde tout à l'humain. Le dépôt du kit délègue `merge` et `accept` et
+  garde `release`, `secrets` et `paid` : cette configuration vit dans
+  `_grimoire/standard/orchestration-policy.yaml` du dépôt qui porte le pilote (le dépôt du kit n'en
+  versionne pas aujourd'hui). La modifier après l'octroi révoque le mandat.
+- **Sous mandat** : un reçu de revue ne vaut que si son relecteur diffère de l'auteur et si la session du
+  relecteur figure au journal d'autorité ; les `--check` doivent être ceux scellés à la création de la
+  tâche, un check modifié depuis ouvre un événement « disjoncteur ».
+- **Principal** : en CLI, `GRIMOIRE_PRINCIPAL=orchestrator` *revendique* le principal et
+  `GRIMOIRE_PROVENANCE=<rule|verdict|receipt>:<réf>` cite la provenance ; la revendication ne vaut que si la
+  session appelante est inscrite au journal d'autorité en rôle `orchestrator`
+  (`register_orchestrator_session(projet, session_id)`, appelée par le lanceur) et n'est celle d'aucun worker ni
+  relecteur de la tâche. Sans session inscrite : refus. Le tick, qui est du code et non une session, appelle
+  l'API Python dans `with acting_as_orchestrator():` (`grimoire.missions.mandate`), jamais par l'environnement.
+- **Cockpit** : `GET /api/workspace/autonomy/mandate`, `POST …/mandate/grant` (jeton de session **et** clé de
+  contrôle `~/.grimoire/control/cockpit-key`) et `POST …/mandate/revoke`.
+- **Zone protégée** : `~/.grimoire/control/` (journal d'autorité, preuve de contrat d'hôte, clé du cockpit) est
+  refusée en écriture aux outils d'agent par le frein `PreToolUse`, et la clé en lecture. Les chemins sont
+  résolus (`$HOME`, `..`, `cd` puis chemin relatif, globs, liens symboliques existants, composants cités).
+  Limite : un agent qui lance un script arbitraire, ou dont le chemin est assemblé par le shell (`$X`),
+  contourne une garde de chemin.
 
 ### Ce que le claim rappelle
 

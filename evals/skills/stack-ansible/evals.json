@@ -1,0 +1,11 @@
+{
+  "skill_name": "stack-ansible",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Écris un playbook Ansible qui installe et configure nginx.",
+      "expected_output": "Écrit un playbook idempotent, vérifié en dry-run (--check), secrets chiffrés.",
+      "files": []
+    }
+  ]
+}
