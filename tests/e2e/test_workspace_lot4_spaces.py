@@ -427,24 +427,17 @@ def test_observer_ne_dit_pas_aucune_trace_quand_le_ledger_porte_des_evenements(
     assert "Aucune trace" not in workspace.locator("#canvas").inner_text()
 
 
-# ── Mémoire — le store d'abord, l'architecture derrière un onglet ──────────
+# ── Mémoire — la recherche d'abord (P24) ────────────────────────────────────
 
 
-def test_memoire_montre_le_store_avant_l_architecture(workspace: Page) -> None:
-    # Un projet jamais sondé est « uninitialized » et n'offre que la Flotte : le
-    # test ne prouvait rien (ou échouait) selon l'ordre des autres tests. On
-    # sonde explicitement — le geste du bouton « Sonder la mémoire », qui ne
-    # touche que le cache de santé, aucune entrée — puis on recharge.
-    status = workspace.evaluate("() => fetch('/api/memory/status?probe=1').then(r => r.status)")
-    assert status == 200, f"sonde mémoire refusée : HTTP {status}"
-    workspace.reload(wait_until="domcontentloaded")
-    workspace.wait_for_selector("body[data-ready='1']", timeout=30_000)
+def test_memoire_s_ouvre_sur_la_recherche(workspace: Page) -> None:
+    # P24 a retiré les onglets Store / Graphe / Couches / Architecture : l'écran
+    # d'entrée de Savoir › Mémoire est la recherche, filtres à gauche.
     _goto(workspace, "memoire")
-    workspace.wait_for_selector(".me-wrap, .empty")
-    views = workspace.locator("#view-seg button")
-    labels = [views.nth(i).inner_text() for i in range(views.count())]
-    assert labels[:1] == ["Store"], f"le store est la vue par défaut, pas l'explication (observé : {labels})"
-    assert "Architecture" in labels
+    workspace.wait_for_selector(".kn-searchbar input[type='search']")
+    assert workspace.locator("#view-seg button:visible").count() == 0
+    legends = [t.strip() for t in workspace.locator(".kn-filters legend").all_inner_texts()]
+    assert legends[:2] == ["Type", "Source"]
 
 
 # ── Cockpit : écritures désactivées (spec §5, critère 8) ───────────────────
