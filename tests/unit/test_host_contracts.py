@@ -451,6 +451,7 @@ class TestEffectiveHostConfigDisablesProofs:
         for d in (home / ".claude", project / ".claude", managed):
             d.mkdir(parents=True)
         monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() lit USERPROFILE sous Windows
         monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         monkeypatch.setattr(contract_probe, "MANAGED_DIR", managed)
         return {"home": home, "project": project, "managed": managed}
@@ -567,6 +568,7 @@ class TestEffectiveHostConfigDisablesProofs:
         assert self._fenced(env) is carried
 
 
+@_POSIX_HARNESS
 class TestHostStatusFollowsTheEffectiveConfig:
     def test_status_does_not_claim_a_proof_when_hooks_are_disabled(
         self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
