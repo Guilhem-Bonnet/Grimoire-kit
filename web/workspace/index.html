@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr" data-theme="dark" data-density="confortable" data-focus="off" data-atelier="off">
+<html lang="fr" data-density="confortable" data-focus="off" data-atelier="off">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -168,6 +168,14 @@
     <input id="palette-input" type="text" autocomplete="off" spellcheck="false"
            placeholder="Aller à, ou lancer une commande grimoire…">
     <ul id="palette-list" role="listbox"></ul>
+  </div>
+</div>
+
+<!-- Aide des raccourcis clavier (« ? ») -->
+<div id="shortcuts" hidden role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+  <div id="shortcuts-box" tabindex="-1">
+    <h2 id="shortcuts-title">Raccourcis clavier</h2>
+    <dl id="shortcuts-list"></dl>
   </div>
 </div>
 

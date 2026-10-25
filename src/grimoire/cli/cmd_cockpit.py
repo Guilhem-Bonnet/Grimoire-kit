@@ -148,19 +148,9 @@ def _resolve_project_path(slug: str | None) -> Path | None:
 _HOME_SLUG: str | None = None
 
 def _is_served_project(proot: Path) -> bool:
-    """Vrai si ``proot`` est le projet servi en direct (``_HOME_SLUG``) — échec fermé.
-
-    Sans projet servi, ou si son slug a quitté le registre, rien n'est servi :
-    on refuse. La comparaison porte sur les chemins résolus, pas sur le slug
-    de la requête (un ``project`` vide vise le premier du registre).
-    """
+    """``proot`` est le projet servi (``_HOME_SLUG``) ; échec fermé s'il n'y en a pas (P02)."""
     served = _resolve_project_path(_HOME_SLUG) if _HOME_SLUG else None
-    if served is None:
-        return False
-    try:
-        return served.resolve() == proot.resolve()
-    except OSError:
-        return False
+    return served is not None and served.resolve() == proot.resolve()
 
 
 _API_CACHE: dict[Path, Any] = {}
@@ -877,9 +867,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
         if is_mutation and not _is_served_project(proot):
-            # P02 : une mutation (delete/gc/sync) n'agit que sur le projet servi
-            # par ce process ; tout autre projet du registre est en lecture
-            # seule, comme le reste de la vue de travail (#356). Échec fermé.
+            # P02 : delete/gc/sync n'agissent que sur le projet servi (échec fermé).
             self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
             return
         subcmd = action
@@ -926,17 +914,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def do_PUT(self) -> None:  # http.server contract
         """``PUT /api/blueprints/<id>`` — enregistrer un blueprint (issue #535).
 
-        Absente jusqu'ici : ``_CockpitHandler`` ne définissait aucun ``do_PUT``,
-        donc ``http.server`` répondait 501 (méthode non gérée) avant même
-        d'atteindre une garde — y compris sur l'atelier (``grimoire serve``,
-        ``readOnly: false``), qui délègue à ce même handler depuis #351. Le
-        bouton « Enregistrer » de Concevoir (``ctx.api.blueprintPut``) restait
-        donc sans effet réel sur le seul serveur qui tourne aujourd'hui, quel
-        que soit le câblage côté client. Même garde que ``/api/setup``
-        ci-dessus : seul le projet de lancement direct (``_HOME_SLUG``)
-        accepte l'écriture — un projet du registre qu'on ne fait que regarder
-        via le cockpit reste en lecture seule, comme le reste de la vue de
-        travail (#356).
+        Même garde que ``/api/setup`` : seul le projet de lancement direct
+        (``_HOME_SLUG``) accepte l'écriture (#356) ; sans ``do_PUT``,
+        ``http.server`` répondait 501 avant toute garde.
         """
         path = urlparse(self.path).path
         if not self._guard_mutation():
