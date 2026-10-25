@@ -59,7 +59,7 @@ from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import locked
 from grimoire.core.standard_state import current_session
 from grimoire.costs import POLICY_STOP, Cost, cap_reason
-from grimoire.flows.attestation import GRANTED_PREFIX, Attestation, CheckpointJournal, attest
+from grimoire.flows.attestation import GRANTED_PREFIX, Attestation, CheckpointJournal, attest_grant, turns_source
 from grimoire.hosts.decisions.authority_guard import AUTHORITY_SUFFIX
 
 __all__ = [
@@ -250,6 +250,7 @@ class GrantState:
             "granted_at": self.grant.get("ts"),
             "attestation": self.grant.get("attestation"),
             "session_id": self.grant.get("session_id"),
+            **({"attest_from": self.grant["attest_from"]} if self.grant.get("attest_from") else {}),
             "spent": self.spent.to_dict(),
             "cost_scope": COST_SCOPE,
         }
@@ -373,14 +374,23 @@ class GrantJournal:
         return None
 
     def request(
-        self, request: GrantRequest, env: Mapping[str, str] | None = None, now: datetime | None = None
+        self,
+        request: GrantRequest,
+        env: Mapping[str, str] | None = None,
+        now: datetime | None = None,
+        *,
+        attest_from: Path | None = None,
     ) -> tuple[dict[str, Any] | None, Attestation]:
         """Inscrit l'octroi si la demande est attestée ; sinon émet (ou garde ouvert) son challenge.
 
         Rend ``(octroi, attestation)`` — ``octroi`` à ``None`` tant que la
         demande n'est pas attestée. La même demande relancée retrouve son
         challenge ; un refus ne le consomme pas.
+        *attest_from* (``--attest-from``) : le projet dont le journal des tours atteste
+        (:func:`grimoire.flows.attestation.attest_grant`) ; le challenge et l'octroi restent ici,
+        l'octroi nomme la source (``attest_from``). Source illisible : :class:`GrimoireRuntimeError`.
         """
+        source = turns_source(attest_from) if attest_from is not None else None
         challenge = self._open_challenge(request.sha256, env)
         if challenge is None:
             session_id, _host = current_session(env)
@@ -396,12 +406,21 @@ class GrantJournal:
                     "ts": (now or _now()).isoformat(),
                 }
             )
-        attestation = attest(self._project_root, challenge, env, self._turns.consumed_turns())
+        attestation, registry = attest_grant(self._project_root, self._turns, challenge, env, source)
         if not attestation.attested:
             return None, attestation
         moment = now or _now()
         grant_id = f"GRT-{uuid.uuid4().hex[:12]}"
-        self._turns.consume_turn(grant_id, attestation)
+        if registry is self._turns:
+            registry.consume_turn(grant_id, attestation)
+        else:
+            try:  # avant l'octroi, comme toujours : un registre qui ne s'écrit pas n'inscrit rien
+                registry.consume_turn(grant_id, attestation, for_project=str(self._project_root))
+            except OSError as exc:
+                raise GrimoireRuntimeError(
+                    f"--attest-from : le tour n'a pas pu être consommé dans {registry.consumed_path} "
+                    f"({type(exc).__name__}) ; aucun octroi inscrit"
+                ) from exc
         grant = self._append(
             {
                 "type": "grant",
@@ -415,6 +434,7 @@ class GrantJournal:
                 "attestation": attestation.status,
                 "session_id": attestation.session_id,
                 "turn_ts": attestation.turn_ts,
+                **({"attest_from": attestation.source} if attestation.source else {}),
                 "ts": moment.isoformat(),
             }
         )

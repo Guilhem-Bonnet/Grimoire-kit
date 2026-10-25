@@ -463,6 +463,27 @@ grimoire autonomy mandate status
 grimoire autonomy mandate revoke --reason "fin du pilote"
 ```
 
+- **Session ouverte dans un autre projet** : le journal des tours humains n'est écrit que par le hook du projet
+  où tourne la session. Pour accorder un mandat sur un projet piloté depuis la session d'un autre, désigne ce
+  dernier : `grimoire autonomy mandate grant … --project-root <cible> --attest-from <projet de ta session>`.
+  Sans l'option, la demande sort en `human_authority_unprovable` et le refus propose `--attest-from`. Rien
+  n'est déduit du dossier courant ni de l'environnement. Les autres règles ne changent pas : même session,
+  tour `user` postérieur au challenge, un tour pour un seul octroi. Le challenge et le mandat restent ceux de
+  la cible ; le mandat inscrit `attest_from`. Le tour est consommé dans le registre de la **source**
+  (`_grimoire-runtime-output/flows/authority/@consumed-turns.authority.jsonl`, entrée `for_project`), après
+  vérification dans celui de la source et dans celui de la cible : le registre suit le journal qu'il protège,
+  si bien qu'un même tour ne sert ni à deux cibles ni à la source elle-même. Un dossier absent, sans journal
+  ou dont le journal est illisible est refusé (code 1) avant tout challenge ; le tour est consommé avant
+  l'inscription du mandat, donc un registre qui ne s'écrit pas n'inscrit rien.
+- **Registre des tours de l'utilisateur** : toute consommation de tour, avec ou sans `--attest-from` (octroi,
+  mandat, checkpoint de flow, `approve-check`), est aussi inscrite dans
+  `~/.grimoire/control/consumed-turns.authority.jsonl`, clé `(session_id, ts, prompt_sha256)`, indépendante du
+  chemin du journal ; toute attestation le consulte. Une copie du journal des tours (dossier source recopié
+  ailleurs) ne réatteste donc pas un tour déjà consommé. La consommation revérifie la clé sous le verrou de ce
+  registre : de deux décisions concurrentes qui ont retenu le même tour, la seconde est refusée (« déjà
+  consommé », code 1) sans rien inscrire. Limite : ce registre vit dans la zone de contrôle de l'utilisateur ;
+  un autre compte (autre `HOME`), ou un agent qui exécute un script arbitraire pour y écrire, n'est pas couvert.
+
 - **Borné** : gestes couverts, types de tâche, plafond de sessions de worker par jour, durée. Un mandat
   expiré, révoqué, hors plafond ou qui ne couvre pas le geste est refusé.
 - **Journal d'autorité** : `~/.grimoire/control/mandates.authority.jsonl`, chaîné par hash. Un journal

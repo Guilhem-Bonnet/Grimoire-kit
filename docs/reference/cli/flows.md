@@ -258,6 +258,7 @@ faire franchir un checkpoint destructif sans humain (CI, banc) ;
 | Commande | Effet |
 |---|---|
 | `grimoire autonomy grant --scope <sel> --max-cost-usd <usd> --until <échéance>` | Demander un octroi. `<sel>` : `run:<id>` ou `blueprint:<id>`, `/<node>` en option, répétable, aucun joker ; `<échéance>` : `+30m`, `+2h`, `+1d` ou un instant ISO 8601 avec fuseau. Les trois bornes sont obligatoires. |
+| `grimoire autonomy grant … --attest-from <projet>` | Même demande, attestée par le journal des tours de `<projet>` quand la session tourne dans un autre projet que la cible (`--project-root`). L'octroi inscrit `attest_from` ; le tour est consommé dans le registre de `<projet>`. Mêmes règles que `autonomy mandate grant --attest-from` ([Tâches](taches.md#mandat-de-lorchestrateur-876-lot-1)). |
 | `grimoire autonomy status` | Chaque octroi réévalué maintenant : actif ou révoqué (motif), coût dépensé, échéance ; `-o json` ajoute les événements. |
 | `grimoire autonomy revoke <grant-id> [--reason]` | Révoquer à la main, toujours permis. |
 
