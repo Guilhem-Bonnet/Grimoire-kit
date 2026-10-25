@@ -244,7 +244,7 @@ footer .sp{flex:1}
 </head>
 <body>
 
-<section class="film5" aria-label="Teaser, 48 secondes">
+<section class="film5" aria-label="Teaser vidéo">
   <header class="bar5"><a href="#top" id="top"><b>›</b> Grimoire</a><nav><a href="#capot">En vrai</a><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" rel="noopener">Code source</a></nav></header>
   <video id="teaser" src="media/teaser-720.mp4" poster="media/teaser-poster.jpg" autoplay muted loop playsinline preload="metadata" width="1920" height="1080"></video>
   <div class="ctl5"><button type="button" id="snd" aria-pressed="false">Son</button><button type="button" id="again">Revoir</button></div>
@@ -267,7 +267,7 @@ footer .sp{flex:1}
   <article class="tool wide"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V9a7 7 0 0 1 14 0v11M3.5 20h17M9.5 20v-5.5h5V20"/></svg></span><h3>Le contrôle des preuves</h3>
     <p>Une tâche ne peut pas être déclarée finie sans sa preuve : un test qui passe, une relecture faite. Le contrôle refuse et dit ce qui manque. Il refuse pour de bon en profil governed, il prévient ailleurs.</p>
     <details class="replay" id="replay-box"><summary>Voir un refus, rejoué tel quel dans un terminal</summary>
-<div class="proof5">
+<div class="proof5" data-verbatim>
 <div class="wrap"><p class="legend">Une tâche refusée faute de preuve, puis acceptée.</p>
       <div class="proof">
         <div class="ring live ok" id="ring" role="img" aria-label="Exigences du passage : 2 sur 2 satisfaites">
@@ -318,7 +318,7 @@ footer .sp{flex:1}
     <li>La mémoire est celle d'un projet : elle n'est pas partagée entre projets, et le rappel au démarrage demande un outil qui sait exécuter des contrôles (Claude Code, Copilot).</li>
     <li>Aucun gain n'est mesuré.</li>
   </ul>
-  <p class="cond">Le tableau de bord est en cours de refonte : ce qu'en décrit ce bloc n'est pas entièrement dans la version publiée (3.62.1). Le contrôle des preuves refuse pour de bon seulement en profil governed. Le reste est dans la version 3.62.1, que tu peux installer maintenant.</p>
+  <p class="cond">Le tableau de bord est en cours de refonte : ce qu'en décrit ce bloc n'est pas entièrement dans la version publiée<span data-source="version" data-format=" ({})"></span>. Le contrôle des preuves refuse pour de bon seulement en profil governed. Le reste est dans la version publiée, que tu peux installer maintenant.</p>
 </section>
 
 <section class="blk wrap" aria-labelledby="capot-lien">

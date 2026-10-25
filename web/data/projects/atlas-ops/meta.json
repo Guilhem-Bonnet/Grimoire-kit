@@ -9,7 +9,7 @@
     "pattern_categories": 11,
     "profiles": 5,
     "artifact_types": 41,
-    "tests": 5948
+    "tests": null
   },
   "archetypes": [
     "agentic-standard",
@@ -88,5 +88,6 @@
     "docs": "https://guilhem-bonnet.github.io/Grimoire-kit/",
     "license": "MIT"
   },
-  "is_demo": true
+  "is_demo": true,
+  "tests_method": null
 }

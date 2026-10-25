@@ -15,7 +15,7 @@ project actually holds — an empty observatory stays empty. A local tool that
 invents a runtime is worse than one that admits it has nothing to display.
 
 Usage:
-    python scripts/gen-site-data.py [--root .] [--with-tests] [--demo]
+    python scripts/gen-site-data.py [--root .] [--with-tests] [--demo] [--meta-only | --dry-run]
 """
 from __future__ import annotations
 
@@ -71,35 +71,58 @@ except ImportError:  # pragma: no cover
 
 
 def _read_version(root: Path) -> str:
-    """Version du projet — jamais fatale.
+    """Version du kit pour ce projet — jamais fatale, jamais dépendante de l'import.
 
     Un projet gouverné n'est pas grimoire-kit : il n'a ni
-    ``src/grimoire/__version__.py`` ni ``version.txt``. Le cockpit doit
-    quand même le rendre, donc on dégrade au lieu de lever.
+    ``src/grimoire/__version__.py`` ni ``version.txt``, et le script peut tourner
+    sans ``src/grimoire`` importable. On lit donc des fichiers, dans l'ordre :
+
+    1. ``src/grimoire/__version__.py`` — le dépôt du kit lui-même ;
+    2. ``version.txt`` — idem, copie texte écrite à la release ;
+    3. ``_grimoire/kit/.up-version`` — le kit installé, écrit par ``init`` et ``up`` ;
+    4. ``project-context.yaml`` — clé ``kit_version`` ou ``grimoire_version``.
+
+    ``unknown`` seulement si aucune de ces sources n'existe : le consommateur
+    n'affiche alors aucun numéro.
     """
     src = root / "src/grimoire/__version__.py"
     if src.is_file():
         m = re.search(r'__version__\s*=\s*"([^"]+)"', src.read_text(encoding="utf-8"))
         if m:
             return m.group(1)
-    txt = root / "version.txt"
-    if txt.is_file():
-        return txt.read_text(encoding="utf-8").strip() or "unknown"
+    for rel in ("version.txt", "_grimoire/kit/.up-version"):
+        f = root / rel
+        if f.is_file():
+            lines = f.read_text(encoding="utf-8").strip().splitlines()
+            if lines and lines[0].strip():
+                return lines[0].strip()
+    ctx = root / "project-context.yaml"
+    if ctx.is_file():
+        m = re.search(
+            r"^(?:kit_version|grimoire_version)\s*:\s*[\"']?([^\s\"'#]+)",
+            ctx.read_text(encoding="utf-8"), re.MULTILINE,
+        )
+        if m:
+            return m.group(1)
     return "unknown"
 
 
 def _count_tools(root: Path) -> int:
-    base = root / "framework/tools"
-    return len(list(base.glob("*.py"))) if base.is_dir() else 0
+    for rel in ("framework/tools", "_grimoire/kit/tools"):
+        base = root / rel
+        if base.is_dir():
+            return len(list(base.glob("*.py")))
+    return 0
 
 
 def _count_agents(root: Path) -> int:
     stems: set[str] = set()
     for p in root.glob("archetypes/*/agents/*.md"):
         stems.add(p.stem)
-    for p in (root / "_grimoire/_config/custom/agents").glob("*.md"):
-        if not p.stem.endswith(".tpl"):
-            stems.add(p.stem)
+    for rel in ("_grimoire/_config/custom/agents", "_grimoire/kit/agents"):
+        for p in (root / rel).glob("*.md"):
+            if not p.stem.endswith(".tpl"):
+                stems.add(p.stem)
     return len(stems)
 
 
@@ -141,7 +164,12 @@ def _standard_counts(root: Path) -> dict:
     return out
 
 
-def _count_tests(root: Path, run_pytest: bool) -> int | None:
+def _count_tests(root: Path, run_pytest: bool) -> tuple[int | None, str | None]:
+    """(nombre, méthode) : ``pytest`` = collecte exacte, ``static`` = plancher.
+
+    ``(None, None)`` quand rien n'est calculable : la page n'affiche alors aucun
+    chiffre plutôt qu'un chiffre faux.
+    """
     if run_pytest:
         try:
             r = subprocess.run(
@@ -150,21 +178,22 @@ def _count_tests(root: Path, run_pytest: bool) -> int | None:
             )
             m = re.search(r"(\d+)\s+tests?\s+collected", r.stdout + r.stderr)
             if m:
-                return int(m.group(1))
+                return int(m.group(1)), "pytest"
             n = len([ln for ln in r.stdout.splitlines() if "::" in ln])
             if n:
-                return n
+                return n, "pytest"
         except Exception:  # noqa: S110 — best-effort; fall back to a static count
             pass
     # Fallback: count test functions (floor — excludes parametrize expansion)
     n = 0
     for p in root.glob("tests/**/*.py"):
         n += len(re.findall(r"^\s*(?:async\s+)?def test_", p.read_text(encoding="utf-8"), re.MULTILINE))
-    return n or None
+    return (n, "static") if n else (None, None)
 
 
 def build_meta(root: Path, with_tests: bool) -> dict:
     std = _standard_counts(root)
+    tests, tests_method = _count_tests(root, with_tests)
     return {
         "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "version": _read_version(root),
@@ -176,8 +205,11 @@ def build_meta(root: Path, with_tests: bool) -> dict:
             "pattern_categories": std["pattern_categories"],
             "profiles": std["profiles"],
             "artifact_types": std["artifact_types"],
-            "tests": _count_tests(root, with_tests),
+            "tests": tests,
         },
+        # Origine de « tests » : `pytest` = collecte exacte ; `static` = plancher
+        # (fonctions `def test_`, paramétrage non développé) ; null = non calculable.
+        "tests_method": tests_method,
         "archetypes": _list_archetypes(root),
         "profiles": ["starter", "controlled", "orchestrated", "governed", "production"],
         "inventory": {
@@ -1377,7 +1409,11 @@ def build_project(root: Path, out_dir: Path, with_tests: bool, *, demo: bool = F
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate web/ data layer from the project(s)")
-    ap.add_argument("--root", type=Path, default=Path.cwd())
+    ap.add_argument("--root", "--project-root", dest="root", type=Path, default=Path.cwd())
+    ap.add_argument("--meta-only", action="store_true",
+                    help="n'écrire que meta.json (chiffres de la vitrine, regénérés par le workflow Pages)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="afficher meta.json sur la sortie standard sans rien écrire")
     ap.add_argument("--out-dir", type=Path, default=None, help="where to write the JSON (default: <root>/web/data)")
     ap.add_argument("--with-tests", action="store_true", help="run pytest --collect-only for the exact test count")
     ap.add_argument("--registry", type=Path, default=None,
@@ -1388,7 +1424,15 @@ def main(argv: list[str]) -> int:
                          "traces représentatives, cartes kanban du template, nuage vectoriel synthétique")
     args = ap.parse_args(argv)
     root = args.root.resolve()
+    if args.dry_run:
+        print(json.dumps(build_meta(root, args.with_tests), ensure_ascii=False, indent=2))
+        return 0
     out_dir = (args.out_dir.resolve() if args.out_dir else root / "web" / "data")
+    if args.meta_only:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        _write(out_dir, "meta.json", build_meta(root, args.with_tests))
+        print(f"[OK] {out_dir / 'meta.json'}")
+        return 0
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Liste de projets : registre (multi) ou projet unique (mono / vitrine)
