@@ -73,7 +73,11 @@ QUESTION_EVENTS: frozenset[str] = frozenset({QUESTION_ASKED_EVENT, HUMAN_ANSWERE
 OPEN, ANSWERED, DEDUCED, LAPSED = "open", "answered", "deduced", "not_awaited"
 #: L'origine du canal humain (``schemas.ORIGIN_HUMAN``, non importé : ``schemas`` importe ce module).
 _HUMAN = "human"
+#: Le principal ``orchestrator`` sous mandat (#876, ``schemas.ORIGIN_ORCHESTRATOR``) : sa réponse tranche comme celle de l'humain.
+_ORCHESTRATOR = "orchestrator"
 _AGENT = "agent"
+#: Les origines dont une réponse tranche : l'humain, ou l'orchestrateur sous un mandat valide.
+ANSWER_ORIGINS: tuple[str, ...] = (_HUMAN, _ORCHESTRATOR)
 
 
 def question_key(text: str) -> str:
@@ -110,7 +114,7 @@ class QuestionRecord:
 
     @property
     def base_status(self) -> str:
-        if self.answer_origin == _HUMAN:
+        if self.answer_origin in ANSWER_ORIGINS:
             return ANSWERED
         if self.answer_origin == _AGENT and self.source:
             return DEDUCED
@@ -158,7 +162,7 @@ def replay_question(data: dict[str, Any], evt_type: str, payload: dict[str, Any]
         records.append(record)
     elif evt_type in (HUMAN_ANSWERED_EVENT, QUESTION_RESOLVED_EVENT):
         human = evt_type == HUMAN_ANSWERED_EVENT
-        if human and payload.get("origin") != _HUMAN:
+        if human and payload.get("origin") not in ANSWER_ORIGINS:
             return
         if qid not in ids:
             # Une question posée sans ``task.question_asked`` (la récolte, K2) : celle que la tâche attend.
@@ -180,7 +184,7 @@ def replay_question(data: dict[str, Any], evt_type: str, payload: dict[str, Any]
             "answer": str(payload.get("answer", "") or ""),
             "answered_at": at,
             "answered_by": str(payload.get("actor_id", "") or ""),
-            "answer_origin": _HUMAN if human else _AGENT,
+            "answer_origin": str(payload.get("origin")) if human else _AGENT,
             **({} if human else {"source": source}),
         }
     else:
