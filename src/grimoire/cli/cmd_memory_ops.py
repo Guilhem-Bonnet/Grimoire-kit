@@ -12,6 +12,7 @@ mémoire à connaître.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from grimoire.cli.cmd_memory import (
     console,
     graph_app,
     memory_app,
+    migrate_app,
 )
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory import profiles as memory_profiles
@@ -190,7 +192,7 @@ def memory_graph_sync_memories(ctx: typer.Context) -> None:
     from grimoire.memory.projections import sync_memory_projection
 
     mgr, cfg, _ = _load_manager_context()
-    graph = _load_neo4j_graph(cfg)
+    graph = _load_neo4j_graph(cfg, ensure_schema=True)
     try:
         stats = sync_memory_projection(graph, mgr.get_all())
     finally:
@@ -554,3 +556,384 @@ def memory_doctor(ctx: typer.Context, apply: bool = _doctor_apply_opt) -> None:
             console.print("  Relancez avec [cyan]--apply[/cyan] pour purger.")
 
 
+
+
+# ── grimoire memory split ─────────────────────────────────────────────────────
+
+_split_source_opt = typer.Option(
+    "", "--source-collection",
+    help="Collection partagée à découper (défaut : celle de la configuration courante).",
+)
+_split_projects_opt = typer.Option(
+    "", "--projects", help="Ne découper que ces projets (noms séparés par des virgules). Défaut : tous.",
+)
+_split_export_opt = typer.Option(
+    None, "--export", help="Fichier JSON de sauvegarde de la source (défaut : _grimoire/_memory/migration/split-*.json).",
+)
+_split_unassigned_opt = typer.Option(
+    False, "--allow-unassigned",
+    help="Autoriser --apply alors que des souvenirs sans project_name resteront dans le segment partagé "
+    "(donc invisibles pour les projets repointés).",
+)
+_split_apply_opt = typer.Option(
+    False, "--apply", help="Copier et vérifier. Sans ce drapeau : aperçu seul. La source n'est jamais supprimée.",
+)
+
+
+def _registry_configs(source_identity: tuple[str, str], current_root: Path) -> dict[str, Path]:
+    """``nom de projet → project-context.yaml`` pour les projets du registre qui lisent la source."""
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.memory.manager import store_identity
+    from grimoire.tools.project_registry import load_registry
+
+    found: dict[str, Path] = {}
+    seen: set[Path] = set()
+    candidates = [str(current_root)] + [str(e.get("path", "")) for e in load_registry()]
+    for raw in candidates:
+        if not raw:
+            continue
+        root = Path(raw)
+        config_path = root / "project-context.yaml"
+        if config_path in seen or not config_path.is_file():
+            continue
+        seen.add(config_path)
+        try:
+            cfg = GrimoireConfig.from_yaml(config_path)
+        except Exception as exc:  # un projet du registre illisible n'arrête pas la découpe des autres
+            logging.getLogger(__name__).info("registre : %s ignoré (%s)", config_path, exc)
+            continue
+        if store_identity(cfg, root) == source_identity:
+            found.setdefault(cfg.project.name, config_path)
+    return found
+
+
+@memory_app.command("split")
+def memory_split(
+    ctx: typer.Context,
+    source_collection: str = _split_source_opt,
+    projects: str = _split_projects_opt,
+    export: Path | None = _split_export_opt,
+    apply: bool = _split_apply_opt,
+    allow_unassigned: bool = _split_unassigned_opt,
+) -> None:
+    """Découper un segment mémoire partagé en un segment par projet — identifiants conservés.
+
+    Groupe les souvenirs de la collection partagée par ``project_name``, les copie par
+    upsert dans ``<collection>-<projet>`` (mêmes identifiants, donc ``superseded_by``
+    reste valide), vérifie les comptes et les identifiants, puis repointe
+    ``memory.collection_prefix`` de chaque projet du registre qui lisait le segment.
+
+    Aperçu par défaut. Avec ``--apply`` : export JSON de la source d'abord, copie, vérification,
+    mise à jour des configurations seulement si tout est vérifié. La source n'est ni modifiée
+    ni supprimée ; relançable sans doublon.
+    """
+    import time
+    from dataclasses import replace as _dc_replace
+
+    from grimoire.memory.manager import store_identity
+    from grimoire.memory.split import SplitError, apply_split, plan_split, render_collection_prefix
+    from grimoire.memory.store_probe import store_exists
+
+    cfg, root = _load_config_context()
+    source_mem = _dc_replace(cfg.memory, collection_prefix=source_collection or cfg.memory.collection_prefix)
+    if source_collection and source_mem.backend == "weaviate-server":
+        source_mem = _dc_replace(source_mem, weaviate_collection=source_collection)
+    source_cfg = _dc_replace(cfg, memory=source_mem)
+    if store_exists(source_cfg, root) is False:
+        console.print(
+            f"[red]Source introuvable[/red] ({source_mem.backend}, {source_mem.collection_prefix!r}) : aucun store de ce nom. "
+            "Vérifiez --source-collection ; rien n'a été créé."
+        )
+        raise typer.Exit(2)
+    try:
+        source_mgr = MemoryManager.from_config(source_cfg, project_root=root)
+    except GrimoireMemoryError as exc:
+        console.print(f"[red]Backend source indisponible ({source_mem.backend}) :[/red] {exc}")
+        raise typer.Exit(1) from None
+    entries = source_mgr.get_all()
+
+    wanted = [p.strip() for p in projects.split(",") if p.strip()]
+    try:
+        plan = plan_split(
+            entries,
+            source_collection=source_mem.collection_prefix,
+            configs=_registry_configs(store_identity(source_cfg, root), root),
+            only=wanted,
+        )
+    except SplitError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from None
+
+    def _target_cfg(collection: str) -> Any:
+        mem = _dc_replace(source_mem, collection_prefix=collection)
+        if mem.backend == "weaviate-server":  # Weaviate lit weaviate_collection avant collection_prefix
+            mem = _dc_replace(mem, weaviate_collection=collection)
+        return _dc_replace(cfg, memory=mem)
+
+    if apply and plan.groups:
+        source_identity = store_identity(source_cfg, root)
+        same = [g.collection for g in plan.groups if store_identity(_target_cfg(g.collection), root) == source_identity]
+        if same:
+            console.print(
+                f"[red]Refus : la cible {same[0]!r} désigne le même store que la source[/red] — la copie "
+                "s'écrirait sur elle-même, puis les configurations pointeraient vers rien. Rien n'est écrit."
+            )
+            raise typer.Exit(2)
+        if plan.unassigned and not allow_unassigned:
+            console.print(
+                f"[red]Refus : {len(plan.unassigned)} souvenir(s) sans project_name ne seraient copiés nulle part.[/red] "
+                "Les projets repointés ne les verraient plus. Attribuez-les d'abord, ou passez "
+                "--allow-unassigned en connaissance de cause. Rien n'est écrit."
+            )
+            raise typer.Exit(2)
+
+    report = None
+    if apply and plan.groups:
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        export_path = export or root / "_grimoire" / "_memory" / "migration" / f"split-{stamp}.json"
+
+        def _open_target(collection: str) -> MemoryManager:
+            return MemoryManager.from_config(_target_cfg(collection), project_root=root)
+
+        try:
+            report = apply_split(
+                plan, entries, export_path=export_path, open_target=_open_target, render_config=render_collection_prefix,
+            )
+        except SplitError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from None
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"apply": apply, **plan.to_dict(), "report": report.to_dict() if report else None}, indent=2))
+        return
+
+    table = Table(title=f"Découpe de « {plan.source_collection} » ({plan.total} souvenir(s))")
+    table.add_column("Projet")
+    table.add_column("Souvenirs", justify="right")
+    table.add_column("Collection cible")
+    table.add_column("Configuration à repointer")
+    for g in plan.groups:
+        table.add_row(g.project, str(g.count), g.collection, str(g.config_path) if g.config_path else "[dim]hors registre[/dim]")
+    console.print(table)
+    if plan.unassigned:
+        consequence = (
+            "--allow-unassigned est passé : ils deviennent invisibles pour les projets repointés."
+            if allow_unassigned
+            else "--apply est refusé sans --allow-unassigned (ils deviendraient invisibles pour les projets repointés)."
+        )
+        console.print(f"  [yellow]{len(plan.unassigned)} souvenir(s) sans project_name[/yellow] restent dans le segment partagé : {consequence}")
+    if report is None:
+        console.print("  Aperçu : aucune donnée n'est écrite. Relancez avec [cyan]--apply[/cyan] (export JSON d'abord, source intacte).")
+        return
+    console.print(f"  [green]Copiés et vérifiés[/green] : {sum(report.copied.values())} — export : {report.export_path}")
+    for path in report.configs_updated:
+        console.print(f"  [green]config repointée[/green] : {path}")
+    console.print("  La source est intacte : la supprimer est un geste séparé, une fois la découpe vérifiée.")
+
+
+# ── grimoire memory migrate run ───────────────────────────────────────────────
+# Déplacé depuis cmd_memory (plafond de taille, ratchet R2) ; s'enregistre sur ``migrate_app``.
+
+_migrate_run_source_opt = typer.Option(
+    "",
+    "--source",
+    help="Backend d'origine (ex: lexical). Détecté depuis la sauvegarde de `memory up --apply` si omis.",
+)
+_migrate_run_apply_opt = typer.Option(
+    False, "--apply", help="Écrire dans le backend courant. Sans ce drapeau : aperçu seul.",
+)
+_migrate_run_project_opt = typer.Option(
+    "", "--project", help="Ne migrer que les souvenirs de ce projet (metadata.project_name).",
+)
+_migrate_run_overwrite_opt = typer.Option(
+    False, "--overwrite",
+    help="Remplacer aussi les identifiants déjà présents dans la cible (défaut : ils sont laissés tels quels).",
+)
+_migrate_run_all_projects_opt = typer.Option(
+    False, "--all-projects",
+    help="Avec --source-collection sans --project : accepter que les souvenirs des autres projets du segment entrent.",
+)
+_migrate_run_collection_opt = typer.Option(
+    "", "--source-collection",
+    help="Collection de la source, si elle diffère de celle de la cible (même type de backend accepté).",
+)
+
+
+@migrate_app.command("run")
+def memory_migrate_run(
+    ctx: typer.Context,
+    source: str = _migrate_run_source_opt,
+    apply: bool = _migrate_run_apply_opt,
+    project: str = _migrate_run_project_opt,
+    source_collection: str = _migrate_run_collection_opt,
+    overwrite: bool = _migrate_run_overwrite_opt,
+    all_projects: bool = _migrate_run_all_projects_opt,
+) -> None:
+    """Migrer les souvenirs d'un ancien backend vers le backend courant — sans bundle ni fichier.
+
+    Couvre le cas laissé sans commande par #527 : passer d'un backend lexical
+    (BM25, pas de vecteur) à un backend vectoriel. ``migrate export-bundle`` /
+    ``import-weaviate`` ne savent lire qu'un Qdrant ; ici la source est
+    n'importe quel backend Memory OS, lu via l'API publique du manager
+    (``get_all``) puis réécrit dans le backend courant, qui recalcule ses
+    propres embeddings. Remplace le couple manuel `memory export` + `memory
+    import`.
+
+    La source est ``--source``, sinon ``memory.migration_source_backend``,
+    sinon la sauvegarde laissée par le dernier `memory up --apply` qui a
+    changé de backend.
+
+    La copie se fait par upsert **sous l'identifiant d'origine** (``superseded_by``
+    reste valide, ``created_at`` est conservé) et **ne crée que les identifiants
+    absents de la cible** : une relance ne défait pas une décision revue ;
+    ``--overwrite`` remplace explicitement. Un registre des identifiants déjà copiés
+    évite de recréer un souvenir copié puis supprimé dans la cible.
+    Un souvenir que la cible refuse est compté et listé, la copie continue ; une
+    interruption laisse la source intacte. ``--project`` ne copie que les souvenirs d'un
+    projet ; ``--source-collection`` lit une autre collection du même type de
+    backend (découpe d'un segment partagé).
+    """
+    from dataclasses import replace as _dc_replace
+
+    from grimoire.memory.manager import store_identity
+    from grimoire.memory.migration import (
+        MigrationInterruptedError,
+        copied_registry_path,
+        load_copied,
+        migrate_backend_to_backend,
+        portable_metadata,
+        read_previous_backend_breadcrumb,
+        save_copied,
+    )
+    from grimoire.memory.store_probe import store_exists
+
+    cfg, root = _load_config_context()
+    target_backend = cfg.memory.backend
+    source_backend = source or cfg.memory.migration_source_backend or read_previous_backend_breadcrumb(root)
+    if not source_backend:
+        console.print(
+            "[red]Backend source inconnu.[/red] Passez --source, ou relancez juste après "
+            "`grimoire memory up --apply` (qui laisse la trace du backend précédent)."
+        )
+        raise typer.Exit(2)
+    source_mem = _dc_replace(cfg.memory, backend=source_backend)
+    if source_collection:
+        source_mem = _dc_replace(
+            source_mem, collection_prefix=source_collection,
+            weaviate_collection=source_collection if source_backend == "weaviate-server" else source_mem.weaviate_collection,
+        )
+    source_cfg = _dc_replace(cfg, memory=source_mem)
+    source_key, target_key = repr(store_identity(source_cfg, root)), repr(store_identity(cfg, root))
+    if source_key == target_key:
+        console.print(f"[yellow]Source et cible identiques ({target_backend}) — rien à migrer.[/yellow]")
+        return
+
+    # Les constructeurs de backends créent ce qu'ils ouvrent : on s'assure d'abord que la source existe,
+    # sinon une faute de frappe créerait une source vide et afficherait « 0 souvenir ».
+    if store_exists(source_cfg, root) is False:
+        console.print(
+            f"[red]Source introuvable[/red] ({source_backend}, {source_mem.collection_prefix!r}) : aucun store de ce nom. "
+            "Vérifiez --source et --source-collection ; rien n'a été créé."
+        )
+        raise typer.Exit(2)
+    try:
+        source_mgr = MemoryManager.from_config(source_cfg, project_root=root)
+    except GrimoireMemoryError as exc:
+        console.print(f"[red]Backend source indisponible ({source_backend}):[/red] {exc}")
+        raise typer.Exit(1) from None
+    entries = source_mgr.get_all()
+
+    if source_collection and not project and not all_projects:
+        names = {str(e.metadata.get("project_name", "")) for e in entries} - {cfg.project.name}
+        if names:
+            shown = ", ".join(sorted(n or "(sans project_name)" for n in names))
+            console.print(
+                f"[red]Le segment « {source_collection} » contient des souvenirs d'autres projets ou sans projet "
+                f"({shown}).[/red] Passez --project {cfg.project.name} pour ne copier que les vôtres, ou "
+                "--all-projects pour accepter que les autres entrent aussi."
+            )
+            raise typer.Exit(2)
+
+    target_mgr = None
+    if apply or store_exists(cfg, root) is not False:
+        try:
+            target_mgr, _, _ = _load_manager_context()
+        except typer.Exit:
+            if apply:
+                raise
+            if _get_fmt(ctx) != "json":  # la sortie JSON reste un document unique
+                console.print("[yellow]Cible injoignable : l'aperçu ne peut pas dire ce qui existe déjà.[/yellow]")
+    elif _get_fmt(ctx) != "json":
+        console.print("[dim]La cible n'existe pas encore (rien n'est créé par l'aperçu) : tout y serait nouveau.[/dim]")
+
+    registry = copied_registry_path(root, source_key, target_key)
+    copied = load_copied(registry)
+    validate_id = None
+    if target_backend in ("qdrant-server", "qdrant-local", "ollama"):
+        from grimoire.memory.backends._qdrant_mixin import _point_id
+
+        def validate_id(entry_id: str) -> str | None:
+            try:
+                _point_id(entry_id)
+            except ValueError as exc:
+                return str(exc)
+            return None
+
+    try:
+        result = migrate_backend_to_backend(
+            entries,
+            source_backend=source_backend,
+            target_backend=target_backend,
+            upsert=(
+                (lambda e: target_mgr.upsert(
+                    e.id, e.text, user_id=e.user_id, tags=e.tags, metadata=portable_metadata(e),
+                    created_at=e.created_at,
+                ))
+                if target_mgr is not None and apply else None
+            ),
+            exists=(lambda i: target_mgr.recall(i) is not None) if target_mgr is not None else None,
+            validate_id=validate_id,
+            already_copied=copied,
+            overwrite=overwrite,
+            dry_run=not apply,
+            project=project,
+        )
+    except MigrationInterruptedError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
+    finally:
+        if apply:  # même interrompue, la copie déjà faite est consignée
+            try:
+                save_copied(registry, copied, source_key=source_key, target_key=target_key)
+            except OSError as exc:
+                console.print(f"[yellow]Registre des copies non écrit ({exc}) : une suppression dans la cible pourrait revenir.[/yellow]")
+
+    all_refused = apply and bool(result.refused) and result.imported == 0
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(result.to_dict(), indent=2))
+        if all_refused:
+            raise typer.Exit(1)
+        return
+
+    verb = "Migrés" if apply else "À migrer (aperçu)"
+    console.print(f"[bold]{source_backend} → {target_backend}[/bold]")
+    console.print(f"  {verb} : {result.entries} souvenir(s)")
+    if project:
+        console.print(f"  Projet « {project} » : {result.filtered_out} souvenir(s) d'autres projets laissés")
+    console.print(
+        f"  Nouveaux : {result.created} — déjà dans la cible : {result.skipped_existing} (laissés tels quels)"
+        + (f" — à écraser : {result.overwritten}" if overwrite else "")
+    )
+    if result.skipped_deleted:
+        console.print(
+            f"  {result.skipped_deleted} souvenir(s) copiés puis supprimés dans la cible : non recréés "
+            f"(registre : {registry.name})."
+        )
+    for entry_id, reason in result.refused:
+        console.print(f"  [red]refusé[/red] {entry_id} : {reason}")
+    if apply:
+        console.print(f"  [green]écrits[/green] : {result.imported}")
+    else:
+        console.print("  Aperçu : aucune donnée n'est écrite. Relancez avec [cyan]--apply[/cyan] pour copier.")
+    if all_refused:
+        raise typer.Exit(1)

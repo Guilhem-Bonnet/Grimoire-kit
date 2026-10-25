@@ -163,6 +163,75 @@ Un écart signale un objet écrit d'un côté sans contrepartie de l'autre — l
 `grimoire memory gate --sync`. La sonde reste légère (trois `COUNT`), là où
 `grimoire memory graph verify` reconstruit tout le code graph.
 
+### Pile Docker reproductible
+
+Les gabarits et les commandes de démarrage proposés par le kit épinglent une
+version exacte (Qdrant `v1.19.1`, Weaviate `1.35.19`, Neo4j `5.26.25`, Redis
+`7.4.2-alpine`) : jamais `latest`, donc la même pile d'un poste à l'autre.
+Redis est lancé avec `--restart unless-stopped`. Avant de créer Redis, le kit
+cherche un conteneur existant de la même image qui publie le même port : un
+conteneur actif n'est pas doublé, un conteneur arrêté du même nom est
+redémarré.
+
+**Si vous avez déjà un `docker-compose.memory.yml` généré par une version
+précédente**, il n'est pas réécrit (c'est votre fichier). Le gabarit des
+nouveaux projets change ainsi :
+
+- l'image passe de `qdrant/qdrant:latest` à `qdrant/qdrant:v1.19.1` ;
+- plus de `container_name: grimoire-qdrant` ni de nom de volume fixe : Compose dérive les deux du nom du projet, donc deux projets ne partagent plus un stockage ;
+- les ports se lisent dans `GRIMOIRE_QDRANT_PORT` / `GRIMOIRE_QDRANT_GRPC_PORT` ;
+  l'ancienne graphie `Grimoire_QDRANT_PORT` reste acceptée.
+
+Un fichier déjà généré garde son volume `grimoire-qdrant-storage` (vos données ne bougent pas).
+
+**Attention à `grimoire init --force`** : il régénère le fichier Compose depuis le gabarit et remplace
+le volume à nom fixe par un volume neuf, **vide** : vos souvenirs ne sont pas supprimés, mais le nouveau
+Qdrant ne les voit plus. Avant de régénérer, soit gardez l'ancien volume en ajoutant dans le fichier
+régénéré
+
+```yaml
+volumes:
+  qdrant_storage:
+    name: grimoire-qdrant-storage
+```
+
+soit copiez les données : arrêter la pile, puis
+`docker run --rm -v grimoire-qdrant-storage:/de -v <projet>_qdrant_storage:/vers alpine cp -a /de/. /vers/`,
+relancer, vérifier avec `grimoire memory status`. Rien de cela n'est automatisé.
+
+Les remèdes « il manque un extra » (`memory up`, `standard init`, `standard
+doctor`) emploient le gestionnaire qui a installé le kit (`uv tool install`,
+`pipx install` ou `pip`), comme `grimoire update`. Pour `uv tool` et `pipx`, qui recréent l'environnement, les extras déjà installés sont repris dans la commande. Le comportement réel d'`uv tool install --force` sur un environnement existant n'a pas été exécuté sur un poste ici : à vérifier avant de s'y fier.
+
+### Une base Neo4j, plusieurs projets
+
+Toute écriture du graphe porte la clé du projet (propriété `project`, valeur
+`project.name`) et les identifiants qu'une base partagée ferait collisionner
+sont préfixés `<projet>::` : nœuds de code (identifiant d'origine dans
+`local_id`), missions, tâches, événements, incidents, preuves, verdicts,
+décisions, faits, journaux, étiquettes, entités et agents (nom lisible dans
+`label`), ainsi que les souvenirs (`GrimoireMemory`) et les objets vectoriels (`WeaviateObject`). Clé à une seule propriété, valable dans toutes les éditions de Neo4j.
+Deux projets qui réutilisent un même identifiant (`MIS-1`, un fait identique,
+un tag) ne s'écrasent plus et ne fusionnent plus ces nœuds.
+
+Les compteurs de `memory status`, `memory graph verify` et le repérage des
+orphelins lisent les nœuds du projet **et** ceux qui n'ont pas de clé : les
+nœuds écrits avant cette clé restent visibles (comme avant), mais ils ne sont
+pas attribués. Il n'y a pas encore de commande de rattrapage : attribuer
+un nœud ancien à un projet exige une racine de code propre à ce projet et un
+traitement des faits, journaux et objets vectoriels qui n'est pas livré.
+
+Le constructeur du graphe ne se connecte ni n'écrit. Le schéma (contraintes)
+est posé une fois, par la même fonction, avant la première écriture de
+n'importe quelle voie, ou par les commandes de synchronisation. Le pilote est
+borné à quelques secondes et, après un échec, le graphe est tenu pour injoignable
+pendant une minute **seulement si l'erreur est une panne de connectivité ou de service**
+(`ServiceUnavailable`, `SessionExpired`, délais) : les écritures suivantes échouent
+aussitôt, en nommant la cause, au lieu de repayer le délai. Une erreur de requête ou
+de contrainte ne suspend rien. L'écriture du souvenir dans le store principal n'est
+jamais bloquée ; `grimoire memory graph sync-memories` rattrape le graphe une fois
+Neo4j de nouveau joignable.
+
 ### Sondes d'environnement
 
 `grimoire doctor` sonde Weaviate, Neo4j et Redis en plus de Qdrant et Ollama,

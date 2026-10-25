@@ -20,6 +20,7 @@ mise en forme du fichier existant.
 
 from __future__ import annotations
 
+import re
 import shutil
 import socket
 import subprocess
@@ -63,12 +64,17 @@ _EXTRA_MODULES: dict[str, tuple[str, tuple[str, ...]]] = {
     "ollama": ("ollama", ("ollama",)),
 }
 
+#: Image Redis épinglée (version exacte, jamais ``latest``) et nom du conteneur proposé.
+REDIS_IMAGE = "redis:7.4.2-alpine"
+REDIS_CONTAINER = "grimoire-redis"
+
 #: Commande de démarrage proposée quand un service manque.
 _START_COMMANDS = {
     "weaviate": "docker compose -f docker-compose.memory-target.yml up -d",
     "neo4j": "docker compose -f docker-compose.memory-target.yml up -d",
     "qdrant": "docker compose -f docker-compose.memory.yml up -d",
-    "redis": "docker run -d --name grimoire-redis -p 6379:6379 redis:7-alpine",
+    # ``--restart unless-stopped`` : la mémoire chaude survit à un redémarrage du poste.
+    "redis": f"docker run -d --name {REDIS_CONTAINER} --restart unless-stopped -p 6379:6379 {REDIS_IMAGE}",
     "ollama": "ollama serve",
 }
 
@@ -536,6 +542,13 @@ def _target_config(
     return target
 
 
+def extras_install_hint(extras: list[str]) -> str:
+    """Remède d'extras manquants, selon le gestionnaire qui a installé le kit."""
+    from grimoire.cli.updater import extras_install_hint as _hint
+
+    return _hint(extras)
+
+
 def _warn_unusable(plan: MemoryPlan, probe: ServiceProbe) -> None:
     """Distingue « service éteint » de « extra pip manquant » : le remède diffère."""
     if probe.usable:
@@ -547,8 +560,7 @@ def _warn_unusable(plan: MemoryPlan, probe: ServiceProbe) -> None:
         )
     elif not probe.extra_installed:
         plan.warnings.append(
-            f"  {probe.id} : service en ligne mais extra absent → "
-            f'pip install "grimoire-kit[{probe.extra}]"'
+            f"  {probe.id} : service en ligne mais extra absent → {extras_install_hint([probe.extra])}"
         )
 
 
@@ -592,7 +604,7 @@ def _next_steps(profile: str, probes: dict[str, ServiceProbe], plan: MemoryPlan)
     steps: list[str] = []
     missing_extras = sorted({p.extra for p in probes.values() if p.reachable and not p.extra_installed})
     if missing_extras:
-        steps.append(f'pip install "grimoire-kit[{",".join(missing_extras)}]"')
+        steps.append(extras_install_hint(missing_extras))
 
     target = plan.config
     if target.get("neo4j_password_env"):
@@ -659,6 +671,7 @@ _STACK_WAIT_ATTEMPTS = 20
 _STACK_WAIT_DELAY_SECONDS = 1.5
 _COMPOSE_UP_TIMEOUT_SECONDS = 120.0
 _REDIS_START_TIMEOUT_SECONDS = 30.0
+_DOCKER_PS_TIMEOUT_SECONDS = 5.0
 
 
 def _ensure_compose_file(project_root: Path) -> Path:
@@ -702,6 +715,49 @@ def _wait_reachable(url: str, default_port: int, *, attempts: int = _STACK_WAIT_
             return True
         time.sleep(_STACK_WAIT_DELAY_SECONDS)
     return False
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingContainer:
+    """Un conteneur Docker déjà présent sur ce poste et qui sert (ou servirait) un service mémoire."""
+
+    name: str
+    image: str
+    running: bool
+
+
+def find_existing_container(image_repo: str, port: int, *, name: str = "") -> ExistingContainer | None:
+    """Cherche, avant toute création, un conteneur de la même image qui publie *port*.
+
+    Lecture seule (``docker ps -a``) : ne démarre, n'arrête ni ne modifie rien.
+    Un conteneur arrêté n'expose plus ses ports ; il est reconnu à son nom
+    (*name*) quand l'image correspond. Toute panne de Docker vaut « rien
+    trouvé » : l'appelant retombe alors sur son comportement habituel.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.State}}"],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_PS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or not isinstance(result.stdout, str):
+        return None
+    for line in result.stdout.splitlines():
+        cols = line.split("\t")
+        if len(cols) < 4:
+            continue
+        c_name, image, ports, state = (c.strip() for c in cols[:4])
+        repo = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
+        if repo != image_repo and not repo.endswith("/" + image_repo):
+            continue
+        running = state == "running"
+        published = {int(m) for m in re.findall(r":(\d+)->", ports)}
+        if port in published or (not running and name and c_name == name):
+            return ExistingContainer(name=c_name, image=image, running=running)
+    return None
 
 
 def start_memory_stack(profile: str, project_root: Path) -> list[str]:
@@ -767,18 +823,23 @@ def start_memory_stack(profile: str, project_root: Path) -> list[str]:
     if canonical == "complet":
         redis = probes["redis"]
         if not redis.reachable:
-            try:
-                subprocess.run(
-                    _START_COMMANDS["redis"].split(),
-                    capture_output=True,
-                    text=True,
-                    timeout=_REDIS_START_TIMEOUT_SECONDS,
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                messages.append(f"Redis : {exc}")
-            else:
-                messages.append(
-                    "Redis : démarré" if _wait_reachable(redis.url, _DEFAULT_PORTS["redis"])
-                    else "Redis : conteneur lancé, mais le service ne répond pas encore."
-                )
+            messages.append(_start_redis(redis))
     return messages
+
+
+def _start_redis(redis: ServiceProbe) -> str:
+    """Démarre Redis sans jamais doubler une pile existante (recherche par image et port)."""
+    existing = find_existing_container("redis", _DEFAULT_PORTS["redis"], name=REDIS_CONTAINER)
+    if existing is not None and existing.running:
+        return (
+            f"Redis : conteneur existant « {existing.name} » ({existing.image}) déjà actif — "
+            "aucun nouveau conteneur créé."
+        )
+    argv = ["docker", "start", existing.name] if existing is not None else _START_COMMANDS["redis"].split()
+    try:
+        subprocess.run(argv, capture_output=True, text=True, timeout=_REDIS_START_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"Redis : {exc}"
+    if _wait_reachable(redis.url, _DEFAULT_PORTS["redis"]):
+        return "Redis : démarré" if existing is None else f"Redis : conteneur existant « {existing.name} » redémarré"
+    return "Redis : conteneur lancé, mais le service ne répond pas encore."
