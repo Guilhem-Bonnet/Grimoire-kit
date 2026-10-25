@@ -266,7 +266,21 @@ jobs:
         env:
           GRIMOIRE_TEST_NEO4J_URI: bolt://localhost:7687
           GRIMOIRE_TEST_NEO4J_PASSWORD: ci-password
-        run: pytest tests/integration/test_neo4j_project_key_service.py -q --tb=short -rs
+          # Interdit au module de se sauter lui-même (variable renommée, extra absent).
+          GRIMOIRE_REQUIRE_NEO4J: "1"
+        run: pytest tests/integration/test_neo4j_project_key_service.py -q --tb=short -rs --junitxml=neo4j-service.xml
+
+      - name: Fail when no test actually ran
+        # Un job vert dont les tests sont tous ignorés ne prouve rien.
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("neo4j-service.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          tests, skipped = int(suite.get("tests")), int(suite.get("skipped"))
+          print(f"tests={tests} skipped={skipped}")
+          assert tests >= 5 and skipped == 0, "le job Neo4j doit exécuter ses tests, aucun ignoré"
+          PY
 
   surface-coverage:
     name: "Surface coverage ratchet"

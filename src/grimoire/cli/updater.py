@@ -134,6 +134,17 @@ def extras_install_cmd(
     """
     kind, binary = manager or _detect_manager()
     wanted = list(extras)
+    if kind in ("uv", "pipx"):
+        # ``uv tool install --force`` / ``pipx install --force`` recréent l'environnement avec les
+        # seuls extras demandés : on reporte ceux qui sont déjà installés, sinon l'ajout d'un extra
+        # en retirerait d'autres.
+        from grimoire.tools import install_trust
+
+        try:
+            current = install_trust.installed_extras()
+        except Exception:  # best-effort : sans lecture des extras actuels, on n'ajoute rien
+            current = []
+        wanted = sorted({*current, *wanted})
     name = f"grimoire-kit[{','.join(wanted)}]" if wanted else "grimoire-kit"
     carry = _carried_uv_options(kind, binary)
     hint = registry_install_cmd((kind, binary), wanted, carry)

@@ -92,6 +92,7 @@ class QdrantStorageMixin:
         user_id: str = "",
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
+        created_at: str = "",
     ) -> MemoryEntry:
         """Crée ou remplace l'entrée d'identifiant *entry_id* (identifiant fourni, jamais régénéré).
 
@@ -107,7 +108,9 @@ class QdrantStorageMixin:
         point_id = _point_id(entry_id)
         existing = self._client.retrieve(collection_name=self._collection, ids=[point_id], with_payload=True)
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-        created_at, updated_at = (str(existing[0].payload.get("created_at", ts)), ts) if existing else (ts, "")
+        created_at, updated_at = (
+            (str(existing[0].payload.get("created_at", ts)), ts) if existing else (created_at or ts, "")
+        )
         uid = user_id or "global"
         payload: dict[str, Any] = {
             "memory": text,

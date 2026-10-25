@@ -102,36 +102,3 @@ def test_codegraph_backend_without_password_is_a_clear_error(project: Path, monk
     result = _run(project, "--backend", "codegraph-neo4j")
     assert result.exit_code == 2
     assert "GK_R10_PW" in result.output
-
-
-class TestBackfillProjectCli:
-    """P15b — le rattrapage est un aperçu tant que ``--apply`` n'est pas passé."""
-
-    def _invoke(self, project: Path, *args: str) -> tuple[Any, MagicMock]:
-        graph = MagicMock()
-        graph.backfill_project.return_value = {"memories_by_collection": 2, "code_nodes": 5}
-        with (
-            patch("grimoire.cli.cmd_memory_projections._load_config_context", return_value=(_cfg(), project)),
-            patch("grimoire.cli.cmd_memory_projections._load_neo4j_graph", return_value=graph) as loader,
-        ):
-            result = runner.invoke(app, ["-o", "json", "memory", "graph", "backfill-project", *args])
-        self.loader = loader
-        return result, graph
-
-    def test_dry_run_by_default_and_schema_untouched(self, project: Path) -> None:
-        result, graph = self._invoke(project, "--paths", "src,tests")
-        assert result.exit_code == 0, result.output
-        graph.backfill_project.assert_called_once_with(
-            collections=["grimoire"], code_prefixes=["src/", "tests/"], apply=False,
-        )
-        assert self.loader.call_args.kwargs == {"ensure_schema": False}
-        assert json.loads(result.output) == {
-            "project": "projet-a", "apply": False, "memories_by_collection": 2, "code_nodes": 5,
-        }
-
-    def test_apply_is_explicit(self, project: Path) -> None:
-        result, graph = self._invoke(project, "--apply", "--collection", "col-x")
-        assert result.exit_code == 0, result.output
-        assert graph.backfill_project.call_args.kwargs["apply"] is True
-        assert graph.backfill_project.call_args.kwargs["collections"] == ["col-x"]
-        assert self.loader.call_args.kwargs == {"ensure_schema": True}

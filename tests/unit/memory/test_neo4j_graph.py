@@ -65,7 +65,7 @@ class _FakeGraphDatabase:
     driver_calls: ClassVar[list[tuple[str, tuple[str, str]]]] = []
 
     @classmethod
-    def driver(cls, uri: str, *, auth: tuple[str, str]) -> _FakeDriver:
+    def driver(cls, uri: str, *, auth: tuple[str, str], **_options: Any) -> _FakeDriver:
         cls.driver_calls.append((uri, auth))
         return cls.driver_instance
 
@@ -375,6 +375,7 @@ def _bare_graph(driver: Any, project: str = "") -> Any:
     graph._driver = driver  # type: ignore[attr-defined]
     graph._database = "neo4j"  # type: ignore[attr-defined]
     graph._project = project  # type: ignore[attr-defined]
+    graph._schema_ready = True  # type: ignore[attr-defined]
     return graph
 
 

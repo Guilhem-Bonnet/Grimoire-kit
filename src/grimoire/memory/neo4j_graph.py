@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +46,22 @@ _COUNTABLE_RELATIONSHIPS = frozenset({
     "MEMORY_FOR",
 })
 _BATCH_SIZE = 1000
+
+#: Bornes du pilote : un Neo4j injoignable échoue en quelques secondes, pas en ~30 s
+#: (le pilote retente seul, avec un backoff, tant qu'on ne le borne pas).
+_DRIVER_TIMEOUTS: dict[str, float] = {
+    "connection_timeout": 3.0,
+    "connection_acquisition_timeout": 3.0,
+    "max_transaction_retry_time": 2.0,
+}
+
+#: Après un échec, le graphe est tenu pour mort pendant ce délai : les appels suivants échouent
+#: aussitôt au lieu de repayer le délai du pilote à chaque écriture (disjoncteur).
+GRAPH_COOLDOWN_SECONDS = 60.0
+
+
+class GraphUnavailableError(RuntimeError):
+    """Neo4j est tenu pour injoignable : l'appel n'a pas été tenté (disjoncteur ouvert)."""
 
 #: Collection name written before per-project Weaviate collections existed
 #: (the hardcoded default in ``grimoire.memory.profiles.BACKEND_CONNECTION``).
@@ -91,6 +108,12 @@ class Neo4jMemoryGraph:
     :meth:`ensure_schema`, appelé par les commandes de synchronisation.
     """
 
+    #: Disjoncteur et schéma : état de classe par défaut, posé par instance à l'usage.
+    _down_until: float = 0.0
+    _down_reason: str = ""
+    _schema_ready: bool = False
+    _in_schema: bool = False
+
     def __init__(self, *, uri: str, user: str, password: str, database: str = "neo4j", project: str = "") -> None:
         if not uri:
             raise ValueError("neo4j uri is required")
@@ -101,7 +124,7 @@ class Neo4jMemoryGraph:
         self._user = user
         self._database = database or "neo4j"
         self._project = project.strip()
-        self._driver = graph_database.driver(uri, auth=(user, password))
+        self._driver = graph_database.driver(uri, auth=(user, password), **_DRIVER_TIMEOUTS)
 
     @property
     def uri(self) -> str:
@@ -128,7 +151,13 @@ class Neo4jMemoryGraph:
         self._driver.close()
 
     def ensure_schema(self) -> None:
-        """Create idempotent constraints used by runtime projections."""
+        """Pose les contraintes idempotentes des projections — la fonction unique de pose du schéma.
+
+        Appelée explicitement par les commandes de synchronisation, et par
+        :meth:`_execute` avant la première écriture de toute voie (souvenirs,
+        faits, journaux, code, tâches). Un échec ouvre le disjoncteur : les
+        écritures suivantes échouent sans repayer le délai du pilote.
+        """
         statements = (
             "CREATE CONSTRAINT grimoire_memory_id IF NOT EXISTS "
             "FOR (m:GrimoireMemory) REQUIRE m.id IS UNIQUE",
@@ -162,8 +191,13 @@ class Neo4jMemoryGraph:
             "FOR (w:WeaviateObject) REQUIRE w.id IS UNIQUE",
             "MATCH (m:GrimoireMemory) WHERE m.deleted IS NULL SET m.deleted = false",
         )
-        for statement in statements:
-            self._execute(statement)
+        self._in_schema = True
+        try:
+            for statement in statements:
+                self._query(statement, {})
+        finally:
+            self._in_schema = False
+        self._schema_ready = True
 
     def upsert_memory(self, entry: MemoryEntry) -> None:
         """Create or update one memory node and its tag edges."""
@@ -288,7 +322,7 @@ class Neo4jMemoryGraph:
             MERGE (m)-[r:MEMORY_FOR {{kind: $kind}}]->(n)
             SET r.updated_at = datetime()
             """,
-            {"memory_id": memory_id, "target_id": target_id, "kind": projection_kind},
+            {"memory_id": memory_id, "target_id": self._key(target_id), "kind": projection_kind},
         )
 
     def delete_memory(self, entry_id: str) -> None:
@@ -304,6 +338,7 @@ class Neo4jMemoryGraph:
     def upsert_fact(self, fact: KnowledgeFact) -> None:
         """Create or update a structured fact projection."""
         payload = fact.to_dict()
+        payload["id"] = self._key(fact.id)
         payload["metadata_json"] = json.dumps({
             "wing": fact.wing,
             "hall": fact.hall,
@@ -338,7 +373,7 @@ class Neo4jMemoryGraph:
                 MATCH (m:GrimoireMemory {id: $source_memory_id})
                 MERGE (f)-[:SOURCED_FROM]->(m)
                 """,
-                {"id": fact.id, "source_memory_id": fact.source_memory_id},
+                {"id": self._key(fact.id), "source_memory_id": fact.source_memory_id},
             )
 
     def invalidate_fact(self, subject: str, predicate: str, object_: str, *, ended: str) -> None:
@@ -350,7 +385,7 @@ class Neo4jMemoryGraph:
               predicate: $predicate,
               object: $object
             })
-            WHERE coalesce(f.valid_to, '') = '' AND ($project = '' OR f.project = $project)
+            WHERE coalesce(f.valid_to, '') = '' AND ($project = '' OR f.project = $project OR f.project IS NULL)
             SET f.valid_to = $ended
             """,
             {"subject": subject, "predicate": predicate, "object": object_, "ended": ended},
@@ -372,7 +407,7 @@ class Neo4jMemoryGraph:
             SET a.label = $agent_name, a.project = $project
             MERGE (a)-[:WROTE_DIARY]->(d)
             """,
-            record.to_dict(),
+            {**record.to_dict(), "id": self._key(record.id)},
         )
         if record.related_memory_id:
             self._execute(
@@ -381,7 +416,7 @@ class Neo4jMemoryGraph:
                 MATCH (m:GrimoireMemory {id: $related_memory_id})
                 MERGE (d)-[:RELATED_TO]->(m)
                 """,
-                {"id": record.id, "related_memory_id": record.related_memory_id},
+                {"id": self._key(record.id), "related_memory_id": record.related_memory_id},
             )
 
     def upsert_code_nodes(self, nodes: list[CodeNode]) -> int:
@@ -461,6 +496,7 @@ class Neo4jMemoryGraph:
     def upsert_mission(self, mission: Mission) -> None:
         """Create or update one mission node."""
         payload = mission.to_dict()
+        payload["id"] = self._key(mission.id)
         payload["scope_json"] = json.dumps(payload.pop("scope", {}), ensure_ascii=False, sort_keys=True)
         self._execute(
             """
@@ -482,6 +518,8 @@ class Neo4jMemoryGraph:
     def upsert_task(self, task: MissionTask) -> None:
         """Create or update one task node and its mission/dependency edges."""
         payload = task.to_dict()
+        payload["id"] = self._key(task.id)
+        payload["mission_id"] = self._key(task.mission_id)
         dependencies = list(payload.pop("dependencies", []))
         claim = payload.pop("claim", None)
         payload["acceptance_json"] = json.dumps(payload.pop("acceptance", []), ensure_ascii=False, sort_keys=True)
@@ -521,7 +559,7 @@ class Neo4jMemoryGraph:
             MATCH (t:GrimoireTask {id: $id})-[old:DEPENDS_ON]->()
             DELETE old
             """,
-            {"id": task.id},
+            {"id": self._key(task.id)},
         )
         for dependency in dependencies:
             self._execute(
@@ -530,7 +568,7 @@ class Neo4jMemoryGraph:
                 MERGE (target:GrimoireTask {id: $target})
                 MERGE (t)-[r:DEPENDS_ON {kind: $kind}]->(target)
                 """,
-                {"task_id": task.id, "target": dependency["target"], "kind": dependency["kind"]},
+                {"task_id": self._key(task.id), "target": self._key(dependency["target"]), "kind": dependency["kind"]},
             )
         if claim:
             self._execute(
@@ -540,12 +578,14 @@ class Neo4jMemoryGraph:
                 SET a.label = $actor_id, a.project = $project
                 MERGE (t)-[:CLAIMED_BY]->(a)
                 """,
-                {"task_id": task.id, "actor_id": claim["actor_id"]},
+                {"task_id": self._key(task.id), "actor_id": claim["actor_id"]},
             )
 
     def upsert_ledger_event(self, event: LedgerEvent) -> None:
         """Create or update one ledger event and link it to its entity."""
         payload = event.to_dict()
+        payload["id"] = self._key(event.id)
+        payload["entity_id"] = self._key(event.entity_id)
         payload["payload_json"] = json.dumps(payload.pop("payload", {}), ensure_ascii=False, sort_keys=True)
         self._execute(
             """
@@ -568,7 +608,7 @@ class Neo4jMemoryGraph:
                 MATCH (e:GrimoireLedgerEvent {id: $event_id})
                 MERGE (m)-[:HAS_EVENT]->(e)
                 """,
-                {"entity_id": event.entity_id, "event_id": event.id},
+                {"entity_id": self._key(event.entity_id), "event_id": self._key(event.id)},
             )
         elif event.entity_kind == "task":
             self._execute(
@@ -577,12 +617,15 @@ class Neo4jMemoryGraph:
                 MATCH (e:GrimoireLedgerEvent {id: $event_id})
                 MERGE (t)-[:HAS_EVENT]->(e)
                 """,
-                {"entity_id": event.entity_id, "event_id": event.id},
+                {"entity_id": self._key(event.entity_id), "event_id": self._key(event.id)},
             )
 
     def upsert_incident(self, incident: Incident) -> None:
         """Create or update one task incident."""
         payload = incident.to_dict()
+        for field_name in ("id", "mission_id", "task_id"):
+            if payload.get(field_name):
+                payload[field_name] = self._key(str(payload[field_name]))
         payload["causes_json"] = json.dumps(payload.pop("causes", []), ensure_ascii=False, sort_keys=True)
         payload["recommended_actions_json"] = json.dumps(
             payload.pop("recommended_actions", []),
@@ -614,6 +657,9 @@ class Neo4jMemoryGraph:
     def upsert_evidence_pack(self, pack: EvidencePack) -> None:
         """Create or update one evidence pack and link it to its task."""
         payload = pack.to_dict()
+        for field_name in ("id", "task_id"):
+            if payload.get(field_name):
+                payload[field_name] = self._key(str(payload[field_name]))
         payload["items_json"] = json.dumps(payload.pop("items", []), ensure_ascii=False, sort_keys=True)
         payload["coverage_json"] = json.dumps(payload.pop("coverage", {}), ensure_ascii=False, sort_keys=True)
         self._execute(
@@ -637,10 +683,13 @@ class Neo4jMemoryGraph:
     def upsert_verdict(self, verdict: VerificationVerdict) -> None:
         """Create or update one verification verdict and link it to task/evidence."""
         payload = verdict.to_dict()
+        for field_name in ("id", "task_id", "evidence_pack_id"):
+            if payload.get(field_name):
+                payload[field_name] = self._key(str(payload[field_name]))
         payload["checks_json"] = json.dumps(payload.pop("checks", []), ensure_ascii=False, sort_keys=True)
         decision = payload.pop("decision", {})
         payload["decision_json"] = json.dumps(decision, ensure_ascii=False, sort_keys=True)
-        payload["decision_id"] = f"decision:{verdict.id}"
+        payload["decision_id"] = self._key(f"decision:{verdict.id}")
         payload["decision_close_task"] = bool(decision.get("close_task", False))
         payload["decision_reopen_task"] = bool(decision.get("reopen_task", False))
         payload["decision_create_incident"] = bool(decision.get("create_incident", False))
@@ -693,9 +742,9 @@ class Neo4jMemoryGraph:
                 WHERE t.id IN $task_ids
                 DELETE old
                 """,
-                {"task_ids": task_ids},
+                {"task_ids": [self._key(t) for t in task_ids]},
             )
-        unique_refs = self._keyed_code_refs(_unique_reference_rows(refs, from_key="task_id"))
+        unique_refs = self._keyed_code_refs(_unique_reference_rows(refs, from_key="task_id"), "task_id")
         for batch in _batches(unique_refs):
             self._execute(
                 """
@@ -719,9 +768,9 @@ class Neo4jMemoryGraph:
                 WHERE p.id IN $evidence_pack_ids
                 DELETE old
                 """,
-                {"evidence_pack_ids": evidence_pack_ids},
+                {"evidence_pack_ids": [self._key(p) for p in evidence_pack_ids]},
             )
-        unique_refs = self._keyed_code_refs(_unique_reference_rows(refs, from_key="evidence_pack_id"))
+        unique_refs = self._keyed_code_refs(_unique_reference_rows(refs, from_key="evidence_pack_id"), "evidence_pack_id")
         for batch in _batches(unique_refs):
             self._execute(
                 """
@@ -736,9 +785,12 @@ class Neo4jMemoryGraph:
             )
         return len(unique_refs)
 
-    def _keyed_code_refs(self, rows: list[dict[str, str]]) -> list[dict[str, str]]:
-        """Les références visent des nœuds de code : leur identifiant porte la clé du projet."""
-        return [{**row, "code_node_id": self._key(row["code_node_id"])} for row in rows]
+    def _keyed_code_refs(self, rows: list[dict[str, str]], from_key: str) -> list[dict[str, str]]:
+        """Les deux bouts d'une référence (tâche ou preuve, nœud de code) portent la clé du projet."""
+        return [
+            {**row, from_key: self._key(row[from_key]), "code_node_id": self._key(row["code_node_id"])}
+            for row in rows
+        ]
 
     def stats(self) -> dict[str, int]:
         """Return key graph counts."""
@@ -766,7 +818,6 @@ class Neo4jMemoryGraph:
             "weaviate_objects": self._count("WeaviateObject"),
             "vectorized_edges": self._relationship_count("VECTORIZED_AS"),
             "memory_links": self._relationship_count("MEMORY_FOR"),
-            **({"unattributed_nodes": self._count_unattributed()} if self._project else {}),
         }
 
     def find_orphan_memory_nodes(
@@ -780,97 +831,17 @@ class Neo4jMemoryGraph:
         unscoped purge would delete another project's memories (#527).
         """
         collections = sorted({collection, LEGACY_GENERIC_COLLECTION} - {""})
-        records, _, _ = self._driver.execute_query(
+        records = self._read(
             """
             MATCH (m:GrimoireMemory)
             WHERE m.weaviate_collection IN $collections AND NOT m.id IN $known_ids
-              AND ($project = '' OR m.project = $project)
+              AND ($project = '' OR m.project = $project OR m.project IS NULL)
             RETURN m.id AS id, m.weaviate_collection AS collection
             """,
             collections=collections,
             known_ids=list(known_ids),
-            project=self._project,
-            database_=self._database,
         )
         return [{"id": str(record["id"]), "collection": str(record["collection"])} for record in records]
-
-    def backfill_project(
-        self,
-        *,
-        collections: list[str],
-        code_prefixes: list[str],
-        apply: bool = False,
-    ) -> dict[str, int]:
-        """Rattrape la clé de projet des nœuds écrits avant qu'elle existe.
-
-        Aperçu par défaut : sans *apply*, seuls des ``count`` sont lancés.
-        N'attribue que des nœuds **sans** ``project`` (jamais un nœud déjà
-        attribué à un autre projet) :
-
-        1. ``GrimoireMemory`` dont ``weaviate_collection`` est dans *collections* ;
-        2. puis ceux dont ``metadata_json`` porte ``project_name`` = ce projet ;
-        3. ``CodeNode`` dont ``file_path`` commence par un des *code_prefixes* ;
-           leur identifiant reçoit le préfixe du projet (sauf conflit avec un
-           nœud déjà préfixé, compté à part et laissé en l'état) ;
-        4. les fantômes (nœuds créés par une arête vers un module non indexé,
-           ``placeholder``) sont marqués ``external`` et restent sans projet.
-
-        Rejouable : une seconde passe ne trouve plus rien à attribuer.
-        """
-        if not self._project:
-            raise ValueError("backfill_project needs a project key")
-        needle = f'"project_name": {json.dumps(self._project, ensure_ascii=False)}'
-        steps: dict[str, tuple[str, dict[str, Any]]] = {
-            "memories_by_collection": (
-                "MATCH (n:GrimoireMemory) WHERE n.project IS NULL AND n.weaviate_collection IN $collections",
-                {"collections": collections},
-            ),
-            "memories_by_metadata": (
-                # Exclut ce que l'étape 1 attribue : l'aperçu ne compte jamais deux fois un souvenir.
-                "MATCH (n:GrimoireMemory) WHERE n.project IS NULL AND n.metadata_json CONTAINS $needle "
-                "AND NOT coalesce(n.weaviate_collection, '') IN $collections",
-                {"needle": needle, "collections": collections},
-            ),
-        }
-        report: dict[str, int] = {}
-        for name, (match, params) in steps.items():
-            report[name] = self._scalar(f"{match} RETURN count(n) AS count", params)
-            if apply and report[name]:
-                self._execute(f"{match} SET n.project = $project", params)
-        code_match = (
-            "MATCH (n:CodeNode) WHERE n.project IS NULL AND coalesce(n.placeholder, false) = false "
-            "AND any(p IN $code_prefixes WHERE n.file_path STARTS WITH p)"
-        )
-        code_params: dict[str, Any] = {"code_prefixes": code_prefixes}
-        report["code_nodes"] = self._scalar(f"{code_match} RETURN count(n) AS count", code_params)
-        report["code_id_conflicts"] = self._scalar(
-            f"{code_match} AND EXISTS {{ MATCH (d:CodeNode {{id: $prefix + n.id}}) }} RETURN count(n) AS count",
-            code_params,
-        )
-        report["ghosts_external"] = self._scalar(
-            "MATCH (n:CodeNode) WHERE n.project IS NULL AND coalesce(n.placeholder, false) = true "
-            "AND coalesce(n.external, false) = false RETURN count(n) AS count",
-            {},
-        )
-        if apply:
-            # Un nœud en conflit garde son identifiant (et reste sans projet) : le renommer
-            # violerait la contrainte d'unicité face au nœud déjà préfixé.
-            free = f"{code_match} AND NOT EXISTS {{ MATCH (d:CodeNode {{id: $prefix + n.id}}) }}"
-            self._execute(
-                f"{free} SET n.local_id = n.id",
-                code_params,
-            )
-            self._execute(f"{free} SET n.project = $project, n.id = $prefix + n.id", code_params)
-            self._execute(
-                "MATCH (n:CodeNode) WHERE n.project IS NULL AND coalesce(n.placeholder, false) = true "
-                "SET n.external = true",
-            )
-        return report
-
-    def _scalar(self, statement: str, params: dict[str, Any]) -> int:
-        merged = {"project": self._project, "prefix": self.key_prefix, **params}
-        records, _, _ = self._driver.execute_query(statement, **merged, database_=self._database)
-        return int(records[0]["count"]) if records else 0
 
     def purge_memory_nodes(self, ids: list[str]) -> int:
         """``DETACH DELETE`` the given ``GrimoireMemory`` nodes by id.
@@ -908,23 +879,19 @@ class Neo4jMemoryGraph:
     def _count(self, label: str) -> int:
         if label not in _COUNTABLE_NODE_LABELS:
             raise ValueError(f"Unsupported Neo4j count label: {label}")
-        records, _, _ = self._driver.execute_query(
-            f"MATCH (n:{label}) WHERE $project = '' OR n.project = $project RETURN count(n) AS count",
-            project=self._project,
-            database_=self._database,
+        records = self._read(
+            f"MATCH (n:{label}) WHERE $project = '' OR n.project = $project OR n.project IS NULL RETURN count(n) AS count",
         )
         return int(records[0]["count"]) if records else 0
 
     def _count_memories(self, *, deleted: bool) -> int:
-        records, _, _ = self._driver.execute_query(
+        records = self._read(
             """
             MATCH (n:GrimoireMemory)
-            WHERE coalesce(n.deleted, false) = $deleted AND ($project = '' OR n.project = $project)
+            WHERE coalesce(n.deleted, false) = $deleted AND ($project = '' OR n.project = $project OR n.project IS NULL)
             RETURN count(n) AS count
             """,
             deleted=deleted,
-            project=self._project,
-            database_=self._database,
         )
         return int(records[0]["count"]) if records else 0
 
@@ -932,29 +899,38 @@ class Neo4jMemoryGraph:
         if relationship not in _COUNTABLE_RELATIONSHIPS:
             raise ValueError(f"Unsupported Neo4j relationship count: {relationship}")
         # Une arête appartient au projet de son nœud de départ.
-        records, _, _ = self._driver.execute_query(
-            f"MATCH (a)-[r:{relationship}]->() WHERE $project = '' OR a.project = $project RETURN count(r) AS count",
-            project=self._project,
-            database_=self._database,
-        )
-        return int(records[0]["count"]) if records else 0
-
-    def _count_unattributed(self) -> int:
-        """Nœuds de projection sans clé de projet : à attribuer par le rattrapage."""
-        labels = sorted(_COUNTABLE_NODE_LABELS - {"WeaviateObject"})
-        records, _, _ = self._driver.execute_query(
-            "MATCH (n) WHERE any(l IN labels(n) WHERE l IN $labels) AND n.project IS NULL "
-            "AND coalesce(n.external, false) = false RETURN count(n) AS count",
-            labels=labels,
-            database_=self._database,
+        records = self._read(
+            f"MATCH (a)-[r:{relationship}]->() WHERE $project = '' OR a.project = $project OR a.project IS NULL RETURN count(r) AS count",
         )
         return int(records[0]["count"]) if records else 0
 
     def _execute(self, statement: str, params: dict[str, Any] | None = None) -> None:
+        """Écriture : pose le schéma une fois, puis exécute. Toutes les voies d'écriture passent ici."""
+        if not self._schema_ready and not self._in_schema:
+            self.ensure_schema()
+        self._query(statement, params or {})
+
+    def _read(self, statement: str, **params: Any) -> list[Any]:
+        records, _, _ = self._query(statement, params)
+        return list(records)
+
+    def _query(self, statement: str, params: dict[str, Any]) -> Any:
+        """Seul point d'appel du pilote : borne (voir ``_DRIVER_TIMEOUTS``) et disjoncteur."""
+        now = time.monotonic()
+        if now < self._down_until:
+            raise GraphUnavailableError(
+                f"Neo4j tenu pour injoignable ({self._down_reason}) ; nouvelle tentative dans "
+                f"{self._down_until - now:.0f}s"
+            )
         # ``project`` et ``prefix`` sont fournis à chaque requête : un paramètre
         # inutilisé par le texte Cypher est ignoré par le pilote.
-        merged = {"project": self._project, "prefix": self.key_prefix, **(params or {})}
-        self._driver.execute_query(statement, **merged, database_=self._database)
+        merged = {"project": self._project, "prefix": self.key_prefix, **params}
+        try:
+            return self._driver.execute_query(statement, **merged, database_=self._database)
+        except Exception as exc:
+            self._down_until = time.monotonic() + GRAPH_COOLDOWN_SECONDS
+            self._down_reason = type(exc).__name__
+            raise
 
 
 def _unique_reference_rows(refs: list[dict[str, str]], *, from_key: str) -> list[dict[str, str]]:

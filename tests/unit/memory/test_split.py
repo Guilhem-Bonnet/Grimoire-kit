@@ -16,7 +16,7 @@ import pytest
 from typer.testing import CliRunner
 
 # Les sous-modules de `memory` (shared, ops, projections, bundle...) sont chargés au premier appel de
-# `memory ...` ; importés sous un `patch("grimoire.cli.cmd_memory._load_config_context")`, ils lieraient
+# `memory ...` ; importés sous un `patch("grimoire.cli.cmd_memory_ops._load_config_context")`, ils lieraient
 # le double pour de bon et fausseraient tous les tests suivants du même processus.
 import grimoire.cli.cmd_memory_lexical  # noqa: F401
 from grimoire.cli.app import app
@@ -315,3 +315,86 @@ class TestCli:
         for root in world["roots"][:2]:
             assert "collection_prefix: grimoire\n" in (root / "project-context.yaml").read_text(encoding="utf-8")
         assert segments.backend("grimoire").count() == 24
+
+
+class TestCliSafetyRefusals:
+    """La sortie ne dit « copiés et vérifiés » que si les souvenirs restent visibles après le repointage."""
+
+    @pytest.fixture
+    def world(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+        segments = _Segments(tmp_path)
+        shared = segments.backend("grimoire")
+        a, orphan = str(uuid.uuid4()), str(uuid.uuid4())
+        shared.upsert(a, "voix", user_id="g", metadata={"project_name": "TTS-Voice"})
+        shared.upsert(orphan, "sans projet", user_id="g", metadata={})
+        root = _project(tmp_path / "tts", "TTS-Voice")
+        home = tmp_path / "cockpit"
+        home.mkdir()
+        (home / "registry.json").write_text(json.dumps([{"name": "TTS-Voice", "path": str(root), "slug": "tts"}]), encoding="utf-8")
+        monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(home))
+        return {"segments": segments, "root": root, "tmp": tmp_path}
+
+    def _invoke(self, world: dict[str, Any], *args: str, config: str | None = None) -> Any:
+        root = world["root"]
+        if config is not None:
+            (root / "project-context.yaml").write_text(config, encoding="utf-8")
+        cfg = GrimoireConfig.from_yaml(root / "project-context.yaml")
+        segments: _Segments = world["segments"]
+        with (
+            patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, root)),
+            patch(
+                "grimoire.cli.cmd_memory_ops.MemoryManager.from_config",
+                side_effect=lambda c, project_root=None: segments.manager(c.memory.collection_prefix),
+            ),
+        ):
+            return runner.invoke(app, ["-o", "json", "memory", "split", *args])
+
+    def test_unassigned_entries_block_apply_and_nothing_is_written(self, world: dict[str, Any]) -> None:
+        result = self._invoke(world, "--apply", "--export", str(world["tmp"] / "e.json"))
+        assert result.exit_code == 2
+        assert "sans project_name" in result.output and "--allow-unassigned" in result.output
+        assert set(world["segments"].backends) == {"grimoire"} and not (world["tmp"] / "e.json").exists()
+        assert "collection_prefix: grimoire\n" in (world["root"] / "project-context.yaml").read_text(encoding="utf-8")
+
+    def test_allow_unassigned_is_the_explicit_way_through(self, world: dict[str, Any]) -> None:
+        result = self._invoke(world, "--apply", "--allow-unassigned", "--export", str(world["tmp"] / "e.json"))
+        assert result.exit_code == 0, result.output
+        assert "collection_prefix: grimoire-tts-voice" in (world["root"] / "project-context.yaml").read_text(encoding="utf-8")
+
+    def test_weaviate_collection_is_resolved_so_targets_differ_from_the_source(self, world: dict[str, Any]) -> None:
+        """Avec Weaviate, `weaviate_collection` prime sur `collection_prefix` : sans la résoudre, la copie s'écrirait sur elle-même."""
+        weaviate = (
+            "project:\n  name: TTS-Voice\n  type: generic\n  stack: []\n"
+            "memory:\n  backend: weaviate-server\n  weaviate_url: http://w.test:8080\n"
+            "  weaviate_collection: Partage\n  collection_prefix: grimoire\n"
+            "agents:\n  archetype: minimal\n"
+        )
+        from grimoire.memory.manager import store_identity
+
+        cfg = GrimoireConfig.from_yaml(_write(world["root"], weaviate))
+        from dataclasses import replace
+
+        naive_target = replace(cfg, memory=replace(cfg.memory, collection_prefix="grimoire-tts-voice"))
+        assert store_identity(naive_target, world["root"]) == store_identity(cfg, world["root"])  # le piège existe
+
+        result = self._invoke(world, "--apply", "--allow-unassigned", "--export", str(world["tmp"] / "e.json"), config=weaviate)
+
+        assert result.exit_code == 0, result.output  # la résolution fait des cibles distinctes
+        assert "weaviate_collection: grimoire-tts-voice" in (world["root"] / "project-context.yaml").read_text(encoding="utf-8")
+
+    def test_a_target_identical_to_the_source_is_refused(self, world: dict[str, Any]) -> None:
+        """MemPalace ignore le nom de collection : la « cible » serait la source."""
+        palace = (
+            "project:\n  name: TTS-Voice\n  type: generic\n  stack: []\n"
+            "memory:\n  backend: mempalace\n  mempalace_path: /tmp/palais\n"
+            "agents:\n  archetype: minimal\n"
+        )
+        result = self._invoke(world, "--apply", "--allow-unassigned", "--export", str(world["tmp"] / "e.json"), config=palace)
+        assert result.exit_code == 2 and "même store" in result.output
+        assert not (world["tmp"] / "e.json").exists()
+
+
+def _write(root: Path, text: str) -> Path:
+    path = root / "project-context.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path

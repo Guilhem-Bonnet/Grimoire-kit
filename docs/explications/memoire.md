@@ -178,46 +178,40 @@ précédente**, il n'est pas réécrit (c'est votre fichier). Le gabarit des
 nouveaux projets change ainsi :
 
 - l'image passe de `qdrant/qdrant:latest` à `qdrant/qdrant:v1.19.1` ;
-- plus de `container_name: grimoire-qdrant` (deux projets sur le même poste ne
-  se disputent plus le nom ; Compose le dérive du nom du projet) ;
+- plus de `container_name: grimoire-qdrant` ni de nom de volume fixe : Compose dérive les deux du nom du projet, donc deux projets ne partagent plus un stockage ;
 - les ports se lisent dans `GRIMOIRE_QDRANT_PORT` / `GRIMOIRE_QDRANT_GRPC_PORT` ;
   l'ancienne graphie `Grimoire_QDRANT_PORT` reste acceptée.
 
-Le volume `grimoire-qdrant-storage` garde son nom : vos données ne bougent pas.
+Un fichier déjà généré garde son volume `grimoire-qdrant-storage` (vos données ne bougent pas). Pour migrer vers un volume par projet, arrêter la pile, copier le contenu de `grimoire-qdrant-storage` vers le nouveau volume du projet, puis régénérer le fichier ; ce n'est pas fait automatiquement.
 
 Les remèdes « il manque un extra » (`memory up`, `standard init`, `standard
 doctor`) emploient le gestionnaire qui a installé le kit (`uv tool install`,
-`pipx install` ou `pip`), comme `grimoire update`.
+`pipx install` ou `pip`), comme `grimoire update`. Pour `uv tool` et `pipx`, qui recréent l'environnement, les extras déjà installés sont repris dans la commande. Le comportement réel d'`uv tool install --force` sur un environnement existant n'a pas été exécuté sur un poste ici : à vérifier avant de s'y fier.
 
 ### Une base Neo4j, plusieurs projets
 
 Toute écriture du graphe porte la clé du projet (propriété `project`, valeur
-`project.name`). Les compteurs de `memory status`, `memory graph verify` et le
-repérage des orphelins ne lisent que les nœuds du projet : une base partagée ne
-fait plus passer les nœuds d'un autre projet pour les vôtres, ni l'inverse.
+`project.name`) et les identifiants qu'une base partagée ferait collisionner
+sont préfixés `<projet>::` : nœuds de code (identifiant d'origine dans
+`local_id`), missions, tâches, événements, incidents, preuves, verdicts,
+décisions, faits, journaux, étiquettes, entités et agents (nom lisible dans
+`label`). Clé à une seule propriété, valable dans toutes les éditions de Neo4j.
+Deux projets qui réutilisent un même identifiant (`MIS-1`, un fait identique,
+un tag) ne s'écrasent plus et ne fusionnent plus ces nœuds.
 
-Les identifiants que deux projets pourraient se disputer sont préfixés
-`<projet>::` : nœuds de code (`CodeNode.id`, avec l'identifiant d'origine dans
-`local_id`), étiquettes, entités et agents (le nom lisible reste dans `label`).
-C'est une clé à une seule propriété, donc valable dans toutes les éditions de
-Neo4j (les clés composites sont réservées à l'édition entreprise). Deux projets
-qui emploient le même tag ne fusionnent plus ce nœud.
+Les compteurs de `memory status`, `memory graph verify` et le repérage des
+orphelins lisent les nœuds du projet **et** ceux qui n'ont pas de clé : les
+nœuds écrits avant cette clé restent visibles (comme avant), mais ils ne sont
+pas attribués. Il n'y a pas encore de commande de rattrapage : attribuer
+un nœud ancien à un projet exige une racine de code propre à ce projet et un
+traitement des faits, journaux et objets vectoriels qui n'est pas livré.
 
-Le constructeur du graphe n'écrit plus rien : les contraintes sont posées par
-les commandes de synchronisation (`graph sync-code`, `sync-tasks`,
-`sync-memories`, `memory gate --sync`) et à la première écriture du manager.
-
-**Migration d'une base existante.** Les nœuds écrits avant la clé n'ont pas de
-`project` : ils ne sont plus comptés (`memory status` signale
-`unattributed_nodes`). Lancer une fois :
-
-```bash
-grimoire memory graph backfill-project            # aperçu chiffré, rien n'est écrit
-grimoire memory graph backfill-project --apply
-```
-
-Le rattrapage n'attribue que des nœuds sans projet, jamais ceux d'un autre, et
-se rejoue sans effet.
+Le constructeur du graphe ne se connecte ni n'écrit. Le schéma (contraintes)
+est posé une fois, par la même fonction, avant la première écriture de
+n'importe quelle voie, ou par les commandes de synchronisation. Le pilote est
+borné à quelques secondes et, après un échec, le graphe est tenu pour injoignable
+pendant une minute : les écritures suivantes échouent aussitôt au lieu de
+repayer le délai. L'écriture du souvenir lui-même n'est jamais bloquée.
 
 ### Sondes d'environnement
 

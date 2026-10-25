@@ -9,8 +9,11 @@
 #
 # Ports : GRIMOIRE_QDRANT_PORT / GRIMOIRE_QDRANT_GRPC_PORT (l'ancienne graphie
 # Grimoire_QDRANT_PORT reste acceptée). Un second projet sur la même machine
-# change ces ports ; le nom du conteneur, lui, est dérivé du projet Compose
-# (plus de `container_name` fixe, qui faisait entrer deux projets en conflit).
+# change ces ports ; le nom du conteneur ET celui du volume sont dérivés du projet
+# Compose (nom du dossier, ou COMPOSE_PROJECT_NAME) : plus de `container_name` ni de
+# volume à nom fixe, qui faisaient partager un même stockage à deux Qdrant.
+# Un projet qui avait déjà un volume `grimoire-qdrant-storage` garde son fichier
+# généré tel quel (il n'est pas réécrit) ; pour migrer, voir docs/explications/memoire.md.
 
 services:
   qdrant:
@@ -32,4 +35,3 @@ services:
 
 volumes:
   qdrant_storage:
-    name: grimoire-qdrant-storage

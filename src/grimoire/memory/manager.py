@@ -321,17 +321,12 @@ def _create_memory_graph_bounded(
 ) -> tuple[Any | None, str]:
     """Bound :func:`_create_memory_graph` — its constructor is not a probe.
 
-    ``Neo4jMemoryGraph.__init__`` calls ``ensure_schema()`` eagerly: a real
-    Cypher round-trip. Against an unreachable server, the driver's own
-    transaction-retry policy backs off for up to ~30s (several retries with
-    growing delays) *before this constructor even returns* — a delay that
-    :meth:`MemoryManager.health_check`'s own timeout cannot help with, since
-    it runs after construction. Every ``from_config`` call pays this risk
-    (not just the explicit ``probe=True`` health check), so it gets the same
-    bounded-thread treatment: past *timeout*, the caller gives up and reports
-    the graph as unavailable, while the construction keeps running
-    unobserved in the background and is discarded when it eventually
-    returns (or errors).
+    ``Neo4jMemoryGraph.__init__`` ne se connecte plus (le schéma est posé à la
+    première écriture, avec un pilote borné à quelques secondes et un
+    disjoncteur : après un échec, les écritures suivantes ne repaient pas le
+    délai). Cette borne reste le garde-fou d'un constructeur tiers ou d'un
+    pilote qui bloquerait : au-delà de *timeout*, l'appelant abandonne et
+    rapporte le graphe indisponible, la construction poursuivant sans témoin.
     """
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -457,8 +452,6 @@ class MemoryManager:
         self._auto_enrich = auto_enrich
         self._sidecar = sidecar
         self._memory_graph = memory_graph
-        #: Contraintes du graphe posées à la première écriture, jamais à la construction.
-        self._graph_schema_ready = False
         self._graph_sync_issue = graph_sync_issue
         self._hot_memory = hot_memory
         self._hot_memory_issue = hot_memory_issue
@@ -1199,13 +1192,15 @@ class MemoryManager:
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
         content_origin: str = "authored",
+        created_at: str = "",
     ) -> MemoryEntry:
         validated = self._validated(
             text, user_id=user_id, tags=tags, metadata=metadata, content_origin=content_origin,
         )
         text, normalized = validated.text, validated.metadata
+        extra = {"created_at": created_at} if created_at else {}
         try:
-            entry = self._backend.upsert(entry_id, text, user_id=user_id, tags=tags, metadata=normalized)
+            entry = self._backend.upsert(entry_id, text, user_id=user_id, tags=tags, metadata=normalized, **extra)
         except NotImplementedError as exc:
             raise GrimoireMemoryError(str(exc)) from None
         self._sync_memory(entry)
@@ -1359,11 +1354,6 @@ class MemoryManager:
         if self._memory_graph is None:
             return
         try:
-            if not self._graph_schema_ready:
-                ensure_schema = getattr(self._memory_graph, "ensure_schema", None)
-                if callable(ensure_schema):
-                    ensure_schema()
-                self._graph_schema_ready = True
             self._memory_graph.upsert_memory(entry)
         except Exception as exc:
             self._record_graph_sync_issue("memory", exc)

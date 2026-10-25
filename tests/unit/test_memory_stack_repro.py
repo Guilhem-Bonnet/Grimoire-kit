@@ -41,9 +41,12 @@ class TestComposeTemplate:
         assert "${GRIMOIRE_QDRANT_PORT:-${Grimoire_QDRANT_PORT:-6333}}:6333" in text
         assert "${GRIMOIRE_QDRANT_GRPC_PORT:-${Grimoire_QDRANT_GRPC_PORT:-6334}}:6334" in text
 
-    def test_restart_policy_and_named_volume_kept(self) -> None:
+    def test_restart_policy_kept_and_volume_is_per_project(self) -> None:
+        """Sans `name:` fixe, Compose préfixe le volume du nom du projet : deux Qdrant ne partagent plus un stockage."""
         text = COMPOSE.read_text(encoding="utf-8")
-        assert "restart: unless-stopped" in text and "name: grimoire-qdrant-storage" in text
+        assert "restart: unless-stopped" in text
+        assert "grimoire-qdrant-storage" not in text.replace("`grimoire-qdrant-storage`", "")
+        assert not re.search(r"^\s+name:\s*\S+", text.split("volumes:\n", 1)[-1], re.MULTILINE)
 
 
 class TestRedisCommand:
@@ -152,13 +155,32 @@ class TestExistingStackIsFoundBeforeCreating:
 
 
 class TestExtrasInstaller:
+    def test_already_installed_extras_are_carried_over(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`--force` recrée l'environnement : sans report, ajouter redis retirerait neo4j."""
+        from grimoire.tools import install_trust
+
+        monkeypatch.setattr(install_trust, "installed_extras", lambda dist=None: ["neo4j", "qdrant"])
+        monkeypatch.setattr(updater, "_carried_uv_options", lambda kind, binary: [])
+        argv, hint = updater.extras_install_cmd(["redis"], manager=("uv", "/u/uv"))
+        assert argv[-1] == "grimoire-kit[neo4j,qdrant,redis]" and "neo4j,qdrant,redis" in hint
+        argv, _ = updater.extras_install_cmd(["redis"], manager=("pipx", "/p/pipx"))
+        assert argv[-1] == "grimoire-kit[neo4j,qdrant,redis]"
+        argv, _ = updater.extras_install_cmd(["redis"], manager=("pip", None))
+        assert argv[-1] == "grimoire-kit[redis]"  # pip ajoute sans rien retirer
+
     def test_uv_tool_install_keeps_the_manager_and_the_extras(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.tools import install_trust
+
+        monkeypatch.setattr(install_trust, "installed_extras", lambda dist=None: [])
         monkeypatch.setattr(updater, "_carried_uv_options", lambda kind, binary: ["--with", "rich"])
         argv, hint = updater.extras_install_cmd(["neo4j", "redis"], manager=("uv", "/u/uv"))
         assert argv == ["/u/uv", "tool", "install", "--force", "--with", "rich", "grimoire-kit[neo4j,redis]"]
         assert hint.startswith("uv tool install --force") and "grimoire-kit[neo4j,redis]" in hint
 
-    def test_pipx_uses_pipx(self) -> None:
+    def test_pipx_uses_pipx(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.tools import install_trust
+
+        monkeypatch.setattr(install_trust, "installed_extras", lambda dist=None: [])
         argv, hint = updater.extras_install_cmd(["qdrant"], manager=("pipx", "/p/pipx"))
         assert argv == ["/p/pipx", "install", "--force", "grimoire-kit[qdrant]"]
         assert hint.startswith("pipx install")
@@ -173,6 +195,9 @@ class TestExtrasInstaller:
     def test_memory_setup_remedies_come_from_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from types import SimpleNamespace
 
+        from grimoire.tools import install_trust
+
+        monkeypatch.setattr(install_trust, "installed_extras", lambda dist=None: [])
         monkeypatch.setattr(updater, "_detect_manager", lambda: ("pipx", "/p/pipx"))
         online_without_extra = ms.ServiceProbe(
             id="neo4j", url=ms._DEFAULT_URLS["neo4j"], reachable=True, extra="neo4j", extra_installed=False,
@@ -186,8 +211,10 @@ class TestExtrasInstaller:
 
     def test_standard_init_installs_extras_through_the_same_function(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from grimoire.cli import cmd_standard
+        from grimoire.tools import install_trust
 
         seen: list[list[str]] = []
+        monkeypatch.setattr(install_trust, "installed_extras", lambda dist=None: [])
         monkeypatch.setattr(updater, "_detect_manager", lambda: ("pipx", "/p/pipx"))
         monkeypatch.setattr(
             subprocess, "run", lambda argv, **_: seen.append(list(argv)) or subprocess.CompletedProcess(argv, 0),

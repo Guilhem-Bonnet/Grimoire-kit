@@ -44,7 +44,7 @@ class _GraphDatabase:
     driver_instance = _Driver()
 
     @classmethod
-    def driver(cls, uri: str, *, auth: tuple[str, str]) -> _Driver:
+    def driver(cls, uri: str, *, auth: tuple[str, str], **_options: Any) -> _Driver:
         return cls.driver_instance
 
 
@@ -177,9 +177,12 @@ class TestScopedReads:
             assert "$project" in statement, statement
             assert kwargs["project"] == "projet-a"
 
-    def test_stats_report_unattributed_nodes_only_with_a_project(self, driver: _Driver) -> None:
-        assert "unattributed_nodes" in _graph().stats()
-        assert "unattributed_nodes" not in _graph(project="").stats()
+    def test_legacy_nodes_without_a_project_stay_visible(self, driver: _Driver) -> None:
+        """Pas de rattrapage livré : un nœud antérieur à la clé ne disparaît pas des lectures."""
+        _graph().stats()
+        _graph().find_orphan_memory_nodes(known_ids=frozenset(), collection="c")
+        reads = [s for s, _ in driver.calls if "count(" in s or "NOT m.id IN" in s]
+        assert reads and all("IS NULL" in s for s in reads)
 
     def test_orphans_are_looked_up_inside_the_project(self, driver: _Driver) -> None:
         _graph().find_orphan_memory_nodes(known_ids=frozenset(), collection="c")
@@ -196,39 +199,109 @@ class TestScopedReads:
         assert all(k["project"] == "projet-a" for s, k in driver.calls if "count(" in s and "labels(n)" not in s)
 
 
-class TestBackfill:
-    def test_preview_runs_counts_only(self, driver: _Driver) -> None:
-        report = _graph().backfill_project(collections=["col"], code_prefixes=["src/"], apply=False)
-        assert set(report) == {
-            "memories_by_collection", "memories_by_metadata", "code_nodes", "code_id_conflicts", "ghosts_external",
-        }
-        for statement, _ in driver.calls:
-            assert "SET " not in statement, statement
+class TestSchemaOnEveryWritePath:
+    """Une seule fonction pose le schéma ; toute voie d'écriture la traverse avant son premier ordre."""
 
-    def test_apply_attributes_in_the_documented_order(self, driver: _Driver) -> None:
-        head = "MATCH (n:GrimoireMemory) WHERE n.project IS NULL AND "
-        driver.scalars = {
-            _first_clause(head + "n.weaviate_collection IN $collections RETURN count(n) AS count"): 3,
-            _first_clause(
-                head + "n.metadata_json CONTAINS $needle AND NOT coalesce(n.weaviate_collection, '') IN $collections "
-                "RETURN count(n) AS count"
-            ): 2,
-        }
-        report = _graph().backfill_project(collections=["col"], code_prefixes=["src/"], apply=True)
-        assert report["memories_by_collection"] == 3
-        statements = [" ".join(s.split()) for s, _ in driver.calls if "SET " in s]
-        assert statements[0].endswith("SET n.project = $project")
-        assert "weaviate_collection IN $collections" in statements[0]
-        assert "metadata_json CONTAINS $needle" in statements[1]
-        assert any("n.id = $prefix + n.id" in s for s in statements)
-        assert any("n.external = true" in s for s in statements)
-        assert all("n.project IS NULL" in s for s in statements)  # jamais un nœud déjà attribué
+    @pytest.mark.parametrize("write", [
+        lambda g: g.upsert_memory(MemoryEntry(id="m", text="t")),
+        lambda g: g.upsert_fact(KnowledgeFact(id="f", subject="s", predicate="p", object="o")),
+        lambda g: g.invalidate_fact("s", "p", "o", ended="2026-01-01"),
+        lambda g: g.upsert_diary(DiaryRecord(id="d", agent_name="a", topic="t", entry="e")),
+        lambda g: g.upsert_code_nodes([CodeNode(id="a:f", kind=NodeKind.FUNCTION, name="f", file_path="x.py", line_start=1, line_end=1, module="a")]),
+        lambda g: g.delete_memory("m"),
+    ])
+    def test_first_write_of_any_path_creates_the_schema_first_and_once(self, driver: _Driver, write: Any) -> None:
+        graph = _graph()
+        write(graph)
+        first_write = next(i for i, (s, _) in enumerate(driver.calls) if "CREATE CONSTRAINT" not in s)
+        assert first_write == 15  # les quinze contraintes précèdent le premier ordre d'écriture
+        constraints = sum("CREATE CONSTRAINT" in s for s, _ in driver.calls)
+        write(graph)
+        assert sum("CREATE CONSTRAINT" in s for s, _ in driver.calls) == constraints  # posé une seule fois
 
-    def test_needle_matches_the_json_written_by_upsert_memory(self, driver: _Driver) -> None:
-        _graph("Mon Projet").backfill_project(collections=[], code_prefixes=[], apply=False)
-        needle = next(k["needle"] for _, k in driver.calls if "needle" in k)
-        assert needle == '"project_name": "Mon Projet"'
 
-    def test_requires_a_project_key(self, driver: _Driver) -> None:
-        with pytest.raises(ValueError, match="project"):
-            _graph(project="").backfill_project(collections=[], code_prefixes=[])
+class _DeadDriver(_Driver):
+    def execute_query(self, statement: str, **kwargs: Any) -> Any:
+        self.calls.append((statement, kwargs))
+        raise ConnectionError("injoignable")
+
+
+class TestDeadGraphCircuitBreaker:
+    def test_second_write_does_not_pay_the_failure_again(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        dead = _DeadDriver()
+        _GraphDatabase.driver_instance = dead
+        monkeypatch.setitem(sys.modules, "neo4j", SimpleNamespace(GraphDatabase=_GraphDatabase))
+        graph = _graph()
+
+        with pytest.raises(ConnectionError):
+            graph.upsert_memory(MemoryEntry(id="m1", text="t"))
+        attempts = len(dead.calls)
+        assert attempts == 1  # la pose du schéma échoue au premier ordre
+
+        from grimoire.memory.neo4j_graph import GraphUnavailableError
+
+        for write in (
+            lambda: graph.upsert_memory(MemoryEntry(id="m2", text="t")),
+            lambda: graph.upsert_fact(KnowledgeFact(id="f", subject="s", predicate="p", object="o")),
+            lambda: graph.stats(),
+        ):
+            with pytest.raises(GraphUnavailableError):
+                write()
+        assert len(dead.calls) == attempts  # aucun appel au pilote pendant que le disjoncteur est ouvert
+
+    def test_the_breaker_closes_after_the_cooldown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.memory import neo4j_graph as ng
+
+        dead = _DeadDriver()
+        _GraphDatabase.driver_instance = dead
+        monkeypatch.setitem(sys.modules, "neo4j", SimpleNamespace(GraphDatabase=_GraphDatabase))
+        graph = _graph()
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(ng.time, "monotonic", lambda: clock["t"])
+
+        with pytest.raises(ConnectionError):
+            graph.upsert_memory(MemoryEntry(id="m1", text="t"))
+        clock["t"] += ng.GRAPH_COOLDOWN_SECONDS + 1
+        with pytest.raises(ConnectionError):  # le pilote est de nouveau interrogé
+            graph.upsert_memory(MemoryEntry(id="m2", text="t"))
+        assert len(dead.calls) == 2
+
+    def test_the_driver_is_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: dict[str, Any] = {}
+
+        class _DB:
+            @staticmethod
+            def driver(uri: str, *, auth: tuple[str, str], **options: Any) -> _Driver:
+                seen.update(options)
+                return _Driver()
+
+        monkeypatch.setitem(sys.modules, "neo4j", SimpleNamespace(GraphDatabase=_DB))
+        _graph()
+        assert seen["max_transaction_retry_time"] <= 5 and seen["connection_timeout"] <= 5
+
+
+class TestProjectsSharingLedgerNodes:
+    """Deux projets qui réutilisent un identifiant de mission, de tâche ou de fait ne s'écrasent pas."""
+
+    def test_ledger_and_fact_ids_are_keyed_per_project(self, driver: _Driver) -> None:
+        for project in ("projet-a", "projet-b"):
+            graph = _graph(project)
+            graph.upsert_mission(Mission(id="MIS-1", title="m", status=MissionState.OPEN, origin="user", created_at="2026-01-01T00:00:00"))
+            graph.upsert_task(MissionTask(
+                id="T-1", mission_id="MIS-1", title="t", status=TaskState.READY, type=TaskType.IMPLEMENTATION,
+                risk_profile=RiskProfile.STANDARD, acceptance=("ok",), created_at="2026-01-01T00:00:00",
+            ))
+            graph.upsert_fact(KnowledgeFact(id="fact-hash", subject="s", predicate="p", object="o"))
+
+        ids = {(k["project"], s.split("MERGE (")[1].split(":")[1].split(" ")[0]): k["id"]
+               for s, k in driver.calls
+               if any(f"MERGE ({v}:Grimoire{label}" in s for v, label in (("m", "Mission"), ("t", "Task"), ("f", "Fact")))}
+        assert ids[("projet-a", "GrimoireMission")] == "projet-a::MIS-1"
+        assert ids[("projet-b", "GrimoireTask")] == "projet-b::T-1"
+        assert ids[("projet-a", "GrimoireFact")] == "projet-a::fact-hash"
+        task_call = next(k for s, k in driver.calls if "MERGE (t:GrimoireTask" in s)
+        assert task_call["mission_id"] == "projet-a::MIS-1"
+
+    def test_without_a_project_ids_are_untouched(self, driver: _Driver) -> None:
+        _graph("").upsert_mission(Mission(id="MIS-1", title="m", status=MissionState.OPEN, origin="user", created_at="2026-01-01T00:00:00"))
+        assert next(k for s, k in driver.calls if "MERGE (m:GrimoireMission" in s)["id"] == "MIS-1"

@@ -33,6 +33,7 @@ from typing import Any
 
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import MemoryEntry
+from grimoire.memory.migration import portable_metadata
 
 __all__ = [
     "SplitError",
@@ -193,7 +194,10 @@ def apply_split(
         for entry_id in group.ids:
             entry = by_id[entry_id]
             try:
-                target.upsert(entry.id, entry.text, user_id=entry.user_id, tags=entry.tags, metadata=dict(entry.metadata))
+                target.upsert(
+                    entry.id, entry.text, user_id=entry.user_id, tags=entry.tags,
+                    metadata=portable_metadata(entry), created_at=entry.created_at,
+                )
             except Exception as exc:
                 raise SplitError(
                     f"copie interrompue vers « {group.collection} » après {done}/{group.count} entrée(s) : {exc}. "

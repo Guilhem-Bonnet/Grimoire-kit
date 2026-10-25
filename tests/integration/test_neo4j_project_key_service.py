@@ -20,12 +20,19 @@ from grimoire.codegraph.schemas import CodeEdge, CodeNode, EdgeKind, NodeKind
 from grimoire.memory.backends.base import MemoryEntry
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(not os.environ.get("GRIMOIRE_TEST_NEO4J_URI"), reason="GRIMOIRE_TEST_NEO4J_URI absent (job CI neo4j-service)"),
-]
+# Le job CI pose GRIMOIRE_REQUIRE_NEO4J=1 : il n'a alors pas le droit de sauter ces tests
+# (une variable renommée ou un extra absent doit échouer, pas passer au vert).
+_REQUIRED = bool(os.environ.get("GRIMOIRE_REQUIRE_NEO4J"))
+if _REQUIRED:
+    import neo4j
 
-neo4j = pytest.importorskip("neo4j")
+    pytestmark = [pytest.mark.integration]
+else:
+    neo4j = pytest.importorskip("neo4j")
+    pytestmark = [
+        pytest.mark.integration,
+        pytest.mark.skipif(not os.environ.get("GRIMOIRE_TEST_NEO4J_URI"), reason="GRIMOIRE_TEST_NEO4J_URI absent (job CI neo4j-service)"),
+    ]
 
 
 def _conn() -> tuple[str, str, str]:
@@ -133,45 +140,41 @@ class TestTwoProjectsOneDatabase:
         assert _scalar(raw, "MATCH (n) RETURN count(n) AS c") == before
 
 
-class TestBackfill:
-    def _seed_legacy(self, raw: Any, project: str, col: str) -> dict[str, str]:
-        ids = {k: f"{k}-{uuid.uuid4().hex[:8]}" for k in ("by_col", "by_meta", "other_col", "other_meta", "code", "outside", "ghost")}
-        mem = "CREATE (:GrimoireMemory {id: $id, text: 't', weaviate_collection: $col, metadata_json: $meta, deleted: false})"
-        raw.execute_query(mem, id=ids["by_col"], col=col, meta="{}")
-        raw.execute_query(mem, id=ids["by_meta"], col="", meta=f'{{"project_name": "{project}"}}')
-        raw.execute_query(mem, id=ids["other_col"], col="autre-collection", meta="{}")
-        raw.execute_query(mem, id=ids["other_meta"], col="", meta='{"project_name": "un-autre-projet"}')
-        code = "CREATE (:CodeNode {id: $id, file_path: $fp, placeholder: $ph, name: $id})"
-        raw.execute_query(code, id=f"{project}-src:f", fp="src/a.py", ph=False)
-        raw.execute_query(code, id=f"{project}-docs:g", fp="docs/b.py", ph=False)
-        raw.execute_query(code, id=f"{project}-ghost", fp="", ph=True)
-        return ids
+class TestLedgerNodesDoNotLeakAcrossProjects:
+    def test_same_mission_task_and_fact_ids_stay_separate(self, raw: Any, projects: tuple[str, str]) -> None:
+        from grimoire.missions.schemas import Mission, MissionState, MissionTask, RiskProfile, TaskState, TaskType
 
-    def test_dry_run_counts_then_apply_attributes_then_replay_is_empty(self, raw: Any, projects: tuple[str, str]) -> None:
-        project = projects[0]
-        col = f"col-{project}"
-        ids = self._seed_legacy(raw, project, col)
-        graph = _graph(project)
-        try:
-            preview = graph.backfill_project(collections=[col], code_prefixes=["src/"], apply=False)
-            assert (preview["memories_by_collection"], preview["memories_by_metadata"], preview["code_nodes"]) == (1, 1, 1)
-            assert preview["code_id_conflicts"] == 0 and preview["ghosts_external"] >= 1
-            assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) WHERE m.project IS NULL RETURN count(m) AS c", id=ids["by_col"]) == 1
+        a, b = projects
+        for project, title in ((a, "mission de A"), (b, "mission de B")):
+            graph = _graph(project)
+            try:
+                graph.upsert_mission(Mission(id="MIS-1", title=title, status=MissionState.OPEN, origin="user", created_at="2026-01-01T00:00:00"))
+                graph.upsert_task(MissionTask(
+                    id="T-1", mission_id="MIS-1", title=f"tâche de {project}", status=TaskState.READY,
+                    type=TaskType.IMPLEMENTATION, risk_profile=RiskProfile.STANDARD, acceptance=("ok",),
+                    created_at="2026-01-01T00:00:00",
+                ))
+                graph.upsert_fact(KnowledgeFact(id="fact-hash", subject="s", predicate="p", object="o"))
+            finally:
+                graph.close()
 
-            applied = graph.backfill_project(collections=[col], code_prefixes=["src/"], apply=True)
-            assert applied["memories_by_collection"] == 1 and applied["memories_by_metadata"] == 1
+        for project, title in ((a, "mission de A"), (b, "mission de B")):
+            assert _scalar(raw, "MATCH (m:GrimoireMission {id: $id, title: $t, project: $p}) RETURN count(m) AS c", id=f"{project}::MIS-1", t=title, p=project) == 1
+            assert _scalar(raw, "MATCH (t:GrimoireTask {id: $id, project: $p})<-[:HAS_TASK]-(:GrimoireMission {id: $m}) RETURN count(t) AS c", id=f"{project}::T-1", p=project, m=f"{project}::MIS-1") == 1
+            assert _scalar(raw, "MATCH (f:GrimoireFact {id: $id, project: $p}) RETURN count(f) AS c", id=f"{project}::fact-hash", p=project) == 1
 
-            for key in ("by_col", "by_meta"):
-                assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) WHERE m.project = $p RETURN count(m) AS c", id=ids[key], p=project) == 1
-            for untouched in ("other_col", "other_meta"):
-                assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) WHERE m.project IS NULL RETURN count(m) AS c", id=ids[untouched]) == 1
-            assert _scalar(raw, "MATCH (n:CodeNode {id: $id, project: $p}) RETURN count(n) AS c", id=f"{project}::{project}-src:f", p=project) == 1
-            assert _scalar(raw, "MATCH (n:CodeNode {id: $id}) WHERE n.project IS NULL RETURN count(n) AS c", id=f"{project}-docs:g") == 1
-            assert _scalar(raw, "MATCH (n:CodeNode {id: $id, external: true}) WHERE n.project IS NULL RETURN count(n) AS c", id=f"{project}-ghost") == 1
 
-            replay = graph.backfill_project(collections=[col], code_prefixes=["src/"], apply=True)
-            assert (replay["memories_by_collection"], replay["memories_by_metadata"], replay["code_nodes"]) == (0, 0, 0)
-        finally:
-            graph.close()
-            raw.execute_query("MATCH (n) WHERE n.id IN $ids OR n.id STARTS WITH $p OR n.id CONTAINS $p DETACH DELETE n", ids=list(ids.values()), p=project)
-            raw.execute_query("MATCH (n:GrimoireMemory) WHERE n.weaviate_collection = 'autre-collection' AND n.text = 't' DETACH DELETE n")
+class TestDeadServer:
+    def test_unreachable_server_fails_fast_then_instantly(self) -> None:
+        from grimoire.memory.neo4j_graph import GraphUnavailableError, Neo4jMemoryGraph
+
+        graph = Neo4jMemoryGraph(uri="bolt://127.0.0.1:1", user="neo4j", password="x", project="p")
+        started = time.monotonic()
+        with pytest.raises(Exception):  # noqa: B017 - ServiceUnavailable du pilote
+            graph.upsert_memory(MemoryEntry(id="m1", text="t"))
+        first = time.monotonic() - started
+        started = time.monotonic()
+        with pytest.raises(GraphUnavailableError):
+            graph.upsert_memory(MemoryEntry(id="m2", text="t"))
+        assert first < 15 and time.monotonic() - started < 0.5
+        graph.close()

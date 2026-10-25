@@ -154,46 +154,6 @@ def memory_graph_sync_code(
     console.print(f"  Edges : {stats['code_edges']}")
 
 
-_backfill_collection_opt = typer.Option(
-    [], "--collection", help="Collection Weaviate du projet (répétable). Défaut : celle de la configuration.",
-)
-_backfill_apply_opt = typer.Option(False, "--apply", help="Écrire. Sans ce drapeau : aperçu chiffré seul.")
-
-
-@graph_app.command("backfill-project")
-def memory_graph_backfill_project(
-    ctx: typer.Context,
-    paths: str = _graph_paths_opt,
-    collection: list[str] = _backfill_collection_opt,
-    apply: bool = _backfill_apply_opt,
-) -> None:
-    """Attribue au projet les nœuds Neo4j écrits avant la clé de projet (aperçu par défaut).
-
-    Souvenirs : par collection Weaviate, puis par ``project_name`` des métadonnées.
-    Nœuds de code : par préfixe de chemin (``--paths``) ; leur identifiant reçoit le
-    préfixe du projet. Fantômes (modules non indexés) : marqués externes. Ne touche
-    jamais un nœud déjà attribué ; relançable.
-    """
-    cfg, _ = _load_config_context()
-    graph = _load_neo4j_graph(cfg, ensure_schema=apply)
-    collections = list(collection) or [
-        c for c in (cfg.memory.weaviate_collection, cfg.memory.collection_prefix) if c
-    ]
-    prefixes = [raw.strip().rstrip("/") + "/" for raw in paths.split(",") if raw.strip()]
-    try:
-        report = graph.backfill_project(collections=collections, code_prefixes=prefixes, apply=apply)
-    finally:
-        graph.close()
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps({"project": cfg.project.name, "apply": apply, **report}, indent=2))
-        return
-    console.print(f"[bold]{cfg.project.name}[/bold] — {'rattrapage appliqué' if apply else 'aperçu (rien écrit)'}")
-    for key, value in report.items():
-        console.print(f"  {key:<24}: {value}")
-    if not apply:
-        console.print("  Relancez avec [cyan]--apply[/cyan] pour écrire.")
-
-
 @graph_app.command("sync-tasks")
 def memory_graph_sync_tasks(
     ctx: typer.Context,

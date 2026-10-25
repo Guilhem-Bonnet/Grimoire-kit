@@ -482,6 +482,10 @@
    "version": "3.4.2",
    "path": "framework/orchestrator-gateway.md"
   },
+  "1f483a2c75e129b46c22d497ca2116b218ed374d4fabe377decec238960e6e05": {
+   "version": "3.65.0",
+   "path": "framework/memory/docker-compose.memory.tpl.yml"
+  },
   "1fe6c4eca99fb53c4204310cf7724b1e9655da634d719574e17718c6a92a730e": {
    "version": "3.16.0",
    "path": "framework/tools/rnd_engine.py"
