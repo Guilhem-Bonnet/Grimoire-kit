@@ -436,6 +436,24 @@ def test_les_raccourcis_de_panneau_basculent(workspace: Page, key: str, panel: s
     assert before != after
 
 
+def test_le_raccourci_5_bascule_le_dock_et_le_bouton_du_rail(workspace: Page) -> None:
+    """``5`` est le seul raccourci de panneau qui ne passe pas par ``togglePanel`` :
+    le dock a son propre état (``pinned``/``collapsed``) et son propre bouton de rail."""
+    dock_state = "() => document.getElementById('dock').dataset.state"
+    pressed = "() => document.querySelector('.rail-btn[data-panel=\"dock\"]').getAttribute('aria-pressed')"
+    start = workspace.evaluate(dock_state)
+    assert start in ("pinned", "collapsed")
+
+    workspace.locator("body").press("5")
+    mid = workspace.evaluate(dock_state)
+    mid_pressed = workspace.evaluate(pressed)
+    workspace.locator("body").press("5")
+
+    assert mid == ("collapsed" if start == "pinned" else "pinned")
+    assert mid_pressed == str(mid != "collapsed").lower()
+    assert workspace.evaluate(dock_state) == start, "un second appui rend l'état d'origine"
+
+
 def test_le_plein_ecran_replie_tout(workspace: Page) -> None:
     """⇧⌘F : la toile prend l'écran. Sans ça, le mode n'est qu'un libellé."""
     open_atelier(workspace)
