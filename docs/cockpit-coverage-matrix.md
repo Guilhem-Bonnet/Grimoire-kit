@@ -55,10 +55,11 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 | Executer | 18 | 18 | 100% |
 | Observer | 8 | 8 | 100% |
 | Mémoire | 11 | 11 | 100% |
+| Savoir › Santé et carte (P25) | 4 | 4 | 100% |
 | Source | 17 | 17 | 100% |
 | Contrôles × états (coque) | 80 | 80 | 100% |
-| Routes API | 28 | 28 | 100% |
-| **TOTAL** | **251** | **251** | **100%** |
+| Routes API | 29 | 29 | 100% |
+| **TOTAL** | **256** | **256** | **100%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -253,6 +254,15 @@ pour ce contrôle précis.
 | Supprimer… (confirmation dans la page) | `#inspector-body .kn-confirm` | `confirmDelete` | `POST /api/memory` (`delete`) | « Entrée supprimée. » sur place ; absent hors du projet servi | `tests/e2e/test_workspace_savoir_p24.py::test_la_suppression_se_confirme_dans_la_page`, `tests/e2e/test_workspace_savoir_p24.py::test_hors_du_projet_servi_la_suppression_n_est_pas_proposee` | oui |
 | Projet illisible ou non initialisé | `.kn-note[data-note='failed']` | `drawResults` | `memory/search`, `memory/entries` (`reason`) | motif nommé, jamais un zéro muet | `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_illisible_est_nomme_avec_son_motif`, `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_sans_memoire_dit_pourquoi_au_lieu_d_une_liste_vide` | oui |
 
+### Espace : Savoir › Santé et carte (P25)
+
+| Contrôle | Sélecteur | Handler | Route | État | Test(s) | Couvert |
+|---|---|---|---|---|---|---|
+| Segmenté de Savoir : Santé et carte, Recherche, Journal ; entrée par la Recherche | `#section-tabs [data-section='sante']` | `goto` | — | aucune vue qui ne marche pas encore | `tests/e2e/test_workspace_sante_p25.py::test_le_segmente_de_savoir_et_l_entree_par_la_recherche` | oui |
+| Carte « Santé de la mémoire » | `.sm-crit[data-criterion]` | `load` | `GET /api/workspace/memory/quality` | chaque critère en échec / réussi / inconnu avec sa mesure ; projet en alerte | `tests/e2e/test_workspace_sante_p25.py::test_la_sante_rend_chaque_critere_et_le_projet_sort_en_alerte` | oui |
+| File d'hygiène : aperçu puis commande à copier | `.sm-hyg button[aria-expanded]`, `.sm-preview` | `toggle` | idem | ce qui sera touché, export avant purge, « Commande copiée » sur place | `tests/e2e/test_workspace_sante_p25.py::test_le_geste_passe_par_un_apercu_puis_la_commande_a_copier` | oui |
+| Alerte mémoire dans À traiter | `.at-row[data-kind='memory_quality']` | `open` | `GET /api/workspace/attention` | l'action ouvre la Santé sur le constat, aperçu ouvert | `tests/e2e/test_workspace_sante_p25.py::test_a_traiter_montre_l_alerte_memoire_et_ouvre_la_sante` | oui |
+
 ### Espace : Source
 
 | Contrôle | Sélecteur | Handler | Route | État | Test(s) | Couvert |
@@ -401,6 +411,7 @@ rapport du lot.
 | GET /api/workspace/tasks/<id> | workspace_routes.py | 200/404/400 (tâche inconnue → 404, id malformé → 400) | `next_moves_require` | `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_une_tache_connue_est_rendue_avec_son_etat_de_board`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_une_tache_inconnue_est_un_404_pas_un_500`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_un_identifiant_de_tache_malforme_est_un_400` | oui |
 | GET /api/workspace/memory/entries | workspace_routes.py → workspace_knowledge.py (P24) | 200 (motif dans `reason`) | page par tranches et curseur `nextOffset`, jamais `get_all` complet ; souvenir/projection, types, `since` ; entrées d'autres projets d'un store partagé comptées | `tests/unit/tools/test_workspace_knowledge.py::TestEntriesPage`, `tests/unit/tools/test_workspace_knowledge.py::TestSharedLocation` | oui |
 | GET /api/workspace/memory/entry | workspace_routes.py → workspace_knowledge.py (P24) | 200 (`found`/`hidden`/`reason`) | provenance, chaîne de remplacement, ce qu'elle remplace (journal P14), nœuds liés ; entrée d'un autre projet jamais rendue | `tests/unit/tools/test_workspace_knowledge.py::TestEntryDetail` | oui |
+| GET /api/workspace/memory/quality | workspace_routes.py → workspace_hygiene.py (P25) | 200 (motif dans `reason`, critère `unknown` sinon) | textes distincts, utilisateurs, provenance, projections, dérive store / lexical / graphe par collection, `memory lint`, hygiène typée | `tests/unit/tools/test_workspace_hygiene.py::TestQualityRoute`, `tests/unit/tools/test_workspace_hygiene.py::TestUnknownIsNotZero` | oui |
 | GET /api/workspace/flows/runs | workspace_routes.py (nouvelle route, issue #506) | 200 | filtrée par `blueprint` | `test_observer_montre_le_run_de_flow_meme_traceledger_vide` | oui |
 | GET /api/workspace/evidence | workspace_routes.py (nouvelle route, issue #534) | 200 | `enrolled:false` sans standard, sinon tâches + gates + pack par tâche du board | `test_le_standard_enrole_liste_ses_taches_avec_gates_et_pack`, `test_un_projet_sans_standard_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
 | GET /api/workspace/agents | workspace_routes.py | 200/500 (`collect_agents` en erreur → 500 réel) | `freshness` par agent | `test_lire_les_agents_a_travers_le_cockpit` | oui |

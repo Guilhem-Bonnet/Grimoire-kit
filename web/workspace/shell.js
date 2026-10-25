@@ -69,8 +69,11 @@ const SPACES = [
   { id: 'flotte', label: 'Flotte', icon: 'i-space-flotte', term: 'flotte',
     sections: [{ id: 'flotte', module: 'piloter', label: 'Flotte' }] },
   { id: FOURTH_SPACE.id, label: FOURTH_SPACE.label, icon: FOURTH_SPACE.icon, term: 'memoire',
+    // Entrée par la Recherche (P24) ; la Santé (P25) est la vue voisine.
+    landing: 'memoire',
     sections: [
-      { id: 'memoire', module: 'memoire', label: 'Mémoire' },
+      { id: 'sante', module: 'sante', label: 'Santé et carte' },
+      { id: 'memoire', module: 'memoire', label: 'Recherche' },
       { id: 'journal', module: 'observer', label: 'Journal' },
     ] },
   { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',

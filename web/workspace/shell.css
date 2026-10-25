@@ -479,7 +479,8 @@ body[data-active-space="executer"] {
 body[data-active-space="observer"] {
   --id-current: var(--id-observer);
 }
-body[data-active-space="memoire"] {
+body[data-active-space="memoire"],
+body[data-active-space="sante"] {
   --id-current: var(--id-memoire);
 }
 body[data-active-space="source"] {

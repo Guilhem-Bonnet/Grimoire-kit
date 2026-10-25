@@ -954,6 +954,24 @@ class Neo4jMemoryGraph:
         )
         return int(records[0]["count"]) if records else 0
 
+    def count_memories_in(self, collection: str) -> int:
+        """Souvenirs vivants du projet rangés sous *collection* (vide : ceux qui n'en portent aucune).
+
+        Une base Neo4j peut servir plusieurs projets et plusieurs collections :
+        comparer le store d'un projet au compte global du graphe donnerait une
+        dérive qui n'est pas la sienne (P25).
+        """
+        records = self._read(
+            """
+            MATCH (n:GrimoireMemory)
+            WHERE coalesce(n.deleted, false) = false AND coalesce(n.weaviate_collection, '') = $collection
+              AND ($project = '' OR n.project = $project OR n.project IS NULL)
+            RETURN count(n) AS count
+            """,
+            collection=collection,
+        )
+        return int(records[0]["count"]) if records else 0
+
     def _relationship_count(self, relationship: str) -> int:
         if relationship not in _COUNTABLE_RELATIONSHIPS:
             raise ValueError(f"Unsupported Neo4j relationship count: {relationship}")
