@@ -212,6 +212,8 @@
 
   /* Contrôles : 30 px en densité confortable, 28 px en compacte. */
   --h-ctl: 30px;
+  /* Lignes de tableau (P61) : 44 px en confortable, 32 px en compacte. */
+  --h-row: 44px;
 
   /* ── Mouvement : survol et focus seulement ────────────────────────────── */
   --dur: 120ms;
@@ -220,12 +222,15 @@
 /* Densité compacte : contrôles resserrés. */
 :root[data-density="compacte"] {
   --h-ctl: 28px;
+  --h-row: 32px;
 }
 
 /* Mobile : cible tactile de 44 px, quelle que soit la densité. */
 @media (pointer: coarse) {
-  :root {
+  :root,
+  :root[data-density] {
     --h-ctl: 44px;
+    --h-row: 44px;
   }
 }
 
@@ -352,4 +357,65 @@
   --syn-ident: #6e5507;
   --syn-comment: #535960;
   --t-min: 12px;
+}
+
+/* ── Contraste élevé (P61) ─────────────────────────────────────────────────
+ * `data-contrast="high"` (posé par shell.js, par choix ou par
+ * prefers-contrast: more) remonte TOUT texte à 7:1 au moins (WCAG AAA) sur la
+ * surface qui le porte, dans chacun des deux thèmes résolus. Les surfaces et
+ * les marques gardent leur rôle ; seules les encres, les teintes d'état, les
+ * encres de remplissage et la colorisation de Source changent de valeur.
+ * tests/unit/test_workspace_tokens.py calcule chaque rapport. */
+:root[data-contrast="high"][data-theme="dark"] {
+  --ink: #ffffff;
+  --ink2: #e8ebf0;
+  --ink3: #d3d8e0;
+  --acc: #b9c6ff;
+  --on-acc: #060a20;
+  --rub: #ffb593;
+  --ok: #86ecba;
+  --warn: #ffdc92;
+  --bad: #ffabb5;
+  --ok-mark: #66dca3;
+  --warn-mark: #f2c568;
+  --bad-mark: #ff909d;
+  --onfill: #06080b;
+  --s1: #86bdf4;
+  --s2: #cfaaf4;
+  --s3: #eebb68;
+  --termink: #f4f6f9;
+  --syn-key: #acd4ff;
+  --syn-string: #b6f1c3;
+  --syn-tag: #e6c9ff;
+  --syn-placeholder: #ffc995;
+  --syn-path: #94f1eb;
+  --syn-ident: #f6de88;
+  --syn-comment: #bcc2cc;
+}
+
+:root[data-contrast="high"][data-theme="light"] {
+  --ink: #000000;
+  --ink2: #1c2128;
+  --ink3: #313843;
+  --acc: #1a31a0;
+  --on-acc: #ffffff;
+  --rub: #812a08;
+  --ok: #0c5330;
+  --warn: #5f3c00;
+  --bad: #8f1428;
+  --ok-mark: #0c5330;
+  --warn-mark: #6d4600;
+  --bad-mark: #92162a;
+  --onfill: #ffffff;
+  --s1: #104a82;
+  --s2: #46279a;
+  --s3: #614000;
+  --termink: #f4f6f9;
+  --syn-key: #134a88;
+  --syn-string: #0a5a2e;
+  --syn-tag: #66308f;
+  --syn-placeholder: #7a3f04;
+  --syn-path: #0a524d;
+  --syn-ident: #5d4604;
+  --syn-comment: #3d434a;
 }

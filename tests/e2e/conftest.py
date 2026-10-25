@@ -216,7 +216,7 @@ def served_untouched(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 @pytest.fixture
 def untouched_workspace(browser: Browser, served_untouched: str) -> Iterator[Page]:
     """La coque, chargée et prête, sur le projet de :func:`served_untouched`."""
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark")
     page = context.new_page()
     page.goto(f"{served_untouched}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
@@ -229,7 +229,7 @@ def untouched_workspace(browser: Browser, served_untouched: str) -> Iterator[Pag
 @pytest.fixture
 def empty_workspace(browser: Browser, served_empty: str) -> Iterator[Page]:
     """La coque, chargée et prête, sur le projet vide de :func:`served_empty`."""
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark")
     page = context.new_page()
     page.goto(f"{served_empty}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
@@ -356,7 +356,7 @@ def served_review_gate(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tup
 def review_gate_workspace(browser: Browser, served_review_gate: tuple[str, str]) -> Iterator[Page]:
     """La coque, chargée sur le projet dédié de :func:`served_review_gate`."""
     served, _task_id = served_review_gate
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark")
     page = context.new_page()
     page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
@@ -461,7 +461,7 @@ def served_timeline(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[
 def timeline_workspace(browser: Browser, served_timeline: tuple[str, str]) -> Iterator[Page]:
     """La coque, chargée sur le projet dédié de :func:`served_timeline`."""
     served, _task_id = served_timeline
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark")
     page = context.new_page()
     page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
@@ -727,7 +727,7 @@ def served_cockpit_triple(
 def cockpit_workspace(browser: Browser, served_cockpit: tuple[str, str]) -> Iterator[Page]:
     """La coque, chargée sur le cockpit et ciblée sur le projet enrôlé."""
     served, slug = served_cockpit
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark")
     page = context.new_page()
     page.goto(f"{served}/workspace/index.html?project={slug}", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
@@ -819,7 +819,7 @@ def cockpit_upgrade_workspace(
 ) -> Iterator[Page]:
     """La coque, chargée sur le cockpit dédié et ciblée sur le projet jetable."""
     served, slug, _root = served_cockpit_upgrade
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark")
     page = context.new_page()
     page.goto(f"{served}/workspace/index.html?project={slug}", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
@@ -872,7 +872,7 @@ def workspace(browser: Browser, served: str) -> Iterator[Page]:
     et couvre au passage le chemin d'accessibilité.
     """
     context = browser.new_context(
-        viewport={"width": 1440, "height": 900}, reduced_motion="reduce"
+        viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme="dark"
     )
     page = context.new_page()
     page.goto(f"{served}/workspace/index.html", wait_until="domcontentloaded")

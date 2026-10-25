@@ -447,6 +447,8 @@ export async function mount(root, ctx) {
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable) return;
     const palette = document.getElementById('palette');
     if (palette && !palette.hidden) return;
+    const help = document.getElementById('shortcuts');
+    if (help && !help.hidden) return;
     const index = rows.findIndex((r) => r.item.id === selected);
     if (event.key === 'j' || event.key === 'k') {
       event.preventDefault();
