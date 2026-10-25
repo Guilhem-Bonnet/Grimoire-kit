@@ -1197,6 +1197,47 @@ def _verify_orchestration_policy(root: Path, result: StandardVerificationResult)
                 "rollback_policy",
             ),
         )
+    _verify_handoff_targets(rel_path, data, roles, result)
+
+
+def _verify_handoff_targets(
+    rel_path: Path, data: dict[str, Any], roles: list[Any], result: StandardVerificationResult
+) -> None:
+    """AG-ORC-003 : chaque ``handoffs:`` relie deux rôles qui existent (``role_id``).
+
+    Un handoff vers un rôle inexistant est une délégation qui n'a pas de
+    destinataire : le modèle la déclare, personne ne la reçoit. ``handoffs:``
+    absent est légitime (flux à un seul rôle) ; présent, il doit être une liste
+    de mappings ``from``/``to``.
+    """
+    if "handoffs" not in data or data["handoffs"] is None:
+        return
+    handoffs = data["handoffs"]
+    if not isinstance(handoffs, list):
+        _add_check(result, "orchestration.handoff_invalid", "error", "handoffs must be a list of from/to mappings.", path=rel_path)
+        return
+    known = {str(role.get("role_id")) for role in roles if isinstance(role, dict) and role.get("role_id")}
+    for index, handoff in enumerate(handoffs, start=1):
+        if not isinstance(handoff, dict) or not handoff.get("from") or not handoff.get("to"):
+            _add_check(
+                result, "orchestration.handoff_invalid", "error",
+                f"handoffs[{index}] must be a mapping with from and to.", path=rel_path,
+            )
+            continue
+        for end in ("from", "to"):
+            if not isinstance(handoff[end], str):
+                # Le gabarit et le modèle déclarent un seul rôle par bout ; une liste est refusée, pas devinée.
+                _add_check(
+                    result, "orchestration.handoff_invalid", "error",
+                    f"handoffs[{index}].{end} must be a single role_id string, not a list or mapping.", path=rel_path,
+                )
+                continue
+            role_id = str(handoff[end])
+            if role_id not in known:
+                _add_check(
+                    result, "orchestration.handoff_role_unknown", "error",
+                    f"handoffs[{index}].{end} names {role_id!r}, which is not a declared role_id.", path=rel_path,
+                )
 
 
 def _verify_evidence_gates(root: Path, result: StandardVerificationResult) -> None:

@@ -231,6 +231,7 @@ profiles:
       - guardrail-contract
       - tool-mediation-gate
       - prompt-injection-firewall
+      - plan-then-execute
       - remote-hygiene-guard
       - prompt-version-observability
     minimum_evidence:

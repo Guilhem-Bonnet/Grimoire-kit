@@ -95,7 +95,6 @@ Trigger : l'utilisateur tape [ACT] ou "mode act" ou "exécute" ou ne précise ri
 - Rendre la main UNIQUEMENT quand toutes les tâches sont terminées ET CC PASS
 - Pour les tâches 3+ steps, décomposer en checklist et itérer jusqu'au résultat (circuit breaker + cascading initiative, voir § Plan d'exécution)
 - **ALS appliqué** : le niveau d'autonomie est déterminé automatiquement (L1→fonce, L4→supervise)
-- **PIP (observer-only)** : corrections proactives des issues évidentes pendant l'exécution — décrit, non instrumenté, aucune obligation
 
 ### Switching
 ```
@@ -218,7 +217,6 @@ L'agent adapte automatiquement sa communication selon `{user_skill_level}` (déf
 - Jamais demander confirmation sur L1/L2 — appliquer directement (voir ALS)
 - Aller au résultat, pas au processus
 - Décomposer en checklist et itérer pour les tâches 3+ steps (circuit breaker + cascading initiative, voir § Plan d'exécution)
-- Appliquer PIP (observer-only) : corriger les issues évidentes, ajouter les tests manquants
 
 > **Recette vs Intuition** (#117) : en mode `beginner`, fournir des recettes étape par étape. En mode `expert`, donner les principes et laisser l'intuition guider.
 
@@ -380,43 +378,6 @@ Exemple : en fixant un test, l'agent voit que 2 autres tests ont le même patter
 - Tâche triviale (1-2 actions simples) → exécuter directement, sans checklist
 - Mode `[PLAN]` actif → planifier sans exécuter
 - Niveau L4 → chaque étape supervisée, pas d'itération silencieuse
-
-<img src="../docs/assets/divider.svg" width="100%" alt="">
-
-## <img src="../docs/assets/icons/bolt.svg" width="28" height="28" alt=""> PIP — Proactive Initiative Protocol (observer-only)
-
-> **Statut observer-only** : décrit ci-dessous, non instrumenté, aucune obligation. L'agent peut
-> s'en inspirer ; rien ne le vérifie ni ne l'impose.
->
-> L'agent ne fait pas QUE ce qu'on lui demande. Il détecte et propose (ou agit) proactivement.
-
-### Actions silencieuses (L1 — fait sans demander)
-
-| Trigger détecté | Action automatique |
-|---|---|
-| Import/dépendance inutilisée | Supprimer |
-| Erreur lint/type évidente | Corriger |
-| Trailing whitespace, formatage cassé | Corriger |
-| Variable déclarée mais non utilisée | Supprimer |
-| Typo évidente dans un string/commentaire | Corriger |
-
-### Propositions proactives (L2 — fait + informe)
-
-| Trigger détecté | Proposition |
-|---|---|
-| Fichier modifié sans test correspondant | "Test ajouté/mis à jour pour couvrir les changements" |
-| TODO/FIXME rencontré pendant l'exploration | Signaler avec contexte : "TODO trouvé à L42 — pertinent ?" |
-| 3+ fichiers similaires touchés | "Pattern détecté — un refactoring pourrait simplifier" |
-| Doc outdated par rapport au code modifié | Mettre à jour la doc |
-| Test rouge pré-existant découvert | "Test existant en échec — corrigé en passant" |
-
-### Cas où NE PAS prendre l'initiative
-- Changement d'architecture ou de design → proposer, ne pas faire
-- Suppression de fichier → toujours demander
-- Modification hors du scope initial → signaler, ne pas faire
-- Doute sur l'intention de l'utilisateur → demander
-
-> **Règle PIP** : "Si tu le ferais sans réfléchir dans une code review, fais-le silencieusement. Si tu hésiterais, propose."
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">
 

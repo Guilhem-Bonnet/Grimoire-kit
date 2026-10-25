@@ -21,6 +21,7 @@ from grimoire.hosts.decisions.enrolment import (
     record_unattached_work,
     session_mutation_count,
     stop_scope,
+    unreadable_text,
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 from grimoire.hosts.decisions.profile_floor import session_profile
@@ -129,9 +130,25 @@ def _decide_stop(hook: HookInput) -> Decision:
         parked = _parked_task(hook, profile)
         if parked is not None:
             return parked
-        no_task = _no_task_closure(hook, profile, active.candidates, active.expired)
+        no_task = _no_task_closure(hook, profile, active.candidates, active.expired, active.unreadable)
         if no_task is not None:
             return no_task
+        if active.source == "unreadable":
+            # Tri R38/R39 : un ledger ou un board corrompu n'est pas « aucune tâche », et la tâche
+            # fantôme `bootstrap` n'est pas jugée. Même règle qu'un gate non évaluable
+            # (`_unevaluable_gate`) : les profils bloquants refusent une fois (`stop_active` laisse
+            # passer le second Stop), les autres sont prévenus.
+            reason = (
+                f"[Grimoire] Tâche {task_id} : gates de preuve non évaluables (profil {profile}). "
+                f"{unreadable_text(active.unreadable)}"
+            )
+            detail = {"task_id": task_id, "task_source": active.source, "unreadable": list(active.unreadable)}
+            # Une session qui a écrit sans tâche est déjà refusée plus haut (_no_task_closure). Ici elle n'a
+            # rien écrit : un ledger durablement corrompu ne bloque pas chaque session à vide, il le dit.
+            # Le board illisible garde son refus d'origine (gates non évaluables), une fois.
+            if profile in _BLOCKING_PROFILES and any(item.startswith("board") for item in active.unreadable):
+                return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
+            return Decision(context=reason, detail=detail)
         if active.source == "ambiguous":
             # Issue #692 : rien n'a été écrit, la session n'est pas bloquée —
             # mais juger la tâche fantôme `bootstrap` (« encore en état
@@ -539,7 +556,11 @@ def _unevaluable_gate(task_id: str, profile: str, exc: Exception) -> Decision:
 
 
 def _no_task_closure(
-    hook: HookInput, profile: str, candidates: tuple[str, ...] = (), expired: tuple[str, ...] = ()
+    hook: HookInput,
+    profile: str,
+    candidates: tuple[str, ...] = (),
+    expired: tuple[str, ...] = (),
+    unreadable: tuple[str, ...] = (),
 ) -> Decision | None:
     """Issue #638 lot A: a session that wrote without a task is not a finished task.
 
@@ -559,7 +580,7 @@ def _no_task_closure(
         return None
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
     detail["unattached_work"] = record_unattached_work(hook, mutations)
-    reason = no_task_stop_reason(profile, mutations, candidates, expired)
+    reason = no_task_stop_reason(profile, mutations, candidates, expired, unreadable)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)

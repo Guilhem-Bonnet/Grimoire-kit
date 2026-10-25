@@ -45,6 +45,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoirePolicyError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.policies.schemas import PolicyRule
 
@@ -53,8 +54,28 @@ from grimoire.policies.schemas import PolicyRule
 RULES_RELPATH = STANDARD_DIR / "policies.yaml"
 
 
+#: Clés racine admises : les règles, et les deux champs d'en-tête que les autres
+#: artefacts du standard portent. Tout le reste est une faute de frappe (`rule:`,
+#: `Rules:`) qui ferait croire à des règles actives.
+_ROOT_KEYS = frozenset({"rules", "$schema", "metadata"})
+
+
+def _unreadable(cause: str) -> GrimoirePolicyError:
+    return GrimoirePolicyError(
+        f"{RULES_RELPATH.as_posix()} illisible ({cause}) — aucune règle n'est appliquée tant que le fichier "
+        "n'est pas corrigé ; corrigez-le ou supprimez-le",
+        error_code="GR-POL-004",
+    )
+
+
 def _compute_raw_rules(path: Path) -> list[dict[str, Any]]:
-    """The ``rules:`` list, as plain dicts — never raises, unlike ``PolicyRule.from_dict``.
+    """The ``rules:`` list, as plain dicts.
+
+    A file that exists but cannot be read as a ``rules:`` list raises
+    :class:`~grimoire.core.exceptions.GrimoirePolicyError` (``GR-POL-004``):
+    silently returning ``[]`` made a typo in the YAML look like "no rules",
+    i.e. every budget and approval the project believed active was off. Only
+    an empty file or one without a ``rules:`` key means "no custom rules".
 
     ``ruamel.yaml`` is imported here, not at module scope, for the same
     reason as ``grimoire.core.standard_state._load_mapping``: a warm cache
@@ -66,14 +87,27 @@ def _compute_raw_rules(path: Path) -> list[dict[str, Any]]:
 
     try:
         data = YAML(typ="safe").load(path)
-    except (OSError, ValueError, YAMLError):
+    except (OSError, ValueError, YAMLError) as exc:
+        lines = str(exc).splitlines()
+        raise _unreadable(f"{type(exc).__name__}: {lines[0] if lines else ''}".strip(": ")) from exc
+    if data is None:  # fichier vide ou fait de commentaires seuls : aucune règle, par conception
         return []
     if not isinstance(data, dict):
-        return []
-    rules_raw = data.get("rules", [])
+        raise _unreadable("la racine doit être un mapping avec une clé `rules:`")
+    unknown = sorted(str(k) for k in data if k not in _ROOT_KEYS)
+    if unknown:
+        raise _unreadable(f"clé(s) racine inconnue(s) {', '.join(unknown)} (attendu : `rules:`) — faute de frappe ?")
+    if "rules" not in data:
+        raise _unreadable("aucune clé `rules:` dans un fichier qui n'est pas vide")
+    rules_raw = data["rules"]
+    if rules_raw is None:
+        raise _unreadable("`rules:` est vide (null) ; écrivez `rules: []` pour déclarer qu'il n'y en a aucune")
     if not isinstance(rules_raw, list):
-        return []
-    return [rule for rule in rules_raw if isinstance(rule, dict)]
+        raise _unreadable("`rules:` doit être une liste")
+    bad = [i for i, rule in enumerate(rules_raw) if not isinstance(rule, dict)]
+    if bad:
+        raise _unreadable(f"entrée de `rules:` qui n'est pas un mapping (position {bad[0] + 1})")
+    return list(rules_raw)
 
 
 def load_custom_rules(project_root: Path) -> tuple[PolicyRule, ...]:
@@ -94,6 +128,8 @@ def load_custom_rules(project_root: Path) -> tuple[PolicyRule, ...]:
     root = project_root.resolve()
     path = root / RULES_RELPATH
     if not path.is_file():
+        if path.exists() or path.is_symlink():  # dossier, lien cassé : présent mais illisible, pas absent
+            raise _unreadable("ce n'est pas un fichier régulier (dossier ou lien cassé)")
         return ()
     from grimoire.core.standard_state import _cached_or_fresh
 
