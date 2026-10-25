@@ -1,6 +1,6 @@
 """CLI ``grimoire stigmergy`` — coordination stigmergique (phéromones).
 
-Feature en canal **beta** (opt-in, journalisée, promue sur métriques — voir
+Feature en canal **beta** (opt-in, journalisée, promue par décision des mainteneurs — voir
 docs/rnd.md et `grimoire features`).
 
 Coordination indirecte : les agents déposent des signaux typés qui

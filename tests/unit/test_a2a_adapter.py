@@ -406,3 +406,39 @@ class TestA2ANormalizeTrace:
         raw = {"id": "t1", "status": {}}
         normalized = A2AAdapter.normalize_trace(raw)
         assert "input_digest" not in normalized
+
+
+# ── Commande `grimoire task import-a2a` (R03) ─────────────────────────────────
+
+def test_cli_import_a2a_complete_atterrit_en_needs_verification(tmp_path: Path) -> None:
+    import json
+
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+
+    fichier = tmp_path / "a2a.json"
+    fichier.write_text(
+        json.dumps({
+            "id": "ext-1",
+            "status": {"state": "completed"},
+            "input": {"role": "user", "parts": [{"type": "text", "text": "Fais un truc"}]},
+        }),
+        encoding="utf-8",
+    )
+    ledger_root = tmp_path / "ledger"
+    res = CliRunner().invoke(task_app, ["import-a2a", str(fichier), "--ledger-root", str(ledger_root)])
+    assert res.exit_code == 0, res.output
+    taches = MissionLedger(ledger_root).list_tasks()
+    assert [t.status for t in taches] == [TaskState.NEEDS_VERIFICATION]
+
+
+def test_cli_import_a2a_refuse_un_fichier_illisible(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+
+    fichier = tmp_path / "mauvais.json"
+    fichier.write_text("{pas du json", encoding="utf-8")
+    res = CliRunner().invoke(task_app, ["import-a2a", str(fichier), "--ledger-root", str(tmp_path / "ledger")])
+    assert res.exit_code == 2

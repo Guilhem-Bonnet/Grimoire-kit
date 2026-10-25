@@ -99,18 +99,19 @@ def test_observer_view_seg_bascule_correctement(workspace: Page) -> None:
     _goto(workspace, "observer")
     workspace.wait_for_selector("#view-seg button")
     labels = workspace.locator("#view-seg button").all_inner_texts()
-    assert [lbl.strip() for lbl in labels] == ["Runtime", "Activité", "RTK", "Bench"]
+    assert [lbl.strip() for lbl in labels] == ["Runtime", "Activité"]
     _assert_segment_toggles(workspace, "#view-seg button")
 
 
-def test_observer_activite_rtk_bench_ne_restent_jamais_muets(workspace: Page) -> None:
-    """Avant cette issue, ces trois onglets n'avaient tout simplement aucun
-    contenu de prévu (dead code) : cliquer dessus ne changeait rien à
-    `#canvas`, sans le dire. Chacun doit désormais rendre quelque chose de
-    lisible — une donnée réelle, ou l'aveu explicite qu'il n'y en a pas."""
+def test_observer_activite_ne_reste_jamais_muet(workspace: Page) -> None:
+    """Avant cette issue, les onglets secondaires n'avaient aucun contenu de
+    prévu (dead code) : cliquer dessus ne changeait rien à `#canvas`, sans le
+    dire. L'onglet restant doit rendre quelque chose de lisible — une donnée
+    réelle, ou l'aveu explicite qu'il n'y en a pas. (RTK et Bench, sans route
+    serveur, ont été retirés : tri R20.)"""
     _goto(workspace, "observer")
     workspace.wait_for_selector("#view-seg button")
-    for view_id in ("activite", "rtk", "bench"):
+    for view_id in ("activite",):
         workspace.locator(f'#view-seg button[data-value="{view_id}"]').click()
         workspace.wait_for_function(
             "(v) => document.querySelector(`#view-seg button[data-value=\"${v}\"]`)"

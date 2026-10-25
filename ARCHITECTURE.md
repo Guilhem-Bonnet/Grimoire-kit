@@ -41,7 +41,7 @@ Paquet installable via pip. Fournit les primitives fondamentales :
 | `mcp/` | Serveur MCP (Model Context Protocol) — expose les outils aux LLM (Claude, Copilot, etc.) |
 | `memory/` | API mémoire unifiée (`MemoryManager`) + backends pluggables |
 | `registry/` | Catalogue d'archétypes et agents bundlés |
-| `tools/` | 7 outils importables : HarmonyCheck, ContextGuard, ContextRouter, MemoryLint, PreflightCheck, AgentForge, Stigmergy |
+| `tools/` | 3 outils importables : HarmonyCheck, MemoryLint, Stigmergy |
 | `archetypes/` | Archétypes bundlés dans le wheel (via `importlib.resources`) |
 
 **Points d'entrée :**
@@ -159,11 +159,7 @@ Tous héritent de `GrimoireTool` et exposent une méthode `run()` typée :
 | Outil | Fonction |
 |---|---|
 | **HarmonyCheck** | Détecte les dissonances architecturales (fichiers longs, nommage, etc.) |
-| **ContextGuard** | Analyse le budget tokens consommé par un agent au démarrage |
-| **ContextRouter** | Planifie le chargement intelligent de contexte (P0→P4) |
 | **MemoryLint** | Vérifie la santé du système mémoire |
-| **PreflightCheck** | Validation pré-session complète |
-| **AgentForge** | Génère des scaffolds d'agents à partir de descriptions |
 | **Stigmergy** | Tableau de coordination inter-agents par phéromones |
 
 Tous sont exposés via le serveur MCP et la CLI.

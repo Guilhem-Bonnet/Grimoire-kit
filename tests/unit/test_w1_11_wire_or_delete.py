@@ -22,10 +22,10 @@ from grimoire.cli.cmd_task import task_app
 runner = CliRunner()
 SRC = Path(__file__).resolve().parents[2] / "src" / "grimoire"
 
-# Exports de ``tools/`` encore sans appelant CLI/MCP, constatés le jour de W1-11.
-# Ce sont l'API SDK publique (docs/guides/sdk-python.md) : le cliquet mesure l'atteignabilité
-# CLI/MCP, il n'autorise PAS leur suppression. L'ensemble ne peut que rétrécir.
-_ORPHELINS_CONNUS = {"AgentForge", "ContextGuard", "ContextRouter", "PreflightCheck"}
+# Exports de ``tools/`` sans appelant CLI/MCP. Les quatre orphelins du jour de W1-11
+# (AgentForge, ContextGuard, ContextRouter, PreflightCheck) ont été retirés (tri R02) :
+# l'ensemble est vide et ne doit plus grossir.
+_ORPHELINS_CONNUS: set[str] = set()
 
 
 def _exports_tools() -> dict[str, str]:

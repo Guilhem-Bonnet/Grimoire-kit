@@ -241,7 +241,6 @@ governance_rules:
   
   # Limites
   limits:
-    max_p2p_without_sog: 5     # messages avant notification SOG obligatoire
     max_challenge_depth: 2      # allers-retours challenge avant arbitrage SOG
     no_decision_in_p2p: true    # les décisions finales passent TOUJOURS par SOG
     
@@ -341,7 +340,6 @@ observability:
     alert_conditions:
       - "challenge non résolu après 2 échanges"
       - "Agent offline contacté"
-      - "Nombre P2P > max_p2p_without_sog"
       - "Décision prise en P2P (interdit)"
   
   # Dashboard mesh (commande)
