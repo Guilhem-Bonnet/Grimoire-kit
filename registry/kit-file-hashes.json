@@ -3982,6 +3982,10 @@
    "version": "3.21.1",
    "path": "framework/tools/agent-worker.py"
   },
+  "ee81851357bf875fbc8768380ee05d4f84be9a7436bb606448058d14ac6e451b": {
+   "version": "3.65.0",
+   "path": "framework/hooks/pre-push.sh"
+  },
   "eebbd513d4c9113272b8bca23ebd8dfce043ce20ebe2ebe34b48ea1c607b3734": {
    "version": "3.41.0",
    "path": "framework/agent2agent.md"
@@ -4045,6 +4049,10 @@
   "f11af45cac2df5b811d867286e1291ae43eae2b99537ec89f3a1f554801c0667": {
    "version": "3.32.0",
    "path": "framework/agent-base.md"
+  },
+  "f12171848f73cc01cf4ea82977034600c45bd6d41b5d46f9ff6f778d56e595cc": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "f163f4c47e0ab022c041421be75296afd809231c8906fb1b7d127b452be18a22": {
    "version": "3.16.0",
