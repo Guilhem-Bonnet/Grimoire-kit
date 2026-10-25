@@ -2425,8 +2425,16 @@ body[data-active-space] .panel-head {
   color: var(--ink);
 }
 
-#shortcuts-title {
+#shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
   margin: 0 0 var(--sp-3);
+}
+
+#shortcuts-title {
+  margin: 0;
   font-size: var(--t-l);
   font-weight: 600;
 }

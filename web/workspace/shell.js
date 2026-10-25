@@ -228,13 +228,15 @@ export function badge(label, tone, title) {
   return span;
 }
 
-/** Dernière valeur rendue de chaque tuile, par rubrique : la comparaison qui
- *  décide d'animer. Vidée à chaque changement de rubrique (le premier rendu
- *  d'un écran n'est pas un changement). */
+/** Dernière valeur rendue de chaque tuile, par rubrique et par identifiant de
+ *  tuile (`item.id`, sinon le libellé ; deux tuiles de même libellé dans une
+ *  rangée se distinguent par leur rang). Jamais vidée par `goto()` : revenir
+ *  sur une rubrique compare à la dernière valeur VUE, donc n'anime que si elle a
+ *  changé entre-temps ; le premier rendu d'une tuile n'anime jamais. */
 const kpiSeen = new Map();
 
-function kpiChanged(label, value) {
-  const key = `${current}|${label}`;
+function kpiChanged(tile, value) {
+  const key = `${current}|${tile}`;
   const before = kpiSeen.get(key);
   kpiSeen.set(key, value);
   if (before === undefined || before === value) return false;
@@ -242,15 +244,19 @@ function kpiChanged(label, value) {
   return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-/** Rangée de tuiles KPI : `items` = [{ value, label, icon?, tone?, sub? }]. Une
+/** Rangée de tuiles KPI : `items` = [{ value, label, id?, icon?, tone?, sub? }]. Une
  *  valeur sans chiffre (« absent », « verte ») est un statut, pas un
  *  indicateur : la tuile la pose en mot d'état (`data-kind="word"`). */
 export function kpiRow(items) {
   const rowNode = mk('div', { class: 'kpi' });
+  const rank = new Map();
   for (const item of items) {
     const value = String(item.value);
     const cell = mk('div', { class: 'kpi-item' });
-    const changed = kpiChanged(item.label, value);
+    const base = item.id || item.label;
+    const nth = rank.get(base) || 0;
+    rank.set(base, nth + 1);
+    const changed = kpiChanged(nth ? `${base}#${nth}` : base, value);
     if (item.tone) cell.dataset.tone = item.tone;
     if (!/\d/.test(value) && value !== '—') cell.dataset.kind = 'word';
     const lbl = mk('div', { class: 'kpi-lbl' }, item.icon ? icon(item.icon) : null, mk('span', { text: item.label }));
@@ -305,13 +311,32 @@ function resolveTheme(pref) {
   return pref;
 }
 
+// Avant `boot()`, le projet est inconnu et la clé par projet illisible : le
+// premier rendu lit la copie non scopée (voir `mirrorPref`) — sinon la page
+// peindrait le thème du système avant de basculer sur le choix mémorisé.
+let hostKnown = false;
+
+function savedPref(key) {
+  const own = readState()[key];
+  if (own || hostKnown) return own;
+  try { return localStorage.getItem(`grimoire.workspace.${key}`); } catch { return null; }
+}
+
 function themePref() {
-  const saved = readState().theme;
+  const saved = savedPref('theme');
   return THEME_PREFS.includes(saved) ? saved : 'system';
+}
+
+// Copie non scopée du choix de thème et de contraste : le script inline de
+// index.html la lit avant le premier paint (la clé par projet n'est connue
+// qu'après `boot()`). Le dernier projet ouvert gagne.
+function mirrorPref(key, value) {
+  try { localStorage.setItem(`grimoire.workspace.${key}`, value); } catch { /* sans mémoire */ }
 }
 
 function applyTheme() {
   const pref = themePref();
+  mirrorPref('theme', pref);
   root.dataset.themePref = pref;
   root.dataset.theme = resolveTheme(pref);
   // La barre d'état et la rubrique Préférences portent les mêmes boutons.
@@ -338,7 +363,7 @@ const CONTRASTS = ['standard', 'high'];
 const contrastQuery = window.matchMedia('(prefers-contrast: more)');
 
 function contrastPref() {
-  const saved = readState().contrast;
+  const saved = savedPref('contrast');
   if (CONTRASTS.includes(saved)) return saved;
   return contrastQuery.matches ? 'high' : 'standard';
 }
@@ -367,6 +392,7 @@ function applyPreferences() {
   $('st-atelier').setAttribute('aria-pressed', String(root.dataset.atelier === 'on'));
   applyTheme();
   root.dataset.contrast = contrastPref();
+  mirrorPref('contrast', root.dataset.contrast);
   for (const button of document.querySelectorAll('[data-contrast-pref]')) {
     button.setAttribute('aria-pressed', String(button.dataset.contrastPref === root.dataset.contrast));
   }
@@ -1306,7 +1332,6 @@ async function goto(id, params, { fromUrl = false } = {}) {
   }
   if (controller) controller.abort();
   controller = new AbortController();
-  kpiSeen.clear();
   const previousSpace = current ? SECTIONS.get(current)?.space.id ?? null : null;
   current = section.id;
   currentParams = { ...(params || {}) };
@@ -1330,6 +1355,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   // transition. Seul l'échange synchrone de la coque est enveloppé — le montage
   // du module, lui, reste hors transition (il peut durer).
   const canvas = $('canvas');
+  let swapped = false;
   const swapShell = () => {
     document.body.dataset.activeSpace = section.module || section.id;
     document.body.dataset.activeArea = space.id;
@@ -1343,16 +1369,23 @@ async function goto(id, params, { fromUrl = false } = {}) {
     canvas.dataset.grid = section.module === 'concevoir' ? 'on' : 'off';
     $('inspector-body').replaceChildren(...loadingNodes('Chargement du détail…', 3));
     $('explorer-body').replaceChildren(...loadingNodes("Chargement de l'arborescence…", 3));
+    swapped = true;
   };
   const crossSpace = previousSpace !== null && previousSpace !== space.id;
   if (crossSpace && canViewTransition()) {
-    const transition = document.startViewTransition(swapShell);
-    try { await transition.updateCallbackDone; } catch { /* repli : l'échange a eu lieu ou sera refait */ }
+    try {
+      const transition = document.startViewTransition(swapShell);
+      // Une transition écartée (goto rapprochés) rejette ces promesses : sans
+      // gestionnaire, c'est une erreur non rattrapée.
+      transition.ready.catch(() => {});
+      transition.finished.catch(() => {});
+      await transition.updateCallbackDone;
+    } catch { /* API qui lève, ou rappel qui a échoué : le repli ci-dessous reprend */ }
     // Un `goto()` plus récent a repris la main pendant la transition.
     if (controller.signal.aborted) return;
-  } else {
-    swapShell();
   }
+  // Repli : pas de transition, ou le rappel n'est pas allé au bout.
+  if (!swapped) swapShell();
   crumbBase = [scopeName(), space.label, ...(space.sections.length > 1 ? [section.label] : [])];
   docbar.setBreadcrumb([]);
   docbar.setZoom([], null);
@@ -2011,6 +2044,12 @@ const SHORTCUTS = [
 
 let shortcutsReturnFocus = null;
 
+// Tout le reste de la page devient inerte tant que l'aide est ouverte (focus,
+// clics et lecteurs d'écran restent dans la boîte).
+function setBackgroundInert(on) {
+  for (const id of ['shell']) if ($(id)) $(id).inert = on;
+}
+
 function openShortcuts() {
   const dialog = $('shortcuts');
   const list = $('shortcuts-list');
@@ -2020,11 +2059,13 @@ function openShortcuts() {
   ]));
   shortcutsReturnFocus = document.activeElement;
   dialog.hidden = false;
-  $('shortcuts-box').focus();
+  setBackgroundInert(true);
+  $('shortcuts-close').focus();
 }
 
 function closeShortcuts() {
   $('shortcuts').hidden = true;
+  setBackgroundInert(false);
   const back = shortcutsReturnFocus;
   shortcutsReturnFocus = null;
   if (back && back.isConnected && typeof back.focus === 'function') back.focus();
@@ -2038,6 +2079,8 @@ function bindShortcuts() {
     if (!$('shortcuts').hidden) {
       // L'aide est modale : Échap ou « ? » la ferme, ⌘K la remplace par la palette.
       if (event.key === 'Escape' || event.key === '?') { event.preventDefault(); closeShortcuts(); return; }
+      // Le seul élément focalisable est « Fermer » : Tab y reste (piège de focus).
+      if (event.key === 'Tab') { event.preventDefault(); $('shortcuts-close').focus(); return; }
       if (!meta) return;
       closeShortcuts();
     }
@@ -2109,6 +2152,8 @@ async function main() {
   syncDetail();
   $('st-fullscreen').addEventListener('click', toggleFocus);
   $('palette-open').addEventListener('click', () => openPalette());
+  $('shortcuts-close').addEventListener('click', closeShortcuts);
+  $('shortcuts').addEventListener('click', (e) => { if (e.target.id === 'shortcuts') closeShortcuts(); });
   startStampTicker();
   // La puce de portée ouvre le sélecteur : la palette réduite à « Projets »,
   // sans plafond, « Tous les projets » en tête. Changer de portée recharge la
@@ -2137,6 +2182,7 @@ async function main() {
     ));
   }
 
+  hostKnown = true;
   if (status) {
     // `applyPreferences()` a déjà tourné une fois plus haut, avant que
     // `host.project` ne soit connu (pour éviter un flash de mauvais thème

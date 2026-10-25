@@ -43,6 +43,45 @@ def _goto(page: Page, section: str) -> None:
 # ── P67 : le thème par défaut suit le système ──────────────────────────────
 
 
+_THEME_LOG = """
+window.__themes = [];
+const note = (why) => window.__themes.push(why + ':' + document.documentElement.dataset.theme);
+new MutationObserver(() => note('attr')).observe(document, {
+  subtree: true, attributes: true, attributeFilter: ['data-theme'],
+});
+new PerformanceObserver((list) => { for (const e of list.getEntries()) note('paint'); })
+  .observe({ type: 'paint', buffered: true });
+"""
+
+
+@pytest.mark.parametrize("pref,scheme", [("dark", "light"), ("light", "dark")])
+def test_p67_un_choix_memorise_ne_clignote_pas_au_premier_paint(
+    browser: Browser, served: str, pref: str, scheme: str
+) -> None:
+    """Avec /api/status retardé, la page ne peint jamais le thème du système avant le choix."""
+    import time
+
+    with _page(browser, served, color_scheme=scheme, reduced_motion="reduce") as first:
+        _goto(first, "preferences")
+        first.locator(f"#canvas [data-theme-pref='{pref}']").click()
+        state = first.context.storage_state()
+    ctx = browser.new_context(
+        storage_state=state, color_scheme=scheme, reduced_motion="reduce", viewport={"width": 1440, "height": 900}
+    )
+    try:
+        ctx.add_init_script(_THEME_LOG)
+        page = ctx.new_page()
+        page.route("**/api/status*", lambda route: (time.sleep(0.6), route.continue_()))
+        page.goto(f"{served}/workspace/index.html", wait_until="commit")
+        page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+        log = page.evaluate("() => window.__themes")
+        assert page.evaluate("() => window.GrimoireWorkspace.theme") == pref
+        assert any(entry.startswith("paint:") for entry in log), log
+        assert all(entry.endswith(f":{pref}") for entry in log), log
+    finally:
+        ctx.close()
+
+
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_p67_sans_choix_memorise_le_theme_suit_le_systeme(browser: Browser, served: str, scheme: str) -> None:
     with _page(browser, served, color_scheme=scheme, reduced_motion="reduce") as page:
@@ -113,6 +152,30 @@ def test_p58_aucun_raccourci_ne_s_active_pendant_une_saisie(browser: Browser, se
         assert page.locator("#t-in").input_value() == "?1jk"
 
 
+def test_p58_l_aide_piege_le_focus_se_ferme_et_rend_le_focus(browser: Browser, served: str) -> None:
+    with _page(browser, served, color_scheme="dark", reduced_motion="reduce") as page:
+        for how in ("bouton", "voile", "echap"):
+            page.locator("#palette-open").focus()
+            page.keyboard.press("Shift+?")
+            assert page.locator("#shortcuts").is_visible()
+            assert page.evaluate("() => document.getElementById('shell').inert") is True
+            assert page.evaluate("() => document.activeElement.id") == "shortcuts-close"
+            for _ in range(3):
+                page.keyboard.press("Tab")
+                assert page.evaluate("() => document.activeElement.id") == "shortcuts-close", how
+            page.keyboard.press("Shift+Tab")
+            assert page.evaluate("() => document.activeElement.id") == "shortcuts-close", how
+            if how == "bouton":
+                page.locator("#shortcuts-close").click()
+            elif how == "voile":
+                page.mouse.click(5, 5)
+            else:
+                page.keyboard.press("Escape")
+            assert page.locator("#shortcuts").is_hidden(), how
+            assert page.evaluate("() => document.getElementById('shell').inert") is False
+            assert page.evaluate("() => document.activeElement.id") == "palette-open", how
+
+
 # ── P54 : transitions entre espaces ────────────────────────────────────────
 
 _COUNT_VT = """
@@ -153,6 +216,31 @@ def test_p54_sans_l_api_le_changement_d_espace_marche_sans_erreur(browser: Brows
         _cross_space(page)
         assert page.locator("#canvas").inner_text().strip()
     assert not errors
+
+
+def test_p54_des_goto_rapproches_ne_levent_aucune_erreur(browser: Browser, served: str) -> None:
+    errors: list[str] = []
+    with _page(browser, served, color_scheme="dark", reduced_motion="no-preference") as page:
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+        _goto(page, "a-traiter")
+        page.evaluate(
+            "() => { const w = window.GrimoireWorkspace; w.goto('flotte'); w.goto('memoire'); w.goto('travail'); }"
+        )
+        page.wait_for_function("() => window.GrimoireWorkspace.section === 'travail'")
+        page.wait_for_function("() => document.querySelector('#canvas').getAttribute('aria-busy') === 'false'")
+        page.wait_for_timeout(500)
+    assert not errors, errors
+
+
+def test_p54_une_api_qui_leve_retombe_sur_l_echange_direct(browser: Browser, served: str) -> None:
+    errors: list[str] = []
+    boom = "Document.prototype.startViewTransition = function () { throw new Error('boom'); };"
+    with _page(browser, served, boom, color_scheme="dark", reduced_motion="no-preference") as page:
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+        _cross_space(page)
+        assert page.locator("#canvas").inner_text().strip()
+        assert page.evaluate("() => document.body.dataset.activeArea") == "flotte"
+    assert not errors, errors
 
 
 def test_p54_prefers_reduced_motion_desactive_la_transition(browser: Browser, served: str) -> None:
@@ -203,7 +291,17 @@ _KPI_PROBE = """async (label) => {
     row.remove();
     return out;
   };
-  return { first: read('3'), same: read('3'), moved: read('4'), again: read('4'), word: read('absent') };
+  const twins = () => {
+    const row = shell.kpiRow([{ label: label + ' jumelle', value: '1' }, { label: label + ' jumelle', value: '9' }]);
+    const out = [...row.querySelectorAll('.kpi-val')].map((v) => v.dataset.changed || null);
+    return out;
+  };
+  const twinsFirst = twins();
+  const twinsSame = twins();
+  return {
+    first: read('3'), same: read('3'), moved: read('4'), again: read('4'), word: read('absent'),
+    twinsFirst, twinsSame,
+  };
 }"""
 
 
@@ -216,6 +314,8 @@ def test_p60_un_chiffre_ne_s_anime_que_sur_changement_reel(browser: Browser, ser
     assert result["moved"]["iterations"] == "1", "une passe, jamais en boucle"
     assert result["again"]["changed"] is None, "la valeur n'a plus bougé"
     assert result["word"]["changed"] is None, "un mot d'état ne s'anime pas"
+    # Deux tuiles de même libellé ne s'écrasent pas : rendues deux fois à l'identique, aucune ne bouge.
+    assert result["twinsFirst"] == [None, None] and result["twinsSame"] == [None, None]
 
 
 def test_p60_aucune_animation_de_chiffre_sous_prefers_reduced_motion(browser: Browser, served: str) -> None:

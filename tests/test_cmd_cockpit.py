@@ -313,6 +313,7 @@ def api_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore
     project_registry.save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
     # Les mutations mémoire n'agissent que sur le projet servi (P02).
     monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "served")
+    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", proj.resolve())
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
     )
