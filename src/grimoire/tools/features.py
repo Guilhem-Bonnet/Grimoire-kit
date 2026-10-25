@@ -4,7 +4,8 @@ Le kit expose ses capacités par canal de maturité :
 
 - **stable** : contrat SemVer, activées d'office.
 - **beta** : fonctionnelles et testées, opt-in par projet, journalisées —
-  candidates à la promotion sur métriques d'usage (voir docs/explications/experimental.md).
+  candidates à la promotion, décidée par les mainteneurs (le kit ne compte pas l'usage ;
+  voir docs/explications/experimental.md).
 - **experimental** : surface R&D exploratoire, hors contrat, usage direct
   (CLI/outil) sans câblage dans le cycle agent.
 

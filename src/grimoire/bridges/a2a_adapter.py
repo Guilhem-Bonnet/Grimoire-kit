@@ -33,6 +33,7 @@ __all__ = [
     "A2AMessage",
     "A2ATask",
     "A2ATaskState",
+    "is_known_state",
 ]
 
 
@@ -210,6 +211,11 @@ _GRIMOIRE_TO_A2A: dict[TaskState, str] = {
 }
 
 
+def is_known_state(state: str) -> bool:
+    """Vrai si l'état A2A est connu du mapping (sinon l'import le ramènerait à PROPOSED)."""
+    return state in _A2A_TO_GRIMOIRE
+
+
 # ── Import report ─────────────────────────────────────────────────────────────
 
 @dataclass
@@ -260,9 +266,27 @@ class A2AAdapter:
         self._evidence = evidence
         self._trace = trace_ledger
 
-    def _stable_task_id(self, a2a_id: str) -> str:
+    @staticmethod
+    def _digest(a2a_id: str) -> str:
+        """Empreinte courte de l'id A2A complet, sensible à la casse."""
+        return hashlib.sha256(a2a_id.encode("utf-8")).hexdigest()[:8]
+
+    @staticmethod
+    def _legacy_task_id(a2a_id: str) -> str:
+        """Ancien id (slug tronqué seul) : deux ids distincts pouvaient s'y confondre."""
         slug = a2a_id.lower().replace("/", "-").replace(":", "-")[:20]
         return f"GAO-a2a-{slug}"
+
+    def _stable_task_id(self, a2a_id: str) -> str:
+        """Slug lisible tronqué + empreinte de l'id complet : deux ids distincts ne se rejoignent jamais."""
+        slug = a2a_id.lower().replace("/", "-").replace(":", "-")[:20]
+        return f"GAO-a2a-{slug}-{self._digest(a2a_id)}"
+
+    @staticmethod
+    def _owner_of(task: MissionTask) -> str:
+        """L'id A2A porté par la description d'une tâche importée ('' si elle n'en porte pas)."""
+        first = (task.description or "").split(" | ", 1)[0]
+        return first.removeprefix("a2a_task_id: ") if first.startswith("a2a_task_id: ") else ""
 
     def import_task(
         self,
@@ -280,6 +304,11 @@ class A2AAdapter:
         - Idempotent: existing task_id is updated, not duplicated.
         """
         stable_id = self._stable_task_id(a2a_task.id)
+        # Compatibilité : un import fait avant l'empreinte vit sous l'ancien id ; on le
+        # reprend seulement s'il appartient bien à cet id A2A (pas à un homonyme).
+        legacy = self._ledger.get_task(self._legacy_task_id(a2a_task.id))
+        if legacy is not None and self._owner_of(legacy) == a2a_task.id:
+            stable_id = legacy.id
         report = A2AImportReport(
             a2a_task_id=a2a_task.id,
             grimoire_task_id=stable_id,
@@ -295,6 +324,11 @@ class A2AAdapter:
 
         # Create or reuse task
         existing = self._ledger.get_task(stable_id)
+        if existing is not None and self._owner_of(existing) != a2a_task.id:
+            report.errors.append(
+                f"La tâche {stable_id} appartient à l'id A2A {self._owner_of(existing)!r}, pas à {a2a_task.id!r} : import refusé"
+            )
+            return report
         if existing is None:
             mission = self._ledger.get_mission(mission_id)
             if mission is None:
@@ -363,7 +397,7 @@ class A2AAdapter:
                 content = artifact.text_content()
                 if not content:
                     content = json.dumps(artifact.to_dict(), ensure_ascii=False)[:500]
-                item_id = f"a2a-art-{a2a_task.id[:8]}-{artifact.index}"
+                item_id = f"a2a-art-{self._digest(a2a_task.id)}-{artifact.index}"
                 items.append(EvidenceItem.from_text(
                     item_id,
                     EvidenceKind.REPORT,

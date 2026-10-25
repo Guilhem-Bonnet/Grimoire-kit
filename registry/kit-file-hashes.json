@@ -2002,6 +2002,10 @@
    "version": "3.19.0",
    "path": "framework/tools/agent-caller.py"
   },
+  "80ac82a72502a07ac29e474d94ebaf37d1b5256d819f3a7f63b2edc3d337855a": {
+   "version": "3.65.0",
+   "path": "framework/agent-mesh-network.md"
+  },
   "815ad25ac457c7ca4d81da31ce192667523d599c2d9997f4b8ad600cd83eb28c": {
    "version": "3.35.4",
    "path": "framework/copilot/prompts/grimoire-session-bootstrap.prompt.md"
@@ -4257,6 +4261,10 @@
   "fbae7690d884a59e6e4dde3c38ea36a8c32d8094bc51af19b8fd115dd0663070": {
    "version": "3.16.0",
    "path": "framework/tools/tool-resolver.py"
+  },
+  "fbdbcb23b787718c86bfffc781cba66274ee968f8890da882dd725068b2eabde": {
+   "version": "3.65.0",
+   "path": "framework/tools/observatory.py"
   },
   "fc0ba7d9e66fe1c6080435574e140b9b9a2935d39b93d9ef4cc01130cef873e7": {
    "version": "3.42.0",

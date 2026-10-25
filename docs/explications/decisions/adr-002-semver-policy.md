@@ -33,7 +33,6 @@ L'API publique inclut :
 - `grimoire.core.exceptions` : toute la hiérarchie d'exceptions
 - `grimoire.core.log` : `configure_logging`
 - `grimoire.core.deprecation` : `deprecated`
-- `grimoire.core.retry` : `with_retry`
 - `grimoire.core.validator` : `validate_config`, `ValidationError`
 - CLI : toutes les commandes et leurs flags documentés dans `cli-reference.md`
 - Entry points : `grimoire.tools`, `grimoire.backends`
