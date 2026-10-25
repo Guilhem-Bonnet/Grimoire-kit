@@ -82,6 +82,7 @@ from grimoire.tools import (
     workspace_attention,
     workspace_config,
     workspace_exec,
+    workspace_knowledge,
     workspace_language,
     workspace_memory,
     workspace_portfolio,
@@ -378,6 +379,25 @@ def _memory_search(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _memory_entries(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/entries`` — une page d'entrées d'un projet (P24).
+
+    ``slug`` (registre) ou le projet servi ; ``kind`` souvenir/projection,
+    ``types``, ``since``, ``offset`` (curseur), ``limit``. Jamais tout le store.
+    """
+    return workspace_knowledge.memory_entries(
+        project_root, slug=_one(query, "slug") or None, kind=_one(query, "kind"),
+        types=_one(query, "types"), since=_one(query, "since"),
+        offset=_one(query, "offset") or 0, limit=_one(query, "limit") or workspace_knowledge.DEFAULT_PAGE,
+        include_superseded=_one(query, "include_superseded") == "1",
+    )
+
+
+def _memory_entry(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/entry`` — provenance, remplaçant et nœuds liés d'une entrée (P24)."""
+    return workspace_knowledge.memory_entry(project_root, _one(query, "id"), slug=_one(query, "slug") or None)
+
+
 def _assist_status(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/assist`` — l'opt-in et la disponibilité, sans coût.
 
@@ -457,6 +477,8 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
+    f"{PREFIX}memory/entries": _memory_entries,
+    f"{PREFIX}memory/entry": _memory_entry,
 }
 
 

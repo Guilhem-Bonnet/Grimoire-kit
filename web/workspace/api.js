@@ -311,6 +311,25 @@ export const api = {
     if (includeStale) params.include_stale = '1';
     return get(WS + 'memory/search', params);
   },
+  // Espace Savoir (P24) : une page d'entrées d'un projet (`slug` du registre,
+  // omis = le projet en portée), lue par tranches côté serveur — jamais tout
+  // le store ; `offset` est le curseur `nextOffset` de la page précédente.
+  memoryEntries: (slug, { kind, types, since, offset, limit, includeSuperseded } = {}) => {
+    const params = {};
+    if (slug) params.slug = slug;
+    if (kind) params.kind = kind;
+    if (types) params.types = types;
+    if (since) params.since = since;
+    if (offset) params.offset = String(offset);
+    if (limit) params.limit = String(limit);
+    if (includeSuperseded) params.include_superseded = '1';
+    return get(WS + 'memory/entries', params);
+  },
+  // La fiche d'une entrée : provenance, chaîne de remplacement, nœuds liés.
+  memoryEntry: (id, slug) => get(WS + 'memory/entry', slug ? { id, slug } : { id }),
+  // Suppression gouvernée du cockpit (`POST /api/memory`) : confirmation
+  // explicite, et le serveur la refuse (403) hors du projet qu'il sert.
+  memoryDelete: (id, project) => post('/api/memory', { action: 'delete', id, project, confirm: true }),
 
   // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
   // Lecture, validation et simulation sont disponibles sur les deux hôtes

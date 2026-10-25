@@ -178,6 +178,8 @@ class QdrantStorageMixin:
                 kwargs["offset"] = next_offset
             points, next_offset = self._client.scroll(**kwargs)
             all_points.extend(points)
+            if limit is not None and len(all_points) >= offset + limit:
+                break  # la page demandée est pleine : inutile de parcourir la suite
 
         # Apply caller-level offset/limit
         sliced = all_points[offset:] if limit is None else all_points[offset:offset + limit]

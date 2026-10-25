@@ -1,538 +1,764 @@
-// Espace Mémoire — LOT 4.
+// Savoir › Mémoire — la recherche d'abord (P24, maquette « Historique — recherche mémoire »).
 //
-// Remplace `memory.html`. Cible : le store et le graphe D'ABORD, les couches
-// ensuite, l'explication d'architecture derrière un onglet. Inspecteur :
-// entrée.
+// Trois colonnes : les filtres à gauche (type, source, projet, période,
+// décisions remplacées), la recherche et ses résultats au centre, l'entrée
+// choisie dans le panneau de détail à droite (`ctx.inspector`).
 //
-// Correction due par la revue §4.5 : la page ne doit pas expliquer
-// l'architecture à la place de montrer la mémoire — deux grandes cartes
-// « Vitrine / Cockpit local » remplaçaient la vue du store réel. Ici,
-// l'explication existe encore (onglet Architecture) mais n'est plus ce que
-// l'espace montre en premier.
+// Sans terme, la colonne centrale liste une page d'entrées par projet
+// (`memory/entries`, lue par tranches, jamais tout le store) ; avec un terme,
+// la recherche de flotte (`memory/search`) classe par rang fusionné (RRF) entre
+// projets, jamais par score brut. Chaque résultat dit son type, sa date, sa
+// provenance, son projet et sa chaîne de supersession.
 //
-// Correction due par la revue §4.4, appliquée ici pour le même défaut de
-// classe : la dérive store ↔ graphe (`parity`) est un objet vide quand aucun
-// graphe n'est câblé — ce module le lit avec des reprises (`?.`), jamais un
-// accès direct qui casserait sur l'absence (le `graph_stats` de l'observatoire
-// hérité).
+// Refus tenus ici :
+// - les entrées d'un AUTRE projet d'un emplacement partagé n'apparaissent
+//   qu'en comptes (le serveur ne les rend jamais) ;
+// - aucun bouton inerte : Corriger et Marquer remplacée attendent leurs routes
+//   (P34, P23) ; seule la suppression, gouvernée côté cockpit (`POST
+//   /api/memory`, projet servi seulement), est proposée, avec confirmation
+//   dans la page ;
+// - la carte « Santé de la mémoire » (P25) et un journal des écritures n'ont
+//   pas encore de lecture serveur : rien n'est affiché à leur place.
 //
-// Onglet Recherche (#172, dernier volet de « du générateur statique au
-// portefeuille actif ») : l'agrégation mémoire multi-projets que
-// `memory_link_status()` ne porte pas (mono-projet). Sa portée est celle de la
-// coque (P31) : « Tous les projets » ou le projet en portée ; le tableau et la
-// recherche croisée sont propres à cet onglet et ne s'affichent que là.
-//
-// API consommées : api.memoryStatus(), api.memoryOverview(projects),
-// api.memorySearch(q, projects).
+// API consommées : api.memoryEntries, api.memoryEntry, api.memorySearch,
+// api.memoryDelete, api.projects.
 
-import { icon, kpiRow, STATE_ICON, stateIcon } from '../shell.js';
+import { badge, icon, monogram } from '../shell.js';
 import { formatScore } from '../score.js';
 
-const STYLE_ID = 'me-styles';
+const STYLE_ID = 'kn-styles';
+
+const STYLES = `
+.kn-wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100%; }
+.kn-filters { background: var(--panel); border-right: 1px solid var(--line); padding: 20px 16px;
+  display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.kn-filters fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.kn-filters legend { padding: 0 0 6px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink3); }
+.kn-chk { display: flex; align-items: center; gap: 8px; padding: 4px 0; min-width: 0; cursor: pointer; }
+.kn-chk input { margin: 0; flex: none; accent-color: var(--acc); }
+.kn-chk { align-items: flex-start; }
+.kn-chk input { margin-top: 3px; }
+.kn-chk .kn-lbl { min-width: 0; overflow-wrap: anywhere; }
+.kn-chk .kn-n { margin-left: auto; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.kn-why { margin: 0 0 4px 24px; color: var(--ink3); font-size: var(--t-min); overflow-wrap: anywhere; }
+.kn-filters select { width: 100%; height: var(--h-ctl); padding: 0 9px; border: 1px solid var(--line); border-radius: var(--r); background-color: var(--card); color: var(--ink); }
+.kn-scope-link { align-self: flex-start; margin-top: 4px; }
+.kn-main { min-width: 0; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; }
+.kn-searchbar { display: flex; gap: 10px; align-items: center; }
+.kn-searchbar label { flex-grow: 1; display: flex; min-width: 0; }
+.kn-searchbar input { flex-grow: 1; height: 36px; font-size: 14px; min-width: 0; padding: 0 12px; }
+.kn-summary { margin: 0; color: var(--ink2); }
+.kn-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); overflow: hidden; }
+.kn-res { display: grid; grid-template-columns: 96px minmax(0, 1fr) 92px; gap: 14px; padding: 14px 16px;
+  border-top: 1px solid var(--line); align-items: start; cursor: pointer; }
+.kn-res:first-child { border-top: 0; }
+.kn-res:hover { background: var(--hover); }
+.kn-res[aria-current="true"] { background: var(--acc-soft); }
+.kn-res:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.kn-res > .badge { justify-self: start; max-width: 96px; }
+.kn-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kn-title { font-weight: 600; overflow-wrap: anywhere; }
+.kn-excerpt { color: var(--ink2); overflow-wrap: anywhere; }
+.kn-src { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; color: var(--ink3); font-size: 12px; min-width: 0; }
+.kn-src .kn-sep { color: var(--ink3); }
+.kn-src .kn-path { overflow-wrap: anywhere; }
+.kn-proj { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px 0 3px; border-radius: var(--r-pill);
+  background: var(--hover); color: var(--ink2); font-size: 12px; white-space: nowrap; }
+.kn-proj .mgram { width: 15px; height: 15px; font-size: 8px; }
+.kn-state-old { color: var(--warn); }
+.kn-date { color: var(--ink3); font-size: 12px; text-align: right; white-space: nowrap; }
+.kn-notes { display: flex; flex-direction: column; gap: 6px; }
+.kn-note { margin: 0; color: var(--ink2); font-size: var(--t-s); }
+.kn-more { align-self: flex-start; }
+.kn-more[hidden] { display: none; }
+.kn-detail { display: flex; flex-direction: column; gap: 16px; }
+.kn-head { display: flex; flex-direction: column; gap: 6px; }
+.kn-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.kn-detail h2 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.kn-lead { margin: 0; color: var(--ink2); font-size: 14px; line-height: 20px; overflow-wrap: anywhere; white-space: pre-line; }
+.kn-kv { margin: 0; display: flex; flex-direction: column; }
+.kn-kv > div { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.kn-kv dt { margin: 0; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink3); }
+.kn-kv dd { margin: 0; overflow-wrap: anywhere; }
+.kn-kv .kn-linkish { padding: 0; border: 0; background: none; color: var(--acc); cursor: pointer; text-align: left; font: inherit; }
+.kn-kv .kn-linkish:hover { text-decoration: underline; }
+.kn-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.kn-danger { color: var(--bad); }
+.kn-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r); background: var(--bad-soft); }
+.kn-confirm p { margin: 0; }
+.kn-status { margin: 0; font-size: var(--t-s); }
+.kn-status[data-tone="ok"] { color: var(--ok); }
+.kn-status[data-tone="bad"] { color: var(--bad); }
+.kn-equiv { display: flex; flex-direction: column; gap: 6px; }
+.kn-eyebrow { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
+.kn-equiv .formula { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+@media (max-width: 720px) {
+  .kn-wrap { grid-template-columns: minmax(0, 1fr); }
+  .kn-filters { border-right: 0; border-bottom: 1px solid var(--line); }
+  .kn-main { padding: var(--sp-4); }
+  .kn-searchbar { flex-wrap: wrap; }
+  .kn-res { grid-template-columns: minmax(0, 1fr) auto; }
+  .kn-res > .badge { grid-column: 1 / -1; }
+}
+`;
 
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = `
-    .me-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .me-graph { display: flex; gap: var(--sp-4); align-items: center; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
-    .me-graph-node { flex: 1; text-align: center; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); }
-    .me-graph-node .val { font-family: var(--mono); font-size: var(--t-l); color: var(--ink); }
-    .me-graph-arrow { color: var(--ink3); font-size: var(--t-l); }
-    .me-arch p { max-width: 640px; color: var(--ink2); }
-    .me-search { display: flex; gap: var(--sp-2); max-width: 480px; }
-    .me-search input { flex: 1; }
-    .me-results { display: flex; flex-direction: column; gap: var(--sp-2); }
-    .me-result { border: 1px solid var(--line); border-radius: var(--r); padding: var(--sp-2) var(--sp-3); background: var(--e1); cursor: pointer; }
-    .me-result:hover, .me-result:focus-visible { background: var(--e2); outline: none; }
-    .me-result .me-result-head { justify-content: space-between; align-items: center; margin-bottom: 4px; }
-    .me-result .me-result-head > .row { flex: 0 1 auto; justify-content: flex-start; }
-    .me-result .me-result-text { color: var(--ink2); font-size: var(--t-s); }
-    .me-summary { color: var(--ink3); font-size: var(--t-min); }
-    .me-result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: 6px; color: var(--ink3); font-size: var(--t-min); }
-    .me-src { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); color: var(--ink2); background: none; border: 0; padding: 0; }
-    button.me-src { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-    button.me-src:hover, button.me-src:focus-visible { color: var(--ink); outline: none; }
-    .me-src .ico { width: 13px; height: 13px; flex: none; }
-    .me-opts { gap: var(--sp-4); flex-wrap: wrap; }
-    .me-opt { display: inline-flex; align-items: center; gap: 6px; }
-    .me-replaced { text-decoration: line-through; }
-    .me-fact { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--sp-3); font-size: var(--t-s); }
-    .me-fact dt { color: var(--ink3); }
-    .me-fact dd { margin: 0; color: var(--ink2); word-break: break-word; }
-    @media (max-width: 640px) {
-      .me-wrap { padding: var(--sp-3); }
-      .me-search { max-width: none; }
-    }
-  `;
+  style.textContent = STYLES;
   document.head.append(style);
 }
 
-const dot = (cls) => stateIcon(cls);
-function text(tag, className, value) {
+function el(tag, className, text, attrs) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  node.textContent = value;
+  if (text != null) node.textContent = text;
+  for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
   return node;
 }
-function row(...children) { const d = document.createElement('div'); d.className = 'row'; d.append(...children); return d; }
 
-const STATE_DOT = { ok: 'ok', ready: 'ok', unavailable: 'warn', partial: 'warn', planned: '', disabled: 'bad' };
-const STATE_WORD = {
-  ok: 'opérationnel', ready: 'prêt', unavailable: 'indisponible',
-  partial: 'partiel', planned: 'planifié', disabled: 'désactivé', uninitialized: 'non initialisée',
-};
-
-function renderStore(wrap, ctx, memory) {
-  wrap.append(kpiRow([
-    { value: memory.entries == null ? '—' : String(memory.entries), label: 'entrées', icon: 'inbox' },
-    { value: memory.configuredBackend || '—', label: 'backend configuré', icon: 'server' },
-    { value: memory.resolvedBackend || '—', label: 'backend résolu', icon: 'plug' },
-    { value: STATE_WORD[memory.state] || memory.state, label: 'état', icon: STATE_ICON[STATE_DOT[memory.state] || ''], tone: STATE_DOT[memory.state] || '' },
-  ]));
-  if (memory.retrieval) {
-    // Ce que la recherche fait réellement, pas ce que le profil annonce.
-    const r = memory.retrieval;
-    wrap.append(row(
-      dot(r.honored ? 'ok' : 'warn'),
-      text('span', null, `recherche : ${r.label}`),
-      text('span', 'lbl', `profil ${r.profile}`),
-    ));
-  }
-
-  const status = document.createElement('div');
-  status.append(row(dot(STATE_DOT[memory.state] || ''), text('span', null, `store ${STATE_WORD[memory.state] || memory.state}`)));
-  wrap.append(status);
-
-  if (memory.error) {
-    wrap.append(text('p', 'lbl', 'erreur best-effort : ' + memory.error));
-  }
-
-  if (memory.detail && Object.keys(memory.detail).length) {
-    const table = document.createElement('table');
-    table.className = 'tbl';
-    const tbody = document.createElement('tbody');
-    for (const [key, value] of Object.entries(memory.detail)) {
-      const tr = document.createElement('tr');
-      const rendered = value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value);
-      tr.append(text('td', 'lbl', key), text('td', 'mono', rendered));
-      tbody.append(tr);
+/** La commande équivalente, à copier d'un clic (jamais lancée d'ici). */
+function formula(command) {
+  const button = el('button', 'formula', null, { type: 'button', title: 'Copier la commande' });
+  button.append(el('b', null, '›'), command);
+  button.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      button.title = 'Commande copiée';
+    } catch {
+      button.title = 'Copie refusée : recopie la commande';
     }
-    table.append(tbody);
-    wrap.append(table);
-  }
-}
-
-function renderGraph(wrap, ctx, memory) {
-  const parity = memory.parity || {};
-  const h3 = text('h3', null, 'Graphe');
-  h3.dataset.term = 'graphe';
-  wrap.append(h3);
-
-  if (!Object.keys(parity).length) {
-    wrap.append(ctx.empty(
-      'Graphe',
-      "Aucun graphe de mémoire n'est câblé sur ce projet — la dérive store ↔ graphe "
-      + 'ne se mesure qu\'avec un backend graphe configuré (Neo4j).',
-      'grimoire memory status',
-    ));
-    return;
-  }
-  if (parity.error) {
-    wrap.append(text('p', 'lbl', 'sonde du graphe en échec : ' + parity.error));
-    return;
-  }
-
-  const graph = document.createElement('div');
-  graph.className = 'me-graph';
-  const node = (label, value) => {
-    const box = document.createElement('div');
-    box.className = 'me-graph-node';
-    box.append(text('div', 'val mono', value == null ? '—' : String(value)), text('div', 'lbl', label));
-    return box;
-  };
-  graph.append(node('store', parity.storeEntries));
-  graph.append(text('div', 'me-graph-arrow', '↔'));
-  graph.append(node('graphe', parity.graphMemories));
-  graph.append(text('div', 'me-graph-arrow', '↔'));
-  graph.append(node('vecteurs', parity.graphVectorObjects));
-  wrap.append(graph);
-  wrap.append(row(dot(parity.ok ? 'ok' : 'warn'), text('span', null, parity.ok ? 'store et graphe alignés' : `dérive : ${parity.drift}`)));
-}
-
-function renderLayers(wrap, ctx, memory) {
-  const layers = memory.layers || [];
-  if (!layers.length) {
-    wrap.append(ctx.empty('Couches', 'Aucune couche déclarée — la config mémoire du projet est absente ou illisible.', 'grimoire memory status', undefined, { art: 'i-empty-memory' }));
-    return;
-  }
-  const table = document.createElement('table');
-  table.className = 'tbl';
-  const thead = document.createElement('thead');
-  const headRow = document.createElement('tr');
-  for (const label of ['Couche', 'État', 'Backend', 'Objet', 'Écarts']) headRow.append(text('th', null, label));
-  thead.append(headRow);
-  table.append(thead);
-  const tbody = document.createElement('tbody');
-  for (const layer of layers) {
-    const tr = document.createElement('tr');
-    tr.append(text('td', null, layer.label || layer.id));
-    const stateCell = document.createElement('td');
-    stateCell.append(row(dot(STATE_DOT[layer.state] || ''), text('span', null, STATE_WORD[layer.state] || layer.state)));
-    tr.append(stateCell);
-    tr.append(text('td', 'lbl', layer.backend || '—'));
-    tr.append(text('td', null, layer.purpose || ''));
-    tr.append(text('td', 'lbl', (layer.gaps || []).join(', ') || '—'));
-    tbody.append(tr);
-  }
-  table.append(tbody);
-  wrap.append(table);
-}
-
-function renderArchitecture(wrap, ctx, memory) {
-  wrap.className += ' me-arch';
-  wrap.append(text('h3', null, `Profil : ${memory.layerProfile || 'non résolu'}`));
-  wrap.append(text('p', null,
-    "Le Memory OS du kit organise sept couches — court terme, épisodique, sémantique, "
-    + 'procédurale, code graph, tâches et projet — chacune servie par un backend '
-    + "qui peut être local ou distant. Cette page ne montre l'explication qu'ici : "
-    + 'le store et le graphe restent la vue par défaut.',
-  ));
-  for (const layer of memory.layers || []) {
-    const block = document.createElement('div');
-    block.style.marginTop = '10px';
-    block.append(text('div', null, layer.label || layer.id), text('div', 'lbl', layer.purpose || ''));
-    wrap.append(block);
-  }
-}
-
-// ── Recherche : agrégation mémoire multi-projets (#172) ─────────────────────
-//
-// Aucun contrôle de portée dans la page : c'est la portée de la coque (P31).
-
-// ── Fraîcheur : le vocabulaire du badge ─────────────────────────────────────
-//
-// Calculée côté serveur, à chaque lecture (`memory/knowledge.py`) : le cockpit
-// n'en décide rien, il l'affiche. Mot + icône + teinte, jamais la teinte seule.
-const FRESH = {
-  a_jour:          { label: 'à jour',          cls: '',     icon: 'check' },
-  perime:          { label: 'périmé',          cls: 'warn', icon: 'alert' },
-  source_disparue: { label: 'source disparue', cls: 'bad',  icon: 'cross' },
-  non_verifie:     { label: 'non vérifié',     cls: 'acc',  icon: 'info' },
-  hypothese:       { label: 'hypothèse',       cls: '',     icon: 'clock' },
-};
-
-function freshnessBadge(entry) {
-  const spec = FRESH[entry.freshness] || { label: entry.freshness || 'inconnu', cls: 'acc', icon: 'info' };
-  const badge = document.createElement('span');
-  badge.className = `chip pill ${spec.cls}`.trim();
-  badge.dataset.freshness = entry.freshness || '';
-  badge.append(icon(spec.icon), document.createTextNode(spec.label));
-  const why = entry.provenance && entry.provenance.fraicheur_raison;
-  if (why) badge.title = why;
-  return badge;
-}
-
-function entryDate(entry) {
-  const fact = entry.provenance || {};
-  const pick = fact.date_source || fact.date_confirmation || fact.date_indexation || '';
-  const kind = fact.date_source ? 'source' : (fact.date_confirmation ? 'confirmé' : 'indexé');
-  return pick ? `${kind} ${String(pick).slice(0, 10)}` : '';
-}
-
-const FILE_KINDS = new Set(['fichier', 'doc', 'code']);
-
-function sourceNode(ctx, entry, canLink) {
-  const fact = entry.provenance || {};
-  const source = fact.source || {};
-  const label = entry.source || 'inconnue';
-  const linkable = canLink && FILE_KINDS.has(source.kind) && source.uri;
-  if (!linkable) {
-    const span = text('span', 'me-src', label);
-    span.prepend(icon(source.kind === 'tâche' ? 'board' : 'tag'));
-    span.title = `source : ${source.kind || 'inconnue'}`;
-    return span;
-  }
-  const [file, line] = String(source.uri).split(/:(\d+)$/);
-  const btn = text('button', 'me-src', label);
-  btn.type = 'button';
-  btn.prepend(icon('link'));
-  btn.title = 'Ouvrir dans Source';
-  btn.addEventListener('click', (evt) => {
-    evt.stopPropagation();
-    ctx.goto('source', line ? { file, line: Number(line) } : { file });
   });
-  return btn;
+  return button;
 }
 
-function factInspector(ctx, entry) {
-  const fact = entry.provenance || {};
-  const source = fact.source || {};
-  const list = document.createElement('dl');
-  list.className = 'me-fact';
-  const add = (k, v) => { if (v) list.append(text('dt', null, k), text('dd', k === 'empreinte' ? 'mono' : null, v)); };
-  add('fraîcheur', (FRESH[entry.freshness] || {}).label || entry.freshness);
-  add('raison', fact.fraicheur_raison);
-  add('source', `${source.kind || 'inconnue'}${source.uri ? ' — ' + source.uri : ''}`);
-  add('empreinte', source.empreinte);
-  add('date de la source', fact.date_source);
-  add('date d’indexation', fact.date_indexation);
-  add('dernière confirmation', fact.date_confirmation);
-  add('changement constaté', fact.date_changement);
-  add('cycle', fact.cycle === 'remplacé' ? `remplacé par ${fact.remplace_par}` : fact.cycle);
-  add('producteur', fact.producteur);
-  add('schéma', fact.schema);
-  return list;
+// ── Vocabulaire : types, natures, états ─────────────────────────────────────
+
+/** Types (`workspace_knowledge.classify`) : libellé du filtre, du badge, teinte. */
+const TYPES = [
+  { id: 'decision', filter: 'Décision', label: 'Décision', tone: 'acc', always: true },
+  { id: 'incident', filter: 'Incident, piège', label: 'Piège', tone: 'warn', always: true },
+  { id: 'convention', filter: 'Convention', label: 'Convention', tone: '', always: true },
+  { id: 'learning', filter: 'Apprentissage', label: 'Apprentissage', tone: '' },
+  { id: 'story', filter: 'Récit', label: 'Récit', tone: '' },
+  { id: 'untyped', filter: 'Fait non typé', label: 'Fait', tone: '', always: true, off: true },
+  { id: 'code', filter: 'Code (projection)', label: 'Code', tone: '' },
+  { id: 'docs', filter: 'Documentation (projection)', label: 'Doc', tone: '' },
+  { id: 'task', filter: 'Tâche (projection)', label: 'Tâche', tone: '' },
+  { id: 'projection', filter: 'Autre projection', label: 'Projection', tone: '' },
+];
+const TYPE = Object.fromEntries(TYPES.map((t) => [t.id, t]));
+const KINDS = [
+  { id: 'souvenir', label: 'Souvenirs' },
+  { id: 'projection', label: 'Projections' },
+];
+const PERIODS = [
+  { id: 'all', label: 'Toutes les dates', days: 0 },
+  { id: '7', label: '7 derniers jours', days: 7 },
+  { id: '30', label: '30 derniers jours', days: 30 },
+  { id: '365', label: '12 derniers mois', days: 365 },
+];
+const STATE = {
+  live: { label: 'en vigueur', tone: 'ok' },
+  superseded: { label: 'remplacée', tone: 'warn' },
+  orphan: { label: 'remplaçant introuvable', tone: 'warn' },
+  retracted: { label: 'retirée', tone: 'bad' },
+};
+
+const DATE_SHORT = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' });
+const DATE_YEAR = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+const DATE_LONG = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+
+function parseDate(value) {
+  const when = value ? new Date(value) : null;
+  return when && !Number.isNaN(when.getTime()) ? when : null;
 }
 
-function fleetOverviewTable(ctx, data) {
-  const wrap = document.createElement('div');
-  if (!data || !data.projects.length) {
-    wrap.append(ctx.empty(
-      'Recherche',
-      "Aucun projet lisible pour cette portée — le registre de la machine "
-      + "(`grimoire cockpit list`) est peut-être vide, ou aucun projet "
-      + "sélectionné ne s'y trouve.",
-      'grimoire cockpit list',
-      undefined,
-      { art: 'i-empty-fleet' },
-    ));
-    return wrap;
-  }
-  const table = document.createElement('table');
-  table.className = 'tbl';
-  const thead = document.createElement('thead');
-  const headRow = document.createElement('tr');
-  for (const label of ['Projet', 'Backend configuré', 'Backend résolu', 'Entrées', 'Dernière écriture', 'Index lexical', 'État']) {
-    headRow.append(text('th', null, label));
-  }
-  thead.append(headRow);
-  table.append(thead);
-  const tbody = document.createElement('tbody');
-  for (const p of data.projects) {
-    const tr = document.createElement('tr');
-    tr.append(text('td', null, p.name || p.slug));
-    tr.append(text('td', 'lbl', p.configuredBackend || '—'));
-    tr.append(text('td', 'lbl', p.resolvedBackend || '—'));
-    tr.append(text('td', 'mono', p.entries == null ? '—' : String(p.entries)));
-    tr.append(text('td', 'lbl mono', p.lastWrite || '—'));
-    tr.append(text('td', 'lbl', p.lexicalIndex || '—'));
-    const stateCell = document.createElement('td');
-    if (p.reason) {
-      stateCell.append(row(dot('bad'), text('span', 'lbl', p.reason)));
-    } else {
-      stateCell.append(row(dot(STATE_DOT[p.state] || ''), text('span', null, STATE_WORD[p.state] || p.state)));
-    }
-    tr.append(stateCell);
-    tbody.append(tr);
-  }
-  table.append(tbody);
-  wrap.append(table);
-  wrap.append(text('p', 'me-summary',
-    `${data.summary.readable}/${data.summary.count} projet(s) lisible(s) — ${data.summary.totalEntries} entrée(s) au total.`));
-  return wrap;
+function shortDate(value) {
+  const when = parseDate(value);
+  if (!when) return '—';
+  return (when.getFullYear() === new Date().getFullYear() ? DATE_SHORT : DATE_YEAR).format(when);
 }
 
-function fleetSearchResults(ctx, data, canLink) {
-  const wrap = document.createElement('div');
-  wrap.className = 'me-results';
-  if (!data) {
-    wrap.append(text('p', 'lbl', 'Recherche indisponible.'));
-    return wrap;
-  }
-  if (!data.query) {
-    wrap.append(text('p', 'lbl', 'Saisissez un terme puis « Rechercher ».'));
-    return wrap;
-  }
-  if (!data.results.length) {
-    wrap.append(ctx.empty('Recherche', `Aucun résultat pour « ${data.query} ».`, '', undefined, { compact: true, art: 'i-empty-search' }));
-  }
-  for (const entry of data.results) {
-    const item = document.createElement('div');
-    item.className = 'me-result';
-    item.tabIndex = 0;
-    item.setAttribute('role', 'button');
-    const who = row(text('span', 'chip', entry.projectName || entry.projectSlug), freshnessBadge(entry));
-    const shown = formatScore(entry.score, entry.scoreKind);
-    const scoreNode = text('span', 'lbl mono', shown.text);
-    scoreNode.title = shown.title;
-    const head = row(who, scoreNode);
-    head.className += ' me-result-head';
-    const replaced = entry.provenance && entry.provenance.cycle === 'remplacé';
-    const body = text('div', 'me-result-text' + (replaced ? ' me-replaced' : ''), (entry.text || '').slice(0, 220));
-    const meta = document.createElement('div');
-    meta.className = 'me-result-meta';
-    meta.append(sourceNode(ctx, entry, canLink));
-    const when = entryDate(entry);
-    if (when) meta.append(text('span', null, when));
-    if (replaced) meta.append(text('span', null, 'remplacé'));
-    item.append(head, body, meta);
-    const openInspector = () => {
-      ctx.inspector.replaceChildren(
-        text('h3', null, entry.projectName || entry.projectSlug),
-        text('div', 'lbl mono', entry.id),
-        text('p', null, entry.text || ''),
-        factInspector(ctx, entry),
-        text('div', 'lbl', `${shown.text} — tags : ${(entry.tags || []).join(', ') || '—'}`),
-      );
-    };
-    item.addEventListener('click', openInspector);
-    item.addEventListener('keydown', (evt) => { if (evt.key === 'Enter' || evt.key === ' ') { evt.preventDefault(); openInspector(); } });
-    wrap.append(item);
-  }
-  const hidden = data.projects.reduce((n, p) => n + (p.hiddenStale || 0), 0);
-  if (hidden) {
-    wrap.append(text('p', 'lbl', `${hidden} résultat(s) écarté(s) : source disparue.`));
-  }
-  const failed = data.projects.filter((p) => p.reason);
-  if (failed.length) {
-    wrap.append(text('p', 'lbl', 'Projets non interrogés : ' + failed.map((p) => `${p.name} (${p.reason})`).join(', ')));
-  }
-  return wrap;
+function sinceDate(period) {
+  const days = (PERIODS.find((p) => p.id === period) || PERIODS[0]).days;
+  if (!days) return '';
+  return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 }
 
-function renderFleet(wrap, ctx, state) {
-  const h3 = text('h3', null, state.scope === 'all' ? 'Recherche — mémoire de tous les projets' : 'Recherche — mémoire du projet');
-  h3.dataset.term = 'cockpit';
-  wrap.append(h3);
-  wrap.append(text('p', 'lbl',
-    "Lecture seule, par projet du registre de la machine — jamais de fusion "
-    + "des stores : chaque ligne, chaque résultat porte son propre projet."));
+const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
 
-  const tableHost = document.createElement('div');
-  wrap.append(tableHost);
-
-  const searchWrap = document.createElement('div');
-  searchWrap.className = 'me-search';
-  const input = document.createElement('input');
-  input.className = 'input';
-  input.type = 'search';
-  input.placeholder = 'Rechercher dans la mémoire…';
-  const searchBtn = text('button', 'btn', 'Rechercher');
-  searchBtn.type = 'button';
-  searchWrap.append(input, searchBtn);
-  wrap.append(searchWrap);
-
-  // Ce qui n'est pas servi par défaut reste atteignable : une décision remplacée
-  // ou une source disparue ne s'efface pas, elle se demande.
-  const options = row();
-  options.classList.add('me-opts');
-  const toggle = (label) => {
-    const box = document.createElement('input');
-    box.type = 'checkbox';
-    const lbl = document.createElement('label');
-    lbl.className = 'lbl me-opt';
-    lbl.append(box, document.createTextNode(label));
-    options.append(lbl);
-    return box;
-  };
-  const superseded = toggle('Décisions remplacées');
-  const stale = toggle('Sources disparues');
-  wrap.append(options);
-
-  const resultsHost = document.createElement('div');
-  wrap.append(resultsHost);
-
-  const projectsParam = () => (state.scope === 'all' ? 'all' : undefined);
-
-  const loadOverview = async () => {
-    tableHost.replaceChildren(...ctx.loading('Chargement…', 3));
-    const data = await ctx.api.memoryOverview(projectsParam()).catch(() => null);
-    tableHost.replaceChildren(fleetOverviewTable(ctx, data));
-  };
-
-  const runSearch = async () => {
-    const q = input.value.trim();
-    if (!q) {
-      resultsHost.replaceChildren(fleetSearchResults(ctx, { query: '', results: [], projects: [] }));
-      return;
-    }
-    resultsHost.replaceChildren(text('p', 'lbl', 'Recherche…'));
-    const data = await ctx.api.memorySearch(q, projectsParam(), {
-      includeSuperseded: superseded.checked, includeStale: stale.checked,
-    }).catch(() => null);
-    resultsHost.replaceChildren(fleetSearchResults(ctx, data, state.scope === 'this'));
-  };
-
-  searchBtn.addEventListener('click', runSearch);
-  input.addEventListener('keydown', (evt) => { if (evt.key === 'Enter') runSearch(); });
-  superseded.addEventListener('change', runSearch);
-  stale.addEventListener('change', runSearch);
-
-  loadOverview();
-  resultsHost.replaceChildren(fleetSearchResults(ctx, { query: '', results: [], projects: [] }));
-
-  // `state.scope` suit la portée de la coque (P31) : changer de portée
-  // remonte l'espace, donc `loadOverview` ci-dessus la reflète déjà.
+function sourceLabel(entry) {
+  const source = (entry.provenance && entry.provenance.source) || {};
+  if (source.kind === 'saisie libre') return 'Saisie libre';
+  if (source.kind === 'tâche') return `Tâche ${String(source.uri || '').replace(/^task:/, '')}`;
+  if (source.uri) return source.uri;
+  return entry.source && entry.source !== 'inconnue' ? entry.source : 'Source inconnue';
 }
+
+function projectChip(entry) {
+  const name = entry.projectName || entry.projectSlug || 'projet';
+  const chip = el('span', 'kn-proj', null, { title: `Projet : ${name}` });
+  chip.dataset.project = entry.projectSlug || '';
+  chip.append(monogram(name), document.createTextNode(name));
+  return chip;
+}
+
+/** La chaîne de supersession dite en une ligne : en vigueur, remplacée par…, remplace… */
+function stateText(entry) {
+  const sup = entry.supersession || {};
+  const parts = [];
+  if (sup.state === 'superseded' && sup.replacedBy) {
+    parts.push(`remplacée par « ${sup.replacedBy.title || sup.replacedBy.id} »`);
+  } else {
+    parts.push((STATE[sup.state] || STATE.live).label);
+  }
+  const replaces = sup.replaces || [];
+  if (replaces.length) {
+    const first = replaces[0].title || replaces[0].id;
+    parts.push(replaces.length > 1 ? `remplace « ${first} » et ${replaces.length - 1} autre(s)` : `remplace « ${first} »`);
+  }
+  return parts.join(' · ');
+}
+
+// ── L'espace ────────────────────────────────────────────────────────────────
 
 export async function mount(root, ctx) {
   injectStyles();
   ctx.docbar.setBreadcrumb([]);
+  ctx.docbar.setViews([], null);
 
-  const memory = await ctx.api.memoryStatus().catch(() => null);
+  const allScope = Boolean(ctx.scope && ctx.scope.all);
+  const canDelete = ctx.host.kind === 'cockpit' && !ctx.host.readOnly;
+  const homeSlug = (ctx.host.status && ctx.host.status.home) || ctx.host.project || '';
+  const params = ctx.params || {};
 
-  if (!memory) {
-    ctx.docbar.setViews([], null);
-    ctx.docbar.setZoom([], null, () => {});
-    root.append(ctx.empty(
-      'Mémoire',
-      "L'API mémoire du projet est injoignable — vérifiez l'hôte local "
-      + '(`grimoire serve` / `grimoire cockpit serve`).',
-      'grimoire memory status',
-    ));
-    ctx.dock.echo('grimoire memory status');
-    ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucune entrée à inspecter.'));
-    return;
-  }
-
-  // Sans mémoire propre, ce projet ne montre ni Store, ni Graphe, ni Couches
-  // — mais la Flotte reste utile : c'est peut-être exactement le projet
-  // qu'on veut voir « en échec » depuis un AUTRE projet déjà initialisé.
-  // En portée « Tous les projets », la recherche multi-projets ouvre l'espace.
-  const hasOwnMemory = memory.state !== 'uninitialized';
-  const allProjects = Boolean(ctx.scope && ctx.scope.all);
-  let view = hasOwnMemory && !allProjects ? 'store' : 'flotte';
-  const fleetState = { scope: allProjects ? 'all' : 'this' };
-
-  const views = hasOwnMemory
-    ? [{ id: 'store', label: 'Store' }, { id: 'graphe', label: 'Graphe' },
-       { id: 'couches', label: 'Couches' }, { id: 'architecture', label: 'Architecture' },
-       { id: 'flotte', label: 'Recherche' }]
-    : [{ id: 'flotte', label: 'Recherche' }];
-  const setView = (id) => { view = id; draw(); };
-
-  const draw = () => {
-    root.replaceChildren();
-    // `setViews` doit être rappelé À CHAQUE `draw()` (comme `executer.js` et
-    // `concevoir.js`), sinon le shell ne remet jamais `aria-pressed` à jour
-    // sur les boutons existants : un clic sur « Couches » changeait bien le
-    // contenu mais laissait « Store » visuellement actif — régression
-    // constatée à la revue du 2026-09-14.
-    ctx.docbar.setViews(views, view, setView);
-    const wrap = document.createElement('div');
-    wrap.className = 'me-wrap';
-    if (view === 'store') renderStore(wrap, ctx, memory);
-    else if (view === 'graphe') renderGraph(wrap, ctx, memory);
-    else if (view === 'couches') renderLayers(wrap, ctx, memory);
-    else if (view === 'architecture') renderArchitecture(wrap, ctx, memory);
-    else if (view === 'flotte') renderFleet(wrap, ctx, fleetState);
-    root.append(wrap);
+  const state = {
+    q: String(params.q || ''),
+    projects: [],
+    selected: new Set(),
+    types: new Set(TYPES.filter((t) => !t.off).map((t) => t.id)),
+    kinds: new Set(KINDS.map((k) => k.id)),
+    period: 'all',
+    includeSuperseded: false,
+    items: [],
+    perProject: new Map(),
+    counts: { type: {}, kind: {} },
+    filteredOut: 0,
+    selectedKey: params.entry ? `${params.of || ''}::${params.entry}` : '',
+    status: null,
+    loading: false,
+    token: 0,
   };
 
-  draw();
-  if (hasOwnMemory) {
-    // Aucune route ne sert le détail d'une entrée individuelle du store — seul
-    // son statut agrégé (`/api/memory/status`) existe côté vue de travail. Le
-    // dire honnêtement plutôt que fabriquer une liste d'entrées inspectables.
-    // L'onglet Recherche, lui, ouvre un vrai résultat de recherche dans ce même
-    // panneau (voir `fleetSearchResults`).
-    ctx.inspector.replaceChildren(text('p', 'lbl',
-      "L'inspecteur d'entrée individuelle n'a pas de route dédiée côté store — "
-      + "cliquez un résultat de l'onglet Recherche pour inspecter une entrée réelle."));
+  // Les projets de la portée : le projet en portée, ou ceux du registre.
+  if (allScope) {
+    const payload = await ctx.api.projects().catch(() => null);
+    state.projects = ((payload && payload.projects) || [])
+      .filter((p) => p.exists !== false)
+      .map((p) => ({ slug: p.slug, name: p.name || p.slug }));
   } else {
-    ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucune entrée à inspecter — cliquez un résultat de recherche dans l’onglet Recherche.'));
+    state.projects = [{ slug: '', name: ctx.scope.name || 'ce projet' }];
   }
-  ctx.dock.echo('grimoire memory status');
+  for (const p of state.projects) state.selected.add(p.slug);
+  if (ctx.signal.aborted) return;
+
+  const wrap = el('div', 'kn-wrap');
+  const filters = el('nav', 'kn-filters', null, { 'aria-label': 'Filtres' });
+  const main = el('main', 'kn-main');
+  wrap.append(filters, main);
+  root.replaceChildren(wrap);
+
+  // Barre de recherche : le champ et la commande équivalente.
+  const searchbar = el('div', 'kn-searchbar');
+  const label = el('label');
+  const input = el('input', 'input', null, { type: 'search', placeholder: 'Rechercher dans la mémoire…', autocomplete: 'off' });
+  input.value = state.q;
+  label.append(el('span', 'sr-only', 'Rechercher dans la mémoire'), input);
+  const formulaHost = el('span');
+  searchbar.append(label, formulaHost);
+  const summary = el('p', 'kn-summary', null, { role: 'status' });
+  const results = el('section', 'kn-card', null, { 'aria-label': 'Résultats' });
+  const notes = el('div', 'kn-notes');
+  const more = el('button', 'btn kn-more', 'Plus d’entrées', { type: 'button' });
+  more.hidden = true;
+  main.append(searchbar, summary, results, notes, more);
+
+  const command = () => (state.q ? `grimoire memory search "${state.q}"` : 'grimoire memory list');
+  const drawFormula = () => {
+    formulaHost.replaceChildren(formula(command()));
+    ctx.dock.echo(command());
+  };
+
+  const keyOf = (entry) => `${entry.projectSlug || ''}::${entry.id}`;
+  const visibleProjects = () => state.projects.filter((p) => state.selected.has(p.slug));
+
+  // ── Filtres ───────────────────────────────────────────────────────────────
+
+  const checkbox = (labelText, checked, count, onChange, { disabled = false, why = '' } = {}) => {
+    const row = el('label', 'kn-chk');
+    const box = el('input', null, null, { type: 'checkbox' });
+    box.checked = checked;
+    box.disabled = disabled;
+    box.addEventListener('change', () => onChange(box.checked));
+    row.append(box, el('span', 'kn-lbl', labelText));
+    if (count != null) row.append(el('span', 'kn-n', String(count)));
+    const nodes = [row];
+    if (why) nodes.push(el('p', 'kn-why', why));
+    return nodes;
+  };
+
+  const drawFilters = () => {
+    filters.replaceChildren();
+
+    const typeSet = el('fieldset');
+    typeSet.append(el('legend', null, 'Type'));
+    for (const type of TYPES) {
+      const n = state.counts.type[type.id] || 0;
+      // Un type rare n'apparaît que s'il compte, ou si on l'a décoché (pour le recocher).
+      if (!type.always && !n && state.types.has(type.id)) continue;
+      typeSet.append(...checkbox(type.filter, state.types.has(type.id), n, (on) => {
+        if (on) state.types.add(type.id); else state.types.delete(type.id);
+        refresh();
+      }));
+    }
+
+    const kindSet = el('fieldset');
+    kindSet.append(el('legend', null, 'Source'));
+    for (const kind of KINDS) {
+      kindSet.append(...checkbox(kind.label, state.kinds.has(kind.id), state.counts.kind[kind.id] || 0, (on) => {
+        if (on) state.kinds.add(kind.id); else state.kinds.delete(kind.id);
+        refresh();
+      }));
+    }
+
+    const projectSet = el('fieldset');
+    projectSet.append(el('legend', null, 'Projet'));
+    for (const project of state.projects) {
+      const info = state.perProject.get(project.slug) || {};
+      const shown = allScope ? state.items.filter((e) => (e.projectSlug || '') === project.slug).length : state.items.length;
+      projectSet.append(...checkbox(project.name, state.selected.has(project.slug), info.reason ? null : shown, (on) => {
+        if (on) state.selected.add(project.slug); else state.selected.delete(project.slug);
+        refresh();
+      }, { disabled: !allScope, why: info.reason ? `non interrogé : ${info.reason}` : '' }));
+    }
+    if (!allScope) {
+      const widen = el('button', 'btn kn-scope-link', 'Tous les projets', { type: 'button' });
+      widen.addEventListener('click', () => ctx.scope.set(null));
+      projectSet.append(widen);
+    }
+
+    const periodSet = el('fieldset');
+    periodSet.append(el('legend', null, 'Date'));
+    const select = el('select', null, null, { 'aria-label': 'Période' });
+    for (const period of PERIODS) {
+      const option = el('option', null, period.label, { value: period.id });
+      option.selected = period.id === state.period;
+      select.append(option);
+    }
+    select.addEventListener('change', () => { state.period = select.value; refresh(); });
+    periodSet.append(select);
+
+    const superseded = checkbox('Inclure les décisions remplacées', state.includeSuperseded, null, (on) => {
+      state.includeSuperseded = on;
+      refresh();
+    });
+
+    filters.append(typeSet, kindSet, projectSet, periodSet, ...superseded);
+  };
+
+  // ── Lecture : une page par projet, ou la recherche de flotte ─────────────
+
+  const matches = (entry) => {
+    if (!state.kinds.has(entry.kind)) return false;
+    if (!state.types.has(entry.type)) return false;
+    const since = sinceDate(state.period);
+    return !(since && String(entry.date || '').slice(0, 10) < since);
+  };
+
+  const typesParam = () => (TYPES.every((t) => state.types.has(t.id)) ? '' : [...state.types].join(','));
+  const kindParam = () => (state.kinds.size === KINDS.length ? '' : [...state.kinds][0] || '');
+
+  const loadList = async (append) => {
+    const targets = visibleProjects().filter((p) => !append || (state.perProject.get(p.slug) || {}).nextOffset != null);
+    const settled = await Promise.allSettled(targets.map((p) => ctx.api.memoryEntries(p.slug || undefined, {
+      kind: kindParam(), types: typesParam(), since: sinceDate(state.period),
+      includeSuperseded: state.includeSuperseded,
+      offset: append ? state.perProject.get(p.slug).nextOffset : 0,
+    })));
+    const counts = append ? state.counts : { type: {}, kind: {} };
+    const lists = [];
+    settled.forEach((result, i) => {
+      const project = targets[i];
+      const previous = append ? state.perProject.get(project.slug) || {} : {};
+      if (result.status !== 'fulfilled') {
+        state.perProject.set(project.slug, { reason: String(result.reason && result.reason.message || 'API injoignable') });
+        return;
+      }
+      const page = result.value;
+      const name = (page.project && page.project.name) || project.name;
+      if (page.project && page.project.name && !allScope) project.name = page.project.name;
+      for (const [k, n] of Object.entries(page.counts.type || {})) counts.type[k] = (counts.type[k] || 0) + n;
+      for (const [k, n] of Object.entries(page.counts.kind || {})) counts.kind[k] = (counts.kind[k] || 0) + n;
+      const hidden = page.hidden || {};
+      state.perProject.set(project.slug, {
+        reason: page.reason,
+        name,
+        owner: page.project && page.project.owner,
+        nextOffset: page.nextOffset,
+        others: mergeOthers(previous.others, hidden.otherProjects),
+        unattributed: (previous.unattributed || 0) + (hidden.unattributed || 0),
+        superseded: (previous.superseded || 0) + (hidden.superseded || 0),
+        filtered: (previous.filtered || 0) + (hidden.filtered || 0),
+      });
+      lists.push(page.entries || []);
+    });
+    // Un projet après l'autre, rang par rang : aucun store ne masque les autres.
+    const merged = [];
+    for (let i = 0; lists.some((list) => i < list.length); i += 1) {
+      for (const list of lists) if (i < list.length) merged.push(list[i]);
+    }
+    state.counts = counts;
+    state.items = append ? state.items.concat(merged) : merged;
+    state.filteredOut = [...state.perProject.values()].reduce((n, p) => n + (p.filtered || 0), 0);
+  };
+
+  const loadSearch = async () => {
+    const all = visibleProjects();
+    const projectsParam = allScope ? all.map((p) => p.slug).join(',') : undefined;
+    const data = await ctx.api.memorySearch(state.q, projectsParam, { includeSuperseded: state.includeSuperseded });
+    const counts = { type: {}, kind: {} };
+    for (const entry of data.results || []) {
+      counts.type[entry.type] = (counts.type[entry.type] || 0) + 1;
+      counts.kind[entry.kind] = (counts.kind[entry.kind] || 0) + 1;
+    }
+    for (const project of data.projects || []) {
+      const slug = allScope ? project.slug : '';
+      state.perProject.set(slug, {
+        reason: project.reason,
+        name: project.name,
+        owner: project.owner,
+        others: project.hiddenOther || [],
+        unattributed: project.hiddenUnattributed || 0,
+        stale: project.hiddenStale || 0,
+      });
+    }
+    const kept = (data.results || []).filter(matches);
+    state.counts = counts;
+    state.filteredOut = (data.results || []).length - kept.length;
+    state.items = kept;
+  };
+
+  const refresh = async ({ append = false } = {}) => {
+    const token = ++state.token;
+    drawFormula();
+    if (!append) {
+      state.perProject = new Map();
+      summary.textContent = 'Lecture de la mémoire…';
+      results.replaceChildren(...ctx.loading('Lecture de la mémoire…', 4));
+    }
+    more.disabled = true;
+    try {
+      if (!visibleProjects().length || !state.kinds.size) {
+        state.items = [];
+        state.counts = state.counts || { type: {}, kind: {} };
+      } else if (state.q) {
+        await loadSearch();
+      } else {
+        await loadList(append);
+      }
+    } catch (error) {
+      if (token !== state.token || ctx.signal.aborted) return;
+      state.items = [];
+      results.replaceChildren(ctx.empty(
+        'Mémoire',
+        `Lecture impossible : ${error && error.message ? error.message : 'API locale injoignable'}.`,
+        command(), undefined, { compact: true, art: 'i-empty-memory' },
+      ));
+      summary.textContent = '';
+      notes.replaceChildren();
+      drawFilters();
+      return;
+    }
+    if (token !== state.token || ctx.signal.aborted) return;
+    drawFilters();
+    drawResults();
+    const keep = state.items.find((e) => keyOf(e) === state.selectedKey) || state.items[0];
+    if (keep) select(keep, { focus: false });
+    else { state.selectedKey = ''; ctx.inspector.replaceChildren(); }
+  };
+
+  // ── Résultats ─────────────────────────────────────────────────────────────
+
+  const scopeLabel = () => {
+    const shown = visibleProjects();
+    if (!allScope) return shown[0] ? shown[0].name : 'ce projet';
+    return shown.length === 1 ? shown[0].name : plural(shown.length, 'projet', 'projets');
+  };
+
+  const row = (entry) => {
+    const type = TYPE[entry.type] || { label: entry.type || 'Fait', tone: '' };
+    const article = el('article', 'kn-res', null, { tabindex: '0', role: 'button' });
+    article.dataset.key = keyOf(entry);
+    article.dataset.type = entry.type || '';
+    article.dataset.kind = entry.kind || '';
+    article.dataset.project = entry.projectSlug || '';
+    article.setAttribute('aria-current', String(keyOf(entry) === state.selectedKey));
+    const body = el('span', 'kn-body');
+    body.append(el('span', 'kn-title', entry.title || entry.text || '(entrée vide)'));
+    if (entry.excerpt) body.append(el('span', 'kn-excerpt', entry.excerpt));
+    const src = el('span', 'kn-src');
+    const sup = entry.supersession || {};
+    const stateNode = el('span', sup.state === 'live' ? 'kn-state' : 'kn-state kn-state-old', stateText(entry));
+    stateNode.dataset.state = sup.state || 'live';
+    src.append(
+      el('span', 'kn-path', sourceLabel(entry)), el('span', 'kn-sep', '·'),
+      projectChip(entry), el('span', 'kn-sep', '·'), stateNode,
+    );
+    body.append(src);
+    const date = el('span', 'kn-date', shortDate(entry.date));
+    if (entry.date) date.title = String(entry.date);
+    article.append(badge(type.label, type.tone), body, date);
+    article.addEventListener('click', () => select(entry, { focus: false }));
+    article.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(entry, { focus: false }); }
+    });
+    return article;
+  };
+
+  const drawResults = () => {
+    const n = state.items.length;
+    const sort = state.q
+      ? (allScope && visibleProjects().length > 1 ? 'triés par rang fusionné entre projets' : 'triés par pertinence')
+      : 'dans l’ordre du store';
+    const noun = state.q ? plural(n, 'résultat', 'résultats') : plural(n, 'entrée', 'entrées');
+    const masked = state.filteredOut ? ` · ${plural(state.filteredOut, 'masquée par les filtres', 'masquées par les filtres')}` : '';
+    summary.textContent = `${noun} sur ${scopeLabel()} · ${sort}${masked}`;
+
+    if (!visibleProjects().length) {
+      results.replaceChildren(ctx.empty('Mémoire', 'Coche au moins un projet pour lire sa mémoire.', '', undefined, { compact: true, art: 'i-empty-memory' }));
+    } else if (!state.kinds.size) {
+      results.replaceChildren(ctx.empty('Mémoire', 'Coche au moins une source : souvenirs ou projections.', '', undefined, { compact: true, art: 'i-empty-memory' }));
+    } else if (!n) {
+      results.replaceChildren(state.q
+        ? ctx.empty('Recherche', `Aucun résultat pour « ${state.q} ».`, command(), undefined, { compact: true, art: 'i-empty-search' })
+        : ctx.empty('Mémoire', state.filteredOut ? 'Aucune entrée ne passe ces filtres.' : 'Aucune entrée dans ce store.', command(), undefined, { compact: true, art: 'i-empty-memory' }));
+    } else {
+      results.replaceChildren(...state.items.map(row));
+    }
+
+    notes.replaceChildren();
+    const info = [...state.perProject.entries()];
+    // En portée « Tous les projets », un projet affiché n'est pas « caché » :
+    // seules comptent les entrées de projets que la vue ne montre pas.
+    const shownNames = new Set(visibleProjects().flatMap((p) => {
+      const info = state.perProject.get(p.slug) || {};
+      return [p.name, info.name, info.owner];
+    }));
+    const others = info.flatMap(([, p]) => p.others || []).filter((o) => !allScope || !shownNames.has(o.name));
+    const othersTotal = others.reduce((sum, o) => sum + o.count, 0);
+    if (othersTotal) {
+      const detail = mergeOthers([], others).map((o) => `${o.name} ${o.count}`).join(', ');
+      notes.append(noteNode('others', `${plural(othersTotal, 'entrée', 'entrées')} d’autres projets dans un emplacement partagé (${detail}) : comptées, jamais montrées.`));
+    }
+    const unattributed = info.reduce((sum, [, p]) => sum + (p.unattributed || 0), 0);
+    if (unattributed) {
+      notes.append(noteNode('unattributed', `${plural(unattributed, 'entrée sans projet', 'entrées sans projet')} dans un emplacement partagé : comptées, jamais montrées.`));
+    }
+    const superseded = info.reduce((sum, [, p]) => sum + (p.superseded || 0), 0);
+    if (superseded && !state.includeSuperseded) {
+      notes.append(noteNode('superseded', `${plural(superseded, 'décision remplacée masquée', 'décisions remplacées masquées')} : coche « Inclure les décisions remplacées » pour les lire.`));
+    }
+    const stale = info.reduce((sum, [, p]) => sum + (p.stale || 0), 0);
+    if (stale) notes.append(noteNode('stale', `${plural(stale, 'résultat écarté', 'résultats écartés')} : source disparue.`));
+    const failed = info.filter(([, p]) => p.reason);
+    if (failed.length) {
+      notes.append(noteNode('failed', 'Non interrogés : ' + failed.map(([slug, p]) => `${p.name || slug || 'ce projet'} (${p.reason})`).join(', ')));
+    }
+    more.hidden = Boolean(state.q) || !info.some(([, p]) => p.nextOffset != null);
+    more.disabled = false;
+  };
+
+  // ── Détail : l'entrée choisie dans le panneau de droite ───────────────────
+
+  const select = (entry, { focus }) => {
+    state.selectedKey = keyOf(entry);
+    state.status = state.status && state.status.key === state.selectedKey ? state.status : null;
+    for (const node of results.querySelectorAll('.kn-res')) {
+      node.setAttribute('aria-current', String(node.dataset.key === state.selectedKey));
+    }
+    ctx.setItem({ q: state.q, entry: entry.id, of: entry.projectSlug || '' });
+    drawDetail(entry, null);
+    const wanted = state.selectedKey;
+    ctx.api.memoryEntry(entry.id, entry.projectSlug || undefined).then((detail) => {
+      if (ctx.signal.aborted || state.selectedKey !== wanted || !detail || !detail.found) return;
+      drawDetail({ ...detail.entry, projectSlug: entry.projectSlug }, detail.entry);
+    }).catch(() => {});
+    if (focus) results.querySelector(`[data-key="${CSS.escape(wanted)}"]`)?.focus();
+  };
+
+  const drawDetail = (entry, full) => {
+    const type = TYPE[entry.type] || { label: entry.type || 'Fait', tone: '' };
+    const sup = entry.supersession || {};
+    const st = STATE[sup.state] || STATE.live;
+    const box = el('div', 'kn-detail');
+    box.dataset.entry = entry.id;
+
+    const head = el('div', 'kn-head');
+    const badges = el('span', 'kn-badges');
+    badges.append(badge(type.label, type.tone), badge(st.label, st.tone));
+    const title = entry.title || entry.text || '(entrée vide)';
+    const text = String(entry.text || '').trim();
+    // Le titre est la première phrase : le corps reprend la suite, pas tout le texte.
+    const rest = !title.endsWith('…') && text.startsWith(title) ? text.slice(title.length).trim() : text;
+    head.append(badges, el('h2', null, title));
+    if (rest) head.append(el('p', 'kn-lead', rest));
+    box.append(head);
+
+    const kv = el('dl', 'kn-kv');
+    const add = (key, value) => {
+      if (value == null || value === '') return;
+      const line = el('div');
+      const dd = el('dd');
+      if (value instanceof Node) dd.append(value); else dd.textContent = String(value);
+      line.append(el('dt', null, key), dd);
+      kv.append(line);
+    };
+    const when = parseDate(entry.date);
+    add(entry.type === 'decision' ? 'Décidé le' : 'Écrit le', when ? DATE_LONG.format(when) : '');
+    const who = entry.actor || entry.agent || (entry.userId && entry.userId !== 'global' ? entry.userId : '');
+    add('Par', who ? (entry.sessionId ? `${who}, session ${entry.sessionId}` : who) : (entry.sessionId ? `session ${entry.sessionId}` : 'inconnu'));
+    const replaces = sup.replaces || [];
+    add('Remplace', replaces.map((r) => r.title || r.id).join(' ; '));
+    if (sup.replacedBy) {
+      const chain = full && full.chain && full.chain.length ? full.chain : [sup.replacedBy];
+      add('Remplacée par', chain.map((r) => (r.found === false ? `${r.id} (introuvable)` : r.title || r.id)).join(' → '));
+    }
+    if (entry.taskRef) {
+      const link = el('button', 'kn-linkish', entry.taskRef, { type: 'button' });
+      link.addEventListener('click', () => ctx.goto('travail', { task: entry.taskRef, of: allScope ? entry.projectSlug || '' : '' }));
+      add('Tâche liée', link);
+    }
+    add('Source', sourceLabel(entry));
+    const fresh = entry.provenance && (entry.provenance.fraicheur_libelle || entry.freshness);
+    add('Fraîcheur', fresh ? `${fresh}${entry.provenance.fraicheur_raison ? ` — ${entry.provenance.fraicheur_raison}` : ''}` : '');
+    add('Projet', projectChip(entry));
+    add('Nature', entry.kind === 'projection' ? 'projection régénérable' : 'souvenir');
+    if (state.q && entry.fleetScore != null) {
+      const shown = formatScore(entry.score, entry.scoreKind);
+      add('Classement', `rang ${entry.projectRank} dans son projet · ${shown.text}`);
+    }
+    if (full && full.journal && full.journal.length) {
+      add('Journal', full.journal.map((r) => `${String(r.ts || '').slice(0, 10)} ${r.op}${r.actor ? ` par ${r.actor}` : ''}`).join(' ; '));
+    }
+    if (entry.tags && entry.tags.length) add('Tags', entry.tags.join(', '));
+    box.append(kv);
+
+    const ownProject = canDelete && (allScope ? entry.projectSlug === homeSlug : true);
+    const actions = el('div', 'kn-actions');
+    if (ownProject) {
+      const remove = el('button', 'btn kn-danger', 'Supprimer…', { type: 'button' });
+      remove.prepend(icon('trash'));
+      remove.addEventListener('click', () => confirmDelete(entry, box, actions));
+      actions.append(remove);
+      box.append(actions);
+    }
+    if (state.status && state.status.key === keyOf(entry)) box.append(statusNode(state.status));
+
+    const equiv = el('div', 'kn-equiv');
+    equiv.append(el('p', 'kn-eyebrow', 'Équivalent'), formula(`grimoire memory show ${entry.id}`));
+    box.append(equiv);
+
+    ctx.inspector.replaceChildren(box);
+  };
+
+  const confirmDelete = (entry, box, actions) => {
+    const panel = el('div', 'kn-confirm', null, { role: 'group', 'aria-label': 'Confirmer la suppression' });
+    panel.append(el('p', null, `Supprimer définitivement cette entrée de ${entry.projectName || 'ce projet'} ? Le journal des écritures garde la trace de la suppression, pas son texte.`));
+    const buttons = el('div', 'kn-actions');
+    const yes = el('button', 'btn kn-danger', 'Supprimer définitivement', { type: 'button' });
+    const no = el('button', 'btn', 'Annuler', { type: 'button' });
+    buttons.append(yes, no);
+    panel.append(buttons);
+    actions.replaceWith(panel);
+    no.focus();
+    no.addEventListener('click', () => panel.replaceWith(actions));
+    yes.addEventListener('click', async () => {
+      yes.disabled = true;
+      no.disabled = true;
+      yes.textContent = 'Suppression…';
+      let outcome;
+      try {
+        const res = await ctx.api.memoryDelete(entry.id, entry.projectSlug || homeSlug || undefined);
+        outcome = res && res.ok
+          ? { tone: 'ok', text: 'Entrée supprimée.' }
+          : { tone: 'bad', text: `Suppression refusée : ${failureOf(res)}` };
+      } catch (error) {
+        outcome = { tone: 'bad', text: `Suppression refusée : ${error && error.message ? error.message : 'API injoignable'}` };
+      }
+      if (ctx.signal.aborted) return;
+      if (outcome.tone === 'ok') {
+        const index = state.items.findIndex((e) => keyOf(e) === keyOf(entry));
+        state.items = state.items.filter((e) => keyOf(e) !== keyOf(entry));
+        drawResults();
+        const next = state.items[Math.min(Math.max(index, 0), state.items.length - 1)];
+        if (next) {
+          state.status = { key: keyOf(next), ...outcome };
+          select(next, { focus: true });
+        } else {
+          state.selectedKey = '';
+          const done = el('div', 'kn-detail');
+          done.append(statusNode(outcome));
+          ctx.inspector.replaceChildren(done);
+        }
+        return;
+      }
+      state.status = { key: keyOf(entry), ...outcome };
+      panel.replaceWith(actions);
+      box.querySelector('.kn-status')?.remove();
+      actions.after(statusNode(outcome));
+    });
+  };
+
+  // ── Gestes ────────────────────────────────────────────────────────────────
+
+  const run = () => {
+    const q = input.value.trim();
+    if (q === state.q) return;
+    state.q = q;
+    state.selectedKey = '';
+    refresh();
+  };
+  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); run(); } });
+  input.addEventListener('search', run);
+  more.addEventListener('click', () => refresh({ append: true }));
+
+  drawFilters();
+  await refresh();
+}
+
+function mergeOthers(previous, next) {
+  const total = new Map();
+  for (const o of [...(previous || []), ...(next || [])]) total.set(o.name, (total.get(o.name) || 0) + o.count);
+  return [...total.entries()].map(([name, count]) => ({ name, count }));
+}
+
+function noteNode(kind, text) {
+  const node = el('p', 'kn-note', text);
+  node.dataset.note = kind;
+  return node;
+}
+
+function statusNode({ tone, text }) {
+  const node = el('p', 'kn-status', text, { role: 'status' });
+  node.dataset.tone = tone;
+  return node;
+}
+
+function failureOf(res) {
+  if (!res) return 'réponse vide';
+  const raw = String(res.stderr || res.error || res.stdout || '').trim();
+  const line = raw.split('\n').filter(Boolean).pop() || `code ${res.code}`;
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }

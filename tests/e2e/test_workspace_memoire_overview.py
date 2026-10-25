@@ -149,13 +149,17 @@ def memory_fleet_workspace(browser: Browser, served_memory_fleet: tuple[str, str
         context.close()
 
 
-def test_memoire_view_seg_bascule_correctement(memory_fleet_workspace: Page) -> None:
-    """Sur un projet à mémoire initialisée, le groupe de segments a plusieurs
-    boutons ; cliqué, un seul est `aria-pressed=true`, celui cliqué."""
+def _settled(page: Page) -> None:
+    page.wait_for_function(
+        "() => { const t = document.querySelector('.kn-summary')?.textContent || '';"
+        " return t && !t.startsWith('Lecture'); }",
+        timeout=30_000,
+    )
+
+
+def test_memoire_s_ouvre_sur_la_recherche_sans_onglets_de_vue(memory_fleet_workspace: Page) -> None:
+    """P24 : plus de Store / Graphe / Couches / Architecture — l'écran d'entrée est la recherche."""
     page = memory_fleet_workspace
-    # Jamais sondé, le projet est « uninitialized » et n'offre que la Flotte :
-    # le segment à plusieurs boutons n'existe qu'après une sonde (le geste du
-    # bouton « Sonder la mémoire »).
     probed = page.evaluate(
         "() => fetch('/api/memory/status' + location.search + '&probe=1').then(r => r.status)"
     )
@@ -163,73 +167,49 @@ def test_memoire_view_seg_bascule_correctement(memory_fleet_workspace: Page) -> 
     page.reload(wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     _goto(page, "memoire")
-    page.wait_for_selector("#view-seg button")
-    buttons = page.locator("#view-seg button")
-    count = buttons.count()
-    assert count >= 2, f"#view-seg button : au moins deux boutons attendus, {count} trouvé(s)"
-    for order in (range(count), reversed(range(count))):
-        for index in order:
-            buttons.nth(index).click()
-            page.wait_for_function(
-                "(i) => document.querySelectorAll('#view-seg button')[i]"
-                "?.getAttribute('aria-pressed') === 'true'",
-                arg=index,
-            )
-            pressed = [buttons.nth(i).get_attribute("aria-pressed") for i in range(count)]
-            assert pressed.count("true") == 1 and pressed[index] == "true", (
-                f"seul le bouton {index} doit être actif (observé : {pressed})"
-            )
+    page.wait_for_selector(".kn-searchbar input[type='search']")
+    _settled(page)
+    assert page.locator("#view-seg button:visible").count() == 0
+    assert "entrée" in page.locator(".kn-summary").inner_text()
 
 
-def test_switching_to_all_projects_shows_two_rows(memory_fleet_workspace: Page) -> None:
+def test_switching_to_all_projects_offers_a_multiple_project_filter(memory_fleet_workspace: Page) -> None:
     page = memory_fleet_workspace
-    # La portée de la coque (P31) remplace le zoom « Ce projet / Tous les
-    # projets » de Mémoire : en « Tous les projets », la Recherche s'ouvre.
     open_scope_all(page, "#savoir/memoire")
     _goto(page, "memoire")
-
-    table = page.locator(".me-wrap table")
-    table.wait_for(timeout=15_000)
-    rows = table.locator("tbody tr")
-    # Deux lignes minimum : projet A (mémoire écrite) et projet B (vide) —
-    # au moins ces deux-là, quel que soit ce que le registre de la machine
-    # porte par ailleurs sur cette fixture jetable.
-    page.wait_for_function(
-        "() => document.querySelectorAll('.me-wrap table tbody tr').length >= 2",
-        timeout=15_000,
-    )
-    assert rows.count() >= 2
+    page.wait_for_selector(".kn-filters")
+    _settled(page)
+    projects = page.locator(".kn-filters fieldset").nth(2).locator("input[type='checkbox']")
+    assert projects.count() >= 2, "projet A et projet B, au moins"
+    assert all(projects.nth(i).is_checked() and projects.nth(i).is_enabled() for i in range(projects.count()))
 
 
-def test_cross_project_search_labels_the_matching_project_only(memory_fleet_workspace: Page) -> None:
+def test_cross_project_search_labels_the_matching_project_only(
+    memory_fleet_workspace: Page, served_memory_fleet: tuple[str, str, str],
+) -> None:
     page = memory_fleet_workspace
-    # La portée de la coque (P31) remplace le zoom « Ce projet / Tous les
-    # projets » de Mémoire : en « Tous les projets », la Recherche s'ouvre.
+    _served, slug_a, _slug_b = served_memory_fleet
     open_scope_all(page, "#savoir/memoire")
     _goto(page, "memoire")
-    page.wait_for_selector(".me-wrap table")
+    _settled(page)
 
-    search_input = page.locator(".me-search input")
-    search_input.wait_for(timeout=10_000)
+    search_input = page.locator(".kn-searchbar input[type='search']")
     search_input.fill(_DISTINCTIVE_TERM)
-    page.get_by_role("button", name="Rechercher", exact=True).click()
+    search_input.press("Enter")
+    page.wait_for_function("() => document.querySelector('.kn-summary')?.textContent.includes('résultat')")
 
-    result = page.locator(".me-result").first
-    result.wait_for(timeout=15_000)
-    results_text = page.locator(".me-results").inner_text()
-    assert "projet-memoire-a" in results_text or "Alpha" in results_text or _DISTINCTIVE_TERM in results_text
+    # Un seul résultat : le terme n'existe QUE dans le projet A, et sa puce le dit.
+    results = page.locator(".kn-res")
+    assert results.count() == 1
+    result = results.first
+    assert result.get_attribute("data-project") == slug_a
+    assert result.locator(".kn-proj").count() == 1
+    assert "Saisie libre" in result.inner_text()
+    assert result.locator(".badge").inner_text().strip() == "Décision"
+    assert "score 0.000" not in page.locator("#canvas").inner_text()
 
-    # Un seul résultat : le terme n'existe QUE dans le projet A.
-    assert page.locator(".me-result").count() == 1
-
-    # EKP-E1 : la fraîcheur et la source se lisent sur le résultat, et le score
-    # est nommé ou dit inconnu — jamais un « 0.000 » fabriqué.
-    assert page.locator(".me-result .chip.pill[data-freshness='non_verifie']").count() == 1
-    assert "saisie libre" in result.inner_text()
-    assert "score 0.000" not in results_text
-
-    # Cliquer le résultat l'ouvre dans le panneau d'inspection, avec son
-    # projet d'origine.
+    # Le résultat ouvre le panneau de détail, avec sa fraîcheur nommée.
     result.click()
     inspector_text = page.locator("#inspector-body").inner_text()
     assert _DISTINCTIVE_TERM in inspector_text
+    assert "non vérifié" in inspector_text
