@@ -1082,6 +1082,13 @@ function segment(el, items, active, onPick) {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = item.label || item;
+    // `item.count` (P33, « Sessions 4 ») : le compte suit le libellé, en encre secondaire.
+    if (typeof item.count === 'number') {
+      const count = document.createElement('span');
+      count.className = 'seg-count';
+      count.textContent = String(item.count);
+      button.append(count);
+    }
     button.dataset.value = item.id || item;
     // Un segment désactivé n'est jamais pressé : la vue active d'un espace
     // vide se lit à l'état vide de la toile, pas à un bouton inerte allumé.
