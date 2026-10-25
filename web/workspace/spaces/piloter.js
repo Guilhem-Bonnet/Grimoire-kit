@@ -2330,11 +2330,11 @@ export async function mount(root, ctx) {
       // `forceFleet` ne vient que du bouton « Rafraîchir la flotte » — un
       // simple retour sur ce niveau (zoom, sélection d'un autre projet puis
       // retour) sert le cache de `loadFleet` (issue #510 point 5).
-      // L'attention (P22) lit tout le registre : elle part en même temps que
-      // la flotte mais ne la retient jamais. La table se peint dès la flotte,
-      // puis se repeint avec les badges quand l'attention répond (le filtre
-      // vit dans `fleetFilter`, la saisie en cours garde son focus).
-      const attentionLoad = ctx.api.attention(true).catch(() => null);
+      // L'attention (P22) lit tout le registre : elle ne part qu'après la
+      // flotte, pour ne pas lui disputer le serveur, et ne la retient jamais.
+      // La table se peint dès la flotte, puis se repeint avec les badges quand
+      // l'attention répond (le filtre vit dans `fleetFilter`, la saisie en
+      // cours garde son focus).
       const rows = await loadFleet(ctx, { force: forceFleet });
       if (ctx.signal.aborted) return;
       const paintFleet = (attention, pending) => {
@@ -2355,7 +2355,7 @@ export async function mount(root, ctx) {
       };
       const painted = paintFleet(null, true);
       ctx.dock.echo('grimoire cockpit list');
-      const attention = await attentionLoad;
+      const attention = await ctx.api.attention(true).catch(() => null);
       // Un autre rendu (zoom sur un projet, rafraîchissement) a pris la main : on ne l'écrase pas.
       if (ctx.signal.aborted || root.firstElementChild !== painted) return;
       paintFleet(attention, false);

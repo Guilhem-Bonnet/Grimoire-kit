@@ -179,6 +179,31 @@ def test_la_flotte_ne_retient_jamais_sa_table_pour_la_lecture_d_attention(
         context.close()
 
 
+def test_aucune_lecture_d_attention_ne_dispute_le_serveur_a_la_flotte(
+    browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
+) -> None:
+    """La lecture d'attention parcourt tout le registre côté serveur (GIL) : au
+    chargement de la Flotte, ni la Flotte ni le compteur de la barre ne la lancent
+    avant que `/api/fleet` ait répondu — sinon elle ralentit la table qu'on attend."""
+    served, _slug_a, _slug_b, _slug_c = served_cockpit_triple
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    events: list[tuple[str, float]] = []
+    page.on("request", lambda req: events.append(("attention", time.monotonic())) if "/api/workspace/attention" in req.url else None)
+    page.on("response", lambda resp: events.append(("fleet", time.monotonic())) if "/api/fleet" in resp.url else None)
+    try:
+        page.goto(f"{served}/workspace/index.html?scope=all#flotte", wait_until="domcontentloaded")
+        page.wait_for_selector(".tbl tbody tr", timeout=10_000)
+        page.wait_for_timeout(1_500)  # laisse partir la lecture différée du compteur
+
+        fleet_at = next(t for kind, t in events if kind == "fleet")
+        early = [t for kind, t in events if kind == "attention" and t < fleet_at]
+        assert not early, f"{len(early)} lecture(s) d'attention partie(s) avant la réponse de /api/fleet"
+        assert any(kind == "attention" for kind, _ in events), "l'attention finit bien par être lue"
+    finally:
+        context.close()
+
+
 def test_refresh_de_la_flotte_ne_double_jamais_les_appels_en_vol(
     browser: Browser, served_cockpit_triple: tuple[str, str, str, str]
 ) -> None:

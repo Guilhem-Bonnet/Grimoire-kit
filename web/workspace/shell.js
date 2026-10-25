@@ -1475,6 +1475,12 @@ function renderReadOnlyBanner() {
 // pouls change ; le pouls lui-même (décisions K6) n'est plus qu'un déclencheur.
 let attentionPrint = null;
 let attentionSeq = 0;
+// La première lecture attend un peu : elle parcourt tout le registre et ne doit
+// pas disputer le serveur au premier rendu de l'espace ouvert (Flotte : budget
+// de 900 ms). Si l'espace lit l'attention entre-temps, `api.attention` partage
+// sa requête en vol. Les pouls suivants relisent tout de suite.
+const ATTENTION_FIRST_READ_DELAY_MS = 1000;
+let attentionFirstRead = true;
 
 function renderAttentionCount(count, unreadable = 0) {
   const badgeNode = $('decisions-count');
@@ -1502,6 +1508,11 @@ function onPulseDecisions() {
   const print = live.state.fingerprint;
   if (print !== null && print === attentionPrint) return;
   attentionPrint = print;
+  if (attentionFirstRead) {
+    attentionFirstRead = false;
+    setTimeout(refreshAttentionCount, ATTENTION_FIRST_READ_DELAY_MS);
+    return;
+  }
   refreshAttentionCount();
 }
 
