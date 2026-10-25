@@ -272,11 +272,15 @@ def test_une_carte_dit_son_identifiant_sa_route_sa_preuve_sa_session_et_son_bloc
 
     review = _card(page, REVIEW_TITLE)
     assert review.locator(".ex-card-id").inner_text().startswith("GAO-")
-    assert review.locator(".ex-card-top .badge").inner_text() in {"V0", "V1", "V2"}
-    # Deux conditions au passage à « Acceptée » (acceptation écrite, verdict absent) : 1 verte sur 2.
-    assert review.locator("[data-role='proof']").inner_text() == "1/2"
+    # P11 : la route se lit « classe · modèle » (« V2 · modèle de session » quand aucun modèle n'est recommandé).
+    route = review.locator(".ex-card-top [data-role='route']")
+    assert route.get_attribute("data-class") in {"V0", "V1", "V2"}
+    assert route.inner_text().startswith(route.get_attribute("data-class") + " · ")
+    # Trois conditions au passage à « Acceptée » (acceptation écrite, verdict absent, et
+    # le reçu de revue que la clôture exige — P11, comme `TaskService.gate`) : 1 verte sur 3.
+    assert review.locator("[data-role='proof']").inner_text() == "1/3"
     assert review.locator(".ex-ring circle.ok").count() == 1
-    assert review.locator(".ex-ring circle.bad").count() == 1
+    assert review.locator(".ex-ring circle.bad").count() == 2
     assert "Aucun verdict de vérification" in review.locator("[data-role='missing-condition']").inner_text()
 
     ready = _card(page, READY_TITLE)
@@ -330,12 +334,12 @@ def test_la_carte_selectionnee_ouvre_ses_conditions_de_passage_dans_le_panneau_d
     assert inspector.locator("h3").inner_text() == REVIEW_TITLE
     assert "Pour passer en Acceptée" in inspector.locator("[data-role='gate-card'] .micro").inner_text()
     conditions = inspector.locator("[data-role='gate-conditions'] .ex-cond")
-    assert conditions.count() == 2
+    assert conditions.count() == 3
     assert conditions.nth(0).get_attribute("data-ok") == "true"
     assert conditions.nth(0).get_attribute("data-gate") == "acceptance_criteria"
     red = inspector.locator(".ex-cond[data-ok='false']")
-    assert red.get_attribute("data-gate") == "review_gate"
-    assert "review_gate" in red.inner_text() and "Aucun verdict de vérification" in red.inner_text()
+    assert [red.nth(i).get_attribute("data-gate") for i in range(red.count())] == ["review_gate", "review.receipt_missing"]
+    assert "review_gate" in red.first.inner_text() and "Aucun verdict de vérification" in red.first.inner_text()
     # Les gestes sont ceux d'avant P64 : la transition réelle (que le gate refusera), pas un bouton inventé.
     assert inspector.get_by_role("button", name="Réaliser : → Acceptée").count() == 1
     assert inspector.locator("[data-role='last-events']").count() == 1
@@ -384,6 +388,8 @@ def test_un_rafraichissement_live_ne_vole_pas_la_raison_en_cours_de_saisie(
         page.wait_for_timeout(100)
     assert held, "le pouls n'a pas déclenché de relecture du panneau"
 
+    # « Annuler » ne vit que dans le menu « ⋯ » (P11).
+    inspector.locator("[data-role='more']").click()
     reason = inspector.locator("input[data-role='cancel-reason']")
     reason.fill("doublon d'une autre carte")
     cancel = inspector.locator("button[data-role='cancel-submit']")
@@ -409,6 +415,7 @@ def test_un_re_rendu_force_du_panneau_rend_la_saisie_valeur_focus_et_bouton(page
     _card(page, READY_TITLE).click()
     inspector = page.locator("#inspector-body")
     inspector.locator("[data-role='gate-card']").wait_for()
+    inspector.locator("[data-role='more']").click()
     reason = inspector.locator("input[data-role='cancel-reason']")
     reason.fill("raison à ne pas perdre")
     reason.evaluate("(el) => el.setSelectionRange(3, 7)")

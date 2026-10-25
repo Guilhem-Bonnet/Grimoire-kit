@@ -580,6 +580,8 @@ def test_une_raison_d_annulation_saisie_survit_au_battement_d_une_session(
     _goto(page, "executer")
     _card(page, title).wait_for(timeout=APPEAR_MS)
     _card(page, title).dispatch_event("click")
+    # « Annuler » ne vit que dans le menu « ⋯ » de l'inspecteur (P11).
+    page.locator("#inspector-body [data-role='more']").click(timeout=APPEAR_MS)
     reason = page.locator("#inspector-body [data-role='cancel-reason']")
     reason.wait_for(timeout=APPEAR_MS)
     page.wait_for_timeout(int(INTERVAL_S * 1000 * 1.5))

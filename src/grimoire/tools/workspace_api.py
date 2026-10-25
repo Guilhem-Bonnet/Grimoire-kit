@@ -254,10 +254,11 @@ def _task_json(task: Any) -> dict[str, Any]:
     # Issue #638 lot A : la session qui porte la carte, et comment la reprendre.
     data.update(session_fields(task))
     # P64 : la classe de route (V0/V1/V2), recalculée depuis le texte comme le
-    # board et `task show` — jamais stockée, jamais devinée côté vue.
-    from grimoire.missions.verifiability import classify
+    # board et `task show` — jamais stockée, jamais devinée côté vue. P11 : le
+    # modèle qu'elle recommande et son palier, même calcul que `task dispatch`.
+    from grimoire.tools.workspace_task_gates import routing_fields
 
-    data["verifiability_class"] = classify(task).value
+    data.update(routing_fields(task))
     return data
 
 
@@ -281,8 +282,9 @@ def annotate_gates(project_root: Path, tasks: list[Any], cards: list[dict[str, A
     """
     from grimoire.core.exceptions import GrimoireError
     from grimoire.missions.board import board_status_of
-    from grimoire.missions.gates import check_transition, declared_transitions
+    from grimoire.missions.gates import declared_transitions
     from grimoire.missions.schemas import TaskState
+    from grimoire.tools.workspace_task_gates import gate_entry
 
     try:
         declared = declared_transitions(project_root)
@@ -293,28 +295,9 @@ def annotate_gates(project_root: Path, tasks: list[Any], cards: list[dict[str, A
         target = "in_progress" if task.status is TaskState.WAITING else _FORWARD_BOARD.get(here)
         if target is None:
             continue
-        try:
-            verdict = check_transition(project_root, task, here, target)
-        except (GrimoireError, OSError):
-            continue
-        entry = declared.get((here, target)) or {}
-        required = [n for n in (entry.get("required_evidence") or []) if isinstance(n, str)]
-        refused = {r.evidence: r for r in verdict.refusals}
-        names = required + [n for n in refused if n not in required]
-        card["next_gate"] = {
-            "to": target,
-            "transition_id": verdict.transition_id,
-            "strictness": verdict.strictness,
-            "conditions": [
-                {
-                    "gate": name,
-                    "ok": name not in refused,
-                    "reason": refused[name].reason if name in refused else "",
-                    "remedy": refused[name].remedy if name in refused else "",
-                }
-                for name in names
-            ],
-        }
+        entry = gate_entry(project_root, task, here, target, declared)
+        if entry is not None:
+            card["next_gate"] = entry
 
 
 def tasks_view(
@@ -448,6 +431,15 @@ def task_view(project_root: Path, task_id: str) -> dict[str, Any]:
         for (src, to), entry in declared_transitions(service.project_root).items()
         if src == here
     }
+    # P11 : chaque passage déclaré avec ses conditions (raison, remède) et le
+    # dernier `task.gate.refused` — l'inspecteur les montre avant le bouton.
+    from grimoire.tools.workspace_task_gates import gate_checks, last_gate_refusal
+
+    refusal = last_gate_refusal(service.project_root, task.id)
+    payload["last_gate_refusal"] = refusal
+    payload["gate_checks"] = gate_checks(
+        service.project_root, task, here, list(payload["next_moves_require"]), refusal,
+    )
     return payload
 
 

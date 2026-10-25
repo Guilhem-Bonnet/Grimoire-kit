@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): inspecteur de tâche de Travail, les gates et leur remède avant toute transition (P11, `GAO-p11-inspect-001`)
+  - **Gates d'abord** : l'inspecteur liste chaque passage déclaré depuis la colonne (`next_moves_require`), chaque condition verte ou rouge avec sa raison et son remède, puis les boutons de transition ; un refus se lit sur place, preuve par preuve, remède compris.
+  - **Dernier refus** : le dernier `task.gate.refused` du TraceLedger s'affiche (date, acteur, gate, preuves manquantes) et date les conditions qu'il a nommées (« déjà refusée le … »).
+  - **Reçu de revue** : la clôture d'une tâche relue montre aussi le reçu de revue que `TaskService.gate` exige ; la carte comptait 1/2 un passage que la clôture refusait ensuite.
+  - **Routage** : la carte et l'inspecteur portent la classe V0/V1/V2, le modèle recommandé (« modèle de session » en V2) et le coût, sur chaque carte backlog compris ; un coût non mesuré s'écrit « inconnu », jamais 0.
+  - **Ordre** : gates, transition, critères, preuves, session ; « Annuler la tâche » ne vit plus que dans le menu « ⋯ » de l'en-tête (raison exigée, Échap pour fermer).
+  - **Lecture** : `GET /api/workspace/tasks/<id>` rend `gate_checks` et `last_gate_refusal`, les cartes `recommended_model` et `model_tier` (`tools/workspace_task_gates.py`) ; aucune route d'écriture nouvelle.
 - feat(cockpit): vue « Sessions » de Travail et vivacité réelle (P33, `GAO-p33-vue-ses-001`) — le board disait ce que chaque tâche attend, rien ne disait ce que fait chaque session
   - **Vue Sessions** : troisième vue du segment de Travail (« Sessions N »), conforme à l'artboard : quatre tuiles (actives, attendent ta réponse, silencieuses avec claim, terminées sur 24 h), un tableau (état, hôte, session, projet et tâche tenue, persona et modèle, activité des 15 dernières minutes, dernier signe) et un panneau de détail (claims, dernier signe et sa source, consignes en attente, commande `claude --resume` à copier, confirmée sur place). « Envoyer une consigne » pose une consigne sur la tâche tenue (route existante `comment`) ; « Ouvrir la décision » et « Voir la tâche » mènent aux vues de Travail. « Relancer la session » et « Libérer les claims… » de la maquette n'ont pas de route : ils ne sont pas dessinés.
   - **Lecture** : `GET /api/workspace/sessions[?scope=portfolio]` (`tools/workspace_sessions.py`) croise journaux de session, claims du Mission Ledger, queue du TraceLedger (activité, agent, modèle, dernier outil) et sonde `claude agents --json`. Un projet illisible est nommé, une activité que rien ne trace vaut « non lue », jamais zéro.
