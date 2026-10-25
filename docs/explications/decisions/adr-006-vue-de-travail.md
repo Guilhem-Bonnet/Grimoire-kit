@@ -6,8 +6,8 @@ audience: décision
 
 - **Statut** : accepté
 - **Date** : 2026-09-06
-- **Décide pour** : `grimoire serve` (atelier mono-projet) et
-  `grimoire cockpit serve` (cockpit multi-projets)
+- **Décide pour** : `grimoire cockpit serve` (atelier mono-projet et cockpit multi-projets,
+  fusionnés par #351 ; `grimoire serve` n'en est plus qu'un alias déprécié)
 - **Source** : `web/DESIGN-SPEC-workspace-2026-09.md`, validée le 2026-09-05.
   Revue préalable : `web/DESIGN-REVIEW-2026-09.md`
 - **Remplace** : rien. **Complète** : ADR-005 (Mission Ledger source de vérité)
