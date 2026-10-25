@@ -56,6 +56,14 @@ et se comportent désormais exactement comme le défaut.
 | `graphe` | Standard + graphes Neo4j : connaissances, souvenirs, code, tâches |
 | `complet` | Graphe + mémoire chaude Redis (TTL, baux, coordination multi-agents) |
 
+**Sans terminal interactif** (stdin redirigé, CI, `grimoire init < /dev/null`), `init`
+n'ouvre pas l'assistant : il suit le chemin express de `-y` et le dit sur stderr,
+une fois, avant d'écrire — « mode non interactif, équivalent à -y » —, avec la
+commande qui le rejoue guidé (`grimoire init --interactive`). Avec `-y` explicite,
+rien de plus n'est affiché : le choix a été fait. Sur un dossier Python nu, ce
+chemin installe `stack` (pas `minimal` seul) ; l'archétype est nommé « best guess »
+dans le rapport quand rien ne l'a confirmé.
+
 Sur un projet qui a déjà du code, le rapport d'`init` propose
 `grimoire onboard brownfield` (et la clé `onboard` en sortie JSON) ; en mode
 interactif, une confirmation (non par défaut) le lance tout de suite.
