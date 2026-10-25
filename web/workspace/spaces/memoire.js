@@ -41,7 +41,7 @@ const STYLES = `
 .kn-chk .kn-lbl { min-width: 0; overflow-wrap: anywhere; }
 .kn-chk .kn-n { margin-left: auto; color: var(--ink3); font-variant-numeric: tabular-nums; }
 .kn-why { margin: 0 0 4px 24px; color: var(--ink3); font-size: var(--t-min); overflow-wrap: anywhere; }
-.kn-filters select { width: 100%; height: var(--h-ctl); }
+.kn-filters select { width: 100%; height: var(--h-ctl); padding: 0 9px; border: 1px solid var(--line); border-radius: var(--r); background-color: var(--card); color: var(--ink); }
 .kn-scope-link { align-self: flex-start; margin-top: 4px; }
 .kn-main { min-width: 0; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; }
 .kn-searchbar { display: flex; gap: 10px; align-items: center; }
