@@ -1,0 +1,11 @@
+{
+  "skill_name": "stack-python",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Ajoute une fonction d'export dans tools/export.py.",
+      "expected_output": "Écrit du code typé, des tests pytest, et passe ruff et mypy.",
+      "files": []
+    }
+  ]
+}

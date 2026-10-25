@@ -207,8 +207,10 @@ def upgrade_flow_orphans(
         moved = archive_orphans(root, report)
 
     if _fmt(ctx, json_flag=json_flag) == "json":
-        typer.echo(json.dumps({"ok": True, "orphans": report.to_dict()["orphans"], "archived": moved}, ensure_ascii=False))
+        typer.echo(json.dumps({"ok": True, "orphans": report.to_dict()["orphans"], "kept": report.to_dict()["kept"], "archived": moved}, ensure_ascii=False))
         return
+    for kept in report.kept:
+        console.print(f"[yellow]Laissé en place (modifié ou ajouté par le projet) :[/yellow] {kept}")
     if not report.orphans:
         console.print("[green]Aucun orphelin.[/green]")
         return

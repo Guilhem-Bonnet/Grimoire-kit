@@ -1,0 +1,11 @@
+{
+  "skill_name": "stack-docker",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Optimise ce Dockerfile : il pèse 1,8 Go.",
+      "expected_output": "Passe en multi-stage, réduit la surface de sécurité et ajoute un healthcheck.",
+      "files": []
+    }
+  ]
+}

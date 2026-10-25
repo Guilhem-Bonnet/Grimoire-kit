@@ -38,7 +38,7 @@ from grimoire.hosts.decisions import (
 # From the leaf module (issue #419), not ``grimoire.hosts.surface``: this is
 # the hook entry point, invoked on every tool call — pulling the full
 # agent/model IR for one enum was the tax the split removes.
-from grimoire.hosts.events import HookEvent
+from grimoire.hosts.events import NOT_EMITTED_EVENTS, HookEvent
 
 #: Neutral event -> the name a host writes in its configuration and payloads.
 #: Claude Code and VS Code Copilot happen to share the spelling; the table is
@@ -53,6 +53,9 @@ _WIRE_EVENT_NAMES: dict[HookEvent, str] = {
     HookEvent.SUBAGENT_STOP: "SubagentStop",
     HookEvent.PRE_COMPACT: "PreCompact",
     HookEvent.STOP: "Stop",
+    HookEvent.TASK_CREATED: "TaskCreated",
+    HookEvent.TASK_COMPLETED: "TaskCompleted",
+    HookEvent.INSTRUCTIONS_LOADED: "InstructionsLoaded",
 }
 
 _EVENT_BY_WIRE_NAME: dict[str, HookEvent] = {v.lower(): k for k, v in _WIRE_EVENT_NAMES.items()}
@@ -268,7 +271,12 @@ _LEDGER_VERDICT = {
 #: Events worth a ledger line. Read-only tool calls are deliberately absent:
 #: they return before the policy engine runs, so recording them would add file
 #: I/O to the one path this layer just spent a chantier making cheap.
-_RECORDED_EVENTS = {HookEvent.PRE_TOOL_USE, HookEvent.STOP, HookEvent.SUBAGENT_STOP}
+_RECORDED_EVENTS = {
+    HookEvent.PRE_TOOL_USE,
+    HookEvent.STOP,
+    HookEvent.SUBAGENT_STOP,
+    *NOT_EMITTED_EVENTS,
+}
 
 
 def _record_decision(

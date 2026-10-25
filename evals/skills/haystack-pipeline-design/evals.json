@@ -1,0 +1,11 @@
+{
+  "skill_name": "haystack-pipeline-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Prépare l'indexation de la base documentaire dans Haystack.",
+      "expected_output": "Déclare le corpus, indexe avec des métadonnées de provenance et vérifie le rappel avant d'indexer en masse.",
+      "files": []
+    }
+  ]
+}

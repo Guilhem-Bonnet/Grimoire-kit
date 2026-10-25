@@ -1,0 +1,11 @@
+{
+  "skill_name": "langgraph-graph-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Dessine un StateGraph LangGraph pour ce traitement.",
+      "expected_output": "Définit un schéma d'état typé, des edges conditionnels nommés et des checkpoints auditables.",
+      "files": []
+    }
+  ]
+}

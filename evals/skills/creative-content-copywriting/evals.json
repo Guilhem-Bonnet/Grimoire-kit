@@ -1,0 +1,11 @@
+{
+  "skill_name": "creative-content-copywriting",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Écris trois titres et un CTA pour la page d'accueil, la charte de marque est déjà dans le projet.",
+      "expected_output": "Produit les titres et le CTA dans le ton de la charte existante, sans redéfinir la charte.",
+      "files": []
+    }
+  ]
+}

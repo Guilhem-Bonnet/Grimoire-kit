@@ -137,56 +137,6 @@ auto_detect:
         self.assertGreaterEqual(len(boost_issues), 1)
 
 
-# ── Team manifest validation ─────────────────────────────────────────────────
-
-class TestValidateTeam(unittest.TestCase):
-    def setUp(self):
-        self.mod = _import()
-        self.tmpdir = Path(tempfile.mkdtemp())
-
-    def tearDown(self):
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
-    def test_valid_team(self):
-        team_file = _write(self.tmpdir, "framework/teams/team-test.yaml", """\
-team:
-  name: "team-test"
-  display_name: "Test Team"
-  version: "1.0.0"
-  description: "A test team"
-  agents:
-    - name: dev
-      role: Lead
-""")
-        data, err = self.mod._load_yaml(team_file)
-        if err:
-            self.skipTest("Needs PyYAML")
-        issues = self.mod.validate_team(team_file, data)
-        errors = [i for i in issues if i.severity == "error"]
-        self.assertEqual(len(errors), 0)
-
-    def test_missing_team_key(self):
-        team_file = _write(self.tmpdir, "framework/teams/team-test.yaml", """\
-name: "bad-format"
-""")
-        data, err = self.mod._load_yaml(team_file)
-        self.assertIsNone(err)
-        issues = self.mod.validate_team(team_file, data)
-        self.assertTrue(any("team" in i.message.lower() for i in issues))
-
-    def test_missing_nested_fields(self):
-        team_file = _write(self.tmpdir, "framework/teams/team-test.yaml", """\
-team:
-  name: "team-test"
-""")
-        data, err = self.mod._load_yaml(team_file)
-        if err:
-            self.skipTest("Needs PyYAML")
-        issues = self.mod.validate_team(team_file, data)
-        missing = [i for i in issues if i.severity == "error"]
-        self.assertGreaterEqual(len(missing), 2)
-
-
 # ── Agent DNA validation ─────────────────────────────────────────────────────
 
 class TestValidateAgentDNA(unittest.TestCase):
@@ -236,11 +186,6 @@ class TestDiscovery(unittest.TestCase):
         self.assertEqual(len(files), 2)
         self.assertTrue(all(t == "dna" for _, t in files))
 
-    def test_discover_team_files(self):
-        _write(self.tmpdir, "framework/teams/team-x.yaml", "team:\n  name: x\n")
-        files = self.mod.discover_files(self.tmpdir, "team")
-        self.assertEqual(len(files), 1)
-
     def test_discover_single_file(self):
         p = _write(self.tmpdir, "test.dna.yaml", "id: x\n")
         files = self.mod.discover_files(self.tmpdir, single_file=str(p))
@@ -252,7 +197,6 @@ class TestDiscovery(unittest.TestCase):
 
     def test_guess_type(self):
         self.assertEqual(self.mod._guess_type(Path("archetype.dna.yaml")), "dna")
-        self.assertEqual(self.mod._guess_type(Path("team-build.yaml")), "team")
         self.assertEqual(self.mod._guess_type(Path("go-expert.dna.yaml")), "agent_dna")
 
 

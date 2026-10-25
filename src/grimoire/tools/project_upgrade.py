@@ -845,13 +845,16 @@ class OrphanAgent:
 @dataclass(slots=True)
 class OrphanReport:
     orphans: list[OrphanAgent] = field(default_factory=list)
+    #: Fichiers d'un sous-dossier retiré du kit que le projet a modifiés ou ajoutés : laissés
+    #: en place, jamais archivés, mais signalés.
+    kept: list[Path] = field(default_factory=list)
 
     @property
     def names(self) -> list[str]:
         return [o.name for o in self.orphans]
 
     def to_dict(self) -> dict[str, Any]:
-        return {"orphans": [o.to_dict() for o in self.orphans]}
+        return {"orphans": [o.to_dict() for o in self.orphans], "kept": [str(p) for p in self.kept]}
 
 
 #: Per-host agent directories a managed projection can live under, beyond
@@ -970,6 +973,7 @@ def find_orphans(target: Path) -> OrphanReport:
     """
     from grimoire.cli.cmd_up import _load_config_quiet, fresh_kit_agent_roster
     from grimoire.core import layout
+    from grimoire.core.kit_hashes import shipped_by_kit
 
     roster = fresh_kit_agent_roster(target)
     installed = layout.installed_agents(target)
@@ -997,6 +1001,17 @@ def find_orphans(target: Path) -> OrphanReport:
         if github_candidate.is_file() and _carries_managed_marker(github_candidate):
             paths.append(github_candidate)
         report.orphans.append(OrphanAgent(name=name, paths=tuple(paths)))
+
+    # Sous-dossiers que le kit ne livre plus : copiés par une version précédente, jamais
+    # élagués par `up`. Seul le tier kit est candidat, comme pour les agents.
+    for subdir in layout.RETIRED_KIT_SUBDIRS:
+        # Seul ce qu'une version du kit a livré, inchangé (empreinte du catalogue), est archivé ;
+        # un fichier modifié ou ajouté par le projet reste en place et est signalé.
+        files = sorted(p for p in (layout.kit_dir(target) / subdir).rglob("*") if p.is_file())
+        shipped = [p for p in files if shipped_by_kit(p) is not None]
+        report.kept.extend(p for p in files if p not in shipped)
+        if shipped:
+            report.orphans.append(OrphanAgent(name=f"{layout.KIT_DIR}/{subdir}", paths=tuple(shipped)))
 
     for name, ghost_paths in sorted(_ghost_managed_projections(target, known_names=set(installed)).items()):
         if name in roster or name in declared:
@@ -1027,7 +1042,7 @@ def archive_orphans(target: Path, report: OrphanReport) -> list[str]:
         readme = dest_root / "README.md"
         names = ", ".join(sorted({o.name for o in report.orphans}))
         readme.write_text(
-            f"# Agents archivés — mise à niveau du {_today()}\n\n"
+            f"# Agents et fichiers du kit archivés — mise à niveau du {_today()}\n\n"
             f"Le kit installé ({_kit_version()}) ne livre plus : {names}.\n"
             "Déplacés ici par `grimoire upgrade-flow`, jamais supprimés — "
             "restaurez-les à la main si l'un d'eux était encore voulu.\n",

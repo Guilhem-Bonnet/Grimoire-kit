@@ -1,0 +1,11 @@
+{
+  "skill_name": "infra-k8s-gitops",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Une réconciliation FluxCD échoue sur ce HelmRelease, diagnostique.",
+      "expected_output": "Lit l'état de la réconciliation et du pod en échec avant de proposer un correctif dans le dépôt GitOps.",
+      "files": []
+    }
+  ]
+}

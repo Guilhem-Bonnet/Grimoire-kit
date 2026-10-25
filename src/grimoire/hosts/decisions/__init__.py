@@ -61,6 +61,7 @@ __all__ = [
     "command_surface",
     "decide_activation",
     "decide_context_capsule",
+    "decide_event_trace",
     "decide_evidence_gate",
     "decide_evidence_trace",
     "decide_subagent_gate",
@@ -82,6 +83,7 @@ _DECISION_FUNCS: dict[str, tuple[str, str]] = {
     "grimoire.evidence-gate": ("evidence_gate", "decide_evidence_gate"),
     "grimoire.subagent-gate": ("subagent_gate", "decide_subagent_gate"),
     "grimoire.context-capsule": ("context_capsule", "decide_context_capsule"),
+    "grimoire.event-trace": ("event_trace", "decide_event_trace"),
 }
 
 #: Which decision answers which event when the caller only names an event.
@@ -93,6 +95,10 @@ DEFAULT_DECISION_BY_EVENT: dict[HookEvent, str] = {
     HookEvent.SUBAGENT_STOP: "grimoire.subagent-gate",
     HookEvent.PRE_COMPACT: "grimoire.context-capsule",
     HookEvent.STOP: "grimoire.evidence-gate",
+    # R31 : décision minimale (une trace) pour les événements déclarés non émis.
+    HookEvent.TASK_CREATED: "grimoire.event-trace",
+    HookEvent.TASK_COMPLETED: "grimoire.event-trace",
+    HookEvent.INSTRUCTIONS_LOADED: "grimoire.event-trace",
 }
 
 
@@ -198,6 +204,7 @@ _NAME_OWNER: dict[str, str] = {
     "decide_task_context": "task_context",
     "decide_tool_policy": "tool_policy",
     "decide_evidence_trace": "evidence_trace",
+    "decide_event_trace": "event_trace",
     "_gate_summary": "gate_summary",
     "decide_evidence_gate": "evidence_gate",
     "_unevaluable_gate": "evidence_gate",

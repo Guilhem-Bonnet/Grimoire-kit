@@ -1,0 +1,11 @@
+{
+  "skill_name": "grimoire-agent-dispatch",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "J'ai besoin d'un avis d'architecture sur le découpage de ce service avant de coder.",
+      "expected_output": "Choisit la persona d'architecture du projet et l'active, au lieu de répondre en généraliste.",
+      "files": []
+    }
+  ]
+}
