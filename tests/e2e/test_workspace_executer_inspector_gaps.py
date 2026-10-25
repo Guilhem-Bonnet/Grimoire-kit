@@ -57,6 +57,11 @@ def _add(root: Path, title: str, *extra: str) -> str:
     return match.group(1)
 
 
+_QUICK_TITLE = "Carte des actions rapides"
+#: Identifiant de la tâche des actions rapides, posé par ``served_inspector``.
+_QUICK: dict[str, str] = {}
+
+
 @pytest.fixture(scope="session")
 def served_inspector(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, Path, str]]:
     root = tmp_path_factory.mktemp("exec-gaps") / "projet-gaps"
@@ -75,6 +80,13 @@ def served_inspector(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple
     moved = _grimoire(root, "task", "move", to_block, "--to", "ready")
     if moved.returncode != 0:
         pytest.skip(f"préparation de {to_block} interrompue : {moved.stderr[-400:]}")
+    # Une tâche à part pour les actions rapides de carte : la fixture vit toute la session et
+    # `test_bloquer_avec_une_raison…` bloque « Prête à bloquer » ; lancés dans l'ordre (sans xdist),
+    # les tests d'action rapide ne trouvaient plus son bouton « Bloquer… ».
+    quick = _add(root, _QUICK_TITLE)
+    if _grimoire(root, "task", "move", quick, "--to", "ready").returncode != 0:
+        pytest.skip(f"préparation de {quick} interrompue")
+    _QUICK["id"] = quick
 
     port = _free_port()
     env = dict(os.environ)
@@ -277,8 +289,8 @@ def test_les_boutons_d_action_rapide_d_une_carte_ne_propagent_pas_le_clic(
     le clic remonte à la carte et sélectionne la tâche une seconde fois. Un
     écouteur posé sur la carte (phase de bulle) le prouve sans dépendre d'un
     effet de bord."""
-    _, _root, task_id = served_inspector
-    card = exec_page.locator(".ex-card", has_text="Prête à bloquer").first
+    task_id = _QUICK["id"]
+    card = exec_page.locator(".ex-card", has_text=_QUICK_TITLE).first
     card.evaluate(
         "(el) => { window.__parentClicks = 0; el.addEventListener('click', () => { window.__parentClicks += 1; }); }"
     )
@@ -293,8 +305,8 @@ def test_un_clic_sur_la_carte_elle_meme_selectionne_la_tache(
     exec_page: Page, served_inspector: tuple[str, Path, str]
 ) -> None:
     """Contre-épreuve du test précédent : le même écouteur voit bien un clic sur la carte."""
-    _, _root, task_id = served_inspector
-    card = exec_page.locator(".ex-card", has_text="Prête à bloquer").first
+    task_id = _QUICK["id"]
+    card = exec_page.locator(".ex-card", has_text=_QUICK_TITLE).first
     card.evaluate(
         "(el) => { window.__parentClicks = 0; el.addEventListener('click', () => { window.__parentClicks += 1; }); }"
     )
