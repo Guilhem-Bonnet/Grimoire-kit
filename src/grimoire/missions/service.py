@@ -587,6 +587,16 @@ class TaskService:
         self.project_board()
         return task
 
+    def unlink(
+        self, task_id: str, depends_on: str, kind: DependencyKind = DependencyKind.BLOCKS, *, reason: str, actor: str = "cli"
+    ) -> MissionTask:
+        """Retire « *task_id* dépend de *depends_on* », motif journalisé (#906)."""
+        from grimoire.missions.ledger_links import unlink_tasks
+
+        task = unlink_tasks(self.ledger, task_id, depends_on, kind, reason=reason, actor_id=actor)
+        self.project_board()
+        return task
+
     def waves(self, mission_id: str | None = None) -> dict[str, Any]:
         """Les vagues du plan, ``file_overlaps`` compris (:func:`grimoire.missions.waves.compute_waves`)."""
         from grimoire.missions.wave_checkpoint import claim_blocked, report
