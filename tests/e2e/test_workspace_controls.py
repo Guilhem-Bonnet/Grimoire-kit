@@ -280,7 +280,7 @@ def test_executer_etat_vide_montre_la_commande_et_desactive_les_vues(empty_works
     assert command.startswith("grimoire task add")
 
     buttons = page.locator("#view-seg button")
-    assert buttons.count() == 5, "les cinq vues (dont Décisions, K6) restent visibles, jamais absentes"
+    assert buttons.count() == 6, "les six vues (dont Décisions, K6, et Sessions, P33) restent visibles, jamais absentes"
     for i in range(buttons.count()):
         assert buttons.nth(i).is_disabled()
         assert buttons.nth(i).get_attribute("aria-pressed") == "false"
