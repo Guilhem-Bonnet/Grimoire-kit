@@ -359,7 +359,7 @@ Ce mécanisme permet à l'orchestrateur de maintenir la cohérence sur 50+ écha
 | **ALS** | SOG utilise l'Autonomy Level System pour déterminer quand foncer vs demander |
 | **AORA** | Retiré (2026-07-12) ; circuit breaker et cascading initiative conservés sans son nom dans `agent-base.md` § Plan d'exécution |
 | **PCS** | SOG compresse le contexte progressivement pour les sessions longues |
-| **PIP** | Observer-only : décrit, non instrumenté, aucune obligation |
+| **PIP** | Retiré : décrit mais jamais instrumenté (aucun compteur, aucun hook) ; ni obligation ni mesure à porter |
 | **DCF** | Retiré (2026-07-12) ; calibration exécuter/proposer/escalader portée par ALS seul |
 
 <img src="../docs/assets/divider.svg" width="100%" alt="">

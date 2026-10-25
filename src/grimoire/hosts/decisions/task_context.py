@@ -69,7 +69,7 @@ def decide_task_context(hook: HookInput) -> Decision:
     )
 
     if active.is_fallback:
-        context = no_task_context(profile, active.candidates, active.expired)
+        context = no_task_context(profile, active.candidates, active.expired, active.unreadable)
         link: dict[str, object] = {}
         self_view = ""
     else:

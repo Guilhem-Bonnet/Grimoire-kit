@@ -177,6 +177,44 @@ def _load_mapping(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _board_problem(path: Path) -> str:
+    """Pourquoi *path* (le board) ne se lit pas, ``""`` s'il est absent ou lisible.
+
+    Un board absent est légitime (ledger seul) ; un board présent dont le YAML
+    est cassé, ou dont la racine n'est pas un mapping, ne l'est pas — et
+    :func:`_load_mapping`, qui ne lève jamais, le rend comme un board vide.
+    """
+    if not path.is_file():
+        return _not_a_file(path, f"board {TASK_BOARD_RELPATH.as_posix()}")
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
+
+    name = f"board {TASK_BOARD_RELPATH.as_posix()}"
+    try:
+        data = YAML(typ="safe").load(path)
+    except (OSError, ValueError, YAMLError) as exc:
+        return f"{name} illisible ({type(exc).__name__})"
+    if data is None:
+        return ""
+    if not isinstance(data, dict):
+        return f"{name} illisible (la racine n'est pas un mapping)"
+    tasks = data.get("tasks")
+    if tasks is None:
+        return ""
+    if not isinstance(tasks, list):
+        return f"{name} illisible (`tasks:` doit être une liste)"
+    if any(not isinstance(task, dict) for task in tasks):
+        return f"{name} illisible (une entrée de `tasks:` n'est pas un mapping)"
+    return ""
+
+
+def _not_a_file(path: Path, name: str) -> str:
+    """``""`` si *path* est absent (légitime), sinon pourquoi un chemin présent n'est pas un fichier régulier."""
+    if path.exists() or path.is_symlink():
+        return f"{name} illisible (dossier ou lien cassé au lieu d'un fichier)"
+    return ""
+
+
 def task_from_board(board: Mapping[str, Any], task_id: str) -> dict[str, Any]:
     """The board entry for *task_id*, or an empty mapping when it has none."""
     tasks = board.get("tasks", [])
@@ -323,17 +361,25 @@ class ActiveTask:
     auraient sinon désigné la tâche — rattachés à cette session, ou sans
     session. Ils ne désignent plus rien ; ils sont nommés pour que le message
     dise « claim expiré » plutôt que « aucune tâche ».
+
+    *unreadable* (tri R38/R39) : ce que la résolution n'a pas pu lire — le
+    ledger (``events.jsonl``) ou le board (``task-board.yaml``) existe mais est
+    corrompu. Une source illisible n'est pas une source vide : quand rien
+    d'autre ne désigne de tâche, la source vaut ``unreadable`` (et non
+    ``bootstrap``) pour que le message dise « illisible » au lieu de « aucune
+    tâche en cours ».
     """
 
     task_id: str
     source: str
     candidates: tuple[str, ...] = ()
     expired: tuple[str, ...] = ()
+    unreadable: tuple[str, ...] = ()
 
     @property
     def is_fallback(self) -> bool:
-        """``True`` quand aucune tâche n'est désignée (``bootstrap``, ambiguë ou non)."""
-        return self.source in ("bootstrap", "ambiguous")
+        """``True`` quand aucune tâche n'est désignée (``bootstrap``, ``unreadable`` ou ambiguë)."""
+        return self.source in ("bootstrap", "ambiguous", "unreadable")
 
 
 def current_session(env: Mapping[str, str] | None = None) -> tuple[str, str]:
@@ -386,22 +432,41 @@ class _Claim(NamedTuple):
 def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
     """Les claims ``claimed``/``running``, expirés compris — ``session_id`` vide si non rattaché.
 
-    Ne lève jamais : un ledger illisible vaut « aucun claim ».
+    Ne lève jamais : un ledger illisible vaut « aucun claim » pour cet appelant ;
+    la résolution de tâche, elle, passe par :func:`_held_claims_checked` et sait
+    le dire.
+    """
+    return _held_claims_checked(project_root, actor=actor)[0]
+
+
+def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_Claim], str]:
+    """Les claims tenus, et ce que le ledger a d'illisible (``""`` s'il se lit en entier).
+
+    Un ledger absent est légitime (projet qui n'a jamais ouvert de tâche) : pas
+    de problème. Un ledger présent mais dont des lignes sont corrompues, ou que
+    le rejeu ne peut pas lire du tout, est signalé : l'appelant ne doit pas le
+    prendre pour « aucune tâche ».
     """
     events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
     if not events.is_file():
-        return []
+        return [], _not_a_file(events, f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl")
     try:
         from grimoire.missions.ledger import MissionLedger
         from grimoire.missions.schemas import TaskState
 
-        tasks = MissionLedger(events.parent).list_tasks()
-    except Exception:  # frontière de hook : ne jamais casser une session
-        return []
+        ledger = MissionLedger(events.parent)
+        tasks = ledger.list_tasks()
+        bad_lines = ledger.unreadable_lines()
+    except Exception as exc:  # frontière de hook : ne jamais casser une session
+        return [], f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl illisible ({type(exc).__name__})"
+    problem = ""
+    if bad_lines:
+        shown = ", ".join(str(n) for n in bad_lines[:5]) + (" …" if len(bad_lines) > 5 else "")
+        problem = f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl : ligne(s) illisible(s) ({shown})"
     active = [t for t in tasks if t.status in (TaskState.CLAIMED, TaskState.RUNNING) and t.claim is not None]
     if actor:
         active = [t for t in active if t.claim is not None and t.claim.actor_id == actor]
-    return [
+    claims = [
         _Claim(
             t.id,
             t.claim.session_id,
@@ -413,6 +478,7 @@ def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
         for t in active
         if t.claim is not None
     ]
+    return claims, problem
 
 
 def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
@@ -531,13 +597,14 @@ def resolve_active_task(
     actor = str(environ.get(ACTOR_ENV, "")).strip()
     # Un seul rejeu du ledger par résolution (K13) : les claims tenus servent à la règle 2
     # comme à la règle 3, qui les relisaient chacune en entier.
-    every_held = _held_claims(project_root)
+    every_held, ledger_problem = _held_claims_checked(project_root)
+    ledger_unreadable = (ledger_problem,) if ledger_problem else ()
     if session:
         mine = [c for c in every_held if not c.expired and c.session_id == session]
         chosen = _claim_of_session(mine, actor, agent_id.strip())
         if chosen is not None:
             try:
-                return ActiveTask(normalize_task_id(chosen), "session_claim")
+                return ActiveTask(normalize_task_id(chosen), "session_claim", unreadable=ledger_unreadable)
             except ValueError:
                 pass
 
@@ -547,26 +614,36 @@ def resolve_active_task(
     # celle-ci — B retombe sur bootstrap/ambiguous, jamais sur la tâche de A.
     if len(claims) == 1 and (not session or claims[0].session_id in ("", session)):
         try:
-            return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim")
+            return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim", unreadable=ledger_unreadable)
         except ValueError:
             pass
     expired = tuple(c.task_id for c in held if c.expired and c.session_id in ("", session))
 
     root = project_root.resolve()
 
-    def compute() -> list[str]:
-        tasks = _load_mapping(root / TASK_BOARD_RELPATH).get("tasks")
+    def compute() -> dict[str, Any]:
+        board_path = root / TASK_BOARD_RELPATH
+        problem = _board_problem(board_path)
+        tasks = _load_mapping(board_path).get("tasks")
         if not isinstance(tasks, list):
-            return []
-        return [
-            str(task.get("task_id", ""))
-            for task in tasks
-            if isinstance(task, dict) and str(task.get("status", "")) == "in_progress" and task.get("task_id")
-        ]
+            return {"in_progress": [], "problem": problem}
+        return {
+            "in_progress": [
+                str(task.get("task_id", ""))
+                for task in tasks
+                if isinstance(task, dict) and str(task.get("status", "")) == "in_progress" and task.get("task_id")
+            ],
+            "problem": problem,
+        }
 
-    in_progress = _cached_or_fresh(
-        root, "board_in_progress", TASK_BOARD_RELPATH, compute, write_cache=write_cache
-    )
+    board_state = _cached_or_fresh(root, "board_state", TASK_BOARD_RELPATH, compute, write_cache=write_cache)
+    in_progress = board_state.get("in_progress", []) if isinstance(board_state, dict) else []
+    # Un dossier ou un lien cassé a la même empreinte qu'un board absent (stat échoue) : jamais lu du cache.
+    board_file = root / TASK_BOARD_RELPATH
+    board_problem = (
+        _not_a_file(board_file, f"board {TASK_BOARD_RELPATH.as_posix()}") if not board_file.is_file() else ""
+    ) or (str(board_state.get("problem", "")) if isinstance(board_state, dict) else "")
+    unreadable = tuple(p for p in (ledger_problem, board_problem) if p)
     # Le board projette les claims du ledger en `in_progress` : sans ce filtre,
     # un claim expiré ou tenu par une autre session reviendrait par la règle 4.
     disqualified = {
@@ -574,9 +651,12 @@ def resolve_active_task(
     }
     in_progress = [tid for tid in in_progress if tid not in disqualified]
     if len(in_progress) == 1:
-        return ActiveTask(normalize_task_id(in_progress[0]), "board")
+        return ActiveTask(normalize_task_id(in_progress[0]), "board", unreadable=unreadable)
     if len(claims) > 1:
-        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims), expired)
+        return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims), expired, unreadable)
+    if unreadable:
+        # Une source corrompue n'est pas une source vide : dire « illisible », pas « aucune tâche ».
+        return ActiveTask("bootstrap", "unreadable", expired=expired, unreadable=unreadable)
     return ActiveTask("bootstrap", "bootstrap", expired=expired)
 
 

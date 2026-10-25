@@ -98,6 +98,15 @@ needs:
     extra_tech_extras: [mcp]
     rationale: "Route tool/MCP calls through a trust gate mapped to OWASP agentic threats before execution."
 
+  - id: web
+    label: "Agent reads the web or other untrusted content"
+    tier: advanced
+    recommended_profile: controlled
+    patterns: [prompt-injection-firewall, plan-then-execute]
+    memory_capabilities: []
+    extra_tech_extras: []
+    rationale: "Isolate untrusted content and freeze the plan before reading it, so what is read cannot steer consequential actions."
+
   - id: hooks-skills-governance
     label: "Govern hooks and skills (gateway + classification)"
     tier: advanced
