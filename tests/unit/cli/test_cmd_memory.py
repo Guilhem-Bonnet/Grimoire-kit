@@ -11,6 +11,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+# Les sous-modules de `memory` (shared, ops, projections, bundle...) sont chargés au premier appel de
+# `memory ...` ; importés sous un `patch("grimoire.cli.cmd_memory._load_config_context")`, ils lieraient
+# le double pour de bon et fausseraient tous les tests suivants du même processus.
+import grimoire.cli.cmd_memory_lexical  # noqa: F401
 from grimoire.cli.app import app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
@@ -540,13 +544,12 @@ class TestMigrateRun:
         assert data["imported"] == 0
         assert data["dryRun"] is True
 
-    def test_apply_writes_through_store_many(self, tmp_path: Path) -> None:
+    def test_apply_writes_through_upsert_keeping_ids(self, tmp_path: Path) -> None:
         write_previous_backend_breadcrumb(tmp_path, "lexical")
         cfg = _migrate_cfg()
         source_mgr = MagicMock()
         source_mgr.get_all.return_value = [MemoryEntry(id="e1", text="a", user_id="g")]
         target_mgr = MagicMock()
-        target_mgr.store_many.return_value = [MemoryEntry(id="e1", text="a", user_id="g")]
         with (
             patch("grimoire.cli.cmd_memory._load_config_context", return_value=(cfg, tmp_path)),
             patch("grimoire.cli.cmd_memory.MemoryManager.from_config", return_value=source_mgr),
@@ -556,7 +559,9 @@ class TestMigrateRun:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["imported"] == 1
-        target_mgr.store_many.assert_called_once()
+        target_mgr.store_many.assert_not_called()
+        target_mgr.upsert.assert_called_once()
+        assert target_mgr.upsert.call_args.args[:2] == ("e1", "a")
 
     def test_no_known_source_is_a_clear_error(self, tmp_path: Path) -> None:
         with patch("grimoire.cli.cmd_memory._load_config_context", return_value=(_migrate_cfg(), tmp_path)):

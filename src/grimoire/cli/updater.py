@@ -120,6 +120,50 @@ def detect_update_cmd() -> tuple[list[str], str]:
     )
 
 
+def extras_install_cmd(
+    extras: Sequence[str],
+    *,
+    manager: tuple[str, str | None] | None = None,
+) -> tuple[list[str], str]:
+    """Commande qui ajoute des extras au kit déjà installé : ``(argv, conseil_manuel)``.
+
+    Source unique des remèdes « il manque un extra » : un kit installé par
+    ``uv tool`` ou ``pipx`` vit dans un environnement isolé sans ``pip`` ; un
+    ``pip install`` nu y échoue, ou installe dans un autre environnement. Le
+    gestionnaire est détecté comme pour la mise à jour (:func:`_detect_manager`).
+    """
+    kind, binary = manager or _detect_manager()
+    wanted = list(extras)
+    name = f"grimoire-kit[{','.join(wanted)}]" if wanted else "grimoire-kit"
+    carry = _carried_uv_options(kind, binary)
+    hint = registry_install_cmd((kind, binary), wanted, carry)
+    if kind == "uv" and binary:
+        return [binary, "tool", "install", "--force", *carry, name], hint
+    if kind == "pipx" and binary:
+        return [binary, "install", "--force", name], hint
+    return [sys.executable, "-m", "pip", "install", name], hint
+
+
+def extras_install_hint(extras: Sequence[str]) -> str:
+    """Le conseil manuel de :func:`extras_install_cmd`, pour un message ou une étape."""
+    return extras_install_cmd(extras)[1]
+
+
+def _carried_uv_options(kind: str, binary: str | None) -> list[str]:
+    """Options ``--with`` / ``--python`` de l'installation d'origine (uv seulement), sinon rien."""
+    if kind != "uv" or not binary:
+        return []
+    from grimoire.tools import install_receipt as receipt
+
+    receipt_file = _receipt_file((kind, binary))
+    if receipt_file is None:
+        return []
+    try:
+        return list(receipt.uv_carried_options(receipt_file))
+    except Exception:  # reçu absent ou d'une forme inconnue : on propose sans les options
+        return []
+
+
 def verified_install_cmd(
     wheel: Path,
     extras: list[str],

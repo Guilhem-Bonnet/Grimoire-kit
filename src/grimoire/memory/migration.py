@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib import error, parse, request
 
+from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import MemoryEntry
 
 #: Breadcrumb left by ``memory up --apply`` whenever it changes
@@ -119,6 +120,10 @@ class BackendMigrationResult:
     entries: int
     imported: int
     dry_run: bool
+    #: Entrées lues dans la source mais écartées par ``--project`` (autre projet).
+    filtered_out: int = 0
+    #: Projet demandé (``metadata.project_name``), vide = aucun filtre.
+    project: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,7 +132,33 @@ class BackendMigrationResult:
             "entries": self.entries,
             "imported": self.imported,
             "dryRun": self.dry_run,
+            "filteredOut": self.filtered_out,
+            "project": self.project,
         }
+
+
+class MigrationInterruptedError(GrimoireMemoryError):
+    """Écriture interrompue en cours de migration.
+
+    La source n'a jamais été modifiée (la migration ne fait que la lire) et la
+    copie se fait par upsert à identifiant conservé : relancer la même
+    commande reprend sans doublon.
+    """
+
+    def __init__(self, imported: int, total: int, cause: Exception) -> None:
+        self.imported = imported
+        self.total = total
+        super().__init__(
+            f"migration interrompue après {imported}/{total} souvenir(s) : {cause}. "
+            "La source est intacte ; relancer la même commande reprend sans doublon."
+        )
+
+
+def filter_by_project(entries: list[MemoryEntry], project: str) -> list[MemoryEntry]:
+    """Garde les entrées dont ``metadata.project_name`` vaut *project* ; sans filtre, tout."""
+    if not project:
+        return list(entries)
+    return [e for e in entries if str(e.metadata.get("project_name", "")) == project]
 
 
 def migrate_backend_to_backend(
@@ -135,28 +166,47 @@ def migrate_backend_to_backend(
     *,
     source_backend: str,
     target_backend: str,
-    store_many: Callable[[list[dict[str, Any]]], list[Any]] | None,
+    store_many: Callable[[list[dict[str, Any]]], list[Any]] | None = None,
+    upsert: Callable[[MemoryEntry], Any] | None = None,
     dry_run: bool = False,
+    project: str = "",
 ) -> BackendMigrationResult:
-    """Copy *source_entries* into whatever backend *store_many* writes to.
+    """Copy *source_entries* into whatever backend *upsert* (or *store_many*) writes to.
 
     Replaces the manual ``memory export`` + ``memory import`` two-step (#527):
     both sides are the public manager API, so this works for any backend pair
     a :class:`~grimoire.memory.manager.MemoryManager` can construct — lexical
     included, since it has no vector to preserve and none is required here.
-    ``store_many`` is ``None`` in dry-run mode: nothing is called, only counted.
+
+    *upsert* est le chemin normal : chaque entrée est écrite sous **son
+    identifiant d'origine**, donc une relance ne crée aucun doublon et les
+    références entre souvenirs (``superseded_by``) restent valides.
+    *store_many* (identifiants régénérés) ne subsiste que pour les appelants
+    qui n'ont pas d'upsert. *project* ne copie que les entrées de ce projet.
+    Les deux sont ``None`` en aperçu : rien n'est appelé, tout est compté.
     """
+    selected = filter_by_project(source_entries, project)
     imported = 0
-    if not dry_run and source_entries:
-        if store_many is None:
-            raise ValueError("store_many is required unless dry_run=True")
-        imported = len(store_many(entries_for_import(source_entries)))
+    if not dry_run and selected:
+        if upsert is not None:
+            for entry in selected:
+                try:
+                    upsert(entry)
+                except Exception as exc:
+                    raise MigrationInterruptedError(imported, len(selected), exc) from exc
+                imported += 1
+        elif store_many is not None:
+            imported = len(store_many(entries_for_import(selected)))
+        else:
+            raise ValueError("upsert or store_many is required unless dry_run=True")
     return BackendMigrationResult(
         source_backend=source_backend,
         target_backend=target_backend,
-        entries=len(source_entries),
+        entries=len(selected),
         imported=imported,
         dry_run=dry_run,
+        filtered_out=len(source_entries) - len(selected),
+        project=project,
     )
 
 

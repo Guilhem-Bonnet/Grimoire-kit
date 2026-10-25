@@ -163,6 +163,62 @@ Un écart signale un objet écrit d'un côté sans contrepartie de l'autre — l
 `grimoire memory gate --sync`. La sonde reste légère (trois `COUNT`), là où
 `grimoire memory graph verify` reconstruit tout le code graph.
 
+### Pile Docker reproductible
+
+Les gabarits et les commandes de démarrage proposés par le kit épinglent une
+version exacte (Qdrant `v1.19.1`, Weaviate `1.35.19`, Neo4j `5.26.25`, Redis
+`7.4.2-alpine`) : jamais `latest`, donc la même pile d'un poste à l'autre.
+Redis est lancé avec `--restart unless-stopped`. Avant de créer Redis, le kit
+cherche un conteneur existant de la même image qui publie le même port : un
+conteneur actif n'est pas doublé, un conteneur arrêté du même nom est
+redémarré.
+
+**Si vous avez déjà un `docker-compose.memory.yml` généré par une version
+précédente**, il n'est pas réécrit (c'est votre fichier). Le gabarit des
+nouveaux projets change ainsi :
+
+- l'image passe de `qdrant/qdrant:latest` à `qdrant/qdrant:v1.19.1` ;
+- plus de `container_name: grimoire-qdrant` (deux projets sur le même poste ne
+  se disputent plus le nom ; Compose le dérive du nom du projet) ;
+- les ports se lisent dans `GRIMOIRE_QDRANT_PORT` / `GRIMOIRE_QDRANT_GRPC_PORT` ;
+  l'ancienne graphie `Grimoire_QDRANT_PORT` reste acceptée.
+
+Le volume `grimoire-qdrant-storage` garde son nom : vos données ne bougent pas.
+
+Les remèdes « il manque un extra » (`memory up`, `standard init`, `standard
+doctor`) emploient le gestionnaire qui a installé le kit (`uv tool install`,
+`pipx install` ou `pip`), comme `grimoire update`.
+
+### Une base Neo4j, plusieurs projets
+
+Toute écriture du graphe porte la clé du projet (propriété `project`, valeur
+`project.name`). Les compteurs de `memory status`, `memory graph verify` et le
+repérage des orphelins ne lisent que les nœuds du projet : une base partagée ne
+fait plus passer les nœuds d'un autre projet pour les vôtres, ni l'inverse.
+
+Les identifiants que deux projets pourraient se disputer sont préfixés
+`<projet>::` : nœuds de code (`CodeNode.id`, avec l'identifiant d'origine dans
+`local_id`), étiquettes, entités et agents (le nom lisible reste dans `label`).
+C'est une clé à une seule propriété, donc valable dans toutes les éditions de
+Neo4j (les clés composites sont réservées à l'édition entreprise). Deux projets
+qui emploient le même tag ne fusionnent plus ce nœud.
+
+Le constructeur du graphe n'écrit plus rien : les contraintes sont posées par
+les commandes de synchronisation (`graph sync-code`, `sync-tasks`,
+`sync-memories`, `memory gate --sync`) et à la première écriture du manager.
+
+**Migration d'une base existante.** Les nœuds écrits avant la clé n'ont pas de
+`project` : ils ne sont plus comptés (`memory status` signale
+`unattributed_nodes`). Lancer une fois :
+
+```bash
+grimoire memory graph backfill-project            # aperçu chiffré, rien n'est écrit
+grimoire memory graph backfill-project --apply
+```
+
+Le rattrapage n'attribue que des nœuds sans projet, jamais ceux d'un autre, et
+se rejoue sans effet.
+
 ### Sondes d'environnement
 
 `grimoire doctor` sonde Weaviate, Neo4j et Redis en plus de Qdrant et Ollama,

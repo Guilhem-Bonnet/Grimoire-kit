@@ -6,15 +6,19 @@
 #   docker compose -f docker-compose.memory.yml down
 #
 # Dashboard : http://localhost:6333/dashboard
+#
+# Ports : GRIMOIRE_QDRANT_PORT / GRIMOIRE_QDRANT_GRPC_PORT (l'ancienne graphie
+# Grimoire_QDRANT_PORT reste acceptée). Un second projet sur la même machine
+# change ces ports ; le nom du conteneur, lui, est dérivé du projet Compose
+# (plus de `container_name` fixe, qui faisait entrer deux projets en conflit).
 
 services:
   qdrant:
-    image: qdrant/qdrant:latest
-    container_name: grimoire-qdrant
+    image: qdrant/qdrant:v1.19.1
     restart: unless-stopped
     ports:
-      - "${Grimoire_QDRANT_PORT:-6333}:6333"
-      - "${Grimoire_QDRANT_GRPC_PORT:-6334}:6334"
+      - "${GRIMOIRE_QDRANT_PORT:-${Grimoire_QDRANT_PORT:-6333}}:6333"
+      - "${GRIMOIRE_QDRANT_GRPC_PORT:-${Grimoire_QDRANT_GRPC_PORT:-6334}}:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:

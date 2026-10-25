@@ -1174,6 +1174,10 @@
    "version": "3.63.0",
    "path": "framework/workflows/party-mode.md"
   },
+  "4f74a9ed16f1ab163fdb234ec1e1929496d831e5f6a726c0093cd96a0c0811ed": {
+   "version": "3.65.0",
+   "path": "framework/memory/k8s-qdrant.tpl.yaml"
+  },
   "4f92d0051658af4b04666e1595aae12d1fd98397caa9f10e490c3884decb92e0": {
    "version": "3.6.1",
    "path": "framework/cc-verify.sh"
@@ -3982,6 +3986,10 @@
    "version": "3.48.0",
    "path": "framework/tools/tool-registry.py"
   },
+  "f08bd6d6b54a06f891d56626936fef1bac1e8f832f9cc2935c2f93d169da4ba7": {
+   "version": "3.65.0",
+   "path": "framework/memory/docker-compose.memory.tpl.yml"
+  },
   "f0b87ec73514e53b459effb6f9541b00f1a76ee189e3bc443b5921e4eab6ac26": {
    "version": "3.36.0",
    "path": "framework/agentic-standard/templates/runtime-surface-registry.yaml"
@@ -3997,6 +4005,10 @@
   "f11af45cac2df5b811d867286e1291ae43eae2b99537ec89f3a1f554801c0667": {
    "version": "3.32.0",
    "path": "framework/agent-base.md"
+  },
+  "f12171848f73cc01cf4ea82977034600c45bd6d41b5d46f9ff6f778d56e595cc": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "f163f4c47e0ab022c041421be75296afd809231c8906fb1b7d127b452be18a22": {
    "version": "3.16.0",

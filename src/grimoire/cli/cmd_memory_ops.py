@@ -12,6 +12,7 @@ mémoire à connaître.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -190,7 +191,7 @@ def memory_graph_sync_memories(ctx: typer.Context) -> None:
     from grimoire.memory.projections import sync_memory_projection
 
     mgr, cfg, _ = _load_manager_context()
-    graph = _load_neo4j_graph(cfg)
+    graph = _load_neo4j_graph(cfg, ensure_schema=True)
     try:
         stats = sync_memory_projection(graph, mgr.get_all())
     finally:
@@ -554,3 +555,130 @@ def memory_doctor(ctx: typer.Context, apply: bool = _doctor_apply_opt) -> None:
             console.print("  Relancez avec [cyan]--apply[/cyan] pour purger.")
 
 
+
+
+# ── grimoire memory split ─────────────────────────────────────────────────────
+
+_split_source_opt = typer.Option(
+    "", "--source-collection",
+    help="Collection partagée à découper (défaut : celle de la configuration courante).",
+)
+_split_projects_opt = typer.Option(
+    "", "--projects", help="Ne découper que ces projets (noms séparés par des virgules). Défaut : tous.",
+)
+_split_export_opt = typer.Option(
+    None, "--export", help="Fichier JSON de sauvegarde de la source (défaut : _grimoire/_memory/migration/split-*.json).",
+)
+_split_apply_opt = typer.Option(
+    False, "--apply", help="Copier et vérifier. Sans ce drapeau : aperçu seul. La source n'est jamais supprimée.",
+)
+
+
+def _registry_configs(source_identity: tuple[str, str], current_root: Path) -> dict[str, Path]:
+    """``nom de projet → project-context.yaml`` pour les projets du registre qui lisent la source."""
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.memory.manager import store_identity
+    from grimoire.tools.project_registry import load_registry
+
+    found: dict[str, Path] = {}
+    seen: set[Path] = set()
+    candidates = [str(current_root)] + [str(e.get("path", "")) for e in load_registry()]
+    for raw in candidates:
+        if not raw:
+            continue
+        root = Path(raw)
+        config_path = root / "project-context.yaml"
+        if config_path in seen or not config_path.is_file():
+            continue
+        seen.add(config_path)
+        try:
+            cfg = GrimoireConfig.from_yaml(config_path)
+        except Exception as exc:  # un projet du registre illisible n'arrête pas la découpe des autres
+            logging.getLogger(__name__).info("registre : %s ignoré (%s)", config_path, exc)
+            continue
+        if store_identity(cfg, root) == source_identity:
+            found.setdefault(cfg.project.name, config_path)
+    return found
+
+
+@memory_app.command("split")
+def memory_split(
+    ctx: typer.Context,
+    source_collection: str = _split_source_opt,
+    projects: str = _split_projects_opt,
+    export: Path | None = _split_export_opt,
+    apply: bool = _split_apply_opt,
+) -> None:
+    """Découper un segment mémoire partagé en un segment par projet — identifiants conservés.
+
+    Groupe les souvenirs de la collection partagée par ``project_name``, les copie par
+    upsert dans ``<collection>-<projet>`` (mêmes identifiants, donc ``superseded_by``
+    reste valide), vérifie les comptes et les identifiants, puis repointe
+    ``memory.collection_prefix`` de chaque projet du registre qui lisait le segment.
+
+    Aperçu par défaut. Avec ``--apply`` : export JSON de la source d'abord, copie, vérification,
+    mise à jour des configurations seulement si tout est vérifié. La source n'est ni modifiée
+    ni supprimée ; relançable sans doublon.
+    """
+    import time
+    from dataclasses import replace as _dc_replace
+
+    from grimoire.memory.manager import store_identity
+    from grimoire.memory.split import SplitError, apply_split, plan_split, set_collection_prefix
+
+    cfg, root = _load_config_context()
+    source_mem = _dc_replace(cfg.memory, collection_prefix=source_collection or cfg.memory.collection_prefix)
+    source_cfg = _dc_replace(cfg, memory=source_mem)
+    try:
+        source_mgr = MemoryManager.from_config(source_cfg, project_root=root)
+    except GrimoireMemoryError as exc:
+        console.print(f"[red]Backend source indisponible ({source_mem.backend}) :[/red] {exc}")
+        raise typer.Exit(1) from None
+    entries = source_mgr.get_all()
+
+    wanted = [p.strip() for p in projects.split(",") if p.strip()]
+    plan = plan_split(
+        entries,
+        source_collection=source_mem.collection_prefix,
+        configs=_registry_configs(store_identity(source_cfg, root), root),
+        only=wanted,
+    )
+
+    report = None
+    if apply and plan.groups:
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        export_path = export or root / "_grimoire" / "_memory" / "migration" / f"split-{stamp}.json"
+
+        def _open_target(collection: str) -> MemoryManager:
+            target_cfg = _dc_replace(cfg, memory=_dc_replace(source_mem, collection_prefix=collection))
+            return MemoryManager.from_config(target_cfg, project_root=root)
+
+        try:
+            report = apply_split(
+                plan, entries, export_path=export_path, open_target=_open_target, update_config=set_collection_prefix,
+            )
+        except SplitError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from None
+
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"apply": apply, **plan.to_dict(), "report": report.to_dict() if report else None}, indent=2))
+        return
+
+    table = Table(title=f"Découpe de « {plan.source_collection} » ({plan.total} souvenir(s))")
+    table.add_column("Projet")
+    table.add_column("Souvenirs", justify="right")
+    table.add_column("Collection cible")
+    table.add_column("Configuration à repointer")
+    for g in plan.groups:
+        table.add_row(g.project, str(g.count), g.collection, str(g.config_path) if g.config_path else "[dim]hors registre[/dim]")
+    console.print(table)
+    if plan.unassigned:
+        console.print(f"  [yellow]{len(plan.unassigned)} souvenir(s) sans project_name[/yellow] restent dans le segment partagé.")
+    if report is None:
+        console.print("  Aperçu : rien n'est écrit. Relancez avec [cyan]--apply[/cyan] (export JSON d'abord, source intacte).")
+        return
+    console.print(f"  [green]Copiés et vérifiés[/green] : {sum(report.copied.values())} — export : {report.export_path}")
+    for path in report.configs_updated:
+        console.print(f"  [green]config repointée[/green] : {path}")
+    console.print("  La source est intacte : la supprimer est un geste séparé, une fois la découpe vérifiée.")

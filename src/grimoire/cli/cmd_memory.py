@@ -184,7 +184,9 @@ def _parse_granularity(raw: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
-def _load_neo4j_graph(cfg: GrimoireConfig) -> Any:
+def _load_neo4j_graph(cfg: GrimoireConfig, *, ensure_schema: bool = False) -> Any:
+    """Graphe Neo4j du projet. Le constructeur n'écrit rien : *ensure_schema* pose les contraintes
+    (commandes de synchronisation uniquement, jamais une lecture)."""
     from grimoire.memory.neo4j_graph import Neo4jMemoryGraph
 
     if not cfg.memory.neo4j_uri:
@@ -195,12 +197,16 @@ def _load_neo4j_graph(cfg: GrimoireConfig) -> Any:
         console.print(f"[red]Missing Neo4j password env:[/red] {cfg.memory.neo4j_password_env}")
         raise typer.Exit(2)
     try:
-        return Neo4jMemoryGraph(
+        graph = Neo4jMemoryGraph(
             uri=cfg.memory.neo4j_uri,
             user=cfg.memory.neo4j_user,
             password=password,
             database=cfg.memory.neo4j_database,
+            project=cfg.project.name,
         )
+        if ensure_schema:
+            graph.ensure_schema()
+        return graph
     except ImportError as exc:
         console.print(f"[red]Neo4j graph unavailable:[/red] {exc}")
         raise typer.Exit(2) from None
@@ -306,7 +312,7 @@ def memory_gate(
         elif not os.environ.get(cfg.memory.neo4j_password_env, ""):
             _append_gate_issue(report, f"Neo4j password env missing: {cfg.memory.neo4j_password_env}")
         else:
-            graph = _load_neo4j_graph(cfg)
+            graph = _load_neo4j_graph(cfg, ensure_schema=sync)
             try:
                 ledger = MissionLedger(ledger_path)
                 evidence = EvidenceService(evidence_path)
@@ -476,6 +482,13 @@ _migrate_run_source_opt = typer.Option(
 _migrate_run_apply_opt = typer.Option(
     False, "--apply", help="Écrire dans le backend courant. Sans ce drapeau : aperçu seul.",
 )
+_migrate_run_project_opt = typer.Option(
+    "", "--project", help="Ne migrer que les souvenirs de ce projet (metadata.project_name).",
+)
+_migrate_run_collection_opt = typer.Option(
+    "", "--source-collection",
+    help="Collection de la source, si elle diffère de celle de la cible (même type de backend accepté).",
+)
 
 
 @migrate_app.command("run")
@@ -483,6 +496,8 @@ def memory_migrate_run(
     ctx: typer.Context,
     source: str = _migrate_run_source_opt,
     apply: bool = _migrate_run_apply_opt,
+    project: str = _migrate_run_project_opt,
+    source_collection: str = _migrate_run_collection_opt,
 ) -> None:
     """Migrer les souvenirs d'un ancien backend vers le backend courant — sans bundle ni fichier.
 
@@ -497,10 +512,21 @@ def memory_migrate_run(
     La source est ``--source``, sinon ``memory.migration_source_backend``,
     sinon la sauvegarde laissée par le dernier `memory up --apply` qui a
     changé de backend.
+
+    La copie se fait par upsert **sous l'identifiant d'origine** : une relance ne
+    crée aucun doublon, ``superseded_by`` reste valide, et une interruption
+    laisse la source intacte. ``--project`` ne copie que les souvenirs d'un
+    projet ; ``--source-collection`` lit une autre collection du même type de
+    backend (découpe d'un segment partagé).
     """
     from dataclasses import replace as _dc_replace
 
-    from grimoire.memory.migration import migrate_backend_to_backend, read_previous_backend_breadcrumb
+    from grimoire.memory.manager import store_identity
+    from grimoire.memory.migration import (
+        MigrationInterruptedError,
+        migrate_backend_to_backend,
+        read_previous_backend_breadcrumb,
+    )
 
     cfg, root = _load_config_context()
     target_backend = cfg.memory.backend
@@ -511,12 +537,18 @@ def memory_migrate_run(
             "`grimoire memory up --apply` (qui laisse la trace du backend précédent)."
         )
         raise typer.Exit(2)
-    if source_backend == target_backend:
+    source_mem = _dc_replace(cfg.memory, backend=source_backend)
+    if source_collection:
+        source_mem = _dc_replace(
+            source_mem, collection_prefix=source_collection,
+            weaviate_collection=source_collection if source_backend == "weaviate-server" else source_mem.weaviate_collection,
+        )
+    source_cfg = _dc_replace(cfg, memory=source_mem)
+    if store_identity(source_cfg, root) == store_identity(cfg, root):
         console.print(f"[yellow]Source et cible identiques ({target_backend}) — rien à migrer.[/yellow]")
         return
 
     try:
-        source_cfg = _dc_replace(cfg, memory=_dc_replace(cfg.memory, backend=source_backend))
         source_mgr = MemoryManager.from_config(source_cfg, project_root=root)
     except GrimoireMemoryError as exc:
         console.print(f"[red]Backend source indisponible ({source_backend}):[/red] {exc}")
@@ -527,13 +559,21 @@ def memory_migrate_run(
     if apply:
         target_mgr, _, _ = _load_manager_context()
 
-    result = migrate_backend_to_backend(
-        entries,
-        source_backend=source_backend,
-        target_backend=target_backend,
-        store_many=target_mgr.store_many if target_mgr is not None else None,
-        dry_run=not apply,
-    )
+    try:
+        result = migrate_backend_to_backend(
+            entries,
+            source_backend=source_backend,
+            target_backend=target_backend,
+            upsert=(
+                (lambda e: target_mgr.upsert(e.id, e.text, user_id=e.user_id, tags=e.tags, metadata=dict(e.metadata)))
+                if target_mgr is not None else None
+            ),
+            dry_run=not apply,
+            project=project,
+        )
+    except MigrationInterruptedError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
 
     if _get_fmt(ctx) == "json":
         typer.echo(json.dumps(result.to_dict(), indent=2))
@@ -542,6 +582,8 @@ def memory_migrate_run(
     verb = "Migrés" if apply else "À migrer (aperçu)"
     console.print(f"[bold]{source_backend} → {target_backend}[/bold]")
     console.print(f"  {verb} : {result.entries} souvenir(s)")
+    if project:
+        console.print(f"  Projet « {project} » : {result.filtered_out} souvenir(s) d'autres projets laissés")
     if apply:
         console.print(f"  [green]écrits[/green] : {result.imported}")
     else:

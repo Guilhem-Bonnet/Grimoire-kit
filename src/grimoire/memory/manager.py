@@ -308,6 +308,7 @@ def _create_memory_graph(config: GrimoireConfig) -> tuple[Any | None, str]:
             user=mem.neo4j_user,
             password=password,
             database=mem.neo4j_database,
+            project=config.project.name,
         ), ""
     except ImportError as exc:
         return None, f"Neo4j graph sync disabled: {exc}"
@@ -456,6 +457,8 @@ class MemoryManager:
         self._auto_enrich = auto_enrich
         self._sidecar = sidecar
         self._memory_graph = memory_graph
+        #: Contraintes du graphe posées à la première écriture, jamais à la construction.
+        self._graph_schema_ready = False
         self._graph_sync_issue = graph_sync_issue
         self._hot_memory = hot_memory
         self._hot_memory_issue = hot_memory_issue
@@ -1356,6 +1359,11 @@ class MemoryManager:
         if self._memory_graph is None:
             return
         try:
+            if not self._graph_schema_ready:
+                ensure_schema = getattr(self._memory_graph, "ensure_schema", None)
+                if callable(ensure_schema):
+                    ensure_schema()
+                self._graph_schema_ready = True
             self._memory_graph.upsert_memory(entry)
         except Exception as exc:
             self._record_graph_sync_issue("memory", exc)
