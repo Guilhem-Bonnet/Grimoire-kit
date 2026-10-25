@@ -138,7 +138,7 @@ Termes liés : [Toile](#toile), [Board gouverné](#board-gouverne)
 
 ## Atelier {: #atelier }
 
-L'hôte mono-projet servi par `grimoire serve` : la vue de travail appliquée au projet courant.
+L'hôte mono-projet servi par `grimoire cockpit serve` lancé depuis un projet : la vue de travail appliquée au projet courant.
 
 Termes liés : [Cockpit](#cockpit), [Projet](#projet), [Kit](#kit)
 

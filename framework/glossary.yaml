@@ -178,7 +178,7 @@ entries:
   - id: atelier
     nom: Atelier
     définition: >-
-      L'hôte mono-projet servi par `grimoire serve` : la vue de travail
+      L'hôte mono-projet servi par `grimoire cockpit serve` lancé depuis un projet : la vue de travail
       appliquée au projet courant.
     raccourci: ""
     termes: [cockpit, projet, kit]
