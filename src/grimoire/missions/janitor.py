@@ -76,11 +76,11 @@ def janitor_active(service: TaskService, policy: OrchestratorPolicy | None) -> b
     return bool(launched_sessions(service))
 
 
-def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # arguments fixes, sans shell
-        ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=120, check=False,
-    )
+def _git(cwd: Path, *args: str, push: bool = False) -> subprocess.CompletedProcess[str]:
+    """Le git durci du tick (:mod:`grimoire.core.safe_git`) : ni hooks, ni exécutable venu de la configuration du dépôt."""
+    from grimoire.core.safe_git import PUSH_ARGS, run
+
+    return run(args, cwd=cwd, extra_args=PUSH_ARGS if push else ())
 
 
 def _after_terminal(events: list[Any]) -> list[Any]:
@@ -292,7 +292,9 @@ class Janitor:
             return "skipped", f"{branch} n'existe pas en local"
         if (refused := self._guard(proof)) is not None:
             return refused
-        if head != proof[2]:
+        # La tête locale peut être un ancêtre de la tête fusionnée : le merger réaligne la branche distante sans toucher
+        # au worktree du worker (lot 4) ; rien de local n'est alors perdu.
+        if head != proof[2] and _git(self._repo, "merge-base", "--is-ancestor", head, proof[2]).returncode != 0:
             return "refused", f"branche conservée : {branch} est à {head[:12]}, la fusion couvre {proof[2][:12]} (commits postérieurs)"
         done = _git(self._repo, "branch", "-D", branch)
         if done.returncode != 0:
@@ -317,7 +319,7 @@ class Janitor:
         if remote_head != proof[2]:
             return "refused", f"branche conservée : {branch} est à {remote_head[:12]} sur {self._remote}, la fusion couvre {proof[2][:12]} (commits postérieurs)"
         # Le bail ferme la fenêtre entre le contrôle et la suppression : un push intermédiaire fait refuser la suppression.
-        done = _git(self._repo, "push", self._remote, f"--force-with-lease=refs/heads/{branch}:{proof[2]}", "--delete", branch)
+        done = _git(self._repo, "push", "--no-verify", self._remote, f"--force-with-lease=refs/heads/{branch}:{proof[2]}", "--delete", branch, push=True)
         if done.returncode != 0:
             return "failed", f"git push --delete {branch} refusé : {(done.stderr or done.stdout).strip()[:200]}"
         return "done", f"{branch} supprimée sur {self._remote} ({proof[1]})"

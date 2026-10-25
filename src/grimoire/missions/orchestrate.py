@@ -167,8 +167,11 @@ def run_tick(
     service = service_factory(project_root) if ledger_root is None else service_factory(project_root, ledger_root)
     if not service.has_ledger:
         return TickReport("idle", state, state.attention(), notes=("aucun ledger : rien à faire",))
+    from grimoire.core.safe_git import tick_scope
+
     if not apply:
-        return _planned(service_factory, service, state, now, effect_probe, ci_probe)
+        with tick_scope(service.home_root):  # revue de #927 : chaque git du tick confiné et durci
+            return _planned(service_factory, service, state, now, effect_probe, ci_probe)
 
     with contextlib.ExitStack() as stack:
         try:
@@ -184,6 +187,7 @@ def run_tick(
                 "sans lui, deux ticks pourraient récolter la même tâche"
             ) from exc
         _sweep_stale_plans(service.home_root / TICK_LOCK_RELPATH.parent)
+        stack.enter_context(tick_scope(service.home_root))  # revue de #927 : chaque git du tick confiné et durci
         return _one_pass(service, state, now, dispatcher, effect_probe, ci_probe, mode="apply", exec_=exec_)
 
 

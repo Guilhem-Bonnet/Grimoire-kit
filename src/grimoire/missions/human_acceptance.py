@@ -67,7 +67,7 @@ class HumanAcceptance:
 
 def accept_task(
     task: MissionTask, project_root: Path, evidence_root: Path, reason: str, actor: str, *, origin: str,
-    provenance: Mapping[str, Any] | None = None, proof_root: Path | None = None,
+    provenance: Mapping[str, Any] | None = None, proof_root: Path | None = None, head: str | None = None,
 ) -> HumanAcceptance:
     """Range le pack d'attestation, le verdict ``passed`` humain et le reçu ``READY`` de *task* ; lève si refusé.
 
@@ -83,7 +83,8 @@ def accept_task(
 
     *proof_root* (lot 4, le merger) : où vivent les reçus de revue, quand ce n'est pas *project_root* — le worktree
     ``task/<id>`` d'une tâche lancée. Le mandat et la politique d'escalade restent lus sous *project_root*, jamais
-    dans un arbre que le worker écrit.
+    dans un arbre que le worker écrit. *head* : la tête que l'acceptation couvre (la tête fusionnée) ; défaut, la tête
+    de ``task/<id>`` — elle doit être celle du READY scellé, ou un réalignement noté par le merger.
     """
     proofs = proof_root or project_root
     authority = require_authority(
@@ -91,7 +92,7 @@ def accept_task(
         record=False,
     )
     if authority is not None:
-        _require_attested_review(task, project_root, proofs)
+        _require_attested_review(task, project_root, proofs, head)
     if task.status is not TaskState.NEEDS_VERIFICATION:
         raise GrimoireMissionError(
             f"Acceptation refusée pour {task.id} : état {task.status.value}, il faut une tâche en revue "
@@ -139,7 +140,7 @@ def accept_task(
     return HumanAcceptance(pack, verdict, receipt)
 
 
-def _require_attested_review(task: MissionTask, project_root: Path, proofs: Path) -> None:
+def _require_attested_review(task: MissionTask, project_root: Path, proofs: Path, head: str | None = None) -> None:
     """Verrou 7 : sous mandat, l'acceptation s'appuie sur un reçu de revue d'un autre, de provenance attestée."""
     try:
         receipt = read_receipt(proofs, task.id)
@@ -154,7 +155,7 @@ def _require_attested_review(task: MissionTask, project_root: Path, proofs: Path
     from grimoire.missions.mandate import MandateRefusedError
     from grimoire.missions.review_seal import verify
 
-    refusal = verify(project_root, task, proofs)
+    refusal = verify(project_root, task, proofs, head=head)
     if refusal:
         raise MandateRefusedError("receipt_unsealed", f"Acceptation refusée pour {task.id} sous mandat : {refusal}")
 

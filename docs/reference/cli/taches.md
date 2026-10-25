@@ -507,56 +507,65 @@ orchestrator:
       realign_max: 1                # PR réalignées sur la cible à la fois (le débit CI)
       ignored_checks: ["codecov/*"] # hors du verdict, seulement quand gh dit qu'aucun check n'est requis
       max_cycles: 2                 # retours au worker (CI rouge, conflit) avant l'escalade
-      protected_paths: []           # chemins en plus des défauts : jamais fusionnés ni acceptés sous mandat
+      mergeable_paths: []           # liste blanche, en plus de src/*, tests/*, docs/*, CHANGELOG.md
+      protected_paths: []           # refusés même dans la liste blanche, en plus des défauts
 ```
 
 La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
-l'ordre des jugements. Le merger n'ouvre pas de PR : il attend celle du worker sur `task/<id>`. À chaque tick, il
+l'ordre des jugements. Le merger n'ouvre pas de PR : il attend celle du worker sur `task/<id>`. Il ne lance aucune
+commande dans le worktree du worker : il travaille sur la tête de la PR et la cible, en objets git. À chaque tick, il
 vérifie dans cet ordre, et chaque garde échoue fermée :
 
 | Étape | Ce qui est vérifié | Sinon |
 |---|---|---|
-| Worktree | celui du ledger, sur `task/<id>`, dans ce dépôt (même dossier git commun) | refus |
-| PR | ouverte, pas en brouillon, vers la cible du worktree | attente, ou refus si elle est fermée sans fusion |
-| READY | arbre propre ; reçu, pack, tête et arbre égaux au **sceau** posé au journal d'autorité au jugement (ou à un réalignement du merger noté au même journal) | arbre sale : retour au worker ; sceau qui ne tient pas : nouvelle relecture (`task.merge_requeued`) |
-| Tête | la tête locale est celle de la PR | attente ; une tête réalignée non poussée est poussée |
+| Worktree | celui du ledger, sur `task/<id>`, lié à ce dépôt ; configuration du dépôt sous liste blanche | refus |
+| PR | ouverte, du même dépôt (pas d'un fork), pas en brouillon, vers la cible du worktree | attente, ou refus |
+| READY | la tête de la PR est la tête **scellée** au jugement (ou un réalignement du merger noté au même journal) ; reçu et pack inchangés à l'octet | tête relue pas encore poussée : attente ; sinon nouvelle relecture (`task.merge_requeued`) |
 | CI | checks requis (`gh pr checks --required`) ; tous hors `ignored_checks` seulement si gh dit qu'aucun n'est requis ; au moins un `pass` ; vert au tick précédent aussi | rouge : retour au worker (`claude --bg --resume`) ; en attente, sans check ou gh en panne : attente |
-| Cible | `origin/<cible>` contenue dans la branche | fusion de la cible dans le worktree, jamais de rebase ni de push forcé, puis push et nouvelle CI |
-| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun chemin protégé touché, reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
-| Acceptation | fusion revérifiée sur la remote, sceau tenu, tête fusionnée égale à la tête relue, mandat qui couvre `accept`, politique qui le délègue | question non bloquante « accepter ? » avec la commande `task accept` |
+| Cible | `origin/<cible>` contenue dans la tête | réalignement en plomberie depuis la tête de la PR, poussé sans forcer, puis nouvelle CI |
+| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, chaque chemin dans la liste blanche, reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
+| Acceptation | fusion revérifiée sur la remote, tête fusionnée couverte par le sceau, chemins permis, mandat qui couvre `accept`, politique qui le délègue | question non bloquante « accepter ? » avec la commande `task accept` |
 
-- **Sceau du READY** : le relecteur du tick scelle au journal d'autorité (`~/.grimoire/control/`) la tête relue,
-  l'arbre et le pack présents, et l'empreinte du fichier reçu (`missions/review_seal.py`) ; la copie au ledger est
-  dans `task.review_judged`. Le merger et `task accept` sous mandat comparent à ce sceau, jamais au fichier reçu seul,
-  que le worker peut réécrire.
+- **Git du tick** (`grimoire.core.safe_git`) : tout git lancé par le tick — merger, relecteur, sceau, empreinte d'arbre,
+  worktree de tâche, janitor, lanceur, effets — passe par un seul wrapper. Les hooks pointent vers `os.devnull`, et le
+  fsmonitor, les signatures, le pager, le diff externe, les assistants d'identifiants et les protocoles `ext`/`fd` sont
+  coupés. La configuration globale et système est neutralisée. `--git-dir`/`--work-tree` sont dérivés du dépôt du
+  projet : `<wt>/.git` doit renvoyer vers `<home>/.git/worktrees/<nom>`, avec `commondir` et `gitdir` réciproques. Enfin,
+  la configuration locale doit tenir dans une liste blanche (identité, remotes, suivi des branches, format) ; un filtre,
+  un pilote, un `include`, un alias, `core.hooksPath`, `gpg.*` ou `core.fsmonitor` y font tout refuser.
+- **Sceau du READY** (`missions/review_seal.py`) : au lancement du relecteur, la tête de `task/<id>` est notée au journal
+  d'autorité (`~/.grimoire/control/`). Au jugement, sont scellés la même tête (une branche qui a bougé pendant la
+  relecture n'est pas scellée), son arbre git, un worktree propre et sur cette tête, et les empreintes du reçu et du pack.
+  La copie au ledger est dans `task.review_judged`. Le merger et `task accept` sous mandat comparent une tête git à ce
+  sceau, jamais le fichier reçu ni l'empreinte de contenu, qui ignore `node_modules`, `__pycache__`, `.venv`…
+- **Chemins** : seuls les chemins de `mergeable_paths` se fusionnent et s'acceptent sous mandat. En sont exclus le code
+  des gardes (`src/grimoire/{core,hosts,flows,missions,mcp,policies}/*`), les fichiers conftest de pytest, `*.pyc`, `*.pth`,
+  `sitecustomize`, les chemins que l'empreinte ignore et `protected_paths`. La comparaison se fait en `casefold()`.
 - **Conflit de réalignement** : limité à `CHANGELOG.md`, il est résolu par l'union des deux côtés
-  (`git merge-file --union`), contrôlée : `git diff origin/<cible> -- CHANGELOG.md` ne doit contenir aucune ligne `-`.
-  Une union qui perdrait une ligne de la cible, ou tout autre conflit, annule la fusion locale et rend la tâche au
+  (`git merge-file --union`), refusée si une ligne du CHANGELOG de la cible manque. Tout autre conflit rend la tâche au
   worker.
 - **Fusion** : `gh pr merge <n> --squash --match-head-commit <tête>`, sans `--admin` ni `--auto`. Elle n'est notée
-  (`task.merged`) que constatée sur la remote : PR `MERGED` et commit de fusion contenu dans `origin/<cible>`. Le geste
-  est inscrit au journal d'autorité avec `origin: orchestrator` et sa provenance. Un refus du dépôt (revue exigée,
-  protection) pose la question à l'humain ; seul un échec technique de gh compte au disjoncteur.
-- **Chemins protégés** : `_grimoire/standard/*`, `.github/workflows/*`, `CODEOWNERS`, le code des gardes
-  (`src/grimoire/missions/{mandate,merger,reviewer,review_seal,review_receipt,human_acceptance,…}.py`,
-  `hosts/decisions/authority_guard.py`) et `protected_paths` : une PR qui en touche un n'est jamais fusionnée ni
-  acceptée sous mandat.
+  (`task.merged`) que constatée sur la remote ; un refus du dépôt pose la question à l'humain ; seul un échec technique
+  de gh compte au disjoncteur.
+- **Clôture** : gates déclarées par le projet, preuve lue dans le worktree, reçu READY exigé quel que soit le profil que
+  le worktree déclare.
 - **Le geste humain** : le merger ne lit aucune réponse du ledger. Ce qu'il ne fait pas sous mandat, l'humain le fait
   lui-même : il fusionne la PR (le tick constate la fusion), puis lance
-  `grimoire task accept <id> --project-root <worktree> --reason "…"`. La tâche reste en revue pendant ce temps.
-- **Git sans hooks** : chaque `git` du merger tourne avec `core.hooksPath` vers `os.devnull`, `core.fsmonitor=false`,
-  et `--no-verify` sur `merge`, `commit` et `push`.
-- **Rejeu** : chaque étape est notée au ledger (`task.merge_queued`, `task.merge_ci`, `task.merge_realigned`,
-  `task.merge_pushed`, `task.merge_bounced`, `task.merge_requested`, `task.merged`, `task.merge_escalated`,
-  `task.merge_accepted`) et n'est faite qu'une fois. Une fusion faite mais non notée est constatée au tick suivant,
-  jamais refaite ; une acceptation inscrite au journal mais non notée n'est pas refaite. Disjoncteur ouvert, le merger
-  ne fait rien.
-- **Limites** : le journal d'autorité vit sous le même utilisateur que les sessions (un script arbitraire, que la garde
-  de zone ne lit pas, pourrait y forger un sceau) ; la configuration git du dépôt reste lue (pilotes de fusion, filtres
-  de `.gitattributes`) ; le janitor lance encore `git push --delete` avec les hooks du dépôt ; une PR sans aucun check
-  attend indéfiniment ; l'union du CHANGELOG garde les deux côtés dans l'ordre de `git merge-file` ; le classement
-  « refus du dépôt » contre « panne » lit le texte d'erreur de gh ; une ligne `task.human_answered` forgée au ledger
-  remet à zéro le compte des retours au worker (un coût, pas une autorité).
+  `grimoire task accept <id> --project-root <worktree> --reason "…"`. Ce que la question cite de la PR (chemins,
+  messages) est échappé.
+- **Rejeu** : chaque étape est notée au ledger et n'est faite qu'une fois. Une fusion faite mais non notée est constatée
+  au tick suivant, jamais refaite. Disjoncteur ouvert, le merger ne fait rien.
+- **Limites** :
+  - le journal d'autorité vit sous le même utilisateur que les sessions : un script arbitraire, que la garde de zone
+    ne lit pas, pourrait y forger un sceau ;
+  - la liste blanche de configuration est relue à chaque git du tick mais pas verrouillée : une clé non neutralisée par
+    `-c` (un filtre) réécrite entre la lecture et l'appel tourne le temps d'un appel ;
+  - l'URL de `origin` est permise, le worker peut la rediriger (sans exécution) ;
+  - hors du tick, le git du kit est durci mais ni confiné ni sous liste blanche ;
+  - deux lectures (`HEAD` observée, URL du remote) restent hors du wrapper ;
+  - le tick refuse tout git quand le projet n'est pas la racine d'un dépôt ;
+  - la branche locale du worker n'est pas avancée par le réalignement ;
+  - une PR sans aucun check attend indéfiniment.
 
 ### Ce que le claim rappelle
 

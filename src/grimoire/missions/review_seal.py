@@ -1,32 +1,36 @@
 """Le jugement READY scellé au journal d'autorité : ce que la fusion et l'acceptation sous mandat comparent (#876, lot 4).
 
-Le reçu de revue (``review-receipt.json``) vit dans le worktree de la tâche, que le worker écrit : ses champs
-(``written_at``, ``tree_fingerprint``, ``evidence_pack_sha256``) se recalculent avec les fonctions publiques du kit. Un
-worker qui modifie le code, puis réécrit le reçu avec les nouvelles empreintes, passait pour relu. Ici, au moment où le
-relecteur du tick juge un READY, le kit **scelle** au journal d'autorité (``~/.grimoire/control/``, chaîné par hash,
-refusé en écriture aux outils d'agent) ce qui a été jugé :
+Le reçu de revue (``review-receipt.json``) vit dans le worktree de la tâche, que le worker écrit : ses champs se
+recalculent avec les fonctions publiques du kit, et l'empreinte d'arbre qu'il porte ignore des chemins entiers
+(``node_modules``, ``__pycache__``, ``.venv``…). Ce module scelle au journal d'autorité (``~/.grimoire/control/``,
+chaîné par hash, refusé en écriture aux outils d'agent) ce qui a été relu, en objets git :
 
-- ``head`` : le SHA de la tête du worktree ;
-- ``tree_fingerprint`` et ``evidence_pack_sha256`` : l'arbre et le dernier pack *tels qu'ils sont* au jugement (et le
-  jugement exige qu'ils soient ceux que le reçu déclare) ;
-- ``receipt_sha256`` : l'empreinte du fichier reçu lui-même.
+- **au lancement du relecteur** (:func:`seal_review_launch`) : la tête de ``task/<id>`` qu'il va relire ;
+- **au jugement READY** (:func:`seal_judgment`) : la même tête — une branche qui a bougé pendant la relecture n'est pas
+  scellée —, son arbre git (``<tête>^{tree}``), un worktree propre et sur cette tête, l'empreinte des octets du reçu et
+  du dernier pack (qui doivent être ceux que le reçu déclare) ;
+- **à chaque réalignement du merger** (:func:`seal_realignment`) : ``from`` → ``to`` et l'arbre git produit.
 
-Le merger y ajoute chaque réalignement qu'il fait lui-même (``from`` → ``to``, et l'empreinte obtenue). :func:`verify`
-compare l'état présent à ces valeurs, jamais au fichier seul : le reçu n'a pas changé d'un octet, le pack non plus, et la
-tête est la tête scellée avec son arbre, ou un descendant noté par un réalignement du merger avec l'arbre noté.
+:func:`verify` compare une tête (celle de la PR pour le merger, celle de la branche sinon) à cette chaîne : la tête
+scellée avec son arbre, ou un descendant noté par un réalignement du merger. Un dépôt sans git retombe sur l'empreinte
+de contenu du reçu. Chaque git passe par :mod:`grimoire.core.safe_git`.
 
-**Limites** : le journal vit sous le même utilisateur que les sessions ; la garde de zone (``authority_guard``) refuse
-les écritures d'agent par les outils et les voies shell reconnues, pas un script arbitraire (voir :mod:`.mandate`).
+**Limites** : le journal vit sous le même utilisateur que les sessions ; la garde de zone refuse les écritures d'agent
+par les outils et les voies shell reconnues, pas un script arbitraire, qui pourrait forger un sceau.
 """
 
 from __future__ import annotations
 
 import hashlib
-import subprocess
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from grimoire.missions.review_receipt import evidence_pack_digest, receipt_fingerprint, receipt_path
+from grimoire.missions.review_receipt import (
+    RECEIPT_FINGERPRINT_EXCLUDES,
+    evidence_pack_digest,
+    receipt_fingerprint,
+    receipt_path,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,10 +38,23 @@ if TYPE_CHECKING:
     from grimoire.missions.review_receipt import ReviewReceipt
     from grimoire.missions.schemas import MissionTask
 
-__all__ = ["REALIGN_ENTRY", "SEAL_ENTRY", "head_of", "receipt_digest", "seal_judgment", "seal_realignment", "verify"]
+__all__ = [
+    "LAUNCH_ENTRY",
+    "REALIGN_ENTRY",
+    "SEAL_ENTRY",
+    "branch_head",
+    "receipt_digest",
+    "seal_judgment",
+    "seal_realignment",
+    "seal_review_launch",
+    "tree_of",
+    "verify",
+]
 
+LAUNCH_ENTRY = "review_launch"
 SEAL_ENTRY = "review_judgment"
 REALIGN_ENTRY = "merge_realignment"
+_BRANCH_PREFIX = "task/"
 
 
 def receipt_digest(root: Path, task_id: str) -> str:
@@ -48,18 +65,21 @@ def receipt_digest(root: Path, task_id: str) -> str:
         return ""
 
 
-def head_of(root: Path) -> str:
-    """Le SHA de ``HEAD`` dans *root* ; ``""`` hors d'un dépôt git ou si git ne répond pas."""
-    from grimoire.missions.task_worktree import _env
+def _rev(cwd: Path, ref: str) -> str:
+    from grimoire.core.safe_git import run
 
-    try:
-        done = subprocess.run(  # arguments fixes, sans shell
-            ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", "HEAD^{commit}"], capture_output=True,
-            text=True, encoding="utf-8", errors="replace", timeout=30, check=False, env=_env(),
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return done.stdout.strip() if done.returncode == 0 else ""
+    done = run(("rev-parse", "--verify", "--quiet", ref), cwd=cwd, timeout=30)
+    return str(done.stdout).strip() if done.returncode == 0 else ""
+
+
+def branch_head(project_root: Path, task_id: str) -> str:
+    """Le SHA de ``task/<id>`` dans le dépôt du projet ; ``""`` sans dépôt ou sans branche."""
+    return _rev(project_root, f"refs/heads/{_BRANCH_PREFIX}{task_id}^{{commit}}")
+
+
+def tree_of(project_root: Path, commit: str) -> str:
+    """L'arbre git de *commit* : ce qui serait fusionné, chemins ignorés par l'empreinte compris."""
+    return _rev(project_root, f"{commit}^{{tree}}") if commit else ""
 
 
 def _store(project_root: Path) -> Any:
@@ -68,17 +88,60 @@ def _store(project_root: Path) -> Any:
     return MandateStore(project_root)
 
 
-def seal_judgment(project_root: Path, task_id: str, review_id: str, proofs_root: Path, receipt: ReviewReceipt) -> dict[str, Any]:
-    """Scelle le READY jugé ; lève :class:`ValueError` si l'arbre ou le pack ne sont pas ceux que le reçu déclare."""
+def seal_review_launch(project_root: Path, task_id: str, session_sha256: str, head: str) -> None:
+    """Note au journal d'autorité la tête que le relecteur lancé va relire."""
+    store = _store(project_root)
+    store.journal.append({
+        "type": LAUNCH_ENTRY, "project": store.project, "task_id": task_id, "session_sha256": session_sha256,
+        "head": head, "ts": datetime.now(UTC).isoformat(),
+    })
+
+
+def _launch_head(project_root: Path, task_id: str, session_sha256: str) -> str | None:
+    store = _store(project_root)
+    found = [
+        e for e in store.journal.read()
+        if e.get("type") == LAUNCH_ENTRY and e.get("project") == store.project and e.get("task_id") == task_id
+        and e.get("session_sha256") == session_sha256
+    ]
+    return str(found[-1].get("head", "")) if found else None
+
+
+def _dirty(proofs_root: Path) -> str:
+    from grimoire.core.safe_git import run
+
+    excludes = [f":(exclude){p}" for p in ("_grimoire-output", *RECEIPT_FINGERPRINT_EXCLUDES)]
+    done = run(("status", "--porcelain", "--untracked-files=all", "--", ".", *excludes), cwd=proofs_root)
+    if done.returncode != 0:
+        return f"état git du worktree illisible ({str(done.stderr).strip()[:160]})"
+    lines = str(done.stdout).splitlines()
+    return f"modifications non commitées ({', '.join(ln[3:] for ln in lines[:5])})" if lines else ""
+
+
+def seal_judgment(
+    project_root: Path, task_id: str, review_id: str, proofs_root: Path, receipt: ReviewReceipt, session_sha256: str = "",
+) -> dict[str, Any]:
+    """Scelle le READY jugé ; lève :class:`ValueError` si ce qui a été relu n'est pas ce qui est là."""
     tree, pack = receipt_fingerprint(proofs_root), evidence_pack_digest(proofs_root, task_id)
     if tree != receipt.tree_fingerprint:
         raise ValueError("l'arbre présent n'est pas celui que le reçu déclare")
     if pack != receipt.evidence_pack_sha256:
         raise ValueError("le pack présent n'est pas celui que le reçu déclare")
+    head = branch_head(project_root, task_id)
+    if head:
+        launched = _launch_head(project_root, task_id, session_sha256)
+        if launched is None:
+            raise ValueError("aucune tête scellée au lancement de cette relecture")
+        if launched != head:
+            raise ValueError(f"la branche a bougé pendant la relecture ({launched[:12]} → {head[:12]})")
+        if _rev(proofs_root, "HEAD^{commit}") != head:
+            raise ValueError(f"le worktree n'est pas sur la tête de {_BRANCH_PREFIX}{task_id}")
+        if dirty := _dirty(proofs_root):
+            raise ValueError(f"{dirty} : la relecture ne porte pas sur la tête")
     store = _store(project_root)
     entry: dict[str, Any] = store.journal.append({
         "type": SEAL_ENTRY, "project": store.project, "task_id": task_id, "review": review_id,
-        "head": head_of(proofs_root), "tree_fingerprint": tree, "evidence_pack_sha256": pack or "",
+        "head": head, "tree": tree_of(project_root, head), "tree_fingerprint": tree, "evidence_pack_sha256": pack or "",
         "receipt_sha256": receipt_digest(proofs_root, task_id), "reviewer_session": receipt.reviewer_session,
         "ts": datetime.now(UTC).isoformat(),
     })
@@ -86,11 +149,11 @@ def seal_judgment(project_root: Path, task_id: str, review_id: str, proofs_root:
 
 
 def seal_realignment(project_root: Path, task_id: str, review_id: str, source: str, target: str, tree: str) -> None:
-    """Note au journal d'autorité un réalignement fait par le merger : ``source`` → ``target``, arbre obtenu."""
+    """Note au journal d'autorité un réalignement fait par le merger : ``source`` → ``target``, arbre git produit."""
     store = _store(project_root)
     store.journal.append({
         "type": REALIGN_ENTRY, "project": store.project, "task_id": task_id, "review": review_id, "from": source,
-        "to": target, "tree_fingerprint": tree, "ts": datetime.now(UTC).isoformat(),
+        "to": target, "tree": tree, "ts": datetime.now(UTC).isoformat(),
     })
 
 
@@ -105,13 +168,29 @@ def _sealed(project_root: Path, task_id: str) -> tuple[dict[str, Any] | None, li
     return seal, realigns
 
 
-def verify(project_root: Path, task: MissionTask, proofs_root: Path, *, review_id: str = "") -> str:
-    """``""`` si l'état présent est celui du dernier READY scellé (ou d'un réalignement noté) ; sinon la raison.
+def reachable(project_root: Path, task_id: str) -> set[tuple[str, str]]:
+    """Les ``(tête, arbre)`` que le dernier sceau couvre : la tête relue, puis les réalignements du merger qui en partent."""
+    seal, realigns = _sealed(project_root, task_id)
+    if seal is None or not seal.get("head"):
+        return set()
+    found = {(str(seal["head"]), str(seal.get("tree", "")))}
+    heads = {str(seal["head"])}
+    for step in realigns:
+        if str(step.get("from")) in heads:
+            heads.add(str(step.get("to")))
+            found.add((str(step.get("to")), str(step.get("tree", ""))))
+    return found
 
-    Fermé : un journal illisible, un sceau absent ou d'une autre relecture que *review_id* refusent.
+
+def verify(project_root: Path, task: MissionTask, proofs_root: Path, *, review_id: str = "", head: str | None = None) -> str:
+    """``""`` si *head* (défaut : la tête de ``task/<id>``) est couverte par le dernier READY scellé ; sinon la raison.
+
+    Fermé : un journal illisible, un sceau absent ou d'une autre relecture que *review_id* refusent ; le reçu et le pack
+    doivent être, octet pour octet, ceux du sceau.
     """
     try:
-        seal, realigns = _sealed(project_root, task.id)
+        seal, _realigns = _sealed(project_root, task.id)
+        covered = reachable(project_root, task.id)
     except Exception as exc:  # une garde qui ne lit pas son journal refuse
         return f"journal d'autorité illisible ({type(exc).__name__}) : jugement READY non vérifiable"
     if seal is None:
@@ -122,13 +201,11 @@ def verify(project_root: Path, task: MissionTask, proofs_root: Path, *, review_i
         return "reçu réécrit depuis le jugement READY scellé"
     if (evidence_pack_digest(proofs_root, task.id) or "") != seal.get("evidence_pack_sha256"):
         return "le pack de preuve a changé depuis le jugement READY scellé"
-    head, tree = head_of(proofs_root), receipt_fingerprint(proofs_root)
-    reachable = {(str(seal.get("head")), str(seal.get("tree_fingerprint")))}
-    heads = {str(seal.get("head"))}
-    for step in realigns:  # seuls les réalignements du merger, chaînés depuis la tête scellée
-        if str(step.get("from")) in heads:
-            heads.add(str(step.get("to")))
-            reachable.add((str(step.get("to")), str(step.get("tree_fingerprint"))))
-    if (head, tree) in reachable:
+    if not seal.get("head"):  # dépôt sans git : l'empreinte de contenu du reçu, faute d'objets
+        if receipt_fingerprint(proofs_root) != seal.get("tree_fingerprint"):
+            return "l'arbre a changé depuis le jugement READY scellé"
         return ""
-    return "la tête ou l'arbre ont changé depuis le jugement READY scellé (autrement que par un réalignement du merger)"
+    target = head if head is not None else branch_head(project_root, task.id)
+    if target and (target, tree_of(project_root, target)) in covered:
+        return ""
+    return "la tête n'est pas celle du jugement READY scellé, ni un réalignement noté par le merger"

@@ -40,7 +40,6 @@ from __future__ import annotations
 import hashlib
 import shlex
 import shutil
-import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -94,21 +93,14 @@ def _is_git_repo(root: Path) -> bool:
 
 def _run_git(root: Path, *args: str) -> str | None:
     """Une commande git, sortie texte UTF-8 ; ``None`` sur tout échec — jamais une exception."""
-    try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=root,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=_GIT_TIMEOUT_S,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):  # silent-ok — git indisponible : None, repli filesystem
-        return None
+    # Le git durci du kit (revue de #927) : ni hooks, ni fsmonitor, ni filtre ou programme venu de la configuration ;
+    # dans le tick, confiné au dépôt du projet et à ses worktrees vérifiés.
+    from grimoire.core.safe_git import run
+
+    completed = run(args, cwd=root, timeout=_GIT_TIMEOUT_S)
     if completed.returncode != 0:
         return None
-    return completed.stdout
+    return str(completed.stdout)
 
 
 def _untracked_paths(status: str) -> list[str]:
@@ -195,7 +187,7 @@ def _git_fingerprint(root: Path, extra: Sequence[str] = (), *, include_toolchain
         return None
     specs = (*_EXCLUDE_PATHSPECS, *_extra_pathspecs(extra))
     status = _run_git(root, "status", "--porcelain=v1", "-z", "--", ".", *specs)
-    diff = _run_git(root, "diff", "HEAD", "--", ".", *specs)
+    diff = _run_git(root, "diff", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".", *specs)
     if status is None or diff is None:
         return None
     untracked_entries: list[str] = []

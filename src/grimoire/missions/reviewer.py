@@ -233,6 +233,12 @@ class ReviewStage:
             worktree = None
         if not launch.get("cwd") or not cwd.is_dir() or worktree is None:
             return ReviewOutcome(tid, "launch", "failed", "worktree de la tâche introuvable : rien à relire")
+        from grimoire.core.safe_git import refusal_for
+        from grimoire.missions.review_seal import branch_head, seal_review_launch
+
+        if unsafe := refusal_for(cwd):  # revue de #927 : un worktree forgé ou une configuration qui exécute, rien n'est relu
+            return ReviewOutcome(tid, "launch", "failed", f"worktree refusé : {unsafe}")
+        head = branch_head(root, tid)
         under_mandate = MandateStore(root).state().active
         session_id, refused = attest_session(self._service, REVIEWER_ACTOR, tid)
         if refused:
@@ -246,10 +252,16 @@ class ReviewStage:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}"
             state = record_failure(root, self._policy.breaker_threshold, f"{tid} : relecteur non lancé : {detail}")
             return ReviewOutcome(tid, "launch", "failed", f"claude --bg a échoué : {detail}" + (" — disjoncteur ouvert" if state.open else ""))
+        try:  # la tête relue, au journal d'autorité : un commit posé pendant la relecture ne sera pas scellé
+            seal_review_launch(root, tid, session_digest(session_id), head)
+            launch_sealed = True
+        except Exception:  # journal rompu : le jugement refusera de sceller (échec fermé)
+            launch_sealed = False
         self._service.ledger.append_event(
             REVIEW_LAUNCHED_EVENT, tid, "task", REVIEWER_ACTOR,
             {"task_id": tid, "session": match.group(1), "session_sha256": session_digest(session_id), "model": model,
-             "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate},
+             "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate,
+             "head": head, "launch_sealed": launch_sealed},
         )
         return ReviewOutcome(tid, "launch", "launched", f"relecteur {match.group(1)} dans {cwd}", match.group(1), model)
 
@@ -274,8 +286,12 @@ class ReviewStage:
         return started is not None and (self._now or datetime.now(UTC)) - started > REVIEW_TIMEOUT
 
     def _judge(self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent) -> ReviewOutcome | None:
+        from grimoire.core.safe_git import refusal_for
+
         tid = task.id
         root = Path(str(review.payload.get("cwd") or launch.get("cwd") or ""))
+        if unsafe := refusal_for(root):  # revue de #927 : rien n'est jugé dans un worktree forgé ou piégé
+            return ReviewOutcome(tid, "refused", "failed", f"worktree refusé : {unsafe}")
         try:
             receipt = read_receipt(root, tid)
         except ValueError as exc:
@@ -334,12 +350,13 @@ class ReviewStage:
         from grimoire.missions.review_seal import seal_judgment
 
         try:
-            entry = seal_judgment(self._service.home_root, task.id, review.id, root, receipt)
+            entry = seal_judgment(self._service.home_root, task.id, review.id, root, receipt,
+                                  str(review.payload.get("session_sha256") or ""))
         except ValueError as exc:
             return {}, str(exc)
         except Exception as exc:  # journal rompu : rien n'est scellé, la garde en aval refusera
             return {"sealed": False, "seal_error": f"{type(exc).__name__}: {exc}"[:300]}, ""
-        keys = ("head", "tree_fingerprint", "evidence_pack_sha256", "receipt_sha256")
+        keys = ("head", "tree", "tree_fingerprint", "evidence_pack_sha256", "receipt_sha256")
         return {"sealed": True, "seal": {k: entry.get(k, "") for k in keys}, "seal_seq": entry.get("seq")}, ""
 
     def _provenance_refusal(self, task: MissionTask, review: LedgerEvent, receipt: ReviewReceipt) -> str:

@@ -125,14 +125,10 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
 
 
 def _git_out(cwd: Path, *args: str) -> str:
-    try:
-        done = subprocess.run(  # arguments fixes, sans shell
-            ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=30, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return done.stdout.strip() if done.returncode == 0 else ""
+    from grimoire.core.safe_git import run  # le git durci du tick (revue de #927)
+
+    done = run(args, cwd=cwd, timeout=30)
+    return str(done.stdout).strip() if done.returncode == 0 else ""
 
 
 def session_env(session_id: str) -> dict[str, str]:

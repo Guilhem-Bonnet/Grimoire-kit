@@ -203,6 +203,10 @@ def reconcile(service: TaskService, *, actor: str = "tick", apply: bool = True, 
 
 
 def _run(cwd: Path, *argv: str) -> subprocess.CompletedProcess[str] | None:
+    if argv and argv[0] == "git":  # le git durci du tick : ni hooks, ni programme venu de la configuration du dépôt
+        from grimoire.core.safe_git import PUSH_ARGS, run
+
+        return run(argv[1:], cwd=cwd, timeout=_PROBE_TIMEOUT_S, extra_args=PUSH_ARGS)
     try:
         return subprocess.run(  # arguments fixes, sans shell
             list(argv), cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",

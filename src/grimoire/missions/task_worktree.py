@@ -156,14 +156,17 @@ class MergeOutcome:
 
 
 def _env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k not in _GIT_REDIRECT_VARS}
+    """L'environnement durci de :mod:`grimoire.core.safe_git` (ni configuration globale, ni variables qui détournent git)."""
+    from grimoire.core.safe_git import safe_env
+
+    return {k: v for k, v in safe_env().items() if k not in _GIT_REDIRECT_VARS}
 
 
 def _git(cwd: Path, *args: str, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    done = subprocess.run(
-        ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=120, check=False, env=env or _env(),
-    )
+    """Le git durci du kit (:func:`grimoire.core.safe_git.run`) : sans hooks ni exécutable de configuration ; *env* s'ajoute."""
+    from grimoire.core.safe_git import run
+
+    done = run(args, cwd=cwd, env=env)
     if check and done.returncode != 0:
         raise GrimoireMissionError(f"git {' '.join(args)} a échoué ({done.returncode}) : {(done.stderr or done.stdout).strip()}")
     return done
@@ -367,7 +370,7 @@ def _run_check(repo: Path, task_id: str, sha: str, command: str, timeout: float)
     try:
         done = subprocess.run(  # noqa: S602 - commande déclarée par le projet ou passée par l'humain
             command, shell=True, cwd=place, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False, env=_env(),
+            timeout=timeout, check=False, env={k: v for k, v in os.environ.items() if k not in _GIT_REDIRECT_VARS},
         )
         return done.returncode
     except subprocess.TimeoutExpired:
@@ -388,7 +391,9 @@ def _candidate(repo: Path, wt: TaskWorktree, head: str, target: str) -> tuple[st
         raise GrimoireMissionError(f"git merge-tree a échoué ({merged.returncode}) : {merged.stderr.strip()}")
     # Date du commit de merge = celle de la tête : le même couple (cible, tête) donne le même SHA.
     stamp = _git(repo, "show", "-s", "--format=%ct", head).stdout.strip()
-    env = {**_env(), "GIT_AUTHOR_DATE": f"@{stamp} +0000", "GIT_COMMITTER_DATE": f"@{stamp} +0000"}
+    from grimoire.core.safe_git import identity_env
+
+    env = {**identity_env(repo), "GIT_AUTHOR_DATE": f"@{stamp} +0000", "GIT_COMMITTER_DATE": f"@{stamp} +0000"}
     message = f"Merge {wt.branch} into {wt.into}"
     return _git(repo, "commit-tree", lines[0], "-p", target, "-p", head, "-m", message, env=env).stdout.strip(), ()
 
