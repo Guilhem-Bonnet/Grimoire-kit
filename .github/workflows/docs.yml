@@ -30,6 +30,8 @@ on:
       - "mkdocs.yml"
       - "mkdocs_hooks/**"
       - "src/**"
+      - "scripts/gen-site-data.py"
+      - "scripts/render-vitrine.py"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
@@ -38,6 +40,8 @@ on:
       - "mkdocs.yml"
       - "mkdocs_hooks/**"
       - "src/**"
+      - "scripts/gen-site-data.py"
+      - "scripts/render-vitrine.py"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -78,6 +82,11 @@ jobs:
           if [ -d web/teaser ]; then cp -r web/teaser _site/; fi
           test ! -e _site/docs || (echo "web/docs entrerait en collision avec le manuel" && exit 1)
           cp -r site _site/docs
+          # Chiffres de la vitrine : calculés ici depuis le dépôt, jamais saisis.
+          # web/index.html ne porte que des attributs data-source ; sans valeur
+          # calculable, la page n'affiche pas de chiffre (render-vitrine.py).
+          python scripts/gen-site-data.py --root . --meta-only --out-dir _site/data
+          python scripts/render-vitrine.py --meta _site/data/meta.json --html web/index.html --out _site/index.html
           test -f _site/index.html
           test -f _site/docs/index.html
           test -f _site/docs/search/search_index.json
