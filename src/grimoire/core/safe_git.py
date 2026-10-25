@@ -8,7 +8,7 @@ neutralisées pour **tous** les git que le processus lance, par l'environnement 
 ``GIT_CONFIG_KEY_<n>``, ``GIT_CONFIG_VALUE_<n>`` : l'équivalent de ``git -c``, qui prime sur les fichiers) :
 
 - toujours : ``core.hooksPath`` vers ``os.devnull``, ``core.fsmonitor=false``, signatures coupées (``commit``, ``tag``,
-  ``push``, ``log.showSignature``, ``merge.verifySignatures``) ;
+  ``push``, ``log.showSignature``, ``merge.verifySignatures``), transports ``ext::`` et ``fd::`` refusés ;
 - seulement si le dépôt ou l'un de ses worktrees les déclare **localement** : chaque ``filter.<nom>.clean|smudge|process``
   et chaque ``merge.<nom>.driver`` vidés, ``core.sshCommand`` remis à la valeur globale de l'utilisateur (à défaut
   ``ssh``), ``credential.helper`` remis aux assistants globaux de l'utilisateur.
@@ -17,7 +17,8 @@ Rien n'est refusé pour une configuration ordinaire ; l'identité et les identif
 pas touchés (ce sont des réglages du poste, pas du dépôt du worker). Les sessions ``claude`` que le tick lance ne
 reçoivent pas ces variables (:func:`session_environ`). Hors d'un tel tick, rien ne change.
 
-**Limites** : la neutralisation est calculée à l'entrée du tick ; une clé posée par le worker pendant le tick tourne le
+**Limites** : les git que ``gh`` lance lui-même héritent de cette neutralisation par l'environnement, sans plus ; la
+neutralisation est calculée à l'entrée du tick ; une clé posée par le worker pendant le tick tourne le
 temps de ce tick (sauf hooks, fsmonitor et signatures, toujours coupés). Les pilotes de diff (``diff.<nom>.command``,
 ``textconv``, ``diff.external``) ne sont pas neutralisés : un pilote vide casse ``git diff``, et le tick n'en lance pas.
 Les sessions tournent sous le même utilisateur du système : un processus qui écrit ce que le tick lit avant lui (le
@@ -41,6 +42,7 @@ __all__ = ["git_env", "hardened", "hardening", "same_repo", "session_environ", "
 _ALWAYS: tuple[tuple[str, str], ...] = (
     ("core.hooksPath", os.devnull), ("core.fsmonitor", "false"), ("commit.gpgSign", "false"), ("tag.gpgSign", "false"),
     ("push.gpgSign", "false"), ("log.showSignature", "false"), ("merge.verifySignatures", "false"),
+    ("protocol.ext.allow", "never"), ("protocol.fd.allow", "never"),
 )
 _DRIVER = re.compile(r"(filter\.(.+)\.(clean|smudge|process)|merge\.(.+)\.driver)")
 #: Les variables qui détourneraient git vers un autre dépôt (un hook git les exporte).

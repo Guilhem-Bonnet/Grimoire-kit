@@ -70,7 +70,8 @@ class FakeHost:
         #: La remote que GitHub représente (un dépôt nu) : ce que dit gh ne suit jamais la configuration locale du worker.
         self.real: Path | None = None
         self.pr_files: dict[str, list[str]] = {}  # branche → fichiers annoncés ; absente : le diff base...tête sur la remote
-        self.changed_files: dict[str, int] = {}  # branche → changedFiles annoncé ; absent : len(files)  # gh tombe juste après la fusion : le constat se fera au tick suivant
+        self.changed_files: dict[str, int] = {}  # branche → changedFiles annoncé ; absent : le nombre d'entrées listées
+        self.repo = ""  # le dépôt GitHub que ce faux gh sert : un ``-R`` autre est refusé (« could not resolve »)  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
         self.calls.append((list(argv), cwd, env))
@@ -93,6 +94,13 @@ class FakeHost:
     def _gh(self, argv: list[str], cwd: Path) -> ExecResult:
         if self.gh_broken:
             return ExecResult(1, "", "gh : réseau indisponible")
+        if "-R" in argv:
+            target = argv[argv.index("-R") + 1]
+            if self.repo and target != self.repo:
+                return ExecResult(1, "", f"GraphQL: Could not resolve to a Repository with the name '{target}'.")
+            argv = argv[:argv.index("-R")] + argv[argv.index("-R") + 2:]
+        if argv[1] == "api" and argv[2].endswith("/files"):
+            return self._api_files(argv, cwd)
         if argv[1:3] == ["pr", "view"]:
             branch = argv[3]
             state = self.prs.get(branch)
@@ -106,13 +114,10 @@ class FakeHost:
             remote = self._remote(cwd)
             head = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
             base = self._git_remote(remote, "rev-parse", f"refs/heads/{self.pr_bases.get(branch, 'main')}")
-            files = self.pr_files.get(branch)
-            if files is None:
-                listing = self._git_remote(remote, "diff", "--name-only", "-z", f"{base}...{head}") if head and base else ""
-                files = [f for f in listing.split("\0") if f]
+            entries = self._entries(cwd, branch, head, base)
             body.update({
-                "baseRefOid": base, "files": [{"path": f} for f in files],
-                "changedFiles": self.changed_files.get(branch, len(files)),
+                "baseRefOid": base, "files": [{"path": new} for new, _old in entries],  # comme gh : le nouveau nom seul
+                "changedFiles": self.changed_files.get(branch, len(entries)),
                 "url": f"file://{remote}/pull/{body['number']}",
             })
             if not self.pr_no_head:
@@ -133,6 +138,40 @@ class FakeHost:
             self.closed_issues.append(argv[3])
             return ExecResult(0, "")
         return ExecResult(2, "", "gh : sous-commande inconnue")
+
+    def _entries(self, cwd: Path, branch: str, head: str, base: str) -> list[tuple[str, str | None]]:
+        """``(filename, previous_filename)`` comme l'API REST : un renommage garde son ancien nom."""
+        given = self.pr_files.get(branch)
+        if given is not None:
+            return [(f, None) if isinstance(f, str) else (f[0], f[1]) for f in given]
+        if not head or not base:
+            return []
+        raw = self._git_remote(self._remote(cwd), "diff", "--name-status", "-z", "-M", f"{base}...{head}").split("\0")
+        out: list[tuple[str, str | None]] = []
+        i = 0
+        while i < len(raw) and raw[i]:
+            status = raw[i]
+            if status[:1] in ("R", "C"):
+                out.append((raw[i + 2], raw[i + 1]))
+                i += 3
+            else:
+                out.append((raw[i + 1], None))
+                i += 2
+        return out
+
+    def _api_files(self, argv: list[str], cwd: Path) -> ExecResult:
+        """``gh api repos/<o>/<r>/pulls/<n>/files --paginate --jq '.[] | [.filename, .previous_filename]'``."""
+        parts = argv[2].split("/")
+        if self.repo and "/".join(parts[1:3]) != self.repo:
+            return ExecResult(1, "", "gh: Not Found (HTTP 404)")
+        number = int(parts[4])
+        branch = next((b for b in self.prs if self.pr_numbers.get(b, 7) == number), "")
+        if not branch:
+            return ExecResult(1, "", "gh: Not Found (HTTP 404)")
+        remote = self._remote(cwd)
+        head = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
+        base = self._git_remote(remote, "rev-parse", f"refs/heads/{self.pr_bases.get(branch, 'main')}")
+        return ExecResult(0, "".join(json.dumps([new, old]) + "\n" for new, old in self._entries(cwd, branch, head, base)))
 
     def _remote(self, cwd: Path) -> Path:
         return self.real or Path(git(cwd, "remote", "get-url", "origin"))

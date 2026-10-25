@@ -42,8 +42,11 @@ if TYPE_CHECKING:
 __all__ = [
     "LAUNCH_ENTRY",
     "REALIGN_ENTRY",
+    "REPOSITORY_ENTRY",
     "SEAL_ENTRY",
     "branch_head",
+    "freeze_repository",
+    "frozen_repository",
     "receipt_digest",
     "seal_judgment",
     "seal_realignment",
@@ -53,6 +56,7 @@ __all__ = [
 ]
 
 LAUNCH_ENTRY = "review_launch"
+REPOSITORY_ENTRY = "task_repository"
 SEAL_ENTRY = "review_judgment"
 REALIGN_ENTRY = "merge_realignment"
 _BRANCH_PREFIX = "task/"
@@ -100,6 +104,38 @@ def _store(project_root: Path) -> Any:
     return MandateStore(project_root)
 
 
+def freeze_repository(project_root: Path, task_id: str) -> dict[str, str]:
+    """Fige au journal d'autorité, **avant** que le worker tourne, le dépôt GitHub de la tâche et l'URL de ``origin``.
+
+    Le worker écrit ensuite la configuration du dépôt : ce que le merger compare et passe à ``gh -R`` vient d'ici.
+    Un dépôt qu'on ne sait pas résoudre est figé vide : le merger refusera (échec fermé), le lancement suit son cours.
+    """
+    from grimoire.missions.ci_slots import ci_repository
+
+    try:
+        repo = ci_repository(project_root, project_root)
+    except Exception:  # pas de remote GitHub reconnaissable : rien ne sera fusionné sous mandat
+        repo = ""
+    _code, url, _err = _git(project_root, "remote", "get-url", "origin")
+    store = _store(project_root)
+    entry = {"type": REPOSITORY_ENTRY, "project": store.project, "task_id": task_id, "repo": repo,
+             "origin_url": url.strip(), "ts": datetime.now(UTC).isoformat()}
+    store.journal.append(entry)
+    return {"repo": repo, "origin_url": url.strip()}
+
+
+def frozen_repository(project_root: Path, task_id: str) -> dict[str, str] | None:
+    """``{repo, origin_url}`` figés au lancement de la tâche, ou ``None``."""
+    store = _store(project_root)
+    found = [
+        e for e in store.journal.read()
+        if e.get("type") == REPOSITORY_ENTRY and e.get("project") == store.project and e.get("task_id") == task_id
+    ]
+    if not found:
+        return None
+    return {"repo": str(found[-1].get("repo") or ""), "origin_url": str(found[-1].get("origin_url") or "")}
+
+
 def seal_review_launch(project_root: Path, task_id: str, session_sha256: str, head: str) -> None:
     """Note au journal d'autorité la tête que le relecteur lancé va relire."""
     store = _store(project_root)
@@ -138,6 +174,8 @@ def seal_judgment(
     if pack != receipt.evidence_pack_sha256:
         raise ValueError("le pack présent n'est pas celui que le reçu déclare")
     head = branch_head(project_root, task_id)
+    if not head and _rev(proofs_root, "HEAD^{commit}"):
+        raise ValueError(f"aucune branche {_BRANCH_PREFIX}{task_id} dans un worktree git : un sceau sans tête ne couvre rien")
     if head:
         launched = _launch_head(project_root, task_id, session_sha256)
         if launched is None:
@@ -211,6 +249,8 @@ def verify(project_root: Path, task: MissionTask, proofs_root: Path, *, review_i
         return "reçu réécrit depuis le jugement READY scellé"
     if (evidence_pack_digest(proofs_root, task.id) or "") != seal.get("evidence_pack_sha256"):
         return "le pack de preuve a changé depuis le jugement READY scellé"
+    if not seal.get("head") and head is not None:
+        return "le jugement scellé ne porte aucune tête : il ne couvre pas la tête demandée"
     if not seal.get("head"):  # dépôt sans git : l'empreinte de contenu du reçu, faute d'objets
         if receipt_fingerprint(proofs_root) != seal.get("tree_fingerprint"):
             return "l'arbre a changé depuis le jugement READY scellé"

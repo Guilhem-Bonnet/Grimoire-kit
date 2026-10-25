@@ -69,12 +69,14 @@ def write_policy(root: Path, *, merger: str = "    merger:\n      enabled: true\
     (root / POLICY).write_text(
         "orchestrator:\n  roles:\n    worker:\n      enabled: true\n      wip: 3\n      model: sonnet\n"
         "      permission_mode: acceptEdits\n    reviewer:\n      enabled: true\n      wip: 3\n"
-        f"      permission_mode: acceptEdits\n{merger}{escalation}",
+        f"      permission_mode: acceptEdits\n{merger}{escalation}ci:\n  repository: {REPO}\n",
         encoding="utf-8",
     )
 
 
 DELEGATED = "escalation:\n  merge: orchestrator\n  accept: orchestrator\n"
+#: Le dépôt GitHub que le faux gh sert, déclaré dans la politique (``ci.repository``) et figé au lancement de chaque tâche.
+REPO = "acme/kit"
 
 
 @pytest.fixture
@@ -97,7 +99,9 @@ def make_projet(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def host() -> FakeHost:
-    return FakeHost()
+    fake = FakeHost()
+    fake.repo = REPO
+    return fake
 
 
 def grant(root: Path, gestures: tuple[str, ...] = ("merge", "accept")) -> md.Mandate:
@@ -228,7 +232,7 @@ def test_vert_sous_mandat_fusionne_accepte_puis_le_janitor_nettoie(projet: Path,
     report = merged_after_review(projet, host, tid, wt)
     assert merges(report) == [("accept", "done")], report.merges
     [argv] = host.of("gh", "pr", "merge")
-    assert argv == ["gh", "pr", "merge", "7", "--squash", "--match-head-commit", head]
+    assert argv == ["gh", "pr", "merge", "7", "--squash", "--match-head-commit", head, "-R", REPO]
     assert not {"--admin", "--auto"} & set(argv)
     [merged] = events(projet, tid, MERGED_EVENT)
     assert merged.payload["head_sha"] == head and merged.payload["mandate_id"] == mandate.id

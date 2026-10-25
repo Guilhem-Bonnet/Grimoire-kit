@@ -8,9 +8,10 @@ relecture de l'entrée en revue en cours est jugée ``READY`` (``task.review_jud
 de la file est celui des jugements ``READY``. Le merger n'ouvre pas de PR : c'est le worker qui l'ouvre ; sans PR, il
 attend.
 
-**GitHub fait foi, pas les refs locales.** La tête, la base et la liste des fichiers de la PR viennent de
-``gh pr view --json headRefOid,baseRefOid,files`` ; le worker écrit les refs et la configuration du dépôt local, pas
-GitHub. Quand le merger a besoin d'objets (réaligner, constater une fusion), il les récupère à refspec explicite vers
+**GitHub fait foi, pas les refs locales.** Le dépôt GitHub de la tâche (``owner/repo``) et l'URL de ``origin`` sont
+figés au journal d'autorité au lancement, avant le worker ; chaque ``gh`` du merger vise ce dépôt (``-R``). La tête et la
+base de la PR viennent de ``gh pr view``, ses fichiers de l'API REST (``gh api …/pulls/<n>/files``, anciens noms d'un
+renommage compris) ; le worker écrit les refs et la configuration du dépôt local, pas GitHub. Quand le merger a besoin d'objets (réaligner, constater une fusion), il les récupère à refspec explicite vers
 des refs à lui (``refs/grimoire/tick/…``), depuis l'URL de ``origin`` vérifiée égale au dépôt de la PR, et compare ce
 qu'il obtient à ce que GitHub annonce. Il ne lance aucune commande dans le worktree du worker.
 
@@ -111,6 +112,7 @@ CHANGELOG = "CHANGELOG.md"
 DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/*", "src/grimoire/hosts/decisions/*", "src/grimoire/core/*", "src/grimoire/flows/attestation.py",
     "_grimoire/standard/*", ".github/*", ".githooks/*", ".husky/*", "framework/hooks/*", "codeowners", "*/codeowners",
+    ".claude/*", ".mcp.json", ".vscode/*", ".pre-commit-config.yaml",
     "pyproject.toml", "setup.py", "setup.cfg", ".gitattributes", ".gitmodules", "*conftest.py",
     "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dll", "*.dylib", "*.exe", "*.whl", "*.egg", "*.pth", "*sitecustomize*",
     "*usercustomize*",
@@ -175,9 +177,11 @@ class _PullRequest:
     draft: bool
     merge_commit: str
     cross: bool
-    files: tuple[str, ...]
+    files: tuple[str, ...]  # chemins touchés, anciens noms d'un renommage compris
+    entries: int  # fichiers listés par l'API (un renommage compte pour un)
     changed: int
-    repo: str
+    slug: str  # owner/repo figé au lancement de la tâche : tous les gh du merger le visent (-R)
+    origin: str  # l'URL de origin figée au lancement
 
 
 def _err(done: subprocess.CompletedProcess[Any] | Any) -> str:
@@ -244,20 +248,26 @@ class MergeStage:
     def _remote_url(self, pr: _PullRequest) -> tuple[str, str]:
         """``(url, "")`` : l'URL de ``origin`` si c'est le dépôt de la PR ; sinon ``("", raison)``. Échec fermé."""
         url = self._git("config", "--get", f"remote.{self._remote}.url").stdout.strip()
-        if not url or _repo_key(url) != pr.repo:
-            return "", f"{self._remote} ({_clean(url, 120) or 'absent'}) n'est pas le dépôt de la PR ({_clean(pr.repo, 120)})"
+        if not url or _repo_key(url) != _repo_key(pr.origin):
+            return "", (f"{self._remote} ({_clean(url, 120) or 'absent'}) n'est pas le dépôt figé au lancement de la tâche "
+                        f"({_clean(pr.origin, 120)})")
         rewrites = self._git("config", "--get-regexp", r"^url\..*\.(push)?insteadof$")
         if rewrites.stdout.strip():
             return "", "la configuration du dépôt réécrit des URL (url.*.insteadOf) : rien n'est récupéré ni poussé"
         return url, ""
 
     def _fetch(self, pr: _PullRequest, *branches: str) -> tuple[dict[str, str], str]:
-        """Récupère *branches* depuis le dépôt de la PR vers ``refs/grimoire/tick/…`` : ``({branche: sha}, "")`` ou une raison."""
+        """Récupère *branches* depuis le dépôt figé de la tâche vers ``refs/grimoire/tick/…``, ou la raison d'un refus."""
         url, refused = self._remote_url(pr)
         if refused:
             return {}, refused
+        return self._fetch_from(url, *branches)
+
+    def _fetch_from(self, url: str, *branches: str) -> tuple[dict[str, str], str]:
+        """``({branche: sha}, "")`` : *branches* de *url*, à refspec explicite, sans sous-module ; sinon la raison."""
         specs = [f"+refs/heads/{b}:{_TICK_REFS}/{b}" for b in branches]
-        done = self._git("fetch", "-q", "--no-tags", "--no-write-fetch-head", url, *specs, timeout=_PUSH_TIMEOUT_S)
+        done = self._git("fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", url, *specs,
+                         timeout=_PUSH_TIMEOUT_S)
         if done.returncode != 0:
             return {}, f"git fetch : {_err(done)}"
         return {b: self._rev(f"{_TICK_REFS}/{b}^{{commit}}") for b in branches}, ""
@@ -338,7 +348,10 @@ class MergeStage:
         events = self._service.ledger.events_for(tid)
         if not any(e.event_type == MERGE_QUEUED_EVENT and e.payload.get("judged") == judged.id for e in events):
             self._note(MERGE_QUEUED_EVENT, tid, {"judged": judged.id, "review": judged.payload.get("review"), "position": position + 1})
-        pr, error = self._view(wt.branch)
+        pin, refused = self._pin(tid)
+        if pin is None:
+            return MergerOutcome(tid, "refused", "refused", refused)
+        pr, error = self._view(wt.branch, pin)
         if error:
             return self._failed(tid, "wait", f"gh pr view {wt.branch} : {error}")
         if pr is None:
@@ -358,7 +371,7 @@ class MergeStage:
             return MergerOutcome(tid, "wait", "waiting", why, pr.number)
         if kind or receipt is None:
             return self._requeue(task, judged, why, pr.number)
-        ci, detail = self._stable_ci(tid, wt.branch, pr.head)
+        ci, detail = self._stable_ci(tid, pr, wt.branch)
         if ci == "unknown":
             return self._failed(tid, "wait", f"CI illisible : {detail}", pr.number)
         if ci == "red":
@@ -405,9 +418,25 @@ class MergeStage:
 
     # -- GitHub --------------------------------------------------------------
 
-    def _view(self, branch: str) -> tuple[_PullRequest | None, str]:
-        fields = "number,state,headRefOid,baseRefOid,baseRefName,isDraft,mergeCommit,isCrossRepository,files,changedFiles,url"
-        result = self._exec(["gh", "pr", "view", branch, "--json", fields], self._home, None)
+    def _pin(self, tid: str) -> tuple[dict[str, str] | None, str]:
+        """Le dépôt figé au journal d'autorité au lancement de la tâche, avant le worker ; sinon pourquoi le merger refuse."""
+        from grimoire.missions.review_seal import frozen_repository
+
+        try:
+            pin = frozen_repository(self._home, tid)
+        except Exception as exc:
+            return None, f"journal d'autorité illisible ({type(exc).__name__}) : dépôt de la tâche non vérifiable"
+        if pin is None or not pin.get("repo") or not pin.get("origin_url"):
+            return None, "dépôt GitHub de la tâche non figé à son lancement : rien n'est fusionné sous mandat"
+        return pin, ""
+
+    def _gh(self, slug: str, *args: str) -> Any:
+        """Un appel ``gh`` qui vise le dépôt figé (``-R``) : jamais celui que les remotes locales désignent."""
+        return self._exec(["gh", *args, "-R", slug], self._home, None)
+
+    def _view(self, branch: str, pin: dict[str, str]) -> tuple[_PullRequest | None, str]:
+        fields = "number,state,headRefOid,baseRefOid,baseRefName,isDraft,mergeCommit,isCrossRepository,changedFiles"
+        result = self._gh(pin["repo"], "pr", "view", branch, "--json", fields)
         if result.returncode != 0:
             if "no pull requests found" in result.stderr.lower():
                 return None, ""
@@ -418,25 +447,45 @@ class MergeStage:
             cross = data.get("isCrossRepository")
             if not isinstance(cross, bool):
                 return None, "gh pr view ne dit pas si la PR vient d'un autre dépôt (isCrossRepository)"
-            files = tuple(str(f["path"]) for f in data.get("files") or [])
-            url = str(data.get("url") or "")
+            number = int(data["number"])
+            files, entries, error = self._files(pin["repo"], number)
+            if error:
+                return None, error
             pr = _PullRequest(
-                int(data["number"]), str(data["state"]).upper(), str(data.get("headRefOid") or ""),
+                number, str(data["state"]).upper(), str(data.get("headRefOid") or ""),
                 str(data.get("baseRefName") or ""), str(data.get("baseRefOid") or ""), bool(data.get("isDraft")),
-                str(commit.get("oid") or "") if isinstance(commit, dict) else "", cross, files,
-                int(data.get("changedFiles") or 0), _repo_key(re.sub(r"/pull/\d+/?$", "", url)),
+                str(commit.get("oid") or "") if isinstance(commit, dict) else "", cross, files, entries,
+                int(data.get("changedFiles") or 0), pin["repo"], pin["origin_url"],
             )
         except (ValueError, KeyError, TypeError, AttributeError):
             return None, "réponse de gh pr view illisible"
         if not _SHA.fullmatch(pr.head) or not _SHA.fullmatch(pr.base_oid):
             return None, "gh pr view ne donne pas la tête ou la base de la PR (headRefOid, baseRefOid)"
-        if not pr.repo:
-            return None, "gh pr view ne donne pas l'URL de la PR"
         return pr, ""
 
-    def _checks(self, branch: str, *extra: str) -> tuple[str, list[dict[str, Any]]]:
+    def _files(self, slug: str, number: int) -> tuple[tuple[str, ...], int, str]:
+        """Les chemins de la PR selon l'API REST (``filename`` et ``previous_filename`` d'un renommage), et leur nombre.
+
+        ``gh pr view --json files`` ne donne que le nouveau chemin d'un renommage : un fichier protégé déplacé hors de sa
+        place y échapperait (cli/cli#14575).
+        """
+        result = self._exec(["gh", "api", f"repos/{slug}/pulls/{number}/files", "--paginate",
+                             "--jq", ".[] | [.filename, .previous_filename]"], self._home, None)
+        if result.returncode != 0:
+            return (), 0, f"gh api …/pulls/{number}/files : {_clean(result.stderr.strip(), 200)}"
+        paths: list[str] = []
+        entries = 0
+        for line in (ln for ln in result.stdout.splitlines() if ln.strip()):
+            row = json.loads(line)
+            if not isinstance(row, list) or not row or not isinstance(row[0], str):
+                return (), 0, "réponse de gh api …/files illisible"
+            entries += 1
+            paths.extend(str(x) for x in row if isinstance(x, str) and x)
+        return tuple(paths), entries, ""
+
+    def _checks(self, slug: str, branch: str, *extra: str) -> tuple[str, list[dict[str, Any]]]:
         """``("ok"|"none"|"error", checks)`` : ``none`` seulement quand gh dit lui-même qu'il n'y a aucun check."""
-        result = self._exec(["gh", "pr", "checks", branch, "--json", "name,bucket", *extra], self._home, None)
+        result = self._gh(slug, "pr", "checks", branch, "--json", "name,bucket", *extra)
         said = result.stderr.lower()
         if result.returncode == 1 and not result.stdout.strip() and "checks reported" in said and "no " in said:
             return "none", []
@@ -450,15 +499,15 @@ class MergeStage:
             return "error", []
         return "ok", rows
 
-    def _ci(self, branch: str) -> tuple[str, str]:
+    def _ci(self, slug: str, branch: str) -> tuple[str, str]:
         """``(green|red|pending|unknown, détail)`` : les checks requis, ou tous hors ignorés si gh dit qu'aucun n'est requis."""
-        state, required = self._checks(branch, "--required")
+        state, required = self._checks(slug, branch, "--required")
         if state == "error":
             return "unknown", "gh pr checks --required en échec : on n'en conclut rien"
         if state == "ok" and required:
             rows, scope = required, "checks requis"
         else:
-            state, every = self._checks(branch)
+            state, every = self._checks(slug, branch)
             if state == "error":
                 return "unknown", "gh pr checks illisible ou en échec"
             ignored = self._policy.merger.ignored_checks
@@ -476,9 +525,10 @@ class MergeStage:
             return "pending", f"{len(rows)} {scope} tous sautés : rien n'a tourné"
         return "green", f"{len(rows)} {scope} verts"
 
-    def _stable_ci(self, tid: str, branch: str, head: str) -> tuple[str, str]:
+    def _stable_ci(self, tid: str, pr: _PullRequest, branch: str) -> tuple[str, str]:
         """Le verdict CI, vert seulement s'il l'était déjà au tick précédent pour cette tête (``task.merge_ci``)."""
-        verdict, detail = self._ci(branch)
+        head = pr.head
+        verdict, detail = self._ci(pr.slug, branch)
         events = self._service.ledger.events_for(tid)
         seen = next((e for e in reversed(events) if e.event_type == MERGE_CI_EVENT and e.payload.get("head") == head), None)
         was_green = seen is not None and seen.payload.get("verdict") == "green"
@@ -580,8 +630,8 @@ class MergeStage:
         guarded = sorted(c for c in task_categories(task) if c not in _GESTURE_CATEGORIES and not policy.delegates(c))
         if guarded:
             return f"catégorie gardée à l'humain : {', '.join(guarded)}"
-        if pr.changed != len(pr.files):
-            return f"GitHub annonce {pr.changed} fichier(s) et en liste {len(pr.files)} : liste incomplète, non vérifiable"
+        if pr.changed != pr.entries:
+            return f"GitHub annonce {pr.changed} fichier(s) et en liste {pr.entries} : liste incomplète, non vérifiable"
         patterns = tuple(p.casefold() for p in (*DEFAULT_PROTECTED_PATHS, *self._policy.merger.protected_paths))
         kept = sorted(p for p in pr.files if any(fnmatch.fnmatchcase(p.casefold(), pat) for pat in patterns))
         if kept:
@@ -615,14 +665,14 @@ class MergeStage:
         self._note(MERGE_REQUESTED_EVENT, tid, {
             "pr": pr.number, "head": head, "origin": ORIGIN_ORCHESTRATOR, "mandate_id": auth.mandate_id, "provenance": provenance,
         })
-        result = self._exec(["gh", "pr", "merge", str(pr.number), "--squash", "--match-head-commit", head], self._home, None)
+        result = self._gh(pr.slug, "pr", "merge", str(pr.number), "--squash", "--match-head-commit", head)
         if result.returncode != 0:
             said = (result.stderr or result.stdout).strip()[:300]
             if result.returncode in (124, 126, 127) or any(w in said.lower() for w in _TECHNICAL):
                 return self._failed(tid, "merge", f"gh pr merge #{pr.number} : {_clean(said, 300)}", pr.number)
             # Le dépôt refuse (revue exigée, protection, file de fusion) : ni une panne, ni un geste à forcer.
             return self._ask_human(task, wt, "merge", judged.id, f"le dépôt refuse la fusion ({said})", pr.number)
-        after, error = self._view(wt.branch)
+        after, error = self._view(wt.branch, {"repo": pr.slug, "origin_url": pr.origin})
         if error or after is None:
             return self._failed(tid, "unconfirmed", f"fusion demandée, non constatée : {error or 'PR introuvable'}", pr.number)
         return self._confirm(task, wt, judged, after)
@@ -689,7 +739,10 @@ class MergeStage:
             return MergerOutcome(tid, "accept", "refused", "aucune fusion constatée")
         if _last(events, MERGE_ACCEPTED_EVENT, _index(events, noted)) is not None:
             return self._close(tid, wt, int(noted.payload.get("pr") or 0))
-        pr, error = self._view(wt.branch)
+        pin, refused = self._pin(tid)
+        if pin is None:
+            return MergerOutcome(tid, "accept", "refused", refused)
+        pr, error = self._view(wt.branch, pin)
         if error or pr is None:
             return self._failed(tid, "accept", f"gh pr view {wt.branch} : {error or 'PR introuvable'}")
         merged, why = self._merged_on_remote(wt, pr)

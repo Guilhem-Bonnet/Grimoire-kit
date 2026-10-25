@@ -511,8 +511,10 @@ orchestrator:
 ```
 
 La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
-l'ordre des jugements. Le merger n'ouvre pas de PR : il attend celle du worker sur `task/<id>`. La tête, la base et la
-liste des fichiers de la PR viennent de GitHub (`gh pr view`), jamais de refs locales. À chaque tick, le merger vérifie
+l'ordre des jugements. Le merger n'ouvre pas de PR : il attend celle du worker sur `task/<id>`. Le dépôt GitHub de la
+tâche et l'URL de `origin` sont figés au journal d'autorité au lancement, avant le worker : chaque `gh` du merger vise
+ce dépôt (`-R`). La tête et la base de la PR viennent de `gh pr view`, ses fichiers de l'API REST, anciens noms d'un
+renommage compris ; jamais de refs locales. À chaque tick, le merger vérifie
 dans cet ordre, et chaque garde échoue fermée :
 
 | Étape | Ce qui est vérifié | Sinon |
@@ -532,7 +534,8 @@ dans cet ordre, et chaque garde échoue fermée :
 - **Chemins qui escaladent** : le code des gardes (`src/grimoire/missions/*`, `src/grimoire/hosts/decisions/*`,
   `src/grimoire/core/*` et l'attestation des flows), la politique (`_grimoire/standard/*`), les workflows et hooks (`.github/*`,
   `.githooks/*`, `.husky/*`), le packaging (`pyproject.toml`, `setup.cfg` et le script setup de setuptools), `.gitattributes`,
-  `.gitmodules`, les fichiers conftest de pytest et les fichiers compilés. La clé `protected_paths` s'y ajoute. La
+  `.gitmodules`, les fichiers conftest de pytest, `.claude/*`, `.mcp.json`, `.vscode/*`, `.pre-commit-config.yaml` et les
+  fichiers compilés. La clé `protected_paths` s'y ajoute. La
   comparaison se fait en `casefold()`, sur la liste de fichiers que GitHub annonce ; une liste tronquée fait escalader.
 - **Réalignement** : `git merge-tree`, puis `commit-tree -p <tête GitHub> -p <base GitHub>`, sur objets : le worktree du
   worker n'est pas touché. Les objets sont récupérés à refspec explicite vers `refs/grimoire/tick/…`, depuis l'URL de
@@ -540,7 +543,7 @@ dans cet ordre, et chaque garde échoue fermée :
   refusée si une ligne de la cible manque.
 - **Git du tick** (`grimoire.core.safe_git`) : seulement quand un rôle autonome est activé, et le temps du tick,
   l'environnement neutralise pour tous les git du processus ce qui exécute du code. Sont toujours coupés : les hooks, le
-  fsmonitor et les signatures. Sont aussi neutralisés, quand le dépôt ou un worktree les déclare localement : les
+  fsmonitor, les signatures et les transports `ext::` et `fd::`. Sont aussi neutralisés, quand le dépôt ou un worktree les déclare localement : les
   filtres, les pilotes de fusion, `core.sshCommand` et `credential.helper` (remis aux valeurs globales de
   l'utilisateur). Rien n'est refusé pour une configuration ordinaire, et l'identité et les identifiants globaux ne sont
   pas touchés. Hors de ce cas, les git du kit sont ceux de toujours.
@@ -550,7 +553,8 @@ dans cet ordre, et chaque garde échoue fermée :
   - les sessions tournent sous le même utilisateur du système : un processus qui écrit ce que le tick lit avant lui
     contourne une garde de fichier ; seule une isolation par utilisateur du système la fermerait ;
   - un filtre posé par le worker pendant le tick tourne le temps de ce tick ;
-  - les pilotes de diff ne sont pas neutralisés ;
+  - les pilotes de diff ne sont pas neutralisés, et les git que `gh` lance lui-même n'héritent que de la neutralisation
+    par l'environnement ;
   - la liste des chemins qui escaladent est courte ;
   - la branche locale du worker n'est pas avancée par le réalignement ;
   - une PR sans aucun check attend indéfiniment.

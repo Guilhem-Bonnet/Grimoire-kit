@@ -165,6 +165,17 @@ def attest_session(service: TaskService, role: str, task_id: str) -> tuple[str, 
     return session, ""
 
 
+def _freeze_repository(service: TaskService, task_id: str) -> str:
+    """Lot 4 : fige le dépôt GitHub de la tâche au journal d'autorité, avant le worker ; ``""`` ou la raison d'un refus."""
+    from grimoire.missions.review_seal import freeze_repository
+
+    try:
+        freeze_repository(service.home_root, task_id)
+    except Exception as exc:  # journal d'autorité rompu : le worker n'est pas lancé (échec fermé)
+        return f"dépôt de la tâche non figé au journal d'autorité ({type(exc).__name__}: {exc})"
+    return ""
+
+
 _LIVE = (TaskState.CLAIMED, TaskState.RUNNING, TaskState.BLOCKED, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
 
 
@@ -251,6 +262,8 @@ class WorkerLauncher:
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
         # Inscrite après la préparation : une préparation qui échoue ne consomme pas le plafond de sessions du mandat.
         session_id, refused = attest_session(service, WORKER_ACTOR, tid)
+        if not refused:
+            refused = _freeze_repository(service, tid)
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)

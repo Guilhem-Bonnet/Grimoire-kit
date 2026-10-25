@@ -48,7 +48,9 @@ def projet(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def host() -> FakeHost:
-    return FakeHost()
+    fake = FakeHost()
+    fake.repo = "acme/kit"
+    return fake
 
 
 posix_only = pytest.mark.skipif(os.name == "nt", reason="scripts shell exécutables : harnais POSIX")
@@ -178,6 +180,10 @@ BYPASS = [
     "src/grimoire/missions/Mandate.py",
     "src/grimoire/missions/mandate.PY",
     "src/app/build/_native.cpython-312-x86_64-linux-gnu.so",
+    ".claude/settings.json",
+    ".mcp.json",
+    ".vscode/tasks.json",
+    ".pre-commit-config.yaml",
 ]
 
 
@@ -272,7 +278,7 @@ def test_le_realignement_ne_blanchit_pas_un_commit_pose_pendant_le_tick(projet: 
         if host.of("gh", "pr", "merge"):
             break
     [argv] = host.of("gh", "pr", "merge")
-    merged_head = argv[-1]
+    merged_head = argv[argv.index("--match-head-commit") + 1]
     assert git(projet, "rev-parse", f"{merged_head}^1") == h0  # le réalignement part de la tête relue, pas du HEAD
     assert "curl evil" not in git(projet, "show", f"{merged_head}:src/app/route.py")
     assert _merged(projet, tid) and _merged(projet, tid)[0].payload["head_sha"] == merged_head
@@ -331,7 +337,7 @@ def test_une_url_de_origin_redirigee_ne_fait_ni_recuperer_ni_fusionner(projet: P
     for _ in range(2):
         outcomes += tick(projet, host).merges
     assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
-    assert any(PROTECTED in o.detail or "n'est pas le dépôt de la PR" in o.detail for o in outcomes), outcomes
+    assert any(PROTECTED in o.detail or "n'est pas le dépôt figé au lancement" in o.detail for o in outcomes), outcomes
 
 
 def test_une_ref_de_suivi_plantee_ne_cache_aucun_chemin(projet: Path, tmp_path: Path) -> None:
@@ -368,7 +374,7 @@ def test_le_noyau_du_kit_escalade_a_l_humain(projet: Path, tmp_path: Path, redir
     for _ in range(2):
         outcomes += tick(projet, host).merges
     assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
-    expected = "n'est pas le dépôt de la PR" if redirect else path  # redirigée : rien n'est récupéré, donc rien fusionné
+    expected = "n'est pas le dépôt figé au lancement" if redirect else path  # redirigée : rien n'est récupéré, donc rien fusionné
     assert any(o.action in ("escalate", "refused") and expected in o.detail for o in outcomes), outcomes
 
 
@@ -491,3 +497,86 @@ def test_une_remote_qui_ne_dit_pas_ce_que_dit_github_fait_attendre(projet: Path,
     report = tick(projet, host)
     assert merges(report) == [("wait", "waiting")] and "ne disent pas encore la même chose" in report.merges[0].detail
     assert host.of("gh", "pr", "merge") == []
+
+
+
+# ── Relecture finale : renommages, ext::, dépôt figé, sceau sans tête ──────────
+
+
+def test_un_fichier_protege_renomme_hors_de_sa_place_escalade(projet: Path, host: FakeHost) -> None:
+    """gh pr view ne donne que le nouveau nom d'un renommage (cli/cli#14575) : l'API REST donne aussi l'ancien."""
+    advance_main(projet, ".github/workflows/ci.yml", "on: push\njobs: {}\n")
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("docs/ok.md", "x\n"))
+    git(wt, "pull", "-q", "--no-rebase", "origin", "main")
+    git(wt, "mv", ".github/workflows/ci.yml", "docs/ci.txt")
+    git(wt, "commit", "-q", "-m", "la CI sort de .github")
+    git(wt, "push", "-q", "origin", f"task/{tid}")
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")] and ".github/workflows/ci.yml" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+@posix_only
+def test_un_transport_ext_de_la_config_n_est_pas_execute_par_le_fetch_du_tick(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from lot2_doubles import make_repo
+
+    from grimoire.core.safe_git import tick_scope
+    from grimoire.missions.merger import MergeStage
+
+    root = make_repo(tmp_path)
+    marker = tmp_path / "pwned"
+    git(root, "config", "protocol.ext.allow", "always")
+    stage = MergeStage(SimpleNamespace(home_root=root), SimpleNamespace())  # type: ignore[arg-type]
+    with tick_scope(root, active=True):
+        got, refused = stage._fetch_from(f"ext::sh -c touch% {marker};:@github.com/o/r", "main")
+    assert not marker.exists() and got == {} and refused
+
+
+def test_tous_les_gh_du_merger_visent_le_depot_fige(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    assert merges(merged_after_review(projet, host, tid, wt)) == [("accept", "done")]
+    calls = [a for a in host.of("gh") if (a[1] in ("pr", "api") and a[2] != "merge") or a[1:3] == ["pr", "merge"]]
+    assert calls and all(("-R" in a and a[a.index("-R") + 1] == "acme/kit") or a[2].startswith("repos/acme/kit/") for a in calls)
+
+
+def test_sans_depot_fige_au_lancement_rien_n_est_fusionne(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from grimoire.missions import ci_slots
+    from grimoire.missions.review_seal import frozen_repository
+
+    def unresolved(_home: Path, _project: Path) -> str:
+        raise ci_slots._RepositoryUnresolvedError(ci_slots.UNKNOWN, "remote origin non reconnu comme owner/repo")
+
+    monkeypatch.setattr(ci_slots, "ci_repository", unresolved)  # aucun owner/repo GitHub à figer au lancement
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    assert frozen_repository(projet, tid) == {"repo": "", "origin_url": git(projet, "remote", "get-url", "origin")}
+    report = review_ready(projet, host, tid, wt)
+    assert merges(report) == [("refused", "refused")] and "non figé à son lancement" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_un_sceau_sans_tete_n_est_ni_pose_ni_accepte(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from lot2_doubles import make_repo
+
+    from grimoire.missions.review_receipt import write_receipt
+    from grimoire.missions.review_seal import seal_judgment, verify
+
+    root = make_repo(tmp_path)  # un dépôt git, sans branche task/T-1
+    receipt = write_receipt(root, "T-1", "READY", reviewer_id="reviewer", reviewer_session="s")
+    with pytest.raises(ValueError, match="sans tête"):
+        seal_judgment(root, "T-1", "rev-1", root, receipt)
+    plain = tmp_path / "sans-git"
+    plain.mkdir()
+    receipt = write_receipt(plain, "T-2", "READY", reviewer_id="reviewer", reviewer_session="s")
+    seal_judgment(plain, "T-2", "rev-2", plain, receipt)  # hors git : l'empreinte de contenu, faute d'objets
+    task = SimpleNamespace(id="T-2")
+    assert verify(plain, task, plain) == ""  # type: ignore[arg-type]
+    assert "aucune tête" in verify(plain, task, plain, head="a" * 40)  # type: ignore[arg-type]
