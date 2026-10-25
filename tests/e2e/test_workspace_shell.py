@@ -27,6 +27,7 @@ SECTIONS = {
     "a-traiter": "a-traiter",
     "travail": "travail",
     "flotte": "flotte",
+    "sante": "savoir",
     "memoire": "savoir",
     "journal": "savoir",
     "fichiers": "configuration",

@@ -13,6 +13,10 @@ qui attend un humain :
   accusées, claims dont plus aucune session ne tient la tâche ;
 - propositions en attente ;
 - kits en retard ;
+- l'hygiène de la mémoire (P25) : store contaminé (doublons, identités de
+  test), contradictions de ``memory lint``, supersessions orphelines, motifs
+  transverses à reconfirmer, dérive de parité, graphe de code périmé — un
+  élément typé par constat, chacun avec son geste (``ref.gesture``) ;
 - sondes en échec (mémoire, lecture d'une source), projets illisibles ;
 - services mémoire requis par un projet qui travaille (session vivante ou
   tâche en cours), arrêtés, en échec ou inconnus.
@@ -49,6 +53,7 @@ from grimoire.missions.liveness import INCONNU, TERMINE, VIVANT, SessionProbe
 from grimoire.tools.memory_setup import SERVICE_FAILED, SERVICE_ONLINE, SERVICE_STOPPED, service_state
 from grimoire.tools.project_health import kit_alignment
 from grimoire.tools.project_registry import load_registry, slug_for_path
+from grimoire.tools.workspace_hygiene import HYGIENE_KINDS, cached_report
 from grimoire.tools.workspace_portfolio import (
     DEFAULT_LIVE_MINUTES,
     RUNS_RELPATH,
@@ -87,7 +92,7 @@ SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("decide", "À décider", (CHECKPOINT, QUESTION, PROPOSAL)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, DIRECTIVE_UNACKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
-    ("maintain", "À entretenir", (KIT_BEHIND,)),
+    ("maintain", "À entretenir", (*HYGIENE_KINDS, KIT_BEHIND)),
     ("resolved", "Résolu automatiquement", (SERVICE_RESOLVED,)),
 )
 #: Un type que :data:`SECTIONS` ne connaît pas tombe ici : jamais perdu.
@@ -378,6 +383,14 @@ def _collect_memory(read: _ProjectRead, probe: bool) -> None:
           backend=status.get("resolvedBackend") or status.get("configuredBackend"))
 
 
+def _collect_hygiene(read: _ProjectRead) -> None:
+    """Les constats d'hygiène de la mémoire, repris du rapport de santé (cache, jamais de réseau)."""
+    assert read.root is not None
+    report = cached_report(read.root, slug=read.row["slug"], name=read.row["name"])
+    for item in report.get("hygiene", []):
+        _item(read, item["kind"], item["key"], item["title"], item["reason"], since=item.get("since"), **item["ref"])
+
+
 def _live_journal(root: Path, now: datetime) -> bool:
     """Un journal de session non terminé, écrit dans la fenêtre de vie, même sans tâche."""
     runs = root / RUNS_RELPATH
@@ -436,6 +449,7 @@ def _read_project(
     _guarded(read, "propositions", lambda: _collect_proposals(read))
     _guarded(read, "kit", lambda: _collect_kit(read))
     _guarded(read, "mémoire", lambda: _collect_memory(read, probe_memory))
+    _guarded(read, "hygiène", lambda: _collect_hygiene(read))
     return read
 
 

@@ -91,7 +91,16 @@ const KINDS = {
   probe_failed: { word: 'sonde en échec', icon: 'pulse', tone: 'bad', action: 'Voir la sonde' },
   kit_behind: { word: 'kit en retard', icon: 'seal', tone: '', action: 'Mettre à jour' },
   service_resolved: { word: 'résolu', icon: 'check', tone: 'ok', action: 'Voir' },
+  // Hygiène de la mémoire (P25) : l'action ouvre Savoir › Santé et carte sur le constat.
+  memory_quality: { word: 'mémoire en alerte', icon: 'i-mem-entry', tone: 'warn', action: 'Voir la santé' },
+  memory_contradiction: { word: 'contradiction', icon: 'i-mem-contradict', tone: 'warn', action: 'Voir la santé' },
+  memory_orphan_supersession: { word: 'remplaçant introuvable', icon: 'i-mem-supersede', tone: '', action: 'Voir la santé' },
+  memory_parity_drift: { word: 'dérive des index', icon: 'i-store-graph', tone: '', action: 'Voir la santé' },
+  codegraph_stale: { word: 'graphe de code périmé', icon: 'code', tone: '', action: 'Voir la santé' },
+  shared_aging: { word: 'motif à reconfirmer', icon: 'i-mem-shared', tone: '', action: 'Voir la santé' },
 };
+const HYGIENE = new Set(['memory_quality', 'memory_contradiction', 'memory_orphan_supersession',
+  'memory_parity_drift', 'codegraph_stale', 'shared_aging']);
 const FALLBACK = { word: 'élément', icon: 'info', tone: '', action: 'Ouvrir' };
 
 /** Une ligne d'aide par section (`workspace_attention.SECTIONS`). */
@@ -116,6 +125,7 @@ const TILES = {
 function cliOf(item) {
   const ref = item.ref || {};
   if (ref.task_id) return `grimoire task show ${ref.task_id}`;
+  if (ref.gesture && ref.gesture.command) return ref.gesture.command;
   if (item.kind === 'checkpoint') return 'grimoire upgrade-flow review';
   return '';
 }
@@ -166,6 +176,7 @@ function destination(ctx, item) {
     };
   }
   if (item.kind === 'unreadable' && ctx.scope.all) return { target: 'flotte', params: {}, slug: null };
+  if (HYGIENE.has(item.kind)) return { target: 'sante', params: { item: item.id }, slug };
   const source = String(item.id || '').split(':').pop();
   const focus = item.kind === 'probe_failed' ? PROBE_FOCUS[source] : FOCUS[item.kind];
   const params = { focus: focus || '', run: ref.run_id || '', proposal: item.kind === 'proposal' ? ref.slug : '' };
@@ -257,6 +268,7 @@ function renderDetail(ctx, item) {
     ['Service', ref.service],
     ['Adresse', ref.url, true],
     ['Fichiers', ref.behind ? `${ref.behind} en retard` : ''],
+    ['Geste', ref.gesture ? ref.gesture.note : ''],
   ]));
   if (Array.isArray(ref.refusals) && ref.refusals.length) {
     const list = node('ul', 'at-refusals');
