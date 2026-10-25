@@ -1126,15 +1126,18 @@ def proposals_view(project_root: Path) -> dict[str, Any]:
     naturellement le cache au prochain appel.
     """
     from grimoire.core.standard_generation import PROPOSALS_DIR
-    from grimoire.proposals import list_proposals
+    from grimoire.proposals import accept_blocker, list_proposals
     from grimoire.tools import view_cache
 
     root = project_root.resolve()
     signature = view_cache.path_signature([root / PROPOSALS_DIR])
+    # `accept_blocker` : le refus qu'« Accepter » rencontrerait à coup sûr
+    # (même texte que `accept_proposal`), pour que la fiche montre ce qu'il
+    # reste à faire à la main plutôt qu'un bouton qui échoue toujours.
     return view_cache.cached(
         f"proposals_view:{root}",
         signature,
-        lambda: {"proposals": [p.to_dict() for p in list_proposals(root)]},
+        lambda: {"proposals": [{**p.to_dict(), "accept_blocker": accept_blocker(p)} for p in list_proposals(root)]},
     )
 
 

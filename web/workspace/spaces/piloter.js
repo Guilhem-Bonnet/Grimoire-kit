@@ -98,10 +98,26 @@ function injectStyles() {
     .pl-field textarea, .pl-field input[type="text"] { font: inherit; font-size: var(--t-s); padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); resize: vertical; }
     .pl-tool-opts { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--t-s); }
     .pl-tool-opts label { display: flex; align-items: center; gap: 4px; }
-    .pl-prop-row { flex-direction: column; align-items: stretch; gap: 6px; }
-    .pl-prop-head { display: flex; align-items: center; gap: var(--sp-2); }
-    .pl-prop-facts { color: var(--ink2); font-size: var(--t-s); }
-    .pl-prop-actions { display: flex; gap: var(--sp-2); }
+    /* Propositions : une carte, une ligne par proposition (artboards Douce,
+       liste d'À traiter) — type et nom, puis les faits en texte secondaire,
+       puis les actions et leur retour. Jamais trois colonnes serrées. */
+    .pl-props { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); overflow: hidden; }
+    .pl-prop-row { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); min-width: 0; }
+    .pl-prop-row:first-child { border-top: 0; }
+    .pl-prop-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+    .pl-prop-head .chip { flex: none; }
+    .pl-prop-name { font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+    .pl-prop-facts { margin: 0; color: var(--ink2); font-size: var(--t-s); overflow-wrap: anywhere; }
+    .pl-prop-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-top: 2px; }
+    .pl-prop-manual { display: flex; align-items: flex-start; gap: 6px; min-width: 0; margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r); background: var(--e1); color: var(--ink2); font-size: var(--t-s); }
+    .pl-prop-manual .ico { flex: none; margin-top: 1px; }
+    .pl-prop-manual > span { min-width: 0; overflow-wrap: anywhere; }
+    .pl-prop-manual b { color: var(--ink); font-weight: 600; }
+    .pl-prop-manual code { font-family: var(--mono); font-size: var(--t-min); }
+    /* Retour d'une action sur place : la Console n'est plus dans la coque
+       (P62), un refus envoyé là-bas restait invisible. */
+    .pl-status:not(:empty) { padding: var(--sp-2) var(--sp-3); border-radius: var(--r); background: var(--e2); color: var(--ink); font-size: var(--t-s); overflow-wrap: anywhere; }
+    .pl-status[data-tone="bad"]:not(:empty) { background: var(--bad-soft); color: var(--bad); }
     /* Un display d auteur l emporte sur l attribut hidden : on le rend explicite. */
     .pl-sheet[hidden], .pl-wrap[hidden], .pl-cat-files[hidden], .pl-up-foot[hidden] { display: none; }
     .pl-update { max-width: 1360px; width: 100%; box-sizing: border-box; margin: 0 auto; }
@@ -691,14 +707,67 @@ async function loadSheet(ctx, slug) {
 // évidente) et re-fetch `agents()` pour que la table au-dessus le montre
 // aussitôt ; refuser ne fait que marquer la proposition.
 
-//: Préfixe que `_accept_repair` (grimoire/proposals.py) reconnaît seul comme
-//: une substitution qu'il peut appliquer sans intervention humaine — même
-//: motif que côté serveur, dupliqué ici pour décider quels boutons montrer
-//: sans faire d'aller-retour réseau.
-const REPAIR_SUBSTITUTION_RE = /^substitution évidente\s*:/;
+// ── Retour d'action sur place ───────────────────────────────────────────────
+//
+// Depuis la refonte (P62) la Console n'est plus dans la coque : un refus
+// envoyé à `ctx.dock` n'était lu par personne. Chaque action porte donc son
+// retour à côté d'elle : le bouton se désactive avec un libellé d'attente,
+// le message du serveur s'affiche en clair dans une zone `role="status"`,
+// puis le bouton redevient utilisable.
 
-function repairHasEvidentSubstitution(p) {
-  return REPAIR_SUBSTITUTION_RE.test(p.carrier_reason || '');
+/** Zone de retour vide, annoncée par les lecteurs d'écran quand elle change. */
+function statusBox() {
+  const box = document.createElement('div');
+  box.className = 'pl-status';
+  box.setAttribute('role', 'status');
+  box.setAttribute('aria-live', 'polite');
+  return box;
+}
+
+function showStatus(box, message, tone) {
+  box.dataset.tone = tone || '';
+  box.textContent = message || '';
+}
+
+/** Libellé d'un échec : « Refusé » quand le serveur a répondu, « Échec » sinon. */
+function failureText(error) {
+  const message = (error && error.message) || 'motif non communiqué';
+  return error && error.status === 0 ? `Échec : ${message}` : `Refusé : ${message}`;
+}
+
+/**
+ * Exécute `action` derrière `button` : libellé d'attente, boutons voisins
+ * gelés le temps de la requête, échec affiché dans `status`. Rend `true`
+ * quand l'action a abouti.
+ */
+async function runInline(button, pendingLabel, status, action, siblings = []) {
+  const label = button.textContent;
+  const frozen = [button, ...siblings].map((b) => [b, b.disabled]);
+  for (const [b] of frozen) b.disabled = true;
+  button.textContent = pendingLabel;
+  button.setAttribute('aria-busy', 'true');
+  showStatus(status, '');
+  try {
+    await action();
+    return true;
+  } catch (error) {
+    showStatus(status, failureText(error), 'bad');
+    return false;
+  } finally {
+    button.textContent = label;
+    button.removeAttribute('aria-busy');
+    for (const [b, was] of frozen) b.disabled = was;
+  }
+}
+
+/** `texte avec `code`` → nœuds, les segments entre accents graves en `<code>`. */
+function withInlineCode(value) {
+  const frag = document.createDocumentFragment();
+  String(value || '').split('`').forEach((part, index) => {
+    if (!part) return;
+    frag.append(index % 2 ? Object.assign(document.createElement('code'), { textContent: part }) : document.createTextNode(part));
+  });
+  return frag;
 }
 
 // `artifact_ref` porte "<chemin>:<ligne> → <cible morte>" (même forme que
@@ -790,55 +859,55 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
   }
 
   const list = document.createElement('div');
-  list.className = 'pl-watch';
+  list.className = 'pl-props';
   for (const proposal of pending) {
     const line = document.createElement('div');
-    line.className = 'pl-watch-row pl-prop-row';
+    line.className = 'pl-prop-row';
     line.dataset.proposal = proposal.slug;
 
+    // Ligne 1 : type et nom. Ligne 2 : les faits, en secondaire.
     const head = document.createElement('div');
     head.className = 'pl-prop-head';
     head.append(
       pill(proposalTypeDot(proposal), proposalTypeLabel(proposal)),
-      text('span', 'pl-watch-name', proposal.specialty),
-      text('span', 'lbl', proposalFacts(proposal)),
+      text('span', 'pl-prop-name', proposal.specialty),
     );
     line.append(head);
-    if (proposal.use_when) line.append(text('div', 'pl-prop-facts', proposal.use_when));
+    const facts = proposalFacts(proposal);
+    if (facts) line.append(text('p', 'pl-prop-facts', facts));
+    if (proposal.use_when) line.append(text('p', 'pl-prop-facts', proposal.use_when));
 
+    // Ligne 3 : actions, puis leur retour sur place.
     const actions = document.createElement('div');
     actions.className = 'pl-prop-actions';
+    const status = statusBox();
 
     const isRepair = proposal.artifact_type === 'repair';
-    const canApply = !isRepair || repairHasEvidentSubstitution(proposal);
+    // `accept_blocker` (grimoire.proposals) : le refus qu'« Accepter »
+    // rencontrerait à coup sûr, calculé par le serveur avec le même texte
+    // que le refus réel. Dans ce cas on ne montre pas un bouton qui échoue
+    // toujours, mais ce qu'il reste à faire à la main.
+    const blocker = proposal.accept_blocker || '';
+    const decide = (button, action, pendingLabel, siblings) => runInline(button, pendingLabel, status, async () => {
+      const result = await ctx.api.proposalAction(proposal.slug, action, slug);
+      if (!result || !result.ok) throw Object.assign(new Error(result?.error || 'refus sans motif'), { status: 200 });
+      onChanged();
+    }, siblings);
 
-    // Une réparation sans substitution évidente n'offre jamais « Accepter » :
-    // `_accept_repair` la refuserait de toute façon (« revue humaine
-    // requise ») — mieux vaut ne pas montrer un bouton qui échoue toujours.
-    if (canApply) {
-      const acceptBtn = document.createElement('button');
+    const acceptBtn = blocker ? null : document.createElement('button');
+    const rejectBtn = document.createElement('button');
+    if (acceptBtn) {
       acceptBtn.type = 'button';
       acceptBtn.className = 'btn pri';
       acceptBtn.textContent = 'Accepter';
-      acceptBtn.addEventListener('click', async () => {
-        ctx.dock.echo(`grimoire proposals accept ${proposal.slug}`);
-        const result = await ctx.api.proposalAction(proposal.slug, 'accept', slug).catch((error) => ({ ok: false, error: error.message }));
-        if (!result.ok) { ctx.dock.echo(`refusé : ${result.error}`); return; }
-        onChanged();
-      });
+      acceptBtn.addEventListener('click', () => decide(acceptBtn, 'accept', 'Acceptation…', [rejectBtn]));
       actions.append(acceptBtn);
     }
 
-    const rejectBtn = document.createElement('button');
     rejectBtn.type = 'button';
     rejectBtn.className = 'btn';
     rejectBtn.textContent = 'Refuser';
-    rejectBtn.addEventListener('click', async () => {
-      ctx.dock.echo(`grimoire proposals reject ${proposal.slug}`);
-      const result = await ctx.api.proposalAction(proposal.slug, 'reject', slug).catch((error) => ({ ok: false, error: error.message }));
-      if (!result.ok) { ctx.dock.echo(`refusé : ${result.error}`); return; }
-      onChanged();
-    });
+    rejectBtn.addEventListener('click', () => decide(rejectBtn, 'reject', 'Refus…', acceptBtn ? [acceptBtn] : []));
     actions.append(rejectBtn);
 
     if (isRepair) {
@@ -854,7 +923,20 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
       }
     }
 
-    line.append(actions);
+    // Ce qu'« Accepter » ne fera jamais : dit avant les actions, en clair.
+    if (blocker) {
+      const manual = document.createElement('p');
+      manual.className = 'pl-prop-manual';
+      manual.dataset.manual = 'true';
+      const lead = document.createElement('b');
+      lead.textContent = 'À faire à la main';
+      const body = document.createElement('span');
+      body.append(lead, document.createTextNode(' — '), withInlineCode(blocker));
+      manual.append(icon('info'), body);
+      line.append(manual);
+    }
+
+    line.append(actions, status);
     list.append(line);
   }
   section.append(list);
@@ -1005,20 +1087,19 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   saveClauseBtn.className = 'btn';
   saveClauseBtn.textContent = saveLabel('Enregistrer la clause');
   saveClauseBtn.disabled = readOnly;
+  const clauseStatus = statusBox();
   saveClauseBtn.addEventListener('click', async () => {
     ctx.dock.echo(`# clause d'emploi — ${agent.name}`);
-    try {
-      await ctx.api.agentFields(agent.name, { use_when: useWhen.value, dont_use_when: dontUseWhen.value });
-      callbacks.refresh(agent.name);
-    } catch (error) {
-      ctx.dock.log('doctor', 'refusé : ' + error.message);
-    }
+    const ok = await runInline(saveClauseBtn, 'Enregistrement…', clauseStatus, () =>
+      ctx.api.agentFields(agent.name, { use_when: useWhen.value, dont_use_when: dontUseWhen.value }));
+    if (ok) callbacks.refresh(agent.name);
   });
 
   block.append(
     fieldRow('use_when', useWhen),
     fieldRow('dont_use_when', dontUseWhen),
     saveClauseBtn,
+    clauseStatus,
   );
   if (agent.tool_boundary) block.append(text('div', 'lbl', 'Frontière : ' + agent.tool_boundary));
 
@@ -1041,17 +1122,15 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   saveToolsBtn.className = 'btn';
   saveToolsBtn.textContent = saveLabel('Enregistrer les outils');
   saveToolsBtn.disabled = readOnly;
+  const toolsStatus = statusBox();
   saveToolsBtn.addEventListener('click', async () => {
     const chosen = TOOL_VERBS.filter((v) => toolChecks[v].checked);
     ctx.dock.echo(`# outils — ${agent.name} → ${chosen.join(', ')}`);
-    try {
-      await ctx.api.agentFields(agent.name, { tools: chosen });
-      callbacks.refresh(agent.name);
-    } catch (error) {
-      ctx.dock.log('doctor', 'refusé : ' + error.message);
-    }
+    const ok = await runInline(saveToolsBtn, 'Enregistrement…', toolsStatus, () =>
+      ctx.api.agentFields(agent.name, { tools: chosen }));
+    if (ok) callbacks.refresh(agent.name);
   });
-  block.append(fieldRow('tools', toolOpts), saveToolsBtn);
+  block.append(fieldRow('tools', toolOpts), saveToolsBtn, toolsStatus);
 
   // ── Contexte ─────────────────────────────────────────────────────────
   const contextArea = document.createElement('textarea');
@@ -1064,21 +1143,20 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   saveContextBtn.className = 'btn';
   saveContextBtn.textContent = saveLabel('Enregistrer le contexte');
   saveContextBtn.disabled = readOnly;
+  const contextStatus = statusBox();
   saveContextBtn.addEventListener('click', async () => {
     const paths = contextArea.value.split('\n').map((s) => s.trim()).filter(Boolean);
     ctx.dock.echo(`# contexte — ${agent.name}`);
-    try {
-      await ctx.api.agentFields(agent.name, { context: paths });
-      callbacks.refresh(agent.name);
-    } catch (error) {
-      ctx.dock.log('doctor', 'refusé : ' + error.message);
-    }
+    const ok = await runInline(saveContextBtn, 'Enregistrement…', contextStatus, () =>
+      ctx.api.agentFields(agent.name, { context: paths }));
+    if (ok) callbacks.refresh(agent.name);
   });
-  block.append(fieldRow('context', contextArea), saveContextBtn);
+  block.append(fieldRow('context', contextArea), saveContextBtn, contextStatus);
 
   // ── Skills ───────────────────────────────────────────────────────────
   const skillsWrap = document.createElement('div');
   skillsWrap.className = 'pl-chips';
+  const skillsStatus = statusBox();
   for (const slug of agent.skills) {
     const chip = document.createElement('span');
     chip.className = 'pl-chip';
@@ -1090,12 +1168,8 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
     remove.setAttribute('aria-label', `Retirer ${slug}`);
     remove.addEventListener('click', async () => {
       ctx.dock.echo(`# retirer skill — ${agent.name} : ${slug}`);
-      try {
-        await ctx.api.agentSkill(agent.name, slug, 'remove');
-        callbacks.refresh(agent.name);
-      } catch (error) {
-        ctx.dock.log('doctor', 'refusé : ' + error.message);
-      }
+      const ok = await runInline(remove, '…', skillsStatus, () => ctx.api.agentSkill(agent.name, slug, 'remove'));
+      if (ok) callbacks.refresh(agent.name);
     });
     chip.append(remove);
     skillsWrap.append(chip);
@@ -1123,16 +1197,12 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
     const slug = select.value;
     if (!slug) return;
     ctx.dock.echo(`# assigner skill — ${agent.name} : ${slug}`);
-    try {
-      await ctx.api.agentSkill(agent.name, slug, 'assign');
-      callbacks.refresh(agent.name);
-    } catch (error) {
-      ctx.dock.log('doctor', 'refusé : ' + error.message);
-    }
+    const ok = await runInline(assignBtn, 'Assignation…', skillsStatus, () => ctx.api.agentSkill(agent.name, slug, 'assign'), [select]);
+    if (ok) callbacks.refresh(agent.name);
   });
   assignRow.append(select, assignBtn);
 
-  block.append(fieldRow('skills', skillsWrap), assignRow);
+  block.append(fieldRow('skills', skillsWrap), assignRow, skillsStatus);
   return block;
 }
 
