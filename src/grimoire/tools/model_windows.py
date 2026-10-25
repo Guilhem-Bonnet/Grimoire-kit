@@ -1,8 +1,8 @@
 """Model context windows — single source of truth (issue #39, C6).
 
-Historically ``context_router.py`` and ``context_guard.py`` each carried
-their own copy of this table, which drifted together toward stale model
-ids. Both now import from here; ``resolve_window`` adds longest-prefix
+Historically ``context_router.py`` and ``context_guard.py`` (retirés, sans
+appelant) each carried their own copy of this table, which drifted together
+toward stale model ids. ``cost_model`` imports from here; ``resolve_window`` adds longest-prefix
 matching so new point releases (``claude-sonnet-4.6``, ``gpt-5.4``…)
 resolve to their family instead of silently falling back to the default.
 

@@ -1386,6 +1386,11 @@ from grimoire.cli.cmd_task_wave import register_wave_commands  # noqa: E402
 
 register_wave_commands(task_app)
 
+# R03 : `task import-a2a`, dans son module (plafond de taille).
+from grimoire.cli.cmd_task_a2a import register_a2a_commands  # noqa: E402
+
+register_a2a_commands(task_app)
+
 # W4-01 : `task fold-usage` et l'usage affiché par `task show`, dans leur module (plafond de taille).
 from grimoire.cli.cmd_task_usage import _usage_line, _usage_of, register_usage_commands  # noqa: E402
 
