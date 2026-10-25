@@ -7,6 +7,7 @@ backend can stay online until parity checks pass.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import uuid
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib import error, parse, request
 
+from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import MemoryEntry
 
 #: Breadcrumb left by ``memory up --apply`` whenever it changes
@@ -119,6 +121,20 @@ class BackendMigrationResult:
     entries: int
     imported: int
     dry_run: bool
+    #: Entrées lues dans la source mais écartées par ``--project`` (autre projet).
+    filtered_out: int = 0
+    #: Projet demandé (``metadata.project_name``), vide = aucun filtre.
+    project: str = ""
+    #: Identifiants absents de la cible (écrits, ou à écrire en aperçu).
+    created: int = 0
+    #: Identifiants déjà présents dans la cible : laissés tels quels sans ``--overwrite``.
+    skipped_existing: int = 0
+    #: Identifiants copiés par une migration précédente puis absents de la cible (supprimés là) : non recréés.
+    skipped_deleted: int = 0
+    #: Identifiants déjà présents et remplacés (``--overwrite``), ou à remplacer en aperçu.
+    overwritten: int = 0
+    #: ``(identifiant, motif)`` des souvenirs que la cible a refusés ; la copie continue.
+    refused: tuple[tuple[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,7 +143,71 @@ class BackendMigrationResult:
             "entries": self.entries,
             "imported": self.imported,
             "dryRun": self.dry_run,
+            "filteredOut": self.filtered_out,
+            "project": self.project,
+            "created": self.created,
+            "skippedExisting": self.skipped_existing,
+            "skippedDeleted": self.skipped_deleted,
+            "overwritten": self.overwritten,
+            "refused": [{"id": i, "reason": r} for i, r in self.refused],
         }
+
+
+class MigrationInterruptedError(GrimoireMemoryError):
+    """Écriture interrompue en cours de migration (cible injoignable, disque plein...).
+
+    La source n'a jamais été modifiée (la migration ne fait que la lire) et la
+    copie ne crée que les identifiants absents : relancer la même commande
+    reprend sans doublon.
+    """
+
+    def __init__(self, imported: int, total: int, cause: Exception) -> None:
+        self.imported = imported
+        self.total = total
+        super().__init__(
+            f"migration interrompue après {imported}/{total} souvenir(s) : {cause}. "
+            "La source est intacte ; relancer la même commande reprend sans doublon."
+        )
+
+
+#: Clés techniques posées par le backend d'origine : elles décrivent *sa* collection ou *son*
+#: objet, pas le souvenir. Les recopier ferait pointer la copie vers la collection source.
+_BACKEND_TECHNICAL_KEYS = frozenset({"weaviate_id", "weaviate_collection", "vector_backend"})
+
+
+def portable_metadata(entry: MemoryEntry) -> dict[str, Any]:
+    """Métadonnées d'une entrée sans les clés techniques du backend d'origine."""
+    return {k: v for k, v in entry.metadata.items() if k not in _BACKEND_TECHNICAL_KEYS}
+
+
+def filter_by_project(entries: list[MemoryEntry], project: str) -> list[MemoryEntry]:
+    """Garde les entrées dont ``metadata.project_name`` vaut *project* ; sans filtre, tout."""
+    if not project:
+        return list(entries)
+    return [e for e in entries if str(e.metadata.get("project_name", "")) == project]
+
+
+def copied_registry_path(project_root: Path, source_key: str, target_key: str) -> Path:
+    """Registre des identifiants déjà copiés pour ce couple source → cible."""
+    digest = hashlib.sha256(f"{source_key}\n{target_key}".encode()).hexdigest()[:16]
+    return project_root / "_grimoire" / "_memory" / "migration" / f"copied-{digest}.json"
+
+
+def load_copied(path: Path) -> set[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    ids = data.get("ids") if isinstance(data, dict) else None
+    return {str(i) for i in ids} if isinstance(ids, list) else set()
+
+
+def save_copied(path: Path, ids: set[str], *, source_key: str, target_key: str) -> None:
+    """Écriture atomique (fichier temporaire puis remplacement) : une coupure ne laisse pas un registre tronqué."""
+    from grimoire.core.fsio import atomic_write
+
+    payload = {"source": source_key, "target": target_key, "ids": sorted(ids)}
+    atomic_write(path, json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def migrate_backend_to_backend(
@@ -135,28 +215,94 @@ def migrate_backend_to_backend(
     *,
     source_backend: str,
     target_backend: str,
-    store_many: Callable[[list[dict[str, Any]]], list[Any]] | None,
+    store_many: Callable[[list[dict[str, Any]]], list[Any]] | None = None,
+    upsert: Callable[[MemoryEntry], Any] | None = None,
+    exists: Callable[[str], bool] | None = None,
+    validate_id: Callable[[str], str | None] | None = None,
+    already_copied: set[str] | None = None,
+    overwrite: bool = False,
     dry_run: bool = False,
+    project: str = "",
 ) -> BackendMigrationResult:
-    """Copy *source_entries* into whatever backend *store_many* writes to.
+    """Copy *source_entries* into whatever backend *upsert* (or *store_many*) writes to.
 
-    Replaces the manual ``memory export`` + ``memory import`` two-step (#527):
-    both sides are the public manager API, so this works for any backend pair
-    a :class:`~grimoire.memory.manager.MemoryManager` can construct — lexical
-    included, since it has no vector to preserve and none is required here.
-    ``store_many`` is ``None`` in dry-run mode: nothing is called, only counted.
+    Replaces the manual ``memory export`` + ``memory import`` two-step (#527).
+
+    *upsert* est le chemin normal : chaque entrée est écrite sous **son
+    identifiant d'origine** (références ``superseded_by`` valides). Par
+    défaut, **seuls les identifiants absents de la cible sont créés** :
+    ce qui existe déjà dans la cible (une décision revue) n'est pas défait par
+    une relance ; *overwrite* remplace explicitement. *exists* dit si un
+    identifiant est dans la cible. *already_copied* (registre des identifiants
+    copiés par une migration précédente, voir :func:`load_copied`) distingue
+    « pas encore copié » de « copié puis supprimé dans la cible » : ce second
+    cas n'est pas recréé, même avec *overwrite*. Les identifiants écrits par
+    cet appel sont ajoutés à *already_copied* (à persister par l'appelant).
+
+    *validate_id* dit d'avance si la cible saura porter un identifiant
+    (message d'erreur, ou ``None``) : l'aperçu annonce alors les refus.
+    Un souvenir que la cible refuse (filtre d'injection, identifiant invalide,
+    réponse 400 d'un serveur) est listé dans ``refused`` sans arrêter les
+    suivants ; une panne de la cible (réseau, disque) interrompt
+    (:class:`MigrationInterruptedError`). *store_many* (identifiants régénérés)
+    ne subsiste que pour les appelants sans upsert. Aperçu : aucune donnée n'est
+    écrite, tout est compté.
     """
+    selected = filter_by_project(source_entries, project)
+    copied = already_copied if already_copied is not None else set()
+    created = skipped = skipped_deleted = overwritten = 0
+    refused: list[tuple[str, str]] = []
     imported = 0
-    if not dry_run and source_entries:
-        if store_many is None:
-            raise ValueError("store_many is required unless dry_run=True")
-        imported = len(store_many(entries_for_import(source_entries)))
+    if not dry_run and selected and upsert is None and store_many is None:
+        raise ValueError("upsert or store_many is required unless dry_run=True")
+    if upsert is None and store_many is not None and not dry_run and selected:
+        imported = len(store_many(entries_for_import(selected)))
+        created = imported
+    else:
+        for entry in selected:
+            try:
+                problem = validate_id(entry.id) if validate_id else None
+                if problem:
+                    refused.append((entry.id, problem))
+                    continue
+                present = bool(exists and exists(entry.id))
+                if present and not overwrite:
+                    skipped += 1
+                    continue
+                if not present and entry.id in copied:
+                    skipped_deleted += 1
+                    continue
+                if dry_run:
+                    overwritten += present
+                    created += not present
+                    continue
+                if upsert is not None:
+                    upsert(entry)
+            except (GrimoireMemoryError, ValueError) as exc:
+                refused.append((entry.id, str(exc)))
+                continue
+            except Exception as exc:
+                if dry_run:
+                    refused.append((entry.id, str(exc)))
+                    continue
+                raise MigrationInterruptedError(imported, len(selected), exc) from exc
+            imported += 1
+            copied.add(entry.id)
+            overwritten += present
+            created += not present
     return BackendMigrationResult(
         source_backend=source_backend,
         target_backend=target_backend,
-        entries=len(source_entries),
+        entries=len(selected),
         imported=imported,
         dry_run=dry_run,
+        filtered_out=len(source_entries) - len(selected),
+        project=project,
+        created=created,
+        skipped_existing=skipped,
+        skipped_deleted=skipped_deleted,
+        overwritten=overwritten,
+        refused=tuple(refused),
     )
 
 

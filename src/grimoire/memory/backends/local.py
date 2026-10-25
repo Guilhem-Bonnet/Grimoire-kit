@@ -229,6 +229,7 @@ class LocalMemoryBackend(MemoryBackend):
         user_id: str = "",
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
+        created_at: str = "",
     ) -> MemoryEntry:
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
         uid = user_id or "global"
@@ -252,7 +253,7 @@ class LocalMemoryBackend(MemoryBackend):
                 "user_id": uid,
                 "tags": list(tags),
                 "metadata": metadata or {},
-                "created_at": ts,
+                "created_at": created_at or ts,
                 "updated_at": "",
             }
             self._data.append(record)

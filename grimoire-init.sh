@@ -1751,7 +1751,7 @@ cmd_doctor() {
             echo -e "  ${GREEN}✓${NC}  Qdrant accessible (localhost:6333)"
         else
             echo -e "  ${YELLOW}⚠${NC}  Qdrant non détecté — mémoire structurée désactivée"
-            echo -e "       Pour activer : docker run -p 6333:6333 qdrant/qdrant"
+            echo -e "       Pour activer : docker run -p 6333:6333 qdrant/qdrant:v1.19.1"
             warnings=$((warnings + 1))
         fi
     else
@@ -3105,7 +3105,7 @@ setup_memory_wizard() {
             MEMORY_BACKEND="qdrant-local"
             if ! $qdrant_up; then
                 warn "Qdrant non détecté sur localhost:6333 — assurez-vous de le démarrer"
-                echo -e "       ${CYAN}docker run -d -p 6333:6333 qdrant/qdrant${NC}"
+                echo -e "       ${CYAN}docker run -d -p 6333:6333 qdrant/qdrant:v1.19.1${NC}"
             else
                 ok "Backend sélectionné : qdrant-local (localhost:6333)"
             fi

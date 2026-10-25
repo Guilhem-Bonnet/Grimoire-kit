@@ -156,7 +156,7 @@ def prune_orphan_memories(
     """
     known_ids = frozenset(str(entry.id) for entry in entries)
     orphans = memory_graph.find_orphan_memory_nodes(known_ids=known_ids, collection=collection)
-    purged = memory_graph.purge_memory_nodes([o["id"] for o in orphans]) if apply and orphans else 0
+    purged = memory_graph.purge_memory_nodes([o.get("node_id", o["id"]) for o in orphans]) if apply and orphans else 0
     return {
         "collection": collection,
         "candidates": len(orphans),
