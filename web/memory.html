@@ -5,10 +5,10 @@
   <title>Memory Manager — Grimoire Kit</title>
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="Memory Manager — Grimoire Kit"/>
-  <meta property="og:description" content="La mémoire agentique de Grimoire Kit, inspectable et vérifiable : store, topologie du Memory OS, graphe de connaissances, vault browser, santé memory-lint et consoles natives. Lecture seule sur la vitrine, pilotée en cockpit local."/>
+  <meta property="og:description" content="La mémoire agentique de Grimoire Kit, inspectable et vérifiable : store, topologie du Memory OS, vault browser, santé memory-lint et consoles natives. Lecture seule sur la vitrine, pilotée en cockpit local."/>
   <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/memory.html"/>
   <meta name="twitter:card" content="summary"/>
-  <meta name="description" content="Memory Manager Grimoire Kit — voir et comprendre la mémoire agentique : 141 entrées, graphe par tags partagés, santé du store et redirections vers les consoles natives. Réel en local, snapshot démo sur la vitrine."/>
+  <meta name="description" content="Memory Manager Grimoire Kit — voir et comprendre la mémoire agentique : entrées, provenance, santé du store et redirections vers les consoles natives. Réel en local, snapshot démo sur la vitrine."/>
   <link rel="stylesheet" href="forge-tokens.css"/>
   <link rel="stylesheet" href="forge-base.css"/>
   <link rel="stylesheet" href="forge-motion.css"/>
@@ -153,23 +153,6 @@
     .bar-val { font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-muted); text-align: right; }
     .dist-note { font-family: var(--font-mono); font-size: 0.6rem; color: var(--ink-muted); margin-top: 8px; line-height: 1.6; }
 
-    /* ── Graph ── */
-    .graph-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; }
-    @media (max-width: 920px) { .graph-grid { grid-template-columns: 1fr; } }
-    .graph-panel { padding: 8px 8px 14px; }
-    #graph { width: 100%; display: block; cursor: grab; }
-    #graph .edge { fill: none; stroke: var(--ink-soft); opacity: 0.16; transition: opacity 200ms, stroke-width 200ms; }
-    #graph.focus .edge { opacity: 0.04; }
-    #graph.focus .edge.lit { opacity: 0.7; }
-    #graph .gnode { cursor: pointer; transition: opacity 180ms; }
-    #graph .gnode circle.halo { transition: r 180ms; }
-    #graph .gnode text { font-family: var(--font-mono); font-size: 9.5px; fill: var(--ink-muted); pointer-events: none; transition: fill 180ms; }
-    #graph.focus .gnode:not(.lit):not(.src) { opacity: 0.22; }
-    #graph .gnode.src text, #graph .gnode.lit text { fill: var(--ink); }
-    #graph .gnode.src circle.halo { stroke: var(--ink); stroke-width: 1.6; }
-    .graph-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px 0; flex-wrap: wrap; }
-    .graph-stats { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
-    .graph-stats b { color: var(--ink-soft); }
     .leg-inline { display: flex; flex-wrap: wrap; gap: 12px; }
     .leg-item { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.58rem; color: var(--ink-muted); }
     .leg-item .sw { width: 9px; height: 9px; border-radius: 2px; }
@@ -218,7 +201,6 @@
     .vd-row { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: baseline; }
     .vd-k { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.08em; color: var(--ink-muted); text-transform: uppercase; }
     .vd-v { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-soft); }
-    .vd-links { display: flex; flex-direction: column; gap: 6px; }
     .vd-link { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.64rem; color: var(--ink-soft); }
     .vd-link .sw { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
     .vd-link b { color: var(--ink-muted); font-weight: 400; }
@@ -289,7 +271,7 @@
       <p class="hero-sub reveal" data-delay="120">
         La mémoire de Grimoire <strong>est</strong> une base de connaissances — <span id="mem-total-inline">…</span> entrées : décisions,
         learnings, contradictions, failures, handoffs. Cette page est un <em>Obsidian pour la mémoire
-        agentique</em> : on voit le contenu, ses liens, son graphe, sa santé et le backend en place.
+        agentique</em> : on voit le contenu, sa provenance, sa santé et le backend en place.
         <strong>Réelle en local</strong>, snapshot démo sur la vitrine. La mémoire est inspectable et vérifiable — pas une boîte noire.
       </p>
       <div class="hero-meta reveal" data-delay="160">
@@ -310,7 +292,7 @@
             <span class="face-kind">GitHub Pages · public</span>
           </div>
           <div class="face-caps">
-            <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Inspecter · browse · graphe · recherche</div>
+            <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Inspecter · browse · recherche</div>
             <div class="face-cap"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 7l2.6 2.6L11 3.6" fill="none" stroke="var(--data-green)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Redirection vers les consoles natives</div>
             <div class="face-cap no"><span class="cap-mk"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><path d="M3.5 3.5l6 6M9.5 3.5l-6 6" fill="none" stroke="var(--ink-muted)" stroke-width="1.5" stroke-linecap="round"/></svg></span>Éditer · init · upgrade · migrer</div>
           </div>
@@ -397,8 +379,8 @@
           <div class="layer derived">
             <span class="layer-idx">02</span>
             <span class="layer-name">Graph store<span>liens entre entrées</span></span>
-            <span class="layer-desc" id="topo-graph-desc">liens dérivés des tags partagés sur l'échantillon.</span>
-            <span class="layer-stat"><b id="topo-edges">—</b>arêtes</span>
+            <span class="layer-desc" id="topo-graph-desc">graphe natif (Neo4j), consultable via sa console.</span>
+            <span class="layer-stat"><b>console</b>native</span>
           </div>
           <div class="layer on">
             <span class="layer-idx">03</span>
@@ -437,34 +419,20 @@
     </div>
   </section>
 
-  <!-- ════════════ BAND B — LE GRAPHE ════════════ -->
+  <!-- ════════════ BAND B — LA FORME DU STORE ════════════ -->
   <section class="band alt" id="band-graph">
     <div class="wrap">
       <div class="band-head reveal">
         <div>
-          <div class="eyebrow" style="margin-bottom:10px"><span class="num">B</span> · LE GRAPHE</div>
-          <h2>Comment les souvenirs se lient.</h2>
-          <p class="lead">Chaque entrée est un nœud ; les arêtes sont les tags partagés — réelles, calculées depuis le store. Survolez un nœud pour isoler son voisinage, cliquez pour l'ouvrir dans le vault.</p>
+          <div class="eyebrow" style="margin-bottom:10px"><span class="num">B</span> · LA FORME DU STORE</div>
+          <h2>Ce que le store contient.</h2>
+          <p class="lead">La projection vectorielle et la densité des tags, calculées depuis le store. Aucun graphe par tags partagés : deux entrées qui portent la même étiquette ne sont pas liées pour autant ; les liens réels vivent dans le graphe natif.</p>
         </div>
         <span class="status-tag snapshot"><span class="dot"></span>SNAPSHOT DÉMO</span>
       </div>
       <div class="band-divider"></div>
 
-      <div class="graph-grid" style="margin-bottom:14px">
-        <div class="panel graph-panel reveal">
-          <div class="panel-head" style="padding:10px 12px 0"><span>Graphe de connaissances</span><span class="sub">nœuds = entrées · arêtes = tags partagés</span></div>
-          <svg id="graph" viewBox="0 0 640 460" aria-label="Graphe des entrées mémoire reliées par tags partagés"></svg>
-          <div class="graph-foot">
-            <div class="graph-stats" id="graph-stats"></div>
-            <div class="leg-inline">
-              <span class="leg-item"><span class="sw" style="background:var(--ink-soft)"></span>mémoire</span>
-              <span class="leg-item"><span class="sw" style="background:var(--data-amber)"></span>learning</span>
-              <span class="leg-item"><span class="sw" style="background:var(--data-red)"></span>failure</span>
-              <span class="leg-item"><span class="sw" style="background:var(--data-violet)"></span>contradiction</span>
-              <span class="leg-item"><span class="sw" style="background:var(--data-cyan)"></span>decision</span>
-            </div>
-          </div>
-        </div>
+      <div style="margin-bottom:14px">
         <div class="side-col">
           <div class="panel reveal" data-delay="60">
             <div class="panel-head"><span>Projection vectorielle</span><span class="sub">vue complémentaire</span></div>
@@ -855,82 +823,10 @@
       : `<span class="console off" aria-disabled="true"><span class="console-led"></span><span class="console-body"><span class="console-name">${esc(c.label)}</span><span class="console-role">${meta.role} · extra non installé</span><span class="console-url">pip install grimoire-kit[${meta.extra}]</span></span><span class="console-arrow">—</span></span>`;
   }).join('');
 
-  /* ── Graphe : nœuds = entrées, arêtes = tags partagés ── */
-  let EDGE_COUNT = 0;
-  const NEIGH = {};
-  (function renderGraph() {
-    const svg = $('graph');
-    if (!svg) return;
-    const W = 640, H = 460, cx = W / 2, cy = H / 2, rx = 252, ry = 176;
-    const nodes = ENTRIES;
-    const edges = [];
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const shared = nodes[i].tags.filter((t) => nodes[j].tags.includes(t));
-        if (shared.length) {
-          edges.push({ a: nodes[i].id, b: nodes[j].id, tags: shared });
-          (NEIGH[nodes[i].id] = NEIGH[nodes[i].id] || new Set()).add(nodes[j].id);
-          (NEIGH[nodes[j].id] = NEIGH[nodes[j].id] || new Set()).add(nodes[i].id);
-        }
-      }
-    }
-    EDGE_COUNT = edges.length;
-    if ($('topo-edges')) $('topo-edges').textContent = EDGE_COUNT;
-    if ($('topo-graph-desc')) $('topo-graph-desc').textContent = extras.neo4j
-      ? 'neo4j installé — graphe natif disponible via sa console.'
-      : 'neo4j non installé → liens dérivés des tags partagés — ' + EDGE_COUNT + ' sur l\u2019échantillon affiché.';
-    if (!nodes.length) {
-      svg.innerHTML = '<text x="320" y="230" text-anchor="middle" style="fill:var(--ink-muted);font-family:var(--font-mono);font-size:12px">store vide — initialisez la mémoire en cockpit local</text>';
-      $('graph-stats').innerHTML = '';
-      return;
-    }
-    const deg = (id) => (NEIGH[id] ? NEIGH[id].size : 0);
-    const maxDeg = Math.max(1, ...nodes.map((n) => deg(n.id)));
-    const POS = {};
-    nodes.forEach((n, i) => {
-      const a = -Math.PI / 2 + i * 2 * Math.PI / nodes.length;
-      POS[n.id] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), r: 8 + deg(n.id) / maxDeg * 9 };
-    });
-    let eHTML = '';
-    edges.forEach((e) => {
-      const a = POS[e.a], b = POS[e.b];
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, qx = mx + (cx - mx) * 0.32, qy = my + (cy - my) * 0.32;
-      eHTML += `<path class="edge" data-a="${e.a}" data-b="${e.b}" d="M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}"><title>${e.a} ↔ ${e.b} · #${e.tags.join(' #')}</title></path>`;
-    });
-    let nHTML = '';
-    nodes.forEach((n) => {
-      const p = POS[n.id], col = tc(n.type);
-      nHTML += `<g class="gnode" data-id="${n.id}" tabindex="0" role="button" aria-label="${esc(n.id)} · ${esc(n.text)}">` +
-        `<circle class="halo" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="1.3"/>` +
-        `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${col}"/>` +
-        `<text x="${p.x.toFixed(1)}" y="${(p.y + p.r + 12).toFixed(1)}" text-anchor="middle">${esc(n.id)}</text></g>`;
-    });
-    svg.innerHTML = eHTML + nHTML;
-    $('graph-stats').innerHTML = `<span><b>${nodes.length}</b> nœuds (échantillon)</span><span><b>${edges.length}</b> arêtes</span><span><b>${store.tags_unique != null ? store.tags_unique : '—'}</b> tags uniques</span>`;
-
-    function focus(id) {
-      svg.classList.add('focus');
-      const near = NEIGH[id] || new Set();
-      svg.querySelectorAll('.gnode').forEach((g) => {
-        g.classList.toggle('src', g.dataset.id === id);
-        g.classList.toggle('lit', near.has(g.dataset.id));
-      });
-      svg.querySelectorAll('.edge').forEach((e) => {
-        e.classList.toggle('lit', e.dataset.a === id || e.dataset.b === id);
-      });
-    }
-    function clear() { svg.classList.remove('focus'); svg.querySelectorAll('.src,.lit').forEach((el) => el.classList.remove('src', 'lit')); }
-
-    svg.querySelectorAll('.gnode').forEach((g) => {
-      const id = g.dataset.id;
-      g.addEventListener('mouseenter', () => focus(id));
-      g.addEventListener('focus', () => focus(id));
-      g.addEventListener('mouseleave', clear);
-      g.addEventListener('blur', clear);
-      g.addEventListener('click', () => selectEntry(id, true));
-      g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectEntry(id, true); } });
-    });
-  })();
+  /* ── Graph store : le graphe natif, jamais un graphe par tags partagés ── */
+  if ($('topo-graph-desc')) $('topo-graph-desc').textContent = extras.neo4j
+    ? 'neo4j installé — graphe natif disponible via sa console.'
+    : 'neo4j non installé — aucun graphe natif sur ce poste.';
 
   /* ── Scatter : projection réelle si disponible ── */
   (function renderScatter() {
@@ -996,8 +892,6 @@
     selectedId = id;
     const e = ENTRIES.find((x) => x.id === id);
     if (!e) return;
-    const links = ENTRIES.filter((o) => o.id !== id && o.tags.some((t) => e.tags.includes(t)))
-      .map((o) => ({ o, shared: o.tags.filter((t) => e.tags.includes(t)) }));
     $('vault-detail').innerHTML =
       `<div class="vd-top"><span class="vd-id">${esc(e.id)}</span>` +
       `<span class="type-pill" style="color:${tc(e.type)}">${esc(TYPE_LABEL[e.type] || e.type)}</span>` +
@@ -1006,10 +900,6 @@
       `<div class="vd-meta">` +
         `<div class="vd-row"><span class="vd-k">Créée le</span><span class="vd-v">${esc(e.date || '—')}</span></div>` +
         `<div class="vd-row"><span class="vd-k">Tags</span><span class="vd-v">${e.tags.length ? e.tags.map((t) => '#' + esc(t)).join('  ') : '—'}</span></div>` +
-        `<div class="vd-row"><span class="vd-k">Liens (${links.length})</span><span class="vd-links">` +
-          (links.length ? links.map((l) => `<span class="vd-link"><span class="sw" style="background:${tc(l.o.type)}"></span>${esc(l.o.id)} <b>· #${esc(l.shared.join(' #'))}</b></span>`).join('')
-            : `<span class="vd-v" style="color:var(--ink-muted)">aucun lien — entrée orpheline</span>`) +
-        `</span></div>` +
       `</div>`;
     $('vault-list').querySelectorAll('.ventry[data-id]').forEach((el) => el.classList.toggle('sel', el.dataset.id === id));
     if (scroll) {

@@ -216,3 +216,29 @@ class TestUpdateNeverDestroysBeforeItCanRewrite:
         backend.update("e1", metadata={"k": 2})
         assert [m for m, _ in calls] == ["PUT"]
         assert store["o"]["vector"] == [0.1, 0.2]
+
+
+def test_get_all_stops_paging_once_the_requested_page_is_full(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P24 : ``get_all(offset, limit)`` ne lit pas la collection au-delà de la page demandée."""
+    _patch_model(monkeypatch)
+    monkeypatch.setattr(weaviate_module, "_BATCH_SIZE", 2)
+    pages: list[str] = []
+
+    def fake_request(self: WeaviateBackend, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if path.startswith("/v1/schema"):
+            return {"properties": [{"name": "memory"}]}
+        pages.append(path)
+        if len(pages) > 3:
+            return {"objects": []}  # fin de collection après trois tranches
+        start = len(pages) * 2 - 2
+        return {"objects": [
+            {"id": f"id-{i}", "properties": {"memory": f"m-{i}", "user_id": "global"}} for i in range(start, start + 2)
+        ]}
+
+    monkeypatch.setattr(WeaviateBackend, "_request_json", fake_request)
+    backend = WeaviateBackend(weaviate_url="http://localhost:8080", collection="grimoire-kit-memory")
+
+    entries = backend.get_all(offset=1, limit=2)
+
+    assert [e.text for e in entries] == ["m-1", "m-2"]
+    assert len(pages) == 2, "la collection est lue tranche par tranche, et pas au-delà de la page"

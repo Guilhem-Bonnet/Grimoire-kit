@@ -347,8 +347,8 @@ class WeaviateBackend(MemoryBackend):
                 if not user_id or entry.user_id == user_id:
                     entries.append(entry)
             after = str(objects[-1].get("id", ""))
-            if len(objects) < _BATCH_SIZE:
-                break
+            if len(objects) < _BATCH_SIZE or (limit is not None and len(entries) >= offset + limit):
+                break  # fin de collection, ou page demandée déjà pleine
         return entries[offset:] if limit is None else entries[offset:offset + limit]
 
     def count(self) -> int:

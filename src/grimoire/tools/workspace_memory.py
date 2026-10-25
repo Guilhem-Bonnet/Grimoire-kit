@@ -34,6 +34,7 @@ la durée suit le projet le plus lent, pas la somme des projets.
 
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -41,13 +42,16 @@ from typing import Any
 from grimoire.memory.supersession import INCLUDE_ALL
 from grimoire.tools.memory_link import memory_link_status
 from grimoire.tools.project_registry import load_registry, slug_for_path
+from grimoire.tools.workspace_knowledge import describe, journal_index, open_readonly, owner_of, ownership
 
-__all__ = ["memory_overview", "memory_search"]
+__all__ = ["RRF_K", "fuse_by_rank", "memory_overview", "memory_search"]
 
 OVERVIEW_SCHEMA_VERSION = "grimoire-memory-overview/v1"
 SEARCH_SCHEMA_VERSION = "grimoire-memory-search/v1"
 
 _DEFAULT_SEARCH_LIMIT = 10
+#: Constante de la fusion par rang réciproque (même valeur que ``retrieval.py``).
+RRF_K = 60
 # Borne du parallélisme de l'aperçu : chaque projet sonde déjà jusqu'à trois
 # services, une flotte entière ne doit pas ouvrir des dizaines de connexions.
 _OVERVIEW_MAX_WORKERS = 8
@@ -66,7 +70,9 @@ def _select_entries(requested: str | None, project_root: Path) -> list[dict[str,
         return entries
     scope = requested or _default_scope(project_root)
     if not scope:
-        return []
+        # Le projet que l'hôte sert déjà, même absent du registre (l'atelier
+        # `grimoire serve`) : son chemin vient de l'hôte, jamais de la requête.
+        return [] if requested else [{"slug": "", "name": "", "path": str(project_root)}]
     slugs = {s.strip() for s in scope.split(",") if s.strip()}
     return [e for e in entries if e.get("slug") in slugs]
 
@@ -157,7 +163,7 @@ def _project_row(entry: dict[str, str]) -> tuple[dict[str, Any], tuple[str, str]
     slug = str(entry.get("slug", ""))
     row: dict[str, Any] = {
         "slug": slug,
-        "name": str(entry.get("name", "")) or slug,
+        "name": str(entry.get("name", "")) or slug or Path(str(entry.get("path", "") or ".")).name,
         "path": str(entry.get("path", "")),
         "state": "unreadable",
         "configuredBackend": None,
@@ -261,39 +267,79 @@ def _score_kind(mgr: Any) -> str:
 def _search_project(
     entry: dict[str, str], query: str, limit: int, *, include_superseded: bool = False, include_stale: bool = False,
 ) -> dict[str, Any]:
+    """Les résultats d'UN projet, classés par sa propre recherche, entrées des autres projets écartées.
+
+    Dans un emplacement partagé, une entrée d'un autre projet n'est jamais
+    rendue : elle n'est que comptée (``hiddenOther``), comme une entrée sans
+    projet quand d'autres projets du registre lisent le même store.
+    """
     slug = str(entry.get("slug", ""))
     name = str(entry.get("name", "")) or slug
     project_root, reason = _resolve_readable_root(entry)
     if project_root is None:
         return {"slug": slug, "name": name, "results": [], "reason": reason}
-    config_path = project_root / "project-context.yaml"
-    if not config_path.is_file():
-        return {
-            "slug": slug, "name": name, "results": [],
-            "reason": "projet non initialisé (pas de project-context.yaml)",
-        }
+    cfg, mgr, reason = open_readonly(project_root)
+    if mgr is None:
+        return {"slug": slug, "name": name, "results": [], "reason": reason}
+    name = name or str(cfg.project.name or project_root.name)
+    owners = ownership(cfg, project_root)
     try:
-        from grimoire.core.config import GrimoireConfig
         from grimoire.core.exceptions import GrimoireConfigError, GrimoireMemoryError
-        from grimoire.memory.manager import MemoryManager
         from grimoire.memory.taxonomy import run_memory_search
 
-        cfg = GrimoireConfig.from_yaml(config_path)
-        mgr = MemoryManager.from_config(cfg, project_root=project_root)
-        # Lecture seule : le cockpit n'écrit rien chez les projets qu'il parcourt, pas même un reçu.
-        mgr.surface, mgr.journal_reads = "cockpit", False
+        # Le double de la limite : des entrées d'autres projets seront écartées.
         found = run_memory_search(
-            mgr, query, hybrid=mgr.prefers_hybrid, limit=limit,
+            mgr, query, hybrid=mgr.prefers_hybrid, limit=limit * 2,
             include_superseded=include_superseded, include_stale=include_stale,
         )
     except (GrimoireConfigError, GrimoireMemoryError, ImportError, OSError, ValueError) as exc:
         return {"slug": slug, "name": name, "results": [], "reason": str(exc)}
+    kept = []
+    others: Counter[str] = Counter()
+    unattributed = 0
+    for item in found:
+        visibility = owners.visibility(item)
+        if visibility == "own":
+            kept.append(item)
+        elif visibility == "other":
+            others[owner_of(item)] += 1
+        else:
+            unattributed += 1
     kind = _score_kind(mgr)
-    results = [{**e.to_dict(), "projectSlug": slug, "projectName": name, "scoreKind": kind} for e in found]
+    recall = mgr.backend.recall
+    journal = journal_index(project_root)
+    results = [
+        {
+            **describe(item, slug=slug, name=name, recall=recall, journal=journal),
+            "score": item.score, "scoreKind": kind, "projectRank": rank,
+        }
+        for rank, item in enumerate(kept[:limit], start=1)
+    ]
     return {
         "slug": slug, "name": name, "results": results, "reason": None,
         "hiddenStale": int(getattr(mgr, "hidden_stale", 0) or 0),
+        "hiddenOther": [{"name": n, "count": c} for n, c in sorted(others.items())],
+        "hiddenUnattributed": unattributed,
+        "sharedWith": list(owners.shared_with),
+        "owner": owners.mine,
     }
+
+
+def fuse_by_rank(per_project: list[dict[str, Any]], *, k: int = RRF_K) -> list[dict[str, Any]]:
+    """Fusion des listes classées de chaque projet par rang réciproque (RRF).
+
+    Les scores bruts des projets ne se comparent pas (cosinus, BM25, RRF
+    local) : seul le rang de chaque résultat dans SA liste compte,
+    ``1 / (k + rang)``. Égalité (même rang dans deux projets) : slug du projet,
+    pour un ordre indépendant de celui du registre. Le score brut reste
+    porté par le résultat, nommé par ``scoreKind``.
+    """
+    fused: list[dict[str, Any]] = []
+    for project in per_project:
+        for rank, result in enumerate(project["results"], start=1):
+            fused.append({**result, "fleetScore": 1.0 / (k + rank)})
+    fused.sort(key=lambda r: (-r["fleetScore"], str(r.get("projectSlug", ""))))
+    return fused
 
 
 def memory_search(
@@ -309,10 +355,10 @@ def memory_search(
 
     Interroge la recherche lexicale/hybride de chaque projet sélectionné
     séparément — la même chaîne que ``grimoire memory search``
-    (``MemoryManager.prefers_hybrid`` + ``run_memory_search``) — et ne
-    fusionne que la LISTE des résultats, chacun étiqueté par ``projectSlug``
-    en tête de ligne. Aucun contenu ne migre d'un store à l'autre : un projet
-    en échec est nommé dans ``projects[].reason``, jamais tu.
+    (``MemoryManager.prefers_hybrid`` + ``run_memory_search``) — puis fusionne
+    les LISTES par rang (:func:`fuse_by_rank`), chaque résultat étiqueté par
+    ``projectSlug``. Aucun contenu ne migre d'un store à l'autre : un projet en
+    échec est nommé dans ``projects[].reason``, jamais tu.
     """
     normalized_query = (query or "").strip()
     entries = _select_entries(requested, project_root)
@@ -320,6 +366,7 @@ def memory_search(
         return {
             "schemaVersion": SEARCH_SCHEMA_VERSION,
             "query": normalized_query,
+            "ranking": "rrf",
             "projects": [],
             "results": [],
             "count": 0,
@@ -328,22 +375,20 @@ def memory_search(
         _search_project(e, normalized_query, limit, include_superseded=include_superseded, include_stale=include_stale)
         for e in entries
     ]
-    merged: list[dict[str, Any]] = []
-    for found in per_project:
-        merged.extend(found["results"])
-    # Tri stable : score décroissant, puis slug de projet. Le tri de Python
-    # est stable, donc deux résultats à égalité de score restent groupés par
-    # projet dans l'ordre du registre plutôt que de se mélanger au hasard —
-    # condition testée côté navigateur (ordre reproductible d'un appel à
-    # l'autre).
-    merged.sort(key=lambda r: (-float(r.get("score") or 0.0), str(r.get("projectSlug", ""))))
+    merged = fuse_by_rank(per_project)
     return {
         "schemaVersion": SEARCH_SCHEMA_VERSION,
         "query": normalized_query,
+        "ranking": "rrf",
+        "rrfK": RRF_K,
         "projects": [
             {
                 "slug": p["slug"], "name": p["name"], "reason": p["reason"],
                 "count": len(p["results"]), "hiddenStale": p.get("hiddenStale", 0),
+                "hiddenOther": p.get("hiddenOther", []),
+                "hiddenUnattributed": p.get("hiddenUnattributed", 0),
+                "sharedWith": p.get("sharedWith", []),
+                "owner": p.get("owner", ""),
             }
             for p in per_project
         ],
