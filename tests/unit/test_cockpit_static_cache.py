@@ -35,7 +35,7 @@ def cockpit_base(tmp_path: Path):
 
 
 def _head(base: str, rel: str, headers: dict[str, str] | None = None) -> tuple[int, dict[str, str]]:
-    req = urllib.request.Request(f"{base}/{rel}", headers=headers or {})
+    req = urllib.request.Request(f"{base}/{rel}", headers=headers or {})  # noqa: S310 - serveur de test local
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 - serveur de test local
             resp.read()
