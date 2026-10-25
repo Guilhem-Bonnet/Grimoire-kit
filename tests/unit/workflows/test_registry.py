@@ -265,38 +265,3 @@ class TestDeclaredPatterns:
         for entry in registry.load_workflows(tmp_path):
             for pattern in entry.patterns:
                 assert re.fullmatch(r"[A-Z]{3}-\d{2}", pattern), f"{entry.slug}: {pattern}"
-
-
-class TestDeclaredTeams:
-    def test_every_declared_team_resolves(self, tmp_path: Path) -> None:
-        """Déclarer une équipe absente donnerait un `show` qui promet dans le vide."""
-        from grimoire.workflows.teams import load_team
-
-        for entry in registry.load_workflows(tmp_path):
-            if entry.team:
-                assert load_team(tmp_path, entry.team) is not None, entry.slug
-
-    @pytest.mark.parametrize(
-        "slug",
-        [
-            "party-mode",
-            "state-checkpoint",
-            "repo-map-generator",
-            "boomerang-orchestration",
-            "subagent-orchestration",
-            "incident-response",
-        ],
-    )
-    def test_a_workflow_without_a_grounded_team_declares_none(self, tmp_path: Path, slug: str) -> None:
-        """Mieux vaut aucune équipe qu'une équipe devinée.
-
-        `framework/teams/team-build.yaml` et `team-ops.yaml` référençaient des
-        agents (`architect`, `dev`, `qa`, `sm`, `tech-writer`) qu'aucun
-        archétype du kit ne livre (issue #346) : les manifestes sont retirés,
-        et les workflows qui les citaient ne déclarent plus d'équipe plutôt
-        que d'en promettre une vide.
-        """
-        entry = registry.find_workflow(tmp_path, slug)
-
-        assert entry is not None
-        assert entry.team == ""

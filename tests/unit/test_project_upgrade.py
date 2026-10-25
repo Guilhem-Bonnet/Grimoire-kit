@@ -1305,3 +1305,26 @@ def test_projected_removals_voit_l_orphelin_puis_l_archive(tmp_path_factory: pyt
     assert f"archived:.claude/agents/{name}.md" in archived
     assert not any(i.endswith("README.md") for i in archived)
     assert projected_removals(root) == archived  # relu sans effet de bord
+
+
+def test_find_orphans_reports_the_retired_teams_manifests(upgrade_project: Path) -> None:
+    """R12 : `up` n'élague pas le tier kit ; les manifestes d'équipe copiés par une ancienne
+    version sont proposés à l'archivage, et archivés (jamais supprimés) sur `--apply`."""
+    from grimoire.core import layout
+    from grimoire.tools.project_upgrade import archive_orphans, find_orphans
+
+    teams = layout.kit_dir(upgrade_project) / "teams"
+    teams.mkdir(parents=True, exist_ok=True)
+    (teams / "team-vision.yaml").write_text("team:\n  name: x\n", encoding="utf-8")
+    custom = layout.overrides_dir(upgrade_project) / "teams"
+    custom.mkdir(parents=True, exist_ok=True)
+    (custom / "mienne.yaml").write_text("team:\n  name: y\n", encoding="utf-8")
+
+    report = find_orphans(upgrade_project)
+
+    orphan = next(o for o in report.orphans if o.name == f"{layout.KIT_DIR}/teams")
+    assert [p.name for p in orphan.paths] == ["team-vision.yaml"]  # jamais le tier du projet
+    moved = archive_orphans(upgrade_project, report)
+    assert any(m.endswith("kit/teams/team-vision.yaml") for m in moved)
+    assert not (teams / "team-vision.yaml").exists()
+    assert (custom / "mienne.yaml").exists()

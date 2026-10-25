@@ -998,6 +998,13 @@ def find_orphans(target: Path) -> OrphanReport:
             paths.append(github_candidate)
         report.orphans.append(OrphanAgent(name=name, paths=tuple(paths)))
 
+    # Sous-dossiers que le kit ne livre plus : copiés par une version précédente, jamais
+    # élagués par `up`. Seul le tier kit est candidat, comme pour les agents.
+    for subdir in layout.RETIRED_KIT_SUBDIRS:
+        leftovers = sorted(p for p in (layout.kit_dir(target) / subdir).rglob("*") if p.is_file())
+        if leftovers:
+            report.orphans.append(OrphanAgent(name=f"{layout.KIT_DIR}/{subdir}", paths=tuple(leftovers)))
+
     for name, ghost_paths in sorted(_ghost_managed_projections(target, known_names=set(installed)).items()):
         if name in roster or name in declared:
             continue
@@ -1027,7 +1034,7 @@ def archive_orphans(target: Path, report: OrphanReport) -> list[str]:
         readme = dest_root / "README.md"
         names = ", ".join(sorted({o.name for o in report.orphans}))
         readme.write_text(
-            f"# Agents archivés — mise à niveau du {_today()}\n\n"
+            f"# Agents et fichiers du kit archivés — mise à niveau du {_today()}\n\n"
             f"Le kit installé ({_kit_version()}) ne livre plus : {names}.\n"
             "Déplacés ici par `grimoire upgrade-flow`, jamais supprimés — "
             "restaurez-les à la main si l'un d'eux était encore voulu.\n",

@@ -1,0 +1,11 @@
+{
+  "skill_name": "web-frontend-ux",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Construis l'écran de paiement : il doit être accessible et rapide.",
+      "expected_output": "Traite l'accessibilité WCAG 2.1 AA et les Core Web Vitals, en réutilisant le design system.",
+      "files": []
+    }
+  ]
+}

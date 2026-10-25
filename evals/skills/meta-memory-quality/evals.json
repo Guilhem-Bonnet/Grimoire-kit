@@ -1,0 +1,11 @@
+{
+  "skill_name": "meta-memory-quality",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Audite la mémoire du projet : contradictions et doublons de learnings.",
+      "expected_output": "Relève contradictions, doublons et entrées périmées avec leur emplacement, sans élaguer la mémoire de routine.",
+      "files": []
+    }
+  ]
+}

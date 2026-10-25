@@ -1,0 +1,11 @@
+{
+  "skill_name": "stack-k8s",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Écris le manifeste et le chart Helm de ce service, avec des limites de ressources.",
+      "expected_output": "Produit manifeste/chart avec requests et limits, validé par un dry-run.",
+      "files": []
+    }
+  ]
+}
