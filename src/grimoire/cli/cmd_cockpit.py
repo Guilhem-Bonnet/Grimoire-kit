@@ -531,12 +531,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # de lancement direct (``_HOME_SLUG``) les honore, exactement comme le
         # faisait l'ancien atelier avant que #351 ne l'y fasse succéder —
         # naviguer vers un AUTRE projet du registre reste en lecture seule.
+        # ``home`` nomme ce projet ouvert (P31) : le bandeau de lecture seule
+        # en tire le geste « Revenir à … », ``None`` si le cockpit n'en a pas.
         if path == "/api/status" and isinstance(payload, dict):
             payload = {
                 **payload,
                 "host": "cockpit",
                 "readOnly": not self._is_home_request(),
                 "project": self._query_slug(),
+                "home": _HOME_SLUG or None,
             }
         self._send_json(200, payload)
 

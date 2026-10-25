@@ -182,7 +182,7 @@ def assist_page(browser: Browser, served_assist: str) -> Iterator[Page]:
     page.goto(f"{served_assist}/workspace/index.html", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.evaluate("() => window.GrimoireWorkspace.goto('source')")
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
     page.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
     try:
         yield page

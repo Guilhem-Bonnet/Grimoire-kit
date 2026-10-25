@@ -30,7 +30,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _proposals_section(page: Page):
@@ -43,10 +43,7 @@ def test_confirmer_depuis_piloter_fait_apparaitre_une_proposition(
     workspace = cockpit_upgrade_workspace
     _goto(workspace, "piloter")
 
-    # Le niveau Flotte est le défaut côté cockpit — passer au niveau Projet
-    # est ce qu'un utilisateur ferait pour atteindre les actions du projet.
-    workspace.wait_for_selector("#zoom-seg button")
-    workspace.locator("#zoom-seg button", has_text="Projet").click()
+    # Portée « ce projet » (P31) : la Flotte ouvre directement sa fiche.
 
     update_button = workspace.locator("button", has_text="Mettre à jour — aperçu")
     update_button.wait_for(state="visible", timeout=15_000)
@@ -98,8 +95,6 @@ def _flow_runs(page: Page, served: str, slug: str) -> dict:
 
 def _open_project_sheet(page: Page) -> None:
     _goto(page, "piloter")
-    page.wait_for_selector("#zoom-seg button")
-    page.locator("#zoom-seg button", has_text="Projet").click()
     page.locator("button", has_text="Mettre à jour — aperçu").wait_for(state="visible", timeout=15_000)
 
 

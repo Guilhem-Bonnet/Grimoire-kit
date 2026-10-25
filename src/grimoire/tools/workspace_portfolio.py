@@ -415,7 +415,7 @@ def _project_cards(
 ) -> list[dict[str, Any]]:
     """Les cartes d'un projet — et l'état de sa ligne, mis à jour en place."""
     from grimoire.missions.service import TaskService
-    from grimoire.tools.workspace_api import _task_json
+    from grimoire.tools.workspace_api import _task_json, annotate_gates
 
     raw = row["path"]
     if not raw:
@@ -447,6 +447,7 @@ def _project_cards(
             )
             cards.append(card)
         annotate_cards(project_root, service, tasks, cards, now=now, live_minutes=live_minutes, probe=probe)
+        annotate_gates(service.project_root, tasks, cards)
         for card in cards:
             card["unread_directives"] = unread_directives(card)
     except Exception as exc:

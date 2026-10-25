@@ -112,9 +112,10 @@ def test_wizard_initializes_a_blank_project_end_to_end(
     _served, root = served_blank
     page = blank_workspace
 
-    # Piloter est l'espace par défaut ; sur `grimoire serve` (pas cockpit),
-    # le niveau est directement « projet », jamais « flotte ».
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'piloter'")
+    # À traiter est l'accueil (P31) ; la Flotte, en portée projet, montre
+    # directement la fiche du projet servi.
+    page.evaluate("() => window.GrimoireWorkspace.goto('flotte')")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
     page.wait_for_selector(".pl-sheet")
 
     run_btn = page.get_by_role("button", name="Initialiser le projet")

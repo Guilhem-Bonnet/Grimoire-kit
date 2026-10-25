@@ -42,7 +42,7 @@ REPAIR_WITH_SUB_SPECIALTY = "repair-e2e-with-substitution"
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _proposals_section(page: Page):

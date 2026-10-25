@@ -45,6 +45,25 @@
   flex: none;
 }
 
+/* Statut façon git (A, M, D, U, O) : une lettre mono dans une case de 16 px,
+   teintée par l'état ; la lettre se lit sans la couleur (P30). 12 px : le
+   plancher typographique tient aussi pour un glyphe d'une lettre. */
+.sr-git {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink2);
+}
+.sr-git.ok { color: var(--ok); }
+.sr-git.warn { color: var(--warn); }
+.sr-git.bad { color: var(--bad); }
+.sr-git.acc { color: var(--acc); }
+
 .sr-editor {
   display: flex;
   flex-direction: column;
@@ -443,4 +462,42 @@
 .sr-usage-empty {
   color: var(--ink3);
   font-size: var(--t-s);
+}
+
+/* L'arbre dans le contenu de la rubrique Fichiers : colonne à gauche, le
+   fichier ouvert à droite ; une seule colonne sous 900 px. */
+.sr-split {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  /* Une rangée bornée : sans elle, `auto` la ferait grandir avec le fichier
+     et l'éditeur déborderait de la toile au lieu de défiler lui-même. */
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.sr-tree {
+  overflow: auto;
+  padding: var(--sp-3);
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.sr-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .sr-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sr-tree {
+    max-height: 40vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
 }

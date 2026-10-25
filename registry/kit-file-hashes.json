@@ -1802,6 +1802,10 @@
    "version": "3.4.2",
    "path": "framework/memory/docker-compose.memory.tpl.yml"
   },
+  "74552b533703e92f18d57d9a2a0d3c75cb864156d735c63b631aff2e43cfe058": {
+   "version": "3.65.0",
+   "path": "framework/glossary.yaml"
+  },
   "74631af32b73da2746d81933bd00c03c92cdbffff18b2a2a37376179172151cb": {
    "version": "3.32.0",
    "path": "archetypes/infra-ops/agents/k8s-navigator.md"

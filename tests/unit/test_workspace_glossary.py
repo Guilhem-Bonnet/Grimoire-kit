@@ -77,7 +77,7 @@ def test_le_glossaire_couvre_au_moins_les_quinze_concepts_de_la_spec(
         "inspecteur",
         "explorateur",
         "palette-de-commandes",
-        "mode-concentration",
+        "plein-ecran",
         "densite",
         "infobulle",
         "tache",

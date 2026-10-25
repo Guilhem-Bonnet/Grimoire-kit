@@ -44,19 +44,32 @@ function injectStyles() {
   style.id = STYLE_ID;
   style.textContent = `
     .pl-sheet { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
-    .pl-fleet-actions { display: flex; justify-content: flex-end; }
-.pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .pl-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
+    .pl-fleet { padding: var(--sp-6); max-width: 1400px; width: 100%; box-sizing: border-box; margin: 0 auto; }
+    .pl-formula { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; }
+    .pl-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
+    .pl-filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+    .pl-search { width: 260px; max-width: 100%; box-sizing: border-box; border-radius: var(--r-pill); }
+    .pl-filterbar .seg { height: 32px; border-radius: var(--r-pill); }
+    .pl-seg-n { margin-left: 6px; color: var(--ink3); }
+    .seg > button[aria-pressed="true"] .pl-seg-n { color: inherit; }
+    .pl-fleet .tbl td { padding-top: 10px; padding-bottom: 10px; }
+    .pl-name { font-weight: 500; }
+    .pl-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+    .pl-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pl-fleet .tbl { table-layout: fixed; }
+    .pl-fleet .tbl th:nth-child(2) { width: 30%; }
+    .pl-fleet .tbl th:nth-child(3) { width: 170px; }
+    .pl-fleet .tbl th:nth-child(4) { width: 100px; }
+    .pl-fleet .tbl th:nth-child(5) { width: 120px; }
+    .pl-fleet .tbl th:nth-child(6) { width: 64px; }
+    .pl-none { margin: 0; }
     @media (max-width: 900px) {
-      .pl-sheet, .pl-wrap { padding: var(--sp-3); }
+      .pl-sheet, .pl-wrap, .pl-fleet { padding: var(--sp-3); }
     }
     .pl-section h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
-    .pl-watch { display: flex; flex-direction: column; gap: 6px; }
-    .pl-watch-row { display: flex; align-items: center; gap: var(--sp-2); padding: 8px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
-    .pl-watch-txt { flex-grow: 1; }
-    .pl-watch-name { font-weight: 500; }
-    .pl-watch-reason { color: var(--ink2); margin-left: 8px; }
     .pl-cards { display: none; flex-direction: column; gap: var(--sp-2); }
-    .pl-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-3); cursor: pointer; }
+    .pl-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); padding: var(--sp-3) var(--sp-4); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
     .pl-card-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
     @media (max-width: 760px) {
       .pl-desktop { display: none; }
@@ -89,6 +102,53 @@ function injectStyles() {
     .pl-prop-head { display: flex; align-items: center; gap: var(--sp-2); }
     .pl-prop-facts { color: var(--ink2); font-size: var(--t-s); }
     .pl-prop-actions { display: flex; gap: var(--sp-2); }
+    /* Un display d auteur l emporte sur l attribut hidden : on le rend explicite. */
+    .pl-sheet[hidden], .pl-wrap[hidden], .pl-cat-files[hidden], .pl-up-foot[hidden] { display: none; }
+    .pl-update { max-width: 1360px; width: 100%; box-sizing: border-box; margin: 0 auto; }
+    .pl-update .pl-preview { margin: 0; padding: 0; border: 0; font-size: var(--t-s); color: var(--ink); display: flex; flex-direction: column; gap: var(--sp-4); }
+    .pl-up-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+    .pl-up-head > div { display: flex; flex-direction: column; gap: 4px; }
+    .pl-up-head h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); display: flex; align-items: center; gap: var(--sp-3); }
+    .pl-up-delta { font-weight: 500; color: var(--ink2); }
+    .pl-up-crumb, .pl-up-sub { color: var(--ink3); font-size: var(--t-min); }
+    .pl-up-sub { color: var(--ink2); font-size: var(--t-s); }
+    .pl-up-aside { display: flex; align-items: center; gap: var(--sp-2); }
+    .pl-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 6px; }
+    .pl-steps li { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .pl-step-bar { height: 4px; border-radius: 2px; background: var(--line); }
+    .pl-step-bar[data-tone="ok"] { background: var(--ok); }
+    .pl-step-bar[data-tone="warn"] { background: var(--warn); }
+    .pl-step-bar[data-tone="bad"] { background: var(--bad); }
+    .pl-step-bar[data-tone="acc"] { background: var(--acc); }
+    .pl-step-name { font-size: var(--t-min); font-weight: 500; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pl-up-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+    @media (max-width: 900px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
+    .pl-upcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; min-width: 0; }
+    .pl-upcard-h { padding: 12px 16px; display: flex; align-items: center; gap: var(--sp-2); background: var(--e1); }
+    .pl-upcard-h h3 { margin: 0; font-size: var(--t-s); font-weight: 600; color: var(--ink); }
+    .pl-upcard-h .lbl { margin-left: auto; }
+    .pl-upcard .tbl-wrap { border: 0; border-radius: 0; background: transparent; }
+    .pl-upcard h4 { margin: 0; padding: 10px 16px 4px; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
+    .pl-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); padding: 12px 16px; border-top: 1px solid var(--line); }
+    .pl-cat-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .pl-cat-title b { font-weight: 500; }
+    .pl-cat-title span { color: var(--ink3); font-size: var(--t-min); }
+    .pl-cat-diff { background: transparent; border-color: transparent; color: var(--ink2); }
+    .pl-cat-diff:hover { background: var(--hover); }
+    .pl-cat-files { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 12px; }
+    .pl-file-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; font: inherit; font-size: var(--t-s); color: var(--ink); background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); padding: 8px var(--sp-3); cursor: pointer; }
+    .pl-file-head:hover { background: var(--hover); }
+    .pl-file-head .lbl, .pl-file-head .badge { flex: none; white-space: nowrap; }
+    .pl-file-head .mono { min-width: 0; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pl-diff { font-family: var(--mono); font-size: var(--t-min); background: var(--e2); border-radius: var(--r); padding: 8px; overflow-x: auto; margin: 4px 0 0; }
+    .pl-diff span { display: block; white-space: pre; }
+    .pl-diff .add { background: var(--ok-soft); color: var(--ok); }
+    .pl-diff .del { background: var(--bad-soft); color: var(--bad); }
+    .pl-diff .hunk { color: var(--ink3); }
+    .pl-up-foot { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: 12px 16px; background: var(--e1); border: 1px solid var(--line); border-radius: var(--r); color: var(--ink2); }
+    .pl-up-formula { margin-left: auto; font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); white-space: nowrap; }
+    .pl-up-formula b { color: var(--rub); font-weight: 500; }
+    [data-focused="true"] { border-radius: var(--r); background: var(--acc-soft); box-shadow: 0 0 0 2px var(--acc); }
   `;
   document.head.append(style);
 }
@@ -223,21 +283,6 @@ function projectToolLine(kit) {
   return `outil du projet : ${toolWord}`;
 }
 
-// ── Signaux « à traiter » ────────────────────────────────────────────────────
-
-function watchReasons(entry, health) {
-  const reasons = [];
-  if (!entry.managed) {
-    reasons.push({ kind: 'kit', word: 'projet non initialisé', action: 'ouvrir' });
-  } else if (health && health.kit && health.kit.scaffolded && health.kit.catalogAvailable && !health.kit.upToDate) {
-    reasons.push({ kind: 'kit', word: `kit en retard (${health.kit.behind} fichier(s))`, action: 'update' });
-  }
-  if (health && health.ci_status === 'failure') {
-    reasons.push({ kind: 'ci', word: 'CI rouge', action: 'ouvrir' });
-  }
-  return reasons;
-}
-
 // ── Niveau Flotte (cockpit) ──────────────────────────────────────────────────
 //
 // Un seul appel `GET /api/fleet` (#541, backend #542) — chaque affichage
@@ -269,7 +314,7 @@ async function loadFleet(ctx, { force = false } = {}) {
   const payload = await ctx.api.fleet();
   // `_fleet_entry` (best-effort côté serveur) rend `{ error }` plutôt que
   // `null` pour un projet cassé — jamais le contrat qu'attendaient
-  // `renderFleet`/`watchReasons` (ex. `health.kit`, `memory.state`), qui
+  // `renderFleet` (ex. `health.kit`, `memory.state`), qui
   // lisaient jusqu'ici toujours soit un payload complet, soit `null` (`ctx.
   // api.health(slug).catch(() => null)`). On aligne ici sur ce contrat.
   const rows = (payload.projects || []).map((p) => ({
@@ -281,21 +326,23 @@ async function loadFleet(ctx, { force = false } = {}) {
   return rows;
 }
 
-// ── « Nouveau projet » (#172) : bouton + section repliable, Flotte ─────────
+// ── « Nouveau projet » (#172) : bouton d'en-tête + panneau repliable ───────
 //
 // Toujours visible, y compris sur un registre vide — c'est justement là que
-// le geste manque le plus. `onCreated` ferme la section et bascule sur le
-// projet créé, par le même chemin que cliquer une ligne du tableau (aucune
-// route dédiée à réinventer, et le sélecteur de projets — ce même tableau —
-// le montrera dès qu'on y revient, sans redémarrer le cockpit).
-function renderNewProjectSection(ctx, onCreated) {
-  const section = document.createElement('div');
-  section.className = 'pl-section';
+// le geste manque le plus. Le bouton prend place dans l'en-tête de la Flotte
+// (maquette Douce), le formulaire s'ouvre dessous, dans `panel`. `onCreated`
+// ferme le panneau et bascule sur le projet créé, par le même chemin que
+// cliquer une ligne du tableau (aucune route dédiée à réinventer, et le
+// sélecteur de projets — ce même tableau — le montrera dès qu'on y revient,
+// sans redémarrer le cockpit).
+function renderNewProject(ctx, onCreated) {
+  const panel = document.createElement('div');
+  panel.className = 'pl-section';
+  panel.hidden = true;
   const toggleBtn = document.createElement('button');
   toggleBtn.type = 'button';
   toggleBtn.className = 'btn pri';
-  toggleBtn.textContent = '+ Nouveau projet';
-  section.append(toggleBtn);
+  toggleBtn.append(icon('plus'), 'Nouveau projet');
 
   let open = false;
   let formHost = null;
@@ -303,27 +350,127 @@ function renderNewProjectSection(ctx, onCreated) {
     open = !open;
     if (!open) {
       if (formHost) { formHost.remove(); formHost = null; }
+      panel.hidden = true;
       return;
     }
+    panel.hidden = false;
     formHost = document.createElement('div');
     formHost.className = 'pl-card';
-    formHost.style.marginTop = 'var(--sp-3)';
     formHost.append(text('p', 'lbl', 'Chargement…'));
-    section.append(formHost);
+    panel.append(formHost);
     renderCreateProjectForm(ctx, (slug) => {
       open = false;
       if (formHost) { formHost.remove(); formHost = null; }
+      panel.hidden = true;
       onCreated(slug);
     }).then((node) => { if (formHost) formHost.replaceWith(node); formHost = node; });
   });
-  return section;
+  return { button: toggleBtn, panel };
 }
 
-function renderFleet(root, ctx, rows, onSelect, onRefresh) {
-  const wrap = document.createElement('div');
-  wrap.className = 'pl-wrap';
-  wrap.append(renderNewProjectSection(ctx, onSelect));
+// ── Attention par projet (P65) ───────────────────────────────────────────────
+//
+// Les badges de la colonne « Attention » sont les éléments que l'API
+// d'attention (`/api/workspace/attention`, P22) compte déjà pour chaque
+// projet — jamais une règle recalculée ici. Le retard du kit a sa propre
+// colonne, et un service « résolu » n'attend plus rien : ni l'un ni l'autre
+// ne fait un badge.
+const ATTENTION_WORDS = {
+  checkpoint: ['checkpoint à valider', 'checkpoints à valider', 'warn'],
+  question: ['question', 'questions', 'warn'],
+  proposal: ['proposition', 'propositions', 'warn'],
+  review_blocked: ['revue bloquée', 'revues bloquées', 'warn'],
+  task_blocked: ['tâche bloquée', 'tâches bloquées', 'bad'],
+  directive_unacked: ['consigne non accusée', 'consignes non accusées', 'warn'],
+  claim_orphaned: ['claim sans session', 'claims sans session', 'warn'],
+  service: ['service en échec', 'services en échec', 'bad'],
+  unreadable: ['projet illisible', 'projets illisibles', 'bad'],
+  probe_failed: ['sonde en échec', 'sondes en échec', 'bad'],
+};
+const ATTENTION_BADGES_MAX = 3;
 
+/** `slug` → éléments d'attention du projet (sans retard de kit ni résolus). */
+function attentionBySlug(payload) {
+  const map = new Map();
+  for (const section of payload?.sections || []) {
+    for (const item of section.items || []) {
+      if (!ATTENTION_WORDS[item.kind]) continue;
+      const slug = item.project?.slug;
+      if (!slug) continue;
+      if (!map.has(slug)) map.set(slug, []);
+      map.get(slug).push(item);
+    }
+  }
+  return map;
+}
+
+/** Les badges d'un projet : un par type, avec son compte, du plus grave au plus doux. */
+function attentionBadges(items) {
+  const counts = new Map();
+  for (const item of items) counts.set(item.kind, (counts.get(item.kind) || 0) + 1);
+  const badges = [...counts].map(([kind, n]) => {
+    const [one, many, tone] = ATTENTION_WORDS[kind];
+    return { tone, label: `${n} ${n === 1 ? one : many}` };
+  });
+  badges.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
+  const shown = badges.slice(0, ATTENTION_BADGES_MAX).map((b) => badge(b.label, b.tone));
+  if (badges.length > shown.length) {
+    const rest = badges.slice(ATTENTION_BADGES_MAX);
+    shown.push(badge(`+${rest.length}`, '', rest.map((b) => b.label).join(' · ')));
+  }
+  return shown;
+}
+
+// ── Kit d'un projet : version + écart (colonne « Kit ») ─────────────────────
+
+function kitCellOf(r) {
+  if (!r.health) return { main: 'indisponible', sub: 'lecture impossible', behind: false };
+  if (!r.entry.managed) return { main: 'non initialisé', sub: '', behind: false };
+  const kit = r.health.kit;
+  if (!kit || !kit.scaffolded) return { main: kit ? 'non initialisé' : 'indisponible', sub: '', behind: false };
+  const version = kit.aligned || kit.installed || 'version inconnue';
+  if (kit.upToDate) {
+    return { main: version, sub: kit.aligned && kit.installed && kit.aligned !== kit.installed ? 'aligné' : 'à jour', behind: false };
+  }
+  const n = kit.behind;
+  return { main: version, sub: `${fmtInt(n)} fichier${n > 1 ? 's' : ''} d’écart`, behind: kit.catalogAvailable !== false };
+}
+
+/** « 1 active », « 2 en cours » : les exécutions encore vivantes du projet. */
+function sessionsWord(health) {
+  const live = (health?.activity?.runs || []).filter((run) => !run.silent).length;
+  if (live) return `${live} en cours`;
+  return '—';
+}
+
+const plural = (n, one, many) => `${fmtInt(n)} ${n > 1 ? many : one}`;
+
+// Filtre de la table (texte + segment), gardé entre deux rendus : un
+// rafraîchissement de la flotte ne remet pas la recherche à zéro.
+const fleetFilter = { query: '', segment: 'all' };
+
+function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pl-wrap pl-fleet';
+
+  const byProject = attentionBySlug(attention);
+  const asking = (r) => (byProject.get(r.entry.slug) || []).length > 0;
+  const lagging = (r) => kitCellOf(r).behind;
+  const alignedCount = rows.filter((r) => r.health?.kit?.upToDate).length;
+  const installed = rows.map((r) => r.health?.kit?.installed).find(Boolean);
+  const askingCount = rows.filter(asking).length;
+
+  const sub = [plural(rows.length, 'projet suivi', 'projets suivis')];
+  if (rows.length) {
+    sub.push(`${plural(alignedCount, 'aligné', 'alignés')} sur le kit${installed ? ' ' + installed : ''}`);
+    if (attention) sub.push(plural(askingCount, 'demande une action', 'demandent une action'));
+    else sub.push(pending ? 'attention en cours de lecture' : 'attention indisponible');
+  }
+
+  const formula = document.createElement('span');
+  formula.className = 'pl-formula';
+  formula.append(text('b', null, '›'), 'grimoire cockpit list');
+  const actions = [formula];
   if (onRefresh) {
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
@@ -335,11 +482,11 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
       refreshBtn.replaceChildren(icon('refresh'), 'Rafraîchissement…');
       onRefresh();
     });
-    const actions = document.createElement('div');
-    actions.className = 'pl-fleet-actions';
-    actions.append(refreshBtn);
-    wrap.append(actions);
+    actions.push(refreshBtn);
   }
+  const create = renderNewProject(ctx, onSelect);
+  actions.push(create.button);
+  wrap.append(spaceHead('Flotte', sub.join(' · '), ...actions), create.panel);
 
   // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
   // flotte vide, pas une panne. Un tableau muet à zéro lignes se lisait comme
@@ -351,57 +498,56 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
       "Aucun projet enregistré. Ce cockpit lit un registre, il ne scanne pas le disque : "
       + "grimoire cockpit add <chemin> pour un projet, ou grimoire cockpit scan <racine> pour explorer un dossier.",
     ));
-    return wrap;
+    root.append(wrap);
+    return;
   }
 
-  const aligned = rows.filter((r) => r.health?.kit?.upToDate).length;
-  const active = rows.filter((r) => r.health?.activity?.active).length;
-  const watch = rows.flatMap((r) => watchReasons(r.entry, r.health).map((reason) => ({ ...r, reason })));
-
-  wrap.append(kpiRow([
-    { value: fmtInt(rows.length), label: 'projets', icon: 'folder-tree' },
-    { value: fmtInt(aligned), label: 'kit aligné', icon: 'seal', tone: aligned === rows.length ? 'ok' : 'warn' },
-    { value: fmtInt(watch.length), label: 'à traiter', icon: watch.length ? 'alert' : 'check', tone: watch.length ? 'warn' : 'ok' },
-    { value: fmtInt(active), label: 'actifs (15 min)', icon: 'bolt' },
-  ]));
-
-  const watchSection = document.createElement('div');
-  watchSection.className = 'pl-section';
-  watchSection.append(text('h3', null, 'À traiter'));
-  if (!watch.length) {
-    watchSection.append(text('p', 'lbl', 'Rien à traiter : chaque projet du registre est initialisé et son kit est aligné.'));
-  } else {
-    const list = document.createElement('div');
-    list.className = 'pl-watch';
-    for (const item of watch) {
-      const line = document.createElement('div');
-      line.className = 'pl-watch-row';
-      line.append(
-        dot('warn'),
-        row(text('span', 'pl-watch-name', item.entry.name || item.entry.slug), text('span', 'pl-watch-reason lbl', item.reason.word)),
-      );
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn';
-      btn.textContent = 'Ouvrir →';
-      btn.addEventListener('click', () => onSelect(item.entry.slug));
-      line.append(btn);
-      list.append(line);
+  // Filtre : champ texte (nom ou chemin) + segments Tous / Demandent une
+  // action / Kit en retard, avec leur compte réel.
+  const bar = document.createElement('div');
+  bar.className = 'pl-filterbar';
+  const field = document.createElement('input');
+  field.type = 'search';
+  field.className = 'input pl-search';
+  field.placeholder = 'Filtrer par nom ou chemin';
+  field.setAttribute('aria-label', 'Filtrer les projets');
+  field.value = fleetFilter.query;
+  const seg = document.createElement('div');
+  seg.className = 'seg';
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', 'Filtre');
+  const segments = [
+    ['all', 'Tous', () => true, rows.length],
+    ['asking', 'Demandent une action', asking, askingCount],
+    ['lagging', 'Kit en retard', lagging, rows.filter(lagging).length],
+  ];
+  const segButtons = new Map();
+  for (const [id, label, , count] of segments) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.segment = id;
+    button.append(label);
+    if (id !== 'all') button.append(text('span', 'pl-seg-n', String(count)));
+    if (id === 'asking' && !attention) {
+      button.disabled = true;
+      button.title = pending
+        ? "Lecture d'attention en cours : le filtre s'active à sa réponse."
+        : "La lecture d'attention n'a pas répondu : impossible de dire qui demande une action.";
     }
-    watchSection.append(list);
+    button.addEventListener('click', () => { fleetFilter.segment = id; paint(); });
+    segButtons.set(id, button);
+    seg.append(button);
   }
-  wrap.append(watchSection);
+  bar.append(field, seg);
+  wrap.append(bar);
 
-  const tableWrap = document.createElement('div');
-  tableWrap.className = 'tbl-wrap pl-desktop';
   const table = document.createElement('table');
   table.className = 'tbl tbl-pick';
-  const thead = document.createElement('thead');
-  thead.innerHTML = '';
   const headRow = document.createElement('tr');
-  const headTerms = { Projet: 'projet', Kit: 'kit', Antifragilité: 'antifragilite', Mémoire: 'memoire', Flows: 'workflow' };
-  for (const label of ['Projet', 'Kit', 'CI', 'Commits', 'Antifragilité', 'Mémoire', 'Flows', 'Dernier événement']) {
+  const headTerms = { Projet: 'projet', Kit: 'kit' };
+  for (const label of ['Projet', 'Attention', 'Kit', 'Sessions', 'Dernier signe', '']) {
     const th = text('th', null, label);
+    if (!label) th.setAttribute('aria-label', 'Ouvrir');
     if (headTerms[label]) {
       th.dataset.term = headTerms[label];
       const hint = icon('info');
@@ -410,64 +556,101 @@ function renderFleet(root, ctx, rows, onSelect, onRefresh) {
     }
     headRow.append(th);
   }
+  const thead = document.createElement('thead');
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
-  for (const r of rows) {
-    const tr = document.createElement('tr');
-    tr.tabIndex = 0;
-    tr.addEventListener('click', () => onSelect(r.entry.slug));
-    tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
-
-    const nameCell = document.createElement('td');
-    nameCell.append(text('div', null, r.entry.name || r.entry.slug), text('div', 'lbl mono', r.entry.path));
-    tr.append(nameCell);
-
-    const kitCell = document.createElement('td');
-    if (!r.entry.managed) kitCell.append(pill('warn', 'non initialisé'));
-    else if (!r.health) kitCell.append(pill('', 'indisponible'));
-    else kitCell.append(pill(r.health.kit.upToDate ? 'ok' : 'warn', r.health.kit.aligned || 'inconnue'));
-    tr.append(kitCell);
-
-    const ciCell = document.createElement('td');
-    const status = r.health?.ci_status;
-    ciCell.append(pill(ciDotClass(status), ciWord(status)));
-    tr.append(ciCell);
-
-    tr.append(text('td', 'mono', fmtInt(r.health?.commits_total)));
-
-    const afCell = document.createElement('td');
-    afCell.append(text('span', 'lbl', r.health?.antifragile == null ? (r.health?.antifragile_note || 'pas encore mesurée') : `${r.health.antifragile}/100`));
-    tr.append(afCell);
-
-    const memCell = document.createElement('td');
-    if (r.memory && r.memory.state === 'ok') memCell.append(pill('ok', `${fmtInt(r.memory.entries)} entrée(s)`));
-    else if (r.memory && r.memory.state === 'unavailable') memCell.append(pill('warn', 'indisponible'));
-    else memCell.append(pill('', 'non initialisée'));
-    tr.append(memCell);
-
-    tr.append(text('td', 'mono', fmtInt((r.health?.flows || []).length)));
-    tr.append(text('td', 'lbl', relativeAge(r.health?.activity?.ageMinutes)));
-    tbody.append(tr);
-  }
   table.append(tbody);
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'tbl-wrap pl-desktop';
   tableWrap.append(table);
-  wrap.append(tableWrap);
-
   const cards = document.createElement('div');
   cards.className = 'pl-cards';
-  for (const r of rows) {
-    const card = document.createElement('div');
-    card.className = 'pl-card';
-    card.addEventListener('click', () => onSelect(r.entry.slug));
-    card.append(text('div', null, r.entry.name || r.entry.slug));
-    card.append(pill(r.health?.kit?.upToDate ? 'ok' : 'warn', r.health?.kit?.aligned || (r.entry.managed ? 'inconnue' : 'non initialisé')));
-    card.append(pill(ciDotClass(r.health?.ci_status), 'CI ' + ciWord(r.health?.ci_status)));
-    card.append(text('div', 'pl-card-row lbl', `${fmtInt(r.health?.commits_total)} commits · ${fmtInt((r.health?.flows || []).length)} flow(s)`));
-    cards.append(card);
-  }
-  wrap.append(cards);
+  const none = text('p', 'lbl pl-none', 'Aucun projet ne correspond à ce filtre.');
+  none.hidden = true;
+  wrap.append(tableWrap, cards, none);
 
+  const openButton = (r) => {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'btn ghost pl-open';
+    open.setAttribute('aria-label', `Ouvrir ${r.entry.name || r.entry.slug}`);
+    open.append(icon('chevron'));
+    return open;
+  };
+
+  function paint() {
+    const query = fleetFilter.query.trim().toLowerCase();
+    const segment = segments.find(([id]) => id === fleetFilter.segment) || segments[0];
+    const shown = rows.filter((r) => segment[2](r)
+      && (!query || `${r.entry.name || ''} ${r.entry.slug} ${r.entry.path}`.toLowerCase().includes(query)));
+    for (const [id, button] of segButtons) button.setAttribute('aria-pressed', String(id === segment[0]));
+    tbody.replaceChildren();
+    cards.replaceChildren();
+    none.hidden = shown.length > 0;
+    tableWrap.hidden = shown.length === 0;
+    for (const r of shown) {
+      const name = r.entry.name || r.entry.slug;
+      const badges = attentionBadges(byProject.get(r.entry.slug) || []);
+      const kit = kitCellOf(r);
+
+      const tr = document.createElement('tr');
+      tr.tabIndex = 0;
+      tr.dataset.project = r.entry.slug;
+      tr.addEventListener('click', () => onSelect(r.entry.slug));
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
+
+      const nameCell = document.createElement('td');
+      const path = text('div', 'lbl mono pl-path', r.entry.path);
+      path.title = r.entry.path;
+      nameCell.append(text('div', 'pl-name', name), path);
+      const attentionCell = document.createElement('td');
+      if (badges.length) {
+        const list = document.createElement('div');
+        list.className = 'pl-badges';
+        list.append(...badges);
+        attentionCell.append(list);
+      } else {
+        attentionCell.append(text('span', 'lbl', pending && !attention ? '…' : '—'));
+      }
+      const kitCell = document.createElement('td');
+      kitCell.append(text('div', null, kit.main));
+      if (kit.sub) kitCell.append(text('div', 'lbl', kit.sub));
+      const openCell = document.createElement('td');
+      openCell.append(openButton(r));
+      tr.append(
+        nameCell, attentionCell, kitCell,
+        text('td', null, sessionsWord(r.health)),
+        text('td', 'lbl', relativeAge(r.health?.activity?.ageMinutes)),
+        openCell,
+      );
+      tbody.append(tr);
+
+      // Mobile : une carte par projet, mêmes données.
+      const card = document.createElement('div');
+      card.className = 'pl-card';
+      card.tabIndex = 0;
+      card.addEventListener('click', () => onSelect(r.entry.slug));
+      card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
+      const cardPath = text('div', 'lbl mono pl-path', r.entry.path);
+      cardPath.title = r.entry.path;
+      card.append(text('div', 'pl-name', name), cardPath);
+      if (badges.length) {
+        const list = document.createElement('div');
+        list.className = 'pl-badges';
+        list.append(...badges.map((b) => b.cloneNode(true)));
+        card.append(list);
+      }
+      card.append(text(
+        'div', 'pl-card-row lbl',
+        [kit.sub ? `${kit.main} · ${kit.sub}` : kit.main, relativeAge(r.health?.activity?.ageMinutes)].join(' · '),
+      ));
+      cards.append(card);
+    }
+  }
+
+  field.addEventListener('input', () => { fleetFilter.query = field.value; paint(); });
+  paint();
   root.append(wrap);
 }
 
@@ -611,6 +794,7 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
   for (const proposal of pending) {
     const line = document.createElement('div');
     line.className = 'pl-watch-row pl-prop-row';
+    line.dataset.proposal = proposal.slug;
 
     const head = document.createElement('div');
     head.className = 'pl-prop-head';
@@ -1309,17 +1493,29 @@ const NODE_STATUS_DOT = {
   fait: 'ok', proposition: 'acc', sauté: '', erreur: 'bad', 'checkpoint en attente': 'warn',
 };
 
-function renderNodeList(nodes) {
-  const list = document.createElement('div');
-  list.className = 'pl-watch pl-nodes';
+// Un aperçu ne joue que `backup` et `preview` : les autres étapes n'ont pas
+// « manqué », elles n'ont pas été exécutées en aperçu (P44). « Jamais atteint »
+// reste réservé à un vrai run arrêté avant elles.
+const NODE_SKIPPED_IN_PREVIEW = 'non exécutée en aperçu';
+
+function renderNodeList(nodes, { dryRun = false } = {}) {
+  // Une barre compacte (P44, maquette Mise à jour) : neuf traits de 4 px sur
+  // une seule rangée, le nom de l'étape dessous. L'état est dit en toutes
+  // lettres à qui ne voit pas la couleur (`sr-only`) et à l'infobulle.
+  const list = document.createElement('ol');
+  list.className = 'pl-steps pl-nodes';
+  list.setAttribute('aria-label', 'Étapes');
   for (const node of nodes) {
-    const nodeRow = document.createElement('div');
-    nodeRow.className = 'pl-watch-row';
-    nodeRow.append(
-      text('span', 'pl-watch-name', NODE_LABELS[node.id] || node.id),
-      pill(NODE_STATUS_DOT[node.status] ?? '', NODE_STATUS_WORD[node.status] || node.status),
-    );
-    list.append(nodeRow);
+    const word = dryRun && node.status === 'sauté' ? NODE_SKIPPED_IN_PREVIEW : (NODE_STATUS_WORD[node.status] || node.status);
+    const item = document.createElement('li');
+    item.title = `${NODE_LABELS[node.id] || node.id} — ${word}`;
+    const bar = document.createElement('span');
+    bar.className = 'pl-step-bar';
+    bar.dataset.tone = NODE_STATUS_DOT[node.status] || '';
+    const name = text('span', 'pl-step-name', NODE_LABELS[node.id] || node.id);
+    name.append(text('span', 'sr-only', ` — ${word}`));
+    item.append(bar, name);
+    list.append(item);
   }
   return list;
 }
@@ -1348,12 +1544,198 @@ function appendPreviewMarkdown(container, previewText) {
   }
 }
 
+// ── Écran « Mise à jour » plein canevas (P44) : lecture seule ──────────────
+//
+// Tout ce qui suit lit : le tableau de `grimoire up --dry-run` (déjà dans la
+// réponse de l'aperçu), puis `GET upgrade/changes` et `GET upgrade/diff` au
+// clic. Aucune écriture ici — la seule écriture reste le bouton de
+// confirmation existant.
+
+function htmlTable(headers, rows) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'tbl-wrap';
+  const table = document.createElement('table');
+  table.className = 'tbl';
+  const head = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const label of headers) headRow.append(text('th', null, label));
+  head.append(headRow);
+  const body = document.createElement('tbody');
+  for (const cells of rows) {
+    const tr = document.createElement('tr');
+    for (const cell of cells) {
+      const td = document.createElement('td');
+      td.append(cell);
+      tr.append(td);
+    }
+    body.append(tr);
+  }
+  table.append(head, body);
+  wrapper.append(table);
+  return wrapper;
+}
+
+function upCard(title, note) {
+  const card = document.createElement('section');
+  card.className = 'pl-upcard';
+  const head = document.createElement('div');
+  head.className = 'pl-upcard-h';
+  head.append(text('h3', null, title));
+  if (note) head.append(text('span', 'lbl', note));
+  card.append(head);
+  return card;
+}
+
+// Colonne de droite (P44, sans décision de checkpoint) : la lecture de
+// `up --dry-run` et des surfaces d'hôtes, en vrais tableaux.
+function renderPreviewTables(table) {
+  const card = upCard('Étapes de la mise à jour', 'grimoire up --dry-run');
+  card.classList.add('pl-preview-tables');
+  card.append(htmlTable(
+    ['Étape', 'Statut', 'Détail'],
+    table.steps.map((step) => [
+      document.createTextNode(step.label),
+      badge(step.statusLabel, step.tone),
+      document.createTextNode(step.detail),
+    ]),
+  ));
+  if (table.hosts && table.hosts.length) {
+    card.append(text('h4', null, "Surfaces d'hôtes"));
+    card.append(htmlTable(
+      ['Hôte', 'Écrirait', 'Inchangé'],
+      table.hosts.map((h) => [
+        document.createTextNode(h.host),
+        document.createTextNode(String(h.wouldWrite)),
+        document.createTextNode(String(h.unchanged)),
+      ]),
+    ));
+  }
+  return card;
+}
+
+function renderDiff(unified) {
+  const pre = document.createElement('div');
+  pre.className = 'pl-diff';
+  for (const line of unified.split('\n')) {
+    if (!line) continue;
+    let kind = '';
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) kind = 'hunk';
+    else if (line.startsWith('+')) kind = 'add';
+    else if (line.startsWith('-')) kind = 'del';
+    pre.append(text('span', kind, line));
+  }
+  return pre;
+}
+
+const CATEGORY_NOTE = {
+  agents: 'agents fournis par le kit',
+  kit: 'fichiers du kit sous _grimoire/',
+  copilot: 'instructions et prompts Copilot',
+  hotes: "surfaces des hôtes et configuration MCP",
+  autres: 'autres fichiers du projet',
+};
+
+// Colonne de gauche : une ligne par catégorie (titre, sous-titre, compte,
+// « Diff » qui déplie les fichiers ; un clic sur un fichier charge son diff).
+function renderChangesSection(ctx) {
+  const card = upCard('Ce que la mise à jour écrirait', "rien n'est écrit en aperçu");
+  card.classList.add('pl-changes');
+  const body = document.createElement('div');
+  body.className = 'pl-cats';
+  body.append(text('div', 'lbl', 'Chargement des changements…'));
+  body.firstChild.style.padding = '12px 16px';
+  card.append(body);
+
+  ctx.api.upgradeChanges().then((view) => {
+    body.replaceChildren();
+    if (!view.categories.length) {
+      const empty = document.createElement('div');
+      empty.className = 'pl-cat-row';
+      empty.append(
+        text('span', 'pl-cat-title', `Rien à écrire (${view.unchanged} fichiers déjà à jour).`),
+        badge('inchangé', ''),
+      );
+      body.append(empty);
+      return;
+    }
+    for (const category of view.categories) {
+      const block = document.createElement('div');
+      block.className = 'pl-cat';
+      const rowEl = document.createElement('div');
+      rowEl.className = 'pl-cat-row';
+      const title = document.createElement('span');
+      title.className = 'pl-cat-title';
+      title.append(text('b', null, category.label), text('span', null, CATEGORY_NOTE[category.id] || ''));
+      const count = category.files.length;
+      const diffBtn = document.createElement('button');
+      diffBtn.type = 'button';
+      diffBtn.className = 'btn pl-cat-diff';
+      diffBtn.dataset.category = category.id;
+      diffBtn.setAttribute('aria-expanded', 'false');
+      diffBtn.textContent = 'Diff';
+      const files = document.createElement('div');
+      files.className = 'pl-cat-files';
+      files.hidden = true;
+      diffBtn.addEventListener('click', () => {
+        const open = files.hidden;
+        files.hidden = !open;
+        diffBtn.setAttribute('aria-expanded', String(open));
+      });
+      for (const file of category.files) files.append(renderFileEntry(ctx, file));
+      rowEl.append(title, badge(`${count} fichier${count > 1 ? 's' : ''}`, 'ok'), diffBtn);
+      block.append(rowEl, files);
+      body.append(block);
+    }
+  }).catch((error) => {
+    body.replaceChildren(text('div', 'lbl', `Changements indisponibles : ${error.message}`));
+  });
+  return card;
+}
+
+function renderFileEntry(ctx, file) {
+  const entry = document.createElement('div');
+  entry.className = 'pl-file';
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'pl-file-head';
+  head.dataset.path = file.path;
+  head.setAttribute('aria-expanded', 'false');
+  const path = text('span', 'mono', file.path);
+  path.title = file.path;
+  head.append(
+    path,
+    badge(file.label, file.status === 'nouveau' ? 'ok' : 'warn'),
+    text('span', 'lbl', `+${file.added} −${file.removed}`),
+  );
+  const detail = document.createElement('div');
+  detail.hidden = true;
+  let loaded = false;
+  head.addEventListener('click', async () => {
+    const open = detail.hidden;
+    detail.hidden = !open;
+    head.setAttribute('aria-expanded', String(open));
+    if (!open || loaded) return;
+    loaded = true;
+    detail.replaceChildren(text('div', 'lbl', 'Chargement du diff…'));
+    try {
+      const diff = await ctx.api.upgradeDiff(file.path);
+      detail.replaceChildren(renderDiff(diff.unified));
+      if (diff.truncated) detail.append(text('div', 'lbl', 'Diff tronqué — le fichier complet reste sur disque.'));
+    } catch (error) {
+      loaded = false;
+      detail.replaceChildren(text('div', 'lbl', `Diff indisponible : ${error.message}`));
+    }
+  });
+  entry.append(head, detail);
+  return entry;
+}
+
 function renderSheet(root, ctx, slug, name, sheet, options) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-sheet';
   const { health, memory } = sheet;
 
-  wrap.append(spaceHead(name || slug || ctx.host.project || 'Projet servi'));
+  wrap.append(spaceHead(name || (ctx.scope && ctx.scope.name) || 'Projet servi'));
 
   const kpi = kpiRow([
     { value: health?.kit?.scaffolded ? kitStatus(health.kit).word : 'absent', label: 'kit', icon: 'seal', tone: health?.kit?.scaffolded ? kitStatus(health.kit).dot : 'warn' },
@@ -1374,6 +1756,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   const kitBlock = document.createElement('div');
   kitBlock.className = 'pl-insp-block';
+  kitBlock.dataset.focus = 'kit';
   kitBlock.append(text('h4', null, 'Kit'));
   const kit = kitStatus(health?.kit);
   const kitRow = pill(kit.dot, kit.word);
@@ -1452,6 +1835,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   const memBlock = document.createElement('div');
   memBlock.className = 'pl-insp-block';
+  memBlock.dataset.focus = 'memory';
   memBlock.append(text('h4', null, 'Mémoire'));
   let memoryPayload = memory;
   let memPill = pill(memoryPayload?.state === 'ok' ? 'ok' : (memoryPayload?.state === 'unavailable' ? 'warn' : ''), memoryPayload?.configuredBackend ? `${memoryPayload.configuredBackend} · ${fmtInt(memoryPayload.entries)} entrée(s)` : 'non initialisée');
@@ -1498,6 +1882,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
 
   const actionsBlock = document.createElement('div');
   actionsBlock.className = 'pl-insp-block pl-actions';
+  actionsBlock.dataset.focus = 'checkpoint';
   actionsBlock.append(text('h4', null, 'Actions'));
 
   if (!health?.kit?.scaffolded) {
@@ -1524,9 +1909,67 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   updateBtn.type = 'button';
   updateBtn.className = 'btn';
   updateBtn.textContent = 'Mettre à jour — aperçu';
+  // P44 : l'aperçu s'ouvre en plein canevas (écran `.pl-update`), pas dans
+  // l'inspecteur. `.pl-preview` reste le conteneur unique du déroulé : les
+  // parcours existants (aperçu, confirmation) le retrouvent sous ce nom.
+  const displayName = name || (ctx.scope && ctx.scope.name) || 'Projet servi';
+  const screen = document.createElement('div');
+  screen.className = 'pl-wrap pl-update';
+  screen.hidden = true;
   const preview = document.createElement('div');
   preview.className = 'pl-preview';
   preview.hidden = true;
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'btn';
+  backBtn.textContent = 'Retour à la fiche';
+  // Le titre n'existe qu'à l'ouverture : une fiche qui n'a pas lancé d'aperçu
+  // ne porte aucun second `h2` au nom du projet (les parcours qui attendent
+  // « le titre du projet » n'en trouvent qu'un).
+  let screenBuilt = false;
+  // Avant la fiche : après une confirmation, la fiche (et ses Propositions) revient
+  // SOUS le déroulé, qui peut donc dire « ci-dessous » sans mentir.
+  wrap.before(screen);
+  backBtn.addEventListener('click', () => {
+    screen.hidden = true;
+    wrap.hidden = false;
+  });
+  // En-tête de la maquette : fil, titre + delta de version, sous-ligne du run,
+  // badge d'attente à droite.
+  const kitInfo = health?.kit || {};
+  const versionDelta = kitInfo.upVersion && kitInfo.installed && kitInfo.upVersion !== kitInfo.installed
+    ? `${kitInfo.upVersion} → ${kitInfo.installed}`
+    : (kitInfo.installed || '');
+  const headSub = text('div', 'pl-up-sub', 'Aperçu en cours…');
+  const foot = document.createElement('footer');
+  foot.className = 'pl-up-foot';
+  foot.hidden = true;
+  const buildScreenHead = () => {
+    const title = document.createElement('h2');
+    title.className = 'space-title';
+    title.append('Mise à jour du kit');
+    if (versionDelta) title.append(' ', text('span', 'pl-up-delta', versionDelta));
+    const left = document.createElement('div');
+    left.append(text('span', 'pl-up-crumb', `Flotte › ${displayName}`), title, headSub);
+    const aside = document.createElement('div');
+    aside.className = 'pl-up-aside';
+    if (checkpointPendingRunId || pendingRun) aside.append(badge('Décision en attente', 'warn'));
+    aside.append(backBtn);
+    const head = document.createElement('div');
+    head.className = 'pl-up-head';
+    head.append(left, aside);
+    return head;
+  };
+  const openScreen = () => {
+    if (!screenBuilt) {
+      screenBuilt = true;
+      screen.append(buildScreenHead(), preview, foot);
+    }
+    wrap.hidden = true;
+    screen.hidden = false;
+    const title = screen.querySelector('.space-title');
+    if (title) { title.tabIndex = -1; title.focus({ preventScroll: true }); }
+  };
   updateBtn.addEventListener('click', async () => {
     ctx.dock.echo(`grimoire upgrade-flow run --dry-run${slug ? ' # ' + slug : ''}`);
     // État « en cours » (issue #506) : le flow peut prendre jusqu'à une
@@ -1534,6 +1977,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     // l'écran passait de « cliqué » à « terminé » sans rien entre.
     updateBtn.disabled = true;
     updateBtn.textContent = 'Aperçu en cours…';
+    openScreen();
     preview.hidden = false;
     preview.replaceChildren(row(dot('acc'), text('span', 'lbl', "Aperçu en cours — jusqu'à une minute…")));
     try {
@@ -1543,9 +1987,39 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
       // message le dit, plutôt qu'un « rien d'autre écrit » démenti par le
       // disque. Son run est marqué aperçu et n'est compté nulle part.
       preview.append(text('div', null, report.ok ? 'Aperçu : sauvegarde créée, aucun fichier du projet modifié.' : (report.error || 'Aperçu en échec.')));
-      if (report.nodes) preview.append(renderNodeList(report.nodes));
-      if (report.backupPath) preview.append(text('div', 'lbl', `Sauvegarde : ${report.backupPath}`));
-      appendPreviewMarkdown(preview, report.preview || report.output);
+      const played = (report.nodes || []).filter((n) => n.status === 'fait' || n.status === 'proposition').length;
+      const when = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+      headSub.replaceChildren(
+        'Run ', text('span', 'mono', report.runId || 'aperçu'),
+        ` · lancé le ${when} · ${played} étape${played > 1 ? 's' : ''} jouée${played > 1 ? 's' : ''} sur ${(report.nodes || []).length || 9} (aperçu).`,
+      );
+      if (report.nodes) preview.append(renderNodeList(report.nodes, { dryRun: true }));
+      const cols = document.createElement('div');
+      cols.className = 'pl-up-cols';
+      if (report.ok) cols.append(renderChangesSection(ctx));
+      if (report.previewTable) {
+        cols.append(renderPreviewTables(report.previewTable));
+      } else {
+        const fallback = upCard('Rapport de la mise à jour');
+        const inner = document.createElement('div');
+        inner.style.padding = '12px 16px';
+        appendPreviewMarkdown(inner, report.preview || report.output);
+        fallback.append(inner);
+        cols.append(fallback);
+      }
+      preview.append(cols);
+      // Pied : sauvegarde et commande équivalente — jamais de « Restaurer », qui écrit.
+      foot.replaceChildren();
+      if (report.backupPath) {
+        const backup = document.createElement('span');
+        backup.append('Sauvegarde ', text('span', 'mono', report.backupPath));
+        foot.append(backup);
+      }
+      const formula = document.createElement('span');
+      formula.className = 'pl-up-formula';
+      formula.append(text('b', null, '›'), ` grimoire upgrade-flow run --dry-run${slug ? ' # ' + slug : ''}`);
+      foot.append(formula);
+      foot.hidden = false;
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button';
       confirmBtn.className = 'btn pri';
@@ -1579,6 +2053,8 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
           preview.append(text('div', 'lbl', `${result.proposals.length} proposition(s) en attente — voir la section Propositions ci-dessous.`));
         }
         confirmBtn.remove();
+        // La fiche réapparaît sous le déroulé : c'est là que vivent les Propositions.
+        wrap.hidden = false;
         if (result.ok) {
           markKitCheckpointPending(result.runId);
           // Un run complet s'arrête toujours, non décidé, au checkpoint
@@ -1616,7 +2092,7 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
       updateBtn.textContent = 'Mettre à jour — aperçu';
     }
   });
-  actionsBlock.append(updateBtn, preview);
+  actionsBlock.append(updateBtn);
 
   // ── Revoir dans l'IDE (issue #520, lot 2) ───────────────────────────────
   //
@@ -1697,23 +2173,6 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
     reviewPreview.append(cliCode);
   });
 
-  if (ctx.host.kind === 'cockpit' && slug && slug !== ctx.host.project) {
-    const openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.className = 'btn';
-    openBtn.textContent = 'Ouvrir ce projet';
-    // Naviguer via `ctx.goto` (une seule page, un seul montage de Piloter),
-    // jamais `location.search = ...` (issue #506) : ce dernier rechargeait
-    // le navigateur en entier, et le `?project=` qui en résultait retombait
-    // sur la vue Flotte par défaut (`projectFromUrl`, voir le docstring de
-    // `mount` plus bas) — le clic n'ouvrait jamais l'écran Projet qu'il
-    // promettait, il fallait recliquer « Projet » à la main. `ctx.params.
-    // openProject`, lu par `mount`, sélectionne directement ce projet au
-    // niveau Projet, sans reconstruire toute la coque.
-    openBtn.addEventListener('click', () => ctx.goto('piloter', { openProject: slug }));
-    actionsBlock.append(openBtn);
-  }
-
   ctx.inspector.append(actionsBlock);
 
   // ── Agents (#374) : table dans la fiche, détail éditable dans l'inspecteur ─
@@ -1785,33 +2244,31 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   wrap.append(proposalsSection);
 }
 
+// À traiter (P32) ouvre la fiche sur ce qui attend : `#flotte?focus=kit`,
+// `memory`, `checkpoint`, ou `proposal&proposal=<slug>`. Le bloc visé est
+// marqué, amené à l'écran, et l'inspecteur s'ouvre s'il le porte.
+function revealFocus(root, ctx) {
+  const { focus, proposal } = ctx.params || {};
+  if (!focus) return;
+  const selector = focus === 'proposal' && proposal
+    ? `[data-proposal="${CSS.escape(proposal)}"]`
+    : `[data-focus="${CSS.escape(focus)}"]`;
+  const target = root.querySelector(selector) || ctx.inspector.querySelector(selector);
+  if (!target) return;
+  target.dataset.focused = 'true';
+  if (ctx.inspector.contains(target)) ctx.openPanel('inspector');
+  target.scrollIntoView({ block: 'center' });
+}
+
 export async function mount(root, ctx) {
   injectStyles();
   const cockpit = ctx.host.kind === 'cockpit';
-  // Flotte reste le point d'entrée du pilotage multi-projets — y compris
-  // quand une navigation cockpit délibérée a un projet en `?project=` — SAUF
-  // quand ce projet vient du lancement direct depuis son dossier (#351) :
-  // `ctx.host.projectFromUrl` distingue les deux (voir api.js). Sans cette
-  // exception, `cockpit serve` lancé dans un projet — seul serveur restant
-  // depuis #356 — n'ouvrait plus jamais Piloter sur sa propre fiche.
-  const directLaunch = ctx.host.project && !ctx.host.projectFromUrl;
-  let level = cockpit && !directLaunch ? 'flotte' : 'projet';
-  let selected = ctx.host.project || null;
-
-  // `ctx.goto('piloter', { openProject: slug })` (bouton « Ouvrir ce
-  // projet », issue #506) : une navigation EXPLICITE vers la fiche d'un
-  // projet précis prime sur la Flotte par défaut, y compris pour un hôte non
-  // home — c'est tout le sens du clic, contrairement à `?project=` dans
-  // l'URL au chargement (`directLaunch` ci-dessus), qui reste une
-  // navigation de flotte par défaut (#351).
-  if (ctx.params && ctx.params.openProject) {
-    selected = ctx.params.openProject;
-    level = 'projet';
-  }
-
-  const zoomLevels = cockpit
-    ? [{ id: 'flotte', label: 'Flotte' }, { id: 'projet', label: 'Projet' }]
-    : [{ id: 'projet', label: 'Projet' }];
+  // La portée de la coque décide seule (P31) : « Tous les projets » montre la
+  // table de la Flotte, un projet montre sa fiche. Plus de zoom Flotte/Projet
+  // propre à cet espace, plus de projet « prévisualisé » distinct du projet
+  // servi : choisir une ligne de la Flotte change la portée (`ctx.scope.set`).
+  const level = cockpit && ctx.scope && ctx.scope.all ? 'flotte' : 'projet';
+  const selected = ctx.host.project || null;
 
   // Un seul tour réseau en vol à la fois (#541 point 4) : un double-clic sur
   // « Rafraîchir », ou une action qui appelle `options.refresh()` pendant
@@ -1853,13 +2310,7 @@ export async function mount(root, ctx) {
   };
 
   const drawOnce = async ({ forceFleet = false } = {}) => {
-    ctx.docbar.setBreadcrumb([ctx.host.project || 'flotte', 'Piloter', level === 'flotte' ? 'Flotte' : 'Projet']);
-    // Un clic sur le niveau déjà actif ne redessine pas (#850) : `draw()`
-    // repeignait la coquille « Chargement… », rechargeait la fiche, puis
-    // `renderSheet` vidait l'Inspecteur — y compris l'aperçu qu'un clic parti
-    // sur l'ANCIEN bouton « Mettre à jour » venait d'y écrire. Un zoom inchangé
-    // est un non-événement, comme pour `stateKey()` côté file d'attente.
-    ctx.docbar.setZoom(zoomLevels, level, (id) => { if (id === level) return; level = id; draw(); });
+    ctx.docbar.setBreadcrumb([]);
 
     // Coquille immédiate (#541 point 3) : jamais d'écran vide le temps que
     // les appels réseau reviennent — un état « chargement… » se peint tout
@@ -1868,26 +2319,46 @@ export async function mount(root, ctx) {
     const shell = document.createElement('div');
     shell.className = 'pl-wrap';
     if (level === 'projet') {
-      const knownTitle = cockpit ? selected : ctx.host.status?.slug;
-      if (knownTitle) shell.append(spaceHead(knownTitle));
+      // Le nom du projet (accents compris), jamais son slug (P31).
+      shell.append(spaceHead(ctx.scope ? ctx.scope.name : 'Projet servi'));
     }
     shell.append(...ctx.loading('Chargement…', 3));
     root.replaceChildren(shell);
 
     if (level === 'flotte') {
-      ctx.inspector.replaceChildren(document.createElement('div'));
+      ctx.inspector.replaceChildren(); // pas de détail : pas de colonne (P62)
       // `forceFleet` ne vient que du bouton « Rafraîchir la flotte » — un
       // simple retour sur ce niveau (zoom, sélection d'un autre projet puis
       // retour) sert le cache de `loadFleet` (issue #510 point 5).
+      // L'attention (P22) lit tout le registre : elle ne part qu'après la
+      // flotte, pour ne pas lui disputer le serveur, et ne la retient jamais.
+      // La table se peint dès la flotte, puis se repeint avec les badges quand
+      // l'attention répond (le filtre vit dans `fleetFilter`, la saisie en
+      // cours garde son focus).
       const rows = await loadFleet(ctx, { force: forceFleet });
       if (ctx.signal.aborted) return;
-      root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
-      renderFleet(
-        root, ctx, rows,
-        (slug) => { selected = slug; level = 'projet'; draw(); },
-        () => draw({ forceFleet: true }),
-      );
-      ctx.dock.echo('grimoire status');
+      const paintFleet = (attention, pending) => {
+        const field = root.querySelector('.pl-search');
+        const caret = field && document.activeElement === field ? field.selectionStart : null;
+        root.replaceChildren(); // retire la coquille « Chargement… » ou le rendu précédent
+        renderFleet(
+          root, ctx, rows, attention,
+          (slug) => ctx.scope.set(slug),
+          () => draw({ forceFleet: true }),
+          { pending },
+        );
+        if (caret !== null) {
+          const next = root.querySelector('.pl-search');
+          if (next) { next.focus(); next.setSelectionRange(caret, caret); }
+        }
+        return root.firstElementChild;
+      };
+      const painted = paintFleet(null, true);
+      ctx.dock.echo('grimoire cockpit list');
+      const attention = await ctx.api.attention(true).catch(() => null);
+      // Un autre rendu (zoom sur un projet, rafraîchissement) a pris la main : on ne l'écrase pas.
+      if (ctx.signal.aborted || root.firstElementChild !== painted) return;
+      paintFleet(attention, false);
     } else {
       // #548 : `loadSheet()` porte désormais le nom du projet aussi (fiche
       // `sheet.name`, résolue côté serveur depuis le registre) — plus de
@@ -1899,6 +2370,7 @@ export async function mount(root, ctx) {
       if (ctx.signal.aborted) return;
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
       renderSheet(root, ctx, selected, name, sheet, { refresh: draw });
+      revealFocus(root, ctx);
       ctx.dock.echo('grimoire doctor');
     }
   };

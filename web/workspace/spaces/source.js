@@ -42,6 +42,7 @@ function ensureStylesheet() {
 function freshState() {
   return {
     tree: null,
+    treeEl: null,
     dirsOpen: new Set(),
     currentPath: null,
     currentEntry: null,
@@ -62,7 +63,7 @@ export async function mount(root, ctx) {
   bindConsoleOnce(ctx);
   populateProblems(ctx);
 
-  ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Source']);
+  ctx.docbar.setBreadcrumb([]);
   ctx.docbar.setViews(
     [
       { id: 'source', label: 'Source' },
@@ -85,6 +86,19 @@ export async function mount(root, ctx) {
     return;
   }
   state.tree = tree;
+  // L'arbre vit dans le contenu de la rubrique (P66), une colonne à gauche du
+  // fichier ouvert : l'explorateur d'atelier (⇧⌘L) reste celui de la coque.
+  const split = document.createElement('div');
+  split.className = 'sr-split';
+  const treeEl = document.createElement('nav');
+  treeEl.className = 'tree sr-tree';
+  treeEl.setAttribute('aria-label', 'Arborescence des fichiers');
+  const pane = document.createElement('div');
+  pane.className = 'sr-pane';
+  split.append(treeEl, pane);
+  root.replaceChildren(split);
+  state.treeEl = treeEl;
+  root = pane;
   renderExplorer(ctx, root);
   renderCanvas(root, ctx);
 
@@ -96,7 +110,8 @@ export async function mount(root, ctx) {
   // vient de Piloter → Propositions → « Ouvrir le fichier » pour une
   // réparation (#490) : la ligne citée dans `artifact_ref`.
   if (ctx.params && ctx.params.file) {
-    await openFile(ctx, root, ctx.params.file, ctx.params.line);
+    // Venue d'un lien profond, la ligne est du texte (`#…?line=12`).
+    await openFile(ctx, root, ctx.params.file, Number(ctx.params.line) || undefined);
   }
 }
 
@@ -119,34 +134,47 @@ function baseName(path) {
   return idx === -1 ? path : path.slice(idx + 1);
 }
 
+// Le statut d'un fichier en lettre façon git (P30), jamais en pastille sans
+// mot : la lettre se lit sans la couleur, le `title` la dit en clair. Le kit
+// joue le rôle de la révision de base ; tout se déduit des champs du serveur
+// (`masks_kit`, `diverges`, `shipped_by_kit`, `overridden`), rien n'est deviné.
+//   M  override modifié : diverge du kit, contenu jamais livré par le kit
+//   U  override à fusionner : copie d'une version livrée, le kit a changé depuis
+//   O  override identique au kit, ou fichier du kit masqué par un override
+//   D  le kit ne livre plus ce chemin (l'override en garde une version livrée)
+//   A  ajouté par le projet : aucun équivalent dans le kit, ni livré
 function fileBadge(entry) {
-  // Le badge de dérive (spec §4, « livrer »·1) : un override qui masque un
-  // fichier du kit toujours présent, mais dont le contenu a divergé.
   if (entry.tier === 'overrides') {
-    if (entry.diverges) return { cls: 'dot warn', title: 'diverge du kit — ' + (entry.kit_counterpart || '') };
-    if (entry.masks_kit) return { cls: 'dot ok', title: 'identique au kit' };
-    return { cls: 'dot bad', title: 'le kit ne livre plus ce chemin' };
+    const counterpart = entry.kit_counterpart || '';
+    if (entry.diverges && entry.shipped_by_kit) {
+      const copy = entry.kit_version ? `copie du kit ${entry.kit_version}` : 'copie du kit';
+      return { letter: 'U', tone: 'warn', title: `à fusionner : ${copy}, le kit a changé depuis — ${counterpart}` };
+    }
+    if (entry.diverges) return { letter: 'M', tone: 'warn', title: 'modifié : diverge du kit — ' + counterpart };
+    if (entry.masks_kit) return { letter: 'O', tone: 'ok', title: 'override identique au kit' };
+    if (entry.shipped_by_kit) return { letter: 'D', tone: 'bad', title: 'le kit ne livre plus ce chemin' };
+    return { letter: 'A', tone: 'acc', title: 'ajouté par le projet : aucun équivalent dans le kit' };
   }
   if (entry.tier === 'kit' && entry.overridden) {
-    return { cls: 'dot acc', title: 'masqué par un override du projet' };
+    return { letter: 'O', tone: 'acc', title: 'masqué par un override du projet' };
   }
   return null;
 }
 
 function renderExplorer(ctx, root) {
-  ctx.explorer.replaceChildren();
+  state.treeEl.replaceChildren();
   for (const tier of state.tree.tiers) {
     const head = document.createElement('div');
     head.className = 'sr-tree-tier';
     if (tier.term) head.dataset.term = tier.term;
     head.textContent = `${tier.label} · ${tier.count}${tier.truncated ? ' (+ )' : ''}`;
-    ctx.explorer.append(head);
+    state.treeEl.append(head);
 
     if (!tier.exists) {
       const note = document.createElement('div');
       note.className = 'sr-tree-file lbl';
       note.textContent = tier.note ? `aucun fichier — ${tier.note}` : 'aucun fichier';
-      ctx.explorer.append(note);
+      state.treeEl.append(note);
       continue;
     }
 
@@ -173,7 +201,7 @@ function renderExplorer(ctx, root) {
           else state.dirsOpen.delete('closed:' + dirKey);
           renderExplorer(ctx, root);
         });
-        ctx.explorer.append(dirBtn);
+        state.treeEl.append(dirBtn);
       }
       if (!open && dir) continue;
       for (const file of files.sort((a, b) => a.path.localeCompare(b.path))) {
@@ -187,13 +215,15 @@ function renderExplorer(ctx, root) {
         row.append(name);
         const badge = fileBadge(file);
         if (badge) {
-          const dot = stateIcon(badge.cls.split(' ')[1]);
-          dot.classList.add('sr-badge');
-          dot.title = badge.title;
-          row.append(dot);
+          const letter = document.createElement('span');
+          letter.className = `sr-badge sr-git ${badge.tone}`;
+          letter.textContent = badge.letter;
+          letter.title = badge.title;
+          letter.setAttribute('aria-label', badge.title);
+          row.append(letter);
         }
         row.addEventListener('click', () => openFile(ctx, root, file.path));
-        ctx.explorer.append(row);
+        state.treeEl.append(row);
       }
     }
   }
@@ -218,6 +248,8 @@ async function openFile(ctx, root, path, line) {
     return;
   }
   state.draft = state.currentEntry.text || '';
+  // Le fichier ouvert entre dans l'URL : un lien copié le rouvre (P31).
+  ctx.setItem?.({ file: path, ...(line ? { line } : {}) });
   renderExplorer(ctx, root);
   renderCanvas(root, ctx);
   renderInspector(ctx);
@@ -273,11 +305,9 @@ function renderCanvas(root, ctx) {
     root.append(ctx.empty(
       'Source',
       total
-        ? `${total} fichier(s) répartis sur ${state.tree.tiers.length} étages. Choisissez un fichier dans l'explorateur.`
+        ? `${total} fichier(s) répartis sur ${state.tree.tiers.length} étages. Choisissez un fichier dans l'arborescence.`
         : "Aucun fichier trouvé. `grimoire init` puis `grimoire standard init` peuplent les étages.",
       'grimoire doctor --check-paths',
-      // Sous 900 px l'explorateur est un tiroir fermé : le bouton l'ouvre.
-      total ? { label: "Ouvrir l'explorateur", run: () => ctx.openPanel('explorer') } : undefined,
     ));
     return;
   }
