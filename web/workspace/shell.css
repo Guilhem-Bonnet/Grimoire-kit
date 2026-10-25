@@ -405,6 +405,27 @@ th .th-hint {
   border-color: transparent;
 }
 
+/* ── Retour d'action (.action-status) : réponse du serveur à côté du bouton ─
+ * La Console n'est plus dans la coque (P62) : succès et refus s'affichent là
+ * où l'action a eu lieu. Vide, la zone disparaît ; un refus prend l'encre
+ * d'état et garde le message du serveur en entier. */
+.action-status:not(:empty) {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r);
+  background: var(--e2);
+  color: var(--ink);
+  font-size: var(--t-s);
+  overflow-wrap: anywhere;
+}
+.action-status[data-tone="ok"]:not(:empty) {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.action-status[data-tone="bad"]:not(:empty) {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
 .btn {
   height: var(--h-ctl);
   display: inline-flex;
