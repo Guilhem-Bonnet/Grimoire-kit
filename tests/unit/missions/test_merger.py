@@ -206,7 +206,7 @@ def advance_main_bytes(projet: Path, path: str, body: bytes) -> None:
         subprocess_clone(projet, clone)
     git(clone, "pull", "-q", "origin", "main")
     (clone / path).write_bytes(body)
-    git(clone, "add", "--", path)
+    git(clone, "-c", "core.autocrlf=false", "add", "--", path)  # Windows : autocrlf=true ramènerait le CRLF à LF
     git(clone, "commit", "-q", "-m", f"main avance ({path}, octets)")
     git(clone, "push", "-q", "origin", "HEAD:refs/heads/main")
 
@@ -398,7 +398,7 @@ def test_un_changelog_en_crlf_garde_ses_fins_de_ligne_a_l_union(projet: Path, ho
     tid, wt = launch_and_work(projet, host)
     top = "- feat: une entrée de main\r\n".encode()
     (wt / "CHANGELOG.md").write_bytes(crlf.replace(top, "- feat: la tâche\r\n".encode() + top))
-    git(wt, "add", "--", "CHANGELOG.md")
+    git(wt, "-c", "core.autocrlf=false", "add", "--", "CHANGELOG.md")
     git(wt, "commit", "-q", "-m", "entrée de la tâche")
     git(wt, "push", "-q", "origin", f"task/{tid}")
     advance_main_bytes(projet, "CHANGELOG.md", crlf.replace(top, b"- fix: une autre PR\r\n" + top))
