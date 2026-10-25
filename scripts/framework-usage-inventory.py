@@ -60,6 +60,24 @@ GENERATED_INDEXES = {
 }
 
 
+# Décision par classe : la politique de résorption de framework/FREEZE.md,
+# appliquée outil par outil. « geler » = ne plus grossir (cliquet) ; « supprimer »
+# = retrait direct, à lister dans FREEZE.md.
+DECISIONS = {
+    "UNREFERENCED": "supprimer",
+    "INTERNAL": "supprimer",
+    "DOCS_ONLY": "supprimer (doc réécrite vers le SDK d'abord)",
+    "TEST_ONLY": "supprimer avec ses tests",
+    "TRANSITIVE": "geler (drainer l'appelant d'abord)",
+    "REFERENCED": "geler (porter vers src/ à la demande)",
+}
+
+
+def decision(cls: str) -> str:
+    """Décision de traitement d'une classe (voir DECISIONS)."""
+    return DECISIONS[cls]
+
+
 def git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=ROOT, capture_output=True, text=True,
@@ -206,13 +224,13 @@ def main() -> None:
         out += [
             f"## {cls} — {len(group)} fichiers, {group_lines} lignes",
             "",
-            "| Fichier | Lignes | runtime | tests | docs | interne | chargé par |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| Fichier | Lignes | runtime | tests | docs | interne | chargé par | décision |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
         ]
         for rel, lines, c in sorted(group, key=lambda r: -r[1]):
             out.append(
                 f"| {rel} | {lines} | {c['runtime']} | {c['tests']} |"
-                f" {c['docs']} | {c['internal']} | {c.get('via', '—')} |"
+                f" {c['docs']} | {c['internal']} | {c.get('via', '—')} | {decision(cls)} |"
             )
         out.append("")
 

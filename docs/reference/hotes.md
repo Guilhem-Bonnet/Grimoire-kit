@@ -44,7 +44,7 @@ Copilot, parce que c'est la même décision.
 | `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main (hors fichier déclaré `hosts.preserve`, rendu `user-owned`), ou si les hooks sont coupés par `disableAllHooks` |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 
-`grimoire init`, `grimoire up --fix` et `grimoire standard init` appellent la
+`grimoire init`, `grimoire up` et `grimoire standard init` appellent la
 synchronisation automatiquement. Un appel manuel n'est nécessaire qu'après avoir
 ajouté ou modifié une persona.
 

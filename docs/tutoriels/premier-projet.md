@@ -308,8 +308,8 @@ comme un échec.
 - Exemples rejouables (sans modèle, vérifiés en CI) : `examples/blueprint-minimal/` et
   `examples/blueprint-web-pipeline/` — `bash examples/<nom>/replay.sh` ; sources dans
   `registry/blueprints/`
-- L'atelier visuel reste disponible via `grimoire serve` (le cockpit
-  multi-projets, lui, est servi par `grimoire cockpit`)
+- L'atelier visuel reste disponible via `grimoire cockpit serve` (qui s'ouvre sur le
+  projet courant et sert aussi le cockpit multi-projets)
 
 Chaque erreur de validation indique le chemin JSON fautif, la valeur attendue et
 la remédiation ; une extension manquante à la compilation affiche la commande

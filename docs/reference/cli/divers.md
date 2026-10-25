@@ -367,7 +367,7 @@ Gestion des extensions (bundles d'artefacts gouvernés). Voir
 Canaux de features : **stable** (contrat SemVer), **beta** (opt-in par projet,
 journalisées, promues sur métriques d'usage), **experimental** (surface R&D).
 État persisté dans `_grimoire/features.json`. La page **Labs** de l'atelier
-(`grimoire serve`) expose les mêmes bascules.
+(`grimoire cockpit serve`) expose les mêmes bascules.
 
 | Sous-commande | Rôle |
 | --- | --- |

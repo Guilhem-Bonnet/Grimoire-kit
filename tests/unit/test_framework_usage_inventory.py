@@ -80,3 +80,11 @@ def test_real_runtime_reference_still_wins(inventory, monkeypatch):
     verdict, counts = inventory.classify("framework/tools/live-tool.py")
     assert verdict == "REFERENCED"
     assert counts["runtime"] == 1
+
+
+def test_every_class_carries_a_decision(inventory):
+    """Chaque classe du classement a une décision (geler ou supprimer), jamais « à décider »."""
+    classes = ["UNREFERENCED", "INTERNAL", "DOCS_ONLY", "TEST_ONLY", "TRANSITIVE", "REFERENCED"]
+    for cls in classes:
+        assert inventory.decision(cls).startswith(("geler", "supprimer"))
+    assert set(inventory.DECISIONS) == set(classes)
