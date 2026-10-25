@@ -292,6 +292,7 @@ class LexicalMemoryBackend(MemoryBackend):
         user_id: str = "",
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
+        created_at: str = "",
     ) -> MemoryEntry:
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
         uid = user_id or "global"
@@ -307,7 +308,7 @@ class LexicalMemoryBackend(MemoryBackend):
                 self._conn.execute(
                     "INSERT INTO entries (id, text, user_id, tags_json, metadata_json, created_at, updated_at)"
                     " VALUES (?, ?, ?, ?, ?, ?, '')",
-                    (entry_id, text, uid, tags_json, metadata_json, ts),
+                    (entry_id, text, uid, tags_json, metadata_json, created_at or ts),
                 )
         entry = self.recall(entry_id)
         if entry is None:  # pragma: no cover - defensive, upsert guarantees existence

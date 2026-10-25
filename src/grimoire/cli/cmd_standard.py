@@ -13,6 +13,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from grimoire.cli.cmd_standard_claims import claims_command
+from grimoire.cli.updater import extras_install_hint
 from grimoire.core.agentic_standard import (
     InstallPlan,
     StandardProviderDetection,
@@ -479,7 +480,7 @@ def _print_plan(plan: InstallPlan) -> None:
     if plan.extra_artifacts:
         console.print(f"  [bold]extra artifacts[/bold]: {', '.join(plan.extra_artifacts)}")
     console.print(f"  [bold]tech extras[/bold]: {', '.join(plan.tech_extras) or 'none (core only)'}")
-    console.print(f"  [bold]install[/bold]: [green]{plan.pip_command}[/green]")
+    console.print(f"  [bold]install[/bold]: [green]{escape(extras_install_hint(list(plan.tech_extras)))}[/green]")
     for warning in plan.warnings:
         console.print(f"  [yellow]![/yellow] {warning}")
 
@@ -694,7 +695,7 @@ def doctor(
         table.add_row(
             str(row["extra"]),
             "[green]yes[/green]" if available else "[yellow]no[/yellow]",
-            "-" if available else f"pip install 'grimoire-kit[{row['extra']}]'",
+            "-" if available else extras_install_hint([str(row["extra"])]),
             "-" if available else str(row["degrades_to"]),
         )
     console.print(table)
@@ -871,7 +872,7 @@ def init_profile(
             elif installed_extras_ok is False:
                 console.print("  [red][x][/red] extra install failed; run the command above manually")
             else:
-                console.print(f"  [cyan]next[/cyan] install technology extras: [green]{plan.pip_command}[/green]")
+                console.print(f"  [cyan]next[/cyan] install technology extras: [green]{escape(extras_install_hint(list(plan.tech_extras)))}[/green]")
 
 
 @standard_app.command("activation-context")
@@ -895,14 +896,17 @@ def activation_context(
 
 
 def _run_pip_install(pip_target: str) -> bool:
+    """Installe les extras avec le gestionnaire qui a installé le kit (uv tool, pipx ou pip)."""
     import subprocess
-    import sys
 
+    from grimoire.cli.updater import extras_install_cmd
+
+    # ``pip_target`` vaut ``grimoire-kit[a,b]`` : on n'en garde que les extras.
+    inner = pip_target.partition("[")[2].rstrip("]")
+    extras = [e for e in inner.split(",") if e]
+    argv, _ = extras_install_cmd(extras)
     try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "pip", "install", pip_target],
-            check=False,
-        )
+        completed = subprocess.run(argv, check=False)
     except OSError:
         return False
     return completed.returncode == 0

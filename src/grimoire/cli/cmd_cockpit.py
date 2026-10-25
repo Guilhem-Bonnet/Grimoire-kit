@@ -147,6 +147,19 @@ def _resolve_project_path(slug: str | None) -> Path | None:
 # une navigation Flotte, et fermée sur tout autre projet du registre.
 _HOME_SLUG: str | None = None
 
+# Chemin du projet servi, figé au démarrage : la garde P02 compare des chemins,
+# pas un slug re-résolu (un ``remove`` puis ``add`` ne la déplace pas).
+_HOME_PATH: Path | None = None
+
+
+def _is_served_project(proot: Path) -> bool:
+    """``proot`` est le projet servi ; échec fermé sans projet servi (P02)."""
+    try:
+        return _HOME_PATH is not None and _HOME_PATH.samefile(proot)
+    except OSError:
+        return False
+
+
 _API_CACHE: dict[Path, Any] = {}
 
 
@@ -860,6 +873,10 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
+        if is_mutation and not _is_served_project(proot):
+            # P02 : delete/gc/sync n'agissent que sur le projet servi (échec fermé).
+            self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+            return
         subcmd = action
         values: list[str] = []
         if is_read:
@@ -904,17 +921,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def do_PUT(self) -> None:  # http.server contract
         """``PUT /api/blueprints/<id>`` — enregistrer un blueprint (issue #535).
 
-        Absente jusqu'ici : ``_CockpitHandler`` ne définissait aucun ``do_PUT``,
-        donc ``http.server`` répondait 501 (méthode non gérée) avant même
-        d'atteindre une garde — y compris sur l'atelier (``grimoire serve``,
-        ``readOnly: false``), qui délègue à ce même handler depuis #351. Le
-        bouton « Enregistrer » de Concevoir (``ctx.api.blueprintPut``) restait
-        donc sans effet réel sur le seul serveur qui tourne aujourd'hui, quel
-        que soit le câblage côté client. Même garde que ``/api/setup``
-        ci-dessus : seul le projet de lancement direct (``_HOME_SLUG``)
-        accepte l'écriture — un projet du registre qu'on ne fait que regarder
-        via le cockpit reste en lecture seule, comme le reste de la vue de
-        travail (#356).
+        Même garde que ``/api/setup`` : seul le projet de lancement direct
+        (``_HOME_SLUG``) accepte l'écriture (#356) ; sans ``do_PUT``,
+        ``http.server`` répondait 501 avant toute garde.
         """
         path = urlparse(self.path).path
         if not self._guard_mutation():
@@ -1090,9 +1099,8 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     ici, l'enregistrement explicite ferait répéter une décision déjà prise.
 
     ``GRIMOIRE_NO_COCKPIT`` désactive cette adoption, comme elle désactive
-    déjà l'enregistrement au moment de l'initialisation : une commande qui
-    écrit dans l'état de la machine doit pouvoir être exécutée sans le faire,
-    et la suite de tests est le premier appelant à en avoir besoin.
+    déjà l'enregistrement à l'initialisation : une commande qui écrit dans
+    l'état de la machine doit pouvoir s'exécuter sans le faire.
 
     Renvoie un message à afficher quand le projet vient d'être enregistré, ou
     ``None`` si rien n'a changé.
@@ -1100,17 +1108,15 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     Retient aussi ce slug dans ``_HOME_SLUG`` (#356) : c'est le seul projet
     pour lequel *ce* process honorera une écriture, même après que l'UI ait
     navigué ailleurs dans le registre — voir ``_CockpitHandler._is_home_request``.
+    Son chemin résolu va dans ``_HOME_PATH`` (garde P02).
     """
-    global _HOME_SLUG
+    global _HOME_PATH, _HOME_SLUG
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):
         return None
     cwd = (root or Path.cwd()).resolve()
-    # `looks_grimoire` ne garde que la détection SILENCIEUSE du dossier
-    # courant : sans `root` explicite, on ne devine jamais qu'un dossier
-    # quelconque est un projet. Un `--project-root <dir>` explicite (issue
-    # #171 : le wizard doit pouvoir initialiser un dossier vierge) est un
-    # geste non ambigu — le même que `grimoire init <dir>` sur un dossier qui
-    # n'est pas encore un projet — et n'a pas besoin de ce garde-fou.
+    # Sans `root` explicite, on ne devine jamais qu'un dossier quelconque est un
+    # projet (`looks_grimoire`). Un `--project-root <dir>` explicite (#171 : le
+    # wizard initialise un dossier vierge) est un geste non ambigu.
     if root is None and not looks_grimoire(cwd):
         return None
     slug = slug_for_path(cwd)
@@ -1121,7 +1127,7 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
             return None
         message = f"[green]+[/green] Projet courant enregistré → [b]{slug}[/b] ({cwd})"
     set_selected_slug(slug)
-    _HOME_SLUG = slug
+    _HOME_SLUG, _HOME_PATH = slug, cwd
     return message
 
 

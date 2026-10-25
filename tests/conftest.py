@@ -130,6 +130,12 @@ def _no_automatic_host_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_managed_settings(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Les réglages managés réels (``/etc/claude-code``, #886) ne comptent jamais dans un test : un dossier vide les remplace."""
+    monkeypatch.setattr("grimoire.hosts.contract_probe.MANAGED_DIR", tmp_path_factory.mktemp("managed-empty"))
+
+
+@pytest.fixture(autouse=True)
 def _default_no_docker_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     """``grimoire init``'s express Memory step recommends ``complet`` whenever
     Docker's daemon actually answers (2026-09-18 arbitrage on #619,
