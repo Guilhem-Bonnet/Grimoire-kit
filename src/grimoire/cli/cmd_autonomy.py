@@ -136,3 +136,88 @@ def autonomy_revoke(
     _emit(ctx, {"revoked": event})
     if _fmt(ctx) != "json":
         console.print(f"[green]révoqué[/green] {grant_id}" + (f" — {reason}" if reason else ""))
+
+
+# ── Mandat de l'orchestrateur (#876, lot 1) ─────────────────────────────────
+
+mandate_app = typer.Typer(
+    help="Mandat de l'orchestrateur : gestes de validation qu'il peut prendre à ta place, bornés et révocables.",
+    no_args_is_help=True,
+)
+autonomy_app.add_typer(mandate_app, name="mandate")
+
+
+def _store(project_root: Path) -> Any:
+    from grimoire.missions.mandate import MandateStore
+
+    return MandateStore(project_root)
+
+
+@mandate_app.command("grant")
+def mandate_grant(
+    ctx: typer.Context,
+    gesture: Annotated[
+        list[str], typer.Option("--gesture", help="Geste couvert : accept, answer, approve-check, resume, queue-release, merge ; répétable.")
+    ],
+    task_type: Annotated[list[str], typer.Option("--task-type", help="Type de tâche couvert (implementation, test…) ; répétable.")],
+    max_sessions_per_day: Annotated[int, typer.Option("--max-sessions-per-day", help="Plafond de sessions de worker par jour.")],
+    until: Annotated[str, typer.Option("--until", help="Échéance : +30m, +2h, +1d ou un instant ISO 8601 avec fuseau.")],
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Demander un mandat : il n'est inscrit qu'attesté par un tour humain de cette session (comme `autonomy grant`)."""
+    from grimoire.missions.mandate import MandateRequest
+
+    try:
+        request = MandateRequest.build(gesture, task_type, max_sessions_per_day, until)
+        mandate, attestation = _store(project_root).request_grant(request)
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+    except Exception as exc:  # MandateRefusedError : demande invalide
+        _fail(ctx, GrimoireRuntimeError(str(exc)))
+        return
+    if mandate is None:
+        _emit(ctx, {"granted": False, "challenge_id": attestation.challenge_id, "attestation": attestation.to_dict()})
+        if _fmt(ctx) != "json":
+            console.print(f"[yellow]décision humaine requise[/yellow] — challenge {attestation.challenge_id}")
+            console.print(
+                f"  awaiting_human : {attestation.reason} — {attestation.explain()}. Un mandat s'accorde par un tour humain de la "
+                f"session qui l'a demandé, postérieur au challenge, puis la même commande relancée. {LIMIT_NOTE}"
+            )
+        raise typer.Exit(_AWAITING_HUMAN_EXIT)
+    _emit(ctx, {"granted": True, "mandate": mandate.to_dict()})
+    if _fmt(ctx) != "json":
+        console.print(
+            f"[green]mandat[/green] {mandate.id} — {', '.join(mandate.gestures)} sur {', '.join(mandate.task_types)}, "
+            f"{mandate.max_sessions_per_day} session(s)/jour, jusqu'au {mandate.until}"
+        )
+
+
+@mandate_app.command("status")
+def mandate_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -> None:
+    """Relire l'état du mandat du projet, réévalué maintenant."""
+    state = _store(project_root).state()
+    _emit(ctx, state.to_dict())
+    if _fmt(ctx) == "json":
+        return
+    if state.mandate is None:
+        console.print(f"aucun mandat actif ({state.reason}{' : ' + state.detail if state.detail else ''})")
+        return
+    label = "[green]actif[/green]" if state.active else f"[red]inactif[/red] ({state.reason} : {state.detail})"
+    console.print(f"{state.mandate.id} — {label} — {', '.join(state.mandate.gestures)} — jusqu'au {state.mandate.until}")
+
+
+@mandate_app.command("revoke")
+def mandate_revoke(
+    ctx: typer.Context,
+    reason: Annotated[str, typer.Option("--reason", help="Motif, inscrit dans l'événement.")] = "",
+    project_root: _PROJECT_ROOT = Path(),
+) -> None:
+    """Révoquer le mandat actif — toujours permis : retirer une autorité n'en demande aucune."""
+    revoked = _store(project_root).revoke(REVOKE_MANUAL, reason)
+    if revoked is None:
+        _fail(ctx, GrimoireRuntimeError("aucun mandat actif à révoquer"))
+        return
+    _emit(ctx, {"revoked": revoked.to_dict()})
+    if _fmt(ctx) != "json":
+        console.print(f"[green]révoqué[/green] {revoked.id}" + (f" — {reason}" if reason else ""))
