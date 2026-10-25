@@ -898,6 +898,10 @@
    "version": "3.21.1",
    "path": "framework/tools/desire-paths.py"
   },
+  "3c8adcd7f4b64ef234a396ac0e51ed945404bf8e2fd012fe674676cd78aff432": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
+  },
   "3ce774cf04cecabdbb4a55bd469b29af6467442afafb4fc5cf1359f52af02c8c": {
    "version": "3.64.0",
    "path": "framework/agentic-standard/traceability.yaml"

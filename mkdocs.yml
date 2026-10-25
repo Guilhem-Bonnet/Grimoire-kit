@@ -177,6 +177,7 @@ nav:
           - Le projet: reference/cli/projet.md
           - Le tableau de bord: reference/cli/tableau-de-bord.md
           - Les tâches: reference/cli/taches.md
+          - L'intendant du projet: reference/cli/intendant.md
           - La mémoire du projet: reference/cli/memoire.md
           - Le contrôle des preuves: reference/cli/preuve.md
           - La mise à jour: reference/cli/mise-a-jour.md

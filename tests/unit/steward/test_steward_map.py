@@ -1,0 +1,132 @@
+"""La carte de l'intendant (#876, lot 5) : déterministe, fusion par comparaison d'arbres, signaux, « non mesuré »."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from steward_doubles import Recorder, Scene
+
+from grimoire.steward import MAP_SCHEMA
+from grimoire.steward.project_map import build_map, ci_state, issue_refs
+from grimoire.steward.sources import NON_MESURE
+
+
+def _by_ref(carte: dict[str, Any], section: str) -> dict[str, dict[str, Any]]:
+    return {e["ref"]: e for e in carte[section]["elements"]}
+
+
+def _signals(carte: dict[str, Any], kind: str) -> set[str]:
+    return {s["ref"] for s in carte["signaux"] if s["type"] == kind}
+
+
+def test_la_carte_est_versionnee_et_stable(scene: Scene) -> None:
+    first = build_map(scene.sources())
+    second = build_map(scene.sources())
+    assert first["$schema"] == MAP_SCHEMA
+    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+    for section in ("taches", "branches", "worktrees", "prs", "issues"):
+        assert first[section]["mesure"] is True, section
+    assert first["resume"]["taches"] == 4
+    assert first["resume"]["taches_ouvertes"] == 3
+
+
+def test_taches_du_ledger(scene: Scene) -> None:
+    taches = _by_ref(build_map(scene.sources()), "taches")
+    tenue = taches[f"tache:{scene.tasks['tenue']}"]
+    assert tenue["etat"] == "claimed"
+    assert tenue["claim"]["session"] == "S1"
+    assert tenue["session"]["vivacite"]["state"] == "vivant"
+    assert taches[f"tache:{scene.tasks['issue_fermee']}"]["liens"]["issues"] == [12]
+    assert taches[f"tache:{scene.tasks['annulee']}"]["ouverte"] is False
+
+
+def test_fusion_par_comparaison_d_arbres(scene: Scene) -> None:
+    """Une fusion squash n'est pas ancêtre de la cible : seule la comparaison d'arbres la voit."""
+    branches = _by_ref(build_map(scene.sources()), "branches")
+    assert branches["branche:feat/ancetre"]["fusion"] == {"etat": "fusionnee", "par": "ancetre"}
+    squash = branches["branche:feat/squash"]
+    assert squash["en_avance"] == 1
+    assert squash["fusion"] == {"etat": "fusionnee", "par": "arbre"}
+    assert branches["branche:feat/pr-fusionnee"]["fusion"] == {"etat": "fusionnee", "par": "pr #40"}
+    assert branches["branche:feat/hors-cible"]["fusion"]["etat"] == "non_fusionnee"
+    assert branches["branche:feat/hors-cible"]["conflit"]["etat"] == "aucun"
+    assert "branche:origin/feat/squash" in branches  # les distantes du remote de la cible
+
+
+def test_conflit_changelog_seul_ou_autre(scene: Scene) -> None:
+    carte = build_map(scene.sources())
+    branches = _by_ref(carte, "branches")
+    assert branches["branche:feat/changelog"]["conflit"] == {"etat": "changelog_seul", "fichiers": ["CHANGELOG.md"]}
+    assert branches["branche:feat/semantique"]["conflit"] == {"etat": "autre", "fichiers": ["src/app.py"]}
+    assert _signals(carte, "conflit_changelog_seul") >= {"branche:feat/changelog", "pr:31"}
+    assert _signals(carte, "conflit_autre") >= {"branche:feat/semantique", "pr:32"}
+
+
+def test_branche_orpheline(scene: Scene) -> None:
+    carte = build_map(scene.sources())
+    branches = _by_ref(carte, "branches")
+    assert branches[f"branche:task/{scene.tasks['annulee']}"]["orpheline"] is True
+    assert branches[f"branche:task/{scene.tasks['tenue']}"]["orpheline"] is False
+    assert f"branche:task/{scene.tasks['annulee']}" in _signals(carte, "branche_orpheline")
+
+
+def test_pr_inactive_sans_session_vivante(scene: Scene) -> None:
+    carte = build_map(scene.sources())
+    prs = _by_ref(carte, "prs")
+    assert prs["pr:30"]["taches"] == [scene.tasks["tenue"]]
+    assert prs["pr:30"]["session_vivante"] is True
+    assert prs["pr:31"]["session_vivante"] is False
+    assert prs["pr:31"]["ci"] == "succes"
+    # 30 : vieille mais sa session est vivante ; 32 : récente ; 31 : vieille et sans session.
+    assert _signals(carte, "pr_inactive_sans_session_vivante") == {"pr:31"}
+    # Sans signe de vie de la sonde, la session de 30 est « inconnue » : plus vivante, la PR monte.
+    dead = build_map(scene.sources(alive=False))
+    assert _signals(dead, "pr_inactive_sans_session_vivante") == {"pr:30", "pr:31"}
+
+
+def test_seuil_d_inactivite_reglable(scene: Scene) -> None:
+    carte = build_map(scene.sources(alive=False), inactivity_hours=100_000)
+    assert _signals(carte, "pr_inactive_sans_session_vivante") == set()
+
+
+def test_signaux_des_taches(scene: Scene) -> None:
+    carte = build_map(scene.sources())
+    assert _signals(carte, "tache_ouverte_issue_fermee") == {f"tache:{scene.tasks['issue_fermee']}"}
+    assert _signals(carte, "tache_ouverte_citee_par_commit") == {f"tache:{scene.tasks['citee']}"}
+    cited = _by_ref(carte, "taches")[f"tache:{scene.tasks['citee']}"]
+    assert [c["sha"] for c in cited["commits_citant"]] == [scene.shas["cite"]]
+
+
+def test_sans_gh_la_carte_dit_non_mesure(scene: Scene) -> None:
+    carte = build_map(scene.sources(Recorder(scene.gh, gh_missing=True)))
+    assert carte["prs"]["mesure"] is False
+    assert "introuvable" in carte["prs"]["raison"]
+    assert carte["issues"]["mesure"] is False
+    assert carte["resume"]["prs"] == NON_MESURE
+    assert carte["branches"]["mesure"] is True  # git, lui, répond
+    tache = _by_ref(carte, "taches")[f"tache:{scene.tasks['issue_fermee']}"]
+    assert tache["liens"]["etats"] == {"12": {"etat": NON_MESURE}}
+
+
+def test_sans_ledger_ni_cible(scene: Scene) -> None:
+    src = scene.sources()
+    src.target = "origin/inexistante"
+    carte = build_map(src)
+    assert carte["cible"]["sha"] == NON_MESURE
+    assert carte["branches"]["mesure"] is False
+
+
+def test_aides_pures() -> None:
+    assert issue_refs("Refs #12, voir https://github.com/o/r/pull/7 et a#3") == [7, 12]
+    assert ci_state([]) == "aucune"
+    assert ci_state([{"status": "IN_PROGRESS"}]) == "en_cours"
+    assert ci_state([{"status": "COMPLETED", "conclusion": "FAILURE"}, {"status": "QUEUED"}]) == "echec"
+    assert ci_state([{"__typename": "StatusContext", "state": "SUCCESS"}]) == "succes"
+
+
+def test_la_carte_n_ecrit_rien_hors_du_dossier_steward(scene: Scene) -> None:
+    recorder = Recorder(scene.gh)
+    build_map(scene.sources(recorder))
+    recorder.assert_read_only()
+    assert not (scene.root / "_grimoire-output" / "steward" / ".objets-git").exists()
