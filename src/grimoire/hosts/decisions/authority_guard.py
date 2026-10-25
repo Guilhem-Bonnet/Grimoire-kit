@@ -236,12 +236,19 @@ def _expand(word: str, home: str) -> str:
 
 
 def _inside(path: str, zone: str) -> bool:
+    # ``normcase`` : sous Windows, la casse ne distingue pas deux chemins et ``/`` vaut ``\`` (no-op sous POSIX).
+    path, zone = os.path.normcase(path), os.path.normcase(zone)
     return path == zone or path.startswith(zone.rstrip(os.sep) + os.sep)
 
 
 def _glob_reaches(pattern: str, zone: str) -> bool:
-    """Vrai si le motif *pattern* (avec jokers) peut désigner la zone ou ce qu'elle contient."""
-    parts, wanted = pattern.split("/"), zone.split("/")
+    """Vrai si le motif *pattern* (avec jokers) peut désigner la zone ou ce qu'elle contient.
+
+    Les deux sont découpés sur le séparateur du système une fois normalisés : sous Windows, ``~`` développé puis
+    ``normpath`` donnent des antislashs — découper sur ``/`` ne reconnaissait plus aucun motif (``cat ~/.grimoire/control/*``
+    passait sous Git Bash).
+    """
+    parts, wanted = Path(os.path.normcase(pattern)).parts, Path(os.path.normcase(zone)).parts
     return len(parts) >= len(wanted) and all(fnmatchcase(w, p) for w, p in zip(wanted, parts, strict=False))
 
 
@@ -347,7 +354,7 @@ _ZONE_SECRET_FILES = ("cockpit-key", "mandates.authority.jsonl")
 def names_zone_secret(command: str, targets: tuple[str, ...] = ()) -> str:
     """Le fichier secret de la zone de contrôle qu'un appel lit — jokers, ``cd``, liens et ``..`` résolus ; ``""`` sinon."""
     zones, _grimoire, home = _control_zones()
-    secrets = [(name, f"{z}/{name}") for z in zones for name in _ZONE_SECRET_FILES]
+    secrets = [(name, str(Path(z) / name)) for z in zones for name in _ZONE_SECRET_FILES]
     found: list[tuple[str, str]] = [r for t in targets for r in _resolutions(t, [_cwd()], home)]
     if command:
         found.extend(r for _program, resolved in _command_paths(command, home) for r in resolved)
