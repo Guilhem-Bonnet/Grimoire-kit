@@ -164,12 +164,14 @@ def test_le_chip_projet_ouvre_la_palette_sur_la_section_projets(cockpit_workspac
     assert first_item.inner_text().strip().lower() == "projets"
 
     # « Tous les projets » d'abord, puis le registre (`served_cockpit` en
-    # enrôle un réel) — le projet en portée se dit « Portée actuelle » (P31).
+    # enrôle un réel) — le projet en portée porte une coche, et sa ligne dit
+    # son dossier en texte secondaire (revue du 2026-10-25).
     second_item = page.locator("#palette-list li").nth(1)
     assert second_item.get_attribute("role") == "option"
     assert second_item.locator("span").first.inner_text().strip() == "Tous les projets"
     third_item = page.locator("#palette-list li").nth(2)
-    assert third_item.locator(".lbl").inner_text().strip() in {"Projet", "Portée actuelle"}
+    assert third_item.locator(".lbl").get_attribute("title")
+    assert page.locator("#palette-list li[aria-current='true'] svg[aria-label='Portée actuelle']").count() == 1
 
     page.locator("body").press("Escape")
 

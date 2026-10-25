@@ -1643,17 +1643,20 @@ async function buildPalette() {
   // cockpit) »).
   const listed = settle(projectsResult, {}).projects;
   if (listed) registry = listed;
+  // Une ligne par projet : pastille d'état, nom, dossier en texte secondaire
+  // (le dossier, pas le slug : deux projets homonymes s'y distinguent). La
+  // portée en cours porte une coche (`current`), plus une colonne de texte.
   const projects = host.kind === 'cockpit'
     ? [
         {
-          section: 'Projets', label: 'Tous les projets', hint: host.scopeAll ? 'Portée actuelle' : 'Portée',
-          command: 'grimoire cockpit list', run: () => setScope(null),
+          section: 'Projets', kind: 'scope-all', label: 'Tous les projets',
+          hint: registry.length === 1 ? '1 projet' : `${registry.length} projets`,
+          current: host.scopeAll, run: () => setScope(null),
         },
         ...registry.map((p) => ({
-          section: 'Projets', label: projectName(p.slug),
-          hint: !host.scopeAll && p.slug === host.project ? 'Portée actuelle' : 'Projet',
-          // Le dossier, pas le slug : deux projets homonymes s'y distinguent.
-          command: p.path || '',
+          section: 'Projets', kind: 'project', label: projectName(p.slug),
+          hint: p.path || '', state: projectState(p),
+          current: !host.scopeAll && p.slug === host.project,
           run: () => setScope(p.slug),
         })),
       ]
@@ -1683,6 +1686,34 @@ async function buildPalette() {
   ).slice(0, 500);
 
   paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks, ...files];
+  // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
+  if (!$('palette').hidden) renderPalette($('palette-input').value);
+}
+
+/** Pastille d'un projet : suivi par Grimoire, dossier sans Grimoire, ou disparu. */
+function projectState(entry) {
+  if (entry.exists === false) return 'missing';
+  if (entry.managed || entry.is_grimoire) return 'ok';
+  return 'plain';
+}
+
+const PROJECT_STATE_LABEL = {
+  ok: 'suivi par Grimoire',
+  plain: 'sans Grimoire',
+  missing: 'dossier introuvable',
+};
+
+// La recherche ignore la casse ET les accents : « ref » trouve « Référence
+// agentique », « portee » trouve « Portée ». Chaque mot tapé doit figurer
+// (dans l'ordre que l'on veut) : « kit forge » trouve Grimoire-Forge/grimoire-kit.
+function fold(text) {
+  return String(text || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+function paletteMatches(item, words) {
+  if (!words.length) return true;
+  const haystack = fold(`${item.label} ${item.hint}`);
+  return words.every((word) => haystack.includes(word));
 }
 
 /** Entrée « Affichage » de la palette : son libellé suit l'état de la bascule. */
@@ -1703,12 +1734,17 @@ function displayItems() {
 function openPalette(sectionFirst = null, { only = false } = {}) {
   paletteSectionFirst = sectionFirst;
   paletteOnly = Boolean(sectionFirst && only);
-  $('palette').hidden = false;
-  $('palette').setAttribute('aria-label', paletteOnly ? 'Choisir la portée' : 'Palette de commandes');
+  const palette = $('palette');
+  palette.hidden = false;
+  // Deux présentations d'un même composant : la palette ⌘K flotte au centre ;
+  // le sélecteur de portée est un menu ancré sous la puce qui l'ouvre.
+  palette.dataset.mode = paletteOnly ? 'scope' : 'commands';
+  palette.setAttribute('aria-label', paletteOnly ? 'Choisir la portée' : 'Palette de commandes');
   $('palette-input').value = '';
   $('palette-input').placeholder = paletteOnly
-    ? 'Choisir la portée : tous les projets, ou un projet…'
+    ? 'Rechercher un projet ou un dossier…'
     : 'Aller à, ou lancer une commande grimoire…';
+  placePalette();
   $('palette-input').focus();
   renderPalette('');
 }
@@ -1717,6 +1753,96 @@ function closePalette() {
   $('palette').hidden = true;
   paletteSectionFirst = null;
   paletteOnly = false;
+}
+
+/** Ancre le sélecteur de portée sous sa puce ; la palette ⌘K garde sa place. */
+function placePalette() {
+  const box = $('palette-box');
+  if (!paletteOnly) {
+    box.style.removeProperty('top');
+    box.style.removeProperty('left');
+    return;
+  }
+  const chip = $('project-chip').getBoundingClientRect();
+  const gutter = 16;
+  const width = Math.min(440, window.innerWidth - 2 * gutter);
+  const left = Math.max(gutter, Math.min(chip.left, window.innerWidth - width - gutter));
+  box.style.top = `${Math.round(chip.bottom + 8)}px`;
+  box.style.left = `${Math.round(left)}px`;
+}
+
+/** Habille la palette une fois : loupe dans le champ, aide clavier en pied. */
+function dressPalette() {
+  const box = $('palette-box');
+  const input = $('palette-input');
+  if (box.querySelector('.pal-field')) return;
+  const field = mk('label', { class: 'pal-field' }, icon('search'));
+  input.replaceWith(field);
+  field.append(input);
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-controls', 'palette-list');
+  input.setAttribute('aria-expanded', 'true');
+  input.setAttribute('aria-autocomplete', 'list');
+  box.append(mk('div', { class: 'pal-foot', 'aria-hidden': 'true' },
+    mk('span', null, mk('span', { class: 'kbd', text: '↑' }), mk('span', { class: 'kbd', text: '↓' }), ' parcourir'),
+    mk('span', null, mk('span', { class: 'kbd', text: 'Entrée' }), ' choisir'),
+    mk('span', null, mk('span', { class: 'kbd', text: 'Échap' }), ' fermer'),
+  ));
+}
+
+/** Dossier sur une ligne : le début s'élide, la fin reste lisible — le dernier
+ * segment, et son parent s'il est court (« …/Grimoire-Forge/grimoire-kit »). */
+function pathNode(path) {
+  const parts = String(path || '').split(/(?=[\\/])/);
+  const keep = parts.length > 1 && parts.slice(-2).join('').length <= 36 ? 2 : 1;
+  const tail = parts.slice(-keep).join('');
+  const head = parts.slice(0, -keep).join('');
+  return mk('span', { class: 'lbl pal-path', title: path },
+    head ? mk('span', { class: 'pal-path-head', text: head }) : null,
+    mk('span', { class: 'pal-path-tail', text: tail }));
+}
+
+function paletteRow(item, index) {
+  const li = mk('li', {
+    role: 'option',
+    id: `palette-opt-${index}`,
+    class: `pal-row${item.kind ? ` pal-${item.kind}` : ''}`,
+    'aria-selected': String(index === 0),
+  });
+  li.dataset.index = String(index);
+  if (item.kind === 'project' || item.kind === 'scope-all') {
+    // Le nom d'abord dans le DOM (premier `span`) ; la pastille est dessinée
+    // par la CSS (`::before`, selon `data-state`), la coche par une icône.
+    if (item.kind === 'project') {
+      li.dataset.state = item.state;
+      li.title = `${item.label} — ${PROJECT_STATE_LABEL[item.state]}\n${item.hint}`;
+    } else {
+      li.append(icon('scope'));
+    }
+    li.append(mk('span', { class: 'pal-label', text: item.label }));
+    li.append(item.kind === 'project' ? pathNode(item.hint) : mk('span', { class: 'lbl', text: item.hint }));
+    if (item.current) {
+      li.setAttribute('aria-current', 'true');
+      li.append(icon('check', 'Portée actuelle'));
+    }
+    return li;
+  }
+  li.append(mk('span', { class: 'pal-label', text: item.label }));
+  li.append(mk('span', { class: 'lbl', text: item.hint }));
+  li.append(mk('span', { class: 'cmd', text: item.command, title: item.command }));
+  return li;
+}
+
+function selectPaletteIndex(index, { scroll = true } = {}) {
+  const options = [...$('palette-list').querySelectorAll('li[role="option"]')];
+  if (!options.length) {
+    $('palette-input').removeAttribute('aria-activedescendant');
+    return;
+  }
+  paletteIndex = (index + options.length) % options.length;
+  options.forEach((li, i) => li.setAttribute('aria-selected', String(i === paletteIndex)));
+  $('palette-input').setAttribute('aria-activedescendant', options[paletteIndex].id);
+  if (scroll) options[paletteIndex].scrollIntoView({ block: 'nearest' });
 }
 
 function paletteSectionOrder() {
@@ -1730,56 +1856,51 @@ function paletteSectionOrder() {
 // regroupe désormais par section titrée, plafonnée par section pour qu'une
 // section bavarde (Commandes) n'évince pas les autres (Projets, Tâches…).
 function renderPalette(query) {
-  const needle = query.trim().toLowerCase();
+  const words = fold(query).split(/\s+/).filter(Boolean);
   const list = $('palette-list');
   list.replaceChildren();
+  list.scrollTop = 0;
 
   const bySection = new Map();
   for (const item of [...paletteItems, ...displayItems()]) {
-    if (needle && !(item.label + ' ' + item.hint).toLowerCase().includes(needle)) continue;
+    if (!paletteMatches(item, words)) continue;
     if (!bySection.has(item.section)) bySection.set(item.section, []);
     bySection.get(item.section).push(item);
   }
 
   const matches = [];
-  paletteIndex = 0;
   for (const section of paletteSectionOrder()) {
     const all = bySection.get(section) || [];
     const items = PALETTE_UNCAPPED.has(section) ? all : all.slice(0, PALETTE_SECTION_CAP);
     if (!items.length) continue;
 
-    const header = document.createElement('li');
-    header.role = 'presentation';
-    header.className = 'palette-section';
-    header.textContent = section;
+    // Le compte vit dans un attribut (rendu par `::after`) : le texte de
+    // l'en-tête reste le nom de la section.
+    const header = mk('li', { role: 'presentation', class: 'palette-section', text: section });
+    header.dataset.count = String(all.filter((item) => item.kind !== 'scope-all').length);
     list.append(header);
 
     for (const item of items) {
-      const index = matches.length;
-      const li = document.createElement('li');
-      li.role = 'option';
-      li.setAttribute('aria-selected', String(index === 0));
-      li.append(Object.assign(document.createElement('span'), { textContent: item.label }));
-      li.append(Object.assign(document.createElement('span'), { className: 'lbl', textContent: item.hint }));
-      li.append(Object.assign(document.createElement('span'), { className: 'cmd', textContent: item.command }));
+      const li = paletteRow(item, matches.length);
       li.addEventListener('click', () => { closePalette(); item.run(); });
       list.append(li);
       matches.push(item);
     }
   }
+  if (!matches.length) {
+    list.append(mk('li', { role: 'presentation', class: 'pal-empty', text: query.trim()
+      ? `Aucun résultat pour « ${query.trim()} ».`
+      : 'Rien à proposer pour le moment.' }));
+  }
   list._matches = matches;
+  selectPaletteIndex(0, { scroll: false });
 }
 
 function movePalette(delta) {
-  const list = $('palette-list');
   // Les en-têtes de section (`role="presentation"`) ne sont pas des options :
   // seuls les `li[role="option"]` comptent pour la navigation clavier, dans
   // le même ordre que `list._matches`.
-  const options = [...list.querySelectorAll('li[role="option"]')];
-  if (!options.length) return;
-  paletteIndex = (paletteIndex + delta + options.length) % options.length;
-  options.forEach((li, i) => li.setAttribute('aria-selected', String(i === paletteIndex)));
-  options[paletteIndex].scrollIntoView({ block: 'nearest' });
+  selectPaletteIndex(paletteIndex + delta);
 }
 
 // ── Console ─────────────────────────────────────────────────────────────────
@@ -1877,8 +1998,16 @@ async function main() {
   // sans plafond, « Tous les projets » en tête. Changer de portée recharge la
   // page (voir `setScope`).
   $('project-chip').addEventListener('click', () => openPalette('Projets', { only: true }));
+  dressPalette();
   $('palette').addEventListener('pointerdown', (e) => { if (e.target.id === 'palette') closePalette(); });
   $('palette-input').addEventListener('input', (e) => renderPalette(e.target.value));
+  // La souris et le clavier tiennent la même ligne : survoler une entrée la
+  // rend active, et Entrée choisit celle que l'on voit en surbrillance.
+  $('palette-list').addEventListener('pointermove', (e) => {
+    const li = e.target.closest('li[role="option"]');
+    if (li && Number(li.dataset.index) !== paletteIndex) selectPaletteIndex(Number(li.dataset.index), { scroll: false });
+  });
+  window.addEventListener('resize', () => { if (!$('palette').hidden) placePalette(); });
 
   let status = null;
   try {
