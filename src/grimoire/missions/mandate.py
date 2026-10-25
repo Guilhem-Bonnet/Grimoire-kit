@@ -133,6 +133,8 @@ REVOKE_MANUAL = "manual"
 REVOKE_PROTECTED_WRITE = "protected_write"
 REVOKE_FORGED_VERDICT = "forged_verdict"
 REVOKE_WRITE_OUTSIDE_WORKTREE = "write_outside_worktree"
+#: Le registre des tours consommés de la source ``--attest-from`` ne s'écrit pas : le mandat juste inscrit tombe.
+ATTEST_SOURCE_UNWRITABLE = "attest_source_unwritable"
 # Disjoncteur : ce que le lot 2 consomme.
 BREAKER_SEAL_MISMATCH = "check_seal_mismatch"
 BREAKER_FORGED_VERDICT = "forged_verdict"
@@ -467,6 +469,8 @@ class Mandate:
     escalation_sha256: str
     granted_at: str
     via: str
+    #: Le projet dont le journal des tours a attesté l'octroi (``--attest-from``) ; vide : le projet lui-même.
+    attest_from: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -479,6 +483,7 @@ class Mandate:
             "escalation_sha256": self.escalation_sha256,
             "granted_at": self.granted_at,
             "via": self.via,
+            **({"attest_from": self.attest_from} if self.attest_from else {}),
         }
 
 
@@ -574,6 +579,7 @@ class MandateStore:
                 "via": via,
                 "attestation": attestation.status if attestation else "",
                 "session_id": attestation.session_id if attestation else "",
+                **({"attest_from": attestation.source} if attestation and attestation.source else {}),
                 "ts": moment.isoformat(),
             }
         )
@@ -583,17 +589,26 @@ class MandateStore:
         return mandate
 
     def request_grant(
-        self, request: MandateRequest, env: Mapping[str, str] | None = None, now: datetime | None = None
+        self,
+        request: MandateRequest,
+        env: Mapping[str, str] | None = None,
+        now: datetime | None = None,
+        *,
+        attest_from: Path | None = None,
     ) -> tuple[Mandate | None, Attestation]:
         """Voie CLI : inscrit le mandat si la demande est attestée par un tour humain ; sinon émet son challenge.
 
         Même mécanisme que ``grimoire autonomy grant`` (:meth:`grimoire.flows.autonomy.GrantJournal.request`) :
         le challenge est celui de cette demande et de cette session, un refus ne le consomme pas, un
         tour humain ne sert qu'une décision (registre commun des tours consommés).
+        *attest_from* (``--attest-from``) : le projet dont le journal des tours atteste, quand la session tourne
+        dans un autre projet que celui-ci (:func:`grimoire.flows.attestation.attest_grant`). Le challenge et le
+        mandat restent ceux de ce projet ; le mandat nomme la source (``attest_from``).
         """
         from grimoire.core.standard_state import current_session
-        from grimoire.flows.attestation import CheckpointJournal, attest
+        from grimoire.flows.attestation import FLOWS_RELPATH, CheckpointJournal, attest_grant, turns_source
 
+        source = turns_source(attest_from) if attest_from is not None else None
         entries = self.journal.read()
         session_id, _host = current_session(env)
         used = {e.get("challenge_id") for e in entries if e.get("type") == "grant"}
@@ -621,12 +636,25 @@ class MandateStore:
                     "ts": (now or _now()).isoformat(),
                 }
             )
-        turns = CheckpointJournal(self.root / "_grimoire-runtime-output" / "flows", "autonomy-grants")
-        attestation = attest(self.root, challenge, env, turns.consumed_turns())
+        turns = CheckpointJournal(self.root / FLOWS_RELPATH, "autonomy-grants")
+        attestation, registry = attest_grant(self.root, turns, challenge, env, source)
         if not attestation.attested:
             return None, attestation
         mandate = self.grant(request, origin=ORIGIN_HUMAN, via="attestation", attestation=attestation, now=now)
-        turns.consume_turn(mandate.id, attestation)
+        if registry is turns:
+            turns.consume_turn(mandate.id, attestation)
+        else:
+            try:
+                registry.consume_turn(mandate.id, attestation, for_project=self.project)
+            except Exception as exc:
+                # Le registre de la source ne s'écrit pas (dossier en lecture seule…) : un mandat dont le tour
+                # n'est pas consommé laisserait ce tour en attester un autre. Échec fermé : le mandat tombe.
+                self._write_revocation(mandate.id, ATTEST_SOURCE_UNWRITABLE, str(registry.consumed_path), _now())
+                raise MandateRefusedError(
+                    ATTEST_SOURCE_UNWRITABLE,
+                    f"mandat {mandate.id} révoqué aussitôt : le tour n'a pas pu être consommé dans le registre de "
+                    f"--attest-from ({registry.consumed_path} : {type(exc).__name__})",
+                ) from exc
         self.journal.append(
             {
                 "type": "grant_challenge_used",
@@ -1018,6 +1046,7 @@ def _mandate_of(entry: Mapping[str, Any]) -> Mandate | None:
             escalation_sha256=str(entry["escalation_sha256"]),
             granted_at=str(entry.get("ts", "")),
             via=str(entry.get("via", "")),
+            attest_from=str(entry.get("attest_from", "")),
         )
     except (KeyError, TypeError, ValueError):
         return None

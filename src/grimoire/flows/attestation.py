@@ -52,6 +52,19 @@ Octroi d'autonomie (W5-06, :mod:`.autonomy`) : une décision ``approve`` ou
 est acceptée avec le statut ``granted:<grant_id>`` — jamais ``attested`` :
 aucun humain n'a vu ce checkpoint. Un octroi révoqué qui le couvrait est nommé
 dans le refus.
+Source d'attestation désignée (``--attest-from``, #876) : le journal des tours
+n'est écrit que par le hook du projet où tourne la session. Un octroi
+(``autonomy grant``, ``autonomy mandate grant``) demandé sur un projet *cible*
+depuis la session d'un autre projet ne trouvait donc jamais de tour
+(``human_authority_unprovable``). :func:`attest_grant` lit alors les tours dans
+le journal du projet *source* que l'appelant désigne, et seulement lui (aucune
+découverte par cwd ni par l'environnement) ; les autres règles ne changent pas.
+Le tour est cherché hors du registre des tours consommés de la source **et** de
+la cible, puis consommé dans celui de la **source** : le registre suit le
+journal qu'il protège, si bien qu'un même tour ne sert qu'une fois, qu'il soit
+utilisé depuis la source elle-même ou depuis n'importe quelle cible. Limite : une
+*copie* du dossier de la source a son propre registre ; la garde d'autorité
+refuse d'écrire le journal par son nom, pas de copier un dossier entier.
 Python seul : aucune de ces décisions ne traverse ``grimoire_flows_core``.
 """
 
@@ -67,15 +80,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import locked
 from grimoire.core.standard_state import current_session
 from grimoire.hosts.decisions.authority_guard import AUTHORITY_SUFFIX, LIMIT_NOTE
-from grimoire.hosts.decisions.human_turns import ORIGIN_USER, is_unattended, load_turns
+from grimoire.hosts.decisions.human_turns import ORIGIN_USER, TURNS_RELPATH, is_unattended, load_turns, turns_path
 
 __all__ = [
     "ATTESTED",
+    "ATTEST_FROM_HINT",
     "CONSUMED_TURNS_FILENAME",
     "DEFAULT_MAX_AMENDMENTS",
+    "FLOWS_RELPATH",
     "GRANTED_PREFIX",
     "NO_HUMAN_TURN",
     "PLAN_DRIFTED",
@@ -85,6 +101,7 @@ __all__ = [
     "CheckpointGate",
     "CheckpointJournal",
     "attest",
+    "attest_grant",
     "destructive_checkpoints",
     "judge_checkpoint",
     "max_amendments",
@@ -92,6 +109,7 @@ __all__ = [
     "plan_providers",
     "project_plan",
     "refusal_text",
+    "turns_source",
     "warning_text",
 ]
 
@@ -126,6 +144,13 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 CONSUMED_TURNS_FILENAME = "@consumed-turns" + AUTHORITY_SUFFIX
 #: Identité d'un tour : ``(session_id, ts, prompt_sha256)``.
 TurnKey = tuple[str, str, str]
+#: Le dossier des flows d'un projet, relatif à sa racine : il porte le registre des tours consommés.
+FLOWS_RELPATH = Path("_grimoire-runtime-output") / "flows"
+#: Ce que dit un octroi refusé en ``human_authority_unprovable`` sans ``--attest-from``.
+ATTEST_FROM_HINT = (
+    "Si ta session tourne dans un autre projet que la cible, son hook de prompt écrit les tours là-bas : "
+    "relance avec --attest-from <racine du projet de ta session>."
+)
 
 
 def _now() -> str:
@@ -150,6 +175,8 @@ class Attestation:
     session_id: str = ""
     turn_ts: str = ""
     turn_sha256: str = ""
+    #: Le projet dont le journal des tours a servi (``--attest-from``) ; vide : le projet cible.
+    source: str = ""
 
     @property
     def attested(self) -> bool:
@@ -169,6 +196,7 @@ class Attestation:
             "challenge_id": self.challenge_id,
             "session_id": self.session_id,
             "turn_ts": self.turn_ts,
+            **({"source": self.source} if self.source else {}),
         }
 
 
@@ -393,8 +421,11 @@ class CheckpointJournal:
                 out.add((str(data.get("session_id", "")), str(data.get("turn_ts", "")), str(data.get("turn_sha256", ""))))
         return frozenset(out)
 
-    def consume_turn(self, node_id: str, attestation: Attestation) -> None:
-        """Inscrit le tour qui atteste *attestation* au registre commun : il n'attestera plus rien."""
+    def consume_turn(self, node_id: str, attestation: Attestation, *, for_project: str = "") -> None:
+        """Inscrit le tour qui atteste *attestation* au registre commun : il n'attestera plus rien.
+
+        *for_project* : le projet cible quand le tour est consommé dans le registre de la source (``--attest-from``).
+        """
         entry = {
             "session_id": attestation.session_id,
             "turn_ts": attestation.turn_ts,
@@ -402,6 +433,7 @@ class CheckpointJournal:
             "challenge_id": attestation.challenge_id,
             "node_id": node_id,
             "run": self.path.name,
+            **({"for_project": for_project} if for_project else {}),
             "ts": _now(),
         }
         with locked(self.consumed_path), self.consumed_path.open("a", encoding="utf-8") as fh:
@@ -460,18 +492,23 @@ def attest(
     challenge: Mapping[str, Any] | None,
     env: Mapping[str, str] | None = None,
     consumed: Collection[TurnKey] = (),
+    *,
+    turns_root: Path | None = None,
 ) -> Attestation:
     """Classe la décision soumise maintenant contre *challenge*.
 
     *consumed* : les tours qu'une décision attestée a déjà utilisés (registre
     commun à tous les runs, :meth:`CheckpointJournal.consumed_turns`) — un tour
     ne sert qu'une décision.
+    *turns_root* : le projet dont le journal des tours est lu (``--attest-from``, voir
+    :func:`attest_grant`) ; ``None`` : *project_root*, comme toujours.
     """
     decider, _host = current_session(env)
     challenge_id = str((challenge or {}).get("challenge_id", ""))
+    source = str(turns_root) if turns_root is not None else ""
 
     def _no(reason: str) -> Attestation:
-        return Attestation(UNATTESTED, reason, challenge_id, decider)
+        return Attestation(UNATTESTED, reason, challenge_id, decider, source=source)
 
     if is_unattended(env):
         return _no("unattended")
@@ -482,7 +519,7 @@ def attest(
         return _no("no_session")
     if decider != owner:
         return _no("other_session")
-    turns = load_turns(project_root)
+    turns = load_turns(project_root if turns_root is None else turns_root)
     if turns is None:
         return _no("human_authority_unprovable")
     since = _parse(str(challenge.get("ts", "")))
@@ -497,8 +534,56 @@ def attest(
             and when > since
             and (turn.session_id, turn.ts, turn.prompt_sha256) not in consumed
         ):
-            return Attestation(ATTESTED, "", challenge_id, decider, turn.ts, turn.prompt_sha256)
+            return Attestation(ATTESTED, "", challenge_id, decider, turn.ts, turn.prompt_sha256, source)
     return _no(NO_HUMAN_TURN)
+
+
+def turns_source(raw: Path) -> Path:
+    """Le projet que ``--attest-from`` désigne, résolu (liens compris) ; refus nommé si son journal ne se lit pas.
+
+    Seul l'appelant désigne la source : ni le dossier courant ni l'environnement ne sont consultés.
+    """
+    root = Path(raw).resolve()
+    if not root.is_dir():
+        raise GrimoireRuntimeError(f"--attest-from {raw} : dossier introuvable (racine du projet de ta session attendue)")
+    try:
+        turns_path(root).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise GrimoireRuntimeError(
+            f"--attest-from {root} : aucun journal des tours humains ({TURNS_RELPATH.as_posix()}) — aucun hook de "
+            "prompt n'y a jamais écrit ; désigne la racine du projet où tourne ta session"
+        ) from None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise GrimoireRuntimeError(
+            f"--attest-from {root} : journal des tours humains illisible ({type(exc).__name__}) ; rien ne peut en être attesté"
+        ) from exc
+    return root
+
+
+def attest_grant(
+    project_root: Path,
+    registry: CheckpointJournal,
+    challenge: Mapping[str, Any] | None,
+    env: Mapping[str, str] | None = None,
+    source: Path | None = None,
+) -> tuple[Attestation, CheckpointJournal]:
+    """L'attestation d'un octroi, et le registre où consommer son tour (``autonomy grant``, ``autonomy mandate grant``).
+
+    Sans *source* (ou si elle est la cible elle-même) : :func:`attest` sur le journal de *project_root* contre
+    *registry*, exactement comme avant ``--attest-from``.
+
+    Avec *source* (déjà validée par :func:`turns_source`) : les tours sont lus dans le journal de *source* ;
+    même session, tour ``user`` postérieur au challenge, comme toujours ; le tour doit être absent du registre
+    de la source **et** de *registry* ; il sera consommé dans celui de la **source**, que l'appelant reçoit.
+    Pourquoi la source : le registre doit suivre le journal qu'il protège. Le tenir dans la cible laisserait
+    le même tour servir une fois par cible, et une fois encore dans la source elle-même.
+    """
+    if source is None or source == project_root.resolve():
+        return attest(project_root, challenge, env, registry.consumed_turns()), registry
+    run = registry.path.name.removesuffix(AUTHORITY_SUFFIX)
+    own = CheckpointJournal(source / FLOWS_RELPATH, run)
+    consumed = registry.consumed_turns() | own.consumed_turns()
+    return attest(project_root, challenge, env, consumed, turns_root=source), own
 
 
 #: Les décisions qui font avancer un run : seules elles exigent une attestation.

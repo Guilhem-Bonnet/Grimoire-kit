@@ -463,6 +463,20 @@ grimoire autonomy mandate status
 grimoire autonomy mandate revoke --reason "fin du pilote"
 ```
 
+- **Session ouverte dans un autre projet** : le journal des tours humains n'est écrit que par le hook du projet
+  où tourne la session. Pour accorder un mandat sur un projet piloté depuis la session d'un autre, désigne ce
+  dernier : `grimoire autonomy mandate grant … --project-root <cible> --attest-from <projet de ta session>`.
+  Sans l'option, la demande sort en `human_authority_unprovable` et le refus propose `--attest-from`. Rien
+  n'est déduit du dossier courant ni de l'environnement. Les autres règles ne changent pas : même session,
+  tour `user` postérieur au challenge, un tour pour un seul octroi. Le challenge et le mandat restent ceux de
+  la cible ; le mandat inscrit `attest_from`. Le tour est consommé dans le registre de la **source**
+  (`_grimoire-runtime-output/flows/authority/@consumed-turns.authority.jsonl`, entrée `for_project`), après
+  vérification dans celui de la source et dans celui de la cible : le registre suit le journal qu'il protège,
+  si bien qu'un même tour ne sert ni à deux cibles ni à la source elle-même. Un dossier absent, sans journal
+  ou dont le journal est illisible est refusé (code 1) avant tout challenge ; si le registre de la source ne
+  s'écrit pas, le mandat juste inscrit est révoqué (`attest_source_unwritable`). Limite : une copie du
+  dossier source a son propre registre.
+
 - **Borné** : gestes couverts, types de tâche, plafond de sessions de worker par jour, durée. Un mandat
   expiré, révoqué, hors plafond ou qui ne couvre pas le geste est refusé.
 - **Journal d'autorité** : `~/.grimoire/control/mandates.authority.jsonl`, chaîné par hash. Un journal

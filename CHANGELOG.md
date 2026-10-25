@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(autonomy): `--attest-from <projet>` sur `autonomy mandate grant` et `autonomy grant` (Refs #876) — accorder un mandat sur un projet depuis la session d'un autre projet échouait toujours en `human_authority_unprovable`, le journal des tours humains n'étant écrit que là où tourne la session
+  - **Source désignée, jamais devinée** : l'option seule désigne le projet dont le journal des tours atteste ; ni le dossier courant ni l'environnement. Sans elle, rien ne change ; le refus `human_authority_unprovable` propose désormais `--attest-from`.
+  - **Mêmes règles** : session de l'appelant, tour `user` postérieur au challenge, un tour pour un seul octroi. Le challenge et le mandat (ou l'octroi) restent ceux de la cible et inscrivent `attest_from`.
+  - **Registre des tours consommés tenu dans la source** : le tour est cherché hors du registre de la source et de celui de la cible, puis consommé dans celui de la source (`for_project` = la cible). Le registre suit le journal qu'il protège : un même tour ne sert ni à deux cibles ni à la source elle-même ; un lien symbolique vers la source est résolu.
+  - **Échec fermé** : source absente, sans journal ou illisible, refus nommé (code 1) avant tout challenge ; registre de la source impossible à écrire, aucun octroi inscrit, et un mandat juste inscrit est révoqué (`attest_source_unwritable`). Limite : une copie du dossier source a son propre registre.
 - fix(missions): une tâche qui dépend d'une tâche annulée redevient réclamable (#906) — `cancelled` est terminal et aucune commande ne retirait un lien : le dépendant restait bloqué à vie
   - **`grimoire task unlink <id> --depends-on <id> --reason "<motif>"`** : retire le lien sous le verrou du journal (`task.unlinked`, rejoué, motif et acteur journalisés, visible dans la frise de `task trace`). Un retrait sans motif, ou d'un lien qui n'existe pas, est refusé sans rien écrire ; le refus liste les vraies dépendances.
   - **Une dépendance annulée reste non satisfaite** : la traiter comme close aurait fait échouer la garde ouvert. Le refus de claim le dit et donne la commande : retirer le lien, puis relier la remplaçante avec `task link`.
