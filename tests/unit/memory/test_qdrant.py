@@ -360,3 +360,27 @@ class TestQdrantBackendImportError:
 
         with pytest.raises(ImportError, match="qdrant-client"):
             QdrantBackend(qdrant_path="/tmp/x")
+
+
+class TestQdrantBackendPageStopsEarly:
+    """P24 : une page demandée ne parcourt pas toute la collection."""
+
+    def test_scroll_stops_once_the_page_is_full(self, qdrant_env: tuple[MagicMock, MagicMock]) -> None:
+        client, _ = qdrant_env
+
+        def batch(prefix: str) -> list[MagicMock]:
+            pts = []
+            for i in range(3):
+                pt = MagicMock()
+                pt.id = f"{prefix}-{i}"
+                pt.payload = {"memory": f"{prefix}-{i}", "user_id": "global", "created_at": "", "tags": [], "updated_at": ""}
+                pts.append(pt)
+            return pts
+
+        client.scroll.side_effect = [(batch("a"), "n1"), (batch("b"), "n2"), (batch("c"), None)]
+
+        backend = _make_backend(qdrant_env)
+        results = backend.get_all(offset=1, limit=4)
+
+        assert [r.text for r in results] == ["a-1", "a-2", "b-0", "b-1"]
+        assert client.scroll.call_count == 2, "la troisième tranche n'est jamais demandée"
