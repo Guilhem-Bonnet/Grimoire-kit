@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from grimoire.codegraph.schemas import CodeEdge, CodeNode
@@ -340,13 +341,36 @@ class Neo4jMemoryGraph:
         )
 
     def delete_memory(self, entry_id: str) -> None:
-        """Mark a memory as deleted while preserving provenance edges."""
+        """Marque le souvenir supprimé ET en efface le contenu, en gardant la pierre tombale.
+
+        ``deleted = true`` seul laissait le texte, les étiquettes et les
+        métadonnées lisibles dans la base : une suppression qui ne supprimait
+        rien. Le nœud reste (son identifiant, sa clé de projet, sa collection et
+        ses arêtes de provenance, pour que le rattrapage sache ce qui a existé),
+        mais ``text``, ``tags``, ``metadata_json``, ``provenance_json`` et
+        ``source`` sont vidés et les arêtes ``TAGGED_WITH`` retirées.
+
+        Enchaînement de purge : ``grimoire memory delete`` efface le contenu ici ;
+        ``grimoire memory graph purge-orphans --apply`` retire ensuite les nœuds
+        sans entrée dans le store, pierres tombales comprises (dry-run par
+        défaut). Les deux gestes sont indépendants : sans le second il reste
+        un nœud vide, jamais un texte.
+        """
         self._execute(
             """
             MATCH (m:GrimoireMemory {id: $id})
-            SET m.deleted = true
+            SET m.deleted = true,
+                m.deleted_at = $deleted_at,
+                m.text = '',
+                m.tags = [],
+                m.metadata_json = '{}',
+                m.provenance_json = '{}',
+                m.source = ''
+            WITH m
+            OPTIONAL MATCH (m)-[tagged:TAGGED_WITH]->(:GrimoireTag)
+            DELETE tagged
             """,
-            {"id": self._key(entry_id)},
+            {"id": self._key(entry_id), "deleted_at": datetime.now(UTC).isoformat(timespec="seconds")},
         )
 
     def upsert_fact(self, fact: KnowledgeFact) -> None:

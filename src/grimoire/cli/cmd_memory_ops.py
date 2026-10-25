@@ -34,6 +34,7 @@ from grimoire.memory import profiles as memory_profiles
 from grimoire.memory.architecture import build_memory_architecture_status
 from grimoire.memory.backends.base import BackendStatus
 from grimoire.memory.manager import MemoryManager
+from grimoire.memory.supersession import INCLUDE_ALL
 
 __all__ = ["memory_app"]
 
@@ -194,7 +195,7 @@ def memory_graph_sync_memories(ctx: typer.Context) -> None:
     mgr, cfg, _ = _load_manager_context()
     graph = _load_neo4j_graph(cfg, ensure_schema=True)
     try:
-        stats = sync_memory_projection(graph, mgr.get_all())
+        stats = sync_memory_projection(graph, mgr.get_all(**INCLUDE_ALL))
     finally:
         graph.close()
 
@@ -232,7 +233,7 @@ def memory_graph_purge_orphans(ctx: typer.Context, apply: bool = _purge_orphans_
     collection = cfg.memory.weaviate_collection or cfg.memory.collection_prefix
     graph = _load_neo4j_graph(cfg)
     try:
-        result = prune_orphan_memories(graph, mgr.get_all(), collection=collection, apply=apply)
+        result = prune_orphan_memories(graph, mgr.get_all(**INCLUDE_ALL), collection=collection, apply=apply)
     finally:
         graph.close()
 
@@ -491,7 +492,7 @@ def memory_doctor(ctx: typer.Context, apply: bool = _doctor_apply_opt) -> None:
             drift_error = str(exc) or "Neo4j indisponible"
         else:
             try:
-                entries = mgr.get_all() if mgr is not None else []
+                entries = mgr.get_all(**INCLUDE_ALL) if mgr is not None else []
                 collection = cfg.memory.weaviate_collection or cfg.memory.collection_prefix
                 drift = prune_orphan_memories(graph, entries, collection=collection, apply=apply)
             except Exception as exc:
@@ -650,7 +651,7 @@ def memory_split(
     except GrimoireMemoryError as exc:
         console.print(f"[red]Backend source indisponible ({source_mem.backend}) :[/red] {exc}")
         raise typer.Exit(1) from None
-    entries = source_mgr.get_all()
+    entries = source_mgr.get_all(**INCLUDE_ALL)
 
     wanted = [p.strip() for p in projects.split(",") if p.strip()]
     try:
@@ -841,7 +842,7 @@ def memory_migrate_run(
     except GrimoireMemoryError as exc:
         console.print(f"[red]Backend source indisponible ({source_backend}):[/red] {exc}")
         raise typer.Exit(1) from None
-    entries = source_mgr.get_all()
+    entries = source_mgr.get_all(**INCLUDE_ALL)
 
     if source_collection and not project and not all_projects:
         names = {str(e.metadata.get("project_name", "")) for e in entries} - {cfg.project.name}

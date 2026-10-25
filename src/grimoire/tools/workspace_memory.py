@@ -38,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from grimoire.memory.supersession import INCLUDE_ALL
 from grimoire.tools.memory_link import memory_link_status
 from grimoire.tools.project_registry import load_registry, slug_for_path
 
@@ -111,7 +112,7 @@ def _last_write(manager: Any, status: dict[str, Any]) -> str | None:
     if not status.get("available") or not status.get("entries"):
         return None
     try:
-        entries = manager.get_all(limit=None)
+        entries = manager.get_all(limit=None, **INCLUDE_ALL)
     except Exception:
         return None
     stamps = [e.updated_at or e.created_at for e in entries if (e.updated_at or e.created_at)]
@@ -279,6 +280,8 @@ def _search_project(
 
         cfg = GrimoireConfig.from_yaml(config_path)
         mgr = MemoryManager.from_config(cfg, project_root=project_root)
+        # Lecture seule : le cockpit n'écrit rien chez les projets qu'il parcourt, pas même un reçu.
+        mgr.surface, mgr.journal_reads = "cockpit", False
         found = run_memory_search(
             mgr, query, hybrid=mgr.prefers_hybrid, limit=limit,
             include_superseded=include_superseded, include_stale=include_stale,

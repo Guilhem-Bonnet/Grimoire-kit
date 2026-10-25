@@ -7,6 +7,11 @@ porte le prédicat, le filtre appliqué par défaut à toutes les lectures de
 :class:`~grimoire.memory.manager.MemoryManager`, et le banc qui mesure ce que
 la recherche sert réellement.
 
+Un souvenir *retiré* (``metadata["retracted"]``, voir :func:`is_retracted`) est
+traité de la même façon, avec une différence : la marque ne désigne aucun
+remplaçant, elle dit seulement « ne plus servir » (qui, quand, pourquoi). Le
+souvenir reste lisible, le retrait s'annule en vidant la marque.
+
 Aucun chiffre n'est inventé : un taux sans résultat servi vaut ``None``, et le
 nombre de jetons est une estimation déclarée (``chars/4``), pas un décompte
 de tokenizer.
@@ -23,16 +28,28 @@ if TYPE_CHECKING:
     from grimoire.memory.manager import MemoryManager
 
 __all__ = [
+    "INCLUDE_ALL",
+    "RETRACTED_KEY",
     "SUPERSEDED_KEY",
     "bench_supersession",
     "drop_superseded",
+    "drop_unserved",
     "has_supersession_mark",
+    "is_retracted",
     "is_superseded",
+    "retraction_of",
     "search_live",
     "supersession_state",
 ]
 
 SUPERSEDED_KEY = "superseded_by"
+#: Marque de retrait : ``{"at": ISO, "by": acteur, "session_id": ..., "reason": ...}``
+#: (les champs inconnus sont omis, ``at`` est toujours là). Vide, ``None`` ou
+#: absente : le souvenir est servi.
+RETRACTED_KEY = "retracted"
+#: Passage explicite « tout lire » des chemins de maintenance (export, migration,
+#: projection, rattrapage du graphe) : un souvenir retiré ou remplacé y reste.
+INCLUDE_ALL: dict[str, bool] = {"include_superseded": True, "include_retracted": True}
 ESTIMATE_BASIS = "chars/4"
 _MAX_REFETCH_ROUNDS = 4
 
@@ -42,6 +59,21 @@ RecallFn = Callable[[str], "MemoryEntry | None"]
 LIVE = "live"
 SUPERSEDED = "superseded"
 ORPHAN = "orphan"
+
+
+def retraction_of(entry: MemoryEntry) -> dict[str, Any]:
+    """La marque de retrait de l'entrée (``{}`` si elle n'est pas retirée)."""
+    mark = (entry.metadata or {}).get(RETRACTED_KEY)
+    if isinstance(mark, dict):
+        return dict(mark) if mark else {}
+    # Une marque qui n'est pas un mapping (``True``, une date) retire aussi : on
+    # ne sert pas un souvenir dont on lit mal le retrait.
+    return {"at": str(mark)} if mark and mark is not False else {}
+
+
+def is_retracted(entry: MemoryEntry) -> bool:
+    """Vrai quand l'entrée porte une marque de retrait non vide."""
+    return bool(retraction_of(entry))
 
 
 def _mark(entry: MemoryEntry) -> str:
@@ -100,6 +132,33 @@ def drop_superseded(entries: Iterable[MemoryEntry], recall: RecallFn) -> list[Me
     return [entry for entry in entries if not is_superseded(entry, recall)]
 
 
+def drop_unserved(
+    entries: Iterable[MemoryEntry],
+    recall: RecallFn,
+    *,
+    include_superseded: bool = False,
+    include_retracted: bool = False,
+    verify_primary: bool = False,
+) -> list[MemoryEntry]:
+    """Les entrées à servir : ni remplacées ni retirées, sauf demande explicite.
+
+    ``verify_primary`` relit la copie de référence de chaque entrée : à poser
+    pour un classement qui vient d'une copie (le compagnon lexical), dont la
+    marque de retrait peut être en retard sur le store principal.
+    """
+    kept: list[MemoryEntry] = []
+    for entry in entries:
+        if not include_retracted:
+            if is_retracted(entry):
+                continue
+            if verify_primary and (primary := recall(entry.id)) is not None and is_retracted(primary):
+                continue
+        if not include_superseded and is_superseded(entry, recall):
+            continue
+        kept.append(entry)
+    return kept
+
+
 def _memoized(recall: RecallFn) -> RecallFn:
     cache: dict[str, MemoryEntry | None] = {}
 
@@ -113,8 +172,9 @@ def _memoized(recall: RecallFn) -> RecallFn:
 
 def search_live(
     fetch: Callable[[int], list[MemoryEntry]], limit: int, recall: RecallFn,
+    *, include_superseded: bool = False, include_retracted: bool = False, verify_primary: bool = False,
 ) -> list[MemoryEntry]:
-    """Remplit ``limit`` avec des entrées non remplacées.
+    """Remplit ``limit`` avec des entrées non remplacées et non retirées.
 
     Filtrer après un ``limit`` fixe renverrait moins de résultats que demandé
     quand les premiers rangs sont périmés : on redemande plus large (×2, au
@@ -126,7 +186,10 @@ def search_live(
     live: list[MemoryEntry] = []
     for _ in range(_MAX_REFETCH_ROUNDS):
         raw = fetch(size)
-        live = drop_superseded(raw, lookup)
+        live = drop_unserved(
+            raw, lookup, include_superseded=include_superseded, include_retracted=include_retracted,
+            verify_primary=verify_primary,
+        )
         if len(live) >= limit or len(raw) < size:
             break
         size *= 2
@@ -163,6 +226,15 @@ def bench_supersession(
     - ``recall_tokens_p95`` : rang le plus proche, sur les requêtes qui ont
       servi au moins un résultat, du nombre de jetons estimés (``chars/4``).
     """
+    # Un banc rejoue des requêtes : ce ne sont pas des lectures servies aux agents.
+    journal_before, mgr.journal_reads = mgr.journal_reads, False
+    try:
+        return _bench(mgr, queries, limit, include_superseded)
+    finally:
+        mgr.journal_reads = journal_before
+
+
+def _bench(mgr: MemoryManager, queries: list[str], limit: int, include_superseded: bool) -> dict[str, Any]:
     served = 0
     stale = 0
     orphans = 0

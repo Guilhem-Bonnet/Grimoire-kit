@@ -42,11 +42,12 @@ if TYPE_CHECKING:
             room: str,
             include_superseded: bool,
             include_stale: bool = False,
+            include_retracted: bool = False,
         ) -> list[MemoryEntry]: ...
 
         def hybrid_search(
             self, query: str, *, user_id: str, limit: int, include_superseded: bool,
-            include_stale: bool = False,
+            include_stale: bool = False, include_retracted: bool = False,
         ) -> list[MemoryEntry]: ...
 
 __all__ = [
@@ -243,6 +244,7 @@ def run_memory_search(
     room: str = "",
     include_superseded: bool = False,
     include_stale: bool = False,
+    include_retracted: bool = False,
 ) -> list[MemoryEntry]:
     """Resolve a memory search, optionally fusing vector and lexical rankings.
 
@@ -250,11 +252,13 @@ def run_memory_search(
     lexical BM25 backends; palace filters are then applied post-hoc because the
     fusion layer is filter-agnostic. Otherwise the taxonomy-aware backend query
     is used directly. Les souvenirs remplacés (``superseded_by``) sont exclus
-    sauf ``include_superseded``.
+    sauf ``include_superseded``, les retirés (``retracted``) sauf ``include_retracted``.
     """
-    # `include_stale` ne voyage que lorsqu'il est demandé : les doublures de
-    # test et les anciens gestionnaires sans ce paramètre restent appelables.
+    # `include_stale` et `include_retracted` ne voyagent que lorsqu'ils sont demandés :
+    # les doublures de test et les anciens gestionnaires sans ces paramètres restent appelables.
     extra: dict[str, Any] = {"include_stale": True} if include_stale else {}
+    if include_retracted:
+        extra["include_retracted"] = True
     if not hybrid:
         return mgr.search_taxonomy(
             query, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room,

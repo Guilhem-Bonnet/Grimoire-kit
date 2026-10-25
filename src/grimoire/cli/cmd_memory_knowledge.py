@@ -47,7 +47,7 @@ def render_search_table(query: str, results: list[Any]) -> Table:
         fact = entry.provenance or {}
         style = _STATE_STYLE.get(entry.freshness, "white")
         text = entry.text[:45] + "…" if len(entry.text) > 48 else entry.text
-        cycle = " (remplacé)" if fact.get("cycle") == "remplacé" else ""
+        cycle = {"remplacé": " (remplacé)", "retiré": " (retiré)"}.get(str(fact.get("cycle")), "")
         tbl.add_row(
             entry.id[:12],
             text,
@@ -64,6 +64,7 @@ def memory_supersede(
     ctx: typer.Context,
     old_id: str = typer.Argument(..., help="ID of the memory being replaced."),
     new_id: str = typer.Argument(..., help="ID of the memory that replaces it (the latest link)."),
+    reason: str = typer.Option("", "--reason", "-r", help="Why (traced in the write journal)."),
 ) -> None:
     """Replace a decision: OLD is no longer served, but stays readable.
 
@@ -74,7 +75,7 @@ def memory_supersede(
     mgr = cmd_memory._load_manager()  # résolu à l'appel : simulable sur cmd_memory
     fmt = _get_fmt(ctx)
     try:
-        updated = mgr.supersede(old_id, new_id)
+        updated = mgr.supersede(old_id, new_id, reason=reason)
     except GrimoireMemoryError as exc:
         if fmt == "json":
             typer.echo(json.dumps({"superseded": False, "old_id": old_id, "new_id": new_id, "error": str(exc)}, indent=2))

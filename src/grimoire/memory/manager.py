@@ -18,7 +18,6 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -26,12 +25,20 @@ from typing import Any, cast
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.gestures import MemoryGesturesMixin
 from grimoire.memory.hot import HotMemoryStatus, RedisHotMemory
 from grimoire.memory.journal import WriteContext, record_change, resolve_write_context
 from grimoire.memory.knowledge import FreshnessState, annotate, order_for_serving, stamp_write
 from grimoire.memory.profiles import VECTOR_BACKENDS
+from grimoire.memory.retrieval import CooldownGuardedBackend, LiveOnlySearch
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact, MemorySidecar
-from grimoire.memory.supersession import SUPERSEDED_KEY, search_live, supersession_state
+from grimoire.memory.supersession import (
+    SUPERSEDED_KEY,
+    drop_unserved,
+    is_retracted,
+    search_live,
+    supersession_state,
+)
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters, normalize_palace_metadata
 from grimoire.memory.validation import MemoryWritePolicy, ValidatedWrite, validate_memory_write
 from grimoire.providers.state import cooling_down_entry, record_failure, record_success
@@ -378,50 +385,7 @@ def _create_hot_memory(config: GrimoireConfig) -> tuple[RedisHotMemory | None, s
         return None, f"Redis hot memory unavailable: {exc}"
 
 
-class _CooldownGuardedBackend:
-    """Adapte ``MemoryManager._guarded_backend_search`` à l'interface ``.search()``
-    attendue par :class:`~grimoire.memory.retrieval.HybridRetriever`.
-
-    ``hybrid_search`` construit un ``HybridRetriever`` qui appelle
-    ``backend.search(...)`` directement sur chaque backend qu'on lui donne —
-    sans ce petit adaptateur, le refroidissement de :meth:`MemoryManager.search`
-    ne s'appliquerait qu'au chemin sans compagnon lexical, alors que c'est le
-    chemin hybride (le seul qui compose vecteur + lexical) qui est le plus
-    courant en lecture (``grimoire_memory_search`` MCP, cockpit). Même
-    refroidissement, même identifiant, une seule politique.
-    """
-
-    __slots__ = ("_manager",)
-
-    def __init__(self, manager: MemoryManager) -> None:
-        self._manager = manager
-
-    def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
-        return self._manager._guarded_backend_search(query, user_id=user_id, limit=limit)
-
-
-class _LiveOnlySearch:
-    """Écarte les souvenirs remplacés d'un classement avant la fusion RRF.
-
-    Filtrer avant la fusion (et non après) évite qu'une entrée périmée
-    consomme un rang de l'un des deux classements.
-    """
-
-    __slots__ = ("_inner", "_recall")
-
-    def __init__(self, inner: Any, recall: Callable[[str], MemoryEntry | None]) -> None:
-        self._inner = inner
-        self._recall = recall
-
-    def search(self, query: str, *, user_id: str = "", limit: int = 5) -> list[MemoryEntry]:
-        return search_live(
-            lambda size: cast(list[MemoryEntry], self._inner.search(query, user_id=user_id, limit=size)),
-            limit,
-            self._recall,
-        )
-
-
-class MemoryManager:
+class MemoryManager(MemoryGesturesMixin):
     """Unified API wrapping whichever backend the project configures.
 
     Create via :meth:`from_config` or :meth:`from_backend`.
@@ -649,7 +613,7 @@ class MemoryManager:
         """``None`` si le backend peut être appelé maintenant, sinon un motif nommé.
 
         Un seul point de lecture de ``providers.state`` pour :meth:`search` et
-        :class:`_CooldownGuardedBackend` (chemin hybride) — même
+        :class:`CooldownGuardedBackend` (chemin hybride) — même
         refroidissement, jamais deux calculs qui pourraient diverger.
         """
         if self._cooldown_provider_id is None or self._project_root is None:
@@ -689,18 +653,22 @@ class MemoryManager:
 
     def search(
         self, query: str, *, user_id: str = "", limit: int = 5, include_superseded: bool = False,
-        include_stale: bool = False,
+        include_stale: bool = False, include_retracted: bool = False,
     ) -> list[MemoryEntry]:
-        """Recherche ; les souvenirs remplacés (``superseded_by``) sont exclus par défaut."""
-        if include_superseded:
-            raw = self._guarded_backend_search(query, user_id=user_id, limit=limit)
-        else:
-            raw = search_live(
-                lambda size: self._guarded_backend_search(query, user_id=user_id, limit=size),
-                limit,
-                self.recall,
-            )
-        return self._serve(raw, limit=limit, include_stale=include_stale)
+        """Recherche ; les souvenirs remplacés (``superseded_by``) et retirés (``retracted``) sont exclus par défaut."""
+        raw = search_live(
+            lambda size: self._guarded_backend_search(query, user_id=user_id, limit=size),
+            limit,
+            self.recall,
+            include_superseded=include_superseded,
+            include_retracted=include_retracted,
+        )
+        served = self._serve(raw, limit=limit, include_stale=include_stale)
+        self.journal_read("search", query, served, filters={
+            "limit": limit, "user_id": user_id, "include_superseded": include_superseded,
+            "include_retracted": include_retracted, "include_stale": include_stale,
+        })
+        return served
 
     def _serve(self, entries: list[MemoryEntry], *, limit: int, include_stale: bool) -> list[MemoryEntry]:
         """Fiche et fraîcheur calculées à la lecture ; source disparue non servie par défaut.
@@ -735,35 +703,42 @@ class MemoryManager:
 
     def hybrid_search(
         self, query: str, *, user_id: str = "", limit: int = 5, include_superseded: bool = False,
-        include_stale: bool = False,
+        include_stale: bool = False, include_retracted: bool = False,
     ) -> list[MemoryEntry]:
         """Fuse vector and lexical rankings via RRF.
 
         Falls back to plain :meth:`search` when no lexical companion is
         configured (local/lexical primaries already are lexical). Les
         souvenirs remplacés sont exclus de chaque classement avant la fusion
-        sauf ``include_superseded``.
+        sauf ``include_superseded``, les retirés sauf ``include_retracted``.
         """
         if self._lexical_companion is None:
             return self.search(
-                query, user_id=user_id, limit=limit,
-                include_superseded=include_superseded, include_stale=include_stale,
+                query, user_id=user_id, limit=limit, include_superseded=include_superseded,
+                include_stale=include_stale, include_retracted=include_retracted,
             )
         from grimoire.memory.retrieval import HybridRetriever
 
         # HybridRetriever n'appelle que `.search()` sur chaque entrée — le
         # cast reflète cette interface réduite, pas une vraie implémentation
-        # de MemoryBackend (voir _CooldownGuardedBackend).
-        vector: Any = _CooldownGuardedBackend(self)
+        # de MemoryBackend (voir CooldownGuardedBackend).
+        vector: Any = CooldownGuardedBackend(self)
         lexical: Any = self._lexical_companion
-        if not include_superseded:
-            vector, lexical = _LiveOnlySearch(vector, self.recall), _LiveOnlySearch(lexical, self.recall)
+        flags = {"include_superseded": include_superseded, "include_retracted": include_retracted}
+        if not (include_superseded and include_retracted):
+            vector = LiveOnlySearch(vector, self.recall, **flags)
+            lexical = LiveOnlySearch(lexical, self.recall, verify_primary=True, **flags)
         retriever = HybridRetriever([
             ("vector", cast(MemoryBackend, vector)),
             ("lexical", cast(MemoryBackend, lexical)),
         ])
         fused = retriever.search(query, user_id=user_id, limit=limit * 2)
-        return self._serve(fused, limit=limit, include_stale=include_stale)
+        served = self._serve(fused, limit=limit, include_stale=include_stale)
+        self.journal_read(
+            "hybrid", query, served, lanes=retriever.lanes,
+            filters={"limit": limit, "user_id": user_id, "include_stale": include_stale, **flags},
+        )
+        return served
 
     def reindex_lexical_companion(self) -> int:
         """Backfill the lexical companion from the primary backend.
@@ -847,12 +822,23 @@ class MemoryManager:
         type_: str = "",
         agent: str = "",
         limit: int = 5,
+        include_superseded: bool = False,
+        include_retracted: bool = False,
+        task_ref: str = "",
+        log_read: bool = True,
     ) -> list[MemoryEntry]:
-        """Search memories written via :meth:`remember`, filtered by type/agent."""
+        """Search memories written via :meth:`remember`, filtered by type/agent.
+
+        Remplacés et retirés sont exclus par défaut. ``log_read=False`` laisse
+        l'appelant (le rappel de tâche) écrire lui-même un reçu unique.
+        """
         if type_ and type_ not in MEMORY_TYPES:
             msg = f"Invalid memory type {type_!r}. Valid: {', '.join(MEMORY_TYPES)}"
             raise GrimoireMemoryError(msg)
-        candidates = self._backend.search(query, user_id=agent, limit=max(limit * 4, limit))
+        candidates = drop_unserved(
+            self._backend.search(query, user_id=agent, limit=max(limit * 4, limit)), self.recall,
+            include_superseded=include_superseded, include_retracted=include_retracted,
+        )
         results: list[MemoryEntry] = []
         for entry in candidates:
             if type_ and entry.metadata.get("type") != type_ and entry.metadata.get("memory_type") != type_:
@@ -860,6 +846,11 @@ class MemoryManager:
             results.append(entry)
             if len(results) >= limit:
                 break
+        if log_read:
+            self.journal_read("typed", query, results, task_ref=task_ref, filters={
+                "limit": limit, "type": type_, "agent": agent,
+                "include_superseded": include_superseded, "include_retracted": include_retracted,
+            })
         return results
 
     def search_taxonomy(
@@ -873,6 +864,7 @@ class MemoryManager:
         room: str = "",
         include_superseded: bool = False,
         include_stale: bool = False,
+        include_retracted: bool = False,
     ) -> list[MemoryEntry]:
         filters = {"wing": wing, "hall": hall, "room": room}
         search_filtered = getattr(self._backend, "search_filtered", None)
@@ -887,8 +879,16 @@ class MemoryManager:
                     for entry in candidates
                     if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
                 ][:size]
-        raw = fetch(limit) if include_superseded else search_live(fetch, limit, self.recall)
-        return self._serve(raw, limit=limit, include_stale=include_stale)
+        raw = search_live(
+            fetch, limit, self.recall, include_superseded=include_superseded, include_retracted=include_retracted,
+        )
+        served = self._serve(raw, limit=limit, include_stale=include_stale)
+        self.journal_read("taxonomy", query, served, filters={
+            "limit": limit, "user_id": user_id, **{k: v for k, v in filters.items() if v},
+            "include_superseded": include_superseded, "include_retracted": include_retracted,
+            "include_stale": include_stale,
+        })
+        return served
 
     def supersede(
         self,
@@ -913,10 +913,14 @@ class MemoryManager:
         replacement = self._backend.recall(new_id)
         if replacement is None:
             raise GrimoireMemoryError(f"Remplaçant introuvable : {new_id!r}.")
+        self._require_own_project(replacement)
+        if is_retracted(replacement):
+            raise GrimoireMemoryError(f"Remplaçant retiré : {new_id!r} ; le rétablir ou viser un autre souvenir.")
         self._refuse_cycle_or_replaced(old_id, replacement)
         existing = self._backend.recall(old_id)
         if existing is None:
             return None
+        self._require_own_project(existing)
         context = self._write_context(actor, session_id, task_ref)
         updated = self._apply_update(
             old_id, text=None, tags=None, metadata={**existing.metadata, SUPERSEDED_KEY: new_id},
@@ -953,8 +957,31 @@ class MemoryManager:
                 f"Remplaçant déjà remplacé : {replacement.id!r} ; viser son remplaçant.",
             )
 
-    def get_all(self, *, user_id: str = "", offset: int = 0, limit: int | None = None) -> list[MemoryEntry]:
-        return self._backend.get_all(user_id=user_id, offset=offset, limit=limit)
+    def _only_served(
+        self, entries: list[MemoryEntry], *, offset: int, limit: int | None,
+        include_superseded: bool, include_retracted: bool,
+    ) -> list[MemoryEntry]:
+        """Écarte remplacés et retirés AVANT de paginer : une page ne se vide pas à moitié."""
+        kept = drop_unserved(
+            entries, self.recall, include_superseded=include_superseded, include_retracted=include_retracted,
+        )
+        return kept[offset:] if limit is None else kept[offset:offset + limit]
+
+    def get_all(
+        self, *, user_id: str = "", offset: int = 0, limit: int | None = None,
+        include_superseded: bool = False, include_retracted: bool = False,
+    ) -> list[MemoryEntry]:
+        """Les souvenirs servis ; remplacés et retirés sont exclus sauf demande.
+
+        Les chemins de maintenance (export, migration, projection) passent
+        ``**INCLUDE_ALL`` : ils ne doivent rien perdre.
+        """
+        if include_superseded and include_retracted:
+            return self._backend.get_all(user_id=user_id, offset=offset, limit=limit)
+        return self._only_served(
+            self._backend.get_all(user_id=user_id, offset=0, limit=None), offset=offset, limit=limit,
+            include_superseded=include_superseded, include_retracted=include_retracted,
+        )
 
     def get_all_filtered(
         self,
@@ -965,18 +992,36 @@ class MemoryManager:
         wing: str = "",
         hall: str = "",
         room: str = "",
+        include_superseded: bool = False,
+        include_retracted: bool = False,
     ) -> list[MemoryEntry]:
         filters = {"wing": wing, "hall": hall, "room": room}
         get_all_filtered = getattr(self._backend, "get_all_filtered", None)
+        everything = include_superseded and include_retracted
         if callable(get_all_filtered):
-            return cast(list[MemoryEntry], get_all_filtered(user_id=user_id, offset=offset, limit=limit, filters=filters))
+            found = cast(
+                list[MemoryEntry],
+                get_all_filtered(
+                    user_id=user_id, offset=offset if everything else 0,
+                    limit=limit if everything else None, filters=filters,
+                ),
+            )
+            if everything:
+                return found
+            return self._only_served(
+                found, offset=offset, limit=limit,
+                include_superseded=include_superseded, include_retracted=include_retracted,
+            )
         entries = self._backend.get_all(user_id=user_id, offset=0, limit=None)
         filtered = [
             entry
             for entry in entries
             if entry_matches_filters(entry, wing=wing, hall=hall, room=room)
         ]
-        return filtered[offset:] if limit is None else filtered[offset:offset + limit]
+        return self._only_served(
+            filtered, offset=offset, limit=limit,
+            include_superseded=include_superseded, include_retracted=include_retracted,
+        )
 
     def taxonomy(
         self,
@@ -985,12 +1030,17 @@ class MemoryManager:
         wing: str = "",
         hall: str = "",
         room: str = "",
+        include_superseded: bool = False,
+        include_retracted: bool = False,
     ) -> dict[str, Any]:
         filters = {"wing": wing, "hall": hall, "room": room}
         taxonomy_fn = getattr(self._backend, "taxonomy", None)
-        if callable(taxonomy_fn):
+        if callable(taxonomy_fn) and include_superseded and include_retracted:
             return cast(dict[str, Any], taxonomy_fn(user_id=user_id, filters=filters))
-        return build_taxonomy(self.get_all_filtered(user_id=user_id, wing=wing, hall=hall, room=room))
+        return build_taxonomy(self.get_all_filtered(
+            user_id=user_id, wing=wing, hall=hall, room=room,
+            include_superseded=include_superseded, include_retracted=include_retracted,
+        ))
 
     def count(self) -> int:
         return self._backend.count()
@@ -1102,6 +1152,8 @@ class MemoryManager:
     ) -> bool:
         # L'empreinte est celle du contenu supprimé : après coup, il n'y a plus rien à hacher.
         before = self._backend.recall(entry_id)
+        if before is not None:
+            self._require_own_project(before)
         deleted = self._backend.delete(entry_id)
         if deleted:
             self._sync_delete_memory(entry_id)

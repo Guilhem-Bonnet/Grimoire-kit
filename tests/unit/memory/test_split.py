@@ -151,8 +151,8 @@ class TestApply:
                     raise OSError("serveur coupé")
                 return self.inner.upsert(*a, **k)
 
-            def get_all(self) -> Any:
-                return self.inner.get_all()
+            def get_all(self, **kw: Any) -> Any:
+                return self.inner.get_all(**kw)
 
         source = segments.backend("grimoire")
         plan = plan_split(source.get_all(), source_collection="grimoire", configs={"TTS-Voice": config, "Brainstrom": config})
@@ -181,8 +181,8 @@ class TestApply:
                 self.seen += 1  # la première écriture est « perdue » en silence
                 return None if self.seen == 1 else self.inner.upsert(entry_id, *a, **k)
 
-            def get_all(self) -> Any:
-                return self.inner.get_all()
+            def get_all(self, **kw: Any) -> Any:
+                return self.inner.get_all(**kw)
 
         source = segments.backend("grimoire")
         plan = plan_split(source.get_all(), source_collection="grimoire", only=["TTS-Voice"])

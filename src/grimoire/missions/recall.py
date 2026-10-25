@@ -256,10 +256,12 @@ def _memory_hits(
     if not query:
         return []
     hits: list[MemoryHit] = []
+    served: list[MemoryEntry] = []
     seen: set[str] = set()
     for type_ in _RECALL_MEMORY_TYPES:
         try:
-            entries = memory_manager.recall_typed(query, type_=type_, limit=limit)
+            # Un seul reçu pour tout le rappel (écrit plus bas), pas un par type.
+            entries = memory_manager.recall_typed(query, type_=type_, limit=limit, log_read=False)
         except Exception:  # noqa: S112 — la mémoire est une couche optionnelle du rappel
             continue
         for entry in entries:
@@ -267,6 +269,11 @@ def _memory_hits(
                 continue
             seen.add(entry.id)
             hits.append(MemoryHit(id=entry.id, type=type_, text=entry.text, tags=tuple(entry.tags)))
+            served.append(entry)
+    journal = getattr(memory_manager, "journal_read", None)
+    if callable(journal):
+        # Reçu de rappel (P13) : ce que le rappel de tâche a réellement servi, jamais son texte.
+        journal("task_recall", query, served[:limit], task_ref=task.id, filters={"limit": limit})
     return hits[:limit]
 
 

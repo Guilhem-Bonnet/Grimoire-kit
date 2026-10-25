@@ -71,6 +71,8 @@ _grimoire-output/.orchestrator/
 _grimoire-output/.semantic-cache-stats.json
 _grimoire-output/.router-stats.jsonl
 _grimoire-output/.event-log.jsonl
+# Reçu de rappel (P13) : une ligne par lecture mémoire servie.
+_grimoire-output/memory-reads.jsonl
 _grimoire-output/.session-lifecycle/
 _grimoire-output/.tool-resolver/
 _grimoire-output/agent-debugger.html

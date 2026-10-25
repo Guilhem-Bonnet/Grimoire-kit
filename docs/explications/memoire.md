@@ -452,7 +452,7 @@ de l'hôte rédige. Chaque extrait porte sa fiche `grimoire.knowledge.fact/v1`
   du contenu source au moment de l'indexation) ;
 - les dates de la source, de l'indexation et de la dernière confirmation, quand
   elles sont connues ;
-- le cycle (`actif`, `remplacé` avec `remplace_par`) ;
+- le cycle (`actif`, `remplacé` avec `remplace_par`, `retiré`) ;
 - la **fraîcheur**, recalculée à chaque lecture et jamais stockée :
 
 | État | Condition |
@@ -470,6 +470,46 @@ déclassent, rien n'est supprimé. Une décision remplacée
 `grimoire_memory_supersede`) n'est plus servie mais reste lisible avec
 `--include-superseded`. Pour qu'un fait écrit à la main porte une source :
 `grimoire memory remember … --source task:T-42` (ou un chemin de fichier).
+
+### Corriger la mémoire sans la perdre
+
+Trois gestes, en CLI et en MCP, qui passent tous par `MemoryManager` et
+laissent une ligne dans `_grimoire-output/memory-changes.jsonl` :
+
+- **Retirer** (`grimoire memory retract <id> --reason …`, outil
+  `grimoire_memory_retract`) : le souvenir n'est plus rendu par aucune lecture
+  servie (recherche, hybride, taxonomie, rappel typé, `list`, rappel de tâche)
+  mais reste lisible, avec qui l'a retiré, quand et pourquoi
+  (`metadata.retracted`). `--include-retracted` le relit ; `unretract` annule.
+  Rien n'est supprimé : un backend qui ne sait pas modifier un souvenir est
+  refusé avec un message, pas traité comme une suppression, et une écriture que
+  la relecture ne confirme pas est défaite puis signalée.
+- **Remplacer** (`supersede`) : inchangé, avec une raison optionnelle.
+- **Réétiqueter** (`grimoire memory tags`, outil `grimoire_memory_update_tags`).
+
+Aucun geste n'agit sur le souvenir d'un autre projet (`metadata.project_name`
+différent). **Limite** : un souvenir écrit avant la provenance, sans
+`project_name`, ne peut pas être attribué et reste accessible.
+Les chemins de maintenance (export, migration, `split`, projection Neo4j,
+`purge-orphans`) lisent tout, retirés et remplacés compris : un retrait ne leur
+fait rien perdre. `delete` reste définitif ; dans Neo4j il efface le contenu du
+nœud (texte, étiquettes, métadonnées) et laisse une pierre tombale que
+`grimoire memory graph purge-orphans --apply` retire ensuite.
+
+### Reçu de rappel
+
+Chaque lecture qui sert des souvenirs (`search`, hybride, taxonomie, rappel typé,
+rappel de tâche, outil MCP `grimoire_memory_search`) ajoute une ligne à
+`_grimoire-output/memory-reads.jsonl` : horodatage, surface (`cli`, `mcp`…),
+acteur, session et tâche si connus, mode, filtres appliqués, et pour chaque
+souvenir servi son identifiant, son rang, son score et, en lecture hybride, son
+rang et son score dans chaque classement avant fusion. **Pas de contenu** : la
+requête n'y figure que par une empreinte SHA-256 tronquée et sa longueur. Le
+fichier est ignoré par git, borné à 1 Mio (au-delà, il est ramené à ses
+lignes les plus récentes), s'écrit sans réseau, et un échec d'écriture est un avertissement,
+jamais une lecture en échec. Le cockpit (lecture seule) et le banc n'y écrivent
+rien. `grimoire memory reads` en tire `recall_count_7d`, le nombre de lectures
+qui ont servi chaque souvenir sur les sept derniers jours.
 
 ## Choix à l'initialisation
 
