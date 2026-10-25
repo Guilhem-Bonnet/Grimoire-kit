@@ -279,6 +279,69 @@ def test_memory_confirm_doit_valoir_true_exactement(duo_server: Any) -> None:
     assert status == 403
 
 
+@pytest.mark.parametrize("action", ["delete", "gc", "sync"])
+def test_memory_mutation_sur_un_autre_projet_du_registre_est_un_403(
+    duo_server: Any, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    """P02 : delete/gc/sync n'agissent que sur le projet servi (``_HOME_SLUG``)."""
+    port, _home, _foreign = duo_server
+    appels: list[list[str]] = []
+
+    def _invoke(proot: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        appels.append(argv)
+        return cmd_cockpit._CliResult(0, "{}", "")
+
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _invoke)
+    status, body = _post(
+        port, "/api/memory", {"action": action, "project": "foreign", "confirm": True, "id": "dec-01"}
+    )
+
+    assert status == 403, body
+    assert body["ok"] is False
+    assert appels == [], "aucune commande ne doit partir vers le projet étranger"
+
+
+@pytest.mark.parametrize("action", ["delete", "gc", "sync"])
+def test_memory_mutation_sur_le_projet_servi_reste_permise(
+    duo_server: Any, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    port, _home, _foreign = duo_server
+    monkeypatch.setattr(
+        cmd_cockpit, "_invoke_memory_cli", lambda proot, argv: cmd_cockpit._CliResult(0, "{}", "")
+    )
+    status, body = _post(
+        port, "/api/memory", {"action": action, "project": "home", "confirm": True, "id": "dec-01"}
+    )
+
+    assert status == 200, body
+
+
+def test_memory_mutation_sans_projet_servi_echoue_ferme(
+    duo_server: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pas de projet servi identifié = aucune mutation, même sur un projet connu."""
+    port, _home, _foreign = duo_server
+    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", None)
+    monkeypatch.setattr(
+        cmd_cockpit, "_invoke_memory_cli", lambda proot, argv: cmd_cockpit._CliResult(0, "{}", "")
+    )
+    status, _ = _post(port, "/api/memory", {"action": "gc", "project": "home", "confirm": True})
+
+    assert status == 403
+
+
+def test_memory_lecture_sur_un_autre_projet_reste_permise(
+    duo_server: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    port, _home, _foreign = duo_server
+    monkeypatch.setattr(
+        cmd_cockpit, "_invoke_memory_cli", lambda proot, argv: cmd_cockpit._CliResult(0, "{}", "")
+    )
+    status, _ = _post(port, "/api/memory", {"action": "status", "project": "foreign"})
+
+    assert status == 200
+
+
 def test_memory_une_action_inconnue_est_un_400(duo_server: Any) -> None:
     port, _home, _foreign = duo_server
 

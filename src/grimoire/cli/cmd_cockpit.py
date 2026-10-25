@@ -147,6 +147,22 @@ def _resolve_project_path(slug: str | None) -> Path | None:
 # une navigation Flotte, et fermée sur tout autre projet du registre.
 _HOME_SLUG: str | None = None
 
+def _is_served_project(proot: Path) -> bool:
+    """Vrai si ``proot`` est le projet servi en direct (``_HOME_SLUG``) — échec fermé.
+
+    Sans projet servi, ou si son slug a quitté le registre, rien n'est servi :
+    on refuse. La comparaison porte sur les chemins résolus, pas sur le slug
+    de la requête (un ``project`` vide vise le premier du registre).
+    """
+    served = _resolve_project_path(_HOME_SLUG) if _HOME_SLUG else None
+    if served is None:
+        return False
+    try:
+        return served.resolve() == proot.resolve()
+    except OSError:
+        return False
+
+
 _API_CACHE: dict[Path, Any] = {}
 
 
@@ -859,6 +875,12 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         proot = _resolve_project_path(str(data.get("project", "")) or None)
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
+            return
+        if is_mutation and not _is_served_project(proot):
+            # P02 : une mutation (delete/gc/sync) n'agit que sur le projet servi
+            # par ce process ; tout autre projet du registre est en lecture
+            # seule, comme le reste de la vue de travail (#356). Échec fermé.
+            self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
             return
         subcmd = action
         values: list[str] = []
