@@ -104,14 +104,24 @@ def queue_release(
     """Libère un créneau (`capacity.released`) : un geste d'humain, quand la fin des checks n'est pas observable."""
     from grimoire.cli.cmd_task import _comment_origin
     from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.mandate import gesture_origin, require_authority
     from grimoire.missions.schemas import ORIGIN_HUMAN
     from grimoire.missions.service import TaskService
 
-    if _comment_origin() != ORIGIN_HUMAN:
-        typer.echo("Libérer un créneau est un geste d'humain : l'origine humaine n'est pas établie.", err=True)
-        raise typer.Exit(1)
+    origin, provenance = gesture_origin(_comment_origin())
+    service = TaskService(project_root.resolve(), ledger_root)
+    if origin != ORIGIN_HUMAN:
+        # #876, verrou 6 : l'orchestrateur sous un mandat qui couvre `queue-release` libère aussi.
+        try:
+            require_authority(
+                project_root.resolve(), "queue-release", service.require(task_id), origin, what="Libérer un créneau",
+                provenance=provenance,
+            )
+        except GrimoireError as exc:
+            typer.echo(f"Libérer un créneau est un geste d'humain : {exc}", err=True)
+            raise typer.Exit(1) from exc
     try:
-        TaskService(project_root.resolve(), ledger_root).release_capacity(task_id, pool, actor, reason)
+        service.release_capacity(task_id, pool, actor, reason)
     except (GrimoireError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
