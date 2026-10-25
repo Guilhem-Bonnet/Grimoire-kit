@@ -197,7 +197,7 @@ s'appliquent, sélecteur de vue, état de validation) et son inspecteur.
 | Piloter | Flotte (cockpit) et Projet : tableau sur bureau, cartes sur mobile ; KPI en une carte divisée ; « À traiter » toujours visible | projet : kit, hôtes, standard, actions (initialiser, mettre à jour, ouvrir) | `portfolio.html`, `index.html` du cockpit |
 | Concevoir | zoom Projet → Workflow → Nœud ; Carte (graphe), Board, Liste ; palette de nœuds ; validation, simulation, compilation | nœud ou workflow : propriétés, validation, coût, preuves | `blueprints.html`, `patterns.html`, `extensions.html` (bibliothèque en panneau) |
 | Exécuter | tâches : Board 4 ou 8 colonnes, Liste, Timeline ; gates en une ligne sous chaque colonne ; carte de tâche à trois niveaux | tâche : critères, preuves, prochaine porte avec bouton, timeline | `kanban.html` |
-| Observer | runtime seulement : six KPI, coût par modèle, latence, spans lents, traces par agent ; activité, RTK, bench en onglets ; un seul état vide qui dit d'où viendra la donnée | trace ou span | `observability.html` |
+| Observer | runtime seulement : six KPI, coût par modèle, latence, spans lents, traces par agent ; l'activité en onglet (RTK et bench retirés : aucune route serveur) ; un seul état vide qui dit d'où viendra la donnée | trace ou span | `observability.html` |
 | Mémoire | store et graphe d'abord, couches et backends ensuite | entrée | `memory.html` |
 | Source | fichiers par étage (overrides, kit, projections) ; éditeur avec Source, Diff contre le kit, Rendu ; « créer un override » quand on édite un fichier du kit | fichier : étage, version, empreinte, override, projeté vers, chargé par | nouveau |
 

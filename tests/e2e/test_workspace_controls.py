@@ -111,15 +111,13 @@ def test_observer_activite_ne_reste_jamais_muet(workspace: Page) -> None:
     serveur, ont été retirés : tri R20.)"""
     _goto(workspace, "observer")
     workspace.wait_for_selector("#view-seg button")
-    for view_id in ("activite",):
-        workspace.locator(f'#view-seg button[data-value="{view_id}"]').click()
-        workspace.wait_for_function(
-            "(v) => document.querySelector(`#view-seg button[data-value=\"${v}\"]`)"
-            ".getAttribute('aria-pressed') === 'true'",
-            arg=view_id,
-        )
-        body = workspace.locator("#canvas").inner_text()
-        assert body.strip(), f"onglet {view_id} : #canvas ne doit jamais rester vide"
+    workspace.locator('#view-seg button[data-value="activite"]').click()
+    workspace.wait_for_function(
+        "() => document.querySelector('#view-seg button[data-value=\"activite\"]')"
+        ".getAttribute('aria-pressed') === 'true'"
+    )
+    body = workspace.locator("#canvas").inner_text()
+    assert body.strip(), "onglet activite : #canvas ne doit jamais rester vide"
 
 
 # `test_memoire_view_seg_bascule_correctement` vit dans

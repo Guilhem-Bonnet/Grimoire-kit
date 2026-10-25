@@ -181,7 +181,7 @@ Expose les outils Grimoire aux LLM via le Model Context Protocol :
 }
 ```
 
-Fonctions exposées : `grimoire_project_context`, `grimoire_harmony_check`, `grimoire_context_guard`, `grimoire_context_router`, `grimoire_memory_lint`, `grimoire_preflight_check`, `grimoire_agent_forge`, `grimoire_stigmergy_board`, etc.
+Fonctions exposées : `grimoire_project_context`, `grimoire_status`, `grimoire_harmony_check`, `grimoire_memory_search`, `grimoire_memory_store`, `grimoire_standard_verify`, `grimoire_standard_gate`, etc.
 
 ---
 
@@ -211,7 +211,7 @@ LocalRegistry (local.py)
 
 2. Agent IA charge le contexte via MCP
    → grimoire_project_context() → JSON config
-   → grimoire_context_router() → plan de chargement optimisé
+   → grimoire_status() → état du projet
 
 3. Pendant la session, l'agent utilise les outils
    → grimoire_harmony_check() → désaccords architecturaux

@@ -80,3 +80,30 @@ def test_on_n_ecrase_pas_sans_force(tmp_path: Path) -> None:
     res = runner.invoke(blueprint_app, ["import", str(entree), "--from", "gascity", "--out", str(sortie)])
     assert res.exit_code == 1
     assert sortie.read_text(encoding="utf-8") == "{}"
+
+
+def test_des_ids_qui_se_slugifient_pareil_sont_dedoublonnes(tmp_path: Path) -> None:
+    entree = tmp_path / "ext.json"
+    entree.write_text(
+        json.dumps({"name": "dup", "molecules": [{"id": "A b", "name": "Un"}, {"id": "a-b", "name": "Deux"}],
+                    "output_schema": _SCHEMA}),
+        encoding="utf-8",
+    )
+    sortie = tmp_path / "out.blueprint.json"
+    res = runner.invoke(blueprint_app, ["import", str(entree), "--from", "gascity", "--out", str(sortie)])
+    assert res.exit_code == 0, res.output
+    ids = [n["id"] for n in json.loads(sortie.read_text(encoding="utf-8"))["nodes"]]
+    assert ids == ["a-b", "a-b-2"]
+    assert runner.invoke(blueprint_app, ["validate", str(sortie), "--allow-skipped-schema"]).exit_code == 0
+
+
+def test_un_blueprint_invalide_n_est_jamais_ecrit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.cli import cmd_blueprint_import as mod
+
+    entree = tmp_path / "ext.json"
+    entree.write_text(json.dumps(DEFINITIONS["gascity"]), encoding="utf-8")
+    sortie = tmp_path / "out.blueprint.json"
+    monkeypatch.setattr(mod, "recipe_to_blueprint", lambda r, s: {"blueprintVersion": 1, "id": "x", "nodes": [], "edges": []})
+    res = runner.invoke(blueprint_app, ["import", str(entree), "--from", "gascity", "--out", str(sortie)])
+    assert res.exit_code == 1
+    assert not sortie.exists()

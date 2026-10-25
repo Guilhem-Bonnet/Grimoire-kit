@@ -48,14 +48,21 @@ def recipe_to_blueprint(recipe: Any, source: str) -> dict[str, Any]:
     if not ID_RE.match(bp_id):
         bp_id = "flow-importe"
     noeuds: list[dict[str, Any]] = []
+    pris: set[str] = set()
     for i, etape in enumerate(recipe.steps):
+        base = slugify(etape.id) or f"etape-{i + 1}"
+        nid, n = base, 1
+        while nid in pris:  # "A b" et "a-b" se slugifient pareil : -2, -3…
+            n += 1
+            nid = f"{base}-{n}"
+        pris.add(nid)
         pins = []
         if i > 0:
             pins.append({"id": "in", "direction": "in", "contract": _CONTRAT})
         if i < len(recipe.steps) - 1:
             pins.append({"id": "out", "direction": "out", "contract": _CONTRAT})
         noeuds.append({
-            "id": slugify(etape.id) or f"etape-{i + 1}",
+            "id": nid,
             "kind": "pattern",
             "ref": _REF_PAR_DEFAUT,
             "label": etape.name or etape.id,
@@ -78,6 +85,21 @@ def recipe_to_blueprint(recipe: Any, source: str) -> dict[str, Any]:
         "extensions": [],
         "meta": {"importedFrom": source, "recipeId": recipe.id, "tags": list(recipe.tags)},
     }
+
+
+def _refuser_si_invalide(blueprint: dict[str, Any]) -> None:
+    """Passe le blueprint au validateur avant toute écriture : un fichier qu'on dit créé doit être relisible."""
+    import tempfile
+
+    from grimoire.cli.cmd_blueprint import _validate_report
+
+    with tempfile.TemporaryDirectory() as tmp:
+        brouillon = Path(tmp) / f"{blueprint['id']}.blueprint.json"
+        brouillon.write_text(json.dumps(blueprint, ensure_ascii=False), encoding="utf-8")
+        erreurs, _ = _validate_report(brouillon, None)
+    if erreurs:
+        typer.secho(f"Import refusé : le blueprint produit est invalide ({erreurs} erreur(s)) ; rien n'a été écrit.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
 
 
 def blueprint_import(
@@ -110,6 +132,7 @@ def blueprint_import(
         raise typer.Exit(code=1)
 
     blueprint = recipe_to_blueprint(recipe, source)
+    _refuser_si_invalide(blueprint)
     cible = out or Path(f"{blueprint['id']}.blueprint.json")
     if cible.exists() and not force:
         typer.secho(f"Error: {cible} existe déjà (--force pour écraser)", fg=typer.colors.RED, err=True)
