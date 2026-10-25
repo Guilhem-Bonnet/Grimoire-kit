@@ -145,3 +145,91 @@ def test_stop_apres_ecriture_refuse_en_nommant_la_source_illisible(governed: Pat
     assert decision.outcome is Outcome.BLOCK
     assert "illisible" in decision.reason
     assert "introuvable" in decision.reason
+
+
+# ── formes de corruption moins évidentes ─────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["tasks: {a: 1}\n", "tasks: oops\n", "tasks:\n  - A\n  - B\n"],
+)
+def test_board_de_forme_invalide_n_est_pas_bootstrap(governed: Path, text: str) -> None:
+    (governed / TASK_BOARD_RELPATH).write_text(text, encoding="utf-8")
+    active = resolve_active_task(governed, env={}, session_id=SESSION)
+    assert active.source == "unreadable"
+    assert any("task-board.yaml" in p for p in active.unreadable)
+
+
+def test_board_remplace_par_un_dossier_ou_un_lien_casse(governed: Path) -> None:
+    board = governed / TASK_BOARD_RELPATH
+    board.unlink()
+    board.mkdir()
+    assert resolve_active_task(governed, env={}, session_id=SESSION).source == "unreadable"
+    board.rmdir()
+    try:
+        board.symlink_to(governed / "nulle-part.yaml")
+    except OSError:  # pragma: no cover
+        pytest.skip("liens symboliques indisponibles")
+    assert resolve_active_task(governed, env={}, session_id=SESSION).source == "unreadable"
+
+
+def test_ledger_remplace_par_un_dossier(governed: Path) -> None:
+    path = governed / LEDGER_RELPATH / "events.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    path.mkdir()
+    assert resolve_active_task(governed, env={}, session_id=SESSION).source == "unreadable"
+
+
+def test_unreadable_est_propage_quand_une_tache_est_quand_meme_designee(governed: Path) -> None:
+    service = TaskService(governed)
+    added = service.add("Tâche", ("ok",), owner="guilhem", actor="claude", ready=True)
+    service.context(added.task.id)
+    service.claim(added.task.id, "claude", host="local")
+    events = governed / LEDGER_RELPATH / "events.jsonl"
+    events.write_text(events.read_text(encoding="utf-8") + "{pas du json\n", encoding="utf-8")
+    active = resolve_active_task(governed, env={}, session_id="")
+    assert active.source == "ledger_claim"
+    assert any("events.jsonl" in p for p in active.unreadable)
+
+
+def test_stop_scope_conserve_unreadable(governed: Path) -> None:
+    """Le claim n'est pas rattaché à la session : stop_scope reconstruit `bootstrap` — sans perdre `unreadable`."""
+    from grimoire.hosts.decisions._shared import HookInput
+    from grimoire.hosts.decisions.enrolment import stop_scope
+
+    service = TaskService(governed)
+    added = service.add("Tâche", ("ok",), owner="guilhem", actor="claude", ready=True)
+    service.context(added.task.id)
+    service.claim(added.task.id, "claude", host="local")
+    events = governed / LEDGER_RELPATH / "events.jsonl"
+    events.write_text(events.read_text(encoding="utf-8") + "{pas du json\n", encoding="utf-8")
+    active = resolve_active_task(governed, env={}, session_id=SESSION)
+    assert active.source == "ledger_claim"
+    hook = HookInput(event=HookEvent.STOP, project_root=governed, session_id=SESSION)
+    scoped = stop_scope(hook, active)
+    assert scoped.source == "bootstrap"
+    assert any("events.jsonl" in p for p in scoped.unreadable)
+
+
+# ── Stop : un ledger durablement corrompu ne bloque pas les sessions à vide ──
+
+
+def test_stop_ledger_corrompu_sans_ecriture_previent_sans_bloquer(governed: Path) -> None:
+    _ledger_with_corrupt_line(governed)
+    rendered, decision = _hook(governed, HookEvent.STOP)
+    assert decision.outcome is Outcome.ALLOW
+    message = rendered["systemMessage"]
+    assert "illisible" in message
+    assert "git checkout" not in message
+    assert "ne le réécris pas" in message
+
+
+def test_stop_ledger_corrompu_apres_ecriture_bloque_avec_un_vrai_remede(governed: Path) -> None:
+    _ledger_with_corrupt_line(governed)
+    _write(governed)
+    _, decision = _hook(governed, HookEvent.STOP)
+    assert decision.outcome is Outcome.BLOCK
+    assert "git checkout" not in decision.reason
+    assert "events.jsonl" in decision.reason

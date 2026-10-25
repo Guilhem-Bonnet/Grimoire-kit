@@ -92,3 +92,10 @@ def test_pre_push_sans_init_script_le_dit_au_lieu_d_afficher_ok(repo: Path) -> N
     assert result.returncode == 0
     assert "DNA validate sautée" in result.stdout
     assert "fichiers OK" not in result.stdout
+
+
+def test_pre_push_sans_archetypes_ne_meurt_pas_en_silence(repo: Path) -> None:
+    """Un projet utilisateur normal n'a pas d'``archetypes/`` : ``find`` échoue, ``pipefail`` tuait le hook (rc=1 muet)."""
+    result = _run("pre-push.sh", repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "push autorisé" in result.stdout

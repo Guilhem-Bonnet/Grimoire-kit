@@ -45,7 +45,7 @@ if [[ -f "$INIT_SCRIPT" ]]; then
 fi
 
 # ── 2. Validation DNA (tous les archetypes) ───────────────────────────────────
-DNA_FILES=$(find "$GIT_ROOT/archetypes" -name "*.dna.yaml" 2>/dev/null | wc -l)
+DNA_FILES=$(find "$GIT_ROOT/archetypes" -name "*.dna.yaml" 2>/dev/null | wc -l) || DNA_FILES=0  # sans archetypes/ : 0
 if [[ "$DNA_FILES" -gt 0 ]]; then
     VALIDATE_RC=0
     if [[ ! -f "$INIT_SCRIPT" ]]; then

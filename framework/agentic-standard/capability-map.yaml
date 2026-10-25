@@ -174,7 +174,7 @@ patterns:
     category: security
     artifacts: [prompt_firewall]
     rules: []
-    checks: [firewall.plan_not_frozen, firewall.plan_deviation_allowed]
+    checks: [firewall.plan_not_frozen, firewall.plan_deviation_allowed, firewall.plan_block_missing]
     tech_extras: []
     profile_min: controlled
   remote-hygiene-guard:

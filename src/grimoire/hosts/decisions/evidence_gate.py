@@ -143,7 +143,10 @@ def _decide_stop(hook: HookInput) -> Decision:
                 f"{unreadable_text(active.unreadable)}"
             )
             detail = {"task_id": task_id, "task_source": active.source, "unreadable": list(active.unreadable)}
-            if profile in _BLOCKING_PROFILES:
+            # Une session qui a écrit sans tâche est déjà refusée plus haut (_no_task_closure). Ici elle n'a
+            # rien écrit : un ledger durablement corrompu ne bloque pas chaque session à vide, il le dit.
+            # Le board illisible garde son refus d'origine (gates non évaluables), une fois.
+            if profile in _BLOCKING_PROFILES and any(item.startswith("board") for item in active.unreadable):
                 return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
             return Decision(context=reason, detail=detail)
         if active.source == "ambiguous":

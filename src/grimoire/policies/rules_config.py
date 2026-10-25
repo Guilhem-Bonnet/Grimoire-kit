@@ -54,6 +54,12 @@ from grimoire.policies.schemas import PolicyRule
 RULES_RELPATH = STANDARD_DIR / "policies.yaml"
 
 
+#: Clés racine admises : les règles, et les deux champs d'en-tête que les autres
+#: artefacts du standard portent. Tout le reste est une faute de frappe (`rule:`,
+#: `Rules:`) qui ferait croire à des règles actives.
+_ROOT_KEYS = frozenset({"rules", "$schema", "metadata"})
+
+
 def _unreadable(cause: str) -> GrimoirePolicyError:
     return GrimoirePolicyError(
         f"{RULES_RELPATH.as_posix()} illisible ({cause}) — aucune règle n'est appliquée tant que le fichier "
@@ -84,13 +90,18 @@ def _compute_raw_rules(path: Path) -> list[dict[str, Any]]:
     except (OSError, ValueError, YAMLError) as exc:
         lines = str(exc).splitlines()
         raise _unreadable(f"{type(exc).__name__}: {lines[0] if lines else ''}".strip(": ")) from exc
-    if data is None:
+    if data is None:  # fichier vide ou fait de commentaires seuls : aucune règle, par conception
         return []
     if not isinstance(data, dict):
         raise _unreadable("la racine doit être un mapping avec une clé `rules:`")
-    rules_raw = data.get("rules", [])
+    unknown = sorted(str(k) for k in data if k not in _ROOT_KEYS)
+    if unknown:
+        raise _unreadable(f"clé(s) racine inconnue(s) {', '.join(unknown)} (attendu : `rules:`) — faute de frappe ?")
+    if "rules" not in data:
+        raise _unreadable("aucune clé `rules:` dans un fichier qui n'est pas vide")
+    rules_raw = data["rules"]
     if rules_raw is None:
-        return []
+        raise _unreadable("`rules:` est vide (null) ; écrivez `rules: []` pour déclarer qu'il n'y en a aucune")
     if not isinstance(rules_raw, list):
         raise _unreadable("`rules:` doit être une liste")
     bad = [i for i, rule in enumerate(rules_raw) if not isinstance(rule, dict)]
@@ -117,6 +128,8 @@ def load_custom_rules(project_root: Path) -> tuple[PolicyRule, ...]:
     root = project_root.resolve()
     path = root / RULES_RELPATH
     if not path.is_file():
+        if path.exists() or path.is_symlink():  # dossier, lien cassé : présent mais illisible, pas absent
+            raise _unreadable("ce n'est pas un fichier régulier (dossier ou lien cassé)")
         return ()
     from grimoire.core.standard_state import _cached_or_fresh
 

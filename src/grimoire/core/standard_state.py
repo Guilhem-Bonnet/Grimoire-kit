@@ -185,7 +185,7 @@ def _board_problem(path: Path) -> str:
     :func:`_load_mapping`, qui ne lève jamais, le rend comme un board vide.
     """
     if not path.is_file():
-        return ""
+        return _not_a_file(path, f"board {TASK_BOARD_RELPATH.as_posix()}")
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError
 
@@ -194,8 +194,24 @@ def _board_problem(path: Path) -> str:
         data = YAML(typ="safe").load(path)
     except (OSError, ValueError, YAMLError) as exc:
         return f"{name} illisible ({type(exc).__name__})"
-    if data is not None and not isinstance(data, dict):
+    if data is None:
+        return ""
+    if not isinstance(data, dict):
         return f"{name} illisible (la racine n'est pas un mapping)"
+    tasks = data.get("tasks")
+    if tasks is None:
+        return ""
+    if not isinstance(tasks, list):
+        return f"{name} illisible (`tasks:` doit être une liste)"
+    if any(not isinstance(task, dict) for task in tasks):
+        return f"{name} illisible (une entrée de `tasks:` n'est pas un mapping)"
+    return ""
+
+
+def _not_a_file(path: Path, name: str) -> str:
+    """``""`` si *path* est absent (légitime), sinon pourquoi un chemin présent n'est pas un fichier régulier."""
+    if path.exists() or path.is_symlink():
+        return f"{name} illisible (dossier ou lien cassé au lieu d'un fichier)"
     return ""
 
 
@@ -433,7 +449,7 @@ def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_
     """
     events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
     if not events.is_file():
-        return [], ""
+        return [], _not_a_file(events, f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl")
     try:
         from grimoire.missions.ledger import MissionLedger
         from grimoire.missions.schemas import TaskState
@@ -582,12 +598,13 @@ def resolve_active_task(
     # Un seul rejeu du ledger par résolution (K13) : les claims tenus servent à la règle 2
     # comme à la règle 3, qui les relisaient chacune en entier.
     every_held, ledger_problem = _held_claims_checked(project_root)
+    ledger_unreadable = (ledger_problem,) if ledger_problem else ()
     if session:
         mine = [c for c in every_held if not c.expired and c.session_id == session]
         chosen = _claim_of_session(mine, actor, agent_id.strip())
         if chosen is not None:
             try:
-                return ActiveTask(normalize_task_id(chosen), "session_claim")
+                return ActiveTask(normalize_task_id(chosen), "session_claim", unreadable=ledger_unreadable)
             except ValueError:
                 pass
 
@@ -597,7 +614,7 @@ def resolve_active_task(
     # celle-ci — B retombe sur bootstrap/ambiguous, jamais sur la tâche de A.
     if len(claims) == 1 and (not session or claims[0].session_id in ("", session)):
         try:
-            return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim")
+            return ActiveTask(normalize_task_id(claims[0].task_id), "ledger_claim", unreadable=ledger_unreadable)
         except ValueError:
             pass
     expired = tuple(c.task_id for c in held if c.expired and c.session_id in ("", session))
@@ -621,7 +638,11 @@ def resolve_active_task(
 
     board_state = _cached_or_fresh(root, "board_state", TASK_BOARD_RELPATH, compute, write_cache=write_cache)
     in_progress = board_state.get("in_progress", []) if isinstance(board_state, dict) else []
-    board_problem = str(board_state.get("problem", "")) if isinstance(board_state, dict) else ""
+    # Un dossier ou un lien cassé a la même empreinte qu'un board absent (stat échoue) : jamais lu du cache.
+    board_file = root / TASK_BOARD_RELPATH
+    board_problem = (
+        _not_a_file(board_file, f"board {TASK_BOARD_RELPATH.as_posix()}") if not board_file.is_file() else ""
+    ) or (str(board_state.get("problem", "")) if isinstance(board_state, dict) else "")
     unreadable = tuple(p for p in (ledger_problem, board_problem) if p)
     # Le board projette les claims du ledger en `in_progress` : sans ce filtre,
     # un claim expiré ou tenu par une autre session reviendrait par la règle 4.
@@ -630,7 +651,7 @@ def resolve_active_task(
     }
     in_progress = [tid for tid in in_progress if tid not in disqualified]
     if len(in_progress) == 1:
-        return ActiveTask(normalize_task_id(in_progress[0]), "board")
+        return ActiveTask(normalize_task_id(in_progress[0]), "board", unreadable=unreadable)
     if len(claims) > 1:
         return ActiveTask("bootstrap", "ambiguous", tuple(c.task_id for c in claims), expired, unreadable)
     if unreadable:

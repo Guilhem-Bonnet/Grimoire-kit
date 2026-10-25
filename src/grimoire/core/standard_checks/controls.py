@@ -351,7 +351,7 @@ def _verify_prompt_firewall(root: Path, profile: StandardProfile, result: Standa
             "Instruction override by external content must be blocked.",
             path=rel_path,
         )
-    _verify_plan_then_execute(data, strict_profile, result, rel_path)
+    _verify_plan_then_execute(data, profile, strict_profile, result, rel_path)
     sources = data.get("untrusted_sources")
     if not isinstance(sources, list) or not sources:
         _add_check(result, "firewall.no_sources", "warning", "No untrusted content source is declared.", path=rel_path)

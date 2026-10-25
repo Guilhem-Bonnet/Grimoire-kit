@@ -188,6 +188,7 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "firewall.isolation_disabled": "hook_registry",
     "firewall.no_sources": "hook_registry",
     "firewall.override_allowed": "hook_registry",
+    "firewall.plan_block_missing": "hook_registry",
     "firewall.plan_deviation_allowed": "hook_registry",
     "firewall.plan_not_frozen": "hook_registry",
     "firewall.source_not_quarantined": "hook_registry",

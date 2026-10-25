@@ -9,8 +9,10 @@ Deux contrôles sur le bloc ``plan_then_execute:`` de ``prompt-firewall.yaml`` :
 - ``firewall.plan_deviation_allowed`` : ``actions_outside_plan`` n'est ni
   ``ask`` ni ``deny``.
 
-Le bloc est optionnel : absent, le projet ne déclare pas ce pattern et il n'y a
-rien à contrôler. Ce qui s'applique réellement en session est le garde-fou
+Le bloc est optionnel pour un profil qui n'installe pas le pattern ; pour un profil
+qui l'installe (``profile-map.yaml``, ``mapped_capabilities``, cumulatif), son absence
+est un avertissement ``firewall.plan_block_missing`` : un pattern installé mais jamais
+déclaré ne contrôlait rien. Ce qui s'applique réellement en session est le garde-fou
 d'exécution (``tool_policy._untrusted_escalation``) ; ce contrôle vérifie
 seulement que la déclaration du projet l'engage.
 """
@@ -20,13 +22,31 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.standard_checks.base import StandardVerificationResult, _add_check
+from grimoire.core.standard_checks.base import StandardProfile, StandardVerificationResult, _add_check
+
+PATTERN_ID = "plan-then-execute"
+
+
+def _pattern_installed(profile: StandardProfile) -> bool:
+    """Le pattern est-il installé au palier de *profile* (ou à un palier inférieur) ?"""
+    from grimoire.core.agentic_standard import load_profile_map
+
+    for raw in load_profile_map().get("profiles", []):
+        if PATTERN_ID in (raw.get("mapped_capabilities") or ()):
+            return True
+        if str(raw.get("id")) == profile.id:
+            return False
+    return False
 
 __all__ = ["_verify_plan_then_execute"]
 
 
 def _verify_plan_then_execute(
-    data: dict[str, Any], strict_profile: bool, result: StandardVerificationResult, rel_path: Path
+    data: dict[str, Any],
+    profile: StandardProfile,
+    strict_profile: bool,
+    result: StandardVerificationResult,
+    rel_path: Path,
 ) -> None:
     """Pattern ``plan-then-execute`` (Beurer-Kellner et al.) : le plan est figé avant de lire du contenu non fiable.
 
@@ -38,6 +58,13 @@ def _verify_plan_then_execute(
     réellement en session ; ce contrôle vérifie que la déclaration l'engage.
     """
     if "plan_then_execute" not in data:
+        if _pattern_installed(profile):
+            _add_check(
+                result, "firewall.plan_block_missing", "warning",
+                "The plan-then-execute pattern is installed at this profile but prompt-firewall.yaml has no "
+                "plan_then_execute: block — nothing is declared, so nothing is checked.",
+                path=rel_path,
+            )
         return
     block = data["plan_then_execute"]
     severity = "error" if strict_profile else "warning"

@@ -79,12 +79,25 @@ def expired_text(expired: tuple[str, ...]) -> str:
 
 
 def unreadable_text(unreadable: tuple[str, ...]) -> str:
-    """Tri R38/R39 : une source de tâches est corrompue — la nommer, et dire que ce n'est pas « aucune tâche »."""
+    """Tri R38/R39 : une source de tâches est corrompue — la nommer, dire que ce n'est pas « aucune tâche », et le remède.
+
+    Le ledger est un journal en ajout seul, souvent non suivi par git : le remède n'est
+    donc ni ``git checkout`` ni une réécriture, mais de sortir la ligne fautive du journal
+    en la conservant. Le board, lui, se corrige comme un YAML.
+    """
+    fixes = []
+    if any(item.startswith("ledger") for item in unreadable):
+        fixes.append(
+            "Ledger : ne le réécris pas. Copie la ou les lignes citées dans un fichier à part "
+            "(par exemple `events.jsonl.corrompu`), retire-les de `events.jsonl` sans toucher aux autres, "
+            "puis relance ; rien n'est perdu et le journal reste en ajout seul."
+        )
+    if any(item.startswith("board") for item in unreadable):
+        fixes.append("Board : corrige le YAML du fichier cité (ou restaure-le depuis une sauvegarde).")
     return (
         f"État des tâches illisible : {' ; '.join(unreadable)}. "
         "Ce n'est pas « aucune tâche en cours » : la tâche de cette session ne peut pas être déterminée. "
-        "Répare ou restaure le fichier (`grimoire doctor`, ou `git diff` / `git checkout` sur le chemin cité), "
-        "ou pose GRIMOIRE_TASK_ID=<id> pour désigner la tâche explicitement."
+        f"{' '.join(fixes)} Ou pose GRIMOIRE_TASK_ID=<id> pour désigner la tâche explicitement."
     )
 
 
@@ -377,7 +390,7 @@ def stop_scope(hook: HookInput, active: ActiveTask) -> ActiveTask:
         return active
     if task.claim is not None and task.claim.session_id == hook.session_id:
         return active
-    return ActiveTask("bootstrap", "bootstrap", expired=active.expired)
+    return ActiveTask("bootstrap", "bootstrap", expired=active.expired, unreadable=active.unreadable)
 
 
 def dirty_files(hook: HookInput) -> tuple[str, ...]:

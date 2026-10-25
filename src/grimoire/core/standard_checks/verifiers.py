@@ -1225,6 +1225,13 @@ def _verify_handoff_targets(
             )
             continue
         for end in ("from", "to"):
+            if not isinstance(handoff[end], str):
+                # Le gabarit et le modèle déclarent un seul rôle par bout ; une liste est refusée, pas devinée.
+                _add_check(
+                    result, "orchestration.handoff_invalid", "error",
+                    f"handoffs[{index}].{end} must be a single role_id string, not a list or mapping.", path=rel_path,
+                )
+                continue
             role_id = str(handoff[end])
             if role_id not in known:
                 _add_check(

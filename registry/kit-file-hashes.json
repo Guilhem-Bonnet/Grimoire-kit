@@ -1486,6 +1486,10 @@
    "version": "3.24.0",
    "path": "archetypes/platform-engineering/agents/reliability-engineer.md"
   },
+  "61e817dcc2f2bc893e361f209ed2bf787419af89caa3cf43b8e84a55357ef6ee": {
+   "version": "3.65.0",
+   "path": "framework/hooks/pre-push.sh"
+  },
   "62466869b21b41b5e28cf19650b31b5d76cce6402571537aa0e6b1ae1d72d2b6": {
    "version": "3.4.2",
    "path": "framework/prompt-templates/periodic-report.md"
@@ -1753,6 +1757,10 @@
   "6e949461c2a8ae3280224d021b1d67eac35be7fc3e898ca11088f0dc8a481792": {
    "version": "3.35.0",
    "path": "framework/tools/grimoire-setup.py"
+  },
+  "6f3bca362e4a9d9c33cd75882fb770edaa6eaadb1cd60609addcc948f2cf7d98": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/capability-map.yaml"
   },
   "6f5bc141e22b00029f6a3f3f794f47ad4f370e62b8ce1db053c4bffa7732e442": {
    "version": "3.16.0",
@@ -2865,6 +2873,10 @@
   "b2f630c34639c8e890b9d1405bd0d4b595da6655455ed6cb98a5af957cb020f4": {
    "version": "3.16.0",
    "path": "framework/tools/expert-tool-chain.py"
+  },
+  "b314d01237fb1458d7a3f64796a44dfebd1625b24b631fea0dd4b8808c9db1b7": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
   },
   "b32383e3132e6702b71ba82d815db5a4a2cdd152212d1ace256bfe76c6de63f3": {
    "version": "3.32.0",
@@ -4057,6 +4069,10 @@
   "f3b9aef9a008a0c6bc154487400836b3e90d9df2b7e6c250dab9cd01f8e8856f": {
    "version": "3.64.0",
    "path": "framework/agent-rules.md"
+  },
+  "f3e962afc44c415e8b945d69e90c6507b3ca03d6991d4c57f516e7e4e994aabd": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
   "f4230898f3279c5fc23f72e4142f057d1ca9ad07e3fc442c30284e3ffbb5bef5": {
    "version": "3.4.2",

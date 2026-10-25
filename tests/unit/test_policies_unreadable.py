@@ -72,7 +72,7 @@ def test_fichier_absent_ou_vide_ou_sans_rules_reste_sans_regle(project: Path) ->
     assert load_custom_rules(project) == ()
     _write(project, "")
     assert load_custom_rules(project) == ()
-    _write(project, "# rien\nautre: 1\n")
+    _write(project, "# rien du tout\n")
     assert load_custom_rules(project) == ()
     _write(project, "rules: []\n")
     assert load_custom_rules(project) == ()
@@ -85,3 +85,55 @@ def test_docstring_des_decisions_dit_ce_que_le_code_rend() -> None:
     doc = decisions.__doc__ or ""
     assert "Outcome.ASK" in doc
     assert "degrade to :data:`Outcome.ALLOW`" not in doc
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "rule:\n  - id: x\n",  # singulier
+        "Rules:\n  - id: x\n",  # casse
+        "rules:\n",  # null dans un fichier non vide
+        "autre: 1\n",  # clés, mais pas de rules
+    ],
+)
+def test_faute_de_frappe_sur_la_cle_racine_n_est_pas_aucune_regle(project: Path, text: str) -> None:
+    _write(project, text)
+    with pytest.raises(GrimoirePolicyError) as err:
+        load_custom_rules(project)
+    assert err.value.error_code == "GR-POL-004"
+
+
+def test_rules_vide_explicite_et_entete_restent_valides(project: Path) -> None:
+    _write(project, '$schema: "x"\nmetadata: {a: 1}\nrules: []\n')
+    assert load_custom_rules(project) == ()
+    _write(project, "# juste un commentaire\n")
+    assert load_custom_rules(project) == ()
+
+
+def test_dossier_ou_lien_casse_n_est_pas_absent(project: Path) -> None:
+    path = project / "_grimoire" / "standard" / "policies.yaml"
+    path.mkdir(parents=True)
+    with pytest.raises(GrimoirePolicyError):
+        load_custom_rules(project)
+    path.rmdir()
+    try:
+        path.symlink_to(project / "nulle-part.yaml")
+    except OSError:  # pragma: no cover - symlinks indisponibles (Windows sans droits)
+        pytest.skip("liens symboliques indisponibles")
+    with pytest.raises(GrimoirePolicyError):
+        load_custom_rules(project)
+
+
+def test_outil_en_lecture_seule_passe_avec_avertissement_le_reste_demande(project: Path) -> None:
+    _write(project, "rules: [")
+    read = HookInput(
+        event=HookEvent.PRE_TOOL_USE,
+        project_root=project,
+        tool_name="Read",
+        tool_input={"file_path": str(project / "_grimoire/standard/policies.yaml")},
+        session_id="sess-r37-read",
+    )
+    decision = run_decision("grimoire.tool-policy", read)
+    assert decision.outcome is Outcome.ALLOW
+    assert "GR-POL-004" in decision.context or "illisible" in decision.context
+    assert run_decision("grimoire.tool-policy", _hook(project)).outcome is Outcome.ASK

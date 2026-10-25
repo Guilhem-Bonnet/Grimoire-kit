@@ -217,7 +217,7 @@ patterns:
     required_artifacts: ["prompt-firewall.yaml"]
     rule_refs: []
     hook_refs: []
-    check_refs: ["firewall.plan_not_frozen", "firewall.plan_deviation_allowed"]
+    check_refs: ["firewall.plan_not_frozen", "firewall.plan_deviation_allowed", "firewall.plan_block_missing"]
   - id: remote-hygiene-guard
     category: governance
     maturity: controlled

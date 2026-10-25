@@ -77,3 +77,12 @@ def test_la_note_de_trou_de_verification_a_disparu() -> None:
     text = (framework_path() / "agentic-standard" / "traceability.yaml").read_text(encoding="utf-8")
     assert "ne lit que roles" not in text
     assert "Ne lit que roles" not in text
+
+
+def test_cible_en_liste_est_refusee_explicitement(project: Path) -> None:
+    """Le modèle déclare un rôle par bout : une liste n'est pas devinée, elle est refusée (et nommée)."""
+    _set_handoffs(project, "handoffs:\n  - from: planner\n    to: [context_orchestrator, release_governor]\n")
+    result = verify_standard_profile(project)
+    bad = [c for c in result.checks if c.id == "orchestration.handoff_invalid"]
+    assert bad
+    assert "single role_id" in bad[0].message
