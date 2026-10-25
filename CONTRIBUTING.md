@@ -24,7 +24,7 @@ grimoire-kit/
 ├── src/grimoire/
 │   ├── core/           # Config, Project, Scanner, Merge, Validator
 │   ├── cli/            # CLI Typer (app.py, cmd_upgrade.py, cmd_merge.py)
-│   ├── tools/          # HarmonyCheck, PreflightCheck, MemoryLint, etc.
+│   ├── tools/          # HarmonyCheck, MemoryLint, Stigmergy
 │   ├── memory/         # MemoryManager + backends
 │   ├── mcp/            # Serveur MCP
 │   └── registry/       # AgentRegistry, LocalRegistry

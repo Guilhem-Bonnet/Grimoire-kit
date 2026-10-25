@@ -21,7 +21,6 @@ if TYPE_CHECKING:  # names remain statically visible to type checkers
     from grimoire.core.log import configure_logging
     from grimoire.core.project import GrimoireProject
     from grimoire.core.resolver import PathResolver
-    from grimoire.core.retry import with_retry
     from grimoire.core.scaffold import ProjectScaffolder
     from grimoire.core.scanner import StackScanner
     from grimoire.core.schema import generate_schema
@@ -37,7 +36,6 @@ __all__ = [
     "configure_logging",
     "deprecated",
     "generate_schema",
-    "with_retry",
 ]
 
 _LAZY: dict[str, tuple[str, str]] = {
@@ -51,7 +49,6 @@ _LAZY: dict[str, tuple[str, str]] = {
     "configure_logging": ("grimoire.core.log", "configure_logging"),
     "deprecated": ("grimoire.core.deprecation", "deprecated"),
     "generate_schema": ("grimoire.core.schema", "generate_schema"),
-    "with_retry": ("grimoire.core.retry", "with_retry"),
 }
 
 
