@@ -69,11 +69,19 @@ def _journal(root: Path) -> list[dict[str, Any]]:
 
 
 def _mcp_body(result: Any) -> tuple[bool, dict[str, Any]]:
-    """``(est_une_erreur, corps_json)`` d'un résultat d'outil MCP."""
+    """``(est_une_erreur, corps_json)`` d'un résultat d'outil MCP.
+
+    Selon la version du SDK, un appel direct rend une chaîne JSON ou un ``CallToolResult`` : on lit
+    le corps dans les deux cas, et l'erreur est ``isError`` OU la clé ``error`` du corps (contrat
+    stable des outils du kit, voir ``_tool_error``).
+    """
     if isinstance(result, str):
-        return False, json.loads(result)
-    text = "".join(getattr(block, "text", "") for block in result.content)
-    return bool(getattr(result, "isError", False)), json.loads(text)
+        body = json.loads(result)
+        flagged = False
+    else:
+        body = json.loads("".join(getattr(block, "text", "") for block in result.content))
+        flagged = bool(getattr(result, "isError", False))
+    return flagged or "error" in body, body
 
 
 def _cli(root: Path, monkeypatch: pytest.MonkeyPatch, *args: str) -> tuple[int, dict[str, Any]]:

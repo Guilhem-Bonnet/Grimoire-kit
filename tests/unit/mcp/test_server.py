@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
 from types import ModuleType
 from typing import Any, ClassVar
 
@@ -779,6 +779,9 @@ class TestReadOnlyToolsWriteNothing:
         created = sorted(set(after) - set(before))
         modified = sorted(k for k in set(after) & set(before) if after[k] != before[k])
         allowed = self._ALLOWED_WRITES.get(name, frozenset())
-        assert not set(created) - allowed, f"{name} a créé {sorted(set(created) - allowed)} malgré readOnlyHint"
-        assert not set(modified) - allowed, f"{name} a modifié {sorted(set(modified) - allowed)} malgré readOnlyHint"
+        # Chemins comparés en POSIX : Windows rend `\\` dans `str(relative_to(...))`.
+        created_posix = {PurePath(c).as_posix() for c in created}
+        modified_posix = {PurePath(m).as_posix() for m in modified}
+        assert not created_posix - allowed, f"{name} a créé {sorted(created_posix - allowed)} malgré readOnlyHint"
+        assert not modified_posix - allowed, f"{name} a modifié {sorted(modified_posix - allowed)} malgré readOnlyHint"
 
