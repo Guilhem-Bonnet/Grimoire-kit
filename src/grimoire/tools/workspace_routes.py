@@ -75,7 +75,7 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-from grimoire.missions.liveness import probe_claude_agents
+from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
     workspace_api,
@@ -88,6 +88,7 @@ from grimoire.tools import (
     workspace_memory,
     workspace_portfolio,
     workspace_pulse,
+    workspace_sessions,
 )
 
 __all__ = [
@@ -152,19 +153,26 @@ def _glossary(project_root: Path, _query: _Query) -> Any:
 #: d'un projet dont une session bat ferait un lancement : un résultat vaut donc
 #: ce délai, pour les deux lectures qui l'utilisent (projet et portefeuille).
 _PROBE_TTL_SECONDS = 10.0
-_probe_memo: tuple[float, Mapping[str, str] | None] | None = None
+_probe_memo: tuple[float, Mapping[str, Mapping[str, Any]] | None] | None = None
 _probe_lock = threading.Lock()
 
 
-def _host_probe() -> Mapping[str, str] | None:
+def _host_entries() -> Mapping[str, Mapping[str, Any]] | None:
+    """Les entrées de ``claude agents --json`` (vue Sessions, P33), mémorisées :data:`_PROBE_TTL_SECONDS`."""
     global _probe_memo
     with _probe_lock:
         now = time.monotonic()
         if _probe_memo is not None and now - _probe_memo[0] < _PROBE_TTL_SECONDS:
             return _probe_memo[1]
-        result = probe_claude_agents()
+        result = probe_entries()
         _probe_memo = (now, result)
         return result
+
+
+def _host_probe() -> Mapping[str, str] | None:
+    """``{session_id: statut}`` : la même sonde mémorisée que :func:`_host_entries`."""
+    entries = _host_entries()
+    return None if entries is None else {sid: str(e.get("status")) for sid, e in entries.items()}
 
 
 def _tasks(project_root: Path, query: _Query) -> Any:
@@ -299,6 +307,19 @@ def _portfolio_tasks(project_root: Path, query: _Query) -> Any:
         live=live_raw not in (None, "", "0", "false"),
         live_minutes=int(minutes_raw) if minutes_raw else workspace_portfolio.DEFAULT_LIVE_MINUTES,
         probe=_host_probe,
+    )
+
+
+def _sessions(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/sessions[?scope=portfolio]`` — la vue Sessions de Travail (P33). Lecture pure.
+
+    Le projet servi seul, ou tout le registre (``scope=portfolio``) : état de
+    chaque session (active, attend ta réponse, silencieuse, terminée), tâches
+    tenues, dernier signe, consignes en attente, activité des quinze dernières
+    minutes et commande de reprise à copier.
+    """
+    return workspace_sessions.sessions_view(
+        project_root, portfolio=_one(query, "scope") == "portfolio", probe=_host_entries
     )
 
 
@@ -459,6 +480,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
     f"{PREFIX}portfolio/tasks": _portfolio_tasks,
+    f"{PREFIX}sessions": _sessions,
     f"{PREFIX}pulse": _pulse,
     f"{PREFIX}attention": _attention,
     f"{PREFIX}flows/runs": _flow_runs,

@@ -549,6 +549,14 @@ body[data-active-space="source"] {
   color: var(--onfill);
 }
 
+/* Compte d'une vue (« Sessions 4 », P33) : même encre que le libellé, plus léger ;
+ * sur le segment pressé il garde l'encre du fond plein (contraste du libellé). */
+.seg-count {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
 /* Espace vide (pas encore de Mission Ledger / blueprint) : les vues restent
    visibles, désactivées, plutôt que disparaître — l'utilisateur voit ce que
    l'espace offrira dès qu'il aura des données. Jamais pressé et désactivé à
