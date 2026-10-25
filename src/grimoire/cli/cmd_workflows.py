@@ -33,7 +33,6 @@ from grimoire.workflows.registry import (
     load_workflows,
     workflow_slug,
 )
-from grimoire.workflows.teams import UnreadableManifest, load_team, load_team_catalog
 
 __all__ = ["workflows_app"]
 
@@ -213,7 +212,7 @@ def workflows_show(
     workflow: str = typer.Argument(..., help="Workflow slug or prompt filename."),
     path: Path = _WORKFLOW_PATH_ARGUMENT,
 ) -> None:
-    """Show a workflow: what it declares, the team it runs, and its content."""
+    """Show a workflow: what it declares and its content."""
     root = path.resolve()
     entry = find_workflow(root, workflow)
     if entry is None:
@@ -221,13 +220,10 @@ def workflows_show(
         raise typer.Exit(1)
 
     content = entry.path.read_text(encoding="utf-8")
-    team = load_team(root, entry.team) if entry.team else None
 
     if _get_fmt(ctx) == "json":
         payload = entry.to_dict()
         payload["content"] = content
-        if team is not None:
-            payload["team_manifest"] = team.to_dict()
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
 
@@ -248,70 +244,8 @@ def workflows_show(
         console.print("Triggers:")
         for trigger in entry.triggers:
             console.print(f"  - {trigger}")
-    if team is not None:
-        console.print(f"\n[bold]Team {team.name}[/bold] — {team.description}")
-        for member in team.agents:
-            flag = "" if member.required else " [dim](optionnel)[/dim]"
-            console.print(f"  - [bold]{member.name}[/bold] · {member.role}{flag}")
-        if team.handoff_to:
-            console.print(f"  handoff → [bold]{team.handoff_to}[/bold] · {team.handoff_trigger}")
-    elif entry.team:
-        console.print(f"[yellow]Team declared but not installed:[/yellow] {entry.team}")
     console.print()
     console.print(content)
-
-
-@workflows_app.command("teams")
-def workflows_teams(
-    ctx: typer.Context,
-    path: Path = _WORKFLOW_PATH_ARGUMENT,
-) -> None:
-    """List the team manifests a workflow can run — members and handoff chain.
-
-    The manifests shipped with the kit had no reader: three files and a schema
-    that nothing in the SDK ever loaded.
-    """
-    root = path.resolve()
-    catalog = load_team_catalog(root)
-    teams = catalog.teams
-
-    if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps(
-            {
-                "count": len(teams),
-                "teams": [team.to_dict() for team in teams],
-                "unreadable": [item.to_dict() for item in catalog.unreadable],
-            },
-            indent=2, ensure_ascii=False,
-        ))
-        _print_unreadable(catalog.unreadable)
-        return
-
-    _print_unreadable(catalog.unreadable)
-    if not teams:
-        console.print("[yellow]No team manifest found.[/yellow]")
-        return
-
-    table = Table(title="Grimoire Teams")
-    table.add_column("Team", style="bold")
-    table.add_column("Specialty")
-    table.add_column("Agents")
-    table.add_column("Handoff")
-    for team in teams:
-        table.add_row(
-            team.name,
-            team.specialty or team.description or "—",
-            ", ".join(member.name for member in team.agents) or "—",
-            team.handoff_to or "—",
-        )
-    console.print(table)
-    console.print(f"\n[dim]{len(teams)} team(s).[/dim]")
-
-
-def _print_unreadable(items: tuple[UnreadableManifest, ...]) -> None:
-    """Un manifeste que le catalogue n'a pas pu lire est nommé, jamais omis."""
-    for item in items:
-        console.print(f"[yellow]![/yellow] manifeste d'équipe illisible : {item.path} — {item.reason}")
 
 
 @workflows_app.command("install")

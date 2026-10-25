@@ -908,6 +908,7 @@ body[data-active-space="source"] {
 
 .tbl td {
   padding: 8px var(--sp-3);
+  height: var(--h-row);
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -917,8 +918,8 @@ body[data-active-space="source"] {
 }
 
 :root[data-density="compacte"] .tbl td {
-  padding-top: 5px;
-  padding-bottom: 5px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 /* Ligne qui ouvre quelque chose : `.tbl-pick` sur la table. */
@@ -969,6 +970,24 @@ body[data-active-space="source"] {
 
 .skeleton-line:nth-child(3n) {
   width: 64%;
+}
+
+/* P60 : un chiffre ne bouge que lorsque sa valeur change réellement. Une seule
+   passe (`1`), jamais en boucle ; shell.js ne pose `data-changed` ni au premier
+   rendu, ni sous prefers-reduced-motion (et la règle globale coupe l'animation). */
+.kpi-val[data-changed="true"] {
+  animation: kpi-tick 480ms ease-out 1;
+}
+
+@keyframes kpi-tick {
+  from {
+    opacity: 0.35;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes skeleton-shimmer {
@@ -2357,4 +2376,82 @@ body[data-active-space] .panel-head {
 
 .formula:hover {
   color: var(--ink);
+}
+
+/* ── Transition entre espaces (P54) ────────────────────────────────────────
+ * shell.js::goto passe par document.startViewTransition quand l'API existe et
+ * que le mouvement n'est pas réduit. Fondu court : 150 ms, sous le plafond de
+ * 200 ms. Sans l'API, ou sous prefers-reduced-motion, aucun mouvement. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 150ms;
+  animation-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}
+
+/* ── Aide des raccourcis clavier (P58) ─────────────────────────────────────*/
+
+#shortcuts[hidden] {
+  display: none;
+}
+
+#shortcuts {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: var(--scrim-soft);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
+}
+
+#shortcuts-box {
+  width: min(520px, 100%);
+  max-height: 72vh;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-tip);
+  color: var(--ink);
+}
+
+#shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-3);
+}
+
+#shortcuts-title {
+  margin: 0;
+  font-size: var(--t-l);
+  font-weight: 600;
+}
+
+#shortcuts-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+  font-size: var(--t-m);
+}
+
+#shortcuts-list dt,
+#shortcuts-list dd {
+  margin: 0;
+}
+
+#shortcuts-list dd {
+  color: var(--ink2);
 }

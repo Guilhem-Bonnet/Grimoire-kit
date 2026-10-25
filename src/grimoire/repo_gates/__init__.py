@@ -100,6 +100,11 @@ GATES: tuple[Gate, ...] = (
         "check-doc-claims.py",
         "un chiffre de vitrine (%, ×, nombre de tests, badge numérique) sans ancre `<!-- source: ... -->`",
     ),
+    Gate(
+        "skills",
+        "check-skills.py",
+        "un skill livré hors de la spécification Agent Skills, ou sans evals.json d'au moins un cas",
+    ),
 )
 
 GATE_IDS: tuple[str, ...] = tuple(gate.id for gate in GATES)

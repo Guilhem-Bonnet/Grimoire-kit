@@ -327,7 +327,7 @@ def test_densite_et_plein_ecran_sont_deux_reglages_distincts(page: Page, served_
     assert page.locator("#st-density").inner_text() == "Densité : confortable"
     assert page.locator("#st-fullscreen").inner_text().startswith("Plein écran")
     titles = page.locator(".pref-title").all_inner_texts()
-    assert titles == ["Thème", "Densité", "Plein écran"]
+    assert titles == ["Thème", "Densité", "Contraste", "Plein écran"]
     assert "concentration" not in page.locator("body").inner_text().lower()
 
     page.locator("[data-density-pref='compacte']").click()

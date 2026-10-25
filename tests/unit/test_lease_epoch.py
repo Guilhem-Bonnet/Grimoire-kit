@@ -377,11 +377,9 @@ def test_attempts_derived_from_ledger(tmp_path: Path) -> None:
     ledger.append_event("task.human_answered", tid, "task", "guilhem", {"task_id": tid, "origin": "human"})
     assert ledger.attempts(tid) == 0 and ledger.backoff_until(tid) is None
     assert backoff_delay(0) == timedelta(0)
-    # L'instantané du rejeu (K13) s'écrit dès qu'un rejeu dépasse SNAPSHOT_AFTER_MS : sur un runner lent,
-    # c'est un cache légitime, pas un compteur à côté du ledger.
-    assert sorted(
-        p.name for p in (tmp_path / "ledger").iterdir() if not p.name.startswith(".") and p.name != SNAPSHOT_FILENAME
-    ) == ["events.jsonl", "leases"]
+    # L'instantané est un cache que le rejeu écrit quand il est lent (runner chargé) : pas un compteur.
+    names = {p.name for p in (tmp_path / "ledger").iterdir() if not p.name.startswith(".")}
+    assert sorted(names - {SNAPSHOT_FILENAME}) == ["events.jsonl", "leases"]
 
 
 # ── CA : récolte sous quota ─────────────────────────────────────────────────

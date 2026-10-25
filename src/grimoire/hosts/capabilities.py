@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import (
@@ -74,8 +75,6 @@ class HostProfile:
     permissions_native: bool = False
     #: Reads an MCP client configuration.
     mcp_native: bool = False
-    #: Can install a packaged bundle without mutating the target repository.
-    plugin_packaging: bool = False
     #: Entry-point file the host reads first, when it has one.
     instructions_entrypoint: str = ""
     notes: str = ""
@@ -88,7 +87,12 @@ class HostProfile:
         manifest = self.manifest
         if manifest is None:
             return False
-        return bool(getattr(manifest.hooks, _HOOK_FIELDS[event], False))
+        field_name = _HOOK_FIELDS.get(event)
+        if field_name is None:
+            # Événement déclaré mais non câblé (``NOT_EMITTED_EVENTS``) : aucun
+            # hôte ne le reçoit, donc aucun émetteur ne l'écrit.
+            return False
+        return bool(getattr(manifest.hooks, field_name, False))
 
     def supported_events(self) -> tuple[HookEvent, ...]:
         return tuple(e for e in HookEvent if self.supports_event(e))
@@ -105,7 +109,6 @@ class HostProfile:
                 "agent_autostart": self.agent_autostart,
                 "permissions": self.permissions_native,
                 "mcp": self.mcp_native,
-                "plugin_packaging": self.plugin_packaging,
             },
             "hook_events": [e.value for e in self.supported_events()],
             "instructions_entrypoint": self.instructions_entrypoint,
@@ -123,7 +126,6 @@ CLAUDE_CODE_PROFILE = HostProfile(
     agent_autostart=True,
     permissions_native=True,
     mcp_native=True,
-    plugin_packaging=True,
     instructions_entrypoint="CLAUDE.md",
     notes=(
         "Every surface has a native counterpart. Starting inside an agent: `claude --agent <name>` "
@@ -142,7 +144,6 @@ COPILOT_PROFILE = HostProfile(
     blocking_hooks=True,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint=".github/copilot-instructions.md",
     notes="No declarative permission table: permissions are enforced by the pre_tool_use hook instead.",
 )
@@ -156,7 +157,6 @@ CODEX_PROFILE = HostProfile(
     blocking_hooks=False,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint="AGENTS.md",
     notes="Prose entrypoint plus MCP: agents, skills and commands degrade to a described catalog.",
 )
@@ -170,7 +170,6 @@ CURSOR_PROFILE = HostProfile(
     blocking_hooks=False,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint=".cursor/rules/grimoire.mdc",
     notes="Rule files plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
@@ -184,7 +183,6 @@ GEMINI_PROFILE = HostProfile(
     blocking_hooks=False,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint="GEMINI.md",
     notes="Prose entrypoint plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
@@ -198,7 +196,6 @@ OPENCODE_PROFILE = HostProfile(
     blocking_hooks=True,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint=".opencode/grimoire.md",
     notes=(
         "Agents, skills, commands et MCP sont chargés depuis .opencode/ et opencode.json (vérifié, 1.17.11). "
@@ -281,8 +278,14 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
             fallback = f"entry persona named in {profile.instructions_entrypoint or 'the instructions entrypoint'}"
             events = ()
         gaps.append(CapabilityGap("agent_autostart", fallback, events))
+    if not profile.mcp_native:
+        # Hôte inconnu : on ne sait pas, on ne dit pas qu'il n'a pas de client MCP.
+        if profile.host_id is HostId.UNKNOWN:
+            gaps.append(CapabilityGap("mcp", "non déterminé : hôte inconnu, client MCP ni affirmé ni exclu"))
+        else:
+            gaps.append(CapabilityGap("mcp", "outils du kit atteints par la CLI `grimoire`, sans client MCP"))
     if not profile.blocking_hooks:
-        missing = tuple(e.value for e in HookEvent if not profile.supports_event(e))
+        missing = tuple(e.value for e in _HOOK_FIELDS if not profile.supports_event(e))
         gaps.append(CapabilityGap("blocking_hooks", "governance stated as instructions, enforced by CI only", missing))
     elif not profile.permissions_native:
         gaps.append(CapabilityGap("permissions", "permission rules enforced through the pre_tool_use hook"))
@@ -448,18 +451,33 @@ def recorded_contract(host_id: HostId) -> HostContract:
     return _CONTRACTS.get(host_id) or _unverified_contract(host_id)
 
 
-def contract_for(host_id: HostId, host_version: str | None) -> HostContract:
+def contract_for(host_id: HostId, host_version: str | None, *, project_root: Path | None = None) -> HostContract:
     """Contrat de *host_id* valable pour *host_version* ; rien de vérifié sinon.
 
     Une preuve vaut pour la version sur laquelle elle a été capturée, pas pour
     les autres. Version absente (``None``, vide), différente de la version
     capturée ou jamais capturée : contrat entièrement non vérifié.
+
+    Aucune preuve n'est retenue (capturée ou sondée) quand la configuration effective de l'hôte désactive
+    les hooks (#886) : la sonde teste un dossier temporaire, pas les réglages réels (voir
+    :func:`~grimoire.hosts.contract_probe.hooks_disabled_reason`). *project_root* : le dossier du projet,
+    par défaut le dossier courant (celui d'où l'hôte lance ses hooks).
     """
     recorded = recorded_contract(host_id)
     wanted = (host_version or "").strip()
-    if wanted and recorded.host_version and wanted == recorded.host_version:
-        return recorded
-    return _probed_contract(host_id, wanted) or _unverified_contract(host_id)
+    contract = (
+        recorded
+        if wanted and recorded.host_version and wanted == recorded.host_version
+        else _probed_contract(host_id, wanted)
+    )
+    if contract is None or not contract.fenced:
+        return contract or _unverified_contract(host_id)
+    if host_id is HostId.CLAUDE_CODE_CLI:
+        from grimoire.hosts.contract_probe import hooks_disabled_reason
+
+        if hooks_disabled_reason(project_root):
+            return _unverified_contract(host_id)
+    return contract
 
 
 def _probed_contract(host_id: HostId, version: str) -> HostContract | None:
@@ -478,16 +496,16 @@ def _probed_contract(host_id: HostId, version: str) -> HostContract | None:
     return HostContract(host_id=host_id, host_version=version, evidence=evidence)
 
 
-def is_fenced(host_id: HostId, host_version: str | None) -> bool:
+def is_fenced(host_id: HostId, host_version: str | None, *, project_root: Path | None = None) -> bool:
     """Un bail perdu peut-il être récolté sur cet hôte, à cette version ? Non, sauf preuve.
 
     La preuve est celle de la version capturée : toute autre version, ou une
     version inconnue (``None``), vaut ``False``.
     """
-    return contract_for(host_id, host_version).fenced
+    return contract_for(host_id, host_version, project_root=project_root).fenced
 
 
-def claim_host_is_fenced(host: str, host_version: str | None) -> bool:
+def claim_host_is_fenced(host: str, host_version: str | None, *, project_root: Path | None = None) -> bool:
     """:func:`is_fenced` pour l'hôte tel qu'un claim le nomme (K3, issue #768).
 
     *host* est une graphie du ledger (``host-claude-code-cli``, ``claude-code-cli``,
@@ -495,4 +513,4 @@ def claim_host_is_fenced(host: str, host_version: str | None) -> bool:
     un hôte prouvé : ``False``, comme une version absente.
     """
     host_id = resolve_host(host)
-    return host_id is not None and is_fenced(host_id, host_version)
+    return host_id is not None and is_fenced(host_id, host_version, project_root=project_root)

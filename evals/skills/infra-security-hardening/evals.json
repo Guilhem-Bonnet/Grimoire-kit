@@ -1,0 +1,11 @@
+{
+  "skill_name": "infra-security-hardening",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Ajoute une règle firewall et un secret SOPS pour ce service.",
+      "expected_output": "Passe par le durcissement : secret chiffré SOPS/age, règle minimale, vérification de conformité avant de conclure.",
+      "files": []
+    }
+  ]
+}

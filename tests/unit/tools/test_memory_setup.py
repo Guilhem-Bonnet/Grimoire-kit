@@ -282,7 +282,8 @@ class TestNextSteps:
         assert any("export GRIMOIRE_NEO4J_PASSWORD" in s for s in plan.next_steps)
         assert any("memory gate" in s for s in plan.next_steps)
 
-    def test_missing_extras_are_grouped_in_one_pip_command(self, tmp_path: Path) -> None:
+    def test_missing_extras_are_grouped_in_one_pip_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("grimoire.cli.updater._detect_manager", lambda: ("pip", None))
         _write_config(tmp_path)
         plan = build_memory_plan(
             tmp_path,

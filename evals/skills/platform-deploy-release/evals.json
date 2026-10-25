@@ -1,0 +1,11 @@
+{
+  "skill_name": "platform-deploy-release",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Prépare le déploiement progressif de ces trois services avec un plan de rollback.",
+      "expected_output": "Propose un rollout progressif ordonné entre services, un rollback explicite et les feature flags nécessaires.",
+      "files": []
+    }
+  ]
+}

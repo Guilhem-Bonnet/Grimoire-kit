@@ -29,6 +29,8 @@ from grimoire.missions.lease import LeaseFile, lease_path, read_lease, write_lea
 from grimoire.missions.schemas import TaskState
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from grimoire.missions.ledger import LeaseView, MissionLedger
     from grimoire.missions.schemas import MissionTask
 
@@ -36,11 +38,11 @@ if TYPE_CHECKING:
 RECLAIMED_KEY = "reclaimed"
 
 
-def _fenced(view: LeaseView) -> bool:
+def _fenced(view: LeaseView, project_root: Path | None = None) -> bool:
     from grimoire.hosts import capabilities
 
     try:
-        return bool(capabilities.claim_host_is_fenced(view.host, view.host_version))
+        return bool(capabilities.claim_host_is_fenced(view.host, view.host_version, project_root=project_root))
     except Exception:
         return False  # table illisible : hôte tenu pour non fencé (fail-closed)
 
@@ -66,7 +68,7 @@ def release_lost_claim(ledger: MissionLedger, task: MissionTask, actor_id: str) 
         raise GrimoireMissionError(f"{refusal} — horloge incohérente : aucun bail n'est jugé perdu")
     if view is None or view.status != "lost":
         raise GrimoireMissionError(refusal)
-    if held.actor_id != actor_id and not _fenced(view):
+    if held.actor_id != actor_id and not _fenced(view, ledger.project_root):
         raise GrimoireMissionError(
             f"{refusal} — bail perdu ({view.reason}), mais l'hôte {view.host or 'inconnu'} est sans frein vérifié : "
             f"sa session peut écrire encore. `grimoire task reap` pose la question à l'humain ; "

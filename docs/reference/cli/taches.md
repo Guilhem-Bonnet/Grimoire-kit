@@ -92,7 +92,7 @@ prochain export l'écrase.
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
 | `grimoire task trace <id> [--causes]` | Timeline unifiée d'une tâche : transitions, outils refusés, gates rouges, checkpoints, abort, preuves, incidents |
 | `grimoire task approve-check <id> [--cmd "<commande>"] [--allow-unattested]` | Approuver par empreinte les commandes de vérification de la tâche, pour cette tâche seule (governed/production : sans approbation, `task verify` et le dispatch de flow ne lancent rien) ; l'acteur est attesté par un tour humain postérieur au challenge de cet ensemble exact de commandes ; sans attestation (terminal nu), l'approbation est refusée sauf `--allow-unattested` (journalisée `unattested`) ; les caractères cachés (U+202E, U+200B) sont refusés |
-| `grimoire task trace-export [<dest>] [--format otel\|langfuse\|otlp] [--endpoint <url>] [--header NOM=VALEUR] [--mission-id <id>]` | Exporte le TraceLedger : JSONL aux conventions OTel GenAI ou Langfuse, ou `--format otlp --endpoint` vers un collecteur OTLP/HTTP (échoue si le lot n'est pas accepté) |
+| `grimoire task trace-export [<dest>] [--format otel\|langfuse\|otlp] [--endpoint <url>] [--header NOM=VALEUR] [--mission-id <id>]` | Exporte le TraceLedger (plus, pour OTel et OTLP, les spans des runs de flow lus dans le journal du kernel, avec `parentSpanId`) : JSONL aux conventions OTel GenAI ou Langfuse, ou `--format otlp --endpoint` vers un collecteur OTLP/HTTP (échoue si le lot n'est pas accepté) |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 | `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
 
@@ -128,7 +128,7 @@ reprojeté depuis le ledger si le projet est enrôlé (`_grimoire/standard/` pr�
 — plus besoin de relancer `task board export` pour qu'un claim se voie.
 
 Les mêmes gestes sont exposés aux agents par le serveur MCP (`task_add`,
-`task_list_ready`, `task_show`, `task_waves`, `task_claim`, `task_update`, `task_context`) :
+`task_intake` pour `add --intake`, `task_list_ready`, `task_show`, `task_waves`, `task_claim`, `task_update`, `task_context`) :
 même service (`TaskService.add` pour l'ouverture), même gate, même refus. Voir
 [Intégration MCP](../../guides/mcp.md).
 

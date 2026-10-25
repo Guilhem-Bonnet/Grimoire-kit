@@ -1,0 +1,11 @@
+{
+  "skill_name": "stack-go",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Ajoute un cas d'usage dans ce service Go, fichier internal/orders/service.go.",
+      "expected_output": "Respecte l'architecture hexagonale, écrit des tests table-driven et enveloppe les erreurs.",
+      "files": []
+    }
+  ]
+}

@@ -197,6 +197,24 @@ class RuntimeKernel:
             fh.write(line)
 
     def _emit(self, event_type: RunEventType, wfi: WorkflowInstance, ctx: ExecutionContext, payload: dict[str, Any] | None = None) -> RunEvent:
+        """Journalise un événement dans l'arbre de spans du run (R26).
+
+        Racine : le span du workflow (``span-workflow-<wfi>``, porté par
+        ``workflow.started``). Un node ouvre ``span-step-<node>`` sous la racine ;
+        tout événement du node (checkpoint, échec, outil) a ce span pour parent ;
+        les événements de workflow (pause, fin, abandon) ont la racine pour parent.
+        """
+        data = payload or {}
+        root_span = f"span-workflow-{wfi.id}"
+        step_id = str(data.get("step_id") or ctx.step_id or "")
+        step_span = f"span-step-{step_id}" if step_id else ""
+        random_span = f"span-{event_type.value}-{uuid.uuid4().hex[:6]}"
+        if event_type is RunEventType.WORKFLOW_STARTED:
+            span_id, parent_span_id = root_span, ""
+        elif event_type is RunEventType.STEP_STARTED and step_span:
+            span_id, parent_span_id = step_span, root_span
+        else:
+            span_id, parent_span_id = random_span, step_span or root_span
         event = RunEvent(
             id=f"evt-{uuid.uuid4().hex[:12]}",
             run_id=wfi.run_id or ctx.run_id,
@@ -207,13 +225,16 @@ class RuntimeKernel:
             actor_id=ctx.actor_id,
             host_id=ctx.host_id,
             created_at=_now_iso(),
-            payload=payload or {},
-            span_id=f"span-{event_type.value}-{uuid.uuid4().hex[:6]}",
+            payload=data,
+            span_id=span_id,
+            parent_span_id=parent_span_id,
         )
         self._append_event(event)
         return event
 
-    def _transition(self, wfi: WorkflowInstance, to_status: WorkflowStatus, abort_reason: str = "") -> WorkflowInstance:
+    def _transition(
+        self, wfi: WorkflowInstance, to_status: WorkflowStatus, abort_reason: str = "", **fields: Any
+    ) -> WorkflowInstance:
         """Legalite de `wfi.status -> to_status`, contre `_WF_TRANSITIONS`.
 
         Delegates to ``grimoire_flows_core.can_transition_status`` (issue
@@ -237,6 +258,7 @@ class RuntimeKernel:
             **wfi.to_dict(),
             "status": to_status.value,
             "abort_reason": abort_reason or wfi.abort_reason,
+            **fields,
         })
         self._save_instance(updated)
         return updated
@@ -252,8 +274,12 @@ class RuntimeKernel:
         wfi_id: str | None = None,
         max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
         max_budget: int = DEFAULT_MAX_BUDGET,
+        inputs_ref: str = "",
     ) -> WorkflowInstance:
         """Create a workflow instance with per-instance MAST caps (B11).
+
+        ``inputs_ref`` désigne ce qui a lancé le run (chemin du blueprint pour un
+        flow) ; ``outputs_ref`` est posé par :meth:`complete` (R26).
 
         ``max_tool_calls`` bounds the number of tool calls ``mediate_tool``
         will mediate for this instance — the kernel's only observable unit
@@ -285,6 +311,7 @@ class RuntimeKernel:
                 created_at=_now_iso(),
                 max_tool_calls=max_tool_calls,
                 max_budget=max_budget,
+                inputs_ref=inputs_ref,
             )
             self._store_instance(wfi)
         return wfi
@@ -562,7 +589,11 @@ class RuntimeKernel:
             return wfi
         if wfi.status == WorkflowStatus.CHECKPOINTED:
             wfi = self._transition(wfi, WorkflowStatus.RUNNING)
-        wfi = self._transition(wfi, WorkflowStatus.COMPLETED)
+        # R26 : la sortie d'un run terminé est l'état de son dernier checkpoint
+        # (celui du dernier node) ; sans checkpoint, il n'y a pas de sortie à nommer.
+        # Posée dans la transition elle-même : pas d'écriture de plus à un crash près.
+        outputs_ref = wfi.checkpoint_refs[-1] if wfi.checkpoint_refs else ""
+        wfi = self._transition(wfi, WorkflowStatus.COMPLETED, outputs_ref=outputs_ref)
         if evidence_pack_id:
             wfi = WorkflowInstance.from_dict({**wfi.to_dict(), "evidence_pack_id": evidence_pack_id})
             self._save_instance(wfi)

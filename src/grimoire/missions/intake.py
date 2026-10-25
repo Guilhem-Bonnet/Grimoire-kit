@@ -310,3 +310,19 @@ class MissionIntakeService:
         if risk != RiskProfile.STANDARD:
             score += 0.1
         return min(1.0, score)
+
+
+def intake_proposal(text: str) -> dict[str, Any]:
+    """La proposition d'intake d'une demande, telle que la rendent `task add --intake` et `task_intake` (R07).
+
+    Source unique du CLI et de l'outil MCP : classement déterministe, rien n'est
+    écrit (``written`` vaut toujours ``False``). Un texte blanc est refusé.
+    """
+    if not text.strip():
+        raise ValueError("l'intake attend le texte de la demande")
+    result = MissionIntakeService().analyze(IntakeRequest(raw_text=text))
+    return {
+        **result.to_dict(),
+        "written": False,
+        "next": "`grimoire task add \"<titre>\" -a \"<critère>\"` pour chaque tâche retenue",
+    }

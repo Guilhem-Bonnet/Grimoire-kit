@@ -39,7 +39,7 @@ from grimoire.missions.review_receipt import write_receipt
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
 
-TASK_TOOLS = {"task_add", "task_list_ready", "task_show", "task_claim", "task_update", "task_context", "task_recall"}
+TASK_TOOLS = {"task_add", "task_intake", "task_list_ready", "task_show", "task_claim", "task_update", "task_context", "task_recall"}
 ACCEPTATION = "un client MCP liste, reclame et clot une tache reelle"
 EVIDENCE = Path("_grimoire-runtime-output/evidence")
 BOARD = Path("_grimoire/standard/task-board.yaml")
@@ -440,3 +440,35 @@ def test_task_add_mcp_conserve_la_description(projet: Path) -> None:
         assert "description trop longue" in json.dumps(trop)
 
     via_client(scenario)
+
+
+# ── R07 : task_intake, la proposition sans écriture ──────────────────────────
+
+
+def test_task_intake_meme_sortie_que_le_cli_et_n_ecrit_rien(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_task import task_app
+    from grimoire.mcp.server import task_intake
+
+    texte = "Implement the recipe schema and delete the old one"
+    (tmp_path / "project-context.yaml").write_text("project:\n  name: t\n", encoding="utf-8")
+
+    def instantane() -> dict[str, bytes]:
+        return {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    avant = instantane()
+    via_mcp = json.loads(task_intake(texte, project_path=str(tmp_path)))
+    res = CliRunner().invoke(task_app, ["add", "--intake", texte, "--project-root", str(tmp_path)])
+    assert res.exit_code == 0, res.output
+    assert via_mcp == json.loads(res.stdout)
+    assert via_mcp["written"] is False and via_mcp["task_proposals"]
+    assert instantane() == avant
+    assert not (tmp_path / DEFAULT_LEDGER_RELPATH).exists()
+
+
+def test_task_intake_refuse_un_texte_blanc(tmp_path: Path) -> None:
+    from grimoire.mcp.server import task_intake
+
+    refus = task_intake("   ", project_path=str(tmp_path))
+    assert "attend le texte" in json.dumps(refus.model_dump() if hasattr(refus, "model_dump") else refus, ensure_ascii=False)

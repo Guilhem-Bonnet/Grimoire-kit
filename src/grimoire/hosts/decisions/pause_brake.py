@@ -52,7 +52,7 @@ def _is_fenced(hook: HookInput) -> bool:
     host_id = resolve_host(hook.host) if hook.host else None
     if host_id is None:
         return False
-    return is_fenced(host_id, detect_host_version(host_id, hook.raw))
+    return is_fenced(host_id, detect_host_version(host_id, hook.raw), project_root=hook.project_root)
 
 
 def _task_status(root: Path, task_id: str) -> str:

@@ -11,6 +11,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+# Les sous-modules de `memory` (shared, ops, projections, bundle...) sont chargés au premier appel de
+# `memory ...` ; importés sous un `patch("grimoire.cli.cmd_memory._load_config_context")`, ils lieraient
+# le double pour de bon et fausseraient tous les tests suivants du même processus.
+import grimoire.cli.cmd_memory_lexical  # noqa: F401
 from grimoire.cli.app import app
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireMemoryError
@@ -524,14 +528,21 @@ class TestMigrateRun:
     """Replaces the manual ``memory export`` + ``memory import`` two-step for a
     lexical -> vector move (#527) — no bundle, no intermediate JSON file."""
 
+    @pytest.fixture(autouse=True)
+    def _stores_unknown(self) -> Any:
+        """Les stores sont des doubles : la sonde d'existence ne sait rien (``None``), elle ne refuse pas."""
+        with patch("grimoire.memory.store_probe.store_exists", return_value=None):
+            yield
+
     def test_dry_run_reports_without_writing(self, tmp_path: Path) -> None:
         write_previous_backend_breadcrumb(tmp_path, "lexical")
         cfg = _migrate_cfg()
         source_mgr = MagicMock()
         source_mgr.get_all.return_value = [MemoryEntry(id="e1", text="a", user_id="g"), MemoryEntry(id="e2", text="b", user_id="g")]
         with (
-            patch("grimoire.cli.cmd_memory._load_config_context", return_value=(cfg, tmp_path)),
+            patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tmp_path)),
             patch("grimoire.cli.cmd_memory.MemoryManager.from_config", return_value=source_mgr),
+            patch("grimoire.cli.cmd_memory_ops._load_manager_context", return_value=(MagicMock(**{"recall.return_value": None}), cfg, tmp_path)),
         ):
             result = runner.invoke(app, ["-o", "json", "memory", "migrate", "run"])
         assert result.exit_code == 0, result.output
@@ -540,32 +551,34 @@ class TestMigrateRun:
         assert data["imported"] == 0
         assert data["dryRun"] is True
 
-    def test_apply_writes_through_store_many(self, tmp_path: Path) -> None:
+    def test_apply_writes_through_upsert_keeping_ids(self, tmp_path: Path) -> None:
         write_previous_backend_breadcrumb(tmp_path, "lexical")
         cfg = _migrate_cfg()
         source_mgr = MagicMock()
         source_mgr.get_all.return_value = [MemoryEntry(id="e1", text="a", user_id="g")]
         target_mgr = MagicMock()
-        target_mgr.store_many.return_value = [MemoryEntry(id="e1", text="a", user_id="g")]
+        target_mgr.recall.return_value = None  # l'identifiant est absent de la cible
         with (
-            patch("grimoire.cli.cmd_memory._load_config_context", return_value=(cfg, tmp_path)),
+            patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tmp_path)),
             patch("grimoire.cli.cmd_memory.MemoryManager.from_config", return_value=source_mgr),
-            patch("grimoire.cli.cmd_memory._load_manager_context", return_value=(target_mgr, cfg, tmp_path)),
+            patch("grimoire.cli.cmd_memory_ops._load_manager_context", return_value=(target_mgr, cfg, tmp_path)),
         ):
             result = runner.invoke(app, ["-o", "json", "memory", "migrate", "run", "--apply"])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["imported"] == 1
-        target_mgr.store_many.assert_called_once()
+        target_mgr.store_many.assert_not_called()
+        target_mgr.upsert.assert_called_once()
+        assert target_mgr.upsert.call_args.args[:2] == ("e1", "a")
 
     def test_no_known_source_is_a_clear_error(self, tmp_path: Path) -> None:
-        with patch("grimoire.cli.cmd_memory._load_config_context", return_value=(_migrate_cfg(), tmp_path)):
+        with patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(_migrate_cfg(), tmp_path)):
             result = runner.invoke(app, ["memory", "migrate", "run"])
         assert result.exit_code == 2
         assert "--source" in result.output
 
     def test_source_equal_to_target_is_a_no_op(self, tmp_path: Path) -> None:
-        with patch("grimoire.cli.cmd_memory._load_config_context", return_value=(_migrate_cfg(), tmp_path)):
+        with patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(_migrate_cfg(), tmp_path)):
             result = runner.invoke(app, ["memory", "migrate", "run", "--source", "weaviate-server"])
         assert result.exit_code == 0
         assert "rien à migrer" in result.output.lower()
@@ -575,9 +588,9 @@ class TestMigrateRun:
         source_mgr = MagicMock()
         source_mgr.get_all.return_value = []
         with (
-            patch("grimoire.cli.cmd_memory._load_config_context", return_value=(_migrate_cfg(), tmp_path)),
+            patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(_migrate_cfg(), tmp_path)),
             patch("grimoire.cli.cmd_memory.MemoryManager.from_config", return_value=source_mgr) as from_config,
         ):
             runner.invoke(app, ["memory", "migrate", "run", "--source", "qdrant-server"])
-        called_cfg = from_config.call_args[0][0]
+        called_cfg = from_config.call_args_list[0][0][0]  # la source, avant la cible
         assert called_cfg.memory.backend == "qdrant-server"

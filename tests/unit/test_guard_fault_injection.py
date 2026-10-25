@@ -370,6 +370,16 @@ def _session_start(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     return measure
 
 
+def _task_completed(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    _governed(root)
+
+    def measure(fault: Fault) -> str:
+        with fault:
+            return _label(run_decision("grimoire.event-trace", _hook(root, HookEvent.TASK_COMPLETED)))
+
+    return measure
+
+
 SCENARIOS: dict[str, tuple[Scenario, str]] = {
     # nom -> (préparation, résultat sain attendu : la preuve que le scénario discrimine)
     "pre_forgery": (_pre_forgery, "deny"),
@@ -386,6 +396,7 @@ SCENARIOS: dict[str, tuple[Scenario, str]] = {
     "subagent_stop": (_subagent_stop, "allow"),
     "pre_compact": (_pre_compact, "allow"),
     "session_start": (_session_start, "allow"),
+    "task_completed": (_task_completed, "allow"),
 }
 
 
@@ -511,6 +522,13 @@ CASES: tuple[FaultCase, ...] = (
         "PreCompact ne sait rien refuser : la capsule perd ses gates, garde la tâche et le profil",
     ),
     _open(
+        "grimoire.event-trace",
+        "event_trace",
+        "task_completed",
+        _P + "event_trace._facts",
+        "événement déclaré non émis (R31) : la décision n'en refuse aucun, elle ne fait que tracer ; sa panne perd la ligne de trace",
+    ),
+    _open(
         "grimoire.activation",
         "activation",
         "session_start",
@@ -530,6 +548,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "chain_ack": (SUPPORT, "phrase d'explication d'une rupture du journal de preuve, appelée par task_context (UserPromptSubmit) : une panne y est couverte par les cas task_context ; sans phrase tapée, elle ne fait rien"),
     "done_gate": (GUARD, ""),
     "enrolment": (GUARD, ""),
+    "event_trace": (GUARD, ""),
     "evidence_gate": (GUARD, ""),
     "evidence_trace": (GUARD, ""),
     "gate_override": (SUPPORT, "levée d'un refus de clôture appelée par evidence_gate DANS son filet W2-08 : une panne devient un refus tracé, couverte par les cas evidence_gate"),

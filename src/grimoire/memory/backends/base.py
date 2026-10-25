@@ -130,8 +130,12 @@ class MemoryBackend(abc.ABC):
         user_id: str = "",
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
+        created_at: str = "",
     ) -> MemoryEntry:
-        """Create or replace an entry with a caller-provided ID."""
+        """Create or replace an entry with a caller-provided ID.
+
+        *created_at* (optionnel) conserve la date d'origine d'une entrée copiée ; une entrée qui
+        existe déjà garde la sienne."""
         raise NotImplementedError(f"{type(self).__name__} does not support upsert()")
 
     def store_many(self, entries: list[dict[str, Any]]) -> list[MemoryEntry]:

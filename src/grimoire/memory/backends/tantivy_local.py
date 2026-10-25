@@ -293,12 +293,13 @@ class TantivyMemoryBackend(MemoryBackend):
         user_id: str = "",
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
+        created_at: str = "",
     ) -> MemoryEntry:
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")
         uid = user_id or "global"
         with self._lock:
             existing = self.recall(entry_id)
-            created_at = existing.created_at if existing is not None else ts
+            created_at = existing.created_at if existing is not None else (created_at or ts)
             updated_at = ts if existing is not None else ""
             payload = {"tags": list(tags), "metadata": metadata or {}, "created_at": created_at, "updated_at": updated_at}
             writer = self._writer()

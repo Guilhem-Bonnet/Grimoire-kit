@@ -1,0 +1,11 @@
+{
+  "skill_name": "infra-pipeline-cicd",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Le workflow GitHub Actions échoue à l'étape Terraform, trouve pourquoi.",
+      "expected_output": "Lit le journal du job, localise l'étape en cause et corrige le workflow ou la task go-task concernée.",
+      "files": []
+    }
+  ]
+}

@@ -36,6 +36,18 @@ def _payload_to_entry(point: Any, *, score: float = 0.0) -> MemoryEntry:
     )
 
 
+def _point_id(entry_id: str) -> str:
+    """Identifiant de point Qdrant valide, identique à celui de l'entrée (un UUID)."""
+    try:
+        uuid.UUID(entry_id)
+    except (ValueError, AttributeError, TypeError):
+        raise ValueError(
+            f"Identifiant {entry_id!r} refusé : Qdrant n'accepte que des UUID pour les entrées du kit "
+            "(l'identifiant est conservé tel quel, pas réécrit)."
+        ) from None
+    return entry_id
+
+
 class QdrantStorageMixin:
     """Mixin providing Qdrant-backed store/recall/search/get_all/count/delete/update.
 
@@ -71,6 +83,51 @@ class QdrantStorageMixin:
             points=[PointStruct(id=entry_id, vector=vector, payload=payload)],
         )
         return MemoryEntry(id=entry_id, text=text, user_id=uid, tags=tags, metadata=metadata or {}, created_at=ts)
+
+    def upsert(
+        self,
+        entry_id: str,
+        text: str,
+        *,
+        user_id: str = "",
+        tags: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+        created_at: str = "",
+    ) -> MemoryEntry:
+        """Crée ou remplace l'entrée d'identifiant *entry_id* (identifiant fourni, jamais régénéré).
+
+        Rejouer le même appel ne crée aucun doublon : c'est ce qui rend une
+        migration ou une découpe de segment relançable après une interruption.
+        Qdrant n'accepte que des UUID ou des entiers non signés comme
+        identifiants de points : tout autre identifiant est refusé
+        explicitement plutôt que réécrit, car un identifiant « conservé » qui
+        changerait casserait les références (``superseded_by``).
+        """
+        from qdrant_client.models import PointStruct
+
+        point_id = _point_id(entry_id)
+        existing = self._client.retrieve(collection_name=self._collection, ids=[point_id], with_payload=True)
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        created_at, updated_at = (
+            (str(existing[0].payload.get("created_at", ts)), ts) if existing else (created_at or ts, "")
+        )
+        uid = user_id or "global"
+        payload: dict[str, Any] = {
+            "memory": text,
+            "user_id": uid,
+            "tags": list(tags),
+            "created_at": created_at,
+            "updated_at": updated_at,
+            **(metadata or {}),
+        }
+        self._client.upsert(
+            collection_name=self._collection,
+            points=[PointStruct(id=point_id, vector=self._embed(text), payload=payload)],
+        )
+        return MemoryEntry(
+            id=entry_id, text=text, user_id=uid, tags=tags, metadata=dict(metadata or {}),
+            created_at=created_at, updated_at=updated_at,
+        )
 
     def recall(self, entry_id: str) -> MemoryEntry | None:
         results = self._client.retrieve(

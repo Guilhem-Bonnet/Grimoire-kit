@@ -44,6 +44,10 @@ PROBE_TIMEOUT = 90
 #: Un échec n'est rejoué qu'après ce délai.
 RETRY_AFTER = timedelta(days=1)
 
+#: Réglages managés de Claude Code sous Linux/WSL (doc « Deploy managed settings ») ; les fichiers de
+#: ``managed-settings.d/*.json`` s'y ajoutent, par ordre alphabétique. Les autres systèmes ne sont pas lus.
+MANAGED_DIR = Path("/etc/claude-code")
+
 _MARKER = "EXECUTED.marker"
 _VERSION = re.compile(r"\d+(?:\.\d+){1,3}")
 _HOSTS = {HostId.CLAUDE_CODE_CLI: "claude"}
@@ -125,6 +129,115 @@ def installed_version(host_id: HostId, binary: str | None = None) -> str:
     if key is not None and version:
         _VERSION_CACHE[key] = version
     return version
+
+
+def _read_settings(path: Path) -> tuple[dict[str, object] | None, str]:
+    """``(réglages, "")`` ; ``(None, "")`` si le fichier est absent ; ``(None, motif)`` s'il est présent mais illisible."""
+    if not path.is_file():
+        return None, ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, f"{path} illisible"
+    return (data, "") if isinstance(data, dict) else (None, f"{path} n'est pas une table JSON")
+
+
+def hooks_disabled_reason(
+    project_root: Path | None = None, *, home: Path | None = None, managed_dir: Path | None = None
+) -> str:
+    """Pourquoi les hooks du projet ne tournent pas dans la configuration EFFECTIVE de Claude Code ; ``""`` sinon.
+
+    La sonde teste un dossier temporaire sans les réglages de l'utilisateur : elle ne dit rien d'un
+    ``disableAllHooks`` ou d'un ``allowManagedHooksOnly`` réels. Clés et précédence (doc Claude Code,
+    pages settings et hooks) : ``disableAllHooks`` vaut la valeur du niveau le plus haut qui la pose
+    (managé > local > projet > utilisateur ; une valeur qui n'est pas un booléen est ignorée) ;
+    ``allowManagedHooksOnly`` (managé seulement) bloque les hooks utilisateur, projet et local : les hooks
+    de Grimoire, posés dans ``.claude/settings.json``, ne tournent alors que si le niveau managé porte une
+    commande ``grimoire-hook``. Un fichier présent mais illisible ne permet rien d'affirmer : le motif est
+    rendu (échec fermé), et aucune erreur ne sort d'ici — un dossier courant supprimé ou un dossier managé
+    non traversable donnent un motif, jamais une exception. ``--settings`` (ligne de commande) n'est pas
+    observable d'ici.
+    """
+    try:
+        return _hooks_disabled_reason(project_root, home, managed_dir)
+    except Exception as exc:  # une garde qui ne sait pas lire ne prouve rien
+        return f"réglages de l'hôte illisibles ({type(exc).__name__})"
+
+
+#: Le programme d'un hook que Grimoire écrit : ``grimoire-hook`` (nu, chemin, entre guillemets, ``.exe``).
+_HOOK_PROGRAM = re.compile(r"^grimoire-hook(?:\.exe)?$")
+
+
+def _first_word(command: str) -> str:
+    """Le premier mot d'une commande shell, guillemets retirés (``"$DIR"/bin/x`` → ``$DIR/bin/x``)."""
+    word, quote = "", ""
+    for char in command.strip():
+        if quote:
+            if char == quote:
+                quote = ""
+            else:
+                word += char
+        elif char in "\"'":
+            quote = char
+        elif char.isspace():
+            break
+        else:
+            word += char
+    return word
+
+
+def _carries_grimoire_hook(hooks: object) -> bool:
+    """Une commande de hook dont le programme est ``grimoire-hook`` : pas une simple mention de « grimoire »."""
+    if not isinstance(hooks, dict):
+        return False
+    for entries in hooks.values():
+        for entry in entries if isinstance(entries, list) else ():
+            for hook in entry.get("hooks", ()) if isinstance(entry, dict) and isinstance(entry.get("hooks"), list) else ():
+                command = hook.get("command") if isinstance(hook, dict) else None
+                if isinstance(command, str) and _HOOK_PROGRAM.match(_first_word(command).replace("\\", "/").rsplit("/", 1)[-1]):
+                    return True
+    return False
+
+
+def _hooks_disabled_reason(project_root: Path | None, home: Path | None, managed_dir: Path | None) -> str:
+    root = project_root or Path.cwd()
+    try:
+        user_dir = (
+            Path(os.environ["CLAUDE_CONFIG_DIR"])
+            if os.environ.get("CLAUDE_CONFIG_DIR")
+            else (home or Path.home()) / ".claude"
+        )
+    except (OSError, RuntimeError):
+        return "répertoire utilisateur indéterminable"
+    managed = managed_dir if managed_dir is not None else MANAGED_DIR
+    ordered = [
+        ("utilisateur", user_dir / "settings.json"),
+        ("projet", root / ".claude" / "settings.json"),
+        ("local", root / ".claude" / "settings.local.json"),
+        ("managé", managed / "managed-settings.json"),
+        *(("managé", f) for f in (sorted((managed / "managed-settings.d").glob("*.json")) if managed.is_dir() else [])),
+    ]
+    disabled = ""
+    managed_only = False
+    managed_has_grimoire = False
+    for level, path in ordered:
+        data, unreadable = _read_settings(path)
+        if unreadable:
+            return unreadable
+        if data is None:
+            continue
+        flag = data.get("disableAllHooks")
+        if isinstance(flag, bool):
+            disabled = f"disableAllHooks=true ({level}, {path})" if flag else ""
+        if level == "managé":
+            if isinstance(data.get("allowManagedHooksOnly"), bool):
+                managed_only = data["allowManagedHooksOnly"] is True
+            managed_has_grimoire = managed_has_grimoire or _carries_grimoire_hook(data.get("hooks"))
+    if disabled:
+        return disabled
+    if managed_only and not managed_has_grimoire:
+        return "allowManagedHooksOnly=true (managé) sans hook Grimoire : les hooks du projet sont bloqués"
+    return ""
 
 
 def _leg(binary: str, *, deny: bool, timeout: int) -> tuple[bool, bool]:
