@@ -19,6 +19,12 @@ siens. Le lanceur ne passe jamais par l'outil Agent (aucun ``--agent``/``--agent
 sous-agent partagerait le budget et les compteurs de la session parente.
 
 Le binaire est injectable (*exec_*), c'est ainsi que les tests tournent contre un faux ``claude``.
+
+**Identité de session (lot 3, verrou 7).** Le lanceur fixe l'identifiant de la session (``--session-id <uuid>`` et
+``GRIMOIRE_SESSION_ID``) au lieu de le lire après coup : sous un mandat actif, il l'inscrit au journal d'autorité
+(:meth:`~grimoire.missions.mandate.MandateStore.register_session`) *avant* le lancement, en rôle ``worker``. C'est ce
+qui permet de refuser un reçu de revue écrit par la session qui a fait le travail. Une inscription refusée (plafond de
+sessions du mandat) ne lance rien. Sans mandat, rien ne s'inscrit et le lancement est celui du lot 2.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -49,8 +56,10 @@ __all__ = [
     "ExecResult",
     "LaunchOutcome",
     "WorkerLauncher",
+    "attest_session",
     "default_exec",
     "launched_sessions",
+    "session_env",
 ]
 
 LAUNCHED_EVENT = "task.session_launched"
@@ -124,6 +133,32 @@ def _git_out(cwd: Path, *args: str) -> str:
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def session_env(session_id: str) -> dict[str, str]:
+    """L'environnement d'une session de fond : sans surveillance, et l'identifiant que ses commandes ``grimoire`` liront."""
+    from grimoire.core.standard_state import SESSION_ENV
+
+    return {"GRIMOIRE_UNATTENDED": "1", SESSION_ENV: session_id}
+
+
+def attest_session(service: TaskService, role: str, task_id: str) -> tuple[str, str]:
+    """``(identifiant, refus)`` d'une session à lancer : un uuid neuf, inscrit au journal d'autorité sous mandat actif.
+
+    Sans mandat actif (ou journal illisible), l'identifiant n'est pas inscrit : rien n'est attesté, rien n'est refusé.
+    Un refus d'inscription (plafond du mandat, rôle déjà tenu) rend ``("", raison)`` : la session n'est pas lancée.
+    """
+    from grimoire.missions.mandate import MandateRefusedError, MandateStore
+
+    session = str(uuid.uuid4())
+    store = MandateStore(service.home_root)
+    if not store.state().active:
+        return session, ""
+    try:
+        store.register_session(session, role, task_id)
+    except MandateRefusedError as exc:
+        return "", f"session {role} non inscrite au journal d'autorité : {exc}"
+    return session, ""
 
 
 _LIVE = (TaskState.CLAIMED, TaskState.RUNNING, TaskState.BLOCKED, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
@@ -203,6 +238,9 @@ class WorkerLauncher:
         base, into, why = self._base()
         if not base:
             return LaunchOutcome(tid, "failed", f"préparation refusée : {why}")
+        session_id, refused = attest_session(service, WORKER_ACTOR, tid)
+        if refused:
+            return LaunchOutcome(tid, "skipped", refused)
         try:
             wt = create_task_worktree(service, tid, repo=service.home_root, base=base, into=into, actor=WORKER_ACTOR)
             service.context(tid)
@@ -211,7 +249,7 @@ class WorkerLauncher:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
         model = self._model_for(admit)
-        result = self._exec(self._argv(tid, model), wt.path, {"GRIMOIRE_UNATTENDED": "1"})
+        result = self._exec(self._argv(tid, model, session_id), wt.path, session_env(session_id))
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}, aucun identifiant de session"
@@ -219,7 +257,10 @@ class WorkerLauncher:
         session = match.group(1)
         service.ledger.append_event(
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
-            {"session": session, "name": f"grimoire-{tid}", "model": model, "cwd": str(wt.path), "branch": wt.branch},
+            {
+                "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
+                "cwd": str(wt.path), "branch": wt.branch,
+            },
         )
         return LaunchOutcome(tid, "launched", f"session {session} dans {wt.path}", session, model)
 
@@ -256,8 +297,8 @@ class WorkerLauncher:
             detail += " — disjoncteur ouvert"
         return LaunchOutcome(tid, "failed", detail)
 
-    def _argv(self, tid: str, model: str) -> list[str]:
-        argv = [self._claude, "--bg", "--name", f"grimoire-{tid}"]
+    def _argv(self, tid: str, model: str, session_id: str) -> list[str]:
+        argv = [self._claude, "--bg", "--name", f"grimoire-{tid}", "--session-id", session_id]
         if model:
             argv += ["--model", model]
         if self._policy.worker.permission_mode:

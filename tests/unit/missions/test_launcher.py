@@ -85,7 +85,8 @@ def test_le_tick_lance_une_session_par_tache_admise_dans_son_worktree(projet: Pa
         tid = argv[argv.index("--name") + 1].removeprefix("grimoire-")
         assert cwd == find_task_worktree(TaskService(projet), tid).path  # type: ignore[union-attr]
         assert cwd.name == tid and (cwd / ".git").is_file()  # le worktree task/<id>, pas le projet
-        assert env == {"GRIMOIRE_UNATTENDED": "1"}
+        # Lot 3 : l'identifiant de session est fixé par le lanceur, le même pour claude et pour les commandes grimoire.
+        assert env == {"GRIMOIRE_UNATTENDED": "1", "GRIMOIRE_SESSION_ID": argv[argv.index("--session-id") + 1]}
     after = TaskService(projet)
     assert {after.require(t).status for t in (first, second)} == {TaskState.CLAIMED}  # claim et bail posés avant le lancement
     assert set(launched_sessions(after)) == {first, second}
