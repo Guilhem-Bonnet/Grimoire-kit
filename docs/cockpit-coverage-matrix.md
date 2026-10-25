@@ -54,11 +54,11 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 | Concevoir | 23 | 23 | 100% |
 | Executer | 18 | 18 | 100% |
 | Observer | 8 | 8 | 100% |
-| Mémoire | 9 | 9 | 100% |
+| Mémoire | 11 | 11 | 100% |
 | Source | 17 | 17 | 100% |
 | Contrôles × états (coque) | 80 | 80 | 100% |
-| Routes API | 26 | 26 | 100% |
-| **TOTAL** | **247** | **247** | **100%** |
+| Routes API | 28 | 28 | 100% |
+| **TOTAL** | **251** | **251** | **100%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -241,15 +241,17 @@ pour ce contrôle précis.
 
 | Contrôle | Sélecteur | Handler | Route | État | Test(s) | Couvert |
 |---|---|---|---|---|---|---|
-| Vue (zoom docbar) | `#view-seg button` | `setView` (dans `draw()`, bug historique corrigé) | `GET /api/memory/status` | bascule visuelle | `test_memoire_view_seg_bascule_correctement` | oui |
-| Zoom Flotte / Ce projet | `#zoom-seg button` | bascule agrégation | `GET /api/workspace/memory/overview?projects=` | Flotte = 2 lignes (registre) | `test_switching_to_all_projects_shows_two_rows` | oui |
-| Recherche croisée (bouton) | `searchBtn` | `runSearch` | `GET /api/workspace/memory/search` | résultats étiquetés par projet | `test_cross_project_search_labels_the_matching_project_only` | oui |
-| Recherche croisée (Entrée clavier) | `input` keydown | `runSearch` | idem | équivalent clavier au clic | `tests/e2e/test_workspace_memoire_fleet_states.py::test_la_touche_entree_lance_la_recherche_croisee` | oui |
-| Recherche — requête vide | idem | idem | idem (`q` vide) | aucun appel réseau, invite à saisir un terme | `tests/e2e/test_workspace_memoire_fleet_states.py::test_une_requete_vide_n_appelle_aucune_route_et_invite_a_saisir` | oui |
-| Item mémoire (clic) | `.item` | `openInspector` | — | ouvre le panneau d'inspection | `tests/e2e/test_workspace_memoire_fleet_states.py::test_le_clic_sur_un_resultat_l_ouvre_dans_l_inspecteur` | oui |
-| Item mémoire (clavier Enter/Espace) | idem | idem | — | équivalent clavier | `tests/e2e/test_workspace_memoire_fleet_states.py::test_le_clavier_ouvre_un_resultat_dans_l_inspecteur` | oui |
-| Store affiché avant l'architecture | — | `mount` | `GET /api/memory/status` | ordre d'affichage | `test_memoire_montre_le_store_avant_l_architecture` | oui |
-| Projet sans mémoire liée | — | `mount` | `GET /api/workspace/memory/overview` | état `unavailable`/`uninitialized`/`unreadable` nommé | `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_sans_memoire_liee_est_nomme_dans_l_apercu`, `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_sans_memoire_propre_n_offre_que_la_flotte` | oui |
+| Écran d'entrée = recherche (P24), sans onglets Store / Graphe / Couches | `.kn-searchbar input` | `mount` | `GET /api/workspace/memory/entries` | filtres Type, Source, Projet, Date | `tests/e2e/test_workspace_savoir_p24.py::test_l_ecran_d_entree_est_la_recherche_avec_ses_filtres`, `tests/e2e/test_workspace_memoire_overview.py::test_memoire_s_ouvre_sur_la_recherche_sans_onglets_de_vue`, `tests/e2e/test_workspace_lot4_spaces.py::test_memoire_s_ouvre_sur_la_recherche` | oui |
+| Filtre projet multiple (portée « Tous les projets ») | `.kn-filters fieldset` (Projet) | `refresh` | `GET /api/workspace/memory/search?projects=` | un projet décoché disparaît des résultats | `tests/e2e/test_workspace_savoir_p24.py::test_les_filtres_type_projet_et_remplacees`, `tests/e2e/test_workspace_memoire_overview.py::test_switching_to_all_projects_offers_a_multiple_project_filter` | oui |
+| Filtres Type, « Inclure les décisions remplacées » | `.kn-filters input` | `refresh` | idem | « Fait non typé » décoché par défaut ; la remplacée dit « remplacée par … » | `tests/e2e/test_workspace_savoir_p24.py::test_les_filtres_type_projet_et_remplacees` | oui |
+| Filtre Date (période) | `select[aria-label='Période']` | `refresh` | `GET /api/workspace/memory/entries?since=` | filtre serveur | `tests/e2e/test_workspace_savoir_p24.py::test_la_periode_passe_au_serveur_et_filtre_les_dates` | oui |
+| Recherche (Entrée clavier) | `.kn-searchbar input` keydown | `run` | `GET /api/workspace/memory/search` | classée par rang fusionné (RRF) ; puce projet, type, date, provenance, supersession | `tests/e2e/test_workspace_memoire_fleet_states.py::test_la_touche_entree_lance_la_recherche`, `tests/e2e/test_workspace_memoire_overview.py::test_cross_project_search_labels_the_matching_project_only` | oui |
+| Recherche — requête vide | idem | idem | aucune recherche | la liste des entrées reste | `tests/e2e/test_workspace_memoire_fleet_states.py::test_une_requete_vide_n_appelle_pas_la_recherche` | oui |
+| Résultat (clic) | `.kn-res` | `select` | `GET /api/workspace/memory/entry` | détail : badges type et état, Décidé le, Par, Remplace, Tâche liée, journal | `tests/e2e/test_workspace_memoire_fleet_states.py::test_le_clic_sur_un_resultat_l_ouvre_dans_le_detail`, `tests/e2e/test_workspace_savoir_p24.py::test_le_detail_montre_provenance_et_chaine` | oui |
+| Résultat (clavier Enter/Espace) | idem | idem | — | équivalent clavier | `tests/e2e/test_workspace_memoire_fleet_states.py::test_le_clavier_ouvre_un_resultat_dans_le_detail` | oui |
+| Emplacement partagé, portée Projet X | `.kn-note[data-note='others']` | `drawResults` | `GET /api/workspace/memory/entries`, `/entry` | les entrées des autres projets du même store : comptes seulement, jamais de contenu | `tests/e2e/test_workspace_savoir_p24.py::test_en_portee_projet_les_entrees_de_l_autre_projet_ne_sont_que_comptees` | oui |
+| Supprimer… (confirmation dans la page) | `#inspector-body .kn-confirm` | `confirmDelete` | `POST /api/memory` (`delete`) | « Entrée supprimée. » sur place ; absent hors du projet servi | `tests/e2e/test_workspace_savoir_p24.py::test_la_suppression_se_confirme_dans_la_page`, `tests/e2e/test_workspace_savoir_p24.py::test_hors_du_projet_servi_la_suppression_n_est_pas_proposee` | oui |
+| Projet illisible ou non initialisé | `.kn-note[data-note='failed']` | `drawResults` | `memory/search`, `memory/entries` (`reason`) | motif nommé, jamais un zéro muet | `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_illisible_est_nomme_avec_son_motif`, `tests/e2e/test_workspace_memoire_fleet_states.py::test_un_projet_sans_memoire_dit_pourquoi_au_lieu_d_une_liste_vide` | oui |
 
 ### Espace : Source
 
@@ -397,6 +399,8 @@ rapport du lot.
 | GET /api/workspace/glossary | workspace_routes.py | 200 | vide / erreur dans le 200 | `test_le_glossaire_est_charge_depuis_l_api` | oui |
 | GET /api/workspace/tasks | workspace_routes.py | 200 (collapse 500 si erreur) | `ledger:false`, filtré par mission/statut | `test_un_projet_sans_ledger_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
 | GET /api/workspace/tasks/<id> | workspace_routes.py | 200/404/400 (tâche inconnue → 404, id malformé → 400) | `next_moves_require` | `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_une_tache_connue_est_rendue_avec_son_etat_de_board`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_une_tache_inconnue_est_un_404_pas_un_500`, `tests/unit/cli/test_cmd_cockpit_workspace_errors.py::test_un_identifiant_de_tache_malforme_est_un_400` | oui |
+| GET /api/workspace/memory/entries | workspace_routes.py → workspace_knowledge.py (P24) | 200 (motif dans `reason`) | page par tranches et curseur `nextOffset`, jamais `get_all` complet ; souvenir/projection, types, `since` ; entrées d'autres projets d'un store partagé comptées | `tests/unit/tools/test_workspace_knowledge.py::TestEntriesPage`, `tests/unit/tools/test_workspace_knowledge.py::TestSharedLocation` | oui |
+| GET /api/workspace/memory/entry | workspace_routes.py → workspace_knowledge.py (P24) | 200 (`found`/`hidden`/`reason`) | provenance, chaîne de remplacement, ce qu'elle remplace (journal P14), nœuds liés ; entrée d'un autre projet jamais rendue | `tests/unit/tools/test_workspace_knowledge.py::TestEntryDetail` | oui |
 | GET /api/workspace/flows/runs | workspace_routes.py (nouvelle route, issue #506) | 200 | filtrée par `blueprint` | `test_observer_montre_le_run_de_flow_meme_traceledger_vide` | oui |
 | GET /api/workspace/evidence | workspace_routes.py (nouvelle route, issue #534) | 200 | `enrolled:false` sans standard, sinon tâches + gates + pack par tâche du board | `test_le_standard_enrole_liste_ses_taches_avec_gates_et_pack`, `test_un_projet_sans_standard_le_dit_au_lieu_de_rendre_un_board_vide` | oui |
 | GET /api/workspace/agents | workspace_routes.py | 200/500 (`collect_agents` en erreur → 500 réel) | `freshness` par agent | `test_lire_les_agents_a_travers_le_cockpit` | oui |

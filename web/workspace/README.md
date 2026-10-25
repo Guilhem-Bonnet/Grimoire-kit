@@ -80,7 +80,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `spaces/concevoir.js` | Toile, zoom, éditeur de graphe, bibliothèque, inspecteur de nœud | lot 3 |
 | `spaces/executer.js` | Board gouverné, portes, carte de tâche, timeline | lot 4 |
 | `spaces/observer.js` | Runtime : KPI, coût, latence, spans, traces | lot 4 |
-| `spaces/memoire.js` | Store et graphe d'abord, couches ensuite | lot 4 |
+| `spaces/memoire.js` | La recherche d'abord : filtres type, source, projet, date ; détail de l'entrée à droite | P24 |
 | `spaces/source.js` | Fichiers par étage, éditeur, diff, override, provenance | lot 5 |
 | `spaces/source-editor.js` | IntelliSense de l'éditeur Source (issue 280) : colorisation par recouvrement, gouttière de diagnostics, complétion, infobulle du glossaire au survol ; suggestions par modèle local derrière (issue 280, voie 2) : barre « Suggérer », panneau d'aperçu, lien « Expliquer » sur un diagnostic | lot 5 |
 
