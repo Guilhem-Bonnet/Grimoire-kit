@@ -1,15 +1,18 @@
 """Import d'un plan JSON dans le Mission Ledger (P50, ``grimoire task import``).
 
 Le plan nomme ses tâches par une **clé** propre (``key``) ; le ledger leur donne
-sa propre clé (``GAO-...``). Le plan est validé en entier AVANT la première
-écriture : un plan invalide n'écrit rien. L'import est idempotent — chaque tâche
-créée porte ``extra.import = {plan, key}``, et une entrée déjà importée n'est
-ni recréée ni modifiée (une divergence de titre ou de critères est signalée, jamais
-écrasée) ; une entrée ``existing`` désigne une tâche déjà au ledger et est sautée.
+sa propre clé (``GAO-...``). Le plan est validé en entier AVANT la première écriture : un plan invalide n'écrit rien. L'import
+est idempotent — chaque tâche créée porte ``extra.import = {plan, key}``, et une entrée déjà importée
+n'est pas recréée. Si son titre ou ses critères diffèrent de ceux du ledger (plan modifié, ou autre
+plan qui réutilise le même identifiant), le plan entier est refusé, rien n'est écrit : aucune tâche
+n'est écrasée en silence. Une entrée ``existing`` désigne une tâche déjà au ledger et est sautée.
+Relire, créer et lier se fait sous :meth:`TaskService.structure_lock` (imports concurrents).
+La relance complète les liens manquants des tâches importées par ce plan (reprise après
+interruption) ; elle ne touche à aucun autre champ, ni à une tâche ``existing``.
 
 Format::
 
-    {"plan": "refonte-x",                    # identité du plan (défaut : nom du fichier)
+    {"plan": "refonte-x",                    # identité du plan (obligatoire, sans blanc)
      "mission": "MIS-...",                   # optionnel (sinon --mission, sinon la mission par défaut)
      "tasks": [
        {"key": "a", "title": "...", "acceptance": ["..."], "evidence": ["..."],
@@ -30,6 +33,11 @@ from grimoire.missions.schemas import DependencyKind
 from grimoire.missions.service import MAX_DESCRIPTION_CHARS, TaskService
 
 __all__ = ["ImportReport", "ImportRow", "PlanError", "import_plan", "load_plan"]
+
+#: Plafonds : un plan plus gros est refusé avant toute lecture ou écriture.
+MAX_PLAN_BYTES = 1_000_000
+MAX_PLAN_TASKS = 200
+MAX_KEY_CHARS = 100
 
 _PLAN_FIELDS = frozenset({"plan", "mission", "tasks"})
 _ENTRY_FIELDS = frozenset(
@@ -71,7 +79,7 @@ class ImportRow:
 
     key: str
     task_id: str
-    action: str  # created | would_create | already_imported | diverged | skipped_existing
+    action: str  # created | would_create | already_imported | skipped_existing
     note: str = ""
 
     def to_dict(self) -> dict[str, str]:
@@ -105,23 +113,38 @@ def _strings(value: Any, label: str, problems: list[str]) -> tuple[str, ...]:
 def load_plan(path: Path) -> _Plan:
     """Lit et valide le fichier ; lève :class:`PlanError` (toutes les anomalies) sinon."""
     try:
+        size = path.stat().st_size
+        if size > MAX_PLAN_BYTES:
+            raise PlanError([f"fichier trop gros : {size} octets (maximum {MAX_PLAN_BYTES}) — scinde le plan"])
         raw = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise PlanError([f"fichier illisible : {path} ({exc.strerror or exc})"]) from exc
-    except ValueError as exc:
+    except ValueError as exc:  # JSONDecodeError et UnicodeDecodeError
         raise PlanError([f"JSON invalide dans {path.name} : {exc}"]) from exc
-    return parse_plan(raw, default_id=path.stem)
+    return parse_plan(raw)
 
 
-def parse_plan(raw: Any, *, default_id: str = "plan") -> _Plan:
+def _bad_token(value: str) -> bool:
+    """Vrai si *value* contient un blanc ou un caractère de contrôle (il fausserait la table de sortie)."""
+    return any(c.isspace() or not c.isprintable() for c in value)
+
+
+def parse_plan(raw: Any) -> _Plan:
     problems: list[str] = []
     if not isinstance(raw, dict):
         raise PlanError(["le plan doit être un objet JSON {\"tasks\": [...]}"])
     for unknown in sorted(set(raw) - _PLAN_FIELDS):
         problems.append(f"champ inconnu au plan : {unknown!r}")
+    plan_id = raw.get("plan")
+    if not isinstance(plan_id, str) or not plan_id.strip():
+        problems.append("« plan » manquant : l'identité du plan (texte sans blanc) est obligatoire — c'est elle qui rend l'import rejouable")
+    elif _bad_token(plan_id.strip()) or len(plan_id.strip()) > MAX_KEY_CHARS:
+        problems.append(f"« plan » invalide : {plan_id!r} (ni blanc ni caractère de contrôle, {MAX_KEY_CHARS} caractères au plus)")
     tasks = raw.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise PlanError([*problems, "« tasks » doit être une liste non vide"])
+    if len(tasks) > MAX_PLAN_TASKS:
+        raise PlanError([*problems, f"trop de tâches : {len(tasks)} (maximum {MAX_PLAN_TASKS}) — scinde le plan"])
     entries: list[_Entry] = []
     seen: set[str] = set()
     for index, item in enumerate(tasks, 1):
@@ -135,6 +158,9 @@ def parse_plan(raw: Any, *, default_id: str = "plan") -> _Plan:
             continue
         key = key.strip()
         where = f"tâche « {key} »"
+        if _bad_token(key) or len(key) > MAX_KEY_CHARS:
+            problems.append(f"tâche n°{index} : clé {key!r} invalide (ni blanc ni caractère de contrôle, {MAX_KEY_CHARS} caractères au plus)")
+            continue
         if key in seen:
             problems.append(f"{where} : clé en double dans le plan")
         seen.add(key)
@@ -151,8 +177,7 @@ def parse_plan(raw: Any, *, default_id: str = "plan") -> _Plan:
     problems.extend(_cycles(entries))
     if problems:
         raise PlanError(problems)
-    plan_id = str(raw.get("plan") or default_id).strip() or default_id
-    return _Plan(plan_id=plan_id, mission=str(raw.get("mission") or "").strip(), entries=tuple(entries))
+    return _Plan(plan_id=str(plan_id).strip(), mission=str(raw.get("mission") or "").strip(), entries=tuple(entries))
 
 
 def _parse_entry(key: str, where: str, item: dict[str, Any], problems: list[str]) -> _Entry:
@@ -217,7 +242,18 @@ def _cycles(entries: list[_Entry]) -> list[str]:
 
 
 def import_plan(service: TaskService, plan: _Plan, *, mission: str = "", actor: str = "cli", dry_run: bool = False) -> ImportReport:
-    """Crée les tâches du plan et leurs liens ; ``dry_run`` calcule le même rapport sans écrire."""
+    """Crée les tâches du plan et leurs liens ; ``dry_run`` calcule le même rapport sans écrire.
+
+    Relecture du ledger, détection des entrées déjà importées, créations et liens se font sous
+    :meth:`TaskService.structure_lock` : deux imports concurrents du même plan en créent un seul jeu.
+    """
+    if dry_run:
+        return _import(service, plan, mission, actor, dry_run=True)
+    with service.structure_lock():
+        return _import(service, plan, mission, actor, dry_run=False)
+
+
+def _import(service: TaskService, plan: _Plan, mission: str, actor: str, *, dry_run: bool) -> ImportReport:
     ledger = service.ledger
     target = mission or plan.mission
     if target and ledger.get_mission(target) is None:
@@ -231,6 +267,15 @@ def import_plan(service: TaskService, plan: _Plan, *, mission: str = "", actor: 
         f"tâche « {e.key} » : {e.existing} n'existe pas dans le ledger"
         for e in plan.entries if e.existing and e.existing not in tasks
     ]
+    for entry in plan.entries:
+        prior = imported.get((plan.plan_id, entry.key))
+        if prior is not None and not entry.existing:
+            old = tasks[prior]
+            if old.title != entry.title or tuple(old.acceptance) != entry.acceptance:
+                problems.append(
+                    f"tâche « {entry.key} » : {prior} a déjà été importée sous le plan « {plan.plan_id} » avec un autre "
+                    "titre ou d'autres critères — un autre plan réutilise-t-il cet identifiant ? (rien n'est modifié)"
+                )
     if problems:
         raise PlanError(problems)
 
@@ -244,12 +289,7 @@ def import_plan(service: TaskService, plan: _Plan, *, mission: str = "", actor: 
         prior = imported.get((plan.plan_id, entry.key))
         if prior is not None:
             ids[entry.key] = prior
-            old = tasks[prior]
-            diverged = old.title != entry.title or tuple(old.acceptance) != entry.acceptance
-            report.rows.append(ImportRow(
-                entry.key, prior, "diverged" if diverged else "already_imported",
-                "titre ou critères différents du plan, tâche non modifiée" if diverged else "déjà importée",
-            ))
+            report.rows.append(ImportRow(entry.key, prior, "already_imported", "déjà importée"))
             continue
         if dry_run:
             ids[entry.key] = ""

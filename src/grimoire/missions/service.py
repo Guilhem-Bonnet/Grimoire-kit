@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -525,20 +525,44 @@ class TaskService:
         title = " ".join(title.split())
         if not title:
             raise GrimoireMissionError("titre de mission vide")
-        for existing in self.ledger.list_missions():
-            if " ".join(existing.title.split()).casefold() == title.casefold():
-                raise GrimoireMissionError(
-                    f"Une mission « {existing.title} » existe déjà : {existing.id} — "
-                    f"`task add --mission {existing.id}` y rattache une tâche."
-                )
 
         def clean(values: tuple[str, ...]) -> tuple[str, ...]:
             return tuple(dict.fromkeys(v.strip() for v in values if v and v.strip()))
 
-        return self.ledger.create_mission(
-            title, origin=origin, description=description.strip(), created_by=actor,
-            scope_repos=clean(scope_repos), scope_surfaces=clean(scope_surfaces), scope_packs=clean(scope_packs),
-        )
+        with self.structure_lock():  # la lecture des homonymes et la création forment un seul geste
+            for existing in self.ledger.list_missions():
+                if " ".join(existing.title.split()).casefold() == title.casefold():
+                    raise GrimoireMissionError(
+                        f"Une mission « {existing.title} » existe déjà : {existing.id} — "
+                        f"`task add --mission {existing.id}` y rattache une tâche."
+                    )
+            return self.ledger.create_mission(
+                title, origin=origin, description=description.strip(), created_by=actor,
+                scope_repos=clean(scope_repos), scope_surfaces=clean(scope_surfaces), scope_packs=clean(scope_packs),
+            )
+
+    @contextlib.contextmanager
+    def structure_lock(self) -> Iterator[None]:
+        """Verrou inter-processus des gestes qui lisent le ledger pour décider d'une création.
+
+        ``mission open`` (homonyme) et ``task import`` (entrée déjà importée) lisent puis écrivent :
+        sans un verrou englobant, deux processus voient le même état et créent tous deux. Fichier de
+        verrou distinct de celui du journal (le journal reste pris, écriture par écriture, à
+        l'intérieur). L'état du ledger est relu une fois le verrou obtenu. Ne protège que les gestes
+        qui le prennent : une création par `task add` n'est pas concernée.
+        """
+        from grimoire.core.fsio import locked
+
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(locked(self.ledger_root / "structure"))
+            except (TimeoutError, OSError) as exc:
+                raise GrimoireMissionError(
+                    "Un autre processus modifie la structure du ledger (mission ouverte ou plan importé) : "
+                    "réessaie dans un instant."
+                ) from exc
+            self.refresh()
+            yield
 
     def mission_scope(self, mission_id: str) -> dict[str, list[str]]:
         """Le périmètre déclaré de la mission (``repos``, ``surfaces``, ``packs``) ; vide si inconnue."""

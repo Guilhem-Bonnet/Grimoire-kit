@@ -59,8 +59,6 @@ def task_import(
     console.print(("[yellow]--dry-run[/yellow] : rien n'est écrit. " if dry_run else "") + f"Plan « {escape(report.plan_id)} »")
     for row in report.rows:  # la table clé du plan → clé du ledger, sur stdout (colonnes séparées par une tabulation)
         typer.echo(f"{row.key}\t{row.task_id or '-'}\t{row.action}")
-        if row.action == "diverged":
-            console.print(f"  [yellow]{escape(row.key)}[/yellow] : {escape(row.note)}")
     for link in report.links:
         console.print(f"  [dim]lien : {escape(link['task'])} dépend de {escape(link['depends_on'])}"
                       + (f" ({link['state']})" if "state" in link else "") + "[/dim]")

@@ -222,13 +222,94 @@ def test_import_relance_ne_cree_aucun_doublon(projet: Path) -> None:
     assert _events(projet) == avant
 
 
-def test_import_plan_modifie_signale_la_divergence_sans_ecraser(projet: Path) -> None:
+def test_import_plan_modifie_est_refuse_sans_ecraser_ni_creer(projet: Path) -> None:
     task(projet, "import", str(_plan(projet, PLAN)))
-    modifie = [{**PLAN[0], "title": "Autre titre"}, PLAN[1]]
-    res = task(projet, "import", str(_plan(projet, modifie)), as_json=True)
-    rows = {r["key"]: r for r in json.loads(res.stdout)["tasks"]}
-    assert rows["a"]["action"] == "diverged"
-    assert _ledger(projet).get_task(rows["a"]["task_id"]).title == "Écrire le schéma"
+    avant = _events(projet)
+    modifie = [{**PLAN[0], "title": "Autre titre"}, PLAN[1], {"key": "c", "title": "Nouvelle", "acceptance": ["ok"]}]
+    res = task(projet, "import", str(_plan(projet, modifie)))
+    assert res.exit_code == 1 and "autre titre" in res.output and "rien n'est modifié" in res.output
+    assert _events(projet) == avant, "le refus n'écrit rien, pas même la tâche nouvelle"
+
+
+def test_import_deux_plans_distincts_au_meme_nom_de_fichier_ne_se_confondent_pas(projet: Path) -> None:
+    (projet / "x").mkdir()
+    (projet / "y").mkdir()
+    un = projet / "x" / "plan.json"
+    deux = projet / "y" / "plan.json"
+    un.write_text(json.dumps({"plan": "un", "tasks": [PLAN[0]]}), encoding="utf-8")
+    deux.write_text(json.dumps({"plan": "deux", "tasks": [{**PLAN[0], "title": "Tout autre"}]}), encoding="utf-8")
+    assert task(projet, "import", str(un)).exit_code == 0
+    assert task(projet, "import", str(deux)).exit_code == 0
+    assert len(_ledger(projet).list_tasks()) == 2
+
+
+def test_import_plan_sans_identite_refuse(projet: Path) -> None:
+    path = projet / "p.json"
+    path.write_text(json.dumps({"tasks": [PLAN[0]]}), encoding="utf-8")
+    res = task(projet, "import", str(path))
+    assert res.exit_code == 1 and "« plan » manquant" in res.output
+    assert _events(projet) == 0
+
+
+@pytest.mark.parametrize("cle", ["a\tb", "a\nb", "a b", "a\x00b", "x" * 101])
+def test_import_cle_avec_blanc_ou_controle_refusee(projet: Path, cle: str) -> None:
+    res = task(projet, "import", str(_plan(projet, [{"key": cle, "title": "T", "acceptance": ["c"]}])))
+    assert res.exit_code == 1 and "invalide" in res.output
+    assert _events(projet) == 0
+
+
+def test_import_plafonds_taille_et_nombre_de_taches(projet: Path) -> None:
+    trop = [{"key": f"k{i}", "title": "T", "acceptance": ["c"]} for i in range(201)]
+    res = task(projet, "import", str(_plan(projet, trop)))
+    assert res.exit_code == 1 and "trop de tâches" in res.output
+    gros = projet / "gros.json"
+    gros.write_text(json.dumps({"plan": "g", "tasks": [PLAN[0]], "pad": "x" * 1_100_000}), encoding="utf-8")
+    res = task(projet, "import", str(gros))
+    assert res.exit_code == 1 and "trop gros" in res.output
+    assert _events(projet) == 0
+
+
+def _import_worker(args: tuple[str, str]) -> int:
+    from grimoire.cli.cmd_task import task_app as app
+
+    root, plan = args
+    return CliRunner().invoke(app, ["import", plan, "--project-root", root]).exit_code
+
+
+def _mission_worker(args: tuple[str, int]) -> int:
+    root, _ = args
+    return CliRunner().invoke(mission_app, ["open", "Race", "--project-root", root]).exit_code
+
+
+def test_import_concurrent_ne_cree_qu_un_jeu_de_taches(projet: Path) -> None:
+    import multiprocessing
+
+    plan = str(_plan(projet, PLAN))
+    with multiprocessing.get_context("spawn").Pool(4) as pool:
+        codes = pool.map(_import_worker, [(str(projet), plan)] * 4)
+    assert set(codes) == {0}
+    assert sorted(t.title for t in _ledger(projet).list_tasks()) == ["Brancher l'API", "Écrire le schéma"]
+
+
+def test_mission_open_concurrent_une_seule_mission(projet: Path) -> None:
+    import multiprocessing
+
+    with multiprocessing.get_context("spawn").Pool(4) as pool:
+        codes = pool.map(_mission_worker, [(str(projet), i) for i in range(4)])
+    assert sorted(codes) == [0, 1, 1, 1]
+    assert [m.title for m in _ledger(projet).list_missions()] == ["Race"]
+
+
+def test_finition_project_context_non_utf8_ne_plante_pas(projet: Path) -> None:
+    (projet / "project-context.yaml").write_bytes(b"\xff\xfe phase: exploration\n")
+    res = task(projet, "add", "T", "-a", CRITERE, as_json=True)
+    assert res.exit_code == 0, res.output
+    assert "finition" not in json.loads(res.stdout)
+
+
+def test_finition_phase_nulle_ne_masque_pas_project_phase(projet: Path) -> None:
+    (projet / "project-context.yaml").write_text("phase:\nproject:\n  phase: exploration\n", encoding="utf-8")
+    assert json.loads(task(projet, "add", "T", "-a", CRITERE, as_json=True).stdout)["finition"] == "maquette"
 
 
 def test_import_dry_run_n_ecrit_rien(projet: Path) -> None:

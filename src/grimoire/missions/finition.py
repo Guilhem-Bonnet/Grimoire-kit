@@ -47,12 +47,12 @@ def project_phase(project_root: Path) -> str:
 
     try:
         raw: Any = yaml.safe_load((project_root / "project-context.yaml").read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+    except (OSError, ValueError, yaml.YAMLError):  # ValueError : UnicodeDecodeError d'un fichier non UTF-8
         return ""
     if not isinstance(raw, dict):
         return ""
     project = raw.get("project")
-    declared = raw.get("phase", project.get("phase") if isinstance(project, dict) else "")
+    declared = raw.get("phase") or (project.get("phase") if isinstance(project, dict) else "")
     phase = str(declared or "").strip().lower()
     return phase if phase in PHASE_FINITION else ""
 
