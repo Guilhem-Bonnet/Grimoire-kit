@@ -412,11 +412,14 @@ class WeaviateBackend(MemoryBackend):
             updated_at=updated_at,
         )
         object_id = self._object_id(entry_id)
-        self._request_json("DELETE", f"/v1/objects/{parse.quote(self._collection)}/{object_id}")
+        # Le plongement d'abord, AVANT toute écriture : un fournisseur d'embedding en panne lève ici,
+        # l'objet n'a pas bougé. Puis un PUT, qui remplace l'objet en place : il n'y a plus de
+        # fenêtre entre une suppression et une recréation où le souvenir n'existe pas.
+        vector = self._embed(new_text)
         self._request_json(
-            "POST",
-            "/v1/objects",
-            {"class": self._collection, "id": object_id, "properties": props, "vector": self._embed(new_text)},
+            "PUT",
+            f"/v1/objects/{parse.quote(self._collection)}/{object_id}",
+            {"class": self._collection, "id": object_id, "properties": props, "vector": vector},
         )
         return MemoryEntry(
             id=entry_id,

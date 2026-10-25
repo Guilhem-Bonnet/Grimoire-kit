@@ -829,8 +829,11 @@ def _fingerprint_excluded_prefixes() -> tuple[str, ...]:
     """Préfixes (POSIX, avec ``/`` final) des dossiers écrits par le hook ``Stop`` lui-même."""
     from grimoire.core.agentic_standard import EVENT_DIR
     from grimoire.core.standard_generation import RUNS_DIR, TRACES_DIR
+    from grimoire.memory.reads_log import READS_RELPATH
 
-    return tuple(f"{folder.as_posix()}/" for folder in (RUNS_DIR, EVENT_DIR, TRACES_DIR))
+    # Le reçu de lecture mémoire : une lecture n'est pas du travail, elle ne doit pas
+    # faire croire à un progrès (fichier, d'où l'absence de « / » final).
+    return (*(f"{folder.as_posix()}/" for folder in (RUNS_DIR, EVENT_DIR, TRACES_DIR)), READS_RELPATH.as_posix())
 
 
 def _tree_fingerprint(project_root: Path, task_id: str) -> str:

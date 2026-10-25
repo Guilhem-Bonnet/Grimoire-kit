@@ -35,7 +35,7 @@ from typing import Any
 
 from grimoire.memory.backends.base import MemoryEntry
 from grimoire.memory.shared import STALE_DAYS
-from grimoire.memory.supersession import SUPERSEDED_KEY
+from grimoire.memory.supersession import SUPERSEDED_KEY, is_retracted
 
 __all__ = [
     "FACT_SCHEMA",
@@ -367,7 +367,7 @@ def _fact(
         "fraicheur": state,
         "fraicheur_libelle": label_of(state),
         "fraicheur_raison": reason,
-        "cycle": "remplacé" if superseded_by else "actif",
+        "cycle": "retiré" if is_retracted(entry) else "remplacé" if superseded_by else "actif",
         "remplace_par": superseded_by,
         "producteur": producer,
     }

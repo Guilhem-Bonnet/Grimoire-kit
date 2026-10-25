@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from grimoire.codegraph.schemas import CodeEdge, CodeNode
@@ -340,13 +341,37 @@ class Neo4jMemoryGraph:
         )
 
     def delete_memory(self, entry_id: str) -> None:
-        """Mark a memory as deleted while preserving provenance edges."""
+        """Marque le souvenir supprimé ET en efface le contenu, en gardant la pierre tombale.
+
+        ``deleted = true`` seul laissait le texte, les étiquettes et les
+        métadonnées lisibles dans la base : une suppression qui ne supprimait
+        rien. Le nœud reste (son identifiant, sa clé de projet et sa collection,
+        pour que le rattrapage sache ce qui a existé),
+        mais ``text``, ``tags``, ``metadata_json``, ``provenance_json`` et
+        ``source`` sont vidés et les arêtes ``TAGGED_WITH``, ``MEMORY_FOR``,
+        ``VECTORIZED_AS`` et ``VECTOR_FOR`` retirées (le nœud ne relie plus rien).
+
+        Enchaînement de purge : ``grimoire memory delete`` efface le contenu ici ;
+        ``grimoire memory graph purge-orphans --apply`` retire ensuite les nœuds
+        sans entrée dans le store, pierres tombales comprises, quelle que soit
+        leur collection (dry-run par défaut ; Weaviate ou non). Les deux gestes
+        sont indépendants : sans le second il reste un nœud vide, jamais un texte.
+        """
         self._execute(
             """
             MATCH (m:GrimoireMemory {id: $id})
-            SET m.deleted = true
+            SET m.deleted = true,
+                m.deleted_at = $deleted_at,
+                m.text = '',
+                m.tags = [],
+                m.metadata_json = '{}',
+                m.provenance_json = '{}',
+                m.source = ''
+            WITH m
+            OPTIONAL MATCH (m)-[edge:TAGGED_WITH|MEMORY_FOR|VECTORIZED_AS|VECTOR_FOR]-()
+            DELETE edge
             """,
-            {"id": self._key(entry_id)},
+            {"id": self._key(entry_id), "deleted_at": datetime.now(UTC).isoformat(timespec="seconds")},
         )
 
     def upsert_fact(self, fact: KnowledgeFact) -> None:
@@ -844,13 +869,24 @@ class Neo4jMemoryGraph:
         small allowlist — rather than every ``GrimoireMemory`` node in the
         database: a Neo4j instance can be shared across projects, and an
         unscoped purge would delete another project's memories (#527).
+
+        Les pierres tombales laissées par :meth:`delete_memory` (``deleted =
+        true``) sont reconnues **sans condition de collection** — un souvenir
+        qui n'a jamais été dans Weaviate n'en a pas — mais seulement dans le
+        projet courant (clé de projet exacte).
         """
         collections = sorted({collection, LEGACY_GENERIC_COLLECTION} - {""})
         records = self._read(
             """
             MATCH (m:GrimoireMemory)
-            WHERE m.weaviate_collection IN $collections AND NOT m.id IN $known_ids
-              AND ($project = '' OR m.project = $project OR m.project IS NULL)
+            WHERE NOT m.id IN $known_ids
+              AND (
+                (m.weaviate_collection IN $collections
+                  AND ($project = '' OR m.project = $project OR m.project IS NULL))
+                // Pierre tombale d'un ``delete`` : reconnue sans condition de collection (un souvenir qui
+                // n'est pas dans Weaviate n'a pas de collection), mais seulement dans le projet courant.
+                OR (coalesce(m.deleted, false) = true AND ($project = '' OR m.project = $project))
+              )
             RETURN m.id AS id, m.weaviate_collection AS collection
             """,
             collections=collections,
@@ -863,7 +899,7 @@ class Neo4jMemoryGraph:
             # ``id`` est l'identifiant du souvenir dans le store (celui que comparent les appelants) ;
             # ``node_id`` est celui du nœud, à rendre tel quel à :meth:`purge_memory_nodes`.
             local = node_id[len(prefix):] if prefix and node_id.startswith(prefix) else node_id
-            found.append({"id": local, "node_id": node_id, "collection": str(record["collection"])})
+            found.append({"id": local, "node_id": node_id, "collection": str(record["collection"] or "")})
         return found
 
     def purge_memory_nodes(self, ids: list[str]) -> int:

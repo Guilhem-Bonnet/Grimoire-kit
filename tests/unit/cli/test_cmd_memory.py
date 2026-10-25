@@ -299,7 +299,9 @@ class TestMemoryRecall:
     def test_recall_filters_forwarded(self, mock_manager: MagicMock) -> None:
         mock_manager.recall_typed.return_value = []
         runner.invoke(app, ["memory", "recall", "q", "-t", "failures", "-a", "dev", "-n", "3"])
-        mock_manager.recall_typed.assert_called_once_with("q", type_="failures", agent="dev", limit=3)
+        mock_manager.recall_typed.assert_called_once_with(
+            "q", type_="failures", agent="dev", limit=3, include_superseded=False, include_retracted=False,
+        )
 
     def test_recall_json(self, mock_manager: MagicMock) -> None:
         mock_manager.recall_typed.return_value = [_make_entry(id="e1")]
@@ -334,7 +336,10 @@ class TestMemoryList:
     def test_list_with_pagination(self, mock_manager: MagicMock) -> None:
         result = runner.invoke(app, ["memory", "list", "--offset", "10", "-n", "5"])
         assert result.exit_code == 0
-        mock_manager.get_all_filtered.assert_any_call(user_id="", offset=10, limit=5, wing="", hall="", room="")
+        mock_manager.get_all_filtered.assert_any_call(
+            user_id="", offset=10, limit=5, wing="", hall="", room="",
+            include_superseded=False, include_retracted=False,
+        )
 
     def test_list_empty(self, mock_manager: MagicMock) -> None:
         mock_manager.get_all_filtered.return_value = []
@@ -365,7 +370,8 @@ class TestMemoryExport:
 
     def test_export_with_user_filter(self, mock_manager: MagicMock) -> None:
         runner.invoke(app, ["memory", "export", "-u", "alice"])
-        mock_manager.get_all.assert_called_once_with(user_id="alice")
+        # Un export est une sauvegarde : il garde les souvenirs remplacés et retirés.
+        mock_manager.get_all.assert_called_once_with(user_id="alice", include_superseded=True, include_retracted=True)
 
 
 # ── grimoire memory import ────────────────────────────────────────────────────

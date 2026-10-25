@@ -244,3 +244,67 @@ class TestKeyedRelationshipsOnARealBase:
             assert _scalar(raw, "MATCH (f:GrimoireFact {id: $id}) WHERE f.valid_to = '2026-02-01' RETURN count(f) AS c", id=f"{project}::f1") == 1
         finally:
             graph.close()
+
+
+class TestDeleteErasesContent:
+    """P23 : supprimer un souvenir efface son contenu dans le graphe, puis ``purge-orphans`` retire la pierre tombale."""
+
+    def test_deleted_node_has_no_text_and_the_purge_removes_it(self, raw: Any, projects: tuple[str, str]) -> None:
+        a, _ = projects
+        graph = _graph(a)
+        try:
+            graph.upsert_memory(MemoryEntry(
+                id="a-del", text="contenu à effacer", tags=("decision",), source="task:T-1",
+                metadata={"weaviate_collection": "col-a", "note": "métadonnée à effacer"},
+            ))
+            graph.delete_memory("a-del")
+
+            records, _, _ = raw.execute_query(
+                "MATCH (m:GrimoireMemory {id: $id}) RETURN m.text AS text, m.deleted AS deleted, "
+                "m.metadata_json AS meta, m.tags AS tags, m.source AS source",
+                id=f"{a}::a-del",
+            )
+            (row,) = records
+            assert row["deleted"] is True
+            assert row["text"] == ""
+            assert row["meta"] == "{}"
+            assert list(row["tags"]) == []
+            assert row["source"] == ""
+            assert _scalar(raw, "MATCH (:GrimoireMemory {id: $id})-[r:TAGGED_WITH]->() RETURN count(r) AS c", id=f"{a}::a-del") == 0
+
+            # Enchaînement documenté : la suppression efface le contenu, `graph purge-orphans --apply` retire le nœud.
+            orphans = graph.find_orphan_memory_nodes(known_ids=frozenset(), collection="col-a")
+            assert "a-del" in {o["id"] for o in orphans}
+            graph.purge_memory_nodes([o.get("node_id", o["id"]) for o in orphans])
+            assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) RETURN count(m) AS c", id=f"{a}::a-del") == 0
+        finally:
+            graph.close()
+
+    def test_a_non_weaviate_memory_leaves_no_edge_and_its_tombstone_is_purged(
+        self, raw: Any, projects: tuple[str, str],
+    ) -> None:
+        """Un souvenir hors Weaviate n'a pas de ``weaviate_collection`` : sa pierre tombale doit quand même partir."""
+        a, b = projects
+        ga, gb = _graph(a), _graph(b)
+        try:
+            ga.upsert_memory(MemoryEntry(id="a-plain", text="contenu local", tags=("decision",), metadata={"projection_kind": "task", "projection_source_id": "t1"}))
+            ga.upsert_memory(MemoryEntry(id="a-vec", text="contenu vectoriel", metadata={"weaviate_id": "w1", "weaviate_collection": "col-a"}))
+            gb.upsert_memory(MemoryEntry(id="b-plain", text="autre projet"))
+            gb.delete_memory("b-plain")
+            ga.delete_memory("a-plain")
+            ga.delete_memory("a-vec")
+
+            for local in ("a-plain", "a-vec"):
+                assert _scalar(
+                    raw, "MATCH (m:GrimoireMemory {id: $id})-[r]-() RETURN count(r) AS c", id=f"{a}::{local}",
+                ) == 0, "toutes les arêtes (étiquettes, MEMORY_FOR, VECTORIZED_AS, VECTOR_FOR) sont retirées"
+
+            orphans = ga.find_orphan_memory_nodes(known_ids=frozenset(), collection="col-a")
+            assert {o["id"] for o in orphans} == {"a-plain", "a-vec"}, "la pierre tombale sans collection est reconnue"
+            ga.purge_memory_nodes([o["node_id"] for o in orphans])
+            assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) RETURN count(m) AS c", id=f"{a}::a-plain") == 0
+            # Jamais la pierre tombale d'un autre projet.
+            assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) RETURN count(m) AS c", id=f"{b}::b-plain") == 1
+        finally:
+            ga.close()
+            gb.close()

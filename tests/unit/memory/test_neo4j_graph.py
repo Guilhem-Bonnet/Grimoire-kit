@@ -417,7 +417,7 @@ class TestFindOrphanMemoryNodes:
 
         call = _find_call(driver, "NOT m.id IN $known_ids")
         assert "AnotherProjectMemory" not in call.kwargs["collections"]
-        assert "WHERE m.weaviate_collection IN $collections" in call.statement
+        assert "m.weaviate_collection IN $collections" in call.statement
 
 
 class TestPurgeMemoryNodes:
@@ -438,3 +438,64 @@ class TestPurgeMemoryNodes:
 
         assert graph.purge_memory_nodes([]) == 0
         assert driver.calls == []
+
+
+def test_delete_memory_erases_the_content_and_keeps_only_a_tombstone(
+    fake_graph: tuple[type[Any], _FakeDriver, type[_FakeGraphDatabase]],
+) -> None:
+    """P23 : ``deleted = true`` seul laissait le texte lisible dans la base ; la pierre tombale n'a plus de contenu."""
+    neo4j_memory_graph, driver, _ = fake_graph
+    graph = neo4j_memory_graph(uri="bolt://localhost:7687", user="neo4j", password="secret", project="demo")
+
+    graph.delete_memory("mem-1")
+
+    call = _find_call(driver, "SET m.deleted = true")
+    assert call.kwargs["id"] == "demo::mem-1"
+    assert call.kwargs["deleted_at"]
+    for erased in ("m.text = ''", "m.tags = []", "m.metadata_json = '{}'", "m.provenance_json = '{}'", "m.source = ''"):
+        assert erased in call.statement
+    for edge in ("TAGGED_WITH", "MEMORY_FOR", "VECTORIZED_AS", "VECTOR_FOR"):
+        assert edge in call.statement
+    assert "DELETE edge" in call.statement
+    # L'identifiant, la clé de projet et la collection restent : le rattrapage sait ce qui a existé.
+    assert "m.id" not in call.statement.split("SET", 1)[1]
+    assert "m.project" not in call.statement.split("SET", 1)[1]
+    assert "weaviate_collection" not in call.statement
+
+
+def test_manager_delete_reaches_the_graph_erasure(tmp_path: Any) -> None:
+    from grimoire.memory.backends.local import LocalMemoryBackend
+    from grimoire.memory.manager import MemoryManager
+
+    erased: list[str] = []
+
+    class _Graph:
+        def upsert_memory(self, entry: MemoryEntry) -> None:
+            pass
+
+        def delete_memory(self, entry_id: str) -> None:
+            erased.append(entry_id)
+
+    mgr = MemoryManager(
+        LocalMemoryBackend(tmp_path / "m.json"), project_name="demo", project_root=tmp_path, memory_graph=_Graph(),
+    )
+    entry = mgr.store("contenu à effacer", user_id="u")
+    assert mgr.delete(entry.id) is True
+    assert erased == [entry.id]
+
+
+def test_orphan_search_recognises_tombstones_without_a_collection_inside_the_project(
+    fake_graph: tuple[type[Any], _FakeDriver, type[_FakeGraphDatabase]],
+) -> None:
+    """Relecture #932 : le filtre sur ``weaviate_collection`` ne voyait jamais la pierre tombale d'un souvenir non Weaviate."""
+    neo4j_memory_graph, driver, _ = fake_graph
+    graph = neo4j_memory_graph(uri="bolt://localhost:7687", user="neo4j", password="secret", project="demo")
+
+    graph.find_orphan_memory_nodes(known_ids=frozenset({"keep"}), collection="col")
+
+    call = _find_call(driver, "MATCH (m:GrimoireMemory)")
+    assert "coalesce(m.deleted, false) = true" in call.statement
+    tombstone = call.statement.split("coalesce(m.deleted, false) = true", 1)[1]
+    assert "$project = '' OR m.project = $project" in tombstone.split(")", 1)[0] + ")"
+    assert "m.project IS NULL" not in tombstone.split("RETURN", 1)[0], "jamais la pierre tombale d'un nœud sans projet"
+    assert call.kwargs["project"] == "demo"

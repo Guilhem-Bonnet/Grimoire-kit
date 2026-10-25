@@ -34,6 +34,7 @@ from typing import Any
 from grimoire.core.exceptions import GrimoireMemoryError
 from grimoire.memory.backends.base import MemoryEntry
 from grimoire.memory.migration import portable_metadata
+from grimoire.memory.supersession import INCLUDE_ALL
 
 __all__ = [
     "SplitError",
@@ -220,7 +221,7 @@ def apply_split(
                 ) from exc
             done += 1
         report.copied[group.project] = done
-        present = {e.id for e in target.get_all()}
+        present = {e.id for e in target.get_all(**INCLUDE_ALL)}
         missing = sorted(set(group.ids) - present)
         report.verified[group.project] = not missing
         if missing:

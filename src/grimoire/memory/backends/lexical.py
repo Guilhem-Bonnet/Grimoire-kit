@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.supersession import carries_state_mark
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters
 
 _SCHEMA = """
@@ -247,11 +248,23 @@ class LexicalMemoryBackend(MemoryBackend):
     def consolidate(self) -> int:
         """Remove exact duplicates (same text + user_id), keeping the oldest."""
         with self._lock, self._conn:
-            cursor = self._conn.execute(
-                "DELETE FROM entries WHERE rowid NOT IN"
-                " (SELECT MIN(rowid) FROM entries GROUP BY text, user_id)"
-            )
-        return int(cursor.rowcount)
+            seen: set[tuple[str, str]] = set()
+            doomed: list[int] = []
+            for row in self._conn.execute("SELECT rowid, text, user_id, metadata_json FROM entries ORDER BY rowid"):
+                try:
+                    meta = json.loads(row["metadata_json"] or "{}")
+                except json.JSONDecodeError:
+                    meta = {}
+                if carries_state_mark(meta):
+                    continue  # retiré ou remplacé : jamais regroupé avec un vivant
+                key = (row["text"], row["user_id"])
+                if key in seen:
+                    doomed.append(int(row["rowid"]))
+                else:
+                    seen.add(key)
+            for rowid in doomed:
+                self._conn.execute("DELETE FROM entries WHERE rowid = ?", (rowid,))
+        return len(doomed)
 
     def taxonomy(self, *, user_id: str = "", filters: dict[str, str] | None = None) -> dict[str, Any]:
         return build_taxonomy(self.get_all_filtered(user_id=user_id, filters=filters))

@@ -139,3 +139,49 @@ def test_wizard_initializes_a_blank_project_end_to_end(
     assert run_report["doctorOk"] is True
     plan = json.loads((root / "_grimoire" / "setup-plan.json").read_text(encoding="utf-8"))
     assert plan["executed"] is True
+
+
+def _open_wizard(page: Page) -> None:
+    # À traiter est l'accueil (P31) : la fiche du projet vierge est celle de la Flotte.
+    page.evaluate("() => window.GrimoireWorkspace.goto('flotte')")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'piloter'")
+    page.wait_for_selector(".pl-sheet")
+    page.get_by_role("button", name="Initialiser le projet").wait_for(timeout=15_000)
+
+
+def test_wizard_fallback_rend_la_commande_sans_rien_executer(
+    blank_workspace: Page, served_blank: tuple[str, Path],
+) -> None:
+    """« ou : obtenir la commande à copier-coller » n'exécute pas `grimoire up` :
+    il écrit le plan et rend la commande, le projet reste vierge."""
+    _served, root = served_blank
+    page = blank_workspace
+    _open_wizard(page)
+
+    page.get_by_role("button", name="ou : obtenir la commande à copier-coller").click()
+
+    page.wait_for_selector("text=Plan écrit dans _grimoire/setup-plan.json")
+    command = page.locator(".pl-insp-block code.mono").first.inner_text()
+    assert command.startswith("grimoire "), command
+    plan = json.loads((root / "_grimoire" / "setup-plan.json").read_text(encoding="utf-8"))
+    assert not plan.get("executed"), "le plan écrit n'est pas marqué exécuté"
+    assert not (root / "project-context.yaml").exists(), "le repli ne doit rien initialiser"
+    assert page.get_by_role("button", name="ou : obtenir la commande à copier-coller").is_enabled()
+
+
+def test_wizard_fallback_en_erreur_est_refuse_lisiblement(blank_workspace: Page) -> None:
+    page = blank_workspace
+    _open_wizard(page)
+    page.route(
+        "**/api/setup*",
+        lambda route: route.fulfill(
+            status=400, content_type="application/json", body='{"ok": false, "error": "archétype inconnu"}'
+        ),
+    )
+    button = page.get_by_role("button", name="ou : obtenir la commande à copier-coller")
+
+    button.click()
+
+    page.wait_for_selector("text=refusé : archétype inconnu")
+    assert button.is_enabled(), "le bouton se réactive après un refus"
+    assert page.locator(".pl-insp-block code.mono").count() == 0

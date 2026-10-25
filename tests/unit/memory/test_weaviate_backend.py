@@ -161,6 +161,58 @@ def test_update_replaces_existing_object_with_stable_id(monkeypatch: pytest.Monk
 
     assert updated is not None
     assert updated.id == "code:src/app.py"
-    assert any(call[0] == "DELETE" and call[1].startswith("/v1/objects/GrimoireMemory/") for call in calls)
-    post_call = next(call for call in calls if call[0] == "POST" and call[1] == "/v1/objects")
-    assert (post_call[2] or {})["properties"]["source_id"] == "code:src/app.py"
+    # Remplacement en place (PUT) : plus de suppression suivie d'une recréation (relecture #932).
+    assert not any(call[0] == "DELETE" for call in calls)
+    put_call = next(call for call in calls if call[0] == "PUT" and call[1].startswith("/v1/objects/GrimoireMemory/"))
+    assert (put_call[2] or {})["properties"]["source_id"] == "code:src/app.py"
+
+
+class TestUpdateNeverDestroysBeforeItCanRewrite:
+    """Relecture #932 : DELETE puis POST avec l'embedding calculé après = souvenir détruit si l'embedding lève."""
+
+    @staticmethod
+    def _backend(calls: list[tuple[str, str]], store: dict[str, Any], embed: Any) -> Any:
+        from grimoire.memory.backends.base import MemoryEntry
+        from grimoire.memory.backends.weaviate import WeaviateBackend
+
+        backend = WeaviateBackend.__new__(WeaviateBackend)
+        existing = MemoryEntry(
+            id="e1", text="x", user_id="u", tags=("a",), metadata={"k": 1}, created_at="2026-01-01T00:00:00",
+        )
+
+        def request(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+            calls.append((method, path))
+            if method == "DELETE":
+                store.pop("o", None)
+            if method in ("POST", "PUT"):
+                store["o"] = payload
+            return {}
+
+        backend.recall = lambda _i: existing  # type: ignore[method-assign]
+        backend._request_json = request  # type: ignore[method-assign]
+        backend._collection = "C"
+        backend._object_id = lambda _i: "oid"  # type: ignore[method-assign]
+        backend._entry_to_properties = lambda *a, **k: {"metadata_json": "{}"}  # type: ignore[method-assign]
+        backend._embed = embed  # type: ignore[method-assign]
+        return backend
+
+    def test_a_failing_embedding_leaves_the_object_untouched(self) -> None:
+        calls: list[tuple[str, str]] = []
+        store: dict[str, Any] = {"o": {"original": True}}
+
+        def boom(_text: str) -> list[float]:
+            raise RuntimeError("embedding provider down")
+
+        backend = self._backend(calls, store, boom)
+        with pytest.raises(RuntimeError, match="embedding provider down"):
+            backend.update("e1", metadata={"retracted": {"at": "x"}})
+        assert calls == [], "aucune requête d'écriture ni de suppression avant l'embedding"
+        assert store["o"] == {"original": True}
+
+    def test_a_successful_update_replaces_in_place_without_a_deletion_window(self) -> None:
+        calls: list[tuple[str, str]] = []
+        store: dict[str, Any] = {}
+        backend = self._backend(calls, store, lambda _t: [0.1, 0.2])
+        backend.update("e1", metadata={"k": 2})
+        assert [m for m, _ in calls] == ["PUT"]
+        assert store["o"]["vector"] == [0.1, 0.2]
