@@ -516,6 +516,71 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
   Limite : un agent qui lance un script arbitraire, ou dont le chemin est assemblé par le shell (`$X`),
   contourne une garde de chemin.
 
+### Fusion par le merger (#876, lot 4)
+
+Le rôle `merger` est une étape de `orchestrate tick --apply`, après le relecteur. Il est désactivé par défaut :
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  roles:
+    merger:
+      enabled: true
+      realign_max: 1                # PR réalignées sur la cible à la fois (le débit CI)
+      ignored_checks: ["codecov/*"] # hors du verdict, seulement quand gh dit qu'aucun check n'est requis
+      max_cycles: 2                 # retours au worker (CI rouge, conflit) avant l'escalade
+      protected_paths: []           # chemins qui reviennent à l'humain, en plus des défauts
+```
+
+La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
+l'ordre des jugements. Le merger n'ouvre pas de PR : il attend celle du worker sur `task/<id>`. Le dépôt GitHub de la
+tâche et l'URL de `origin` sont figés au journal d'autorité au lancement, avant le worker : chaque `gh` du merger vise
+ce dépôt (`-R`). La tête et la base de la PR viennent de `gh pr view`, ses fichiers de l'API REST, anciens noms d'un
+renommage compris ; jamais de refs locales. À chaque tick, le merger vérifie
+dans cet ordre, et chaque garde échoue fermée :
+
+| Étape | Ce qui est vérifié | Sinon |
+|---|---|---|
+| Worktree | celui du ledger, sur `task/<id>`, du même dépôt que le projet | refus |
+| PR | ouverte, du même dépôt (pas d'un fork), pas en brouillon, vers la cible du worktree | attente, ou refus |
+| READY | la tête GitHub est la tête **scellée** au jugement (ou un réalignement noté au même journal) ; reçu et pack inchangés à l'octet | tête relue pas encore poussée : attente ; sinon nouvelle relecture |
+| CI | checks requis (`gh pr checks --required`) ; tous hors `ignored_checks` seulement si gh dit qu'aucun n'est requis ; au moins un `pass` ; vert au tick précédent aussi | rouge : retour au worker ; en attente, sans check ou gh en panne : attente |
+| Cible | la base GitHub contenue dans la tête | réalignement en plomberie, poussé sans forcer, puis nouvelle CI |
+| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun fichier qui escalade, reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
+| Acceptation | fusion revérifiée, tête fusionnée couverte par le sceau, aucun fichier qui escalade, mandat qui couvre `accept` | question non bloquante « accepter ? » avec la commande `task accept` |
+
+- **Sceau du READY** (`missions/review_seal.py`) : au lancement du relecteur, la tête de `task/<id>` est notée au journal
+  d'autorité (`~/.grimoire/control/`). Au jugement, sont scellés la même tête (une branche qui a bougé pendant la
+  relecture n'est pas scellée), son arbre git, un worktree propre, et les empreintes du reçu et du pack. Le merger et
+  `task accept` sous mandat comparent une tête git à ce sceau, jamais le fichier reçu seul.
+- **Chemins qui escaladent** : le code des gardes (`src/grimoire/missions/*`, `src/grimoire/hosts/decisions/*`,
+  `src/grimoire/core/*` et l'attestation des flows), la politique (`_grimoire/standard/*`), les workflows et hooks (`.github/*`,
+  `.githooks/*`, `.husky/*`), le packaging (`pyproject.toml`, `setup.cfg` et le script setup de setuptools), `.gitattributes`,
+  `.gitmodules`, les fichiers conftest de pytest, `.claude/*`, `.mcp.json`, `.vscode/*`, `.pre-commit-config.yaml` et les
+  fichiers compilés. La clé `protected_paths` s'y ajoute. La
+  comparaison se fait en `casefold()`, sur la liste de fichiers que GitHub annonce ; une liste tronquée fait escalader.
+- **Réalignement** : `git merge-tree`, puis `commit-tree -p <tête GitHub> -p <base GitHub>`, sur objets : le worktree du
+  worker n'est pas touché. Les objets sont récupérés à refspec explicite vers `refs/grimoire/tick/…`, depuis l'URL de
+  `origin` vérifiée égale au dépôt de la PR. Un conflit limité à `CHANGELOG.md` est résolu par l'union des deux côtés,
+  refusée si une ligne de la cible manque.
+- **Git du tick** (`grimoire.core.safe_git`) : seulement quand un rôle autonome est activé, et le temps du tick,
+  l'environnement neutralise pour tous les git du processus ce qui exécute du code. Sont toujours coupés : les hooks, le
+  fsmonitor, les signatures et les transports `ext::` et `fd::`. Sont aussi neutralisés, quand le dépôt ou un worktree les déclare localement : les
+  filtres, les pilotes de fusion, `core.sshCommand` et `credential.helper` (remis aux valeurs globales de
+  l'utilisateur). Rien n'est refusé pour une configuration ordinaire, et l'identité et les identifiants globaux ne sont
+  pas touchés. Hors de ce cas, les git du kit sont ceux de toujours.
+- **Le geste humain** : le merger ne lit aucune réponse du ledger. Ce qu'il ne fait pas sous mandat, l'humain le fait
+  lui-même : il fusionne la PR, puis lance `grimoire task accept <id> --project-root <worktree> --reason "…"`.
+- **Limites** :
+  - les sessions tournent sous le même utilisateur du système : un processus qui écrit ce que le tick lit avant lui
+    contourne une garde de fichier ; seule une isolation par utilisateur du système la fermerait ;
+  - un filtre posé par le worker pendant le tick tourne le temps de ce tick ;
+  - les pilotes de diff ne sont pas neutralisés, et les git que `gh` lance lui-même n'héritent que de la neutralisation
+    par l'environnement ;
+  - la liste des chemins qui escaladent est courte ;
+  - la branche locale du worker n'est pas avancée par le réalignement ;
+  - une PR sans aucun check attend indéfiniment.
+
 ### Ce que le claim rappelle
 
 `grimoire task recall <id>` (#141) assemble ce qu'une tâche et ses voisines ont
