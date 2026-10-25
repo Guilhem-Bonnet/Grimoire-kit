@@ -1,8 +1,9 @@
-// Espace Concevoir — LOT 3.
+// Rubrique Blueprints de Configuration (P31, ex-espace Concevoir — LOT 3).
 //
 // Remplace `blueprints.html`, `patterns.html`, `extensions.html` (bibliothèque
-// en panneau). Zoom Projet → Workflow → Nœud (+ Flotte, lecture seule, sur le
-// cockpit) ; vues Carte, Board, Liste au niveau Projet ; éditeur de graphe au
+// en panneau). Zoom Blueprints → Workflow → Nœud (la liste des projets, en
+// lecture seule, en portée « Tous les projets ») ; vues Carte, Board, Liste au
+// niveau Blueprints ; éditeur de graphe au
 // niveau Workflow ; inspecteur à quatre onglets au niveau Nœud.
 //
 // L'éditeur hérité `web/bp2-core.js` (97 Ko, ~1900 lignes) est un script
@@ -31,14 +32,11 @@
 // sélectionné (`cmd_cockpit.py::do_GET`/`do_POST`), donc les niveaux Workflow
 // et Nœud fonctionnent identiquement sur l'atelier et sur le cockpit.
 
-const ZOOM_LEVELS_ATELIER = [
-  { id: 'projet', label: 'Projet' },
-  { id: 'workflow', label: 'Workflow' },
-  { id: 'noeud', label: 'Nœud' },
-];
-const ZOOM_LEVELS_COCKPIT = [
-  { id: 'flotte', label: 'Flotte' },
-  { id: 'projet', label: 'Projet' },
+// Le grain de la toile des blueprints. Plus de niveau Flotte ni Projet ici
+// (P31) : la portée de la coque les remplace. En portée « Tous les projets »,
+// la toile liste les projets (`state.zoom = 'flotte'`) sans zoom affiché.
+const ZOOM_LEVELS = [
+  { id: 'projet', label: 'Blueprints' },
   { id: 'workflow', label: 'Workflow' },
   { id: 'noeud', label: 'Nœud' },
 ];
@@ -253,13 +251,10 @@ function renderEdgesSvg(nodes, edges, pos) {
 export async function mount(root, ctx) {
   injectStyles();
 
-  // Un projet déjà ciblé (`?project=`, ou sélection courante du cockpit —
-  // voir `api.js: boot()`) doit ouvrir directement sur ses blueprints : la
-  // Flotte n'est le point d'entrée que quand aucun projet n'est encore choisi
-  // (#356). Piloter, lui, reste Flotte-first même projet sélectionné : son
-  // niveau Flotte est la vue de pilotage, pas un repli d'absence de projet.
+  // La portée de la coque (P31) : un projet ouvre directement ses blueprints,
+  // « Tous les projets » la liste des projets à choisir.
   const state = {
-    zoom: ctx.host.kind === 'cockpit' && !ctx.host.project ? 'flotte' : 'projet',
+    zoom: ctx.scope && ctx.scope.all ? 'flotte' : 'projet',
     view: 'carte',
     containers: [],
     selectedId: null,
@@ -275,7 +270,8 @@ export async function mount(root, ctx) {
     dirty: false,
   };
 
-  const zoomLevels = ctx.host.kind === 'cockpit' ? ZOOM_LEVELS_COCKPIT : ZOOM_LEVELS_ATELIER;
+  const zoomLevels = ZOOM_LEVELS;
+  const zoomShown = () => (state.zoom === 'flotte' ? [] : zoomLevels);
   // Lecture, validation et simulation du graphe marchent désormais sur les
   // deux hôtes : `cockpit serve` est le seul serveur restant (#351) et sait
   // depuis #356 servir `/api/blueprints/<id>` (+ validate/simulate) pour le
@@ -305,8 +301,20 @@ export async function mount(root, ctx) {
   function setZoom(id) {
     if (aborted()) return;
     state.zoom = id;
-    ctx.docbar.setZoom(zoomLevels, id, setZoom);
+    ctx.docbar.setZoom(zoomShown(), id, pickZoom);
     render();
+  }
+
+  // Clic sur un segment du zoom. Un blueprint SÉLECTIONNÉ (simple clic sur sa
+  // carte) n'est pas pour autant CHARGÉ : seul `zoomToWorkflow` appelle
+  // `loadBlueprint`. Sans ce détour, « Workflow » restait sur « Chargement du
+  // blueprint… » indéfiniment — le chargement ne partait jamais.
+  function pickZoom(id) {
+    if (id === 'workflow' && graphAvailable && state.selectedId && !state.blueprint) {
+      zoomToWorkflow(state.selectedId);
+      return;
+    }
+    setZoom(id);
   }
 
   function setView(id) {
@@ -390,7 +398,7 @@ export async function mount(root, ctx) {
     setZoom('noeud');
   }
 
-  // ── Niveau Flotte (cockpit, lecture seule) ──────────────────────────────
+  // ── Portée « Tous les projets » (cockpit, lecture seule) ────────────────
 
   async function renderFlotte() {
     ctx.docbar.setViews([], null);
@@ -404,9 +412,11 @@ export async function mount(root, ctx) {
     root.replaceChildren();
     if (!projects.length) {
       root.append(ctx.empty(
-        'Concevoir — Flotte',
+        'Blueprints — tous les projets',
         "Aucun projet enregistré auprès du cockpit. Un projet s'enregistre au premier `grimoire init`.",
         'grimoire init',
+        undefined,
+        { art: 'i-empty-fleet' },
       ));
       return;
     }
@@ -417,11 +427,12 @@ export async function mount(root, ctx) {
         el('h3', { text: project.name || project.slug }),
         el('span', { class: 'lbl mono' }, project.slug),
       );
-      card.addEventListener('click', () => { location.search = '?project=' + encodeURIComponent(project.slug); });
+      // Choisir un projet change la portée de la coque, et rouvre cette rubrique.
+      card.addEventListener('click', () => ctx.scope.set(project.slug, '#configuration/blueprints'));
       cards.append(card);
     }
     root.append(el('div', { class: 'cv-projet' },
-      el('p', { class: 'cv-msg' }, 'Sélectionnez un projet — la Flotte est en lecture seule ici, et ', term('cockpit', 'le cockpit'), " n'édite aucun blueprint."),
+      el('p', { class: 'cv-msg' }, 'Sélectionnez un projet pour voir ses blueprints : en portée « Tous les projets », ', term('cockpit', 'le cockpit'), " n'en édite aucun."),
       cards,
     ));
     ctx.inspector.replaceChildren(el('p', { class: 'cv-msg' }, 'Sélectionnez un projet pour voir ses blueprints.'));
@@ -482,6 +493,8 @@ export async function mount(root, ctx) {
         'Concevoir',
         "Ce projet n'a pas encore de blueprint. La toile se peuplera dès qu'il en aura un.",
         'grimoire blueprint new <id>',
+        undefined,
+        { art: 'i-empty-blueprints' },
       ));
       return;
     }
@@ -890,9 +903,8 @@ export async function mount(root, ctx) {
 
   function render() {
     if (aborted()) return;
-    ctx.docbar.setZoom(zoomLevels, state.zoom, setZoom);
+    ctx.docbar.setZoom(zoomShown(), state.zoom, pickZoom);
     ctx.docbar.setBreadcrumb([
-      ctx.host.project || 'projet', 'Concevoir',
       ...(state.zoom !== 'projet' && state.zoom !== 'flotte' && state.selectedId ? [state.selectedId] : []),
       ...(state.zoom === 'noeud' && state.selectedNodeId ? [state.selectedNodeId] : []),
     ]);
@@ -902,7 +914,7 @@ export async function mount(root, ctx) {
     renderNoeud();
   }
 
-  ctx.docbar.setZoom(zoomLevels, state.zoom, setZoom);
+  ctx.docbar.setZoom(zoomShown(), state.zoom, pickZoom);
 
   // Le cockpit peut s'ouvrir sans `?project=` (pure vue de Flotte) : lire les
   // blueprints échoue alors, et c'est attendu — le niveau Flotte n'en a pas

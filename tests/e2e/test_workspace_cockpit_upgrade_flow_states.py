@@ -32,7 +32,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _fulfill(route: Route, payload: dict) -> None:
@@ -40,19 +40,13 @@ def _fulfill(route: Route, payload: dict) -> None:
 
 
 def _open_project_level(page: Page) -> None:
-    """Attend la fiche rendue, PUIS passe au niveau « Projet ».
+    """Attend la fiche rendue : en portée projet (P31), la Flotte l'ouvre seule.
 
-    Issue #850 : cliquer le zoom dès que `#zoom-seg` existe tombait parfois
-    après le premier rendu de la fiche (hôte servi : le niveau Projet est
-    déjà actif). Le clic relançait alors `draw()` ; le bouton « Mettre à
-    jour » de l'ancien Inspecteur restait cliquable le temps du rechargement,
-    puis `renderSheet` vidait l'Inspecteur avec l'aperçu dedans — timeout sur
-    « Confirmer la mise à jour ». Attendre `.pl-sheet` rend l'ordre
-    déterministe ; `piloter.js` ignore de son côté un zoom inchangé.
+    Issue #850 : cliquer un zoom pendant le premier rendu de la fiche
+    relançait `draw()` et vidait l'aperçu de l'Inspecteur. Il n'y a plus de
+    zoom Flotte/Projet ; attendre `.pl-sheet` garde l'ordre déterministe.
     """
     page.wait_for_selector(".pl-sheet", timeout=15_000)
-    page.wait_for_selector("#zoom-seg button")
-    page.locator("#zoom-seg button", has_text="Projet").click()
 
 
 def test_apercu_en_echec_affiche_l_erreur_et_reactive_le_bouton(workspace: Page) -> None:

@@ -881,3 +881,31 @@ def workspace(browser: Browser, served: str) -> Iterator[Page]:
         yield page
     finally:
         context.close()
+
+
+def open_scope_all(page: Page, hash_: str = "#flotte") -> None:
+    """Rouvre la coque en portée « Tous les projets » (P31), sur *hash_*.
+
+    La portée est la seule sélection de la coque et vit dans l'URL : la table
+    de la Flotte, le portefeuille de Travail ou la recherche mémoire de tous
+    les projets s'atteignent par ``?scope=all``, plus par un zoom propre à
+    chaque espace.
+    """
+    base = page.url.split("?")[0].split("#")[0]
+    page.goto(f"{base}?scope=all{hash_}", wait_until="domcontentloaded")
+    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+
+
+def open_atelier(page: Page, on: bool = True) -> None:
+    """Rouvre (ou referme) les panneaux d'atelier de la coque (P62).
+
+    Par défaut la coque ne montre que la barre du haut, le contenu et le panneau
+    de détail. Rail, explorateur, inspecteur permanent, preuves et dock se
+    rouvrent par la bascule ``setAtelier`` — la même que ⇧⌘L, la palette et le
+    bouton « Atelier » du pied de page. Un test qui mesure l'un d'eux l'ouvre ici
+    plutôt que de supposer qu'il est là.
+    """
+    page.evaluate("(on) => window.GrimoireWorkspace.setAtelier(on)", on)
+    page.wait_for_function(
+        "(on) => document.documentElement.dataset.atelier === (on ? 'on' : 'off')", arg=on
+    )

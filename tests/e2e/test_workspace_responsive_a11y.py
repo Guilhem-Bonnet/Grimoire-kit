@@ -17,7 +17,9 @@ from collections.abc import Iterator
 import pytest
 from playwright.sync_api import Browser, Page
 
-SPACES = ["piloter", "concevoir", "executer", "observer", "memoire", "source"]
+from .conftest import open_atelier
+
+SPACES = ["a-traiter", "travail", "flotte", "savoir", "configuration"]
 
 PHONE = {"width": 390, "height": 844}
 
@@ -108,6 +110,9 @@ def phone(browser: Browser, served: str) -> Iterator[Page]:
 def _settle(page: Page) -> None:
     """Attend que l'espace ait fini de se monter."""
     page.wait_for_load_state("networkidle")
+    # Instrument Sans se charge en `swap` : mesurer avant elle, c'est mesurer la
+    # police de repli, plus large de quelques pixels (P62).
+    page.evaluate("() => document.fonts.ready")
     page.wait_for_function("() => document.getElementById('canvas').getAttribute('aria-busy') !== 'true'")
     page.wait_for_timeout(250)
 
@@ -223,6 +228,7 @@ def test_un_tiroir_se_ferme_d_un_appui_tactile_hors_de_lui_et_rend_le_focus(brow
 
 def test_a_1440_px_les_panneaux_restent_en_colonnes(workspace: Page) -> None:
     """Le bureau ne change pas : explorateur et inspecteur épinglés à côté du centre."""
+    open_atelier(workspace)
     assert workspace.evaluate("() => window.GrimoireWorkspace.panelState('explorer')") == "pinned"
     widths = workspace.evaluate(
         "() => ['panel-explorer', 'center', 'panel-inspector'].map((i) => document.getElementById(i).getBoundingClientRect().width)"
@@ -239,17 +245,17 @@ def test_les_espaces_forment_un_tablist_navigable_aux_fleches(workspace: Page) -
     l'activation reste manuelle (Entrée) car monter un espace coûte des requêtes."""
     assert workspace.locator('#spaces[role="tablist"]').count() == 1
     tabs = workspace.locator('#spaces [role="tab"]')
-    assert tabs.count() == 6
+    assert tabs.count() == 5
 
     focusable = workspace.evaluate("() => [...document.querySelectorAll('#spaces [role=\"tab\"]')].map((t) => t.tabIndex)")
-    assert focusable.count(0) == 1 and focusable.count(-1) == 5, focusable
+    assert focusable.count(0) == 1 and focusable.count(-1) == 4, focusable
     selected = workspace.evaluate("() => document.querySelector('#spaces [aria-selected=\"true\"]').dataset.space")
     assert workspace.evaluate("() => document.querySelector('#spaces [tabindex=\"0\"]').dataset.space") == selected
 
     workspace.locator(f'#spaces [data-space="{selected}"]').focus()
     workspace.keyboard.press("ArrowRight")
     after_right = workspace.evaluate("() => document.activeElement.dataset.space")
-    assert after_right == SPACES[(SPACES.index(selected) + 1) % 6]
+    assert after_right == SPACES[(SPACES.index(selected) + 1) % len(SPACES)]
     workspace.keyboard.press("End")
     assert workspace.evaluate("() => document.activeElement.dataset.space") == SPACES[-1]
     workspace.keyboard.press("ArrowRight")
@@ -282,6 +288,7 @@ def test_la_toile_est_le_tabpanel_de_l_espace_courant(workspace: Page) -> None:
 
 def test_les_onglets_du_dock_s_activent_aux_fleches(workspace: Page) -> None:
     """Dans le dock, la flèche active l'onglet (le contenu est local, sans requête)."""
+    open_atelier(workspace)
     assert workspace.locator('#dock-tabs[role="tablist"]').count() == 1
     current = workspace.evaluate("() => document.querySelector('[data-dock-tab][aria-selected=\"true\"]').dataset.dockTab")
     workspace.locator(f'[data-dock-tab="{current}"]').focus()
@@ -393,15 +400,17 @@ def test_les_zones_de_donnees_sont_des_regions_polies(workspace: Page) -> None:
 
 def test_un_explorateur_vide_dit_pourquoi_et_propose_ou_aller(workspace: Page) -> None:
     """Cinq espaces sur six ne remplissent pas l'explorateur : il restait un
-    cadre muet. Il explique, et un bouton mène à Source, où vit l'arborescence."""
+    cadre muet. Il explique, et un bouton mène aux Fichiers de Configuration
+    (ex-Source), où vit l'arborescence."""
+    open_atelier(workspace)
     workspace.evaluate("() => window.GrimoireWorkspace.goto('observer')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'observer'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'observer'")
     _settle(workspace)
     body = workspace.locator("#explorer-body")
     assert body.inner_text().strip(), "l'explorateur ne doit pas rester muet"
-    button = body.get_by_role("button", name="Ouvrir Source")
+    button = body.get_by_role("button", name="Ouvrir les fichiers")
     button.click()
-    workspace.wait_for_function("() => window.GrimoireWorkspace.space === 'source'")
+    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
 
 
 def test_le_diagnostic_non_lance_se_lance_d_un_bouton(workspace: Page) -> None:
@@ -455,7 +464,7 @@ def test_un_etat_vide_dont_la_commande_demande_un_argument_n_a_pas_de_faux_bouto
     Projet que rien n'écrit : Observer n'est vide que sans ledger, hook ni run (P07)."""
     page = untouched_workspace
     page.evaluate("() => window.GrimoireWorkspace.goto('observer')")
-    page.wait_for_function("() => window.GrimoireWorkspace.space === 'observer'")
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'observer'")
     _settle(page)
     empty = page.locator("#canvas .empty").first
     empty.wait_for(state="visible", timeout=10_000)

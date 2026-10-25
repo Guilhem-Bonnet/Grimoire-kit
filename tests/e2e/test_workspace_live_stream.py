@@ -61,7 +61,7 @@ def _capture(page: Page, name: str) -> None:
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 @pytest.fixture(scope="module")

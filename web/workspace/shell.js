@@ -1,19 +1,35 @@
-// La coque : ce qui tient les six espaces ensemble.
+// La coque : ce qui tient les cinq espaces ensemble (P31).
 //
-// Possède la barre d'application, le rail, les trois états de panneau, le dock,
-// la palette, les raccourcis, le thème et la densité. Ne possède AUCUN contenu
-// d'espace : chaque espace est un module `spaces/<id>.js` qui exporte
-// `mount(root, ctx)` et rend la fonction de démontage.
+// Possède la barre d'application, la portée, le rail, les trois états de
+// panneau, le dock, la palette, les raccourcis, le thème et la densité. Ne
+// possède AUCUN contenu d'espace : chaque espace regroupe une ou plusieurs
+// rubriques, et chaque rubrique est un module `spaces/<module>.js` qui exporte
+// `mount(root, ctx)` et rend la fonction de démontage (seules les Préférences
+// sont rendues par la coque elle-même : ce sont SES réglages).
+//
+// L'URL dit tout : `?project=<slug>` ou `?scope=all` pour la portée, puis
+// `#<espace>[/<rubrique>][?<élément>]` — un lien copié rouvre le même écran
+// sur la même sélection.
 //
 // Contrat passé aux espaces (`ctx`), figé par ce squelette :
 //   ctx.api        le client de api.js, déjà ciblé sur le bon projet
 //   ctx.host       { kind: 'atelier'|'cockpit', project, readOnly, status }
+//   ctx.scope      { all, project, name, set(slug|null, target?) } : la seule
+//                  portée de la coque. `all` vrai = « Tous les projets » ; sinon
+//                  `project` (slug, pour l'API) et `name` (pour l'écran, jamais
+//                  le slug). `set` change la portée partout (rechargement)
+//   ctx.setItem    (params) : l'élément sélectionné entre dans l'URL (lien
+//                  profond), sans remonter la rubrique
 //   ctx.glossary   le glossaire chargé (get, open, missingTerms)
-//   ctx.inspector  l'élément du panneau droit — l'espace le remplit
-//   ctx.docbar     { setBreadcrumb, setZoom, setViews, setValidation }
+//   ctx.inspector  l'élément du panneau de détail (à droite) — l'espace le remplit ;
+//                  hors atelier (P62) il n'est affiché que s'il porte du contenu
+//   ctx.docbar     { setBreadcrumb, setZoom, setViews, setValidation } — le fil
+//                  d'Ariane reçoit seulement ce qui suit la portée et l'espace,
+//                  que la coque pose elle-même
 //   ctx.dock       { log, setTab, echo } — `echo` affiche la commande équivalente
 //   ctx.explorer   l'élément de l'arbre gauche
-//   ctx.empty      (titre, phrase, commande) → le bloc d'état vide unique
+//   ctx.empty      (titre, phrase, commande, action?, { art? }) → le bloc d'état
+//                  vide unique ; `art` nomme une composition `i-empty-*` du sprite
 //   ctx.signal     un AbortSignal annulé au démontage de l'espace
 //   ctx.params     ce que l'appelant de `goto(id, params)` a demandé pour ce
 //                  montage (ex. `{ file }` depuis ⌘K) — jamais persistant,
@@ -30,19 +46,68 @@
 //                  données. Remis à zéro à chaque changement d'espace.
 
 import { api, boot, host } from './api.js';
-import glossary from './glossary.js';
+import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
 
-// ── Les six espaces, dans l'ordre de la barre ───────────────────────────────
+// Fin du premier montage d'espace : la première lecture du compteur d'attention
+// l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
+let markFirstSpaceMounted;
+const firstSpaceMounted = new Promise((resolve) => { markFirstSpaceMounted = resolve; });
+
+// ── Les cinq espaces, dans l'ordre de la barre, et leurs rubriques ──────────
+//
+// Un espace suit une intention (trier, travailler, maintenir, se souvenir,
+// configurer), plus une source de données : ses rubriques montent les modules
+// d'avant. `module: null` = rendu par la coque. Le nom du 4e espace vient de
+// glossary.js, jamais d'ici.
 
 const SPACES = [
-  { id: 'piloter',  label: 'Piloter',  icon: 'rocket', term: 'flotte' },
-  { id: 'concevoir', label: 'Concevoir', icon: 'workflow', term: 'blueprint' },
-  { id: 'executer',  label: 'Exécuter',  icon: 'bolt', term: 'tache' },
-  { id: 'observer',  label: 'Observer',  icon: 'microscope', term: 'trace' },
-  { id: 'memoire',   label: 'Mémoire',   icon: 'brain', term: 'memoire' },
-  { id: 'source',    label: 'Source',    icon: 'branch', term: 'etage' },
+  { id: 'a-traiter', label: 'À traiter', icon: 'i-space-a-traiter', term: 'a-traiter',
+    sections: [{ id: 'a-traiter', module: 'a-traiter', label: 'À traiter' }] },
+  { id: 'travail', label: 'Travail', icon: 'i-space-travail', term: 'tache',
+    sections: [{ id: 'travail', module: 'executer', label: 'Tâches' }] },
+  { id: 'flotte', label: 'Flotte', icon: 'i-space-flotte', term: 'flotte',
+    sections: [{ id: 'flotte', module: 'piloter', label: 'Flotte' }] },
+  { id: FOURTH_SPACE.id, label: FOURTH_SPACE.label, icon: FOURTH_SPACE.icon, term: 'memoire',
+    sections: [
+      { id: 'memoire', module: 'memoire', label: 'Mémoire' },
+      { id: 'journal', module: 'observer', label: 'Journal' },
+    ] },
+  { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',
+    // Atterrit sur « Hôtes et hooks » (maquette Configuration) : l'arbre de
+    // fichiers est une rubrique parmi d'autres, pas l'écran d'arrivée.
+    landing: 'hotes',
+    sections: [
+      { id: 'agents', module: 'configurer', label: 'Agents', count: (api) => api.agents().then((d) => (d.agents || []).length) },
+      { id: 'fichiers', module: 'source', label: 'Fichiers' },
+      { id: 'blueprints', module: 'concevoir', label: 'Blueprints', count: (api) => api.blueprintContainers().then((d) => d.count) },
+      { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', count: (api) => api.hooks().then((d) => d.total) },
+      { id: 'fournisseurs', module: 'configurer', label: 'Fournisseurs et budgets' },
+      { id: 'preferences', module: null, label: 'Préférences' },
+    ] },
 ];
+
+const SECTIONS = new Map();
+for (const space of SPACES) {
+  for (const section of space.sections) SECTIONS.set(section.id, Object.assign(section, { space }));
+}
+
+// Les six identifiants d'avant (anciens liens, `ctx.goto('source', …)` des
+// modules) mènent à la rubrique qui les a remplacés.
+const LEGACY_SECTION = {
+  piloter: 'flotte', executer: 'travail', observer: 'journal',
+  memoire: 'memoire', source: 'fichiers', concevoir: 'blueprints',
+};
+
+/** Espace, rubrique ou ancien identifiant → la rubrique à monter. Un espace
+ * rouvre la dernière rubrique vue dans cette session, sinon la première. */
+function resolveSection(target) {
+  const space = SPACES.find((s) => s.id === target);
+  if (space) return SECTIONS.get(lastSection[space.id]) || SECTIONS.get(space.landing) || space.sections[0];
+  return SECTIONS.get(target) || SECTIONS.get(LEGACY_SECTION[target]) || SPACES[0].sections[0];
+}
+
+const lastSection = {};
 
 // Rail : 1 explorateur, 2 bibliothèque, 3 preuves, 4 inspecteur, 5 dock.
 const RAIL = [
@@ -104,6 +169,53 @@ export function stateIcon(cls) {
   return span;
 }
 
+// ── Fin du point polysémique (P30) ──────────────────────────────────────────
+// Un point ne porte plus qu'une présence ou une quantité : une catégorie prend
+// son icône, une échelle ses barres, une identité son monogramme. Le mot reste
+// toujours lisible (texte voisin ou `title`) : jamais la forme seule.
+
+/** Icône de catégorie avec son libellé au survol ; `tone` (ok | warn | bad |
+ *  acc) ne sert qu'aux glyphes qui disent un état (vivacité de session).
+ *  `alone` : aucun mot voisin ne la double, l'icône porte alors le libellé
+ *  pour les lecteurs d'écran. */
+export function glyph(name, label, tone, { alone = false } = {}) {
+  const span = mk('span', { class: 'glyph' + (tone ? ' ' + tone : '') });
+  span.title = label;
+  span.append(alone ? icon(name, label) : icon(name));
+  return span;
+}
+
+/** Deux lettres d'un nom : initiales des deux premiers mots, sinon ses deux
+ *  premières lettres (« Grimoire-Forge » → GF, « kit » → KI). Calculé ici,
+ *  rien n'est demandé au serveur. */
+export function monogramText(name) {
+  const words = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!words.length) return '?';
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2);
+  return letters.toUpperCase();
+}
+
+/** Monogramme d'une identité (projet) : remplace le point d'accent. Le nom
+ *  complet suit en texte, le monogramme est donc décoratif. */
+export function monogram(name) {
+  const span = mk('span', { class: 'mgram', text: monogramText(name) });
+  span.setAttribute('aria-hidden', 'true');
+  return span;
+}
+
+/** Échelle ordinale en barres (1 à 3 pleines sur 3) : la priorité se lit « plus
+ *  ou moins », ce qu'un point de couleur ne dit pas. `tone` = bad pour la plus
+ *  haute marche (critique). */
+export function levelBars(level, label, tone) {
+  const span = mk('span', { class: 'bars' + (tone ? ' ' + tone : '') });
+  span.dataset.level = String(level);
+  span.setAttribute('role', 'img');
+  span.setAttribute('aria-label', label);
+  span.title = label;
+  for (let i = 1; i <= 3; i += 1) span.append(mk('i', { class: i <= level ? 'on' : '' }));
+  return span;
+}
+
 // ── Composants partagés des espaces (P21) ───────────────────────────────────
 // Une seule implémentation chacun, stylée par shell.css : un espace les
 // compose, il n'en recopie jamais le CSS sous son préfixe.
@@ -116,7 +228,7 @@ export function badge(label, tone, title) {
   return span;
 }
 
-/** Rangée de tuiles KPI : `items` = [{ value, label, icon?, tone? }]. Une
+/** Rangée de tuiles KPI : `items` = [{ value, label, icon?, tone?, sub? }]. Une
  *  valeur sans chiffre (« absent », « verte ») est un statut, pas un
  *  indicateur : la tuile la pose en mot d'état (`data-kind="word"`). */
 export function kpiRow(items) {
@@ -130,6 +242,7 @@ export function kpiRow(items) {
     const val = mk('div', { class: 'kpi-val', text: value });
     val.title = value;
     cell.append(lbl, val);
+    if (item.sub) cell.append(mk('div', { class: 'kpi-sub', text: item.sub }));
     rowNode.append(cell);
   }
   return rowNode;
@@ -182,7 +295,8 @@ function applyTheme() {
   const pref = themePref();
   root.dataset.themePref = pref;
   root.dataset.theme = resolveTheme(pref);
-  for (const button of document.querySelectorAll('#st-theme [data-theme-pref]')) {
+  // La barre d'état et la rubrique Préférences portent les mêmes boutons.
+  for (const button of document.querySelectorAll('[data-theme-pref]')) {
     button.setAttribute('aria-pressed', String(button.dataset.themePref === pref));
   }
 }
@@ -199,32 +313,89 @@ colorScheme.addEventListener('change', () => {
   if (themePref() === 'system') applyTheme();
 });
 
+// Deux réglages, deux mots (P31) : la densité (confortable ou compacte) et le
+// plein écran (⇧⌘F). Le mot « Concentration » désignait les deux à la fois.
+// Les valeurs mémorisées avant P31 se relisent sous leur nouveau nom.
+const DENSITIES = { confortable: 'confortable', compacte: 'compacte', decouverte: 'confortable', concentration: 'compacte' };
+const DENSITY_LABEL = { confortable: 'confortable', compacte: 'compacte' };
+
 function applyPreferences() {
   const saved = readState();
-  root.dataset.density = saved.density || 'decouverte';
-  root.dataset.focus = 'off';
+  root.dataset.density = DENSITIES[saved.density] || 'confortable';
+  root.dataset.focus = root.dataset.focus === 'on' ? 'on' : 'off';
+  root.dataset.atelier = saved.atelier === 'on' ? 'on' : 'off';
+  $('st-atelier').setAttribute('aria-pressed', String(root.dataset.atelier === 'on'));
   applyTheme();
-  $('st-density').textContent =
-    root.dataset.density === 'concentration' ? 'Concentration' : 'Découverte';
+  // « Densité : » s'efface sous 900 px (`.st-pre`) : la barre d'état y est serrée.
+  $('st-density').replaceChildren(
+    mk('span', null, mk('span', { class: 'st-pre', text: 'Densité : ' }), DENSITY_LABEL[root.dataset.density]),
+  );
+  $('st-density').setAttribute('aria-pressed', String(root.dataset.density === 'compacte'));
+  $('st-fullscreen').setAttribute('aria-pressed', String(root.dataset.focus === 'on'));
+  for (const button of document.querySelectorAll('[data-density-pref]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.densityPref === root.dataset.density));
+  }
+  for (const button of document.querySelectorAll('[data-fullscreen-pref]')) {
+    button.setAttribute('aria-pressed', String(root.dataset.focus === 'on'));
+  }
 }
 
-function toggleDensity() {
-  const next = root.dataset.density === 'concentration' ? 'decouverte' : 'concentration';
+function setDensity(next) {
+  if (!DENSITY_LABEL[next] || next === root.dataset.density) return;
   writeState({ density: next });
   applyPreferences();
-  // Concentration replie tout ; Découverte réépingle les deux panneaux utiles.
+  // Compacte replie tout ; confortable réépingle les deux panneaux utiles.
   // Sous 900 px les panneaux sont des tiroirs qu'on ouvre à la main : la
   // densité ne les ouvre pas d'office.
   if (!isNarrow()) {
-    setPanel('explorer', next === 'concentration' ? 'collapsed' : 'pinned');
-    setPanel('inspector', next === 'concentration' ? 'collapsed' : 'pinned');
+    setPanel('explorer', next === 'compacte' ? 'collapsed' : 'pinned');
+    setPanel('inspector', next === 'compacte' ? 'collapsed' : 'pinned');
   }
-  setDock(next === 'concentration' || isNarrow() ? 'collapsed' : 'pinned');
-  selectDockTab(next === 'concentration' ? 'console' : 'traces');
+  setDock(next === 'compacte' || isNarrow() ? 'collapsed' : 'pinned');
+  selectDockTab(next === 'compacte' ? 'console' : 'traces');
+}
+
+function toggleDensity() {
+  setDensity(root.dataset.density === 'compacte' ? 'confortable' : 'compacte');
+}
+
+// ── Panneaux d'atelier (P62) ────────────────────────────────────────────────
+//
+// Par défaut la coque ne montre que la barre du haut, le contenu et, quand
+// l'écran y met quelque chose, le panneau de détail (l'ancien Inspecteur). Rail,
+// explorateur, inspecteur permanent, preuves et dock servent au diagnostic : ils
+// restent là, derrière cette bascule (⇧⌘L, palette, pied de page), mémorisée par
+// projet comme le thème. Sous 900 px la coque garde ses tiroirs : le rail y est
+// la seule porte vers eux.
+function setAtelier(on) {
+  writeState({ atelier: on ? 'on' : 'off' });
+  applyPreferences();
+  fillEmptyPanels();
+}
+
+function toggleAtelier() {
+  setAtelier(root.dataset.atelier !== 'on');
+}
+
+/** Un panneau latéral n'existe, hors atelier, que si l'écran y a posé du
+ * contenu : les squelettes de chargement, l'indice vide de la coque et les
+ * phrases « Choisissez un élément » ne comptent pas. Vaut pour le panneau de
+ * détail (ancien Inspecteur) et pour l'arbre de la rubrique Fichiers, qui est
+ * sa navigation et non un outil de diagnostic. */
+function syncDetail() {
+  for (const [bodyId, panelId] of [['inspector-body', 'panel-inspector'], ['explorer-body', 'panel-explorer']]) {
+    const filled = [...$(bodyId).children].some((child) => (
+      !child.hasAttribute(PLACEHOLDER)
+      && !child.matches('p.lbl, p.cv-msg, .sr-only')
+      && (child.children.length || child.textContent.trim())
+    ));
+    $(panelId).dataset.detail = filled ? 'on' : 'off';
+  }
 }
 
 function toggleFocus() {
   root.dataset.focus = root.dataset.focus === 'on' ? 'off' : 'on';
+  applyPreferences();
 }
 
 // ── Panneaux à trois états : collapsed, peek, pinned ────────────────────────
@@ -253,7 +424,7 @@ function syncDrawer() {
 }
 
 function panelKey(kind, id) {
-  return `${kind}.${current || 'piloter'}.${id}`;
+  return `${kind}.${current || 'flotte'}.${id}`;
 }
 
 function panelState(id) {
@@ -339,9 +510,9 @@ function setDock(state) {
   if (!isNarrow()) writeState({ [panelKey('panel', 'dock')]: state });
 }
 
-/** Découverte ouvre par défaut ; Concentration replie tout (spec §3.4). */
+/** Confortable ouvre par défaut ; compacte replie tout (spec §3.4). */
 function defaultPanelState() {
-  return root.dataset.density === 'concentration' || isNarrow() ? 'collapsed' : 'pinned';
+  return root.dataset.density === 'compacte' || isNarrow() ? 'collapsed' : 'pinned';
 }
 
 /** Largeur : un panneau redimensionné à la souris (poignée) la garde, par
@@ -370,7 +541,7 @@ function restorePanelsForSpace() {
   setPanel('explorer', saved[panelKey('panel', 'explorer')] || fallback);
   setPanel('inspector', saved[panelKey('panel', 'inspector')] || fallback);
   // Preuves (#534) : jamais ouvert par défaut (ce n'est pas un des « deux
-  // panneaux utiles » que la densité Découverte réépingle) — seulement s'il
+  // panneaux utiles » que la densité confortable réépingle) — seulement s'il
   // a été explicitement ouvert dans cet espace, pour ce projet, auparavant.
   setPanel('evidence', saved[panelKey('panel', 'evidence')] || 'collapsed');
   setDock(saved[panelKey('panel', 'dock')] || 'pinned');
@@ -485,13 +656,13 @@ function mk(tag, attrs, ...children) {
 
 function bindTablist(list, { activate }) {
   list.addEventListener('keydown', (event) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
     const tabs = [...list.querySelectorAll('[role="tab"]')].filter((tab) => !tab.disabled);
     const index = tabs.indexOf(event.target.closest('[role="tab"]'));
     if (index < 0) return;
     let next = index;
-    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + tabs.length) % tabs.length;
     if (event.key === 'Home') next = 0;
     if (event.key === 'End') next = tabs.length - 1;
     event.preventDefault();
@@ -764,7 +935,9 @@ const dock = {
   // Chaque action à la souris affiche sa commande équivalente (spec §3.3).
   echo(command) {
     const el = $('dock-echo');
-    if (el) el.innerHTML = 'Commande équivalente : <span class="mono">' + escapeHtml(command) + '</span>';
+    if (!el) return;
+    if (!command) { el.replaceChildren(); return; }
+    el.innerHTML = 'Commande équivalente : <span class="mono">' + escapeHtml(command) + '</span>';
   },
 };
 
@@ -774,15 +947,20 @@ function escapeHtml(text) {
 
 // ── Barre de document ───────────────────────────────────────────────────────
 
+// Le fil d'Ariane commence toujours par la portée (nom du projet, jamais son
+// slug) puis l'espace, et la rubrique quand l'espace en a plusieurs : la coque
+// les pose, un module n'ajoute que ce qui suit.
+let crumbBase = [];
+
 const docbar = {
   setBreadcrumb(parts) {
     const el = $('breadcrumb');
     el.replaceChildren();
-    parts.forEach((part, index) => {
+    [...crumbBase, ...parts.filter(Boolean)].forEach((part, index, all) => {
       if (index) el.append(Object.assign(document.createElement('span'), { textContent: '›' }));
       const span = document.createElement('span');
       span.textContent = part;
-      if (index === parts.length - 1) { span.style.color = 'var(--ink)'; span.style.fontWeight = '500'; }
+      if (index === all.length - 1) { span.style.color = 'var(--ink)'; span.style.fontWeight = '500'; }
       el.append(span);
     });
   },
@@ -844,11 +1022,19 @@ function consoleArgv(command) {
   return null;
 }
 
-function empty(title, sentence, command, action, { compact = false } = {}) {
+// `art` : une composition d'état vide du sprite (`i-empty-*`, 96 × 64) posée
+// au-dessus du titre, à la place de la petite icône de bac.
+function empty(title, sentence, command, action, { compact = false, art = '' } = {}) {
   const block = document.createElement('div');
   block.className = compact ? 'empty empty-compact' : 'empty';
+  if (art) {
+    const scene = icon(art);
+    scene.setAttribute('class', 'empty-art');
+    block.dataset.art = art;
+    block.append(scene);
+  }
   const heading = document.createElement('h2');
-  heading.append(icon('inbox'), mk('span', { text: title }));
+  heading.append(...(art ? [] : [icon('inbox')]), mk('span', { text: title }));
   block.append(heading);
   const paragraph = document.createElement('p');
   paragraph.textContent = sentence;
@@ -873,11 +1059,9 @@ function emptyPanelHint(which) {
   if (which === 'explorer') {
     return empty(
       "Pas d'arborescence ici",
-      current === 'source'
-        ? "Aucun fichier à parcourir pour l'instant."
-        : "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Source.",
+      "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Configuration › Fichiers.",
       null,
-      current === 'source' ? null : { label: 'Ouvrir Source', run: () => goto('source') },
+      current === 'fichiers' ? null : { label: 'Ouvrir les fichiers', run: () => goto('fichiers') },
       { compact: true },
     );
   }
@@ -885,7 +1069,7 @@ function emptyPanelHint(which) {
     'Rien à inspecter',
     "Choisissez un élément dans la zone centrale : son détail s'affiche ici.",
     null,
-    { label: 'Rechercher ou commander', run: () => openPalette() },
+    { label: 'Rechercher ou agir', run: () => openPalette() },
     { compact: true },
   );
 }
@@ -893,6 +1077,9 @@ function emptyPanelHint(which) {
 /** Pose l'indication dans une zone latérale restée vide ; elle s'efface seule
  * dès que l'espace y écrit (`watchPlaceholders`). */
 function fillEmptyPanels() {
+  // Hors atelier (et hors tiroirs) ces panneaux sont masqués : leur indication
+  // le serait aussi, et ne doit pas répondre à la place du contenu de l'écran.
+  if (root.dataset.atelier !== 'on' && !isNarrow()) return;
   for (const [which, id] of [['explorer', 'explorer-body'], ['inspector', 'inspector-body']]) {
     const body = $(id);
     if (body.children.length) continue;
@@ -929,69 +1116,190 @@ function triggerRailAction(id, event) {
   if (handler) handler(event);
 }
 
+function tabButton(id, label, iconName, term) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'tab';
+  button.setAttribute('role', 'tab');
+  button.setAttribute('aria-controls', 'canvas');
+  button.setAttribute('aria-selected', 'false');
+  button.tabIndex = -1;
+  if (term) button.dataset.term = term;
+  button.append(...(iconName ? [icon(iconName)] : []), mk('span', { class: 'tab-lbl', text: label }));
+  return button;
+}
+
 function buildSpaces() {
   const nav = $('spaces');
   nav.replaceChildren();
   SPACES.forEach((space, index) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'tab';
-    button.setAttribute('role', 'tab');
+    const button = tabButton(space.id, space.label, space.icon, space.term);
     button.id = `tab-space-${space.id}`;
-    button.setAttribute('aria-controls', 'canvas');
     button.dataset.space = space.id;
-    button.dataset.term = space.term;
-    button.append(icon(space.icon), mk('span', { class: 'tab-lbl', text: space.label }));
-    button.setAttribute('aria-selected', 'false');
     button.tabIndex = index === 0 ? 0 : -1;
     // Nom accessible stable : sous 900 px seul l'onglet courant garde son libellé visible.
     button.setAttribute('aria-label', space.label);
     button.title = `${space.label} — ⌘${index + 1}`;
     button.addEventListener('click', () => goto(space.id));
+    if (space.id === 'a-traiter') {
+      // Le compteur de décisions vit sur l'onglet (maquette Douce), pas dans une pastille à part.
+      const count = badge('0', 'warn');
+      count.id = 'decisions-count';
+      count.hidden = true;
+      button.append(count);
+    }
     nav.append(button);
   });
   bindTablist(nav, { activate: 'manual' });
+  bindTablist($('section-tabs'), { activate: 'manual' });
 }
 
-async function goto(id, params) {
-  const space = SPACES.find((s) => s.id === id) || SPACES[0];
-  // Un deuxième `goto()` vers l'espace déjà actif est un doublon SAUF s'il
-  // porte des `params` (⌘K « ouvrir ce fichier de Source » alors que Source
-  // est déjà monté) : sans l'exception, la palette perdrait silencieusement
-  // la navigation quand l'espace ne change pas.
-  if (current === space.id && !params) return;
+/** Les rubriques de l'espace courant ; masquées quand il n'en a qu'une. */
+/** Le compte d'une rubrique (« Agents 3 ») : lu une fois par portée, jamais
+ * deviné. Une lecture qui échoue laisse l'étiquette sans nombre. */
+const sectionCounts = new Map();
+
+function fillSectionCount(item, button) {
+  const show = (n) => {
+    if (!Number.isFinite(n) || !button.isConnected) return;
+    button.append(mk('span', { class: 'tab-count', text: String(n), 'data-count': item.id }));
+    button.setAttribute('aria-label', `${item.label}, ${n}`);
+  };
+  if (!sectionCounts.has(item.id)) {
+    sectionCounts.set(item.id, Promise.resolve(item.count(api)).catch(() => null));
+  }
+  sectionCounts.get(item.id).then(show);
+}
+
+function renderSectionTabs(space, section) {
+  const list = $('section-tabs');
+  list.replaceChildren();
+  list.hidden = space.sections.length < 2;
+  if (list.hidden) return;
+  for (const item of space.sections) {
+    const button = tabButton(item.id, item.label);
+    button.id = `tab-section-${item.id}`;
+    button.dataset.section = item.id;
+    button.addEventListener('click', () => goto(item.id));
+    list.append(button);
+    if (item.count) fillSectionCount(item, button);
+  }
+  markSelectedTab(list, list.querySelector(`[data-section="${section.id}"]`));
+}
+
+// ── Lien profond : l'URL dit la portée, l'espace et l'élément ───────────────
+//
+// `#<espace>[/<rubrique>][?<clé>=<valeur>…]` ; la portée est dans la query
+// (`?project=` / `?scope=all`), lue par api.js au chargement. Seuls les
+// paramètres simples (texte, nombre, booléen) entrent dans l'URL : ce sont
+// ceux qu'un module relit dans `ctx.params`.
+
+let appliedHash = '';
+
+function locationHash(section, params) {
+  const space = section.space;
+  let hash = '#' + space.id + (space.sections.length > 1 ? '/' + section.id : '');
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === null || value === undefined || value === '' || typeof value === 'object') continue;
+    query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? `${hash}?${text}` : hash;
+}
+
+function parseHash(hash) {
+  const raw = String(hash || '').replace(/^#/, '');
+  const [path, query = ''] = raw.split('?');
+  const [first = '', second = ''] = path.split('/');
+  const params = Object.fromEntries(new URLSearchParams(query));
+  return { target: second || first || SPACES[0].id, params: Object.keys(params).length ? params : null };
+}
+
+function writeHash(hash, { push }) {
+  appliedHash = hash;
+  if (location.hash === hash) return;
+  const url = location.pathname + location.search + hash;
+  if (push) history.pushState(null, '', url);
+  else history.replaceState(null, '', url);
+}
+
+/** L'URL a changé sans nous (précédent/suivant, lien collé) : la suivre. */
+function followLocation() {
+  if (location.hash === appliedHash) return;
+  const { target, params } = parseHash(location.hash);
+  // `{}` plutôt que rien : revenir de `#travail?task=…` à `#travail` doit
+  // remonter la rubrique sans la sélection, pas être pris pour un doublon.
+  goto(target, params || {}, { fromUrl: true });
+}
+
+/** `ctx.setItem` : la sélection d'un module entre dans l'URL, sans remontage. */
+function setItem(params) {
+  if (!current) return;
+  currentParams = { ...(params || {}) };
+  writeHash(locationHash(SECTIONS.get(current), currentParams), { push: false });
+}
+
+let currentParams = {};
+
+async function goto(id, params, { fromUrl = false } = {}) {
+  const section = resolveSection(id);
+  const space = section.space;
+  // Un deuxième `goto()` vers la rubrique déjà active est un doublon SAUF s'il
+  // porte des `params` (⌘K « ouvrir ce fichier » alors que Fichiers est déjà
+  // monté) : sans l'exception, la palette perdrait silencieusement la
+  // navigation quand la rubrique ne change pas.
+  if (current === section.id && !params) {
+    writeHash(locationHash(section, currentParams), { push: false });
+    return;
+  }
   if (controller) controller.abort();
   controller = new AbortController();
-  current = space.id;
+  current = section.id;
+  currentParams = { ...(params || {}) };
+  lastSection[space.id] = section.id;
   railActions = {};
   live.clear();
   restorePanelsForSpace();
-  location.hash = '#' + space.id;
+  // Une navigation venue de l'URL ne la réécrit qu'à l'identique (forme
+  // canonique d'un ancien `#piloter`) ; un clic, lui, crée une entrée
+  // d'historique — « Précédent » ramène à l'espace d'avant.
+  writeHash(locationHash(section, currentParams), { push: !fromUrl && Boolean(appliedHash) });
   // Identité d'espace (revue 2026-09) : shell.css en tire --id-current pour
   // le filet sous l'onglet actif et le liseré des en-têtes de panneau.
   // `data-active-space`, jamais `data-space` : ce dernier est réservé aux
   // boutons d'onglet (le sélecteur générique `[data-space]` juste en dessous
   // les recense pour poser `aria-selected` — poser aussi `data-space` sur
-  // `<body>` le ferait matcher par ce même sélecteur).
-  document.body.dataset.activeSpace = space.id;
+  // `<body>` le ferait matcher par ce même sélecteur). La teinte reste celle
+  // du module monté (tokens.css), l'espace est porté à part.
+  document.body.dataset.activeSpace = section.module || section.id;
+  document.body.dataset.activeArea = space.id;
   const tab = document.querySelector(`#spaces [data-space="${space.id}"]`);
   markSelectedTab($('spaces'), tab);
   revealTab($('spaces'), tab);
+  renderSectionTabs(space, section);
   const canvas = $('canvas');
-  canvas.setAttribute('aria-labelledby', `tab-space-${space.id}`);
+  canvas.setAttribute('aria-labelledby', space.sections.length > 1 ? `tab-section-${section.id}` : `tab-space-${space.id}`);
   canvas.setAttribute('aria-busy', 'true');
   canvas.replaceChildren(...loadingNodes(`Chargement de l'espace ${space.label}…`, 5, { cover: true }));
-  canvas.dataset.grid = space.id === 'concevoir' ? 'on' : 'off';
+  canvas.dataset.grid = section.module === 'concevoir' ? 'on' : 'off';
   $('inspector-body').replaceChildren(...loadingNodes('Chargement du détail…', 3));
   $('explorer-body').replaceChildren(...loadingNodes("Chargement de l'arborescence…", 3));
-  docbar.setBreadcrumb([host.project || host.status?.slug || 'projet', space.label]);
+  crumbBase = [scopeName(), space.label, ...(space.sections.length > 1 ? [section.label] : [])];
+  docbar.setBreadcrumb([]);
   docbar.setZoom([], null);
   docbar.setViews([], null);
   docbar.setValidation('');
+  // Rien d'un espace quitté ne survit dans la coque (M7) : la commande
+  // équivalente se réécrit au montage suivant.
+  dock.echo('');
 
   const ctx = {
     api, host, glossary, dock, docbar, empty, icon,
     canvas,
+    section: section.id,
+    scope,
+    setItem,
     inspector: $('inspector-body'),
     explorer: $('explorer-body'),
     signal: controller.signal,
@@ -1003,8 +1311,12 @@ async function goto(id, params) {
     live: { on: (handler) => live.on(handler) },
   };
   try {
-    const module = await import(`./spaces/${space.id}.js`);
-    await module.mount(canvas, ctx);
+    if (section.module) {
+      const module = await import(`./spaces/${section.module}.js`);
+      await module.mount(canvas, ctx);
+    } else {
+      mountPreferences(canvas, ctx);
+    }
   } catch (error) {
     if (ctx.signal.aborted) return;
     clearLoading(canvas);
@@ -1012,7 +1324,7 @@ async function goto(id, params) {
       `L'espace ${space.label} n'a pas pu s'ouvrir`,
       String(error && error.message ? error.message : error),
       null,
-      { label: 'Réessayer', run: () => goto(space.id, {}) },
+      { label: 'Réessayer', run: () => goto(section.id, {}) },
     ));
   }
   // Un `goto()` plus récent a repris la main : il gère lui-même son chargement.
@@ -1020,35 +1332,214 @@ async function goto(id, params) {
   for (const area of [canvas, $('inspector-body'), $('explorer-body')]) clearLoading(area);
   canvas.setAttribute('aria-busy', 'false');
   fillEmptyPanels();
+  markFirstSpaceMounted();
+}
+
+// ── Préférences : la seule rubrique que la coque rend elle-même ─────────────
+//
+// Trois réglages distincts, trois mots distincts : Thème, Densité, Plein
+// écran. Les mêmes boutons que la barre d'état, jamais une seconde mémoire.
+
+function mountPreferences(canvas, ctx) {
+  const choice = (label, attr, value, pressed, run) => {
+    const button = mk('button', { type: 'button', [attr]: value, 'aria-pressed': String(pressed), text: label });
+    button.addEventListener('click', run);
+    return button;
+  };
+  const group = (title, sentence, ...controls) => mk('section', { class: 'pref-group' },
+    mk('h3', { class: 'pref-title', text: title }),
+    mk('p', { class: 'space-sub', text: sentence }),
+    mk('div', { class: 'seg', role: 'group', 'aria-label': title }, ...controls));
+  const theme = root.dataset.themePref;
+  const density = root.dataset.density;
+  const full = root.dataset.focus === 'on';
+  const wrap = mk('div', { class: 'pref-wrap' },
+    spaceHead('Préférences', 'Réglages de cet écran, gardés par projet dans ce navigateur.'),
+    group('Thème', 'Clair, sombre, ou celui du système.',
+      choice('Système', 'data-theme-pref', 'system', theme === 'system', () => setThemePref('system')),
+      choice('Clair', 'data-theme-pref', 'light', theme === 'light', () => setThemePref('light')),
+      choice('Sombre', 'data-theme-pref', 'dark', theme === 'dark', () => setThemePref('dark'))),
+    group('Densité', 'Confortable ouvre les panneaux et écrit les libellés ; compacte les replie et resserre les contrôles.',
+      choice('Confortable', 'data-density-pref', 'confortable', density === 'confortable', () => setDensity('confortable')),
+      choice('Compacte', 'data-density-pref', 'compacte', density === 'compacte', () => setDensity('compacte'))),
+    group('Plein écran', "Donne la toile à tout l'écran : panneaux épinglés et dock s'effacent. ⇧⌘F le bascule de partout.",
+      choice('Plein écran', 'data-fullscreen-pref', 'on', full, toggleFocus)),
+  );
+  canvas.replaceChildren(wrap);
+  ctx.inspector.replaceChildren();
+}
+
+// ── Portée : « Tous les projets », ou un projet (P31) ───────────────────────
+//
+// Une seule sélection pour toute la coque : plus de zoom Flotte/Projet par
+// espace, plus de projet « prévisualisé » distinct du projet servi. La portée
+// vit dans l'URL ; en changer recharge la page, pour que l'hôte relise le
+// projet servi — et donc s'il accepte l'écriture.
+
+/** Le registre (`/api/projects`), lu une fois à l'amorçage. */
+let registry = [];
+
+function projectEntry(slug) {
+  return registry.find((p) => p.slug === slug) || null;
+}
+
+function baseName(path) {
+  return String(path || '').split(/[\\/]/).filter(Boolean).pop() || '';
+}
+
+/** Le nom d'un projet à l'écran, jamais son slug : celui-ci mutile les accents
+ * (« Référence agentique » devient « r-f-rence-agentique »). Hors registre, le
+ * dossier servi porte le même nom. */
+function projectName(slug) {
+  const entry = projectEntry(slug);
+  if (entry && entry.name) return entry.name;
+  if (entry && entry.path) return baseName(entry.path);
+  if (slug === host.project && host.status) return baseName(host.status.projectRoot) || 'projet servi';
+  return 'projet';
+}
+
+function scopeName() {
+  return host.scopeAll ? 'Tous les projets' : projectName(host.project);
+}
+
+function scopeUrl(slug, hash) {
+  const params = new URLSearchParams(location.search);
+  params.delete('project');
+  params.delete('scope');
+  if (slug) params.set('project', slug);
+  else params.set('scope', 'all');
+  return `${location.pathname}?${params.toString()}${hash}`;
+}
+
+/** Change la portée partout. Choisir un projet ouvre sa fiche (Flotte en
+ * portée projet), pas la table de la Flotte ; revenir à « Tous les projets »
+ * garde l'espace courant. `target` impose un autre écran (lien profond). */
+function setScope(slug, target) {
+  const section = SECTIONS.get(current) || SPACES[0].sections[0];
+  const hash = target ?? (slug ? '#flotte' : locationHash(section, {}));
+  location.assign(scopeUrl(slug || null, hash));
+}
+
+const scope = {
+  get all() { return host.scopeAll; },
+  get project() { return host.scopeAll ? null : host.project; },
+  get name() { return scopeName(); },
+  set: setScope,
+};
+
+function renderScopeChip() {
+  $('project-name').textContent = scopeName();
+  // Maquettes : « Tous les projets 11 » — le nombre de projets du registre.
+  const count = $('project-count');
+  count.hidden = !(host.scopeAll && registry.length);
+  count.textContent = String(registry.length);
+  $('project-chip').setAttribute('aria-label', `Portée : ${scopeName()} — changer de portée`);
+}
+
+// Lecture seule (M6) : dit en tête de la toile, pas seulement dans la barre
+// d'état, avec le geste qui rend l'écriture — revenir au projet ouvert, ou
+// ouvrir le cockpit depuis celui-ci.
+function renderReadOnlyBanner() {
+  const banner = $('readonly-banner');
+  banner.hidden = !host.readOnly;
+  banner.replaceChildren();
+  if (!host.readOnly) return;
+  const home = host.status && host.status.home;
+  const away = home && home !== host.project;
+  const sentence = away
+    ? `${scopeName()} est consulté depuis le cockpit ouvert sur ${projectName(home)} : seul le projet ouvert accepte une écriture.`
+    : "Ce cockpit n'a été ouvert depuis aucun projet : il lit le registre sans y écrire.";
+  const actions = mk('div', { class: 'ro-actions' });
+  if (away) {
+    const back = mk('button', { type: 'button', class: 'btn pri', 'data-ro-action': 'home', text: `Revenir à ${projectName(home)}` });
+    back.addEventListener('click', () => setScope(home, locationHash(SECTIONS.get(current) || SPACES[0].sections[0], {})));
+    actions.append(back);
+  }
+  const path = (projectEntry(host.project) || {}).path || (host.status && host.status.projectRoot);
+  if (path && !host.scopeAll) {
+    const command = `grimoire cockpit serve --project-root "${path}"`;
+    const copy = mk('button', { type: 'button', class: 'btn', 'data-ro-action': 'copy', text: 'Copier la commande' });
+    copy.title = `Ouvre le cockpit sur ce projet, en écriture : ${command}`;
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(command); copy.textContent = 'Commande copiée'; } catch { copy.textContent = 'Copie refusée : recopiez la commande'; }
+    });
+    actions.append(mk('code', { class: 'mono', text: command }), copy);
+  }
+  banner.append(
+    icon('lock'),
+    mk('div', { class: 'ro-text' }, mk('strong', { text: 'Lecture seule' }), mk('span', { text: ' — ' + sentence })),
+    actions,
+  );
 }
 
 // ── Pouls : actualisation, compteur de décisions, horodatage ────────────────
 
-// Le compteur de la barre du haut : les décisions que K6 met en attente d'un
-// humain, de tout le registre sur le cockpit. Caché à zéro (rien à faire), mais
-// un projet illisible reste dit : un compteur qui ignorerait ce qu'il ne peut
-// pas lire mentirait par omission.
-function renderDecisionsPill(decisions) {
-  const pill = $('decisions-pill');
-  const pending = Number(decisions && decisions.pending) || 0;
-  const unreadable = (decisions && decisions.unreadable) || [];
-  pill.hidden = pending === 0 && unreadable.length === 0;
-  $('decisions-count').textContent = String(pending);
-  $('decisions-lbl').textContent = pending > 1 ? ' décisions' : ' décision';
-  let label = `${pending} décision${pending > 1 ? 's' : ''} en attente`;
-  if (unreadable.length) label += ` — ${unreadable.length} projet(s) illisible(s) : ${unreadable.join(', ')}`;
-  pill.setAttribute('aria-label', label);
-  pill.title = `${label} — ouvrir la vue Décisions`;
-  pill.dataset.pending = String(pending);
+// Le compteur de l'onglet « À traiter » : le `count` de `/api/workspace/attention`
+// (hors « résolu automatiquement »), dans la portée courante — le nombre
+// d'éléments qui attendent dans l'espace, celui qui décide aussi de son état
+// vide. Lecture seule : relu au premier pouls et chaque fois que l'empreinte du
+// pouls change ; le pouls lui-même (décisions K6) n'est plus qu'un déclencheur.
+let attentionPrint = null;
+let attentionSeq = 0;
+// La première lecture parcourt tout le registre : elle attend la fin du premier
+// montage d'espace pour ne pas lui disputer le serveur (Flotte : budget de
+// 900 ms), et reprend la réponse que l'espace vient de lire (Flotte, À traiter)
+// si elle a moins de `ATTENTION_REUSE_MS`. Jamais onglet masqué. Les pouls
+// suivants relisent toujours le serveur.
+const ATTENTION_REUSE_MS = 5000;
+let attentionFirstRead = true;
+
+function renderAttentionCount(count, unreadable = 0) {
+  const badgeNode = $('decisions-count');
+  const tab = $('tab-space-a-traiter');
+  badgeNode.hidden = count === 0;
+  badgeNode.textContent = String(count);
+  let label = `${count} élément${count > 1 ? 's' : ''} à traiter`;
+  if (unreadable) label += ` — ${unreadable} projet(s) illisible(s)`;
+  badgeNode.title = label;
+  tab.setAttribute('aria-label', badgeNode.hidden ? 'À traiter' : `À traiter — ${label}`);
+  badgeNode.dataset.pending = String(count);
+}
+
+async function refreshAttentionCount({ maxAgeMs = 0 } = {}) {
+  const seq = ++attentionSeq;
+  try {
+    const data = await api.attention(host.scopeAll, { maxAgeMs });
+    if (seq !== attentionSeq) return;
+    const unreadable = (data.projects || []).filter((p) => p.state === 'unreadable').length;
+    renderAttentionCount(Number(data.count) || 0, unreadable);
+  } catch { /* le compteur garde sa dernière valeur : l'espace dit l'erreur */ }
+}
+
+function onPulseDecisions() {
+  const print = live.state.fingerprint;
+  if (print !== null && print === attentionPrint) return;
+  attentionPrint = print;
+  if (attentionFirstRead) {
+    attentionFirstRead = false;
+    firstSpaceMounted.then(() => {
+      if (document.hidden) {
+        // Reprise au prochain pouls visible, par le même chemin.
+        attentionFirstRead = true;
+        attentionPrint = null;
+        return;
+      }
+      refreshAttentionCount({ maxAgeMs: ATTENTION_REUSE_MS });
+    });
+    return;
+  }
+  refreshAttentionCount();
 }
 
 function openDecisions() {
-  // Sur le cockpit le compteur est global : la vue s'ouvre sur tout le registre.
-  return goto('executer', { view: 'decisions', ...(host.kind === 'cockpit' ? { scope: 'portfolio' } : {}) });
+  // Sur le cockpit le compteur est global : la vue s'ouvre sur tout le registre,
+  // donc en portée « Tous les projets ».
+  if (host.kind === 'cockpit' && !host.scopeAll) return setScope(null, '#travail?view=decisions');
+  return goto('travail', { view: 'decisions' });
 }
 
 const live = createLive({
-  onDecisions: renderDecisionsPill,
+  onDecisions: onPulseDecisions,
   onState: () => renderLiveStamp(),
 });
 
@@ -1081,6 +1572,9 @@ function renderLiveStamp() {
       ? `Flux en direct, confirmé au moins toutes les ${seconds} s, dernier à ${at}`
       : `Sondage toutes les ${seconds} s, dernier à ${at}`;
   }
+  const top = $('top-live');
+  top.dataset.state = status === 'error' ? 'error' : (status === 'paused' ? 'paused' : 'ok');
+  $('top-live-text').textContent = status === 'error' ? 'hors ligne' : (status === 'paused' ? 'en pause' : 'en direct');
   const lead = document.createElement('span');
   lead.className = 'live-pre';
   lead.textContent = pre;
@@ -1104,14 +1598,18 @@ function startStampTicker() {
 let paletteItems = [];
 let paletteIndex = 0;
 // Ouverte depuis le raccourci ⌘K, la palette n'a pas de section prioritaire ;
-// ouverte depuis le chip projet (#project-chip), « Projets » doit apparaître
-// en premier — voir `openPalette()`.
+// ouverte depuis la puce de portée (#project-chip), elle ne montre QUE la
+// section « Projets » — c'est le sélecteur de portée — voir `openPalette()`.
 let paletteSectionFirst = null;
+let paletteOnly = false;
 
 // Ordre par défaut des sections titrées ; ne pas fusionner en une liste
 // plate (30+ entrées sans repère) comme avant.
-const PALETTE_SECTION_ORDER = ['Espaces', 'Commandes', 'Projets', 'Tâches', 'Workflows', 'Fichiers'];
+const PALETTE_SECTION_ORDER = ['Espaces', 'Affichage', 'Commandes', 'Projets', 'Tâches', 'Workflows', 'Fichiers'];
 const PALETTE_SECTION_CAP = 12;
+// Le sélecteur de portée n'a pas de plafond : un projet que l'on ne voit pas
+// sans le taper n'est pas choisissable (M6, 4 projets sur 16 cachés).
+const PALETTE_UNCAPPED = new Set(['Projets']);
 
 // Chaque source alimente la palette indépendamment : une route absente ou en
 // erreur (projet sans ledger, sans blueprint…) ne doit jamais vider les
@@ -1121,10 +1619,14 @@ function settle(result, fallback) {
 }
 
 async function buildPalette() {
-  const spaces = SPACES.map((s) => ({
-    section: 'Espaces', label: s.label, hint: 'Espace', command: `grimoire serve # ${s.id}`,
-    run: () => goto(s.id),
-  }));
+  // Un espace, et chaque rubrique d'un espace qui en a plusieurs.
+  const spaces = SPACES.flatMap((s) => [
+    { section: 'Espaces', label: s.label, hint: 'Espace', command: `grimoire cockpit serve # ${s.id}`, run: () => goto(s.id) },
+    ...(s.sections.length > 1 ? s.sections.map((r) => ({
+      section: 'Espaces', label: `${s.label} › ${r.label}`, hint: 'Rubrique',
+      command: `grimoire cockpit serve # ${s.id}/${r.id}`, run: () => goto(r.id),
+    })) : []),
+  ]);
 
   const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
     await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks(), api.files()]);
@@ -1139,11 +1641,25 @@ async function buildPalette() {
   // Projets : seulement au cockpit — l'atelier sert un projet fixe, en
   // changer n'a pas de sens (spec §3.3 : « projets (/api/workspace… sur le
   // cockpit) »).
+  const listed = settle(projectsResult, {}).projects;
+  if (listed) registry = listed;
+  // Une ligne par projet : pastille d'état, nom, dossier en texte secondaire
+  // (le dossier, pas le slug : deux projets homonymes s'y distinguent). La
+  // portée en cours porte une coche (`current`), plus une colonne de texte.
   const projects = host.kind === 'cockpit'
-    ? (settle(projectsResult, {}).projects || []).map((p) => ({
-        section: 'Projets', label: p.name || p.slug, hint: 'Projet', command: `grimoire cockpit serve # ${p.slug}`,
-        run: () => { location.search = '?project=' + encodeURIComponent(p.slug); },
-      }))
+    ? [
+        {
+          section: 'Projets', kind: 'scope-all', label: 'Tous les projets',
+          hint: registry.length === 1 ? '1 projet' : `${registry.length} projets`,
+          current: host.scopeAll, run: () => setScope(null),
+        },
+        ...registry.map((p) => ({
+          section: 'Projets', kind: 'project', label: projectName(p.slug),
+          hint: p.path || '', state: projectState(p),
+          current: !host.scopeAll && p.slug === host.project,
+          run: () => setScope(p.slug),
+        })),
+      ]
     : [];
 
   const workflows = (settle(blueprintsResult, [])).map((b) => ({
@@ -1170,14 +1686,65 @@ async function buildPalette() {
   ).slice(0, 500);
 
   paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks, ...files];
+  // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
+  if (!$('palette').hidden) renderPalette($('palette-input').value);
 }
 
-// `sectionFirst` : section à placer en tête (ex. « Projets » quand on ouvre
-// depuis le chip projet, #project-chip). `null` garde l'ordre par défaut.
-function openPalette(sectionFirst = null) {
+/** Pastille d'un projet : suivi par Grimoire, dossier sans Grimoire, ou disparu. */
+function projectState(entry) {
+  if (entry.exists === false) return 'missing';
+  if (entry.managed || entry.is_grimoire) return 'ok';
+  return 'plain';
+}
+
+const PROJECT_STATE_LABEL = {
+  ok: 'suivi par Grimoire',
+  plain: 'sans Grimoire',
+  missing: 'dossier introuvable',
+};
+
+// La recherche ignore la casse ET les accents : « ref » trouve « Référence
+// agentique », « portee » trouve « Portée ». Chaque mot tapé doit figurer
+// (dans l'ordre que l'on veut) : « kit forge » trouve Grimoire-Forge/grimoire-kit.
+function fold(text) {
+  return String(text || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+function paletteMatches(item, words) {
+  if (!words.length) return true;
+  const haystack = fold(`${item.label} ${item.hint}`);
+  return words.every((word) => haystack.includes(word));
+}
+
+/** Entrée « Affichage » de la palette : son libellé suit l'état de la bascule. */
+function displayItems() {
+  const on = root.dataset.atelier === 'on';
+  return [{
+    section: 'Affichage',
+    label: on ? "Masquer les panneaux d'atelier" : "Afficher les panneaux d'atelier",
+    hint: 'Rail, explorateur, inspecteur, dock',
+    command: '⇧⌘L',
+    run: toggleAtelier,
+  }];
+}
+
+// `sectionFirst` : section à placer en tête. `only` : ne montrer qu'elle
+// (la puce de portée ouvre ainsi le sélecteur de projets). `null` garde
+// l'ordre par défaut.
+function openPalette(sectionFirst = null, { only = false } = {}) {
   paletteSectionFirst = sectionFirst;
-  $('palette').hidden = false;
+  paletteOnly = Boolean(sectionFirst && only);
+  const palette = $('palette');
+  palette.hidden = false;
+  // Deux présentations d'un même composant : la palette ⌘K flotte au centre ;
+  // le sélecteur de portée est un menu ancré sous la puce qui l'ouvre.
+  palette.dataset.mode = paletteOnly ? 'scope' : 'commands';
+  palette.setAttribute('aria-label', paletteOnly ? 'Choisir la portée' : 'Palette de commandes');
   $('palette-input').value = '';
+  $('palette-input').placeholder = paletteOnly
+    ? 'Rechercher un projet ou un dossier…'
+    : 'Aller à, ou lancer une commande grimoire…';
+  placePalette();
   $('palette-input').focus();
   renderPalette('');
 }
@@ -1185,10 +1752,102 @@ function openPalette(sectionFirst = null) {
 function closePalette() {
   $('palette').hidden = true;
   paletteSectionFirst = null;
+  paletteOnly = false;
+}
+
+/** Ancre le sélecteur de portée sous sa puce ; la palette ⌘K garde sa place. */
+function placePalette() {
+  const box = $('palette-box');
+  if (!paletteOnly) {
+    box.style.removeProperty('top');
+    box.style.removeProperty('left');
+    return;
+  }
+  const chip = $('project-chip').getBoundingClientRect();
+  const gutter = 16;
+  const width = Math.min(440, window.innerWidth - 2 * gutter);
+  const left = Math.max(gutter, Math.min(chip.left, window.innerWidth - width - gutter));
+  box.style.top = `${Math.round(chip.bottom + 8)}px`;
+  box.style.left = `${Math.round(left)}px`;
+}
+
+/** Habille la palette une fois : loupe dans le champ, aide clavier en pied. */
+function dressPalette() {
+  const box = $('palette-box');
+  const input = $('palette-input');
+  if (box.querySelector('.pal-field')) return;
+  const field = mk('label', { class: 'pal-field' }, icon('search'));
+  input.replaceWith(field);
+  field.append(input);
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-controls', 'palette-list');
+  input.setAttribute('aria-expanded', 'true');
+  input.setAttribute('aria-autocomplete', 'list');
+  box.append(mk('div', { class: 'pal-foot', 'aria-hidden': 'true' },
+    mk('span', null, mk('span', { class: 'kbd', text: '↑' }), mk('span', { class: 'kbd', text: '↓' }), ' parcourir'),
+    mk('span', null, mk('span', { class: 'kbd', text: 'Entrée' }), ' choisir'),
+    mk('span', null, mk('span', { class: 'kbd', text: 'Échap' }), ' fermer'),
+  ));
+}
+
+/** Dossier sur une ligne : le début s'élide, la fin reste lisible — le dernier
+ * segment, et son parent s'il est court (« …/Grimoire-Forge/grimoire-kit »). */
+function pathNode(path) {
+  const parts = String(path || '').split(/(?=[\\/])/);
+  const keep = parts.length > 1 && parts.slice(-2).join('').length <= 36 ? 2 : 1;
+  const tail = parts.slice(-keep).join('');
+  const head = parts.slice(0, -keep).join('');
+  return mk('span', { class: 'lbl pal-path', title: path },
+    head ? mk('span', { class: 'pal-path-head', text: head }) : null,
+    mk('span', { class: 'pal-path-tail', text: tail }));
+}
+
+function paletteRow(item, index) {
+  const li = mk('li', {
+    role: 'option',
+    id: `palette-opt-${index}`,
+    class: `pal-row${item.kind ? ` pal-${item.kind}` : ''}`,
+    'aria-selected': String(index === 0),
+  });
+  li.dataset.index = String(index);
+  if (item.kind === 'project' || item.kind === 'scope-all') {
+    // Le nom d'abord dans le DOM (premier `span`) ; la pastille est dessinée
+    // par la CSS (`::before`, selon `data-state`), la coche par une icône.
+    if (item.kind === 'project') {
+      li.dataset.state = item.state;
+      li.title = `${item.label} — ${PROJECT_STATE_LABEL[item.state]}\n${item.hint}`;
+    } else {
+      li.append(icon('scope'));
+    }
+    li.append(mk('span', { class: 'pal-label', text: item.label }));
+    li.append(item.kind === 'project' ? pathNode(item.hint) : mk('span', { class: 'lbl', text: item.hint }));
+    if (item.current) {
+      li.setAttribute('aria-current', 'true');
+      li.append(icon('check', 'Portée actuelle'));
+    }
+    return li;
+  }
+  li.append(mk('span', { class: 'pal-label', text: item.label }));
+  li.append(mk('span', { class: 'lbl', text: item.hint }));
+  li.append(mk('span', { class: 'cmd', text: item.command, title: item.command }));
+  return li;
+}
+
+function selectPaletteIndex(index, { scroll = true } = {}) {
+  const options = [...$('palette-list').querySelectorAll('li[role="option"]')];
+  if (!options.length) {
+    $('palette-input').removeAttribute('aria-activedescendant');
+    return;
+  }
+  paletteIndex = (index + options.length) % options.length;
+  options.forEach((li, i) => li.setAttribute('aria-selected', String(i === paletteIndex)));
+  $('palette-input').setAttribute('aria-activedescendant', options[paletteIndex].id);
+  if (scroll) options[paletteIndex].scrollIntoView({ block: 'nearest' });
 }
 
 function paletteSectionOrder() {
   if (!paletteSectionFirst) return PALETTE_SECTION_ORDER;
+  if (paletteOnly) return [paletteSectionFirst];
   return [paletteSectionFirst, ...PALETTE_SECTION_ORDER.filter((s) => s !== paletteSectionFirst)];
 }
 
@@ -1197,60 +1856,59 @@ function paletteSectionOrder() {
 // regroupe désormais par section titrée, plafonnée par section pour qu'une
 // section bavarde (Commandes) n'évince pas les autres (Projets, Tâches…).
 function renderPalette(query) {
-  const needle = query.trim().toLowerCase();
+  const words = fold(query).split(/\s+/).filter(Boolean);
   const list = $('palette-list');
   list.replaceChildren();
+  list.scrollTop = 0;
 
   const bySection = new Map();
-  for (const item of paletteItems) {
-    if (needle && !(item.label + ' ' + item.hint).toLowerCase().includes(needle)) continue;
+  for (const item of [...paletteItems, ...displayItems()]) {
+    if (!paletteMatches(item, words)) continue;
     if (!bySection.has(item.section)) bySection.set(item.section, []);
     bySection.get(item.section).push(item);
   }
 
   const matches = [];
-  paletteIndex = 0;
   for (const section of paletteSectionOrder()) {
-    const items = (bySection.get(section) || []).slice(0, PALETTE_SECTION_CAP);
+    const all = bySection.get(section) || [];
+    const items = PALETTE_UNCAPPED.has(section) ? all : all.slice(0, PALETTE_SECTION_CAP);
     if (!items.length) continue;
 
-    const header = document.createElement('li');
-    header.role = 'presentation';
-    header.className = 'palette-section';
-    header.textContent = section;
+    // Le compte vit dans un attribut (rendu par `::after`) : le texte de
+    // l'en-tête reste le nom de la section.
+    const header = mk('li', { role: 'presentation', class: 'palette-section', text: section });
+    header.dataset.count = String(all.filter((item) => item.kind !== 'scope-all').length);
     list.append(header);
 
     for (const item of items) {
-      const index = matches.length;
-      const li = document.createElement('li');
-      li.role = 'option';
-      li.setAttribute('aria-selected', String(index === 0));
-      li.append(Object.assign(document.createElement('span'), { textContent: item.label }));
-      li.append(Object.assign(document.createElement('span'), { className: 'lbl', textContent: item.hint }));
-      li.append(Object.assign(document.createElement('span'), { className: 'cmd', textContent: item.command }));
+      const li = paletteRow(item, matches.length);
       li.addEventListener('click', () => { closePalette(); item.run(); });
       list.append(li);
       matches.push(item);
     }
   }
+  if (!matches.length) {
+    list.append(mk('li', { role: 'presentation', class: 'pal-empty', text: query.trim()
+      ? `Aucun résultat pour « ${query.trim()} ».`
+      : 'Rien à proposer pour le moment.' }));
+  }
   list._matches = matches;
+  selectPaletteIndex(0, { scroll: false });
 }
 
 function movePalette(delta) {
-  const list = $('palette-list');
   // Les en-têtes de section (`role="presentation"`) ne sont pas des options :
   // seuls les `li[role="option"]` comptent pour la navigation clavier, dans
   // le même ordre que `list._matches`.
-  const options = [...list.querySelectorAll('li[role="option"]')];
-  if (!options.length) return;
-  paletteIndex = (paletteIndex + delta + options.length) % options.length;
-  options.forEach((li, i) => li.setAttribute('aria-selected', String(i === paletteIndex)));
-  options[paletteIndex].scrollIntoView({ block: 'nearest' });
+  selectPaletteIndex(paletteIndex + delta);
 }
 
 // ── Console ─────────────────────────────────────────────────────────────────
 
 async function runCommand(argv) {
+  // La sortie vit dans la Console du dock : lancer une commande la montre, même
+  // quand les panneaux d'atelier sont fermés (sous 900 px le dock reste à part).
+  if (root.dataset.atelier !== 'on' && !isNarrow()) setAtelier(true);
   selectDockTab('console');
   setDock('pinned');
   dock.log('console', '$ grimoire ' + argv.join(' '));
@@ -1272,7 +1930,8 @@ function bindShortcuts() {
 
     if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); openPalette(); return; }
     if (meta && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); toggleFocus(); return; }
-    if (meta && /^[1-6]$/.test(event.key)) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
+    if (meta && event.shiftKey && event.key.toLowerCase() === 'l') { event.preventDefault(); toggleAtelier(); return; }
+    if (meta && /^[1-5]$/.test(event.key)) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
 
     if ($('palette').hidden && event.key === 'Escape' && isNarrow() && leaveDrawer()) {
       event.preventDefault();
@@ -1324,19 +1983,31 @@ async function main() {
     narrowDockSeen = false;
     if (current) restorePanelsForSpace();
     syncDrawer();
+    fillEmptyPanels();
   });
   $('st-density').addEventListener('click', toggleDensity);
+  $('st-atelier').addEventListener('click', toggleAtelier);
+  for (const id of ['inspector-body', 'explorer-body']) {
+    new MutationObserver(syncDetail).observe($(id), { childList: true, subtree: true, characterData: true });
+  }
+  syncDetail();
+  $('st-fullscreen').addEventListener('click', toggleFocus);
   $('palette-open').addEventListener('click', () => openPalette());
-  $('decisions-pill').addEventListener('click', openDecisions);
   startStampTicker();
-  // Le chip projet ressemblait à un sélecteur mais n'avait aucun
-  // gestionnaire : un clic n'y faisait rien. Il ouvre la palette directement
-  // sur la section Projets — le changement de projet reste un
-  // `location.search = ?project=` (rechargement complet, voir `buildPalette`
-  // ci-dessus), inchangé.
-  $('project-chip').addEventListener('click', () => openPalette('Projets'));
+  // La puce de portée ouvre le sélecteur : la palette réduite à « Projets »,
+  // sans plafond, « Tous les projets » en tête. Changer de portée recharge la
+  // page (voir `setScope`).
+  $('project-chip').addEventListener('click', () => openPalette('Projets', { only: true }));
+  dressPalette();
   $('palette').addEventListener('pointerdown', (e) => { if (e.target.id === 'palette') closePalette(); });
   $('palette-input').addEventListener('input', (e) => renderPalette(e.target.value));
+  // La souris et le clavier tiennent la même ligne : survoler une entrée la
+  // rend active, et Entrée choisit celle que l'on voit en surbrillance.
+  $('palette-list').addEventListener('pointermove', (e) => {
+    const li = e.target.closest('li[role="option"]');
+    if (li && Number(li.dataset.index) !== paletteIndex) selectPaletteIndex(Number(li.dataset.index), { scroll: false });
+  });
+  window.addEventListener('resize', () => { if (!$('palette').hidden) placePalette(); });
 
   let status = null;
   try {
@@ -1361,7 +2032,9 @@ async function main() {
     // bonne clé après un clic (`setThemePref`, appelé après amorçage) mais
     // sous `atelier` après un rechargement — la préférence semblait perdue.
     applyPreferences();
-    $('project-name').textContent = host.project || status.slug || '(projet servi)';
+    registry = (await api.projects().catch(() => null))?.projects || [];
+    renderScopeChip();
+    renderReadOnlyBanner();
     $('project-dot').classList.add('ok');
     $('st-kit').textContent = 'grimoire-kit ' + (status.kitVersion || '—');
     $('st-api').textContent = 'API locale ' + location.host;
@@ -1384,8 +2057,11 @@ async function main() {
     // précède les données de l'espace, donc un changement survenu pendant son
     // chargement est vu au sondage suivant au lieu d'être perdu.
     await live.start();
-    await goto((location.hash || '#piloter').slice(1));
-    window.addEventListener('hashchange', () => goto(location.hash.slice(1)));
+    // « À traiter » est l'accueil (⌘1) ; un lien profond ouvre son écran.
+    const { target, params } = parseHash(location.hash || '#' + SPACES[0].id);
+    await goto(target, params, { fromUrl: true });
+    window.addEventListener('hashchange', followLocation);
+    window.addEventListener('popstate', followLocation);
   } else {
     restorePanelsForSpace();
   }
@@ -1393,14 +2069,21 @@ async function main() {
   // Surface de test : Playwright interroge la coque plutôt que ses détails.
   window.GrimoireWorkspace = {
     spaces: SPACES.map((s) => s.id),
+    sections: Object.fromEntries(SPACES.map((s) => [s.id, s.sections.map((r) => r.id)])),
     goto, host, glossary, dock, empty,
     panelState, setPanel,
     live: { state: live.state, openDecisions },
+    get scope() { return { all: scope.all, project: scope.project, name: scope.name }; },
+    /** L'espace (un des cinq), la rubrique, et le module qu'elle monte. */
+    get space() { return SECTIONS.get(current)?.space.id ?? null; },
+    get section() { return current; },
+    get module() { return SECTIONS.get(current)?.module ?? null; },
     get focus() { return root.dataset.focus; },
     get theme() { return root.dataset.theme; },
     get themePref() { return root.dataset.themePref; },
     get density() { return root.dataset.density; },
-    get space() { return current; },
+    get atelier() { return root.dataset.atelier; },
+    setAtelier,
     get paletteOpen() { return !$('palette').hidden; },
   };
   document.body.dataset.ready = '1';

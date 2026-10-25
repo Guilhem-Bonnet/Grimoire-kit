@@ -10,23 +10,21 @@ audience: référence
 > (`web/workspace/glossary.js`, spécification §3.2) : éditer une définition ici
 > n'aurait aucun effet, éditer le YAML met à jour les deux.
 
-**63 concepts.**
+**67 concepts.**
 
 ## Espace de travail {: #espace-de-travail }
 
-Un des six regroupements de l'interface par intention — Piloter, Concevoir, Exécuter, Observer, Mémoire, Source — chacun avec sa toile, sa barre de document et son inspecteur.
+Un des cinq regroupements de l'interface par intention, d'À traiter à Configuration, chacun avec sa toile, ses rubriques, sa barre de document et son inspecteur.
 
-Raccourci : `⌘1 … ⌘6`
+Raccourci : `⌘1 … ⌘5`
 
 Termes liés : [Toile](#toile), [Inspecteur](#inspecteur), [Dock](#dock)
 
 ## Toile {: #toile }
 
-La surface centrale d'un espace, où le document se manipule directement à quatre niveaux de zoom, de la flotte au nœud.
+La surface centrale d'un espace, où le document de la portée courante se manipule directement.
 
-Raccourci : `Z puis F/P/W/N`
-
-Termes liés : [Niveau de zoom](#niveau-de-zoom), [Vue](#vue), [Flotte](#flotte)
+Termes liés : [Portée](#portee), [Vue](#vue), [Niveau de zoom](#niveau-de-zoom)
 
 ## Rail {: #rail }
 
@@ -42,7 +40,7 @@ Une surface latérale à trois états — repliée, entrouverte en surimpression
 
 Raccourci : `1 … 5`
 
-Termes liés : [Rail](#rail), [Mode concentration](#mode-concentration), [Densité](#densite)
+Termes liés : [Rail](#rail), [Plein écran](#plein-ecran), [Densité](#densite)
 
 ## Explorateur {: #explorateur }
 
@@ -62,7 +60,7 @@ Termes liés : [Panneau](#panneau), [Toile](#toile), [Porte de preuve](#porte-de
 
 ## Dock {: #dock }
 
-La bande basse commune aux six espaces : Console, Traces, Timeline, Problèmes.
+La bande basse commune aux cinq espaces : Console, Traces, Timeline, Problèmes.
 
 Raccourci : `5`
 
@@ -100,7 +98,7 @@ Une bulle de définition qu'Alt fige, dans laquelle le pointeur peut entrer, et 
 
 Raccourci : `Alt`
 
-Termes liés : [Glossaire](#glossaire), [Mode concentration](#mode-concentration)
+Termes liés : [Glossaire](#glossaire), [Densité](#densite)
 
 ## Glossaire {: #glossaire }
 
@@ -110,27 +108,25 @@ Raccourci : `F1`
 
 Termes liés : [Infobulle épinglable](#infobulle)
 
-## Mode concentration {: #mode-concentration }
+## Plein écran {: #plein-ecran }
 
-Le réglage qui replie tous les panneaux, réduit les infobulles au nom et au raccourci et donne la toile à l'écran entier.
+Le réglage qui efface les panneaux épinglés et le dock pour donner la toile à l'écran entier, sans toucher à la densité.
 
 Raccourci : `⇧⌘F`
 
-Termes liés : [Densité](#densite), [Panneau](#panneau), [Infobulle épinglable](#infobulle)
+Termes liés : [Densité](#densite), [Panneau](#panneau), [Toile](#toile)
 
 ## Densité {: #densite }
 
-Un des deux réglages d'affichage — Découverte, aérée et bavarde, ou Concentration, dense et muette — choisi par l'utilisateur, jamais deviné.
+Un des deux réglages d'affichage — confortable, aérée et bavarde, ou compacte, resserrée et muette — choisi par l'utilisateur, jamais deviné.
 
-Termes liés : [Mode concentration](#mode-concentration)
+Termes liés : [Plein écran](#plein-ecran), [Infobulle épinglable](#infobulle)
 
 ## Niveau de zoom {: #niveau-de-zoom }
 
-Un des quatre grains de la toile — Flotte, Projet, Workflow, Nœud — qui changent ce qui est montré, pas seulement sa taille.
+Un des trois grains de la toile des blueprints — Blueprints, Workflow, Nœud — qui changent ce qui est montré, pas seulement sa taille.
 
-Raccourci : `Z puis F/P/W/N`
-
-Termes liés : [Toile](#toile), [Flotte](#flotte), [Workflow](#workflow)
+Termes liés : [Toile](#toile), [Workflow](#workflow), [Portée](#portee)
 
 ## Vue {: #vue }
 
@@ -150,19 +146,47 @@ Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Cockpit {: #cockpit }
 
-L'hôte multi-projets servi par `grimoire cockpit serve` : la même coque que l'atelier, plus le niveau de zoom Flotte et le sélecteur de projet.
+L'hôte multi-projets servi par `grimoire cockpit serve` : la même coque que l'atelier, plus la portée « Tous les projets ».
 
-Termes liés : [Atelier](#atelier), [Flotte](#flotte), [Projet](#projet)
+Termes liés : [Atelier](#atelier), [Flotte](#flotte), [Portée](#portee)
 
 Documentation : [reference/cli/index.md](/reference/cli/index.md)
 
 ## Flotte {: #flotte }
 
-L'ensemble des projets enregistrés au registre local, et le niveau de zoom que seul le cockpit ajoute.
+L'ensemble des projets enregistrés au registre local, et l'espace qui les liste en portée « Tous les projets » ou montre la fiche d'un seul.
 
-Raccourci : `Z puis F`
+Raccourci : `⌘3`
 
-Termes liés : [Cockpit](#cockpit), [Projet](#projet), [Niveau de zoom](#niveau-de-zoom)
+Termes liés : [Cockpit](#cockpit), [Projet](#projet), [Portée](#portee)
+
+## Portée {: #portee }
+
+Le choix unique, en haut de la coque, entre « Tous les projets » et un projet, appliqué à tous les espaces et écrit dans l'URL.
+
+Termes liés : [Projet](#projet), [Flotte](#flotte), [Lecture seule](#lecture-seule)
+
+## Lecture seule {: #lecture-seule }
+
+L'état d'un projet consulté depuis un cockpit ouvert ailleurs : la coque le dit en tête et offre de revenir au projet ouvert, seul à accepter une écriture.
+
+Termes liés : [Cockpit](#cockpit), [Portée](#portee)
+
+## À traiter {: #a-traiter }
+
+L'espace d'accueil, qui range par urgence ce qui attend une décision humaine dans la portée courante.
+
+Raccourci : `⌘1`
+
+Termes liés : [Portée](#portee), [Tâche](#tache), [Porte de preuve](#porte-de-preuve)
+
+## Configuration {: #configuration }
+
+L'espace des réglages durables du projet et de l'écran : fichiers, blueprints, préférences.
+
+Raccourci : `⌘5`
+
+Termes liés : [Étage](#etage), [Blueprint](#blueprint), [Densité](#densite)
 
 ## Projet {: #projet }
 

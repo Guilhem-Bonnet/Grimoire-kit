@@ -223,6 +223,62 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .sico.bad { color: var(--bad); }
 .sico.acc { color: var(--acc); }
 
+/* Fin du point polysémique (P30) : une catégorie prend son icône (.glyph),
+   une échelle ses barres (.bars), une identité son monogramme (.mgram). */
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--ink2);
+}
+.glyph .ico {
+  width: 14px;
+  height: 14px;
+}
+.glyph.ok { color: var(--ok); }
+.glyph.warn { color: var(--warn); }
+.glyph.bad { color: var(--bad); }
+.glyph.acc { color: var(--acc); }
+
+.bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  flex: none;
+}
+.bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--ink3);
+  opacity: 0.4;
+}
+.bars i:nth-child(1) { height: 5px; }
+.bars i:nth-child(2) { height: 8px; }
+.bars i:nth-child(3) { height: 11px; }
+.bars i.on {
+  background: var(--ink2);
+  opacity: 1;
+}
+.bars.bad i.on { background: var(--bad); }
+
+.mgram {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 3px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
 /* En-tête de tableau sobre : pas de soulignement ; une infobulle (data-term)
  * s'indique par une icône discrète, pas par un pointillé de lien. */
 th[data-term] {
@@ -356,7 +412,7 @@ th .th-hint {
   gap: 6px;
   padding: 0 var(--sp-3);
   border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-radius: var(--r-pill);
   font-size: var(--t-s);
   background: var(--e2);
   color: var(--ink);
@@ -528,7 +584,7 @@ body[data-active-space="source"] {
   padding: 0 5px;
   border: 1px solid var(--line);
   border-bottom-width: 2px;
-  border-radius: var(--r);
+  border-radius: 4px;
   font-size: 11px;
   color: var(--ink2);
   background: var(--e1);
@@ -640,6 +696,17 @@ body[data-active-space="source"] {
   color: var(--ink);
 }
 
+/* Composition d'état vide (`i-empty-*`) : trait d'encre discret, un seul
+   accent (la rubrique) porté par `currentColor`. */
+.empty-art {
+  display: block;
+  width: 96px;
+  height: 64px;
+  margin-bottom: var(--sp-3);
+  stroke: var(--ink3);
+  color: var(--rub);
+}
+
 .empty h2 .ico {
   width: 24px;
   height: 24px;
@@ -734,7 +801,7 @@ body[data-active-space="source"] {
   min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--r-l);
   background: var(--card);
   box-shadow: var(--shadow);
 }
@@ -772,6 +839,14 @@ body[data-active-space="source"] {
   text-overflow: ellipsis;
 }
 
+.kpi-sub {
+  font-size: var(--t-min);
+  color: var(--ink3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .kpi-item[data-kind="word"] .kpi-val {
   font-size: 15px;
   line-height: 34px;
@@ -806,8 +881,9 @@ body[data-active-space="source"] {
 .tbl-wrap {
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--r-l);
   background: var(--card);
+  box-shadow: var(--shadow);
 }
 
 .tbl {
@@ -840,7 +916,7 @@ body[data-active-space="source"] {
   border-bottom: 0;
 }
 
-:root[data-density="concentration"] .tbl td {
+:root[data-density="compacte"] .tbl td {
   padding-top: 5px;
   padding-bottom: 5px;
 }
@@ -928,10 +1004,13 @@ body[data-active-space="source"] {
 #brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  font-size: var(--t-min);
+  font-size: 15px;
+}
+
+.brand-mark {
+  color: var(--rub);
 }
 
 .spaces-nav {
@@ -994,7 +1073,7 @@ body[data-active-space="source"] {
   background: var(--accsoft);
 }
 
-/* En densité Découverte le rail porte ses libellés (spec §3.4).
+/* En densité confortable le rail porte ses libellés (spec §3.4).
  *
  * Le libellé est du texte : il tient le plancher typographique comme le reste,
  * donc le rail s'élargit au lieu de rétrécir la police. Un rail de 44 px avec
@@ -1004,18 +1083,18 @@ body[data-active-space="source"] {
   display: none;
 }
 
-:root[data-density="decouverte"] #rail {
+:root[data-density="confortable"] #rail {
   width: var(--w-rail-wide);
 }
 
-:root[data-density="decouverte"] .rail-btn {
+:root[data-density="confortable"] .rail-btn {
   width: var(--w-rail-wide);
   flex-direction: column;
   gap: 2px;
   height: 52px;
 }
 
-:root[data-density="decouverte"] .rail-lbl {
+:root[data-density="confortable"] .rail-lbl {
   display: block;
   max-width: 100%;
   padding: 0 4px;
@@ -1026,7 +1105,7 @@ body[data-active-space="source"] {
   white-space: nowrap;
 }
 
-:root[data-density="decouverte"] .panel[data-state="peek"].panel-left {
+:root[data-density="confortable"] .panel[data-state="peek"].panel-left {
   left: var(--w-rail-wide);
 }
 
@@ -1191,6 +1270,80 @@ body[data-active-space] .panel-head {
   flex: none;
 }
 
+/* ── Bandeau de lecture seule (P31) ───────────────────────────────────────
+ * En tête de la toile, au-dessus des rubriques : dit pourquoi on ne peut pas
+ * écrire, et porte le geste qui le rétablit. Jamais un aplat saturé. */
+#readonly-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) 14px;
+  background: var(--warn-soft);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+#readonly-banner[hidden] {
+  display: none;
+}
+#readonly-banner > .ico {
+  width: 16px;
+  height: 16px;
+  color: var(--warn);
+  flex: none;
+}
+.ro-text {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.ro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.ro-actions code {
+  overflow-wrap: anywhere;
+  color: var(--ink2);
+}
+
+/* ── Rubriques d'un espace (P31) : une rangée d'onglets sous la barre ─────── */
+#section-tabs {
+  display: flex;
+  align-items: stretch;
+  height: var(--h-doc);
+  padding: 0 14px;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  flex: none;
+}
+#section-tabs[hidden] {
+  display: none;
+}
+
+/* ── Préférences (rubrique de Configuration rendue par la coque) ──────────── */
+.pref-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-5);
+  max-width: 720px;
+}
+.pref-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.pref-title {
+  margin: 0;
+  font-size: var(--t-l);
+  font-weight: 600;
+}
+
 #canvas {
   flex-grow: 1;
   position: relative;
@@ -1282,9 +1435,16 @@ body[data-active-space] .panel-head {
   font-weight: 500;
 }
 
-#decisions-pill {
-  font-weight: 500;
-  white-space: nowrap;
+/* Le compteur de décisions : un badge sur l'onglet « À traiter ». */
+#decisions-count {
+  height: 18px;
+  padding: 0 6px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+#decisions-count[hidden] {
+  display: none;
 }
 
 /* ── Palette de commandes ──────────────────────────────────────────────────*/
@@ -1293,82 +1453,298 @@ body[data-active-space] .panel-head {
   display: none;
 }
 
+/* Un seul composant, deux présentations (Douce) :
+   - `data-mode="commands"` (⌘K) : carte flottante centrée ;
+   - `data-mode="scope"` (puce de portée) : menu ancré sous la puce, placé
+     par shell.js::placePalette.
+   Le fond s'assombrit (--scrim-soft) sans masquer l'interface : l'ancien voile
+   était l'accent doux opaque, la coque disparaissait derrière.
+   Chaque ligne tient sur une seule ligne de texte par champ (nowrap +
+   ellipse) et sa hauteur suit son contenu : aucun chevauchement possible. */
 #palette {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: var(--accsoft);
+  background: var(--scrim-soft);
   display: flex;
   justify-content: center;
-  padding-top: 12vh;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
 }
 
 #palette-box {
-  width: min(640px, 92vw);
-  height: fit-content;
-  max-height: 60vh;
+  width: min(640px, 100%);
+  max-height: min(560px, 72vh);
   display: flex;
   flex-direction: column;
-  background: var(--e2);
+  background: var(--overlay);
   border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-radius: var(--r-l);
   box-shadow: var(--shadow-tip);
   overflow: hidden;
+  box-sizing: border-box;
+}
+
+#palette[data-mode="scope"] {
+  padding: 0;
+}
+
+#palette[data-mode="scope"] #palette-box {
+  position: absolute;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 88px));
+}
+
+.pal-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 10px 4px;
+  padding: 0 12px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink3);
+  flex: none;
+}
+
+.pal-field:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px var(--acc-soft);
+}
+
+.pal-field .ico {
+  width: 16px;
+  height: 16px;
 }
 
 #palette-input {
-  height: 44px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   border: 0;
-  border-bottom: 1px solid var(--line);
-  background: var(--e2);
-  padding: 0 14px;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
   font-size: var(--t-m);
+}
+
+/* Le contour de focus est porté par le champ entier (`.pal-field`). */
+#palette-input:focus-visible {
+  outline: 0;
+  box-shadow: none;
 }
 
 #palette-list {
   overflow: auto;
+  overscroll-behavior: contain;
   margin: 0;
-  padding: var(--sp-1);
+  padding: 2px 6px 6px;
   list-style: none;
+  min-height: 0;
 }
 
-#palette-list li {
+#palette-list li.pal-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: 0 10px;
-  height: 34px;
+  gap: 10px;
+  min-height: 36px;
+  padding: 7px 10px;
   border-radius: var(--r);
   cursor: pointer;
+  color: var(--ink);
+  box-sizing: border-box;
+}
+
+#palette-list li.pal-row > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #palette-list li[aria-selected="true"] {
-  background: var(--accsoft);
+  background: var(--acc-soft);
+}
+
+#palette-list .pal-label {
+  flex: 0 1 auto;
+  font-weight: 500;
+}
+
+#palette-list li.pal-row > .lbl {
+  flex: 0 1 auto;
+  color: var(--ink3);
+  font-size: var(--t-s);
 }
 
 #palette-list .cmd {
+  flex: 0 1 auto;
+  max-width: 45%;
   margin-left: auto;
   font-family: var(--mono);
   font-size: var(--t-min);
   color: var(--ink3);
 }
 
+/* Projets : pastille · nom en gras / dossier sur une ligne · coche. */
+#palette-list li.pal-project,
+#palette-list li.pal-scope-all {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  grid-template-areas: "dot name check" "dot path check";
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 8px 10px;
+}
+
+#palette-list li.pal-project::before {
+  content: "";
+  grid-area: dot;
+  justify-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink3);
+}
+
+#palette-list li.pal-project[data-state="ok"]::before {
+  background: var(--ok-mark);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+#palette-list li.pal-project[data-state="plain"]::before {
+  background: var(--warn-mark);
+}
+
+#palette-list li.pal-project[data-state="missing"]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--bad-mark);
+}
+
+#palette-list li.pal-scope-all > .ico:first-child {
+  grid-area: dot;
+  width: 16px;
+  height: 16px;
+  color: var(--acc);
+}
+
+#palette-list li.pal-project .pal-label,
+#palette-list li.pal-scope-all .pal-label {
+  grid-area: name;
+  font-weight: 600;
+}
+
+#palette-list li.pal-project .lbl,
+#palette-list li.pal-scope-all .lbl {
+  grid-area: path;
+  font-size: var(--t-min);
+  line-height: 16px;
+}
+
+#palette-list li[aria-current="true"] > .ico:last-child {
+  grid-area: check;
+  width: 16px;
+  height: 16px;
+  color: var(--acc);
+}
+
+/* « Tous les projets » se détache du registre par un filet. */
+#palette-list li.pal-scope-all {
+  position: relative;
+  margin-bottom: 9px;
+}
+
+#palette-list li.pal-scope-all::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -5px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Dossier élidé au milieu : le début rétrécit (ellipse), la fin reste. */
+#palette-list .pal-path {
+  display: flex;
+  min-width: 0;
+}
+
+#palette-list .pal-path-head {
+  flex: 0 1 auto;
+  min-width: 1.5ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ne rétrécit pas tant que le début peut s'élider ; trop longue à elle seule,
+   elle s'élide à son tour en laissant la place de l'ellipse du début. */
+#palette-list .pal-path-tail {
+  flex: 0 0 auto;
+  max-width: calc(100% - 1.5ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* En-tête de section (Projets, Espaces, Commandes, Tâches, Workflows,
-   Fichiers) : jamais sélectionnable, jamais cliquable — juste un repère
-   visuel dans une liste qui dépassait 30 entrées à plat. */
+   Fichiers) : jamais sélectionnable, jamais cliquable — un repère discret,
+   en casse normale comme les sur-titres Douce, avec son compte. */
 #palette-list li.palette-section {
-  height: auto;
+  display: flex;
+  gap: 6px;
   padding: 10px 10px 4px;
   cursor: default;
   font-size: var(--t-min);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 500;
   color: var(--ink3);
 }
 
+#palette-list li.palette-section::after {
+  content: attr(data-count);
+  color: var(--rub);
+  font-weight: 600;
+}
+
 #palette-list li.palette-section:first-child {
-  padding-top: 4px;
+  padding-top: 6px;
+}
+
+#palette-list li.pal-empty {
+  padding: 18px 10px;
+  color: var(--ink2);
+  text-align: center;
+}
+
+.pal-foot {
+  display: flex;
+  gap: 14px;
+  flex: none;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-min);
+  color: var(--ink3);
+}
+
+.pal-foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .pal-foot {
+    display: none;
+  }
+}
+
+/* Sur un écran étroit, le libellé passe avant la commande équivalente. */
+@media (max-width: 900px) {
+  #palette-list .cmd {
+    display: none;
+  }
 }
 
 /* ── Infobulles épinglables ────────────────────────────────────────────────*/
@@ -1421,7 +1797,7 @@ body[data-active-space] .panel-head {
   text-decoration: none;
 }
 
-/* ── Mode concentration ────────────────────────────────────────────────────*/
+/* ── Plein écran ──────────────────────────────────────────────────────────*/
 
 :root[data-focus="on"] .panel[data-state="pinned"] {
   display: none;
@@ -1452,11 +1828,12 @@ body[data-active-space] .panel-head {
     padding: 0 var(--sp-2);
   }
 
-  #brand span,
+  #brand .brand-name,
+  #top-live,
   #appbar > .grow,
   .palette-lbl,
-  .pill-lbl,
   .live-pre,
+  .st-pre,
   #palette-open .kbd,
   #project-chip .chevron {
     display: none;
@@ -1600,9 +1977,45 @@ body[data-active-space] .panel-head {
     display: none;
   }
 
+  /* Le fil d'Ariane prend sa ligne : les vues (« Recherche », « Board »…) passent
+     dessous au lieu de se loger à côté de lui, où un fil un peu long les
+     poussait de 10 px hors écran (Savoir, projet avec des entrées). */
+  #docbar > #breadcrumb {
+    flex: 1 0 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  #docbar > .seg,
+  #docbar > .chip {
+    max-width: 100%;
+  }
+
+  /* Un projet riche donne plus de vues que 390 px n'en tient (Savoir, Travail) :
+     le sélecteur défile dans sa propre boîte au lieu de rogner ses boutons. */
+  #docbar > .seg {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #docbar > .seg > button {
+    flex: none;
+    white-space: nowrap;
+  }
+
   #statusbar {
-    gap: var(--sp-3);
+    gap: var(--sp-2);
     padding: 0 var(--sp-2);
+    overflow: hidden;
+  }
+
+  /* Le pouls cède de la place avant que la barre ne déborde : son texte change
+     de longueur (« il y a 4 s », « injoignable depuis… ») et la police de Douce
+     est un peu plus large que l'ancienne — 2 px de trop sur le dernier bouton
+     du sélecteur de thème à 390 px. */
+  #statusbar > #st-live {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -1616,7 +2029,8 @@ body[data-active-space] .panel-head {
     min-width: 0;
   }
 
-  .st-extra {
+  .st-extra,
+  #st-atelier {
     display: none;
   }
 
@@ -1650,4 +2064,297 @@ body[data-active-space] .panel-head {
     max-width: 100%;
     overflow-x: auto;
   }
+}
+
+
+/* ═══ P62 — la coque des maquettes (Douce) ══════════════════════════════════
+ *
+ * Maquettes de référence : StyleDouce et les cinq écrans (À traiter, Travail,
+ * Flotte, Savoir, Configuration). Une barre du haut, le contenu, et selon
+ * l'écran un panneau de détail à droite ; Savoir et Configuration ajoutent un
+ * sous-menu à gauche (les rubriques). Rail, explorateur, preuves, dock et
+ * inspecteur permanent sont les panneaux d'atelier : masqués tant que
+ * `html[data-atelier="off"]`, rouverts par ⇧⌘L (shell.js::toggleAtelier).
+ *
+ * Les règles « masquées » ne valent qu'au-dessus de 900 px : dessous, la coque
+ * garde ses tiroirs, et le rail en est la seule porte.
+ */
+
+/* Barre du haut : blanche, un filet d'ombre plutôt qu'une bordure, 52 px. */
+#appbar {
+  align-items: center;
+  background: var(--panel);
+  border-bottom: 0;
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.project-count {
+  color: var(--ink3);
+}
+
+.project-count[hidden] {
+  display: none;
+}
+
+#project-chip {
+  height: 30px;
+  border-radius: var(--r);
+}
+
+#palette-open {
+  height: 30px;
+  color: var(--ink3);
+  border-radius: var(--r);
+}
+
+.top-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-min);
+  color: var(--ok);
+  white-space: nowrap;
+}
+
+.top-live[data-state="paused"],
+.top-live[data-state="error"] {
+  color: var(--ink2);
+}
+
+.top-live[data-state="error"] {
+  font-weight: 500;
+}
+
+/* Onglets d'espace : pilules à icône. Actif = fond d'accent doux, texte et
+   icône d'accent ; le filet de l'identité d'espace disparaît (Douce n'a pas de
+   filet). */
+#spaces {
+  align-items: center;
+}
+
+#spaces .tab {
+  height: 34px;
+  gap: 7px;
+  border: 0;
+  border-radius: var(--r-pill);
+  font-weight: 500;
+}
+
+#spaces .tab .ico {
+  color: var(--ink3);
+}
+
+#spaces .tab:hover {
+  background: var(--hover);
+}
+
+#spaces .tab[aria-selected="true"],
+#spaces .tab.on {
+  background: var(--acc-soft);
+  color: var(--acc);
+  border: 0;
+}
+
+#spaces .tab[aria-selected="true"] .ico,
+#spaces .tab.on .ico {
+  color: var(--acc);
+}
+
+/* Titre d'espace : 32 px, serré (StyleDouce `.title`). */
+.space-title {
+  font-size: var(--t-title);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+/* Sous-menu à gauche : les rubriques d'un espace, en colonne. */
+#center {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+}
+
+#readonly-banner {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+#section-tabs {
+  grid-column: 1;
+  grid-row: 2 / span 4;
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  width: 200px;
+  padding: var(--sp-5) var(--sp-3);
+  gap: 4px;
+  border-bottom: 0;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  overflow-x: visible;
+  overflow-y: auto;
+}
+
+#section-tabs .tab {
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r);
+  font-weight: 500;
+}
+
+#section-tabs .tab[aria-selected="true"] {
+  background: var(--acc-soft);
+  color: var(--acc);
+  border: 0;
+}
+
+#docbar {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+#canvas {
+  grid-column: 2;
+  grid-row: 3 / span 2;
+  min-width: 0;
+}
+
+#dock {
+  grid-column: 2;
+  grid-row: 5;
+}
+
+@media (min-width: 901px) {
+  /* Le panneau de détail (l'ancien Inspecteur) : une carte arrondie à ombre,
+     détachée du bord, sans bandeau (StyleDouce `.aside`). */
+  html[data-atelier="off"] #panel-inspector {
+    width: 380px;
+    margin: 18px 18px 18px 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  html[data-atelier="off"] #panel-inspector .panel-head {
+    display: none;
+  }
+
+  html[data-atelier="off"] #panel-inspector .panel-body {
+    padding: var(--sp-5);
+  }
+
+  html[data-atelier="off"] #panel-inspector .panel-resize {
+    display: none;
+  }
+
+  html[data-atelier="off"] #panel-inspector:focus-within {
+    width: 380px;
+    margin: 18px 18px 18px 0;
+    border: 1px solid var(--line);
+  }
+
+  #spaces {
+    gap: 4px;
+    margin-left: 6px;
+  }
+
+  #spaces .tab {
+    padding: 0 12px;
+  }
+
+  /* Panneaux d'atelier : fermés par défaut, quel que soit l'état mémorisé.
+     L'arbre de Fichiers vit dans le contenu de sa rubrique (P66), plus ici :
+     l'explorateur n'est rouvert que par la bascule d'atelier (⇧⌘L). */
+  html[data-atelier="off"] #rail,
+  html[data-atelier="off"] #panel-explorer,
+  html[data-atelier="off"] #panel-evidence,
+  html[data-atelier="off"] #dock {
+    display: none;
+  }
+
+  /* Le détail n'existe que s'il y a quelque chose à détailler : pas de colonne vide. */
+  html[data-atelier="off"] #panel-inspector {
+    display: flex;
+  }
+
+  /* `:has()` plutôt que l'attribut `data-detail` (posé par un MutationObserver,
+     donc après coup) : un espace qui remplit le panneau puis donne le focus à
+     un champ dans le même tour doit le trouver déjà affiché. */
+  html[data-atelier="off"] #panel-inspector:not(:has(#inspector-body > :not([data-shell-placeholder], p.lbl, p.cv-msg, .sr-only))) {
+    display: none;
+  }
+
+  /* Une barre de document sans fil d'Ariane ni vue n'a rien à montrer. */
+  html[data-atelier="off"] #breadcrumb {
+    display: none;
+  }
+
+  html[data-atelier="off"] #docbar:not(:has(.seg:not([hidden]), #doc-validation:not([hidden]))) {
+    display: none;
+  }
+
+  /* Au plus un pied fin : version, API, pouls ; les réglages d'atelier restent
+     à portée mais les panneaux ne se devinent pas. */
+  html[data-atelier="off"] #statusbar {
+    height: 24px;
+  }
+}
+
+@media (max-width: 900px) {
+  #center {
+    display: flex;
+  }
+
+  #section-tabs {
+    flex-direction: row;
+    width: auto;
+    padding: 0 14px;
+    gap: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+
+  #section-tabs .tab {
+    height: 100%;
+    border-radius: var(--r) var(--r) 0 0;
+    flex: none;
+    white-space: nowrap;
+  }
+}
+
+/* Compte d'une rubrique (« Agents 3 »), à droite de son libellé. */
+.tab-count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--t-min);
+  font-weight: 400;
+  color: var(--ink3);
+}
+
+/* La commande équivalente d'un écran, à copier d'un clic (Douce `.formula`). */
+.formula {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: var(--t-s);
+  color: var(--ink2);
+  white-space: nowrap;
+  cursor: copy;
+}
+
+.formula b {
+  color: var(--rub);
+  font-weight: 500;
+}
+
+.formula:hover {
+  color: var(--ink);
 }

@@ -33,7 +33,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 def _goto(page: Page, space: str) -> None:
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", space)
-    page.wait_for_function("(id) => window.GrimoireWorkspace.space === id", arg=space)
+    page.wait_for_function("(id) => window.GrimoireWorkspace.module === id", arg=space)
 
 
 def _computed_signature(page: Page, handle: object) -> str:
@@ -145,12 +145,6 @@ def test_concevoir_view_seg_bascule_correctement(workspace: Page, project_with_b
     _assert_segment_toggles(workspace, "#view-seg button")
 
 
-def test_piloter_zoom_seg_bascule_correctement(cockpit_workspace: Page) -> None:
-    _goto(cockpit_workspace, "piloter")
-    cockpit_workspace.wait_for_selector("#zoom-seg button")
-    _assert_segment_toggles(cockpit_workspace, "#zoom-seg button")
-
-
 # ── #project-chip : jusqu'ici décoratif, aucun clic ne l'ouvrait ────────────
 
 
@@ -169,11 +163,15 @@ def test_le_chip_projet_ouvre_la_palette_sur_la_section_projets(cockpit_workspac
     # texte source — d'où la comparaison insensible à la casse.
     assert first_item.inner_text().strip().lower() == "projets"
 
-    # Au moins un projet du registre (`served_cockpit` en enrôle un réel) doit
-    # apparaître juste après l'en-tête « Projets », avant tout autre en-tête.
+    # « Tous les projets » d'abord, puis le registre (`served_cockpit` en
+    # enrôle un réel) — le projet en portée porte une coche, et sa ligne dit
+    # son dossier en texte secondaire (revue du 2026-10-25).
     second_item = page.locator("#palette-list li").nth(1)
     assert second_item.get_attribute("role") == "option"
-    assert second_item.locator(".lbl").inner_text().strip() == "Projet"
+    assert second_item.locator("span").first.inner_text().strip() == "Tous les projets"
+    third_item = page.locator("#palette-list li").nth(2)
+    assert third_item.locator(".lbl").get_attribute("title")
+    assert page.locator("#palette-list li[aria-current='true'] svg[aria-label='Portée actuelle']").count() == 1
 
     page.locator("body").press("Escape")
 

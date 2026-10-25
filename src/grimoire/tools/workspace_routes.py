@@ -78,6 +78,8 @@ from grimoire.missions.liveness import probe_claude_agents
 from grimoire.tools import (
     source_assist,
     workspace_api,
+    workspace_attention,
+    workspace_config,
     workspace_exec,
     workspace_language,
     workspace_memory,
@@ -194,12 +196,36 @@ def _file_diff(project_root: Path, query: _Query) -> Any:
     return workspace_api.file_diff(project_root, _one(query, "path"))
 
 
+def _upgrade_changes(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/upgrade/changes`` — ce qu'une mise à jour écrirait, par catégorie (P44). Lecture pure."""
+    from grimoire.tools import upgrade_changes
+
+    return upgrade_changes.changes_view(project_root)
+
+
+def _upgrade_diff(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/upgrade/diff?path=`` — le diff d'un fichier que la mise à jour toucherait (P44). Lecture pure."""
+    from grimoire.tools import upgrade_changes
+
+    return upgrade_changes.diff_view(project_root, _one(query, "path"))
+
+
 def _blueprints(project_root: Path, _query: _Query) -> Any:
     return workspace_api.blueprints_view(project_root)
 
 
 def _agents(project_root: Path, _query: _Query) -> Any:
     return workspace_api.agents_view(project_root)
+
+
+def _hooks(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/hooks`` — le registre de sûreté des hooks (P66). Lecture pure."""
+    return workspace_config.hooks_view(project_root)
+
+
+def _providers(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/providers`` — les fournisseurs de modèles, état et palier (P66). Lecture pure."""
+    return workspace_config.providers_view(project_root)
 
 
 def _proposals(project_root: Path, _query: _Query) -> Any:
@@ -290,6 +316,23 @@ def _pulse(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _attention(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/attention`` — ce qui attend une décision humaine (P22).
+
+    Le projet servi seul ; ``scope=portfolio`` tout le registre, ``slug=`` un
+    projet du registre. ``probe=1`` relance la sonde mémoire (« Réessayer »)
+    au lieu de lire son cache. Sections par urgence :
+    :func:`workspace_attention.attention_order`.
+    """
+    return workspace_attention.attention_view(
+        project_root,
+        portfolio=_one(query, "scope") == "portfolio",
+        slug=_one(query, "slug") or None,
+        probe=_one(query, "probe") not in (None, "", "0", "false"),
+        host_probe=_host_probe,
+    )
+
+
 def _evidence(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
@@ -356,17 +399,22 @@ GET_ROUTES: dict[str, _GetHandler] = {
     f"{PREFIX}file/diff": _file_diff,
     f"{PREFIX}file/usage": _file_usage,
     f"{PREFIX}file/history": _file_history,
+    f"{PREFIX}upgrade/changes": _upgrade_changes,
+    f"{PREFIX}upgrade/diff": _upgrade_diff,
     f"{PREFIX}commands": _commands,
     f"{PREFIX}doctor": _doctor,
     f"{PREFIX}language": _language,
     f"{PREFIX}assist": _assist_status,
     f"{PREFIX}blueprints": _blueprints,
     f"{PREFIX}agents": _agents,
+    f"{PREFIX}hooks": _hooks,
+    f"{PREFIX}providers": _providers,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
     f"{PREFIX}portfolio/tasks": _portfolio_tasks,
     f"{PREFIX}pulse": _pulse,
+    f"{PREFIX}attention": _attention,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,

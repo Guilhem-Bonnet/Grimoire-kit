@@ -1,0 +1,36 @@
+{
+  "_comment": "Fixture de attention_order (P22) : cartes d'attention dans le désordre, et l'ordre attendu par section. task_blocked:beta:t2 et task_blocked:alpha:t6 sont à égalité (même type, même date) : l'ordre d'arrivée tranche. proposal:beta:p2 a une date illisible et proposal:beta:p3 aucune date : en fin de section, dans l'ordre d'arrivée. Le type « mystere » est inconnu : section « other », jamais perdu.",
+  "cards": [
+    {"id": "kit_behind:alpha:kit", "kind": "kit_behind", "since": null},
+    {"id": "proposal:beta:p2", "kind": "proposal", "since": "pas une date"},
+    {"id": "proposal:alpha:p1", "kind": "proposal", "since": "2026-10-20T10:00:00+00:00"},
+    {"id": "checkpoint:beta:r2", "kind": "checkpoint", "since": "2026-10-21T09:00:00+00:00"},
+    {"id": "checkpoint:alpha:r1", "kind": "checkpoint", "since": "2026-10-19T09:00:00+00:00"},
+    {"id": "proposal:beta:p3", "kind": "proposal"},
+    {"id": "question:alpha:t1", "kind": "question", "since": "2026-10-18T09:00:00"},
+    {"id": "task_blocked:beta:t2", "kind": "task_blocked", "since": "2026-10-22T08:00:00+00:00"},
+    {"id": "review_blocked:alpha:t3", "kind": "review_blocked", "since": "2026-10-22T09:00:00+00:00"},
+    {"id": "claim_orphaned:beta:t4", "kind": "claim_orphaned", "since": "2026-10-21T08:00:00+00:00"},
+    {"id": "directive_unacked:alpha:t5", "kind": "directive_unacked", "since": "2026-10-20T08:00:00+00:00"},
+    {"id": "task_blocked:alpha:t6", "kind": "task_blocked", "since": "2026-10-22T08:00:00+00:00"},
+    {"id": "unreadable:gamma:project", "kind": "unreadable", "since": null},
+    {"id": "service:alpha:qdrant", "kind": "service", "since": "2026-10-23T14:30:00+00:00"},
+    {"id": "probe_failed:beta:memory", "kind": "probe_failed", "since": "2026-10-23T14:00:00+00:00"},
+    {"id": "service_resolved:beta:neo4j", "kind": "service_resolved", "since": "2026-10-23T14:32:00+00:00"},
+    {"id": "mystere:alpha:x", "kind": "mystere", "since": null}
+  ],
+  "expected": {
+    "decide": [
+      "checkpoint:alpha:r1", "checkpoint:beta:r2", "question:alpha:t1",
+      "proposal:alpha:p1", "proposal:beta:p2", "proposal:beta:p3"
+    ],
+    "unblock": [
+      "review_blocked:alpha:t3", "task_blocked:beta:t2", "task_blocked:alpha:t6",
+      "directive_unacked:alpha:t5", "claim_orphaned:beta:t4"
+    ],
+    "repair": ["service:alpha:qdrant", "unreadable:gamma:project", "probe_failed:beta:memory"],
+    "maintain": ["kit_behind:alpha:kit"],
+    "resolved": ["service_resolved:beta:neo4j"],
+    "other": ["mystere:alpha:x"]
+  }
+}

@@ -480,7 +480,24 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 
             payload = api_get(_project_api(proot), path, parse_qs(urlparse(self.path).query))
-        except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+        except FileNotFoundError as exc:
+            # Même traduction que l'atelier (``forge_http.py::do_GET``) et que
+            # ``do_POST`` ci-dessous : un refus métier (tâche inconnue, chemin hors
+            # étage) n'est pas une panne serveur. Tout tombait avant dans le 500
+            # générique, et l'UI ne pouvait plus distinguer « introuvable » de « cassé ».
+            self._send_json(404, {"ok": False, "error": f"introuvable : {exc}"})
+            return
+        except PermissionError as exc:
+            self._send_json(403, {"ok": False, "error": str(exc)})
+            return
+        except json.JSONDecodeError as exc:
+            # Un fichier d'état illisible est une panne, pas une requête invalide.
+            self._send_json(500, {"ok": False, "error": str(exc)})
+            return
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        except (OSError, RuntimeError) as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
             return
         if payload is API_GET_UNHANDLED:
@@ -514,12 +531,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # de lancement direct (``_HOME_SLUG``) les honore, exactement comme le
         # faisait l'ancien atelier avant que #351 ne l'y fasse succéder —
         # naviguer vers un AUTRE projet du registre reste en lecture seule.
+        # ``home`` nomme ce projet ouvert (P31) : le bandeau de lecture seule
+        # en tire le geste « Revenir à … », ``None`` si le cockpit n'en a pas.
         if path == "/api/status" and isinstance(payload, dict):
             payload = {
                 **payload,
                 "host": "cockpit",
                 "readOnly": not self._is_home_request(),
                 "project": self._query_slug(),
+                "home": _HOME_SLUG or None,
             }
         self._send_json(200, payload)
 

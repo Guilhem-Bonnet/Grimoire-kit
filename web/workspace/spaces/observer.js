@@ -283,7 +283,10 @@ function renderSpanInspector(ctx, span) {
     btn.className = 'btn';
     btn.style.marginTop = '8px';
     btn.textContent = `Voir la timeline de ${taskId}`;
-    btn.addEventListener('click', () => ctx.goto('executer', { task: taskId, view: 'timeline' }));
+    // En portée « Tous les projets », la tâche est celle du projet servi.
+    btn.addEventListener('click', () => ctx.goto('executer', {
+      task: taskId, view: 'timeline', ...(ctx.scope?.all ? { of: ctx.host.project } : {}),
+    }));
     ctx.inspector.append(btn);
   }
 }
@@ -414,6 +417,8 @@ function renderActivite(root, ctx, { events }) {
       "Aucun flux d'événements : ni hook-runtime/events.jsonl ni task-flow/events.jsonl "
       + "n'ont encore de ligne pour ce projet.",
       'grimoire task trace',
+      undefined,
+      { art: 'i-empty-hooks' },
     ));
     ctx.inspector.replaceChildren(text('p', 'lbl', 'Aucun flux à inspecter.'));
     return;
@@ -451,7 +456,7 @@ function renderUnavailable(root, ctx, title, sentence, command) {
 
 export async function mount(root, ctx) {
   injectStyles();
-  ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Observer']);
+  ctx.docbar.setBreadcrumb([]);
 
   let view = 'runtime';
 

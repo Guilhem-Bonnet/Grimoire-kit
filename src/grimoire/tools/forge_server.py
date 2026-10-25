@@ -115,6 +115,7 @@ from grimoire.tools.project_setup import (
     execute_setup_plan,
     needs_catalogue,
     read_setup_run,
+    setup_questions_view,
 )
 from grimoire.tools.project_update import update_project
 from grimoire.tools.serve_data import DataLayer
@@ -288,6 +289,10 @@ class ForgeAPI:
     def needs_view(self) -> dict[str, Any]:
         """Catalogue des needs + suggestions pour le projet servi (issue #171)."""
         return needs_catalogue(self.project_root)
+
+    def setup_questions(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        """Les trois questions du wizard et l'archétype déduit (#888) — même module que la CLI."""
+        return setup_questions_view(self.project_root, query)
 
     def setup_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Exécute le plan de setup (issue #171), sauf repli explicite.

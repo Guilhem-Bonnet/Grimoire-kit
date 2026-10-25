@@ -40,7 +40,7 @@
 // Portefeuille (#638, lot C) : la portée « Tous les projets » lit
 // `api.portfolioTasks()` — toutes les tâches de tous les projets du registre
 // cockpit, agrégées côté serveur — avec une puce projet par carte, la session
-// qui la porte (point + mot : vivante / inactive / inconnue), sa priorité et ses
+// qui la porte (glyphe + mot : vivante / inactive / terminée / inconnue), sa priorité et ses
 // consignes non lues quand le champ existe. Les cartes se clé-ent par
 // (projet, id) : deux ledgers peuvent dériver le même identifiant d'un même
 // titre. Une action depuis le portefeuille passe par
@@ -55,9 +55,19 @@ const STYLE_ID = 'ex-styles';
 // `timelineFilter` : revenir sur l'espace garde le dernier réglage.
 const scope = { mode: 'project', state: '', slug: '', live: false };
 
+// « Demande une action de moi » (artboard Travail) : le filtre garde les tâches qui
+// attendent un humain — une question (attente `human`), une revue, un blocage.
+// Calculé sur les colonnes et l'attente que l'API donne déjà, rien n'est deviné.
+// Au niveau du module, comme `scope` : revenir sur l'espace garde le réglage.
+const askMe = { on: false };
+const needsHuman = (t) => isHumanWait(t) || t.board === 'review' || t.board === 'blocked';
+
+// Les vues que l'URL peut demander (`#travail?view=liste`).
+const VIEW_IDS = ['board4', 'board8', 'liste', 'timeline', 'decisions'];
+
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
-import { badge, icon, stateIcon } from '../shell.js';
+import { badge, glyph, icon, levelBars, monogram, stateIcon } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 
 const COLUMN_LABEL = {
@@ -92,20 +102,36 @@ const DEP_LABEL = {
   blocks: 'bloque', relates: 'lié à', parent_child: 'parent / enfant',
   discovered_from: 'découverte depuis', supersedes: 'remplace',
 };
-// `risk_profile` (grimoire.missions.schemas.RiskProfile) rendait en texte nu
-// dans le méta de carte (revue 2026-09) — aucune couleur alors que c'est une
-// vraie échelle de sévérité (grimoire.missions.board._PRIORITY_BY_RISK :
-// light → low, standard → medium, le reste → high). Point + mot, comme tout
-// le reste des états — jamais la couleur seule.
-const RISK_DOT = {
-  light: 'ok', standard: 'warn', strict: 'bad', security_critical: 'bad', release: 'bad',
+// `risk_profile` (grimoire.missions.schemas.RiskProfile) : une vraie échelle de
+// sévérité (grimoire.missions.board._PRIORITY_BY_RISK : light → low, standard →
+// medium, le reste → high). Fin du point polysémique (P30) : un bouclier à 0, 1
+// ou 2 traits, un octogone pour security_critical, et le mot à côté.
+const RISK_ICON = {
+  light: 'i-risk-light', standard: 'i-risk-standard', strict: 'i-risk-strict',
+  security_critical: 'i-risk-critical', release: 'i-risk-strict',
 };
+// `type` (grimoire.missions.schemas.TaskType) : une icône par valeur, le
+// libellé français au survol — le mot brut (« implementation ») disparaît de la carte.
+const TYPE_LABEL = {
+  analysis: 'Analyse', architecture: 'Architecture', implementation: 'Implémentation',
+  test: 'Test', documentation: 'Documentation', migration: 'Migration',
+  security: 'Sécurité', operation: 'Opération', cleanup: 'Nettoyage',
+};
+function typeGlyph(type) {
+  return TYPE_LABEL[type] ? glyph(`i-task-${type}`, `type : ${TYPE_LABEL[type]}`, '', { alone: true }) : text('span', null, type);
+}
 // Échelle de priorité (grimoire.missions.board.PRIORITIES), la plus pressante
 // en dernier ; `tasks_view()` la renvoie aussi (`priorities`) — la constante
 // locale n'est que le repli si le serveur ne la donne pas.
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const PRIORITY_LABEL = { low: 'Basse', medium: 'Moyenne', high: 'Haute', critical: 'Critique' };
-const PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
+// Priorité en barres (1 à 3 sur 3) : critique garde trois barres et prend la
+// teinte d'erreur. Une valeur hors échelle n'a pas de barres, seulement son mot.
+const PRIORITY_BARS = { low: 1, medium: 2, high: 3, critical: 3 };
+function priorityBars(priority) {
+  if (!PRIORITY_BARS[priority]) return null;
+  return levelBars(PRIORITY_BARS[priority], `priorité ${(PRIORITY_LABEL[priority] || priority).toLowerCase()}`, priority === 'critical' ? 'bad' : '');
+}
 const priorityRank = (p) => PRIORITIES.indexOf(p);
 // Dans une colonne, la plus pressante d'abord ; à égalité, l'identifiant
 // garde un ordre stable (même règle que `build_board`).
@@ -115,8 +141,9 @@ const byPriority = (a, b) =>
   (Number(isHumanWait(b)) - Number(isHumanWait(a))) ||
   (priorityRank(b.effective_priority || 'medium') - priorityRank(a.effective_priority || 'medium')) ||
   String(a.id).localeCompare(String(b.id));
-// La raison d'une attente, en clair — point + mot, jamais la couleur seule.
+// La raison d'une attente, en clair — icône + mot, jamais la couleur seule.
 const WAIT_LABEL = { human: 'décision attendue', ci: 'attend la CI', quota: 'attend le quota', paused: 'en pause' };
+const waitGlyph = (waiting) => glyph(waiting.reason === 'human' ? 'user' : 'hourglass', 'attente');
 const QUESTION_KIND_LABEL = {
   merge: 'fusion', permission: 'permission', choice: 'choix', resume_branch: 'reprise de branche',
   resume_unfenced: 'reprise sans frein', retry_exhausted: 'tentatives épuisées',
@@ -144,22 +171,53 @@ function injectStyles() {
     .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
     @media (max-width: 900px) { .ex-wrap { padding: var(--sp-3); } }
     .ex-board { display: flex; gap: var(--sp-3); align-items: flex-start; overflow-x: auto; flex-grow: 1; }
-    .ex-col { width: 260px; flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+    .ex-col { flex: 1 0 240px; max-width: 340px; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
     .ex-col-head { padding: 6px 2px; }
-    .ex-col-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); display: flex; align-items: center; gap: 6px; }
-    .ex-col-title > span:first-of-type { margin-right: auto; }
+    .ex-col-title { font-size: var(--t-s); font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+    .ex-col-title > .mono { color: var(--rub); font-weight: 600; }
     .ex-col-title .ico { width: 16px; height: 16px; color: var(--ink2); }
     .ex-col-gate { font-size: var(--t-min); color: var(--ink3); margin-top: 2px; }
     .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
     .ex-col-body[hidden] { display: none; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
-    .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-2) var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
-    .ex-card:hover { background: var(--e2); }
-    .ex-card[aria-current="true"] { outline: 2px solid var(--acc); outline-offset: -2px; }
-    .ex-card-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); }
-    .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
+    .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); box-shadow: var(--shadow); padding: var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+    .ex-card:hover { background: var(--hover); }
+    .ex-card[aria-current="true"] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+    .ex-card-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+    .ex-card-top .badge { flex: none; }
+    .ex-card-id { color: var(--ink3); font-size: var(--t-min); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .ex-proof { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ink2); font-size: var(--t-min); flex: none; }
+    .ex-ring { width: 16px; height: 16px; transform: rotate(-90deg); }
+    .ex-ring circle { fill: none; stroke-width: 2.6; }
+    .ex-ring .ok { stroke: var(--ok-mark); }
+    .ex-ring .bad { stroke: var(--bad-mark); }
+    .ex-ring .todo { stroke: var(--ink3); opacity: 0.4; }
+    .ex-card-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+    .ex-card-flag { display: block; max-width: 100%; }
+    .ex-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+    .ex-head .space-title { margin: 0; }
+    .ex-head .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .ex-head .seg > button { flex: none; white-space: nowrap; }
+    .ex-head-end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
+    .ex-ask { gap: 6px; }
+    .ex-ask[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--acc); }
+    .ex-formula { font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); white-space: nowrap; }
+    .ex-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
+    .ex-insp-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--sp-3); }
+    .ex-insp-head h3 { margin: 0; font-size: var(--t-l); line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+    .ex-gate-card { background: var(--e2); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); padding: var(--sp-4); display: flex; flex-direction: column; gap: 10px; margin-bottom: var(--sp-4); }
+    .ex-gate-card .micro { font-size: var(--t-min); font-weight: 500; color: var(--ink2); }
+    .ex-gate-card .micro strong { color: var(--ink); }
+    .ex-conds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .ex-cond { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--sp-2); padding: 6px 0; font-size: var(--t-s); }
+    .ex-cond-strong { font-weight: 600; }
+    .ex-cond-why { display: block; color: var(--ink2); font-size: var(--t-min); }
+    .ex-kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
+    .ex-event { font-size: var(--t-min); color: var(--ink2); padding: 2px 0; }
+    .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-    .ex-card-next { font-size: var(--t-s); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    .ex-card-next { font-size: var(--t-min); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    .ex-card-next .btn { height: 24px; padding: 0 10px; font-size: var(--t-min); }
     .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
     .ex-cost { font-size: var(--t-min); }
     .ex-list-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
@@ -182,7 +240,7 @@ function injectStyles() {
     .ex-insp-block h4 { font-size: var(--t-min); color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
     .ex-insp-block ul { margin: 0; padding-left: 18px; font-size: var(--t-s); }
     .ex-recall { margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap; word-break: break-word; }
-    .ex-gate-row { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r); margin-bottom: 6px; }
+    .ex-gate-row { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r); }
     .ex-gate-req { font-size: var(--t-min); color: var(--ink3); }
     .ex-session { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); display: flex; align-items: center; gap: 6px; }
     .ex-session code { font-family: var(--mono); font-size: var(--t-min); padding: 1px 4px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
@@ -202,6 +260,9 @@ function injectStyles() {
     .ex-steer-form textarea { min-height: 56px; font: inherit; font-size: var(--t-s); }
     .ex-steer-row { display: flex; gap: 6px; align-items: center; }
     .ex-wait { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .ex-wait.flag { padding: 2px 8px; border-radius: var(--r); }
+    .ex-wait.flag.bad { background: var(--bad-soft); color: var(--bad); }
+    .ex-wait.flag.warn { background: var(--warn-soft); color: var(--warn); }
     .ex-wait.human { color: var(--ink); font-weight: 500; }
     .ex-banner { display: flex; align-items: center; gap: var(--sp-3); padding: 8px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); }
     .ex-decisions { display: flex; flex-direction: column; gap: var(--sp-3); max-width: 760px; }
@@ -217,6 +278,10 @@ function injectStyles() {
   document.head.append(style);
 }
 
+// Le glyphe d'état ne dit plus qu'un ÉTAT (colonne d'une tâche, échec d'une
+// ligne de timeline, ledger absent) : les catégories ont leur icône, la
+// priorité ses barres, le projet son monogramme (P30 ; garde :
+// tests/unit/test_workspace_polysemy.py).
 const dot = (cls) => stateIcon(cls);
 function text(tag, className, value) {
   const node = document.createElement(tag);
@@ -225,10 +290,11 @@ function text(tag, className, value) {
   return node;
 }
 function row(...children) { const d = document.createElement('div'); d.className = 'row'; d.append(...children); return d; }
-function chip(label, present) {
+// Une preuve attendue : le sceau dit « preuve », le mot dit laquelle.
+function chip(label) {
   const c = document.createElement('span');
   c.className = 'chip';
-  c.append(dot(present ? 'ok' : ''), text('span', null, label));
+  c.append(glyph('seal', 'preuve attendue'), text('span', null, label));
   return c;
 }
 
@@ -237,6 +303,12 @@ function chip(label, present) {
 const HOST_LABEL = {
   'host-claude-code-cli': 'Claude Code', 'host-github-copilot': 'Copilot',
   'host-codex': 'Codex', 'host-cursor': 'Cursor', 'host-gemini-cli': 'Gemini CLI',
+};
+// Pictogramme générique de l'hôte, jamais un logo de marque : la forme dit le
+// genre d'outil (terminal, éditeur), le nom reste en texte.
+const HOST_ICON = {
+  'host-claude-code-cli': 'i-host-cli', 'host-codex': 'i-host-cli', 'host-gemini-cli': 'i-host-cli',
+  'host-opencode': 'i-host-cli', 'host-github-copilot': 'i-host-ide', 'host-cursor': 'i-host-caret',
 };
 
 // Une ligne « session » : identifiant (tronqué sur la carte, entier dans
@@ -248,7 +320,10 @@ function sessionLine(task, { full = false } = {}) {
   line.className = 'ex-session';
   const id = full ? task.session_id : `${task.session_id.slice(0, 8)}…`;
   line.append(text('span', 'lbl', 'session'), Object.assign(document.createElement('code'), { textContent: id, title: task.session_id }));
-  if (task.host) line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
+  if (task.host) {
+    if (HOST_ICON[task.host]) line.append(glyph(HOST_ICON[task.host], 'hôte'));
+    line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
+  }
   return line;
 }
 
@@ -279,31 +354,31 @@ function nextMovesText(task, none) {
 // le champ de raison (posé par le clic, consommé par `renderInspector`).
 let focusBlockReason = false;
 
-// Priorité effective (lot B la calcule côté serveur : `effective_priority`) — point + mot.
+// Priorité effective (lot B la calcule côté serveur : `effective_priority`) — barres + mot.
 const PORTFOLIO_PRIORITY_LABEL = { low: 'priorité basse', medium: 'priorité moyenne', high: 'priorité haute', critical: 'priorité critique' };
-const PORTFOLIO_PRIORITY_DOT = { low: '', medium: '', high: 'warn', critical: 'bad' };
 
-// La ligne « portefeuille » d'une carte : projet, session (point + mot),
-// priorité, consignes non lues — chaque état est un point ET un mot, jamais
-// la couleur seule (revue 2026-09).
+// La ligne « portefeuille » d'une carte : projet (monogramme + nom), session
+// (glyphe de vivacité + mot), priorité (barres + mot), consignes non lues
+// (bulle + compteur) — une forme par sens, jamais la couleur seule (P30).
 function portfolioRow(task) {
   const line = document.createElement('div');
   line.className = 'ex-card-project';
   const project = document.createElement('span');
   project.className = 'chip';
-  project.append(dot('acc'), text('span', null, task.project?.name || task.project?.slug || 'projet'));
+  const projectName = task.project?.name || task.project?.slug || 'projet';
+  project.append(monogram(projectName), text('span', null, projectName));
   line.append(project);
   const session = task.session;
   if (session && session.id) {
-    line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
+    line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
   } else {
     line.append(text('span', 'lbl', 'aucune session'));
   }
   if (task.priority) {
-    line.append(row(dot(PORTFOLIO_PRIORITY_DOT[task.priority] || ''), text('span', null, PORTFOLIO_PRIORITY_LABEL[task.priority] || `priorité ${task.priority}`)));
+    line.append(row(priorityBars(task.priority) || '', text('span', null, PORTFOLIO_PRIORITY_LABEL[task.priority] || `priorité ${task.priority}`)));
   }
   if (task.unread_directives) {
-    line.append(row(dot('warn'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
+    line.append(row(glyph('chat', 'consignes'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
   }
   return line;
 }
@@ -326,7 +401,7 @@ function liveRow(session, { withState = true } = {}) {
   const line = document.createElement('div');
   line.className = 'ex-facts lbl';
   line.dataset.role = 'live-facts';
-  if (withState) line.append(row(dot(livenessDot(session)), text('span', null, `session ${livenessLabel(session)}`)));
+  if (withState) line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
   if (session.updated_at && !Number.isNaN(Date.parse(session.updated_at))) {
     const sign = text('span', null, 'signe ');
     sign.append(sinceNode(session.updated_at));
@@ -359,25 +434,80 @@ function costRow(task) {
   return line;
 }
 
-function taskCard(task, onSelect, portfolio = false) {
+// L'anneau de preuve : un segment par condition du prochain passage (le nombre
+// vient du fichier de gates, pas d'un « 3 » fixe), plein quand le gate l'accepte.
+// Une condition non remplie est grise, rouge seulement pour une carte en revue
+// (c'est elle qui attend un verdict). Rien n'est dessiné sans `next_gate`.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function proofRing(task) {
+  const gate = task.next_gate;
+  if (!gate || !(gate.conditions || []).length) return null;
+  const n = gate.conditions.length;
+  const done = gate.conditions.filter((c) => c.ok).length;
+  const circumference = 2 * Math.PI * 7;
+  const slot = circumference / n;
+  const length = n === 1 ? circumference : slot - 2.2;
+  const wrap = document.createElement('span');
+  wrap.className = 'ex-proof';
+  wrap.dataset.role = 'proof';
+  wrap.title = `conditions de passage vers ${COLUMN_LABEL[gate.to] || gate.to} : ${done} sur ${n}`;
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 18 18');
+  svg.setAttribute('class', 'ex-ring');
+  svg.setAttribute('aria-hidden', 'true');
+  gate.conditions.forEach((c, i) => {
+    const arc = document.createElementNS(SVG_NS, 'circle');
+    arc.setAttribute('cx', '9');
+    arc.setAttribute('cy', '9');
+    arc.setAttribute('r', '7');
+    arc.setAttribute('class', c.ok ? 'ok' : (task.board === 'review' ? 'bad' : 'todo'));
+    arc.setAttribute('stroke-dasharray', `${length.toFixed(2)} ${(circumference - length).toFixed(2)}`);
+    arc.setAttribute('stroke-dashoffset', (-i * slot).toFixed(2));
+    svg.append(arc);
+  });
+  wrap.append(svg, text('span', null, `${done}/${n}`));
+  return wrap;
+}
+
+function taskCard(task, onSelect, portfolio = false, selected = false) {
   const card = document.createElement('div');
   card.className = 'ex-card';
+  if (selected) card.setAttribute('aria-current', 'true');
   card.tabIndex = 0;
   card.dataset.project = task.project?.slug || '';
   card.dataset.task = task.id;
   card.addEventListener('click', () => onSelect(task));
   card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(task); });
 
-  card.append(text('div', 'ex-card-title', task.title || task.id));
+  // Ligne du haut (artboard Travail) : identifiant, classe de route, anneau de preuve.
+  const top = document.createElement('div');
+  top.className = 'ex-card-top';
+  const cardId = text('span', 'ex-card-id mono', task.id);
+  cardId.title = task.id;
+  top.append(cardId);
+  if (task.verifiability_class) {
+    top.append(badge(task.verifiability_class, '', `classe de route : ${task.verifiability_class}`));
+  }
+  appendIf(top, proofRing(task));
+  card.append(top);
+  const cardTitle = text('div', 'ex-card-title', task.title || task.id);
+  cardTitle.title = task.title || task.id;
+  card.append(cardTitle);
   if (portfolio) card.append(portfolioRow(task));
   const meta = text('div', 'ex-card-meta lbl', '');
-  if (task.risk_profile) meta.append(dot(RISK_DOT[task.risk_profile] || ''));
-  meta.append(text('span', null, [task.owner || 'sans owner', task.type, task.risk_profile].filter(Boolean).join(' · ')));
-  // Priorité effective (issue #638) : point + mot, comme le risque — jamais la
-  // couleur seule ; et le badge « consigne non lue » tant qu'une consigne de
-  // l'orchestrateur n'a pas été livrée à la session.
+  if (task.type) meta.append(typeGlyph(task.type));
+  meta.append(text('span', null, task.owner || 'sans owner'));
+  if (task.risk_profile) {
+    if (RISK_ICON[task.risk_profile]) meta.append(glyph(RISK_ICON[task.risk_profile], 'profil de risque'));
+    meta.append(text('span', null, task.risk_profile));
+  }
+  // Priorité effective (issue #638) : barres + mot, jamais la couleur seule ; et
+  // le badge « consigne non lue » tant qu'une consigne de l'orchestrateur n'a
+  // pas été livrée à la session.
   const priority = task.effective_priority || 'medium';
-  meta.append(dot(PRIORITY_DOT[priority] || ''), text('span', null, PRIORITY_LABEL[priority] || priority));
+  const bars = priorityBars(priority);
+  if (bars) meta.append(bars);
+  meta.append(text('span', null, PRIORITY_LABEL[priority] || priority));
   if (task.directives_pending > 0) {
     const unread = badge(`consigne non lue (${task.directives_pending})`, 'acc');
     unread.dataset.role = 'directive-badge';
@@ -390,9 +520,9 @@ function taskCard(task, onSelect, portfolio = false) {
     // Le mot ET la raison, jamais la seule couleur (une attente nommée a déjà
     // sa propre ligne juste en dessous).
     const line = document.createElement('div');
-    line.className = 'ex-wait';
+    line.className = 'ex-wait flag bad';
     line.dataset.role = 'blocked';
-    line.append(dot('bad'), text('span', null, 'Bloquée'));
+    line.append(stateIcon('bad'), text('span', null, 'Bloquée'));
     line.append(text('span', 'lbl', task.blocked_reason || 'raison non écrite'));
     card.append(line);
   }
@@ -401,22 +531,34 @@ function taskCard(task, onSelect, portfolio = false) {
     const line = document.createElement('div');
     line.className = 'ex-wait' + (human ? ' human' : '');
     line.dataset.role = 'waiting';
-    line.append(dot(human ? 'warn' : ''), text('span', null, waitingText(task.waiting)));
+    line.append(waitGlyph(task.waiting), text('span', null, waitingText(task.waiting)));
     if (human) line.append(text('span', 'lbl', QUESTION_KIND_LABEL[task.waiting.question.kind] || task.waiting.question.kind));
     card.append(line);
     if (human) card.append(text('div', 'lbl', task.waiting.question.text));
   }
 
-  const chips = document.createElement('div');
-  chips.className = 'ex-card-chips';
-  for (const evidence of (task.expected_evidence || []).slice(0, 4)) chips.append(chip(evidence, false));
-  if (!(task.expected_evidence || []).length) chips.append(text('span', 'lbl', 'aucune preuve déclarée'));
-  card.append(chips);
+  // Une carte en revue dit ce qui lui manque : la première condition rouge du
+  // passage à « Acceptée », en clair, avec son gate au survol.
+  if (task.board === 'review' && task.next_gate) {
+    const missing = (task.next_gate.conditions || []).find((c) => !c.ok);
+    if (missing) {
+      const flag = document.createElement('div');
+      flag.className = 'ex-wait flag warn';
+      flag.dataset.role = 'missing-condition';
+      flag.title = `${missing.gate} — ${missing.reason}`;
+      flag.append(stateIcon('warn'), text('span', null, sentence(missing.reason) || gateLabel(missing.gate)));
+      card.append(flag);
+    }
+  }
 
   // Session qui porte la carte (issue #638, lot A) : `session_id` et `host`
   // viennent du claim, posés par le hook UserPromptSubmit de la session —
   // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
-  if (task.session_id) card.append(sessionLine(task));
+  if (task.session_id) {
+    const sessionRow = sessionLine(task);
+    if (task.session && task.session.id) sessionRow.prepend(sessionGlyph(task.session));
+    card.append(sessionRow);
+  }
   // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
   // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
   if (task.session && task.session.id) card.append(liveRow(task.session, { withState: !portfolio }));
@@ -439,18 +581,14 @@ function taskCard(task, onSelect, portfolio = false) {
     blockBtn.addEventListener('click', (e) => { e.stopPropagation(); focusBlockReason = true; onSelect(task); });
     actions.append(blockBtn);
   }
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'btn';
-  btn.textContent = 'Voir la porte';
-  btn.addEventListener('click', (e) => { e.stopPropagation(); onSelect(task); });
-  actions.append(btn);
+  // « Voir la porte » doublait le clic sur la carte (qui ouvre le même panneau de
+  // détail) : la carte entière est le geste, comme sur la maquette.
   nextRow.append(actions);
   card.append(nextRow);
   return card;
 }
 
-function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
+function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSelected = () => false) {
   const board = document.createElement('div');
   board.className = 'ex-board';
   const byColumn = new Map();
@@ -481,7 +619,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
       toggle.addEventListener('click', () => {
         if (unfolded.has(group.id)) unfolded.delete(group.id); else unfolded.add(group.id);
         const fresh = document.createElement('div');
-        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio);
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected);
         board.replaceWith(fresh.firstElementChild);
       });
       head.append(toggle);
@@ -500,7 +638,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false) {
     if (!inColumn.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio));
+      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio, isSelected(task)));
     }
     col.append(body);
     board.append(col);
@@ -541,19 +679,19 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       const sessionCell = document.createElement('td');
       const session = task.session;
       if (session && session.id) {
-        sessionCell.append(row(dot(livenessDot(session)), text('span', null, livenessLabel(session))));
+        sessionCell.append(row(sessionGlyph(session), text('span', null, livenessLabel(session))));
       } else {
         sessionCell.append(text('span', 'lbl', '—'));
       }
       tr.append(sessionCell);
       const prioCell = document.createElement('td');
-      if (task.priority) prioCell.append(row(dot(PORTFOLIO_PRIORITY_DOT[task.priority] || ''), text('span', null, task.priority)));
+      if (task.priority) prioCell.append(row(priorityBars(task.priority) || '', text('span', null, task.priority)));
       else prioCell.append(text('span', 'lbl', '—'));
       tr.append(prioCell);
     } else {
       const prio = task.effective_priority || 'medium';
       const prioCell = document.createElement('td');
-      prioCell.append(row(dot(PRIORITY_DOT[prio] || ''), text('span', null, PRIORITY_LABEL[prio] || prio)));
+      prioCell.append(row(priorityBars(prio) || '', text('span', null, PRIORITY_LABEL[prio] || prio)));
       tr.append(prioCell);
     }
     tr.append(text('td', null, task.owner || '—'));
@@ -563,7 +701,7 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
       else sessionCell.append(text('span', 'lbl', '—'));
       tr.append(sessionCell);
       const evCell = document.createElement('td');
-      evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e, false))));
+      evCell.append(row(...(task.expected_evidence || []).slice(0, 3).map((e) => chip(e))));
       if (!(task.expected_evidence || []).length) evCell.append(text('span', 'lbl', '—'));
       tr.append(evCell);
     }
@@ -800,7 +938,7 @@ function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
   const wrap = document.createElement('div');
   wrap.className = 'ex-decisions';
   if (!pending.length) {
-    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions'));
+    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions', undefined, { art: 'i-empty-inbox' }));
   }
   for (const task of pending) wrap.append(decisionCard(ctx, task, portfolio, onWritten));
   root.append(wrap);
@@ -811,7 +949,7 @@ function decisionsBanner(count, onOpen) {
   const banner = document.createElement('div');
   banner.className = 'ex-banner';
   banner.dataset.role = 'decisions-banner';
-  banner.append(dot('warn'), text('span', null, `${count} décision${count > 1 ? 's' : ''} en attente d'un humain`));
+  banner.append(glyph('user', 'décisions'), text('span', null, `${count} décision${count > 1 ? 's' : ''} en attente d'un humain`));
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn pri';
@@ -832,9 +970,14 @@ function livenessLabel(session) {
   const word = { vivant: 'vivante', inactif: 'inactive', inconnu: 'inconnue', 'terminé': 'terminée' }[l.state] || l.state;
   return l.reason && l.state === 'inactif' ? `${word} (${l.reason})` : word;
 }
-function livenessDot(session) {
-  if (session.attention) return 'warn';
-  return (session.liveness || {}).state === 'vivant' ? 'ok' : '';
+// Glyphe de vivacité (P30) : une forme par valeur — anneau à moitié plein
+// (vivante), anneau vide (inactive), anneau coché (terminée), anneau en
+// tirets (inconnue) ; `attention` le teinte sans changer sa forme.
+const SESSION_ICON = { vivant: 'i-session-live', inactif: 'i-session-idle', 'terminé': 'i-session-done', inconnu: 'i-session-unknown' };
+function sessionGlyph(session) {
+  const state = (session.liveness || {}).state || 'inconnu';
+  const tone = session.attention ? 'warn' : (state === 'vivant' ? 'ok' : '');
+  return glyph(SESSION_ICON[state] || 'i-session-unknown', 'vivacité de la session', tone);
 }
 
 // « Reprendre la session » (#638) : copie la commande sur l'hôte Claude Code,
@@ -844,7 +987,7 @@ function sessionBlock(session, { resume = true } = {}) {
   block.className = 'ex-insp-block ex-session';
   block.append(text('h4', null, 'Session'));
   block.append(row(
-    dot(livenessDot(session)),
+    sessionGlyph(session),
     text('span', null, `${livenessLabel(session)} · ${session.id}` + (session.host ? ` · ${session.host}` : '')),
   ));
   if (session.attention) block.append(text('div', 'lbl', `attention : ${session.attention.reason}`));
@@ -885,19 +1028,103 @@ function sessionBlock(session, { resume = true } = {}) {
   return block;
 }
 
+// Les conditions de passage (`next_gate`, lu par `workspace_api.annotate_gates`
+// depuis le verdict du gate) en clair : le libellé dit la preuve, l'identifiant
+// du gate reste affiché à côté pour qu'on puisse le chercher dans le fichier de portes.
+const GATE_LABEL = {
+  acceptance_criteria: "Critères d'acceptation déclarés",
+  owner_or_agent_role: 'Propriétaire ou rôle nommé',
+  provider_policy: 'Fournisseur activé au registre',
+  evidence_pack: 'Pack de preuve présent',
+  review_gate: 'Verdict de revue',
+  evidence_gate: 'Critères couverts par la preuve',
+  context_bundle: 'Context bundle présent',
+  decision_trace: 'Trace de décision présente',
+  blocker_reason: 'Raison du blocage écrite',
+  remediation_plan: 'Plan de remédiation',
+  compliance_score: 'Score de conformité',
+  release_authorization: 'Autorisation de publication',
+};
+const gateLabel = (gate) => GATE_LABEL[gate] || gate;
+// Les raisons du gate sont écrites en minuscules (« aucun verdict… ») : en tête de ligne, une majuscule.
+const sentence = (value) => (value ? value.charAt(0).toUpperCase() + value.slice(1) : '');
+const STATE_TONE = { review: 'warn', blocked: 'bad', accepted: 'ok', released: 'ok', in_progress: 'acc' };
+
+function conditionList(gate) {
+  const list = document.createElement('ul');
+  list.className = 'ex-conds';
+  list.dataset.role = 'gate-conditions';
+  for (const c of gate.conditions) {
+    const li = document.createElement('li');
+    li.className = 'ex-cond ' + (c.ok ? 'ok' : 'bad');
+    li.dataset.ok = String(c.ok);
+    li.dataset.gate = c.gate;
+    const body = document.createElement('span');
+    body.append(text('span', c.ok ? null : 'ex-cond-strong', gateLabel(c.gate)), text('span', 'lbl', ` · ${c.gate}`));
+    if (!c.ok) body.append(text('span', 'ex-cond-why', sentence(c.reason) + (c.remedy ? ` — ${c.remedy}` : '')));
+    li.append(stateIcon(c.ok ? 'ok' : 'bad'), body);
+    list.append(li);
+  }
+  return list;
+}
+
+// Ce qu'un re-rendu ne doit jamais écraser : la saisie en cours (valeur, focus,
+// curseur) des champs d'un même inspecteur. Les champs sont retrouvés par leur
+// `data-role` et leur rang ; une autre tâche ne reçoit rien.
+function snapshotFields(container) {
+  const fields = [];
+  if (container.dataset.owner !== 'executer') return { task: '', fields };
+  for (const el of container.querySelectorAll('input[data-role], textarea[data-role]')) {
+    if (el.type === 'checkbox') continue;
+    const focused = el === document.activeElement;
+    fields.push({
+      role: el.dataset.role,
+      nth: [...container.querySelectorAll(`[data-role="${el.dataset.role}"]`)].indexOf(el),
+      value: el.value,
+      focused,
+      start: focused ? el.selectionStart : null,
+      end: focused ? el.selectionEnd : null,
+    });
+  }
+  return { task: container.dataset.task || '', fields };
+}
+
+function restoreFields(container, kept) {
+  if (!kept || !kept.task || kept.task !== container.dataset.task) return;
+  for (const f of kept.fields) {
+    const el = container.querySelectorAll(`[data-role="${f.role}"]`)[f.nth];
+    if (!el) continue;
+    if (f.value) {
+      el.value = f.value;
+      // Les gardes du formulaire (« Annuler » inerte sans raison) écoutent `input`.
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (f.focused) {
+      el.focus({ preventScroll: true });
+      try { el.setSelectionRange(f.start, f.end); } catch { /* champ sans sélection */ }
+    }
+  }
+}
+
 // `task` porte l'id et, en portefeuille, `project.slug` (cible des lectures et
 // des actions) et `session` (bloc « Session »). `portfolio` choisit la porte
 // d'écriture : `portfolioTaskAction` (dérogation nommée, tout projet du
-// registre) plutôt que `taskAction` (projet de lancement seulement). Le
-// vidage attend la fin des trois lectures : reconstruire tout l'inspecteur en
-// un seul geste synchrone une fois les données prêtes, plutôt que de le
-// laisser vide pendant l'aller-retour réseau — utile pour un changement de
-// tâche sélectionnée ou la transition d'état (« Réaliser » ci-dessous). Le
-// pilotage humain (`renderSteering`, issue #638 lot B) ne passe plus par ce
-// chemin pour ses propres écritures : il réécrit son conteneur en place et ne
-// redéclenche qu'un rafraîchissement « board seul » (`draw({ skipInspector:
-// true })`), donc ne revient jamais vider ce panneau sous un geste qui suit.
-async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false) {
+// registre) plutôt que `taskAction` (projet de lancement seulement).
+//
+// Le panneau de détail (P64) suit l'artboard Travail : identifiant et état, titre,
+// carte « Pour passer en … » (conditions vertes ou rouges et leur gate, puis les
+// gestes qui existent déjà), preuves, consigne à la session, derniers événements ;
+// le reste du détail (description, critères, dépendances…) vient dessous.
+//
+// Aucune écriture nouvelle : chaque bouton ci-dessous existait avant P64.
+//
+// Une saisie en cours n'est jamais perdue (P64, course connue de
+// `test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur`) : le
+// remplacement du panneau attend les trois lectures réseau, pendant lesquelles
+// l'utilisateur a pu taper. `guard.defer()` dit si une saisie est en cours (alors
+// le re-rendu est reporté, `false` rendu) ; et quand il a lieu quand même (clic
+// sur une carte, transition), valeur, focus et curseur sont rétablis.
+async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false, guard = {}) {
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
   const [detail, trace, recall] = await Promise.all([
@@ -905,108 +1132,36 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     ctx.api.taskTrace(taskId, project).catch(() => null),
     ctx.api.taskRecall(taskId, project).catch(() => null),
   ]);
+  if (ctx.signal.aborted) return false;
+  if (guard.defer && guard.defer()) return false;
+  const kept = snapshotFields(ctx.inspector);
   ctx.inspector.replaceChildren();
+  ctx.inspector.dataset.owner = 'executer';
+  ctx.inspector.dataset.task = taskId;
   if (!detail) {
     ctx.inspector.append(text('p', 'lbl', 'Tâche indisponible.'));
-    return;
+    return true;
   }
 
-  ctx.inspector.append(text('h3', null, detail.title || detail.id));
-  ctx.inspector.append(text('div', 'lbl mono', detail.id));
-  if (portfolio) {
-    ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
-    if (task.session && task.session.id) ctx.inspector.append(sessionBlock(task.session));
-  } else if (task.session && task.session.id) {
-    // Portée projet : vivacité, signes de vie, durée ; la reprise reste dans le bloc « Session » plus bas.
-    ctx.inspector.append(sessionBlock(task.session, { resume: false }));
-  }
-  const costBlock = document.createElement('div');
-  costBlock.className = 'ex-insp-block';
-  costBlock.dataset.role = 'cost-block';
-  costBlock.append(text('h4', null, 'Coût'));
-  costBlock.append(text('p', null, costLabel(task.cost)));
-  costBlock.append(text('p', 'lbl', task.cost && task.cost.calls
-    ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est mesuré nulle part dans le kit.`
-    : "Aucun dispatch sur cette tâche : le kit n'a rien mesuré, ce qui n'est pas un coût nul."));
-  ctx.inspector.append(costBlock);
+  // ── En-tête : identifiant, état, titre ──────────────────────────────────
+  const waitingNow = detail.status === 'waiting' && detail.waiting;
+  const stateLabel = waitingNow ? waitingText(detail.waiting) : (COLUMN_LABEL[detail.board] || detail.board);
+  const head = document.createElement('div');
+  head.className = 'ex-insp-head';
+  head.append(row(
+    text('span', 'lbl mono', detail.id),
+    badge(stateLabel, waitingNow ? 'warn' : STATE_TONE[detail.board]),
+  ));
+  head.append(text('h3', null, detail.title || detail.id));
+  ctx.inspector.append(head);
+  if (portfolio) ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
 
-  // Finition (lot 4.3, issue #561) : lecture seule ici — le champ existe déjà
-  // au ledger et à la projection board (ADR-007 point 6) mais aucune
-  // interface ne l'édite encore, ce lot-ci compris. Absent (`""`) tant que
-  // personne ne l'a posé : pas de ligne « Finition » plutôt qu'une valeur
-  // vide qui laisserait croire à un état déclaré.
-  if (detail.finition) {
-    ctx.inspector.append(text('div', 'lbl', `Finition : ${FINITION_LABEL[detail.finition] || detail.finition}`));
-  }
-
-  // Drill-down (#139) : depuis la carte d'une tâche, ouvrir sa timeline sans
-  // passer par l'onglet Timeline du docbar — le nombre d'événements déjà lus
-  // rend le geste visible même quand l'utilisateur ne sait pas que la vue
-  // existe.
-  const timelineBtn = document.createElement('button');
-  timelineBtn.type = 'button';
-  timelineBtn.className = 'btn';
-  const eventCount = (trace?.entries || []).length;
-  timelineBtn.textContent = eventCount ? `Voir la timeline (${eventCount})` : 'Voir la timeline';
-  timelineBtn.addEventListener('click', () => onTimeline(taskId));
-  ctx.inspector.append(timelineBtn);
-
-  // Corps réel de la tâche (#140) : de quoi elle parle, avant les critères et
-  // les preuves — un board qui ne montre qu'un titre et un owner ne dit rien
-  // à lire pour comprendre la tâche.
-  if (detail.description) {
-    const descBlock = document.createElement('div');
-    descBlock.className = 'ex-insp-block';
-    descBlock.append(text('h4', null, 'Description'));
-    descBlock.append(text('p', null, detail.description));
-    ctx.inspector.append(descBlock);
-  }
-
-  // Session (issue #638, lot A) : la session d'hôte qui porte le claim, et la
-  // commande qui la reprend quand l'hôte en a une — `resume_command` vient
-  // du serveur, cette vue ne compose jamais une commande elle-même. Le
-  // bouton la pose dans le dock, comme les commandes d'intention des portes.
-  if (detail.session_id) {
-    const sessionBlock = document.createElement('div');
-    sessionBlock.className = 'ex-insp-block';
-    sessionBlock.append(text('h4', null, 'Session'));
-    sessionBlock.append(sessionLine(detail, { full: true }));
-    if (detail.resume_command) {
-      const resumeRow = row();
-      resumeRow.append(Object.assign(document.createElement('code'), { textContent: detail.resume_command }));
-      const resumeBtn = document.createElement('button');
-      resumeBtn.type = 'button';
-      resumeBtn.className = 'btn';
-      resumeBtn.textContent = 'Reprendre';
-      resumeBtn.title = 'Copier la commande de reprise dans le dock';
-      resumeBtn.addEventListener('click', () => ctx.dock.echo(detail.resume_command));
-      resumeRow.append(resumeBtn);
-      sessionBlock.append(resumeRow);
-    } else {
-      sessionBlock.append(text('p', 'lbl', 'aucune commande de reprise connue pour cet hôte'));
-    }
-    ctx.inspector.append(sessionBlock);
-  }
-
-  // Rappel (#141) : avec parcimonie — le bloc n'existe pas quand il n'a rien
-  // à dire, plutôt que d'afficher « rien en mémoire » à chaque tâche neuve.
-  if (recall && recall.has_content) {
-    const recallBlock = document.createElement('div');
-    recallBlock.className = 'ex-insp-block';
-    recallBlock.append(text('h4', null, 'Rappel'));
-    const pre = document.createElement('pre');
-    pre.className = 'ex-recall';
-    pre.textContent = recall.text;
-    recallBlock.append(pre);
-    ctx.inspector.append(recallBlock);
-  }
-
-  if (detail.status === 'waiting' && detail.waiting) {
+  if (waitingNow) {
     const waitBlock = document.createElement('div');
     waitBlock.className = 'ex-insp-block';
     waitBlock.dataset.role = 'waiting-block';
     waitBlock.append(text('h4', null, 'En attente'));
-    waitBlock.append(row(dot(detail.waiting.reason === 'human' ? 'warn' : ''), text('span', null, waitingText(detail.waiting))));
+    waitBlock.append(row(waitGlyph(detail.waiting), text('span', null, waitingText(detail.waiting))));
     if (detail.waiting.since) waitBlock.append(text('div', 'lbl', ageText(detail.waiting.since)));
     if (isHumanWait(detail)) {
       waitBlock.append(decisionCard(ctx, { ...detail, project: task.project }, portfolio, onWritten));
@@ -1014,76 +1169,24 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     ctx.inspector.append(waitBlock);
   }
 
-  renderSteering(ctx, detail, onWritten);
-
-  if (detail.description) {
-    const description = document.createElement('div');
-    description.className = 'ex-insp-block';
-    description.dataset.role = 'description-block';
-    description.append(text('h4', null, 'Description'));
-    const pre = document.createElement('pre');
-    pre.className = 'ex-recall';
-    pre.textContent = detail.description;
-    description.append(pre);
-    ctx.inspector.append(description);
-  }
-
-  const acceptance = document.createElement('div');
-  acceptance.className = 'ex-insp-block';
-  acceptance.append(text('h4', null, "Critères d'acceptation"));
-  const ul = document.createElement('ul');
-  for (const item of detail.acceptance || []) ul.append(text('li', null, item));
-  if (!(detail.acceptance || []).length) acceptance.append(text('p', 'lbl', 'aucun critère déclaré'));
-  else acceptance.append(ul);
-  ctx.inspector.append(acceptance);
-
-  if ((detail.guardrails || []).length) {
-    const guardrailsBlock = document.createElement('div');
-    guardrailsBlock.className = 'ex-insp-block';
-    guardrailsBlock.append(text('h4', null, 'Garde-fous'));
-    const gUl = document.createElement('ul');
-    for (const item of detail.guardrails) gUl.append(text('li', null, item));
-    guardrailsBlock.append(gUl);
-    ctx.inspector.append(guardrailsBlock);
-  }
-
-  // Dépendances (#140) : ce que le ledger sait au-delà des blockers dérivés
-  // du board — une tâche `blocks` une autre est le cas qui compte le plus,
-  // affiché en premier, mais les autres natures (relates, parent_child…)
-  // ne sont pas tues.
-  if ((detail.dependencies || []).length) {
-    const depsBlock = document.createElement('div');
-    depsBlock.className = 'ex-insp-block';
-    depsBlock.append(text('h4', null, 'Dépendances'));
-    const dUl = document.createElement('ul');
-    const deps = [...detail.dependencies].sort((a, b) => (a.kind === 'blocks' ? -1 : b.kind === 'blocks' ? 1 : 0));
-    for (const dep of deps) {
-      const label = DEP_LABEL[dep.kind] || dep.kind;
-      const li = text('li', dep.kind === 'blocks' ? 'ex-refusal' : null, `${label} ${dep.target}`);
-      dUl.append(li);
-    }
-    depsBlock.append(dUl);
-    ctx.inspector.append(depsBlock);
-  }
-
-  const hasEvidencePack = (trace?.entries || []).some((e) => e.kind === 'evidence.pack');
-  const evidenceBlock = document.createElement('div');
-  evidenceBlock.className = 'ex-insp-block';
-  const evHead = text('h4', null, 'Preuves');
-  evHead.dataset.term = 'evidence-pack';
-  evidenceBlock.append(evHead);
-  const chips = document.createElement('div');
-  chips.className = 'ex-card-chips';
-  for (const evidence of detail.expected_evidence || []) chips.append(chip(evidence, hasEvidencePack));
-  if (!(detail.expected_evidence || []).length) chips.append(text('span', 'lbl', 'aucune preuve déclarée'));
-  evidenceBlock.append(chips);
-  ctx.inspector.append(evidenceBlock);
-
-  const gateBlock = document.createElement('div');
-  gateBlock.className = 'ex-insp-block';
-  const gateHead = text('h4', null, 'Prochaine porte');
+  // ── Carte « Pour passer en … » : conditions, puis les gestes existants ──
+  const gate = detail.next_gate || null;
+  const gateBlock = document.createElement('section');
+  gateBlock.className = 'ex-gate-card';
+  gateBlock.dataset.role = 'gate-card';
+  const gateHead = text('span', 'micro', '');
   gateHead.dataset.term = 'porte-de-preuve';
+  if (gate) {
+    gateHead.append('Pour passer en ', text('strong', null, COLUMN_LABEL[gate.to] || gate.to));
+  } else {
+    gateHead.textContent = 'Passage à la colonne suivante';
+  }
   gateBlock.append(gateHead);
+  if (gate && gate.conditions.length) {
+    gateBlock.append(conditionList(gate));
+  } else if (gate) {
+    gateBlock.append(text('p', 'lbl', 'aucune condition déclarée pour ce passage'));
+  }
   const requirements = detail.next_moves_require || {};
   const targets = Object.keys(requirements);
   // Le ledger permet de bloquer une tâche prête ou en cours même quand le
@@ -1099,7 +1202,10 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     gateRow.className = 'ex-gate-row';
     gateRow.append(row(text('span', null, target === 'blocked' ? 'Bloquer…' : `→ ${COLUMN_LABEL[target] || target}`)));
     const required = requirements[target] || [];
-    gateRow.append(text('div', 'ex-gate-req', required.length ? `requiert : ${required.join(', ')}` : 'aucune preuve requise'));
+    // Les conditions de la colonne suivante sont déjà listées plus haut, avec leur état.
+    if (!(gate && gate.to === target && gate.conditions.length)) {
+      gateRow.append(text('div', 'ex-gate-req', required.length ? `requiert : ${required.join(', ')}` : 'aucune preuve requise'));
+    }
 
     let reasonInput = null;
     if (target === 'blocked') {
@@ -1148,11 +1254,174 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   }
   gateBlock.append(feedback);
   ctx.inspector.append(gateBlock);
+
+  // ── Preuves : ce que le kit sait, ligne à ligne ─────────────────────────
+  const hasEvidencePack = (trace?.entries || []).some((e) => e.kind === 'evidence.pack');
+  const evidenceBlock = document.createElement('div');
+  evidenceBlock.className = 'ex-insp-block';
+  const evHead = text('h4', null, 'Preuves');
+  evHead.dataset.term = 'evidence-pack';
+  evidenceBlock.append(evHead);
+  const kv = (label, ...nodes) => {
+    const line = document.createElement('div');
+    line.className = 'ex-kv';
+    line.append(text('span', 'lbl', label), (() => { const v = document.createElement('span'); v.append(...nodes); return v; })());
+    return line;
+  };
+  evidenceBlock.append(kv('Pack', hasEvidencePack ? 'présent (voir la timeline)' : 'aucun pack de preuve lu'));
+  if (detail.verifiability_class) {
+    evidenceBlock.append(kv('Routage', `classe ${detail.verifiability_class} · ${costLabel(task.cost)}`));
+  }
+  const chips = document.createElement('div');
+  chips.className = 'ex-card-chips';
+  for (const evidence of detail.expected_evidence || []) chips.append(chip(evidence, hasEvidencePack));
+  if (!(detail.expected_evidence || []).length) chips.append(text('span', 'lbl', 'aucune preuve déclarée'));
+  evidenceBlock.append(kv('Attendues', chips));
+  if (task.session && task.session.id) {
+    evidenceBlock.append(kv('Session', sessionGlyph(task.session), text('span', 'mono', ` ${task.session.id.slice(0, 8)}… `), text('span', null, `${task.session.host ? (HOST_LABEL[task.session.host] || task.session.host) + ' · ' : ''}${livenessLabel(task.session)}`)));
+  }
+  ctx.inspector.append(evidenceBlock);
+
+  // ── Consigne à la session, priorité, annulation (gestes existants) ──────
+  renderSteering(ctx, detail, onWritten);
+
+  // ── Derniers événements ─────────────────────────────────────────────────
+  const eventCount = (trace?.entries || []).length;
+  const eventsBlock = document.createElement('div');
+  eventsBlock.className = 'ex-insp-block';
+  eventsBlock.dataset.role = 'last-events';
+  eventsBlock.append(text('h4', null, 'Derniers événements'));
+  const recent = [...(trace?.entries || [])].slice(-3).reverse();
+  if (!recent.length) eventsBlock.append(text('p', 'lbl', 'aucun événement lu'));
+  for (const entry of recent) {
+    const line = text('div', 'ex-event', '');
+    line.append(text('span', 'lbl', `${(entry.at || '').slice(0, 16).replace('T', ' ')} · `), entry.summary || entry.kind);
+    eventsBlock.append(line);
+  }
+  // Drill-down (#139) : la timeline complète de la tâche sans passer par le sélecteur de vue.
+  const timelineBtn = document.createElement('button');
+  timelineBtn.type = 'button';
+  timelineBtn.className = 'btn ghost';
+  timelineBtn.textContent = eventCount ? `Voir la timeline (${eventCount})` : 'Voir la timeline';
+  timelineBtn.addEventListener('click', () => onTimeline(taskId));
+  eventsBlock.append(timelineBtn);
+  ctx.inspector.append(eventsBlock);
+
+  // ── Le détail complet, sous la maquette ─────────────────────────────────
+  const costBlock = document.createElement('div');
+  costBlock.className = 'ex-insp-block';
+  costBlock.dataset.role = 'cost-block';
+  costBlock.append(text('h4', null, 'Coût'));
+  costBlock.append(text('p', null, costLabel(task.cost)));
+  costBlock.append(text('p', 'lbl', task.cost && task.cost.calls
+    ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est mesuré nulle part dans le kit.`
+    : "Aucun dispatch sur cette tâche : le kit n'a rien mesuré, ce qui n'est pas un coût nul."));
+  ctx.inspector.append(costBlock);
+
+  if (portfolio) {
+    if (task.session && task.session.id) ctx.inspector.append(sessionBlock(task.session));
+  } else if (task.session && task.session.id) {
+    // Portée projet : vivacité, signes de vie, durée ; la reprise reste dans le bloc « Session » plus bas.
+    ctx.inspector.append(sessionBlock(task.session, { resume: false }));
+  }
+
+  // Finition (lot 4.3, issue #561) : lecture seule — absente (`""`) tant que
+  // personne ne l'a posée : pas de ligne plutôt qu'une valeur vide.
+  if (detail.finition) {
+    ctx.inspector.append(text('div', 'lbl', `Finition : ${FINITION_LABEL[detail.finition] || detail.finition}`));
+  }
+
+  // Session (issue #638, lot A) : la session d'hôte qui porte le claim, et la
+  // commande qui la reprend quand l'hôte en a une — `resume_command` vient
+  // du serveur, cette vue ne compose jamais une commande elle-même.
+  if (detail.session_id) {
+    const sessionHold = document.createElement('div');
+    sessionHold.className = 'ex-insp-block';
+    sessionHold.append(text('h4', null, 'Session'));
+    sessionHold.append(sessionLine(detail, { full: true }));
+    if (detail.resume_command) {
+      const resumeRow = row();
+      resumeRow.append(Object.assign(document.createElement('code'), { textContent: detail.resume_command }));
+      const resumeBtn = document.createElement('button');
+      resumeBtn.type = 'button';
+      resumeBtn.className = 'btn';
+      resumeBtn.textContent = 'Reprendre';
+      resumeBtn.title = 'Copier la commande de reprise dans le dock';
+      resumeBtn.addEventListener('click', () => ctx.dock.echo(detail.resume_command));
+      resumeRow.append(resumeBtn);
+      sessionHold.append(resumeRow);
+    } else {
+      sessionHold.append(text('p', 'lbl', 'aucune commande de reprise connue pour cet hôte'));
+    }
+    ctx.inspector.append(sessionHold);
+  }
+
+  // Rappel (#141) : avec parcimonie — le bloc n'existe pas quand il n'a rien à dire.
+  if (recall && recall.has_content) {
+    const recallBlock = document.createElement('div');
+    recallBlock.className = 'ex-insp-block';
+    recallBlock.append(text('h4', null, 'Rappel'));
+    const pre = document.createElement('pre');
+    pre.className = 'ex-recall';
+    pre.textContent = recall.text;
+    recallBlock.append(pre);
+    ctx.inspector.append(recallBlock);
+  }
+
+  // Corps réel de la tâche (#140) : de quoi elle parle, avant les critères.
+  if (detail.description) {
+    const description = document.createElement('div');
+    description.className = 'ex-insp-block';
+    description.dataset.role = 'description-block';
+    description.append(text('h4', null, 'Description'));
+    const pre = document.createElement('pre');
+    pre.className = 'ex-recall';
+    pre.textContent = detail.description;
+    description.append(pre);
+    ctx.inspector.append(description);
+  }
+
+  const acceptance = document.createElement('div');
+  acceptance.className = 'ex-insp-block';
+  acceptance.append(text('h4', null, "Critères d'acceptation"));
+  const ul = document.createElement('ul');
+  for (const item of detail.acceptance || []) ul.append(text('li', null, item));
+  if (!(detail.acceptance || []).length) acceptance.append(text('p', 'lbl', 'aucun critère déclaré'));
+  else acceptance.append(ul);
+  ctx.inspector.append(acceptance);
+
+  if ((detail.guardrails || []).length) {
+    const guardrailsBlock = document.createElement('div');
+    guardrailsBlock.className = 'ex-insp-block';
+    guardrailsBlock.append(text('h4', null, 'Garde-fous'));
+    const gUl = document.createElement('ul');
+    for (const item of detail.guardrails) gUl.append(text('li', null, item));
+    guardrailsBlock.append(gUl);
+    ctx.inspector.append(guardrailsBlock);
+  }
+
+  // Dépendances (#140) : une tâche `blocks` une autre est le cas qui compte le plus, en premier.
+  if ((detail.dependencies || []).length) {
+    const depsBlock = document.createElement('div');
+    depsBlock.className = 'ex-insp-block';
+    depsBlock.append(text('h4', null, 'Dépendances'));
+    const dUl = document.createElement('ul');
+    const deps = [...detail.dependencies].sort((a, b) => (a.kind === 'blocks' ? -1 : b.kind === 'blocks' ? 1 : 0));
+    for (const dep of deps) {
+      const label = DEP_LABEL[dep.kind] || dep.kind;
+      dUl.append(text('li', dep.kind === 'blocks' ? 'ex-refusal' : null, `${label} ${dep.target}`));
+    }
+    depsBlock.append(dUl);
+    ctx.inspector.append(depsBlock);
+  }
+
+  restoreFields(ctx.inspector, kept);
   if (focusBlockReason) {
     focusBlockReason = false;
     const reasonField = gateBlock.querySelector('[data-role="block-reason"]');
     if (reasonField) reasonField.focus();
   }
+  return true;
 }
 
 // ── Pilotage humain (issue #638, lot B) ───────────────────────────────────
@@ -1329,79 +1598,61 @@ function actionFor(target, task, reason) {
   return ['move', { to: state }, `grimoire task move ${task.id} --to ${state}`];
 }
 
-// La barre de portée et de filtres du portefeuille (#638). Sur un hôte qui
-// n'est pas le cockpit, la portée « Tous les projets » reste visible mais
-// désactivée avec sa raison : l'atelier mono-projet ne résout pas `?project=`,
-// donc il ne saurait ni lire ni router vers un autre projet du registre.
+// Les filtres du portefeuille (#638). La portée elle-même n'est plus choisie
+// ici (P31) : c'est celle de la coque, « Tous les projets » ou un projet —
+// `ctx.scope`. Hors portefeuille il n'y a rien à filtrer : pas de barre.
 function scopeToolbar(ctx, portfolio, onChange) {
+  if (scope.mode !== 'portfolio' || !portfolio) return null;
   const bar = document.createElement('div');
   bar.className = 'ex-toolbar';
-  const scopeLabel = document.createElement('label');
-  scopeLabel.append(text('span', null, 'Portée'));
-  const scopeSelect = document.createElement('select');
-  scopeSelect.className = 'input';
-  scopeSelect.dataset.role = 'scope';
-  for (const [value, label] of [['project', 'Ce projet'], ['portfolio', 'Tous les projets']]) {
+  const stateLabel = document.createElement('label');
+  stateLabel.append(text('span', null, 'État'));
+  const stateSelect = document.createElement('select');
+  stateSelect.className = 'input';
+  stateSelect.dataset.role = 'state';
+  const stateOptions = [['', 'Tous les états'], ...LIFECYCLE.map((c) => [c, COLUMN_LABEL[c]])];
+  for (const [value, label] of stateOptions) {
     const option = document.createElement('option');
     option.value = value;
     option.textContent = label;
-    if (value === scope.mode) option.selected = true;
-    if (value === 'portfolio' && ctx.host.kind !== 'cockpit') {
-      option.disabled = true;
-      option.title = 'portefeuille : cockpit seulement (grimoire cockpit serve)';
-    }
-    scopeSelect.append(option);
+    if (value === scope.state) option.selected = true;
+    stateSelect.append(option);
   }
-  scopeSelect.addEventListener('change', () => { scope.mode = scopeSelect.value; onChange(); });
-  scopeLabel.append(scopeSelect);
-  bar.append(scopeLabel);
+  stateSelect.addEventListener('change', () => { scope.state = stateSelect.value; onChange(); });
+  stateLabel.append(stateSelect);
 
-  if (scope.mode === 'portfolio' && portfolio) {
-    const stateLabel = document.createElement('label');
-    stateLabel.append(text('span', null, 'État'));
-    const stateSelect = document.createElement('select');
-    stateSelect.className = 'input';
-    stateSelect.dataset.role = 'state';
-    const stateOptions = [['', 'Tous les états'], ...LIFECYCLE.map((c) => [c, COLUMN_LABEL[c]])];
-    for (const [value, label] of stateOptions) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      if (value === scope.state) option.selected = true;
-      stateSelect.append(option);
-    }
-    stateSelect.addEventListener('change', () => { scope.state = stateSelect.value; onChange(); });
-    stateLabel.append(stateSelect);
-
-    const projectLabel = document.createElement('label');
-    projectLabel.append(text('span', null, 'Projet'));
-    const projectSelect = document.createElement('select');
-    projectSelect.className = 'input';
-    projectSelect.dataset.role = 'project';
-    const projectOptions = [['', 'Tous les projets'], ...(portfolio.projects || []).map((p) => [p.slug, p.name || p.slug])];
-    for (const [value, label] of projectOptions) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      if (value === scope.slug) option.selected = true;
-      projectSelect.append(option);
-    }
-    projectSelect.addEventListener('change', () => { scope.slug = projectSelect.value; onChange(); });
-    projectLabel.append(projectSelect);
-
-    const liveLabel = document.createElement('label');
-    const liveBox = document.createElement('input');
-    liveBox.type = 'checkbox';
-    liveBox.dataset.role = 'live';
-    liveBox.checked = scope.live;
-    liveBox.addEventListener('change', () => { scope.live = liveBox.checked; onChange(); });
-    liveLabel.append(liveBox, text('span', null, `Sessions vivantes (< ${portfolio.live_minutes} min)`));
-
-    const summary = portfolio.summary || {};
-    const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${(summary.liveness || {}).vivant ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
-    bar.append(stateLabel, projectLabel, liveLabel, count);
+  const projectLabel = document.createElement('label');
+  projectLabel.append(text('span', null, 'Projet'));
+  const projectSelect = document.createElement('select');
+  projectSelect.className = 'input';
+  projectSelect.dataset.role = 'project';
+  const projectOptions = [['', 'Tous les projets'], ...(portfolio.projects || []).map((p) => [p.slug, p.name || p.slug])];
+  for (const [value, label] of projectOptions) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    if (value === scope.slug) option.selected = true;
+    projectSelect.append(option);
   }
+  projectSelect.addEventListener('change', () => { scope.slug = projectSelect.value; onChange(); });
+  projectLabel.append(projectSelect);
+
+  const liveLabel = document.createElement('label');
+  const liveBox = document.createElement('input');
+  liveBox.type = 'checkbox';
+  liveBox.dataset.role = 'live';
+  liveBox.checked = scope.live;
+  liveBox.addEventListener('change', () => { scope.live = liveBox.checked; onChange(); });
+  liveLabel.append(liveBox, text('span', null, `Sessions vivantes (< ${portfolio.live_minutes} min)`));
+
+  const summary = portfolio.summary || {};
+  const count = text('span', 'ex-count', `${portfolio.count} / ${summary.tasks ?? 0} tâche(s) · ${(summary.liveness || {}).vivant ?? 0} session(s) vivante(s) · ${summary.readable ?? 0}/${summary.projects ?? 0} projet(s) lisible(s)`);
+  bar.append(stateLabel, projectLabel, liveLabel, count);
   return bar;
+}
+
+function appendIf(host, child) {
+  if (child) host.append(child);
 }
 
 // Les projets du registre que le portefeuille n'a pas pu lire — nommés avec
@@ -1451,32 +1702,70 @@ export async function mount(root, ctx) {
   wrap.className = 'ex-wrap';
   root.append(wrap);
 
-  // `ctx.params` porte ce qu'un `goto('executer', { task, view })` a demandé —
-  // Observer s'en sert pour ouvrir directement la timeline d'une tâche depuis
-  // un span OTel qui en porte l'identifiant (#139). `scope: 'portfolio'`
-  // ouvre directement le portefeuille (#638).
-  // `decisions` : le compteur de la barre du haut (UI-3) ouvre directement la vue.
-  let view = ['timeline', 'decisions'].includes(ctx.params.view) ? ctx.params.view : 'board4';
-  // Sélection par (projet, id) : en portée projet, `project` reste vide.
-  let selected = ctx.params.task ? { id: ctx.params.task, project: '' } : null;
-  if (ctx.params.scope === 'portfolio' && ctx.host.kind === 'cockpit') scope.mode = 'portfolio';
-  else if (ctx.params.scope === 'project') scope.mode = 'project';
-  if (ctx.host.kind !== 'cockpit') scope.mode = 'project';
+  // `ctx.params` porte ce qu'un `goto('travail', { task, view })` — ou un lien
+  // profond `#travail?task=…` — a demandé. Observer s'en sert pour ouvrir
+  // directement la timeline d'une tâche depuis un span OTel qui en porte
+  // l'identifiant (#139) ; `decisions` : le compteur de la barre du haut
+  // (UI-3) ouvre directement la vue.
+  let view = VIEW_IDS.includes(ctx.params.view) ? ctx.params.view : 'board4';
+  // Sélection par (projet, id) : en portée projet, `project` reste vide ; en
+  // portefeuille, `of` dit le projet de la tâche.
+  let selected = ctx.params.task ? { id: ctx.params.task, project: ctx.params.of || '' } : null;
+  // La portée de la coque (P31) : « Tous les projets » = le portefeuille.
+  scope.mode = ctx.host.kind === 'cockpit' && ctx.scope && ctx.scope.all ? 'portfolio' : 'project';
   let board = await ctx.api.tasks();
 
+  // Libellés français de l'artboard Travail (Tableau / Liste) ; la vue « Sessions »
+  // de la maquette n'existe pas encore : les autres vues réelles gardent un nom clair.
   const VIEW_LABELS = [
-    { id: 'board4', label: 'Board 4' },
-    { id: 'board8', label: 'Board 8' },
+    { id: 'board4', label: 'Tableau' },
+    { id: 'board8', label: 'Huit colonnes' },
     { id: 'liste', label: 'Liste' },
-    { id: 'timeline', label: 'Timeline' },
+    { id: 'timeline', label: 'Chronologie' },
     { id: 'decisions', label: 'Décisions' },
   ];
+
+  // Le sélecteur de vues est celui de la barre de document (`#view-seg`, géré par
+  // la coque) : l'espace le pose dans SON en-tête pour qu'il tienne sur la ligne du
+  // titre comme dans la maquette, et le rend à la barre en partant (ou quand il
+  // redessine son contenu : un élément détaché ne se retrouve plus par son id).
+  const viewSeg = document.getElementById('view-seg');
+  const releaseSeg = () => {
+    const bar = document.getElementById('docbar');
+    if (viewSeg && bar && !bar.contains(viewSeg)) {
+      const anchor = bar.querySelector('#doc-validation');
+      if (anchor) bar.insertBefore(viewSeg, anchor); else bar.append(viewSeg);
+    }
+  };
+  ctx.signal.addEventListener('abort', releaseSeg);
+
+  function renderHead(shown) {
+    const head = document.createElement('header');
+    head.className = 'ex-head';
+    head.append(text('h2', 'space-title', 'Travail'));
+    if (viewSeg) head.append(viewSeg);
+    const ask = document.createElement('button');
+    ask.type = 'button';
+    ask.className = 'btn ex-ask';
+    ask.dataset.role = 'ask-me';
+    ask.setAttribute('aria-pressed', String(askMe.on));
+    ask.title = "Garde les tâches qui attendent un humain : une question, une revue, un blocage";
+    ask.append(icon('filter'), text('span', null, 'Demande une action de moi'), badge(String(shown), askMe.on ? 'acc' : ''));
+    ask.addEventListener('click', () => { askMe.on = !askMe.on; draw(); });
+    const formula = document.createElement('span');
+    formula.className = 'ex-formula';
+    formula.append(text('b', null, '›'), 'grimoire task board');
+    head.append(ask, row(formula));
+    head.lastElementChild.classList.add('ex-head-end');
+    return head;
+  }
 
   const setView = (id) => { view = id; draw(); };
   const redraw = () => { selected = null; draw(); };
 
   function renderNoLedger() {
-    ctx.docbar.setBreadcrumb([ctx.host.project || 'projet', 'Exécuter']);
+    releaseSeg();
+    ctx.docbar.setBreadcrumb([]);
     // Avant cette issue, un early-return ici évitait tout appel à
     // `setViews` : les boutons de vue disparaissaient purement et
     // simplement plutôt que rester visibles (désactivés) — l'utilisateur ne
@@ -1491,11 +1780,13 @@ export async function mount(root, ctx) {
       null,
       () => {},
     );
-    wrap.append(scopeToolbar(ctx, null, redraw));
+    appendIf(wrap, scopeToolbar(ctx, null, redraw));
     wrap.append(ctx.empty(
       'Exécuter',
       board.note || "Ce projet n'a pas encore de Mission Ledger.",
       'grimoire task add "<titre>" --acceptance "<critère>"',
+      undefined,
+      { art: 'i-empty-tasks' },
     ));
     // ADR-007 (issue #559) : un board du standard scaffoldé avant le lot 4.1,
     // ou jamais migré, n'a pas encore de Mission Ledger — mais SES tâches
@@ -1573,15 +1864,19 @@ export async function mount(root, ctx) {
       tasks = fresh.tasks || [];
     }
     if (ctx.signal.aborted || seq !== drawSeq) return;
-    ctx.docbar.setBreadcrumb([portfolioMode ? 'Tous les projets' : (ctx.host.project || 'projet'), 'Exécuter']);
+    ctx.docbar.setBreadcrumb(selected ? [selected.id] : []);
     ctx.docbar.setViews(VIEW_LABELS, view, setView);
 
     // Les données sont là : on remplace d'un geste synchrone, en gardant le
     // défilement du board et la carte au clavier (une actualisation ne doit
     // pas renvoyer l'utilisateur au début ni lui voler le focus).
     const kept = captureView(wrap);
+    releaseSeg();
     wrap.replaceChildren();
-    wrap.append(scopeToolbar(ctx, portfolio, redraw));
+    const everyTask = tasks;
+    if (askMe.on) tasks = tasks.filter(needsHuman);
+    wrap.append(renderHead(everyTask.filter(needsHuman).length));
+    appendIf(wrap, scopeToolbar(ctx, portfolio, redraw));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);
       if (notice) wrap.append(notice);
@@ -1590,6 +1885,8 @@ export async function mount(root, ctx) {
     const same = (t) => selected && t.id === selected.id && (!portfolioMode || (t.project?.slug || '') === selected.project);
     const onSelect = async (task) => {
       selected = { id: task.id, project: task.project?.slug || '' };
+      // Sous 900 px le panneau de détail est un tiroir : choisir une carte l'ouvre.
+      if (window.matchMedia('(max-width: 900px)').matches) ctx.openPanel?.('inspector');
       draw();
     };
 
@@ -1602,9 +1899,9 @@ export async function mount(root, ctx) {
     if (view === 'decisions') {
       renderDecisions(wrap, ctx, tasks, portfolioMode, () => draw());
     } else if (view === 'board4') {
-      renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode);
+      renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode, same);
     } else if (view === 'board8') {
-      renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect, portfolioMode);
+      renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect, portfolioMode, same);
     } else if (view === 'liste') {
       renderList(wrap, ctx, tasks, onSelect, portfolioMode);
     } else if (view === 'timeline') {
@@ -1626,16 +1923,28 @@ export async function mount(root, ctx) {
     // panneau que l'utilisateur est peut-être déjà en train de réutiliser.
     if (opts.skipInspector) return;
 
-    const current = tasks.find(same);
+    const current = everyTask.find(same);
+    // L'URL suit la sélection (lien profond, P31) : vue et tâche.
+    ctx.setItem?.({
+      ...(view !== 'board4' ? { view } : {}),
+      ...(current ? { task: current.id, ...(portfolioMode && current.project?.slug ? { of: current.project.slug } : {}) } : {}),
+    });
     if (current) {
       const sig = JSON.stringify(current);
       if (opts.live && sig === inspectedSig) return;
-      inspectedSig = sig;
       const onTimeline = (id) => { selected = { id, project: current.project?.slug || '' }; setView('timeline'); };
-      await renderInspector(ctx, current, draw, onTimeline, portfolioMode);
+      // Une saisie en cours reporte le re-rendu (elle repart à la sortie du champ) ;
+      // la signature n'est retenue qu'une fois le panneau réellement reconstruit.
+      const drawn = await renderInspector(ctx, current, draw, onTimeline, portfolioMode, {
+        defer: () => opts.live && editing(),
+      });
+      if (seq !== drawSeq) return;
+      if (!drawn) { inspectedSig = ''; refreshPending = true; return; }
+      inspectedSig = sig;
       ctx.dock.echo(`grimoire task show ${current.id}`);
     } else {
       inspectedSig = '';
+      ctx.inspector.dataset.owner = '';
       ctx.inspector.replaceChildren(text('p', 'lbl', 'Sélectionnez une tâche pour voir sa porte suivante.'));
       ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task board');
     }
