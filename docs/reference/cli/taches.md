@@ -83,6 +83,7 @@ prochain export l'écrase.
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
 | `grimoire task ack <id> <dir-…>` | Accuser réception d'une consigne de l'orchestrateur |
 | `grimoire task link <id> --depends-on <id>` | Déclarer une dépendance |
+| `grimoire task unlink <id> --depends-on <id> --reason "<motif>" [--kind <nature>]` | Retirer une dépendance, motif journalisé. Une dépendance annulée bloque le claim pour toujours (elle ne sera jamais close) : si elle a été remplacée, on retire le lien puis on relie la remplaçante avec `task link` |
 | `grimoire task ask <id> "<question>" [--kind <nature>] [-o <option>] [--non-blocking] [--why "<pourquoi>"] [--key <clé>]` | Poser une question à l'humain : une bloquante gare la tâche en `waiting(human)` et remonte au cockpit ; `--non-blocking` l'inscrit sans garer la tâche |
 | `grimoire task ask <id> --from <lot.yaml\|->` | Poser un lot de questions (JSON ou YAML) en **une** interruption et une notification ; une question déjà répondue (même clé) n'est pas reposée |
 | `grimoire task answer <id> "<réponse>" [--question <q-…>]` | Répondre (canal humain seulement) ; la tâche n'est rendue que quand toutes les bloquantes du lot ont leur réponse |
