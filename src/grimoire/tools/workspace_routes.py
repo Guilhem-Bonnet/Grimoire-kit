@@ -82,6 +82,7 @@ from grimoire.tools import (
     workspace_attention,
     workspace_config,
     workspace_exec,
+    workspace_hygiene,
     workspace_knowledge,
     workspace_language,
     workspace_memory,
@@ -398,6 +399,14 @@ def _memory_entry(project_root: Path, query: _Query) -> Any:
     return workspace_knowledge.memory_entry(project_root, _one(query, "id"), slug=_one(query, "slug") or None)
 
 
+def _memory_quality(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/quality`` — santé de la mémoire d'un projet et sa file d'hygiène (P25).
+
+    ``slug`` (registre) ou le projet servi ; lecture seule, mesure fraîche.
+    """
+    return workspace_hygiene.memory_quality(project_root, slug=_one(query, "slug") or None)
+
+
 def _assist_status(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/assist`` — l'opt-in et la disponibilité, sans coût.
 
@@ -479,6 +488,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/search": _memory_search,
     f"{PREFIX}memory/entries": _memory_entries,
     f"{PREFIX}memory/entry": _memory_entry,
+    f"{PREFIX}memory/quality": _memory_quality,
 }
 
 

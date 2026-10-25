@@ -327,6 +327,9 @@ export const api = {
   },
   // La fiche d'une entrée : provenance, chaîne de remplacement, nœuds liés.
   memoryEntry: (id, slug) => get(WS + 'memory/entry', slug ? { id, slug } : { id }),
+  // Santé de la mémoire et file d'hygiène (P25) : une mesure fraîche d'un projet
+  // (`slug` du registre, omis = le projet en portée). Lecture seule.
+  memoryQuality: (slug) => get(WS + 'memory/quality', slug ? { slug } : undefined),
   // Suppression gouvernée du cockpit (`POST /api/memory`) : confirmation
   // explicite, et le serveur la refuse (403) hors du projet qu'il sert.
   memoryDelete: (id, project) => post('/api/memory', { action: 'delete', id, project, confirm: true }),

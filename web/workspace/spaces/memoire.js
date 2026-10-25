@@ -17,8 +17,9 @@
 //   (P34, P23) ; seule la suppression, gouvernée côté cockpit (`POST
 //   /api/memory`, projet servi seulement), est proposée, avec confirmation
 //   dans la page ;
-// - la carte « Santé de la mémoire » (P25) et un journal des écritures n'ont
-//   pas encore de lecture serveur : rien n'est affiché à leur place.
+// - la santé de la mémoire est la rubrique voisine (`sante.js`, P25) ; un
+//   journal des écritures n'a pas encore de lecture serveur : rien n'est
+//   affiché à sa place.
 //
 // API consommées : api.memoryEntries, api.memoryEntry, api.memorySearch,
 // api.memoryDelete, api.projects.
