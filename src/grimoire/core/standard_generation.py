@@ -129,12 +129,18 @@ def _same_rendered(existing: str, rendered: str) -> bool:
 #: init` and one that only ever ran `grimoire standard init` end up with the
 #: same `.gitignore`, not two independently-maintained texts that can drift.
 GITIGNORE_MARKER = "# --- Grimoire Kit ---"
+MEMORY_READS_IGNORE = "_grimoire-output/memory-reads.jsonl"
+MEMORY_READS_IGNORE_BLOCK = (
+    "# Memory read receipts — one line per memory read served to agents (no content)\n"
+    f"{MEMORY_READS_IGNORE}\n"
+)
 GITIGNORE_SECTION = (
     f"{GITIGNORE_MARKER}\n"
     "# Session runs — ephemeral runtime data\n"
     f"{RUNS_DIR.as_posix()}/\n"
     "# Memory archives — compressed old sessions\n"
     "_grimoire/_memory/archives/\n"
+    + MEMORY_READS_IGNORE_BLOCK
 )
 
 
@@ -155,8 +161,12 @@ def ensure_grimoire_gitignore(root: Path) -> Path | None:
     except OSError:
         return None
     if GITIGNORE_MARKER in existing:
-        return None
-    content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION if existing.strip() else GITIGNORE_SECTION
+        if MEMORY_READS_IGNORE in existing:
+            return None
+        # Section posée avant le reçu de lecture mémoire : on n'y ajoute que sa ligne.
+        content = existing.rstrip() + "\n" + MEMORY_READS_IGNORE_BLOCK
+    else:
+        content = existing.rstrip() + "\n\n" + GITIGNORE_SECTION if existing.strip() else GITIGNORE_SECTION
     try:
         gitignore.write_text(content, encoding="utf-8")
     except OSError:

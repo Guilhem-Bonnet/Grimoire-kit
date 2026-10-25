@@ -279,3 +279,32 @@ class TestDeleteErasesContent:
             assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) RETURN count(m) AS c", id=f"{a}::a-del") == 0
         finally:
             graph.close()
+
+    def test_a_non_weaviate_memory_leaves_no_edge_and_its_tombstone_is_purged(
+        self, raw: Any, projects: tuple[str, str],
+    ) -> None:
+        """Un souvenir hors Weaviate n'a pas de ``weaviate_collection`` : sa pierre tombale doit quand même partir."""
+        a, b = projects
+        ga, gb = _graph(a), _graph(b)
+        try:
+            ga.upsert_memory(MemoryEntry(id="a-plain", text="contenu local", tags=("decision",), metadata={"projection_kind": "task", "projection_source_id": "t1"}))
+            ga.upsert_memory(MemoryEntry(id="a-vec", text="contenu vectoriel", metadata={"weaviate_id": "w1", "weaviate_collection": "col-a"}))
+            gb.upsert_memory(MemoryEntry(id="b-plain", text="autre projet"))
+            gb.delete_memory("b-plain")
+            ga.delete_memory("a-plain")
+            ga.delete_memory("a-vec")
+
+            for local in ("a-plain", "a-vec"):
+                assert _scalar(
+                    raw, "MATCH (m:GrimoireMemory {id: $id})-[r]-() RETURN count(r) AS c", id=f"{a}::{local}",
+                ) == 0, "toutes les arêtes (étiquettes, MEMORY_FOR, VECTORIZED_AS, VECTOR_FOR) sont retirées"
+
+            orphans = ga.find_orphan_memory_nodes(known_ids=frozenset(), collection="col-a")
+            assert {o["id"] for o in orphans} == {"a-plain", "a-vec"}, "la pierre tombale sans collection est reconnue"
+            ga.purge_memory_nodes([o["node_id"] for o in orphans])
+            assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) RETURN count(m) AS c", id=f"{a}::a-plain") == 0
+            # Jamais la pierre tombale d'un autre projet.
+            assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id}) RETURN count(m) AS c", id=f"{b}::b-plain") == 1
+        finally:
+            ga.close()
+            gb.close()

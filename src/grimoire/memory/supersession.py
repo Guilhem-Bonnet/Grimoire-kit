@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from grimoire.memory.backends.base import MemoryEntry
@@ -32,6 +32,7 @@ __all__ = [
     "RETRACTED_KEY",
     "SUPERSEDED_KEY",
     "bench_supersession",
+    "carries_state_mark",
     "drop_superseded",
     "drop_unserved",
     "has_supersession_mark",
@@ -49,7 +50,12 @@ SUPERSEDED_KEY = "superseded_by"
 RETRACTED_KEY = "retracted"
 #: Passage explicite « tout lire » des chemins de maintenance (export, migration,
 #: projection, rattrapage du graphe) : un souvenir retiré ou remplacé y reste.
-INCLUDE_ALL: dict[str, bool] = {"include_superseded": True, "include_retracted": True}
+class _IncludeAll(TypedDict):
+    include_superseded: bool
+    include_retracted: bool
+
+
+INCLUDE_ALL: _IncludeAll = {"include_superseded": True, "include_retracted": True}
 ESTIMATE_BASIS = "chars/4"
 _MAX_REFETCH_ROUNDS = 4
 
@@ -69,6 +75,18 @@ def retraction_of(entry: MemoryEntry) -> dict[str, Any]:
     # Une marque qui n'est pas un mapping (``True``, une date) retire aussi : on
     # ne sert pas un souvenir dont on lit mal le retrait.
     return {"at": str(mark)} if mark and mark is not False else {}
+
+
+def carries_state_mark(metadata: dict[str, Any] | None) -> bool:
+    """Vrai quand des métadonnées portent un retrait ou un remplacement (non vide).
+
+    Utilisé par ``consolidate()`` des backends : un souvenir retiré ou remplacé
+    n'est JAMAIS regroupé avec un autre, ni supprimé comme doublon, ni gardé
+    comme représentant (le doublon vivant serait supprimé, ou le retrait perdu).
+    """
+    meta = metadata or {}
+    mark = meta.get(RETRACTED_KEY)
+    return bool(str(meta.get(SUPERSEDED_KEY) or "").strip()) or bool(mark and mark is not False)
 
 
 def is_retracted(entry: MemoryEntry) -> bool:

@@ -794,7 +794,7 @@ class MemoryManager(MemoryGesturesMixin):
         if source:
             metadata["source_uri"] = source
         validated = self._validated(text, user_id=agent, tags=tags, metadata=metadata, emitter="agent")
-        text, normalized = validated.text, validated.metadata
+        text, normalized = validated.text, self.carry_state_marks(entry_id, validated.metadata)
         try:
             entry = self._backend.upsert(entry_id, text, user_id=agent, tags=tags, metadata=normalized)
         except NotImplementedError:
@@ -1249,7 +1249,7 @@ class MemoryManager(MemoryGesturesMixin):
         validated = self._validated(
             text, user_id=user_id, tags=tags, metadata=metadata, content_origin=content_origin,
         )
-        text, normalized = validated.text, validated.metadata
+        text, normalized = validated.text, self.carry_state_marks(entry_id, validated.metadata)
         extra = {"created_at": created_at} if created_at else {}
         try:
             entry = self._backend.upsert(entry_id, text, user_id=user_id, tags=tags, metadata=normalized, **extra)

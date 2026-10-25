@@ -494,7 +494,15 @@ Les chemins de maintenance (export, migration, `split`, projection Neo4j,
 `purge-orphans`) lisent tout, retirés et remplacés compris : un retrait ne leur
 fait rien perdre. `delete` reste définitif ; dans Neo4j il efface le contenu du
 nœud (texte, étiquettes, métadonnées) et laisse une pierre tombale que
-`grimoire memory graph purge-orphans --apply` retire ensuite.
+`grimoire memory graph purge-orphans --apply` retire ensuite, que le souvenir ait
+été dans Weaviate ou non (les arêtes du nœud sont retirées au `delete`).
+
+`memory gc` (`consolidate`) ne regroupe jamais un souvenir retiré ou remplacé avec
+un autre : ni le retiré ni sa raison ne sont supprimés comme doublon, et la copie
+vivante ne disparaît pas derrière un retiré. `remember` et `upsert` sur un
+identifiant existant conservent le retrait et le remplacement. Sur Weaviate,
+`update` calcule l'embedding avant toute écriture puis remplace l'objet en place
+(PUT) : un fournisseur d'embedding en panne ne détruit plus le souvenir.
 
 ### Reçu de rappel
 
@@ -504,11 +512,16 @@ rappel de tâche, outil MCP `grimoire_memory_search`) ajoute une ligne à
 acteur, session et tâche si connus, mode, filtres appliqués, et pour chaque
 souvenir servi son identifiant, son rang, son score et, en lecture hybride, son
 rang et son score dans chaque classement avant fusion. **Pas de contenu** : la
-requête n'y figure que par une empreinte SHA-256 tronquée et sa longueur. Le
+requête n'y figure que par sa longueur : ni texte ni empreinte (celle d'une requête
+courte se retrouve par dictionnaire, et une empreinte à clé locale demanderait un
+second fichier). Le
 fichier est ignoré par git, borné à 1 Mio (au-delà, il est ramené à ses
 lignes les plus récentes), s'écrit sans réseau, et un échec d'écriture est un avertissement,
 jamais une lecture en échec. Le cockpit (lecture seule) et le banc n'y écrivent
-rien. `grimoire memory reads` en tire `recall_count_7d`, le nombre de lectures
+rien. Les outils MCP qui l'écrivent restent `readOnlyHint` : c'est une télémétrie
+interne locale, ignorée par git et par l'empreinte d'arbre du gate `Stop` (une
+lecture n'est pas du travail), et le **seul** fichier qu'ils ont le droit
+d'écrire — `TestReadOnlyToolsWriteNothing` le vérifie. `grimoire memory reads` en tire `recall_count_7d`, le nombre de lectures
 qui ont servi chaque souvenir sur les sept derniers jours.
 
 ## Choix à l'initialisation

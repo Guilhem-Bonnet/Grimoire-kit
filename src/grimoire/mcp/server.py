@@ -399,12 +399,12 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".",
         return _tool_error({"error": str(exc)})
 
 
-# Plus `readOnlyHint` depuis le reçu de rappel (P13) : chaque lecture qui sert des
-# souvenirs ajoute une ligne bornée à `_grimoire-output/memory-reads.jsonl`
-# (identifiants, requête hachée, jamais de contenu). Annoncer « lecture seule »
-# serait faux ; la ligne est locale, bornée, ignorée par git, et son échec ne
-# fait jamais échouer la recherche.
-@_tool(_writes(destructive=False, idempotent=True, open_world=True))
+# `readOnlyHint` reste vrai : le reçu de rappel (P13) est une télémétrie interne
+# locale, une ligne bornée sans contenu dans `_grimoire-output/memory-reads.jsonl`
+# (ignoré par git, hors de l'empreinte d'arbre du gate Stop), et c'est le seul
+# fichier que ces deux outils ont le droit d'écrire : `TestReadOnlyToolsWriteNothing`
+# le vérifie plutôt que de le déclarer.
+@_tool(_reads(open_world=True))
 def grimoire_memory_search(
     query: str, user_id: str = "", limit: int = 5, project_path: str = ".",
     include_superseded: bool = False, include_stale: bool = False, include_retracted: bool = False,
@@ -1146,9 +1146,8 @@ def task_context(
         return _task_error(exc)
 
 
-# Plus `readOnlyHint` : le rappel écrit son reçu de lecture quand la mémoire du
-# projet est interrogée (voir `grimoire_memory_search`).
-@_tool(_writes(destructive=False, idempotent=True))
+# Même exception que `grimoire_memory_search` : seul le reçu de lecture est écrit.
+@_tool(_reads())
 def task_recall(
     task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"
 ) -> str:

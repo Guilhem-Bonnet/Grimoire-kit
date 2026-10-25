@@ -104,10 +104,10 @@ class TestWhatIsWritten:
         assert "Qdrant" not in raw
         assert "secret-dans-la-requête" not in raw
         for row in _rows(tmp_path):
-            assert row["query_sha"] == reads_log.query_fingerprint(QUERY)
+            assert "query_sha" not in row
             assert row["query_chars"] == len(QUERY)
             assert set(row) <= {
-                "ts", "mode", "surface", "actor", "session_id", "task_ref", "query_sha", "query_chars",
+                "ts", "mode", "surface", "actor", "session_id", "task_ref", "query_chars",
                 "filters", "served", "served_truncated", "hidden_stale",
             }
             assert all(set(s) <= {"id", "rank", "score", "lanes"} for s in row["served"])
@@ -171,8 +171,7 @@ class TestBounds:
         rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
         assert 1 < len(rows) < 60
         # Ce qui reste est la fin du journal, en ordre, en JSON complet.
-        last = reads_log.query_fingerprint("backend vectoriel 59")
-        assert rows[-1]["query_sha"] == last
+        assert rows[-1]["query_chars"] == len("backend vectoriel 59")
         assert [r["ts"] for r in rows] == sorted(r["ts"] for r in rows)
 
     def test_served_rows_are_capped(self, tmp_path: Path) -> None:
@@ -268,3 +267,33 @@ class TestRecallCount:
         mgr.search("backend vectoriel")
         counts = read_counts(tmp_path)
         assert counts.per_memory == {e.id: 2 for e in served}
+
+
+class TestNeverCountedAsWork:
+    """Une lecture n'est pas du travail : le reçu est ignoré du dépôt et de l'empreinte du gate Stop."""
+
+    def test_the_generated_gitignore_section_lists_the_receipt(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_generation import GITIGNORE_SECTION, ensure_grimoire_gitignore
+
+        assert "_grimoire-output/memory-reads.jsonl" in GITIGNORE_SECTION
+        ensure_grimoire_gitignore(tmp_path)
+        assert "_grimoire-output/memory-reads.jsonl" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
+
+    def test_a_section_written_before_the_receipt_gets_only_its_line(self, tmp_path: Path) -> None:
+        from grimoire.core.standard_generation import GITIGNORE_MARKER, ensure_grimoire_gitignore
+
+        (tmp_path / ".gitignore").write_text(f"node_modules/\n\n{GITIGNORE_MARKER}\nold/\n", encoding="utf-8")
+        assert ensure_grimoire_gitignore(tmp_path) is not None
+        text = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+        assert text.count("memory-reads.jsonl") == 1
+        assert text.count(GITIGNORE_MARKER) == 1
+        assert ensure_grimoire_gitignore(tmp_path) is None  # idempotent
+
+    def test_a_memory_read_does_not_change_the_stop_fingerprint(self, mgr: MemoryManager, tmp_path: Path) -> None:
+        from grimoire.hosts.decisions.done_gate import _tree_fingerprint
+
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        before = _tree_fingerprint(tmp_path, "T-1")
+        mgr.search("backend vectoriel")
+        assert (tmp_path / READS_RELPATH).is_file()
+        assert _tree_fingerprint(tmp_path, "T-1") == before

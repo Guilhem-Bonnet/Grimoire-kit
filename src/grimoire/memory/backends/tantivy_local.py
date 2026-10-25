@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.supersession import carries_state_mark
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters
 
 _TEXT_FIELDS = ["text", "text_en", "text_fr", "text_folded"]
@@ -236,6 +237,8 @@ class TantivyMemoryBackend(MemoryBackend):
             duplicates: list[str] = []
             for entry in self._match_all_entries():
                 key = (entry.text, entry.user_id)
+                if carries_state_mark(entry.metadata):
+                    continue  # retiré ou remplacé : jamais regroupé avec un vivant
                 if key in seen:
                     duplicates.append(entry.id)
                 else:

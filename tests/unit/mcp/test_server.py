@@ -740,16 +740,25 @@ class TestReadOnlyToolsWriteNothing:
         "grimoire_agent_list": {},
         "grimoire_harmony_check": {},
         "grimoire_config": {},
+        "grimoire_memory_search": {"query": "quoi que ce soit"},
         "grimoire_standard_verify": {},
         "grimoire_standard_audit": {},
         "grimoire_codegraph_freshness": {},
         "task_list_ready": {},
         "task_show": {"task_id": "bootstrap"},
+        "task_recall": {"task_id": "bootstrap"},
         "task_waves": {},
         "grimoire_host_status": {},
         "grimoire_providers_status": {},
         "grimoire_skill": {"slug": "inexistant"},
         "grimoire_command": {"slug": "inexistant"},
+    }
+
+    #: Seule exception admise : le reçu de lecture mémoire (P13), télémétrie interne locale, bornée,
+    #: sans contenu, ignorée par git et par l'empreinte d'arbre du gate Stop. Aucun autre fichier.
+    _ALLOWED_WRITES: ClassVar[dict[str, frozenset[str]]] = {
+        "grimoire_memory_search": frozenset({"_grimoire-output/memory-reads.jsonl"}),
+        "task_recall": frozenset({"_grimoire-output/memory-reads.jsonl"}),
     }
 
     def test_la_table_couvre_tous_les_outils_en_lecture(self) -> None:
@@ -768,6 +777,7 @@ class TestReadOnlyToolsWriteNothing:
         after = self._snapshot(gouverne)
         created = sorted(set(after) - set(before))
         modified = sorted(k for k in set(after) & set(before) if after[k] != before[k])
-        assert not created, f"{name} a créé {created} malgré readOnlyHint"
-        assert not modified, f"{name} a modifié {modified} malgré readOnlyHint"
+        allowed = self._ALLOWED_WRITES.get(name, frozenset())
+        assert not set(created) - allowed, f"{name} a créé {sorted(set(created) - allowed)} malgré readOnlyHint"
+        assert not set(modified) - allowed, f"{name} a modifié {sorted(set(modified) - allowed)} malgré readOnlyHint"
 

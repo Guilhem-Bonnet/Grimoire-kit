@@ -259,16 +259,16 @@ class TestReadsThroughBothSurfaces:
         assert body["reads"] == 2
 
 
-class TestReadReceiptsAreNotReadOnly:
-    """Les outils qui journalisent leur lecture ne se déclarent plus ``readOnlyHint``."""
+class TestReadReceiptsStayReadOnly:
+    """``readOnlyHint`` reste vrai : le reçu est la seule écriture admise (voir TestReadOnlyToolsWriteNothing)."""
 
-    def test_search_and_task_recall_declare_a_write_and_write_only_the_receipt(self, tmp_path: Path) -> None:
+    def test_search_and_task_recall_are_read_only_and_write_only_the_receipt(self, tmp_path: Path) -> None:
         from grimoire.mcp import server
         from grimoire.mcp.server import annotation_hints
 
         tools = {t.name: t for t in server.mcp._tool_manager.list_tools()}
         for name in ("grimoire_memory_search", "task_recall"):
-            assert not annotation_hints(tools[name].annotations).get("readOnlyHint"), f"{name} écrit son reçu de lecture"
+            assert annotation_hints(tools[name].annotations).get("readOnlyHint") is True
         for name in ("grimoire_memory_retract", "grimoire_memory_unretract", "grimoire_memory_update_tags"):
             hints = annotation_hints(tools[name].annotations)
             assert not hints.get("readOnlyHint")
@@ -276,12 +276,10 @@ class TestReadReceiptsAreNotReadOnly:
 
         root = _project(tmp_path / "p")
         _seed(root)
-        before = {p for p in root.rglob("*") if p.is_file()}
+        before = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
         server.grimoire_memory_search("backend vectoriel", project_path=str(root))
-        created = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} - {
-            p.relative_to(root).as_posix() for p in before
-        }
-        assert created == {"_grimoire-output/memory-reads.jsonl"}
+        after = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+        assert after - before == {"_grimoire-output/memory-reads.jsonl"}
 
 
 class _RecordingGraph:

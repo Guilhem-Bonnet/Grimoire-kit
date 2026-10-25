@@ -51,6 +51,7 @@ from grimoire.memory.reads_log import record_read
 from grimoire.memory.supersession import (
     RETRACTED_KEY,
     SUPERSEDED,
+    SUPERSEDED_KEY,
     is_retracted,
     retraction_of,
     supersession_state,
@@ -154,6 +155,38 @@ class MemoryGesturesMixin:
 
     # ── retirer / rétablir ───────────────────────────────────────────────
 
+    def _clear_retraction(self, entry_id: str, metadata: dict[str, Any]) -> MemoryEntry:
+        """Rend le souvenir au service : la clé ``retracted`` disparaît, relecture à l'appui.
+
+        Un backend qui remplace les métadonnées (local, lexical, tantivy, Qdrant) perd la
+        clé quand on ne la réécrit pas. Un backend qui les *fusionne* (MemPalace) la
+        garderait : on y pose alors ``None``, qui la neutralise. Lève si le souvenir reste retiré.
+        """
+        base = {k: v for k, v in metadata.items() if k != RETRACTED_KEY}
+        self._write_gesture(entry_id, metadata=base)
+        reread = self._backend.recall(entry_id)
+        if reread is not None and is_retracted(reread):
+            self._write_gesture(entry_id, metadata={**base, RETRACTED_KEY: None})
+            reread = self._backend.recall(entry_id)
+        if reread is None or is_retracted(reread):
+            raise GrimoireMemoryError(
+                f"Rétablissement non confirmé par la relecture du backend {type(self._backend).__name__} : "
+                "le souvenir reste retiré."
+            )
+        return reread
+
+    def carry_state_marks(self, entry_id: str, metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Reporte le retrait et le remplacement d'un souvenir existant sur les métadonnées d'une réécriture.
+
+        ``remember`` et ``upsert`` remplacent les métadonnées : sans ce report, réenregistrer
+        le même texte remettrait en service un souvenir retiré (et ferait perdre sa raison).
+        """
+        prior = self._backend.recall(entry_id)
+        if prior is None:
+            return metadata
+        marks = {k: prior.metadata[k] for k in (RETRACTED_KEY, SUPERSEDED_KEY) if prior.metadata.get(k)}
+        return {**(metadata or {}), **marks} if marks else metadata
+
     def retract(
         self,
         entry_id: str,
@@ -185,11 +218,16 @@ class MemoryGesturesMixin:
         # La relecture est la preuve : un backend qui perd la marque servirait encore le souvenir.
         reread = self._backend.recall(entry_id)
         if reread is None or not is_retracted(reread):
-            self._write_gesture(entry_id, metadata=dict(existing.metadata))
-            raise GrimoireMemoryError(
+            origin = GrimoireMemoryError(
                 f"Retrait non confirmé par la relecture du backend {type(self._backend).__name__} : "
-                "la marque n'a pas été conservée, l'état d'origine est rétabli."
+                "la marque n'a pas été conservée."
             )
+            try:
+                self._clear_retraction(entry_id, existing.metadata)
+            except Exception as undo_failure:
+                # L'erreur d'origine reste la cause visible ; l'échec de l'annulation s'y ajoute.
+                raise GrimoireMemoryError(f"{origin} Annulation impossible aussi : {undo_failure}") from origin
+            raise origin
         self._sync_memory(reread)
         record_change(
             self._project_root, op="retract", context=context, before_id=entry_id,
@@ -215,13 +253,7 @@ class MemoryGesturesMixin:
             raise GrimoireMemoryError(f"Souvenir {entry_id!r} non retiré : rien à rétablir.")
         context = self._write_context(actor, session_id, task_ref)
         was = retraction_of(existing)
-        self._write_gesture(entry_id, metadata={**existing.metadata, RETRACTED_KEY: None})
-        reread = self._backend.recall(entry_id)
-        if reread is None or is_retracted(reread):
-            raise GrimoireMemoryError(
-                f"Rétablissement non confirmé par la relecture du backend {type(self._backend).__name__} : "
-                "le souvenir reste retiré."
-            )
+        reread = self._clear_retraction(entry_id, existing.metadata)
         self._sync_memory(reread)
         record_change(
             self._project_root, op="unretract", context=context, before_id=entry_id,

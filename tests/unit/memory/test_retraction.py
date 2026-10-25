@@ -433,3 +433,132 @@ class TestProvenanceCardShowsTheCycle:
         by_id = {e.id: e for e in mgr.search(QUERY, include_retracted=True)}
         assert by_id[a].provenance["cycle"] == "retiré"
         assert by_id[b].provenance["cycle"] == "actif"
+
+
+# ── Relecture adversariale de la PR #932 : perte et remise en service à tort ─────────────────
+
+
+class TestUnretractRemovesTheKey:
+    def test_the_key_is_gone_on_replace_backends_and_neutral_on_merge_backends(
+        self, kind: str, mgr: MemoryManager,
+    ) -> None:
+        a, _ = _seed(mgr)
+        mgr.retract(a, reason="r")
+        mgr.unretract(a)
+        meta = (mgr.backend.recall(a) or pytest.fail("perdu")).metadata
+        assert not is_retracted(mgr.backend.recall(a))  # type: ignore[arg-type]
+        if kind != "mempalace":  # MemPalace fusionne les métadonnées : la clé ne peut qu'y être neutralisée
+            assert RETRACTED_KEY not in meta
+
+
+class TestRollbackAfterUnconfirmedRetraction:
+    def test_rollback_clears_the_mark_and_keeps_the_original_error(self, tmp_path: Path) -> None:
+        """Un backend qui écrit la marque mais la relit mal : la marque ne doit pas rester posée."""
+
+        class _Lying(LocalMemoryBackend):
+            def recall(self, entry_id: str) -> MemoryEntry | None:
+                got = super().recall(entry_id)
+                if got is not None and got.metadata.get(RETRACTED_KEY):
+                    return None if self.hide else got  # type: ignore[has-type]
+                return got
+
+        backend = _Lying(tmp_path / "m.json")
+        backend.hide = False  # type: ignore[attr-defined]
+        mgr = MemoryManager(backend, project_name="demo", project_root=tmp_path)
+        a = mgr.store(TEXT_A, user_id="u").id
+        backend.hide = True  # type: ignore[attr-defined]
+        with pytest.raises(GrimoireMemoryError, match="Retrait non confirmé"):
+            mgr.retract(a, reason="x")
+        backend.hide = False  # type: ignore[attr-defined]
+        assert not is_retracted(backend.recall(a))  # type: ignore[arg-type]
+
+    def test_a_failed_undo_chains_the_original_error(self, tmp_path: Path) -> None:
+        class _Breaking(LocalMemoryBackend):
+            calls = 0
+
+            def update(self, *a: Any, **k: Any) -> MemoryEntry | None:
+                self.calls += 1
+                if self.calls >= 2:
+                    raise OSError("disque plein")
+                return self.recall(a[0])  # la première écriture « réussit » sans rien garder
+
+        backend = _Breaking(tmp_path / "m.json")
+        mgr = MemoryManager(backend, project_name="demo", project_root=tmp_path)
+        a = mgr.store(TEXT_A, user_id="u").id
+        with pytest.raises(GrimoireMemoryError, match="Annulation impossible aussi : disque plein") as caught:
+            mgr.retract(a, reason="x")
+        assert "Retrait non confirmé" in str(caught.value)
+        assert isinstance(caught.value.__cause__, GrimoireMemoryError)
+        assert "Retrait non confirmé" in str(caught.value.__cause__)
+
+
+class TestConsolidateNeverMixesStates:
+    """``memory gc`` dédoublonne sur (texte, utilisateur) : un retiré ou remplacé n'est jamais regroupé avec un vivant."""
+
+    @pytest.fixture(params=("local", "lexical", "tantivy"))
+    def cmgr(self, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryManager:
+        return MemoryManager(
+            _make_backend(str(request.param), tmp_path, monkeypatch), project_name="demo", project_root=tmp_path,
+        )
+
+    def test_retracted_copy_is_kept_with_its_reason_and_the_live_copy_too(self, cmgr: MemoryManager) -> None:
+        live = cmgr.store(TEXT_A, user_id="u").id
+        gone = cmgr.store(TEXT_A, user_id="u").id
+        cmgr.retract(gone, reason="doublon erroné")
+        assert cmgr.consolidate() == 0
+        kept = {e.id: e for e in cmgr.get_all(**INCLUDE_ALL)}
+        assert set(kept) == {live, gone}
+        assert is_retracted(kept[gone])
+        assert kept[gone].metadata[RETRACTED_KEY]["reason"] == "doublon erroné"
+        assert not is_retracted(kept[live])
+
+    def test_retracting_the_oldest_does_not_delete_the_live_copy(self, cmgr: MemoryManager) -> None:
+        first = cmgr.store(TEXT_A, user_id="u").id
+        second = cmgr.store(TEXT_A, user_id="u").id
+        cmgr.retract(first, reason="erreur")
+        cmgr.consolidate()
+        assert _ids(cmgr.get_all()) == {second}, "il doit rester un souvenir servi"
+        assert _ids(cmgr.get_all(**INCLUDE_ALL)) == {first, second}
+
+    def test_superseded_copy_is_not_grouped_either(self, cmgr: MemoryManager) -> None:
+        old = cmgr.store(TEXT_A, user_id="u").id
+        twin = cmgr.store(TEXT_A, user_id="u").id
+        new = cmgr.store(TEXT_B, user_id="u").id
+        cmgr.supersede(old, new)
+        cmgr.consolidate()
+        assert _ids(cmgr.get_all(**INCLUDE_ALL)) == {old, twin, new}
+
+    def test_plain_duplicates_are_still_removed(self, cmgr: MemoryManager) -> None:
+        cmgr.store(TEXT_A, user_id="u")
+        cmgr.store(TEXT_A, user_id="u")
+        assert cmgr.consolidate() == 1
+        assert cmgr.backend.count() == 1
+
+
+class TestRememberKeepsTheMarks:
+    """Réenregistrer le même texte ne remet pas en service un souvenir retiré, ni ne le fait oublier."""
+
+    def test_remember_again_keeps_the_retraction(self, kind: str, mgr: MemoryManager) -> None:
+        first = mgr.remember("decisions", "agentA", TEXT_A, tags=("t1", "t2"), source="src://a")
+        mgr.retract(first.id, reason="fausse")
+        again = mgr.remember("decisions", "agentA", TEXT_A, tags=("t1",))
+        assert again.id == first.id
+        kept = mgr.backend.recall(first.id)
+        assert kept is not None
+        assert is_retracted(kept), f"{kind} : le retrait a été effacé par remember"
+        assert kept.metadata[RETRACTED_KEY]["reason"] == "fausse"
+
+    def test_remember_again_keeps_the_replacement(self, mgr: MemoryManager) -> None:
+        old = mgr.remember("decisions", "agentA", TEXT_A)
+        new = mgr.remember("decisions", "agentA", TEXT_B)
+        mgr.supersede(old.id, new.id)
+        mgr.remember("decisions", "agentA", TEXT_A)
+        assert (mgr.backend.recall(old.id) or pytest.fail("perdu")).metadata.get("superseded_by") == new.id
+
+    def test_upsert_keeps_the_retraction_too(self, kind: str, mgr: MemoryManager) -> None:
+        if kind in ("qdrant", "mempalace"):
+            pytest.skip("pas d'upsert à identifiant fourni sur ce backend")
+        mgr.upsert("fixed-id", TEXT_A, user_id="u")
+        mgr.retract("fixed-id", reason="fausse")
+        mgr.upsert("fixed-id", TEXT_A, user_id="u")
+        assert is_retracted(mgr.backend.recall("fixed-id"))  # type: ignore[arg-type]

@@ -14,9 +14,11 @@ par une valeur vide) :
   ``api`` ou ``bench`` ;
 * ``actor``, ``session_id``, ``task_ref`` : la provenance de la lecture
   (même résolution que le journal des écritures) ;
-* ``query_sha`` et ``query_chars`` : l'empreinte SHA-256 tronquée de la requête
-  et sa longueur. **Jamais le texte de la requête** : une requête peut contenir
-  un secret ou une donnée personnelle ;
+* ``query_chars`` : la longueur de la requête. **Ni le texte ni une empreinte** :
+  une requête peut contenir un secret ou une donnée personnelle, et l'empreinte
+  d'une requête courte se retrouve par dictionnaire (une empreinte à clé locale
+  demanderait de créer un second fichier, ce que les outils annotés en lecture
+  seule n'ont pas le droit de faire) ;
 * ``filters`` : les filtres appliqués (limite, utilisateur, type, agent, ailes,
   ``include_*``) ;
 * ``served`` : pour chaque souvenir servi, ``id``, ``rank`` (1 = premier), ``score``
@@ -36,7 +38,6 @@ avertissement dans les logs, la lecture a déjà eu lieu. Aucun appel réseau.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from collections.abc import Iterable, Mapping, Sequence
@@ -66,14 +67,8 @@ READS_RELPATH = Path("_grimoire-output") / "memory-reads.jsonl"
 MAX_BYTES = 1_048_576
 #: Souvenirs détaillés par ligne ; au-delà, ``served_truncated`` donne le total.
 MAX_SERVED = 50
-_SHA_LENGTH = 16
 #: Surfaces dont les lectures ne comptent pas comme un service rendu aux agents.
 _UNCOUNTED_SURFACES = frozenset({"bench"})
-
-
-def query_fingerprint(query: str) -> str:
-    """Empreinte courte et stable d'une requête — le texte n'est jamais journalisé."""
-    return hashlib.sha256(query.encode("utf-8")).hexdigest()[:_SHA_LENGTH]
 
 
 def _served_rows(
@@ -145,7 +140,6 @@ def record_read(
         }
         row.update({k: v for k, v in (("actor", actor), ("session_id", session_id), ("task_ref", task_ref)) if v})
         if query:
-            row["query_sha"] = query_fingerprint(query)
             row["query_chars"] = len(query)
         if filters:
             row["filters"] = {k: v for k, v in filters.items() if v not in ("", None, False)}
