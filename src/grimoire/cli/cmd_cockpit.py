@@ -295,11 +295,6 @@ class _CountingReader:
         return getattr(self._raw, name)
 
 
-#: Fichiers statiques revalidés à chaque chargement (``Cache-Control: no-cache``) :
-#: les modules et feuilles de style qu'une mise à jour du kit remplace.
-_REVALIDATED_SUFFIXES = frozenset({".js", ".mjs", ".css"})
-
-
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
@@ -308,16 +303,13 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
 
     def send_header(self, keyword: str, value: str) -> None:
         super().send_header(keyword, value)
-        # Seul le serveur de fichiers statiques pose ``Last-Modified``. Sans
-        # ``Cache-Control``, le navigateur applique sa fraîcheur heuristique et
-        # garde d'anciens modules JS/CSS après une mise à jour du kit (page
-        # neuve, scripts périmés) ; ``no-cache`` force leur revalidation, qu'un
-        # 304 rend peu coûteuse. Le reste (icons.svg, polices) prend une
-        # minute de fraîcheur : ``no-cache`` y coûtait une requête par rendu
-        # d'icône (``<use href="icons.svg#…">``).
+        # Seuls les fichiers statiques portent ``Last-Modified``. Sans
+        # ``Cache-Control``, le navigateur gardait d'anciens modules JS/CSS
+        # après une mise à jour du kit ; icons.svg et polices prennent une
+        # minute (``no-cache`` y coûtait une requête par rendu d'icône).
         if keyword.lower() == "last-modified":
-            suffix = Path(urlparse(self.path).path).suffix.lower()
-            super().send_header("Cache-Control", "no-cache" if suffix in _REVALIDATED_SUFFIXES else "max-age=60")
+            js_css = Path(urlparse(self.path).path).suffix.lower() in {".js", ".mjs", ".css"}
+            super().send_header("Cache-Control", "no-cache" if js_css else "max-age=60")
 
     def setup(self) -> None:
         super().setup()
