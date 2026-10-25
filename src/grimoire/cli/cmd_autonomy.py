@@ -17,6 +17,7 @@ import typer
 from rich.console import Console
 
 from grimoire.core.exceptions import GrimoireRuntimeError
+from grimoire.flows.attestation import ATTEST_FROM_HINT, Attestation
 from grimoire.flows.autonomy import COST_SCOPE, REVOKE_MANUAL, GrantJournal, GrantRequest
 from grimoire.hosts.decisions.authority_guard import LIMIT_NOTE
 
@@ -29,6 +30,14 @@ console = Console(stderr=True)
 
 _FLOWS_RELPATH = Path("_grimoire-runtime-output/flows")
 _PROJECT_ROOT = Annotated[Path, typer.Option("--project-root", help="Racine du projet cible.")]
+_ATTEST_FROM = Annotated[
+    Path | None,
+    typer.Option(
+        "--attest-from",
+        help="Racine du projet où tourne ta session : son journal des tours humains atteste l'octroi "
+        "(session ouverte dans un autre projet que la cible). Jamais déduit du dossier courant.",
+    ),
+]
 #: Décision humaine requise : distinct d'une erreur de saisie.
 _AWAITING_HUMAN_EXIT = 3
 
@@ -45,6 +54,27 @@ def _journal(project_root: Path) -> GrantJournal:
 def _emit(ctx: typer.Context, payload: dict[str, Any]) -> None:
     if _fmt(ctx) == "json":
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _hint(attestation: Attestation, attest_from: Path | None) -> str:
+    """L'orientation vers ``--attest-from`` d'un refus ``human_authority_unprovable`` qui ne l'a pas utilisé."""
+    return ATTEST_FROM_HINT if attestation.reason == "human_authority_unprovable" and attest_from is None else ""
+
+
+def _awaiting(ctx: typer.Context, attestation: Attestation, message: str, attest_from: Path | None) -> None:
+    hint = _hint(attestation, attest_from)
+    payload: dict[str, Any] = {
+        "granted": False,
+        "challenge_id": attestation.challenge_id,
+        "attestation": attestation.to_dict(),
+    }
+    _emit(ctx, {**payload, "hint": hint} if hint else payload)
+    if _fmt(ctx) != "json":
+        console.print(f"[yellow]décision humaine requise[/yellow] — challenge {attestation.challenge_id}")
+        console.print(f"  {message}")
+        if hint:
+            console.print(f"  {hint}")
+    raise typer.Exit(_AWAITING_HUMAN_EXIT)
 
 
 def _fail(ctx: typer.Context, exc: GrimoireRuntimeError) -> None:
@@ -67,11 +97,12 @@ def autonomy_grant(
         str, typer.Option("--until", help="Échéance : +30m, +2h, +1d ou un instant ISO 8601 avec fuseau.")
     ],
     project_root: _PROJECT_ROOT = Path(),
+    attest_from: _ATTEST_FROM = None,
 ) -> None:
     """Demander un octroi : il n'est inscrit qu'attesté par un tour humain de cette session."""
     try:
         request = GrantRequest.build(scope, max_cost_usd, until)
-        grant, attestation = _journal(project_root).request(request)
+        grant, attestation = _journal(project_root).request(request, attest_from=attest_from)
     except GrimoireRuntimeError as exc:
         _fail(ctx, exc)
         return
@@ -81,16 +112,15 @@ def autonomy_grant(
             "humain de la session qui l'a demandé, postérieur au challenge, puis la même commande relancée depuis "
             f"cette session. {LIMIT_NOTE}"
         )
-        _emit(ctx, {"granted": False, "challenge_id": attestation.challenge_id, "attestation": attestation.to_dict()})
-        if _fmt(ctx) != "json":
-            console.print(f"[yellow]décision humaine requise[/yellow] — challenge {attestation.challenge_id}")
-            console.print(f"  {message}")
-        raise typer.Exit(_AWAITING_HUMAN_EXIT)
+        _awaiting(ctx, attestation, message, attest_from)
+        return
     _emit(ctx, {"granted": True, "grant": grant, "cost_scope": COST_SCOPE})
     if _fmt(ctx) != "json":
         console.print(
             f"[green]octroi[/green] {grant['grant_id']} — {', '.join(grant['scope'])}, "
-            f"plafond {grant['max_cost_usd']:.4f} USD, jusqu'au {grant['until']} ({grant['attestation']})"
+            f"plafond {grant['max_cost_usd']:.4f} USD, jusqu'au {grant['until']} ({grant['attestation']}"
+            + (f", depuis {grant['attest_from']}" if grant.get("attest_from") else "")
+            + ")"
         )
         console.print(f"  [dim]{COST_SCOPE}[/dim]")
 
@@ -163,13 +193,14 @@ def mandate_grant(
     max_sessions_per_day: Annotated[int, typer.Option("--max-sessions-per-day", help="Plafond de sessions de worker par jour.")],
     until: Annotated[str, typer.Option("--until", help="Échéance : +30m, +2h, +1d ou un instant ISO 8601 avec fuseau.")],
     project_root: _PROJECT_ROOT = Path(),
+    attest_from: _ATTEST_FROM = None,
 ) -> None:
     """Demander un mandat : il n'est inscrit qu'attesté par un tour humain de cette session (comme `autonomy grant`)."""
     from grimoire.missions.mandate import MandateRequest
 
     try:
         request = MandateRequest.build(gesture, task_type, max_sessions_per_day, until)
-        mandate, attestation = _store(project_root).request_grant(request)
+        mandate, attestation = _store(project_root).request_grant(request, attest_from=attest_from)
     except GrimoireRuntimeError as exc:
         _fail(ctx, exc)
         return
@@ -177,19 +208,18 @@ def mandate_grant(
         _fail(ctx, GrimoireRuntimeError(str(exc)))
         return
     if mandate is None:
-        _emit(ctx, {"granted": False, "challenge_id": attestation.challenge_id, "attestation": attestation.to_dict()})
-        if _fmt(ctx) != "json":
-            console.print(f"[yellow]décision humaine requise[/yellow] — challenge {attestation.challenge_id}")
-            console.print(
-                f"  awaiting_human : {attestation.reason} — {attestation.explain()}. Un mandat s'accorde par un tour humain de la "
-                f"session qui l'a demandé, postérieur au challenge, puis la même commande relancée. {LIMIT_NOTE}"
-            )
-        raise typer.Exit(_AWAITING_HUMAN_EXIT)
+        message = (
+            f"awaiting_human : {attestation.reason} — {attestation.explain()}. Un mandat s'accorde par un tour humain de la "
+            f"session qui l'a demandé, postérieur au challenge, puis la même commande relancée. {LIMIT_NOTE}"
+        )
+        _awaiting(ctx, attestation, message, attest_from)
+        return
     _emit(ctx, {"granted": True, "mandate": mandate.to_dict()})
     if _fmt(ctx) != "json":
         console.print(
             f"[green]mandat[/green] {mandate.id} — {', '.join(mandate.gestures)} sur {', '.join(mandate.task_types)}, "
             f"{mandate.max_sessions_per_day} session(s)/jour, jusqu'au {mandate.until}"
+            + (f", attesté depuis {mandate.attest_from}" if mandate.attest_from else "")
         )
 
 
