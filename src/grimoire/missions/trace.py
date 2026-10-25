@@ -195,6 +195,10 @@ def _ledger_entries(ledger: MissionLedger, task_id: str) -> list[TimelineEntry]:
         elif event.event_type == "task.linked":
             out.append(TimelineEntry(event.created_at, "ledger", event.event_type,
                                      f"dépend de {payload.get('depends_on', '?')} ({payload.get('kind', '?')})"))
+        elif event.event_type == "task.unlinked":
+            out.append(TimelineEntry(event.created_at, "ledger", event.event_type,
+                                     f"ne dépend plus de {payload.get('depends_on', '?')} ({payload.get('kind', '?')})"
+                                     f" — {payload.get('reason', '')}"))
         else:
             out.append(TimelineEntry(event.created_at, "ledger", event.event_type, event.event_type))
     for incident in ledger.list_incidents(task_id):

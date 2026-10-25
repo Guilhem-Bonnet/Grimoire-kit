@@ -158,6 +158,12 @@ def unclosed_blockers(tasks: Mapping[str, MissionTask], task: MissionTask) -> li
         target = tasks.get(dep.target)
         if target is None:
             out.append(f"{dep.target} (inconnue du ledger)")
+        elif target.status is TaskState.CANCELLED:
+            # Terminal : elle ne sera jamais close (#906). Le lien se retire, il ne se contourne pas.
+            out.append(
+                f"{dep.target} (cancelled, ne sera jamais close : si elle est remplacée, "
+                f"`grimoire task unlink {task.id} --depends-on {dep.target} --reason …` puis `task link` vers la remplaçante)"
+            )
         elif target.status is not TaskState.CLOSED:
             out.append(f"{dep.target} ({target.status.value})")
     return out
@@ -182,8 +188,8 @@ def blocks_path(tasks: Mapping[str, MissionTask], start: str, goal: str) -> list
     return []
 
 
-def replay_link(tasks: dict[str, MissionTask], raw: dict[str, Any], payload: dict[str, Any]) -> None:
-    """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon."""
+def replay_link(tasks: dict[str, MissionTask], raw: dict[str, Any], payload: dict[str, Any], *, remove: bool = False) -> None:
+    """Ajoute la dépendance d'un événement de lien à la tâche source, sans doublon ; *remove* la retire (#906)."""
     tid = str(raw.get("entity_id") or payload.get("task_id") or "")
     current = tasks.get(tid)
     if current is None:
@@ -195,7 +201,11 @@ def replay_link(tasks: dict[str, MissionTask], raw: dict[str, Any], payload: dic
             dep = TaskDependency(DependencyKind(str(payload.get("kind", "blocks"))), str(payload["depends_on"]))
     except (KeyError, ValueError, TypeError):
         return
-    if dep not in current.dependencies:
+    if remove:
+        kept = [d.to_dict() for d in current.dependencies if d != dep]
+        if len(kept) != len(current.dependencies):
+            tasks[tid] = MissionTask.from_dict({**current.to_dict(), "dependencies": kept})
+    elif dep not in current.dependencies:
         tasks[tid] = MissionTask.from_dict(
             {**current.to_dict(), "dependencies": [d.to_dict() for d in (*current.dependencies, dep)]}
         )

@@ -149,6 +149,8 @@ RISK_ACCEPTED_EVENT = "task.risk_accepted"
 #: l'ancien nom (import Beads) : les deux se rejouent, un seul s'écrit.
 TASK_LINKED_EVENT = "task.linked"
 _LEGACY_LINK_EVENT = "task.dependency.added"
+#: Issue #906 : un lien retiré, motif compris (:mod:`grimoire.missions.ledger_links`).
+TASK_UNLINKED_EVENT = "task.unlinked"
 
 #: K2 (issue #767) : le plafond dur ``expires_at`` du claim repoussé par ``task renew``.
 LEASE_RENEWED_EVENT = "task.lease_renewed"
@@ -408,11 +410,9 @@ class MissionLedger:
                         agent_id=str(payload.get("agent_id", "") or ""),
                     )
                     self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
-            elif evt_type in (TASK_LINKED_EVENT, _LEGACY_LINK_EVENT):
-                # W5-01 : ni ``task.linked`` ni ``task.dependency.added`` n'étaient
-                # rejoués — ``task link`` écrivait un événement que rien ne lisait,
-                # et ``MissionTask.dependencies`` restait vide.
-                replay_link(self._tasks, raw, payload)
+            elif evt_type in (TASK_LINKED_EVENT, _LEGACY_LINK_EVENT, TASK_UNLINKED_EVENT):
+                # W5-01 : avant, aucun lien n'était rejoué ; #906 : un retrait se rejoue aussi.
+                replay_link(self._tasks, raw, payload, remove=evt_type == TASK_UNLINKED_EVENT)
             elif evt_type == RISK_ACCEPTED_EVENT:
                 # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
                 # Un événement orphelin n'invente rien ; l'horodatage de
