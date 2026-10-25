@@ -277,9 +277,10 @@ def test_enregistrer_apres_ajout_de_noeud_persiste_apres_rechargement(
     )
 
     page.locator(".cv-toolbar button", has_text="Enregistrer").click()
+    # Le libellé d'attente (« Enregistrement… ») perd aussi « modifié » :
+    # seule la confirmation sur place dit que l'écriture a abouti.
     page.wait_for_function(
-        "() => ![...document.querySelectorAll('.cv-toolbar button')]"
-        ".some((b) => b.textContent.includes('modifié'))"
+        "() => document.querySelector('.cv-graph > .action-status')?.textContent.startsWith('Enregistré')"
     )
 
     target = real_project / "_grimoire" / "blueprints" / f"{bp_id}.blueprint.json"

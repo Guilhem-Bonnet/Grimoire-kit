@@ -40,6 +40,31 @@
   padding-left: calc(var(--sp-2) + 14px);
 }
 
+/* Les lignes de l'arbre ont une hauteur fixe (.tree, shell.css) : un nom long
+   passait à la ligne et chevauchait la suivante. Une ligne, coupée par une
+   ellipse, le chemin complet dans `title`. */
+.sr-tree-dir > span,
+.sr-tree-file > span:first-child,
+.sr-tree-tier {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sr-tree > .lbl {
+  height: auto;
+  min-height: 28px;
+  padding-block: var(--sp-1);
+}
+
+/* Retour d'enregistrement : bandeau bord à bord, comme .sr-banner. */
+.sr-editor > .action-status:not(:empty) {
+  flex: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+}
+
 .sr-badge {
   margin-left: auto;
   flex: none;

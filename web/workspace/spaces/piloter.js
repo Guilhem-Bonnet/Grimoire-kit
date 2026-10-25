@@ -34,7 +34,7 @@
 // (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
-import { badge, icon, kpiRow, spaceHead, STATE_ICON } from '../shell.js';
+import { actionStatus, badge, failureText, icon, kpiRow, setActionStatus, spaceHead, STATE_ICON } from '../shell.js';
 
 const STYLE_ID = 'pl-styles';
 
@@ -114,10 +114,6 @@ function injectStyles() {
     .pl-prop-manual > span { min-width: 0; overflow-wrap: anywhere; }
     .pl-prop-manual b { color: var(--ink); font-weight: 600; }
     .pl-prop-manual code { font-family: var(--mono); font-size: var(--t-min); }
-    /* Retour d'une action sur place : la Console n'est plus dans la coque
-       (P62), un refus envoyé là-bas restait invisible. */
-    .pl-status:not(:empty) { padding: var(--sp-2) var(--sp-3); border-radius: var(--r); background: var(--e2); color: var(--ink); font-size: var(--t-s); overflow-wrap: anywhere; }
-    .pl-status[data-tone="bad"]:not(:empty) { background: var(--bad-soft); color: var(--bad); }
     /* Un display d auteur l emporte sur l attribut hidden : on le rend explicite. */
     .pl-sheet[hidden], .pl-wrap[hidden], .pl-cat-files[hidden], .pl-up-foot[hidden] { display: none; }
     .pl-update { max-width: 1360px; width: 100%; box-sizing: border-box; margin: 0 auto; }
@@ -712,28 +708,8 @@ async function loadSheet(ctx, slug) {
 // Depuis la refonte (P62) la Console n'est plus dans la coque : un refus
 // envoyé à `ctx.dock` n'était lu par personne. Chaque action porte donc son
 // retour à côté d'elle : le bouton se désactive avec un libellé d'attente,
-// le message du serveur s'affiche en clair dans une zone `role="status"`,
+// le message du serveur s'affiche en clair dans `actionStatus` (shell.js),
 // puis le bouton redevient utilisable.
-
-/** Zone de retour vide, annoncée par les lecteurs d'écran quand elle change. */
-function statusBox() {
-  const box = document.createElement('div');
-  box.className = 'pl-status';
-  box.setAttribute('role', 'status');
-  box.setAttribute('aria-live', 'polite');
-  return box;
-}
-
-function showStatus(box, message, tone) {
-  box.dataset.tone = tone || '';
-  box.textContent = message || '';
-}
-
-/** Libellé d'un échec : « Refusé » quand le serveur a répondu, « Échec » sinon. */
-function failureText(error) {
-  const message = (error && error.message) || 'motif non communiqué';
-  return error && error.status === 0 ? `Échec : ${message}` : `Refusé : ${message}`;
-}
 
 /**
  * Exécute `action` derrière `button` : libellé d'attente, boutons voisins
@@ -746,12 +722,12 @@ async function runInline(button, pendingLabel, status, action, siblings = []) {
   for (const [b] of frozen) b.disabled = true;
   button.textContent = pendingLabel;
   button.setAttribute('aria-busy', 'true');
-  showStatus(status, '');
+  setActionStatus(status, '');
   try {
     await action();
     return true;
   } catch (error) {
-    showStatus(status, failureText(error), 'bad');
+    setActionStatus(status, failureText(error), 'bad');
     return false;
   } finally {
     button.textContent = label;
@@ -880,7 +856,7 @@ function renderProposalsSection(ctx, proposalsPayload, onChanged, slug) {
     // Ligne 3 : actions, puis leur retour sur place.
     const actions = document.createElement('div');
     actions.className = 'pl-prop-actions';
-    const status = statusBox();
+    const status = actionStatus();
 
     const isRepair = proposal.artifact_type === 'repair';
     // `accept_blocker` (grimoire.proposals) : le refus qu'« Accepter »
@@ -1087,7 +1063,7 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   saveClauseBtn.className = 'btn';
   saveClauseBtn.textContent = saveLabel('Enregistrer la clause');
   saveClauseBtn.disabled = readOnly;
-  const clauseStatus = statusBox();
+  const clauseStatus = actionStatus();
   saveClauseBtn.addEventListener('click', async () => {
     ctx.dock.echo(`# clause d'emploi — ${agent.name}`);
     const ok = await runInline(saveClauseBtn, 'Enregistrement…', clauseStatus, () =>
@@ -1122,7 +1098,7 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   saveToolsBtn.className = 'btn';
   saveToolsBtn.textContent = saveLabel('Enregistrer les outils');
   saveToolsBtn.disabled = readOnly;
-  const toolsStatus = statusBox();
+  const toolsStatus = actionStatus();
   saveToolsBtn.addEventListener('click', async () => {
     const chosen = TOOL_VERBS.filter((v) => toolChecks[v].checked);
     ctx.dock.echo(`# outils — ${agent.name} → ${chosen.join(', ')}`);
@@ -1143,7 +1119,7 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   saveContextBtn.className = 'btn';
   saveContextBtn.textContent = saveLabel('Enregistrer le contexte');
   saveContextBtn.disabled = readOnly;
-  const contextStatus = statusBox();
+  const contextStatus = actionStatus();
   saveContextBtn.addEventListener('click', async () => {
     const paths = contextArea.value.split('\n').map((s) => s.trim()).filter(Boolean);
     ctx.dock.echo(`# contexte — ${agent.name}`);
@@ -1156,7 +1132,7 @@ function renderAgentInspector(ctx, agentsPayload, agent, callbacks) {
   // ── Skills ───────────────────────────────────────────────────────────
   const skillsWrap = document.createElement('div');
   skillsWrap.className = 'pl-chips';
-  const skillsStatus = statusBox();
+  const skillsStatus = actionStatus();
   for (const slug of agent.skills) {
     const chip = document.createElement('span');
     chip.className = 'pl-chip';

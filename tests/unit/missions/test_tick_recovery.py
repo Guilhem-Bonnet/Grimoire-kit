@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -302,8 +303,16 @@ def test_pushed_branch_is_reaped_and_a_dirty_tree_asks(repo: Path, tmp_path: Pat
     assert question is not None and "arbre de travail modifié" in question.text
 
 
-def _slow_unpushed_work(monkeypatch: pytest.MonkeyPatch, journal: list[str], *, seconds: float = 1.0) -> None:
-    """``unpushed_work`` ralenti (git lent) et journalisé : début et fin."""
+def _slow_unpushed_work(
+    monkeypatch: pytest.MonkeyPatch, journal: list[str], *, seconds: float = 1.0,
+    started: threading.Event | None = None, release: threading.Event | None = None,
+) -> None:
+    """``unpushed_work`` ralenti (git lent) et journalisé : début et fin.
+
+    Avec *started*/*release*, le « git » signale son départ puis attend *release*
+    (au plus *seconds*) au lieu d'une pause fixe : l'ordre ne dépend plus de la
+    vitesse du runner (un Windows lent finissait la pause avant l'écrivain).
+    """
     import time
 
     from grimoire.missions import task_worktree
@@ -318,7 +327,12 @@ def _slow_unpushed_work(monkeypatch: pytest.MonkeyPatch, journal: list[str], *, 
                 journal.append("git-start")
         except TimeoutError:
             journal.append("git-start:verrou-tenu")
-        time.sleep(seconds)
+        if started is not None:
+            started.set()
+        if release is not None:
+            release.wait(seconds)
+        else:
+            time.sleep(seconds)
         out = real(service, task_id)
         journal.append("git-end")
         return out
@@ -362,9 +376,6 @@ def test_a_writer_is_not_held_up_by_the_reap_git_nor_enters_its_critical_section
     Avec ``flock`` : l'écrivain attendait la fin des git (``git-end`` avant ``writer``). Sans ``flock`` et
     péremption comprimée : le verrou de la récolte était cassé et l'écrivain entrait sous elle.
     """
-    import threading
-    import time
-
     import grimoire.core.fsio as fsio
 
     if fallback:
@@ -375,16 +386,20 @@ def test_a_writer_is_not_held_up_by_the_reap_git_nor_enters_its_critical_section
     _commit(path, "travail.txt", "pas encore poussé\n")
     _expire(service, tid)
     journal: list[str] = []
-    _slow_unpushed_work(monkeypatch, journal)
+    started, release = threading.Event(), threading.Event()
+    # Écrivain bloqué par le verrou (le défaut) : le git n'attend que 10 s, finit, et l'ordre trahit le blocage.
+    _slow_unpushed_work(monkeypatch, journal, seconds=10.0, started=started, release=release)
     errors: list[BaseException] = []
 
     def writer() -> None:
-        time.sleep(0.4)
+        started.wait(30)
         try:
             TaskService(repo).ledger.append_event("task.note", tid, "task", "ecrivain", {"text": "pendant les git"})
             journal.append("writer")
         except BaseException as exc:  # remonté au test
             errors.append(exc)
+        finally:
+            release.set()
 
     thread = threading.Thread(target=writer)
     thread.start()
