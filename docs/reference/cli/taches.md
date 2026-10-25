@@ -65,6 +65,9 @@ prochain export l'écrase.
 | `grimoire task board export . -o <chemin>` | Écrire ailleurs que dans le board du standard |
 | `grimoire task add "<titre>" -a "<critère>" [--owner <qui>] [--ready]` | Ouvrir une tâche (un critère d'acceptation au moins) ; `--ready` la rend réclamable tout de suite, gate `proposed_to_ready` compris |
 | `grimoire task add "<titre>" -a "<critère>" --description "<brief>"` ou `--description-file <fichier>` | Donner à la tâche son contexte (pourquoi, pistes) au-delà du titre : texte brut, 4000 caractères au plus ; rendu par `task show`, l'outil MCP `task_show`, `task_context` (bundle) et la carte du cockpit (#714) |
+| `grimoire task add "<titre>" -a "<critère>" --finition maquette\|peaufine` | Poser la finition du livrable (R24). Sans l'option, la tâche hérite de la phase de `project-context.yaml` (clé `phase` ou `project.phase` : `exploration` → `maquette`, `construction` et `exploitation` → `peaufine`) ; sans phase déclarée ou reconnue, le champ reste vide (le kit ne devine pas). `task show` rend `finition`. La valeur machine est sans accent ; `peaufiné` est accepté en entrée. Une valeur inconnue est refusée avant toute écriture. L'outil MCP `task_add` porte le même paramètre `finition` |
+| `grimoire task add --intake "<texte>"` | Proposer, **sans rien écrire**, le type de mission, le risque, le périmètre, les contrôles de politique attendus et les tâches d'une demande (JSON sur stdout, classement déterministe sans modèle) ; ne se combine ni avec un titre ni avec `-a` (R07). Les tâches se créent ensuite une à une par `task add` |
+| `grimoire task import <plan.json> [--mission <id>] [--dry-run]` | Importer un plan JSON (P50) : crée les tâches (titre, critères, preuves, priorité) et leurs dépendances (`task link`), puis rend la table clé du plan → clé du ledger sur stdout (`clé<TAB>GAO-…<TAB>action`). Le plan est validé en entier avant d'écrire (champ inconnu, critère manquant, clé en double, dépendance absente, cycle, mission inconnue : tout est refusé, rien n'est écrit, code 1). **Idempotent** : une entrée déjà importée (`extra.import = {plan, key}`) n'est ni recréée ni modifiée — signalée `diverged` si titre ou critères ont changé depuis ; une entrée `{"key": …, "existing": "GAO-…"}` désigne une tâche déjà au ledger, sautée mais utilisable comme cible de `depends_on`. `--dry-run` montre ce qui serait créé sans toucher au ledger |
 | `grimoire task list [--status <état>] [--mission <id>]` | Lister les tâches et leur colonne de board |
 | `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
@@ -221,6 +224,19 @@ sinon le gate refuse avec `acceptance.depth_floor_unmet` (bloquant selon la
 sévérité du profil, comme les autres preuves). Une profondeur inconnue est un
 refus. Le routeur ne choisit pas de modèle : il choisit la cérémonie.
 
+### Ouvrir une mission
+
+| Commande | Description |
+| --- | --- |
+| `grimoire mission open "<titre>" [-d "<visée>"] [--scope-repo <dépôt>] [--scope-surface <surface>] [--scope-pack <pack>]` | Ouvre une mission dans le Mission Ledger et rend son identifiant (`MIS-…`) sur stdout ; les `--scope-*` sont répétables |
+
+`task add --mission <identifiant>` y rattache ensuite des tâches (une mission
+inconnue est refusée). Deux titres homonymes — à la casse et aux espaces près —
+sont refusés avec l'identifiant de la mission existante ; un titre vide aussi ; rien
+n'est écrit sur un refus (code 1). Le périmètre (`scope.repos`, `scope.surfaces`,
+`scope.packs`) est écrit au ledger sans doublon ni entrée blanche, et l'outil MCP
+`task_context` le rend sous `mission_scope` avec la tâche (R25, P49).
+
 ### Rapport de mission
 
 | Commande | Description |
@@ -247,6 +263,20 @@ et le `trace_id` de sa cascade ; chaque ligne nomme sa source (`ledger:`,
 - **Lecture seule et déterministe.** Aucun dossier n'est créé, aucune date de
   génération n'est écrite : deux exécutions sur les mêmes journaux donnent les
   mêmes octets. Mission inconnue ou ledger absent : sortie 1.
+
+### Registre des plans
+
+| Commande | Description |
+| --- | --- |
+| `grimoire plans list [--status active\|absorbed\|archive\|incubator] [--check] [--registry <fichier>]` | Lister les plans du registre (`deprecated-plans-registry.yaml`) : identifiant, statut, titre, et le plan qui absorbe un plan absorbé (R08) |
+
+Lecture seule. Le registre se cherche à
+`_grimoire-runtime-output/planning-artifacts/deprecated-plans-registry.yaml` sous la
+racine du projet (`--registry` en désigne un autre) ; absent ou illisible, la commande
+le dit et sort en 1, elle n'en invente pas un. La liste part sur stdout (colonnes
+séparées par une tabulation), `--json` rend le registre entier. `--check` valide aussi
+le registre (ids uniques, statuts connus, `absorbed_by` renseigné, chemins présents,
+au moins un plan actif) et sort en 1 s'il est incohérent.
 
 ### Plafonds MAST par instance de workflow
 
