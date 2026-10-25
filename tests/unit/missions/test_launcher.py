@@ -323,6 +323,7 @@ def _shim(directory: Path, *names: str) -> Path:
     return directory
 
 
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
 def test_le_minuteur_porte_le_path_du_poste_reduit_aux_outils_utiles(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Le PATH n'est pas figé tel quel : ni un dossier temporaire (session d'agent), ni un dossier sans outil utile, ni un chemin relatif."""
     import tempfile
