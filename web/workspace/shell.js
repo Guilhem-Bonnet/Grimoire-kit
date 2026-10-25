@@ -49,6 +49,11 @@ import { api, boot, host } from './api.js';
 import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
 
+// Fin du premier montage d'espace : la première lecture du compteur d'attention
+// l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
+let markFirstSpaceMounted;
+const firstSpaceMounted = new Promise((resolve) => { markFirstSpaceMounted = resolve; });
+
 // ── Les cinq espaces, dans l'ordre de la barre, et leurs rubriques ──────────
 //
 // Un espace suit une intention (trier, travailler, maintenir, se souvenir,
@@ -1327,6 +1332,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   for (const area of [canvas, $('inspector-body'), $('explorer-body')]) clearLoading(area);
   canvas.setAttribute('aria-busy', 'false');
   fillEmptyPanels();
+  markFirstSpaceMounted();
 }
 
 // ── Préférences : la seule rubrique que la coque rend elle-même ─────────────
@@ -1475,6 +1481,13 @@ function renderReadOnlyBanner() {
 // pouls change ; le pouls lui-même (décisions K6) n'est plus qu'un déclencheur.
 let attentionPrint = null;
 let attentionSeq = 0;
+// La première lecture parcourt tout le registre : elle attend la fin du premier
+// montage d'espace pour ne pas lui disputer le serveur (Flotte : budget de
+// 900 ms), et reprend la réponse que l'espace vient de lire (Flotte, À traiter)
+// si elle a moins de `ATTENTION_REUSE_MS`. Jamais onglet masqué. Les pouls
+// suivants relisent toujours le serveur.
+const ATTENTION_REUSE_MS = 5000;
+let attentionFirstRead = true;
 
 function renderAttentionCount(count, unreadable = 0) {
   const badgeNode = $('decisions-count');
@@ -1488,10 +1501,10 @@ function renderAttentionCount(count, unreadable = 0) {
   badgeNode.dataset.pending = String(count);
 }
 
-async function refreshAttentionCount() {
+async function refreshAttentionCount({ maxAgeMs = 0 } = {}) {
   const seq = ++attentionSeq;
   try {
-    const data = await api.attention(host.scopeAll);
+    const data = await api.attention(host.scopeAll, { maxAgeMs });
     if (seq !== attentionSeq) return;
     const unreadable = (data.projects || []).filter((p) => p.state === 'unreadable').length;
     renderAttentionCount(Number(data.count) || 0, unreadable);
@@ -1502,6 +1515,19 @@ function onPulseDecisions() {
   const print = live.state.fingerprint;
   if (print !== null && print === attentionPrint) return;
   attentionPrint = print;
+  if (attentionFirstRead) {
+    attentionFirstRead = false;
+    firstSpaceMounted.then(() => {
+      if (document.hidden) {
+        // Reprise au prochain pouls visible, par le même chemin.
+        attentionFirstRead = true;
+        attentionPrint = null;
+        return;
+      }
+      refreshAttentionCount({ maxAgeMs: ATTENTION_REUSE_MS });
+    });
+    return;
+  }
   refreshAttentionCount();
 }
 

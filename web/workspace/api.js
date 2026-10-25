@@ -11,6 +11,11 @@
 
 const WS = '/api/workspace/';
 
+/** Lectures d'attention en vol, par portée : partagées entre lecteurs simultanés. */
+const attentionInFlight = new Map();
+/** Dernière réponse d'attention par portée, reprise seulement par qui le demande (`maxAgeMs`). */
+const attentionRecent = new Map();
+
 /** État de l'hôte, résolu une fois à l'amorçage. */
 export const host = {
   /** 'atelier' | 'cockpit' — décidé par la réponse de /api/status. */
@@ -193,9 +198,25 @@ export const api = {
   // Ce qui attend une décision humaine (P22), rangé par urgence. `portfolio`
   // lit tout le registre — la portée « Tous les projets » ; `probe` relance
   // les sondes au lieu de lire leur cache (« Réessayer », P32).
-  attention: (portfolio, { probe = false } = {}) => {
+  // Une lecture d'attention parcourt tout le registre côté serveur : deux
+  // lecteurs simultanés (compteur de la barre, Flotte, À traiter) partagent la
+  // même requête en vol au lieu d'en lancer deux. `probe` force une lecture neuve ;
+  // `maxAgeMs` accepte une réponse déjà reçue s'il n'est pas plus vieille.
+  attention: (portfolio, { probe = false, maxAgeMs = 0 } = {}) => {
     const params = { ...(portfolio ? { scope: 'portfolio' } : {}), ...(probe ? { probe: '1' } : {}) };
-    return get(WS + 'attention', Object.keys(params).length ? params : undefined);
+    const key = portfolio ? 'portfolio' : 'project';
+    if (!probe) {
+      const recent = attentionRecent.get(key);
+      if (maxAgeMs > 0 && recent && Date.now() - recent.at <= maxAgeMs) return Promise.resolve(recent.data);
+      if (attentionInFlight.has(key)) return attentionInFlight.get(key);
+    }
+    const request = get(WS + 'attention', Object.keys(params).length ? params : undefined);
+    request.then((data) => attentionRecent.set(key, { at: Date.now(), data })).catch(() => {});
+    if (!probe) {
+      attentionInFlight.set(key, request);
+      request.finally(() => attentionInFlight.delete(key)).catch(() => {});
+    }
+    return request;
   },
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
