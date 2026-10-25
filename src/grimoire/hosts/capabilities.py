@@ -278,7 +278,11 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
             events = ()
         gaps.append(CapabilityGap("agent_autostart", fallback, events))
     if not profile.mcp_native:
-        gaps.append(CapabilityGap("mcp", "outils du kit atteints par la CLI `grimoire`, sans client MCP"))
+        # Hôte inconnu : on ne sait pas, on ne dit pas qu'il n'a pas de client MCP.
+        if profile.host_id is HostId.UNKNOWN:
+            gaps.append(CapabilityGap("mcp", "non déterminé : hôte inconnu, client MCP ni affirmé ni exclu"))
+        else:
+            gaps.append(CapabilityGap("mcp", "outils du kit atteints par la CLI `grimoire`, sans client MCP"))
     if not profile.blocking_hooks:
         missing = tuple(e.value for e in _HOOK_FIELDS if not profile.supports_event(e))
         gaps.append(CapabilityGap("blocking_hooks", "governance stated as instructions, enforced by CI only", missing))

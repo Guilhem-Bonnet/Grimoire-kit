@@ -50,6 +50,10 @@
    "version": "3.36.0",
    "path": "framework/agentic-standard/profile-map.yaml"
   },
+  "04a461b9e622c2adbe600c42a93d67791e95ca330e6201605308a0a7e106f66b": {
+   "version": "3.65.0",
+   "path": "framework/tools/schema-validator.py"
+  },
   "0504d12328d73ec9f9da9f169500da5de740827f2577d8e86a509eb9dd9adf49": {
    "version": "3.35.0",
    "path": "archetypes/creative-studio/archetype.dna.yaml"
@@ -3997,6 +4001,10 @@
   "f11af45cac2df5b811d867286e1291ae43eae2b99537ec89f3a1f554801c0667": {
    "version": "3.32.0",
    "path": "framework/agent-base.md"
+  },
+  "f12171848f73cc01cf4ea82977034600c45bd6d41b5d46f9ff6f778d56e595cc": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "f163f4c47e0ab022c041421be75296afd809231c8906fb1b7d127b452be18a22": {
    "version": "3.16.0",

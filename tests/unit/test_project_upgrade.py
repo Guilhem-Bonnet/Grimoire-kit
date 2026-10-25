@@ -1307,24 +1307,37 @@ def test_projected_removals_voit_l_orphelin_puis_l_archive(tmp_path_factory: pyt
     assert projected_removals(root) == archived  # relu sans effet de bord
 
 
-def test_find_orphans_reports_the_retired_teams_manifests(upgrade_project: Path) -> None:
-    """R12 : `up` n'élague pas le tier kit ; les manifestes d'équipe copiés par une ancienne
-    version sont proposés à l'archivage, et archivés (jamais supprimés) sur `--apply`."""
+def test_find_orphans_archives_only_shipped_unchanged_teams_manifests(
+    upgrade_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R12 : `up` n'élague pas le tier kit. Seul un manifeste livré INCHANGÉ (empreinte du catalogue) est
+    proposé à l'archivage ; un manifeste modifié ou ajouté reste en place et est signalé."""
+    import grimoire.core.kit_hashes as kh
     from grimoire.core import layout
     from grimoire.tools.project_upgrade import archive_orphans, find_orphans
 
+    real = kh.shipped_by_kit
+    # Le contenu livré n'est pas dans le dépôt : `team-vision.yaml` joue le fichier inchangé (empreinte connue).
+    monkeypatch.setattr(
+        kh, "shipped_by_kit", lambda p: {"path": "framework/teams/team-vision.yaml"} if p.name == "team-vision.yaml" else real(p)
+    )
     teams = layout.kit_dir(upgrade_project) / "teams"
     teams.mkdir(parents=True, exist_ok=True)
-    (teams / "team-vision.yaml").write_text("team:\n  name: x\n", encoding="utf-8")
+    (teams / "team-vision.yaml").write_text("livré\n", encoding="utf-8")
+    (teams / "team-ops.yaml").write_text("roster adapté par le projet\n", encoding="utf-8")
+    (teams / "mon-equipe.yaml").write_text("team:\n  name: y\n", encoding="utf-8")
     custom = layout.overrides_dir(upgrade_project) / "teams"
     custom.mkdir(parents=True, exist_ok=True)
-    (custom / "mienne.yaml").write_text("team:\n  name: y\n", encoding="utf-8")
+    (custom / "mienne.yaml").write_text("team:\n  name: z\n", encoding="utf-8")
 
     report = find_orphans(upgrade_project)
 
     orphan = next(o for o in report.orphans if o.name == f"{layout.KIT_DIR}/teams")
-    assert [p.name for p in orphan.paths] == ["team-vision.yaml"]  # jamais le tier du projet
-    moved = archive_orphans(upgrade_project, report)
-    assert any(m.endswith("kit/teams/team-vision.yaml") for m in moved)
+    assert [p.name for p in orphan.paths] == ["team-vision.yaml"]
+    assert sorted(p.name for p in report.kept) == ["mon-equipe.yaml", "team-ops.yaml"]
+    assert "kept" in report.to_dict()
+    archive_orphans(upgrade_project, report)
     assert not (teams / "team-vision.yaml").exists()
+    assert (teams / "team-ops.yaml").exists()
+    assert (teams / "mon-equipe.yaml").exists()
     assert (custom / "mienne.yaml").exists()

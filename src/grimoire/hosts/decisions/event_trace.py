@@ -8,8 +8,9 @@ main (``grimoire-hook --event task_completed``), ils ne sont ni ignorés ni
 bloquants : ils laissent une ligne dans ``traces.jsonl``, dans les mêmes
 conditions que les autres événements journalisés (racine reconnue).
 
-Seuls des identifiants sont retenus, jamais un contenu : le journal est écrit
-sur disque et exporté.
+Seul l'identifiant de tâche de l'hôte est retenu (tronqué), plus le nom de
+l'événement : ni sujet, ni raison de chargement, ni chemin, ni prompt, textes
+libres que le journal, écrit sur disque et exporté, n'a pas à copier.
 """
 
 from __future__ import annotations
@@ -21,9 +22,6 @@ from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 #: Clés de la charge utile de l'hôte copiées dans le détail (nom -> clés acceptées).
 _KEPT: dict[str, tuple[str, ...]] = {
     "host_task_id": ("task_id", "taskId"),
-    "host_task_subject": ("task_subject", "taskSubject"),
-    "file_path": ("file_path", "filePath"),
-    "load_reason": ("load_reason", "loadReason"),
 }
 _MAX_VALUE = 200
 

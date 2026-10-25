@@ -49,6 +49,14 @@ def test_event_writes_a_trace_and_never_blocks(tmp_path: Path, name: str) -> Non
     assert len(traces) == 1
     assert name in traces[0]["tags"]
     assert "secret" not in json.dumps(traces[0])
+    assert "écrire" not in json.dumps(traces[0], ensure_ascii=False)  # le sujet est du texte libre de l'hôte
+
+
+def test_only_the_host_task_id_reaches_the_detail() -> None:
+    from grimoire.hosts.decisions.event_trace import _facts
+
+    raw = {"task_id": "42", "task_subject": "texte libre", "load_reason": "include", "file_path": "/etc/x", "prompt": "p"}
+    assert _facts(raw) == {"host_task_id": "42"}
 
 
 def test_no_host_declares_nor_receives_these_events() -> None:
@@ -68,3 +76,9 @@ def test_mcp_flag_changes_the_gaps() -> None:
     assert all(g.surface != "mcp" for g in gaps_for(claude))
     without = replace(claude, mcp_native=False)
     assert any(g.surface == "mcp" for g in gaps_for(without))
+
+
+def test_unknown_host_does_not_claim_it_has_no_mcp_client() -> None:
+    gap = next(g for g in gaps_for(profile_for(HostId.UNKNOWN)) if g.surface == "mcp")
+    assert "non déterminé" in gap.fallback
+    assert "sans client MCP" not in gap.fallback
