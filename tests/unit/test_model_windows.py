@@ -1,24 +1,16 @@
 """Anti-drift guard: one model-window table, shared by every consumer.
 
-context_router and context_guard historically each carried a private
-copy of MODEL_WINDOWS; the copies drifted together toward stale ids
-(issue #39, C6). These tests pin three invariants: the table object is
-shared (identity, not equality — a re-declared copy fails), historical
-exact ids keep their historical budgets, and current-generation ids
-resolve through prefix matching instead of silently falling back to the
-default window.
+Les anciens context_router et context_guard portaient chacun une copie
+privée de MODEL_WINDOWS ; les copies avaient dérivé ensemble (issue #39,
+C6). Ces tests posent deux invariants : les ids exacts historiques gardent
+leur budget historique, et les ids de génération courante se résolvent par
+préfixe au lieu de retomber silencieusement sur la fenêtre par défaut.
 """
 
 from __future__ import annotations
 
-from grimoire.tools import context_guard, context_router, model_windows
+from grimoire.tools import model_windows
 from grimoire.tools.model_windows import DEFAULT_MODEL, MODEL_WINDOWS, resolve_window
-
-
-def test_single_shared_table() -> None:
-    assert context_router.MODEL_WINDOWS is MODEL_WINDOWS
-    assert context_guard.MODEL_WINDOWS is MODEL_WINDOWS
-    assert context_router.DEFAULT_MODEL == context_guard.DEFAULT_MODEL == DEFAULT_MODEL
 
 
 def test_historical_exact_ids_unchanged() -> None:

@@ -14,7 +14,7 @@ Distributed as `grimoire-kit` on PyPI. CLI entrypoint: `grimoire`.
   - `memory/` — MemoryManager + backends (JSON, Qdrant, Ollama)
   - `mcp/` — MCP server
   - `registry/` — AgentRegistry, LocalRegistry
-  - `tools/` — HarmonyCheck, PreflightCheck, MemoryLint, etc.
+  - `tools/` — HarmonyCheck, MemoryLint, Stigmergy
 - `tests/unit/` — pytest test suite (640+ tests)
 - `framework/tools/` — standalone Python tools (distill.py, context-summarizer.py, etc.)
 - `archetypes/` — project archetypes (minimal, web-app, infra-ops, creative-studio, fix-loop)

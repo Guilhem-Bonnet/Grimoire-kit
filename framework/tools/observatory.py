@@ -1392,13 +1392,6 @@ function renderGraph() {
       // Initials
       ctx.fillStyle = color; ctx.font = 'bold 14px system-ui';
       ctx.fillText((a.persona||a.id).substring(0,2).toUpperCase(), n.x, n.y + 5);
-
-      // Trust badge
-      if (a.metrics && a.metrics.avg_trust_score) {
-        const ts = a.metrics.avg_trust_score;
-        ctx.fillStyle = ts>=90?'#3fb950':ts>=70?'#d29922':'#f85149';
-        ctx.font = 'bold 10px system-ui'; ctx.fillText('\u2b50'+ts, n.x, n.y + 46);
-      }
       ctx.globalAlpha = 1;
     });
   }
@@ -1463,9 +1456,7 @@ function renderGraph() {
       <div class="ac-header"><div class="ac-avatar" style="border-color:${color};color:${color}">${initials}</div><div><div class="ac-name" style="color:${color}">${esc(a.id)}</div><div class="ac-persona">${esc(a.persona||'')}</div></div></div>
       <div class="ac-stats">
         ${m.tasks_completed?`<div class="ac-stat"><span class="label">Tasks</span><span>${m.tasks_completed}</span></div>`:''}
-        ${m.avg_trust_score?`<div class="ac-stat"><span class="label">Trust</span><span style="color:${m.avg_trust_score>=90?'var(--green)':m.avg_trust_score>=70?'var(--yellow)':'var(--red)'}">${m.avg_trust_score}</span></div>`:''}
         ${m.cross_validations_passed?`<div class="ac-stat"><span class="label">CVTL [OK]</span><span>${m.cross_validations_passed}</span></div>`:''}
-        ${m.hup_red_count!==undefined?`<div class="ac-stat"><span class="label">HUP [!!]</span><span>${m.hup_red_count}</span></div>`:''}
       </div>
       ${capsHtml?`<div class="ac-caps">${capsHtml}</div>`:''}
     </div>`;
@@ -1521,14 +1512,6 @@ function renderMetrics() {
   const decisions = DATA.traces.filter(t => t.event_type === 'DECISION');
   cards.push({label:'Décisions',value:decisions.length,cls:decisions.length>0?'good':'',detail:'Décisions techniques'});
 
-  const hup = DATA.traces.filter(t => t.event_type.startsWith('HUP:'));
-  const hupRed = hup.filter(t => t.event_type.includes('escalation'));
-  cards.push({label:'HUP Checks',value:hup.length,cls:hupRed.length===0?'good':'warn',detail:`${hupRed.length} escalations ROUGE`});
-
-  const trusts = DATA.agents.filter(a => a.metrics&&a.metrics.avg_trust_score).map(a => a.metrics.avg_trust_score);
-  const avgTrust = trusts.length ? Math.round(trusts.reduce((a,b)=>a+b,0)/trusts.length) : 0;
-  cards.push({label:'Trust Moyen',value:avgTrust||'—',cls:avgTrust>=85?'good':avgTrust>=70?'warn':avgTrust>0?'bad':'',detail:trusts.length?`Sur ${trusts.length} agents`:'Pas de données ARG'});
-
   const hpeEvents = DATA.traces.filter(t => t.event_type.startsWith('HPE:'));
   cards.push({label:'HPE Events',value:hpeEvents.length,cls:hpeEvents.length>0?'good':'',detail:'Parallélisme HPE'});
 
@@ -1557,7 +1540,7 @@ function renderMetrics() {
   chartsHtml += `<h3>Distribution des types d'événements</h3><div class="bar-chart">`;
   sortedTypes.slice(0,15).forEach(([type,count]) => {
     const pct = (count/maxCount)*100;
-    const color = type.startsWith('HPE:') ? 'var(--accent)' : type.startsWith('HUP:') ? 'var(--yellow)' : type.startsWith('CVTL:') ? 'var(--purple)' : type.includes('ACTION') ? 'var(--green)' : type === 'DECISION' ? 'var(--orange)' : type === 'ACTIVATED' ? 'var(--cyan)' : 'var(--fg2)';
+    const color = type.startsWith('HPE:') ? 'var(--accent)' : type.startsWith('CVTL:') ? 'var(--purple)' : type.includes('ACTION') ? 'var(--green)' : type === 'DECISION' ? 'var(--orange)' : type === 'ACTIVATED' ? 'var(--cyan)' : 'var(--fg2)';
     chartsHtml += `<div class="bar-row"><span class="bar-label">${esc(type)}</span><span class="bar-track"><span class="bar-fill" style="width:${pct}%;background:${color}">${count}</span></span></div>`;
   });
   chartsHtml += '</div>';
@@ -1590,14 +1573,6 @@ function renderOverview() {
 
   const decisions = DATA.traces.filter(t => t.event_type === 'DECISION');
   cards.push({icon:'&#128161;',label:'D\u00e9cisions',value:decisions.length,cls:decisions.length>0?'good':'',sub:'Choix techniques'});
-
-  const hup = DATA.traces.filter(t => t.event_type.startsWith('HUP:'));
-  const hupEsc = hup.filter(t => t.event_type.includes('escalation'));
-  cards.push({icon:'&#128737;',label:'HUP Checks',value:hup.length,cls:hupEsc.length===0?'good':'warn',sub:hupEsc.length+' escalations'});
-
-  const trusts = DATA.agents.filter(a => a.metrics && a.metrics.avg_trust_score).map(a => a.metrics.avg_trust_score);
-  const avgTrust = trusts.length ? Math.round(trusts.reduce((a,b)=>a+b,0)/trusts.length) : 0;
-  cards.push({icon:'&#128170;',label:'Trust Moyen',value:avgTrust||'\u2014',cls:avgTrust>=85?'good':avgTrust>=70?'warn':avgTrust>0?'bad':'',sub:trusts.length?trusts.length+' agents':'Pas de donn\u00e9es ARG'});
 
   const cvtl = DATA.traces.filter(t => t.event_type.startsWith('CVTL:'));
   cards.push({icon:'&#9989;',label:'Cross-Valid.',value:cvtl.length,cls:cvtl.length>0?'good':'',sub:'CVTL checks'});
@@ -1633,9 +1608,7 @@ function renderOverview() {
     wlDiv.innerHTML = sortedAg.map(([ag,cnt]) => {
       const pct = (cnt/maxAg)*100;
       const color = agentColor(ag);
-      const trust = (DATA.agents.find(a=>a.id===ag)||{}).metrics;
-      const ts = trust && trust.avg_trust_score ? trust.avg_trust_score : '';
-      return `<div class="ov-work-row"><span class="wl-name" style="color:${color}">${esc(ag)}</span><span class="wl-bar"><span class="wl-fill" style="width:${pct}%;background:${color}">${cnt}</span></span><span class="wl-score">${ts?'\u2b50'+ts:''}</span></div>`;
+      return `<div class="ov-work-row"><span class="wl-name" style="color:${color}">${esc(ag)}</span><span class="wl-bar"><span class="wl-fill" style="width:${pct}%;background:${color}">${cnt}</span></span></div>`;
     }).join('');
   } else {
     wlDiv.innerHTML = '<div style="color:var(--fg2);font-size:.82rem">Aucune activit\u00e9 agent</div>';
@@ -1656,7 +1629,6 @@ function renderOverview() {
   // Alerts
   const alertDiv = $('#ov-alerts');
   const alerts = [];
-  hupEsc.forEach(h => alerts.push({cls:'hup',icon:'&#9888;&#65039;',text:`HUP Escalation: ${h.payload.substring(0,80)}`,ts:h.timestamp}));
   DATA.traces.filter(t => t.event_type.includes('PCE:')).forEach(p => alerts.push({cls:'info',icon:'&#128172;',text:`D\u00e9bat: ${p.payload.substring(0,80)}`,ts:p.timestamp}));
   DATA.traces.filter(t => t.payload.toLowerCase().includes('fail') || t.payload.toLowerCase().includes('error')).slice(-5).forEach(f => alerts.push({cls:'error',icon:'&#10060;',text:`${f.agent}: ${f.payload.substring(0,80)}`,ts:f.timestamp}));
 

@@ -53,12 +53,12 @@ l'atelier ni sur le cockpit. Ce n'est pas une ligne manquante de la table « Rou
 | Piloter | 34 | 29 | 85% |
 | Concevoir | 23 | 17 | 74% |
 | Executer | 18 | 12 | 67% |
-| Observer | 10 | 7 | 70% |
+| Observer | 8 | 5 | 62% |
 | Mémoire | 9 | 4 | 44% |
 | Source | 17 | 15 | 88% |
 | Contrôles × états (coque) | 80 | 80 | 100% |
 | Routes API | 26 | 26 | 100% |
-| **TOTAL** | **249** | **221** | **89%** |
+| **TOTAL** | **247** | **219** | **89%** |
 <!-- END:cockpit-coverage-summary -->
 
 *(régénéré par `python scripts/cockpit-coverage.py` — recopier sa sortie ici après toute modification des tables ci-dessous ; la CI de PR 1 le vérifie via `--check`.)*
@@ -228,10 +228,8 @@ pour ce contrôle précis.
 
 | Contrôle | Sélecteur | Handler | Route | État | Test(s) | Couvert |
 |---|---|---|---|---|---|---|
-| Vue (Runtime/Activité/RTK/Bench) | `#view-seg button` | `setView` (callback repassé à chaque `draw`, bug historique corrigé) | `GET /api/otel`, `/api/workspace/flows/runs`, `/api/events/log` | bascule visuelle + contenu | `test_observer_view_seg_bascule_correctement` | oui |
-| Vue Activité/RTK/Bench — jamais muettes | idem | idem | idem | jamais un écran vide silencieux | `test_observer_activite_rtk_bench_ne_restent_jamais_muets` | oui |
-| Vue RTK — indisponible | idem | `renderUnavailable` | aucune route serveur | message + commande CLI de repli | (couvert par le test ci-dessus) | oui |
-| Vue Bench — indisponible | idem | idem | aucune | message + commande CLI de repli | (couvert par le test ci-dessus) | oui |
+| Vue (Runtime/Activité) | `#view-seg button` | `setView` (callback repassé à chaque `draw`, bug historique corrigé) | `GET /api/otel`, `/api/workspace/flows/runs`, `/api/events/log` | bascule visuelle + contenu | `test_observer_view_seg_bascule_correctement` | oui |
+| Vue Activité — jamais muette | idem | idem | idem | jamais un écran vide silencieux | `test_observer_activite_ne_reste_jamais_muet` | oui |
 | Span OTel (ligne, clic) | `tr` | `onSelect(span)` | `GET /api/otel` | sélection dans l'inspecteur | — | non |
 | Ligne d'événement (clic) | `.line` | `onSelect(list[0])` | `GET /api/events/log` | sélection | — | non |
 | Bouton « voir la tâche » | `.btn` | `goto('executer', {task, view})` | — | navigue vers Executer | — | non |

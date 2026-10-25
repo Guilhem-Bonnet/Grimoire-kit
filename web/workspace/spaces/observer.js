@@ -1,8 +1,8 @@
 // Espace Observer — LOT 4.
 //
 // Remplace `observability.html`. Cible : le RUNTIME seulement — six KPI, coût
-// par modèle, latence, spans lents, traces par agent ; activité, RTK et bench
-// passent en onglets secondaires. Inspecteur : trace ou span.
+// par modèle, latence, spans lents, traces par agent ; l'activité passe en
+// onglet secondaire. Inspecteur : trace ou span.
 //
 // Corrections dues par la revue §4.4 : un projet sans trace obtient UN bloc
 // vide qui dit d'où viendra la donnée, jamais un mur de zéros ni une erreur
@@ -444,16 +444,6 @@ function renderActivite(root, ctx, { events }) {
   ctx.dock.log('traces', ...streams.map(([name, entries]) => `${name} : ${entries.length} évènement(s)`));
 }
 
-// RTK et Bench : aucune route serveur ne les alimente aujourd'hui (grep sur
-// forge_routes.py) — RTK vit uniquement côté CLI (`rtk gain`), et il n'existe
-// pas de bench exporté par ce serveur. Plutôt qu'un onglet qui ne réagit à
-// rien, l'un et l'autre le disent explicitement et pointent la vraie
-// commande CLI qui, elle, existe.
-function renderUnavailable(root, ctx, title, sentence, command) {
-  root.append(ctx.empty(title, sentence, command));
-  ctx.inspector.replaceChildren(text('p', 'lbl', 'Rien à inspecter : aucune donnée serveur pour cet onglet.'));
-}
-
 export async function mount(root, ctx) {
   injectStyles();
   ctx.docbar.setBreadcrumb([]);
@@ -489,30 +479,12 @@ export async function mount(root, ctx) {
     // boutons) mais plus aucun clic suivant n'appelle `onPick` : régression
     // constatée sur cet espace, cf. revue du 2026-09-14.
     ctx.docbar.setViews(
-      [{ id: 'runtime', label: 'Runtime' }, { id: 'activite', label: 'Activité' },
-       { id: 'rtk', label: 'RTK' }, { id: 'bench', label: 'Bench' }],
+      [{ id: 'runtime', label: 'Runtime' }, { id: 'activite', label: 'Activité' }],
       view,
       setView,
     );
     if (view === 'activite') {
       renderActivite(root, ctx, { events });
-      return;
-    }
-    if (view === 'rtk') {
-      renderUnavailable(
-        root, ctx, 'Observer — RTK',
-        "RTK (rust token killer) n'expose aujourd'hui aucune route serveur : ses économies "
-        + "ne vivent que côté CLI, dans son propre journal.",
-        'rtk gain --history',
-      );
-      return;
-    }
-    if (view === 'bench') {
-      renderUnavailable(
-        root, ctx, 'Observer — Bench',
-        "Aucun résultat de benchmark n'est exposé par ce serveur pour l'instant.",
-        'grimoire blueprint evals --record',
-      );
       return;
     }
     renderRuntime(root, ctx, { spans, modelRates, runs, runsTotal, streams, onActivite: () => setView('activite') });
