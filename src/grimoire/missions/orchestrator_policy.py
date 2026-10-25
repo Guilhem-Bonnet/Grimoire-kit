@@ -1,4 +1,4 @@
-"""Les réglages des rôles de l'orchestrateur, lus dans ``orchestration-policy.yaml`` (#876, lot 2).
+"""Les réglages des rôles de l'orchestrateur, lus dans ``orchestration-policy.yaml`` (#876, lots 2 à 4).
 
 Un bloc ``orchestrator:`` du fichier ``_grimoire/standard/orchestration-policy.yaml`` — à côté des ``roles:`` et
 du ``wip:`` du standard, que ce module ne lit pas — règle le rôle ``worker`` (le lanceur), le disjoncteur et le
@@ -25,6 +25,14 @@ janitor :
           wip: 1                  # relectures en même temps
           max_cycles: 2           # désaccords relecteur/checks avant l'escalade à l'humain
           permission_mode: ""     # OBLIGATOIRE quand enabled: true
+        merger:                   # lot 4 : fusionne en série les tâches relues READY dont la PR est ouverte
+          enabled: false
+          realign_max: 1          # PR réalignées sur la cible (main fusionnée dans la branche) à la fois : le débit CI
+          ignored_checks:         # checks hors du verdict quand la protection de branche ne dit pas lesquels sont requis
+            - "codecov/*"
+          max_cycles: 2           # retours au worker (CI rouge, conflit) avant l'escalade à l'humain
+          protected_paths: []     # chemins qui reviennent à l'humain, en plus des défauts (code des gardes, politique,
+                                  # workflows et hooks, pyproject, fichiers compilés) ; comparaison en casefold()
       breaker:
         threshold: 3              # échecs consécutifs avant l'ouverture du disjoncteur
       janitor:
@@ -59,6 +67,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DEFAULT_BREAKER_THRESHOLD",
     "ORCHESTRATION_FILE",
+    "MergerRole",
     "OrchestratorPolicy",
     "PolicyRead",
     "ReviewerRole",
@@ -75,6 +84,9 @@ _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
 _WORKER_KEYS = frozenset({"enabled", "model", "tier", "wip", "sessions_per_day", "permission_mode"})
 _REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode"})
 DEFAULT_MAX_CYCLES = 2
+_MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths"})
+#: Les checks qui ne disent rien du code (couverture rapportée par un service tiers) : hors du verdict par défaut.
+DEFAULT_IGNORED_CHECKS: tuple[str, ...] = ("codecov/*",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,16 +126,33 @@ class ReviewerRole:
 
 
 @dataclass(frozen=True, slots=True)
+class MergerRole:
+    """Le rôle ``merger`` (lot 4) : désactivé par défaut ; une fusion à la fois, une PR réalignée à la fois."""
+
+    enabled: bool = False
+    realign_max: int = 1
+    ignored_checks: tuple[str, ...] = DEFAULT_IGNORED_CHECKS
+    max_cycles: int = DEFAULT_MAX_CYCLES
+    protected_paths: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "realign_max": self.realign_max, "ignored_checks": list(self.ignored_checks),
+                "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths)}
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestratorPolicy:
     worker: WorkerRole = field(default_factory=WorkerRole)
     base: str = ""
     breaker_threshold: int = DEFAULT_BREAKER_THRESHOLD
     close_issue: bool = False
     reviewer: ReviewerRole = field(default_factory=ReviewerRole)
+    merger: MergerRole = field(default_factory=MergerRole)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "worker": self.worker.to_dict(), "reviewer": self.reviewer.to_dict(), "base": self.base,
+            "worker": self.worker.to_dict(), "reviewer": self.reviewer.to_dict(), "merger": self.merger.to_dict(),
+            "base": self.base,
             "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue,
         }
 
@@ -215,9 +244,30 @@ def _parse_reviewer(raw: Any) -> ReviewerRole:
     )
 
 
+def _parse_merger(raw: Any) -> MergerRole:
+    where = "orchestrator.roles.merger"
+    data = _table(raw, where, _MERGER_KEYS)
+    enabled = data.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise _InvalidPolicyError(f"{where}.enabled doit être un booléen, pas {enabled!r}")
+    globs: dict[str, tuple[str, ...]] = {}
+    for key, default in (("ignored_checks", DEFAULT_IGNORED_CHECKS), ("protected_paths", ())):
+        raw_globs = data.get(key, list(default))
+        if not isinstance(raw_globs, list) or not all(isinstance(g, str) and g.strip() for g in raw_globs):
+            raise _InvalidPolicyError(f"{where}.{key} doit être une liste de motifs non vides, pas {raw_globs!r}")
+        globs[key] = tuple(g.strip() for g in raw_globs)
+    return MergerRole(
+        enabled=enabled,
+        realign_max=_positive(data.get("realign_max", 1), f"{where}.realign_max"),
+        ignored_checks=globs["ignored_checks"],
+        max_cycles=_positive(data.get("max_cycles", DEFAULT_MAX_CYCLES), f"{where}.max_cycles"),
+        protected_paths=globs["protected_paths"],
+    )
+
+
 def _parse(block: Any) -> OrchestratorPolicy:
     top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor"}))
-    roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer"}))
+    roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer", "merger"}))
     breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold"}))
     janitor = _table(top.get("janitor", {}), "orchestrator.janitor", frozenset({"close_issue"}))
     close_issue = janitor.get("close_issue", False)
@@ -229,6 +279,7 @@ def _parse(block: Any) -> OrchestratorPolicy:
     return OrchestratorPolicy(
         worker=_parse_worker(roles["worker"]) if "worker" in roles else WorkerRole(),
         reviewer=_parse_reviewer(roles["reviewer"]) if "reviewer" in roles else ReviewerRole(),
+        merger=_parse_merger(roles["merger"]) if "merger" in roles else MergerRole(),
         base=base,
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
         close_issue=close_issue,

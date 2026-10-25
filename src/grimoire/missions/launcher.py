@@ -29,7 +29,6 @@ sessions du mandat) ne lance rien. Sans mandat, rien ne s'inscrit et le lancemen
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import uuid
@@ -86,7 +85,9 @@ Exec = Callable[[Sequence[str], Path, Mapping[str, str] | None], ExecResult]
 
 def default_exec(argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
     """Lance *argv* sans shell. Un binaire absent ou un délai dépassé est un échec lisible (127, 124), jamais une exception."""
-    full_env = {**os.environ, **env} if env else None
+    from grimoire.core.safe_git import session_environ  # une session ne reçoit pas la neutralisation git du tick
+
+    full_env = session_environ(env)
     try:
         done = subprocess.run(  # arguments fixes, sans shell
             list(argv), cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -162,6 +163,17 @@ def attest_session(service: TaskService, role: str, task_id: str) -> tuple[str, 
     except Exception as exc:  # une garde qui échoue ne lance rien
         return "", f"session {role} non inscrite : journal d'autorité en erreur ({type(exc).__name__}: {exc})"
     return session, ""
+
+
+def _freeze_repository(service: TaskService, task_id: str) -> str:
+    """Lot 4 : fige le dépôt GitHub de la tâche au journal d'autorité, avant le worker ; ``""`` ou la raison d'un refus."""
+    from grimoire.missions.review_seal import freeze_repository
+
+    try:
+        freeze_repository(service.home_root, task_id)
+    except Exception as exc:  # journal d'autorité rompu : le worker n'est pas lancé (échec fermé)
+        return f"dépôt de la tâche non figé au journal d'autorité ({type(exc).__name__}: {exc})"
+    return ""
 
 
 _LIVE = (TaskState.CLAIMED, TaskState.RUNNING, TaskState.BLOCKED, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
@@ -250,6 +262,8 @@ class WorkerLauncher:
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
         # Inscrite après la préparation : une préparation qui échoue ne consomme pas le plafond de sessions du mandat.
         session_id, refused = attest_session(service, WORKER_ACTOR, tid)
+        if not refused:
+            refused = _freeze_repository(service, tid)
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
