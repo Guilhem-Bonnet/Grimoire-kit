@@ -57,7 +57,6 @@ class WorkflowEntry:
     kind: str = KIND_COMMAND
     description: str = ""
     agents: tuple[str, ...] = ()
-    team: str = ""
     patterns: tuple[str, ...] = ()
     memory: tuple[str, ...] = ()
     triggers: tuple[str, ...] = ()
@@ -93,7 +92,6 @@ class WorkflowEntry:
             "kind": self.kind,
             "description": self.description,
             "agents": list(self.agents),
-            "team": self.team,
             "patterns": list(self.patterns),
             "memory": list(self.memory),
             "triggers": list(self.triggers),
@@ -166,7 +164,6 @@ def _read_entry(path: Path, source: str, *, default_kind: str) -> WorkflowEntry 
         kind=kind,
         description=description,
         agents=_tuple_field(meta.get("agents")),
-        team=str(meta.get("team", "")).strip(),
         patterns=_tuple_field(meta.get("patterns")),
         memory=_tuple_field(meta.get("memory")),
         triggers=_triggers(meta.get("triggers")),

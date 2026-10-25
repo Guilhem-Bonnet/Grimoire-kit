@@ -78,6 +78,12 @@ def build_kit(root: Path) -> Path:
     _write(root, "Makefile", "gates:\n\techo ok\n")
     for page in ("docs/index.md", "docs/guide.md"):
         _write(root, page, "---\naudience: utilisateur\n---\n\n# Page\n\nRien de chiffré.\n")
+    _write(root, "framework/hosts/skills/bon-skill.md", "---\ndescription: 'Une description utile.'\n---\n# Corps\n")
+    _write(
+        root,
+        "evals/skills/bon-skill/evals.json",
+        json.dumps({"skill_name": "bon-skill", "evals": [{"id": 1, "prompt": "p", "expected_output": "e"}]}),
+    )
     _write(root, "README.md", "# Kit\n\nRien de chiffré.\n")
     _write(root, "README.fr.md", "# Kit\n\nRien de chiffré.\n")
     _commit(root, "chore: départ")
@@ -149,6 +155,10 @@ def _break_doc_claims(kit: Path) -> None:
     _write(kit, "README.md", "# Kit\n\nUn taux de réussite de 99 % mesuré.\n")
 
 
+def _break_skills(kit: Path) -> None:
+    _write(kit, "framework/hosts/skills/sans-frontmatter.md", "# Pas de frontmatter\n")
+
+
 BREAKS: dict[str, Callable[[Path], None]] = {
     "ratchet": _break_ratchet,
     "changelog": _break_changelog,
@@ -159,6 +169,7 @@ BREAKS: dict[str, Callable[[Path], None]] = {
     "doc-audience": _break_doc_audience,
     "doc-commands": _break_doc_commands,
     "doc-claims": _break_doc_claims,
+    "skills": _break_skills,
 }
 
 

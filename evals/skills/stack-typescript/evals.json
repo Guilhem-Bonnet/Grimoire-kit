@@ -1,0 +1,11 @@
+{
+  "skill_name": "stack-typescript",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Crée un composant React de liste filtrable dans src/List.tsx.",
+      "expected_output": "Utilise des types stricts et des hooks, avec un test React Testing Library.",
+      "files": []
+    }
+  ]
+}

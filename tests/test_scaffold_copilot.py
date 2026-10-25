@@ -95,12 +95,11 @@ class TestPlanDirectoriesIncludesCopilot:
         names = {d.as_posix() for d in plan.directories}
         for expected in (
             "_grimoire/kit/agents",
-            "_grimoire/kit/teams",  # manifestes d'équipe, installés par cette PR
             "_grimoire/overrides/agents",
         ):
             assert any(expected in n for n in names), f"{expected} absent du plan"
 
-        assert len(plan.directories) == 18
+        assert len(plan.directories) == 17
         assert len(names) == len(plan.directories), "un répertoire est planifié deux fois"
 
 

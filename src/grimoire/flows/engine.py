@@ -803,7 +803,7 @@ class FlowEngine:
             host_id=self._host_id,
             risk_profile="standard",
         )
-        wfi = self._kernel.create_instance(ctx, recipe_id=blueprint_id)
+        wfi = self._kernel.create_instance(ctx, recipe_id=blueprint_id, inputs_ref=relative_blueprint_path(blueprint_path, self._project_root))
         ctx = replace(ctx, workflow_instance_id=wfi.id)
         wfi = self._kernel.start(wfi.id, ctx)
         wfi = self._kernel.advance_step(wfi.id, ctx, step_id=order[0])

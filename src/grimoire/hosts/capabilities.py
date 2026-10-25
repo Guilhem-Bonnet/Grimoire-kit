@@ -74,8 +74,6 @@ class HostProfile:
     permissions_native: bool = False
     #: Reads an MCP client configuration.
     mcp_native: bool = False
-    #: Can install a packaged bundle without mutating the target repository.
-    plugin_packaging: bool = False
     #: Entry-point file the host reads first, when it has one.
     instructions_entrypoint: str = ""
     notes: str = ""
@@ -88,7 +86,12 @@ class HostProfile:
         manifest = self.manifest
         if manifest is None:
             return False
-        return bool(getattr(manifest.hooks, _HOOK_FIELDS[event], False))
+        field_name = _HOOK_FIELDS.get(event)
+        if field_name is None:
+            # Événement déclaré mais non câblé (``NOT_EMITTED_EVENTS``) : aucun
+            # hôte ne le reçoit, donc aucun émetteur ne l'écrit.
+            return False
+        return bool(getattr(manifest.hooks, field_name, False))
 
     def supported_events(self) -> tuple[HookEvent, ...]:
         return tuple(e for e in HookEvent if self.supports_event(e))
@@ -105,7 +108,6 @@ class HostProfile:
                 "agent_autostart": self.agent_autostart,
                 "permissions": self.permissions_native,
                 "mcp": self.mcp_native,
-                "plugin_packaging": self.plugin_packaging,
             },
             "hook_events": [e.value for e in self.supported_events()],
             "instructions_entrypoint": self.instructions_entrypoint,
@@ -123,7 +125,6 @@ CLAUDE_CODE_PROFILE = HostProfile(
     agent_autostart=True,
     permissions_native=True,
     mcp_native=True,
-    plugin_packaging=True,
     instructions_entrypoint="CLAUDE.md",
     notes=(
         "Every surface has a native counterpart. Starting inside an agent: `claude --agent <name>` "
@@ -142,7 +143,6 @@ COPILOT_PROFILE = HostProfile(
     blocking_hooks=True,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint=".github/copilot-instructions.md",
     notes="No declarative permission table: permissions are enforced by the pre_tool_use hook instead.",
 )
@@ -156,7 +156,6 @@ CODEX_PROFILE = HostProfile(
     blocking_hooks=False,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint="AGENTS.md",
     notes="Prose entrypoint plus MCP: agents, skills and commands degrade to a described catalog.",
 )
@@ -170,7 +169,6 @@ CURSOR_PROFILE = HostProfile(
     blocking_hooks=False,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint=".cursor/rules/grimoire.mdc",
     notes="Rule files plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
@@ -184,7 +182,6 @@ GEMINI_PROFILE = HostProfile(
     blocking_hooks=False,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint="GEMINI.md",
     notes="Prose entrypoint plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
@@ -198,7 +195,6 @@ OPENCODE_PROFILE = HostProfile(
     blocking_hooks=True,
     permissions_native=False,
     mcp_native=True,
-    plugin_packaging=False,
     instructions_entrypoint=".opencode/grimoire.md",
     notes=(
         "Agents, skills, commands et MCP sont chargés depuis .opencode/ et opencode.json (vérifié, 1.17.11). "
@@ -281,8 +277,14 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
             fallback = f"entry persona named in {profile.instructions_entrypoint or 'the instructions entrypoint'}"
             events = ()
         gaps.append(CapabilityGap("agent_autostart", fallback, events))
+    if not profile.mcp_native:
+        # Hôte inconnu : on ne sait pas, on ne dit pas qu'il n'a pas de client MCP.
+        if profile.host_id is HostId.UNKNOWN:
+            gaps.append(CapabilityGap("mcp", "non déterminé : hôte inconnu, client MCP ni affirmé ni exclu"))
+        else:
+            gaps.append(CapabilityGap("mcp", "outils du kit atteints par la CLI `grimoire`, sans client MCP"))
     if not profile.blocking_hooks:
-        missing = tuple(e.value for e in HookEvent if not profile.supports_event(e))
+        missing = tuple(e.value for e in _HOOK_FIELDS if not profile.supports_event(e))
         gaps.append(CapabilityGap("blocking_hooks", "governance stated as instructions, enforced by CI only", missing))
     elif not profile.permissions_native:
         gaps.append(CapabilityGap("permissions", "permission rules enforced through the pre_tool_use hook"))

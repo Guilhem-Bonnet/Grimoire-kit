@@ -54,6 +54,10 @@
    "version": "3.36.0",
    "path": "framework/agentic-standard/profile-map.yaml"
   },
+  "04a461b9e622c2adbe600c42a93d67791e95ca330e6201605308a0a7e106f66b": {
+   "version": "3.65.0",
+   "path": "framework/tools/schema-validator.py"
+  },
   "0504d12328d73ec9f9da9f169500da5de740827f2577d8e86a509eb9dd9adf49": {
    "version": "3.35.0",
    "path": "archetypes/creative-studio/archetype.dna.yaml"

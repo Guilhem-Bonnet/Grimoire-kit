@@ -1,0 +1,11 @@
+{
+  "skill_name": "platform-reliability-sre",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Définis les SLO du service de paiement et rédige le post-mortem de l'incident d'hier.",
+      "expected_output": "Fixe SLO/SLI mesurables, instrumente l'observabilité et rédige post-mortem et runbook à partir des faits.",
+      "files": []
+    }
+  ]
+}

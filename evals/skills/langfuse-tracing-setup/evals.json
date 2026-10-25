@@ -1,0 +1,11 @@
+{
+  "skill_name": "langfuse-tracing-setup",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Active l'export de télémétrie vers Langfuse.",
+      "expected_output": "Configure les variables d'environnement, vérifie la connectivité et la correspondance events.jsonl vers traces.",
+      "files": []
+    }
+  ]
+}

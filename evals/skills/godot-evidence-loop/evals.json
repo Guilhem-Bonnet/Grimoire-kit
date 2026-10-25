@@ -1,0 +1,11 @@
+{
+  "skill_name": "godot-evidence-loop",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Valide cette scène Godot et débogue le crash au lancement.",
+      "expected_output": "Ancre chaque claim sur des diagnostics éditeur, captures, contexte de scène et logs runtime obtenus via le serveur MCP.",
+      "files": []
+    }
+  ]
+}

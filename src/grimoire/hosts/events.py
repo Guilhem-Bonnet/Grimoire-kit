@@ -45,6 +45,25 @@ class HookEvent(StrEnum):
     SUBAGENT_STOP = "subagent_stop"
     PRE_COMPACT = "pre_compact"
     STOP = "stop"
+    #: Événements que le kit sait décider (au minimum tracer) mais qu'aucun
+    #: émetteur n'écrit : voir :data:`NOT_EMITTED_EVENTS` (R31, veille
+    #: ``hooks-echec-ferme-2026-10``).
+    TASK_CREATED = "task_created"
+    TASK_COMPLETED = "task_completed"
+    INSTRUCTIONS_LOADED = "instructions_loaded"
+
+
+#: Événements déclarés avec une décision par défaut (``grimoire.event-trace`` :
+#: une ligne au TraceLedger) mais jamais émis dans la configuration d'un hôte.
+#: ``TaskCreated``/``TaskCompleted`` portent sur les tâches de l'hôte (outil
+#: ``TaskCreate``), pas sur le registre du kit ; ``InstructionsLoaded`` est une
+#: sonde de mesure, pas un gate. Un hôte ne reçoit un événement que si son
+#: manifeste le déclare (:meth:`HostProfile.supports_event`) : aucun ne le
+#: déclare, donc aucun émetteur ne l'écrit. Le point d'entrée
+#: ``grimoire host hook --event <nom>`` reste appelable à la main.
+NOT_EMITTED_EVENTS: frozenset[HookEvent] = frozenset(
+    {HookEvent.TASK_CREATED, HookEvent.TASK_COMPLETED, HookEvent.INSTRUCTIONS_LOADED}
+)
 
 
 class Enforcement(StrEnum):

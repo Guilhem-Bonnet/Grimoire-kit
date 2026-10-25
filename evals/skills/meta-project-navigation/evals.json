@@ -1,0 +1,11 @@
+{
+  "skill_name": "meta-project-navigation",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Où est configuré le port du service d'indexation ? shared-context.md et le compose se contredisent.",
+      "expected_output": "Retrouve les deux sources, arbitre la contradiction et dit laquelle fait foi.",
+      "files": []
+    }
+  ]
+}
