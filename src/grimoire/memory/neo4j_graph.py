@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,6 +47,36 @@ _COUNTABLE_RELATIONSHIPS = frozenset({
 })
 _BATCH_SIZE = 1000
 
+#: Bornes du pilote : un Neo4j injoignable échoue en quelques secondes, pas en ~30 s
+#: (le pilote retente seul, avec un backoff, tant qu'on ne le borne pas).
+_DRIVER_TIMEOUTS: dict[str, float] = {
+    "connection_timeout": 3.0,
+    "connection_acquisition_timeout": 3.0,
+    "max_transaction_retry_time": 2.0,
+}
+
+#: Après un échec, le graphe est tenu pour mort pendant ce délai : les appels suivants échouent
+#: aussitôt au lieu de repayer le délai du pilote à chaque écriture (disjoncteur).
+GRAPH_COOLDOWN_SECONDS = 60.0
+
+
+#: Erreurs du pilote qui disent « le service ne répond pas » (et non « la requête est fausse »).
+_CONNECTIVITY_NAMES = frozenset({
+    "ServiceUnavailable", "SessionExpired", "WriteServiceUnavailable", "ReadServiceUnavailable",
+    "RoutingServiceUnavailable", "DatabaseUnavailable", "ConnectionAcquisitionTimeoutError",
+})
+
+
+def _is_connectivity_error(exc: BaseException) -> bool:
+    """Connectivité ou service indisponible (y compris délais) ; pas les erreurs Cypher ni de contrainte."""
+    if isinstance(exc, OSError):  # ConnectionError, TimeoutError, socket
+        return True
+    return any(cls.__name__ in _CONNECTIVITY_NAMES for cls in type(exc).__mro__)
+
+
+class GraphUnavailableError(RuntimeError):
+    """Neo4j est tenu pour injoignable : l'appel n'a pas été tenté (disjoncteur ouvert)."""
+
 #: Collection name written before per-project Weaviate collections existed
 #: (the hardcoded default in ``grimoire.memory.profiles.BACKEND_CONNECTION``).
 #: Orphan ``GrimoireMemory`` nodes from that era carry this value even though
@@ -77,9 +108,27 @@ class Neo4jGraphStatus:
 
 
 class Neo4jMemoryGraph:
-    """Write-through Neo4j projection for memory, facts, and diary records."""
+    """Write-through Neo4j projection for memory, facts, and diary records.
 
-    def __init__(self, *, uri: str, user: str, password: str, database: str = "neo4j") -> None:
+    *project* est la clé du projet : tout nœud écrit la porte (propriété
+    ``project``), les compteurs et le repérage des orphelins ne lisent que lui,
+    et les identifiants qu'une même base partage entre projets (nœuds de code,
+    étiquettes, entités, agents) sont préfixés ``<projet>::``. Une clé
+    mono-propriété, donc valable dans toutes les éditions de Neo4j (pas de clé
+    composite, réservée à l'édition entreprise). Sans *project*, le graphe se
+    comporte comme avant : aucune clé, aucun filtre.
+
+    Le constructeur n'écrit rien : le schéma (contraintes) est posé par
+    :meth:`ensure_schema`, appelé par les commandes de synchronisation.
+    """
+
+    #: Disjoncteur et schéma : état de classe par défaut, posé par instance à l'usage.
+    _down_until: float = 0.0
+    _down_reason: str = ""
+    _schema_ready: bool = False
+    _in_schema: bool = False
+
+    def __init__(self, *, uri: str, user: str, password: str, database: str = "neo4j", project: str = "") -> None:
         if not uri:
             raise ValueError("neo4j uri is required")
         if not password:
@@ -88,8 +137,8 @@ class Neo4jMemoryGraph:
         self._uri = uri
         self._user = user
         self._database = database or "neo4j"
-        self._driver = graph_database.driver(uri, auth=(user, password))
-        self.ensure_schema()
+        self._project = project.strip()
+        self._driver = graph_database.driver(uri, auth=(user, password), **_DRIVER_TIMEOUTS)
 
     @property
     def uri(self) -> str:
@@ -99,11 +148,30 @@ class Neo4jMemoryGraph:
     def database(self) -> str:
         return self._database
 
+    @property
+    def project(self) -> str:
+        return self._project
+
+    @property
+    def key_prefix(self) -> str:
+        """Préfixe des identifiants partagés (``<projet>::``), vide sans clé de projet."""
+        return f"{self._project}::" if self._project else ""
+
+    def _key(self, identifier: str) -> str:
+        """Identifiant tel qu'il est écrit dans la base pour ce projet."""
+        return f"{self.key_prefix}{identifier}"
+
     def close(self) -> None:
         self._driver.close()
 
     def ensure_schema(self) -> None:
-        """Create idempotent constraints used by runtime projections."""
+        """Pose les contraintes idempotentes des projections — la fonction unique de pose du schéma.
+
+        Appelée explicitement par les commandes de synchronisation, et par
+        :meth:`_execute` avant la première écriture de toute voie (souvenirs,
+        faits, journaux, code, tâches). Un échec ouvre le disjoncteur : les
+        écritures suivantes échouent sans repayer le délai du pilote.
+        """
         statements = (
             "CREATE CONSTRAINT grimoire_memory_id IF NOT EXISTS "
             "FOR (m:GrimoireMemory) REQUIRE m.id IS UNIQUE",
@@ -137,8 +205,13 @@ class Neo4jMemoryGraph:
             "FOR (w:WeaviateObject) REQUIRE w.id IS UNIQUE",
             "MATCH (m:GrimoireMemory) WHERE m.deleted IS NULL SET m.deleted = false",
         )
-        for statement in statements:
-            self._execute(statement)
+        self._in_schema = True
+        try:
+            for statement in statements:
+                self._query(statement, {})
+        finally:
+            self._in_schema = False
+        self._schema_ready = True
 
     def upsert_memory(self, entry: MemoryEntry) -> None:
         """Create or update one memory node and its tag edges."""
@@ -147,7 +220,7 @@ class Neo4jMemoryGraph:
         weaviate_collection = str(metadata.get("weaviate_collection", ""))
         vector_backend = str(metadata.get("vector_backend", ""))
         payload = {
-            "id": entry.id,
+            "id": self._key(entry.id),
             "text": entry.text,
             "user_id": entry.user_id,
             "tags": list(entry.tags),
@@ -178,38 +251,41 @@ class Neo4jMemoryGraph:
                 m.weaviate_id = $weaviate_id,
                 m.weaviate_collection = $weaviate_collection,
                 m.vector_backend = $vector_backend,
+                m.project = $project,
                 m.deleted = false
             WITH m
             OPTIONAL MATCH (m)-[old:TAGGED_WITH]->(old_tag:GrimoireTag)
-            WHERE NOT old_tag.name IN $tags
+            WHERE NOT old_tag.name IN $tag_keys
             DELETE old
             """,
-            payload,
+            {**payload, "tag_keys": [self._key(t) for t in entry.tags]},
         )
         if entry.tags:
             self._execute(
                 """
                 MATCH (m:GrimoireMemory {id: $id})
                 UNWIND $tags AS tag_name
-                MERGE (t:GrimoireTag {name: tag_name})
+                MERGE (t:GrimoireTag {name: $prefix + tag_name})
+                SET t.label = tag_name, t.project = $project
                 MERGE (m)-[:TAGGED_WITH]->(t)
                 """,
-                {"id": entry.id, "tags": list(entry.tags)},
+                {"id": self._key(entry.id), "tags": list(entry.tags)},
             )
         self._execute(
             """
             MATCH (m:GrimoireMemory {id: $id})-[old:MEMORY_FOR]->()
             DELETE old
             """,
-            {"id": entry.id},
+            {"id": self._key(entry.id)},
         )
-        self._link_projected_memory(entry.id, metadata)
+        self._link_projected_memory(self._key(entry.id), metadata)
         if weaviate_id:
             self._execute(
                 """
                 MATCH (m:GrimoireMemory {id: $id})
-                MERGE (w:WeaviateObject {id: $weaviate_id})
+                MERGE (w:WeaviateObject {id: $prefix + $weaviate_id})
                 SET w.collection = $weaviate_collection,
+                    w.project = $project,
                     w.backend = $vector_backend,
                     w.source_id = $id,
                     w.updated_at = datetime()
@@ -217,7 +293,7 @@ class Neo4jMemoryGraph:
                 MERGE (w)-[:VECTOR_FOR]->(m)
                 """,
                 {
-                    "id": entry.id,
+                    "id": self._key(entry.id),
                     "weaviate_id": weaviate_id,
                     "weaviate_collection": weaviate_collection,
                     "vector_backend": vector_backend,
@@ -237,7 +313,7 @@ class Neo4jMemoryGraph:
                     MERGE (m)-[r:MEMORY_FOR {kind: $kind}]->(n)
                     SET r.updated_at = datetime()
                     """,
-                    {"memory_id": memory_id, "target_id": target_id, "kind": projection_kind},
+                    {"memory_id": memory_id, "target_id": self._key(target_id), "kind": projection_kind},
                 )
             return
 
@@ -260,7 +336,7 @@ class Neo4jMemoryGraph:
             MERGE (m)-[r:MEMORY_FOR {{kind: $kind}}]->(n)
             SET r.updated_at = datetime()
             """,
-            {"memory_id": memory_id, "target_id": target_id, "kind": projection_kind},
+            {"memory_id": memory_id, "target_id": self._key(target_id), "kind": projection_kind},
         )
 
     def delete_memory(self, entry_id: str) -> None:
@@ -270,12 +346,13 @@ class Neo4jMemoryGraph:
             MATCH (m:GrimoireMemory {id: $id})
             SET m.deleted = true
             """,
-            {"id": entry_id},
+            {"id": self._key(entry_id)},
         )
 
     def upsert_fact(self, fact: KnowledgeFact) -> None:
         """Create or update a structured fact projection."""
         payload = fact.to_dict()
+        payload["id"] = self._key(fact.id)
         payload["metadata_json"] = json.dumps({
             "wing": fact.wing,
             "hall": fact.hall,
@@ -292,9 +369,12 @@ class Neo4jMemoryGraph:
                 f.confidence = $confidence,
                 f.source_memory_id = $source_memory_id,
                 f.metadata_json = $metadata_json,
+                f.project = $project,
                 f.created_at = $created_at
-            MERGE (s:GrimoireEntity {name: $subject})
-            MERGE (o:GrimoireEntity {name: $object})
+            MERGE (s:GrimoireEntity {name: $prefix + $subject})
+            SET s.label = $subject, s.project = $project
+            MERGE (o:GrimoireEntity {name: $prefix + $object})
+            SET o.label = $object, o.project = $project
             MERGE (s)-[:FACT_SUBJECT]->(f)
             MERGE (f)-[:FACT_OBJECT]->(o)
             """,
@@ -307,7 +387,7 @@ class Neo4jMemoryGraph:
                 MATCH (m:GrimoireMemory {id: $source_memory_id})
                 MERGE (f)-[:SOURCED_FROM]->(m)
                 """,
-                {"id": fact.id, "source_memory_id": fact.source_memory_id},
+                {"id": self._key(fact.id), "source_memory_id": self._key(fact.source_memory_id)},
             )
 
     def invalidate_fact(self, subject: str, predicate: str, object_: str, *, ended: str) -> None:
@@ -319,7 +399,7 @@ class Neo4jMemoryGraph:
               predicate: $predicate,
               object: $object
             })
-            WHERE coalesce(f.valid_to, '') = ''
+            WHERE coalesce(f.valid_to, '') = '' AND ($project = '' OR f.project = $project OR f.project IS NULL)
             SET f.valid_to = $ended
             """,
             {"subject": subject, "predicate": predicate, "object": object_, "ended": ended},
@@ -335,11 +415,13 @@ class Neo4jMemoryGraph:
                 d.entry = $entry,
                 d.entry_format = $entry_format,
                 d.related_memory_id = $related_memory_id,
+                d.project = $project,
                 d.created_at = $created_at
-            MERGE (a:GrimoireAgent {name: $agent_name})
+            MERGE (a:GrimoireAgent {name: $prefix + $agent_name})
+            SET a.label = $agent_name, a.project = $project
             MERGE (a)-[:WROTE_DIARY]->(d)
             """,
-            record.to_dict(),
+            {**record.to_dict(), "id": self._key(record.id)},
         )
         if record.related_memory_id:
             self._execute(
@@ -348,17 +430,21 @@ class Neo4jMemoryGraph:
                 MATCH (m:GrimoireMemory {id: $related_memory_id})
                 MERGE (d)-[:RELATED_TO]->(m)
                 """,
-                {"id": record.id, "related_memory_id": record.related_memory_id},
+                {"id": self._key(record.id), "related_memory_id": self._key(record.related_memory_id)},
             )
 
     def upsert_code_nodes(self, nodes: list[CodeNode]) -> int:
         """Create or update code graph nodes."""
-        for batch in _batches([node.to_dict() for node in nodes]):
+        rows = [{**node.to_dict(), "id": self._key(node.id), "local_id": node.id} for node in nodes]
+        for batch in _batches(rows):
             self._execute(
                 """
                 UNWIND $nodes AS row
                 MERGE (n:CodeNode {id: row.id})
-                SET n.kind = row.kind,
+                SET n.local_id = row.local_id,
+                    n.project = $project,
+                    n.external = false,
+                    n.kind = row.kind,
                     n.name = row.name,
                     n.file_path = row.file_path,
                     n.line_start = row.line_start,
@@ -376,7 +462,11 @@ class Neo4jMemoryGraph:
 
     def upsert_code_edges(self, edges: list[CodeEdge]) -> int:
         """Create or update code graph edges."""
-        for batch in _batches([edge.to_dict() for edge in edges]):
+        rows = [
+            {**edge.to_dict(), "from_node": self._key(edge.from_node), "to_node": self._key(edge.to_node)}
+            for edge in edges
+        ]
+        for batch in _batches(rows):
             self._execute(
                 """
                 UNWIND $edges AS row
@@ -392,6 +482,8 @@ class Neo4jMemoryGraph:
                     a.is_test = false,
                     a.is_public = true,
                     a.placeholder = true,
+                    a.external = true,
+                    a.project = $project,
                     a.created_at = datetime()
                 MERGE (b:CodeNode {id: row.to_node})
                 ON CREATE SET
@@ -405,6 +497,8 @@ class Neo4jMemoryGraph:
                     b.is_test = false,
                     b.is_public = true,
                     b.placeholder = true,
+                    b.external = true,
+                    b.project = $project,
                     b.created_at = datetime()
                 MERGE (a)-[r:CODE_EDGE {kind: row.kind}]->(b)
                 SET r.updated_at = datetime()
@@ -416,6 +510,7 @@ class Neo4jMemoryGraph:
     def upsert_mission(self, mission: Mission) -> None:
         """Create or update one mission node."""
         payload = mission.to_dict()
+        payload["id"] = self._key(mission.id)
         payload["scope_json"] = json.dumps(payload.pop("scope", {}), ensure_ascii=False, sort_keys=True)
         self._execute(
             """
@@ -428,6 +523,7 @@ class Neo4jMemoryGraph:
                 m.risk_profile = $risk_profile,
                 m.created_at = $created_at,
                 m.created_by = $created_by,
+                m.project = $project,
                 m.scope_json = $scope_json
             """,
             payload,
@@ -436,6 +532,8 @@ class Neo4jMemoryGraph:
     def upsert_task(self, task: MissionTask) -> None:
         """Create or update one task node and its mission/dependency edges."""
         payload = task.to_dict()
+        payload["id"] = self._key(task.id)
+        payload["mission_id"] = self._key(task.mission_id)
         dependencies = list(payload.pop("dependencies", []))
         claim = payload.pop("claim", None)
         payload["acceptance_json"] = json.dumps(payload.pop("acceptance", []), ensure_ascii=False, sort_keys=True)
@@ -462,6 +560,7 @@ class Neo4jMemoryGraph:
                 t.guardrails_json = $guardrails_json,
                 t.expected_evidence_json = $expected_evidence_json,
                 t.claim_json = $claim_json,
+                t.project = $project,
                 t.created_at = $created_at
             WITH t
             MATCH (m:GrimoireMission {id: $mission_id})
@@ -474,30 +573,34 @@ class Neo4jMemoryGraph:
             MATCH (t:GrimoireTask {id: $id})-[old:DEPENDS_ON]->()
             DELETE old
             """,
-            {"id": task.id},
+            {"id": self._key(task.id)},
         )
         for dependency in dependencies:
             self._execute(
                 """
                 MATCH (t:GrimoireTask {id: $task_id})
                 MERGE (target:GrimoireTask {id: $target})
+                ON CREATE SET target.project = $project
                 MERGE (t)-[r:DEPENDS_ON {kind: $kind}]->(target)
                 """,
-                {"task_id": task.id, "target": dependency["target"], "kind": dependency["kind"]},
+                {"task_id": self._key(task.id), "target": self._key(dependency["target"]), "kind": dependency["kind"]},
             )
         if claim:
             self._execute(
                 """
                 MATCH (t:GrimoireTask {id: $task_id})
-                MERGE (a:GrimoireAgent {name: $actor_id})
+                MERGE (a:GrimoireAgent {name: $prefix + $actor_id})
+                SET a.label = $actor_id, a.project = $project
                 MERGE (t)-[:CLAIMED_BY]->(a)
                 """,
-                {"task_id": task.id, "actor_id": claim["actor_id"]},
+                {"task_id": self._key(task.id), "actor_id": claim["actor_id"]},
             )
 
     def upsert_ledger_event(self, event: LedgerEvent) -> None:
         """Create or update one ledger event and link it to its entity."""
         payload = event.to_dict()
+        payload["id"] = self._key(event.id)
+        payload["entity_id"] = self._key(event.entity_id)
         payload["payload_json"] = json.dumps(payload.pop("payload", {}), ensure_ascii=False, sort_keys=True)
         self._execute(
             """
@@ -507,6 +610,7 @@ class Neo4jMemoryGraph:
                 e.entity_id = $entity_id,
                 e.entity_kind = $entity_kind,
                 e.actor_id = $actor_id,
+                e.project = $project,
                 e.created_at = $created_at,
                 e.payload_json = $payload_json
             """,
@@ -519,7 +623,7 @@ class Neo4jMemoryGraph:
                 MATCH (e:GrimoireLedgerEvent {id: $event_id})
                 MERGE (m)-[:HAS_EVENT]->(e)
                 """,
-                {"entity_id": event.entity_id, "event_id": event.id},
+                {"entity_id": self._key(event.entity_id), "event_id": self._key(event.id)},
             )
         elif event.entity_kind == "task":
             self._execute(
@@ -528,12 +632,15 @@ class Neo4jMemoryGraph:
                 MATCH (e:GrimoireLedgerEvent {id: $event_id})
                 MERGE (t)-[:HAS_EVENT]->(e)
                 """,
-                {"entity_id": event.entity_id, "event_id": event.id},
+                {"entity_id": self._key(event.entity_id), "event_id": self._key(event.id)},
             )
 
     def upsert_incident(self, incident: Incident) -> None:
         """Create or update one task incident."""
         payload = incident.to_dict()
+        for field_name in ("id", "mission_id", "task_id"):
+            if payload.get(field_name):
+                payload[field_name] = self._key(str(payload[field_name]))
         payload["causes_json"] = json.dumps(payload.pop("causes", []), ensure_ascii=False, sort_keys=True)
         payload["recommended_actions_json"] = json.dumps(
             payload.pop("recommended_actions", []),
@@ -553,6 +660,7 @@ class Neo4jMemoryGraph:
                 i.summary = $summary,
                 i.causes_json = $causes_json,
                 i.recommended_actions_json = $recommended_actions_json,
+                i.project = $project,
                 i.created_at = $created_at
             WITH i
             MATCH (t:GrimoireTask {id: $task_id})
@@ -564,6 +672,9 @@ class Neo4jMemoryGraph:
     def upsert_evidence_pack(self, pack: EvidencePack) -> None:
         """Create or update one evidence pack and link it to its task."""
         payload = pack.to_dict()
+        for field_name in ("id", "task_id"):
+            if payload.get(field_name):
+                payload[field_name] = self._key(str(payload[field_name]))
         payload["items_json"] = json.dumps(payload.pop("items", []), ensure_ascii=False, sort_keys=True)
         payload["coverage_json"] = json.dumps(payload.pop("coverage", {}), ensure_ascii=False, sort_keys=True)
         self._execute(
@@ -575,6 +686,7 @@ class Neo4jMemoryGraph:
                 p.profile = $profile,
                 p.items_json = $items_json,
                 p.coverage_json = $coverage_json,
+                p.project = $project,
                 p.created_at = $created_at
             WITH p
             MATCH (t:GrimoireTask {id: $task_id})
@@ -586,10 +698,13 @@ class Neo4jMemoryGraph:
     def upsert_verdict(self, verdict: VerificationVerdict) -> None:
         """Create or update one verification verdict and link it to task/evidence."""
         payload = verdict.to_dict()
+        for field_name in ("id", "task_id", "evidence_pack_id"):
+            if payload.get(field_name):
+                payload[field_name] = self._key(str(payload[field_name]))
         payload["checks_json"] = json.dumps(payload.pop("checks", []), ensure_ascii=False, sort_keys=True)
         decision = payload.pop("decision", {})
         payload["decision_json"] = json.dumps(decision, ensure_ascii=False, sort_keys=True)
-        payload["decision_id"] = f"decision:{verdict.id}"
+        payload["decision_id"] = self._key(f"decision:{verdict.id}")
         payload["decision_close_task"] = bool(decision.get("close_task", False))
         payload["decision_reopen_task"] = bool(decision.get("reopen_task", False))
         payload["decision_create_incident"] = bool(decision.get("create_incident", False))
@@ -603,6 +718,7 @@ class Neo4jMemoryGraph:
                 v.profile = $profile,
                 v.checks_json = $checks_json,
                 v.decision_json = $decision_json,
+                v.project = $project,
                 v.created_by = $created_by,
                 v.created_at = $created_at
             WITH v
@@ -623,6 +739,7 @@ class Neo4jMemoryGraph:
                 d.reopen_task = $decision_reopen_task,
                 d.create_incident = $decision_create_incident,
                 d.decision_json = $decision_json,
+                d.project = $project,
                 d.created_at = $created_at,
                 d.updated_at = datetime()
             MERGE (v)-[:PRODUCED_DECISION]->(d)
@@ -640,9 +757,9 @@ class Neo4jMemoryGraph:
                 WHERE t.id IN $task_ids
                 DELETE old
                 """,
-                {"task_ids": task_ids},
+                {"task_ids": [self._key(t) for t in task_ids]},
             )
-        unique_refs = _unique_reference_rows(refs, from_key="task_id")
+        unique_refs = self._keyed_code_refs(_unique_reference_rows(refs, from_key="task_id"), "task_id")
         for batch in _batches(unique_refs):
             self._execute(
                 """
@@ -666,9 +783,9 @@ class Neo4jMemoryGraph:
                 WHERE p.id IN $evidence_pack_ids
                 DELETE old
                 """,
-                {"evidence_pack_ids": evidence_pack_ids},
+                {"evidence_pack_ids": [self._key(p) for p in evidence_pack_ids]},
             )
-        unique_refs = _unique_reference_rows(refs, from_key="evidence_pack_id")
+        unique_refs = self._keyed_code_refs(_unique_reference_rows(refs, from_key="evidence_pack_id"), "evidence_pack_id")
         for batch in _batches(unique_refs):
             self._execute(
                 """
@@ -682,6 +799,13 @@ class Neo4jMemoryGraph:
                 {"refs": batch},
             )
         return len(unique_refs)
+
+    def _keyed_code_refs(self, rows: list[dict[str, str]], from_key: str) -> list[dict[str, str]]:
+        """Les deux bouts d'une référence (tâche ou preuve, nœud de code) portent la clé du projet."""
+        return [
+            {**row, from_key: self._key(row[from_key]), "code_node_id": self._key(row["code_node_id"])}
+            for row in rows
+        ]
 
     def stats(self) -> dict[str, int]:
         """Return key graph counts."""
@@ -722,17 +846,25 @@ class Neo4jMemoryGraph:
         unscoped purge would delete another project's memories (#527).
         """
         collections = sorted({collection, LEGACY_GENERIC_COLLECTION} - {""})
-        records, _, _ = self._driver.execute_query(
+        records = self._read(
             """
             MATCH (m:GrimoireMemory)
             WHERE m.weaviate_collection IN $collections AND NOT m.id IN $known_ids
+              AND ($project = '' OR m.project = $project OR m.project IS NULL)
             RETURN m.id AS id, m.weaviate_collection AS collection
             """,
             collections=collections,
-            known_ids=list(known_ids),
-            database_=self._database,
+            known_ids=sorted({*known_ids, *(self._key(i) for i in known_ids)}),
         )
-        return [{"id": str(record["id"]), "collection": str(record["collection"])} for record in records]
+        prefix = self.key_prefix
+        found: list[dict[str, str]] = []
+        for record in records:
+            node_id = str(record["id"])
+            # ``id`` est l'identifiant du souvenir dans le store (celui que comparent les appelants) ;
+            # ``node_id`` est celui du nœud, à rendre tel quel à :meth:`purge_memory_nodes`.
+            local = node_id[len(prefix):] if prefix and node_id.startswith(prefix) else node_id
+            found.append({"id": local, "node_id": node_id, "collection": str(record["collection"])})
+        return found
 
     def purge_memory_nodes(self, ids: list[str]) -> int:
         """``DETACH DELETE`` the given ``GrimoireMemory`` nodes by id.
@@ -770,35 +902,62 @@ class Neo4jMemoryGraph:
     def _count(self, label: str) -> int:
         if label not in _COUNTABLE_NODE_LABELS:
             raise ValueError(f"Unsupported Neo4j count label: {label}")
-        records, _, _ = self._driver.execute_query(
-            f"MATCH (n:{label}) RETURN count(n) AS count",
-            database_=self._database,
+        records = self._read(
+            f"MATCH (n:{label}) WHERE $project = '' OR n.project = $project OR n.project IS NULL RETURN count(n) AS count",
         )
         return int(records[0]["count"]) if records else 0
 
     def _count_memories(self, *, deleted: bool) -> int:
-        records, _, _ = self._driver.execute_query(
+        records = self._read(
             """
             MATCH (n:GrimoireMemory)
-            WHERE coalesce(n.deleted, false) = $deleted
+            WHERE coalesce(n.deleted, false) = $deleted AND ($project = '' OR n.project = $project OR n.project IS NULL)
             RETURN count(n) AS count
             """,
             deleted=deleted,
-            database_=self._database,
         )
         return int(records[0]["count"]) if records else 0
 
     def _relationship_count(self, relationship: str) -> int:
         if relationship not in _COUNTABLE_RELATIONSHIPS:
             raise ValueError(f"Unsupported Neo4j relationship count: {relationship}")
-        records, _, _ = self._driver.execute_query(
-            f"MATCH ()-[r:{relationship}]->() RETURN count(r) AS count",
-            database_=self._database,
+        # Une arête appartient au projet de son nœud de départ.
+        records = self._read(
+            f"MATCH (a)-[r:{relationship}]->() WHERE $project = '' OR a.project = $project OR a.project IS NULL RETURN count(r) AS count",
         )
         return int(records[0]["count"]) if records else 0
 
     def _execute(self, statement: str, params: dict[str, Any] | None = None) -> None:
-        self._driver.execute_query(statement, **(params or {}), database_=self._database)
+        """Écriture : pose le schéma une fois, puis exécute. Toutes les voies d'écriture passent ici."""
+        if not self._schema_ready and not self._in_schema:
+            self.ensure_schema()
+        self._query(statement, params or {})
+
+    def _read(self, statement: str, **params: Any) -> list[Any]:
+        records, _, _ = self._query(statement, params)
+        return list(records)
+
+    def _query(self, statement: str, params: dict[str, Any]) -> Any:
+        """Seul point d'appel du pilote : borne (voir ``_DRIVER_TIMEOUTS``) et disjoncteur."""
+        now = time.monotonic()
+        if now < self._down_until:
+            raise GraphUnavailableError(
+                f"Neo4j injoignable ({self._down_reason}) ; prochaine tentative dans {self._down_until - now:.0f}s. "
+                "Le souvenir est écrit dans le store principal ; `grimoire memory graph sync-memories` "
+                "rattrape le graphe une fois Neo4j joignable."
+            )
+        # ``project`` et ``prefix`` sont fournis à chaque requête : un paramètre
+        # inutilisé par le texte Cypher est ignoré par le pilote.
+        merged = {"project": self._project, "prefix": self.key_prefix, **params}
+        try:
+            return self._driver.execute_query(statement, **merged, database_=self._database)
+        except Exception as exc:
+            if _is_connectivity_error(exc):
+                self._down_until = time.monotonic() + GRAPH_COOLDOWN_SECONDS
+                self._down_reason = f"{type(exc).__name__}: {str(exc)[:100]}"
+            # Une erreur de requête ou de contrainte laisse le disjoncteur fermé : les écritures
+            # valides qui suivent ne sont pas suspendues pour une écriture fautive.
+            raise
 
 
 def _unique_reference_rows(refs: list[dict[str, str]], *, from_key: str) -> list[dict[str, str]]:

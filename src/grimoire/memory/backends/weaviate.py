@@ -246,6 +246,7 @@ class WeaviateBackend(MemoryBackend):
         user_id: str = "",
         tags: tuple[str, ...] = (),
         metadata: dict[str, Any] | None = None,
+        created_at: str = "",
     ) -> MemoryEntry:
         existing = self.recall(entry_id)
         if existing is not None:
@@ -254,7 +255,7 @@ class WeaviateBackend(MemoryBackend):
                 raise RuntimeError(f"Weaviate upsert failed for existing entry: {entry_id}")
             return updated
 
-        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        ts = created_at or time.strftime("%Y-%m-%dT%H:%M:%S")
         props = self._entry_to_properties(
             text,
             entry_id=entry_id,

@@ -65,7 +65,7 @@ class _FakeGraphDatabase:
     driver_calls: ClassVar[list[tuple[str, tuple[str, str]]]] = []
 
     @classmethod
-    def driver(cls, uri: str, *, auth: tuple[str, str]) -> _FakeDriver:
+    def driver(cls, uri: str, *, auth: tuple[str, str], **_options: Any) -> _FakeDriver:
         cls.driver_calls.append((uri, auth))
         return cls.driver_instance
 
@@ -90,6 +90,9 @@ def test_init_creates_driver_and_schema(fake_graph: tuple[type[Any], _FakeDriver
     graph = neo4j_memory_graph(uri="bolt://localhost:7687", user="neo4j", password="secret", database="grimoire")
 
     assert graph_database.driver_calls == [("bolt://localhost:7687", ("neo4j", "secret"))]
+    # P15 : le constructeur n'écrit rien ; le schéma est posé par ensure_schema().
+    assert driver.calls == []
+    graph.ensure_schema()
     assert sum("CREATE CONSTRAINT" in call.statement for call in driver.calls) == 15
 
     graph.close()
@@ -364,13 +367,15 @@ class _OrphanQueryDriver:
         return ([], None, None)
 
 
-def _bare_graph(driver: Any) -> Any:
+def _bare_graph(driver: Any, project: str = "") -> Any:
     """A Neo4jMemoryGraph wired straight to *driver*, skipping __init__'s schema DDL."""
     from grimoire.memory.neo4j_graph import Neo4jMemoryGraph
 
     graph = object.__new__(Neo4jMemoryGraph)
     graph._driver = driver  # type: ignore[attr-defined]
     graph._database = "neo4j"  # type: ignore[attr-defined]
+    graph._project = project  # type: ignore[attr-defined]
+    graph._schema_ready = True  # type: ignore[attr-defined]
     return graph
 
 
@@ -381,7 +386,7 @@ class TestFindOrphanMemoryNodes:
 
         orphans = graph.find_orphan_memory_nodes(known_ids=frozenset({"kept-1"}), collection="ProjectMemory")
 
-        assert orphans == [{"id": "orphan-1", "collection": "GrimoireMemory"}]
+        assert orphans == [{"id": "orphan-1", "node_id": "orphan-1", "collection": "GrimoireMemory"}]
         call = _find_call(driver, "NOT m.id IN $known_ids")
         assert call.kwargs["known_ids"] == ["kept-1"]
 

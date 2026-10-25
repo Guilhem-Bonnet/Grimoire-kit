@@ -59,7 +59,8 @@ _OLLAMA_DEFAULT_URL = "http://localhost:11434"
 _QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
 _MEMORY_TARGET_COMPOSE_FILE = "docker-compose.memory-target.yml"
 _QDRANT_DOCKER_RUN = (
-    "docker run -d --name qdrant -p 6333:6333 -v qdrant_storage:/qdrant/storage qdrant/qdrant"
+    "docker run -d --name qdrant --restart unless-stopped -p 6333:6333 "
+    "-v qdrant_storage:/qdrant/storage qdrant/qdrant:v1.19.1"
 )
 
 # Directories reconciled by ``up`` (mirrors app.py doctor requirements).
@@ -179,7 +180,7 @@ def check_weaviate(target: Path | None = None) -> EnvCheck | None:
         return EnvCheck("env_weaviate", passed=True, level="ok", detail=f"Weaviate reachable at {url}")
     remedy = f"docker compose -f {_MEMORY_TARGET_COMPOSE_FILE} up -d"
     if target is not None and not (target / _MEMORY_TARGET_COMPOSE_FILE).is_file():
-        remedy = "docker run -d --name weaviate -p 8080:8080 semitechnologies/weaviate"
+        remedy = "docker run -d --name weaviate --restart unless-stopped -p 8080:8080 semitechnologies/weaviate:1.35.19"
     return EnvCheck(
         "env_weaviate",
         passed=True,
@@ -234,6 +235,8 @@ def check_redis(target: Path | None = None) -> EnvCheck | None:
     mem = _memory_config(target) if target is not None else None
     if mem is None or (mem.short_term_backend != "redis" and not mem.redis_url.strip()):
         return None
+    from grimoire.tools.memory_setup import _START_COMMANDS
+
     url = mem.redis_url.strip() or "redis://localhost:6379/0"
     if _tcp_reachable(url, 6379):
         return EnvCheck("env_redis", passed=True, level="ok", detail=f"Redis hot memory reachable at {url}")
@@ -242,7 +245,7 @@ def check_redis(target: Path | None = None) -> EnvCheck | None:
         passed=True,
         level="warn",
         detail=f"Redis declared but not reachable at {url} (hot memory is down, durable stores unaffected)",
-        remedy="docker run -d --name grimoire-redis -p 6379:6379 redis:7-alpine",
+        remedy=_START_COMMANDS["redis"],
     )
 
 

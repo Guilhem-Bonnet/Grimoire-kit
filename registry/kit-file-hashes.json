@@ -486,6 +486,10 @@
    "version": "3.4.2",
    "path": "framework/orchestrator-gateway.md"
   },
+  "1f483a2c75e129b46c22d497ca2116b218ed374d4fabe377decec238960e6e05": {
+   "version": "3.65.0",
+   "path": "framework/memory/docker-compose.memory.tpl.yml"
+  },
   "1fe6c4eca99fb53c4204310cf7724b1e9655da634d719574e17718c6a92a730e": {
    "version": "3.16.0",
    "path": "framework/tools/rnd_engine.py"
@@ -1205,6 +1209,10 @@
   "4f48cafd08d570204d1aa5d6c53bea9d28f5a0b7bf5b6a33af6cba68f962b4ab": {
    "version": "3.63.0",
    "path": "framework/workflows/party-mode.md"
+  },
+  "4f74a9ed16f1ab163fdb234ec1e1929496d831e5f6a726c0093cd96a0c0811ed": {
+   "version": "3.65.0",
+   "path": "framework/memory/k8s-qdrant.tpl.yaml"
   },
   "4f92d0051658af4b04666e1595aae12d1fd98397caa9f10e490c3884decb92e0": {
    "version": "3.6.1",
@@ -4041,6 +4049,10 @@
   "f089a1bd69f338c6a9193f5c0d429b7f68a48de3e67fd77638e8945228a9ff18": {
    "version": "3.48.0",
    "path": "framework/tools/tool-registry.py"
+  },
+  "f08bd6d6b54a06f891d56626936fef1bac1e8f832f9cc2935c2f93d169da4ba7": {
+   "version": "3.65.0",
+   "path": "framework/memory/docker-compose.memory.tpl.yml"
   },
   "f0b87ec73514e53b459effb6f9541b00f1a76ee189e3bc443b5921e4eab6ac26": {
    "version": "3.36.0",
