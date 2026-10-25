@@ -15,8 +15,9 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
    - d'une autre session que le relecteur lancé : refusé, rien ne bouge (un humain peut relire et accepter lui-même) ;
    - lancé sous mandat : le mandat doit être encore actif et la provenance tenir au journal d'autorité, sinon le reçu
      est refusé **définitivement** — une révocation entre le lancement et le jugement ne lève pas la garde ;
-   - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : noté ; l'acceptation et la fusion
-     sont les lots suivants. ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
+   - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : scellé au journal d'autorité
+     (:mod:`.review_seal` : tête, arbre, pack et empreinte du reçu, qui doivent être ceux que le reçu déclare), puis
+     noté ; la fusion et l'acceptation sont au merger (:mod:`.merger`, lot 4), qui comparent à ce sceau. ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
    - ``NOT-READY`` : la tâche repart au worker (``needs_verification → running``, session du worker reprise par
      ``claude --bg --resume <son uuid>``, constats en note). Une reprise qui échoue remet la tâche en revue et sera
      retentée. Au cycle ``max_cycles`` (2 par défaut, compté depuis la dernière réponse humaine), ou sans session à
@@ -66,6 +67,7 @@ __all__ = [
     "REVIEW_TIMEOUT",
     "ReviewOutcome",
     "ReviewStage",
+    "entered_review_at",
     "session_digest",
 ]
 
@@ -105,6 +107,23 @@ class ReviewOutcome:
                 "session": self.session, "model": self.model}
 
 
+def entered_review_at(service: TaskService, task_id: str) -> str:
+    """La dernière remise en revue par le worker ; celles du relecteur (reprise ou escalade ratée) n'en sont pas.
+
+    Lot 4 : le merger qui remet une tâche en revue (reprise du worker ratée, question non posée) n'en fait pas une
+    nouvelle entrée ; un READY qu'il trouve périmé en est une (``task.merge_requeued``) : il appelle une relecture.
+    """
+    from grimoire.missions.merger import MERGE_REQUEUED_EVENT, MERGER_ACTOR
+
+    moves = [
+        e.created_at for e in service.ledger.events_for(task_id)
+        if (e.event_type == "task.transitioned" and e.payload.get("to_state") == TaskState.NEEDS_VERIFICATION.value
+            and e.payload.get("actor_id") not in (REVIEWER_ACTOR, MERGER_ACTOR))
+        or e.event_type == MERGE_REQUEUED_EVENT
+    ]
+    return moves[-1] if moves else ""
+
+
 def _family(model: str) -> str:
     lowered = model.lower()
     return next((alias for alias in _ALTERNATE if alias in lowered), lowered)
@@ -137,13 +156,7 @@ class ReviewStage:
         return [e for e in self._service.ledger.events_for(task_id) if e.event_type == kind]
 
     def _entered_review_at(self, task_id: str) -> str:
-        """La dernière remise en revue par le worker ; celles du relecteur (reprise ou escalade ratée) n'en sont pas."""
-        moves = [
-            e.created_at for e in self._service.ledger.events_for(task_id)
-            if e.event_type == "task.transitioned" and e.payload.get("to_state") == TaskState.NEEDS_VERIFICATION.value
-            and e.payload.get("actor_id") != REVIEWER_ACTOR
-        ]
-        return moves[-1] if moves else ""
+        return entered_review_at(self._service, task_id)
 
     def _verdicts(self, task_id: str) -> dict[str, str]:
         """Relecture (id de ``task.review_launched``) → verdict noté."""
@@ -220,6 +233,12 @@ class ReviewStage:
             worktree = None
         if not launch.get("cwd") or not cwd.is_dir() or worktree is None:
             return ReviewOutcome(tid, "launch", "failed", "worktree de la tâche introuvable : rien à relire")
+        from grimoire.core.safe_git import same_repo
+        from grimoire.missions.review_seal import branch_head, seal_review_launch
+
+        if unsafe := same_repo(root, cwd):  # un worktree qui n'est pas de ce dépôt (.git réécrit) n'est pas relu
+            return ReviewOutcome(tid, "launch", "failed", f"worktree refusé : {unsafe}")
+        head = branch_head(root, tid)
         under_mandate = MandateStore(root).state().active
         session_id, refused = attest_session(self._service, REVIEWER_ACTOR, tid)
         if refused:
@@ -233,10 +252,16 @@ class ReviewStage:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}"
             state = record_failure(root, self._policy.breaker_threshold, f"{tid} : relecteur non lancé : {detail}")
             return ReviewOutcome(tid, "launch", "failed", f"claude --bg a échoué : {detail}" + (" — disjoncteur ouvert" if state.open else ""))
+        try:  # la tête relue, au journal d'autorité : un commit posé pendant la relecture ne sera pas scellé
+            seal_review_launch(root, tid, session_digest(session_id), head)
+            launch_sealed = True
+        except Exception:  # journal rompu : le jugement refusera de sceller (échec fermé)
+            launch_sealed = False
         self._service.ledger.append_event(
             REVIEW_LAUNCHED_EVENT, tid, "task", REVIEWER_ACTOR,
             {"task_id": tid, "session": match.group(1), "session_sha256": session_digest(session_id), "model": model,
-             "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate},
+             "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate,
+             "head": head, "launch_sealed": launch_sealed},
         )
         return ReviewOutcome(tid, "launch", "launched", f"relecteur {match.group(1)} dans {cwd}", match.group(1), model)
 
@@ -261,8 +286,12 @@ class ReviewStage:
         return started is not None and (self._now or datetime.now(UTC)) - started > REVIEW_TIMEOUT
 
     def _judge(self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent) -> ReviewOutcome | None:
+        from grimoire.core.safe_git import same_repo
+
         tid = task.id
         root = Path(str(review.payload.get("cwd") or launch.get("cwd") or ""))
+        if unsafe := same_repo(self._service.home_root, root):  # rien n'est jugé dans un worktree d'un autre dépôt
+            return ReviewOutcome(tid, "refused", "failed", f"worktree refusé : {unsafe}")
         try:
             receipt = read_receipt(root, tid)
         except ValueError as exc:
@@ -302,10 +331,33 @@ class ReviewStage:
                 self._record_judged(task, review, "stale", 0)
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({refusal}) : relu de nouveau")
-            self._record_judged(task, review, READY, 0)
+            sealed, why = self._seal(task, review, receipt, root)
+            if why:
+                self._record_judged(task, review, "stale", 0)
+                self._stop(review)
+                return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({why}) : relu de nouveau")
+            self._record_judged(task, review, READY, 0, sealed)
             self._stop(review)
             return ReviewOutcome(tid, "ready", "done", f"READY, {len(receipt.criteria_met)} critère(s) tenu(s)")
         return self._bounce(task, launch, review, receipt)
+
+    def _seal(self, task: MissionTask, review: LedgerEvent, receipt: ReviewReceipt, root: Path) -> tuple[dict[str, Any], str]:
+        """Lot 4 : scelle le READY au journal d'autorité (tête, arbre, pack, empreinte du reçu), copie au ledger.
+
+        Un arbre ou un pack qui ne sont pas ceux du reçu : ``("…", raison)``, le READY est relu. Un journal qui refuse
+        l'écriture : le READY est noté non scellé, et ni la fusion ni l'acceptation sous mandat ne s'y appuieront.
+        """
+        from grimoire.missions.review_seal import seal_judgment
+
+        try:
+            entry = seal_judgment(self._service.home_root, task.id, review.id, root, receipt,
+                                  str(review.payload.get("session_sha256") or ""))
+        except ValueError as exc:
+            return {}, str(exc)
+        except Exception as exc:  # journal rompu : rien n'est scellé, la garde en aval refusera
+            return {"sealed": False, "seal_error": f"{type(exc).__name__}: {exc}"[:300]}, ""
+        keys = ("head", "tree", "tree_fingerprint", "evidence_pack_sha256", "receipt_sha256")
+        return {"sealed": True, "seal": {k: entry.get(k, "") for k in keys}, "seal_seq": entry.get("seq")}, ""
 
     def _provenance_refusal(self, task: MissionTask, review: LedgerEvent, receipt: ReviewReceipt) -> str:
         """Une relecture lancée sous mandat s'atteste au journal d'autorité au jugement aussi ; ``""`` si elle tient.
@@ -344,10 +396,12 @@ class ReviewStage:
         self._stop(review)
         return ReviewOutcome(tid, "forged", "done", detail + (f" — mandat {revoked.id} révoqué" if revoked is not None else ""))
 
-    def _record_judged(self, task: MissionTask, review: LedgerEvent, verdict: str, cycle: int) -> None:
+    def _record_judged(
+        self, task: MissionTask, review: LedgerEvent, verdict: str, cycle: int, extra: dict[str, Any] | None = None,
+    ) -> None:
         self._service.ledger.append_event(
             REVIEW_JUDGED_EVENT, task.id, "task", REVIEWER_ACTOR,
-            {"task_id": task.id, "review": review.id, "verdict": verdict, "cycle": cycle},
+            {"task_id": task.id, "review": review.id, "verdict": verdict, "cycle": cycle, **(extra or {})},
         )
 
     def _stop(self, review: LedgerEvent) -> None:

@@ -423,7 +423,17 @@ def test_accept_under_mandate_requires_the_attested_review(project: Path) -> Non
     write_receipt(project, tid, READY, reviewer_id="worker", reviewer_session="s-r")
     with pytest.raises(MandateRefusedError, match="auteur"):
         accept_task(task, project, evidence, "relu", "orch", **kwargs)
-    write_receipt(project, tid, READY, reviewer_id="agent:rev", reviewer_session="s-r")
+    receipt = write_receipt(project, tid, READY, reviewer_id="agent:rev", reviewer_session="s-r")
+    # Lot 4 (revue #927) : sous mandat, seul le READY scellé au journal d'autorité par le relecteur du tick fait foi.
+    with pytest.raises(MandateRefusedError, match="aucun jugement READY scellé"):
+        accept_task(task, project, evidence, "relu", "orch", **kwargs)
+    from grimoire.missions.review_seal import seal_judgment
+
+    seal_judgment(project, tid, "rev-1", project, receipt)
+    (project / "preuve.md").write_text("# preuve modifiée après le jugement\n", encoding="utf-8")
+    with pytest.raises(MandateRefusedError, match="changé depuis le jugement"):
+        accept_task(task, project, evidence, "relu", "orch", **kwargs)
+    (project / "preuve.md").write_text("# preuve\n", encoding="utf-8")
     outcome = accept_task(task, project, evidence, "relu", "orch", **kwargs)
     assert outcome.verdict.created_by.startswith("orchestrator:MND-")
     assert outcome.receipt.reviewer_id == outcome.verdict.created_by and outcome.receipt.reviewer_session == "s-r"
