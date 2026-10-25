@@ -36,6 +36,7 @@ TARGET_AGENT = "security-auditor"  # agent réel de l'archétype, déjà ciblé 
 NEEDS_HOSTS_SLUG = "hosts-declare-enabled"  # slug fixe imposé par project_upgrade.py — jamais un autre
 OVERRIDE_MIGRATION_SPECIALTY = "override-migration-e2e-review-needed"
 MEMORY_LINK_SPECIALTY = "memory-link-e2e-no-carrier"
+MEMORY_LINK_GONE_SPECIALTY = "memory-link-e2e-carrier-gone"
 REPAIR_NO_SUB_SPECIALTY = "repair-e2e-no-substitution"
 REPAIR_WITH_SUB_SPECIALTY = "repair-e2e-with-substitution"
 
@@ -148,9 +149,9 @@ def test_accepter_une_proposition_type_needs_hosts_declare_les_hotes_actives(
 def test_une_proposition_repair_sans_substitution_n_offre_pas_accepter(
     workspace: Page, real_project: Path
 ) -> None:
-    """`piloter.js::repairHasEvidentSubstitution` cache « Accepter » quand
-    `carrier_reason` ne porte pas le motif de substitution — `_accept_repair`
-    refuserait de toute façon (revue humaine requise). Le bouton « Refuser »,
+    """Le serveur (`accept_blocker`, joint à `proposals_view`) sait qu'une
+    réparation sans motif de substitution sera toujours refusée (revue
+    humaine requise) : la fiche cache « Accepter ». Le bouton « Refuser »,
     lui, doit rester utilisable : cette réparation n'est pas bloquée à vie."""
     from grimoire.proposals import create_manual_proposal, list_proposals
 
@@ -208,12 +209,12 @@ def test_accepter_une_proposition_repair_avec_substitution_corrige_le_fichier(
     assert fixture.read_text(encoding="utf-8") == "Voir dead-target-v3 pour le détail.\n"
 
 
-def test_accepter_une_proposition_override_migration_refusee_journalise_le_motif(
+def test_une_migration_override_en_revue_dit_quoi_faire_a_la_main(
     workspace: Page, real_project: Path
 ) -> None:
-    """Sans le préfixe « conversion sûre » dans `carrier_reason`, `_accept_
-    override_migration` refuse avant même de toucher un override — motif
-    affiché via `ctx.dock.echo` (`#dock-echo`), jamais une exception muette."""
+    """Sans le préfixe « conversion sûre » dans `carrier_reason`, l'acceptation
+    est toujours refusée (revue humaine requise) : la fiche ne montre pas
+    « Accepter » mais le motif et la commande à lancer, sur la ligne même."""
     from grimoire.core import layout
     from grimoire.proposals import create_manual_proposal, list_proposals
 
@@ -240,10 +241,11 @@ def test_accepter_une_proposition_override_migration_refusee_journalise_le_motif
     _open_piloter(workspace)
     row = _row(workspace, OVERRIDE_MIGRATION_SPECIALTY)
     row.wait_for()
-    row.get_by_role("button", name="Accepter").click()
-
-    workspace.wait_for_function("() => document.getElementById('dock-echo')?.textContent.includes('refusé')")
-    assert "revue humaine requise" in workspace.locator("#dock-echo").inner_text()
+    assert row.get_by_role("button", name="Accepter").count() == 0
+    manual = row.locator("[data-manual]")
+    assert manual.is_visible()
+    assert "revue humaine requise" in manual.inner_text()
+    assert f"grimoire agent override convert {migration_agent} --dry-run" in manual.inner_text()
     # La proposition reste affichée (jamais acceptée par erreur) — on la
     # referme explicitement pour ne pas polluer le projet partagé de session.
     row.get_by_role("button", name="Refuser").click()
@@ -256,12 +258,14 @@ def test_accepter_une_proposition_override_migration_refusee_journalise_le_motif
     override.unlink(missing_ok=True)
 
 
-def test_accepter_une_proposition_memory_link_refusee_sans_porteur(
+def test_une_proposition_memory_link_sans_porteur_n_offre_pas_accepter(
     workspace: Page, real_project: Path
 ) -> None:
-    """`target_agent` vide : `_accept_memory_link` refuse nommément plutôt que
-    de deviner un porteur — le déclencheur documente déjà ce cas comme « à
-    placer à la main »."""
+    """`target_agent` vide : l'acceptation serait toujours refusée (le
+    déclencheur conclut lui-même « à placer à la main »). La fiche ne montre
+    donc pas « Accepter » — avant ce correctif le bouton était là, et son
+    refus partait dans la Console que la coque ne montre plus : « Accepter ne
+    fait rien ». Elle dit à la place quoi raccorder, et où."""
     from grimoire.proposals import create_manual_proposal, list_proposals
 
     slug = "memory-link-e2e"
@@ -270,16 +274,21 @@ def test_accepter_une_proposition_memory_link_refusee_sans_porteur(
         slug=slug,
         specialty=MEMORY_LINK_SPECIALTY,
         artifact_type="memory-link",
+        carrier_reason="aucun porteur plausible : à placer à la main",
         artifact_ref="_grimoire/_memory/some-fiche.md",
     )
 
     _open_piloter(workspace)
     row = _row(workspace, MEMORY_LINK_SPECIALTY)
     row.wait_for()
-    row.get_by_role("button", name="Accepter").click()
+    assert row.get_by_role("button", name="Accepter").count() == 0, (
+        "une fiche sans porteur ne doit jamais offrir « Accepter » : le serveur la refuse toujours"
+    )
+    manual = row.locator("[data-manual]")
+    assert manual.is_visible()
+    assert "aucun porteur plausible" in manual.inner_text()
+    assert "_grimoire/_memory/some-fiche.md" in manual.inner_text()
 
-    workspace.wait_for_function("() => document.getElementById('dock-echo')?.textContent.includes('refusé')")
-    assert "aucun porteur plausible" in workspace.locator("#dock-echo").inner_text()
     row.get_by_role("button", name="Refuser").click()
     workspace.wait_for_function(
         "(specialty) => !Array.from(document.querySelectorAll('.pl-prop-row')).some((r) => r.textContent.includes(specialty))",
@@ -287,3 +296,47 @@ def test_accepter_une_proposition_memory_link_refusee_sans_porteur(
     )
     proposals = {p.slug: p for p in list_proposals(real_project, sync=False)}
     assert proposals[slug].status == "rejected"
+
+
+def test_une_acceptation_refusee_affiche_le_motif_sur_la_ligne(
+    workspace: Page, real_project: Path
+) -> None:
+    """Un refus que seul le disque révèle (porteur nommé mais disparu) ne peut
+    pas être prédit : « Accepter » reste offert, et son refus s'affiche sur
+    la ligne même, visible, dans une zone `role="status"` — plus jamais dans
+    la Console que la coque ne montre plus (P62). Le bouton redevient
+    utilisable, la proposition reste en attente."""
+    from grimoire.proposals import create_manual_proposal, list_proposals
+
+    slug = "memory-link-e2e-porteur-disparu"
+    create_manual_proposal(
+        real_project,
+        slug=slug,
+        specialty=MEMORY_LINK_GONE_SPECIALTY,
+        artifact_type="memory-link",
+        target_agent="agent-disparu-e2e",
+        carrier_reason="porteur par mot entier : agent-disparu-e2e",
+        artifact_ref="_grimoire/_memory/decisions-log.md",
+    )
+
+    _open_piloter(workspace)
+    row = _row(workspace, MEMORY_LINK_GONE_SPECIALTY)
+    row.wait_for()
+    accept = row.get_by_role("button", name="Accepter")
+    accept.click()
+
+    status = row.locator("[role='status']")
+    status.filter(has_text="agent porteur introuvable").wait_for()
+    assert status.is_visible(), "le refus doit se lire sur la ligne, pas dans un panneau masqué"
+    assert status.get_attribute("aria-live") == "polite"
+    assert "Refusé" in status.inner_text()
+    assert accept.is_enabled(), "le bouton redevient utilisable après le refus"
+    assert accept.inner_text() == "Accepter"
+
+    proposals = {p.slug: p for p in list_proposals(real_project, sync=False)}
+    assert proposals[slug].status == "pending", "un refus ne marque jamais la proposition acceptée"
+    row.get_by_role("button", name="Refuser").click()
+    workspace.wait_for_function(
+        "(specialty) => !Array.from(document.querySelectorAll('.pl-prop-row')).some((r) => r.textContent.includes(specialty))",
+        arg=MEMORY_LINK_GONE_SPECIALTY,
+    )

@@ -69,6 +69,7 @@ from grimoire.core.exceptions import GrimoireRuntimeError
 
 __all__ = [
     "Proposal",
+    "accept_blocker",
     "accept_proposal",
     "count_pending",
     "create_manual_proposal",
@@ -947,6 +948,10 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
             "reason": proposal.resolved_reason or "déjà acceptée",
         }
 
+    blocker = accept_blocker(proposal)
+    if blocker:
+        return {"ok": False, "error": blocker}
+
     accept_by_type = {
         "skill": _accept_skill,
         "override-migration": _accept_override_migration,
@@ -979,6 +984,60 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
     )
     _save_proposal(path, accepted)
     return {"ok": True, **result}
+
+
+def accept_blocker(proposal: Proposal) -> str:
+    """Le refus qu'`accept_proposal` opposera à coup sûr à *proposal*, ou ``""``.
+
+    Lu sur la seule proposition, sans toucher au disque : ce sont les refus
+    qui ne dépendent d'aucun état du projet (porteur absent, substitution
+    non évidente, revue humaine requise, commande impossible à déduire). Un
+    refus qui dépend du disque (agent porteur disparu, fichier modifié
+    depuis, skill déjà présent) n'est jamais prédit ici : il reste possible
+    à l'acceptation et s'affiche alors tel quel.
+
+    :func:`accept_proposal` l'appelle avant tout ``_accept_*`` : le cockpit
+    (``proposals_view``) s'en sert pour ne pas montrer « Accepter » là où
+    il échouerait toujours, et c'est le même texte que le refus réel —
+    jamais deux règles qui pourraient diverger.
+    """
+    kind = proposal.artifact_type
+    if kind == "memory-link":
+        if not proposal.target_agent:
+            ref = proposal.artifact_ref or "la fiche"
+            return (
+                "aucun porteur plausible pour cette fiche — à raccorder à la main : "
+                f"ajouter `{ref}` au champ `context:` de l'agent choisi"
+            )
+        if not proposal.artifact_ref:
+            return "proposition sans fiche à raccorder (artifact_ref vide)"
+    elif kind == "skill":
+        if not proposal.target_agent:
+            return "aucun agent de repli à qui attacher ce skill"
+    elif kind == "repair":
+        if not proposal.artifact_ref:
+            return "proposition sans référence à corriger (artifact_ref vide)"
+        if _REPAIR_SUBSTITUTION_RE.match(proposal.carrier_reason) is None:
+            return (
+                "aucune substitution évidente pour cette référence — revue humaine requise "
+                f"({proposal.carrier_reason or 'motif absent'})"
+            )
+    elif kind == "override-migration":
+        if not proposal.carrier_reason.startswith("conversion sûre"):
+            return (
+                f"revue humaine requise avant conversion — {proposal.carrier_reason or 'diff non résumé'} "
+                f"(voir `grimoire agent override convert {proposal.target_agent} --dry-run`)"
+            )
+    elif kind == "needs-hosts":
+        if proposal.slug == _NEEDS_HOSTS_COMMANDS_SLUG:
+            return (
+                "aucune commande ne peut être déduite mécaniquement pour ces besoins — "
+                f"déclarez `needs.commands` à la main dans project-context.yaml pour : "
+                f"{proposal.artifact_ref or '(voir la proposition)'}"
+            )
+        if proposal.slug != _NEEDS_HOSTS_ENABLED_SLUG:
+            return f"type de proposition « needs-hosts » inconnu : {proposal.slug}"
+    return ""
 
 
 def _accept_agent(project_root: Path, proposal: Proposal) -> dict[str, Any]:
@@ -1014,9 +1073,7 @@ def _accept_agent(project_root: Path, proposal: Proposal) -> dict[str, Any]:
 def _accept_skill(project_root: Path, proposal: Proposal) -> dict[str, Any]:
     from grimoire.core import layout
 
-    if not proposal.target_agent:
-        raise RuntimeError("aucun agent de repli à qui attacher ce skill")
-
+    # Porteur absent : refusé en amont par `accept_blocker`.
     skills_dir = layout.overrides_dir(project_root) / layout.SKILLS_SUBDIR
     dest = skills_dir / f"{proposal.slug}.md"
     if dest.is_file():
@@ -1062,11 +1119,7 @@ def _accept_override_migration(project_root: Path, proposal: Proposal) -> dict[s
     """
     from grimoire.core.override_drift import OverrideConversionRefusedError, convert_override
 
-    if not proposal.carrier_reason.startswith("conversion sûre"):
-        raise RuntimeError(
-            f"revue humaine requise avant conversion — {proposal.carrier_reason or 'diff non résumé'} "
-            f"(voir `grimoire agent override convert {proposal.target_agent} --dry-run`)"
-        )
+    # « revue nécessaire » : refusé en amont par `accept_blocker`.
     try:
         result = convert_override(project_root, proposal.target_agent, dry_run=False)
     except (FileNotFoundError, OverrideConversionRefusedError) as exc:
@@ -1077,8 +1130,8 @@ def _accept_override_migration(project_root: Path, proposal: Proposal) -> dict[s
 def _accept_memory_link(project_root: Path, proposal: Proposal) -> dict[str, Any]:
     """Apply a ``"memory-link"`` proposal (issue #490): add the fiche to the carrier's ``context:``.
 
-    Refuses when no plausible carrier was found (``target_agent`` empty) —
-    the déclencheur's own conclusion for that case is "à placer à la main",
+    Refused upstream (:func:`accept_blocker`) when no plausible carrier was
+    found (``target_agent`` empty) — the déclencheur's own conclusion for that case is "à placer à la main",
     and writing to a resolved-by-guess agent instead would contradict the
     proposal it is accepting. Never refuses for the carrier lacking an
     override, though: when the carrier is a kit agent with no override yet,
@@ -1092,11 +1145,7 @@ def _accept_memory_link(project_root: Path, proposal: Proposal) -> dict[str, Any
     from grimoire.hosts.collect import collect_agents, effective_agent_frontmatter
     from grimoire.tools.workspace_routes import _agent_override_path, _agent_target, _apply_agent_updates
 
-    if not proposal.target_agent:
-        raise RuntimeError("aucun porteur plausible pour cette fiche — à raccorder à la main")
-    if not proposal.artifact_ref:
-        raise RuntimeError("proposition sans fiche à raccorder (artifact_ref vide)")
-
+    # Porteur ou fiche absents : refusés en amont par `accept_blocker`.
     root = project_root.resolve()
     try:
         agents = list(collect_agents(root))
@@ -1138,14 +1187,10 @@ def _accept_repair(project_root: Path, proposal: Proposal) -> dict[str, Any]:
     occurrence of the dead target on it — never every occurrence in the file,
     which could touch text the citing line has nothing to do with.
     """
-    if not proposal.artifact_ref:
-        raise RuntimeError("proposition sans référence à corriger (artifact_ref vide)")
+    # Référence vide ou substitution non évidente : refusées en amont par `accept_blocker`.
     match = _REPAIR_SUBSTITUTION_RE.match(proposal.carrier_reason)
-    if match is None:
-        raise RuntimeError(
-            f"aucune substitution évidente pour cette référence — revue humaine requise "
-            f"({proposal.carrier_reason or 'motif absent'})"
-        )
+    if match is None:  # pragma: no cover - garanti par accept_blocker
+        raise RuntimeError(accept_blocker(proposal))
     old, new = match.group("old"), match.group("new")
 
     source, _, rest = proposal.artifact_ref.partition(":")
@@ -1211,15 +1256,7 @@ def _accept_needs_hosts(project_root: Path, proposal: Proposal) -> dict[str, Any
     root = project_root.resolve()
     config_path = root / "project-context.yaml"
 
-    if proposal.slug == _NEEDS_HOSTS_COMMANDS_SLUG:
-        raise RuntimeError(
-            "aucune commande ne peut être déduite mécaniquement pour ces besoins — "
-            f"déclarez `needs.commands` à la main dans project-context.yaml pour : "
-            f"{proposal.artifact_ref or '(voir la proposition)'}"
-        )
-    if proposal.slug != _NEEDS_HOSTS_ENABLED_SLUG:
-        raise RuntimeError(f"type de proposition « needs-hosts » inconnu : {proposal.slug}")
-
+    # `needs-declare-commands` et slug inconnu : refusés en amont par `accept_blocker`.
     detected = [host for host in proposal.artifact_ref.split(",") if host]
     data = load_yaml_roundtrip(config_path) if config_path.is_file() else {}
     hosts = data.get("hosts")
