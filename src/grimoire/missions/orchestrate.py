@@ -217,7 +217,10 @@ def _one_pass(
         from grimoire.missions.launcher import default_exec
         from grimoire.missions.reviewer import ReviewStage
 
-        reviews = ReviewStage(service, policy, exec_=exec_ or default_exec)()
+        try:
+            reviews = ReviewStage(service, policy, exec_=exec_ or default_exec, now=now)()
+        except Exception as exc:  # une étape en erreur ne casse pas le tick : récolte, admission et lancements sont faits
+            attention.append(f"relecteur : étape en erreur, rien n'est jugé à ce tick ({type(exc).__name__}: {exc})")
     from grimoire.missions.breaker import read_breaker
 
     state_of_breaker = read_breaker(service.home_root)

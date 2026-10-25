@@ -145,19 +145,22 @@ def session_env(session_id: str) -> dict[str, str]:
 def attest_session(service: TaskService, role: str, task_id: str) -> tuple[str, str]:
     """``(identifiant, refus)`` d'une session à lancer : un uuid neuf, inscrit au journal d'autorité sous mandat actif.
 
-    Sans mandat actif (ou journal illisible), l'identifiant n'est pas inscrit : rien n'est attesté, rien n'est refusé.
-    Un refus d'inscription (plafond du mandat, rôle déjà tenu) rend ``("", raison)`` : la session n'est pas lancée.
+    Sans mandat actif (ou journal illisible à la lecture), l'identifiant n'est pas inscrit : rien n'est attesté, rien
+    n'est refusé — aucun geste ne sera pris sous mandat. Un refus d'inscription (plafond du mandat, rôle déjà tenu) ou
+    une écriture du journal qui échoue rend ``("", raison)`` : la session n'est pas lancée (échec fermé).
     """
     from grimoire.missions.mandate import MandateRefusedError, MandateStore
 
     session = str(uuid.uuid4())
-    store = MandateStore(service.home_root)
-    if not store.state().active:
-        return session, ""
     try:
+        store = MandateStore(service.home_root)
+        if not store.state().active:
+            return session, ""
         store.register_session(session, role, task_id)
     except MandateRefusedError as exc:
         return "", f"session {role} non inscrite au journal d'autorité : {exc}"
+    except Exception as exc:  # une garde qui échoue ne lance rien
+        return "", f"session {role} non inscrite : journal d'autorité en erreur ({type(exc).__name__}: {exc})"
     return session, ""
 
 
@@ -238,9 +241,6 @@ class WorkerLauncher:
         base, into, why = self._base()
         if not base:
             return LaunchOutcome(tid, "failed", f"préparation refusée : {why}")
-        session_id, refused = attest_session(service, WORKER_ACTOR, tid)
-        if refused:
-            return LaunchOutcome(tid, "skipped", refused)
         try:
             wt = create_task_worktree(service, tid, repo=service.home_root, base=base, into=into, actor=WORKER_ACTOR)
             service.context(tid)
@@ -248,6 +248,11 @@ class WorkerLauncher:
         except (GrimoireError, ValueError, OSError) as exc:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
+        # Inscrite après la préparation : une préparation qui échoue ne consomme pas le plafond de sessions du mandat.
+        session_id, refused = attest_session(service, WORKER_ACTOR, tid)
+        if refused:
+            service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
+            return LaunchOutcome(tid, "skipped", refused)
         model = self._model_for(admit)
         result = self._exec(self._argv(tid, model, session_id), wt.path, session_env(session_id))
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None

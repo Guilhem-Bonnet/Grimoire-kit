@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,12 @@ def launched_and_in_review(projet: Path, host: FakeHost) -> tuple[str, dict[str,
 
 def review_event(projet: Path, tid: str):  # type: ignore[no-untyped-def]
     return [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_LAUNCHED_EVENT][-1]
+
+
+def reviewer_sid(host: FakeHost) -> str:
+    """L'identifiant du dernier relecteur lancé, lu dans sa ligne de commande : le ledger n'en garde que l'empreinte."""
+    argv = [a for a in host.of("claude", "--bg") if "--name" in a and a[a.index("--name") + 1].startswith("grimoire-review-")][-1]
+    return argv[argv.index("--session-id") + 1]
 
 
 def receipt_from(worktree: Path, tid: str, verdict: str, session: str, *, reviewer: str = "reviewer") -> None:
@@ -270,7 +277,7 @@ def test_un_recu_ready_du_relecteur_est_note_et_sa_session_arretee(projet: Path,
     tid, launch = launched_and_in_review(projet, host)
     tick(projet, host)
     review = review_event(projet, tid)
-    receipt_from(Path(str(launch["cwd"])), tid, "READY", str(review.payload["session_id"]))
+    receipt_from(Path(str(launch["cwd"])), tid, "READY", reviewer_sid(host))
     report = tick(projet, host)
     assert [(o.action, o.status) for o in report.reviews] == [("ready", "done")]
     assert host.of("claude", "stop") == [["claude", "stop", review.payload["session"]]]
@@ -310,7 +317,7 @@ def test_not_ready_renvoie_au_worker_puis_escalade_au_cycle_max(projet: Path, ho
     tid, launch = launched_and_in_review(projet, host)
     worktree = Path(str(launch["cwd"]))
     tick(projet, host)
-    receipt_from(worktree, tid, "NOT-READY", str(review_event(projet, tid).payload["session_id"]))
+    receipt_from(worktree, tid, "NOT-READY", reviewer_sid(host))
     first = tick(projet, host)
     assert [(o.action, o.status) for o in first.reviews] == [("bounce", "done")]
     task = TaskService(projet).require(tid)
@@ -321,7 +328,7 @@ def test_not_ready_renvoie_au_worker_puis_escalade_au_cycle_max(projet: Path, ho
     to_review(projet, tid)
     tick(projet, host)
     assert len([e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_LAUNCHED_EVENT]) == 2
-    receipt_from(worktree, tid, "NOT-READY", str(review_event(projet, tid).payload["session_id"]))
+    receipt_from(worktree, tid, "NOT-READY", reviewer_sid(host))
     second = tick(projet, host)
     assert [(o.action, o.status) for o in second.reviews] == [("escalate", "done")]
     task = TaskService(projet).require(tid)
@@ -347,7 +354,7 @@ def test_sous_mandat_worker_et_relecteur_sont_inscrits_avant_leur_lancement(proj
     store = MandateStore(projet)
     workers = {e["session_id"] for e in store.sessions(role="worker", task_id=tid)}
     reviewers = {e["session_id"] for e in store.sessions(role="reviewer", task_id=tid)}
-    assert workers == {launch["session_id"]} and reviewers == {review_event(projet, tid).payload["session_id"]}
+    assert workers == {launch["session_id"]} and reviewers == {reviewer_sid(host)}
 
 
 def test_sous_mandat_un_verdict_forge_revoque_le_mandat(projet: Path, host: FakeHost) -> None:
@@ -365,6 +372,157 @@ def test_sous_mandat_le_recu_du_relecteur_inscrit_est_accepte(projet: Path, host
     _grant(projet)
     tid, launch = launched_and_in_review(projet, host)
     tick(projet, host)
-    receipt_from(Path(str(launch["cwd"])), tid, "READY", str(review_event(projet, tid).payload["session_id"]))
+    receipt_from(Path(str(launch["cwd"])), tid, "READY", reviewer_sid(host))
     assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("ready", "done")]
     assert MandateStore(projet).state().active
+
+
+# ── Revue adversariale du lot 3 : chaque défaut trouvé, épinglé ─────────────────
+
+
+def _verdict_in(worktree: Path, tid: str, verdict: str = "READY", statuses: tuple[str, str] = ("met", "met")) -> Path:
+    path = worktree / "_grimoire-output" / "reviews" / tid / "verdict.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return _verdict_file(path.parent, verdict, statuses)
+
+
+def _review_cli(worktree: Path, tid: str, verdict_file: Path, session: str, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", session)
+    return runner.invoke(app, ["task", "review", tid, "--criteria", str(verdict_file), "--reviewer", "reviewer",
+                               "--project-root", str(worktree)])
+
+
+def test_le_worker_ne_peut_pas_ecrire_sa_propre_relecture(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    tid, launch = launched_and_in_review(projet, host)
+    worktree = Path(str(launch["cwd"]))
+    out = _review_cli(worktree, tid, _verdict_in(worktree, tid), str(launch["session_id"]), monkeypatch)
+    assert out.exit_code == 1 and "celle du worker" in out.output
+    assert EvidenceService(worktree / EVIDENCE).list_packs(tid) == [] and read_receipt(worktree, tid) is None  # rien d'écrit
+
+
+def test_sous_mandat_une_session_non_inscrite_ne_peut_pas_relire(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    _grant(projet)
+    tid, launch = launched_and_in_review(projet, host)
+    worktree = Path(str(launch["cwd"]))
+    out = _review_cli(worktree, tid, _verdict_in(worktree, tid), "une-session-quelconque", monkeypatch)
+    assert out.exit_code == 1 and read_receipt(worktree, tid) is None
+    tick(projet, host)  # le relecteur lancé, inscrit, peut écrire
+    assert _review_cli(worktree, tid, _verdict_in(worktree, tid), reviewer_sid(host), monkeypatch).exit_code == 0
+
+
+def test_le_ledger_ne_garde_que_l_empreinte_de_la_session_du_relecteur(projet: Path, host: FakeHost) -> None:
+    tid, _ = launched_and_in_review(projet, host)
+    tick(projet, host)
+    payload = review_event(projet, tid).payload
+    assert "session_id" not in payload and reviewer_sid(host) not in json.dumps(payload)
+
+
+def test_un_recu_refuse_au_journal_d_autorite_le_reste_au_tick_suivant(projet: Path, host: FakeHost) -> None:
+    """Sous mandat, la session du relecteur qui signe au nom du propriétaire : refus définitif, jamais READY ensuite."""
+    _grant(projet)
+    tid, launch = launched_and_in_review(projet, host)
+    tick(projet, host)
+    receipt_from(Path(str(launch["cwd"])), tid, "READY", reviewer_sid(host), reviewer="amelia")
+    first = tick(projet, host)
+    assert [(o.action, o.status) for o in first.reviews] == [("refused", "done")]
+    assert tick(projet, host).reviews == () and MandateStore(projet).state().active
+
+
+def test_un_mandat_revoque_depuis_le_lancement_ne_leve_pas_la_garde(projet: Path, host: FakeHost) -> None:
+    _grant(projet)
+    tid, launch = launched_and_in_review(projet, host)
+    tick(projet, host)
+    MandateStore(projet).revoke("test", "révoqué entre le lancement et le jugement")
+    receipt_from(Path(str(launch["cwd"])), tid, "READY", reviewer_sid(host))
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("refused", "done")] and "mandat inactif" in report.reviews[0].detail
+
+
+def _stage(projet: Path, host: FakeHost, now: datetime | None = None):  # type: ignore[no-untyped-def]
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+    from grimoire.missions.reviewer import ReviewStage
+
+    return ReviewStage(TaskService(projet), load_orchestrator_policy(projet).policy, exec_=host, now=now)()  # type: ignore[arg-type]
+
+
+def test_un_relecteur_muet_est_arrete_relance_puis_escalade(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.reviewer import MAX_RELAUNCHES, REVIEW_TIMEOUT
+
+    tid, _ = launched_and_in_review(projet, host)
+    later = datetime.now(UTC)
+    for n in range(MAX_RELAUNCHES + 1):
+        assert [(o.action, o.status) for o in _stage(projet, host, later)] == [("launch", "launched")], n
+        later += REVIEW_TIMEOUT + timedelta(minutes=1)
+        assert [(o.action, o.status) for o in _stage(projet, host, later)] == [("timeout", "done")], n
+    assert [(o.action, o.status) for o in _stage(projet, host, later)] == [("escalate", "done")]
+    assert TaskService(projet).require(tid).status is TaskState.WAITING
+    assert len(host.of("claude", "stop")) == MAX_RELAUNCHES + 1  # chaque relecteur muet est arrêté
+
+
+def test_un_ready_perime_est_relu(projet: Path, host: FakeHost) -> None:
+    tid, launch = launched_and_in_review(projet, host)
+    worktree = Path(str(launch["cwd"]))
+    tick(projet, host)
+    receipt_from(worktree, tid, "READY", reviewer_sid(host))
+    (worktree / "README.md").write_text("modifié après la relecture\n", encoding="utf-8")
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("stale", "done")]
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("launch", "launched")]
+
+
+def test_une_reprise_du_worker_ratee_remet_la_tache_en_revue(projet: Path, host: FakeHost) -> None:
+    tid, launch = launched_and_in_review(projet, host)
+    tick(projet, host)
+    receipt_from(Path(str(launch["cwd"])), tid, "NOT-READY", reviewer_sid(host))
+    host.bg_fails = True
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("bounce", "failed")]
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION  # pas « running » sans personne
+    host.bg_fails = False
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("bounce", "done")]  # retentée
+
+
+def test_disjoncteur_ouvert_aucune_reprise(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.breaker import trip
+
+    tid, launch = launched_and_in_review(projet, host)
+    tick(projet, host)
+    receipt_from(Path(str(launch["cwd"])), tid, "NOT-READY", reviewer_sid(host))
+    trip(projet, "autre tâche")
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("bounce", "skipped")] and host.of("claude", "--bg", "--resume") == []
+
+
+def test_un_not_ready_rend_le_verdict_du_pack_rouge(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    tid = ready(TaskService(root))
+    _checks_pack(root, tid)
+    out = runner.invoke(app, ["task", "review", tid, "--criteria", str(_verdict_file(tmp_path, "NOT-READY", ("met", "unmet"))),
+                              "--project-root", str(root)])
+    assert out.exit_code == 0, out.output
+    verdict = EvidenceService(root / EVIDENCE).get_latest_verdict(tid)
+    assert verdict is not None and verdict.verdict.value == "failed"
+    assert any(c.id == "review-verdict" and c.result.value == "failed" for c in verdict.checks)
+
+
+def test_une_preparation_ratee_ne_consomme_pas_le_plafond_du_mandat(projet: Path, host: FakeHost) -> None:
+    from lot2_doubles import git
+
+    _grant(projet)
+    tid = ready(TaskService(projet))
+    git(projet, "branch", f"task/{tid}")  # create_task_worktree refuse
+    for _ in range(2):
+        assert tick(projet, host).launches[0].status == "failed"
+    assert MandateStore(projet).sessions(role="worker") == [] and MandateStore(projet).state().active
+
+
+def test_une_etape_de_relecture_en_erreur_ne_casse_pas_le_tick(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import reviewer
+
+    launched_and_in_review(projet, host)
+
+    def boom(self: object) -> tuple[()]:
+        raise RuntimeError("panne simulée")
+
+    monkeypatch.setattr(reviewer.ReviewStage, "__call__", boom)
+    report = tick(projet, host)
+    assert report.status == "ran" and any("étape en erreur" in a for a in report.attention)

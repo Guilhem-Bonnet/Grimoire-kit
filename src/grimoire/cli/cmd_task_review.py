@@ -50,10 +50,10 @@ def task_review(
     les critères de la tâche, porté à un pack de preuve (les critères tenus y
     sont couverts) et au reçu, puis noté au ledger.
     """
-    from grimoire.cli.cmd_task import _fmt, _require_task, _service, console
+    from grimoire.cli.cmd_task import _comment_origin, _fmt, _require_task, _service, console
     from grimoire.core.standard_state import current_session
     from grimoire.missions.review_receipt import ReviewFinding, ReviewReceiptError, write_receipt
-    from grimoire.missions.review_verdict import load_verdict, record_review
+    from grimoire.missions.review_verdict import load_verdict, record_review, require_reviewer
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
@@ -62,16 +62,21 @@ def task_review(
         summary, _, cmd = raw.partition("::")
         findings.append(ReviewFinding(summary.strip(), cmd.strip()))
     session = current_session()[0]
+    human = _comment_origin() == "human"
     try:
         if criteria is not None:
             structured = load_verdict(criteria)
             if verdict and verdict.strip().upper() != structured.verdict:
                 raise ReviewReceiptError("review.receipt_invalid", f"--verdict {verdict!r} contredit le fichier ({structured.verdict})")
             structured = replace(structured, findings=(*structured.findings, *findings))
-            receipt = record_review(service, task, structured, reviewer_id=reviewer or actor, model=model, reviewer_session=session)
+            receipt = record_review(
+                service, task, structured, reviewer_id=reviewer or actor, model=model, reviewer_session=session, human=human
+            )
         elif not verdict:
             raise ReviewReceiptError("review.receipt_invalid", "--verdict ou --criteria requis")
         else:
+            if not human:  # la même garde de session que pour le verdict structuré (#876, lot 3)
+                require_reviewer(service, task, reviewer or actor, session)
             receipt = write_receipt(
                 service.project_root, task_id, verdict.strip().upper(), findings=findings,
                 reviewer_id=reviewer or actor, model=model, reviewer_session=session,
