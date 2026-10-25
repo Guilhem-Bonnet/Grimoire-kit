@@ -282,6 +282,32 @@ export function spaceHead(title, sub, ...actions) {
   return head;
 }
 
+/** Retour d'action sur place. Depuis P62 la Console n'est plus dans la coque :
+ *  un refus envoyé à `ctx.dock` n'était lu par personne. L'espace pose cette
+ *  zone à côté du bouton ; vide, elle ne prend aucune place. */
+export function actionStatus(message, tone) {
+  const box = mk('div', { class: 'action-status', role: 'status', 'aria-live': 'polite' });
+  setActionStatus(box, message, tone);
+  return box;
+}
+
+/** `tone` ∈ ok | bad, neutre sinon ; un message vide efface la zone. */
+export function setActionStatus(box, message, tone) {
+  if (!box) return;
+  box.dataset.tone = (message && tone) || '';
+  box.textContent = message || '';
+}
+
+/** Libellé d'un échec : « Échec » quand la requête n'a pas abouti (api.js pose
+ *  alors `code: 0`), « Refusé » sinon — le serveur a répondu non. */
+export function failureText(error) {
+  if (error && error.payload && error.payload.readOnly) {
+    return "Refusé : lecture seule — ce cockpit n'écrit que dans le projet qu'il sert. Lancez « grimoire cockpit serve » dans ce projet pour le modifier.";
+  }
+  const message = (error && error.message) || 'motif non communiqué';
+  return error && error.code === 0 ? `Échec : ${message}` : `Refusé : ${message}`;
+}
+
 // ── État mémorisé par espace et par projet (spec §3.1) ──────────────────────
 
 const stateKey = () => `grimoire.workspace.${host.project || 'atelier'}`;
