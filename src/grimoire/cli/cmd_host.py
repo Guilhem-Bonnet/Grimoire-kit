@@ -118,17 +118,20 @@ class _HostStatus:
         }
 
 
-def _brake_status(host_id: HostId, *, probe: bool) -> tuple[str, dict[str, Any]]:
+def _brake_status(host_id: HostId, *, probe: bool, project_root: Path | None = None) -> tuple[str, dict[str, Any]]:
     """``(version installée, preuve du frein)`` pour *host_id* (#876) ; ``("", {})`` si non sondable.
 
-    ``probe`` lance la sonde si la version n'est couverte par aucune preuve.
+    ``probe`` lance la sonde si la version n'est couverte par aucune preuve. Une preuve n'est pas annoncée
+    quand la configuration effective de l'hôte coupe les hooks (même verdict que ``contract_for``, #886).
     """
     from grimoire.hosts.capabilities import recorded_contract
-    from grimoire.hosts.contract_probe import installed_version, probe_host, proof_for
+    from grimoire.hosts.contract_probe import hooks_disabled_reason, installed_version, probe_host, proof_for
 
     version = installed_version(host_id)
     if not version:
         return "", {}
+    if host_id is HostId.CLAUDE_CODE_CLI and (reason := hooks_disabled_reason(project_root)):
+        return version, {"status": "unverified", "source": "", "version": version, "probed_at": "", "reason": reason}
     if recorded_contract(host_id).host_version == version:
         return version, {"status": "verified", "source": "fixtures", "version": version, "probed_at": ""}
     proof = proof_for(host_id, version)
@@ -330,7 +333,7 @@ def host_status(
         profile = profile_for(host_id)
         plan = emitter.plan(surface, project_root)
         pending = apply_plan(plan, project_root, dry_run=True)
-        host_version, brake_proof = _brake_status(host_id, probe=probe)
+        host_version, brake_proof = _brake_status(host_id, probe=probe, project_root=project_root)
         payload.append(
             _HostStatus(
                 host=host_id.value,

@@ -293,6 +293,7 @@ class TaskService:
     def ledger(self) -> MissionLedger:
         if self._ledger is None:
             self._ledger = MissionLedger(self.ledger_root)
+            self._ledger.project_root = self.project_root  # le frein d'hôte se juge sur les réglages de CE projet (#886)
             self._ledger.claim_guard = _claim_guards(self.home_root, self.ledger_root)  # K10 WIP + K11 pause, sous le verrou
         return self._ledger
 
@@ -747,7 +748,7 @@ class TaskService:
             actor_id=actor,
             apply=apply,
             now=now,
-            is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version),
+            is_fenced=lambda view: claim_host_is_fenced(view.host, view.host_version, project_root=self.project_root),
             branch_hold=branch_hold,
         )
         if any(d.written and d.action == "ready" for d in report.decisions):

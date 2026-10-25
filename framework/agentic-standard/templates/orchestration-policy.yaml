@@ -60,6 +60,10 @@ wip:
   limit_per_role: 2
   limit_global: 5
   open_delegation: forbidden    # forbidden | envelope_required
+# Dépôt qui porte les PR des tâches (branches task/<id>), pour les créneaux CI du tick (#886).
+# Sans cette clé, le dépôt est le remote origin du projet. Format : owner/repo (ou host/owner/repo).
+# ci:
+#   repository: owner/repo
 # Escalade (#876) : qui décide quoi quand l'orchestrateur agit sous un mandat (`grimoire autonomy mandate`).
 # `human` : le geste reste à un humain ; `orchestrator` : le mandat peut le couvrir. Valeurs prudentes livrées :
 # tout reste humain. Le dépôt qui veut déléguer `merge` et `accept` écrit ici `orchestrator` — `release`,
