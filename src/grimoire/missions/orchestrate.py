@@ -21,6 +21,10 @@ Lot 2 de #876 : sans *dispatcher* fourni, le tick lit le rôle ``worker`` de la 
 le tick se comporte comme avant. Le janitor (:mod:`.janitor`) passe avant l'admission, dès qu'un rôle lance des sessions :
 il nettoie les tâches terminales (créneau CI, session, worktree, branche fusionnée, preuve).
 
+Lot 3 : après le lancement, si le rôle ``reviewer`` est activé, l'étape de relecture (:mod:`.reviewer`) lance une
+session distincte sur chaque tâche lancée arrivée en revue et juge les reçus rendus (verdict forgé, retour au worker,
+escalade à l'humain).
+
 K12 — **idempotent et rejouable** :
 
 - un seul tick écrit à la fois : ``_grimoire-output/control/.tick.lock`` (:func:`grimoire.core.fsio.locked`,
@@ -62,6 +66,7 @@ if TYPE_CHECKING:
     from grimoire.missions.effects import EffectOutcome, Probe
     from grimoire.missions.janitor import JanitorOutcome
     from grimoire.missions.launcher import Exec, LaunchOutcome
+    from grimoire.missions.reviewer import ReviewOutcome
     from grimoire.missions.service import TaskService, WakeDecision
 
 __all__ = ["TICK_LOCK_RELPATH", "TickReport", "run_tick"]
@@ -92,6 +97,7 @@ class TickReport:
     launches: tuple[LaunchOutcome, ...] = ()
     cleanup: tuple[JanitorOutcome, ...] = ()
     breaker: BreakerState | None = None
+    reviews: tuple[ReviewOutcome, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -114,6 +120,8 @@ class TickReport:
             payload["cleanup"] = [o.to_dict() for o in self.cleanup]
         if self.breaker is not None:
             payload["breaker"] = self.breaker.to_dict()
+        if self.reviews:  # lot 3 : même règle
+            payload["reviews"] = [o.to_dict() for o in self.reviews]
         return payload
 
 
@@ -204,6 +212,15 @@ def _one_pass(
         result = dispatcher(plan.admitted)
         launches = tuple(result) if isinstance(result, (tuple, list)) else ()
         dispatched = tuple(o.task_id for o in launches if o.status == "launched") if launches else tuple(a.task_id for a in plan.admitted)
+    reviews: tuple[ReviewOutcome, ...] = ()
+    if mode == "apply" and policy is not None and policy.reviewer.enabled:
+        from grimoire.missions.launcher import default_exec
+        from grimoire.missions.reviewer import ReviewStage
+
+        try:
+            reviews = ReviewStage(service, policy, exec_=exec_ or default_exec, now=now)()
+        except Exception as exc:  # une étape en erreur ne casse pas le tick : récolte, admission et lancements sont faits
+            attention.append(f"relecteur : étape en erreur, rien n'est jugé à ce tick ({type(exc).__name__}: {exc})")
     from grimoire.missions.breaker import read_breaker
 
     state_of_breaker = read_breaker(service.home_root)
@@ -216,6 +233,9 @@ def _one_pass(
     for launch in launches:
         if launch.status == "failed":
             attention.append(f"lanceur : {launch.task_id} non lancée ({launch.detail})")
+    for review in reviews:
+        if review.status == "failed" or review.action in ("forged", "escalate"):
+            attention.append(f"relecteur : {review.task_id} {review.action} ({review.detail})")
     if report.clock == "unknown":
         attention.append("horloge incohérente (plus tôt que le dernier événement du ledger) : rien n'est récolté")
     if unreadable := service.ledger.unreadable_lines():
@@ -231,7 +251,7 @@ def _one_pass(
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
-        launches, cleanup, breaker,
+        launches, cleanup, breaker, reviews,
     )
 
 
