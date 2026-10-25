@@ -77,7 +77,9 @@ def accept_task(
     Sous mandat (#876, verrou 6) l'origine ``orchestrator`` accepte aussi, si un mandat valide couvre le
     geste ``accept`` et le type de la tâche, que la politique d'escalade du projet délègue ``accept``, et
     que le reçu de revue déjà rangé vaut (verrou 7 : relecteur distinct de l'auteur, session attestée au
-    journal d'autorité). Le verdict et le reçu sont alors signés ``orchestrator:<mandat>``.
+    journal d'autorité), et que l'état présent est celui du READY scellé par le relecteur du tick
+    (:func:`grimoire.missions.review_seal.verify` : reçu, pack, tête et arbre). Le verdict et le reçu sont alors signés
+    ``orchestrator:<mandat>``.
 
     *proof_root* (lot 4, le merger) : où vivent les reçus de revue, quand ce n'est pas *project_root* — le worktree
     ``task/<id>`` d'une tâche lancée. Le mandat et la politique d'escalade restent lus sous *project_root*, jamais
@@ -148,6 +150,13 @@ def _require_attested_review(task: MissionTask, project_root: Path, proofs: Path
             f"Acceptation refusée pour {task.id} : sous mandat, un reçu de revue READY d'un relecteur distinct est exigé"
         )
     MandateStore(project_root).check_receipt_provenance(task, receipt)
+    # Lot 4 : le reçu vit dans un arbre que le worker écrit ; seul le jugement scellé au journal d'autorité fait foi.
+    from grimoire.missions.mandate import MandateRefusedError
+    from grimoire.missions.review_seal import verify
+
+    refusal = verify(project_root, task, proofs)
+    if refusal:
+        raise MandateRefusedError("receipt_unsealed", f"Acceptation refusée pour {task.id} sous mandat : {refusal}")
 
 
 def _reviewer_session(task: MissionTask, project_root: Path) -> str:

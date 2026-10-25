@@ -164,12 +164,6 @@ def attest_session(service: TaskService, role: str, task_id: str) -> tuple[str, 
     return session, ""
 
 
-def _held_by_merger(service: TaskService, task_id: str) -> bool:
-    from grimoire.missions.merger import merger_holds  # lot 4 : import tardif, le merger importe ce module
-
-    return merger_holds(service, task_id)
-
-
 _LIVE = (TaskState.CLAIMED, TaskState.RUNNING, TaskState.BLOCKED, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
 
 
@@ -226,9 +220,6 @@ class WorkerLauncher:
             tid = admit.task_id
             if not role.enabled:
                 outcomes.append(LaunchOutcome(tid, "skipped", "rôle worker désactivé"))
-                continue
-            if self._policy.merger.enabled and _held_by_merger(self._service, tid):
-                outcomes.append(LaunchOutcome(tid, "skipped", "réveillée par un « oui » humain au merger : il la reprend"))
                 continue
             breaker = read_breaker(root)
             if breaker.open:

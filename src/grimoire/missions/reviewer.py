@@ -15,8 +15,9 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
    - d'une autre session que le relecteur lancé : refusé, rien ne bouge (un humain peut relire et accepter lui-même) ;
    - lancé sous mandat : le mandat doit être encore actif et la provenance tenir au journal d'autorité, sinon le reçu
      est refusé **définitivement** — une révocation entre le lancement et le jugement ne lève pas la garde ;
-   - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : noté ; la fusion et l'acceptation
-     sont au merger (:mod:`.merger`, lot 4). ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
+   - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : scellé au journal d'autorité
+     (:mod:`.review_seal` : tête, arbre, pack et empreinte du reçu, qui doivent être ceux que le reçu déclare), puis
+     noté ; la fusion et l'acceptation sont au merger (:mod:`.merger`, lot 4), qui comparent à ce sceau. ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
    - ``NOT-READY`` : la tâche repart au worker (``needs_verification → running``, session du worker reprise par
      ``claude --bg --resume <son uuid>``, constats en note). Une reprise qui échoue remet la tâche en revue et sera
      retentée. Au cycle ``max_cycles`` (2 par défaut, compté depuis la dernière réponse humaine), ou sans session à
@@ -109,7 +110,7 @@ class ReviewOutcome:
 def entered_review_at(service: TaskService, task_id: str) -> str:
     """La dernière remise en revue par le worker ; celles du relecteur (reprise ou escalade ratée) n'en sont pas.
 
-    Lot 4 : le merger qui rend une tâche à la revue (sa remise en état après une réponse humaine) n'en fait pas une
+    Lot 4 : le merger qui remet une tâche en revue (reprise du worker ratée, question non posée) n'en fait pas une
     nouvelle entrée ; un READY qu'il trouve périmé en est une (``task.merge_requeued``) : il appelle une relecture.
     """
     from grimoire.missions.merger import MERGE_REQUEUED_EVENT, MERGER_ACTOR
@@ -314,10 +315,32 @@ class ReviewStage:
                 self._record_judged(task, review, "stale", 0)
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({refusal}) : relu de nouveau")
-            self._record_judged(task, review, READY, 0)
+            sealed, why = self._seal(task, review, receipt, root)
+            if why:
+                self._record_judged(task, review, "stale", 0)
+                self._stop(review)
+                return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({why}) : relu de nouveau")
+            self._record_judged(task, review, READY, 0, sealed)
             self._stop(review)
             return ReviewOutcome(tid, "ready", "done", f"READY, {len(receipt.criteria_met)} critère(s) tenu(s)")
         return self._bounce(task, launch, review, receipt)
+
+    def _seal(self, task: MissionTask, review: LedgerEvent, receipt: ReviewReceipt, root: Path) -> tuple[dict[str, Any], str]:
+        """Lot 4 : scelle le READY au journal d'autorité (tête, arbre, pack, empreinte du reçu), copie au ledger.
+
+        Un arbre ou un pack qui ne sont pas ceux du reçu : ``("…", raison)``, le READY est relu. Un journal qui refuse
+        l'écriture : le READY est noté non scellé, et ni la fusion ni l'acceptation sous mandat ne s'y appuieront.
+        """
+        from grimoire.missions.review_seal import seal_judgment
+
+        try:
+            entry = seal_judgment(self._service.home_root, task.id, review.id, root, receipt)
+        except ValueError as exc:
+            return {}, str(exc)
+        except Exception as exc:  # journal rompu : rien n'est scellé, la garde en aval refusera
+            return {"sealed": False, "seal_error": f"{type(exc).__name__}: {exc}"[:300]}, ""
+        keys = ("head", "tree_fingerprint", "evidence_pack_sha256", "receipt_sha256")
+        return {"sealed": True, "seal": {k: entry.get(k, "") for k in keys}, "seal_seq": entry.get("seq")}, ""
 
     def _provenance_refusal(self, task: MissionTask, review: LedgerEvent, receipt: ReviewReceipt) -> str:
         """Une relecture lancée sous mandat s'atteste au journal d'autorité au jugement aussi ; ``""`` si elle tient.
@@ -356,10 +379,12 @@ class ReviewStage:
         self._stop(review)
         return ReviewOutcome(tid, "forged", "done", detail + (f" — mandat {revoked.id} révoqué" if revoked is not None else ""))
 
-    def _record_judged(self, task: MissionTask, review: LedgerEvent, verdict: str, cycle: int) -> None:
+    def _record_judged(
+        self, task: MissionTask, review: LedgerEvent, verdict: str, cycle: int, extra: dict[str, Any] | None = None,
+    ) -> None:
         self._service.ledger.append_event(
             REVIEW_JUDGED_EVENT, task.id, "task", REVIEWER_ACTOR,
-            {"task_id": task.id, "review": review.id, "verdict": verdict, "cycle": cycle},
+            {"task_id": task.id, "review": review.id, "verdict": verdict, "cycle": cycle, **(extra or {})},
         )
 
     def _stop(self, review: LedgerEvent) -> None:

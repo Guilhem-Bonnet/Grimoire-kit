@@ -504,9 +504,10 @@ orchestrator:
   roles:
     merger:
       enabled: true
-      realign_max: 1               # PR réalignées sur la cible à la fois (le débit CI)
-      ignored_checks: ["codecov/*"] # hors du verdict quand la protection de branche ne dit pas quels checks sont requis
-      max_cycles: 2                # retours au worker (CI rouge, conflit) avant l'escalade
+      realign_max: 1                # PR réalignées sur la cible à la fois (le débit CI)
+      ignored_checks: ["codecov/*"] # hors du verdict, seulement quand gh dit qu'aucun check n'est requis
+      max_cycles: 2                 # retours au worker (CI rouge, conflit) avant l'escalade
+      protected_paths: []           # chemins en plus des défauts : jamais fusionnés ni acceptés sous mandat
 ```
 
 La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
@@ -515,37 +516,47 @@ vérifie dans cet ordre, et chaque garde échoue fermée :
 
 | Étape | Ce qui est vérifié | Sinon |
 |---|---|---|
+| Worktree | celui du ledger, sur `task/<id>`, dans ce dépôt (même dossier git commun) | refus |
 | PR | ouverte, pas en brouillon, vers la cible du worktree | attente, ou refus si elle est fermée sans fusion |
-| READY | reçu jugé, pack et critères inchangés, arbre propre, contenu relu (ou réaligné par le merger) | arbre sale : retour au worker ; READY périmé : nouvelle relecture (`task.merge_requeued`) |
+| READY | arbre propre ; reçu, pack, tête et arbre égaux au **sceau** posé au journal d'autorité au jugement (ou à un réalignement du merger noté au même journal) | arbre sale : retour au worker ; sceau qui ne tient pas : nouvelle relecture (`task.merge_requeued`) |
 | Tête | la tête locale est celle de la PR | attente ; une tête réalignée non poussée est poussée |
-| CI | checks requis (`gh pr checks --required`), à défaut tous hors `ignored_checks` | rouge : retour au worker (`claude --bg --resume`) ; en attente ou aucun check : attente |
-| Cible | `origin/<cible>` contenue dans la branche | fusion de la cible dans le worktree, jamais de rebase ni de push forcé, puis push et attente de la CI |
-| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, reçu attesté au journal d'autorité | `waiting(human)` avec la question « fusionner ? » |
-| Acceptation | mandat qui couvre `accept`, politique qui le délègue, tête fusionnée égale à la tête relue | `waiting(human)` avec la question « accepter ? » |
+| CI | checks requis (`gh pr checks --required`) ; tous hors `ignored_checks` seulement si gh dit qu'aucun n'est requis ; au moins un `pass` ; vert au tick précédent aussi | rouge : retour au worker (`claude --bg --resume`) ; en attente, sans check ou gh en panne : attente |
+| Cible | `origin/<cible>` contenue dans la branche | fusion de la cible dans le worktree, jamais de rebase ni de push forcé, puis push et nouvelle CI |
+| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun chemin protégé touché, reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
+| Acceptation | fusion revérifiée sur la remote, sceau tenu, tête fusionnée égale à la tête relue, mandat qui couvre `accept`, politique qui le délègue | question non bloquante « accepter ? » avec la commande `task accept` |
 
+- **Sceau du READY** : le relecteur du tick scelle au journal d'autorité (`~/.grimoire/control/`) la tête relue,
+  l'arbre et le pack présents, et l'empreinte du fichier reçu (`missions/review_seal.py`) ; la copie au ledger est
+  dans `task.review_judged`. Le merger et `task accept` sous mandat comparent à ce sceau, jamais au fichier reçu seul,
+  que le worker peut réécrire.
 - **Conflit de réalignement** : limité à `CHANGELOG.md`, il est résolu par l'union des deux côtés
   (`git merge-file --union`), contrôlée : `git diff origin/<cible> -- CHANGELOG.md` ne doit contenir aucune ligne `-`.
   Une union qui perdrait une ligne de la cible, ou tout autre conflit, annule la fusion locale et rend la tâche au
   worker.
 - **Fusion** : `gh pr merge <n> --squash --match-head-commit <tête>`, sans `--admin` ni `--auto`. Elle n'est notée
   (`task.merged`) que constatée sur la remote : PR `MERGED` et commit de fusion contenu dans `origin/<cible>`. Le geste
-  est alors inscrit au journal d'autorité avec `origin: orchestrator` et sa provenance (le reçu READY jugé, la tête
-  fusionnée).
-- **Acceptation** : par la garde de `task accept` (lot 1), qui exige le reçu READY d'un relecteur inscrit distinct de
-  l'auteur. La tâche close, le janitor nettoie la session, le worktree, la branche et le créneau.
-- **Catégories gardées** : une tâche dont le type, le profil ou les labels touchent `release`, `secrets`, `paid` ou
-  `security`, quand la politique garde cette catégorie à l'humain, n'est jamais fusionnée ni acceptée sous mandat.
-- **Réponse humaine** : `grimoire task answer <id> fusionner` (ou `accepter`) réveille la tâche ; le lanceur ne la
-  relance pas, le merger la reprend au tick suivant, revérifie tout et fait le geste au nom de l'humain, la réponse en
-  provenance. `reprendre` rend la tâche au worker, `abandonner` l'annule.
-- **Rejeu** : chaque étape est notée au ledger (`task.merge_queued`, `task.merge_realigned`, `task.merge_pushed`,
-  `task.merge_bounced`, `task.merge_requested`, `task.merged`, `task.merge_escalated`, `task.merge_resumed`,
+  est inscrit au journal d'autorité avec `origin: orchestrator` et sa provenance. Un refus du dépôt (revue exigée,
+  protection) pose la question à l'humain ; seul un échec technique de gh compte au disjoncteur.
+- **Chemins protégés** : `_grimoire/standard/*`, `.github/workflows/*`, `CODEOWNERS`, le code des gardes
+  (`src/grimoire/missions/{mandate,merger,reviewer,review_seal,review_receipt,human_acceptance,…}.py`,
+  `hosts/decisions/authority_guard.py`) et `protected_paths` : une PR qui en touche un n'est jamais fusionnée ni
+  acceptée sous mandat.
+- **Le geste humain** : le merger ne lit aucune réponse du ledger. Ce qu'il ne fait pas sous mandat, l'humain le fait
+  lui-même : il fusionne la PR (le tick constate la fusion), puis lance
+  `grimoire task accept <id> --project-root <worktree> --reason "…"`. La tâche reste en revue pendant ce temps.
+- **Git sans hooks** : chaque `git` du merger tourne avec `core.hooksPath` vers `os.devnull`, `core.fsmonitor=false`,
+  et `--no-verify` sur `merge`, `commit` et `push`.
+- **Rejeu** : chaque étape est notée au ledger (`task.merge_queued`, `task.merge_ci`, `task.merge_realigned`,
+  `task.merge_pushed`, `task.merge_bounced`, `task.merge_requested`, `task.merged`, `task.merge_escalated`,
   `task.merge_accepted`) et n'est faite qu'une fois. Une fusion faite mais non notée est constatée au tick suivant,
-  jamais refaite. Un échec de `gh` ou de `git` est compté au disjoncteur ; disjoncteur ouvert, le merger ne fait rien.
-- **Limites** : la réponse humaine relayée vaut ce que vaut la ligne `task.human_answered` du ledger, qui n'est pas une
-  zone protégée (la voie sous mandat passe par le journal d'autorité) ; le push du réalignement fait tourner les hooks
-  git du dépôt ; une PR sans aucun check attend indéfiniment ; l'union du CHANGELOG garde les deux côtés dans l'ordre de
-  `git merge-file`, sans reconstruire les sections.
+  jamais refaite ; une acceptation inscrite au journal mais non notée n'est pas refaite. Disjoncteur ouvert, le merger
+  ne fait rien.
+- **Limites** : le journal d'autorité vit sous le même utilisateur que les sessions (un script arbitraire, que la garde
+  de zone ne lit pas, pourrait y forger un sceau) ; la configuration git du dépôt reste lue (pilotes de fusion, filtres
+  de `.gitattributes`) ; le janitor lance encore `git push --delete` avec les hooks du dépôt ; une PR sans aucun check
+  attend indéfiniment ; l'union du CHANGELOG garde les deux côtés dans l'ordre de `git merge-file` ; le classement
+  « refus du dépôt » contre « panne » lit le texte d'erreur de gh ; une ligne `task.human_answered` forgée au ledger
+  remet à zéro le compte des retours au worker (un coût, pas une autorité).
 
 ### Ce que le claim rappelle
 

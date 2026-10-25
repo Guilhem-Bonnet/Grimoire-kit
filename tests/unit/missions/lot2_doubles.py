@@ -62,6 +62,8 @@ class FakeHost:
         self.merge_commits: dict[str, str] = {}  # branche → commit de fusion, posé par ``pr merge``
         self.merge_lands = True  # False : ``pr merge`` sort en 0 sans rien fusionner (file de fusion, réglage du dépôt)
         self.merge_fails = False
+        self.merge_error = "Pull request is not mergeable: review required"  # le refus du dépôt quand merge_fails
+        self.required_broken = False  # ``gh pr checks --required`` en panne (réseau), pas « aucun check requis »
         self.broken_after_merge = False  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
@@ -98,6 +100,8 @@ class FakeHost:
                 body["headRefOid"] = self.pr_heads.get(branch) or git(cwd, "rev-parse", f"refs/heads/{branch}")
             return ExecResult(0, json.dumps(body))
         if argv[1:3] == ["pr", "checks"]:
+            if "--required" in argv and self.required_broken:
+                return ExecResult(1, "", "error connecting to api.github.com")
             table = self.required if "--required" in argv else self.checks
             rows = table.get(argv[3])
             if not rows:
@@ -116,7 +120,7 @@ class FakeHost:
         number = int(argv[3])
         branch = next((b for b in self.prs if self.pr_numbers.get(b, 7) == number and self.prs[b] == "OPEN"), "")
         if self.merge_fails or not branch:
-            return ExecResult(1, "", "gh : fusion refusée (simulée)")
+            return ExecResult(1, "", self.merge_error if branch else "no pull request found")
         head = self.pr_heads.get(branch) or git(cwd, "rev-parse", f"refs/heads/{branch}")
         expected = argv[argv.index("--match-head-commit") + 1] if "--match-head-commit" in argv else ""
         if expected and expected != head:
