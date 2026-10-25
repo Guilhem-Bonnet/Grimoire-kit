@@ -17,7 +17,16 @@ from grimoire.codegraph.schemas import CodeEdge, CodeNode, EdgeKind, NodeKind
 from grimoire.core.config import GrimoireConfig
 from grimoire.memory.backends.base import MemoryEntry
 from grimoire.memory.sidecar import DiaryRecord, KnowledgeFact
-from grimoire.missions.schemas import Mission, MissionState, MissionTask, RiskProfile, TaskState, TaskType
+from grimoire.missions.schemas import (
+    DependencyKind,
+    Mission,
+    MissionState,
+    MissionTask,
+    RiskProfile,
+    TaskDependency,
+    TaskState,
+    TaskType,
+)
 
 
 class _Driver:
@@ -305,3 +314,95 @@ class TestProjectsSharingLedgerNodes:
     def test_without_a_project_ids_are_untouched(self, driver: _Driver) -> None:
         _graph("").upsert_mission(Mission(id="MIS-1", title="m", status=MissionState.OPEN, origin="user", created_at="2026-01-01T00:00:00"))
         assert next(k for s, k in driver.calls if "MERGE (m:GrimoireMission" in s)["id"] == "MIS-1"
+
+
+class TestMemoryNodesAreKeyedToo:
+    """Un second projet qui écrit le même identifiant ne vole ni l'attribution ni le texte."""
+
+    def test_memory_and_vector_object_ids_are_prefixed(self, driver: _Driver) -> None:
+        _graph().upsert_memory(MemoryEntry(
+            id="m1", text="t", tags=("x",),
+            metadata={"weaviate_id": "w1", "projection_kind": "code_symbol", "code_node_id": "a:f"},
+        ))
+        node = next(k for s, k in driver.calls if "MERGE (m:GrimoireMemory" in s)
+        assert node["id"] == "projet-a::m1"
+        assert next(k for s, k in driver.calls if "UNWIND $tags" in s)["id"] == "projet-a::m1"
+        vector = next((s, k) for s, k in driver.calls if "WeaviateObject" in s and "MERGE (w" in s)
+        assert "{id: $prefix + $weaviate_id}" in vector[0] and vector[1]["id"] == "projet-a::m1"
+        link = next(k for s, k in driver.calls if "MEMORY_FOR {kind" in s and "CodeNode" in s)
+        assert (link["memory_id"], link["target_id"]) == ("projet-a::m1", "projet-a::a:f")
+
+    def test_two_projects_writing_the_same_memory_id_get_two_nodes(self, driver: _Driver) -> None:
+        for project in ("projet-a", "projet-b"):
+            _graph(project).upsert_memory(MemoryEntry(id="same", text=f"texte de {project}"))
+        written = [(k["id"], k["project"], k["text"]) for s, k in driver.calls if "MERGE (m:GrimoireMemory" in s]
+        assert written == [("projet-a::same", "projet-a", "texte de projet-a"), ("projet-b::same", "projet-b", "texte de projet-b")]
+
+    def test_fact_diary_delete_and_orphans_use_the_keyed_memory_id(self, driver: _Driver) -> None:
+        graph = _graph()
+        graph.upsert_fact(KnowledgeFact(id="f", subject="s", predicate="p", object="o", source_memory_id="m1"))
+        graph.upsert_diary(DiaryRecord(id="d", agent_name="a", topic="t", entry="e", related_memory_id="m1"))
+        graph.delete_memory("m1")
+        assert next(k for s, k in driver.calls if "SOURCED_FROM" in s)["source_memory_id"] == "projet-a::m1"
+        assert next(k for s, k in driver.calls if "RELATED_TO" in s)["related_memory_id"] == "projet-a::m1"
+        assert next(k for s, k in driver.calls if "SET m.deleted = true" in s)["id"] == "projet-a::m1"
+        graph.find_orphan_memory_nodes(known_ids=frozenset({"m1"}), collection="c")
+        known = next(k for s, k in driver.calls if "NOT m.id IN $known_ids" in s)["known_ids"]
+        assert set(known) == {"m1", "projet-a::m1"}  # un nœud antérieur à la clé n'est pas pris pour un orphelin
+
+    def test_dependency_stubs_get_the_project(self, driver: _Driver) -> None:
+        graph = _graph()
+        graph.upsert_task(MissionTask(
+            id="T-1", mission_id="MIS-1", title="t", status=TaskState.READY, type=TaskType.IMPLEMENTATION,
+            risk_profile=RiskProfile.STANDARD, acceptance=("ok",), created_at="2026-01-01T00:00:00",
+            dependencies=(TaskDependency(kind=DependencyKind.RELATES, target="T-0"),),
+        ))
+        stub = next((s, k) for s, k in driver.calls if "MERGE (target:GrimoireTask" in s)
+        assert "ON CREATE SET target.project = $project" in stub[0] and stub[1]["target"] == "projet-a::T-0"
+
+
+class _QueryErrorDriver(_Driver):
+    def execute_query(self, statement: str, **kwargs: Any) -> Any:
+        self.calls.append((statement, kwargs))
+        if "MERGE (m:GrimoireMemory" not in statement:
+            return ([], None, None)
+        raise CypherSyntaxError("Invalid input")
+
+
+class CypherSyntaxError(Exception):
+    """Erreur de requête : pas une panne de connectivité."""
+
+
+class TestBreakerOnlyOnConnectivity:
+    def test_a_query_error_does_not_suspend_valid_writes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        bad = _QueryErrorDriver()
+        _GraphDatabase.driver_instance = bad
+        monkeypatch.setitem(sys.modules, "neo4j", SimpleNamespace(GraphDatabase=_GraphDatabase))
+        graph = _graph()
+        with pytest.raises(CypherSyntaxError):
+            graph.upsert_memory(MemoryEntry(id="m1", text="t"))
+        with pytest.raises(CypherSyntaxError):  # le disjoncteur est resté fermé : le pilote est réinterrogé
+            graph.upsert_memory(MemoryEntry(id="m2", text="t"))
+        assert sum("MERGE (m:GrimoireMemory" in s for s, _ in bad.calls) == 2
+
+    def test_service_unavailable_opens_it_and_the_message_names_the_cause_and_the_remedy(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class ServiceUnavailable(Exception):  # noqa: N818 - même nom que l'erreur du pilote
+            pass
+
+        class _Down(_Driver):
+            def execute_query(self, statement: str, **kwargs: Any) -> Any:
+                self.calls.append((statement, kwargs))
+                raise ServiceUnavailable("Couldn't connect to x:7687")
+
+        _GraphDatabase.driver_instance = _Down()
+        monkeypatch.setitem(sys.modules, "neo4j", SimpleNamespace(GraphDatabase=_GraphDatabase))
+        graph = _graph()
+        with pytest.raises(ServiceUnavailable):
+            graph.upsert_memory(MemoryEntry(id="m1", text="t"))
+        from grimoire.memory.neo4j_graph import GraphUnavailableError
+
+        with pytest.raises(GraphUnavailableError) as err:
+            graph.upsert_memory(MemoryEntry(id="m2", text="t"))
+        assert "ServiceUnavailable" in str(err.value) and "memory graph sync-memories" in str(err.value)

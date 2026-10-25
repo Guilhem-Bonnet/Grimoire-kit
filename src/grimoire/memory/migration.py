@@ -7,6 +7,7 @@ backend can stay online until parity checks pass.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import uuid
@@ -128,6 +129,8 @@ class BackendMigrationResult:
     created: int = 0
     #: Identifiants déjà présents dans la cible : laissés tels quels sans ``--overwrite``.
     skipped_existing: int = 0
+    #: Identifiants copiés par une migration précédente puis absents de la cible (supprimés là) : non recréés.
+    skipped_deleted: int = 0
     #: Identifiants déjà présents et remplacés (``--overwrite``), ou à remplacer en aperçu.
     overwritten: int = 0
     #: ``(identifiant, motif)`` des souvenirs que la cible a refusés ; la copie continue.
@@ -144,6 +147,7 @@ class BackendMigrationResult:
             "project": self.project,
             "created": self.created,
             "skippedExisting": self.skipped_existing,
+            "skippedDeleted": self.skipped_deleted,
             "overwritten": self.overwritten,
             "refused": [{"id": i, "reason": r} for i, r in self.refused],
         }
@@ -183,6 +187,29 @@ def filter_by_project(entries: list[MemoryEntry], project: str) -> list[MemoryEn
     return [e for e in entries if str(e.metadata.get("project_name", "")) == project]
 
 
+def copied_registry_path(project_root: Path, source_key: str, target_key: str) -> Path:
+    """Registre des identifiants déjà copiés pour ce couple source → cible."""
+    digest = hashlib.sha256(f"{source_key}\n{target_key}".encode()).hexdigest()[:16]
+    return project_root / "_grimoire" / "_memory" / "migration" / f"copied-{digest}.json"
+
+
+def load_copied(path: Path) -> set[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    ids = data.get("ids") if isinstance(data, dict) else None
+    return {str(i) for i in ids} if isinstance(ids, list) else set()
+
+
+def save_copied(path: Path, ids: set[str], *, source_key: str, target_key: str) -> None:
+    """Écriture atomique (fichier temporaire puis remplacement) : une coupure ne laisse pas un registre tronqué."""
+    from grimoire.core.fsio import atomic_write
+
+    payload = {"source": source_key, "target": target_key, "ids": sorted(ids)}
+    atomic_write(path, json.dumps(payload, ensure_ascii=False, indent=2))
+
+
 def migrate_backend_to_backend(
     source_entries: list[MemoryEntry],
     *,
@@ -191,6 +218,8 @@ def migrate_backend_to_backend(
     store_many: Callable[[list[dict[str, Any]]], list[Any]] | None = None,
     upsert: Callable[[MemoryEntry], Any] | None = None,
     exists: Callable[[str], bool] | None = None,
+    validate_id: Callable[[str], str | None] | None = None,
+    already_copied: set[str] | None = None,
     overwrite: bool = False,
     dry_run: bool = False,
     project: str = "",
@@ -202,45 +231,63 @@ def migrate_backend_to_backend(
     *upsert* est le chemin normal : chaque entrée est écrite sous **son
     identifiant d'origine** (références ``superseded_by`` valides). Par
     défaut, **seuls les identifiants absents de la cible sont créés** :
-    ce qui existe déjà dans la cible (une décision revue, un oubli volontaire)
-    n'est pas défait par une relance ; *overwrite* remplace explicitement.
-    *exists* dit si un identifiant est déjà dans la cible (indispensable pour
-    ne pas écraser, et pour chiffrer l'aperçu).
+    ce qui existe déjà dans la cible (une décision revue) n'est pas défait par
+    une relance ; *overwrite* remplace explicitement. *exists* dit si un
+    identifiant est dans la cible. *already_copied* (registre des identifiants
+    copiés par une migration précédente, voir :func:`load_copied`) distingue
+    « pas encore copié » de « copié puis supprimé dans la cible » : ce second
+    cas n'est pas recréé, même avec *overwrite*. Les identifiants écrits par
+    cet appel sont ajoutés à *already_copied* (à persister par l'appelant).
 
-    Un souvenir que la cible refuse (filtre d'injection, identifiant que le
-    backend ne sait pas porter) est compté et listé dans ``refused`` sans
-    arrêter les suivants ; une panne de la cible (réseau, disque) interrompt
+    *validate_id* dit d'avance si la cible saura porter un identifiant
+    (message d'erreur, ou ``None``) : l'aperçu annonce alors les refus.
+    Un souvenir que la cible refuse (filtre d'injection, identifiant invalide,
+    réponse 400 d'un serveur) est listé dans ``refused`` sans arrêter les
+    suivants ; une panne de la cible (réseau, disque) interrompt
     (:class:`MigrationInterruptedError`). *store_many* (identifiants régénérés)
-    ne subsiste que pour les appelants sans upsert. *project* ne copie que les
-    entrées de ce projet. Aperçu : rien n'est écrit, tout est compté.
+    ne subsiste que pour les appelants sans upsert. Aperçu : aucune donnée n'est
+    écrite, tout est compté.
     """
     selected = filter_by_project(source_entries, project)
-    created = skipped = overwritten = 0
+    copied = already_copied if already_copied is not None else set()
+    created = skipped = skipped_deleted = overwritten = 0
     refused: list[tuple[str, str]] = []
     imported = 0
+    if not dry_run and selected and upsert is None and store_many is None:
+        raise ValueError("upsert or store_many is required unless dry_run=True")
     if upsert is None and store_many is not None and not dry_run and selected:
         imported = len(store_many(entries_for_import(selected)))
         created = imported
     else:
         for entry in selected:
-            present = bool(exists and exists(entry.id))
-            if present and not overwrite:
-                skipped += 1
-                continue
-            if dry_run:
-                overwritten += present
-                created += not present
-                continue
-            if upsert is None:
-                raise ValueError("upsert or store_many is required unless dry_run=True")
             try:
-                upsert(entry)
+                problem = validate_id(entry.id) if validate_id else None
+                if problem:
+                    refused.append((entry.id, problem))
+                    continue
+                present = bool(exists and exists(entry.id))
+                if present and not overwrite:
+                    skipped += 1
+                    continue
+                if not present and entry.id in copied:
+                    skipped_deleted += 1
+                    continue
+                if dry_run:
+                    overwritten += present
+                    created += not present
+                    continue
+                if upsert is not None:
+                    upsert(entry)
             except (GrimoireMemoryError, ValueError) as exc:
                 refused.append((entry.id, str(exc)))
                 continue
             except Exception as exc:
+                if dry_run:
+                    refused.append((entry.id, str(exc)))
+                    continue
                 raise MigrationInterruptedError(imported, len(selected), exc) from exc
             imported += 1
+            copied.add(entry.id)
             overwritten += present
             created += not present
     return BackendMigrationResult(
@@ -253,6 +300,7 @@ def migrate_backend_to_backend(
         project=project,
         created=created,
         skipped_existing=skipped,
+        skipped_deleted=skipped_deleted,
         overwritten=overwritten,
         refused=tuple(refused),
     )

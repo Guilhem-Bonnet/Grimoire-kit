@@ -274,6 +274,7 @@ class TestCli:
         cfg = _cfg("mine")
         with (
             patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tmp_path)),
+            patch("grimoire.memory.store_probe.store_exists", return_value=None),
             patch("grimoire.cli.cmd_memory.MemoryManager.from_config", return_value=MemoryManager.from_backend(source)),
             patch(
                 "grimoire.cli.cmd_memory_ops._load_manager_context",

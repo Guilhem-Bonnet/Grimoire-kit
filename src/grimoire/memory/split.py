@@ -42,7 +42,7 @@ __all__ = [
     "apply_split",
     "export_entries",
     "plan_split",
-    "set_collection_prefix",
+    "render_collection_prefix",
     "target_collection",
 ]
 
@@ -136,9 +136,23 @@ def plan_split(
     certains projets ; les autres restent dans le segment partagé, intacts.
     """
     wanted = {p for p in only if p}
+    rows = list(entries)
+    owners: dict[str, list[str]] = defaultdict(list)
+    for entry in rows:
+        name = str(entry.metadata.get("project_name", UNASSIGNED))
+        if name != UNASSIGNED and name not in owners[target_collection(source_collection, name)]:
+            owners[target_collection(source_collection, name)].append(name)
+    clashes = {c: names for c, names in owners.items() if len(names) > 1}
+    if clashes:
+        collection, names = next(iter(clashes.items()))
+        raise SplitError(
+            f"les projets {', '.join(repr(n) for n in names)} ne diffèrent que par la casse ou la ponctuation : "
+            f"ils auraient la même collection cible « {collection} » et leurs souvenirs se mélangeraient. "
+            "Rien n'est écrit ; harmonisez project.name d'abord."
+        )
     by_project: dict[str, list[str]] = defaultdict(list)
     total = 0
-    for entry in entries:
+    for entry in rows:
         total += 1
         by_project[str(entry.metadata.get("project_name", UNASSIGNED))].append(entry.id)
     groups = tuple(
@@ -174,7 +188,7 @@ def apply_split(
     *,
     export_path: Path,
     open_target: Callable[[str], Any],
-    update_config: Callable[[Path, str], None] | None = None,
+    render_config: Callable[[Path, str], str] | None = None,
 ) -> SplitReport:
     """Exécute la découpe. Lève :class:`SplitError` au premier écart, sans toucher aux configurations.
 
@@ -215,16 +229,38 @@ def apply_split(
                 f"« {group.collection} » (premier : {missing[0]}). Configurations non modifiées."
             )
 
-    if update_config is not None:
-        for group in plan.groups:
-            if group.config_path is not None:
-                update_config(group.config_path, group.collection)
-                report.configs_updated.append(str(group.config_path))
+    if render_config is not None:
+        _repoint_configs(plan, render_config, report)
     return report
 
 
-def set_collection_prefix(config_path: Path, collection: str) -> None:
-    """Repointe ``memory.collection_prefix`` d'un ``project-context.yaml``, commentaires conservés."""
+def _repoint_configs(plan: SplitPlan, render_config: Callable[[Path, str], str], report: SplitReport) -> None:
+    """Repointe les configurations en tout ou rien.
+
+    Tout est d'abord rendu (un YAML illisible s'arrête ici, rien n'est touché) ; chaque remplacement est
+    atomique (:func:`grimoire.core.fsio.atomic_write`) ; si l'un échoue, ceux déjà faits sont remis tels quels.
+    """
+    from grimoire.core.fsio import atomic_write
+
+    pending = [(g.config_path, g.collection) for g in plan.groups if g.config_path is not None]
+    originals = {path: path.read_text(encoding="utf-8") for path, _ in pending}
+    rendered = [(path, render_config(path, collection)) for path, collection in pending]
+    done: list[Path] = []
+    try:
+        for path, text in rendered:
+            atomic_write(path, text)
+            done.append(path)
+    except OSError as exc:
+        for path in done:
+            atomic_write(path, originals[path])
+        raise SplitError(f"écriture des configurations impossible ({exc}) ; aucune n'a été modifiée.") from exc
+    report.configs_updated.extend(str(p) for p in done)
+
+
+def render_collection_prefix(config_path: Path, collection: str) -> str:
+    """Contenu de ``project-context.yaml`` avec ``memory.collection_prefix`` repointé, commentaires conservés."""
+    import io
+
     from ruamel.yaml import YAML
 
     yaml = YAML()
@@ -240,5 +276,6 @@ def set_collection_prefix(config_path: Path, collection: str) -> None:
     memory["collection_prefix"] = collection
     if memory.get("backend") == "weaviate-server" and memory.get("weaviate_collection"):
         memory["weaviate_collection"] = collection
-    with config_path.open("w", encoding="utf-8") as fh:
-        yaml.dump(data, fh)
+    out = io.StringIO()
+    yaml.dump(data, out)
+    return out.getvalue()

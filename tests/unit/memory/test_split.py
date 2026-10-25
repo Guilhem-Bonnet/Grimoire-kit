@@ -23,7 +23,7 @@ from grimoire.cli.app import app
 from grimoire.core.config import GrimoireConfig
 from grimoire.memory.backends.local import LocalMemoryBackend
 from grimoire.memory.manager import MemoryManager
-from grimoire.memory.split import SplitError, apply_split, plan_split, set_collection_prefix, target_collection
+from grimoire.memory.split import SplitError, apply_split, plan_split, render_collection_prefix, target_collection
 
 runner = CliRunner()
 SERVER = "http://qdrant.test:6333"
@@ -161,7 +161,7 @@ class TestApply:
             apply_split(
                 plan, source.get_all(), export_path=tmp_path / "e.json",
                 open_target=lambda c: _Flaky(segments.manager(c)),
-                update_config=lambda p, c: updated.append(p),
+                render_config=lambda p, c: updated.append(p) or "",
             )
 
         assert updated == []
@@ -204,7 +204,7 @@ class TestConfigRewrite:
     def test_sets_collection_prefix_and_keeps_comments(self, tmp_path: Path) -> None:
         config = tmp_path / "project-context.yaml"
         config.write_text("project:\n  name: P  # nom\nmemory:\n  backend: qdrant-server  # serveur\n", encoding="utf-8")
-        set_collection_prefix(config, "grimoire-p")
+        config.write_text(render_collection_prefix(config, "grimoire-p"), encoding="utf-8")
         text = config.read_text(encoding="utf-8")
         assert "collection_prefix: grimoire-p" in text and "# nom" in text and "# serveur" in text
 
@@ -246,6 +246,7 @@ class TestCli:
         segments: _Segments = world["segments"]
         with (
             patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tts_root)),
+            patch("grimoire.memory.store_probe.store_exists", return_value=None),
             patch(
                 "grimoire.cli.cmd_memory_ops.MemoryManager.from_config",
                 side_effect=lambda c, project_root=None: segments.manager(c.memory.collection_prefix),
@@ -342,6 +343,7 @@ class TestCliSafetyRefusals:
         segments: _Segments = world["segments"]
         with (
             patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, root)),
+            patch("grimoire.memory.store_probe.store_exists", return_value=None),
             patch(
                 "grimoire.cli.cmd_memory_ops.MemoryManager.from_config",
                 side_effect=lambda c, project_root=None: segments.manager(c.memory.collection_prefix),

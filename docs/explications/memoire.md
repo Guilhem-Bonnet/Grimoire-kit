@@ -182,7 +182,22 @@ nouveaux projets change ainsi :
 - les ports se lisent dans `GRIMOIRE_QDRANT_PORT` / `GRIMOIRE_QDRANT_GRPC_PORT` ;
   l'ancienne graphie `Grimoire_QDRANT_PORT` reste acceptée.
 
-Un fichier déjà généré garde son volume `grimoire-qdrant-storage` (vos données ne bougent pas). Pour migrer vers un volume par projet, arrêter la pile, copier le contenu de `grimoire-qdrant-storage` vers le nouveau volume du projet, puis régénérer le fichier ; ce n'est pas fait automatiquement.
+Un fichier déjà généré garde son volume `grimoire-qdrant-storage` (vos données ne bougent pas).
+
+**Attention à `grimoire init --force`** : il régénère le fichier Compose depuis le gabarit et remplace
+le volume à nom fixe par un volume neuf, **vide** : vos souvenirs ne sont pas supprimés, mais le nouveau
+Qdrant ne les voit plus. Avant de régénérer, soit gardez l'ancien volume en ajoutant dans le fichier
+régénéré
+
+```yaml
+volumes:
+  qdrant_storage:
+    name: grimoire-qdrant-storage
+```
+
+soit copiez les données : arrêter la pile, puis
+`docker run --rm -v grimoire-qdrant-storage:/de -v <projet>_qdrant_storage:/vers alpine cp -a /de/. /vers/`,
+relancer, vérifier avec `grimoire memory status`. Rien de cela n'est automatisé.
 
 Les remèdes « il manque un extra » (`memory up`, `standard init`, `standard
 doctor`) emploient le gestionnaire qui a installé le kit (`uv tool install`,
@@ -195,7 +210,7 @@ Toute écriture du graphe porte la clé du projet (propriété `project`, valeur
 sont préfixés `<projet>::` : nœuds de code (identifiant d'origine dans
 `local_id`), missions, tâches, événements, incidents, preuves, verdicts,
 décisions, faits, journaux, étiquettes, entités et agents (nom lisible dans
-`label`). Clé à une seule propriété, valable dans toutes les éditions de Neo4j.
+`label`), ainsi que les souvenirs (`GrimoireMemory`) et les objets vectoriels (`WeaviateObject`). Clé à une seule propriété, valable dans toutes les éditions de Neo4j.
 Deux projets qui réutilisent un même identifiant (`MIS-1`, un fait identique,
 un tag) ne s'écrasent plus et ne fusionnent plus ces nœuds.
 
@@ -210,8 +225,12 @@ Le constructeur du graphe ne se connecte ni n'écrit. Le schéma (contraintes)
 est posé une fois, par la même fonction, avant la première écriture de
 n'importe quelle voie, ou par les commandes de synchronisation. Le pilote est
 borné à quelques secondes et, après un échec, le graphe est tenu pour injoignable
-pendant une minute : les écritures suivantes échouent aussitôt au lieu de
-repayer le délai. L'écriture du souvenir lui-même n'est jamais bloquée.
+pendant une minute **seulement si l'erreur est une panne de connectivité ou de service**
+(`ServiceUnavailable`, `SessionExpired`, délais) : les écritures suivantes échouent
+aussitôt, en nommant la cause, au lieu de repayer le délai. Une erreur de requête ou
+de contrainte ne suspend rien. L'écriture du souvenir dans le store principal n'est
+jamais bloquée ; `grimoire memory graph sync-memories` rattrape le graphe une fois
+Neo4j de nouveau joignable.
 
 ### Sondes d'environnement
 

@@ -528,6 +528,12 @@ class TestMigrateRun:
     """Replaces the manual ``memory export`` + ``memory import`` two-step for a
     lexical -> vector move (#527) — no bundle, no intermediate JSON file."""
 
+    @pytest.fixture(autouse=True)
+    def _stores_unknown(self) -> Any:
+        """Les stores sont des doubles : la sonde d'existence ne sait rien (``None``), elle ne refuse pas."""
+        with patch("grimoire.memory.store_probe.store_exists", return_value=None):
+            yield
+
     def test_dry_run_reports_without_writing(self, tmp_path: Path) -> None:
         write_previous_backend_breadcrumb(tmp_path, "lexical")
         cfg = _migrate_cfg()

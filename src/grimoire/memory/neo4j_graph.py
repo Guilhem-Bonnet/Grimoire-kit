@@ -60,6 +60,20 @@ _DRIVER_TIMEOUTS: dict[str, float] = {
 GRAPH_COOLDOWN_SECONDS = 60.0
 
 
+#: Erreurs du pilote qui disent « le service ne répond pas » (et non « la requête est fausse »).
+_CONNECTIVITY_NAMES = frozenset({
+    "ServiceUnavailable", "SessionExpired", "WriteServiceUnavailable", "ReadServiceUnavailable",
+    "RoutingServiceUnavailable", "DatabaseUnavailable", "ConnectionAcquisitionTimeoutError",
+})
+
+
+def _is_connectivity_error(exc: BaseException) -> bool:
+    """Connectivité ou service indisponible (y compris délais) ; pas les erreurs Cypher ni de contrainte."""
+    if isinstance(exc, OSError):  # ConnectionError, TimeoutError, socket
+        return True
+    return any(cls.__name__ in _CONNECTIVITY_NAMES for cls in type(exc).__mro__)
+
+
 class GraphUnavailableError(RuntimeError):
     """Neo4j est tenu pour injoignable : l'appel n'a pas été tenté (disjoncteur ouvert)."""
 
@@ -206,7 +220,7 @@ class Neo4jMemoryGraph:
         weaviate_collection = str(metadata.get("weaviate_collection", ""))
         vector_backend = str(metadata.get("vector_backend", ""))
         payload = {
-            "id": entry.id,
+            "id": self._key(entry.id),
             "text": entry.text,
             "user_id": entry.user_id,
             "tags": list(entry.tags),
@@ -255,21 +269,21 @@ class Neo4jMemoryGraph:
                 SET t.label = tag_name, t.project = $project
                 MERGE (m)-[:TAGGED_WITH]->(t)
                 """,
-                {"id": entry.id, "tags": list(entry.tags)},
+                {"id": self._key(entry.id), "tags": list(entry.tags)},
             )
         self._execute(
             """
             MATCH (m:GrimoireMemory {id: $id})-[old:MEMORY_FOR]->()
             DELETE old
             """,
-            {"id": entry.id},
+            {"id": self._key(entry.id)},
         )
-        self._link_projected_memory(entry.id, metadata)
+        self._link_projected_memory(self._key(entry.id), metadata)
         if weaviate_id:
             self._execute(
                 """
                 MATCH (m:GrimoireMemory {id: $id})
-                MERGE (w:WeaviateObject {id: $weaviate_id})
+                MERGE (w:WeaviateObject {id: $prefix + $weaviate_id})
                 SET w.collection = $weaviate_collection,
                     w.project = $project,
                     w.backend = $vector_backend,
@@ -279,7 +293,7 @@ class Neo4jMemoryGraph:
                 MERGE (w)-[:VECTOR_FOR]->(m)
                 """,
                 {
-                    "id": entry.id,
+                    "id": self._key(entry.id),
                     "weaviate_id": weaviate_id,
                     "weaviate_collection": weaviate_collection,
                     "vector_backend": vector_backend,
@@ -332,7 +346,7 @@ class Neo4jMemoryGraph:
             MATCH (m:GrimoireMemory {id: $id})
             SET m.deleted = true
             """,
-            {"id": entry_id},
+            {"id": self._key(entry_id)},
         )
 
     def upsert_fact(self, fact: KnowledgeFact) -> None:
@@ -373,7 +387,7 @@ class Neo4jMemoryGraph:
                 MATCH (m:GrimoireMemory {id: $source_memory_id})
                 MERGE (f)-[:SOURCED_FROM]->(m)
                 """,
-                {"id": self._key(fact.id), "source_memory_id": fact.source_memory_id},
+                {"id": self._key(fact.id), "source_memory_id": self._key(fact.source_memory_id)},
             )
 
     def invalidate_fact(self, subject: str, predicate: str, object_: str, *, ended: str) -> None:
@@ -416,7 +430,7 @@ class Neo4jMemoryGraph:
                 MATCH (m:GrimoireMemory {id: $related_memory_id})
                 MERGE (d)-[:RELATED_TO]->(m)
                 """,
-                {"id": self._key(record.id), "related_memory_id": record.related_memory_id},
+                {"id": self._key(record.id), "related_memory_id": self._key(record.related_memory_id)},
             )
 
     def upsert_code_nodes(self, nodes: list[CodeNode]) -> int:
@@ -566,6 +580,7 @@ class Neo4jMemoryGraph:
                 """
                 MATCH (t:GrimoireTask {id: $task_id})
                 MERGE (target:GrimoireTask {id: $target})
+                ON CREATE SET target.project = $project
                 MERGE (t)-[r:DEPENDS_ON {kind: $kind}]->(target)
                 """,
                 {"task_id": self._key(task.id), "target": self._key(dependency["target"]), "kind": dependency["kind"]},
@@ -839,7 +854,7 @@ class Neo4jMemoryGraph:
             RETURN m.id AS id, m.weaviate_collection AS collection
             """,
             collections=collections,
-            known_ids=list(known_ids),
+            known_ids=sorted({*known_ids, *(self._key(i) for i in known_ids)}),
         )
         return [{"id": str(record["id"]), "collection": str(record["collection"])} for record in records]
 
@@ -919,8 +934,9 @@ class Neo4jMemoryGraph:
         now = time.monotonic()
         if now < self._down_until:
             raise GraphUnavailableError(
-                f"Neo4j tenu pour injoignable ({self._down_reason}) ; nouvelle tentative dans "
-                f"{self._down_until - now:.0f}s"
+                f"Neo4j injoignable ({self._down_reason}) ; prochaine tentative dans {self._down_until - now:.0f}s. "
+                "Le souvenir est écrit dans le store principal ; `grimoire memory graph sync-memories` "
+                "rattrape le graphe une fois Neo4j joignable."
             )
         # ``project`` et ``prefix`` sont fournis à chaque requête : un paramètre
         # inutilisé par le texte Cypher est ignoré par le pilote.
@@ -928,8 +944,11 @@ class Neo4jMemoryGraph:
         try:
             return self._driver.execute_query(statement, **merged, database_=self._database)
         except Exception as exc:
-            self._down_until = time.monotonic() + GRAPH_COOLDOWN_SECONDS
-            self._down_reason = type(exc).__name__
+            if _is_connectivity_error(exc):
+                self._down_until = time.monotonic() + GRAPH_COOLDOWN_SECONDS
+                self._down_reason = f"{type(exc).__name__}: {str(exc)[:100]}"
+            # Une erreur de requête ou de contrainte laisse le disjoncteur fermé : les écritures
+            # valides qui suivent ne sont pas suspendues pour une écriture fautive.
             raise
 
 
