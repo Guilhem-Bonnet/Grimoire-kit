@@ -32,14 +32,15 @@ from ruamel.yaml.error import YAMLError
 
 from grimoire.core import layout
 from grimoire.core.kit_hashes import load_catalog, shipped_by_kit
+from grimoire.missions.liveness import DEFAULT_ACTIVE_MINUTES, DEFAULT_ACTIVE_WINDOW, recent_sign
 from grimoire.tools.blueprint_telemetry import event_files
 
 _yaml = YAML(typ="safe")
 
-#: Fenêtre au-delà de laquelle un projet n'est plus considéré comme actif.
-#: Quinze minutes : assez pour couvrir une pause de frappe, trop court pour
-#: laisser croire qu'une session d'hier est en cours.
-ACTIVE_WINDOW_MINUTES = 15
+#: Fenêtre au-delà de laquelle un projet n'est plus considéré comme actif : celle
+#: de la vivacité des sessions (:data:`grimoire.missions.liveness.DEFAULT_ACTIVE_MINUTES`),
+#: jamais une seconde valeur. La Flotte disait 15 min quand Travail disait 30 (P33).
+ACTIVE_WINDOW_MINUTES = DEFAULT_ACTIVE_MINUTES
 
 #: Où vivent les blueprints d'un projet. Défini ici, module feuille, pour que
 #: le serveur et la santé ne puissent pas diverger sur l'emplacement.
@@ -611,7 +612,7 @@ def activity(project_root: Path, *, now: datetime | None = None) -> dict[str, An
         "lastEventSource": latest["source"] if latest else None,
         "lastEventLabel": latest["label"] if latest else None,
         "ageMinutes": round(age_minutes, 1) if age_minutes is not None else None,
-        "active": bool(age_minutes is not None and age_minutes <= ACTIVE_WINDOW_MINUTES),
+        "active": recent_sign(latest["at"] if latest else None, now, DEFAULT_ACTIVE_WINDOW),
         "activeWindowMinutes": ACTIVE_WINDOW_MINUTES,
         "inFlight": in_flight,
     }

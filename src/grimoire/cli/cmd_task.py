@@ -22,6 +22,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from grimoire.cli.cmd_task_portfolio import list_all_projects
+from grimoire.missions.liveness import DEFAULT_ACTIVE_MINUTES
 
 task_app = typer.Typer(
     help="Tâches agentiques : projection du Mission Ledger vers le board gouverné.",
@@ -219,7 +220,7 @@ def task_list(
     ] = False,
     live_minutes: Annotated[
         int, typer.Option("--live-minutes", help="Âge maximal du journal de session pour --live (minutes).")
-    ] = 30,
+    ] = DEFAULT_ACTIVE_MINUTES,
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
 ) -> None:
@@ -237,7 +238,7 @@ def task_list(
         list_all_projects(ctx, project_root, status=status, project=project, live=live, live_minutes=live_minutes)
         return
 
-    if project is not None or live or live_minutes != 30:
+    if project is not None or live or live_minutes != DEFAULT_ACTIVE_MINUTES:
         # `console.print` + `typer.Exit`, pas la levée nue : le rendu Rich
         # d'un `typer.BadParameter` non attrapé varie selon la largeur de
         # terminal détectée (panneau tronqué en CI, texte simple en local) —

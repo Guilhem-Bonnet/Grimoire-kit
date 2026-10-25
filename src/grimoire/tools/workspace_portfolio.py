@@ -37,6 +37,7 @@ from typing import Any
 from grimoire.costs import Cost
 from grimoire.missions.lease import DEFAULT_LEASE_TTL_SECONDS, LeaseFile
 from grimoire.missions.liveness import (
+    DEFAULT_ACTIVE_MINUTES,
     INACTIF,
     INCONNU,
     TERMINE,
@@ -57,6 +58,7 @@ __all__ = [
     "portfolio_tasks",
     "resolve_registry_root",
     "resume_command",
+    "sessions_index",
     "unread_directives",
 ]
 
@@ -65,8 +67,9 @@ SCHEMA_VERSION = "grimoire-task-portfolio/v1"
 #: Fenêtre du journal de session : écrit depuis moins de N minutes, c'est un
 #: signe de vie. Passé ce délai ce n'est PAS « mort » : la vivacité devient
 #: `inactif` ou `inconnu` (`missions.liveness`). Paramétrable (`?minutes=`,
-#: `--live-minutes`).
-DEFAULT_LIVE_MINUTES = 30
+#: `--live-minutes`). La valeur est celle de la vivacité
+#: (:data:`grimoire.missions.liveness.DEFAULT_ACTIVE_MINUTES`), partagée avec la Flotte.
+DEFAULT_LIVE_MINUTES = DEFAULT_ACTIVE_MINUTES
 
 #: Journaux de session des hooks (`grimoire.policies.session_state`) :
 #: `session-<id>.json`, avec `updated_at` réécrit à chaque événement de hook.
@@ -161,7 +164,7 @@ def _parse_iso(value: str | None) -> datetime | None:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
-def _sessions_index(project_root: Path) -> dict[str, dict[str, Any]]:
+def sessions_index(project_root: Path) -> dict[str, dict[str, Any]]:
     """``session_id → journal`` des sessions de hooks du projet, best-effort."""
     runs = project_root / RUNS_RELPATH
     index: dict[str, dict[str, Any]] = {}
@@ -375,7 +378,7 @@ def annotate_cards(
     from grimoire.missions.board import blockers_of
     from grimoire.missions.schemas import TaskState
 
-    sessions = _sessions_index(project_root)
+    sessions = sessions_index(project_root)
     costs = dispatch_costs(service.ledger)
     reasons = block_reasons(service.ledger)
     closed: frozenset[str] | None = None

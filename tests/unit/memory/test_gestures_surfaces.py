@@ -68,6 +68,15 @@ def _journal(root: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
+def _comparable(body: dict[str, Any]) -> dict[str, Any]:
+    """Le corps sans ce qui diffère d'une surface à l'autre par nature : l'id, et
+    l'horodatage du retrait (deux appels successifs peuvent changer de seconde)."""
+    out: dict[str, Any] = {**body, "id": "ID"}
+    if isinstance(out.get("retracted"), dict):
+        out["retracted"] = {**out["retracted"], "at": "AT"}
+    return out
+
+
 def _mcp_body(result: Any) -> tuple[bool, dict[str, Any]]:
     """``(est_une_erreur, corps_json)`` d'un résultat d'outil MCP.
 
@@ -119,7 +128,7 @@ class TestSameGestures:
             code, cli_body = _cli(cli_root, monkeypatch, *cli_args)
             is_error, mcp_body = _mcp_body(call())
             assert code == 0 and not is_error, (cli_args, cli_body, mcp_body)
-            assert {**cli_body, "id": "ID"} == {**mcp_body, "id": "ID"}
+            assert _comparable(cli_body) == _comparable(mcp_body)
 
         cli_rows = [r["op"] for r in _journal(cli_root) if r["op"] != "store"]
         mcp_rows = [r["op"] for r in _journal(mcp_root) if r["op"] != "store"]
