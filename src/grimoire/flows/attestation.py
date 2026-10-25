@@ -62,9 +62,17 @@ découverte par cwd ni par l'environnement) ; les autres règles ne changent pas
 Le tour est cherché hors du registre des tours consommés de la source **et** de
 la cible, puis consommé dans celui de la **source** : le registre suit le
 journal qu'il protège, si bien qu'un même tour ne sert qu'une fois, qu'il soit
-utilisé depuis la source elle-même ou depuis n'importe quelle cible. Limite : une
-*copie* du dossier de la source a son propre registre ; la garde d'autorité
-refuse d'écrire le journal par son nom, pas de copier un dossier entier.
+utilisé depuis la source elle-même ou depuis n'importe quelle cible.
+Registre de l'utilisateur : un registre lié à un chemin ne voit pas la *copie*
+du journal (la garde d'autorité refuse d'écrire le journal par son nom, pas de
+copier un dossier entier). Toute consommation, avec ou sans ``--attest-from``,
+est donc aussi inscrite dans un registre indépendant du chemin, sous la zone de
+contrôle de l'utilisateur (``~/.grimoire/control/``, :func:`user_consumed_path`),
+clé ``(session_id, ts, prompt_sha256)`` ; toute attestation le consulte en plus
+du registre du projet. :meth:`CheckpointJournal.consume_turn` revérifie la clé
+sous le verrou de ce registre et refuse un tour déjà consommé
+(:class:`TurnAlreadyConsumedError`) : deux décisions concurrentes ne partagent
+plus un tour.
 Python seul : aucune de ces décisions ne traverse ``grimoire_flows_core``.
 """
 
@@ -97,9 +105,11 @@ __all__ = [
     "PLAN_DRIFTED",
     "PLAN_PROVIDERS",
     "UNATTESTED",
+    "USER_CONSUMED_TURNS_FILENAME",
     "Attestation",
     "CheckpointGate",
     "CheckpointJournal",
+    "TurnAlreadyConsumedError",
     "attest",
     "attest_grant",
     "destructive_checkpoints",
@@ -110,6 +120,7 @@ __all__ = [
     "project_plan",
     "refusal_text",
     "turns_source",
+    "user_consumed_path",
     "warning_text",
 ]
 
@@ -142,8 +153,38 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 #: Registre des tours humains déjà consommés par une décision attestée, commun
 #: à tous les runs. Suffixe ``.authority.jsonl`` : la garde d'écriture le couvre.
 CONSUMED_TURNS_FILENAME = "@consumed-turns" + AUTHORITY_SUFFIX
+#: Registre de l'utilisateur, indépendant du chemin du journal (zone de contrôle, ``~/.grimoire/control/``).
+#: Sans ``@`` : son nom ne contient pas celui du registre d'un projet.
+USER_CONSUMED_TURNS_FILENAME = "consumed-turns" + AUTHORITY_SUFFIX
 #: Identité d'un tour : ``(session_id, ts, prompt_sha256)``.
 TurnKey = tuple[str, str, str]
+
+
+class TurnAlreadyConsumedError(GrimoireRuntimeError):
+    """Le tour qu'une attestation a retenu vient d'être consommé par une autre décision (course)."""
+
+
+def user_consumed_path() -> Path:
+    """Le registre des tours consommés de l'utilisateur : ``~/.grimoire/control/``, zone que la garde refuse aux agents."""
+    return Path.home() / ".grimoire" / "control" / USER_CONSUMED_TURNS_FILENAME
+
+
+def _turn_keys(path: Path) -> frozenset[TurnKey]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return frozenset()
+    out: set[TurnKey] = set()
+    for line in raw.splitlines():
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            out.add((str(data.get("session_id", "")), str(data.get("turn_ts", "")), str(data.get("turn_sha256", ""))))
+    return frozenset(out)
+
+
 #: Le dossier des flows d'un projet, relatif à sa racine : il porte le registre des tours consommés.
 FLOWS_RELPATH = Path("_grimoire-runtime-output") / "flows"
 #: Ce que dit un octroi refusé en ``human_authority_unprovable`` sans ``--attest-from``.
@@ -406,26 +447,49 @@ class CheckpointJournal:
         return self.path.parent / CONSUMED_TURNS_FILENAME
 
     def consumed_turns(self) -> frozenset[TurnKey]:
-        """Les tours qu'une décision attestée de n'importe quel run a déjà consommés."""
-        try:
-            raw = self.consumed_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return frozenset()
-        out: set[TurnKey] = set()
-        for line in raw.splitlines():
-            try:
-                data = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(data, dict):
-                out.add((str(data.get("session_id", "")), str(data.get("turn_ts", "")), str(data.get("turn_sha256", ""))))
-        return frozenset(out)
+        """Les tours qu'une décision attestée de n'importe quel run de ce dossier a déjà consommés.
+
+        Le registre de l'utilisateur n'y est pas : :func:`attest` le lit lui-même, pour tout appelant.
+        """
+        return _turn_keys(self.consumed_path)
 
     def consume_turn(self, node_id: str, attestation: Attestation, *, for_project: str = "") -> None:
-        """Inscrit le tour qui atteste *attestation* au registre commun : il n'attestera plus rien.
+        """Inscrit le tour qui atteste *attestation* au registre de ce dossier et à celui de l'utilisateur.
 
+        Sous le verrou du registre de l'utilisateur, le tour est revérifié : déjà consommé (une décision
+        concurrente l'a pris entre l'attestation et maintenant), :class:`TurnAlreadyConsumedError`, rien n'est
+        écrit. Le registre du dossier est écrit d'abord : s'il ne s'écrit pas, rien n'est consommé ; si celui de
+        l'utilisateur échoue ensuite, le tour reste consommé ici (échec fermé, il n'attestera plus rien).
         *for_project* : le projet cible quand le tour est consommé dans le registre de la source (``--attest-from``).
         """
+        key = (attestation.session_id, attestation.turn_ts, attestation.turn_sha256)
+        user = user_consumed_path()
+        user.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with locked(user):
+            if key in _turn_keys(user) or key in _turn_keys(self.consumed_path):
+                raise TurnAlreadyConsumedError(
+                    f"tour humain du {attestation.turn_ts} (session {attestation.session_id}) déjà consommé par une "
+                    "autre décision : il n'atteste plus rien, un nouveau tour humain est nécessaire"
+                )
+            self._write_consumed(node_id, attestation, for_project)
+            with user.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "session_id": attestation.session_id,
+                            "turn_ts": attestation.turn_ts,
+                            "turn_sha256": attestation.turn_sha256,
+                            "challenge_id": attestation.challenge_id,
+                            "node_id": node_id,
+                            "registry": str(self.consumed_path),
+                            "ts": _now(),
+                        },
+                        ensure_ascii=True,
+                    )
+                    + "\n"
+                )
+
+    def _write_consumed(self, node_id: str, attestation: Attestation, for_project: str) -> None:
         entry = {
             "session_id": attestation.session_id,
             "turn_ts": attestation.turn_ts,
@@ -499,7 +563,8 @@ def attest(
 
     *consumed* : les tours qu'une décision attestée a déjà utilisés (registre
     commun à tous les runs, :meth:`CheckpointJournal.consumed_turns`) — un tour
-    ne sert qu'une décision.
+    ne sert qu'une décision. Le registre de l'utilisateur (:func:`user_consumed_path`)
+    est toujours consulté en plus, quel que soit l'appelant.
     *turns_root* : le projet dont le journal des tours est lu (``--attest-from``, voir
     :func:`attest_grant`) ; ``None`` : *project_root*, comme toujours.
     """
@@ -525,6 +590,7 @@ def attest(
     since = _parse(str(challenge.get("ts", "")))
     if since is None:
         return _no("no_challenge")
+    consumed = frozenset(consumed) | _turn_keys(user_consumed_path())
     for turn in reversed(turns):
         when = _parse(turn.ts)
         if (
@@ -545,7 +611,9 @@ def turns_source(raw: Path) -> Path:
     """
     root = Path(raw).resolve()
     if not root.is_dir():
-        raise GrimoireRuntimeError(f"--attest-from {raw} : dossier introuvable (racine du projet de ta session attendue)")
+        raise GrimoireRuntimeError(
+            f"--attest-from {raw} : dossier introuvable (racine du projet de ta session attendue)"
+        )
     try:
         turns_path(root).read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -574,7 +642,8 @@ def attest_grant(
 
     Avec *source* (déjà validée par :func:`turns_source`) : les tours sont lus dans le journal de *source* ;
     même session, tour ``user`` postérieur au challenge, comme toujours ; le tour doit être absent du registre
-    de la source **et** de *registry* ; il sera consommé dans celui de la **source**, que l'appelant reçoit.
+    de la source, de *registry* et de celui de l'utilisateur (:func:`attest`) ; il sera consommé dans celui de
+    la **source**, que l'appelant reçoit (et dans celui de l'utilisateur, :meth:`CheckpointJournal.consume_turn`).
     Pourquoi la source : le registre doit suivre le journal qu'il protège. Le tenir dans la cible laisserait
     le même tour servir une fois par cible, et une fois encore dans la source elle-même.
     """

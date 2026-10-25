@@ -473,9 +473,16 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
   (`_grimoire-runtime-output/flows/authority/@consumed-turns.authority.jsonl`, entrée `for_project`), après
   vérification dans celui de la source et dans celui de la cible : le registre suit le journal qu'il protège,
   si bien qu'un même tour ne sert ni à deux cibles ni à la source elle-même. Un dossier absent, sans journal
-  ou dont le journal est illisible est refusé (code 1) avant tout challenge ; si le registre de la source ne
-  s'écrit pas, le mandat juste inscrit est révoqué (`attest_source_unwritable`). Limite : une copie du
-  dossier source a son propre registre.
+  ou dont le journal est illisible est refusé (code 1) avant tout challenge ; le tour est consommé avant
+  l'inscription du mandat, donc un registre qui ne s'écrit pas n'inscrit rien.
+- **Registre des tours de l'utilisateur** : toute consommation de tour, avec ou sans `--attest-from` (octroi,
+  mandat, checkpoint de flow, `approve-check`), est aussi inscrite dans
+  `~/.grimoire/control/consumed-turns.authority.jsonl`, clé `(session_id, ts, prompt_sha256)`, indépendante du
+  chemin du journal ; toute attestation le consulte. Une copie du journal des tours (dossier source recopié
+  ailleurs) ne réatteste donc pas un tour déjà consommé. La consommation revérifie la clé sous le verrou de ce
+  registre : de deux décisions concurrentes qui ont retenu le même tour, la seconde est refusée (« déjà
+  consommé », code 1) sans rien inscrire. Limite : ce registre vit dans la zone de contrôle de l'utilisateur ;
+  un autre compte (autre `HOME`), ou un agent qui exécute un script arbitraire pour y écrire, n'est pas couvert.
 
 - **Borné** : gestes couverts, types de tâche, plafond de sessions de worker par jour, durée. Un mandat
   expiré, révoqué, hors plafond ou qui ne couvre pas le geste est refusé.

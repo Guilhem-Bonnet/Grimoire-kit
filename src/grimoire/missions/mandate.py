@@ -55,7 +55,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from grimoire.core.exceptions import GrimoireMissionError
+from grimoire.core.exceptions import GrimoireMissionError, GrimoireRuntimeError
 from grimoire.core.fsio import atomic_write, locked
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.missions.schemas import ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR
@@ -133,8 +133,6 @@ REVOKE_MANUAL = "manual"
 REVOKE_PROTECTED_WRITE = "protected_write"
 REVOKE_FORGED_VERDICT = "forged_verdict"
 REVOKE_WRITE_OUTSIDE_WORKTREE = "write_outside_worktree"
-#: Le registre des tours consommés de la source ``--attest-from`` ne s'écrit pas : le mandat juste inscrit tombe.
-ATTEST_SOURCE_UNWRITABLE = "attest_source_unwritable"
 # Disjoncteur : ce que le lot 2 consomme.
 BREAKER_SEAL_MISMATCH = "check_seal_mismatch"
 BREAKER_FORGED_VERDICT = "forged_verdict"
@@ -554,6 +552,7 @@ class MandateStore:
         via: str,
         attestation: Attestation | None = None,
         now: datetime | None = None,
+        mandate_id: str | None = None,
     ) -> Mandate:
         """Inscrit le mandat. *origin* vient du canal (cockpit derrière son jeton, tour humain attesté), jamais d'un champ libre."""
         if origin != ORIGIN_HUMAN:
@@ -564,7 +563,8 @@ class MandateStore:
         from grimoire.flows.autonomy import parse_until
 
         moment = now or _now()
-        mandate_id = f"MND-{uuid.uuid4().hex[:12]}"
+        if mandate_id is None or not _MANDATE_ID.match(mandate_id):
+            mandate_id = f"MND-{uuid.uuid4().hex[:12]}"
         until = parse_until(request.until_raw, moment).isoformat()
         entry = self.journal.append(
             {
@@ -640,21 +640,23 @@ class MandateStore:
         attestation, registry = attest_grant(self.root, turns, challenge, env, source)
         if not attestation.attested:
             return None, attestation
-        mandate = self.grant(request, origin=ORIGIN_HUMAN, via="attestation", attestation=attestation, now=now)
+        # Le tour est consommé AVANT l'inscription du mandat : un tour qu'on ne peut pas consommer (registre en
+        # lecture seule, décision concurrente qui l'a pris) n'inscrit rien ; un mandat qui échoue ensuite a brûlé
+        # son tour (échec fermé).
+        mandate_id = f"MND-{uuid.uuid4().hex[:12]}"
         if registry is turns:
-            turns.consume_turn(mandate.id, attestation)
+            turns.consume_turn(mandate_id, attestation)
         else:
             try:
-                registry.consume_turn(mandate.id, attestation, for_project=self.project)
-            except Exception as exc:
-                # Le registre de la source ne s'écrit pas (dossier en lecture seule…) : un mandat dont le tour
-                # n'est pas consommé laisserait ce tour en attester un autre. Échec fermé : le mandat tombe.
-                self._write_revocation(mandate.id, ATTEST_SOURCE_UNWRITABLE, str(registry.consumed_path), _now())
-                raise MandateRefusedError(
-                    ATTEST_SOURCE_UNWRITABLE,
-                    f"mandat {mandate.id} révoqué aussitôt : le tour n'a pas pu être consommé dans le registre de "
-                    f"--attest-from ({registry.consumed_path} : {type(exc).__name__})",
+                registry.consume_turn(mandate_id, attestation, for_project=self.project)
+            except OSError as exc:
+                raise GrimoireRuntimeError(
+                    f"--attest-from : le tour n'a pas pu être consommé dans {registry.consumed_path} "
+                    f"({type(exc).__name__}) ; aucun mandat inscrit"
                 ) from exc
+        mandate = self.grant(
+            request, origin=ORIGIN_HUMAN, via="attestation", attestation=attestation, now=now, mandate_id=mandate_id
+        )
         self.journal.append(
             {
                 "type": "grant_challenge_used",

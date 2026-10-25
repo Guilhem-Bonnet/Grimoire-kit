@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,17 @@ from typer.testing import CliRunner
 
 from grimoire.cli.app import app
 from grimoire.core.exceptions import GrimoireRuntimeError
-from grimoire.flows.attestation import CONSUMED_TURNS_FILENAME, FLOWS_RELPATH, NO_HUMAN_TURN
+from grimoire.flows import attestation as attestation_module
+from grimoire.flows.attestation import (
+    CONSUMED_TURNS_FILENAME,
+    FLOWS_RELPATH,
+    NO_HUMAN_TURN,
+    CheckpointJournal,
+    TurnAlreadyConsumedError,
+    _turn_keys,
+    attest_grant,
+    user_consumed_path,
+)
 from grimoire.flows.autonomy import GrantJournal, GrantRequest
 from grimoire.hosts.decisions import HookInput, run_decision
 from grimoire.hosts.decisions.human_turns import turns_path
@@ -249,15 +261,111 @@ def test_un_registre_source_qui_ne_s_ecrit_pas_n_accorde_rien(source: Path, targ
     try:
         with pytest.raises(GrimoireRuntimeError, match="aucun octroi inscrit"):
             journal.request(request, attest_from=source)
-        with pytest.raises(md.MandateRefusedError, match="révoqué aussitôt"):
+        with pytest.raises(GrimoireRuntimeError, match="aucun mandat inscrit"):
             store.request_grant(_request(), attest_from=source)
     finally:
         source.chmod(0o755)
     assert [e["type"] for e in journal.entries()] == ["grant_challenge"]
-    assert store.state().reason == md.REVOKED
-    # Le tour n'a été consommé nulle part : il reste utilisable une fois le registre réparé.
+    # Le tour est consommé avant l'inscription : rien n'a été inscrit, rien n'est à révoquer.
+    assert store.state().reason == md.NO_MANDATE
+    assert not any(e["type"] == "grant" for e in md.AuthorityJournal().read())
+    # Le tour n'a été consommé nulle part (ni la source ni le registre de l'utilisateur) : il reste utilisable.
+    assert _turn_keys(user_consumed_path()) == frozenset()
     mandate, _ = store.request_grant(_request(), attest_from=source)
     assert mandate is not None and store.state().active
+
+
+# ── Registre de l'utilisateur : copie du journal et course ────────────────────
+
+
+def test_une_copie_du_journal_source_ne_reatteste_pas_un_tour(source: Path, tmp_path: Path) -> None:
+    """Preuve de concept de la relecture : N demandes ouvertes, UN tour, puis des copies de la source.
+
+    La copie emporte le journal des tours mais pas le registre du projet (``_grimoire-runtime-output``) : sans
+    registre de l'utilisateur, chaque copie réattestait le même tour.
+    """
+    kit, other = _project(tmp_path, "kit"), _project(tmp_path, "autre")
+    requests = [GrantRequest.build([f"blueprint:{n}"], float(i + 1), "+1h") for i, n in enumerate("abc")]
+    for request in requests:
+        GrantJournal(kit / FLOWS_RELPATH, kit).request(request, attest_from=source)
+    stores = [MandateStore(kit), MandateStore(other)]
+    for store in stores:
+        store.request_grant(_request(), attest_from=source)
+    _human_turn(source)  # un seul tour humain
+    copies = []
+    for name in ("copie-1", "copie-2", "copie-3"):
+        copy = _project(tmp_path, name)
+        shutil.copytree(source / "_grimoire-output", copy / "_grimoire-output")
+        copies.append(copy)
+    granted = [GrantJournal(kit / FLOWS_RELPATH, kit).request(requests[0], attest_from=source)[0]]
+    granted += [GrantJournal(kit / FLOWS_RELPATH, kit).request(requests[1], attest_from=source)[0]]
+    granted += [GrantJournal(kit / FLOWS_RELPATH, kit).request(requests[2], attest_from=copies[0])[0]]
+    granted += [stores[0].request_grant(_request(), attest_from=copies[1])[0]]
+    granted += [stores[1].request_grant(_request(), attest_from=copies[2])[0]]
+    assert sum(g is not None for g in granted) == 1
+    # Le registre de copie-N est vide : c'est celui de l'utilisateur qui a refusé.
+    assert all(_consumed(c) == [] for c in copies)
+    assert len(_turn_keys(user_consumed_path())) == 1
+
+
+def test_sans_l_option_la_consommation_s_inscrit_aussi_au_registre_de_l_utilisateur(target: Path) -> None:
+    """Sans ``--attest-from`` : même résultat qu'avant, une ligne de plus dans le registre de l'utilisateur."""
+    store = MandateStore(target)
+    store.request_grant(_request())
+    _human_turn(target)
+    mandate, attestation = store.request_grant(_request())
+    assert mandate is not None and "source" not in attestation.to_dict() and mandate.attest_from == ""
+    assert _turn_keys(user_consumed_path()) == {("S1", attestation.turn_ts, attestation.turn_sha256)}
+    assert len(_consumed(target)) == 1 and "for_project" not in _consumed(target)[0]
+
+
+def test_deux_consommations_du_meme_tour_la_seconde_est_refusee(source: Path, tmp_path: Path) -> None:
+    """La course : deux octrois attestés par le même tour avant que l'un ne le consomme."""
+    kit, other = _project(tmp_path, "kit"), _project(tmp_path, "autre")
+    registries = [CheckpointJournal(root / FLOWS_RELPATH, "autonomy-grants") for root in (kit, other)]
+    challenges = []
+    for root in (kit, other):
+        challenges.append({"challenge_id": f"MCH-{root.name}", "session_id": "S1", "ts": datetime.now(UTC).isoformat()})
+    _human_turn(source)
+    found = [
+        attest_grant(root, reg, ch, None, source)
+        for root, reg, ch in zip((kit, other), registries, challenges, strict=True)
+    ]
+    assert all(a.attested for a, _ in found)  # les deux lisent le registre avant toute consommation
+    (first, first_registry), (second, second_registry) = found
+    first_registry.consume_turn("MND-000000000001", first, for_project=str(kit))
+    with pytest.raises(TurnAlreadyConsumedError, match="déjà consommé"):
+        second_registry.consume_turn("MND-000000000002", second, for_project=str(other))
+    # Le même registre deux fois : refusé aussi, et rien n'est réécrit.
+    with pytest.raises(TurnAlreadyConsumedError):
+        first_registry.consume_turn("MND-000000000003", first, for_project=str(kit))
+    assert len(_consumed(source)) == 1 and len(_turn_keys(user_consumed_path())) == 1
+
+
+def test_la_course_cote_cli_refuse_sans_inscrire(source: Path, target: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le tour pris entre l'attestation et la consommation : refus nommé, aucun mandat inscrit."""
+    store, rival = MandateStore(target), MandateStore(_project(source.parent, "rival"))
+    for each in (store, rival):
+        each.request_grant(_request(), attest_from=source)
+    _human_turn(source)
+    # La cible atteste d'abord (lecture des registres), puis le rival consomme le même tour : la fenêtre de course.
+    challenge = next(
+        e for e in md.AuthorityJournal().read() if e["type"] == "grant_challenge" and e["project"] == str(target)
+    )
+    stale = attest_grant(target, CheckpointJournal(target / FLOWS_RELPATH, "autonomy-grants"), challenge, None, source)
+    assert stale[0].attested
+    rival_mandate, _ = rival.request_grant(_request(), attest_from=source)
+    assert rival_mandate is not None
+    monkeypatch.setattr(attestation_module, "attest_grant", lambda *_args, **_kwargs: stale)
+    with pytest.raises(TurnAlreadyConsumedError):
+        store.request_grant(_request(), attest_from=source)
+    assert store.state().reason == md.NO_MANDATE
+    argv = [
+        "autonomy", "mandate", "grant", "--gesture", "accept", "--task-type", "implementation",
+        "--max-sessions-per-day", "2", "--until", "+1h", "--project-root", str(target), "--attest-from", str(source),
+    ]  # fmt: skip
+    refused = runner.invoke(app, argv)
+    assert refused.exit_code == 1 and "déjà consommé" in refused.output
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
