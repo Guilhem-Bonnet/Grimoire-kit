@@ -296,6 +296,7 @@ def test_une_pr_venue_d_un_fork_n_est_jamais_fusionnee(projet: Path, host: FakeH
     assert host.of("gh", "pr", "merge") == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="séquence de terminal et chevrons interdits dans un nom de fichier Windows")
 def test_la_question_echappe_ce_que_la_pr_controle(projet: Path, host: FakeHost) -> None:
     from grimoire.missions.questions import records_of
 
@@ -580,3 +581,19 @@ def test_un_sceau_sans_tete_n_est_ni_pose_ni_accepte(tmp_path: Path) -> None:
     task = SimpleNamespace(id="T-2")
     assert verify(plain, task, plain) == ""  # type: ignore[arg-type]
     assert "aucune tête" in verify(plain, task, plain, head="a" * 40)  # type: ignore[arg-type]
+
+
+
+def test_la_question_echappe_le_message_que_le_depot_renvoie(projet: Path, host: FakeHost) -> None:
+    """Le même échappement, par un vecteur qui n'est pas un nom de fichier (le texte d'un refus de fusion)."""
+    from grimoire.missions.questions import records_of
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.merge_fails, host.merge_error = True, "refus \x1b[31mrouge`<b>x</b>` [lien](javascript:x)"
+    report = merged_after_review(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")]
+    [question] = [r.question for r in records_of(TaskService(projet).require(tid))]
+    assert "rouge" in question.text
+    for piece in ("\x1b", "<b>", "rouge`", "[lien]"):  # le gabarit cite lui-même des commandes entre accents graves
+        assert piece not in question.text, piece

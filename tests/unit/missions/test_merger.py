@@ -13,6 +13,7 @@ plus), aucune réponse du ledger ne vaut un geste, aucun hook git n'est exécut�
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -198,6 +199,18 @@ def advance_main(projet: Path, path: str, text: str) -> None:
     git(clone, "push", "-q", "origin", "HEAD:refs/heads/main")
 
 
+def advance_main_bytes(projet: Path, path: str, body: bytes) -> None:
+    """Comme :func:`advance_main`, octet pour octet (fins de ligne comprises)."""
+    clone = projet.parent / "autre-clone"
+    if not clone.exists():
+        subprocess_clone(projet, clone)
+    git(clone, "pull", "-q", "origin", "main")
+    (clone / path).write_bytes(body)
+    git(clone, "add", "--", path)
+    git(clone, "commit", "-q", "-m", f"main avance ({path}, octets)")
+    git(clone, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+
 def subprocess_clone(projet: Path, clone: Path) -> None:
     import subprocess
 
@@ -374,6 +387,53 @@ def test_branche_en_retard_avec_conflit_de_changelog_union_sans_perdre_main(proj
     assert merges(tick(projet, host)) == [("wait", "waiting")]
     assert merges(tick(projet, host)) == [("accept", "done")]  # sceau tenu par le réalignement noté au journal
     assert events(projet, tid, MERGED_EVENT)[0].payload["head_sha"] == head
+
+
+def test_un_changelog_en_crlf_garde_ses_fins_de_ligne_a_l_union(projet: Path, host: FakeHost) -> None:
+    """Fins de ligne CRLF, forcées dans les objets même sous Linux : l'union ne les réécrit pas, ne perd aucune ligne."""
+    grant(projet)
+    crlf = CHANGELOG_MAIN.replace("\n", "\r\n").encode("utf-8")
+    advance_main_bytes(projet, "CHANGELOG.md", crlf)
+    git(projet, "fetch", "-q", "origin")
+    tid, wt = launch_and_work(projet, host)
+    top = "- feat: une entrée de main\r\n".encode()
+    (wt / "CHANGELOG.md").write_bytes(crlf.replace(top, "- feat: la tâche\r\n".encode() + top))
+    git(wt, "add", "--", "CHANGELOG.md")
+    git(wt, "commit", "-q", "-m", "entrée de la tâche")
+    git(wt, "push", "-q", "origin", f"task/{tid}")
+    advance_main_bytes(projet, "CHANGELOG.md", crlf.replace(top, b"- fix: une autre PR\r\n" + top))
+    review_ready(projet, host, tid, wt)
+    assert merges(tick(projet, host)) == [("realign", "done")]
+    head = git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0]
+    blob = subprocess.run(["git", "-C", str(projet), "cat-file", "blob", f"{head}:CHANGELOG.md"],
+                          capture_output=True, check=True).stdout
+    assert blob.count(b"\r\n") == blob.count(b"\n") and b"\r\r" not in blob  # aucune fin de ligne réécrite
+    assert "la tâche".encode() in blob and b"une autre PR" in blob
+    main = git(projet, "ls-remote", "origin", "refs/heads/main").split()[0]
+    diff = git(projet, "diff", main, head, "--", "CHANGELOG.md")
+    assert not [ln for ln in diff.splitlines() if ln.startswith("-") and not ln.startswith("---")]
+
+
+def test_le_git_du_merger_passe_des_octets_sans_traduire_les_fins_de_ligne(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sous Windows, une entrée en mode texte réécrit « \\n » en « \\r\\n » : le merger n'en passe jamais."""
+    from types import SimpleNamespace
+
+    from grimoire.missions import merger as merger_module
+
+    seen: list[dict[str, object]] = []
+    real = subprocess.run
+
+    def spy(*args: object, **kwargs: object) -> object:
+        seen.append(kwargs)
+        return real(*args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(merger_module.subprocess, "run", spy)
+    stage = merger_module.MergeStage(SimpleNamespace(home_root=projet), SimpleNamespace())  # type: ignore[arg-type]
+    done = stage._git("hash-object", "--no-filters", "--stdin", stdin=b"a\r\nb\n")
+    expected = real(["git", "-C", str(projet), "hash-object", "--no-filters", "--stdin"], input=b"a\r\nb\n",
+                    capture_output=True, check=True).stdout.decode().strip()
+    assert done.stdout.strip() == expected
+    assert seen and not seen[-1].get("text") and isinstance(seen[-1].get("input"), bytes)
 
 
 def test_une_union_qui_perdrait_une_ligne_de_main_est_refusee(projet: Path, host: FakeHost) -> None:

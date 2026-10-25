@@ -221,14 +221,17 @@ class MergeStage:
     # -- git, sur le dépôt du projet (objets et refs), jamais dans le worktree du worker -----------------
 
     def _git(self, *args: str, timeout: float = 120, stdin: bytes | None = None) -> subprocess.CompletedProcess[str]:
+        """Git en octets (aucune traduction de fins de ligne, même sous Windows), sorties décodées en UTF-8."""
         try:
-            return subprocess.run(  # arguments fixes, sans shell ; dans le tick, la config qui exécute est neutralisée
-                ["git", "-C", str(self._home), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=timeout, check=False, env=git_env(),
-                input=stdin.decode("utf-8", "replace") if stdin is not None else None,
+            done = subprocess.run(  # arguments fixes, sans shell ; dans le tick, la config qui exécute est neutralisée
+                ["git", "-C", str(self._home), *args], capture_output=True, timeout=timeout, check=False, env=git_env(),
+                input=stdin,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return subprocess.CompletedProcess(["git", *args], 124, "", f"git {args[0]} : {exc}")
+        return subprocess.CompletedProcess(
+            done.args, done.returncode, done.stdout.decode("utf-8", "replace"), done.stderr.decode("utf-8", "replace"),
+        )
 
     def _git_bytes(self, *args: str) -> tuple[int, bytes]:
         try:
