@@ -1453,82 +1453,298 @@ body[data-active-space] .panel-head {
   display: none;
 }
 
+/* Un seul composant, deux présentations (Douce) :
+   - `data-mode="commands"` (⌘K) : carte flottante centrée ;
+   - `data-mode="scope"` (puce de portée) : menu ancré sous la puce, placé
+     par shell.js::placePalette.
+   Le fond s'assombrit (--scrim-soft) sans masquer l'interface : l'ancien voile
+   était l'accent doux opaque, la coque disparaissait derrière.
+   Chaque ligne tient sur une seule ligne de texte par champ (nowrap +
+   ellipse) et sa hauteur suit son contenu : aucun chevauchement possible. */
 #palette {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: var(--accsoft);
+  background: var(--scrim-soft);
   display: flex;
   justify-content: center;
-  padding-top: 12vh;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
 }
 
 #palette-box {
-  width: min(640px, 92vw);
-  height: fit-content;
-  max-height: 60vh;
+  width: min(640px, 100%);
+  max-height: min(560px, 72vh);
   display: flex;
   flex-direction: column;
-  background: var(--e2);
+  background: var(--overlay);
   border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-radius: var(--r-l);
   box-shadow: var(--shadow-tip);
   overflow: hidden;
+  box-sizing: border-box;
+}
+
+#palette[data-mode="scope"] {
+  padding: 0;
+}
+
+#palette[data-mode="scope"] #palette-box {
+  position: absolute;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 88px));
+}
+
+.pal-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 10px 4px;
+  padding: 0 12px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink3);
+  flex: none;
+}
+
+.pal-field:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px var(--acc-soft);
+}
+
+.pal-field .ico {
+  width: 16px;
+  height: 16px;
 }
 
 #palette-input {
-  height: 44px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   border: 0;
-  border-bottom: 1px solid var(--line);
-  background: var(--e2);
-  padding: 0 14px;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
   font-size: var(--t-m);
+}
+
+/* Le contour de focus est porté par le champ entier (`.pal-field`). */
+#palette-input:focus-visible {
+  outline: 0;
+  box-shadow: none;
 }
 
 #palette-list {
   overflow: auto;
+  overscroll-behavior: contain;
   margin: 0;
-  padding: var(--sp-1);
+  padding: 2px 6px 6px;
   list-style: none;
+  min-height: 0;
 }
 
-#palette-list li {
+#palette-list li.pal-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: 0 10px;
-  height: 34px;
+  gap: 10px;
+  min-height: 36px;
+  padding: 7px 10px;
   border-radius: var(--r);
   cursor: pointer;
+  color: var(--ink);
+  box-sizing: border-box;
+}
+
+#palette-list li.pal-row > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #palette-list li[aria-selected="true"] {
-  background: var(--accsoft);
+  background: var(--acc-soft);
+}
+
+#palette-list .pal-label {
+  flex: 0 1 auto;
+  font-weight: 500;
+}
+
+#palette-list li.pal-row > .lbl {
+  flex: 0 1 auto;
+  color: var(--ink3);
+  font-size: var(--t-s);
 }
 
 #palette-list .cmd {
+  flex: 0 1 auto;
+  max-width: 45%;
   margin-left: auto;
   font-family: var(--mono);
   font-size: var(--t-min);
   color: var(--ink3);
 }
 
+/* Projets : pastille · nom en gras / dossier sur une ligne · coche. */
+#palette-list li.pal-project,
+#palette-list li.pal-scope-all {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  grid-template-areas: "dot name check" "dot path check";
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 8px 10px;
+}
+
+#palette-list li.pal-project::before {
+  content: "";
+  grid-area: dot;
+  justify-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink3);
+}
+
+#palette-list li.pal-project[data-state="ok"]::before {
+  background: var(--ok-mark);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+#palette-list li.pal-project[data-state="plain"]::before {
+  background: var(--warn-mark);
+}
+
+#palette-list li.pal-project[data-state="missing"]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--bad-mark);
+}
+
+#palette-list li.pal-scope-all > .ico:first-child {
+  grid-area: dot;
+  width: 16px;
+  height: 16px;
+  color: var(--acc);
+}
+
+#palette-list li.pal-project .pal-label,
+#palette-list li.pal-scope-all .pal-label {
+  grid-area: name;
+  font-weight: 600;
+}
+
+#palette-list li.pal-project .lbl,
+#palette-list li.pal-scope-all .lbl {
+  grid-area: path;
+  font-size: var(--t-min);
+  line-height: 16px;
+}
+
+#palette-list li[aria-current="true"] > .ico:last-child {
+  grid-area: check;
+  width: 16px;
+  height: 16px;
+  color: var(--acc);
+}
+
+/* « Tous les projets » se détache du registre par un filet. */
+#palette-list li.pal-scope-all {
+  position: relative;
+  margin-bottom: 9px;
+}
+
+#palette-list li.pal-scope-all::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -5px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Dossier élidé au milieu : le début rétrécit (ellipse), la fin reste. */
+#palette-list .pal-path {
+  display: flex;
+  min-width: 0;
+}
+
+#palette-list .pal-path-head {
+  flex: 0 1 auto;
+  min-width: 1.5ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ne rétrécit pas tant que le début peut s'élider ; trop longue à elle seule,
+   elle s'élide à son tour en laissant la place de l'ellipse du début. */
+#palette-list .pal-path-tail {
+  flex: 0 0 auto;
+  max-width: calc(100% - 1.5ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* En-tête de section (Projets, Espaces, Commandes, Tâches, Workflows,
-   Fichiers) : jamais sélectionnable, jamais cliquable — juste un repère
-   visuel dans une liste qui dépassait 30 entrées à plat. */
+   Fichiers) : jamais sélectionnable, jamais cliquable — un repère discret,
+   en casse normale comme les sur-titres Douce, avec son compte. */
 #palette-list li.palette-section {
-  height: auto;
+  display: flex;
+  gap: 6px;
   padding: 10px 10px 4px;
   cursor: default;
   font-size: var(--t-min);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 500;
   color: var(--ink3);
 }
 
+#palette-list li.palette-section::after {
+  content: attr(data-count);
+  color: var(--rub);
+  font-weight: 600;
+}
+
 #palette-list li.palette-section:first-child {
-  padding-top: 4px;
+  padding-top: 6px;
+}
+
+#palette-list li.pal-empty {
+  padding: 18px 10px;
+  color: var(--ink2);
+  text-align: center;
+}
+
+.pal-foot {
+  display: flex;
+  gap: 14px;
+  flex: none;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-min);
+  color: var(--ink3);
+}
+
+.pal-foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .pal-foot {
+    display: none;
+  }
+}
+
+/* Sur un écran étroit, le libellé passe avant la commande équivalente. */
+@media (max-width: 900px) {
+  #palette-list .cmd {
+    display: none;
+  }
 }
 
 /* ── Infobulles épinglables ────────────────────────────────────────────────*/
