@@ -67,7 +67,7 @@ class HumanAcceptance:
 
 def accept_task(
     task: MissionTask, project_root: Path, evidence_root: Path, reason: str, actor: str, *, origin: str,
-    provenance: Mapping[str, Any] | None = None,
+    provenance: Mapping[str, Any] | None = None, proof_root: Path | None = None, head: str | None = None,
 ) -> HumanAcceptance:
     """Range le pack d'attestation, le verdict ``passed`` humain et le reçu ``READY`` de *task* ; lève si refusé.
 
@@ -77,14 +77,22 @@ def accept_task(
     Sous mandat (#876, verrou 6) l'origine ``orchestrator`` accepte aussi, si un mandat valide couvre le
     geste ``accept`` et le type de la tâche, que la politique d'escalade du projet délègue ``accept``, et
     que le reçu de revue déjà rangé vaut (verrou 7 : relecteur distinct de l'auteur, session attestée au
-    journal d'autorité). Le verdict et le reçu sont alors signés ``orchestrator:<mandat>``.
+    journal d'autorité), et que l'état présent est celui du READY scellé par le relecteur du tick
+    (:func:`grimoire.missions.review_seal.verify` : reçu, pack, tête et arbre). Le verdict et le reçu sont alors signés
+    ``orchestrator:<mandat>``.
+
+    *proof_root* (lot 4, le merger) : où vivent les reçus de revue, quand ce n'est pas *project_root* — le worktree
+    ``task/<id>`` d'une tâche lancée. Le mandat et la politique d'escalade restent lus sous *project_root*, jamais
+    dans un arbre que le worker écrit. *head* : la tête que l'acceptation couvre (la tête fusionnée) ; défaut, la tête
+    de ``task/<id>`` — elle doit être celle du READY scellé, ou un réalignement noté par le merger.
     """
+    proofs = proof_root or project_root
     authority = require_authority(
         project_root, "accept", task, origin, what=f"Acceptation refusée pour {task.id}", provenance=provenance,
         record=False,
     )
     if authority is not None:
-        _require_attested_review(task, project_root)
+        _require_attested_review(task, project_root, proofs, head)
     if task.status is not TaskState.NEEDS_VERIFICATION:
         raise GrimoireMissionError(
             f"Acceptation refusée pour {task.id} : état {task.status.value}, il faut une tâche en revue "
@@ -124,18 +132,18 @@ def accept_task(
     )
     service.record_verdict(verdict)
     receipt = write_receipt(
-        project_root, task.id, READY, reviewer_id=signer,
-        reviewer_session=_reviewer_session(task, project_root) if authority else "",
+        proofs, task.id, READY, reviewer_id=signer,
+        reviewer_session=_reviewer_session(task, proofs) if authority else "",
     )
     if authority is not None:
         MandateStore(project_root).record_gesture(authority)  # inscrit une fois le geste fait
     return HumanAcceptance(pack, verdict, receipt)
 
 
-def _require_attested_review(task: MissionTask, project_root: Path) -> None:
+def _require_attested_review(task: MissionTask, project_root: Path, proofs: Path, head: str | None = None) -> None:
     """Verrou 7 : sous mandat, l'acceptation s'appuie sur un reçu de revue d'un autre, de provenance attestée."""
     try:
-        receipt = read_receipt(project_root, task.id)
+        receipt = read_receipt(proofs, task.id)
     except ValueError as exc:
         raise GrimoireMissionError(f"Acceptation refusée pour {task.id} : reçu de revue illisible ({exc})") from exc
     if receipt is None or receipt.verdict != READY:
@@ -143,6 +151,13 @@ def _require_attested_review(task: MissionTask, project_root: Path) -> None:
             f"Acceptation refusée pour {task.id} : sous mandat, un reçu de revue READY d'un relecteur distinct est exigé"
         )
     MandateStore(project_root).check_receipt_provenance(task, receipt)
+    # Lot 4 : le reçu vit dans un arbre que le worker écrit ; seul le jugement scellé au journal d'autorité fait foi.
+    from grimoire.missions.mandate import MandateRefusedError
+    from grimoire.missions.review_seal import verify
+
+    refusal = verify(project_root, task, proofs, head=head)
+    if refusal:
+        raise MandateRefusedError("receipt_unsealed", f"Acceptation refusée pour {task.id} sous mandat : {refusal}")
 
 
 def _reviewer_session(task: MissionTask, project_root: Path) -> str:

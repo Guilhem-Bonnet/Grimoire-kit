@@ -63,12 +63,13 @@ const askMe = { on: false };
 const needsHuman = (t) => isHumanWait(t) || t.board === 'review' || t.board === 'blocked';
 
 // Les vues que l'URL peut demander (`#travail?view=liste`).
-const VIEW_IDS = ['board4', 'board8', 'liste', 'timeline', 'decisions'];
+const VIEW_IDS = ['board4', 'board8', 'liste', 'sessions', 'timeline', 'decisions'];
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
 import { actionStatus, badge, glyph, icon, levelBars, monogram, setActionStatus, stateIcon } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
+import { renderSessionInspector, renderSessions } from './sessions.js';
 
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
@@ -1758,16 +1759,21 @@ export async function mount(root, ctx) {
   // Sélection par (projet, id) : en portée projet, `project` reste vide ; en
   // portefeuille, `of` dit le projet de la tâche.
   let selected = ctx.params.task ? { id: ctx.params.task, project: ctx.params.of || '' } : null;
+  // Vue Sessions (P33) : la session sélectionnée, et le dernier compte lu pour le segment.
+  let selectedSession = ctx.params.session || '';
+  let sessionsCount = null;
+  const viewLabels = () => VIEW_LABELS.map((v) => (v.id === 'sessions' && sessionsCount !== null ? { ...v, count: sessionsCount } : v));
   // La portée de la coque (P31) : « Tous les projets » = le portefeuille.
   scope.mode = ctx.host.kind === 'cockpit' && ctx.scope && ctx.scope.all ? 'portfolio' : 'project';
   let board = await ctx.api.tasks();
 
-  // Libellés français de l'artboard Travail (Tableau / Liste) ; la vue « Sessions »
-  // de la maquette n'existe pas encore : les autres vues réelles gardent un nom clair.
+  // Libellés français des artboards Travail (Tableau / Liste) et Sessions (P33) ; les
+  // autres vues réelles gardent un nom clair. « Sessions » porte son compte quand il est lu.
   const VIEW_LABELS = [
     { id: 'board4', label: 'Tableau' },
     { id: 'board8', label: 'Huit colonnes' },
     { id: 'liste', label: 'Liste' },
+    { id: 'sessions', label: 'Sessions' },
     { id: 'timeline', label: 'Chronologie' },
     { id: 'decisions', label: 'Décisions' },
   ];
@@ -1791,6 +1797,15 @@ export async function mount(root, ctx) {
     head.className = 'ex-head';
     head.append(text('h2', 'space-title', 'Travail'));
     if (viewSeg) head.append(viewSeg);
+    if (view === 'sessions') {
+      // L'en-tête de l'artboard Sessions : titre, vues, commande — le filtre des tâches n'a rien à filtrer ici.
+      const formula = document.createElement('span');
+      formula.className = 'ex-formula';
+      formula.append(text('b', null, '›'), scope.mode === 'portfolio' ? 'grimoire task list --all-projects' : 'grimoire task list');
+      head.append(row(formula));
+      head.lastElementChild.classList.add('ex-head-end');
+      return head;
+    }
     const ask = document.createElement('button');
     ask.type = 'button';
     ask.className = 'btn ex-ask';
@@ -1881,6 +1896,8 @@ export async function mount(root, ctx) {
   async function draw(opts = {}) {
     const seq = ++drawSeq;
     const portfolioMode = scope.mode === 'portfolio';
+    // Les sessions se lisent à chaque dessin, en parallèle des tâches : le segment porte leur compte.
+    const sessionsRead = ctx.api.sessions(portfolioMode).then((data) => ({ data }), (error) => ({ error }));
     if (!portfolioMode && !board.ledger) {
       // Le ledger peut naître HORS du navigateur (`grimoire task add`) pendant que cet état vide
       // est affiché : on relit avant de choisir, sinon le pouls tourne pour rien (UI3-S1-01).
@@ -1910,9 +1927,11 @@ export async function mount(root, ctx) {
       const fresh = await ctx.api.tasks();
       tasks = fresh.tasks || [];
     }
+    const sessions = await sessionsRead;
     if (ctx.signal.aborted || seq !== drawSeq) return;
-    ctx.docbar.setBreadcrumb(selected ? [selected.id] : []);
-    ctx.docbar.setViews(VIEW_LABELS, view, setView);
+    sessionsCount = sessions.data ? sessions.data.count : null;
+    ctx.docbar.setBreadcrumb(view === 'sessions' ? (selectedSession ? [selectedSession.slice(0, 8)] : []) : (selected ? [selected.id] : []));
+    ctx.docbar.setViews(viewLabels(), view, setView);
 
     // Les données sont là : on remplace d'un geste synchrone, en gardant le
     // défilement du board et la carte au clavier (une actualisation ne doit
@@ -1923,6 +1942,10 @@ export async function mount(root, ctx) {
     const everyTask = tasks;
     if (askMe.on) tasks = tasks.filter(needsHuman);
     wrap.append(renderHead(everyTask.filter(needsHuman).length));
+    if (view === 'sessions') {
+      drawSessions(sessions, portfolioMode, kept, opts);
+      return;
+    }
     appendIf(wrap, scopeToolbar(ctx, portfolio, redraw));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);
@@ -1994,6 +2017,45 @@ export async function mount(root, ctx) {
       ctx.inspector.dataset.owner = '';
       ctx.inspector.replaceChildren(text('p', 'lbl', 'Sélectionnez une tâche pour voir sa porte suivante.'));
       ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task board');
+    }
+  }
+
+  // Vue Sessions (P33) : tableau et tuiles, puis le panneau de la session choisie.
+  // Une actualisation ne reconstruit le panneau que si la session a changé (une
+  // consigne en cours de saisie n'est jamais jetée : `refresh` attend la fin de la saisie).
+  let inspectedSession = '';
+  let sessionNotice = null;
+  function drawSessions(sessions, portfolioMode, kept, opts) {
+    const list = (sessions.data && sessions.data.sessions) || [];
+    const current = list.find((s) => s.id === selectedSession) || null;
+    const onPick = (session) => {
+      selectedSession = session.id;
+      sessionNotice = null;
+      if (window.matchMedia('(max-width: 900px)').matches) ctx.openPanel?.('inspector');
+      draw();
+    };
+    renderSessions(wrap, ctx, { data: sessions.data, error: sessions.error, selectedId: current ? current.id : '', onSelect: onPick });
+    restoreView(wrap, kept);
+    ctx.setItem?.({ view: 'sessions', ...(current ? { session: current.id } : {}) });
+    if (current) {
+      const sig = JSON.stringify(current);
+      if (opts.live && sig === inspectedSession) return;
+      inspectedSession = sig;
+      renderSessionInspector(ctx, current, {
+        portfolio: portfolioMode,
+        notice: sessionNotice && sessionNotice.id === current.id ? sessionNotice.message : '',
+        onWritten: (message) => { sessionNotice = { id: current.id, message }; draw({ live: true }); },
+        go: {
+          decisions: (taskId, slug) => { selected = { id: taskId, project: slug || '' }; setView('decisions'); },
+          task: (taskId, slug) => { selected = { id: taskId, project: slug || '' }; setView('board4'); },
+        },
+      });
+    } else {
+      inspectedSession = '';
+      inspectedSig = '';
+      ctx.inspector.dataset.owner = '';
+      ctx.inspector.replaceChildren(text('p', 'lbl', 'Choisis une session pour voir ses claims, son dernier signe et comment la reprendre.'));
+      ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task list');
     }
   }
 

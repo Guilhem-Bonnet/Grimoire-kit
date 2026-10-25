@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -236,8 +237,9 @@ def test_l_en_tete_porte_le_titre_les_vues_le_filtre_et_la_formule(page: Page) -
     head = page.locator(".ex-head")
     assert head.locator("h2.space-title").inner_text() == "Travail"
     assert page.evaluate("getComputedStyle(document.querySelector('.ex-head .space-title')).fontSize") == "32px"
-    labels = [t.strip() for t in head.locator("#view-seg button").all_inner_texts()]
-    assert labels == ["Tableau", "Huit colonnes", "Liste", "Chronologie", "Décisions"]
+    # « Sessions » porte son compte (P33) : le libellé se lit sans lui.
+    labels = [re.sub(r"\s*\d+$", "", t.strip()) for t in head.locator("#view-seg button").all_inner_texts()]
+    assert labels == ["Tableau", "Huit colonnes", "Liste", "Sessions", "Chronologie", "Décisions"]
     assert head.locator("#view-seg button[aria-pressed='true']").inner_text() == "Tableau"
     assert "Demande une action de moi" in head.locator("[data-role='ask-me']").inner_text()
     assert head.locator(".ex-formula").inner_text().replace("\n", "") == "›grimoire task board"

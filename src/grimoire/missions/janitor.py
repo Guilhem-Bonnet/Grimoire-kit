@@ -292,7 +292,9 @@ class Janitor:
             return "skipped", f"{branch} n'existe pas en local"
         if (refused := self._guard(proof)) is not None:
             return refused
-        if head != proof[2]:
+        # La tête locale peut être un ancêtre de la tête fusionnée : le merger (lot 4) réaligne la branche distante sans
+        # toucher au worktree du worker ; rien de local n'est alors perdu.
+        if head != proof[2] and _git(self._repo, "merge-base", "--is-ancestor", head, proof[2]).returncode != 0:
             return "refused", f"branche conservée : {branch} est à {head[:12]}, la fusion couvre {proof[2][:12]} (commits postérieurs)"
         done = _git(self._repo, "branch", "-D", branch)
         if done.returncode != 0:

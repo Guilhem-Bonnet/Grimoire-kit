@@ -218,6 +218,8 @@ def _render_lot2(report: TickReport) -> None:
         console.print(f"Lancement {launch.status} : {launch.task_id} — {launch.detail}")
     for review in report.reviews:
         console.print(f"Relecture {review.action} {review.status} : {review.task_id} — {review.detail}")
+    for merge in report.merges:
+        console.print(f"Fusion {merge.action} {merge.status} : {merge.task_id} — {merge.detail}")
     for outcome in report.cleanup:
         console.print(f"Janitor {outcome.status} : {outcome.task_id} {outcome.action} — {outcome.detail}")
     if report.breaker is not None:
