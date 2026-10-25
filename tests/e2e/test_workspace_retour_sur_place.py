@@ -67,6 +67,34 @@ def scratch_workflow(workspace: Page, real_project: Path) -> Iterator[Page]:
         target.unlink(missing_ok=True)
 
 
+def test_le_double_clic_ouvre_la_carte_visee_meme_quand_le_detail_apparait(
+    workspace: Page, project_with_blueprint: tuple[Path, str], real_project: Path
+) -> None:
+    """Le premier clic remplissait le panneau de détail, masqué tant qu'il est vide : la
+    grille rétrécissait sous le curseur et le second clic tombait sur une autre carte."""
+    _root, bp_id = project_with_blueprint
+    folder = real_project / "_grimoire" / "blueprints"
+    extra = [folder / f"a{i}-retour-{uuid.uuid4().hex[:6]}.blueprint.json" for i in range(3)]
+    source = json.loads((folder / f"{bp_id}.blueprint.json").read_text(encoding="utf-8"))
+    for target in extra:
+        copy_id = target.name.removesuffix(".blueprint.json")
+        target.write_text(json.dumps({**source, "id": copy_id, "name": copy_id}), encoding="utf-8")
+    try:
+        workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")
+        workspace.wait_for_function("() => document.querySelectorAll('.cv-card').length >= 4")
+        card = workspace.locator(f'.cv-card[data-container-id="{bp_id}"]')
+        assert not workspace.locator("#panel-inspector").is_visible(), "le détail est masqué avant toute sélection"
+
+        card.dblclick()
+
+        workspace.wait_for_selector(".cv-node", timeout=15_000)
+        assert workspace.locator('#zoom-seg button[aria-pressed="true"]').inner_text().strip() == "Workflow"
+        assert workspace.locator(".cv-toolbar strong").inner_text() != ""
+    finally:
+        for target in extra:
+            target.unlink(missing_ok=True)
+
+
 def _add_node(page: Page) -> None:
     page.locator("body").press("2")
     page.wait_for_selector(".cv-prim", timeout=10_000)

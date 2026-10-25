@@ -401,10 +401,25 @@ export async function mount(root, ctx) {
     };
   }
 
+  // Hors atelier, le panneau de détail est masqué tant qu'il est vide (P62) :
+  // le remplir au premier clic rétrécissait la grille sous le curseur, et le
+  // second clic d'un double-clic tombait sur une autre carte ou dans le vide.
+  // Tant que le panneau est masqué, son remplissage attend le délai d'un
+  // double-clic ; déjà visible, il suit la sélection sans attendre.
+  const DOUBLE_CLICK_GRACE_MS = 300;
+  let inspectorTimer = 0;
+
   function selectContainer(id) {
     state.selectedId = id;
-    renderInspectorProjet();
     renderCanvasOnly();
+    clearTimeout(inspectorTimer);
+    if (ctx.inspector.offsetParent !== null) {
+      renderInspectorProjet();
+      return;
+    }
+    inspectorTimer = setTimeout(() => {
+      if (!aborted() && state.zoom === 'projet') renderInspectorProjet();
+    }, DOUBLE_CLICK_GRACE_MS);
   }
 
   async function zoomToWorkflow(id) {
