@@ -529,8 +529,8 @@ dans cet ordre, et chaque garde échoue fermée :
   d'autorité (`~/.grimoire/control/`). Au jugement, sont scellés la même tête (une branche qui a bougé pendant la
   relecture n'est pas scellée), son arbre git, un worktree propre, et les empreintes du reçu et du pack. Le merger et
   `task accept` sous mandat comparent une tête git à ce sceau, jamais le fichier reçu seul.
-- **Chemins qui escaladent** : le code des gardes (`src/grimoire/missions/*`, `src/grimoire/hosts/decisions/*` et
-  quelques modules dont elles dépendent), la politique (`_grimoire/standard/*`), les workflows et hooks (`.github/*`,
+- **Chemins qui escaladent** : le code des gardes (`src/grimoire/missions/*`, `src/grimoire/hosts/decisions/*`,
+  `src/grimoire/core/*` et l'attestation des flows), la politique (`_grimoire/standard/*`), les workflows et hooks (`.github/*`,
   `.githooks/*`, `.husky/*`), le packaging (`pyproject.toml`, `setup.cfg` et le script setup de setuptools), `.gitattributes`,
   `.gitmodules`, les fichiers conftest de pytest et les fichiers compilés. La clé `protected_paths` s'y ajoute. La
   comparaison se fait en `casefold()`, sur la liste de fichiers que GitHub annonce ; une liste tronquée fait escalader.

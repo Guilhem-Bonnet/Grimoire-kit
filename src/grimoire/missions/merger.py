@@ -109,8 +109,7 @@ CHANGELOG = "CHANGELOG.md"
 #: Les chemins qui escaladent à l'humain, quoi que dise le mandat (``protected_paths`` de la politique s'y ajoute) :
 #: le code des gardes, la politique, les workflows et hooks, le packaging, ce qui s'exécute à l'import ou se compile.
 DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
-    "src/grimoire/missions/*", "src/grimoire/hosts/decisions/*", "src/grimoire/core/safe_git.py",
-    "src/grimoire/core/fsio.py", "src/grimoire/core/standard_checks/tree_fingerprint.py", "src/grimoire/flows/attestation.py",
+    "src/grimoire/missions/*", "src/grimoire/hosts/decisions/*", "src/grimoire/core/*", "src/grimoire/flows/attestation.py",
     "_grimoire/standard/*", ".github/*", ".githooks/*", ".husky/*", "framework/hooks/*", "codeowners", "*/codeowners",
     "pyproject.toml", "setup.py", "setup.cfg", ".gitattributes", ".gitmodules", "*conftest.py",
     "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dll", "*.dylib", "*.exe", "*.whl", "*.egg", "*.pth", "*sitecustomize*",

@@ -354,6 +354,24 @@ def test_temoin_un_chemin_protege_sans_manipulation_n_est_pas_fusionne(projet: P
     assert merges(report) == [("escalate", "done")] and host.of("gh", "pr", "merge") == []
 
 
+@pytest.mark.parametrize("redirect", [False, True])
+def test_le_noyau_du_kit_escalade_a_l_humain(projet: Path, tmp_path: Path, redirect: bool) -> None:
+    """La preuve de concept de la troisième revue, sur son chemin d'origine : `src/grimoire/core/*` n'est jamais fusionné."""
+    host = RealRemoteHost()
+    grant(projet)
+    path = "src/grimoire/core/guards.py"
+    tid, wt = launch_and_work(projet, host, edit=(path, "import os\nos.system('id')\n"))
+    if redirect:
+        evil = _evil_remote(tmp_path, host.real, git(wt, "rev-parse", "HEAD"))  # type: ignore[arg-type]
+        git(wt, "config", "--local", "remote.origin.url", str(evil))
+    outcomes = list(merged_after_review(projet, host, tid, wt).merges)
+    for _ in range(2):
+        outcomes += tick(projet, host).merges
+    assert host.of("gh", "pr", "merge") == [] and MandateStore(projet).gestures_taken(tid) == []
+    expected = "n'est pas le dépôt de la PR" if redirect else path  # redirigée : rien n'est récupéré, donc rien fusionné
+    assert any(o.action in ("escalate", "refused") and expected in o.detail for o in outcomes), outcomes
+
+
 def test_une_liste_de_fichiers_incomplete_n_est_pas_fusionnee(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
