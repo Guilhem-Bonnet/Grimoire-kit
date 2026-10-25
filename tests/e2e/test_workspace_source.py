@@ -20,6 +20,7 @@ dernier du fichier, et il choisit lui-même un fichier encore vierge plutôt que
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -72,6 +73,25 @@ def test_l_espace_source_liste_les_trois_etages(source: Page) -> None:
     assert any(label.startswith("Overrides") for label in labels)
     assert any(label.startswith("Kit") for label in labels)
     assert any(label.startswith("Projections") for label in labels)
+
+
+def test_chaque_ligne_de_l_arbre_tient_sur_une_ligne(source: Page) -> None:
+    """Les lignes ont une hauteur fixe : un nom passé à la ligne chevauchait la
+    suivante (« · 4 » sous le dossier, « reference.md » sur le fichier d'après)."""
+    wrapped = source.evaluate(
+        """() => [...document.querySelectorAll('.sr-tree-dir > span, .sr-tree-file > span:first-child, .sr-tree-tier')]
+            .filter((n) => {
+              const row = n.classList.contains('sr-tree-tier') ? n : n.parentElement;
+              return n.scrollHeight > n.clientHeight + 1
+                || n.getBoundingClientRect().height > row.getBoundingClientRect().height + 1;
+            })
+            .map((n) => n.textContent)"""
+    )
+    assert wrapped == []
+    dirs = source.locator(".tree .sr-tree-dir").all_inner_texts()
+    # La racine de l'étage garde son chemin ; ses sous-dossiers s'en passent.
+    assert dirs and not any(re.search(r"_grimoire/kit/\S", d) for d in dirs), "un dossier se nomme depuis la racine de son étage"
+    assert all(source.locator(".tree .sr-tree-dir").nth(i).get_attribute("title") for i in range(len(dirs)))
 
 
 def test_ouvrir_un_fichier_du_kit_montre_le_bandeau_lecture_seule(source: Page) -> None:

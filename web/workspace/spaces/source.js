@@ -24,7 +24,7 @@
 // source-editor.js, jamais ici.
 
 import * as sourceEditor from './source-editor.js';
-import { stateIcon } from '../shell.js';
+import { actionStatus, failureText, setActionStatus, stateIcon } from '../shell.js';
 import { renderMarkdown } from '../markdown.js';
 
 const CSS_HREF = new URL('./source.css', import.meta.url).href;
@@ -50,6 +50,9 @@ function freshState() {
     inspectorTab: 'fichier',
     dirty: false,
     draft: '',
+    // Retour du dernier enregistrement ou override (`{ text, tone }`), posé
+    // sous la barre du fichier : la Console n'est plus dans la coque (P62).
+    notice: null,
   };
 }
 
@@ -161,6 +164,16 @@ function fileBadge(entry) {
   return null;
 }
 
+/** `dir` sans la racine de son étage (`_grimoire/kit/agents` → `agents`) ;
+ *  la racine elle-même garde son chemin. */
+function dirLabel(tier, dir) {
+  for (const root of tier.roots || []) {
+    const prefix = root.replace(/\/+$/, '') + '/';
+    if (dir.startsWith(prefix)) return dir.slice(prefix.length);
+  }
+  return dir;
+}
+
 function renderExplorer(ctx, root) {
   state.treeEl.replaceChildren();
   for (const tier of state.tree.tiers) {
@@ -195,7 +208,12 @@ function renderExplorer(ctx, root) {
         const dirBtn = document.createElement('button');
         dirBtn.type = 'button';
         dirBtn.className = 'sr-tree-dir';
-        dirBtn.textContent = `${open ? '▾' : '▸'} ${dir}/ · ${files.length}`;
+        // Une ligne par dossier : nommé depuis la racine de son étage (le
+        // titre de l'étage dit déjà « Kit »), chemin complet au survol.
+        const label = document.createElement('span');
+        label.textContent = `${open ? '▾' : '▸'} ${dirLabel(tier, dir)}/ · ${files.length}`;
+        dirBtn.title = `${dir}/ · ${files.length} fichier(s)`;
+        dirBtn.append(label);
         dirBtn.addEventListener('click', () => {
           if (open) state.dirsOpen.add('closed:' + dirKey);
           else state.dirsOpen.delete('closed:' + dirKey);
@@ -212,6 +230,7 @@ function renderExplorer(ctx, root) {
         if (file.path === state.currentPath) row.classList.add('sel');
         const name = document.createElement('span');
         name.textContent = baseName(file.path);
+        row.title = file.path;
         row.append(name);
         const badge = fileBadge(file);
         if (badge) {
@@ -237,6 +256,7 @@ async function openFile(ctx, root, path, line) {
   }
   state.currentPath = path;
   state.dirty = false;
+  state.notice = null;
   state.inspectorTab = 'fichier';
   editorProblemLines = []; // le fichier change : les diagnostics de l'ancien ne s'appliquent plus
   renderProblems(ctx);
@@ -332,6 +352,7 @@ function renderCanvas(root, ctx) {
     docrow.append(save);
   }
   wrap.append(docrow);
+  wrap.append(actionStatus(state.notice && state.notice.text, state.notice && state.notice.tone));
 
   if (!entry.editable && state.view === 'source') {
     const overridePath = entry.override_path || '(à calculer par le serveur)';
@@ -459,35 +480,78 @@ function loadRendered(body, entry) {
 
 // ── Enregistrer / créer un override ─────────────────────────────────────────
 
-async function saveCurrent(ctx, root) {
-  const entry = state.currentEntry;
-  if (!entry || !entry.editable) return;
+//
+// Le dock n'est visible qu'en mode atelier (P62) : chaque action y garde sa
+// trace, et rend aussi son résultat sous la barre du fichier. Le bouton se
+// désactive avec un libellé d'attente le temps de la requête ; un refus garde
+// le brouillon intact, l'éditeur n'est pas reconstruit.
+
+let pending = false;
+
+/** Gèle `button` le temps de `action` ; un refus s'affiche dans la zone de
+ *  retour sans reconstruire l'éditeur (le brouillon reste où il est). */
+async function runInline(ctx, root, button, pendingLabel, action) {
+  if (pending) return;
+  pending = true;
+  const label = button && button.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = pendingLabel;
+    button.setAttribute('aria-busy', 'true');
+  }
+  const status = root.querySelector('.sr-editor > .action-status');
+  setActionStatus(status, '');
   try {
+    await action();
+  } catch (error) {
+    ctx.dock.log('console', `refusé · ${error.message}`);
+    state.notice = { text: failureText(error), tone: 'bad' };
+    setActionStatus(status, state.notice.text, 'bad');
+    if (button && button.isConnected) {
+      button.textContent = label;
+      button.disabled = false;
+    }
+  } finally {
+    pending = false;
+    if (button) button.removeAttribute('aria-busy');
+  }
+}
+
+function saveCurrent(ctx, root) {
+  const entry = state.currentEntry;
+  if (!entry || !entry.editable) return undefined;
+  const button = root.querySelector('.sr-docrow .btn:not(.pri)');
+  return runInline(ctx, root, button, 'Enregistrement…', async () => {
     const updated = await ctx.api.writeFile(entry.path, state.draft);
     state.currentEntry = updated;
     state.draft = updated.text || '';
     state.dirty = false;
     ctx.dock.log('console', `$ enregistré · ${entry.path}`);
     ctx.dock.echo('POST /api/workspace/file/write');
+    state.notice = { text: `Enregistré : ${entry.path}`, tone: 'ok' };
     renderCanvas(root, ctx);
     renderInspector(ctx);
-  } catch (error) {
-    ctx.dock.log('console', `refusé · ${error.message}`);
-  }
+  });
 }
 
-async function createOverrideAndOpen(ctx, root) {
+function createOverrideAndOpen(ctx, root) {
   const entry = state.currentEntry;
-  if (!entry) return;
-  try {
+  if (!entry) return undefined;
+  const button = root.querySelector('.sr-banner .btn');
+  return runInline(ctx, root, button, 'Création…', async () => {
     const created = await ctx.api.createOverride(entry.path);
     ctx.dock.log('console', `$ override créé · ${created.override_path}`);
     ctx.dock.echo('POST /api/workspace/file/override');
     await ctx.api.files().then((tree) => { state.tree = tree; renderExplorer(ctx, root); });
     await openFile(ctx, root, created.override_path);
-  } catch (error) {
-    ctx.dock.log('console', `refusé · ${error.message}`);
-  }
+    // `openFile` vient de construire l'éditeur : on remplit sa zone de retour
+    // sans le reconstruire (l'assistance et la saisie y ont déjà démarré).
+    state.notice = {
+      text: `Override créé : ${created.override_path} — il prime sur le fichier du kit et survit aux mises à jour.`,
+      tone: 'ok',
+    };
+    setActionStatus(root.querySelector('.sr-editor > .action-status'), state.notice.text, 'ok');
+  });
 }
 
 // ── Inspecteur : Fichier / Utilisé par / Historique ─────────────────────────

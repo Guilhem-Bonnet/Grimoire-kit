@@ -32,6 +32,8 @@
 // sélectionné (`cmd_cockpit.py::do_GET`/`do_POST`), donc les niveaux Workflow
 // et Nœud fonctionnent identiquement sur l'atelier et sur le cockpit.
 
+import { actionStatus, failureText } from '../shell.js';
+
 // Le grain de la toile des blueprints. Plus de niveau Flotte ni Projet ici
 // (P31) : la portée de la coque les remplace. En portée « Tous les projets »,
 // la toile liste les projets (`state.zoom = 'flotte'`) sans zoom affiché.
@@ -79,6 +81,8 @@ function injectStyles() {
     .cv-toolbar { position: sticky; top: 0; z-index: 6; display: flex; align-items: center;
       gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bar);
       border: 1px solid var(--line); border-radius: var(--r); margin-bottom: var(--sp-3); }
+    .cv-stage { position: relative; }
+    .cv-graph > .action-status:not(:empty) { margin-bottom: var(--sp-3); }
     .cv-svg { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
     .cv-node {
       position: absolute; width: 190px; border: 1px solid var(--line); border-radius: var(--r);
@@ -93,10 +97,12 @@ function injectStyles() {
     .cv-node .label { font-size: var(--t-s); color: var(--ink); margin-top: 2px; }
     .cv-node .ref { font-family: var(--mono); font-size: var(--t-min); color: var(--ink2); margin-top: 2px; }
     .cv-node.dim { opacity: .45; }
+    /* Dans la scène, sous la barre et le retour d'action : posée sur la toile,
+       elle masquait Valider, Simuler et Compiler dès qu'on l'ouvrait. */
     .cv-palette {
-      position: absolute; top: var(--sp-3); right: var(--sp-3); z-index: 7; width: 220px;
+      position: absolute; top: 0; right: 0; z-index: 7; width: 220px;
       background: var(--e1); border: 1px solid var(--line); border-radius: var(--r);
-      box-shadow: var(--shadow-tip); max-height: 70%; display: flex; flex-direction: column;
+      box-shadow: var(--shadow-tip); max-height: 70vh; display: flex; flex-direction: column;
     }
     .cv-palette[data-open="0"] { display: none; }
     .cv-palette-head { display: flex; align-items: center; justify-content: space-between;
@@ -268,6 +274,12 @@ export async function mount(root, ctx) {
     // à `false` par `loadBlueprint` (chargement frais) et par `saveBlueprint`
     // (écriture réussie) — jamais par un minuteur, jamais automatiquement.
     dirty: false,
+    // Retour de la dernière action du graphe (`{ text, tone }`), affiché sous
+    // la barre d'outils : la Console n'est plus dans la coque (P62).
+    notice: null,
+    // Action en cours (`validate`, `simulate`, `compile`, `save`) : son bouton
+    // est désactivé avec un libellé d'attente jusqu'à la réponse.
+    busy: null,
   };
 
   const zoomLevels = ZOOM_LEVELS;
@@ -346,31 +358,68 @@ export async function mount(root, ctx) {
         ctx.api.blueprintSimulate(id, blueprint),
       ]);
       if (aborted()) return;
-      state.lint = lint;
       state.simulate = simulate;
-      const count = (lint.errors || []).length + (lint.warnings || []).length;
-      ctx.docbar.setValidation(
-        (lint.errors || []).length
-          ? `${lint.errors.length} erreur(s)`
-          : (lint.warnings || []).length ? `${lint.warnings.length} avertissement(s)` : 'validé',
-        (lint.errors || []).length ? 'bad' : (lint.warnings || []).length ? 'warn' : 'ok',
-      );
-      ctx.dock.log(
-        'problemes',
-        `$ grimoire blueprint validate ${id}`,
-        ...(lint.errors || []).map((m) => `erreur : ${m}`),
-        ...(lint.warnings || []).map((m) => `avertissement : ${m}`),
-        count ? '' : 'aucune erreur ni avertissement.',
-      );
+      applyLint(id, lint);
     } catch (error) {
+      ctx.docbar.setValidation('validation impossible', 'bad');
       ctx.dock.log('problemes', `validation impossible : ${error.message}`);
+      state.notice = { text: `Validation impossible — ${failureText(error)}`, tone: 'bad' };
     }
   }
 
+  /** Pose le verdict de validation partout où il se lit : barre de document,
+   *  dock (atelier) et retour d'action sous la barre d'outils. */
+  function applyLint(id, lint) {
+    state.lint = lint;
+    const errors = lint.errors || [];
+    const warnings = lint.warnings || [];
+    ctx.docbar.setValidation(
+      errors.length
+        ? `${errors.length} erreur(s)`
+        : warnings.length ? `${warnings.length} avertissement(s)` : 'validé',
+      errors.length ? 'bad' : warnings.length ? 'warn' : 'ok',
+    );
+    ctx.dock.log(
+      'problemes',
+      `$ grimoire blueprint validate ${id}`,
+      ...errors.map((m) => `erreur : ${m}`),
+      ...warnings.map((m) => `avertissement : ${m}`),
+      errors.length + warnings.length ? '' : 'aucune erreur ni avertissement.',
+    );
+    return lintNotice(errors, warnings);
+  }
+
+  function lintNotice(errors, warnings) {
+    if (!errors.length && !warnings.length) {
+      return { text: 'Validé : aucune erreur ni avertissement.', tone: 'ok' };
+    }
+    const shown = [...errors, ...warnings];
+    const more = shown.length > 3 ? ` (+${shown.length - 3})` : '';
+    return {
+      text: `Validation : ${errors.length} erreur(s), ${warnings.length} avertissement(s) — ${shown.slice(0, 3).join(' · ')}${more}`,
+      tone: errors.length ? 'bad' : '',
+    };
+  }
+
+  // Hors atelier, le panneau de détail est masqué tant qu'il est vide (P62) :
+  // le remplir au premier clic rétrécissait la grille sous le curseur, et le
+  // second clic d'un double-clic tombait sur une autre carte ou dans le vide.
+  // Tant que le panneau est masqué, son remplissage attend le délai d'un
+  // double-clic ; déjà visible, il suit la sélection sans attendre.
+  const DOUBLE_CLICK_GRACE_MS = 300;
+  let inspectorTimer = 0;
+
   function selectContainer(id) {
     state.selectedId = id;
-    renderInspectorProjet();
     renderCanvasOnly();
+    clearTimeout(inspectorTimer);
+    if (ctx.inspector.offsetParent !== null) {
+      renderInspectorProjet();
+      return;
+    }
+    inspectorTimer = setTimeout(() => {
+      if (!aborted() && state.zoom === 'projet') renderInspectorProjet();
+    }, DOUBLE_CLICK_GRACE_MS);
   }
 
   async function zoomToWorkflow(id) {
@@ -382,12 +431,21 @@ export async function mount(root, ctx) {
       return;
     }
     state.selectedId = id;
+    state.notice = null;
     if (!graphAvailable) {
       setZoom('workflow');
       return;
     }
     setZoom('workflow');
-    await loadBlueprint(id);
+    try {
+      await loadBlueprint(id);
+    } catch (error) {
+      // Sans ce rattrapage, un blueprint illisible laissait le squelette de
+      // chargement affiché pour toujours, sans un mot.
+      if (aborted()) return;
+      root.replaceChildren(ctx.empty('Blueprint illisible', failureText(error), `grimoire blueprint validate ${id}`));
+      return;
+    }
     if (aborted()) return;
     render();
   }
@@ -592,37 +650,81 @@ export async function mount(root, ctx) {
     return (state.simulate?.contextPressure || []).find((p) => p.nodeId === id) || null;
   }
 
-  async function runValidate() {
-    if (!state.blueprint) return;
-    ctx.dock.setTab('problemes');
-    ctx.dock.echo(`grimoire blueprint validate ${state.selectedId}`);
-    await loadBlueprint(state.selectedId);
+  // ── Actions du graphe : retour sur place ────────────────────────────────
+  //
+  // Le dock n'est visible qu'en mode atelier (P62) : chaque action garde sa
+  // trace dans le dock pour qui l'ouvre, mais rend aussi son résultat dans
+  // `state.notice`, affiché sous la barre d'outils. Le bouton se désactive
+  // avec un libellé d'attente le temps de la requête.
+  const ACTIONS = {
+    validate: { title: 'Validation', pending: 'Validation…', refused: 'validation impossible' },
+    simulate: { title: 'Simulation', pending: 'Simulation…', refused: 'simulation refusée' },
+    compile: { title: 'Compilation', pending: 'Compilation…', refused: 'compilation refusée' },
+    save: { title: 'Enregistrement', pending: 'Enregistrement…', refused: 'enregistrement refusé' },
+  };
+
+  async function runAction(kind, action) {
+    if (state.busy) return;
+    state.busy = kind;
+    for (const button of root.querySelectorAll('.cv-toolbar [data-action]')) {
+      button.disabled = true;
+      if (button.dataset.action === kind) {
+        button.textContent = ACTIONS[kind].pending;
+        button.setAttribute('aria-busy', 'true');
+      }
+    }
+    try {
+      state.notice = await action();
+    } catch (error) {
+      ctx.dock.log('problemes', `${ACTIONS[kind].refused} : ${error.message}`);
+      state.notice = { text: `${ACTIONS[kind].title} — ${failureText(error)}`, tone: 'bad' };
+    } finally {
+      state.busy = null;
+    }
+    if (aborted()) return;
     render();
+    const again = root.querySelector(`.cv-toolbar [data-action="${kind}"]`);
+    if (again && !again.disabled) again.focus();
   }
 
-  async function runSimulate() {
-    if (!state.blueprint) return;
+  // Valide le graphe tel qu'il est à l'écran, brouillon compris : relire le
+  // disque ici effaçait sans prévenir les nœuds non enregistrés (#535).
+  function runValidate() {
+    if (!state.blueprint) return undefined;
+    ctx.dock.setTab('problemes');
+    ctx.dock.echo(`grimoire blueprint validate ${state.selectedId}`);
+    return runAction('validate', async () => {
+      const lint = await ctx.api.blueprintValidate(state.selectedId, state.blueprint);
+      return applyLint(state.selectedId, lint);
+    });
+  }
+
+  function runSimulate() {
+    if (!state.blueprint) return undefined;
     ctx.dock.echo(`grimoire blueprint simulate ${state.selectedId}`);
-    try {
+    return runAction('simulate', async () => {
       const simulate = await ctx.api.blueprintSimulate(state.selectedId, state.blueprint);
       state.simulate = simulate;
       ctx.dock.log('problemes', `$ grimoire blueprint simulate ${state.selectedId}`, `verdict : ${simulate.verdict}`);
-      render();
-    } catch (error) {
-      ctx.dock.log('problemes', `simulation refusée : ${error.message}`);
-    }
+      // `blueprint_simulate` (forge_server.py) rend « prêt à appliquer » ou
+      // « bloqué » avec ses bloqueurs : un blocage dit pourquoi.
+      const blockers = simulate.blockers || [];
+      return blockers.length
+        ? { text: `Simulation : ${simulate.verdict} — ${blockers.join(' · ')}`, tone: 'bad' }
+        : { text: `Simulation : ${simulate.verdict}.`, tone: 'ok' };
+    });
   }
 
-  async function runCompile() {
-    if (!state.blueprint) return;
+  function runCompile() {
+    if (!state.blueprint) return undefined;
     ctx.dock.echo(`grimoire blueprint compile ${state.selectedId}`);
-    try {
+    return runAction('compile', async () => {
       const compiled = await ctx.api.blueprintCompile(state.selectedId, state.blueprint);
-      ctx.dock.log('problemes', `$ grimoire blueprint compile ${state.selectedId}`, `artefact : ${compiled.artifact || '(sans nom)'}`);
+      const artifact = compiled.artifact || '(sans nom)';
+      ctx.dock.log('problemes', `$ grimoire blueprint compile ${state.selectedId}`, `artefact : ${artifact}`);
       ctx.dock.setTab('problemes');
-    } catch (error) {
-      ctx.dock.log('problemes', `compilation refusée : ${error.message}`);
-    }
+      return { text: `Compilé : ${artifact}`, tone: 'ok' };
+    });
   }
 
   async function loadPrimitivesInto(body) {
@@ -662,6 +764,10 @@ export async function mount(root, ctx) {
       `nœud ajouté au brouillon : ${candidate} (${primitiveRole}) — référence à compléter dans ` +
         `Propriétés, puis « Enregistrer » pour écrire sur disque (non enregistré tant que non cliqué).`,
     );
+    state.notice = {
+      text: `Nœud ${candidate} ajouté au brouillon : complétez sa référence dans Propriétés, puis « Enregistrer » l'écrit sur disque.`,
+      tone: '',
+    };
     render();
   }
 
@@ -672,17 +778,18 @@ export async function mount(root, ctx) {
   // ::do_PUT`) écrit tel quel, refusé côté client par `readOnly` sur le cockpit
   // comme `blueprintCompile`. Même mécanique de bouton que Source
   // (`source.js::saveCurrent`) : libellé et disponibilité suivent `state.dirty`.
-  async function saveBlueprint() {
-    if (!state.blueprint || !state.dirty) return;
-    try {
+  function saveBlueprint() {
+    if (!state.blueprint || !state.dirty) return undefined;
+    return runAction('save', async () => {
       const saved = await ctx.api.blueprintPut(state.selectedId, state.blueprint);
       state.dirty = false;
-      ctx.dock.log('problemes', `$ enregistré · ${state.selectedId}`, ...(saved.errors || []).map((m) => `erreur : ${m}`));
+      const errors = saved.errors || [];
+      ctx.dock.log('problemes', `$ enregistré · ${state.selectedId}`, ...errors.map((m) => `erreur : ${m}`));
       ctx.dock.echo(`PUT /api/blueprints/${state.selectedId}`);
-      render();
-    } catch (error) {
-      ctx.dock.log('problemes', `enregistrement refusé : ${error.message}`);
-    }
+      return errors.length
+        ? { text: `Enregistré, avec ${errors.length} erreur(s) à corriger — ${errors.join(' · ')}`, tone: 'bad' }
+        : { text: `Enregistré : ${state.selectedId}.`, tone: 'ok' };
+    });
   }
 
   function renderWorkflow() {
@@ -706,7 +813,7 @@ export async function mount(root, ctx) {
       return;
     }
     const bp = state.blueprint;
-    const pos = layoutNodes(bp.nodes || [], bp.edges || [], 68);
+    const pos = layoutNodes(bp.nodes || [], bp.edges || [], 0);
     const graph = el('div', { class: 'cv-graph' });
 
     const toolbar = el('div', { class: 'cv-toolbar' },
@@ -720,14 +827,14 @@ export async function mount(root, ctx) {
     }
     toolbar.append(el('span', { style: 'margin-right:auto' }));
     const btnSave = el('button', {
-      type: 'button', class: 'btn pri',
+      type: 'button', class: 'btn pri', 'data-action': 'save',
       text: state.dirty ? 'Enregistrer (modifié)' : 'Enregistrer',
     });
     btnSave.disabled = !state.dirty;
     btnSave.addEventListener('click', saveBlueprint);
-    const btnValidate = el('button', { type: 'button', class: 'btn', text: 'Valider' });
-    const btnSimulate = el('button', { type: 'button', class: 'btn', text: 'Simuler' });
-    const btnCompile = el('button', { type: 'button', class: 'btn pri', text: 'Compiler' });
+    const btnValidate = el('button', { type: 'button', class: 'btn', 'data-action': 'validate', text: 'Valider' });
+    const btnSimulate = el('button', { type: 'button', class: 'btn', 'data-action': 'simulate', text: 'Simuler' });
+    const btnCompile = el('button', { type: 'button', class: 'btn pri', 'data-action': 'compile', text: 'Compiler' });
     btnValidate.addEventListener('click', runValidate);
     btnSimulate.addEventListener('click', runSimulate);
     btnCompile.addEventListener('click', runCompile);
@@ -735,8 +842,13 @@ export async function mount(root, ctx) {
     btnLib.addEventListener('click', () => { state.paletteOpen = !state.paletteOpen; render(); });
     toolbar.append(btnLib, btnSave, btnValidate, btnSimulate, btnCompile);
     graph.append(toolbar);
+    graph.append(actionStatus(state.notice && state.notice.text, state.notice && state.notice.tone));
 
-    graph.append(renderEdgesSvg(bp.nodes || [], bp.edges || [], pos));
+    // Les nœuds sont placés en absolu : la scène qui les porte suit la barre
+    // et le retour d'action dans le flux, qu'aucun message ne recouvre un nœud.
+    const svg = renderEdgesSvg(bp.nodes || [], bp.edges || [], pos);
+    const stage = el('div', { class: 'cv-stage', style: `height:${svg.getAttribute('height')}px` }, svg);
+    graph.append(stage);
     for (const node of bp.nodes || []) {
       const p = pos.get(node.id) || { x: 0, y: 0 };
       const nodeLint = lintForNode(node.id);
@@ -754,7 +866,7 @@ export async function mount(root, ctx) {
       box.addEventListener('click', () => { state.selectedNodeId = node.id; render(); });
       box.addEventListener('dblclick', () => zoomToNode(node.id));
       box.addEventListener('keydown', (event) => { if (event.key === 'Enter') zoomToNode(node.id); });
-      graph.append(box);
+      stage.append(box);
     }
 
     const palette = el('div', { class: 'cv-palette', 'data-open': state.paletteOpen ? '1' : '0' },
@@ -763,7 +875,7 @@ export async function mount(root, ctx) {
       ),
       el('div', { class: 'cv-palette-body' }),
     );
-    graph.append(palette);
+    stage.append(palette);
     if (state.paletteOpen) loadPrimitivesInto(palette.querySelector('.cv-palette-body'));
 
     root.replaceChildren(graph);
