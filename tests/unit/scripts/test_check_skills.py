@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,10 @@ def _run(root: Path, *paths: Path) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
+        # Sous Windows, la console du sous-processus écrit en cp1252 : sans UTF-8 forcé, les accents
+        # de la sortie ne se décodent pas et `stdout` vaut None.
+        env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         timeout=60,
         check=False,
     )
