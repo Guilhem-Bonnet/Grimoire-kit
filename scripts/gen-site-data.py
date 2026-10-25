@@ -1193,21 +1193,6 @@ def _memory_entries(root: Path, limit: int = 40) -> tuple[list[dict], int]:
     return entries[:limit], len(data)
 
 
-def _memory_graph(entries: list[dict]) -> dict:
-    """Graphe : entrées = nœuds, arêtes = tags partagés (liens réels)."""
-    nodes = [{"id": e["id"], "label": e["text"][:48], "tags": e["tags"]} for e in entries]
-    by_tag: dict[str, list[str]] = {}
-    for e in entries:
-        for t in (e["tags"] if isinstance(e["tags"], list) else []):
-            by_tag.setdefault(str(t), []).append(e["id"])
-    edges = []
-    for t, ids in by_tag.items():
-        for i in range(len(ids)):
-            for j in range(i + 1, len(ids)):
-                edges.append({"from": ids[i], "to": ids[j], "tag": t})
-    return {"nodes": nodes, "edges": edges[:200]}
-
-
 def _vector_projection_demo() -> dict:
     """Projection 2D représentative (embeddings absents du store actuel → démo honnête)."""
     rng = random.Random(42)  # noqa: S311 — cosmétique (nuage de démo), pas crypto
@@ -1276,7 +1261,6 @@ def build_memory(root: Path, *, demo: bool = False) -> dict:
             "contradictions": c, "failures": f, "learnings": le, "decisions": de,
         })(health.get("contradictions", 0), health.get("failures", 0),
            health.get("learnings_files", 0), health.get("decisions", 0)),
-        "graph": _memory_graph(entries),
         "vector_projection": (
             _vector_projection_demo() if demo else _real_vector_projection(root, entries)
         ),
