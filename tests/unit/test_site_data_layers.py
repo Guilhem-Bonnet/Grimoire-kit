@@ -104,3 +104,22 @@ def test_blueprint_path_refuses_traversal(tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="invalide"):
             api._blueprint_path(bad)
     assert api._blueprint_path("ok-1").name == "ok-1.blueprint.json"
+
+
+def test_read_version_reads_the_installed_kit_without_src(tmp_path: Path) -> None:
+    """R17 : sans `src/grimoire`, la version vient du kit installé puis de project-context."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("gsd", ROOT / "scripts" / "gen-site-data.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    (tmp_path / "project-context.yaml").write_text("kit_version: '3.1.4'  # note\n", encoding="utf-8")
+    assert mod._read_version(tmp_path) == "3.1.4"
+
+    marker = tmp_path / "_grimoire" / "kit" / ".up-version"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("3.65.0\n", encoding="utf-8")
+    assert mod._read_version(tmp_path) == "3.65.0"
+    assert mod.build_meta(tmp_path, False)["version"] == "3.65.0"

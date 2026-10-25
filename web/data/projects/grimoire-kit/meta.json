@@ -1,16 +1,17 @@
 {
-  "generated_at": "2026-06-29T17:47:25+00:00",
-  "version": "3.16.0",
+  "generated_at": "2026-10-25T17:19:26+00:00",
+  "version": "3.65.0",
   "counts": {
-    "tools": 108,
-    "agents": 33,
+    "tools": 46,
+    "agents": 20,
     "archetypes": 10,
-    "patterns": 36,
+    "patterns": 37,
     "pattern_categories": 11,
     "profiles": 5,
-    "artifact_types": 41,
-    "tests": 5948
+    "artifact_types": 49,
+    "tests": null
   },
+  "tests_method": null,
   "archetypes": [
     "agentic-standard",
     "creative-studio",
@@ -35,49 +36,32 @@
       "creative-studio": [
         "blender-expert",
         "brand-designer",
-        "content-creator",
         "illustration-expert"
       ],
       "fix-loop": [
         "fix-loop-orchestrator.tpl"
       ],
       "infra-ops": [
-        "backup-dr-specialist",
-        "k8s-navigator",
         "monitoring-specialist",
         "ops-engineer",
-        "pipeline-architect",
-        "security-hardener",
         "systems-debugger"
       ],
       "meta": [
         "agent-optimizer",
-        "art-director",
         "concierge",
-        "creative-toolsmith",
-        "memory-keeper",
-        "project-navigator"
+        "security-auditor"
       ],
       "minimal": [
         "custom-agent.tpl"
       ],
       "platform-engineering": [
         "backend-engineer",
-        "deploy-orchestrator",
-        "platform-architect",
-        "reliability-engineer"
+        "platform-architect"
       ],
       "stack": [
-        "ansible-expert",
-        "docker-expert",
-        "go-expert",
-        "k8s-expert",
-        "python-expert",
-        "terraform-expert",
-        "typescript-expert"
+        "stack-engineer"
       ],
       "web-app": [
-        "frontend-specialist",
         "fullstack-dev"
       ]
     }
