@@ -67,7 +67,7 @@ class HumanAcceptance:
 
 def accept_task(
     task: MissionTask, project_root: Path, evidence_root: Path, reason: str, actor: str, *, origin: str,
-    provenance: Mapping[str, Any] | None = None,
+    provenance: Mapping[str, Any] | None = None, proof_root: Path | None = None,
 ) -> HumanAcceptance:
     """Range le pack d'attestation, le verdict ``passed`` humain et le reçu ``READY`` de *task* ; lève si refusé.
 
@@ -78,13 +78,18 @@ def accept_task(
     geste ``accept`` et le type de la tâche, que la politique d'escalade du projet délègue ``accept``, et
     que le reçu de revue déjà rangé vaut (verrou 7 : relecteur distinct de l'auteur, session attestée au
     journal d'autorité). Le verdict et le reçu sont alors signés ``orchestrator:<mandat>``.
+
+    *proof_root* (lot 4, le merger) : où vivent les reçus de revue, quand ce n'est pas *project_root* — le worktree
+    ``task/<id>`` d'une tâche lancée. Le mandat et la politique d'escalade restent lus sous *project_root*, jamais
+    dans un arbre que le worker écrit.
     """
+    proofs = proof_root or project_root
     authority = require_authority(
         project_root, "accept", task, origin, what=f"Acceptation refusée pour {task.id}", provenance=provenance,
         record=False,
     )
     if authority is not None:
-        _require_attested_review(task, project_root)
+        _require_attested_review(task, project_root, proofs)
     if task.status is not TaskState.NEEDS_VERIFICATION:
         raise GrimoireMissionError(
             f"Acceptation refusée pour {task.id} : état {task.status.value}, il faut une tâche en revue "
@@ -124,18 +129,18 @@ def accept_task(
     )
     service.record_verdict(verdict)
     receipt = write_receipt(
-        project_root, task.id, READY, reviewer_id=signer,
-        reviewer_session=_reviewer_session(task, project_root) if authority else "",
+        proofs, task.id, READY, reviewer_id=signer,
+        reviewer_session=_reviewer_session(task, proofs) if authority else "",
     )
     if authority is not None:
         MandateStore(project_root).record_gesture(authority)  # inscrit une fois le geste fait
     return HumanAcceptance(pack, verdict, receipt)
 
 
-def _require_attested_review(task: MissionTask, project_root: Path) -> None:
+def _require_attested_review(task: MissionTask, project_root: Path, proofs: Path) -> None:
     """Verrou 7 : sous mandat, l'acceptation s'appuie sur un reçu de revue d'un autre, de provenance attestée."""
     try:
-        receipt = read_receipt(project_root, task.id)
+        receipt = read_receipt(proofs, task.id)
     except ValueError as exc:
         raise GrimoireMissionError(f"Acceptation refusée pour {task.id} : reçu de revue illisible ({exc})") from exc
     if receipt is None or receipt.verdict != READY:

@@ -25,6 +25,9 @@ Lot 3 : après le lancement, si le rôle ``reviewer`` est activé, l'étape de r
 session distincte sur chaque tâche lancée arrivée en revue et juge les reçus rendus (verdict forgé, retour au worker,
 escalade à l'humain).
 
+Lot 4 : après le relecteur, si le rôle ``merger`` est activé, la file série (:mod:`.merger`) fusionne la tête de file
+relue READY (CI verte, branche réalignée, sous mandat seulement) puis l'accepte, ou pose la question à l'humain.
+
 K12 — **idempotent et rejouable** :
 
 - un seul tick écrit à la fois : ``_grimoire-output/control/.tick.lock`` (:func:`grimoire.core.fsio.locked`,
@@ -66,6 +69,7 @@ if TYPE_CHECKING:
     from grimoire.missions.effects import EffectOutcome, Probe
     from grimoire.missions.janitor import JanitorOutcome
     from grimoire.missions.launcher import Exec, LaunchOutcome
+    from grimoire.missions.merger import MergerOutcome
     from grimoire.missions.reviewer import ReviewOutcome
     from grimoire.missions.service import TaskService, WakeDecision
 
@@ -98,6 +102,7 @@ class TickReport:
     cleanup: tuple[JanitorOutcome, ...] = ()
     breaker: BreakerState | None = None
     reviews: tuple[ReviewOutcome, ...] = ()
+    merges: tuple[MergerOutcome, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -122,6 +127,8 @@ class TickReport:
             payload["breaker"] = self.breaker.to_dict()
         if self.reviews:  # lot 3 : même règle
             payload["reviews"] = [o.to_dict() for o in self.reviews]
+        if self.merges:  # lot 4 : même règle
+            payload["merges"] = [o.to_dict() for o in self.merges]
         return payload
 
 
@@ -221,6 +228,7 @@ def _one_pass(
             reviews = ReviewStage(service, policy, exec_=exec_ or default_exec, now=now)()
         except Exception as exc:  # une étape en erreur ne casse pas le tick : récolte, admission et lancements sont faits
             attention.append(f"relecteur : étape en erreur, rien n'est jugé à ce tick ({type(exc).__name__}: {exc})")
+    merges = _merger_stage(service, policy, mode, exec_, now, attention)
     from grimoire.missions.breaker import read_breaker
 
     state_of_breaker = read_breaker(service.home_root)
@@ -236,6 +244,9 @@ def _one_pass(
     for review in reviews:
         if review.status == "failed" or review.action in ("forged", "escalate"):
             attention.append(f"relecteur : {review.task_id} {review.action} ({review.detail})")
+    for merge in merges:
+        if merge.status in ("failed", "refused") or merge.action == "escalate":
+            attention.append(f"merger : {merge.task_id} {merge.action} {merge.status} ({merge.detail})")
     if report.clock == "unknown":
         attention.append("horloge incohérente (plus tôt que le dernier événement du ledger) : rien n'est récolté")
     if unreadable := service.ledger.unreadable_lines():
@@ -251,8 +262,24 @@ def _one_pass(
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
-        launches, cleanup, breaker, reviews,
+        launches, cleanup, breaker, reviews, merges,
     )
+
+
+def _merger_stage(
+    service: TaskService, policy: Any, mode: str, exec_: Exec | None, now: datetime | None, attention: list[str]
+) -> tuple[MergerOutcome, ...]:
+    """La file du merger (lot 4), appliquée seulement ; une étape en erreur ne casse pas le tick."""
+    if mode != "apply" or policy is None or not policy.merger.enabled:
+        return ()
+    from grimoire.missions.launcher import default_exec
+    from grimoire.missions.merger import MergeStage
+
+    try:
+        return MergeStage(service, policy, exec_=exec_ or default_exec, now=now)()
+    except Exception as exc:  # récolte, admission, lancements et relectures sont faits
+        attention.append(f"merger : étape en erreur, rien n'est fusionné à ce tick ({type(exc).__name__}: {exc})")
+        return ()
 
 
 def _orchestrator_stage(

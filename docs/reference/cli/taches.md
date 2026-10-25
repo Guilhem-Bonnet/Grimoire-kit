@@ -464,6 +464,59 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
   Limite : un agent qui lance un script arbitraire, ou dont le chemin est assemblé par le shell (`$X`),
   contourne une garde de chemin.
 
+### Fusion par le merger (#876, lot 4)
+
+Le rôle `merger` est une étape de `orchestrate tick --apply`, après le relecteur. Il est désactivé par défaut :
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  roles:
+    merger:
+      enabled: true
+      realign_max: 1               # PR réalignées sur la cible à la fois (le débit CI)
+      ignored_checks: ["codecov/*"] # hors du verdict quand la protection de branche ne dit pas quels checks sont requis
+      max_cycles: 2                # retours au worker (CI rouge, conflit) avant l'escalade
+```
+
+La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
+l'ordre des jugements. Le merger n'ouvre pas de PR : il attend celle du worker sur `task/<id>`. À chaque tick, il
+vérifie dans cet ordre, et chaque garde échoue fermée :
+
+| Étape | Ce qui est vérifié | Sinon |
+|---|---|---|
+| PR | ouverte, pas en brouillon, vers la cible du worktree | attente, ou refus si elle est fermée sans fusion |
+| READY | reçu jugé, pack et critères inchangés, arbre propre, contenu relu (ou réaligné par le merger) | arbre sale : retour au worker ; READY périmé : nouvelle relecture (`task.merge_requeued`) |
+| Tête | la tête locale est celle de la PR | attente ; une tête réalignée non poussée est poussée |
+| CI | checks requis (`gh pr checks --required`), à défaut tous hors `ignored_checks` | rouge : retour au worker (`claude --bg --resume`) ; en attente ou aucun check : attente |
+| Cible | `origin/<cible>` contenue dans la branche | fusion de la cible dans le worktree, jamais de rebase ni de push forcé, puis push et attente de la CI |
+| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, reçu attesté au journal d'autorité | `waiting(human)` avec la question « fusionner ? » |
+| Acceptation | mandat qui couvre `accept`, politique qui le délègue, tête fusionnée égale à la tête relue | `waiting(human)` avec la question « accepter ? » |
+
+- **Conflit de réalignement** : limité à `CHANGELOG.md`, il est résolu par l'union des deux côtés
+  (`git merge-file --union`), contrôlée : `git diff origin/<cible> -- CHANGELOG.md` ne doit contenir aucune ligne `-`.
+  Une union qui perdrait une ligne de la cible, ou tout autre conflit, annule la fusion locale et rend la tâche au
+  worker.
+- **Fusion** : `gh pr merge <n> --squash --match-head-commit <tête>`, sans `--admin` ni `--auto`. Elle n'est notée
+  (`task.merged`) que constatée sur la remote : PR `MERGED` et commit de fusion contenu dans `origin/<cible>`. Le geste
+  est alors inscrit au journal d'autorité avec `origin: orchestrator` et sa provenance (le reçu READY jugé, la tête
+  fusionnée).
+- **Acceptation** : par la garde de `task accept` (lot 1), qui exige le reçu READY d'un relecteur inscrit distinct de
+  l'auteur. La tâche close, le janitor nettoie la session, le worktree, la branche et le créneau.
+- **Catégories gardées** : une tâche dont le type, le profil ou les labels touchent `release`, `secrets`, `paid` ou
+  `security`, quand la politique garde cette catégorie à l'humain, n'est jamais fusionnée ni acceptée sous mandat.
+- **Réponse humaine** : `grimoire task answer <id> fusionner` (ou `accepter`) réveille la tâche ; le lanceur ne la
+  relance pas, le merger la reprend au tick suivant, revérifie tout et fait le geste au nom de l'humain, la réponse en
+  provenance. `reprendre` rend la tâche au worker, `abandonner` l'annule.
+- **Rejeu** : chaque étape est notée au ledger (`task.merge_queued`, `task.merge_realigned`, `task.merge_pushed`,
+  `task.merge_bounced`, `task.merge_requested`, `task.merged`, `task.merge_escalated`, `task.merge_resumed`,
+  `task.merge_accepted`) et n'est faite qu'une fois. Une fusion faite mais non notée est constatée au tick suivant,
+  jamais refaite. Un échec de `gh` ou de `git` est compté au disjoncteur ; disjoncteur ouvert, le merger ne fait rien.
+- **Limites** : la réponse humaine relayée vaut ce que vaut la ligne `task.human_answered` du ledger, qui n'est pas une
+  zone protégée (la voie sous mandat passe par le journal d'autorité) ; le push du réalignement fait tourner les hooks
+  git du dépôt ; une PR sans aucun check attend indéfiniment ; l'union du CHANGELOG garde les deux côtés dans l'ordre de
+  `git merge-file`, sans reconstruire les sections.
+
 ### Ce que le claim rappelle
 
 `grimoire task recall <id>` (#141) assemble ce qu'une tâche et ses voisines ont

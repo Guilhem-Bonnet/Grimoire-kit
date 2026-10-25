@@ -15,8 +15,8 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
    - d'une autre session que le relecteur lancé : refusé, rien ne bouge (un humain peut relire et accepter lui-même) ;
    - lancé sous mandat : le mandat doit être encore actif et la provenance tenir au journal d'autorité, sinon le reçu
      est refusé **définitivement** — une révocation entre le lancement et le jugement ne lève pas la garde ;
-   - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : noté ; l'acceptation et la fusion
-     sont les lots suivants. ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
+   - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : noté ; la fusion et l'acceptation
+     sont au merger (:mod:`.merger`, lot 4). ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
    - ``NOT-READY`` : la tâche repart au worker (``needs_verification → running``, session du worker reprise par
      ``claude --bg --resume <son uuid>``, constats en note). Une reprise qui échoue remet la tâche en revue et sera
      retentée. Au cycle ``max_cycles`` (2 par défaut, compté depuis la dernière réponse humaine), ou sans session à
@@ -66,6 +66,7 @@ __all__ = [
     "REVIEW_TIMEOUT",
     "ReviewOutcome",
     "ReviewStage",
+    "entered_review_at",
     "session_digest",
 ]
 
@@ -105,6 +106,23 @@ class ReviewOutcome:
                 "session": self.session, "model": self.model}
 
 
+def entered_review_at(service: TaskService, task_id: str) -> str:
+    """La dernière remise en revue par le worker ; celles du relecteur (reprise ou escalade ratée) n'en sont pas.
+
+    Lot 4 : le merger qui rend une tâche à la revue (sa remise en état après une réponse humaine) n'en fait pas une
+    nouvelle entrée ; un READY qu'il trouve périmé en est une (``task.merge_requeued``) : il appelle une relecture.
+    """
+    from grimoire.missions.merger import MERGE_REQUEUED_EVENT, MERGER_ACTOR
+
+    moves = [
+        e.created_at for e in service.ledger.events_for(task_id)
+        if (e.event_type == "task.transitioned" and e.payload.get("to_state") == TaskState.NEEDS_VERIFICATION.value
+            and e.payload.get("actor_id") not in (REVIEWER_ACTOR, MERGER_ACTOR))
+        or e.event_type == MERGE_REQUEUED_EVENT
+    ]
+    return moves[-1] if moves else ""
+
+
 def _family(model: str) -> str:
     lowered = model.lower()
     return next((alias for alias in _ALTERNATE if alias in lowered), lowered)
@@ -137,13 +155,7 @@ class ReviewStage:
         return [e for e in self._service.ledger.events_for(task_id) if e.event_type == kind]
 
     def _entered_review_at(self, task_id: str) -> str:
-        """La dernière remise en revue par le worker ; celles du relecteur (reprise ou escalade ratée) n'en sont pas."""
-        moves = [
-            e.created_at for e in self._service.ledger.events_for(task_id)
-            if e.event_type == "task.transitioned" and e.payload.get("to_state") == TaskState.NEEDS_VERIFICATION.value
-            and e.payload.get("actor_id") != REVIEWER_ACTOR
-        ]
-        return moves[-1] if moves else ""
+        return entered_review_at(self._service, task_id)
 
     def _verdicts(self, task_id: str) -> dict[str, str]:
         """Relecture (id de ``task.review_launched``) → verdict noté."""
