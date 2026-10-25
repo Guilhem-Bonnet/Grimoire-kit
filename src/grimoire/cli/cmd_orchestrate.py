@@ -36,13 +36,25 @@ def _as_json(ctx: typer.Context, flag: bool) -> bool:
     return flag or str((ctx.obj or {}).get("output", "text") or "text") == "json"
 
 
-def _require_human(what: str) -> None:
+def _require_human(what: str, *, gesture: str = "", project_root: Path | None = None) -> None:
+    """Exige l'origine humaine ; avec *gesture*, l'orchestrateur sous mandat qui le couvre passe aussi (#876, verrou 6)."""
     from grimoire.cli.cmd_task import _comment_origin
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.mandate import gesture_origin, require_authority
     from grimoire.missions.schemas import ORIGIN_HUMAN
 
-    if _comment_origin() != ORIGIN_HUMAN:
-        typer.echo(f"{what} est un geste d'humain : l'origine humaine n'est pas établie.", err=True)
-        raise typer.Exit(1)
+    origin, provenance = gesture_origin(_comment_origin())
+    if origin == ORIGIN_HUMAN:
+        return
+    if gesture:
+        try:
+            require_authority((project_root or Path()).resolve(), gesture, None, origin, what=what, provenance=provenance)
+        except GrimoireError as exc:
+            typer.echo(f"{what} est un geste d'humain : {exc}", err=True)
+            raise typer.Exit(1) from exc
+        return
+    typer.echo(f"{what} est un geste d'humain : l'origine humaine n'est pas établie.", err=True)
+    raise typer.Exit(1)
 
 
 @orchestrate_app.command("pause")
@@ -101,7 +113,7 @@ def orchestrate_resume(
     """Lève le drapeau (geste d'humain). Le tick suivant repasse les `waiting(paused)` en `ready`, dans l'ordre de la file."""
     from grimoire.missions.pause import SCOPE_GLOBAL, SCOPE_PROJECT, PauseError, clear_pause
 
-    _require_human("Reprendre")
+    _require_human("Reprendre", gesture="" if global_scope else "resume", project_root=project_root)
     try:
         lifted = clear_pause(
             project_root.resolve(), scope=SCOPE_GLOBAL if global_scope else SCOPE_PROJECT, tasks=tuple(task or ())

@@ -419,6 +419,51 @@ les autres objets du même bloc restent gardés. Rien de tout cela ne change le
 verdict ni le code de sortie du dispatch. `task show` affiche les incertitudes
 du dernier dispatch.
 
+### Mandat de l'orchestrateur (#876, lot 1)
+
+Les gestes de validation (`task accept`, `task answer`, `task approve-check`, `orchestrate resume`,
+`queue release`) exigent l'origine humaine. Un **mandat** ajoute un second principal, `orchestrator`, qui
+n'agit qu'à l'intérieur de ses bornes. Sans mandat, rien ne change.
+
+```bash
+grimoire autonomy mandate grant --gesture accept --gesture approve-check --task-type implementation \
+    --max-sessions-per-day 5 --until +7d       # attesté par un tour humain, comme `autonomy grant`
+grimoire autonomy mandate status
+grimoire autonomy mandate revoke --reason "fin du pilote"
+```
+
+- **Borné** : gestes couverts, types de tâche, plafond de sessions de worker par jour, durée. Un mandat
+  expiré, révoqué, hors plafond ou qui ne couvre pas le geste est refusé.
+- **Journal d'autorité** : `~/.grimoire/control/mandates.authority.jsonl`, chaîné par hash. Un journal
+  illisible ou rompu ne porte aucun mandat. Chaque geste pris sous mandat y est inscrit avec
+  `origin: orchestrator`, l'identifiant du mandat et sa provenance (règle, verdict ou reçu).
+  La troncature de la queue est vue par une tête (`<journal>.head`) et un marqueur par révocation
+  (`revoked/<mandat>`) : un journal plus court que sa tête, ou sans tête, est rompu. Pour repartir d'un journal
+  rompu, l'humain supprime lui-même les fichiers `mandates.*` et le dossier `revoked/` de `~/.grimoire/control/`.
+- **Jamais couverts** : modifier le mandat et modifier la politique d'escalade.
+- **Politique d'escalade** : section `escalation` de `_grimoire/standard/orchestration-policy.yaml`, par
+  catégories génériques (`release`, `secrets`, `paid`, `security`, `merge`, `accept`), chacune `human` ou
+  `orchestrator`. Le gabarit livré garde tout à l'humain. Le dépôt du kit délègue `merge` et `accept` et
+  garde `release`, `secrets` et `paid` : cette configuration vit dans
+  `_grimoire/standard/orchestration-policy.yaml` du dépôt qui porte le pilote (le dépôt du kit n'en
+  versionne pas aujourd'hui). La modifier après l'octroi révoque le mandat.
+- **Sous mandat** : un reçu de revue ne vaut que si son relecteur diffère de l'auteur et si la session du
+  relecteur figure au journal d'autorité ; les `--check` doivent être ceux scellés à la création de la
+  tâche, un check modifié depuis ouvre un événement « disjoncteur ».
+- **Principal** : en CLI, `GRIMOIRE_PRINCIPAL=orchestrator` *revendique* le principal et
+  `GRIMOIRE_PROVENANCE=<rule|verdict|receipt>:<réf>` cite la provenance ; la revendication ne vaut que si la
+  session appelante est inscrite au journal d'autorité en rôle `orchestrator`
+  (`register_orchestrator_session(projet, session_id)`, appelée par le lanceur) et n'est celle d'aucun worker ni
+  relecteur de la tâche. Sans session inscrite : refus. Le tick, qui est du code et non une session, appelle
+  l'API Python dans `with acting_as_orchestrator():` (`grimoire.missions.mandate`), jamais par l'environnement.
+- **Cockpit** : `GET /api/workspace/autonomy/mandate`, `POST …/mandate/grant` (jeton de session **et** clé de
+  contrôle `~/.grimoire/control/cockpit-key`) et `POST …/mandate/revoke`.
+- **Zone protégée** : `~/.grimoire/control/` (journal d'autorité, preuve de contrat d'hôte, clé du cockpit) est
+  refusée en écriture aux outils d'agent par le frein `PreToolUse`, et la clé en lecture. Les chemins sont
+  résolus (`$HOME`, `..`, `cd` puis chemin relatif, globs, liens symboliques existants, composants cités).
+  Limite : un agent qui lance un script arbitraire, ou dont le chemin est assemblé par le shell (`$X`),
+  contourne une garde de chemin.
+
 ### Ce que le claim rappelle
 
 `grimoire task recall <id>` (#141) assemble ce qu'une tâche et ses voisines ont

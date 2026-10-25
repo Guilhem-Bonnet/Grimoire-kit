@@ -301,6 +301,16 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def log_message(self, *args: object) -> None:
         return  # quiet by default
 
+    def send_header(self, keyword: str, value: str) -> None:
+        super().send_header(keyword, value)
+        # Seuls les fichiers statiques portent ``Last-Modified``. Sans
+        # ``Cache-Control``, le navigateur gardait d'anciens modules JS/CSS
+        # après une mise à jour du kit ; icons.svg et polices prennent une
+        # minute (``no-cache`` y coûtait une requête par rendu d'icône).
+        if keyword.lower() == "last-modified":
+            js_css = Path(urlparse(self.path).path).suffix.lower() in {".js", ".mjs", ".css"}
+            super().send_header("Cache-Control", "no-cache" if js_css else "max-age=60")
+
     def setup(self) -> None:
         super().setup()
         self.rfile = _CountingReader(self.rfile)  # type: ignore[assignment]

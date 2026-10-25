@@ -293,6 +293,27 @@ def test_une_carte_dit_son_identifiant_sa_route_sa_preuve_sa_session_et_son_bloc
     ) == "2"
 
 
+def test_chaque_fait_de_carte_tient_sur_une_ligne_sans_couper_un_mot(page: Page) -> None:
+    """La méta (owner, risque, priorité) et la session (identifiant, hôte) tiennent
+    chacune sur une ligne : avant, l'identifiant encadré se cassait en deux, « Claude
+    Code » passait à la ligne et la priorité restait seule sur la ligne suivante."""
+    _goto(page)
+    running = _card(page, RUNNING_TITLE)
+    running.wait_for(timeout=APPEAR_MS)
+    for selector in (".ex-card-meta", ".ex-session"):
+        lines = running.locator(selector).evaluate(
+            "(n) => { const lh = parseFloat(getComputedStyle(n).lineHeight) || 18; return Math.round(n.getBoundingClientRect().height / lh); }"
+        )
+        assert lines == 1, f"{selector} tient sur {lines} lignes"
+    # Aucun fait de la ligne de vivacité ne se casse au milieu (chaque fait d'un bloc).
+    broken = running.locator("[data-role='live-facts'] > *").evaluate_all(
+        "(nodes) => nodes.filter((n) => n.getClientRects().length > 1 || n.getBoundingClientRect().height > 24).map((n) => n.textContent)"
+    )
+    assert broken == [], broken
+    # La raison d'une inactivité et le texte entier d'un blocage restent au survol.
+    assert "aucune preuve déclarée" in (_card(page, BLOCKED_TITLE).locator("[data-role='blocked']").get_attribute("title") or "")
+
+
 def test_la_carte_selectionnee_ouvre_ses_conditions_de_passage_dans_le_panneau_de_detail(page: Page) -> None:
     _goto(page)
     assert not page.locator("#panel-inspector").is_visible(), "sans sélection, pas de colonne de détail"
