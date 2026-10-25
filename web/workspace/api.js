@@ -235,6 +235,10 @@ export const api = {
   // `slug` (un projet — `project` est déjà le projet servi par l'hôte),
   // `live` ('1' : sessions dont le journal a moins de `minutes` minutes).
   portfolioTasks: (params) => get(WS + 'portfolio/tasks', params),
+  // Vue « Sessions » de Travail (P33) : les sessions d'agent du projet servi, ou de
+  // tout le registre (`portfolio`) — état, tâches tenues, dernier signe, consignes
+  // en attente, activité des 15 dernières minutes, commande de reprise à copier.
+  sessions: (portfolio) => get(WS + 'sessions', portfolio ? { scope: 'portfolio' } : undefined),
   files: (tier) => get(WS + 'files', tier ? { tier } : undefined),
   file: (path) => get(WS + 'file', { path }),
   fileDiff: (path) => get(WS + 'file/diff', { path }),

@@ -35,6 +35,7 @@ from typing import Any
 from grimoire.missions.lease import DEFAULT_LEASE_TTL_SECONDS, LeaseFile, parse_instant
 
 __all__ = [
+    "DEFAULT_ACTIVE_MINUTES",
     "DEFAULT_ACTIVE_WINDOW",
     "DEFAULT_PROGRESS_THRESHOLD",
     "INACTIF",
@@ -51,7 +52,9 @@ __all__ = [
     "label",
     "liveness",
     "probe_claude_agents",
+    "probe_entries",
     "progress_at",
+    "recent_sign",
     "self_view_line",
     "task_progress",
 ]
@@ -69,8 +72,13 @@ def label(state: str) -> str:
     """Libellé féminin d'une valeur de vivacité (« session vivante »)."""
     return LABELS.get(state, state)
 
-#: Un journal de session écrit depuis moins de ce délai vaut « signe de vie ».
-DEFAULT_ACTIVE_WINDOW = timedelta(minutes=30)
+#: Un signe écrit depuis moins de ce délai vaut « signe de vie ». **Seule** définition
+#: de « vivante » du kit (P33) : la Flotte (``project_health.ACTIVE_WINDOW_MINUTES``,
+#: projet actif), Travail (``workspace_portfolio.DEFAULT_LIVE_MINUTES``, cartes et vue
+#: Sessions), le pouls et ``grimoire task list --live`` la lisent ici. Avant, la Flotte
+#: disait 15 min et Travail 30 : la même session était vivante dans un espace, pas dans l'autre.
+DEFAULT_ACTIVE_MINUTES = 30
+DEFAULT_ACTIVE_WINDOW = timedelta(minutes=DEFAULT_ACTIVE_MINUTES)
 #: Au-delà (D19, §2.5), un vivant sans progression monte en attention.
 DEFAULT_PROGRESS_THRESHOLD = timedelta(minutes=45)
 #: Événement du ledger qui compte comme une progression : la note du titulaire
@@ -115,6 +123,11 @@ def _ago(moment: datetime, now: datetime) -> str:
     return f"{minutes} min" if minutes < 120 else f"{minutes // 60} h"
 
 
+def recent_sign(moment: datetime | None, now: datetime, window: timedelta = DEFAULT_ACTIVE_WINDOW) -> bool:
+    """Vrai si *moment* tombe dans la fenêtre de vie : ni absent, ni dans le futur, ni trop vieux."""
+    return moment is not None and 0 <= (now - moment).total_seconds() <= window.total_seconds()
+
+
 def liveness(
     *,
     now: datetime,
@@ -127,16 +140,22 @@ def liveness(
 ) -> Liveness:
     """La vivacité à l'instant *now* — fonction pure.
 
-    Ordre : ``ended`` (terminé) ; sonde ``busy`` (vivant) ; journal récent
-    (vivant) ; sonde ``idle`` (inactif) ; outil long déclaré sous un bail
-    valide (inactif) ; sinon ``inconnu``, daté du dernier indice. Une session
-    sans journal, sans bail et sans sonde est ``inconnu``, pas morte.
+    Ordre : ``ended`` (terminé) ; sonde ``ended`` (terminé) ; sonde ``busy``
+    ou ``waiting`` (vivant) ; journal récent (vivant) ; sonde ``idle``
+    (inactif) ; outil long déclaré sous un bail valide (inactif) ; sinon
+    ``inconnu``, daté du dernier indice. Une session sans journal, sans bail et
+    sans sonde est ``inconnu``, pas morte. Sonde muette (``None``) : le journal
+    de session tranche seul.
     """
     if ended:
         return Liveness(TERMINE, "la session a déclaré sa fin")
+    if probe_status == "ended":
+        return Liveness(TERMINE, "sonde de l'hôte : session arrêtée")
     if probe_status == "busy":
         return Liveness(VIVANT, "sonde de l'hôte : occupée")
-    if journal_at is not None and 0 <= (now - journal_at).total_seconds() <= active_window.total_seconds():
+    if probe_status == "waiting":
+        return Liveness(VIVANT, "sonde de l'hôte : attend une réponse")
+    if journal_at is not None and recent_sign(journal_at, now, active_window):
         return Liveness(VIVANT, f"journal de session écrit il y a {_ago(journal_at, now)}")
     if probe_status == "idle":
         return Liveness(INACTIF, "sonde de l'hôte : au repos")
@@ -180,11 +199,37 @@ def attention(
     return None
 
 
-def probe_claude_agents(*, run: Callable[..., Any] = subprocess.run, timeout: float = 3.0) -> dict[str, str] | None:
-    """``claude agents --json`` : ``{sessionId: status}``, ou ``None`` si la sonde échoue.
+#: ``state`` des sessions d'arrière-plan de ``claude agents --json`` → statut de sonde.
+#: Relevé sur la sortie réelle (2026-10-25) : ``done`` et ``stopped`` ; ``running`` et
+#: ``waiting`` sont les états en cours que l'hôte documente. Un état absent d'ici
+#: n'est pas lu : il ne prouve rien.
+_BACKGROUND_STATES = {
+    "running": "busy",
+    "waiting": "waiting",
+    "done": "ended",
+    "stopped": "ended",
+    "failed": "ended",
+}
 
-    K0 : les sessions interactives ne donnent que ``busy``/``idle`` (ni ``state``
-    ni ``waitingFor``). Toute erreur rend ``None`` : une sonde muette n'est pas une preuve.
+
+def _probe_status(entry: Mapping[str, Any]) -> str | None:
+    if entry.get("waitingFor"):
+        return "waiting"
+    status = entry.get("status")
+    if status in ("busy", "idle"):
+        return str(status)
+    return _BACKGROUND_STATES.get(str(entry.get("state") or ""))
+
+
+def probe_entries(
+    *, run: Callable[..., Any] = subprocess.run, timeout: float = 3.0
+) -> dict[str, dict[str, Any]] | None:
+    """``claude agents --json`` : ``{sessionId: {status, cwd, name, kind, started_at}}``, ``None`` si la sonde échoue.
+
+    ``status`` ∈ ``busy`` | ``idle`` (sessions interactives, K0 : ni ``state`` ni
+    ``waitingFor``) | ``waiting`` | ``ended`` (sessions d'arrière-plan, champ
+    ``state``). Une entrée sans statut reconnu est écartée. Toute erreur rend
+    ``None`` : une sonde muette n'est pas une preuve, ni une flotte vide.
     """
     try:
         done = run(
@@ -202,11 +247,32 @@ def probe_claude_agents(*, run: Callable[..., Any] = subprocess.run, timeout: fl
         return None
     if not isinstance(data, list):
         return None
-    return {
-        str(e["sessionId"]): str(e["status"])
-        for e in data
-        if isinstance(e, dict) and e.get("sessionId") and e.get("status") in ("busy", "idle")
-    }
+    out: dict[str, dict[str, Any]] = {}
+    for e in data:
+        if not isinstance(e, dict) or not e.get("sessionId"):
+            continue
+        status = _probe_status(e)
+        if status is None:
+            continue
+        started = e.get("startedAt")
+        out[str(e["sessionId"])] = {
+            "status": status,
+            "cwd": str(e.get("cwd") or ""),
+            "name": str(e.get("name") or ""),
+            "kind": str(e.get("kind") or ""),
+            "started_at": (
+                datetime.fromtimestamp(started / 1000, UTC).isoformat()
+                if isinstance(started, int | float) and not isinstance(started, bool) and started > 0
+                else ""
+            ),
+        }
+    return out
+
+
+def probe_claude_agents(*, run: Callable[..., Any] = subprocess.run, timeout: float = 3.0) -> dict[str, str] | None:
+    """``claude agents --json`` : ``{sessionId: status}``, ou ``None`` si la sonde échoue (voir :func:`probe_entries`)."""
+    entries = probe_entries(run=run, timeout=timeout)
+    return None if entries is None else {sid: e["status"] for sid, e in entries.items()}
 
 
 _SAFE_TASK_ID = re.compile(r"[A-Za-z0-9_.-]{1,120}")
