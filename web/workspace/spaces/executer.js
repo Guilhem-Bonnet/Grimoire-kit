@@ -67,7 +67,7 @@ const VIEW_IDS = ['board4', 'board8', 'liste', 'timeline', 'decisions'];
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
-import { badge, glyph, icon, levelBars, monogram, stateIcon } from '../shell.js';
+import { actionStatus, badge, glyph, icon, levelBars, monogram, setActionStatus, stateIcon } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 
 const COLUMN_LABEL = {
@@ -1378,14 +1378,25 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     if (detail.resume_command) {
       const resumeRow = row();
       resumeRow.append(Object.assign(document.createElement('code'), { textContent: detail.resume_command }));
+      // Le dock n'est plus affiché hors atelier (P62) : y écrire seul laissait
+      // ce bouton sans effet visible. Il copie, et le dit sous la commande.
       const resumeBtn = document.createElement('button');
       resumeBtn.type = 'button';
       resumeBtn.className = 'btn';
-      resumeBtn.textContent = 'Reprendre';
-      resumeBtn.title = 'Copier la commande de reprise dans le dock';
-      resumeBtn.addEventListener('click', () => ctx.dock.echo(detail.resume_command));
+      resumeBtn.textContent = 'Copier la commande';
+      resumeBtn.title = 'Copier la commande de reprise, à coller dans un terminal';
+      const resumeStatus = actionStatus();
+      resumeBtn.addEventListener('click', async () => {
+        ctx.dock.echo(detail.resume_command);
+        try {
+          await navigator.clipboard.writeText(detail.resume_command);
+          setActionStatus(resumeStatus, 'Commande copiée : collez-la dans un terminal pour reprendre la session.', 'ok');
+        } catch {
+          setActionStatus(resumeStatus, 'Copie refusée par le navigateur : recopiez la commande ci-dessus.', 'bad');
+        }
+      });
       resumeRow.append(resumeBtn);
-      sessionHold.append(resumeRow);
+      sessionHold.append(resumeRow, resumeStatus);
     } else {
       sessionHold.append(text('p', 'lbl', 'aucune commande de reprise connue pour cet hôte'));
     }
