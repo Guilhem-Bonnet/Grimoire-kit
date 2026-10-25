@@ -111,7 +111,7 @@ def read_ledger(src: Sources) -> tuple[LedgerView | None, str]:
     from grimoire.core.standard_state import suspended_state_writes
     from grimoire.missions.ledger import MissionLedger
     from grimoire.missions.service import TaskService
-    from grimoire.tools.workspace_portfolio import _sessions_index
+    from grimoire.tools.workspace_portfolio import sessions_index
 
     service = TaskService(src.root)  # ne touche pas le disque : seul l'accès à ``.ledger`` ouvrirait le journal
     if not service.has_ledger:
@@ -125,7 +125,7 @@ def read_ledger(src: Sources) -> tuple[LedgerView | None, str]:
             for event in ledger.list_events():
                 if event.entity_id in view.tasks and event.created_at > view.last_activity.get(event.entity_id, ""):
                     view.last_activity[event.entity_id] = event.created_at
-            journals = _sessions_index(service.home_root)
+            journals = sessions_index(service.home_root)
             probed: Mapping[str, str] | None = None
             probe_done = False
             for task in view.tasks.values():
