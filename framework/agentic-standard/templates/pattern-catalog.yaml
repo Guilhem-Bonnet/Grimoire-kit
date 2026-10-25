@@ -137,7 +137,7 @@ patterns:
     required_artifacts: ["orchestration-policy.yaml"]
     rule_refs: ["orchestration.no-undeclared-handoff"]
     hook_refs: []
-    check_refs: ["orchestration.roles_missing", "orchestration.wip_missing", "orchestration.role.handoff_contracts_missing"]
+    check_refs: ["orchestration.roles_missing", "orchestration.wip_missing", "orchestration.role.handoff_contracts_missing", "orchestration.handoff_role_unknown", "orchestration.handoff_invalid"]
   - id: governed-knowledge-indexing
     category: knowledge
     maturity: orchestrated
@@ -208,6 +208,16 @@ patterns:
     rule_refs: []
     hook_refs: []
     check_refs: ["firewall.isolation_disabled", "firewall.override_allowed", "firewall.untrusted_output_unwrapped", "firewall.capability_resolves_unwrapped", "firewall.artifact_missing"]
+  - id: plan-then-execute
+    category: security
+    maturity: controlled
+    source_normative: security-governance.plan-then-execute
+    catalog_ref: []
+    intent: "Freeze the plan before reading untrusted content; an action outside the plan is refused or confirmed, never accepted silently."
+    required_artifacts: ["prompt-firewall.yaml"]
+    rule_refs: []
+    hook_refs: []
+    check_refs: ["firewall.plan_not_frozen", "firewall.plan_deviation_allowed", "firewall.plan_block_missing"]
   - id: remote-hygiene-guard
     category: governance
     maturity: controlled

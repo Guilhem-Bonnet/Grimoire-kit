@@ -9,8 +9,11 @@ without simulating any host at all.
 
 Every decision is defensive by construction:
 
-- it never raises into the host — a crashed hook must not brick a session, so
-  failures degrade to :data:`Outcome.ALLOW` with the error carried as context;
+- it never raises into the host — a crashed hook must not brick a session, but
+  it never turns a crash into an approval either (see ``_failed_decision``): on
+  ``PreToolUse`` a decision that crashed returns :data:`Outcome.ASK` (the call
+  goes back to the user, with the cause in the reason); on every other event it
+  returns :data:`Outcome.ALLOW` with the error carried as context;
 - it fails **open** when the project is not enrolled in the standard: gates
   that do not exist cannot be red, and blocking on their absence would make
   the hook a trap rather than a guardrail;

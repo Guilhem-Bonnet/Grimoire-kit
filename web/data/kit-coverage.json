@@ -1,7 +1,7 @@
 {
   "generated_by": "scripts/gen-kit-coverage.py",
   "source": "framework/agentic-standard/capability-map.yaml",
-  "verified_pattern_count": 36,
+  "verified_pattern_count": 37,
   "verified_patterns": [
     {
       "id": "advanced-context-orchestrator",
@@ -107,6 +107,11 @@
       "id": "mission-evidence-ledger",
       "category": "workflow",
       "profile_min": "governed"
+    },
+    {
+      "id": "plan-then-execute",
+      "category": "security",
+      "profile_min": "controlled"
     },
     {
       "id": "policy-by-environment",

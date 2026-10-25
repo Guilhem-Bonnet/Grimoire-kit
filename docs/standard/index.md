@@ -39,7 +39,7 @@ cette section décrit ce à quoi il vous engage quand vous activez le standard.
 
 - **[Contrôles gouvernés](controles-gouvernes.md)**
 
-    La référence : 36 patterns répartis sur 11 catégories, avec leur profil
+    La référence : 37 patterns répartis sur 11 catégories, avec leur profil
     minimal, leur artefact et leurs checks. Page générée depuis le catalogue,
     jamais éditée à la main.
 

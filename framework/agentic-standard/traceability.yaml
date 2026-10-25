@@ -124,7 +124,6 @@ artifacts:
     requirements: [AG-ORC-003, AG-ORC-004, AG-QUA-004]
     controls: [CTRL-QUA-001, CTRL-AUT-001, CTRL-OBS-001]
     evidence: "matrice L27 (handoff packet), L28 (WIP, délégation ouverte), L59 (RACI) ; exigences L23, L24, L75"
-    note: "AG-ORC-003 couvert par le modèle (handoffs:) mais le vérificateur ne lit que roles: — trou de vérification."
   evidence_gates:
     requirements: [AG-QUA-008]
     controls: [CTRL-QUA-003]
@@ -259,7 +258,7 @@ verifiers:
   decision: {prefix: "decision.", controls: [CTRL-QUA-003]}
   rules: {prefix: "rules.", controls: [], reason: "Forme des règles ; chaque règle référence son propre contrôle."}
   hooks: {prefix: "hooks.", controls: [CTRL-PAT-001]}
-  orchestration: {prefix: "orchestration.", controls: [CTRL-AUT-001], note: "Ne lit que roles: ; handoffs: (AG-ORC-003) non vérifié."}
+  orchestration: {prefix: "orchestration.", controls: [CTRL-AUT-001]}
   gates: {prefix: "gates.", controls: [CTRL-QUA-003]}
   patterns: {prefix: "patterns.", controls: [CTRL-PAT-001]}
   skills: {prefix: "skills.", controls: [CTRL-PAT-001], note: "#636 : classification des skills du projet (managed_sources.skills) avant promotion."}

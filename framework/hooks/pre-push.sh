@@ -8,7 +8,7 @@
 #
 # Comportement :
 #   1. Vérifie la syntaxe bash de grimoire-init.sh si modifié
-#   2. Lance validate --all (léger — python inline, <2s)
+#   2. Lance validate --all (code retour + mot erreur ; script absent = dit)
 #   3. Vérifie que Grimoire_TRACE.md n'est pas vide si _grimoire-output/ a des commits
 #   4. Skip si Grimoire_SKIP_PUSH_CHECK=1 (CI/CD ou urgence)
 #
@@ -45,17 +45,17 @@ if [[ -f "$INIT_SCRIPT" ]]; then
 fi
 
 # ── 2. Validation DNA (tous les archetypes) ───────────────────────────────────
-DNA_FILES=$(find "$GIT_ROOT/archetypes" -name "*.dna.yaml" 2>/dev/null | wc -l)
+DNA_FILES=$(find "$GIT_ROOT/archetypes" -name "*.dna.yaml" 2>/dev/null | wc -l | tr -d " ") || DNA_FILES=0  # sans archetypes/ : 0 ; wc -l macOS pad les blancs
 if [[ "$DNA_FILES" -gt 0 ]]; then
-    if command -v python3 &>/dev/null; then
-        VALIDATE_RESULT=$(bash "$INIT_SCRIPT" validate --all 2>&1 | tail -3)
-        if echo "$VALIDATE_RESULT" | grep -qi "erreur\|error\|invalid"; then
-            echo "   ✗ DNA validate --all — erreurs détectées !"
-            echo "     $VALIDATE_RESULT"
+    VALIDATE_RC=0
+    if [[ ! -f "$INIT_SCRIPT" ]]; then
+        echo "   ⚠ DNA validate sautée — grimoire-init.sh introuvable ($DNA_FILES fichiers non validés)"
+    elif command -v python3 &>/dev/null; then
+        VALIDATE_RESULT=$(bash "$INIT_SCRIPT" validate --all 2>&1 | tail -3) || VALIDATE_RC=$?  # le code retour fait foi (R41)
+        if [[ "$VALIDATE_RC" -ne 0 ]] || echo "$VALIDATE_RESULT" | grep -qi "erreur\|error\|invalid"; then
+            echo "   ✗ DNA validate --all — échec (code retour $VALIDATE_RC) !"; echo "     $VALIDATE_RESULT"
             ERRORS=$((ERRORS + 1))
-        else
-            echo "   ✓ DNA validate — $DNA_FILES fichiers OK"
-        fi
+        else echo "   ✓ DNA validate — $DNA_FILES fichiers OK"; fi
     fi
 fi
 
