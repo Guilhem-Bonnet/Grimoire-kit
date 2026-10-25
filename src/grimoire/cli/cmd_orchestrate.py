@@ -145,7 +145,7 @@ def _hold_lines(project_root: Path, ledger_root: Path, state: PauseState) -> lis
         mode = state.mode_for(task.id)
         if task.status not in (TaskState.CLAIMED, TaskState.RUNNING) or task.claim is None or mode is None:
             continue
-        fenced = claim_host_is_fenced(task.claim.session_host or task.claim.host_id, task.claim.session_host_version)
+        fenced = claim_host_is_fenced(task.claim.session_host or task.claim.host_id, task.claim.session_host_version, project_root=project_root)
         applied, note = effective_mode(mode, fenced=fenced)
         lines.append(f"  - {task.id} : {applied}" + (f" — {note}" if note else ""))
     waiting = [t.id for t in service.ledger.list_tasks() if t.status is TaskState.WAITING and t.waiting and t.waiting.reason == "paused"]
