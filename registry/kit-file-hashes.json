@@ -14,6 +14,10 @@
    "version": "3.4.2",
    "path": "framework/tools/cc-feedback.py"
   },
+  "015c71b8c06c1795f50724092249808dfe42165255ff211a7e981d3945b441d7": {
+   "version": "3.65.0",
+   "path": "framework/hooks/pre-push.sh"
+  },
   "026135d34523450d7c944083ae3eac88441e40262183430946fd0a3ce78cdeeb": {
    "version": "3.8.0",
    "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
@@ -206,6 +210,10 @@
    "version": "3.16.0",
    "path": "framework/tools/digital-twin.py"
   },
+  "0e3339067799a3ae730e8e324a48994cffee95c07a62687d1c7b79f5892f2ee5": {
+   "version": "3.65.0",
+   "path": "framework/orchestrator-gateway.md"
+  },
   "0e8f9fda063cfc8169062b2309c42b97e4f077653cb7d34e7c6478f167a7ce73": {
    "version": "3.4.4",
    "path": "framework/agentic-standard/templates/hook-registry.yaml"
@@ -313,6 +321,10 @@
   "17632f14263035e3b9bdfe7cf28f74c9d47949d9cab2fe03c7dbe6a7caf4c675": {
    "version": "3.18.0",
    "path": "framework/copilot-extension/README.md"
+  },
+  "179c4ec41e0911703ee7f8ac39051eb8c2d71a2d889ec5e8dca7157224a6bc25": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/capability-map.yaml"
   },
   "17bf7711a8efc34bf2a3cd9267955e3d2731fd6ab929bdc9ff0dcf48e91635ab": {
    "version": "3.4.3",
@@ -446,6 +458,10 @@
    "version": "3.35.4",
    "path": "framework/copilot/prompts/grimoire-self-heal.prompt.md"
   },
+  "1cb48b737a01e1a19109c174b46394a2eb3ada002cf1d8c185dc117893ec33ee": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/traceability.yaml"
+  },
   "1cdea41aacf50cc932787b161c8e26bfbc9190998a001e60457b949cc4688eeb": {
    "version": "3.32.0",
    "path": "archetypes/web-app/agents/fullstack-dev.md"
@@ -469,6 +485,10 @@
   "1fe6c4eca99fb53c4204310cf7724b1e9655da634d719574e17718c6a92a730e": {
    "version": "3.16.0",
    "path": "framework/tools/rnd_engine.py"
+  },
+  "1ff56209282347c3d9867af541f42fb806c8bac0cdc6c3ae71e401fb3fc9c4e9": {
+   "version": "3.65.0",
+   "path": "framework/hooks/pre-commit-cc.sh"
   },
   "204f3a8d1976d78f57bae3c1efbd58570ebf5d8ae5b7eb97019c98b6a3223780": {
    "version": "3.36.0",
@@ -706,6 +726,10 @@
    "version": "3.4.2",
    "path": "framework/tools/time-travel.py"
   },
+  "2e8b824a9bbec88c8b14fe17270fa2c52357e78d998ebfbebc45575c97d46526": {
+   "version": "3.65.0",
+   "path": "framework/agent-base-compact.md"
+  },
   "2efa304e9097bd815fb5c06af40c91bfb307ed2e98bcbd09f267d0efc2d71f23": {
    "version": "3.36.0",
    "path": "framework/tools/memory-lint.py"
@@ -749,6 +773,10 @@
   "3269cf56de0c448f1c4f5c1eacc92a48adf3f5365ef5f15ee946f434e0236b69": {
    "version": "3.4.2",
    "path": "framework/tools/failure-museum.py"
+  },
+  "32b94dc84c75a7a5f50bdb78ca5b5e12bb354ee77f662e4c037d793f8dee9af6": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/prompt-firewall.yaml"
   },
   "32be587f9138437b1f0f57ce10335fd7bcb0d2c0195492447b336ff4cbb1abdf": {
    "version": "3.32.0",
@@ -1426,6 +1454,10 @@
    "version": "3.24.0",
    "path": "archetypes/platform-engineering/agents/platform-architect.md"
   },
+  "603590c415d1e8f8a1d0e81d63e0733000712d5768ff47dbef78c7769734cade": {
+   "version": "3.65.0",
+   "path": "framework/agent-base.md"
+  },
   "6050bce4a13ae354a04a63b368e173f612539aab2a1b918de37d84e459b3291d": {
    "version": "3.46.0",
    "path": "framework/agentic-industry-reference.md"
@@ -1461,6 +1493,10 @@
   "61dd6c1b80e8c6522db1c48421219816bb0d2c966d164de813e2cd9102525695": {
    "version": "3.24.0",
    "path": "archetypes/platform-engineering/agents/reliability-engineer.md"
+  },
+  "61e817dcc2f2bc893e361f209ed2bf787419af89caa3cf43b8e84a55357ef6ee": {
+   "version": "3.65.0",
+   "path": "framework/hooks/pre-push.sh"
   },
   "62466869b21b41b5e28cf19650b31b5d76cce6402571537aa0e6b1ae1d72d2b6": {
    "version": "3.4.2",
@@ -1734,6 +1770,10 @@
    "version": "3.35.0",
    "path": "framework/tools/grimoire-setup.py"
   },
+  "6f3bca362e4a9d9c33cd75882fb770edaa6eaadb1cd60609addcc948f2cf7d98": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/capability-map.yaml"
+  },
   "6f5bc141e22b00029f6a3f3f794f47ad4f370e62b8ce1db053c4bffa7732e442": {
    "version": "3.16.0",
    "path": "framework/tools/failure-museum.py"
@@ -1885,6 +1925,10 @@
   "78af93db7cad61f12dd7a15471fb7cbf65c7b64e928333a6d254c652bf466e66": {
    "version": "3.35.4",
    "path": "framework/tools/tool-registry.py"
+  },
+  "78ef1a015b9e6aca53987c06e6aaa62d3f65af13494d5e187c54ce3508fc2b8f": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
   "792c400fa682aec23a4f4247149984e1d8d1430664ceafa77cb99d8c71439056": {
    "version": "3.16.0",
@@ -2850,6 +2894,10 @@
    "version": "3.16.0",
    "path": "framework/tools/expert-tool-chain.py"
   },
+  "b314d01237fb1458d7a3f64796a44dfebd1625b24b631fea0dd4b8808c9db1b7": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/profile-map.yaml"
+  },
   "b32383e3132e6702b71ba82d815db5a4a2cdd152212d1ace256bfe76c6de63f3": {
    "version": "3.32.0",
    "path": "archetypes/stack/agents/terraform-expert.md"
@@ -3193,6 +3241,10 @@
   "c3c0f98261ed739cbdf8dfda6f87da431c72b3b072159109dd0edbff500bb554": {
    "version": "3.60.0",
    "path": "framework/event-log-shared-state.md"
+  },
+  "c3d84708beb7ee797c57e2d78b2e86f696583e468947f4ac1608d7b79d9de5f6": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/needs-catalog.yaml"
   },
   "c4a77dc1e655f9799395ef117056b2d3a632adbefdd085193b64220dfc2eaeb9": {
    "version": "3.42.0",
@@ -3938,6 +3990,10 @@
    "version": "3.21.1",
    "path": "framework/tools/agent-worker.py"
   },
+  "ee81851357bf875fbc8768380ee05d4f84be9a7436bb606448058d14ac6e451b": {
+   "version": "3.65.0",
+   "path": "framework/hooks/pre-push.sh"
+  },
   "eebbd513d4c9113272b8bca23ebd8dfce043ce20ebe2ebe34b48ea1c607b3734": {
    "version": "3.41.0",
    "path": "framework/agent2agent.md"
@@ -4053,6 +4109,10 @@
   "f3b9aef9a008a0c6bc154487400836b3e90d9df2b7e6c250dab9cd01f8e8856f": {
    "version": "3.64.0",
    "path": "framework/agent-rules.md"
+  },
+  "f3e962afc44c415e8b945d69e90c6507b3ca03d6991d4c57f516e7e4e994aabd": {
+   "version": "3.65.0",
+   "path": "framework/agentic-standard/templates/pattern-catalog.yaml"
   },
   "f4230898f3279c5fc23f72e4142f057d1ca9ad07e3fc442c30284e3ffbb5bef5": {
    "version": "3.4.2",

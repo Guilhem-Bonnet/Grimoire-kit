@@ -391,8 +391,9 @@ def decide_activation(hook: HookInput) -> Decision:
     if governed:
         if active.is_fallback:
             profile = session_profile(hook)
-            if profile in BLOCKING_PROFILES:
-                enrolment = no_task_context(profile, active.candidates, active.expired)
+            # Une source illisible se dit quel que soit le profil : ce n'est pas « aucune tâche ».
+            if profile in BLOCKING_PROFILES or active.unreadable:
+                enrolment = no_task_context(profile, active.candidates, active.expired, active.unreadable)
         else:
             link = link_session(hook, active)
     directive = (
