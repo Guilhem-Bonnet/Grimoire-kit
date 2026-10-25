@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr" data-theme="dark" data-density="confortable" data-focus="off" data-atelier="off">
+<html lang="fr" data-density="confortable" data-focus="off" data-atelier="off">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,6 +14,22 @@
   est montée par son module (spaces/*.js), qui expose `mount(root, ctx)` —
   voir README.md.
 -->
+<!-- Thème et contraste avant le premier paint : la clé par projet du choix n'est
+     lisible qu'après `boot()`, shell.js en recopie donc une version non scopée. -->
+<script>
+(function () {
+  try {
+    var d = document.documentElement;
+    var get = function (k) { try { return localStorage.getItem('grimoire.workspace.' + k); } catch (e) { return null; } };
+    var t = get('theme');
+    d.dataset.theme = t === 'light' || t === 'dark' ? t
+      : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var c = get('contrast');
+    d.dataset.contrast = c === 'high' || c === 'standard' ? c
+      : (matchMedia('(prefers-contrast: more)').matches ? 'high' : 'standard');
+  } catch (e) { /* sans script : le CSS suit prefers-color-scheme */ }
+})();
+</script>
 <link rel="stylesheet" href="./tokens.css">
 <link rel="stylesheet" href="./shell.css">
 </head>
@@ -168,6 +184,17 @@
     <input id="palette-input" type="text" autocomplete="off" spellcheck="false"
            placeholder="Aller à, ou lancer une commande grimoire…">
     <ul id="palette-list" role="listbox"></ul>
+  </div>
+</div>
+
+<!-- Aide des raccourcis clavier (« ? ») -->
+<div id="shortcuts" hidden role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+  <div id="shortcuts-box" tabindex="-1">
+    <div id="shortcuts-head">
+      <h2 id="shortcuts-title">Raccourcis clavier</h2>
+      <button class="chip" id="shortcuts-close" type="button">Fermer <span class="kbd">Échap</span></button>
+    </div>
+    <dl id="shortcuts-list"></dl>
   </div>
 </div>
 
