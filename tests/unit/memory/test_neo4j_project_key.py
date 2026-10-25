@@ -406,3 +406,35 @@ class TestBreakerOnlyOnConnectivity:
         with pytest.raises(GraphUnavailableError) as err:
             graph.upsert_memory(MemoryEntry(id="m2", text="t"))
         assert "ServiceUnavailable" in str(err.value) and "memory graph sync-memories" in str(err.value)
+
+
+class _OrphanRows(_Driver):
+    def execute_query(self, statement: str, **kwargs: Any) -> Any:
+        self.calls.append((statement, kwargs))
+        if "NOT m.id IN $known_ids" in statement:
+            rows = [
+                {"id": "projet-a::gone", "collection": "c"},   # nœud préfixé d'un souvenir disparu du store
+                {"id": "legacy-gone", "collection": "c"},      # nœud antérieur à la clé
+            ]
+            return (rows, None, None)
+        return ([{"count": 0}], None, None)
+
+
+class TestOrphanApiSpeaksStoreIds:
+    def test_find_returns_the_store_id_and_keeps_the_node_id_for_the_purge(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        driver = _OrphanRows()
+        _GraphDatabase.driver_instance = driver
+        monkeypatch.setitem(sys.modules, "neo4j", SimpleNamespace(GraphDatabase=_GraphDatabase))
+        found = _graph().find_orphan_memory_nodes(known_ids=frozenset({"kept"}), collection="c")
+        assert [(o["id"], o["node_id"]) for o in found] == [("gone", "projet-a::gone"), ("legacy-gone", "legacy-gone")]
+
+    def test_prune_reports_store_ids_and_purges_node_ids(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.memory.projections import prune_orphan_memories
+
+        driver = _OrphanRows()
+        _GraphDatabase.driver_instance = driver
+        monkeypatch.setitem(sys.modules, "neo4j", SimpleNamespace(GraphDatabase=_GraphDatabase))
+        report = prune_orphan_memories(_graph(), [MemoryEntry(id="kept", text="t")], collection="c", apply=True)
+        assert report["ids"] == ["gone", "legacy-gone"] and report["purged"] == 2
+        purge = next(k for s, k in driver.calls if "DETACH DELETE" in s)
+        assert purge["ids"] == ["projet-a::gone", "legacy-gone"]

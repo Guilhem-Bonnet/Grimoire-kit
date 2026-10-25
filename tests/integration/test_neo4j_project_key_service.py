@@ -125,6 +125,14 @@ class TestTwoProjectsOneDatabase:
             # B ne connaît que b-m1 : b-m2 est orphelin pour B, jamais pour A, et A ne voit rien de B.
             assert [o["id"] for o in gb.find_orphan_memory_nodes(known_ids=frozenset({"b-m1"}), collection="col-b")] == ["b-m2"]
             assert ga.find_orphan_memory_nodes(known_ids=frozenset(), collection="col-b") == []
+            # La suppression d'orphelins passe par l'identifiant du nœud, et ne touche que lui.
+            from grimoire.memory.projections import prune_orphan_memories
+
+            known = [MemoryEntry(id="b-m1", text="mémoire")]
+            preview = prune_orphan_memories(gb, known, collection="col-b")
+            assert (preview["candidates"], preview["ids"], preview["purged"]) == (1, ["b-m2"], 0)
+            assert prune_orphan_memories(gb, known, collection="col-b", apply=True)["purged"] == 1
+            assert gb.stats()["memories"] == 1 and ga.stats()["memories"] == 1
             report = graph_projection_verify(ga)
             assert report["ok"] is True
         finally:
@@ -178,3 +186,61 @@ class TestDeadServer:
             graph.upsert_memory(MemoryEntry(id="m2", text="t"))
         assert first < 15 and time.monotonic() - started < 0.5
         graph.close()
+
+
+class TestKeyedRelationshipsOnARealBase:
+    """Les requêtes à clés préfixées que le faux pilote ne peut pas éprouver : arêtes, liens, suppressions."""
+
+    def _count(self, raw: Any, rel: str, project: str) -> int:
+        return _scalar(raw, f"MATCH (a)-[r:{rel}]->() WHERE a.project = $p RETURN count(r) AS c", p=project)
+
+    def test_every_keyed_edge_is_created_and_scoped(self, raw: Any, projects: tuple[str, str]) -> None:
+        from grimoire.evidence.schemas import EvidenceProfile, VerdictDecision, VerdictResult, VerificationVerdict
+        from grimoire.missions.schemas import (
+            DependencyKind,
+            LedgerEvent,
+            Mission,
+            MissionState,
+            MissionTask,
+            RiskProfile,
+            TaskDependency,
+            TaskState,
+            TaskType,
+        )
+
+        project = projects[0]
+        graph = _graph(project)
+        try:
+            graph.upsert_code_nodes([CodeNode(id="pkg:run", kind=NodeKind.FUNCTION, name="run", file_path="src/p.py", line_start=1, line_end=2, module="pkg")])
+            graph.upsert_memory(MemoryEntry(
+                id="m1", text="lien code", tags=("t",),
+                metadata={"weaviate_id": "w-1", "weaviate_collection": "col", "projection_kind": "code_symbol", "code_node_id": "pkg:run"},
+            ))
+            graph.upsert_fact(KnowledgeFact(id="f1", subject="s", predicate="p", object="o", source_memory_id="m1"))
+            graph.upsert_diary(DiaryRecord(id="d1", agent_name="atlas", topic="t", entry="e", related_memory_id="m1"))
+            graph.upsert_mission(Mission(id="MIS-1", title="m", status=MissionState.OPEN, origin="user", created_at="2026-01-01T00:00:00"))
+            graph.upsert_task(MissionTask(
+                id="T-1", mission_id="MIS-1", title="t", status=TaskState.READY, type=TaskType.IMPLEMENTATION,
+                risk_profile=RiskProfile.STANDARD, acceptance=("ok",), created_at="2026-01-01T00:00:00",
+                dependencies=(TaskDependency(kind=DependencyKind.RELATES, target="T-0"),),
+            ))
+            graph.upsert_ledger_event(LedgerEvent(id="ev1", event_type="task.created", entity_id="T-1", entity_kind="task", actor_id="a", created_at="2026-01-01T00:00:00"))
+            graph.upsert_verdict(VerificationVerdict(
+                id="ver-1", task_id="T-1", evidence_pack_id="EVD-1", verdict=VerdictResult.PASSED, profile=EvidenceProfile.LIGHT,
+                checks=(), decision=VerdictDecision(close_task=True, reopen_task=False, create_incident=False),
+                created_at="2026-01-01T00:00:00",
+            ))
+            graph.replace_task_code_references(["T-1"], [{"task_id": "T-1", "code_node_id": "pkg:run", "source": "ctx", "reason": "r"}])
+
+            for rel in ("TAGGED_WITH", "VECTORIZED_AS", "MEMORY_FOR", "SOURCED_FROM", "DEPENDS_ON", "HAS_TASK", "HAS_EVENT", "HAS_VERDICT", "HAS_DECISION", "TOUCHES_CODE"):
+                assert self._count(raw, rel, project) >= 1, f"arête {rel} absente"
+            assert _scalar(raw, "MATCH (:GrimoireDiary {id: $id})-[r:RELATED_TO]->(:GrimoireMemory {id: $m}) RETURN count(r) AS c", id=f"{project}::d1", m=f"{project}::m1") == 1
+            # Le stub de dépendance porte le projet.
+            assert _scalar(raw, "MATCH (t:GrimoireTask {id: $id, project: $p}) RETURN count(t) AS c", id=f"{project}::T-0", p=project) == 1
+
+            graph.delete_memory("m1")
+            assert _scalar(raw, "MATCH (m:GrimoireMemory {id: $id, deleted: true}) RETURN count(m) AS c", id=f"{project}::m1") == 1
+            graph.invalidate_fact("s", "p", "o", ended="2026-02-01")
+            assert _scalar(raw, "MATCH (f:GrimoireFact {id: $id}) WHERE f.valid_to = '2026-02-01' RETURN count(f) AS c", id=f"{project}::f1") == 1
+        finally:
+            graph.close()

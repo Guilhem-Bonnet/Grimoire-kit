@@ -542,6 +542,7 @@ class TestMigrateRun:
         with (
             patch("grimoire.cli.cmd_memory_ops._load_config_context", return_value=(cfg, tmp_path)),
             patch("grimoire.cli.cmd_memory.MemoryManager.from_config", return_value=source_mgr),
+            patch("grimoire.cli.cmd_memory_ops._load_manager_context", return_value=(MagicMock(**{"recall.return_value": None}), cfg, tmp_path)),
         ):
             result = runner.invoke(app, ["-o", "json", "memory", "migrate", "run"])
         assert result.exit_code == 0, result.output

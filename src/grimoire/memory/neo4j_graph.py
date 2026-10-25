@@ -856,7 +856,15 @@ class Neo4jMemoryGraph:
             collections=collections,
             known_ids=sorted({*known_ids, *(self._key(i) for i in known_ids)}),
         )
-        return [{"id": str(record["id"]), "collection": str(record["collection"])} for record in records]
+        prefix = self.key_prefix
+        found: list[dict[str, str]] = []
+        for record in records:
+            node_id = str(record["id"])
+            # ``id`` est l'identifiant du souvenir dans le store (celui que comparent les appelants) ;
+            # ``node_id`` est celui du nœud, à rendre tel quel à :meth:`purge_memory_nodes`.
+            local = node_id[len(prefix):] if prefix and node_id.startswith(prefix) else node_id
+            found.append({"id": local, "node_id": node_id, "collection": str(record["collection"])})
+        return found
 
     def purge_memory_nodes(self, ids: list[str]) -> int:
         """``DETACH DELETE`` the given ``GrimoireMemory`` nodes by id.

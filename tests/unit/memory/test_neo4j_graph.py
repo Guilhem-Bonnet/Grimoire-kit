@@ -386,7 +386,7 @@ class TestFindOrphanMemoryNodes:
 
         orphans = graph.find_orphan_memory_nodes(known_ids=frozenset({"kept-1"}), collection="ProjectMemory")
 
-        assert orphans == [{"id": "orphan-1", "collection": "GrimoireMemory"}]
+        assert orphans == [{"id": "orphan-1", "node_id": "orphan-1", "collection": "GrimoireMemory"}]
         call = _find_call(driver, "NOT m.id IN $known_ids")
         assert call.kwargs["known_ids"] == ["kept-1"]
 

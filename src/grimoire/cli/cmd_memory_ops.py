@@ -861,8 +861,9 @@ def memory_migrate_run(
         except typer.Exit:
             if apply:
                 raise
-            console.print("[yellow]Cible injoignable : l'aperçu ne peut pas dire ce qui existe déjà.[/yellow]")
-    else:
+            if _get_fmt(ctx) != "json":  # la sortie JSON reste un document unique
+                console.print("[yellow]Cible injoignable : l'aperçu ne peut pas dire ce qui existe déjà.[/yellow]")
+    elif _get_fmt(ctx) != "json":
         console.print("[dim]La cible n'existe pas encore (rien n'est créé par l'aperçu) : tout y serait nouveau.[/dim]")
 
     registry = copied_registry_path(root, source_key, target_key)
