@@ -2049,19 +2049,13 @@ body[data-active-space] .panel-head {
     padding: 0 12px;
   }
 
-  /* Panneaux d'atelier : fermés par défaut, quel que soit l'état mémorisé. */
+  /* Panneaux d'atelier : fermés par défaut, quel que soit l'état mémorisé.
+     L'arbre de Fichiers vit dans le contenu de sa rubrique (P66), plus ici :
+     l'explorateur n'est rouvert que par la bascule d'atelier (⇧⌘L). */
   html[data-atelier="off"] #rail,
+  html[data-atelier="off"] #panel-explorer,
   html[data-atelier="off"] #panel-evidence,
   html[data-atelier="off"] #dock {
-    display: none;
-  }
-
-  /* L'explorateur ne reste que s'il porte l'arbre de la rubrique (Fichiers). */
-  html[data-atelier="off"] #panel-explorer {
-    display: flex;
-  }
-
-  html[data-atelier="off"] #panel-explorer:not(:has(#explorer-body > :not([data-shell-placeholder], p.lbl, p.cv-msg, .sr-only))) {
     display: none;
   }
 
@@ -2111,5 +2105,40 @@ body[data-active-space] .panel-head {
   #section-tabs .tab {
     height: 100%;
     border-radius: var(--r) var(--r) 0 0;
+    flex: none;
+    white-space: nowrap;
   }
+}
+
+/* Compte d'une rubrique (« Agents 3 »), à droite de son libellé. */
+.tab-count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--t-min);
+  font-weight: 400;
+  color: var(--ink3);
+}
+
+/* La commande équivalente d'un écran, à copier d'un clic (Douce `.formula`). */
+.formula {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: var(--t-s);
+  color: var(--ink2);
+  white-space: nowrap;
+  cursor: copy;
+}
+
+.formula b {
+  color: var(--rub);
+  font-weight: 500;
+}
+
+.formula:hover {
+  color: var(--ink);
 }

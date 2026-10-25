@@ -49,6 +49,11 @@ import { api, boot, host } from './api.js';
 import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
 
+// Fin du premier montage d'espace : la première lecture du compteur d'attention
+// l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
+let markFirstSpaceMounted;
+const firstSpaceMounted = new Promise((resolve) => { markFirstSpaceMounted = resolve; });
+
 // ── Les cinq espaces, dans l'ordre de la barre, et leurs rubriques ──────────
 //
 // Un espace suit une intention (trier, travailler, maintenir, se souvenir,
@@ -69,9 +74,15 @@ const SPACES = [
       { id: 'journal', module: 'observer', label: 'Journal' },
     ] },
   { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',
+    // Atterrit sur « Hôtes et hooks » (maquette Configuration) : l'arbre de
+    // fichiers est une rubrique parmi d'autres, pas l'écran d'arrivée.
+    landing: 'hotes',
     sections: [
+      { id: 'agents', module: 'configurer', label: 'Agents', count: (api) => api.agents().then((d) => (d.agents || []).length) },
       { id: 'fichiers', module: 'source', label: 'Fichiers' },
-      { id: 'blueprints', module: 'concevoir', label: 'Blueprints' },
+      { id: 'blueprints', module: 'concevoir', label: 'Blueprints', count: (api) => api.blueprintContainers().then((d) => d.count) },
+      { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', count: (api) => api.hooks().then((d) => d.total) },
+      { id: 'fournisseurs', module: 'configurer', label: 'Fournisseurs et budgets' },
       { id: 'preferences', module: null, label: 'Préférences' },
     ] },
 ];
@@ -92,7 +103,7 @@ const LEGACY_SECTION = {
  * rouvre la dernière rubrique vue dans cette session, sinon la première. */
 function resolveSection(target) {
   const space = SPACES.find((s) => s.id === target);
-  if (space) return SECTIONS.get(lastSection[space.id]) || space.sections[0];
+  if (space) return SECTIONS.get(lastSection[space.id]) || SECTIONS.get(space.landing) || space.sections[0];
   return SECTIONS.get(target) || SECTIONS.get(LEGACY_SECTION[target]) || SPACES[0].sections[0];
 }
 
@@ -1048,9 +1059,7 @@ function emptyPanelHint(which) {
   if (which === 'explorer') {
     return empty(
       "Pas d'arborescence ici",
-      current === 'fichiers'
-        ? "Aucun fichier à parcourir pour l'instant."
-        : "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Configuration › Fichiers.",
+      "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Configuration › Fichiers.",
       null,
       current === 'fichiers' ? null : { label: 'Ouvrir les fichiers', run: () => goto('fichiers') },
       { compact: true },
@@ -1146,6 +1155,22 @@ function buildSpaces() {
 }
 
 /** Les rubriques de l'espace courant ; masquées quand il n'en a qu'une. */
+/** Le compte d'une rubrique (« Agents 3 ») : lu une fois par portée, jamais
+ * deviné. Une lecture qui échoue laisse l'étiquette sans nombre. */
+const sectionCounts = new Map();
+
+function fillSectionCount(item, button) {
+  const show = (n) => {
+    if (!Number.isFinite(n) || !button.isConnected) return;
+    button.append(mk('span', { class: 'tab-count', text: String(n), 'data-count': item.id }));
+    button.setAttribute('aria-label', `${item.label}, ${n}`);
+  };
+  if (!sectionCounts.has(item.id)) {
+    sectionCounts.set(item.id, Promise.resolve(item.count(api)).catch(() => null));
+  }
+  sectionCounts.get(item.id).then(show);
+}
+
 function renderSectionTabs(space, section) {
   const list = $('section-tabs');
   list.replaceChildren();
@@ -1157,6 +1182,7 @@ function renderSectionTabs(space, section) {
     button.dataset.section = item.id;
     button.addEventListener('click', () => goto(item.id));
     list.append(button);
+    if (item.count) fillSectionCount(item, button);
   }
   markSelectedTab(list, list.querySelector(`[data-section="${section.id}"]`));
 }
@@ -1271,6 +1297,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   const ctx = {
     api, host, glossary, dock, docbar, empty, icon,
     canvas,
+    section: section.id,
     scope,
     setItem,
     inspector: $('inspector-body'),
@@ -1305,6 +1332,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   for (const area of [canvas, $('inspector-body'), $('explorer-body')]) clearLoading(area);
   canvas.setAttribute('aria-busy', 'false');
   fillEmptyPanels();
+  markFirstSpaceMounted();
 }
 
 // ── Préférences : la seule rubrique que la coque rend elle-même ─────────────
@@ -1453,6 +1481,13 @@ function renderReadOnlyBanner() {
 // pouls change ; le pouls lui-même (décisions K6) n'est plus qu'un déclencheur.
 let attentionPrint = null;
 let attentionSeq = 0;
+// La première lecture parcourt tout le registre : elle attend la fin du premier
+// montage d'espace pour ne pas lui disputer le serveur (Flotte : budget de
+// 900 ms), et reprend la réponse que l'espace vient de lire (Flotte, À traiter)
+// si elle a moins de `ATTENTION_REUSE_MS`. Jamais onglet masqué. Les pouls
+// suivants relisent toujours le serveur.
+const ATTENTION_REUSE_MS = 5000;
+let attentionFirstRead = true;
 
 function renderAttentionCount(count, unreadable = 0) {
   const badgeNode = $('decisions-count');
@@ -1466,10 +1501,10 @@ function renderAttentionCount(count, unreadable = 0) {
   badgeNode.dataset.pending = String(count);
 }
 
-async function refreshAttentionCount() {
+async function refreshAttentionCount({ maxAgeMs = 0 } = {}) {
   const seq = ++attentionSeq;
   try {
-    const data = await api.attention(host.scopeAll);
+    const data = await api.attention(host.scopeAll, { maxAgeMs });
     if (seq !== attentionSeq) return;
     const unreadable = (data.projects || []).filter((p) => p.state === 'unreadable').length;
     renderAttentionCount(Number(data.count) || 0, unreadable);
@@ -1480,6 +1515,19 @@ function onPulseDecisions() {
   const print = live.state.fingerprint;
   if (print !== null && print === attentionPrint) return;
   attentionPrint = print;
+  if (attentionFirstRead) {
+    attentionFirstRead = false;
+    firstSpaceMounted.then(() => {
+      if (document.hidden) {
+        // Reprise au prochain pouls visible, par le même chemin.
+        attentionFirstRead = true;
+        attentionPrint = null;
+        return;
+      }
+      refreshAttentionCount({ maxAgeMs: ATTENTION_REUSE_MS });
+    });
+    return;
+  }
   refreshAttentionCount();
 }
 
