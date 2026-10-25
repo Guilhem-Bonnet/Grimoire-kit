@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,6 +57,7 @@ from grimoire.missions.schemas import (
     ORIGIN_HUMAN,
     ORIGIN_ORCHESTRATOR,
     DependencyKind,
+    Mission,
     MissionTask,
     RiskProfile,
     TaskCheck,
@@ -438,6 +439,7 @@ class TaskService:
         description: str = "",
         priority: str = "",
         extra: Mapping[str, Any] | None = None,
+        finition: str = "",
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -454,8 +456,12 @@ class TaskService:
         borné à :data:`MAX_DESCRIPTION_CHARS` ; vide, la tâche ne porte que son
         titre et ses critères, comme avant. *priority* (échelle
         :data:`PRIORITIES`) et *extra* (champs portés tels quels, ex. ``covers`` de ``cadrage plan``,
-        W6-07b) sont posés à la création.
+        W6-07b) sont posés à la création. *finition* (R24) : ``maquette`` ou ``peaufine`` ;
+        vide, la tâche hérite de la phase de ``project-context.yaml`` (:mod:`grimoire.missions.finition`).
         """
+        from grimoire.missions.finition import finition_for
+
+        finition = finition_for(self.project_root, finition)  # refuse une valeur inconnue avant toute écriture
         description = description.strip()
         if len(description) > MAX_DESCRIPTION_CHARS:
             raise GrimoireMissionError(
@@ -492,13 +498,76 @@ class TaskService:
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
             risk_profile=risk, checks=checks, test_depth=test_depth, description=description,
-            priority=priority, extra=fields or None,
+            priority=priority, extra=fields or None, finition=finition,
         )
         if checks:
             self._seal_checks(task.id, checks, actor)
         if ready:
             task = self.transition(task.id, TaskState.READY, actor).task
         return TaskAdded(task=task, mission_id=mission_id, mission_created=created_mission, board_path=self.project_board())
+
+    def open_mission(
+        self,
+        title: str,
+        *,
+        description: str = "",
+        scope_repos: tuple[str, ...] = (),
+        scope_surfaces: tuple[str, ...] = (),
+        scope_packs: tuple[str, ...] = (),
+        actor: str = "cli",
+        origin: str = "cli",
+    ) -> Mission:
+        """Ouvre une mission nommée (P49, R25) ; un titre déjà pris est refusé, rien n'est écrit.
+
+        Deux titres sont homonymes à la casse et aux espaces près. Le périmètre
+        (dépôts, surfaces, packs) est borné aux entrées non blanches, sans doublon.
+        """
+        title = " ".join(title.split())
+        if not title:
+            raise GrimoireMissionError("titre de mission vide")
+
+        def clean(values: tuple[str, ...]) -> tuple[str, ...]:
+            return tuple(dict.fromkeys(v.strip() for v in values if v and v.strip()))
+
+        with self.structure_lock():  # la lecture des homonymes et la création forment un seul geste
+            for existing in self.ledger.list_missions():
+                if " ".join(existing.title.split()).casefold() == title.casefold():
+                    raise GrimoireMissionError(
+                        f"Une mission « {existing.title} » existe déjà : {existing.id} — "
+                        f"`task add --mission {existing.id}` y rattache une tâche."
+                    )
+            return self.ledger.create_mission(
+                title, origin=origin, description=description.strip(), created_by=actor,
+                scope_repos=clean(scope_repos), scope_surfaces=clean(scope_surfaces), scope_packs=clean(scope_packs),
+            )
+
+    @contextlib.contextmanager
+    def structure_lock(self) -> Iterator[None]:
+        """Verrou inter-processus des gestes qui lisent le ledger pour décider d'une création.
+
+        ``mission open`` (homonyme) et ``task import`` (entrée déjà importée) lisent puis écrivent :
+        sans un verrou englobant, deux processus voient le même état et créent tous deux. Fichier de
+        verrou distinct de celui du journal (le journal reste pris, écriture par écriture, à
+        l'intérieur). L'état du ledger est relu une fois le verrou obtenu. Ne protège que les gestes
+        qui le prennent : une création par `task add` n'est pas concernée.
+        """
+        from grimoire.core.fsio import locked
+
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(locked(self.ledger_root / "structure"))
+            except (TimeoutError, OSError) as exc:
+                raise GrimoireMissionError(
+                    "Un autre processus modifie la structure du ledger (mission ouverte ou plan importé) : "
+                    "réessaie dans un instant."
+                ) from exc
+            self.refresh()
+            yield
+
+    def mission_scope(self, mission_id: str) -> dict[str, list[str]]:
+        """Le périmètre déclaré de la mission (``repos``, ``surfaces``, ``packs``) ; vide si inconnue."""
+        mission = self.ledger.get_mission(mission_id)
+        return mission.to_dict()["scope"] if mission is not None else {"repos": [], "surfaces": [], "packs": []}
 
     def _seal_checks(self, task_id: str, checks: tuple[TaskCheck, ...], actor: str) -> None:
         """Verrou 9 (#876) : l'empreinte des ``--check`` est scellée au journal d'autorité à la création.

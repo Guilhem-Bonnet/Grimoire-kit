@@ -877,19 +877,19 @@ class TestNonTtyExpressNotice:
         result = runner.invoke(app, ["init", str(target)])
         assert result.exit_code == 0, result.output
         assert "--interactive" in result.output
-        assert "express" in result.output.lower()
+        assert "mode non interactif, équivalent à -y" in result.output  # R55 : le libellé du critère
 
     def test_explicit_yes_does_not_print_the_notice(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "proj"
         result = runner.invoke(app, ["-y", "init", str(target)])
         assert result.exit_code == 0, result.output
-        assert "pas de terminal interactif" not in result.output
+        assert "mode non interactif" not in result.output
 
     def test_dry_run_does_not_print_the_notice(self, runner, app, tmp_path: Path) -> None:
         target = tmp_path / "proj"
         result = runner.invoke(app, ["init", str(target), "--dry-run"])
         assert result.exit_code == 0, result.output
-        assert "pas de terminal interactif" not in result.output
+        assert "mode non interactif" not in result.output
 
     def test_init_interactive_flag_is_declared(self, app) -> None:
         from typer.main import get_command

@@ -1227,8 +1227,8 @@ def run_init(
     # decides whether the wizard actually runs.
     if not is_interactive and not yes and not dry_run and fmt != "json" and not has_tty:
         console.print(
-            "[dim]Express mode (no interactive terminal): "
-            "`grimoire init --interactive` to rerun with guidance.[/dim]"
+            "[yellow]mode non interactif, équivalent à -y[/yellow] (aucun terminal interactif) : "
+            "`grimoire init --interactive` pour être guidé."
         )
 
     start_memory_stack_consent = False
