@@ -2,11 +2,11 @@
 audience: utilisateur
 ---
 
-# Mode local : `grimoire serve` et les blueprints
+# Mode local : `grimoire cockpit serve` et les blueprints
 
 ```bash
 pip install grimoire-kit
-grimoire serve
+grimoire cockpit serve
 ```
 
 !!! tip "Cette page décrit l'outil ; le langage est ailleurs"
@@ -16,8 +16,8 @@ grimoire serve
     [Votre premier blueprint](../nodal/premier-blueprint.md) pour le parcourir en
     ligne de commande.
 
-`grimoire serve` ouvre la **vue de travail** sur
-`http://127.0.0.1:4173/workspace/index.html` : la coque unique décrite par
+`grimoire cockpit serve` ouvre la **vue de travail** sur
+`http://127.0.0.1:8420/workspace/index.html` : la coque unique décrite par
 [l'ADR de la vue de travail](../explications/decisions/adr-006-vue-de-travail.md), avec l'espace
 Concevoir pour l'éditeur de blueprints. L'UI complète reste embarquée dans le
 paquet. Le serveur est lié à `127.0.0.1` — c'est un outil local, pas un
@@ -25,7 +25,7 @@ service.
 
 Le site public (GitHub Pages) et l'atelier local sont **la même UI** : sans
 API locale, les pages « atelier » affichent l'écran de premier lancement avec
-les commandes ci-dessus ; avec `grimoire serve`, elles se branchent sur le
+les commandes ci-dessus ; avec `grimoire cockpit serve`, elles se branchent sur le
 projet réel.
 
 !!! note "Les pages ci-dessous restent servies"
@@ -35,7 +35,7 @@ projet réel.
     `?legacy=1` à l'URL les sert sans redirection — c'est ce que décrit le
     reste de cette page.
 
-Options utiles : `grimoire serve --port 8080`, `--project-root <chemin>`,
+Options utiles : `grimoire cockpit serve --port 8080`, `--project-root <chemin>`,
 `--no-open` (ne pas ouvrir le navigateur).
 
 Principe non négociable : le serveur **lit, valide et écrit des artefacts** ;
@@ -114,7 +114,7 @@ portefeuille actif ») :
 `kanban.html` reste servi comme vitrine statique (lecture du JSON plat du
 projet primaire, sans écriture), mais le board vivant est dans l'espace
 **Exécuter** de la vue de travail : `workspace/index.html#executer`, sur
-`grimoire serve` comme sur `grimoire cockpit serve`. Il lit les tâches
+`grimoire cockpit serve`. Il lit les tâches
 réelles du Mission Ledger (ADR-005) plutôt qu'un `task-board.yaml` écrit à la
 main, et change de contenu avec le projet sélectionné — sur le cockpit,
 `?project=<slug>` cible un autre board à chaque lecture, jamais « le dernier
@@ -138,7 +138,7 @@ webview n'est jamais une autorité causale*.
 
 **Restriction d'écriture** — comme le reste de la vue de travail, ces
 commandes ne s'exécutent que pour le projet que l'hôte sert en direct
-(`grimoire serve`, ou le projet de lancement de `grimoire cockpit serve`) ;
+(le projet de lancement de `grimoire cockpit serve`) ;
 regarder un autre projet du registre depuis le cockpit reste une lecture
 seule, refusée en `403` côté serveur si on tente d'agir dessus — pas
 seulement grisée côté client.

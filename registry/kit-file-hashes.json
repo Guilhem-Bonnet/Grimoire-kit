@@ -1022,6 +1022,10 @@
    "version": "3.4.2",
    "path": "framework/workflows/github-cc-check.yml.tpl"
   },
+  "46dd6c60c26f9cce79177a8eb80507158dd3e31eb52553e853ffa1e906e8f7c3": {
+   "version": "3.65.0",
+   "path": "framework/hybrid-parallelism-engine.md"
+  },
   "46f51e11c8791a299c934f881562249cf1a060cac2c7c8a4c29f7f4b09922ecd": {
    "version": "3.4.2",
    "path": "framework/hooks/prepare-commit-msg.sh"
@@ -1590,6 +1594,10 @@
    "version": "3.32.0",
    "path": "framework/memory/mem0-bridge.py"
   },
+  "69022b4f722bfe1c2e395515b237ac564e344c3080c8ad3916616112d7a06498": {
+   "version": "3.65.0",
+   "path": "framework/glossary.yaml"
+  },
   "6959e227fc4adb3510ff60296e999fbda63156358acc189a53acbba7c9ebc4c0": {
    "version": "3.16.0",
    "path": "framework/tools/nso.py"
@@ -1929,6 +1937,10 @@
   "7f62d55eb85940a3e820d9e9030eba0840e0a6a872d9d5a8f2fe0f1b542faf95": {
    "version": "3.32.0",
    "path": "framework/hooks/pre-commit-cc.sh"
+  },
+  "7fb1d768c661a1bab8785a5f3997a0efac7029d304df57ccd61b8a5456ec0f9c": {
+   "version": "3.65.0",
+   "path": "framework/FREEZE.md"
   },
   "7fd1201e6ff2ece8f128f4d09ec00c4cf565d3c0808fee2c443be052ae4d17f9": {
    "version": "3.38.0",
@@ -3394,6 +3406,10 @@
    "version": "3.35.0",
    "path": "framework/hooks/pre-commit-cc.sh"
   },
+  "ce57483694f1dfbf3613e699fe2457df13056918659993ebd51abc674d353e30": {
+   "version": "3.65.0",
+   "path": "framework/agentic-industry-reference.md"
+  },
   "ce5e979887e5d3493863c2afc7ca199ce3f51f564415af130e302abbfe139600": {
    "version": "3.4.2",
    "path": "framework/tools/reasoning-stream.py"
@@ -3701,6 +3717,10 @@
   "e1fc1f8bd3c29be1f91d1508ea684217c78c0ab71089af33b7b1603e1915aee5": {
    "version": "3.32.0",
    "path": "archetypes/web-app/agents/fullstack-dev.md"
+  },
+  "e237d00c4e49bb9b4ff8f3b28894c25f8b672cb4eaf7402f5e0801f342f728f9": {
+   "version": "3.65.0",
+   "path": "framework/FREEZE.md"
   },
   "e2508fe38dd3ea1ae257b9e4e721cb32dd74cadc663aa1aafdea6421b357a4a1": {
    "version": "3.20.0",
