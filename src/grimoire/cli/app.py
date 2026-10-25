@@ -1296,6 +1296,7 @@ LazyTyperGroup.configure(
         "cockpit": LazyGroupSpec("grimoire.cli.cmd_cockpit", "cockpit_app", rich_help_panel="Project"),
         "task": LazyGroupSpec("grimoire.cli.cmd_task", "task_app", rich_help_panel="Project"),
         "mission": LazyGroupSpec("grimoire.cli.cmd_mission", "mission_app", rich_help_panel="Project"),
+        "plans": LazyGroupSpec("grimoire.cli.cmd_plans", "plans_app", rich_help_panel="Project"),
         "stigmergy": LazyGroupSpec("grimoire.cli.cmd_stigmergy", "stigmergy_app", rich_help_panel="Data"),
         "features": LazyGroupSpec("grimoire.cli.cmd_features", "features_app", rich_help_panel="Project"),
         "host": LazyGroupSpec("grimoire.cli.cmd_host", "host_app", rich_help_panel="Project"),
