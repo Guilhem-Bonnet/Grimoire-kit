@@ -8,6 +8,7 @@ sur git. Le faux ``gh pr merge`` (lot 4) fait ce que GitHub ferait : un commit s
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -65,7 +66,11 @@ class FakeHost:
         self.merge_error = "Pull request is not mergeable: review required"  # le refus du dépôt quand merge_fails
         self.required_broken = False  # ``gh pr checks --required`` en panne (réseau), pas « aucun check requis »
         self.broken_after_merge = False
-        self.cross_repo: set[str] = set()  # branches dont la PR vient d'un fork  # gh tombe juste après la fusion : le constat se fera au tick suivant
+        self.cross_repo: set[str] = set()  # branches dont la PR vient d'un fork
+        #: La remote que GitHub représente (un dépôt nu) : ce que dit gh ne suit jamais la configuration locale du worker.
+        self.real: Path | None = None
+        self.pr_files: dict[str, list[str]] = {}  # branche → fichiers annoncés ; absente : le diff base...tête sur la remote
+        self.changed_files: dict[str, int] = {}  # branche → changedFiles annoncé ; absent : len(files)  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
         self.calls.append((list(argv), cwd, env))
@@ -98,8 +103,20 @@ class FakeHost:
                 "isDraft": False, "mergeCommit": {"oid": self.merge_commits[branch]} if branch in self.merge_commits else None,
                 "isCrossRepository": branch in self.cross_repo,
             }
+            remote = self._remote(cwd)
+            head = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
+            base = self._git_remote(remote, "rev-parse", f"refs/heads/{self.pr_bases.get(branch, 'main')}")
+            files = self.pr_files.get(branch)
+            if files is None:
+                listing = self._git_remote(remote, "diff", "--name-only", "-z", f"{base}...{head}") if head and base else ""
+                files = [f for f in listing.split("\0") if f]
+            body.update({
+                "baseRefOid": base, "files": [{"path": f} for f in files],
+                "changedFiles": self.changed_files.get(branch, len(files)),
+                "url": f"file://{remote}/pull/{body['number']}",
+            })
             if not self.pr_no_head:
-                body["headRefOid"] = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
+                body["headRefOid"] = head
             return ExecResult(0, json.dumps(body))
         if argv[1:3] == ["pr", "checks"]:
             if "--required" in argv and self.required_broken:
@@ -117,11 +134,18 @@ class FakeHost:
             return ExecResult(0, "")
         return ExecResult(2, "", "gh : sous-commande inconnue")
 
+    def _remote(self, cwd: Path) -> Path:
+        return self.real or Path(git(cwd, "remote", "get-url", "origin"))
+
     @staticmethod
-    def _branch_head(cwd: Path, branch: str) -> str:
+    def _git_remote(remote: Path, *args: str) -> str:
+        done = subprocess.run(["git", f"--git-dir={remote}", *args], capture_output=True, text=True, encoding="utf-8", check=False)
+        return done.stdout.strip() if done.returncode == 0 else ""
+
+    def _branch_head(self, cwd: Path, branch: str) -> str:
         """La tête de la PR, comme GitHub la voit : la branche sur la remote, à défaut la branche locale."""
-        remote = git(cwd, "ls-remote", "origin", f"refs/heads/{branch}").split()
-        return remote[0] if remote else git(cwd, "rev-parse", f"refs/heads/{branch}")
+        found = self._git_remote(self._remote(cwd), "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+        return found or git(cwd, "rev-parse", f"refs/heads/{branch}")
 
     def _merge(self, argv: list[str], cwd: Path) -> ExecResult:
         """Squash de la tête de la PR sur ``main`` de la remote, comme GitHub ; ``--match-head-commit`` est tenu."""
@@ -135,14 +159,17 @@ class FakeHost:
             return ExecResult(1, "", "head commit mismatch")
         if not self.merge_lands:
             return ExecResult(0, "")
-        git(cwd, "fetch", "-q", "origin", "main")
-        target = git(cwd, "rev-parse", "refs/remotes/origin/main")
-        tree = subprocess.run(["git", "-C", str(cwd), "merge-tree", "--write-tree", target, head],
+        remote = self._remote(cwd)  # côté serveur, comme GitHub : sur le dépôt nu, jamais dans le dépôt local
+        target = self._git_remote(remote, "rev-parse", "refs/heads/main")
+        tree = subprocess.run(["git", f"--git-dir={remote}", "merge-tree", "--write-tree", target, head],
                               capture_output=True, text=True, encoding="utf-8", check=False)
         if tree.returncode != 0:
             return ExecResult(1, "", "Pull request is not mergeable: conflicts")
-        commit = git(cwd, "commit-tree", tree.stdout.split()[0], "-p", target, "-m", f"{branch} (squash)")
-        git(cwd, "push", "-q", "origin", f"{commit}:refs/heads/main")
+        env = {**os.environ, "GIT_AUTHOR_NAME": "gh", "GIT_AUTHOR_EMAIL": "gh@example.invalid",
+               "GIT_COMMITTER_NAME": "gh", "GIT_COMMITTER_EMAIL": "gh@example.invalid"}
+        commit = subprocess.run(["git", f"--git-dir={remote}", "commit-tree", tree.stdout.split()[0], "-p", target, "-m",
+                                 f"{branch} (squash)"], capture_output=True, text=True, encoding="utf-8", check=True, env=env).stdout.strip()
+        subprocess.run(["git", f"--git-dir={remote}", "update-ref", "refs/heads/main", commit, target], check=True)
         self.prs[branch], self.pr_heads[branch], self.merge_commits[branch] = "MERGED", head, commit
         if self.broken_after_merge:
             self.gh_broken = True

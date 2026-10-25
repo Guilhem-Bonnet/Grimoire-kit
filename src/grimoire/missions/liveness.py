@@ -216,11 +216,6 @@ def git_commit_at(project_root: Path, task_id: str, *, run: Callable[..., Any] =
     """Date du dernier commit de la branche ``task/<id>`` ; ``None`` si elle n'existe pas ou si git échoue."""
     if not _SAFE_TASK_ID.fullmatch(task_id) or task_id.startswith("-"):
         return None
-    if run is subprocess.run:  # le git durci du tick (revue de #927) : `log` lirait log.showSignature et gpg.program
-        from grimoire.core.safe_git import run as safe_run
-
-        safe = safe_run(("log", "-1", "--format=%cI", f"refs/heads/task/{task_id}"), cwd=project_root, timeout=3.0)
-        return parse_instant(str(safe.stdout).strip()) if safe.returncode == 0 else None
     try:
         done = run(
             ["git", "-C", str(project_root), "log", "-1", "--format=%cI", f"refs/heads/task/{task_id}"],

@@ -169,8 +169,9 @@ def run_tick(
         return TickReport("idle", state, state.attention(), notes=("aucun ledger : rien à faire",))
     from grimoire.core.safe_git import tick_scope
 
+    autonomous = _autonomous(service)
     if not apply:
-        with tick_scope(service.home_root):  # revue de #927 : chaque git du tick confiné et durci
+        with tick_scope(service.home_root, active=autonomous):  # lot 4 : git neutralisé si un rôle autonome est activé
             return _planned(service_factory, service, state, now, effect_probe, ci_probe)
 
     with contextlib.ExitStack() as stack:
@@ -187,7 +188,7 @@ def run_tick(
                 "sans lui, deux ticks pourraient récolter la même tâche"
             ) from exc
         _sweep_stale_plans(service.home_root / TICK_LOCK_RELPATH.parent)
-        stack.enter_context(tick_scope(service.home_root))  # revue de #927 : chaque git du tick confiné et durci
+        stack.enter_context(tick_scope(service.home_root, active=autonomous))  # lot 4 : git du tick neutralisé
         return _one_pass(service, state, now, dispatcher, effect_probe, ci_probe, mode="apply", exec_=exec_)
 
 
@@ -269,6 +270,17 @@ def _one_pass(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
         launches, cleanup, breaker, reviews, merges,
     )
+
+
+def _autonomous(service: TaskService) -> bool:
+    """Un rôle autonome est activé (worker, reviewer, merger), ou le ledger porte des sessions lancées par le tick."""
+    from grimoire.missions.launcher import launched_sessions
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+    policy = load_orchestrator_policy(service.home_root).policy
+    if policy is not None and (policy.worker.enabled or policy.reviewer.enabled or policy.merger.enabled):
+        return True
+    return bool(launched_sessions(service))
 
 
 def _merger_stage(

@@ -13,7 +13,7 @@ chaîné par hash, refusé en écriture aux outils d'agent) ce qui a été relu,
 
 :func:`verify` compare une tête (celle de la PR pour le merger, celle de la branche sinon) à cette chaîne : la tête
 scellée avec son arbre, ou un descendant noté par un réalignement du merger. Un dépôt sans git retombe sur l'empreinte
-de contenu du reçu. Chaque git passe par :mod:`grimoire.core.safe_git`.
+de contenu du reçu. Dans le tick, ses git sont neutralisés par :mod:`grimoire.core.safe_git`.
 
 **Limites** : le journal vit sous le même utilisateur que les sessions ; la garde de zone refuse les écritures d'agent
 par les outils et les voies shell reconnues, pas un script arbitraire, qui pourrait forger un sceau.
@@ -22,6 +22,7 @@ par les outils et les voies shell reconnues, pas un script arbitraire, qui pourr
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -65,11 +66,22 @@ def receipt_digest(root: Path, task_id: str) -> str:
         return ""
 
 
-def _rev(cwd: Path, ref: str) -> str:
-    from grimoire.core.safe_git import run
+def _git(cwd: Path, *args: str) -> tuple[int, str, str]:
+    from grimoire.core.safe_git import git_env
 
-    done = run(("rev-parse", "--verify", "--quiet", ref), cwd=cwd, timeout=30)
-    return str(done.stdout).strip() if done.returncode == 0 else ""
+    try:
+        done = subprocess.run(  # arguments fixes, sans shell ; dans un tick durci, l'environnement neutralise la config
+            ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, check=False, env=git_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 124, "", str(exc)
+    return done.returncode, done.stdout, done.stderr
+
+
+def _rev(cwd: Path, ref: str) -> str:
+    code, out, _err = _git(cwd, "rev-parse", "--verify", "--quiet", ref)
+    return out.strip() if code == 0 else ""
 
 
 def branch_head(project_root: Path, task_id: str) -> str:
@@ -108,13 +120,11 @@ def _launch_head(project_root: Path, task_id: str, session_sha256: str) -> str |
 
 
 def _dirty(proofs_root: Path) -> str:
-    from grimoire.core.safe_git import run
-
     excludes = [f":(exclude){p}" for p in ("_grimoire-output", *RECEIPT_FINGERPRINT_EXCLUDES)]
-    done = run(("status", "--porcelain", "--untracked-files=all", "--", ".", *excludes), cwd=proofs_root)
-    if done.returncode != 0:
-        return f"état git du worktree illisible ({str(done.stderr).strip()[:160]})"
-    lines = str(done.stdout).splitlines()
+    code, out, err = _git(proofs_root, "status", "--porcelain", "--untracked-files=all", "--", ".", *excludes)
+    if code != 0:
+        return f"état git du worktree illisible ({err.strip()[:160]})"
+    lines = out.splitlines()
     return f"modifications non commitées ({', '.join(ln[3:] for ln in lines[:5])})" if lines else ""
 
 

@@ -1,28 +1,28 @@
-"""Le seul ``git`` que le tick lance : rien de ce que le worker écrit n'y est exécuté (#876, lot 4, revue de #927).
+"""Les ``git`` du tick, quand un rôle autonome est activé : ce que la configuration du dépôt ferait exécuter est neutralisé.
 
-Un worker écrit son worktree, et aussi — c'est le même utilisateur — la configuration commune du dépôt
-(``git config --local`` depuis le worktree écrit ``<common>/config``) et le fichier ``<worktree>/.git``. Un ``git`` lancé
-par le tick sans précaution exécuterait alors son code : ``core.fsmonitor``, hooks, ``gpg.program``, ``core.sshCommand``,
-``filter.*``, pilotes de fusion, ``diff.external``, ``credential.helper``, ``remote.*.uploadpack``… Le tick s'accorderait un
-mandat lui-même. Ici :
+Un worker écrit son worktree, et aussi — c'est le même utilisateur — la configuration du dépôt (``git config --local``
+depuis le worktree écrit ``<common>/config``). Un ``git`` lancé par le tick y lirait des commandes à exécuter : hooks,
+``core.fsmonitor``, filtres ``clean``/``smudge``, pilotes de fusion, signatures (``gpg.program``), ``core.sshCommand``,
+assistant d'identifiants. Le temps d'un tick qui pilote un rôle autonome (:func:`tick_scope`), ces clés sont
+neutralisées pour **tous** les git que le processus lance, par l'environnement (``GIT_CONFIG_COUNT``,
+``GIT_CONFIG_KEY_<n>``, ``GIT_CONFIG_VALUE_<n>`` : l'équivalent de ``git -c``, qui prime sur les fichiers) :
 
-- :data:`SAFE_ARGS` neutralise par ``-c`` ce qui exécute (hooks, fsmonitor, signatures, ssh, pager, diff externe,
-  assistants d'identifiants, protocoles ``ext``/``fd``, maintenance automatique) ; :func:`safe_env` neutralise la
-  configuration globale et système (``GIT_CONFIG_GLOBAL``/``GIT_CONFIG_SYSTEM`` vers ``os.devnull``,
-  ``GIT_CONFIG_NOSYSTEM``) et retire les variables qui détourneraient git ou l'interrogeraient ;
-- **dans le tick** (:func:`tick_scope`), chaque appel est en plus confiné : ``--git-dir`` et ``--work-tree`` sont dérivés
-  du dépôt du projet, jamais lus dans ``<worktree>/.git`` ; un worktree n'est accepté que si ``<wt>/.git`` renvoie vers
-  ``<home>/.git/worktrees/<nom>`` et que ``commondir`` et ``gitdir`` y sont réciproques (:func:`worktree_git_dir`) ; et la
-  configuration locale du dépôt ne doit contenir que des clés d'une liste blanche (:func:`config_refusal`) — un filtre,
-  un pilote, un ``include``, un alias, une URL de réécriture ou un assistant d'identifiants y fait tout refuser.
+- toujours : ``core.hooksPath`` vers ``os.devnull``, ``core.fsmonitor=false``, signatures coupées (``commit``, ``tag``,
+  ``push``, ``log.showSignature``, ``merge.verifySignatures``) ;
+- seulement si le dépôt ou l'un de ses worktrees les déclare **localement** : chaque ``filter.<nom>.clean|smudge|process``
+  et chaque ``merge.<nom>.driver`` vidés, ``core.sshCommand`` remis à la valeur globale de l'utilisateur (à défaut
+  ``ssh``), ``credential.helper`` remis aux assistants globaux de l'utilisateur.
 
-Hors du tick (CLI d'un humain ou d'une session), :data:`SAFE_ARGS` et :func:`safe_env` s'appliquent aussi, sans
-confinement ni liste blanche : un dépôt d'utilisateur garde ses filtres (LFS…) pour ses propres commandes.
+Rien n'est refusé pour une configuration ordinaire ; l'identité et les identifiants **globaux** de l'utilisateur ne sont
+pas touchés (ce sont des réglages du poste, pas du dépôt du worker). Les sessions ``claude`` que le tick lance ne
+reçoivent pas ces variables (:func:`session_environ`). Hors d'un tel tick, rien ne change.
 
-**Limites** : la liste blanche est relue à chaque appel mais pas verrouillée — une configuration réécrite entre la
-lecture et l'appel passe le temps d'un appel, et ce qui n'est pas neutralisé par ``-c`` (un filtre) peut alors tourner ;
-l'URL de ``origin`` est une clé permise : le worker peut la rediriger (pas d'exécution, protocoles ``ext`` et ``fd``
-refusés).
+**Limites** : la neutralisation est calculée à l'entrée du tick ; une clé posée par le worker pendant le tick tourne le
+temps de ce tick (sauf hooks, fsmonitor et signatures, toujours coupés). Les pilotes de diff (``diff.<nom>.command``,
+``textconv``, ``diff.external``) ne sont pas neutralisés : un pilote vide casse ``git diff``, et le tick n'en lance pas.
+Les sessions tournent sous le même utilisateur du système : un processus qui écrit ce que le tick lit avant lui (le
+journal d'autorité, le ledger) contourne une garde de fichier ; seule une isolation par utilisateur du système la
+fermerait.
 """
 
 from __future__ import annotations
@@ -33,221 +33,136 @@ import os
 import re
 import subprocess
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = [
-    "PUSH_ARGS",
-    "SAFE_ARGS",
-    "TickRepo",
-    "UnsafeRepoError",
-    "config_refusal",
-    "identity_env",
-    "refusal_for",
-    "run",
-    "run_bytes",
-    "safe_env",
-    "tick_repo",
-    "tick_scope",
-    "worktree_git_dir",
-]
+__all__ = ["git_env", "hardened", "hardening", "same_repo", "session_environ", "tick_scope"]
 
-#: Tout ce qu'une configuration pourrait faire exécuter à un ``git`` qui lit, compare, fusionne en plomberie ou pousse.
-SAFE_ARGS: tuple[str, ...] = (
-    "-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
-    "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "push.gpgSign=false",
-    "-c", "log.showSignature=false", "-c", "merge.verifySignatures=false",
-    "-c", "core.sshCommand=ssh", "-c", "core.pager=cat", "-c", "diff.external=", "-c", "core.askPass=",
-    "-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never",
-    "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", f"core.attributesFile={os.devnull}",
-    "-c", f"core.excludesFile={os.devnull}",
+#: Toujours neutralisé dans un tick qui pilote un rôle autonome.
+_ALWAYS: tuple[tuple[str, str], ...] = (
+    ("core.hooksPath", os.devnull), ("core.fsmonitor", "false"), ("commit.gpgSign", "false"), ("tag.gpgSign", "false"),
+    ("push.gpgSign", "false"), ("log.showSignature", "false"), ("merge.verifySignatures", "false"),
 )
-#: Les variables qui détourneraient git (autre dépôt, autre configuration) ou lui feraient lancer un programme.
-_DROPPED_ENV = frozenset({
+_DRIVER = re.compile(r"(filter\.(.+)\.(clean|smudge|process)|merge\.(.+)\.driver)")
+#: Les variables qui détourneraient git vers un autre dépôt (un hook git les exporte).
+_REDIRECT = frozenset({
     "GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_COUNT", "GIT_EXTERNAL_DIFF", "GIT_PAGER", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_EDITOR",
-    "GIT_SEQUENCE_EDITOR", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
 })
-#: Clés de configuration locale permises (en minuscules) : identité, remotes, suivi des branches, format du dépôt.
-_ALLOWED = tuple(re.compile(p) for p in (
-    r"core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|eol|safecrlf|longpaths)",
-    r"extensions\.(objectformat|refstorage)",
-    r"remote\..+\.(url|fetch|gh-resolved|tagopt|prune)",
-    r"branch\..+\.(remote|merge|rebase|vscode-merge-base|github-pr-owner-number|description|pushremote)",
-    r"user\.(name|email)",
-    r"(init\.defaultbranch|fetch\.prune|pull\.rebase|pull\.ff|push\.default|push\.autosetupremote|commit\.gpgsign|gc\.auto)",
-))
-_TIMEOUT_S = 120.0
-#: Pour pousser vers GitHub : l'assistant d'identifiants de ``gh``, jamais celui que la configuration du dépôt désigne.
-PUSH_ARGS: tuple[str, ...] = ("-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential")
+_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar("grimoire_tick_hardened", default=False)
+#: Ce que le tick a posé dans l'environnement, et le ``GIT_CONFIG_COUNT`` d'avant : ce qu'une session ne reçoit pas.
+_OURS: dict[str, str | None] = {}
 
 
-class UnsafeRepoError(RuntimeError):
-    """Le dépôt, ou le worktree, n'est pas celui qu'il prétend, ou sa configuration fait exécuter du code."""
+def git_env() -> dict[str, str]:
+    """L'environnement d'un git du kit : celui du processus, sans les variables qui détourneraient git."""
+    return {k: v for k, v in os.environ.items() if k not in _REDIRECT}
 
 
-def safe_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in _DROPPED_ENV and not k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_", "GIT_TRACE"))}
-    env.update({
-        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_PAGER": "cat",
-    })
-    env.update(extra or {})
-    return env
-
-
-@dataclass(frozen=True, slots=True)
-class TickRepo:
-    """Le dépôt du projet tel que le tick le connaît : sa racine et son dossier git commun (jamais un fichier ``.git``)."""
-
-    home: Path
-    common: Path
-
-
-_TICK: contextvars.ContextVar[TickRepo | None] = contextvars.ContextVar("grimoire_tick_repo", default=None)
-
-
-def _resolve(path: Path) -> Path:
+def _git(cwd: Path, *args: str) -> str:
     try:
-        return path.resolve()
-    except OSError:
-        return path.absolute()
+        done = subprocess.run(  # arguments fixes, sans shell ; lire la configuration n'exécute rien
+            ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, check=False, env=git_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout if done.returncode == 0 else ""
 
 
-def tick_repo() -> TickRepo | None:
-    return _TICK.get()
+def _local_keys(home: Path) -> set[str]:
+    """Les clés que le dépôt et ses worktrees déclarent eux-mêmes (portées ``local`` et ``worktree``), en minuscules."""
+    roots = [home]
+    for line in _git(home, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            roots.append(Path(line[len("worktree "):]))
+    keys: set[str] = set()
+    for root in roots:
+        for entry in _git(root, "config", "--list", "--show-scope", "--null", "--name-only").split("\0"):
+            scope, _, key = entry.strip().partition("\t")
+            if scope in ("local", "worktree") and key:
+                keys.add(key.strip())
+    return keys
+
+
+def hardening(home: Path) -> list[tuple[str, str]]:
+    """Les paires ``(clé, valeur)`` qui neutralisent ce que la configuration du dépôt *home* ferait exécuter."""
+    pairs = list(_ALWAYS)
+    local = _local_keys(home)
+    for key in sorted(local):
+        if _DRIVER.fullmatch(key.casefold()):
+            pairs.append((key, ""))  # un filtre ou un pilote vide n'est pas lancé (le contenu passe tel quel)
+    folded = {k.casefold() for k in local}
+    if "core.sshcommand" in folded:
+        pairs.append(("core.sshCommand", _git(home, "config", "--global", "--get", "core.sshCommand").strip() or "ssh"))
+    for key in sorted(k for k in local if k.casefold() == "credential.helper" or re.fullmatch(r"credential\..+\.helper", k.casefold())):
+        pairs.append((key, ""))  # vide la liste, puis remet les assistants globaux de l'utilisateur pour cette clé
+        pairs.extend((key, h) for h in _git(home, "config", "--global", "--get-all", key).splitlines() if h)
+    return pairs
+
+
+def hardened() -> bool:
+    """Vrai le temps d'un tick qui pilote un rôle autonome."""
+    return _ACTIVE.get()
 
 
 @contextlib.contextmanager
-def tick_scope(home: Path) -> Iterator[TickRepo | None]:
-    """Le temps d'un tick : chaque ``git`` est confiné au dépôt *home* et à ses worktrees vérifiés, sous liste blanche.
+def tick_scope(home: Path, *, active: bool) -> Iterator[None]:
+    """Le temps du tick : si *active* (un rôle autonome est activé), chaque git lancé par le processus est neutralisé.
 
-    *home* sans dossier ``.git`` (pas un dépôt, ou un worktree lui-même) : aucun git n'est permis — les appels échouent.
+    Inactif, rien ne change : les git du kit sont ceux de toujours.
     """
-    root = _resolve(home)
-    common = root / ".git"
-    repo = TickRepo(root, common) if common.is_dir() and not common.is_symlink() else TickRepo(root, Path())
-    token = _TICK.set(repo)
+    if not active or _ACTIVE.get():
+        yield
+        return
+    pairs = hardening(home)
+    before = os.environ.get("GIT_CONFIG_COUNT")
+    base = int(before) if before and before.isdigit() else 0
+    added = {"GIT_CONFIG_COUNT": str(base + len(pairs))}
+    for i, (key, value) in enumerate(pairs, start=base):
+        added[f"GIT_CONFIG_KEY_{i}"] = key
+        added[f"GIT_CONFIG_VALUE_{i}"] = value
+    saved = {k: os.environ.get(k) for k in added}
+    os.environ.update(added)
+    _OURS.clear()
+    _OURS.update({k: saved[k] for k in added})
+    token = _ACTIVE.set(True)
     try:
-        yield repo
+        yield
     finally:
-        _TICK.reset(token)
+        _ACTIVE.reset(token)
+        for name, previous in saved.items():
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
+        _OURS.clear()
 
 
-def config_refusal(common: Path) -> str:
-    """``""`` si la configuration locale du dépôt ne porte que des clés permises ; sinon ce qui est refusé."""
-    path = common / "config"
-    try:
-        done = subprocess.run(  # lecture du fichier seul : --file ne suit pas les include
-            ["git", "config", "--file", str(path), "--list", "--null", "--name-only"], capture_output=True,
-            timeout=30, check=False, env=safe_env(),
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return f"configuration du dépôt illisible ({type(exc).__name__})"
-    if done.returncode != 0:
-        return "configuration du dépôt illisible"
-    keys = [k.decode("utf-8", "replace").strip().casefold() for k in done.stdout.split(b"\0") if k.strip()]
-    refused = sorted({k for k in keys if not any(p.fullmatch(k) for p in _ALLOWED)})
-    if refused:
-        return f"configuration locale du dépôt hors liste blanche : {', '.join(refused[:8])}"
-    return ""
+def session_environ(extra: Mapping[str, str] | None) -> dict[str, str] | None:
+    """L'environnement d'une session lancée par le tick : celui du processus, sans la neutralisation du tick.
 
-
-def worktree_git_dir(repo: TickRepo, work_tree: Path) -> tuple[Path | None, str]:
-    """Le dossier git de *work_tree*, s'il est bien un worktree de *repo* : ``(dossier, "")`` ou ``(None, raison)``.
-
-    ``<wt>/.git`` est un fichier (pas un lien) qui renvoie vers ``<common>/worktrees/<nom>`` ; ce dossier renvoie vers
-    ``<common>`` (``commondir``) et vers ``<wt>/.git`` (``gitdir``).
+    Hors d'un tick durci : ``{**os.environ, **extra}`` (ou ``None`` sans *extra*), comme avant.
     """
-    wt = _resolve(work_tree)
-    marker = wt / ".git"
-    if marker.is_symlink() or not marker.is_file():
-        return None, f"{wt} n'est pas un worktree lié (pas de fichier .git)"
-    try:
-        first = marker.read_text(encoding="utf-8").splitlines()[0]
-    except (OSError, UnicodeDecodeError, IndexError):
-        return None, f"{marker} illisible"
-    if not first.startswith("gitdir:"):
-        return None, f"{marker} ne désigne aucun dossier git"
-    raw = Path(first[len("gitdir:"):].strip())
-    gitdir = _resolve(raw if raw.is_absolute() else wt / raw)
-    if gitdir.parent != _resolve(repo.common / "worktrees"):
-        return None, f"{wt} renvoie vers {gitdir}, hors des worktrees du dépôt du projet"
-    try:
-        common_ref = (gitdir / "commondir").read_text(encoding="utf-8").strip()
-        back_ref = (gitdir / "gitdir").read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):
-        return None, f"{gitdir} incomplet (commondir, gitdir)"
-    common_path = Path(common_ref)
-    if _resolve(common_path if common_path.is_absolute() else gitdir / common_path) != _resolve(repo.common):
-        return None, f"{gitdir}/commondir ne renvoie pas au dépôt du projet"
-    if _resolve(Path(back_ref)) != _resolve(marker):
-        return None, f"{gitdir}/gitdir ne renvoie pas à {marker}"
-    return gitdir, ""
+    if not _ACTIVE.get():
+        return {**os.environ, **extra} if extra else None
+    env = dict(os.environ)
+    for key, value in _OURS.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    return {**env, **(extra or {})}
 
 
-def _confine(cwd: Path | None) -> tuple[list[str], Path | None]:
-    """``(options, dossier courant)`` : dans le tick, ``--git-dir``/``--work-tree`` dérivées du dépôt du projet ; lève sinon."""
-    repo = _TICK.get()
-    if repo is None:
-        return (["-C", str(cwd)] if cwd is not None else []), None
-    if not repo.common.parts or not repo.common.is_dir():
-        raise UnsafeRepoError(f"{repo.home} n'a pas de dossier .git : aucun git n'est lancé par le tick")
-    refused = config_refusal(repo.common)
-    if refused:
-        raise UnsafeRepoError(refused)
-    where = _resolve(cwd) if cwd is not None else repo.home
-    if where == repo.home:
-        return [f"--git-dir={repo.common}", f"--work-tree={repo.home}"], repo.home
-    gitdir, why = worktree_git_dir(repo, where)
-    if gitdir is None:
-        raise UnsafeRepoError(why)
-    return [f"--git-dir={gitdir}", f"--work-tree={where}"], where
+def same_repo(home: Path, work_tree: Path) -> str:
+    """``""`` si *work_tree* partage le dossier git commun de *home* ; sinon pourquoi il est refusé."""
+    def common(path: Path) -> str:
+        found = _git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        return str(Path(found).resolve()) if found else ""
 
-
-def run_bytes(
-    args: tuple[str, ...] | list[str], *, cwd: Path | None = None, timeout: float = _TIMEOUT_S,
-    input_bytes: bytes | None = None, extra_args: tuple[str, ...] = (), env: Mapping[str, str] | None = None,
-) -> subprocess.CompletedProcess[bytes]:
-    """``git`` durci, sorties en octets ; jamais d'exception : un refus ou une panne rend un code non nul et la raison."""
-    try:
-        where, inside = _confine(cwd)
-    except UnsafeRepoError as exc:
-        return subprocess.CompletedProcess(["git", *args], 128, b"", f"dépôt refusé par le tick : {exc}".encode())
-    argv = ["git", *SAFE_ARGS, *extra_args, *where, *args]
-    try:
-        return subprocess.run(  # arguments fixes, sans shell
-            argv, cwd=inside, capture_output=True, timeout=timeout, check=False, env=safe_env(env), input=input_bytes,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return subprocess.CompletedProcess(argv, 124, b"", f"git {args[0] if args else ''} : {type(exc).__name__}: {exc}".encode())
-
-
-def run(
-    args: tuple[str, ...] | list[str], *, cwd: Path | None = None, timeout: float = _TIMEOUT_S,
-    input_bytes: bytes | None = None, extra_args: tuple[str, ...] = (), env: Mapping[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """``git`` durci (voir le module), sorties en texte UTF-8."""
-    done = run_bytes(args, cwd=cwd, timeout=timeout, input_bytes=input_bytes, extra_args=extra_args, env=env)
-    return subprocess.CompletedProcess(
-        done.args, done.returncode, done.stdout.decode("utf-8", "replace"), done.stderr.decode("utf-8", "replace"),
-    )
-
-
-def identity_env(cwd: Path | None = None) -> dict[str, str]:
-    """L'auteur d'un commit fait par le kit : ``user.name``/``user.email`` de la configuration locale, sinon le kit."""
-    name = run(("config", "--get", "user.name"), cwd=cwd).stdout
-    email = run(("config", "--get", "user.email"), cwd=cwd).stdout
-    who = str(name).strip() or "Grimoire"
-    mail = str(email).strip() or "grimoire@localhost"
-    return {"GIT_AUTHOR_NAME": who, "GIT_AUTHOR_EMAIL": mail, "GIT_COMMITTER_NAME": who, "GIT_COMMITTER_EMAIL": mail}
-
-
-def refusal_for(path: Path) -> str:
-    """Dans le tick : pourquoi un ``git`` sur *path* serait refusé (configuration, worktree non lié) ; ``""`` sinon."""
-    try:
-        _confine(path)
-    except UnsafeRepoError as exc:
-        return str(exc)
+    mine, theirs = common(home), common(work_tree)
+    if not mine or not theirs:
+        return f"{work_tree} : dossier git illisible"
+    if mine != theirs:
+        return f"{work_tree} n'est pas un worktree du dépôt du projet ({theirs})"
     return ""

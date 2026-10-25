@@ -233,10 +233,10 @@ class ReviewStage:
             worktree = None
         if not launch.get("cwd") or not cwd.is_dir() or worktree is None:
             return ReviewOutcome(tid, "launch", "failed", "worktree de la tâche introuvable : rien à relire")
-        from grimoire.core.safe_git import refusal_for
+        from grimoire.core.safe_git import same_repo
         from grimoire.missions.review_seal import branch_head, seal_review_launch
 
-        if unsafe := refusal_for(cwd):  # revue de #927 : un worktree forgé ou une configuration qui exécute, rien n'est relu
+        if unsafe := same_repo(root, cwd):  # un worktree qui n'est pas de ce dépôt (.git réécrit) n'est pas relu
             return ReviewOutcome(tid, "launch", "failed", f"worktree refusé : {unsafe}")
         head = branch_head(root, tid)
         under_mandate = MandateStore(root).state().active
@@ -286,11 +286,11 @@ class ReviewStage:
         return started is not None and (self._now or datetime.now(UTC)) - started > REVIEW_TIMEOUT
 
     def _judge(self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent) -> ReviewOutcome | None:
-        from grimoire.core.safe_git import refusal_for
+        from grimoire.core.safe_git import same_repo
 
         tid = task.id
         root = Path(str(review.payload.get("cwd") or launch.get("cwd") or ""))
-        if unsafe := refusal_for(root):  # revue de #927 : rien n'est jugé dans un worktree forgé ou piégé
+        if unsafe := same_repo(self._service.home_root, root):  # rien n'est jugé dans un worktree d'un autre dépôt
             return ReviewOutcome(tid, "refused", "failed", f"worktree refusé : {unsafe}")
         try:
             receipt = read_receipt(root, tid)

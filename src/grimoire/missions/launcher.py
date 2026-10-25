@@ -29,7 +29,6 @@ sessions du mandat) ne lance rien. Sans mandat, rien ne s'inscrit et le lancemen
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import uuid
@@ -86,7 +85,9 @@ Exec = Callable[[Sequence[str], Path, Mapping[str, str] | None], ExecResult]
 
 def default_exec(argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
     """Lance *argv* sans shell. Un binaire absent ou un délai dépassé est un échec lisible (127, 124), jamais une exception."""
-    full_env = {**os.environ, **env} if env else None
+    from grimoire.core.safe_git import session_environ  # une session ne reçoit pas la neutralisation git du tick
+
+    full_env = session_environ(env)
     try:
         done = subprocess.run(  # arguments fixes, sans shell
             list(argv), cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -125,10 +126,14 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
 
 
 def _git_out(cwd: Path, *args: str) -> str:
-    from grimoire.core.safe_git import run  # le git durci du tick (revue de #927)
-
-    done = run(args, cwd=cwd, timeout=30)
-    return str(done.stdout).strip() if done.returncode == 0 else ""
+    try:
+        done = subprocess.run(  # arguments fixes, sans shell
+            ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def session_env(session_id: str) -> dict[str, str]:

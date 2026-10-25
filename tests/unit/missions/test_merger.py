@@ -126,6 +126,8 @@ def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (
     task = service.ledger.create_task(mission.id, f"tâche {edit[0]}", acceptance=CRITERIA, owner="amelia",
                                       extra={"labels": list(labels)} if labels else None)
     service.ledger.transition_task(task.id, TaskState.READY)
+    if host.real is None:  # GitHub : la remote d'origine, quoi que le worker écrive ensuite dans la configuration locale
+        host.real = Path(git(projet, "remote", "get-url", "origin"))
     tick(projet, host)
     wt = Path(str(launched_sessions(TaskService(projet))[task.id]["cwd"]))
     (wt / edit[0]).parent.mkdir(parents=True, exist_ok=True)
@@ -232,6 +234,7 @@ def test_vert_sous_mandat_fusionne_accepte_puis_le_janitor_nettoie(projet: Path,
     assert merged.payload["head_sha"] == head and merged.payload["mandate_id"] == mandate.id
     git(projet, "fetch", "-q", "origin", "main")
     assert git(projet, "merge-base", "--is-ancestor", merged.payload["merged_sha"], "refs/remotes/origin/main") == ""
+    assert git(projet, "rev-parse", "refs/grimoire/tick/main") == git(projet, "rev-parse", "refs/remotes/origin/main")
     gestures = MandateStore(projet).gestures_taken(tid)
     assert [g["gesture"] for g in gestures] == ["merge", "accept"]
     assert gestures[0]["origin"] == "orchestrator" and gestures[0]["provenance"]["kind"] == "receipt"
@@ -356,9 +359,10 @@ def test_branche_en_retard_avec_conflit_de_changelog_union_sans_perdre_main(proj
     assert realigned.payload["changelog_union"] is True and realigned.payload["from"] == before
     head = git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0]  # poussée, sans forcer
     assert head == realigned.payload["to"] and git(projet, "rev-parse", f"{head}^1") == before  # une fusion, pas un rebase
-    assert git(projet, "rev-parse", f"{head}^2") == git(projet, "rev-parse", "refs/remotes/origin/main")
+    main = git(projet, "ls-remote", "origin", "refs/heads/main").split()[0]
+    assert git(projet, "rev-parse", f"{head}^2") == main  # la base que GitHub annonce
     assert git(wt, "rev-parse", "HEAD") == before  # en plomberie : le worktree du worker n'est pas touché
-    diff = git(projet, "diff", "refs/remotes/origin/main", head, "--", "CHANGELOG.md")
+    diff = git(projet, "diff", main, head, "--", "CHANGELOG.md")
     assert not [ln for ln in diff.splitlines() if ln.startswith("-") and not ln.startswith("---")]
     text = git(projet, "show", f"{head}:CHANGELOG.md")
     assert "l'entrée de la tâche" in text and "une autre PR fusionnée" in text
@@ -560,24 +564,18 @@ def test_une_pr_qui_touche_ce_qui_garde_les_gardes_reste_a_l_humain(projet: Path
     assert host.of("gh", "pr", "merge") == []
 
 
-def test_la_liste_blanche_et_les_refus_de_la_politique_s_ajoutent(projet: Path, host: FakeHost) -> None:
+def test_les_chemins_proteges_de_la_politique_s_ajoutent_en_casefold(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host, edit=("infra/main.tf", "x\n"))
-    report = merged_after_review(projet, host, tid, wt)  # hors de la liste blanche par défaut
-    assert merges(report) == [("escalate", "done")] and "infra/main.tf" in report.merges[0].detail
-    write_policy(projet, merger="    merger:\n      enabled: true\n      mergeable_paths: [\"infra/*\"]\n"
-                 "      protected_paths: [\"src/app/garde/*\"]\n", escalation=DELEGATED)
+    assert merges(merged_after_review(projet, host, tid, wt)) == [("accept", "done")]  # rien de protégé par défaut
+    write_policy(projet, merger="    merger:\n      enabled: true\n      protected_paths: [\"infra/*\"]\n", escalation=DELEGATED)
     other, wt2 = launch_and_work(projet, host, edit=("INFRA/net.tf", "x\n"))  # la casse ne change rien
     host.pr_numbers[f"task/{other}"] = 8
-    review_ready(projet, host, other, wt2)  # la première, désormais permise, est fusionnée ; la seconde suit
-    for _ in range(4):
-        tick(projet, host)
-    assert TaskService(projet).require(tid).status is TaskState.CLOSED
-    assert TaskService(projet).require(other).status is TaskState.CLOSED
-    third, wt3 = launch_and_work(projet, host, edit=("src/app/Garde/cle.py", "x\n"))
-    host.pr_numbers[f"task/{third}"] = 9
-    report = merged_after_review(projet, host, third, wt3)
-    assert ("escalate", "done") in merges(report) and "src/app/Garde/cle.py" in report.merges[-1].detail
+    outcomes = merged_after_review(projet, host, other, wt2).merges  # en retard sur la première : réalignée d'abord
+    for _ in range(3):
+        outcomes += tick(projet, host).merges
+    assert any(o.action == "escalate" and "INFRA/net.tf" in o.detail for o in outcomes), outcomes
+    assert len(host.of("gh", "pr", "merge")) == 1
 
 
 def test_une_relecture_non_attestee_ne_fonde_pas_une_fusion_sous_mandat(projet: Path, host: FakeHost) -> None:
@@ -716,7 +714,7 @@ def test_un_worktree_qui_n_est_pas_celui_de_la_tache_est_refuse(projet: Path, ho
     git(other, "checkout", "-q", "-b", f"task/{tid}")
     TaskService(projet).ledger.append_event(WORKTREE_CREATED_EVENT, tid, "task", "agent", {**wt_event.payload, "path": str(other)})
     report = tick(projet, host)
-    assert merges(report) == [("refused", "refused")] and "worktree lié" in report.merges[0].detail
+    assert merges(report) == [("refused", "refused")] and "n'est pas un worktree du dépôt du projet" in report.merges[0].detail
     assert host.of("gh", "pr", "merge") == []
 
 
@@ -757,8 +755,7 @@ def test_une_fusion_non_constatee_n_est_ni_notee_ni_acceptee(projet: Path, host:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     host.merge_lands = False  # gh sort en 0, la PR reste ouverte
-    git(projet, "fetch", "-q", "origin", "main")
-    host.merge_commits[f"task/{tid}"] = git(projet, "rev-parse", "refs/remotes/origin/main")  # un oid sans état MERGED
+    host.merge_commits[f"task/{tid}"] = git(projet, "ls-remote", "origin", "refs/heads/main").split()[0]  # oid sans MERGED
     report = merged_after_review(projet, host, tid, wt)
     assert merges(report) == [("unconfirmed", "waiting")]
     assert events(projet, tid, MERGED_EVENT) == [] and MandateStore(projet).gestures_taken(tid) == []
