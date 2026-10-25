@@ -45,6 +45,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.exceptions import GrimoirePolicyError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.policies.schemas import PolicyRule
 
@@ -53,8 +54,22 @@ from grimoire.policies.schemas import PolicyRule
 RULES_RELPATH = STANDARD_DIR / "policies.yaml"
 
 
+def _unreadable(cause: str) -> GrimoirePolicyError:
+    return GrimoirePolicyError(
+        f"{RULES_RELPATH.as_posix()} illisible ({cause}) — aucune règle n'est appliquée tant que le fichier "
+        "n'est pas corrigé ; corrigez-le ou supprimez-le",
+        error_code="GR-POL-004",
+    )
+
+
 def _compute_raw_rules(path: Path) -> list[dict[str, Any]]:
-    """The ``rules:`` list, as plain dicts — never raises, unlike ``PolicyRule.from_dict``.
+    """The ``rules:`` list, as plain dicts.
+
+    A file that exists but cannot be read as a ``rules:`` list raises
+    :class:`~grimoire.core.exceptions.GrimoirePolicyError` (``GR-POL-004``):
+    silently returning ``[]`` made a typo in the YAML look like "no rules",
+    i.e. every budget and approval the project believed active was off. Only
+    an empty file or one without a ``rules:`` key means "no custom rules".
 
     ``ruamel.yaml`` is imported here, not at module scope, for the same
     reason as ``grimoire.core.standard_state._load_mapping``: a warm cache
@@ -66,14 +81,22 @@ def _compute_raw_rules(path: Path) -> list[dict[str, Any]]:
 
     try:
         data = YAML(typ="safe").load(path)
-    except (OSError, ValueError, YAMLError):
+    except (OSError, ValueError, YAMLError) as exc:
+        lines = str(exc).splitlines()
+        raise _unreadable(f"{type(exc).__name__}: {lines[0] if lines else ''}".strip(": ")) from exc
+    if data is None:
         return []
     if not isinstance(data, dict):
-        return []
+        raise _unreadable("la racine doit être un mapping avec une clé `rules:`")
     rules_raw = data.get("rules", [])
-    if not isinstance(rules_raw, list):
+    if rules_raw is None:
         return []
-    return [rule for rule in rules_raw if isinstance(rule, dict)]
+    if not isinstance(rules_raw, list):
+        raise _unreadable("`rules:` doit être une liste")
+    bad = [i for i, rule in enumerate(rules_raw) if not isinstance(rule, dict)]
+    if bad:
+        raise _unreadable(f"entrée de `rules:` qui n'est pas un mapping (position {bad[0] + 1})")
+    return list(rules_raw)
 
 
 def load_custom_rules(project_root: Path) -> tuple[PolicyRule, ...]:

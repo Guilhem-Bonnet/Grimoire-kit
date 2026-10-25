@@ -118,7 +118,7 @@ patterns:
     category: orchestration
     artifacts: [orchestration_policy]
     rules: [orchestration.no-undeclared-handoff]
-    checks: [orchestration.roles_missing, orchestration.wip_missing, orchestration.role.handoff_contracts_missing]
+    checks: [orchestration.roles_missing, orchestration.wip_missing, orchestration.role.handoff_contracts_missing, orchestration.handoff_role_unknown, orchestration.handoff_invalid]
     tech_extras: []
     profile_min: orchestrated
   governed-knowledge-indexing:
@@ -168,6 +168,13 @@ patterns:
     artifacts: [prompt_firewall]
     rules: []
     checks: [firewall.isolation_disabled, firewall.override_allowed, firewall.untrusted_output_unwrapped, firewall.capability_resolves_unwrapped, firewall.artifact_missing]
+    tech_extras: []
+    profile_min: controlled
+  plan-then-execute:
+    category: security
+    artifacts: [prompt_firewall]
+    rules: []
+    checks: [firewall.plan_not_frozen, firewall.plan_deviation_allowed]
     tech_extras: []
     profile_min: controlled
   remote-hygiene-guard:

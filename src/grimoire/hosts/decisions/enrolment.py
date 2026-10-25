@@ -78,7 +78,19 @@ def expired_text(expired: tuple[str, ...]) -> str:
     )
 
 
-def _with_expired(text: str, expired: tuple[str, ...]) -> str:
+def unreadable_text(unreadable: tuple[str, ...]) -> str:
+    """Tri R38/R39 : une source de tâches est corrompue — la nommer, et dire que ce n'est pas « aucune tâche »."""
+    return (
+        f"État des tâches illisible : {' ; '.join(unreadable)}. "
+        "Ce n'est pas « aucune tâche en cours » : la tâche de cette session ne peut pas être déterminée. "
+        "Répare ou restaure le fichier (`grimoire doctor`, ou `git diff` / `git checkout` sur le chemin cité), "
+        "ou pose GRIMOIRE_TASK_ID=<id> pour désigner la tâche explicitement."
+    )
+
+
+def _with_expired(text: str, expired: tuple[str, ...], unreadable: tuple[str, ...] = ()) -> str:
+    if unreadable:
+        text = f"{text}\n{unreadable_text(unreadable)}"
     return f"{text}\n{expired_text(expired)}" if expired else text
 
 
@@ -88,9 +100,22 @@ def _ambiguity_tail(profile: str) -> str:
     return f"Profil {profile} : une écriture hors tâche est signalée au Stop, pas refusée."
 
 
-def no_task_context(profile: str, candidates: tuple[str, ...] = (), expired: tuple[str, ...] = ()) -> str:
-    """Ce qu'une session sans tâche lit au ``SessionStart`` et au ``UserPromptSubmit``."""
-    return _with_expired(_no_task_context(profile, candidates), expired)
+def no_task_context(
+    profile: str,
+    candidates: tuple[str, ...] = (),
+    expired: tuple[str, ...] = (),
+    unreadable: tuple[str, ...] = (),
+) -> str:
+    """Ce qu'une session sans tâche lit au ``SessionStart`` et au ``UserPromptSubmit``.
+
+    *unreadable* : le ledger ou le board est corrompu. Le texte dit « illisible »
+    au lieu de « aucune tâche en cours » (qui serait faux et ferait ouvrir une
+    tâche dans un ledger qu'on ne sait pas lire).
+    """
+    if unreadable and not candidates:
+        head = f"[Grimoire] Tâche de la session indéterminée (profil {profile})."
+        return _with_expired(head, expired, unreadable)
+    return _with_expired(_no_task_context(profile, candidates), expired, unreadable)
 
 
 def _no_task_context(profile: str, candidates: tuple[str, ...]) -> str:
@@ -110,10 +135,20 @@ def _no_task_context(profile: str, candidates: tuple[str, ...]) -> str:
 
 
 def no_task_stop_reason(
-    profile: str, mutations: int, candidates: tuple[str, ...] = (), expired: tuple[str, ...] = ()
+    profile: str,
+    mutations: int,
+    candidates: tuple[str, ...] = (),
+    expired: tuple[str, ...] = (),
+    unreadable: tuple[str, ...] = (),
 ) -> str:
-    """Le motif que ``Stop`` rend quand une session a écrit sans tâche."""
-    return _with_expired(_no_task_stop_reason(profile, mutations, candidates), expired)
+    """Le motif que ``Stop`` rend quand une session a écrit sans tâche (ou sans pouvoir la lire)."""
+    if unreadable and not candidates:
+        head = (
+            f"[Grimoire] Clôture hors tâche : {mutations} action(s) d'écriture observée(s) dans cette session "
+            f"et la tâche qui devrait les porter est introuvable (profil {profile})."
+        )
+        return _with_expired(head, expired, unreadable)
+    return _with_expired(_no_task_stop_reason(profile, mutations, candidates), expired, unreadable)
 
 
 def _no_task_stop_reason(profile: str, mutations: int, candidates: tuple[str, ...]) -> str:
