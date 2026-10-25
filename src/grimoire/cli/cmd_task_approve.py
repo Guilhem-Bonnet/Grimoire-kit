@@ -48,19 +48,46 @@ def task_approve_check(
     que `task verify` a émis (W2-01) ; les caractères cachés (U+202E, U+200B…) sont refusés.
     """
     from grimoire.cli.cmd_task import _fmt, _require_task, _service, console
-    from grimoire.missions.check_gate import ApprovalRefusedError, CheckSpec, approve_checks, specs_of_task, visible
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.check_gate import (
+        ApprovalRefusedError,
+        CheckSpec,
+        approve_checks,
+        approve_checks_under_mandate,
+        specs_of_task,
+        visible,
+    )
+    from grimoire.missions.mandate import gesture_origin
+    from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_ORCHESTRATOR
 
     root = project_root.resolve()
     task = _require_task(_service(project_root, ledger_root), task_id)
-    specs = tuple(CheckSpec(c) for c in cmd if c.strip()) if cmd else specs_of_task(task)
-    if not specs:
-        console.print(f"[red]✗[/red] {task_id} ne déclare aucune commande : rien à approuver (`--cmd` en nomme une)")
-        raise typer.Exit(2)
-    try:
-        outcome = approve_checks(root, task_id, specs, actor=actor, allow_unattested=allow_unattested)
-    except ApprovalRefusedError as exc:
-        console.print(f"[red]✗[/red] {escape(str(exc))}")
-        raise typer.Exit(3 if exc.code in ("awaiting_human", "unattested") else 2) from exc
+    # Pas de `_comment_origin()` : ce geste s'atteste par un tour humain, il n'a jamais interrogé le terminal.
+    origin, provenance = gesture_origin(ORIGIN_AGENT)
+    if origin == ORIGIN_ORCHESTRATOR:
+        # #876, verrou 6 et 9 : sous mandat, les `checks` scellés de la tâche, jamais une commande libre.
+        if cmd:
+            console.print("[red]✗[/red] sous mandat, `--cmd` est refusé : seuls les checks scellés de la tâche s'approuvent")
+            raise typer.Exit(2)
+        try:
+            outcome = approve_checks_under_mandate(root, task, actor=actor, provenance=provenance)
+            specs = specs_of_task(task)
+        except ApprovalRefusedError as exc:
+            console.print(f"[red]✗[/red] {escape(str(exc))}")
+            raise typer.Exit(2) from exc
+        except GrimoireError as exc:
+            console.print(f"[red]✗[/red] {escape(str(exc))}")
+            raise typer.Exit(1) from exc
+    else:
+        specs = tuple(CheckSpec(c) for c in cmd if c.strip()) if cmd else specs_of_task(task)
+        if not specs:
+            console.print(f"[red]✗[/red] {task_id} ne déclare aucune commande : rien à approuver (`--cmd` en nomme une)")
+            raise typer.Exit(2)
+        try:
+            outcome = approve_checks(root, task_id, specs, actor=actor, allow_unattested=allow_unattested)
+        except ApprovalRefusedError as exc:
+            console.print(f"[red]✗[/red] {escape(str(exc))}")
+            raise typer.Exit(3 if exc.code in ("awaiting_human", "unattested") else 2) from exc
     if _fmt(ctx) == "json":
         typer.echo(
             json.dumps(

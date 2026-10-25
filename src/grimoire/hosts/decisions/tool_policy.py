@@ -9,6 +9,7 @@ of it.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from datetime import UTC, datetime
@@ -301,12 +302,24 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         profile = session_profile(hook, journal=False)
         if vector.governed_only and profile not in _AUTHORITY_PROFILES:
             return None
+        if vector.code == "control-zone":
+            # #876 lot 1 : une écriture d'agent refusée dans la zone protégée révoque les mandats (best effort :
+            # le refus, lui, ne dépend pas de la révocation).
+            with contextlib.suppress(Exception):
+                from grimoire.missions.mandate import REVOKE_PROTECTED_WRITE, revoke_every_mandate
+
+                revoke_every_mandate(REVOKE_PROTECTED_WRITE, vector.what)
         why = (
             "L'instantané du ledger est un cache dérivé du journal, restauré sans rejouer le préfixe qu'il couvre : "
             "écrit à la main, il imposerait un état que le journal ne dit pas. Il ne s'écrit que par le ledger."
             if vector.code == "ledger-snapshot"
-            else "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
-            "le hook de l'hôte : c'est la preuve qu'un humain a décidé."
+            else (
+                "La zone de contrôle ~/.grimoire/control/ porte la preuve de contrat d'hôte, le journal d'autorité du "
+                "mandat et la clé du cockpit : elle ne s'écrit que par le code du kit, jamais par un outil d'agent."
+                if vector.code == "control-zone"
+                else "Le journal des tours humains et les challenges de checkpoint ne s'écrivent que par "
+                "le hook de l'hôte : c'est la preuve qu'un humain a décidé."
+            )
         )
         return Decision(
             outcome=Outcome.DENY,
