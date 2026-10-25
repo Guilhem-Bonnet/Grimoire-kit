@@ -14,6 +14,7 @@ from grimoire.codegraph.parser import DEFAULT_EXCLUDE
 from grimoire.codegraph.schemas import CodeEdge, CodeNode, NodeKind
 from grimoire.evidence.service import EvidenceService
 from grimoire.memory.knowledge import projection_is_current, stamp_projection_entries
+from grimoire.memory.supersession import INCLUDE_ALL
 from grimoire.missions.ledger import MissionLedger
 
 if TYPE_CHECKING:
@@ -831,7 +832,7 @@ def sync_task_vector_projection(
 def _actual_projection_entries(memory: MemoryManager, *, groups: set[str]) -> dict[str, Any]:
     return {
         entry.id: entry
-        for entry in memory.get_all()
+        for entry in memory.get_all(**INCLUDE_ALL)
         if str(entry.metadata.get("projection_group", "")) in groups
     }
 

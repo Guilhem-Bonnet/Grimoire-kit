@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
 from types import ModuleType
 from typing import Any, ClassVar
 
@@ -747,12 +747,19 @@ class TestReadOnlyToolsWriteNothing:
         "task_intake": {"text": "Implement a thing"},
         "task_list_ready": {},
         "task_show": {"task_id": "bootstrap"},
-        "task_waves": {},
         "task_recall": {"task_id": "bootstrap"},
+        "task_waves": {},
         "grimoire_host_status": {},
         "grimoire_providers_status": {},
         "grimoire_skill": {"slug": "inexistant"},
         "grimoire_command": {"slug": "inexistant"},
+    }
+
+    #: Seule exception admise : le reçu de lecture mémoire (P13), télémétrie interne locale, bornée,
+    #: sans contenu, ignorée par git et par l'empreinte d'arbre du gate Stop. Aucun autre fichier.
+    _ALLOWED_WRITES: ClassVar[dict[str, frozenset[str]]] = {
+        "grimoire_memory_search": frozenset({"_grimoire-output/memory-reads.jsonl"}),
+        "task_recall": frozenset({"_grimoire-output/memory-reads.jsonl"}),
     }
 
     def test_la_table_couvre_tous_les_outils_en_lecture(self) -> None:
@@ -771,6 +778,10 @@ class TestReadOnlyToolsWriteNothing:
         after = self._snapshot(gouverne)
         created = sorted(set(after) - set(before))
         modified = sorted(k for k in set(after) & set(before) if after[k] != before[k])
-        assert not created, f"{name} a créé {created} malgré readOnlyHint"
-        assert not modified, f"{name} a modifié {modified} malgré readOnlyHint"
+        allowed = self._ALLOWED_WRITES.get(name, frozenset())
+        # Chemins comparés en POSIX : Windows rend `\\` dans `str(relative_to(...))`.
+        created_posix = {PurePath(c).as_posix() for c in created}
+        modified_posix = {PurePath(m).as_posix() for m in modified}
+        assert not created_posix - allowed, f"{name} a créé {sorted(created_posix - allowed)} malgré readOnlyHint"
+        assert not modified_posix - allowed, f"{name} a modifié {sorted(modified_posix - allowed)} malgré readOnlyHint"
 

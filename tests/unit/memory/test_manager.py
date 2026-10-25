@@ -75,8 +75,14 @@ class TestFromBackend:
 
     def test_get_all_pagination_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)
-        mgr.get_all(offset=10, limit=5)
+        mgr.get_all(offset=10, limit=5, include_superseded=True, include_retracted=True)
         mock_backend.get_all.assert_called_once_with(user_id="", offset=10, limit=5)
+
+    def test_get_all_pages_after_hiding_replaced_and_retracted(self, mock_backend: MagicMock) -> None:
+        """Par défaut le filtre précède la pagination : le backend est lu en entier, la page est découpée ensuite."""
+        mgr = MemoryManager.from_backend(mock_backend)
+        mgr.get_all(offset=10, limit=5)
+        mock_backend.get_all.assert_called_once_with(user_id="", offset=0, limit=None)
 
     def test_count_delegates(self, mock_backend: MagicMock) -> None:
         mgr = MemoryManager.from_backend(mock_backend)

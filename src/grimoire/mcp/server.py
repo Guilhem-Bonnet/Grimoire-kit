@@ -388,6 +388,7 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".",
     try:
         cfg = GrimoireConfig.find_and_load(target)
         mgr = MemoryManager.from_config(cfg, project_root=target)
+        mgr.surface = "mcp"
         entry = mgr.store(
             text, user_id=user_id, emitter="mcp", metadata={"source_uri": source} if source else None,
         )
@@ -398,10 +399,15 @@ def grimoire_memory_store(text: str, user_id: str = "", project_path: str = ".",
         return _tool_error({"error": str(exc)})
 
 
+# `readOnlyHint` reste vrai : le reçu de rappel (P13) est une télémétrie interne
+# locale, une ligne bornée sans contenu dans `_grimoire-output/memory-reads.jsonl`
+# (ignoré par git, hors de l'empreinte d'arbre du gate Stop), et c'est le seul
+# fichier que ces deux outils ont le droit d'écrire : `TestReadOnlyToolsWriteNothing`
+# le vérifie plutôt que de le déclarer.
 @_tool(_reads(open_world=True))
 def grimoire_memory_search(
     query: str, user_id: str = "", limit: int = 5, project_path: str = ".",
-    include_superseded: bool = False, include_stale: bool = False,
+    include_superseded: bool = False, include_stale: bool = False, include_retracted: bool = False,
 ) -> str:
     """Search project memories; every result carries its source and freshness.
 
@@ -422,6 +428,8 @@ def grimoire_memory_search(
             (metadata ``superseded_by``); hidden by default.
         include_stale: Also return memories whose source file is gone; hidden
             by default, the count is reported in ``hidden_source_disparue``.
+        include_retracted: Also return memories retracted with
+            ``grimoire_memory_retract``; hidden by default.
     """
     from grimoire.memory.manager import MemoryManager
     from grimoire.memory.profiles import retrieval_in_service
@@ -430,12 +438,14 @@ def grimoire_memory_search(
     try:
         cfg = GrimoireConfig.find_and_load(target)
         mgr = MemoryManager.from_config(cfg, project_root=target)
+        mgr.surface = "mcp"
         # Agents read through this tool. Fusing the vector and BM25 rankings
         # here is what makes a composed memory observable to them at all;
         # hybrid_search falls back to plain search when there is nothing to fuse.
         entries = mgr.hybrid_search(
             query, user_id=user_id, limit=limit,
             include_superseded=include_superseded, include_stale=include_stale,
+            include_retracted=include_retracted,
         )
         return json.dumps({
             "query": query,
@@ -450,7 +460,7 @@ def grimoire_memory_search(
 
 
 @_tool(_writes(destructive=False, idempotent=True))
-def grimoire_memory_supersede(old_id: str, new_id: str, project_path: str = ".") -> str:
+def grimoire_memory_supersede(old_id: str, new_id: str, project_path: str = ".", reason: str = "") -> str:
     """Replace a decision: ``old_id`` is no longer served, but stays readable.
 
     The replaced memory is hidden from ``grimoire_memory_search`` unless
@@ -461,6 +471,7 @@ def grimoire_memory_supersede(old_id: str, new_id: str, project_path: str = ".")
         old_id: ID of the memory being replaced.
         new_id: ID of the memory that replaces it.
         project_path: Path to project root (default: current directory).
+        reason: Why (traced in the write journal).
     """
     from grimoire.memory.manager import MemoryManager
 
@@ -468,12 +479,19 @@ def grimoire_memory_supersede(old_id: str, new_id: str, project_path: str = ".")
     try:
         cfg = GrimoireConfig.find_and_load(target)
         mgr = MemoryManager.from_config(cfg, project_root=target)
-        updated = mgr.supersede(old_id, new_id)
+        mgr.surface = "mcp"
+        updated = mgr.supersede(old_id, new_id, reason=reason)
     except GrimoireError as exc:
         return _tool_error({"error": str(exc)})
     if updated is None:
         return _tool_error({"error": f"Entry not found: {old_id!r}."})
     return json.dumps({"superseded": True, "old_id": old_id, "new_id": new_id}, ensure_ascii=False)
+
+
+# Gestes de correction (retirer, rétablir, réétiqueter) : définis à côté, enregistrés ici.
+from grimoire.mcp import memory_gestures as _memory_gestures  # noqa: E402
+
+_memory_gestures.register(_tool, _writes)
 
 
 @_tool(_writes(destructive=True, idempotent=False))
@@ -1150,6 +1168,7 @@ def task_context(
         return _task_error(exc)
 
 
+# Même exception que `grimoire_memory_search` : seul le reçu de lecture est écrit.
 @_tool(_reads())
 def task_recall(
     task_id: str = "", project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger"

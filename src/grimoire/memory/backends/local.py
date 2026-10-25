@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.supersession import carries_state_mark
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters
 
 
@@ -181,7 +182,10 @@ class LocalMemoryBackend(MemoryBackend):
             removed = 0
             for rec in self._data:
                 key = (rec.get("text", ""), rec.get("user_id", ""))
-                if key in seen:
+                if carries_state_mark(rec.get("metadata")):
+                    # Retiré ou remplacé : jamais regroupé avec un vivant (voir carries_state_mark).
+                    unique.append(rec)
+                elif key in seen:
                     removed += 1
                 else:
                     seen.add(key)

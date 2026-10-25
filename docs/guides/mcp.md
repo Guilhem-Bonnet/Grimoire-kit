@@ -76,8 +76,10 @@ Dans `claude_desktop_config.json` :
 | `grimoire_harmony_check` | Exécute un Harmony Check et retourne le rapport | lecture |
 | `grimoire_config` | Configuration brute du projet | lecture |
 | `grimoire_memory_store` | Stocker un texte en mémoire ; `source` (chemin, `task:<id>`…) dit d'où vient le fait, sans quoi c'est une saisie libre | écriture, destructif, monde ouvert |
-| `grimoire_memory_search` | Extraits sourcés de la mémoire : chaque résultat porte `source`, `freshness` (recalculée à la lecture) et la fiche `provenance` ; le kit ne génère jamais de réponse. `include_superseded`, `include_stale` | lecture, monde ouvert |
+| `grimoire_memory_search` | Extraits sourcés de la mémoire : chaque résultat porte `source`, `freshness` (recalculée à la lecture) et la fiche `provenance` ; le kit ne génère jamais de réponse. `include_superseded`, `include_stale`, `include_retracted` ; chaque lecture servie ajoute une ligne (identifiants, longueur de la requête, jamais de contenu) à `_grimoire-output/memory-reads.jsonl` — télémétrie locale, bornée, ignorée par git, seule écriture admise par `TestReadOnlyToolsWriteNothing` | lecture, monde ouvert |
 | `grimoire_memory_supersede` | Remplacer une décision (l'ancienne n'est plus servie, reste lisible avec `include_superseded`) | écriture, idempotent |
+| `grimoire_memory_retract` / `grimoire_memory_unretract` | Retirer un souvenir du service sans le supprimer (raison obligatoire), ou annuler le retrait ; même garde que `grimoire memory retract` : refus sur un backend sans `update` et sur le souvenir d'un autre projet | écriture, non destructif |
+| `grimoire_memory_update_tags` | Ajouter, retirer ou remplacer les étiquettes d'un souvenir | écriture, non destructif, idempotent |
 | `grimoire_add_agent` | Créer un agent dans `_grimoire/overrides/agents/` à partir du gabarit `custom-agent` | écriture, destructif |
 | `grimoire_standard_verify` / `_audit` / `_score` / `_gate` | Le standard agentique : vérifier, auditer, scorer, opposer les gates | lecture ; `_score` persiste le score et `_gate` journalise le passage |
 | `grimoire_host_status` / `grimoire_skill` / `grimoire_command` | Les surfaces hôtes, pour un client sans émetteur | lecture |
@@ -220,7 +222,10 @@ Réciproquement, `readOnlyHint` est vérifié plutôt que déclaré :
 projet gouverné et compare l'arborescence avant et après. C'est ce contrôle qui
 a montré que `task_context` écrivait son bundle et que `grimoire_standard_gate`
 journalisait son passage — deux annotations qui mentaient, alors qu'un hôte
-auto-approuve sur leur foi.
+auto-approuve sur leur foi. Deux outils, `grimoire_memory_search` et `task_recall`,
+écrivent un reçu de lecture (`_grimoire-output/memory-reads.jsonl`, sans contenu)
+et restent `readOnlyHint` : le test les inclut et n'autorise que ce fichier, rien
+d'autre. Ajouter un autre fichier à leur écriture fait échouer le test.
 
 ## Exemples d'utilisation
 

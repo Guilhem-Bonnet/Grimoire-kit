@@ -20,6 +20,7 @@ from rich.table import Table
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireMemoryError
 from grimoire.memory.manager import MemoryManager
+from grimoire.memory.supersession import INCLUDE_ALL
 from grimoire.memory.taxonomy import flatten_taxonomy, run_memory_search
 
 memory_app = typer.Typer(help="Inspect and manage the memory subsystem.")
@@ -111,7 +112,9 @@ def _load_manager_context(path: Path = Path()) -> tuple[MemoryManager, GrimoireC
     """Resolve project config and return a MemoryManager with source context."""
     cfg, root = _load_config_context(path)
     try:
-        return MemoryManager.from_config(cfg, project_root=root), cfg, root
+        mgr = MemoryManager.from_config(cfg, project_root=root)
+        mgr.surface = "cli"
+        return mgr, cfg, root
     except GrimoireMemoryError as exc:
         console.print(f"[red]Memory backend error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -507,7 +510,7 @@ def memory_migrate_export_bundle(
             records = records_from_qdrant_backend(mgr.backend)
             source_backend = health.backend
         except TypeError:
-            records = records_from_memory_entries(mgr.get_all())
+            records = records_from_memory_entries(mgr.get_all(**INCLUDE_ALL))
             source_backend = f"{health.backend}:public-api"
 
     vector_count = sum(1 for record in records if record.has_vector)
@@ -714,6 +717,7 @@ def memory_search(
     hybrid: bool | None = typer.Option(None, "--hybrid/--no-hybrid", help="Fuse vector and lexical BM25 rankings (RRF). Default: on when the project has both."),
     include_superseded: bool = typer.Option(False, "--include-superseded", help="Also return memories replaced by a newer one (metadata superseded_by). Hidden by default."),
     include_stale: bool = typer.Option(False, "--include-stale", help="Also return memories whose source file no longer exists. Hidden by default (the count is reported)."),
+    include_retracted: bool = typer.Option(False, "--include-retracted", help="Also return retracted memories (`memory retract`). Hidden by default."),
 ) -> None:
     """Search memories by keyword or semantic similarity.
 
@@ -730,7 +734,7 @@ def memory_search(
     """
     mgr = _load_manager()
     use_hybrid = mgr.prefers_hybrid if hybrid is None else hybrid
-    results = run_memory_search(mgr, query, hybrid=use_hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room, include_superseded=include_superseded, include_stale=include_stale)
+    results = run_memory_search(mgr, query, hybrid=use_hybrid, user_id=user_id, limit=limit, wing=wing, hall=hall, room=room, include_superseded=include_superseded, include_stale=include_stale, include_retracted=include_retracted)
     fmt = _get_fmt(ctx)
     raw_hidden = getattr(mgr, "hidden_stale", 0)
     hidden = raw_hidden if isinstance(raw_hidden, int) else 0
@@ -826,13 +830,18 @@ def memory_recall(
     type_: str = typer.Option("", "--type", "-t", help="Filter by memory type."),
     agent: str = typer.Option("", "--agent", "-a", help="Filter by emitting agent."),
     limit: int = typer.Option(5, "--limit", "-n", help="Max results to return."),
+    include_superseded: bool = typer.Option(False, "--include-superseded", help="Also return replaced memories."),
+    include_retracted: bool = typer.Option(False, "--include-retracted", help="Also return retracted memories."),
 ) -> None:
     """Search typed memories written via `grimoire memory remember`."""
     from grimoire.core.exceptions import GrimoireMemoryError
 
     mgr = _load_manager()
     try:
-        results = mgr.recall_typed(query, type_=type_, agent=agent, limit=limit)
+        results = mgr.recall_typed(
+            query, type_=type_, agent=agent, limit=limit,
+            include_superseded=include_superseded, include_retracted=include_retracted,
+        )
     except GrimoireMemoryError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None
@@ -875,11 +884,14 @@ def memory_list(
     wing: str = typer.Option("", "--wing", help="Filter by palace wing."),
     hall: str = typer.Option("", "--hall", help="Filter by palace hall."),
     room: str = typer.Option("", "--room", help="Filter by palace room."),
+    include_superseded: bool = typer.Option(False, "--include-superseded", help="Also list replaced memories."),
+    include_retracted: bool = typer.Option(False, "--include-retracted", help="Also list retracted memories."),
 ) -> None:
-    """List stored memories with pagination."""
+    """List stored memories with pagination (replaced and retracted ones are hidden by default)."""
     mgr = _load_manager()
-    entries = mgr.get_all_filtered(user_id=user_id, offset=offset, limit=limit, wing=wing, hall=hall, room=room)
-    total = len(mgr.get_all_filtered(user_id=user_id, wing=wing, hall=hall, room=room))
+    shown = {"include_superseded": include_superseded, "include_retracted": include_retracted}
+    entries = mgr.get_all_filtered(user_id=user_id, offset=offset, limit=limit, wing=wing, hall=hall, room=room, **shown)
+    total = len(mgr.get_all_filtered(user_id=user_id, wing=wing, hall=hall, room=room, **shown))
     fmt = _get_fmt(ctx)
 
     if fmt == "json":
@@ -931,10 +943,14 @@ def memory_taxonomy(
     wing: str = typer.Option("", "--wing", help="Filter by wing before aggregating."),
     hall: str = typer.Option("", "--hall", help="Filter by hall before aggregating."),
     room: str = typer.Option("", "--room", help="Filter by room before aggregating."),
+    include_hidden: bool = typer.Option(False, "--include-hidden", help="Also count replaced and retracted memories."),
 ) -> None:
-    """Show the palace-style wing / hall / room taxonomy."""
+    """Show the palace-style wing / hall / room taxonomy (served memories only by default)."""
     mgr = _load_manager()
-    taxonomy = mgr.taxonomy(user_id=user_id, wing=wing, hall=hall, room=room)
+    taxonomy = mgr.taxonomy(
+        user_id=user_id, wing=wing, hall=hall, room=room,
+        include_superseded=include_hidden, include_retracted=include_hidden,
+    )
     fmt = _get_fmt(ctx)
 
     if fmt == "json":
@@ -971,7 +987,7 @@ def memory_export(
 ) -> None:
     """Export all memories to JSON."""
     mgr = _load_manager()
-    entries = mgr.get_all(user_id=user_id)
+    entries = mgr.get_all(user_id=user_id, **INCLUDE_ALL)
     data = {
         "version": 1,
         "count": len(entries),
@@ -1056,7 +1072,7 @@ def memory_mempalace_export(
     """Export current Grimoire memories into a MemPalace-compatible palace."""
     mgr = _load_manager()
     backend = _load_mempalace_backend(palace)
-    entries = mgr.get_all_filtered(user_id=user_id, wing=wing, hall=hall, room=room)
+    entries = mgr.get_all_filtered(user_id=user_id, wing=wing, hall=hall, room=room, **INCLUDE_ALL)
     result = backend.store_many([
         {
             "text": entry.text,
@@ -1333,7 +1349,11 @@ def memory_delete(
     entry_id: str = typer.Argument(..., help="Entry ID to delete."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Delete a specific memory entry by ID."""
+    """Delete a specific memory entry by ID (final; `memory retract` keeps it readable).
+
+    With a Neo4j graph the node's content is erased and an empty tombstone is
+    left; `memory graph purge-orphans --apply` removes the tombstone afterwards.
+    """
     mgr = _load_manager()
     fmt = _get_fmt(ctx)
     confirm = yes or (ctx.obj or {}).get("yes", False)
