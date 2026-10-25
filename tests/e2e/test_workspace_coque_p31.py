@@ -213,8 +213,8 @@ def test_un_lien_profond_rouvre_la_tache_dans_sa_portee_et_l_url_suit(page: Page
 
     # Changer d'espace réécrit l'URL sans perdre la portée…
     page.locator("#tab-space-configuration").click()
-    page.wait_for_function("() => window.GrimoireWorkspace.section === 'fichiers'")
-    assert urlparse(page.url).fragment == "configuration/fichiers"
+    page.wait_for_function("() => window.GrimoireWorkspace.section === 'hotes'")
+    assert urlparse(page.url).fragment == "configuration/hotes"
     assert _query(page)["project"] == [home]
 
     # … et « Précédent » ramène la tâche sélectionnée.

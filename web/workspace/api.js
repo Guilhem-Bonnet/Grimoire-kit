@@ -252,6 +252,11 @@ export const api = {
   // Concevoir (lot 3) : les containers enrichis (genre, agents, équipe,
   // dernière modification) que `/api/blueprints` seul ne porte pas.
   blueprintContainers: () => get(WS + 'blueprints'),
+  // Configuration (P66) : registre de sûreté des hooks et fournisseurs de
+  // modèles, deux lectures (jamais d'écriture : les gestes sont des commandes).
+  hooks: () => get(WS + 'hooks'),
+  providers: () => get(WS + 'providers'),
+
   // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
   // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue
   // disponible pour l'assignation, pas seulement ceux déjà attachés. `project`
