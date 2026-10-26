@@ -146,21 +146,20 @@ def test_chaque_type_de_decision_a_sa_carte_et_une_seule_action_primaire(workspa
     expect(details).to_contain_text("R14")
     expect(details).to_contain_text(sid)
     # « Copier la commande » : le presse-papiers dans le clic, et le statut le dit.
-    # Sous chromium headless, `navigator.clipboard` refuse parfois l'écriture même
-    # avec la permission (document jugé non focalisé, selon la charge de la machine
-    # de CI) : l'UI a un repli prévu — la commande sélectionnée, prête pour Ctrl+C.
-    # Le test accepte les deux issues et vérifie chacune jusqu'au bout, au lieu
-    # d'échouer au hasard sur un aléa d'environnement.
-    workspace.context.grant_permissions(["clipboard-read", "clipboard-write"])
-    workspace.bring_to_front()
+    # Le vrai presse-papiers reste un aléa en chromium headless : `writeText`
+    # refuse parfois malgré la permission (document jugé non focalisé, selon la
+    # charge de la machine de CI), et le repli de l'UI — la commande sélectionnée,
+    # prête pour Ctrl+C — ne se relit pas non plus de façon stable, le pouls live
+    # redessinant la carte et détruisant la sélection. Le test stub donc
+    # `writeText` et vérifie le contrat de l'UI : ce qu'elle a demandé de copier,
+    # et le statut qui le dit. Déterministe partout, même issue sur toute machine.
+    workspace.evaluate(
+        "() => { window.__copied = []; navigator.clipboard.writeText ="
+        " (t) => { window.__copied.push(t); return Promise.resolve(); }; }"
+    )
     details.get_by_role("button", name="Copier la commande").click()
-    status = details.locator(".action-status")
-    expect(status).to_contain_text(re.compile("Commande copiée|Copie refusée"))
-    if "Commande copiée" in (status.inner_text() or ""):
-        assert "--resume" in workspace.evaluate("() => navigator.clipboard.readText()")
-    else:
-        selected = workspace.evaluate("() => String(window.getSelection())")
-        assert "--resume" in selected, selected
+    expect(details.locator(".action-status")).to_contain_text("Commande copiée")
+    assert "--resume" in workspace.evaluate("() => window.__copied.join('')")
     resume = card.get_by_role("button", name="Reprendre")
     expect(resume).to_have_class(re.compile(r"\bpri\b"))
     expect(card.get_by_role("button", name="Abandonner")).not_to_have_class(re.compile(r"\bpri\b"))
