@@ -102,7 +102,8 @@ def test_p67_un_choix_explicite_reste_prioritaire_et_memorise(browser: Browser, 
 
 # ── P58 : clavier d'abord ──────────────────────────────────────────────────
 # j / k / Entrée sur les lignes : test_workspace_a_traiter_p32.py
-# (test_j_et_k_parcourent_les_lignes_et_entree_ouvre_l_action).
+# (test_j_et_k_parcourent_les_lignes_et_entree_ouvre_l_action) et, pour les
+# autres listes, test_workspace_lignes_p56_p58_p60.py.
 
 
 def test_p58_cmd_k_ouvre_la_palette_depuis_chaque_espace(browser: Browser, served: str) -> None:

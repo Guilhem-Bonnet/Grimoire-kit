@@ -27,7 +27,7 @@
 // API consommées : api.memoryEntries, api.memoryEntry, api.memorySearch,
 // api.memoryDelete, api.memoryGesture, api.projects.
 
-import { badge, icon, monogram } from '../shell.js';
+import { badge, icon, listNav, monogram } from '../shell.js';
 import { formatScore } from '../score.js';
 import { GESTURE_STYLES, historyList, openGesture } from './memoire-gestes.js';
 
@@ -291,6 +291,8 @@ export async function mount(root, ctx) {
   searchbar.append(label, formulaHost);
   const summary = el('p', 'kn-summary', null, { role: 'status' });
   const results = el('section', 'kn-card', null, { 'aria-label': 'Résultats' });
+  // P58 : j / k parcourent les résultats, le détail suit ; Entrée le rouvre.
+  listNav(results, { rows: '.kn-res', onMove: (row) => row.click() });
   const notes = el('div', 'kn-notes');
   const more = el('button', 'btn kn-more', 'Plus d’entrées', { type: 'button' });
   more.hidden = true;
@@ -467,7 +469,7 @@ export async function mount(root, ctx) {
     if (!append) {
       state.perProject = new Map();
       summary.textContent = 'Lecture de la mémoire…';
-      results.replaceChildren(...ctx.loading('Lecture de la mémoire…', 4));
+      results.replaceChildren(...ctx.loading('Lecture de la mémoire…', 4, 'results'));
     }
     more.disabled = true;
     try {
@@ -535,8 +537,9 @@ export async function mount(root, ctx) {
     if (entry.date) date.title = String(entry.date);
     article.append(badge(type.label, type.tone), body, date);
     article.addEventListener('click', () => select(entry, { focus: false }));
+    // Entrée (P58) passe par le contrôleur de liste de la coque (le clic du résultat).
     article.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(entry, { focus: false }); }
+      if (event.key === ' ') { event.preventDefault(); select(entry, { focus: false }); }
     });
     return article;
   };

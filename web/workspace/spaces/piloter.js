@@ -34,7 +34,9 @@
 // (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
-import { actionStatus, badge, failureText, icon, kpiRow, setActionStatus, spaceHead, STATE_ICON } from '../shell.js';
+import {
+  actionStatus, badge, copyText, failureText, icon, kpiRow, listNav, rowActions, setActionStatus, spaceHead, STATE_ICON,
+} from '../shell.js';
 
 const STYLE_ID = 'pl-styles';
 
@@ -63,7 +65,9 @@ function injectStyles() {
     .pl-fleet .tbl th:nth-child(3) { width: 170px; }
     .pl-fleet .tbl th:nth-child(4) { width: 100px; }
     .pl-fleet .tbl th:nth-child(5) { width: 120px; }
-    .pl-fleet .tbl th:nth-child(6) { width: 64px; }
+    /* Actions de ligne (P56) puis ouverture : trois boutons de 28 px, 36 px au doigt. */
+    .pl-fleet .tbl th:nth-child(6) { width: 136px; }
+    @media (hover: none), (pointer: coarse) { .pl-fleet .tbl th:nth-child(6) { width: 168px; } }
     .pl-none { margin: 0; }
     @media (max-width: 900px) {
       .pl-sheet, .pl-wrap, .pl-fleet { padding: var(--sp-3); }
@@ -72,6 +76,9 @@ function injectStyles() {
     .pl-cards { display: none; flex-direction: column; gap: var(--sp-2); }
     .pl-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); padding: var(--sp-3) var(--sp-4); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
     .pl-card-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+    .pl-open-cell { width: 1%; white-space: nowrap; text-align: right; }
+    .pl-open-cell > .row-actions { margin-right: 4px; vertical-align: middle; }
+    .pl-card > .row-actions { align-self: flex-end; }
     @media (max-width: 760px) {
       .pl-desktop { display: none; }
       .pl-cards { display: flex; }
@@ -624,6 +631,16 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
     return open;
   };
 
+  // P56 : les actions secondaires d'un projet, révélées au survol et au focus,
+  // toutes dans le menu « … » ; ouvrir la fiche reste le clic sur la ligne.
+  const projectActions = (r) => {
+    const name = r.entry.name || r.entry.slug;
+    return rowActions([
+      { id: 'copy-path', label: `Copier le chemin de ${name}`, icon: 'copy', run: (b) => copyText(r.entry.path, b) },
+      { id: 'open-work', label: `Voir le Travail de ${name}`, icon: 'board', run: () => ctx.scope.set(r.entry.slug, '#travail') },
+    ], { label: `Plus d'actions pour ${name}` });
+  };
+
   function paint() {
     const query = fleetFilter.query.trim().toLowerCase();
     const segment = segments.find(([id]) => id === fleetFilter.segment) || segments[0];
@@ -642,8 +659,8 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
       const tr = document.createElement('tr');
       tr.tabIndex = 0;
       tr.dataset.project = r.entry.slug;
+      // Entrée (P58) passe par le contrôleur de liste de la coque : le clic de la ligne.
       tr.addEventListener('click', () => onSelect(r.entry.slug));
-      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
 
       const nameCell = document.createElement('td');
       const path = text('div', 'lbl mono pl-path', r.entry.path);
@@ -662,7 +679,8 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
       kitCell.append(text('div', null, kit.main));
       if (kit.sub) kitCell.append(text('div', 'lbl', kit.sub));
       const openCell = document.createElement('td');
-      openCell.append(openButton(r));
+      openCell.className = 'pl-open-cell';
+      openCell.append(projectActions(r), openButton(r));
       tr.append(
         nameCell, attentionCell, kitCell,
         text('td', null, sessionsWord(r.health)),
@@ -675,8 +693,8 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
       const card = document.createElement('div');
       card.className = 'pl-card';
       card.tabIndex = 0;
+      card.dataset.project = r.entry.slug;
       card.addEventListener('click', () => onSelect(r.entry.slug));
-      card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
       const cardPath = text('div', 'lbl mono pl-path', r.entry.path);
       cardPath.title = r.entry.path;
       card.append(text('div', 'pl-name', name), cardPath);
@@ -690,6 +708,7 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
         'div', 'pl-card-row lbl',
         [kit.sub ? `${kit.main} · ${kit.sub}` : kit.main, relativeAge(r.health?.activity?.ageMinutes)].join(' · '),
       ));
+      card.append(projectActions(r));
       cards.append(card);
     }
   }
@@ -2347,6 +2366,11 @@ export async function mount(root, ctx) {
   // propre à cet espace, plus de projet « prévisualisé » distinct du projet
   // servi : choisir une ligne de la Flotte change la portée (`ctx.scope.set`).
   const level = cockpit && ctx.scope && ctx.scope.all ? 'flotte' : 'projet';
+  // P58 : j / k parcourent les projets de la Flotte (table au bureau, cartes en
+  // mobile) ; la ligne active porte `aria-current`, Entrée ouvre sa fiche.
+  if (level === 'flotte') {
+    listNav(root, { rows: '.pl-fleet tbody tr[data-project], .pl-fleet .pl-card[data-project]', mark: 'aria-current', key: 'project' });
+  }
   const selected = ctx.host.project || null;
   // Vue de la Flotte (`#flotte?vue=donnees`) : Projets par défaut.
   let view = ctx.params && ctx.params.vue === 'donnees' ? 'donnees' : 'projets';
@@ -2403,7 +2427,8 @@ export async function mount(root, ctx) {
       // Le nom du projet (accents compris), jamais son slug (P31).
       shell.append(spaceHead(ctx.scope ? ctx.scope.name : 'Projet servi'));
     }
-    shell.append(...ctx.loading('Chargement…', 3));
+    // P60 : la forme de ce qui vient — la table des projets, ou la fiche d'un projet.
+    shell.append(...ctx.loading('Chargement…', level === 'flotte' ? 6 : 3, level === 'flotte' ? 'table' : 'kpi'));
     root.replaceChildren(shell);
 
     if (level === 'flotte' && view === 'donnees') {

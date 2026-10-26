@@ -271,7 +271,7 @@ export async function mount(root, ctx) {
     const mine = ++token;
     const command = task ? `grimoire task recall ${task}` : 'grimoire task recall <tâche>';
     const head = spaceHead('Rappel', task ? `Reçus de la tâche ${task}` : 'Ce que la mémoire a servi aux agents', picker(), formula(command));
-    wrap.replaceChildren(head, ...ctx.loading('Lecture des reçus…', 5));
+    wrap.replaceChildren(head, ...ctx.loading('Lecture des reçus…', 5, 'results'));
     let payload;
     try {
       payload = await ctx.api.memoryRecall(slug || undefined, task || undefined);

@@ -34,8 +34,10 @@
 //   ctx.params     ce que l'appelant de `goto(id, params)` a demandé pour ce
 //                  montage (ex. `{ file }` depuis ⌘K) — jamais persistant,
 //                  relu à chaque montage seulement
-//   ctx.loading    (libellé, lignes?) → [squelette, texte pour lecteurs d'écran] à
-//                  poser dans une zone qui attend ses données
+//   ctx.loading    (libellé, lignes?, forme?) → [squelette, texte pour lecteurs
+//                  d'écran] à poser dans une zone qui attend ses données ; la
+//                  forme (P60 : lines, inbox, board, table, results, kpi) est
+//                  celle de la liste qui vient
 //   ctx.openPanel  (id) → ouvre un panneau latéral (`explorer`, `inspector`,
 //                  `evidence`) : épinglé au bureau, en tiroir sous 900 px
 //   ctx.rail       `{ on(id, handler) }` : enregistre ce que fait le rail « 2 »
@@ -63,34 +65,37 @@ const firstSpaceMounted = new Promise((resolve) => { markFirstSpaceMounted = res
 
 const SPACES = [
   { id: 'a-traiter', label: 'À traiter', icon: 'i-space-a-traiter', term: 'a-traiter',
-    sections: [{ id: 'a-traiter', module: 'a-traiter', label: 'À traiter' }] },
+    sections: [{ id: 'a-traiter', module: 'a-traiter', label: 'À traiter',
+      skeleton: (p) => (p.view === 'revue' ? 'table' : 'inbox') }] },
   { id: 'travail', label: 'Travail', icon: 'i-space-travail', term: 'tache',
-    sections: [{ id: 'travail', module: 'executer', label: 'Tâches' }] },
+    sections: [{ id: 'travail', module: 'executer', label: 'Tâches',
+      skeleton: (p) => (['liste', 'sessions', 'timeline', 'decisions'].includes(p.view) ? 'table' : 'board') }] },
   { id: 'flotte', label: 'Flotte', icon: 'i-space-flotte', term: 'flotte',
-    sections: [{ id: 'flotte', module: 'piloter', label: 'Flotte' }] },
+    sections: [{ id: 'flotte', module: 'piloter', label: 'Flotte',
+      skeleton: () => (host.kind === 'cockpit' && scope.all ? 'table' : 'kpi') }] },
   { id: FOURTH_SPACE.id, label: FOURTH_SPACE.label, icon: FOURTH_SPACE.icon, term: 'memoire',
     // Entrée par la Recherche (P24) ; la Santé (P25) est la vue voisine.
     landing: 'memoire',
     sections: [
-      { id: 'sante', module: 'sante', label: 'Santé et carte' },
-      { id: 'memoire', module: 'memoire', label: 'Recherche' },
+      { id: 'sante', module: 'sante', label: 'Santé et carte', skeleton: 'kpi' },
+      { id: 'memoire', module: 'memoire', label: 'Recherche', skeleton: 'results' },
       // Le reçu de rappel (P27) : ce que la mémoire a servi aux agents, rejouable.
-      { id: 'rappel', module: 'rappel', label: 'Rappel' },
-      { id: 'journal', module: 'observer', label: 'Journal' },
+      { id: 'rappel', module: 'rappel', label: 'Rappel', skeleton: 'results' },
+      { id: 'journal', module: 'observer', label: 'Journal', skeleton: 'table' },
     ] },
   { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',
     // Atterrit sur « Hôtes et hooks » (maquette Configuration) : l'arbre de
     // fichiers est une rubrique parmi d'autres, pas l'écran d'arrivée.
     landing: 'hotes',
     sections: [
-      { id: 'agents', module: 'configurer', label: 'Agents', count: (api) => api.agents().then((d) => (d.agents || []).length) },
+      { id: 'agents', module: 'configurer', label: 'Agents', skeleton: 'table', count: (api) => api.agents().then((d) => (d.agents || []).length) },
       { id: 'fichiers', module: 'source', label: 'Fichiers' },
       { id: 'blueprints', module: 'concevoir', label: 'Blueprints', count: (api) => api.blueprintContainers().then((d) => d.count) },
-      { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', count: (api) => api.hooks().then((d) => d.total) },
+      { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', skeleton: 'table', count: (api) => api.hooks().then((d) => d.total) },
       { id: 'fournisseurs', module: 'configurer', label: 'Fournisseurs et budgets' },
       // Le registre des projets du cockpit (P35) : ajouter, scanner, retirer, purger. Sans compte
       // sur l'onglet : il serait lu une fois par portée, donc faux dès le premier retrait.
-      { id: 'projets', module: 'registre', label: 'Projets' },
+      { id: 'projets', module: 'registre', label: 'Projets', skeleton: 'table' },
       { id: 'preferences', module: null, label: 'Préférences' },
     ] },
 ];
@@ -288,6 +293,184 @@ export function spaceHead(title, sub, ...actions) {
   const kept = actions.filter(Boolean);
   if (kept.length) head.append(mk('div', { class: 'space-head-actions' }, ...kept));
   return head;
+}
+
+// ── Menu « … » (P11, partagé depuis P56) ────────────────────────────────────
+// Une seule implémentation : le menu de l'inspecteur de tâche (Annuler) et le
+// menu de chaque ligne de liste. Un bouton « … » (`aria-expanded`), un panneau
+// (`data-role="<role>-panel"`) ; Échap le referme et rend le focus au bouton,
+// un clic à côté le referme (sauf si `keepOpen()` le retient : un brouillon ne
+// se perd pas). Un seul menu ouvert à la fois, un seul écouteur pour tous.
+// `floating` : le panneau se pose en position fixe sous le bouton, pour sortir
+// d'une liste qui coupe ce qui déborde (sections, colonnes qui défilent).
+
+let menuSeq = 0;
+let openMenu = null;
+
+export function moreMenu({ label = "Plus d'actions", role = 'more', id = '', floating = false, keepOpen = null, onOpen = null } = {}) {
+  menuSeq += 1;
+  const wrap = mk('div', { class: 'more' });
+  const panelId = id || `more-panel-${menuSeq}`;
+  const toggle = mk('button', {
+    type: 'button', class: 'btn ghost more-btn', 'data-role': role, 'aria-label': label, title: label,
+    'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': panelId,
+  }, icon('more'));
+  const panel = mk('div', { class: 'more-panel', id: panelId, 'data-role': `${role}-panel`, role: 'group', 'aria-label': label });
+  panel.hidden = true;
+  if (floating) panel.dataset.floating = 'true';
+  const menu = { wrap, toggle, panel, floating, keepOpen };
+  const place = () => {
+    const box = toggle.getBoundingClientRect();
+    panel.style.top = `${Math.round(box.bottom + 4)}px`;
+    panel.style.right = `${Math.max(8, Math.round(window.innerWidth - box.right))}px`;
+  };
+  menu.setOpen = (open) => {
+    if (open && openMenu && openMenu !== menu) openMenu.setOpen(false);
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    wrap.classList.toggle('open', open);
+    if (open && floating) place();
+    openMenu = open ? menu : (openMenu === menu ? null : openMenu);
+  };
+  toggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    menu.setOpen(panel.hidden);
+    if (!panel.hidden && onOpen) onOpen(panel);
+  });
+  wrap.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || panel.hidden) return;
+    event.stopPropagation();
+    menu.setOpen(false);
+    toggle.focus();
+  });
+  wrap.append(toggle, panel);
+  return menu;
+}
+
+function closeMenuOutside(event) {
+  if (!openMenu) return;
+  if (!openMenu.wrap.isConnected) { openMenu = null; return; }
+  const target = event.target instanceof Node ? event.target : null;
+  if (target && openMenu.wrap.contains(target)) return;
+  if (event.type === 'click' && openMenu.keepOpen && openMenu.keepOpen()) return;
+  // Défilement et redimensionnement ne referment qu'un panneau flottant : celui
+  // de l'inspecteur suit son bouton.
+  if (event.type !== 'click' && !openMenu.floating) return;
+  openMenu.setOpen(false);
+}
+
+// ── Actions de ligne (P56) ──────────────────────────────────────────────────
+// Les actions secondaires d'une ligne : révélées au survol et au focus clavier
+// (shell.css, `.row-actions` : opacité seulement, elles restent dans l'ordre de
+// tabulation), toujours visibles sur écran tactile (`hover: none`), et toutes
+// atteignables par le menu « … » de la ligne. `actions` = [{ id, label, icon,
+// run(bouton) }] ; l'action principale reste le clic sur la ligne (et Entrée).
+
+export function rowActions(actions, { label = "Plus d'actions" } = {}) {
+  const kept = actions.filter(Boolean);
+  const box = mk('span', { class: 'row-actions', 'data-role': 'row-actions' });
+  if (!kept.length) return box;
+  const menu = moreMenu({ label, role: 'row-more', floating: true });
+  for (const action of kept) {
+    const button = mk('button', {
+      type: 'button', class: 'btn ghost row-act', 'data-action': action.id, 'aria-label': action.label, title: action.label,
+    }, icon(action.icon));
+    button.addEventListener('click', () => { if (openMenu) openMenu.setOpen(false); action.run(button); });
+    const item = mk('button', { type: 'button', class: 'more-item', 'data-action': action.id },
+      icon(action.icon), mk('span', { text: action.label }));
+    item.addEventListener('click', () => { menu.setOpen(false); menu.toggle.focus(); action.run(menu.toggle); });
+    box.append(button);
+    menu.panel.append(item);
+  }
+  box.append(menu.wrap);
+  // Un clic ou Entrée sur une action n'est pas un clic sur la ligne.
+  box.addEventListener('click', (event) => event.stopPropagation());
+  box.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); });
+  return box;
+}
+
+/** Copie un texte et le dit sur le bouton (`data-copied` : ok | refused). */
+export async function copyText(value, button) {
+  try {
+    await navigator.clipboard.writeText(value);
+    if (button) { button.dataset.copied = 'ok'; button.title = 'Copié'; }
+    return true;
+  } catch {
+    if (button) { button.dataset.copied = 'refused'; button.title = `Copie refusée : ${value}`; }
+    return false;
+  }
+}
+
+// ── Navigation clavier des listes (P58) ─────────────────────────────────────
+// Un seul contrôleur pour toutes les listes : j / k passent à la ligne suivante
+// ou précédente (bornées, sans reboucler), Entrée lance l'action principale de
+// la ligne qui a le focus. Les raccourcis sont lus par `bindShortcuts`, donc
+// jamais pendant une saisie, la palette ou l'aide ouverte.
+//
+// `listNav(conteneur, options)` est appelé par l'espace à son montage ; la
+// coque oublie les listes à chaque changement de rubrique. Les lignes sont
+// relues à chaque frappe (`rows` est un sélecteur) : un re-rendu ne casse rien.
+//   rows        sélecteur des lignes, cherchées dans le conteneur ; seules les
+//               lignes affichées comptent (vue mobile ou bureau, colonne repliée)
+//   onActivate  (ligne) → l'action principale ; par défaut le clic de la ligne
+//   onMove      (ligne) → appelé après j / k (À traiter et la Recherche y
+//               posent la sélection, le détail suit)
+//   mark        attribut posé sur la ligne active quand la liste n'a pas
+//               d'autre sélection (`aria-current` : Flotte, Projets)
+//   key         nom du `data-*` qui identifie une ligne : la ligne active se
+//               retrouve après un re-rendu
+
+let lists = [];
+
+export function listNav(container, { rows, onActivate = null, onMove = null, mark = null, key = null } = {}) {
+  const nav = { container, rows, onActivate, onMove, mark, key, last: null };
+  lists.push(nav);
+  return nav;
+}
+
+function navRows(nav) {
+  return [...nav.container.querySelectorAll(nav.rows)].filter((row) => row.getClientRects().length > 0);
+}
+
+function navCurrent(nav, rows) {
+  const focused = document.activeElement && document.activeElement.closest ? document.activeElement.closest(nav.rows) : null;
+  if (focused && rows.includes(focused)) return focused;
+  if (nav.key && nav.last !== null) {
+    const same = rows.find((row) => row.dataset[nav.key] === nav.last);
+    if (same) return same;
+  }
+  return rows.find((row) => row.getAttribute(nav.mark || 'aria-current') === 'true') || null;
+}
+
+function moveInList(delta) {
+  const live = lists.filter((nav) => nav.container.isConnected);
+  const active = document.activeElement;
+  const nav = live.find((n) => active && n.container.contains(active) && navRows(n).length)
+    || live.find((n) => navRows(n).length);
+  if (!nav) return false;
+  const rows = navRows(nav);
+  const current = navCurrent(nav, rows);
+  const index = current ? rows.indexOf(current) : -1;
+  const next = rows[index < 0 ? (delta > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, index + delta))];
+  if (nav.mark) for (const row of rows) row.setAttribute(nav.mark, String(row === next));
+  if (next.tabIndex < 0 && !next.hasAttribute('tabindex')) next.tabIndex = -1;
+  next.focus({ preventScroll: true });
+  next.scrollIntoView({ block: 'nearest' });
+  if (nav.key) nav.last = next.dataset[nav.key] ?? null;
+  if (nav.onMove) nav.onMove(next);
+  return true;
+}
+
+function activateInList(event) {
+  const active = document.activeElement;
+  if (!active || !active.matches) return false;
+  const nav = lists.find((n) => n.container.isConnected && n.container.contains(active) && active.matches(n.rows));
+  if (!nav) return false;
+  event.preventDefault();
+  if (nav.key) nav.last = active.dataset[nav.key] ?? null;
+  if (nav.onActivate) nav.onActivate(active, event);
+  else active.click();
+  return true;
 }
 
 /** Retour d'action sur place. Depuis P62 la Console n'est plus dans la coque :
@@ -802,14 +985,90 @@ function revealTab(list, tab) {
 
 const PLACEHOLDER = 'data-shell-placeholder';
 
+// P60 : un squelette a la forme de ce qui vient. `shape` :
+//   lines    des lignes de texte (défaut)
+//   inbox    tuiles de comptes puis lignes à pastille, deux lignes de texte et action (À traiter)
+//   board    colonnes de cartes (tableau de Travail)
+//   table    en-tête et lignes à cellules (Flotte, Sessions, Projets, Journal)
+//   results  champ de recherche puis résultats à badge, titre et extrait (Savoir)
+//   kpi      tuiles de chiffres puis lignes (fiche d'un projet, Santé)
+// Les barres gardent la classe `skeleton-line` : une seule animation, coupée
+// sous prefers-reduced-motion par la règle globale.
+const SKELETON_SHAPES = ['lines', 'inbox', 'board', 'table', 'results', 'kpi'];
+
+function skeletonBar(cls) {
+  return mk('div', { class: cls ? `skeleton-line ${cls}` : 'skeleton-line' });
+}
+
+function skeletonTiles(count) {
+  const row = mk('div', { class: 'sk-tiles' });
+  for (let i = 0; i < count; i += 1) row.append(mk('div', { class: 'sk-tile' }, skeletonBar('sk-short'), skeletonBar('sk-num')));
+  return row;
+}
+
+function skeletonShape(shape, rows) {
+  if (shape === 'inbox') {
+    const list = mk('div', { class: 'sk-list' });
+    for (let i = 0; i < rows; i += 1) {
+      list.append(mk('div', { class: 'sk-row sk-inbox-row' },
+        mk('div', { class: 'skeleton-line sk-dot' }),
+        mk('div', { class: 'sk-text' }, skeletonBar(), skeletonBar('sk-short')),
+        skeletonBar('sk-pill')));
+    }
+    return [skeletonTiles(3), list];
+  }
+  if (shape === 'board') {
+    const board = mk('div', { class: 'sk-board' });
+    for (let c = 0; c < 4; c += 1) {
+      const col = mk('div', { class: 'sk-col' }, skeletonBar('sk-short'));
+      for (let i = 0; i < 3 - (c % 2); i += 1) {
+        col.append(mk('div', { class: 'sk-card' }, skeletonBar('sk-short'), skeletonBar(), skeletonBar('sk-mid')));
+      }
+      board.append(col);
+    }
+    return [board];
+  }
+  if (shape === 'table') {
+    const table = mk('div', { class: 'sk-table' });
+    for (let i = 0; i <= rows; i += 1) {
+      const line = mk('div', { class: i ? 'sk-row sk-trow' : 'sk-row sk-trow sk-thead' });
+      for (let c = 0; c < 5; c += 1) line.append(mk('div', { class: 'sk-cell' }, skeletonBar(c ? 'sk-mid' : '')));
+      table.append(line);
+    }
+    return [table];
+  }
+  if (shape === 'results') {
+    const list = mk('div', { class: 'sk-list' });
+    for (let i = 0; i < rows; i += 1) {
+      list.append(mk('div', { class: 'sk-result' },
+        skeletonBar('sk-pill'),
+        mk('div', { class: 'sk-text' }, skeletonBar('sk-mid'), skeletonBar(), skeletonBar('sk-short'))));
+    }
+    return [skeletonBar('sk-field'), list];
+  }
+  if (shape === 'kpi') {
+    const lines = mk('div', { class: 'sk-list' });
+    for (let i = 0; i < rows; i += 1) lines.append(skeletonBar());
+    return [skeletonTiles(4), lines];
+  }
+  return Array.from({ length: rows }, () => skeletonBar());
+}
+
 // `cover` : le squelette de la toile recouvre la zone (position absolue) au lieu
 // de s'y ajouter, pour ne pas déplacer ce qu'un espace y pose pendant qu'il charge.
-function loadingNodes(label, rows = 4, { cover = false } = {}) {
+function loadingNodes(label, rows = 4, { cover = false, shape = 'lines' } = {}) {
+  const form = SKELETON_SHAPES.includes(shape) ? shape : 'lines';
   const bars = mk('div', {
-    class: cover ? 'skeleton skeleton-cover' : 'skeleton', 'aria-hidden': 'true', [PLACEHOLDER]: 'loading',
-  });
-  for (let i = 0; i < rows; i += 1) bars.append(mk('div', { class: 'skeleton-line' }));
+    class: cover ? 'skeleton skeleton-cover' : 'skeleton', 'aria-hidden': 'true', [PLACEHOLDER]: 'loading', 'data-shape': form,
+  }, ...skeletonShape(form, Math.max(1, rows)));
   return [bars, mk('p', { class: 'sr-only', [PLACEHOLDER]: 'loading', text: label })];
+}
+
+/** La forme du squelette de la toile pour une rubrique (P60) : celle de sa
+ *  liste. La Flotte dépend de la portée (table de tous les projets, ou fiche). */
+function sectionSkeleton(section, params) {
+  const shape = section.skeleton;
+  return typeof shape === 'function' ? shape(params || {}) : shape || 'lines';
 }
 
 // Une enveloppe vide (un espace pose son conteneur avant d'avoir les données) ne
@@ -1378,6 +1637,8 @@ async function goto(id, params, { fromUrl = false } = {}) {
   currentParams = { ...(params || {}) };
   lastSection[space.id] = section.id;
   railActions = {};
+  lists = [];
+  if (openMenu) openMenu.setOpen(false);
   live.clear();
   restorePanelsForSpace();
   // Une navigation venue de l'URL ne la réécrit qu'à l'identique (forme
@@ -1406,7 +1667,9 @@ async function goto(id, params, { fromUrl = false } = {}) {
     renderSectionTabs(space, section);
     canvas.setAttribute('aria-labelledby', space.sections.length > 1 ? `tab-section-${section.id}` : `tab-space-${space.id}`);
     canvas.setAttribute('aria-busy', 'true');
-    canvas.replaceChildren(...loadingNodes(`Chargement de l'espace ${space.label}…`, 5, { cover: true }));
+    canvas.replaceChildren(...loadingNodes(`Chargement de l'espace ${space.label}…`, 5, {
+      cover: true, shape: sectionSkeleton(section, params),
+    }));
     canvas.dataset.grid = section.module === 'concevoir' ? 'on' : 'off';
     $('inspector-body').replaceChildren(...loadingNodes('Chargement du détail…', 3));
     $('explorer-body').replaceChildren(...loadingNodes("Chargement de l'arborescence…", 3));
@@ -1447,7 +1710,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
     signal: controller.signal,
     goto,
     openPanel,
-    loading: (label, rows) => loadingNodes(label, rows),
+    loading: (label, rows, shape) => loadingNodes(label, rows, { shape }),
     params: params || {},
     rail: { on: registerRailAction },
     live: { on: (handler) => live.on(handler) },
@@ -2074,7 +2337,7 @@ async function runCommand(argv) {
 const SHORTCUTS = [
   ['⌘K', 'Ouvrir la palette, depuis tous les espaces'],
   ['⌘1 à ⌘5', "Aller à l'espace 1 à 5"],
-  ['J / K', 'Ligne suivante / précédente dans À traiter'],
+  ['J / K', 'Ligne suivante / précédente, dans toutes les listes'],
   ['Entrée', "Lancer l'action principale de la ligne tenue"],
   ['1 à 5', 'Ouvrir ou fermer un panneau'],
   ['⇧⌘F', 'Plein écran'],
@@ -2152,6 +2415,12 @@ function bindShortcuts() {
 
     if (event.key === '?' && !meta && !event.altKey) { event.preventDefault(); openShortcuts(); return; }
 
+    // P58 : j / k et Entrée sur les lignes, jamais depuis un menu « … » ouvert.
+    if (!meta && !event.altKey && !event.shiftKey && !(openMenu && openMenu.wrap.contains(event.target))) {
+      if ((event.key === 'j' || event.key === 'k') && moveInList(event.key === 'j' ? 1 : -1)) { event.preventDefault(); return; }
+      if (event.key === 'Enter' && activateInList(event)) return;
+    }
+
     // 1 à 5 : bascule des panneaux. Sans modificateur, comme un atelier 3D.
     if (/^[1-5]$/.test(event.key)) {
       const item = RAIL[Number(event.key) - 1];
@@ -2173,6 +2442,9 @@ async function main() {
   buildDock();
   bindResize();
   bindShortcuts();
+  document.addEventListener('click', closeMenuOutside);
+  document.addEventListener('scroll', closeMenuOutside, true);
+  window.addEventListener('resize', closeMenuOutside);
   for (const button of document.querySelectorAll('#st-theme [data-theme-pref]')) {
     button.addEventListener('click', () => setThemePref(button.dataset.themePref));
   }
