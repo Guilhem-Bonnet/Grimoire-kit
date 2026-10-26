@@ -51,6 +51,7 @@ function injectStyles() {
     .pl-filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
     .pl-search { width: 260px; max-width: 100%; box-sizing: border-box; border-radius: var(--r-pill); }
     .pl-filterbar .seg { height: 32px; border-radius: var(--r-pill); }
+    .pl-titlerow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
     .pl-seg-n { margin-left: 6px; color: var(--ink3); }
     .seg > button[aria-pressed="true"] .pl-seg-n { color: inherit; }
     .pl-fleet .tbl td { padding-top: 10px; padding-bottom: 10px; }
@@ -461,7 +462,37 @@ const plural = (n, one, many) => `${fmtInt(n)} ${n > 1 ? many : one}`;
 // rafraîchissement de la flotte ne remet pas la recherche à zéro.
 const fleetFilter = { query: '', segment: 'all' };
 
-function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false } = {}) {
+// La Flotte a deux vues (maquette « Flotte — données ») : Projets, la table,
+// et Données, la machine et qui partage quoi (P26, `donnees.js`). Le
+// segmenté se pose à côté du titre ; Données n'est importée et lue qu'au
+// clic, jamais au premier rendu de la Flotte.
+function viewSeg(current, onView) {
+  const seg = document.createElement('div');
+  seg.className = 'seg pl-viewseg';
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', 'Vue');
+  for (const [id, label] of [['projets', 'Projets'], ['donnees', 'Données']]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.view = id;
+    button.textContent = label;
+    button.setAttribute('aria-pressed', String(id === current));
+    button.addEventListener('click', () => onView(id));
+    seg.append(button);
+  }
+  return seg;
+}
+
+function withViewSeg(head, seg) {
+  const title = head.querySelector('.space-title');
+  if (!seg || !title) return;
+  const line = document.createElement('div');
+  line.className = 'pl-titlerow';
+  title.replaceWith(line);
+  line.append(title, seg);
+}
+
+function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false, viewSwitch = null } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-wrap pl-fleet';
 
@@ -498,7 +529,9 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
   }
   const create = renderNewProject(ctx, onSelect);
   actions.push(create.button);
-  wrap.append(spaceHead('Flotte', sub.join(' · '), ...actions), create.panel);
+  const head = spaceHead('Flotte', sub.join(' · '), ...actions);
+  withViewSeg(head, viewSwitch);
+  wrap.append(head, create.panel);
 
   // Le cockpit ne scanne jamais le disque (#341) : un registre vide rend une
   // flotte vide, pas une panne. Un tableau muet à zéro lignes se lisait comme
@@ -2315,6 +2348,8 @@ export async function mount(root, ctx) {
   // servi : choisir une ligne de la Flotte change la portée (`ctx.scope.set`).
   const level = cockpit && ctx.scope && ctx.scope.all ? 'flotte' : 'projet';
   const selected = ctx.host.project || null;
+  // Vue de la Flotte (`#flotte?vue=donnees`) : Projets par défaut.
+  let view = ctx.params && ctx.params.vue === 'donnees' ? 'donnees' : 'projets';
 
   // Un seul tour réseau en vol à la fois (#541 point 4) : un double-clic sur
   // « Rafraîchir », ou une action qui appelle `options.refresh()` pendant
@@ -2339,7 +2374,7 @@ export async function mount(root, ctx) {
   let queued = false;
   let queuedOpts;
 
-  const stateKey = () => level + '|' + (level === 'projet' ? selected : '');
+  const stateKey = () => level + '|' + (level === 'projet' ? selected : view);
 
   const runDraw = (opts) => {
     const startedKey = stateKey();
@@ -2371,7 +2406,12 @@ export async function mount(root, ctx) {
     shell.append(...ctx.loading('Chargement…', 3));
     root.replaceChildren(shell);
 
-    if (level === 'flotte') {
+    if (level === 'flotte' && view === 'donnees') {
+      ctx.inspector.replaceChildren();
+      const { renderMachine } = await import('./donnees.js');
+      if (ctx.signal.aborted) return;
+      await renderMachine(root, ctx, { seg: viewSeg(view, onView), decorate: withViewSeg });
+    } else if (level === 'flotte') {
       ctx.inspector.replaceChildren(); // pas de détail : pas de colonne (P62)
       // `forceFleet` ne vient que du bouton « Rafraîchir la flotte » — un
       // simple retour sur ce niveau (zoom, sélection d'un autre projet puis
@@ -2391,7 +2431,7 @@ export async function mount(root, ctx) {
           root, ctx, rows, attention,
           (slug) => ctx.scope.set(slug),
           () => draw({ forceFleet: true }),
-          { pending },
+          { pending, viewSwitch: viewSeg(view, onView) },
         );
         if (caret !== null) {
           const next = root.querySelector('.pl-search');
@@ -2419,6 +2459,13 @@ export async function mount(root, ctx) {
       revealFocus(root, ctx);
       ctx.dock.echo('grimoire doctor');
     }
+  };
+
+  const onView = (next) => {
+    if (next === view) return;
+    view = next;
+    ctx.setItem(next === 'donnees' ? { vue: 'donnees' } : {});
+    draw();
   };
 
   const draw = (opts) => {

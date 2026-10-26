@@ -85,6 +85,7 @@ from grimoire.tools import (
     workspace_hygiene,
     workspace_knowledge,
     workspace_language,
+    workspace_machine,
     workspace_memory,
     workspace_portfolio,
     workspace_pulse,
@@ -407,6 +408,15 @@ def _memory_quality(project_root: Path, query: _Query) -> Any:
     return workspace_hygiene.memory_quality(project_root, slug=_one(query, "slug") or None)
 
 
+def _data_machine(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/data/machine`` — les services mémoire du poste et qui les partage (P26).
+
+    Lecture seule, mesure fraîche : ``docker ps``/``docker inspect``, connexions
+    TCP et ``GET`` de version bornés ; rien ne démarre, aucun secret ne sort.
+    """
+    return workspace_machine.machine_view(project_root)
+
+
 def _assist_status(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/assist`` — l'opt-in et la disponibilité, sans coût.
 
@@ -489,6 +499,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/entries": _memory_entries,
     f"{PREFIX}memory/entry": _memory_entry,
     f"{PREFIX}memory/quality": _memory_quality,
+    f"{PREFIX}data/machine": _data_machine,
 }
 
 

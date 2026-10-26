@@ -330,6 +330,9 @@ export const api = {
   // Santé de la mémoire et file d'hygiène (P25) : une mesure fraîche d'un projet
   // (`slug` du registre, omis = le projet en portée). Lecture seule.
   memoryQuality: (slug) => get(WS + 'memory/quality', slug ? { slug } : undefined),
+  // Flotte › Données (P26) : services mémoire de la machine, conteneurs, propriétaires
+  // et partages. Lecture seule, mesure fraîche ; demandée à l'ouverture de la vue seulement.
+  dataMachine: () => get(WS + 'data/machine'),
   // Suppression gouvernée du cockpit (`POST /api/memory`) : confirmation
   // explicite, et le serveur la refuse (403) hors du projet qu'il sert.
   memoryDelete: (id, project) => post('/api/memory', { action: 'delete', id, project, confirm: true }),

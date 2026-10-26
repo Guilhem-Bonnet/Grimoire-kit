@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): Flotte › Données, la carte des services mémoire de la machine et de qui les partage, sans jamais rien démarrer (P26, `GAO-p26-carte-q-001`)
+  - **Lecture** : `GET /api/workspace/data/machine` rend, pour Weaviate, Qdrant, Neo4j, Redis et Ollama, l'état, la version annoncée par le service (sinon l'étiquette de l'image), le conteneur, le Compose propriétaire et la politique de redémarrage lus par `docker inspect`, l'extra Python importable et les projets du registre qui l'utilisent ; puis les partages de collection, de base Neo4j et de Redis entre projets.
+  - **Huit états distincts** : en ligne, démarrage, incomplet (extra absent, `GRIMOIRE_NEO4J_PASSWORD` absente), emprunté (le conteneur appartient au Compose d'un projet qui ne l'utilise pas), en échec, arrêté, absent, inconnu ; Docker absent ou injoignable rend « inconnu » avec son motif, jamais « arrêté ».
+  - **Sans démarrage ni secret** : `docker ps` et `docker inspect` seulement, sondes bornées et injectables ; du mot de passe Neo4j seule la présence sort, et `Config.Env` des conteneurs n'est jamais lu.
+  - **Interface** : segmenté Projets / Données à côté du titre de la Flotte (`#flotte?vue=donnees`), lu au clic seulement ; chaque service porte un lien vers sa console native et « Copier la commande », puis la matrice « Qui partage quoi » et ce que voit le cockpit.
 - feat(cockpit): inspecteur de tâche de Travail, les gates et leur remède avant toute transition (P11, `GAO-p11-inspect-001`)
   - **Gates d'abord** : l'inspecteur liste chaque passage déclaré depuis la colonne (`next_moves_require`), chaque condition verte ou rouge avec sa raison et son remède, puis les boutons de transition ; un refus se lit sur place, preuve par preuve, remède compris.
   - **Dernier refus** : le dernier `task.gate.refused` du TraceLedger s'affiche (date, acteur, gate, preuves manquantes) et date les conditions qu'il a nommées (« déjà refusée le … »).
