@@ -59,8 +59,12 @@ def test_le_focus_et_la_fermeture_maison_ont_disparu() -> None:
     for needle, why in gone.items():
         assert needle not in SHELL_JS, why
     assert "if (event.key === 'Escape') { event.preventDefault(); closePalette(); }" not in SHELL_JS
-    # Un espace qui lit l'état de la palette le lit à `open` (la Console de Source).
-    assert "el.open === true" in SPACE_SOURCES["source.js"]
+    # La Console simulée de Source lisait l'état de la palette pour se taire ;
+    # c'est désormais un vrai champ de la coque (P06) : aucun espace n'écoute
+    # plus le clavier de toute la page pour elle.
+    assert "onConsoleKeydown" not in SPACE_SOURCES["source.js"]
+    for name, source in SPACE_SOURCES.items():
+        assert "getElementById('palette').hidden" not in source, f"{name} : palette lue à `hidden`"
     menu = SHELL_JS[SHELL_JS.index("export function moreMenu"):SHELL_JS.index("// ── Actions de ligne")]
     assert "Escape" not in menu, "Échap du menu : c'est le popover qui le gère"
 
