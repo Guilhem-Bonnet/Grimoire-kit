@@ -11,8 +11,9 @@
 // - aucun bouton inerte : chaque geste ouvre d'abord un aperçu (ce qui sera
 //   touché, pourquoi) puis donne la commande qui le fait, à copier ; aucune
 //   écriture n'a de route sans export préalable, donc aucune ne part d'ici ;
-// - la carte par hall et la légende « Lire une connaissance » (P26) n'ont pas
-//   encore de lecture serveur : leur place est dite vide, rien n'est dessiné.
+// - la carte par hall et la légende « Lire une connaissance » n'ont pas
+//   encore de lecture serveur (P26 sert la carte machine de Flotte › Données,
+//   pas celle des halls) : leur place est dite vide, rien n'est dessiné.
 //
 // API consommées : api.memoryQuality, api.projects.
 
@@ -137,7 +138,7 @@ function healthCard(report) {
   return card;
 }
 
-/** La place de la carte par hall (P26) : dite vide, jamais simulée. */
+/** La place de la carte par hall : dite vide, jamais simulée. */
 function mapSlot() {
   const card = el('section', 'sm-card sm-map', null, { 'aria-labelledby': 'sm-h-map' });
   const head = el('div', 'sm-cardhead');
