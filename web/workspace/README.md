@@ -81,6 +81,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `spaces/executer.js` | Board gouverné, portes, carte de tâche, timeline | lot 4 |
 | `spaces/observer.js` | Runtime : KPI, coût, latence, spans, traces | lot 4 |
 | `spaces/memoire.js` | La recherche d'abord : filtres type, source, projet, date ; détail de l'entrée à droite | P24 |
+| `spaces/memoire-gestes.js` | Correction directe d'une entrée dans son panneau de détail : Corriger (étiquettes, source, fusion, retrait), Marquer remplacée…, historique avec Annuler… ; chaque geste par un aperçu avant/après puis son application (`POST /api/memory`, `action: gesture`) | P34 |
 | `spaces/sante.js` | Savoir › Santé et carte : critères de santé de la mémoire (en échec, réussis, inconnus, chacun avec sa mesure) et file d'hygiène, chaque geste par un aperçu puis sa commande à copier (`/api/workspace/memory/quality`) | P25 |
 | `spaces/source.js` | Fichiers par étage, éditeur, diff, override, provenance | lot 5 |
 | `spaces/source-editor.js` | IntelliSense de l'éditeur Source (issue 280) : colorisation par recouvrement, gouttière de diagnostics, complétion, infobulle du glossaire au survol ; suggestions par modèle local derrière (issue 280, voie 2) : barre « Suggérer », panneau d'aperçu, lien « Expliquer » sur un diagnostic | lot 5 |

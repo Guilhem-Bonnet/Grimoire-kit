@@ -180,10 +180,8 @@ def _project_api(proot: Path) -> Any:
 
 
 # ── Local API (cockpit only) ──────────────────────────────────────────────────
-# A read-only governance API: dispatches an allowlisted ``grimoire memory``
-# subcommand against a registered project. Bound to 127.0.0.1 only — never the
-# vitrine. Mutations are intentionally NOT exposed here yet (next increment,
-# behind explicit confirmation, still via the Memory OS CLI — never raw SQL).
+# Governance API (127.0.0.1 only): allowlisted ``grimoire memory`` reads, confirmed
+# mutations and correction gestures (P34), the last two on the served project only.
 
 _ALLOWED_ACTIONS: dict[str, list[str]] = {
     "status": [],
@@ -203,9 +201,7 @@ class _Mutation:
     subcommand: str | None = None  # defaults to the action name
 
 
-# Mutations stay deliberately small and well-defined; each maps to a real
-# ``grimoire memory`` command and runs only when the request carries
-# ``confirm: true`` (the UI gates this behind an explicit confirmation).
+# Each mutation maps to a real ``grimoire memory`` command and needs ``confirm: true``.
 _MUTATION_ACTIONS: dict[str, _Mutation] = {
     "gc": _Mutation(),  # consolidate / compact the store
     "delete": _Mutation(args=("--yes",), needs_id=True),  # remove one entry by id
@@ -863,7 +859,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         action = str(data.get("action", ""))
         is_read = action in _ALLOWED_ACTIONS
         is_mutation = action in _MUTATION_ACTIONS
-        if not (is_read or is_mutation):
+        gesture = action == "gesture"  # P34 : aperçu puis application (workspace_memory_gestures)
+        if not (is_read or is_mutation or gesture):
             self._send_json(400, {"ok": False, "error": f"action non autorisée: {action}"})
             return
         if is_mutation and data.get("confirm") is not True:
@@ -873,9 +870,13 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
-        if is_mutation and not _is_served_project(proot):
-            # P02 : delete/gc/sync n'agissent que sur le projet servi (échec fermé).
+        if (is_mutation or gesture) and not _is_served_project(proot):
+            # P02 : delete/gc/sync et gestes n'agissent que sur le projet servi (échec fermé).
             self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+            return
+        if gesture:
+            from grimoire.tools.workspace_memory_gestures import handle as memory_gesture
+            self._send_json(*memory_gesture(proot, data))
             return
         subcmd = action
         values: list[str] = []

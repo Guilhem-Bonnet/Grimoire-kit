@@ -310,7 +310,8 @@ def test_le_detail_montre_provenance_et_chaine(savoir: tuple[Page, dict[str, str
     _search(page, "épinglé")
     page.locator(".kn-res", has_text="1.19.1").first.click()
     detail = page.locator("#inspector-body .kn-detail")
-    page.wait_for_function("() => document.querySelector('#inspector-body .kn-kv')?.textContent.includes('Journal')")
+    # L'historique (journal des écritures P14) vient avec la fiche complète (P34 : section « Historique »).
+    page.wait_for_selector("#inspector-body .kn-hist li[data-op='store']")
 
     text = detail.inner_text()
     assert "en vigueur" in text
