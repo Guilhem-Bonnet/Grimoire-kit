@@ -2703,7 +2703,7 @@ export async function mount(root, ctx) {
     ask.addEventListener('click', () => { askMe.on = !askMe.on; draw(); });
     const formula = document.createElement('span');
     formula.className = 'ex-formula';
-    formula.append(text('b', null, '›'), 'grimoire task board');
+    formula.append(text('b', null, '›'), 'grimoire task list');
     // « Nouvelle tâche » (P35) : désactivé, raison écrite, hors du projet servi.
     head.append(ask, row(formula, ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
     head.lastElementChild.classList.add('ex-head-end');
@@ -2917,7 +2917,7 @@ export async function mount(root, ctx) {
       inspectedSig = '';
       ctx.inspector.dataset.owner = '';
       ctx.inspector.replaceChildren(text('p', 'lbl', 'Sélectionnez une tâche pour voir sa porte suivante.'));
-      ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task board');
+      ctx.dock.echo(portfolioMode ? 'grimoire task list --all-projects' : 'grimoire task list');
     }
   }
 

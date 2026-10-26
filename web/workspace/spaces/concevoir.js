@@ -53,6 +53,8 @@ const GENRE_LABEL = { blueprint: 'Blueprint', studio: 'Studio' };
 // dot de validation (dot+word, jamais la couleur seule). `.dot.sX` vient de
 // shell.css.
 const GENRE_DOT = { blueprint: 's1', studio: 's2' };
+/** Le fichier qu'attendent `grimoire blueprint validate|compile` : un chemin, jamais un identifiant. */
+const blueprintFile = (id) => `_grimoire/blueprints/${id}.blueprint.json`;
 const RANK_COL = 230;
 const RANK_ROW = 118;
 
@@ -301,10 +303,23 @@ export async function mount(root, ctx) {
   // un blueprint chargé — mêmes conditions que le bouton « Bibliothèque » de
   // la barre d'outils du graphe ; en dehors, « 2 » n'a rien à faire.
   ctx.rail?.on('library', () => {
-    if (!graphAvailable || state.zoom !== 'workflow' || !state.selectedId) return;
+    if (libraryUnavailable()) return;
     state.paletteOpen = !state.paletteOpen;
     render();
   });
+
+  /** Pourquoi « 2 » ne peut rien ici, ou `''` quand le tiroir s'ouvre (P06). */
+  function libraryUnavailable() {
+    if (!graphAvailable) return "l'éditeur de graphe n'est pas disponible ici";
+    if (state.zoom !== 'workflow' || !state.selectedId) return 'ouvre un blueprint au niveau Workflow pour poser des nœuds';
+    return '';
+  }
+
+  /** Le rail suit le niveau affiché : désactivé, il dit pourquoi. */
+  function syncLibraryRail() {
+    ctx.rail?.reason?.('library', libraryUnavailable());
+  }
+  syncLibraryRail();
 
   function aborted() {
     return ctx.signal.aborted;
@@ -692,7 +707,7 @@ export async function mount(root, ctx) {
   function runValidate() {
     if (!state.blueprint) return undefined;
     ctx.dock.setTab('problemes');
-    ctx.dock.echo(`grimoire blueprint validate ${state.selectedId}`);
+    ctx.dock.echo(`grimoire blueprint validate ${blueprintFile(state.selectedId)}`);
     return runAction('validate', async () => {
       const lint = await ctx.api.blueprintValidate(state.selectedId, state.blueprint);
       return applyLint(state.selectedId, lint);
@@ -701,11 +716,13 @@ export async function mount(root, ctx) {
 
   function runSimulate() {
     if (!state.blueprint) return undefined;
-    ctx.dock.echo(`grimoire blueprint simulate ${state.selectedId}`);
+    // Aucune sous-commande ne simule seule (`blueprint compile` simule avant
+    // d'écrire) : l'équivalent honnête est la route que le bouton appelle.
+    ctx.dock.echo(`POST /api/blueprints/${state.selectedId}/simulate`);
     return runAction('simulate', async () => {
       const simulate = await ctx.api.blueprintSimulate(state.selectedId, state.blueprint);
       state.simulate = simulate;
-      ctx.dock.log('problemes', `$ grimoire blueprint simulate ${state.selectedId}`, `verdict : ${simulate.verdict}`);
+      ctx.dock.log('problemes', `$ simulation · ${state.selectedId}`, `verdict : ${simulate.verdict}`);
       // `blueprint_simulate` (forge_server.py) rend « prêt à appliquer » ou
       // « bloqué » avec ses bloqueurs : un blocage dit pourquoi.
       const blockers = simulate.blockers || [];
@@ -717,11 +734,11 @@ export async function mount(root, ctx) {
 
   function runCompile() {
     if (!state.blueprint) return undefined;
-    ctx.dock.echo(`grimoire blueprint compile ${state.selectedId}`);
+    ctx.dock.echo(`grimoire blueprint compile ${blueprintFile(state.selectedId)}`);
     return runAction('compile', async () => {
       const compiled = await ctx.api.blueprintCompile(state.selectedId, state.blueprint);
       const artifact = compiled.artifact || '(sans nom)';
-      ctx.dock.log('problemes', `$ grimoire blueprint compile ${state.selectedId}`, `artefact : ${artifact}`);
+      ctx.dock.log('problemes', `$ grimoire blueprint compile ${blueprintFile(state.selectedId)}`, `artefact : ${artifact}`);
       ctx.dock.setTab('problemes');
       return { text: `Compilé : ${artifact}`, tone: 'ok' };
     });
@@ -1015,6 +1032,7 @@ export async function mount(root, ctx) {
 
   function render() {
     if (aborted()) return;
+    syncLibraryRail();
     ctx.docbar.setZoom(zoomShown(), state.zoom, pickZoom);
     ctx.docbar.setBreadcrumb([
       ...(state.zoom !== 'projet' && state.zoom !== 'flotte' && state.selectedId ? [state.selectedId] : []),
@@ -1038,12 +1056,13 @@ export async function mount(root, ctx) {
   } catch (error) {
     if (aborted()) return;
     if (state.zoom !== 'flotte') {
-      root.append(ctx.empty('Concevoir', `Impossible de lire les blueprints du projet : ${error.message}`, 'grimoire blueprint list'));
+      root.append(ctx.empty('Concevoir', `Impossible de lire les blueprints du projet : ${error.message}`, 'grimoire doctor'));
       return;
     }
     state.containers = [];
   }
   if (aborted()) return;
-  ctx.dock.echo('grimoire blueprint list');
+  // `grimoire blueprint` n'a pas de `list` : la liste est celle que lit la route.
+  ctx.dock.echo('GET /api/workspace/blueprints');
   render();
 }
