@@ -120,7 +120,7 @@ def test_la_table_porte_projet_chemin_attention_kit_sessions_dernier_signe(page:
 
 def test_les_segments_et_le_filtre_texte_reduisent_la_table(page: Page, served_inbox: dict[str, str]) -> None:
     _open(page, served_inbox)
-    seg = page.locator(".pl-fleet .seg")
+    seg = page.locator(".pl-fleet .pl-filterbar .seg")
     assert [b.get_attribute("aria-pressed") for b in seg.locator("button").all()] == ["true", "false", "false"]
 
     seg.get_by_role("button", name="Kit en retard").click()
