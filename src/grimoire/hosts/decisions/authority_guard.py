@@ -30,7 +30,11 @@ vecteurs connus pour fabriquer cette preuve :
   d'autorité du mandat de l'orchestrateur et la clé de contrôle du cockpit. Refusé quel que soit le profil, par
   les mêmes voies d'écriture que le journal (Write, Edit, NotebookEdit, redirection, ``cp``/``mv``/``tee``/
   ``sed -i``, ``python -c``). Le kit y écrit par son propre code, hors outil d'agent ; la limite résiduelle (un
-  script arbitraire) est écrite à :data:`CONTROL_ZONE` ;
+  script arbitraire) est écrite à :data:`CONTROL_ZONE`. Le refus reste large : une commande qui ne fait que
+  *citer* la zone (message de commit, corps d'issue, heredoc écrit vers un autre fichier) est refusée aussi,
+  par prudence. Mais seule une **écriture caractérisée** (:func:`writes_control_zone` : redirection, ``tee``,
+  ``cp``/``mv``/``install``/``ln`` vers la zone, ``rm``/``truncate``/``sed -i`` d'un de ses chemins, code
+  interprété qui y écrit) porte ``revokes`` et révoque le mandat (#982) ;
 - ``ledger-snapshot`` (K13) — écrire ``ledger.snapshot.json``, l'instantané du rejeu du
   ledger : refusé quel que soit le profil. Ce n'est pas une preuve d'autorité, c'est un
   cache que le ledger restaure *sans rejouer* le préfixe qu'il couvre ; son hash ne lie que
@@ -61,6 +65,7 @@ from grimoire.hosts.decisions.tool_facts import (
     _strip_heredoc_bodies,
     command_surface,
     extract_c_bodies,
+    interpreted_bodies,
 )
 from grimoire.policies.schemas import ActionKind, MutationClass
 
@@ -74,6 +79,7 @@ __all__ = [
     "ForgeryVector",
     "forgery_vector",
     "names_zone_secret",
+    "writes_control_zone",
 ]
 
 #: Suffixe des journaux de challenges et de décisions de checkpoint
@@ -91,8 +97,9 @@ SNAPSHOT_FILENAME = "ledger.snapshot.json"
 #:
 #: **Limite résiduelle, écrite** : la garde lit des chemins et des commandes, pas du code. Un agent qui lance un
 #: script Python arbitraire (ou ``bash script.sh`` dont le corps écrit là) contourne cette garde ; ``LIMIT_NOTE``
-#: l'affiche à chaque refus. Le mandat n'en dépend pas seul : le journal est chaîné par hash et un mandat se
-#: révoque sur écriture refusée dans la zone (``MandateStore.revoke_on_protected_write``).
+#: l'affiche à chaque refus. Le mandat n'en dépend pas seul : le journal est chaîné par hash et le mandat du
+#: projet de la session se révoque sur écriture caractérisée refusée dans la zone
+#: (:func:`grimoire.missions.mandate.revoke_session_mandates`, #982).
 #: Le second membre attrape le chemin que du code assemble en morceaux cités
 #: (``Path.home().joinpath('.grimoire', 'control', ...)``, ``'.grimoire' / 'control'``).
 CONTROL_ZONE = re.compile(r"""\.grimoire(?:/+|['"][\s,+/()'"]*)control(?![A-Za-z0-9_.-])""")
@@ -151,11 +158,17 @@ _USER_PROMPT_KEY = "userpromptsubmit"
 
 @dataclass(frozen=True, slots=True)
 class ForgeryVector:
-    """Un vecteur reconnu : son code, ce qu'il viserait, et s'il ne compte qu'en governed."""
+    """Un vecteur reconnu : son code, ce qu'il viserait, s'il ne compte qu'en governed, et s'il révoque.
+
+    ``revokes`` (#982) : vrai pour une écriture **caractérisée** dans la zone de contrôle (chemin d'un outil
+    d'écriture, ou :func:`writes_control_zone`). Une commande qui ne fait que citer la zone est refusée
+    (``revokes`` faux) : le refus prudent coûte un geste, la révocation coupe toute l'autonomie.
+    """
 
     code: str
     what: str
     governed_only: bool
+    revokes: bool = False
 
 
 def _norm(text: str) -> str:
@@ -172,15 +185,18 @@ def _names_hook_module(text: str) -> bool:
     )
 
 
-def _write_vector(marker: str, what: str) -> ForgeryVector:
-    """Le vecteur d'une écriture qui vise *marker* : l'instantané du ledger (K13) et la zone de contrôle ont leur code."""
+def _write_vector(marker: str, what: str, *, characterized: bool) -> ForgeryVector:
+    """Le vecteur d'une écriture qui vise *marker* : l'instantané du ledger (K13) et la zone de contrôle ont leur code.
+
+    Seule la zone de contrôle révoque, et seulement sur écriture *characterized* (#982).
+    """
     if marker == SNAPSHOT_FILENAME:
         code = "ledger-snapshot"
     elif marker == CONTROL_ZONE_MARKER:
         code = "control-zone"
     else:
         code = "journal"
-    return ForgeryVector(code, what, governed_only=False)
+    return ForgeryVector(code, what, governed_only=False, revokes=characterized and code == "control-zone")
 
 
 def _names_protected(text: str) -> str:
@@ -302,8 +318,17 @@ def _command_paths(command: str, home: str) -> list[tuple[str, list[tuple[str, s
     d'abord, puis chaque mot relatif est joint à chacun : une commande qui change de dossier n'est pas lue
     comme si elle ne l'avait pas fait.
     """
-    bodies = [_strip_heredoc_bodies(command), *extract_c_bodies(command)]
-    segments = [_without_neutral(seg) for text in bodies for seg in _command_words(text)]
+    segments, dirs = _segments_and_dirs([_strip_heredoc_bodies(command), *extract_c_bodies(command)], home)
+    return [
+        (launched[0].rsplit("/", 1)[-1], [r for word in launched[1:] for r in _resolutions(word, dirs, home)])
+        for launched in segments
+        if launched
+    ]
+
+
+def _segments_and_dirs(texts: list[str], home: str) -> tuple[list[list[str]], list[str]]:
+    """Les segments de *texts* (sans préfixes neutres) et chaque répertoire où la commande peut se placer."""
+    segments = [_without_neutral(seg) for text in texts for seg in _command_words(text)]
     dirs = [_cwd()]
     for launched in segments:
         if launched and launched[0].rsplit("/", 1)[-1] in _DIR_PROGRAMS:
@@ -316,12 +341,7 @@ def _command_paths(command: str, home: str) -> list[tuple[str, list[tuple[str, s
         for word in launched:
             if word.startswith(("--directory=", "--target-directory=")):
                 dirs.extend(real for _normal, real in _resolutions(word.split("=", 1)[1], list(dirs), home))
-    dirs = list(dict.fromkeys(dirs))
-    return [
-        (launched[0].rsplit("/", 1)[-1], [r for word in launched[1:] for r in _resolutions(word, dirs, home)])
-        for launched in segments
-        if launched
-    ]
+    return segments, list(dict.fromkeys(dirs))
 
 
 def _reaches(normal: str, real: str, target: str) -> bool:
@@ -342,6 +362,187 @@ def _names_control_zone_command(command: str) -> bool:
                 return True
             if program == "ln" and (normal in (grimoire, home) or real in (grimoire, home)):
                 return True
+    return False
+
+
+# ── Écriture caractérisée vs mention (#982) ──────────────────────────────────
+#
+# Le refus lit la commande entière, heredocs et textes cités compris (échec fermé). La révocation du mandat, elle,
+# exige une écriture *caractérisée* : un chemin de la zone en position de cible d'écriture. Un message de commit,
+# un corps d'issue, un heredoc écrit vers un autre fichier ou un ``grep`` qui cherche le chemin le citent sans y
+# écrire. Révoquer sur une citation coupait toute l'autonomie jusqu'à un tour humain, pour une prose.
+
+#: Programmes dont chaque opérande est écrit, déplacé, supprimé ou change de droits.
+_DELETERS = frozenset({"rm", "rmdir", "unlink", "shred", "truncate"})
+_MODE_CHANGERS = frozenset({"chmod", "chown", "chgrp", "chattr", "setfacl"})
+_WRITES_EVERY_OPERAND = _DELETERS | _MODE_CHANGERS | frozenset({"tee", "mv", "ln", "touch", "mkdir", "rename"})
+#: Programmes qui écrivent leur dernier opérande (ou le dossier de ``-t``/``--target-directory``).
+_WRITES_DESTINATION = frozenset({"cp", "install", "rsync", "scp"})
+#: Éditeurs en place : avec ``-i``/``--in-place``, leurs fichiers opérandes sont réécrits.
+_IN_PLACE_EDITORS = frozenset({"sed", "perl", "ruby"})
+#: Options d'un éditeur en place dont la valeur est un script, pas un fichier édité.
+_SCRIPT_OPTIONS = frozenset({"-e", "-E", "-f", "--expression", "--file"})
+#: Programmes pour lesquels ``~/.grimoire`` lui-même (déplacé, supprimé, lié) contourne la zone.
+_RELOCATES_ANY_OPERAND = frozenset({"mv", "rm", "rmdir", "ln", "rename", "chmod", "chown"})
+#: Ce qui, dans du code interprété (``python -c``, heredoc lu par un interpréteur), ouvre ou modifie un fichier.
+_CODE_WRITE = re.compile(
+    r"""\bopen\s*\([^)]*['"](?:[rbt]*[wax+][rwxabt+]*|\+?<|>>?|\+>)['"]"""
+    r"""|\bmode\s*=\s*['"][rbt]*[wax+]"""
+    r"""|\.\s*(?:write_text|write_bytes|unlink|rmdir|rename|touch|mkdir|symlink_to|hardlink_to|chmod)\s*\("""
+    r"""|\bos\s*\.\s*(?:remove|unlink|rename|replace|rmdir|removedirs|makedirs|mkdir|symlink|link|chmod|chown"""
+    r"""|truncate|open|write)\s*\("""
+    r"""|\bshutil\s*\.\s*\w+\s*\("""
+    r"""|\b(?:atomic_write|writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|copyFileSync"""
+    r"""|renameSync|unlinkSync|rmSync|FileUtils|File\s*\.\s*(?:write|open|delete|rename))\b"""
+    r"""|\bjson\s*\.\s*dump\s*\("""
+)
+_WORD_STOP = frozenset(";&|()<>\n")
+
+
+def _read_word(text: str, start: int) -> tuple[str, int]:
+    """Le mot shell qui commence à *start*, guillemets et antislash retirés, et l'index qui le suit."""
+    out: list[str] = []
+    i, quote = start, ""
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+            elif ch == "\\" and quote == '"' and i + 1 < len(text):
+                out.append(text[i + 1])
+                i += 1
+            else:
+                out.append(ch)
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "\\" and i + 1 < len(text):
+            out.append(text[i + 1])
+            i += 1
+        elif ch.isspace() or ch in _WORD_STOP:
+            break
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out), i
+
+
+def _redirect_targets(text: str) -> list[str]:
+    """Les cibles des redirections en écriture (``>``, ``>>``, ``>|``, ``&>``, ``<>``) hors guillemets.
+
+    Un ``>`` cité (``-m "a > b"``, ``--body "…"``) n'est pas une redirection ; ``>&2`` duplique un descripteur.
+    """
+    targets: list[str] = []
+    i, quote = 0, ""
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+            elif ch == "\\" and quote == '"':
+                i += 1
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "\\":
+            i += 1
+        elif ch == ">":
+            j = i + 1
+            while j < len(text) and text[j] in ">|&":
+                j += 1
+            while j < len(text) and text[j] in " \t":
+                j += 1
+            word, i = _read_word(text, j)
+            if word and not word.isdigit() and word != "-":
+                targets.append(word)
+            continue
+        i += 1
+    return targets
+
+
+def _operands(words: list[str]) -> list[str]:
+    return [w for w in words if not w.startswith("-")]
+
+
+def _written_operands(program: str, args: list[str]) -> list[str]:
+    """Les opérandes que *program* écrit, d'après sa forme ; ``[]`` si ce n'est pas un écrivain reconnu."""
+    if program in _WRITES_EVERY_OPERAND:
+        return _operands(args)
+    if program in _WRITES_DESTINATION:
+        targeted = [b for a, b in pairwise(args) if a in ("-t", "--target-directory")]
+        targeted += [a.split("=", 1)[1] for a in args if a.startswith("--target-directory=")]
+        operands = _operands(args)
+        return targeted or operands[-1:]
+    if program == "dd":
+        return [a.split("=", 1)[1] for a in args if a.startswith("of=")]
+    if program in _IN_PLACE_EDITORS and any(a.startswith("--in-place") or re.match(r"^-[A-Za-z]*i", a) for a in args):
+        kept: list[str] = []
+        skip = False
+        has_script_option = False
+        for arg in args:
+            if skip:
+                skip = False
+                continue
+            if arg in _SCRIPT_OPTIONS:
+                skip = has_script_option = True
+                continue
+            if not arg.startswith("-"):
+                kept.append(arg)
+        # ``sed -i 's/a/b/' f`` : sans -e/-f, le premier opérande est le script, pas un fichier.
+        return kept if has_script_option or program != "sed" else kept[1:]
+    if program == "tar" and (
+        any(a in ("--extract", "--get") or re.fullmatch(r"-[A-Za-z]*x[A-Za-z]*", a) for a in args)
+        or bool(args and re.fullmatch(r"[A-Za-z]*x[A-Za-z]*", args[0]))  # forme ancienne : ``tar xf a.tar``
+    ):
+        return _operands(args)
+    if program == "find" and any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir") for a in args):
+        return _operands(args)
+    return []
+
+
+def _hits_zone(word: str, dirs: list[str], zones: list[str], home: str) -> bool:
+    """Vrai si *word*, lu comme chemin, désigne la zone de contrôle ou ce qu'elle contient."""
+    if CONTROL_ZONE.search(_norm(word)) or Path(_norm(word)).name in CONTROL_ZONE_FILES:
+        return True
+    return any(_reaches(normal, real, z) for normal, real in _resolutions(word, dirs, home) for z in zones)
+
+
+def writes_control_zone(command: str) -> bool:
+    """Vrai si *command* écrit de façon **caractérisée** dans la zone de contrôle (#982).
+
+    Caractérisée : un chemin de la zone est la cible d'une redirection en écriture, l'opérande écrit de ``tee``,
+    ``cp``/``install``/``rsync`` (destination), ``mv``/``ln``/``rm``/``truncate``/``chmod``… (tout opérande),
+    ``sed -i``, ``dd of=``, ``tar -x``, ``find -delete`` ; ``~/.grimoire`` lui-même déplacé, supprimé ou lié ; ou
+    du code interprété (``python -c``, heredoc lu par un interpréteur) qui nomme la zone **et** contient un appel
+    d'écriture. Le reste — la zone citée dans un argument de texte, un heredoc écrit vers un autre fichier, un
+    ``grep`` qui la cherche — est une mention : la garde la refuse, elle ne révoque rien.
+    """
+    zones, grimoire, home = _control_zones()
+    shell_texts = [_strip_heredoc_bodies(command), *extract_c_bodies(command)]
+    for language, body in interpreted_bodies(command):
+        if language == "shell":
+            shell_texts.append(body)
+        elif _names_protected(body) == CONTROL_ZONE_MARKER and _CODE_WRITE.search(body):
+            return True
+    _, dirs = _segments_and_dirs(shell_texts, home)
+    if any(_hits_zone(t, dirs, zones, home) for text in shell_texts for t in _redirect_targets(text)):
+        return True
+    # Les assignations ne sont retirées qu'en tête : ``dd of=…`` garde son opérande.
+    for raw in (seg for text in shell_texts for seg in _command_words(text)):
+        words = list(raw)
+        while words and (_ENV_ASSIGNMENT.match(words[0]) or words[0].rsplit("/", 1)[-1] in _NEUTRAL):
+            words = words[1:]
+        if not words:
+            continue
+        # Derrière un lanceur (``timeout 5 cp …``, ``xargs rm``), le programme visé peut être à toute position.
+        for k in range(len(words)) if words[0].rsplit("/", 1)[-1] in _LAUNCHERS else (0,):
+            program, args = words[k].rsplit("/", 1)[-1], words[k + 1 :]
+            if any(_hits_zone(w, dirs, zones, home) for w in _written_operands(program, args)):
+                return True
+            if program in _RELOCATES_ANY_OPERAND or program in _WRITES_DESTINATION:
+                relocated = _operands(args) if program in _RELOCATES_ANY_OPERAND else _written_operands(program, args)
+                anchors = (grimoire, home) if program == "ln" else (grimoire,)
+                for word in relocated:
+                    if any(n in anchors or r in anchors for n, r in _resolutions(word, dirs, home)):
+                        return True
     return False
 
 
@@ -526,14 +727,29 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
         for target in facts.targets:
             marker = _names_protected(target) or (CONTROL_ZONE_MARKER if _names_control_zone_path(target) else "")
             if marker:
-                return _write_vector(marker, f"écriture de {target}")
+                # Le chemin d'un outil d'écriture est sa cible : écriture caractérisée.
+                return _write_vector(marker, f"écriture de {target}", characterized=True)
     command = facts.command
     if not command:
         return None
     if facts.mutation is not MutationClass.READ_ONLY:
         marker = _names_protected(command) or (CONTROL_ZONE_MARKER if _names_control_zone_command(command) else "")
+        if marker == CONTROL_ZONE_MARKER and not writes_control_zone(command):
+            # #982 : la zone est citée (message de commit, corps d'issue, heredoc vers un autre fichier), pas
+            # écrite. Refus prudent, sans révocation : le mandat reste actif.
+            return _write_vector(
+                marker,
+                f"commande qui cite la zone de contrôle ({marker}) sans y écrire de façon caractérisée — refus "
+                "prudent, le mandat n'est pas révoqué ; écris ce texte par l'outil Write puis passe le fichier "
+                "(`git commit -F`, `--body-file`)",
+                characterized=False,
+            )
         if marker:
-            return _write_vector(marker, f"commande qui écrit un journal d'autorité ou l'instantané du ledger ({marker})")
+            return _write_vector(
+                marker,
+                f"commande qui écrit un journal d'autorité ou l'instantané du ledger ({marker})",
+                characterized=True,
+            )
     executed = [command_surface(command), *extract_c_bodies(command)]
     if facts.mutation is not MutationClass.READ_ONLY and any(_names_hook_module(text) for text in executed):
         return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)

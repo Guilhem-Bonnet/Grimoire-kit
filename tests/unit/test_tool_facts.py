@@ -16,6 +16,8 @@ left no mutation trace in the evidence pack.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from grimoire.hosts.decisions import classify_tool, command_surface
@@ -393,6 +395,158 @@ def test_other_paths_are_not_taken_for_the_control_zone(real_home, command: str)
     from grimoire.hosts.decisions.authority_guard import forgery_vector
 
     assert forgery_vector(classify_tool("Bash", {"command": command})) is None, command
+
+
+# ── Écriture caractérisée vs mention : seule la première révoque (#982) ─────────────────────────
+# Le mandat du kit est tombé deux fois le 2026-10-26 sur une commande qui ne faisait que *citer* la zone : un
+# message de commit par heredoc, un corps d'issue écrit dans le scratchpad. Le refus prudent reste ; la
+# révocation, qui coupe toute l'autonomie jusqu'à un tour humain, exige une écriture caractérisée.
+
+
+@pytest.mark.parametrize("command", _ZONE_COMMANDS)
+def test_disguised_control_zone_writes_are_characterized_and_revoke(real_home, command: str) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions.authority_guard import forgery_vector, writes_control_zone
+
+    vector = forgery_vector(classify_tool("Bash", {"command": command}))
+    assert vector is not None and vector.code == "control-zone" and vector.revokes is True, command
+    assert writes_control_zone(command), command
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Write", {"file_path": _JOURNAL, "content": "{}\n"}),
+        ("Edit", {"file_path": _PROOF, "old_string": "false", "new_string": "true"}),
+        ("Bash", {"command": f"echo '{{}}' >> {_PROOF}"}),
+        ("Bash", {"command": f"cp /tmp/forged.json {_PROOF}"}),
+        ("Bash", {"command": f"mv /tmp/forged {_JOURNAL}"}),
+        ("Bash", {"command": f"tee -a {_PROOF} < /tmp/forged"}),
+        ("Bash", {"command": f"sed -i 's/false/true/' {_PROOF}"}),
+        ("Bash", {"command": f"python -c \"open('{_PROOF}', 'w').write('{{}}')\""}),
+        ("Bash", {"command": f"python3 - <<'EOF'\nwith open('{_JOURNAL}', 'a') as fh:\n    fh.write('x')\nEOF"}),
+        ("Bash", {"command": f"rm -f {_JOURNAL}"}),
+        ("Bash", {"command": f"truncate -s 0 {_JOURNAL}"}),
+        ("Bash", {"command": f"install -m 600 /tmp/k {_ZONE}/cockpit-key"}),
+        ("Bash", {"command": f"cp -t {_ZONE} /tmp/cockpit-key"}),
+        ("Bash", {"command": f"bash -c \"echo x > {_PROOF}\""}),
+        ("Bash", {"command": f"timeout 5 cp /tmp/x {_PROOF}"}),
+    ],
+)
+def test_a_characterized_control_zone_write_revokes(tool: str, tool_input: dict[str, object]) -> None:
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    vector = forgery_vector(classify_tool(tool, tool_input))
+    assert vector is not None and vector.code == "control-zone" and vector.revokes is True, tool_input
+
+
+_MENTIONS = [
+    'git commit -m "fix(hosts): refus de lecture de ~/.grimoire/control/cockpit-key et du journal"',
+    "git commit -q -F - <<'EOF'\nfix: le journal ~/.grimoire/control/mandates.authority.jsonl\nEOF",
+    "cat > notes/body.md <<'EOF'\nLa zone ~/.grimoire/control est protégée.\nEOF\ngh issue create --title t --body-file notes/body.md",
+    'gh issue create --title t --body "écrire > ~/.grimoire/control/host-contracts.json est refusé"',
+    'gh pr create --title t --body "voir ~/.grimoire/control" && git push',
+    "printf '%s\\n' 'voir ~/.grimoire/control/cockpit-key' > notes.md",
+    'echo "cp x ~/.grimoire/control/y" >> notes.md',
+    "sed -i 's|~/.grimoire/control|<zone>|' notes.md",
+    "python3 - <<'EOF'\nprint('~/.grimoire/control')\nEOF",
+    "grep -rn '.grimoire/control' src > hits.txt",
+]
+
+
+@pytest.mark.parametrize("command", _MENTIONS)
+def test_a_mention_of_the_control_zone_does_not_revoke(real_home, command: str) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions.authority_guard import forgery_vector, writes_control_zone
+
+    vector = forgery_vector(classify_tool("Bash", {"command": command}))
+    assert vector is None or vector.revokes is False, command
+    assert not writes_control_zone(command), command
+
+
+def test_a_mention_is_still_refused_prudently(real_home) -> None:  # type: ignore[no-untyped-def]
+    """Le refus prudent reste (le risque d'une voie d'écriture non reconnue) ; il dit que le mandat tient."""
+    from grimoire.hosts.decisions.authority_guard import forgery_vector
+
+    vector = forgery_vector(classify_tool("Bash", {"command": _MENTIONS[1]}))
+    assert vector is not None and vector.code == "control-zone" and vector.revokes is False
+    assert "pas révoqué" in vector.what
+
+
+def _grant_on(root: Path) -> object:
+    from grimoire.missions.mandate import MandateRequest, MandateStore
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
+    root.mkdir(parents=True, exist_ok=True)
+    store = MandateStore(root)
+    store.grant(MandateRequest.build(("accept",), ("implementation",), 1, "+1h"), origin=ORIGIN_HUMAN, via="test")
+    assert store.state().active
+    return store
+
+
+def _pre_tool(root: Path, tool: str, tool_input: dict[str, object], session: str = "S1"):  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions import HookInput, run_decision
+    from grimoire.hosts.events import HookEvent
+
+    return run_decision(
+        "grimoire.tool-policy",
+        HookInput(event=HookEvent.PRE_TOOL_USE, project_root=root, tool_name=tool, tool_input=tool_input, session_id=session),
+    )
+
+
+@pytest.mark.parametrize("command", _MENTIONS[:5])
+def test_the_brake_refuses_a_mention_but_keeps_the_mandate(real_home, tmp_path, command: str) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions import Outcome
+
+    store = _grant_on(tmp_path / "proj")
+    decision = _pre_tool(tmp_path / "proj", "Bash", {"command": command})
+    assert store.state().active, command  # type: ignore[attr-defined]
+    assert decision.outcome is Outcome.DENY and decision.detail["authority_revokes"] is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo '{}' > ~/.grimoire/control/mandates.authority.jsonl",
+        "cp /tmp/forged.json ~/.grimoire/control/host-contracts.json",
+        "python3 -c \"open('/x/.grimoire/control/host-contracts.json', 'w').write('{}')\"",
+    ],
+)
+def test_the_brake_revokes_on_a_characterized_write_and_says_why(real_home, tmp_path, command: str) -> None:  # type: ignore[no-untyped-def]
+    from grimoire.hosts.decisions import Outcome
+
+    store = _grant_on(tmp_path / "proj")
+    decision = _pre_tool(tmp_path / "proj", "Bash", {"command": command}, session="S-982")
+    assert decision.outcome is Outcome.DENY and decision.detail["authority_revokes"] is True
+    state = store.state()  # type: ignore[attr-defined]
+    assert not state.active and state.reason == "revoked"
+    cause = state.to_dict()["revocation"]
+    assert cause["reason"] == "protected_write" and cause["session_id"] == "S-982" and cause["tool"] == "Bash"
+    assert cause["command"].split()[0] in ("echo", "cp", "python3") and cause["ts"]
+
+
+def test_the_revocation_only_hits_the_session_project(real_home, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Une session du projet A ne révoque pas le mandat du projet B ; une session sans mandat n'en révoque aucun."""
+    a, b, forge = tmp_path / "kit", tmp_path / "other", tmp_path / "forge"
+    store_a, store_b = _grant_on(a), _grant_on(b)
+    forge.mkdir()
+    write = {"command": "cp /tmp/forged ~/.grimoire/control/host-contracts.json"}
+    _pre_tool(forge, "Bash", write)
+    assert store_a.state().active and store_b.state().active  # type: ignore[attr-defined]
+    _pre_tool(a, "Bash", write)
+    assert not store_a.state().active and store_b.state().active  # type: ignore[attr-defined]
+
+
+def test_a_task_worktree_session_revokes_its_project_mandate(real_home, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Le worker d'une tâche tourne dans un worktree lié : il agit sous le mandat du worktree principal."""
+    main, other = tmp_path / "kit", tmp_path / "other"
+    store_main, store_other = _grant_on(main), _grant_on(other)
+    gitdir = main / ".git" / "worktrees" / "t-1"
+    gitdir.mkdir(parents=True)
+    (gitdir / "commondir").write_text("../..\n", encoding="utf-8")
+    worktree = tmp_path / "wt" / "t-1"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    _pre_tool(worktree, "Write", {"file_path": str(real_home / ".grimoire" / "control" / "cockpit-key"), "content": "k"})
+    assert not store_main.state().active and store_other.state().active  # type: ignore[attr-defined]
 
 
 # ── Lecture de la clé du cockpit et du journal du mandat : jokers, répertoire courant, liens ────

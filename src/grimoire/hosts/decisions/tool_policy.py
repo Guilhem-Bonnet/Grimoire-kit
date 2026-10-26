@@ -302,13 +302,20 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         profile = session_profile(hook, journal=False)
         if vector.governed_only and profile not in _AUTHORITY_PROFILES:
             return None
-        if vector.code == "control-zone":
-            # #876 lot 1 : une écriture d'agent refusée dans la zone protégée révoque les mandats (best effort :
-            # le refus, lui, ne dépend pas de la révocation).
+        if vector.revokes:
+            # #876 lot 1, #982 : une écriture d'agent *caractérisée* refusée dans la zone protégée révoque le mandat
+            # du projet de la session — pas sur une simple mention, pas celui d'un autre projet. Best effort : le
+            # refus, lui, ne dépend pas de la révocation.
             with contextlib.suppress(Exception):
-                from grimoire.missions.mandate import REVOKE_PROTECTED_WRITE, revoke_every_mandate
+                from grimoire.missions.mandate import REVOKE_PROTECTED_WRITE, revoke_session_mandates
 
-                revoke_every_mandate(REVOKE_PROTECTED_WRITE, vector.what)
+                shown = facts.command or " ".join(facts.targets)
+                revoke_session_mandates(
+                    hook.project_root,
+                    REVOKE_PROTECTED_WRITE,
+                    vector.what,
+                    cause={"session_id": hook.session_id, "tool": hook.tool_name, "command": shown},
+                )
         why = (
             "L'instantané du ledger est un cache dérivé du journal, restauré sans rejouer le préfixe qu'il couvre : "
             "écrit à la main, il imposerait un état que le journal ne dit pas. Il ne s'écrit que par le ledger."
@@ -324,7 +331,12 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         return Decision(
             outcome=Outcome.DENY,
             reason=f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. {why} {limit}",
-            detail={"tool": hook.tool_name, "authority_vector": vector.code, "profile": profile},
+            detail={
+                "tool": hook.tool_name,
+                "authority_vector": vector.code,
+                "profile": profile,
+                "authority_revokes": vector.revokes,
+            },
         )
     except Exception as exc:
         try:

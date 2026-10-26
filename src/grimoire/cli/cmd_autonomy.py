@@ -235,6 +235,14 @@ def mandate_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -> 
         return
     label = "[green]actif[/green]" if state.active else f"[red]inactif[/red] ({state.reason} : {state.detail})"
     console.print(f"{state.mandate.id} — {label} — {', '.join(state.mandate.gestures)} — jusqu'au {state.mandate.until}")
+    cause = state.revocation
+    if cause:
+        # #982 : ce qui a révoqué — l'heure, la session, l'outil et l'extrait (borné, caviardé) de la commande.
+        who = f" par la session {cause['session_id']}" if cause.get("session_id") else ""
+        tool = f" ({cause['tool']})" if cause.get("tool") else ""
+        console.print(f"révoqué le {cause.get('ts', '?')}{who}{tool}", markup=False, highlight=False)
+        if cause.get("command"):
+            console.print(f"  commande : {cause['command']}", markup=False, highlight=False)
 
 
 @mandate_app.command("revoke")

@@ -22,8 +22,10 @@ le mandat scelle, à l'octroi, la section ``escalation`` de ``orchestration-poli
 politique modifiée depuis révoque le mandat (``escalation_policy_changed``).
 
 Un mandat est révoqué par l'humain (:meth:`MandateStore.revoke`) ou automatiquement sur
-événement : échéance, plafond de sessions dépassé, écriture d'agent refusée dans la zone
-protégée (:meth:`MandateStore.revoke_on_protected_write`), politique modifiée. Le verdict forgé
+événement : échéance, plafond de sessions dépassé, écriture d'agent caractérisée refusée dans la zone
+protégée (:func:`revoke_session_mandates` : le mandat du projet de la session seulement, et pas sur une
+simple mention de la zone — #982), politique modifiée. La révocation inscrit sa cause (session, outil,
+extrait borné et caviardé de la commande), que le statut rend (:attr:`MandateState.revocation`). Le verdict forgé
 (:meth:`MandateStore.revoke_on_forged_verdict`) et l'écriture hors worktree
 (:meth:`MandateStore.revoke_on_write_outside_worktree`) sont exposés ici et branchés aux
 lots 2 et 3.
@@ -85,6 +87,7 @@ __all__ = [
     "MandateState",
     "MandateStore",
     "acting_as_orchestrator",
+    "command_excerpt",
     "control_dir",
     "control_key_path",
     "ensure_control_key",
@@ -93,6 +96,7 @@ __all__ = [
     "register_orchestrator_session",
     "require_authority",
     "revoke_every_mandate",
+    "revoke_session_mandates",
     "task_categories",
     "verify_control_key",
 ]
@@ -493,6 +497,9 @@ class MandateState:
     reason: str = ""
     detail: str = ""
     sessions_today: int = 0
+    #: L'entrée de révocation telle qu'inscrite (#982) : ``reason``, ``detail``, ``ts`` et, quand l'événement les
+    #: portait, ``session_id``, ``tool`` et ``command`` (extrait borné, secrets caviardés). Vide hors révocation.
+    revocation: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False)
 
     @property
     def active(self) -> bool:
@@ -505,6 +512,7 @@ class MandateState:
             "detail": self.detail,
             "sessions_today": self.sessions_today,
             "mandate": self.mandate.to_dict() if self.mandate else None,
+            "revocation": dict(self.revocation) if self.revocation else None,
         }
 
 
@@ -669,19 +677,29 @@ class MandateStore:
 
     # ── Révocation ───────────────────────────────────────────────────────────
 
-    def revoke(self, reason: str = REVOKE_MANUAL, detail: str = "", now: datetime | None = None) -> Mandate | None:
+    def revoke(
+        self,
+        reason: str = REVOKE_MANUAL,
+        detail: str = "",
+        now: datetime | None = None,
+        *,
+        cause: Mapping[str, str] | None = None,
+    ) -> Mandate | None:
         """Révoque le mandat actif du projet — toujours permis : retirer une autorité n'en demande aucune.
 
         Rend le mandat révoqué, ``None`` s'il n'y en avait pas d'actif. API que les lots 2 et 3 appellent
-        sur événement (voir ``revoke_on_*``).
+        sur événement (voir ``revoke_on_*``). *cause* (#982) : ce qui a déclenché la révocation, inscrit avec
+        elle et rendu par le statut — ``session_id``, ``tool``, ``command`` (borné et caviardé ici).
         """
         state = self._state(now or _now(), auto_revoke=False)
         if state.mandate is None or not state.active:
             return None
-        self._write_revocation(state.mandate.id, reason or REVOKE_MANUAL, detail, now or _now())
+        self._write_revocation(state.mandate.id, reason or REVOKE_MANUAL, detail, now or _now(), cause)
         return state.mandate
 
-    def _write_revocation(self, mandate_id: str, reason: str, detail: str, moment: datetime) -> None:
+    def _write_revocation(
+        self, mandate_id: str, reason: str, detail: str, moment: datetime, cause: Mapping[str, str] | None = None
+    ) -> None:
         # Le marqueur d'abord : si l'entrée ne s'écrit pas, ou si on la retire ensuite du journal, le mandat reste révoqué.
         with contextlib.suppress(OSError):
             self.journal.mark_revoked(mandate_id, reason, moment.isoformat())
@@ -692,15 +710,17 @@ class MandateStore:
                 "reason": reason,
                 "detail": detail[:400],
                 "ts": moment.isoformat(),
+                **_cause_fields(cause),
             }
         )
 
-    def revoke_on_protected_write(self, detail: str) -> Mandate | None:
-        """Un agent a tenté d'écrire dans la zone protégée (refus du frein) : le mandat tombe.
+    def revoke_on_protected_write(self, detail: str, *, cause: Mapping[str, str] | None = None) -> Mandate | None:
+        """Un agent a écrit (de façon caractérisée) dans la zone protégée, refusé par le frein : le mandat tombe.
 
-        Le frein appelle :func:`revoke_every_mandate` (le journal est commun à tous les projets).
+        Le frein appelle :func:`revoke_session_mandates` : le mandat du projet de la session, pas ceux des autres
+        projets du poste (#982).
         """
-        return self.revoke(REVOKE_PROTECTED_WRITE, detail)
+        return self.revoke(REVOKE_PROTECTED_WRITE, detail, cause=cause)
 
     def revoke_on_forged_verdict(self, task_id: str, detail: str) -> Mandate | None:
         """Branché au lot 3 (reviewer) : un verdict forgé ouvre le disjoncteur et révoque."""
@@ -743,6 +763,11 @@ class MandateStore:
                 REVOKED,
                 f"{revocation.get('reason', '')} : {revocation.get('detail', '')}".strip(" :"),
                 sessions,
+                {
+                    k: str(revocation[k])
+                    for k in ("reason", "detail", "ts", *_CAUSE_KEYS)
+                    if revocation.get(k) not in (None, "")
+                },
             )
         until = _parse(mandate.until)
         verdict: tuple[str, str] | None = None
@@ -1227,9 +1252,10 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None,
 def revoke_every_mandate(reason: str, detail: str, journal: AuthorityJournal | None = None) -> list[str]:
     """Révoque chaque mandat actif du poste, tous projets confondus ; rend leurs identifiants.
 
-    Pour un événement qui touche la zone protégée elle-même (une écriture d'agent refusée sous
-    ``~/.grimoire/control/``) : le journal est commun à tous les projets, la confiance qu'il porte
-    tombe pour tous. Un journal illisible ne se prolonge pas : il ne porte déjà aucun mandat.
+    Révocation de poste, que plus rien n'appelle sur un refus du frein : depuis #982, une écriture d'agent
+    refusée sous ``~/.grimoire/control/`` ne révoque que le mandat du projet de la session
+    (:func:`revoke_session_mandates`) — un autre projet ouvert sur le poste n'a rien fait. Un journal
+    illisible ne se prolonge pas : il ne porte déjà aucun mandat.
     """
     store_journal = journal or AuthorityJournal()
     hit: list[str] = []
@@ -1243,3 +1269,109 @@ def revoke_every_mandate(reason: str, detail: str, journal: AuthorityJournal | N
         if revoked is not None:
             hit.append(revoked.id)
     return hit
+
+
+def _main_worktree(root: Path) -> Path | None:
+    """La racine du worktree principal quand *root* est un worktree lié (``.git`` est un fichier), sans lancer git.
+
+    Lu sur disque : ``<root>/.git`` (``gitdir: …/.git/worktrees/<nom>``) puis ``commondir`` dans ce dossier. Un
+    worker lancé dans le worktree de sa tâche agit sous le mandat du projet, inscrit à la racine principale.
+    """
+    try:
+        dotgit = root / ".git"
+        if not dotgit.is_file():
+            return None
+        text = dotgit.read_text(encoding="utf-8").strip()
+        if not text.startswith("gitdir:"):
+            return None
+        gitdir = Path(text[len("gitdir:") :].strip())
+        gitdir = gitdir if gitdir.is_absolute() else root / gitdir
+        common_raw = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+        common = (Path(common_raw) if Path(common_raw).is_absolute() else gitdir / common_raw).resolve()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return common.parent if common.name == ".git" else None
+
+
+def revoke_session_mandates(
+    project_root: Path,
+    reason: str,
+    detail: str,
+    *,
+    cause: Mapping[str, str] | None = None,
+    journal: AuthorityJournal | None = None,
+) -> list[str]:
+    """Révoque le mandat du projet de la session (#982) ; rend les identifiants révoqués.
+
+    *project_root* est la racine que le hook a résolue pour la session. Si c'est un worktree lié, le mandat du
+    worktree principal tombe aussi (le worker d'une tâche agit sous le mandat du projet). Les mandats des autres
+    projets du poste ne sont pas touchés : une session de la Forge qui se fait refuser une commande ne coupe pas
+    l'autonomie du kit. Un journal illisible ne se prolonge pas : il ne porte déjà aucun mandat.
+    """
+    store_journal = journal or AuthorityJournal()
+    roots = [project_root.resolve()]
+    main = _main_worktree(roots[0])
+    if main is not None and main != roots[0]:
+        roots.append(main)
+    hit: list[str] = []
+    try:
+        store_journal.read()
+    except JournalError:
+        return hit
+    for root in roots:
+        revoked = MandateStore(root, store_journal).revoke(reason, detail, cause=cause)
+        if revoked is not None:
+            hit.append(revoked.id)
+    return hit
+
+
+# ── Cause d'une révocation (#982) ────────────────────────────────────────────
+
+#: Ce qu'une révocation sur événement inscrit de sa cause, en plus du motif, du détail et de l'heure.
+_CAUSE_KEYS: tuple[str, ...] = ("session_id", "tool", "command")
+_EXCERPT_LIMIT = 240
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|glpat-[A-Za-z0-9_-]{16,}"
+            r"|xox[abposr]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16})"
+        ),
+        "[secret]",
+    ),
+    (re.compile(r"(?i)\b(bearer\s+)\S+"), r"\1[secret]"),
+    (
+        re.compile(
+            r"(?i)(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]*"
+            r"\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)"
+        ),
+        r"\1[secret]",
+    ),
+    (
+        re.compile(r"(?i)(--(?:token|password|secret|api-key|key|control-key)(?:=|\s+))(\"[^\"]*\"|'[^']*'|\S+)"),
+        r"\1[secret]",
+    ),
+    (re.compile(r"(://[^/\s:@]+:)[^@\s/]+@"), r"\1[secret]@"),
+    # Jeton opaque (clé de contrôle du cockpit : 43 caractères url-safe) : aucun chemin n'a un tel segment.
+    (re.compile(r"[A-Za-z0-9_+=-]{40,}"), "[secret]"),
+)
+
+
+def command_excerpt(text: str, limit: int = _EXCERPT_LIMIT) -> str:
+    """Un extrait borné de *text* sans secret reconnu : ce que le statut d'un mandat révoqué montre de sa cause.
+
+    Les blancs (sauts de ligne d'un heredoc compris) sont repliés ; jetons, mots de passe, ``KEY=valeur`` et
+    blocs opaques de 40 caractères et plus sont remplacés par ``[secret]`` *avant* la coupe.
+    """
+    out = " ".join(text.split())
+    for pattern, replacement in _SECRET_PATTERNS:
+        out = pattern.sub(replacement, out)
+    return out if len(out) <= limit else out[: limit - 1].rstrip() + "…"
+
+
+def _cause_fields(cause: Mapping[str, str] | None) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for key in _CAUSE_KEYS:
+        value = str((cause or {}).get(key, "") or "").strip()
+        if value:
+            fields[key] = command_excerpt(value) if key == "command" else value[:120]
+    return fields

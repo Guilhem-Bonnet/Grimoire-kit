@@ -582,6 +582,68 @@ def test_revoke_every_mandate_covers_all_projects(project: Path, tmp_path: Path)
     assert not MandateStore(project).state().active and not MandateStore(other).state().active
 
 
+# ── #982 : la révocation sur écriture refusée vise le projet de la session et dit sa cause ──────
+
+
+def test_revoke_session_mandates_spares_the_other_projects(project: Path, tmp_path: Path) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    a, _b = _grant(project), _grant(other)
+    assert md.revoke_session_mandates(project, md.REVOKE_PROTECTED_WRITE, "test") == [a.id]
+    assert not MandateStore(project).state().active and MandateStore(other).state().active
+    stranger = tmp_path / "forge"
+    stranger.mkdir()
+    assert md.revoke_session_mandates(stranger, md.REVOKE_PROTECTED_WRITE, "test") == []
+    assert MandateStore(other).state().active
+
+
+_CAUSE = {
+    "session_id": "S-982",
+    "tool": "Bash",
+    "command": "GH_TOKEN=ghp_" + "a" * 36 + " cp /tmp/forged x\n  && echo" + " mot" * 200,
+}
+
+
+def test_the_status_carries_the_revocation_cause_bounded_and_without_secret(project: Path) -> None:
+    mandate = _grant(project)
+    md.revoke_session_mandates(project, md.REVOKE_PROTECTED_WRITE, "écriture refusée", cause=_CAUSE)
+    state = MandateStore(project).state()
+    assert not state.active and state.mandate is not None and state.mandate.id == mandate.id
+    cause = state.to_dict()["revocation"]
+    assert cause["session_id"] == "S-982" and cause["tool"] == "Bash" and cause["reason"] == md.REVOKE_PROTECTED_WRITE
+    assert cause["ts"] and cause["detail"] == "écriture refusée"
+    assert "ghp_" not in cause["command"] and "[secret]" in cause["command"] and "cp /tmp/forged x" in cause["command"]
+    assert len(cause["command"]) <= 240 and cause["command"].endswith("…") and "\n" not in cause["command"]
+
+
+def test_the_mandate_status_cli_says_what_revoked_it(project: Path) -> None:
+    _grant(project)
+    md.revoke_session_mandates(project, md.REVOKE_PROTECTED_WRITE, "écriture refusée", cause=_CAUSE)
+    text = runner.invoke(app, ["autonomy", "mandate", "status", "--project-root", str(project)])
+    assert text.exit_code == 0, text.output
+    assert "par la session S-982 (Bash)" in text.output and "cp /tmp/forged x" in text.output
+    assert "ghp_" not in text.output
+    raw = runner.invoke(app, ["--output", "json", "autonomy", "mandate", "status", "--project-root", str(project)])
+    assert raw.exit_code == 0, raw.output
+    payload = json.loads(raw.output)
+    assert payload["revocation"]["session_id"] == "S-982" and "cp /tmp/forged x" in payload["revocation"]["command"]
+
+
+def test_a_manual_revocation_has_no_command_but_keeps_its_time(project: Path) -> None:
+    _grant(project)
+    MandateStore(project).revoke(md.REVOKE_MANUAL, "fin de la nuit")
+    cause = MandateStore(project).state().to_dict()["revocation"]
+    assert cause["reason"] == md.REVOKE_MANUAL and cause["ts"] and "command" not in cause and "session_id" not in cause
+
+
+def test_command_excerpt_masks_known_secret_shapes() -> None:
+    shown = md.command_excerpt(
+        "curl -H 'Authorization: Bearer abc.def' https://u:hunter2@x.io --token tok123 API_KEY=s3cr3t " + "k" * 43
+    )
+    for secret in ("abc.def", "hunter2", "tok123", "s3cr3t", "k" * 43):
+        assert secret not in shown, secret
+
+
 # ── Gestes de la CLI sous le principal orchestrator ─────────────────────────────────────────────
 
 
