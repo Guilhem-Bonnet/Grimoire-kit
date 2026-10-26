@@ -1612,6 +1612,12 @@ body[data-active-space] .panel-head {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* P68 : `min-height: 0` aussi. Sous 900 px, `#middle` passe en colonne et le
+   * min-height `auto` d'un item flex vaut la hauteur de son contenu : `#center`
+   * grossissait avec une liste longue, débordait de `#middle` (overflow visible)
+   * et peignait PAR-DESSUS la barre d'état, qui ne recevait plus les clics.
+   * Borné, c'est `#canvas` (overflow auto) qui défile, comme prévu. */
+  min-height: 0;
 }
 
 #docbar {
