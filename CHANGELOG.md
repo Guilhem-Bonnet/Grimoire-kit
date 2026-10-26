@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): l'unité systemd du minuteur du tick (`orchestrate install-timer`) porte `KillMode=process`. En `oneshot` avec le `control-group` par défaut, systemd tuait à la fin du tick tout ce qu'il avait lancé, dont le démon de `claude --bg` : la session worker mourait à sa naissance, la tâche restait réclamée sans session jusqu'à la récolte de son bail. Vu au premier tick réel sur le dépôt du kit (R14, aucun transcript). Un minuteur déjà posé se répare en relançant `grimoire orchestrate install-timer`.
+
 ## [3.66.1] - 2026-10-26
 
 - fix(missions): `missions/finition.py` lit `project-context.yaml` avec ruamel.yaml, la dépendance du kit, au lieu de PyYAML qui n'est pas installé chez l'utilisateur. La 3.66.0 n'est jamais partie sur PyPI : son test de fumée (`up --prove` sur une installation vierge) s'arrêtait sur « No module named 'yaml' ». La CI ne le voyait pas, PyYAML y étant installé par les dépendances de développement. Garde `tests/unit/test_no_unguarded_pyyaml.py` : tout `import yaml` de `src/` doit avoir un repli sur `ImportError`.
