@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): préflight d'assignation — plan en lecture seule et commande équivalente (P47 lot 1, GAO-p47-assigne-001)
 - feat(cockpit): premier lancement en lecture seule — la page servie dit l'état du projet (S0 à S3) avec sa source, et le cockpit guide un projet non configuré sans rien écrire (P36)
   - **État lu, jamais deviné** : `web/workspace/setup-state.js` classe le projet d'après `/api/status`, `/api/health`, `/api/setup/run` et `/api/memory/status` (sans sonde) — S0 pas initialisé, S1 initialisation en échec, S2 mémoire non liée (lexical seul), S3 prêt — et cite toujours la lecture qui tranche (« lu dans /api/health · kit.scaffolded = false ») ; une lecture ratée ou une mémoire jamais sondée donne « inconnu » avec sa raison, jamais un faux S0 ni un faux S3.
   - **Guide « Démarrer »** : sur un projet que `/api/health` dit non initialisé, À traiter cède la place au guide (`#a-traiter?view=demarrer`, joignable à tout moment et depuis la palette) : détection de la machine, quatre profils mémoire dont les impossibles restent visibles, grisés, avec leur raison, plan (ce qui serait écrit, démarré, partagé, les extras à installer) et commandes à copier, « Copier » confirmant sur place. Aucun POST, aucun PUT, aucun bouton qui installe (ADR-008, P40).
