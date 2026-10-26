@@ -48,6 +48,7 @@ class FakeHost:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], Path, Mapping[str, str] | None]] = []
         self.bg_fails = False
+        self.agents: list[dict[str, str]] | None = None  # ``claude agents --json`` ; None : la lecture échoue
         self.stop_result = ExecResult(0, "stopped\n")
         self.prs: dict[str, str] = {}  # branche → état (MERGED, OPEN, CLOSED) ; absente : aucune PR
         self.pr_heads: dict[str, str] = {}  # branche → headRefOid ; absente : la tête locale de la branche
@@ -89,6 +90,10 @@ class FakeHost:
             return ExecResult(0, f"backgrounded · {self._next:08x} (running)\n")
         if argv[1] == "stop":
             return self.stop_result
+        if argv[1:3] == ["agents", "--json"]:
+            if self.agents is None:
+                return ExecResult(1, "", "claude agents : échec simulé")
+            return ExecResult(0, json.dumps(self.agents))
         return ExecResult(2, "", "sous-commande inconnue")
 
     def _gh(self, argv: list[str], cwd: Path) -> ExecResult:
