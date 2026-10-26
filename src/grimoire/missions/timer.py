@@ -104,19 +104,26 @@ def _has_tool(directory: Path, tool: str) -> bool:
     return candidate.is_file() and os.access(candidate, os.X_OK)
 
 
-def _unit_path(raw: str) -> str:
+def _unit_path(raw: str, tick_bin: Path | None = None) -> str:
     """Le ``PATH`` de l'unité : seulement les dossiers du poste qui portent un outil utile, plus les dossiers système.
 
     Ce n'est pas le ``PATH`` du poste recopié tel quel : celui d'une session d'agent contient des dossiers temporaires
     propres à la session (ils disparaissent, et un exécutable y a pu être posé), et n'importe quel PATH peut porter un
     dossier qui n'a rien à faire dans un service persistant. Sont écartés : les chemins relatifs, les dossiers absents
     ou temporaires, ceux sans ``claude``, ``gh``, ``git`` ni ``node``.
+
+    *tick_bin* (le dossier de l'interpréteur qui pose le minuteur) passe en tête s'il porte ``grimoire`` : les sessions
+    que le tick lance appellent ``grimoire task …`` par le ``PATH``, et doivent exécuter la version du tick, pas un autre
+    ``grimoire`` du poste (#983 : un pipx resté en 3.65.0 sous un tick en 3.67.0 annulait le correctif d'identité).
     """
     import tempfile
 
     temp = [Path(tempfile.gettempdir()), Path("/var/tmp")]  # noqa: S108 - exclusion, pas un usage
     temp += [t.resolve() for t in temp]
     kept: list[str] = []
+    if tick_bin is not None and tick_bin.is_absolute() and _has_tool(tick_bin, "grimoire") \
+            and not _under(tick_bin, temp) and not _under(tick_bin.resolve(), temp):
+        kept.append(str(tick_bin))
     for entry in raw.split(os.pathsep):
         if not entry or "\n" in entry or "\r" in entry:
             continue
@@ -129,9 +136,9 @@ def _unit_path(raw: str) -> str:
     return os.pathsep.join(kept)
 
 
-def _path_line() -> str:
-    """``Environment="PATH=…"`` pour l'unité : où trouver ``claude`` et ``gh`` (voir :func:`_unit_path`)."""
-    return f"Environment={_systemd_quote('PATH=' + _unit_path(os.environ.get('PATH', '')))}\n"
+def _path_line(python: str) -> str:
+    """``Environment="PATH=…"`` pour l'unité : le ``grimoire`` du tick d'abord, puis ``claude`` et ``gh`` (voir :func:`_unit_path`)."""
+    return f"Environment={_systemd_quote('PATH=' + _unit_path(os.environ.get('PATH', ''), Path(python).parent))}\n"
 
 
 def _command(project_root: Path, python: str) -> list[str]:
@@ -191,7 +198,7 @@ def plan_timer(project_root: Path, interval: str = DEFAULT_INTERVAL, *, python: 
         # Le tick lance des sessions `claude --bg` : en `control-group` (défaut), systemd tue leur démon dès la fin du tick.
         "KillMode=process\n"
         f"WorkingDirectory={_spec(str(root))}\n"
-        f"{_path_line()}"
+        f"{_path_line(exe)}"
         f"ExecStart={exec_start}\n"
     )
     timer = (
