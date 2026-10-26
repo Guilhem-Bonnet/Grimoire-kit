@@ -47,11 +47,15 @@ def test_un_lot_de_questions_se_tranche_question_par_question(workspace: Page, r
     card = workspace.locator(f"[data-role='decision'][data-task='{tid}']")
     expect(card.locator("[data-role='decision-question']")).to_have_count(2)
     expect(card).to_contain_text("2 questions en un lot")
-    expect(card).to_contain_text("pourquoi : arbitrage irréversible")
+    # P68 : le « pourquoi » est replié dans les détails de sa question, pas perdu.
+    expect(card.locator(f"[data-question='{second}'] [data-role='decision-details']")).to_contain_text("arbitrage irréversible")
 
     second_box = card.locator(f"[data-role='decision-question'][data-question='{second}']")
     with workspace.expect_response(lambda r: "/answer" in r.url) as answered:
+        # P68 : un choix se pose (aria-pressed), puis « Valider ce choix » l'envoie.
         second_box.get_by_role("button", name="garder").click()
+        expect(second_box.get_by_role("button", name="garder")).to_have_attribute("aria-pressed", "true")
+        second_box.get_by_role("button", name="Valider ce choix").click()
     assert answered.value.ok
     assert TaskService(real_project).require(tid).status is TaskState.WAITING
     expect(card.locator("[data-role='decision-question']")).to_have_count(0)  # une seule question : carte simple
@@ -60,6 +64,7 @@ def test_un_lot_de_questions_se_tranche_question_par_question(workspace: Page, r
 
     with workspace.expect_response(lambda r: "/answer" in r.url) as answered:
         card.get_by_role("button", name="maquette").click()
+        card.get_by_role("button", name="Valider ce choix").click()
     assert answered.value.ok
     task = TaskService(real_project).require(tid)
     assert task.status is TaskState.READY
