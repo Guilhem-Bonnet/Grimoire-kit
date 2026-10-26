@@ -37,7 +37,7 @@ from grimoire.missions.review_receipt import (
     write_receipt,
 )
 from grimoire.missions.review_verdict import REVIEW_RECORDED_EVENT
-from grimoire.missions.reviewer import REVIEW_FORGED_EVENT, REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT
+from grimoire.missions.reviewer import REVIEW_FORGED_EVENT, REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT, session_digest
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 
@@ -114,9 +114,8 @@ def review_event(projet: Path, tid: str):  # type: ignore[no-untyped-def]
 
 
 def reviewer_sid(host: FakeHost) -> str:
-    """L'identifiant du dernier relecteur lancé, lu dans sa ligne de commande : le ledger n'en garde que l'empreinte."""
-    argv = [a for a in host.of("claude", "--bg") if "--name" in a and a[a.index("--name") + 1].startswith("grimoire-review-")][-1]
-    return argv[argv.index("--session-id") + 1]
+    """Le vrai identifiant du dernier relecteur lancé, tel que ``claude agents`` le rend : le ledger n'en garde que l'empreinte."""
+    return host.session_of("grimoire-review-")
 
 
 def receipt_from(worktree: Path, tid: str, verdict: str, session: str, *, reviewer: str = "reviewer") -> None:
@@ -246,11 +245,15 @@ def test_une_tache_en_revue_recoit_une_session_de_relecture_distincte(projet: Pa
     assert [(o.action, o.status) for o in report.reviews] == [("launch", "launched")]
     worker_argv, review_argv = host.of("claude", "--bg")
     assert review_argv[review_argv.index("--name") + 1] == f"grimoire-review-{tid}"
-    reviewer_sid = review_argv[review_argv.index("--session-id") + 1]
-    assert reviewer_sid != launch["session_id"] == worker_argv[worker_argv.index("--session-id") + 1]
+    # #966 : les identités sont celles que `claude agents` rend, jamais un `--session-id` que `--bg` ignore.
+    assert "--session-id" not in worker_argv + review_argv
+    reviewer = host.session_of(f"grimoire-review-{tid}")
+    assert reviewer != launch["session_id"] == host.session_of(f"grimoire-{tid}")
+    assert review_event(projet, tid).payload["session_sha256"] == session_digest(reviewer)
     assert review_argv[review_argv.index("--model") + 1] == "opus"  # le worker est en sonnet : un autre modèle
-    _, cwd, env = host.calls[-1]
-    assert cwd == Path(str(launch["cwd"])) and env == {"GRIMOIRE_UNATTENDED": "1", "GRIMOIRE_SESSION_ID": reviewer_sid}
+    _, cwd, env = [c for c in host.calls if c[0][:2] == ["claude", "--bg"]][-1]
+    # Aucune identité dans l'environnement : le démon des sessions de fond la transmettrait à toutes (#966).
+    assert cwd == Path(str(launch["cwd"])) and env == {"GRIMOIRE_UNATTENDED": "1"}
     prompt = review_argv[-1]
     assert f"grimoire task review {tid} --criteria" in prompt and "raisonnement du worker" in prompt
     assert not {"--resume", "--continue", "--agent", "--agents"} & set(review_argv)
@@ -347,14 +350,183 @@ def _grant(root: Path) -> md.Mandate:
     return MandateStore(root).grant(request, origin=ORIGIN_HUMAN, via="test")
 
 
-def test_sous_mandat_worker_et_relecteur_sont_inscrits_avant_leur_lancement(projet: Path, host: FakeHost) -> None:
+def test_sous_mandat_worker_et_relecteur_sont_inscrits_et_scelles_sous_leur_vraie_identite(projet: Path, host: FakeHost) -> None:
+    """#966 : l'identité inscrite au journal d'autorité, notée au ledger et scellée pour le relecteur est le `sessionId`
+    que `claude agents` rend, jamais un uuid passé en `--session-id` (que `claude --bg` ignore)."""
+    from grimoire.missions.review_seal import _launch_head
+
     _grant(projet)
     tid, launch = launched_and_in_review(projet, host)
     tick(projet, host)
+    worker, reviewer = host.session_of(f"grimoire-{tid}"), host.session_of(f"grimoire-review-{tid}")
     store = MandateStore(projet)
     workers = {e["session_id"] for e in store.sessions(role="worker", task_id=tid)}
     reviewers = {e["session_id"] for e in store.sessions(role="reviewer", task_id=tid)}
-    assert workers == {launch["session_id"]} and reviewers == {reviewer_sid(host)}
+    assert workers == {launch["session_id"]} == {worker} and reviewers == {reviewer}
+    assert review_event(projet, tid).payload["session_sha256"] == session_digest(reviewer)
+    assert _launch_head(projet, tid, session_digest(reviewer)) is not None  # le sceau du lancement porte le vrai
+    passed = {a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if "--session-id" in a}
+    assert not passed & {worker, reviewer}
+
+
+def test_le_recu_du_relecteur_sous_sa_vraie_session_est_juge_malgre_l_environnement_du_demon(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Le relecteur hérite de l'environnement du démon (celui du premier worker lancé) : son `grimoire task review` signe
+    pourtant de sa propre session, et le tick juge ce reçu au lieu de le refuser (« autre session »)."""
+    _grant(projet)
+    tid, launch = launched_and_in_review(projet, host)
+    worktree = Path(str(launch["cwd"]))
+    tick(projet, host)
+    name = f"grimoire-review-{tid}"
+    with monkeypatch.context() as m:
+        for var, value in host.session_environ(name).items():
+            m.setenv(var, value)
+        out = runner.invoke(app, ["task", "review", tid, "--criteria", str(_verdict_in(worktree, tid)), "--reviewer", "reviewer",
+                                  "--project-root", str(worktree)])
+    assert out.exit_code == 0, out.output
+    receipt = read_receipt(worktree, tid)
+    assert receipt is not None and receipt.reviewer_session == host.session_of(name)
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("ready", "done")]
+    assert MandateStore(projet).state().active
+
+
+def test_un_recu_signe_de_la_vraie_session_du_worker_est_forge(projet: Path, host: FakeHost) -> None:
+    _grant(projet)
+    tid, launch = launched_and_in_review(projet, host)
+    tick(projet, host)
+    receipt_from(Path(str(launch["cwd"])), tid, "READY", host.session_of(f"grimoire-{tid}"))
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("forged", "done")] and read_breaker(projet).open
+    assert not MandateStore(projet).state().active
+
+
+def test_un_relecteur_introuvable_est_arrete_sans_rien_inscrire_ni_sceller(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.review_seal import _store
+
+    _grant(projet)
+    tid, _ = launched_and_in_review(projet, host)
+    host.agents = [dict(s) for s in host.bg]  # figé : le relecteur à venir n'y sera pas
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("launch", "failed")]
+    assert "identité non résolue" in report.reviews[0].detail
+    short = host.bg[-1]["id"]
+    assert host.bg[-1]["name"] == f"grimoire-review-{tid}" and host.of("claude", "stop") == [["claude", "stop", short]]
+    assert MandateStore(projet).sessions(role="reviewer") == []
+    assert not [e for e in _store(projet).journal.read() if e.get("task_id") == tid and e.get("session_sha256")]
+    assert not [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_LAUNCHED_EVENT]
+    assert read_breaker(projet).failures == 1
+
+
+def test_sous_mandat_un_worker_introuvable_n_est_pas_inscrit(projet: Path, host: FakeHost) -> None:
+    _grant(projet)
+    host.agents_fail = True
+    tid = ready(TaskService(projet))
+    assert tick(projet, host).launches[0].status == "failed"
+    assert MandateStore(projet).sessions(role="worker") == [] and host.of("claude", "stop") == [["claude", "stop", "00000001"]]
+    assert TaskService(projet).require(tid).status is TaskState.READY
+
+
+def _refusing(code: str):  # type: ignore[no-untyped-def]
+    def refuse(self: MandateStore, session_id: str, role: str, task_id: str = "", now: datetime | None = None) -> None:
+        if code == "journal":
+            raise OSError("disque plein")
+        raise md.MandateRefusedError(code, f"session {session_id!r} refusée")
+
+    return refuse
+
+
+@pytest.mark.parametrize(("code", "status", "failures"), [("role_conflict", "failed", 1), ("journal", "failed", 1),
+                                                          (md.CAP_EXCEEDED, "skipped", 0)])
+def test_une_inscription_refusee_apres_le_lancement_arrete_la_session_et_compte_la_tentative(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch, code: str, status: str, failures: int,
+) -> None:
+    """Une session lancée puis arrêtée est une tentative : notée (plafond du jour) et, sauf refus de plafond (qui révoque
+    déjà le mandat), comptée au disjoncteur — sinon chaque tick relancerait une session sans fin."""
+    from grimoire.missions.launcher import LAUNCH_FAILED_EVENT, WorkerLauncher
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+    _grant(projet)
+    monkeypatch.setattr(MandateStore, "register_session", _refusing(code))
+    tid = ready(TaskService(projet))
+    (outcome,) = tick(projet, host).launches
+    assert outcome.status == status and "non inscrite" in outcome.detail and "session 00000001 arrêtée" in outcome.detail
+    assert host.of("claude", "stop") == [["claude", "stop", "00000001"]]
+    after = TaskService(projet)
+    assert after.require(tid).status is TaskState.READY and tid not in launched_sessions(after)
+    (failed,) = [e for e in after.ledger.events_for(tid) if e.event_type == LAUNCH_FAILED_EVENT]
+    assert failed.payload["halted"] is True and failed.payload["session"] == "00000001"
+    launcher = WorkerLauncher(after, load_orchestrator_policy(projet).policy, exec_=host)  # type: ignore[arg-type]
+    assert launcher._launched_today() == 1  # la tentative compte au plafond du jour
+    assert read_breaker(projet).failures == failures
+
+
+def test_au_plafond_du_mandat_rien_n_est_lance(projet: Path, host: FakeHost) -> None:
+    """Relu sans écrire avant de lancer : une inscription certaine d'échouer ne lance pas de session à arrêter."""
+    _grant(projet)  # 5 sessions par jour
+    store = MandateStore(projet)
+    for n in range(5):
+        store.register_session(f"autre-{n}", "worker", "ailleurs")
+    tid = ready(TaskService(projet))
+    (outcome,) = tick(projet, host).launches
+    assert outcome.status == "skipped" and "plafond de 5 sessions par jour du mandat atteint" in outcome.detail
+    assert host.of("claude", "--bg") == [] and host.of("claude", "stop") == []
+    assert TaskService(projet).require(tid).status is TaskState.READY and MandateStore(projet).state().active
+
+
+def test_un_relecteur_refuse_au_journal_est_arrete_et_n_est_pas_relance(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions.reviewer import REVIEW_LAUNCH_FAILED_EVENT
+
+    _grant(projet)
+    tid, _ = launched_and_in_review(projet, host)
+    real = MandateStore.register_session
+
+    def refuse_reviewer(self: MandateStore, session_id: str, role: str, task_id: str = "", now: datetime | None = None) -> None:
+        if role == "reviewer":
+            raise md.MandateRefusedError("role_conflict", "rôle déjà tenu")
+        real(self, session_id, role, task_id, now)
+
+    monkeypatch.setattr(MandateStore, "register_session", refuse_reviewer)
+    first = tick(projet, host)
+    assert [(o.action, o.status) for o in first.reviews] == [("launch", "failed")]
+    short = host.bg[-1]["id"]
+    assert host.of("claude", "stop") == [["claude", "stop", short]] and read_breaker(projet).failures == 1
+    (failed,) = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_LAUNCH_FAILED_EVENT]
+    assert failed.payload["halted"] is True and failed.payload["reason"] == "refused"
+    bg = len(host.of("claude", "--bg"))
+    second = tick(projet, host)  # pas de relance : l'humain tranche
+    assert [(o.action, o.status) for o in second.reviews] == [("escalate", "done")] and len(host.of("claude", "--bg")) == bg
+    assert TaskService(projet).require(tid).status is TaskState.WAITING
+
+
+def test_un_relecteur_non_arrete_bloque_la_relance_jusqu_a_l_arret(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.launcher import ExecResult
+    from grimoire.missions.reviewer import REVIEW_HALTED_EVENT, REVIEW_LAUNCH_FAILED_EVENT
+
+    tid, _ = launched_and_in_review(projet, host)
+    host.agents = [dict(s) for s in host.bg]  # le relecteur à venir n'y sera pas
+    host.stop_result = ExecResult(1, "", "démon injoignable")
+    first = tick(projet, host)
+    assert [(o.action, o.status) for o in first.reviews] == [("launch", "failed")] and "NON arrêtée" in first.reviews[0].detail
+    short = host.bg[-1]["id"]
+    (failed,) = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_LAUNCH_FAILED_EVENT]
+    assert failed.payload["halted"] is False and failed.payload["session"] == short
+    assert _stage_wip(projet, host) == 1  # le relecteur non arrêté tient un créneau du WIP
+    bg = len(host.of("claude", "--bg"))
+    second = tick(projet, host)
+    assert [(o.action, o.status) for o in second.reviews] == [("launch", "skipped")] and len(host.of("claude", "--bg")) == bg
+    assert host.of("claude", "stop") == [["claude", "stop", short]] * 2  # l'arrêt est retenté
+    host.stop_result, host.agents = ExecResult(0, "stopped\n"), None
+    third = tick(projet, host)
+    assert [(o.action, o.status) for o in third.reviews] == [("launch", "launched")]
+    assert [e.payload["session"] for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_HALTED_EVENT] == [short]
+
+
+def _stage_wip(projet: Path, host: FakeHost) -> int:
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+    from grimoire.missions.reviewer import ReviewStage
+
+    return ReviewStage(TaskService(projet), load_orchestrator_policy(projet).policy, exec_=host)._open_reviews()  # type: ignore[arg-type]
 
 
 def test_sous_mandat_un_verdict_forge_revoque_le_mandat(projet: Path, host: FakeHost) -> None:
