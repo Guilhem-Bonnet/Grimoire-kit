@@ -716,14 +716,6 @@ class MandateStore:
             }
         )
 
-    def revoke_on_protected_write(self, detail: str, *, cause: Mapping[str, str] | None = None) -> Mandate | None:
-        """Un agent a écrit (de façon caractérisée) dans la zone protégée, refusé par le frein : le mandat tombe.
-
-        Le frein appelle :func:`revoke_session_mandates` : le mandat du projet de la session, pas ceux des autres
-        projets du poste (#982).
-        """
-        return self.revoke(REVOKE_PROTECTED_WRITE, detail, cause=cause)
-
     def revoke_on_forged_verdict(self, task_id: str, detail: str) -> Mandate | None:
         """Branché au lot 3 (reviewer) : un verdict forgé ouvre le disjoncteur et révoque."""
         self.trip_breaker(task_id, BREAKER_FORGED_VERDICT, detail)
