@@ -232,6 +232,8 @@ def test_nouvelle_tache_appelle_task_service_et_confirme_sur_place(page_p35: tup
     assert {t["id"] for t in _tasks(srv)} == before
 
     form.locator("[data-role='new-task-acceptance']").fill("la tâche existe dans le ledger\nelle porte sa description")
+    # Corriger efface le refus : il ne doit plus prétendre qu'un critère manque.
+    assert form.locator(".action-status").inner_text().strip() == ""
     form.locator("[data-role='new-task-description']").fill("Créée par le test e2e de P35.")
     assert _low_contrast(page, "[data-role='new-task-form']") == []
     _capture(page, "p35-nouvelle-tache-formulaire-clair")

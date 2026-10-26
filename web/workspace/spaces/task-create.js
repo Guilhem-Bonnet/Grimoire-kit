@@ -121,10 +121,14 @@ function form(ctx, onCreated, onChange, columnLabel) {
     name: 'description', 'data-role': 'new-task-description', rows: '3', maxlength: '4000',
   });
   description.value = state.description;
-  for (const [node, key] of [[title, 'title'], [acceptance, 'acceptance'], [description, 'description']]) {
-    node.addEventListener('input', () => { state[key] = node.value; });
-  }
   const status = actionStatus();
+  for (const [node, key] of [[title, 'title'], [acceptance, 'acceptance'], [description, 'description']]) {
+    node.addEventListener('input', () => {
+      state[key] = node.value;
+      // Un refus dit ce qui manque : dès qu'on corrige, il ne doit plus le prétendre.
+      if (status.dataset.tone === 'bad') setActionStatus(status, '');
+    });
+  }
   const submit = el('button', 'btn pri', 'Créer la tâche', { type: 'submit', 'data-role': 'new-task-submit' });
   const cancel = el('button', 'btn', 'Annuler', { type: 'button' });
   submit.disabled = state.busy;
