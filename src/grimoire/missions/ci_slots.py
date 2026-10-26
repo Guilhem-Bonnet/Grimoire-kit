@@ -147,7 +147,8 @@ def ci_repository(home_root: Path, project_root: Path) -> str:
     except (OSError, subprocess.SubprocessError) as exc:
         raise _RepositoryUnresolvedError(UNKNOWN, "git indisponible") from exc
     if done.returncode != 0 or not done.stdout.strip():
-        if "no such remote" in done.stderr.lower():
+        # Code 2 : remote absent (``git remote get-url``), quelle que soit la langue du message.
+        if done.returncode == 2 or "no such remote" in done.stderr.lower():
             raise _RepositoryUnresolvedError(NO_PR, "aucun remote origin : aucune PR possible")
         raise _RepositoryUnresolvedError(UNKNOWN, f"remote origin illisible (git {done.returncode})")
     match = _REMOTE.match(done.stdout.strip())

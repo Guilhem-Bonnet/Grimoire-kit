@@ -96,7 +96,7 @@ class TestAttentionOrder:
         sections = wa.attention_order(fixture["cards"])
 
         assert {s["id"]: _ids(s) for s in sections} == fixture["expected"]
-        assert [s["id"] for s in sections] == ["decide", "unblock", "repair", "maintain", "resolved", "other"]
+        assert [s["id"] for s in sections] == ["decide", "review", "unblock", "repair", "maintain", "resolved", "other"]
         assert all(s["count"] == len(s["items"]) for s in sections)
 
     def test_chaque_element_dans_une_seule_section(self, fixture: dict[str, Any]) -> None:

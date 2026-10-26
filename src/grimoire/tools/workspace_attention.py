@@ -12,6 +12,10 @@ qui attend un humain :
 - revues dont le gate refuse la clôture, tâches bloquées, consignes non
   accusées, claims dont plus aucune session ne tient la tâche ;
 - propositions en attente ;
+- PR ouvertes à revoir (P48), avec l'état de leur CI et la tâche du ledger
+  liée — la lecture ``gh`` est bornée et partagée
+  (:mod:`grimoire.tools.workspace_reviews`), un ``gh`` absent est un « état
+  des PR inconnu », jamais une liste vide ;
 - kits en retard ;
 - l'hygiène de la mémoire (P25) : store contaminé (doublons, identités de
   test), contradictions de ``memory lint``, supersessions orphelines, motifs
@@ -50,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.missions.liveness import INCONNU, TERMINE, VIVANT, SessionProbe
+from grimoire.tools import workspace_reviews
 from grimoire.tools.memory_setup import SERVICE_FAILED, SERVICE_ONLINE, SERVICE_STOPPED, service_state
 from grimoire.tools.project_health import kit_alignment
 from grimoire.tools.project_registry import load_registry, slug_for_path
@@ -76,6 +81,7 @@ SCHEMA_VERSION = "grimoire-workspace-attention/v1"
 CHECKPOINT = "checkpoint"
 QUESTION = "question"
 PROPOSAL = "proposal"
+PR_REVIEW = "pr_review"
 REVIEW_BLOCKED = "review_blocked"
 TASK_BLOCKED = "task_blocked"
 DIRECTIVE_UNACKED = "directive_unacked"
@@ -90,6 +96,7 @@ SERVICE_RESOLVED = "service_resolved"
 #: dans leur ordre. Un type n'apparaît que dans une section.
 SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("decide", "À décider", (CHECKPOINT, QUESTION, PROPOSAL)),
+    ("review", "PR à revoir", (PR_REVIEW,)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, DIRECTIVE_UNACKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
     ("maintain", "À entretenir", (*HYGIENE_KINDS, KIT_BEHIND)),
@@ -231,6 +238,11 @@ class _ProjectRead:
     items: list[dict[str, Any]] = field(default_factory=list)
     #: Pourquoi le projet travaille (« session vivante », « tâche en cours »), ou vide.
     activity: str = ""
+    #: Les tâches du ledger (``id → titre, état``), pour lier une PR à sa tâche (P48).
+    tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    home_root: Path | None = None
+    #: Ce que vaut la lecture des PR du projet : ``{state, detail, repo, count}``.
+    reviews: dict[str, Any] = field(default_factory=dict)
 
 
 def _hm(moment: datetime) -> str:
@@ -293,11 +305,13 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
 
     assert read.root is not None
     service = TaskService(read.root)
+    read.home_root = service.home_root
     if not service.has_ledger:
         read.row["state"] = "no_ledger"
         read.row["reason"] = "aucun Mission Ledger"
         return
     tasks = service.list_tasks()
+    read.tasks = {task.id: {"title": task.title, "status": task.status.value} for task in tasks}
     cards = [_task_json(task) for task in tasks]
     annotate_cards(read.root, service, tasks, cards, now=now, probe=host_probe)
     last = _last_events(service.ledger)
@@ -362,6 +376,34 @@ def _collect_proposals(read: _ProjectRead) -> None:
               since=proposal.created_at or proposal.first_seen, slug=proposal.slug)
 
 
+@dataclass(frozen=True, slots=True)
+class _ReviewSource:
+    """Comment lire les PR : le lecteur ``gh`` (injectable), le cache partagé et l'attente accordée."""
+
+    reader: workspace_reviews.PrReader | None = None
+    cache: workspace_reviews.ReviewCache | None = None
+    wait: float = workspace_reviews.ATTENTION_WAIT_S
+
+
+def _collect_reviews(read: _ProjectRead, source: _ReviewSource) -> None:
+    """Une ligne par PR ouverte à revoir ; un état inconnu devient une sonde en échec, jamais un silence."""
+    assert read.root is not None
+    got = workspace_reviews.project_reviews(
+        read.root, home_root=read.home_root, tasks=read.tasks,
+        reader=source.reader, cache=source.cache, wait=source.wait,
+    )
+    read.reviews = {"state": got["state"], "detail": got["detail"], "repo": got["repo"], "count": len(got["prs"])}
+    if got["state"] == workspace_reviews.UNKNOWN:
+        _item(read, PROBE_FAILED, "pr", "PR à revoir", f"état des PR inconnu : {got['detail']}", repo=got["repo"])
+    for pr in got["prs"]:
+        task = pr["task"] or {}
+        _item(read, PR_REVIEW, f"{got['repo']}#{pr['number']}", f"#{pr['number']} {pr['title']}",
+              workspace_reviews.review_reason(pr), since=pr["created_at"] or None,
+              pr=pr["number"], repo=got["repo"], url=pr["url"], branch=pr["branch"],
+              linked_task=task.get("id", ""), checks=pr["checks"],
+              additions=pr["additions"], deletions=pr["deletions"])
+
+
 def _collect_kit(read: _ProjectRead) -> None:
     assert read.root is not None
     kit = kit_alignment(read.root)
@@ -421,7 +463,12 @@ def _required_services(root: Path) -> list[tuple[str, str]]:
 
 
 def _read_project(
-    entry: Mapping[str, Any], *, now: datetime, probe_memory: bool, host_probe: SessionProbe | None
+    entry: Mapping[str, Any],
+    *,
+    now: datetime,
+    probe_memory: bool,
+    host_probe: SessionProbe | None,
+    reviews: _ReviewSource | None = None,
 ) -> _ProjectRead:
     slug = str(entry.get("slug", ""))
     raw = str(entry.get("path", "") or "")
@@ -447,6 +494,7 @@ def _read_project(
         read.activity = "session vivante"
     _guarded(read, "checkpoints", lambda: _collect_checkpoints(read))
     _guarded(read, "propositions", lambda: _collect_proposals(read))
+    _guarded(read, "PR", lambda: _collect_reviews(read, reviews or _ReviewSource()))
     _guarded(read, "kit", lambda: _collect_kit(read))
     _guarded(read, "mémoire", lambda: _collect_memory(read, probe_memory))
     _guarded(read, "hygiène", lambda: _collect_hygiene(read))
@@ -481,6 +529,20 @@ def _collect_services(
                       resolved_at=seen.resolved_at.isoformat())
 
 
+def _dedupe_reviews(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Une PR vue par deux projets du même dépôt (deux worktrees) : le premier du registre la garde."""
+    seen: set[tuple[Any, Any]] = set()
+    kept: list[dict[str, Any]] = []
+    for item in items:
+        if item["kind"] == PR_REVIEW:
+            key = (item["ref"].get("repo"), item["ref"].get("pr"))
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(item)
+    return kept
+
+
 def _entries(project_root: Path, *, portfolio: bool, slug: str | None) -> list[dict[str, Any]]:
     registry = load_registry()
     if portfolio:
@@ -506,6 +568,9 @@ def attention_view(
     host_probe: SessionProbe | None = None,
     service_probe: Callable[[str, str], str] | None = None,
     watch: ServiceWatch | None = None,
+    pr_reader: workspace_reviews.PrReader | None = None,
+    review_cache: workspace_reviews.ReviewCache | None = None,
+    pr_wait: float = workspace_reviews.ATTENTION_WAIT_S,
 ) -> dict[str, Any]:
     """Charge utile de ``GET /api/workspace/attention``.
 
@@ -513,7 +578,12 @@ def attention_view(
     seul projet *slug* (inconnu : ``FileNotFoundError``, un 404). *probe*
     relance la sonde mémoire au lieu de lire son cache (« Réessayer »).
     Les projets sont lus en parallèle ; les services, une fois par service.
+    Les PR (P48) : *pr_reader* remplace ``gh``, *review_cache* le cache
+    partagé, *pr_wait* l'attente accordée à une lecture neuve ; une PR vue
+    par deux projets du même dépôt n'est comptée qu'une fois, et
+    ``reviews`` dit par projet si la lecture est encore en cours.
     """
+    source = _ReviewSource(pr_reader, review_cache, pr_wait)
     moment = now or datetime.now(UTC)
     entries = _entries(project_root, portfolio=portfolio, slug=slug)
     if entries:
@@ -521,14 +591,15 @@ def attention_view(
             max_workers=min(len(entries), _PROJECT_MAX_WORKERS), thread_name_prefix="grimoire-attention"
         ) as pool:
             reads = list(pool.map(
-                lambda e: _read_project(e, now=moment, probe_memory=probe, host_probe=host_probe), entries
+                lambda e: _read_project(e, now=moment, probe_memory=probe, host_probe=host_probe, reviews=source),
+                entries,
             ))
     else:
         reads = []
     _collect_services(
         reads, now=moment, watch=watch or _WATCH, probe=service_probe or service_state
     )
-    items = [item for read in reads for item in read.items]
+    items = _dedupe_reviews(item for read in reads for item in read.items)
     sections = attention_order(items)
     active = [i for i in items if i["kind"] != SERVICE_RESOLVED]
     counts: dict[str, int] = {}
@@ -544,6 +615,7 @@ def attention_view(
         "count": len(active),
         "counts": counts,
         "projects": [read.row for read in reads],
+        "reviews": [{"project": read.row["slug"], **read.reviews} for read in reads if read.reviews],
         "summary": {
             "projects": len(reads),
             "readable": sum(1 for read in reads if read.row["state"] != "unreadable"),

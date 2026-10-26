@@ -13,6 +13,11 @@
 // Réessayer, qui relance la sonde), lecture seule (actions désactivées, la
 // raison écrite à côté). Clavier : j / k pour passer d'une ligne à l'autre,
 // Entrée pour l'action de la ligne.
+//
+// PR à revoir (P48) : une ligne par PR ouverte, l'état de sa CI et sa tâche
+// liée ; l'action ouvre l'écran de revue (`#a-traiter?view=revue&pr=…`,
+// module `revue.js`), la PR déjà sélectionnée. Aucune fusion ici : l'écran
+// de revue renvoie sur GitHub.
 
 import { glyph, kpiRow, spaceHead } from '../shell.js';
 import { agoText } from '../live.js';
@@ -83,6 +88,7 @@ const KINDS = {
   checkpoint: { word: 'checkpoint', icon: 'gate', tone: 'warn', action: 'Examiner' },
   question: { word: 'question', icon: 'chat', tone: 'warn', action: 'Répondre' },
   proposal: { word: 'proposition', icon: 'agent', tone: 'warn', action: 'Examiner' },
+  pr_review: { word: 'PR à revoir', icon: 'pr', tone: '', action: 'Revoir' },
   review_blocked: { word: 'revue bloquée', icon: 'scale', tone: 'warn', action: 'Voir ce qui manque' },
   task_blocked: { word: 'tâche bloquée', icon: 'stop', tone: 'bad', action: 'Débloquer' },
   directive_unacked: { word: 'consigne non accusée', icon: 'bell', tone: 'warn', action: 'Voir les consignes' },
@@ -107,6 +113,7 @@ const FALLBACK = { word: 'élément', icon: 'info', tone: '', action: 'Ouvrir' }
 /** Une ligne d'aide par section (`workspace_attention.SECTIONS`). */
 const HINTS = {
   decide: 'les plus anciennes d’abord',
+  review: 'la fusion se fait sur GitHub',
   unblock: 'une condition de passage manque',
   repair: 'une lecture ou un service a échoué',
   maintain: 'rien d’urgent',
@@ -117,6 +124,7 @@ const HINTS = {
  *  icône ; « résolu » et « autre » n'en ont pas (rien n'attend l'humain). */
 const TILES = {
   decide: { icon: 'gate', tone: 'warn' },
+  review: { icon: 'pr', tone: '' },
   unblock: { icon: 'stop', tone: 'bad' },
   repair: { icon: 'alert', tone: 'bad' },
   maintain: { icon: 'seal', tone: '' },
@@ -126,6 +134,7 @@ const TILES = {
 function cliOf(item) {
   const ref = item.ref || {};
   if (ref.task_id) return `grimoire task show ${ref.task_id}`;
+  if (item.kind === 'pr_review' && ref.pr) return `gh pr view ${ref.pr}${ref.repo ? ` -R ${ref.repo}` : ''}`;
   if (ref.gesture && ref.gesture.command) return ref.gesture.command;
   if (item.kind === 'checkpoint') return 'grimoire upgrade-flow review';
   return '';
@@ -152,6 +161,14 @@ function node(tag, cls, text) {
 }
 
 const kindOf = (item) => KINDS[item.kind] || FALLBACK;
+/** La teinte d'une PR suit sa CI : échec en rouge, verte en vert, en cours neutre. */
+const CI_TONE = { failed: 'bad', passed: 'ok' };
+const toneOf = (item) => (item.kind === 'pr_review'
+  ? CI_TONE[(item.ref && item.ref.checks && item.ref.checks.state) || ''] || ''
+  : kindOf(item).tone);
+/** Une ligne qui mène à l'écran de revue : une PR, ou la lecture des PR en échec. */
+const isReview = (item) => item.kind === 'pr_review'
+  || (item.kind === 'probe_failed' && String(item.id || '').endsWith(':pr'));
 const projectName = (item) => (item.project && (item.project.name || item.project.slug)) || '';
 
 function hm(iso) {
@@ -169,6 +186,13 @@ function hashOf(target, params) {
 function destination(ctx, item) {
   const slug = (item.project && item.project.slug) || '';
   const ref = item.ref || {};
+  if (isReview(item)) {
+    return {
+      target: 'a-traiter',
+      params: { view: 'revue', pr: ref.pr || '', of: ctx.scope.all ? slug : '' },
+      slug: ctx.scope.all ? null : slug,
+    };
+  }
   if (ref.task_id) {
     return {
       target: 'travail',
@@ -236,6 +260,15 @@ function sinceNode(item) {
   return time;
 }
 
+/** Les checks d'une PR en une phrase : verts, échecs, ignorés, en cours. */
+function ciText(checks) {
+  const parts = [`${checks.passed} vert${checks.passed > 1 ? 's' : ''}`];
+  if (checks.failed) parts.push(`${checks.failed} en échec`);
+  if (checks.skipped) parts.push(`${checks.skipped} ignoré${checks.skipped > 1 ? 's' : ''}`);
+  if (checks.pending) parts.push(`${checks.pending} en cours`);
+  return checks.total ? parts.join(', ') : 'aucun check rapporté';
+}
+
 function kv(rows) {
   const list = node('dl', 'at-kv');
   for (const [label, value, mono] of rows) {
@@ -269,6 +302,11 @@ function renderDetail(ctx, item) {
     ['Service', ref.service],
     ['Adresse', ref.url, true],
     ['Fichiers', ref.behind ? `${ref.behind} en retard` : ''],
+    ['PR', ref.pr ? `#${ref.pr}` : '', true],
+    ['Dépôt', ref.repo, true],
+    ['Branche', ref.branch, true],
+    ['Tâche liée', item.kind === 'pr_review' ? (ref.linked_task || 'aucune') : '', true],
+    ['CI', ref.checks ? ciText(ref.checks) : ''],
     ['Geste', ref.gesture ? ref.gesture.note : ''],
   ]));
   if (Array.isArray(ref.refusals) && ref.refusals.length) {
@@ -329,7 +367,18 @@ function partialError(unreadable, retry) {
   return box;
 }
 
+/** Relectures tant que les PR d'un projet sont « en cours de lecture » : la
+ *  route d'attention n'attend jamais GitHub, elle le dit et l'écran relit. */
+const REVIEW_POLL_MS = 1500;
+const REVIEW_POLL_MAX = 12;
+
 export async function mount(root, ctx) {
+  // L'écran de revue (P48) vit dans À traiter : même espace, autre vue.
+  if (ctx.params.view === 'revue') {
+    const review = await import('./revue.js');
+    await review.mount(root, ctx);
+    return;
+  }
   injectStyles();
   const wrap = node('div', 'at-wrap');
   root.append(wrap);
@@ -411,8 +460,9 @@ export async function mount(root, ctx) {
         li.dataset.kind = item.kind;
         li.tabIndex = -1;
         const pastille = node('span', 'at-rico');
-        if (kind.tone) pastille.dataset.tone = kind.tone;
-        pastille.append(glyph(kind.icon, kind.word, kind.tone, { alone: true }));
+        const tone = toneOf(item);
+        if (tone) pastille.dataset.tone = tone;
+        pastille.append(glyph(kind.icon, kind.word, tone, { alone: true }));
         const text = node('span', 'at-text');
         const sub = node('span', 'at-sub');
         const project = node('span', 'at-project', projectName(item));
@@ -436,6 +486,10 @@ export async function mount(root, ctx) {
     else ctx.inspector.replaceChildren();
   };
 
+  let polls = 0;
+  let pollTimer = 0;
+  ctx.signal.addEventListener('abort', () => clearTimeout(pollTimer));
+
   const refresh = async (probe = false) => {
     let data;
     try {
@@ -452,6 +506,14 @@ export async function mount(root, ctx) {
     }
     if (ctx.signal.aborted) return;
     render(data);
+    clearTimeout(pollTimer);
+    const loading = (data.reviews || []).some((r) => r.state === 'loading');
+    if (loading && polls < REVIEW_POLL_MAX) {
+      polls += 1;
+      pollTimer = setTimeout(() => refresh(false), REVIEW_POLL_MS);
+    } else if (!loading) {
+      polls = 0;
+    }
   };
 
   // j / k : ligne suivante, précédente ; Entrée : l'action de la ligne tenue.

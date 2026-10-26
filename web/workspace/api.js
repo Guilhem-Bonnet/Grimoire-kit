@@ -244,6 +244,9 @@ export const api = {
   // tout le registre (`portfolio`) — état, tâches tenues, dernier signe, consignes
   // en attente, activité des 15 dernières minutes, commande de reprise à copier.
   sessions: (portfolio) => get(WS + 'sessions', portfolio ? { scope: 'portfolio' } : undefined),
+  // PR à revoir (P48) : les PR ouvertes, l'état de leur CI et la tâche liée,
+  // les plus prêtes d'abord. Lecture seule : le cockpit ne fusionne jamais.
+  reviews: (portfolio) => get(WS + 'reviews', portfolio ? { scope: 'portfolio' } : undefined),
   files: (tier) => get(WS + 'files', tier ? { tier } : undefined),
   file: (path) => get(WS + 'file', { path }),
   fileDiff: (path) => get(WS + 'file/diff', { path }),
