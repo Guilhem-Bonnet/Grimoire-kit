@@ -356,7 +356,7 @@ class TestAttentionItems:
         cfg = GrimoireConfig.from_yaml(root / "project-context.yaml")
         manager = sh.open_shared(cfg)
         assert manager is not None
-        old = dt.date.today() - dt.timedelta(days=200)
+        old = dt.datetime.now(dt.UTC).date() - dt.timedelta(days=200)  # même référence que shared._today (UTC)
         aging = sh.promote(manager, "Toujours épingler la mineure d'un service partagé.",
                            domain="infra", project_name="Projet P", today=old)
         sh.promote(manager, "Garder une sauvegarde hors volume avant de recréer un conteneur.", domain="infra", project_name="Ailleurs", today=old)

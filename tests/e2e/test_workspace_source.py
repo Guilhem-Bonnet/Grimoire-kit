@@ -174,6 +174,11 @@ def test_editer_un_fichier_du_kit_cree_l_override_diffuse_et_laisse_doctor_vert(
         ".some((b) => b.textContent.includes('modifié'))"
     )
     source.locator(".sr-docrow button", has_text="Enregistrer").click()
+    # Le libellé d'attente (« Enregistrement… ») perd aussi « modifié » : seule la
+    # confirmation sur place dit que l'écriture a abouti sur le disque.
+    source.wait_for_function(
+        "() => document.querySelector('.sr-editor > .action-status')?.textContent.startsWith('Enregistré')"
+    )
     source.wait_for_function(
         "() => ![...document.querySelectorAll('.sr-docrow button')]"
         ".some((b) => b.textContent.includes('modifié'))"
