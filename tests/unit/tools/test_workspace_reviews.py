@@ -123,7 +123,7 @@ class TestAttention:
         green, failed = rows[12], rows[15]
         assert green["title"] == "#12 Lot vert"
         assert green["ref"]["checks"] | {"failing": []} == {
-            "state": "green", "green": 2, "failed": 0, "skipped": 2, "pending": 0, "total": 4, "failing": [],
+            "state": "passed", "passed": 2, "failed": 0, "skipped": 2, "pending": 0, "total": 4, "failing": [],
         }
         assert green["ref"]["linked_task"] == ids["branch"]
         assert green["reason"] == f"CI verte : 2 verts, 2 ignorés · tâche {ids['branch']}"
@@ -205,14 +205,14 @@ class TestLecture:
             {"context": "statut", "state": "SUCCESS"}, {"context": "attente", "state": "PENDING"},
             {"context": "erreur", "state": "ERROR", "targetUrl": "https://ci.exemple/1"}, "pas un check",
         ])
-        assert (summary["green"], summary["skipped"], summary["failed"], summary["pending"]) == (2, 2, 3, 2)
+        assert (summary["passed"], summary["skipped"], summary["failed"], summary["pending"]) == (2, 2, 3, 2)
         assert summary["state"] == "failed"
         assert [f["name"] for f in summary["failing"]] == ["d", "e", "erreur"]
         assert summary["failing"][0]["url"] == ""
         assert summary["failing"][2]["url"] == "https://ci.exemple/1"
         assert wr.check_summary(None)["state"] == "none"
         assert wr.check_summary([_run("a", status="QUEUED")])["state"] == "pending"
-        assert wr.check_summary([_run("a", "SKIPPED")])["state"] == "green"
+        assert wr.check_summary([_run("a", "SKIPPED")])["state"] == "passed"
 
     def test_tache_liee(self) -> None:
         ids = {"GAO-lot-a-001", "GAO-lot-b-002", "bootstrap"}

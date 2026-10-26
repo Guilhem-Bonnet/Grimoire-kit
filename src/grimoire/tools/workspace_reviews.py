@@ -87,7 +87,7 @@ VIEW_WAIT_S = READ_TIMEOUT_S + 2
 _SUCCESS = frozenset({"SUCCESS"})
 _SKIPPED = frozenset({"SKIPPED", "NEUTRAL"})
 _PENDING = frozenset({"PENDING", "EXPECTED"})
-_STATE_RANK = {"green": 0, "pending": 1, "none": 2, "failed": 3}
+_STATE_RANK = {"passed": 0, "pending": 1, "none": 2, "failed": 3}
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*[A-Za-z0-9]")
 _TASK_BRANCH = "task/"
 _TEST_SUFFIXES = ("_test.py", ".test.js", ".test.ts", ".spec.js", ".spec.ts")
@@ -228,7 +228,7 @@ def check_summary(rollup: Any) -> dict[str, Any]:
     """Les checks d'une PR comptés : verts, en échec, ignorés (``SKIPPED``, ``NEUTRAL``), en cours.
 
     ``state`` : ``failed`` dès un échec, sinon ``pending`` dès un check en
-    cours, sinon ``green`` s'il y a des checks, ``none`` sinon. Les échecs sont
+    cours, sinon ``passed`` s'il y a des checks, ``none`` sinon. Les échecs sont
     nommés, avec le lien de leur journal quand GitHub en donne un.
     """
     green = failed = skipped = pending = 0
@@ -260,9 +260,9 @@ def check_summary(rollup: Any) -> dict[str, Any]:
                 "url": url if url.startswith("https://") else "",
             })
     total = green + failed + skipped + pending
-    state = "failed" if failed else "pending" if pending else "green" if total else "none"
+    state = "failed" if failed else "pending" if pending else "passed" if total else "none"
     return {
-        "state": state, "green": green, "failed": failed, "skipped": skipped, "pending": pending,
+        "state": state, "passed": green, "failed": failed, "skipped": skipped, "pending": pending,
         "total": total, "failing": failing,
     }
 
@@ -356,8 +356,8 @@ def review_reason(pr: Mapping[str, Any]) -> str:
         ci = f"{checks['failed']} échec{'s' if checks['failed'] > 1 else ''} de CI : {names}"
     elif checks["state"] == "pending":
         ci = f"CI en cours : {checks['pending']} check{'s' if checks['pending'] > 1 else ''} sur {checks['total']}"
-    elif checks["state"] == "green":
-        ci = f"CI verte : {checks['green']} vert{'s' if checks['green'] > 1 else ''}"
+    elif checks["state"] == "passed":
+        ci = f"CI verte : {checks['passed']} vert{'s' if checks['passed'] > 1 else ''}"
         if checks["skipped"]:
             ci += f", {checks['skipped']} ignoré{'s' if checks['skipped'] > 1 else ''}"
     else:

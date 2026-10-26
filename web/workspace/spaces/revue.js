@@ -98,7 +98,7 @@ const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
 /** Le badge de CI d'une ligne (maquette) : verte, 1 échec, N échecs, en cours, sans check. */
 function ciBadge(checks) {
   if (checks.state === 'failed') return badge(plural(checks.failed, 'échec'), checks.failed > 1 ? 'bad' : 'warn');
-  if (checks.state === 'green') return badge('CI verte', 'ok');
+  if (checks.state === 'passed') return badge('CI verte', 'ok');
   if (checks.state === 'pending') return badge('CI en cours', '');
   return badge('sans check', '');
 }
@@ -151,7 +151,7 @@ function renderMain(ctx, main, pr, { missing } = {}) {
 
   const failingNames = checks.failing.map((f) => f.name).join(', ');
   const tiles = kpiRow([
-    { id: 'green', value: checks.green, label: 'CI verte', icon: 'check', tone: checks.green ? 'ok' : '',
+    { id: 'passed', value: checks.passed, label: 'CI verte', icon: 'check', tone: checks.passed ? 'ok' : '',
       sub: checks.pending ? `${checks.pending} encore en cours` : `sur ${plural(checks.total, 'check')}` },
     { id: 'failed', value: checks.failed, label: 'En échec', icon: 'cross', tone: checks.failed ? 'bad' : '',
       sub: failingNames || 'aucun' },

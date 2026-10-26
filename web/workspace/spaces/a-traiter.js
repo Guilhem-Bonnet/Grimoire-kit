@@ -161,7 +161,7 @@ function node(tag, cls, text) {
 
 const kindOf = (item) => KINDS[item.kind] || FALLBACK;
 /** La teinte d'une PR suit sa CI : échec en rouge, verte en vert, en cours neutre. */
-const CI_TONE = { failed: 'bad', green: 'ok' };
+const CI_TONE = { failed: 'bad', passed: 'ok' };
 const toneOf = (item) => (item.kind === 'pr_review'
   ? CI_TONE[(item.ref && item.ref.checks && item.ref.checks.state) || ''] || ''
   : kindOf(item).tone);
@@ -261,7 +261,7 @@ function sinceNode(item) {
 
 /** Les checks d'une PR en une phrase : verts, échecs, ignorés, en cours. */
 function ciText(checks) {
-  const parts = [`${checks.green} vert${checks.green > 1 ? 's' : ''}`];
+  const parts = [`${checks.passed} vert${checks.passed > 1 ? 's' : ''}`];
   if (checks.failed) parts.push(`${checks.failed} en échec`);
   if (checks.skipped) parts.push(`${checks.skipped} ignoré${checks.skipped > 1 ? 's' : ''}`);
   if (checks.pending) parts.push(`${checks.pending} en cours`);
