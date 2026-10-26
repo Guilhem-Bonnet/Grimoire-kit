@@ -17,6 +17,7 @@ Toutes les commandes disponibles via `grimoire [commande]`, rangées par outil, 
 | [Le projet](projet.md) | création, état et diagnostic d'un projet ; surfaces hôtes ; gestion de projet |
 | [Le tableau de bord](tableau-de-bord.md) | le cockpit local et la commande `serve` |
 | [Les tâches](taches.md) | `grimoire task`, la comptabilité du dispatch |
+| [L'intendant du projet](intendant.md) | `grimoire steward` : état des lieux en lecture seule, verdicts prouvés |
 | [La mémoire du projet](memoire.md) | `grimoire memory` |
 | [Le contrôle des preuves](preuve.md) | `grimoire standard`, les gardes du dépôt, les hooks git |
 | [La mise à jour](mise-a-jour.md) | `grimoire self update`, canaux et bundle hors ligne |
