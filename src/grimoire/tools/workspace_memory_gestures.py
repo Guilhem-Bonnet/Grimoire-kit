@@ -476,13 +476,20 @@ def _source_uri(ctx: _Ctx, params: Mapping[str, Any]) -> str:
         return f"commit:{value.lower()}"
     if kind != "file":
         raise GestureRefusedError("Source inconnue : tâche, session, fichier ou commit.")
-    from grimoire.memory.knowledge import _confined
-
     rel = value.replace("\\", "/")
     if not rel or rel.startswith("/") or _CONTROL.search(rel) or len(rel) > 512:
         raise GestureRefusedError("Chemin refusé : un chemin relatif à la racine du projet.")
-    target = _confined(ctx.root, rel)
-    if target is None or not target.is_file():
+    # Confinement écrit ici, dans la fonction qui touche au disque : l'analyse
+    # statique (CodeQL py/path-injection) ne suit pas une garde déportée dans un
+    # autre module (même motif que `missions/ledger.py::_confined_ledger_file`).
+    try:
+        base = ctx.root.resolve()
+        target = (base / rel).resolve()
+    except (OSError, RuntimeError):
+        raise GestureRefusedError("Chemin refusé : un chemin relatif à la racine du projet.") from None
+    if not target.is_relative_to(base):
+        raise GestureRefusedError(f"Fichier introuvable dans le projet : {rel} (le chemin sort de sa racine).")
+    if not target.is_file():
         raise GestureRefusedError(f"Fichier introuvable dans le projet : {rel}.")
     line = params.get("line")
     if line in (None, ""):
