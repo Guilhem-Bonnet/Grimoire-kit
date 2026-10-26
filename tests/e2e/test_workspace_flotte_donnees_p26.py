@@ -242,6 +242,38 @@ def test_les_huit_etats_se_lisent_chacun_avec_son_mot(context_page: Page, served
     assert context_page.locator(".dn-docker").count() == 0
 
 
+def test_la_matrice_garde_des_colonnes_egales_et_l_etat_sain_ne_se_repete_pas(
+    context_page: Page, served_inbox: dict[str, str],
+) -> None:
+    """P73, maquette « Flotte — données » : densité des cartes et matrice lisible.
+
+    Un service en ligne ne répète pas « le service répond » sous son badge (le
+    motif reste dans le ``title`` du badge) ; tout autre état garde sa raison
+    écrite. La matrice « Qui partage quoi » répartit ses colonnes comme la
+    maquette (projet plus large, une colonne égale par service) : aucun
+    en-tête n'est écrasé ni coupé par le bord du cadre.
+    """
+    _fake(context_page, _payload())
+    _open_fleet(context_page, served_inbox, "#flotte?vue=donnees")
+    context_page.wait_for_selector(".dn-svc", timeout=30_000)
+
+    assert context_page.locator(".dn-svc[data-state='en_ligne'] .dn-reason").count() == 0
+    reason = context_page.locator(".dn-svc[data-state='incomplet'] .dn-reason")
+    assert "GRIMOIRE_NEO4J_PASSWORD" in reason.inner_text()
+
+    matrix = context_page.locator(".dn-card", has=context_page.get_by_role("heading", name="Qui partage quoi"))
+    table = matrix.locator("table.tbl")
+    assert table.evaluate("t => getComputedStyle(t).tableLayout") == "fixed"
+    wrap_box = matrix.locator(".tbl-wrap").bounding_box()
+    headers = matrix.locator("thead th")
+    last = headers.last
+    assert last.inner_text().strip() == "Embarqué"
+    box = last.bounding_box()
+    assert box["x"] + box["width"] <= wrap_box["x"] + wrap_box["width"] + 1, "l'en-tête Embarqué reste entier dans le cadre"
+    widths = [th.bounding_box()["width"] for th in headers.all()[1:]]
+    assert max(widths) - min(widths) < 2, widths
+
+
 def test_docker_injoignable_se_dit_en_clair(context_page: Page, served_inbox: dict[str, str]) -> None:
     _fake(context_page, _payload(docker_up=False))
     _open_fleet(context_page, served_inbox, "#flotte?vue=donnees")

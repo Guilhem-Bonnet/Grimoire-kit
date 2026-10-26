@@ -1163,6 +1163,13 @@ def _sheet_project_name(root: Path) -> str | None:
     return None
 
 
+def _sheet_capacity(root: Path) -> dict[str, Any]:
+    """La sous-vue Capacité de la fiche (P71) : la même lecture que ``GET /api/workspace/capacity``."""
+    from grimoire.tools.workspace_capacity import capacity_view
+
+    return capacity_view(root)
+
+
 def sheet_view(project_root: Path) -> dict[str, Any]:
     """``GET /api/workspace/sheet`` — toute la fiche Piloter, en une réponse (issue #548).
 
@@ -1207,6 +1214,11 @@ def sheet_view(project_root: Path) -> dict[str, Any]:
         # le KPI de la fiche en dérive, jamais du nombre de blueprints présents.
         "flowRuns": lambda: flow_runs_view(root),
         "name": lambda: _sheet_project_name(root),
+        # Capacité (P71) : le panneau de la fiche se peint avec le reste au
+        # PREMIER rendu — un seul aller-retour, le contrat de #548 tient. Les
+        # rafraîchissements « en direct » suivants passent, eux, par
+        # `GET /api/workspace/capacity` seul.
+        "capacity": lambda: _sheet_capacity(root),
     }
     results: dict[str, Any] = {"doctor": None}
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
