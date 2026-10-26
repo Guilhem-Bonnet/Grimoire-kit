@@ -26,12 +26,27 @@ le premier ``--bg`` démarre — toutes les sessions suivantes héritent du sien
 que ``--bg`` imprime, résout le vrai ``sessionId`` dans ``claude agents --json``
 (:func:`resolve_background_session`), et seulement alors, sous un mandat actif, l'inscrit au journal d'autorité
 (:meth:`~grimoire.missions.mandate.MandateStore.register_session`) en rôle ``worker``. C'est ce qui permet de refuser un
-reçu de revue écrit par la session qui a fait le travail. Identité introuvable ou inscription refusée (plafond de
-sessions du mandat) : la session est arrêtée (``claude stop``) et la tâche rendue. Sans mandat, rien ne s'inscrit.
-La session a pu commencer à travailler avant son inscription : c'est sans effet sur la garde, l'inscription précède tout
-tick qui jugerait ses reçus. Dans la session, les commandes ``grimoire`` lisent l'identité que l'hôte exporte
-(``CLAUDE_CODE_SESSION_ID``, qui prime sous ``GRIMOIRE_UNATTENDED=1`` :
+reçu de revue écrit par la session qui a fait le travail. Sans mandat, rien ne s'inscrit. Avant de lancer, le mandat
+est relu sans écrire (:func:`mandate_precheck`) : plafond du jour atteint ou journal illisible, rien n'est lancé.
+Identité introuvable ou inscription refusée après le lancement : la session est arrêtée (``claude stop``) et la tâche
+rendue ; la tentative est notée (``task.session_launch_failed``, qui compte au plafond du jour) et, sauf refus de
+plafond (qui révoque déjà le mandat), comptée au disjoncteur. Un arrêt **non confirmé** ne rend pas la tâche : elle
+reste tenue (``claimed``) avec la session nommée au ledger (``halted: false``), compte au WIP et au disjoncteur, et la
+récolte la gare chez l'humain à l'expiration du bail. La session a pu commencer à travailler avant son inscription :
+c'est sans effet sur la garde, l'inscription précède tout tick qui jugerait ses reçus. Dans la session, les commandes
+``grimoire`` lisent l'identité que l'hôte exporte (``CLAUDE_CODE_SESSION_ID``, qui prime sous ``GRIMOIRE_UNATTENDED=1`` :
 :func:`~grimoire.core.standard_state.current_session`).
+
+**Limites (#966).**
+
+- L'identité de session n'est pas un secret : un worker peut lire le ``sessionId`` du relecteur dans ``claude agents``
+  et signer un reçu avec ``CLAUDE_CODE_SESSION_ID=<cet id>``. Ce n'est pas pire qu'avant (l'environnement est aux mains
+  de l'agent), mais le verrou 7 ne tient que contre un worker honnête. Défense à venir : prouver l'appelant par le hook
+  ``PreToolUse`` de l'hôte (``session_id`` lu sur son entrée standard), pas par l'environnement.
+- Une reprise ``claude --bg --resume <sessionId>`` (relecteur et merger) n'est ni résolue ni réinscrite : on suppose
+  que l'hôte garde l'identité reprise, ce qui n'a pas été vérifié sur Claude Code 2.1.310.
+- Un tick qui meurt entre ``claude --bg`` et l'événement qui note la session laisse une session orpheline, que rien
+  au ledger ne nomme.
 """
 
 from __future__ import annotations
@@ -67,9 +82,11 @@ __all__ = [
     "default_exec",
     "launched_sessions",
     "live_background_sessions",
+    "mandate_precheck",
     "renew_live_workers",
     "resolve_background_session",
     "session_env",
+    "unhalted_sessions",
 ]
 
 LAUNCHED_EVENT = "task.session_launched"
@@ -77,7 +94,7 @@ LAUNCH_FAILED_EVENT = "task.session_launch_failed"
 WORKER_ACTOR = "worker"
 _HOST = "claude-code-cli"
 _EXEC_TIMEOUT_S = 60.0
-#: ``backgrounded · 0d310bc4 (…)`` : la ligne que ``claude --bg`` imprime (vérifié avec Claude Code 2.1.309).
+#: ``backgrounded · 0d310bc4 (…)`` : la ligne que ``claude --bg`` imprime (vérifié avec Claude Code 2.1.310).
 _BG_ID = re.compile(r"backgrounded\s*\S?\s*([0-9a-f]{8})\b")
 #: Le ``sessionId`` d'une session de fond, tel que ``claude agents --json`` le rend : un uuid (le nom de son transcript).
 _SESSION_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -201,15 +218,25 @@ def _read_agents(exec_: Exec, cwd: Path, claude_bin: str) -> list[dict[str, Any]
     return [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else None
 
 
+def _same_dir(seen: object, expected: Path) -> bool:
+    try:
+        return Path(str(seen)).resolve() == expected.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def resolve_background_session(
     exec_: Exec, cwd: Path, short: str, claude_bin: str = "claude", *,
+    name: str = "", session_cwd: Path | None = None,
     attempts: int = _RESOLVE_ATTEMPTS, pause_s: float | None = None,
 ) -> str:
     """Le vrai ``sessionId`` de la session de fond d'identifiant court *short* (``claude agents --json``) ; ``""`` sinon.
 
     ``claude --bg`` ignore ``--session-id`` (#966, Claude Code 2.1.310) : l'identité d'une session de fond se lit, elle
     ne se choisit pas. Retenue : l'entrée ``kind: background`` dont l'``id`` est *short* et dont le ``sessionId`` est un
-    uuid qui commence par *short*. Lecture en échec, aucune entrée ou plusieurs candidates : ``""`` (échec fermé),
+    uuid qui commence par *short* ; quand l'entrée porte ``name`` ou ``cwd``, ils doivent valoir *name* (le ``--name``
+    du lancement) et *session_cwd* (le dossier où la session a été lancée), si l'appelant les donne.
+    Lecture en échec, aucune entrée ou plusieurs candidates : ``""`` (échec fermé),
     après *attempts* lectures espacées de *pause_s* (la session peut n'être pas encore listée à la sortie de ``--bg``) ;
     *pause_s* omis : :data:`_RESOLVE_PAUSE_S`, lu à l'appel.
     """
@@ -224,6 +251,8 @@ def resolve_background_session(
         found = {
             str(a.get("sessionId") or "") for a in agents
             if a.get("kind") == "background" and str(a.get("id") or "") == short
+            and not (name and a.get("name") is not None and str(a.get("name")) != name)
+            and not (session_cwd is not None and a.get("cwd") is not None and not _same_dir(a.get("cwd"), session_cwd))
         }
         found = {s for s in found if s.startswith(short) and _SESSION_UUID.fullmatch(s)}
         if len(found) == 1:
@@ -231,6 +260,24 @@ def resolve_background_session(
         if len(found) > 1:
             return ""  # deux sessions pour un même id court : on ne choisit pas
     return ""
+
+
+def unhalted_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
+    """Task id → payload du dernier ``task.session_launch_failed`` d'une session lancée dont l'arrêt n'est pas confirmé.
+
+    Seules les tâches qui tiennent encore le claim de cette tentative (même ``lease_epoch``) sont rendues.
+    """
+    last: dict[str, dict[str, Any]] = {}
+    for event in service.ledger.list_events():
+        if event.event_type == LAUNCH_FAILED_EVENT:
+            last[event.entity_id] = dict(event.payload)
+    found: dict[str, dict[str, Any]] = {}
+    for tid, payload in last.items():
+        task = service.ledger.get_task(tid)
+        if payload.get("halted") is False and task is not None and task.claim is not None \
+                and payload.get("lease_epoch") == task.claim.lease_epoch:
+            found[tid] = payload
+    return found
 
 
 def _git_out(cwd: Path, *args: str) -> str:
@@ -255,34 +302,57 @@ def session_env() -> dict[str, str]:
     return {"GRIMOIRE_UNATTENDED": "1"}
 
 
-def attest_session(service: TaskService, session_id: str, role: str, task_id: str) -> str:
-    """Inscrit *session_id* (résolu après le lancement) au journal d'autorité sous mandat actif ; ``""`` ou le refus.
+#: Code d'un refus d'inscription qui n'est pas un refus du mandat : le journal d'autorité est en erreur.
+JOURNAL_ERROR = "journal_error"
 
-    Sans mandat actif, l'identifiant n'est pas inscrit : rien n'est attesté, rien n'est refusé — aucun geste ne sera
-    pris sous mandat. Un refus d'inscription (plafond du mandat, rôle déjà tenu) ou une écriture du journal qui échoue
-    rend la raison : l'appelant arrête la session (échec fermé).
+
+def attest_session(service: TaskService, session_id: str, role: str, task_id: str) -> tuple[str, str]:
+    """Inscrit *session_id* (résolu après le lancement) au journal d'autorité sous mandat actif ; ``(refus, code)``.
+
+    ``("", "")`` : inscrite, ou aucun mandat actif (rien n'est attesté, rien n'est refusé — aucun geste ne sera pris
+    sous mandat). Sinon la raison et son code : celui du :class:`~grimoire.missions.mandate.MandateRefusedError`
+    (``cap_exceeded``, ``role_conflict``…) ou :data:`JOURNAL_ERROR` ; l'appelant arrête la session (échec fermé).
     """
     from grimoire.missions.mandate import MandateRefusedError, MandateStore
 
     try:
         store = MandateStore(service.home_root)
         if not store.state().active:
-            return ""
+            return "", ""
         store.register_session(session_id, role, task_id)
     except MandateRefusedError as exc:
-        return f"session {role} non inscrite au journal d'autorité : {exc}"
+        return f"session {role} non inscrite au journal d'autorité : {exc}", str(exc.code)
     except Exception as exc:  # une garde qui échoue ne laisse pas la session travailler
-        return f"session {role} non inscrite : journal d'autorité en erreur ({type(exc).__name__}: {exc})"
+        return f"session {role} non inscrite : journal d'autorité en erreur ({type(exc).__name__}: {exc})", JOURNAL_ERROR
+    return "", ""
+
+
+def mandate_precheck(service: TaskService, role: str) -> str:
+    """Avant de lancer, relu sans écrire : ``""`` si l'inscription peut réussir, sinon pourquoi elle échouerait.
+
+    Sans mandat actif, rien ne sera inscrit : ``""``. Un worker au plafond du jour du mandat, ou un journal illisible :
+    la raison — rien n'est lancé, plutôt que lancer une session qu'il faudrait arrêter aussitôt.
+    """
+    from grimoire.missions.mandate import MandateStore
+
+    try:
+        state = MandateStore(service.home_root).state()
+    except Exception as exc:  # journal illisible : l'inscription échouerait
+        return f"journal d'autorité illisible ({type(exc).__name__}: {exc}) : rien n'est lancé"
+    if not state.active or state.mandate is None:
+        return ""
+    if role == WORKER_ACTOR and state.sessions_today >= state.mandate.max_sessions_per_day:
+        return f"plafond de {state.mandate.max_sessions_per_day} sessions par jour du mandat atteint : rien n'est lancé"
     return ""
 
 
-def _halt(exec_: Exec, cwd: Path, short: str, claude_bin: str) -> str:
-    """Arrête (``claude stop``) une session lancée qu'on ne peut pas attester ; rend la fin de phrase qui le dit."""
+def _halt(exec_: Exec, cwd: Path, short: str, claude_bin: str) -> tuple[bool, str]:
+    """Arrête (``claude stop``) une session lancée qu'on ne peut pas attester : ``(arrêt confirmé, fin de phrase)``."""
     result = exec_([claude_bin, "stop", short], cwd, None)
     if result.returncode == 0:
-        return f", session {short} arrêtée"
+        return True, f", session {short} arrêtée"
     why = (result.stderr or result.stdout).strip()[:200] or f"sortie {result.returncode}"
-    return f", session {short} NON arrêtée ({why})"
+    return False, f", session {short} NON arrêtée ({why})"
 
 
 def _freeze_repository(service: TaskService, task_id: str) -> str:
@@ -321,10 +391,11 @@ class WorkerLauncher:
     def _active(self) -> int:
         """Les sessions de worker vivantes : tâches portant un lancement et tenant encore leur claim.
 
-        Une session qui attend (``blocked``, ``waiting``, ``needs_verification``) est vivante : elle compte.
+        Une session qui attend (``blocked``, ``waiting``, ``needs_verification``) est vivante : elle compte. Une session
+        lancée puis abandonnée sans arrêt confirmé (``halted: false``) tient encore son claim : elle compte aussi.
         """
-        sessions = launched_sessions(self._service)
-        return sum(1 for tid in sessions if self._service.require(tid).status in _LIVE)
+        tasks = set(launched_sessions(self._service)) | set(unhalted_sessions(self._service))
+        return sum(1 for tid in tasks if self._service.require(tid).status in _LIVE)
 
     def _launched_today(self) -> int:
         today = _day((self._now or datetime.now(UTC)).isoformat())
@@ -370,6 +441,8 @@ class WorkerLauncher:
 
     def _launch(self, admit: Admit) -> LaunchOutcome:
         service, tid = self._service, admit.task_id
+        if blocked := mandate_precheck(service, WORKER_ACTOR):
+            return LaunchOutcome(tid, "skipped", blocked)
         base, into, why = self._base()
         if not base:
             return LaunchOutcome(tid, "failed", f"préparation refusée : {why}")
@@ -392,18 +465,18 @@ class WorkerLauncher:
             return self._failed(tid, f"claude --bg a échoué ({result.returncode}) : {detail}")
         session = match.group(1)
         # #966 : l'identité se lit après le lancement ; c'est elle, et elle seule, qui s'inscrit et se note.
-        session_id = resolve_background_session(self._exec, wt.path, session, self._claude)
+        session_id = resolve_background_session(
+            self._exec, wt.path, session, self._claude, name=f"grimoire-{tid}", session_cwd=wt.path
+        )
         if not session_id:
-            stopped = _halt(self._exec, wt.path, session, self._claude)
-            return self._failed(tid, f"session {session} lancée mais introuvable dans `claude agents` : identité non résolue{stopped}")
-        refused = attest_session(service, session_id, WORKER_ACTOR, tid)
+            return self._abandon(tid, session, wt.path, f"session {session} lancée mais introuvable dans `claude agents` : "
+                                 "identité non résolue", count=True)
+        refused, code = attest_session(service, session_id, WORKER_ACTOR, tid)
         if refused:
-            refused += _halt(self._exec, wt.path, session, self._claude)
-            try:
-                service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
-            except GrimoireError as exc:
-                refused += f" (claim non rendu : {exc})"
-            return LaunchOutcome(tid, "skipped", refused)
+            from grimoire.missions.mandate import CAP_EXCEEDED
+
+            # Un refus de plafond révoque déjà le mandat ; un rôle en conflit ou un journal en erreur est une panne.
+            return self._abandon(tid, session, wt.path, refused, count=code != CAP_EXCEEDED)
         current = service.require(tid).claim
         service.ledger.append_event(
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
@@ -434,6 +507,35 @@ class WorkerLauncher:
         remote_ref = f"refs/remotes/origin/{name}"
         base = remote_ref if _git_out(repo, "rev-parse", "--verify", "--quiet", f"{remote_ref}^{{commit}}") else f"refs/heads/{name}"
         return base, name, ""
+
+    def _abandon(self, tid: str, short: str, cwd: Path, detail: str, *, count: bool) -> LaunchOutcome:
+        """Une session lancée qu'on n'atteste pas : arrêtée, la tentative notée, la tâche rendue.
+
+        Arrêt non confirmé : la tâche reste tenue (une session qui tourne peut encore pousser sur sa branche), la
+        session est nommée au ledger (``halted: false``) et l'échec compte au disjoncteur quoi qu'il arrive.
+        """
+        service = self._service
+        halted, said = _halt(self._exec, cwd, short, self._claude)
+        detail += said
+        claim = service.require(tid).claim
+        epoch = claim.lease_epoch if claim is not None else 0
+        if halted:
+            try:
+                service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=f"lancement abandonné : {detail}")
+            except GrimoireError as exc:
+                detail += f" (claim non rendu : {exc})"
+        else:
+            detail += " : tâche gardée tenue tant que l'arrêt n'est pas confirmé (la récolte la gare chez l'humain)"
+        service.ledger.append_event(
+            LAUNCH_FAILED_EVENT, tid, "task", WORKER_ACTOR,
+            {"detail": detail, "session": short, "halted": halted, "name": f"grimoire-{tid}", "cwd": str(cwd),
+             "lease_epoch": epoch},
+        )
+        if count or not halted:
+            if record_failure(service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}").open:
+                detail += " — disjoncteur ouvert"
+            return LaunchOutcome(tid, "failed", detail, short)
+        return LaunchOutcome(tid, "skipped", detail, short)
 
     def _failed(self, tid: str, detail: str) -> LaunchOutcome:
         """Rend le claim, note l'échec, et le compte au disjoncteur."""
