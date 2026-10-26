@@ -716,6 +716,37 @@ def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
     return migrate_standard_tasks(project_root).to_dict()
 
 
+def _task_add(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Nouvelle tâche » de Travail (P35) : ``TaskService.add``, l'entrée de ``grimoire task add`` et de ``task_add``.
+
+    Titre, critères d'acceptation (une liste, ou un texte à un critère par ligne)
+    et description. Écriture du projet servi seulement : le cockpit ne câble
+    cette route que pour son projet de lancement (garde P02, aucune dérogation).
+    """
+    from grimoire.missions.service import TaskService
+
+    title = str(body.get("title") or "").strip()
+    if not title:
+        raise ValueError("titre requis : nomme la tâche")
+    raw = body.get("acceptance")
+    items = raw.splitlines() if isinstance(raw, str) else raw
+    if not isinstance(items, list):
+        raise ValueError("`acceptance` doit être une liste de critères")
+    acceptance = tuple(str(item).strip() for item in items if str(item).strip())
+    if not acceptance:
+        raise ValueError("au moins un critère d'acceptation est requis")
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    try:
+        added = TaskService(project_root.resolve()).add(
+            title, acceptance, description=str(body.get("description") or ""),
+            actor=str(body.get("actor") or "workspace"), origin="cockpit",
+        )
+    except GrimoireMissionError as exc:  # description trop longue, critère refusé : un 400, pas un 404
+        raise ValueError(str(exc)) from exc
+    return added.to_dict()
+
+
 def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
 
@@ -764,6 +795,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}command": _command,
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
+    f"{PREFIX}tasks/add": _task_add,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
