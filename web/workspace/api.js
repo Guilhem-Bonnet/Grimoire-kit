@@ -308,6 +308,12 @@ export const api = {
   // dernier run de flow `project-upgrade`, nom du projet. `project` cible un
   // AUTRE projet que celui déjà résolu — même convention que `health()`.
   sheet: (project) => get(WS + 'sheet', project ? { project } : undefined),
+  // Capacité (P71) : WIP, réservoirs d'admission, quota et file des tâches
+  // prêtes avec la raison de chaque report — le même plan à blanc que
+  // `grimoire queue plan`, côté serveur (workspace_capacity.py), lecture
+  // seule. `project` cible un AUTRE projet que celui déjà résolu par l'hôte —
+  // même convention que `sheet()` juste au-dessus.
+  capacity: (project) => get(WS + 'capacity', project ? { project } : undefined),
   // Agrégation mémoire multi-projets (#172, dernier volet de « du générateur
   // statique au portefeuille actif ») : `projects` vaut 'all', une liste
   // 'slug1,slug2', ou est omis pour « ce projet » seul — jamais toute la

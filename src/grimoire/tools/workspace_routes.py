@@ -483,6 +483,18 @@ def _memory_recall_replay(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _capacity(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/capacity`` — WIP, réservoirs d'admission, quota et file (P71).
+
+    Le même plan à blanc que ``grimoire queue plan`` (K10), rendu pour le
+    cockpit : occupation dérivée du ledger réel, jamais un compteur à côté,
+    jamais une écriture. Voir :mod:`grimoire.tools.workspace_capacity`.
+    """
+    from grimoire.tools import workspace_capacity
+
+    return workspace_capacity.capacity_view(project_root)
+
+
 def _assist_status(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/assist`` — l'opt-in et la disponibilité, sans coût.
 
@@ -535,6 +547,7 @@ def _mandate_state(project_root: Path, _query: _Query) -> Any:
 GET_ROUTES: dict[str, _GetHandler] = {
 f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
+    f"{PREFIX}capacity": _capacity,
     f"{PREFIX}tasks": _tasks,
     f"{PREFIX}waves": _waves,
     f"{PREFIX}files": _files,
