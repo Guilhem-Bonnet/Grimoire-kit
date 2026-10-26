@@ -153,19 +153,27 @@ def test_p58_aucun_raccourci_ne_s_active_pendant_une_saisie(browser: Browser, se
         assert page.locator("#t-in").input_value() == "?1jk"
 
 
+#: Le focus n'est jamais dans la page derrière l'aide : dans le dialogue, ou nulle part
+#: (Tab après le dernier élément d'un <dialog> modal sort vers le navigateur).
+_FOCUS_OUTSIDE_HELP = "() => { const a = document.activeElement; return Boolean(a && a !== document.body && !a.closest('#shortcuts')); }"
+
+
 def test_p58_l_aide_piege_le_focus_se_ferme_et_rend_le_focus(browser: Browser, served: str) -> None:
+    # P55 : l'aide est un <dialog> modal — le piège du focus, Échap, le clic sur
+    # le fond et le retour du focus sont ceux du navigateur (plus de `inert` posé
+    # à la main sur #shell, plus de Tab intercepté).
     with _page(browser, served, color_scheme="dark", reduced_motion="reduce") as page:
         for how in ("bouton", "voile", "echap"):
             page.locator("#palette-open").focus()
             page.keyboard.press("Shift+?")
             assert page.locator("#shortcuts").is_visible()
-            assert page.evaluate("() => document.getElementById('shell').inert") is True
+            assert page.evaluate("() => document.getElementById('shortcuts').matches('dialog:modal')") is True
             assert page.evaluate("() => document.activeElement.id") == "shortcuts-close"
             for _ in range(3):
                 page.keyboard.press("Tab")
-                assert page.evaluate("() => document.activeElement.id") == "shortcuts-close", how
+                assert page.evaluate(_FOCUS_OUTSIDE_HELP) is False, how
             page.keyboard.press("Shift+Tab")
-            assert page.evaluate("() => document.activeElement.id") == "shortcuts-close", how
+            assert page.evaluate(_FOCUS_OUTSIDE_HELP) is False, how
             if how == "bouton":
                 page.locator("#shortcuts-close").click()
             elif how == "voile":
@@ -173,7 +181,7 @@ def test_p58_l_aide_piege_le_focus_se_ferme_et_rend_le_focus(browser: Browser, s
             else:
                 page.keyboard.press("Escape")
             assert page.locator("#shortcuts").is_hidden(), how
-            assert page.evaluate("() => document.getElementById('shell').inert") is False
+            assert page.evaluate("() => document.getElementById('shortcuts').open") is False
             assert page.evaluate("() => document.activeElement.id") == "palette-open", how
 
 

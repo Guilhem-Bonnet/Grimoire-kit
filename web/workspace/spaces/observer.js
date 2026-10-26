@@ -32,7 +32,7 @@ function injectStyles() {
   style.textContent = `
     .ob-wrap { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
     .ob-panels { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
-    @media (max-width: 900px) { .ob-panels { grid-template-columns: 1fr; } }
+    @container canvas (max-width: 900px) { .ob-panels { grid-template-columns: 1fr; } }
     .ob-panel { border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); padding: var(--sp-3); }
     .ob-panel h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-3); }
     .ob-bar-row { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 6px; font-size: var(--t-min); }

@@ -38,8 +38,10 @@
 //                  d'écran] à poser dans une zone qui attend ses données ; la
 //                  forme (P60 : lines, inbox, board, table, results, kpi) est
 //                  celle de la liste qui vient
-//   ctx.openPanel  (id) → ouvre un panneau latéral (`explorer`, `inspector`,
-//                  `evidence`) : épinglé au bureau, en tiroir sous 900 px
+//   ctx.openPanel  (id, { detail? }) → ouvre un panneau latéral (`explorer`,
+//                  `inspector`, `evidence`) : épinglé au bureau, en tiroir sous
+//                  900 px ; `detail` : seulement si le détail n'est pas déjà
+//                  posé sous la liste (P59)
 //   ctx.rail       `{ on(id, handler) }` : enregistre ce que fait le rail « 2 »
 //                  (bibliothèque) tant que cet espace est monté ; remis à
 //                  zéro par la coque à chaque changement d'espace
@@ -295,19 +297,30 @@ export function spaceHead(title, sub, ...actions) {
   return head;
 }
 
-// ── Menu « … » (P11, partagé depuis P56) ────────────────────────────────────
+// ── Menu « … » (P11, partagé depuis P56, natif depuis P55) ──────────────────
 // Une seule implémentation : le menu de l'inspecteur de tâche (Annuler) et le
-// menu de chaque ligne de liste. Un bouton « … » (`aria-expanded`), un panneau
-// (`data-role="<role>-panel"`) ; Échap le referme et rend le focus au bouton,
-// un clic à côté le referme (sauf si `keepOpen()` le retient : un brouillon ne
-// se perd pas). Un seul menu ouvert à la fois, un seul écouteur pour tous.
-// `floating` : le panneau se pose en position fixe sous le bouton, pour sortir
-// d'une liste qui coupe ce qui déborde (sections, colonnes qui défilent).
+// menu de chaque ligne de liste. Un bouton « … » (`aria-expanded`) qui commande
+// un panneau `popover="auto"` (`data-role="<role>-panel"`). Le navigateur fait
+// tout ce que le menu faisait à la main avant P55 : Échap et un clic à côté le
+// referment, un seul menu ouvert à la fois, le focus revient au bouton quand le
+// menu se ferme alors qu'il le tenait, et le panneau vit dans la couche
+// supérieure — aucune liste qui défile ne le coupe. Il reste posé sous son
+// bouton par l'ancrage CSS (`anchor-name`, shell.css) ; sans ancrage CSS, par
+// une position calculée à l'ouverture.
+// Un brouillon (la raison d'une annulation) ne se perd pas : un clic à côté
+// referme le panneau, le champ garde sa saisie et la retrouve à la réouverture.
+//
+// Repli : sans Popover API (`showPopover` absent), le bouton bascule
+// `hidden` sur le panneau — le menu s'ouvre et se ferme au bouton et au choix
+// d'une action, sans fermeture par Échap ni par un clic à côté.
+
+const HAS_POPOVER = typeof HTMLElement === 'function' && typeof HTMLElement.prototype.showPopover === 'function';
+const HAS_ANCHOR = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('anchor-name: --a');
 
 let menuSeq = 0;
 let openMenu = null;
 
-export function moreMenu({ label = "Plus d'actions", role = 'more', id = '', floating = false, keepOpen = null, onOpen = null } = {}) {
+export function moreMenu({ label = "Plus d'actions", role = 'more', id = '', onOpen = null } = {}) {
   menuSeq += 1;
   const wrap = mk('div', { class: 'more' });
   const panelId = id || `more-panel-${menuSeq}`;
@@ -316,47 +329,59 @@ export function moreMenu({ label = "Plus d'actions", role = 'more', id = '', flo
     'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': panelId,
   }, icon('more'));
   const panel = mk('div', { class: 'more-panel', id: panelId, 'data-role': `${role}-panel`, role: 'group', 'aria-label': label });
-  panel.hidden = true;
-  if (floating) panel.dataset.floating = 'true';
-  const menu = { wrap, toggle, panel, floating, keepOpen };
+  const menu = { wrap, toggle, panel };
+  const isOpen = () => (HAS_POPOVER ? panel.matches(':popover-open') : !panel.hidden);
+  // `beforetoggle` est synchrone (le bouton dit l'état dès le clic) ; le
+  // focus confié à `onOpen` attend `toggle`, quand le panneau est affiché.
+  const sync = (open) => {
+    toggle.setAttribute('aria-expanded', String(open));
+    wrap.classList.toggle('open', open);
+    openMenu = open ? menu : (openMenu === menu ? null : openMenu);
+  };
+  // Sans ancrage CSS : la position se calcule à l'ouverture, sous le bouton.
   const place = () => {
     const box = toggle.getBoundingClientRect();
     panel.style.top = `${Math.round(box.bottom + 4)}px`;
     panel.style.right = `${Math.max(8, Math.round(window.innerWidth - box.right))}px`;
   };
+  if (HAS_POPOVER) {
+    panel.popover = 'auto';
+    toggle.popoverTargetElement = panel;
+    toggle.popoverTargetAction = 'toggle';
+    const anchor = `--more-${menuSeq}`;
+    if (HAS_ANCHOR) {
+      toggle.style.setProperty('anchor-name', anchor);
+      panel.style.setProperty('position-anchor', anchor);
+    } else {
+      panel.addEventListener('beforetoggle', (event) => { if (event.newState === 'open') place(); });
+    }
+    panel.addEventListener('beforetoggle', (event) => sync(event.newState === 'open'));
+    panel.addEventListener('toggle', (event) => { if (event.newState === 'open' && onOpen) onOpen(panel); });
+  } else {
+    panel.hidden = true;
+    toggle.addEventListener('click', () => {
+      if (panel.hidden) place();
+      panel.hidden = !panel.hidden;
+      sync(!panel.hidden);
+      if (!panel.hidden && onOpen) onOpen(panel);
+    });
+  }
+  menu.isOpen = isOpen;
   menu.setOpen = (open) => {
-    if (open && openMenu && openMenu !== menu) openMenu.setOpen(false);
-    panel.hidden = !open;
-    toggle.setAttribute('aria-expanded', String(open));
-    wrap.classList.toggle('open', open);
-    if (open && floating) place();
-    openMenu = open ? menu : (openMenu === menu ? null : openMenu);
+    if (open === isOpen()) return;
+    if (HAS_POPOVER) {
+      if (open) panel.showPopover({ source: toggle }); else panel.hidePopover();
+    } else {
+      if (open) place();
+      panel.hidden = !open;
+      sync(open);
+      if (open && onOpen) onOpen(panel);
+    }
   };
-  toggle.addEventListener('click', (event) => {
-    event.stopPropagation();
-    menu.setOpen(panel.hidden);
-    if (!panel.hidden && onOpen) onOpen(panel);
-  });
-  wrap.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || panel.hidden) return;
-    event.stopPropagation();
-    menu.setOpen(false);
-    toggle.focus();
-  });
+  // Un clic sur le bouton n'est pas un clic sur la ligne.
+  toggle.addEventListener('click', (event) => event.stopPropagation());
   wrap.append(toggle, panel);
   return menu;
-}
-
-function closeMenuOutside(event) {
-  if (!openMenu) return;
-  if (!openMenu.wrap.isConnected) { openMenu = null; return; }
-  const target = event.target instanceof Node ? event.target : null;
-  if (target && openMenu.wrap.contains(target)) return;
-  if (event.type === 'click' && openMenu.keepOpen && openMenu.keepOpen()) return;
-  // Défilement et redimensionnement ne referment qu'un panneau flottant : celui
-  // de l'inspecteur suit son bouton.
-  if (event.type !== 'click' && !openMenu.floating) return;
-  openMenu.setOpen(false);
 }
 
 // ── Actions de ligne (P56) ──────────────────────────────────────────────────
@@ -370,15 +395,17 @@ export function rowActions(actions, { label = "Plus d'actions" } = {}) {
   const kept = actions.filter(Boolean);
   const box = mk('span', { class: 'row-actions', 'data-role': 'row-actions' });
   if (!kept.length) return box;
-  const menu = moreMenu({ label, role: 'row-more', floating: true });
+  const menu = moreMenu({ label, role: 'row-more' });
   for (const action of kept) {
     const button = mk('button', {
       type: 'button', class: 'btn ghost row-act', 'data-action': action.id, 'aria-label': action.label, title: action.label,
     }, icon(action.icon));
-    button.addEventListener('click', () => { if (openMenu) openMenu.setOpen(false); action.run(button); });
+    button.addEventListener('click', () => action.run(button));
     const item = mk('button', { type: 'button', class: 'more-item', 'data-action': action.id },
       icon(action.icon), mk('span', { text: action.label }));
-    item.addEventListener('click', () => { menu.setOpen(false); menu.toggle.focus(); action.run(menu.toggle); });
+    // Fermer le menu rend le focus au bouton « … » (Popover API) : l'action
+    // part ensuite de là, comme depuis le bouton direct de la ligne.
+    item.addEventListener('click', () => { menu.setOpen(false); action.run(menu.toggle); });
     box.append(button);
     menu.panel.append(item);
   }
@@ -498,6 +525,111 @@ export function failureText(error) {
   const message = (error && error.message) || 'motif non communiqué';
   return error && error.code === 0 ? `Échec : ${message}` : `Refusé : ${message}`;
 }
+
+// ── Toast « Annuler » (P57) ─────────────────────────────────────────────────
+// Un geste réversible part tout de suite, sans confirmation : le toast dit ce
+// qui vient d'arriver et offre « Annuler » pendant 10 s. Annuler appelle la
+// route inverse que l'espace fournit (`undo`), jamais une route nouvelle. Un
+// geste irréversible n'a jamais de toast : il garde sa confirmation.
+//
+// Un seul toast à la fois, dans la région `#toast` (`role="status"`, annonce
+// polie, présente dès le chargement pour que l'annonce parte). Le délai se met
+// en pause tant que le pointeur survole le toast ou que le focus y est : le
+// bouton reste atteignable au clavier sans course contre la montre.
+// L'horloge est injectable (`toastClock`) et la fin du délai se déclenche à la
+// demande (`GrimoireWorkspace.toast.expire()`) : aucun test n'attend 10 s.
+
+export const UNDO_DELAY_MS = 10000;
+const DONE_DELAY_MS = 4000;
+
+export const toastClock = {
+  now: () => Date.now(),
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (handle) => clearTimeout(handle),
+};
+
+let toast = null;
+
+function dropToast() {
+  if (!toast) return;
+  toastClock.clear(toast.timer);
+  toast = null;
+  const region = $('toast');
+  if (region) region.replaceChildren();
+}
+
+function armToast(ms) {
+  toast.remaining = ms;
+  toast.started = toastClock.now();
+  toast.timer = toastClock.set(dropToast, ms);
+}
+
+function holdToast(held) {
+  if (!toast || toast.phase !== 'pending' || toast.held === held) return;
+  toast.held = held;
+  toast.card.dataset.held = String(held);
+  if (held) {
+    toastClock.clear(toast.timer);
+    toast.remaining = Math.max(0, toast.remaining - (toastClock.now() - toast.started));
+  } else {
+    armToast(toast.remaining);
+  }
+}
+
+/** Montre le toast d'un geste qui vient de partir. `undo()` rejoue la route
+ *  inverse et rend une promesse ; `undone` est le message de réussite. */
+export function undoToast(message, { undo, undone = 'Geste annulé.' } = {}) {
+  dropToast();
+  const region = $('toast');
+  if (!region || typeof undo !== 'function') return null;
+  const text = mk('span', { class: 'toast-msg', text: message });
+  const action = mk('button', { type: 'button', class: 'btn pri toast-undo', 'data-role': 'toast-undo' },
+    icon('undo'), mk('span', { text: 'Annuler' }));
+  const close = mk('button', { type: 'button', class: 'btn ghost toast-close', 'aria-label': 'Fermer', title: 'Fermer' }, icon('cross'));
+  const card = mk('div', { class: 'toast-card', 'data-phase': 'pending', 'data-duration': String(UNDO_DELAY_MS) }, text, action, close);
+  const own = { card, phase: 'pending', held: false, timer: null, remaining: UNDO_DELAY_MS, started: 0 };
+  toast = own;
+  card.addEventListener('pointerenter', () => holdToast(true));
+  card.addEventListener('pointerleave', () => holdToast(card.contains(document.activeElement)));
+  card.addEventListener('focusin', () => holdToast(true));
+  card.addEventListener('focusout', (event) => holdToast(card.contains(event.relatedTarget) || card.matches(':hover')));
+  close.addEventListener('click', dropToast);
+  action.addEventListener('click', async () => {
+    if (toast !== own || own.phase !== 'pending') return;
+    toastClock.clear(own.timer);
+    own.phase = 'undoing';
+    card.dataset.phase = 'undoing';
+    action.disabled = true;
+    text.textContent = 'Annulation…';
+    let outcome;
+    try {
+      await undo();
+      outcome = { tone: 'ok', text: undone };
+    } catch (error) {
+      outcome = { tone: 'bad', text: `Annulation impossible. ${failureText(error)}` };
+    }
+    if (toast !== own) return;
+    own.phase = 'done';
+    card.dataset.phase = 'done';
+    card.dataset.tone = outcome.tone;
+    text.textContent = outcome.text;
+    action.remove();
+    // La réponse reste lisible, puis s'efface ; un refus attend « Fermer ».
+    if (outcome.tone === 'ok') own.timer = toastClock.set(dropToast, DONE_DELAY_MS);
+    close.focus({ preventScroll: true });
+  });
+  region.replaceChildren(card);
+  armToast(UNDO_DELAY_MS);
+  return card;
+}
+
+/** Surface de test : l'état du toast, et la fin du délai sans attendre. */
+const toastProbe = {
+  get phase() { return toast ? toast.phase : null; },
+  get held() { return toast ? toast.held : false; },
+  get duration() { return UNDO_DELAY_MS; },
+  expire() { if (toast) { toastClock.clear(toast.timer); dropToast(); } },
+};
 
 // ── État mémorisé par espace et par projet (spec §3.1) ──────────────────────
 
@@ -749,9 +881,22 @@ function setPanel(id, state, { persist = true } = {}) {
   if (state !== 'collapsed') PANEL_ON_OPEN[id]?.();
 }
 
-/** Ouvre un panneau à la demande d'un espace (bouton d'un état vide, par exemple). */
-function openPanel(id) {
+// P59 : entre 600 et 1180 px de `#middle`, hors atelier, le détail se pose
+// sous la liste (requête de conteneur `middle`, shell.css). Même seuil bas ici :
+// au-dessus, un tiroir ouvert pour « montrer le détail » le recouvrirait.
+const DETAIL_IN_FLOW_MIN = 600;
+
+function detailInFlow(id) {
+  return id === 'inspector' && root.dataset.atelier !== 'on' && $('middle').clientWidth >= DETAIL_IN_FLOW_MIN;
+}
+
+/** Ouvre un panneau à la demande d'un espace (bouton d'un état vide, par
+ * exemple). `detail` : l'espace veut montrer l'élément qu'on vient de choisir —
+ * utile seulement sous 900 px, et seulement si le détail n'est pas déjà posé
+ * sous la liste. */
+function openPanel(id, { detail = false } = {}) {
   if (!PANELS[id]) return;
+  if (detail && (!isNarrow() || detailInFlow(id))) return;
   if (isNarrow()) {
     setPanel(id, 'peek');
     enterDrawer(id, document.activeElement);
@@ -1838,6 +1983,8 @@ const scope = {
 
 function renderScopeChip() {
   $('project-name').textContent = scopeName();
+  // P59 : un nom long s'élide dans la puce ; il reste entier au survol.
+  $('project-chip').title = `${scopeName()} — changer de portée : tous les projets ou un seul`;
   // Maquettes : « Tous les projets 11 » — le nombre de projets du registre.
   const count = $('project-count');
   count.hidden = !(host.scopeAll && registry.length);
@@ -2096,7 +2243,7 @@ async function buildPalette() {
 
   paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks, ...files];
   // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
-  if (!$('palette').hidden) renderPalette($('palette-input').value);
+  if ($('palette').open) renderPalette($('palette-input').value);
 }
 
 /** Pastille d'un projet : suivi par Grimoire, dossier sans Grimoire, ou disparu. */
@@ -2140,11 +2287,18 @@ function displayItems() {
 // `sectionFirst` : section à placer en tête. `only` : ne montrer qu'elle
 // (la puce de portée ouvre ainsi le sélecteur de projets). `null` garde
 // l'ordre par défaut.
+//
+// P55 : la palette est un `<dialog>` ouvert par `showModal()`. Le navigateur
+// donne le focus au champ (premier élément focalisable), rend le reste de la
+// page inerte, ferme sur Échap et sur un clic hors de la boîte (`closedby`),
+// et rend le focus au déclencheur à la fermeture. Seules les flèches et
+// Entrée (la liste à choix, `bindShortcuts`) restent à la coque.
+const HAS_CLOSEDBY = typeof HTMLDialogElement === 'function' && 'closedBy' in HTMLDialogElement.prototype;
+
 function openPalette(sectionFirst = null, { only = false } = {}) {
   paletteSectionFirst = sectionFirst;
   paletteOnly = Boolean(sectionFirst && only);
   const palette = $('palette');
-  palette.hidden = false;
   // Deux présentations d'un même composant : la palette ⌘K flotte au centre ;
   // le sélecteur de portée est un menu ancré sous la puce qui l'ouvre.
   palette.dataset.mode = paletteOnly ? 'scope' : 'commands';
@@ -2154,19 +2308,23 @@ function openPalette(sectionFirst = null, { only = false } = {}) {
     ? 'Rechercher un projet ou un dossier…'
     : 'Aller à, ou lancer une commande grimoire…';
   placePalette();
-  $('palette-input').focus();
   renderPalette('');
+  if (!palette.open) palette.showModal();
 }
 
 function closePalette() {
-  $('palette').hidden = true;
+  if ($('palette').open) $('palette').close();
+}
+
+/** Ce que la fermeture remet à zéro, quelle qu'en soit la cause (Échap, fond, choix). */
+function resetPalette() {
   paletteSectionFirst = null;
   paletteOnly = false;
 }
 
 /** Ancre le sélecteur de portée sous sa puce ; la palette ⌘K garde sa place. */
 function placePalette() {
-  const box = $('palette-box');
+  const box = $('palette');
   if (!paletteOnly) {
     box.style.removeProperty('top');
     box.style.removeProperty('left');
@@ -2346,14 +2504,9 @@ const SHORTCUTS = [
   ['Échap', 'Fermer la palette, un tiroir ou cette aide'],
 ];
 
-let shortcutsReturnFocus = null;
-
-// Tout le reste de la page devient inerte tant que l'aide est ouverte (focus,
-// clics et lecteurs d'écran restent dans la boîte).
-function setBackgroundInert(on) {
-  for (const id of ['shell']) if ($(id)) $(id).inert = on;
-}
-
+// L'aide est un `<dialog>` modal (P55) : le reste de la page est inerte, le
+// focus va à « Fermer », Échap et un clic sur le fond la ferment, et le focus
+// revient à l'élément qui l'avait ouverte — tout cela par le navigateur.
 function openShortcuts() {
   const dialog = $('shortcuts');
   const list = $('shortcuts-list');
@@ -2361,18 +2514,18 @@ function openShortcuts() {
     mk('dt', null, mk('span', { class: 'kbd', text: keys })),
     mk('dd', { text: what }),
   ]));
-  shortcutsReturnFocus = document.activeElement;
-  dialog.hidden = false;
-  setBackgroundInert(true);
-  $('shortcuts-close').focus();
+  if (!dialog.open) dialog.showModal();
 }
 
 function closeShortcuts() {
-  $('shortcuts').hidden = true;
-  setBackgroundInert(false);
-  const back = shortcutsReturnFocus;
-  shortcutsReturnFocus = null;
-  if (back && back.isConnected && typeof back.focus === 'function') back.focus();
+  if ($('shortcuts').open) $('shortcuts').close();
+}
+
+/** Repli sans `closedby` : un clic sur le fond d'un `<dialog>` vise le dialogue
+ * lui-même (sa boîte intérieure le remplit), jamais l'un de ses enfants. */
+function closeOnBackdrop(dialog) {
+  if (HAS_CLOSEDBY) return;
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
 }
 
 function bindShortcuts() {
@@ -2380,11 +2533,10 @@ function bindShortcuts() {
     const meta = event.metaKey || event.ctrlKey;
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
 
-    if (!$('shortcuts').hidden) {
-      // L'aide est modale : Échap ou « ? » la ferme, ⌘K la remplace par la palette.
-      if (event.key === 'Escape' || event.key === '?') { event.preventDefault(); closeShortcuts(); return; }
-      // Le seul élément focalisable est « Fermer » : Tab y reste (piège de focus).
-      if (event.key === 'Tab') { event.preventDefault(); $('shortcuts-close').focus(); return; }
+    if ($('shortcuts').open) {
+      // L'aide est modale (Échap : le navigateur) ; « ? » la referme aussi, ⌘K
+      // la remplace par la palette.
+      if (event.key === '?') { event.preventDefault(); closeShortcuts(); return; }
       if (!meta) return;
       closeShortcuts();
     }
@@ -2394,13 +2546,13 @@ function bindShortcuts() {
     if (meta && event.shiftKey && event.key.toLowerCase() === 'l') { event.preventDefault(); toggleAtelier(); return; }
     if (meta && /^[1-5]$/.test(event.key)) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
 
-    if ($('palette').hidden && event.key === 'Escape' && isNarrow() && leaveDrawer()) {
+    if (!$('palette').open && event.key === 'Escape' && isNarrow() && leaveDrawer()) {
       event.preventDefault();
       return;
     }
 
-    if (!$('palette').hidden) {
-      if (event.key === 'Escape') { event.preventDefault(); closePalette(); }
+    if ($('palette').open) {
+      // Échap : le `<dialog>` lui-même. Restent les flèches et Entrée.
       if (event.key === 'ArrowDown') { event.preventDefault(); movePalette(1); }
       if (event.key === 'ArrowUp') { event.preventDefault(); movePalette(-1); }
       if (event.key === 'Enter') {
@@ -2442,9 +2594,6 @@ async function main() {
   buildDock();
   bindResize();
   bindShortcuts();
-  document.addEventListener('click', closeMenuOutside);
-  document.addEventListener('scroll', closeMenuOutside, true);
-  window.addEventListener('resize', closeMenuOutside);
   for (const button of document.querySelectorAll('#st-theme [data-theme-pref]')) {
     button.addEventListener('click', () => setThemePref(button.dataset.themePref));
   }
@@ -2466,14 +2615,15 @@ async function main() {
   $('st-fullscreen').addEventListener('click', toggleFocus);
   $('palette-open').addEventListener('click', () => openPalette());
   $('shortcuts-close').addEventListener('click', closeShortcuts);
-  $('shortcuts').addEventListener('click', (e) => { if (e.target.id === 'shortcuts') closeShortcuts(); });
+  closeOnBackdrop($('shortcuts'));
   startStampTicker();
   // La puce de portée ouvre le sélecteur : la palette réduite à « Projets »,
   // sans plafond, « Tous les projets » en tête. Changer de portée recharge la
   // page (voir `setScope`).
   $('project-chip').addEventListener('click', () => openPalette('Projets', { only: true }));
   dressPalette();
-  $('palette').addEventListener('pointerdown', (e) => { if (e.target.id === 'palette') closePalette(); });
+  $('palette').addEventListener('close', resetPalette);
+  closeOnBackdrop($('palette'));
   $('palette-input').addEventListener('input', (e) => renderPalette(e.target.value));
   // La souris et le clavier tiennent la même ligne : survoler une entrée la
   // rend active, et Entrée choisit celle que l'on voit en surbrillance.
@@ -2481,7 +2631,7 @@ async function main() {
     const li = e.target.closest('li[role="option"]');
     if (li && Number(li.dataset.index) !== paletteIndex) selectPaletteIndex(Number(li.dataset.index), { scroll: false });
   });
-  window.addEventListener('resize', () => { if (!$('palette').hidden) placePalette(); });
+  window.addEventListener('resize', () => { if ($('palette').open) placePalette(); });
 
   let status = null;
   try {
@@ -2560,7 +2710,8 @@ async function main() {
     get contrast() { return root.dataset.contrast; },
     get atelier() { return root.dataset.atelier; },
     setAtelier,
-    get paletteOpen() { return !$('palette').hidden; },
+    get paletteOpen() { return $('palette').open; },
+    toast: toastProbe,
   };
   document.body.dataset.ready = '1';
 }

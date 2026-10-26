@@ -76,7 +76,7 @@ const STYLES = `
 .dn-cell[data-tone="none"] .dn-pip { background: var(--line); }
 .dn-env { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 16px 14px; }
 .dn-env-label { color: var(--ink2); font-size: 12.5px; }
-@media (max-width: 760px) {
+@container canvas (max-width: 760px) {
   .dn-hint { margin-left: 0; flex-basis: 100%; }
 }
 `;

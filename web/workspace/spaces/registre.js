@@ -9,12 +9,17 @@
 // maquette : elle compose les primitives de la coque (en-tête, tableau, badge,
 // retour d'action) dans le style Douce.
 //
-// Retirer et purger se font en deux temps, dans la page, jamais par `confirm()` :
-// un aperçu (rien n'est écrit) puis la confirmation. Aucun des deux ne touche au
-// dossier d'un projet : l'écran le répète à chaque fois. Le projet que ce
-// cockpit sert ne se retire pas d'ici (le serveur refuse, le bouton le dit).
+// Retirer une entrée est réversible (P57) quand « Ajouter » la recrée à
+// l'identique : son dossier existe encore et son nom est celui du dossier
+// (l'ajout n'en connaît pas d'autre). Alors le retrait part tout de suite et
+// le toast offre « Annuler » 10 s, qui rappelle `POST /api/projects/add`.
+// Sinon — dossier disparu, nom choisi à la main — et pour la purge, deux temps
+// dans la page, jamais par `confirm()` : un aperçu (rien n'est écrit) puis la
+// confirmation. Rien ne touche au dossier d'un projet : l'écran le répète. Le
+// projet que ce cockpit sert ne se retire pas d'ici (le serveur refuse, le
+// bouton le dit).
 
-import { actionStatus, badge, failureText, icon, listNav, monogram, setActionStatus, spaceHead } from '../shell.js';
+import { actionStatus, badge, failureText, icon, listNav, monogram, setActionStatus, spaceHead, undoToast } from '../shell.js';
 
 const STYLE_ID = 'rg-styles';
 const FOLDER_NOTE = 'Retirer ne touche pas au dossier, seulement au registre du cockpit.';
@@ -52,8 +57,8 @@ function injectStyles() {
     .rg-wrap .tbl td > .rg-path { display: block; }
     .rg-confirm td { background: var(--hover); }
     .rg-confirm .rg-card { box-shadow: none; }
-    @media (max-width: 900px) { .rg-wrap { padding: var(--sp-3); } .rg-note { margin-left: 0; } }
-    @media (max-width: 700px) { .rg-wrap .tbl { table-layout: auto; } }
+    @container canvas (max-width: 720px) { .rg-wrap { padding: var(--sp-3); } .rg-note { margin-left: 0; } }
+    @container canvas (max-width: 700px) { .rg-wrap .tbl { table-layout: auto; } }
   `;
   document.head.append(style);
 }
@@ -244,7 +249,38 @@ function prunePanel(ctx, reload) {
   return card;
 }
 
-// ── Retirer une entrée : aperçu puis confirmation, sur sa ligne ─────────────
+// ── Retirer une entrée : tout de suite si « Ajouter » la rend, sinon aperçu
+// puis confirmation, sur sa ligne ────────────────────────────────────────────
+
+/** Dernier segment d'un chemin, quel que soit le séparateur. */
+const folderName = (path) => String(path || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '';
+
+/** « Ajouter » recrée-t-il cette entrée telle quelle ? Dossier présent, nom du dossier. */
+export function restorableEntry(project) {
+  return Boolean(project.exists && project.path && (project.name || '') === folderName(project.path));
+}
+
+/** Retire l'entrée et offre « Annuler » : `registryAdd(path)` la rend au registre. */
+export async function removeWithUndo(ctx, project, { onChange, onError } = {}) {
+  const name = project.name || project.slug;
+  ctx.dock.echo(`grimoire cockpit remove ${project.slug}`);
+  try {
+    await ctx.api.registryRemove(project.slug, true);
+  } catch (error) {
+    if (onError) onError(error);
+    return false;
+  }
+  if (onChange) await onChange();
+  undoToast(`« ${name} » retiré du registre. Le dossier reste sur le disque.`, {
+    undone: `« ${name} » est de nouveau au registre.`,
+    undo: async () => {
+      ctx.dock.echo(`grimoire cockpit add ${project.path}`);
+      await ctx.api.registryAdd(project.path);
+      if (onChange) await onChange();
+    },
+  });
+  return true;
+}
 
 function confirmRow(ctx, project, colspan, reload) {
   const tr = el('tr', 'rg-confirm', null, { 'data-role': 'registry-remove-confirm', 'data-slug': project.slug });
@@ -299,12 +335,26 @@ function projectsTable(ctx, data, home, reload) {
     const name = el('span', 'rg-name');
     name.append(monogram(project.name || project.slug), el('span', null, project.name || project.slug, { title: project.slug }));
     const cells = [name, el('span', 'rg-path', project.path, { title: project.path }), stateBadge(project, home)];
-    const remove = button('Retirer…', { iconName: 'trash', role: 'registry-remove' });
+    // Les points de suspension annoncent un second temps : seulement quand le
+    // retrait demande une confirmation (il ne se défera pas par « Ajouter »).
+    const remove = button(restorableEntry(project) || project.slug === home ? 'Retirer' : 'Retirer…', { iconName: 'trash', role: 'registry-remove' });
     if (project.slug === home) {
       remove.disabled = true;
       remove.title = 'C’est le projet que ce cockpit sert : il ne se retire pas d’ici.';
     } else {
-      remove.addEventListener('click', () => { view.removing = project.slug; reload(); });
+      remove.addEventListener('click', async () => {
+        if (!restorableEntry(project)) { view.removing = project.slug; reload(); return; }
+        remove.disabled = true;
+        view.notice = null;
+        await removeWithUndo(ctx, project, {
+          onChange: () => (ctx.signal.aborted ? null : reload()),
+          onError: (error) => {
+            remove.disabled = false;
+            view.notice = { tone: 'bad', text: failureText(error) };
+            reload();
+          },
+        });
+      });
     }
     cells.push(remove);
     for (const cell of cells) {

@@ -777,9 +777,10 @@ function consoleTabIsActive() {
   return !!btn && btn.getAttribute('aria-selected') === 'true';
 }
 
+// La palette est un `<dialog>` (P55) : ouverte se lit à `open`, jamais à `hidden`.
 function paletteIsOpen() {
   const el = document.getElementById('palette');
-  return !!el && !el.hidden;
+  return !!el && el.open === true;
 }
 
 function onConsoleKeydown(event) {

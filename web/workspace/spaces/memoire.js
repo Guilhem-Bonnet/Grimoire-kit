@@ -27,9 +27,9 @@
 // API consommées : api.memoryEntries, api.memoryEntry, api.memorySearch,
 // api.memoryDelete, api.memoryGesture, api.projects.
 
-import { badge, icon, listNav, monogram } from '../shell.js';
+import { badge, icon, listNav, monogram, undoToast } from '../shell.js';
 import { formatScore } from '../score.js';
-import { GESTURE_STYLES, historyList, openGesture } from './memoire-gestes.js';
+import { GESTURE_STYLES, INVERSE_GESTURE, historyList, openGesture, undoGesture } from './memoire-gestes.js';
 
 const STYLE_ID = 'kn-styles';
 
@@ -103,7 +103,7 @@ const STYLES = `
 .kn-fix { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r); background: var(--acc-soft); }
 .kn-fix p { margin: 0; }
 .kn-fix .formula { overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; }
-@media (max-width: 720px) {
+@container canvas (max-width: 720px) {
   .kn-wrap { grid-template-columns: minmax(0, 1fr); }
   .kn-filters { border-right: 0; border-bottom: 1px solid var(--line); }
   .kn-main { padding: var(--sp-4); }
@@ -681,9 +681,20 @@ export async function mount(root, ctx) {
       entry, kind, row, anchor: actions,
       candidates: candidatesFor(entry),
       project: entry.projectSlug || homeSlug || undefined,
-      onDone: async (message) => {
+      onDone: async (message, { gesture: done } = {}) => {
         state.status = { key: keyOf(entry), tone: 'ok', text: message };
         await refresh({ stay: entry });
+        // P57 : retirer et rendre au service se défont en un clic, 10 s durant.
+        if (!INVERSE_GESTURE[done]) return;
+        const project = entry.projectSlug || homeSlug || undefined;
+        undoToast(done === 'retract' ? 'Entrée retirée du service.' : 'Entrée rendue au service.', {
+          undone: done === 'retract' ? 'Entrée rendue au service.' : 'Entrée de nouveau retirée du service.',
+          undo: async () => {
+            await undoGesture(ctx, { gesture: done, entryId: entry.id, project });
+            state.status = null;
+            if (!ctx.signal.aborted) await refresh({ stay: entry });
+          },
+        });
       },
     });
     if (entry.kind === 'projection') {

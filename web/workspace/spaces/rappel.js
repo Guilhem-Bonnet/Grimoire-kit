@@ -61,7 +61,7 @@ const STYLES = `
 .rp-kv { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
 .rp-kv span:first-child { color: var(--ink2); font-size: var(--t-min); font-weight: 500; }
 .rp-kv .rp-bad { color: var(--bad); font-weight: 600; }
-@media (max-width: 960px) {
+@container canvas (max-width: 760px) {
   .rp-wrap { padding: var(--sp-4); }
   .rp-row { grid-template-columns: 36px minmax(0, 1fr) auto; }
   .rp-row > .rp-num, .rp-row.rp-th > :nth-child(n+3) { display: none; }
