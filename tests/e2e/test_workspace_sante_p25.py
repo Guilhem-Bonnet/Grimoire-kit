@@ -4,7 +4,7 @@ Le cockpit sert un projet initialisé pour de vrai dont le store reproduit
 celui de la Forge : 25 fois « python is the best language », utilisateur
 alice, et un seul vrai souvenir. Prouvé par navigateur :
 
-- le segmenté de Savoir porte « Santé et carte », « Recherche », « Journal »
+- le segmenté de Savoir porte « Santé et carte », « Recherche », « Rappel », « Journal »
   (pas de vue qui ne marche pas encore) et l'entrée de Savoir reste la
   Recherche ;
 - la carte « Santé de la mémoire » rend chaque critère avec sa mesure, et le
@@ -146,7 +146,7 @@ def test_le_segmente_de_savoir_et_l_entree_par_la_recherche(sante: tuple[Page, d
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'memoire'")
 
     tabs = [t.strip() for t in page.locator("#section-tabs .tab").all_inner_texts()]
-    assert tabs == ["Santé et carte", "Recherche", "Journal"]
+    assert tabs == ["Santé et carte", "Recherche", "Rappel", "Journal"]
 
     page.locator("#section-tabs [data-section='sante']").click()
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'sante'")

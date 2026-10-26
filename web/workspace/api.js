@@ -330,6 +330,29 @@ export const api = {
   // Santé de la mémoire et file d'hygiène (P25) : une mesure fraîche d'un projet
   // (`slug` du registre, omis = le projet en portée). Lecture seule.
   memoryQuality: (slug) => get(WS + 'memory/quality', slug ? { slug } : undefined),
+  // Reçu de rappel (P27) : ce que la mémoire a servi à une tâche (`tasks/<id>/receipts`),
+  // ou les derniers reçus du projet (`memory/recall`, `task` pour filtrer). Lecture seule.
+  taskReceipts: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/receipts', project ? { project } : undefined),
+  memoryRecall: (slug, task) => {
+    const params = {};
+    if (slug) params.slug = slug;
+    if (task) params.task = task;
+    return get(WS + 'memory/recall', params);
+  },
+  // Rejouer (P27) : `receipt` (clé d'un reçu) ou `q` (requête libre) et `base`
+  // (la liste du passage précédent, identifiants dans l'ordre servi). Un calcul
+  // en GET : le serveur n'écrit rien, pas même un reçu de lecture.
+  memoryReplay: ({ receipt, task, q, base, slug, project } = {}) => {
+    const params = {};
+    if (receipt) params.receipt = receipt;
+    if (task) params.task = task;
+    if (q) params.q = q;
+    if (base != null) params.base = base.join(',');
+    if (slug) params.slug = slug;
+    if (project) params.project = project;
+    return get(WS + 'memory/recall/replay', params);
+  },
   // Suppression gouvernée du cockpit (`POST /api/memory`) : confirmation
   // explicite, et le serveur la refuse (403) hors du projet qu'il sert.
   memoryDelete: (id, project) => post('/api/memory', { action: 'delete', id, project, confirm: true }),
