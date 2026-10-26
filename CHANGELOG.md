@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.66.0] - 2026-10-25
+
+- fix(missions): une ligne illisible du journal que couvre l'instantané du rejeu reste signalée (K12 x K13). L'instantané, écrit quand un rejeu dépasse 50 ms, ne portait pas les lignes illisibles : le rejeu suivant ne relisait que la suite et `unreadable_lines()` revenait vide, l'alerte « ligne(s) illisible(s) » du tick disparaissait. Vu en CI (runner lent) sur `test_crash_bench` scénario H ; test déterministe dans `tests/unit/test_ledger_snapshot.py`.
+- fix(cockpit): correctifs de fusion sans entrée propre, repris ici — copie de l'état d'un service par `copy.copy`, hors du garde d'écriture atomique (P22, d48b0a3d) ; la ligne « Bloquée » du board passe par `stateIcon` (P07, ead06ec9) ; `list_flow_runs` annote son retour pour `mypy --strict` (P07, ebbb28dc).
 - feat(cockpit): Flotte › Données, la carte des services mémoire de la machine et de qui les partage, sans jamais rien démarrer (P26, `GAO-p26-carte-q-001`)
   - **Lecture** : `GET /api/workspace/data/machine` rend, pour Weaviate, Qdrant, Neo4j, Redis et Ollama, l'état, la version annoncée par le service (sinon l'étiquette de l'image), le conteneur, le Compose propriétaire et la politique de redémarrage lus par `docker inspect`, l'extra Python importable et les projets du registre qui l'utilisent ; puis les partages de collection, de base Neo4j et de Redis entre projets.
   - **Huit états distincts** : en ligne, démarrage, incomplet (extra absent, `GRIMOIRE_NEO4J_PASSWORD` absente), emprunté (le conteneur appartient au Compose d'un projet qui ne l'utilise pas), en échec, arrêté, absent, inconnu ; Docker absent ou injoignable rend « inconnu » avec son motif, jamais « arrêté ».

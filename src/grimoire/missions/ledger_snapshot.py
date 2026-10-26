@@ -87,6 +87,13 @@ class Replay:
     first_line: int
     data: bytes
     started: float
+    #: K12 x K13 : les lignes illisibles que l'instantané couvre, que le rejeu de la suite ne relit pas.
+    unreadable: tuple[int, ...] = ()
+
+    def records(self) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
+        """Les événements de la suite, et les lignes illisibles de tout le journal (couvertes, puis de la suite)."""
+        records, tail_unreadable = parse_jsonl(self.tail, self.first_line)
+        return records, (*self.unreadable, *tail_unreadable)
 
 
 def _producer() -> str:
@@ -118,8 +125,8 @@ def _read_valid(ledger: MissionLedger, data: bytes) -> tuple[dict[str, Any], int
         return None
 
 
-def _restore(ledger: MissionLedger, raw: dict[str, Any], offset: int) -> bool:
-    """Restaure l'état de *raw* dans *ledger* ; ``False`` (rien n'a été touché) s'il est inexploitable."""
+def _restore(ledger: MissionLedger, raw: dict[str, Any], offset: int) -> tuple[int, ...] | None:
+    """Restaure l'état de *raw* dans *ledger* et rend ses lignes illisibles ; ``None`` (rien n'a été touché) s'il est inexploitable."""
     try:
         state = raw["state"]
         missions = {str(k): Mission.from_dict(v) for k, v in state["missions"].items()}
@@ -127,14 +134,15 @@ def _restore(ledger: MissionLedger, raw: dict[str, Any], offset: int) -> bool:
         epoch_high = {str(k): int(v) for k, v in state["epoch_high"].items()}
         rejected = {str(k): str(v) for k, v in state["rejected"].items()}
         idem = {str(k) for k in state["idem_seen"]}
+        unreadable = tuple(int(n) for n in state["unreadable"])
         latest = parse_instant(raw.get("latest_event_at"))
     except (ValueError, KeyError, TypeError, AttributeError):
         logger.debug("instantané du ledger inexploitable : rejeu complet", exc_info=True)
-        return False
+        return None
     ledger._missions, ledger._tasks, ledger._epoch_high = missions, tasks, epoch_high
     ledger._rejected, ledger._idem_seen = rejected, idem
     ledger._snapshot = Cover(offset, latest)
-    return True
+    return unreadable
 
 
 def resume_from_snapshot(ledger: MissionLedger) -> Replay:
@@ -142,8 +150,9 @@ def resume_from_snapshot(ledger: MissionLedger) -> Replay:
     started = time.perf_counter()
     data = ledger._events_path.read_bytes()
     found = _read_valid(ledger, data)
-    if found is not None and _restore(ledger, *found):
-        return Replay(data[found[1] :], data.count(b"\n", 0, found[1]) + 1, data, started)
+    restored = _restore(ledger, *found) if found is not None else None
+    if found is not None and restored is not None:
+        return Replay(data[found[1] :], data.count(b"\n", 0, found[1]) + 1, data, started, restored)
     return Replay(data, 1, data, started)
 
 
@@ -179,6 +188,8 @@ def save_if_slow(ledger: MissionLedger, replay: Replay) -> None:
             "epoch_high": dict(ledger._epoch_high),
             "rejected": dict(ledger._rejected),
             "idem_seen": sorted(ledger._idem_seen),
+            # Sans elles, une ligne tronquée couverte par l'instantané cesserait d'être signalée.
+            "unreadable": list(ledger._unreadable),
         },
     }
     try:
