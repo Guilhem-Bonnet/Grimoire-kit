@@ -82,8 +82,8 @@ _BG_ID = re.compile(r"backgrounded\s*\S?\s*([0-9a-f]{8})\b")
 #: Le ``sessionId`` d'une session de fond, tel que ``claude agents --json`` le rend : un uuid (le nom de son transcript).
 _SESSION_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 #: Lectures de ``claude agents`` avant de conclure qu'une session lancée est introuvable, et la pause entre deux.
-_RESOLVE_ATTEMPTS = 3
-_RESOLVE_PAUSE_S = 0.5
+_RESOLVE_ATTEMPTS = 10
+_RESOLVE_PAUSE_S = 1.0
 #: Palier de la politique → alias de modèle que ``claude --model`` accepte.
 _TIER_ALIAS = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
 
