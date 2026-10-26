@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 import socket
-import sys
 import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
