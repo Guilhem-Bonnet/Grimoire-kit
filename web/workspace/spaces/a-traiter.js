@@ -21,6 +21,7 @@
 
 import { glyph, kpiRow, spaceHead } from '../shell.js';
 import { agoText } from '../live.js';
+import { mountSince } from './a-traiter-since.js';
 
 const STYLE_ID = 'at-styles';
 
@@ -384,6 +385,8 @@ export async function mount(root, ctx) {
 
   // La sélection : un identifiant d'élément (`#a-traiter?item=…`, lien profond).
   let selected = ctx.params.item || '';
+  // Le résumé « depuis ta dernière visite » (P53) : gardé d'un rendu à l'autre.
+  const since = document.createElement('section');
   let rows = [];
 
   const load = (probe) => ctx.api.attention(ctx.scope.all, probe ? { probe: true } : undefined);
@@ -417,7 +420,7 @@ export async function mount(root, ctx) {
     const head = spaceHead('À traiter', ctx.scope.all
       ? `Ce qui attend une décision de toi, sur ${count} projet${count > 1 ? 's' : ''}.`
       : `Ce qui attend une décision de toi dans ${ctx.scope.name}.`, formula);
-    wrap.replaceChildren(head);
+    wrap.replaceChildren(head, since);
     rows = [];
 
     const unreadable = (data.projects || []).filter((p) => p.state === 'unreadable');
@@ -539,4 +542,6 @@ export async function mount(root, ctx) {
   ctx.live.on(() => refresh(false));
 
   await refresh(false);
+  // Après le premier rendu, jamais devant lui.
+  mountSince(since, ctx);
 }
