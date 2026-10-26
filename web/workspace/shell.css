@@ -462,6 +462,125 @@ th .th-hint {
   color: var(--onfill);
 }
 
+/* ── Menu « … » (P11, partagé depuis P56) ──────────────────────────────────
+ * Le bouton, son panneau ancré dessous (`floating` : position fixe, pour
+ * sortir d'une liste qui coupe ce qui déborde). */
+.more {
+  position: relative;
+  display: inline-flex;
+}
+
+.more-btn,
+.row-act {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+.more-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: min(300px, 80vw);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-3);
+  background: var(--overlay);
+  border: 1px solid var(--line2, var(--line));
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow);
+  text-align: left;
+  white-space: normal;
+  cursor: default;
+}
+
+.more-panel[hidden] {
+  display: none;
+}
+
+.more-panel[data-floating="true"] {
+  position: fixed;
+  top: auto;
+  width: max-content;
+  min-width: 200px;
+  max-width: min(320px, 90vw);
+  padding: var(--sp-1);
+  gap: 2px;
+  z-index: 60;
+}
+
+.more-panel h4 {
+  margin: 0;
+  font-size: var(--t-min);
+  font-weight: 500;
+  color: var(--ink2);
+}
+
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-s);
+  text-align: left;
+  cursor: pointer;
+}
+
+.more-item:hover {
+  background: var(--hover);
+}
+
+/* ── Actions de ligne (P56) ────────────────────────────────────────────────
+ * Révélées au survol, au focus clavier (`:focus-within`), sur la ligne active
+ * et quand leur menu est ouvert. Opacité seulement : elles restent dans l'ordre
+ * de tabulation, et le focus qui y entre les révèle. Sur écran tactile (aucun
+ * survol possible), elles sont toujours visibles. */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+
+.row-actions:empty {
+  display: none;
+}
+
+:is(.at-row, .ex-card, .ex-list tbody tr, .tbl tbody tr, .pl-card):is(:hover, :focus-within, [aria-current="true"]) .row-actions,
+.row-actions:focus-within,
+.row-actions:has(.more.open) {
+  opacity: 1;
+}
+
+.row-act[data-copied="ok"] {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .row-actions {
+    opacity: 1;
+  }
+
+  .more-btn,
+  .row-act {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+  }
+}
+
 /* ── Identité d'espace ────────────────────────────────────────────────────
  * `shell.js::goto()` pose `body[data-active-space]` à chaque changement d'espace ;
  * --id-current en tire la teinte du token --id-<espace> correspondant
@@ -1000,6 +1119,149 @@ body[data-active-space="source"] {
 
 .skeleton-line:nth-child(3n) {
   width: 64%;
+}
+
+/* P60 : la forme de chaque liste (`data-shape`, voir loadingNodes dans shell.js). */
+.skeleton:not([data-shape="lines"]) .skeleton-line {
+  background: linear-gradient(90deg, var(--hover) 25%, var(--line) 50%, var(--hover) 75%);
+  background-size: 300% 100%;
+}
+
+.sk-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+}
+
+.sk-tile,
+.sk-card,
+.sk-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--card);
+}
+
+.sk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.sk-inbox-row {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.sk-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.skeleton .skeleton-line.sk-dot {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+}
+
+.skeleton .skeleton-line.sk-pill {
+  flex: none;
+  width: 72px;
+  height: 22px;
+  border-radius: var(--r-pill);
+}
+
+.skeleton .skeleton-line.sk-num {
+  width: 40%;
+  height: 26px;
+}
+
+.skeleton .skeleton-line.sk-short {
+  width: 38%;
+}
+
+.skeleton .skeleton-line.sk-mid {
+  width: 70%;
+}
+
+.skeleton .skeleton-line.sk-field {
+  width: 100%;
+  max-width: 560px;
+  height: var(--h-ctl);
+}
+
+.sk-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.sk-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-l);
+  background: var(--e1);
+}
+
+.sk-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.sk-trow {
+  padding: 0 var(--sp-4);
+  min-height: 44px;
+  border-top: 1px solid var(--line);
+}
+
+.sk-thead {
+  border-top: 0;
+  min-height: 36px;
+}
+
+.sk-cell {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sk-cell:first-child {
+  flex-grow: 2;
+}
+
+.sk-result {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+/* Le seuil unique de la coque (900 px, partagé avec shell.js) : un second seuil
+   donnerait une coque à moitié mobile (test_workspace_responsive). */
+@media (max-width: 900px) {
+  .sk-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sk-cell:nth-child(n + 3) {
+    display: none;
+  }
 }
 
 /* P60 : un chiffre ne bouge que lorsque sa valeur change réellement. Une seule

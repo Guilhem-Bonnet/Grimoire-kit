@@ -154,9 +154,17 @@ Deux règles opposables :
   de tabulation, flèches gauche/droite (rebouclage), Début/Fin. Dock : la flèche
   active ; espaces : elle déplace le focus et Entrée active (monter un espace
   coûte des requêtes).
-- **Chargement** : `ctx.loading()` pose un squelette décoratif et un texte pour
-  les lecteurs d'écran ; la coque en pose un sur la toile à chaque changement
-  d'espace et le retire dès que l'espace y écrit du contenu. Les zones de données
+- **Chargement** : `ctx.loading(libellé, lignes, forme)` pose un squelette
+  décoratif et un texte pour les lecteurs d'écran ; la coque en pose un sur la
+  toile à chaque changement d'espace et le retire dès que l'espace y écrit du
+  contenu. Le squelette a la forme de la liste qui vient (P60 : `board`,
+  `table`, `results`, `kpi`, `inbox`, sinon `lines`) ; celle de la toile est
+  déclarée par rubrique (`skeleton` dans `SPACES`).
+- **Lignes de liste** : `listNav(conteneur, { rows, onActivate, onMove, mark,
+  key })` branche j / k / Entrée sur une liste (P58), lus par la coque, donc
+  jamais pendant une saisie ; `rowActions(actions)` pose les actions
+  secondaires d'une ligne, révélées au survol et au focus, toutes dans un menu
+  « … » (P56) ; `moreMenu()` est ce menu, partagé avec l'inspecteur de tâche. Les zones de données
   (`#canvas`, `#explorer-body`, `#inspector-body`, `#evidence-body`) sont des
   régions `aria-live="polite"`.
 - **États vides** : un bouton qui fait (`ctx.empty(…, action)`), pas une commande

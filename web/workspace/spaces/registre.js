@@ -14,7 +14,7 @@
 // dossier d'un projet : l'écran le répète à chaque fois. Le projet que ce
 // cockpit sert ne se retire pas d'ici (le serveur refuse, le bouton le dit).
 
-import { actionStatus, badge, failureText, icon, monogram, setActionStatus, spaceHead } from '../shell.js';
+import { actionStatus, badge, failureText, icon, listNav, monogram, setActionStatus, spaceHead } from '../shell.js';
 
 const STYLE_ID = 'rg-styles';
 const FOLDER_NOTE = 'Retirer ne touche pas au dossier, seulement au registre du cockpit.';
@@ -322,6 +322,12 @@ function projectsTable(ctx, data, home, reload) {
 
 export async function mount(root, ctx) {
   injectStyles();
+  // P58 : j / k parcourent les projets du registre (`aria-current` sur la ligne
+  // active) ; Entrée ouvre le projet dans la Flotte, comme une ligne de la Flotte.
+  listNav(root, {
+    rows: '.tbl tbody tr[data-slug]:not(.rg-confirm)', mark: 'aria-current', key: 'slug',
+    onActivate: (row) => ctx.scope.set(row.dataset.slug, '#flotte'),
+  });
   const draw = async ({ keepPanel = false } = {}) => {
     let data;
     try {

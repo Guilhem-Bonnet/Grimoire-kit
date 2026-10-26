@@ -19,7 +19,7 @@
 // module `revue.js`), la PR déjà sélectionnée. Aucune fusion ici : l'écran
 // de revue renvoie sur GitHub.
 
-import { glyph, kpiRow, spaceHead } from '../shell.js';
+import { copyText, glyph, kpiRow, listNav, rowActions, spaceHead } from '../shell.js';
 import { agoText } from '../live.js';
 import { mountSince } from './a-traiter-since.js';
 
@@ -41,7 +41,7 @@ const CSS = `
 .at-n { color: var(--rub); font-weight: 600; }
 .at-section-head .at-hint { margin-left: auto; color: var(--ink3); }
 .at-list { list-style: none; margin: 0; padding: 0; }
-.at-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(64px, auto) auto;
+.at-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(64px, auto) auto auto;
   align-items: center; gap: 14px; padding: var(--sp-3) var(--sp-4); margin: 2px var(--sp-2);
   border-radius: 12px; cursor: pointer; }
 .at-row:hover { background: var(--hover); }
@@ -79,6 +79,7 @@ const CSS = `
   .at-sub .at-project { max-width: 100%; }
   .at-since { grid-column: 2; text-align: left; }
   .at-act { grid-column: 3; grid-row: 1 / span 2; }
+  .at-row .row-actions { grid-column: 2; grid-row: 3; justify-self: start; }
 }
 `;
 
@@ -248,6 +249,18 @@ function actionNode(ctx, item, { primary = false } = {}) {
     open(ctx, item);
   });
   return link;
+}
+
+/** Les actions secondaires d'une ligne (P56) : révélées au survol et au focus,
+ *  toutes dans le menu « … ». Copier ne décide rien : elles restent offertes en
+ *  lecture seule. L'action principale reste le bouton de la ligne (et Entrée). */
+function rowActionsOf(ctx, item) {
+  const command = cliOf(item);
+  return rowActions([
+    { id: 'copy-link', label: 'Copier le lien', icon: 'link',
+      run: (b) => copyText(new URL(href(destination(ctx, item)), window.location.href).href, b) },
+    command ? { id: 'copy-command', label: 'Copier la commande', icon: 'terminal', run: (b) => copyText(command, b) } : null,
+  ], { label: `Plus d'actions : ${item.title || kindOf(item).word}` });
 }
 
 function sinceNode(item) {
@@ -474,7 +487,7 @@ export async function mount(root, ctx) {
         const title = node('span', 'at-title', item.title || kind.word);
         title.title = item.title || '';
         text.append(title, sub);
-        li.append(pastille, text, sinceNode(item), actionNode(ctx, item));
+        li.append(pastille, text, sinceNode(item), rowActionsOf(ctx, item), actionNode(ctx, item));
         li.addEventListener('click', () => select(item.id, { focus: true }));
         list.append(li);
         rows.push({ item, el: li });
@@ -517,26 +530,16 @@ export async function mount(root, ctx) {
   };
 
   // j / k : ligne suivante, précédente ; Entrée : l'action de la ligne tenue.
-  // Jamais pendant une saisie, la palette ouverte, ou sous un modificateur.
-  document.addEventListener('keydown', (event) => {
-    if (event.metaKey || event.ctrlKey || event.altKey || !rows.length) return;
-    const target = event.target;
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable) return;
-    const palette = document.getElementById('palette');
-    if (palette && !palette.hidden) return;
-    const help = document.getElementById('shortcuts');
-    if (help && !help.hidden) return;
-    const index = rows.findIndex((r) => r.item.id === selected);
-    if (event.key === 'j' || event.key === 'k') {
-      event.preventDefault();
-      const next = Math.min(rows.length - 1, Math.max(0, index + (event.key === 'j' ? 1 : -1)));
-      select(rows[next].item.id, { focus: true });
-    } else if (event.key === 'Enter' && target.classList && target.classList.contains('at-row')) {
-      event.preventDefault();
-      const row = rows.find((r) => r.el === target);
-      if (row && !ctx.host.readOnly) open(ctx, row.item);
-    }
-  }, { signal: ctx.signal });
+  // Le contrôleur de liste de la coque (P58) : jamais pendant une saisie, la
+  // palette ouverte, ou sous un modificateur.
+  listNav(wrap, {
+    rows: '.at-row',
+    onMove: (row) => select(row.dataset.item, { focus: true }),
+    onActivate: (row) => {
+      const hit = rows.find((r) => r.el === row);
+      if (hit && !ctx.host.readOnly) open(ctx, hit.item);
+    },
+  });
 
   // Le pouls (P10) annonce un changement : la liste se relit, la sélection reste.
   ctx.live.on(() => refresh(false));

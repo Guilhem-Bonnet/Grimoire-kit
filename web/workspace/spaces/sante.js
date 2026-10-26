@@ -289,7 +289,7 @@ export async function mount(root, ctx) {
   let token = 0;
   const load = async () => {
     const mine = ++token;
-    wrap.replaceChildren(spaceHead('Santé et carte', 'Mesure de la mémoire…', picker()), ...ctx.loading('Mesure de la mémoire…', 6));
+    wrap.replaceChildren(spaceHead('Santé et carte', 'Mesure de la mémoire…', picker()), ...ctx.loading('Mesure de la mémoire…', 6, 'kpi'));
     let report;
     try {
       report = await ctx.api.memoryQuality(slug || undefined);

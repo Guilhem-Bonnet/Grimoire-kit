@@ -325,7 +325,7 @@ export async function renderMachine(root, ctx, { seg, decorate } = {}) {
   refresh.append(icon('refresh'), 'Relire la machine');
   const head = spaceHead('Flotte', 'Lecture des services de la machine…', formula('grimoire memory status'), refresh);
   if (decorate) decorate(head, seg);
-  wrap.append(head, ...ctx.loading('Lecture de Docker et des services…', 3));
+  wrap.append(head, ...ctx.loading('Lecture de Docker et des services…', 3, 'table'));
   root.replaceChildren(wrap);
   ctx.dock.echo('grimoire memory status');
 
