@@ -211,3 +211,132 @@ def test_une_consommation_inconnue_sous_quota_fini_s_affiche_inconnue(
     assert view["quota"]["consomme"] is None
     assert view["quota"]["statut"] == "unknown"
     assert "inconnue" in view["quota"]["detail"]
+
+
+# ── Branches d'erreur par section et pool hôte borné (couverture du diff P71) ─
+
+
+def test_un_pool_host_illisible_rend_le_reservoir_inconnu_et_defere_unknown(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _capacity(projet, "pools:\n  host:\n    mauvaise_cle: 1\n")
+    _pret(service, mission, "gâtée par la déclaration")
+    view = capacity_view(projet, probe=lambda: READING)
+    host = _reservoir(view, "host")
+    assert host["etat"] == "inconnu"
+    assert "pools.host" in host["detail"]
+    (ligne,) = view["file"]
+    assert (ligne["verdict"], ligne["raison"]) == ("defer", "unknown")
+
+
+def test_un_pool_host_non_declare_et_sonde_muette_dit_les_deux(projet: Path) -> None:
+    view = capacity_view(projet, probe=lambda: None)
+    host = _reservoir(view, "host")
+    assert host["etat"] == "non_declare"
+    assert "pool non déclaré" in host["detail"] and "sonde muette" in host["detail"]
+
+
+def test_le_pool_host_borne_rend_charge_et_memoire_sous_les_seuils(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _capacity(projet, "pools:\n  host:\n    max_load_per_cpu: 2\n    min_mem_available_mb: 1024\n")
+    _pret(service, mission, "sous les seuils de l'hôte")
+    view = capacity_view(projet, probe=lambda: READING)
+    charge = _reservoir(view, "host.charge")
+    assert (charge["utilise"], charge["capacite"], charge["etat"]) == (0.42, 2.0, "ok")
+    assert "max 2" in charge["detail"]
+    memoire = _reservoir(view, "host.memoire")
+    assert (memoire["utilise"], memoire["etat"]) == (2048, "ok")
+    assert "min 1024 Mo" in memoire["detail"]
+    assert view["file"][0]["verdict"] == "admit"
+
+
+def test_le_pool_host_sature_passe_plein_et_defere_hote_charge(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _capacity(projet, "pools:\n  host:\n    max_load_per_cpu: 2\n    min_mem_available_mb: 1024\n")
+    _pret(service, mission, "au-dessus des seuils")
+    view = capacity_view(projet, probe=lambda: HostReading(load_per_cpu=5.0, mem_available_mb=512))
+    assert _reservoir(view, "host.charge")["etat"] == "plein"
+    assert _reservoir(view, "host.memoire")["etat"] == "plein"
+    (ligne,) = view["file"]
+    assert (ligne["verdict"], ligne["raison"], ligne["raison_libelle"]) == ("defer", "host", "hôte chargé")
+
+
+def test_une_seule_borne_host_laisse_l_autre_jauge_non_bornee(projet: Path) -> None:
+    _capacity(projet, "pools:\n  host:\n    max_load_per_cpu: 2\n")
+    memoire = _reservoir(capacity_view(projet, probe=lambda: READING), "host.memoire")
+    assert memoire["capacite"] is None and "non bornée" in memoire["detail"]
+    _capacity(projet, "pools:\n  host:\n    min_mem_available_mb: 1024\n")
+    charge = _reservoir(capacity_view(projet, probe=lambda: READING), "host.charge")
+    assert charge["capacite"] is None and "non bornée" in charge["detail"]
+
+
+def test_un_pool_llm_illisible_rend_le_reservoir_inconnu(projet: Path) -> None:
+    _capacity(projet, "pools:\n  llm:\n    claude:\n      sessions: 0\n")
+    llm = _reservoir(capacity_view(projet, probe=lambda: READING), "llm")
+    assert llm["etat"] == "inconnu"
+    assert "pools.llm.claude.sessions" in llm["detail"]
+
+
+def test_un_fournisseur_llm_sature_passe_plein(projet: Path, service: TaskService, mission: str) -> None:
+    tenue = _tenue(service, mission, "tenue par claude")
+    # La route enregistrée au ledger (K9) : c'est elle qui donne son fournisseur au créneau tenu.
+    service.ledger.append_event(
+        "task.routed", tenue.id, "task", "test",
+        {"decision": {"outcome": "route", "provider": "claude", "model": "haiku"}},
+    )
+    _capacity(projet, "pools:\n  llm:\n    claude:\n      sessions: 1\n")
+    llm = _reservoir(capacity_view(projet, probe=lambda: READING), "llm.claude")
+    assert (llm["utilise"], llm["capacite"], llm["etat"]) == (1, 1, "plein")
+
+
+def test_une_limite_wip_illisible_rend_le_wip_inconnu(projet: Path) -> None:
+    _capacity(projet, "wip:\n  limit_global: 0\n")
+    view = capacity_view(projet, probe=lambda: READING)
+    assert view["wip"]["etat"] == "inconnu"
+    assert view["wip"]["limite"] is None
+    assert "limit_global" in view["wip"]["detail"]
+
+
+def test_un_quota_illisible_rend_le_quota_inconnu(projet: Path, service: TaskService, mission: str) -> None:
+    _capacity(projet, "quota:\n  tokens_per_day: 0\n")
+    _pret(service, mission, "sous quota illisible")
+    view = capacity_view(projet, probe=lambda: READING)
+    assert view["quota"]["mode"] == "inconnu"
+    assert "tokens_per_day" in view["quota"]["detail"]
+    (ligne,) = view["file"]
+    assert (ligne["verdict"], ligne["raison"]) == ("defer", "unknown")
+
+
+def test_le_wip_par_role_est_expose_et_defere_la_tache_du_meme_role(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    _tenue(service, mission, "tenue par amelia")
+    _pret(service, mission, "aussi pour amelia")
+    _capacity(projet, "wip:\n  limit_per_role: 1\n")  # après le claim : la garde de claim l'aurait sinon refusé
+    view = capacity_view(projet, probe=lambda: READING)
+    assert view["wip"]["par_role"] == 1
+    assert view["wip"]["limite"] is None
+    (ligne,) = view["file"]
+    assert (ligne["verdict"], ligne["raison"]) == ("defer", "wip")
+    assert "WIP du rôle amelia atteint (1/1)" in ligne["detail"]
+
+
+def test_une_pause_se_voit_et_une_tache_differee_depuis_24h_entre_en_famine(
+    projet: Path, service: TaskService, mission: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from datetime import timedelta
+
+    from grimoire.missions.pause import write_pause
+
+    # La pause de la machine du poste ne doit pas entrer dans ce test : on la détourne.
+    monkeypatch.setenv("GRIMOIRE_CONTROL_HOME", str(tmp_path / "control-home"))
+    task = _pret(service, mission, "gelée par la pause")
+    write_pause(projet, mode="drain", actor="test", reason="gel de test")
+    view = capacity_view(projet, now=datetime.now(UTC) + timedelta(hours=25), probe=lambda: READING)
+    assert view["pause"] and "drain" in view["pause"][0]
+    (ligne,) = view["file"]
+    assert (ligne["verdict"], ligne["raison"], ligne["raison_libelle"]) == ("defer", "pause", "pause")
+    # Différée depuis plus de 24 h (seuil famine par défaut) : la tâche est en famine.
+    assert view["famine"] == [task.id]
