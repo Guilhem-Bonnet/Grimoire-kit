@@ -7,6 +7,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.66.1] - 2026-10-26
+
+- fix(missions): `missions/finition.py` lit `project-context.yaml` avec ruamel.yaml, la dépendance du kit, au lieu de PyYAML qui n'est pas installé chez l'utilisateur. La 3.66.0 n'est jamais partie sur PyPI : son test de fumée (`up --prove` sur une installation vierge) s'arrêtait sur « No module named 'yaml' ». La CI ne le voyait pas, PyYAML y étant installé par les dépendances de développement. Garde `tests/unit/test_no_unguarded_pyyaml.py` : tout `import yaml` de `src/` doit avoir un repli sur `ImportError`.
 - feat(cockpit): PR à revoir dans À traiter, et l'écran de revue, sans fusion depuis le cockpit (P48)
   - **Lecture** : `GET /api/workspace/reviews` et une section « PR à revoir » dans `GET /api/workspace/attention` rendent les PR ouvertes du dépôt (`ci.repository` de la politique d'orchestration, sinon `origin`), leurs checks comptés (verts, échecs nommés, ignorés, en cours) et la tâche du ledger liée (branche `task/<id>`, sinon un identifiant cité dans la branche, le titre ou le corps).
   - **Jamais bloquante** : une seule lecture `gh pr list --state open` par dépôt, bornée à 15 s, partagée en vol et gardée 60 s ; la route d'attention ne l'attend que 0,3 s puis dit « lecture en cours » et l'écran relit. Un `gh` absent, non authentifié ou lent est un « état des PR inconnu » avec sa raison, jamais une liste vide ; un projet sans remote n'affiche rien.
