@@ -2919,3 +2919,79 @@ body[data-active-space] .panel-head {
     padding: var(--sp-4) var(--sp-5);
   }
 }
+
+/* ── Barres de la coque sur une ligne (P59) ────────────────────────────────
+ * Entre 901 et ~1280 px, la barre d'application et la barre d'état passaient
+ * à la ligne (« À traiter » sur deux lignes, badge coupé, « en direct » sur
+ * « Configuration », pied sur deux lignes). Elles sont à leur tour des
+ * conteneurs : sous 1280 px de barre, les onglets non choisis gardent leur
+ * icône (nom accessible et `title` inchangés), le pouls et la palette leur
+ * icône, et le pied se déleste de ses éléments secondaires, comme sous 900 px.
+ * Rien n'y passe jamais à la ligne. */
+#appbar {
+  container: appbar / inline-size;
+}
+
+#statusbar {
+  container: statusbar / inline-size;
+}
+
+#appbar .tab,
+#appbar .chip,
+#brand,
+#statusbar > *,
+#statusbar .chip {
+  white-space: nowrap;
+}
+
+#spaces .tab {
+  flex: none;
+}
+
+/* Le badge d'un onglet n'est jamais coupé : il garde sa largeur. */
+#decisions-count {
+  flex: none;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+#project-chip {
+  min-width: 0;
+  max-width: 240px;
+}
+
+#project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container appbar (max-width: 1279px) {
+  #spaces .tab[aria-selected="false"] .tab-lbl,
+  #top-live-text,
+  .palette-lbl {
+    display: none;
+  }
+
+  #spaces .tab {
+    padding: 0 10px;
+  }
+
+  #palette-open {
+    width: auto;
+  }
+
+  #project-chip {
+    max-width: 180px;
+  }
+}
+
+@container statusbar (max-width: 1279px) {
+  #statusbar .st-extra,
+  #statusbar .st-pre,
+  #statusbar .chip .kbd {
+    display: none;
+  }
+}

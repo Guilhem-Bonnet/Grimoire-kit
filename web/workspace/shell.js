@@ -1983,6 +1983,8 @@ const scope = {
 
 function renderScopeChip() {
   $('project-name').textContent = scopeName();
+  // P59 : un nom long s'élide dans la puce ; il reste entier au survol.
+  $('project-chip').title = `${scopeName()} — changer de portée : tous les projets ou un seul`;
   // Maquettes : « Tous les projets 11 » — le nombre de projets du registre.
   const count = $('project-count');
   count.hidden = !(host.scopeAll && registry.length);
