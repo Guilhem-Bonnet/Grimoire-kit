@@ -9,6 +9,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [3.66.0] - 2026-10-25
 
+- fix(missions): une ligne illisible du journal que couvre l'instantané du rejeu reste signalée (K12 x K13). L'instantané, écrit quand un rejeu dépasse 50 ms, ne portait pas les lignes illisibles : le rejeu suivant ne relisait que la suite et `unreadable_lines()` revenait vide, l'alerte « ligne(s) illisible(s) » du tick disparaissait. Vu en CI (runner lent) sur `test_crash_bench` scénario H ; test déterministe dans `tests/unit/test_ledger_snapshot.py`.
 - fix(cockpit): correctifs de fusion sans entrée propre, repris ici — copie de l'état d'un service par `copy.copy`, hors du garde d'écriture atomique (P22, d48b0a3d) ; la ligne « Bloquée » du board passe par `stateIcon` (P07, ead06ec9) ; `list_flow_runs` annote son retour pour `mypy --strict` (P07, ebbb28dc).
 - feat(cockpit): reçu de rappel visible et rejouable dans l'inspecteur de tâche et dans Savoir › Rappel (P27, `GAO-p27-re-u-de-001`)
   - **Mémoire servie** : l'inspecteur d'une tâche (espace Travail, après la session) montre chaque lecture mémoire servie à la tâche : requête, heure, mode, puis les souvenirs avec rang, score, portée (projet, non attribuée, autre projet au contenu masqué), état d'aujourd'hui (`live`, `superseded`, `retracted`, `orphan`, introuvable) et fraîcheur. Sans lecture, la phrase le dit (« aucune lecture mémoire enregistrée pour cette tâche ») ; une lecture ratée porte son motif.

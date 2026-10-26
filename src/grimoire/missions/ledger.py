@@ -356,7 +356,8 @@ class MissionLedger:
             self._unreadable = ()
             return
         replay = snapshot.resume_from_snapshot(self)  # K13 : l'état d'un instantané prouvé, puis la suite seule
-        records, self._unreadable = parse_jsonl(replay.tail, replay.first_line)  # K12 : lignes illisibles numérotées sur tout le journal
+        records, tail_unreadable = parse_jsonl(replay.tail, replay.first_line)
+        self._unreadable = (*replay.unreadable, *tail_unreadable)  # K12 : lignes illisibles numérotées sur tout le journal
         for raw in records:
             evt_type = raw.get("event_type", "")
             payload = raw.get("payload", {})
