@@ -88,6 +88,7 @@ from grimoire.tools import (
     workspace_memory,
     workspace_portfolio,
     workspace_pulse,
+    workspace_recall,
     workspace_sessions,
 )
 
@@ -407,6 +408,31 @@ def _memory_quality(project_root: Path, query: _Query) -> Any:
     return workspace_hygiene.memory_quality(project_root, slug=_one(query, "slug") or None)
 
 
+def _memory_recall(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/recall`` — les derniers reçus de rappel du projet (P27).
+
+    ``task`` filtre une tâche, ``slug`` vise un projet du registre ; lecture seule.
+    """
+    return workspace_recall.recall_receipts(
+        project_root, task_id=_one(query, "task") or None, slug=_one(query, "slug") or None,
+        limit=_one(query, "limit") or workspace_recall.MAX_RECEIPTS,
+    )
+
+
+def _memory_recall_replay(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/recall/replay`` — rejoue un reçu ou une requête libre (P27).
+
+    ``receipt`` (clé d'un reçu, ``task`` pour le cloisonner) ou ``q`` (requête
+    libre) et ``base`` (la liste du passage précédent). Un calcul, aucune
+    écriture : pas même un reçu de lecture.
+    """
+    return workspace_recall.recall_replay(
+        project_root, receipt=_one(query, "receipt") or None, task_id=_one(query, "task") or None,
+        query=_one(query, "q"), base=_one(query, "base"), limit=_one(query, "limit") or workspace_recall.FREE_LIMIT,
+        slug=_one(query, "slug") or None,
+    )
+
+
 def _assist_status(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/assist`` — l'opt-in et la disponibilité, sans coût.
 
@@ -489,6 +515,8 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/entries": _memory_entries,
     f"{PREFIX}memory/entry": _memory_entry,
     f"{PREFIX}memory/quality": _memory_quality,
+    f"{PREFIX}memory/recall": _memory_recall,
+    f"{PREFIX}memory/recall/replay": _memory_recall_replay,
 }
 
 
@@ -548,6 +576,8 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
                 return workspace_api.task_trace_view(project_root, _task_id(path, "trace"))
             if path.endswith("/recall"):
                 return workspace_api.task_recall_view(project_root, _task_id(path, "recall"))
+            if path.endswith("/receipts"):
+                return workspace_recall.recall_receipts(project_root, task_id=_task_id(path, "receipts"))
             return workspace_api.task_view(project_root, _task_id(path))
     except GrimoireError as exc:
         raise _translate(exc) from exc

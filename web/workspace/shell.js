@@ -74,6 +74,8 @@ const SPACES = [
     sections: [
       { id: 'sante', module: 'sante', label: 'Santé et carte' },
       { id: 'memoire', module: 'memoire', label: 'Recherche' },
+      // Le reçu de rappel (P27) : ce que la mémoire a servi aux agents, rejouable.
+      { id: 'rappel', module: 'rappel', label: 'Rappel' },
       { id: 'journal', module: 'observer', label: 'Journal' },
     ] },
   { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',
