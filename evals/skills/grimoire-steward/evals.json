@@ -1,0 +1,17 @@
+{
+  "skill_name": "grimoire-steward",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Le kanban porte 170 tâches ouvertes, beaucoup semblent déjà livrées. Fais le tri.",
+      "expected_output": "Lance `grimoire steward map --json`, lit le code de la cible pour chaque tâche plutôt que les titres, écrit un verdicts.json au schéma grimoire-steward-verdicts/v1 avec une preuve typée par verdict, le fait valider par `grimoire steward verdicts`, puis rend `grimoire steward report` sans fermer aucune tâche.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Un commit de main cite l'identifiant de cette tâche ouverte : elle est livrée, non ?",
+      "expected_output": "Ne conclut pas sur le message du commit (identifiant homonyme possible) : lit le diff et le code de la cible contre les critères ; sans preuve vérifiable dans le code, garde le verdict a_faire.",
+      "files": []
+    }
+  ]
+}
