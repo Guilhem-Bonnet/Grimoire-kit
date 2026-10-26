@@ -507,17 +507,44 @@ def test_un_worker_vivant_garde_son_bail_au_dela_du_ttl(projet: Path, service: T
     assert TaskService(projet).require(tid).status is TaskState.CLAIMED
 
 
-def test_un_worker_mort_ou_illisible_ne_renouvelle_rien(projet: Path, service: TaskService, host: FakeHost) -> None:
+def test_un_worker_mort_au_repos_ou_illisible_ne_renouvelle_rien(projet: Path, service: TaskService, host: FakeHost) -> None:
     tid = ready(service, "morte")
-    (launch,) = tick(projet, host).launches
+    tick(projet, host)
     host.agents = None  # `claude agents` en panne : échec fermé, la récolte juge comme avant
-    assert [d.task_id for d in tick(projet, host, now=_later(25)).reaped] == [tid]
+    report = tick(projet, host, now=_later(25))
+    assert [d.task_id for d in report.reaped] == [tid]
     other = ready(TaskService(projet), "autre")
     (second,) = (o for o in tick(projet, host).launches if o.task_id == other)
-    # Une autre session vivante, ou une session interactive homonyme, ne tient pas le bail de celle-ci.
+    name = f"grimoire-{other}"
     host.agents = [
-        {"id": launch.session, "kind": "interactive", "status": "busy"},
-        {"id": "ffffffff", "kind": "background", "status": "busy"},
-        {"id": second.session, "kind": "background", "status": "exited"},
+        {"id": second.session, "kind": "interactive", "status": "busy", "name": name},  # pas une session de fond
+        {"id": "ffffffff", "kind": "background", "status": "busy", "name": name},  # une autre session, même nom
+        {"id": second.session, "kind": "background", "status": "busy", "name": "grimoire-ailleurs"},  # même id, autre nom
+        {"id": second.session, "kind": "background", "status": "idle", "name": name},  # son tour est fini : elle ne travaille plus
     ]
     assert other in [d.task_id for d in tick(projet, host, now=_later(50)).reaped]
+
+
+def test_la_session_d_un_claim_recolte_ne_tient_pas_le_claim_suivant(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Une session restée vivante après la récolte de son claim ne renouvelle pas celui d'un autre titulaire."""
+    tid = ready(service, "reprise")
+    (launch,) = tick(projet, host).launches
+    later = TaskService(projet)
+    later.ledger.transition_task(tid, TaskState.READY, actor_id="worker", reason="rendue")
+    later.claim(tid, "humain")  # epoch suivant, hors du lanceur : le dernier lancement reste celui de l'epoch 1
+    host.agents = [{"id": launch.session, "kind": "background", "status": "busy", "name": f"grimoire-{tid}"}]
+    assert tid in [d.task_id for d in tick(projet, host, now=_later(25)).reaped]
+
+
+def test_un_battement_en_erreur_ne_casse_pas_le_tick(projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import launcher
+
+    ready(service, "solide")
+    tick(projet, host)
+
+    def boom(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(launcher, "renew_live_workers", boom)
+    report = tick(projet, host, now=_later(25))
+    assert report.reaped and any("battement des workers" in line for line in report.attention)

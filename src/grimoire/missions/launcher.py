@@ -73,8 +73,6 @@ _EXEC_TIMEOUT_S = 60.0
 _BG_ID = re.compile(r"backgrounded\s*\S?\s*([0-9a-f]{8})\b")
 #: Palier de la politique → alias de modèle que ``claude --model`` accepte.
 _TIER_ALIAS = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
-#: Les états d'une session de fond (``claude agents --json``) qui tournent encore.
-_ALIVE = frozenset({"busy", "idle"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,8 +128,12 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
     return found
 
 
-def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude") -> frozenset[str] | None:
-    """Les identifiants courts des sessions de fond vivantes (``claude agents --json``) ; ``None`` si la lecture échoue."""
+def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude") -> frozenset[tuple[str, str]] | None:
+    """Les sessions de fond au travail (``claude agents --json``), en ``(id court, nom)`` ; ``None`` si la lecture échoue.
+
+    Seul ``busy`` compte : une session ``idle`` a fini son tour (question posée, travail rendu sans transition) et ne
+    travaille plus ; la tenir pour vivante repousserait sans fin le plafond dur du claim.
+    """
     result = exec_([claude_bin, "agents", "--json"], cwd, None)
     if result.returncode != 0:
         return None
@@ -142,8 +144,8 @@ def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude")
     if not isinstance(raw, list):
         return None
     return frozenset(
-        str(a["id"]) for a in raw
-        if isinstance(a, dict) and a.get("kind") == "background" and a.get("status") in _ALIVE and a.get("id")
+        (str(a["id"]), str(a.get("name", ""))) for a in raw
+        if isinstance(a, dict) and a.get("kind") == "background" and a.get("status") == "busy" and a.get("id")
     )
 
 
@@ -157,19 +159,24 @@ def renew_live_workers(
     ``claude agents`` qui échoue, ne renouvelle rien : la récolte juge comme avant (échec fermé).
     """
     sessions = launched_sessions(service)
-    held = {tid: p for tid, p in sessions.items() if service.require(tid).status in (TaskState.CLAIMED, TaskState.RUNNING)}
+    held: dict[str, tuple[dict[str, Any], int]] = {}
+    for tid, payload in sessions.items():
+        task = service.ledger.get_task(tid)
+        # Le lancement doit être celui du claim courant : une session d'un claim récolté puis repris ne le tient pas.
+        if task is not None and task.status in (TaskState.CLAIMED, TaskState.RUNNING) and task.claim is not None \
+                and payload.get("lease_epoch") == task.claim.lease_epoch:
+            held[tid] = (payload, task.claim.lease_epoch)
     if not held:
         return ()
     alive = live_background_sessions(exec_, service.home_root, claude_bin)
     if alive is None:
         return ()
     renewed: list[str] = []
-    for tid, payload in held.items():
-        claim = service.require(tid).claim
-        if claim is None or str(payload.get("session", "")) not in alive:
+    for tid, (payload, epoch) in held.items():
+        if (str(payload.get("session", "")), f"grimoire-{tid}") not in alive:
             continue
         try:
-            service.ledger.renew_lease(tid, claim.lease_epoch, actor_id="tick", now=now)
+            service.ledger.renew_lease(tid, epoch, actor_id="tick", now=now)
         except GrimoireError:
             continue  # epoch périmé ou bail rendu entre-temps : rien à renouveler
         renewed.append(tid)
@@ -325,11 +332,13 @@ class WorkerLauncher:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}, aucun identifiant de session"
             return self._failed(tid, f"claude --bg a échoué ({result.returncode}) : {detail}")
         session = match.group(1)
+        current = service.require(tid).claim
         service.ledger.append_event(
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
             {
                 "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
                 "cwd": str(wt.path), "branch": wt.branch,
+                "lease_epoch": current.lease_epoch if current is not None else 0,
             },
         )
         return LaunchOutcome(tid, "launched", f"session {session} dans {wt.path}", session, model)

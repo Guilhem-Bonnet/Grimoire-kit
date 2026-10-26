@@ -208,13 +208,17 @@ def _one_pass(
     from grimoire.missions.effects import reconcile
     from grimoire.missions.launcher import default_exec, renew_live_workers
 
-    renew_live_workers(service, exec_ or default_exec, now=now)  # le battement des workers vivants, avant la récolte (#961)
+    heartbeat = ""
+    try:  # le battement des workers au travail, avant la récolte (#961) ; en erreur, la récolte juge comme avant
+        renew_live_workers(service, exec_ or default_exec, now=now)
+    except Exception as exc:
+        heartbeat = f"battement des workers : en erreur, aucun bail renouvelé à ce tick ({type(exc).__name__}: {exc})"
     report = service.reap(apply=True, now=now, probe_hosts=mode == "apply")
     woken = tuple(service.wake_due(apply=True, now=now, pause=state))
     effects = tuple(reconcile(service, apply=True, probe=effect_probe))
     shared = once_per_tick(ci_probe)  # UNE lecture gh par tick, partagée par la réconciliation et la migration
     ci = (*reconcile_ci(service, probe=shared, now=now), *migrate_orphan_slots(service, probe=shared, now=now))
-    attention = [*state.attention()]
+    attention = [*state.attention(), *([heartbeat] if heartbeat else [])]
     policy, cleanup = _orchestrator_stage(service, mode, exec_, attention)
     plan = service.queue_plan(now=now, pause=state)
     dispatched: tuple[str, ...] = ()
