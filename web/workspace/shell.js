@@ -42,9 +42,14 @@
 //                  `inspector`, `evidence`) : épinglé au bureau, en tiroir sous
 //                  900 px ; `detail` : seulement si le détail n'est pas déjà
 //                  posé sous la liste (P59)
-//   ctx.rail       `{ on(id, handler) }` : enregistre ce que fait le rail « 2 »
-//                  (bibliothèque) tant que cet espace est monté ; remis à
+//   ctx.rail       `{ on(id, handler), reason(id, phrase) }` : enregistre ce que
+//                  fait le rail « 2 » (bibliothèque) tant que cet espace est
+//                  monté — le bouton n'est visible qu'ainsi ; `reason` le
+//                  désactive en disant pourquoi (`''` le réactive). Remis à
 //                  zéro par la coque à chaque changement d'espace
+//   Après le démontage (`ctx.signal.aborted`), `dock`, `docbar`, `setItem`,
+//   `openPanel` et `rail` n'ont plus d'effet : un rendu en retard d'un espace
+//   quitté ne fuit pas sur le suivant.
 //   ctx.live       `{ on(handler) }` : appelé quand le pouls (live.js) annonce un
 //                  changement du ledger ou des sessions ; l'espace recharge SES
 //                  données. Remis à zéro à chaque changement d'espace.
@@ -1283,6 +1288,7 @@ function buildRail() {
     rail.append(button);
     if (item.id === 'evidence') rail.append(Object.assign(document.createElement('div'), { className: 'grow' }));
   }
+  syncRailActions();
   for (const [id, elementId] of Object.entries(PANELS)) {
     $(elementId).querySelector(`[data-pin="${id}"]`)?.addEventListener('click', () => {
       setPanel(id, panelState(id) === 'pinned' ? 'collapsed' : 'pinned');
@@ -1370,6 +1376,9 @@ function buildDock() {
     button.setAttribute('aria-controls', 'dock-body');
     button.dataset.dockTab = tab.id;
     button.dataset.term = tab.term;
+    // Nom stable : dans un dock étroit, seul l'onglet choisi garde son libellé visible.
+    button.setAttribute('aria-label', tab.label);
+    button.title = tab.label;
     button.append(icon(tab.icon), mk('span', { class: 'tab-lbl', text: tab.label }));
     button.addEventListener('click', () => selectDockTab(tab.id));
     tabs.append(button);
@@ -1390,6 +1399,7 @@ function buildDock() {
   kbd.textContent = '5';
   kbdRow.append(kbd);
   tabs.append(kbdRow);
+  $('dock-body').after(buildConsoleField());
   selectDockTab(dockTab);
 }
 
@@ -1397,6 +1407,9 @@ function selectDockTab(id) {
   dockTab = id;
   markSelectedTab($('dock-tabs'), document.querySelector(`[data-dock-tab="${id}"]`));
   $('dock-body').setAttribute('aria-labelledby', `tab-dock-${id}`);
+  // Le champ n'appartient qu'à l'onglet Console : ailleurs il ne prend ni place ni focus.
+  const field = $('dock-console');
+  if (field) field.hidden = id !== 'console';
   renderDock();
 }
 
@@ -1426,11 +1439,129 @@ function renderDock() {
 
 function dockPlaceholder(id) {
   return {
-    console: 'Tapez une sous-commande grimoire, ou ` pour le curseur.',
-    traces: 'Aucune trace : le TraceLedger de ce projet est vide.',
-    timeline: 'Sélectionnez une tâche dans Exécuter pour voir sa timeline.',
-    problemes: 'Lancez le diagnostic (grimoire doctor) pour peupler cet onglet.',
+    console: 'Aucune commande lancée. Tape une sous-commande dans le champ « grimoire » ci-dessous ; ` y place le curseur depuis tout l’écran.',
+    traces: 'Aucune trace affichée : le Journal et le détail d’une tâche en écrivent ici.',
+    timeline: 'Choisis une tâche dans Travail pour voir sa timeline.',
+    problemes: 'Aucun problème affiché : Fichiers et Blueprints écrivent ici leurs diagnostics (grimoire doctor, validation).',
   }[id] || '';
+}
+
+// Les onglets qu'un espace remplit pour lui-même. La Console, elle, est à la
+// coque : son historique suit la personne d'un espace à l'autre.
+const DOCK_TABS_OF_SPACE = ['traces', 'timeline', 'problemes'];
+
+// ── Console du dock : un vrai champ de saisie (P06) ─────────────────────────
+//
+// La saisie passait par un tampon simulé, branché sur `document` par Source :
+// Tab y lançait la complétion au lieu de déplacer le focus, chaque frappe
+// redessinait le transcript, et la Console restait sourde tant que Source
+// n'avait jamais été ouvert. C'est maintenant un `<input>` que la coque
+// possède : Tab sort du dock comme partout, Échap vide le champ puis rend le
+// focus d'où l'on venait, ↑ / ↓ rappellent les commandes déjà lancées, et les
+// raccourcis d'une lettre se taisent pendant la saisie (`bindShortcuts`).
+// L'exécution passe par la même route que la palette (`runCommand`), donc par
+// la liste blanche de `workspace_exec`.
+
+const consoleHistory = [];
+let consoleHistoryIndex = 0;
+let consoleRunning = false;
+let consoleReturnFocus = null;
+
+function buildConsoleField() {
+  const input = mk('input', {
+    id: 'dock-console-input',
+    class: 'dock-console-input',
+    type: 'text',
+    autocomplete: 'off',
+    autocapitalize: 'off',
+    spellcheck: 'false',
+    enterkeyhint: 'send',
+    list: 'dock-console-commands',
+    placeholder: 'task list, doctor, memory status…',
+  });
+  const label = mk('label', { for: 'dock-console-input', class: 'dock-console-prompt' },
+    mk('span', { class: 'prompt', 'aria-hidden': 'true', text: '$' }),
+    mk('span', { text: 'grimoire' }),
+    mk('span', { class: 'sr-only', text: ' : sous-commande à lancer' }));
+  const form = mk('form', { id: 'dock-console', class: 'dock-console', 'aria-label': 'Console' },
+    label, input, mk('datalist', { id: 'dock-console-commands' }));
+  form.hidden = true;
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitConsole();
+  });
+  input.addEventListener('keydown', onConsoleKeydown);
+  // D'où l'on venait : Échap y retourne. Jamais un élément du dock lui-même.
+  input.addEventListener('focus', (event) => {
+    const from = event.relatedTarget;
+    if (from && !$('dock').contains(from)) consoleReturnFocus = from;
+  });
+  return form;
+}
+
+/** Découpe une ligne en mots, en gardant ensemble ce qui est entre guillemets. */
+function consoleWords(raw) {
+  const words = [];
+  for (const match of raw.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) {
+    words.push(match[1] ?? match[2] ?? match[3]);
+  }
+  return words;
+}
+
+function submitConsole() {
+  const input = $('dock-console-input');
+  const raw = input.value.trim();
+  if (!raw || consoleRunning) return;
+  const argv = consoleWords(raw.replace(/^grimoire(\s+|$)/, ''));
+  input.value = '';
+  if (consoleHistory[consoleHistory.length - 1] !== raw) consoleHistory.push(raw);
+  consoleHistoryIndex = consoleHistory.length;
+  if (!argv.length) return;
+  void runCommand(argv);
+}
+
+function onConsoleKeydown(event) {
+  const input = event.currentTarget;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (input.value) { input.value = ''; consoleHistoryIndex = consoleHistory.length; return; }
+    const back = consoleReturnFocus && consoleReturnFocus.isConnected ? consoleReturnFocus : $('tab-dock-console');
+    back.focus();
+    return;
+  }
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  // ↑ / ↓ parcourent l'historique tant que le champ est vide ou montre une
+  // commande rappelée ; sur une saisie en cours, ils restent aux suggestions.
+  const browsing = !input.value || input.value === consoleHistory[consoleHistoryIndex];
+  if (!browsing || !consoleHistory.length) return;
+  event.preventDefault();
+  const step = event.key === 'ArrowUp' ? -1 : 1;
+  consoleHistoryIndex = Math.max(0, Math.min(consoleHistory.length, consoleHistoryIndex + step));
+  input.value = consoleHistory[consoleHistoryIndex] ?? '';
+}
+
+/** Les sous-commandes ouvertes, proposées sous le champ (liste blanche lue dans /commands). */
+function fillConsoleSuggestions(catalogue) {
+  const list = $('dock-console-commands');
+  if (!list) return;
+  list.replaceChildren(...catalogue.map((c) => mk('option', { value: c.key, label: c.summary })));
+}
+
+/** Ouvre la Console et y place le curseur (`` ` ``, de partout). */
+function focusConsole() {
+  if (root.dataset.atelier !== 'on' && !isNarrow()) setAtelier(true);
+  selectDockTab('console');
+  setDock('pinned');
+  $('dock-console-input').focus();
+}
+
+function setConsoleRunning(on) {
+  consoleRunning = on;
+  const input = $('dock-console-input');
+  if (!input) return;
+  input.readOnly = on;
+  $('dock-console').setAttribute('aria-busy', String(on));
 }
 
 const dock = {
@@ -1620,15 +1751,47 @@ let controller = null;
 // l'espace monté enregistre ici ce que « 2 » doit faire tant qu'il est actif.
 // Remis à zéro à chaque changement d'espace : un espace qui ne s'en sert pas
 // laisse « 2 » sans effet, plutôt que de rejouer l'action d'un espace quitté.
+//
+// P06 : le bouton suit ce registre. Sans action enregistrée il est masqué (il
+// promettait la bibliothèque sur les cinq espaces et ne faisait rien sur
+// quatre) ; enregistré mais hors de propos ici (`ctx.rail.reason(id, phrase)`),
+// il reste visible, désactivé, et dit pourquoi.
 let railActions = {};
 
 function registerRailAction(id, handler) {
-  railActions[id] = handler;
+  railActions[id] = { handler, reason: '' };
+  syncRailActions();
+}
+
+function setRailReason(id, reason) {
+  if (!railActions[id]) return;
+  railActions[id].reason = reason || '';
+  syncRailActions();
 }
 
 function triggerRailAction(id, event) {
-  const handler = railActions[id];
-  if (handler) handler(event);
+  const action = railActions[id];
+  if (action && !action.reason) action.handler(event);
+}
+
+function syncRailActions() {
+  for (const item of RAIL) {
+    if (PANELS[item.id] || item.id === 'dock') continue;
+    const button = document.querySelector(`.rail-btn[data-panel="${item.id}"]`);
+    if (!button) continue;
+    const action = railActions[item.id];
+    button.hidden = !action;
+    const reason = action ? action.reason : '';
+    if (reason) {
+      button.setAttribute('aria-disabled', 'true');
+      button.setAttribute('aria-description', reason);
+      button.title = `${item.label} — ${reason}`;
+    } else {
+      button.removeAttribute('aria-disabled');
+      button.removeAttribute('aria-description');
+      button.title = `${item.label} (${item.key})`;
+    }
+  }
 }
 
 function tabButton(id, label, iconName, term) {
@@ -1782,6 +1945,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   currentParams = { ...(params || {}) };
   lastSection[space.id] = section.id;
   railActions = {};
+  syncRailActions();
   lists = [];
   if (openMenu) openMenu.setOpen(false);
   live.clear();
@@ -1843,21 +2007,35 @@ async function goto(id, params, { fromUrl = false } = {}) {
   // Rien d'un espace quitté ne survit dans la coque (M7) : la commande
   // équivalente se réécrit au montage suivant.
   dock.echo('');
+  // Les diagnostics et traces d'un espace sont les siens : ceux de Fichiers
+  // n'ont rien à dire sur Travail. La Console garde son historique.
+  for (const tab of DOCK_TABS_OF_SPACE) dock.clear(tab);
+
+  // Un rendu asynchrone d'un espace démonté ne touche plus la coque (P06) :
+  // une réponse arrivée après le changement d'espace posait la pastille de la
+  // barre de document, la commande équivalente ou l'URL de l'espace quitté sur
+  // celui qui venait de s'ouvrir. Chaque écriture de la coque passe par
+  // `ctx.signal` ; les modules testent aussi `ctx.signal.aborted` pour ce qui
+  // reste dans leur propre DOM.
+  const signal = controller.signal;
+  const whileMounted = (fn) => (...args) => (signal.aborted ? undefined : fn(...args));
+  const spaceDock = Object.fromEntries(Object.entries(dock).map(([key, fn]) => [key, whileMounted(fn)]));
+  const spaceDocbar = Object.fromEntries(Object.entries(docbar).map(([key, fn]) => [key, whileMounted(fn)]));
 
   const ctx = {
-    api, host, glossary, dock, docbar, empty, icon,
+    api, host, glossary, dock: spaceDock, docbar: spaceDocbar, empty, icon,
     canvas,
     section: section.id,
     scope,
-    setItem,
+    setItem: whileMounted(setItem),
     inspector: $('inspector-body'),
     explorer: $('explorer-body'),
-    signal: controller.signal,
+    signal,
     goto,
-    openPanel,
+    openPanel: whileMounted(openPanel),
     loading: (label, rows, shape) => loadingNodes(label, rows, { shape }),
     params: params || {},
-    rail: { on: registerRailAction },
+    rail: { on: whileMounted(registerRailAction), reason: whileMounted(setRailReason) },
     live: { on: (handler) => live.on(handler) },
   };
   try {
@@ -2189,6 +2367,7 @@ async function buildPalette() {
 
   const catalogue = settle(commandsResult, {}).commands || [];
   consoleCatalogue = new Map(catalogue.map((c) => [c.key, { flags: new Set(c.flags || []), positionals: c.positionals || 0 }]));
+  fillConsoleSuggestions(catalogue);
   const commands = catalogue.map((c) => ({
     section: 'Commandes', label: c.command, hint: c.summary, command: c.command,
     run: () => runCommand(c.key.split(' ')),
@@ -2478,13 +2657,20 @@ async function runCommand(argv) {
   if (root.dataset.atelier !== 'on' && !isNarrow()) setAtelier(true);
   selectDockTab('console');
   setDock('pinned');
-  dock.log('console', '$ grimoire ' + argv.join(' '));
-  dock.echo('grimoire ' + argv.join(' '));
+  const command = 'grimoire ' + argv.join(' ');
+  dock.log('console', '$ ' + command);
+  dock.echo(command);
+  setConsoleRunning(true);
   try {
     const result = await api.run(argv);
     dock.log('console', result.output || '(aucune sortie)');
+    if (result.timed_out) dock.log('console', '(délai dépassé)');
+    if (result.code !== null && result.code !== undefined) dock.log('console', `(code de sortie ${result.code})`);
   } catch (error) {
+    // Le refus vient du serveur (liste blanche, drapeau, hôte) : affiché tel quel.
     dock.log('console', 'refusé : ' + error.message);
+  } finally {
+    setConsoleRunning(false);
   }
 }
 
@@ -2581,7 +2767,7 @@ function bindShortcuts() {
       else triggerRailAction(item.id, event);
       return;
     }
-    if (event.key === '`') { event.preventDefault(); selectDockTab('console'); setDock('pinned'); }
+    if (event.key === '`') { event.preventDefault(); focusConsole(); }
   });
 }
 

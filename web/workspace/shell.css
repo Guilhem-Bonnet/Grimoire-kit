@@ -1398,6 +1398,17 @@ body[data-active-space="source"] {
   background: var(--accsoft);
 }
 
+/* P06 : un bouton du rail sans action dans l'espace monté n'est pas affiché ;
+ * hors de propos ici, il reste visible, désactivé, et son titre dit pourquoi. */
+#rail .rail-btn[hidden] {
+  display: none;
+}
+
+.rail-btn[aria-disabled="true"] {
+  color: var(--ink3);
+  cursor: not-allowed;
+}
+
 /* En densité confortable le rail porte ses libellés (spec §3.4).
  *
  * Le libellé est du texte : il tient le plancher typographique comme le reste,
@@ -1717,8 +1728,13 @@ body[data-active-space] .panel-head {
   color: var(--termink);
 }
 
-#dock-body .prompt {
-  color: var(--pri);
+/* L'invite « $ » : le terminal reste sombre dans les deux thèmes, et --pri du
+ * thème clair y tombait à 2,56:1 (mesuré par la garde de contraste, P06). Elle
+ * prend l'encre du terminal, en gras, plutôt qu'un accent illisible. */
+#dock-body .prompt,
+.dock-console-prompt .prompt {
+  color: var(--termink);
+  font-weight: 600;
 }
 
 /* Le terminal reste sombre dans les deux thèmes (spec §2.1) : le texte discret
@@ -1727,6 +1743,57 @@ body[data-active-space] .panel-head {
  * mesure sur le DOM, invisible à la lecture de la feuille. */
 #dock-body .lbl {
   color: var(--termink);
+}
+
+/* La Console (P06) : un vrai champ sous le transcript, dans l'encre du
+ * terminal. Masqué sur les autres onglets du dock (`hidden`). */
+.dock-console {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 14px;
+  border-top: 1px solid var(--line);
+  background: var(--term);
+  font-family: var(--mono);
+  font-size: var(--t-min);
+  color: var(--termink);
+  flex: none;
+}
+
+.dock-console[hidden] {
+  display: none;
+}
+
+.dock-console-prompt {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.dock-console-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  padding: 2px 6px;
+  font: inherit;
+  color: var(--termink);
+}
+
+.dock-console-input::placeholder {
+  color: var(--termink);
+  opacity: 1;
+  font-style: italic;
+}
+
+.dock-console-input:hover {
+  border-color: var(--line);
+}
+
+.dock-console[aria-busy="true"] .dock-console-input {
+  cursor: progress;
 }
 
 /* ── Barre d'état ──────────────────────────────────────────────────────────*/
@@ -2992,6 +3059,44 @@ body[data-active-space] .panel-head {
   #statusbar .st-extra,
   #statusbar .st-pre,
   #statusbar .chip .kbd {
+    display: none;
+  }
+}
+
+/* ── Dock sur une ligne (P06) ──────────────────────────────────────────────
+ * Avec l'explorateur et l'inspecteur épinglés, le dock n'a plus que ~390 px à
+ * 1024 px d'écran : la commande équivalente poussait « Problèmes » hors de la
+ * barre. Le dock est un conteneur : la commande s'élide, puis cède sa place
+ * avec le rappel « 5 », puis les onglets non choisis gardent leur icône (nom
+ * accessible et `title` posés par shell.js::buildDock). */
+#dock {
+  container: dock / inline-size;
+}
+
+#dock-tabs > .tab {
+  flex: none;
+  white-space: nowrap;
+}
+
+#dock-echo {
+  display: block;
+  align-self: center;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container dock (max-width: 640px) {
+  #dock-echo,
+  #dock-tabs > .row:last-child {
+    display: none;
+  }
+}
+
+@container dock (max-width: 480px) {
+  #dock-tabs .tab[aria-selected="false"] .tab-lbl {
     display: none;
   }
 }
