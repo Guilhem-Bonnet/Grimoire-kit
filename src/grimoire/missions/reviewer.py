@@ -3,12 +3,14 @@
 Étape du tick, après le lanceur, active seulement si ``orchestrator.roles.reviewer.enabled`` (désactivé par défaut).
 Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui est en ``needs_verification`` :
 
-1. **Lancement** — une fois par entrée en revue : ``claude --bg --name grimoire-review-<id> --session-id <uuid> …`` dans
-   le worktree de la tâche. La session est neuve : elle ne voit pas le raisonnement du worker, seulement les critères,
-   le diff de la branche et le pack de preuve. Le modèle diffère de celui du worker quand la politique ne l'impose pas.
-   Sous mandat actif, l'identifiant est inscrit au journal d'autorité en rôle ``reviewer`` pour la tâche *avant* le
-   lancement (:func:`~grimoire.missions.launcher.attest_session`) : c'est ce qui atteste le reçu (verrou 7). Le ledger
-   n'en garde que l'empreinte (``session_sha256``), pas l'identifiant.
+1. **Lancement** — une fois par entrée en revue : ``claude --bg --name grimoire-review-<id> …`` dans le worktree de la
+   tâche. La session est neuve : elle ne voit pas le raisonnement du worker, seulement les critères, le diff de la
+   branche et le pack de preuve. Le modèle diffère de celui du worker quand la politique ne l'impose pas. Son vrai
+   ``sessionId`` est résolu après le lancement dans ``claude agents --json``
+   (:func:`~grimoire.missions.launcher.resolve_background_session` : ``--bg`` ignore ``--session-id``, #966) puis, sous
+   mandat actif, inscrit au journal d'autorité en rôle ``reviewer`` pour la tâche
+   (:func:`~grimoire.missions.launcher.attest_session`) : c'est ce qui atteste le reçu (verrou 7). Identité introuvable
+   ou inscription refusée : la session est arrêtée. Le ledger n'en garde que l'empreinte (``session_sha256``).
 2. **Jugement** — quand un reçu postérieur au lancement existe, et une seule fois par relecture :
    - écrit par la session du worker : **verdict forgé** — disjoncteur ouvert et, sous mandat, mandat révoqué
      (:meth:`~grimoire.missions.mandate.MandateStore.revoke_on_forged_verdict`) ;
@@ -45,7 +47,16 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
 from grimoire.missions.breaker import read_breaker, record_failure, trip
-from grimoire.missions.launcher import _BG_ID, _TIER_ALIAS, attest_session, default_exec, launched_sessions, session_env
+from grimoire.missions.launcher import (
+    _BG_ID,
+    _TIER_ALIAS,
+    _halt,
+    attest_session,
+    default_exec,
+    launched_sessions,
+    resolve_background_session,
+    session_env,
+)
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import find_task_worktree
@@ -240,18 +251,26 @@ class ReviewStage:
             return ReviewOutcome(tid, "launch", "failed", f"worktree refusé : {unsafe}")
         head = branch_head(root, tid)
         under_mandate = MandateStore(root).state().active
-        session_id, refused = attest_session(self._service, REVIEWER_ACTOR, tid)
-        if refused:
-            return ReviewOutcome(tid, "launch", "skipped", refused)
         model = self._model(str(launch.get("model") or ""))
-        argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--session-id", session_id, "--model", model,
+        argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,
                 "--permission-mode", role.permission_mode, self._prompt(tid, worktree.base_sha, model)]
-        result = self._exec(argv, cwd, session_env(session_id))
+        result = self._exec(argv, cwd, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}"
             state = record_failure(root, self._policy.breaker_threshold, f"{tid} : relecteur non lancé : {detail}")
             return ReviewOutcome(tid, "launch", "failed", f"claude --bg a échoué : {detail}" + (" — disjoncteur ouvert" if state.open else ""))
+        short = match.group(1)
+        # #966 : l'identité du relecteur se lit après le lancement ; c'est elle qui s'inscrit et se scelle.
+        session_id = resolve_background_session(self._exec, cwd, short, self._claude)
+        if not session_id:
+            halted = _halt(self._exec, cwd, short, self._claude)
+            detail = f"relecteur {short} lancé mais introuvable dans `claude agents` : identité non résolue{halted}"
+            state = record_failure(root, self._policy.breaker_threshold, f"{tid} : {detail}")
+            return ReviewOutcome(tid, "launch", "failed", detail + (" — disjoncteur ouvert" if state.open else ""))
+        refused = attest_session(self._service, session_id, REVIEWER_ACTOR, tid)
+        if refused:
+            return ReviewOutcome(tid, "launch", "skipped", refused + _halt(self._exec, cwd, short, self._claude))
         try:  # la tête relue, au journal d'autorité : un commit posé pendant la relecture ne sera pas scellé
             seal_review_launch(root, tid, session_digest(session_id), head)
             launch_sealed = True
@@ -259,11 +278,11 @@ class ReviewStage:
             launch_sealed = False
         self._service.ledger.append_event(
             REVIEW_LAUNCHED_EVENT, tid, "task", REVIEWER_ACTOR,
-            {"task_id": tid, "session": match.group(1), "session_sha256": session_digest(session_id), "model": model,
+            {"task_id": tid, "session": short, "session_sha256": session_digest(session_id), "model": model,
              "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate,
              "head": head, "launch_sealed": launch_sealed},
         )
-        return ReviewOutcome(tid, "launch", "launched", f"relecteur {match.group(1)} dans {cwd}", match.group(1), model)
+        return ReviewOutcome(tid, "launch", "launched", f"relecteur {short} dans {cwd}", short, model)
 
     @staticmethod
     def _prompt(tid: str, base_sha: str, model: str) -> str:
@@ -446,7 +465,7 @@ class ReviewStage:
             f"La relecture de {tid} rend NOT-READY : {notes} Corrige, revérifie avec les checks de la tâche, "
             f"puis remets-la en revue (`grimoire task move {tid} --to needs_verification`)."
         )
-        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env(worker_session))
+        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env())
         if result.returncode != 0:
             # Personne ne reprend la tâche : elle revient en revue, la reprise sera retentée au tick suivant.
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="reprise du worker échouée")
