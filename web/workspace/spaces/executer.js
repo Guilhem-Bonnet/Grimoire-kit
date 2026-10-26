@@ -70,6 +70,7 @@ const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'acc
 import { actionStatus, badge, glyph, icon, levelBars, monogram, setActionStatus, stateIcon } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
+import { newTaskBlock, newTaskButton } from './task-create.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
 const COLUMN_LABEL = {
@@ -2079,13 +2080,22 @@ export async function mount(root, ctx) {
     const formula = document.createElement('span');
     formula.className = 'ex-formula';
     formula.append(text('b', null, '›'), 'grimoire task board');
-    head.append(ask, row(formula));
+    // « Nouvelle tâche » (P35) : désactivé, raison écrite, hors du projet servi.
+    head.append(ask, row(formula, ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
     head.lastElementChild.classList.add('ex-head-end');
     return head;
   }
 
   const setView = (id) => { view = id; draw(); };
   const redraw = () => { selected = null; draw(); };
+  // Confirmation et formulaire « Nouvelle tâche », redessinés depuis leur état à chaque dessin.
+  const newTask = (portfolio) => newTaskBlock(ctx, {
+    portfolio,
+    onCreated: (task) => { selected = { id: task.id, project: '' }; draw(); },
+    onOpen: (id) => { selected = { id, project: '' }; if (view === 'sessions' || view === 'decisions') view = 'board4'; draw(); },
+    onChange: () => draw(),
+    columnLabel: (b) => COLUMN_LABEL[b] || b,
+  });
 
   function renderNoLedger() {
     releaseSeg();
@@ -2105,6 +2115,8 @@ export async function mount(root, ctx) {
       () => {},
     );
     appendIf(wrap, scopeToolbar(ctx, null, redraw));
+    wrap.append(row(...newTaskButton(ctx, { portfolio: false, onToggle: () => draw() })));
+    appendIf(wrap, newTask(false));
     wrap.append(ctx.empty(
       'Exécuter',
       board.note || "Ce projet n'a pas encore de Mission Ledger.",
@@ -2209,6 +2221,7 @@ export async function mount(root, ctx) {
       return;
     }
     appendIf(wrap, scopeToolbar(ctx, portfolio, redraw));
+    appendIf(wrap, newTask(portfolioMode));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);
       if (notice) wrap.append(notice);

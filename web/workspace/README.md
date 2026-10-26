@@ -79,6 +79,8 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `spaces/piloter.js` | Flotte et projet, KPI, « À traiter », agents (clause d'emploi, outils, contexte, skills, usage — #374) | lot 4 |
 | `spaces/concevoir.js` | Toile, zoom, éditeur de graphe, bibliothèque, inspecteur de nœud | lot 3 |
 | `spaces/executer.js` | Board gouverné, portes, carte de tâche, timeline | lot 4 |
+| `spaces/task-create.js` | Travail › « Nouvelle tâche » : titre, critères d'acceptation, description, envoyés à `TaskService.add` (`POST /api/workspace/tasks/add`) ; désactivé avec sa raison hors du projet servi | P35 |
+| `spaces/registre.js` | Configuration › Projets : entretien du registre du cockpit (ajouter, scanner un dossier, retirer, purger les entrées mortes), chaque retrait par un aperçu puis une confirmation dans la page ; le dossier d'un projet n'est jamais touché | P35 |
 | `spaces/observer.js` | Runtime : KPI, coût, latence, spans, traces | lot 4 |
 | `spaces/memoire.js` | La recherche d'abord : filtres type, source, projet, date ; détail de l'entrée à droite | P24 |
 | `spaces/memoire-gestes.js` | Correction directe d'une entrée dans son panneau de détail : Corriger (étiquettes, source, fusion, retrait), Marquer remplacée…, historique avec Annuler… ; chaque geste par un aperçu avant/après puis son application (`POST /api/memory`, `action: gesture`) | P34 |
