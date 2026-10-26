@@ -33,8 +33,8 @@ function injectStyles() {
     .cf-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); }
     .cf-card h3 { margin: 0; font-size: var(--t-m); font-weight: 500; color: var(--ink); }
     .cf-foot { margin-top: auto; }
-    @media (max-width: 900px) { .cf-wrap { padding: var(--sp-3); } }
-    @media (max-width: 700px) { .cf-wrap .tbl { table-layout: auto; } .cf-wrap .tbl th, .cf-wrap .tbl td { white-space: nowrap; } }
+    @container canvas (max-width: 720px) { .cf-wrap { padding: var(--sp-3); } }
+    @container canvas (max-width: 700px) { .cf-wrap .tbl { table-layout: auto; } .cf-wrap .tbl th, .cf-wrap .tbl td { white-space: nowrap; } }
   `;
   document.head.append(style);
 }

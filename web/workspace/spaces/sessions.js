@@ -162,8 +162,9 @@ function sessionRow(session, selected, onSelect) {
   tr.tabIndex = 0;
   if (selected) tr.setAttribute('aria-current', 'true');
   tr.addEventListener('click', () => onSelect(session));
+  // Entrée (P58) passe par le contrôleur de liste de la coque (le clic de la ligne).
   tr.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(session); }
+    if (event.key === ' ') { event.preventDefault(); onSelect(session); }
   });
   const stateCell = el('td');
   stateCell.append(stateBadge(session));

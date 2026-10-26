@@ -188,6 +188,8 @@ def plan_timer(project_root: Path, interval: str = DEFAULT_INTERVAL, *, python: 
         f"Description=Grimoire : tick d'orchestration de {_spec(root.name)} (aucun appel de LLM)\n"
         "\n[Service]\n"
         "Type=oneshot\n"
+        # Le tick lance des sessions `claude --bg` : en `control-group` (défaut), systemd tue leur démon dès la fin du tick.
+        "KillMode=process\n"
         f"WorkingDirectory={_spec(str(root))}\n"
         f"{_path_line()}"
         f"ExecStart={exec_start}\n"

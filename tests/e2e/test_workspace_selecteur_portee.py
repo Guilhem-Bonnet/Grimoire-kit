@@ -193,7 +193,7 @@ def test_le_selecteur_est_un_menu_ancre_sur_un_fond_assombri(browser: Browser, s
         assert abs(box["x"] - chip["x"]) <= 2, "le menu doit s'aligner sur la puce"
         alpha = page.evaluate(
             """() => {
-                 const c = getComputedStyle(document.getElementById('palette')).backgroundColor;
+                 const c = getComputedStyle(document.getElementById('palette'), '::backdrop').backgroundColor;
                  const m = c.match(/rgba?\\(([^)]+)\\)/);
                  const parts = m ? m[1].split(',').map(Number) : [];
                  return parts.length === 4 ? parts[3] : 1;
