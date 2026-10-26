@@ -41,6 +41,8 @@ from grimoire.policies.schemas import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from grimoire.hosts.decisions.authority_guard import ForgeryVector
+
 #: Standard profile -> policy risk profile. The standard grades *how much
 #: evidence* a project owes; the policy engine grades *how much freedom* it
 #: gets. A production project owes the most and gets the least.
@@ -281,6 +283,28 @@ def _floor_write_check(hook: HookInput, proposed: str) -> Decision | None:
 _AUTHORITY_PROFILES = frozenset({"governed", "production"})
 
 
+def _revoke_on_protected_write(hook: HookInput, facts: ToolFacts, vector: ForgeryVector) -> None:
+    """#982 : révoque après un refus dans la zone protégée ; une révocation ciblée en erreur devient large."""
+    from grimoire.missions.mandate import (
+        REVOKE_PROTECTED_WRITE,
+        revocation_cause,
+        revoke_every_mandate,
+        revoke_session_mandates,
+    )
+
+    cause = revocation_cause(hook.session_id, hook.tool_name, facts.command, vector.code, vector.what)
+    targeted = not vector.revokes_all
+    if targeted:
+        try:
+            revoke_session_mandates(
+                hook.project_root, REVOKE_PROTECTED_WRITE, vector.what, cause=cause, session_id=hook.session_id
+            )
+        except Exception:  # échec fermé : on ne sait pas qui révoquer, on révoque tout
+            targeted = False
+    if not targeted:
+        revoke_every_mandate(REVOKE_PROTECTED_WRITE, vector.what, cause=cause)
+
+
 def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
     """W2-01 : refuse ce qui fabriquerait la preuve d'un tour humain (:mod:`.authority_guard`).
 
@@ -302,13 +326,13 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         profile = session_profile(hook, journal=False)
         if vector.governed_only and profile not in _AUTHORITY_PROFILES:
             return None
-        if vector.code == "control-zone":
-            # #876 lot 1 : une écriture d'agent refusée dans la zone protégée révoque les mandats (best effort :
-            # le refus, lui, ne dépend pas de la révocation).
+        if vector.revokes:
+            # #876 lot 1, #982 : un refus dans la zone protégée révoque, sauf mention prouvée inoffensive
+            # (``vector.revokes`` faux). La cible peut être le journal ou la clé (``revokes_all``) : tous les mandats
+            # du poste ; sinon ceux du projet de la session et de la session elle-même (repli : tous). Best effort :
+            # le refus, lui, ne dépend pas de la révocation.
             with contextlib.suppress(Exception):
-                from grimoire.missions.mandate import REVOKE_PROTECTED_WRITE, revoke_every_mandate
-
-                revoke_every_mandate(REVOKE_PROTECTED_WRITE, vector.what)
+                _revoke_on_protected_write(hook, facts, vector)
         why = (
             "L'instantané du ledger est un cache dérivé du journal, restauré sans rejouer le préfixe qu'il couvre : "
             "écrit à la main, il imposerait un état que le journal ne dit pas. Il ne s'écrit que par le ledger."
@@ -324,7 +348,12 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         return Decision(
             outcome=Outcome.DENY,
             reason=f"[Grimoire authority] {hook.tool_name or 'action'} refusé — {vector.what}. {why} {limit}",
-            detail={"tool": hook.tool_name, "authority_vector": vector.code, "profile": profile},
+            detail={
+                "tool": hook.tool_name,
+                "authority_vector": vector.code,
+                "profile": profile,
+                "authority_revokes": vector.revokes,
+            },
         )
     except Exception as exc:
         try:
