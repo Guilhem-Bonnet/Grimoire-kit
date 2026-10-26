@@ -90,20 +90,29 @@ def _sub(
 #: réécrivent l'arbre du projet, installent depuis le réseau, ou relancent un
 #: serveur depuis un serveur. Les ouvrir demande un geste explicite dans
 #: l'interface, pas une ligne de terminal dans un onglet.
+#:
+#: Chaque entrée est une commande *feuille* de la CLI, vérifiée par
+#: tests/unit/test_workspace_console_commands.py (P06) : ``blueprint list``
+#: n'a jamais existé et ``task board`` est un groupe (seul ``task board export``
+#: s'exécute, et il écrit) — les deux répondaient « No such command » ou l'aide.
+#: ``config`` était lui aussi un groupe : il devient ``config show``.
 ALLOWED: dict[str, _Sub] = {
     "version": _sub("version", summary="Version du kit installé."),
     "status": _sub("status", summary="Registre des agents et état du projet."),
     "doctor": _sub(
         "doctor",
         summary="Diagnostic du projet : chemins, hôtes, standard.",
-        flags=("--check-paths", "--json"),
+        # `doctor` n'a jamais eu `--check-paths` ni `--json` : sa sortie
+        # machine est `-o json`. Lecture seule ; `--fix` (qui écrit) reste fermé.
+        flags=("--output", "-o"),
     ),
     "env": _sub("env", summary="Environnement résolu par le kit."),
-    "config": _sub("config", summary="Configuration effective du projet.", positionals=1),
+    # `config` seul est un groupe : son positionnel ouvrait aussi `config edit`
+    # (lance $EDITOR) — seule la lecture reste.
+    "config show": _sub("config", "show", summary="Configuration effective du projet."),
     "task list": _sub("task", "list", summary="Tâches du ledger et leur colonne de board.", flags=("--mission", "--status")),
     "task show": _sub("task", "show", summary="Détail d'une tâche et sa prochaine porte.", positionals=1),
     "task trace": _sub("task", "trace", summary="Timeline unifiée d'une tâche.", positionals=1),
-    "task board": _sub("task", "board", summary="Board gouverné, projeté depuis le ledger."),
     "task context": _sub("task", "context", summary="Context bundle d'une tâche.", positionals=1),
     "standard verify": _sub("standard", "verify", summary="Conformité au profil déclaré.", flags=("--profile",)),
     "standard score": _sub("standard", "score", summary="Score de conformité du standard."),
@@ -117,7 +126,6 @@ ALLOWED: dict[str, _Sub] = {
     "host status": _sub("host", "status", summary="Hôtes équipés et fraîcheur de leurs projections."),
     "validate": _sub("validate", summary="Validation statique des artefacts.", positionals=1),
     "lint": _sub("lint", summary="Lint des artefacts du projet.", positionals=1),
-    "blueprint list": _sub("blueprint", "list", summary="Blueprints du projet."),
 }
 
 

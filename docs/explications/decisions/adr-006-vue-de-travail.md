@@ -147,6 +147,11 @@ lecture, chacune avec ses drapeaux acceptés et son nombre d'arguments
 positionnels. Tout le reste est refusé **avant** exécution, en nommant ce qui
 est ouvert.
 
+> Révision P06 (octobre 2026) : la liste compte désormais 21 entrées, chacune
+> vérifiée comme commande feuille de la CLI. `blueprint list` (inexistante) et
+> `task board` (un groupe) sont retirées ; `config`, un groupe dont le
+> positionnel ouvrait aussi `config edit`, devient `config show`.
+
 Quatre garanties : pas de `shell=True` (argv littéral), liste blanche et non
 liste noire, arguments bornés et sans octet nul ni retour à la ligne, délai
 maximal et sortie tronquée. `init`, `up`, `migrate`, `serve`, `cockpit`,

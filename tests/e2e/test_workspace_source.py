@@ -136,7 +136,7 @@ def test_la_console_execute_grimoire_status_et_refuse_rm(source: Page) -> None:
         "() => document.querySelector('#dock-body').textContent.includes('code de sortie 0')",
         timeout=15_000,
     )
-    assert "$ status" in source.locator("#dock-body").inner_text()
+    assert "$ grimoire status" in source.locator("#dock-body").inner_text()
 
     source.keyboard.type("rm -rf /")
     source.keyboard.press("Enter")
