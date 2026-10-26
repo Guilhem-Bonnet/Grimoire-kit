@@ -54,13 +54,15 @@ const STYLES = `
 .kn-searchbar input { flex-grow: 1; height: 36px; font-size: 14px; min-width: 0; padding: 0 12px; }
 .kn-summary { margin: 0; color: var(--ink2); }
 .kn-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); overflow: hidden; }
-.kn-res { display: grid; grid-template-columns: 96px minmax(0, 1fr) 92px; gap: 14px; padding: 14px 16px;
+.kn-res { display: grid; grid-template-columns: fit-content(130px) minmax(0, 1fr) 92px; gap: 14px; padding: 14px 16px;
   border-top: 1px solid var(--line); align-items: start; cursor: pointer; }
 .kn-res:first-child { border-top: 0; }
 .kn-res:hover { background: var(--hover); }
 .kn-res[aria-current="true"] { background: var(--acc-soft); }
 .kn-res:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-.kn-res > .badge { justify-self: start; max-width: 96px; }
+/* La colonne du type s'ajuste au libellé (« Apprentissage » entier, jamais ellipsé) ;
+ * fit-content(130px) borne les types inconnus trop bavards. */
+.kn-res > .badge { justify-self: start; max-width: 130px; }
 .kn-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .kn-title { font-weight: 600; overflow-wrap: anywhere; }
 .kn-excerpt { color: var(--ink2); overflow-wrap: anywhere; }
@@ -245,11 +247,14 @@ export async function mount(root, ctx) {
   const homeSlug = (ctx.host.status && ctx.host.status.home) || ctx.host.project || '';
   const params = ctx.params || {};
 
+  // `types` dans l'URL (clic sur un hall de la carte, P73) : la vue s'ouvre
+  // filtrée sur ces seuls types ; sinon, les types cochés par défaut.
+  const wantedTypes = String(params.types || '').split(',').filter((t) => TYPE[t]);
   const state = {
     q: String(params.q || ''),
     projects: [],
     selected: new Set(),
-    types: new Set(TYPES.filter((t) => !t.off).map((t) => t.id)),
+    types: new Set(wantedTypes.length ? wantedTypes : TYPES.filter((t) => !t.off).map((t) => t.id)),
     kinds: new Set(KINDS.map((k) => k.id)),
     period: 'all',
     includeSuperseded: false,
