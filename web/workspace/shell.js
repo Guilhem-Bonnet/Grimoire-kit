@@ -2183,6 +2183,11 @@ async function buildPalette() {
       command: `grimoire cockpit serve # ${s.id}/${r.id}`, run: () => goto(r.id),
     })) : []),
   ]);
+  // Le guide de premier lancement (P36), en lecture seule : une vue d'À traiter.
+  spaces.splice(1, 0, {
+    section: 'Espaces', label: 'À traiter › Démarrer', hint: 'Premier lancement, lecture seule',
+    command: 'grimoire cockpit serve # a-traiter?view=demarrer', run: () => goto('a-traiter', { view: 'demarrer' }),
+  });
 
   const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
     await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks(), api.files()]);

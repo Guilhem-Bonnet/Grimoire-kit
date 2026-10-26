@@ -341,6 +341,9 @@ export const api = {
   // Flotte › Données (P26) : services mémoire de la machine, conteneurs, propriétaires
   // et partages. Lecture seule, mesure fraîche ; demandée à l'ouverture de la vue seulement.
   dataMachine: () => get(WS + 'data/machine'),
+  // Premier lancement (P36) : la machine vue par le guide — détection, profils
+  // mémoire possibles ou non et pourquoi, plan, commandes à copier. Lecture seule.
+  setupGuide: () => get(WS + 'setup/guide'),
   // Reçu de rappel (P27) : ce que la mémoire a servi à une tâche (`tasks/<id>/receipts`),
   // ou les derniers reçus du projet (`memory/recall`, `task` pour filtrer). Lecture seule.
   taskReceipts: (id, project) =>

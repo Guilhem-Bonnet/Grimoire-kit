@@ -92,6 +92,7 @@ from grimoire.tools import (
     workspace_recall,
     workspace_reviews,
     workspace_sessions,
+    workspace_setup_guide,
     workspace_since,
 )
 
@@ -448,6 +449,15 @@ def _data_machine(project_root: Path, _query: _Query) -> Any:
     return workspace_machine.machine_view(project_root)
 
 
+def _setup_guide(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/setup/guide`` — la machine vue par le guide de premier lancement (P36).
+
+    Lecture seule : détection, profils mémoire possibles ou non avec leur raison,
+    plan et commandes à copier. Rien ne s'écrit, rien ne démarre.
+    """
+    return workspace_setup_guide.setup_guide(project_root)
+
+
 def _memory_recall(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/memory/recall`` — les derniers reçus de rappel du projet (P27).
 
@@ -558,6 +568,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/entry": _memory_entry,
     f"{PREFIX}memory/quality": _memory_quality,
     f"{PREFIX}data/machine": _data_machine,
+    f"{PREFIX}setup/guide": _setup_guide,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
 }
