@@ -91,6 +91,7 @@ from grimoire.tools import (
     workspace_pulse,
     workspace_recall,
     workspace_sessions,
+    workspace_since,
 )
 
 __all__ = [
@@ -359,6 +360,20 @@ def _attention(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _attention_since(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/attention/since`` — « depuis ta dernière visite » (P53).
+
+    ``since`` est l'instant de la visite, gardé par le navigateur : la route
+    lit, elle ne retient rien. Mêmes portées que ``attention``.
+    """
+    return workspace_since.since_view(
+        project_root,
+        since=_one(query, "since") or None,
+        portfolio=_one(query, "scope") == "portfolio",
+        slug=_one(query, "slug") or None,
+    )
+
+
 def _evidence(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
@@ -519,6 +534,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}sessions": _sessions,
     f"{PREFIX}pulse": _pulse,
     f"{PREFIX}attention": _attention,
+    f"{PREFIX}attention/since": _attention_since,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,

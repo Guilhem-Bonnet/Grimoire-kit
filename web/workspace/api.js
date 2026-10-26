@@ -218,6 +218,11 @@ export const api = {
     }
     return request;
   },
+  // « Depuis ta dernière visite » (P53) : livré, refusé, laissé en attente
+  // depuis `since` (ISO, gardé par le navigateur). Une lecture, à part
+  // d'`attention` : le premier rendu d'À traiter ne l'attend pas.
+  attentionSince: (portfolio, since) =>
+    get(WS + 'attention/since', { ...(portfolio ? { scope: 'portfolio' } : {}), since }),
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
   // convention que `health()` : l'inspecteur du portefeuille (#638, lot C)
