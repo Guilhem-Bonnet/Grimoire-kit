@@ -242,7 +242,7 @@ def test_l_en_tete_porte_le_titre_les_vues_le_filtre_et_la_formule(page: Page) -
     assert labels == ["Tableau", "Huit colonnes", "Liste", "Sessions", "Chronologie", "Décisions"]
     assert head.locator("#view-seg button[aria-pressed='true']").inner_text() == "Tableau"
     assert "Demande une action de moi" in head.locator("[data-role='ask-me']").inner_text()
-    assert head.locator(".ex-formula").inner_text().replace("\n", "") == "›grimoire task board"
+    assert head.locator(".ex-formula").inner_text().replace("\n", "") == "›grimoire task list"
     # La barre de document n'a plus rien à montrer : les vues vivent dans l'en-tête.
     assert not page.locator("#docbar").is_visible()
 

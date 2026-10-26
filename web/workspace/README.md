@@ -116,11 +116,11 @@ directement dans le DOM de la coque :
 | `ctx.empty` | `(titre, phrase, commande, action?)` → le bloc d'état vide unique ; `action` est `{ label, run }` (un bouton qui fait, pas une commande à recopier) ; sans `action`, une commande que la Console du dock sait exécuter (liste blanche, sans argument) reçoit un bouton « Lancer dans la Console » |
 | `ctx.loading` | `(libellé, lignes?)` → `[squelette, texte pour lecteurs d'écran]` à poser dans une zone qui attend ses données (jamais un « Chargement… » nu) ; la coque en pose un sur la toile à chaque changement d'espace et le retire dès que l'espace y écrit du contenu |
 | `ctx.openPanel` | `(id, { detail? })` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px ; `detail: true` (montrer l'élément choisi) n'agit que sous 900 px et pas quand le détail est déjà posé sous la liste (P59) |
-| `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté |
+| `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté. Après, `dock`, `docbar`, `setItem`, `openPanel` et `rail` n'ont plus d'effet (P06) : une réponse en retard ne fuit pas sur l'espace suivant ; ce qui reste dans le DOM du module se garde en testant `ctx.signal.aborted` après chaque `await` |
 | `ctx.goto` | `goto(id, params?)` — naviguer vers un espace, une rubrique ou un ancien identifiant (`'source'`) ; `params` est vu au montage qui suit (ex. `goto('source', { file })` depuis ⌘K) et écrit dans le hash (lien profond) |
 | `ctx.params` | Ce que l'appelant de `goto()` a demandé pour CE montage — `{}` la plupart du temps |
 | `ctx.live` | `{ on(handler) }` — appelé quand le pouls annonce un changement du ledger ou des sessions (`live.js`) ; l'espace relit SES données, sans rien jeter de ce que l'utilisateur écrit ; remis à zéro par la coque à chaque changement d'espace |
-| `ctx.rail` | `{ on(id, handler) }` — enregistre ce que fait un rail sans panneau dédié (ex. « 2 », bibliothèque de Concevoir) tant que cet espace reste monté ; remis à zéro par la coque à chaque changement d'espace |
+| `ctx.rail` | `{ on(id, handler), reason(id, phrase) }` — enregistre ce que fait un rail sans panneau dédié (ex. « 2 », bibliothèque de Concevoir) tant que cet espace reste monté ; le bouton n'est visible que dans un espace qui l'enregistre, et `reason` le désactive en disant pourquoi (`''` le réactive) ; remis à zéro par la coque à chaque changement d'espace |
 
 Deux règles opposables :
 
@@ -291,7 +291,12 @@ un autre projet du registre qu'on ne fait que regarder.
 ## Ce que la Console accepte
 
 `POST /api/workspace/command` n'exécute que des sous-commandes `grimoire` de
-lecture, sans shell, avec un délai maximal. La liste vit dans
+lecture, sans shell, avec un délai maximal. La saisie est un vrai champ de la
+coque, sous l'onglet Console du dock (P06) : `` ` `` y place le curseur, ↑ / ↓
+rappellent les commandes lancées, Échap vide le champ puis rend le focus, Tab
+sort du dock. Chaque entrée de la liste est une commande feuille de la CLI,
+vérifiée par `tests/unit/test_workspace_console_commands.py`, qui vérifie aussi
+chaque commande « équivalente » citée par les modules. La liste vit dans
 `src/grimoire/tools/workspace_exec.py` (`ALLOWED`) — l'ouvrir davantage se fait
 là, avec le test qui va avec. `init`, `up`, `migrate`, `serve`, `cockpit`,
 `upgrade` et `ext` en sont **volontairement absents** : ils réécrivent l'arbre

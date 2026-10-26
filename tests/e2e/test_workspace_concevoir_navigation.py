@@ -74,7 +74,7 @@ def test_simuler_ecrit_le_verdict_dans_le_dock_problemes(concevoir: tuple[Page, 
     _open_problemes(page)
     page.wait_for_function("() => document.querySelector('#dock-body')?.textContent.includes('verdict :')")
     dock = page.locator("#dock-body").inner_text()
-    assert "blueprint simulate" in dock
+    assert "simulation ·" in dock
     assert "verdict :" in dock
 
 
