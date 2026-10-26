@@ -29,6 +29,7 @@ sessions du mandat) ne lance rien. Sans mandat, rien ne s'inscrit et le lancemen
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import uuid
@@ -58,6 +59,8 @@ __all__ = [
     "attest_session",
     "default_exec",
     "launched_sessions",
+    "live_background_sessions",
+    "renew_live_workers",
     "session_env",
 ]
 
@@ -123,6 +126,61 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
         if event.event_type == LAUNCHED_EVENT:
             found[event.entity_id] = dict(event.payload)
     return found
+
+
+def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude") -> frozenset[tuple[str, str]] | None:
+    """Les sessions de fond au travail (``claude agents --json``), en ``(id court, nom)`` ; ``None`` si la lecture échoue.
+
+    Seul ``busy`` compte : une session ``idle`` a fini son tour (question posée, travail rendu sans transition) et ne
+    travaille plus ; la tenir pour vivante repousserait sans fin le plafond dur du claim.
+    """
+    result = exec_([claude_bin, "agents", "--json"], cwd, None)
+    if result.returncode != 0:
+        return None
+    try:
+        raw = json.loads(result.stdout)
+    except ValueError:
+        return None
+    if not isinstance(raw, list):
+        return None
+    return frozenset(
+        (str(a["id"]), str(a.get("name", ""))) for a in raw
+        if isinstance(a, dict) and a.get("kind") == "background" and a.get("status") == "busy" and a.get("id")
+    )
+
+
+def renew_live_workers(
+    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None
+) -> tuple[str, ...]:
+    """Le battement des workers (#961) : renouvelle le bail de chaque tâche tenue dont la session lancée vit encore.
+
+    Le bail n'est écrit qu'au claim : sans ce geste, un worker qui travaille plus que le TTL du bail (20 min) est
+    récolté et garé en ``waiting(human)`` alors que sa session tourne. Une session absente, ou une lecture de
+    ``claude agents`` qui échoue, ne renouvelle rien : la récolte juge comme avant (échec fermé).
+    """
+    sessions = launched_sessions(service)
+    held: dict[str, tuple[dict[str, Any], int]] = {}
+    for tid, payload in sessions.items():
+        task = service.ledger.get_task(tid)
+        # Le lancement doit être celui du claim courant : une session d'un claim récolté puis repris ne le tient pas.
+        if task is not None and task.status in (TaskState.CLAIMED, TaskState.RUNNING) and task.claim is not None \
+                and payload.get("lease_epoch") == task.claim.lease_epoch:
+            held[tid] = (payload, task.claim.lease_epoch)
+    if not held:
+        return ()
+    alive = live_background_sessions(exec_, service.home_root, claude_bin)
+    if alive is None:
+        return ()
+    renewed: list[str] = []
+    for tid, (payload, epoch) in held.items():
+        if (str(payload.get("session", "")), f"grimoire-{tid}") not in alive:
+            continue
+        try:
+            service.ledger.renew_lease(tid, epoch, actor_id="tick", now=now)
+        except GrimoireError:
+            continue  # epoch périmé ou bail rendu entre-temps : rien à renouveler
+        renewed.append(tid)
+    return tuple(renewed)
 
 
 def _git_out(cwd: Path, *args: str) -> str:
@@ -274,11 +332,13 @@ class WorkerLauncher:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}, aucun identifiant de session"
             return self._failed(tid, f"claude --bg a échoué ({result.returncode}) : {detail}")
         session = match.group(1)
+        current = service.require(tid).claim
         service.ledger.append_event(
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
             {
                 "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
                 "cwd": str(wt.path), "branch": wt.branch,
+                "lease_epoch": current.lease_epoch if current is not None else 0,
             },
         )
         return LaunchOutcome(tid, "launched", f"session {session} dans {wt.path}", session, model)
@@ -330,6 +390,10 @@ class WorkerLauncher:
         return (
             f"Tu es le worker de la tâche {tid}, dans son worktree task/{tid}. "
             f"Rattache cette session à ton claim (`grimoire task attach {tid}`), lis `grimoire task show {tid}`, "
-            "réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR. "
-            "Ne sors pas de ce worktree. Si tu es bloqué, dis-le par `grimoire task ask` plutôt que de deviner."
+            "réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR "
+            f"et passe la tâche en revue (`grimoire task move {tid} --to running`, puis `--to needs_verification`) : "
+            "le relecteur ne prend que les tâches en revue. "
+            "Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le "
+            f"(`grimoire task note {tid}`). Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, "
+            "hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
         )
