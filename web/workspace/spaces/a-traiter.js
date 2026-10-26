@@ -392,6 +392,23 @@ export async function mount(root, ctx) {
     await review.mount(root, ctx);
     return;
   }
+  // Premier lancement (P36) : le guide, en lecture seule, joignable à tout
+  // moment par `#a-traiter?view=demarrer` ; et sur un projet que `/api/health`
+  // dit non initialisé, il prend d'office la place de l'accueil.
+  if (ctx.params.view === 'demarrer') {
+    const guide = await import('./demarrer.js');
+    await guide.mount(root, ctx);
+    return;
+  }
+  if (!ctx.scope.all) {
+    const health = await ctx.api.health().catch(() => null);
+    if (ctx.signal.aborted) return;
+    if (health && health.kit && health.kit.scaffolded === false) {
+      const guide = await import('./demarrer.js');
+      await guide.mount(root, ctx, { health });
+      return;
+    }
+  }
   injectStyles();
   const wrap = node('div', 'at-wrap');
   root.append(wrap);
