@@ -1252,7 +1252,9 @@ body[data-active-space="source"] {
   align-items: flex-start;
 }
 
-@media (max-width: 720px) {
+/* Le seuil unique de la coque (900 px, partagé avec shell.js) : un second seuil
+   donnerait une coque à moitié mobile (test_workspace_responsive). */
+@media (max-width: 900px) {
   .sk-board {
     grid-template-columns: minmax(0, 1fr);
   }
