@@ -19,7 +19,8 @@
 // 'prioritize' | 'comment' | 'cancel' | 'ack' — jamais une écriture directe
 // depuis la webview (ADR-007), toujours `TaskService`. Sélecteur de priorité
 // et zone de consigne dans l'inspecteur, « Annuler » avec raison exigée, tri
-// par priorité dans chaque colonne, badge « consigne non lue » sur la carte.
+// par priorité dans chaque colonne, badge « message en attente de la session »
+// sur la carte (P74 : fin du jargon « consigne non lue »).
 //
 // Attente nommée (K6, issue #771) : un état `waiting` à raison nommée
 // (`human`, `ci`, `quota`, `paused`). `waiting(human)` porte une question ;
@@ -41,7 +42,7 @@
 // `api.portfolioTasks()` — toutes les tâches de tous les projets du registre
 // cockpit, agrégées côté serveur — avec une puce projet par carte, la session
 // qui la porte (glyphe + mot : vivante / inactive / terminée / inconnue), sa priorité et ses
-// consignes non lues quand le champ existe. Les cartes se clé-ent par
+// messages en attente quand le champ existe. Les cartes se clé-ent par
 // (projet, id) : deux ledgers peuvent dériver le même identifiant d'un même
 // titre. Une action depuis le portefeuille passe par
 // `api.portfolioTaskAction(id, action, body, slug)` — le `TaskService` du
@@ -94,6 +95,11 @@ const GROUPS4 = [
 // Colonne repliée dépliée ou non — au niveau du module, comme `scope` : revenir
 // sur l'espace garde le dernier réglage.
 const unfolded = new Set();
+// P74 : une tâche close (acceptée, publiée, annulée) n'a plus de vivacité à
+// montrer sur sa carte — le travail est fini. Si la session existe encore,
+// c'est l'inspecteur qui le dit (bloc « Session »), jamais la carte.
+const CLOSED_BOARDS = new Set(['accepted', 'released', 'archived']);
+const isClosed = (t) => CLOSED_BOARDS.has(t.board);
 // Board → état ledger, pour appeler `move` (grimoire.missions.board._FROM_BOARD).
 const BOARD_TO_STATE = {
   proposed: 'proposed', ready: 'ready', in_progress: 'running', blocked: 'blocked',
@@ -187,6 +193,16 @@ function injectStyles() {
     .ex-col-body[hidden] { display: none; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
     .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); box-shadow: var(--shadow); padding: var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+    /* P74 : liseré gauche stable par « ouverte par » (hash → --owner-N de tokens.css).
+       Un repère de balayage, jamais le seul porteur de sens : le nom est écrit sur la carte. */
+    .ex-card { border-left: 3px solid var(--owner-tone, var(--line)); }
+    /* P74 : badge de type (code / design / doc / infra / autre) — pastille + mot, jamais la couleur seule. */
+    .ex-type { display: inline-flex; align-items: center; gap: 5px; }
+    .ex-type .ex-type-sw { width: 8px; height: 8px; border-radius: 2px; background: var(--type-tone, var(--ink3)); flex: none; }
+    /* P74 : l'âge situé de la carte — un fait nommé, élidé s'il manque de place. */
+    .ex-card .ex-card-age { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .ex-card-owner { display: inline-flex; align-items: center; gap: 4px; }
+    .ex-card-owner > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ex-card:hover { background: var(--hover); }
     .ex-card[aria-current="true"] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
     .ex-card-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
@@ -247,7 +263,13 @@ function injectStyles() {
        entier reste au survol. */
     .ex-card .ex-card-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
     .ex-card .ex-card-meta > * { flex: none; }
-    .ex-card .ex-card-meta > .ex-card-owner { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    /* P74 : la ligne « ouverte par … · dans <colonne> depuis … » — mêmes règles
+       de tenue qu'une méta de carte (une ligne, élision, texte entier au survol). */
+    .ex-card-who { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 4px 6px; }
+    .ex-card .ex-card-who { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+    .ex-card .ex-card-who > * { flex: none; }
+    .ex-card .ex-card-who > .ex-card-owner { flex: 0 1 auto; min-width: 14ch; overflow: hidden; text-overflow: ellipsis; }
+    .ex-card .ex-card-who > .ex-card-age { flex: 0 3 auto; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; }
     .ex-card-flags { display: flex; flex-wrap: wrap; gap: 4px; }
     .ex-card .ex-session { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; color: var(--ink2); font-family: inherit; font-size: var(--t-min); }
     .ex-card .ex-session > * { flex: none; }
@@ -419,6 +441,122 @@ function sessionLine(task, { full = false } = {}) {
   return line;
 }
 
+// ── P74 : lisibilité humaine des cartes ─────────────────────────────────────
+
+// « Ouverte par » : qui a ouvert la tâche (champ `owner` du ledger), pas qui
+// travaille dessus. Humain ou agent : déduit du nom (aucun champ ne le dit),
+// le `title` l'assume. Icônes du sprite : `user` (personne), `agent` (agent).
+const OWNER_AGENT = /\b(agent|bot|claude|copilot|codex|cursor|gemini|ci|kit)\b|[-_](dev|bot|agent)\b/i;
+const ownerIsAgent = (owner) => OWNER_AGENT.test(String(owner || ''));
+function ownerNode(task) {
+  const node = document.createElement('span');
+  node.className = 'ex-card-owner';
+  node.dataset.role = 'owner';
+  const owner = task.owner || '';
+  const agent = ownerIsAgent(owner);
+  node.dataset.ownerKind = owner ? (agent ? 'agent' : 'humain') : 'inconnu';
+  node.title = owner
+    ? `ouverte par ${owner} — qui a ouvert la tâche, pas qui travaille dessus (${agent ? 'agent' : 'humain'}, déduit du nom)`
+    : 'qui a ouvert la tâche, pas qui travaille dessus — personne n’est nommé';
+  node.append(glyph(agent ? 'agent' : 'user', agent ? 'ouverte par un agent' : 'ouverte par un humain'));
+  node.append(text('span', null, owner ? `ouverte par ${owner}` : 'ouverte par — non renseigné'));
+  return node;
+}
+
+// Couleur stable par « ouverte par » : hash du nom → un des six tokens
+// --owner-N (tokens.css, dérivés des teintes d'identité). Un liseré de
+// balayage, jamais le seul porteur de sens (le nom est écrit sur la carte).
+function ownerTone(owner) {
+  const value = String(owner || '');
+  if (!value) return '';
+  let hash = 0;
+  for (const ch of value) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  return `var(--owner-${(hash % 6) + 1})`;
+}
+
+// Type lisible — code / design / doc / infra / autre. D'abord le `type`
+// déclaré au ledger quand il tranche seul (documentation, migration,
+// opération, sécurité) ; sinon une heuristique honnête sur titre + critères
+// (mots-clés), dite telle quelle dans le `title` (« type déduit du contenu »).
+const TYPE_DECLARED_CATEGORY = {
+  documentation: 'doc', migration: 'infra', operation: 'infra', security: 'infra', test: 'code',
+};
+const TYPE_FALLBACK_CATEGORY = { implementation: 'code', cleanup: 'code', architecture: 'code', analysis: 'autre' };
+const CATEGORY_HINTS = [
+  ['design', /\b(maquette|design|artboard|ui|ux|visuel|écran|ecran|css|th[eè]me|style)\b/i],
+  ['doc', /\b(doc|docs|documentation|documenter|readme|guide|changelog|glossaire)\b/i],
+  ['infra', /\b(ci|cd|pipeline|docker|déploi|deploi|release|infra|serveur|hook|workflow|qdrant)\b/i],
+  ['code', /\b(bug|fix|test|refactor|impl[ée]ment|module|api|fonction|commande)\b/i],
+];
+function taskCategory(task) {
+  const declared = TYPE_DECLARED_CATEGORY[task.type];
+  if (declared) return { category: declared, why: `type déclaré au ledger (${TYPE_LABEL[task.type] || task.type})` };
+  const content = [task.title || '', ...(task.acceptance || [])].join(' ');
+  for (const [category, pattern] of CATEGORY_HINTS) {
+    if (pattern.test(content)) return { category, why: 'type déduit du contenu (titre et critères)' };
+  }
+  const fallback = TYPE_FALLBACK_CATEGORY[task.type];
+  if (fallback) return { category: fallback, why: `type déclaré au ledger (${TYPE_LABEL[task.type] || task.type})` };
+  return { category: 'autre', why: 'type déduit du contenu (aucun indice : autre)' };
+}
+function typeBadge(task) {
+  const { category, why } = taskCategory(task);
+  const node = document.createElement('span');
+  node.className = 'badge ex-type';
+  node.dataset.role = 'type-badge';
+  node.dataset.cat = category;
+  node.title = why;
+  const swatch = document.createElement('i');
+  swatch.className = 'ex-type-sw';
+  swatch.style.setProperty('--type-tone', `var(--type-${category})`);
+  swatch.setAttribute('aria-hidden', 'true');
+  node.append(swatch, text('span', null, category));
+  return node;
+}
+
+// La session sur la CARTE, sans identifiant brut (l'UUID ne dit rien à un
+// humain : il reste dans l'inspecteur, avec la commande de reprise). À la
+// place : hôte, persona du claim (`agent_id` du sous-agent, sinon `actor_id`)
+// et palier de modèle recommandé — seulement quand ils sont connus, rien
+// n'est inventé (« hôte inconnu » plutôt qu'un vide).
+function cardSessionLine(task) {
+  const line = document.createElement('div');
+  line.className = 'ex-session';
+  line.dataset.role = 'card-session';
+  line.title = "la session qui tient cette tâche — l'identifiant et la commande de reprise sont dans le détail";
+  if (task.host) {
+    if (HOST_ICON[task.host]) line.append(glyph(HOST_ICON[task.host], 'hôte'));
+    line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
+  } else {
+    line.append(text('span', 'lbl', 'hôte inconnu'));
+  }
+  const claim = task.claim || {};
+  const persona = claim.agent_id || claim.actor_id || '';
+  if (persona) {
+    const who = text('span', null, persona);
+    who.title = 'persona du claim : qui tient la tâche dans la session';
+    line.append(who);
+  }
+  // « session » n'est pas un palier : le badge de route dit déjà « modèle de session ».
+  if (task.model_tier && task.model_tier !== 'session') line.append(text('span', 'lbl', `palier ${task.model_tier}`));
+  return line;
+}
+
+// Les deux temps d'une carte, nommés (P74) : l'âge dans la colonne courante
+// (depuis la dernière transition, `in_state_since` servi par le serveur) sur
+// la carte ; l'âge total (depuis l'ouverture) au survol et dans l'inspecteur —
+// « depuis N h » tout seul ne disait pas de quoi.
+function cardAge(task) {
+  const inColumn = ageText(task.in_state_since || '');
+  if (!inColumn) return null;
+  const node = text('span', 'ex-card-age', `dans ${COLUMN_LABEL[task.board] || task.board} ${inColumn}`);
+  node.dataset.role = 'card-age';
+  const total = ageText(task.created_at || '');
+  node.title = `Dans la colonne « ${COLUMN_LABEL[task.board] || task.board} » ${inColumn} (dernière transition).`
+    + (total ? ` Ouverte ${total} (âge total).` : '');
+  return node;
+}
+
 // La suite d'une carte, lue sur le graphe réel du ledger
 // (`grimoire.missions.ledger._TASK_TRANSITIONS`) projeté sur le board — jamais
 // la colonne suivante de `LIFECYCLE`, qui faisait de « Bloquée » la suite de
@@ -450,8 +588,9 @@ let focusBlockReason = false;
 const PORTFOLIO_PRIORITY_LABEL = { low: 'priorité basse', medium: 'priorité moyenne', high: 'priorité haute', critical: 'priorité critique' };
 
 // La ligne « portefeuille » d'une carte : projet (monogramme + nom), session
-// (glyphe de vivacité + mot), priorité (barres + mot), consignes non lues
+// (glyphe de vivacité + mot), priorité (barres + mot), messages en attente
 // (bulle + compteur) — une forme par sens, jamais la couleur seule (P30).
+// P74 : une tâche close n'affiche plus de vivacité ici non plus.
 function portfolioRow(task) {
   const line = document.createElement('div');
   line.className = 'ex-card-project';
@@ -460,17 +599,21 @@ function portfolioRow(task) {
   const projectName = task.project?.name || task.project?.slug || 'projet';
   project.append(monogram(projectName), text('span', null, projectName));
   line.append(project);
-  const session = task.session;
-  if (session && session.id) {
-    line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
-  } else {
-    line.append(text('span', 'lbl', 'aucune session'));
+  if (!isClosed(task)) {
+    const session = task.session;
+    if (session && session.id) {
+      line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
+    } else {
+      line.append(text('span', 'lbl', 'aucune session'));
+    }
   }
   if (task.priority) {
     line.append(row(priorityBars(task.priority) || '', text('span', null, PORTFOLIO_PRIORITY_LABEL[task.priority] || `priorité ${task.priority}`)));
   }
   if (task.unread_directives) {
-    line.append(row(glyph('chat', 'consignes'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
+    const pending = row(glyph('chat', 'messages'), text('span', null, `${task.unread_directives} message(s) en attente de la session`));
+    pending.title = 'Consigne posée au ledger, pas encore accusée par la session qui tient la tâche.';
+    line.append(pending);
   }
   return line;
 }
@@ -606,6 +749,9 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   card.tabIndex = 0;
   card.dataset.project = task.project?.slug || '';
   card.dataset.task = task.id;
+  // P74 : liseré gauche stable par « ouverte par » (hash → token --owner-N).
+  const tone = ownerTone(task.owner);
+  if (tone) card.style.setProperty('--owner-tone', tone);
   // Entrée (P58) passe par le contrôleur de liste de la coque : le clic de la carte.
   card.addEventListener('click', () => onSelect(task));
 
@@ -618,15 +764,21 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   appendIf(top, routeBadge(task));
   appendIf(top, proofRing(task));
   card.append(top);
-  const cardTitle = text('div', 'ex-card-title', task.title || task.id);
+  // P74 : le préfixe interne (« R52 — », « [P47] », « P68 — ») quitte le titre
+  // affiché ; le titre entier reste au survol, l'identifiant dans l'inspecteur.
+  const cardTitle = text('div', 'ex-card-title', titleParts(task.title || task.id).title);
   cardTitle.title = task.title || task.id;
   card.append(cardTitle);
   if (portfolio) card.append(portfolioRow(task));
+  // P74 : qui a ouvert, et depuis quand la carte est là — une ligne à eux,
+  // la méta (type, risque, priorité) garde la sienne : rien ne se collapse.
+  const who = text('div', 'ex-card-who lbl', '');
+  who.append(ownerNode(task));
+  appendIf(who, cardAge(task));
+  card.append(who);
   const meta = text('div', 'ex-card-meta lbl', '');
   if (task.type) meta.append(typeGlyph(task.type));
-  const owner = text('span', 'ex-card-owner', task.owner || 'sans owner');
-  owner.title = owner.textContent;
-  meta.append(owner);
+  meta.append(typeBadge(task));
   if (task.risk_profile) {
     // Le profil par défaut garde son glyphe (forme + nom au survol) ; seul un
     // profil qui s'écarte du défaut écrit son mot, la ligne tient sur une carte.
@@ -640,16 +792,22 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   if (bars) meta.append(bars);
   meta.append(text('span', null, PRIORITY_LABEL[priority] || priority));
   card.append(meta);
-  // Le badge « consigne non lue » tant qu'une consigne de l'orchestrateur n'a
-  // pas été livrée à la session — sur sa propre ligne, hors de la méta.
+  // Le badge « message en attente de la session » tant qu'une consigne de
+  // l'orchestrateur n'a pas été livrée à la session — sur sa propre ligne.
   const flags = document.createElement('div');
   flags.className = 'ex-card-flags';
   if (task.directives_pending > 0) {
-    const unread = badge(`consigne non lue (${task.directives_pending})`, 'acc');
+    const unread = badge(
+      `message en attente de la session (${task.directives_pending})`, 'acc',
+      'Consigne posée au ledger, pas encore livrée à la session qui tient la tâche.',
+    );
     unread.dataset.role = 'directive-badge';
     flags.append(unread);
   } else if (task.directives_unacknowledged > 0) {
-    flags.append(badge(`consigne non accusée (${task.directives_unacknowledged})`, 'acc'));
+    flags.append(badge(
+      `message livré, sans accusé (${task.directives_unacknowledged})`, 'acc',
+      'Consigne livrée à la session, dont aucun agent n’a encore accusé réception.',
+    ));
   }
   if (flags.childElementCount) card.append(flags);
   if (task.board === 'blocked' && task.status !== 'waiting') {
@@ -692,16 +850,22 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   // Session qui porte la carte (issue #638, lot A) : `session_id` et `host`
   // viennent du claim, posés par le hook UserPromptSubmit de la session —
   // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
-  if (task.session_id) {
+  // P74 : plus d'UUID sur la carte (hôte + persona + palier), et plus rien de
+  // tout cela sur une tâche close — c'est l'inspecteur qui parle de sa session.
+  if (task.session_id && !isClosed(task)) {
     // La vivacité a son glyphe sur la ligne des faits, juste en dessous : pas
     // de doublon ici.
-    card.append(sessionLine(task));
+    card.append(cardSessionLine(task));
   }
   // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
   // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
   // Vivacité, signe, durée et coût sur une seule ligne de faits, chaque fait
   // d'un bloc (le coût n'a sa propre ligne que sans session).
-  const facts = task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
+  // P74 : la cause des « sessions vivantes » en colonne Fait était ici — le
+  // serveur pose `task.session` (claim, ou journal qui nomme la tâche) sans
+  // condition d'état, et la carte l'affichait tel quel. Une tâche close
+  // n'affiche plus de vivacité.
+  const facts = !isClosed(task) && task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
   if (facts) card.append(facts);
   const cost = costRow(task);
   if (cost && facts) facts.append(Object.assign(cost, { className: 'ex-cost' }));
@@ -814,7 +978,10 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = 
     if (isSelected(task)) tr.setAttribute('aria-current', 'true');
     tr.addEventListener('click', () => onSelect(task));
     if (portfolio) tr.append(text('td', null, task.project?.name || task.project?.slug || '—'));
-    tr.append(text('td', null, task.title || task.id));
+    // P74 : même titre lisible que la carte ; le titre entier reste au survol.
+    const titleCell = text('td', null, titleParts(task.title || task.id).title);
+    titleCell.title = task.title || task.id;
+    tr.append(titleCell);
     const stateCell = document.createElement('td');
     const waitingNow = task.status === 'waiting' && task.waiting;
     stateCell.append(row(
@@ -825,7 +992,8 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = 
     if (portfolio) {
       const sessionCell = document.createElement('td');
       const session = task.session;
-      if (session && session.id) {
+      // P74 : même règle que la carte — une tâche close n'affiche plus de vivacité.
+      if (session && session.id && !isClosed(task)) {
         sessionCell.append(row(sessionGlyph(session), text('span', null, livenessLabel(session))));
       } else {
         sessionCell.append(text('span', 'lbl', '—'));
@@ -1054,12 +1222,19 @@ function resumeOptions(q) {
   return { resume, abandon };
 }
 
-// « R52 — Poser le secret » : l'identifiant interne quitte le titre pour les détails.
-const TITLE_REF = /^(R\d+)\s*[—–-]\s*/;
+// « R52 — Poser le secret », « [P47] Refonte », « P68 — Décisions » :
+// l'identifiant interne quitte les titres affichés (cartes, inspecteur,
+// décisions) ; il reste lisible en métadonnée discrète (P74).
+// Deux formes : « [P47] … » (le crochet suffit, tiret optionnel) et
+// « P68 — … » / « R52 — … » (le tiret est requis : « P2P sans tiret » n'est
+// pas un préfixe).
+const TITLE_REF = /^(?:\[([PRW]\d+[a-z]?)\]\s*(?:[—–-]\s*)?|([PRW]\d+[a-z]?)\s*[—–-]\s*)/;
 function titleParts(title) {
   const value = String(title || '');
   const match = TITLE_REF.exec(value);
-  return match && value.length > match[0].length ? { title: value.slice(match[0].length), ref: match[1] } : { title: value, ref: '' };
+  return match && value.length > match[0].length
+    ? { title: value.slice(match[0].length), ref: match[1] || match[2] }
+    : { title: value, ref: '' };
 }
 
 const askedAt = (task, q) => Date.parse(task.waiting.since || q.asked_at || '') || 0;
@@ -1932,14 +2107,35 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   const stateLabel = waitingNow ? waitingText(detail.waiting) : (COLUMN_LABEL[detail.board] || detail.board);
   const head = document.createElement('div');
   head.className = 'ex-insp-head';
+  // P74 : le préfixe interne quitte aussi le titre de l'inspecteur ; il reste
+  // ici, en métadonnée discrète à côté de l'identifiant complet.
+  const { title: shownTitle, ref: titleRef } = titleParts(detail.title || detail.id);
   const headRow = row(
     text('span', 'lbl mono', detail.id),
     badge(stateLabel, waitingNow ? 'warn' : STATE_TONE[detail.board]),
   );
   headRow.classList.add('ex-insp-idrow');
+  if (titleRef) {
+    const refNode = text('span', 'lbl mono', titleRef);
+    refNode.dataset.role = 'title-ref';
+    refNode.title = `identifiant interne du titre : ${detail.title}`;
+    headRow.insertBefore(refNode, headRow.children[1]);
+  }
   appendIf(headRow, moreMenu(ctx, detail, onWritten));
   head.append(headRow);
-  head.append(text('h3', null, detail.title || detail.id));
+  head.append(text('h3', null, shownTitle));
+  // P74 : les deux temps, nommés — l'âge dans la colonne et l'âge total.
+  const inColumnAge = ageText(task.in_state_since || detail.in_state_since || '');
+  const totalAge = ageText(detail.created_at || '');
+  if (inColumnAge || totalAge) {
+    const ages = text('div', 'lbl', [
+      inColumnAge ? `dans ${COLUMN_LABEL[detail.board] || detail.board} ${inColumnAge}` : '',
+      totalAge ? `ouverte ${totalAge}` : '',
+    ].filter(Boolean).join(' · '));
+    ages.dataset.role = 'task-ages';
+    ages.title = 'Âge dans la colonne courante (dernière transition), puis âge total (depuis l’ouverture).';
+    head.append(ages);
+  }
   ctx.inspector.append(head);
   if (portfolio) ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
 
@@ -2387,9 +2583,13 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
     const node = document.createElement('div');
     node.className = 'ex-directive' + (d.delivered_at ? '' : ' unread');
     node.dataset.role = 'directive';
-    const status = d.acknowledged_at ? 'accusée' : (d.delivered_at ? 'livrée' : 'non lue');
+    // P74 : « non lue » était du jargon — la consigne est posée au ledger,
+    // c'est la session qui ne l'a pas encore reçue.
+    const status = d.acknowledged_at ? 'accusée' : (d.delivered_at ? 'livrée' : 'en attente de la session');
+    const metaLine = text('div', 'ex-directive-meta', `${d.kind} · ${d.author} · ${(d.created_at || '').slice(0, 16)} · ${status}`);
+    if (!d.delivered_at) metaLine.title = 'Consigne posée au ledger, pas encore livrée à la session qui tient la tâche.';
     node.append(text('div', null, d.text));
-    node.append(text('div', 'ex-directive-meta', `${d.kind} · ${d.author} · ${(d.created_at || '').slice(0, 16)} · ${status}`));
+    node.append(metaLine);
     dirBlock.append(node);
   }
   if (!readOnly) {
