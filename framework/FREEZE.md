@@ -55,23 +55,24 @@ Deux pièges vérifiés sur cet inventaire, encodés dans
   chargé par un outil référencé n'est pas supprimable même s'il n'a que des
   tests.
 
-## Décisions par outil (2026-10-25)
+## Décisions par outil (2026-10-26)
 
-L'inventaire régénéré le 2026-10-25 (47 fichiers `.py`, 35 475 lignes ; les 55
+L'inventaire régénéré le 2026-10-26 (47 fichiers `.py`, 35 369 lignes ; les 55
 fichiers suivis sous `framework/tools/` comptent aussi 8 non-`.py`) porte, pour
 chaque outil, la décision de la politique ci-dessus dans sa colonne `décision` :
 
-- 41 REFERENCED : **geler**, porter vers `src/` à la demande ; « geler » est leur état présent, la suppression de
-  l'original suit le portage (tableau ci-dessus), pas avant ;
-- 6 TRANSITIVE (`rag-indexer.py`, `rag-retriever.py`, `memory-sync.py`,
-  `llm-router.py`, `token-budget.py`, `incubator.py`) : **geler**, drainer
-  l'appelant d'abord ;
-- aucun outil UNREFERENCED, INTERNAL, DOCS_ONLY ni TEST_ONLY : **aucun outil à
-  supprimer** à cette date.
+- 47 REFERENCED : **geler**, porter vers `src/` à la demande ; « geler » est leur
+  état présent, la suppression de l'original suit le portage (tableau
+  ci-dessus), pas avant. Les 6 outils classés TRANSITIVE le 2026-10-25
+  (`rag-indexer.py`, `rag-retriever.py`, `memory-sync.py`, `llm-router.py`,
+  `token-budget.py`, `incubator.py`) ont désormais une référence runtime directe
+  et passent REFERENCED : même décision, geler ;
+- aucun outil UNREFERENCED, INTERNAL, DOCS_ONLY, TEST_ONLY ni TRANSITIVE : **aucun
+  outil à supprimer** à cette date.
 
 ### Suppressions
 
-Aucune suppression en attente au 2026-10-25. Les retraits déjà faits sont ceux du
+Aucune suppression en attente au 2026-10-26. Les retraits déjà faits sont ceux du
 drainage du 2026-08-10 (voir ci-dessous) et de #111 (128 fichiers de
 `framework/` drainés). Toute suppression future s'inscrit ici avec sa date et
 son outil.
