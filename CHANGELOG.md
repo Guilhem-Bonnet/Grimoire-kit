@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): PR à revoir dans À traiter, et l'écran de revue, sans fusion depuis le cockpit (P48)
+  - **Lecture** : `GET /api/workspace/reviews` et une section « PR à revoir » dans `GET /api/workspace/attention` rendent les PR ouvertes du dépôt (`ci.repository` de la politique d'orchestration, sinon `origin`), leurs checks comptés (verts, échecs nommés, ignorés, en cours) et la tâche du ledger liée (branche `task/<id>`, sinon un identifiant cité dans la branche, le titre ou le corps).
+  - **Jamais bloquante** : une seule lecture `gh pr list --state open` par dépôt, bornée à 15 s, partagée en vol et gardée 60 s ; la route d'attention ne l'attend que 0,3 s puis dit « lecture en cours » et l'écran relit. Un `gh` absent, non authentifié ou lent est un « état des PR inconnu » avec sa raison, jamais une liste vide ; un projet sans remote n'affiche rien.
+  - **Écran de revue** (`web/workspace/spaces/revue.js`, `#a-traiter?view=revue&pr=…`) : la liste des PR les plus prêtes d'abord, la PR choisie (origine, quatre tuiles de CI, checks en échec avec leur journal, fichiers touchés, CHANGELOG, autres PR sur les mêmes fichiers, issues fermées) et les trois questions avant de fusionner.
+  - **Aucune fusion** : le seul geste est un lien qui ouvre la PR sur GitHub dans un nouvel onglet ; aucune route d'écriture ajoutée.
+  - **Correctif** : `ci_repository` reconnaît un remote `origin` absent au code de sortie de git, plus seulement au message anglais (un poste en français prenait « aucun remote » pour « état inconnu »).
+
 - feat(cockpit): Flotte › Données, la carte des services mémoire de la machine et de qui les partage, sans jamais rien démarrer (P26, `GAO-p26-carte-q-001`)
   - **Lecture** : `GET /api/workspace/data/machine` rend, pour Weaviate, Qdrant, Neo4j, Redis et Ollama, l'état, la version annoncée par le service (sinon l'étiquette de l'image), le conteneur, le Compose propriétaire et la politique de redémarrage lus par `docker inspect`, l'extra Python importable et les projets du registre qui l'utilisent ; puis les partages de collection, de base Neo4j et de Redis entre projets.
   - **Huit états distincts** : en ligne, démarrage, incomplet (extra absent, `GRIMOIRE_NEO4J_PASSWORD` absente), emprunté (le conteneur appartient au Compose d'un projet qui ne l'utilise pas), en échec, arrêté, absent, inconnu ; Docker absent ou injoignable rend « inconnu » avec son motif, jamais « arrêté ».
