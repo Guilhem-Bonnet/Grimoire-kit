@@ -485,3 +485,39 @@ def test_sans_bloc_orchestrator_le_tick_ne_dit_rien_de_plus_qu_avant(projet: Pat
     opened = tick(projet, host)
     cmd_orchestrate._render_tick(opened)
     assert "Disjoncteur" in capsys.readouterr().out and "breaker" in opened.to_dict()  # ouvert : on le dit
+
+
+# ── #961 : le battement des workers vivants ───────────────────────────────────
+
+
+def _later(minutes: int) -> datetime:
+    from datetime import timedelta
+
+    return datetime.now(UTC) + timedelta(minutes=minutes)
+
+
+def test_un_worker_vivant_garde_son_bail_au_dela_du_ttl(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Le bail n'est écrit qu'au claim : sans battement, 25 min de travail suffisaient à garer la tâche en waiting(human)."""
+    tid = ready(service, "longue")
+    (launch,) = tick(projet, host).launches
+    host.agents = [{"id": launch.session, "kind": "background", "status": "busy", "name": f"grimoire-{tid}"}]
+    for minutes in (15, 30, 45):  # trois ticks espacés de moins d'un TTL, bien au-delà du premier
+        report = tick(projet, host, now=_later(minutes))
+        assert not report.reaped, report.reaped
+    assert TaskService(projet).require(tid).status is TaskState.CLAIMED
+
+
+def test_un_worker_mort_ou_illisible_ne_renouvelle_rien(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "morte")
+    (launch,) = tick(projet, host).launches
+    host.agents = None  # `claude agents` en panne : échec fermé, la récolte juge comme avant
+    assert [d.task_id for d in tick(projet, host, now=_later(25)).reaped] == [tid]
+    other = ready(TaskService(projet), "autre")
+    (second,) = (o for o in tick(projet, host).launches if o.task_id == other)
+    # Une autre session vivante, ou une session interactive homonyme, ne tient pas le bail de celle-ci.
+    host.agents = [
+        {"id": launch.session, "kind": "interactive", "status": "busy"},
+        {"id": "ffffffff", "kind": "background", "status": "busy"},
+        {"id": second.session, "kind": "background", "status": "exited"},
+    ]
+    assert other in [d.task_id for d in tick(projet, host, now=_later(50)).reaped]

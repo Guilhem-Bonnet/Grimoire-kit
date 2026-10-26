@@ -206,7 +206,9 @@ def _one_pass(
     """Récolte, réveils, effets, admission — les mêmes gestes en plan (sur la copie) et appliqués."""
     from grimoire.missions.ci_slots import migrate_orphan_slots, once_per_tick, reconcile_ci
     from grimoire.missions.effects import reconcile
+    from grimoire.missions.launcher import default_exec, renew_live_workers
 
+    renew_live_workers(service, exec_ or default_exec, now=now)  # le battement des workers vivants, avant la récolte (#961)
     report = service.reap(apply=True, now=now, probe_hosts=mode == "apply")
     woken = tuple(service.wake_due(apply=True, now=now, pause=state))
     effects = tuple(reconcile(service, apply=True, probe=effect_probe))

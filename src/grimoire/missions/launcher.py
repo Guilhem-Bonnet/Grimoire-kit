@@ -29,6 +29,7 @@ sessions du mandat) ne lance rien. Sans mandat, rien ne s'inscrit et le lancemen
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import uuid
@@ -58,6 +59,8 @@ __all__ = [
     "attest_session",
     "default_exec",
     "launched_sessions",
+    "live_background_sessions",
+    "renew_live_workers",
     "session_env",
 ]
 
@@ -70,6 +73,8 @@ _EXEC_TIMEOUT_S = 60.0
 _BG_ID = re.compile(r"backgrounded\s*\S?\s*([0-9a-f]{8})\b")
 #: Palier de la politique → alias de modèle que ``claude --model`` accepte.
 _TIER_ALIAS = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
+#: Les états d'une session de fond (``claude agents --json``) qui tournent encore.
+_ALIVE = frozenset({"busy", "idle"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +128,52 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
         if event.event_type == LAUNCHED_EVENT:
             found[event.entity_id] = dict(event.payload)
     return found
+
+
+def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude") -> frozenset[str] | None:
+    """Les identifiants courts des sessions de fond vivantes (``claude agents --json``) ; ``None`` si la lecture échoue."""
+    result = exec_([claude_bin, "agents", "--json"], cwd, None)
+    if result.returncode != 0:
+        return None
+    try:
+        raw = json.loads(result.stdout)
+    except ValueError:
+        return None
+    if not isinstance(raw, list):
+        return None
+    return frozenset(
+        str(a["id"]) for a in raw
+        if isinstance(a, dict) and a.get("kind") == "background" and a.get("status") in _ALIVE and a.get("id")
+    )
+
+
+def renew_live_workers(
+    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None
+) -> tuple[str, ...]:
+    """Le battement des workers (#961) : renouvelle le bail de chaque tâche tenue dont la session lancée vit encore.
+
+    Le bail n'est écrit qu'au claim : sans ce geste, un worker qui travaille plus que le TTL du bail (20 min) est
+    récolté et garé en ``waiting(human)`` alors que sa session tourne. Une session absente, ou une lecture de
+    ``claude agents`` qui échoue, ne renouvelle rien : la récolte juge comme avant (échec fermé).
+    """
+    sessions = launched_sessions(service)
+    held = {tid: p for tid, p in sessions.items() if service.require(tid).status in (TaskState.CLAIMED, TaskState.RUNNING)}
+    if not held:
+        return ()
+    alive = live_background_sessions(exec_, service.home_root, claude_bin)
+    if alive is None:
+        return ()
+    renewed: list[str] = []
+    for tid, payload in held.items():
+        claim = service.require(tid).claim
+        if claim is None or str(payload.get("session", "")) not in alive:
+            continue
+        try:
+            service.ledger.renew_lease(tid, claim.lease_epoch, actor_id="tick", now=now)
+        except GrimoireError:
+            continue  # epoch périmé ou bail rendu entre-temps : rien à renouveler
+        renewed.append(tid)
+    return tuple(renewed)
 
 
 def _git_out(cwd: Path, *args: str) -> str:
