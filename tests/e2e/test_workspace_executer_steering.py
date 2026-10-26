@@ -131,6 +131,8 @@ def test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur(workspace:
         # n'est jamais vraiment attendue (cause de la course #GAO-e-e2e-instab-001 :
         # sans cette synchronisation, la lecture directe de `TaskService` juste
         # après pouvait devancer l'écriture serveur, encore en vol).
+        # « Annuler » ne vit que dans le menu « ⋯ » de l'inspecteur (P11).
+        inspector.locator("button[data-role='more']").click()
         cancel = inspector.locator("button[data-role='cancel-submit']")
         assert cancel.is_disabled()
         inspector.locator("input[data-role='cancel-reason']").fill("doublon d'une autre carte")
