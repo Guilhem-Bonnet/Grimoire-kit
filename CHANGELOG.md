@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.68.0] - 2026-10-26
+
 - fix(hosts): citer la zone de contrôle dans un texte ne révoque plus le mandat, et une révocation ciblée ne touche que les mandats de la session (#982)
   - **Mention prouvée inoffensive** : la garde d'autorité refuse toujours, par prudence, une commande qui cite `~/.grimoire/control`. Elle révoque désormais **sauf** si une liste blanche stricte prouve la mention inoffensive : valeur d'une option de prose (`git commit|tag -m/--message`, `gh issue|pr create|comment|edit --body/--title`), corps de heredoc consommé par `cat > <hors zone>`, `git commit -F -` ou `gh … --body-file -`, opérande d'un lecteur pur (`grep`, `rg`, `ls`, `head`, `tail`, `wc`, `cat` sans redirection). Tout ce qu'elle ne sait pas lire révoque : `$`, `$(…)`, backtick, `eval`, `| bash`, `<(…)`, `source`, commentaire, guillemet non fermé, programme ou préfixe inconnu (`sudo -u`, `env -i`…). Une exception de cette lecture révoque aussi ; le refus reste un refus.
   - **Qui tombe** : viser le journal du mandat ou la clé du cockpit (qui forgent un mandat pour n'importe quel projet), ou une cible illisible, révoque tous les mandats du poste. Sinon tombent le mandat du projet de la session (et celui du worktree principal) et chaque mandat où la session est inscrite. Une session hors projet reconnu ou sans mandat révoque tout, comme une révocation ciblée en erreur.
