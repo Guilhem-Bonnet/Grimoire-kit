@@ -320,11 +320,11 @@ export function failureText(error) {
 
 const stateKey = () => `grimoire.workspace.${host.project || 'atelier'}`;
 
-function readState() {
+export function readState() {
   try { return JSON.parse(localStorage.getItem(stateKey()) || '{}'); } catch { return {}; }
 }
 
-function writeState(patch) {
+export function writeState(patch) {
   try {
     localStorage.setItem(stateKey(), JSON.stringify({ ...readState(), ...patch }));
   } catch { /* navigation privée : la coque marche sans mémoire */ }
