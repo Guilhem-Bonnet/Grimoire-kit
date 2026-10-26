@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -442,4 +443,9 @@ def test_la_sonde_tcp_par_defaut_dit_arrete_quand_rien_n_ecoute() -> None:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = int(sock.getsockname()[1])
-    assert wmach.MachineProbes().tcp("redis", f"redis://127.0.0.1:{port}") == "arrete"
+    state = wmach.MachineProbes().tcp("redis", f"redis://127.0.0.1:{port}")
+    # Windows ne refuse pas aussitôt un port local fermé : il réessaie ~2 s, au-delà du
+    # délai de la sonde, qui dit alors « inconnu » (un délai dépassé ne prouve pas
+    # l'arrêt). Ailleurs, le refus immédiat dit « arrêté ». Jamais « en ligne ».
+    expected = {"arrete", "inconnu"} if sys.platform == "win32" else {"arrete"}
+    assert state in expected
