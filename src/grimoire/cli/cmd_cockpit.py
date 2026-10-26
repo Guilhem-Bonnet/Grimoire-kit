@@ -36,11 +36,12 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.data import site_script, web_path
+from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES, registry_post
 from grimoire.tools.project_registry import (
-    DEFAULT_SCAN_DEPTH,
     browse,
     classify_registry,
     crawl_projects,
+    forget_selection_if_gone,
     load_registry,
     looks_grimoire,
     projects_payload,
@@ -50,7 +51,6 @@ from grimoire.tools.project_registry import (
     registry_home,
     resolve_within_allowed,
     save_registry,
-    scan_payload,
     selected_slug,
     set_selected_slug,
     slug_for_path,
@@ -609,39 +609,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(200, update_project(target, dry_run=data.get("confirm") is not True))
             return
-        if path in ("/api/projects/add", "/api/projects/scan"):
-            # Le cockpit est en lecture seule sur les *projets* ; peupler le
-            # registre de la machine n'en est pas une écriture — c'est
-            # exactement ce que fait déjà `grimoire cockpit add|scan`.
+        if path in REGISTRY_ROUTES:
+            # Registre de la machine (add/scan/remove/prune, P35) : jamais un dépôt.
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 data = json.loads(self.rfile.read(length) or b"{}")
             except (ValueError, json.JSONDecodeError):
                 self._send_json(400, {"ok": False, "error": "bad json"})
                 return
-            try:
-                if path.endswith("/add"):
-                    # Noms distincts de ``proot``/``slug`` plus bas : même
-                    # portée de fonction, types différents.
-                    added_root = resolve_within_allowed(str(data.get("path", "")))
-                    if not added_root.is_dir():
-                        self._send_json(404, {"ok": False,
-                                              "error": f"pas un dossier : {added_root}"})
-                        return
-                    added_slug = register_project(added_root) or slug_for_path(added_root)
-                    self._send_json(200, {
-                        "slug": added_slug, "path": str(added_root), "added": True,
-                        "is_grimoire": looks_grimoire(added_root),
-                    })
-                else:
-                    self._send_json(200, scan_payload(
-                        str(data.get("root", "")),
-                        int(data.get("depth", DEFAULT_SCAN_DEPTH)),
-                    ))
-            except FileNotFoundError as exc:
-                self._send_json(404, {"ok": False, "error": str(exc)})
-            except (PermissionError, OSError) as exc:
-                self._send_json(403, {"ok": False, "error": str(exc)})
+            self._send_json(*registry_post(path, data if isinstance(data, dict) else {}, served=_HOME_PATH))
             return
         if path in ("/api/setup", "/api/setup/plan"):
             # Le wizard exécute (issue #171) : `grimoire serve` n'est plus
@@ -989,19 +965,6 @@ def remove(
     console.print(f"[green]−[/green] Removed: {target}")
 
 
-def _forget_selection_if_gone(kept: list[dict[str, str]]) -> None:
-    """Oublie la sélection courante si son projet vient d'être retiré.
-
-    Une sélection qui pointe une entrée purgée fait retomber le cockpit sur le
-    projet primaire à chaque lecture, sans jamais le dire. Autant l'effacer au
-    moment où l'entrée disparaît.
-    """
-    if selected_slug() not in {str(p.get("slug", "")) for p in kept}:
-        state = _read_state() or {}
-        state.pop("selected_project", None)
-        write_state(state)
-
-
 _prune_dry_opt = typer.Option(False, "--dry-run", "-n", help="Montrer le plan sans rien retirer.")
 _prune_yes_opt = typer.Option(False, "--yes", "-y", help="Ne pas demander confirmation.")
 _prune_stale_opt = typer.Option(
@@ -1043,7 +1006,7 @@ def prune(
         }
         if drop and not dry_run:
             save_registry(keep)
-            _forget_selection_if_gone(keep)
+            forget_selection_if_gone(keep)
         typer.echo(json.dumps(payload, indent=2))
         return
 
@@ -1066,7 +1029,7 @@ def prune(
 
     save_registry(keep)
 
-    _forget_selection_if_gone(keep)
+    forget_selection_if_gone(keep)
     console.print(f"[green]−[/green] {len(drop)} entrée(s) retirée(s), {len(keep)} conservée(s).")
 
 

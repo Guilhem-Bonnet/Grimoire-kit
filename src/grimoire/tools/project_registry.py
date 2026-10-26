@@ -291,6 +291,21 @@ def set_selected_slug(slug: str) -> bool:
     return True
 
 
+def forget_selection_if_gone(kept: list[dict[str, str]]) -> None:
+    """Oublie la sélection courante si son projet vient d'être retiré du registre.
+
+    Une sélection qui pointe une entrée retirée fait retomber le cockpit sur le
+    projet primaire à chaque lecture, sans jamais le dire. Autant l'effacer au
+    moment où l'entrée disparaît (``cockpit prune``, retrait depuis le cockpit).
+    """
+    state = read_state()
+    if "selected_project" not in state:
+        return
+    if str(state.get("selected_project", "")) not in {str(p.get("slug", "")) for p in kept}:
+        state.pop("selected_project", None)
+        write_state(state)
+
+
 def projects_payload(*, selected: str | None = None) -> dict[str, Any]:
     """Registre tel que servi à l'UI — chaque entrée dit si son chemin existe encore."""
     projects = [
