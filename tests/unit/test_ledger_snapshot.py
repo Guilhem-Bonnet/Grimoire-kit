@@ -202,6 +202,23 @@ def test_no_snapshot_over_an_unterminated_last_line(tmp_path: Path, always_snaps
     assert not (service.ledger._root / SNAPSHOT).exists()
 
 
+def test_a_snapshot_keeps_reporting_the_unreadable_lines_it_covers(
+    tmp_path: Path, always_snapshot: Callable[[], None]
+) -> None:
+    """K12 x K13 : une ligne tronquée que l'instantané couvre reste signalée (vu en CI : un rejeu lent l'effaçait)."""
+    service = TaskService(tmp_path)
+    tid = service.add("Tâche", ("ok",), owner="g", actor="claude", ready=True).task.id
+    events = service.ledger._root / "events.jsonl"
+    events.write_bytes(events.read_bytes() + b'{"id": "evt-x", "event_type": "task.tr\n')
+    service.comment(tid, "après la coupure", "g")
+    expected = _fresh(service.ledger._root).unreadable_lines()
+    assert len(expected) == 1
+    always_snapshot()
+    _fresh(service.ledger._root).list_tasks()  # écrit l'instantané par-dessus la ligne illisible
+    assert _snapshot_offset(service.ledger._root) == len(events.read_bytes())
+    assert _fresh(service.ledger._root).unreadable_lines() == expected
+
+
 def test_clock_state_does_not_reread_the_covered_events(tmp_path: Path, always_snapshot: Callable[[], None], monkeypatch: pytest.MonkeyPatch) -> None:
     service = TaskService(tmp_path)
     for i in range(4):
