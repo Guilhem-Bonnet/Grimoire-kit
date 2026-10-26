@@ -239,6 +239,9 @@ export const api = {
   // tout le registre (`portfolio`) — état, tâches tenues, dernier signe, consignes
   // en attente, activité des 15 dernières minutes, commande de reprise à copier.
   sessions: (portfolio) => get(WS + 'sessions', portfolio ? { scope: 'portfolio' } : undefined),
+  // PR à revoir (P48) : les PR ouvertes, l'état de leur CI et la tâche liée,
+  // les plus prêtes d'abord. Lecture seule : le cockpit ne fusionne jamais.
+  reviews: (portfolio) => get(WS + 'reviews', portfolio ? { scope: 'portfolio' } : undefined),
   files: (tier) => get(WS + 'files', tier ? { tier } : undefined),
   file: (path) => get(WS + 'file', { path }),
   fileDiff: (path) => get(WS + 'file/diff', { path }),
@@ -386,6 +389,10 @@ export const api = {
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
   taskAction: (id, action, body) =>
     post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
+  // « Nouvelle tâche » (P35) : `TaskService.add` du projet servi, comme
+  // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
+  taskAdd: ({ title, acceptance, description }) =>
+    post(WS + 'tasks/add', { title, acceptance, description }),
   // Action depuis le portefeuille (#638, lot C) : routée vers le projet
   // propriétaire par `?project=<slug>` explicite dans le chemin (donc jamais
   // doublé par `withProject`) et confirmée par `project` dans le corps —
@@ -487,6 +494,16 @@ export const api = {
   // d'en créer un autre), mais la validation propre de la route côté
   // serveur (chemin permis, pas déjà un projet, plan exécutable).
   createProject: (payload) => postOpen('/api/projects/create', payload),
+
+  // Entretien du registre des projets (P35) : l'état de la machine, pas un
+  // dépôt — d'où `postOpen`, comme `grimoire cockpit add|scan|remove|prune`.
+  // Retirer et purger rendent un aperçu sans `confirm: true` et ne touchent
+  // jamais au dossier d'un projet, seulement à son entrée du registre.
+  registryAdd: (path) => postOpen('/api/projects/add', { path }),
+  registryScan: (root, depth) => postOpen('/api/projects/scan', { root, ...(depth ? { depth } : {}) }),
+  registryRemove: (slug, confirm = false) => postOpen('/api/projects/remove', { slug, confirm }),
+  registryPrune: ({ confirm = false, stale = false, slugs } = {}) =>
+    postOpen('/api/projects/prune', { confirm, stale, ...(slugs ? { slugs } : {}) }),
 };
 
 export default api;

@@ -90,6 +90,7 @@ from grimoire.tools import (
     workspace_portfolio,
     workspace_pulse,
     workspace_recall,
+    workspace_reviews,
     workspace_sessions,
 )
 
@@ -359,6 +360,20 @@ def _attention(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _reviews(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/reviews`` — les PR ouvertes à revoir, les plus prêtes d'abord (P48).
+
+    Même portée que ``attention`` (``scope=portfolio``, ``slug=``). Lecture
+    seule : une lecture ``gh pr list`` bornée par dépôt, partagée avec la
+    route d'attention ; jamais de fusion ni de commentaire depuis le cockpit.
+    """
+    return workspace_reviews.reviews_view(
+        project_root,
+        portfolio=_one(query, "scope") == "portfolio",
+        slug=_one(query, "slug") or None,
+    )
+
+
 def _evidence(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
@@ -519,6 +534,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}sessions": _sessions,
     f"{PREFIX}pulse": _pulse,
     f"{PREFIX}attention": _attention,
+    f"{PREFIX}reviews": _reviews,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
     f"{PREFIX}memory/search": _memory_search,
@@ -727,6 +743,37 @@ def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
     return migrate_standard_tasks(project_root).to_dict()
 
 
+def _task_add(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Nouvelle tâche » de Travail (P35) : ``TaskService.add``, l'entrée de ``grimoire task add`` et de ``task_add``.
+
+    Titre, critères d'acceptation (une liste, ou un texte à un critère par ligne)
+    et description. Écriture du projet servi seulement : le cockpit ne câble
+    cette route que pour son projet de lancement (garde P02, aucune dérogation).
+    """
+    from grimoire.missions.service import TaskService
+
+    title = str(body.get("title") or "").strip()
+    if not title:
+        raise ValueError("titre requis : nomme la tâche")
+    raw = body.get("acceptance")
+    items = raw.splitlines() if isinstance(raw, str) else raw
+    if not isinstance(items, list):
+        raise ValueError("`acceptance` doit être une liste de critères")
+    acceptance = tuple(str(item).strip() for item in items if str(item).strip())
+    if not acceptance:
+        raise ValueError("au moins un critère d'acceptation est requis")
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    try:
+        added = TaskService(project_root.resolve()).add(
+            title, acceptance, description=str(body.get("description") or ""),
+            actor=str(body.get("actor") or "workspace"), origin="cockpit",
+        )
+    except GrimoireMissionError as exc:  # description trop longue, critère refusé : un 400, pas un 404
+        raise ValueError(str(exc)) from exc
+    return added.to_dict()
+
+
 def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
 
@@ -775,6 +822,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}command": _command,
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
+    f"{PREFIX}tasks/add": _task_add,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:

@@ -88,6 +88,9 @@ const SPACES = [
       { id: 'blueprints', module: 'concevoir', label: 'Blueprints', count: (api) => api.blueprintContainers().then((d) => d.count) },
       { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', count: (api) => api.hooks().then((d) => d.total) },
       { id: 'fournisseurs', module: 'configurer', label: 'Fournisseurs et budgets' },
+      // Le registre des projets du cockpit (P35) : ajouter, scanner, retirer, purger. Sans compte
+      // sur l'onglet : il serait lu une fois par portée, donc faux dès le premier retrait.
+      { id: 'projets', module: 'registre', label: 'Projets' },
       { id: 'preferences', module: null, label: 'Préférences' },
     ] },
 ];

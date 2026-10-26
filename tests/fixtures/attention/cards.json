@@ -24,6 +24,7 @@
       "checkpoint:alpha:r1", "checkpoint:beta:r2", "question:alpha:t1",
       "proposal:alpha:p1", "proposal:beta:p2", "proposal:beta:p3"
     ],
+    "review": [],
     "unblock": [
       "review_blocked:alpha:t3", "task_blocked:beta:t2", "task_blocked:alpha:t6",
       "directive_unacked:alpha:t5", "claim_orphaned:beta:t4"
