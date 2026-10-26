@@ -126,7 +126,7 @@ export const NEXT_COMMAND = {
   S0: 'grimoire up .',
   S1: 'grimoire doctor . --fix',
   S2: 'grimoire memory up',
-  S3: 'grimoire cockpit',
+  S3: 'grimoire cockpit serve',
   inconnu: 'grimoire doctor .',
 };
 
