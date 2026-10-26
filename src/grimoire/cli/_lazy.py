@@ -142,9 +142,12 @@ class LazyTyperGroup(TyperGroup):
         commands: dict[str, LazyCommandSpec],
         order: list[str] | None = None,
     ) -> None:
-        cls._lazy_groups = groups
+        # Les groupes enregistrés hors de ``app.py`` (plafond de taille) s'ajoutent à la fin de l'ordre.
+        from grimoire.cli._lazy_extra import EXTRA_GROUPS
+
+        cls._lazy_groups = {**groups, **{n: s for n, s in EXTRA_GROUPS.items() if n not in groups}}
         cls._lazy_commands = commands
-        cls._lazy_order = order or []
+        cls._lazy_order = [*(order or []), *(n for n in EXTRA_GROUPS if n not in (order or []))]
 
     def list_commands(self, ctx: Any) -> list[str]:
         names = set(self.commands) | set(self._lazy_groups) | set(self._lazy_commands)
