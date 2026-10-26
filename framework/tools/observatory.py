@@ -427,6 +427,12 @@ def load_all(project_root: Path, output_dir: Path | None = None) -> ObservatoryD
 
     traces, sessions = parse_trace(_find_trace(out_dir))
     events = parse_event_log(out_dir / EVENT_LOG_FILE)
+    try:  # sources runtime réelles : TraceLedger + journal (SDK, absent hors install)
+        from grimoire.traces.observatory_feed import load_journal_events, load_ledger_traces
+        traces += [TraceEntry(**d) for d in load_ledger_traces(project_root)]
+        events += [EventEntry(**d) for d in load_journal_events(project_root)]
+    except ImportError:
+        pass
     agents, rels = parse_agent_graph(out_dir / AGENT_GRAPH_FILE)
     shared = parse_shared_state(out_dir / SHARED_STATE_FILE)
 
