@@ -186,6 +186,8 @@ function injectStyles() {
     .ex-card[aria-current="true"] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
     .ex-card-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
     .ex-card-top .badge { flex: none; }
+    .ex-card-top .ex-card-id { flex: 1 1 0; min-width: 4ch; }
+    .ex-card-top .badge[data-role="route"] { flex: 0 1 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
     .ex-card-id { color: var(--ink3); font-size: var(--t-min); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .ex-proof { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ink2); font-size: var(--t-min); flex: none; }
     .ex-ring { width: 16px; height: 16px; transform: rotate(-90deg); }
@@ -213,6 +215,23 @@ function injectStyles() {
     .ex-cond { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--sp-2); padding: 6px 0; font-size: var(--t-s); }
     .ex-cond-strong { font-weight: 600; }
     .ex-cond-why { display: block; color: var(--ink2); font-size: var(--t-min); }
+    .ex-cond-remedy { color: var(--ink); }
+    .ex-gates { display: flex; flex-direction: column; }
+    .ex-gates-sub { padding-top: 8px; border-top: 1px solid var(--line); margin-top: 4px; }
+    .ex-last-refusal { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--sp-2); padding: 6px 8px; margin-bottom: 4px; border-radius: var(--r); background: var(--bad-soft); color: var(--bad); font-size: var(--t-min); }
+    .ex-cond > .sico { align-self: start; margin-top: 1px; }
+    .ex-last-refusal > .sico { align-self: start; }
+    /* Les gestes sous les gates, en une rangée comme l'artboard : un seul primaire (le passage suivant). */
+    .ex-moves { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+    .ex-moves .ex-gate-row { border: 0; padding: 0; }
+    .ex-moves .ex-gate-row[data-target="blocked"] { flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); border-radius: 0; }
+    .ex-moves .ex-gate-row[data-target="blocked"] .input { flex: 1 1 160px; min-width: 0; }
+    .ex-insp-idrow > .badge { margin-left: auto; }
+    .ex-more { position: relative; }
+    .ex-more-btn { width: 28px; padding: 0; justify-content: center; }
+    .ex-more-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(300px, 80vw); display: flex; flex-direction: column; gap: 6px; padding: var(--sp-3); background: var(--overlay); border: 1px solid var(--line2, var(--line)); border-radius: var(--r-l); box-shadow: var(--shadow); }
+    .ex-more-panel[hidden] { display: none; }
+    .ex-more-panel h4 { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink2); }
     .ex-kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
     .ex-event { font-size: var(--t-min); color: var(--ink2); padding: 2px 0; }
     .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
@@ -436,10 +455,9 @@ function liveRow(session, { withState = true, compact = false } = {}) {
   return line;
 }
 
-// Un coût d'étape non démarrée (proposée, prête, annulée) n'a rien à dire : la
-// ligne « coût inconnu » sur chaque carte du backlog serait du bruit. Dès qu'un
-// dispatch existe, ou que le travail a commencé, la ligne est toujours là.
-const COST_QUIET = new Set(['proposed', 'ready', 'cancelled']);
+// P11 : le coût est sur chaque carte, backlog compris — c'est avant de lancer
+// une tâche qu'on veut savoir qu'aucun chiffre n'existe. Inconnu se lit
+// « coût inconnu », jamais « 0 » (W1-01, #709).
 function costLabel(cost) {
   const unpriced = cost && cost.unpriced_calls ? `, ${cost.unpriced_calls} non chiffré(s)` : '';
   const text_ = costText(cost);
@@ -447,7 +465,6 @@ function costLabel(cost) {
   return `coût ${text_} (dispatch${unpriced})`;
 }
 function costRow(task) {
-  if (COST_QUIET.has(task.status) && !(task.cost && task.cost.calls)) return null;
   const line = text('div', 'ex-cost lbl', costLabel(task.cost));
   line.dataset.role = 'cost';
   line.dataset.costStatus = (task.cost && task.cost.status) || 'unknown';
@@ -455,6 +472,29 @@ function costRow(task) {
     ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est pas mesuré.`
     : "Aucun dispatch : le kit n'a rien mesuré. Le coût de la session hôte n'est pas mesuré non plus.";
   return line;
+}
+
+// Classe de route, modèle recommandé (P11) : le même calcul que `grimoire task
+// dispatch` (`dispatch_advice`). V2 n'a pas de nom de modèle (`recommended_model:
+// null`) : la consigne est de garder celui de la session, écrite telle quelle.
+function modelLabel(task) {
+  return task.recommended_model || 'modèle de session';
+}
+function routeText(task) {
+  return `${task.verifiability_class} · ${modelLabel(task)}`;
+}
+function routeTitle(task) {
+  const model = task.recommended_model
+    ? `modèle recommandé : ${task.recommended_model}`
+    : 'aucun modèle recommandé : garde celui de la session';
+  return `classe de route ${task.verifiability_class} · ${model}${task.model_tier ? ` (palier ${task.model_tier})` : ''}`;
+}
+function routeBadge(task) {
+  if (!task.verifiability_class) return null;
+  const node = badge(routeText(task), '', routeTitle(task));
+  node.dataset.role = 'route';
+  node.dataset.class = task.verifiability_class;
+  return node;
 }
 
 // L'anneau de preuve : un segment par condition du prochain passage (le nombre
@@ -508,9 +548,7 @@ function taskCard(task, onSelect, portfolio = false, selected = false) {
   const cardId = text('span', 'ex-card-id mono', task.id);
   cardId.title = task.id;
   top.append(cardId);
-  if (task.verifiability_class) {
-    top.append(badge(task.verifiability_class, '', `classe de route : ${task.verifiability_class}`));
-  }
+  appendIf(top, routeBadge(task));
   appendIf(top, proofRing(task));
   card.append(top);
   const cardTitle = text('div', 'ex-card-title', task.title || task.id);
@@ -1081,6 +1119,13 @@ const GATE_LABEL = {
   remediation_plan: 'Plan de remédiation',
   compliance_score: 'Score de conformité',
   release_authorization: 'Autorisation de publication',
+  // Reçu de revue (W3-01) : exigé par la clôture d'une tâche relue, comme `TaskService.gate`.
+  'review.receipt_missing': 'Reçu de revue présent',
+  'review.receipt_stale': 'Reçu de revue à jour',
+  'review.receipt_invalid': 'Reçu de revue lisible',
+  'review.finding_ungrounded': 'Constats de revue étayés',
+  'review.not_ready': 'Relecture rendue READY',
+  'review.criteria_changed': 'Critères inchangés depuis la relecture',
 };
 const gateLabel = (gate) => GATE_LABEL[gate] || gate;
 // Les raisons du gate sont écrites en minuscules (« aucun verdict… ») : en tête de ligne, une majuscule.
@@ -1096,13 +1141,59 @@ function conditionList(gate) {
     li.className = 'ex-cond ' + (c.ok ? 'ok' : 'bad');
     li.dataset.ok = String(c.ok);
     li.dataset.gate = c.gate;
+    if (c.refused_at) li.dataset.refused = c.refused_at;
     const body = document.createElement('span');
     body.append(text('span', c.ok ? null : 'ex-cond-strong', gateLabel(c.gate)), text('span', 'lbl', ` · ${c.gate}`));
-    if (!c.ok) body.append(text('span', 'ex-cond-why', sentence(c.reason) + (c.remedy ? ` — ${c.remedy}` : '')));
+    // P11 : la raison, puis le remède sur sa ligne — ce qu'il faut faire, pas seulement ce qui manque.
+    if (!c.ok) {
+      const why = text('span', 'ex-cond-why', sentence(c.reason));
+      why.dataset.role = 'gate-reason';
+      body.append(why);
+      if (c.remedy) {
+        const remedy = text('span', 'ex-cond-why ex-cond-remedy', `Remède : ${c.remedy}`);
+        remedy.dataset.role = 'gate-remedy';
+        body.append(remedy);
+      }
+    }
+    if (c.refused_at) {
+      const refused = text('span', 'ex-cond-why', `déjà refusée le ${stamp(c.refused_at)}`);
+      refused.dataset.role = 'gate-refused-at';
+      body.append(refused);
+    }
     li.append(stateIcon(c.ok ? 'ok' : 'bad'), body);
     list.append(li);
   }
   return list;
+}
+
+// Une date du journal, lisible : « 2026-10-25 14:02 » (heure du serveur, sans fuseau inventé).
+const stamp = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
+
+// Le dernier `task.gate.refused` (TraceLedger) : quand, quel gate, ce qui manquait.
+function lastRefusalLine(refusal) {
+  if (!refusal) return null;
+  const line = document.createElement('div');
+  line.className = 'ex-last-refusal';
+  line.dataset.role = 'last-refusal';
+  const missing = (refusal.missing || []).join(', ') || 'preuve non nommée';
+  const who = refusal.actor ? ` par ${refusal.actor}` : '';
+  line.append(stateIcon('bad'), text('span', null,
+    `Dernier refus le ${stamp(refusal.at)}${who} : gate « ${refusal.transition_id || '?'} », manque ${missing}`));
+  return line;
+}
+
+// Le refus d'une transition, sur place : une ligne par preuve, raison puis remède.
+function refusalNode(refusals) {
+  const box = document.createElement('div');
+  box.className = 'ex-refusal';
+  box.dataset.role = 'refusal';
+  box.append(text('div', 'ex-cond-strong', 'refusé par le gate :'));
+  for (const r of refusals) {
+    const item = text('div', null, `${r.evidence} — ${sentence(r.reason)}`);
+    if (r.remedy) item.append(text('span', 'ex-cond-why', `Remède : ${r.remedy}`));
+    box.append(item);
+  }
+  return box;
 }
 
 // Ce qu'un re-rendu ne doit jamais écraser : la saisie en cours (valeur, focus,
@@ -1131,6 +1222,12 @@ function restoreFields(container, kept) {
   for (const f of kept.fields) {
     const el = container.querySelectorAll(`[data-role="${f.role}"]`)[f.nth];
     if (!el) continue;
+    // Une saisie dans le menu « ⋯ » (raison d'annulation) rouvre le menu qui la porte.
+    const panel = el.closest('[data-role="more-panel"]');
+    if (panel && panel.hidden && (f.value || f.focused)) {
+      panel.hidden = false;
+      container.querySelector('[data-role="more"]')?.setAttribute('aria-expanded', 'true');
+    }
     if (f.value) {
       el.value = f.value;
       // Les gardes du formulaire (« Annuler » inerte sans raison) écoutent `input`.
@@ -1185,10 +1282,13 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   const stateLabel = waitingNow ? waitingText(detail.waiting) : (COLUMN_LABEL[detail.board] || detail.board);
   const head = document.createElement('div');
   head.className = 'ex-insp-head';
-  head.append(row(
+  const headRow = row(
     text('span', 'lbl mono', detail.id),
     badge(stateLabel, waitingNow ? 'warn' : STATE_TONE[detail.board]),
-  ));
+  );
+  headRow.classList.add('ex-insp-idrow');
+  appendIf(headRow, moreMenu(ctx, detail, onWritten));
+  head.append(headRow);
   head.append(text('h3', null, detail.title || detail.id));
   ctx.inspector.append(head);
   if (portfolio) ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
@@ -1206,8 +1306,13 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     ctx.inspector.append(waitBlock);
   }
 
-  // ── Carte « Pour passer en … » : conditions, puis les gestes existants ──
+  // ── Carte « Pour passer en … » : d'abord les gates, puis les gestes (P11) ──
+  // Chaque passage déclaré depuis la colonne (`next_moves_require`) avec ses
+  // conditions vertes ou rouges, leur raison et leur remède (`gate_checks`), et
+  // le dernier `task.gate.refused` : tout est lisible AVANT le bouton.
   const gate = detail.next_gate || null;
+  const checks = detail.gate_checks || {};
+  const requirements = detail.next_moves_require || {};
   const gateBlock = document.createElement('section');
   gateBlock.className = 'ex-gate-card';
   gateBlock.dataset.role = 'gate-card';
@@ -1219,12 +1324,27 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     gateHead.textContent = 'Passage à la colonne suivante';
   }
   gateBlock.append(gateHead);
-  if (gate && gate.conditions.length) {
-    gateBlock.append(conditionList(gate));
+
+  const gatesBox = document.createElement('div');
+  gatesBox.className = 'ex-gates';
+  gatesBox.dataset.role = 'gates';
+  appendIf(gatesBox, lastRefusalLine(detail.last_gate_refusal));
+  // Le passage suivant d'abord (celui de l'en-tête), puis les autres passages
+  // déclarés qui exigent quelque chose ; un passage sans exigence n'a rien à lister.
+  const primary = gate ? (checks[gate.to] || gate) : null;
+  if (primary && primary.conditions.length) {
+    gatesBox.append(conditionList(primary));
   } else if (gate) {
-    gateBlock.append(text('p', 'lbl', 'aucune condition déclarée pour ce passage'));
+    gatesBox.append(text('p', 'lbl', 'aucune condition déclarée pour ce passage'));
   }
-  const requirements = detail.next_moves_require || {};
+  for (const [to, entry] of Object.entries(checks)) {
+    if ((gate && to === gate.to) || !entry.conditions.length) continue;
+    const sub = text('div', 'ex-gates-sub micro', '');
+    sub.append('Pour passer en ', text('strong', null, COLUMN_LABEL[to] || to));
+    gatesBox.append(sub, conditionList(entry));
+  }
+  gateBlock.append(gatesBox);
+
   const targets = Object.keys(requirements);
   // Le ledger permet de bloquer une tâche prête ou en cours même quand le
   // fichier de portes ne déclare aucune transition vers `blocked` : le geste
@@ -1233,14 +1353,19 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   if (!targets.length) {
     gateBlock.append(text('p', 'lbl', 'colonne terminale : aucune transition déclarée depuis ici'));
   }
+  const moves = document.createElement('div');
+  moves.className = 'ex-moves';
+  moves.dataset.role = 'transitions';
   const feedback = document.createElement('div');
+  feedback.dataset.role = 'transition-feedback';
+  feedback.setAttribute('aria-live', 'polite');
   for (const target of targets) {
     const gateRow = document.createElement('div');
     gateRow.className = 'ex-gate-row';
-    gateRow.append(row(text('span', null, target === 'blocked' ? 'Bloquer…' : `→ ${COLUMN_LABEL[target] || target}`)));
+    gateRow.dataset.target = target;
     const required = requirements[target] || [];
-    // Les conditions de la colonne suivante sont déjà listées plus haut, avec leur état.
-    if (!(gate && gate.to === target && gate.conditions.length)) {
+    // Les conditions de ce passage sont déjà listées plus haut, avec leur état.
+    if (!(checks[target] && checks[target].conditions.length) && !(gate && gate.to === target && gate.conditions.length)) {
       gateRow.append(text('div', 'ex-gate-req', required.length ? `requiert : ${required.join(', ')}` : 'aucune preuve requise'));
     }
 
@@ -1251,6 +1376,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
       reasonInput.className = 'input';
       reasonInput.placeholder = 'raison du blocage';
       reasonInput.dataset.role = 'block-reason';
+      reasonInput.setAttribute('aria-label', 'Raison du blocage');
       gateRow.append(reasonInput);
     }
 
@@ -1261,7 +1387,9 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     const locked = !portfolio && ctx.host.readOnly;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'btn pri';
+    // Un seul bouton primaire : le passage suivant (celui que les gates ci-dessus décrivent en tête).
+    btn.className = target === targets.find((t) => t !== 'blocked') ? 'btn pri' : 'btn';
+    btn.dataset.role = 'transition';
     btn.textContent = locked ? 'Écriture désactivée (cockpit)' : (target === 'blocked' ? 'Réaliser : bloquer' : `Réaliser : → ${COLUMN_LABEL[target] || target}`);
     btn.disabled = locked;
     if (locked) {
@@ -1276,8 +1404,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
           : await ctx.api.taskAction(taskId, action, body);
         feedback.replaceChildren();
         if (result && result.blocked) {
-          const refusals = (result.refusals || []).map((r) => `${r.evidence} — ${r.reason} (${r.remedy})`);
-          feedback.append(text('div', 'ex-refusal', 'refusé : ' + refusals.join(' ; ')));
+          feedback.append(refusalNode(result.refusals || []));
         } else {
           feedback.append(text('div', 'lbl', `transition : ${result.transition}`));
           onWritten();
@@ -1287,15 +1414,27 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
       }
     });
     gateRow.append(btn);
-    gateBlock.append(gateRow);
+    moves.append(gateRow);
   }
-  gateBlock.append(feedback);
+  gateBlock.append(moves, feedback);
   ctx.inspector.append(gateBlock);
+
+  // ── Critères d'acceptation : ce que la transition doit prouver ──────────
+  const acceptance = document.createElement('div');
+  acceptance.className = 'ex-insp-block';
+  acceptance.dataset.role = 'acceptance-block';
+  acceptance.append(text('h4', null, "Critères d'acceptation"));
+  const ul = document.createElement('ul');
+  for (const item of detail.acceptance || []) ul.append(text('li', null, item));
+  if (!(detail.acceptance || []).length) acceptance.append(text('p', 'lbl', 'aucun critère déclaré'));
+  else acceptance.append(ul);
+  ctx.inspector.append(acceptance);
 
   // ── Preuves : ce que le kit sait, ligne à ligne ─────────────────────────
   const hasEvidencePack = (trace?.entries || []).some((e) => e.kind === 'evidence.pack');
   const evidenceBlock = document.createElement('div');
   evidenceBlock.className = 'ex-insp-block';
+  evidenceBlock.dataset.role = 'evidence-block';
   const evHead = text('h4', null, 'Preuves');
   evHead.dataset.term = 'evidence-pack';
   evidenceBlock.append(evHead);
@@ -1306,8 +1445,15 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     return line;
   };
   evidenceBlock.append(kv('Pack', hasEvidencePack ? 'présent (voir la timeline)' : 'aucun pack de preuve lu'));
+  // Routage (artboard Travail) : classe · modèle · coût, le coût inconnu écrit « inconnu ».
   if (detail.verifiability_class) {
-    evidenceBlock.append(kv('Routage', `classe ${detail.verifiability_class} · ${costLabel(task.cost)}`));
+    const routing = text('span', null, `classe ${routeText(detail)} · ${costLabel(task.cost)}`);
+    routing.dataset.role = 'routing';
+    routing.title = routeTitle(detail);
+    const costNote = text('span', 'ex-cond-why', task.cost && task.cost.calls
+      ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est mesuré nulle part dans le kit.`
+      : "Aucun dispatch sur cette tâche : le kit n'a rien mesuré, ce qui n'est pas un coût nul.");
+    evidenceBlock.append(kv('Routage', routing, costNote));
   }
   const chips = document.createElement('div');
   chips.className = 'ex-card-chips';
@@ -1319,55 +1465,13 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   }
   ctx.inspector.append(evidenceBlock);
 
-  // ── Consigne à la session, priorité, annulation (gestes existants) ──────
-  renderSteering(ctx, detail, onWritten);
-
-  // ── Derniers événements ─────────────────────────────────────────────────
-  const eventCount = (trace?.entries || []).length;
-  const eventsBlock = document.createElement('div');
-  eventsBlock.className = 'ex-insp-block';
-  eventsBlock.dataset.role = 'last-events';
-  eventsBlock.append(text('h4', null, 'Derniers événements'));
-  const recent = [...(trace?.entries || [])].slice(-3).reverse();
-  if (!recent.length) eventsBlock.append(text('p', 'lbl', 'aucun événement lu'));
-  for (const entry of recent) {
-    const line = text('div', 'ex-event', '');
-    line.append(text('span', 'lbl', `${(entry.at || '').slice(0, 16).replace('T', ' ')} · `), entry.summary || entry.kind);
-    eventsBlock.append(line);
+  // ── Session : vivacité, signes de vie, reprise ──────────────────────────
+  const sessionWrap = document.createElement('div');
+  sessionWrap.dataset.role = 'session-block';
+  if (task.session && task.session.id) {
+    // Portée projet : la reprise reste dans le bloc « Session » du claim, juste dessous.
+    sessionWrap.append(sessionBlock(task.session, { resume: portfolio }));
   }
-  // Drill-down (#139) : la timeline complète de la tâche sans passer par le sélecteur de vue.
-  const timelineBtn = document.createElement('button');
-  timelineBtn.type = 'button';
-  timelineBtn.className = 'btn ghost';
-  timelineBtn.textContent = eventCount ? `Voir la timeline (${eventCount})` : 'Voir la timeline';
-  timelineBtn.addEventListener('click', () => onTimeline(taskId));
-  eventsBlock.append(timelineBtn);
-  ctx.inspector.append(eventsBlock);
-
-  // ── Le détail complet, sous la maquette ─────────────────────────────────
-  const costBlock = document.createElement('div');
-  costBlock.className = 'ex-insp-block';
-  costBlock.dataset.role = 'cost-block';
-  costBlock.append(text('h4', null, 'Coût'));
-  costBlock.append(text('p', null, costLabel(task.cost)));
-  costBlock.append(text('p', 'lbl', task.cost && task.cost.calls
-    ? `${task.cost.calls} tentative(s) de dispatch. Le coût de la session hôte n'est mesuré nulle part dans le kit.`
-    : "Aucun dispatch sur cette tâche : le kit n'a rien mesuré, ce qui n'est pas un coût nul."));
-  ctx.inspector.append(costBlock);
-
-  if (portfolio) {
-    if (task.session && task.session.id) ctx.inspector.append(sessionBlock(task.session));
-  } else if (task.session && task.session.id) {
-    // Portée projet : vivacité, signes de vie, durée ; la reprise reste dans le bloc « Session » plus bas.
-    ctx.inspector.append(sessionBlock(task.session, { resume: false }));
-  }
-
-  // Finition (lot 4.3, issue #561) : lecture seule — absente (`""`) tant que
-  // personne ne l'a posée : pas de ligne plutôt qu'une valeur vide.
-  if (detail.finition) {
-    ctx.inspector.append(text('div', 'lbl', `Finition : ${FINITION_LABEL[detail.finition] || detail.finition}`));
-  }
-
   // Session (issue #638, lot A) : la session d'hôte qui porte le claim, et la
   // commande qui la reprend quand l'hôte en a une — `resume_command` vient
   // du serveur, cette vue ne compose jamais une commande elle-même.
@@ -1401,7 +1505,45 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     } else {
       sessionHold.append(text('p', 'lbl', 'aucune commande de reprise connue pour cet hôte'));
     }
-    ctx.inspector.append(sessionHold);
+    sessionWrap.append(sessionHold);
+  }
+  if (!sessionWrap.childElementCount) {
+    const none = document.createElement('div');
+    none.className = 'ex-insp-block';
+    none.append(text('h4', null, 'Session'), text('p', 'lbl', "aucune session d'hôte n'a encore travaillé sous ce claim"));
+    sessionWrap.append(none);
+  }
+  ctx.inspector.append(sessionWrap);
+
+  // ── Consigne à la session, priorité (gestes existants) ──────────────────
+  renderSteering(ctx, detail, onWritten);
+
+  // ── Derniers événements ─────────────────────────────────────────────────
+  const eventCount = (trace?.entries || []).length;
+  const eventsBlock = document.createElement('div');
+  eventsBlock.className = 'ex-insp-block';
+  eventsBlock.dataset.role = 'last-events';
+  eventsBlock.append(text('h4', null, 'Derniers événements'));
+  const recent = [...(trace?.entries || [])].slice(-3).reverse();
+  if (!recent.length) eventsBlock.append(text('p', 'lbl', 'aucun événement lu'));
+  for (const entry of recent) {
+    const line = text('div', 'ex-event', '');
+    line.append(text('span', 'lbl', `${(entry.at || '').slice(0, 16).replace('T', ' ')} · `), entry.summary || entry.kind);
+    eventsBlock.append(line);
+  }
+  // Drill-down (#139) : la timeline complète de la tâche sans passer par le sélecteur de vue.
+  const timelineBtn = document.createElement('button');
+  timelineBtn.type = 'button';
+  timelineBtn.className = 'btn ghost';
+  timelineBtn.textContent = eventCount ? `Voir la timeline (${eventCount})` : 'Voir la timeline';
+  timelineBtn.addEventListener('click', () => onTimeline(taskId));
+  eventsBlock.append(timelineBtn);
+  ctx.inspector.append(eventsBlock);
+
+  // Finition (lot 4.3, issue #561) : lecture seule — absente (`""`) tant que
+  // personne ne l'a posée : pas de ligne plutôt qu'une valeur vide.
+  if (detail.finition) {
+    ctx.inspector.append(text('div', 'lbl', `Finition : ${FINITION_LABEL[detail.finition] || detail.finition}`));
   }
 
   // Rappel (#141) : avec parcimonie — le bloc n'existe pas quand il n'a rien à dire.
@@ -1416,7 +1558,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     ctx.inspector.append(recallBlock);
   }
 
-  // Corps réel de la tâche (#140) : de quoi elle parle, avant les critères.
+  // Corps réel de la tâche (#140) : de quoi elle parle.
   if (detail.description) {
     const description = document.createElement('div');
     description.className = 'ex-insp-block';
@@ -1428,15 +1570,6 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     description.append(pre);
     ctx.inspector.append(description);
   }
-
-  const acceptance = document.createElement('div');
-  acceptance.className = 'ex-insp-block';
-  acceptance.append(text('h4', null, "Critères d'acceptation"));
-  const ul = document.createElement('ul');
-  for (const item of detail.acceptance || []) ul.append(text('li', null, item));
-  if (!(detail.acceptance || []).length) acceptance.append(text('p', 'lbl', 'aucun critère déclaré'));
-  else acceptance.append(ul);
-  ctx.inspector.append(acceptance);
 
   if ((detail.guardrails || []).length) {
     const guardrailsBlock = document.createElement('div');
@@ -1462,7 +1595,6 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     depsBlock.append(dUl);
     ctx.inspector.append(depsBlock);
   }
-
   restoreFields(ctx.inspector, kept);
   if (focusBlockReason) {
     focusBlockReason = false;
@@ -1474,10 +1606,10 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
 
 // ── Pilotage humain (issue #638, lot B) ───────────────────────────────────
 //
-// Trois blocs dans l'inspecteur : la priorité (sélecteur), les consignes
-// (journal + zone de saisie), l'annulation (raison exigée, `force` proposé
-// seulement quand le service a refusé pour un claim tenu ailleurs). Chaque
-// geste est un `api.taskAction` ; le refus revient en 200 `blocked: true`.
+// Deux blocs dans l'inspecteur : la priorité (sélecteur) et les consignes
+// (journal + zone de saisie). L'annulation vit dans le menu « ⋯ » (P11,
+// `moreMenu`). Chaque geste est un `api.taskAction` ; le refus revient en 200
+// `blocked: true`.
 
 function renderSteering(ctx, detail, onWritten) {
   // Conteneur dédié (issue #638, lot B, correctif de course résiduelle) :
@@ -1593,43 +1725,106 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
   }
   container.append(dirBlock);
 
-  // Annulation — sauf colonne terminale, et jamais proposée en lecture seule :
-  // le cockpit ne montre pas un formulaire qu'il ne laisserait pas partir.
-  if (!readOnly && detail.board !== 'archived' && detail.board !== 'accepted' && detail.board !== 'released') {
-    const cancelBlock = document.createElement('div');
-    cancelBlock.className = 'ex-insp-block';
-    cancelBlock.append(text('h4', null, 'Annuler'));
-    const reason = document.createElement('input');
-    reason.type = 'text';
-    reason.className = 'input';
-    reason.placeholder = "raison de l'annulation (obligatoire)";
-    reason.dataset.role = 'cancel-reason';
-    const force = document.createElement('input');
-    force.type = 'checkbox';
-    force.dataset.role = 'cancel-force';
-    const forceLabel = document.createElement('label');
-    forceLabel.className = 'lbl';
-    forceLabel.append(force, text('span', null, " forcer même si une session la tient"));
-    forceLabel.hidden = true;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btn';
-    btn.textContent = 'Annuler la tâche';
-    btn.dataset.role = 'cancel-submit';
-    btn.disabled = true;
-    reason.addEventListener('input', () => { btn.disabled = !reason.value.trim(); });
-    btn.addEventListener('click', async () => {
-      const body = { reason: reason.value.trim() };
-      if (force.checked) body.force = true;
-      const result = await send('cancel', body, `grimoire task cancel ${detail.id} --reason "${body.reason}"${force.checked ? ' --force' : ''}`);
-      // Le refus « claim » (tenue par une autre session) ouvre l'option de
-      // forcer — jamais avant : forcer n'est pas le geste par défaut.
-      if (result && result.blocked && (result.refusals || []).some((r) => r.evidence === 'claim')) forceLabel.hidden = false;
-    });
-    cancelBlock.append(reason, forceLabel, btn);
-    container.append(cancelBlock);
-  }
   container.append(feedback);
+}
+
+// Le menu « ⋯ » de l'inspecteur (P11) : les gestes rares et destructifs, hors
+// du chemin de la transition. Seul « Annuler la tâche » y vit : raison exigée,
+// `force` proposé seulement quand le service a refusé pour un claim tenu
+// ailleurs. Aucun menu en lecture seule ni en colonne terminale : le cockpit ne
+// montre pas un geste qu'il ne laisserait pas partir.
+const CANCEL_TERMINAL = new Set(['archived', 'accepted', 'released']);
+let moreMenuListener = null;
+function moreMenu(ctx, detail, onWritten) {
+  if (ctx.host.readOnly || CANCEL_TERMINAL.has(detail.board)) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'ex-more';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'btn ghost ex-more-btn';
+  toggle.dataset.role = 'more';
+  toggle.setAttribute('aria-label', "Plus d'actions");
+  toggle.title = "Plus d'actions";
+  toggle.setAttribute('aria-haspopup', 'true');
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', 'ex-more-panel');
+  toggle.append(icon('more'));
+  const panel = document.createElement('div');
+  panel.className = 'ex-more-panel';
+  panel.id = 'ex-more-panel';
+  panel.dataset.role = 'more-panel';
+  panel.setAttribute('role', 'group');
+  panel.setAttribute('aria-label', "Plus d'actions");
+  panel.hidden = true;
+  const setOpen = (open) => {
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setOpen(panel.hidden);
+    if (!panel.hidden) panel.querySelector('input')?.focus();
+  });
+  panel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { setOpen(false); toggle.focus(); }
+  });
+  panel.append(text('h4', null, 'Annuler la tâche'));
+  const reason = document.createElement('input');
+  reason.type = 'text';
+  reason.className = 'input';
+  reason.placeholder = "raison de l'annulation (obligatoire)";
+  reason.dataset.role = 'cancel-reason';
+  reason.setAttribute('aria-label', "Raison de l'annulation");
+  // Un seul écouteur « clic hors du menu » vit à la fois : chaque re-rendu de
+  // l'inspecteur retire celui du menu précédent.
+  moreMenuListener?.abort();
+  moreMenuListener = new AbortController();
+  const listening = AbortSignal.any ? AbortSignal.any([ctx.signal, moreMenuListener.signal]) : moreMenuListener.signal;
+  document.addEventListener('click', (e) => {
+    // Une raison déjà saisie garde le menu ouvert (un brouillon ne se perd pas sur un clic à côté).
+    if (!panel.hidden && !wrap.contains(e.target) && !reason.value.trim()) setOpen(false);
+  }, { signal: listening });
+
+  const force = document.createElement('input');
+  force.type = 'checkbox';
+  force.dataset.role = 'cancel-force';
+  const forceLabel = document.createElement('label');
+  forceLabel.className = 'lbl';
+  forceLabel.append(force, text('span', null, ' forcer même si une session la tient'));
+  forceLabel.hidden = true;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn';
+  btn.textContent = 'Annuler la tâche';
+  btn.dataset.role = 'cancel-submit';
+  btn.disabled = true;
+  const feedback = document.createElement('div');
+  feedback.setAttribute('aria-live', 'polite');
+  reason.addEventListener('input', () => { btn.disabled = !reason.value.trim(); });
+  btn.addEventListener('click', async () => {
+    const body = { reason: reason.value.trim() };
+    if (force.checked) body.force = true;
+    ctx.dock.echo(`grimoire task cancel ${detail.id} --reason "${body.reason}"${force.checked ? ' --force' : ''}`);
+    feedback.replaceChildren();
+    try {
+      const result = await ctx.api.taskAction(detail.id, 'cancel', body);
+      if (result && result.blocked) {
+        feedback.append(refusalNode(result.refusals || []));
+        // Le refus « claim » (tenue par une autre session) ouvre l'option de
+        // forcer — jamais avant : forcer n'est pas le geste par défaut.
+        if ((result.refusals || []).some((r) => r.evidence === 'claim')) forceLabel.hidden = false;
+        return;
+      }
+      // La saisie est consommée : le re-rendu (colonne terminale, plus de menu) n'attend plus rien.
+      reason.value = '';
+      onWritten();
+    } catch (error) {
+      feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+    }
+  });
+  panel.append(reason, forceLabel, btn, feedback);
+  wrap.append(toggle, panel);
+  return wrap;
 }
 
 function actionFor(target, task, reason) {
