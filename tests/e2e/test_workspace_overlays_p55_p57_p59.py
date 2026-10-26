@@ -568,6 +568,26 @@ _BARS_JS = """
 }
 """
 
+#: Les actions d'une carte du tableau (« → En cours », « Bloquer… ») : chaque
+#: libellé tient sur une ligne ; faute de place, les boutons passent à la ligne.
+_CARD_ACTIONS_JS = """
+() => {
+  const out = [];
+  for (const row of document.querySelectorAll('.ex-card .ex-card-next')) {
+    if (!row.getClientRects().length) continue;
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent.trim() || !node.parentElement.getClientRects().length) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+      if (tops.size > 1) out.push(`${row.closest('.ex-card').dataset.task}: ${node.textContent.trim()} (sur ${tops.size} lignes)`);
+    }
+  }
+  return out;
+}
+"""
+
 _GEOMETRY_JS = """
 () => {
   const r = (id) => document.getElementById(id).getBoundingClientRect();
@@ -598,6 +618,10 @@ def test_p59_le_detail_passe_sous_la_liste_quand_la_place_manque(browser: Browse
         # Les barres de la coque : une ligne, rien de coupé, aucun chevauchement.
         bars = shot.evaluate(_BARS_JS)
         assert bars == [], f"barres de la coque à {width} px : {bars[:8]}"
+        # Les actions des cartes du tableau : aucun libellé cassé.
+        assert shot.locator(".ex-card .ex-card-next").count() >= 2
+        cards = shot.evaluate(_CARD_ACTIONS_JS)
+        assert cards == [], f"actions de carte sur plusieurs lignes à {width} px : {cards[:6]}"
 
         # Les tuiles (fiche du projet) se replient : aucune ne sort de sa rangée.
         _open(shot, served_lotb, "?project=forge-lotb#flotte")

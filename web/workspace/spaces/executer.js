@@ -254,7 +254,10 @@ function injectStyles() {
     .ex-card .ex-wait > .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .ex-card .ex-wait.flag > span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-    .ex-card-next { font-size: var(--t-min); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    .ex-card-next { font-size: var(--t-min); color: var(--ink2); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    /* P59 : un libellé d'action ne se casse jamais ; faute de place, ce sont les boutons qui passent à la ligne. */
+    .ex-card-next > span:first-child, .ex-card-next .btn { white-space: nowrap; }
+    .ex-card-next > .row { flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
     .ex-card-next .btn { height: 24px; padding: 0 10px; font-size: var(--t-min); }
     .ex-card-next .row-act, .ex-card-next .more-btn { width: 24px; min-width: 24px; padding: 0; }
     .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
