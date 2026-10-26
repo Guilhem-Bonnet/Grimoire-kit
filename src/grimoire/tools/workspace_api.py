@@ -464,6 +464,12 @@ def task_recall_view(project_root: Path, task_id: str) -> dict[str, Any]:
     """
     service = _service(project_root)
     service.require(task_id)
+    memory = service.memory
+    if memory is not None:
+        # Le cockpit lit, il ne sert rien à un agent : ouvrir l'inspecteur n'écrit
+        # aucun reçu de rappel (P27), sinon chaque clic ajouterait sa propre lecture
+        # aux reçus de la tâche qu'il affiche.
+        memory.surface, memory.journal_reads = "cockpit", False
     payload: dict[str, Any] = service.recall(task_id).to_dict()
     return payload
 

@@ -13,19 +13,23 @@
 // Refus tenus ici :
 // - les entrées d'un AUTRE projet d'un emplacement partagé n'apparaissent
 //   qu'en comptes (le serveur ne les rend jamais) ;
-// - aucun bouton inerte : Corriger et Marquer remplacée attendent leurs routes
-//   (P34, P23) ; seule la suppression, gouvernée côté cockpit (`POST
-//   /api/memory`, projet servi seulement), est proposée, avec confirmation
-//   dans la page ;
-// - la santé de la mémoire est la rubrique voisine (`sante.js`, P25) ; un
-//   journal des écritures n'a pas encore de lecture serveur : rien n'est
-//   affiché à sa place.
+// - aucun bouton inerte : Corriger, Marquer remplacée… (P34, `memoire-gestes.js`)
+//   et Supprimer… passent par `POST /api/memory`, gouvernée côté cockpit et
+//   ouverte au seul projet servi ; chaque geste s'ouvre dans le panneau, avec
+//   aperçu avant/après ou confirmation, et dit son résultat sur place ; hors du
+//   projet servi, ils sont absents et la raison est écrite ;
+// - une projection (copie régénérable) ne montre aucun geste d'édition :
+//   « Corriger la source » mène au fichier ou à la tâche dont elle vient ;
+// - la santé de la mémoire est la rubrique voisine (`sante.js`, P25) ;
+//   l'historique d'une entrée vient du journal des écritures (P14), lu par
+//   `memory/entry`.
 //
 // API consommées : api.memoryEntries, api.memoryEntry, api.memorySearch,
-// api.memoryDelete, api.projects.
+// api.memoryDelete, api.memoryGesture, api.projects.
 
 import { badge, icon, monogram } from '../shell.js';
 import { formatScore } from '../score.js';
+import { GESTURE_STYLES, historyList, openGesture } from './memoire-gestes.js';
 
 const STYLE_ID = 'kn-styles';
 
@@ -85,6 +89,9 @@ const STYLES = `
 .kn-kv .kn-linkish:hover { text-decoration: underline; }
 .kn-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .kn-danger { color: var(--bad); }
+.kn-detail > .kn-actions { gap: 6px; }
+.kn-actions .btn.kn-ghost { background: transparent; border-color: transparent; padding: 0 6px; }
+.kn-actions .btn.kn-ghost:hover { background: var(--hover); }
 .kn-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r); background: var(--bad-soft); }
 .kn-confirm p { margin: 0; }
 .kn-status { margin: 0; font-size: var(--t-s); }
@@ -93,6 +100,9 @@ const STYLES = `
 .kn-equiv { display: flex; flex-direction: column; gap: 6px; }
 .kn-eyebrow { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink3); }
 .kn-equiv .formula { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.kn-fix { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r); background: var(--acc-soft); }
+.kn-fix p { margin: 0; }
+.kn-fix .formula { overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; }
 @media (max-width: 720px) {
   .kn-wrap { grid-template-columns: minmax(0, 1fr); }
   .kn-filters { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -107,7 +117,7 @@ function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = STYLES;
+  style.textContent = STYLES + GESTURE_STYLES;
   document.head.append(style);
 }
 
@@ -451,7 +461,7 @@ export async function mount(root, ctx) {
     state.items = kept;
   };
 
-  const refresh = async ({ append = false } = {}) => {
+  const refresh = async ({ append = false, stay = null } = {}) => {
     const token = ++state.token;
     drawFormula();
     if (!append) {
@@ -485,7 +495,10 @@ export async function mount(root, ctx) {
     if (token !== state.token || ctx.signal.aborted) return;
     drawFilters();
     drawResults();
-    const keep = state.items.find((e) => keyOf(e) === state.selectedKey) || state.items[0];
+    // `stay` : l'entrée qu'un geste vient de corriger reste ouverte, même si la
+    // liste ne la sert plus (retirée, remplacée).
+    const kept = stay && keyOf(stay) === state.selectedKey ? stay : null;
+    const keep = state.items.find((e) => keyOf(e) === state.selectedKey) || kept || state.items[0];
     if (keep) select(keep, { focus: false });
     else { state.selectedKey = ''; ctx.inspector.replaceChildren(); }
   };
@@ -650,28 +663,95 @@ export async function mount(root, ctx) {
       const shown = formatScore(entry.score, entry.scoreKind);
       add('Classement', `rang ${entry.projectRank} dans son projet · ${shown.text}`);
     }
-    if (full && full.journal && full.journal.length) {
-      add('Journal', full.journal.map((r) => `${String(r.ts || '').slice(0, 10)} ${r.op}${r.actor ? ` par ${r.actor}` : ''}`).join(' ; '));
-    }
     if (entry.tags && entry.tags.length) add('Tags', entry.tags.join(', '));
     box.append(kv);
 
     const ownProject = canDelete && (allScope ? entry.projectSlug === homeSlug : true);
     const actions = el('div', 'kn-actions');
-    if (ownProject) {
-      const remove = el('button', 'btn kn-danger', 'Supprimer…', { type: 'button' });
-      remove.prepend(icon('trash'));
+    const gesture = (kind, row) => {
+      // Un nouveau geste efface le compte rendu du précédent.
+      state.status = null;
+      box.querySelector(':scope > .kn-status')?.remove();
+      return openGestureIn(kind, row);
+    };
+    const openGestureIn = (kind, row) => openGesture(ctx, {
+      entry, kind, row, anchor: actions,
+      candidates: candidatesFor(entry),
+      project: entry.projectSlug || homeSlug || undefined,
+      onDone: async (message) => {
+        state.status = { key: keyOf(entry), tone: 'ok', text: message };
+        await refresh({ stay: entry });
+      },
+    });
+    if (entry.kind === 'projection') {
+      box.append(sourceFix(entry));
+    } else if (ownProject) {
+      // Libellés seuls, comme la maquette : les trois gestes tiennent sur une ligne.
+      const correct = el('button', 'btn', 'Corriger', { type: 'button' });
+      correct.addEventListener('click', () => gesture('correct'));
+      const replace = el('button', 'btn', 'Marquer remplacée…', { type: 'button' });
+      replace.addEventListener('click', () => gesture('supersede'));
+      actions.append(correct, replace);
+      if (sup.state === 'retracted') {
+        const restore = el('button', 'btn', 'Rendre au service…', { type: 'button' });
+        restore.prepend(icon('undo'));
+        restore.addEventListener('click', () => gesture('unretract'));
+        actions.append(restore);
+      }
+      // Bouton discret, comme la maquette : la suppression reste le dernier recours.
+      const remove = el('button', 'btn kn-danger kn-ghost', 'Supprimer…', { type: 'button' });
       remove.addEventListener('click', () => confirmDelete(entry, box, actions));
       actions.append(remove);
       box.append(actions);
+    } else {
+      box.append(noteNode('readonly', readOnlyReason()));
     }
     if (state.status && state.status.key === keyOf(entry)) box.append(statusNode(state.status));
+    const history = historyList(entry.id, full && full.journal, {
+      canEdit: ownProject && entry.kind !== 'projection',
+      onUndo: (row) => gesture('undo', row),
+    });
+    if (history) box.append(history);
 
     const equiv = el('div', 'kn-equiv');
     equiv.append(el('p', 'kn-eyebrow', 'Équivalent'), formula(`grimoire memory show ${entry.id}`));
     box.append(equiv);
 
     ctx.inspector.replaceChildren(box);
+  };
+
+  /** Les autres entrées en vigueur du même projet, déjà chargées : remplaçantes ou doublons possibles. */
+  const candidatesFor = (entry) => state.items.filter((e) => keyOf(e) !== keyOf(entry)
+    && (e.projectSlug || '') === (entry.projectSlug || '') && e.kind === 'souvenir'
+    && (e.supersession || {}).state === 'live');
+
+  const readOnlyReason = () => {
+    if (ctx.host.kind !== 'cockpit') return 'Correction depuis le cockpit seulement : lance « grimoire cockpit serve » dans ce projet.';
+    if (ctx.host.readOnly) return 'Ce cockpit est en lecture seule : il n’écrit que dans le projet qu’il sert.';
+    return `Correction réservée au projet que ce cockpit sert (${homeSlug || 'projet de lancement'}) : lance « grimoire cockpit serve » dans ce projet-ci pour le corriger.`;
+  };
+
+  /** Une projection ne se corrige pas : sa source, si. */
+  const sourceFix = (entry) => {
+    const fix = el('div', 'kn-fix', null, { role: 'group', 'aria-label': 'Corriger la source' });
+    fix.dataset.fix = 'source';
+    fix.append(el('p', null, 'Projection régénérable : elle se corrige à sa source, puis se régénère. La corriger ici serait écrasé à la prochaine synchronisation.'));
+    const source = (entry.provenance && entry.provenance.source) || {};
+    const uri = String(source.uri || '');
+    const task = source.kind === 'tâche' ? uri.replace(/^task:/, '') : '';
+    const file = !task && uri ? uri.match(/^(.*?)(?::(\d+))?$/) : null;
+    if (task || (file && file[1])) {
+      const go = el('button', 'btn', 'Corriger la source', { type: 'button' });
+      go.prepend(icon('wrench'));
+      go.addEventListener('click', () => (task
+        ? ctx.goto('travail', { task, of: allScope ? entry.projectSlug || '' : '' })
+        : ctx.goto('source', { file: file[1], line: file[2] ? Number(file[2]) : undefined })));
+      fix.append(go);
+    } else {
+      fix.append(el('p', null, 'Sa source n’est pas déclarée : régénère la projection.'));
+    }
+    fix.append(formula(entry.type === 'task' ? 'grimoire memory vector sync-tasks' : 'grimoire memory vector sync-code'));
+    return fix;
   };
 
   const confirmDelete = (entry, box, actions) => {

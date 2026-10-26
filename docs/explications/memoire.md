@@ -511,10 +511,13 @@ rappel de tâche, outil MCP `grimoire_memory_search`) ajoute une ligne à
 `_grimoire-output/memory-reads.jsonl` : horodatage, surface (`cli`, `mcp`…),
 acteur, session et tâche si connus, mode, filtres appliqués, et pour chaque
 souvenir servi son identifiant, son rang, son score et, en lecture hybride, son
-rang et son score dans chaque classement avant fusion. **Pas de contenu** : la
-requête n'y figure que par sa longueur : ni texte ni empreinte (celle d'une requête
-courte se retrouve par dictionnaire, et une empreinte à clé locale demanderait un
-second fichier). Le
+rang et son score dans chaque classement avant fusion. **Pas de contenu de
+souvenir**, et jamais d'empreinte de requête (celle d'une requête courte se
+retrouve par dictionnaire, et une empreinte à clé locale demanderait un second
+fichier). La requête n'y figure que par sa longueur, **sauf pour une lecture
+rattachée à une tâche** : son texte est alors gardé, secrets caviardés et borné à
+300 caractères, pour que l'inspecteur de la tâche puisse la montrer et la
+rejouer (voir plus bas). Le
 fichier est ignoré par git, borné à 1 Mio (au-delà, il est ramené à ses
 lignes les plus récentes), s'écrit sans réseau, et un échec d'écriture est un avertissement,
 jamais une lecture en échec. Le cockpit (lecture seule) et le banc n'y écrivent
@@ -523,6 +526,16 @@ interne locale, ignorée par git et par l'empreinte d'arbre du gate `Stop` (une
 lecture n'est pas du travail), et le **seul** fichier qu'ils ont le droit
 d'écrire — `TestReadOnlyToolsWriteNothing` le vérifie. `grimoire memory reads` en tire `recall_count_7d`, le nombre de lectures
 qui ont servi chaque souvenir sur les sept derniers jours.
+
+Le cockpit le rend lisible (P27) : l'inspecteur d'une tâche (espace Travail,
+bloc « Mémoire servie ») et Savoir › Rappel montrent, pour chaque lecture, la
+requête, l'heure et les souvenirs servis avec leur rang, leur score, leur portée
+et leur état et fraîcheur **d'aujourd'hui** — un souvenir servi puis remplacé
+depuis se lit « remplacée ». « Rejouer maintenant » relance la même lecture
+(même mode, mêmes filtres) sur la mémoire actuelle et rend le différentiel :
+apparue, remplacée ou retirée, déclassée, disparue. Une requête libre se rejoue
+de la même façon. Lectures en `GET` (`tasks/<id>/receipts`, `memory/recall`,
+`memory/recall/replay`), sans écriture : le rejeu n'ajoute aucun reçu.
 
 ## Choix à l'initialisation
 

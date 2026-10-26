@@ -14,11 +14,15 @@ par une valeur vide) :
   ``api`` ou ``bench`` ;
 * ``actor``, ``session_id``, ``task_ref`` : la provenance de la lecture
   (même résolution que le journal des écritures) ;
-* ``query_chars`` : la longueur de la requête. **Ni le texte ni une empreinte** :
-  une requête peut contenir un secret ou une donnée personnelle, et l'empreinte
-  d'une requête courte se retrouve par dictionnaire (une empreinte à clé locale
-  demanderait de créer un second fichier, ce que les outils annotés en lecture
-  seule n'ont pas le droit de faire) ;
+* ``query_chars`` : la longueur de la requête. **Jamais d'empreinte** :
+  l'empreinte d'une requête courte se retrouve par dictionnaire (une empreinte à
+  clé locale demanderait de créer un second fichier, ce que les outils annotés
+  en lecture seule n'ont pas le droit de faire) ;
+* ``query`` : le texte de la requête, **seulement pour une lecture rattachée à
+  une tâche** (``task_ref``), secrets caviardés (``redact_secrets``) et borné à
+  :data:`MAX_QUERY_CHARS`. C'est ce que l'inspecteur de la tâche montre et
+  rejoue (P27). Hors tâche, le texte n'est pas gardé : une requête libre peut
+  porter une donnée personnelle que personne n'a demandé de conserver ;
 * ``filters`` : les filtres appliqués (limite, utilisateur, type, agent, ailes,
   ``include_*``) ;
 * ``served`` : pour chaque souvenir servi, ``id``, ``rank`` (1 = premier), ``score``
@@ -27,7 +31,7 @@ par une valeur vide) :
 * ``hidden_stale`` : le nombre d'extraits dont la source a disparu, écartés.
 
 **Ce qu'elle ne contient pas** : le texte, les étiquettes, les métadonnées ni
-le titre d'un souvenir, ni le texte de la requête.
+le titre d'un souvenir, ni le texte d'une requête hors tâche.
 
 **Bornes** : au-delà de ``MAX_BYTES`` le fichier est ramené à ses lignes les plus
 récentes (la moitié du plafond), réécrit atomiquement ; une lecture concurrente
@@ -53,6 +57,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "MAX_BYTES",
+    "MAX_QUERY_CHARS",
     "MAX_SERVED",
     "READS_RELPATH",
     "ReadCounts",
@@ -67,6 +72,8 @@ READS_RELPATH = Path("_grimoire-output") / "memory-reads.jsonl"
 MAX_BYTES = 1_048_576
 #: Souvenirs détaillés par ligne ; au-delà, ``served_truncated`` donne le total.
 MAX_SERVED = 50
+#: Longueur gardée d'une requête rattachée à une tâche (même borne que le rappel de tâche).
+MAX_QUERY_CHARS = 300
 #: Surfaces dont les lectures ne comptent pas comme un service rendu aux agents.
 _UNCOUNTED_SURFACES = frozenset({"bench"})
 
@@ -90,6 +97,14 @@ def _served_rows(
             row["lanes"] = per_lane
         rows.append(row)
     return rows
+
+
+def _kept_query(query: str) -> str:
+    """Le texte d'une requête rattachée à une tâche : secrets caviardés, espaces réduits, borné."""
+    from grimoire.memory.validation import redact_secrets
+
+    redacted, _ = redact_secrets(" ".join(query.split()))
+    return redacted[:MAX_QUERY_CHARS]
 
 
 def _rotate(path: Path) -> None:
@@ -141,6 +156,8 @@ def record_read(
         row.update({k: v for k, v in (("actor", actor), ("session_id", session_id), ("task_ref", task_ref)) if v})
         if query:
             row["query_chars"] = len(query)
+            if task_ref:
+                row["query"] = _kept_query(query)
         if filters:
             row["filters"] = {k: v for k, v in filters.items() if v not in ("", None, False)}
         row["served"] = _served_rows(served, lanes)

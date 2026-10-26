@@ -70,6 +70,7 @@ const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'acc
 import { actionStatus, badge, glyph, icon, levelBars, monogram, setActionStatus, stateIcon } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
+import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
 const COLUMN_LABEL = {
   proposed: 'Proposée', ready: 'Prête', in_progress: 'En cours', blocked: 'Bloquée',
@@ -1240,6 +1241,67 @@ function restoreFields(container, kept) {
   }
 }
 
+// Bloc « Mémoire servie » (P27) : les lectures mémoire servies à cette tâche,
+// la plus récente dépliée (requête, heure, entrées avec rang, score, portée,
+// état et fraîcheur d'aujourd'hui), les autres au choix. « Rejouer maintenant »
+// relance la même lecture (GET, aucune écriture) et rend le différentiel. Sans
+// reçu, la phrase le dit : jamais une liste vide.
+function receiptBlock(ctx, taskId, payload, project) {
+  injectRecallStyles();
+  const block = rcEl('div', 'ex-insp-block');
+  block.dataset.role = 'recall-receipt';
+  block.append(rcEl('h4', null, 'Mémoire servie'));
+  if (!payload || payload.failed) {
+    block.append(rcEl('p', 'ex-refusal', `Lecture des reçus impossible : ${payload && payload.failed ? payload.failed.message : 'réponse vide'}.`));
+    return block;
+  }
+  if (payload.reason) {
+    block.append(rcEl('p', 'lbl', `Reçus illisibles : ${payload.reason}.`));
+    return block;
+  }
+  const receipts = payload.receipts || [];
+  if (!receipts.length) {
+    block.dataset.empty = 'true';
+    block.append(rcEl('p', 'lbl', payload.logPresent
+      ? 'aucune lecture mémoire enregistrée pour cette tâche'
+      : 'aucune lecture mémoire enregistrée pour cette tâche : ce projet n’a encore aucun journal des lectures'));
+    return block;
+  }
+  if (payload.memoryReason) block.append(rcEl('p', 'lbl', `Entrées non décrites : ${payload.memoryReason}.`));
+  const body = rcEl('div');
+  const show = (receipt) => {
+    const parts = [receiptMeta(receipt), servedList(receipt)];
+    if (receipt.replayable) {
+      parts.push(replayControl(() => ctx.api.memoryReplay({ receipt: receipt.key, task: taskId, project })));
+    } else if (receipt.notReplayable) {
+      const why = rcEl('p', 'lbl', `Pas de rejeu : ${receipt.notReplayable}.`);
+      why.dataset.role = 'not-replayable';
+      parts.push(why);
+    }
+    body.replaceChildren(...parts);
+    body.dataset.key = receipt.key;
+  };
+  if (receipts.length > 1) {
+    const label = rcEl('label', 'lbl', `Lecture (${rcPlural(payload.total, 'reçu', 'reçus')}) `);
+    const select = rcEl('select', 'input', null, { 'aria-label': 'Lecture mémoire affichée' });
+    select.dataset.role = 'receipt-pick';
+    receipts.forEach((receipt, index) => {
+      const option = rcEl('option', null, `${whenText(receipt.ts)} · ${rcPlural((receipt.served || []).length, 'souvenir', 'souvenirs')}`, { value: String(index) });
+      select.append(option);
+    });
+    select.addEventListener('change', () => show(receipts[Number(select.value)]));
+    label.append(select);
+    block.append(label);
+  }
+  show(receipts[0]);
+  block.append(body);
+  const open = rcEl('button', 'btn ghost', 'Voir dans Savoir › Rappel', { type: 'button' });
+  open.dataset.role = 'open-recall';
+  open.addEventListener('click', () => ctx.goto('rappel', { task: taskId, of: project || '' }));
+  block.append(open);
+  return block;
+}
+
 // `task` porte l'id et, en portefeuille, `project.slug` (cible des lectures et
 // des actions) et `session` (bloc « Session »). `portfolio` choisit la porte
 // d'écriture : `portfolioTaskAction` (dérogation nommée, tout projet du
@@ -1261,10 +1323,12 @@ function restoreFields(container, kept) {
 async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false, guard = {}) {
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
-  const [detail, trace, recall] = await Promise.all([
+  const [detail, trace, recall, receipts] = await Promise.all([
     ctx.api.task(taskId, project).catch(() => null),
     ctx.api.taskTrace(taskId, project).catch(() => null),
     ctx.api.taskRecall(taskId, project).catch(() => null),
+    // Une lecture ratée garde son erreur : « lecture impossible » ≠ « aucune lecture ».
+    ctx.api.taskReceipts(taskId, project).catch((error) => ({ failed: error })),
   ]);
   if (ctx.signal.aborted) return false;
   if (guard.defer && guard.defer()) return false;
@@ -1514,6 +1578,9 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     sessionWrap.append(none);
   }
   ctx.inspector.append(sessionWrap);
+
+  // ── Mémoire servie : le reçu de rappel, rejouable (P27) ─────────────────
+  ctx.inspector.append(receiptBlock(ctx, taskId, receipts, project));
 
   // ── Consigne à la session, priorité (gestes existants) ──────────────────
   renderSteering(ctx, detail, onWritten);

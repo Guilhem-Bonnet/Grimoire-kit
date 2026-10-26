@@ -49,6 +49,8 @@ __all__ = [
     "TaskRecall",
     "build_task_recall",
     "consolidate_task_memory",
+    "task_recall_entries",
+    "task_recall_query",
 ]
 
 DEFAULT_LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
@@ -238,6 +240,35 @@ def _sibling_recall(task: MissionTask, other: MissionTask, causes: list[str]) ->
     )
 
 
+def task_recall_entries(
+    memory_manager: MemoryManager, query: str, *, limit: int,
+) -> list[tuple[str, MemoryEntry]]:
+    """Les souvenirs que le rappel de tâche sert pour *query* : ``(type, entrée)``, sans doublon.
+
+    Un type par passe (:data:`_RECALL_MEMORY_TYPES`), au plus *limit* par type,
+    et aucun reçu écrit ici : l'appelant écrit le sien (le rappel de tâche) ou
+    n'en écrit aucun (le rejeu du cockpit, P27). Une passe en erreur est sautée.
+    """
+    served: list[tuple[str, MemoryEntry]] = []
+    seen: set[str] = set()
+    for type_ in _RECALL_MEMORY_TYPES:
+        try:
+            entries = memory_manager.recall_typed(query, type_=type_, limit=limit, log_read=False)
+        except Exception:  # noqa: S112 — la mémoire est une couche optionnelle du rappel
+            continue
+        for entry in entries:
+            if not entry.id or entry.id in seen:
+                continue
+            seen.add(entry.id)
+            served.append((type_, entry))
+    return served
+
+
+def task_recall_query(task: MissionTask, siblings: tuple[SiblingRecall, ...]) -> str:
+    """La requête mémoire du rappel de *task* : son titre et ceux de ses voisines, bornée."""
+    return " ".join([task.title, *(s.title for s in siblings)])[:300].strip()
+
+
 def _memory_hits(
     memory_manager: MemoryManager | None,
     task: MissionTask,
@@ -252,24 +283,13 @@ def _memory_hits(
     """
     if memory_manager is None or limit <= 0:
         return []
-    query = " ".join([task.title, *(s.title for s in siblings)])[:300].strip()
+    query = task_recall_query(task, siblings)
     if not query:
         return []
-    hits: list[MemoryHit] = []
-    served: list[MemoryEntry] = []
-    seen: set[str] = set()
-    for type_ in _RECALL_MEMORY_TYPES:
-        try:
-            # Un seul reçu pour tout le rappel (écrit plus bas), pas un par type.
-            entries = memory_manager.recall_typed(query, type_=type_, limit=limit, log_read=False)
-        except Exception:  # noqa: S112 — la mémoire est une couche optionnelle du rappel
-            continue
-        for entry in entries:
-            if not entry.id or entry.id in seen:
-                continue
-            seen.add(entry.id)
-            hits.append(MemoryHit(id=entry.id, type=type_, text=entry.text, tags=tuple(entry.tags)))
-            served.append(entry)
+    # Un seul reçu pour tout le rappel (écrit plus bas), pas un par type.
+    pairs = task_recall_entries(memory_manager, query, limit=limit)
+    hits = [MemoryHit(id=e.id, type=t, text=e.text, tags=tuple(e.tags)) for t, e in pairs]
+    served = [e for _t, e in pairs]
     journal = getattr(memory_manager, "journal_read", None)
     if callable(journal):
         # Reçu de rappel (P13) : ce que le rappel de tâche a réellement servi, jamais son texte.

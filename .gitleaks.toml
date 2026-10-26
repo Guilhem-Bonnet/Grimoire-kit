@@ -32,3 +32,16 @@ paths = [
 regexes = [
   '''ghp_16C7e42F292c6912E7710c838347Ae178B4a''',
 ]
+
+# Mot de passe Neo4j factice de la carte machine (P26) : le test prouve que la valeur
+# lue dans l'environnement ou dans `docker inspect` ne sort jamais de la route. Même
+# bornage que ci-dessus : ce fichier ET cette valeur exacte.
+[[allowlists]]
+description = "Mot de passe Neo4j factice des tests de la carte machine"
+condition = "AND"
+paths = [
+  '''^tests/unit/tools/test_workspace_machine\.py$''',
+]
+regexes = [
+  '''s3cr3t-valeur-neo4j''',
+]

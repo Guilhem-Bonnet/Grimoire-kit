@@ -73,6 +73,10 @@ _JOURNAL_MAX_BYTES = 4 * 1024 * 1024
 #: Maillons suivis au plus dans une chaîne de remplacement.
 _CHAIN_MAX = 20
 _TITLE_MAX = 96
+_JOURNAL_KEYS = (
+    "ts", "op", "actor", "session_id", "task_ref", "reason", "before_id", "after_id", "gesture",
+    "tags_added", "tags_removed", "fingerprint", "undo_ref",
+)
 _EXCERPT_MAX = 240
 
 KINDS = ("souvenir", "projection")
@@ -617,8 +621,13 @@ def memory_entry(project_root: Path, entry_id: str | None, *, slug: str | None =
     described = describe(served, slug=target.slug, name=name, recall=recall, journal=journal)
     described["chain"] = _chain(served, recall)
     described["links"] = _links(described)
+    from grimoire.tools.workspace_memory_gestures import can_undo
+
     described["journal"] = [
-        {k: row[k] for k in ("ts", "op", "actor", "session_id", "task_ref", "reason", "before_id", "after_id") if k in row}
+        {
+            **{k: row[k] for k in _JOURNAL_KEYS if k in row},
+            "undoable": can_undo(row),  # P34 : ligne annulable depuis l'historique de l'entrée
+        }
         for row in journal.rows.get(entry.id, [])
     ]
     described["metadata"] = {k: v for k, v in (entry.metadata or {}).items() if not isinstance(v, (dict, list))}

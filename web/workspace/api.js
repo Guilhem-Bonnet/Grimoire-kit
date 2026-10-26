@@ -330,9 +330,40 @@ export const api = {
   // Santé de la mémoire et file d'hygiène (P25) : une mesure fraîche d'un projet
   // (`slug` du registre, omis = le projet en portée). Lecture seule.
   memoryQuality: (slug) => get(WS + 'memory/quality', slug ? { slug } : undefined),
+  // Flotte › Données (P26) : services mémoire de la machine, conteneurs, propriétaires
+  // et partages. Lecture seule, mesure fraîche ; demandée à l'ouverture de la vue seulement.
+  dataMachine: () => get(WS + 'data/machine'),
+  // Reçu de rappel (P27) : ce que la mémoire a servi à une tâche (`tasks/<id>/receipts`),
+  // ou les derniers reçus du projet (`memory/recall`, `task` pour filtrer). Lecture seule.
+  taskReceipts: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/receipts', project ? { project } : undefined),
+  memoryRecall: (slug, task) => {
+    const params = {};
+    if (slug) params.slug = slug;
+    if (task) params.task = task;
+    return get(WS + 'memory/recall', params);
+  },
+  // Rejouer (P27) : `receipt` (clé d'un reçu) ou `q` (requête libre) et `base`
+  // (la liste du passage précédent, identifiants dans l'ordre servi). Un calcul
+  // en GET : le serveur n'écrit rien, pas même un reçu de lecture.
+  memoryReplay: ({ receipt, task, q, base, slug, project } = {}) => {
+    const params = {};
+    if (receipt) params.receipt = receipt;
+    if (task) params.task = task;
+    if (q) params.q = q;
+    if (base != null) params.base = base.join(',');
+    if (slug) params.slug = slug;
+    if (project) params.project = project;
+    return get(WS + 'memory/recall/replay', params);
+  },
   // Suppression gouvernée du cockpit (`POST /api/memory`) : confirmation
   // explicite, et le serveur la refuse (403) hors du projet qu'il sert.
   memoryDelete: (id, project) => post('/api/memory', { action: 'delete', id, project, confirm: true }),
+  // Correction directe d'une entrée (P34), même route et mêmes gardes :
+  // `mode: 'preview'` rend l'avant/après et la version des entrées en jeu ;
+  // `mode: 'apply'` renvoie cette version avec `confirm: true` (409 et aperçu
+  // recalculé si une entrée a changé entre-temps).
+  memoryGesture: (body, project) => post('/api/memory', { action: 'gesture', project, ...body }),
 
   // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
   // Lecture, validation et simulation sont disponibles sur les deux hôtes
