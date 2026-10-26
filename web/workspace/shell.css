@@ -160,12 +160,23 @@ input:not([type="checkbox"]):not([type="radio"]) {
   height: 13px;
 }
 
+/* Hauteur minimale, jamais fixe (P68) : un libellé long passe à la ligne
+ * DANS la pastille au lieu de déborder. Une pastille d'une ligne garde ses
+ * 24 px au pixel près (2 px de rembourrage + 1,3 de hauteur de ligne restent
+ * sous le plancher) ; `.chip.pill` reste sur une ligne. `break-word` et non
+ * `anywhere` : la largeur minimale reste celle du mot le plus long, une pastille
+ * ou un bouton ne se laisse pas écraser lettre à lettre dans une rangée flex. */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 9px;
+  height: auto;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 9px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+  text-align: left;
   border: 1px solid var(--line);
   border-radius: var(--r);
   font-size: var(--t-min);
@@ -426,12 +437,19 @@ th .th-hint {
   color: var(--bad);
 }
 
+/* Même règle que `.chip` (P68) : hauteur minimale, un libellé long s'enroule
+ * dans le bouton au lieu d'en sortir ; un bouton d'une ligne est inchangé. */
 .btn {
-  height: var(--h-ctl);
+  height: auto;
+  min-height: var(--h-ctl);
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 var(--sp-3);
+  padding: 2px var(--sp-3);
+  line-height: 1.3;
+  overflow-wrap: break-word;
+  text-align: left;
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   font-size: var(--t-s);
@@ -592,6 +610,7 @@ th .th-hint {
     width: 36px;
     min-width: 36px;
     height: 36px;
+    min-height: 36px;
   }
 }
 
