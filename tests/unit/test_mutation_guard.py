@@ -41,6 +41,8 @@ COCKPIT_LITERALS: dict[str, list[str]] = {
     "/api/projects/update": ["/api/projects/update"],
     "/api/projects/add": ["/api/projects/add"],
     "/api/projects/scan": ["/api/projects/scan"],
+    "/api/projects/remove": ["/api/projects/remove"],
+    "/api/projects/prune": ["/api/projects/prune"],
     "/api/projects/create": ["/api/projects/create"],
     "/api/setup": ["/api/setup"],
     "/api/setup/plan": ["/api/setup/plan"],
@@ -287,7 +289,9 @@ def _literals(func: Any) -> set[str]:
 
 def test_every_cockpit_post_literal_is_covered_by_the_matrix() -> None:
     """Une route ajoutée à ``do_POST`` sans ligne dans ``COCKPIT_LITERALS`` échoue ici."""
-    seen = _literals(cmd_cockpit._CockpitHandler.do_POST) - {"/api/"}
+    from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES
+
+    seen = (_literals(cmd_cockpit._CockpitHandler.do_POST) | set(REGISTRY_ROUTES)) - {"/api/"}
     assert seen <= set(COCKPIT_LITERALS), f"route non couverte : {sorted(seen - set(COCKPIT_LITERALS))}"
 
 

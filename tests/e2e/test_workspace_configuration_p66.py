@@ -105,7 +105,7 @@ def test_les_rubriques_sont_verticales_avec_leurs_comptes(cockpit_workspace: Pag
     _open_configuration(page, payloads)
     tabs = page.locator("#section-tabs .tab")
     assert [t.locator(".tab-lbl").inner_text() for t in tabs.all()] == [
-        "Agents", "Fichiers", "Blueprints", "Hôtes et hooks", "Fournisseurs et budgets", "Préférences",
+        "Agents", "Fichiers", "Blueprints", "Hôtes et hooks", "Fournisseurs et budgets", "Projets", "Préférences",
     ]
     page.wait_for_selector("#section-tabs [data-count='hotes']")
     assert page.locator("#section-tabs [data-count='hotes']").inner_text() == "8"
