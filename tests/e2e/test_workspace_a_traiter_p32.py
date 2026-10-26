@@ -139,7 +139,10 @@ def served_inbox(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str,
     _init(studio, STUDIO, env)
     _block(studio, _task(studio, STUDIO_TASK, env), "la maquette attend une relecture", env)
     calm = base / CALM
-    (calm / "_grimoire").mkdir(parents=True)
+    # Un projet réellement équipé où rien n'attend. Un dossier nu, `/api/health`
+    # le dirait non initialisé et le guide de premier lancement (P36) prendrait
+    # la place de l'accueil.
+    _init(calm, CALM, env)
 
     for folder in (home, studio, calm):
         _grimoire(base, "cockpit", "add", str(folder), env=env)

@@ -145,6 +145,8 @@ class TestQualityRoute:
         }
         assert measures["provenance"] == {"souvenirs": 26, "withProvenance": 1, "rate": 1 / 26}
         assert measures["projections"] == {"count": 0, "share": 0.0}
+        # P73 : la carte par hall se nourrit des comptes par type classé.
+        assert measures["types"] == {"untyped": 25, "decision": 1}
         crit = _criteria(report)
         assert (crit["distinct"]["state"], crit["distinct"]["value"]) == ("fail", "2")
         assert "×25" in crit["distinct"]["detail"]
