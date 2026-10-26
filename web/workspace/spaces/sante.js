@@ -71,7 +71,7 @@ const STYLES = `
 .sm-cmd code { font-family: var(--mono); font-size: var(--t-s); padding: 4px 8px; border-radius: var(--r); background: var(--hover);
   color: var(--ink); overflow-wrap: anywhere; }
 .sm-none { margin: 0; padding: 12px 16px 14px; border-top: 1px solid var(--line); color: var(--ink2); }
-@media (max-width: 960px) {
+@container canvas (max-width: 760px) {
   .sm-wrap { padding: var(--sp-4); }
   .sm-grid { grid-template-columns: minmax(0, 1fr); }
   .sm-hyg { grid-template-columns: minmax(0, 1fr); }

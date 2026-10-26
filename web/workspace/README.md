@@ -115,7 +115,7 @@ directement dans le DOM de la coque :
 | `ctx.dock` | `log(onglet, …lignes)`, `clear`, `setTab`, `echo(commande)` |
 | `ctx.empty` | `(titre, phrase, commande, action?)` → le bloc d'état vide unique ; `action` est `{ label, run }` (un bouton qui fait, pas une commande à recopier) ; sans `action`, une commande que la Console du dock sait exécuter (liste blanche, sans argument) reçoit un bouton « Lancer dans la Console » |
 | `ctx.loading` | `(libellé, lignes?)` → `[squelette, texte pour lecteurs d'écran]` à poser dans une zone qui attend ses données (jamais un « Chargement… » nu) ; la coque en pose un sur la toile à chaque changement d'espace et le retire dès que l'espace y écrit du contenu |
-| `ctx.openPanel` | `(id)` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px |
+| `ctx.openPanel` | `(id, { detail? })` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px ; `detail: true` (montrer l'élément choisi) n'agit que sous 900 px et pas quand le détail est déjà posé sous la liste (P59) |
 | `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté |
 | `ctx.goto` | `goto(id, params?)` — naviguer vers un espace, une rubrique ou un ancien identifiant (`'source'`) ; `params` est vu au montage qui suit (ex. `goto('source', { file })` depuis ⌘K) et écrit dans le hash (lien profond) |
 | `ctx.params` | Ce que l'appelant de `goto()` a demandé pour CE montage — `{}` la plupart du temps |
@@ -142,6 +142,12 @@ Deux règles opposables :
   Le bouton du rail ouvre, le focus entre dans le tiroir, Échap, son bouton
   « Fermer » ou un appui sur le voile le referment et rendent le focus au rail.
   La barre de document passe à la ligne ; les onglets des espaces défilent.
+- **Conteneurs (P59)** : ce seuil ne décide que de la coque. La mise en page des
+  panneaux suit la place qu'ils ont : `#middle` et `#canvas` sont des
+  conteneurs de requête, les espaces écrivent `@container canvas (max-width: …)`
+  et jamais `@media (max-width: …)` (`tests/unit/test_workspace_overlays.py`).
+  Entre 600 et 1180 px de `#middle`, hors atelier, le détail se pose sous la
+  liste, sur toute la largeur.
 - **Mesure** : `scrollWidth` du document ne prouve rien ici (`#shell` est en
   `overflow: hidden`, il vaut `innerWidth` même quand le centre est écrasé à
   0 px). `tests/e2e/test_workspace_responsive_a11y.py` mesure la largeur du
@@ -164,9 +170,17 @@ Deux règles opposables :
   key })` branche j / k / Entrée sur une liste (P58), lus par la coque, donc
   jamais pendant une saisie ; `rowActions(actions)` pose les actions
   secondaires d'une ligne, révélées au survol et au focus, toutes dans un menu
-  « … » (P56) ; `moreMenu()` est ce menu, partagé avec l'inspecteur de tâche. Les zones de données
+  « … » (P56) ; `moreMenu()` est ce menu, partagé avec l'inspecteur de tâche, un
+  `popover="auto"` (P55) : Échap, le clic à côté et le retour du focus au bouton
+  sont ceux du navigateur. La palette et l'aide sont des `<dialog>` modaux, les
+  infobulles des `popover="manual"`. Les zones de données
   (`#canvas`, `#explorer-body`, `#inspector-body`, `#evidence-body`) sont des
   régions `aria-live="polite"`.
+- **« Annuler » (P57)** : `undoToast(message, { undo, undone })` suit un geste
+  réversible, parti sans confirmation ; `undo()` rappelle la route inverse
+  existante. Région `#toast` (`role="status"`), 10 s, en pause au survol et au
+  focus ; `GrimoireWorkspace.toast.expire()` en déclenche la fin dans les tests.
+  Un geste irréversible n'a pas de toast : il garde sa confirmation.
 - **États vides** : un bouton qui fait (`ctx.empty(…, action)`), pas une commande
   à recopier. Sans `action`, une commande que la Console sait exécuter (liste
   blanche, sans argument) reçoit « Lancer dans la Console ». Un explorateur ou un

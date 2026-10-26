@@ -69,7 +69,7 @@ function injectStyles() {
     .pl-fleet .tbl th:nth-child(6) { width: 136px; }
     @media (hover: none), (pointer: coarse) { .pl-fleet .tbl th:nth-child(6) { width: 168px; } }
     .pl-none { margin: 0; }
-    @media (max-width: 900px) {
+    @container canvas (max-width: 720px) {
       .pl-sheet, .pl-wrap, .pl-fleet { padding: var(--sp-3); }
     }
     .pl-section h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
@@ -79,7 +79,7 @@ function injectStyles() {
     .pl-open-cell { width: 1%; white-space: nowrap; text-align: right; }
     .pl-open-cell > .row-actions { margin-right: 4px; vertical-align: middle; }
     .pl-card > .row-actions { align-self: flex-end; }
-    @media (max-width: 760px) {
+    @container canvas (max-width: 760px) {
       .pl-desktop { display: none; }
       .pl-cards { display: flex; }
     }
@@ -142,7 +142,7 @@ function injectStyles() {
     .pl-step-bar[data-tone="acc"] { background: var(--acc); }
     .pl-step-name { font-size: var(--t-min); font-weight: 500; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .pl-up-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-    @media (max-width: 900px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
+    @container canvas (max-width: 900px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
     .pl-upcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; min-width: 0; }
     .pl-upcard-h { padding: 12px 16px; display: flex; align-items: center; gap: var(--sp-2); background: var(--e1); }
     .pl-upcard-h h3 { margin: 0; font-size: var(--t-s); font-weight: 600; color: var(--ink); }
@@ -499,7 +499,7 @@ function withViewSeg(head, seg) {
   line.append(title, seg);
 }
 
-function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false, viewSwitch = null } = {}) {
+function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false, viewSwitch = null, onRemove = null } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-wrap pl-fleet';
 
@@ -633,11 +633,19 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
 
   // P56 : les actions secondaires d'un projet, révélées au survol et au focus,
   // toutes dans le menu « … » ; ouvrir la fiche reste le clic sur la ligne.
+  // P57 : « Retirer de la flotte » (le registre du cockpit, jamais le dossier)
+  // part tout de suite et s'annule 10 s durant quand « Ajouter » rend l'entrée
+  // telle quelle ; sinon il mène à Configuration › Projets, qui confirme. Le
+  // projet que ce cockpit sert ne se retire pas d'ici.
+  const home = (ctx.host.status && ctx.host.status.home) || '';
   const projectActions = (r) => {
     const name = r.entry.name || r.entry.slug;
     return rowActions([
       { id: 'copy-path', label: `Copier le chemin de ${name}`, icon: 'copy', run: (b) => copyText(r.entry.path, b) },
       { id: 'open-work', label: `Voir le Travail de ${name}`, icon: 'board', run: () => ctx.scope.set(r.entry.slug, '#travail') },
+      onRemove && r.entry.slug !== home
+        ? { id: 'remove', label: `Retirer ${name} de la flotte`, icon: 'cross', run: (b) => onRemove(r, b) }
+        : null,
     ], { label: `Plus d'actions pour ${name}` });
   };
 
@@ -2456,7 +2464,7 @@ export async function mount(root, ctx) {
           root, ctx, rows, attention,
           (slug) => ctx.scope.set(slug),
           () => draw({ forceFleet: true }),
-          { pending, viewSwitch: viewSeg(view, onView) },
+          { pending, viewSwitch: viewSeg(view, onView), onRemove: cockpit ? removeFromFleet : null },
         );
         if (caret !== null) {
           const next = root.querySelector('.pl-search');
@@ -2484,6 +2492,24 @@ export async function mount(root, ctx) {
       revealFocus(root, ctx);
       ctx.dock.echo('grimoire doctor');
     }
+  };
+
+  // Retirer une ligne de la flotte : le geste du registre (Configuration ›
+  // Projets), chargé au premier clic seulement — jamais au premier rendu.
+  const removeFromFleet = async (r, button) => {
+    button.disabled = true;
+    const { restorableEntry, removeWithUndo } = await import('./registre.js');
+    const registry = await ctx.api.projects().catch(() => null);
+    const entry = registry && (registry.projects || []).find((p) => p.slug === r.entry.slug);
+    if (!entry || !restorableEntry(entry)) { ctx.goto('projets'); return; }
+    const repaint = async () => {
+      invalidateFleetCache();
+      if (!ctx.signal.aborted) await draw({ forceFleet: true });
+    };
+    await removeWithUndo(ctx, entry, {
+      onChange: repaint,
+      onError: (error) => { button.disabled = false; button.title = failureText(error); },
+    });
   };
 
   const onView = (next) => {

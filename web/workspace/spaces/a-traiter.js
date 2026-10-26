@@ -72,7 +72,7 @@ const CSS = `
 .at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
-@media (max-width: 720px) {
+@container canvas (max-width: 720px) {
   .at-wrap { padding: var(--sp-4); }
   .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
   .at-sub { flex-wrap: wrap; column-gap: var(--sp-1); }

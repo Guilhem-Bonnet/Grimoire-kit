@@ -253,9 +253,10 @@ def test_p56_les_lignes_de_la_flotte_et_d_a_traiter_ont_leurs_actions(page: Page
     row.hover()
     assert _opacity(page, ".pl-fleet tbody tr[data-project]:hover .row-actions") == 1
     actions = row.locator(".row-act").evaluate_all("(ns) => ns.map((n) => n.dataset.action)")
-    assert actions == ["copy-path", "open-work"]
+    # P57 a ajouté « Retirer de la flotte » (absent sur le projet servi).
+    assert actions[:2] == ["copy-path", "open-work"] and set(actions[2:]) <= {"remove"}
     row.locator("[data-role='row-more']").click()
-    assert row.locator("[data-role='row-more-panel'] .more-item").count() == 2
+    assert row.locator("[data-role='row-more-panel'] .more-item").count() == len(actions)
     # Ouvrir le menu n'a pas ouvert la fiche du projet.
     assert page.evaluate("() => window.GrimoireWorkspace.scope.all") is True
 
