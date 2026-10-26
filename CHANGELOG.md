@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.66.1] - 2026-10-26
+
+- fix(missions): `missions/finition.py` lit `project-context.yaml` avec ruamel.yaml, la dépendance du kit, au lieu de PyYAML qui n'est pas installé chez l'utilisateur. La 3.66.0 n'est jamais partie sur PyPI : son test de fumée (`up --prove` sur une installation vierge) s'arrêtait sur « No module named 'yaml' ». La CI ne le voyait pas, PyYAML y étant installé par les dépendances de développement. Garde `tests/unit/test_no_unguarded_pyyaml.py` : tout `import yaml` de `src/` doit avoir un repli sur `ImportError`.
+
 ## [3.66.0] - 2026-10-25
 
 - fix(missions): une ligne illisible du journal que couvre l'instantané du rejeu reste signalée (K12 x K13). L'instantané, écrit quand un rejeu dépasse 50 ms, ne portait pas les lignes illisibles : le rejeu suivant ne relisait que la suite et `unreadable_lines()` revenait vide, l'alerte « ligne(s) illisible(s) » du tick disparaissait. Vu en CI (runner lent) sur `test_crash_bench` scénario H ; test déterministe dans `tests/unit/test_ledger_snapshot.py`.

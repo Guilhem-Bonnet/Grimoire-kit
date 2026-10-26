@@ -13,6 +13,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+
 from grimoire.core.exceptions import GrimoireMissionError
 
 __all__ = ["FINITIONS", "PHASE_FINITION", "finition_for", "normalize_finition", "project_phase"]
@@ -43,11 +46,9 @@ def normalize_finition(value: str) -> str:
 
 def project_phase(project_root: Path) -> str:
     """La phase déclarée dans ``project-context.yaml`` ; ``""`` si absente, illisible ou inconnue."""
-    import yaml  # type: ignore[import-untyped]
-
-    try:
-        raw: Any = yaml.safe_load((project_root / "project-context.yaml").read_text(encoding="utf-8"))
-    except (OSError, ValueError, yaml.YAMLError):  # ValueError : UnicodeDecodeError d'un fichier non UTF-8
+    try:  # ruamel, la dépendance du kit : PyYAML n'est pas installé chez l'utilisateur
+        raw: Any = YAML(typ="safe").load((project_root / "project-context.yaml").read_text(encoding="utf-8"))
+    except (OSError, ValueError, YAMLError):  # ValueError : UnicodeDecodeError d'un fichier non UTF-8
         return ""
     if not isinstance(raw, dict):
         return ""
