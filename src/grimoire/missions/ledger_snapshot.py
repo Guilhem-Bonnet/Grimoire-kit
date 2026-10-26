@@ -90,6 +90,11 @@ class Replay:
     #: K12 x K13 : les lignes illisibles que l'instantané couvre, que le rejeu de la suite ne relit pas.
     unreadable: tuple[int, ...] = ()
 
+    def records(self) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
+        """Les événements de la suite, et les lignes illisibles de tout le journal (couvertes, puis de la suite)."""
+        records, tail_unreadable = parse_jsonl(self.tail, self.first_line)
+        return records, (*self.unreadable, *tail_unreadable)
+
 
 def _producer() -> str:
     from grimoire.__version__ import __version__

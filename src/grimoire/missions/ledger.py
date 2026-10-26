@@ -49,7 +49,6 @@ from grimoire.missions.ledger_rules import (
     blocks_path,
     default_claim_expiry,
     deferred_waiting,
-    parse_jsonl,
     read_jsonl,
     replay_link,
     replay_steering,
@@ -356,8 +355,7 @@ class MissionLedger:
             self._unreadable = ()
             return
         replay = snapshot.resume_from_snapshot(self)  # K13 : l'état d'un instantané prouvé, puis la suite seule
-        records, tail_unreadable = parse_jsonl(replay.tail, replay.first_line)
-        self._unreadable = (*replay.unreadable, *tail_unreadable)  # K12 : lignes illisibles numérotées sur tout le journal
+        records, self._unreadable = replay.records()  # K12 : lignes illisibles numérotées sur tout le journal
         for raw in records:
             evt_type = raw.get("event_type", "")
             payload = raw.get("payload", {})
