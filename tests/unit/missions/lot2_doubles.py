@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -48,7 +49,12 @@ class FakeHost:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], Path, Mapping[str, str] | None]] = []
         self.bg_fails = False
-        self.agents: list[dict[str, str]] | None = None  # ``claude agents --json`` ; None : la lecture échoue
+        #: ``claude agents --json`` ; ``None`` : les sessions ``--bg`` que ce double a lancées et pas arrêtées.
+        self.agents: list[dict[str, str]] | None = None
+        self.agents_fail = False  # ``claude agents --json`` sort en erreur : la lecture échoue
+        #: Toutes les sessions de fond lancées, comme ``claude agents --json`` les décrit (#966 : ``sessionId`` ≠ ``--session-id``).
+        self.bg: list[dict[str, str]] = []
+        self.stopped: set[str] = set()  # ids courts arrêtés par ``claude stop`` : ``claude agents`` ne les liste plus
         self.stop_result = ExecResult(0, "stopped\n")
         self.prs: dict[str, str] = {}  # branche → état (MERGED, OPEN, CLOSED) ; absente : aucune PR
         self.pr_heads: dict[str, str] = {}  # branche → headRefOid ; absente : la tête locale de la branche
@@ -77,24 +83,55 @@ class FakeHost:
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
         self.calls.append((list(argv), cwd, env))
         if argv[0] == "claude":
-            return self._claude(list(argv))
+            return self._claude(list(argv), cwd)
         if argv[0] == "gh":
             return self._gh(list(argv), cwd)
         return ExecResult(127, "", f"{argv[0]} : faux binaire inconnu")
 
-    def _claude(self, argv: list[str]) -> ExecResult:
+    def _claude(self, argv: list[str], cwd: Path) -> ExecResult:
         if argv[1] == "--bg":
             if self.bg_fails:
                 return ExecResult(1, "", "claude : échec simulé")
             self._next += 1
-            return ExecResult(0, f"backgrounded · {self._next:08x} (running)\n")
+            short = f"{self._next:08x}"
+            # Comme Claude Code 2.1.310 : ``--session-id`` est ignoré, l'identité commence par l'id court imprimé ;
+            # une reprise (``--resume <id>``) garde l'identité reprise.
+            resumed = argv[argv.index("--resume") + 1] if "--resume" in argv else ""
+            name = argv[argv.index("--name") + 1] if "--name" in argv else ""
+            self.bg.append({
+                "pid": str(4000 + self._next), "id": short, "cwd": str(cwd), "kind": "background",
+                "startedAt": "2026-10-26T00:00:00Z", "sessionId": resumed or short + str(uuid.uuid4())[8:],
+                "name": name, "status": "busy", "state": "running",
+            })
+            return ExecResult(0, f"backgrounded · {short} (running)\n")
         if argv[1] == "stop":
+            if self.stop_result.returncode == 0:
+                self.stopped.add(argv[2])
             return self.stop_result
         if argv[1:3] == ["agents", "--json"]:
-            if self.agents is None:
+            if self.agents_fail:
                 return ExecResult(1, "", "claude agents : échec simulé")
-            return ExecResult(0, json.dumps(self.agents))
+            live = [s for s in self.bg if s["id"] not in self.stopped]
+            return ExecResult(0, json.dumps(live if self.agents is None else self.agents))
         return ExecResult(2, "", "sous-commande inconnue")
+
+    def session_environ(self, name: str) -> dict[str, str]:
+        """L'environnement que voit la session de fond *name*, comme sous Claude Code 2.1.310 (#966).
+
+        Celui du démon, c'est-à-dire celui du **premier** ``claude --bg`` lancé, quelle que soit la session ; plus
+        ``CLAUDE_CODE_SESSION_ID``, que l'hôte exporte avec le vrai identifiant de la session.
+        """
+        daemon = next((dict(e or {}) for a, _c, e in self.calls if a[:2] == ["claude", "--bg"]), {})
+        return {**daemon, "CLAUDE_CODE_SESSION_ID": self.session_of(name)}
+
+    def session_of(self, name: str) -> str:
+        """Le ``sessionId`` réel de la dernière session de fond lancée sous ce nom (``grimoire-<id>``, ``grimoire-review-<id>``).
+
+        Un nom qui finit par ``-`` est un préfixe (``grimoire-review-`` : le dernier relecteur lancé, quelle que soit sa tâche).
+        """
+        return next(
+            s["sessionId"] for s in reversed(self.bg) if s["name"] == name or (name.endswith("-") and s["name"].startswith(name))
+        )
 
     def _gh(self, argv: list[str], cwd: Path) -> ExecResult:
         if self.gh_broken:

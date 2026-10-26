@@ -119,8 +119,8 @@ def events(projet: Path, tid: str, kind: str) -> list:  # type: ignore[type-arg]
 
 
 def reviewer_sid(host: FakeHost) -> str:
-    argv = [a for a in host.of("claude", "--bg") if "--name" in a and a[a.index("--name") + 1].startswith("grimoire-review-")][-1]
-    return argv[argv.index("--session-id") + 1]
+    """Le vrai identifiant du dernier relecteur lancé, tel que ``claude agents`` le rend (#966)."""
+    return host.session_of("grimoire-review-")
 
 
 def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (), edit: tuple[str, str] = ("src/app/route.py", "404\n"),
@@ -492,7 +492,7 @@ def test_file_serie_une_fusion_a_la_fois_et_la_suivante_realignee(projet: Path, 
     host.pr_numbers[f"task/{second}"] = 8
     tick(projet, host)  # deux relecteurs
     for tid, wt in ((first, wt1), (second, wt2)):
-        give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+        give_ready(host, tid, wt, host.session_of(f"grimoire-review-{tid}"))
     tick(projet, host)  # READY jugés, CI vue une fois
     report = tick(projet, host)
     outcome = {o.task_id: (o.action, o.status) for o in report.merges}
@@ -512,7 +512,7 @@ def test_deux_taches_en_retard_un_seul_realignement_a_la_fois(projet: Path, host
     advance_main(projet, "c.py", "c\n")  # les deux branches sont en retard
     tick(projet, host)
     for tid, wt in ((first, wt1), (second, wt2)):
-        give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+        give_ready(host, tid, wt, host.session_of(f"grimoire-review-{tid}"))
     tick(projet, host)
     report = tick(projet, host)
     assert {o.task_id: (o.action, o.status) for o in report.merges} == {first: ("realign", "done"), second: ("wait", "waiting")}
@@ -528,7 +528,7 @@ def test_la_tete_de_file_garde_son_rang_meme_quand_la_suivante_est_prete(projet:
     host.checks[f"task/{first}"] = [{"name": "tests", "bucket": "pending"}]
     tick(projet, host)
     for tid, wt in ((first, wt1), (second, wt2)):
-        give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+        give_ready(host, tid, wt, host.session_of(f"grimoire-review-{tid}"))
     tick(projet, host)
     report = tick(projet, host)
     assert {o.task_id: (o.action, o.status) for o in report.merges} == {first: ("wait", "waiting"), second: ("wait", "waiting")}
