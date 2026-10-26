@@ -76,6 +76,7 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `glossary.js` | Chargement du glossaire et pile d'infobulles épinglables ; nom du 4e espace (`FOURTH_SPACE`) | lot 2, P31 |
 | `api.js` | **Le seul module qui appelle `fetch`.** Cible le bon projet sur les deux hôtes | figé par le squelette |
 | `spaces/a-traiter.js` | Accueil : ce qui attend une décision, groupé par urgence (`/api/workspace/attention`) ; une ligne par élément (projet, raison, ancienneté, action en ligne qui ouvre l'écran de décision, sélection posée), détail dans l'inspecteur, états vide / erreur partielle / lecture seule, clavier j / k / Entrée | P31, P32 |
+| `spaces/a-traiter-since.js` | À traiter › « Depuis ta dernière visite » : livré, refusé, laissé en attente depuis la dernière visite (`/api/workspace/attention/since`), chaque ligne liée à sa tâche ; la visite est gardée par le navigateur (`visit:<portée>`), avancée seulement quand le résumé a été refermé ou quitté | P53 |
 | `spaces/piloter.js` | Flotte et projet, KPI, « À traiter », agents (clause d'emploi, outils, contexte, skills, usage — #374) | lot 4 |
 | `spaces/concevoir.js` | Toile, zoom, éditeur de graphe, bibliothèque, inspecteur de nœud | lot 3 |
 | `spaces/executer.js` | Board gouverné, portes, carte de tâche, timeline | lot 4 |
