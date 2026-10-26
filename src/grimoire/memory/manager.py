@@ -18,6 +18,7 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -899,6 +900,7 @@ class MemoryManager(MemoryGesturesMixin):
         session_id: str = "",
         task_ref: str = "",
         reason: str = "",
+        journal_extra: Mapping[str, Any] | None = None,
     ) -> MemoryEntry | None:
         """Marque ``old_id`` comme remplacé par ``new_id`` (métadonnées conservées).
 
@@ -929,7 +931,7 @@ class MemoryManager(MemoryGesturesMixin):
         if updated is not None:
             record_change(
                 self._project_root, op="supersede", context=context, before_id=old_id,
-                after_id=new_id, content=updated.text, reason=reason,
+                after_id=new_id, content=updated.text, reason=reason, extra=journal_extra,
             )
         return updated
 
@@ -1174,6 +1176,7 @@ class MemoryManager(MemoryGesturesMixin):
         session_id: str = "",
         task_ref: str = "",
         reason: str = "",
+        journal_extra: Mapping[str, Any] | None = None,
     ) -> MemoryEntry | None:
         """Modifier une entrée — même frontière que la créer.
 
@@ -1186,7 +1189,7 @@ class MemoryManager(MemoryGesturesMixin):
         if updated is not None:
             record_change(
                 self._project_root, op="update", context=context, before_id=entry_id,
-                after_id=updated.id, content=updated.text, reason=reason,
+                after_id=updated.id, content=updated.text, reason=reason, extra=journal_extra,
             )
         return updated
 

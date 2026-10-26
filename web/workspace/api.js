@@ -333,6 +333,11 @@ export const api = {
   // Suppression gouvernée du cockpit (`POST /api/memory`) : confirmation
   // explicite, et le serveur la refuse (403) hors du projet qu'il sert.
   memoryDelete: (id, project) => post('/api/memory', { action: 'delete', id, project, confirm: true }),
+  // Correction directe d'une entrée (P34), même route et mêmes gardes :
+  // `mode: 'preview'` rend l'avant/après et la version des entrées en jeu ;
+  // `mode: 'apply'` renvoie cette version avec `confirm: true` (409 et aperçu
+  // recalculé si une entrée a changé entre-temps).
+  memoryGesture: (body, project) => post('/api/memory', { action: 'gesture', project, ...body }),
 
   // ── Blueprints : éditeur de graphe (édition — atelier seulement) ───────────
   // Lecture, validation et simulation sont disponibles sur les deux hôtes
