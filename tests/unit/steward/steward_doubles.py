@@ -36,9 +36,9 @@ RECENT = "2026-10-25T11:00:00Z"
 
 def git(cwd: Path, *args: str, date: str = "") -> str:
     env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else None
-    done = subprocess.run(
-        ["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", check=True, env=env
-    )
+    done = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, encoding="utf-8", env=env)
+    if done.returncode != 0:  # le stderr dans l'échec : un décor qui casse en CI doit dire pourquoi
+        raise AssertionError(f"git {' '.join(args)} : code {done.returncode}\n{done.stderr}")
     return done.stdout.strip()
 
 
@@ -60,7 +60,7 @@ def make_repo(tmp_path: Path) -> Path:
     root = tmp_path / "projet"
     root.mkdir()
     git(root, "init", "-q", "-b", "main")
-    for key, value in (("user.name", "Test"), ("user.email", "test@example.invalid"), ("commit.gpgsign", "false")):
+    for key, value in (("user.name", "Test"), ("user.email", "test@example.invalid"), ("commit.gpgsign", "false"), ("gc.auto", "0"), ("maintenance.auto", "false")):
         git(root, "config", key, value)
     (root / "README.md").write_text("projet\n", encoding="utf-8")
     (root / "CHANGELOG.md").write_text("# Changelog\n\n## [Unreleased]\n\n- base\n", encoding="utf-8")

@@ -78,8 +78,8 @@ def test_un_arbre_ancien_de_la_cible_revient_en_arriere(scene: Scene) -> None:
 def test_worktree_sale(scene: Scene) -> None:
     carte = build_map(scene.sources())
     worktrees = _by_ref(carte, "worktrees")
-    assert worktrees[f"worktree:{scene.worktree}"]["sale"] is True
-    assert worktrees[f"worktree:{scene.root}"]["sale"] is False
+    assert worktrees[f"worktree:{scene.worktree.as_posix()}"]["sale"] is True  # git rend des chemins en « / »
+    assert worktrees[f"worktree:{scene.root.as_posix()}"]["sale"] is False
     assert _by_ref(carte, "branches")["branche:feat/sale"]["worktree_sale"] is True
     sale = [s for s in carte["signaux"] if s["type"] == "worktree_sale"]
     assert [s["branche"] for s in sale] == ["branche:feat/sale"]

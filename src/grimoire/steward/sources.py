@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import stat
 import tempfile
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -294,7 +295,14 @@ def scratch_objects(src: Sources) -> Iterator[dict[str, str] | None]:
     try:
         yield {"GIT_OBJECT_DIRECTORY": str(scratch), "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(objects.resolve())}
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(scratch, onexc=_writable_then_retry)
+
+
+def _writable_then_retry(func: Callable[..., object], path: str, _exc: BaseException) -> None:
+    """Windows : git écrit ses objets en lecture seule, que ``rmtree`` ne retire pas sans ``chmod``."""
+    with suppress(OSError):
+        Path(path).chmod(stat.S_IWRITE)
+        func(path)
 
 
 @dataclass(frozen=True, slots=True)
