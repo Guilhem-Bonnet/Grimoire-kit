@@ -34,6 +34,7 @@
 // (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
+import { renderCapacityPanel } from './capacite.js';
 import {
   actionStatus, badge, copyText, failureText, icon, kpiRow, listNav, rowActions, setActionStatus, spaceHead, STATE_ICON,
 } from '../shell.js';
@@ -745,7 +746,7 @@ async function loadSheet(ctx, slug) {
   return (
     sheet || {
       health: null, memory: null, doctor: null, agents: null,
-      proposals: null, setupRun: null, upgradeRuns: null, flowRuns: null, name: null,
+      proposals: null, setupRun: null, upgradeRuns: null, flowRuns: null, name: null, capacity: null,
     }
   );
 }
@@ -1855,6 +1856,14 @@ function renderSheet(root, ctx, slug, name, sheet, options) {
   ]);
   wrap.append(kpi);
 
+  // ── Capacité (P71) : la file d'admission et ses goulots ─────────────────
+  // Composant partagé (spaces/capacite.js, pensé pour une future vue « Plan »
+  // de Travail) : la fiche l'héberge et branche son `refresh` sur le pouls de
+  // la coque via `options.onCapacity` — jamais de boucle de sondage dédiée.
+  const capacity = renderCapacityPanel(ctx, { project: slug, initial: sheet.capacity });
+  wrap.append(capacity.node);
+  if (options.onCapacity) options.onCapacity(capacity.refresh);
+
   root.append(wrap);
 
   // ── Inspecteur : kit, hôtes, standard, actions ─────────────────────────
@@ -2406,6 +2415,12 @@ export async function mount(root, ctx) {
   let queued = false;
   let queuedOpts;
 
+  // Capacité (P71) : le panneau de la fiche projet s'actualise au pouls de la
+  // coque (UI-3), jamais par une boucle dédiée. Un seul handler pour tout le
+  // montage ; la fiche courante y branche son `refresh`, la Flotte le défait.
+  const capacityLive = { refresh: null };
+  ctx.live.on(() => { if (capacityLive.refresh) capacityLive.refresh(); });
+
   const stateKey = () => level + '|' + (level === 'projet' ? selected : view);
 
   const runDraw = (opts) => {
@@ -2424,6 +2439,7 @@ export async function mount(root, ctx) {
 
   const drawOnce = async ({ forceFleet = false } = {}) => {
     ctx.docbar.setBreadcrumb([]);
+    capacityLive.refresh = null; // la fiche qui vient (si c'en est une) rebranchera le sien
 
     // Coquille immédiate (#541 point 3) : jamais d'écran vide le temps que
     // les appels réseau reviennent — un état « chargement… » se peint tout
@@ -2488,7 +2504,10 @@ export async function mount(root, ctx) {
       const name = cockpit ? sheet.name || null : ctx.host.status?.slug || null;
       if (ctx.signal.aborted) return;
       root.replaceChildren(); // retire la coquille « Chargement… » avant le vrai rendu
-      renderSheet(root, ctx, selected, name, sheet, { refresh: draw });
+      renderSheet(root, ctx, selected, name, sheet, {
+        refresh: draw,
+        onCapacity: (fn) => { capacityLive.refresh = fn; },
+      });
       revealFocus(root, ctx);
       ctx.dock.echo('grimoire doctor');
     }
