@@ -22,8 +22,11 @@ le mandat scelle, à l'octroi, la section ``escalation`` de ``orchestration-poli
 politique modifiée depuis révoque le mandat (``escalation_policy_changed``).
 
 Un mandat est révoqué par l'humain (:meth:`MandateStore.revoke`) ou automatiquement sur
-événement : échéance, plafond de sessions dépassé, écriture d'agent refusée dans la zone
-protégée (:meth:`MandateStore.revoke_on_protected_write`), politique modifiée. Le verdict forgé
+événement : échéance, plafond de sessions dépassé, refus d'agent dans la zone protégée (sauf mention
+prouvée inoffensive — #982 : :func:`revoke_session_mandates` pour le projet et la session, :func:`revoke_every_mandate`
+quand le journal ou la clé peut être visé ou que le projet est inconnu), politique modifiée. La révocation inscrit
+sa cause (session, outil, programme, zone visée ; aucun argument), que le statut rend
+(:attr:`MandateState.revocation`). Le verdict forgé
 (:meth:`MandateStore.revoke_on_forged_verdict`) et l'écriture hors worktree
 (:meth:`MandateStore.revoke_on_write_outside_worktree`) sont exposés ici et branchés aux
 lots 2 et 3.
@@ -92,7 +95,9 @@ __all__ = [
     "load_escalation",
     "register_orchestrator_session",
     "require_authority",
+    "revocation_cause",
     "revoke_every_mandate",
+    "revoke_session_mandates",
     "task_categories",
     "verify_control_key",
 ]
@@ -493,6 +498,10 @@ class MandateState:
     reason: str = ""
     detail: str = ""
     sessions_today: int = 0
+    #: L'entrée de révocation telle qu'inscrite (#982) : ``reason``, ``detail``, ``ts`` et, quand l'événement les
+    #: portait, ``session_id``, ``tool``, ``program`` (premier mot de la commande) et ``target`` (vecteur et zone
+    #: visée) — aucun argument, donc aucun secret. Vide hors révocation.
+    revocation: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False)
 
     @property
     def active(self) -> bool:
@@ -505,6 +514,7 @@ class MandateState:
             "detail": self.detail,
             "sessions_today": self.sessions_today,
             "mandate": self.mandate.to_dict() if self.mandate else None,
+            "revocation": dict(self.revocation) if self.revocation else None,
         }
 
 
@@ -669,19 +679,29 @@ class MandateStore:
 
     # ── Révocation ───────────────────────────────────────────────────────────
 
-    def revoke(self, reason: str = REVOKE_MANUAL, detail: str = "", now: datetime | None = None) -> Mandate | None:
+    def revoke(
+        self,
+        reason: str = REVOKE_MANUAL,
+        detail: str = "",
+        now: datetime | None = None,
+        *,
+        cause: Mapping[str, str] | None = None,
+    ) -> Mandate | None:
         """Révoque le mandat actif du projet — toujours permis : retirer une autorité n'en demande aucune.
 
         Rend le mandat révoqué, ``None`` s'il n'y en avait pas d'actif. API que les lots 2 et 3 appellent
-        sur événement (voir ``revoke_on_*``).
+        sur événement (voir ``revoke_on_*``). *cause* (#982) : ce qui a déclenché la révocation, inscrit avec
+        elle et rendu par le statut — ``session_id``, ``tool``, ``program``, ``target`` (:func:`revocation_cause`).
         """
         state = self._state(now or _now(), auto_revoke=False)
         if state.mandate is None or not state.active:
             return None
-        self._write_revocation(state.mandate.id, reason or REVOKE_MANUAL, detail, now or _now())
+        self._write_revocation(state.mandate.id, reason or REVOKE_MANUAL, detail, now or _now(), cause)
         return state.mandate
 
-    def _write_revocation(self, mandate_id: str, reason: str, detail: str, moment: datetime) -> None:
+    def _write_revocation(
+        self, mandate_id: str, reason: str, detail: str, moment: datetime, cause: Mapping[str, str] | None = None
+    ) -> None:
         # Le marqueur d'abord : si l'entrée ne s'écrit pas, ou si on la retire ensuite du journal, le mandat reste révoqué.
         with contextlib.suppress(OSError):
             self.journal.mark_revoked(mandate_id, reason, moment.isoformat())
@@ -692,15 +712,9 @@ class MandateStore:
                 "reason": reason,
                 "detail": detail[:400],
                 "ts": moment.isoformat(),
+                **_cause_fields(cause),
             }
         )
-
-    def revoke_on_protected_write(self, detail: str) -> Mandate | None:
-        """Un agent a tenté d'écrire dans la zone protégée (refus du frein) : le mandat tombe.
-
-        Le frein appelle :func:`revoke_every_mandate` (le journal est commun à tous les projets).
-        """
-        return self.revoke(REVOKE_PROTECTED_WRITE, detail)
 
     def revoke_on_forged_verdict(self, task_id: str, detail: str) -> Mandate | None:
         """Branché au lot 3 (reviewer) : un verdict forgé ouvre le disjoncteur et révoque."""
@@ -743,6 +757,11 @@ class MandateStore:
                 REVOKED,
                 f"{revocation.get('reason', '')} : {revocation.get('detail', '')}".strip(" :"),
                 sessions,
+                {
+                    k: str(revocation[k])
+                    for k in ("reason", "detail", "ts", *_CAUSE_KEYS)
+                    if revocation.get(k) not in (None, "")
+                },
             )
         until = _parse(mandate.until)
         verdict: tuple[str, str] | None = None
@@ -1224,12 +1243,19 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None,
         )
 
 
-def revoke_every_mandate(reason: str, detail: str, journal: AuthorityJournal | None = None) -> list[str]:
+def revoke_every_mandate(
+    reason: str,
+    detail: str,
+    journal: AuthorityJournal | None = None,
+    *,
+    cause: Mapping[str, str] | None = None,
+) -> list[str]:
     """Révoque chaque mandat actif du poste, tous projets confondus ; rend leurs identifiants.
 
-    Pour un événement qui touche la zone protégée elle-même (une écriture d'agent refusée sous
-    ``~/.grimoire/control/``) : le journal est commun à tous les projets, la confiance qu'il porte
-    tombe pour tous. Un journal illisible ne se prolonge pas : il ne porte déjà aucun mandat.
+    Le frein l'appelle (#982) quand la cible peut être le journal du mandat ou la clé du cockpit (qui forgent un
+    mandat pour n'importe quel projet), et en repli de :func:`revoke_session_mandates` quand le projet de la
+    session est inconnu, sans mandat, ou quand la révocation ciblée échoue. Un journal illisible ne se prolonge
+    pas : il ne porte déjà aucun mandat.
     """
     store_journal = journal or AuthorityJournal()
     hit: list[str] = []
@@ -1239,7 +1265,123 @@ def revoke_every_mandate(reason: str, detail: str, journal: AuthorityJournal | N
         return hit
     projects = {str(e["project"]) for e in entries if e.get("type") == "grant" and e.get("project")}
     for project in sorted(projects):
-        revoked = MandateStore(Path(project), store_journal).revoke(reason, detail)
+        revoked = MandateStore(Path(project), store_journal).revoke(reason, detail, cause=cause)
         if revoked is not None:
             hit.append(revoked.id)
     return hit
+
+
+def _main_worktree(root: Path) -> Path | None:
+    """La racine du worktree principal quand *root* est un worktree lié (``.git`` est un fichier), sans lancer git.
+
+    Lu sur disque : ``<root>/.git`` (``gitdir: …/.git/worktrees/<nom>``) puis ``commondir`` dans ce dossier. Un
+    worker lancé dans le worktree de sa tâche agit sous le mandat du projet, inscrit à la racine principale.
+    """
+    try:
+        dotgit = root / ".git"
+        if not dotgit.is_file():
+            return None
+        text = dotgit.read_text(encoding="utf-8").strip()
+        if not text.startswith("gitdir:"):
+            return None
+        gitdir = Path(text[len("gitdir:") :].strip())
+        gitdir = gitdir if gitdir.is_absolute() else root / gitdir
+        common_raw = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+        common = (Path(common_raw) if Path(common_raw).is_absolute() else gitdir / common_raw).resolve()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return common.parent if common.name == ".git" else None
+
+
+#: Le marqueur d'une racine de projet Grimoire (``grimoire.hosts.runtime.PROJECT_MARKER``, recopié pour ne pas
+#: importer l'exécution du hook).
+_PROJECT_MARKER = "_grimoire"
+
+
+def revoke_session_mandates(
+    project_root: Path,
+    reason: str,
+    detail: str,
+    *,
+    cause: Mapping[str, str] | None = None,
+    session_id: str = "",
+    journal: AuthorityJournal | None = None,
+) -> list[str]:
+    """Révoque les mandats de la session (#982) ; rend les identifiants révoqués.
+
+    Tombent : le mandat du projet de la session (*project_root*, la racine que le hook a résolue) et, si c'est un
+    worktree lié, celui du worktree principal ; et tout mandat où *session_id* est inscrit (octroi ou session
+    enregistrée), quel que soit le répertoire courant. Échec fermé : si *project_root* n'est pas une racine Grimoire
+    reconnue (pas de ``_grimoire/``, la session a fait ``cd`` ailleurs), ou si aucun mandat n'y correspond, tous
+    les mandats du poste tombent (:func:`revoke_every_mandate`). Un journal illisible ne porte déjà aucun mandat.
+    """
+    store_journal = journal or AuthorityJournal()
+    try:
+        entries = store_journal.read()
+    except JournalError:
+        return []
+    root = project_root.resolve()
+    roots = [root]
+    main = _main_worktree(root)
+    if main is not None and main != root:
+        roots.append(main)
+    granted = {str(e.get("project")) for e in entries if e.get("type") == "grant"}
+    if not (root / _PROJECT_MARKER).is_dir() or not any(str(r) in granted for r in roots):
+        return revoke_every_mandate(reason, detail, store_journal, cause=cause)
+    session = session_id.strip()
+    if session:
+        mine = {
+            str(e.get("mandate_id"))
+            for e in entries
+            if e.get("type") in ("grant", "session") and str(e.get("session_id", "")) == session
+        }
+        roots.extend(
+            Path(str(e["project"]))
+            for e in entries
+            if e.get("type") == "grant" and str(e.get("mandate_id")) in mine and e.get("project")
+        )
+    hit: list[str] = []
+    for project in dict.fromkeys(roots):
+        revoked = MandateStore(project, store_journal).revoke(reason, detail, cause=cause)
+        if revoked is not None:
+            hit.append(revoked.id)
+    return hit
+
+
+# ── Cause d'une révocation (#982) ────────────────────────────────────────────
+
+#: Ce qu'une révocation sur événement inscrit de sa cause, en plus du motif, du détail et de l'heure. Aucun
+#: argument de la commande : seulement le programme (premier mot) et la zone visée — rien à caviarder.
+_CAUSE_KEYS: tuple[str, ...] = ("session_id", "tool", "program", "target")
+_PROGRAM = re.compile(r"[A-Za-z0-9._+-]{1,40}")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def revocation_cause(session_id: str, tool: str, command: str, vector: str, what: str = "") -> dict[str, str]:
+    """La cause qu'une révocation du frein inscrit : session, outil, programme lancé, zone visée.
+
+    Le programme est le premier mot de la commande qui n'est pas une assignation (``TOKEN=x cp …`` donne ``cp``),
+    réduit à son nom de base et à ``[A-Za-z0-9._+-]`` ; aucun argument n'est gardé, donc aucun secret. La cible est
+    le code du vecteur et le marqueur de la zone. Ne lève jamais.
+    """
+    try:
+        program = next((w for w in command.split() if not _ASSIGNMENT.match(w)), "")
+        found = _PROGRAM.match(program.rsplit("/", 1)[-1]) if program else None
+        marker = what[what.rfind("(") + 1 : what.rfind(")")] if "(" in what and what.endswith(")") else ""
+        return {
+            "session_id": session_id,
+            "tool": tool,
+            "program": found.group(0) if found else "",
+            "target": f"{vector} {marker}".strip(),
+        }
+    except Exception:
+        return {"session_id": session_id, "tool": tool}
+
+
+def _cause_fields(cause: Mapping[str, str] | None) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for key in _CAUSE_KEYS:
+        value = str((cause or {}).get(key, "") or "").strip()
+        if value:
+            fields[key] = value[:120]
+    return fields
