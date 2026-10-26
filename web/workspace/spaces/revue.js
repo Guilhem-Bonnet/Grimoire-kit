@@ -64,7 +64,7 @@ const CSS = `
 .rv-kv > :first-child { color: var(--ink3); font-weight: 500; }
 .rv-formula { margin-top: auto; font-family: var(--mono); font-size: var(--t-s); color: var(--ink2); overflow-wrap: anywhere; }
 .rv-formula b { color: var(--rub); font-weight: 500; margin-right: 6px; }
-@media (max-width: 860px) {
+@container canvas (max-width: 860px) {
   .rv-wrap { grid-template-columns: minmax(0, 1fr); }
   .rv-list { border-right: 0; border-bottom: 1px solid var(--line); }
   .rv-card { grid-template-columns: minmax(0, 1fr); }

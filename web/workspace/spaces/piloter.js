@@ -34,7 +34,9 @@
 // (`ctx.host.readOnly`) hors projet d'accueil, comme le reste de la fiche.
 
 import { renderMarkdown, truncateMarkdown } from '../markdown.js';
-import { actionStatus, badge, failureText, icon, kpiRow, setActionStatus, spaceHead, STATE_ICON } from '../shell.js';
+import {
+  actionStatus, badge, copyText, failureText, icon, kpiRow, listNav, rowActions, setActionStatus, spaceHead, STATE_ICON,
+} from '../shell.js';
 
 const STYLE_ID = 'pl-styles';
 
@@ -63,16 +65,21 @@ function injectStyles() {
     .pl-fleet .tbl th:nth-child(3) { width: 170px; }
     .pl-fleet .tbl th:nth-child(4) { width: 100px; }
     .pl-fleet .tbl th:nth-child(5) { width: 120px; }
-    .pl-fleet .tbl th:nth-child(6) { width: 64px; }
+    /* Actions de ligne (P56) puis ouverture : trois boutons de 28 px, 36 px au doigt. */
+    .pl-fleet .tbl th:nth-child(6) { width: 136px; }
+    @media (hover: none), (pointer: coarse) { .pl-fleet .tbl th:nth-child(6) { width: 168px; } }
     .pl-none { margin: 0; }
-    @media (max-width: 900px) {
+    @container canvas (max-width: 720px) {
       .pl-sheet, .pl-wrap, .pl-fleet { padding: var(--sp-3); }
     }
     .pl-section h3 { font-size: var(--t-m); font-weight: 500; margin: 0 0 var(--sp-2); color: var(--ink); }
     .pl-cards { display: none; flex-direction: column; gap: var(--sp-2); }
     .pl-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); padding: var(--sp-3) var(--sp-4); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
     .pl-card-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
-    @media (max-width: 760px) {
+    .pl-open-cell { width: 1%; white-space: nowrap; text-align: right; }
+    .pl-open-cell > .row-actions { margin-right: 4px; vertical-align: middle; }
+    .pl-card > .row-actions { align-self: flex-end; }
+    @container canvas (max-width: 760px) {
       .pl-desktop { display: none; }
       .pl-cards { display: flex; }
     }
@@ -135,7 +142,7 @@ function injectStyles() {
     .pl-step-bar[data-tone="acc"] { background: var(--acc); }
     .pl-step-name { font-size: var(--t-min); font-weight: 500; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .pl-up-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-    @media (max-width: 900px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
+    @container canvas (max-width: 900px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
     .pl-upcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; min-width: 0; }
     .pl-upcard-h { padding: 12px 16px; display: flex; align-items: center; gap: var(--sp-2); background: var(--e1); }
     .pl-upcard-h h3 { margin: 0; font-size: var(--t-s); font-weight: 600; color: var(--ink); }
@@ -492,7 +499,7 @@ function withViewSeg(head, seg) {
   line.append(title, seg);
 }
 
-function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false, viewSwitch = null } = {}) {
+function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending = false, viewSwitch = null, onRemove = null } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'pl-wrap pl-fleet';
 
@@ -624,6 +631,24 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
     return open;
   };
 
+  // P56 : les actions secondaires d'un projet, révélées au survol et au focus,
+  // toutes dans le menu « … » ; ouvrir la fiche reste le clic sur la ligne.
+  // P57 : « Retirer de la flotte » (le registre du cockpit, jamais le dossier)
+  // part tout de suite et s'annule 10 s durant quand « Ajouter » rend l'entrée
+  // telle quelle ; sinon il mène à Configuration › Projets, qui confirme. Le
+  // projet que ce cockpit sert ne se retire pas d'ici.
+  const home = (ctx.host.status && ctx.host.status.home) || '';
+  const projectActions = (r) => {
+    const name = r.entry.name || r.entry.slug;
+    return rowActions([
+      { id: 'copy-path', label: `Copier le chemin de ${name}`, icon: 'copy', run: (b) => copyText(r.entry.path, b) },
+      { id: 'open-work', label: `Voir le Travail de ${name}`, icon: 'board', run: () => ctx.scope.set(r.entry.slug, '#travail') },
+      onRemove && r.entry.slug !== home
+        ? { id: 'remove', label: `Retirer ${name} de la flotte`, icon: 'cross', run: (b) => onRemove(r, b) }
+        : null,
+    ], { label: `Plus d'actions pour ${name}` });
+  };
+
   function paint() {
     const query = fleetFilter.query.trim().toLowerCase();
     const segment = segments.find(([id]) => id === fleetFilter.segment) || segments[0];
@@ -642,8 +667,8 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
       const tr = document.createElement('tr');
       tr.tabIndex = 0;
       tr.dataset.project = r.entry.slug;
+      // Entrée (P58) passe par le contrôleur de liste de la coque : le clic de la ligne.
       tr.addEventListener('click', () => onSelect(r.entry.slug));
-      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
 
       const nameCell = document.createElement('td');
       const path = text('div', 'lbl mono pl-path', r.entry.path);
@@ -662,7 +687,8 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
       kitCell.append(text('div', null, kit.main));
       if (kit.sub) kitCell.append(text('div', 'lbl', kit.sub));
       const openCell = document.createElement('td');
-      openCell.append(openButton(r));
+      openCell.className = 'pl-open-cell';
+      openCell.append(projectActions(r), openButton(r));
       tr.append(
         nameCell, attentionCell, kitCell,
         text('td', null, sessionsWord(r.health)),
@@ -675,8 +701,8 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
       const card = document.createElement('div');
       card.className = 'pl-card';
       card.tabIndex = 0;
+      card.dataset.project = r.entry.slug;
       card.addEventListener('click', () => onSelect(r.entry.slug));
-      card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(r.entry.slug); });
       const cardPath = text('div', 'lbl mono pl-path', r.entry.path);
       cardPath.title = r.entry.path;
       card.append(text('div', 'pl-name', name), cardPath);
@@ -690,6 +716,7 @@ function renderFleet(root, ctx, rows, attention, onSelect, onRefresh, { pending 
         'div', 'pl-card-row lbl',
         [kit.sub ? `${kit.main} · ${kit.sub}` : kit.main, relativeAge(r.health?.activity?.ageMinutes)].join(' · '),
       ));
+      card.append(projectActions(r));
       cards.append(card);
     }
   }
@@ -2347,6 +2374,11 @@ export async function mount(root, ctx) {
   // propre à cet espace, plus de projet « prévisualisé » distinct du projet
   // servi : choisir une ligne de la Flotte change la portée (`ctx.scope.set`).
   const level = cockpit && ctx.scope && ctx.scope.all ? 'flotte' : 'projet';
+  // P58 : j / k parcourent les projets de la Flotte (table au bureau, cartes en
+  // mobile) ; la ligne active porte `aria-current`, Entrée ouvre sa fiche.
+  if (level === 'flotte') {
+    listNav(root, { rows: '.pl-fleet tbody tr[data-project], .pl-fleet .pl-card[data-project]', mark: 'aria-current', key: 'project' });
+  }
   const selected = ctx.host.project || null;
   // Vue de la Flotte (`#flotte?vue=donnees`) : Projets par défaut.
   let view = ctx.params && ctx.params.vue === 'donnees' ? 'donnees' : 'projets';
@@ -2403,7 +2435,8 @@ export async function mount(root, ctx) {
       // Le nom du projet (accents compris), jamais son slug (P31).
       shell.append(spaceHead(ctx.scope ? ctx.scope.name : 'Projet servi'));
     }
-    shell.append(...ctx.loading('Chargement…', 3));
+    // P60 : la forme de ce qui vient — la table des projets, ou la fiche d'un projet.
+    shell.append(...ctx.loading('Chargement…', level === 'flotte' ? 6 : 3, level === 'flotte' ? 'table' : 'kpi'));
     root.replaceChildren(shell);
 
     if (level === 'flotte' && view === 'donnees') {
@@ -2431,7 +2464,7 @@ export async function mount(root, ctx) {
           root, ctx, rows, attention,
           (slug) => ctx.scope.set(slug),
           () => draw({ forceFleet: true }),
-          { pending, viewSwitch: viewSeg(view, onView) },
+          { pending, viewSwitch: viewSeg(view, onView), onRemove: cockpit ? removeFromFleet : null },
         );
         if (caret !== null) {
           const next = root.querySelector('.pl-search');
@@ -2459,6 +2492,24 @@ export async function mount(root, ctx) {
       revealFocus(root, ctx);
       ctx.dock.echo('grimoire doctor');
     }
+  };
+
+  // Retirer une ligne de la flotte : le geste du registre (Configuration ›
+  // Projets), chargé au premier clic seulement — jamais au premier rendu.
+  const removeFromFleet = async (r, button) => {
+    button.disabled = true;
+    const { restorableEntry, removeWithUndo } = await import('./registre.js');
+    const registry = await ctx.api.projects().catch(() => null);
+    const entry = registry && (registry.projects || []).find((p) => p.slug === r.entry.slug);
+    if (!entry || !restorableEntry(entry)) { ctx.goto('projets'); return; }
+    const repaint = async () => {
+      invalidateFleetCache();
+      if (!ctx.signal.aborted) await draw({ forceFleet: true });
+    };
+    await removeWithUndo(ctx, entry, {
+      onChange: repaint,
+      onError: (error) => { button.disabled = false; button.title = failureText(error); },
+    });
   };
 
   const onView = (next) => {

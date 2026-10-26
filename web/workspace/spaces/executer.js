@@ -67,7 +67,10 @@ const VIEW_IDS = ['board4', 'board8', 'liste', 'sessions', 'timeline', 'decision
 
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
-import { actionStatus, badge, glyph, icon, levelBars, monogram, setActionStatus, stateIcon } from '../shell.js';
+import {
+  actionStatus, badge, copyText, glyph, icon, levelBars, listNav, monogram, moreMenu as sharedMoreMenu, rowActions,
+  setActionStatus, stateIcon, undoToast,
+} from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
@@ -172,7 +175,7 @@ function injectStyles() {
   style.id = STYLE_ID;
   style.textContent = `
     .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
-    @media (max-width: 900px) { .ex-wrap { padding: var(--sp-3); } }
+    @container canvas (max-width: 720px) { .ex-wrap { padding: var(--sp-3); } }
     .ex-board { display: flex; gap: var(--sp-3); align-items: flex-start; overflow-x: auto; flex-grow: 1; }
     .ex-col { flex: 1 0 240px; max-width: 340px; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
     .ex-col-head { padding: 6px 2px; }
@@ -228,12 +231,9 @@ function injectStyles() {
     .ex-moves .ex-gate-row { border: 0; padding: 0; }
     .ex-moves .ex-gate-row[data-target="blocked"] { flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); border-radius: 0; }
     .ex-moves .ex-gate-row[data-target="blocked"] .input { flex: 1 1 160px; min-width: 0; }
+    .ex-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--hover); }
+    .ex-confirm .lbl { flex: 1 1 100%; margin: 0; }
     .ex-insp-idrow > .badge { margin-left: auto; }
-    .ex-more { position: relative; }
-    .ex-more-btn { width: 28px; padding: 0; justify-content: center; }
-    .ex-more-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(300px, 80vw); display: flex; flex-direction: column; gap: 6px; padding: var(--sp-3); background: var(--overlay); border: 1px solid var(--line2, var(--line)); border-radius: var(--r-l); box-shadow: var(--shadow); }
-    .ex-more-panel[hidden] { display: none; }
-    .ex-more-panel h4 { margin: 0; font-size: var(--t-min); font-weight: 500; color: var(--ink2); }
     .ex-kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--t-s); overflow-wrap: anywhere; }
     .ex-event { font-size: var(--t-min); color: var(--ink2); padding: 2px 0; }
     .ex-card-meta { font-size: var(--t-s); color: var(--ink2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
@@ -254,8 +254,12 @@ function injectStyles() {
     .ex-card .ex-wait > .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .ex-card .ex-wait.flag > span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .ex-card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-    .ex-card-next { font-size: var(--t-min); color: var(--ink2); display: flex; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    .ex-card-next { font-size: var(--t-min); color: var(--ink2); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+    /* P59 : un libellé d'action ne se casse jamais ; faute de place, ce sont les boutons qui passent à la ligne. */
+    .ex-card-next > span:first-child, .ex-card-next .btn { white-space: nowrap; }
+    .ex-card-next > .row { flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
     .ex-card-next .btn { height: 24px; padding: 0 10px; font-size: var(--t-min); }
+    .ex-card-next .row-act, .ex-card-next .more-btn { width: 24px; min-width: 24px; padding: 0; }
     .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
     .ex-cost { font-size: var(--t-min); }
     .ex-list-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
@@ -264,6 +268,9 @@ function injectStyles() {
     .ex-list td { padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); }
     .ex-list tbody tr { cursor: pointer; }
     .ex-list tbody tr:hover { background: var(--e2); }
+    .ex-list tbody tr[aria-current="true"] { background: var(--acc-soft); }
+    .ex-list tbody tr:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+    .ex-list .ex-list-actions { width: 1%; white-space: nowrap; text-align: right; }
     .ex-timeline { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) 0; }
     .ex-tl-filters { display: flex; gap: var(--sp-2); align-items: center; padding-bottom: var(--sp-2); }
     .ex-tl-filters select { font-size: var(--t-min); }
@@ -534,15 +541,26 @@ function proofRing(task) {
   return wrap;
 }
 
-function taskCard(task, onSelect, portfolio = false, selected = false) {
+/** Les actions secondaires d'une tâche (P56), sur sa carte comme sur sa ligne :
+ *  révélées au survol et au focus, toutes dans le menu « … ». L'action
+ *  principale reste le clic sur la carte (et Entrée) : ouvrir le détail. */
+function taskActions(task, onTimeline) {
+  return rowActions([
+    { id: 'copy-id', label: `Copier l'identifiant ${task.id}`, icon: 'copy', run: (b) => copyText(task.id, b) },
+    { id: 'copy-command', label: 'Copier la commande', icon: 'terminal', run: (b) => copyText(`grimoire task show ${task.id}`, b) },
+    onTimeline ? { id: 'timeline', label: 'Voir la chronologie', icon: 'history', run: () => onTimeline(task) } : null,
+  ], { label: `Plus d'actions pour ${task.id}` });
+}
+
+function taskCard(task, onSelect, portfolio = false, selected = false, onTimeline = null) {
   const card = document.createElement('div');
   card.className = 'ex-card';
   if (selected) card.setAttribute('aria-current', 'true');
   card.tabIndex = 0;
   card.dataset.project = task.project?.slug || '';
   card.dataset.task = task.id;
+  // Entrée (P58) passe par le contrôleur de liste de la coque : le clic de la carte.
   card.addEventListener('click', () => onSelect(task));
-  card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSelect(task); });
 
   // Ligne du haut (artboard Travail) : identifiant, classe de route, anneau de preuve.
   const top = document.createElement('div');
@@ -660,12 +678,13 @@ function taskCard(task, onSelect, portfolio = false, selected = false) {
   }
   // « Voir la porte » doublait le clic sur la carte (qui ouvre le même panneau de
   // détail) : la carte entière est le geste, comme sur la maquette.
+  actions.append(taskActions(task, onTimeline));
   nextRow.append(actions);
   card.append(nextRow);
   return card;
 }
 
-function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSelected = () => false) {
+function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSelected = () => false, onTimeline = null) {
   const board = document.createElement('div');
   board.className = 'ex-board';
   const byColumn = new Map();
@@ -696,7 +715,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
       toggle.addEventListener('click', () => {
         if (unfolded.has(group.id)) unfolded.delete(group.id); else unfolded.add(group.id);
         const fresh = document.createElement('div');
-        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected);
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
         board.replaceWith(fresh.firstElementChild);
       });
       head.append(toggle);
@@ -715,7 +734,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     if (!inColumn.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio, isSelected(task)));
+      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
     }
     col.append(body);
     board.append(col);
@@ -723,7 +742,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
   root.append(board);
 }
 
-function renderList(root, ctx, tasks, onSelect, portfolio = false) {
+function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = () => false, onTimeline = null) {
   const wrap = document.createElement('div');
   wrap.className = 'ex-list-wrap';
   const table = document.createElement('table');
@@ -734,6 +753,9 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
     ? ['Projet', 'Tâche', 'État', 'Session', 'Priorité', 'Owner', 'Coût', 'Prochaine porte']
     : ['Tâche', 'État', 'Priorité', 'Owner', 'Session', 'Preuves', 'Coût', 'Prochaine porte'];
   for (const label of columns) headRow.append(text('th', null, label));
+  const actionsHead = text('th', 'ex-list-actions', '');
+  actionsHead.setAttribute('aria-label', 'Actions');
+  headRow.append(actionsHead);
   thead.append(headRow);
   table.append(thead);
   const tbody = document.createElement('tbody');
@@ -742,6 +764,7 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
     const tr = document.createElement('tr');
     tr.dataset.project = task.project?.slug || '';
     tr.dataset.task = task.id;
+    if (isSelected(task)) tr.setAttribute('aria-current', 'true');
     tr.addEventListener('click', () => onSelect(task));
     if (portfolio) tr.append(text('td', null, task.project?.name || task.project?.slug || '—'));
     tr.append(text('td', null, task.title || task.id));
@@ -785,6 +808,9 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false) {
     // Coût : « inconnu » reste lisible, et une tâche jamais démarrée garde un tiret.
     tr.append(text('td', 'lbl', costRow(task) ? costLabel(task.cost).replace(/^coût /, '') : '—'));
     tr.append(text('td', 'lbl', nextMovesText(task, '—')));
+    const actionCell = text('td', 'ex-list-actions', '');
+    actionCell.append(taskActions(task, onTimeline));
+    tr.append(actionCell);
     tbody.append(tr);
   }
   table.append(tbody);
@@ -1207,7 +1233,9 @@ function snapshotFields(container) {
   for (const el of container.querySelectorAll('input[data-role], textarea[data-role]')) {
     if (el.type === 'checkbox') continue;
     const focused = el === document.activeElement;
+    const menu = el.closest('[data-role="more-panel"]');
     fields.push({
+      inOpenMenu: Boolean(menu && (menu.popover ? menu.matches(':popover-open') : !menu.hidden)),
       role: el.dataset.role,
       nth: [...container.querySelectorAll(`[data-role="${el.dataset.role}"]`)].indexOf(el),
       value: el.value,
@@ -1224,11 +1252,18 @@ function restoreFields(container, kept) {
   for (const f of kept.fields) {
     const el = container.querySelectorAll(`[data-role="${f.role}"]`)[f.nth];
     if (!el) continue;
-    // Une saisie dans le menu « ⋯ » (raison d'annulation) rouvre le menu qui la porte.
+    // Un menu « ⋯ » ouvert sur une saisie (raison d'annulation) se rouvre après
+    // le re-rendu : un popover (P55) par la Popover API, qui remet aussi
+    // `aria-expanded` ; un menu fermé, brouillon compris, le reste.
     const panel = el.closest('[data-role="more-panel"]');
-    if (panel && panel.hidden && (f.value || f.focused)) {
-      panel.hidden = false;
-      container.querySelector('[data-role="more"]')?.setAttribute('aria-expanded', 'true');
+    if (panel && f.inOpenMenu) {
+      const toggle = container.querySelector('[data-role="more"]');
+      if (panel.popover) {
+        if (!panel.matches(':popover-open')) panel.showPopover({ source: toggle || undefined });
+      } else if (panel.hidden) {
+        panel.hidden = false;
+        toggle?.setAttribute('aria-expanded', 'true');
+      }
     }
     if (f.value) {
       el.value = f.value;
@@ -1460,23 +1495,66 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     if (locked) {
       gateRow.append(text('div', 'lbl', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
     }
-    btn.addEventListener('click', async () => {
+    const send = (action, body) => (portfolio
+      ? ctx.api.portfolioTaskAction(taskId, action, body, project)
+      : ctx.api.taskAction(taskId, action, body));
+    const realise = async () => {
       const [action, body, command] = actionFor(target, detail, reasonInput?.value || '');
       ctx.dock.echo(portfolio && project ? `${command}  # projet ${project}` : command);
+      // P57 : un passage dont le ledger connaît le chemin retour s'annule
+      // 10 s durant ; l'annulation rappelle `move` vers l'état de départ.
+      const back = reverseMove(detail.status, target);
       try {
-        const result = portfolio
-          ? await ctx.api.portfolioTaskAction(taskId, action, body, project)
-          : await ctx.api.taskAction(taskId, action, body);
+        const result = await send(action, body);
         feedback.replaceChildren();
         if (result && result.blocked) {
           feedback.append(refusalNode(result.refusals || []));
         } else {
           feedback.append(text('div', 'lbl', `transition : ${result.transition}`));
           onWritten();
+          if (back) {
+            const from = COLUMN_LABEL[detail.board] || detail.board;
+            undoToast(`${taskId} : ${from} → ${COLUMN_LABEL[target] || target}.`, {
+              undone: `${taskId} est revenue en ${from}.`,
+              undo: async () => {
+                ctx.dock.echo(`grimoire task move ${taskId} --to ${back}${portfolio && project ? `  # projet ${project}` : ''}`);
+                const undone = await send('move', { to: back });
+                if (undone && undone.blocked) {
+                  throw new Error((undone.refusals || []).map((r) => r.reason || r.evidence).join(' ; ') || 'passage refusé');
+                }
+                onWritten();
+              },
+            });
+          }
         }
       } catch (error) {
         feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
       }
+    };
+    btn.addEventListener('click', () => {
+      // Accepter clôt la tâche pour de bon (le ledger n'a aucun chemin retour) :
+      // pas de toast, une confirmation sur place.
+      if (!IRREVERSIBLE_TARGETS.has(target)) { realise(); return; }
+      btn.hidden = true;
+      const confirmBox = document.createElement('div');
+      confirmBox.className = 'ex-confirm';
+      confirmBox.dataset.role = 'transition-confirm';
+      confirmBox.setAttribute('role', 'group');
+      confirmBox.setAttribute('aria-label', `Confirmer : → ${COLUMN_LABEL[target] || target}`);
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'btn pri';
+      yes.dataset.role = 'transition-confirm-yes';
+      yes.textContent = `Confirmer : → ${COLUMN_LABEL[target] || target}`;
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'btn';
+      no.textContent = 'Annuler';
+      confirmBox.append(text('p', 'lbl', `${COLUMN_LABEL[target] || target} clôt la tâche : ce passage ne se défait pas.`), yes, no);
+      no.addEventListener('click', () => { confirmBox.remove(); btn.hidden = false; btn.focus(); });
+      yes.addEventListener('click', () => { confirmBox.remove(); btn.hidden = false; realise(); });
+      btn.after(confirmBox);
+      no.focus();
     });
     gateRow.append(btn);
     moves.append(gateRow);
@@ -1802,56 +1880,26 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
 // ailleurs. Aucun menu en lecture seule ni en colonne terminale : le cockpit ne
 // montre pas un geste qu'il ne laisserait pas partir.
 const CANCEL_TERMINAL = new Set(['archived', 'accepted', 'released']);
-let moreMenuListener = null;
 function moreMenu(ctx, detail, onWritten) {
   if (ctx.host.readOnly || CANCEL_TERMINAL.has(detail.board)) return null;
-  const wrap = document.createElement('div');
-  wrap.className = 'ex-more';
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'btn ghost ex-more-btn';
-  toggle.dataset.role = 'more';
-  toggle.setAttribute('aria-label', "Plus d'actions");
-  toggle.title = "Plus d'actions";
-  toggle.setAttribute('aria-haspopup', 'true');
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.setAttribute('aria-controls', 'ex-more-panel');
-  toggle.append(icon('more'));
-  const panel = document.createElement('div');
-  panel.className = 'ex-more-panel';
-  panel.id = 'ex-more-panel';
-  panel.dataset.role = 'more-panel';
-  panel.setAttribute('role', 'group');
-  panel.setAttribute('aria-label', "Plus d'actions");
-  panel.hidden = true;
-  const setOpen = (open) => {
-    panel.hidden = !open;
-    toggle.setAttribute('aria-expanded', String(open));
-  };
-  toggle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    setOpen(panel.hidden);
-    if (!panel.hidden) panel.querySelector('input')?.focus();
-  });
-  panel.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { setOpen(false); toggle.focus(); }
-  });
-  panel.append(text('h4', null, 'Annuler la tâche'));
   const reason = document.createElement('input');
+  // Le composant de la coque (P56 le partage avec les lignes, P55 le pose sur
+  // la Popover API) ; une raison déjà saisie survit à un clic à côté : le
+  // champ la garde et la retrouve à la réouverture du menu.
+  const menu = sharedMoreMenu({
+    id: 'ex-more-panel',
+    onOpen: () => reason.focus(),
+  });
+  const { panel } = menu;
+  menu.wrap.classList.add('ex-more');
+  menu.toggle.classList.add('ex-more-btn');
+  panel.classList.add('ex-more-panel');
+  panel.append(text('h4', null, 'Annuler la tâche'));
   reason.type = 'text';
   reason.className = 'input';
   reason.placeholder = "raison de l'annulation (obligatoire)";
   reason.dataset.role = 'cancel-reason';
   reason.setAttribute('aria-label', "Raison de l'annulation");
-  // Un seul écouteur « clic hors du menu » vit à la fois : chaque re-rendu de
-  // l'inspecteur retire celui du menu précédent.
-  moreMenuListener?.abort();
-  moreMenuListener = new AbortController();
-  const listening = AbortSignal.any ? AbortSignal.any([ctx.signal, moreMenuListener.signal]) : moreMenuListener.signal;
-  document.addEventListener('click', (e) => {
-    // Une raison déjà saisie garde le menu ouvert (un brouillon ne se perd pas sur un clic à côté).
-    if (!panel.hidden && !wrap.contains(e.target) && !reason.value.trim()) setOpen(false);
-  }, { signal: listening });
 
   const force = document.createElement('input');
   force.type = 'checkbox';
@@ -1891,8 +1939,19 @@ function moreMenu(ctx, detail, onWritten) {
     }
   });
   panel.append(reason, forceLabel, btn, feedback);
-  wrap.append(toggle, panel);
-  return wrap;
+  return menu.wrap;
+}
+
+// P57 : les passages que le ledger sait défaire (`_TASK_TRANSITIONS`), état de
+// départ → colonne visée → état où l'annulation ramène. Bloquer une tâche prête
+// se défait (blocked → ready) ; remettre en revue une tâche qui tournait aussi
+// (needs_verification → running). Bloquer une tâche réclamée ne revient qu'à
+// « prête », pas à son claim : pas d'annulation. Accepter ne se défait jamais.
+const REVERSIBLE_MOVES = { ready: { blocked: 'ready' }, running: { review: 'running' } };
+const IRREVERSIBLE_TARGETS = new Set(['accepted']);
+
+function reverseMove(status, target) {
+  return (REVERSIBLE_MOVES[status] || {})[target] || null;
 }
 
 function actionFor(target, task, reason) {
@@ -2012,6 +2071,9 @@ export async function mount(root, ctx) {
   const wrap = document.createElement('div');
   wrap.className = 'ex-wrap';
   root.append(wrap);
+  // P58 : j / k parcourent les cartes du tableau, les lignes de la liste et de
+  // Sessions ; Entrée ouvre celle qui a le focus (le clic de la ligne).
+  listNav(wrap, { rows: '.ex-card, .ex-list tbody tr[data-task], .ss-table tbody tr[data-session]' });
 
   // `ctx.params` porte ce qu'un `goto('travail', { task, view })` — ou un lien
   // profond `#travail?task=…` — a demandé. Observer s'en sert pour ouvrir
@@ -2230,10 +2292,12 @@ export async function mount(root, ctx) {
     const same = (t) => selected && t.id === selected.id && (!portfolioMode || (t.project?.slug || '') === selected.project);
     const onSelect = async (task) => {
       selected = { id: task.id, project: task.project?.slug || '' };
-      // Sous 900 px le panneau de détail est un tiroir : choisir une carte l'ouvre.
-      if (window.matchMedia('(max-width: 900px)').matches) ctx.openPanel?.('inspector');
+      // Sous 900 px le détail est un tiroir, sauf quand il tient sous la liste
+      // (P59) : la coque en décide, choisir une carte le montre.
+      ctx.openPanel?.('inspector', { detail: true });
       draw();
     };
+    const onRowTimeline = (task) => { selected = { id: task.id, project: task.project?.slug || '' }; setView('timeline'); };
 
     // K6 : ce qui attend un humain ne se cherche pas dans une colonne — bandeau sur le board,
     // vue dédiée « Décisions ».
@@ -2244,11 +2308,11 @@ export async function mount(root, ctx) {
     if (view === 'decisions') {
       renderDecisions(wrap, ctx, tasks, portfolioMode, () => draw());
     } else if (view === 'board4') {
-      renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode, same);
+      renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode, same, onRowTimeline);
     } else if (view === 'board8') {
-      renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect, portfolioMode, same);
+      renderBoard(wrap, ctx, tasks, LIFECYCLE.map((id) => ({ id, label: COLUMN_LABEL[id], cols: [id] })), onSelect, portfolioMode, same, onRowTimeline);
     } else if (view === 'liste') {
-      renderList(wrap, ctx, tasks, onSelect, portfolioMode);
+      renderList(wrap, ctx, tasks, onSelect, portfolioMode, same, onRowTimeline);
     } else if (view === 'timeline') {
       const task = tasks.find(same) || tasks[0];
       if (!task) {
@@ -2306,7 +2370,7 @@ export async function mount(root, ctx) {
     const onPick = (session) => {
       selectedSession = session.id;
       sessionNotice = null;
-      if (window.matchMedia('(max-width: 900px)').matches) ctx.openPanel?.('inspector');
+      ctx.openPanel?.('inspector', { detail: true });
       draw();
     };
     renderSessions(wrap, ctx, { data: sessions.data, error: sessions.error, selectedId: current ? current.id : '', onSelect: onPick });
