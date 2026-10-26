@@ -7,6 +7,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.66.0] - 2026-10-25
+
+- fix(cockpit): correctifs de fusion sans entrée propre, repris ici — copie de l'état d'un service par `copy.copy`, hors du garde d'écriture atomique (P22, d48b0a3d) ; la ligne « Bloquée » du board passe par `stateIcon` (P07, ead06ec9) ; `list_flow_runs` annote son retour pour `mypy --strict` (P07, ebbb28dc).
 - feat(cockpit): inspecteur de tâche de Travail, les gates et leur remède avant toute transition (P11, `GAO-p11-inspect-001`)
   - **Gates d'abord** : l'inspecteur liste chaque passage déclaré depuis la colonne (`next_moves_require`), chaque condition verte ou rouge avec sa raison et son remède, puis les boutons de transition ; un refus se lit sur place, preuve par preuve, remède compris.
   - **Dernier refus** : le dernier `task.gate.refused` du TraceLedger s'affiche (date, acteur, gate, preuves manquantes) et date les conditions qu'il a nommées (« déjà refusée le … »).
