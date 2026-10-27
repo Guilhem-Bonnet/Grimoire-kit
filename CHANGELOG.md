@@ -8,6 +8,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(web): bobines de rejeu générées sur un projet fixture. `python scripts/gen-reels.py` rejoue de vraies exécutions du kit (clôture refusée puis acceptée, décision humaine attestée sur pseudo-terminal, supersession, rappel au claim, tri V0/V1/V2) sur un projet jetable et écrit `web/data/reels/*.json` et leur HTML statique. Chaque bobine porte sa commande, la version du kit, sa date et l'empreinte de sa sortie normalisée ; `tests/unit/scripts/test_gen_reels.py` échoue dès qu'une bobine ne correspond plus à la sortie du kit courant (`--check` fait de même en ligne de commande). (P37, `GAO-p37-bobines-001`)
+
+- fix(missions): le merger réaligne (ou renvoie au worker) une PR que GitHub dit en conflit et sur laquelle aucun check n'est rapporté, au lieu d'attendre une CI que GitHub ne lance pas sur une PR en conflit. Le 2026-10-27, R57 (#979) restait sur « aucun check rapporté » à chaque tick, en conflit sur le seul CHANGELOG.md. Une PR à jour sans check attend toujours sa CI.
+
+- feat(cockpit): « Lancer la session » lance pour de vrai depuis le panneau Assigner (P47 lot 3, GAO-p47-assigne-001) : l'empreinte du plan montré engage l'apply (ADR-008 plan→apply, refus si l'état a changé), lancement par le lanceur du tick (toutes gardes : rôle, disjoncteur, WIP, plafond du jour, mandat), idempotent par tâche, journal `launch-apply.jsonl` ajout seul et fail-closed à l'entrée
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27
