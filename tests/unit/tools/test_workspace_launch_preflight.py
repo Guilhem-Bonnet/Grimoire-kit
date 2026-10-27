@@ -402,8 +402,9 @@ def test_un_worktree_note_au_ledger_est_rendu_tel_quel(projet: Path, service: Ta
          "base_sha": "deadbeef", "into": "main"},
     )
     wt = _plan(projet, task.id)["worktree"]
+    # `find_task_worktree` rend un Path : sous Windows, `str()` écrit des antislashs.
     assert wt == {
-        "chemin": f"/depot/.git/grimoire/worktrees/{task.id}", "branche": f"task/{task.id}",
+        "chemin": str(Path(f"/depot/.git/grimoire/worktrees/{task.id}")), "branche": f"task/{task.id}",
         "existant": True, "detail": "",
     }
 
