@@ -20,7 +20,7 @@ function injectStyles() {
     .wa-feed li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; min-width: 0; }
     .wa-feed .wa-when { color: var(--ink3); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
     .wa-feed .wa-what { min-width: 0; overflow-wrap: anywhere; }
-    .wa-feed li.bad .wa-what { color: var(--err, #b54233); }
+    .wa-feed li.bad .wa-what { color: var(--bad); }
     .wa-logs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .wa-logs code { font-size: 12px; overflow-wrap: anywhere; }
   `;
