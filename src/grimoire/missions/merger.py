@@ -136,6 +136,8 @@ MERGE_WAITED_EVENT = "task.merge_waited"
 MAX_DESYNC_WAITS = 3
 #: Ce que GitHub dit d'une PR en conflit avec sa cible (``mergeable``, ``mergeStateStatus``).
 _CONFLICTING = frozenset({"CONFLICTING", "DIRTY"})
+#: Le début du détail CI quand GitHub ne rapporte aucun check : le cas d'une PR en conflit, dont il ne lance pas la CI.
+_NO_CHECKS = "aucun check rapporté"
 CHANGELOG = "CHANGELOG.md"
 #: Les chemins qui escaladent à l'humain, quoi que dise le mandat (``protected_paths`` de la politique s'y ajoute) :
 #: le code des gardes, la politique, les workflows et hooks, le packaging, ce qui s'exécute à l'import ou se compile.
@@ -457,7 +459,9 @@ class MergeStage:
             return self._failed(tid, "wait", f"CI illisible : {detail}", pr.number)
         if ci == "red":
             return self._bounce(task, launch, "ci_red", detail, pr.number)
-        if ci != "green" and not self._desync_waits(tid):
+        # GitHub ne lance pas la CI d'une PR en conflit : l'attendre ne finirait jamais, le réalignement passe d'abord.
+        stalled = pr.conflicting and ci == "pending" and detail.startswith(_NO_CHECKS)
+        if ci != "green" and not self._desync_waits(tid) and not stalled:
             return MergerOutcome(tid, "wait", "waiting", f"CI : {detail}", pr.number)
         # CI verte, ou désaccord en cours de compte : la remote est relue (un tick sans désaccord remet le compte à zéro).
         got, refused = self._fetch(pr, wt.into, wt.branch)
@@ -469,9 +473,10 @@ class MergeStage:
             return self._desynced(task, launch, wt, pr, desync, side, remote_base)
         if self._desync_waits(tid):
             self._note(MERGE_WAITED_EVENT, tid, {"cleared": True, "head": pr.head, "base": target})
-        if ci != "green":
+        behind = self._git("merge-base", "--is-ancestor", target, pr.head).returncode != 0
+        if ci != "green" and not (stalled and behind):
             return MergerOutcome(tid, "wait", "waiting", f"CI : {detail}", pr.number)
-        if self._git("merge-base", "--is-ancestor", target, pr.head).returncode != 0:
+        if behind:
             if position >= self._policy.merger.realign_max:
                 if pr.conflicting and (hard := self._hard_conflicts(pr.head, target)):
                     return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {hard}", pr.number,
@@ -719,7 +724,7 @@ class MergeStage:
             rows = [r for r in every if not any(fnmatch.fnmatchcase(str(r.get("name", "")), pat) for pat in ignored)]
             scope = f"checks hors {', '.join(ignored)}" if ignored else "tous les checks"
         if not rows:
-            return "pending", f"aucun check rapporté ({scope}) : la CI verte est exigée"
+            return "pending", f"{_NO_CHECKS} ({scope}) : la CI verte est exigée"
         buckets = [str(r.get("bucket", "")) for r in rows]
         failed = [_clean(str(r.get("name")), 80) for r, b in zip(rows, buckets, strict=True) if b in red]
         if failed:
