@@ -877,7 +877,7 @@ class MergeStage:
             f"checks de la tâche, puis remets-la en revue "
             f"(`grimoire task move {tid} --to needs_verification`)."
         )
-        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env(worker))
+        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env())
         if result.returncode != 0:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=MERGER_ACTOR, reason="reprise du worker échouée")
             return self._failed(tid, "bounce", f"worker non repris ({_err(result)}), tâche remise en revue", pr)

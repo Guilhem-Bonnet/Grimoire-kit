@@ -358,6 +358,22 @@ def block_reasons(ledger: Any) -> dict[str, str]:
     return reasons
 
 
+def transition_times(ledger: Any) -> dict[str, str]:
+    """L'horodatage du dernier ``task.transitioned`` de chaque tâche (P74).
+
+    C'est l'entrée dans la colonne courante du board : la carte affiche « dans
+    la colonne depuis … » depuis ce moment, distinct de l'âge total (depuis
+    ``created_at``). Une tâche jamais transitionnée n'a pas d'entrée ici — la
+    carte retombe alors sur sa création, ce qui est exact (elle n'a jamais
+    quitté sa première colonne).
+    """
+    times: dict[str, str] = {}
+    for event in ledger.list_events():
+        if event.event_type == "task.transitioned" and event.created_at:
+            times[event.entity_id] = str(event.created_at)
+    return times
+
+
 def annotate_cards(
     project_root: Path,
     service: Any,
@@ -381,6 +397,7 @@ def annotate_cards(
     sessions = sessions_index(project_root)
     costs = dispatch_costs(service.ledger)
     reasons = block_reasons(service.ledger)
+    since = transition_times(service.ledger)
     closed: frozenset[str] | None = None
     probed: Mapping[str, str] | None = None
     probe_done = False
@@ -399,6 +416,8 @@ def annotate_cards(
             claimed_at=claim_time(service.ledger, task.id) if held else None,
         )
         card["cost"] = cost_of(costs, task.id)
+        # P74 : l'âge situé — depuis quand la carte est dans sa colonne.
+        card["in_state_since"] = since.get(task.id) or str(task.created_at)
         if card.get("board") == "blocked" and task.status is not TaskState.WAITING:
             # Le motif écrit au blocage d'abord ; à défaut, celui que la
             # projection du board pose (dépendance ouverte, échec, état inconnu).

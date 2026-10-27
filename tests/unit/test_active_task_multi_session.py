@@ -23,7 +23,7 @@ from typer.testing import CliRunner
 from grimoire.bridges.schemas import HostId
 from grimoire.cli.cmd_task import task_app
 from grimoire.core.agentic_standard import setup_standard_profile
-from grimoire.core.standard_state import resolve_active_task
+from grimoire.core.standard_state import current_session, resolve_active_task
 from grimoire.hosts.decisions import Outcome
 from grimoire.hosts.events import HookEvent
 from grimoire.hosts.runtime import run_hook
@@ -115,6 +115,19 @@ def test_la_session_se_lit_aussi_dans_l_environnement_de_l_hote(governed: Path) 
     assert active.task_id == tid_a
     active = resolve_active_task(governed, env={"GRIMOIRE_SESSION_ID": SESSION_A, "CLAUDE_CODE_SESSION_ID": SESSION_B})
     assert active.task_id == tid_a, "GRIMOIRE_SESSION_ID, posé explicitement, prime"
+
+
+def test_sans_humain_la_session_de_l_hote_prime_sur_un_residu_du_demon(governed: Path) -> None:
+    """#966 : les sessions `claude --bg` héritent de l'environnement du démon, donc d'un `GRIMOIRE_SESSION_ID` qui n'est
+    pas le leur ; sous `GRIMOIRE_UNATTENDED=1`, l'identité est celle que l'hôte exporte. Hors de ce drapeau, inchangé."""
+    both = {"GRIMOIRE_SESSION_ID": SESSION_A, "CLAUDE_CODE_SESSION_ID": SESSION_B}
+    assert current_session({**both, "GRIMOIRE_UNATTENDED": "1"}) == (SESSION_B, HostId.CLAUDE_CODE_CLI.value)
+    assert current_session(both) == (SESSION_A, "")
+    assert current_session({**both, "GRIMOIRE_UNATTENDED": "0"}) == (SESSION_A, "")
+    assert current_session({"GRIMOIRE_SESSION_ID": SESSION_A, "GRIMOIRE_UNATTENDED": "1"}) == (SESSION_A, "")  # CI, pilote : sans hôte
+    _claimed(governed, "Tache de A", session=SESSION_A)
+    tid_b = _claimed(governed, "Tache de B", session=SESSION_B)
+    assert resolve_active_task(governed, env={**both, "GRIMOIRE_UNATTENDED": "1"}).task_id == tid_b
 
 
 # ── un seul claim : inchangé ─────────────────────────────────────────────────
