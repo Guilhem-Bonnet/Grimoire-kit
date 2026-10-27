@@ -471,6 +471,49 @@ def test_un_autre_conflit_renvoie_au_worker(projet: Path, host: FakeHost) -> Non
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["conflict"]
 
 
+def dirty_without_ci(host: FakeHost, tid: str) -> None:
+    """Ce que GitHub rend d'une PR en conflit : aucun check, car il ne lance pas la CI d'une PR qu'il ne sait pas fusionner."""
+    branch = f"task/{tid}"
+    host.checks.pop(branch, None)
+    host.mergeable[branch], host.merge_states[branch] = "CONFLICTING", "DIRTY"
+
+
+def test_une_pr_en_conflit_sans_ci_est_realignee_au_lieu_d_attendre(projet: Path, host: FakeHost) -> None:
+    """R57 (#979), 2026-10-27 : « aucun check rapporté » à chaque tick, la PR en conflit sur le seul CHANGELOG.md."""
+    grant(projet)
+    mine = CHANGELOG_MAIN.replace("- feat: une entrée de main\n", "- feat: l'entrée de la tâche\n- feat: une entrée de main\n")
+    tid, wt = launch_and_work(projet, host, changelog=mine)
+    advance_main(projet, "CHANGELOG.md", CHANGELOG_MAIN.replace("- feat: une entrée de main\n",
+                                                                "- fix: une autre PR fusionnée\n- feat: une entrée de main\n"))
+    review_ready(projet, host, tid, wt)
+    dirty_without_ci(host, tid)
+    assert merges(tick(projet, host)) == [("realign", "done")]
+    head = git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0]
+    text = git(projet, "show", f"{head}:CHANGELOG.md")
+    assert "l'entrée de la tâche" in text and "une autre PR fusionnée" in text
+    assert host.of("gh", "pr", "merge") == []  # réalignée, jamais fusionnée sans CI
+
+
+def test_une_pr_en_conflit_dur_sans_ci_retourne_au_worker(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("docs/readme.md", "la version de la tâche\n"))
+    advance_main(projet, "docs/readme.md", "la version de main\n")
+    review_ready(projet, host, tid, wt)
+    dirty_without_ci(host, tid)
+    report = tick(projet, host)
+    assert merges(report) == [("bounce", "done")] and "docs/readme.md" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_une_pr_a_jour_sans_check_attend_toujours_sa_ci(projet: Path, host: FakeHost) -> None:
+    """Un ``DIRTY`` que GitHub n'a pas encore recalculé, sur une tête qui contient déjà main : on attend la CI."""
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    review_ready(projet, host, tid, wt)
+    dirty_without_ci(host, tid)
+    assert merges(tick(projet, host)) == [("wait", "waiting")] and host.of("gh", "pr", "merge") == []
+
+
 @pytest.mark.skipif(os.name == "nt", reason="hooks shell exécutables : harnais POSIX")
 def test_le_tick_n_execute_aucun_hook_git_du_depot(projet: Path, host: FakeHost) -> None:
     """Revue #927 : les hooks (pre-commit, commit-msg, post-commit, pre-push…) sont des scripts que le worker réécrit."""
