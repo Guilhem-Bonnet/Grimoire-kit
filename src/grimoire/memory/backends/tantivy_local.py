@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 import time
 import unicodedata
@@ -25,6 +26,9 @@ from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEn
 from grimoire.memory.supersession import carries_state_mark
 from grimoire.memory.taxonomy import build_taxonomy, entry_matches_filters
 
+#: Réessais bornés du commit sous Windows (os error 5), ~0,75 s au total au pire.
+_COMMIT_ATTEMPTS = 6
+_COMMIT_BACKOFF_S = 0.05
 _TEXT_FIELDS = ["text", "text_en", "text_fr", "text_folded"]
 
 
@@ -96,7 +100,17 @@ class TantivyMemoryBackend(MemoryBackend):
 
     def _commit(self, writer: Any) -> None:
         """Commit and release the writer lock, then refresh the searcher."""
-        writer.commit()
+        for attempt in range(_COMMIT_ATTEMPTS):
+            try:
+                writer.commit()
+                break
+            except ValueError as exc:
+                # Windows : un segment encore tenu ouvert par un lecteur ou une fusion
+                # refuse le renommage (« Access is denied », os error 5) ; il se libère
+                # en quelques dizaines de ms. Toute autre erreur remonte telle quelle.
+                if sys.platform != "win32" or "os error 5" not in str(exc) or attempt == _COMMIT_ATTEMPTS - 1:
+                    raise
+                time.sleep(_COMMIT_BACKOFF_S * (attempt + 1))
         del writer
         self._index.reload()
 
