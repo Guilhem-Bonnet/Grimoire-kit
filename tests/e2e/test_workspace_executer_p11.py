@@ -359,8 +359,10 @@ def test_un_refus_de_transition_se_lit_sur_place_avec_son_remede(
 
     root, ids = p11_project
     inspector = _open(page, REVIEW_TITLE)
+    # Accepter ne se défait pas (P57) : une confirmation sur place, jamais de toast.
+    inspector.get_by_role("button", name="Réaliser : → Acceptée").click()
     with page.expect_response(lambda r: f"/tasks/{ids[REVIEW_TITLE]}/close" in r.url):
-        inspector.get_by_role("button", name="Réaliser : → Acceptée").click()
+        inspector.locator("[data-role='transition-confirm-yes']").click()
     refusal = inspector.locator("[data-role='gate-card'] [data-role='refusal']")
     expect(refusal).to_be_visible()
     assert "refusé par le gate" in refusal.inner_text()

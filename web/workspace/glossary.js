@@ -14,6 +14,16 @@
 //   clic ailleurs         → ferme les bulles non épinglées, laisse les épinglées
 //   croix de la bulle     → ferme cette bulle épinglée (et ses enfants)
 //   densité compacte      → nom et raccourci seulement, délai 800 ms
+//
+// P55 : chaque bulle est un `popover="manual"`. Elle vit dans la couche
+// supérieure, au-dessus de la palette et de l'aide (`<dialog>` modaux) et d'un
+// menu ouvert, sans qu'aucun `z-index` ne se dispute la place. « manual » et
+// non « auto » ou « hint » : la pile (une bulle enfant ouverte depuis sa mère,
+// les bulles épinglées qui survivent au clic à côté) n'est pas un modèle que
+// le navigateur connaît — « auto » et « hint » fermeraient la mère en ouvrant
+// l'enfant. Échap et le clic à côté restent donc ceux de la pile, ci-dessous ;
+// la bulle ne prend jamais le focus, il n'y a pas de focus à rendre. Sans
+// Popover API, la bulle reste un bloc en position fixe (shell.css, `.tip`).
 
 /** Le 4e espace de la coque (P31) : son nom n'est écrit qu'ici. « Savoir » ou
  *  « Historique » reste à trancher (décision D2) : changer ces deux chaînes
@@ -22,6 +32,7 @@
 export const FOURTH_SPACE = Object.freeze({ id: 'savoir', label: 'Savoir', icon: 'i-space-savoir' });
 
 const MAX_DEPTH = 3;
+const HAS_POPOVER = typeof HTMLElement === 'function' && typeof HTMLElement.prototype.showPopover === 'function';
 //: Balises déjà focusables nativement — les autres reçoivent tabindex="0" pour
 //: que Tab atteigne tout `[data-term]`, quel que soit l'espace qui l'a posé.
 const NATIVELY_FOCUSABLE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
@@ -92,6 +103,7 @@ function build(entry, depth, pinned) {
   tip.dataset.depth = String(depth);
   tip.dataset.term = entry.id;
   tip.setAttribute('role', 'tooltip');
+  if (HAS_POPOVER) tip.popover = 'manual';
 
   const head = document.createElement('div');
   head.className = 'row';
@@ -198,6 +210,7 @@ export function open(id, anchor, depth = 0, pinned = false) {
   closeFrom(depth);
   const tip = build(entry, depth, pinned);
   document.body.append(tip);
+  if (HAS_POPOVER) tip.showPopover();
   place(tip, anchor);
   const frame = { id, tip, anchor, depth, pinned };
   stack.push(frame);
@@ -315,6 +328,9 @@ export function attach(root = document) {
   // Alt fige la bulle ouverte — ou l'ouvre tout de suite si le survol court encore.
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && stack.length) {
+      // La pile d'abord : la palette ou l'aide ouverte dessous ne se ferme
+      // qu'à l'Échap suivant (`preventDefault` retient la demande de fermeture).
+      event.preventDefault();
       event.stopPropagation();
       closeAll();
       return;

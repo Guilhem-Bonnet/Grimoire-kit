@@ -27,9 +27,9 @@
 // API consommées : api.memoryEntries, api.memoryEntry, api.memorySearch,
 // api.memoryDelete, api.memoryGesture, api.projects.
 
-import { badge, icon, monogram } from '../shell.js';
+import { badge, icon, listNav, monogram, undoToast } from '../shell.js';
 import { formatScore } from '../score.js';
-import { GESTURE_STYLES, historyList, openGesture } from './memoire-gestes.js';
+import { GESTURE_STYLES, INVERSE_GESTURE, historyList, openGesture, undoGesture } from './memoire-gestes.js';
 
 const STYLE_ID = 'kn-styles';
 
@@ -54,13 +54,15 @@ const STYLES = `
 .kn-searchbar input { flex-grow: 1; height: 36px; font-size: 14px; min-width: 0; padding: 0 12px; }
 .kn-summary { margin: 0; color: var(--ink2); }
 .kn-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); overflow: hidden; }
-.kn-res { display: grid; grid-template-columns: 96px minmax(0, 1fr) 92px; gap: 14px; padding: 14px 16px;
+.kn-res { display: grid; grid-template-columns: fit-content(130px) minmax(0, 1fr) 92px; gap: 14px; padding: 14px 16px;
   border-top: 1px solid var(--line); align-items: start; cursor: pointer; }
 .kn-res:first-child { border-top: 0; }
 .kn-res:hover { background: var(--hover); }
 .kn-res[aria-current="true"] { background: var(--acc-soft); }
 .kn-res:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
-.kn-res > .badge { justify-self: start; max-width: 96px; }
+/* La colonne du type s'ajuste au libellé (« Apprentissage » entier, jamais ellipsé) ;
+ * fit-content(130px) borne les types inconnus trop bavards. */
+.kn-res > .badge { justify-self: start; max-width: 130px; }
 .kn-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .kn-title { font-weight: 600; overflow-wrap: anywhere; }
 .kn-excerpt { color: var(--ink2); overflow-wrap: anywhere; }
@@ -103,7 +105,7 @@ const STYLES = `
 .kn-fix { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--r); background: var(--acc-soft); }
 .kn-fix p { margin: 0; }
 .kn-fix .formula { overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; }
-@media (max-width: 720px) {
+@container canvas (max-width: 720px) {
   .kn-wrap { grid-template-columns: minmax(0, 1fr); }
   .kn-filters { border-right: 0; border-bottom: 1px solid var(--line); }
   .kn-main { padding: var(--sp-4); }
@@ -245,11 +247,14 @@ export async function mount(root, ctx) {
   const homeSlug = (ctx.host.status && ctx.host.status.home) || ctx.host.project || '';
   const params = ctx.params || {};
 
+  // `types` dans l'URL (clic sur un hall de la carte, P73) : la vue s'ouvre
+  // filtrée sur ces seuls types ; sinon, les types cochés par défaut.
+  const wantedTypes = String(params.types || '').split(',').filter((t) => TYPE[t]);
   const state = {
     q: String(params.q || ''),
     projects: [],
     selected: new Set(),
-    types: new Set(TYPES.filter((t) => !t.off).map((t) => t.id)),
+    types: new Set(wantedTypes.length ? wantedTypes : TYPES.filter((t) => !t.off).map((t) => t.id)),
     kinds: new Set(KINDS.map((k) => k.id)),
     period: 'all',
     includeSuperseded: false,
@@ -291,6 +296,8 @@ export async function mount(root, ctx) {
   searchbar.append(label, formulaHost);
   const summary = el('p', 'kn-summary', null, { role: 'status' });
   const results = el('section', 'kn-card', null, { 'aria-label': 'Résultats' });
+  // P58 : j / k parcourent les résultats, le détail suit ; Entrée le rouvre.
+  listNav(results, { rows: '.kn-res', onMove: (row) => row.click() });
   const notes = el('div', 'kn-notes');
   const more = el('button', 'btn kn-more', 'Plus d’entrées', { type: 'button' });
   more.hidden = true;
@@ -467,7 +474,7 @@ export async function mount(root, ctx) {
     if (!append) {
       state.perProject = new Map();
       summary.textContent = 'Lecture de la mémoire…';
-      results.replaceChildren(...ctx.loading('Lecture de la mémoire…', 4));
+      results.replaceChildren(...ctx.loading('Lecture de la mémoire…', 4, 'results'));
     }
     more.disabled = true;
     try {
@@ -535,8 +542,9 @@ export async function mount(root, ctx) {
     if (entry.date) date.title = String(entry.date);
     article.append(badge(type.label, type.tone), body, date);
     article.addEventListener('click', () => select(entry, { focus: false }));
+    // Entrée (P58) passe par le contrôleur de liste de la coque (le clic du résultat).
     article.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(entry, { focus: false }); }
+      if (event.key === ' ') { event.preventDefault(); select(entry, { focus: false }); }
     });
     return article;
   };
@@ -678,9 +686,20 @@ export async function mount(root, ctx) {
       entry, kind, row, anchor: actions,
       candidates: candidatesFor(entry),
       project: entry.projectSlug || homeSlug || undefined,
-      onDone: async (message) => {
+      onDone: async (message, { gesture: done } = {}) => {
         state.status = { key: keyOf(entry), tone: 'ok', text: message };
         await refresh({ stay: entry });
+        // P57 : retirer et rendre au service se défont en un clic, 10 s durant.
+        if (!INVERSE_GESTURE[done]) return;
+        const project = entry.projectSlug || homeSlug || undefined;
+        undoToast(done === 'retract' ? 'Entrée retirée du service.' : 'Entrée rendue au service.', {
+          undone: done === 'retract' ? 'Entrée rendue au service.' : 'Entrée de nouveau retirée du service.',
+          undo: async () => {
+            await undoGesture(ctx, { gesture: done, entryId: entry.id, project });
+            state.status = null;
+            if (!ctx.signal.aborted) await refresh({ stay: entry });
+          },
+        });
       },
     });
     if (entry.kind === 'projection') {

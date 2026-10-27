@@ -160,12 +160,23 @@ input:not([type="checkbox"]):not([type="radio"]) {
   height: 13px;
 }
 
+/* Hauteur minimale, jamais fixe (P68) : un libellé long passe à la ligne
+ * DANS la pastille au lieu de déborder. Une pastille d'une ligne garde ses
+ * 24 px au pixel près (2 px de rembourrage + 1,3 de hauteur de ligne restent
+ * sous le plancher) ; `.chip.pill` reste sur une ligne. `break-word` et non
+ * `anywhere` : la largeur minimale reste celle du mot le plus long, une pastille
+ * ou un bouton ne se laisse pas écraser lettre à lettre dans une rangée flex. */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 9px;
+  height: auto;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 9px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+  text-align: left;
   border: 1px solid var(--line);
   border-radius: var(--r);
   font-size: var(--t-min);
@@ -426,12 +437,19 @@ th .th-hint {
   color: var(--bad);
 }
 
+/* Même règle que `.chip` (P68) : hauteur minimale, un libellé long s'enroule
+ * dans le bouton au lieu d'en sortir ; un bouton d'une ligne est inchangé. */
 .btn {
-  height: var(--h-ctl);
+  height: auto;
+  min-height: var(--h-ctl);
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 var(--sp-3);
+  padding: 2px var(--sp-3);
+  line-height: 1.3;
+  overflow-wrap: break-word;
+  text-align: left;
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   font-size: var(--t-s);
@@ -460,6 +478,140 @@ th .th-hint {
   background: var(--acc);
   border-color: var(--acc);
   color: var(--onfill);
+}
+
+/* ── Menu « … » (P11, partagé depuis P56, natif depuis P55) ────────────────
+ * Le bouton, et son panneau `popover="auto"` : il vit dans la couche
+ * supérieure (aucune liste qui défile ne le coupe) et se pose sous son bouton
+ * par l'ancrage CSS (`anchor-name` posé par shell.js::moreMenu). La feuille du
+ * navigateur centre un popover dans l'écran : `inset`/`margin` la défont. Sans
+ * ancrage CSS, shell.js pose `top`/`right` à l'ouverture. */
+.more {
+  position: relative;
+  display: inline-flex;
+}
+
+.more-btn,
+.row-act {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+.more-panel {
+  position: fixed;
+  inset: auto;
+  margin: 4px 0 0;
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-block;
+  position-visibility: anchors-visible;
+  width: min(300px, 80vw);
+  max-height: min(420px, 70vh);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-3);
+  background: var(--overlay);
+  border: 1px solid var(--line2, var(--line));
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  cursor: default;
+}
+
+/* Un popover fermé n'est pas affiché : `display: flex` ci-dessus l'emporterait
+ * sur la feuille du navigateur. Deux règles : un navigateur qui ignore
+ * `:popover-open` jetterait la règle entière, repli `hidden` compris. */
+.more-panel[hidden] {
+  display: none;
+}
+
+.more-panel[popover]:not(:popover-open) {
+  display: none;
+}
+
+/* Le menu d'une ligne : une colonne d'actions, à sa largeur. */
+.more-panel[data-role="row-more-panel"] {
+  width: max-content;
+  min-width: 200px;
+  max-width: min(320px, 90vw);
+  padding: var(--sp-1);
+  gap: 2px;
+}
+
+.more-panel h4 {
+  margin: 0;
+  font-size: var(--t-min);
+  font-weight: 500;
+  color: var(--ink2);
+}
+
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-s);
+  text-align: left;
+  cursor: pointer;
+}
+
+.more-item:hover {
+  background: var(--hover);
+}
+
+/* ── Actions de ligne (P56) ────────────────────────────────────────────────
+ * Révélées au survol, au focus clavier (`:focus-within`), sur la ligne active
+ * et quand leur menu est ouvert. Opacité seulement : elles restent dans l'ordre
+ * de tabulation, et le focus qui y entre les révèle. Sur écran tactile (aucun
+ * survol possible), elles sont toujours visibles. */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+
+.row-actions:empty {
+  display: none;
+}
+
+:is(.at-row, .ex-card, .ex-list tbody tr, .tbl tbody tr, .pl-card):is(:hover, :focus-within, [aria-current="true"]) .row-actions,
+.row-actions:focus-within,
+.row-actions:has(.more.open) {
+  opacity: 1;
+}
+
+.row-act[data-copied="ok"] {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .row-actions {
+    opacity: 1;
+  }
+
+  .more-btn,
+  .row-act {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
 }
 
 /* ── Identité d'espace ────────────────────────────────────────────────────
@@ -1002,6 +1154,149 @@ body[data-active-space="source"] {
   width: 64%;
 }
 
+/* P60 : la forme de chaque liste (`data-shape`, voir loadingNodes dans shell.js). */
+.skeleton:not([data-shape="lines"]) .skeleton-line {
+  background: linear-gradient(90deg, var(--hover) 25%, var(--line) 50%, var(--hover) 75%);
+  background-size: 300% 100%;
+}
+
+.sk-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+}
+
+.sk-tile,
+.sk-card,
+.sk-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--card);
+}
+
+.sk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.sk-inbox-row {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.sk-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.skeleton .skeleton-line.sk-dot {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+}
+
+.skeleton .skeleton-line.sk-pill {
+  flex: none;
+  width: 72px;
+  height: 22px;
+  border-radius: var(--r-pill);
+}
+
+.skeleton .skeleton-line.sk-num {
+  width: 40%;
+  height: 26px;
+}
+
+.skeleton .skeleton-line.sk-short {
+  width: 38%;
+}
+
+.skeleton .skeleton-line.sk-mid {
+  width: 70%;
+}
+
+.skeleton .skeleton-line.sk-field {
+  width: 100%;
+  max-width: 560px;
+  height: var(--h-ctl);
+}
+
+.sk-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.sk-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-l);
+  background: var(--e1);
+}
+
+.sk-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.sk-trow {
+  padding: 0 var(--sp-4);
+  min-height: 44px;
+  border-top: 1px solid var(--line);
+}
+
+.sk-thead {
+  border-top: 0;
+  min-height: 36px;
+}
+
+.sk-cell {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sk-cell:first-child {
+  flex-grow: 2;
+}
+
+.sk-result {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+/* P59 : le squelette suit la place de la toile (conteneur `canvas`), comme
+   le tableau qu'il annonce — pas la largeur de l'écran. */
+@container canvas (max-width: 720px) {
+  .sk-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sk-cell:nth-child(n + 3) {
+    display: none;
+  }
+}
+
 /* P60 : un chiffre ne bouge que lorsque sa valeur change réellement. Une seule
    passe (`1`), jamais en boucle ; shell.js ne pose `data-changed` ni au premier
    rendu, ni sous prefers-reduced-motion (et la règle globale coupe l'animation). */
@@ -1120,6 +1415,17 @@ body[data-active-space="source"] {
   color: var(--ink);
   border-left-color: var(--acc);
   background: var(--accsoft);
+}
+
+/* P06 : un bouton du rail sans action dans l'espace monté n'est pas affiché ;
+ * hors de propos ici, il reste visible, désactivé, et son titre dit pourquoi. */
+#rail .rail-btn[hidden] {
+  display: none;
+}
+
+.rail-btn[aria-disabled="true"] {
+  color: var(--ink3);
+  cursor: not-allowed;
 }
 
 /* En densité confortable le rail porte ses libellés (spec §3.4).
@@ -1306,6 +1612,12 @@ body[data-active-space] .panel-head {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* P68 : `min-height: 0` aussi. Sous 900 px, `#middle` passe en colonne et le
+   * min-height `auto` d'un item flex vaut la hauteur de son contenu : `#center`
+   * grossissait avec une liste longue, débordait de `#middle` (overflow visible)
+   * et peignait PAR-DESSUS la barre d'état, qui ne recevait plus les clics.
+   * Borné, c'est `#canvas` (overflow auto) qui défile, comme prévu. */
+  min-height: 0;
 }
 
 #docbar {
@@ -1441,8 +1753,13 @@ body[data-active-space] .panel-head {
   color: var(--termink);
 }
 
-#dock-body .prompt {
-  color: var(--pri);
+/* L'invite « $ » : le terminal reste sombre dans les deux thèmes, et --pri du
+ * thème clair y tombait à 2,56:1 (mesuré par la garde de contraste, P06). Elle
+ * prend l'encre du terminal, en gras, plutôt qu'un accent illisible. */
+#dock-body .prompt,
+.dock-console-prompt .prompt {
+  color: var(--termink);
+  font-weight: 600;
 }
 
 /* Le terminal reste sombre dans les deux thèmes (spec §2.1) : le texte discret
@@ -1451,6 +1768,57 @@ body[data-active-space] .panel-head {
  * mesure sur le DOM, invisible à la lecture de la feuille. */
 #dock-body .lbl {
   color: var(--termink);
+}
+
+/* La Console (P06) : un vrai champ sous le transcript, dans l'encre du
+ * terminal. Masqué sur les autres onglets du dock (`hidden`). */
+.dock-console {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 14px;
+  border-top: 1px solid var(--line);
+  background: var(--term);
+  font-family: var(--mono);
+  font-size: var(--t-min);
+  color: var(--termink);
+  flex: none;
+}
+
+.dock-console[hidden] {
+  display: none;
+}
+
+.dock-console-prompt {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.dock-console-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  padding: 2px 6px;
+  font: inherit;
+  color: var(--termink);
+}
+
+.dock-console-input::placeholder {
+  color: var(--termink);
+  opacity: 1;
+  font-style: italic;
+}
+
+.dock-console-input:hover {
+  border-color: var(--line);
+}
+
+.dock-console[aria-busy="true"] .dock-console-input {
+  cursor: progress;
 }
 
 /* ── Barre d'état ──────────────────────────────────────────────────────────*/
@@ -1498,31 +1866,34 @@ body[data-active-space] .panel-head {
 
 /* ── Palette de commandes ──────────────────────────────────────────────────*/
 
-#palette[hidden] {
-  display: none;
-}
-
-/* Un seul composant, deux présentations (Douce) :
+/* Un seul composant, deux présentations (Douce), un seul `<dialog>` modal (P55) :
    - `data-mode="commands"` (⌘K) : carte flottante centrée ;
    - `data-mode="scope"` (puce de portée) : menu ancré sous la puce, placé
      par shell.js::placePalette.
-   Le fond s'assombrit (--scrim-soft) sans masquer l'interface : l'ancien voile
-   était l'accent doux opaque, la coque disparaissait derrière.
+   Le fond (`::backdrop`) s'assombrit (--scrim-soft) sans masquer l'interface.
+   Le dialogue a la taille de sa boîte : un clic hors d'elle est un clic sur le
+   fond, qui le ferme (`closedby="any"`).
    Chaque ligne tient sur une seule ligne de texte par champ (nowrap +
    ellipse) et sa hauteur suit son contenu : aucun chevauchement possible. */
 #palette {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
+  width: min(640px, calc(100% - 32px));
+  max-width: none;
+  max-height: none;
+  margin: 12vh auto auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  overflow: visible;
+}
+
+#palette::backdrop,
+#shortcuts::backdrop {
   background: var(--scrim-soft);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 12vh 16px 16px;
 }
 
 #palette-box {
-  width: min(640px, 100%);
+  width: 100%;
   max-height: min(560px, 72vh);
   display: flex;
   flex-direction: column;
@@ -1535,12 +1906,12 @@ body[data-active-space] .panel-head {
 }
 
 #palette[data-mode="scope"] {
-  padding: 0;
+  inset: auto;
+  margin: 0;
+  width: min(440px, calc(100vw - 32px));
 }
 
 #palette[data-mode="scope"] #palette-box {
-  position: absolute;
-  width: min(440px, calc(100vw - 32px));
   max-height: min(520px, calc(100vh - 88px));
 }
 
@@ -1798,8 +2169,13 @@ body[data-active-space] .panel-head {
 
 /* ── Infobulles épinglables ────────────────────────────────────────────────*/
 
+/* Popover « manual » (glossary.js) : la feuille du navigateur centre un
+ * popover ; `inset`/`margin` la défont, la bulle se pose par `left`/`top`. */
 .tip {
   position: fixed;
+  inset: auto;
+  margin: 0;
+  overflow: visible;
   z-index: 90;
   width: 268px;
   background: var(--e3);
@@ -2275,6 +2651,25 @@ body[data-active-space] .panel-head {
 }
 
 @media (min-width: 901px) {
+  /* P59 : la liste et son détail peuvent passer sur deux lignes (voir la
+     requête de conteneur `middle`, plus bas). La liste part d'une base nulle :
+     sans requête qui la pousse à 100 %, rien ne passe à la ligne. Une ligne
+     d'un conteneur à plusieurs lignes prend la hauteur de son contenu : les
+     deux panneaux sont donc bornés à la hauteur de `#middle` (le détail moins
+     ses marges), et défilent dedans comme avant. */
+  html[data-atelier="off"] #middle {
+    flex-wrap: wrap;
+  }
+
+  html[data-atelier="off"] #center {
+    flex-basis: 0;
+    height: 100%;
+  }
+
+  html[data-atelier="off"] #middle > #panel-inspector {
+    max-height: calc(100% - 36px);
+  }
+
   /* Le panneau de détail (l'ancien Inspecteur) : une carte arrondie à ombre,
      détachée du bord, sans bandeau (StyleDouce `.aside`). */
   html[data-atelier="off"] #panel-inspector {
@@ -2427,23 +2822,21 @@ body[data-active-space] .panel-head {
 
 /* ── Aide des raccourcis clavier (P58) ─────────────────────────────────────*/
 
-#shortcuts[hidden] {
-  display: none;
-}
-
+/* Un `<dialog>` modal (P55), à la taille de sa boîte : un clic sur le fond
+ * (`::backdrop`, plus haut avec la palette) le ferme. */
 #shortcuts {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  background: var(--scrim-soft);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 12vh 16px 16px;
+  width: min(520px, calc(100% - 32px));
+  max-width: none;
+  max-height: none;
+  margin: 12vh auto auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
 }
 
 #shortcuts-box {
-  width: min(520px, 100%);
+  width: 100%;
   max-height: 72vh;
   overflow: auto;
   box-sizing: border-box;
@@ -2484,4 +2877,251 @@ body[data-active-space] .panel-head {
 
 #shortcuts-list dd {
   color: var(--ink2);
+}
+
+/* ── Toast « Annuler » (P57) ───────────────────────────────────────────────
+ * Aucune maquette ne le dessine : les composants de la coque (carte de
+ * superposition, bouton primaire indigo, bouton fantôme) et ses tokens. Posé
+ * au-dessus de la barre d'état, centré ; la région vide ne prend aucune place.
+ * Sous prefers-reduced-motion, la règle globale coupe l'entrée animée. */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--h-status, 28px) + var(--sp-4));
+  z-index: 70;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 32px);
+}
+
+#toast:empty {
+  display: none;
+}
+
+.toast-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-tip);
+  color: var(--ink);
+  font-size: var(--t-s);
+  animation: toast-in 160ms ease-out 1;
+}
+
+.toast-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-card[data-tone="ok"] .toast-msg {
+  color: var(--ok);
+}
+
+.toast-card[data-tone="bad"] .toast-msg {
+  color: var(--bad);
+}
+
+.toast-undo,
+.toast-close {
+  flex: none;
+}
+
+.toast-close {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 900px) {
+  #toast {
+    bottom: calc(var(--h-railbar, 48px) + var(--sp-3));
+  }
+}
+
+/* ── Mise en page adaptative par conteneur (P59) ───────────────────────────
+ * Les panneaux se règlent sur la place qu'ils ont, pas sur la largeur de
+ * l'écran : `#middle` (la liste et son détail) et `#canvas` (le contenu d'une
+ * rubrique) sont des conteneurs de requête. Le seuil de la coque (900 px,
+ * partagé avec shell.js) ne décide plus que de la coque : tiroirs, barre basse.
+ *
+ * Détail sous la liste : quand `#middle` n'offre plus 1180 px, la carte de
+ * détail (380 px + marges) laisserait moins de ~580 px à la liste et à ses
+ * rubriques ; elle passe dessous, sur toute la largeur, et défile seule. Sous
+ * 600 px (téléphone), le détail reste un tiroir. Hors atelier seulement : avec
+ * les panneaux d'atelier, l'inspecteur est une colonne que l'on règle à la
+ * main. Un tiroir ouvert (`data-drawer`) garde la main. shell.js::openPanel lit
+ * le même seuil de 600 px (DETAIL_IN_FLOW_MIN) pour ne pas ouvrir de tiroir
+ * par-dessus un détail déjà visible. */
+#middle {
+  container: middle / inline-size;
+}
+
+#canvas {
+  container: canvas / inline-size;
+}
+
+@container middle (min-width: 600px) and (max-width: 1179px) {
+  html[data-atelier="off"] #middle:not([data-drawer]) > #center {
+    flex: 1 1 100%;
+    height: 100%;
+  }
+
+  html[data-atelier="off"] #middle:not([data-drawer]):has(> #panel-inspector #inspector-body > :not([data-shell-placeholder], p.lbl, p.cv-msg, .sr-only)) > #center {
+    height: 58%;
+  }
+
+  html[data-atelier="off"] #middle:not([data-drawer]) > #panel-inspector:has(#inspector-body > :not([data-shell-placeholder], p.lbl, p.cv-msg, .sr-only)) {
+    display: flex;
+    position: static;
+    order: 1;
+    flex: 1 1 100%;
+    width: auto !important;
+    max-height: calc(42% - 18px);
+    margin: 0 18px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  html[data-atelier="off"] #middle:not([data-drawer]) > #panel-inspector .panel-head,
+  html[data-atelier="off"] #middle:not([data-drawer]) > #panel-inspector .panel-resize {
+    display: none;
+  }
+
+  html[data-atelier="off"] #middle:not([data-drawer]) > #panel-inspector .panel-body {
+    padding: var(--sp-4) var(--sp-5);
+  }
+}
+
+/* ── Barres de la coque sur une ligne (P59) ────────────────────────────────
+ * Entre 901 et ~1280 px, la barre d'application et la barre d'état passaient
+ * à la ligne (« À traiter » sur deux lignes, badge coupé, « en direct » sur
+ * « Configuration », pied sur deux lignes). Elles sont à leur tour des
+ * conteneurs : sous 1280 px de barre, les onglets non choisis gardent leur
+ * icône (nom accessible et `title` inchangés), le pouls et la palette leur
+ * icône, et le pied se déleste de ses éléments secondaires, comme sous 900 px.
+ * Rien n'y passe jamais à la ligne. */
+#appbar {
+  container: appbar / inline-size;
+}
+
+#statusbar {
+  container: statusbar / inline-size;
+}
+
+#appbar .tab,
+#appbar .chip,
+#brand,
+#statusbar > *,
+#statusbar .chip {
+  white-space: nowrap;
+}
+
+#spaces .tab {
+  flex: none;
+}
+
+/* Le badge d'un onglet n'est jamais coupé : il garde sa largeur. */
+#decisions-count {
+  flex: none;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+#project-chip {
+  min-width: 0;
+  max-width: 240px;
+}
+
+#project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container appbar (max-width: 1279px) {
+  #spaces .tab[aria-selected="false"] .tab-lbl,
+  #top-live-text,
+  .palette-lbl {
+    display: none;
+  }
+
+  #spaces .tab {
+    padding: 0 10px;
+  }
+
+  #palette-open {
+    width: auto;
+  }
+
+  #project-chip {
+    max-width: 180px;
+  }
+}
+
+@container statusbar (max-width: 1279px) {
+  #statusbar .st-extra,
+  #statusbar .st-pre,
+  #statusbar .chip .kbd {
+    display: none;
+  }
+}
+
+/* ── Dock sur une ligne (P06) ──────────────────────────────────────────────
+ * Avec l'explorateur et l'inspecteur épinglés, le dock n'a plus que ~390 px à
+ * 1024 px d'écran : la commande équivalente poussait « Problèmes » hors de la
+ * barre. Le dock est un conteneur : la commande s'élide, puis cède sa place
+ * avec le rappel « 5 », puis les onglets non choisis gardent leur icône (nom
+ * accessible et `title` posés par shell.js::buildDock). */
+#dock {
+  container: dock / inline-size;
+}
+
+#dock-tabs > .tab {
+  flex: none;
+  white-space: nowrap;
+}
+
+#dock-echo {
+  display: block;
+  align-self: center;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container dock (max-width: 640px) {
+  #dock-echo,
+  #dock-tabs > .row:last-child {
+    display: none;
+  }
+}
+
+@container dock (max-width: 480px) {
+  #dock-tabs .tab[aria-selected="false"] .tab-lbl {
+    display: none;
+  }
 }

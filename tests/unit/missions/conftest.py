@@ -16,3 +16,11 @@ def _mute_ci_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     # Le dépôt vient de la politique ou du remote ``origin`` : aucun test ne lance le vrai ``git`` pour le trouver.
     monkeypatch.setattr(ci_slots, "ci_repository", lambda _home, _project: "acme/kit")
+
+
+@pytest.fixture(autouse=True)
+def _no_resolve_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La résolution d'une session de fond relit `claude agents` avec une pause réelle : aucune dans les tests (#966)."""
+    from grimoire.missions import launcher
+
+    monkeypatch.setattr(launcher, "_RESOLVE_PAUSE_S", 0.0)

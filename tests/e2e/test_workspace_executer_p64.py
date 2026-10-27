@@ -242,7 +242,7 @@ def test_l_en_tete_porte_le_titre_les_vues_le_filtre_et_la_formule(page: Page) -
     assert labels == ["Tableau", "Huit colonnes", "Liste", "Sessions", "Chronologie", "Décisions"]
     assert head.locator("#view-seg button[aria-pressed='true']").inner_text() == "Tableau"
     assert "Demande une action de moi" in head.locator("[data-role='ask-me']").inner_text()
-    assert head.locator(".ex-formula").inner_text().replace("\n", "") == "›grimoire task board"
+    assert head.locator(".ex-formula").inner_text().replace("\n", "") == "›grimoire task list"
     # La barre de document n'a plus rien à montrer : les vues vivent dans l'en-tête.
     assert not page.locator("#docbar").is_visible()
 
@@ -291,7 +291,11 @@ def test_une_carte_dit_son_identifiant_sa_route_sa_preuve_sa_session_et_son_bloc
     assert "aucune preuve déclarée" in blocked.locator("[data-role='blocked']").inner_text()
 
     running = _card(page, RUNNING_TITLE)
-    assert "41c89d23" in running.locator(".ex-session").inner_text()
+    # P74 : plus d'identifiant brut sur la carte — hôte et persona à la place
+    # (l'UUID reste dans l'inspecteur, avec la commande de reprise).
+    session_line = running.locator(".ex-session").inner_text()
+    assert "41c89d23" not in running.inner_text()
+    assert "Claude Code" in session_line and "agent-a" in session_line
     assert "session vivante" in running.locator("[data-role='live-facts']").inner_text()
     assert page.evaluate(
         "(t) => getComputedStyle([...document.querySelectorAll('.ex-card-title')].find((n) => n.textContent === t)).webkitLineClamp",
