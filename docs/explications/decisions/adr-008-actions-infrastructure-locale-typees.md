@@ -4,7 +4,7 @@ audience: décision
 
 # ADR-008 — Actions d'infrastructure locale typées depuis le cockpit
 
-- **Statut** : proposé (en attente de la décision de Guilhem)
+- **Statut** : accepté (décision de Guilhem, 2026-10-26)
 - **Date** : 2026-10-17
 - **Décide pour** : `grimoire cockpit serve` (cockpit multi-projets) et, à
   périmètre égal, `grimoire serve` (atelier mono-projet)
@@ -210,7 +210,7 @@ tâche de mise en œuvre ne démarre.
 
 | Décision | Date | Motif / amendements |
 |---|---|---|
-| _(en attente)_ | | |
+| **accepté** | 2026-10-26 | Accepté tel que proposé, sans amendement. Débloque P47 (assigner une session depuis le cockpit) et les actions typées A et B. |
 
 ## Références
 
