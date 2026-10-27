@@ -1276,6 +1276,13 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
         if path.startswith(f"{PREFIX}tasks/"):
             tail = path[len(f"{PREFIX}tasks/") :].strip("/")
             task_id, _, action = tail.partition("/")
+            if task_id and action == "launch":
+                # Apply d'assignation (P47 lot 3) : l'empreinte du plan engage
+                # le lancement (ADR-008) ; la garde d'écriture commune est déjà
+                # passée côté hôte, comme pour toute écriture.
+                from grimoire.tools import workspace_launch_apply
+
+                return workspace_launch_apply.launch_apply(project_root, task_id, body)
             if task_id and action in TASK_ACTIONS:
                 return _task_action(project_root, task_id, action, body)
         portfolio_action = _portfolio_action_route(path)

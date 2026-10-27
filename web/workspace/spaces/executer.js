@@ -2148,19 +2148,24 @@ function receiptBlock(ctx, taskId, payload, project) {
 //
 // Une section de l'inspecteur (jamais une modale) : le plan de lancement que
 // GET tasks/<id>/launch-plan rend — modèle, worktree, branche, les cinq
-// vérifications du préflight et la commande équivalente à copier. Rien n'est
-// lancé : le bouton « Lancer la session » reste désactivé tant que la garde
-// d'écriture commune (ADR-008) n'existe pas (GAO-garde-d-crit-001).
+// vérifications du préflight et la commande équivalente à copier. Le bouton
+// « Lancer la session » est réel depuis le lot 3 : il envoie l'empreinte du
+// plan montré, le serveur refuse si l'état a changé (ADR-008) et lance par le
+// lanceur du tick, derrière la garde d'écriture commune (GAO-garde-d-crit-001).
 
 //: Les verdicts du préflight sur les tons existants du cockpit (stateIcon).
 const PREFLIGHT_TONE = { ok: 'ok', warn: 'warn', bloquant: 'bad', inconnu: '' };
 const PREFLIGHT_WORD = { ok: 'ok', warn: 'attention', bloquant: 'bloquant', inconnu: 'inconnu' };
-const LAUNCH_LOCK_REASON = "Lancement depuis le cockpit après la garde d'écriture commune (ADR-008) — copie la commande en attendant.";
+// Le cockpit multi-projets regarde, l'atelier du projet lance (même frontière
+// que réclamer une tâche) ; un plan sans empreinte vient d'un serveur plus
+// ancien que cette page.
+const LAUNCH_REMOTE_REASON = "Lancement depuis l'atelier du projet seulement (grimoire serve) — copie la commande en attendant.";
+const LAUNCH_STALE_REASON = 'Plan sans empreinte (serveur plus ancien que la page) : copie la commande en attendant.';
 // Les états que le préflight accepte en entrée de file : une tâche prête est
 // candidate à l'admission, une proposée reçoit un plan qui dit ce qui manque.
 const ASSIGNABLE_STATUS = new Set(['proposed', 'ready']);
 
-function assignPlanNode(plan) {
+function assignPlanNode(ctx, plan, taskId, project, refresh) {
   const panel = document.createElement('div');
   panel.className = 'ex-assign-panel';
   panel.append(text('h4', null, 'Assigner une session'));
@@ -2229,8 +2234,11 @@ function assignPlanNode(plan) {
   else verifsBlock.append(list);
   panel.append(verifsBlock);
 
-  // Lancer : présent mais toujours désactivé dans ce lot — la garde d'écriture
-  // commune (ADR-008) n'existe pas encore, la raison est écrite à côté.
+  // Lancer : réel (P47 lot 3). L'empreinte du plan montré part dans le corps ;
+  // le serveur refuse si l'état a changé depuis (ADR-008) et lance par le
+  // lanceur du tick, toutes gardes comprises. Désactivé quand le plan n'est
+  // pas prêt, quand on regarde un autre projet depuis le cockpit, ou sans
+  // empreinte — la raison est toujours écrite à côté.
   const launchRow = document.createElement('div');
   launchRow.className = 'ex-assign-launch';
   const launch = document.createElement('button');
@@ -2238,13 +2246,50 @@ function assignPlanNode(plan) {
   launch.className = 'btn pri';
   launch.dataset.role = 'assign-launch';
   launch.textContent = 'Lancer la session';
-  launch.disabled = true;
-  launch.title = LAUNCH_LOCK_REASON;
-  launch.setAttribute('aria-describedby', 'ex-assign-lock-reason');
-  const lockReason = text('p', 'lbl', LAUNCH_LOCK_REASON);
+  const launchStatus = actionStatus('');
+  const lockReason = text('p', 'lbl', '');
   lockReason.id = 'ex-assign-lock-reason';
   lockReason.dataset.role = 'assign-launch-reason';
-  launchRow.append(launch, lockReason);
+  const lock = (why) => {
+    launch.disabled = true;
+    launch.title = why;
+    lockReason.textContent = why;
+    launch.setAttribute('aria-describedby', 'ex-assign-lock-reason');
+  };
+  if (project) lock(LAUNCH_REMOTE_REASON);
+  else if (plan.pret === false) lock(`Pas prêt : ${plan.raison || 'raison non communiquée'}`);
+  else if (!plan.empreinte) lock(LAUNCH_STALE_REASON);
+  else {
+    launch.addEventListener('click', async () => {
+      launch.disabled = true;
+      setActionStatus(launchStatus, 'Lancement en cours…');
+      let result;
+      try {
+        result = await ctx.api.taskLaunch(taskId, plan.empreinte);
+      } catch (error) {
+        setActionStatus(launchStatus, failureText(error));
+        launch.disabled = false;
+        return;
+      }
+      if (result.lance) {
+        // La tâche passe réclamée : le pouls fera disparaître le panneau.
+        setActionStatus(launchStatus, `Session ${result.session || '?'} lancée — ${result.detail || 'elle travaille dans son worktree.'}`, 'ok');
+        return;
+      }
+      if (result.deja_lancee) {
+        setActionStatus(launchStatus, `Session déjà lancée (${result.session || '?'}) : rien n'est relancé.`, 'ok');
+        return;
+      }
+      if (result.empreinte && refresh) {
+        // L'état a changé depuis le plan montré : on recharge le plan à jour.
+        refresh();
+        return;
+      }
+      setActionStatus(launchStatus, `Lancement refusé : ${result.raison || 'raison non communiquée'}`);
+      launch.disabled = false;
+    });
+  }
+  launchRow.append(launch, lockReason, launchStatus);
   panel.append(launchRow);
 
   // Équivalent : la commande du payload, à copier — même pattern statut +
@@ -2301,7 +2346,7 @@ async function renderAssignPanel(ctx, holder, taskId, project) {
   }
   // Le pouls a pu fermer le panneau ou changer de tâche pendant la lecture.
   if (ctx.signal.aborted || !(assignUi.open && assignUi.task === taskId)) return;
-  holder.replaceChildren(assignPlanNode(plan));
+  holder.replaceChildren(assignPlanNode(ctx, plan, taskId, project, () => renderAssignPanel(ctx, holder, taskId, project)));
 }
 
 function assignBlock(ctx, detail, project) {
