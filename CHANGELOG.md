@@ -8,6 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): préflight d'assignation — plan en lecture seule et commande équivalente (P47 lot 1, GAO-p47-assigne-001)
+- feat(cockpit): bloqué visible sans bruit — compteur warn et section repliée dans le tableau compact (P72v2, GAO-p72v2-bloqu-001)
 - feat(cockpit): cartes du kanban lisibles par un humain (P74, `GAO-p74-cartes-k-001`)
   - **Fin des sessions vivantes en colonne « Fait »** : le serveur pose `task.session` (claim, ou journal récent qui nomme la tâche) sans condition d'état, et la carte l'affichait tel quel. Une tâche close (acceptée, publiée, annulée) n'affiche plus de vivacité — si la session existe encore, c'est l'inspecteur qui le dit.
   - **Fin du jargon** : « consigne non lue » devient « message en attente de la session » (badge de carte, portefeuille, inspecteur), avec l'explication au survol (consigne posée au ledger, pas encore livrée à la session qui tient la tâche).
