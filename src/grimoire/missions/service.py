@@ -45,7 +45,7 @@ from grimoire.missions.board import PRIORITIES, board_status_of, build_board, pr
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
-from grimoire.missions.mandate import require_authority
+from grimoire.missions.mandate import ANSWER_CHANNEL, require_authority
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
 from grimoire.missions.question_gestures import BatchOutcome
 from grimoire.missions.questions import OPEN, QuestionSpec, group_settled, open_in_group, records_of
@@ -943,11 +943,12 @@ class TaskService:
             from grimoire.missions.orchestrator_session import answer_gesture
 
             asked = self._question_to_answer(task, question_id)
-            gesture = answer_gesture(self.ledger.events_for(task_id), task_id, asked, text)
+            gesture = answer_gesture(self, task, asked, text)
         # Sous mandat (#876, verrou 6) : l'origine `orchestrator` répond si un mandat valide couvre ce geste
         # et ce type de tâche ; sans mandat, elle est refusée comme toute origine non humaine.
         authority = require_authority(
-            self.project_root, gesture, task, origin, what=f"Réponse refusée pour {task_id}", provenance=provenance
+            self.project_root, gesture, task, origin, what=f"Réponse refusée pour {task_id}", provenance=provenance,
+            channel=ANSWER_CHANNEL,
         )
         question = asked or self._question_to_answer(task, question_id)
         if question.origin == "flow" and not attested_by_flow:
@@ -963,7 +964,8 @@ class TaskService:
             HUMAN_ANSWERED_EVENT, task_id, "task", actor,
             {
                 "task_id": task_id, "question_id": question.id, "answer": answer, "origin": origin, "actor_id": actor,
-                **({"mandate_id": authority.mandate_id, "provenance": dict(authority.provenance)} if authority else {}),
+                **({"mandate_id": authority.mandate_id, "provenance": dict(authority.provenance),
+                    "gesture": authority.gesture} if authority else {}),
             },
         )
         self.ledger.add_directive(

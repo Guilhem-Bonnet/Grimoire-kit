@@ -596,52 +596,67 @@ orchestrator:
       model: sonnet                 # défaut
       wip: 1                        # sessions orchestrateur en même temps
       sessions_per_day: 12          # plafond de lancements par jour (UTC)
-      permission_mode: acceptEdits  # obligatoire quand le rôle est activé
+      # permission_mode : imposé, dontAsk ; toute autre valeur rend la politique illisible
 ```
 
 Le tick n'a pas de LLM et ne tranche rien. Quand une question éligible attend et qu'un mandat actif la couvre, il
-lance **une** session de fond, `claude --bg --name grimoire-orchestrator`, dans la racine du projet. Sa consigne liste
-chaque question : tâche, identifiant, nature, texte, options, critères d'acceptation, dernières notes et consignes,
-et pour une reprise l'état de la session du worker. Pour chacune, la session tranche **dans le périmètre des
-critères**, ou ne répond pas et la question reste à l'humain :
+lance **une** session de fond, `claude --bg --name grimoire-orchestrator`, dans la racine du projet. Sa consigne porte
+les questions dans un bloc JSON, déclaré **donnée non fiable** : tâche, identifiant, nature, geste, texte, options,
+critères d'acceptation, dernières consignes et, pour une reprise, l'état de la session du worker. Les délimiteurs de
+bloc sont retirés des textes du worker, et ses notes libres n'y entrent pas. Pour chaque question, la session tranche
+**dans le périmètre des critères**, ou ne répond pas et la question reste à l'humain :
 
 ```bash
 GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-2 \
     grimoire task answer <tâche> "<réponse>" --question <q-…>
 ```
 
-| Question ouverte d'une tâche lancée par le tick | Geste du mandat |
-|---|---|
-| `choice` (avec ou sans options) posée par le worker | `answer` |
-| `resume_unfenced` ou `retry_exhausted` posée par la récolte, « reprendre ou abandonner ? » d'un désaccord de relecture | `resume` |
-| checkpoint de flow (`origin: flow`) ou autre origine que `agent`/`tick`, `merge`, `permission`, `resume_branch`, question du merger | jamais : humain |
+| Question ouverte d'une tâche lancée par le tick | Source (événement écrit par le kit) | Geste du mandat |
+|---|---|---|
+| `choice` (avec ou sans options) | `task.question_asked` du worker | `answer` |
+| `resume_unfenced` | `task.reap_deferred` de la récolte | `resume` |
+| « reprendre ou abandonner ? » d'un désaccord de relecture | `task.review_escalated` | `resume` |
+| checkpoint de flow (`origin: flow`) ou autre origine que `agent`/`tick`, `merge`, `permission`, `resume_branch`, `retry_exhausted`, escalade du merger (`task.merge_escalated`), source inconnue | — | jamais : humain |
 
 - **Éligible** : la tâche est en `waiting(human)`, porte un lancement du tick, et le mandat autorise le geste sur
-  elle (geste couvert, type de tâche, politique d'escalade). Une question déjà présentée à une session terminée
+  elle (geste couvert, type de tâche, politique d'escalade). La source se lit dans les événements que le kit écrit,
+  jamais dans l'acteur qu'un appelant CLI choisit (`--actor`). Une question déjà présentée à une session terminée
   n'est pas relistée : le silence de la session est une escalade.
+- **Pas de boucle** : au plus 2 reprises (geste `resume`) de l'orchestrateur par tâche depuis la dernière réponse
+  humaine ; au-delà, la question reste à l'humain. Une réponse de l'orchestrateur ne remet à zéro ni le compteur de
+  tentatives de la récolte, ni les cycles du relecteur et du merger : seule une réponse humaine le fait.
 - **Identité** : la vraie identité de la session est lue dans `claude agents --json` après le lancement (#966), puis
-  inscrite au journal d'autorité en rôle `orchestrator`, **bornée aux gestes `answer` et `resume`**. Identité
-  introuvable ou inscription refusée : la session est arrêtée (`claude stop`), la tentative notée au ledger
+  inscrite au journal d'autorité en rôle `orchestrator`, **bornée au canal `task answer`** et **datée** (lancement +
+  30 minutes). Sa fin (terminée, arrêtée, délai dépassé) est aussi inscrite au journal : son identifiant ne vaut plus.
+  Identité introuvable ou inscription refusée : la session est arrêtée (`claude stop`), la tentative notée au ledger
   (`orchestrator.session_launch_failed`) et comptée au disjoncteur. Un arrêt non confirmé compte au WIP et se
   retente à chaque tick.
-- **Gardes de `task answer`** : une réponse d'origine `orchestrator` exige une session inscrite orchestrateur sous
-  le mandat actif, qui n'est celle d'aucun worker ni relecteur. Le geste (`answer` ou `resume`) doit être couvert,
-  et le type de la tâche aussi. Les questions réservées à l'humain et la réponse `abandonner`, qui annule la tâche,
-  sont refusées avant le mandat : le journal ne dit jamais « pris » d'un geste refusé. Chaque réponse acceptée est
+- **Gardes de `task answer`** : une réponse d'origine `orchestrator` est refusée, avant le mandat (le journal ne dit
+  jamais « pris » d'un geste refusé), pour une question réservée à l'humain, pour la réponse `abandonner` (qui
+  annule la tâche), au-delà du plafond de reprises, depuis un worktree de tâche, quand un identifiant présenté
+  (`GRIMOIRE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`) a tenu le claim de la tâche ou l'a relue, sur une tâche que le tick
+  n'a pas lancée, et pour une question que le tick n'a pas présentée à **cette** session. Le mandat exige ensuite une
+  session inscrite orchestrateur, non échue et non terminée, qui n'est celle d'aucun worker ni relecteur, et un geste
+  (`answer` ou `resume`) et un type de tâche couverts. Une inscription illisible refuse. Chaque réponse acceptée est
   inscrite au journal d'autorité (geste, mandat, provenance) et au ledger (`task.human_answered`, `origin:
-  orchestrator`, `mandate_id`, `provenance`).
-- **Jamais** : la session inscrite ne peut ni accepter, ni fusionner, ni approuver un check, ni lever une file,
-  même si le mandat couvre ces gestes. Ils restent au code du tick (merger) ou à l'humain. Sa ligne de commande lui
-  refuse aussi `Edit`, `Write`, `gh pr merge`, `git push`, `git commit`, `task accept`, `task approve-check` et
-  `task move` (`--disallowed-tools`).
+  orchestrator`, `mandate_id`, `provenance`, `gesture`).
+- **Jamais** : la session inscrite ne peut ni accepter, ni fusionner, ni approuver un check, ni libérer la file, ni
+  lever une pause (`orchestrate resume`), même si le mandat couvre ces gestes : ces commandes n'ouvrent pas le canal
+  `task answer`. Elle tourne en `--permission-mode dontAsk`, imposé quelle que soit la politique (jamais
+  `bypassPermissions`), avec une liste blanche `--allowed-tools` : `Read`, `grimoire task show|list|questions` et
+  `grimoire task answer`. Tout autre outil est refusé sans demander.
 - **Fin** : une session absente de `claude agents`, ou qui a rendu son tour, est terminée au tick suivant. Une
   session encore au travail après 30 minutes est arrêtée. Les questions qu'elle a laissées ouvertes remontent dans
   l'attention du tick. Une lecture de `claude agents` en échec ne termine rien et ne lance rien.
 - **Limites** :
   - la session est un LLM : elle peut trancher faux *dans* le périmètre des critères. Tout est journalisé avec sa
     provenance, et l'humain garde la révocation du mandat (`grimoire autonomy mandate revoke`) ;
-  - elle tourne sous le même utilisateur du système : le refus d'outils de sa ligne de commande la gêne sans
-    l'empêcher absolument (un script quelconque peut lancer `gh`) ;
+  - l'identité de session n'est pas un secret, comme pour le relecteur : un worker peut lire celle de l'orchestrateur
+    dans `claude agents` et la présenter. Il est refusé sur sa propre tâche s'il agit depuis son worktree ou présente
+    aussi son identifiant, sur toute question non présentée à cette session, et après la fin ou l'échéance de
+    l'inscription. Reste ouvert : hors de son worktree, avec le seul identifiant volé, pendant la vie de la session,
+    une question présentée sur une **autre** tâche. Seule une preuve de l'appelant par le hook de l'hôte le fermerait ;
+  - elle tourne sous le même utilisateur du système : la liste blanche la borne côté hôte, pas côté système ;
   - entre son lancement et son inscription (quelques secondes), ses réponses sont refusées : la consigne lui dit de
     réessayer une fois ;
   - une réponse « reprendre » rend la tâche `ready` : le tick relance un worker, comme après une réponse humaine.

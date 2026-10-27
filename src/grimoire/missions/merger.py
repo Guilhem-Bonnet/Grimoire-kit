@@ -847,8 +847,9 @@ class MergeStage:
 
     @staticmethod
     def _cycle(events: list[LedgerEvent], kind: str) -> int:
-        """Le rang de ce retour depuis la dernière réponse humaine (« reprendre » remet à zéro)."""
-        answered = max((i for i, e in enumerate(events) if e.event_type == HUMAN_ANSWERED_EVENT), default=-1)
+        """Le rang de ce retour depuis la dernière réponse humaine (« reprendre » remet à zéro ; pas celui de l'orchestrateur)."""
+        answered = max((i for i, e in enumerate(events)
+                        if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == "human"), default=-1)
         return 1 + sum(1 for e in events[answered + 1:] if e.event_type == kind)
 
     def _bounce(self, task: MissionTask, launch: dict[str, Any], reason: str, detail: str, pr: int) -> MergerOutcome:

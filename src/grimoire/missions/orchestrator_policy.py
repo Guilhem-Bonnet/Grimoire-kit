@@ -38,7 +38,7 @@ janitor :
           model: sonnet           # vide : sonnet
           wip: 1                  # sessions orchestrateur en même temps
           sessions_per_day: 12    # plafond de lancements par jour (UTC)
-          permission_mode: ""     # OBLIGATOIRE quand enabled: true
+          permission_mode: dontAsk  # imposé : toute autre valeur rend la politique illisible (liste blanche d'outils)
       breaker:
         threshold: 3              # échecs consécutifs avant l'ouverture du disjoncteur
       janitor:
@@ -95,6 +95,8 @@ _MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycle
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
 #: Le modèle de la session orchestrateur quand la politique n'en nomme pas.
 DEFAULT_ORCHESTRATOR_MODEL = "sonnet"
+#: Le seul mode de permission de la session orchestrateur (``orchestrator_session.PERMISSION_MODE``).
+ORCHESTRATOR_PERMISSION_MODE = "dontAsk"
 #: Les checks qui ne disent rien du code (couverture rapportée par un service tiers) : hors du verdict par défaut.
 DEFAULT_IGNORED_CHECKS: tuple[str, ...] = ("codecov/*",)
 
@@ -152,13 +154,17 @@ class MergerRole:
 
 @dataclass(frozen=True, slots=True)
 class OrchestratorRole:
-    """Le rôle ``orchestrator`` (#962) : désactivé par défaut ; une session à la fois, sonnet, 12 lancements par jour."""
+    """Le rôle ``orchestrator`` (#962) : désactivé par défaut ; une session à la fois, sonnet, 12 lancements par jour.
+
+    Son mode de permission est imposé (``dontAsk`` : refuse sans demander tout outil hors de sa liste blanche) ; la
+    politique ne peut pas le changer, encore moins en ``bypassPermissions``.
+    """
 
     enabled: bool = False
     model: str = DEFAULT_ORCHESTRATOR_MODEL
     wip: int = 1
     sessions_per_day: int = 12
-    permission_mode: str = ""
+    permission_mode: str = ORCHESTRATOR_PERMISSION_MODE
 
     def to_dict(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "model": self.model, "wip": self.wip,
@@ -295,7 +301,15 @@ def _parse_merger(raw: Any) -> MergerRole:
 def _parse_orchestrator(raw: Any) -> OrchestratorRole:
     where = "orchestrator.roles.orchestrator"
     data = _table(raw, where, _ORCHESTRATOR_KEYS)
-    enabled, model, _tier, mode = _session_role(data, "orchestrator")
+    enabled, model, _tier, _mode = _session_role(
+        {**data, "permission_mode": ORCHESTRATOR_PERMISSION_MODE}, "orchestrator"
+    )
+    mode = _text(data.get("permission_mode", ORCHESTRATOR_PERMISSION_MODE), f"{where}.permission_mode")
+    if mode != ORCHESTRATOR_PERMISSION_MODE:
+        raise _InvalidPolicyError(
+            f"{where}.permission_mode : {mode!r} refusé — la session orchestrateur tourne toujours en "
+            f"{ORCHESTRATOR_PERMISSION_MODE} (liste blanche d'outils, aucun autre outil sans demander)"
+        )
     return OrchestratorRole(
         enabled=enabled,
         model=model or DEFAULT_ORCHESTRATOR_MODEL,

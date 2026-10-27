@@ -38,7 +38,7 @@ toute écriture d'agent sous ce dossier par les outils et les voies shell reconn
 la *queue* du journal (retirer une révocation récente rouvre le mandat). Le principal
 ``orchestrator`` se déclare par ``GRIMOIRE_PRINCIPAL=orchestrator`` ; cette déclaration ne vaut que pour
 une session que l'étape orchestrateur du tick a inscrite (#962, :func:`register_orchestrator_session`,
-bornée aux gestes ``answer`` et ``resume``), et dans les bornes du mandat.
+bornée au canal ``task answer`` et datée, :data:`ANSWER_CHANNEL`), et dans les bornes du mandat.
 """
 
 from __future__ import annotations
@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
 
 __all__ = [
+    "ANSWER_CHANNEL",
     "BREAKER_FORGED_VERDICT",
     "BREAKER_SEAL_MISMATCH",
     "BREAKER_WRITE_OUTSIDE_WORKTREE",
@@ -88,6 +89,7 @@ __all__ = [
     "MandateState",
     "MandateStore",
     "acting_as_orchestrator",
+    "acting_in_process",
     "control_dir",
     "control_key_path",
     "ensure_control_key",
@@ -783,13 +785,15 @@ class MandateStore:
     # ── Sessions (plafond, provenance du reçu) ───────────────────────────────
 
     def register_session(
-        self, session_id: str, role: str, task_id: str = "", now: datetime | None = None, *, gestures: Sequence[str] = ()
+        self, session_id: str, role: str, task_id: str = "", now: datetime | None = None, *,
+        channels: Sequence[str] = (), expires_at: str = "",
     ) -> None:
         """Inscrit une session lancée par le kit. Un worker au-delà du plafond du jour est refusé et révoque le mandat.
 
         Le lanceur du lot 2 y inscrit chaque worker ; le reviewer du lot 3 y inscrit sa session, ce qui
         l'atteste (verrou 7). Hors mandat actif, rien ne s'inscrit : l'attestation n'existe que sous mandat.
-        *gestures* (#962) borne une session ``orchestrator`` aux gestes nommés, en plus du mandat.
+        #962 : *channels* borne une session ``orchestrator`` aux canaux nommés (:data:`ANSWER_CHANNEL`), en plus du
+        mandat ; *expires_at* (ISO 8601) borne son inscription dans le temps.
         """
         if role not in _ROLES or not session_id.strip():
             raise MandateRefusedError(MALFORMED, f"session invalide : rôle {role!r}, identifiant {session_id!r}")
@@ -827,7 +831,8 @@ class MandateStore:
                 "session_id": session_id.strip(),
                 "role": role,
                 "task_id": task_id,
-                **({"gestures": sorted(set(gestures))} if gestures else {}),
+                **({"channels": sorted(set(channels))} if channels else {}),
+                **({"expires_at": expires_at} if expires_at else {}),
                 "ts": moment.isoformat(),
             }
         )
@@ -844,6 +849,20 @@ class MandateStore:
             and (not role or e.get("role") == role)
             and (not task_id or e.get("task_id") == task_id)
         ]
+
+    def end_session(self, session_sha256: str, reason: str, now: datetime | None = None) -> int:
+        """#962 : inscrit la fin de chaque session orchestrateur d'empreinte *session_sha256* ; rend combien.
+
+        Une session terminée n'agit plus en orchestrateur, même avant l'échéance de son inscription.
+        """
+        ended = 0
+        for entry in self.sessions(role="orchestrator"):
+            sid = str(entry.get("session_id") or "")
+            if sid and hashlib.sha256(sid.encode("utf-8")).hexdigest() == session_sha256:
+                self.journal.append({"type": "session_end", "mandate_id": entry.get("mandate_id"), "session_id": sid,
+                                     "reason": reason[:120], "ts": (now or _now()).isoformat()})
+                ended += 1
+        return ended
 
     # ── Autorisation d'un geste ──────────────────────────────────────────────
 
@@ -1152,8 +1171,20 @@ def acting_as_orchestrator() -> Iterator[None]:
         _IN_PROCESS_ORCHESTRATOR.reset(token)
 
 
+#: #962 : le seul canal d'une session orchestrateur lancée par le tick — ``task answer`` (gestes ``answer`` et
+#: ``resume`` d'une question). Tout autre appelant de :func:`require_authority` (``task accept``, ``approve-check``,
+#: ``orchestrate resume``, ``queue release``, le merger) ne passe pas de canal : une session bornée y est refusée.
+ANSWER_CHANNEL = "task-answer"
+
+
+def acting_in_process() -> bool:
+    """Vrai dans un bloc :func:`acting_as_orchestrator` : l'appelant est le code du tick, pas une session."""
+    return _IN_PROCESS_ORCHESTRATOR.get()
+
+
 def register_orchestrator_session(
-    project_root: Path, session_id: str, now: datetime | None = None, *, gestures: Sequence[str] = ()
+    project_root: Path, session_id: str, now: datetime | None = None, *,
+    channels: Sequence[str] = (), expires_at: str = "",
 ) -> None:
     """Inscrit *session_id* au journal d'autorité en rôle ``orchestrator`` : la seule voie CLI du principal.
 
@@ -1161,8 +1192,9 @@ def register_orchestrator_session(
     ``sessionId`` de la session de fond, résolu après son lancement. Exige un mandat actif ; refuse un identifiant vide.
     Un identifiant déjà inscrit comme worker ou relecteur ne peut pas devenir orchestrateur.
     L'inscription vaut pour le mandat actif seulement : un nouveau mandat se réinscrit.
-    *gestures* borne la session : un geste hors de cette liste est refusé même si le mandat le couvre (la session
-    du tick ne répond qu'aux questions ; accepter, fusionner ou approuver un check reste hors de sa portée).
+    *channels* borne la session : un geste pris par un autre canal est refusé même si le mandat le couvre (la session
+    du tick ne répond qu'aux questions, par :data:`ANSWER_CHANNEL` ; accepter, fusionner, approuver un check ou lever
+    une pause reste hors de sa portée). *expires_at* : au-delà, l'inscription ne vaut plus.
     """
     store = MandateStore(project_root)
     session = session_id.strip()
@@ -1170,7 +1202,7 @@ def register_orchestrator_session(
         raise MandateRefusedError(
             "principal_unattested", f"session {session!r} déjà inscrite comme worker ou relecteur : pas orchestrateur"
         )
-    store.register_session(session, "orchestrator", now=now, gestures=gestures)
+    store.register_session(session, "orchestrator", now=now, channels=channels, expires_at=expires_at)
 
 
 def require_authority(
@@ -1182,6 +1214,7 @@ def require_authority(
     what: str,
     provenance: Mapping[str, Any] | None = None,
     record: bool = True,
+    channel: str = "",
 ) -> Authorization | None:
     """Le contrôle d'origine d'un geste : ``None`` pour l'humain, une :class:`Authorization` sous mandat, sinon un refus.
 
@@ -1189,7 +1222,8 @@ def require_authority(
     tâche, l'origine ``orchestrator`` est refusée comme toute autre origine non humaine. Avec un mandat, elle
     exige encore un appelant attesté : le code du tick (:func:`acting_as_orchestrator`) ou une session inscrite
     en rôle ``orchestrator`` (:func:`register_orchestrator_session`), qui n'est celle d'aucun worker ni relecteur.
-    Une garde en erreur refuse (échec fermé).
+    Une garde en erreur refuse (échec fermé). *channel* : le canal de l'appel (:data:`ANSWER_CHANNEL`), que seule une
+    session bornée à ce canal exige.
     """
     if origin == ORIGIN_HUMAN:
         return None
@@ -1203,7 +1237,7 @@ def require_authority(
         # Le mandat d'abord (son refus dit pourquoi : aucun mandat, expiré, hors périmètre), puis l'appelant,
         # puis le journal du geste : un geste refusé ensuite n'est jamais inscrit « pris ».
         auth = store.authorize(gesture, task, provenance, record=False)
-        _require_orchestrator_session(store, task, auth.mandate_id, gesture)
+        _require_orchestrator_session(store, task, auth.mandate_id, gesture, channel)
         if record:
             store.record_gesture(auth)
         return auth
@@ -1215,10 +1249,14 @@ def require_authority(
         ) from exc
 
 
-def _require_orchestrator_session(store: MandateStore, task: MissionTask | None, mandate_id: str, gesture: str) -> None:
+def _require_orchestrator_session(
+    store: MandateStore, task: MissionTask | None, mandate_id: str, gesture: str, channel: str = ""
+) -> None:
     """Échec fermé : l'appelant est le code du tick, ou une session inscrite orchestrateur qui n'est pas celle d'un worker.
 
-    Une inscription bornée (``gestures``, #962) ne vaut que pour ses gestes.
+    #962 : une inscription bornée (``channels``) ne vaut que par ses canaux, et une inscription datée
+    (``expires_at``) jusqu'à son échéance ; une session dont la fin est inscrite (``session_end``) ne vaut plus. Un champ
+    illisible refuse.
     """
     from grimoire.core.standard_state import current_session
 
@@ -1242,13 +1280,7 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None,
             "le principal orchestrator n'est pas attesté : la session appelante n'est pas inscrite orchestrateur au "
             "journal d'autorité (la variable GRIMOIRE_PRINCIPAL ne prouve rien)",
         )
-    scoped = [e["gestures"] for e in mine if isinstance(e.get("gestures"), list)]
-    if scoped and not any(gesture in allowed for allowed in scoped):
-        raise MandateRefusedError(
-            "gesture_out_of_session_scope",
-            f"{gesture} refusé : la session orchestrateur {session!r} est inscrite pour "
-            f"{', '.join(sorted({g for allowed in scoped for g in allowed}))} seulement",
-        )
+    _check_session_bounds(store, session, mine, gesture, channel)
     held = {str(e["session_id"]) for e in registered if e.get("role") in ("worker", "reviewer")}
     if task is not None and task.claim is not None:
         held.add(task.claim.session_id)
@@ -1258,6 +1290,32 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None,
             "principal_unattested",
             f"la session {session!r} est celle d'un worker ou d'un relecteur : elle ne valide pas en orchestrateur",
         )
+
+
+def _check_session_bounds(
+    store: MandateStore, session: str, mine: list[dict[str, Any]], gesture: str, channel: str
+) -> None:
+    """Canaux, échéance et fin d'une session orchestrateur inscrite (#962) ; lève au premier manquement."""
+    if any("channels" in e and not isinstance(e["channels"], list) for e in mine):
+        raise MandateRefusedError("session_bounds_unreadable", f"inscription de {session!r} illisible (canaux)")
+    scoped = [e["channels"] for e in mine if "channels" in e]
+    if scoped and not any(channel and channel in allowed for allowed in scoped):
+        allowed_text = ", ".join(sorted({str(c) for allowed in scoped for c in allowed}))
+        raise MandateRefusedError(
+            "gesture_out_of_session_scope",
+            f"{gesture} refusé : la session orchestrateur {session!r} n'agit que par {allowed_text}",
+        )
+    moment = _now()
+    for entry in mine:
+        if "expires_at" not in entry:
+            continue
+        until = _parse(entry["expires_at"])
+        if until is None or moment >= until:
+            raise MandateRefusedError(
+                "session_expired", f"{gesture} refusé : l'inscription orchestrateur de {session!r} a expiré"
+            )
+    if any(e.get("type") == "session_end" and e.get("session_id") == session for e in store.journal.read()):
+        raise MandateRefusedError("session_ended", f"{gesture} refusé : la session orchestrateur {session!r} est terminée")
 
 
 def revoke_every_mandate(
