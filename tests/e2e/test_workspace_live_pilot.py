@@ -312,6 +312,32 @@ def test_un_onglet_cache_ne_fait_aucune_requete_puis_reprend(poll_page: Page, se
     assert any("/api/workspace/pulse" in u for u in requests), "le sondage reprend dès le retour"
 
 
+def test_une_rafale_de_changements_est_regroupee_en_rechargements_espaces(poll_page: Page, service) -> None:  # type: ignore[no-untyped-def]
+    """P79 : huit workers font bouger l'empreinte plusieurs fois par seconde. Une rafale ne relance pas un rechargement
+    par pouls : au plus un toutes les 3 s (``MIN_RELOAD_MS``), jamais deux en même temps, et le dernier changement
+    s'affiche quand même."""
+    page = poll_page
+    _goto(page, "executer")
+    page.wait_for_selector(".ex-card")
+    page.wait_for_timeout(1500)
+    started: list[float] = []
+    page.on("request", lambda r: started.append(time.monotonic())
+            if "/api/workspace/" in r.url and "/pulse" not in r.url and "/glossary" not in r.url else None)
+    titles = [f"Rafale de changements {i}" for i in range(6)]
+    for title in titles:
+        service.add(title, ("critère",), actor="t", owner="winston", ready=True)
+        page.wait_for_timeout(500)
+
+    _card(page, titles[-1]).wait_for(timeout=APPEAR_MS)
+
+    # Un rechargement peut porter plusieurs requêtes (tâches, sessions…) au même instant : on compte les vagues.
+    waves = [s for i, s in enumerate(started) if i == 0 or s - started[i - 1] > 0.5]
+    assert waves, "la rafale a bien fait recharger l'espace"
+    gaps = [b - a for a, b in zip(waves, waves[1:], strict=False)]
+    assert all(gap >= 2.5 for gap in gaps), f"rechargements trop rapprochés : {gaps}"
+    assert len(waves) <= 3, f"une rafale de 3 s en six écritures donne au plus 3 vagues : {len(waves)}"
+
+
 def test_l_horodatage_dit_depuis_quand_les_donnees_sont_a_jour(poll_page: Page) -> None:
     """« mis à jour il y a Xs » avance seul, entre deux sondages, et nomme l'intervalle déclaré."""
     page = poll_page
