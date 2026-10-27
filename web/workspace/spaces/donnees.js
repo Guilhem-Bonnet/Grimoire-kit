@@ -66,6 +66,17 @@ const STYLES = `
 .dn-cardhead h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; }
 .dn-hint { margin-left: auto; color: var(--ink2); font-size: 12px; }
 .dn-card .tbl-wrap { border: 0; border-radius: 0; box-shadow: none; }
+/* Maquette « Flotte — données » : la colonne projet un peu plus large (1,4fr),
+ * puis une colonne égale par service — jamais une colonne écrasée ni un
+ * en-tête coupé ; sous ~700px le cadre défile, le tableau ne s'écrase pas.
+ * :nth-child(n) rend la règle plus spécifique que les largeurs par colonne
+ * du tableau Projets (piloter.js, .pl-fleet .tbl th:nth-child(…)) : la vue
+ * Données vit dans le même .pl-fleet et hériterait de ses colonnes. */
+.dn-card .tbl { table-layout: fixed; min-width: 700px; }
+.dn-wrap .dn-card .tbl th:nth-child(n) { width: auto; }
+.dn-wrap .dn-card .tbl th:nth-child(1) { width: 18%; }
+.dn-card .tbl th { white-space: normal; overflow-wrap: anywhere; }
+.dn-card .tbl td { overflow-wrap: anywhere; }
 .dn-cell { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
 .dn-pip { width: 8px; height: 8px; flex: none; border-radius: 2px; background: var(--acc); }
 .dn-cell[data-tone="warn"] { color: var(--warn); }
@@ -162,7 +173,11 @@ function serviceCard(service) {
   head.append(mark, el('span', 'dn-name', title, { id: `dn-h-${service.id}` }), el('span', 'dn-role', service.role));
   const state = badge(service.stateLabel, STATE_TONE[service.state] ?? '', service.reason);
   state.dataset.stateBadge = service.state;
-  card.append(head, state, el('p', 'dn-reason', service.reason));
+  card.append(head, state);
+  // Densité de la maquette : un service en ligne ne répète pas son état en
+  // toutes lettres (« le service répond ») — le motif reste dans le `title`
+  // du badge ; tout autre état garde sa raison écrite, jamais la couleur seule.
+  if (service.reason && service.state !== 'en_ligne') card.append(el('p', 'dn-reason', service.reason));
 
   const facts = el('dl', 'dn-facts');
   if (service.host !== 'localhost') fact(facts, 'Adresse', `${service.host}:${service.port}`, true);

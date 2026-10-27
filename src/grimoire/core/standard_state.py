@@ -326,6 +326,9 @@ TASK_ENV = "GRIMOIRE_TASK_ID"
 SESSION_ENV = "GRIMOIRE_SESSION_ID"
 #: variable d'environnement exportée par l'hôte → identifiant d'hôte (``HookInput.host``).
 HOST_SESSION_ENVS = {"CLAUDE_CODE_SESSION_ID": HostId.CLAUDE_CODE_CLI.value}
+#: Exécution déclarée sans humain (le même drapeau que ``hosts.decisions.human_turns.UNATTENDED_ENV``, relu ici sans
+#: importer ce module) : la variable d'hôte y prime sur ``GRIMOIRE_SESSION_ID`` (#966, :func:`current_session`).
+_UNATTENDED_ENV = "GRIMOIRE_UNATTENDED"
 #: Variables qu'un terminal d'agent exporte aux commandes qu'il lance, même sans
 #: identifiant de session. Elles disent « un agent tient ce shell », jamais qui il
 #: est : ``AI_AGENT`` et ``CLAUDECODE`` ont été observées dans une session Claude
@@ -388,16 +391,22 @@ def current_session(env: Mapping[str, str] | None = None) -> tuple[str, str]:
     ``GRIMOIRE_SESSION_ID`` (explicite, hôte inconnu) prime sur la variable que
     l'hôte exporte. Jamais de supposition par « journal le plus récent » : avec
     plusieurs sessions concurrentes, ce serait rattacher au hasard.
+
+    Exception (#966) : sous ``GRIMOIRE_UNATTENDED=1``, la variable d'hôte prime.
+    Une session sans humain est lancée par l'hôte (``claude --bg``) ; c'est lui
+    qui dit qui agit. Un ``GRIMOIRE_SESSION_ID`` y est un résidu du démon des
+    sessions de fond, qui le transmet tel quel à toutes celles qu'il lance. Sans
+    variable d'hôte (CI, pilote), ``GRIMOIRE_SESSION_ID`` reste lu.
     """
     environ = os.environ if env is None else env
     explicit = str(environ.get(SESSION_ENV, "")).strip()
-    if explicit:
+    if explicit and str(environ.get(_UNATTENDED_ENV, "")).strip() != "1":
         return explicit, ""
     for name, host in HOST_SESSION_ENVS.items():
         value = str(environ.get(name, "")).strip()
         if value:
             return value, host
-    return "", ""
+    return (explicit, "") if explicit else ("", "")
 
 
 def agent_marker(env: Mapping[str, str] | None = None) -> str:

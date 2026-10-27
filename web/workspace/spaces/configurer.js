@@ -118,6 +118,56 @@ function providersSummary(data) {
   return parts.join(' · ');
 }
 
+// P75 : options du projet — le taux USD→CAD que la colonne Fait applique au
+// coût replié. Lu et écrit par /api/workspace/options (project-context.yaml,
+// section cockpit) ; le défaut du kit est dit comme défaut, jamais comme un choix.
+function optionsCard(ctx) {
+  const card = el('section', 'cf-card');
+  card.dataset.role = 'project-options';
+  card.setAttribute('aria-label', 'Options du projet');
+  card.append(el('h3', null, 'Options du projet'));
+  const note = el('p', 'cf-note', 'Taux de conversion du coût affiché par la colonne Fait (en CAD pour 1 USD).');
+  const source = el('p', 'cf-note', 'lecture du taux…');
+  source.dataset.role = 'options-source';
+  const line = el('div');
+  line.style.display = 'flex';
+  line.style.gap = 'var(--sp-2)';
+  line.style.alignItems = 'center';
+  const input = el('input', null, null, {
+    type: 'number', step: '0.01', min: '0.01', max: '999.99',
+    'aria-label': 'CAD pour 1 USD', 'data-role': 'usd-cad-input',
+  });
+  input.style.width = '110px';
+  const save = el('button', 'btn', 'Enregistrer', { type: 'button', 'data-role': 'usd-cad-save' });
+  const status = el('span', 'cf-note', '');
+  status.dataset.role = 'usd-cad-status';
+  line.append(el('span', null, '1 USD ='), input, el('span', null, '$ CAD'), save, status);
+  const describe = (data) => {
+    source.textContent = data.usd_cad_source === 'project'
+      ? 'Taux déclaré par le projet (project-context.yaml, cockpit.usd_cad).'
+      : `Défaut du kit (1 USD = ${String(data.usd_cad_default).replace('.', ',')} $ CAD) tant que le projet ne déclare rien.`;
+  };
+  ctx.api.options()
+    .then((data) => { if (ctx.signal.aborted) return; input.value = String(data.usd_cad); describe(data); })
+    .catch((error) => { source.textContent = `Options injoignables : ${error.message}`; });
+  save.addEventListener('click', async () => {
+    const rate = Number.parseFloat(input.value);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      status.textContent = 'taux invalide : un nombre positif est attendu';
+      return;
+    }
+    try {
+      const data = await ctx.api.optionsWrite(rate);
+      describe(data);
+      status.textContent = 'taux enregistré — la colonne Fait l\'applique au prochain rafraîchissement';
+    } catch (error) {
+      status.textContent = `écriture refusée : ${error.message}`;
+    }
+  });
+  card.append(note, line, source);
+  return card;
+}
+
 function budgetsCard() {
   const card = el('section', 'cf-card');
   card.setAttribute('aria-label', 'Budgets de session');
@@ -189,7 +239,7 @@ async function mountProviders(root, ctx) {
   } else if (!data.error) {
     wrap.append(ctx.empty('Aucun fournisseur déclaré', 'Le registre des fournisseurs est absent ou vide.', 'grimoire standard init'));
   }
-  wrap.append(budgetsCard());
+  wrap.append(budgetsCard(), optionsCard(ctx));
   root.replaceChildren(wrap);
 }
 
