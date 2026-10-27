@@ -8,7 +8,7 @@ son HTML statique `web/data/reels/<id>.html`.
 
 Une bobine porte : la commande (la suite rejouée), la version du kit, la date
 d'enregistrement et l'empreinte (sha256) de sa sortie normalisée. Le test
-`tests/test_reels.py` réenregistre chaque bobine et échoue si l'empreinte ne
+`tests/unit/scripts/test_gen_reels.py` réenregistre chaque bobine et échoue si l'empreinte ne
 correspond plus à la sortie du kit courant.
 
 Usage :
