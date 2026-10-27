@@ -233,6 +233,19 @@ export const api = {
     get(WS + 'tasks/' + encodeURIComponent(id) + '/trace', project ? { project } : undefined),
   taskRecall: (id, project) =>
     get(WS + 'tasks/' + encodeURIComponent(id) + '/recall', project ? { project } : undefined),
+  // Préflight d'assignation (P47) : le plan de lancement d'une session worker
+  // sur une tâche — modèle, worktree, vérifications, commande équivalente.
+  // Lecture seule stricte : rien n'est lancé ni écrit (ADR-008, phase plan),
+  // donc permise même sur un hôte en lecture seule.
+  taskLaunchPlan: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/launch-plan', project ? { project } : undefined),
+  // Bloc Activité (P69v2) : le fil de la tâche dérivé du ledger (claim,
+  // transitions, portes, questions/réponses, notes de progression), et le
+  // même fil vu d'une session (l'union des tâches que son claim tient).
+  taskFeed: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/feed', project ? { project } : undefined),
+  sessionFeed: (id, project) =>
+    get(WS + 'sessions/' + encodeURIComponent(id) + '/feed', project ? { project } : undefined),
   // Portefeuille (#638, lot C) : toutes les tâches de tous les projets du
   // registre cockpit, chacune avec son projet, son claim, sa session et sa
   // priorité — agrégé côté serveur (`workspace_portfolio.py`), jamais une
@@ -289,6 +302,10 @@ export const api = {
   // modèles, deux lectures (jamais d'écriture : les gestes sont des commandes).
   hooks: () => get(WS + 'hooks'),
   providers: () => get(WS + 'providers'),
+  // Options du projet (P75) : taux USD→CAD de la colonne Fait, lu et écrit
+  // dans project-context.yaml (section cockpit) par le serveur.
+  options: () => get(WS + 'options'),
+  optionsWrite: (usdCad) => post(WS + 'options', { usd_cad: usdCad }),
 
   // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
   // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue

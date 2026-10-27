@@ -5,7 +5,11 @@ recalculent avec les fonctions publiques du kit, et l'empreinte d'arbre qu'il po
 (``node_modules``, ``__pycache__``, ``.venv``…). Ce module scelle au journal d'autorité (``~/.grimoire/control/``,
 chaîné par hash, refusé en écriture aux outils d'agent) ce qui a été relu, en objets git :
 
-- **au lancement du relecteur** (:func:`seal_review_launch`) : la tête de ``task/<id>`` qu'il va relire ;
+- **à l'octroi d'un mandat** (:func:`pin_project_repository`, #994) : le dépôt GitHub et l'URL de ``origin`` du projet,
+  ce que la relecture d'une tâche faite à la main compare (:func:`project_repository_pin`, sans repli sur le dépôt
+  figé pour une tâche du tick) ;
+- **au lancement du relecteur** (:func:`seal_review_launch`) : la tête de ``task/<id>`` qu'il va relire — pour une tâche
+  faite à la main, aussi la PR, sa base, son dépôt et le worktree de vérification (:func:`launch_entry`) ;
 - **au jugement READY** (:func:`seal_judgment`) : la même tête — une branche qui a bougé pendant la relecture n'est pas
   scellée —, son arbre git (``<tête>^{tree}``), un worktree propre et sur cette tête, l'empreinte des octets du reçu et
   du dernier pack (qui doivent être ceux que le reçu déclare) ;
@@ -41,12 +45,16 @@ if TYPE_CHECKING:
 
 __all__ = [
     "LAUNCH_ENTRY",
+    "PROJECT_PIN_ENTRY",
     "REALIGN_ENTRY",
     "REPOSITORY_ENTRY",
     "SEAL_ENTRY",
     "branch_head",
     "freeze_repository",
     "frozen_repository",
+    "launch_entry",
+    "pin_project_repository",
+    "project_repository_pin",
     "receipt_digest",
     "seal_judgment",
     "seal_realignment",
@@ -59,6 +67,8 @@ LAUNCH_ENTRY = "review_launch"
 REPOSITORY_ENTRY = "task_repository"
 SEAL_ENTRY = "review_judgment"
 REALIGN_ENTRY = "merge_realignment"
+#: #994 : le dépôt du projet figé à l'octroi d'un mandat, avant toute relecture d'une tâche faite à la main.
+PROJECT_PIN_ENTRY = "project_repository"
 _BRANCH_PREFIX = "task/"
 
 
@@ -136,13 +146,65 @@ def frozen_repository(project_root: Path, task_id: str) -> dict[str, str] | None
     return {"repo": str(found[-1].get("repo") or ""), "origin_url": str(found[-1].get("origin_url") or "")}
 
 
-def seal_review_launch(project_root: Path, task_id: str, session_sha256: str, head: str) -> None:
-    """Note au journal d'autorité la tête que le relecteur lancé va relire."""
+def _current_repository(project_root: Path) -> dict[str, str]:
+    from grimoire.missions.ci_slots import ci_repository
+
+    try:
+        repo = ci_repository(project_root, project_root)
+    except Exception:  # pas de remote GitHub reconnaissable
+        repo = ""
+    _code, url, _err = _git(project_root, "remote", "get-url", "origin")
+    return {"repo": repo, "origin_url": url.strip()}
+
+
+def pin_project_repository(project_root: Path, mandate_id: str) -> dict[str, str]:
+    """#994 : fige au journal d'autorité, à l'octroi du mandat *mandate_id*, le dépôt GitHub et l'URL de ``origin``.
+
+    Un dépôt qu'on ne sait pas résoudre est figé vide : aucune tâche faite à la main ne sera relue sous ce mandat.
+    """
+    found = _current_repository(project_root)
+    store = _store(project_root)
+    store.journal.append({"type": PROJECT_PIN_ENTRY, "project": store.project, "mandate_id": mandate_id, **found,
+                          "ts": datetime.now(UTC).isoformat()})
+    return found
+
+
+def project_repository_pin(project_root: Path, mandate_id: str = "") -> tuple[dict[str, str] | None, dict[str, str]]:
+    """``(pin, courant)`` : le dépôt figé à l'octroi du mandat *mandate_id*, et celui que le projet déclare maintenant.
+
+    Le pin est le dernier posé à l'octroi de *mandate_id* (de n'importe quel mandat du projet si *mandate_id* est vide).
+    Jamais un repli sur le dépôt figé pour une tâche du tick : un pin absent, ou dont le dépôt ou l'URL de ``origin``
+    sont vides, rend ``None`` — rien n'est relu à la main, il faut réoctroyer le mandat.
+    """
+    store = _store(project_root)
+    pins = [e for e in store.journal.read() if e.get("type") == PROJECT_PIN_ENTRY and e.get("project") == store.project
+            and (not mandate_id or e.get("mandate_id") == mandate_id)]
+    last = pins[-1] if pins else {}
+    repo, url = str(last.get("repo") or "").strip(), str(last.get("origin_url") or "").strip()
+    return ({"repo": repo, "origin_url": url} if repo and url else None), _current_repository(project_root)
+
+
+def seal_review_launch(
+    project_root: Path, task_id: str, session_sha256: str, head: str, target: dict[str, Any] | None = None,
+) -> None:
+    """Note au journal d'autorité la tête que le relecteur lancé va relire ; *target* (#994) : la PR d'une tâche faite à
+    la main (``pr``, ``base``, ``branch``, ``repo``, ``origin_url``, ``cwd``), que le jugement et le merger comparent."""
     store = _store(project_root)
     store.journal.append({
         "type": LAUNCH_ENTRY, "project": store.project, "task_id": task_id, "session_sha256": session_sha256,
-        "head": head, "ts": datetime.now(UTC).isoformat(),
+        "head": head, **(target or {}), "ts": datetime.now(UTC).isoformat(),
     })
+
+
+def launch_entry(project_root: Path, task_id: str, session_sha256: str) -> dict[str, Any] | None:
+    """La dernière entrée de lancement de la relecture d'empreinte *session_sha256*, telle que le journal la garde."""
+    store = _store(project_root)
+    found = [
+        e for e in store.journal.read()
+        if e.get("type") == LAUNCH_ENTRY and e.get("project") == store.project and e.get("task_id") == task_id
+        and e.get("session_sha256") == session_sha256
+    ]
+    return dict(found[-1]) if found else None
 
 
 def _launch_head(project_root: Path, task_id: str, session_sha256: str) -> str | None:
@@ -166,14 +228,22 @@ def _dirty(proofs_root: Path) -> str:
 
 def seal_judgment(
     project_root: Path, task_id: str, review_id: str, proofs_root: Path, receipt: ReviewReceipt, session_sha256: str = "",
+    *, head: str | None = None,
 ) -> dict[str, Any]:
-    """Scelle le READY jugé ; lève :class:`ValueError` si ce qui a été relu n'est pas ce qui est là."""
+    """Scelle le READY jugé ; lève :class:`ValueError` si ce qui a été relu n'est pas ce qui est là.
+
+    *head* (#994) : la tête relue quand ce n'est pas ``task/<id>`` — celle de la PR d'une tâche faite à la main, dans
+    un worktree détaché ; elle doit être celle scellée au lancement et celle du worktree, comme une branche.
+    """
     tree, pack = receipt_fingerprint(proofs_root), evidence_pack_digest(proofs_root, task_id)
     if tree != receipt.tree_fingerprint:
         raise ValueError("l'arbre présent n'est pas celui que le reçu déclare")
     if pack != receipt.evidence_pack_sha256:
         raise ValueError("le pack présent n'est pas celui que le reçu déclare")
-    head = branch_head(project_root, task_id)
+    explicit = head is not None
+    head = head if head is not None else branch_head(project_root, task_id)
+    if explicit and not head:
+        raise ValueError("aucune tête de PR notée au lancement de cette relecture : un sceau sans tête ne couvre rien")
     if not head and _rev(proofs_root, "HEAD^{commit}"):
         raise ValueError(f"aucune branche {_BRANCH_PREFIX}{task_id} dans un worktree git : un sceau sans tête ne couvre rien")
     if head:
@@ -183,7 +253,8 @@ def seal_judgment(
         if launched != head:
             raise ValueError(f"la branche a bougé pendant la relecture ({launched[:12]} → {head[:12]})")
         if _rev(proofs_root, "HEAD^{commit}") != head:
-            raise ValueError(f"le worktree n'est pas sur la tête de {_BRANCH_PREFIX}{task_id}")
+            what = "la tête relue de la PR" if explicit else f"la tête de {_BRANCH_PREFIX}{task_id}"
+            raise ValueError(f"le worktree n'est pas sur {what}")
         if dirty := _dirty(proofs_root):
             raise ValueError(f"{dirty} : la relecture ne porte pas sur la tête")
     store = _store(project_root)

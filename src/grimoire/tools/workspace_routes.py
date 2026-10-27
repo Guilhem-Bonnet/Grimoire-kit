@@ -244,6 +244,27 @@ def _providers(project_root: Path, _query: _Query) -> Any:
     return workspace_config.providers_view(project_root)
 
 
+def _options(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/options`` — les options du projet (P75) : taux USD→CAD et sa provenance."""
+    from grimoire.tools.workspace_work import project_options
+
+    return project_options(project_root)
+
+
+def _options_write(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/options`` — pose ``cockpit.usd_cad`` dans ``project-context.yaml`` (P75).
+
+    Une seule clé acceptée : le taux de conversion du coût affiché par la
+    colonne Fait. Un taux illisible ou hors borne est un 400, jamais écrit.
+    """
+    from grimoire.tools.workspace_work import write_usd_cad
+
+    raw = body.get("usd_cad")
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        raise ValueError("`usd_cad` doit être un nombre (CAD pour 1 USD)")
+    return write_usd_cad(project_root, float(raw))
+
+
 def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
@@ -565,6 +586,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}hooks": _hooks,
     f"{PREFIX}providers": _providers,
+    f"{PREFIX}options": _options,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -638,7 +660,25 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
         handler = GET_ROUTES.get(path)
         if handler is not None:
             return handler(project_root, query)
+        if path.startswith(f"{PREFIX}sessions/"):
+            # Bloc Activité d'une session (P69v2) : le fil des tâches que son claim tient.
+            rest = path[len(f"{PREFIX}sessions/") :].strip("/")
+            session_id, _, tail = rest.partition("/")
+            if session_id and tail == "feed":
+                from grimoire.tools import workspace_session_feed
+
+                return workspace_session_feed.session_feed(project_root, session_id)
         if path.startswith(f"{PREFIX}tasks/"):
+            if path.endswith("/launch-plan"):
+                # Préflight d'assignation (P47 lot 1) : plan en lecture seule, rien n'est lancé (ADR-008).
+                from grimoire.tools import workspace_launch_preflight
+
+                return workspace_launch_preflight.launch_preflight(project_root, _task_id(path, "launch-plan"))
+            if path.endswith("/feed"):
+                # Bloc Activité d'une tâche (P69v2) : le fil dérivé du ledger.
+                from grimoire.tools import workspace_session_feed
+
+                return workspace_session_feed.task_feed(project_root, _task_id(path, "feed"))
             if path.endswith("/trace"):
                 return workspace_api.task_trace_view(project_root, _task_id(path, "trace"))
             if path.endswith("/recall"):
@@ -863,6 +903,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}options": _options_write,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:

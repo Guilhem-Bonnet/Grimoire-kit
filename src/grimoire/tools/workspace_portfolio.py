@@ -398,6 +398,12 @@ def annotate_cards(
     costs = dispatch_costs(service.ledger)
     reasons = block_reasons(service.ledger)
     since = transition_times(service.ledger)
+    # P69v2 : la dernière entrée du fil d'activité, pour la ligne sur la carte
+    # d'une tâche tenue dont la session est vivante — une passe du ledger.
+    from grimoire.tools.workspace_session_feed import last_feed_labels
+
+    held_ids = {t.id for t in tasks if t.status in (TaskState.CLAIMED, TaskState.RUNNING, TaskState.WAITING)}
+    feed_last = last_feed_labels(service, held_ids)
     closed: frozenset[str] | None = None
     probed: Mapping[str, str] | None = None
     probe_done = False
@@ -416,6 +422,11 @@ def annotate_cards(
             claimed_at=claim_time(service.ledger, task.id) if held else None,
         )
         card["cost"] = cost_of(costs, task.id)
+        # P69v2 : la dernière entrée du fil, en une ligne, seulement quand la
+        # session de la carte est vivante — sinon la ligne raconterait le passé.
+        session = card["session"]
+        if session is not None and (session.get("liveness") or {}).get("state") == "vivant":
+            card["feed_last"] = feed_last.get(task.id)
         # P74 : l'âge situé — depuis quand la carte est dans sa colonne.
         card["in_state_since"] = since.get(task.id) or str(task.created_at)
         if card.get("board") == "blocked" and task.status is not TaskState.WAITING:
@@ -425,6 +436,12 @@ def annotate_cards(
                 closed = frozenset(t.id for t in service.ledger.list_tasks() if t.status is TaskState.CLOSED)
             fallback = blockers_of(task, closed or frozenset())
             card["blocked_reason"] = reasons.get(task.id) or (fallback[0]["reason"] if fallback else "")
+    # P75 : qui travaille, avec quoi, à quel coût — usage replié (task_usage),
+    # coût en CAD au taux des options du projet, et pour une tâche tenue ce que
+    # le journal de session rapporte (modèle réel, effort, skills).
+    from grimoire.tools.workspace_work import annotate_work
+
+    annotate_work(project_root, tasks, cards)
 
 
 def _project_cards(

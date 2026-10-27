@@ -117,11 +117,19 @@ class Host:
             conn.close()
 
     def snapshot(self) -> dict[str, tuple[int, int]]:
+        # Le journal de la garde (ADR-008 D3) grossit à CHAQUE verdict, refus
+        # compris : c'est la seule écriture attendue d'une requête refusée.
         return {
             str(p): (p.stat().st_size, p.stat().st_mtime_ns)
             for p in sorted(self.watched.rglob("*"))
-            if p.is_file()
+            if p.is_file() and p.name != "write-guard.jsonl"
         }
+
+    def journal_lines(self) -> list[dict[str, Any]]:
+        lines: list[dict[str, Any]] = []
+        for p in sorted(self.watched.rglob("write-guard.jsonl")):
+            lines += [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines()]
+        return lines
 
     @property
     def origin(self) -> str:
@@ -316,8 +324,43 @@ def test_no_unguarded_write_method_exists() -> None:
 
 def test_both_hosts_share_one_guard() -> None:
     """Deux copies de la règle divergeraient : c'est ce qui a laissé le cockpit ouvert."""
-    from grimoire.tools import request_guard
+    from grimoire.tools import request_guard, workspace_write_guard
 
     assert hasattr(request_guard, "check_mutation")
+    assert hasattr(workspace_write_guard, "guard_write")
     for module in (forge_http, cmd_cockpit):
-        assert "request_guard" in inspect.getsource(module), f"{module.__name__} ne l'utilise pas"
+        source = inspect.getsource(module)
+        assert "request_guard" in source, f"{module.__name__} ne l'utilise pas"
+        assert "guard_write" in source, f"{module.__name__} ne passe pas par la garde commune"
+
+
+# ── 4. Chaque verdict est journalisé (ADR-008 D3) ──────────────────────────
+
+
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_a_refused_write_is_journaled(fixture_name: str, request: pytest.FixtureRequest) -> None:
+    host: Host = request.getfixturevalue(fixture_name)
+    host.request("POST", "/api/projects/select", BODY, {**JSON, "Origin": EVIL})
+    lines = host.journal_lines()
+    assert lines, "aucune ligne de journal pour une écriture refusée"
+    last = lines[-1]
+    assert last["verdict"] == "refusée"
+    assert last["route"] == "/api/projects/select"
+    assert last["method"] == "POST"
+    assert last["code"] == 403
+    assert last["reason"]
+    assert last["ts"]
+
+
+@pytest.mark.parametrize("fixture_name", ["cockpit", "atelier"])
+def test_an_accepted_write_is_journaled_by_append(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    host: Host = request.getfixturevalue(fixture_name)
+    ok_body = json.dumps({"slug": host.slug}).encode()
+    before = len(host.journal_lines())
+    assert host.request("POST", "/api/projects/select", ok_body, {**JSON}) == 200
+    assert host.request("POST", "/api/projects/select", ok_body, {**JSON}) == 200
+    lines = host.journal_lines()
+    assert len(lines) == before + 2, "le journal n'est pas en ajout seul"
+    assert all(x["verdict"] == "acceptée" for x in lines[before:])

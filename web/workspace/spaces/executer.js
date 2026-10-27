@@ -61,6 +61,11 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 // Calculé sur les colonnes et l'attente que l'API donne déjà, rien n'est deviné.
 // Au niveau du module, comme `scope` : revenir sur l'espace garde le réglage.
 const askMe = { on: false };
+
+// Panneau « Assigner une session » (P47 lot 2) : l'ouverture vit au niveau du
+// module, comme `scope` — le pouls live redessine l'inspecteur, et un panneau
+// rouvert doit se recharger au lieu de disparaître (pattern task-create.js).
+const assignUi = { task: '', open: false };
 const needsHuman = (t) => isHumanWait(t) || t.board === 'review' || t.board === 'blocked';
 
 // Les vues que l'URL peut demander (`#travail?view=liste`).
@@ -73,6 +78,7 @@ import {
   setActionStatus, stateIcon, undoToast,
 } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
+import { activityBlockAsync } from '../activity.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
@@ -87,7 +93,9 @@ const COLUMN_LABEL = {
 // annulée n'est pas faite : elle a sa propre colonne, repliée par défaut.
 const GROUPS4 = [
   { id: 'todo', icon: 'clipboard', label: 'À faire', cols: ['proposed', 'ready'] },
-  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'] },
+  // P72v2 : pas de 5e colonne pour « Bloquée » — un compteur de ton warn sous
+  // « En cours » et une section « Bloqué » repliée par défaut (`blockedFold`).
+  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'], blockedFold: true },
   { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
   { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'] },
   { id: 'cancelled', icon: 'archive', label: 'Annulées', cols: ['archived'], folded: true },
@@ -192,6 +200,12 @@ function injectStyles() {
     .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
     .ex-col-body[hidden] { display: none; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
+    /* P72v2 : bloquées du board compact — compteur discret de ton warn (jamais une alarme), section repliée par défaut. */
+    .ex-blocked-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 2px 8px; font-size: var(--t-min); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); cursor: pointer; }
+    .ex-blocked-toggle:hover { background: var(--hover); }
+    .ex-blocked-body { display: flex; flex-direction: column; gap: 6px; }
+    .ex-blocked-body[hidden] { display: none; }
+    .ex-blocked-title { font-size: var(--t-min); font-weight: 600; color: var(--ink2); }
     .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); box-shadow: var(--shadow); padding: var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
     /* P74 : liseré gauche stable par « ouverte par » (hash → --owner-N de tokens.css).
        Un repère de balayage, jamais le seul porteur de sens : le nom est écrit sur la carte. */
@@ -263,6 +277,9 @@ function injectStyles() {
        entier reste au survol. */
     .ex-card .ex-card-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
     .ex-card .ex-card-meta > * { flex: none; }
+    /* P69v2 : la dernière entrée du fil d'activité — une seule ligne, élidée. */
+    .ex-card-feed { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .ex-card-feed .ex-card-feed-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     /* P74 : la ligne « ouverte par … · dans <colonne> depuis … » — mêmes règles
        de tenue qu'une méta de carte (une ligne, élision, texte entier au survol). */
     .ex-card-who { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 4px 6px; }
@@ -383,6 +400,20 @@ function injectStyles() {
     .ex-dec-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; white-space: normal; }
     .ex-decision-note { font-size: var(--t-min); color: var(--ink3); }
     .ex-decision-item { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+    /* P47 : panneau Assigner une session — plan de lancement en lecture seule, section de l'inspecteur. */
+    .ex-assign-panel { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); }
+    .ex-assign-panel h4 { font-size: var(--t-s); color: var(--ink); margin: 0; font-weight: 600; }
+    .ex-assign-sub { margin: 0; font-size: var(--t-s); color: var(--ink2); }
+    .ex-assign-notready { display: flex; align-items: flex-start; gap: 6px; padding: 6px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); font-size: var(--t-s); }
+    .ex-assign-panel .skeleton { padding: var(--sp-2) 0; }
+    .ex-assign-rows { display: flex; flex-direction: column; }
+    .ex-assign-verifs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .ex-assign-verif { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-s); }
+    .ex-assign-verif > .sico { align-self: start; margin-top: 1px; }
+    .ex-assign-verif > span:not(.sico) { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+    .ex-assign-launch { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .ex-assign-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .ex-assign-cmd code { font-family: var(--mono); font-size: var(--t-min); padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
     @container canvas (max-width: 900px) {
       .ex-dec-bulk { margin-left: 0; width: 100%; }
       .ex-decision { padding: var(--sp-3); }
@@ -537,8 +568,104 @@ function cardSessionLine(task) {
     who.title = 'persona du claim : qui tient la tâche dans la session';
     line.append(who);
   }
-  // « session » n'est pas un palier : le badge de route dit déjà « modèle de session ».
-  if (task.model_tier && task.model_tier !== 'session') line.append(text('span', 'lbl', `palier ${task.model_tier}`));
+  // P75 : le palier RÉEL lu du journal de session quand il est rapporté ; le
+  // palier recommandé (route) en repli ; sinon le dire — rien n'est inventé.
+  const work = (task.work && task.work.session) || null;
+  const model = document.createElement('span');
+  model.dataset.role = 'work-model';
+  if (work && (work.tier || work.model)) {
+    model.textContent = work.tier || work.model;
+    model.title = work.tier
+      ? `palier réel, lu du journal de session${work.model ? ` (${work.model})` : ''}`
+      : 'modèle lu du journal de session (hors paliers haiku/sonnet/opus)';
+  } else if (!work && task.model_tier && task.model_tier !== 'session') {
+    // « session » n'est pas un palier : le badge de route dit déjà « modèle de session ».
+    model.className = 'lbl';
+    model.textContent = `palier ${task.model_tier}`;
+  }
+  if (model.textContent) line.append(model);
+  return line;
+}
+
+// P75 : la ligne de travail d'une carte tenue — effort, tokens en direct,
+// derniers skills. Sa propre ligne : la ligne session est en nowrap/élision,
+// ces faits y disparaissaient. Rien n'est inventé : un effort absent se dit.
+function workLiveRow(task) {
+  const work = (task.work && task.work.session) || null;
+  if (!work) return null;
+  const line = document.createElement('div');
+  line.className = 'ex-facts lbl';
+  line.dataset.role = 'work-live';
+  if (!work.tier && !work.model) {
+    // Le journal ne rapporte pas de modèle : le dire ici (la ligne session,
+    // en nowrap, tronquait la phrase) plutôt qu'afficher un palier deviné.
+    const missing = text('span', null, 'modèle non rapporté');
+    missing.dataset.role = 'work-model';
+    missing.title = "le journal de session n'est pas lisible d'ici : aucun palier affirmé";
+    line.append(missing);
+  }
+  const effort = text('span', null, work.effort ? `effort ${work.effort}` : 'effort non rapporté');
+  effort.dataset.role = 'work-effort';
+  effort.title = work.effort
+    ? 'effort de raisonnement, lu du journal de session'
+    : "l'hôte ne rapporte pas d'effort pour cette session";
+  line.append(effort);
+  const usage = (task.work && task.work.usage) || null;
+  if (usage && usage.usage_source === 'claude-code-transcript') {
+    const tokens = text('span', null, tokensText(usage.total_tokens || 0));
+    tokens.dataset.role = 'work-tokens';
+    tokens.title = `${usage.input_tokens} in / ${usage.output_tokens} out, cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit — repliés des traces (grimoire task fold-usage)`;
+    line.append(tokens);
+  }
+  if (work.skills && work.skills.length) {
+    const last = work.skills.slice(-2);
+    const skills = text('span', null, last.join(' · '));
+    skills.dataset.role = 'work-skills';
+    skills.title = `derniers skills invoqués par la session (liste complète dans le détail) : ${work.skills.join(', ')}`;
+    line.append(skills);
+  }
+  return line;
+}
+
+// P75 : tokens compacts pour une carte — « 48,2 k tokens » au-delà du millier.
+function tokensText(total) {
+  if (total < 1000) return `${total} tokens`;
+  const k = total / 1000;
+  const rounded = k >= 100 ? String(Math.round(k)) : (Math.round(k * 10) / 10).toFixed(1).replace(/\.0$/, '');
+  return `${rounded.replace('.', ',')} k tokens`;
+}
+
+// Montant CAD : virgule décimale, l'unité écrite — jamais un symbole seul.
+function cadText(cad) {
+  return `${cad.toFixed(2).replace('.', ',')} $ CAD`;
+}
+
+// Statut d'usage en toutes lettres quand ce n'est pas le journal de l'hôte (P75).
+const USAGE_SOURCE_WORDS = {
+  none: 'aucun usage replié depuis le journal de l’hôte (none)',
+  unavailable: "l'hôte de la tâche n'expose pas de journal d'usage vérifié (unavailable)",
+  reported: "coût rapporté par l'ouvrier seulement (reported)",
+};
+
+// P75 : fin de parcours — total de tokens repliés et coût approximatif en CAD
+// au taux des options du projet ; « coût inconnu » quand rien n'est replié.
+function workTotalRow(work) {
+  const usage = work.usage || {};
+  const line = text('div', 'ex-cost lbl', '');
+  line.dataset.role = 'work-total';
+  line.dataset.usageSource = usage.usage_source || 'none';
+  const parts = [];
+  if (usage.usage_source === 'claude-code-transcript') {
+    parts.push(`total ${tokensText(usage.total_tokens || 0)}`);
+    if (work.cost_cad != null) parts.push(`${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)}`);
+    else parts.push('coût inconnu');
+  } else {
+    parts.push('coût inconnu');
+  }
+  line.textContent = parts.join(' · ');
+  const source = USAGE_SOURCE_WORDS[usage.usage_source];
+  line.title = `${source ? source + '. ' : ''}Taux : 1 USD = ${String(work.usd_cad).replace('.', ',')} $ CAD `
+    + `(${work.usd_cad_source === 'default' ? 'défaut du kit' : 'déclaré par le projet'}, modifiable dans Configuration → Fournisseurs et budgets).`;
   return line;
 }
 
@@ -856,6 +983,8 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
     // La vivacité a son glyphe sur la ligne des faits, juste en dessous : pas
     // de doublon ici.
     card.append(cardSessionLine(task));
+    // P75 : effort, tokens en direct et derniers skills de la session.
+    appendIf(card, workLiveRow(task));
   }
   // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
   // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
@@ -867,7 +996,21 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   // n'affiche plus de vivacité.
   const facts = !isClosed(task) && task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
   if (facts) card.append(facts);
-  const cost = costRow(task);
+  // P69v2 : la dernière entrée du fil d'activité, en une ligne — le serveur ne
+  // la pose que sur une tâche tenue dont la session est vivante.
+  if (task.feed_last && task.feed_last.label) {
+    const feedLine = text('div', 'ex-card-feed lbl', '');
+    feedLine.dataset.role = 'feed-last';
+    feedLine.title = `Dernière entrée du fil d'activité (ledger) : ${task.feed_last.label}`;
+    feedLine.append(icon('history'), text('span', 'ex-card-feed-text', task.feed_last.label));
+    card.append(feedLine);
+  }
+  // P75 : une carte close dit le total de tokens et le coût approximatif en
+  // CAD — c'est son bilan ; la ligne « coût (dispatch) » de P11 reste aux
+  // cartes ouvertes (deux « coût inconnu » superposés ne disaient rien).
+  const closedTotal = isClosed(task) && task.work ? workTotalRow(task.work) : null;
+  const cost = closedTotal ? null : costRow(task);
+  if (closedTotal) card.append(closedTotal);
   if (cost && facts) facts.append(Object.assign(cost, { className: 'ex-cost' }));
   else if (cost) card.append(cost);
 
@@ -909,6 +1052,10 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     col.dataset.group = group.id;
     const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
     const folded = group.folded && !unfolded.has(group.id);
+    // P72v2 : sur le board compact, les bloquées sortent du flux de la colonne —
+    // compteur de ton warn sous le titre, section « Bloqué » repliée par défaut.
+    const heldBack = group.blockedFold ? inColumn.filter((t) => t.board === 'blocked') : [];
+    const shown = heldBack.length ? inColumn.filter((t) => t.board !== 'blocked') : inColumn;
 
     const head = document.createElement('div');
     head.className = 'ex-col-head';
@@ -939,13 +1086,45 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     }
     col.append(head);
 
+    if (heldBack.length) {
+      // Compteur + repli (décision P72v2) : pas de colonne dédiée, pas d'alarme.
+      // Absent dès qu'aucune tâche n'est bloquée.
+      const foldKey = `${group.id}:blocked`;
+      const open = unfolded.has(foldKey);
+      const sectionId = `ex-blocked-${group.id}`;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'ex-blocked-toggle';
+      toggle.dataset.role = 'blocked-count';
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-controls', sectionId);
+      toggle.title = open ? 'Replier les tâches bloquées' : 'Afficher les tâches bloquées et leur raison';
+      toggle.append(stateIcon('warn'), text('span', null, `${heldBack.length} bloquée${heldBack.length > 1 ? 's' : ''}`));
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (unfolded.has(foldKey)) unfolded.delete(foldKey); else unfolded.add(foldKey);
+        const fresh = document.createElement('div');
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
+        board.replaceWith(fresh.firstElementChild);
+      });
+      col.append(toggle);
+      const section = document.createElement('div');
+      section.className = 'ex-blocked-body';
+      section.id = sectionId;
+      section.dataset.role = 'blocked-section';
+      section.hidden = !open;
+      section.append(text('div', 'ex-blocked-title', 'Bloqué'));
+      for (const task of heldBack) section.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      col.append(section);
+    }
+
     const body = document.createElement('div');
-    body.className = 'ex-col-body' + (inColumn.length ? '' : ' empty');
+    body.className = 'ex-col-body' + (shown.length ? '' : ' empty');
     body.hidden = folded;
-    if (!inColumn.length) {
+    if (!shown.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      for (const task of shown) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
     }
     col.append(body);
     board.append(col);
@@ -1856,6 +2035,55 @@ function sessionBlock(session, { resume = true } = {}) {
   return block;
 }
 
+// P75 : la section « Travail de la session » de l'inspecteur — persona, hôte,
+// modèle réel, effort, skills invoqués, tokens détaillés. Chaque donnée absente
+// est dite absente (« non rapporté »), et le statut d'usage est écrit en toutes
+// lettres quand le chiffre ne vient pas du journal de l'hôte.
+function workBlock(task) {
+  const work = task.work || {};
+  const block = document.createElement('div');
+  block.className = 'ex-insp-block';
+  block.dataset.role = 'work-block';
+  block.append(text('h4', null, 'Travail de la session'));
+  const claim = task.claim || {};
+  const persona = claim.agent_id || claim.actor_id || '';
+  block.append(text('div', 'lbl', `persona : ${persona || 'non rapportée'}`));
+  block.append(text('div', 'lbl', `hôte : ${task.host ? (HOST_LABEL[task.host] || task.host) : 'inconnu'}`));
+  const session = work.session;
+  const modelLine = text('div', 'lbl', '');
+  modelLine.dataset.role = 'work-model-detail';
+  modelLine.textContent = session && session.model
+    ? `modèle réel : ${session.model}${session.tier ? ` (palier ${session.tier})` : ''}`
+    : 'modèle réel : non rapporté';
+  block.append(modelLine);
+  const effortLine = text('div', 'lbl', `effort : ${session && session.effort ? session.effort : 'non rapporté'}`);
+  effortLine.dataset.role = 'work-effort-detail';
+  block.append(effortLine);
+  const skillsLine = text('div', 'lbl', 'skills invoqués : ');
+  skillsLine.dataset.role = 'work-skills-list';
+  skillsLine.append(text('span', null, session && session.skills && session.skills.length ? session.skills.join(', ') : 'aucun rapporté'));
+  block.append(skillsLine);
+  const usage = work.usage || {};
+  const usageLine = text('div', 'lbl', '');
+  usageLine.dataset.role = 'work-usage';
+  if (usage.usage_source === 'claude-code-transcript') {
+    usageLine.textContent = `tokens : ${usage.total_tokens} (${usage.input_tokens} in / ${usage.output_tokens} out, `
+      + `cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit, ${usage.calls} appel(s))`;
+    block.append(usageLine);
+    const costLine = text('div', 'lbl', '');
+    costLine.dataset.role = 'work-cost';
+    costLine.textContent = work.cost_cad != null && usage.cost_usd != null
+      ? `coût : ${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)} `
+        + `(${usage.cost_usd.toFixed(4)} USD, taux ${String(work.usd_cad).replace('.', ',')})`
+      : 'coût : inconnu (appels non tarifés)';
+    block.append(costLine);
+  } else {
+    usageLine.textContent = `usage : ${USAGE_SOURCE_WORDS[usage.usage_source] || 'aucun usage replié (none)'}`;
+    block.append(usageLine);
+  }
+  return block;
+}
+
 // Les conditions de passage (`next_gate`, lu par `workspace_api.annotate_gates`
 // depuis le verdict du gate) en clair : le libellé dit la preuve, l'identifiant
 // du gate reste affiché à côté pour qu'on puisse le chercher dans le fichier de portes.
@@ -2081,6 +2309,195 @@ function receiptBlock(ctx, taskId, payload, project) {
 // l'utilisateur a pu taper. `guard.defer()` dit si une saisie est en cours (alors
 // le re-rendu est reporté, `false` rendu) ; et quand il a lieu quand même (clic
 // sur une carte, transition), valeur, focus et curseur sont rétablis.
+// ── Assigner une session (P47 lot 2) ────────────────────────────────────────
+//
+// Une section de l'inspecteur (jamais une modale) : le plan de lancement que
+// GET tasks/<id>/launch-plan rend — modèle, worktree, branche, les cinq
+// vérifications du préflight et la commande équivalente à copier. Rien n'est
+// lancé : le bouton « Lancer la session » reste désactivé tant que la garde
+// d'écriture commune (ADR-008) n'existe pas (GAO-garde-d-crit-001).
+
+//: Les verdicts du préflight sur les tons existants du cockpit (stateIcon).
+const PREFLIGHT_TONE = { ok: 'ok', warn: 'warn', bloquant: 'bad', inconnu: '' };
+const PREFLIGHT_WORD = { ok: 'ok', warn: 'attention', bloquant: 'bloquant', inconnu: 'inconnu' };
+const LAUNCH_LOCK_REASON = "Lancement depuis le cockpit après la garde d'écriture commune (ADR-008) — copie la commande en attendant.";
+// Les états que le préflight accepte en entrée de file : une tâche prête est
+// candidate à l'admission, une proposée reçoit un plan qui dit ce qui manque.
+const ASSIGNABLE_STATUS = new Set(['proposed', 'ready']);
+
+function assignPlanNode(plan) {
+  const panel = document.createElement('div');
+  panel.className = 'ex-assign-panel';
+  panel.append(text('h4', null, 'Assigner une session'));
+  panel.append(text('p', 'ex-assign-sub', 'Tu lances, la session travaille dans son worktree, elle finit par une PR que tu fusionnes.'));
+
+  // Pas prêt : le dire clairement en tête, avec la raison du préflight (ton warn).
+  if (plan.pret === false) {
+    const notReady = document.createElement('div');
+    notReady.className = 'ex-assign-notready';
+    notReady.dataset.role = 'assign-not-ready';
+    notReady.append(stateIcon('warn'), text('span', null, `Pas prêt : ${plan.raison || 'raison non communiquée'}`));
+    panel.append(notReady);
+  }
+
+  // Modèle, worktree, branche — les mêmes lignes clé-valeur que le bloc Preuves.
+  const rows = document.createElement('div');
+  rows.className = 'ex-assign-rows';
+  const kv = (label, role, ...nodes) => {
+    const line = document.createElement('div');
+    line.className = 'ex-kv';
+    line.dataset.role = role;
+    const value = document.createElement('span');
+    value.append(...nodes);
+    line.append(text('span', 'lbl', label), value);
+    return line;
+  };
+  const modele = plan.modele || {};
+  const modelValue = text('span', null, modele.recommande || 'aucun modèle imposé — la session garde son défaut');
+  if (modele.source) modelValue.title = `source : ${modele.source}${modele.palier ? ` · palier ${modele.palier}` : ''}`;
+  const modelWhy = text('span', 'ex-cond-why', `classe ${modele.classe || '?'}, ${modele.justification || 'justification non communiquée'}`);
+  rows.append(kv('Modèle', 'assign-model', modelValue, modelWhy));
+  const worktree = plan.worktree || {};
+  const worktreeName = worktree.chemin ? String(worktree.chemin).split('/').filter(Boolean).pop() : '';
+  const wtValue = worktreeName
+    ? text('code', null, worktreeName)
+    : text('span', 'lbl', worktree.detail || 'chemin inconnu');
+  if (worktree.chemin) wtValue.title = worktree.chemin;
+  const wtNodes = [wtValue];
+  if (worktree.existant) wtNodes.push(text('span', 'ex-cond-why', 'worktree déjà créé : la session le reprendrait'));
+  rows.append(kv('Worktree', 'assign-worktree', ...wtNodes));
+  rows.append(kv('Branche', 'assign-branch', text('code', null, worktree.branche || '?')));
+  panel.append(rows);
+
+  // Les cinq vérifications du préflight, chacune avec son verdict.
+  const verifsBlock = document.createElement('div');
+  verifsBlock.append(text('h4', null, 'Vérifications avant lancement'));
+  const list = document.createElement('ul');
+  list.className = 'ex-assign-verifs';
+  list.dataset.role = 'assign-verifs';
+  for (const v of plan.verifications || []) {
+    const li = document.createElement('li');
+    const tone = PREFLIGHT_TONE[v.verdict] ?? '';
+    li.className = 'ex-assign-verif' + (tone ? ' ' + tone : '');
+    li.dataset.role = 'assign-verif';
+    li.dataset.verif = v.id;
+    li.dataset.verdict = v.verdict;
+    const body = document.createElement('span');
+    body.append(
+      text('span', v.verdict === 'bloquant' ? 'ex-cond-strong' : null, `${v.libelle} — ${PREFLIGHT_WORD[v.verdict] || v.verdict}`),
+      text('span', 'ex-cond-why', v.detail || ''),
+    );
+    li.append(stateIcon(tone), body);
+    list.append(li);
+  }
+  if (!(plan.verifications || []).length) verifsBlock.append(text('p', 'lbl', 'aucune vérification lue'));
+  else verifsBlock.append(list);
+  panel.append(verifsBlock);
+
+  // Lancer : présent mais toujours désactivé dans ce lot — la garde d'écriture
+  // commune (ADR-008) n'existe pas encore, la raison est écrite à côté.
+  const launchRow = document.createElement('div');
+  launchRow.className = 'ex-assign-launch';
+  const launch = document.createElement('button');
+  launch.type = 'button';
+  launch.className = 'btn pri';
+  launch.dataset.role = 'assign-launch';
+  launch.textContent = 'Lancer la session';
+  launch.disabled = true;
+  launch.title = LAUNCH_LOCK_REASON;
+  launch.setAttribute('aria-describedby', 'ex-assign-lock-reason');
+  const lockReason = text('p', 'lbl', LAUNCH_LOCK_REASON);
+  lockReason.id = 'ex-assign-lock-reason';
+  lockReason.dataset.role = 'assign-launch-reason';
+  launchRow.append(launch, lockReason);
+  panel.append(launchRow);
+
+  // Équivalent : la commande du payload, à copier — même pattern statut +
+  // repli (sélection prête pour Ctrl+C) que la vue Décisions.
+  const equiv = document.createElement('div');
+  equiv.append(text('h4', null, 'Équivalent'));
+  const commande = plan.commande || {};
+  if (commande.texte) {
+    const box = document.createElement('div');
+    box.className = 'ex-assign-cmd';
+    const code = text('code', null, commande.texte);
+    code.dataset.role = 'assign-command';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn';
+    copy.dataset.role = 'assign-copy';
+    copy.append(icon('copy'), text('span', null, 'Copier la commande'));
+    const status = actionStatus('');
+    copy.addEventListener('click', async () => {
+      // `copyText` appelle le presse-papiers dans le geste même (permission du navigateur).
+      if (await copyText(commande.texte, copy)) {
+        setActionStatus(status, 'Commande copiée : collez-la dans un terminal pour lancer la session.', 'ok');
+        return;
+      }
+      // Repli : la commande est sélectionnée, prête pour Ctrl+C.
+      const selection = window.getSelection();
+      if (selection) selection.selectAllChildren(code);
+      setActionStatus(status, 'Copie refusée par le navigateur : la commande est sélectionnée, copiez-la (Ctrl+C).');
+    });
+    box.append(code, copy, status);
+    equiv.append(box);
+  } else {
+    equiv.append(text('p', 'lbl', `commande indisponible : ${commande.raison || 'non composée par le préflight'}`));
+  }
+  panel.append(equiv);
+  return panel;
+}
+
+async function renderAssignPanel(ctx, holder, taskId, project) {
+  // Chargement : squelette court, remplacé par le plan ou par l'échec nommé.
+  const wait = document.createElement('div');
+  wait.className = 'skeleton';
+  wait.dataset.shape = 'lines';
+  wait.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 3; i += 1) wait.append(text('div', 'skeleton-line', ''));
+  holder.replaceChildren(text('p', 'lbl sr-only', 'Lecture du plan de lancement…'), wait);
+  let plan;
+  try {
+    plan = await ctx.api.taskLaunchPlan(taskId, project);
+  } catch (error) {
+    if (ctx.signal.aborted) return;
+    holder.replaceChildren(text('p', 'ex-refusal', failureText(error)));
+    return;
+  }
+  // Le pouls a pu fermer le panneau ou changer de tâche pendant la lecture.
+  if (ctx.signal.aborted || !(assignUi.open && assignUi.task === taskId)) return;
+  holder.replaceChildren(assignPlanNode(plan));
+}
+
+function assignBlock(ctx, detail, project) {
+  if (!ASSIGNABLE_STATUS.has(detail.status)) return null;
+  const block = document.createElement('section');
+  block.className = 'ex-insp-block';
+  block.dataset.role = 'assign-block';
+  const holder = document.createElement('div');
+  holder.dataset.role = 'assign-panel-holder';
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'btn';
+  open.dataset.role = 'assign-open';
+  open.append(icon('play'), text('span', null, 'Assigner une session…'));
+  const paint = (opened) => {
+    open.setAttribute('aria-expanded', String(opened));
+    if (opened) renderAssignPanel(ctx, holder, detail.id, project);
+    else holder.replaceChildren();
+  };
+  open.addEventListener('click', () => {
+    const opened = !(assignUi.open && assignUi.task === detail.id);
+    assignUi.open = opened;
+    assignUi.task = opened ? detail.id : '';
+    paint(opened);
+  });
+  block.append(open, holder);
+  // Le panneau survit au re-rendu de l'inspecteur (pouls live) : rouvert, il se rafraîchit.
+  paint(assignUi.open && assignUi.task === detail.id);
+  return block;
+}
+
 async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false, guard = {}) {
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
@@ -2404,25 +2821,30 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   }
   ctx.inspector.append(sessionWrap);
 
+  // ── P75 : qui travaille — persona, modèle réel, effort, skills, tokens ──
+  if (task.work) ctx.inspector.append(workBlock(task));
+
+  // ── Assigner une session (P47) : le plan de lancement, sans rien lancer ──
+  appendIf(ctx.inspector, assignBlock(ctx, detail, project));
+
   // ── Mémoire servie : le reçu de rappel, rejouable (P27) ─────────────────
   ctx.inspector.append(receiptBlock(ctx, taskId, receipts, project));
 
   // ── Consigne à la session, priorité (gestes existants) ──────────────────
   renderSteering(ctx, detail, onWritten);
 
-  // ── Derniers événements ─────────────────────────────────────────────────
+  // ── Activité (P69v2, artboard Travail « Derniers événements ») ──────────
+  // Le fil de l'agent dérivé du ledger (claim, transitions, portes,
+  // questions/réponses, notes de progression), le même bloc que l'inspecteur
+  // de session (`activity.js`), avec la commande `claude logs` à copier.
   const eventCount = (trace?.entries || []).length;
   const eventsBlock = document.createElement('div');
   eventsBlock.className = 'ex-insp-block';
   eventsBlock.dataset.role = 'last-events';
-  eventsBlock.append(text('h4', null, 'Derniers événements'));
-  const recent = [...(trace?.entries || [])].slice(-3).reverse();
-  if (!recent.length) eventsBlock.append(text('p', 'lbl', 'aucun événement lu'));
-  for (const entry of recent) {
-    const line = text('div', 'ex-event', '');
-    line.append(text('span', 'lbl', `${(entry.at || '').slice(0, 16).replace('T', ' ')} · `), entry.summary || entry.kind);
-    eventsBlock.append(line);
-  }
+  eventsBlock.append(activityBlockAsync(
+    () => ctx.api.taskFeed(taskId, project),
+    { heading: 'Derniers événements', signal: ctx.signal },
+  ));
   // Drill-down (#139) : la timeline complète de la tâche sans passer par le sélecteur de vue.
   const timelineBtn = document.createElement('button');
   timelineBtn.type = 'button';
