@@ -204,6 +204,9 @@ def test_une_question_de_worker_sous_mandat_lance_une_session_inscrite(projet: P
     assert argv[argv.index("--model") + 1] == "sonnet" and argv[argv.index("--permission-mode") + 1] == "dontAsk"
     allowed = argv[argv.index("--allowed-tools") + 1]
     assert "Bash(grimoire task answer *)" in allowed and "Edit" not in allowed and "--disallowed-tools" not in argv
+    # Réglages utilisateur, projet et local ignorés (leurs permissions.allow ne s'ajoutent pas), ni MCP ni autre outil.
+    assert {"--restricted", "--strict-mcp-config"} <= set(argv) and argv[argv.index("--tools") + 1] == "Read,Bash"
+    assert argv.index("--permission-mode") < len(argv) - 1 and argv[-1].startswith("Tu es la session orchestrateur")
     [item] = prompt_data(host)
     assert (item["task_id"], item["question_id"], item["gesture"]) == (tid, qid, "answer")
     assert item["question"] == "Rendre 404 ou 410 ?" and item["options"] == ["404", "410"] and item["criteria"] == list(CRITERIA)
@@ -451,6 +454,12 @@ def test_un_worker_qui_usurpe_l_identite_de_l_orchestrateur_est_refuse(
     # Depuis son worktree, avec le seul identifiant volé : refusé.
     out = answer(projet, tid, "404", qid, root=worktree)
     assert out.exit_code == 1 and "worktree de tâche" in out.output, out.output
+    # Depuis un sous-dossier de son worktree, vers la racine du projet : refusé aussi.
+    (worktree / "src").mkdir(exist_ok=True)
+    with monkeypatch.context() as inside:
+        inside.chdir(worktree / "src")
+        out = answer(projet, tid, "404", qid)
+    assert out.exit_code == 1 and "worktree de tâche" in out.output, out.output
     # Hors de son worktree, en présentant aussi le sien : refusé.
     monkeypatch.setenv("GRIMOIRE_SESSION_ID", own)
     out = answer(projet, tid, "404", qid)
@@ -564,3 +573,47 @@ def test_les_reprises_de_l_orchestrateur_ne_bouclent_pas(projet: Path, host: Fak
     assert mandate_gesture(exhausted, "reap")[0] == ""
     service.answer(tid, "reprendre", "guilhem", origin=ORIGIN_HUMAN, question_id=qid)
     assert TaskService(projet).ledger.attempts(tid) == 0  # seule la réponse humaine remet à zéro
+
+
+def test_une_question_presentee_a_une_session_ouverte_n_est_pas_relistee(projet: Path, host: FakeHost) -> None:
+    write_policy(projet, wip=2)
+    grant(projet)
+    _tid, qid = worker_asks(projet, host)
+    tick(projet, host)
+    assert tick(projet, host).orchestrator == ()  # présentée à la session ouverte : aucune seconde session
+    _tid2, qid2 = worker_asks(projet, host, "Quel format de date ?", options=("ISO",))
+    assert [(o.action, o.status) for o in tick(projet, host).orchestrator] == [("launch", "launched")]
+    assert [i["question_id"] for i in prompt_data(host)] == [qid2]
+    assert len([a for a in host.of("claude", "--bg") if SESSION_NAME in a]) == 2 and qid != qid2
+
+
+def test_la_fin_non_inscrite_au_journal_remonte_a_l_attention(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    grant(projet)
+    worker_asks(projet, host)
+    [first] = tick(projet, host).orchestrator
+    host.stopped.add(first.session)
+
+    def broken(*_a: object, **_k: object) -> int:
+        raise OSError("journal en lecture seule")
+
+    monkeypatch.setattr(MandateStore, "end_session", broken)
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.orchestrator] == [("end", "done"), ("end", "failed")]
+    assert any("non inscrite au journal d'autorité" in line and "lecture seule" in line for line in report.attention)
+    assert orch_events(projet, ORCH_ENDED_EVENT)[0]["journal_error"] == "OSError: journal en lecture seule"
+
+
+def test_l_escalade_du_relecteur_est_notee_avant_sa_question(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.reviewer import REVIEW_ESCALATED_EVENT, ReviewStage
+
+    tid = launched(projet, host)
+    ledger = TaskService(projet).ledger
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="worker")
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")
+    service = TaskService(projet)
+    stage = ReviewStage(service, load_orchestrator_policy(projet).policy, exec_=host)  # type: ignore[arg-type]
+    assert stage._escalate(service.require(tid), "2 relecture(s) NOT-READY", "").status == "done"
+    kinds = [e.event_type for e in TaskService(projet).ledger.events_for(tid)]
+    assert kinds.index(REVIEW_ESCALATED_EVENT) < kinds.index("task.question_asked")

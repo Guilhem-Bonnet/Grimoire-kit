@@ -633,7 +633,8 @@ GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-2 \
   retente à chaque tick.
 - **Gardes de `task answer`** : une réponse d'origine `orchestrator` est refusée, avant le mandat (le journal ne dit
   jamais « pris » d'un geste refusé), pour une question réservée à l'humain, pour la réponse `abandonner` (qui
-  annule la tâche), au-delà du plafond de reprises, depuis un worktree de tâche, quand un identifiant présenté
+  annule la tâche), au-delà du plafond de reprises, depuis un worktree de tâche, l'un de ses sous-dossiers ou le
+  dossier des worktrees, quand un identifiant présenté
   (`GRIMOIRE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`) a tenu le claim de la tâche ou l'a relue, sur une tâche que le tick
   n'a pas lancée, et pour une question que le tick n'a pas présentée à **cette** session. Le mandat exige ensuite une
   session inscrite orchestrateur, non échue et non terminée, qui n'est celle d'aucun worker ni relecteur, et un geste
@@ -642,9 +643,13 @@ GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-2 \
   orchestrator`, `mandate_id`, `provenance`, `gesture`).
 - **Jamais** : la session inscrite ne peut ni accepter, ni fusionner, ni approuver un check, ni libérer la file, ni
   lever une pause (`orchestrate resume`), même si le mandat couvre ces gestes : ces commandes n'ouvrent pas le canal
-  `task answer`. Elle tourne en `--permission-mode dontAsk`, imposé quelle que soit la politique (jamais
-  `bypassPermissions`), avec une liste blanche `--allowed-tools` : `Read`, `grimoire task show|list|questions` et
-  `grimoire task answer`. Tout autre outil est refusé sans demander.
+  `task answer`. Elle est lancée en `--restricted` : les réglages utilisateur, projet et local sont ignorés, donc
+  leurs `permissions.allow` ne s'ajoutent pas et `bypassPermissions` est refusé. S'y ajoutent `--strict-mcp-config`
+  (aucun serveur MCP), `--tools Read,Bash` (aucun autre outil), `--permission-mode dontAsk`, imposé quelle que soit
+  la politique, et une liste blanche `--allowed-tools` : `Read`, `grimoire task show|list|questions` et
+  `grimoire task answer`. Tout autre appel est refusé sans demander. Contrepartie assumée : les hooks des réglages
+  utilisateur et projet ne tournent pas dans cette session, dont les seuls gestes passent par `task answer`, gardé
+  dans le code du kit.
 - **Fin** : une session absente de `claude agents`, ou qui a rendu son tour, est terminée au tick suivant. Une
   session encore au travail après 30 minutes est arrêtée. Les questions qu'elle a laissées ouvertes remontent dans
   l'attention du tick. Une lecture de `claude agents` en échec ne termine rien et ne lance rien.
@@ -652,10 +657,11 @@ GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-2 \
   - la session est un LLM : elle peut trancher faux *dans* le périmètre des critères. Tout est journalisé avec sa
     provenance, et l'humain garde la révocation du mandat (`grimoire autonomy mandate revoke`) ;
   - l'identité de session n'est pas un secret, comme pour le relecteur : un worker peut lire celle de l'orchestrateur
-    dans `claude agents` et la présenter. Il est refusé sur sa propre tâche s'il agit depuis son worktree ou présente
-    aussi son identifiant, sur toute question non présentée à cette session, et après la fin ou l'échéance de
-    l'inscription. Reste ouvert : hors de son worktree, avec le seul identifiant volé, pendant la vie de la session,
-    une question présentée sur une **autre** tâche. Seule une preuve de l'appelant par le hook de l'hôte le fermerait ;
+    dans `claude agents` et la présenter. Il est refusé depuis un worktree de tâche ou l'un de ses sous-dossiers,
+    s'il présente aussi son identifiant, sur toute question non présentée à cette session, et après la fin ou
+    l'échéance de l'inscription. Reste ouvert : sorti de tout worktree (`cd /`, `--project-root` vers la racine),
+    avec le seul identifiant volé et pendant la vie de la session, toute question présentée à cette session, **y
+    compris la sienne**. Seule une preuve de l'appelant par le hook de l'hôte le fermerait ;
   - elle tourne sous le même utilisateur du système : la liste blanche la borne côté hôte, pas côté système ;
   - entre son lancement et son inscription (quelques secondes), ses réponses sont refusées : la consigne lui dit de
     réessayer une fois ;

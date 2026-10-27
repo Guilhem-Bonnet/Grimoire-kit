@@ -548,6 +548,11 @@ class ReviewStage:
             return ReviewOutcome(tid, "escalate", "failed", f"escalade refusée : {exc}")
         detail = f" : {notes[:600]}" if notes else ""
         qid = new_question_id()
+        # Avant la question, comme le merger : un tick tué entre les deux ne laisse pas une question du relecteur que
+        # l'étape orchestrateur (#962) prendrait pour celle du worker.
+        self._service.ledger.append_event(
+            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR, {"task_id": tid, "question_id": qid, "why": why[:300]}
+        )
         try:
             self._service.ask(
                 tid, f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
@@ -556,9 +561,6 @@ class ReviewStage:
         except (GrimoireError, ValueError) as exc:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="escalade non posée")
             return ReviewOutcome(tid, "escalate", "failed", f"question à l'humain non posée ({exc}) : tâche remise en revue")
-        self._service.ledger.append_event(
-            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR, {"task_id": tid, "question_id": qid, "why": why[:300]}
-        )
         return ReviewOutcome(tid, "escalate", "done", f"escalade à l'humain après {why}")
 
 

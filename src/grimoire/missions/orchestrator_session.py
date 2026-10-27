@@ -38,9 +38,13 @@ mandat, cette session ne peut ni accepter, ni fusionner, ni approuver un check, 
 session est arrêtée et la tentative notée (``orchestrator.session_launch_failed``), comptée au disjoncteur ; un arrêt
 non confirmé compte au WIP et est retenté à chaque tick.
 
-**Outils** — la session est lancée en ``--permission-mode dontAsk`` quelle que soit la politique (jamais
-``bypassPermissions``), avec une liste blanche (:data:`ALLOWED_TOOLS`) : lire, ``grimoire task show|list|questions``
-et ``grimoire task answer``. Tout autre outil est refusé sans demander.
+**Outils** — la session est lancée en ``--restricted`` (les réglages utilisateur, projet et local sont ignorés : leurs
+``permissions.allow`` ne s'ajoutent pas, ``bypassPermissions`` est refusé), ``--strict-mcp-config`` sans serveur MCP,
+``--tools Read,Bash`` (aucun autre outil n'existe pour elle), ``--permission-mode dontAsk`` quelle que soit la politique,
+et une liste blanche (:data:`ALLOWED_TOOLS`) : lire, ``grimoire task show|list|questions`` et ``grimoire task answer``.
+Tout autre appel est refusé sans demander. Contrepartie : les hooks des réglages utilisateur et projet ne tournent pas
+dans cette session ; ses seuls gestes passent par ``task answer``, dont les gardes sont dans le code du kit, pas dans un
+hook.
 
 **Fin** — à chaque tick, chaque session ouverte est relue dans ``claude agents --json`` : absente, elle a fini ;
 présente mais plus ``busy``, elle a rendu son tour et elle est arrêtée ; ``busy`` au-delà de :data:`SESSION_TIMEOUT`,
@@ -53,10 +57,12 @@ elle est arrêtée. Sa fin est inscrite au journal d'autorité : son identifiant
   avec sa provenance (``rule:…``) au journal d'autorité et au ledger, et l'humain garde la révocation du mandat ;
 - l'identité de session n'est pas un secret (même limite que le relecteur, :mod:`.launcher`) : un worker peut lire le
   ``sessionId`` de l'orchestrateur dans ``claude agents`` et le présenter (``CLAUDE_CODE_SESSION_ID``). Sont refusés :
-  sa propre tâche quand il présente aussi son identifiant ou agit depuis son worktree, toute question que le tick n'a
-  pas présentée à cette session, toute réponse après la fin ou l'échéance de l'inscription. Reste ouvert : un worker
-  qui quitte son worktree et ne présente que l'identifiant volé peut répondre, pendant la vie de la session, à une
-  question présentée sur une *autre* tâche. Seule une preuve de l'appelant par le hook de l'hôte le fermerait ;
+  un appel depuis un worktree de tâche ou l'un de ses sous-dossiers, ou sous le dossier des worktrees ; un identifiant
+  présenté qui a tenu le claim ; toute question que le tick n'a pas présentée à cette session ; toute réponse après la
+  fin ou l'échéance de l'inscription. Reste ouvert : un worker qui sort de tout worktree (``cd /``, puis
+  ``--project-root`` vers la racine) et ne présente que l'identifiant volé peut répondre, pendant la vie de la session,
+  à toute question présentée à cette session, **y compris la sienne**. Seule une preuve de l'appelant par le hook de
+  l'hôte le fermerait ;
 - la session tourne sous le même utilisateur du système : la liste blanche la borne côté hôte, pas côté système ;
 - entre son lancement et son inscription (quelques secondes), ses réponses sont refusées : la consigne lui dit de
   réessayer une fois.
@@ -64,6 +70,7 @@ elle est arrêtée. Sa fin est inscrite au journal d'autorité : son identifiant
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -106,6 +113,7 @@ __all__ = [
     "PERMISSION_MODE",
     "SESSION_NAME",
     "SESSION_TIMEOUT",
+    "SESSION_TOOLS",
     "OpenQuestion",
     "OrchestratorOutcome",
     "OrchestratorStage",
@@ -130,6 +138,8 @@ MAX_RESUMES = 2
 MAX_LISTED = 12
 #: Le mode de la session, imposé : refuse sans demander tout outil hors de :data:`ALLOWED_TOOLS`.
 PERMISSION_MODE = "dontAsk"
+#: Les seuls outils intégrés de la session (``--tools``) ; la liste blanche ci-dessous borne encore ``Bash``.
+SESSION_TOOLS = "Read,Bash"
 #: La liste blanche de la session (Claude Code : valeurs séparées par des espaces).
 ALLOWED_TOOLS = (
     "Read Bash(grimoire task show *) Bash(grimoire task list *) Bash(grimoire task questions *) "
@@ -258,20 +268,41 @@ def _held_ids(service: TaskService, task: MissionTask, events: list[LedgerEvent]
     return held - {""}
 
 
+def _task_worktree_of_caller(service: TaskService) -> str:
+    """Où l'appelant touche un worktree de tâche (``""`` sinon) : projet ouvert depuis un worktree, dossier courant
+    dans un worktree marqué ou l'un de ses sous-dossiers, sous le dossier d'un lancement de worker, ou sous le dossier
+    des worktrees de tâche du dépôt."""
+    from grimoire.missions.task_worktree import _state_dir, home_of_worktree
+
+    if service.home_root != service.project_root:
+        return f"--project-root {service.project_root}"
+    cwd = Path.cwd().resolve()
+    for folder in (cwd, *cwd.parents):
+        if (folder / ".git").is_file() and home_of_worktree(folder) is not None:
+            return str(folder)
+    roots = [Path(str(p["cwd"])) for p in launched_sessions(service).values() if p.get("cwd")]
+    with contextlib.suppress(Exception):  # pas un dépôt git : aucun worktree de tâche n'y vit ; les autres gardes jouent
+        roots.append(_state_dir(service.home_root) / "worktrees")
+    for root in roots:
+        resolved = root.resolve()
+        if cwd == resolved or resolved in cwd.parents:
+            return str(resolved)
+    return ""
+
+
 def _check_caller(service: TaskService, task: MissionTask, question: Question, events: list[LedgerEvent]) -> None:
     """La session appelante : hors worktree de tâche, sans lien avec le claim, sur une question qu'on lui a présentée."""
     from grimoire.core.standard_state import current_session
-    from grimoire.missions.task_worktree import home_of_worktree
 
     def refuse(why: str) -> GrimoireMissionError:
         return GrimoireMissionError(f"Réponse refusée pour {task.id} : {why}")
 
     try:
-        in_worktree = service.home_root != service.project_root or home_of_worktree(Path.cwd()) is not None
+        where = _task_worktree_of_caller(service)
     except (GrimoireMissionError, OSError) as exc:
         raise refuse(f"worktree de l'appelant illisible ({exc})") from exc
-    if in_worktree:
-        raise refuse("appel depuis un worktree de tâche : un worker ne répond pas en orchestrateur")
+    if where:
+        raise refuse(f"appel depuis un worktree de tâche ({where}) : un worker ne répond pas en orchestrateur")
     try:
         held = _held_ids(service, task, events)
     except Exception as exc:  # une garde qui échoue ne laisse pas passer
@@ -399,11 +430,10 @@ class OrchestratorStage:
         ]
 
     def _presented(self) -> set[tuple[str, str]]:
-        """``(tâche, question)`` déjà présentées à une session terminée : l'humain les a, plus l'orchestrateur."""
-        ended = self._ended()
+        """``(tâche, question)`` déjà présentées à une session, ouverte ou terminée : jamais deux fois à l'orchestrateur."""
         return {
             (str(q.get("task_id")), str(q.get("question_id")))
-            for e in self._events(ORCH_LAUNCHED_EVENT) if str(e.payload.get("session") or "") in ended
+            for e in self._events(ORCH_LAUNCHED_EVENT)
             for q in e.payload.get("questions") or () if isinstance(q, dict)
         }
 
@@ -412,20 +442,26 @@ class OrchestratorStage:
         return sum(1 for kind in (ORCH_LAUNCHED_EVENT, ORCH_LAUNCH_FAILED_EVENT) for e in self._events(kind)
                    if e.created_at[:10] == today)
 
-    def _end(self, short: str, reason: str, digest: str = "") -> None:
-        """Termine la session au ledger et, si elle était inscrite, au journal d'autorité : son identifiant ne vaut plus."""
+    def _end(self, short: str, reason: str, digest: str = "") -> str:
+        """Termine la session au ledger et, si elle était inscrite, au journal d'autorité : son identifiant ne vaut plus.
+
+        Rend ``""``, ou pourquoi la fin n'est pas au journal d'autorité : l'appelant le porte à l'attention du tick
+        (l'échéance de l'inscription borne encore la session).
+        """
         from grimoire.missions.mandate import MandateStore
 
         journal = ""
         if digest:
             try:
-                MandateStore(self._root).end_session(digest, reason)
-            except Exception as exc:  # l'échéance de l'inscription borne encore la session
+                if not MandateStore(self._root).end_session(digest, reason):
+                    journal = "aucune inscription de cette session retrouvée au journal d'autorité"
+            except Exception as exc:
                 journal = f"{type(exc).__name__}: {exc}"[:200]
         self._service.ledger.append_event(
             ORCH_ENDED_EVENT, _ENTITY, _ENTITY, ORCHESTRATOR_ACTOR,
             {"session": short, "reason": reason, **({"journal_error": journal} if journal else {})},
         )
+        return journal
 
     # -- étape ---------------------------------------------------------------
 
@@ -467,8 +503,13 @@ class OrchestratorStage:
                 if not halted:
                     outcomes.append(OrchestratorOutcome("end", "failed", f"session {reason}{said} : retenté au tick suivant", short))
                     continue
-            self._end(short, reason, str(launch.payload.get("session_sha256") or ""))
+            journal = self._end(short, reason, str(launch.payload.get("session_sha256") or ""))
             outcomes.append(OrchestratorOutcome("end", "done", self._leftover(launch, reason), short))
+            if journal:
+                outcomes.append(OrchestratorOutcome(
+                    "end", "failed", f"fin de la session non inscrite au journal d'autorité ({journal}) : son "
+                    f"inscription vaut jusqu'à son échéance", short,
+                ))
         return outcomes
 
     def _leftover(self, launch: LedgerEvent, reason: str) -> str:
@@ -516,6 +557,7 @@ class OrchestratorStage:
         listed = tuple(f"{q.task_id}/{q.question_id}" for q in questions)
         # Le mode est imposé (jamais celui de la politique) : tout outil hors de la liste blanche est refusé sans demander.
         argv = [self._claude, "--bg", "--name", SESSION_NAME, "--model", role.model,
+                "--restricted", "--strict-mcp-config", "--tools", SESSION_TOOLS,
                 "--allowed-tools", ALLOWED_TOOLS, "--permission-mode", PERMISSION_MODE,
                 self._prompt(questions, mandate_id, status)]
         result = self._exec(argv, root, session_env())
