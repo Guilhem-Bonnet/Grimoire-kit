@@ -213,6 +213,24 @@ def pr_title_from_event(environ: Mapping[str, str] | None = None) -> str | None:
     return title.strip() if isinstance(title, str) and title.strip() else None
 
 
+def _added_fragments(repo: Path, merge_base: str) -> list[str]:
+    """Les fragments ``changelog.d/*.md`` que la branche ajoute (index compris) et qui portent une puce."""
+    now = set((_git(repo, "ls-files", "--", "changelog.d") or "").split())
+    before = set((_git(repo, "ls-tree", "-r", "--name-only", merge_base, "--", "changelog.d") or "").split())
+    found: list[str] = []
+    for name in sorted(now - before):
+        path = repo / name
+        if path.suffix != ".md" or path.name.lower() == "readme.md" or path.name.startswith("."):
+            continue
+        try:
+            body = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if any(line.startswith("- ") for line in body.splitlines()):
+            found.append(name)
+    return found
+
+
 def dev_problems(repo: Path, requested_base: str | None = None, title: str | None = None) -> list[str]:
     """La convention « chaque PR feat/fix/perf ajoute son entrée », vérifiée avant le tag.
 
@@ -259,10 +277,10 @@ def dev_problems(repo: Path, requested_base: str | None = None, title: str | Non
     if diff is None:
         return ["git diff CHANGELOG.md a échoué : entrées ajoutées illisibles"]
     added = [line[3:].strip() for line in diff.splitlines() if line.startswith("+- ")]
-    if not added:
+    if not added and not _added_fragments(repo, merge_base):
         return [
-            f"{len(noteworthy)} changement(s) feat/fix/perf depuis {base} sans nouvelle entrée dans CHANGELOG.md "
-            "(sous [Unreleased]) : " + " ; ".join(noteworthy[:3])
+            f"{len(noteworthy)} changement(s) feat/fix/perf depuis {base} sans fragment changelog.d/<slug>.md "
+            "et sans nouvelle entrée sous [Unreleased] de CHANGELOG.md : " + " ; ".join(noteworthy[:3])
         ]
     # Une entrée est une puce de premier niveau, quel que soit son style
     # (`- **Titre.** …` des versions publiées, `- fix(scope): …` de [Unreleased]).
@@ -336,6 +354,14 @@ def main(argv: list[str] | None = None) -> int:
                 + "\n".join(f"      {ln[:88]}" for ln in pending[:5])
                 + (f"\n      … et {len(pending) - 5} autre(s)" if len(pending) > 5 else "")
             )
+
+    leftovers = [p.name for p in sorted((REPO / "changelog.d").glob("*.md")) if p.name.lower() != "readme.md" and not p.name.startswith(".")]
+    if leftovers:
+        problems.append(
+            f"changelog.d/ porte {len(leftovers)} fragment(s) non assemblé(s) : ils partiraient sans "
+            "figurer dans la note de version (scripts/changelog-assemble.py)\n"
+            + "\n".join(f"      {name}" for name in leftovers[:5])
+        )
 
     released = [name for name, _ in sections if name.lower() != "unreleased"]
     if not released:
