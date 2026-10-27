@@ -611,6 +611,11 @@ GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-2 \
     grimoire task answer <tâche> "<réponse>" --question <q-…>
 ```
 
+**Une commande par question**, à cette forme littérale : la liste blanche de la session (`dontAsk`) refuse une
+boucle, un `;`, `&&` ou `|`, un `set --`, une variable ou un sous-shell. La consigne donne l'exemple de la première
+question et demande de reformuler seule une commande refusée par les permissions plutôt que d'abandonner (premier
+lancement réel, 3.69.0 : 8 questions jugées, une boucle refusée, rien d'écrit).
+
 | Question ouverte d'une tâche lancée par le tick | Source (événement écrit par le kit) | Geste du mandat |
 |---|---|---|
 | `choice` (avec ou sans options) | `task.question_asked` du worker | `answer` |
@@ -620,8 +625,10 @@ GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-2 \
 
 - **Éligible** : la tâche est en `waiting(human)`, porte un lancement du tick, et le mandat autorise le geste sur
   elle (geste couvert, type de tâche, politique d'escalade). La source se lit dans les événements que le kit écrit,
-  jamais dans l'acteur qu'un appelant CLI choisit (`--actor`). Une question déjà présentée à une session terminée
-  n'est pas relistée : le silence de la session est une escalade.
+  jamais dans l'acteur qu'un appelant CLI choisit (`--actor`). Une question présentée à une session encore ouverte
+  n'est pas relistée. Présentée à une session terminée sans qu'aucune réponse de l'orchestrateur ne soit enregistrée,
+  elle est représentée **une fois** à une nouvelle session (au plus 2 présentations) ; au-delà, le silence est une
+  escalade et la question reste à l'humain.
 - **Pas de boucle** : au plus 2 reprises (geste `resume`) de l'orchestrateur par tâche depuis la dernière réponse
   humaine ; au-delà, la question reste à l'humain. Une réponse de l'orchestrateur ne remet à zéro ni le compteur de
   tentatives de la récolte, ni les cycles du relecteur et du merger : seule une réponse humaine le fait.

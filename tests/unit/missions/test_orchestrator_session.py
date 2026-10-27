@@ -345,15 +345,22 @@ def test_une_session_trop_longue_est_arretee_et_ne_vaut_plus(
     grant(projet)
     tid, qid = worker_asks(projet, host)
     [launched_] = tick(projet, host).orchestrator
+    first_id = host.session_of(SESSION_NAME)
     later = datetime.now(UTC) + SESSION_TIMEOUT + timedelta(minutes=1)
     report = tick(projet, host, now=later)
-    [ended] = report.orchestrator  # la question, déjà présentée, n'est pas relistée : aucune relance
+    # Arrêtée sans réponse : la question est représentée une fois, à une nouvelle session.
+    [ended, again] = report.orchestrator
     assert (ended.action, ended.status) == ("end", "done") and f"{tid}/{qid}" in ended.detail
+    assert "à représenter une fois" in ended.detail and (again.action, again.status) == ("launch", "launched")
     assert launched_.session in host.stopped and orch_events(projet, ORCH_ENDED_EVENT)[0]["reason"] == "timeout"
+    later2 = later + SESSION_TIMEOUT + timedelta(minutes=1)
+    report = tick(projet, host, now=later2)
+    [last] = report.orchestrator  # deuxième fin silencieuse : à l'humain, aucune troisième session
+    assert (last.action, last.status) == ("end", "done") and "laissées à l'humain" in last.detail
     assert any("laissées à l'humain" in line for line in report.attention)
-    assert tick(projet, host, now=later).orchestrator == ()
+    assert tick(projet, host, now=later2).orchestrator == ()
     # Sa fin est au journal d'autorité : son identifiant ne répond plus.
-    as_session(monkeypatch, host.session_of(SESSION_NAME))
+    as_session(monkeypatch, first_id)
     out = answer(projet, tid, "404", qid)
     assert out.exit_code == 1 and "terminée" in out.output, out.output
 
@@ -363,8 +370,12 @@ def test_une_session_finie_libere_le_wip(projet: Path, host: FakeHost) -> None:
     worker_asks(projet, host)
     [first] = tick(projet, host).orchestrator
     host.stopped.add(first.session)  # la session a rendu la main : `claude agents` ne la liste plus
-    [(action, status)] = [(o.action, o.status) for o in tick(projet, host).orchestrator]
-    assert (action, status) == ("end", "done") and orch_events(projet, ORCH_ENDED_EVENT)[0]["reason"] == "finished"
+    # Le WIP libéré, la question restée sans réponse est représentée une fois dans le même tick.
+    [ended, again] = tick(projet, host).orchestrator
+    assert (ended.action, ended.status, again.action, again.status) == ("end", "done", "launch", "launched")
+    assert orch_events(projet, ORCH_ENDED_EVENT)[0]["reason"] == "finished"
+    host.stopped.add(again.session)
+    assert [(o.action, o.status) for o in tick(projet, host).orchestrator] == [("end", "done")]
     _tid2, qid2 = worker_asks(projet, host, "Quel format de date ?", options=("ISO", "RFC 2822"))
     assert [(o.action, o.status) for o in tick(projet, host).orchestrator] == [("launch", "launched")]
     assert [i["question_id"] for i in prompt_data(host)] == [qid2]
@@ -600,7 +611,8 @@ def test_la_fin_non_inscrite_au_journal_remonte_a_l_attention(
 
     monkeypatch.setattr(MandateStore, "end_session", broken)
     report = tick(projet, host)
-    assert [(o.action, o.status) for o in report.orchestrator] == [("end", "done"), ("end", "failed")]
+    assert [(o.action, o.status) for o in report.orchestrator] == [("end", "done"), ("end", "failed"),
+                                                                     ("launch", "launched")]
     assert any("non inscrite au journal d'autorité" in line and "lecture seule" in line for line in report.attention)
     assert orch_events(projet, ORCH_ENDED_EVENT)[0]["journal_error"] == "OSError: journal en lecture seule"
 
@@ -617,3 +629,84 @@ def test_l_escalade_du_relecteur_est_notee_avant_sa_question(projet: Path, host:
     assert stage._escalate(service.require(tid), "2 relecture(s) NOT-READY", "").status == "done"
     kinds = [e.event_type for e in TaskService(projet).ledger.events_for(tid)]
     assert kinds.index(REVIEW_ESCALATED_EVENT) < kinds.index("task.question_asked")
+
+
+# ── Premier lancement réel (3.69.0) : une commande par question, une seconde présentation ──────
+
+
+#: La commande composée que la session a tentée au premier lancement réel : refusée par `dontAsk`, rien d'écrit.
+LOOP = ('for p in "GAO-r14-x q-06ec" "GAO-r15-y q-f791"; do set -- $p; GRIMOIRE_PRINCIPAL=orchestrator '
+        'GRIMOIRE_PROVENANCE=rule:x grimoire task answer "$1" "reprendre" --question "$2"; done')
+
+
+def test_la_consigne_exige_une_commande_par_question_avec_l_exemple_litteral(projet: Path, host: FakeHost) -> None:
+    from fnmatch import fnmatchcase
+
+    from grimoire.missions.orchestrator_session import ALLOWED_TOOLS
+
+    grant(projet)
+    tid, qid = worker_asks(projet, host)
+    tick(projet, host)
+    prompt = orchestrator_argv(host)[-1].split("```json", 1)[0]
+    example = (f'GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-1 grimoire task answer {tid} '
+               f'"<réponse>" --question {qid}')
+    assert f"\n    {example}\n" in prompt  # l'exemple littéral, seul sur sa ligne, pour la première question
+    for banned in ("UNE commande Bash par question", "jamais de boucle", "`;`", "`&&`", "`|`", "`set --`",
+                   "variable shell", "sous-shell"):
+        assert banned in prompt, banned
+    assert "Permission to use Bash has been denied" in prompt and "reformule-la seule" in prompt
+    assert "n'abandonne pas" in prompt and "ne rends jamais tes décisions en texte" in prompt
+    assert "attends 30 secondes" not in prompt  # `sleep` n'est pas dans la liste blanche
+    # L'exemple passe la liste blanche de la session ; la boucle du premier lancement réel, non.
+    patterns = [p.strip().removesuffix(")") for p in ALLOWED_TOOLS.split("Bash(")[1:]]
+    assert any(fnmatchcase(example, p) for p in patterns)
+    assert not any(fnmatchcase(LOOP, p) for p in patterns)
+
+
+def test_une_reprise_donne_un_exemple_reprendre(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid = launched(projet, host)
+    qid = reap(projet, host, tid)
+    tick(projet, host, now=datetime.now(UTC) + LATER)
+    prompt = orchestrator_argv(host)[-1]
+    assert f'grimoire task answer {tid} "reprendre" --question {qid}\n' in prompt
+
+
+def test_une_question_sans_reponse_d_une_session_terminee_est_representee_une_seule_fois(
+    projet: Path, host: FakeHost
+) -> None:
+    grant(projet)
+    tid, qid = worker_asks(projet, host)
+    [first] = tick(projet, host).orchestrator
+    host.stopped.add(first.session)  # fin silencieuse : ses réponses refusées par `dontAsk`, rien d'écrit
+    [ended, second] = tick(projet, host).orchestrator
+    assert "à représenter une fois" in ended.detail and f"{tid}/{qid}" in ended.detail
+    assert (second.action, second.status) == ("launch", "launched") and second.session != first.session
+    assert [i["question_id"] for i in prompt_data(host)] == [qid]
+    # La nouvelle session est la seule à qui la question est présentée : elle seule peut y répondre.
+    launches = orch_events(projet, ORCH_LAUNCHED_EVENT)
+    assert [launch["session"] for launch in launches] == [first.session, second.session]
+    host.stopped.add(second.session)
+    [last] = tick(projet, host).orchestrator
+    assert (last.action, last.status) == ("end", "done") and f"laissées à l'humain : {tid}/{qid}" in last.detail
+    assert tick(projet, host).orchestrator == ()  # jamais une troisième présentation
+    assert len([a for a in host.of("claude", "--bg") if SESSION_NAME in a]) == 2
+
+
+def test_une_question_repondue_n_est_jamais_representee(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tid1, qid1 = worker_asks(projet, host)
+    tid2, qid2 = worker_asks(projet, host, "Quel format de date ?", options=("ISO", "RFC 2822"))
+    grant(projet)  # le mandat après les questions : une seule session les reçoit toutes deux
+    [first] = tick(projet, host).orchestrator
+    assert {i["question_id"] for i in prompt_data(host)} == {qid1, qid2}
+    with monkeypatch.context() as m:
+        as_session(m, host.session_of(SESSION_NAME))
+        out = answer(projet, tid1, "404", qid1)
+    assert out.exit_code == 0, out.output
+    host.stopped.add(first.session)
+    [ended, second] = tick(projet, host).orchestrator
+    assert f"{tid2}/{qid2}" in ended.detail and f"{tid1}/{qid1}" not in ended.detail
+    assert second.status == "launched" and [i["question_id"] for i in prompt_data(host)] == [qid2]
+
