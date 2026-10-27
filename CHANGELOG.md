@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): garde d'écriture commune — jeton, origine et journal sur toutes les routes d'écriture (ADR-008 D3, GAO-garde-d-crit-001)
+
 - fix(missions): la boucle worker → relecteur → merger ne reste plus bloquée sur un brouillon, une CI rouge ou une base périmée (Refs #993)
   - **Brouillon** : la consigne du worker demande une PR prête à relire (`gh pr create` sans `--draft`). Le merger sort du brouillon (`gh pr ready`, noté `task.merge_undrafted`) une PR dont la tête GitHub est couverte par le READY scellé, après les gardes de dépôt, de cible et de sceau ; la fusion attend le tick suivant et la CI de la PR prête. Il le fait une fois par tête : une PR qu'un humain remet en brouillon y reste. Une PR qui touche un chemin qui escalade ne sort jamais du brouillon ; la question « fusionner ? » est posée à la place.
   - **READY sur CI rouge** : au jugement d'un READY attesté, le relecteur lit la CI de la PR comme le merger (checks requis, sinon tous hors `ignored_checks`) quand la tête GitHub est la tête relue. Un check en échec (`fail`) fait du verdict un NOT-READY, les checks en constat, rien n'est scellé. Un check annulé reste au merger. Une CI en cours, illisible ou sans PR ne change rien : le merger exige toujours la CI verte.
