@@ -8,6 +8,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): panneau « Assigner une session » — plan de lancement et commande à copier (P47 lot 2, GAO-p47-assigne-001)
+## [3.69.0] - 2026-10-27
+
 - feat(missions): sous mandat, une session orchestrateur lancée par le tick répond aux questions des workers (Refs #962)
   - **Rôle `orchestrator`** dans `orchestration-policy.yaml` (`enabled` faux par défaut, `model` sonnet, `wip` 1, `sessions_per_day` 12 ; mode de permission imposé `dontAsk`, toute autre valeur rend la politique illisible) : après le merger, quand une tâche lancée par le tick attend en `waiting(human)` une réponse qu'un mandat actif couvre, le tick lance une session `claude --bg --name grimoire-orchestrator` dans la racine du projet, avec `--restricted --strict-mcp-config --tools Read,Bash` (réglages utilisateur, projet et local ignorés, donc leurs `permissions.allow` aussi, et aucun hook de ces réglages), une liste blanche d'outils (`Read`, `grimoire task show|list|questions|answer`) et les questions dans un bloc JSON déclaré non fiable. Elle tranche dans le périmètre des critères par `GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:… grimoire task answer`, ou ne répond pas et la question reste à l'humain.
   - **Gestes**, d'après la source écrite par le kit (jamais `--actor`) : `answer` pour une question `choice` du worker ; `resume` pour `resume_unfenced` de la récolte ou un désaccord de relecture (`task.review_escalated`, nouvel événement), au plus 2 fois par tâche sans réponse humaine. Jamais : checkpoint de flow, `merge`, `permission`, `resume_branch`, `retry_exhausted`, escalade du merger, réponse `abandonner`.
