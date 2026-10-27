@@ -31,8 +31,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright absent — harnais
 
 from playwright.sync_api import Browser, Page
 
-from tests.unit.tools.test_workspace_graph import write_codegraph
-
+from ._codegraph import write_codegraph
 from .conftest import _alive, _free_port, _wait_ready
 
 NODES, EDGES = 22_000, 92_000
@@ -49,7 +48,13 @@ def served_carte(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
     created = subprocess.run(
         [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-carte"],
-        cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=180,
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=180,
     )
     if not (root / "_grimoire" / "kit").is_dir():
         pytest.skip(f"`grimoire init` indisponible ici : {created.stderr[-400:]}")
@@ -61,7 +66,10 @@ def served_carte(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     env["NO_COLOR"] = "1"
     process = subprocess.Popen(
         [sys.executable, "-m", "grimoire", "serve", "--project-root", str(root), "--port", str(port), "--no-open"],
-        cwd=str(root), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        cwd=str(root),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         _wait_ready(port, time.monotonic() + 60)
@@ -197,7 +205,9 @@ def test_sans_webgl_un_repli_2d_lisible(browser: Browser, served_carte: str) -> 
         assert page.evaluate("() => window.GrimoireCarte.mode") == "2d"
         assert page.locator(".sc-stage").get_attribute("data-mode") == "2d"
         assert "repli 2D" in page.locator("[data-note='fallback']").inner_text()
-        assert page.evaluate("() => window.GrimoireCarte.renderedNodes") == page.evaluate("() => window.GrimoireCarte.nodes")
+        assert page.evaluate("() => window.GrimoireCarte.renderedNodes") == page.evaluate(
+            "() => window.GrimoireCarte.nodes"
+        )
         # Lisible : le canvas 2D porte des pixels non vides (autre chose que le fond).
         painted = page.evaluate(
             """() => { const c = document.querySelector('.sc-stage canvas'); const d = c.getContext('2d')
