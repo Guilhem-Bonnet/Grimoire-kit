@@ -1476,7 +1476,10 @@ function buildConsoleField() {
     autocapitalize: 'off',
     spellcheck: 'false',
     enterkeyhint: 'send',
-    list: 'dock-console-commands',
+    role: 'combobox',
+    'aria-autocomplete': 'list',
+    'aria-expanded': 'false',
+    'aria-controls': 'dock-console-listbox',
     placeholder: 'task list, doctor, memory status…',
   });
   const label = mk('label', { for: 'dock-console-input', class: 'dock-console-prompt' },
@@ -1484,13 +1487,23 @@ function buildConsoleField() {
     mk('span', { text: 'grimoire' }),
     mk('span', { class: 'sr-only', text: ' : sous-commande à lancer' }));
   const form = mk('form', { id: 'dock-console', class: 'dock-console', 'aria-label': 'Console' },
-    label, input, mk('datalist', { id: 'dock-console-commands' }));
+    label, input,
+    mk('ul', { id: 'dock-console-listbox', class: 'dock-console-listbox', role: 'listbox', 'aria-label': 'Sous-commandes proposées' }));
+  form.querySelector('#dock-console-listbox').hidden = true;
   form.hidden = true;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     submitConsole();
   });
   input.addEventListener('keydown', onConsoleKeydown);
+  input.addEventListener('input', refreshConsoleSuggestions);
+  input.addEventListener('blur', () => closeConsoleSuggestions());
+  form.querySelector('#dock-console-listbox').addEventListener('mousedown', (event) => {
+    const row = event.target.closest('[role="option"]');
+    if (!row) return;
+    event.preventDefault(); // garde le focus dans le champ
+    acceptConsoleSuggestion(Number(row.dataset.index));
+  });
   // D'où l'on venait : Échap y retourne. Jamais un élément du dock lui-même.
   input.addEventListener('focus', (event) => {
     const from = event.relatedTarget;
@@ -1514,6 +1527,7 @@ function submitConsole() {
   if (!raw || consoleRunning) return;
   const argv = consoleWords(raw.replace(/^grimoire(\s+|$)/, ''));
   input.value = '';
+  closeConsoleSuggestions();
   if (consoleHistory[consoleHistory.length - 1] !== raw) consoleHistory.push(raw);
   consoleHistoryIndex = consoleHistory.length;
   if (!argv.length) return;
@@ -1522,6 +1536,25 @@ function submitConsole() {
 
 function onConsoleKeydown(event) {
   const input = event.currentTarget;
+  if (suggestions.length) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      setActiveSuggestion((suggestionIndex + step + suggestions.length) % suggestions.length);
+      return;
+    }
+    if (event.key === 'Tab' || event.key === 'Enter') {
+      event.preventDefault();
+      acceptConsoleSuggestion(suggestionIndex);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeConsoleSuggestions();
+      return;
+    }
+  }
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopPropagation();
@@ -1541,11 +1574,89 @@ function onConsoleKeydown(event) {
   input.value = consoleHistory[consoleHistoryIndex] ?? '';
 }
 
-/** Les sous-commandes ouvertes, proposées sous le champ (liste blanche lue dans /commands). */
+/** Le catalogue de /commands, gardé tel quel : jamais une proposition hors liste blanche. */
+let consoleCommands = [];
+let suggestions = [];
+let suggestionIndex = 0;
+
 function fillConsoleSuggestions(catalogue) {
-  const list = $('dock-console-commands');
-  if (!list) return;
-  list.replaceChildren(...catalogue.map((c) => mk('option', { value: c.key, label: c.summary })));
+  consoleCommands = catalogue;
+}
+
+/** Propositions pour la ligne : mots suivants des sous-commandes ouvertes, puis options d'une commande complète. */
+function computeSuggestions(raw) {
+  const line = raw.replace(/^\s*grimoire(\s+|$)/, '');
+  if (raw.trim() === 'grimoire' && !/\s$/.test(raw)) return { items: [], partial: '' };
+  const words = line.split(/\s+/);
+  const partial = words.pop();
+  const done = words.filter(Boolean);
+  const items = new Map();
+  for (const c of consoleCommands) {
+    const parts = c.key.split(' ');
+    if (done.length < parts.length && done.every((w, i) => parts[i] === w)) {
+      const next = parts[done.length];
+      if (!next.startsWith(partial)) continue;
+      const leaf = parts.length === done.length + 1;
+      const entry = items.get(next);
+      if (!entry) items.set(next, { value: next, help: leaf ? c.summary : '', count: 1 });
+      else { entry.count += 1; if (leaf) entry.help = c.summary; }
+    } else if (partial.startsWith('-') && done.join(' ') === c.key) {
+      for (const flag of c.flags || []) {
+        if (flag.startsWith(partial)) items.set(flag, { value: flag, help: 'Option de ' + c.key, count: 1 });
+      }
+    }
+  }
+  const list = [...items.values()].map((e) => ({
+    value: e.value,
+    help: e.help || e.count + ' sous-commandes',
+  })).filter((e) => e.value !== partial);
+  return { items: list, partial };
+}
+
+function refreshConsoleSuggestions() {
+  const input = $('dock-console-input');
+  if (!input || consoleRunning) return;
+  const { items } = computeSuggestions(input.value);
+  suggestions = items;
+  suggestionIndex = 0;
+  const list = $('dock-console-listbox');
+  list.replaceChildren(...items.map((item, index) => mk('li', {
+    id: 'dock-console-opt-' + index, role: 'option', 'data-index': String(index),
+    'aria-selected': String(index === 0),
+  }, mk('span', { class: 'opt-name', text: item.value }), mk('span', { class: 'opt-help', text: item.help }))));
+  list.hidden = !items.length;
+  input.setAttribute('aria-expanded', String(items.length > 0));
+  if (items.length) input.setAttribute('aria-activedescendant', 'dock-console-opt-0');
+  else input.removeAttribute('aria-activedescendant');
+}
+
+function setActiveSuggestion(index) {
+  suggestionIndex = index;
+  const input = $('dock-console-input');
+  $('dock-console-listbox').querySelectorAll('[role="option"]').forEach((row, i) => {
+    row.setAttribute('aria-selected', String(i === index));
+    if (i === index) row.scrollIntoView?.({ block: 'nearest' });
+  });
+  input.setAttribute('aria-activedescendant', 'dock-console-opt-' + index);
+}
+
+function closeConsoleSuggestions() {
+  suggestions = [];
+  const input = $('dock-console-input');
+  const list = $('dock-console-listbox');
+  if (list) { list.hidden = true; list.replaceChildren(); }
+  if (input) {
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
+}
+
+function acceptConsoleSuggestion(index) {
+  const item = suggestions[index];
+  if (!item) return;
+  const input = $('dock-console-input');
+  input.value = input.value.replace(/\S*$/, '') + item.value + ' ';
+  refreshConsoleSuggestions();
 }
 
 /** Ouvre la Console et y place le curseur (`` ` ``, de partout). */

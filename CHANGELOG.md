@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): IntelliSense des commandes `grimoire` dans la Console — liste filtrée sous le champ depuis `/api/workspace/commands` (jamais hors `workspace_exec.ALLOWED`), Tab/Entrée complètent, ↑/↓ parcourent, Échap ferme, aide courte, `role=listbox` + `aria-activedescendant` (P77, GAO-p77-intelli-001)
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27

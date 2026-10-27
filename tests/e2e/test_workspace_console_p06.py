@@ -85,13 +85,13 @@ def test_tab_depuis_le_champ_ne_complete_pas_et_sort_du_dock(workspace: Page) ->
     _console_tab(workspace)
     before = workspace.locator("#dock-body").inner_text()
     workspace.locator("#dock-console-input").focus()
-    workspace.keyboard.type("sta")
+    workspace.keyboard.type("zzz")  # rien à proposer : Tab ne complète pas (P77)
 
     workspace.keyboard.press("Tab")
     workspace.keyboard.press("Tab")
 
     assert not workspace.evaluate(_ACTIVE_IN_DOCK)
-    assert workspace.locator("#dock-console-input").input_value() == "sta"
+    assert workspace.locator("#dock-console-input").input_value() == "zzz"
     assert workspace.locator("#dock-body").inner_text() == before
 
 
@@ -103,6 +103,8 @@ def test_echap_vide_le_champ_puis_rend_le_focus(workspace: Page) -> None:
     workspace.wait_for_function(_INPUT_FOCUSED)
     workspace.keyboard.type("task li")
 
+    workspace.keyboard.press("Escape")  # ferme d'abord la liste de propositions (P77)
+    assert workspace.locator("#dock-console-input").input_value() == "task li"
     workspace.keyboard.press("Escape")
     assert workspace.locator("#dock-console-input").input_value() == ""
     assert workspace.evaluate(_INPUT_FOCUSED)
@@ -336,3 +338,84 @@ def test_captures_et_aucun_debordement_a_1024(workspace: Page) -> None:
         if target:
             workspace.screenshot(path=str(Path(target) / f"p06-console-{scheme}-1024.png"))
         assert _no_overflow(workspace) == [], scheme
+
+
+# ── IntelliSense des commandes (P77) ────────────────────────────────────────
+
+_OPTIONS = "#dock-console-listbox [role=option]"
+
+
+def _names(page: Page) -> list[str]:
+    return page.locator(_OPTIONS + " .opt-name").all_inner_texts()
+
+
+def test_p77_tab_complete_task_puis_propose_show_avec_son_aide(workspace: Page) -> None:
+    _console_tab(workspace)
+    field = workspace.locator("#dock-console-input")
+    field.focus()
+    workspace.keyboard.type("grimoire ta")
+    assert _names(workspace) == ["task"]
+    workspace.keyboard.press("Tab")
+    assert field.input_value() == "grimoire task "
+    workspace.keyboard.type("sh")
+    assert _names(workspace) == ["show"]
+    assert workspace.locator(_OPTIONS + " .opt-help").inner_text() == "Détail d'une tâche et sa prochaine porte."
+
+
+def test_p77_fleches_echap_et_entree_sans_liste(workspace: Page) -> None:
+    _console_tab(workspace)
+    field = workspace.locator("#dock-console-input")
+    field.focus()
+    workspace.keyboard.type("task ")
+    names = _names(workspace)
+    assert len(names) >= 3
+    active = "() => document.getElementById(document.activeElement.getAttribute('aria-activedescendant')).textContent"
+    first = workspace.evaluate(active)
+    workspace.keyboard.press("ArrowDown")
+    second = workspace.evaluate(active)
+    assert second != first and second.startswith(names[1])
+    workspace.keyboard.press("ArrowUp")
+    assert workspace.evaluate(active) == first
+
+    workspace.keyboard.press("Escape")
+    assert workspace.locator(_OPTIONS).count() == 0
+    assert field.input_value() == "task "
+
+    field.fill("version")
+    assert workspace.locator(_OPTIONS).count() == 0
+    field.press("Enter")
+    workspace.wait_for_function(
+        "() => document.getElementById('dock-body').textContent.includes('$ grimoire version')"
+    )
+
+
+def test_p77_les_propositions_viennent_du_catalogue_du_serveur(workspace: Page) -> None:
+    from grimoire.tools import workspace_exec
+
+    _console_tab(workspace)
+    field = workspace.locator("#dock-console-input")
+    field.focus()
+    firsts = {key.split(" ")[0] for key in workspace_exec.ALLOWED}
+    seen: set[str] = set()
+    for letter in "abcdefghijklmnopqrstuvwxyz":
+        field.fill(letter)
+        seen.update(_names(workspace))
+    assert seen == firsts
+    field.fill("task s")
+    assert set(_names(workspace)) <= {k.split(" ")[1] for k in workspace_exec.ALLOWED if k.startswith("task ")}
+    field.fill("blueprint ")
+    assert workspace.locator(_OPTIONS).count() == 0
+
+
+def test_p77_aria_listbox_et_activedescendant(workspace: Page) -> None:
+    _console_tab(workspace)
+    field = workspace.locator("#dock-console-input")
+    field.focus()
+    assert field.get_attribute("aria-autocomplete") == "list"
+    assert field.get_attribute("aria-expanded") == "false"
+    workspace.keyboard.type("ta")
+    assert field.get_attribute("aria-expanded") == "true"
+    assert workspace.locator("#dock-console-listbox").get_attribute("role") == "listbox"
+    assert field.get_attribute("aria-controls") == "dock-console-listbox"
+    descendant = field.get_attribute("aria-activedescendant")
+    assert descendant and workspace.locator(f"#{descendant}").get_attribute("role") == "option"
