@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): la consigne du relecteur lui fait noter `git status`, lancer ses commandes avec `uv run --frozen` et remettre l'arbre en état avant `task review`. Un `uv.lock` réécrit ou un rapport de bench rejoué par ses propres commandes rendait son READY périmé (« modifications non commitées »), trois fois de suite, puis escaladait à l'humain (R59, R60, R63 le 2026-10-27).
+
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27
