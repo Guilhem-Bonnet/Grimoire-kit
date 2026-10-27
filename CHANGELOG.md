@@ -9,6 +9,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - perf(cockpit): le flux en direct ne fait plus recalculer tâches, attention, sessions et fiche à chaque pouls (P79, `GAO-p79-cockpit-001`). Côté serveur, la réponse est gardée tant que l'empreinte du pouls ne bouge pas (15 s au plus), et deux onglets au même instant attendent un seul calcul. Côté page, les rechargements des espaces sont regroupés : un changement isolé part tout de suite, une rafale en donne au plus un toutes les 3 s, jamais deux en même temps. Mesuré le 2026-10-27 avec 8 workers actifs : `attention` de 0,87 s (7,6 s sous charge) à 11 ms, `tasks` de 0,54 s à 14 ms.
 
+- fix(missions): le merger réaligne (ou renvoie au worker) une PR que GitHub dit en conflit et sur laquelle aucun check n'est rapporté, au lieu d'attendre une CI que GitHub ne lance pas sur une PR en conflit. Le 2026-10-27, R57 (#979) restait sur « aucun check rapporté » à chaque tick, en conflit sur le seul CHANGELOG.md. Une PR à jour sans check attend toujours sa CI.
+
+- feat(cockpit): « Lancer la session » lance pour de vrai depuis le panneau Assigner (P47 lot 3, GAO-p47-assigne-001) : l'empreinte du plan montré engage l'apply (ADR-008 plan→apply, refus si l'état a changé), lancement par le lanceur du tick (toutes gardes : rôle, disjoncteur, WIP, plafond du jour, mandat), idempotent par tâche, journal `launch-apply.jsonl` ajout seul et fail-closed à l'entrée
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27
