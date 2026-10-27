@@ -65,7 +65,7 @@ from grimoire.missions.launcher import (
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import find_task_worktree
-from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
+from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, new_question_id
 
 if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
@@ -77,6 +77,7 @@ if TYPE_CHECKING:
 __all__ = [
     "MAX_RELAUNCHES",
     "REVIEWER_ACTOR",
+    "REVIEW_ESCALATED_EVENT",
     "REVIEW_FORGED_EVENT",
     "REVIEW_HALTED_EVENT",
     "REVIEW_JUDGED_EVENT",
@@ -93,6 +94,9 @@ REVIEWER_ACTOR = "reviewer"
 REVIEW_LAUNCHED_EVENT = "task.review_launched"
 REVIEW_JUDGED_EVENT = "task.review_judged"
 REVIEW_FORGED_EVENT = "task.review_forged"
+#: L'escalade « reprendre ou abandonner ? » d'un désaccord, avec l'identifiant de sa question : ce que l'étape
+#: orchestrateur (#962) lit pour reconnaître cette question, plutôt que l'acteur qu'un appelant CLI choisit.
+REVIEW_ESCALATED_EVENT = "task.review_escalated"
 #: Un relecteur lancé puis abandonné (identité introuvable, inscription refusée) ; ``halted`` dit si l'arrêt est confirmé.
 REVIEW_LAUNCH_FAILED_EVENT = "task.review_launch_failed"
 #: L'arrêt, enfin confirmé, d'un relecteur abandonné dont le premier arrêt avait échoué.
@@ -484,8 +488,12 @@ class ReviewStage:
             self._exec([self._claude, "stop", short], Path(str(review.payload.get("cwd") or ".")), None)
 
     def _cycle(self, task_id: str) -> int:
-        """Le rang de ce ``NOT-READY`` depuis la dernière réponse humaine : l'humain qui dit « reprendre » remet à zéro."""
-        answered = [e.created_at for e in self._service.ledger.events_for(task_id) if e.event_type == HUMAN_ANSWERED_EVENT]
+        """Le rang de ce ``NOT-READY`` depuis la dernière réponse humaine : l'humain qui dit « reprendre » remet à zéro.
+
+        Une réponse de l'orchestrateur sous mandat (#962) ne remet rien à zéro : elle ne relance pas le compte des cycles.
+        """
+        answered = [e.created_at for e in self._service.ledger.events_for(task_id)
+                    if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == "human"]
         since = answered[-1] if answered else ""
         return 1 + sum(
             1 for e in self._events(task_id, REVIEW_JUDGED_EVENT) if e.payload.get("verdict") == NOT_READY and e.created_at > since
@@ -539,10 +547,16 @@ class ReviewStage:
         except GrimoireError as exc:
             return ReviewOutcome(tid, "escalate", "failed", f"escalade refusée : {exc}")
         detail = f" : {notes[:600]}" if notes else ""
+        qid = new_question_id()
+        # Avant la question, comme le merger : un tick tué entre les deux ne laisse pas une question du relecteur que
+        # l'étape orchestrateur (#962) prendrait pour celle du worker.
+        self._service.ledger.append_event(
+            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR, {"task_id": tid, "question_id": qid, "why": why[:300]}
+        )
         try:
             self._service.ask(
                 tid, f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
-                REVIEWER_ACTOR, kind="choice", options=("reprendre", "abandonner"),
+                REVIEWER_ACTOR, kind="choice", options=("reprendre", "abandonner"), question_id=qid,
             )
         except (GrimoireError, ValueError) as exc:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="escalade non posée")

@@ -56,7 +56,7 @@ from grimoire.missions.ledger_rules import (
     unfenced_question,
     waiting_guard,
 )
-from grimoire.missions.questions import ANSWER_ORIGINS, QUESTION_EVENTS
+from grimoire.missions.questions import QUESTION_EVENTS
 from grimoire.missions.reclaim import release_lost_claim
 from grimoire.missions.schemas import (
     DEFAULT_CLAIM_TTL_SECONDS,
@@ -1063,11 +1063,11 @@ class MissionLedger:
 
     def _since_last_answer(self, task_id: str) -> list[LedgerEvent]:
         events = [e for e in self.list_events(task_id) if e.id not in self._rejected]
-        # Seule une réponse venue du canal humain remet le compteur à zéro : un agent qui
-        # écrirait ``task.human_answered`` lui-même (``append_event`` est public) n'y gagne rien.
+        # Seule une réponse du canal humain remet le compteur à zéro — ni un agent qui écrirait l'événement
+        # (``append_event`` est public), ni l'orchestrateur sous mandat (#962 : sinon « reprendre » boucle sans fin).
         answers = [
             i for i, e in enumerate(events)
-            if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") in ANSWER_ORIGINS
+            if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == ORIGIN_HUMAN
         ]
         return events[answers[-1] + 1 :] if answers else events
 
