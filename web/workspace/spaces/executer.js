@@ -78,6 +78,7 @@ import {
   setActionStatus, stateIcon, undoToast,
 } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
+import { activityBlockAsync } from '../activity.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
@@ -276,6 +277,9 @@ function injectStyles() {
        entier reste au survol. */
     .ex-card .ex-card-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
     .ex-card .ex-card-meta > * { flex: none; }
+    /* P69v2 : la dernière entrée du fil d'activité — une seule ligne, élidée. */
+    .ex-card-feed { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .ex-card-feed .ex-card-feed-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     /* P74 : la ligne « ouverte par … · dans <colonne> depuis … » — mêmes règles
        de tenue qu'une méta de carte (une ligne, élision, texte entier au survol). */
     .ex-card-who { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 4px 6px; }
@@ -894,6 +898,15 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   // n'affiche plus de vivacité.
   const facts = !isClosed(task) && task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
   if (facts) card.append(facts);
+  // P69v2 : la dernière entrée du fil d'activité, en une ligne — le serveur ne
+  // la pose que sur une tâche tenue dont la session est vivante.
+  if (task.feed_last && task.feed_last.label) {
+    const feedLine = text('div', 'ex-card-feed lbl', '');
+    feedLine.dataset.role = 'feed-last';
+    feedLine.title = `Dernière entrée du fil d'activité (ledger) : ${task.feed_last.label}`;
+    feedLine.append(icon('history'), text('span', 'ex-card-feed-text', task.feed_last.label));
+    card.append(feedLine);
+  }
   const cost = costRow(task);
   if (cost && facts) facts.append(Object.assign(cost, { className: 'ex-cost' }));
   else if (cost) card.append(cost);
@@ -2665,19 +2678,18 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   // ── Consigne à la session, priorité (gestes existants) ──────────────────
   renderSteering(ctx, detail, onWritten);
 
-  // ── Derniers événements ─────────────────────────────────────────────────
+  // ── Activité (P69v2, artboard Travail « Derniers événements ») ──────────
+  // Le fil de l'agent dérivé du ledger (claim, transitions, portes,
+  // questions/réponses, notes de progression), le même bloc que l'inspecteur
+  // de session (`activity.js`), avec la commande `claude logs` à copier.
   const eventCount = (trace?.entries || []).length;
   const eventsBlock = document.createElement('div');
   eventsBlock.className = 'ex-insp-block';
   eventsBlock.dataset.role = 'last-events';
-  eventsBlock.append(text('h4', null, 'Derniers événements'));
-  const recent = [...(trace?.entries || [])].slice(-3).reverse();
-  if (!recent.length) eventsBlock.append(text('p', 'lbl', 'aucun événement lu'));
-  for (const entry of recent) {
-    const line = text('div', 'ex-event', '');
-    line.append(text('span', 'lbl', `${(entry.at || '').slice(0, 16).replace('T', ' ')} · `), entry.summary || entry.kind);
-    eventsBlock.append(line);
-  }
+  eventsBlock.append(activityBlockAsync(
+    () => ctx.api.taskFeed(taskId, project),
+    { heading: 'Derniers événements', signal: ctx.signal },
+  ));
   // Drill-down (#139) : la timeline complète de la tâche sans passer par le sélecteur de vue.
   const timelineBtn = document.createElement('button');
   timelineBtn.type = 'button';
