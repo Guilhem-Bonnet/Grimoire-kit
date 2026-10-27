@@ -29,13 +29,16 @@ jobs:
           cache: "pip"
 
       - name: Install package + dev deps
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,search]"
+
+      - name: Tantivy présent (un skip ne compte pas)
+        run: python -c "import tantivy"
 
       - name: test_retraction[tantivy] x50
         shell: bash
         run: |
           for i in $(seq 1 50); do
-            python -m pytest tests/unit/memory/test_retraction.py -k tantivy -q -p no:cacheprovider || { echo "échec à la passe $i"; exit 1; }
+            python -m pytest tests/unit/memory/test_retraction.py -k tantivy -q -rs -p no:cacheprovider || { echo "échec à la passe $i"; exit 1; }
           done
 
       - name: test_workspace_stream x20
