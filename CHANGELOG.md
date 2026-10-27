@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): qui travaille sur chaque carte — persona, modèle, effort, skills, tokens en direct et coût en CAD (P75, GAO-p75-qui-trav-001)
+
 ## [3.69.0] - 2026-10-27
 
 - feat(missions): sous mandat, une session orchestrateur lancée par le tick répond aux questions des workers (Refs #962)

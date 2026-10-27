@@ -244,6 +244,27 @@ def _providers(project_root: Path, _query: _Query) -> Any:
     return workspace_config.providers_view(project_root)
 
 
+def _options(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/options`` — les options du projet (P75) : taux USD→CAD et sa provenance."""
+    from grimoire.tools.workspace_work import project_options
+
+    return project_options(project_root)
+
+
+def _options_write(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/options`` — pose ``cockpit.usd_cad`` dans ``project-context.yaml`` (P75).
+
+    Une seule clé acceptée : le taux de conversion du coût affiché par la
+    colonne Fait. Un taux illisible ou hors borne est un 400, jamais écrit.
+    """
+    from grimoire.tools.workspace_work import write_usd_cad
+
+    raw = body.get("usd_cad")
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        raise ValueError("`usd_cad` doit être un nombre (CAD pour 1 USD)")
+    return write_usd_cad(project_root, float(raw))
+
+
 def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
@@ -565,6 +586,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}hooks": _hooks,
     f"{PREFIX}providers": _providers,
+    f"{PREFIX}options": _options,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -868,6 +890,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}options": _options_write,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:

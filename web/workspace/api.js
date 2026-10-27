@@ -289,6 +289,10 @@ export const api = {
   // modèles, deux lectures (jamais d'écriture : les gestes sont des commandes).
   hooks: () => get(WS + 'hooks'),
   providers: () => get(WS + 'providers'),
+  // Options du projet (P75) : taux USD→CAD de la colonne Fait, lu et écrit
+  // dans project-context.yaml (section cockpit) par le serveur.
+  options: () => get(WS + 'options'),
+  optionsWrite: (usdCad) => post(WS + 'options', { usd_cad: usdCad }),
 
   // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
   // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue

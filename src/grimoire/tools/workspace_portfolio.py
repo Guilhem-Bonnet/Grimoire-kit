@@ -425,6 +425,12 @@ def annotate_cards(
                 closed = frozenset(t.id for t in service.ledger.list_tasks() if t.status is TaskState.CLOSED)
             fallback = blockers_of(task, closed or frozenset())
             card["blocked_reason"] = reasons.get(task.id) or (fallback[0]["reason"] if fallback else "")
+    # P75 : qui travaille, avec quoi, à quel coût — usage replié (task_usage),
+    # coût en CAD au taux des options du projet, et pour une tâche tenue ce que
+    # le journal de session rapporte (modèle réel, effort, skills).
+    from grimoire.tools.workspace_work import annotate_work
+
+    annotate_work(project_root, tasks, cards)
 
 
 def _project_cards(
