@@ -5,7 +5,8 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
 
 1. **Lancement** — une fois par entrée en revue : ``claude --bg --name grimoire-review-<id> …`` dans le worktree de la
    tâche. La session est neuve : elle ne voit pas le raisonnement du worker, seulement les critères, le diff de la
-   branche et le pack de preuve. Le modèle diffère de celui du worker quand la politique ne l'impose pas. Son vrai
+   PR contre sa vraie base (``origin/<cible>...HEAD`` après ``git fetch``, jamais la base de création du worktree, qui
+   mêle au travail la cible fusionnée depuis, #993) et le pack de preuve. Le modèle diffère de celui du worker quand la politique ne l'impose pas. Son vrai
    ``sessionId`` est résolu après le lancement dans ``claude agents --json``
    (:func:`~grimoire.missions.launcher.resolve_background_session` : ``--bg`` ignore ``--session-id``, #966) puis, sous
    mandat actif, inscrit au journal d'autorité en rôle ``reviewer`` pour la tâche
@@ -24,6 +25,11 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
    - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : scellé au journal d'autorité
      (:mod:`.review_seal` : tête, arbre, pack et empreinte du reçu, qui doivent être ceux que le reçu déclare), puis
      noté ; la fusion et l'acceptation sont au merger (:mod:`.merger`, lot 4), qui comparent à ce sceau. ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
+   - ``READY`` sur une CI rouge (#993) : la CI de la PR est lue comme le merger la lit
+     (:meth:`~grimoire.missions.merger.MergeStage.head_ci` : checks requis, sinon tous hors ``ignored_checks``) quand
+     la tête GitHub de la PR est la tête relue ; un check en échec fait du verdict un ``NOT-READY``, les checks en
+     constat. Une CI en cours, illisible ou d'une autre tête ne change rien ici : le merger exige de toute façon la CI
+     verte de la tête qu'il fusionne ;
    - ``NOT-READY`` : la tâche repart au worker (``needs_verification → running``, session du worker reprise par
      ``claude --bg --resume <son uuid>``, constats en note). Une reprise qui échoue remet la tâche en revue et sera
      retentée. Au cycle ``max_cycles`` (2 par défaut, compté depuis la dernière réponse humaine), ou sans session à
@@ -297,7 +303,7 @@ class ReviewStage:
         under_mandate = MandateStore(root).state().active
         model = self._model(str(launch.get("model") or ""))
         argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,
-                "--permission-mode", role.permission_mode, self._prompt(tid, worktree.base_sha, model)]
+                "--permission-mode", role.permission_mode, self._prompt(tid, worktree.into, worktree.base_sha, model)]
         result = self._exec(argv, cwd, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
@@ -344,17 +350,26 @@ class ReviewStage:
         return ReviewOutcome(tid, "launch", "failed", detail + (" — disjoncteur ouvert" if state.open else ""), short)
 
     @staticmethod
-    def _prompt(tid: str, base_sha: str, model: str) -> str:
+    def _prompt(tid: str, into: str, base_sha: str, model: str) -> str:
+        """La consigne du relecteur. Le diff part de la base réelle de la PR au moment de la relecture (#993) : après un
+        réalignement, ``base_sha...HEAD`` (la base de création du worktree) mêlerait toute la cible au travail."""
+        diff = (
+            f"`git fetch -q origin {into}` puis `git diff origin/{into}...HEAD` (depuis `git merge-base origin/{into} "
+            f"HEAD`, la base réelle de la PR, ou `gh pr diff task/{tid}`), jamais depuis la base de création du worktree"
+            if into else f"`git diff {base_sha}...HEAD`"
+        )
         return (
             f"Tu es le relecteur de la tâche {tid}. Tu ne vois pas le raisonnement du worker et tu ne le cherches pas : "
-            f"tu juges le résultat. Lis les critères d'acceptation (`grimoire task show {tid}`), le diff de la branche "
-            f"(`git diff {base_sha}...HEAD`) et le dernier pack de preuve, puis rejoue les commandes qui montrent chaque "
-            "critère. Ne modifie aucun fichier suivi du dépôt. Écris ton verdict dans "
+            f"tu juges le résultat. Lis les critères d'acceptation (`grimoire task show {tid}`), le diff de la PR "
+            f"({diff}) et le dernier pack de preuve, puis rejoue les commandes qui montrent chaque critère. Vérifie "
+            "qu'aucun fichier hors du périmètre de la tâche n'est modifié : un fichier réécrit sans raison (`uv.lock`, "
+            "un fichier généré) est un constat. Ne modifie aucun fichier suivi du dépôt. Écris ton verdict dans "
             f"`_grimoire-output/reviews/{tid}/verdict.json` (schéma grimoire-review-verdict/v1 : `verdict` READY ou "
             "NOT-READY ; `criteria`, un objet par critère avec `index` à partir de 1, `status` met, unmet ou "
             "unverifiable, `evidence_cmd` et `note` ; `findings` facultatifs), puis lance "
             f"`grimoire task review {tid} --criteria _grimoire-output/reviews/{tid}/verdict.json --reviewer reviewer "
-            f"--model {model}`. READY seulement si chaque critère est tenu et montré."
+            f"--model {model}`. READY seulement si chaque critère est tenu et montré, et si aucun check requis de la PR "
+            f"n'est en échec (`gh pr checks task/{tid} --required`)."
         )
 
     # -- jugement ------------------------------------------------------------
@@ -409,15 +424,32 @@ class ReviewStage:
                 self._record_judged(task, review, "stale", 0)
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({refusal}) : relu de nouveau")
+            ci, ci_detail = self._head_ci(task)
+            if ci == "red":
+                notes = f"READY rendu sur une CI rouge, la tête relue ne l'est pas : {ci_detail}"
+                return self._bounce(task, launch, review, receipt, notes=notes, extra={"ci": ci, "receipt_verdict": READY})
             sealed, why = self._seal(task, review, receipt, root)
             if why:
                 self._record_judged(task, review, "stale", 0)
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({why}) : relu de nouveau")
-            self._record_judged(task, review, READY, 0, sealed)
+            self._record_judged(task, review, READY, 0, {**sealed, **({"ci": ci} if ci else {})})
             self._stop(review)
             return ReviewOutcome(tid, "ready", "done", f"READY, {len(receipt.criteria_met)} critère(s) tenu(s)")
         return self._bounce(task, launch, review, receipt)
+
+    def _head_ci(self, task: MissionTask) -> tuple[str, str]:
+        """La CI de la PR sur la tête relue, lue par le merger (#993) ; ``("", …)`` quand rien n'en est conclu."""
+        from grimoire.missions.merger import MergeStage
+        from grimoire.missions.review_seal import branch_head
+
+        head = branch_head(self._service.home_root, task.id)
+        if not head:
+            return "", "aucune tête relue"
+        try:
+            return MergeStage(self._service, self._policy, exec_=self._exec, claude_bin=self._claude).head_ci(task.id, head)
+        except Exception as exc:  # une lecture de la CI ratée ne fait ni ne défait un READY : le merger revérifie
+            return "unknown", f"{type(exc).__name__}: {exc}"[:300]
 
     def _seal(self, task: MissionTask, review: LedgerEvent, receipt: ReviewReceipt, root: Path) -> tuple[dict[str, Any], str]:
         """Lot 4 : scelle le READY au journal d'autorité (tête, arbre, pack, empreinte du reçu), copie au ledger.
@@ -499,19 +531,23 @@ class ReviewStage:
             1 for e in self._events(task_id, REVIEW_JUDGED_EVENT) if e.payload.get("verdict") == NOT_READY and e.created_at > since
         )
 
-    def _bounce(self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent, receipt: ReviewReceipt) -> ReviewOutcome:
-        """``NOT-READY`` : retour au worker avec les constats, ou escalade au cycle ``max_cycles``."""
+    def _bounce(
+        self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent, receipt: ReviewReceipt, *, notes: str = "",
+        extra: dict[str, Any] | None = None,
+    ) -> ReviewOutcome:
+        """``NOT-READY`` : retour au worker avec les constats (*notes*, à défaut ceux du reçu), ou escalade au cycle
+        ``max_cycles``. *extra* s'ajoute au jugement noté (une CI rouge qui défait un READY, #993)."""
         tid, max_cycles = task.id, self._policy.reviewer.max_cycles
         breaker = read_breaker(self._service.home_root)
         if breaker.open:
             return ReviewOutcome(tid, "bounce", "skipped", f"disjoncteur ouvert : {breaker.reason}")
-        cycle, notes = self._cycle(tid), _findings_text(receipt)
+        cycle, notes = self._cycle(tid), notes or _findings_text(receipt)
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:
             why = f"{cycle} relecture(s) NOT-READY" if worker_session else "aucune session de worker à reprendre"
             escalated = self._escalate(task, why, notes)
             if escalated.status == "done":
-                self._record_judged(task, review, NOT_READY, cycle)
+                self._record_judged(task, review, NOT_READY, cycle, extra)
                 self._stop(review)
             return escalated
         ledger = self._service.ledger
@@ -534,7 +570,7 @@ class ReviewStage:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="reprise du worker échouée")
             state = record_failure(self._service.home_root, self._policy.breaker_threshold, f"{tid} : reprise du worker : {result.stderr[:200]}")
             return ReviewOutcome(tid, "bounce", "failed", "worker non repris, tâche remise en revue" + (" — disjoncteur ouvert" if state.open else ""))
-        self._record_judged(task, review, NOT_READY, cycle)
+        self._record_judged(task, review, NOT_READY, cycle, extra)
         self._stop(review)
         self._service.comment(tid, f"Relecture NOT-READY (cycle {cycle}/{max_cycles}) : {notes}", REVIEWER_ACTOR)
         return ReviewOutcome(tid, "bounce", "done", f"retour au worker (cycle {cycle}/{max_cycles})")

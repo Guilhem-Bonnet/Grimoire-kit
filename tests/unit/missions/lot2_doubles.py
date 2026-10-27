@@ -78,6 +78,12 @@ class FakeHost:
         self.real: Path | None = None
         self.pr_files: dict[str, list[str]] = {}  # branche → fichiers annoncés ; absente : le diff base...tête sur la remote
         self.changed_files: dict[str, int] = {}  # branche → changedFiles annoncé ; absent : le nombre d'entrées listées
+        # #993 : brouillon, base que GitHub n'a pas rafraîchie, conflit annoncé.
+        self.drafts: set[str] = set()  # branches dont la PR est en brouillon ; ``gh pr ready`` l'en sort
+        self.ready_fails = False  # ``gh pr ready`` refusé (droits de l'intégration)
+        self.pr_base_oids: dict[str, str] = {}  # branche → baseRefOid annoncé ; absente : la cible de la remote
+        self.mergeable: dict[str, str] = {}  # branche → ``mergeable`` (MERGEABLE, CONFLICTING) ; absente : non dit
+        self.merge_states: dict[str, str] = {}  # branche → ``mergeStateStatus`` (CLEAN, BEHIND, DIRTY) ; absente : non dit
         self.repo = ""  # le dépôt GitHub que ce faux gh sert : un ``-R`` autre est refusé (« could not resolve »)  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
@@ -150,7 +156,7 @@ class FakeHost:
                 return ExecResult(1, "", "no pull requests found for branch")
             body: dict[str, object] = {
                 "state": state, "number": self.pr_numbers.get(branch, 7), "baseRefName": self.pr_bases.get(branch, "main"),
-                "isDraft": False, "mergeCommit": {"oid": self.merge_commits[branch]} if branch in self.merge_commits else None,
+                "isDraft": branch in self.drafts, "mergeCommit": {"oid": self.merge_commits[branch]} if branch in self.merge_commits else None,
                 "isCrossRepository": branch in self.cross_repo,
             }
             remote = self._remote(cwd)
@@ -158,12 +164,16 @@ class FakeHost:
             base = self._git_remote(remote, "rev-parse", f"refs/heads/{self.pr_bases.get(branch, 'main')}")
             entries = self._entries(cwd, branch, head, base)
             body.update({
-                "baseRefOid": base, "files": [{"path": new} for new, _old in entries],  # comme gh : le nouveau nom seul
+                "baseRefOid": self.pr_base_oids.get(branch, base), "files": [{"path": new} for new, _old in entries],  # comme gh : le nouveau nom seul
                 "changedFiles": self.changed_files.get(branch, len(entries)),
                 "url": f"file://{remote}/pull/{body['number']}",
             })
             if not self.pr_no_head:
                 body["headRefOid"] = head
+            if branch in self.mergeable:
+                body["mergeable"] = self.mergeable[branch]
+            if branch in self.merge_states:
+                body["mergeStateStatus"] = self.merge_states[branch]
             return ExecResult(0, json.dumps(body))
         if argv[1:3] == ["pr", "checks"]:
             if "--required" in argv and self.required_broken:
@@ -176,6 +186,13 @@ class FakeHost:
             return ExecResult(1 if buckets & {"fail", "cancel"} else 8 if "pending" in buckets else 0, json.dumps(rows))
         if argv[1:3] == ["pr", "merge"]:
             return self._merge(argv, cwd)
+        if argv[1:3] == ["pr", "ready"]:
+            number = int(argv[3])
+            branch = next((b for b in self.prs if self.pr_numbers.get(b, 7) == number and self.prs[b] == "OPEN"), "")
+            if self.ready_fails or not branch:
+                return ExecResult(1, "", "GraphQL: Resource not accessible by integration (markPullRequestReadyForReview)")
+            self.drafts.discard(branch)
+            return ExecResult(0, "")
         if argv[1:3] == ["issue", "close"]:
             self.closed_issues.append(argv[3])
             return ExecResult(0, "")
