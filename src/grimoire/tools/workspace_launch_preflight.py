@@ -33,6 +33,7 @@ from grimoire.missions import launcher
 from grimoire.missions.admission import (
     Admit,
     Capacity,
+    Defer,
     HostReading,
     LedgerView,
     QueuePlan,
@@ -189,8 +190,8 @@ def _model_for(role: WorkerRole, route: RouteRef | None) -> tuple[str, str]:
 
 def _route_of(plan: QueuePlan, tid: str) -> RouteRef | None:
     """La route que le plan d'admission a lue pour *tid* (``None`` hors file) — un seul appel au routeur."""
-    decisions: tuple[Admit, ...] = plan.admitted
-    for decision in (*decisions, *plan.deferred):
+    decisions: tuple[Admit | Defer, ...] = (*plan.admitted, *plan.deferred)
+    for decision in decisions:
         if decision.task_id == tid:
             return decision.route
     return None
