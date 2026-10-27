@@ -233,6 +233,12 @@ export const api = {
     get(WS + 'tasks/' + encodeURIComponent(id) + '/trace', project ? { project } : undefined),
   taskRecall: (id, project) =>
     get(WS + 'tasks/' + encodeURIComponent(id) + '/recall', project ? { project } : undefined),
+  // Préflight d'assignation (P47) : le plan de lancement d'une session worker
+  // sur une tâche — modèle, worktree, vérifications, commande équivalente.
+  // Lecture seule stricte : rien n'est lancé ni écrit (ADR-008, phase plan),
+  // donc permise même sur un hôte en lecture seule.
+  taskLaunchPlan: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/launch-plan', project ? { project } : undefined),
   // Portefeuille (#638, lot C) : toutes les tâches de tous les projets du
   // registre cockpit, chacune avec son projet, son claim, sa session et sa
   // priorité — agrégé côté serveur (`workspace_portfolio.py`), jamais une

@@ -61,6 +61,11 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 // Calculé sur les colonnes et l'attente que l'API donne déjà, rien n'est deviné.
 // Au niveau du module, comme `scope` : revenir sur l'espace garde le réglage.
 const askMe = { on: false };
+
+// Panneau « Assigner une session » (P47 lot 2) : l'ouverture vit au niveau du
+// module, comme `scope` — le pouls live redessine l'inspecteur, et un panneau
+// rouvert doit se recharger au lieu de disparaître (pattern task-create.js).
+const assignUi = { task: '', open: false };
 const needsHuman = (t) => isHumanWait(t) || t.board === 'review' || t.board === 'blocked';
 
 // Les vues que l'URL peut demander (`#travail?view=liste`).
@@ -391,6 +396,20 @@ function injectStyles() {
     .ex-dec-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; white-space: normal; }
     .ex-decision-note { font-size: var(--t-min); color: var(--ink3); }
     .ex-decision-item { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+    /* P47 : panneau Assigner une session — plan de lancement en lecture seule, section de l'inspecteur. */
+    .ex-assign-panel { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); }
+    .ex-assign-panel h4 { font-size: var(--t-s); color: var(--ink); margin: 0; font-weight: 600; }
+    .ex-assign-sub { margin: 0; font-size: var(--t-s); color: var(--ink2); }
+    .ex-assign-notready { display: flex; align-items: flex-start; gap: 6px; padding: 6px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); font-size: var(--t-s); }
+    .ex-assign-panel .skeleton { padding: var(--sp-2) 0; }
+    .ex-assign-rows { display: flex; flex-direction: column; }
+    .ex-assign-verifs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .ex-assign-verif { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-s); }
+    .ex-assign-verif > .sico { align-self: start; margin-top: 1px; }
+    .ex-assign-verif > span:not(.sico) { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+    .ex-assign-launch { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .ex-assign-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .ex-assign-cmd code { font-family: var(--mono); font-size: var(--t-min); padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
     @container canvas (max-width: 900px) {
       .ex-dec-bulk { margin-left: 0; width: 100%; }
       .ex-decision { padding: var(--sp-3); }
@@ -2277,6 +2296,195 @@ function receiptBlock(ctx, taskId, payload, project) {
 // l'utilisateur a pu taper. `guard.defer()` dit si une saisie est en cours (alors
 // le re-rendu est reporté, `false` rendu) ; et quand il a lieu quand même (clic
 // sur une carte, transition), valeur, focus et curseur sont rétablis.
+// ── Assigner une session (P47 lot 2) ────────────────────────────────────────
+//
+// Une section de l'inspecteur (jamais une modale) : le plan de lancement que
+// GET tasks/<id>/launch-plan rend — modèle, worktree, branche, les cinq
+// vérifications du préflight et la commande équivalente à copier. Rien n'est
+// lancé : le bouton « Lancer la session » reste désactivé tant que la garde
+// d'écriture commune (ADR-008) n'existe pas (GAO-garde-d-crit-001).
+
+//: Les verdicts du préflight sur les tons existants du cockpit (stateIcon).
+const PREFLIGHT_TONE = { ok: 'ok', warn: 'warn', bloquant: 'bad', inconnu: '' };
+const PREFLIGHT_WORD = { ok: 'ok', warn: 'attention', bloquant: 'bloquant', inconnu: 'inconnu' };
+const LAUNCH_LOCK_REASON = "Lancement depuis le cockpit après la garde d'écriture commune (ADR-008) — copie la commande en attendant.";
+// Les états que le préflight accepte en entrée de file : une tâche prête est
+// candidate à l'admission, une proposée reçoit un plan qui dit ce qui manque.
+const ASSIGNABLE_STATUS = new Set(['proposed', 'ready']);
+
+function assignPlanNode(plan) {
+  const panel = document.createElement('div');
+  panel.className = 'ex-assign-panel';
+  panel.append(text('h4', null, 'Assigner une session'));
+  panel.append(text('p', 'ex-assign-sub', 'Tu lances, la session travaille dans son worktree, elle finit par une PR que tu fusionnes.'));
+
+  // Pas prêt : le dire clairement en tête, avec la raison du préflight (ton warn).
+  if (plan.pret === false) {
+    const notReady = document.createElement('div');
+    notReady.className = 'ex-assign-notready';
+    notReady.dataset.role = 'assign-not-ready';
+    notReady.append(stateIcon('warn'), text('span', null, `Pas prêt : ${plan.raison || 'raison non communiquée'}`));
+    panel.append(notReady);
+  }
+
+  // Modèle, worktree, branche — les mêmes lignes clé-valeur que le bloc Preuves.
+  const rows = document.createElement('div');
+  rows.className = 'ex-assign-rows';
+  const kv = (label, role, ...nodes) => {
+    const line = document.createElement('div');
+    line.className = 'ex-kv';
+    line.dataset.role = role;
+    const value = document.createElement('span');
+    value.append(...nodes);
+    line.append(text('span', 'lbl', label), value);
+    return line;
+  };
+  const modele = plan.modele || {};
+  const modelValue = text('span', null, modele.recommande || 'aucun modèle imposé — la session garde son défaut');
+  if (modele.source) modelValue.title = `source : ${modele.source}${modele.palier ? ` · palier ${modele.palier}` : ''}`;
+  const modelWhy = text('span', 'ex-cond-why', `classe ${modele.classe || '?'}, ${modele.justification || 'justification non communiquée'}`);
+  rows.append(kv('Modèle', 'assign-model', modelValue, modelWhy));
+  const worktree = plan.worktree || {};
+  const worktreeName = worktree.chemin ? String(worktree.chemin).split('/').filter(Boolean).pop() : '';
+  const wtValue = worktreeName
+    ? text('code', null, worktreeName)
+    : text('span', 'lbl', worktree.detail || 'chemin inconnu');
+  if (worktree.chemin) wtValue.title = worktree.chemin;
+  const wtNodes = [wtValue];
+  if (worktree.existant) wtNodes.push(text('span', 'ex-cond-why', 'worktree déjà créé : la session le reprendrait'));
+  rows.append(kv('Worktree', 'assign-worktree', ...wtNodes));
+  rows.append(kv('Branche', 'assign-branch', text('code', null, worktree.branche || '?')));
+  panel.append(rows);
+
+  // Les cinq vérifications du préflight, chacune avec son verdict.
+  const verifsBlock = document.createElement('div');
+  verifsBlock.append(text('h4', null, 'Vérifications avant lancement'));
+  const list = document.createElement('ul');
+  list.className = 'ex-assign-verifs';
+  list.dataset.role = 'assign-verifs';
+  for (const v of plan.verifications || []) {
+    const li = document.createElement('li');
+    const tone = PREFLIGHT_TONE[v.verdict] ?? '';
+    li.className = 'ex-assign-verif' + (tone ? ' ' + tone : '');
+    li.dataset.role = 'assign-verif';
+    li.dataset.verif = v.id;
+    li.dataset.verdict = v.verdict;
+    const body = document.createElement('span');
+    body.append(
+      text('span', v.verdict === 'bloquant' ? 'ex-cond-strong' : null, `${v.libelle} — ${PREFLIGHT_WORD[v.verdict] || v.verdict}`),
+      text('span', 'ex-cond-why', v.detail || ''),
+    );
+    li.append(stateIcon(tone), body);
+    list.append(li);
+  }
+  if (!(plan.verifications || []).length) verifsBlock.append(text('p', 'lbl', 'aucune vérification lue'));
+  else verifsBlock.append(list);
+  panel.append(verifsBlock);
+
+  // Lancer : présent mais toujours désactivé dans ce lot — la garde d'écriture
+  // commune (ADR-008) n'existe pas encore, la raison est écrite à côté.
+  const launchRow = document.createElement('div');
+  launchRow.className = 'ex-assign-launch';
+  const launch = document.createElement('button');
+  launch.type = 'button';
+  launch.className = 'btn pri';
+  launch.dataset.role = 'assign-launch';
+  launch.textContent = 'Lancer la session';
+  launch.disabled = true;
+  launch.title = LAUNCH_LOCK_REASON;
+  launch.setAttribute('aria-describedby', 'ex-assign-lock-reason');
+  const lockReason = text('p', 'lbl', LAUNCH_LOCK_REASON);
+  lockReason.id = 'ex-assign-lock-reason';
+  lockReason.dataset.role = 'assign-launch-reason';
+  launchRow.append(launch, lockReason);
+  panel.append(launchRow);
+
+  // Équivalent : la commande du payload, à copier — même pattern statut +
+  // repli (sélection prête pour Ctrl+C) que la vue Décisions.
+  const equiv = document.createElement('div');
+  equiv.append(text('h4', null, 'Équivalent'));
+  const commande = plan.commande || {};
+  if (commande.texte) {
+    const box = document.createElement('div');
+    box.className = 'ex-assign-cmd';
+    const code = text('code', null, commande.texte);
+    code.dataset.role = 'assign-command';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn';
+    copy.dataset.role = 'assign-copy';
+    copy.append(icon('copy'), text('span', null, 'Copier la commande'));
+    const status = actionStatus('');
+    copy.addEventListener('click', async () => {
+      // `copyText` appelle le presse-papiers dans le geste même (permission du navigateur).
+      if (await copyText(commande.texte, copy)) {
+        setActionStatus(status, 'Commande copiée : collez-la dans un terminal pour lancer la session.', 'ok');
+        return;
+      }
+      // Repli : la commande est sélectionnée, prête pour Ctrl+C.
+      const selection = window.getSelection();
+      if (selection) selection.selectAllChildren(code);
+      setActionStatus(status, 'Copie refusée par le navigateur : la commande est sélectionnée, copiez-la (Ctrl+C).');
+    });
+    box.append(code, copy, status);
+    equiv.append(box);
+  } else {
+    equiv.append(text('p', 'lbl', `commande indisponible : ${commande.raison || 'non composée par le préflight'}`));
+  }
+  panel.append(equiv);
+  return panel;
+}
+
+async function renderAssignPanel(ctx, holder, taskId, project) {
+  // Chargement : squelette court, remplacé par le plan ou par l'échec nommé.
+  const wait = document.createElement('div');
+  wait.className = 'skeleton';
+  wait.dataset.shape = 'lines';
+  wait.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 3; i += 1) wait.append(text('div', 'skeleton-line', ''));
+  holder.replaceChildren(text('p', 'lbl sr-only', 'Lecture du plan de lancement…'), wait);
+  let plan;
+  try {
+    plan = await ctx.api.taskLaunchPlan(taskId, project);
+  } catch (error) {
+    if (ctx.signal.aborted) return;
+    holder.replaceChildren(text('p', 'ex-refusal', failureText(error)));
+    return;
+  }
+  // Le pouls a pu fermer le panneau ou changer de tâche pendant la lecture.
+  if (ctx.signal.aborted || !(assignUi.open && assignUi.task === taskId)) return;
+  holder.replaceChildren(assignPlanNode(plan));
+}
+
+function assignBlock(ctx, detail, project) {
+  if (!ASSIGNABLE_STATUS.has(detail.status)) return null;
+  const block = document.createElement('section');
+  block.className = 'ex-insp-block';
+  block.dataset.role = 'assign-block';
+  const holder = document.createElement('div');
+  holder.dataset.role = 'assign-panel-holder';
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'btn';
+  open.dataset.role = 'assign-open';
+  open.append(icon('play'), text('span', null, 'Assigner une session…'));
+  const paint = (opened) => {
+    open.setAttribute('aria-expanded', String(opened));
+    if (opened) renderAssignPanel(ctx, holder, detail.id, project);
+    else holder.replaceChildren();
+  };
+  open.addEventListener('click', () => {
+    const opened = !(assignUi.open && assignUi.task === detail.id);
+    assignUi.open = opened;
+    assignUi.task = opened ? detail.id : '';
+    paint(opened);
+  });
+  block.append(open, holder);
+  // Le panneau survit au re-rendu de l'inspecteur (pouls live) : rouvert, il se rafraîchit.
+  paint(assignUi.open && assignUi.task === detail.id);
+  return block;
+}
+
 async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false, guard = {}) {
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
@@ -2602,6 +2810,9 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
 
   // ── P75 : qui travaille — persona, modèle réel, effort, skills, tokens ──
   if (task.work) ctx.inspector.append(workBlock(task));
+
+  // ── Assigner une session (P47) : le plan de lancement, sans rien lancer ──
+  appendIf(ctx.inspector, assignBlock(ctx, detail, project));
 
   // ── Mémoire servie : le reçu de rappel, rejouable (P27) ─────────────────
   ctx.inspector.append(receiptBlock(ctx, taskId, receipts, project));
