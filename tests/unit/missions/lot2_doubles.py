@@ -91,6 +91,9 @@ class FakeHost:
         self.pr_created: dict[str, str] = {}  # branche → createdAt ; absente : l'instant de la lecture
         self.merged_at: dict[str, str] = {}  # branche → mergedAt, posé par ``pr merge``
         self.protected: set[str] = set()  # branches que ``gh api repos/…/branches/<b>`` dit protégées
+        self.rerun_error = "gh: Resource not accessible by integration (HTTP 403)"  # refus de ``rerun-failed-jobs`` ; "" : permis
+        self.failed_runs: dict[str, list[int]] = {}  # tête → runs en échec ; absente : un run, 101
+        self.reruns: list[int] = []  # runs relancés par ``rerun-failed-jobs``
         self.repo = ""  # le dépôt GitHub que ce faux gh sert : un ``-R`` autre est refusé (« could not resolve »)  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
@@ -156,6 +159,14 @@ class FakeHost:
             argv = argv[:argv.index("-R")] + argv[argv.index("-R") + 2:]
         if argv[1] == "api" and argv[2].endswith("/files"):
             return self._api_files(argv, cwd)
+        if argv[1] == "api" and "/actions/runs?" in argv[2]:
+            head = argv[2].split("head_sha=", 1)[1].split("&", 1)[0]
+            return ExecResult(0, "".join(f"{r}\n" for r in self.failed_runs.get(head, [101])))
+        if argv[1:4] == ["api", "-X", "POST"] and argv[4].endswith("/rerun-failed-jobs"):
+            if self.rerun_error:
+                return ExecResult(1, "", self.rerun_error)
+            self.reruns.append(int(argv[4].split("/")[-2]))
+            return ExecResult(0, "")
         if argv[1] == "api" and "/branches/" in argv[2]:
             branch = unquote(argv[2].split("/branches/", 1)[1])
             return ExecResult(0, "true\n" if branch in self.protected else "false\n")
