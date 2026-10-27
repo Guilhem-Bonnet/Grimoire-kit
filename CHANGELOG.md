@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(memory): `grimoire memory graph backfill-project` rattrape un graphe Neo4j écrit avant la clé de projet (P15b). Aperçu chiffré par défaut, `--apply` pour écrire. Souvenirs attribués par `weaviate_collection` puis `metadata_json.project_name` (jamais un souvenir d'un autre projet) ; faits, journaux, `WeaviateObject`, étiquettes, entités et agents par leur souvenir, sans fusionner un nom partagé avec un autre projet ; `CodeNode` par préfixe de `--paths` **et** fichier présent dans la racine du projet (la racine elle-même, un dossier hors projet ou inexistant sont refusés) ; fantômes marqués externes. Les identifiants reçoivent le préfixe `<projet>::` ; un conflit avec un nœud déjà préfixé est listé et le nœud laissé en l'état. Rejouable. Testé sur le service Neo4j du CI.
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27
