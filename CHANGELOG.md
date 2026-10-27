@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): panneau « Assigner une session » — plan de lancement et commande à copier (P47 lot 2, GAO-p47-assigne-001)
 - feat(cockpit): préflight d'assignation — plan en lecture seule et commande équivalente (P47 lot 1, GAO-p47-assigne-001)
 - feat(cockpit): bloqué visible sans bruit — compteur warn et section repliée dans le tableau compact (P72v2, GAO-p72v2-bloqu-001)
 - feat(cockpit): cartes du kanban lisibles par un humain (P74, `GAO-p74-cartes-k-001`)
