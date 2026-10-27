@@ -985,6 +985,7 @@ function restorePanelsForSpace() {
   restoreWidth('explorer');
   restoreWidth('inspector');
   restoreWidth('evidence');
+  restoreDockHeight();
 }
 
 // ── Panneau « Preuves » (rail « 3 », touche 3) ──────────────────────────────
@@ -1357,6 +1358,90 @@ function bindResize() {
       handle.addEventListener('pointerup', onUp);
     });
   }
+}
+
+// ── Hauteur du dock (P76) ───────────────────────────────────────────────────
+//
+// La poignée du bord haut tire le dock vers le haut. Bornée à 80 % de la
+// fenêtre ; mémorisée par espace et par projet comme la largeur des panneaux ;
+// double-clic = hauteur par défaut ; flèches haut/bas au clavier.
+
+const DOCK_MIN_HEIGHT = 80;
+const DOCK_MAX_RATIO = 0.8;
+const DOCK_KEY_STEP = 24;
+
+function dockMaxHeight() {
+  return Math.max(DOCK_MIN_HEIGHT, Math.floor(window.innerHeight * DOCK_MAX_RATIO));
+}
+
+function clampDockHeight(value) {
+  return Math.min(dockMaxHeight(), Math.max(DOCK_MIN_HEIGHT, Math.round(value)));
+}
+
+function updateDockSeparator() {
+  const handle = $('dock-resize');
+  const dock = $('dock');
+  if (!handle || !dock) return;
+  handle.setAttribute('aria-valuemin', String(DOCK_MIN_HEIGHT));
+  handle.setAttribute('aria-valuemax', String(dockMaxHeight()));
+  handle.setAttribute('aria-valuenow', String(Math.round(dock.getBoundingClientRect().height)));
+}
+
+function setDockHeight(value, { persist = true } = {}) {
+  const dock = $('dock');
+  if (value == null) {
+    dock.style.height = '';
+    if (persist) writeState({ [panelKey('dockHeight', 'dock')]: null });
+  } else {
+    const height = clampDockHeight(value);
+    dock.style.height = height + 'px';
+    if (persist) writeState({ [panelKey('dockHeight', 'dock')]: height });
+  }
+  updateDockSeparator();
+}
+
+function restoreDockHeight() {
+  const saved = Number(readState()[panelKey('dockHeight', 'dock')]);
+  setDockHeight(Number.isFinite(saved) && saved > 0 ? saved : null, { persist: false });
+}
+
+function bindDockResize() {
+  const handle = $('dock-resize');
+  const dock = $('dock');
+  if (!handle || !dock) return;
+  handle.addEventListener('pointerdown', (event) => {
+    if (dock.dataset.state === 'collapsed') return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = dock.getBoundingClientRect().height;
+    handle.setPointerCapture(event.pointerId);
+    handle.dataset.dragging = '';
+    const onMove = (moveEvent) => {
+      setDockHeight(startHeight + (startY - moveEvent.clientY), { persist: false });
+    };
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      delete handle.dataset.dragging;
+      setDockHeight(dock.getBoundingClientRect().height);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  });
+  handle.addEventListener('dblclick', () => setDockHeight(null));
+  handle.addEventListener('keydown', (event) => {
+    const height = dock.getBoundingClientRect().height;
+    if (event.key === 'ArrowUp') setDockHeight(height + DOCK_KEY_STEP);
+    else if (event.key === 'ArrowDown') setDockHeight(height - DOCK_KEY_STEP);
+    else if (event.key === 'Home') setDockHeight(DOCK_MIN_HEIGHT);
+    else if (event.key === 'End') setDockHeight(dockMaxHeight());
+    else return;
+    event.preventDefault();
+  });
+  window.addEventListener('resize', updateDockSeparator);
+  updateDockSeparator();
 }
 
 // ── Dock ────────────────────────────────────────────────────────────────────
@@ -2784,6 +2869,7 @@ async function main() {
   buildRail();
   buildDock();
   bindResize();
+  bindDockResize();
   bindShortcuts();
   for (const button of document.querySelectorAll('#st-theme [data-theme-pref]')) {
     button.addEventListener('click', () => setThemePref(button.dataset.themePref));

@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(workspace): la console du dock se redimensionne vers le haut, comme le panneau de VS Code (P76, GAO-p76-console-001). Poignée sur le bord haut (`role="separator"`, `aria-orientation="horizontal"`, flèches haut/bas, Début/Fin), hauteur bornée à 80 % de la fenêtre, mémorisée par espace et par projet (localStorage), double-clic pour la hauteur par défaut. Aucun changement serveur.
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27
