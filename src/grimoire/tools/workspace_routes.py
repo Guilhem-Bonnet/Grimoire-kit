@@ -639,6 +639,11 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
         if handler is not None:
             return handler(project_root, query)
         if path.startswith(f"{PREFIX}tasks/"):
+            if path.endswith("/launch-plan"):
+                # Préflight d'assignation (P47 lot 1) : plan en lecture seule, rien n'est lancé (ADR-008).
+                from grimoire.tools import workspace_launch_preflight
+
+                return workspace_launch_preflight.launch_preflight(project_root, _task_id(path, "launch-plan"))
             if path.endswith("/trace"):
                 return workspace_api.task_trace_view(project_root, _task_id(path, "trace"))
             if path.endswith("/recall"):
