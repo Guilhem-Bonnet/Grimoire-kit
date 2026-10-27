@@ -58,7 +58,6 @@ absent. Voir ``tests/unit/test_dispatch_rust_parity.py``.
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import json
 import math
 import os
@@ -79,6 +78,7 @@ from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.grounding import GROUNDING_RULE
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
+from grimoire.missions.diff_fingerprint import signal_if_stuck
 from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.route_dispatch import record_route
@@ -523,38 +523,6 @@ def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | No
     if matched:
         return "review_required", matched, None
     return "review_optional", (), None
-
-
-#: Ce que la cascade écrit elle-même (ledger, état fournisseurs, sorties) n'est pas du travail
-#: de l'ouvrier : il changerait l'empreinte à chaque tentative et masquerait la répétition.
-_FINGERPRINT_EXCLUDES = (":(exclude)_grimoire-runtime-output", ":(exclude)_grimoire-output")
-
-
-def _diff_fingerprint(project_root: Path) -> str | None:
-    """Empreinte du diff courant (suivi + fichiers non suivis), ``None`` hors dépôt git.
-
-    Sert au signal « tourne en rond » du pilote (lot 4.4) : deux tentatives
-    qui laissent exactement le même diff n'ont rien appris l'une à l'autre.
-    """
-    try:
-        tracked = subprocess.run(
-            ["git", "diff", "HEAD", "--", ".", *_FINGERPRINT_EXCLUDES], cwd=project_root, capture_output=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S
-        )
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard", "--", ".", *_FINGERPRINT_EXCLUDES], cwd=project_root, capture_output=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if tracked.returncode != 0 or untracked.returncode != 0:
-        return None
-    digest = hashlib.sha256(tracked.stdout.encode("utf-8"))
-    for name in sorted(line for line in untracked.stdout.splitlines() if line.strip()):
-        digest.update(b"\0" + name.encode("utf-8") + b"\0")
-        try:
-            digest.update((project_root / name).read_bytes())
-        except OSError:
-            continue
-    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1413,23 +1381,10 @@ def run_dispatch(
                 )
                 return unrunnable_report
             if verdict == "red":
-                # Signal « tourne en rond » (lot 4.4) : même diff qu'à la tentative
-                # rouge précédente. Le palier change quoi qu'il arrive après un rouge ;
-                # le signal dit pourquoi, et vers où.
-                fingerprint = _diff_fingerprint(root)
-                if fingerprint is not None and fingerprint == previous_red_diff:
-                    service.ledger.append_event(
-                        "pilot.signal", task_id, "task", actor,
-                        {
-                            "signal": "stuck",
-                            "reason": "même diff à deux tentatives rouges consécutives",
-                            "attempt": attempt_no,
-                            "from_tier": tier,
-                            "to_tier": chain[tier_idx + 1] if tier_idx + 1 < len(chain) else None,
-                            "diff_fingerprint": fingerprint,
-                        },
-                    )
-                previous_red_diff = fingerprint
+                previous_red_diff = signal_if_stuck(
+                    service, task_id, actor, root, previous_red_diff,
+                    attempt=attempt_no, tier=tier, next_tier=chain[tier_idx + 1] if tier_idx + 1 < len(chain) else None,
+                )
             tier_settled = True
             break  # appel réussi : ce palier a son verdict, vert ou rouge
 
