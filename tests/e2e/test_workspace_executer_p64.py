@@ -291,7 +291,11 @@ def test_une_carte_dit_son_identifiant_sa_route_sa_preuve_sa_session_et_son_bloc
     assert "aucune preuve déclarée" in blocked.locator("[data-role='blocked']").inner_text()
 
     running = _card(page, RUNNING_TITLE)
-    assert "41c89d23" in running.locator(".ex-session").inner_text()
+    # P74 : plus d'identifiant brut sur la carte — hôte et persona à la place
+    # (l'UUID reste dans l'inspecteur, avec la commande de reprise).
+    session_line = running.locator(".ex-session").inner_text()
+    assert "41c89d23" not in running.inner_text()
+    assert "Claude Code" in session_line and "agent-a" in session_line
     assert "session vivante" in running.locator("[data-role='live-facts']").inner_text()
     assert page.evaluate(
         "(t) => getComputedStyle([...document.querySelectorAll('.ex-card-title')].find((n) => n.textContent === t)).webkitLineClamp",
