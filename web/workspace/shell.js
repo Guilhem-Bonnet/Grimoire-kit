@@ -88,6 +88,8 @@ const SPACES = [
       { id: 'memoire', module: 'memoire', label: 'Recherche', skeleton: 'results' },
       // Le reçu de rappel (P27) : ce que la mémoire a servi aux agents, rejouable.
       { id: 'rappel', module: 'rappel', label: 'Rappel', skeleton: 'results' },
+      // La carte 3D (P81) : tout le graphe du projet, rendu sur le GPU.
+      { id: 'carte', module: 'carte', label: 'Carte 3D', skeleton: 'kpi' },
       { id: 'journal', module: 'observer', label: 'Journal', skeleton: 'table' },
     ] },
   { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',
