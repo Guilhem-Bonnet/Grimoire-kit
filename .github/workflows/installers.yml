@@ -45,7 +45,8 @@ jobs:
           VERSION="$(tr -d '[:space:]' < version.txt)"
           python scripts/stamp-installers.py --version "$VERSION" --out "$RUNNER_TEMP/installers"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "WHEEL=$(ls "$PWD"/dist/*.whl | head -1)" >> "$GITHUB_ENV"
+          # Chemin natif (D:\...) : le « /d/... » de git-bash est inconnu de uv sous Windows.
+          echo "WHEEL=$(python -c "import glob, os; print(os.path.abspath(glob.glob('dist/*.whl')[0]))")" >> "$GITHUB_ENV"
 
       # uv n'est pas préinstallé : l'installeur doit le poser lui-même.
       - name: install.sh (Linux, macOS)
