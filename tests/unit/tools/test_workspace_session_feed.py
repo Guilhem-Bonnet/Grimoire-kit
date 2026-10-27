@@ -177,3 +177,40 @@ def test_le_brief_du_worker_demande_une_note_de_progression_sans_garde(
     assert "note ta progression" in prompt
     assert f"grimoire task note {task.id}" in prompt
     assert "rien ne te bloque si tu l'oublies" in prompt
+
+
+# ── Les portes et les routes ─────────────────────────────────────────────────
+
+
+def test_un_refus_de_porte_entre_dans_le_fil_comme_echec(tmp_path: Path) -> None:
+    from grimoire.core.agentic_standard import setup_standard_profile
+    from grimoire.missions.service import TaskRefusedError
+
+    setup_standard_profile(tmp_path, profile_id="governed", task_id="bootstrap")
+    registry = tmp_path / "_grimoire/standard/llm-provider-registry.yaml"
+    registry.write_text(registry.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1), encoding="utf-8")
+    service = TaskService(tmp_path)
+    mission = service.ledger.create_mission(title="Portes", origin="test").id
+    task = service.ledger.create_task(mission, "porte rouge", acceptance=(ACC,), owner="amelia")
+    service.transition(task.id, TaskState.READY, "amelia")
+    service.context(task.id)
+    service.claim(task.id, "claude", "claude-code")
+    service.transition(task.id, TaskState.RUNNING, "claude")
+    with pytest.raises(TaskRefusedError):
+        service.transition(task.id, TaskState.NEEDS_VERIFICATION, "claude")
+    feed = task_feed(tmp_path, task.id)
+    gates = [e for e in feed["entries"] if e["kind"] == "task.gate.refused"]
+    assert len(gates) == 1
+    assert gates[0]["failure"] is True
+    assert "refuse la transition" in gates[0]["label"]
+
+
+def test_les_routes_feed_rendent_les_deux_fils(projet: Path, service: TaskService, mission: str) -> None:
+    from grimoire.tools.workspace_routes import PREFIX, workspace_get
+
+    tid = _held(service, mission, "par la route")
+    by_task = workspace_get(projet, f"{PREFIX}tasks/{tid}/feed", {})
+    assert by_task["task_id"] == tid and by_task["entries"]
+    by_session = workspace_get(projet, f"{PREFIX}sessions/{SESSION}/feed", {})
+    assert by_session["session_id"] == SESSION and by_session["tasks"] == [tid]
+    assert by_session["logs_command"] == f"claude logs {SESSION}"
