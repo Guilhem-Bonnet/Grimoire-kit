@@ -1,0 +1,42 @@
+{
+  "$schema": "grimoire-review-receipt/v1",
+  "task_id": "GAO-p29-install-002",
+  "verdict": "NOT-READY",
+  "findings": [
+    {
+      "summary": "print avec « → » plante sous Windows (cp1252).",
+      "evidence_cmd": "",
+      "severity": "",
+      "grounded": false
+    }
+  ],
+  "reviewer_id": "reviewer",
+  "model": "sonnet",
+  "tree_fingerprint": "553f255a492805b92f66eeee0b9052d7c0049dc8f2c383ba902c64bd25dc39f0",
+  "evidence_pack_sha256": "aa6b0ea25cabce351dbef48ad9be45bee5c6be7bac4b487f84f255773d46301a",
+  "written_at": "2026-10-27T23:25:17.962211+00:00",
+  "reviewer_session": "21765324-0665-472f-86f3-ca0f1cd1ca73",
+  "criteria": [
+    {
+      "index": 1,
+      "criterion": "install.ps1 (nouveau) et install.sh (refondu, --legacy conservé) installent uv si absent puis grimoire-kit en version épinglée par uv tool install",
+      "status": "met",
+      "evidence_cmd": "bash install.sh; python -m pytest tests/unit/test_stamp_installers.py",
+      "note": "install.sh (refondu, --legacy conservé) et install.ps1 (nouveau) installent uv si absent puis grimoire-kit==VERSION via uv tool install ; install.sh sans version échoue proprement ; tests de l'estampillage passent."
+    },
+    {
+      "index": 2,
+      "criterion": "Job CI sur 3 OS : depuis un shell neuf hors venv, grimoire, grimoire-mcp et grimoire-hook se résolvent et grimoire --version égale le tag",
+      "status": "unmet",
+      "evidence_cmd": "gh pr checks task/GAO-p29-install-002",
+      "note": "Le job CI « Installeur (windows-latest) » est en échec : scripts/stamp-installers.py:55 imprime « → » et lève UnicodeEncodeError (cp1252) sur Windows, avant même l'installeur. Le job macOS passe ; Linux encore en cours. Le critère 3 OS n'est donc pas démontré."
+    },
+    {
+      "index": 3,
+      "criterion": "Scripts publiés en artefacts de release avec attestation actions/attest ; CI verte",
+      "status": "unverifiable",
+      "evidence_cmd": "gh pr checks task/GAO-p29-install-002 --required",
+      "note": "Attestation des installeurs câblée dans publish.yml (test_release_ships_attested_installers passe) mais le workflow ne tourne qu'à la release ; CI de la PR non verte (job Windows en échec)."
+    }
+  ]
+}

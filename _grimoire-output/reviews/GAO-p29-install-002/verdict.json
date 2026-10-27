@@ -1,0 +1,12 @@
+{
+  "schema": "grimoire-review-verdict/v1",
+  "verdict": "NOT-READY",
+  "criteria": [
+    {"index": 1, "status": "met", "evidence_cmd": "bash install.sh; python -m pytest tests/unit/test_stamp_installers.py", "note": "install.sh (refondu, --legacy conservé) et install.ps1 (nouveau) installent uv si absent puis grimoire-kit==VERSION via uv tool install ; install.sh sans version échoue proprement ; tests de l'estampillage passent."},
+    {"index": 2, "status": "unmet", "evidence_cmd": "gh pr checks task/GAO-p29-install-002", "note": "Le job CI « Installeur (windows-latest) » est en échec : scripts/stamp-installers.py:55 imprime « → » et lève UnicodeEncodeError (cp1252) sur Windows, avant même l'installeur. Le job macOS passe ; Linux encore en cours. Le critère 3 OS n'est donc pas démontré."},
+    {"index": 3, "status": "unverifiable", "evidence_cmd": "gh pr checks task/GAO-p29-install-002 --required", "note": "Attestation des installeurs câblée dans publish.yml (test_release_ships_attested_installers passe) mais le workflow ne tourne qu'à la release ; CI de la PR non verte (job Windows en échec)."}
+  ],
+  "findings": [
+    {"file": "scripts/stamp-installers.py", "line": 55, "summary": "print avec « → » plante sous Windows (cp1252).", "failure_scenario": "windows-latest : python scripts/stamp-installers.py --out ... lève UnicodeEncodeError, le job Installeur (windows-latest) échoue. Remplacer par « -> » ou reconfigurer stdout en utf-8."}
+  ]
+}

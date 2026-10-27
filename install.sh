@@ -1,28 +1,16 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# Grimoire Custom Kit — Installeur
-# ═══════════════════════════════════════════════════════════════════════════════
+# Grimoire Custom Kit — Installeur : uv (installé s'il manque) puis grimoire-kit
+# en version épinglée via `uv tool install`. grimoire, grimoire-mcp et
+# grimoire-hook se résolvent ensuite hors de tout venv.
 #
-# Installe uv s'il manque, puis grimoire-kit en version épinglée avec
-# `uv tool install` : grimoire, grimoire-mcp et grimoire-hook se résolvent
-# ensuite depuis n'importe quel shell, sans venv actif.
+#   bash install.sh [--version X.Y.Z]
+#   bash install.sh --legacy --name "Projet" --user "Alice" [options]   # legacy
 #
-# Usage:
-#   bash install.sh                       # version épinglée par la release
-#   bash install.sh --version 3.71.0      # une autre version
-#   curl -fsSL <URL>/install.sh | bash
-#
-# Le script publié en artefact de release porte sa version et une attestation
-# de provenance : `gh attestation verify install.sh --repo Guilhem-Bonnet/Grimoire-kit`.
-# Sorti du dépôt, sans version estampillée, il exige --version.
-#
-# Variables : GRIMOIRE_VERSION (= --version), GRIMOIRE_SPEC (wheel ou source à
-# installer à la place du paquet publié, pour la CI), UV_VERSION (version d'uv).
-#
-# Mode legacy (--legacy) : clone le kit, exécute grimoire-init.sh, nettoie.
-#   bash install.sh --legacy --name "Mon Projet" --user "Alice" [options]
-#
-# Prérequis : curl ou wget ; git et bash 4+ pour --legacy seulement.
+# Publié avec la release, estampillé de sa version et attesté :
+#   gh attestation verify install.sh --repo Guilhem-Bonnet/Grimoire-kit
+# Sans version estampillée (copie du dépôt), --version est exigé.
+# Variables : GRIMOIRE_VERSION, GRIMOIRE_SPEC (wheel/source, CI), UV_VERSION.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -52,14 +40,8 @@ error() { echo -e "${RED}❌ $*${NC}" >&2; exit 1; }
 
 # ─── Prérequis (legacy) ──────────────────────────────────────────────────────
 check_prerequisites() {
-    if ! command -v git &>/dev/null; then
-        error "git est requis. Installez-le : https://git-scm.com"
-    fi
-    local bash_major
-    bash_major="${BASH_VERSION%%.*}"
-    if [[ "$bash_major" -lt 4 ]]; then
-        error "bash 4+ requis (actuel: $BASH_VERSION)"
-    fi
+    command -v git &>/dev/null || error "git est requis. Installez-le : https://git-scm.com"
+    [[ "${BASH_VERSION%%.*}" -ge 4 ]] || error "bash 4+ requis (actuel: $BASH_VERSION)"
 }
 
 # ─── Nettoyage ───────────────────────────────────────────────────────────────
@@ -75,25 +57,11 @@ usage() {
     cat <<EOF
 ${CYAN}Grimoire Custom Kit — Installeur${NC}
 
-Installe uv si absent, puis grimoire-kit épinglé via uv tool install.
+  bash install.sh [--version X.Y.Z]     uv si absent, puis grimoire-kit épinglé
+  bash install.sh --legacy --name NOM --user NOM [options]
 
-Usage:
-  bash install.sh [--version X.Y.Z]
-  bash install.sh --legacy --name "Nom du Projet" --user "Votre Nom" [options]
-
-Options:
-  --version X.Y.Z     Version de grimoire-kit à installer (défaut: celle de la release)
-  --legacy            Installeur shell legacy (clone le kit, lance grimoire-init.sh)
-  --name NAME         (legacy) Nom du projet (requis)
-  --user USER         (legacy) Votre nom (requis)
-  --lang LANGUAGE     (legacy) Langue de communication (défaut: Français)
-  --archetype TYPE    (legacy) Archétype: minimal, infra-ops, web-app, fix-loop
-  --auto              (legacy) Détecter automatiquement le stack
-  --memory BACKEND    (legacy) Backend mémoire: auto, local, qdrant-local, ollama
-  --branch BRANCH     (legacy) Branche git du kit (défaut: main)
-  --keep-kit          (legacy) Garder le clone du kit après installation
-  --kit-dir DIR       (legacy) Chemin pour le clone du kit
-  --help              Afficher cette aide
+Options legacy : --lang L, --archetype T, --auto, --memory B, --branch B,
+                 --keep-kit, --kit-dir DIR (cf. grimoire-init.sh)
 EOF
     exit 0
 }
@@ -121,9 +89,7 @@ ensure_uv() {
     fi
     info "uv absent — installation..."
     local url="https://astral.sh/uv/install.sh"
-    if [[ -n "${UV_VERSION:-}" ]]; then
-        url="https://astral.sh/uv/${UV_VERSION}/install.sh"
-    fi
+    [[ -z "${UV_VERSION:-}" ]] || url="https://astral.sh/uv/${UV_VERSION}/install.sh"
     if command -v curl &>/dev/null; then
         curl -LsSf "$url" | sh
     elif command -v wget &>/dev/null; then
@@ -150,9 +116,7 @@ install_sdk() {
     # Le dossier des exécutables d'uv doit être dans le PATH, ici et aux shells futurs.
     local bindir
     bindir="$(uv tool dir --bin 2>/dev/null || true)"
-    if [[ -n "$bindir" ]]; then
-        export PATH="$bindir:$PATH"
-    fi
+    [[ -z "$bindir" ]] || export PATH="$bindir:$PATH"
     uv tool update-shell >/dev/null 2>&1 || true
 
     local tool
@@ -169,10 +133,7 @@ install_sdk() {
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 main() {
-    echo ""
-    echo -e "${CYAN}Grimoire Custom Kit — Installeur${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
-    echo ""
+    echo -e "\n${CYAN}Grimoire Custom Kit — Installeur${NC}\n"
 
     if [[ "$LEGACY" == false ]]; then
         install_sdk
