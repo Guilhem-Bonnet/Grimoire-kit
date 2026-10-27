@@ -1543,7 +1543,7 @@ function onConsoleKeydown(event) {
       setActiveSuggestion((suggestionIndex + step + suggestions.length) % suggestions.length);
       return;
     }
-    if (event.key === 'Tab' || event.key === 'Enter') {
+    if (['Tab', 'Enter'].includes(event.key)) {
       event.preventDefault();
       acceptConsoleSuggestion(suggestionIndex);
       return;
