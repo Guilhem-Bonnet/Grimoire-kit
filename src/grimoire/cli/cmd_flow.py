@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -307,6 +310,62 @@ def _resolve_run_task(project_root: Path, task_id: str) -> str:
     return resolved
 
 
+def _spawn_detached(cmd: list[str], log: Path) -> int:
+    """Lance ``cmd`` détaché du terminal (sortie dans ``log``) et rend son PID."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("ab") as sink:
+        if os.name == "posix":
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink, start_new_session=True)
+        else:
+            flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink, creationflags=flags)
+    return proc.pid
+
+
+def _run_in_background(
+    ctx: typer.Context,
+    engine: FlowEngine,
+    blueprint: Path,
+    project_root: Path,
+    mission: str,
+    task_id: str,
+    max_tier: str | None,
+    timeout: float,
+) -> None:
+    """Ouvre le run, lance la cascade dans un processus détaché et rend la main.
+
+    Le run est créé ici (son ``run_id`` est connu avant de rendre la main) ;
+    le processus détaché le reprend par ``flow resume --executor dispatch``,
+    et ``flow status <run_id>`` le suit.
+    """
+    root = project_root.resolve()
+    try:
+        wfi, _ = engine.run(blueprint, executor=_executor(ctx), mission_id=mission, task_id=task_id)
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+    cmd = [
+        sys.executable, "-m", "grimoire", "flow", "resume", wfi.id,
+        "--executor", "dispatch", "--timeout", str(timeout), "--project-root", str(root),
+    ]
+    if max_tier:
+        cmd += ["--max-tier", max_tier]
+    log = root / _FLOWS_RELPATH / f"{wfi.id}.background.log"
+    try:
+        pid = _spawn_detached(cmd, log)
+    except OSError as exc:
+        _fail(ctx, GrimoireRuntimeError(f"run {wfi.id} ouvert mais le lancement en arrière-plan a échoué : {exc}"))
+        return
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(
+            {"run_id": wfi.id, "status": "background", "pid": pid, "log": str(log)}, indent=2, ensure_ascii=False
+        ))
+        return
+    console.print(f"[green]OK[/green] {wfi.id} lancé en arrière-plan (pid {pid})")
+    console.print(f"  suivre : grimoire flow status {wfi.id}")
+    console.print(f"  journal : {log}")
+
+
 def _fail(ctx: typer.Context, exc: GrimoireRuntimeError) -> None:
     if _fmt(ctx) == "json":
         typer.echo(json.dumps({"error": str(exc)}, indent=2, ensure_ascii=False))
@@ -327,6 +386,14 @@ def flow_run(
     executor: _EXECUTOR_OPTION = "interactive",
     max_tier: _MAX_TIER_OPTION = None,
     timeout: _TIMEOUT_OPTION = DEFAULT_CALL_TIMEOUT_S,
+    background: Annotated[
+        bool,
+        typer.Option(
+            "--background",
+            help="dispatch seul : ouvre le run, lance la cascade en processus détaché et rend la main "
+            "tout de suite ; suivre avec `flow status <run_id>`.",
+        ),
+    ] = False,
 ) -> None:
     """Démarre un run et présente le contrat du premier node.
 
@@ -337,6 +404,9 @@ def flow_run(
     verte, checkpointe après chacun, et s'arrête au premier node rouge ou
     V2 — avec le rapport (fournisseur, tentatives, coût, escalades) plutôt
     qu'un contrat à présenter à l'hôte.
+
+    ``--background`` (avec ``--executor dispatch``) ne bloque pas le terminal :
+    le run est ouvert, la cascade continue dans un processus détaché.
     """
     engine = _engine(project_root)
     if blueprint is None:
@@ -360,6 +430,10 @@ def flow_run(
         _fail(ctx, exc)
         return
 
+    if background and executor != "dispatch":
+        _fail(ctx, GrimoireRuntimeError("--background exige --executor dispatch (l'exécuteur interactive rend déjà la main)"))
+        return
+
     try:
         loaded = load_blueprint(blueprint, project_root.resolve())
     except GrimoireRuntimeError:
@@ -367,6 +441,10 @@ def flow_run(
     if loaded is not None:
         for warning in hardcoded_command_warnings(loaded, project_root.resolve()):
             console.print(f"[yellow]avertissement[/yellow] {warning}")
+
+    if background:
+        _run_in_background(ctx, engine, blueprint, project_root, mission, task_id, max_tier, timeout)
+        return
 
     if executor == "dispatch":
         try:

@@ -5,8 +5,11 @@ session… » : une section — jamais une modale — qui rend le plan de la vra
 route ``GET /api/workspace/tasks/<id>/launch-plan`` (P47 lot 1). Modèle avec sa
 classe de vérifiabilité, worktree et branche que le lanceur créerait, les cinq
 vérifications du préflight avec leurs verdicts, le bouton « Lancer la session »
-présent mais désactivé (la garde d'écriture commune ADR-008 n'existe pas
-encore), et la commande équivalente à copier.
+— réel depuis le lot 3 : l'empreinte du plan part dans le corps et le serveur
+lance par le lanceur du tick, toutes gardes comprises ; ici la politique
+d'orchestration est celle d'un ``init`` (rôle worker désactivé), donc le clic
+rend un refus nommé et ne lance jamais rien — et la commande équivalente à
+copier.
 
 Le presse-papiers est stubbé AVANT le clic (pattern déterministe de
 ``test_workspace_decisions_p68.py``) : le vrai ``writeText`` est un aléa en
@@ -16,6 +19,7 @@ statut qui le dit.
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -199,21 +203,39 @@ def test_les_cinq_verifications_du_preflight_sont_listees_avec_leurs_verdicts(pa
     assert verdicts[VERIF_IDS.index("conflit_reservation")] == "ok"
 
 
-def test_lancer_reste_desactive_avec_sa_raison_et_la_commande_se_copie(page: Page, p47_project: Path) -> None:
+def test_lancer_est_reel_et_le_refus_du_lanceur_est_nomme_et_journalise(page: Page, p47_project: Path) -> None:
+    """Le clic envoie l'empreinte du plan à POST tasks/<id>/launch — le lanceur
+    du tick répond « rôle worker désactivé » (politique d'un ``init``) : rien
+    n'est lancé, le refus est affiché et l'apply est journalisé (ADR-008)."""
     tid = _task_id(p47_project, READY_TITLE)
     _open_panel(page, "Brancher le préflight")
     panel = page.locator(".ex-assign-panel")
 
-    # Le bouton est là, désactivé, et la raison est dite (title + texte adjacent).
+    # Plan prêt (le rôle désactivé n'est qu'un warn) : le bouton est actif.
     launch = panel.locator("[data-role='assign-launch']")
-    expect(launch).to_be_disabled()
+    expect(launch).to_be_enabled()
     expect(launch).to_have_text("Lancer la session")
-    title = launch.get_attribute("title") or ""
-    assert "ADR-008" in title and "copie la commande" in title, title
-    reason = panel.locator("[data-role='assign-launch-reason']")
-    expect(reason).to_be_visible()
-    expect(reason).to_contain_text("garde d'écriture commune (ADR-008)")
-    assert launch.get_attribute("aria-describedby") == reason.get_attribute("id")
+
+    with page.expect_response(lambda r: f"/tasks/{tid}/launch" in r.url and r.request.method == "POST") as resp:
+        launch.click()
+    assert resp.value.ok
+    verdict = resp.value.json()
+    assert verdict["lance"] is False and verdict["statut"] == "skipped", verdict
+    status = panel.locator(".ex-assign-launch .action-status")
+    expect(status).to_contain_text("Lancement refusé")
+    expect(status).to_contain_text("rôle worker désactivé")
+    expect(launch).to_be_enabled()
+    # L'apply est tracé dans le journal ajout seul du projet, started puis effect.
+    journal = p47_project / "_grimoire-runtime-output" / "cockpit" / "launch-apply.jsonl"
+    events = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert [e["event"] for e in events][-2:] == ["apply_started", "apply_effect"]
+    assert events[-1]["status"] == "skipped"
+
+
+def test_la_commande_equivalente_se_copie(page: Page, p47_project: Path) -> None:
+    tid = _task_id(p47_project, READY_TITLE)
+    _open_panel(page, "Brancher le préflight")
+    panel = page.locator(".ex-assign-panel")
 
     # Équivalent : la commande du payload dans un <code>.
     code = panel.locator("[data-role='assign-command']")
@@ -230,7 +252,9 @@ def test_lancer_reste_desactive_avec_sa_raison_et_la_commande_se_copie(page: Pag
         " (t) => { window.__copied.push(t); return Promise.resolve(); }; }"
     )
     panel.get_by_role("button", name="Copier la commande").click()
-    expect(panel.locator(".action-status")).to_contain_text("Commande copiée")
+    # Deux statuts vivent dans le panneau depuis le lot 3 (lancement + copie) :
+    # on lit celui du bloc Équivalent.
+    expect(panel.locator(".ex-assign-cmd .action-status")).to_contain_text("Commande copiée")
     copied = page.evaluate("() => window.__copied.join('')")
     assert command in copied, copied
 
@@ -244,6 +268,12 @@ def test_une_tache_proposee_dit_pas_pret_en_tete_et_une_tache_en_cours_n_a_pas_l
     expect(not_ready).to_contain_text("Pas prêt")
     admission = panel.locator("[data-role='assign-verif'][data-verif='admission']")
     expect(admission).to_have_attribute("data-verdict", "bloquant")
+    # Pas prêt : le bouton réel reste désactivé, la raison écrite à côté (lot 3).
+    launch = panel.locator("[data-role='assign-launch']")
+    expect(launch).to_be_disabled()
+    reason = panel.locator("[data-role='assign-launch-reason']")
+    expect(reason).to_contain_text("Pas prêt")
+    assert launch.get_attribute("aria-describedby") == reason.get_attribute("id")
 
     # En cours : l'état ne la rend pas lançable, aucune action « Assigner une session… ».
     card = page.locator(".ex-card:visible").filter(has_text="hors du périmètre").first
