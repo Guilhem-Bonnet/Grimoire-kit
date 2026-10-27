@@ -8,7 +8,7 @@
 
 | Fichier | Lignes | runtime | tests | docs | interne | chargé par | décision |
 | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| framework/tools/observatory.py | 1911 | 4 | 2 | 6 | 0 | — | geler (porter vers src/ à la demande) |
+| framework/tools/observatory.py | 1911 | 4 | 3 | 6 | 0 | — | geler (porter vers src/ à la demande) |
 | framework/tools/dream.py | 1347 | 2 | 3 | 1 | 5 | — | geler (porter vers src/ à la demande) |
 | framework/tools/tool-resolver.py | 1211 | 9 | 4 | 3 | 0 | — | geler (porter vers src/ à la demande) |
 | framework/tools/context-guard.py | 1105 | 2 | 3 | 1 | 1 | — | geler (porter vers src/ à la demande) |
