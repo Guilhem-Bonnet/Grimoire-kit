@@ -46,7 +46,10 @@ READY_TITLE = "Brancher le préflight d'assignation"
 PROPOSED_TITLE = "Esquisser le panneau de lancement"
 RUNNING_TITLE = "Tâche en cours, hors du périmètre du panneau"
 
-VERIF_IDS = ["conflit_reservation", "plafond_sessions", "admission", "dependances", "quota"]
+VERIF_IDS = [
+    "conflit_reservation", "plafond_sessions", "admission", "dependances", "quota",
+    "dossier_approuve", "gh_app", "pr_ouverte",
+]
 VERDICTS = {"ok", "warn", "bloquant", "inconnu"}
 
 
@@ -107,10 +110,26 @@ def _task_id(root: Path, title: str) -> str:
 
 @pytest.fixture(scope="module")
 def p47_url(p47_project: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    import json as _json
+    import stat
+
     port = _free_port()
     env = dict(os.environ)
     env["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path_factory.mktemp("cockpit-home-p47"))
     env["NO_COLOR"] = "1"
+    # Critère 2 : le préflight sonde la confiance Claude Code (~/.claude.json)
+    # et gh. Le serveur reçoit un HOME factice qui approuve le projet, et un
+    # stub gh en tête de PATH (authentifié, aucune PR) : les contrôles rendent
+    # « ok » sans toucher au vrai poste ni au réseau.
+    home = tmp_path_factory.mktemp("home-p47")
+    (home / ".claude.json").write_text(
+        _json.dumps({"projects": {str(p47_project.resolve()): {"hasTrustDialogAccepted": True}}}), encoding="utf-8"
+    )
+    stub = tmp_path_factory.mktemp("bin-p47") / "gh"
+    stub.write_text('#!/bin/sh\ncase "$1 $2" in\n"auth status") exit 0;;\n"pr list") echo "[]"; exit 0;;\nesac\nexit 2\n', encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    env["HOME"] = str(home)
+    env["PATH"] = f"{stub.parent}{os.pathsep}" + env.get("PATH", "")
     process = subprocess.Popen(
         [sys.executable, "-m", "grimoire", "serve", "--project-root", str(p47_project), "--port", str(port), "--no-open"],
         cwd=str(p47_project), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -188,13 +207,13 @@ def test_les_cinq_verifications_du_preflight_sont_listees_avec_leurs_verdicts(pa
     _open_panel(page, "Brancher le préflight")
     panel = page.locator(".ex-assign-panel")
     verifs = panel.locator("[data-role='assign-verif']")
-    expect(verifs).to_have_count(5)
+    expect(verifs).to_have_count(8)
     ids = verifs.evaluate_all("(nodes) => nodes.map((n) => n.dataset.verif)")
     assert ids == VERIF_IDS, ids
     verdicts = verifs.evaluate_all("(nodes) => nodes.map((n) => n.dataset.verdict)")
     assert set(verdicts) <= VERDICTS, verdicts
     # Chaque ligne porte une icône d'état et un détail lisible.
-    for i in range(5):
+    for i in range(8):
         line = verifs.nth(i)
         expect(line.locator(".sico .ico")).to_have_count(1)
         assert line.inner_text().strip(), f"vérification {ids[i]} sans texte"
