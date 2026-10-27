@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): les refus du kit d'une réponse de la session orchestrateur sont journalisés, et une présentation entièrement refusée ne consomme pas la borne (Refs #962 #966)
+  - **Constat** (second lancement réel, 3.70.0, 2026-10-27) : la session a envoyé 5 commandes `task answer` à la bonne forme, toutes refusées (« un identifiant présenté a tenu le claim de cette tâche »), sans trace au ledger. Les 5 questions avaient en outre épuisé leurs 2 présentations.
+  - **Refus journalisés** : chaque refus par le kit d'une réponse d'origine `orchestrator` écrit `task.answer_refused` au ledger (tâche, question, motif court, empreinte sha256 de la session, jamais l'identifiant).
+  - **Présentations** : une présentation dont toutes les réponses tentées ont été refusées par le kit ne compte pas dans `MAX_PRESENTATIONS`, au plus une par question.
+  - **Cause connue de refus : le résidu du démon.** Les sessions de fond héritent de l'environnement du démon `claude` (#966) ; un démon démarré par un tick d'avant #967 garde un `GRIMOIRE_SESSION_ID` (ici l'uuid du premier worker, sous lequel des workers s'étaient rattachés à leurs claims) et le transmet à la session orchestrateur. La garde le compte, volontairement : c'est elle qui refuse un worker qui pose l'identifiant volé de l'orchestrateur en gardant le sien. Remède : redémarrer le démon (les sessions de fond s'arrêtent) ; depuis #967 le lanceur ne transmet plus `GRIMOIRE_SESSION_ID`.
+
 ## [3.70.0] - 2026-10-27
 
 - fix(missions): la session orchestrateur répond par une commande `task answer` par question, et une question restée sans réponse est représentée une fois (Refs #962)

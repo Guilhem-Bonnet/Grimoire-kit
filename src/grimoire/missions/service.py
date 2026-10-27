@@ -939,24 +939,31 @@ class TaskService:
         """
         task = self.require(task_id)
         gesture, asked = "answer", None
-        if origin == ORIGIN_ORCHESTRATOR:  # #962 : ce qu'une réponse sous mandat tranche, et sous quel geste
-            from grimoire.missions.orchestrator_session import answer_gesture
+        try:
+            if origin == ORIGIN_ORCHESTRATOR:  # #962 : ce qu'une réponse sous mandat tranche, et sous quel geste
+                from grimoire.missions.orchestrator_session import answer_gesture
 
-            asked = self._question_to_answer(task, question_id)
-            gesture = answer_gesture(self, task, asked, text)
-        # Sous mandat (#876, verrou 6) : l'origine `orchestrator` répond si un mandat valide couvre ce geste
-        # et ce type de tâche ; sans mandat, elle est refusée comme toute origine non humaine.
-        authority = require_authority(
-            self.project_root, gesture, task, origin, what=f"Réponse refusée pour {task_id}", provenance=provenance,
-            channel=ANSWER_CHANNEL,
-        )
-        question = asked or self._question_to_answer(task, question_id)
-        if question.origin == "flow" and not attested_by_flow:
-            raise GrimoireMissionError(
-                f"Réponse refusée pour {task_id} : la question {question.id} vient d'un checkpoint de flow, dont la "
-                "décision s'atteste dans le flux (un tour humain de la session qui l'a présenté, puis la même "
-                "décision renvoyée). Répondre ici réveillerait la tâche sans décider le checkpoint"
+                asked = self._question_to_answer(task, question_id)
+                gesture = answer_gesture(self, task, asked, text)
+            # Sous mandat (#876, verrou 6) : l'origine `orchestrator` répond si un mandat valide couvre ce geste
+            # et ce type de tâche ; sans mandat, elle est refusée comme toute origine non humaine.
+            authority = require_authority(
+                self.project_root, gesture, task, origin, what=f"Réponse refusée pour {task_id}", provenance=provenance,
+                channel=ANSWER_CHANNEL,
             )
+            question = asked or self._question_to_answer(task, question_id)
+            if question.origin == "flow" and not attested_by_flow:
+                raise GrimoireMissionError(
+                    f"Réponse refusée pour {task_id} : la question {question.id} vient d'un checkpoint de flow, dont la "
+                    "décision s'atteste dans le flux (un tour humain de la session qui l'a présenté, puis la même "
+                    "décision renvoyée). Répondre ici réveillerait la tâche sans décider le checkpoint"
+                )
+        except GrimoireMissionError as exc:
+            if origin == ORIGIN_ORCHESTRATOR:  # le tick voit les refus du kit (une présentation ainsi perdue est rendue)
+                from grimoire.missions.orchestrator_session import record_answer_refused
+
+                record_answer_refused(self, task_id, asked.id if asked is not None else question_id, exc)
+            raise
         answer = text.strip()
         if not answer:
             raise ValueError("`text` requis : une réponse vide ne tranche rien")
