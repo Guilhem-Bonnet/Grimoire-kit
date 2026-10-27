@@ -228,3 +228,17 @@ def test_e2e_conftest_wiring_is_structural() -> None:
     assert "importorskip" not in ast.unparse(guarded[0].body[0])
     top_level_skips = [n for n in tree.body if isinstance(n, ast.Expr) and "importorskip" in ast.unparse(n)]
     assert not top_level_skips
+
+
+def test_windows_et_macos_passent_la_suite_complete_hors_pr_seulement() -> None:
+    """2026-10-27 : chaque réalignement de PR relançait ~45 min de Windows. Sur une PR, Windows et macOS rendent leur
+    check requis sans la suite ; sur main, la nuit et à la demande, ils la passent. Ubuntu la passe toujours."""
+    workflow = YAML(typ="safe").load(_CI.read_text(encoding="utf-8"))
+    triggers = workflow.get("on") or workflow.get(True)
+    assert "schedule" in triggers and "workflow_dispatch" in triggers and "push" in triggers
+    job = workflow["jobs"]["test"]
+    gate = job["env"]["FULL_SUITE"]
+    assert "matrix.os == 'ubuntu-latest'" in gate and "github.event_name != 'pull_request'" in gate
+    suite = next(s for s in job["steps"] if "pytest tests/unit/" in str(s.get("run", "")))
+    assert suite.get("if") == "env.FULL_SUITE == 'true'"
+    assert {"windows-latest", "macos-latest"} <= set(job["strategy"]["matrix"]["os"])  # le nom du check requis reste
