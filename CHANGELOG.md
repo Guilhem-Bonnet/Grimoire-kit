@@ -9,6 +9,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - feat(observatory): l'export lit le TraceLedger et le journal runtime réels (R15)
   - `observatory export` ne lisait que les fichiers de l'ère shell. Il lit désormais `_grimoire-output/traces/traces.jsonl` (TraceLedger) et `events/runtime-journal.jsonl`, via `grimoire.traces.observatory_feed` ; `framework/tools/observatory.py` (gelé) y délègue en six lignes.
+- feat(cockpit): « Lancer la session » lance pour de vrai depuis le panneau Assigner (P47 lot 3, GAO-p47-assigne-001) : l'empreinte du plan montré engage l'apply (ADR-008 plan→apply, refus si l'état a changé), lancement par le lanceur du tick (toutes gardes : rôle, disjoncteur, WIP, plafond du jour, mandat), idempotent par tâche, journal `launch-apply.jsonl` ajout seul et fail-closed à l'entrée
+- fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
+
 ## [3.71.0] - 2026-10-27
 
 - feat(flows): `grimoire flow run <blueprint> --executor dispatch --background` ouvre le run, lance la cascade dans un processus détaché (journal `<run_id>.background.log` sous `_grimoire-runtime-output/flows/`) et rend la main avec le `run_id` ; `flow status <run_id>` le suit. Refusé sans `--executor dispatch` (l'exécuteur interactive rend déjà la main). Les `.mdc` Cursor par portée sont déjà émis par `host sync` (W6-05). (R65, `GAO-r65-ouvrir-l-001`)

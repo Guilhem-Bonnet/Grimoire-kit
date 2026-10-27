@@ -15,7 +15,14 @@ from lot2_doubles import FakeHost, git, make_repo
 
 from grimoire.missions.admission import CI_PUSHED_EVENT, derive_view, load_capacity
 from grimoire.missions.breaker import read_breaker, record_failure
-from grimoire.missions.janitor import ACTION_EVENT, ARCHIVE_DIR, SWEPT_EVENT, Janitor, janitor_active
+from grimoire.missions.janitor import (
+    ACTION_EVENT,
+    ARCHIVE_DIR,
+    SWEPT_EVENT,
+    WORKTREE_ARCHIVE_DIR,
+    Janitor,
+    janitor_active,
+)
 from grimoire.missions.launcher import ExecResult, launched_sessions
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import OrchestratorPolicy, load_orchestrator_policy
@@ -266,6 +273,47 @@ def test_un_arbre_de_travail_sale_n_est_pas_retire(projet: Path, host: FakeHost)
     status = by_action(sweep(projet, host))
     assert status["worktree"] == "failed" and (wt.path / "non-commite.txt").is_file()  # sans --force : le travail reste
     assert status["branch_local"] == "failed" and local_has(projet, wt.branch)  # la branche est extraite : git refuse
+
+
+def kit_outputs(path: Path, tid: str) -> None:
+    """Ce que le relecteur et le runtime du kit écrivent dans le worktree de la tâche, non suivi."""
+    reviews = path / "_grimoire-output" / "reviews" / tid
+    reviews.mkdir(parents=True)
+    (reviews / "verdict.json").write_text('{"verdict": "READY"}\n', encoding="utf-8")
+    runtime = path / "_grimoire-runtime-output" / "ledger"
+    runtime.mkdir(parents=True)
+    (runtime / "trace.jsonl").write_text("{}\n", encoding="utf-8")
+
+
+def test_un_arbre_qui_ne_porte_que_les_sorties_du_kit_est_retire_et_archive(projet: Path, host: FakeHost) -> None:
+    tid = worked_task(projet, host)
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None
+    kit_outputs(wt.path, tid)
+    host.prs[wt.branch] = "MERGED"
+    finish(projet, tid, TaskState.CLOSED)
+    status = by_action(sweep(projet, host))
+    assert status["worktree"] == "done" and not wt.path.exists()
+    assert status["branch_local"] == "done" and not local_has(projet, wt.branch)
+    archive = projet / WORKTREE_ARCHIVE_DIR / tid
+    assert (archive / "_grimoire-output" / "reviews" / tid / "verdict.json").read_text(encoding="utf-8") == '{"verdict": "READY"}\n'
+    assert (archive / "_grimoire-runtime-output" / "ledger" / "trace.jsonl").is_file()
+
+
+@pytest.mark.parametrize("extra", ["non-commite.txt", "modifie"])
+def test_les_sorties_du_kit_n_excusent_pas_un_autre_changement(projet: Path, host: FakeHost, extra: str) -> None:
+    tid = worked_task(projet, host)
+    wt = find_task_worktree(TaskService(projet), tid)
+    assert wt is not None
+    kit_outputs(wt.path, tid)
+    if extra == "modifie":
+        (wt.path / "travail.txt").write_text("réécrit sans commit\n", encoding="utf-8")
+    else:
+        (wt.path / extra).write_text("brouillon\n", encoding="utf-8")
+    host.prs[wt.branch] = "MERGED"
+    finish(projet, tid, TaskState.CLOSED)
+    assert by_action(sweep(projet, host))["worktree"] == "failed" and wt.path.is_dir()
+    assert not (projet / WORKTREE_ARCHIVE_DIR / tid).exists()
 
 
 def test_le_creneau_ci_est_rendu_meme_sans_gh(projet: Path, host: FakeHost) -> None:
