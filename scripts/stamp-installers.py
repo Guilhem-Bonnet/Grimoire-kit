@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         # newline="" : ni CRLF ni LF n'est imposé au fichier publié.
         with open(args.out / name, "w", encoding="utf-8", newline="") as fh:
             fh.write(stamped)
-        print(f"{name} → {args.out / name} ({args.version})")
+        print(f"{name} -> {args.out / name} ({args.version})")
     return 0
 
 

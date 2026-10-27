@@ -49,3 +49,10 @@ def test_unpinned_install_sh_demands_a_version():
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash absent")
 def test_install_sh_syntax():
     assert subprocess.run(["bash", "-n", str(ROOT / "install.sh")], check=False).returncode == 0
+
+
+def test_output_survives_a_cp1252_console(tmp_path):
+    """Windows : la console cp1252 ne sait pas écrire « → » (régression CI)."""
+    r = subprocess.run(["python3", "-I", str(SCRIPT), "--version", "1.2.3", "--out", str(tmp_path / "o")],
+                       capture_output=True, env={"PYTHONIOENCODING": "cp1252", "PATH": "/usr/bin:/bin"}, check=False)
+    assert r.returncode == 0, r.stderr
