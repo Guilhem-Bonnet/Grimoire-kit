@@ -39,12 +39,14 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
 
 **Tâche faite à la main (#994).** Sous mandat actif, une tâche en ``needs_verification`` sans lancement de worker (une
 session interactive l'a faite) est relue par le même chemin (:mod:`.manual_review`) : ses « workers » sont toutes les
-sessions qui ont tenu son claim ; le relecteur est lancé dans un worktree **détaché** de vérification posé sur la tête
-de la PR de la tâche (lien de PR de la tâche, ``gh pr list --search <id>``, branche ``task/<id>``), tête scellée au
-lancement comme une branche, et sa consigne lit la PR (``gh pr view``, ``gh pr diff``). Sans PR trouvable, rien n'est
-relu (``no_pr``, en attention), jamais la cible entière. Un ``NOT-READY`` escalade (aucune session à reprendre). Le
-READY scellé passe au merger, qui fusionne la PR ouverte ou constate la fusion, puis accepte sous mandat. Sans mandat,
-rien ne change : ces tâches ne sont pas relues par le tick.
+sessions qui ont tenu son claim. Seule une PR **rattachée** est relue (branche ``task/<id>`` ou identifiant exact au
+titre, créée — et fusionnée — après le premier claim, vers la branche d'intégration du projet, depuis une branche de
+travail), sur le dépôt figé à l'octroi du mandat. Le relecteur est lancé, sans les réglages ni les serveurs MCP du
+projet (``--setting-sources user --strict-mcp-config``), dans un worktree **détaché** recréé sur la tête de la PR ; la
+tête, la PR, sa base, sa branche, le dépôt et le dossier sont scellés au lancement et recoupés au jugement. Sa consigne
+lit la PR (``gh pr view``, ``gh pr diff``). Sans PR rattachée (``no_pr``) ou PR refusée (``pr_refused``), rien n'est
+relu, jamais la cible entière, et la tâche n'est regardée de nouveau qu'une heure plus tard. Un ``NOT-READY`` escalade
+(aucune session à reprendre). Le READY scellé passe au merger. Sans mandat, rien ne change.
 
 Chaque étape est notée au ledger (``task.review_launched``, ``task.review_judged``, ``task.review_forged``) : le tick
 est rejouable. Disjoncteur ouvert : rien n'est lancé ni repris. Les binaires sont injectables (*exec_*).
@@ -340,8 +342,11 @@ class ReviewStage:
         under_mandate = MandateStore(root).state().active
         model = self._model(str(launch.get("model") or ""))
         prompt = self._manual_prompt(tid, manual, model) if manual else self._prompt(tid, into, base_sha, model)
+        # #994 : les réglages, hooks et serveurs MCP que la PR apporte (.claude/, .mcp.json) ne s'appliquent pas au
+        # relecteur d'une tâche faite à la main ; il garde son dossier dans le worktree pour rejouer les preuves.
+        isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual else []
         argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,
-                "--permission-mode", role.permission_mode, prompt]
+                "--permission-mode", role.permission_mode, *isolate, prompt]
         result = self._exec(argv, cwd, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
@@ -360,7 +365,9 @@ class ReviewStage:
         if refused:
             return self._abandon(tid, short, cwd, "refused", refused)
         try:  # la tête relue, au journal d'autorité : un commit posé pendant la relecture ne sera pas scellé
-            seal_review_launch(root, tid, session_digest(session_id), head)
+            seal_review_launch(root, tid, session_digest(session_id), head, target={
+                "pr": manual["pr"], "base": manual["into"], "branch": manual["branch"], "repo": manual["repo"],
+                "origin_url": manual["origin_url"], "cwd": manual["cwd"]} if manual else None)
             launch_sealed = True
         except Exception:  # journal rompu : le jugement refusera de sceller (échec fermé)
             launch_sealed = False
@@ -376,31 +383,57 @@ class ReviewStage:
     def _manual_target(self, task: MissionTask) -> dict[str, Any] | ReviewOutcome:
         """#994 : la PR d'une tâche faite à la main et son worktree détaché de vérification, ou pourquoi rien n'est relu.
 
-        Sous mandat actif seulement. Le dépôt GitHub est figé au journal d'autorité à la première relecture (aucun
-        worker du tick ne l'a figé avant). Aucune PR trouvable : ``no_pr``, rien n'est relu — jamais la cible entière.
+        Sous mandat actif seulement, sur le dépôt figé avant toute relecture manuelle (:mod:`.manual_review`). Aucune
+        PR rattachée (``no_pr``) ou PR refusée (``pr_refused``) : la tâche attend :data:`~.manual_review.DEFER`
+        (``task.review_deferred``) ; rien n'est écrit au journal d'autorité avant un lancement.
         """
         from grimoire.missions.mandate import MandateStore
-        from grimoire.missions.manual_review import find_pull_request, review_tree
-        from grimoire.missions.review_seal import freeze_repository, frozen_repository
+        from grimoire.missions.manual_review import defer, deferred_until, resolve_target, review_tree
+        from grimoire.missions.review_seal import project_repository_pin
 
         tid, root = task.id, self._service.home_root
+        now = self._now or datetime.now(UTC)
         try:
-            if not MandateStore(root).state().active:
+            state = MandateStore(root).state()
+            if not state.active or state.mandate is None:
                 return ReviewOutcome(tid, "launch", "skipped", "sans mandat actif, une tâche faite à la main n'est pas relue par le tick")
-            pin = frozen_repository(root, tid)
-            if pin is None or not pin.get("repo"):
-                pin = freeze_repository(root, tid)
+            if until := deferred_until(self._service, tid, self._entered_review_at(tid), now):
+                return ReviewOutcome(tid, "launch", "skipped", f"relecture à la main différée jusqu'à {until}")
+            pin, current = project_repository_pin(root, state.mandate.id)
         except Exception as exc:  # journal illisible : rien n'est relu (échec fermé)
-            return ReviewOutcome(tid, "launch", "failed", f"journal d'autorité illisible ({type(exc).__name__}) : dépôt de la tâche non figé")
-        if not pin.get("repo") or not pin.get("origin_url"):
-            return ReviewOutcome(tid, "launch", "failed", "dépôt GitHub de la tâche non résolu (ci.repository, origin) : rien n'est relu")
-        pr, kind, why = find_pull_request(self._exec, root, task, pin["repo"])
-        if pr is None:
-            return ReviewOutcome(tid, "no_pr" if kind == "none" else "launch", "skipped" if kind == "none" else "failed", why)
-        place, why = review_tree(self._service, tid, pr, pin["origin_url"])
+            return ReviewOutcome(tid, "launch", "failed", f"journal d'autorité illisible ({type(exc).__name__}) : rien n'est relu")
+        pr, kind, why = resolve_target(self._service, self._exec, task, policy_base=self._policy.base, pin=pin, current=current)
+        if pr is None or pin is None:
+            if kind == "error":
+                return ReviewOutcome(tid, "launch", "failed", why)
+            until = defer(self._service, tid, why, now, REVIEWER_ACTOR)
+            return ReviewOutcome(tid, "no_pr" if kind == "none" else "pr_refused", "skipped", f"{why} (revu après {until})")
+        place, refused = review_tree(self._service, tid, pr, pin["origin_url"])
         if place is None:
-            return ReviewOutcome(tid, "launch", "failed", why)
-        return {"cwd": str(place), "branch": pr.branch, "into": pr.base, "pr": pr.number, "head": pr.head}
+            return ReviewOutcome(tid, "launch", "failed", refused)
+        return {"cwd": str(place), "branch": pr.branch, "into": why, "pr": pr.number, "head": pr.head,
+                "repo": pin["repo"], "origin_url": pin["origin_url"]}
+
+    def _manual_seal_refusal(self, review: LedgerEvent) -> str:
+        """#994 : la relecture notée au ledger est celle scellée au lancement (PR, base, branche, tête, dossier), et le
+        dépôt du projet n'a pas bougé depuis ; ``""`` si tout tient."""
+        from grimoire.missions.review_seal import launch_entry, project_repository_pin
+
+        tid = review.entity_id
+        try:
+            sealed = launch_entry(self._service.home_root, tid, str(review.payload.get("session_sha256") or ""))
+            _pin, current = project_repository_pin(self._service.home_root)
+        except Exception as exc:
+            return f"journal d'autorité illisible ({type(exc).__name__}) : relecture non vérifiable"
+        p = review.payload
+        if sealed is None:
+            return "aucun lancement scellé au journal d'autorité pour cette relecture"
+        noted = {"pr": p.get("pr"), "base": p.get("into"), "branch": p.get("branch"), "head": p.get("head"), "cwd": p.get("cwd")}
+        if drift := sorted(k for k, v in noted.items() if str(sealed.get(k) or "") != str(v or "")):
+            return f"la relecture notée au ledger diffère de celle scellée au lancement ({', '.join(drift)})"
+        if current.get("repo") != sealed.get("repo") or current.get("origin_url", "").strip() != str(sealed.get("origin_url") or "").strip():
+            return "le dépôt du projet ou l'URL de origin ont changé depuis le lancement de la relecture"
+        return ""
 
     def _abandon(self, tid: str, short: str, cwd: Path, reason: str, detail: str) -> ReviewOutcome:
         """Un relecteur lancé qu'on n'atteste pas : arrêté, la tentative notée et comptée au disjoncteur.
@@ -490,6 +523,8 @@ class ReviewStage:
         """Le reçu vient de la session du relecteur lancé : provenance sous mandat, puis verdict."""
         tid = task.id
         refused = self._provenance_refusal(task, review, receipt)
+        if not refused and review.payload.get(MANUAL_KEY):
+            refused = self._manual_seal_refusal(review)
         if refused:
             self._record_judged(task, review, "refused", 0)
             self._stop(review)

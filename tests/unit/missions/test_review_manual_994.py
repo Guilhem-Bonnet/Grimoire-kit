@@ -4,25 +4,31 @@ Avant : le relecteur ne relisait que les tâches lancées par le lanceur (``task
 fait la tâche est refusée (``review.self_review``), une autre aussi (non inscrite relecteur au journal d'autorité). Une
 tâche faite à la main restait en ``needs_verification`` sans issue tant qu'un mandat était actif.
 
-Rejoué contre le faux ``gh`` et le faux ``claude`` sur un vrai git : la PR de la tâche est trouvée (lien, recherche par
-identifiant, branche ``task/<id>``), relue dans un worktree détaché sur sa tête, scellée ; le merger fusionne la PR
-ouverte ou constate la fusion, puis accepte sous mandat. Un reçu signé par une session qui a tenu le claim est forgé.
-Sans PR, rien n'est relu ; sans mandat, rien ne change.
+Rejoué contre le faux ``gh`` et le faux ``claude`` sur un vrai git : la PR rattachée à la tâche (branche ``task/<id>``,
+identifiant exact dans le titre, créée après le claim) est relue dans un worktree détaché recréé sur sa tête, scellée
+avec sa PR, sa base et son dépôt ; le merger fusionne la PR ouverte ou constate la fusion, puis accepte sous mandat. Un
+reçu signé par une session qui a tenu le claim est forgé. Revue adversariale : une vieille PR liée, une PR depuis une
+branche d'intégration, un dépôt changé avant la relecture, un worktree pré-posé, une branche au nom piégé sont refusés ;
+le merger ne pousse jamais sur une branche qui n'est pas ``task/<id>`` ; une clôture sans pack passe à l'humain.
+Sans PR, rien n'est relu (et rien n'est réessayé avant une heure) ; sans mandat, rien ne change.
 """
 
 from __future__ import annotations
 
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from lot2_doubles import FakeHost, git
-from test_merger import CRITERIA, GREEN, REPO, give_ready, grant, isolate_home, merges, tick
+from test_merger import CRITERIA, GREEN, REPO, advance_main, give_ready, grant, isolate_home, merges, tick
 from test_merger import make_projet as _make_projet
 
+from grimoire.missions import ci_slots
 from grimoire.missions.mandate import MandateStore
-from grimoire.missions.manual_review import MANUAL_KEY
-from grimoire.missions.merger import MERGE_ACCEPTED_EVENT
+from grimoire.missions.manual_review import MANUAL_KEY, REVIEW_DEFERRED_EVENT
+from grimoire.missions.merger import MERGE_ACCEPTED_EVENT, MERGE_PUSHED_EVENT
+from grimoire.missions.review_receipt import write_receipt
 from grimoire.missions.review_seal import SEAL_ENTRY
 from grimoire.missions.reviewer import REVIEW_FORGED_EVENT, REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT
 from grimoire.missions.schemas import TaskState
@@ -126,6 +132,8 @@ def test_une_tache_manuelle_dont_la_pr_est_fusionnee_est_relue_puis_close_sous_m
     assert [s["session_id"] for s in MandateStore(projet).sessions(role="reviewer", task_id=tid)] == [reviewer]
     [bg] = [a for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a]
     assert f"gh pr diff {NUMBER}" in bg[-1] and f"gh pr view {NUMBER}" in bg[-1] and "origin/main...HEAD" in bg[-1]
+    # Les réglages, hooks et serveurs MCP qu'apporte la PR ne s'appliquent pas au relecteur.
+    assert bg[bg.index("--setting-sources") + 1] == "user" and "--strict-mcp-config" in bg
     give_ready(host, tid, tree)
     report = tick(projet, host)
     [judged] = events(projet, tid, REVIEW_JUDGED_EVENT)
@@ -151,13 +159,36 @@ def test_une_tache_manuelle_a_pr_ouverte_est_relue_puis_fusionnee_par_le_merger(
     assert sorted(g["gesture"] for g in MandateStore(projet).gestures_taken(tid)) == ["accept", "merge"]
 
 
-def test_la_pr_est_trouvee_par_le_lien_de_la_tache(projet: Path, host: FakeHost) -> None:
+def test_un_lien_libre_vers_une_pr_non_rattachee_n_est_qu_un_indice(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid = manual_task(projet, host, title="un titre sans identifiant",
                       extra={"pr_url": f"https://github.com/{REPO}/pull/{NUMBER}"})
-    assert reviews(tick(projet, host)) == [(tid, "launch", "launched")]
-    assert events(projet, tid, REVIEW_LAUNCHED_EVENT)[-1].payload["pr"] == NUMBER
-    assert not host.of("gh", "pr", "list")  # le lien suffit
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "no_pr", "skipped")], report.reviews  # ni task/<id>, ni identifiant au titre
+    assert host.of("gh", "pr", "view", str(NUMBER)) and host.of("claude", "--bg") == []
+
+
+def test_une_vieille_pr_fusionnee_liee_a_la_tache_est_refusee(projet: Path, host: FakeHost) -> None:
+    """B1 : une PR fusionnée avant le claim, liée par la description, ne clôt pas la tâche sans relecture de son travail."""
+    grant(projet)
+    tid = manual_task(projet, host, extra={"pr_url": f"https://github.com/{REPO}/pull/{NUMBER}"})
+    old = (datetime.now(UTC) - timedelta(days=400)).isoformat()
+    host.pr_created[BRANCH] = old
+    host.merged_at[BRANCH] = old
+    human_merges(host, projet)
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "pr_refused", "skipped")], report.reviews
+    assert "créée après la tâche" in report.reviews[0].detail
+    assert host.of("claude", "--bg") == [] and TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+    assert any(f"relecteur : {tid} pr_refused" in a for a in report.attention)
+
+
+def test_un_lien_hors_github_n_est_pas_un_indice(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid = manual_task(projet, host, extra={"pr_url": f"https://notgithub.com/{REPO}/pull/9"})
+    host.pr_numbers[BRANCH] = 9
+    tick(projet, host)
+    assert host.of("gh", "pr", "view", "9") == [] and events(projet, tid, REVIEW_LAUNCHED_EVENT)
 
 
 def test_la_pr_est_trouvee_par_la_branche_task_id(projet: Path, host: FakeHost) -> None:
@@ -196,6 +227,13 @@ def test_sans_pr_trouvable_rien_n_est_relu_et_le_tick_le_signale(projet: Path, h
     assert "pas de PR à relire" in report.reviews[0].detail
     assert any(f"relecteur : {tid} no_pr" in a for a in report.attention), report.attention
     assert host.of("claude", "--bg") == [] and events(projet, tid, REVIEW_LAUNCHED_EVENT) == []
+    # Revue une heure plus tard, pas à chaque tick : ni gh, ni attention, rien au journal d'autorité.
+    [deferred] = events(projet, tid, REVIEW_DEFERRED_EVENT)
+    assert deferred.payload["until"] > datetime.now(UTC).isoformat()
+    calls, journal = len(host.calls), len(MandateStore(projet).journal.read())
+    again = tick(projet, host)
+    assert not any(a[0] == "gh" for a, _c, _e in host.calls[calls:]) and not any("no_pr" in a for a in again.attention)
+    assert len(MandateStore(projet).journal.read()) == journal
 
 
 def test_sans_mandat_une_tache_manuelle_n_est_pas_relue_par_le_tick(projet: Path, host: FakeHost) -> None:
@@ -229,3 +267,101 @@ def test_mandat_retire_pendant_la_relecture_le_recu_est_refuse_et_rien_n_est_rel
     assert host.of("claude", "stop")  # le relecteur est arrêté
     assert tick(projet, host).reviews == () and len(host.of("claude", "--bg")) == 1  # jamais relancé sans mandat
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_une_pr_depuis_main_vers_une_autre_base_est_refusee_sans_poussee(projet: Path, host: FakeHost) -> None:
+    """B2 : la base vient de la politique (ou origin/HEAD), jamais de la PR ; une branche d'intégration n'est pas relue."""
+    grant(projet)
+    tid = manual_task(projet, host)
+    remote = Path(str(host.real))
+    git(remote, "branch", "release", "main")
+    for table in (host.prs, host.pr_numbers, host.pr_titles, host.checks):
+        table["main"] = table.pop(BRANCH)  # type: ignore[attr-defined]
+    host.pr_bases["main"] = "release"
+    before = git(remote, "rev-parse", "refs/heads/main")
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "pr_refused", "skipped")], report.reviews
+    assert host.of("claude", "--bg") == [] and git(remote, "rev-parse", "refs/heads/main") == before
+
+
+def test_le_merger_ne_realigne_pas_une_branche_qui_n_est_pas_task_id(projet: Path, host: FakeHost) -> None:
+    """B2 : une PR manuelle en retard sur la cible est laissée à l'humain, sans aucune poussée sur sa branche."""
+    grant(projet)
+    tid = manual_task(projet, host)
+    advance_main(projet, "docs/autre.md", "autre\n")
+    tick(projet, host)
+    give_ready(host, tid, review_tree_of(projet, tid))
+    tick(projet, host)  # READY scellé, CI verte vue une fois
+    head = git(Path(str(host.real)), "rev-parse", f"refs/heads/{BRANCH}")
+    report = tick(projet, host)
+    assert merges(report) == [("escalate", "done")], report.merges
+    assert "ne réaligne que les branches task/" in report.merges[0].detail
+    assert events(projet, tid, MERGE_PUSHED_EVENT) == [] and git(Path(str(host.real)), "rev-parse", f"refs/heads/{BRANCH}") == head
+
+
+def test_un_depot_change_avant_la_premiere_relecture_est_refuse(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H1 : le dépôt vient du pin posé à l'octroi du mandat, pas de la configuration lue à la relecture."""
+    grant(projet)  # fige acme/kit
+    tid = manual_task(projet, host)
+    monkeypatch.setattr(ci_slots, "ci_repository", lambda _home, _project: "evil/kit")  # la session a réécrit ci.repository
+    host.repo = ""  # le faux gh servirait n'importe quel dépôt
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "pr_refused", "skipped")], report.reviews
+    assert "ont changé" in report.reviews[0].detail and host.of("claude", "--bg") == []
+
+
+def test_sans_depot_fige_avant_la_relecture_rien_n_est_relu(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H1 : aucun pin (dépôt introuvable à l'octroi, aucune tâche du tick) : échec fermé."""
+
+    def unresolved(_home: Path, _project: Path) -> str:
+        raise RuntimeError("pas de remote GitHub")
+
+    monkeypatch.setattr(ci_slots, "ci_repository", unresolved)
+    grant(projet)
+    monkeypatch.setattr(ci_slots, "ci_repository", lambda _home, _project: REPO)
+    tid = manual_task(projet, host)
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "pr_refused", "skipped")], report.reviews
+    assert "réoctroyer le mandat" in report.reviews[0].detail and host.of("claude", "--bg") == []
+
+
+def test_un_worktree_de_relecture_pre_pose_n_est_jamais_reutilise(projet: Path, host: FakeHost) -> None:
+    """M1 : un dossier au nom prévisible, préparé avec un réglage piégé, n'est pas celui où le relecteur travaille."""
+    grant(projet)
+    tid = manual_task(projet, host)
+    head = git(Path(str(host.real)), "rev-parse", f"refs/heads/{BRANCH}")
+    git(projet, "fetch", "-q", "origin", BRANCH)
+    planted = Path(git(projet, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "grimoire" / "review" / f"{tid}-{head[:12]}"
+    git(projet, "worktree", "add", "-q", "--detach", str(planted), head)
+    (planted / ".claude").mkdir()
+    (planted / ".claude" / "settings.json").write_text('{"hooks": "piège"}', encoding="utf-8")
+    assert reviews(tick(projet, host)) == [(tid, "launch", "launched")]
+    tree = review_tree_of(projet, tid)
+    assert tree != planted and not (tree / ".claude" / "settings.json").exists() and not planted.exists()
+
+
+def test_un_nom_de_branche_piege_est_refuse(projet: Path, host: FakeHost) -> None:
+    """M3 : un nom de branche hors [A-Za-z0-9._/-] n'entre ni dans une commande ni dans la consigne."""
+    grant(projet)
+    tid = manual_task(projet, host, branch="feat/p74$(id)")
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "pr_refused", "skipped")], report.reviews
+    assert "nom de branche" in report.reviews[0].detail and host.of("claude", "--bg") == []
+
+
+def test_une_cloture_sans_pack_de_preuve_passe_a_l_humain(projet: Path, host: FakeHost) -> None:
+    """M4 : PR fusionnée, READY scellé, mais aucun pack dans le worktree de relecture : waiting(human), avec la raison."""
+    grant(projet)
+    tid = manual_task(projet, host)
+    human_merges(host, projet)
+    tick(projet, host)
+    write_receipt(review_tree_of(projet, tid), tid, "READY", reviewer_id="reviewer",
+                  reviewer_session=host.session_of("grimoire-review-"))  # un READY sans pack
+    report = tick(projet, host)
+    task = TaskService(projet).require(tid)
+    assert task.status is TaskState.WAITING, (report.reviews, report.merges)
+    assert "aucun pack de preuve" in report.merges[0].detail

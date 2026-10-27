@@ -12,7 +12,9 @@ import os
 import subprocess
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import unquote
 
 from grimoire.missions.launcher import ExecResult
 
@@ -86,6 +88,9 @@ class FakeHost:
         self.merge_states: dict[str, str] = {}  # branche → ``mergeStateStatus`` (CLEAN, BEHIND, DIRTY) ; absente : non dit
         #: #994 : branche → titre et corps de la PR, ce que ``gh pr list --search <texte>`` cherche.
         self.pr_titles: dict[str, str] = {}
+        self.pr_created: dict[str, str] = {}  # branche → createdAt ; absente : l'instant de la lecture
+        self.merged_at: dict[str, str] = {}  # branche → mergedAt, posé par ``pr merge``
+        self.protected: set[str] = set()  # branches que ``gh api repos/…/branches/<b>`` dit protégées
         self.repo = ""  # le dépôt GitHub que ce faux gh sert : un ``-R`` autre est refusé (« could not resolve »)  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
@@ -151,8 +156,11 @@ class FakeHost:
             argv = argv[:argv.index("-R")] + argv[argv.index("-R") + 2:]
         if argv[1] == "api" and argv[2].endswith("/files"):
             return self._api_files(argv, cwd)
+        if argv[1] == "api" and "/branches/" in argv[2]:
+            branch = unquote(argv[2].split("/branches/", 1)[1])
+            return ExecResult(0, "true\n" if branch in self.protected else "false\n")
         if argv[1:3] == ["pr", "list"]:
-            query = argv[argv.index("--search") + 1] if "--search" in argv else ""
+            query = (argv[argv.index("--search") + 1] if "--search" in argv else "").split(" ")[0]
             rows = [json.loads(self._pr_view(b, cwd).stdout) for b in self.prs if query in self.pr_titles.get(b, "")]
             return ExecResult(0, json.dumps(rows))
         if argv[1:3] == ["pr", "view"]:
@@ -192,7 +200,8 @@ class FakeHost:
         if state is None:
             return ExecResult(1, "", "no pull requests found for branch")
         body: dict[str, object] = {
-            "headRefName": branch, "state": state, "number": self.pr_numbers.get(branch, 7), "baseRefName": self.pr_bases.get(branch, "main"),
+            "headRefName": branch, "state": state, "title": self.pr_titles.get(branch, ""),
+            "createdAt": self.pr_created.get(branch) or datetime.now(UTC).isoformat(), "mergedAt": self.merged_at.get(branch), "number": self.pr_numbers.get(branch, 7), "baseRefName": self.pr_bases.get(branch, "main"),
             "isDraft": branch in self.drafts, "mergeCommit": {"oid": self.merge_commits[branch]} if branch in self.merge_commits else None,
             "isCrossRepository": branch in self.cross_repo,
         }
@@ -284,6 +293,7 @@ class FakeHost:
                                  f"{branch} (squash)"], capture_output=True, text=True, encoding="utf-8", check=True, env=env).stdout.strip()
         subprocess.run(["git", f"--git-dir={remote}", "update-ref", "refs/heads/main", commit, target], check=True)
         self.prs[branch], self.pr_heads[branch], self.merge_commits[branch] = "MERGED", head, commit
+        self.merged_at.setdefault(branch, datetime.now(UTC).isoformat())
         if self.broken_after_merge:
             self.gh_broken = True
         return ExecResult(0, "")

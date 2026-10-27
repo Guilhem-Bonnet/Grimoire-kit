@@ -59,6 +59,10 @@ qu'il obtient à ce que GitHub annonce. Il ne lance aucune commande dans le work
 (:mod:`.manual_review`) entre dans la même file : son « worktree » est le worktree détaché de vérification, sa branche
 celle de la PR, sa cible la base de la PR, et chaque ``gh pr view`` la vise par son numéro. Le dépôt est celui figé à sa
 relecture. Sans session de worker à reprendre, un retour (CI rouge, conflit, désaccord) escalade à l'humain.
+Ce qui fait foi est le lancement scellé au journal d'autorité (PR, base, branche, dépôt, dossier), pas le ledger : un
+écart refuse. Le merger ne réaligne que les branches ``task/<id>`` : une autre branche en retard sur la cible est laissée
+à l'humain, sans aucune poussée. Une tâche fusionnée sans pack de preuve, ou dont la clôture est refusée, passe en
+``waiting(human)`` avec la raison.
 
 Le merger ne lit aucune réponse humaine du ledger. Ce qu'une question cite de la PR est échappé. Chaque étape est notée
 au ledger et n'est faite qu'une fois ; le tick est rejouable. Un échec technique de ``gh`` ou de ``git`` est compté au
@@ -78,6 +82,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
+from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, session_env
 from grimoire.missions.review_receipt import READY, read_receipt
@@ -322,7 +327,7 @@ class MergeStage:
         from grimoire.missions.manual_review import manual_reviews
 
         launched = launched_sessions(self._service)
-        self._manual = {tid: p for tid, p in manual_reviews(self._service).items() if tid not in launched}
+        self._manual = {tid: self._sealed_manual(tid, p) for tid, p in manual_reviews(self._service).items() if tid not in launched}
         launched = {**self._manual, **launched}
         merged, queue = self._classify(launched)
         breaker = read_breaker(self._home)
@@ -373,6 +378,22 @@ class MergeStage:
         judged = [e for e in events if e.event_type == REVIEW_JUDGED_EVENT and e.payload.get("review") == reviews[-1].id]
         return judged[-1] if judged and judged[-1].payload.get("verdict") == READY else None
 
+    def _sealed_manual(self, tid: str, noted: dict[str, Any]) -> dict[str, Any]:
+        """#994 : la relecture manuelle telle que le journal d'autorité l'a scellée au lancement ; ``refused`` dit
+        pourquoi elle ne vaut pas (aucun lancement scellé, écart avec le ledger)."""
+        from grimoire.missions.review_seal import launch_entry
+
+        try:
+            sealed = launch_entry(self._home, tid, str(noted.get("session_sha256") or ""))
+        except Exception as exc:
+            return {**noted, "refused": f"journal d'autorité illisible ({type(exc).__name__})"}
+        if sealed is None:
+            return {**noted, "refused": "aucun lancement de relecture scellé au journal d'autorité"}
+        pairs = {"pr": "pr", "base": "into", "branch": "branch", "head": "head", "cwd": "cwd"}
+        if drift := sorted(k for k, n in pairs.items() if str(sealed.get(k) or "") != str(noted.get(n) or "")):
+            return {**noted, "refused": f"la relecture notée au ledger diffère de celle scellée ({', '.join(drift)})"}
+        return {**noted, "sealed": sealed}
+
     def _worktree(self, tid: str) -> tuple[TaskWorktree | None, str]:
         """Le worktree du ledger, s'il est celui de ``task/<id>`` et du même dépôt que le projet ; sinon pourquoi.
 
@@ -381,7 +402,9 @@ class MergeStage:
         if tid in self._manual:
             from grimoire.missions.manual_review import manual_worktree
 
-            manual = manual_worktree(tid, self._manual[tid])
+            if refused := str(self._manual[tid].get("refused") or ""):
+                return None, refused
+            manual = manual_worktree(tid, self._manual[tid]["sealed"])
             if not manual.path.is_dir() or not manual.branch or not manual.into:
                 return None, "worktree de vérification de la tâche introuvable"
             if refused := same_repo(self._home, manual.path):
@@ -570,6 +593,11 @@ class MergeStage:
         """Le dépôt figé au journal d'autorité au lancement de la tâche, avant le worker ; sinon pourquoi le merger refuse."""
         from grimoire.missions.review_seal import frozen_repository
 
+        if tid in self._manual:  # #994 : le dépôt scellé au lancement de la relecture, lui-même tiré du pin du mandat
+            sealed = self._manual[tid].get("sealed") or {}
+            if not sealed.get("repo") or not sealed.get("origin_url"):
+                return None, "dépôt de la tâche faite à la main non scellé au lancement de sa relecture"
+            return {"repo": str(sealed["repo"]), "origin_url": str(sealed["origin_url"])}, ""
         try:
             pin = frozen_repository(self._home, tid)
         except Exception as exc:
@@ -726,6 +754,9 @@ class MergeStage:
         from grimoire.missions.review_seal import seal_realignment, tree_of
 
         tid, head = task.id, pr.head
+        if wt.branch != TASK_BRANCH_PREFIX + tid:  # #994 : jamais une poussée sur une branche qui n'est pas task/<id>
+            return self._ask_human(task, wt, "merge", judged.id, f"{wt.branch} est en retard sur {wt.into} : le merger ne "
+                                   f"réaligne que les branches {TASK_BRANCH_PREFIX}<id>, fusionne la cible dans la PR", pr.number)
         merged = self._git("merge-tree", "--write-tree", "--name-only", "--no-messages", head, target)
         lines = [ln for ln in merged.stdout.splitlines() if ln.strip()]
         if merged.returncode not in (0, 1) or not lines:
@@ -943,6 +974,9 @@ class MergeStage:
             reasons.append(kept)
         if reasons:
             return self._ask_human(task, wt, "accept", pr.merge_commit, " ; ".join(reasons), pr.number)
+        if tid in self._manual and not EvidenceService(wt.path / _EVIDENCE).list_packs(tid):
+            return self._escalate(task, f"PR #{pr.number} fusionnée et relue READY, mais aucun pack de preuve dans le "
+                                  f"worktree de relecture ({wt.path}) : la clôture ne peut pas l'accepter", pr.number)
         reason = f"PR #{pr.number} fusionnée à {pr.merge_commit[:12]}, relue READY (sceau tenu), CI verte"
         try:
             with acting_as_orchestrator():
@@ -972,6 +1006,8 @@ class MergeStage:
             refusals.append(refused)
         if refusals:
             shown = "; ".join(str(r) for r in refusals)[:400]
+            if tid in self._manual:  # #994 : une tâche faite à la main ne reste pas bloquée en revue
+                return self._escalate(task, f"acceptée, clôture refusée : {shown}", pr)
             return MergerOutcome(tid, "close", "failed", f"acceptée, clôture refusée : {shown}", pr)
         try:
             moved = self._service.ledger.transition_task(
