@@ -34,7 +34,9 @@ audience: décision
 - Aucune mesure n'a été faite sur le code de `main` du 2026-10-27 ; l'estimation suppose qu'aucun changement postérieur au lot L n'a touché le chemin chaud du gate.
 - La cible de coût ≤ 105 % **n'est pas atteignable par ce lot** : elle demande de réduire le surcoût fixe de la gouvernance, pas de corriger un message.
 
-## 4. Décision proposée
+## 4. Décision
 
-Clore le lot K sur ses deux correctifs mécaniques (livrés, testés). Le critère de coût reste ouvert dans #642 et ne se tranchera qu'avec un rejeu
-explicitement demandé ; le coût d'un rejeu `kit-gov` seul est de l'ordre de 34 $ (lot K).
+**Critère 3 non démontré — clôture en l'état avec dérogation humaine** (décision de Guilhem, 2026-10-27, `dir-21054a88c51b`).
+Le lot K est clos sur ses deux correctifs mécaniques (livrés par #651, testés). Les cibles chiffrées (excursions < 10 %, coût médian ≤ 105 % du nu)
+ne sont ni mesurées ni atteintes ; seul « 60/60 gate check verts » est établi, par les campagnes K et L. Le critère de coût reste ouvert dans #642
+et ne se tranchera qu'avec un rejeu explicitement demandé (≈ 34 $ pour `kit-gov` seul). La dérogation est actée par le canal humain, pas par le relecteur.
