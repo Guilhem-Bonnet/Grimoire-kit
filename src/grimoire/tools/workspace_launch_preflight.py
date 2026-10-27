@@ -19,10 +19,12 @@ estimation (doctrine d'ancrage des affirmations).
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -50,8 +52,9 @@ from grimoire.missions.reservation import _HOLDING, find_conflict  # la même r�
 from grimoire.missions.schemas import MissionTask, TaskClaim
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import TASK_BRANCH_PREFIX, find_task_worktree
+from grimoire.tools.workspace_write_guard import state_fingerprint
 
-__all__ = ["launch_preflight"]
+__all__ = ["Preflight", "launch_preflight", "launch_preflight_full", "plan_fingerprint"]
 
 #: Le ``host_id`` que le lanceur pose sur le claim du worker (``launcher._HOST``).
 _HOST = "claude-code-cli"
@@ -255,6 +258,45 @@ def _commande(read: PolicyRead, tid: str, model: str) -> dict[str, Any]:
 # ── Entrée ───────────────────────────────────────────────────────────────────
 
 
+def plan_fingerprint(payload: Mapping[str, Any]) -> str:
+    """L'empreinte du plan (ADR-008) : les faits qui engagent le lancement, jamais les compteurs.
+
+    Entrent dans l'empreinte : la tâche (id, statut), ``pret``, le verdict de
+    chaque vérification — pas son détail : les compteurs qu'il porte (tokens
+    consommés, sessions actives) bougent sans changer la décision —, le modèle
+    recommandé, la branche et l'existence du worktree, la commande équivalente.
+    ``apply`` recalcule cette empreinte et refuse si elle diffère de celle du
+    plan montré : l'état a changé entre le plan et le geste.
+    """
+    stable = {
+        "task_id": payload["task_id"],
+        "statut": payload["statut"],
+        "pret": payload["pret"],
+        "verifications": [[v["id"], v["verdict"]] for v in payload["verifications"]],
+        "modele": payload["modele"]["recommande"],
+        "branche": payload["worktree"]["branche"],
+        "worktree_existant": payload["worktree"]["existant"],
+        "commande": payload["commande"]["texte"],
+    }
+    return state_fingerprint(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+
+
+@dataclass(frozen=True, slots=True)
+class Preflight:
+    """Le plan rendu à la route, plus ce que l'apply (P47 lot 3) relit sans recomposer.
+
+    ``payload`` est exactement ce que ``launch_preflight`` rend ; ``plan`` le
+    plan d'admission déjà construit (son ``Admit`` part au lanceur tel quel),
+    ``service``, ``policy`` et ``task`` les lectures déjà faites.
+    """
+
+    payload: dict[str, Any]
+    plan: QueuePlan
+    service: TaskService
+    policy: PolicyRead
+    task: MissionTask
+
+
 def launch_preflight(
     project_root: Path,
     task_id: str,
@@ -273,6 +315,24 @@ def launch_preflight(
     ``capacity_view``. *files* : les fichiers que le claim du worker
     réserverait (défaut : ceux du claim courant de la tâche, s'il y en a un).
     Une tâche inconnue lève :class:`GrimoireMissionError` (404 côté transport).
+    """
+    return launch_preflight_full(project_root, task_id, now=now, probe=probe, route_of=route_of, files=files).payload
+
+
+def launch_preflight_full(
+    project_root: Path,
+    task_id: str,
+    *,
+    now: datetime | None = None,
+    probe: Callable[[], HostReading | None] = read_host,
+    route_of: Callable[[MissionTask], RouteRef | None] | None = None,
+    files: tuple[str, ...] | None = None,
+) -> Preflight:
+    """Comme :func:`launch_preflight`, mais rend aussi les lectures déjà faites (:class:`Preflight`).
+
+    C'est l'entrée de l'apply (P47 lot 3) : il compare l'empreinte du corps à
+    ``payload["empreinte"]`` et passe ``plan.admitted`` au lanceur — le même
+    plan que celui qui a rendu le verdict, jamais un second calcul divergent.
     """
     service = TaskService(project_root.resolve())
     if not service.has_ledger:
@@ -301,7 +361,7 @@ def launch_preflight(
     bad = [v for v in verifications if v["verdict"] in _NOT_READY]
     pret = not bad
     raison = "toutes les vérifications passent" if pret else f"{bad[0]['libelle']} : {bad[0]['detail']}"
-    return {
+    payload = {
         "task_id": task.id,
         "titre": task.title,
         "statut": task.status.value,
@@ -312,3 +372,5 @@ def launch_preflight(
         "pret": pret,
         "raison": raison,
     }
+    payload["empreinte"] = plan_fingerprint(payload)
+    return Preflight(payload=payload, plan=plan, service=service, policy=read, task=task)
