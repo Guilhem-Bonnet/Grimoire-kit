@@ -13,6 +13,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - **Représentation** : une question présentée à une session terminée sans réponse de l'orchestrateur enregistrée est représentée une fois (`MAX_PRESENTATIONS` = 2) ; au-delà, elle reste à l'humain. Une question tenue par une session ouverte, ou déjà répondue, n'est jamais relistée. La fin d'une session distingue « à représenter une fois » et « laissées à l'humain ».
   - **Limite** : le tick ne voit pas les refus de permission de la session (l'hôte ne les journalise que dans sa transcription) ; la borne de 2 présentations vaut pour toute fin silencieuse.
 
+- feat(cockpit): panneau « Assigner une session » — plan de lancement et commande à copier (P47 lot 2, GAO-p47-assigne-001)
 ## [3.69.0] - 2026-10-27
 
 - feat(missions): sous mandat, une session orchestrateur lancée par le tick répond aux questions des workers (Refs #962)
