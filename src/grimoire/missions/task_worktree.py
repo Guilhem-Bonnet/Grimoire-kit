@@ -71,6 +71,7 @@ __all__ = [
     "create_task_worktree",
     "find_task_worktree",
     "home_of_worktree",
+    "mark_worktree",
     "merge_task",
     "unpushed_work",
 ]
@@ -334,14 +335,19 @@ def create_task_worktree(
     _refuse_temp_target(repo, target)
     target.parent.mkdir(parents=True, exist_ok=True)
     _git(repo, "worktree", "add", "--quiet", "-b", branch, str(target), base_sha)
-    gitdir = Path(_git(target, "rev-parse", "--absolute-git-dir").stdout.strip())
-    home = service.home_root
-    marker = {"$schema": _MARKER_SCHEMA, "task_id": task_id, "branch": branch, "base_sha": base_sha, "into": into,
-              "project_root": str(home), "ledger_root": str(service.ledger_root)}
-    atomic_write(gitdir / MARKER_NAME, json.dumps(marker, ensure_ascii=False, sort_keys=True) + "\n")
     wt = TaskWorktree(task_id, target, branch, base_sha, into)
+    mark_worktree(service, wt)
     service.ledger.append_event(WORKTREE_CREATED_EVENT, task_id, "task", actor, wt.to_dict())
     return wt
+
+
+def mark_worktree(service: TaskService, wt: TaskWorktree) -> None:
+    """Pose le marqueur (:data:`MARKER_NAME`) dans le dossier git propre à *wt* : un ``grimoire task …`` lancé dedans
+    écrit au ledger du projet. Aussi le worktree détaché où le tick relit une tâche faite à la main (#994)."""
+    gitdir = Path(_git(wt.path, "rev-parse", "--absolute-git-dir").stdout.strip())
+    marker = {"$schema": _MARKER_SCHEMA, "task_id": wt.task_id, "branch": wt.branch, "base_sha": wt.base_sha,
+              "into": wt.into, "project_root": str(service.home_root), "ledger_root": str(service.ledger_root)}
+    atomic_write(gitdir / MARKER_NAME, json.dumps(marker, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 # ── Merge série ──────────────────────────────────────────────────────────────

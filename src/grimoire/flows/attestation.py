@@ -575,6 +575,8 @@ def attest(
     def _no(reason: str) -> Attestation:
         return Attestation(UNATTESTED, reason, challenge_id, decider, source=source)
 
+    # Sous ce drapeau, ``current_session`` préfère la variable d'hôte à ``GRIMOIRE_SESSION_ID`` (#966) : seule
+    # l'identité notée (``decider``, session du challenge) peut changer, le refus est le même et vient avant elle.
     if is_unattended(env):
         return _no("unattended")
     if challenge is None:

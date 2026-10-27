@@ -22,8 +22,11 @@ le mandat scelle, à l'octroi, la section ``escalation`` de ``orchestration-poli
 politique modifiée depuis révoque le mandat (``escalation_policy_changed``).
 
 Un mandat est révoqué par l'humain (:meth:`MandateStore.revoke`) ou automatiquement sur
-événement : échéance, plafond de sessions dépassé, écriture d'agent refusée dans la zone
-protégée (:meth:`MandateStore.revoke_on_protected_write`), politique modifiée. Le verdict forgé
+événement : échéance, plafond de sessions dépassé, refus d'agent dans la zone protégée (sauf mention
+prouvée inoffensive — #982 : :func:`revoke_session_mandates` pour le projet et la session, :func:`revoke_every_mandate`
+quand le journal ou la clé peut être visé ou que le projet est inconnu), politique modifiée. La révocation inscrit
+sa cause (session, outil, programme, zone visée ; aucun argument), que le statut rend
+(:attr:`MandateState.revocation`). Le verdict forgé
 (:meth:`MandateStore.revoke_on_forged_verdict`) et l'écriture hors worktree
 (:meth:`MandateStore.revoke_on_write_outside_worktree`) sont exposés ici et branchés aux
 lots 2 et 3.
@@ -33,9 +36,9 @@ toute écriture d'agent sous ce dossier par les outils et les voies shell reconn
 (:mod:`grimoire.hosts.decisions.authority_guard`). Un agent qui exécute du code arbitraire
 (un script Python quelconque) peut le contourner, et la chaîne de hash ne voit pas la troncature de
 la *queue* du journal (retirer une révocation récente rouvre le mandat). Le principal
-``orchestrator`` se déclare par ``GRIMOIRE_PRINCIPAL=orchestrator`` ; tant que le lanceur du
-lot 2 n'enregistre pas la session de l'orchestrateur (:meth:`MandateStore.register_session`,
-rôle ``orchestrator``), cette déclaration ne vaut que par le mandat qu'elle exige.
+``orchestrator`` se déclare par ``GRIMOIRE_PRINCIPAL=orchestrator`` ; cette déclaration ne vaut que pour
+une session que l'étape orchestrateur du tick a inscrite (#962, :func:`register_orchestrator_session`,
+bornée au canal ``task answer`` et datée, :data:`ANSWER_CHANNEL`), et dans les bornes du mandat.
 """
 
 from __future__ import annotations
@@ -65,6 +68,7 @@ if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
 
 __all__ = [
+    "ANSWER_CHANNEL",
     "BREAKER_FORGED_VERDICT",
     "BREAKER_SEAL_MISMATCH",
     "BREAKER_WRITE_OUTSIDE_WORKTREE",
@@ -85,6 +89,7 @@ __all__ = [
     "MandateState",
     "MandateStore",
     "acting_as_orchestrator",
+    "acting_in_process",
     "control_dir",
     "control_key_path",
     "ensure_control_key",
@@ -92,7 +97,9 @@ __all__ = [
     "load_escalation",
     "register_orchestrator_session",
     "require_authority",
+    "revocation_cause",
     "revoke_every_mandate",
+    "revoke_session_mandates",
     "task_categories",
     "verify_control_key",
 ]
@@ -493,6 +500,10 @@ class MandateState:
     reason: str = ""
     detail: str = ""
     sessions_today: int = 0
+    #: L'entrée de révocation telle qu'inscrite (#982) : ``reason``, ``detail``, ``ts`` et, quand l'événement les
+    #: portait, ``session_id``, ``tool``, ``program`` (premier mot de la commande) et ``target`` (vecteur et zone
+    #: visée) — aucun argument, donc aucun secret. Vide hors révocation.
+    revocation: Mapping[str, str] = field(default_factory=dict, compare=False, hash=False)
 
     @property
     def active(self) -> bool:
@@ -505,6 +516,7 @@ class MandateState:
             "detail": self.detail,
             "sessions_today": self.sessions_today,
             "mandate": self.mandate.to_dict() if self.mandate else None,
+            "revocation": dict(self.revocation) if self.revocation else None,
         }
 
 
@@ -586,6 +598,10 @@ class MandateStore:
         mandate = _mandate_of(entry)
         if mandate is None:  # l'entrée qu'on vient d'écrire ne se relit pas : jamais un octroi muet
             raise MandateRefusedError(JOURNAL_UNREADABLE, f"octroi {mandate_id} écrit mais illisible au journal")
+        from grimoire.missions.review_seal import pin_project_repository
+
+        with contextlib.suppress(Exception):  # sans pin, aucune tâche faite à la main n'est relue (échec fermé)
+            pin_project_repository(self.root, mandate_id)  # #994 : le dépôt que relit une tâche faite à la main
         return mandate
 
     def request_grant(
@@ -669,19 +685,29 @@ class MandateStore:
 
     # ── Révocation ───────────────────────────────────────────────────────────
 
-    def revoke(self, reason: str = REVOKE_MANUAL, detail: str = "", now: datetime | None = None) -> Mandate | None:
+    def revoke(
+        self,
+        reason: str = REVOKE_MANUAL,
+        detail: str = "",
+        now: datetime | None = None,
+        *,
+        cause: Mapping[str, str] | None = None,
+    ) -> Mandate | None:
         """Révoque le mandat actif du projet — toujours permis : retirer une autorité n'en demande aucune.
 
         Rend le mandat révoqué, ``None`` s'il n'y en avait pas d'actif. API que les lots 2 et 3 appellent
-        sur événement (voir ``revoke_on_*``).
+        sur événement (voir ``revoke_on_*``). *cause* (#982) : ce qui a déclenché la révocation, inscrit avec
+        elle et rendu par le statut — ``session_id``, ``tool``, ``program``, ``target`` (:func:`revocation_cause`).
         """
         state = self._state(now or _now(), auto_revoke=False)
         if state.mandate is None or not state.active:
             return None
-        self._write_revocation(state.mandate.id, reason or REVOKE_MANUAL, detail, now or _now())
+        self._write_revocation(state.mandate.id, reason or REVOKE_MANUAL, detail, now or _now(), cause)
         return state.mandate
 
-    def _write_revocation(self, mandate_id: str, reason: str, detail: str, moment: datetime) -> None:
+    def _write_revocation(
+        self, mandate_id: str, reason: str, detail: str, moment: datetime, cause: Mapping[str, str] | None = None
+    ) -> None:
         # Le marqueur d'abord : si l'entrée ne s'écrit pas, ou si on la retire ensuite du journal, le mandat reste révoqué.
         with contextlib.suppress(OSError):
             self.journal.mark_revoked(mandate_id, reason, moment.isoformat())
@@ -692,15 +718,9 @@ class MandateStore:
                 "reason": reason,
                 "detail": detail[:400],
                 "ts": moment.isoformat(),
+                **_cause_fields(cause),
             }
         )
-
-    def revoke_on_protected_write(self, detail: str) -> Mandate | None:
-        """Un agent a tenté d'écrire dans la zone protégée (refus du frein) : le mandat tombe.
-
-        Le frein appelle :func:`revoke_every_mandate` (le journal est commun à tous les projets).
-        """
-        return self.revoke(REVOKE_PROTECTED_WRITE, detail)
 
     def revoke_on_forged_verdict(self, task_id: str, detail: str) -> Mandate | None:
         """Branché au lot 3 (reviewer) : un verdict forgé ouvre le disjoncteur et révoque."""
@@ -743,6 +763,11 @@ class MandateStore:
                 REVOKED,
                 f"{revocation.get('reason', '')} : {revocation.get('detail', '')}".strip(" :"),
                 sessions,
+                {
+                    k: str(revocation[k])
+                    for k in ("reason", "detail", "ts", *_CAUSE_KEYS)
+                    if revocation.get(k) not in (None, "")
+                },
             )
         until = _parse(mandate.until)
         verdict: tuple[str, str] | None = None
@@ -763,11 +788,16 @@ class MandateStore:
 
     # ── Sessions (plafond, provenance du reçu) ───────────────────────────────
 
-    def register_session(self, session_id: str, role: str, task_id: str = "", now: datetime | None = None) -> None:
+    def register_session(
+        self, session_id: str, role: str, task_id: str = "", now: datetime | None = None, *,
+        channels: Sequence[str] = (), expires_at: str = "",
+    ) -> None:
         """Inscrit une session lancée par le kit. Un worker au-delà du plafond du jour est refusé et révoque le mandat.
 
         Le lanceur du lot 2 y inscrit chaque worker ; le reviewer du lot 3 y inscrit sa session, ce qui
         l'atteste (verrou 7). Hors mandat actif, rien ne s'inscrit : l'attestation n'existe que sous mandat.
+        #962 : *channels* borne une session ``orchestrator`` aux canaux nommés (:data:`ANSWER_CHANNEL`), en plus du
+        mandat ; *expires_at* (ISO 8601) borne son inscription dans le temps.
         """
         if role not in _ROLES or not session_id.strip():
             raise MandateRefusedError(MALFORMED, f"session invalide : rôle {role!r}, identifiant {session_id!r}")
@@ -805,6 +835,8 @@ class MandateStore:
                 "session_id": session_id.strip(),
                 "role": role,
                 "task_id": task_id,
+                **({"channels": sorted(set(channels))} if channels else {}),
+                **({"expires_at": expires_at} if expires_at else {}),
                 "ts": moment.isoformat(),
             }
         )
@@ -821,6 +853,20 @@ class MandateStore:
             and (not role or e.get("role") == role)
             and (not task_id or e.get("task_id") == task_id)
         ]
+
+    def end_session(self, session_sha256: str, reason: str, now: datetime | None = None) -> int:
+        """#962 : inscrit la fin de chaque session orchestrateur d'empreinte *session_sha256* ; rend combien.
+
+        Une session terminée n'agit plus en orchestrateur, même avant l'échéance de son inscription.
+        """
+        ended = 0
+        for entry in self.sessions(role="orchestrator"):
+            sid = str(entry.get("session_id") or "")
+            if sid and hashlib.sha256(sid.encode("utf-8")).hexdigest() == session_sha256:
+                self.journal.append({"type": "session_end", "mandate_id": entry.get("mandate_id"), "session_id": sid,
+                                     "reason": reason[:120], "ts": (now or _now()).isoformat()})
+                ended += 1
+        return ended
 
     # ── Autorisation d'un geste ──────────────────────────────────────────────
 
@@ -1129,13 +1175,30 @@ def acting_as_orchestrator() -> Iterator[None]:
         _IN_PROCESS_ORCHESTRATOR.reset(token)
 
 
-def register_orchestrator_session(project_root: Path, session_id: str, now: datetime | None = None) -> None:
+#: #962 : le seul canal d'une session orchestrateur lancée par le tick — ``task answer`` (gestes ``answer`` et
+#: ``resume`` d'une question). Tout autre appelant de :func:`require_authority` (``task accept``, ``approve-check``,
+#: ``orchestrate resume``, ``queue release``, le merger) ne passe pas de canal : une session bornée y est refusée.
+ANSWER_CHANNEL = "task-answer"
+
+
+def acting_in_process() -> bool:
+    """Vrai dans un bloc :func:`acting_as_orchestrator` : l'appelant est le code du tick, pas une session."""
+    return _IN_PROCESS_ORCHESTRATOR.get()
+
+
+def register_orchestrator_session(
+    project_root: Path, session_id: str, now: datetime | None = None, *,
+    channels: Sequence[str] = (), expires_at: str = "",
+) -> None:
     """Inscrit *session_id* au journal d'autorité en rôle ``orchestrator`` : la seule voie CLI du principal.
 
-    À appeler par le lanceur du lot 2, avec l'identifiant de session qu'il a fixé au processus orchestrateur
-    (``GRIMOIRE_SESSION_ID`` ou la variable de l'hôte). Exige un mandat actif ; refuse un identifiant vide.
+    Appelée par l'étape orchestrateur du tick (#962, :mod:`grimoire.missions.orchestrator_session`) avec le vrai
+    ``sessionId`` de la session de fond, résolu après son lancement. Exige un mandat actif ; refuse un identifiant vide.
     Un identifiant déjà inscrit comme worker ou relecteur ne peut pas devenir orchestrateur.
     L'inscription vaut pour le mandat actif seulement : un nouveau mandat se réinscrit.
+    *channels* borne la session : un geste pris par un autre canal est refusé même si le mandat le couvre (la session
+    du tick ne répond qu'aux questions, par :data:`ANSWER_CHANNEL` ; accepter, fusionner, approuver un check ou lever
+    une pause reste hors de sa portée). *expires_at* : au-delà, l'inscription ne vaut plus.
     """
     store = MandateStore(project_root)
     session = session_id.strip()
@@ -1143,7 +1206,7 @@ def register_orchestrator_session(project_root: Path, session_id: str, now: date
         raise MandateRefusedError(
             "principal_unattested", f"session {session!r} déjà inscrite comme worker ou relecteur : pas orchestrateur"
         )
-    store.register_session(session, "orchestrator")
+    store.register_session(session, "orchestrator", now=now, channels=channels, expires_at=expires_at)
 
 
 def require_authority(
@@ -1155,6 +1218,7 @@ def require_authority(
     what: str,
     provenance: Mapping[str, Any] | None = None,
     record: bool = True,
+    channel: str = "",
 ) -> Authorization | None:
     """Le contrôle d'origine d'un geste : ``None`` pour l'humain, une :class:`Authorization` sous mandat, sinon un refus.
 
@@ -1162,7 +1226,8 @@ def require_authority(
     tâche, l'origine ``orchestrator`` est refusée comme toute autre origine non humaine. Avec un mandat, elle
     exige encore un appelant attesté : le code du tick (:func:`acting_as_orchestrator`) ou une session inscrite
     en rôle ``orchestrator`` (:func:`register_orchestrator_session`), qui n'est celle d'aucun worker ni relecteur.
-    Une garde en erreur refuse (échec fermé).
+    Une garde en erreur refuse (échec fermé). *channel* : le canal de l'appel (:data:`ANSWER_CHANNEL`), que seule une
+    session bornée à ce canal exige.
     """
     if origin == ORIGIN_HUMAN:
         return None
@@ -1176,7 +1241,7 @@ def require_authority(
         # Le mandat d'abord (son refus dit pourquoi : aucun mandat, expiré, hors périmètre), puis l'appelant,
         # puis le journal du geste : un geste refusé ensuite n'est jamais inscrit « pris ».
         auth = store.authorize(gesture, task, provenance, record=False)
-        _require_orchestrator_session(store, task, auth.mandate_id)
+        _require_orchestrator_session(store, task, auth.mandate_id, gesture, channel)
         if record:
             store.record_gesture(auth)
         return auth
@@ -1188,8 +1253,15 @@ def require_authority(
         ) from exc
 
 
-def _require_orchestrator_session(store: MandateStore, task: MissionTask | None, mandate_id: str) -> None:
-    """Échec fermé : l'appelant est le code du tick, ou une session inscrite orchestrateur qui n'est pas celle d'un worker."""
+def _require_orchestrator_session(
+    store: MandateStore, task: MissionTask | None, mandate_id: str, gesture: str, channel: str = ""
+) -> None:
+    """Échec fermé : l'appelant est le code du tick, ou une session inscrite orchestrateur qui n'est pas celle d'un worker.
+
+    #962 : une inscription bornée (``channels``) ne vaut que par ses canaux, et une inscription datée
+    (``expires_at``) jusqu'à son échéance ; une session dont la fin est inscrite (``session_end``) ne vaut plus. Un champ
+    illisible refuse.
+    """
     from grimoire.core.standard_state import current_session
 
     if _IN_PROCESS_ORCHESTRATOR.get():
@@ -1202,17 +1274,17 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None,
             "ne prouve rien ; le lanceur inscrit la session d'orchestrateur au journal d'autorité)",
         )
     registered = store.sessions()
-    orchestrators = {
-        str(e["session_id"])
-        for e in registered
-        if e.get("role") == "orchestrator" and e.get("mandate_id") == mandate_id
-    }
-    if session not in orchestrators:
+    mine = [
+        e for e in registered
+        if e.get("role") == "orchestrator" and e.get("mandate_id") == mandate_id and str(e.get("session_id")) == session
+    ]
+    if not mine:
         raise MandateRefusedError(
             "principal_unattested",
             "le principal orchestrator n'est pas attesté : la session appelante n'est pas inscrite orchestrateur au "
             "journal d'autorité (la variable GRIMOIRE_PRINCIPAL ne prouve rien)",
         )
+    _check_session_bounds(store, session, mine, gesture, channel)
     held = {str(e["session_id"]) for e in registered if e.get("role") in ("worker", "reviewer")}
     if task is not None and task.claim is not None:
         held.add(task.claim.session_id)
@@ -1224,12 +1296,45 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None,
         )
 
 
-def revoke_every_mandate(reason: str, detail: str, journal: AuthorityJournal | None = None) -> list[str]:
+def _check_session_bounds(
+    store: MandateStore, session: str, mine: list[dict[str, Any]], gesture: str, channel: str
+) -> None:
+    """Canaux, échéance et fin d'une session orchestrateur inscrite (#962) ; lève au premier manquement."""
+    if any("channels" in e and not isinstance(e["channels"], list) for e in mine):
+        raise MandateRefusedError("session_bounds_unreadable", f"inscription de {session!r} illisible (canaux)")
+    scoped = [e["channels"] for e in mine if "channels" in e]
+    if scoped and not any(channel and channel in allowed for allowed in scoped):
+        allowed_text = ", ".join(sorted({str(c) for allowed in scoped for c in allowed}))
+        raise MandateRefusedError(
+            "gesture_out_of_session_scope",
+            f"{gesture} refusé : la session orchestrateur {session!r} n'agit que par {allowed_text}",
+        )
+    moment = _now()
+    for entry in mine:
+        if "expires_at" not in entry:
+            continue
+        until = _parse(entry["expires_at"])
+        if until is None or moment >= until:
+            raise MandateRefusedError(
+                "session_expired", f"{gesture} refusé : l'inscription orchestrateur de {session!r} a expiré"
+            )
+    if any(e.get("type") == "session_end" and e.get("session_id") == session for e in store.journal.read()):
+        raise MandateRefusedError("session_ended", f"{gesture} refusé : la session orchestrateur {session!r} est terminée")
+
+
+def revoke_every_mandate(
+    reason: str,
+    detail: str,
+    journal: AuthorityJournal | None = None,
+    *,
+    cause: Mapping[str, str] | None = None,
+) -> list[str]:
     """Révoque chaque mandat actif du poste, tous projets confondus ; rend leurs identifiants.
 
-    Pour un événement qui touche la zone protégée elle-même (une écriture d'agent refusée sous
-    ``~/.grimoire/control/``) : le journal est commun à tous les projets, la confiance qu'il porte
-    tombe pour tous. Un journal illisible ne se prolonge pas : il ne porte déjà aucun mandat.
+    Le frein l'appelle (#982) quand la cible peut être le journal du mandat ou la clé du cockpit (qui forgent un
+    mandat pour n'importe quel projet), et en repli de :func:`revoke_session_mandates` quand le projet de la
+    session est inconnu, sans mandat, ou quand la révocation ciblée échoue. Un journal illisible ne se prolonge
+    pas : il ne porte déjà aucun mandat.
     """
     store_journal = journal or AuthorityJournal()
     hit: list[str] = []
@@ -1239,7 +1344,123 @@ def revoke_every_mandate(reason: str, detail: str, journal: AuthorityJournal | N
         return hit
     projects = {str(e["project"]) for e in entries if e.get("type") == "grant" and e.get("project")}
     for project in sorted(projects):
-        revoked = MandateStore(Path(project), store_journal).revoke(reason, detail)
+        revoked = MandateStore(Path(project), store_journal).revoke(reason, detail, cause=cause)
         if revoked is not None:
             hit.append(revoked.id)
     return hit
+
+
+def _main_worktree(root: Path) -> Path | None:
+    """La racine du worktree principal quand *root* est un worktree lié (``.git`` est un fichier), sans lancer git.
+
+    Lu sur disque : ``<root>/.git`` (``gitdir: …/.git/worktrees/<nom>``) puis ``commondir`` dans ce dossier. Un
+    worker lancé dans le worktree de sa tâche agit sous le mandat du projet, inscrit à la racine principale.
+    """
+    try:
+        dotgit = root / ".git"
+        if not dotgit.is_file():
+            return None
+        text = dotgit.read_text(encoding="utf-8").strip()
+        if not text.startswith("gitdir:"):
+            return None
+        gitdir = Path(text[len("gitdir:") :].strip())
+        gitdir = gitdir if gitdir.is_absolute() else root / gitdir
+        common_raw = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+        common = (Path(common_raw) if Path(common_raw).is_absolute() else gitdir / common_raw).resolve()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return common.parent if common.name == ".git" else None
+
+
+#: Le marqueur d'une racine de projet Grimoire (``grimoire.hosts.runtime.PROJECT_MARKER``, recopié pour ne pas
+#: importer l'exécution du hook).
+_PROJECT_MARKER = "_grimoire"
+
+
+def revoke_session_mandates(
+    project_root: Path,
+    reason: str,
+    detail: str,
+    *,
+    cause: Mapping[str, str] | None = None,
+    session_id: str = "",
+    journal: AuthorityJournal | None = None,
+) -> list[str]:
+    """Révoque les mandats de la session (#982) ; rend les identifiants révoqués.
+
+    Tombent : le mandat du projet de la session (*project_root*, la racine que le hook a résolue) et, si c'est un
+    worktree lié, celui du worktree principal ; et tout mandat où *session_id* est inscrit (octroi ou session
+    enregistrée), quel que soit le répertoire courant. Échec fermé : si *project_root* n'est pas une racine Grimoire
+    reconnue (pas de ``_grimoire/``, la session a fait ``cd`` ailleurs), ou si aucun mandat n'y correspond, tous
+    les mandats du poste tombent (:func:`revoke_every_mandate`). Un journal illisible ne porte déjà aucun mandat.
+    """
+    store_journal = journal or AuthorityJournal()
+    try:
+        entries = store_journal.read()
+    except JournalError:
+        return []
+    root = project_root.resolve()
+    roots = [root]
+    main = _main_worktree(root)
+    if main is not None and main != root:
+        roots.append(main)
+    granted = {str(e.get("project")) for e in entries if e.get("type") == "grant"}
+    if not (root / _PROJECT_MARKER).is_dir() or not any(str(r) in granted for r in roots):
+        return revoke_every_mandate(reason, detail, store_journal, cause=cause)
+    session = session_id.strip()
+    if session:
+        mine = {
+            str(e.get("mandate_id"))
+            for e in entries
+            if e.get("type") in ("grant", "session") and str(e.get("session_id", "")) == session
+        }
+        roots.extend(
+            Path(str(e["project"]))
+            for e in entries
+            if e.get("type") == "grant" and str(e.get("mandate_id")) in mine and e.get("project")
+        )
+    hit: list[str] = []
+    for project in dict.fromkeys(roots):
+        revoked = MandateStore(project, store_journal).revoke(reason, detail, cause=cause)
+        if revoked is not None:
+            hit.append(revoked.id)
+    return hit
+
+
+# ── Cause d'une révocation (#982) ────────────────────────────────────────────
+
+#: Ce qu'une révocation sur événement inscrit de sa cause, en plus du motif, du détail et de l'heure. Aucun
+#: argument de la commande : seulement le programme (premier mot) et la zone visée — rien à caviarder.
+_CAUSE_KEYS: tuple[str, ...] = ("session_id", "tool", "program", "target")
+_PROGRAM = re.compile(r"[A-Za-z0-9._+-]{1,40}")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def revocation_cause(session_id: str, tool: str, command: str, vector: str, what: str = "") -> dict[str, str]:
+    """La cause qu'une révocation du frein inscrit : session, outil, programme lancé, zone visée.
+
+    Le programme est le premier mot de la commande qui n'est pas une assignation (``TOKEN=x cp …`` donne ``cp``),
+    réduit à son nom de base et à ``[A-Za-z0-9._+-]`` ; aucun argument n'est gardé, donc aucun secret. La cible est
+    le code du vecteur et le marqueur de la zone. Ne lève jamais.
+    """
+    try:
+        program = next((w for w in command.split() if not _ASSIGNMENT.match(w)), "")
+        found = _PROGRAM.match(program.rsplit("/", 1)[-1]) if program else None
+        marker = what[what.rfind("(") + 1 : what.rfind(")")] if "(" in what and what.endswith(")") else ""
+        return {
+            "session_id": session_id,
+            "tool": tool,
+            "program": found.group(0) if found else "",
+            "target": f"{vector} {marker}".strip(),
+        }
+    except Exception:
+        return {"session_id": session_id, "tool": tool}
+
+
+def _cause_fields(cause: Mapping[str, str] | None) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for key in _CAUSE_KEYS:
+        value = str((cause or {}).get(key, "") or "").strip()
+        if value:
+            fields[key] = value[:120]
+    return fields

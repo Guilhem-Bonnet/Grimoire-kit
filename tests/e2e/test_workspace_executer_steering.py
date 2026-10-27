@@ -1,7 +1,7 @@
 """Espace Exécuter — pilotage humain depuis l'inspecteur (issue #638, lot B).
 
 Sélecteur de priorité, zone de consigne, bouton « Annuler » avec raison
-exigée, badge « consigne non lue » sur la carte. Chaque geste part en
+exigée, badge « message en attente de la session » sur la carte. Chaque geste part en
 ``api.taskAction`` vers ``TaskService`` — la webview ne touche jamais le
 ledger (ADR-007) ; ce que la page affiche ensuite est relu du serveur.
 """
@@ -122,7 +122,8 @@ def test_executer_priorite_consigne_et_annulation_depuis_l_inspecteur(workspace:
         inspector.locator(".ex-directive.unread").filter(has_text="lis d'abord le test de fait").first.wait_for()
         card = workspace.locator(".ex-card").filter(has_text=TITRE).first
         card.locator("[data-role='directive-badge']").wait_for()
-        assert "consigne non lue" in card.inner_text()
+        # P74 : fin du jargon « consigne non lue » — le badge dit ce qui se passe.
+        assert "message en attente de la session" in card.inner_text()
         assert [d.text for d in TaskService(real_project).require(task_id).directives] == ["lis d'abord le test de fait"]
 
         # Annuler : inerte sans raison, refusé par le serveur jamais contourné.

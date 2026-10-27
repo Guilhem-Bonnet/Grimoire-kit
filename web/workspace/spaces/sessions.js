@@ -20,6 +20,7 @@
 
 import { actionStatus, badge, icon, kpiRow, monogram, setActionStatus } from '../shell.js';
 import { agoText } from '../live.js';
+import { activityBlockAsync } from '../activity.js';
 
 const STYLE_ID = 'ss-styles';
 
@@ -162,8 +163,9 @@ function sessionRow(session, selected, onSelect) {
   tr.tabIndex = 0;
   if (selected) tr.setAttribute('aria-current', 'true');
   tr.addEventListener('click', () => onSelect(session));
+  // Entrée (P58) passe par le contrôleur de liste de la coque (le clic de la ligne).
   tr.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(session); }
+    if (event.key === ' ') { event.preventDefault(); onSelect(session); }
   });
   const stateCell = el('td');
   stateCell.append(stateBadge(session));
@@ -369,6 +371,17 @@ export function renderSessionInspector(ctx, session, { portfolio, go, onWritten,
   }
   if (actions.childElementCount) box.append(actions);
   box.append(status);
+  // ── Activité (P69v2) : le fil des tâches que la session tient, dérivé du
+  // ledger — le même bloc que l'inspecteur de tâche (`activity.js`), avec la
+  // commande `claude logs` à copier. Sur un autre projet du registre, l'hôte
+  // résout `?project=` comme pour toute lecture.
+  const feedWrap = el('div');
+  feedWrap.dataset.role = 'session-activity';
+  feedWrap.append(activityBlockAsync(
+    () => ctx.api.sessionFeed(session.id, portfolio ? session.project.slug : undefined),
+    { heading: 'Activité' },
+  ));
+  box.append(feedWrap);
   box.append(resumeBlock(session));
   panel.append(box);
   ctx.dock.echo(session.resume_command || `grimoire task list${portfolio ? ' --all-projects' : ''}`);

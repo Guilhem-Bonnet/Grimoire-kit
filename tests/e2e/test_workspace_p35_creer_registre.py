@@ -329,25 +329,38 @@ def test_entretenir_le_registre_ajouter_scanner_retirer_purger(page_p35: tuple[P
     page.locator("tr[data-slug='a-scanner']").wait_for(timeout=APPEAR_MS)
     assert "a-scanner" in _registry(srv)
 
-    # Retirer : aperçu dans la page, puis confirmation.
+    # Retirer une entrée que « Ajouter » rend telle quelle (dossier présent, nom
+    # du dossier) : le retrait part tout de suite, le toast offre « Annuler »
+    # (P57, couvert par test_workspace_overlays_p55_p57_p59).
     page.locator("tr[data-slug='a-retirer'] [data-role='registry-remove']").click()
-    confirm = page.locator("[data-role='registry-remove-confirm'][data-slug='a-retirer']")
+    page.wait_for_function(
+        "() => (document.querySelector('#toast .toast-msg')?.textContent || '').includes('retiré du registre')"
+    )
+    page.wait_for_function("() => !document.querySelector(\"tr[data-slug='a-retirer']\")")
+    assert "a-retirer" not in _registry(srv)
+    assert (srv["removable"] / ".git").is_dir(), "le dossier du projet a été touché"
+    page.evaluate("() => window.GrimoireWorkspace.toast.expire()")
+
+    # Retirer une entrée morte ne se défait pas (« Ajouter » refuse un dossier
+    # absent) : aperçu dans la page, puis confirmation — ici abandonnée, la
+    # purge s'en charge plus bas.
+    page.locator("tr[data-slug='disparu'] [data-role='registry-remove']").click()
+    confirm = page.locator("[data-role='registry-remove-confirm'][data-slug='disparu']")
     confirm.wait_for(timeout=APPEAR_MS)
     page.wait_for_function(
         "() => (document.querySelector(\"[data-role='registry-remove-confirm'] .action-status\")?.textContent || '')"
         ".includes('reste sur le disque')"
     )
-    assert "a-retirer" in _registry(srv)
+    assert page.locator("#toast .toast-card").count() == 0, "un geste à confirmer n'a pas de toast"
     assert _low_contrast(page, "[data-role='registry-remove-confirm']") == []
     _capture(page, "p35-registre-retirer-confirmation-clair")
     _set_theme(page, "dark")
     assert _low_contrast(page, "[data-role='registry-remove-confirm']") == []
     _capture(page, "p35-registre-retirer-confirmation-sombre")
     _set_theme(page, "light")
-    confirm.locator("[data-role='registry-remove-yes']").click()
-    _notice(page, "retiré du registre")
-    assert "a-retirer" not in _registry(srv)
-    assert (srv["removable"] / ".git").is_dir(), "le dossier du projet a été touché"
+    confirm.get_by_role("button", name="Annuler").click()
+    page.wait_for_function("() => !document.querySelector(\"[data-role='registry-remove-confirm']\")")
+    assert "disparu" in _registry(srv)
 
     # Purger : l'aperçu liste l'entrée morte, la confirmation la retire.
     page.locator("[data-role='registry-open-prune']").click()

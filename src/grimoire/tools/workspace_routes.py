@@ -92,6 +92,8 @@ from grimoire.tools import (
     workspace_recall,
     workspace_reviews,
     workspace_sessions,
+    workspace_setup_guide,
+    workspace_since,
 )
 
 __all__ = [
@@ -242,6 +244,27 @@ def _providers(project_root: Path, _query: _Query) -> Any:
     return workspace_config.providers_view(project_root)
 
 
+def _options(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/options`` — les options du projet (P75) : taux USD→CAD et sa provenance."""
+    from grimoire.tools.workspace_work import project_options
+
+    return project_options(project_root)
+
+
+def _options_write(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/options`` — pose ``cockpit.usd_cad`` dans ``project-context.yaml`` (P75).
+
+    Une seule clé acceptée : le taux de conversion du coût affiché par la
+    colonne Fait. Un taux illisible ou hors borne est un 400, jamais écrit.
+    """
+    from grimoire.tools.workspace_work import write_usd_cad
+
+    raw = body.get("usd_cad")
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        raise ValueError("`usd_cad` doit être un nombre (CAD pour 1 USD)")
+    return write_usd_cad(project_root, float(raw))
+
+
 def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
@@ -360,6 +383,20 @@ def _attention(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _attention_since(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/attention/since`` — « depuis ta dernière visite » (P53).
+
+    ``since`` est l'instant de la visite, gardé par le navigateur : la route
+    lit, elle ne retient rien. Mêmes portées que ``attention``.
+    """
+    return workspace_since.since_view(
+        project_root,
+        since=_one(query, "since") or None,
+        portfolio=_one(query, "scope") == "portfolio",
+        slug=_one(query, "slug") or None,
+    )
+
+
 def _reviews(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/reviews`` — les PR ouvertes à revoir, les plus prêtes d'abord (P48).
 
@@ -433,6 +470,15 @@ def _data_machine(project_root: Path, _query: _Query) -> Any:
     return workspace_machine.machine_view(project_root)
 
 
+def _setup_guide(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/setup/guide`` — la machine vue par le guide de premier lancement (P36).
+
+    Lecture seule : détection, profils mémoire possibles ou non avec leur raison,
+    plan et commandes à copier. Rien ne s'écrit, rien ne démarre.
+    """
+    return workspace_setup_guide.setup_guide(project_root)
+
+
 def _memory_recall(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/memory/recall`` — les derniers reçus de rappel du projet (P27).
 
@@ -456,6 +502,18 @@ def _memory_recall_replay(project_root: Path, query: _Query) -> Any:
         query=_one(query, "q"), base=_one(query, "base"), limit=_one(query, "limit") or workspace_recall.FREE_LIMIT,
         slug=_one(query, "slug") or None,
     )
+
+
+def _capacity(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/capacity`` — WIP, réservoirs d'admission, quota et file (P71).
+
+    Le même plan à blanc que ``grimoire queue plan`` (K10), rendu pour le
+    cockpit : occupation dérivée du ledger réel, jamais un compteur à côté,
+    jamais une écriture. Voir :mod:`grimoire.tools.workspace_capacity`.
+    """
+    from grimoire.tools import workspace_capacity
+
+    return workspace_capacity.capacity_view(project_root)
 
 
 def _assist_status(project_root: Path, _query: _Query) -> Any:
@@ -510,6 +568,7 @@ def _mandate_state(project_root: Path, _query: _Query) -> Any:
 GET_ROUTES: dict[str, _GetHandler] = {
 f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
+    f"{PREFIX}capacity": _capacity,
     f"{PREFIX}tasks": _tasks,
     f"{PREFIX}waves": _waves,
     f"{PREFIX}files": _files,
@@ -527,6 +586,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}agents": _agents,
     f"{PREFIX}hooks": _hooks,
     f"{PREFIX}providers": _providers,
+    f"{PREFIX}options": _options,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -534,6 +594,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}sessions": _sessions,
     f"{PREFIX}pulse": _pulse,
     f"{PREFIX}attention": _attention,
+    f"{PREFIX}attention/since": _attention_since,
     f"{PREFIX}reviews": _reviews,
     f"{PREFIX}flows/runs": _flow_runs,
     f"{PREFIX}memory/overview": _memory_overview,
@@ -542,6 +603,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/entry": _memory_entry,
     f"{PREFIX}memory/quality": _memory_quality,
     f"{PREFIX}data/machine": _data_machine,
+    f"{PREFIX}setup/guide": _setup_guide,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
 }
@@ -598,7 +660,25 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
         handler = GET_ROUTES.get(path)
         if handler is not None:
             return handler(project_root, query)
+        if path.startswith(f"{PREFIX}sessions/"):
+            # Bloc Activité d'une session (P69v2) : le fil des tâches que son claim tient.
+            rest = path[len(f"{PREFIX}sessions/") :].strip("/")
+            session_id, _, tail = rest.partition("/")
+            if session_id and tail == "feed":
+                from grimoire.tools import workspace_session_feed
+
+                return workspace_session_feed.session_feed(project_root, session_id)
         if path.startswith(f"{PREFIX}tasks/"):
+            if path.endswith("/launch-plan"):
+                # Préflight d'assignation (P47 lot 1) : plan en lecture seule, rien n'est lancé (ADR-008).
+                from grimoire.tools import workspace_launch_preflight
+
+                return workspace_launch_preflight.launch_preflight(project_root, _task_id(path, "launch-plan"))
+            if path.endswith("/feed"):
+                # Bloc Activité d'une tâche (P69v2) : le fil dérivé du ledger.
+                from grimoire.tools import workspace_session_feed
+
+                return workspace_session_feed.task_feed(project_root, _task_id(path, "feed"))
             if path.endswith("/trace"):
                 return workspace_api.task_trace_view(project_root, _task_id(path, "trace"))
             if path.endswith("/recall"):
@@ -823,6 +903,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}options": _options_write,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:

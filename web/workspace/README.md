@@ -76,6 +76,9 @@ démonstration dans cette suite, et il ne doit jamais y en avoir.
 | `glossary.js` | Chargement du glossaire et pile d'infobulles épinglables ; nom du 4e espace (`FOURTH_SPACE`) | lot 2, P31 |
 | `api.js` | **Le seul module qui appelle `fetch`.** Cible le bon projet sur les deux hôtes | figé par le squelette |
 | `spaces/a-traiter.js` | Accueil : ce qui attend une décision, groupé par urgence (`/api/workspace/attention`) ; une ligne par élément (projet, raison, ancienneté, action en ligne qui ouvre l'écran de décision, sélection posée), détail dans l'inspecteur, états vide / erreur partielle / lecture seule, clavier j / k / Entrée | P31, P32 |
+| `spaces/demarrer.js` | À traiter › Démarrer (`#a-traiter?view=demarrer`) : le premier lancement en lecture seule. Prend d'office la place de l'accueil quand `/api/health` dit le projet non initialisé. État S0 à S3 avec sa source, détection de la machine, profils mémoire (les impossibles grisés avec leur raison), plan et commandes à copier (`/api/workspace/setup/guide`) ; aucune écriture | P36 |
+| `setup-state.js` | Module pur partagé par le guide et la vitrine : classe le projet servi (S0 pas initialisé, S1 initialisation en échec, S2 mémoire non liée, S3 prêt, sinon « inconnu » avec sa raison) d'après `/api/status`, `/api/health`, `/api/setup/run` et `/api/memory/status` sans sonde ; `servedByCockpit()` : sans le marqueur du cockpit, aucune requête | P36 |
+| `spaces/a-traiter-since.js` | À traiter › « Depuis ta dernière visite » : livré, refusé, laissé en attente depuis la dernière visite (`/api/workspace/attention/since`), chaque ligne liée à sa tâche ; la visite est gardée par le navigateur (`visit:<portée>`), avancée seulement quand le résumé a été refermé ou quitté | P53 |
 | `spaces/piloter.js` | Flotte et projet, KPI, « À traiter », agents (clause d'emploi, outils, contexte, skills, usage — #374) | lot 4 |
 | `spaces/concevoir.js` | Toile, zoom, éditeur de graphe, bibliothèque, inspecteur de nœud | lot 3 |
 | `spaces/executer.js` | Board gouverné, portes, carte de tâche, timeline | lot 4 |
@@ -114,12 +117,12 @@ directement dans le DOM de la coque :
 | `ctx.dock` | `log(onglet, …lignes)`, `clear`, `setTab`, `echo(commande)` |
 | `ctx.empty` | `(titre, phrase, commande, action?)` → le bloc d'état vide unique ; `action` est `{ label, run }` (un bouton qui fait, pas une commande à recopier) ; sans `action`, une commande que la Console du dock sait exécuter (liste blanche, sans argument) reçoit un bouton « Lancer dans la Console » |
 | `ctx.loading` | `(libellé, lignes?)` → `[squelette, texte pour lecteurs d'écran]` à poser dans une zone qui attend ses données (jamais un « Chargement… » nu) ; la coque en pose un sur la toile à chaque changement d'espace et le retire dès que l'espace y écrit du contenu |
-| `ctx.openPanel` | `(id)` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px |
-| `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté |
+| `ctx.openPanel` | `(id, { detail? })` → ouvre un panneau latéral (`explorer`, `inspector`, `evidence`) : épinglé au bureau, en tiroir sous 900 px ; `detail: true` (montrer l'élément choisi) n'agit que sous 900 px et pas quand le détail est déjà posé sous la liste (P59) |
+| `ctx.signal` | Un `AbortSignal` annulé quand l'espace est démonté. Après, `dock`, `docbar`, `setItem`, `openPanel` et `rail` n'ont plus d'effet (P06) : une réponse en retard ne fuit pas sur l'espace suivant ; ce qui reste dans le DOM du module se garde en testant `ctx.signal.aborted` après chaque `await` |
 | `ctx.goto` | `goto(id, params?)` — naviguer vers un espace, une rubrique ou un ancien identifiant (`'source'`) ; `params` est vu au montage qui suit (ex. `goto('source', { file })` depuis ⌘K) et écrit dans le hash (lien profond) |
 | `ctx.params` | Ce que l'appelant de `goto()` a demandé pour CE montage — `{}` la plupart du temps |
 | `ctx.live` | `{ on(handler) }` — appelé quand le pouls annonce un changement du ledger ou des sessions (`live.js`) ; l'espace relit SES données, sans rien jeter de ce que l'utilisateur écrit ; remis à zéro par la coque à chaque changement d'espace |
-| `ctx.rail` | `{ on(id, handler) }` — enregistre ce que fait un rail sans panneau dédié (ex. « 2 », bibliothèque de Concevoir) tant que cet espace reste monté ; remis à zéro par la coque à chaque changement d'espace |
+| `ctx.rail` | `{ on(id, handler), reason(id, phrase) }` — enregistre ce que fait un rail sans panneau dédié (ex. « 2 », bibliothèque de Concevoir) tant que cet espace reste monté ; le bouton n'est visible que dans un espace qui l'enregistre, et `reason` le désactive en disant pourquoi (`''` le réactive) ; remis à zéro par la coque à chaque changement d'espace |
 
 Deux règles opposables :
 
@@ -141,6 +144,12 @@ Deux règles opposables :
   Le bouton du rail ouvre, le focus entre dans le tiroir, Échap, son bouton
   « Fermer » ou un appui sur le voile le referment et rendent le focus au rail.
   La barre de document passe à la ligne ; les onglets des espaces défilent.
+- **Conteneurs (P59)** : ce seuil ne décide que de la coque. La mise en page des
+  panneaux suit la place qu'ils ont : `#middle` et `#canvas` sont des
+  conteneurs de requête, les espaces écrivent `@container canvas (max-width: …)`
+  et jamais `@media (max-width: …)` (`tests/unit/test_workspace_overlays.py`).
+  Entre 600 et 1180 px de `#middle`, hors atelier, le détail se pose sous la
+  liste, sur toute la largeur.
 - **Mesure** : `scrollWidth` du document ne prouve rien ici (`#shell` est en
   `overflow: hidden`, il vaut `innerWidth` même quand le centre est écrasé à
   0 px). `tests/e2e/test_workspace_responsive_a11y.py` mesure la largeur du
@@ -153,11 +162,27 @@ Deux règles opposables :
   de tabulation, flèches gauche/droite (rebouclage), Début/Fin. Dock : la flèche
   active ; espaces : elle déplace le focus et Entrée active (monter un espace
   coûte des requêtes).
-- **Chargement** : `ctx.loading()` pose un squelette décoratif et un texte pour
-  les lecteurs d'écran ; la coque en pose un sur la toile à chaque changement
-  d'espace et le retire dès que l'espace y écrit du contenu. Les zones de données
+- **Chargement** : `ctx.loading(libellé, lignes, forme)` pose un squelette
+  décoratif et un texte pour les lecteurs d'écran ; la coque en pose un sur la
+  toile à chaque changement d'espace et le retire dès que l'espace y écrit du
+  contenu. Le squelette a la forme de la liste qui vient (P60 : `board`,
+  `table`, `results`, `kpi`, `inbox`, sinon `lines`) ; celle de la toile est
+  déclarée par rubrique (`skeleton` dans `SPACES`).
+- **Lignes de liste** : `listNav(conteneur, { rows, onActivate, onMove, mark,
+  key })` branche j / k / Entrée sur une liste (P58), lus par la coque, donc
+  jamais pendant une saisie ; `rowActions(actions)` pose les actions
+  secondaires d'une ligne, révélées au survol et au focus, toutes dans un menu
+  « … » (P56) ; `moreMenu()` est ce menu, partagé avec l'inspecteur de tâche, un
+  `popover="auto"` (P55) : Échap, le clic à côté et le retour du focus au bouton
+  sont ceux du navigateur. La palette et l'aide sont des `<dialog>` modaux, les
+  infobulles des `popover="manual"`. Les zones de données
   (`#canvas`, `#explorer-body`, `#inspector-body`, `#evidence-body`) sont des
   régions `aria-live="polite"`.
+- **« Annuler » (P57)** : `undoToast(message, { undo, undone })` suit un geste
+  réversible, parti sans confirmation ; `undo()` rappelle la route inverse
+  existante. Région `#toast` (`role="status"`), 10 s, en pause au survol et au
+  focus ; `GrimoireWorkspace.toast.expire()` en déclenche la fin dans les tests.
+  Un geste irréversible n'a pas de toast : il garde sa confirmation.
 - **États vides** : un bouton qui fait (`ctx.empty(…, action)`), pas une commande
   à recopier. Sans `action`, une commande que la Console sait exécuter (liste
   blanche, sans argument) reçoit « Lancer dans la Console ». Un explorateur ou un
@@ -268,7 +293,12 @@ un autre projet du registre qu'on ne fait que regarder.
 ## Ce que la Console accepte
 
 `POST /api/workspace/command` n'exécute que des sous-commandes `grimoire` de
-lecture, sans shell, avec un délai maximal. La liste vit dans
+lecture, sans shell, avec un délai maximal. La saisie est un vrai champ de la
+coque, sous l'onglet Console du dock (P06) : `` ` `` y place le curseur, ↑ / ↓
+rappellent les commandes lancées, Échap vide le champ puis rend le focus, Tab
+sort du dock. Chaque entrée de la liste est une commande feuille de la CLI,
+vérifiée par `tests/unit/test_workspace_console_commands.py`, qui vérifie aussi
+chaque commande « équivalente » citée par les modules. La liste vit dans
 `src/grimoire/tools/workspace_exec.py` (`ALLOWED`) — l'ouvrir davantage se fait
 là, avec le test qui va avec. `init`, `up`, `migrate`, `serve`, `cockpit`,
 `upgrade` et `ext` en sont **volontairement absents** : ils réécrivent l'arbre

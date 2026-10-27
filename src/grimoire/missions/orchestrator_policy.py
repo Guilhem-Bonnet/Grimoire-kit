@@ -33,6 +33,12 @@ janitor :
           max_cycles: 2           # retours au worker (CI rouge, conflit) avant l'escalade à l'humain
           protected_paths: []     # chemins qui reviennent à l'humain, en plus des défauts (code des gardes, politique,
                                   # workflows et hooks, pyproject, fichiers compilés) ; comparaison en casefold()
+        orchestrator:             # #962 : une session qui répond sous mandat aux questions des workers lancés
+          enabled: false
+          model: sonnet           # vide : sonnet
+          wip: 1                  # sessions orchestrateur en même temps
+          sessions_per_day: 12    # plafond de lancements par jour (UTC)
+          permission_mode: dontAsk  # imposé : toute autre valeur rend la politique illisible (liste blanche d'outils)
       breaker:
         threshold: 3              # échecs consécutifs avant l'ouverture du disjoncteur
       janitor:
@@ -69,6 +75,7 @@ __all__ = [
     "ORCHESTRATION_FILE",
     "MergerRole",
     "OrchestratorPolicy",
+    "OrchestratorRole",
     "PolicyRead",
     "ReviewerRole",
     "WorkerRole",
@@ -85,6 +92,11 @@ _WORKER_KEYS = frozenset({"enabled", "model", "tier", "wip", "sessions_per_day",
 _REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode"})
 DEFAULT_MAX_CYCLES = 2
 _MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths"})
+_ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
+#: Le modèle de la session orchestrateur quand la politique n'en nomme pas.
+DEFAULT_ORCHESTRATOR_MODEL = "sonnet"
+#: Le seul mode de permission de la session orchestrateur (``orchestrator_session.PERMISSION_MODE``).
+ORCHESTRATOR_PERMISSION_MODE = "dontAsk"
 #: Les checks qui ne disent rien du code (couverture rapportée par un service tiers) : hors du verdict par défaut.
 DEFAULT_IGNORED_CHECKS: tuple[str, ...] = ("codecov/*",)
 
@@ -141,6 +153,25 @@ class MergerRole:
 
 
 @dataclass(frozen=True, slots=True)
+class OrchestratorRole:
+    """Le rôle ``orchestrator`` (#962) : désactivé par défaut ; une session à la fois, sonnet, 12 lancements par jour.
+
+    Son mode de permission est imposé (``dontAsk`` : refuse sans demander tout outil hors de sa liste blanche) ; la
+    politique ne peut pas le changer, encore moins en ``bypassPermissions``.
+    """
+
+    enabled: bool = False
+    model: str = DEFAULT_ORCHESTRATOR_MODEL
+    wip: int = 1
+    sessions_per_day: int = 12
+    permission_mode: str = ORCHESTRATOR_PERMISSION_MODE
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "model": self.model, "wip": self.wip,
+                "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode}
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestratorPolicy:
     worker: WorkerRole = field(default_factory=WorkerRole)
     base: str = ""
@@ -148,10 +179,12 @@ class OrchestratorPolicy:
     close_issue: bool = False
     reviewer: ReviewerRole = field(default_factory=ReviewerRole)
     merger: MergerRole = field(default_factory=MergerRole)
+    orchestrator: OrchestratorRole = field(default_factory=OrchestratorRole)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "worker": self.worker.to_dict(), "reviewer": self.reviewer.to_dict(), "merger": self.merger.to_dict(),
+            "orchestrator": self.orchestrator.to_dict(),
             "base": self.base,
             "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue,
         }
@@ -196,7 +229,7 @@ def _text(value: Any, where: str) -> str:
 
 
 def _session_role(data: dict[str, Any], role: str) -> tuple[bool, str, str, str]:
-    """``(enabled, model, tier, permission_mode)`` d'un rôle qui lance des sessions de fond (worker, reviewer)."""
+    """``(enabled, model, tier, permission_mode)`` d'un rôle qui lance des sessions de fond (worker, reviewer, orchestrator)."""
     where = f"orchestrator.roles.{role}"
     enabled = data.get("enabled", False)
     if not isinstance(enabled, bool):
@@ -265,9 +298,30 @@ def _parse_merger(raw: Any) -> MergerRole:
     )
 
 
+def _parse_orchestrator(raw: Any) -> OrchestratorRole:
+    where = "orchestrator.roles.orchestrator"
+    data = _table(raw, where, _ORCHESTRATOR_KEYS)
+    enabled, model, _tier, _mode = _session_role(
+        {**data, "permission_mode": ORCHESTRATOR_PERMISSION_MODE}, "orchestrator"
+    )
+    mode = _text(data.get("permission_mode", ORCHESTRATOR_PERMISSION_MODE), f"{where}.permission_mode")
+    if mode != ORCHESTRATOR_PERMISSION_MODE:
+        raise _InvalidPolicyError(
+            f"{where}.permission_mode : {mode!r} refusé — la session orchestrateur tourne toujours en "
+            f"{ORCHESTRATOR_PERMISSION_MODE} (liste blanche d'outils, aucun autre outil sans demander)"
+        )
+    return OrchestratorRole(
+        enabled=enabled,
+        model=model or DEFAULT_ORCHESTRATOR_MODEL,
+        wip=_positive(data.get("wip", 1), f"{where}.wip"),
+        sessions_per_day=_positive(data.get("sessions_per_day", 12), f"{where}.sessions_per_day"),
+        permission_mode=mode,
+    )
+
+
 def _parse(block: Any) -> OrchestratorPolicy:
     top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor"}))
-    roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer", "merger"}))
+    roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer", "merger", "orchestrator"}))
     breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold"}))
     janitor = _table(top.get("janitor", {}), "orchestrator.janitor", frozenset({"close_issue"}))
     close_issue = janitor.get("close_issue", False)
@@ -280,6 +334,7 @@ def _parse(block: Any) -> OrchestratorPolicy:
         worker=_parse_worker(roles["worker"]) if "worker" in roles else WorkerRole(),
         reviewer=_parse_reviewer(roles["reviewer"]) if "reviewer" in roles else ReviewerRole(),
         merger=_parse_merger(roles["merger"]) if "merger" in roles else MergerRole(),
+        orchestrator=_parse_orchestrator(roles["orchestrator"]) if "orchestrator" in roles else OrchestratorRole(),
         base=base,
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
         close_issue=close_issue,

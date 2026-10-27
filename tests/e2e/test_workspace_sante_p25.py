@@ -173,7 +173,73 @@ def test_la_sante_rend_chaque_critere_et_le_projet_sort_en_alerte(sante: tuple[P
     for value in page.locator(".sm-crit .sm-value").all_inner_texts():
         assert value.strip() and "[n]" not in value, "chaque critère porte sa mesure, jamais un trou"
     assert "grimoire-forge › local · 26 souvenirs, 0 projection" in page.locator(".space-head").inner_text()
-    assert page.locator(".sm-map .sm-slot").inner_text().startswith("La carte par hall n’est pas encore servie")
+
+
+def test_la_carte_par_hall_rend_la_mesure_et_ouvre_la_recherche_filtree(sante: tuple[Page, dict[str, str]]) -> None:
+    """P73 : surface = nombre d'entrées classées, un clic descend dans la Recherche filtrée."""
+    page, srv = sante
+    _open_sante(page, srv)
+
+    # 25 « python is the best language » (faits non typés) + 1 décision = un seul hall.
+    tiles = page.locator(".sm-tmap .sm-tile")
+    assert tiles.count() == 1
+    tile = tiles.first
+    assert tile.get_attribute("data-hall") == "faits"
+    assert tile.locator(".sm-tile-n").inner_text() == "26"
+    assert "25 faits non typés" in tile.locator(".sm-tile-sub").inner_text()
+    assert "1 décision" in tile.locator(".sm-tile-sub").inner_text()
+    assert page.locator(".sm-map .sm-slot").count() == 0, "la carte est servie : plus de place vide"
+
+    # La légende « Lire la carte » vit dans le panneau de droite et ne promet
+    # que ce que la carte dessine (la forme ; fraîcheur et liens sont nommés à venir).
+    legend = page.locator("#inspector-body .sm-legend")
+    assert legend.get_attribute("aria-label") == "Lire la carte"
+    assert legend.locator(".sm-leg").count() == 4
+    assert "Faits et décisions" in legend.inner_text()
+    assert "ne les dessine pas encore" in legend.locator(".sm-leg-note").inner_text()
+
+    tile.click()
+    page.wait_for_function("() => window.GrimoireWorkspace.module === 'memoire'")
+    page.wait_for_selector(".kn-main .kn-summary:not(:empty)", timeout=30_000)
+    boxes = page.locator(".kn-filters fieldset").first.locator(".kn-chk")
+    states = {
+        boxes.nth(i).locator(".kn-lbl").inner_text().strip(): boxes.nth(i).locator("input").is_checked()
+        for i in range(boxes.count())
+    }
+    assert states.get("Décision") is True and states.get("Fait non typé") is True
+    assert states.get("Incident, piège") is False, "le hall cliqué filtre la Recherche sur ses seuls types"
+
+
+def test_la_carte_dit_sa_place_vide_plutot_que_dessiner(sante: tuple[Page, dict[str, str]]) -> None:
+    """P73, états vides : un store vide ou non lu se dit en clair, rien n'est simulé."""
+    page, srv = sante
+    _open_sante(page, srv)
+    report = page.evaluate(
+        "(u) => fetch(u).then(r => r.json())",
+        f"{srv['base']}/api/workspace/memory/quality?slug={srv['forge']}",
+    )
+
+    empty = dict(report)
+    empty["measures"] = {**report["measures"], "types": {}}
+    page.route("**/api/workspace/memory/quality*", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(empty)))
+    page.get_by_role("button", name="Mesurer à nouveau").click()
+    page.wait_for_selector(".sm-map .sm-slot", timeout=30_000)
+    assert "store est vide" in page.locator(".sm-map .sm-slot").inner_text()
+
+    unread = dict(report)
+    unread["storeReason"] = "aucun store encore créé"
+    unread["measures"] = {**report["measures"], "types": None}
+    page.unroute("**/api/workspace/memory/quality*")
+    page.route("**/api/workspace/memory/quality*", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(unread)))
+    page.get_by_role("button", name="Mesurer à nouveau").click()
+    page.wait_for_function(
+        "() => (document.querySelector('.sm-map .sm-slot')?.textContent || '').includes('Carte non mesurable')",
+        timeout=30_000,
+    )
+    assert "aucun store encore créé" in page.locator(".sm-map .sm-slot").inner_text()
+    page.unroute("**/api/workspace/memory/quality*")
 
 
 def test_le_geste_passe_par_un_apercu_puis_la_commande_a_copier(sante: tuple[Page, dict[str, str]]) -> None:

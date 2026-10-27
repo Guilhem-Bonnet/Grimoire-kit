@@ -148,12 +148,32 @@ export function historyList(entryId, rows, { canEdit, onUndo }) {
   return box;
 }
 
+// ── Annuler un geste réversible (P57) ───────────────────────────────────────
+// Retirer une entrée se défait en la rendant au service, et l'inverse : deux
+// gestes de la même route (`POST /api/memory`, aperçu puis application avec la
+// version rendue). Les autres gestes (étiquettes, source, fusion, remplacement)
+// se défont depuis l'historique de l'entrée, avec leur aperçu : pas de toast.
+
+export const INVERSE_GESTURE = { retract: 'unretract', unretract: 'retract' };
+
+/** Rejoue le geste inverse de `gesture` sur `entryId` ; rejette sur refus. */
+export async function undoGesture(ctx, { gesture, entryId, project }) {
+  const inverse = INVERSE_GESTURE[gesture];
+  if (!inverse) throw new Error(`geste sans inverse : ${gesture}`);
+  const base = { gesture: inverse, id: entryId, params: {} };
+  const preview = await ctx.api.memoryGesture({ ...base, mode: 'preview' }, project);
+  const reason = inverse === 'retract' ? 'annulation de « Rendre au service »' : '';
+  return ctx.api.memoryGesture({ ...base, mode: 'apply', version: preview.version, reason, confirm: true }, project);
+}
+
 // ── Le panneau d'un geste ───────────────────────────────────────────────────
 
 /**
  * Ouvre un geste à la place de `anchor` (la rangée d'actions) dans le panneau.
  * `kind` : correct (onglets), supersede, unretract ou undo (`row` requis).
- * `onDone(message)` est appelé après une application réussie.
+ * `onDone(message, { gesture, reason })` est appelé après une application
+ * réussie ; `gesture` dit l'onglet réellement appliqué (retirer est un onglet
+ * de « Corriger »), pour que l'écran offre l'annulation des gestes réversibles.
  */
 export function openGesture(ctx, { entry, kind, row, candidates, project, anchor, onDone }) {
   const panel = el('section', 'kn-gesture', null, { 'aria-label': TITLES[kind] || 'Corriger' });
@@ -338,7 +358,7 @@ export function openGesture(ctx, { entry, kind, row, candidates, project, anchor
     try {
       const done = await request({ mode: 'apply', version: preview.version, reason: reasonValue(), confirm: true });
       if (ctx.signal.aborted) return;
-      await onDone(done.message || 'Geste appliqué.');
+      await onDone(done.message || 'Geste appliqué.', { gesture: gesture(), reason: reasonValue() });
       return;
     } catch (error) {
       const fresh = error && error.payload && error.payload.stale ? error.payload.preview : null;

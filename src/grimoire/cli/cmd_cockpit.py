@@ -60,13 +60,13 @@ from grimoire.tools.project_registry import (
 from grimoire.tools.project_update import update_project
 from grimoire.tools.request_guard import (
     check_host,
-    check_mutation,
     drain_body,
     has_body,
     inject_session_token,
     new_session_token,
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
+from grimoire.tools.workspace_write_guard import cockpit_journal_path, guard_write
 
 cockpit_app = typer.Typer(
     help="Local multi-project governance cockpit (serves the bundled site).",
@@ -369,17 +369,23 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         return True
 
     def _guard_mutation(self) -> bool:
-        """Garde des écritures (``POST``/``PUT``), commune avec l'atelier.
+        """Garde d'écriture commune (ADR-008 D3), partagée avec l'atelier.
 
-        Pair et hôte (``_local_only``), puis ``Origin`` égal à l'origine servie,
-        ``Sec-Fetch-Site`` et type de contenu JSON — avant toute lecture du corps.
-        Une page tierce sait émettre un ``POST`` « simple » vers la loopback ; le
-        contrôle d'hôte seul ne la voit pas.
+        Pair réseau et hôte, puis ``Origin`` égal à l'origine servie,
+        ``Sec-Fetch-Site`` et type de contenu JSON — avant toute lecture du
+        corps (``workspace_write_guard``). Une page tierce sait émettre un
+        ``POST`` « simple » vers la loopback ; le contrôle d'hôte seul ne la
+        voit pas. Chaque verdict est journalisé en JSONL ajout seul dans le
+        dossier runtime du cockpit, fail-closed si le journal est inaccessible.
         """
-        if not self._local_only():
-            return False
-        refused = check_mutation(
-            self.headers, int(cast(tuple[str, int], self.server.server_address)[1]), with_body=has_body(self.headers)
+        refused = guard_write(
+            self.headers,
+            int(cast(tuple[str, int], self.server.server_address)[1]),
+            method=self.command,
+            route=urlparse(self.path).path,
+            journal=cockpit_journal_path(),
+            with_body=has_body(self.headers),
+            peer=self.client_address[0],
         )
         if refused:
             self._send_json(refused[0], {"ok": False, "error": refused[1]})
