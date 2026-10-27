@@ -117,6 +117,10 @@ def render_markdown(report: dict[str, Any]) -> str:
     score = report["score"]
     shown = "null (aucune question notée)" if score is None else f"{score:.1%}"
     lines = [
+        "---",
+        "audience: décision",
+        "---",
+        "",
         f"# LongMemEval — {report['measured_at']}",
         "",
         f"- Score {report['metric']} @ k={report['k']} : **{shown}** sur {report['questions_scored']} questions",

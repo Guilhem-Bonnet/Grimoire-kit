@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # LongMemEval — 2026-10-26
 
 - Score recall_any@k (session) @ k=5 : **66.7%** sur 3 questions
