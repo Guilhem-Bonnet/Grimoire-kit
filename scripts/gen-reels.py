@@ -15,6 +15,7 @@ Usage :
     python scripts/gen-reels.py            # réécrit web/data/reels/
     python scripts/gen-reels.py --check    # n'écrit rien ; sort 1 si une bobine a dérivé
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,7 +44,10 @@ REELS: list[dict] = [
         "title": "Clôture refusée, puis acceptée",
         "summary": "Sans reçu de revue, la clôture d'une tâche V2 est refusée ; elle passe une fois la revue écrite.",
         "steps": [
-            ("run", 'task add "Livrer fichier" -a "le livrable est relu par un humain" --check "test -f livrable.txt" --ready'),
+            (
+                "run",
+                'task add "Livrer fichier" -a "le livrable est relu par un humain" --check "test -f livrable.txt" --ready',
+            ),
             ("run", "task claim {0}"),
             ("run", "task move {0} --to running"),
             ("write", "livrable.txt", "livré\n"),
@@ -111,17 +115,28 @@ REELS: list[dict] = [
 
 _KEEP = {"GRIMOIRE_NO_COCKPIT"}
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-_NOISE = re.compile(r"^(Warning: You are sending unauthenticated|Loading weights|\S*BertModel LOAD REPORT|Key  |-{5,}\+|embeddings\.|Notes:|- UNEXPECTED)")
+_NOISE = re.compile(
+    r"^(Warning: You are sending unauthenticated|Loading weights|\S*BertModel LOAD REPORT|Key  |-{5,}\+|embeddings\.|Notes:|- UNEXPECTED)"
+)
 
 
 def _env(home: Path) -> dict[str, str]:
     env = dict(os.environ)
-    env.update({
-        "GRIMOIRE_NO_COCKPIT": "1", "HF_HUB_OFFLINE": "1", "TQDM_DISABLE": "1",
-        "NO_COLOR": "1", "COLUMNS": "100", "LC_ALL": "C.UTF-8", "HOME": str(home),
-        "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
-        "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
-    })
+    env.update(
+        {
+            "GRIMOIRE_NO_COCKPIT": "1",
+            "HF_HUB_OFFLINE": "1",
+            "TQDM_DISABLE": "1",
+            "NO_COLOR": "1",
+            "COLUMNS": "100",
+            "LC_ALL": "C.UTF-8",
+            "HOME": str(home),
+            "GIT_AUTHOR_NAME": "fixture",
+            "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+            "GIT_COMMITTER_NAME": "fixture",
+            "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+        }
+    )
     # Le modèle d'embedding reste lu dans le cache réel (HOME est jetable, hors ligne).
     env.setdefault("HF_HOME", str(Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")))
     # Aucun signal d'hôte : sans eux, le canal humain n'est plus déduit « agent ».
@@ -155,20 +170,30 @@ def _grimoire(root: Path, env: dict[str, str], args: str) -> tuple[int, str]:
     import shlex
 
     proc = subprocess.run(
-        [*_CLI, *shlex.split(args)], cwd=root, env=env,
-        capture_output=True, text=True, timeout=300, check=False,
+        [*_CLI, *shlex.split(args)],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
     )
     return proc.returncode, _normalize(proc.stdout + proc.stderr, root)
 
 
 def _grimoire_human(root: Path, env: dict[str, str], args: str, confirm: str = "o") -> tuple[int, str]:
     """Rejoue une commande sur un pseudo-terminal où l'humain confirme sa présence."""
+    import fcntl
     import pty
     import select
     import shlex
+    import struct
+    import termios
 
     pid, fd = pty.fork()
     if pid == 0:  # enfant
+        # Largeur figée : sinon le retour à la ligne suit la taille du pty de la machine.
+        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 100, 0, 0))
         os.chdir(root)
         os.execvpe(_CLI[0], [*_CLI, *shlex.split(args)], env)  # noqa: S606 - commande du kit, arguments figés par REELS
     chunks: list[bytes] = []
@@ -214,7 +239,14 @@ def record(reel: dict, version: str) -> dict:
         for step in reel["steps"]:
             if step[0] == "supersede":
                 code, out = _supersede(root, env, step[1], step[2])
-                frames.append({"kind": "run", "command": "grimoire memory supersede <ancien> <nouveau>", "exit_code": code, "output": out})
+                frames.append(
+                    {
+                        "kind": "run",
+                        "command": "grimoire memory supersede <ancien> <nouveau>",
+                        "exit_code": code,
+                        "output": out,
+                    }
+                )
                 continue
             if step[0] == "write":
                 (root / step[1]).write_text(step[2], encoding="utf-8")
@@ -231,18 +263,27 @@ def record(reel: dict, version: str) -> dict:
         json.dumps([[f["command"], f["exit_code"], f["output"]] for f in frames], ensure_ascii=False).encode()
     ).hexdigest()
     return {
-        "schema": SCHEMA, "id": reel["id"], "title": reel["title"], "summary": reel["summary"],
-        "command": [f["command"] for f in frames], "kit_version": version,
+        "schema": SCHEMA,
+        "id": reel["id"],
+        "title": reel["title"],
+        "summary": reel["summary"],
+        "command": [f["command"] for f in frames],
+        "kit_version": version,
         "recorded_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "output_sha256": digest, "frames": frames,
+        "output_sha256": digest,
+        "frames": frames,
     }
 
 
 def _supersede(root: Path, env: dict[str, str], old_word: str, new_word: str) -> tuple[int, str]:
     """Remplace la décision qui porte *old_word* par celle qui porte *new_word* (vrais identifiants)."""
     proc = subprocess.run(
-        [*_CLI, "-o", "json", "memory", "list"], cwd=root, env=env,
-        capture_output=True, text=True, check=False,
+        [*_CLI, "-o", "json", "memory", "list"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     try:
         entries = json.loads(proc.stdout)["entries"]
@@ -289,15 +330,18 @@ def render_html(reel: dict) -> str:
     frames = []
     for f in reel["frames"]:
         cls = "ok" if f["exit_code"] == 0 else "ko"
-        out = f'<pre>{html.escape(f["output"])}</pre>' if f["output"] else ""
+        out = f"<pre>{html.escape(f['output'])}</pre>" if f["output"] else ""
         frames.append(
             f'<section class="frame"><p class="cmd">$ {html.escape(f["command"])}'
             f'<span class="rc {cls}">sortie {f["exit_code"]}</span></p>{out}</section>'
         )
     return _HTML.format(
-        title=html.escape(reel["title"]), summary=html.escape(reel["summary"]),
-        version=html.escape(reel["kit_version"]), date=html.escape(reel["recorded_at"]),
-        digest=reel["output_sha256"], frames="\n".join(frames),
+        title=html.escape(reel["title"]),
+        summary=html.escape(reel["summary"]),
+        version=html.escape(reel["kit_version"]),
+        date=html.escape(reel["recorded_at"]),
+        digest=reel["output_sha256"],
+        frames="\n".join(frames),
     )
 
 
@@ -322,12 +366,16 @@ def main() -> int:
             old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
             if old.get("output_sha256") != reel["output_sha256"]:
                 drift += 1
-                print(f"dérive : {spec['id']} ({old.get('output_sha256', 'absente')[:12]} → {reel['output_sha256'][:12]})")
+                print(
+                    f"dérive : {spec['id']} ({old.get('output_sha256', 'absente')[:12]} → {reel['output_sha256'][:12]})"
+                )
         else:
             write(reel)
             print(f"bobine {spec['id']} · {reel['output_sha256'][:12]}")
     if not args.check:
-        (OUT / "index.json").write_text(json.dumps({"schema": SCHEMA, "reels": index}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        (OUT / "index.json").write_text(
+            json.dumps({"schema": SCHEMA, "reels": index}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
     return 1 if drift else 0
 
 
