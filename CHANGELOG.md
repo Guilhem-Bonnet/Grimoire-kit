@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(web): bobines de rejeu générées sur un projet fixture. `python scripts/gen-reels.py` rejoue de vraies exécutions du kit (clôture refusée puis acceptée, décision humaine attestée sur pseudo-terminal, supersession, rappel au claim, tri V0/V1/V2) sur un projet jetable et écrit `web/data/reels/*.json` et leur HTML statique. Chaque bobine porte sa commande, la version du kit, sa date et l'empreinte de sa sortie normalisée ; `tests/unit/scripts/test_gen_reels.py` échoue dès qu'une bobine ne correspond plus à la sortie du kit courant (`--check` fait de même en ligne de commande). (P37, `GAO-p37-bobines-001`)
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27

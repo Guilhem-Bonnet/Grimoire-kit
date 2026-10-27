@@ -1,0 +1,55 @@
+{
+  "schema": "grimoire-reel/v1",
+  "id": "decision-humaine-attestee",
+  "title": "Décision humaine attestée",
+  "summary": "L'agent pose une question ; seule la réponse du canal humain rend la tâche.",
+  "command": [
+    "grimoire task add \"Choisir base\" -a \"le choix est tranche par un humain\" --ready",
+    "grimoire task claim GAO-choisir-base-001",
+    "grimoire task ask GAO-choisir-base-001 \"Quelle base de données ?\" --option sqlite --option postgres",
+    "grimoire task show GAO-choisir-base-001",
+    "grimoire task answer GAO-choisir-base-001 sqlite",
+    "grimoire task show GAO-choisir-base-001"
+  ],
+  "kit_version": "3.71.0",
+  "recorded_at": "2026-10-27T20:38:06Z",
+  "output_sha256": "3800e4bcd04fe9526223793a42f4ee707a341ac497c6c877519f7f18883501ce",
+  "frames": [
+    {
+      "kind": "run",
+      "command": "grimoire task add \"Choisir base\" -a \"le choix est tranche par un humain\" --ready",
+      "exit_code": 0,
+      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-choisir-base-001 — Choisir base (ready)\n  vérifiabilité : V2 — critère sans verdict reconnu : 'le choix est tranche par un humain'\n    non reconnu : le choix est tranche par un humain"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task claim GAO-choisir-base-001",
+      "exit_code": 0,
+      "output": "OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → aucun — omets le paramètre model,\ngarde celui de la session"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task ask GAO-choisir-base-001 \"Quelle base de données ?\" --option sqlite --option postgres",
+      "exit_code": 0,
+      "output": "OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,\ngarde celui de la session"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task show GAO-choisir-base-001",
+      "exit_code": 0,
+      "output": "GAO-choisir-base-001 — Choisir base\n  état    : waiting (board : blocked)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n  usage   : none\n  porté par : cli"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task answer GAO-choisir-base-001 sqlite",
+      "exit_code": 0,
+      "output": "Cette note sera enregistrée au nom d'un humain. Est-ce bien toi qui la donnes ? [o/N] o\nOK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → aucun — omets le\nparamètre model, garde celui de la session"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task show GAO-choisir-base-001",
+      "exit_code": 0,
+      "output": "GAO-choisir-base-001 — Choisir base\n  état    : ready (board : ready)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n  usage   : none\n  porté par : cli\n  consignes de l'orchestrateur :\n    - [directive, human, non lue] cli, <date> : Réponse à « Quelle base de données ? » :\nsqlite  dir-<hex>"
+    }
+  ]
+}

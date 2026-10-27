@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Décision humaine attestée — bobine de rejeu</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1d1b17; --muted:#6b665c; --card:#fff; --line:#e3ded2; --ok:#1a7f4b; --ko:#b3261e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#16150f; --fg:#efece3; --muted:#a39e90; --card:#201e16; --line:#38352a; --ok:#5fcf90; --ko:#ff8a80; } }
+body { margin:0; padding:24px 16px; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+main { max-width:860px; margin:0 auto; }
+h1 { font-size:1.5rem; margin:0 0 4px; }
+.meta { color:var(--muted); font-size:.85rem; margin:0 0 20px; overflow-wrap:anywhere; }
+.frame { background:var(--card); border:1px solid var(--line); border-radius:8px; margin:0 0 12px; padding:12px 14px; }
+.cmd { font:600 .9rem ui-monospace, monospace; margin:0 0 6px; }
+.cmd .rc { float:right; font-weight:400; } .rc.ok { color:var(--ok); } .rc.ko { color:var(--ko); }
+pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+</style>
+</head>
+<body>
+<main>
+<h1>Décision humaine attestée</h1>
+<p>L&#x27;agent pose une question ; seule la réponse du canal humain rend la tâche.</p>
+<p class="meta">kit 3.71.0 · enregistrée le 2026-10-27T20:38:06Z · empreinte de sortie <code>3800e4bcd04fe9526223793a42f4ee707a341ac497c6c877519f7f18883501ce</code></p>
+<section class="frame"><p class="cmd">$ grimoire task add &quot;Choisir base&quot; -a &quot;le choix est tranche par un humain&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
+OK GAO-choisir-base-001 — Choisir base (ready)
+  vérifiabilité : V2 — critère sans verdict reconnu : &#x27;le choix est tranche par un humain&#x27;
+    non reconnu : le choix est tranche par un humain</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task claim GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → aucun — omets le paramètre model,
+garde celui de la session</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task ask GAO-choisir-base-001 &quot;Quelle base de données ?&quot; --option sqlite --option postgres<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,
+garde celui de la session</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task show GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>GAO-choisir-base-001 — Choisir base
+  état    : waiting (board : blocked)
+  accepte : le choix est tranche par un humain
+  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —
+ou la tâche n&#x27;a aucun critère : sa vérifiabilité reste à démontrer.
+  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)
+    - le choix est tranche par un humain → non reconnu
+  usage   : none
+  porté par : cli</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task answer GAO-choisir-base-001 sqlite<span class="rc ok">sortie 0</span></p><pre>Cette note sera enregistrée au nom d&#x27;un humain. Est-ce bien toi qui la donnes ? [o/N] o
+OK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → aucun — omets le
+paramètre model, garde celui de la session</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task show GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>GAO-choisir-base-001 — Choisir base
+  état    : ready (board : ready)
+  accepte : le choix est tranche par un humain
+  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —
+ou la tâche n&#x27;a aucun critère : sa vérifiabilité reste à démontrer.
+  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)
+    - le choix est tranche par un humain → non reconnu
+  usage   : none
+  porté par : cli
+  consignes de l&#x27;orchestrateur :
+    - [directive, human, non lue] cli, &lt;date&gt; : Réponse à « Quelle base de données ? » :
+sqlite  dir-&lt;hex&gt;</pre></section>
+</main>
+</body>
+</html>

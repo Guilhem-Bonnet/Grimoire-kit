@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clôture refusée, puis acceptée — bobine de rejeu</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1d1b17; --muted:#6b665c; --card:#fff; --line:#e3ded2; --ok:#1a7f4b; --ko:#b3261e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#16150f; --fg:#efece3; --muted:#a39e90; --card:#201e16; --line:#38352a; --ok:#5fcf90; --ko:#ff8a80; } }
+body { margin:0; padding:24px 16px; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+main { max-width:860px; margin:0 auto; }
+h1 { font-size:1.5rem; margin:0 0 4px; }
+.meta { color:var(--muted); font-size:.85rem; margin:0 0 20px; overflow-wrap:anywhere; }
+.frame { background:var(--card); border:1px solid var(--line); border-radius:8px; margin:0 0 12px; padding:12px 14px; }
+.cmd { font:600 .9rem ui-monospace, monospace; margin:0 0 6px; }
+.cmd .rc { float:right; font-weight:400; } .rc.ok { color:var(--ok); } .rc.ko { color:var(--ko); }
+pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+</style>
+</head>
+<body>
+<main>
+<h1>Clôture refusée, puis acceptée</h1>
+<p>Sans reçu de revue, la clôture d&#x27;une tâche V2 est refusée ; elle passe une fois la revue écrite.</p>
+<p class="meta">kit 3.71.0 · enregistrée le 2026-10-27T20:38:03Z · empreinte de sortie <code>493b0203db612bc5104420aaf8d51a825426916f07d2b4b389afdeccc83b2c8f</code></p>
+<section class="frame"><p class="cmd">$ grimoire task add &quot;Livrer fichier&quot; -a &quot;le livrable est relu par un humain&quot; --check &quot;test -f livrable.txt&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
+OK GAO-livrer-fichi-001 — Livrer fichier (ready)
+  vérifiabilité : V2 — critère sans verdict reconnu : &#x27;le livrable est relu par un humain&#x27;
+    non reconnu : le livrable est relu par un humain</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task claim GAO-livrer-fichi-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-livrer-fichi-001 — Livrer fichier (ready → claimed) · V2 → aucun — omets le paramètre model,
+garde celui de la session</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task move GAO-livrer-fichi-001 --to running<span class="rc ok">sortie 0</span></p><pre>OK GAO-livrer-fichi-001 — Livrer fichier (claimed → running) · V2 → aucun — omets le paramètre
+model, garde celui de la session</pre></section>
+<section class="frame"><p class="cmd">$ écrire livrable.txt<span class="rc ok">sortie 0</span></p></section>
+<section class="frame"><p class="cmd">$ grimoire task move GAO-livrer-fichi-001 --to needs_verification<span class="rc ok">sortie 0</span></p><pre>OK GAO-livrer-fichi-001 — Livrer fichier (running → needs_verification) · V2 → aucun — omets le
+paramètre model, garde celui de la session</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task verify GAO-livrer-fichi-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-livrer-fichi-001 — verdict passed (EVD-GAO-livrer-fichi-001-001,
+ver-GAO-livrer-fichi-001-001)
+  - critère non couvert par les commandes : le livrable est relu par un humain</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task close GAO-livrer-fichi-001<span class="rc ko">sortie 1</span></p><pre>✗ Gate de preuve « review_receipt » : 1 exigence(s) non satisfaite(s)
+  - review.receipt_missing : aucun reçu de revue : la tâche exige une relecture avant de fermer
+    faire relire, puis : grimoire task review GAO-livrer-fichi-001 --verdict READY (attendu :
+_grimoire-output/reviews/GAO-livrer-fichi-001/review-receipt.json)</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task review GAO-livrer-fichi-001 --verdict READY --reviewer fixture<span class="rc ok">sortie 0</span></p><pre>OK reçu READY pour GAO-livrer-fichi-001 (empreinte &lt;hex&gt;, 0 constat(s) vérifiable(s))</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task close GAO-livrer-fichi-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-livrer-fichi-001 — Livrer fichier (needs_verification → closed) · V2 → aucun — omets le
+paramètre model, garde celui de la session</pre></section>
+</main>
+</body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "schema": "grimoire-reel/v1",
+  "id": "supersession",
+  "title": "Supersession d'une décision",
+  "summary": "Une décision remplacée n'est plus servie, mais reste lisible.",
+  "command": [
+    "grimoire memory remember \"Le cache est stocké en JSON\" --type decisions --agent fixture",
+    "grimoire memory remember \"Le cache est stocké en SQLite\" --type decisions --agent fixture",
+    "grimoire memory list",
+    "grimoire memory supersede <ancien> <nouveau>",
+    "grimoire memory list",
+    "grimoire memory list --include-superseded"
+  ],
+  "kit_version": "3.71.0",
+  "recorded_at": "2026-10-27T20:38:09Z",
+  "output_sha256": "373a530818bf20f177d7206ff3fddf17301754edbad40ccc193b5294cdc9005a",
+  "frames": [
+    {
+      "kind": "run",
+      "command": "grimoire memory remember \"Le cache est stocké en JSON\" --type decisions --agent fixture",
+      "exit_code": 0,
+      "output": "OK remembered [decisions] as <uuid> (agent: fixture)"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire memory remember \"Le cache est stocké en SQLite\" --type decisions --agent fixture",
+      "exit_code": 0,
+      "output": "OK remembered [decisions] as <uuid> (agent: fixture)"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire memory list",
+      "exit_code": 0,
+      "output": "                                        Memories (1–2 of 2)\n┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┓\n┃ ID           ┃ Text                 ┃ Wing          ┃ Hall       ┃ Room      ┃ Tags ┃ Created    ┃\n┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━┩\n│ <uuid> │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ <date> │\n│              │ en JSON              │               │            │           │      │            │\n│ <uuid> │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ <date> │\n│              │ en SQLite            │               │            │           │      │            │\n└──────────────┴──────────────────────┴───────────────┴────────────┴───────────┴──────┴────────────┘"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire memory supersede <ancien> <nouveau>",
+      "exit_code": 0,
+      "output": "OK <uuid> remplacé par <uuid> (lisible\navec --include-superseded)"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire memory list",
+      "exit_code": 0,
+      "output": "                                        Memories (1–1 of 1)\n┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┓\n┃ ID           ┃ Text                 ┃ Wing          ┃ Hall       ┃ Room      ┃ Tags ┃ Created    ┃\n┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━┩\n│ <uuid> │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ <date> │\n│              │ en SQLite            │               │            │           │      │            │\n└──────────────┴──────────────────────┴───────────────┴────────────┴───────────┴──────┴────────────┘"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire memory list --include-superseded",
+      "exit_code": 0,
+      "output": "                                        Memories (1–2 of 2)\n┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┓\n┃ ID           ┃ Text                 ┃ Wing          ┃ Hall       ┃ Room      ┃ Tags ┃ Created    ┃\n┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━┩\n│ <uuid> │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ <date> │\n│              │ en JSON              │               │            │           │      │            │\n│ <uuid> │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ <date> │\n│              │ en SQLite            │               │            │           │      │            │\n└──────────────┴──────────────────────┴───────────────┴────────────┴───────────┴──────┴────────────┘"
+    }
+  ]
+}

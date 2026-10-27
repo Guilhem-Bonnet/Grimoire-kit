@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tri V0 / V1 / V2 — bobine de rejeu</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1d1b17; --muted:#6b665c; --card:#fff; --line:#e3ded2; --ok:#1a7f4b; --ko:#b3261e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#16150f; --fg:#efece3; --muted:#a39e90; --card:#201e16; --line:#38352a; --ok:#5fcf90; --ko:#ff8a80; } }
+body { margin:0; padding:24px 16px; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+main { max-width:860px; margin:0 auto; }
+h1 { font-size:1.5rem; margin:0 0 4px; }
+.meta { color:var(--muted); font-size:.85rem; margin:0 0 20px; overflow-wrap:anywhere; }
+.frame { background:var(--card); border:1px solid var(--line); border-radius:8px; margin:0 0 12px; padding:12px 14px; }
+.cmd { font:600 .9rem ui-monospace, monospace; margin:0 0 6px; }
+.cmd .rc { float:right; font-weight:400; } .rc.ok { color:var(--ok); } .rc.ko { color:var(--ko); }
+pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+</style>
+</head>
+<body>
+<main>
+<h1>Tri V0 / V1 / V2</h1>
+<p>La vérifiabilité d&#x27;une tâche se lit à ses critères et à ses checks.</p>
+<p class="meta">kit 3.71.0 · enregistrée le 2026-10-27T20:38:16Z · empreinte de sortie <code>829c760f88e3c8ad5960f782bbb237e2d33b4545b7869c65a27580162712c72b</code></p>
+<section class="frame"><p class="cmd">$ grimoire task add &quot;Tri mecanique&quot; -a &quot;le test passe&quot; --check &quot;true&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
+OK GAO-tri-mecaniqu-001 — Tri mecanique (ready)
+  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task add &quot;Tri par revue&quot; -a &quot;revue de code sans constat&quot; --ready<span class="rc ok">sortie 0</span></p><pre>OK GAO-tri-par-revu-001 — Tri par revue (ready)
+  vérifiabilité : V1 — critère de revue (revue) : &#x27;revue de code sans constat&#x27;</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task add &quot;Tri sans check&quot; -a &quot;le rendu est elegant&quot; --ready<span class="rc ok">sortie 0</span></p><pre>OK GAO-tri-sans-che-001 — Tri sans check (ready)
+  vérifiabilité : V2 — critère sans verdict reconnu : &#x27;le rendu est elegant&#x27;
+    non reconnu : le rendu est elegant</pre></section>
+<section class="frame"><p class="cmd">$ grimoire task list<span class="rc ok">sortie 0</span></p><pre>  GAO-tri-mecaniqu-001  [ready · ready]  Tri mecanique
+  GAO-tri-par-revu-001  [ready · ready]  Tri par revue
+  GAO-tri-sans-che-001  [ready · ready]  Tri sans check</pre></section>
+</main>
+</body>
+</html>
