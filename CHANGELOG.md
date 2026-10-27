@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
+
 ## [3.71.0] - 2026-10-27
 
 - feat(flows): `grimoire flow run <blueprint> --executor dispatch --background` ouvre le run, lance la cascade dans un processus détaché (journal `<run_id>.background.log` sous `_grimoire-runtime-output/flows/`) et rend la main avec le `run_id` ; `flow status <run_id>` le suit. Refusé sans `--executor dispatch` (l'exécuteur interactive rend déjà la main). Les `.mdc` Cursor par portée sont déjà émis par `host sync` (W6-05). (R65, `GAO-r65-ouvrir-l-001`)
