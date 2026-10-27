@@ -19,7 +19,8 @@
 // 'prioritize' | 'comment' | 'cancel' | 'ack' — jamais une écriture directe
 // depuis la webview (ADR-007), toujours `TaskService`. Sélecteur de priorité
 // et zone de consigne dans l'inspecteur, « Annuler » avec raison exigée, tri
-// par priorité dans chaque colonne, badge « consigne non lue » sur la carte.
+// par priorité dans chaque colonne, badge « message en attente de la session »
+// sur la carte (P74 : fin du jargon « consigne non lue »).
 //
 // Attente nommée (K6, issue #771) : un état `waiting` à raison nommée
 // (`human`, `ci`, `quota`, `paused`). `waiting(human)` porte une question ;
@@ -41,7 +42,7 @@
 // `api.portfolioTasks()` — toutes les tâches de tous les projets du registre
 // cockpit, agrégées côté serveur — avec une puce projet par carte, la session
 // qui la porte (glyphe + mot : vivante / inactive / terminée / inconnue), sa priorité et ses
-// consignes non lues quand le champ existe. Les cartes se clé-ent par
+// messages en attente quand le champ existe. Les cartes se clé-ent par
 // (projet, id) : deux ledgers peuvent dériver le même identifiant d'un même
 // titre. Une action depuis le portefeuille passe par
 // `api.portfolioTaskAction(id, action, body, slug)` — le `TaskService` du
@@ -60,6 +61,11 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 // Calculé sur les colonnes et l'attente que l'API donne déjà, rien n'est deviné.
 // Au niveau du module, comme `scope` : revenir sur l'espace garde le réglage.
 const askMe = { on: false };
+
+// Panneau « Assigner une session » (P47 lot 2) : l'ouverture vit au niveau du
+// module, comme `scope` — le pouls live redessine l'inspecteur, et un panneau
+// rouvert doit se recharger au lieu de disparaître (pattern task-create.js).
+const assignUi = { task: '', open: false };
 const needsHuman = (t) => isHumanWait(t) || t.board === 'review' || t.board === 'blocked';
 
 // Les vues que l'URL peut demander (`#travail?view=liste`).
@@ -68,10 +74,11 @@ const VIEW_IDS = ['board4', 'board8', 'liste', 'sessions', 'timeline', 'decision
 // Colonnes du standard, dans l'ordre normatif (grimoire.missions.board.BOARD_LIFECYCLE).
 const LIFECYCLE = ['proposed', 'ready', 'in_progress', 'blocked', 'review', 'accepted', 'released', 'archived'];
 import {
-  actionStatus, badge, copyText, glyph, icon, levelBars, listNav, monogram, moreMenu as sharedMoreMenu, rowActions,
+  actionStatus, badge, copyText, failureText, glyph, icon, levelBars, listNav, monogram, moreMenu as sharedMoreMenu, rowActions,
   setActionStatus, stateIcon, undoToast,
 } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
+import { activityBlockAsync } from '../activity.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
@@ -86,7 +93,9 @@ const COLUMN_LABEL = {
 // annulée n'est pas faite : elle a sa propre colonne, repliée par défaut.
 const GROUPS4 = [
   { id: 'todo', icon: 'clipboard', label: 'À faire', cols: ['proposed', 'ready'] },
-  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'] },
+  // P72v2 : pas de 5e colonne pour « Bloquée » — un compteur de ton warn sous
+  // « En cours » et une section « Bloqué » repliée par défaut (`blockedFold`).
+  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'], blockedFold: true },
   { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
   { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'] },
   { id: 'cancelled', icon: 'archive', label: 'Annulées', cols: ['archived'], folded: true },
@@ -94,6 +103,11 @@ const GROUPS4 = [
 // Colonne repliée dépliée ou non — au niveau du module, comme `scope` : revenir
 // sur l'espace garde le dernier réglage.
 const unfolded = new Set();
+// P74 : une tâche close (acceptée, publiée, annulée) n'a plus de vivacité à
+// montrer sur sa carte — le travail est fini. Si la session existe encore,
+// c'est l'inspecteur qui le dit (bloc « Session »), jamais la carte.
+const CLOSED_BOARDS = new Set(['accepted', 'released', 'archived']);
+const isClosed = (t) => CLOSED_BOARDS.has(t.board);
 // Board → état ledger, pour appeler `move` (grimoire.missions.board._FROM_BOARD).
 const BOARD_TO_STATE = {
   proposed: 'proposed', ready: 'ready', in_progress: 'running', blocked: 'blocked',
@@ -186,7 +200,23 @@ function injectStyles() {
     .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
     .ex-col-body[hidden] { display: none; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
+    /* P72v2 : bloquées du board compact — compteur discret de ton warn (jamais une alarme), section repliée par défaut. */
+    .ex-blocked-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 2px 8px; font-size: var(--t-min); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); cursor: pointer; }
+    .ex-blocked-toggle:hover { background: var(--hover); }
+    .ex-blocked-body { display: flex; flex-direction: column; gap: 6px; }
+    .ex-blocked-body[hidden] { display: none; }
+    .ex-blocked-title { font-size: var(--t-min); font-weight: 600; color: var(--ink2); }
     .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); box-shadow: var(--shadow); padding: var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+    /* P74 : liseré gauche stable par « ouverte par » (hash → --owner-N de tokens.css).
+       Un repère de balayage, jamais le seul porteur de sens : le nom est écrit sur la carte. */
+    .ex-card { border-left: 3px solid var(--owner-tone, var(--line)); }
+    /* P74 : badge de type (code / design / doc / infra / autre) — pastille + mot, jamais la couleur seule. */
+    .ex-type { display: inline-flex; align-items: center; gap: 5px; }
+    .ex-type .ex-type-sw { width: 8px; height: 8px; border-radius: 2px; background: var(--type-tone, var(--ink3)); flex: none; }
+    /* P74 : l'âge situé de la carte — un fait nommé, élidé s'il manque de place. */
+    .ex-card .ex-card-age { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .ex-card-owner { display: inline-flex; align-items: center; gap: 4px; }
+    .ex-card-owner > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ex-card:hover { background: var(--hover); }
     .ex-card[aria-current="true"] { background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
     .ex-card-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
@@ -215,6 +245,11 @@ function injectStyles() {
     .ex-insp-head h3 { margin: 0; font-size: var(--t-l); line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
     .ex-gate-card { background: var(--e2); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); padding: var(--sp-4); display: flex; flex-direction: column; gap: 10px; margin-bottom: var(--sp-4); }
     .ex-gate-card .micro { font-size: var(--t-min); font-weight: 500; color: var(--ink2); }
+    /* P68 : une carte d'une seule ligne n'empile plus les marges de blocs vides. */
+    .ex-gate-card > :empty { display: none; }
+    .ex-gate-card p { margin: 0; }
+    .ex-prio-row > select { flex: 1 1 auto; width: auto; min-width: 0; }
+    .ex-prio-row > .lbl { flex: none; white-space: nowrap; }
     .ex-gate-card .micro strong { color: var(--ink); }
     .ex-conds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
     .ex-cond { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--sp-2); padding: 6px 0; font-size: var(--t-s); }
@@ -242,7 +277,16 @@ function injectStyles() {
        entier reste au survol. */
     .ex-card .ex-card-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
     .ex-card .ex-card-meta > * { flex: none; }
-    .ex-card .ex-card-meta > .ex-card-owner { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    /* P69v2 : la dernière entrée du fil d'activité — une seule ligne, élidée. */
+    .ex-card-feed { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    .ex-card-feed .ex-card-feed-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    /* P74 : la ligne « ouverte par … · dans <colonne> depuis … » — mêmes règles
+       de tenue qu'une méta de carte (une ligne, élision, texte entier au survol). */
+    .ex-card-who { font-size: var(--t-s); color: var(--ink2); display: flex; align-items: center; gap: 4px 6px; }
+    .ex-card .ex-card-who { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+    .ex-card .ex-card-who > * { flex: none; }
+    .ex-card .ex-card-who > .ex-card-owner { flex: 0 1 auto; min-width: 14ch; overflow: hidden; text-overflow: ellipsis; }
+    .ex-card .ex-card-who > .ex-card-age { flex: 0 3 auto; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; }
     .ex-card-flags { display: flex; flex-wrap: wrap; gap: 4px; }
     .ex-card .ex-session { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; color: var(--ink2); font-family: inherit; font-size: var(--t-min); }
     .ex-card .ex-session > * { flex: none; }
@@ -258,7 +302,7 @@ function injectStyles() {
     /* P59 : un libellé d'action ne se casse jamais ; faute de place, ce sont les boutons qui passent à la ligne. */
     .ex-card-next > span:first-child, .ex-card-next .btn { white-space: nowrap; }
     .ex-card-next > .row { flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
-    .ex-card-next .btn { height: 24px; padding: 0 10px; font-size: var(--t-min); }
+    .ex-card-next .btn { height: 24px; min-height: 24px; padding: 0 10px; font-size: var(--t-min); }
     .ex-card-next .row-act, .ex-card-next .more-btn { width: 24px; min-width: 24px; padding: 0; }
     .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
     .ex-cost { font-size: var(--t-min); }
@@ -278,8 +322,10 @@ function injectStyles() {
     .ex-tl-entry { display: flex; flex-direction: column; gap: 4px; padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); cursor: pointer; }
     .ex-tl-entry:hover { background: var(--e2); }
     .ex-tl-entry.fail { border-color: var(--bad); }
-    .ex-tl-row { display: flex; gap: var(--sp-3); align-items: flex-start; }
-    .ex-tl-at { font-family: var(--mono); font-size: var(--t-min); color: var(--ink3); width: 150px; flex: none; }
+    .ex-tl-row { display: flex; gap: var(--sp-3); align-items: flex-start; min-width: 0; }
+    /* P68 : la date lisible tient dans sa colonne (largeur au contenu, jamais fixe) ; l'ISO complet est au survol. */
+    .ex-tl-at { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--t-min); color: var(--ink3); flex: none; min-width: 16ch; white-space: nowrap; }
+    .ex-tl-body { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
     .ex-tl-detail { margin: 0; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); background: var(--e2); font-family: var(--mono); font-size: var(--t-min); white-space: pre-wrap; word-break: break-word; }
     .ex-insp-block { margin-bottom: var(--sp-4); }
     .ex-insp-block h4 { font-size: var(--t-min); color: var(--ink3); margin: 0 0 6px; font-weight: 500; }
@@ -310,15 +356,69 @@ function injectStyles() {
     .ex-wait.flag.warn { background: var(--warn-soft); color: var(--warn); }
     .ex-wait.human { color: var(--ink); font-weight: 500; }
     .ex-banner { display: flex; align-items: center; gap: var(--sp-3); padding: 8px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--e1); font-size: var(--t-s); }
-    .ex-decisions { display: flex; flex-direction: column; gap: var(--sp-3); max-width: 760px; }
-    .ex-decision { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: var(--r); background: var(--e1); }
-    .ex-decision-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--t-s); color: var(--ink2); }
-    .ex-decision-title { font-size: var(--t-s); font-weight: 500; color: var(--ink); }
-    .ex-decision-question { font-size: var(--t-m, var(--t-s)); color: var(--ink); margin: 0; white-space: pre-wrap; }
-    .ex-decision-options { display: flex; flex-wrap: wrap; gap: 6px; }
-    .ex-decision textarea { min-height: 44px; font: inherit; font-size: var(--t-s); }
+    .ex-banner > span:not(.glyph) { flex: 1 1 auto; min-width: 0; }
+    .ex-banner > .btn { flex: none; white-space: nowrap; }
+    /* Décisions (P68) : une colonne à la largeur utile, une carte par type, une seule action primaire. */
+    .ex-decisions { display: flex; flex-direction: column; gap: var(--sp-4); width: 100%; max-width: 960px; }
+    .ex-dec-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+    .ex-dec-filter { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ex-dec-filter .chip[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--acc); }
+    .ex-dec-n { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .ex-dec-section { display: flex; flex-direction: column; gap: var(--sp-3); }
+    .ex-dec-section[hidden] { display: none; }
+    .ex-dec-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-height: var(--h-ctl); }
+    .ex-dec-section-head h3 { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-s); font-weight: 600; color: var(--ink2); }
+    .ex-dec-section-head h3 .ex-dec-n { color: var(--ink3); font-weight: 500; }
+    .ex-dec-bulk { margin-left: auto; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+    .ex-dec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+    .ex-dec-refusals { margin: 6px 0 0; padding-left: 18px; }
+    .ex-decision { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); min-width: 0; }
+    .ex-decision[data-type="reprise"] { gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+    .ex-decision-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .ex-decision-title { margin: 0; font-size: var(--t-l); font-weight: 600; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere; }
+    .ex-decision-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ex-decision-chips .chip { cursor: default; }
+    .ex-decision-question { margin: 0; font-size: var(--t-s); line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .ex-choices { display: flex; flex-direction: column; gap: 6px; }
+    .ex-choice { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-height: var(--h-ctl); padding: 7px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); font: inherit; font-size: var(--t-s); line-height: 1.45; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+    .ex-choice:hover { background: var(--hover); }
+    .ex-choice[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+    .ex-choice:disabled { color: var(--ink3); border-style: dashed; cursor: not-allowed; }
+    .ex-choice-mark { flex: none; width: 14px; height: 14px; margin-top: 3px; border: 2px solid var(--ink3); border-radius: 50%; }
+    .ex-choice[aria-pressed="true"] .ex-choice-mark { border-color: var(--acc); background: var(--acc); box-shadow: inset 0 0 0 2px var(--card); }
+    .ex-dec-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+    .ex-dec-free { display: flex; flex-direction: column; gap: var(--sp-2); }
+    .ex-dec-free[hidden] { display: none; }
+    .ex-decision textarea { width: 100%; height: auto; min-height: 64px; padding: 6px 9px; font: inherit; font-size: var(--t-s); resize: vertical; }
+    .ex-dec-more { font-size: var(--t-min); color: var(--ink2); }
+    .ex-dec-more > summary { width: fit-content; cursor: pointer; color: var(--ink2); padding: 2px 0; }
+    .ex-dec-more[open] > summary { margin-bottom: var(--sp-2); }
+    .ex-dec-more dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--sp-3); margin: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); }
+    .ex-dec-more dt { color: var(--ink3); }
+    .ex-dec-more dd { margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+    .ex-dec-more code { font-family: var(--mono); font-size: var(--t-min); word-break: break-all; }
+    .ex-dec-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; white-space: normal; }
     .ex-decision-note { font-size: var(--t-min); color: var(--ink3); }
-    .ex-decision-item { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--line); }
+    .ex-decision-item { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+    /* P47 : panneau Assigner une session — plan de lancement en lecture seule, section de l'inspecteur. */
+    .ex-assign-panel { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); }
+    .ex-assign-panel h4 { font-size: var(--t-s); color: var(--ink); margin: 0; font-weight: 600; }
+    .ex-assign-sub { margin: 0; font-size: var(--t-s); color: var(--ink2); }
+    .ex-assign-notready { display: flex; align-items: flex-start; gap: 6px; padding: 6px var(--sp-3); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); font-size: var(--t-s); }
+    .ex-assign-panel .skeleton { padding: var(--sp-2) 0; }
+    .ex-assign-rows { display: flex; flex-direction: column; }
+    .ex-assign-verifs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .ex-assign-verif { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-s); }
+    .ex-assign-verif > .sico { align-self: start; margin-top: 1px; }
+    .ex-assign-verif > span:not(.sico) { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+    .ex-assign-launch { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .ex-assign-cmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .ex-assign-cmd code { font-family: var(--mono); font-size: var(--t-min); padding: 6px var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); word-break: break-all; }
+    @container canvas (max-width: 900px) {
+      .ex-dec-bulk { margin-left: 0; width: 100%; }
+      .ex-decision { padding: var(--sp-3); }
+      .ex-dec-more dl { grid-template-columns: minmax(0, 1fr); }
+    }
   `;
   document.head.append(style);
 }
@@ -372,6 +472,218 @@ function sessionLine(task, { full = false } = {}) {
   return line;
 }
 
+// ── P74 : lisibilité humaine des cartes ─────────────────────────────────────
+
+// « Ouverte par » : qui a ouvert la tâche (champ `owner` du ledger), pas qui
+// travaille dessus. Humain ou agent : déduit du nom (aucun champ ne le dit),
+// le `title` l'assume. Icônes du sprite : `user` (personne), `agent` (agent).
+const OWNER_AGENT = /\b(agent|bot|claude|copilot|codex|cursor|gemini|ci|kit)\b|[-_](dev|bot|agent)\b/i;
+const ownerIsAgent = (owner) => OWNER_AGENT.test(String(owner || ''));
+function ownerNode(task) {
+  const node = document.createElement('span');
+  node.className = 'ex-card-owner';
+  node.dataset.role = 'owner';
+  const owner = task.owner || '';
+  const agent = ownerIsAgent(owner);
+  node.dataset.ownerKind = owner ? (agent ? 'agent' : 'humain') : 'inconnu';
+  node.title = owner
+    ? `ouverte par ${owner} — qui a ouvert la tâche, pas qui travaille dessus (${agent ? 'agent' : 'humain'}, déduit du nom)`
+    : 'qui a ouvert la tâche, pas qui travaille dessus — personne n’est nommé';
+  node.append(glyph(agent ? 'agent' : 'user', agent ? 'ouverte par un agent' : 'ouverte par un humain'));
+  node.append(text('span', null, owner ? `ouverte par ${owner}` : 'ouverte par — non renseigné'));
+  return node;
+}
+
+// Couleur stable par « ouverte par » : hash du nom → un des six tokens
+// --owner-N (tokens.css, dérivés des teintes d'identité). Un liseré de
+// balayage, jamais le seul porteur de sens (le nom est écrit sur la carte).
+function ownerTone(owner) {
+  const value = String(owner || '');
+  if (!value) return '';
+  let hash = 0;
+  for (const ch of value) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  return `var(--owner-${(hash % 6) + 1})`;
+}
+
+// Type lisible — code / design / doc / infra / autre. D'abord le `type`
+// déclaré au ledger quand il tranche seul (documentation, migration,
+// opération, sécurité) ; sinon une heuristique honnête sur titre + critères
+// (mots-clés), dite telle quelle dans le `title` (« type déduit du contenu »).
+const TYPE_DECLARED_CATEGORY = {
+  documentation: 'doc', migration: 'infra', operation: 'infra', security: 'infra', test: 'code',
+};
+const TYPE_FALLBACK_CATEGORY = { implementation: 'code', cleanup: 'code', architecture: 'code', analysis: 'autre' };
+const CATEGORY_HINTS = [
+  ['design', /\b(maquette|design|artboard|ui|ux|visuel|écran|ecran|css|th[eè]me|style)\b/i],
+  ['doc', /\b(doc|docs|documentation|documenter|readme|guide|changelog|glossaire)\b/i],
+  ['infra', /\b(ci|cd|pipeline|docker|déploi|deploi|release|infra|serveur|hook|workflow|qdrant)\b/i],
+  ['code', /\b(bug|fix|test|refactor|impl[ée]ment|module|api|fonction|commande)\b/i],
+];
+function taskCategory(task) {
+  const declared = TYPE_DECLARED_CATEGORY[task.type];
+  if (declared) return { category: declared, why: `type déclaré au ledger (${TYPE_LABEL[task.type] || task.type})` };
+  const content = [task.title || '', ...(task.acceptance || [])].join(' ');
+  for (const [category, pattern] of CATEGORY_HINTS) {
+    if (pattern.test(content)) return { category, why: 'type déduit du contenu (titre et critères)' };
+  }
+  const fallback = TYPE_FALLBACK_CATEGORY[task.type];
+  if (fallback) return { category: fallback, why: `type déclaré au ledger (${TYPE_LABEL[task.type] || task.type})` };
+  return { category: 'autre', why: 'type déduit du contenu (aucun indice : autre)' };
+}
+function typeBadge(task) {
+  const { category, why } = taskCategory(task);
+  const node = document.createElement('span');
+  node.className = 'badge ex-type';
+  node.dataset.role = 'type-badge';
+  node.dataset.cat = category;
+  node.title = why;
+  const swatch = document.createElement('i');
+  swatch.className = 'ex-type-sw';
+  swatch.style.setProperty('--type-tone', `var(--type-${category})`);
+  swatch.setAttribute('aria-hidden', 'true');
+  node.append(swatch, text('span', null, category));
+  return node;
+}
+
+// La session sur la CARTE, sans identifiant brut (l'UUID ne dit rien à un
+// humain : il reste dans l'inspecteur, avec la commande de reprise). À la
+// place : hôte, persona du claim (`agent_id` du sous-agent, sinon `actor_id`)
+// et palier de modèle recommandé — seulement quand ils sont connus, rien
+// n'est inventé (« hôte inconnu » plutôt qu'un vide).
+function cardSessionLine(task) {
+  const line = document.createElement('div');
+  line.className = 'ex-session';
+  line.dataset.role = 'card-session';
+  line.title = "la session qui tient cette tâche — l'identifiant et la commande de reprise sont dans le détail";
+  if (task.host) {
+    if (HOST_ICON[task.host]) line.append(glyph(HOST_ICON[task.host], 'hôte'));
+    line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
+  } else {
+    line.append(text('span', 'lbl', 'hôte inconnu'));
+  }
+  const claim = task.claim || {};
+  const persona = claim.agent_id || claim.actor_id || '';
+  if (persona) {
+    const who = text('span', null, persona);
+    who.title = 'persona du claim : qui tient la tâche dans la session';
+    line.append(who);
+  }
+  // P75 : le palier RÉEL lu du journal de session quand il est rapporté ; le
+  // palier recommandé (route) en repli ; sinon le dire — rien n'est inventé.
+  const work = (task.work && task.work.session) || null;
+  const model = document.createElement('span');
+  model.dataset.role = 'work-model';
+  if (work && (work.tier || work.model)) {
+    model.textContent = work.tier || work.model;
+    model.title = work.tier
+      ? `palier réel, lu du journal de session${work.model ? ` (${work.model})` : ''}`
+      : 'modèle lu du journal de session (hors paliers haiku/sonnet/opus)';
+  } else if (!work && task.model_tier && task.model_tier !== 'session') {
+    // « session » n'est pas un palier : le badge de route dit déjà « modèle de session ».
+    model.className = 'lbl';
+    model.textContent = `palier ${task.model_tier}`;
+  }
+  if (model.textContent) line.append(model);
+  return line;
+}
+
+// P75 : la ligne de travail d'une carte tenue — effort, tokens en direct,
+// derniers skills. Sa propre ligne : la ligne session est en nowrap/élision,
+// ces faits y disparaissaient. Rien n'est inventé : un effort absent se dit.
+function workLiveRow(task) {
+  const work = (task.work && task.work.session) || null;
+  if (!work) return null;
+  const line = document.createElement('div');
+  line.className = 'ex-facts lbl';
+  line.dataset.role = 'work-live';
+  if (!work.tier && !work.model) {
+    // Le journal ne rapporte pas de modèle : le dire ici (la ligne session,
+    // en nowrap, tronquait la phrase) plutôt qu'afficher un palier deviné.
+    const missing = text('span', null, 'modèle non rapporté');
+    missing.dataset.role = 'work-model';
+    missing.title = "le journal de session n'est pas lisible d'ici : aucun palier affirmé";
+    line.append(missing);
+  }
+  const effort = text('span', null, work.effort ? `effort ${work.effort}` : 'effort non rapporté');
+  effort.dataset.role = 'work-effort';
+  effort.title = work.effort
+    ? 'effort de raisonnement, lu du journal de session'
+    : "l'hôte ne rapporte pas d'effort pour cette session";
+  line.append(effort);
+  const usage = (task.work && task.work.usage) || null;
+  if (usage && usage.usage_source === 'claude-code-transcript') {
+    const tokens = text('span', null, tokensText(usage.total_tokens || 0));
+    tokens.dataset.role = 'work-tokens';
+    tokens.title = `${usage.input_tokens} in / ${usage.output_tokens} out, cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit — repliés des traces (grimoire task fold-usage)`;
+    line.append(tokens);
+  }
+  if (work.skills && work.skills.length) {
+    const last = work.skills.slice(-2);
+    const skills = text('span', null, last.join(' · '));
+    skills.dataset.role = 'work-skills';
+    skills.title = `derniers skills invoqués par la session (liste complète dans le détail) : ${work.skills.join(', ')}`;
+    line.append(skills);
+  }
+  return line;
+}
+
+// P75 : tokens compacts pour une carte — « 48,2 k tokens » au-delà du millier.
+function tokensText(total) {
+  if (total < 1000) return `${total} tokens`;
+  const k = total / 1000;
+  const rounded = k >= 100 ? String(Math.round(k)) : (Math.round(k * 10) / 10).toFixed(1).replace(/\.0$/, '');
+  return `${rounded.replace('.', ',')} k tokens`;
+}
+
+// Montant CAD : virgule décimale, l'unité écrite — jamais un symbole seul.
+function cadText(cad) {
+  return `${cad.toFixed(2).replace('.', ',')} $ CAD`;
+}
+
+// Statut d'usage en toutes lettres quand ce n'est pas le journal de l'hôte (P75).
+const USAGE_SOURCE_WORDS = {
+  none: 'aucun usage replié depuis le journal de l’hôte (none)',
+  unavailable: "l'hôte de la tâche n'expose pas de journal d'usage vérifié (unavailable)",
+  reported: "coût rapporté par l'ouvrier seulement (reported)",
+};
+
+// P75 : fin de parcours — total de tokens repliés et coût approximatif en CAD
+// au taux des options du projet ; « coût inconnu » quand rien n'est replié.
+function workTotalRow(work) {
+  const usage = work.usage || {};
+  const line = text('div', 'ex-cost lbl', '');
+  line.dataset.role = 'work-total';
+  line.dataset.usageSource = usage.usage_source || 'none';
+  const parts = [];
+  if (usage.usage_source === 'claude-code-transcript') {
+    parts.push(`total ${tokensText(usage.total_tokens || 0)}`);
+    if (work.cost_cad != null) parts.push(`${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)}`);
+    else parts.push('coût inconnu');
+  } else {
+    parts.push('coût inconnu');
+  }
+  line.textContent = parts.join(' · ');
+  const source = USAGE_SOURCE_WORDS[usage.usage_source];
+  line.title = `${source ? source + '. ' : ''}Taux : 1 USD = ${String(work.usd_cad).replace('.', ',')} $ CAD `
+    + `(${work.usd_cad_source === 'default' ? 'défaut du kit' : 'déclaré par le projet'}, modifiable dans Configuration → Fournisseurs et budgets).`;
+  return line;
+}
+
+// Les deux temps d'une carte, nommés (P74) : l'âge dans la colonne courante
+// (depuis la dernière transition, `in_state_since` servi par le serveur) sur
+// la carte ; l'âge total (depuis l'ouverture) au survol et dans l'inspecteur —
+// « depuis N h » tout seul ne disait pas de quoi.
+function cardAge(task) {
+  const inColumn = ageText(task.in_state_since || '');
+  if (!inColumn) return null;
+  const node = text('span', 'ex-card-age', `dans ${COLUMN_LABEL[task.board] || task.board} ${inColumn}`);
+  node.dataset.role = 'card-age';
+  const total = ageText(task.created_at || '');
+  node.title = `Dans la colonne « ${COLUMN_LABEL[task.board] || task.board} » ${inColumn} (dernière transition).`
+    + (total ? ` Ouverte ${total} (âge total).` : '');
+  return node;
+}
+
 // La suite d'une carte, lue sur le graphe réel du ledger
 // (`grimoire.missions.ledger._TASK_TRANSITIONS`) projeté sur le board — jamais
 // la colonne suivante de `LIFECYCLE`, qui faisait de « Bloquée » la suite de
@@ -403,8 +715,9 @@ let focusBlockReason = false;
 const PORTFOLIO_PRIORITY_LABEL = { low: 'priorité basse', medium: 'priorité moyenne', high: 'priorité haute', critical: 'priorité critique' };
 
 // La ligne « portefeuille » d'une carte : projet (monogramme + nom), session
-// (glyphe de vivacité + mot), priorité (barres + mot), consignes non lues
+// (glyphe de vivacité + mot), priorité (barres + mot), messages en attente
 // (bulle + compteur) — une forme par sens, jamais la couleur seule (P30).
+// P74 : une tâche close n'affiche plus de vivacité ici non plus.
 function portfolioRow(task) {
   const line = document.createElement('div');
   line.className = 'ex-card-project';
@@ -413,17 +726,21 @@ function portfolioRow(task) {
   const projectName = task.project?.name || task.project?.slug || 'projet';
   project.append(monogram(projectName), text('span', null, projectName));
   line.append(project);
-  const session = task.session;
-  if (session && session.id) {
-    line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
-  } else {
-    line.append(text('span', 'lbl', 'aucune session'));
+  if (!isClosed(task)) {
+    const session = task.session;
+    if (session && session.id) {
+      line.append(row(sessionGlyph(session), text('span', null, `session ${livenessLabel(session)}`)));
+    } else {
+      line.append(text('span', 'lbl', 'aucune session'));
+    }
   }
   if (task.priority) {
     line.append(row(priorityBars(task.priority) || '', text('span', null, PORTFOLIO_PRIORITY_LABEL[task.priority] || `priorité ${task.priority}`)));
   }
   if (task.unread_directives) {
-    line.append(row(glyph('chat', 'consignes'), text('span', null, `${task.unread_directives} consigne(s) non lue(s)`)));
+    const pending = row(glyph('chat', 'messages'), text('span', null, `${task.unread_directives} message(s) en attente de la session`));
+    pending.title = 'Consigne posée au ledger, pas encore accusée par la session qui tient la tâche.';
+    line.append(pending);
   }
   return line;
 }
@@ -559,6 +876,9 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   card.tabIndex = 0;
   card.dataset.project = task.project?.slug || '';
   card.dataset.task = task.id;
+  // P74 : liseré gauche stable par « ouverte par » (hash → token --owner-N).
+  const tone = ownerTone(task.owner);
+  if (tone) card.style.setProperty('--owner-tone', tone);
   // Entrée (P58) passe par le contrôleur de liste de la coque : le clic de la carte.
   card.addEventListener('click', () => onSelect(task));
 
@@ -571,15 +891,21 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   appendIf(top, routeBadge(task));
   appendIf(top, proofRing(task));
   card.append(top);
-  const cardTitle = text('div', 'ex-card-title', task.title || task.id);
+  // P74 : le préfixe interne (« R52 — », « [P47] », « P68 — ») quitte le titre
+  // affiché ; le titre entier reste au survol, l'identifiant dans l'inspecteur.
+  const cardTitle = text('div', 'ex-card-title', titleParts(task.title || task.id).title);
   cardTitle.title = task.title || task.id;
   card.append(cardTitle);
   if (portfolio) card.append(portfolioRow(task));
+  // P74 : qui a ouvert, et depuis quand la carte est là — une ligne à eux,
+  // la méta (type, risque, priorité) garde la sienne : rien ne se collapse.
+  const who = text('div', 'ex-card-who lbl', '');
+  who.append(ownerNode(task));
+  appendIf(who, cardAge(task));
+  card.append(who);
   const meta = text('div', 'ex-card-meta lbl', '');
   if (task.type) meta.append(typeGlyph(task.type));
-  const owner = text('span', 'ex-card-owner', task.owner || 'sans owner');
-  owner.title = owner.textContent;
-  meta.append(owner);
+  meta.append(typeBadge(task));
   if (task.risk_profile) {
     // Le profil par défaut garde son glyphe (forme + nom au survol) ; seul un
     // profil qui s'écarte du défaut écrit son mot, la ligne tient sur une carte.
@@ -593,16 +919,22 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   if (bars) meta.append(bars);
   meta.append(text('span', null, PRIORITY_LABEL[priority] || priority));
   card.append(meta);
-  // Le badge « consigne non lue » tant qu'une consigne de l'orchestrateur n'a
-  // pas été livrée à la session — sur sa propre ligne, hors de la méta.
+  // Le badge « message en attente de la session » tant qu'une consigne de
+  // l'orchestrateur n'a pas été livrée à la session — sur sa propre ligne.
   const flags = document.createElement('div');
   flags.className = 'ex-card-flags';
   if (task.directives_pending > 0) {
-    const unread = badge(`consigne non lue (${task.directives_pending})`, 'acc');
+    const unread = badge(
+      `message en attente de la session (${task.directives_pending})`, 'acc',
+      'Consigne posée au ledger, pas encore livrée à la session qui tient la tâche.',
+    );
     unread.dataset.role = 'directive-badge';
     flags.append(unread);
   } else if (task.directives_unacknowledged > 0) {
-    flags.append(badge(`consigne non accusée (${task.directives_unacknowledged})`, 'acc'));
+    flags.append(badge(
+      `message livré, sans accusé (${task.directives_unacknowledged})`, 'acc',
+      'Consigne livrée à la session, dont aucun agent n’a encore accusé réception.',
+    ));
   }
   if (flags.childElementCount) card.append(flags);
   if (task.board === 'blocked' && task.status !== 'waiting') {
@@ -645,18 +977,40 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   // Session qui porte la carte (issue #638, lot A) : `session_id` et `host`
   // viennent du claim, posés par le hook UserPromptSubmit de la session —
   // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
-  if (task.session_id) {
+  // P74 : plus d'UUID sur la carte (hôte + persona + palier), et plus rien de
+  // tout cela sur une tâche close — c'est l'inspecteur qui parle de sa session.
+  if (task.session_id && !isClosed(task)) {
     // La vivacité a son glyphe sur la ligne des faits, juste en dessous : pas
     // de doublon ici.
-    card.append(sessionLine(task));
+    card.append(cardSessionLine(task));
+    // P75 : effort, tokens en direct et derniers skills de la session.
+    appendIf(card, workLiveRow(task));
   }
   // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
   // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
   // Vivacité, signe, durée et coût sur une seule ligne de faits, chaque fait
   // d'un bloc (le coût n'a sa propre ligne que sans session).
-  const facts = task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
+  // P74 : la cause des « sessions vivantes » en colonne Fait était ici — le
+  // serveur pose `task.session` (claim, ou journal qui nomme la tâche) sans
+  // condition d'état, et la carte l'affichait tel quel. Une tâche close
+  // n'affiche plus de vivacité.
+  const facts = !isClosed(task) && task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
   if (facts) card.append(facts);
-  const cost = costRow(task);
+  // P69v2 : la dernière entrée du fil d'activité, en une ligne — le serveur ne
+  // la pose que sur une tâche tenue dont la session est vivante.
+  if (task.feed_last && task.feed_last.label) {
+    const feedLine = text('div', 'ex-card-feed lbl', '');
+    feedLine.dataset.role = 'feed-last';
+    feedLine.title = `Dernière entrée du fil d'activité (ledger) : ${task.feed_last.label}`;
+    feedLine.append(icon('history'), text('span', 'ex-card-feed-text', task.feed_last.label));
+    card.append(feedLine);
+  }
+  // P75 : une carte close dit le total de tokens et le coût approximatif en
+  // CAD — c'est son bilan ; la ligne « coût (dispatch) » de P11 reste aux
+  // cartes ouvertes (deux « coût inconnu » superposés ne disaient rien).
+  const closedTotal = isClosed(task) && task.work ? workTotalRow(task.work) : null;
+  const cost = closedTotal ? null : costRow(task);
+  if (closedTotal) card.append(closedTotal);
   if (cost && facts) facts.append(Object.assign(cost, { className: 'ex-cost' }));
   else if (cost) card.append(cost);
 
@@ -698,6 +1052,10 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     col.dataset.group = group.id;
     const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
     const folded = group.folded && !unfolded.has(group.id);
+    // P72v2 : sur le board compact, les bloquées sortent du flux de la colonne —
+    // compteur de ton warn sous le titre, section « Bloqué » repliée par défaut.
+    const heldBack = group.blockedFold ? inColumn.filter((t) => t.board === 'blocked') : [];
+    const shown = heldBack.length ? inColumn.filter((t) => t.board !== 'blocked') : inColumn;
 
     const head = document.createElement('div');
     head.className = 'ex-col-head';
@@ -728,13 +1086,45 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     }
     col.append(head);
 
+    if (heldBack.length) {
+      // Compteur + repli (décision P72v2) : pas de colonne dédiée, pas d'alarme.
+      // Absent dès qu'aucune tâche n'est bloquée.
+      const foldKey = `${group.id}:blocked`;
+      const open = unfolded.has(foldKey);
+      const sectionId = `ex-blocked-${group.id}`;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'ex-blocked-toggle';
+      toggle.dataset.role = 'blocked-count';
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-controls', sectionId);
+      toggle.title = open ? 'Replier les tâches bloquées' : 'Afficher les tâches bloquées et leur raison';
+      toggle.append(stateIcon('warn'), text('span', null, `${heldBack.length} bloquée${heldBack.length > 1 ? 's' : ''}`));
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (unfolded.has(foldKey)) unfolded.delete(foldKey); else unfolded.add(foldKey);
+        const fresh = document.createElement('div');
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
+        board.replaceWith(fresh.firstElementChild);
+      });
+      col.append(toggle);
+      const section = document.createElement('div');
+      section.className = 'ex-blocked-body';
+      section.id = sectionId;
+      section.dataset.role = 'blocked-section';
+      section.hidden = !open;
+      section.append(text('div', 'ex-blocked-title', 'Bloqué'));
+      for (const task of heldBack) section.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      col.append(section);
+    }
+
     const body = document.createElement('div');
-    body.className = 'ex-col-body' + (inColumn.length ? '' : ' empty');
+    body.className = 'ex-col-body' + (shown.length ? '' : ' empty');
     body.hidden = folded;
-    if (!inColumn.length) {
+    if (!shown.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      for (const task of shown) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
     }
     col.append(body);
     board.append(col);
@@ -767,7 +1157,10 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = 
     if (isSelected(task)) tr.setAttribute('aria-current', 'true');
     tr.addEventListener('click', () => onSelect(task));
     if (portfolio) tr.append(text('td', null, task.project?.name || task.project?.slug || '—'));
-    tr.append(text('td', null, task.title || task.id));
+    // P74 : même titre lisible que la carte ; le titre entier reste au survol.
+    const titleCell = text('td', null, titleParts(task.title || task.id).title);
+    titleCell.title = task.title || task.id;
+    tr.append(titleCell);
     const stateCell = document.createElement('td');
     const waitingNow = task.status === 'waiting' && task.waiting;
     stateCell.append(row(
@@ -778,7 +1171,8 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = 
     if (portfolio) {
       const sessionCell = document.createElement('td');
       const session = task.session;
-      if (session && session.id) {
+      // P74 : même règle que la carte — une tâche close n'affiche plus de vivacité.
+      if (session && session.id && !isClosed(task)) {
         sessionCell.append(row(sessionGlyph(session), text('span', null, livenessLabel(session))));
       } else {
         sessionCell.append(text('span', 'lbl', '—'));
@@ -823,15 +1217,38 @@ function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = 
 // autres réglages d'affichage de cet espace (vue, sélection).
 const timelineFilter = { source: 'tous', gravite: 'tous' };
 
+// « 26 oct. 07:47:43 » (l'année quand ce n'est pas l'année en cours) : l'ISO
+// brut (microsecondes, fuseau) débordait sur la colonne voisine (P68). L'ISO
+// complet reste dans `datetime` et au survol.
+const TL_DATE = new Intl.DateTimeFormat('fr-FR', {
+  day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+});
+function timelineDate(iso) {
+  const when = Date.parse(iso || '');
+  if (Number.isNaN(when)) return iso || '—';
+  const parts = Object.fromEntries(TL_DATE.formatToParts(new Date(when)).map((p) => [p.type, p.value]));
+  const year = Number(parts.year) === new Date().getFullYear() ? '' : ` ${parts.year}`;
+  return `${parts.day} ${parts.month}${year} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+function timelineTime(iso) {
+  const node = document.createElement('time');
+  node.className = 'ex-tl-at';
+  node.textContent = timelineDate(iso);
+  if (iso) { node.dateTime = iso; node.title = iso; }
+  return node;
+}
+
 function timelineEntryNode(entry) {
   const node = document.createElement('div');
   node.className = 'ex-tl-entry' + (entry.failure ? ' fail' : '');
   const head = document.createElement('div');
   head.className = 'ex-tl-row';
-  head.append(text('div', 'ex-tl-at mono', entry.at || '—'));
+  head.append(timelineTime(entry.at));
   const body = document.createElement('div');
+  body.className = 'ex-tl-body';
   body.append(row(dot(entry.failure ? 'bad' : 'ok'), text('span', null, entry.summary || entry.kind)));
-  body.append(text('div', 'lbl', `${entry.source} · ${entry.kind}`));
+  // Sans résumé, le titre est déjà le type : la ligne du dessous ne le répète pas.
+  body.append(text('div', 'lbl', entry.summary ? `${entry.source} · ${entry.kind}` : entry.source));
   head.append(body);
   node.append(head);
 
@@ -926,7 +1343,7 @@ async function renderTimeline(root, ctx, task) {
   ctx.dock.log('traces', ...allEntries.map((e) => `${e.at} · ${e.source} · ${e.summary}`));
 }
 
-// ── Décisions en attente (K6) ─────────────────────────────────────────────
+// ── Décisions en attente (K6, P68) ────────────────────────────────────────
 
 // Une décision : la question, ses réponses proposées, une zone libre. Le clic
 // poste `answer` ; le serveur répond 200 avec la tâche rendue (`ready`) ou
@@ -934,6 +1351,15 @@ async function renderTimeline(root, ctx, task) {
 // W6-07 (issue #564) : un lot de questions posé en une fois est UNE carte, une
 // réponse par question encore ouverte (`waiting.batch`, statut lu au registre
 // `task.questions`) ; la tâche n'est rendue qu'une fois les bloquantes tranchées.
+//
+// P68 : une carte par type de décision, une seule action primaire par carte.
+//   - geste humain (`permission`) : « Fait », ou les réponses proposées ;
+//   - choix (`choice`, `merge` avec réponses) : liste de choix, « Valider ce choix » ;
+//   - question libre (aucune réponse proposée) : la zone de réponse, ouverte ;
+//   - reprise (`resume_*`, `retry_exhausted`) : une phrase écrite ici, « Reprendre »
+//     ou « Abandonner » — mappés vers le libellé d'option réel envoyé au serveur.
+// Le texte serveur intégral, le « pourquoi », les identifiants et la commande de
+// reprise vivent dans « Détails » : rien n'est retiré, seulement replié.
 function openQuestions(task) {
   const w = task.waiting;
   const group = [w.question, ...(w.batch || [])];
@@ -943,108 +1369,586 @@ function openQuestions(task) {
   return open.length ? open : [w.question];
 }
 
+const RESUME_KINDS = new Set(['resume_branch', 'resume_unfenced', 'retry_exhausted']);
+// Ordre des sections : ce qu'un humain seul peut faire d'abord, les reprises (souvent en nombre) à la fin.
+const DECISION_TYPES = [
+  { id: 'geste', label: 'Gestes humains', icon: 'user' },
+  { id: 'choix', label: 'Choix', icon: 'split' },
+  { id: 'libre', label: 'Questions libres', icon: 'chat' },
+  { id: 'reprise', label: 'Reprises', icon: 'refresh' },
+];
+const DECISION_TYPE = Object.fromEntries(DECISION_TYPES.map((t) => [t.id, t]));
+function decisionType(q) {
+  if (RESUME_KINDS.has(q.kind)) return 'reprise';
+  if (q.kind === 'permission') return 'geste';
+  return (q.options || []).length ? 'choix' : 'libre';
+}
+
+// Ce que la vue garde d'un rendu à l'autre (le pouls redessine tout) : filtre,
+// choix en cours, « Autre réponse… » ouvert, détails dépliés, confirmation et
+// bilan d'un lot. Au niveau du module, comme `scope`.
+const decisionUi = { filter: '', picked: new Map(), other: new Set(), details: new Set(), confirm: '', bulk: null };
+const decisionKey = (task, q) => `${task.project?.slug || ''}|${task.id}|${q.id}`;
+
+const isAbandon = (option) => String(option).trim().toLowerCase() === 'abandonner';
+// Les deux gestes d'une reprise, lus dans les options réelles (« reprendre »,
+// « réessayer »…) : jamais un libellé inventé envoyé au serveur.
+function resumeOptions(q) {
+  const options = q.options || [];
+  const abandon = options.find(isAbandon) || '';
+  const resume = options.find((o) => /^(reprendre|réessayer|relancer)$/i.test(String(o).trim()))
+    || options.find((o) => !isAbandon(o)) || '';
+  return { resume, abandon };
+}
+
+// « R52 — Poser le secret », « [P47] Refonte », « P68 — Décisions » :
+// l'identifiant interne quitte les titres affichés (cartes, inspecteur,
+// décisions) ; il reste lisible en métadonnée discrète (P74).
+// Deux formes : « [P47] … » (le crochet suffit, tiret optionnel) et
+// « P68 — … » / « R52 — … » (le tiret est requis : « P2P sans tiret » n'est
+// pas un préfixe).
+const TITLE_REF = /^(?:\[([PRW]\d+[a-z]?)\]\s*(?:[—–-]\s*)?|([PRW]\d+[a-z]?)\s*[—–-]\s*)/;
+function titleParts(title) {
+  const value = String(title || '');
+  const match = TITLE_REF.exec(value);
+  return match && value.length > match[0].length
+    ? { title: value.slice(match[0].length), ref: match[1] || match[2] }
+    : { title: value, ref: '' };
+}
+
+const askedAt = (task, q) => Date.parse(task.waiting.since || q.asked_at || '') || 0;
+
+// La phrase d'une reprise, écrite ici à partir du type et de l'âge : le texte
+// serveur (sonde, variable d'environnement, commande) reste entier dans les détails.
+function resumeSentence(task, q) {
+  const age = ageText(q.asked_at || task.waiting.since).replace(/^depuis /, '');
+  const since = age ? ` depuis au moins ${age}` : '';
+  if (q.kind === 'retry_exhausted') {
+    const lost = /perdu son bail (\d+) fois/.exec(q.text || '');
+    return lost
+      ? `Cette tâche a perdu son worker ${lost[1]} fois : la relancer encore, ou l'abandonner ?`
+      : "Cette tâche a épuisé ses tentatives automatiques : la relancer encore, ou l'abandonner ?";
+  }
+  if (q.kind === 'resume_branch') return `Le worker de cette tâche s'est arrêté${since} en laissant du travail local non poussé.`;
+  return `La session de ce worker ne donne plus signe de vie${since}. Son hôte n'a pas de frein vérifié : rien n'est relancé sans votre accord.`;
+}
+
+function decisionChip(label, { icon: iconName = '', tone = '', title = '' } = {}) {
+  const chipNode = document.createElement('span');
+  chipNode.className = 'chip pill' + (tone ? ` ${tone}` : '');
+  if (iconName) chipNode.append(icon(iconName));
+  chipNode.append(text('span', null, label));
+  if (title) chipNode.title = title;
+  return chipNode;
+}
+
+function postAnswer(ctx, task, q, answer, portfolio) {
+  const body = { text: answer, question_id: q.id };
+  ctx.dock.echo(`grimoire task answer ${task.id} "${answer}" --question ${q.id}` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
+  return portfolio
+    ? ctx.api.portfolioTaskAction(task.id, 'answer', body, task.project?.slug)
+    : ctx.api.taskAction(task.id, 'answer', body);
+}
+
 function decisionCard(ctx, task, portfolio, onWritten) {
   const open = openQuestions(task);
   const q = open[0];
-  const node = document.createElement('div');
+  const type = decisionType(q);
+  const { title, ref } = titleParts(task.title || task.id);
+  const node = document.createElement('article');
   node.className = 'ex-decision';
   node.dataset.role = 'decision';
   node.dataset.task = task.id;
+  node.dataset.type = type;
+  node.dataset.kind = q.kind;
+  if (task.project?.slug) node.dataset.project = task.project.slug;
+
   const head = document.createElement('div');
   head.className = 'ex-decision-head';
-  if (portfolio) head.append(text('span', 'chip', task.project?.name || task.project?.slug || 'projet'));
-  head.append(
-    text('span', 'ex-decision-title', task.title || task.id),
-    text('span', 'lbl', open.length > 1 ? `${open.length} questions en un lot` : (QUESTION_KIND_LABEL[q.kind] || q.kind)),
-    text('span', 'lbl', ageText(task.waiting.since || q.asked_at)),
-  );
+  const heading = text('h3', 'ex-decision-title', title);
+  heading.title = task.title || task.id;
+  const chips = document.createElement('div');
+  chips.className = 'ex-decision-chips';
+  // Une pastille d'avertissement porte le type : plus de bord jaune.
+  const kindLabel = type === 'libre' ? 'question libre' : (QUESTION_KIND_LABEL[q.kind] || q.kind);
+  chips.append(decisionChip(kindLabel, { icon: DECISION_TYPE[type].icon, tone: 'warn' }));
+  if (open.length > 1) chips.append(decisionChip(`${open.length} questions en un lot`));
+  if (portfolio) {
+    const projectName = task.project?.name || task.project?.slug || 'projet';
+    const project = decisionChip(projectName);
+    project.prepend(monogram(projectName));
+    chips.append(project);
+  }
+  const age = ageText(task.waiting.since || q.asked_at);
+  if (age) chips.append(decisionChip(age, { icon: 'clock', title: task.waiting.since || q.asked_at || '' }));
+  head.append(heading, chips);
   node.append(head);
 
-  const hint = task.waiting.resume_hint;
-  const hintNote = hint && hint.session_id
-    ? text('div', 'ex-decision-note', `session ${hint.session_id}` + (hint.resume_command ? ` — ${hint.resume_command}` : ''))
-    : null;
   if (q.origin === 'flow') {
     node.append(text('p', 'ex-decision-question', q.text));
-    if (hintNote) node.append(hintNote);
     node.append(text('div', 'ex-decision-note', "Cette décision est celle d'un checkpoint de flow : elle s'atteste dans le flux (un tour humain de la session qui l'a présenté, puis la même décision renvoyée), pas ici."));
+    node.append(decisionDetails(task, q, ref, { fullText: false }));
     return node;
   }
   const locked = !portfolio && ctx.host.readOnly;
   for (const question of open) {
-    const box = open.length > 1 ? document.createElement('div') : node;
-    if (box !== node) {
+    let box = node;
+    if (open.length > 1) {
+      box = document.createElement('div');
       box.className = 'ex-decision-item';
       box.dataset.role = 'decision-question';
       box.dataset.question = question.id;
       node.append(box);
     }
-    appendQuestionForm(ctx, box, task, question, portfolio, locked, onWritten, open.length > 1);
-    if (box === node && hintNote) node.insertBefore(hintNote, node.querySelector('.ex-decision-options'));
+    appendQuestionForm(ctx, box, task, question, { portfolio, locked, onWritten, grouped: open.length > 1, ref });
   }
-  if (open.length > 1 && hintNote) node.append(hintNote);
   if (locked) node.append(text('div', 'ex-decision-note', "le cockpit est en lecture seule : ouvrez l'atelier de ce projet, ou la portée « Tous les projets »"));
   return node;
 }
 
-function appendQuestionForm(ctx, box, task, q, portfolio, locked, onWritten, grouped) {
-  box.append(text('p', 'ex-decision-question', q.text));
-  const tags = [];
-  if (grouped) tags.push(QUESTION_KIND_LABEL[q.kind] || q.kind);
-  if (q.blocking === false) tags.push('non bloquante');
-  if (tags.length) box.append(text('div', 'ex-decision-note', tags.join(' · ')));
-  if (q.why) box.append(text('div', 'ex-decision-note', `pourquoi : ${q.why}`));
-  const feedback = document.createElement('div');
-  const area = document.createElement('textarea');
-  area.className = 'input';
-  area.placeholder = 'Votre réponse (ou choisissez une option)';
-  area.dataset.role = 'answer-text';
-  area.disabled = locked;
+// « Détails » : tout ce que la carte replie — texte serveur, pourquoi,
+// identifiants, session et commande de reprise (copiée, jamais exécutée : ADR-007).
+function decisionDetails(task, q, ref, { fullText }) {
+  const key = decisionKey(task, q);
+  const details = document.createElement('details');
+  details.className = 'ex-dec-more';
+  details.dataset.role = 'decision-details';
+  details.open = decisionUi.details.has(key);
+  details.addEventListener('toggle', () => {
+    if (details.open) decisionUi.details.add(key);
+    else decisionUi.details.delete(key);
+  });
+  const summary = text('summary', null, 'Détails');
+  summary.dataset.focusKey = `${key}|details`;
+  details.append(summary);
+  const list = document.createElement('dl');
+  const add = (label, value, { mono = false } = {}) => {
+    if (!value) return null;
+    const dd = document.createElement('dd');
+    if (value instanceof Node) dd.append(value);
+    else if (mono) dd.append(text('code', null, value));
+    else dd.textContent = value;
+    list.append(text('dt', null, label), dd);
+    return dd;
+  };
+  if (fullText) add('Texte du serveur', q.text);
+  add('Pourquoi', q.why);
+  add('Identifiant', ref);
+  add('Tâche', task.id, { mono: true });
+  add('Question', q.id, { mono: true });
+  if (q.blocking === false) add('Portée', 'non bloquante');
+  const hint = task.waiting.resume_hint || null;
+  if (hint && hint.session_id) {
+    const session = document.createElement('span');
+    session.append(text('code', null, hint.session_id));
+    if (hint.host) session.append(text('span', 'lbl', ` · ${HOST_LABEL[hint.host] || hint.host}`));
+    add('Session', session);
+  }
+  if (hint && hint.branch) add('Branche', hint.branch + (hint.observed_head ? ` @ ${hint.observed_head.slice(0, 10)}` : ''), { mono: true });
+  if (hint && hint.resume_command) {
+    const box = document.createElement('div');
+    box.className = 'ex-dec-cmd';
+    const code = text('code', null, hint.resume_command);
+    code.dataset.role = 'resume-command';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn';
+    copy.dataset.role = 'copy-resume';
+    copy.dataset.focusKey = `${key}|copy`;
+    copy.append(icon('copy'), text('span', null, 'Copier la commande'));
+    const status = actionStatus('');
+    copy.addEventListener('click', async () => {
+      // `copyText` appelle le presse-papiers dans le geste même (permission du navigateur).
+      if (await copyText(hint.resume_command, copy)) {
+        setActionStatus(status, 'Commande copiée : collez-la dans un terminal pour reprendre la session.', 'ok');
+        return;
+      }
+      // Repli : la commande est sélectionnée, prête pour Ctrl+C.
+      const selection = window.getSelection();
+      if (selection) selection.selectAllChildren(code);
+      setActionStatus(status, 'Copie refusée par le navigateur : la commande est sélectionnée, copiez-la (Ctrl+C).');
+    });
+    box.append(code, copy, status);
+    add('Reprendre', box);
+  }
+  details.append(list);
+  return details;
+}
+
+function appendQuestionForm(ctx, box, task, q, { portfolio, locked, onWritten, grouped, ref }) {
+  const key = decisionKey(task, q);
+  const type = decisionType(q);
+  const status = actionStatus('');
+  status.dataset.role = 'answer-status';
+  const controls = [];
   const send = async (value) => {
     const answer = (value || '').trim();
-    if (!answer) { feedback.replaceChildren(text('div', 'ex-refusal', 'une réponse vide ne tranche rien')); return; }
-    const body = { text: answer, question_id: q.id };
-    ctx.dock.echo(`grimoire task answer ${task.id} "${answer}" --question ${q.id}` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
+    if (!answer) { setActionStatus(status, 'Une réponse vide ne tranche rien.', 'bad'); return; }
+    for (const control of controls) control.disabled = true;
+    setActionStatus(status, 'Envoi de la réponse…');
     try {
-      if (portfolio) await ctx.api.portfolioTaskAction(task.id, 'answer', body, task.project?.slug);
-      else await ctx.api.taskAction(task.id, 'answer', body);
+      const result = await postAnswer(ctx, task, q, answer, portfolio);
+      if (result && result.blocked) throw new Error(result.reason || result.message || 'réponse refusée');
+      decisionUi.picked.delete(key);
+      decisionUi.other.delete(key);
+      setActionStatus(status, 'Réponse envoyée.', 'ok');
       onWritten();
     } catch (error) {
-      feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+      for (const control of controls) control.disabled = locked;
+      setActionStatus(status, failureText(error), 'bad');
     }
   };
-  const options = document.createElement('div');
-  options.className = 'ex-decision-options';
-  for (const option of q.options || []) {
+  const button = (label, { primary = false, role = '', focus = '' } = {}) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'btn' + (option.toLowerCase() === 'abandonner' ? '' : ' pri');
-    btn.textContent = option;
-    btn.dataset.role = 'answer-option';
+    btn.className = 'btn' + (primary ? ' pri' : '');
+    btn.textContent = label;
+    if (role) btn.dataset.role = role;
+    btn.dataset.focusKey = `${key}|${focus || role || label}`;
     btn.disabled = locked;
-    btn.addEventListener('click', () => send(option));
-    options.append(btn);
+    controls.push(btn);
+    return btn;
+  };
+
+  if (grouped) {
+    const tags = [QUESTION_KIND_LABEL[q.kind] || q.kind];
+    if (q.blocking === false) tags.push('non bloquante');
+    box.append(text('div', 'ex-decision-note', tags.join(' · ')));
   }
-  const submit = document.createElement('button');
-  submit.type = 'button';
-  submit.className = 'btn';
-  submit.textContent = 'Répondre';
-  submit.dataset.role = 'answer-submit';
-  submit.disabled = locked;
+
+  // Reprise : la phrase, deux gestes, le texte serveur dans les détails.
+  const resume = type === 'reprise' ? resumeOptions(q) : { resume: '', abandon: '' };
+  if (resume.resume || resume.abandon) {
+    box.append(text('p', 'ex-decision-question', resumeSentence(task, q)));
+    const actions = document.createElement('div');
+    actions.className = 'ex-dec-actions';
+    if (resume.resume) {
+      const go = button('Reprendre', { primary: true, role: 'answer-resume' });
+      go.dataset.answer = resume.resume;
+      go.title = `Envoie « ${resume.resume} »`;
+      go.addEventListener('click', () => send(resume.resume));
+      actions.append(go);
+    }
+    if (resume.abandon) {
+      const stop = button('Abandonner', { role: 'answer-abandon' });
+      stop.dataset.answer = resume.abandon;
+      stop.title = `Envoie « ${resume.abandon} » : la tâche est annulée`;
+      stop.addEventListener('click', () => send(resume.abandon));
+      actions.append(stop);
+    }
+    box.append(actions, status, decisionDetails(task, q, ref, { fullText: true }));
+    return;
+  }
+
+  box.append(text('p', 'ex-decision-question', q.text));
+  const options = q.options || [];
+  const actions = document.createElement('div');
+  actions.className = 'ex-dec-actions';
+
+  // La zone libre : ouverte d'office pour une question sans réponse proposée,
+  // repliée derrière « Autre réponse… » sinon.
+  const free = document.createElement('div');
+  free.className = 'ex-dec-free';
+  free.id = `ex-free-${key.replace(/[^\w-]/g, '_')}`;
+  const area = document.createElement('textarea');
+  area.className = 'input';
+  area.dataset.role = 'answer-text';
+  area.disabled = locked;
+  area.setAttribute('aria-label', 'Votre réponse');
+  controls.push(area);
+  const freeOnly = type === 'libre' || (type === 'reprise' && !options.length);
+  area.placeholder = freeOnly ? 'Votre réponse' : 'Une autre réponse que celles proposées';
+  const submit = button('Répondre', { primary: freeOnly, role: 'answer-submit' });
   submit.addEventListener('click', () => send(area.value));
-  box.append(options, area, row(submit), feedback);
+  const submitRow = document.createElement('div');
+  submitRow.className = 'ex-dec-actions';
+  submitRow.append(submit);
+  free.append(area, submitRow);
+
+  if (freeOnly) {
+    box.append(free, status, decisionDetails(task, q, ref, { fullText: false }));
+    return;
+  }
+
+  if (options.length) {
+    // Liste de choix : un clic choisit (aria-pressed), « Valider ce choix » envoie.
+    const list = document.createElement('div');
+    list.className = 'ex-choices';
+    list.setAttribute('role', 'group');
+    list.setAttribute('aria-label', 'Réponses proposées');
+    const validate = button('Valider ce choix', { primary: true, role: 'answer-validate' });
+    const choiceButtons = [];
+    const paint = () => {
+      const picked = decisionUi.picked.get(key);
+      for (const choice of choiceButtons) choice.setAttribute('aria-pressed', String(choice.dataset.answer === picked));
+      validate.disabled = locked || !picked;
+    };
+    options.forEach((option, index) => {
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.className = 'ex-choice';
+      choice.dataset.role = 'answer-option';
+      choice.dataset.answer = option;
+      choice.dataset.focusKey = `${key}|opt|${index}`;
+      choice.disabled = locked;
+      const mark = document.createElement('span');
+      mark.className = 'ex-choice-mark';
+      mark.setAttribute('aria-hidden', 'true');
+      choice.append(mark, text('span', null, option));
+      choice.addEventListener('click', () => {
+        if (decisionUi.picked.get(key) === option) decisionUi.picked.delete(key);
+        else decisionUi.picked.set(key, option);
+        paint();
+      });
+      controls.push(choice);
+      choiceButtons.push(choice);
+      list.append(choice);
+    });
+    validate.addEventListener('click', () => send(decisionUi.picked.get(key)));
+    box.append(list);
+    actions.append(validate);
+    paint();
+    // Le désactivé de « Valider » dépend du choix : `controls` ne doit pas le réactiver seul.
+    const reenable = controls.indexOf(validate);
+    if (reenable >= 0) controls.splice(reenable, 1);
+  } else {
+    // Geste humain sans réponse proposée : « Fait » envoie « fait ».
+    const done = button('Fait', { primary: true, role: 'answer-done' });
+    done.title = 'Envoie « fait » : le geste demandé est accompli';
+    done.addEventListener('click', () => send('fait'));
+    actions.append(done);
+  }
+
+  const other = button('Autre réponse…', { role: 'answer-other' });
+  other.setAttribute('aria-controls', free.id);
+  const showFree = (on) => {
+    free.hidden = !on;
+    other.setAttribute('aria-expanded', String(on));
+  };
+  showFree(decisionUi.other.has(key));
+  other.addEventListener('click', () => {
+    const on = free.hidden;
+    if (on) decisionUi.other.add(key);
+    else decisionUi.other.delete(key);
+    showFree(on);
+    if (on) area.focus();
+  });
+  actions.append(other);
+  box.append(actions, free, status, decisionDetails(task, q, ref, { fullText: false }));
+}
+
+// Lot « Tout reprendre » / « Tout abandonner » : aucune route groupée, donc N
+// réponses envoyées l'une après l'autre ; un refus n'arrête pas les suivantes,
+// le bilan les nomme. L'état vit au module : le pouls peut redessiner la vue
+// pendant le lot, la progression se repeint sur la nouvelle zone.
+function bulkEligible(tasks, action, portfolio, ctx) {
+  if (!portfolio && ctx.host.readOnly) return [];
+  return tasks.filter((task) => {
+    const q = openQuestions(task)[0];
+    if (q.origin === 'flow') return false;
+    const options = resumeOptions(q);
+    return action === 'resume' ? !!options.resume : !!options.abandon;
+  });
+}
+
+function bulkMessage(state) {
+  const resume = state.action === 'resume';
+  if (state.running) return `${resume ? 'Reprise' : 'Abandon'} en cours : ${state.done}/${state.total}…`;
+  const n = state.ok;
+  const done = resume
+    ? `${n} tâche${n > 1 ? 's' : ''} reprise${n > 1 ? 's' : ''}`
+    : `${n} tâche${n > 1 ? 's' : ''} abandonnée${n > 1 ? 's' : ''}`;
+  if (!state.refused.length) return `${done} sur ${state.total}.`;
+  return `${done} sur ${state.total} ; ${state.refused.length} refus :`;
+}
+
+function paintBulk() {
+  const state = decisionUi.bulk;
+  for (const box of document.querySelectorAll('[data-role="bulk-status"]')) {
+    if (!state) { setActionStatus(box, ''); continue; }
+    const tone = state.running ? '' : (state.refused.length ? 'bad' : 'ok');
+    setActionStatus(box, bulkMessage(state), tone);
+    if (!state.running && state.refused.length) {
+      const list = document.createElement('ul');
+      list.className = 'ex-dec-refusals';
+      for (const refusal of state.refused) list.append(text('li', null, `${refusal.title} — ${refusal.why}`));
+      box.append(list);
+    }
+  }
+  for (const btn of document.querySelectorAll('[data-role="bulk-resume"], [data-role="bulk-abandon"]')) {
+    btn.disabled = !!(state && state.running);
+  }
+}
+
+async function runBulk(ctx, action, tasks, portfolio, onWritten) {
+  const state = { action, total: tasks.length, done: 0, ok: 0, refused: [], running: true };
+  decisionUi.bulk = state;
+  paintBulk();
+  for (const task of tasks) {
+    const q = openQuestions(task)[0];
+    const options = resumeOptions(q);
+    try {
+      const result = await postAnswer(ctx, task, q, action === 'resume' ? options.resume : options.abandon, portfolio);
+      if (result && result.blocked) throw new Error(result.reason || result.message || 'réponse refusée');
+      state.ok += 1;
+    } catch (error) {
+      state.refused.push({ title: titleParts(task.title || task.id).title, why: failureText(error) });
+    }
+    state.done += 1;
+    paintBulk();
+  }
+  state.running = false;
+  paintBulk();
+  onWritten();
+}
+
+function bulkControls(ctx, tasks, portfolio, onWritten) {
+  const box = document.createElement('div');
+  box.className = 'ex-dec-bulk';
+  const confirmSlot = document.createElement('div');
+  confirmSlot.dataset.role = 'bulk-confirm-slot';
+  const showConfirm = ({ focus = false } = {}) => {
+    confirmSlot.replaceChildren();
+    const action = decisionUi.confirm;
+    if (!action) return;
+    const targets = bulkEligible(tasks, action, portfolio, ctx);
+    if (targets.length < 2) { decisionUi.confirm = ''; return; }
+    const confirm = document.createElement('div');
+    confirm.className = 'ex-confirm';
+    confirm.dataset.role = 'bulk-confirm';
+    confirm.setAttribute('role', 'group');
+    confirm.setAttribute('aria-label', 'Confirmer le lot');
+    const n = targets.length;
+    confirm.append(text('p', 'lbl', action === 'resume'
+      ? `Reprendre ${n} tâches ? Chacune repart en « Prête » pour le prochain worker ; les réponses partent l'une après l'autre.`
+      : `Abandonner ${n} tâches ? Chacune est annulée ; ce geste ne s'annule pas.`));
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'btn pri';
+    go.dataset.role = 'bulk-confirm-go';
+    go.textContent = action === 'resume' ? `Reprendre les ${n}` : `Abandonner les ${n}`;
+    go.addEventListener('click', () => {
+      decisionUi.confirm = '';
+      confirmSlot.replaceChildren();
+      runBulk(ctx, action, targets, portfolio, onWritten);
+    });
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn';
+    cancel.dataset.role = 'bulk-confirm-cancel';
+    cancel.textContent = 'Annuler';
+    cancel.addEventListener('click', () => { decisionUi.confirm = ''; confirmSlot.replaceChildren(); });
+    confirm.append(go, cancel);
+    confirmSlot.append(confirm);
+    if (focus) go.focus({ preventScroll: true });
+  };
+  for (const [action, label, role] of [['resume', 'Tout reprendre', 'bulk-resume'], ['abandon', 'Tout abandonner', 'bulk-abandon']]) {
+    const n = bulkEligible(tasks, action, portfolio, ctx).length;
+    if (n < 2) continue;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.dataset.role = role;
+    btn.dataset.focusKey = `bulk|${role}`;
+    btn.textContent = `${label} (${n})`;
+    btn.disabled = !!(decisionUi.bulk && decisionUi.bulk.running);
+    btn.addEventListener('click', () => { decisionUi.confirm = action; showConfirm({ focus: true }); });
+    box.append(btn);
+  }
+  if (decisionUi.confirm) showConfirm();
+  return box.childElementCount ? { box, confirmSlot } : null;
 }
 
 function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
-  const pending = tasks.filter(isHumanWait).sort((a, b) =>
-    String(a.waiting.since || '').localeCompare(String(b.waiting.since || '')) || String(a.id).localeCompare(String(b.id)));
+  const pending = tasks.filter(isHumanWait);
   const wrap = document.createElement('div');
   wrap.className = 'ex-decisions';
+  wrap.dataset.role = 'decisions';
+  const bulkStatus = actionStatus('');
+  bulkStatus.dataset.role = 'bulk-status';
   if (!pending.length) {
-    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions', undefined, { art: 'i-empty-inbox' }));
+    wrap.append(bulkStatus, ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions', undefined, { art: 'i-empty-inbox' }));
+    root.append(wrap);
+    paintBulk();
+    return;
   }
-  for (const task of pending) wrap.append(decisionCard(ctx, task, portfolio, onWritten));
+  const groups = new Map(DECISION_TYPES.map((t) => [t.id, []]));
+  for (const task of pending) groups.get(decisionType(openQuestions(task)[0])).push(task);
+  // Dans chaque section, la plus ancienne d'abord.
+  for (const list of groups.values()) {
+    list.sort((a, b) => (askedAt(a, openQuestions(a)[0]) - askedAt(b, openQuestions(b)[0])) || String(a.id).localeCompare(String(b.id)));
+  }
+  if (decisionUi.filter && !(groups.get(decisionUi.filter) || []).length) decisionUi.filter = '';
+
+  // Compteurs par type : des filtres, comme les puces d'À traiter.
+  const bar = document.createElement('div');
+  bar.className = 'ex-dec-bar';
+  const filters = document.createElement('div');
+  filters.className = 'ex-dec-filter';
+  filters.setAttribute('role', 'group');
+  filters.setAttribute('aria-label', 'Filtrer les décisions par type');
+  const sections = [];
+  const filterButtons = [];
+  const applyFilter = () => {
+    for (const btn of filterButtons) btn.setAttribute('aria-pressed', String((btn.dataset.filter || '') === decisionUi.filter));
+    for (const section of sections) section.hidden = !!decisionUi.filter && section.dataset.type !== decisionUi.filter;
+  };
+  const filterButton = (id, label, count, iconName) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip pill';
+    btn.dataset.role = 'decision-filter';
+    btn.dataset.filter = id;
+    btn.dataset.focusKey = `filter|${id}`;
+    if (iconName) btn.append(icon(iconName));
+    btn.append(text('span', null, label), text('span', 'ex-dec-n', String(count)));
+    btn.addEventListener('click', () => {
+      decisionUi.filter = decisionUi.filter === id || !id ? '' : id;
+      applyFilter();
+    });
+    filterButtons.push(btn);
+    return btn;
+  };
+  filters.append(filterButton('', 'Toutes', pending.length, ''));
+  for (const type of DECISION_TYPES) {
+    const count = groups.get(type.id).length;
+    if (count) filters.append(filterButton(type.id, type.label, count, type.icon));
+  }
+  bar.append(filters);
+  wrap.append(bar, bulkStatus);
+
+  for (const type of DECISION_TYPES) {
+    const list = groups.get(type.id);
+    if (!list.length) continue;
+    const section = document.createElement('section');
+    section.className = 'ex-dec-section';
+    section.dataset.type = type.id;
+    const head = document.createElement('div');
+    head.className = 'ex-dec-section-head';
+    const h = document.createElement('h3');
+    h.id = `ex-dec-h-${type.id}`;
+    h.append(icon(type.icon), text('span', null, type.label), text('span', 'ex-dec-n', String(list.length)));
+    head.append(h);
+    section.setAttribute('aria-labelledby', h.id);
+    section.append(head);
+    if (type.id === 'reprise') {
+      const bulk = bulkControls(ctx, list, portfolio, onWritten);
+      if (bulk) { head.append(bulk.box); section.append(bulk.confirmSlot); }
+    }
+    const ul = document.createElement('ul');
+    ul.className = 'ex-dec-list';
+    for (const task of list) {
+      const li = document.createElement('li');
+      li.append(decisionCard(ctx, task, portfolio, onWritten));
+      ul.append(li);
+    }
+    section.append(ul);
+    sections.push(section);
+    wrap.append(section);
+  }
+  applyFilter();
   root.append(wrap);
+  paintBulk();
 }
 
 // Le bandeau au-dessus du board : ce qui attend un humain ne se découvre pas en cherchant.
@@ -1128,6 +2032,55 @@ function sessionBlock(session, { resume = true } = {}) {
     block.append(text('p', 'lbl', "cet hôte n'a pas de commande de reprise connue : reprenez la session par son identifiant"));
   }
   block.append(feedback);
+  return block;
+}
+
+// P75 : la section « Travail de la session » de l'inspecteur — persona, hôte,
+// modèle réel, effort, skills invoqués, tokens détaillés. Chaque donnée absente
+// est dite absente (« non rapporté »), et le statut d'usage est écrit en toutes
+// lettres quand le chiffre ne vient pas du journal de l'hôte.
+function workBlock(task) {
+  const work = task.work || {};
+  const block = document.createElement('div');
+  block.className = 'ex-insp-block';
+  block.dataset.role = 'work-block';
+  block.append(text('h4', null, 'Travail de la session'));
+  const claim = task.claim || {};
+  const persona = claim.agent_id || claim.actor_id || '';
+  block.append(text('div', 'lbl', `persona : ${persona || 'non rapportée'}`));
+  block.append(text('div', 'lbl', `hôte : ${task.host ? (HOST_LABEL[task.host] || task.host) : 'inconnu'}`));
+  const session = work.session;
+  const modelLine = text('div', 'lbl', '');
+  modelLine.dataset.role = 'work-model-detail';
+  modelLine.textContent = session && session.model
+    ? `modèle réel : ${session.model}${session.tier ? ` (palier ${session.tier})` : ''}`
+    : 'modèle réel : non rapporté';
+  block.append(modelLine);
+  const effortLine = text('div', 'lbl', `effort : ${session && session.effort ? session.effort : 'non rapporté'}`);
+  effortLine.dataset.role = 'work-effort-detail';
+  block.append(effortLine);
+  const skillsLine = text('div', 'lbl', 'skills invoqués : ');
+  skillsLine.dataset.role = 'work-skills-list';
+  skillsLine.append(text('span', null, session && session.skills && session.skills.length ? session.skills.join(', ') : 'aucun rapporté'));
+  block.append(skillsLine);
+  const usage = work.usage || {};
+  const usageLine = text('div', 'lbl', '');
+  usageLine.dataset.role = 'work-usage';
+  if (usage.usage_source === 'claude-code-transcript') {
+    usageLine.textContent = `tokens : ${usage.total_tokens} (${usage.input_tokens} in / ${usage.output_tokens} out, `
+      + `cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit, ${usage.calls} appel(s))`;
+    block.append(usageLine);
+    const costLine = text('div', 'lbl', '');
+    costLine.dataset.role = 'work-cost';
+    costLine.textContent = work.cost_cad != null && usage.cost_usd != null
+      ? `coût : ${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)} `
+        + `(${usage.cost_usd.toFixed(4)} USD, taux ${String(work.usd_cad).replace('.', ',')})`
+      : 'coût : inconnu (appels non tarifés)';
+    block.append(costLine);
+  } else {
+    usageLine.textContent = `usage : ${USAGE_SOURCE_WORDS[usage.usage_source] || 'aucun usage replié (none)'}`;
+    block.append(usageLine);
+  }
   return block;
 }
 
@@ -1356,6 +2309,195 @@ function receiptBlock(ctx, taskId, payload, project) {
 // l'utilisateur a pu taper. `guard.defer()` dit si une saisie est en cours (alors
 // le re-rendu est reporté, `false` rendu) ; et quand il a lieu quand même (clic
 // sur une carte, transition), valeur, focus et curseur sont rétablis.
+// ── Assigner une session (P47 lot 2) ────────────────────────────────────────
+//
+// Une section de l'inspecteur (jamais une modale) : le plan de lancement que
+// GET tasks/<id>/launch-plan rend — modèle, worktree, branche, les cinq
+// vérifications du préflight et la commande équivalente à copier. Rien n'est
+// lancé : le bouton « Lancer la session » reste désactivé tant que la garde
+// d'écriture commune (ADR-008) n'existe pas (GAO-garde-d-crit-001).
+
+//: Les verdicts du préflight sur les tons existants du cockpit (stateIcon).
+const PREFLIGHT_TONE = { ok: 'ok', warn: 'warn', bloquant: 'bad', inconnu: '' };
+const PREFLIGHT_WORD = { ok: 'ok', warn: 'attention', bloquant: 'bloquant', inconnu: 'inconnu' };
+const LAUNCH_LOCK_REASON = "Lancement depuis le cockpit après la garde d'écriture commune (ADR-008) — copie la commande en attendant.";
+// Les états que le préflight accepte en entrée de file : une tâche prête est
+// candidate à l'admission, une proposée reçoit un plan qui dit ce qui manque.
+const ASSIGNABLE_STATUS = new Set(['proposed', 'ready']);
+
+function assignPlanNode(plan) {
+  const panel = document.createElement('div');
+  panel.className = 'ex-assign-panel';
+  panel.append(text('h4', null, 'Assigner une session'));
+  panel.append(text('p', 'ex-assign-sub', 'Tu lances, la session travaille dans son worktree, elle finit par une PR que tu fusionnes.'));
+
+  // Pas prêt : le dire clairement en tête, avec la raison du préflight (ton warn).
+  if (plan.pret === false) {
+    const notReady = document.createElement('div');
+    notReady.className = 'ex-assign-notready';
+    notReady.dataset.role = 'assign-not-ready';
+    notReady.append(stateIcon('warn'), text('span', null, `Pas prêt : ${plan.raison || 'raison non communiquée'}`));
+    panel.append(notReady);
+  }
+
+  // Modèle, worktree, branche — les mêmes lignes clé-valeur que le bloc Preuves.
+  const rows = document.createElement('div');
+  rows.className = 'ex-assign-rows';
+  const kv = (label, role, ...nodes) => {
+    const line = document.createElement('div');
+    line.className = 'ex-kv';
+    line.dataset.role = role;
+    const value = document.createElement('span');
+    value.append(...nodes);
+    line.append(text('span', 'lbl', label), value);
+    return line;
+  };
+  const modele = plan.modele || {};
+  const modelValue = text('span', null, modele.recommande || 'aucun modèle imposé — la session garde son défaut');
+  if (modele.source) modelValue.title = `source : ${modele.source}${modele.palier ? ` · palier ${modele.palier}` : ''}`;
+  const modelWhy = text('span', 'ex-cond-why', `classe ${modele.classe || '?'}, ${modele.justification || 'justification non communiquée'}`);
+  rows.append(kv('Modèle', 'assign-model', modelValue, modelWhy));
+  const worktree = plan.worktree || {};
+  const worktreeName = worktree.chemin ? String(worktree.chemin).split('/').filter(Boolean).pop() : '';
+  const wtValue = worktreeName
+    ? text('code', null, worktreeName)
+    : text('span', 'lbl', worktree.detail || 'chemin inconnu');
+  if (worktree.chemin) wtValue.title = worktree.chemin;
+  const wtNodes = [wtValue];
+  if (worktree.existant) wtNodes.push(text('span', 'ex-cond-why', 'worktree déjà créé : la session le reprendrait'));
+  rows.append(kv('Worktree', 'assign-worktree', ...wtNodes));
+  rows.append(kv('Branche', 'assign-branch', text('code', null, worktree.branche || '?')));
+  panel.append(rows);
+
+  // Les cinq vérifications du préflight, chacune avec son verdict.
+  const verifsBlock = document.createElement('div');
+  verifsBlock.append(text('h4', null, 'Vérifications avant lancement'));
+  const list = document.createElement('ul');
+  list.className = 'ex-assign-verifs';
+  list.dataset.role = 'assign-verifs';
+  for (const v of plan.verifications || []) {
+    const li = document.createElement('li');
+    const tone = PREFLIGHT_TONE[v.verdict] ?? '';
+    li.className = 'ex-assign-verif' + (tone ? ' ' + tone : '');
+    li.dataset.role = 'assign-verif';
+    li.dataset.verif = v.id;
+    li.dataset.verdict = v.verdict;
+    const body = document.createElement('span');
+    body.append(
+      text('span', v.verdict === 'bloquant' ? 'ex-cond-strong' : null, `${v.libelle} — ${PREFLIGHT_WORD[v.verdict] || v.verdict}`),
+      text('span', 'ex-cond-why', v.detail || ''),
+    );
+    li.append(stateIcon(tone), body);
+    list.append(li);
+  }
+  if (!(plan.verifications || []).length) verifsBlock.append(text('p', 'lbl', 'aucune vérification lue'));
+  else verifsBlock.append(list);
+  panel.append(verifsBlock);
+
+  // Lancer : présent mais toujours désactivé dans ce lot — la garde d'écriture
+  // commune (ADR-008) n'existe pas encore, la raison est écrite à côté.
+  const launchRow = document.createElement('div');
+  launchRow.className = 'ex-assign-launch';
+  const launch = document.createElement('button');
+  launch.type = 'button';
+  launch.className = 'btn pri';
+  launch.dataset.role = 'assign-launch';
+  launch.textContent = 'Lancer la session';
+  launch.disabled = true;
+  launch.title = LAUNCH_LOCK_REASON;
+  launch.setAttribute('aria-describedby', 'ex-assign-lock-reason');
+  const lockReason = text('p', 'lbl', LAUNCH_LOCK_REASON);
+  lockReason.id = 'ex-assign-lock-reason';
+  lockReason.dataset.role = 'assign-launch-reason';
+  launchRow.append(launch, lockReason);
+  panel.append(launchRow);
+
+  // Équivalent : la commande du payload, à copier — même pattern statut +
+  // repli (sélection prête pour Ctrl+C) que la vue Décisions.
+  const equiv = document.createElement('div');
+  equiv.append(text('h4', null, 'Équivalent'));
+  const commande = plan.commande || {};
+  if (commande.texte) {
+    const box = document.createElement('div');
+    box.className = 'ex-assign-cmd';
+    const code = text('code', null, commande.texte);
+    code.dataset.role = 'assign-command';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn';
+    copy.dataset.role = 'assign-copy';
+    copy.append(icon('copy'), text('span', null, 'Copier la commande'));
+    const status = actionStatus('');
+    copy.addEventListener('click', async () => {
+      // `copyText` appelle le presse-papiers dans le geste même (permission du navigateur).
+      if (await copyText(commande.texte, copy)) {
+        setActionStatus(status, 'Commande copiée : collez-la dans un terminal pour lancer la session.', 'ok');
+        return;
+      }
+      // Repli : la commande est sélectionnée, prête pour Ctrl+C.
+      const selection = window.getSelection();
+      if (selection) selection.selectAllChildren(code);
+      setActionStatus(status, 'Copie refusée par le navigateur : la commande est sélectionnée, copiez-la (Ctrl+C).');
+    });
+    box.append(code, copy, status);
+    equiv.append(box);
+  } else {
+    equiv.append(text('p', 'lbl', `commande indisponible : ${commande.raison || 'non composée par le préflight'}`));
+  }
+  panel.append(equiv);
+  return panel;
+}
+
+async function renderAssignPanel(ctx, holder, taskId, project) {
+  // Chargement : squelette court, remplacé par le plan ou par l'échec nommé.
+  const wait = document.createElement('div');
+  wait.className = 'skeleton';
+  wait.dataset.shape = 'lines';
+  wait.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 3; i += 1) wait.append(text('div', 'skeleton-line', ''));
+  holder.replaceChildren(text('p', 'lbl sr-only', 'Lecture du plan de lancement…'), wait);
+  let plan;
+  try {
+    plan = await ctx.api.taskLaunchPlan(taskId, project);
+  } catch (error) {
+    if (ctx.signal.aborted) return;
+    holder.replaceChildren(text('p', 'ex-refusal', failureText(error)));
+    return;
+  }
+  // Le pouls a pu fermer le panneau ou changer de tâche pendant la lecture.
+  if (ctx.signal.aborted || !(assignUi.open && assignUi.task === taskId)) return;
+  holder.replaceChildren(assignPlanNode(plan));
+}
+
+function assignBlock(ctx, detail, project) {
+  if (!ASSIGNABLE_STATUS.has(detail.status)) return null;
+  const block = document.createElement('section');
+  block.className = 'ex-insp-block';
+  block.dataset.role = 'assign-block';
+  const holder = document.createElement('div');
+  holder.dataset.role = 'assign-panel-holder';
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'btn';
+  open.dataset.role = 'assign-open';
+  open.append(icon('play'), text('span', null, 'Assigner une session…'));
+  const paint = (opened) => {
+    open.setAttribute('aria-expanded', String(opened));
+    if (opened) renderAssignPanel(ctx, holder, detail.id, project);
+    else holder.replaceChildren();
+  };
+  open.addEventListener('click', () => {
+    const opened = !(assignUi.open && assignUi.task === detail.id);
+    assignUi.open = opened;
+    assignUi.task = opened ? detail.id : '';
+    paint(opened);
+  });
+  block.append(open, holder);
+  // Le panneau survit au re-rendu de l'inspecteur (pouls live) : rouvert, il se rafraîchit.
+  paint(assignUi.open && assignUi.task === detail.id);
+  return block;
+}
+
 async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false, guard = {}) {
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
@@ -1382,14 +2524,35 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   const stateLabel = waitingNow ? waitingText(detail.waiting) : (COLUMN_LABEL[detail.board] || detail.board);
   const head = document.createElement('div');
   head.className = 'ex-insp-head';
+  // P74 : le préfixe interne quitte aussi le titre de l'inspecteur ; il reste
+  // ici, en métadonnée discrète à côté de l'identifiant complet.
+  const { title: shownTitle, ref: titleRef } = titleParts(detail.title || detail.id);
   const headRow = row(
     text('span', 'lbl mono', detail.id),
     badge(stateLabel, waitingNow ? 'warn' : STATE_TONE[detail.board]),
   );
   headRow.classList.add('ex-insp-idrow');
+  if (titleRef) {
+    const refNode = text('span', 'lbl mono', titleRef);
+    refNode.dataset.role = 'title-ref';
+    refNode.title = `identifiant interne du titre : ${detail.title}`;
+    headRow.insertBefore(refNode, headRow.children[1]);
+  }
   appendIf(headRow, moreMenu(ctx, detail, onWritten));
   head.append(headRow);
-  head.append(text('h3', null, detail.title || detail.id));
+  head.append(text('h3', null, shownTitle));
+  // P74 : les deux temps, nommés — l'âge dans la colonne et l'âge total.
+  const inColumnAge = ageText(task.in_state_since || detail.in_state_since || '');
+  const totalAge = ageText(detail.created_at || '');
+  if (inColumnAge || totalAge) {
+    const ages = text('div', 'lbl', [
+      inColumnAge ? `dans ${COLUMN_LABEL[detail.board] || detail.board} ${inColumnAge}` : '',
+      totalAge ? `ouverte ${totalAge}` : '',
+    ].filter(Boolean).join(' · '));
+    ages.dataset.role = 'task-ages';
+    ages.title = 'Âge dans la colonne courante (dernière transition), puis âge total (depuis l’ouverture).';
+    head.append(ages);
+  }
   ctx.inspector.append(head);
   if (portfolio) ctx.inspector.append(text('div', 'lbl', `Projet : ${task.project?.name || task.project?.slug || '—'}`));
 
@@ -1658,25 +2821,30 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   }
   ctx.inspector.append(sessionWrap);
 
+  // ── P75 : qui travaille — persona, modèle réel, effort, skills, tokens ──
+  if (task.work) ctx.inspector.append(workBlock(task));
+
+  // ── Assigner une session (P47) : le plan de lancement, sans rien lancer ──
+  appendIf(ctx.inspector, assignBlock(ctx, detail, project));
+
   // ── Mémoire servie : le reçu de rappel, rejouable (P27) ─────────────────
   ctx.inspector.append(receiptBlock(ctx, taskId, receipts, project));
 
   // ── Consigne à la session, priorité (gestes existants) ──────────────────
   renderSteering(ctx, detail, onWritten);
 
-  // ── Derniers événements ─────────────────────────────────────────────────
+  // ── Activité (P69v2, artboard Travail « Derniers événements ») ──────────
+  // Le fil de l'agent dérivé du ledger (claim, transitions, portes,
+  // questions/réponses, notes de progression), le même bloc que l'inspecteur
+  // de session (`activity.js`), avec la commande `claude logs` à copier.
   const eventCount = (trace?.entries || []).length;
   const eventsBlock = document.createElement('div');
   eventsBlock.className = 'ex-insp-block';
   eventsBlock.dataset.role = 'last-events';
-  eventsBlock.append(text('h4', null, 'Derniers événements'));
-  const recent = [...(trace?.entries || [])].slice(-3).reverse();
-  if (!recent.length) eventsBlock.append(text('p', 'lbl', 'aucun événement lu'));
-  for (const entry of recent) {
-    const line = text('div', 'ex-event', '');
-    line.append(text('span', 'lbl', `${(entry.at || '').slice(0, 16).replace('T', ' ')} · `), entry.summary || entry.kind);
-    eventsBlock.append(line);
-  }
+  eventsBlock.append(activityBlockAsync(
+    () => ctx.api.taskFeed(taskId, project),
+    { heading: 'Derniers événements', signal: ctx.signal },
+  ));
   // Drill-down (#139) : la timeline complète de la tâche sans passer par le sélecteur de vue.
   const timelineBtn = document.createElement('button');
   timelineBtn.type = 'button';
@@ -1822,7 +2990,9 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
   select.addEventListener('change', () => {
     send('prioritize', { to: select.value }, `grimoire task prioritize ${detail.id} --to ${select.value}`);
   });
-  prioBlock.append(row(select, text('span', 'lbl', detail.priority ? 'déclarée' : 'dérivée du profil de risque')));
+  const prioRow = row(select, text('span', 'lbl', detail.priority ? 'déclarée' : 'dérivée du profil de risque'));
+  prioRow.classList.add('ex-prio-row');
+  prioBlock.append(prioRow);
   container.append(prioBlock);
 
   // Consignes.
@@ -1835,9 +3005,13 @@ function renderSteeringInto(container, ctx, detail, onWritten) {
     const node = document.createElement('div');
     node.className = 'ex-directive' + (d.delivered_at ? '' : ' unread');
     node.dataset.role = 'directive';
-    const status = d.acknowledged_at ? 'accusée' : (d.delivered_at ? 'livrée' : 'non lue');
+    // P74 : « non lue » était du jargon — la consigne est posée au ledger,
+    // c'est la session qui ne l'a pas encore reçue.
+    const status = d.acknowledged_at ? 'accusée' : (d.delivered_at ? 'livrée' : 'en attente de la session');
+    const metaLine = text('div', 'ex-directive-meta', `${d.kind} · ${d.author} · ${(d.created_at || '').slice(0, 16)} · ${status}`);
+    if (!d.delivered_at) metaLine.title = 'Consigne posée au ledger, pas encore livrée à la session qui tient la tâche.';
     node.append(text('div', null, d.text));
-    node.append(text('div', 'ex-directive-meta', `${d.kind} · ${d.author} · ${(d.created_at || '').slice(0, 16)} · ${status}`));
+    node.append(metaLine);
     dirBlock.append(node);
   }
   if (!readOnly) {
@@ -2044,7 +3218,10 @@ function captureView(wrap) {
   const canvas = wrap.parentElement;
   const board = wrap.querySelector('.ex-board, .ex-list-wrap');
   const focus = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.ex-card, tr[data-task]') : null;
+  // Décisions (P68) : un bouton de choix, de filtre ou de lot garde le focus après une actualisation.
+  const keyed = document.activeElement && wrap.contains(document.activeElement) ? document.activeElement.dataset?.focusKey || '' : '';
   return {
+    focusKey: keyed,
     canvasTop: canvas ? canvas.scrollTop : 0,
     wrapTop: wrap.scrollTop,
     boardLeft: board ? board.scrollLeft : 0,
@@ -2064,10 +3241,17 @@ function restoreView(wrap, kept) {
       .find((n) => n.dataset.task === kept.focus.task && (n.dataset.project || '') === kept.focus.project);
     if (same && typeof same.focus === 'function') same.focus({ preventScroll: true });
   }
+  if (kept.focusKey) {
+    const same = [...wrap.querySelectorAll('[data-focus-key]')].find((n) => n.dataset.focusKey === kept.focusKey);
+    if (same) same.focus({ preventScroll: true });
+  }
 }
 
 export async function mount(root, ctx) {
   injectStyles();
+  // Le bilan d'un lot de décisions ne survit pas à un retour sur l'espace (sauf lot en cours).
+  if (decisionUi.bulk && !decisionUi.bulk.running) decisionUi.bulk = null;
+  decisionUi.confirm = '';
   const wrap = document.createElement('div');
   wrap.className = 'ex-wrap';
   root.append(wrap);

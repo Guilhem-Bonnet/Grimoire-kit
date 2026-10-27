@@ -5,7 +5,9 @@ tâche ``closed``, ``cancelled`` ou ``failed`` qui a un worktree, une session la
 
 1. ``ci_slot`` — rend le créneau ``ci.runners`` (``capacity.released``, comme ``task.ci_finished``) ;
 2. ``session`` — ``claude stop <id>`` sur la session détachée (la conversation est gardée) ;
-3. ``worktree`` — ``git worktree remove`` **sans** ``--force`` : un arbre sale reste là, et l'échec est rapporté ;
+3. ``worktree`` — ``git worktree remove`` **sans** ``--force`` : un arbre sale reste là, et l'échec est rapporté ; un arbre
+   dont les seuls changements sont des sorties du kit non suivies (reçus du relecteur…) les voit copiées sous
+   ``_grimoire-output/archive/worktrees/<id>`` puis est retiré ;
 4. ``branch_local`` et ``branch_remote`` — suppression de ``task/<id>``, **seulement si fusionnée** : ``gh pr view`` dit
    ``MERGED``, ou (aucune PR) le ledger a un ``task.merged`` pour cette tête qui est dans la cible. Une vérification
    qui échoue ou qui dit « pas fusionnée » ne supprime rien (échec fermé) ;
@@ -43,12 +45,16 @@ if TYPE_CHECKING:
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.service import TaskService
 
-__all__ = ["ACTION_EVENT", "ARCHIVE_DIR", "JANITOR_ACTOR", "SWEPT_EVENT", "Janitor", "JanitorOutcome", "janitor_active", "pending_cleanup"]
+__all__ = ["ACTION_EVENT", "ARCHIVE_DIR", "JANITOR_ACTOR", "SWEPT_EVENT", "WORKTREE_ARCHIVE_DIR", "Janitor", "JanitorOutcome", "janitor_active", "pending_cleanup"]
 
 ACTION_EVENT = "janitor.action"
 SWEPT_EVENT = "janitor.swept"
 JANITOR_ACTOR = "janitor"
 ARCHIVE_DIR = "_grimoire-output/archive/evidence"
+#: Où vont les sorties du kit trouvées dans un worktree retiré (reçus et verdicts du relecteur, runtime).
+WORKTREE_ARCHIVE_DIR = "_grimoire-output/archive/worktrees"
+#: Dossiers que le kit écrit lui-même dans un worktree de tâche : non suivis, ils ne rendent pas l'arbre « sale ».
+_KIT_OUTPUTS = ("_grimoire-output/", "_grimoire-runtime-output/")
 _TERMINAL = (TaskState.CLOSED, TaskState.CANCELLED, TaskState.FAILED)
 _FINAL = frozenset({"done", "skipped"})
 _ISSUE_LINK = re.compile(r"\b(?:closes|closed|fixes|fixed|resolves|resolved)\s*:?\s*#(\d+)", re.IGNORECASE)
@@ -230,10 +236,29 @@ class Janitor:
             if wt is not None:
                 _git(self._repo, "worktree", "prune")
             return "skipped", "aucun worktree à retirer"
-        done = _git(self._repo, "worktree", "remove", str(wt.path))  # sans --force : un arbre sale reste
+        archived = self._archive_kit_outputs(tid, wt.path)
+        # --force seulement quand l'arbre ne porte que des sorties du kit, copiées juste avant : un autre fichier reste.
+        args = ("worktree", "remove", "--force", str(wt.path)) if archived else ("worktree", "remove", str(wt.path))
+        done = _git(self._repo, *args)
         if done.returncode != 0:
             return "failed", f"git worktree remove refusé : {(done.stderr or done.stdout).strip()[:200]}"
-        return "done", f"worktree {wt.path} retiré"
+        return "done", f"worktree {wt.path} retiré" + (f" (sorties du kit copiées sous {WORKTREE_ARCHIVE_DIR}/{tid})" if archived else "")
+
+    def _archive_kit_outputs(self, tid: str, path: Path) -> bool:
+        """Vrai quand l'arbre n'a pour tout changement que des fichiers non suivis sous :data:`_KIT_OUTPUTS`, copiés sous
+        :data:`WORKTREE_ARCHIVE_DIR` ; faux sinon (arbre propre, fichier suivi modifié, autre fichier non suivi, git illisible)."""
+        status = _git(path, "status", "--porcelain", "--untracked-files=all")
+        lines = [line for line in status.stdout.splitlines() if line.strip()]
+        if status.returncode != 0 or not lines:
+            return False
+        if not all(line.startswith("?? ") and line[3:].startswith(_KIT_OUTPUTS) for line in lines):
+            return False
+        target = self._repo / WORKTREE_ARCHIVE_DIR / tid
+        for name in _KIT_OUTPUTS:
+            source = path / name
+            if source.is_dir():
+                shutil.copytree(source, target / name, dirs_exist_ok=True)
+        return True
 
     def _branch(self, tid: str) -> str:
         """La branche que le lanceur (ou ``task_worktree``) a créée, notée au ledger ; jamais un ``task/<id>`` qu'on n'a pas posé."""

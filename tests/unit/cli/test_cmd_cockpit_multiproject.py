@@ -379,7 +379,15 @@ def test_portfolio_action_on_an_unregistered_project_is_refused_and_writes_nothi
     """``?project=`` n'est qu'une clé du registre : un chemin ou un slug inconnu ne mène à aucun ledger."""
     port, alpha, beta = duo_server
     stray = _project(tmp_path, "non-enregistre")
-    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+
+    def files() -> list[Path]:
+        # Seule écriture attendue : le journal de la garde (ADR-008 D3),
+        # qui consigne chaque verdict, 404 métier compris.
+        return sorted(
+            p.relative_to(tmp_path) for p in tmp_path.rglob("*") if p.name != "write-guard.jsonl"
+        )
+
+    before = files()
     for key in (str(stray), "/tmp/x", "../../", "ghost"):
         status, _body = _post_json(
             port,
@@ -387,6 +395,6 @@ def test_portfolio_action_on_an_unregistered_project_is_refused_and_writes_nothi
             {"project": key, "actor": "x"},
         )
         assert status == 404, key
-    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
+    assert files() == before
     assert not list(tmp_path.rglob("events.jsonl"))
     assert alpha.is_dir() and beta.is_dir()

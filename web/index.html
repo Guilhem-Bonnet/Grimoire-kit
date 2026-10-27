@@ -240,10 +240,24 @@ footer .sp{flex:1}
 .cond{font-size:14px;color:var(--ink3);max-width:78ch;margin:20px 0 0}
 .capot{padding-block:48px 56px;border-top:1px solid var(--line)}
 .capot p{font-size:18px;color:var(--ink2);max-width:62ch;margin:0 0 14px}
+/* état du projet servi (P36) : rendu seulement quand le cockpit sert cette page */
+.etat{max-width:1180px;margin:16px auto;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line2);border-radius:16px;box-shadow:var(--shadow);padding:18px 22px;display:grid;gap:8px}
+.etat[data-state="S0"]{border-left-color:var(--rub)}.etat[data-state="S1"]{border-left-color:var(--errm)}
+.etat[data-state="S2"]{border-left-color:var(--acc)}.etat[data-state="S3"]{border-left-color:var(--okm)}
+.etat .eb{font-size:14px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.etat .key{font-family:var(--mono);font-size:13.5px;font-weight:600;color:var(--ink);background:var(--hover);border:1px solid var(--line);border-radius:999px;padding:1px 10px}
+.etat h2{font-size:clamp(22px,2.6vw,30px);margin:0;max-width:none}
+.etat p{margin:0;color:var(--ink2);font-size:16px}
+.etat .src{font-size:14px;color:var(--ink3)}.etat .src code{font-family:var(--mono);color:var(--ink2);overflow-wrap:anywhere}
+.etat .acts{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px}
+.etat .acts a.btn{text-decoration:none;background:var(--acc);border-color:var(--acc);color:var(--onacc)}
+.etat .acts code{font-family:var(--mono);font-size:14.5px}
+.etat .acts code .p{color:var(--rub)}
 </style>
 </head>
 <body>
 
+<section class="etat" id="etat-local" aria-live="polite" hidden></section>
 <section class="film5" aria-label="Teaser vidéo">
   <header class="bar5"><a href="#top" id="top"><b>›</b> Grimoire</a><nav><a href="#capot">En vrai</a><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" rel="noopener">Code source</a></nav></header>
   <video id="teaser" src="media/teaser-720.mp4" poster="media/teaser-poster.jpg" autoplay muted loop playsinline preload="metadata" width="1920" height="1080"></video>
@@ -335,6 +349,44 @@ footer .sp{flex:1}
     <span class="sp"></span>
   </footer>
 </div>
+<script>
+/* État du projet servi (P36). La vitrine publiée, un fichier ouvert depuis le
+   disque ou un serveur statique quelconque ne font AUCUNE requête : seul le
+   cockpit du kit injecte <meta name="grimoire-session"> dans les pages qu'il
+   sert (même règle que servedByCockpit() dans workspace/setup-state.js). */
+(function(){
+  if(location.protocol!=='http:'&&location.protocol!=='https:')return;
+  if(!document.querySelector('meta[name="grimoire-session"]'))return;
+  var box=document.getElementById('etat-local');
+  function get(path){return fetch(path,{headers:{Accept:'application/json'}}).then(function(r){
+    if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})}
+  function el(tag,cls,txt){var n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n}
+  import('./workspace/setup-state.js').then(function(m){
+    return m.readAll(get).then(function(reads){
+      var st=m.classify(reads),data=reads.status.ok?reads.status.data:{};
+      var root=data.projectRoot||'',name=root.split(/[\\/]/).filter(Boolean).pop()||'ce projet';
+      box.dataset.state=st.id;box.replaceChildren();
+      var eb=el('div','eb');eb.append(el('span','key',st.id==='inconnu'?'État inconnu':'État '+st.id),el('span',null,st.label+' · sur ce poste · '+name));
+      box.append(eb,el('h2',null,st.title));
+      if(st.sentence)box.append(el('p',null,st.sentence));
+      var src=el('p','src');src.append('lu dans ',el('code',null,st.source));box.append(src);
+      var acts=el('div','acts'),go=el('a','btn');
+      go.href=st.id==='S3'?'workspace/index.html':'workspace/index.html#a-traiter?view=demarrer';
+      go.textContent=st.id==='S3'?'Ouvrir le cockpit':'Ouvrir le guide dans le cockpit';
+      acts.append(go);
+      if(st.id!=='S3'){
+        var cmd=m.NEXT_COMMAND[st.id],code=el('code');code.append(el('span','p','$ '),cmd);
+        var b=el('button','btn copy-etat'),lbl=el('span','lbl','Copier');b.type='button';b.append(lbl);
+        b.addEventListener('click',function(){try{navigator.clipboard.writeText(cmd).then(function(){lbl.textContent='Copié'},function(){lbl.textContent='Copie refusée'})}catch(e){lbl.textContent='Copie refusée'}});
+        acts.append(code,b);
+      }
+      box.append(acts);box.hidden=false;
+    });
+  }).catch(function(e){
+    box.dataset.state='inconnu';box.replaceChildren(el('p','src','État du projet illisible : '+(e&&e.message||e)));box.hidden=false;
+  });
+})();
+</script>
 <script>
 (function(){
   // géométrie de l'anneau : segment 1 (context_bundle) à gauche, segment 2 (provider_policy) à droite

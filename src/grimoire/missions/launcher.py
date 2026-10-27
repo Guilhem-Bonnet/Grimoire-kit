@@ -562,13 +562,18 @@ class WorkerLauncher:
 
     @staticmethod
     def _prompt(tid: str) -> str:
+        """La consigne du worker ; sa PR s'ouvre prête à relire : un brouillon n'est jamais fusionné (#993)."""
         return (
             f"Tu es le worker de la tâche {tid}, dans son worktree task/{tid}. "
             f"Rattache cette session à ton claim (`grimoire task attach {tid}`), lis `grimoire task show {tid}`, "
             "réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR "
+            "prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), "
             f"et passe la tâche en revue (`grimoire task move {tid} --to running`, puis `--to needs_verification`) : "
             "le relecteur ne prend que les tâches en revue. "
             "Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le "
-            f"(`grimoire task note {tid}`). Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, "
-            "hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+            f"(`grimoire task note {tid}`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, "
+            f"PR ouverte), note ta progression en une phrase (`grimoire task note {tid} \"...\"`) : c'est ce que "
+            "le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. "
+            "Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par "
+            "`grimoire task ask` plutôt que de deviner."
         )

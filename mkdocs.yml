@@ -224,6 +224,6 @@ nav:
           - "005 — Mission Ledger source de vérité": explications/decisions/adr-005-mission-ledger-source-of-truth.md
           - "006 — Vue de travail": explications/decisions/adr-006-vue-de-travail.md
           - "007 — Unification des tâches": explications/decisions/adr-007-unification-des-taches.md
-          - "008 — Actions d'infrastructure locale (proposé)": explications/decisions/adr-008-actions-infrastructure-locale-typees.md
+          - "008 — Actions d'infrastructure locale (accepté)": explications/decisions/adr-008-actions-infrastructure-locale-typees.md
       - Cadrages:
           - "Portail de connaissance local (proposé)": cadrage/portail-connaissance.md

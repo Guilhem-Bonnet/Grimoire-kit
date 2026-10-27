@@ -349,6 +349,26 @@ def test_le_minuteur_porte_le_path_du_poste_reduit_aux_outils_utiles(projet: Pat
     assert "/usr/bin" in line  # les dossiers système restent
 
 
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_le_grimoire_du_tick_passe_avant_celui_du_poste(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#983 : les sessions appellent `grimoire` par le PATH ; ce doit être celui du venv qui exécute le tick."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "ailleurs"))  # tmp_path n'est pas un dossier de session
+    poste = _shim(tmp_path / "pipx-bin", "claude", "grimoire")  # un autre grimoire, plus ancien, avec claude
+    tick = _shim(tmp_path / "venv" / "bin", "python", "grimoire")
+    monkeypatch.setenv("PATH", str(poste))
+    line = next(row for row in plan_timer(projet, python=str(tick / "python")).service.splitlines() if row.startswith("Environment="))
+    entries = line.split("PATH=", 1)[1].rstrip('"').split(os.pathsep)
+    assert entries[:2] == [str(tick), str(poste)]
+    # Un interpréteur sans `grimoire` à côté (python système) n'ajoute rien.
+    nu = _shim(tmp_path / "sys-bin", "python")
+    line = next(row for row in plan_timer(projet, python=str(nu / "python")).service.splitlines() if row.startswith("Environment="))
+    assert str(nu) not in line and str(poste) in line
+
+
 def test_sans_aucun_outil_utile_le_minuteur_ne_fige_que_les_dossiers_systeme(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from grimoire.missions.timer import plan_timer
 

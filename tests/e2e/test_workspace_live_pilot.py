@@ -328,7 +328,10 @@ def test_une_reponse_en_cours_de_saisie_n_est_pas_ecrasee_par_l_actualisation(pa
     _ask(service, tid, "Fusionner la PR en cours de saisie ?")
     _goto(page, "executer")
     page.locator("#view-seg button", has_text="Décisions").click()
-    area = page.locator(".ex-decision").filter(has_text="en cours de saisie").locator("textarea")
+    card = page.locator(".ex-decision").filter(has_text="en cours de saisie")
+    # P68 : une question à réponses proposées replie la zone libre derrière « Autre réponse… ».
+    card.locator("[data-role='answer-other']").click()
+    area = card.locator("textarea")
     area.wait_for(timeout=APPEAR_MS)
     area.fill("ma réponse à moitié écrite")
     title = "Carte arrivée pendant la saisie"

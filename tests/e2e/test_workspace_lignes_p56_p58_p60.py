@@ -65,6 +65,17 @@ def _travail(page: Page, served: dict[str, str], view: str = "") -> None:
     _open(page, served, f"?project={served['home']}#travail" + (f"?view={view}" if view else ""))
     rows = ".ex-list tbody tr[data-task]" if view == "liste" else ".ex-card"
     page.wait_for_function(f"() => document.querySelectorAll('{rows}').length >= 2", timeout=30_000)
+    if view != "liste":
+        # P72v2 : la tâche bloquée du seed vit désormais dans la section
+        # « Bloqué » repliée par défaut du tableau compact — la déplier garde
+        # deux cartes VISIBLES (l'hypothèse de P56/P58 : j/k, survol, focus
+        # parcourent les cartes affichées, dont la bloquée).
+        page.locator("[data-role='blocked-count']").click()
+        page.locator("[data-role='blocked-section']").wait_for(state="visible", timeout=30_000)
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('.ex-card')].filter((n) => n.getClientRects().length).length >= 2",
+            timeout=30_000,
+        )
 
 
 def _flotte(page: Page, served: dict[str, str]) -> None:
