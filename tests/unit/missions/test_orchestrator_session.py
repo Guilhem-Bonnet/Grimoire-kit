@@ -710,3 +710,72 @@ def test_une_question_repondue_n_est_jamais_representee(
     assert f"{tid2}/{qid2}" in ended.detail and f"{tid1}/{qid1}" not in ended.detail
     assert second.status == "launched" and [i["question_id"] for i in prompt_data(host)] == [qid2]
 
+
+
+# ── Second lancement réel (3.70.0) : les refus du kit journalisés, une présentation rendue ──────
+
+
+REFUSED_EVENT = "task.answer_refused"
+
+
+def refusals(projet: Path, tid: str) -> list[dict[str, object]]:
+    return [dict(e.payload) for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REFUSED_EVENT]
+
+
+def sha(session: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(session.encode()).hexdigest()
+
+
+def test_un_worker_sous_unattended_dont_le_vrai_identifiant_a_tenu_le_claim_est_refuse(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un worker qui pose l'identifiant de l'orchestrateur en ``GRIMOIRE_SESSION_ID`` garde son vrai
+    ``CLAUDE_CODE_SESSION_ID``, qui a tenu le claim : refusé, et le refus est journalisé sans identifiant."""
+    grant(projet)
+    tid, qid = worker_asks(projet, host)
+    tick(projet, host)
+    orch, own = host.session_of(SESSION_NAME), host.session_of(f"grimoire-{tid}")
+    as_session(monkeypatch, own)
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", orch)
+    out = answer(projet, tid, "404", qid)
+    assert out.exit_code == 1 and "tenu le claim" in out.output, out.output
+    assert answered(projet, tid) == [] and MandateStore(projet).gestures_taken() == []
+    [refused] = refusals(projet, tid)
+    assert (refused["task_id"], refused["question_id"], refused["session_sha256"]) == (tid, qid, sha(own))
+    assert "tenu le claim" in str(refused["reason"]) and len(str(refused["reason"])) <= 200
+    assert own not in json.dumps(refused) and orch not in json.dumps(refused)
+
+
+def test_une_presentation_dont_toutes_les_reponses_sont_refusees_est_neutralisee_une_seule_fois(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refusées par le kit, les réponses d'une session ne consomment pas sa présentation — une fois par question."""
+    grant(projet)
+    tid, qid = worker_asks(projet, host)
+
+    def refused_session() -> str:
+        short = tick(projet, host).orchestrator[-1]
+        assert (short.action, short.status) == ("launch", "launched"), short
+        with monkeypatch.context() as m:
+            as_session(m, host.session_of(SESSION_NAME))
+            out = answer(projet, tid, "abandonner", qid)  # refusé par le kit : geste d'humain
+        assert out.exit_code == 1 and "annule la tâche" in out.output, out.output
+        host.stopped.add(short.session)
+        return short.session
+
+    first = refused_session()
+    second = refused_session()  # la première, neutralisée : représentée
+    third = tick(projet, host).orchestrator[-1]  # la seconde compte : une présentation reste
+    assert (third.action, third.status) == ("launch", "launched")
+    assert len({first, second, third.session}) == 3
+    # Chaque refus porte l'empreinte de la session à qui la question était présentée.
+    launches = orch_events(projet, ORCH_LAUNCHED_EVENT)
+    assert [launch["session"] for launch in launches[:2]] == [first, second]
+    assert [r["session_sha256"] for r in refusals(projet, tid)] == [launch["session_sha256"] for launch in launches[:2]]
+    host.stopped.add(third.session)  # fin silencieuse : elle compte
+    [last] = tick(projet, host).orchestrator
+    assert (last.action, last.status) == ("end", "done") and f"laissées à l'humain : {tid}/{qid}" in last.detail
+    assert tick(projet, host).orchestrator == ()
+    assert len([a for a in host.of("claude", "--bg") if SESSION_NAME in a]) == 3
