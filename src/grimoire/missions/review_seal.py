@@ -166,14 +166,22 @@ def _dirty(proofs_root: Path) -> str:
 
 def seal_judgment(
     project_root: Path, task_id: str, review_id: str, proofs_root: Path, receipt: ReviewReceipt, session_sha256: str = "",
+    *, head: str | None = None,
 ) -> dict[str, Any]:
-    """Scelle le READY jugé ; lève :class:`ValueError` si ce qui a été relu n'est pas ce qui est là."""
+    """Scelle le READY jugé ; lève :class:`ValueError` si ce qui a été relu n'est pas ce qui est là.
+
+    *head* (#994) : la tête relue quand ce n'est pas ``task/<id>`` — celle de la PR d'une tâche faite à la main, dans
+    un worktree détaché ; elle doit être celle scellée au lancement et celle du worktree, comme une branche.
+    """
     tree, pack = receipt_fingerprint(proofs_root), evidence_pack_digest(proofs_root, task_id)
     if tree != receipt.tree_fingerprint:
         raise ValueError("l'arbre présent n'est pas celui que le reçu déclare")
     if pack != receipt.evidence_pack_sha256:
         raise ValueError("le pack présent n'est pas celui que le reçu déclare")
-    head = branch_head(project_root, task_id)
+    explicit = head is not None
+    head = head if head is not None else branch_head(project_root, task_id)
+    if explicit and not head:
+        raise ValueError("aucune tête de PR notée au lancement de cette relecture : un sceau sans tête ne couvre rien")
     if not head and _rev(proofs_root, "HEAD^{commit}"):
         raise ValueError(f"aucune branche {_BRANCH_PREFIX}{task_id} dans un worktree git : un sceau sans tête ne couvre rien")
     if head:
@@ -183,7 +191,8 @@ def seal_judgment(
         if launched != head:
             raise ValueError(f"la branche a bougé pendant la relecture ({launched[:12]} → {head[:12]})")
         if _rev(proofs_root, "HEAD^{commit}") != head:
-            raise ValueError(f"le worktree n'est pas sur la tête de {_BRANCH_PREFIX}{task_id}")
+            what = "la tête relue de la PR" if explicit else f"la tête de {_BRANCH_PREFIX}{task_id}"
+            raise ValueError(f"le worktree n'est pas sur {what}")
         if dirty := _dirty(proofs_root):
             raise ValueError(f"{dirty} : la relecture ne porte pas sur la tête")
     store = _store(project_root)

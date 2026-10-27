@@ -55,6 +55,11 @@ qu'il obtient à ce que GitHub annonce. Il ne lance aucune commande dans le work
    :func:`~grimoire.missions.human_acceptance.accept_task`, puis clôture (gates déclarées par le projet) ; sinon une
    question non bloquante « accepter ? » donne la commande ``grimoire task accept``.
 
+**Tâche faite à la main (#994).** Une tâche sans lancement de worker que le relecteur du tick a relue sous mandat
+(:mod:`.manual_review`) entre dans la même file : son « worktree » est le worktree détaché de vérification, sa branche
+celle de la PR, sa cible la base de la PR, et chaque ``gh pr view`` la vise par son numéro. Le dépôt est celui figé à sa
+relecture. Sans session de worker à reprendre, un retour (CI rouge, conflit, désaccord) escalade à l'humain.
+
 Le merger ne lit aucune réponse humaine du ledger. Ce qu'une question cite de la PR est échappé. Chaque étape est notée
 au ledger et n'est faite qu'une fois ; le tick est rejouable. Un échec technique de ``gh`` ou de ``git`` est compté au
 disjoncteur ; un refus de fusion du dépôt ne l'est pas. Disjoncteur ouvert : rien n'est fait.
@@ -249,6 +254,8 @@ class MergeStage:
         self._remote = remote
         self._now = now
         self._home = service.home_root
+        #: #994 : tâche faite à la main → sa dernière relecture manuelle (worktree de vérification, PR, branche, cible).
+        self._manual: dict[str, dict[str, Any]] = {}
 
     # -- git, sur le dépôt du projet (objets et refs), jamais dans le worktree du worker -----------------
 
@@ -312,7 +319,11 @@ class MergeStage:
     def __call__(self) -> tuple[MergerOutcome, ...]:
         if not self._policy.merger.enabled:
             return ()
+        from grimoire.missions.manual_review import manual_reviews
+
         launched = launched_sessions(self._service)
+        self._manual = {tid: p for tid, p in manual_reviews(self._service).items() if tid not in launched}
+        launched = {**self._manual, **launched}
         merged, queue = self._classify(launched)
         breaker = read_breaker(self._home)
         if breaker.open:
@@ -363,7 +374,19 @@ class MergeStage:
         return judged[-1] if judged and judged[-1].payload.get("verdict") == READY else None
 
     def _worktree(self, tid: str) -> tuple[TaskWorktree | None, str]:
-        """Le worktree du ledger, s'il est celui de ``task/<id>`` et du même dépôt que le projet ; sinon pourquoi."""
+        """Le worktree du ledger, s'il est celui de ``task/<id>`` et du même dépôt que le projet ; sinon pourquoi.
+
+        Tâche faite à la main (#994) : le worktree détaché de vérification de sa dernière relecture, sur la branche de sa PR.
+        """
+        if tid in self._manual:
+            from grimoire.missions.manual_review import manual_worktree
+
+            manual = manual_worktree(tid, self._manual[tid])
+            if not manual.path.is_dir() or not manual.branch or not manual.into:
+                return None, "worktree de vérification de la tâche introuvable"
+            if refused := same_repo(self._home, manual.path):
+                return None, refused
+            return manual, ""
         wt = find_task_worktree(self._service, tid)
         if wt is None or not wt.path.is_dir():
             return None, "worktree de la tâche introuvable"
@@ -386,7 +409,7 @@ class MergeStage:
         pin, refused = self._pin(tid)
         if pin is None:
             return MergerOutcome(tid, "refused", "refused", refused)
-        pr, error = self._view(wt.branch, pin)
+        pr, error = self._view(self._selector(tid, wt), pin)
         if error:
             return self._failed(tid, "wait", f"gh pr view {wt.branch} : {error}")
         if pr is None:
@@ -555,6 +578,11 @@ class MergeStage:
             return None, "dépôt GitHub de la tâche non figé à son lancement : rien n'est fusionné sous mandat"
         return pin, ""
 
+    def _selector(self, tid: str, wt: TaskWorktree) -> str:
+        """Ce que ``gh pr view`` reçoit : la branche ``task/<id>``, ou le numéro de la PR d'une tâche faite à la main."""
+        number = int(self._manual.get(tid, {}).get("pr") or 0)
+        return str(number) if number else wt.branch
+
     def _gh(self, slug: str, *args: str) -> Any:
         """Un appel ``gh`` qui vise le dépôt figé (``-R``) : jamais celui que les remotes locales désignent."""
         return self._exec(["gh", *args, "-R", slug], self._home, None)
@@ -626,16 +654,17 @@ class MergeStage:
             return "error", []
         return "ok", rows
 
-    def head_ci(self, task_id: str, head: str) -> tuple[str, str]:
+    def head_ci(self, task_id: str, head: str, *, selector: str = "") -> tuple[str, str]:
         """La CI de la PR de ``task/<id>`` lue comme le merger la lit, pour le relecteur (#993) : ``(verdict, détail)``.
 
         ``green``, ``red``, ``pending`` ou ``unknown`` (gh en échec), seulement si la tête GitHub de la PR est *head* ;
         ``""`` quand ce n'est pas la CI de *head* (dépôt non figé, aucune PR, PR à une autre tête) : rien n'en est conclu.
+        *selector* (#994) : la PR d'une tâche faite à la main, par son numéro, au lieu de ``task/<id>``.
         """
         pin, why = self._pin(task_id)
         if pin is None:
             return "", why
-        branch = TASK_BRANCH_PREFIX + task_id
+        branch = selector or TASK_BRANCH_PREFIX + task_id
         pr, error = self._view(branch, pin)
         if error:
             return "unknown", f"gh pr view {branch} : {error}"
@@ -824,7 +853,7 @@ class MergeStage:
                 return self._failed(tid, "merge", f"gh pr merge #{pr.number} : {_clean(said, 300)}", pr.number)
             # Le dépôt refuse (revue exigée, protection, file de fusion) : ni une panne, ni un geste à forcer.
             return self._ask_human(task, wt, "merge", judged.id, f"le dépôt refuse la fusion ({said})", pr.number)
-        after, error = self._view(wt.branch, {"repo": pr.slug, "origin_url": pr.origin})
+        after, error = self._view(self._selector(tid, wt), {"repo": pr.slug, "origin_url": pr.origin})
         if error or after is None:
             return self._failed(tid, "unconfirmed", f"fusion demandée, non constatée : {error or 'PR introuvable'}", pr.number)
         return self._confirm(task, wt, judged, after)
@@ -894,7 +923,7 @@ class MergeStage:
         pin, refused = self._pin(tid)
         if pin is None:
             return MergerOutcome(tid, "accept", "refused", refused)
-        pr, error = self._view(wt.branch, pin)
+        pr, error = self._view(self._selector(tid, wt), pin)
         if error or pr is None:
             return self._failed(tid, "accept", f"gh pr view {wt.branch} : {error or 'PR introuvable'}")
         merged, why = self._merged_on_remote(wt, pr)

@@ -84,6 +84,8 @@ class FakeHost:
         self.pr_base_oids: dict[str, str] = {}  # branche → baseRefOid annoncé ; absente : la cible de la remote
         self.mergeable: dict[str, str] = {}  # branche → ``mergeable`` (MERGEABLE, CONFLICTING) ; absente : non dit
         self.merge_states: dict[str, str] = {}  # branche → ``mergeStateStatus`` (CLEAN, BEHIND, DIRTY) ; absente : non dit
+        #: #994 : branche → titre et corps de la PR, ce que ``gh pr list --search <texte>`` cherche.
+        self.pr_titles: dict[str, str] = {}
         self.repo = ""  # le dépôt GitHub que ce faux gh sert : un ``-R`` autre est refusé (« could not resolve »)  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
@@ -149,37 +151,17 @@ class FakeHost:
             argv = argv[:argv.index("-R")] + argv[argv.index("-R") + 2:]
         if argv[1] == "api" and argv[2].endswith("/files"):
             return self._api_files(argv, cwd)
+        if argv[1:3] == ["pr", "list"]:
+            query = argv[argv.index("--search") + 1] if "--search" in argv else ""
+            rows = [json.loads(self._pr_view(b, cwd).stdout) for b in self.prs if query in self.pr_titles.get(b, "")]
+            return ExecResult(0, json.dumps(rows))
         if argv[1:3] == ["pr", "view"]:
-            branch = argv[3]
-            state = self.prs.get(branch)
-            if state is None:
-                return ExecResult(1, "", "no pull requests found for branch")
-            body: dict[str, object] = {
-                "state": state, "number": self.pr_numbers.get(branch, 7), "baseRefName": self.pr_bases.get(branch, "main"),
-                "isDraft": branch in self.drafts, "mergeCommit": {"oid": self.merge_commits[branch]} if branch in self.merge_commits else None,
-                "isCrossRepository": branch in self.cross_repo,
-            }
-            remote = self._remote(cwd)
-            head = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
-            base = self._git_remote(remote, "rev-parse", f"refs/heads/{self.pr_bases.get(branch, 'main')}")
-            entries = self._entries(cwd, branch, head, base)
-            body.update({
-                "baseRefOid": self.pr_base_oids.get(branch, base), "files": [{"path": new} for new, _old in entries],  # comme gh : le nouveau nom seul
-                "changedFiles": self.changed_files.get(branch, len(entries)),
-                "url": f"file://{remote}/pull/{body['number']}",
-            })
-            if not self.pr_no_head:
-                body["headRefOid"] = head
-            if branch in self.mergeable:
-                body["mergeable"] = self.mergeable[branch]
-            if branch in self.merge_states:
-                body["mergeStateStatus"] = self.merge_states[branch]
-            return ExecResult(0, json.dumps(body))
+            return self._pr_view(self._branch_of(argv[3]), cwd)
         if argv[1:3] == ["pr", "checks"]:
             if "--required" in argv and self.required_broken:
                 return ExecResult(1, "", "error connecting to api.github.com")
             table = self.required if "--required" in argv else self.checks
-            rows = table.get(argv[3])
+            rows = table.get(self._branch_of(argv[3]))
             if not rows:
                 return ExecResult(1, "", "no required checks reported" if "--required" in argv else "no checks reported")
             buckets = {r["bucket"] for r in rows}
@@ -197,6 +179,39 @@ class FakeHost:
             self.closed_issues.append(argv[3])
             return ExecResult(0, "")
         return ExecResult(2, "", "gh : sous-commande inconnue")
+
+    def _branch_of(self, selector: str) -> str:
+        """``gh pr view|checks <n>`` vise une PR par son numéro (#994) : la branche qui le porte ; sinon *selector*."""
+        if selector.isdigit():
+            return next((b for b in self.prs if self.pr_numbers.get(b, 7) == int(selector)), selector)
+        return selector
+
+    def _pr_view(self, branch: str, cwd: Path) -> ExecResult:
+        """``gh pr view`` de la PR de *branch* : ce que GitHub en dit, la tête lue sur la remote."""
+        state = self.prs.get(branch)
+        if state is None:
+            return ExecResult(1, "", "no pull requests found for branch")
+        body: dict[str, object] = {
+            "headRefName": branch, "state": state, "number": self.pr_numbers.get(branch, 7), "baseRefName": self.pr_bases.get(branch, "main"),
+            "isDraft": branch in self.drafts, "mergeCommit": {"oid": self.merge_commits[branch]} if branch in self.merge_commits else None,
+            "isCrossRepository": branch in self.cross_repo,
+        }
+        remote = self._remote(cwd)
+        head = self.pr_heads.get(branch) or self._branch_head(cwd, branch)
+        base = self._git_remote(remote, "rev-parse", f"refs/heads/{self.pr_bases.get(branch, 'main')}")
+        entries = self._entries(cwd, branch, head, base)
+        body.update({
+            "baseRefOid": self.pr_base_oids.get(branch, base), "files": [{"path": new} for new, _old in entries],  # comme gh : le nouveau nom seul
+            "changedFiles": self.changed_files.get(branch, len(entries)),
+            "url": f"file://{remote}/pull/{body['number']}",
+        })
+        if not self.pr_no_head:
+            body["headRefOid"] = head
+        if branch in self.mergeable:
+            body["mergeable"] = self.mergeable[branch]
+        if branch in self.merge_states:
+            body["mergeStateStatus"] = self.merge_states[branch]
+        return ExecResult(0, json.dumps(body))
 
     def _entries(self, cwd: Path, branch: str, head: str, base: str) -> list[tuple[str, str | None]]:
         """``(filename, previous_filename)`` comme l'API REST : un renommage garde son ancien nom."""

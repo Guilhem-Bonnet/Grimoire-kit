@@ -263,7 +263,7 @@ def _one_pass(
         if launch.status == "failed":
             attention.append(f"lanceur : {launch.task_id} non lancée ({launch.detail})")
     for review in reviews:
-        if review.status == "failed" or review.action in ("forged", "escalate"):
+        if review.status == "failed" or review.action in ("forged", "escalate", "no_pr"):  # #994 : pas de PR à relire
             attention.append(f"relecteur : {review.task_id} {review.action} ({review.detail})")
     for merge in merges:
         if merge.status in ("failed", "refused") or merge.action == "escalate":
