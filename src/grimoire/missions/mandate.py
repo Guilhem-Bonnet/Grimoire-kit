@@ -36,9 +36,9 @@ toute écriture d'agent sous ce dossier par les outils et les voies shell reconn
 (:mod:`grimoire.hosts.decisions.authority_guard`). Un agent qui exécute du code arbitraire
 (un script Python quelconque) peut le contourner, et la chaîne de hash ne voit pas la troncature de
 la *queue* du journal (retirer une révocation récente rouvre le mandat). Le principal
-``orchestrator`` se déclare par ``GRIMOIRE_PRINCIPAL=orchestrator`` ; tant que le lanceur du
-lot 2 n'enregistre pas la session de l'orchestrateur (:meth:`MandateStore.register_session`,
-rôle ``orchestrator``), cette déclaration ne vaut que par le mandat qu'elle exige.
+``orchestrator`` se déclare par ``GRIMOIRE_PRINCIPAL=orchestrator`` ; cette déclaration ne vaut que pour
+une session que l'étape orchestrateur du tick a inscrite (#962, :func:`register_orchestrator_session`,
+bornée aux gestes ``answer`` et ``resume``), et dans les bornes du mandat.
 """
 
 from __future__ import annotations
@@ -782,11 +782,14 @@ class MandateStore:
 
     # ── Sessions (plafond, provenance du reçu) ───────────────────────────────
 
-    def register_session(self, session_id: str, role: str, task_id: str = "", now: datetime | None = None) -> None:
+    def register_session(
+        self, session_id: str, role: str, task_id: str = "", now: datetime | None = None, *, gestures: Sequence[str] = ()
+    ) -> None:
         """Inscrit une session lancée par le kit. Un worker au-delà du plafond du jour est refusé et révoque le mandat.
 
         Le lanceur du lot 2 y inscrit chaque worker ; le reviewer du lot 3 y inscrit sa session, ce qui
         l'atteste (verrou 7). Hors mandat actif, rien ne s'inscrit : l'attestation n'existe que sous mandat.
+        *gestures* (#962) borne une session ``orchestrator`` aux gestes nommés, en plus du mandat.
         """
         if role not in _ROLES or not session_id.strip():
             raise MandateRefusedError(MALFORMED, f"session invalide : rôle {role!r}, identifiant {session_id!r}")
@@ -824,6 +827,7 @@ class MandateStore:
                 "session_id": session_id.strip(),
                 "role": role,
                 "task_id": task_id,
+                **({"gestures": sorted(set(gestures))} if gestures else {}),
                 "ts": moment.isoformat(),
             }
         )
@@ -1148,13 +1152,17 @@ def acting_as_orchestrator() -> Iterator[None]:
         _IN_PROCESS_ORCHESTRATOR.reset(token)
 
 
-def register_orchestrator_session(project_root: Path, session_id: str, now: datetime | None = None) -> None:
+def register_orchestrator_session(
+    project_root: Path, session_id: str, now: datetime | None = None, *, gestures: Sequence[str] = ()
+) -> None:
     """Inscrit *session_id* au journal d'autorité en rôle ``orchestrator`` : la seule voie CLI du principal.
 
-    À appeler par le lanceur du lot 2, avec l'identifiant de session qu'il a fixé au processus orchestrateur
-    (``GRIMOIRE_SESSION_ID`` ou la variable de l'hôte). Exige un mandat actif ; refuse un identifiant vide.
+    Appelée par l'étape orchestrateur du tick (#962, :mod:`grimoire.missions.orchestrator_session`) avec le vrai
+    ``sessionId`` de la session de fond, résolu après son lancement. Exige un mandat actif ; refuse un identifiant vide.
     Un identifiant déjà inscrit comme worker ou relecteur ne peut pas devenir orchestrateur.
     L'inscription vaut pour le mandat actif seulement : un nouveau mandat se réinscrit.
+    *gestures* borne la session : un geste hors de cette liste est refusé même si le mandat le couvre (la session
+    du tick ne répond qu'aux questions ; accepter, fusionner ou approuver un check reste hors de sa portée).
     """
     store = MandateStore(project_root)
     session = session_id.strip()
@@ -1162,7 +1170,7 @@ def register_orchestrator_session(project_root: Path, session_id: str, now: date
         raise MandateRefusedError(
             "principal_unattested", f"session {session!r} déjà inscrite comme worker ou relecteur : pas orchestrateur"
         )
-    store.register_session(session, "orchestrator")
+    store.register_session(session, "orchestrator", now=now, gestures=gestures)
 
 
 def require_authority(
@@ -1195,7 +1203,7 @@ def require_authority(
         # Le mandat d'abord (son refus dit pourquoi : aucun mandat, expiré, hors périmètre), puis l'appelant,
         # puis le journal du geste : un geste refusé ensuite n'est jamais inscrit « pris ».
         auth = store.authorize(gesture, task, provenance, record=False)
-        _require_orchestrator_session(store, task, auth.mandate_id)
+        _require_orchestrator_session(store, task, auth.mandate_id, gesture)
         if record:
             store.record_gesture(auth)
         return auth
@@ -1207,8 +1215,11 @@ def require_authority(
         ) from exc
 
 
-def _require_orchestrator_session(store: MandateStore, task: MissionTask | None, mandate_id: str) -> None:
-    """Échec fermé : l'appelant est le code du tick, ou une session inscrite orchestrateur qui n'est pas celle d'un worker."""
+def _require_orchestrator_session(store: MandateStore, task: MissionTask | None, mandate_id: str, gesture: str) -> None:
+    """Échec fermé : l'appelant est le code du tick, ou une session inscrite orchestrateur qui n'est pas celle d'un worker.
+
+    Une inscription bornée (``gestures``, #962) ne vaut que pour ses gestes.
+    """
     from grimoire.core.standard_state import current_session
 
     if _IN_PROCESS_ORCHESTRATOR.get():
@@ -1221,16 +1232,22 @@ def _require_orchestrator_session(store: MandateStore, task: MissionTask | None,
             "ne prouve rien ; le lanceur inscrit la session d'orchestrateur au journal d'autorité)",
         )
     registered = store.sessions()
-    orchestrators = {
-        str(e["session_id"])
-        for e in registered
-        if e.get("role") == "orchestrator" and e.get("mandate_id") == mandate_id
-    }
-    if session not in orchestrators:
+    mine = [
+        e for e in registered
+        if e.get("role") == "orchestrator" and e.get("mandate_id") == mandate_id and str(e.get("session_id")) == session
+    ]
+    if not mine:
         raise MandateRefusedError(
             "principal_unattested",
             "le principal orchestrator n'est pas attesté : la session appelante n'est pas inscrite orchestrateur au "
             "journal d'autorité (la variable GRIMOIRE_PRINCIPAL ne prouve rien)",
+        )
+    scoped = [e["gestures"] for e in mine if isinstance(e.get("gestures"), list)]
+    if scoped and not any(gesture in allowed for allowed in scoped):
+        raise MandateRefusedError(
+            "gesture_out_of_session_scope",
+            f"{gesture} refusé : la session orchestrateur {session!r} est inscrite pour "
+            f"{', '.join(sorted({g for allowed in scoped for g in allowed}))} seulement",
         )
     held = {str(e["session_id"]) for e in registered if e.get("role") in ("worker", "reviewer")}
     if task is not None and task.claim is not None:

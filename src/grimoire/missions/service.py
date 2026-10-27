@@ -938,12 +938,18 @@ class TaskService:
         *attested_by_flow*. Répondre à sa place réveillerait la tâche sans rien décider.
         """
         task = self.require(task_id)
+        gesture, asked = "answer", None
+        if origin == ORIGIN_ORCHESTRATOR:  # #962 : ce qu'une réponse sous mandat tranche, et sous quel geste
+            from grimoire.missions.orchestrator_session import answer_gesture
+
+            asked = self._question_to_answer(task, question_id)
+            gesture = answer_gesture(self.ledger.events_for(task_id), task_id, asked, text)
         # Sous mandat (#876, verrou 6) : l'origine `orchestrator` répond si un mandat valide couvre ce geste
         # et ce type de tâche ; sans mandat, elle est refusée comme toute origine non humaine.
         authority = require_authority(
-            self.project_root, "answer", task, origin, what=f"Réponse refusée pour {task_id}", provenance=provenance
+            self.project_root, gesture, task, origin, what=f"Réponse refusée pour {task_id}", provenance=provenance
         )
-        question = self._question_to_answer(task, question_id)
+        question = asked or self._question_to_answer(task, question_id)
         if question.origin == "flow" and not attested_by_flow:
             raise GrimoireMissionError(
                 f"Réponse refusée pour {task_id} : la question {question.id} vient d'un checkpoint de flow, dont la "
