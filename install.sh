@@ -1,34 +1,38 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# Grimoire Custom Kit — Bootstrap Installer
+# Grimoire Custom Kit — Installeur
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# Installation rapide sans clone préalable.
+# Installe uv s'il manque, puis grimoire-kit en version épinglée avec
+# `uv tool install` : grimoire, grimoire-mcp et grimoire-hook se résolvent
+# ensuite depuis n'importe quel shell, sans venv actif.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Guilhem-Bonnet/Grimoire-kit/main/install.sh | bash
-#   curl -fsSL <URL>/install.sh | bash -s -- --name "Mon Projet" --user "Alice"
-#   bash install.sh --name "Mon Projet" --user "Alice" --archetype infra-ops
+#   bash install.sh                       # version épinglée par la release
+#   bash install.sh --version 3.71.0      # une autre version
+#   curl -fsSL <URL>/install.sh | bash
 #
-# CHEMIN RECOMMANDE (SDK Python) :
-#   pipx install grimoire-kit
-#   grimoire up .          # init + setup + standard + doctor en une commande
+# Le script publié en artefact de release porte sa version et une attestation
+# de provenance : `gh attestation verify install.sh --repo Guilhem-Bonnet/Grimoire-kit`.
+# Sorti du dépôt, sans version estampillée, il exige --version.
 #
-# Ce script shell est le chemin LEGACY (mode maintenance). Sans --legacy, il
-# affiche les instructions SDK et s'arrête.
+# Variables : GRIMOIRE_VERSION (= --version), GRIMOIRE_SPEC (wheel ou source à
+# installer à la place du paquet publié, pour la CI), UV_VERSION (version d'uv).
 #
-# Mode legacy (--legacy) :
-#   1. Clone le kit Grimoire dans un dossier temporaire
-#   2. Exécute grimoire-init.sh avec les arguments fournis
-#   3. Nettoie le clone temporaire (ou --keep-kit pour garder)
+# Mode legacy (--legacy) : clone le kit, exécute grimoire-init.sh, nettoie.
+#   bash install.sh --legacy --name "Mon Projet" --user "Alice" [options]
 #
-# Prérequis : git, bash 4+
+# Prérequis : curl ou wget ; git et bash 4+ pour --legacy seulement.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/Guilhem-Bonnet/Grimoire-kit.git"
+# Estampillé par la release (publish.yml) ; vide dans le dépôt.
+PINNED_VERSION=""
+VERSION="${GRIMOIRE_VERSION:-}"
+SPEC="${GRIMOIRE_SPEC:-}"
 BRANCH="main"
 KEEP_KIT=false
 KIT_DIR=""
@@ -46,15 +50,11 @@ ok()    { echo -e "${GREEN}✅ $*${NC}"; }
 warn()  { echo -e "${YELLOW}⚠️  $*${NC}"; }
 error() { echo -e "${RED}❌ $*${NC}" >&2; exit 1; }
 
-# ─── Prérequis ───────────────────────────────────────────────────────────────
+# ─── Prérequis (legacy) ──────────────────────────────────────────────────────
 check_prerequisites() {
     if ! command -v git &>/dev/null; then
         error "git est requis. Installez-le : https://git-scm.com"
     fi
-    if ! command -v bash &>/dev/null; then
-        error "bash est requis"
-    fi
-    # Vérifier bash 4+
     local bash_major
     bash_major="${BASH_VERSION%%.*}"
     if [[ "$bash_major" -lt 4 ]]; then
@@ -73,34 +73,27 @@ trap cleanup EXIT
 # ─── Usage ───────────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-${CYAN}Grimoire Custom Kit — Bootstrap Installer${NC}
+${CYAN}Grimoire Custom Kit — Installeur${NC}
 
-CHEMIN RECOMMANDE (SDK Python) :
-  pipx install grimoire-kit
-  grimoire up .              # init + setup + standard + doctor en une commande
-
-Ce script est le chemin legacy (mode maintenance). Il exige --legacy.
+Installe uv si absent, puis grimoire-kit épinglé via uv tool install.
 
 Usage:
+  bash install.sh [--version X.Y.Z]
   bash install.sh --legacy --name "Nom du Projet" --user "Votre Nom" [options]
 
 Options:
-  --legacy            Exécuter l'installeur shell legacy (sinon: instructions SDK)
-  --name NAME         Nom du projet (requis)
-  --user USER         Votre nom (requis)
-  --lang LANGUAGE     Langue de communication (défaut: Français)
-  --archetype TYPE    Archétype: minimal, infra-ops, web-app, fix-loop (défaut: minimal)
-  --auto              Détecter automatiquement le stack
-  --memory BACKEND    Backend mémoire: auto, local, qdrant-local, ollama (défaut: auto)
-  --branch BRANCH     Branche git du kit (défaut: main)
-  --keep-kit          Garder le clone du kit après installation
-  --kit-dir DIR       Chemin pour le clone du kit (défaut: .grimoire-kit-tmp)
+  --version X.Y.Z     Version de grimoire-kit à installer (défaut: celle de la release)
+  --legacy            Installeur shell legacy (clone le kit, lance grimoire-init.sh)
+  --name NAME         (legacy) Nom du projet (requis)
+  --user USER         (legacy) Votre nom (requis)
+  --lang LANGUAGE     (legacy) Langue de communication (défaut: Français)
+  --archetype TYPE    (legacy) Archétype: minimal, infra-ops, web-app, fix-loop
+  --auto              (legacy) Détecter automatiquement le stack
+  --memory BACKEND    (legacy) Backend mémoire: auto, local, qdrant-local, ollama
+  --branch BRANCH     (legacy) Branche git du kit (défaut: main)
+  --keep-kit          (legacy) Garder le clone du kit après installation
+  --kit-dir DIR       (legacy) Chemin pour le clone du kit
   --help              Afficher cette aide
-
-Exemples:
-  bash install.sh --name "Mon API" --user "Alice"
-  bash install.sh --name "Infra Prod" --user "Bob" --archetype infra-ops --auto
-  curl -fsSL <URL>/install.sh | bash -s -- --name "Test" --user "Dev"
 EOF
     exit 0
 }
@@ -110,6 +103,7 @@ INIT_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --legacy)    LEGACY=true; shift ;;
+        --version)   VERSION="$2"; shift 2 ;;
         --branch)    BRANCH="$2"; shift 2 ;;
         --keep-kit)  KEEP_KIT=true; shift ;;
         --kit-dir)   KIT_DIR="$2"; shift 2 ;;
@@ -119,31 +113,73 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# ─── uv ──────────────────────────────────────────────────────────────────────
+ensure_uv() {
+    if command -v uv &>/dev/null; then
+        ok "uv déjà présent : $(uv --version)"
+        return
+    fi
+    info "uv absent — installation..."
+    local url="https://astral.sh/uv/install.sh"
+    if [[ -n "${UV_VERSION:-}" ]]; then
+        url="https://astral.sh/uv/${UV_VERSION}/install.sh"
+    fi
+    if command -v curl &>/dev/null; then
+        curl -LsSf "$url" | sh
+    elif command -v wget &>/dev/null; then
+        wget -qO- "$url" | sh
+    else
+        error "curl ou wget est requis pour installer uv"
+    fi
+    # uv s'installe dans ~/.local/bin (ou ~/.cargo/bin selon la version).
+    export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    command -v uv &>/dev/null || error "uv est installé mais introuvable dans le PATH"
+    ok "uv installé : $(uv --version)"
+}
+
+# ─── SDK : uv tool install ───────────────────────────────────────────────────
+install_sdk() {
+    VERSION="${VERSION:-$PINNED_VERSION}"
+    [[ -n "$VERSION" ]] || error "aucune version épinglée : relancez avec --version X.Y.Z (ou utilisez le script publié avec la release)"
+    ensure_uv
+
+    local target="${SPEC:-grimoire-kit==$VERSION}"
+    info "Installation de grimoire-kit $VERSION (uv tool install)..."
+    uv tool install --force "$target"
+
+    # Le dossier des exécutables d'uv doit être dans le PATH, ici et aux shells futurs.
+    local bindir
+    bindir="$(uv tool dir --bin 2>/dev/null || true)"
+    if [[ -n "$bindir" ]]; then
+        export PATH="$bindir:$PATH"
+    fi
+    uv tool update-shell >/dev/null 2>&1 || true
+
+    local tool
+    for tool in grimoire grimoire-mcp grimoire-hook; do
+        command -v "$tool" &>/dev/null || error "$tool ne se résout pas dans le PATH après l'installation"
+    done
+    local got
+    got="$(grimoire --version)"
+    [[ "$got" == "grimoire-kit $VERSION" ]] || error "version installée inattendue : '$got' (attendu : grimoire-kit $VERSION)"
+    ok "$got — grimoire, grimoire-mcp et grimoire-hook sont installés"
+    echo ""
+    info "Si \`grimoire\` n'est pas encore trouvé, ouvrez un nouveau shell. Puis : grimoire up ."
+}
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 main() {
     echo ""
-    echo -e "${CYAN}Grimoire Custom Kit — Bootstrap Installer${NC}"
+    echo -e "${CYAN}Grimoire Custom Kit — Installeur${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
     echo ""
 
     if [[ "$LEGACY" == false ]]; then
-        cat <<EOF
-Le chemin d'installation recommandé est le SDK Python :
-
-    pipx install grimoire-kit      # ou: pip install grimoire-kit (dans un venv)
-    grimoire up .                  # init + setup + standard + doctor en une commande
-
-Autres commandes utiles :
-    grimoire doctor                # diagnostic de l'environnement
-    grimoire cockpit scan ~/dev    # détecter et enrôler vos projets existants
-
-Cet installeur shell est conservé en mode maintenance uniquement.
-Pour l'exécuter malgré tout : relancez avec --legacy
-EOF
+        install_sdk
         exit 0
     fi
 
-    warn "Mode legacy : le chemin recommandé est le SDK (pipx install grimoire-kit && grimoire up .)"
+    warn "Mode legacy : le chemin recommandé est l'installation sans --legacy (uv tool install)"
     echo ""
 
     check_prerequisites

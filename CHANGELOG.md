@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(install): `install.sh` (refondu, `--legacy` conservé) et `install.ps1` (nouveau) installent uv s'il manque puis grimoire-kit en version épinglée par `uv tool install` ; `grimoire`, `grimoire-mcp` et `grimoire-hook` se résolvent depuis un shell neuf hors venv, vérifié en CI sur Linux, macOS et Windows (`installers.yml`). La release publie les deux scripts, estampillés de la version du tag, avec une attestation de provenance (P29, GAO-p29-install-002).
 - fix(missions): le merger réaligne (ou renvoie au worker) une PR que GitHub dit en conflit et sur laquelle aucun check n'est rapporté, au lieu d'attendre une CI que GitHub ne lance pas sur une PR en conflit. Le 2026-10-27, R57 (#979) restait sur « aucun check rapporté » à chaque tick, en conflit sur le seul CHANGELOG.md. Une PR à jour sans check attend toujours sa CI.
 
 - feat(cockpit): « Lancer la session » lance pour de vrai depuis le panneau Assigner (P47 lot 3, GAO-p47-assigne-001) : l'empreinte du plan montré engage l'apply (ADR-008 plan→apply, refus si l'état a changé), lancement par le lanceur du tick (toutes gardes : rôle, disjoncteur, WIP, plafond du jour, mandat), idempotent par tâche, journal `launch-apply.jsonl` ajout seul et fail-closed à l'entrée
