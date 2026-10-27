@@ -24,16 +24,18 @@ qu'il obtient à ce que GitHub annonce. Il ne lance aucune commande dans le work
    (:mod:`.review_seal`), ou un commit de réalignement noté au même journal par le merger ; reçu et pack inchangés à
    l'octet. Tête relue pas encore poussée : on attend ; sinon nouvelle relecture (``task.merge_requeued``). Une PR
    restée en brouillon dont la tête est ainsi couverte sort du brouillon (``gh pr ready``, ``task.merge_undrafted``,
-   #993) : c'est ici, et pas chez le relecteur, que la tête GitHub est comparée au sceau ; la CI est attendue au tick
-   suivant ;
+   #993), une fois par tête et jamais si elle touche un chemin qui escalade (la question « fusionner ? » est posée) :
+   c'est ici, et pas chez le relecteur, que la tête GitHub est comparée au sceau ; la CI est attendue au tick suivant.
+   Remise en brouillon après cela, elle y reste : un humain la retient ;
 4. **la CI** (``gh pr checks``) : les checks requis (``--required``) ; seulement si gh dit qu'aucun n'est requis, tous
    les checks hors ``ignored_checks`` (défaut ``codecov/*``). Vert = au moins un ``pass``, rien d'autre que
    ``pass``/``skipping``, et le même verdict au tick précédent pour cette tête. Rouge : retour au worker (``claude --bg
    --resume``). En attente, aucun check ou gh en échec : on attend ;
 5. **la cible** : la tête et la base récupérées de la remote doivent être celles que GitHub annonce ; une base
    GitHub en retard sur la remote (``baseRefOid`` périmé, #993) cède à la base récupérée qui en descend. Tout autre
-   désaccord attend, au plus :data:`MAX_DESYNC_WAITS` ticks de suite, puis renvoie au worker ; une PR que GitHub dit
-   en conflit (``CONFLICTING``, ``DIRTY``) y retourne aussitôt. Tête en retard sur la base, le merger réaligne **en plomberie** (``git merge-tree``,
+   désaccord attend, au plus :data:`MAX_DESYNC_WAITS` ticks de suite (tant qu'un compte est ouvert, la remote est
+   relue même sur une CI en attente, et tout tick sans désaccord le remet à zéro), puis renvoie au worker ; une PR que GitHub dit en conflit (``CONFLICTING``, ``DIRTY``) hors ``CHANGELOG.md``
+   y retourne aussitôt. Tête en retard sur la base, le merger réaligne **en plomberie** (``git merge-tree``,
    ``commit-tree -p <tête GitHub> -p <base GitHub>``), sans toucher au worktree. Un conflit limité à ``CHANGELOG.md`` est
    résolu par l'union des deux côtés, refusée si une ligne de la cible manque ; tout autre conflit renvoie au worker.
    Le commit est noté au journal d'autorité, puis poussé sans forcer ; on attend la nouvelle CI. Seules les
@@ -206,6 +208,12 @@ class _PullRequest:
     @property
     def conflicting(self) -> bool:
         return self.mergeable in _CONFLICTING or self.merge_state in _CONFLICTING
+
+
+def _merge_hint(into: str) -> str:
+    """Le geste demandé au worker quand sa branche est en conflit avec la cible *into*."""
+    return (f"Fusionne la cible dans ta branche et résous les conflits : `git fetch origin {into}` puis "
+            f"`git merge origin/{into}` (ni rebase ni push forcé). ")
 
 
 def _err(done: subprocess.CompletedProcess[Any] | Any) -> str:
@@ -397,26 +405,31 @@ class MergeStage:
         if kind or receipt is None:
             return self._requeue(task, judged, why, pr.number)
         if pr.draft:  # après le sceau : seule une tête couverte par le READY attesté sort du brouillon
-            return self._undraft(tid, pr)
+            return self._draft(task, wt, judged, pr)
         ci, detail = self._stable_ci(tid, pr, wt.branch)
         if ci == "unknown":
             return self._failed(tid, "wait", f"CI illisible : {detail}", pr.number)
         if ci == "red":
             return self._bounce(task, launch, "ci_red", detail, pr.number)
-        if ci != "green":
+        if ci != "green" and not self._desync_waits(tid):
             return MergerOutcome(tid, "wait", "waiting", f"CI : {detail}", pr.number)
+        # CI verte, ou désaccord en cours de compte : la remote est relue (un tick sans désaccord remet le compte à zéro).
         got, refused = self._fetch(pr, wt.into, wt.branch)
         if refused:
             return MergerOutcome(tid, "refused", "refused", refused, pr.number)
-        target, desync = self._target(pr, got.get(wt.branch, ""), got.get(wt.into, ""))
+        remote_base = got.get(wt.into, "")
+        target, desync, side = self._target(pr, got.get(wt.branch, ""), remote_base)
         if desync:
-            return self._desynced(task, launch, wt, pr, desync)
+            return self._desynced(task, launch, wt, pr, desync, side, remote_base)
         if self._desync_waits(tid):
             self._note(MERGE_WAITED_EVENT, tid, {"cleared": True, "head": pr.head, "base": target})
+        if ci != "green":
+            return MergerOutcome(tid, "wait", "waiting", f"CI : {detail}", pr.number)
         if self._git("merge-base", "--is-ancestor", target, pr.head).returncode != 0:
             if position >= self._policy.merger.realign_max:
                 if pr.conflicting and (hard := self._hard_conflicts(pr.head, target)):
-                    return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {hard}", pr.number, into=wt.into)
+                    return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {hard}", pr.number,
+                                        hint=_merge_hint(wt.into))
                 return MergerOutcome(tid, "wait", "waiting", f"en retard sur {wt.into}, en file (position {position + 1}) : "
                                      f"{self._policy.merger.realign_max} réalignement(s) à la fois", pr.number)
             return self._realign(task, wt, pr, judged, launch, target)
@@ -424,19 +437,20 @@ class MergeStage:
             return MergerOutcome(tid, "wait", "waiting", f"prête, en file (position {position + 1}) : une fusion à la fois", pr.number)
         return self._merge(task, wt, judged, receipt, pr)
 
-    def _target(self, pr: _PullRequest, remote_head: str, remote_base: str) -> tuple[str, str]:
-        """``(base à rejoindre, "")`` ; ``("", raison)`` quand la remote et GitHub ne disent pas la même chose.
+    def _target(self, pr: _PullRequest, remote_head: str, remote_base: str) -> tuple[str, str, str]:
+        """``(base à rejoindre, "", "")`` ; ``("", raison, "head"|"base")`` quand la remote et GitHub ne disent pas la
+        même chose, et de quel côté.
 
         Un ``baseRefOid`` que GitHub n'a pas rafraîchi (#993) n'est pas un désaccord : la base récupérée, du dépôt figé
         de la tâche, en descend ; c'est elle que la tête doit contenir, et elle que le réalignement fusionne.
         """
         if remote_head != pr.head:
-            return "", f"tête de la remote {remote_head[:12] or 'absente'}, tête de la PR {pr.head[:12]}"
+            return "", f"tête de la remote {remote_head[:12] or 'absente'}, tête de la PR {pr.head[:12]}", "head"
         if remote_base == pr.base_oid:
-            return remote_base, ""
+            return remote_base, "", ""
         if remote_base and self._git("merge-base", "--is-ancestor", pr.base_oid, remote_base).returncode == 0:
-            return remote_base, ""
-        return "", f"base de la remote {remote_base[:12] or 'absente'}, base de la PR {pr.base_oid[:12]}, sans filiation"
+            return remote_base, "", ""
+        return "", f"base de la remote {remote_base[:12] or 'absente'}, base de la PR {pr.base_oid[:12]}, sans filiation", "base"
 
     def _desync_waits(self, tid: str) -> int:
         """Les attentes de désaccord consécutives depuis la dernière remise à zéro (nouveau READY, push, retour, relecture)."""
@@ -449,17 +463,23 @@ class MergeStage:
                 break
         return count
 
-    def _desynced(self, task: MissionTask, launch: dict[str, Any], wt: TaskWorktree, pr: _PullRequest, why: str) -> MergerOutcome:
-        """La remote et GitHub en désaccord : on attend, borné (:data:`MAX_DESYNC_WAITS`) ; en conflit, retour au worker."""
+    def _desynced(
+        self, task: MissionTask, launch: dict[str, Any], wt: TaskWorktree, pr: _PullRequest, why: str, side: str, remote_base: str,
+    ) -> MergerOutcome:
+        """La remote et GitHub en désaccord : on attend, borné (:data:`MAX_DESYNC_WAITS`), puis retour au worker ; une PR
+        en conflit hors ``CHANGELOG.md`` (que le réalignement unit) y retourne aussitôt."""
         tid = task.id
-        if pr.conflicting:
+        if pr.conflicting and remote_base and (hard := self._hard_conflicts(pr.head, remote_base)):
             said = _clean(pr.mergeable if pr.mergeable in _CONFLICTING else pr.merge_state, 40)
-            return self._bounce(task, launch, "conflict", f"GitHub dit la PR #{pr.number} en conflit avec {wt.into} ({said}) ; {why}",
-                                pr.number, into=wt.into)
+            return self._bounce(task, launch, "conflict", f"GitHub dit la PR #{pr.number} en conflit avec {wt.into} ({said}) "
+                                f"sur {hard} ; {why}", pr.number, hint=_merge_hint(wt.into))
         waits = self._desync_waits(tid)
         if waits >= MAX_DESYNC_WAITS:
+            hint = (f"La tête de task/{tid} sur la remote n'est pas celle de la PR : vérifie qu'elle est poussée "
+                    f"(`git status`, `git push origin task/{tid}`, jamais forcé) et que la PR la suit. "
+                    if side == "head" else _merge_hint(wt.into))
             return self._bounce(task, launch, "desync", f"la remote et GitHub en désaccord {waits} tick(s) de suite ({why})",
-                                pr.number, into=wt.into)
+                                pr.number, hint=hint)
         self._note(MERGE_WAITED_EVENT, tid, {"head": pr.head, "base": pr.base_oid, "why": why[:300], "count": waits + 1})
         return MergerOutcome(tid, "wait", "waiting", f"la remote et GitHub ne disent pas encore la même chose ({why}) : revu au "
                              f"tick suivant ({waits + 1}/{MAX_DESYNC_WAITS})", pr.number)
@@ -471,6 +491,19 @@ class MergeStage:
             return ""
         conflicted = sorted({ln for ln in merged.stdout.splitlines()[1:] if ln.strip()} - {CHANGELOG})
         return ", ".join(_clean(p, 120) for p in conflicted[:10])
+
+    def _draft(self, task: MissionTask, wt: TaskWorktree, judged: LedgerEvent, pr: _PullRequest) -> MergerOutcome:
+        """Une PR en brouillon au READY scellé : chemins qui escaladent → question ; déjà sortie pour cette tête → un
+        humain l'y a remise, elle y reste ; sinon elle sort du brouillon."""
+        tid = task.id
+        if kept := self._kept_to_human(task, pr):
+            return self._ask_human(task, wt, "merge", judged.id, f"{kept} ; PR en brouillon, le merger ne l'en sort pas "
+                                   f"(`gh pr ready {pr.number}` d'abord)", pr.number)
+        events = self._service.ledger.events_for(tid)
+        if any(e.event_type == MERGE_UNDRAFTED_EVENT and e.payload.get("head") == pr.head for e in events):
+            return MergerOutcome(tid, "wait", "waiting", f"PR #{pr.number} remise en brouillon par un humain après sa sortie "
+                                 f"à {pr.head[:12]} : le merger ne l'en ressort pas", pr.number)
+        return self._undraft(tid, pr)
 
     def _undraft(self, tid: str, pr: _PullRequest) -> MergerOutcome:
         """#993 : la PR en brouillon dont la tête GitHub est couverte par le READY scellé passe « prête à relire ».
@@ -610,10 +643,12 @@ class MergeStage:
             return "", f"aucune PR pour {branch}"
         if pr.head != head:
             return "", f"PR #{pr.number} à {pr.head[:12]}, tête relue {head[:12]}"
-        return self._ci(pr.slug, branch)
+        return self._ci(pr.slug, branch, red=frozenset({"fail"}))  # un check annulé reste au merger
 
-    def _ci(self, slug: str, branch: str) -> tuple[str, str]:
-        """``(green|red|pending|unknown, détail)`` : les checks requis, ou tous hors ignorés si gh dit qu'aucun n'est requis."""
+    def _ci(self, slug: str, branch: str, *, red: frozenset[str] = _RED_BUCKETS) -> tuple[str, str]:
+        """``(green|red|pending|unknown, détail)`` : les checks requis, ou tous hors ignorés si gh dit qu'aucun n'est requis.
+
+        *red* : les états qui font un rouge (``fail`` et ``cancel`` pour le merger) ; les autres non verts sont en cours."""
         state, required = self._checks(slug, branch, "--required")
         if state == "error":
             return "unknown", "gh pr checks --required en échec : on n'en conclut rien"
@@ -629,9 +664,9 @@ class MergeStage:
         if not rows:
             return "pending", f"aucun check rapporté ({scope}) : la CI verte est exigée"
         buckets = [str(r.get("bucket", "")) for r in rows]
-        red = [_clean(str(r.get("name")), 80) for r, b in zip(rows, buckets, strict=True) if b in _RED_BUCKETS]
-        if red:
-            return "red", f"{len(red)}/{len(rows)} {scope} en échec : {', '.join(red[:5])}"
+        failed = [_clean(str(r.get("name")), 80) for r, b in zip(rows, buckets, strict=True) if b in red]
+        if failed:
+            return "red", f"{len(failed)}/{len(rows)} {scope} en échec : {', '.join(failed[:5])}"
         if any(b not in _GREEN_BUCKETS for b in buckets):
             return "pending", f"{sum(1 for b in buckets if b not in _GREEN_BUCKETS)}/{len(rows)} {scope} en cours"
         if "pass" not in buckets:
@@ -671,10 +706,11 @@ class MergeStage:
             conflicted = sorted(set(lines[1:]))
             if conflicted != [CHANGELOG]:
                 shown = ", ".join(_clean(p, 120) for p in conflicted[:10])
-                return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {shown}", pr.number, into=wt.into)
+                return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {shown}", pr.number,
+                                    hint=_merge_hint(wt.into))
             tree, refused = self._union_changelog(tree, head, target)
             if refused:
-                return self._bounce(task, launch, "conflict", refused, pr.number, into=wt.into)
+                return self._bounce(task, launch, "conflict", refused, pr.number, hint=_merge_hint(wt.into))
             union = True
         made = self._git("commit-tree", tree, "-p", head, "-p", target, "-m", f"Merge {wt.into} into {wt.branch} (merger, #876)")
         new = made.stdout.strip()
@@ -965,9 +1001,9 @@ class MergeStage:
                         if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == "human"), default=-1)
         return 1 + sum(1 for e in events[answered + 1:] if e.event_type == kind)
 
-    def _bounce(self, task: MissionTask, launch: dict[str, Any], reason: str, detail: str, pr: int, *, into: str = "") -> MergerOutcome:
+    def _bounce(self, task: MissionTask, launch: dict[str, Any], reason: str, detail: str, pr: int, *, hint: str = "") -> MergerOutcome:
         """CI rouge, conflit, désaccord persistant : retour au worker (reprise de sa session), ou escalade au cycle
-        ``max_cycles``. Un conflit avec la cible *into* demande au worker de la fusionner lui-même dans sa branche."""
+        ``max_cycles``. *hint* : le geste attendu du worker (fusionner la cible, pousser sa branche)."""
         tid, max_cycles = task.id, self._policy.merger.max_cycles
         events = self._service.ledger.events_for(tid)
         cycle, worker = self._cycle(events, MERGE_BOUNCED_EVENT), str(launch.get("session_id") or "")
@@ -988,10 +1024,8 @@ class MergeStage:
         argv.append(
             f"La fusion de {tid} est refusée : {_clean(detail)}. La branche distante task/{tid} a pu être réalignée par le "
             f"merger (main fusionnée, ton worktree n'est pas touché) : `git pull --no-rebase origin task/{tid}` avant de "
-            "pousser. "
-            + (f"Fusionne la cible dans ta branche et résous les conflits : `git fetch origin {into}` puis "
-               f"`git merge origin/{into}` (ni rebase ni push forcé). " if into and reason in ("conflict", "desync") else "")
-            + f"Corrige dans ce worktree, commite, pousse sur task/{tid} (jamais de push forcé), revérifie avec les "
+            f"pousser. {hint}"
+            f"Corrige dans ce worktree, commite, pousse sur task/{tid} (jamais de push forcé), revérifie avec les "
             f"checks de la tâche, puis remets-la en revue "
             f"(`grimoire task move {tid} --to needs_verification`)."
         )

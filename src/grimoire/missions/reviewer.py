@@ -27,9 +27,9 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
      noté ; la fusion et l'acceptation sont au merger (:mod:`.merger`, lot 4), qui comparent à ce sceau. ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
    - ``READY`` sur une CI rouge (#993) : la CI de la PR est lue comme le merger la lit
      (:meth:`~grimoire.missions.merger.MergeStage.head_ci` : checks requis, sinon tous hors ``ignored_checks``) quand
-     la tête GitHub de la PR est la tête relue ; un check en échec fait du verdict un ``NOT-READY``, les checks en
-     constat. Une CI en cours, illisible ou d'une autre tête ne change rien ici : le merger exige de toute façon la CI
-     verte de la tête qu'il fusionne ;
+     la tête GitHub de la PR est la tête relue ; un check en échec (``fail`` ; un check annulé reste au merger) fait
+     du verdict un ``NOT-READY``, les checks en constat. Une CI en cours, illisible ou d'une autre tête ne change
+     rien ici : le merger exige de toute façon la CI verte de la tête qu'il fusionne ;
    - ``NOT-READY`` : la tâche repart au worker (``needs_verification → running``, session du worker reprise par
      ``claude --bg --resume <son uuid>``, constats en note). Une reprise qui échoue remet la tâche en revue et sera
      retentée. Au cycle ``max_cycles`` (2 par défaut, compté depuis la dernière réponse humaine), ou sans session à

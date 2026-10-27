@@ -117,6 +117,34 @@ def test_un_brouillon_dont_le_ready_ne_tient_plus_reste_en_brouillon(projet: Pat
     assert len(host.of("gh", "pr", "ready")) == calls
 
 
+def test_une_pr_remise_en_brouillon_par_un_humain_n_en_ressort_pas(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.drafts.add(f"task/{tid}")
+    assert merges(review_ready(projet, host, tid, wt)) == [("undraft", "done")]
+    host.drafts.add(f"task/{tid}")  # un humain la retient, même tête
+    for _ in range(2):
+        report = tick(projet, host)
+        assert merges(report) == [("wait", "waiting")] and "remise en brouillon par un humain" in report.merges[0].detail
+    assert len(host.of("gh", "pr", "ready")) == 1 and host.of("gh", "pr", "merge") == []
+
+
+def test_une_pr_en_brouillon_qui_touche_un_chemin_protege_n_en_sort_pas(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("docs/x.md", "x\n"))
+    (wt / ".github" / "workflows").mkdir(parents=True)
+    (wt / ".github" / "workflows" / "ci.yml").write_text("on: push\n", encoding="utf-8")
+    git(wt, "add", "--", ".github/workflows/ci.yml")
+    git(wt, "commit", "-q", "-m", "la CI désactivée")
+    git(wt, "push", "-q", "origin", f"task/{tid}")
+    host.drafts.add(f"task/{tid}")
+    report = review_ready(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")], report.merges
+    assert ".github/workflows/ci.yml" in report.merges[0].detail and "gh pr ready 7" in report.merges[0].detail
+    assert host.of("gh", "pr", "ready") == [] and f"task/{tid}" in host.drafts
+    assert events(projet, tid, MERGE_UNDRAFTED_EVENT) == []
+
+
 def test_un_gh_pr_ready_refuse_est_compte_et_rejoue(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
@@ -156,6 +184,17 @@ def test_un_check_requis_rouge_defait_le_ready_meme_si_les_autres_sont_verts(pro
     host.required[branch] = [{"name": "e2e", "bucket": "fail"}]
     report = review_ready(projet, host, tid, wt)
     assert [o.action for o in report.reviews] == ["bounce"] and "e2e" in host.of("claude", "--bg", "--resume")[0][-1]
+
+
+def test_un_check_annule_ne_defait_pas_le_ready_il_reste_au_merger(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pass"}, {"name": "e2e", "bucket": "cancel"}]
+    report = review_ready(projet, host, tid, wt)
+    assert [o.action for o in report.reviews] == ["ready"], report.reviews
+    assert events(projet, tid, REVIEW_JUDGED_EVENT)[-1].payload["ci"] == "pending"
+    assert merges(report) == [("bounce", "done")]  # le merger, lui, tient un check annulé pour rouge
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
 
 
 def test_un_check_ignore_ou_non_requis_en_echec_ne_defait_pas_le_ready(projet: Path, host: FakeHost) -> None:
@@ -225,7 +264,7 @@ def test_un_desaccord_persistant_est_borne_puis_renvoye_au_worker(projet: Path, 
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     host.pr_base_oids[f"task/{tid}"] = "f" * 40  # une base que la remote ne connaît pas : aucune filiation
-    review_ready(projet, host, tid, wt)
+    review_ready(projet, host, tid, wt)  # CI verte vue une fois : à confirmer
     for n in range(1, MAX_DESYNC_WAITS + 1):
         report = tick(projet, host)
         assert merges(report) == [("wait", "waiting")], report.merges
@@ -236,15 +275,51 @@ def test_un_desaccord_persistant_est_borne_puis_renvoye_au_worker(projet: Path, 
     assert bounced.payload["reason"] == "desync" and "git merge origin/main" in host.of("claude", "--bg", "--resume")[0][-1]
 
 
+def test_un_desaccord_sur_la_tete_demande_de_pousser_la_branche_pas_de_fusionner_la_cible(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    branch = f"task/{tid}"
+    host.pr_heads[branch] = git(wt, "rev-parse", "HEAD")  # GitHub reste sur la tête relue…
+    clone = projet.parent / "pousse-tete"
+    subprocess.run(["git", "clone", "-q", "-b", branch, git(projet, "remote", "get-url", "origin"), str(clone)], check=True)
+    git(clone, "-c", "user.name=A", "-c", "user.email=a@example.invalid", "commit", "-q", "--allow-empty", "-m", "ailleurs")
+    git(clone, "push", "-q", "origin", branch)  # … la remote est ailleurs
+    review_ready(projet, host, tid, wt)  # CI verte vue une fois : à confirmer
+    for n in range(1, MAX_DESYNC_WAITS + 1):
+        report = tick(projet, host)
+        assert merges(report) == [("wait", "waiting")] and "tête de la remote" in report.merges[0].detail, report.merges
+        assert f"({n}/{MAX_DESYNC_WAITS})" in report.merges[0].detail
+    assert merges(tick(projet, host)) == [("bounce", "done")]
+    [resume] = host.of("claude", "--bg", "--resume")
+    assert f"git push origin task/{tid}" in resume[-1] and "git merge origin/main" not in resume[-1]
+
+
 def test_un_desaccord_en_conflit_annonce_est_renvoye_sans_attendre(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     host.pr_base_oids[f"task/{tid}"] = "f" * 40
     host.mergeable[f"task/{tid}"] = "CONFLICTING"
+    advance_main(projet, "src/app/route.py", "500\n")  # un vrai conflit, hors CHANGELOG
     review_ready(projet, host, tid, wt)
     report = tick(projet, host)
     assert merges(report) == [("bounce", "done")] and "CONFLICTING" in report.merges[0].detail
-    assert events(projet, tid, MERGE_WAITED_EVENT) == []
+    assert "src/app/route.py" in report.merges[0].detail and events(projet, tid, MERGE_WAITED_EVENT) == []
+
+
+def test_un_desaccord_en_conflit_du_seul_changelog_attend_l_union_du_realignement(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    text = (projet / "CHANGELOG.md").read_text(encoding="utf-8")
+    tid, wt = launch_and_work(projet, host, changelog=text.replace("## [Unreleased]\n", "## [Unreleased]\n\n- fix: route\n"))
+    branch = f"task/{tid}"
+    host.pr_base_oids[branch] = "f" * 40
+    host.mergeable[branch] = "CONFLICTING"
+    advance_main(projet, "CHANGELOG.md", text.replace("## [Unreleased]\n", "## [Unreleased]\n\n- feat: autre\n"))
+    review_ready(projet, host, tid, wt)
+    report = tick(projet, host)
+    assert merges(report) == [("wait", "waiting")] and f"(1/{MAX_DESYNC_WAITS})" in report.merges[0].detail
+    host.pr_base_oids.pop(branch)  # GitHub et la remote s'accordent : le réalignement unit le CHANGELOG
+    assert merges(tick(projet, host)) == [("realign", "done")]
+    assert events(projet, tid, MERGE_REALIGNED_EVENT)[0].payload["changelog_union"] is True
 
 
 def test_le_compteur_d_attentes_repart_de_zero_quand_le_desaccord_cesse(projet: Path, host: FakeHost) -> None:
@@ -260,6 +335,24 @@ def test_le_compteur_d_attentes_repart_de_zero_quand_le_desaccord_cesse(projet: 
     host.pr_base_oids[branch] = "f" * 40
     report = tick(projet, host)
     assert merges(report) == [("wait", "waiting")] and f"(1/{MAX_DESYNC_WAITS})" in report.merges[0].detail
+
+
+def test_un_tick_sans_desaccord_remet_le_compte_a_zero_meme_sur_une_ci_en_attente(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    branch = f"task/{tid}"
+    host.pr_base_oids[branch] = "f" * 40
+    review_ready(projet, host, tid, wt)
+    assert f"(1/{MAX_DESYNC_WAITS})" in tick(projet, host).merges[0].detail
+    host.pr_base_oids.pop(branch)
+    host.checks[branch] = [{"name": "tests", "bucket": "pending"}]
+    report = tick(projet, host)
+    assert merges(report) == [("wait", "waiting")] and report.merges[0].detail.startswith("CI")
+    assert events(projet, tid, MERGE_WAITED_EVENT)[-1].payload["cleared"] is True
+    host.pr_base_oids[branch] = "f" * 40
+    host.checks[branch] = [{"name": "tests", "bucket": "pass"}]
+    assert "à confirmer" in tick(projet, host).merges[0].detail  # compte fermé : la CI d'abord, comme avant
+    assert f"(1/{MAX_DESYNC_WAITS})" in tick(projet, host).merges[0].detail  # le compte repart de un
 
 
 def test_au_dela_de_realign_max_une_pr_en_conflit_est_renvoyee_sans_attendre_son_tour(projet: Path, host: FakeHost) -> None:
