@@ -8,6 +8,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): bloc Activité — le fil de l'agent dérivé du ledger, partagé par l'inspecteur de tâche et l'inspecteur de session (P69v2, GAO-p69v2-bloc-a-001) : module `workspace_session_feed.py` (claim, transitions, portes du TraceLedger, questions/réponses, notes de progression), contrat session étendu (`logs_command` : `claude logs <id>` à copier), dernière entrée du fil en une ligne sur la carte d'une tâche dont la session est vivante (sans identifiant de session — P74), et le brief des workers demande une note de progression aux étapes clés, sans garde bloquante
+- fix(missions): les refus du kit d'une réponse de la session orchestrateur sont journalisés, et une présentation entièrement refusée ne consomme pas la borne (Refs #962 #966)
+  - **Constat** (second lancement réel, 3.70.0, 2026-10-27) : la session a envoyé 5 commandes `task answer` à la bonne forme, toutes refusées (« un identifiant présenté a tenu le claim de cette tâche »), sans trace au ledger. Les 5 questions avaient en outre épuisé leurs 2 présentations.
+  - **Refus journalisés** : chaque refus par le kit d'une réponse d'origine `orchestrator` écrit `task.answer_refused` au ledger (tâche, question, motif court, empreinte sha256 de la session, jamais l'identifiant).
+  - **Présentations** : une présentation dont toutes les réponses tentées ont été refusées par le kit ne compte pas dans `MAX_PRESENTATIONS`, au plus une par question.
+  - **Cause connue de refus : le résidu du démon.** Les sessions de fond héritent de l'environnement du démon `claude` (#966) ; un démon démarré par un tick d'avant #967 garde un `GRIMOIRE_SESSION_ID` (ici l'uuid du premier worker, sous lequel des workers s'étaient rattachés à leurs claims) et le transmet à la session orchestrateur. La garde le compte, volontairement : c'est elle qui refuse un worker qui pose l'identifiant volé de l'orchestrateur en gardant le sien. Remède : redémarrer le démon (les sessions de fond s'arrêtent) ; depuis #967 le lanceur ne transmet plus `GRIMOIRE_SESSION_ID`.
+
 - feat(cockpit): qui travaille sur chaque carte — persona, modèle, effort, skills, tokens en direct et coût en CAD (P75, GAO-p75-qui-trav-001)
 ## [3.70.0] - 2026-10-27
 

@@ -23,7 +23,18 @@ l'acteur qu'un appelant CLI choisit (``--actor``) :
 Ces règles sont tenues par :func:`answer_gesture` pour **toute** réponse d'origine ``orchestrator``
 (:meth:`~grimoire.missions.service.TaskService.answer`) : la consigne n'est pas la garde. Une session appelante doit en
 plus répondre à une question que le tick lui a présentée, sur une tâche lancée par le tick ; aucun identifiant qu'elle
-présente ne doit avoir tenu le claim de la tâche, et elle ne doit pas agir depuis un worktree de tâche.
+présente ne doit avoir tenu le claim de la tâche, et elle ne doit pas agir depuis un worktree de tâche. Tous les
+identifiants présentés comptent, ``GRIMOIRE_SESSION_ID`` compris, y compris sous ``GRIMOIRE_UNATTENDED=1`` : c'est ce
+qui refuse un worker qui pose l'identifiant volé de l'orchestrateur en gardant le sien. Chaque refus, par le kit, d'une
+réponse d'origine ``orchestrator`` est journalisé au ledger (:data:`ANSWER_REFUSED_EVENT` : tâche, question, motif,
+empreinte de la session — jamais l'identifiant).
+
+**Cause connue de refus : le résidu du démon.** Les sessions de fond héritent de l'environnement du démon ``claude``
+(#966). Un démon démarré par un tick d'avant #967 garde le ``GRIMOIRE_SESSION_ID`` de ce tick (au second lancement
+réel, 3.70.0 : l'uuid du premier worker, sous lequel des workers s'étaient rattachés à leurs claims) et le transmet à
+la session orchestrateur, dont chaque réponse est alors refusée (« a tenu le claim »). Le remède est de redémarrer le
+démon (les sessions de fond s'arrêtent) — depuis #967 le lanceur ne transmet plus ``GRIMOIRE_SESSION_ID`` —, jamais
+d'affaiblir la garde.
 
 Une question présentée à une session orchestrateur **ouverte** n'est pas relistée. Présentée à une session
 **terminée** sans qu'aucune réponse de l'orchestrateur n'ait été enregistrée pour elle, elle est représentée une fois de
@@ -31,7 +42,9 @@ plus, au plus :data:`MAX_PRESENTATIONS` présentations par question : le premier
 juger juste mais répondre en une boucle Bash, refusée par ``dontAsk``, puis rendre ses décisions en texte ; son silence
 n'était pas une escalade. Au-delà, le silence escalade et la question reste à l'humain. Le tick ne voit pas les refus
 de permission de la session (l'hôte ne les journalise pas hors de sa transcription) : la borne vaut pour toute fin
-silencieuse.
+silencieuse. Il voit en revanche les refus du kit : une présentation dont toutes les réponses tentées ont été refusées
+par le kit (second lancement réel, 3.70.0 : le résidu du démon faisait tout refuser) ne compte pas dans la borne,
+au plus une présentation ainsi neutralisée par question.
 
 **Consigne** — une commande Bash par question, à la forme exacte de la liste blanche (pas de boucle, de ``;``, ``&&``,
 ``|``, ``set --``, variable ni sous-shell), avec l'exemple littéral de la première question ; une commande refusée par
@@ -114,6 +127,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ALLOWED_TOOLS",
+    "ANSWER_REFUSED_EVENT",
     "MAX_PRESENTATIONS",
     "MAX_RESUMES",
     "ORCHESTRATOR_ACTOR",
@@ -131,6 +145,7 @@ __all__ = [
     "eligible_questions",
     "mandate_gesture",
     "question_source",
+    "record_answer_refused",
 ]
 
 ORCHESTRATOR_ACTOR = "orchestrator"
@@ -139,6 +154,9 @@ SESSION_NAME = "grimoire-orchestrator"
 ORCH_LAUNCHED_EVENT = "orchestrator.session_launched"
 ORCH_ENDED_EVENT = "orchestrator.session_ended"
 ORCH_LAUNCH_FAILED_EVENT = "orchestrator.session_launch_failed"
+#: Une réponse d'origine ``orchestrator`` refusée par le kit, au ledger, sur la tâche (:func:`record_answer_refused`).
+ANSWER_REFUSED_EVENT = "task.answer_refused"
+_REASON_SIZE = 200
 _ENTITY = "orchestrator"
 #: Au-delà, une session encore au travail est arrêtée, et son inscription a expiré.
 SESSION_TIMEOUT = timedelta(minutes=30)
@@ -278,6 +296,36 @@ def _held_ids(service: TaskService, task: MissionTask, events: list[LedgerEvent]
     held |= {str(e.get("session_id") or "") for e in MandateStore(service.home_root).sessions(task_id=task.id)
              if e.get("role") in ("worker", "reviewer")}
     return held - {""}
+
+
+def record_answer_refused(service: TaskService, task_id: str, question_id: str, exc: Exception) -> None:
+    """Journalise au ledger le refus, par le kit, d'une réponse d'origine ``orchestrator`` (:data:`ANSWER_REFUSED_EVENT`).
+
+    Tâche, question, motif court et empreinte sha256 de la session appelante — jamais son identifiant en clair. Le tick
+    s'en sert pour ne pas compter une présentation dont toutes les réponses ont été refusées (:data:`MAX_PRESENTATIONS`).
+    Best-effort : un ledger qui refuse l'écriture laisse le refus d'origine remonter tel quel.
+    """
+    from grimoire.core.standard_state import current_session
+
+    session = current_session()[0].strip()
+    why = str(exc).split(" : ", 1)[1] if str(exc).startswith("Réponse refusée pour ") and " : " in str(exc) else str(exc)
+    payload: dict[str, Any] = {
+        "task_id": task_id, "question_id": question_id, "reason": _data(why, _REASON_SIZE),
+        "session_sha256": _digest(session) if session else "",
+    }
+    code = getattr(exc, "code", None)  # MandateRefusedError
+    if isinstance(code, str) and code:
+        payload["code"] = code
+    with contextlib.suppress(Exception):
+        service.ledger.append_event(ANSWER_REFUSED_EVENT, task_id, "task", ORCHESTRATOR_ACTOR, payload)
+
+
+def _refusals(service: TaskService, task_id: str) -> set[tuple[str, str]]:
+    """Les ``(question, empreinte de session)`` dont une réponse sur *task_id* a été refusée par le kit."""
+    return {
+        (str(e.payload.get("question_id") or ""), str(e.payload.get("session_sha256") or ""))
+        for e in service.ledger.events_for(task_id) if e.event_type == ANSWER_REFUSED_EVENT
+    }
 
 
 def _task_worktree_of_caller(service: TaskService) -> str:
@@ -442,18 +490,31 @@ class OrchestratorStage:
         ]
 
     def _presentations(self) -> tuple[dict[tuple[str, str], int], set[tuple[str, str]]]:
-        """Combien de fois chaque ``(tâche, question)`` a été présentée, et celles qu'une session ouverte tient."""
+        """Combien de présentations de chaque ``(tâche, question)`` comptent, et celles qu'une session ouverte tient.
+
+        Une présentation dont les réponses tentées ont toutes été refusées par le kit (:data:`ANSWER_REFUSED_EVENT` de
+        cette session, aucune réponse acceptée) ne compte pas — au plus une par question : la borne anti-boucle tient.
+        """
         ended = self._ended()
         count: dict[tuple[str, str], int] = {}
+        neutralized: set[tuple[str, str]] = set()
         held: set[tuple[str, str]] = set()
+        refused: dict[str, set[tuple[str, str]]] = {}  # tâche → (question, empreinte) refusées, lu une fois par tâche
         for launch in self._events(ORCH_LAUNCHED_EVENT):
             alive = str(launch.payload.get("session") or "") not in ended
+            digest = str(launch.payload.get("session_sha256") or "")
             for q in launch.payload.get("questions") or ():
                 if isinstance(q, dict):
                     key = (str(q.get("task_id")), str(q.get("question_id")))
-                    count[key] = count.get(key, 0) + 1
                     if alive:
                         held.add(key)
+                    elif digest and key not in neutralized:
+                        if key[0] not in refused:
+                            refused[key[0]] = _refusals(self._service, key[0])
+                        if (key[1], digest) in refused[key[0]]:
+                            neutralized.add(key)
+                            continue
+                    count[key] = count.get(key, 0) + 1
         return count, held
 
     def _answered_by_orchestrator(self, task_id: str, question_id: str) -> bool:
