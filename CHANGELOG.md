@@ -8,6 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): bloc Activité — le fil de l'agent dérivé du ledger, partagé par l'inspecteur de tâche et l'inspecteur de session (P69v2, GAO-p69v2-bloc-a-001) : module `workspace_session_feed.py` (claim, transitions, portes du TraceLedger, questions/réponses, notes de progression), contrat session étendu (`logs_command` : `claude logs <id>` à copier), dernière entrée du fil en une ligne sur la carte d'une tâche dont la session est vivante (sans identifiant de session — P74), et le brief des workers demande une note de progression aux étapes clés, sans garde bloquante
+- feat(cockpit): qui travaille sur chaque carte — persona, modèle, effort, skills, tokens en direct et coût en CAD (P75, GAO-p75-qui-trav-001)
 ## [3.70.0] - 2026-10-27
 
 - fix(missions): la session orchestrateur répond par une commande `task answer` par question, et une question restée sans réponse est représentée une fois (Refs #962)

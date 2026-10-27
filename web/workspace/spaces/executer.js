@@ -568,8 +568,104 @@ function cardSessionLine(task) {
     who.title = 'persona du claim : qui tient la tâche dans la session';
     line.append(who);
   }
-  // « session » n'est pas un palier : le badge de route dit déjà « modèle de session ».
-  if (task.model_tier && task.model_tier !== 'session') line.append(text('span', 'lbl', `palier ${task.model_tier}`));
+  // P75 : le palier RÉEL lu du journal de session quand il est rapporté ; le
+  // palier recommandé (route) en repli ; sinon le dire — rien n'est inventé.
+  const work = (task.work && task.work.session) || null;
+  const model = document.createElement('span');
+  model.dataset.role = 'work-model';
+  if (work && (work.tier || work.model)) {
+    model.textContent = work.tier || work.model;
+    model.title = work.tier
+      ? `palier réel, lu du journal de session${work.model ? ` (${work.model})` : ''}`
+      : 'modèle lu du journal de session (hors paliers haiku/sonnet/opus)';
+  } else if (!work && task.model_tier && task.model_tier !== 'session') {
+    // « session » n'est pas un palier : le badge de route dit déjà « modèle de session ».
+    model.className = 'lbl';
+    model.textContent = `palier ${task.model_tier}`;
+  }
+  if (model.textContent) line.append(model);
+  return line;
+}
+
+// P75 : la ligne de travail d'une carte tenue — effort, tokens en direct,
+// derniers skills. Sa propre ligne : la ligne session est en nowrap/élision,
+// ces faits y disparaissaient. Rien n'est inventé : un effort absent se dit.
+function workLiveRow(task) {
+  const work = (task.work && task.work.session) || null;
+  if (!work) return null;
+  const line = document.createElement('div');
+  line.className = 'ex-facts lbl';
+  line.dataset.role = 'work-live';
+  if (!work.tier && !work.model) {
+    // Le journal ne rapporte pas de modèle : le dire ici (la ligne session,
+    // en nowrap, tronquait la phrase) plutôt qu'afficher un palier deviné.
+    const missing = text('span', null, 'modèle non rapporté');
+    missing.dataset.role = 'work-model';
+    missing.title = "le journal de session n'est pas lisible d'ici : aucun palier affirmé";
+    line.append(missing);
+  }
+  const effort = text('span', null, work.effort ? `effort ${work.effort}` : 'effort non rapporté');
+  effort.dataset.role = 'work-effort';
+  effort.title = work.effort
+    ? 'effort de raisonnement, lu du journal de session'
+    : "l'hôte ne rapporte pas d'effort pour cette session";
+  line.append(effort);
+  const usage = (task.work && task.work.usage) || null;
+  if (usage && usage.usage_source === 'claude-code-transcript') {
+    const tokens = text('span', null, tokensText(usage.total_tokens || 0));
+    tokens.dataset.role = 'work-tokens';
+    tokens.title = `${usage.input_tokens} in / ${usage.output_tokens} out, cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit — repliés des traces (grimoire task fold-usage)`;
+    line.append(tokens);
+  }
+  if (work.skills && work.skills.length) {
+    const last = work.skills.slice(-2);
+    const skills = text('span', null, last.join(' · '));
+    skills.dataset.role = 'work-skills';
+    skills.title = `derniers skills invoqués par la session (liste complète dans le détail) : ${work.skills.join(', ')}`;
+    line.append(skills);
+  }
+  return line;
+}
+
+// P75 : tokens compacts pour une carte — « 48,2 k tokens » au-delà du millier.
+function tokensText(total) {
+  if (total < 1000) return `${total} tokens`;
+  const k = total / 1000;
+  const rounded = k >= 100 ? String(Math.round(k)) : (Math.round(k * 10) / 10).toFixed(1).replace(/\.0$/, '');
+  return `${rounded.replace('.', ',')} k tokens`;
+}
+
+// Montant CAD : virgule décimale, l'unité écrite — jamais un symbole seul.
+function cadText(cad) {
+  return `${cad.toFixed(2).replace('.', ',')} $ CAD`;
+}
+
+// Statut d'usage en toutes lettres quand ce n'est pas le journal de l'hôte (P75).
+const USAGE_SOURCE_WORDS = {
+  none: 'aucun usage replié depuis le journal de l’hôte (none)',
+  unavailable: "l'hôte de la tâche n'expose pas de journal d'usage vérifié (unavailable)",
+  reported: "coût rapporté par l'ouvrier seulement (reported)",
+};
+
+// P75 : fin de parcours — total de tokens repliés et coût approximatif en CAD
+// au taux des options du projet ; « coût inconnu » quand rien n'est replié.
+function workTotalRow(work) {
+  const usage = work.usage || {};
+  const line = text('div', 'ex-cost lbl', '');
+  line.dataset.role = 'work-total';
+  line.dataset.usageSource = usage.usage_source || 'none';
+  const parts = [];
+  if (usage.usage_source === 'claude-code-transcript') {
+    parts.push(`total ${tokensText(usage.total_tokens || 0)}`);
+    if (work.cost_cad != null) parts.push(`${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)}`);
+    else parts.push('coût inconnu');
+  } else {
+    parts.push('coût inconnu');
+  }
+  line.textContent = parts.join(' · ');
+  const source = USAGE_SOURCE_WORDS[usage.usage_source];
+  line.title = `${source ? source + '. ' : ''}Taux : 1 USD = ${String(work.usd_cad).replace('.', ',')} $ CAD `
+    + `(${work.usd_cad_source === 'default' ? 'défaut du kit' : 'déclaré par le projet'}, modifiable dans Configuration → Fournisseurs et budgets).`;
   return line;
 }
 
@@ -887,6 +983,8 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
     // La vivacité a son glyphe sur la ligne des faits, juste en dessous : pas
     // de doublon ici.
     card.append(cardSessionLine(task));
+    // P75 : effort, tokens en direct et derniers skills de la session.
+    appendIf(card, workLiveRow(task));
   }
   // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
   // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
@@ -907,7 +1005,12 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
     feedLine.append(icon('history'), text('span', 'ex-card-feed-text', task.feed_last.label));
     card.append(feedLine);
   }
-  const cost = costRow(task);
+  // P75 : une carte close dit le total de tokens et le coût approximatif en
+  // CAD — c'est son bilan ; la ligne « coût (dispatch) » de P11 reste aux
+  // cartes ouvertes (deux « coût inconnu » superposés ne disaient rien).
+  const closedTotal = isClosed(task) && task.work ? workTotalRow(task.work) : null;
+  const cost = closedTotal ? null : costRow(task);
+  if (closedTotal) card.append(closedTotal);
   if (cost && facts) facts.append(Object.assign(cost, { className: 'ex-cost' }));
   else if (cost) card.append(cost);
 
@@ -1932,6 +2035,55 @@ function sessionBlock(session, { resume = true } = {}) {
   return block;
 }
 
+// P75 : la section « Travail de la session » de l'inspecteur — persona, hôte,
+// modèle réel, effort, skills invoqués, tokens détaillés. Chaque donnée absente
+// est dite absente (« non rapporté »), et le statut d'usage est écrit en toutes
+// lettres quand le chiffre ne vient pas du journal de l'hôte.
+function workBlock(task) {
+  const work = task.work || {};
+  const block = document.createElement('div');
+  block.className = 'ex-insp-block';
+  block.dataset.role = 'work-block';
+  block.append(text('h4', null, 'Travail de la session'));
+  const claim = task.claim || {};
+  const persona = claim.agent_id || claim.actor_id || '';
+  block.append(text('div', 'lbl', `persona : ${persona || 'non rapportée'}`));
+  block.append(text('div', 'lbl', `hôte : ${task.host ? (HOST_LABEL[task.host] || task.host) : 'inconnu'}`));
+  const session = work.session;
+  const modelLine = text('div', 'lbl', '');
+  modelLine.dataset.role = 'work-model-detail';
+  modelLine.textContent = session && session.model
+    ? `modèle réel : ${session.model}${session.tier ? ` (palier ${session.tier})` : ''}`
+    : 'modèle réel : non rapporté';
+  block.append(modelLine);
+  const effortLine = text('div', 'lbl', `effort : ${session && session.effort ? session.effort : 'non rapporté'}`);
+  effortLine.dataset.role = 'work-effort-detail';
+  block.append(effortLine);
+  const skillsLine = text('div', 'lbl', 'skills invoqués : ');
+  skillsLine.dataset.role = 'work-skills-list';
+  skillsLine.append(text('span', null, session && session.skills && session.skills.length ? session.skills.join(', ') : 'aucun rapporté'));
+  block.append(skillsLine);
+  const usage = work.usage || {};
+  const usageLine = text('div', 'lbl', '');
+  usageLine.dataset.role = 'work-usage';
+  if (usage.usage_source === 'claude-code-transcript') {
+    usageLine.textContent = `tokens : ${usage.total_tokens} (${usage.input_tokens} in / ${usage.output_tokens} out, `
+      + `cache ${usage.cache_read_tokens} lu / ${usage.cache_creation_tokens} écrit, ${usage.calls} appel(s))`;
+    block.append(usageLine);
+    const costLine = text('div', 'lbl', '');
+    costLine.dataset.role = 'work-cost';
+    costLine.textContent = work.cost_cad != null && usage.cost_usd != null
+      ? `coût : ${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)} `
+        + `(${usage.cost_usd.toFixed(4)} USD, taux ${String(work.usd_cad).replace('.', ',')})`
+      : 'coût : inconnu (appels non tarifés)';
+    block.append(costLine);
+  } else {
+    usageLine.textContent = `usage : ${USAGE_SOURCE_WORDS[usage.usage_source] || 'aucun usage replié (none)'}`;
+    block.append(usageLine);
+  }
+  return block;
+}
+
 // Les conditions de passage (`next_gate`, lu par `workspace_api.annotate_gates`
 // depuis le verdict du gate) en clair : le libellé dit la preuve, l'identifiant
 // du gate reste affiché à côté pour qu'on puisse le chercher dans le fichier de portes.
@@ -2668,6 +2820,9 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
     sessionWrap.append(none);
   }
   ctx.inspector.append(sessionWrap);
+
+  // ── P75 : qui travaille — persona, modèle réel, effort, skills, tokens ──
+  if (task.work) ctx.inspector.append(workBlock(task));
 
   // ── Assigner une session (P47) : le plan de lancement, sans rien lancer ──
   appendIf(ctx.inspector, assignBlock(ctx, detail, project));
