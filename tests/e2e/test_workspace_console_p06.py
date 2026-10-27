@@ -153,7 +153,7 @@ def _kit_file(page: Page) -> str:
 def _open_source(page: Page) -> None:
     page.evaluate("() => window.GrimoireWorkspace.goto('source')")
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
-    page.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
+    page.wait_for_selector("#canvas .tree .sr-tree-file", timeout=10_000)
 
 
 def _goto_travail(page: Page) -> None:
@@ -189,7 +189,7 @@ def test_une_reponse_arrivee_apres_le_changement_d_espace_est_ignoree(workspace:
     path = _kit_file(workspace)
     held: list[Route] = []
     workspace.route(lambda url: "/api/workspace/file?" in url, lambda route: held.append(route))
-    workspace.locator(".tree .sr-tree-file", has_text=path.rsplit("/", 1)[-1]).first.dispatch_event("click")
+    workspace.locator("#canvas .tree .sr-tree-file", has_text=path.rsplit("/", 1)[-1]).first.dispatch_event("click")
     for _ in range(50):
         if held:
             break
@@ -222,7 +222,8 @@ def test_le_rail_bibliotheque_n_est_visible_que_la_ou_il_agit(
     workspace: Page, project_with_blueprint: tuple[Path, str]
 ) -> None:
     open_atelier(workspace)
-    assert workspace.locator('.rail-btn[data-panel="explorer"]').is_visible()
+    # P78 : À traiter n'a pas d'arborescence, donc pas de bouton Explorateur.
+    assert workspace.locator('.rail-btn[data-panel="explorer"]').is_hidden()
     assert _library(workspace).is_hidden(), "Bibliothèque promise sur À traiter, où elle ne fait rien"
 
     workspace.evaluate("() => window.GrimoireWorkspace.goto('concevoir')")

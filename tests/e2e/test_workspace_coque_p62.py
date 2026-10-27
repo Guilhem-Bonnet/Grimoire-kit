@@ -95,8 +95,10 @@ def test_la_bascule_rouvre_les_panneaux_d_atelier_et_se_souvient(cockpit_workspa
 
     page.keyboard.press("Control+Shift+L")
     page.wait_for_function("document.documentElement.dataset.atelier === 'on'")
-    for selector in ("#rail", "#panel-explorer", "#dock", "#panel-inspector"):
+    # Travail n'a pas d'arborescence : l'Explorateur reste absent (P78).
+    for selector in ("#rail", "#dock", "#panel-inspector"):
         assert _visible(page, selector), f"{selector} doit se rouvrir avec la bascule"
+    assert not _visible(page, "#panel-explorer")
     assert page.locator("#st-atelier").get_attribute("aria-pressed") == "true"
 
     page.reload(wait_until="domcontentloaded")
