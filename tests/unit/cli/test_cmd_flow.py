@@ -363,3 +363,33 @@ def test_flow_list_reports_measure_from_dispatch_and_require_measure_passes(tmp_
         app, ["flow", "list", "--project-root", str(tmp_path), "--require-measure", "cli-flow-dispatch"]
     )
     assert required.exit_code == 0, required.output
+
+
+def test_flow_run_background_rend_la_main_et_status_suit_le_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.cli import cmd_flow
+
+    _write_dispatch_registry(tmp_path)
+    bp = _write_dispatchable_blueprint(tmp_path)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(cmd_flow, "_spawn_detached", lambda cmd, log: spawned.append(cmd) or 4242)
+
+    result = runner.invoke(
+        app,
+        ["--output", "json", "flow", "run", str(bp), "--executor", "dispatch", "--background", "--project-root", str(tmp_path)],
+    )
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.output)
+    assert body["status"] == "background"
+    assert body["pid"] == 4242
+    assert spawned and spawned[0][3:6] == ["flow", "resume", body["run_id"]]
+    assert "dispatch" in spawned[0]
+
+    status = runner.invoke(app, ["--output", "json", "flow", "status", body["run_id"], "--project-root", str(tmp_path)])
+    assert status.exit_code == 0, status.output
+    assert json.loads(status.output)["status"] == "running"
+
+
+def test_flow_run_background_sans_dispatch_est_refuse(tmp_path: Path) -> None:
+    bp = _write_blueprint(tmp_path)
+    result = runner.invoke(app, ["flow", "run", str(bp), "--background", "--project-root", str(tmp_path)])
+    assert result.exit_code == 1
