@@ -598,6 +598,10 @@ class MandateStore:
         mandate = _mandate_of(entry)
         if mandate is None:  # l'entrée qu'on vient d'écrire ne se relit pas : jamais un octroi muet
             raise MandateRefusedError(JOURNAL_UNREADABLE, f"octroi {mandate_id} écrit mais illisible au journal")
+        from grimoire.missions.review_seal import pin_project_repository
+
+        with contextlib.suppress(Exception):  # sans pin, aucune tâche faite à la main n'est relue (échec fermé)
+            pin_project_repository(self.root, mandate_id)  # #994 : le dépôt que relit une tâche faite à la main
         return mandate
 
     def request_grant(
