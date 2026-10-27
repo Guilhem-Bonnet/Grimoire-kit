@@ -1,6 +1,6 @@
 # Inventaire d'usage — framework/tools/
 
-> Généré le 2026-10-26 par `python scripts/framework-usage-inventory.py`. Instantané de décision pour le portage/suppression (cf. framework/FREEZE.md) — régénérer avant tout arbitrage.
+> Généré le 2026-10-27 par `python scripts/framework-usage-inventory.py`. Instantané de décision pour le portage/suppression (cf. framework/FREEZE.md) — régénérer avant tout arbitrage.
 
 **47 fichiers, 35369 lignes.** Classes par priorité de traitement : UNREFERENCED (suppression candidate), INTERNAL (référencé uniquement par d'autres outils de tools/), DOCS_ONLY (réécrire la doc ou porter), TEST_ONLY (test hérité sans usage runtime), TRANSITIVE (chargé au runtime par un outil référencé — supprimer l'appelant d'abord), REFERENCED (à porter vers src/ à la demande).
 
