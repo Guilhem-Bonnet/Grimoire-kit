@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(observatory): l'export lit le TraceLedger et le journal runtime réels (R15)
+  - `observatory export` ne lisait que les fichiers de l'ère shell. Il lit désormais `_grimoire-output/traces/traces.jsonl` (TraceLedger) et `events/runtime-journal.jsonl`, via `grimoire.traces.observatory_feed` ; `framework/tools/observatory.py` (gelé) y délègue en six lignes.
 - fix(missions): sous mandat, une tâche faite à la main par une session interactive est relue par le relecteur du tick, puis fusionnée ou close par le merger (Closes #994)
   - **Constat** (3.68.0, mandat actif, 2026-10-26) : le relecteur du tick ne relisait que les tâches lancées par le lanceur (`task.session_launched`). La session qui a fait la tâche est refusée (`review.self_review`), une autre aussi (« ne figure pas au journal d'autorité comme relecteur de cette tâche ») : P74 (#989, fusionnée) restait en `needs_verification` sans issue, sauf à révoquer le mandat le temps des revues.
   - **Relecture** : sous mandat actif, une tâche en `needs_verification` sans lancement de worker passe par le même chemin que les tâches du tick : vraie identité du relecteur inscrite (#966), tête relue scellée au lancement et au jugement, verdict par critère, provenance. La consigne lit la PR (`gh pr view`, `gh pr diff`) et diffe contre `origin/<cible>...HEAD`. Pour une PR déjà fusionnée, ce diff est vide : elle donne `gh pr diff <n>` et `git diff <fusion>^1 <fusion>`.
