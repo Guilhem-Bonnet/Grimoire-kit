@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.71.0] - 2026-10-27
+
 - feat(flows): `grimoire flow run <blueprint> --executor dispatch --background` ouvre le run, lance la cascade dans un processus détaché (journal `<run_id>.background.log` sous `_grimoire-runtime-output/flows/`) et rend la main avec le `run_id` ; `flow status <run_id>` le suit. Refusé sans `--executor dispatch` (l'exécuteur interactive rend déjà la main). Les `.mdc` Cursor par portée sont déjà émis par `host sync` (W6-05). (R65, `GAO-r65-ouvrir-l-001`)
 - fix(missions): sous mandat, une tâche faite à la main par une session interactive est relue par le relecteur du tick, puis fusionnée ou close par le merger (Closes #994)
   - **Constat** (3.68.0, mandat actif, 2026-10-26) : le relecteur du tick ne relisait que les tâches lancées par le lanceur (`task.session_launched`). La session qui a fait la tâche est refusée (`review.self_review`), une autre aussi (« ne figure pas au journal d'autorité comme relecteur de cette tâche ») : P74 (#989, fusionnée) restait en `needs_verification` sans issue, sauf à révoquer le mandat le temps des revues.
