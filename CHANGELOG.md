@@ -13,6 +13,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - **Présentations** : une présentation dont toutes les réponses tentées ont été refusées par le kit ne compte pas dans `MAX_PRESENTATIONS`, au plus une par question.
   - **Cause connue de refus : le résidu du démon.** Les sessions de fond héritent de l'environnement du démon `claude` (#966) ; un démon démarré par un tick d'avant #967 garde un `GRIMOIRE_SESSION_ID` (ici l'uuid du premier worker, sous lequel des workers s'étaient rattachés à leurs claims) et le transmet à la session orchestrateur. La garde le compte, volontairement : c'est elle qui refuse un worker qui pose l'identifiant volé de l'orchestrateur en gardant le sien. Remède : redémarrer le démon (les sessions de fond s'arrêtent) ; depuis #967 le lanceur ne transmet plus `GRIMOIRE_SESSION_ID`.
 
+- feat(cockpit): qui travaille sur chaque carte — persona, modèle, effort, skills, tokens en direct et coût en CAD (P75, GAO-p75-qui-trav-001)
 ## [3.70.0] - 2026-10-27
 
 - fix(missions): la session orchestrateur répond par une commande `task answer` par question, et une question restée sans réponse est représentée une fois (Refs #962)
