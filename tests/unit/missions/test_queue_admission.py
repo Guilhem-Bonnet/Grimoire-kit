@@ -414,6 +414,34 @@ def test_no_declared_limit_refuses_nothing(service: TaskService, mission: str) -
         service.claim(tid, "amelia")
 
 
+def test_une_tache_bloquee_ne_tient_pas_de_place_dans_le_wip(projet: Path, service: TaskService, mission: str) -> None:
+    """P72v2 (GAO-p72v2-bloqu-001) : une tâche ``blocked`` ne compte pas dans le WIP d'admission.
+
+    La constante ``_HELD`` de :mod:`grimoire.missions.admission` ne retient que
+    CLAIMED et RUNNING : bloquer une tâche rend sa place, un claim suivant passe.
+
+    Divergence connue, documentée ici sans la changer : le plafond de sessions
+    du launcher (``_LIVE`` dans :mod:`grimoire.missions.launcher`) compte
+    BLOCKED — une session qui attend reste vivante pour le lancement de
+    workers, alors que l'admission la libère. Les deux compteurs n'ont pas le
+    même objet (places de travail vs sessions d'hôte) ; ce test fige la
+    frontière côté admission.
+    """
+    _wip(projet, total=1, role=1)
+    a = _pret(service, mission, "bloquée", owner="x")
+    b = _pret(service, mission, "candidate", owner="y")
+    service.claim(a.id, "x")
+    with pytest.raises(GrimoireMissionError, match=r"WIP global atteint \(1/1\)"):
+        service.claim(b.id, "y")
+    service.ledger.transition_task(a.id, TaskState.BLOCKED, actor_id="x", reason="dépendance externe ouverte")
+    # La vue du planificateur ne la tient plus…
+    capacity = load_capacity(projet)
+    view = derive_view(service.ledger, capacity, now=_later(0))
+    assert a.id not in {h.task_id for h in view.held}
+    # …et la garde au claim rend la place : le claim suivant passe.
+    assert service.claim(b.id, "y").task.status is TaskState.CLAIMED
+
+
 def test_wip_is_checked_under_the_ledger_lock_for_a_second_service(projet: Path, service: TaskService, mission: str) -> None:
     _wip(projet, total=1, role=1)
     a, b = _pret(service, mission, "a", owner="x"), _pret(service, mission, "b", owner="y")

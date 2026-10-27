@@ -87,7 +87,9 @@ const COLUMN_LABEL = {
 // annulée n'est pas faite : elle a sa propre colonne, repliée par défaut.
 const GROUPS4 = [
   { id: 'todo', icon: 'clipboard', label: 'À faire', cols: ['proposed', 'ready'] },
-  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'] },
+  // P72v2 : pas de 5e colonne pour « Bloquée » — un compteur de ton warn sous
+  // « En cours » et une section « Bloqué » repliée par défaut (`blockedFold`).
+  { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'], blockedFold: true },
   { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
   { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'] },
   { id: 'cancelled', icon: 'archive', label: 'Annulées', cols: ['archived'], folded: true },
@@ -192,6 +194,12 @@ function injectStyles() {
     .ex-col-body { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
     .ex-col-body[hidden] { display: none; }
     .ex-col-body.empty { border: 1px dashed var(--line); border-radius: var(--r); align-items: center; justify-content: center; color: var(--ink3); font-size: var(--t-min); padding: var(--sp-4) 0; }
+    /* P72v2 : bloquées du board compact — compteur discret de ton warn (jamais une alarme), section repliée par défaut. */
+    .ex-blocked-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 2px 8px; font-size: var(--t-min); border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); cursor: pointer; }
+    .ex-blocked-toggle:hover { background: var(--hover); }
+    .ex-blocked-body { display: flex; flex-direction: column; gap: 6px; }
+    .ex-blocked-body[hidden] { display: none; }
+    .ex-blocked-title { font-size: var(--t-min); font-weight: 600; color: var(--ink2); }
     .ex-card { border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); box-shadow: var(--shadow); padding: var(--sp-3); cursor: pointer; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
     /* P74 : liseré gauche stable par « ouverte par » (hash → --owner-N de tokens.css).
        Un repère de balayage, jamais le seul porteur de sens : le nom est écrit sur la carte. */
@@ -909,6 +917,10 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     col.dataset.group = group.id;
     const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
     const folded = group.folded && !unfolded.has(group.id);
+    // P72v2 : sur le board compact, les bloquées sortent du flux de la colonne —
+    // compteur de ton warn sous le titre, section « Bloqué » repliée par défaut.
+    const heldBack = group.blockedFold ? inColumn.filter((t) => t.board === 'blocked') : [];
+    const shown = heldBack.length ? inColumn.filter((t) => t.board !== 'blocked') : inColumn;
 
     const head = document.createElement('div');
     head.className = 'ex-col-head';
@@ -939,13 +951,45 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     }
     col.append(head);
 
+    if (heldBack.length) {
+      // Compteur + repli (décision P72v2) : pas de colonne dédiée, pas d'alarme.
+      // Absent dès qu'aucune tâche n'est bloquée.
+      const foldKey = `${group.id}:blocked`;
+      const open = unfolded.has(foldKey);
+      const sectionId = `ex-blocked-${group.id}`;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'ex-blocked-toggle';
+      toggle.dataset.role = 'blocked-count';
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-controls', sectionId);
+      toggle.title = open ? 'Replier les tâches bloquées' : 'Afficher les tâches bloquées et leur raison';
+      toggle.append(stateIcon('warn'), text('span', null, `${heldBack.length} bloquée${heldBack.length > 1 ? 's' : ''}`));
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (unfolded.has(foldKey)) unfolded.delete(foldKey); else unfolded.add(foldKey);
+        const fresh = document.createElement('div');
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
+        board.replaceWith(fresh.firstElementChild);
+      });
+      col.append(toggle);
+      const section = document.createElement('div');
+      section.className = 'ex-blocked-body';
+      section.id = sectionId;
+      section.dataset.role = 'blocked-section';
+      section.hidden = !open;
+      section.append(text('div', 'ex-blocked-title', 'Bloqué'));
+      for (const task of heldBack) section.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      col.append(section);
+    }
+
     const body = document.createElement('div');
-    body.className = 'ex-col-body' + (inColumn.length ? '' : ' empty');
+    body.className = 'ex-col-body' + (shown.length ? '' : ' empty');
     body.hidden = folded;
-    if (!inColumn.length) {
+    if (!shown.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of inColumn) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      for (const task of shown) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
     }
     col.append(body);
     board.append(col);
