@@ -239,6 +239,13 @@ export const api = {
   // donc permise même sur un hôte en lecture seule.
   taskLaunchPlan: (id, project) =>
     get(WS + 'tasks/' + encodeURIComponent(id) + '/launch-plan', project ? { project } : undefined),
+  // Bloc Activité (P69v2) : le fil de la tâche dérivé du ledger (claim,
+  // transitions, portes, questions/réponses, notes de progression), et le
+  // même fil vu d'une session (l'union des tâches que son claim tient).
+  taskFeed: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/feed', project ? { project } : undefined),
+  sessionFeed: (id, project) =>
+    get(WS + 'sessions/' + encodeURIComponent(id) + '/feed', project ? { project } : undefined),
   // Portefeuille (#638, lot C) : toutes les tâches de tous les projets du
   // registre cockpit, chacune avec son projet, son claim, sa session et sa
   // priorité — agrégé côté serveur (`workspace_portfolio.py`), jamais une
