@@ -25,8 +25,17 @@ Ces règles sont tenues par :func:`answer_gesture` pour **toute** réponse d'ori
 plus répondre à une question que le tick lui a présentée, sur une tâche lancée par le tick ; aucun identifiant qu'elle
 présente ne doit avoir tenu le claim de la tâche, et elle ne doit pas agir depuis un worktree de tâche.
 
-Une question déjà présentée à une session orchestrateur terminée n'est plus relistée : une session qui ne répond pas
-escalade par son silence, et la question reste à l'humain.
+Une question présentée à une session orchestrateur **ouverte** n'est pas relistée. Présentée à une session
+**terminée** sans qu'aucune réponse de l'orchestrateur n'ait été enregistrée pour elle, elle est représentée une fois de
+plus, au plus :data:`MAX_PRESENTATIONS` présentations par question : le premier lancement réel (3.69.0) a vu une session
+juger juste mais répondre en une boucle Bash, refusée par ``dontAsk``, puis rendre ses décisions en texte ; son silence
+n'était pas une escalade. Au-delà, le silence escalade et la question reste à l'humain. Le tick ne voit pas les refus
+de permission de la session (l'hôte ne les journalise pas hors de sa transcription) : la borne vaut pour toute fin
+silencieuse.
+
+**Consigne** — une commande Bash par question, à la forme exacte de la liste blanche (pas de boucle, de ``;``, ``&&``,
+``|``, ``set --``, variable ni sous-shell), avec l'exemple littéral de la première question ; une commande refusée par
+les permissions est à reformuler seule, pas à abandonner.
 
 **Lancement** — les mêmes étapes que le relecteur : disjoncteur, WIP du rôle, plafond du jour, mandat actif ; puis
 ``claude --bg``, le vrai ``sessionId`` résolu dans ``claude agents --json``
@@ -105,6 +114,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ALLOWED_TOOLS",
+    "MAX_PRESENTATIONS",
     "MAX_RESUMES",
     "ORCHESTRATOR_ACTOR",
     "ORCH_ENDED_EVENT",
@@ -134,6 +144,8 @@ _ENTITY = "orchestrator"
 SESSION_TIMEOUT = timedelta(minutes=30)
 #: Reprises (geste ``resume``) qu'une tâche reçoit de l'orchestrateur depuis la dernière réponse humaine ; au-delà, l'humain.
 MAX_RESUMES = 2
+#: Présentations d'une même question à l'orchestrateur : une session terminée sans y répondre en vaut une seconde.
+MAX_PRESENTATIONS = 2
 #: Questions listées par session ; les suivantes attendent la session d'après.
 MAX_LISTED = 12
 #: Le mode de la session, imposé : refuse sans demander tout outil hors de :data:`ALLOWED_TOOLS`.
@@ -429,13 +441,34 @@ class OrchestratorStage:
             if e.payload.get("halted") is False and str(e.payload.get("session") or "") not in ended
         ]
 
-    def _presented(self) -> set[tuple[str, str]]:
-        """``(tâche, question)`` déjà présentées à une session, ouverte ou terminée : jamais deux fois à l'orchestrateur."""
-        return {
-            (str(q.get("task_id")), str(q.get("question_id")))
-            for e in self._events(ORCH_LAUNCHED_EVENT)
-            for q in e.payload.get("questions") or () if isinstance(q, dict)
-        }
+    def _presentations(self) -> tuple[dict[tuple[str, str], int], set[tuple[str, str]]]:
+        """Combien de fois chaque ``(tâche, question)`` a été présentée, et celles qu'une session ouverte tient."""
+        ended = self._ended()
+        count: dict[tuple[str, str], int] = {}
+        held: set[tuple[str, str]] = set()
+        for launch in self._events(ORCH_LAUNCHED_EVENT):
+            alive = str(launch.payload.get("session") or "") not in ended
+            for q in launch.payload.get("questions") or ():
+                if isinstance(q, dict):
+                    key = (str(q.get("task_id")), str(q.get("question_id")))
+                    count[key] = count.get(key, 0) + 1
+                    if alive:
+                        held.add(key)
+        return count, held
+
+    def _answered_by_orchestrator(self, task_id: str, question_id: str) -> bool:
+        """Une réponse d'origine ``orchestrator`` est enregistrée pour cette question (elle n'est jamais représentée)."""
+        return any(
+            e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == ORCHESTRATOR_ACTOR
+            and e.payload.get("question_id") == question_id
+            for e in self._service.ledger.events_for(task_id)
+        )
+
+    def _not_relisted(self) -> set[tuple[str, str]]:
+        """Les questions qu'aucune session ne se voit présenter : tenues par une session ouverte, déjà présentées
+        :data:`MAX_PRESENTATIONS` fois, ou déjà répondues par l'orchestrateur."""
+        count, held = self._presentations()
+        return held | {key for key, n in count.items() if n >= MAX_PRESENTATIONS or self._answered_by_orchestrator(*key)}
 
     def _launched_today(self) -> int:
         today = (self._now or datetime.now(UTC)).astimezone(UTC).date().isoformat()
@@ -513,16 +546,22 @@ class OrchestratorStage:
         return outcomes
 
     def _leftover(self, launch: LedgerEvent, reason: str) -> str:
-        """Ce qu'une session terminée a laissé à l'humain : les questions présentées encore ouvertes."""
+        """Ce qu'une session terminée a laissé ouvert : à représenter (une fois) ou à l'humain."""
+        count, _held = self._presentations()
+        again: list[str] = []
         still: list[str] = []
         for q in launch.payload.get("questions") or ():
             if not isinstance(q, dict):
                 continue
-            task = self._service.ledger.get_task(str(q.get("task_id")))
-            if task is not None and any(r.id == q.get("question_id") for r in open_in_group(task)):
-                still.append(f"{q.get('task_id')}/{q.get('question_id')}")
+            key = (str(q.get("task_id")), str(q.get("question_id")))
+            task = self._service.ledger.get_task(key[0])
+            if task is None or not any(r.id == key[1] for r in open_in_group(task)):
+                continue
+            last = count.get(key, 0) >= MAX_PRESENTATIONS or self._answered_by_orchestrator(*key)
+            (still if last else again).append("/".join(key))
         what = "délai dépassé, arrêtée" if reason == "timeout" else "terminée"
-        return f"session {what}" + (f" ; laissées à l'humain : {', '.join(still)}" if still else "")
+        return (f"session {what}" + (f" ; sans réponse, à représenter une fois : {', '.join(again)}" if again else "")
+                + (f" ; laissées à l'humain : {', '.join(still)}" if still else ""))
 
     def _maybe_launch(self, status: dict[str, str] | None) -> OrchestratorOutcome | None:
         from grimoire.missions.mandate import MandateStore
@@ -535,8 +574,8 @@ class OrchestratorStage:
             return OrchestratorOutcome("launch", "skipped", f"journal d'autorité illisible ({type(exc).__name__})")
         if not state.active or state.mandate is None:
             return None  # sans mandat, aucune question n'est éligible : rien à dire
-        presented = self._presented()
-        questions = [q for q in eligible_questions(self._service, store) if (q.task_id, q.question_id) not in presented]
+        skipped = self._not_relisted()
+        questions = [q for q in eligible_questions(self._service, store) if (q.task_id, q.question_id) not in skipped]
         if not questions:
             return None
         breaker = read_breaker(self._root)
@@ -611,6 +650,10 @@ class OrchestratorStage:
 
     def _prompt(self, questions: list[OpenQuestion], mandate_id: str, status: dict[str, str]) -> str:
         data = json.dumps([self._item(q, status) for q in questions], ensure_ascii=False, indent=1)
+        first = questions[0]
+        example = (f"GRIMOIRE_PRINCIPAL=orchestrator GRIMOIRE_PROVENANCE=rule:critere-1 grimoire task answer "
+                   f"{first.task_id} \"{'reprendre' if first.gesture == 'resume' else '<réponse>'}\" "
+                   f"--question {first.question_id}")
         return (
             f"Tu es la session orchestrateur de ce projet, lancée par le tick sous le mandat {mandate_id}. Ton seul geste "
             "est `grimoire task answer`, et seulement pour les questions du bloc de données ci-dessous. Tu ne modifies "
@@ -628,9 +671,17 @@ class OrchestratorStage:
             "pertinente ; sinon ne réponds pas ;\n"
             "- sinon (hors des critères, irréversible, coût, sécurité, secret, publication, doute) : ne réponds rien, la "
             "question reste à l'humain. Ne réponds jamais `abandonner`.\n"
-            "Une réponse refusée parce que le principal n'est pas attesté : attends 30 secondes et réessaie une fois "
-            "(ton inscription suit ton lancement de quelques secondes). Tout autre refus est définitif : passe à la "
-            "suivante. Quand toutes sont traitées, arrête-toi.\n\n"
+            "UNE commande Bash par question, seule, sur une ligne, exactement à la forme ci-dessus : jamais de boucle "
+            "(`for`, `while`), de `;`, `&&`, `||` ni `|`, de `set --`, de variable shell ni de sous-shell (`$(…)`, "
+            "`(…)`) ; tes permissions n'acceptent que cette forme littérale. Pour la première question du bloc, la "
+            "forme (pas la décision : elle reste ton jugement, et ne pas répondre reste possible) est :\n"
+            f"    {example}\n"
+            "Une décision qui ne passe pas par cette commande n'existe pas : ne rends jamais tes décisions en texte à la "
+            "place. Une commande refusée par les permissions (« Permission to use Bash has been denied ») n'avait pas "
+            "exactement cette forme : reformule-la seule, à la forme exacte, et relance-la ; n'abandonne pas.\n"
+            "Une réponse refusée parce que le principal n'est pas attesté : traite d'abord les autres questions, puis "
+            "réessaie-la une fois (ton inscription suit ton lancement de quelques secondes ; tu n'as pas de `sleep`). "
+            "Tout autre refus du kit est définitif : passe à la suivante. Quand toutes sont traitées, arrête-toi.\n\n"
             f"```json\n{data}\n```\n"
         )
 
