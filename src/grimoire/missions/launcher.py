@@ -571,6 +571,9 @@ class WorkerLauncher:
             f"et passe la tâche en revue (`grimoire task move {tid} --to running`, puis `--to needs_verification`) : "
             "le relecteur ne prend que les tâches en revue. "
             "Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le "
-            f"(`grimoire task note {tid}`). Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, "
-            "hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+            f"(`grimoire task note {tid}`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, "
+            f"PR ouverte), note ta progression en une phrase (`grimoire task note {tid} \"...\"`) : c'est ce que "
+            "le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. "
+            "Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par "
+            "`grimoire task ask` plutôt que de deviner."
         )
