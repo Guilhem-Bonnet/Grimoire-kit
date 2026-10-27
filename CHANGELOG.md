@@ -8,6 +8,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): « Lancer la session » lance pour de vrai depuis le panneau Assigner (P47 lot 3, GAO-p47-assigne-001) : l'empreinte du plan montré engage l'apply (ADR-008 plan→apply, refus si l'état a changé), lancement par le lanceur du tick (toutes gardes : rôle, disjoncteur, WIP, plafond du jour, mandat), idempotent par tâche, journal `launch-apply.jsonl` ajout seul et fail-closed à l'entrée
+## [3.70.0] - 2026-10-27
+
 - fix(missions): la session orchestrateur répond par une commande `task answer` par question, et une question restée sans réponse est représentée une fois (Refs #962)
   - **Constat** (premier lancement réel, 3.69.0, Claude Code 2.1.311) : la session a jugé juste les 8 questions mais a voulu répondre en une boucle Bash (`for … do set -- $p; … grimoire task answer "$1" … done`) ; la liste blanche `dontAsk` ne couvre pas une boucle, tout a été refusé, rien écrit, et la session a rendu ses décisions en texte. Ses 8 questions n'étaient plus jamais représentées (« le silence vaut escalade »).
   - **Consigne** : une commande Bash par question, à la forme exacte de la liste blanche, sans boucle, `;`, `&&`, `|`, `set --`, variable ni sous-shell ; exemple littéral pour la première question ; une commande refusée par les permissions se reformule seule, une décision en texte n'existe pas ; plus de « attends 30 secondes » (`sleep` est hors liste blanche) : réessayer après les autres questions.
