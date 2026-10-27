@@ -235,6 +235,13 @@ def ready_judged(projet: Path, host: FakeHost, tid: str, wt: Path) -> None:
     assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]
 
 
+def red_after_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: ignore[no-untyped-def]
+    """READY jugé sur une CI en cours, qui tombe rouge ensuite (#993 : une CI déjà rouge défait le READY au relecteur)."""
+    ready_judged(projet, host, tid, wt)
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
+    return tick(projet, host)
+
+
 # ── Chemin vert, sous mandat ───────────────────────────────────────────────────
 
 
@@ -294,8 +301,7 @@ def test_ci_rouge_renvoie_au_worker_comme_un_not_ready(projet: Path, host: FakeH
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     launch = launched_sessions(TaskService(projet))[tid]
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
-    report = review_ready(projet, host, tid, wt)
+    report = red_after_ready(projet, host, tid, wt)
     assert merges(report) == [("bounce", "done")]
     [resume] = host.of("claude", "--bg", "--resume")
     assert resume[3] == launch["session_id"] and "tests" in resume[-1]
@@ -995,10 +1001,9 @@ def test_la_politique_du_merger_est_lue_et_validee(projet: Path) -> None:
 def test_un_echec_de_reprise_du_worker_remet_la_tache_en_revue(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
     host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
-    tick(projet, host)
-    host.bg_fails = True  # le relecteur est lancé ; c'est la reprise du worker qui échoue
-    give_ready(host, tid, wt)
+    host.bg_fails = True  # le relecteur a rendu READY ; c'est la reprise du worker qui échoue
     report = tick(projet, host)
     assert merges(report) == [("bounce", "failed")]
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
@@ -1008,10 +1013,9 @@ def test_un_echec_de_reprise_du_worker_remet_la_tache_en_revue(projet: Path, hos
 def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("bounce", "done")]
+    assert merges(red_after_ready(projet, host, tid, wt)) == [("bounce", "done")]
     TaskService(projet).ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")  # remise en revue
-    report = review_ready(projet, host, tid, wt)
+    report = red_after_ready(projet, host, tid, wt)
     assert merges(report) == [("escalate", "done")]
     task = TaskService(projet).require(tid)
     assert task.status is TaskState.WAITING and "échoue à répétition" in task.waiting.question.text  # type: ignore[union-attr]
