@@ -24,7 +24,7 @@ from lot2_doubles import FakeHost, git
 from test_merger import CRITERIA, GREEN, REPO, advance_main, give_ready, grant, isolate_home, merges, tick
 from test_merger import make_projet as _make_projet
 
-from grimoire.missions import ci_slots
+from grimoire.missions import ci_slots, review_seal
 from grimoire.missions.mandate import MandateStore
 from grimoire.missions.manual_review import MANUAL_KEY, REVIEW_DEFERRED_EVENT
 from grimoire.missions.merger import MERGE_ACCEPTED_EVENT, MERGE_PUSHED_EVENT
@@ -341,7 +341,9 @@ def test_un_worktree_de_relecture_pre_pose_n_est_jamais_reutilise(projet: Path, 
     (planted / ".claude" / "settings.json").write_text('{"hooks": "piège"}', encoding="utf-8")
     assert reviews(tick(projet, host)) == [(tid, "launch", "launched")]
     tree = review_tree_of(projet, tid)
-    assert tree != planted and not (tree / ".claude" / "settings.json").exists() and not planted.exists()
+    # Le dossier pré-posé n'est pas celui du relecteur ; il n'est pas retiré non plus : son nom n'est pas celui d'une
+    # relecture du tick (D5, <id>-<tête>-<aléa>), le tick ne touche pas un worktree qu'il n'a pas posé.
+    assert tree != planted and not (tree / ".claude" / "settings.json").exists()
 
 
 def test_un_nom_de_branche_piege_est_refuse(projet: Path, host: FakeHost) -> None:
@@ -365,3 +367,79 @@ def test_une_cloture_sans_pack_de_preuve_passe_a_l_humain(projet: Path, host: Fa
     task = TaskService(projet).require(tid)
     assert task.status is TaskState.WAITING, (report.reviews, report.merges)
     assert "aucun pack de preuve" in report.merges[0].detail
+
+
+def test_un_indice_errone_n_empeche_pas_la_recherche(projet: Path, host: FakeHost) -> None:
+    """D1 : un lien de description vers une PR inexistante est ignoré ; la PR rattachée est trouvée quand même."""
+    grant(projet)
+    tid = manual_task(projet, host, extra={"pr_url": f"https://github.com/{REPO}/pull/999"})
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "launch", "launched")], report.reviews
+    assert host.of("gh", "pr", "view", "999") and events(projet, tid, REVIEW_LAUNCHED_EVENT)[-1].payload["pr"] == NUMBER
+
+
+def test_une_pr_de_fork_au_meme_titre_ne_bloque_pas_la_relecture(projet: Path, host: FakeHost) -> None:
+    """D2 : une PR de fork qui copie le titre n'est jamais candidate : elle ne rend pas le choix ambigu."""
+    grant(projet)
+    tid = manual_task(projet, host)
+    fork = "feat/fork-copie"
+    host.prs[fork], host.pr_numbers[fork], host.pr_titles[fork] = "OPEN", 77, host.pr_titles[BRANCH]
+    host.pr_heads[fork] = git(Path(str(host.real)), "rev-parse", "refs/heads/main")
+    host.cross_repo.add(fork)
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "launch", "launched")], report.reviews
+    assert events(projet, tid, REVIEW_LAUNCHED_EVENT)[-1].payload["pr"] == NUMBER
+
+
+def test_la_consigne_d_une_pr_deja_fusionnee_donne_le_diff_de_la_fusion(projet: Path, host: FakeHost) -> None:
+    """D3 : la PR fusionnée, `origin/<cible>...HEAD` est vide ; la consigne donne `gh pr diff` et le diff de la fusion."""
+    grant(projet)
+    tid = manual_task(projet, host)
+    human_merges(host, projet)
+    tick(projet, host)
+    merge = host.merge_commits[BRANCH]
+    [bg] = [a for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a]
+    assert f"gh pr diff {NUMBER}" in bg[-1] and f"git diff {merge}^1 {merge}" in bg[-1]
+
+
+def test_un_pin_vide_du_mandat_ne_retombe_pas_sur_le_depot_d_une_tache_du_tick(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D4 : le mandat actif n'a qu'un pin vide ; un dépôt figé pour une tâche du tick ne le remplace pas."""
+
+    def unresolved(_home: Path, _project: Path) -> str:
+        raise RuntimeError("pas de remote GitHub")
+
+    monkeypatch.setattr(ci_slots, "ci_repository", unresolved)
+    grant(projet)
+    monkeypatch.setattr(ci_slots, "ci_repository", lambda _home, _project: REPO)
+    review_seal.freeze_repository(projet, "GAO-tick-001")  # le gel d'une tâche du tick, plus tard
+    tid = manual_task(projet, host)
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "pr_refused", "skipped")], report.reviews
+    assert "réoctroyer le mandat" in report.reviews[0].detail and host.of("claude", "--bg") == []
+
+
+def test_un_pin_sans_url_de_origin_est_refuse(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D6 : un pin dont l'URL de origin est vide ne vaut pas pin."""
+    real = review_seal._current_repository
+    monkeypatch.setattr(review_seal, "_current_repository", lambda _root: {"repo": REPO, "origin_url": ""})
+    grant(projet)
+    monkeypatch.setattr(review_seal, "_current_repository", real)
+    tid = manual_task(projet, host)
+    report = tick(projet, host)
+    assert reviews(report) == [(tid, "pr_refused", "skipped")], report.reviews
+    assert "réoctroyer le mandat" in report.reviews[0].detail and host.of("claude", "--bg") == []
+
+
+def test_le_retrait_des_worktrees_de_relecture_ne_touche_que_ceux_de_la_tache(projet: Path) -> None:
+    """D5 : retirer les relectures de GAO-1 ne retire pas celles de GAO-1-bis."""
+    from grimoire.missions.manual_review import _retire_trees
+
+    parent = Path(git(projet, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "grimoire" / "review"
+    head = git(projet, "rev-parse", "HEAD")
+    mine, other = parent / f"GAO-1-{head[:12]}-{'a' * 12}", parent / f"GAO-1-bis-{head[:12]}-{'b' * 12}"
+    for place in (mine, other):
+        git(projet, "worktree", "add", "-q", "--detach", str(place), head)
+    _retire_trees(projet, parent, "GAO-1")
+    assert not mine.exists() and other.is_dir()

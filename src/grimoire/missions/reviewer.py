@@ -412,7 +412,8 @@ class ReviewStage:
         if place is None:
             return ReviewOutcome(tid, "launch", "failed", refused)
         return {"cwd": str(place), "branch": pr.branch, "into": why, "pr": pr.number, "head": pr.head,
-                "repo": pin["repo"], "origin_url": pin["origin_url"]}
+                "repo": pin["repo"], "origin_url": pin["origin_url"],
+                "merge_commit": pr.merge_commit if pr.state == "MERGED" else ""}
 
     def _manual_seal_refusal(self, review: LedgerEvent) -> str:
         """#994 : la relecture notée au ledger est celle scellée au lancement (PR, base, branche, tête, dossier), et le
@@ -470,12 +471,17 @@ class ReviewStage:
     def _manual_prompt(tid: str, target: dict[str, Any], model: str) -> str:
         """#994 : la consigne du relecteur d'une tâche faite à la main — il lit la PR et diffe contre sa vraie base."""
         number, into, head = target["pr"], target["into"], str(target["head"])
+        merge = str(target.get("merge_commit") or "")
+        # Une PR déjà fusionnée (commit de fusion) : `origin/<cible>...HEAD` est vide, la tête est dans la cible.
+        diff = (f"(`gh pr diff {number}`, ou `git diff {merge}^1 {merge}` : ce que la fusion a apporté à {into} ; "
+                f"`git diff origin/{into}...HEAD` est vide, la PR est déjà fusionnée)" if merge else
+                f"(`git fetch -q origin {into}` puis `git diff origin/{into}...HEAD`)")
         return (
             f"Tu es le relecteur de la tâche {tid}, faite à la main par une session interactive. Tu ne vois pas son "
             f"raisonnement et tu ne le cherches pas : tu juges le résultat. Ce worktree est détaché sur la tête relue de "
             f"la PR #{number} ({head[:12]}) : ne change pas de commit. Lis les critères d'acceptation (`grimoire task show "
             f"{tid}`), la PR (`gh pr view {number}`, `gh pr diff {number}`) et son diff contre sa vraie base "
-            f"(`git fetch -q origin {into}` puis `git diff origin/{into}...HEAD`), puis rejoue les commandes qui montrent "
+            f"{diff}, puis rejoue les commandes qui montrent "
             "chaque critère. " + _verdict_steps(tid, model, str(number))
         )
 

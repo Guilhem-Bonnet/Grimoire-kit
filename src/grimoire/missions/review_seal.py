@@ -6,7 +6,8 @@ recalculent avec les fonctions publiques du kit, et l'empreinte d'arbre qu'il po
 chaîné par hash, refusé en écriture aux outils d'agent) ce qui a été relu, en objets git :
 
 - **à l'octroi d'un mandat** (:func:`pin_project_repository`, #994) : le dépôt GitHub et l'URL de ``origin`` du projet,
-  ce que la relecture d'une tâche faite à la main compare (:func:`project_repository_pin`) ;
+  ce que la relecture d'une tâche faite à la main compare (:func:`project_repository_pin`, sans repli sur le dépôt
+  figé pour une tâche du tick) ;
 - **au lancement du relecteur** (:func:`seal_review_launch`) : la tête de ``task/<id>`` qu'il va relire — pour une tâche
   faite à la main, aussi la PR, sa base, son dépôt et le worktree de vérification (:func:`launch_entry`) ;
 - **au jugement READY** (:func:`seal_judgment`) : la même tête — une branche qui a bougé pendant la relecture n'est pas
@@ -169,18 +170,18 @@ def pin_project_repository(project_root: Path, mandate_id: str) -> dict[str, str
 
 
 def project_repository_pin(project_root: Path, mandate_id: str = "") -> tuple[dict[str, str] | None, dict[str, str]]:
-    """``(pin, courant)`` : le dépôt figé avant toute relecture manuelle, et celui que le projet déclare maintenant.
+    """``(pin, courant)`` : le dépôt figé à l'octroi du mandat *mandate_id*, et celui que le projet déclare maintenant.
 
-    Le pin est celui de l'octroi de *mandate_id* ; à défaut, le dernier dépôt figé au lancement d'une tâche du tick
-    (avant son worker) ; ``None`` sans l'un ni l'autre. Seul un pin non vide compte.
+    Le pin est le dernier posé à l'octroi de *mandate_id* (de n'importe quel mandat du projet si *mandate_id* est vide).
+    Jamais un repli sur le dépôt figé pour une tâche du tick : un pin absent, ou dont le dépôt ou l'URL de ``origin``
+    sont vides, rend ``None`` — rien n'est relu à la main, il faut réoctroyer le mandat.
     """
     store = _store(project_root)
-    mine = [e for e in store.journal.read() if e.get("project") == store.project and e.get("repo")]
-    pins = [e for e in mine if e.get("type") == PROJECT_PIN_ENTRY and (not mandate_id or e.get("mandate_id") == mandate_id)]
-    frozen = [e for e in mine if e.get("type") == REPOSITORY_ENTRY and e.get("origin_url")]
-    chosen = (pins or frozen or [None])[-1]
-    pin = {"repo": str(chosen["repo"]), "origin_url": str(chosen.get("origin_url") or "")} if chosen else None
-    return pin, _current_repository(project_root)
+    pins = [e for e in store.journal.read() if e.get("type") == PROJECT_PIN_ENTRY and e.get("project") == store.project
+            and (not mandate_id or e.get("mandate_id") == mandate_id)]
+    last = pins[-1] if pins else {}
+    repo, url = str(last.get("repo") or "").strip(), str(last.get("origin_url") or "").strip()
+    return ({"repo": repo, "origin_url": url} if repo and url else None), _current_repository(project_root)
 
 
 def seal_review_launch(

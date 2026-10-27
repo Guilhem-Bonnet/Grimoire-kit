@@ -164,6 +164,8 @@ class FakeHost:
             rows = [json.loads(self._pr_view(b, cwd).stdout) for b in self.prs if query in self.pr_titles.get(b, "")]
             return ExecResult(0, json.dumps(rows))
         if argv[1:3] == ["pr", "view"]:
+            if argv[3].isdigit() and self._branch_of(argv[3]) == argv[3]:  # comme gh : un numéro sans PR est une erreur
+                return ExecResult(1, "", f"GraphQL: Could not resolve to a PullRequest with the number of {argv[3]}.")
             return self._pr_view(self._branch_of(argv[3]), cwd)
         if argv[1:3] == ["pr", "checks"]:
             if "--required" in argv and self.required_broken:

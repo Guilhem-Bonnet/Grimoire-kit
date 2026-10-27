@@ -521,8 +521,8 @@ class MergeStage:
                                 f"sur {hard} ; {why}", pr.number, hint=_merge_hint(wt.into))
         waits = self._desync_waits(tid)
         if waits >= MAX_DESYNC_WAITS:
-            hint = (f"La tête de task/{tid} sur la remote n'est pas celle de la PR : vérifie qu'elle est poussée "
-                    f"(`git status`, `git push origin task/{tid}`, jamais forcé) et que la PR la suit. "
+            hint = (f"La tête de {wt.branch} sur la remote n'est pas celle de la PR : vérifie qu'elle est poussée "
+                    f"(`git status`, `git push origin {wt.branch}`, jamais forcé) et que la PR la suit. "
                     if side == "head" else _merge_hint(wt.into))
             return self._bounce(task, launch, "desync", f"la remote et GitHub en désaccord {waits} tick(s) de suite ({why})",
                                 pr.number, hint=hint)
@@ -1032,7 +1032,7 @@ class MergeStage:
 
         tid, safe = task.id, _clean(why)
         if gesture == "merge":
-            text = (f"Fusionner la PR #{pr} de task/{tid} ? Le merger ne la fusionne pas : {safe}. Fusionne-la toi-même "
+            text = (f"Fusionner la PR #{pr} de {_clean(wt.branch, 80)} ? Le merger ne la fusionne pas : {safe}. Fusionne-la toi-même "
                     f"(`gh pr merge {pr} --squash`) si elle te convient : le tick constatera la fusion.")
         else:
             text = (f"Accepter {tid} (PR #{pr} fusionnée) ? Le merger ne l'accepte pas : {safe}. Accepte-la toi-même : "

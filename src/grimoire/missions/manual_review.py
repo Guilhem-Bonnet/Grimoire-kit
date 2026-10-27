@@ -11,9 +11,9 @@ Ce module donne au relecteur ce qui lui manque pour la relire par le même chemi
   ``task.session_attached``) : ce sont ses « workers », un reçu signé par l'une d'elles est forgé ;
 - :func:`resolve_target` — la PR à relire, et seulement une PR **rattachée** à la tâche :
 
-  - le dépôt est celui figé au journal d'autorité **avant** toute relecture manuelle (à l'octroi du mandat, à défaut au
-    lancement d'une tâche du tick) ; un dépôt ou une URL de ``origin`` qui ont changé depuis refusent, et sans pin rien
-    n'est relu (réoctroyer le mandat le pose) ;
+  - le dépôt est celui figé au journal d'autorité à l'octroi du mandat actif, jamais celui figé pour une tâche du tick ;
+    un dépôt ou une URL de ``origin`` qui ont changé depuis refusent ; sans pin, ou un pin au dépôt ou à l'URL vides,
+    rien n'est relu (réoctroyer le mandat le pose) ;
   - rattachée par sa branche ``task/<id>`` ou par l'identifiant **exact** de la tâche dans son titre (jeton entier) ; un
     lien libre (description, consignes, ``extra``) n'est qu'un indice, recoupé par ces mêmes règles ; plusieurs PR
     candidates : rien n'est relu ;
@@ -26,7 +26,10 @@ Ce module donne au relecteur ce qui lui manque pour la relire par le même chemi
 - :func:`review_tree` — un worktree **détaché** de vérification, recréé à chaque relecture sous un nom imprévisible, sur
   la tête de la PR récupérée depuis l'URL de ``origin`` figée et comparée à celle que GitHub annonce ; marqué pour qu'un
   ``grimoire task review`` lancé dedans écrive au ledger du projet ;
-- :func:`manual_reviews` — pour le merger (:mod:`.merger`) : la dernière relecture d'une tâche manuelle.
+- :func:`manual_reviews` — pour le merger (:mod:`.merger`) : la dernière relecture d'une tâche manuelle. Le pack de
+  preuve que la clôture exige est lu dans le worktree de relecture : celui que ``grimoire task review`` y écrit, ou
+  celui que la PR a commité. Sans pack (le relecteur ne l'a pas écrit, la PR ne le porte pas), la tâche fusionnée passe
+  en ``waiting(human)`` avec la raison, au lieu d'être close.
 
 Une tâche sans PR à relire, ou dont la PR est refusée, attend :data:`DEFER` avant d'être regardée de nouveau
 (``task.review_deferred`` au ledger) ; rien n'est écrit au journal d'autorité avant un lancement.
@@ -282,12 +285,15 @@ def _candidates(exec_: Exec, cwd: Path, task: MissionTask, slug: str) -> tuple[l
 
     rows: list[dict[str, Any]] = []
     hint = _linked_number(task, slug)
-    for selector in ([str(hint)] if hint else []) + [TASK_BRANCH_PREFIX + task.id]:
-        row, error = view(selector)
-        if error:
-            return [], error
+    if hint:  # un indice illisible ou erroné (PR introuvable, lien faux) est ignoré : la recherche continue
+        row, _error = view(str(hint))
         if row is not None:
             rows.append(row)
+    row, error = view(TASK_BRANCH_PREFIX + task.id)
+    if error:
+        return [], error
+    if row is not None:
+        rows.append(row)
     done = gh("pr", "list", "--search", f"{task.id} in:title", "--state", "all", "--limit", str(_SEARCH_LIMIT),
               "--json", _FIELDS)
     if done.returncode != 0:
@@ -298,8 +304,9 @@ def _candidates(exec_: Exec, cwd: Path, task: MissionTask, slug: str) -> tuple[l
         return [], "gh pr list : réponse illisible"
     rows += [r for r in listed if isinstance(r, dict)] if isinstance(listed, list) else []
     seen: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        if _belongs(row, task.id) and str(row.get("state") or "").upper() in ("OPEN", "MERGED"):
+    for row in rows:  # une PR de fork n'est jamais candidate : elle ne bloque pas la relecture en s'ajoutant au compte
+        if _belongs(row, task.id) and str(row.get("state") or "").upper() in ("OPEN", "MERGED") \
+                and row.get("isCrossRepository") is False:
             seen.setdefault(int(row.get("number") or 0), row)
     return list(seen.values()), ""
 
@@ -370,6 +377,8 @@ def review_tree(service: TaskService, task_id: str, pr: PullRequestRef, origin_u
     de la tâche sont retirés ; le nouveau porte un nom imprévisible.
     """
     home = service.home_root
+    if not origin_url.strip():
+        return None, "URL de origin non figée au journal d'autorité : rien n'est récupéré"
     if _git(home, "config", "--get-regexp", r"^url\..*\.(push)?insteadof$").stdout.strip():
         return None, "la configuration du dépôt réécrit des URL (url.*.insteadOf) : rien n'est récupéré"
 
@@ -418,9 +427,10 @@ def _merge_refusal(home: Path, pr: PullRequestRef, target: str) -> str:
 
 def _retire_trees(home: Path, parent: Path, task_id: str) -> None:
     """Retire (``--force``) les worktrees de relecture précédents de *task_id* : jamais un dossier réutilisé."""
+    mine = re.compile(rf"{re.escape(task_id)}-[0-9a-f]{{12}}-[0-9a-f]{{12}}")  # jamais GAO-1-bis pour GAO-1
     listing = _git(home, "worktree", "list", "--porcelain").stdout.splitlines()
     for line in listing:
         path = Path(line[len("worktree "):]) if line.startswith("worktree ") else None
-        if path is not None and path.resolve().parent == parent.resolve() and path.name.startswith(f"{task_id}-"):
+        if path is not None and path.resolve().parent == parent.resolve() and mine.fullmatch(path.name):
             _git(home, "worktree", "remove", "--force", str(path))
     _git(home, "worktree", "prune")
