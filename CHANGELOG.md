@@ -8,6 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): qui travaille sur chaque carte — persona, modèle, effort, skills, tokens en direct et coût en CAD (P75, GAO-p75-qui-trav-001)
+- feat(cockpit): garde d'écriture commune — jeton, origine et journal sur toutes les routes d'écriture (ADR-008 D3, GAO-garde-d-crit-001)
 
 - fix(missions): la boucle worker → relecteur → merger ne reste plus bloquée sur un brouillon, une CI rouge ou une base périmée (Refs #993)
   - **Brouillon** : la consigne du worker demande une PR prête à relire (`gh pr create` sans `--draft`). Le merger sort du brouillon (`gh pr ready`, noté `task.merge_undrafted`) une PR dont la tête GitHub est couverte par le READY scellé, après les gardes de dépôt, de cible et de sceau ; la fusion attend le tick suivant et la CI de la PR prête. Il le fait une fois par tête : une PR qu'un humain remet en brouillon y reste. Une PR qui touche un chemin qui escalade ne sort jamais du brouillon ; la question « fusionner ? » est posée à la place.

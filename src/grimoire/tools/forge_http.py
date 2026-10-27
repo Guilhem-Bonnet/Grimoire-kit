@@ -25,7 +25,6 @@ from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 from grimoire.tools.project_registry import DEFAULT_SCAN_DEPTH, looks_grimoire, register_project
 from grimoire.tools.request_guard import (
     check_host,
-    check_mutation,
     drain_body,
     has_body,
     inject_session_token,
@@ -34,6 +33,7 @@ from grimoire.tools.request_guard import (
 from grimoire.tools.workspace_legacy import legacy_redirect_target
 from grimoire.tools.workspace_routes import PREFIX as WORKSPACE_PREFIX
 from grimoire.tools.workspace_routes import WORKSPACE_UNHANDLED, workspace_post
+from grimoire.tools.workspace_write_guard import guard_write
 
 if TYPE_CHECKING:  # pragma: no cover - uniquement pour le typage
     from grimoire.tools.forge_server import ForgeAPI
@@ -89,13 +89,20 @@ def make_handler(api: ForgeAPI) -> type[BaseHTTPRequestHandler]:
             return True
 
         def _guard_mutation(self) -> bool:
-            """Anti CSRF, en plus du garde d'hôte : même règle que le cockpit.
+            """Garde d'écriture commune (ADR-008 D3) : jeton, origine, journal.
 
-            Origine (schéma, hôte, port), ``Sec-Fetch-Site`` et type de contenu
-            JSON, vérifiés avant de lire le corps.
+            Même règle que le cockpit (``workspace_write_guard``) : origine
+            (schéma, hôte, port), ``Sec-Fetch-Site`` et type de contenu JSON,
+            vérifiés avant de lire le corps ; verdict journalisé en JSONL
+            ajout seul, fail-closed si le journal n'est pas inscriptible.
             """
-            refused = check_mutation(
-                self.headers, int(cast(tuple[str, int], self.server.server_address)[1]), with_body=has_body(self.headers)
+            refused = guard_write(
+                self.headers,
+                int(cast(tuple[str, int], self.server.server_address)[1]),
+                method=self.command,
+                route=self.path.split("?")[0],
+                journal=api.project_root / "_grimoire-runtime-output" / "cockpit" / "write-guard.jsonl",
+                with_body=has_body(self.headers),
             )
             if refused:
                 self._error(refused[1], refused[0])
