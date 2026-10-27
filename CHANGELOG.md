@@ -8,6 +8,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): qui travaille sur chaque carte — persona, modèle, effort, skills, tokens en direct et coût en CAD (P75, GAO-p75-qui-trav-001)
+- fix(missions): la session orchestrateur répond par une commande `task answer` par question, et une question restée sans réponse est représentée une fois (Refs #962)
+  - **Constat** (premier lancement réel, 3.69.0, Claude Code 2.1.311) : la session a jugé juste les 8 questions mais a voulu répondre en une boucle Bash (`for … do set -- $p; … grimoire task answer "$1" … done`) ; la liste blanche `dontAsk` ne couvre pas une boucle, tout a été refusé, rien écrit, et la session a rendu ses décisions en texte. Ses 8 questions n'étaient plus jamais représentées (« le silence vaut escalade »).
+  - **Consigne** : une commande Bash par question, à la forme exacte de la liste blanche, sans boucle, `;`, `&&`, `|`, `set --`, variable ni sous-shell ; exemple littéral pour la première question ; une commande refusée par les permissions se reformule seule, une décision en texte n'existe pas ; plus de « attends 30 secondes » (`sleep` est hors liste blanche) : réessayer après les autres questions.
+  - **Représentation** : une question présentée à une session terminée sans réponse de l'orchestrateur enregistrée est représentée une fois (`MAX_PRESENTATIONS` = 2) ; au-delà, elle reste à l'humain. Une question tenue par une session ouverte, ou déjà répondue, n'est jamais relistée. La fin d'une session distingue « à représenter une fois » et « laissées à l'humain ».
+  - **Limite** : le tick ne voit pas les refus de permission de la session (l'hôte ne les journalise que dans sa transcription) ; la borne de 2 présentations vaut pour toute fin silencieuse.
 - feat(cockpit): garde d'écriture commune — jeton, origine et journal sur toutes les routes d'écriture (ADR-008 D3, GAO-garde-d-crit-001)
 
 - fix(missions): la boucle worker → relecteur → merger ne reste plus bloquée sur un brouillon, une CI rouge ou une base périmée (Refs #993)
