@@ -8,6 +8,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): préflight d'assignation — plan en lecture seule et commande équivalente (P47 lot 1, GAO-p47-assigne-001)
+- feat(cockpit): cartes du kanban lisibles par un humain (P74, `GAO-p74-cartes-k-001`)
+  - **Fin des sessions vivantes en colonne « Fait »** : le serveur pose `task.session` (claim, ou journal récent qui nomme la tâche) sans condition d'état, et la carte l'affichait tel quel. Une tâche close (acceptée, publiée, annulée) n'affiche plus de vivacité — si la session existe encore, c'est l'inspecteur qui le dit.
+  - **Fin du jargon** : « consigne non lue » devient « message en attente de la session » (badge de carte, portefeuille, inspecteur), avec l'explication au survol (consigne posée au ledger, pas encore livrée à la session qui tient la tâche).
+  - **Plus d'UUID sur les cartes** : hôte + persona du claim + palier de modèle quand ils sont connus (« hôte inconnu » sinon, rien n'est inventé) ; l'identifiant complet et la commande de reprise restent dans l'inspecteur.
+  - **Titres sans préfixe interne** : « R52 — », « [P47] », « P68 — » sortent des cartes, de la liste et du titre de l'inspecteur ; l'identifiant reste en métadonnée discrète à côté de l'identifiant de tâche, et le titre entier au survol.
+  - **Owner situé** : « ouverte par guilhem » / « ouverte par kit-dev » (au survol : qui a ouvert la tâche, pas qui travaille dessus), icône personne ou agent déduite du nom, et un liseré gauche stable par porteur (hash → tokens `--owner-1…6`, dérivés des teintes d'identité) pour balayer le tableau.
+  - **Deux temps nommés** : « dans `<colonne>` depuis … » (dernière transition, nouveau champ `in_state_since` servi par le board) sur la carte, l'âge total (depuis l'ouverture) au survol et dans l'inspecteur.
+  - **Type lisible** : badge couleur stable code / design / doc / infra / autre (tokens `--type-*`), du `type` déclaré au ledger quand il tranche seul, sinon d'une heuristique honnête sur titre + critères, dite au survol (« type déduit du contenu ») ; le mot est toujours écrit, jamais la couleur seule.
 ## [3.68.0] - 2026-10-26
 
 - fix(hosts): citer la zone de contrôle dans un texte ne révoque plus le mandat, et une révocation ciblée ne touche que les mandats de la session (#982)
