@@ -16,6 +16,7 @@ Captures (preuve d'interface) : ``GRIMOIRE_E2E_CAPTURES=<dossier>`` les écrit.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -333,7 +334,7 @@ def test_une_rafale_de_changements_est_regroupee_en_rechargements_espaces(poll_p
     # Un rechargement peut porter plusieurs requêtes (tâches, sessions…) au même instant : on compte les vagues.
     waves = [s for i, s in enumerate(started) if i == 0 or s - started[i - 1] > 0.5]
     assert waves, "la rafale a bien fait recharger l'espace"
-    gaps = [b - a for a, b in zip(waves, waves[1:], strict=False)]
+    gaps = [b - a for a, b in itertools.pairwise(waves)]
     assert all(gap >= 2.5 for gap in gaps), f"rechargements trop rapprochés : {gaps}"
     assert len(waves) <= 3, f"une rafale de 3 s en six écritures donne au plus 3 vagues : {len(waves)}"
 
