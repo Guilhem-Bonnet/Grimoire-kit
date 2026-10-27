@@ -20,6 +20,13 @@ RESUME_COMMANDS: dict[str, str] = {
     HostId.CLAUDE_CODE_CLI.value: "claude --resume {session_id}",
 }
 
+#: Hôte → gabarit de commande qui montre le journal de la session (P69v2).
+#: Même doctrine que :data:`RESUME_COMMANDS` : un hôte absent d'ici n'a pas de
+#: commande connue, le bloc Activité n'en affiche aucune — jamais inventée.
+LOGS_COMMANDS: dict[str, str] = {
+    HostId.CLAUDE_CODE_CLI.value: "claude logs {session_id}",
+}
+
 
 def canonical_host(host: str) -> str:
     """La graphie canonique (valeur de ``HostId``) de *host*.
@@ -45,15 +52,24 @@ def resume_command(session_host: str, session_id: str) -> str:
     return template.format(session_id=session_id)
 
 
+def logs_command(session_host: str, session_id: str) -> str:
+    """La commande qui montre le journal de *session_id* sur *session_host*, ou ``""`` si inconnue."""
+    template = LOGS_COMMANDS.get(canonical_host(session_host), "")
+    if not template or not session_id:
+        return ""
+    return template.format(session_id=session_id)
+
+
 def session_fields(task: Any) -> dict[str, Any]:
-    """``session_id``, ``host`` et ``resume_command`` d'une tâche — vides sans claim rattaché."""
+    """``session_id``, ``host``, ``resume_command`` et ``logs_command`` d'une tâche — vides sans claim rattaché."""
     claim = getattr(task, "claim", None)
     if claim is None:
-        return {"session_id": "", "host": "", "resume_command": ""}
+        return {"session_id": "", "host": "", "resume_command": "", "logs_command": ""}
     session_id = str(getattr(claim, "session_id", "") or "")
     host = canonical_host(str(getattr(claim, "session_host", "") or ""))
     return {
         "session_id": session_id,
         "host": host,
         "resume_command": resume_command(host, session_id),
+        "logs_command": logs_command(host, session_id),
     }
