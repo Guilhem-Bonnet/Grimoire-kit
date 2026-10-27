@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- perf(cockpit): le flux en direct ne fait plus recalculer tâches, attention, sessions et fiche à chaque pouls (P79, `GAO-p79-cockpit-001`). Côté serveur, la réponse est gardée tant que l'empreinte du pouls ne bouge pas (15 s au plus), et deux onglets au même instant attendent un seul calcul. Côté page, les rechargements des espaces sont regroupés : un changement isolé part tout de suite, une rafale en donne au plus un toutes les 3 s, jamais deux en même temps. Mesuré le 2026-10-27 avec 8 workers actifs : `attention` de 0,87 s (7,6 s sous charge) à 11 ms, `tasks` de 0,54 s à 14 ms.
+
 - fix(missions): le janitor retire le worktree d'une tâche close quand ses seuls changements sont des sorties du kit non suivies (`_grimoire-output/`, `_grimoire-runtime-output/` : reçus et verdicts du relecteur). Elles sont d'abord copiées sous `_grimoire-output/archive/worktrees/<id>`. Avant, `git worktree remove` refusait chaque tâche relue, et ses worktrees et branches s'accumulaient (R58, R65 le 2026-10-27). Un autre fichier non commité garde l'arbre en place, comme avant.
 
 ## [3.71.0] - 2026-10-27
