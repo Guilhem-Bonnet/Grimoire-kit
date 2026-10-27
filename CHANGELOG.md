@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): qui travaille sur chaque carte — persona, modèle, effort, skills, tokens en direct et coût en CAD (P75, GAO-p75-qui-trav-001)
 ## [3.70.0] - 2026-10-27
 
 - fix(missions): la session orchestrateur répond par une commande `task answer` par question, et une question restée sans réponse est représentée une fois (Refs #962)
