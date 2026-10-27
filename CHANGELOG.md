@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): panneau « Assigner une session » — plan de lancement et commande à copier (P47 lot 2, GAO-p47-assigne-001)
 ## [3.69.0] - 2026-10-27
 
 - feat(missions): sous mandat, une session orchestrateur lancée par le tick répond aux questions des workers (Refs #962)
