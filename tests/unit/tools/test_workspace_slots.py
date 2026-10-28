@@ -219,3 +219,15 @@ def test_separer_sans_souvenir_du_projet_est_refuse(tmp_path: Path) -> None:
     env = _env([], {None: FakeStore([_entry("3", "Beta")])})
     plan = wact.plan_action(root, "memory.split", {"params": {"kind": "qdrant"}}, env=env)
     assert not plan["ok"] and "rien à séparer" in plan["blockers"][0]
+
+
+def test_separer_un_store_local_partage(tmp_path: Path) -> None:
+    root = _project(tmp_path / "a", "Alpha", "  backend: local\n  collection_prefix: shared\n")
+    stores: dict[str | None, FakeStore] = {None: FakeStore([_entry("1", "Alpha"), _entry("2", "Beta")])}
+    env = _env([], stores)
+    _plan, done = _run(root, "memory.split", {"kind": "local"}, env, confirm=True)
+    assert done["ok"], done
+    assert set(stores["shared-alpha"].rows) == {"1"} and len(stores[None].rows) == 2
+    assert "collection_prefix: shared-alpha" in (root / "project-context.yaml").read_text()
+    sans_store = _project(tmp_path / "b", "Beta", "  backend: lexical\n")
+    assert not wact.plan_action(sans_store, "memory.split", {"params": {"kind": "local"}}, env=env)["ok"]

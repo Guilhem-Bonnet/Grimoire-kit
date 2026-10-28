@@ -128,7 +128,7 @@ CATALOGUE: dict[str, ActionSpec] = {
         ),
         ActionSpec(
             "memory.split", "Séparer le projet d'un emplacement partagé", "D",
-            ("emplacement qdrant ou weaviate attribué", "Neo4j non séparable tant que P15 n'est pas livré",
+            ("emplacement qdrant, weaviate ou store local attribué", "Neo4j non séparable tant que P15 n'est pas livré",
              "au moins un souvenir du projet dans la source", "cible distincte de la source"),
             "aperçu `memory split` : souvenirs du projet, collection cible, souvenirs sans projet laissés dans la source",
             ("export JSON de toute la source (obligatoire, avant la copie)", "copie par upsert à identifiants conservés",

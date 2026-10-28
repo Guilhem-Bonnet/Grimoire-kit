@@ -97,8 +97,11 @@ def _project_name(config: Path) -> str:
 
 def current_slot(config: Path, kind: str) -> SlotView:
     """L'emplacement de *kind* que le fichier désigne (valeurs écrites, sinon défauts)."""
-    spec = KINDS[kind]
     block = _raw_block(config)
+    if kind == "local":  # store fichier du projet : pas de serveur, la collection est le préfixe
+        local = block.get("backend") == "local"
+        return SlotView(kind, "fichier" if local else "", str(block.get("collection_prefix") or "grimoire"))
+    spec = KINDS[kind]
     name = str(block.get(spec["name"]) or ("neo4j" if kind == "neo4j" else ""))
     if kind in ("qdrant", "weaviate") and block.get("backend") != spec["backend"]:
         return SlotView(kind, "", name)
@@ -279,6 +282,10 @@ def split_blockers(config: Path, kind: str) -> list[str]:
     """Pourquoi *kind* ne peut pas être séparé, vide si rien ne s'y oppose."""
     if kind == "neo4j":
         return [NEO4J_SPLIT_BLOCKER]
+    if kind == "local":  # fichier JSON du projet : séparable, sans serveur
+        if _raw_block(config).get("backend") != "local":
+            return ["aucun store local (backend: local) n'est attribué à ce projet"]
+        return []
     if kind not in KINDS:
         return [f"type d'emplacement inconnu « {kind} » — attendu : {', '.join(KINDS)}"]
     if kind == "redis":
