@@ -12,6 +12,10 @@ Catalogue :
 * ``memory.compose`` (classe A) — appliquer un ``MemoryPlan`` à
   ``project-context.yaml`` ; le fichier d'avant est copié au journal et restauré
   par le rollback tant qu'il n'a pas été modifié depuis ;
+* ``memory.slot`` (classe A) — attribuer ou retirer un emplacement mémoire du projet
+  (configuration seulement, P41, cf. :mod:`grimoire.tools.workspace_slots`) ;
+* ``memory.split`` (classe D) — séparer le projet d'un emplacement partagé par
+  ``memory split`` (P28) : export d'abord, copie, bascule ; nettoyage différé ;
 * ``stack.start`` / ``stack.stop`` (classe B) — ``docker compose -f <compose du
   kit> up -d|stop`` ; le compose est celui du gabarit du kit, copié dans le
   projet, jamais fourni par l'appelant ; jamais ``-v``/``--volumes``/``down`` ;
@@ -113,6 +117,27 @@ CATALOGUE: dict[str, ActionSpec] = {
             "restauration de project-context.yaml copié au journal (refusée s'il a été modifié depuis)",
         ),
         ActionSpec(
+            "memory.slot", "Attribuer ou retirer un emplacement mémoire", "A",
+            ("project-context.yaml présent et lisible", "type qdrant | weaviate | redis | neo4j",
+             "attribution : adresse connue et nom valide ; retrait : un emplacement est attribué"),
+            "différence clé par clé de memory:, avertissement de partage (« deviendra partagé avec N »), "
+            "emplacement neuf proposé par défaut ; Redis : namespace dédié avant conteneur dédié",
+            ("clés d'adresse et de nom de memory: dans project-context.yaml — aucun souvenir copié ni effacé",),
+            "project-context.yaml relu : chaque clé du plan a la valeur prévue",
+            "restauration de project-context.yaml copié au journal (refusée s'il a été modifié depuis)",
+        ),
+        ActionSpec(
+            "memory.split", "Séparer le projet d'un emplacement partagé", "D",
+            ("emplacement qdrant ou weaviate attribué", "Neo4j non séparable tant que P15 n'est pas livré",
+             "au moins un souvenir du projet dans la source", "cible distincte de la source"),
+            "aperçu `memory split` : souvenirs du projet, collection cible, souvenirs sans projet laissés dans la source",
+            ("export JSON de toute la source (obligatoire, avant la copie)", "copie par upsert à identifiants conservés",
+             "bascule de memory.collection_prefix — la source n'est ni modifiée ni supprimée"),
+            "comptes et identifiants relus dans la cible ; configuration relue",
+            "restauration de project-context.yaml ; la copie reste en place. "
+            "Le nettoyage de la source est un geste séparé et différé, hors de cette action",
+        ),
+        ActionSpec(
             "stack.start", "Démarrer une pile mémoire", "B",
             ("Docker joignable", "pile du catalogue (qdrant | weaviate-neo4j)",
              "aucun conteneur de la pile ne dépend du Compose d'un autre projet"),
@@ -195,6 +220,9 @@ class ActionEnv:
     memory_dir: Callable[[], Path] = _kit_memory_dir
     now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     build_memory_plan: Callable[..., Any] | None = None
+    registry: Callable[[], list[dict[str, str]]] | None = None
+    #: ``open_store(config, project_root, collection)`` → gestionnaire ; ``collection=None`` = la source.
+    open_store: Callable[[Any, Path, str | None], Any] | None = None
 
 
 def journal_path(project_root: Path) -> Path:
@@ -430,7 +458,7 @@ def _memory_rollback(project_root: Path, inverse: dict[str, Any]) -> dict[str, A
         return {"ok": False, "detail": "project-context.yaml a été modifié depuis l'apply : restauration refusée"}
     config.write_text(inverse["content"], encoding="utf-8")
     crumb = inverse.get("breadcrumb") or {}
-    if crumb.get("path"):
+    if crumb.get("path") and not crumb.get("keep"):
         target = project_root / crumb["path"]
         if crumb.get("content") is None:
             target.unlink(missing_ok=True)
@@ -438,6 +466,170 @@ def _memory_rollback(project_root: Path, inverse: dict[str, Any]) -> dict[str, A
             target.write_text(crumb["content"], encoding="utf-8")
     ok = config.read_text(encoding="utf-8") == inverse["content"]
     return {"ok": ok, "detail": "project-context.yaml restauré" if ok else "restauration non conforme"}
+
+
+# ── memory.slot (A) et memory.split (D) — P41 ──────────────────────────────────
+
+
+def _registry(env: ActionEnv) -> list[dict[str, str]]:
+    if env.registry is not None:
+        return env.registry()
+    from grimoire.tools.project_registry import load_registry
+
+    return load_registry()
+
+
+def _default_open_store(cfg: Any, root: Path, collection: str | None) -> Any:
+    from dataclasses import replace
+
+    from grimoire.memory.manager import MemoryManager
+
+    if collection is not None:
+        mem = replace(cfg.memory, collection_prefix=collection)
+        if mem.backend == "weaviate-server":
+            mem = replace(mem, weaviate_collection=collection)
+        cfg = replace(cfg, memory=mem)
+    return MemoryManager.from_config(cfg, project_root=root)
+
+
+def _slot_plan(project_root: Path, env: ActionEnv, params: dict[str, Any]) -> _Plan:
+    from grimoire.tools import workspace_slots as slots
+
+    plan = _Plan("memory.slot", {k: v for k, v in params.items() if k in ("op", "kind", "slot", "name", "location", "redis_mode")})
+    config = project_root / "project-context.yaml"
+    if not config.is_file():
+        plan.blockers.append("project-context.yaml absent — lancez d'abord `grimoire init`")
+        return plan
+    changes, blockers, warnings, facts = slots.assign_changes(config, params, _registry(env))
+    plan.blockers.extend(blockers)
+    plan.notes = warnings
+    plan.effects = [f"memory.{c['key']}: {c['old']!r} → {c['new']!r}" for c in changes]
+    plan.facts = {"configSha": state_fingerprint(config.read_bytes()), "changes": changes, **facts}
+    return plan
+
+
+def _slot_apply(project_root: Path, plan: _Plan) -> dict[str, Any]:
+    from grimoire.memory.migration import PREVIOUS_BACKEND_BREADCRUMB
+    from grimoire.tools import workspace_slots as slots
+
+    config = project_root / "project-context.yaml"
+    before = config.read_text(encoding="utf-8")
+    written = slots.write_changes(config, plan.facts["changes"])
+    return {
+        "effects": [f"memory.{k} écrit" for k in written],
+        "inverse": {
+            "kind": "restore_file", "path": "project-context.yaml", "content": before,
+            "afterSha": state_fingerprint(config.read_bytes()),
+            "breadcrumb": {"path": str(PREVIOUS_BACKEND_BREADCRUMB), "content": None, "keep": True},
+        },
+        "verification": slots.verify_changes(config, plan.facts["changes"]),
+    }
+
+
+def _split_context(project_root: Path, env: ActionEnv, kind: str) -> tuple[Any, Any, str, list[Any]]:
+    """``(config, plan P28, collection source, entrées de la source)`` — lecture seule."""
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.memory.split import plan_split
+    from grimoire.memory.supersession import INCLUDE_ALL
+
+    config_path = project_root / "project-context.yaml"
+    cfg = GrimoireConfig.from_yaml(config_path)
+    source = cfg.memory.weaviate_collection or cfg.memory.collection_prefix if kind == "weaviate" else cfg.memory.collection_prefix
+    store = (env.open_store or _default_open_store)(cfg, project_root, None)
+    entries = store.get_all(**INCLUDE_ALL)
+    plan = plan_split(entries, source_collection=source, configs={cfg.project.name: config_path}, only=[cfg.project.name])
+    return cfg, plan, source, entries
+
+
+def _split_plan(project_root: Path, env: ActionEnv, params: dict[str, Any]) -> _Plan:
+    from grimoire.memory.split import SplitError
+    from grimoire.tools import workspace_slots as slots
+
+    kind = str(params.get("kind") or "qdrant")
+    plan = _Plan("memory.split", {"kind": kind})
+    config = project_root / "project-context.yaml"
+    if not config.is_file():
+        plan.blockers.append("project-context.yaml absent — lancez d'abord `grimoire init`")
+        return plan
+    plan.blockers.extend(slots.split_blockers(config, kind))
+    if plan.blockers:
+        plan.facts = {"separable": False, "kind": kind}
+        return plan
+    try:
+        cfg, split, source, entries = _split_context(project_root, env, kind)
+    except SplitError as exc:
+        plan.blockers.append(str(exc))
+        return plan
+    except Exception as exc:
+        plan.blockers.append(f"source illisible : {exc}")
+        return plan
+    mine = next((g for g in split.groups if g.project == cfg.project.name), None)
+    if mine is None:
+        plan.blockers.append(f"aucun souvenir de « {cfg.project.name} » (project_name) dans « {source} » : rien à séparer")
+        return plan
+    if mine.collection == source:
+        plan.blockers.append("la cible désigne la même collection que la source")
+    others = sorted({str(e.metadata.get("project_name", "")) for e in entries} - {cfg.project.name, ""})
+    plan.effects = [
+        f"export JSON de la source entière ({split.total} souvenir(s)) dans _grimoire/_memory/migration/",
+        f"copie de {mine.count} souvenir(s) vers « {mine.collection} », identifiants conservés",
+        f"memory.collection_prefix: {source!r} → {mine.collection!r}",
+        f"la source « {source} » n'est ni modifiée ni supprimée",
+    ]
+    plan.notes = ["le nettoyage de la source est un geste séparé et différé : cette action ne supprime rien"]
+    if split.unassigned:
+        plan.notes.append(f"{len(split.unassigned)} souvenir(s) sans project_name restent dans la source et ne seront plus vus d'ici")
+    plan.facts = {
+        "separable": True, "kind": kind, "source": source, "target": mine.collection, "count": mine.count,
+        "total": split.total, "unassigned": len(split.unassigned), "stayWith": others,
+        "configSha": state_fingerprint(config.read_bytes()), "ids": sorted(mine.ids),
+        "touches": {"projects": others, "sessions": []},
+    }
+    plan.needs_confirmation = True  # classe D : jamais sans accord explicite
+    return plan
+
+
+def _split_apply(project_root: Path, env: ActionEnv, plan: _Plan) -> dict[str, Any]:
+    import time
+
+    from grimoire.memory.migration import PREVIOUS_BACKEND_BREADCRUMB
+    from grimoire.memory.split import SplitError, apply_split
+    from grimoire.tools import workspace_slots as slots
+
+    kind = plan.params["kind"]
+    config = project_root / "project-context.yaml"
+    before = config.read_text(encoding="utf-8")
+    cfg, split, _source, entries = _split_context(project_root, env, kind)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    export_path = project_root / "_grimoire" / "_memory" / "migration" / f"split-{stamp}.json"
+    opener = env.open_store or _default_open_store
+    try:
+        report = apply_split(
+            split, entries, export_path=export_path,
+            open_target=lambda collection: opener(cfg, project_root, collection),
+            render_config=lambda path, collection: slots.render_split_config(path, collection, kind),
+        )
+    except SplitError as exc:
+        return {"ok": False, "raison": str(exc)}
+    wrong = [p for p, ok in report.verified.items() if not ok]
+    relu = slots.current_slot(config, kind).name
+    ok = not wrong and relu == plan.facts["target"] and export_path.is_file()
+    return {
+        "effects": [
+            f"export : {export_path}", f"copiés et vérifiés : {sum(report.copied.values())}",
+            f"configuration repointée vers « {plan.facts['target']} »", "source intacte — nettoyage différé",
+        ],
+        "inverse": {
+            "kind": "restore_file", "path": "project-context.yaml", "content": before,
+            "afterSha": state_fingerprint(config.read_bytes()),
+            "breadcrumb": {"path": str(PREVIOUS_BACKEND_BREADCRUMB), "content": None, "keep": True},
+        },
+        "verification": {
+            "ok": ok,
+            "detail": "comptes, identifiants, export et configuration relus" if ok else f"écart : {wrong or 'configuration/export'}",
+            "export": str(export_path),
+        },
+    }
 
 
 # ── stack.start / stack.stop (B) ───────────────────────────────────────────────
@@ -641,6 +833,10 @@ def actions_catalogue(project_root: Path) -> dict[str, Any]:
 def _build_plan(project_root: Path, env: ActionEnv, action: str, params: dict[str, Any]) -> _Plan:
     if action == "memory.compose":
         return _memory_plan(project_root, env, params)
+    if action == "memory.slot":
+        return _slot_plan(project_root, env, params)
+    if action == "memory.split":
+        return _split_plan(project_root, env, params)
     if action in ("stack.start", "stack.stop"):
         return _stack_plan(project_root, env, params, stopping=action == "stack.stop")
     if action == "stack.restart_policy":
@@ -715,7 +911,7 @@ def apply_action(
     if plan.needs_confirmation and body.get("confirm") is not True:
         # Avant le journal : le plan n'est pas consommé, on le rejoue avec `confirm: true`.
         return _refus(
-            action, "pile partagée ou sessions vivantes : confirmation requise (confirm: true)",
+            action, "geste engageant (pile partagée, sessions vivantes ou classe D) : confirmation requise (confirm: true)",
             touches=plan.facts["touches"],
         )
     error = _log(project_root, {"event": "apply_started", "run_id": run_id, "action": action, "empreinte": empreinte})
@@ -725,6 +921,10 @@ def apply_action(
     try:
         if action == "memory.compose":
             result = _memory_apply(project_root, env, plan, run_id)
+        elif action == "memory.slot":
+            result = _slot_apply(project_root, plan)
+        elif action == "memory.split":
+            result = _split_apply(project_root, env, plan)
         elif action == "stack.restart_policy":
             result = _restart_apply(project_root, env, plan)
         else:
