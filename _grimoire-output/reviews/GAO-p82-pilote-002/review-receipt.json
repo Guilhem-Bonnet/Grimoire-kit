@@ -1,69 +1,63 @@
 {
   "$schema": "grimoire-review-receipt/v1",
   "task_id": "GAO-p82-pilote-002",
-  "verdict": "NOT-READY",
+  "verdict": "READY",
   "findings": [
     {
-      "summary": "Écarts au ticket : « abandonner » non réouvrable et acceptation sous dérogation hors lot ; à faire valider explicitement.",
+      "summary": "Acceptation sous dérogation non traitée (aucune notion de dérogation dans le kit) : écart au ticket hors critères, à valider par l'humain.",
       "evidence_cmd": "",
-      "severity": "major",
-      "grounded": false
-    },
-    {
-      "summary": "Échecs dans tests/unit/missions/test_route_dispatch.py (8) et test_orchestrator_session.py lancés depuis le worktree ; fichiers non touchés par le diff, à confirmer sur CI.",
-      "evidence_cmd": "",
-      "severity": "major",
+      "severity": "",
       "grounded": false
     }
   ],
   "reviewer_id": "reviewer",
   "model": "sonnet",
-  "tree_fingerprint": "87e1803ffd17f71966b40ef82313b0b662d6f0f7214efad13bc44e66ad473c9b",
-  "evidence_pack_sha256": "64157c3bdae629256e4a78637b56001d68c338e50bf82ddd7a227c38e920a7b1",
-  "written_at": "2026-10-28T01:08:30.310536+00:00",
-  "reviewer_session": "cf7f2f44-7c39-4b15-b2d4-525bd1d4ad9c",
+  "tree_fingerprint": "a6b294d48fec02d6ea2f8f254f66a88c799a4a3066e34f027811a36bd3156fde",
+  "evidence_pack_sha256": "bf57364d8b303d8a6efbabebf33994dde8c7f820feaa0a8e78b5c966584419cb",
+  "written_at": "2026-10-28T04:36:47.198769+00:00",
+  "reviewer_session": "31403f06-024b-4a11-bab6-ecd6e6d7067a",
   "criteria": [
     {
       "index": 1,
       "criterion": "Test : sans pilote, une question merge ou retry_exhausted présentée à l orchestrateur est refusée comme aujourd hui ; pilote activé, elle est tranchée et un événement autopilot.decided porte l option et la justification",
       "status": "met",
       "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'without_the_pilot or with_the_pilot_the_question'",
-      "note": "Tests présents et verts : sans pilote merge/retry_exhausted refusés, avec pilote tranché et autopilot.decided tracé."
+      "note": "Sans pilote merge/retry_exhausted restent humains ; pilote activé, tranchés avec autopilot.decided (option, justification)."
     },
     {
       "index": 2,
       "criterion": "Test : activer ou couper le pilote depuis une session d agent (CLI sans tour humain, en-tête forgé) est refusé ; depuis le canal humain, accepté et journalisé ; révoquer le mandat coupe le pilote",
       "status": "met",
-      "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'origin or human_turn or human_channel or revoking or cockpit'",
-      "note": "Origines non humaines refusées, CLI sans tour humain n'écrit rien, canal humain journalisé, révocation du mandat coupe le pilote."
+      "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'origin or human_channel or revoking or cockpit or cli_channel or tampered'",
+      "note": "Origine agent/en-tête forgé refusés sans écriture ; canal humain accepté et journalisé ; révocation du mandat coupe le pilote."
     },
     {
       "index": 3,
       "criterion": "Test : même pilote activé, une question classée identifiants, secret, payant, permission hors dépôt ou mandat reste à l humain (liste fermée non modifiable par la politique)",
       "status": "met",
-      "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'closed_list or policy'",
-      "note": "Liste fermée testée (12 cas), la politique ne peut qu'ajouter."
+      "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'closed_list or policy or permission'",
+      "note": "Liste fermée reste humaine pilote activé ; la politique ne peut qu'ajouter."
     },
     {
       "index": 4,
       "criterion": "Test : une question avec recommended reçoit cette option ; sans recommended et en confiance déclarée basse, elle reste à l humain avec la raison",
-      "status": "unmet",
-      "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py::test_a_registered_session_answers_by_the_cli_with_its_justification_and_confidence",
-      "note": "Les tests recommended/confiance basse unitaires passent, mais le test de bout en bout (confiance basse via CLI) échoue ici : « appel depuis un worktree de tâche ». D'autres tests pré-existants (test_orchestrator_session) échouent pareillement dans un worktree : probablement l'environnement, non démontré vert."
+      "status": "met",
+      "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'recommend or confidence'",
+      "note": "recommended appliqué ; sans recommended et confiance basse/non déclarée, reste à l'humain avec la raison. Suite complète (test_autopilot + test_waiting_state) verte, y compris le test CLI de bout en bout."
     },
     {
       "index": 5,
       "criterion": "Test : pilote activé, les présentations ne sont plus bornées à MAX_PRESENTATIONS et les tâches faites à la main sont éligibles",
-      "status": "unverifiable",
+      "status": "met",
       "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'hand_made or presentations'",
-      "note": "Tests de présence ; critère de vérification manuelle."
+      "note": "Tests exécutables passants : présentations non bornées et tâches manuelles éligibles uniquement sous pilote."
     },
     {
       "index": 6,
       "criterion": "Revue adversariale de sécurité du modèle d autorité jointe à la PR ; Fichier CHANGELOG.md : entrée [Unreleased] ; CI verte",
-      "status": "unmet",
-      "evidence_cmd": "gh pr checks 1036 --required",
-      "note": "Revue de sécurité jointe et entrée CHANGELOG présentes, mais aucun check CI rapporté sur la PR #1036 : « CI verte » non démontrée. De plus la revue admet que l'annulation est terminale (le ticket demandait réouvrable) et que l'acceptation sous dérogation n'est pas traitée."
+      "status": "met",
+      "evidence_cmd": "gh pr checks task/GAO-p82-pilote-002 --required",
+      "note": "docs/security/autopilot-authority-review.md jointe, CHANGELOG [Unreleased] présent, 14 checks requis passés, 0 échec sur la tête 9bf198007. codecov/patch en échec mais non requis."
     }
   ]
 }
