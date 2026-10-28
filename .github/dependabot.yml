@@ -21,3 +21,9 @@ updates:
       - "ci"
     commit-message:
       prefix: "chore(ci):"
+    # Les étapes de codeql-action (init, autobuild, analyze) doivent avoir la même version :
+    # mises à jour séparément, CodeQL refuse la configuration (#953, #955, 2026-10-26).
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
