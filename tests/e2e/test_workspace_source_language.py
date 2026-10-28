@@ -30,7 +30,7 @@ def source(workspace: Page) -> Page:
     """La coque, déjà sur l'espace Source."""
     workspace.evaluate("() => window.GrimoireWorkspace.goto('source')")
     workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
-    workspace.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
+    workspace.wait_for_selector("#canvas .tree .sr-tree-file", timeout=10_000)
     return workspace
 
 
@@ -60,7 +60,7 @@ def _open(page: Page, path: str) -> None:
     # gabarit `stack`. `dispatch_event` envoie l'événement `click` direct à
     # l'élément déjà résolu par le locator, sans dépendre des coordonnées
     # écran ni du hit-testing du navigateur à cet endroit.
-    page.locator(".tree .sr-tree-file", has_text=name).first.dispatch_event("click")
+    page.locator("#canvas .tree .sr-tree-file", has_text=name).first.dispatch_event("click")
     page.wait_for_function(
         "(p) => document.querySelector('.sr-docrow .mono')?.textContent === p", arg=path
     )

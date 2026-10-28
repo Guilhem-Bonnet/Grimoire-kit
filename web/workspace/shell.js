@@ -1813,17 +1813,10 @@ function empty(title, sentence, command, action, { compact = false, art = '' } =
   return block;
 }
 
-/** Ce que la coque dit quand un espace laisse l'explorateur ou l'inspecteur muets. */
-function emptyPanelHint(which) {
-  if (which === 'explorer') {
-    return empty(
-      "Pas d'arborescence ici",
-      "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Configuration › Fichiers.",
-      null,
-      current === 'fichiers' ? null : { label: 'Ouvrir les fichiers', run: () => goto('fichiers') },
-      { compact: true },
-    );
-  }
+/** Ce que la coque dit quand un espace laisse l'inspecteur muet. L'explorateur,
+ * lui, n'a pas d'indication : sans arborescence, le panneau et son bouton de
+ * rail disparaissent (P78, `shell.css`). */
+function emptyPanelHint() {
   return empty(
     'Rien à inspecter',
     "Choisissez un élément dans la zone centrale : son détail s'affiche ici.",
@@ -1839,10 +1832,10 @@ function fillEmptyPanels() {
   // Hors atelier (et hors tiroirs) ces panneaux sont masqués : leur indication
   // le serait aussi, et ne doit pas répondre à la place du contenu de l'écran.
   if (root.dataset.atelier !== 'on' && !isNarrow()) return;
-  for (const [which, id] of [['explorer', 'explorer-body'], ['inspector', 'inspector-body']]) {
+  for (const id of ['inspector-body']) {
     const body = $(id);
     if (body.children.length) continue;
-    const hint = emptyPanelHint(which);
+    const hint = emptyPanelHint();
     hint.setAttribute(PLACEHOLDER, 'hint');
     body.append(hint);
   }

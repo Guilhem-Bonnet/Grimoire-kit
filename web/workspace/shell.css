@@ -3167,3 +3167,11 @@ body[data-active-space] .panel-head {
     display: none;
   }
 }
+
+/* P78 : un espace sans arborescence n'ouvre ni panneau Explorateur ni son
+   bouton de rail ; la place revient au contenu. `data-detail` est posé par
+   `syncDetail` selon que l'espace a écrit dans `ctx.explorer`. */
+#panel-explorer[data-detail="off"],
+html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
+  display: none !important;
+}
