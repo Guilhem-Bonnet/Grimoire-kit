@@ -29,7 +29,6 @@ au catalogue de P40 : l'étape ``compose`` est bloquée et dit la commande à co
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -37,6 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.fsio import atomic_write
 from grimoire.tools import workspace_actions
 
 __all__ = ["SCHEMA_VERSION", "VERBS", "LaunchEnv", "launch_state", "launch_verb"]
@@ -96,10 +96,7 @@ def _read(project_root: Path) -> dict[str, Any] | None:
 def _write(project_root: Path, state: dict[str, Any], env: LaunchEnv) -> None:
     state["updated"] = env.now().isoformat()
     path = _state_path(project_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    atomic_write(path, json.dumps(state, ensure_ascii=False, indent=2))
 
 
 # ── Traduction des échecs ──────────────────────────────────────────────────────
