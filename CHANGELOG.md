@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): chat d'orchestrateur, étape 3 (ACP3, GAO-acp3-chat-d-001) : tous les hôtes, choix par projet, doctor ACP, repli kanban
+  - **Table de lancement** (`HostProfile.acp_command`) : Gemini CLI `gemini --acp`, Copilot CLI `copilot --acp` (preview, à valider), Codex `npx -y @agentclientprotocol/codex-acp` (exige `npx` et `codex`), Cursor `agent acp`, opencode `opencode acp`. Le profil porte aussi `acp_binary`, `acp_preview` et `acp_note`.
+  - **Choix de l'hôte** par projet : sélecteur dans l'onglet Orchestrateur (`GET /api/workspace/chat/hosts`, `POST /api/workspace/chat/host`), mémorisé sous `_grimoire-runtime-output/cockpit/chat-host.json` ; sans réglage, l'hôte détecté. Les hôtes non installés sont grisés avec leur raison. `GRIMOIRE_CHAT_HOST` et `GRIMOIRE_CHAT_AGENT_COMMAND` passent toujours avant.
+  - **Doctor** : `grimoire doctor` négocie `initialize` avec le mode ACP de chaque hôte installé (aucun `session/new`, aucun prompt, donc aucun coût) ; un mode muet est un avertissement, le chat se replie sur le kanban.
+  - **Repli kanban** (Copilot dans VS Code n'a pas d'interface externe, ni tout hôte sans ACP lançable) : le chat dépose une consigne humaine sur la tâche tenue (ou `task_id`), et le fil affiche les notes, questions et commentaires que les sessions y déposent ; le fil se relit du ledger, il survit au redémarrage. En différé, mais disponible partout.
+  - **Pérennité** : Gemini CLI cède la place à Antigravity CLI pour les comptes gratuits (juin 2026) — `gemini --acp` reste valable tant que la CLI est installée, la commande du profil est à mettre à jour à la migration ; le mode ACP de Copilot CLI est en preview, signalé dans le sélecteur et par le doctor.
 - fix(init): la sonde « collection déjà remplie » de `grimoire init` ne laisse plus le nom de collection réécrire l'URL (CodeQL py/partial-ssrf, `cmd_init.py`) : nom hors de `[A-Za-z0-9][A-Za-z0-9_-]{0,127}` non sondé (lu comme vide, comme une sonde en échec), segment Qdrant encodé, requête Weaviate construite par `urlencode`.
 
 - fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).

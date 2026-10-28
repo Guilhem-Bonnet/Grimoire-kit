@@ -31,6 +31,7 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.cli import cmd_setup
+from grimoire.cli.doctor_acp import check_acp_hosts
 from grimoire.cli.doctor_hooks import check_hook_commands
 from grimoire.cli.doctor_instructions import check_instruction_files
 from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_spec_http
@@ -504,6 +505,7 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         *check_mcp_json(target),
         check_mcp_processes(),
         *check_hook_commands(target),
+        *check_acp_hosts(target),
         *check_instruction_files(target),
     ]
 
