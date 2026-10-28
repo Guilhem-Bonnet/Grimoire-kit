@@ -128,6 +128,7 @@ def _env(home: Path) -> dict[str, str]:
             "HF_HUB_OFFLINE": "1",
             "TQDM_DISABLE": "1",
             "NO_COLOR": "1",
+            "TERM": "xterm",  # Rich retombe à 80 colonnes sur TERM=dumb (CI) et ignore COLUMNS
             "COLUMNS": "100",
             "LC_ALL": "C.UTF-8",
             "HOME": str(home),

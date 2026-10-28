@@ -21,7 +21,7 @@ pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; 
 <main>
 <h1>Décision humaine attestée</h1>
 <p>L&#x27;agent pose une question ; seule la réponse du canal humain rend la tâche.</p>
-<p class="meta">kit 3.71.0 · enregistrée le 2026-10-27T22:15:11Z · empreinte de sortie <code>3800e4bcd04fe9526223793a42f4ee707a341ac497c6c877519f7f18883501ce</code></p>
+<p class="meta">kit 3.71.0 · enregistrée le 2026-10-28T00:08:08Z · empreinte de sortie <code>dbb19df8db3d0d86ed04334ea75e5de19cde8eba4b7ae3c701d441c428f18f5f</code></p>
 <section class="frame"><p class="cmd">$ grimoire task add &quot;Choisir base&quot; -a &quot;le choix est tranche par un humain&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
 OK GAO-choisir-base-001 — Choisir base (ready)
   vérifiabilité : V2 — critère sans verdict reconnu : &#x27;le choix est tranche par un humain&#x27;
@@ -40,8 +40,8 @@ ou la tâche n&#x27;a aucun critère : sa vérifiabilité reste à démontrer.
   usage   : none
   porté par : cli</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task answer GAO-choisir-base-001 sqlite<span class="rc ok">sortie 0</span></p><pre>Cette note sera enregistrée au nom d&#x27;un humain. Est-ce bien toi qui la donnes ? [o/N] o
-OK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → aucun — omets le
-paramètre model, garde celui de la session</pre></section>
+OK GAO-choisir-base-001 — Choisir base (waiting → ready) · V2 → aucun — omets le paramètre model,
+garde celui de la session</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task show GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>GAO-choisir-base-001 — Choisir base
   état    : ready (board : ready)
   accepte : le choix est tranche par un humain
