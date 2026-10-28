@@ -22,7 +22,7 @@ def _size(text: str) -> int:
 
 
 def _scripts() -> list[str]:
-    return re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script\s*>", PAGE, re.DOTALL | re.IGNORECASE)
+    return re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script[^>]*>", PAGE, re.DOTALL | re.IGNORECASE)
 
 
 def test_html_css_js_sous_le_budget() -> None:
