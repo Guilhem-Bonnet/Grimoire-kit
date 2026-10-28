@@ -403,6 +403,8 @@ def test_la_consigne_du_relecteur_diffe_depuis_la_base_reelle_de_la_pr(projet: P
     prompt = prompt_of(host, f"grimoire-review-{tid}")
     assert f"{base_sha}...HEAD" not in prompt
     assert "git merge-base origin/main HEAD" in prompt and "gh pr diff" in prompt and "uv.lock" in prompt
+    # 2026-10-27 (R59, R60, R63) : ce que les commandes du relecteur créent périme son verdict ; il remet l'arbre en état.
+    assert "uv run --frozen" in prompt and "git checkout -- <chemin>" in prompt
     assert f"gh pr checks task/{tid} --required" in prompt
     found = re.search(r"`git diff (\S+)\.\.\.HEAD`", prompt)
     assert found is not None
