@@ -14,8 +14,11 @@ embarqué (``:memory:``, vecteurs déterministes sans modèle).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +46,25 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("ANONYMIZED_TELEMETRY", "False")
 
 
+@functools.cache
+def _chroma_runs_here() -> bool:
+    """Vrai si ChromaDB crée un client persistant sans planter le processus.
+
+    Sur certains runners, ses extensions natives meurent en SIGILL (instruction
+    absente du CPU) : hors processus, le test se saute au lieu de tuer le
+    worker xdist et de figer la suite.
+    """
+    import tempfile
+
+    code = "import sys, chromadb; chromadb.PersistentClient(path=sys.argv[1])"
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            done = subprocess.run([sys.executable, "-c", code, tmp], capture_output=True, timeout=120, check=False)
+        except subprocess.TimeoutExpired:
+            return False
+    return done.returncode == 0
+
+
 def _offline_chroma_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Le plongement par défaut de ChromaDB télécharge un modèle : on lui substitue un hachage."""
     from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
@@ -65,7 +87,8 @@ def _make_qdrant(tmp_path: Path) -> MemoryBackend:
             self._collection = "retraction-tests"
             self._client = QdrantClient(":memory:")
             self._client.create_collection(
-                collection_name=self._collection, vectors_config=VectorParams(size=8, distance=Distance.COSINE),
+                collection_name=self._collection,
+                vectors_config=VectorParams(size=8, distance=Distance.COSINE),
             )
 
         def _embed(self, text: str) -> list[float]:
@@ -92,6 +115,8 @@ def _make_backend(kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch | N
         return TantivyMemoryBackend(tmp_path / "tantivy")
     if kind == "mempalace":
         pytest.importorskip("chromadb")
+        if not _chroma_runs_here():
+            pytest.skip("ChromaDB ne s'initialise pas sur cette machine (plantage natif)")
         from grimoire.memory.backends.mempalace import MemPalaceBackend
 
         assert monkeypatch is not None
@@ -209,7 +234,11 @@ class TestReadsFilterRetracted:
         assert a in _ids(mgr.search_taxonomy(QUERY, include_retracted=True))
 
     def test_recall_typed_hides_then_includes(self, kind: str, tmp_path: Path) -> None:
-        mgr = MemoryManager(_make_backend(kind, tmp_path), project_name="demo", project_root=tmp_path) if kind in _SEARCHABLE else None
+        mgr = (
+            MemoryManager(_make_backend(kind, tmp_path), project_name="demo", project_root=tmp_path)
+            if kind in _SEARCHABLE
+            else None
+        )
         if mgr is None:
             pytest.skip("pas de recherche hors ligne sur ce backend")
         # remember() range par identifiant déterministe et type : les valeurs de l'agent sont l'entrée.
@@ -257,8 +286,10 @@ class TestHybridKeepsRetractedOut:
         """Le compagnon lexical est une copie : sa marque peut être en retard, le store principal fait foi."""
         companion = LocalMemoryBackend(tmp_path / "lexical.json")
         mgr = MemoryManager(
-            LocalMemoryBackend(tmp_path / "primary.json"), lexical_companion=companion,
-            project_name="demo", project_root=tmp_path,
+            LocalMemoryBackend(tmp_path / "primary.json"),
+            lexical_companion=companion,
+            project_name="demo",
+            project_root=tmp_path,
         )
         a, b = _seed(mgr)
         assert _ids(mgr.hybrid_search(QUERY)) == {a, b}
@@ -332,7 +363,9 @@ class TestProjectBoundary:
     @pytest.fixture
     def foreign(self, mgr: MemoryManager) -> str:
         entry = mgr.backend.store(
-            "Souvenir d'un autre projet", user_id="u", tags=("t",),
+            "Souvenir d'un autre projet",
+            user_id="u",
+            tags=("t",),
             metadata={"project_name": "autre", "source_kind": "memory"},
         )
         return entry.id
@@ -415,7 +448,9 @@ class TestGraphMirror:
                 seen.append(entry)
 
         mgr = MemoryManager(
-            LocalMemoryBackend(tmp_path / "m.json"), project_name="demo", project_root=tmp_path,
+            LocalMemoryBackend(tmp_path / "m.json"),
+            project_name="demo",
+            project_root=tmp_path,
             memory_graph=_Graph(),
         )
         a, _ = _seed(mgr)
@@ -440,7 +475,9 @@ class TestProvenanceCardShowsTheCycle:
 
 class TestUnretractRemovesTheKey:
     def test_the_key_is_gone_on_replace_backends_and_neutral_on_merge_backends(
-        self, kind: str, mgr: MemoryManager,
+        self,
+        kind: str,
+        mgr: MemoryManager,
     ) -> None:
         a, _ = _seed(mgr)
         mgr.retract(a, reason="r")
@@ -498,7 +535,9 @@ class TestConsolidateNeverMixesStates:
     @pytest.fixture(params=("local", "lexical", "tantivy"))
     def cmgr(self, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryManager:
         return MemoryManager(
-            _make_backend(str(request.param), tmp_path, monkeypatch), project_name="demo", project_root=tmp_path,
+            _make_backend(str(request.param), tmp_path, monkeypatch),
+            project_name="demo",
+            project_root=tmp_path,
         )
 
     def test_retracted_copy_is_kept_with_its_reason_and_the_live_copy_too(self, cmgr: MemoryManager) -> None:
