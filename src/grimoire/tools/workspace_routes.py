@@ -83,6 +83,7 @@ from grimoire.tools import (
     workspace_chat,
     workspace_config,
     workspace_exec,
+    workspace_first_launch,
     workspace_hygiene,
     workspace_knowledge,
     workspace_language,
@@ -494,6 +495,11 @@ def _data_actions_journal(project_root: Path, query: _Query) -> Any:
     return workspace_actions.actions_journal(project_root, limit=int(raw) if raw.isdigit() else 100)
 
 
+def _setup_launch(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/setup/launch`` — l'avancement du premier lancement (P45), tel qu'enregistré."""
+    return workspace_first_launch.launch_state(project_root)
+
+
 def _setup_guide(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/setup/guide`` — la machine vue par le guide de premier lancement (P36).
 
@@ -643,6 +649,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}data/actions": _data_actions,
     f"{PREFIX}data/actions/journal": _data_actions_journal,
     f"{PREFIX}setup/guide": _setup_guide,
+    f"{PREFIX}setup/launch": _setup_launch,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
@@ -983,6 +990,8 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
     f"{PREFIX}options": _options_write,
+    # Premier lancement (P45) : « Lancer » exécute les actions typées de P40, étape par étape.
+    f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
