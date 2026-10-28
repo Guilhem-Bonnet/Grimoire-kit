@@ -99,3 +99,8 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Sorties du kit en fonctionnement (journaux de preuve, reçus de relecture) : jamais suivies. Commitées par des
+# workers le 2026-10-28 (#1017), elles rendaient chaque relecture « périmée » (fichier suivi modifié).
+_grimoire-runtime-output/
+_grimoire-output/reviews/

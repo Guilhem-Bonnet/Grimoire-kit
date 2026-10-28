@@ -10,7 +10,7 @@ audience: référence
 > (`web/workspace/glossary.js`, spécification §3.2) : éditer une définition ici
 > n'aurait aucun effet, éditer le YAML met à jour les deux.
 
-**67 concepts.**
+**68 concepts.**
 
 ## Espace de travail {: #espace-de-travail }
 
@@ -75,6 +75,12 @@ Raccourci : ```
 Termes liés : [Dock](#dock), [Commande équivalente](#commande-equivalente)
 
 Documentation : [reference/cli/index.md](/reference/cli/index.md)
+
+## Orchestrateur {: #orchestrateur }
+
+L'agent de l'hôte (Claude Code d'abord), lancé dans le dossier du projet : le chat du dock lui relaie un tour humain, et c'est lui qui agit, avec ses permissions.
+
+Termes liés : [Dock](#dock)
 
 ## Commande équivalente {: #commande-equivalente }
 

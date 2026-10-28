@@ -372,3 +372,14 @@ def test_grimoire_acp_works_from_the_wheel_without_the_compiled_module(built_whe
     proc = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=120, check=False)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "ok"
+
+
+def test_la_commande_d_agent_garde_les_antislashs_d_un_chemin_windows() -> None:
+    """CI Windows du 2026-10-28 : `C:\\hostedtoolcache\\...\\python.exe` devenait `C:hostedtoolcache...python.exe`."""
+    from grimoire.cli.cmd_chat import split_command
+
+    windows = r'C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe "C:\a b\agent.py" transcript.json'
+    assert split_command(windows, posix=False) == (
+        r"C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe", r"C:\a b\agent.py", "transcript.json",
+    )
+    assert split_command("/usr/bin/python3 'a b/agent.py' t.json", posix=True) == ("/usr/bin/python3", "a b/agent.py", "t.json")
