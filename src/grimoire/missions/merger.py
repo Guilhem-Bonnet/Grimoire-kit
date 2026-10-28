@@ -86,7 +86,7 @@ from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, session_env
 from grimoire.missions.review_receipt import READY, read_receipt
-from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT, entered_review_at
+from grimoire.missions.reviewer import CI_RUNNING, REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT, entered_review_at
 from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR, TaskState
 from grimoire.missions.task_worktree import MERGED_EVENT, TASK_BRANCH_PREFIX, find_task_worktree
 from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, new_question_id
@@ -735,7 +735,10 @@ class MergeStage:
         if failed:
             return "red", f"{len(failed)}/{len(rows)} {scope} en échec : {', '.join(failed[:5])}"
         if any(b not in _GREEN_BUCKETS for b in buckets):
-            return "pending", f"{sum(1 for b in buckets if b not in _GREEN_BUCKETS)}/{len(rows)} {scope} en cours"
+            waiting = sum(1 for b in buckets if b not in _GREEN_BUCKETS)
+            # Un check annulé n'est pas en cours : seul un « pending » fait attendre le relecteur (P87).
+            state_word = CI_RUNNING if "pending" in buckets else "annulés ou non verts"
+            return "pending", f"{waiting}/{len(rows)} {scope} {state_word}"
         if "pass" not in buckets:
             return "pending", f"{len(rows)} {scope} tous sautés : rien n'a tourné"
         return "green", f"{len(rows)} {scope} verts"

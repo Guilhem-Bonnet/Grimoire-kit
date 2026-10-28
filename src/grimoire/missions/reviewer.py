@@ -30,6 +30,8 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
      la tête GitHub de la PR est la tête relue ; un check en échec (``fail`` ; un check annulé reste au merger) fait
      du verdict un ``NOT-READY``, les checks en constat. Une CI en cours, illisible ou d'une autre tête ne change
      rien ici : le merger exige de toute façon la CI verte de la tête qu'il fusionne ;
+   - CI en cours (P87) : tant qu'un check de la tête tourne, aucun relecteur n'est lancé (rien au ledger, aucun cycle) ;
+     un ``NOT-READY`` rendu pendant ce temps est écarté (verdict ``ci_pending``, relecture refaite sans compter de relance) ;
    - ``NOT-READY`` : la tâche repart au worker (``needs_verification → running``, session du worker reprise par
      ``claude --bg --resume <son uuid>``, constats en note). Une reprise qui échoue remet la tâche en revue et sera
      retentée. Au cycle ``max_cycles`` (2 par défaut, compté depuis la dernière réponse humaine), ou sans session à
@@ -93,6 +95,8 @@ if TYPE_CHECKING:
     from grimoire.missions.service import TaskService
 
 __all__ = [
+    "CI_PENDING",
+    "CI_RUNNING",
     "MAX_RELAUNCHES",
     "REVIEWER_ACTOR",
     "REVIEW_ESCALATED_EVENT",
@@ -123,8 +127,13 @@ REVIEW_HALTED_EVENT = "task.review_session_halted"
 REVIEW_TIMEOUT = timedelta(hours=2)
 #: Relances d'une même entrée en revue (relecteur muet, reçu périmé) avant l'escalade à l'humain.
 MAX_RELAUNCHES = 2
+#: Le mot du détail ``pending`` de la CI quand des checks tournent encore (par opposition à « aucun check »).
+CI_RUNNING = "en cours"
+#: Un ``NOT-READY`` rendu pendant que des checks de la tête tournent encore : écarté, la relecture est refaite sans
+#: compter ni cycle ni relance (P87).
+CI_PENDING = "ci_pending"
 #: Verdicts notés qui appellent une nouvelle relecture, et ceux qui clôturent la relecture.
-_RELAUNCH = frozenset({"timeout", "stale"})
+_RELAUNCH = frozenset({"timeout", "stale", CI_PENDING})
 #: Un autre modèle que celui du worker, quand la politique ne l'impose pas.
 _ALTERNATE = {"opus": "sonnet", "sonnet": "opus", "haiku": "sonnet"}
 _DEFAULT_MODEL = "sonnet"
@@ -288,7 +297,7 @@ class ReviewStage:
         if refused := [e for e in failures if e.payload.get("reason") == "refused"]:
             why = f"relecteur non inscrit au journal d'autorité ({str(refused[-1].payload.get('detail') or '')[:300]})"
             return self._escalate(task, why, "")
-        relaunched = sum(1 for r in reviews if verdicts.get(r.id) in _RELAUNCH) + len(failures)
+        relaunched = sum(1 for r in reviews if verdicts.get(r.id) in _RELAUNCH and verdicts[r.id] != CI_PENDING) + len(failures)
         if relaunched > MAX_RELAUNCHES:
             return self._escalate(task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "")
         return self._launch(task, launch)
@@ -337,6 +346,10 @@ class ReviewStage:
         if unsafe := same_repo(root, cwd):  # un worktree qui n'est pas de ce dépôt (.git réécrit) n'est pas relu
             return ReviewOutcome(tid, "launch", "failed", f"worktree refusé : {unsafe}")
         head = str(manual["head"]) if manual else branch_head(root, tid)
+        # P87 : tant qu'un check de la tête tourne, aucun relecteur n'est lancé (ni reçu, ni cycle) : au tick suivant.
+        ci, ci_detail = self._ci_of(tid, head, str(manual["pr"]) if manual else "")
+        if ci == "pending" and CI_RUNNING in ci_detail:
+            return ReviewOutcome(tid, "launch", "skipped", f"CI en cours, relecture différée au tick suivant : {ci_detail}")
         if blocked := mandate_precheck(self._service, REVIEWER_ACTOR):
             return ReviewOutcome(tid, "launch", "skipped", blocked)
         under_mandate = MandateStore(root).state().active
@@ -553,23 +566,31 @@ class ReviewStage:
             self._record_judged(task, review, READY, 0, {**sealed, **({"ci": ci} if ci else {})})
             self._stop(review)
             return ReviewOutcome(tid, "ready", "done", f"READY, {len(receipt.criteria_met)} critère(s) tenu(s)")
+        ci, ci_detail = self._head_ci(task, review)
+        if ci == "pending" and CI_RUNNING in ci_detail:  # P87 : ce NOT-READY a pu naître d'un check encore en cours
+            self._record_judged(task, review, CI_PENDING, 0, {"ci": ci})
+            self._stop(review)
+            return ReviewOutcome(tid, "deferred", "done", f"CI en cours ({ci_detail}) : NOT-READY écarté, relecture refaite sans compter de cycle")
         return self._bounce(task, launch, review, receipt)
 
     def _head_ci(self, task: MissionTask, review: LedgerEvent) -> tuple[str, str]:
         """La CI de la PR sur la tête relue, lue par le merger (#993) ; ``("", …)`` quand rien n'en est conclu.
 
         Tâche faite à la main (#994) : la tête scellée au lancement et la PR par son numéro."""
-        from grimoire.missions.merger import MergeStage
         from grimoire.missions.review_seal import branch_head
 
         manual = bool(review.payload.get(MANUAL_KEY))
         head = str(review.payload.get("head") or "") if manual else branch_head(self._service.home_root, task.id)
         if not head:
             return "", "aucune tête relue"
-        selector = str(review.payload.get("pr") or "") if manual else ""
+        return self._ci_of(task.id, head, str(review.payload.get("pr") or "") if manual else "")
+
+    def _ci_of(self, tid: str, head: str, selector: str) -> tuple[str, str]:
+        from grimoire.missions.merger import MergeStage
+
         try:
             return MergeStage(self._service, self._policy, exec_=self._exec, claude_bin=self._claude).head_ci(
-                task.id, head, selector=selector)
+                tid, head, selector=selector)
         except Exception as exc:  # une lecture de la CI ratée ne fait ni ne défait un READY : le merger revérifie
             return "unknown", f"{type(exc).__name__}: {exc}"[:300]
 
@@ -737,7 +758,10 @@ def _verdict_steps(tid: str, model: str, pr: str) -> str:
         "NOT-READY ; `criteria`, un objet par critère avec `index` à partir de 1, `status` met, unmet ou "
         "unverifiable, `evidence_cmd` et `note` ; `findings` facultatifs), puis lance "
         f"`grimoire task review {tid} --criteria _grimoire-output/reviews/{tid}/verdict.json --reviewer reviewer "
-        f"--model {model}`. READY seulement si chaque critère est tenu et montré, et si aucun check requis de la PR "
+        f"--model {model}`. Un critère que porte un job de CI (un test e2e, un test qui a son job) se tient par le verdict "
+        f"de ce job sur la tête relue (`gh pr checks {pr}`) : tu n'as pas à le rejouer ; s'il est vert, marque le critère "
+        "met et cite dans `evidence_cmd` le nom du job et son URL ; s'il est encore en cours, ne rends pas de verdict "
+        "dessus (la relecture sera refaite) ; rouge, il est unmet. READY seulement si chaque critère est tenu et montré, et si aucun check requis de la PR "
         f"n'est en échec (`gh pr checks {pr} --required`)."
     )
 
