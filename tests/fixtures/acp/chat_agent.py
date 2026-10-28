@@ -16,6 +16,9 @@ import os
 import sys
 
 LOG = sys.argv[1]
+# Le client parle UTF-8 : sous Windows les flux par défaut suivent la page de code (cp1252).
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
 
 
 def send(msg: dict) -> None:

@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.74.0] - 2026-10-28
+
+- chore(release): correctifs intermédiaires des PR fusionnées par le lot #1060 (commit de fusion), déjà décrits par l'entrée de leur PR ou du fragment : 9bf19800, 6ca3e6b9, db6e0683, af9cf874, 1d215170
+- fix(windows): main rouge sous Windows depuis le lot #1060 (GAO-main-rouge-s-001). `GRIMOIRE_CHAT_AGENT_COMMAND` n'est plus découpée en mode POSIX sous Windows (les « \ » des chemins étaient mangés, le chat ne recevait aucun événement) ; un chemin `C:\…` à l'intérieur du dépôt n'est plus réservé d'office à l'humain par l'autopilote ; les tests des actions typées lisent en UTF-8, l'agent ACP factice parle UTF-8 ; les tests à faux hôtes en shebang et à `install.sh` sont ignorés sous win32 avec leur raison.
 - fix(missions): plus de boucle de relecture sur une CI qui n'a pas conclu (P89). Constat du 2026-10-28 : P79 escaladée trois fois à l'humain, un READY défait par un test de temps instable.
   - **CI pas encore inscrite** : juste après un push, GitHub ne liste encore aucun check ; le relecteur n'est plus lancé sur une tête de moins de 10 min sans check (au-delà : dépôt sans CI, la relecture se fait), et un NOT-READY rendu dans cet état est écarté sans compter de cycle, comme une CI en cours (P87).
   - **Tête dépassée** : un NOT-READY rendu sur une tête que la PR a dépassée pendant la relecture est relu, il ne renvoie plus le worker corriger ce qui l'est déjà.
@@ -36,6 +40,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - **Tests** : faux agent ACP interactif (`tests/fixtures/acp/chat_agent.py`, aucun banc payant) ; unitaires (flux, permissions, Stop, reprise, gardes HTTP) et e2e Playwright ; captures clair et sombre sous `docs/captures/acp2-chat/`. `AcpClient` gagne un `observer` qui rend le message brut de l'agent (outils, plans, diffs) sans toucher à la machine d'états ni à la parité Rust.
 - fix(bench): `scripts/bench/source_assist_replay.py` rejoue les 12 appels de la mesure Source piste 2 (journal brut dans `docs/audits/source-assist-piste2-2026-10-28-journal.jsonl`), `# noqa: S310` sur la bonne ligne ; la note de cadrage `docs/audits/source-assist-piste2-2026-10-26.md` reçoit son front-matter `audience: décision` (GAO-r49-note-de-001).
 - feat(web): page de présentation en dix plans (P39, GAO-p39-page-de-001). `web/index.html` reste l'unique page : récit en plans avec scènes collantes liées au scroll, anneau de preuve piloté par le scroll, terminaux rendus depuis les bobines de P37 (`web/data/reels/`, aucun terminal écrit à la main), section « Ce qui n'est pas prouvé » citée et datée. `prefers-reduced-motion` supprime scènes collantes et animations liées au scroll. Budget verrouillé par `tests/unit/test_vitrine_budget.py` : HTML+CSS+JS ≤ 120 Ko hors images et polices, JS ≤ 20 Ko, aucune requête tierce.
+- feat(ci): les entrées de CHANGELOG vont dans `changelog.d/<slug>.md` (un fichier par PR) et `scripts/changelog-assemble.py`, appelé par `make release`, les range sous `[X.Y.Z]` ; les PR ne se mettent plus en conflit en tête de `CHANGELOG.md`. La garde `--dev` accepte un fragment ou une entrée `[Unreleased]`, le garde de release refuse un fragment non assemblé (GAO-ci1-fragmen-001)
 
 ## [3.73.0] - 2026-10-28
 
