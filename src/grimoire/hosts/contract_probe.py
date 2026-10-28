@@ -300,18 +300,22 @@ def probe_host(
     return proof
 
 
-def ensure_probed(host_id: HostId, version: str | None, *, binary: str | None = None) -> ProbeProof | None:
+def ensure_probed(
+    host_id: HostId, version: str | None, *, binary: str | None = None, enabled: bool | None = None
+) -> ProbeProof | None:
     """Sonde la version si aucune preuve (en dur ou consignée) ne la couvre ; ``None`` si rien à faire.
 
     Une fois par version : une preuve consignée, réussie ou non, n'est pas rejouée
-    avant :data:`RETRY_AFTER`. Opt-in : sans ``GRIMOIRE_HOST_PROBE=1`` rien n'est lancé
+    avant :data:`RETRY_AFTER`. Opt-in : *enabled* (``orchestrator.probe_host`` de la politique, P86) ; à défaut,
+    ``GRIMOIRE_HOST_PROBE=1`` ; sans l'un ni l'autre rien n'est lancé
     (la sonde coûte deux appels payants) et la version non prouvée garde le comportement sûr,
     une reprise en ``waiting(human)``.
     """
     from grimoire.hosts.capabilities import recorded_contract
 
     wanted = (version or "").strip()
-    if not wanted or host_id not in _HOSTS or os.environ.get(PROBE_ENV, "").strip() != "1":
+    allowed = enabled if enabled is not None else os.environ.get(PROBE_ENV, "").strip() == "1"
+    if not wanted or host_id not in _HOSTS or not allowed:
         return None
     if recorded_contract(host_id).host_version == wanted:
         return None
@@ -326,3 +330,27 @@ def ensure_probed(host_id: HostId, version: str | None, *, binary: str | None = 
         return probe_host(host_id, wanted, binary=binary)
     except Exception:
         return None  # fail-closed : pas de frein, jamais d'erreur pour l'utilisateur
+
+
+def brake_state(host_id: HostId, version: str | None = None, *, binary: str | None = None) -> tuple[str, str, str]:
+    """``(version, état, détail)`` du frein de la version d'hôte courante (P86) ; état ``proved`` | ``failed`` | ``unproved`` | ``absent``.
+
+    Sans lancer l'hôte plus que ``--version`` : ne sonde jamais. *version* force la version lue.
+    """
+    from grimoire.hosts.capabilities import recorded_contract
+
+    found = (version or "").strip() or installed_version(host_id, binary)
+    if not found:
+        return "", "absent", f"hôte {host_id.value} introuvable ou version illisible : rien à prouver"
+    if recorded_contract(host_id).host_version == found:
+        return found, "proved", f"frein de {host_id.value} {found} prouvé (fixtures capturées)"
+    proof = proof_for(host_id, found)
+    if proof is not None and proof.ok:
+        return found, "proved", f"frein de {host_id.value} {found} prouvé par la sonde du {proof.probed_at}"
+    how = (
+        "`grimoire host status --probe` le sonde (deux appels payants à l'hôte) ; "
+        "`orchestrator.probe_host: true` dans la politique le sonde seul, une fois par version"
+    )
+    if proof is not None:
+        return found, "failed", f"frein de {host_id.value} {found} non prouvé (sonde échouée : {proof.reason or 'sans motif'}) ; {how}"
+    return found, "unproved", f"frein de {host_id.value} {found} non prouvé : une session muette reste une question à l'humain ; {how}"

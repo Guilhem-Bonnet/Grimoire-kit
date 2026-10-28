@@ -582,14 +582,8 @@ def doctor(
                 if fmt != "json":
                     console.print(f"  [yellow]WARN[/yellow]  {tool_detail}")
             else:
-                _record(
-                    "tool_version",
-                    passed=True,
-                    detail=(
-                        f"outil grimoire {gap['installed']} à jour vis-à-vis du kit du projet "
-                        f"({gap['aligned']})"
-                    ),
-                )
+                _record("tool_version", passed=True, detail=(
+                    f"outil grimoire {gap['installed']} à jour vis-à-vis du kit du projet ({gap['aligned']})"))
 
     # 4quater-ter. Confiance dans l'installation de l'outil (D-03) : les fichiers
     # installés sont-ils ceux de leur RECORD ? Hors ligne ; la provenance se
@@ -609,6 +603,10 @@ def doctor(
         if fmt != "json":
             tag = "[green]OK[/green]" if trust_verdict.ok else "[red]FAIL[/red]"
             console.print(f"  {tag}  {trust_entry['detail']}")
+
+    with _timed_phase("host_brake"):  # P86 : le frein de la version d'hôte courante est-il prouvé ?
+        from grimoire.cli.doctor_brake import apply_host_brake_check
+        apply_host_brake_check(results, fmt=fmt, console=console)
 
     # 4quinquies. Override drift (issue #427) — un override est une copie ou
     # une extension du kit, jamais une garantie qu'il en reçoit encore les
@@ -1321,6 +1319,7 @@ LazyTyperGroup.configure(
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
+        "chat": LazyCommandSpec("grimoire.cli.cmd_chat", "chat_command", rich_help_panel="Project"),
         "context-pack": LazyCommandSpec("grimoire.cli.cmd_context_pack", "context_pack_command", rich_help_panel="Data"),
         "migrate": LazyCommandSpec("grimoire.cli.cmd_migrate", "migrate_command", rich_help_panel="Project"),
         "upgrade": LazyCommandSpec("grimoire.cli.cmd_upgrade", "upgrade_command", rich_help_panel="Utilities"),
@@ -1339,7 +1338,7 @@ LazyTyperGroup.configure(
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
         "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "expertise", "web",
-        "autonomy", "mcp", "onboard", "team",
+        "autonomy", "mcp", "onboard", "team", "chat",
         "config", "completion", "self", "plugins",
     ],
 )

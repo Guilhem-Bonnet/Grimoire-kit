@@ -51,6 +51,7 @@ c'est sans effet sur la garde, l'inscription précède tout tick qui jugerait se
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import subprocess
@@ -385,6 +386,7 @@ class WorkerLauncher:
         self._exec = exec_
         self._claude = claude_bin
         self._now = now
+        self._version: str | None = None
 
     # -- gardes -------------------------------------------------------------
 
@@ -412,6 +414,22 @@ class WorkerLauncher:
         if route is not None and route.outcome == "route" and route.model and route.provider.lower() in {"anthropic", "claude", "claude-code"}:
             return route.model
         return _TIER_ALIAS.get(role.tier, "")
+
+    def _host_version(self) -> str:
+        """La version de l'hôte (``claude --version``), lue une fois par tick (P86) ; ``""`` si illisible.
+
+        C'est elle que le claim porte : le frein d'un hôte ne se prouve que pour une version exacte.
+        """
+        if self._version is None:
+            from grimoire.hosts.host_version import VERSION_PATTERN
+
+            try:
+                done = self._exec([self._claude, "--version"], self._service.home_root, None)
+                found = VERSION_PATTERN.search(done.stdout or "") if done.returncode == 0 else None
+            except (OSError, ValueError):
+                found = None
+            self._version = found.group(0) if found else ""
+        return self._version
 
     # -- lancement ----------------------------------------------------------
 
@@ -477,6 +495,11 @@ class WorkerLauncher:
 
             # Un refus de plafond révoque déjà le mandat ; un rôle en conflit ou un journal en erreur est une panne.
             return self._abandon(tid, session, wt.path, refused, count=code != CAP_EXCEEDED)
+        version = self._host_version()
+        if version:
+            # P86 : la session est nommée au claim avec la version de l'hôte ; sans elle le frein n'est jamais prouvé.
+            with contextlib.suppress(GrimoireError):
+                service.attach_session(tid, session_id, session_host=_HOST, actor=WORKER_ACTOR, host_version=version)
         current = service.require(tid).claim
         service.ledger.append_event(
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
@@ -557,15 +580,16 @@ class WorkerLauncher:
             argv += ["--model", model]
         if self._policy.worker.permission_mode:
             argv += ["--permission-mode", self._policy.worker.permission_mode]
-        argv.append(self._prompt(tid))
+        argv.append(self._prompt(tid, self._host_version()))
         return argv
 
     @staticmethod
-    def _prompt(tid: str) -> str:
+    def _prompt(tid: str, host_version: str = "") -> str:
         """La consigne du worker ; sa PR s'ouvre prête à relire : un brouillon n'est jamais fusionné (#993)."""
+        flag = f" --host-version {host_version}" if host_version else ""
         return (
             f"Tu es le worker de la tâche {tid}, dans son worktree task/{tid}. "
-            f"Rattache cette session à ton claim (`grimoire task attach {tid}`), lis `grimoire task show {tid}`, "
+            f"Rattache cette session à ton claim (`grimoire task attach {tid}{flag}`), lis `grimoire task show {tid}`, "
             "réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR "
             "prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), "
             f"et passe la tâche en revue (`grimoire task move {tid} --to running`, puis `--to needs_verification`) : "

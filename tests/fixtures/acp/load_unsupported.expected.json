@@ -1,0 +1,51 @@
+{
+ "final": {
+  "load_session": false,
+  "outstanding": [],
+  "pending_permissions": [],
+  "resolved_permissions": [],
+  "session_id": "sess-1",
+  "state": "idle"
+ },
+ "steps": [
+  {
+   "events": [],
+   "state": "initializing"
+  },
+  {
+   "events": [
+    {
+     "auth_methods": 0,
+     "load_session": false,
+     "protocol_version": 1,
+     "type": "initialized"
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "events": [
+    {
+     "code": "load_unsupported",
+     "message": "l'agent n'annonce pas loadSession",
+     "type": "error"
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "events": [],
+   "state": "opening"
+  },
+  {
+   "events": [
+    {
+     "loaded": false,
+     "session_id": "sess-1",
+     "type": "session_opened"
+    }
+   ],
+   "state": "idle"
+  }
+ ]
+}

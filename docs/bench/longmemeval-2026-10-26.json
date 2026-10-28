@@ -1,0 +1,32 @@
+{
+  "benchmark": "LongMemEval",
+  "measured_at": "2026-10-26",
+  "dataset": {
+    "kind": "sample",
+    "source": "grimoire.data/bench/longmemeval-sample.json",
+    "questions": 4
+  },
+  "metric": "recall_any@k (session)",
+  "k": 5,
+  "backend": "local (lexical)",
+  "questions_scored": 3,
+  "abstention_excluded": 1,
+  "sessions_refused_by_write_policy": 0,
+  "score": 0.6666666666666666,
+  "by_question_type": {
+    "knowledge-update": {
+      "n": 1,
+      "score": 0.0
+    },
+    "multi-session": {
+      "n": 1,
+      "score": 1.0
+    },
+    "single-session-user": {
+      "n": 1,
+      "score": 1.0
+    }
+  },
+  "comparable_to_published_qa_accuracy": false,
+  "note": "Récupération seule, sans LLM-juge : ne se compare pas au ~94,9 % de réponse cité pour Mastra."
+}

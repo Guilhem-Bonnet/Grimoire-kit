@@ -28,7 +28,7 @@ LONG_OPTION = (
 )
 UNFENCED = (
     "la session {sid} (hôte claude-code-cli, version inconnue, sans frein) ne donne plus signe ; reprendre ? "
-    "Frein non prouvé pour cette version : GRIMOIRE_HOST_PROBE=1 la sonde au prochain tick "
+    "Frein non prouvé pour cette version : `orchestrator.probe_host: true` (politique) la sonde au prochain tick "
     "(deux appels payants à l'hôte), ou `grimoire host status --probe`."
 )
 LONG_EVIDENCE = "Document ; audit _scratch/audit-restes-20260927/rapport.md ligne R49 ; issue #634"
@@ -138,11 +138,11 @@ def test_chaque_type_de_decision_a_sa_carte_et_une_seule_action_primaire(workspa
     expect(card.locator(".ex-decision-title")).to_have_text("Régénérer l'inventaire")
     visible = card.inner_text()
     assert "ne donne plus signe de vie" in visible
-    for jargon in ("GRIMOIRE_HOST_PROBE", sid, "claude --resume"):
+    for jargon in ("GRIMOIRE_HOST_PROBE", "probe_host", sid, "claude --resume"):
         assert jargon not in visible, jargon
     details = card.locator("[data-role='decision-details']")
     details.locator("summary").click()
-    expect(details).to_contain_text("GRIMOIRE_HOST_PROBE=1")
+    expect(details).to_contain_text("orchestrator.probe_host: true")
     expect(details).to_contain_text("R14")
     expect(details).to_contain_text(sid)
     # « Copier la commande » : le presse-papiers dans le clic, et le statut le dit.

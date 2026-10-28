@@ -1,0 +1,295 @@
+[
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "x",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "trop tot"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 9,
+   "result": {
+    "stopReason": "end_turn"
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": "pas un objet"
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "1.0",
+   "method": "session/update"
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "method": "session/new",
+   "params": {
+    "cwd": "/p"
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "method": "initialize",
+   "params": {
+    "protocolVersion": 1,
+    "clientCapabilities": {},
+    "clientInfo": {
+     "name": "grimoire",
+     "version": "x"
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "loadSession": false,
+     "promptCapabilities": {}
+    },
+    "authMethods": []
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 2,
+   "method": "session/new",
+   "params": {
+    "cwd": "/p"
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 2,
+   "error": {
+    "code": -32000,
+    "message": "auth requise"
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 3,
+   "method": "session/new",
+   "params": {
+    "cwd": "/p"
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 3,
+   "result": {
+    "sessionId": "sess-1"
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "autre",
+    "update": {
+     "sessionUpdate": "agent_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "fantome"
+     }
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": "fs-1",
+   "method": "fs/read_text_file",
+   "params": {
+    "sessionId": "sess-1",
+    "path": "/etc/passwd"
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": "fs-1",
+   "error": {
+    "code": -32601,
+    "message": "Method not found"
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "custom/ping",
+   "params": {}
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 4,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "sess-1",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "hop"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 5,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "sess-1",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "deux"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": "p1",
+   "method": "session/request_permission",
+   "params": {
+    "sessionId": "sess-1",
+    "toolCall": {
+     "toolCallId": "call-1",
+     "title": "Ecrire notes.md"
+    },
+    "options": [
+     {
+      "optionId": "allow",
+      "name": "Autoriser",
+      "kind": "allow_once"
+     },
+     {
+      "optionId": "reject",
+      "name": "Refuser",
+      "kind": "reject_once"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": "p1",
+   "result": {
+    "outcome": {
+     "outcome": "selected",
+     "optionId": "inconnue"
+    }
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": "zzz",
+   "result": {}
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 4,
+   "result": {
+    "stopReason": "inventee"
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/cancel",
+   "params": {
+    "sessionId": "sess-1"
+   }
+  }
+ },
+ {
+  "dir": "close"
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 6,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "sess-1",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "apres fermeture"
+     }
+    ]
+   }
+  }
+ }
+]
