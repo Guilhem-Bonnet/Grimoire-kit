@@ -200,8 +200,11 @@ jobs:
         # fichier, on retrouve exactement l'ensemble des échecs de la série.
         shell: bash
         run: |
+          # `--timeout-method=thread` : un worker xdist figé hors d'un point Python (fork() d'un processus multi-thread,
+          # vu en 3.13 le 2026-10-28 : job bloqué une heure) ne reçoit jamais le SIGALRM de la méthode `signal` ; le fil
+          # de garde, lui, vide les piles dans le journal et tue le worker, que xdist remplace : le test fautif est nommé.
           pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -n auto --dist loadfile \
-            --timeout=300 --durations=25 \
+            --timeout=300 --timeout-method=thread --durations=25 \
             --cov=src/grimoire \
             --cov-report=xml \
             --cov-report=term-missing \
