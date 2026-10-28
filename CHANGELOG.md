@@ -7,6 +7,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(acp): pont ACP (Agent Client Protocol), étape 1 du chat d'orchestrateur (GAO-acp1-chat-d-001) : le kit devient un client ACP de l'agent de chaque hôte, sans harness maison
+  - **`rust/grimoire-acp-core`** (`publish = false`, PyO3 optionnel, abi3-py312, `cargo test --no-default-features`) : validation des messages `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/update`, `session/request_permission`, machine d'états de session et routage des permissions (en attente, accordée, refusée, annulée). Crate sur `serde_json` plutôt que sur `agent-client-protocol` : le cœur est pur, le crate officiel tire un runtime asynchrone dont il n'a pas l'usage.
+  - **Repli Python `grimoire.acp`**, livré par défaut : la roue reste `py3-none-any`, rien de publié ne dépend du module compilé (`GRIMOIRE_ACP_BACKEND=rust` choisit l'oracle quand il est installé). Le SDK Python `agent-client-protocol` n'est pas ajouté aux dépendances : la machine et le client tiennent en stdlib.
+  - **Client de processus** (`AcpClient`) : lance l'agent dans le dossier du projet, envoie les prompts, rend le flux, annule (`session/cancel`, permissions en attente annulées), reprend (`session/load` si l'agent annonce `loadSession`, refus net sinon), arrête proprement. `fs/*` et `terminal/*` ne sont pas annoncés ; une demande quand même reçoit `-32601`. Sans réponse de l'utilisateur, une permission est annulée, jamais accordée.
+  - **`HostProfile.acp_command`** : table de lancement par hôte (`claude-agent-acp`, `gemini --acp`, `copilot --acp`, `agent acp`, `codex-acp`, `opencode acp`).
+  - **`grimoire chat --host claude|gemini "<message>"`** : imprime le flux, pose les permissions dans le terminal, Ctrl-C annule le tour.
+  - **Tests** : faux agent ACP en sous-processus rejouant une transcription (aucun banc payant), parité Rust/Python sur les mêmes transcriptions et fichiers `.expected.json` (`cargo test` et `pytest`), contrôle de la roue construite (`py3-none-any`, sans source Rust, `grimoire.acp` sans le module compilé). Job `rust-acp` ajouté à `rust-cores.yml`.
+
 - fix(missions): la consigne du relecteur lui fait noter `git status`, lancer ses commandes avec `uv run --frozen` et remettre l'arbre en état avant `task review`. Un `uv.lock` réécrit ou un rapport de bench rejoué par ses propres commandes rendait son READY périmé (« modifications non commitées »), trois fois de suite, puis escaladait à l'humain (R59, R60, R63 le 2026-10-27).
 
 - fix(missions): le merger réaligne (ou renvoie au worker) une PR que GitHub dit en conflit et sur laquelle aucun check n'est rapporté, au lieu d'attendre une CI que GitHub ne lance pas sur une PR en conflit. Le 2026-10-27, R57 (#979) restait sur « aucun check rapporté » à chaque tick, en conflit sur le seul CHANGELOG.md. Une PR à jour sans check attend toujours sa CI.

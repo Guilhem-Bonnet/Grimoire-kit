@@ -3,7 +3,8 @@ name: Rust cores
 # Point d'entrée CI unique pour les cœurs Rust optionnels du kit
 # (rust/grimoire-policies-core/, rust/grimoire-schema-core/,
 # rust/grimoire-hosts-core/, rust/grimoire-flows-core/,
-# rust/grimoire-dispatch-core/ et rust/grimoire-traces-core/, issue #354).
+# rust/grimoire-dispatch-core/, rust/grimoire-traces-core/ et
+# rust/grimoire-acp-core/, issue #354).
 #
 # Remplace rust-policies-core.yml et rust-schema-core.yml. Ces deux
 # workflows étaient filtrés par `paths:` : invisibles de toute PR hors de
@@ -15,12 +16,12 @@ name: Rust cores
 # Ici le déclenchement couvre TOUTE PR vers main et TOUT push sur main, sans
 # filtre `paths`. Un premier job `changes` calcule quel(s) crate(s) sont
 # concernés (dorny/paths-filter, sur les mêmes listes de chemins que les
-# anciens workflows) ; les douze jobs par crate (cargo + parity, un couple
+# anciens workflows) ; les quatorze jobs par crate (cargo + parity, un couple
 # par crate) ne s'exécutent que si leur périmètre est touché et sont sinon
 # rapportés `skipped` par GitHub — un skip satisfait un check requis, une
 # absence de rapport ne le satisfait jamais. `rust-gate` est le seul job à
 # déclarer comme check requis dans la protection de branche : il agrège les
-# douze jobs et échoue si l'un d'eux a échoué ou a été annulé, réussit sinon
+# quatorze jobs et échoue si l'un d'eux a échoué ou a été annulé, réussit sinon
 # (y compris quand tous ont été sautés).
 #
 # Ne touche à rien de ce que publish.yml construit ou publie : la wheel
@@ -54,6 +55,7 @@ jobs:
       flows: ${{ steps.filter.outputs.flows }}
       dispatch: ${{ steps.filter.outputs.dispatch }}
       traces: ${{ steps.filter.outputs.traces }}
+      acp: ${{ steps.filter.outputs.acp }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
@@ -125,6 +127,14 @@ jobs:
               - "tests/e2e/test_workspace_proposals.py"
               - "tests/e2e/test_workspace_agent_freshness.py"
               - "tests/fixtures/traces_ledgers/**"
+              - "pyproject.toml"
+              - ".github/workflows/rust-cores.yml"
+            acp:
+              - "rust/grimoire-acp-core/**"
+              - "src/grimoire/acp/**"
+              - "src/grimoire/hosts/capabilities.py"
+              - "tests/unit/test_acp.py"
+              - "tests/fixtures/acp/**"
               - "pyproject.toml"
               - ".github/workflows/rust-cores.yml"
 
@@ -622,6 +632,88 @@ jobs:
         # regarde) : la suite complète doit rester verte avec lui présent.
         run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
 
+  rust-acp-cargo:
+    name: "rust-acp / cargo"
+    needs: changes
+    if: needs.changes.outputs.acp == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249  # stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2
+        with:
+          workspaces: "rust/grimoire-acp-core -> target"
+
+      - name: Format check
+        run: cargo fmt --manifest-path rust/grimoire-acp-core/Cargo.toml --check
+
+      - name: Unit tests
+        # --no-default-features : la feature `extension-module` de PyO3 (par
+        # défaut, requise pour que l'extension soit chargeable par Python)
+        # empêche de lier le binaire de test — voir le commentaire en tête
+        # de rust/grimoire-acp-core/Cargo.toml. La logique testée ici
+        # (validation des messages, machine d'états, permissions, rejeu des
+        # transcriptions de tests/fixtures/acp/) ne touche à aucun type
+        # PyO3, aucun interpréteur Python n'est nécessaire pour ce job.
+        run: cargo test --no-default-features --manifest-path rust/grimoire-acp-core/Cargo.toml
+
+  rust-acp-parity:
+    name: "rust-acp / parity"
+    needs: changes
+    if: needs.changes.outputs.acp == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249  # stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2
+        with:
+          workspaces: "rust/grimoire-acp-core -> target"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Build and install the compiled core
+        # `maturin develop` exige un virtualenv actif ; le runner utilise le
+        # Python de l'image, sans venv. On construit donc la roue et on
+        # l'installe, ce qui donne le même résultat sans cette contrainte
+        # (piège déjà rencontré et documenté sur les jobs
+        # policies/schema/hosts/flows/dispatch).
+        run: |
+          pip install "maturin>=1.7,<2"
+          maturin build --release --manifest-path rust/grimoire-acp-core/Cargo.toml --out dist-rust
+          pip install --force-reinstall dist-rust/*.whl
+
+      - name: Verify the compiled core is importable
+        run: python -c "import grimoire_acp_core; print('grimoire_acp_core', grimoire_acp_core.__version__)"
+
+      - name: ACP tests — both backends, transcripts replayed on each
+        # tests/unit/test_acp.py rejoue les transcriptions de
+        # tests/fixtures/acp/ sur la machine Python puis, module compilé
+        # présent, sur la machine Rust, et compare aux mêmes fichiers
+        # `.expected.json` que lit `cargo test`. Il construit aussi la roue
+        # (uv) : py3-none-any, sans source Rust, et `grimoire.acp` y tourne
+        # sans `grimoire_acp_core`.
+        run: |
+          pip install uv
+          pytest tests/unit/test_acp.py -q --tb=short
+
+      - name: Full SDK suite with the compiled core loaded
+        # Preuve que rien d'autre dans le kit ne dépend de l'absence du
+        # module compilé (import optionnel, aucun autre appelant ne le
+        # regarde) : la suite complète doit rester verte avec lui présent.
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+
   rust-gate:
     name: rust-gate
     if: always()
@@ -639,9 +731,11 @@ jobs:
       - rust-dispatch-parity
       - rust-traces-cargo
       - rust-traces-parity
+      - rust-acp-cargo
+      - rust-acp-parity
     runs-on: ubuntu-latest
     steps:
-      - name: Aggregate the twelve Rust jobs
+      - name: Aggregate the fourteen Rust jobs
         # Seul ce job est déclaré comme check requis dans la protection de
         # main. Un job sauté (crate hors périmètre de la PR) est un succès
         # pour ce gate ; seuls `failure` et `cancelled` le font échouer.
@@ -660,6 +754,8 @@ jobs:
             ["rust-dispatch / parity"]="${{ needs.rust-dispatch-parity.result }}"
             ["rust-traces / cargo"]="${{ needs.rust-traces-cargo.result }}"
             ["rust-traces / parity"]="${{ needs.rust-traces-parity.result }}"
+            ["rust-acp / cargo"]="${{ needs.rust-acp-cargo.result }}"
+            ["rust-acp / parity"]="${{ needs.rust-acp-parity.result }}"
           )
           failed=0
           for name in "${!results[@]}"; do
