@@ -8,6 +8,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - docs(bench): parité de coût du lot K estimée sans rejeu payant (issue #642) — `docs/bench/rejeu-lot-k-2026-10-27.md`. Aucun run lancé (banc payant refusé) ; estimation tirée des lots K et L : excursions 8-17 % selon la définition, coût ≈ 120-125 % du nu (cible ≤ 105 % non atteinte), `gate check` 60/60.
+- fix(missions): la consigne du relecteur lui fait noter `git status`, lancer ses commandes avec `uv run --frozen` et remettre l'arbre en état avant `task review`. Un `uv.lock` réécrit ou un rapport de bench rejoué par ses propres commandes rendait son READY périmé (« modifications non commitées »), trois fois de suite, puis escaladait à l'humain (R59, R60, R63 le 2026-10-27).
+
 - fix(missions): le merger réaligne (ou renvoie au worker) une PR que GitHub dit en conflit et sur laquelle aucun check n'est rapporté, au lieu d'attendre une CI que GitHub ne lance pas sur une PR en conflit. Le 2026-10-27, R57 (#979) restait sur « aucun check rapporté » à chaque tick, en conflit sur le seul CHANGELOG.md. Une PR à jour sans check attend toujours sa CI.
 
 - feat(cockpit): « Lancer la session » lance pour de vrai depuis le panneau Assigner (P47 lot 3, GAO-p47-assigne-001) : l'empreinte du plan montré engage l'apply (ADR-008 plan→apply, refus si l'état a changé), lancement par le lanceur du tick (toutes gardes : rôle, disjoncteur, WIP, plafond du jour, mandat), idempotent par tâche, journal `launch-apply.jsonl` ajout seul et fail-closed à l'entrée
