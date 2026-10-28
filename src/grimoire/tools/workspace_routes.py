@@ -1006,6 +1006,10 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
             task_id, str(body.get("text") or ""), actor, origin=ORIGIN_HUMAN,
             question_id=str(body.get("question_id") or ""),
         )
+    if action == "accept":
+        # P88 : l'acceptation de la preuve déclarative (#865), même canal humain que `answer` — l'origine est
+        # posée ici ; le service refuse hors revue, sans motif ou sans pack.
+        return service.accept(task_id, str(body.get("reason") or ""), actor, origin=ORIGIN_HUMAN)
     directive_id = str(body.get("directive_id") or "")
     if not directive_id:
         raise ValueError("`directive_id` requis pour accuser réception")
@@ -1015,7 +1019,7 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
 #: Les gestes de pilotage humain (issue #638) : jamais une transition d'état
 #: sauf `cancel`, qui passe par le même gate que `move --to cancelled` plus la
 #: raison obligatoire et le verrou de claim.
-_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack", "answer")
+_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack", "answer", "accept")
 
 #: Les verbes qu'une tâche accepte depuis l'interface.
 TASK_ACTIONS = ("claim", "move", "block", "close", *_STEERING_ACTIONS)

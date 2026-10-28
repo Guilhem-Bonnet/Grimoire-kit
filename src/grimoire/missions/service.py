@@ -1016,6 +1016,31 @@ class TaskService:
             abandon_reason=f"pilote automatique : {decision.justification}" if decision is not None else "",
         )
 
+    def accept(
+        self, task_id: str, reason: str, actor: str, *, origin: str, provenance: Mapping[str, Any] | None = None,
+        evidence_root: Path | None = None,
+    ) -> TaskMove:
+        """Accepte la preuve déclarative d'une tâche en revue — canal humain — puis la ferme (#865, P88).
+
+        Même geste que ``grimoire task accept --reason`` : :func:`~grimoire.missions.human_acceptance.accept_task`
+        range le pack d'attestation, le verdict ``passed`` humain et le reçu ``READY`` ; la raison est aussi
+        commentée au ledger, puis la tâche est fermée par le gate ordinaire. *origin* est posé par le canal d'appel,
+        jamais lu d'un champ que l'appelant remplit.
+        """
+        from grimoire.missions.human_acceptance import accept_task
+
+        task = self.require(task_id)
+        root = self.project_root
+        outcome = accept_task(
+            task, root, evidence_root or root / "_grimoire-runtime-output" / "evidence", reason, actor,
+            origin=origin, provenance=provenance,
+        )
+        self.comment(
+            task_id, f"Acceptation humaine ({outcome.verdict.id}, pack {outcome.pack.id}) : {reason.strip()}",
+            actor, origin=origin,
+        )
+        return self.transition(task_id, TaskState.CLOSED, actor, reason.strip())
+
     def _question_to_answer(self, task: MissionTask, question_id: str) -> Question:
         """La question visée par une réponse humaine : celle du lot en attente, ou une non bloquante encore ouverte.
 

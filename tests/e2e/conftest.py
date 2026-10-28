@@ -125,13 +125,20 @@ def served(real_project: Path, tmp_path_factory: pytest.TempPathFactory) -> Iter
         assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
 
 
-def _serve_empty_project(tmp_path_factory: pytest.TempPathFactory, label: str) -> Iterator[str]:
-    """Un projet `init` + `standard init`, ledger retiré, servi par `grimoire serve`."""
+def _serve_empty_project(
+    tmp_path_factory: pytest.TempPathFactory, label: str, roots: list[Path] | None = None
+) -> Iterator[str]:
+    """Un projet `init` + `standard init`, ledger retiré, servi par `grimoire serve`.
+
+    *roots*, s'il est donné, reçoit la racine du projet (pour les tests qui y écrivent).
+    """
     root = tmp_path_factory.mktemp(label) / "projet-vide"
     root.mkdir(parents=True)
+    if roots is not None:
+        roots.append(root)
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
     created = subprocess.run(
-        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-vide"],
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-vide", "--backend", "local"],
         cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=180,
     )
     if not (root / "_grimoire" / "kit").is_dir():
