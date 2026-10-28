@@ -77,7 +77,7 @@ EXPECTED_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     S.FAILED: frozenset({S.READY, S.CANCELLED}),
     S.CLOSED: frozenset(),
     S.CANCELLED: frozenset(),
-    S.WAITING: frozenset({S.RUNNING, S.READY, S.CANCELLED}),
+    S.WAITING: frozenset({S.RUNNING, S.READY, S.FAILED, S.CANCELLED}),  # FAILED : l'abandon du pilote (P82), réouvrable
 }
 
 _WAITING_PAYLOAD = {"waiting": Waiting("quota", "unknown", None, None, "2026-10-17T00:00:00+00:00").to_dict()}

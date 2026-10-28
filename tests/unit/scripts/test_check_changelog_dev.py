@@ -195,3 +195,39 @@ def test_main_title_argument_wins_and_needs_a_value(repo: Path, monkeypatch: pyt
     assert MOD.main(["--dev", "--title", "docs: coquille"]) == 0
     assert "--title" in capsys.readouterr().out
     assert MOD.main(["--dev", "--title"]) == 2
+
+
+def test_a_fragment_satisfies_the_branch(repo: Path) -> None:
+    (repo / "changelog.d").mkdir()
+    _commit(repo, "feat: une fonctionnalité", code__py="a = 2\n")
+    (repo / "changelog.d" / "ma-pr.md").write_text("- feat: elle fait ceci\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: fragment")
+    assert MOD.dev_problems(repo) == []
+
+
+def test_an_empty_fragment_or_readme_does_not_count(repo: Path) -> None:
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "README.md").write_text("- exemple\n", encoding="utf-8")
+    (repo / "changelog.d" / "vide.md").write_text("rien\n", encoding="utf-8")
+    _commit(repo, "fix: un correctif", code__py="a = 2\n")
+    assert MOD.dev_problems(repo)
+
+
+def test_two_prs_with_fragments_merge_without_conflict(repo: Path) -> None:
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / ".gitkeep").write_text("", encoding="utf-8")
+    _commit(repo, "chore: dossier")
+    _git(repo, "checkout", "-q", "-b", "pr-a", "main")
+    _git(repo, "merge", "-q", "--ff-only", "travail")
+    _git(repo, "checkout", "-q", "-b", "pr-b", "travail")
+    _git(repo, "checkout", "-q", "pr-a")
+    (repo / "changelog.d" / "a.md").write_text("- feat: a\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "feat: a")
+    _git(repo, "checkout", "-q", "pr-b")
+    (repo / "changelog.d" / "b.md").write_text("- feat: b\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "feat: b")
+    proc = subprocess.run(["git", "merge-tree", "--write-tree", "pr-a", "pr-b"], cwd=repo, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stdout + proc.stderr

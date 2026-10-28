@@ -457,6 +457,52 @@ def test_p63_le_badge_suit_l_espace_travail_aussi(page: Page, served_inbox: dict
     assert page.locator("#decisions-count").inner_text() == "3"
 
 
+# ── Compagnon mobile (P52) : 390 px ─────────────────────────────────────────
+
+
+def test_p52_a_390_px_une_colonne_une_action_par_decision_sans_defilement_horizontal(
+    browser: Browser, served_inbox: dict[str, str]
+) -> None:
+    context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
+    shot = context.new_page()
+    try:
+        _open(shot, served_inbox, f"?project={served_inbox['home']}#a-traiter")
+        measured = shot.evaluate(
+            """() => {
+              const iw = window.innerWidth;
+              const rows = [...document.querySelectorAll('.at-row')].map((r) => {
+                const b = r.getBoundingClientRect();
+                const a = r.querySelector('.at-act').getBoundingClientRect();
+                return { left: b.left, right: b.right, act: [a.left, a.right, a.width, a.height] };
+              });
+              const secs = [...document.querySelectorAll('.at-section')].map((s) => s.getBoundingClientRect().left);
+              return { iw, doc: document.documentElement.scrollWidth, body: document.body.scrollWidth,
+                       canvas: document.querySelector('#canvas').scrollWidth,
+                       canvasClient: document.querySelector('#canvas').clientWidth, rows, secs };
+            }"""
+        )
+        iw = measured["iw"]
+        assert measured["doc"] <= iw and measured["body"] <= iw, f"défilement horizontal de la page : {measured}"
+        assert measured["canvas"] <= measured["canvasClient"], f"défilement horizontal du canevas : {measured}"
+        assert len(measured["rows"]) == 3
+        # Une seule colonne : toutes les lignes partagent le même bord gauche.
+        assert len({round(r["left"]) for r in measured["rows"]}) == 1, measured["rows"]
+        assert len({round(r["right"]) for r in measured["rows"]}) == 1, measured["rows"]
+        for row in measured["rows"]:
+            left, right, width, height = row["act"]
+            assert 0 <= left and right <= iw, f"action hors de l'écran : {row}"
+            assert width > 0 and height > 0, f"action invisible : {row}"
+        for kind in ("question", "proposal", "task_blocked"):
+            action = shot.locator(f".at-row[data-kind='{kind}'] .at-act")
+            assert action.is_visible()
+        # L'action reste atteignable d'un appui : elle ouvre bien l'écran de décision.
+        _row(shot, BLOCKED_TITLE).locator(".at-act").click()
+        shot.wait_for_function("() => window.GrimoireWorkspace.space === 'travail'")
+        assert _fragment(shot) == ("travail", {"task": [served_inbox["blocked"]]})
+    finally:
+        context.close()
+
+
 # ── Captures pour la relecture ──────────────────────────────────────────────
 
 
