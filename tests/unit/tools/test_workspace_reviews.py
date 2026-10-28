@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 from grimoire.tools import project_registry as reg
 from grimoire.tools import workspace_attention as wa
@@ -105,6 +106,66 @@ def _items(view: dict[str, Any], kind: str) -> list[dict[str, Any]]:
 
 
 # ── Critère 1 : la route d'attention ────────────────────────────────────────
+
+
+class TestPilote:
+    """P84 : sous mandat accept+merge, le relecteur du tick relit les PR de tâches ; elles quittent « À relire »."""
+
+    @staticmethod
+    def _view(root: Path, prs: list[dict[str, Any]]) -> dict[str, Any]:
+        return wa.attention_view(root, pr_reader=_Reader(prs), review_cache=wr.ReviewCache(), pr_wait=5,
+                                 service_probe=lambda *_: "online", watch=wa.ServiceWatch())
+
+    def test_sous_mandat_la_pr_de_tache_est_comptee_a_part(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "atelier"
+        ids = _project(root)
+        monkeypatch.setattr(wa, "_pilot_covers_reviews", lambda _root: True)
+
+        view = self._view(root, _prs(ids))
+
+        assert {i["ref"]["pr"] for i in _items(view, wa.PR_REVIEW)} == {15}  # la PR 12 (task/<id>) est pilotée
+        assert view["reviews"][0]["piloted"] == 1
+        assert view["reviews"][0]["count"] == 1
+
+    def test_pr_sans_tache_ou_tache_en_attente_humaine_reste_a_relire(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "atelier"
+        ids = _project(root)
+        service = TaskService(root)
+        service.claim(ids["branch"], "agent-a", host="host-claude-code-cli")
+        service.transition(ids["branch"], TaskState.RUNNING, "agent-a")
+        service.ask(ids["branch"], "Fusionner ?", "agent-a")
+        monkeypatch.setattr(wa, "_pilot_covers_reviews", lambda _root: True)
+        prs = [*_prs(ids), _pr(20, "Bump dépendance", branch="dependabot/pip/x", checks=[_run("tests", "SUCCESS")])]
+
+        view = self._view(root, prs)
+
+        assert {i["ref"]["pr"] for i in _items(view, wa.PR_REVIEW)} == {12, 15, 20}
+        assert "piloted" not in view["reviews"][0]
+
+    def test_pr_pilotee_en_echec_de_ci_revient_a_l_humain(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "atelier"
+        ids = _project(root)
+        monkeypatch.setattr(wa, "_pilot_covers_reviews", lambda _root: True)
+        prs = [_pr(12, "Lot rouge", branch=f"task/{ids['branch']}", checks=[_run("tests", "FAILURE")])]
+
+        view = self._view(root, prs)
+
+        assert {i["ref"]["pr"] for i in _items(view, wa.PR_REVIEW)} == {12}
+
+    def test_sans_mandat_la_liste_est_inchangee(self, tmp_path: Path) -> None:
+        root = tmp_path / "atelier"
+        ids = _project(root)
+
+        view = self._view(root, _prs(ids))
+
+        assert {i["ref"]["pr"] for i in _items(view, wa.PR_REVIEW)} == {12, 15}
+        assert "piloted" not in view["reviews"][0]
 
 
 class TestAttention:

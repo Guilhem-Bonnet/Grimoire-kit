@@ -1723,6 +1723,8 @@ body[data-active-space] .panel-head {
 
 #dock {
   height: var(--h-dock);
+  max-height: 80vh;
+  position: relative;
   border-top: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -1732,6 +1734,33 @@ body[data-active-space] .panel-head {
 
 #dock[data-state="collapsed"] {
   display: none;
+}
+
+/* Poignée du bord haut : le dock grandit vers le haut, comme le panneau de
+ * VS Code. Absente sous 900 px, où le dock a une hauteur fixe. */
+.dock-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 5;
+  touch-action: none;
+  background: transparent;
+  transition: background var(--dur);
+}
+
+.dock-resize:hover,
+.dock-resize:focus-visible,
+.dock-resize[data-dragging] {
+  background: var(--accsoft);
+}
+
+@media (max-width: 900px) {
+  .dock-resize {
+    display: none;
+  }
 }
 
 #dock-tabs {
