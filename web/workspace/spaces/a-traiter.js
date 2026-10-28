@@ -512,6 +512,15 @@ export async function mount(root, ctx) {
       block.append(heading, list);
       wrap.append(block);
     }
+    const piloted = (data.reviews || []).reduce((n, r) => n + (r.piloted || 0), 0);
+    if (piloted) {
+      const fold = node('details', 'at-piloted');
+      fold.append(
+        node('summary', null, `Relues par le pilote : ${piloted} en cours`),
+        node('p', 'at-hint', 'Le relecteur du tick relit ces PR sous mandat, le merger les fusionne : rien à faire de ton côté.'),
+      );
+      wrap.append(fold);
+    }
     if (rows.length) select(selected, { focus: hadFocus, remember: Boolean(ctx.params.item) || hadFocus });
     else ctx.inspector.replaceChildren();
   };

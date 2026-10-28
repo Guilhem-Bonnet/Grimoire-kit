@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): « À traiter › À relire » ne liste plus les PR que le relecteur du tick relit (P84, GAO-p84-traiter-001) : sous un mandat actif couvrant `accept` et `merge`, une PR rattachée à une tâche (branche `task/<id>` ou identifiant dans le titre) en cours, CI non rouge, passe dans une ligne repliée « Relues par le pilote : N en cours ». Restent à relire : PR sans tâche, tâche revenue vers l'humain (waiting, blocked, failed), CI en échec. Sans mandat, rien ne change
 - feat(cockpit): les contrôles préalables au lancement d'une session bloquent avec leur raison (P47 critère 2, GAO-p47-assigne-001) : dossier approuvé par Claude Code (~/.claude.json, sans lui une session --bg se bloque en silence), gh authentifié (le worker doit pouvoir ouvrir sa PR), PR ouverte sur les mêmes fichiers que le claim réserverait — trois vérifications de plus au préflight (8 au total), injectables, sondées par le même exec_ que le lanceur ; l'apply refuse tout plan pas prêt avec la raison du premier contrôle rouge
 ## [3.72.0] - 2026-10-27
 
