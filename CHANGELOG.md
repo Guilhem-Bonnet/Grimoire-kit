@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(missions): plus de boucle de relecture sur une CI qui n'a pas conclu (P89). Constat du 2026-10-28 : P79 escaladée trois fois à l'humain, un READY défait par un test de temps instable.
+  - **CI pas encore inscrite** : juste après un push, GitHub ne liste encore aucun check ; le relecteur n'est plus lancé sur une tête de moins de 10 min sans check (au-delà : dépôt sans CI, la relecture se fait), et un NOT-READY rendu dans cet état est écarté sans compter de cycle, comme une CI en cours (P87).
+  - **Tête dépassée** : un NOT-READY rendu sur une tête que la PR a dépassée pendant la relecture est relu, il ne renvoie plus le worker corriger ce qui l'est déjà.
+  - **CI rouge sur un READY** : le relecteur relance d'abord une fois les jobs en échec (même clé que le merger : une seule relance par tête), le READY tient ; le merger attend le verdict de la relance (3 min) avant de renvoyer au worker si la tête retombe.
+
 - fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).
 
 - fix(ci): les journaux de preuve (`_grimoire-runtime-output/`) et les reçus de relecture (`_grimoire-output/reviews/`) ne sont plus suivis par git. Commités par des workers (#1017, #1039), ils rendaient « périmée » chaque relecture (fichier suivi modifié par `task verify` ou la relecture), jusqu'à l'escalade à l'humain (P82, 2026-10-28).
