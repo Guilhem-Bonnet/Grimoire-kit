@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(memory): `grimoire memory graph backfill-project` rattrape un graphe Neo4j écrit avant la clé de projet (P15b). Aperçu chiffré par défaut, `--apply` pour écrire. Souvenirs attribués par `weaviate_collection` puis `metadata_json.project_name` (jamais un souvenir d'un autre projet) ; faits, journaux, `WeaviateObject`, étiquettes, entités et agents par leur souvenir, sans fusionner un nom partagé avec un autre projet ; `CodeNode` par préfixe de `--paths` **et** fichier présent dans la racine du projet (la racine elle-même, un dossier hors projet ou inexistant sont refusés) ; fantômes marqués externes. Les identifiants reçoivent le préfixe `<projet>::` ; un conflit avec un nœud déjà préfixé est listé et le nœud laissé en l'état. Rejouable. Testé sur le service Neo4j du CI.
 - feat(cockpit): les contrôles préalables au lancement d'une session bloquent avec leur raison (P47 critère 2, GAO-p47-assigne-001) : dossier approuvé par Claude Code (~/.claude.json, sans lui une session --bg se bloque en silence), gh authentifié (le worker doit pouvoir ouvrir sa PR), PR ouverte sur les mêmes fichiers que le claim réserverait — trois vérifications de plus au préflight (8 au total), injectables, sondées par le même exec_ que le lanceur ; l'apply refuse tout plan pas prêt avec la raison du premier contrôle rouge
 ## [3.72.0] - 2026-10-27
 
