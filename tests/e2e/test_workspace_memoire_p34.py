@@ -411,3 +411,31 @@ def test_hors_du_projet_servi_les_gestes_sont_absents_avec_leur_raison(page_p34:
     assert detail.locator("button", has_text="Corriger").count() == 0
     assert detail.locator(".kn-actions").count() == 0
     assert "lecture seule" in detail.locator(".kn-note[data-note='readonly']").inner_text()
+
+
+def test_p42_captures_de_relecture(browser: Browser, served_p34: dict[str, Any]) -> None:
+    """Avec ``GRIMOIRE_E2E_CAPTURES=<dossier>``, écrit les captures de « Demander une correction… »."""
+    target = os.environ.get("GRIMOIRE_E2E_CAPTURES")
+    if not target:
+        return
+    out = Path(target)
+    out.mkdir(parents=True, exist_ok=True)
+    for theme, label in (("light", "clair"), ("dark", "sombre")):
+        word = _word()
+        title = f"Décision {word}"
+        _seed(served_p34, [{"key": "a", "text": f"{title} : la limite est de 10 mots", "tags": [word]}])
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme=theme)
+        page = context.new_page()
+        try:
+            _open_entry(page, served_p34, word, title)
+            page.evaluate(f"() => document.querySelector(`#st-theme [data-theme-pref='{theme}']`)?.click()")
+            page.locator("#inspector-body button", has_text="Demander une correction…").click()
+            page.locator(".kn-ask textarea").fill("La limite est de 20 mots, pas 10 : l’agent doit le vérifier dans le code.")
+            page.wait_for_timeout(300)
+            page.screenshot(path=str(out / f"p42-demander-une-correction-{label}.png"), full_page=False)
+            page.locator(".kn-ask button[type='submit']").click()
+            page.wait_for_selector("#inspector-body .kn-status[data-tone='ok']", timeout=30_000)
+            page.wait_for_timeout(300)
+            page.screenshot(path=str(out / f"p42-tache-creee-{label}.png"), full_page=False)
+        finally:
+            context.close()
