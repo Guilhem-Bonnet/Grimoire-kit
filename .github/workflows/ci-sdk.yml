@@ -43,6 +43,12 @@ on:
     # `edited` : la garde `changelog` juge le titre de la PR (celui que le
     # squash-merge conserve) ; le renommer doit relancer le job qui le lit.
     types: [opened, synchronize, reopened, edited]
+  # Windows et macOS ne passent la suite complète que sur main, la nuit et à la
+  # demande (2026-10-27) : sur une PR, chaque réalignement relançait ~45 min de
+  # Windows. Une régression propre à ces systèmes se voit au plus tard la nuit.
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -62,7 +68,7 @@ jobs:
           # de la branche contre origin/main, un clone shallow la rendrait muette.
           fetch-depth: 0
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -93,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -119,7 +125,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -147,6 +153,10 @@ jobs:
     # ~43 s de sondes localhost sans réponse (#857) ; borné depuis, la jambe
     # est réarmée sur les PR. 120 min reste la borne de sécurité.
     timeout-minutes: 120
+    env:
+      # Sur une PR, Windows et macOS rendent leur check requis sans lancer la suite
+      # (le nom du job reste, la protection de main l'exige) ; ubuntu la lance toujours.
+      FULL_SUITE: ${{ matrix.os == 'ubuntu-latest' || github.event_name != 'pull_request' }}
     strategy:
       fail-fast: false
       matrix:
@@ -159,17 +169,26 @@ jobs:
           - os: macos-latest
             python-version: "3.13"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Suite complète réservée à main, la nuit et la demande
+        if: env.FULL_SUITE != 'true'
+        shell: bash
+        run: echo "Suite sautée sur PR pour ${{ matrix.os }}, elle tourne sur main, chaque nuit et à la demande."
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - if: env.FULL_SUITE == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - if: env.FULL_SUITE == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
       - name: Install package + dev deps
+        if: env.FULL_SUITE == 'true'
         run: pip install -e ".[dev]"
 
       - name: Run unit tests with coverage
+        if: env.FULL_SUITE == 'true'
         # La suite complète sur les trois systèmes (D-10) : l'ancien sous-ensemble
         # Windows et le `-x` (arrêt au premier échec, aussi posé par `addopts`)
         # cachaient chaque défaut derrière le précédent. xdist (`-n auto`) paie
@@ -217,7 +236,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -257,7 +276,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -297,7 +316,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -318,7 +337,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
