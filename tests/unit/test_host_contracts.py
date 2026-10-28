@@ -342,7 +342,7 @@ class TestProbeOnNewVersion:
             host = "claude-code"
             host_version = "2.1.309"
 
-        assert "GRIMOIRE_HOST_PROBE=1" in unfenced_question(_View())  # type: ignore[arg-type]
+        assert "orchestrator.probe_host: true" in unfenced_question(_View())  # type: ignore[arg-type]
 
     def test_installed_version_is_read_once_per_binary(
         self, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
@@ -592,3 +592,36 @@ class TestHostStatusFollowsTheEffectiveConfig:
         proof = json.loads(result.stdout)[0]["brake_proof"]
         assert proof["status"] == "unverified"
         assert "disableAllHooks" in proof["reason"]
+
+
+class TestBrakeState:
+    """P86 : ce que `grimoire doctor` dit du frein de la version d'hôte courante."""
+
+    def test_captured_version_is_proved(self) -> None:
+        from grimoire.hosts.contract_probe import brake_state
+
+        version, status, detail = brake_state(HostId.CLAUDE_CODE_CLI, "2.1.301")
+        assert (version, status) == ("2.1.301", "proved") and "prouvé" in detail
+
+    def test_unknown_version_says_how_to_prove_it(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from grimoire.hosts.contract_probe import brake_state
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        version, status, detail = brake_state(HostId.CLAUDE_CODE_CLI, "9.9.9")
+        assert (version, status) == ("9.9.9", "unproved")
+        assert "probe_host" in detail and "host status --probe" in detail
+
+    def test_doctor_reports_the_brake(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import json as _json
+
+        from typer.testing import CliRunner
+
+        from grimoire.cli.app import app
+
+        monkeypatch.setattr("grimoire.hosts.contract_probe.installed_version", lambda *_a, **_k: "9.9.9")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "project-context.yaml").write_text("project:\n  name: t\n", encoding="utf-8")
+        result = CliRunner().invoke(app, ["doctor", str(tmp_path), "-o", "json"])
+        checks = _json.loads(result.output)["checks"]
+        brake = next(c for c in checks if c["name"] == "host_brake")
+        assert brake["status"] == "unproved" and brake["host_version"] == "9.9.9" and "probe_host" in brake["detail"]

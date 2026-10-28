@@ -57,6 +57,7 @@
 import { api, boot, host } from './api.js';
 import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
+import { createChat } from './chat.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -88,6 +89,8 @@ const SPACES = [
       { id: 'memoire', module: 'memoire', label: 'Recherche', skeleton: 'results' },
       // Le reçu de rappel (P27) : ce que la mémoire a servi aux agents, rejouable.
       { id: 'rappel', module: 'rappel', label: 'Rappel', skeleton: 'results' },
+      // La carte 3D (P81) : tout le graphe du projet, rendu sur le GPU.
+      { id: 'carte', module: 'carte', label: 'Carte 3D', skeleton: 'kpi' },
       { id: 'journal', module: 'observer', label: 'Journal', skeleton: 'table' },
     ] },
   { id: 'configuration', label: 'Configuration', icon: 'i-space-configuration', term: 'configuration',
@@ -148,6 +151,7 @@ const DOCK_TABS = [
   { id: 'traces', icon: 'network',   label: 'Traces',   term: 'trace' },
   { id: 'timeline', icon: 'chart', label: 'Timeline', term: 'timeline' },
   { id: 'problemes', icon: 'alert', label: 'Problèmes', term: 'probleme' },
+  { id: 'orchestrateur', icon: 'agent', label: 'Orchestrateur', term: 'orchestrateur' },
 ];
 
 const PANELS = { explorer: 'panel-explorer', inspector: 'panel-inspector', evidence: 'panel-evidence' };
@@ -985,6 +989,7 @@ function restorePanelsForSpace() {
   restoreWidth('explorer');
   restoreWidth('inspector');
   restoreWidth('evidence');
+  restoreDockHeight();
 }
 
 // ── Panneau « Preuves » (rail « 3 », touche 3) ──────────────────────────────
@@ -1359,6 +1364,90 @@ function bindResize() {
   }
 }
 
+// ── Hauteur du dock (P76) ───────────────────────────────────────────────────
+//
+// La poignée du bord haut tire le dock vers le haut. Bornée à 80 % de la
+// fenêtre ; mémorisée par espace et par projet comme la largeur des panneaux ;
+// double-clic = hauteur par défaut ; flèches haut/bas au clavier.
+
+const DOCK_MIN_HEIGHT = 80;
+const DOCK_MAX_RATIO = 0.8;
+const DOCK_KEY_STEP = 24;
+
+function dockMaxHeight() {
+  return Math.max(DOCK_MIN_HEIGHT, Math.floor(window.innerHeight * DOCK_MAX_RATIO));
+}
+
+function clampDockHeight(value) {
+  return Math.min(dockMaxHeight(), Math.max(DOCK_MIN_HEIGHT, Math.round(value)));
+}
+
+function updateDockSeparator() {
+  const handle = $('dock-resize');
+  const dock = $('dock');
+  if (!handle || !dock) return;
+  handle.setAttribute('aria-valuemin', String(DOCK_MIN_HEIGHT));
+  handle.setAttribute('aria-valuemax', String(dockMaxHeight()));
+  handle.setAttribute('aria-valuenow', String(Math.round(dock.getBoundingClientRect().height)));
+}
+
+function setDockHeight(value, { persist = true } = {}) {
+  const dock = $('dock');
+  if (value == null) {
+    dock.style.height = '';
+    if (persist) writeState({ [panelKey('dockHeight', 'dock')]: null });
+  } else {
+    const height = clampDockHeight(value);
+    dock.style.height = height + 'px';
+    if (persist) writeState({ [panelKey('dockHeight', 'dock')]: height });
+  }
+  updateDockSeparator();
+}
+
+function restoreDockHeight() {
+  const saved = Number(readState()[panelKey('dockHeight', 'dock')]);
+  setDockHeight(Number.isFinite(saved) && saved > 0 ? saved : null, { persist: false });
+}
+
+function bindDockResize() {
+  const handle = $('dock-resize');
+  const dock = $('dock');
+  if (!handle || !dock) return;
+  handle.addEventListener('pointerdown', (event) => {
+    if (dock.dataset.state === 'collapsed') return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = dock.getBoundingClientRect().height;
+    handle.setPointerCapture(event.pointerId);
+    handle.dataset.dragging = '';
+    const onMove = (moveEvent) => {
+      setDockHeight(startHeight + (startY - moveEvent.clientY), { persist: false });
+    };
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      delete handle.dataset.dragging;
+      setDockHeight(dock.getBoundingClientRect().height);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  });
+  handle.addEventListener('dblclick', () => setDockHeight(null));
+  handle.addEventListener('keydown', (event) => {
+    const height = dock.getBoundingClientRect().height;
+    if (event.key === 'ArrowUp') setDockHeight(height + DOCK_KEY_STEP);
+    else if (event.key === 'ArrowDown') setDockHeight(height - DOCK_KEY_STEP);
+    else if (event.key === 'Home') setDockHeight(DOCK_MIN_HEIGHT);
+    else if (event.key === 'End') setDockHeight(dockMaxHeight());
+    else return;
+    event.preventDefault();
+  });
+  window.addEventListener('resize', updateDockSeparator);
+  updateDockSeparator();
+}
+
 // ── Dock ────────────────────────────────────────────────────────────────────
 
 const dockBuffers = Object.fromEntries(DOCK_TABS.map((t) => [t.id, []]));
@@ -1405,6 +1494,7 @@ function buildDock() {
 
 function selectDockTab(id) {
   dockTab = id;
+  $('dock').dataset.tab = id;
   markSelectedTab($('dock-tabs'), document.querySelector(`[data-dock-tab="${id}"]`));
   $('dock-body').setAttribute('aria-labelledby', `tab-dock-${id}`);
   // Le champ n'appartient qu'à l'onglet Console : ailleurs il ne prend ni place ni focus.
@@ -1413,9 +1503,19 @@ function selectDockTab(id) {
   renderDock();
 }
 
+// Le chat de l'orchestrateur (ACP2) : monté une fois, son DOM et son flux survivent aux changements d'onglet.
+let orchestratorChat = null;
+
 function renderDock() {
   const body = $('dock-body');
   body.replaceChildren();
+  body.classList.toggle('is-chat', dockTab === 'orchestrateur');
+  if (dockTab === 'orchestrateur') {
+    orchestratorChat ||= createChat({ readOnly: () => host.readOnly });
+    body.append(orchestratorChat.element);
+    orchestratorChat.open();
+    return;
+  }
   const lines = dockBuffers[dockTab] || [];
   if (!lines.length) {
     const empty = document.createElement('div');
@@ -1476,7 +1576,10 @@ function buildConsoleField() {
     autocapitalize: 'off',
     spellcheck: 'false',
     enterkeyhint: 'send',
-    list: 'dock-console-commands',
+    role: 'combobox',
+    'aria-autocomplete': 'list',
+    'aria-expanded': 'false',
+    'aria-controls': 'dock-console-listbox',
     placeholder: 'task list, doctor, memory status…',
   });
   const label = mk('label', { for: 'dock-console-input', class: 'dock-console-prompt' },
@@ -1484,13 +1587,23 @@ function buildConsoleField() {
     mk('span', { text: 'grimoire' }),
     mk('span', { class: 'sr-only', text: ' : sous-commande à lancer' }));
   const form = mk('form', { id: 'dock-console', class: 'dock-console', 'aria-label': 'Console' },
-    label, input, mk('datalist', { id: 'dock-console-commands' }));
+    label, input,
+    mk('ul', { id: 'dock-console-listbox', class: 'dock-console-listbox', role: 'listbox', 'aria-label': 'Sous-commandes proposées' }));
+  form.querySelector('#dock-console-listbox').hidden = true;
   form.hidden = true;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     submitConsole();
   });
   input.addEventListener('keydown', onConsoleKeydown);
+  input.addEventListener('input', refreshConsoleSuggestions);
+  input.addEventListener('blur', () => closeConsoleSuggestions());
+  form.querySelector('#dock-console-listbox').addEventListener('mousedown', (event) => {
+    const row = event.target.closest('[role="option"]');
+    if (!row) return;
+    event.preventDefault(); // garde le focus dans le champ
+    acceptConsoleSuggestion(Number(row.dataset.index));
+  });
   // D'où l'on venait : Échap y retourne. Jamais un élément du dock lui-même.
   input.addEventListener('focus', (event) => {
     const from = event.relatedTarget;
@@ -1514,6 +1627,7 @@ function submitConsole() {
   if (!raw || consoleRunning) return;
   const argv = consoleWords(raw.replace(/^grimoire(\s+|$)/, ''));
   input.value = '';
+  closeConsoleSuggestions();
   if (consoleHistory[consoleHistory.length - 1] !== raw) consoleHistory.push(raw);
   consoleHistoryIndex = consoleHistory.length;
   if (!argv.length) return;
@@ -1522,6 +1636,25 @@ function submitConsole() {
 
 function onConsoleKeydown(event) {
   const input = event.currentTarget;
+  if (suggestions.length) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      setActiveSuggestion((suggestionIndex + step + suggestions.length) % suggestions.length);
+      return;
+    }
+    if (['Tab', 'Enter'].includes(event.key)) {
+      event.preventDefault();
+      acceptConsoleSuggestion(suggestionIndex);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeConsoleSuggestions();
+      return;
+    }
+  }
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopPropagation();
@@ -1541,11 +1674,89 @@ function onConsoleKeydown(event) {
   input.value = consoleHistory[consoleHistoryIndex] ?? '';
 }
 
-/** Les sous-commandes ouvertes, proposées sous le champ (liste blanche lue dans /commands). */
+/** Le catalogue de /commands, gardé tel quel : jamais une proposition hors liste blanche. */
+let consoleCommands = [];
+let suggestions = [];
+let suggestionIndex = 0;
+
 function fillConsoleSuggestions(catalogue) {
-  const list = $('dock-console-commands');
-  if (!list) return;
-  list.replaceChildren(...catalogue.map((c) => mk('option', { value: c.key, label: c.summary })));
+  consoleCommands = catalogue;
+}
+
+/** Propositions pour la ligne : mots suivants des sous-commandes ouvertes, puis options d'une commande complète. */
+function computeSuggestions(raw) {
+  const line = raw.replace(/^\s*grimoire(\s+|$)/, '');
+  if (raw.trim() === 'grimoire' && !/\s$/.test(raw)) return { items: [], partial: '' };
+  const words = line.split(/\s+/);
+  const partial = words.pop();
+  const done = words.filter(Boolean);
+  const items = new Map();
+  for (const c of consoleCommands) {
+    const parts = c.key.split(' ');
+    if (done.length < parts.length && done.every((w, i) => parts[i] === w)) {
+      const next = parts[done.length];
+      if (!next.startsWith(partial)) continue;
+      const leaf = parts.length === done.length + 1;
+      const entry = items.get(next);
+      if (!entry) items.set(next, { value: next, help: leaf ? c.summary : '', count: 1 });
+      else { entry.count += 1; if (leaf) entry.help = c.summary; }
+    } else if (partial.startsWith('-') && done.join(' ') === c.key) {
+      for (const flag of c.flags || []) {
+        if (flag.startsWith(partial)) items.set(flag, { value: flag, help: 'Option de ' + c.key, count: 1 });
+      }
+    }
+  }
+  const list = [...items.values()].map((e) => ({
+    value: e.value,
+    help: e.help || e.count + ' sous-commandes',
+  })).filter((e) => e.value !== partial);
+  return { items: list, partial };
+}
+
+function refreshConsoleSuggestions() {
+  const input = $('dock-console-input');
+  if (!input || consoleRunning) return;
+  const { items } = computeSuggestions(input.value);
+  suggestions = items;
+  suggestionIndex = 0;
+  const list = $('dock-console-listbox');
+  list.replaceChildren(...items.map((item, index) => mk('li', {
+    id: 'dock-console-opt-' + index, role: 'option', 'data-index': String(index),
+    'aria-selected': String(index === 0),
+  }, mk('span', { class: 'opt-name', text: item.value }), mk('span', { class: 'opt-help', text: item.help }))));
+  list.hidden = !items.length;
+  input.setAttribute('aria-expanded', String(items.length > 0));
+  if (items.length) input.setAttribute('aria-activedescendant', 'dock-console-opt-0');
+  else input.removeAttribute('aria-activedescendant');
+}
+
+function setActiveSuggestion(index) {
+  suggestionIndex = index;
+  const input = $('dock-console-input');
+  $('dock-console-listbox').querySelectorAll('[role="option"]').forEach((row, i) => {
+    row.setAttribute('aria-selected', String(i === index));
+    if (i === index) row.scrollIntoView?.({ block: 'nearest' });
+  });
+  input.setAttribute('aria-activedescendant', 'dock-console-opt-' + index);
+}
+
+function closeConsoleSuggestions() {
+  suggestions = [];
+  const input = $('dock-console-input');
+  const list = $('dock-console-listbox');
+  if (list) { list.hidden = true; list.replaceChildren(); }
+  if (input) {
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
+}
+
+function acceptConsoleSuggestion(index) {
+  const item = suggestions[index];
+  if (!item) return;
+  const input = $('dock-console-input');
+  input.value = input.value.replace(/\S*$/, '') + item.value + ' ';
+  refreshConsoleSuggestions();
 }
 
 /** Ouvre la Console et y place le curseur (`` ` ``, de partout). */
@@ -1700,17 +1911,10 @@ function empty(title, sentence, command, action, { compact = false, art = '' } =
   return block;
 }
 
-/** Ce que la coque dit quand un espace laisse l'explorateur ou l'inspecteur muets. */
-function emptyPanelHint(which) {
-  if (which === 'explorer') {
-    return empty(
-      "Pas d'arborescence ici",
-      "Cet espace n'a rien à parcourir à gauche. Les fichiers du projet, étage par étage, sont dans Configuration › Fichiers.",
-      null,
-      current === 'fichiers' ? null : { label: 'Ouvrir les fichiers', run: () => goto('fichiers') },
-      { compact: true },
-    );
-  }
+/** Ce que la coque dit quand un espace laisse l'inspecteur muet. L'explorateur,
+ * lui, n'a pas d'indication : sans arborescence, le panneau et son bouton de
+ * rail disparaissent (P78, `shell.css`). */
+function emptyPanelHint() {
   return empty(
     'Rien à inspecter',
     "Choisissez un élément dans la zone centrale : son détail s'affiche ici.",
@@ -1726,10 +1930,10 @@ function fillEmptyPanels() {
   // Hors atelier (et hors tiroirs) ces panneaux sont masqués : leur indication
   // le serait aussi, et ne doit pas répondre à la place du contenu de l'écran.
   if (root.dataset.atelier !== 'on' && !isNarrow()) return;
-  for (const [which, id] of [['explorer', 'explorer-body'], ['inspector', 'inspector-body']]) {
+  for (const id of ['inspector-body']) {
     const body = $(id);
     if (body.children.length) continue;
-    const hint = emptyPanelHint(which);
+    const hint = emptyPanelHint();
     hint.setAttribute(PLACEHOLDER, 'hint');
     body.append(hint);
   }
@@ -2784,6 +2988,7 @@ async function main() {
   buildRail();
   buildDock();
   bindResize();
+  bindDockResize();
   bindShortcuts();
   for (const button of document.querySelectorAll('#st-theme [data-theme-pref]')) {
     button.addEventListener('click', () => setThemePref(button.dataset.themePref));

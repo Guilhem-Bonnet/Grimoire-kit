@@ -39,7 +39,7 @@ import hashlib
 import json
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -222,7 +222,7 @@ def pulse_stream(
     tick: float = STREAM_TICK_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
-) -> Iterator[bytes]:
+) -> Generator[bytes, None, None]:
     """Le pouls en Server-Sent Events, pour ``GET /api/workspace/stream`` (P10).
 
     Chaque événement ``pulse`` porte la charge utile de :func:`pulse_view`. Le

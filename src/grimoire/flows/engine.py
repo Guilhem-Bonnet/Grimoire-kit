@@ -1365,7 +1365,30 @@ class FlowEngine:
             checkpoint_decisions=self._authority(run_id).decisions(),
             blueprint_drift=self._drift_state(meta, wfi)[0] if include_contract else None,
             blueprint_sha256=meta.blueprint_sha256,
+            **(self._questions_receipt(wfi) if include_contract else {}),
         )
+
+    def _questions_receipt(self, wfi: WorkflowInstance) -> dict[str, int]:
+        """``questions_asked`` / ``question_interruptions`` de la tâche liée au run (lot 4.6), ``{}`` sans tâche liée.
+
+        Lecture seule, meilleur effort : le statut d'un run ne dépend pas du ledger. Une question
+        déduite par l'agent n'est pas « posée » ; un lot de blocages posés ensemble est une seule interruption.
+        """
+        import contextlib
+
+        from grimoire.core.exceptions import GrimoireError
+        from grimoire.missions.questions import questions_summary
+
+        with contextlib.suppress(GrimoireError, OSError, ValueError):
+            service = self._linked_service(wfi)
+            task = service.ledger.get_task(wfi.task_id) if service is not None else None
+            if task is not None:
+                summary = questions_summary(task)
+                return {
+                    "questions_asked": summary["asked_to_human"],
+                    "question_interruptions": summary["interruptions"],
+                }
+        return {}
 
     def next_wave(self, run_id: str) -> list[str]:
         """Les nodes prêts ensemble (W5-04) : non faits, tous leurs prédécesseurs du DAG faits.

@@ -491,9 +491,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if proot is None or not proot.is_dir():
             self._send_json(404, {"ok": False, "error": "projet inconnu"})
             return
-        from grimoire.tools.workspace_routes import STREAM_HEADERS, STREAM_PATH, workspace_stream
+        from grimoire.tools.workspace_routes import (
+            CHAT_STREAM_PATH,
+            STREAM_HEADERS,
+            STREAM_PATH,
+            chat_stream,
+            workspace_stream,
+        )
 
-        if path == STREAM_PATH:
+        if path in (STREAM_PATH, CHAT_STREAM_PATH):
             # Le flux du pouls (P10) : la route vit dans `workspace_routes`, le
             # cockpit ne fait que recopier ses octets jusqu'à ce que la page parte.
             self.send_response(200)
@@ -502,9 +508,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.close_connection = True
             try:
-                for chunk in workspace_stream(proot, parse_qs(parsed.query)):
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                stream = (chat_stream if path == CHAT_STREAM_PATH else workspace_stream)(proot, parse_qs(parsed.query))
+                with contextlib.closing(stream):  # la page partie, `finally` du générateur désabonne
+                    for chunk in stream:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
             except ConnectionError:
                 pass  # la page est partie : fin du flux, pas une panne
             return

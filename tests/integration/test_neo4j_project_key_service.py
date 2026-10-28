@@ -308,3 +308,100 @@ class TestDeleteErasesContent:
         finally:
             ga.close()
             gb.close()
+
+
+class TestBackfillProject:
+    """Rattrapage d'une base écrite avant la clé de projet (deux projets, mêmes étiquettes et chemins)."""
+
+    @pytest.fixture
+    def legacy(self, raw: Any, projects: tuple[str, str], tmp_path: Any) -> Iterator[dict[str, Any]]:
+        a, b = projects
+        root = tmp_path / "proj-a"
+        (root / "src" / "pkg").mkdir(parents=True)
+        (root / "src" / "pkg" / "mod.py").write_text("x = 1\n")
+        sfx = a.rsplit("-", 1)[1]
+        ids = {k: f"{k}-{sfx}" for k in ("m-a", "m-b", "m-foreign", "m-dup", "f-a", "d-a", "n-a", "n-b", "n-gone")}
+        raw.execute_query(
+            """
+            CREATE (ma:GrimoireMemory {id: $ma, weaviate_collection: $ca, metadata_json: '{}', deleted: false})
+            CREATE (mb:GrimoireMemory {id: $mb, weaviate_collection: $cb, metadata_json: '{}', deleted: false})
+            CREATE (mf:GrimoireMemory {id: $mf, weaviate_collection: $ca, deleted: false,
+                    metadata_json: '{"project_name": "ailleurs"}'})
+            CREATE (mm:GrimoireMemory {id: $mm, weaviate_collection: 'autre', deleted: false,
+                    metadata_json: '{"project_name": "' + $a + '"}'})
+            CREATE (ta:GrimoireTag {name: 'solo-' + $sfx}), (ts:GrimoireTag {name: 'commun-' + $sfx})
+            CREATE (ma)-[:TAGGED_WITH]->(ta), (ma)-[:TAGGED_WITH]->(ts), (mb)-[:TAGGED_WITH]->(ts)
+            CREATE (f:GrimoireFact {id: $fa, subject: 's', predicate: 'p', object: 'o'})-[:SOURCED_FROM]->(ma)
+            CREATE (d:GrimoireDiary {id: $da, agent_name: 'atlas'})-[:RELATED_TO]->(ma)
+            CREATE (w:WeaviateObject {id: 'w-' + $sfx})<-[:VECTORIZED_AS]-(ma)
+            CREATE (:CodeNode {id: 'pkg.mod:run', file_path: 'src/pkg/mod.py', placeholder: false})
+            CREATE (:CodeNode {id: 'pkg.gone:run', file_path: 'src/pkg/gone.py', placeholder: false})
+            CREATE (:CodeNode {id: 'ghost-' + $sfx, file_path: '', placeholder: true})
+            """,
+            ma=ids["m-a"], mb=ids["m-b"], mf=ids["m-foreign"], mm=ids["m-dup"], fa=ids["f-a"], da=ids["d-a"],
+            ca=f"col-{a}", cb=f"col-{b}", a=a, sfx=sfx,
+        )
+        yield {"a": a, "root": root, "ids": ids, "sfx": sfx}
+        raw.execute_query(
+            "MATCH (n) WHERE n.id IN $ids OR n.id IN ['pkg.mod:run', 'pkg.gone:run', $g, $w] "
+            "OR n.name ENDS WITH $sfx OR n.id STARTS WITH $pre DETACH DELETE n",
+            ids=list(ids.values()), g=f"ghost-{sfx}", w=f"w-{sfx}", sfx=sfx, pre=f"{a}::",
+        )
+
+    def _run(self, legacy: dict[str, Any], *, apply: bool) -> dict[str, Any]:
+        from grimoire.memory.neo4j_backfill import backfill_project, resolve_code_prefixes
+
+        a = legacy["a"]
+        graph = _graph(a)
+        try:
+            return backfill_project(
+                graph,
+                collections=[f"col-{a}"],
+                project_root=legacy["root"],
+                code_prefixes=resolve_code_prefixes(legacy["root"], ["src"]),
+                apply=apply,
+            )
+        finally:
+            graph.close()
+
+    def test_preview_counts_and_writes_nothing(self, raw: Any, legacy: dict[str, Any]) -> None:
+        report = self._run(legacy, apply=False)
+        assert report["memories_by_collection"] == 1  # m-a ; m-foreign porte un autre project_name
+        assert report["memories_by_metadata"] == 1  # m-dup
+        assert report["memories_other_project"] == 1
+        assert (report["facts"], report["diaries"], report["weaviate_objects"]) == (1, 1, 1)
+        assert report["tags"] == 1 and report["tags_shared"] == 1  # solo ; commun avec le projet B
+        assert (report["code_nodes"], report["code_nodes_not_in_project"]) == (1, 1)
+        assert report["ghosts_external"] >= 1
+        assert _scalar(raw, "MATCH (n) WHERE n.project = $p RETURN count(n) AS c", p=legacy["a"]) == 0
+
+    def test_apply_attributes_prefixes_and_is_replayable(self, raw: Any, legacy: dict[str, Any]) -> None:
+        a, sfx, ids = legacy["a"], legacy["sfx"], legacy["ids"]
+        self._run(legacy, apply=True)
+
+        for kind in ("m-a", "m-dup"):
+            assert _scalar(raw, "MATCH (n:GrimoireMemory {id: $id, project: $p}) RETURN count(n) AS c", id=f"{a}::{ids[kind]}", p=a) == 1
+        # Le souvenir d'un autre projet et celui de la collection de B restent intacts.
+        assert _scalar(raw, "MATCH (n:GrimoireMemory {id: $id}) WHERE n.project IS NULL RETURN count(n) AS c", id=ids["m-foreign"]) == 1
+        assert _scalar(raw, "MATCH (n:GrimoireMemory {id: $id}) WHERE n.project IS NULL RETURN count(n) AS c", id=ids["m-b"]) == 1
+        assert _scalar(raw, "MATCH (n:GrimoireFact {id: $id, project: $p}) RETURN count(n) AS c", id=f"{a}::{ids['f-a']}", p=a) == 1
+        assert _scalar(raw, "MATCH (n:GrimoireDiary {id: $id, project: $p}) RETURN count(n) AS c", id=f"{a}::{ids['d-a']}", p=a) == 1
+        assert _scalar(raw, "MATCH (n:WeaviateObject {id: $id, project: $p}) RETURN count(n) AS c", id=f"{a}::w-{sfx}", p=a) == 1
+        assert _scalar(raw, "MATCH (n:GrimoireTag {name: $n, project: $p}) RETURN count(n) AS c", n=f"{a}::solo-{sfx}", p=a) == 1
+        # Le nom partagé entre deux projets n'est pas attribué, ni fusionné.
+        assert _scalar(raw, "MATCH (n:GrimoireTag {name: $n}) WHERE n.project IS NULL RETURN count(n) AS c", n=f"commun-{sfx}") == 1
+        assert _scalar(raw, "MATCH (n:CodeNode {id: $id, project: $p, local_id: 'pkg.mod:run'}) RETURN count(n) AS c", id=f"{a}::pkg.mod:run", p=a) == 1
+        assert _scalar(raw, "MATCH (n:CodeNode {id: 'pkg.gone:run'}) WHERE n.project IS NULL RETURN count(n) AS c") == 1
+        assert _scalar(raw, "MATCH (n:CodeNode {id: $id, external: true}) RETURN count(n) AS c", id=f"ghost-{sfx}") == 1
+        # Les relations suivent le nœud renommé.
+        assert _scalar(raw, "MATCH (:GrimoireFact {id: $f})-[:SOURCED_FROM]->(:GrimoireMemory {id: $m}) RETURN count(*) AS c", f=f"{a}::{ids['f-a']}", m=f"{a}::{ids['m-a']}") == 1
+
+        second = self._run(legacy, apply=True)
+        assert (second["memories_by_collection"], second["memories_by_metadata"], second["facts"], second["code_nodes"]) == (0, 0, 0, 0)
+
+    def test_id_conflict_is_listed_and_left_untouched(self, raw: Any, legacy: dict[str, Any]) -> None:
+        a, ids = legacy["a"], legacy["ids"]
+        raw.execute_query("CREATE (:GrimoireMemory {id: $id, project: $p, deleted: false})", id=f"{a}::{ids['m-a']}", p=a)
+        report = self._run(legacy, apply=True)
+        assert {"label": "GrimoireMemory", "id": ids["m-a"]} in report["conflicts"]
+        assert _scalar(raw, "MATCH (n:GrimoireMemory {id: $id}) WHERE n.project IS NULL RETURN count(n) AS c", id=ids["m-a"]) == 1

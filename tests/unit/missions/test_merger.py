@@ -30,6 +30,7 @@ from grimoire.missions.merger import (
     MERGE_ESCALATED_EVENT,
     MERGE_REALIGNED_EVENT,
     MERGE_REQUEUED_EVENT,
+    MERGE_RERUN_EVENT,
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
@@ -160,9 +161,13 @@ def give_ready(host: FakeHost, tid: str, wt: Path, session: str = "") -> None:
     write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=session or reviewer_sid(host))
 
 
-def review_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: ignore[no-untyped-def]
-    """Le relecteur lancé rend READY ; le tick qui le juge fait passer le merger (une CI verte s'y voit une première fois)."""
+def review_ready(projet: Path, host: FakeHost, tid: str, wt: Path, *, checks: list[dict[str, str]] | None = None):  # type: ignore[no-untyped-def]
+    """Le relecteur lancé rend READY ; le tick qui le juge fait passer le merger (une CI verte s'y voit une première fois).
+
+    *checks* : la CI qui repart après le lancement du relecteur (P87 : une CI en cours diffère le lancement)."""
     tick(projet, host)  # lance le relecteur
+    if checks is not None:
+        host.checks[f"task/{tid}"] = checks
     give_ready(host, tid, wt)
     return tick(projet, host)
 
@@ -231,8 +236,7 @@ def questions(projet: Path, tid: str) -> list:  # type: ignore[type-arg]
 
 def ready_judged(projet: Path, host: FakeHost, tid: str, wt: Path) -> None:
     """READY jugé, CI tenue en attente : la tâche est dans la file, rien n'est fusionné."""
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]
+    assert merges(review_ready(projet, host, tid, wt, checks=[{"name": "tests", "bucket": "pending"}])) == [("wait", "waiting")]
 
 
 def red_after_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: ignore[no-untyped-def]
@@ -307,6 +311,46 @@ def test_ci_rouge_renvoie_au_worker_comme_un_not_ready(projet: Path, host: FakeH
     assert resume[3] == launch["session_id"] and "tests" in resume[-1]
     assert TaskService(projet).require(tid).status is TaskState.RUNNING and host.of("gh", "pr", "merge") == []
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+
+
+def test_une_tete_rouge_est_relancee_une_fois_puis_renvoyee_si_elle_retombe(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    host.rerun_error = ""
+    tid, wt = launch_and_work(projet, host)
+    head = git(wt, "rev-parse", "HEAD")
+    report = red_after_ready(projet, host, tid, wt)
+    assert merges(report) == [("wait", "waiting")] and host.reruns == [101]
+    assert host.of("claude", "--bg", "--resume") == [] and events(projet, tid, MERGE_BOUNCED_EVENT) == []
+    [rerun] = events(projet, tid, MERGE_RERUN_EVENT)
+    assert rerun.payload["head"] == head and rerun.payload["outcome"] == "rerun" and rerun.payload["runs"] == ["101"]
+    assert any(a[:4] == ["gh", "api", "-X", "POST"] and a[4].endswith("/actions/runs/101/rerun-failed-jobs") for a, _c, _e in host.calls)
+    assert merges(tick(projet, host)) == [("bounce", "done")]  # la même tête, rouge de nouveau
+    assert host.reruns == [101] and len(host.of("claude", "--bg", "--resume")) == 1
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+
+
+def test_un_refus_403_de_la_relance_renvoie_au_worker_sans_boucle(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    assert merges(red_after_ready(projet, host, tid, wt)) == [("bounce", "done")]
+    assert host.reruns == [] and [e.payload["outcome"] for e in events(projet, tid, MERGE_RERUN_EVENT)] == ["denied"]
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+    calls = len([a for a, _c, _e in host.calls if a[:4] == ["gh", "api", "-X", "POST"]])
+    tick(projet, host)
+    assert len([a for a, _c, _e in host.calls if a[:4] == ["gh", "api", "-X", "POST"]]) == calls  # jamais une seconde tentative
+
+
+def test_une_nouvelle_tete_remet_le_droit_a_une_relance(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    host.rerun_error = ""
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    service = TaskService(projet)
+    old = "a" * 40
+    service.ledger.append_event(MERGE_RERUN_EVENT, tid, "task", "merger", {"task_id": tid, "head": old, "outcome": "rerun"})
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
+    assert merges(tick(projet, host)) == [("wait", "waiting")] and host.reruns == [101]  # la tête courante n'a pas eu la sienne
+    assert [e.payload["head"] for e in events(projet, tid, MERGE_RERUN_EVENT)][-1] == git(wt, "rev-parse", "HEAD")
 
 
 def test_ci_en_attente_attend_puis_un_vert_se_confirme_au_tick_suivant(projet: Path, host: FakeHost) -> None:
@@ -574,8 +618,8 @@ def test_la_tete_de_file_garde_son_rang_meme_quand_la_suivante_est_prete(projet:
     first, wt1 = launch_and_work(projet, host, edit=("src/app/a.py", "a\n"))
     second, wt2 = launch_and_work(projet, host, edit=("src/app/b.py", "b\n"))
     host.pr_numbers[f"task/{second}"] = 8
-    host.checks[f"task/{first}"] = [{"name": "tests", "bucket": "pending"}]
     tick(projet, host)
+    host.checks[f"task/{first}"] = [{"name": "tests", "bucket": "pending"}]
     for tid, wt in ((first, wt1), (second, wt2)):
         give_ready(host, tid, wt, host.session_of(f"grimoire-review-{tid}"))
     tick(projet, host)
@@ -793,6 +837,8 @@ def test_un_ready_perime_rend_la_tache_a_la_relecture(projet: Path, host: FakeHo
     assert merges(report) == [("stale", "done")] and host.of("gh", "pr", "merge") == []
     assert len(events(projet, tid, MERGE_REQUEUED_EVENT)) == 1
     reviews = len(events(projet, tid, REVIEW_LAUNCHED_EVENT))
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("launch", "skipped")]  # CI encore en cours : différée
+    host.checks[f"task/{tid}"] = list(GREEN)
     report = tick(projet, host)
     assert [(o.action, o.status) for o in report.reviews] == [("launch", "launched")]  # une nouvelle relecture
     assert len(events(projet, tid, REVIEW_LAUNCHED_EVENT)) == reviews + 1 and report.merges == ()

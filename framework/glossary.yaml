@@ -99,6 +99,15 @@ entries:
     termes: [dock, commande-equivalente]
     doc: reference/cli/index.md
 
+  - id: orchestrateur
+    nom: Orchestrateur
+    définition: >-
+      L'agent de l'hôte (Claude Code d'abord), lancé dans le dossier du projet : le chat du dock
+      lui relaie un tour humain, et c'est lui qui agit, avec ses permissions.
+    raccourci: ""
+    termes: [dock]
+    doc: ""
+
   - id: commande-equivalente
     nom: Commande équivalente
     définition: >-

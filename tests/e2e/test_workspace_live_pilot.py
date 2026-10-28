@@ -545,7 +545,6 @@ def test_a_390_px_le_compteur_et_l_horodatage_ne_font_rien_deborder(phone: Page,
     """Le compteur ajoute un contrôle à une barre déjà serrée : à 390 px elle ne déborde pas, le compteur reste cliquable."""
     _answer_all(service)
     phone.wait_for_function("() => document.getElementById('decisions-count') !== null")
-    base = _badge(phone)
     tid = _running(service, "Carte à décider sur petit écran")
     _ask(service, tid, "Fusionner depuis le téléphone ?")
     phone.wait_for_function("() => !document.getElementById('decisions-count').hidden", timeout=APPEAR_MS)
