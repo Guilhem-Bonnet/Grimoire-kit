@@ -1,0 +1,49 @@
+{
+  "$schema": "grimoire-review-receipt/v1",
+  "task_id": "GAO-p42-correct-001",
+  "verdict": "NOT-READY",
+  "findings": [
+    {
+      "summary": "Check requis « Ruff lint » en échec : l'étape « Repo gates » échoue, `uv run --frozen grimoire gates repo` -> changelog : aucune entrée sous [Unreleased] pour le commit 0ac58e68 feat(memory). CHANGELOG.md non modifié par la PR.",
+      "evidence_cmd": "uv run --frozen grimoire gates repo",
+      "severity": "blocking",
+      "grounded": true
+    }
+  ],
+  "reviewer_id": "reviewer",
+  "model": "sonnet",
+  "tree_fingerprint": "45b9805bc588c608f99decf3d4a38fa66c22ee6b5977389164ce980371855185",
+  "evidence_pack_sha256": "32c8a7ab19b7182096bc58294372e22abe0f7617bd99ba1e7670f472d48d14d1",
+  "written_at": "2026-10-28T07:48:12.570873+00:00",
+  "reviewer_session": "838f4208-485c-4acc-9c8f-51d5f5e62923",
+  "criteria": [
+    {
+      "index": 1,
+      "criterion": "Test e2e : « Demander une correction » crée une tâche avec description et critère vérifiable généré (« l'entrée <id> est remplacée par une entrée qui porte corrects: <id> ») ; le critère généré dépend du résultat attendu choisi (remplacer, fusionner, rattacher une source, vérifier puis décider)",
+      "status": "unverifiable",
+      "evidence_cmd": "gh pr checks task/GAO-p42-correct-001 -> job « E2E (chromium, ubuntu-latest) » https://github.com/Guilhem-Bonnet/Grimoire-kit/actions/runs/40651703608/job/122693051088",
+      "note": "Job e2e encore en cours sur la tête : pas de verdict, relecture à refaire."
+    },
+    {
+      "index": 2,
+      "criterion": "Test : l'agent dépose sa correction comme proposition du mécanisme existant grimoire.proposals (accept/reject, #490), sans écrire dans la mémoire ; accepter applique par MemoryManager et le journal P14 porte « proposé par » et « appliqué par »",
+      "status": "met",
+      "evidence_cmd": "uv run --frozen pytest tests/unit/memory/test_correction_deleguee.py -q",
+      "note": "5 tests verts ; proposition type memory-correction via grimoire.proposals, acceptation par apply_correction (MemoryManager)."
+    },
+    {
+      "index": 3,
+      "criterion": "Déclencheur : le verdict de #707 existe ; captures validées par Guilhem",
+      "status": "unverifiable",
+      "evidence_cmd": "grimoire task show GAO-p42-correct-001",
+      "note": "Déclencheur externe : verdict #707 et captures validées par Guilhem, non démontrables depuis le diff."
+    },
+    {
+      "index": 4,
+      "criterion": "Test : une proposition dont une entrée a changé depuis la demande est marquée périmée et l'aperçu compare à l'état actuel ; tant que GAO-annuler-arr-001 n'est pas livré, l'annulation affiche que la session peut encore travailler",
+      "status": "unverifiable",
+      "evidence_cmd": "gh pr checks task/GAO-p42-correct-001",
+      "note": "Périmé/aperçu relèvent de l'e2e/tests encore en cours ; non rejoués."
+    }
+  ]
+}

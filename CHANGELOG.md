@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(memory): correction mémoire déléguée à un agent (P42, GAO-p42-correct-001) : « Demander une correction… » ouvre une tâche au critère généré selon le résultat attendu (`corrects: <id>` pour remplacer ou fusionner) ; l'agent dépose sa correction par `grimoire memory correct propose` comme proposition `memory-correction` (`grimoire.proposals`), sans écrire en mémoire ; accepter applique par `MemoryManager`, le journal P14 porte `proposed_by` et `applied_by` ; une proposition dont une entrée a changé depuis la demande est périmée (refusée, aperçu sur l'état actuel).
+
 ## [3.73.0] - 2026-10-28
 
 - chore(release): correctifs intermédiaires des PR fusionnées par les lots #1041 et #1045 (commit de fusion), déjà décrits par l'entrée de leur PR : ad678a01, 8e56b3e4, 38ecc42d, 636b652a, 4dac071c, 8dfd0ea1, 1519bd3b, 9b09b950, 7a619722, aae9897c.
