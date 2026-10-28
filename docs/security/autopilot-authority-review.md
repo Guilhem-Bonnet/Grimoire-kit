@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # Pilote automatique : revue adversariale du modèle d'autorité (P82)
 
 Périmètre : `src/grimoire/missions/autopilot.py`, `orchestrator_session.py` (`answer_plan`, `eligible_questions`,
