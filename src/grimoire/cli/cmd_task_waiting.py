@@ -69,13 +69,12 @@ def register(task_app: typer.Typer) -> None:
         actor: _ACTOR = "cli",
     ) -> None:
         """Pose une question à l'humain (ou un lot, `--from`) : la tâche se gare en `waiting(human)` et remonte au cockpit."""
-        if not from_file and not (non_blocking or key):
+        if not from_file and not (non_blocking or why or key or recommended):
             if not text.strip():
                 console.print("[red]✗[/red] une question (texte) ou un lot (`--from`)")
                 raise typer.Exit(1)
             run(ctx, project_root, ledger_root, task_id,
-                lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch, why=why,
-                                recommended=recommended), parking=True)
+                lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch), parking=True)
             return
         from grimoire.cli.cmd_task_questions import emit_batch, read_specs
         from grimoire.core.exceptions import GrimoireError
