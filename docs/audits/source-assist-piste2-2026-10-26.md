@@ -1,3 +1,7 @@
+---
+audience: décision
+---
+
 # Source : piste 2 (petit modèle local) — note de cadrage
 
 Date : 2026-10-26 · Issue #280, piste 2 · Tâche GAO-r49-note-de-001
