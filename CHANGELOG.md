@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(bench): `scripts/bench/source_assist_replay.py` rejoue les 12 appels de la mesure Source piste 2 (journal brut dans `docs/audits/source-assist-piste2-2026-10-28-journal.jsonl`), `# noqa: S310` sur la bonne ligne ; la note de cadrage `docs/audits/source-assist-piste2-2026-10-26.md` reçoit son front-matter `audience: décision` (GAO-r49-note-de-001).
 ## [3.73.0] - 2026-10-28
 
 - chore(release): correctifs intermédiaires des PR fusionnées par les lots #1041 et #1045 (commit de fusion), déjà décrits par l'entrée de leur PR : ad678a01, 8e56b3e4, 38ecc42d, 636b652a, 4dac071c, 8dfd0ea1, 1519bd3b, 9b09b950, 7a619722, aae9897c.
