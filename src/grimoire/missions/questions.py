@@ -236,7 +236,8 @@ def question_rows(task: MissionTask) -> list[dict[str, Any]]:
         q = record.question
         row: dict[str, Any] = {
             "task_id": task.id, "id": q.id, "key": record.key, "kind": q.kind, "text": q.text,
-            "options": list(q.options), "blocking": q.blocking, "why": q.why, "asked_by": q.origin,
+            "options": list(q.options), "blocking": q.blocking, "why": q.why, "recommended": q.recommended,
+            "asked_by": q.origin,
             "asked_at": q.asked_at, "batch": record.batch, "status": status_of(task, record),
         }
         if record.answer_origin:
@@ -279,6 +280,8 @@ class QuestionSpec:
     blocking: bool = True
     why: str = ""
     key: str = ""
+    #: L'option recommandée (parmi ``options`` quand il y en a) : le pilote automatique la prend (P82).
+    recommended: str = ""
     #: Réponse déduite (non bloquante seulement), avec ``source`` obligatoire : jamais posée à l'humain.
     answer: str = ""
     source: str = ""
@@ -288,6 +291,9 @@ class QuestionSpec:
             return "une question sans texte ne demande rien"
         if self.kind not in QUESTION_KINDS:
             return f"nature de question inconnue : {self.kind!r} — parmi {', '.join(QUESTION_KINDS)}"
+        pick = self.recommended.strip()
+        if pick and self.options and pick.lower() not in (o.strip().lower() for o in self.options):
+            return f"« {self.text.strip()} » : la recommandation {pick!r} n'est pas l'une des options proposées"
         if self.answer.strip() and self.blocking:
             return (
                 f"« {self.text.strip()} » est bloquante : une question bloquante ne se déduit pas, seul un humain la "
@@ -309,6 +315,7 @@ class QuestionSpec:
             blocking=d.get("blocking") is not False,
             why=str(d.get("why", "") or ""),
             key=str(d.get("key", "") or ""),
+            recommended=str(d.get("recommended", "") or ""),
             answer=str(d.get("answer", "") or ""),
             source=str(d.get("source", "") or ""),
         )
@@ -370,7 +377,7 @@ def plan_batch(task: MissionTask, specs: list[QuestionSpec], *, origin: str = "a
             continue
         question = Question(
             new_question_id(), spec.kind, spec.text.strip(), spec.options, origin, moment,
-            blocking=spec.blocking, why=spec.why.strip(), key=key,
+            blocking=spec.blocking, why=spec.why.strip(), key=key, recommended=spec.recommended.strip(),
         )
         if spec.answer.strip():
             deduced.append((question, spec))

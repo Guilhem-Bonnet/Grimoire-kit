@@ -253,12 +253,50 @@ footer .sp{flex:1}
 .etat .acts a.btn{text-decoration:none;background:var(--acc);border-color:var(--acc);color:var(--onacc)}
 .etat .acts code{font-family:var(--mono);font-size:14.5px}
 .etat .acts code .p{color:var(--rub)}
+
+/* P39 : récit en dix plans. Scènes collantes liées au scroll (--p, 0 à 1) ; supprimées sous prefers-reduced-motion */
+.plans{max-width:1180px;margin:0 auto}
+.plan{position:relative;border-top:1px solid var(--line)}
+.plan .nb::before{content:"Plan " attr(data-plan) " · "}
+.plan .nb{font:600 13px var(--mono);color:var(--rub);letter-spacing:.04em;text-transform:uppercase;margin:0 0 10px}
+.plan.tall{min-height:190vh}
+.plan .stick{padding-block:64px;display:grid;gap:22px;align-content:start}
+.plan.tall .stick{position:sticky;top:0;min-height:100vh;align-content:center;padding-block:32px}
+.plan h2{max-width:24ch;margin:0 0 14px}
+.beat{font-size:clamp(22px,3vw,34px);letter-spacing:-.025em;line-height:1.2;font-weight:600;margin:0;color:var(--ink);opacity:clamp(.14,calc(var(--p,1) * 4 - var(--i,0)),1);transition:opacity .15s linear}
+.scene{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:40px;align-items:center}
+.scene>*{min-width:0}
+.reel .head{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.reel .log{white-space:pre-wrap;overflow-wrap:anywhere;padding-block:10px}
+.reel .fr+.fr{border-top:1px solid var(--line)}
+.reel .rc{font-size:12.5px;color:var(--ok);margin-left:auto}.reel .rc.ko{color:var(--err)}
+.reel .miss{padding:16px 18px;color:var(--ink2);font-size:15px;margin:0}
+.reel .soft{color:var(--ink3)}
+.ring4{display:grid;grid-template-columns:auto auto;gap:22px;align-items:center;justify-content:start}
+.ring4 svg{width:150px;height:150px;overflow:visible}
+.ring4 .seg{fill:none;stroke-width:12;stroke-linecap:round;transition:stroke .3s}
+.ring4 [data-s="err"]{stroke:var(--errm)}.ring4 [data-s="ok"]{stroke:var(--okm)}
+.ring4 .labs{display:grid;gap:6px;font:12.5px var(--mono);color:var(--ink2)}
+.ring4 .labs i{display:inline-block;width:10px;height:10px;border-radius:5px;margin-right:8px}
+.ring4 .labs i[data-s="err"]{background:var(--errm)}.ring4 .labs i[data-s="ok"]{background:var(--okm)}
+.bob{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px}
+.bob li{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:grid;gap:8px;align-content:start}
+.bob b{font-size:18px;letter-spacing:-.015em}.bob p{margin:0;color:var(--ink2);font-size:15.5px}
+.bob .prov{padding:0}.bob .act{display:flex;gap:14px;flex-wrap:wrap;font-size:14.5px}
+.bob button{font:inherit;color:var(--acc);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+#bobine{margin-top:18px}
+.cite{font-size:14px;color:var(--ink3);margin:16px 0 0;max-width:78ch}
+@media (max-width:900px){.scene{grid-template-columns:minmax(0,1fr);gap:22px}.plan.tall{min-height:150vh}}
+@media (prefers-reduced-motion:reduce){
+  .plan.tall{min-height:0}.plan.tall .stick{position:static;min-height:0;padding-block:64px}
+  .beat{opacity:1;transition:none}.ring4 .seg{transition:none}
+}
 </style>
 </head>
 <body>
 
 <section class="etat" id="etat-local" aria-live="polite" hidden></section>
-<section class="film5" aria-label="Teaser vidéo">
+<section class="film5" id="p1" aria-label="Teaser vidéo">
   <header class="bar5"><a href="#top" id="top"><b>›</b> Grimoire</a><nav><a href="#capot">En vrai</a><a href="https://github.com/Guilhem-Bonnet/Grimoire-kit" rel="noopener">Code source</a></nav></header>
   <video id="teaser" src="media/teaser-720.mp4" poster="media/teaser-poster.jpg" autoplay muted loop playsinline preload="metadata" width="1920" height="1080"></video>
   <div class="ctl5"><button type="button" id="snd" aria-pressed="false">Son</button><button type="button" id="again">Revoir</button></div>
@@ -267,7 +305,55 @@ footer .sp{flex:1}
   <div class="install"><code><span class="p">$ </span>uv tool install grimoire-kit</code><button class="btn copy" type="button" id="copy-top" data-copy="uv tool install grimoire-kit"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
   <p class="micro">Open source · Claude Code · Copilot</p>
 </section>
-<section class="capot" aria-labelledby="capot-t">
+
+<main class="plans" id="recit">
+<section class="plan tall" id="p2" data-scroll aria-labelledby="p2t">
+  <div class="stick wrap">
+    <p class="nb" data-plan="2">le constat</p>
+    <h2 id="p2t">Un agent peut dire « c'est fini ».</h2>
+    <p class="beat" style="--i:0">Il dit que le test passe.</p>
+    <p class="beat" style="--i:1">Il dit que c'est relu.</p>
+    <p class="beat" style="--i:2">Rien, dans ton dépôt, ne le lui fait prouver.</p>
+    <p class="beat" style="--i:3">Grimoire pose la question avant la clôture.</p>
+  </div>
+</section>
+<section class="plan" id="p3" aria-labelledby="p3t"><div class="stick wrap scene">
+  <div><p class="nb" data-plan="3">la tâche</p><h2 id="p3t">Une tâche porte ses critères.</h2>
+  <p class="txt">Tu écris ce qui doit être vrai, et la commande qui le vérifie. Grimoire dit tout de suite si le critère a un verdict, une revue, ou rien.</p></div>
+  <div class="term reel" data-reel="tri-v0-v1-v2" data-frames="0-3" data-verbatim><div class="head"><span class="cap">tri des critères · bobine enregistrée</span></div><p class="miss">Rejeu de la bobine <a href="data/reels/tri-v0-v1-v2.html">tri-v0-v1-v2</a> (ouvre la bobine complète si le rejeu ne s'affiche pas).</p></div>
+</div></section>
+<section class="plan tall" id="p4" data-scroll data-ring aria-labelledby="p4t"><div class="stick wrap scene">
+  <div><p class="nb" data-plan="4">l'anneau de preuve</p><h2 id="p4t">La clôture est refusée tant qu'une preuve manque.</h2>
+  <p class="txt">Fais défiler : le verdict est passé, la revue manque, la clôture est refusée. Une fois la revue écrite, la clôture passe.</p>
+  <div class="ring4 err" id="ring4" role="img" aria-label="Anneau de preuve : verdict passé, reçu de revue manquant">
+    <svg viewBox="0 0 150 150" aria-hidden="true"><path class="seg" id="r4a" data-s="ok" d=""/><path class="seg" id="r4b" data-s="err" d=""/></svg>
+    <div class="labs"><span><i id="l4a" data-s="ok"></i>verdict (task verify)</span><span><i id="l4b" data-s="err"></i>review_receipt</span></div>
+  </div></div>
+  <div class="term reel" data-reel="cloture-refusee-puis-acceptee" data-frames="5-8" data-verbatim><div class="head"><span class="cap">clôture · bobine enregistrée</span></div><p class="miss">Rejeu de la bobine <a href="data/reels/cloture-refusee-puis-acceptee.html">cloture-refusee-puis-acceptee</a> (ouvre la bobine complète si le rejeu ne s'affiche pas).</p></div>
+</div></section>
+<section class="plan" id="p5" aria-labelledby="p5t"><div class="stick wrap scene">
+  <div><p class="nb" data-plan="5">l'agent s'attache</p><h2 id="p5t">Une session prend la tâche, et le projet se souvient.</h2>
+  <p class="txt">Réclamer une tâche voisine d'une tâche close rappelle ce que le projet en sait, avant que l'agent ne reparte de zéro.</p></div>
+  <div class="term reel" data-reel="rappel-au-claim" data-frames="7-8" data-verbatim><div class="head"><span class="cap">rappel au claim · bobine enregistrée</span></div><p class="miss">Rejeu de la bobine <a href="data/reels/rappel-au-claim.html">rappel-au-claim</a> (ouvre la bobine complète si le rejeu ne s'affiche pas).</p></div>
+</div></section>
+<section class="plan" id="p6" aria-labelledby="p6t"><div class="stick wrap scene">
+  <div><p class="nb" data-plan="6">la décision humaine</p><h2 id="p6t">L'agent pose la question, l'humain répond.</h2>
+  <p class="txt">Seule la réponse du canal humain rend la tâche. Une réponse d'agent ne compte pas.</p></div>
+  <div class="term reel" data-reel="decision-humaine-attestee" data-frames="2-4" data-verbatim><div class="head"><span class="cap">décision attestée · bobine enregistrée</span></div><p class="miss">Rejeu de la bobine <a href="data/reels/decision-humaine-attestee.html">decision-humaine-attestee</a> (ouvre la bobine complète si le rejeu ne s'affiche pas).</p></div>
+</div></section>
+<section class="plan" id="p7" aria-labelledby="p7t"><div class="stick wrap scene">
+  <div><p class="nb" data-plan="7">la mémoire</p><h2 id="p7t">Une décision remplacée n'est plus servie, mais reste lisible.</h2>
+  <p class="txt">La mémoire garde l'historique : l'ancienne décision sort de la liste courante et reste consultable.</p></div>
+  <div class="term reel" data-reel="supersession" data-frames="3-5" data-verbatim><div class="head"><span class="cap">supersession · bobine enregistrée</span></div><p class="miss">Rejeu de la bobine <a href="data/reels/supersession.html">supersession</a> (ouvre la bobine complète si le rejeu ne s'affiche pas).</p></div>
+</div></section>
+<section class="plan" id="p8" aria-labelledby="p8t"><div class="stick wrap">
+  <p class="nb" data-plan="8">les bobines</p><h2 id="p8t">Chaque terminal ci-dessus est un enregistrement.</h2>
+  <p class="txt">Une bobine est l'exécution réelle de commandes du kit sur un projet jetable, avec la version du kit, la date et l'empreinte de la sortie. Si une commande change de sortie, un test échoue jusqu'à nouvel enregistrement.</p>
+  <ul class="bob" id="bobines" data-verbatim></ul>
+  <div class="term reel" id="bobine" data-verbatim hidden><div class="head"><span class="cap" id="bobine-t"></span></div><div id="bobine-b"></div></div>
+</div></section>
+</main>
+<section class="capot plan" id="p9" aria-labelledby="capot-t">
 <h2 class="h5" id="capot" style="margin-top:0"><span id="capot-t">Ce que tu as sous la main</span></h2>
 <p class="h5s">Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à des agents (Claude Code, Copilot), un tableau de bord local, des tâches, la mémoire du projet et un contrôle des preuves.</p>
 <div class="wrap tools">
@@ -323,7 +409,8 @@ footer .sp{flex:1}
 <p class="hosts">Claude Code · Copilot. Le manuel dit ce que prend en charge chaque outil.</p>
 </section>
 
-<section class="blk wrap" aria-labelledby="limites">
+<section class="blk wrap plan" id="p10" aria-labelledby="limites">
+  <p class="nb" data-plan="10">ce qui reste à prouver</p>
   <h2 id="limites">Ce qui n'est pas prouvé</h2>
   <ul class="limits">
     <li>Le kit ne crée pas de copie du dépôt et ne propose pas lui-même le travail à relire : c'est ton outil (Claude Code, Copilot) et git.</li>
@@ -333,6 +420,7 @@ footer .sp{flex:1}
     <li>Aucun gain n'est mesuré.</li>
   </ul>
   <p class="cond">Le tableau de bord est en cours de refonte : ce qu'en décrit ce bloc n'est pas entièrement dans la version publiée<span data-source="version" data-format=" ({})"></span>. Le contrôle des preuves refuse pour de bon seulement en profil governed. Le reste est dans la version publiée, que tu peux installer maintenant.</p>
+  <p class="cite">Relevé le 2026-10-28 sur la version publiée<span data-source="version" data-format=" ({})"></span>, d'après <a href="docs/hosts/">les outils pris en charge</a> et <a href="docs/standard/">le contrôle des preuves</a> du manuel. Les bobines du plan huit montrent ce que le kit a fait sur un projet jetable, pas sur ton dépôt.</p>
 </section>
 
 <section class="blk wrap" aria-labelledby="capot-lien">
@@ -458,6 +546,50 @@ footer .sp{flex:1}
   if(rm){v.removeAttribute('autoplay');v.setAttribute('controls','');v.pause()}
   snd.addEventListener('click',function(){var on=v.muted;v.muted=!on;snd.setAttribute('aria-pressed',String(on));snd.textContent=on?'Couper le son':'Son';if(on){v.currentTime=0;v.play().catch(function(){})}});
   again.addEventListener('click',function(){v.currentTime=0;v.play().catch(function(){})});
+})();
+</script>
+<script>
+/* P39 : scènes collantes, anneau de preuve et bobines. Rien n'est écrit en dur : les terminaux
+   viennent de data/reels/ (même origine). Sous prefers-reduced-motion, aucune animation liée au scroll. */
+(function(){
+  var rm=matchMedia('(prefers-reduced-motion: reduce)').matches,cache={};
+  function el(t,c,x){var n=document.createElement(t);if(c)n.className=c;if(x!=null)n.textContent=x;return n}
+  function getReel(id){return cache[id]||(cache[id]=fetch('data/reels/'+id+'.json').then(function(r){if(!r.ok)throw 0;return r.json()}))}
+  function fill(box,reel,range){
+    var a=range?range.split('-'):[0,reel.frames.length-1],fs=reel.frames.slice(+a[0],+a[1]+1);
+    var old=box.querySelectorAll('.fr,.miss,.prov');for(var i=0;i<old.length;i++)old[i].remove();
+    fs.forEach(function(f){var d=el('div','fr'),c=el('p','log');c.style.paddingBottom='0';
+      c.append(el('span','p','$ '),f.command);var rc=el('span','rc'+(f.exit_code?' ko':''),'sortie '+f.exit_code);c.append(' ',rc);d.append(c);
+      if(f.output)d.append(el('pre','log soft',f.output));box.append(d)});
+    box.append(el('div','prov','bobine '+reel.id+' · kit '+reel.kit_version+' · enregistrée le '+reel.recorded_at.slice(0,10)+' · empreinte '+reel.output_sha256.slice(0,12)));
+  }
+  document.querySelectorAll('[data-reel]').forEach(function(b){
+    getReel(b.dataset.reel).then(function(r){fill(b,r,b.dataset.frames)}).catch(function(){});
+  });
+  var list=document.getElementById('bobines');
+  if(list)fetch('data/reels/index.json').then(function(r){return r.json()}).then(function(ix){
+    ix.reels.forEach(function(r){var li=el('li');li.append(el('b',null,r.title),el('p',null,r.summary));
+      var act=el('div','act'),a=el('a',null,'Ouvrir la bobine');a.href='data/reels/'+r.id+'.html';
+      var bt=el('button',null,'Lire ici');bt.type='button';
+      bt.addEventListener('click',function(){getReel(r.id).then(function(rl){var box=document.getElementById('bobine');
+        document.getElementById('bobine-t').textContent=rl.title;var inner=document.getElementById('bobine-b');
+        inner.replaceChildren();inner.className='reel';fill(inner,rl);box.hidden=false;box.scrollIntoView({block:'nearest',behavior:rm?'auto':'smooth'})})});
+      act.append(bt,a);li.append(act);
+      li.append(el('p','prov','kit '+r.kit_version+' · enregistrée le '+r.recorded_at.slice(0,10)));list.append(li)});
+  }).catch(function(){list.append(el('li',null,'Les bobines se lisent depuis le cockpit ou un serveur : ouvre data/reels/index.json.'))});
+  // géométrie de l'anneau du plan quatre (même tracé que l'anneau du rejeu)
+  function arc(a0,a1){var c=75,r=60,p=function(a){a=(a-90)*Math.PI/180;return [c+r*Math.cos(a),c+r*Math.sin(a)]};var s=p(a0),e=p(a1);
+    return 'M'+s[0].toFixed(2)+' '+s[1].toFixed(2)+'A'+r+' '+r+' 0 0 1 '+e[0].toFixed(2)+' '+e[1].toFixed(2)}
+  document.getElementById('r4a').setAttribute('d',arc(190,350));document.getElementById('r4b').setAttribute('d',arc(10,170));
+  if(rm)return;
+  var scenes=[].slice.call(document.querySelectorAll('[data-scroll]')),tick=0;
+  function setS(id,lid,s){document.getElementById(id).setAttribute('data-s',s);document.getElementById(lid).setAttribute('data-s',s)}
+  function update(){tick=0;var vh=innerHeight;
+    scenes.forEach(function(sc){var r=sc.getBoundingClientRect(),span=r.height-vh,p=span>0?Math.min(1,Math.max(0,-r.top/span)):1;
+      sc.style.setProperty('--p',p.toFixed(3));
+      if(sc.hasAttribute('data-ring')){var ok=p>.6;setS('r4b','l4b',ok?'ok':'err');document.getElementById('ring4').className='ring4 '+(ok?'ok':'err');
+        document.getElementById('ring4').setAttribute('aria-label','Anneau de preuve : verdict passé, '+(ok?'reçu de revue présent':'reçu de revue manquant'))}})}
+  addEventListener('scroll',function(){if(!tick)tick=requestAnimationFrame(update)},{passive:true});addEventListener('resize',update);update();
 })();
 </script>
 </body>

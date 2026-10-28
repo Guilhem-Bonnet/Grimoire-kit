@@ -90,7 +90,10 @@ export function createChat({ readOnly = () => false } = {}) {
   const form = mk('form', { class: 'chat-form', 'aria-label': 'Message à l’orchestrateur' },
     mk('label', { for: 'chat-input', class: 'sr-only', text: 'Message à l’orchestrateur' }),
     input, mk('div', { class: 'chat-actions' }, send, stop));
-  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, status, log, form);
+  const hostSelect = mk('select', { class: 'chat-host', id: 'chat-host', 'aria-label': 'Hôte de l’orchestrateur' });
+  const hostBar = mk('div', { class: 'chat-hostbar' },
+    mk('label', { for: 'chat-host', class: 'chat-host-label', text: 'Hôte' }), hostSelect);
+  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, form);
 
   let stream = null;
   let lastSeq = 0;
@@ -249,8 +252,54 @@ export function createChat({ readOnly = () => false } = {}) {
     entry.box.classList.add('is-done');
   }
 
+  // ── L'hôte (ACP3) : réglage du projet, hôte détecté par défaut ───────────
+  async function loadHosts() {
+    let state;
+    try { state = await api.chatHosts(); } catch { hostBar.hidden = true; return; }
+    hostBar.hidden = false;
+    hostSelect.replaceChildren();
+    for (const host of state.hosts) {
+      const flags = [host.preview ? 'preview' : '', host.detected ? 'détecté' : ''].filter(Boolean);
+      const label = host.display_name + (flags.length ? ` (${flags.join(', ')})` : '')
+        + (host.available ? '' : ` — ${host.reason}`);
+      const option = mk('option', { value: host.alias, text: label });
+      option.disabled = !host.available;
+      option.selected = host.selected;
+      if (host.note) option.title = host.note;
+      hostSelect.append(option);
+    }
+    if (state.mode === 'kanban') {
+      setStatus(`Mode différé : ${state.reason || 'le chat écrit dans le kanban'}. Les réponses arrivent par les notes des sessions.`);
+    }
+  }
+
+  hostSelect.addEventListener('change', async () => {
+    hostSelect.disabled = true;
+    try {
+      await api.chatHost(hostSelect.value);
+      note('Hôte changé : la prochaine conversation démarre sur ce nouvel hôte.');
+    } catch (error) {
+      note(`Hôte non changé : ${error.message}`, 'error');
+    } finally {
+      hostSelect.disabled = false;
+      loadHosts();
+    }
+  });
+
   // ── Le flux ─────────────────────────────────────────────────────────────
   function handle(event) {
+    if (event.type === 'reply' || event.type === 'kanban_sent') {
+      if (event.seq && event.seq <= lastSeq) return;
+      if (event.seq) lastSeq = event.seq;
+      if (event.type === 'kanban_sent') {
+        note(`Consigne déposée sur ${event.task_id} : la session la lira à son prochain tour, sa réponse apparaîtra ici.`);
+      } else {
+        current = null;
+        addText('agent', `**${event.actor || 'session'}** (${event.task_id}) — ${event.text}`);
+        current = null;
+      }
+      return;
+    }
     if (event.seq && event.seq <= lastSeq) return; // un rejeu après reconnexion
     if (event.seq) lastSeq = event.seq;
     switch (event.type) {
@@ -363,6 +412,7 @@ export function createChat({ readOnly = () => false } = {}) {
         } else {
           setBusy(false);
           setStatus('Connexion à l’orchestrateur…');
+          loadHosts();
           connect();
         }
       }
