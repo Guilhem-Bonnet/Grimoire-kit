@@ -705,3 +705,48 @@ def test_un_dossier_atteint_par_un_lien_est_le_meme(tmp_path: Path) -> None:
         pytest.skip("liens symboliques indisponibles")
     entries = [{"id": SHORT, "kind": "background", "sessionId": SID, "cwd": str(link)}]
     assert resolve_background_session(_agents_exec(entries), wt, SHORT, session_cwd=wt, attempts=1) == SID
+
+
+# ── P86 : la version de l'hôte au claim ────────────────────────────────────────
+
+
+def test_un_worker_lance_par_le_tick_porte_la_version_de_l_hote_au_claim(projet: Path, service: TaskService, host: FakeHost) -> None:
+    host.version = "2.1.310"
+    first, second = ready(service, "une"), ready(service, "deux")
+    tick(projet, host)
+    after = TaskService(projet)
+    for tid in (first, second):
+        claim = after.require(tid).claim
+        assert claim is not None and claim.session_host_version == "2.1.310"
+        assert claim.session_id == host.session_of(f"grimoire-{tid}")
+    assert len(host.of("claude", "--version")) == 1  # lue une fois par tick, pas une fois par tâche
+    for argv, _c, _e in (c for c in host.calls if c[0][:2] == ["claude", "--bg"]):
+        assert "--host-version 2.1.310" in argv[-1]
+
+
+def test_version_illisible_le_claim_n_en_porte_pas(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "sans version")
+    tick(projet, host)
+    claim = TaskService(projet).require(tid).claim
+    assert claim is not None and claim.session_host_version == ""
+    (argv,) = host.of("claude", "--bg")
+    assert "--host-version" not in argv[-1]
+
+
+def test_task_attach_inscrit_la_version_donnee_par_la_consigne(projet: Path, service: TaskService) -> None:
+    tid = ready(service, "attache")
+    service.claim(tid, "worker", host="claude-code-cli")
+    result = runner.invoke(
+        app, ["task", "attach", tid, "--session-id", "sess-1", "--host-version", "2.1.310", "--project-root", str(projet)]
+    )
+    assert result.exit_code == 0, result.output
+    claim = TaskService(projet).require(tid).claim
+    assert claim is not None and claim.session_host_version == "2.1.310"
+
+
+def test_la_politique_probe_host_est_un_booleen_desactive_par_defaut(projet: Path) -> None:
+    assert load_orchestrator_policy(projet).policy.probe_host is False  # type: ignore[union-attr]
+    (projet / POLICY).write_text("orchestrator:\n  probe_host: true\n", encoding="utf-8")
+    assert load_orchestrator_policy(projet).policy.probe_host is True  # type: ignore[union-attr]
+    (projet / POLICY).write_text("orchestrator:\n  probe_host: oui\n", encoding="utf-8")
+    assert load_orchestrator_policy(projet).policy is None
