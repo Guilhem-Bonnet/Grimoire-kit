@@ -218,7 +218,7 @@ def test_corriger_les_etiquettes_avec_apercu_puis_annuler_depuis_l_historique(
     _open_entry(page, srv, word, f"Étiquettes {word}")
 
     buttons = [b.strip() for b in page.locator("#inspector-body .kn-actions button").all_inner_texts()]
-    assert buttons == ["Corriger", "Marquer remplacée…", "Supprimer…"], "les trois gestes de la maquette"
+    assert buttons == ["Corriger", "Marquer remplacée…", "Demander une correction…", "Supprimer…"], "les gestes de la maquette (P34 + P42)"
     page.locator("#inspector-body .kn-actions button", has_text="Corriger").click()
     panel = _panel(page)
     assert [t.strip() for t in panel.locator(".seg button").all_inner_texts()] == ["Étiquettes", "Source", "Fusionner", "Retirer"]
