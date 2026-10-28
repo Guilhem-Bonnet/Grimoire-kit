@@ -1321,6 +1321,7 @@ LazyTyperGroup.configure(
     },
     commands={
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
+        "chat": LazyCommandSpec("grimoire.cli.cmd_chat", "chat_command", rich_help_panel="Project"),
         "context-pack": LazyCommandSpec("grimoire.cli.cmd_context_pack", "context_pack_command", rich_help_panel="Data"),
         "migrate": LazyCommandSpec("grimoire.cli.cmd_migrate", "migrate_command", rich_help_panel="Project"),
         "upgrade": LazyCommandSpec("grimoire.cli.cmd_upgrade", "upgrade_command", rich_help_panel="Utilities"),
@@ -1339,7 +1340,7 @@ LazyTyperGroup.configure(
         "memory", "hooks", "cadrage", "debugger", "dbg", "registry", "workflows",
         "wf", "standard", "ext", "blueprint", "flow", "cockpit", "task", "mission",
         "stigmergy", "features", "host", "providers", "dispatch", "route", "queue", "orchestrate", "needs", "evidence", "gates", "proposals", "upgrade-flow", "agent", "expertise", "web",
-        "autonomy", "mcp", "onboard", "team",
+        "autonomy", "mcp", "onboard", "team", "chat",
         "config", "completion", "self", "plugins",
     ],
 )

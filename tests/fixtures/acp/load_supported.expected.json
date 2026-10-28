@@ -1,0 +1,77 @@
+{
+ "final": {
+  "load_session": true,
+  "outstanding": [],
+  "pending_permissions": [],
+  "resolved_permissions": [],
+  "session_id": "old-7",
+  "state": "idle"
+ },
+ "steps": [
+  {
+   "events": [],
+   "state": "initializing"
+  },
+  {
+   "events": [
+    {
+     "auth_methods": 0,
+     "load_session": true,
+     "protocol_version": 1,
+     "type": "initialized"
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "events": [],
+   "state": "opening"
+  },
+  {
+   "events": [
+    {
+     "kind": "user_message_chunk",
+     "session_id": "old-7",
+     "text": "avant",
+     "type": "update"
+    }
+   ],
+   "state": "opening"
+  },
+  {
+   "events": [
+    {
+     "loaded": true,
+     "session_id": "old-7",
+     "type": "session_opened"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "kind": "agent_message_chunk",
+     "session_id": "old-7",
+     "text": "reprise",
+     "type": "update"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "session_id": "old-7",
+     "stop_reason": "end_turn",
+     "type": "turn_ended"
+    }
+   ],
+   "state": "idle"
+  }
+ ]
+}
