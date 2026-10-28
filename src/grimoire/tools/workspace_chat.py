@@ -38,7 +38,7 @@ import os
 import shlex
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
@@ -410,7 +410,7 @@ def chat_stream(
     query: dict[str, list[str]],
     *,
     clock: Callable[[], float] = time.monotonic,
-) -> Iterator[bytes]:
+) -> Generator[bytes, None, None]:
     """Le flux de la conversation de *root* — ne se termine pas ; l'hôte cesse d'itérer au départ de la page."""
     conv = _conversation(root)
     try:

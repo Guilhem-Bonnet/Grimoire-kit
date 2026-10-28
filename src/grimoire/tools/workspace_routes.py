@@ -71,7 +71,7 @@ import contextlib
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -633,7 +633,7 @@ STREAM_HEADERS: tuple[tuple[str, str], ...] = (
 )
 
 
-def workspace_stream(project_root: Path, query: _Query) -> Iterator[bytes]:
+def workspace_stream(project_root: Path, query: _Query) -> Generator[bytes, None, None]:
     """Le flux du pouls pour *project_root*, servi par l'hôte sur :data:`STREAM_PATH`.
 
     Mêmes paramètres que ``pulse`` : ``since`` (l'empreinte connue) et
@@ -650,7 +650,7 @@ def workspace_stream(project_root: Path, query: _Query) -> Iterator[bytes]:
 CHAT_STREAM_PATH = f"{PREFIX}chat/stream"
 
 
-def chat_stream(project_root: Path, query: _Query) -> Iterator[bytes]:
+def chat_stream(project_root: Path, query: _Query) -> Generator[bytes, None, None]:
     """Le flux de la conversation de l'orchestrateur du projet, servi sur :data:`CHAT_STREAM_PATH`."""
     return workspace_chat.chat_stream(project_root, query)
 
