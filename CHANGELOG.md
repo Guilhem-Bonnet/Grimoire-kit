@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(ci): les journaux de preuve (`_grimoire-runtime-output/`) et les reçus de relecture (`_grimoire-output/reviews/`) ne sont plus suivis par git. Commités par des workers (#1017, #1039), ils rendaient « périmée » chaque relecture (fichier suivi modifié par `task verify` ou la relecture), jusqu'à l'escalade à l'humain (P82, 2026-10-28).
+
 - fix(bench): `scripts/bench/source_assist_replay.py` rejoue les 12 appels de la mesure Source piste 2 (journal brut dans `docs/audits/source-assist-piste2-2026-10-28-journal.jsonl`), `# noqa: S310` sur la bonne ligne ; la note de cadrage `docs/audits/source-assist-piste2-2026-10-26.md` reçoit son front-matter `audience: décision` (GAO-r49-note-de-001).
 ## [3.73.0] - 2026-10-28
 
