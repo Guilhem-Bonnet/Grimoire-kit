@@ -77,6 +77,7 @@ class AcpClient:
         backend: str | None = None,
         env: Mapping[str, str] | None = None,
         request_timeout: float = 60.0,
+        observer: Callable[[Any], None] | None = None,
     ) -> None:
         if not command:
             raise AcpError("aucune commande ACP pour cet hôte")
@@ -84,6 +85,9 @@ class AcpClient:
         self.cwd = Path(cwd).resolve()
         self._env = dict(env) if env is not None else None
         self._timeout = request_timeout
+        # Reçoit chaque message brut de l'agent avant la machine : la machine normalise (texte, état),
+        # l'observateur garde le détail (appels d'outils, plans, diffs) pour qui l'affiche.
+        self._observer = observer
         self._machine: Machine = new_machine(backend)
         self._lock = threading.Lock()
         self._next_id = 0
@@ -256,6 +260,8 @@ class AcpClient:
         if msg is _EOF:
             self._eof = True
             raise AcpError(self._died("l'agent s'est arrêté avant la fin de l'échange"))
+        if self._observer is not None:
+            self._observer(msg)
         with self._lock:
             events = self._machine.on_incoming(msg)
         self.agent_events.extend(events)
