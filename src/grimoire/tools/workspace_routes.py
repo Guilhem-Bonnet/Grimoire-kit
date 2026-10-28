@@ -565,7 +565,19 @@ def _mandate_state(project_root: Path, _query: _Query) -> Any:
     }
 
 
+def _autopilot_state(project_root: Path, _query: _Query) -> Any:
+    """État du pilote automatique (P82) : lecture seule, jamais d'activation ici ; les décisions sont au ledger."""
+    from grimoire.missions.autopilot import RESERVED, AutopilotStore, load_autopilot_policy
+
+    policy = load_autopilot_policy(project_root.resolve())
+    return {
+        **AutopilotStore(project_root).state().to_dict(),
+        "reserved": sorted(RESERVED), "extra_reserved": list(policy.extra), "policy_error": policy.error,
+    }
+
+
 GET_ROUTES: dict[str, _GetHandler] = {
+f"{PREFIX}autonomy/autopilot": _autopilot_state,
 f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}capacity": _capacity,
@@ -893,8 +905,31 @@ def _mandate_revoke(project_root: Path, body: dict[str, Any]) -> Any:
     return {"revoked": revoked.to_dict() if revoked else None}
 
 
+def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
+    """Active ou coupe le pilote automatique (P82) : l'origine humaine est posée ici, derrière la clé de contrôle.
+
+    Comme l'octroi du mandat, le jeton de session ne suffit pas (une page servie sur la loopback le porte) :
+    couper comme activer exige la clé de contrôle. Sans clé valide : 403, rien n'est écrit. L'activation exige un
+    mandat actif, auquel le pilote reste lié.
+    """
+    from grimoire.missions.autopilot import AutopilotStore
+    from grimoire.missions.mandate import JournalError, MandateRefusedError, verify_control_key
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
+    if not verify_control_key(body.get("control_key")):
+        raise PermissionError("clé de contrôle absente ou invalide : le pilote automatique est un geste d'humain")
+    if not isinstance(body.get("on"), bool):
+        raise ValueError("`on` (booléen) requis : true active, false coupe")
+    try:
+        entry = AutopilotStore(project_root).set(body["on"], origin=ORIGIN_HUMAN, via="cockpit")
+    except (MandateRefusedError, JournalError) as exc:
+        raise ValueError(str(exc)) from exc
+    return {"autopilot": entry["state"], "mandate_id": entry["mandate_id"], "ts": entry["ts"]}
+
+
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
+    f"{PREFIX}autonomy/autopilot": _autopilot_set,
     f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
     f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,

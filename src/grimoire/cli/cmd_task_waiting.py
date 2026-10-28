@@ -56,6 +56,9 @@ def register(task_app: typer.Typer) -> None:
             bool, typer.Option("--non-blocking", help="Ne gare pas la tâche : l'agent continue, l'humain répond quand il veut.")
         ] = False,
         why: Annotated[str, typer.Option("--why", help="Pourquoi la question est posée (ce que le reçu montre).")] = "",
+        recommended: Annotated[
+            str, typer.Option("--recommended", help="L'option que tu recommandes (l'une des `--option`) : le pilote automatique la prend.")
+        ] = "",
         key: Annotated[str, typer.Option("--key", help="Identité stable : une reprise ne repose pas une question déjà répondue.")] = "",
         from_file: Annotated[
             str, typer.Option("--from", help="Un lot de questions (JSON ou YAML, `-` : entrée standard), posé en une interruption.")
@@ -66,12 +69,13 @@ def register(task_app: typer.Typer) -> None:
         actor: _ACTOR = "cli",
     ) -> None:
         """Pose une question à l'humain (ou un lot, `--from`) : la tâche se gare en `waiting(human)` et remonte au cockpit."""
-        if not from_file and not (non_blocking or why or key):
+        if not from_file and not (non_blocking or key):
             if not text.strip():
                 console.print("[red]✗[/red] une question (texte) ou un lot (`--from`)")
                 raise typer.Exit(1)
             run(ctx, project_root, ledger_root, task_id,
-                lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch), parking=True)
+                lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch, why=why,
+                                recommended=recommended), parking=True)
             return
         from grimoire.cli.cmd_task_questions import emit_batch, read_specs
         from grimoire.core.exceptions import GrimoireError
@@ -80,7 +84,8 @@ def register(task_app: typer.Typer) -> None:
 
         try:
             specs = read_specs(from_file) if from_file else [
-                QuestionSpec(text, kind, tuple(option or ()), blocking=not non_blocking, why=why, key=key)
+                QuestionSpec(text, kind, tuple(option or ()), blocking=not non_blocking, why=why, key=key,
+                             recommended=recommended)
             ]
         except ValueError as exc:
             console.print(f"[red]✗[/red] {exc}")
@@ -102,6 +107,12 @@ def register(task_app: typer.Typer) -> None:
         task_id: Annotated[str, typer.Argument()],
         text: Annotated[str, typer.Argument(help="La réponse (ou l'une des options proposées).")],
         question: Annotated[str, typer.Option("--question", help="Identifiant de la question (q-…).")] = "",
+        why: Annotated[
+            str, typer.Option("--why", help="Pilote automatique : la justification de la décision (une phrase).")
+        ] = "",
+        confidence: Annotated[
+            str, typer.Option("--confidence", help="Pilote automatique : high, medium ou low (low : la question reste à l'humain).")
+        ] = "",
         project_root: _PROJECT_ROOT = Path(),
         ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
         actor: _ACTOR = "cli",
@@ -111,7 +122,8 @@ def register(task_app: typer.Typer) -> None:
 
         origin, provenance = gesture_origin(ct._comment_origin())
         run(ctx, project_root, ledger_root, task_id,
-            lambda s: s.answer(task_id, text, actor, origin=origin, question_id=question, provenance=provenance))
+            lambda s: s.answer(task_id, text, actor, origin=origin, question_id=question, provenance=provenance,
+                               justification=why, confidence=confidence))
 
     @task_app.command("accept")
     def task_accept(
