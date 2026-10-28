@@ -28,6 +28,10 @@ escalade à l'humain).
 Lot 4 : après le relecteur, si le rôle ``merger`` est activé, la file série (:mod:`.merger`) fusionne la tête de file
 relue READY (CI verte, branche réalignée, sous mandat seulement) puis l'accepte, ou pose la question à l'humain.
 
+#962 : après le merger, si le rôle ``orchestrator`` est activé et qu'un mandat actif couvre des questions ouvertes des
+workers (geste ``answer``) ou des reprises (geste ``resume``), l'étape orchestrateur (:mod:`.orchestrator_session`)
+lance une session de fond qui les tranche dans le périmètre des critères, ou les laisse à l'humain.
+
 K12 — **idempotent et rejouable** :
 
 - un seul tick écrit à la fois : ``_grimoire-output/control/.tick.lock`` (:func:`grimoire.core.fsio.locked`,
@@ -70,6 +74,7 @@ if TYPE_CHECKING:
     from grimoire.missions.janitor import JanitorOutcome
     from grimoire.missions.launcher import Exec, LaunchOutcome
     from grimoire.missions.merger import MergerOutcome
+    from grimoire.missions.orchestrator_session import OrchestratorOutcome
     from grimoire.missions.reviewer import ReviewOutcome
     from grimoire.missions.service import TaskService, WakeDecision
 
@@ -103,6 +108,7 @@ class TickReport:
     breaker: BreakerState | None = None
     reviews: tuple[ReviewOutcome, ...] = ()
     merges: tuple[MergerOutcome, ...] = ()
+    orchestrator: tuple[OrchestratorOutcome, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -129,6 +135,8 @@ class TickReport:
             payload["reviews"] = [o.to_dict() for o in self.reviews]
         if self.merges:  # lot 4 : même règle
             payload["merges"] = [o.to_dict() for o in self.merges]
+        if self.orchestrator:  # #962 : même règle
+            payload["orchestrator"] = [o.to_dict() for o in self.orchestrator]
         return payload
 
 
@@ -206,13 +214,26 @@ def _one_pass(
     """Récolte, réveils, effets, admission — les mêmes gestes en plan (sur la copie) et appliqués."""
     from grimoire.missions.ci_slots import migrate_orphan_slots, once_per_tick, reconcile_ci
     from grimoire.missions.effects import reconcile
+    from grimoire.missions.launcher import default_exec, renew_live_workers
 
+    heartbeat = ""
+    try:  # le battement des workers au travail, avant la récolte (#961) ; en erreur, la récolte juge comme avant
+        renew_live_workers(service, exec_ or default_exec, now=now)
+    except Exception as exc:
+        heartbeat = f"battement des workers : en erreur, aucun bail renouvelé à ce tick ({type(exc).__name__}: {exc})"
     report = service.reap(apply=True, now=now, probe_hosts=mode == "apply")
     woken = tuple(service.wake_due(apply=True, now=now, pause=state))
     effects = tuple(reconcile(service, apply=True, probe=effect_probe))
     shared = once_per_tick(ci_probe)  # UNE lecture gh par tick, partagée par la réconciliation et la migration
+    if mode == "apply":  # les workers en revue ou en attente rendent leur place : session arrêtée, conversation gardée
+        from grimoire.missions.launcher import halt_idle_workers
+
+        try:
+            halt_idle_workers(service, exec_ or default_exec)
+        except Exception as exc:
+            heartbeat = heartbeat or f"arrêt des workers au repos : en erreur, retenté au tick suivant ({type(exc).__name__}: {exc})"
     ci = (*reconcile_ci(service, probe=shared, now=now), *migrate_orphan_slots(service, probe=shared, now=now))
-    attention = [*state.attention()]
+    attention = [*state.attention(), *([heartbeat] if heartbeat else [])]
     policy, cleanup = _orchestrator_stage(service, mode, exec_, attention)
     plan = service.queue_plan(now=now, pause=state)
     dispatched: tuple[str, ...] = ()
@@ -235,6 +256,7 @@ def _one_pass(
         except Exception as exc:  # une étape en erreur ne casse pas le tick : récolte, admission et lancements sont faits
             attention.append(f"relecteur : étape en erreur, rien n'est jugé à ce tick ({type(exc).__name__}: {exc})")
     merges = _merger_stage(service, policy, mode, exec_, now, attention)
+    answers = _orchestrator_session_stage(service, policy, mode, exec_, now, attention)
     from grimoire.missions.breaker import read_breaker
 
     state_of_breaker = read_breaker(service.home_root)
@@ -248,11 +270,14 @@ def _one_pass(
         if launch.status == "failed":
             attention.append(f"lanceur : {launch.task_id} non lancée ({launch.detail})")
     for review in reviews:
-        if review.status == "failed" or review.action in ("forged", "escalate"):
+        if review.status == "failed" or review.action in ("forged", "escalate", "no_pr", "pr_refused"):  # #994 : pas de PR à relire
             attention.append(f"relecteur : {review.task_id} {review.action} ({review.detail})")
     for merge in merges:
         if merge.status in ("failed", "refused") or merge.action == "escalate":
             attention.append(f"merger : {merge.task_id} {merge.action} {merge.status} ({merge.detail})")
+    for answer in answers:
+        if answer.status == "failed" or "laissées à l'humain" in answer.detail:
+            attention.append(f"orchestrateur : {answer.action} {answer.status} ({answer.detail})")
     if report.clock == "unknown":
         attention.append("horloge incohérente (plus tôt que le dernier événement du ledger) : rien n'est récolté")
     if unreadable := service.ledger.unreadable_lines():
@@ -268,17 +293,19 @@ def _one_pass(
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
-        launches, cleanup, breaker, reviews, merges,
+        launches, cleanup, breaker, reviews, merges, answers,
     )
 
 
 def _autonomous(service: TaskService) -> bool:
-    """Un rôle autonome est activé (worker, reviewer, merger), ou le ledger porte des sessions lancées par le tick."""
+    """Un rôle autonome est activé (worker, reviewer, merger, orchestrator), ou le ledger porte des sessions du tick."""
     from grimoire.missions.launcher import launched_sessions
     from grimoire.missions.orchestrator_policy import load_orchestrator_policy
 
     policy = load_orchestrator_policy(service.home_root).policy
-    if policy is not None and (policy.worker.enabled or policy.reviewer.enabled or policy.merger.enabled):
+    if policy is not None and (
+        policy.worker.enabled or policy.reviewer.enabled or policy.merger.enabled or policy.orchestrator.enabled
+    ):
         return True
     return bool(launched_sessions(service))
 
@@ -296,6 +323,22 @@ def _merger_stage(
         return MergeStage(service, policy, exec_=exec_ or default_exec, now=now)()
     except Exception as exc:  # récolte, admission, lancements et relectures sont faits
         attention.append(f"merger : étape en erreur, rien n'est fusionné à ce tick ({type(exc).__name__}: {exc})")
+        return ()
+
+
+def _orchestrator_session_stage(
+    service: TaskService, policy: Any, mode: str, exec_: Exec | None, now: datetime | None, attention: list[str]
+) -> tuple[OrchestratorOutcome, ...]:
+    """La session orchestrateur (#962), appliquée seulement ; une étape en erreur ne casse pas le tick."""
+    if mode != "apply" or policy is None or not policy.orchestrator.enabled:
+        return ()
+    from grimoire.missions.launcher import default_exec
+    from grimoire.missions.orchestrator_session import OrchestratorStage
+
+    try:
+        return OrchestratorStage(service, policy, exec_=exec_ or default_exec, now=now)()
+    except Exception as exc:  # récolte, admission, lancements, relectures et fusions sont faits
+        attention.append(f"orchestrateur : étape en erreur, aucune question n'est confiée à ce tick ({type(exc).__name__}: {exc})")
         return ()
 
 

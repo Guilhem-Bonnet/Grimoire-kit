@@ -2,23 +2,14 @@
 // la prise d'override, l'inspecteur de provenance. Écran nouveau : rien à
 // remplacer (ADR-006, lot 5).
 //
-// Ce module possède aussi ce que la Console du dock ENVOIE (README, « Lot 5 ↔
-// lot 1 ») : le lot 1 possède le chrome du dock (`ctx.dock.log/clear/setTab/
-// echo`), donc l'entrée interactive de la Console — invite, historique,
-// complétion — est construite au-dessus de ce seul contrat, en redessinant le
-// transcript à chaque frappe plutôt qu'en touchant le DOM du dock, que ce
-// module n'a pas le droit d'atteindre directement. C'est plus de frappes
-// affichées que par un vrai `<input>`, mais ça tient la promesse « aucun
-// module d'espace ne touche le DOM de l'autre » plutôt que de la contourner.
-//
-// La saisie de la Console est amorcée une fois pour toute la session, au
-// premier montage de Source (le dock est commun à tous les espaces ; il
-// resterait sourd tant que Source n'a jamais été ouvert — c'est la seule
-// zone grise que le contrat figé de l'ADR laisse à ce lot).
+// La Console du dock n'est plus ici (P06) : c'est un vrai champ de saisie que
+// la coque possède (`shell.js`, « Console du dock »). Ce module n'écrit dans
+// le dock que ce qui le concerne — l'onglet Problèmes et la trace de ses
+// enregistrements —, et seulement tant qu'il est monté (`ctx.signal`).
 //
 // API consommées : api.files(tier), api.file(path), api.fileDiff(path),
 // api.fileUsage(path), api.fileHistory(path), api.createOverride(path),
-// api.writeFile(path, text), api.commands(), api.doctor(), api.run(argv),
+// api.writeFile(path, text), api.doctor(),
 // api.language(path, {text, pos}). L'assistance par modèle local (#280, voie
 // 2 — api.assistStatus(), api.assist(path, {...})) vit entièrement dans
 // source-editor.js, jamais ici.
@@ -42,7 +33,7 @@ function ensureStylesheet() {
 function freshState() {
   return {
     tree: null,
-    treeEl: null,
+    treeEls: [],
     dirsOpen: new Set(),
     currentPath: null,
     currentEntry: null,
@@ -63,7 +54,6 @@ let state = freshState();
 export async function mount(root, ctx) {
   ensureStylesheet();
   state = freshState();
-  bindConsoleOnce(ctx);
   populateProblems(ctx);
 
   ctx.docbar.setBreadcrumb([]);
@@ -81,16 +71,19 @@ export async function mount(root, ctx) {
   try {
     tree = await ctx.api.files();
   } catch (error) {
+    if (ctx.signal.aborted) return;
     root.append(ctx.empty(
       'Source injoignable',
       "L'API locale n'a pas répondu pour /api/workspace/files : " + error.message,
-      'grimoire doctor --check-paths',
+      'grimoire doctor',
     ));
     return;
   }
+  // Rubrique quittée pendant la lecture : rien de ce qui suit ne la concerne plus.
+  if (ctx.signal.aborted) return;
   state.tree = tree;
   // L'arbre vit dans le contenu de la rubrique (P66), une colonne à gauche du
-  // fichier ouvert : l'explorateur d'atelier (⇧⌘L) reste celui de la coque.
+  // fichier ouvert, et reprise dans l'Explorateur de la coque (P78).
   const split = document.createElement('div');
   split.className = 'sr-split';
   const treeEl = document.createElement('nav');
@@ -100,7 +93,16 @@ export async function mount(root, ctx) {
   pane.className = 'sr-pane';
   split.append(treeEl, pane);
   root.replaceChildren(split);
-  state.treeEl = treeEl;
+  state.treeEls = [treeEl];
+  // P78 : l'Explorateur de la coque est celui des espaces qui ont une
+  // arborescence. Fichiers y pose la même, sans quoi le panneau se masque.
+  if (ctx.explorer) {
+    const shellTree = document.createElement('nav');
+    shellTree.className = 'tree sr-tree';
+    shellTree.setAttribute('aria-label', 'Arborescence des fichiers');
+    ctx.explorer.replaceChildren(shellTree);
+    state.treeEls.push(shellTree);
+  }
   root = pane;
   renderExplorer(ctx, root);
   renderCanvas(root, ctx);
@@ -175,19 +177,23 @@ function dirLabel(tier, dir) {
 }
 
 function renderExplorer(ctx, root) {
-  state.treeEl.replaceChildren();
+  for (const treeEl of state.treeEls) renderTree(ctx, root, treeEl);
+}
+
+function renderTree(ctx, root, treeEl) {
+  treeEl.replaceChildren();
   for (const tier of state.tree.tiers) {
     const head = document.createElement('div');
     head.className = 'sr-tree-tier';
     if (tier.term) head.dataset.term = tier.term;
     head.textContent = `${tier.label} · ${tier.count}${tier.truncated ? ' (+ )' : ''}`;
-    state.treeEl.append(head);
+    treeEl.append(head);
 
     if (!tier.exists) {
       const note = document.createElement('div');
       note.className = 'sr-tree-file lbl';
       note.textContent = tier.note ? `aucun fichier — ${tier.note}` : 'aucun fichier';
-      state.treeEl.append(note);
+      treeEl.append(note);
       continue;
     }
 
@@ -219,7 +225,7 @@ function renderExplorer(ctx, root) {
           else state.dirsOpen.delete('closed:' + dirKey);
           renderExplorer(ctx, root);
         });
-        state.treeEl.append(dirBtn);
+        treeEl.append(dirBtn);
       }
       if (!open && dir) continue;
       for (const file of files.sort((a, b) => a.path.localeCompare(b.path))) {
@@ -242,7 +248,7 @@ function renderExplorer(ctx, root) {
           row.append(letter);
         }
         row.addEventListener('click', () => openFile(ctx, root, file.path));
-        state.treeEl.append(row);
+        treeEl.append(row);
       }
     }
   }
@@ -260,13 +266,19 @@ async function openFile(ctx, root, path, line) {
   state.inspectorTab = 'fichier';
   editorProblemLines = []; // le fichier change : les diagnostics de l'ancien ne s'appliquent plus
   renderProblems(ctx);
+  let entry;
   try {
-    state.currentEntry = await ctx.api.file(path);
+    entry = await ctx.api.file(path);
   } catch (error) {
+    if (ctx.signal.aborted) return;
     state.currentEntry = null;
     root.replaceChildren(ctx.empty('Fichier illisible', error.message, `grimoire doctor`));
     return;
   }
+  // Une réponse arrivée après le changement d'espace ne pose ni pastille, ni
+  // URL, ni inspecteur sur l'espace suivant (P06).
+  if (ctx.signal.aborted) return;
+  state.currentEntry = entry;
   state.draft = state.currentEntry.text || '';
   // Le fichier ouvert entre dans l'URL : un lien copié le rouvre (P31).
   ctx.setItem?.({ file: path, ...(line ? { line } : {}) });
@@ -318,6 +330,49 @@ function chipEtat(entry) {
   return chip;
 }
 
+// Le bandeau d'un fichier en lecture seule dit ce qu'on peut en faire, selon
+// son étage (P06). « Créer un override » n'existe que pour un fichier du kit
+// dont le serveur a calculé l'override (`override_path`) : un pack de preuve,
+// une projection d'hôte ou un fichier du standard sans override possible ont
+// leur propre phrase, sans bouton — et aucun chemin n'est jamais inventé.
+function readOnlyBanner(ctx, root, entry) {
+  const banner = document.createElement('div');
+  banner.className = 'sr-banner';
+  const text = document.createElement('span');
+  const mono = (value) => Object.assign(document.createElement('span'), { className: 'mono', textContent: value });
+  let button = null;
+  if (entry.tier === 'kit' && entry.override_path) {
+    banner.dataset.term = 'kit';
+    banner.dataset.kind = 'override';
+    button = document.createElement('button');
+    button.className = 'btn pri';
+    button.type = 'button';
+    if (entry.overridden) {
+      text.append('Un override de ce fichier existe déjà : ', mono(entry.override_path), '. C’est lui qui prime.');
+      button.textContent = 'Ouvrir l’override';
+      button.addEventListener('click', () => openFile(ctx, root, entry.override_path));
+    } else {
+      text.append('Ce fichier est généré par le kit. Le modifier crée ', mono(entry.override_path), ', qui prime et survit aux mises à jour.');
+      button.textContent = 'Créer un override';
+      button.addEventListener('click', () => createOverrideAndOpen(ctx, root));
+    }
+  } else if (entry.tier === 'evidence') {
+    banner.dataset.term = 'evidence-pack';
+    banner.dataset.kind = 'evidence';
+    text.append('Pack de preuve : il est écrit par la tâche qui le produit, jamais à la main.');
+  } else if (entry.tier === 'projections') {
+    banner.dataset.term = 'projection';
+    banner.dataset.kind = 'projection';
+    text.append('Projection régénérée depuis le kit pour un hôte : une modification ici serait perdue à la prochaine projection.');
+  } else {
+    banner.dataset.term = 'kit';
+    banner.dataset.kind = 'generated';
+    text.append('Fichier généré, sans override possible à cet emplacement : il se régénère à chaque mise à jour.');
+  }
+  banner.append(stateIcon('acc'), text, ...(button ? [button] : []));
+  return banner;
+}
+
 function renderCanvas(root, ctx) {
   root.replaceChildren();
   if (!state.currentPath || !state.currentEntry) {
@@ -327,7 +382,7 @@ function renderCanvas(root, ctx) {
       total
         ? `${total} fichier(s) répartis sur ${state.tree.tiers.length} étages. Choisissez un fichier dans l'arborescence.`
         : "Aucun fichier trouvé. `grimoire init` puis `grimoire standard init` peuplent les étages.",
-      'grimoire doctor --check-paths',
+      'grimoire doctor',
     ));
     return;
   }
@@ -354,26 +409,7 @@ function renderCanvas(root, ctx) {
   wrap.append(docrow);
   wrap.append(actionStatus(state.notice && state.notice.text, state.notice && state.notice.tone));
 
-  if (!entry.editable && state.view === 'source') {
-    const overridePath = entry.override_path || '(à calculer par le serveur)';
-    const banner = document.createElement('div');
-    banner.className = 'sr-banner';
-    banner.dataset.term = 'kit';
-    const dot = stateIcon('acc');
-    const text = document.createElement('span');
-    text.append(document.createTextNode('Ce fichier est généré par le kit. Le modifier crée '));
-    const code = document.createElement('span');
-    code.className = 'mono';
-    code.textContent = overridePath;
-    text.append(code, document.createTextNode(', qui prime et survit aux mises à jour.'));
-    const btn = document.createElement('button');
-    btn.className = 'btn pri';
-    btn.type = 'button';
-    btn.textContent = 'Créer un override';
-    btn.addEventListener('click', () => createOverrideAndOpen(ctx, root));
-    banner.append(dot, text, btn);
-    wrap.append(banner);
-  }
+  if (!entry.editable && state.view === 'source') wrap.append(readOnlyBanner(ctx, root, entry));
 
   const body = document.createElement('div');
   body.className = 'sr-body';
@@ -523,6 +559,7 @@ function saveCurrent(ctx, root) {
   const button = root.querySelector('.sr-docrow .btn:not(.pri)');
   return runInline(ctx, root, button, 'Enregistrement…', async () => {
     const updated = await ctx.api.writeFile(entry.path, state.draft);
+    if (ctx.signal.aborted) return;
     state.currentEntry = updated;
     state.draft = updated.text || '';
     state.dirty = false;
@@ -728,7 +765,7 @@ function renderProblems(ctx) {
 }
 
 async function populateProblems(ctx) {
-  doctorLines = ['diagnostic en cours — grimoire doctor --check-paths…'];
+  doctorLines = ['diagnostic en cours — grimoire doctor…'];
   renderProblems(ctx);
   try {
     const report = await ctx.api.doctor();
@@ -736,6 +773,7 @@ async function populateProblems(ctx) {
   } catch (error) {
     doctorLines = ['diagnostic indisponible · ' + error.message];
   }
+  if (ctx.signal.aborted) return;
   renderProblems(ctx);
 }
 
@@ -744,163 +782,4 @@ function updateEditorProblems(ctx, path, diagnostics) {
     (d) => `${path}:${d.line + 1}:${d.start + 1} — [${d.severity}] ${d.family} — ${d.message}`,
   );
   renderProblems(ctx);
-}
-
-// ── Console du dock : invite, historique, complétion ────────────────────────
-//
-// Rendue entièrement à travers `ctx.dock.log`/`clear` (voir l'en-tête de ce
-// fichier) : chaque frappe redessine le transcript plutôt que de manipuler un
-// `<input>` que ce module n'a pas le droit de posséder.
-
-const consoleState = {
-  transcript: [],   // { input, output, code, refusal }
-  inputHistory: [],
-  historyIndex: 0,
-  buffer: '',
-  catalogue: null,
-  running: false,
-};
-
-let consoleCtx = null;
-let consoleBound = false;
-
-function bindConsoleOnce(ctx) {
-  consoleCtx = ctx;
-  if (consoleBound) return;
-  consoleBound = true;
-  document.addEventListener('keydown', onConsoleKeydown);
-  renderConsole();
-}
-
-function consoleTabIsActive() {
-  const btn = document.querySelector('[data-dock-tab="console"]');
-  return !!btn && btn.getAttribute('aria-selected') === 'true';
-}
-
-function paletteIsOpen() {
-  const el = document.getElementById('palette');
-  return !!el && !el.hidden;
-}
-
-function onConsoleKeydown(event) {
-  if (!consoleCtx || consoleState.running) return;
-  if (paletteIsOpen()) return;
-  if (!consoleTabIsActive()) return;
-  const target = event.target;
-  const typingElsewhere = /^(INPUT|TEXTAREA)$/.test(target.tagName) || target.isContentEditable;
-  if (typingElsewhere) return; // l'éditeur de Source a la priorité sur ses propres frappes.
-  const meta = event.metaKey || event.ctrlKey || event.altKey;
-
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    void executeConsole();
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    historyStep(-1);
-  } else if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    historyStep(1);
-  } else if (event.key === 'Tab') {
-    event.preventDefault();
-    void completeConsole();
-  } else if (event.key === 'Backspace') {
-    event.preventDefault();
-    consoleState.buffer = consoleState.buffer.slice(0, -1);
-    renderConsole();
-  } else if (event.key === 'Escape') {
-    event.preventDefault();
-    consoleState.buffer = '';
-    renderConsole();
-  } else if (event.key === '`') {
-    // Raccourci du raccourci : la coque (shell.js) traite déjà `` ` `` comme
-    // « place le curseur dans la Console » et vient de sélectionner l'onglet
-    // dans ce même tour d'événement (les deux écouteurs sont sur `document`,
-    // le sien enregistré en premier). Sans ce garde, le caractère atterrirait
-    // dans le tampon au lieu d'y ouvrir simplement la saisie.
-  } else if (!meta && event.key.length === 1) {
-    consoleState.buffer += event.key;
-    renderConsole();
-  }
-}
-
-function historyStep(delta) {
-  if (!consoleState.inputHistory.length) return;
-  const idx = Math.max(0, Math.min(consoleState.inputHistory.length, consoleState.historyIndex + delta));
-  consoleState.historyIndex = idx;
-  consoleState.buffer = idx < consoleState.inputHistory.length ? consoleState.inputHistory[idx] : '';
-  renderConsole();
-}
-
-function renderConsole() {
-  if (!consoleCtx) return;
-  const lines = [];
-  for (const item of consoleState.transcript) {
-    lines.push('$ ' + item.input);
-    for (const outLine of (item.output || '').split('\n')) {
-      if (outLine) lines.push(outLine);
-    }
-    if (item.code !== null && item.code !== undefined) lines.push(`(code de sortie ${item.code})`);
-  }
-  lines.push('$ ' + consoleState.buffer + (consoleState.running ? ' …' : ''));
-  consoleCtx.dock.clear('console');
-  consoleCtx.dock.log('console', ...lines);
-}
-
-async function executeConsole() {
-  const raw = consoleState.buffer.trim();
-  consoleState.buffer = '';
-  if (!raw) { renderConsole(); return; }
-  consoleState.inputHistory.push(raw);
-  consoleState.historyIndex = consoleState.inputHistory.length;
-  const argv = raw.replace(/^grimoire\s+/, '').split(/\s+/);
-  const entry = { input: raw, output: '', code: null };
-  consoleState.transcript.push(entry);
-  consoleState.running = true;
-  renderConsole();
-  consoleCtx.dock.echo('grimoire ' + argv.join(' '));
-  try {
-    const result = await consoleCtx.api.run(argv);
-    entry.output = result.output || '(aucune sortie)';
-    entry.code = result.code;
-    if (result.timed_out) entry.output += '\n(délai dépassé)';
-  } catch (error) {
-    // Le refus explicite (liste blanche, drapeau, hôte) : la raison vient du
-    // serveur (workspace_exec.CommandRefusedError), affichée telle quelle.
-    entry.output = 'refusé : ' + error.message;
-  } finally {
-    consoleState.running = false;
-    renderConsole();
-  }
-}
-
-function commonPrefix(words) {
-  if (!words.length) return '';
-  let prefix = words[0];
-  for (const word of words.slice(1)) {
-    let i = 0;
-    while (i < prefix.length && i < word.length && prefix[i] === word[i]) i += 1;
-    prefix = prefix.slice(0, i);
-  }
-  return prefix;
-}
-
-async function completeConsole() {
-  if (!consoleState.catalogue) {
-    try { consoleState.catalogue = (await consoleCtx.api.commands()).commands; }
-    catch { consoleState.catalogue = []; }
-  }
-  const withoutPrefix = consoleState.buffer.replace(/^grimoire\s*/, '');
-  const matches = consoleState.catalogue.map((c) => c.key).filter((k) => k.startsWith(withoutPrefix));
-  if (matches.length === 1) {
-    consoleState.buffer = 'grimoire ' + matches[0] + ' ';
-  } else if (matches.length > 1) {
-    const common = commonPrefix(matches);
-    if (common.length > withoutPrefix.length) consoleState.buffer = 'grimoire ' + common;
-    consoleState.transcript.push({
-      input: consoleState.buffer,
-      output: matches.map((m) => 'grimoire ' + m).join('   '),
-      code: null,
-    });
-  }
-  renderConsole();
 }

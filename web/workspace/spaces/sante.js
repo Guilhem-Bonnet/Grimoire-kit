@@ -7,13 +7,20 @@
 // est « inconnu » avec son motif, jamais un zéro. La « File d'hygiène » rend
 // les mêmes constats que À traiter, chacun avec son geste.
 //
+// La « Carte par hall » (P73, maquette « Savoir — santé et carte ») rend la
+// même mesure en surfaces : un pavé par hall, surface proportionnelle au
+// nombre d'entrées classées (`measures.types`), forme = hall (le même langage
+// que la légende « Lire la carte » du panneau de droite). Un clic ouvre la
+// Recherche filtrée sur les types du hall.
+//
 // Refus tenus ici :
 // - aucun bouton inerte : chaque geste ouvre d'abord un aperçu (ce qui sera
 //   touché, pourquoi) puis donne la commande qui le fait, à copier ; aucune
 //   écriture n'a de route sans export préalable, donc aucune ne part d'ici ;
-// - la carte par hall et la légende « Lire une connaissance » n'ont pas
-//   encore de lecture serveur (P26 sert la carte machine de Flotte › Données,
-//   pas celle des halls) : leur place est dite vide, rien n'est dessiné.
+// - la carte ne dessine que ce qui est mesuré : un scan incomplet le dit
+//   (« comptes sur les N premières entrées »), un store vide dit sa place
+//   vide ; la fraîcheur et les liens par entrée ne sont pas encore rendus,
+//   la légende ne documente donc que la forme.
 //
 // API consommées : api.memoryQuality, api.projects.
 
@@ -28,7 +35,7 @@ const STYLES = `
 .sm-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 14px; align-items: stretch; }
 .sm-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-l); box-shadow: var(--shadow); min-width: 0; }
 .sm-health { padding: 14px 16px; display: flex; flex-direction: column; }
-.sm-cardhead { display: flex; align-items: baseline; gap: 10px; }
+.sm-cardhead { display: flex; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
 .sm-health .sm-cardhead { padding-bottom: 6px; }
 .sm-cardhead h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; }
 .sm-cardhead .badge { margin-left: auto; }
@@ -48,6 +55,34 @@ const STYLES = `
 .sm-map .sm-sub { color: var(--ink2); font-size: 12px; }
 .sm-slot { flex: 1; min-height: 160px; display: flex; align-items: center; justify-content: center; text-align: center;
   padding: 16px; border: 1px dashed var(--line); border-radius: var(--r); color: var(--ink2); }
+.sm-tmap { display: flex; gap: 4px; flex: 1; min-height: 220px; }
+/* Les surfaces suivent les comptes, mais aucun pavé ne descend sous une
+ * largeur lisible : un store très déséquilibré garde ses petits halls nommés. */
+.sm-tcol { display: flex; flex-direction: column; gap: 4px; min-width: 168px; }
+.sm-tmap > .sm-tile { min-width: 128px; }
+.sm-tile { appearance: none; font: inherit; text-align: left; cursor: pointer; border-radius: var(--r);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 90px;
+  overflow: hidden; box-sizing: border-box; background: var(--card); border: 1px solid var(--line2); color: var(--ink); }
+.sm-tile:hover { border-color: var(--ink3); }
+.sm-tile:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.sm-tile[data-tone="acc"] { background: var(--acc-soft); border-color: var(--acc); }
+.sm-tile[data-tone="warn"] { background: var(--warn-soft); border-color: var(--warn-mark); }
+.sm-tile[data-tone="off"] { background: transparent; border-style: dashed; }
+.sm-tile-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
+.sm-tile-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-tile-n { font-size: 24px; line-height: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sm-tile-sub { color: var(--ink2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-shape { width: 12px; height: 12px; flex: none; fill: currentColor; color: var(--ink2); }
+.sm-tile[data-tone="acc"] .sm-shape { color: var(--acc); }
+.sm-tile[data-tone="warn"] .sm-shape { color: var(--warn-mark); }
+.sm-partial { margin: 0; color: var(--ink2); font-size: 12px; }
+.sm-legend { display: flex; flex-direction: column; gap: 14px; }
+.sm-legend-head { display: flex; flex-direction: column; gap: 4px; }
+.sm-legend-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.sm-legend-lead { margin: 0; color: var(--ink2); font-size: 12.5px; }
+.sm-leg { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 0; }
+.sm-leg .sm-shape { justify-self: center; }
+.sm-leg-note { margin: 0; color: var(--ink2); font-size: 12px; }
 .sm-hygiene { overflow: hidden; }
 .sm-hygiene > .sm-cardhead { padding: 14px 16px 10px; }
 .sm-cnt { color: var(--rub); font-weight: 600; }
@@ -71,7 +106,7 @@ const STYLES = `
 .sm-cmd code { font-family: var(--mono); font-size: var(--t-s); padding: 4px 8px; border-radius: var(--r); background: var(--hover);
   color: var(--ink); overflow-wrap: anywhere; }
 .sm-none { margin: 0; padding: 12px 16px 14px; border-top: 1px solid var(--line); color: var(--ink2); }
-@media (max-width: 960px) {
+@container canvas (max-width: 760px) {
   .sm-wrap { padding: var(--sp-4); }
   .sm-grid { grid-template-columns: minmax(0, 1fr); }
   .sm-hyg { grid-template-columns: minmax(0, 1fr); }
@@ -138,14 +173,132 @@ function healthCard(report) {
   return card;
 }
 
-/** La place de la carte par hall : dite vide, jamais simulée. */
-function mapSlot() {
+// ── Carte par hall : la mesure en surfaces (P73) ───────────────────────────
+
+/** Les halls : un regroupement de types classés, une forme, une teinte. */
+const HALLS = [
+  { id: 'faits', label: 'Faits et décisions', sub: 'hall des faits', shape: 'square', tone: 'acc',
+    types: ['decision', 'convention', 'untyped'] },
+  { id: 'evenements', label: 'Événements, échecs', sub: 'hall des événements', shape: 'circle', tone: 'warn',
+    types: ['incident', 'story'] },
+  { id: 'decouvertes', label: 'Découvertes', sub: 'hall des apprentissages', shape: 'diamond', tone: '',
+    types: ['learning'] },
+  { id: 'projections', label: 'Projections', sub: 'copies régénérables', shape: 'dashed', tone: 'off',
+    types: ['code', 'docs', 'task', 'projection'] },
+];
+
+const TYPE_WORDS = {
+  decision: ['décision', 'décisions'], convention: ['convention', 'conventions'],
+  untyped: ['fait non typé', 'faits non typés'], incident: ['incident', 'incidents'],
+  story: ['récit', 'récits'], learning: ['apprentissage', 'apprentissages'],
+  code: ['code', 'code'], docs: ['doc', 'docs'], task: ['tâche', 'tâches'],
+  projection: ['autre projection', 'autres projections'],
+};
+
+const SHAPES = {
+  square: '<rect x="1" y="1" width="10" height="10"/>',
+  circle: '<circle cx="6" cy="6" r="5"/>',
+  diamond: '<path d="M6 .5 11.5 6 6 11.5.5 6z"/>',
+  dashed: '<rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.2 2"/>',
+};
+
+/** La forme d'un hall, en SVG local (fill/stroke = currentColor, jamais une couleur). */
+function shapeIcon(shape) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 12 12');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('sm-shape');
+  svg.innerHTML = SHAPES[shape] || SHAPES.square;
+  return svg;
+}
+
+/** Les halls mesurés : compte total et composition par type, dans l'ordre décroissant. */
+function hallCounts(types) {
+  const halls = [];
+  for (const hall of HALLS) {
+    const parts = hall.types
+      .map((t) => ({ type: t, count: types[t] || 0 }))
+      .filter((p) => p.count > 0);
+    const count = parts.reduce((sum, p) => sum + p.count, 0);
+    if (count) halls.push({ ...hall, count, parts });
+  }
+  return halls.sort((a, b) => b.count - a.count);
+}
+
+/** Un pavé de la carte : forme, hall, compte ; un clic ouvre la Recherche filtrée. */
+function hallTile(ctx, hall, slug) {
+  const noun = plural(hall.count, 'entrée', 'entrées');
+  const tile = el('button', 'sm-tile', null, {
+    type: 'button',
+    'aria-label': `${hall.label} : ${noun} — ouvrir dans Recherche`,
+  });
+  tile.dataset.hall = hall.id;
+  if (hall.tone) tile.dataset.tone = hall.tone;
+  tile.style.flex = `${hall.count} 1 0`;
+  const head = el('span', 'sm-tile-head');
+  head.append(shapeIcon(hall.shape), el('span', null, hall.label));
+  const detail = hall.parts.map((p) => `${p.count} ${TYPE_WORDS[p.type][p.count > 1 ? 1 : 0]}`).join(' · ');
+  tile.append(head, el('span', 'sm-tile-n', String(hall.count)), el('span', 'sm-tile-sub', detail || hall.sub));
+  tile.title = `${hall.sub} · ${detail}`;
+  tile.addEventListener('click', () => ctx.goto('memoire', { types: hall.types.join(','), of: slug || '' }));
+  return tile;
+}
+
+/** La carte par hall : surface = nombre d'entrées classées, mesurées par `memory/quality`. */
+function mapCard(ctx, report, slug) {
   const card = el('section', 'sm-card sm-map', null, { 'aria-labelledby': 'sm-h-map' });
   const head = el('div', 'sm-cardhead');
   head.append(el('h2', null, 'Carte par hall', { id: 'sm-h-map' }));
-  card.append(head, el('span', 'sm-sub', 'surface = nombre d’entrées · clic pour descendre aux rooms'));
-  card.append(el('p', 'sm-slot', 'La carte par hall n’est pas encore servie : elle arrive avec l’exploration du savoir.'));
+  card.append(head, el('span', 'sm-sub', 'surface = nombre d’entrées · clic ouvre la Recherche sur le hall'));
+  const measures = report.measures || {};
+  const types = measures.types;
+  if (types == null) {
+    card.append(el('p', 'sm-slot', `Carte non mesurable : ${report.storeReason || 'store non lu'}.`));
+    return card;
+  }
+  const halls = hallCounts(types);
+  if (!halls.length) {
+    card.append(el('p', 'sm-slot', 'Aucune entrée à cartographier : le store est vide.'));
+    return card;
+  }
+  const map = el('div', 'sm-tmap', null, { role: 'group', 'aria-label': 'Carte par hall' });
+  const [first, ...rest] = halls;
+  map.append(hallTile(ctx, first, slug));
+  if (rest.length === 1) {
+    map.append(hallTile(ctx, rest[0], slug));
+  } else if (rest.length) {
+    const column = el('div', 'sm-tcol');
+    column.style.flex = `${rest.reduce((sum, h) => sum + h.count, 0)} 1 0`;
+    for (const hall of rest) column.append(hallTile(ctx, hall, slug));
+    map.append(column);
+  }
+  card.append(map);
+  if (!measures.complete) {
+    card.append(el('p', 'sm-partial', `Comptes sur les ${measures.scanned} premières entrées parcourues : le store n’a pas été lu en entier.`));
+  }
   return card;
+}
+
+/** La légende « Lire la carte » du panneau de droite : le langage des formes, rien de plus. */
+function legend() {
+  const box = el('div', 'sm-legend', null, { role: 'group', 'aria-label': 'Lire la carte' });
+  const head = el('div', 'sm-legend-head');
+  head.append(
+    el('p', 'sm-eyebrow', 'Un seul langage, partout'),
+    el('h2', null, 'Lire la carte'),
+    el('p', 'sm-legend-lead', 'Le même encodage dans la carte et les tableaux de Savoir : une dimension par canal.'),
+  );
+  box.append(head);
+  const list = el('div');
+  list.append(el('p', 'sm-eyebrow', 'Forme = hall'));
+  for (const hall of HALLS) {
+    const row = el('div', 'sm-leg');
+    row.append(shapeIcon(hall.shape), el('span', null, hall.label));
+    list.append(row);
+  }
+  box.append(list, el('p', 'sm-leg-note',
+    'La fraîcheur et les liens (remplace, contredit) se lisent entrée par entrée dans la Recherche : la carte ne les dessine pas encore.'));
+  return box;
 }
 
 const itemMatches = (item, wanted) => Boolean(wanted)
@@ -289,7 +442,7 @@ export async function mount(root, ctx) {
   let token = 0;
   const load = async () => {
     const mine = ++token;
-    wrap.replaceChildren(spaceHead('Santé et carte', 'Mesure de la mémoire…', picker()), ...ctx.loading('Mesure de la mémoire…', 6));
+    wrap.replaceChildren(spaceHead('Santé et carte', 'Mesure de la mémoire…', picker()), ...ctx.loading('Mesure de la mémoire…', 6, 'kpi'));
     let report;
     try {
       report = await ctx.api.memoryQuality(slug || undefined);
@@ -311,9 +464,10 @@ export async function mount(root, ctx) {
       return;
     }
     const grid = el('div', 'sm-grid');
-    grid.append(healthCard(report), mapSlot());
+    grid.append(healthCard(report), mapCard(ctx, report, slug));
     const { card, opened } = hygieneCard(ctx, report, String(params.item || ''));
     wrap.replaceChildren(head, grid, card);
+    ctx.inspector.replaceChildren(legend());
     wrap.dataset.alert = String(Boolean(report.alert));
     ctx.dock.echo('grimoire memory status');
     if (opened) opened.scrollIntoView({ block: 'nearest' });

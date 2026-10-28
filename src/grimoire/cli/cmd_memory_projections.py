@@ -154,6 +154,60 @@ def memory_graph_sync_code(
     console.print(f"  Edges : {stats['code_edges']}")
 
 
+_backfill_collection_opt = typer.Option(
+    [], "--collection", help="Collection Weaviate du projet (répétable). Défaut : celle de la configuration.",
+)
+_backfill_apply_opt = typer.Option(False, "--apply", help="Écrire. Sans ce drapeau : aperçu chiffré seul.")
+
+
+@graph_app.command("backfill-project")
+def memory_graph_backfill_project(
+    ctx: typer.Context,
+    paths: str = _graph_paths_opt,
+    collection: list[str] = _backfill_collection_opt,
+    apply: bool = _backfill_apply_opt,
+) -> None:
+    """Attribue au projet les nœuds Neo4j écrits avant la clé de projet (aperçu par défaut).
+
+    Souvenirs : par collection Weaviate, puis par ``project_name`` des métadonnées (jamais un
+    souvenir d'un autre projet). Faits, journaux, objets Weaviate, étiquettes, entités, agents :
+    par leur souvenir. Nœuds de code : ``--paths`` doit nommer une racine de code propre au projet
+    (refus sinon) et le fichier doit y exister. Les identifiants reçoivent le préfixe du projet ;
+    un conflit est listé et le nœud laissé en l'état. Fantômes : marqués externes. Relançable.
+    """
+    from grimoire.memory.neo4j_backfill import BackfillRefusalError, backfill_project, resolve_code_prefixes
+
+    cfg, root = _load_config_context()
+    try:
+        prefixes = resolve_code_prefixes(root, paths.split(","))
+    except BackfillRefusalError as exc:
+        console.print(f"[red]Refus :[/red] {exc}")
+        raise typer.Exit(2) from None
+    graph = _load_neo4j_graph(cfg, ensure_schema=apply)
+    collections = list(collection) or [
+        c for c in (cfg.memory.weaviate_collection, cfg.memory.collection_prefix) if c
+    ]
+    try:
+        report = backfill_project(
+            graph, collections=collections, project_root=root, code_prefixes=prefixes, apply=apply,
+        )
+    finally:
+        graph.close()
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"project": cfg.project.name, "apply": apply, **report}, indent=2))
+        return
+    conflicts = report.pop("conflicts")
+    console.print(f"[bold]{cfg.project.name}[/bold] — {'rattrapage appliqué' if apply else 'aperçu (rien écrit)'}")
+    for key, value in report.items():
+        console.print(f"  {key:<28}: {value}")
+    if conflicts:
+        console.print("  Conflits (identifiant préfixé déjà présent, nœud laissé en l'état) :")
+        for item in conflicts:
+            console.print(f"    {item['label']}  {item['id']}")
+    if not apply:
+        console.print("  Relancez avec [cyan]--apply[/cyan] pour écrire.")
+
+
 @graph_app.command("sync-tasks")
 def memory_graph_sync_tasks(
     ctx: typer.Context,

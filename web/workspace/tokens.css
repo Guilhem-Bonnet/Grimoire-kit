@@ -152,6 +152,24 @@
   --id-memoire: #b5789a;
   --id-source: #7ea172;
 
+  /* ── Cartes du kanban (P74) : type et porteur ─────────────────────────── *
+   * Dérivées des teintes d'identité ci-dessus (aucune couleur neuve) : elles
+   * suivent les deux thèmes par les variables, jamais par une valeur recopiée.
+   * - --type-* : pastille du badge de type (le mot est toujours écrit à côté,
+   *   jamais la couleur seule — P30) ;
+   * - --owner-* : liseré gauche de carte, stable par « ouverte par » (hash). */
+  --type-code: var(--id-source);
+  --type-design: var(--id-memoire);
+  --type-doc: var(--id-piloter);
+  --type-infra: var(--id-executer);
+  --type-autre: var(--ink3);
+  --owner-1: var(--id-piloter);
+  --owner-2: var(--id-concevoir);
+  --owner-3: var(--id-executer);
+  --owner-4: var(--id-observer);
+  --owner-5: var(--id-memoire);
+  --owner-6: var(--id-source);
+
   /* ── Colorisation de l'éditeur Source (#280) ──────────────────────────── *
    * Tokens de syntaxe ajoutés par l'IntelliSense déterministe — aucun n'est
    * une couleur d'état ni de série : ce sont des rôles de lecture, posés sur

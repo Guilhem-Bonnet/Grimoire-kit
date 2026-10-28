@@ -644,6 +644,8 @@ def test_install_timer_writes_a_oneshot_unit_and_its_timer(projet: Path, tmp_pat
     service_text = plan.service_path.read_text(encoding="utf-8")
     timer_text = plan.timer_path.read_text(encoding="utf-8")
     assert "Type=oneshot" in service_text and '"orchestrate" "tick" "--apply"' in service_text
+    # Sans elle, systemd tue le démon `claude --bg` du worker à la fin du tick : la session meurt à sa naissance.
+    assert "\nKillMode=process\n" in service_text
     assert timer._systemd_quote(str(projet.resolve())) in service_text  # même échappement que le code (\\ doublés sous Windows)
     assert "OnUnitActiveSec=15min" in timer_text and f"Unit={plan.name}.service" in timer_text
     assert spy.calls == [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", f"{plan.name}.timer"]]
@@ -855,12 +857,17 @@ def test_the_tick_lock_fallback_is_kept_fresh_while_a_tick_runs(projet: Path, mo
     assert run_tick(projet, apply=True).status == "ran", "le verrou est rendu à la fin du tick"
 
 
+def _probe_policy(projet: Path, value: str) -> None:
+    (projet / STANDARD / "orchestration-policy.yaml").write_text(f"orchestrator:\n  probe_host: {value}\n", encoding="utf-8")
+
+
 def test_preview_and_plan_never_probe_the_host(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Une sonde lance l'hôte (deux appels modèle, #876) : seule la récolte appliquée la déclenche."""
     import grimoire.hosts.contract_probe as contract_probe
 
     probed: list[tuple[str, str]] = []
-    monkeypatch.setattr(contract_probe, "ensure_probed", lambda host, version: probed.append((str(host), version)))
+    monkeypatch.setattr(contract_probe, "ensure_probed", lambda host, version, **_kw: probed.append((str(host), version)))
+    _probe_policy(projet, "true")
     service = TaskService(projet)
     tid = _running(service, "bail perdu sur une version jamais sondée", version="2.1.309")
     _expire(service, tid)
@@ -870,3 +877,63 @@ def test_preview_and_plan_never_probe_the_host(projet: Path, monkeypatch: pytest
     assert probed == []
     service.reap(apply=True)
     assert [version for _, version in probed] == ["2.1.309"]
+
+
+def test_probe_host_false_never_probes(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P86 : sonde désactivée (défaut) → jamais lancée, la question reste posée à l'humain."""
+    import grimoire.hosts.contract_probe as contract_probe
+
+    probed: list[str] = []
+    monkeypatch.setattr(contract_probe, "ensure_probed", lambda host, version, **_kw: probed.append(version))
+    service = TaskService(projet)
+    tid = _running(service, "bail perdu, sonde éteinte", version="2.1.309")
+    _expire(service, tid)
+    service.reap(apply=True)
+    assert probed == []
+    assert service.require(tid).status is not S.READY
+
+
+def test_probe_host_true_probes_each_version_once(projet: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """P86 : la sonde ne part qu'une fois par version (résultat gardé), puis le bail perdu repart seul."""
+    import grimoire.hosts.contract_probe as contract_probe
+    from grimoire.hosts.contract_probe import ProbeProof
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    runs: list[str] = []
+
+    def fake_probe(host_id: Any, version: str, *, binary: Any = None) -> ProbeProof:
+        runs.append(version)
+        proof = ProbeProof(host_id.value, version, True, datetime.now(UTC).isoformat(timespec="seconds"))
+        contract_probe._record(proof)
+        return proof
+
+    monkeypatch.setattr(contract_probe, "probe_host", fake_probe)
+    _probe_policy(projet, "true")
+    service = TaskService(projet)
+    first = _running(service, "bail perdu un", version="2.1.309", session="S-un")
+    second = _running(service, "bail perdu deux", version="2.1.309", session="S-deux")
+    _expire(service, first)
+    _expire(service, second)
+    service.reap(apply=True)
+    service.reap(apply=True)
+    assert runs == ["2.1.309"]
+    assert service.require(first).status is S.READY and service.require(second).status is S.READY
+
+
+def test_lost_lease_with_unfenced_version_asks_the_human(projet: Path) -> None:
+    """P86 : frein non prouvé pour cette version → resume_unfenced comme avant."""
+    service = TaskService(projet)
+    tid = _running(service, "version non prouvée", version="9.9.9")
+    _expire(service, tid)
+    report = service.reap(apply=True)
+    assert [(d.action, d.cause) for d in report.decisions if d.task_id == tid] == [("defer", "resume_unfenced")]
+
+
+def test_lost_lease_with_fenced_version_is_ready_without_question(projet: Path) -> None:
+    """P86 : frein prouvé pour la version du claim → ready, aucune question."""
+    service = TaskService(projet)
+    tid = _running(service, "version prouvée", version=FENCED_VERSION)
+    _expire(service, tid)
+    report = service.reap(apply=True)
+    assert [d.action for d in report.decisions if d.task_id == tid] == ["ready"]
+    assert service.require(tid).status is S.READY

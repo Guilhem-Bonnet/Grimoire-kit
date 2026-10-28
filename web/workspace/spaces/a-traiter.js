@@ -19,8 +19,9 @@
 // module `revue.js`), la PR déjà sélectionnée. Aucune fusion ici : l'écran
 // de revue renvoie sur GitHub.
 
-import { glyph, kpiRow, spaceHead } from '../shell.js';
+import { copyText, glyph, kpiRow, listNav, rowActions, spaceHead } from '../shell.js';
 import { agoText } from '../live.js';
+import { mountSince } from './a-traiter-since.js';
 
 const STYLE_ID = 'at-styles';
 
@@ -40,7 +41,7 @@ const CSS = `
 .at-n { color: var(--rub); font-weight: 600; }
 .at-section-head .at-hint { margin-left: auto; color: var(--ink3); }
 .at-list { list-style: none; margin: 0; padding: 0; }
-.at-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(64px, auto) auto;
+.at-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(64px, auto) auto auto;
   align-items: center; gap: 14px; padding: var(--sp-3) var(--sp-4); margin: 2px var(--sp-2);
   border-radius: 12px; cursor: pointer; }
 .at-row:hover { background: var(--hover); }
@@ -71,13 +72,14 @@ const CSS = `
 .at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
-@media (max-width: 720px) {
+@container canvas (max-width: 720px) {
   .at-wrap { padding: var(--sp-4); }
   .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
   .at-sub { flex-wrap: wrap; column-gap: var(--sp-1); }
   .at-sub .at-project { max-width: 100%; }
   .at-since { grid-column: 2; text-align: left; }
   .at-act { grid-column: 3; grid-row: 1 / span 2; }
+  .at-row .row-actions { grid-column: 2; grid-row: 3; justify-self: start; }
 }
 `;
 
@@ -249,6 +251,18 @@ function actionNode(ctx, item, { primary = false } = {}) {
   return link;
 }
 
+/** Les actions secondaires d'une ligne (P56) : révélées au survol et au focus,
+ *  toutes dans le menu « … ». Copier ne décide rien : elles restent offertes en
+ *  lecture seule. L'action principale reste le bouton de la ligne (et Entrée). */
+function rowActionsOf(ctx, item) {
+  const command = cliOf(item);
+  return rowActions([
+    { id: 'copy-link', label: 'Copier le lien', icon: 'link',
+      run: (b) => copyText(new URL(href(destination(ctx, item)), window.location.href).href, b) },
+    command ? { id: 'copy-command', label: 'Copier la commande', icon: 'terminal', run: (b) => copyText(command, b) } : null,
+  ], { label: `Plus d'actions : ${item.title || kindOf(item).word}` });
+}
+
 function sinceNode(item) {
   const at = Date.parse(item.since || '');
   if (!Number.isFinite(at)) return node('span', 'at-since', 'date inconnue');
@@ -378,12 +392,31 @@ export async function mount(root, ctx) {
     await review.mount(root, ctx);
     return;
   }
+  // Premier lancement (P36) : le guide, en lecture seule, joignable à tout
+  // moment par `#a-traiter?view=demarrer` ; et sur un projet que `/api/health`
+  // dit non initialisé, il prend d'office la place de l'accueil.
+  if (ctx.params.view === 'demarrer') {
+    const guide = await import('./demarrer.js');
+    await guide.mount(root, ctx);
+    return;
+  }
+  if (!ctx.scope.all) {
+    const health = await ctx.api.health().catch(() => null);
+    if (ctx.signal.aborted) return;
+    if (health && health.kit && health.kit.scaffolded === false) {
+      const guide = await import('./demarrer.js');
+      await guide.mount(root, ctx, { health });
+      return;
+    }
+  }
   injectStyles();
   const wrap = node('div', 'at-wrap');
   root.append(wrap);
 
   // La sélection : un identifiant d'élément (`#a-traiter?item=…`, lien profond).
   let selected = ctx.params.item || '';
+  // Le résumé « depuis ta dernière visite » (P53) : gardé d'un rendu à l'autre.
+  const since = document.createElement('section');
   let rows = [];
 
   const load = (probe) => ctx.api.attention(ctx.scope.all, probe ? { probe: true } : undefined);
@@ -417,7 +450,7 @@ export async function mount(root, ctx) {
     const head = spaceHead('À traiter', ctx.scope.all
       ? `Ce qui attend une décision de toi, sur ${count} projet${count > 1 ? 's' : ''}.`
       : `Ce qui attend une décision de toi dans ${ctx.scope.name}.`, formula);
-    wrap.replaceChildren(head);
+    wrap.replaceChildren(head, since);
     rows = [];
 
     const unreadable = (data.projects || []).filter((p) => p.state === 'unreadable');
@@ -471,13 +504,22 @@ export async function mount(root, ctx) {
         const title = node('span', 'at-title', item.title || kind.word);
         title.title = item.title || '';
         text.append(title, sub);
-        li.append(pastille, text, sinceNode(item), actionNode(ctx, item));
+        li.append(pastille, text, sinceNode(item), rowActionsOf(ctx, item), actionNode(ctx, item));
         li.addEventListener('click', () => select(item.id, { focus: true }));
         list.append(li);
         rows.push({ item, el: li });
       }
       block.append(heading, list);
       wrap.append(block);
+    }
+    const piloted = (data.reviews || []).reduce((n, r) => n + (r.piloted || 0), 0);
+    if (piloted) {
+      const fold = node('details', 'at-piloted');
+      fold.append(
+        node('summary', null, `Relues par le pilote : ${piloted} en cours`),
+        node('p', 'at-hint', 'Le relecteur du tick relit ces PR sous mandat, le merger les fusionne : rien à faire de ton côté.'),
+      );
+      wrap.append(fold);
     }
     if (rows.length) select(selected, { focus: hadFocus, remember: Boolean(ctx.params.item) || hadFocus });
     else ctx.inspector.replaceChildren();
@@ -514,29 +556,21 @@ export async function mount(root, ctx) {
   };
 
   // j / k : ligne suivante, précédente ; Entrée : l'action de la ligne tenue.
-  // Jamais pendant une saisie, la palette ouverte, ou sous un modificateur.
-  document.addEventListener('keydown', (event) => {
-    if (event.metaKey || event.ctrlKey || event.altKey || !rows.length) return;
-    const target = event.target;
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable) return;
-    const palette = document.getElementById('palette');
-    if (palette && !palette.hidden) return;
-    const help = document.getElementById('shortcuts');
-    if (help && !help.hidden) return;
-    const index = rows.findIndex((r) => r.item.id === selected);
-    if (event.key === 'j' || event.key === 'k') {
-      event.preventDefault();
-      const next = Math.min(rows.length - 1, Math.max(0, index + (event.key === 'j' ? 1 : -1)));
-      select(rows[next].item.id, { focus: true });
-    } else if (event.key === 'Enter' && target.classList && target.classList.contains('at-row')) {
-      event.preventDefault();
-      const row = rows.find((r) => r.el === target);
-      if (row && !ctx.host.readOnly) open(ctx, row.item);
-    }
-  }, { signal: ctx.signal });
+  // Le contrôleur de liste de la coque (P58) : jamais pendant une saisie, la
+  // palette ouverte, ou sous un modificateur.
+  listNav(wrap, {
+    rows: '.at-row',
+    onMove: (row) => select(row.dataset.item, { focus: true }),
+    onActivate: (row) => {
+      const hit = rows.find((r) => r.el === row);
+      if (hit && !ctx.host.readOnly) open(ctx, hit.item);
+    },
+  });
 
   // Le pouls (P10) annonce un changement : la liste se relit, la sélection reste.
   ctx.live.on(() => refresh(false));
 
   await refresh(false);
+  // Après le premier rendu, jamais devant lui.
+  mountSince(since, ctx);
 }

@@ -30,6 +30,7 @@ from grimoire.missions.merger import (
     MERGE_ESCALATED_EVENT,
     MERGE_REALIGNED_EVENT,
     MERGE_REQUEUED_EVENT,
+    MERGE_RERUN_EVENT,
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
@@ -119,8 +120,8 @@ def events(projet: Path, tid: str, kind: str) -> list:  # type: ignore[type-arg]
 
 
 def reviewer_sid(host: FakeHost) -> str:
-    argv = [a for a in host.of("claude", "--bg") if "--name" in a and a[a.index("--name") + 1].startswith("grimoire-review-")][-1]
-    return argv[argv.index("--session-id") + 1]
+    """Le vrai identifiant du dernier relecteur lancé, tel que ``claude agents`` le rend (#966)."""
+    return host.session_of("grimoire-review-")
 
 
 def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (), edit: tuple[str, str] = ("src/app/route.py", "404\n"),
@@ -160,9 +161,13 @@ def give_ready(host: FakeHost, tid: str, wt: Path, session: str = "") -> None:
     write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=session or reviewer_sid(host))
 
 
-def review_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: ignore[no-untyped-def]
-    """Le relecteur lancé rend READY ; le tick qui le juge fait passer le merger (une CI verte s'y voit une première fois)."""
+def review_ready(projet: Path, host: FakeHost, tid: str, wt: Path, *, checks: list[dict[str, str]] | None = None):  # type: ignore[no-untyped-def]
+    """Le relecteur lancé rend READY ; le tick qui le juge fait passer le merger (une CI verte s'y voit une première fois).
+
+    *checks* : la CI qui repart après le lancement du relecteur (P87 : une CI en cours diffère le lancement)."""
     tick(projet, host)  # lance le relecteur
+    if checks is not None:
+        host.checks[f"task/{tid}"] = checks
     give_ready(host, tid, wt)
     return tick(projet, host)
 
@@ -231,8 +236,14 @@ def questions(projet: Path, tid: str) -> list:  # type: ignore[type-arg]
 
 def ready_judged(projet: Path, host: FakeHost, tid: str, wt: Path) -> None:
     """READY jugé, CI tenue en attente : la tâche est dans la file, rien n'est fusionné."""
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("wait", "waiting")]
+    assert merges(review_ready(projet, host, tid, wt, checks=[{"name": "tests", "bucket": "pending"}])) == [("wait", "waiting")]
+
+
+def red_after_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: ignore[no-untyped-def]
+    """READY jugé sur une CI en cours, qui tombe rouge ensuite (#993 : une CI déjà rouge défait le READY au relecteur)."""
+    ready_judged(projet, host, tid, wt)
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
+    return tick(projet, host)
 
 
 # ── Chemin vert, sous mandat ───────────────────────────────────────────────────
@@ -294,13 +305,52 @@ def test_ci_rouge_renvoie_au_worker_comme_un_not_ready(projet: Path, host: FakeH
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     launch = launched_sessions(TaskService(projet))[tid]
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
-    report = review_ready(projet, host, tid, wt)
+    report = red_after_ready(projet, host, tid, wt)
     assert merges(report) == [("bounce", "done")]
     [resume] = host.of("claude", "--bg", "--resume")
     assert resume[3] == launch["session_id"] and "tests" in resume[-1]
     assert TaskService(projet).require(tid).status is TaskState.RUNNING and host.of("gh", "pr", "merge") == []
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+
+
+def test_une_tete_rouge_est_relancee_une_fois_puis_renvoyee_si_elle_retombe(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    host.rerun_error = ""
+    tid, wt = launch_and_work(projet, host)
+    head = git(wt, "rev-parse", "HEAD")
+    report = red_after_ready(projet, host, tid, wt)
+    assert merges(report) == [("wait", "waiting")] and host.reruns == [101]
+    assert host.of("claude", "--bg", "--resume") == [] and events(projet, tid, MERGE_BOUNCED_EVENT) == []
+    [rerun] = events(projet, tid, MERGE_RERUN_EVENT)
+    assert rerun.payload["head"] == head and rerun.payload["outcome"] == "rerun" and rerun.payload["runs"] == ["101"]
+    assert any(a[:4] == ["gh", "api", "-X", "POST"] and a[4].endswith("/actions/runs/101/rerun-failed-jobs") for a, _c, _e in host.calls)
+    assert merges(tick(projet, host)) == [("bounce", "done")]  # la même tête, rouge de nouveau
+    assert host.reruns == [101] and len(host.of("claude", "--bg", "--resume")) == 1
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+
+
+def test_un_refus_403_de_la_relance_renvoie_au_worker_sans_boucle(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    assert merges(red_after_ready(projet, host, tid, wt)) == [("bounce", "done")]
+    assert host.reruns == [] and [e.payload["outcome"] for e in events(projet, tid, MERGE_RERUN_EVENT)] == ["denied"]
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+    calls = len([a for a, _c, _e in host.calls if a[:4] == ["gh", "api", "-X", "POST"]])
+    tick(projet, host)
+    assert len([a for a, _c, _e in host.calls if a[:4] == ["gh", "api", "-X", "POST"]]) == calls  # jamais une seconde tentative
+
+
+def test_une_nouvelle_tete_remet_le_droit_a_une_relance(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    host.rerun_error = ""
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    service = TaskService(projet)
+    old = "a" * 40
+    service.ledger.append_event(MERGE_RERUN_EVENT, tid, "task", "merger", {"task_id": tid, "head": old, "outcome": "rerun"})
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
+    assert merges(tick(projet, host)) == [("wait", "waiting")] and host.reruns == [101]  # la tête courante n'a pas eu la sienne
+    assert [e.payload["head"] for e in events(projet, tid, MERGE_RERUN_EVENT)][-1] == git(wt, "rev-parse", "HEAD")
 
 
 def test_ci_en_attente_attend_puis_un_vert_se_confirme_au_tick_suivant(projet: Path, host: FakeHost) -> None:
@@ -465,6 +515,49 @@ def test_un_autre_conflit_renvoie_au_worker(projet: Path, host: FakeHost) -> Non
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["conflict"]
 
 
+def dirty_without_ci(host: FakeHost, tid: str) -> None:
+    """Ce que GitHub rend d'une PR en conflit : aucun check, car il ne lance pas la CI d'une PR qu'il ne sait pas fusionner."""
+    branch = f"task/{tid}"
+    host.checks.pop(branch, None)
+    host.mergeable[branch], host.merge_states[branch] = "CONFLICTING", "DIRTY"
+
+
+def test_une_pr_en_conflit_sans_ci_est_realignee_au_lieu_d_attendre(projet: Path, host: FakeHost) -> None:
+    """R57 (#979), 2026-10-27 : « aucun check rapporté » à chaque tick, la PR en conflit sur le seul CHANGELOG.md."""
+    grant(projet)
+    mine = CHANGELOG_MAIN.replace("- feat: une entrée de main\n", "- feat: l'entrée de la tâche\n- feat: une entrée de main\n")
+    tid, wt = launch_and_work(projet, host, changelog=mine)
+    advance_main(projet, "CHANGELOG.md", CHANGELOG_MAIN.replace("- feat: une entrée de main\n",
+                                                                "- fix: une autre PR fusionnée\n- feat: une entrée de main\n"))
+    review_ready(projet, host, tid, wt)
+    dirty_without_ci(host, tid)
+    assert merges(tick(projet, host)) == [("realign", "done")]
+    head = git(projet, "ls-remote", "origin", f"refs/heads/task/{tid}").split()[0]
+    text = git(projet, "show", f"{head}:CHANGELOG.md")
+    assert "l'entrée de la tâche" in text and "une autre PR fusionnée" in text
+    assert host.of("gh", "pr", "merge") == []  # réalignée, jamais fusionnée sans CI
+
+
+def test_une_pr_en_conflit_dur_sans_ci_retourne_au_worker(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("docs/readme.md", "la version de la tâche\n"))
+    advance_main(projet, "docs/readme.md", "la version de main\n")
+    review_ready(projet, host, tid, wt)
+    dirty_without_ci(host, tid)
+    report = tick(projet, host)
+    assert merges(report) == [("bounce", "done")] and "docs/readme.md" in report.merges[0].detail
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_une_pr_a_jour_sans_check_attend_toujours_sa_ci(projet: Path, host: FakeHost) -> None:
+    """Un ``DIRTY`` que GitHub n'a pas encore recalculé, sur une tête qui contient déjà main : on attend la CI."""
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    review_ready(projet, host, tid, wt)
+    dirty_without_ci(host, tid)
+    assert merges(tick(projet, host)) == [("wait", "waiting")] and host.of("gh", "pr", "merge") == []
+
+
 @pytest.mark.skipif(os.name == "nt", reason="hooks shell exécutables : harnais POSIX")
 def test_le_tick_n_execute_aucun_hook_git_du_depot(projet: Path, host: FakeHost) -> None:
     """Revue #927 : les hooks (pre-commit, commit-msg, post-commit, pre-push…) sont des scripts que le worker réécrit."""
@@ -492,7 +585,7 @@ def test_file_serie_une_fusion_a_la_fois_et_la_suivante_realignee(projet: Path, 
     host.pr_numbers[f"task/{second}"] = 8
     tick(projet, host)  # deux relecteurs
     for tid, wt in ((first, wt1), (second, wt2)):
-        give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+        give_ready(host, tid, wt, host.session_of(f"grimoire-review-{tid}"))
     tick(projet, host)  # READY jugés, CI vue une fois
     report = tick(projet, host)
     outcome = {o.task_id: (o.action, o.status) for o in report.merges}
@@ -512,7 +605,7 @@ def test_deux_taches_en_retard_un_seul_realignement_a_la_fois(projet: Path, host
     advance_main(projet, "c.py", "c\n")  # les deux branches sont en retard
     tick(projet, host)
     for tid, wt in ((first, wt1), (second, wt2)):
-        give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+        give_ready(host, tid, wt, host.session_of(f"grimoire-review-{tid}"))
     tick(projet, host)
     report = tick(projet, host)
     assert {o.task_id: (o.action, o.status) for o in report.merges} == {first: ("realign", "done"), second: ("wait", "waiting")}
@@ -525,10 +618,10 @@ def test_la_tete_de_file_garde_son_rang_meme_quand_la_suivante_est_prete(projet:
     first, wt1 = launch_and_work(projet, host, edit=("src/app/a.py", "a\n"))
     second, wt2 = launch_and_work(projet, host, edit=("src/app/b.py", "b\n"))
     host.pr_numbers[f"task/{second}"] = 8
-    host.checks[f"task/{first}"] = [{"name": "tests", "bucket": "pending"}]
     tick(projet, host)
+    host.checks[f"task/{first}"] = [{"name": "tests", "bucket": "pending"}]
     for tid, wt in ((first, wt1), (second, wt2)):
-        give_ready(host, tid, wt, next(a[a.index("--session-id") + 1] for a in host.of("claude", "--bg") if f"grimoire-review-{tid}" in a))
+        give_ready(host, tid, wt, host.session_of(f"grimoire-review-{tid}"))
     tick(projet, host)
     report = tick(projet, host)
     assert {o.task_id: (o.action, o.status) for o in report.merges} == {first: ("wait", "waiting"), second: ("wait", "waiting")}
@@ -744,6 +837,8 @@ def test_un_ready_perime_rend_la_tache_a_la_relecture(projet: Path, host: FakeHo
     assert merges(report) == [("stale", "done")] and host.of("gh", "pr", "merge") == []
     assert len(events(projet, tid, MERGE_REQUEUED_EVENT)) == 1
     reviews = len(events(projet, tid, REVIEW_LAUNCHED_EVENT))
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("launch", "skipped")]  # CI encore en cours : différée
+    host.checks[f"task/{tid}"] = list(GREEN)
     report = tick(projet, host)
     assert [(o.action, o.status) for o in report.reviews] == [("launch", "launched")]  # une nouvelle relecture
     assert len(events(projet, tid, REVIEW_LAUNCHED_EVENT)) == reviews + 1 and report.merges == ()
@@ -995,10 +1090,9 @@ def test_la_politique_du_merger_est_lue_et_validee(projet: Path) -> None:
 def test_un_echec_de_reprise_du_worker_remet_la_tache_en_revue(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
     host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
-    tick(projet, host)
-    host.bg_fails = True  # le relecteur est lancé ; c'est la reprise du worker qui échoue
-    give_ready(host, tid, wt)
+    host.bg_fails = True  # le relecteur a rendu READY ; c'est la reprise du worker qui échoue
     report = tick(projet, host)
     assert merges(report) == [("bounce", "failed")]
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
@@ -1008,10 +1102,9 @@ def test_un_echec_de_reprise_du_worker_remet_la_tache_en_revue(projet: Path, hos
 def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
-    assert merges(review_ready(projet, host, tid, wt)) == [("bounce", "done")]
+    assert merges(red_after_ready(projet, host, tid, wt)) == [("bounce", "done")]
     TaskService(projet).ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")  # remise en revue
-    report = review_ready(projet, host, tid, wt)
+    report = red_after_ready(projet, host, tid, wt)
     assert merges(report) == [("escalate", "done")]
     task = TaskService(projet).require(tid)
     assert task.status is TaskState.WAITING and "échoue à répétition" in task.waiting.question.text  # type: ignore[union-attr]

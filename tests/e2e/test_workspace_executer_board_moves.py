@@ -148,7 +148,9 @@ def board_page(browser: Browser, served_board_moves: str) -> Iterator[Page]:
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.evaluate("() => window.GrimoireWorkspace.goto('executer')")
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'executer'")
-    page.wait_for_selector(".ex-card")
+    # `:visible` : depuis P72v2, la carte bloquée vit dans une section repliée et
+    # peut être le premier `.ex-card` du DOM — `wait_for_selector` ne regarde que lui.
+    page.wait_for_selector(".ex-card:visible")
     try:
         yield page
     finally:
@@ -186,7 +188,10 @@ def test_les_taches_annulees_ne_sont_plus_dans_fait(board_page: Page) -> None:
 
 
 def test_une_carte_bloquee_affiche_le_mot_et_la_raison(board_page: Page) -> None:
+    # Depuis P72v2, la bloquée vit dans la section repliée : on la déplie d'abord.
+    board_page.locator("[data-role='blocked-count']").click()
     line = _card(board_page, "Tâche bloquée").locator("[data-role='blocked']")
+    line.wait_for()
     text = line.inner_text()
     assert "Bloquée" in text
     assert _BLOCK_REASON in text

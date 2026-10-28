@@ -909,3 +909,11 @@ def open_atelier(page: Page, on: bool = True) -> None:
     page.wait_for_function(
         "(on) => document.documentElement.dataset.atelier === (on ? 'on' : 'off')", arg=on
     )
+
+
+def open_tree_space(page: Page) -> None:
+    """Se place dans Configuration › Fichiers, le seul espace qui remplit
+    l'Explorateur de la coque (P78) : ailleurs le panneau et son bouton de rail
+    n'existent pas."""
+    page.evaluate("() => window.GrimoireWorkspace.goto('fichiers')")
+    page.wait_for_selector("#explorer-body .sr-tree-file", state="attached", timeout=30_000)

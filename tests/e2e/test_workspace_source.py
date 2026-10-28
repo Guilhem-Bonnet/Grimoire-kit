@@ -34,7 +34,7 @@ def source(workspace: Page) -> Page:
     """La coque, déjà sur l'espace Source."""
     workspace.evaluate("() => window.GrimoireWorkspace.goto('source')")
     workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
-    workspace.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
+    workspace.wait_for_selector("#canvas .tree .sr-tree-file", timeout=10_000)
     return workspace
 
 
@@ -62,14 +62,14 @@ def _open(page: Page, path: str) -> None:
     # `_grimoire/kit/agents/stack-engineer.md` (repli `stack` de l'issue
     # onboarding-60s, sept skills de pile au lieu de deux). Sans lien avec
     # le contenu servi par `/api/workspace/*`, qui répond correctement.
-    page.locator(".tree .sr-tree-file", has_text=name).first.dispatch_event("click")
+    page.locator("#canvas .tree .sr-tree-file", has_text=name).first.dispatch_event("click")
     page.wait_for_function(
         "(p) => document.querySelector('.sr-docrow .mono')?.textContent === p", arg=path
     )
 
 
 def test_l_espace_source_liste_les_trois_etages(source: Page) -> None:
-    labels = source.locator(".tree .sr-tree-tier").all_inner_texts()
+    labels = source.locator("#canvas .tree .sr-tree-tier").all_inner_texts()
     assert any(label.startswith("Overrides") for label in labels)
     assert any(label.startswith("Kit") for label in labels)
     assert any(label.startswith("Projections") for label in labels)
@@ -88,10 +88,10 @@ def test_chaque_ligne_de_l_arbre_tient_sur_une_ligne(source: Page) -> None:
             .map((n) => n.textContent)"""
     )
     assert wrapped == []
-    dirs = source.locator(".tree .sr-tree-dir").all_inner_texts()
+    dirs = source.locator("#canvas .tree .sr-tree-dir").all_inner_texts()
     # La racine de l'étage garde son chemin ; ses sous-dossiers s'en passent.
     assert dirs and not any(re.search(r"_grimoire/kit/\S", d) for d in dirs), "un dossier se nomme depuis la racine de son étage"
-    assert all(source.locator(".tree .sr-tree-dir").nth(i).get_attribute("title") for i in range(len(dirs)))
+    assert all(source.locator("#canvas .tree .sr-tree-dir").nth(i).get_attribute("title") for i in range(len(dirs)))
 
 
 def test_ouvrir_un_fichier_du_kit_montre_le_bandeau_lecture_seule(source: Page) -> None:
@@ -136,7 +136,7 @@ def test_la_console_execute_grimoire_status_et_refuse_rm(source: Page) -> None:
         "() => document.querySelector('#dock-body').textContent.includes('code de sortie 0')",
         timeout=15_000,
     )
-    assert "$ status" in source.locator("#dock-body").inner_text()
+    assert "$ grimoire status" in source.locator("#dock-body").inner_text()
 
     source.keyboard.type("rm -rf /")
     source.keyboard.press("Enter")

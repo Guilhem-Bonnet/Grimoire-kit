@@ -514,7 +514,7 @@
   overflow: auto;
 }
 
-@media (max-width: 900px) {
+@container canvas (max-width: 700px) {
   .sr-split {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);

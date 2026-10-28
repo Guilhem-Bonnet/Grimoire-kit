@@ -143,6 +143,7 @@ class _StoreScan:
     users: Counter[str] = field(default_factory=Counter)
     souvenirs: int = 0
     projections: int = 0
+    types: Counter[str] = field(default_factory=Counter)
     with_provenance: int = 0
     retracted: int = 0
     superseded: int = 0
@@ -171,7 +172,8 @@ class _StoreScan:
         user = str(entry.user_id or "global")
         self.users[user] += 1
         self.text_users.setdefault(key, Counter())[user] += 1
-        kind, _ = classify(entry)
+        kind, type_ = classify(entry)
+        self.types[type_] += 1
         if kind == "projection":
             self.projections += 1
         else:
@@ -659,6 +661,9 @@ def project_report(root: Path, *, slug: str = "", name: str = "", attention: boo
             "count": scan.projections if scan else None,
             "share": (scan.projections / scan.total) if scan and scan.total else None,
         },
+        # Comptes par type classé (`workspace_knowledge.classify`) : la carte
+        # par hall de Savoir › Santé et carte s'en nourrit, surface = compte.
+        "types": dict(scan.types) if scan else None,
         "hidden": {"otherProjects": scan.others, "unattributed": scan.unattributed} if scan else None,
         "supersession": {"superseded": scan.superseded, "orphans": len(scan.orphans)} if scan else None,
         "drift": drift,

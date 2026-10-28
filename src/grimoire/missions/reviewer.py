@@ -3,12 +3,19 @@
 Étape du tick, après le lanceur, active seulement si ``orchestrator.roles.reviewer.enabled`` (désactivé par défaut).
 Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui est en ``needs_verification`` :
 
-1. **Lancement** — une fois par entrée en revue : ``claude --bg --name grimoire-review-<id> --session-id <uuid> …`` dans
-   le worktree de la tâche. La session est neuve : elle ne voit pas le raisonnement du worker, seulement les critères,
-   le diff de la branche et le pack de preuve. Le modèle diffère de celui du worker quand la politique ne l'impose pas.
-   Sous mandat actif, l'identifiant est inscrit au journal d'autorité en rôle ``reviewer`` pour la tâche *avant* le
-   lancement (:func:`~grimoire.missions.launcher.attest_session`) : c'est ce qui atteste le reçu (verrou 7). Le ledger
-   n'en garde que l'empreinte (``session_sha256``), pas l'identifiant.
+1. **Lancement** — une fois par entrée en revue : ``claude --bg --name grimoire-review-<id> …`` dans le worktree de la
+   tâche. La session est neuve : elle ne voit pas le raisonnement du worker, seulement les critères, le diff de la
+   PR contre sa vraie base (``origin/<cible>...HEAD`` après ``git fetch``, jamais la base de création du worktree, qui
+   mêle au travail la cible fusionnée depuis, #993) et le pack de preuve. Le modèle diffère de celui du worker quand la politique ne l'impose pas. Son vrai
+   ``sessionId`` est résolu après le lancement dans ``claude agents --json``
+   (:func:`~grimoire.missions.launcher.resolve_background_session` : ``--bg`` ignore ``--session-id``, #966) puis, sous
+   mandat actif, inscrit au journal d'autorité en rôle ``reviewer`` pour la tâche
+   (:func:`~grimoire.missions.launcher.attest_session`) : c'est ce qui atteste le reçu (verrou 7). Le ledger n'en garde
+   que l'empreinte (``session_sha256``). Identité introuvable ou inscription refusée : la session est arrêtée, la
+   tentative notée (``task.review_launch_failed``) et comptée au disjoncteur. Une identité introuvable compte parmi
+   les relances (:data:`MAX_RELAUNCHES`) ; une inscription refusée n'est pas relancée : la tâche va à l'humain au tick
+   suivant. Un arrêt non confirmé bloque toute relance de la tâche et compte au WIP du relecteur : l'arrêt est retenté
+   à chaque tick jusqu'à ce qu'il soit confirmé (``task.review_session_halted``).
 2. **Jugement** — quand un reçu postérieur au lancement existe, et une seule fois par relecture :
    - écrit par la session du worker : **verdict forgé** — disjoncteur ouvert et, sous mandat, mandat révoqué
      (:meth:`~grimoire.missions.mandate.MandateStore.revoke_on_forged_verdict`) ;
@@ -18,12 +25,30 @@ Pour chaque tâche que le lanceur a lancée (``task.session_launched``) et qui e
    - ``READY`` frais (:func:`~grimoire.missions.review_receipt.check_receipt`) : scellé au journal d'autorité
      (:mod:`.review_seal` : tête, arbre, pack et empreinte du reçu, qui doivent être ceux que le reçu déclare), puis
      noté ; la fusion et l'acceptation sont au merger (:mod:`.merger`, lot 4), qui comparent à ce sceau. ``READY`` périmé (l'arbre, le pack ou les critères ont changé) : relu de nouveau ;
+   - ``READY`` sur une CI rouge (#993) : la CI de la PR est lue comme le merger la lit
+     (:meth:`~grimoire.missions.merger.MergeStage.head_ci` : checks requis, sinon tous hors ``ignored_checks``) quand
+     la tête GitHub de la PR est la tête relue ; un check en échec (``fail`` ; un check annulé reste au merger) fait
+     du verdict un ``NOT-READY``, les checks en constat. Une CI en cours, illisible ou d'une autre tête ne change
+     rien ici : le merger exige de toute façon la CI verte de la tête qu'il fusionne ;
+   - CI en cours (P87) : tant qu'un check de la tête tourne, aucun relecteur n'est lancé (rien au ledger, aucun cycle) ;
+     un ``NOT-READY`` rendu pendant ce temps est écarté (verdict ``ci_pending``, relecture refaite sans compter de relance) ;
    - ``NOT-READY`` : la tâche repart au worker (``needs_verification → running``, session du worker reprise par
      ``claude --bg --resume <son uuid>``, constats en note). Une reprise qui échoue remet la tâche en revue et sera
      retentée. Au cycle ``max_cycles`` (2 par défaut, compté depuis la dernière réponse humaine), ou sans session à
      reprendre, escalade : la tâche passe ``waiting(human)`` avec sa question.
    Un relecteur muet au-delà de :data:`REVIEW_TIMEOUT` est arrêté et relancé ; après :data:`MAX_RELAUNCHES` relances
    (muet ou périmé), l'escalade aussi. La session du relecteur est arrêtée une fois son reçu jugé.
+
+**Tâche faite à la main (#994).** Sous mandat actif, une tâche en ``needs_verification`` sans lancement de worker (une
+session interactive l'a faite) est relue par le même chemin (:mod:`.manual_review`) : ses « workers » sont toutes les
+sessions qui ont tenu son claim. Seule une PR **rattachée** est relue (branche ``task/<id>`` ou identifiant exact au
+titre, créée — et fusionnée — après le premier claim, vers la branche d'intégration du projet, depuis une branche de
+travail), sur le dépôt figé à l'octroi du mandat. Le relecteur est lancé, sans les réglages ni les serveurs MCP du
+projet (``--setting-sources user --strict-mcp-config``), dans un worktree **détaché** recréé sur la tête de la PR ; la
+tête, la PR, sa base, sa branche, le dépôt et le dossier sont scellés au lancement et recoupés au jugement. Sa consigne
+lit la PR (``gh pr view``, ``gh pr diff``). Sans PR rattachée (``no_pr``) ou PR refusée (``pr_refused``), rien n'est
+relu, jamais la cible entière, et la tâche n'est regardée de nouveau qu'une heure plus tard. Un ``NOT-READY`` escalade
+(aucune session à reprendre). Le READY scellé passe au merger. Sans mandat, rien ne change.
 
 Chaque étape est notée au ledger (``task.review_launched``, ``task.review_judged``, ``task.review_forged``) : le tick
 est rejouable. Disjoncteur ouvert : rien n'est lancé ni repris. Les binaires sont injectables (*exec_*).
@@ -45,11 +70,23 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
 from grimoire.missions.breaker import read_breaker, record_failure, trip
-from grimoire.missions.launcher import _BG_ID, _TIER_ALIAS, attest_session, default_exec, launched_sessions, session_env
+from grimoire.missions.launcher import (
+    _BG_ID,
+    _TIER_ALIAS,
+    _halt,
+    attest_session,
+    default_exec,
+    launched_sessions,
+    mandate_precheck,
+    resolve_background_session,
+    resume_worker,
+    session_env,
+)
+from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_reviews, manual_tasks
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import find_task_worktree
-from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT
+from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, new_question_id
 
 if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
@@ -59,11 +96,16 @@ if TYPE_CHECKING:
     from grimoire.missions.service import TaskService
 
 __all__ = [
+    "CI_PENDING",
+    "CI_RUNNING",
     "MAX_RELAUNCHES",
     "REVIEWER_ACTOR",
+    "REVIEW_ESCALATED_EVENT",
     "REVIEW_FORGED_EVENT",
+    "REVIEW_HALTED_EVENT",
     "REVIEW_JUDGED_EVENT",
     "REVIEW_LAUNCHED_EVENT",
+    "REVIEW_LAUNCH_FAILED_EVENT",
     "REVIEW_TIMEOUT",
     "ReviewOutcome",
     "ReviewStage",
@@ -75,12 +117,24 @@ REVIEWER_ACTOR = "reviewer"
 REVIEW_LAUNCHED_EVENT = "task.review_launched"
 REVIEW_JUDGED_EVENT = "task.review_judged"
 REVIEW_FORGED_EVENT = "task.review_forged"
+#: L'escalade « reprendre ou abandonner ? » d'un désaccord, avec l'identifiant de sa question : ce que l'étape
+#: orchestrateur (#962) lit pour reconnaître cette question, plutôt que l'acteur qu'un appelant CLI choisit.
+REVIEW_ESCALATED_EVENT = "task.review_escalated"
+#: Un relecteur lancé puis abandonné (identité introuvable, inscription refusée) ; ``halted`` dit si l'arrêt est confirmé.
+REVIEW_LAUNCH_FAILED_EVENT = "task.review_launch_failed"
+#: L'arrêt, enfin confirmé, d'un relecteur abandonné dont le premier arrêt avait échoué.
+REVIEW_HALTED_EVENT = "task.review_session_halted"
 #: Au-delà, un relecteur sans reçu est arrêté et relancé.
 REVIEW_TIMEOUT = timedelta(hours=2)
 #: Relances d'une même entrée en revue (relecteur muet, reçu périmé) avant l'escalade à l'humain.
 MAX_RELAUNCHES = 2
+#: Le mot du détail ``pending`` de la CI quand des checks tournent encore (par opposition à « aucun check »).
+CI_RUNNING = "en cours"
+#: Un ``NOT-READY`` rendu pendant que des checks de la tête tournent encore : écarté, la relecture est refaite sans
+#: compter ni cycle ni relance (P87).
+CI_PENDING = "ci_pending"
 #: Verdicts notés qui appellent une nouvelle relecture, et ceux qui clôturent la relecture.
-_RELAUNCH = frozenset({"timeout", "stale"})
+_RELAUNCH = frozenset({"timeout", "stale", CI_PENDING})
 #: Un autre modèle que celui du worker, quand la politique ne l'impose pas.
 _ALTERNATE = {"opus": "sonnet", "sonnet": "opus", "haiku": "sonnet"}
 _DEFAULT_MODEL = "sonnet"
@@ -162,10 +216,41 @@ class ReviewStage:
         """Relecture (id de ``task.review_launched``) → verdict noté."""
         return {str(e.payload.get("review")): str(e.payload.get("verdict")) for e in self._events(task_id, REVIEW_JUDGED_EVENT)}
 
+    def _unhalted(self, task_id: str) -> list[LedgerEvent]:
+        """Les relecteurs abandonnés de cette tâche dont l'arrêt n'est toujours pas confirmé."""
+        halted = {str(e.payload.get("session")) for e in self._events(task_id, REVIEW_HALTED_EVENT)}
+        return [
+            e for e in self._events(task_id, REVIEW_LAUNCH_FAILED_EVENT)
+            if e.payload.get("halted") is False and str(e.payload.get("session")) not in halted
+        ]
+
+    def _review_task_ids(self) -> list[str]:
+        """Les tâches lancées, plus celles faites à la main qui ont déjà eu un relecteur (#994)."""
+        ids = list(launched_sessions(self._service))
+        seen = set(ids)
+        for event in self._service.ledger.list_events():
+            if event.event_type in (REVIEW_LAUNCHED_EVENT, REVIEW_LAUNCH_FAILED_EVENT) and event.entity_id not in seen:
+                seen.add(event.entity_id)
+                ids.append(event.entity_id)
+        return ids
+
+    def _retry_halts(self) -> None:
+        """Retente l'arrêt de chaque relecteur abandonné encore en vie, quel que soit l'état de sa tâche."""
+        for task_id in self._review_task_ids():
+            for failed in self._unhalted(task_id):
+                short = str(failed.payload.get("session") or "")
+                halted, _said = _halt(self._exec, Path(str(failed.payload.get("cwd") or ".")), short, self._claude)
+                if halted:
+                    self._service.ledger.append_event(
+                        REVIEW_HALTED_EVENT, task_id, "task", REVIEWER_ACTOR, {"task_id": task_id, "session": short}
+                    )
+
     def _open_reviews(self) -> int:
-        """Les relectures lancées et pas encore jugées, sur des tâches encore en revue : le WIP du relecteur."""
-        count = 0
-        for task_id in launched_sessions(self._service):
+        """Les relectures lancées et pas encore jugées, sur des tâches encore en revue, plus les relecteurs abandonnés
+        dont l'arrêt n'est pas confirmé (sur toute tâche) : le WIP du relecteur."""
+        tasks = self._review_task_ids()
+        count = sum(len(self._unhalted(task_id)) for task_id in tasks)
+        for task_id in tasks:
             task = self._service.ledger.get_task(task_id)
             if task is None or task.status is not TaskState.NEEDS_VERIFICATION:
                 continue
@@ -178,8 +263,16 @@ class ReviewStage:
     def __call__(self) -> tuple[ReviewOutcome, ...]:
         if not self._policy.reviewer.enabled:
             return ()
+        self._retry_halts()
         outcomes: list[ReviewOutcome] = []
-        for task_id, launch in launched_sessions(self._service).items():
+        # Les tâches du tick d'abord, puis celles faites à la main (#994, sous mandat actif seulement).
+        launched = launched_sessions(self._service)
+        manual = {tid: launch for tid, launch in manual_tasks(self._service).items() if tid not in launched}
+        # Une relecture manuelle lancée puis le mandat retiré : jugée quand même (la provenance la refusera et arrêtera
+        # le relecteur), jamais relancée sans mandat.
+        for tid in manual_reviews(self._service):
+            manual.setdefault(tid, {"session_id": "", "cwd": "", "model": "", MANUAL_KEY: True})
+        for task_id, launch in (*launched.items(), *manual.items()):
             task = self._service.ledger.get_task(task_id)
             if task is None or task.status is not TaskState.NEEDS_VERIFICATION:
                 continue
@@ -191,17 +284,23 @@ class ReviewStage:
     def _step(self, task: MissionTask, launch: dict[str, Any]) -> ReviewOutcome | None:
         entered = self._entered_review_at(task.id)
         reviews = [e for e in self._events(task.id, REVIEW_LAUNCHED_EVENT) if e.created_at >= entered]
+        failures = [e for e in self._events(task.id, REVIEW_LAUNCH_FAILED_EVENT) if e.created_at >= entered]
         verdicts = self._verdicts(task.id)
-        if not reviews:
-            return self._launch(task, launch)
-        last = reviews[-1]
-        if last.id not in verdicts:
+        last = reviews[-1] if reviews else None
+        if last is not None and last.id not in verdicts:
             return self._judge(task, launch, last)
-        if verdicts[last.id] not in _RELAUNCH:
+        if last is not None and verdicts[last.id] not in _RELAUNCH:
             return None  # jugée : READY (lots suivants), forgée ou refusée — rien de plus à faire ici
-        relaunched = sum(1 for r in reviews if verdicts.get(r.id) in _RELAUNCH)
+        if pending := self._unhalted(task.id):
+            shorts = ", ".join(str(e.payload.get("session")) for e in pending)
+            return ReviewOutcome(task.id, "launch", "skipped", f"relecteur(s) {shorts} lancé(s) et non arrêté(s) : "
+                                 "aucune relance tant que l'arrêt n'est pas confirmé")
+        if refused := [e for e in failures if e.payload.get("reason") == "refused"]:
+            why = f"relecteur non inscrit au journal d'autorité ({str(refused[-1].payload.get('detail') or '')[:300]})"
+            return self._escalate(task, why, "")
+        relaunched = sum(1 for r in reviews if verdicts.get(r.id) in _RELAUNCH and verdicts[r.id] != CI_PENDING) + len(failures)
         if relaunched > MAX_RELAUNCHES:
-            return self._escalate(task, f"{relaunched} relecture(s) sans reçu jugeable (muettes ou périmées)", "")
+            return self._escalate(task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "")
         return self._launch(task, launch)
 
     # -- lancement -----------------------------------------------------------
@@ -226,57 +325,178 @@ class ReviewStage:
         open_reviews = self._open_reviews()
         if open_reviews >= role.wip:
             return ReviewOutcome(tid, "launch", "skipped", f"WIP du relecteur atteint ({open_reviews}/{role.wip})")
-        cwd = Path(str(launch.get("cwd") or ""))
-        try:
-            worktree = find_task_worktree(self._service, tid)
-        except (KeyError, ValueError, TypeError):
-            worktree = None
-        if not launch.get("cwd") or not cwd.is_dir() or worktree is None:
-            return ReviewOutcome(tid, "launch", "failed", "worktree de la tâche introuvable : rien à relire")
         from grimoire.core.safe_git import same_repo
         from grimoire.missions.review_seal import branch_head, seal_review_launch
 
+        manual: dict[str, Any] = {}
+        into, base_sha = "", ""
+        if launch.get(MANUAL_KEY):  # #994 : la PR d'une tâche faite à la main, dans un worktree détaché de vérification
+            target = self._manual_target(task)
+            if isinstance(target, ReviewOutcome):
+                return target
+            manual, cwd = target, Path(str(target["cwd"]))
+        else:
+            cwd = Path(str(launch.get("cwd") or ""))
+            try:
+                worktree = find_task_worktree(self._service, tid)
+            except (KeyError, ValueError, TypeError):
+                worktree = None
+            if not launch.get("cwd") or not cwd.is_dir() or worktree is None:
+                return ReviewOutcome(tid, "launch", "failed", "worktree de la tâche introuvable : rien à relire")
+            into, base_sha = worktree.into, worktree.base_sha
         if unsafe := same_repo(root, cwd):  # un worktree qui n'est pas de ce dépôt (.git réécrit) n'est pas relu
             return ReviewOutcome(tid, "launch", "failed", f"worktree refusé : {unsafe}")
-        head = branch_head(root, tid)
+        head = str(manual["head"]) if manual else branch_head(root, tid)
+        # P87 : tant qu'un check de la tête tourne, aucun relecteur n'est lancé (ni reçu, ni cycle) : au tick suivant.
+        ci, ci_detail = self._ci_of(tid, head, str(manual["pr"]) if manual else "")
+        if ci == "pending" and CI_RUNNING in ci_detail:
+            return ReviewOutcome(tid, "launch", "skipped", f"CI en cours, relecture différée au tick suivant : {ci_detail}")
+        if blocked := mandate_precheck(self._service, REVIEWER_ACTOR):
+            return ReviewOutcome(tid, "launch", "skipped", blocked)
         under_mandate = MandateStore(root).state().active
-        session_id, refused = attest_session(self._service, REVIEWER_ACTOR, tid)
-        if refused:
-            return ReviewOutcome(tid, "launch", "skipped", refused)
         model = self._model(str(launch.get("model") or ""))
-        argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--session-id", session_id, "--model", model,
-                "--permission-mode", role.permission_mode, self._prompt(tid, worktree.base_sha, model)]
-        result = self._exec(argv, cwd, session_env(session_id))
+        prompt = self._manual_prompt(tid, manual, model) if manual else self._prompt(tid, into, base_sha, model)
+        # #994 : les réglages, hooks et serveurs MCP que la PR apporte (.claude/, .mcp.json) ne s'appliquent pas au
+        # relecteur d'une tâche faite à la main ; il garde son dossier dans le worktree pour rejouer les preuves.
+        isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual else []
+        argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,
+                "--permission-mode", role.permission_mode, *isolate, prompt]
+        result = self._exec(argv, cwd, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}"
             state = record_failure(root, self._policy.breaker_threshold, f"{tid} : relecteur non lancé : {detail}")
             return ReviewOutcome(tid, "launch", "failed", f"claude --bg a échoué : {detail}" + (" — disjoncteur ouvert" if state.open else ""))
+        short = match.group(1)
+        # #966 : l'identité du relecteur se lit après le lancement ; c'est elle qui s'inscrit et se scelle.
+        session_id = resolve_background_session(
+            self._exec, cwd, short, self._claude, name=f"grimoire-review-{tid}", session_cwd=cwd
+        )
+        if not session_id:
+            return self._abandon(tid, short, cwd, "unresolved",
+                                 f"relecteur {short} lancé mais introuvable dans `claude agents` : identité non résolue")
+        refused, _code = attest_session(self._service, session_id, REVIEWER_ACTOR, tid)
+        if refused:
+            return self._abandon(tid, short, cwd, "refused", refused)
         try:  # la tête relue, au journal d'autorité : un commit posé pendant la relecture ne sera pas scellé
-            seal_review_launch(root, tid, session_digest(session_id), head)
+            seal_review_launch(root, tid, session_digest(session_id), head, target={
+                "pr": manual["pr"], "base": manual["into"], "branch": manual["branch"], "repo": manual["repo"],
+                "origin_url": manual["origin_url"], "cwd": manual["cwd"]} if manual else None)
             launch_sealed = True
         except Exception:  # journal rompu : le jugement refusera de sceller (échec fermé)
             launch_sealed = False
         self._service.ledger.append_event(
             REVIEW_LAUNCHED_EVENT, tid, "task", REVIEWER_ACTOR,
-            {"task_id": tid, "session": match.group(1), "session_sha256": session_digest(session_id), "model": model,
+            {"task_id": tid, "session": short, "session_sha256": session_digest(session_id), "model": model,
              "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate,
-             "head": head, "launch_sealed": launch_sealed},
+             "head": head, "launch_sealed": launch_sealed,
+             **({MANUAL_KEY: True, "pr": manual["pr"], "branch": manual["branch"], "into": manual["into"]} if manual else {})},
         )
-        return ReviewOutcome(tid, "launch", "launched", f"relecteur {match.group(1)} dans {cwd}", match.group(1), model)
+        return ReviewOutcome(tid, "launch", "launched", f"relecteur {short} dans {cwd}", short, model)
+
+    def _manual_target(self, task: MissionTask) -> dict[str, Any] | ReviewOutcome:
+        """#994 : la PR d'une tâche faite à la main et son worktree détaché de vérification, ou pourquoi rien n'est relu.
+
+        Sous mandat actif seulement, sur le dépôt figé avant toute relecture manuelle (:mod:`.manual_review`). Aucune
+        PR rattachée (``no_pr``) ou PR refusée (``pr_refused``) : la tâche attend :data:`~.manual_review.DEFER`
+        (``task.review_deferred``) ; rien n'est écrit au journal d'autorité avant un lancement.
+        """
+        from grimoire.missions.mandate import MandateStore
+        from grimoire.missions.manual_review import defer, deferred_until, resolve_target, review_tree
+        from grimoire.missions.review_seal import project_repository_pin
+
+        tid, root = task.id, self._service.home_root
+        now = self._now or datetime.now(UTC)
+        try:
+            state = MandateStore(root).state()
+            if not state.active or state.mandate is None:
+                return ReviewOutcome(tid, "launch", "skipped", "sans mandat actif, une tâche faite à la main n'est pas relue par le tick")
+            if until := deferred_until(self._service, tid, self._entered_review_at(tid), now):
+                return ReviewOutcome(tid, "launch", "skipped", f"relecture à la main différée jusqu'à {until}")
+            pin, current = project_repository_pin(root, state.mandate.id)
+        except Exception as exc:  # journal illisible : rien n'est relu (échec fermé)
+            return ReviewOutcome(tid, "launch", "failed", f"journal d'autorité illisible ({type(exc).__name__}) : rien n'est relu")
+        pr, kind, why = resolve_target(self._service, self._exec, task, policy_base=self._policy.base, pin=pin, current=current)
+        if pr is None or pin is None:
+            if kind == "error":
+                return ReviewOutcome(tid, "launch", "failed", why)
+            until = defer(self._service, tid, why, now, REVIEWER_ACTOR)
+            return ReviewOutcome(tid, "no_pr" if kind == "none" else "pr_refused", "skipped", f"{why} (revu après {until})")
+        place, refused = review_tree(self._service, tid, pr, pin["origin_url"])
+        if place is None:
+            return ReviewOutcome(tid, "launch", "failed", refused)
+        return {"cwd": str(place), "branch": pr.branch, "into": why, "pr": pr.number, "head": pr.head,
+                "repo": pin["repo"], "origin_url": pin["origin_url"],
+                "merge_commit": pr.merge_commit if pr.state == "MERGED" else ""}
+
+    def _manual_seal_refusal(self, review: LedgerEvent) -> str:
+        """#994 : la relecture notée au ledger est celle scellée au lancement (PR, base, branche, tête, dossier), et le
+        dépôt du projet n'a pas bougé depuis ; ``""`` si tout tient."""
+        from grimoire.missions.review_seal import launch_entry, project_repository_pin
+
+        tid = review.entity_id
+        try:
+            sealed = launch_entry(self._service.home_root, tid, str(review.payload.get("session_sha256") or ""))
+            _pin, current = project_repository_pin(self._service.home_root)
+        except Exception as exc:
+            return f"journal d'autorité illisible ({type(exc).__name__}) : relecture non vérifiable"
+        p = review.payload
+        if sealed is None:
+            return "aucun lancement scellé au journal d'autorité pour cette relecture"
+        noted = {"pr": p.get("pr"), "base": p.get("into"), "branch": p.get("branch"), "head": p.get("head"), "cwd": p.get("cwd")}
+        if drift := sorted(k for k, v in noted.items() if str(sealed.get(k) or "") != str(v or "")):
+            return f"la relecture notée au ledger diffère de celle scellée au lancement ({', '.join(drift)})"
+        if current.get("repo") != sealed.get("repo") or current.get("origin_url", "").strip() != str(sealed.get("origin_url") or "").strip():
+            return "le dépôt du projet ou l'URL de origin ont changé depuis le lancement de la relecture"
+        return ""
+
+    def _abandon(self, tid: str, short: str, cwd: Path, reason: str, detail: str) -> ReviewOutcome:
+        """Un relecteur lancé qu'on n'atteste pas : arrêté, la tentative notée et comptée au disjoncteur.
+
+        Le relecteur n'a pas de plafond de mandat : tout refus d'inscription (rôle en conflit, journal en erreur) est
+        une panne. Arrêt non confirmé : noté ``halted: false``, retenté aux ticks suivants, sans relance d'ici là.
+        """
+        halted, said = _halt(self._exec, cwd, short, self._claude)
+        detail += said
+        self._service.ledger.append_event(
+            REVIEW_LAUNCH_FAILED_EVENT, tid, "task", REVIEWER_ACTOR,
+            {"task_id": tid, "session": short, "cwd": str(cwd), "halted": halted, "reason": reason, "detail": detail[:600]},
+        )
+        state = record_failure(self._service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}")
+        return ReviewOutcome(tid, "launch", "failed", detail + (" — disjoncteur ouvert" if state.open else ""), short)
 
     @staticmethod
-    def _prompt(tid: str, base_sha: str, model: str) -> str:
+    def _prompt(tid: str, into: str, base_sha: str, model: str) -> str:
+        """La consigne du relecteur. Le diff part de la base réelle de la PR au moment de la relecture (#993) : après un
+        réalignement, ``base_sha...HEAD`` (la base de création du worktree) mêlerait toute la cible au travail."""
+        diff = (
+            f"`git fetch -q origin {into}` puis `git diff origin/{into}...HEAD` (depuis `git merge-base origin/{into} "
+            f"HEAD`, la base réelle de la PR, ou `gh pr diff task/{tid}`), jamais depuis la base de création du worktree"
+            if into else f"`git diff {base_sha}...HEAD`"
+        )
         return (
             f"Tu es le relecteur de la tâche {tid}. Tu ne vois pas le raisonnement du worker et tu ne le cherches pas : "
-            f"tu juges le résultat. Lis les critères d'acceptation (`grimoire task show {tid}`), le diff de la branche "
-            f"(`git diff {base_sha}...HEAD`) et le dernier pack de preuve, puis rejoue les commandes qui montrent chaque "
-            "critère. Ne modifie aucun fichier suivi du dépôt. Écris ton verdict dans "
-            f"`_grimoire-output/reviews/{tid}/verdict.json` (schéma grimoire-review-verdict/v1 : `verdict` READY ou "
-            "NOT-READY ; `criteria`, un objet par critère avec `index` à partir de 1, `status` met, unmet ou "
-            "unverifiable, `evidence_cmd` et `note` ; `findings` facultatifs), puis lance "
-            f"`grimoire task review {tid} --criteria _grimoire-output/reviews/{tid}/verdict.json --reviewer reviewer "
-            f"--model {model}`. READY seulement si chaque critère est tenu et montré."
+            f"tu juges le résultat. Lis les critères d'acceptation (`grimoire task show {tid}`), le diff de la PR "
+            f"({diff}) et le dernier pack de preuve, puis rejoue les commandes qui montrent chaque critère. "
+            + _verdict_steps(tid, model, f"task/{tid}")
+        )
+
+    @staticmethod
+    def _manual_prompt(tid: str, target: dict[str, Any], model: str) -> str:
+        """#994 : la consigne du relecteur d'une tâche faite à la main — il lit la PR et diffe contre sa vraie base."""
+        number, into, head = target["pr"], target["into"], str(target["head"])
+        merge = str(target.get("merge_commit") or "")
+        # Une PR déjà fusionnée (commit de fusion) : `origin/<cible>...HEAD` est vide, la tête est dans la cible.
+        diff = (f"(`gh pr diff {number}`, ou `git diff {merge}^1 {merge}` : ce que la fusion a apporté à {into} ; "
+                f"`git diff origin/{into}...HEAD` est vide, la PR est déjà fusionnée)" if merge else
+                f"(`git fetch -q origin {into}` puis `git diff origin/{into}...HEAD`)")
+        return (
+            f"Tu es le relecteur de la tâche {tid}, faite à la main par une session interactive. Tu ne vois pas son "
+            f"raisonnement et tu ne le cherches pas : tu juges le résultat. Ce worktree est détaché sur la tête relue de "
+            f"la PR #{number} ({head[:12]}) : ne change pas de commit. Lis les critères d'acceptation (`grimoire task show "
+            f"{tid}`), la PR (`gh pr view {number}`, `gh pr diff {number}`) et son diff contre sa vraie base "
+            f"{diff}, puis rejoue les commandes qui montrent "
+            "chaque critère. " + _verdict_steps(tid, model, str(number))
         )
 
     # -- jugement ------------------------------------------------------------
@@ -301,6 +521,8 @@ class ReviewStage:
         fresh = receipt is not None and receipt.written_at >= review.created_at
         if receipt is not None and fresh:
             workers = {str(launch.get("session_id") or ""), task.claim.session_id if task.claim else ""} - {""}
+            if launch.get(MANUAL_KEY):  # #994 : toute session qui a tenu le claim est un worker de la tâche
+                workers |= claim_sessions(self._service, task)
             if receipt.reviewer_session in workers:
                 return self._forged(task, review, receipt)
             if session_digest(receipt.reviewer_session) == review.payload.get("session_sha256"):
@@ -321,6 +543,8 @@ class ReviewStage:
         """Le reçu vient de la session du relecteur lancé : provenance sous mandat, puis verdict."""
         tid = task.id
         refused = self._provenance_refusal(task, review, receipt)
+        if not refused and review.payload.get(MANUAL_KEY):
+            refused = self._manual_seal_refusal(review)
         if refused:
             self._record_judged(task, review, "refused", 0)
             self._stop(review)
@@ -331,15 +555,45 @@ class ReviewStage:
                 self._record_judged(task, review, "stale", 0)
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({refusal}) : relu de nouveau")
+            ci, ci_detail = self._head_ci(task, review)
+            if ci == "red":
+                notes = f"READY rendu sur une CI rouge, la tête relue ne l'est pas : {ci_detail}"
+                return self._bounce(task, launch, review, receipt, notes=notes, extra={"ci": ci, "receipt_verdict": READY})
             sealed, why = self._seal(task, review, receipt, root)
             if why:
                 self._record_judged(task, review, "stale", 0)
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({why}) : relu de nouveau")
-            self._record_judged(task, review, READY, 0, sealed)
+            self._record_judged(task, review, READY, 0, {**sealed, **({"ci": ci} if ci else {})})
             self._stop(review)
             return ReviewOutcome(tid, "ready", "done", f"READY, {len(receipt.criteria_met)} critère(s) tenu(s)")
+        ci, ci_detail = self._head_ci(task, review)
+        if ci == "pending" and CI_RUNNING in ci_detail:  # P87 : ce NOT-READY a pu naître d'un check encore en cours
+            self._record_judged(task, review, CI_PENDING, 0, {"ci": ci})
+            self._stop(review)
+            return ReviewOutcome(tid, "deferred", "done", f"CI en cours ({ci_detail}) : NOT-READY écarté, relecture refaite sans compter de cycle")
         return self._bounce(task, launch, review, receipt)
+
+    def _head_ci(self, task: MissionTask, review: LedgerEvent) -> tuple[str, str]:
+        """La CI de la PR sur la tête relue, lue par le merger (#993) ; ``("", …)`` quand rien n'en est conclu.
+
+        Tâche faite à la main (#994) : la tête scellée au lancement et la PR par son numéro."""
+        from grimoire.missions.review_seal import branch_head
+
+        manual = bool(review.payload.get(MANUAL_KEY))
+        head = str(review.payload.get("head") or "") if manual else branch_head(self._service.home_root, task.id)
+        if not head:
+            return "", "aucune tête relue"
+        return self._ci_of(task.id, head, str(review.payload.get("pr") or "") if manual else "")
+
+    def _ci_of(self, tid: str, head: str, selector: str) -> tuple[str, str]:
+        from grimoire.missions.merger import MergeStage
+
+        try:
+            return MergeStage(self._service, self._policy, exec_=self._exec, claude_bin=self._claude).head_ci(
+                tid, head, selector=selector)
+        except Exception as exc:  # une lecture de la CI ratée ne fait ni ne défait un READY : le merger revérifie
+            return "unknown", f"{type(exc).__name__}: {exc}"[:300]
 
     def _seal(self, task: MissionTask, review: LedgerEvent, receipt: ReviewReceipt, root: Path) -> tuple[dict[str, Any], str]:
         """Lot 4 : scelle le READY au journal d'autorité (tête, arbre, pack, empreinte du reçu), copie au ledger.
@@ -351,7 +605,8 @@ class ReviewStage:
 
         try:
             entry = seal_judgment(self._service.home_root, task.id, review.id, root, receipt,
-                                  str(review.payload.get("session_sha256") or ""))
+                                  str(review.payload.get("session_sha256") or ""),
+                                  head=str(review.payload.get("head") or "") if review.payload.get(MANUAL_KEY) else None)
         except ValueError as exc:
             return {}, str(exc)
         except Exception as exc:  # journal rompu : rien n'est scellé, la garde en aval refusera
@@ -410,26 +665,34 @@ class ReviewStage:
             self._exec([self._claude, "stop", short], Path(str(review.payload.get("cwd") or ".")), None)
 
     def _cycle(self, task_id: str) -> int:
-        """Le rang de ce ``NOT-READY`` depuis la dernière réponse humaine : l'humain qui dit « reprendre » remet à zéro."""
-        answered = [e.created_at for e in self._service.ledger.events_for(task_id) if e.event_type == HUMAN_ANSWERED_EVENT]
+        """Le rang de ce ``NOT-READY`` depuis la dernière réponse humaine : l'humain qui dit « reprendre » remet à zéro.
+
+        Une réponse de l'orchestrateur sous mandat (#962) ne remet rien à zéro : elle ne relance pas le compte des cycles.
+        """
+        answered = [e.created_at for e in self._service.ledger.events_for(task_id)
+                    if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == "human"]
         since = answered[-1] if answered else ""
         return 1 + sum(
             1 for e in self._events(task_id, REVIEW_JUDGED_EVENT) if e.payload.get("verdict") == NOT_READY and e.created_at > since
         )
 
-    def _bounce(self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent, receipt: ReviewReceipt) -> ReviewOutcome:
-        """``NOT-READY`` : retour au worker avec les constats, ou escalade au cycle ``max_cycles``."""
+    def _bounce(
+        self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent, receipt: ReviewReceipt, *, notes: str = "",
+        extra: dict[str, Any] | None = None,
+    ) -> ReviewOutcome:
+        """``NOT-READY`` : retour au worker avec les constats (*notes*, à défaut ceux du reçu), ou escalade au cycle
+        ``max_cycles``. *extra* s'ajoute au jugement noté (une CI rouge qui défait un READY, #993)."""
         tid, max_cycles = task.id, self._policy.reviewer.max_cycles
         breaker = read_breaker(self._service.home_root)
         if breaker.open:
             return ReviewOutcome(tid, "bounce", "skipped", f"disjoncteur ouvert : {breaker.reason}")
-        cycle, notes = self._cycle(tid), _findings_text(receipt)
+        cycle, notes = self._cycle(tid), notes or _findings_text(receipt)
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:
             why = f"{cycle} relecture(s) NOT-READY" if worker_session else "aucune session de worker à reprendre"
             escalated = self._escalate(task, why, notes)
             if escalated.status == "done":
-                self._record_judged(task, review, NOT_READY, cycle)
+                self._record_judged(task, review, NOT_READY, cycle, extra)
                 self._stop(review)
             return escalated
         ledger = self._service.ledger
@@ -439,20 +702,18 @@ class ReviewStage:
             )
         except GrimoireError as exc:
             return ReviewOutcome(tid, "bounce", "failed", f"retour au worker refusé : {exc}")
-        argv = [self._claude, "--bg", "--resume", worker_session]
-        if self._policy.worker.permission_mode:
-            argv += ["--permission-mode", self._policy.worker.permission_mode]
-        argv.append(
+        result = resume_worker(
+            self._service, self._exec, self._claude, tid, launch,
             f"La relecture de {tid} rend NOT-READY : {notes} Corrige, revérifie avec les checks de la tâche, "
-            f"puis remets-la en revue (`grimoire task move {tid} --to needs_verification`)."
+            f"puis remets-la en revue (`grimoire task move {tid} --to needs_verification`).",
+            permission_mode=self._policy.worker.permission_mode,
         )
-        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env(worker_session))
         if result.returncode != 0:
             # Personne ne reprend la tâche : elle revient en revue, la reprise sera retentée au tick suivant.
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="reprise du worker échouée")
             state = record_failure(self._service.home_root, self._policy.breaker_threshold, f"{tid} : reprise du worker : {result.stderr[:200]}")
             return ReviewOutcome(tid, "bounce", "failed", "worker non repris, tâche remise en revue" + (" — disjoncteur ouvert" if state.open else ""))
-        self._record_judged(task, review, NOT_READY, cycle)
+        self._record_judged(task, review, NOT_READY, cycle, extra)
         self._stop(review)
         self._service.comment(tid, f"Relecture NOT-READY (cycle {cycle}/{max_cycles}) : {notes}", REVIEWER_ACTOR)
         return ReviewOutcome(tid, "bounce", "done", f"retour au worker (cycle {cycle}/{max_cycles})")
@@ -465,15 +726,43 @@ class ReviewStage:
         except GrimoireError as exc:
             return ReviewOutcome(tid, "escalate", "failed", f"escalade refusée : {exc}")
         detail = f" : {notes[:600]}" if notes else ""
+        qid = new_question_id()
+        # Avant la question, comme le merger : un tick tué entre les deux ne laisse pas une question du relecteur que
+        # l'étape orchestrateur (#962) prendrait pour celle du worker.
+        self._service.ledger.append_event(
+            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR, {"task_id": tid, "question_id": qid, "why": why[:300]}
+        )
         try:
             self._service.ask(
                 tid, f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
-                REVIEWER_ACTOR, kind="choice", options=("reprendre", "abandonner"),
+                REVIEWER_ACTOR, kind="choice", options=("reprendre", "abandonner"), question_id=qid,
             )
         except (GrimoireError, ValueError) as exc:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="escalade non posée")
             return ReviewOutcome(tid, "escalate", "failed", f"question à l'humain non posée ({exc}) : tâche remise en revue")
         return ReviewOutcome(tid, "escalate", "done", f"escalade à l'humain après {why}")
+
+
+def _verdict_steps(tid: str, model: str, pr: str) -> str:
+    """La fin commune des consignes du relecteur : périmètre, verdict par critère, ``task review`` ; *pr* : la PR (branche
+    ``task/<id>`` ou numéro) dont les checks requis comptent."""
+    return (
+        "Vérifie qu'aucun fichier hors du périmètre de la tâche n'est modifié : un fichier réécrit sans raison (`uv.lock`, "
+        "un fichier généré) est un constat. Ne modifie aucun fichier suivi du dépôt. Note `git status --porcelain` avant "
+        "tes commandes et lance-les avec `uv run --frozen` (un `uv run` simple réécrit `uv.lock`). Avant `task review`, "
+        "remets l'arbre dans l'état noté : retire les fichiers non suivis que tes commandes ont créés (un rapport "
+        "rejoué…), restaure par `git checkout -- <chemin>` un fichier suivi qu'elles ont réécrit ; sinon ton verdict "
+        "ne porte pas sur la tête et il est périmé. Écris ton verdict dans "
+        f"`_grimoire-output/reviews/{tid}/verdict.json` (schéma grimoire-review-verdict/v1 : `verdict` READY ou "
+        "NOT-READY ; `criteria`, un objet par critère avec `index` à partir de 1, `status` met, unmet ou "
+        "unverifiable, `evidence_cmd` et `note` ; `findings` facultatifs), puis lance "
+        f"`grimoire task review {tid} --criteria _grimoire-output/reviews/{tid}/verdict.json --reviewer reviewer "
+        f"--model {model}`. Un critère que porte un job de CI (un test e2e, un test qui a son job) se tient par le verdict "
+        f"de ce job sur la tête relue (`gh pr checks {pr}`) : tu n'as pas à le rejouer ; s'il est vert, marque le critère "
+        "met et cite dans `evidence_cmd` le nom du job et son URL ; s'il est encore en cours, ne rends pas de verdict "
+        "dessus (la relecture sera refaite) ; rouge, il est unmet. READY seulement si chaque critère est tenu et montré, et si aucun check requis de la PR "
+        f"n'est en échec (`gh pr checks {pr} --required`)."
+    )
 
 
 def _findings_text(receipt: ReviewReceipt) -> str:

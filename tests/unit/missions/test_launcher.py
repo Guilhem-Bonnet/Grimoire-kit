@@ -20,7 +20,16 @@ from grimoire.cli.app import app
 from grimoire.missions import breaker as brk
 from grimoire.missions.admission import Admit
 from grimoire.missions.breaker import read_breaker, record_failure, record_success, reset, trip
-from grimoire.missions.launcher import LAUNCH_FAILED_EVENT, LAUNCHED_EVENT, WorkerLauncher, launched_sessions
+from grimoire.missions.launcher import (
+    LAUNCH_FAILED_EVENT,
+    LAUNCHED_EVENT,
+    WORKER_HALTED_EVENT,
+    ExecResult,
+    WorkerLauncher,
+    active_worker_ids,
+    launched_sessions,
+    resume_worker,
+)
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
 from grimoire.missions.schemas import TaskState
@@ -85,12 +94,15 @@ def test_le_tick_lance_une_session_par_tache_admise_dans_son_worktree(projet: Pa
         tid = argv[argv.index("--name") + 1].removeprefix("grimoire-")
         assert cwd == find_task_worktree(TaskService(projet), tid).path  # type: ignore[union-attr]
         assert cwd.name == tid and (cwd / ".git").is_file()  # le worktree task/<id>, pas le projet
-        # Lot 3 : l'identifiant de session est fixé par le lanceur, le même pour claude et pour les commandes grimoire.
-        assert env == {"GRIMOIRE_UNATTENDED": "1", "GRIMOIRE_SESSION_ID": argv[argv.index("--session-id") + 1]}
+        # #966 : aucune identité dans l'environnement (le démon des sessions de fond la transmettrait à toutes), ni en
+        # argument (`--bg` ignore `--session-id`) ; l'identité notée est celle que `claude agents` rend.
+        assert env == {"GRIMOIRE_UNATTENDED": "1"} and "--session-id" not in argv
     after = TaskService(projet)
     assert {after.require(t).status for t in (first, second)} == {TaskState.CLAIMED}  # claim et bail posés avant le lancement
     assert set(launched_sessions(after)) == {first, second}
     assert [o.session for o in launched] == sorted(o.session for o in launched) and len({o.session for o in launched}) == 2
+    for o in launched:
+        assert launched_sessions(after)[o.task_id]["session_id"] == host.session_of(f"grimoire-{o.task_id}")
 
 
 def test_la_syntaxe_est_celle_de_claude_bg_et_jamais_un_sous_agent(projet: Path, service: TaskService, host: FakeHost) -> None:
@@ -346,6 +358,26 @@ def test_le_minuteur_porte_le_path_du_poste_reduit_aux_outils_utiles(projet: Pat
     assert "/usr/bin" in line  # les dossiers système restent
 
 
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_le_grimoire_du_tick_passe_avant_celui_du_poste(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#983 : les sessions appellent `grimoire` par le PATH ; ce doit être celui du venv qui exécute le tick."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "ailleurs"))  # tmp_path n'est pas un dossier de session
+    poste = _shim(tmp_path / "pipx-bin", "claude", "grimoire")  # un autre grimoire, plus ancien, avec claude
+    tick = _shim(tmp_path / "venv" / "bin", "python", "grimoire")
+    monkeypatch.setenv("PATH", str(poste))
+    line = next(row for row in plan_timer(projet, python=str(tick / "python")).service.splitlines() if row.startswith("Environment="))
+    entries = line.split("PATH=", 1)[1].rstrip('"').split(os.pathsep)
+    assert entries[:2] == [str(tick), str(poste)]
+    # Un interpréteur sans `grimoire` à côté (python système) n'ajoute rien.
+    nu = _shim(tmp_path / "sys-bin", "python")
+    line = next(row for row in plan_timer(projet, python=str(nu / "python")).service.splitlines() if row.startswith("Environment="))
+    assert str(nu) not in line and str(poste) in line
+
+
 def test_sans_aucun_outil_utile_le_minuteur_ne_fige_que_les_dossiers_systeme(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from grimoire.missions.timer import plan_timer
 
@@ -450,16 +482,91 @@ def test_modele_et_mode_ne_peuvent_pas_etre_une_option(projet: Path, key: str, v
     assert load_orchestrator_policy(projet).usable is False
 
 
-def test_le_wip_compte_aussi_les_sessions_bloquees_en_attente_de_verification(projet: Path, service: TaskService, host: FakeHost) -> None:
-    write_policy(projet, wip=1)
-    first = ready(service, "a")
-    tick(projet, host)
+def _to_review(projet: Path, tid: str) -> None:
     ledger = TaskService(projet).ledger
-    ledger.transition_task(first, TaskState.RUNNING, actor_id="worker")
-    ledger.transition_task(first, TaskState.NEEDS_VERIFICATION, actor_id="worker")  # la session vit encore, en attente de relecture
-    ready(TaskService(projet), "b")
-    again = tick(projet, host)
-    assert [o.status for o in again.launches] == ["skipped"] and len(host.of("claude", "--bg")) == 1
+    if ledger.get_task(tid).status is not TaskState.RUNNING:
+        ledger.transition_task(tid, TaskState.RUNNING, actor_id="worker")
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")
+
+
+def test_les_taches_en_revue_ne_comptent_plus_dans_le_wip(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, wip=12, per_day=30)
+    ids = [ready(service, f"t{i}") for i in range(10)]
+    launcher = WorkerLauncher(TaskService(projet), load_orchestrator_policy(projet).policy, exec_=host)  # type: ignore[arg-type]
+    assert [o.status for o in launcher(tuple(Admit(t) for t in ids))] == ["launched"] * 10
+    for tid in ids:
+        _to_review(projet, tid)
+    write_policy(projet, wip=2, per_day=30)
+    eleventh = ready(TaskService(projet), "onzieme")
+    small = WorkerLauncher(TaskService(projet), load_orchestrator_policy(projet).policy, exec_=host)  # type: ignore[arg-type]
+    again = small((Admit(eleventh),))  # dix sessions rangées, WIP de 2 : la onzième part quand même
+    assert [(o.task_id, o.status) for o in again] == [(eleventh, "launched")]
+    assert active_worker_ids(TaskService(projet)) == frozenset({eleventh})
+
+
+def test_au_passage_en_revue_la_session_du_worker_est_arretee_et_notee(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "a")
+    tick(projet, host)
+    short = launched_sessions(TaskService(projet))[tid]["session"]
+    _to_review(projet, tid)
+    tick(projet, host)
+    assert ["claude", "stop", short] in [c[0] for c in host.calls]
+    halted = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_HALTED_EVENT]
+    assert len(halted) == 1 and halted[0].payload["session"] == short
+    tick(projet, host)  # l'arrêt n'est ni rejoué ni noté deux fois
+    assert len([c for c in host.calls if c[0][:2] == ["claude", "stop"]]) == 1
+
+
+def test_un_arret_refuse_est_retente_au_tick_suivant(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "a")
+    tick(projet, host)
+    _to_review(projet, tid)
+    host.stop_result = ExecResult(1, "", "stop refusé")
+    tick(projet, host)
+    assert not [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_HALTED_EVENT]
+    host.stop_result = ExecResult(0, "stopped\n")
+    tick(projet, host)
+    assert [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_HALTED_EVENT]
+
+
+def test_un_renvoi_reprend_la_session_arretee_et_la_recompte(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, wip=1)
+    tid = ready(service, "a")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    _to_review(projet, tid)
+    tick(projet, host)
+    assert active_worker_ids(TaskService(projet)) == frozenset()
+    TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
+    result = resume_worker(TaskService(projet), host, "claude", tid, launch, "corrige", permission_mode="acceptEdits")
+    assert result.returncode == 0
+    assert host.of("claude", "--bg", "--resume")[-1][:4] == ["claude", "--bg", "--resume", launch["session_id"]]
+    assert active_worker_ids(TaskService(projet)) == frozenset({tid})
+    _to_review(projet, tid)  # renvoyée en revue : la session reprise est arrêtée à son tour
+    tick(projet, host)
+    assert len([c for c in host.calls if c[0][:2] == ["claude", "stop"]]) == 2
+
+
+def test_une_reprise_qui_echoue_relance_une_session_neuve_sur_le_meme_worktree(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "a")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    _to_review(projet, tid)
+    tick(projet, host)
+    TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
+    real = host.__call__
+
+    def broken_resume(argv, cwd, env=None):  # type: ignore[no-untyped-def]
+        if "--resume" in argv:
+            return ExecResult(1, "", "conversation introuvable")
+        return real(argv, cwd, env)
+
+    result = resume_worker(TaskService(projet), broken_resume, "claude", tid, launch, "corrige")
+    assert result.returncode == 0
+    fresh = host.bg[-1]
+    assert fresh["name"] == f"grimoire-{tid}" and Path(fresh["cwd"]) == Path(launch["cwd"])
+    assert launched_sessions(TaskService(projet))[tid]["session"] == fresh["id"]
+    assert tid in active_worker_ids(TaskService(projet))
 
 
 def test_un_lancement_echoue_compte_au_plafond_du_jour(projet: Path, service: TaskService, host: FakeHost) -> None:
@@ -485,3 +592,245 @@ def test_sans_bloc_orchestrator_le_tick_ne_dit_rien_de_plus_qu_avant(projet: Pat
     opened = tick(projet, host)
     cmd_orchestrate._render_tick(opened)
     assert "Disjoncteur" in capsys.readouterr().out and "breaker" in opened.to_dict()  # ouvert : on le dit
+
+
+# ── #961 : le battement des workers vivants ───────────────────────────────────
+
+
+def _later(minutes: int) -> datetime:
+    from datetime import timedelta
+
+    return datetime.now(UTC) + timedelta(minutes=minutes)
+
+
+def test_un_worker_vivant_garde_son_bail_au_dela_du_ttl(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Le bail n'est écrit qu'au claim : sans battement, 25 min de travail suffisaient à garer la tâche en waiting(human)."""
+    tid = ready(service, "longue")
+    (launch,) = tick(projet, host).launches
+    host.agents = [{"id": launch.session, "kind": "background", "status": "busy", "name": f"grimoire-{tid}"}]
+    for minutes in (15, 30, 45):  # trois ticks espacés de moins d'un TTL, bien au-delà du premier
+        report = tick(projet, host, now=_later(minutes))
+        assert not report.reaped, report.reaped
+    assert TaskService(projet).require(tid).status is TaskState.CLAIMED
+
+
+def test_un_worker_mort_au_repos_ou_illisible_ne_renouvelle_rien(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "morte")
+    tick(projet, host)
+    host.agents_fail = True  # `claude agents` en panne : échec fermé, la récolte juge comme avant
+    report = tick(projet, host, now=_later(25))
+    assert [d.task_id for d in report.reaped] == [tid]
+    host.agents_fail = False  # le lancement suivant doit pouvoir résoudre l'identité de sa session (#966)
+    other = ready(TaskService(projet), "autre")
+    (second,) = (o for o in tick(projet, host).launches if o.task_id == other)
+    name = f"grimoire-{other}"
+    host.agents = [
+        {"id": second.session, "kind": "interactive", "status": "busy", "name": name},  # pas une session de fond
+        {"id": "ffffffff", "kind": "background", "status": "busy", "name": name},  # une autre session, même nom
+        {"id": second.session, "kind": "background", "status": "busy", "name": "grimoire-ailleurs"},  # même id, autre nom
+        {"id": second.session, "kind": "background", "status": "idle", "name": name},  # son tour est fini : elle ne travaille plus
+    ]
+    assert other in [d.task_id for d in tick(projet, host, now=_later(50)).reaped]
+
+
+def test_la_session_d_un_claim_recolte_ne_tient_pas_le_claim_suivant(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Une session restée vivante après la récolte de son claim ne renouvelle pas celui d'un autre titulaire."""
+    tid = ready(service, "reprise")
+    (launch,) = tick(projet, host).launches
+    later = TaskService(projet)
+    later.ledger.transition_task(tid, TaskState.READY, actor_id="worker", reason="rendue")
+    later.claim(tid, "humain")  # epoch suivant, hors du lanceur : le dernier lancement reste celui de l'epoch 1
+    host.agents = [{"id": launch.session, "kind": "background", "status": "busy", "name": f"grimoire-{tid}"}]
+    assert tid in [d.task_id for d in tick(projet, host, now=_later(25)).reaped]
+
+
+def test_un_battement_en_erreur_ne_casse_pas_le_tick(projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import launcher
+
+    ready(service, "solide")
+    tick(projet, host)
+
+    def boom(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(launcher, "renew_live_workers", boom)
+    report = tick(projet, host, now=_later(25))
+    assert report.reaped and any("battement des workers" in line for line in report.attention)
+
+
+# ── #966 : l'identité d'une session de fond se lit après le lancement ──────────────
+
+
+def test_l_identite_notee_au_ledger_est_celle_que_claude_agents_rend(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """`claude --bg` ignore `--session-id` : le lanceur note le `sessionId` réel, lu dans `claude agents --json`."""
+    tid = ready(service, "identité")
+    (launch,) = tick(projet, host).launches
+    real = host.session_of(f"grimoire-{tid}")
+    payload = launched_sessions(TaskService(projet))[tid]
+    assert payload["session"] == launch.session and real.startswith(launch.session)
+    assert payload["session_id"] == real
+    # La seule source de l'identité : l'entrée de `claude agents` qui porte l'id court imprimé par `--bg`.
+    assert [a["sessionId"] for a in host.bg if a["id"] == launch.session] == [real]
+    (argv,) = host.of("claude", "--bg")
+    assert "--session-id" not in argv and real not in argv
+
+
+def test_chaque_worker_se_rattache_sous_sa_vraie_session_malgre_l_environnement_du_demon(
+    projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Les sessions de fond héritent de l'environnement du démon (celui du premier `--bg`) : chacune se rattache pourtant
+    à son claim sous son propre identifiant, celui que l'hôte exporte (`CLAUDE_CODE_SESSION_ID`)."""
+    first, second = ready(service, "une"), ready(service, "deux")
+    tick(projet, host)
+    for tid in (first, second):
+        name = f"grimoire-{tid}"
+        wt = find_task_worktree(TaskService(projet), tid)
+        assert wt is not None
+        with monkeypatch.context() as m:
+            m.delenv("GRIMOIRE_SESSION_ID", raising=False)
+            for var, value in host.session_environ(name).items():
+                m.setenv(var, value)
+            out = runner.invoke(app, ["task", "attach", tid, "--project-root", str(wt.path)])
+        assert out.exit_code == 0, out.output
+        claim = TaskService(projet).require(tid).claim
+        assert claim is not None and claim.session_id == host.session_of(name)
+        assert claim.session_id == launched_sessions(TaskService(projet))[tid]["session_id"]
+
+
+@pytest.mark.parametrize("panne", ["lecture en échec", "session absente", "autre identité", "session interactive"])
+def test_une_identite_introuvable_arrete_la_session_et_rend_la_tache(
+    projet: Path, service: TaskService, host: FakeHost, panne: str,
+) -> None:
+    short = "00000001"  # le premier id court que le faux `claude --bg` imprime
+    other = {"id": short, "kind": "background", "status": "busy", "name": "x", "sessionId": "ffffffff-0000-4000-8000-000000000001"}
+    if panne == "lecture en échec":
+        host.agents_fail = True
+    elif panne == "session absente":
+        host.agents = []
+    elif panne == "autre identité":
+        host.agents = [other]  # un sessionId qui ne commence pas par l'id court
+    else:
+        host.agents = [{**other, "kind": "interactive", "sessionId": f"{short}-0000-4000-8000-000000000001"}]
+    tid = ready(service, "introuvable")
+    (outcome,) = tick(projet, host).launches
+    assert outcome.status == "failed" and "identité non résolue" in outcome.detail and f"session {short} arrêtée" in outcome.detail
+    assert host.of("claude", "stop") == [["claude", "stop", short]]
+    after = TaskService(projet)
+    assert after.require(tid).status is TaskState.READY and tid not in launched_sessions(after)
+    assert any(e.event_type == LAUNCH_FAILED_EVENT for e in after.ledger.events_for(tid))
+    assert read_breaker(projet).failures == 1  # compté au disjoncteur, comme un lancement raté
+
+
+def test_un_arret_non_confirme_garde_la_tache_tenue_et_compte(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Une session qu'on n'a pas pu arrêter tourne encore et peut pousser : la tâche n'est pas rendue à la file."""
+    from grimoire.missions.launcher import ExecResult, unhalted_sessions
+
+    write_policy(projet, wip=1)
+    host.agents, host.stop_result = [], ExecResult(1, "", "démon injoignable")
+    tid = ready(service, "arrêt raté")
+    (outcome,) = tick(projet, host).launches
+    assert outcome.status == "failed" and "NON arrêtée (démon injoignable)" in outcome.detail and "gardée tenue" in outcome.detail
+    after = TaskService(projet)
+    assert after.require(tid).status is TaskState.CLAIMED and tid not in launched_sessions(after)
+    (failed,) = [e for e in after.ledger.events_for(tid) if e.event_type == LAUNCH_FAILED_EVENT]
+    assert failed.payload["halted"] is False and failed.payload["session"] == "00000001"
+    assert set(unhalted_sessions(after)) == {tid} and read_breaker(projet).failures == 1
+    ready(after, "suivante")  # la session non arrêtée tient le seul créneau de WIP
+    assert [(o.status, "WIP du worker atteint (1/1)" in o.detail) for o in tick(projet, host).launches] == [("skipped", True)]
+    assert len(host.of("claude", "--bg")) == 1
+    assert tid in [d.task_id for d in tick(projet, host, now=_later(25)).reaped]  # le bail expire : la récolte la prend
+
+
+# ── B1 : la résolution recoupe le nom et le dossier quand l'hôte les donne ───────
+
+
+def _agents_exec(entries: list[dict[str, str]]):  # type: ignore[no-untyped-def]
+    from grimoire.missions.launcher import ExecResult
+
+    return lambda _argv, _cwd, _env: ExecResult(0, json.dumps(entries))
+
+
+SHORT = "0d310bc4"
+SID = f"{SHORT}-3f97-4fbc-8a2e-1234567890ab"
+
+
+@pytest.mark.parametrize(
+    ("entries", "expected"),
+    [
+        ([{"id": SHORT, "kind": "background", "sessionId": SID, "name": "grimoire-T", "cwd": "{wt}"}], SID),
+        ([{"id": SHORT, "kind": "background", "sessionId": SID}], SID),  # ni nom ni dossier : seul l'id tranche
+        ([{"id": SHORT, "kind": "background", "sessionId": SID, "name": "grimoire-T"},
+          {"id": SHORT, "kind": "background", "sessionId": f"{SHORT}-0000-4000-8000-000000000000", "name": "grimoire-T"}], ""),
+        ([{"id": SHORT, "kind": "background", "sessionId": f"{SHORT}-pas-un-uuid"}], ""),
+        ([{"id": SHORT, "kind": "background", "sessionId": SID, "name": "grimoire-review-T"}], ""),
+        ([{"id": SHORT, "kind": "background", "sessionId": SID, "cwd": "{autre}"}], ""),
+    ],
+    ids=["nom-et-dossier", "champs-absents", "deux-candidates", "pas-un-uuid", "autre-nom", "autre-dossier"],
+)
+def test_la_resolution_recoupe_nom_et_dossier(tmp_path: Path, entries: list[dict[str, str]], expected: str) -> None:
+    from grimoire.missions.launcher import resolve_background_session
+
+    wt, autre = tmp_path / "wt", tmp_path / "autre"
+    wt.mkdir(), autre.mkdir()
+    filled = [{k: v.format(wt=wt, autre=autre) for k, v in e.items()} for e in entries]
+    found = resolve_background_session(_agents_exec(filled), wt, SHORT, name="grimoire-T", session_cwd=wt, attempts=1)
+    assert found == expected
+
+
+def test_un_dossier_atteint_par_un_lien_est_le_meme(tmp_path: Path) -> None:
+    from grimoire.missions.launcher import resolve_background_session
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    link = tmp_path / "lien"
+    try:
+        link.symlink_to(wt, target_is_directory=True)
+    except OSError:
+        pytest.skip("liens symboliques indisponibles")
+    entries = [{"id": SHORT, "kind": "background", "sessionId": SID, "cwd": str(link)}]
+    assert resolve_background_session(_agents_exec(entries), wt, SHORT, session_cwd=wt, attempts=1) == SID
+
+
+# ── P86 : la version de l'hôte au claim ────────────────────────────────────────
+
+
+def test_un_worker_lance_par_le_tick_porte_la_version_de_l_hote_au_claim(projet: Path, service: TaskService, host: FakeHost) -> None:
+    host.version = "2.1.310"
+    first, second = ready(service, "une"), ready(service, "deux")
+    tick(projet, host)
+    after = TaskService(projet)
+    for tid in (first, second):
+        claim = after.require(tid).claim
+        assert claim is not None and claim.session_host_version == "2.1.310"
+        assert claim.session_id == host.session_of(f"grimoire-{tid}")
+    assert len(host.of("claude", "--version")) == 1  # lue une fois par tick, pas une fois par tâche
+    for argv, _c, _e in (c for c in host.calls if c[0][:2] == ["claude", "--bg"]):
+        assert "--host-version 2.1.310" in argv[-1]
+
+
+def test_version_illisible_le_claim_n_en_porte_pas(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "sans version")
+    tick(projet, host)
+    claim = TaskService(projet).require(tid).claim
+    assert claim is not None and claim.session_host_version == ""
+    (argv,) = host.of("claude", "--bg")
+    assert "--host-version" not in argv[-1]
+
+
+def test_task_attach_inscrit_la_version_donnee_par_la_consigne(projet: Path, service: TaskService) -> None:
+    tid = ready(service, "attache")
+    service.claim(tid, "worker", host="claude-code-cli")
+    result = runner.invoke(
+        app, ["task", "attach", tid, "--session-id", "sess-1", "--host-version", "2.1.310", "--project-root", str(projet)]
+    )
+    assert result.exit_code == 0, result.output
+    claim = TaskService(projet).require(tid).claim
+    assert claim is not None and claim.session_host_version == "2.1.310"
+
+
+def test_la_politique_probe_host_est_un_booleen_desactive_par_defaut(projet: Path) -> None:
+    assert load_orchestrator_policy(projet).policy.probe_host is False  # type: ignore[union-attr]
+    (projet / POLICY).write_text("orchestrator:\n  probe_host: true\n", encoding="utf-8")
+    assert load_orchestrator_policy(projet).policy.probe_host is True  # type: ignore[union-attr]
+    (projet / POLICY).write_text("orchestrator:\n  probe_host: oui\n", encoding="utf-8")
+    assert load_orchestrator_policy(projet).policy is None

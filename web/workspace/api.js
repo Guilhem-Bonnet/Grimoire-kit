@@ -218,6 +218,11 @@ export const api = {
     }
     return request;
   },
+  // « Depuis ta dernière visite » (P53) : livré, refusé, laissé en attente
+  // depuis `since` (ISO, gardé par le navigateur). Une lecture, à part
+  // d'`attention` : le premier rendu d'À traiter ne l'attend pas.
+  attentionSince: (portfolio, since) =>
+    get(WS + 'attention/since', { ...(portfolio ? { scope: 'portfolio' } : {}), since }),
   tasks: (params) => get(WS + 'tasks', params),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
   // convention que `health()` : l'inspecteur du portefeuille (#638, lot C)
@@ -228,6 +233,19 @@ export const api = {
     get(WS + 'tasks/' + encodeURIComponent(id) + '/trace', project ? { project } : undefined),
   taskRecall: (id, project) =>
     get(WS + 'tasks/' + encodeURIComponent(id) + '/recall', project ? { project } : undefined),
+  // Préflight d'assignation (P47) : le plan de lancement d'une session worker
+  // sur une tâche — modèle, worktree, vérifications, commande équivalente.
+  // Lecture seule stricte : rien n'est lancé ni écrit (ADR-008, phase plan),
+  // donc permise même sur un hôte en lecture seule.
+  taskLaunchPlan: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/launch-plan', project ? { project } : undefined),
+  // Bloc Activité (P69v2) : le fil de la tâche dérivé du ledger (claim,
+  // transitions, portes, questions/réponses, notes de progression), et le
+  // même fil vu d'une session (l'union des tâches que son claim tient).
+  taskFeed: (id, project) =>
+    get(WS + 'tasks/' + encodeURIComponent(id) + '/feed', project ? { project } : undefined),
+  sessionFeed: (id, project) =>
+    get(WS + 'sessions/' + encodeURIComponent(id) + '/feed', project ? { project } : undefined),
   // Portefeuille (#638, lot C) : toutes les tâches de tous les projets du
   // registre cockpit, chacune avec son projet, son claim, sa session et sa
   // priorité — agrégé côté serveur (`workspace_portfolio.py`), jamais une
@@ -284,6 +302,10 @@ export const api = {
   // modèles, deux lectures (jamais d'écriture : les gestes sont des commandes).
   hooks: () => get(WS + 'hooks'),
   providers: () => get(WS + 'providers'),
+  // Options du projet (P75) : taux USD→CAD de la colonne Fait, lu et écrit
+  // dans project-context.yaml (section cockpit) par le serveur.
+  options: () => get(WS + 'options'),
+  optionsWrite: (usdCad) => post(WS + 'options', { usd_cad: usdCad }),
 
   // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
   // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue
@@ -303,6 +325,12 @@ export const api = {
   // dernier run de flow `project-upgrade`, nom du projet. `project` cible un
   // AUTRE projet que celui déjà résolu — même convention que `health()`.
   sheet: (project) => get(WS + 'sheet', project ? { project } : undefined),
+  // Capacité (P71) : WIP, réservoirs d'admission, quota et file des tâches
+  // prêtes avec la raison de chaque report — le même plan à blanc que
+  // `grimoire queue plan`, côté serveur (workspace_capacity.py), lecture
+  // seule. `project` cible un AUTRE projet que celui déjà résolu par l'hôte —
+  // même convention que `sheet()` juste au-dessus.
+  capacity: (project) => get(WS + 'capacity', project ? { project } : undefined),
   // Agrégation mémoire multi-projets (#172, dernier volet de « du générateur
   // statique au portefeuille actif ») : `projects` vaut 'all', une liste
   // 'slug1,slug2', ou est omis pour « ce projet » seul — jamais toute la
@@ -328,6 +356,8 @@ export const api = {
     if (includeSuperseded) params.include_superseded = '1';
     return get(WS + 'memory/entries', params);
   },
+  // Le graphe complet (P81), en colonnes compactes : jamais échantillonné.
+  memoryGraph: () => get(WS + 'memory/graph'),
   // La fiche d'une entrée : provenance, chaîne de remplacement, nœuds liés.
   memoryEntry: (id, slug) => get(WS + 'memory/entry', slug ? { id, slug } : { id }),
   // Santé de la mémoire et file d'hygiène (P25) : une mesure fraîche d'un projet
@@ -336,6 +366,9 @@ export const api = {
   // Flotte › Données (P26) : services mémoire de la machine, conteneurs, propriétaires
   // et partages. Lecture seule, mesure fraîche ; demandée à l'ouverture de la vue seulement.
   dataMachine: () => get(WS + 'data/machine'),
+  // Premier lancement (P36) : la machine vue par le guide — détection, profils
+  // mémoire possibles ou non et pourquoi, plan, commandes à copier. Lecture seule.
+  setupGuide: () => get(WS + 'setup/guide'),
   // Reçu de rappel (P27) : ce que la mémoire a servi à une tâche (`tasks/<id>/receipts`),
   // ou les derniers reçus du projet (`memory/recall`, `task` pour filtrer). Lecture seule.
   taskReceipts: (id, project) =>
@@ -389,6 +422,11 @@ export const api = {
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
   taskAction: (id, action, body) =>
     post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
+  // Apply d'assignation (P47 lot 3) : lance LA session que le plan a montrée —
+  // l'empreinte du plan voyage dans le corps, le serveur refuse si l'état a
+  // changé depuis (ADR-008). `post` : garde d'écriture commune comprise.
+  taskLaunch: (id, empreinte) =>
+    post(WS + 'tasks/' + encodeURIComponent(id) + '/launch', { empreinte }),
   // « Nouvelle tâche » (P35) : `TaskService.add` du projet servi, comme
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>
