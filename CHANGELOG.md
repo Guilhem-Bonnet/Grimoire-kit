@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(windows): main rouge sous Windows depuis le lot #1060 (GAO-main-rouge-s-001). `GRIMOIRE_CHAT_AGENT_COMMAND` n'est plus découpée en mode POSIX sous Windows (les « \ » des chemins étaient mangés, le chat ne recevait aucun événement) ; un chemin `C:\…` à l'intérieur du dépôt n'est plus réservé d'office à l'humain par l'autopilote ; les tests des actions typées lisent en UTF-8, l'agent ACP factice parle UTF-8 ; les tests à faux hôtes en shebang et à `install.sh` sont ignorés sous win32 avec leur raison.
 - fix(missions): plus de boucle de relecture sur une CI qui n'a pas conclu (P89). Constat du 2026-10-28 : P79 escaladée trois fois à l'humain, un READY défait par un test de temps instable.
   - **CI pas encore inscrite** : juste après un push, GitHub ne liste encore aucun check ; le relecteur n'est plus lancé sur une tête de moins de 10 min sans check (au-delà : dépôt sans CI, la relecture se fait), et un NOT-READY rendu dans cet état est écarté sans compter de cycle, comme une CI en cours (P87).
   - **Tête dépassée** : un NOT-READY rendu sur une tête que la PR a dépassée pendant la relecture est relu, il ne renvoie plus le worker corriger ce qui l'est déjà.
