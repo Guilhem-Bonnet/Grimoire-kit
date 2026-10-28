@@ -322,7 +322,8 @@ def test_une_rafale_de_changements_est_regroupee_en_rechargements_espaces(poll_p
     page.wait_for_selector(".ex-card")
     page.wait_for_timeout(1500)
     started: list[float] = []
-    page.on("request", lambda r: started.append(time.monotonic())
+    urls: list[str] = []
+    page.on("request", lambda r: (started.append(time.monotonic()), urls.append(r.url.split("?")[0]))
             if "/api/workspace/" in r.url and "/pulse" not in r.url and "/glossary" not in r.url else None)
     titles = [f"Rafale de changements {i}" for i in range(6)]
     for title in titles:
@@ -335,8 +336,61 @@ def test_une_rafale_de_changements_est_regroupee_en_rechargements_espaces(poll_p
     waves = [s for i, s in enumerate(started) if i == 0 or s - started[i - 1] > 0.5]
     assert waves, "la rafale a bien fait recharger l'espace"
     gaps = [b - a for a, b in itertools.pairwise(waves)]
-    assert all(gap >= 2.5 for gap in gaps), f"rechargements trop rapprochés : {gaps}"
+    assert all(gap >= 2.5 for gap in gaps), f"rechargements trop rapprochés : {gaps} {urls}"
     assert len(waves) <= 3, f"une rafale de 3 s en six écritures donne au plus 3 vagues : {len(waves)}"
+
+
+def test_quinze_secondes_d_onglet_masque_sans_requete_puis_le_changement_est_recharge(poll_page: Page, service) -> None:  # type: ignore[no-untyped-def]
+    """P79, critère 3 : masqué 15 s pendant qu'une écriture arrive, l'onglet ne fait aucune requête ; revenu visible,
+    le changement retenu est rechargé aussitôt (son empreinte est déjà connue, aucun pouls ne la redira)."""
+    page = poll_page
+    _goto(page, "executer")
+    page.wait_for_selector(".ex-card")
+    page.wait_for_timeout(1500)
+    page.evaluate(_HIDE)
+    page.wait_for_timeout(300)  # une requête déjà en vol peut se terminer
+    requests = _api_requests(page)
+    title = "Carte écrite pendant quinze secondes d'onglet masqué"
+
+    service.add(title, ("critère",), actor="t", owner="winston", ready=True)
+    page.wait_for_timeout(15_000)
+
+    assert requests == [], f"requêtes émises onglet masqué : {requests}"
+    page.evaluate(_SHOW)
+    _card(page, title).wait_for(timeout=APPEAR_MS)
+
+
+_COUNT_INFLIGHT = """() => {
+  const real = window.fetch;
+  window.__inflight = {};
+  window.__maxInflight = {};
+  window.fetch = async (...args) => {
+    const raw = args[0] && args[0].url ? args[0].url : String(args[0]);
+    const route = new URL(raw, location.href).pathname;
+    window.__inflight[route] = (window.__inflight[route] || 0) + 1;
+    window.__maxInflight[route] = Math.max(window.__maxInflight[route] || 0, window.__inflight[route]);
+    try { return await real(...args); } finally { window.__inflight[route] -= 1; }
+  };
+}"""
+
+
+def test_jamais_deux_requetes_en_vol_vers_la_meme_route(poll_page: Page, service) -> None:  # type: ignore[no-untyped-def]
+    """P79, critère 4 : pendant une rafale d'écritures, aucune route n'a deux requêtes en vol depuis le même onglet."""
+    page = poll_page
+    _goto(page, "executer")
+    page.wait_for_selector(".ex-card")
+    page.wait_for_timeout(1500)
+    page.evaluate(_COUNT_INFLIGHT)
+    titles = [f"Rafale sans chevauchement {i}" for i in range(6)]
+    for title in titles:
+        service.add(title, ("critère",), actor="t", owner="winston", ready=True)
+        page.wait_for_timeout(400)
+
+    _card(page, titles[-1]).wait_for(timeout=APPEAR_MS)
+    page.wait_for_timeout(1000)
+    peaks = page.evaluate("() => window.__maxInflight")
+    assert peaks, "la rafale a fait relire des routes"
+    assert all(n <= 1 for n in peaks.values()), f"requêtes simultanées vers une même route : {peaks}"
 
 
 def test_l_horodatage_dit_depuis_quand_les_donnees_sont_a_jour(poll_page: Page) -> None:

@@ -610,7 +610,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 
 
 #: Les lectures que les espaces relancent à chaque pouls changé (P79) : gardées par empreinte
-#: (:mod:`grimoire.tools.workspace_read_cache`). Rien qui dépende d'un paramètre d'écriture ou d'une sonde lente.
+#: (:mod:`grimoire.tools.workspace_read_cache`), seulement quand la requête porte ``live=1``.
 LIVE_ROUTES = frozenset({f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet"})
 
 #: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
@@ -662,13 +662,15 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
 
     try:
         handler = GET_ROUTES.get(path)
-        if handler is not None and path in LIVE_ROUTES:
-            # P79 : ce que le flux relance à chaque changement, calculé une fois par empreinte, pas une par onglet.
+        if handler is not None and path in LIVE_ROUTES and _one(query, "live") == "1":
+            # P79 : un rechargement du direct (`live=1`, posé par la page pendant un pouls changé) est servi une fois
+            # par empreinte, pas une par onglet. Un chargement de page ou une navigation relisent toujours.
             from grimoire.tools import workspace_pulse, workspace_read_cache
 
-            portfolio = _one(query, "scope") == "portfolio"
+            plain = {k: v for k, v in query.items() if k != "live"}
+            portfolio = _one(plain, "scope") == "portfolio"
             return workspace_read_cache.cached_read(
-                path, project_root, query, lambda: handler(project_root, query),
+                path, project_root, plain, lambda: handler(project_root, plain),
                 lambda: workspace_pulse.fingerprint_of(project_root, portfolio=portfolio),
             )
         if handler is not None:

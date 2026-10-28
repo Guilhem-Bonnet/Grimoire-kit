@@ -27,7 +27,7 @@
 //     un par `MIN_RELOAD_MS`, jamais deux en même temps, et le dernier pouls est
 //     toujours rechargé.
 
-import { api, host } from './api.js';
+import { api, host, duringLiveReload } from './api.js';
 
 const DEFAULT_INTERVAL_MS = 5000;
 const FIRST_PULSE_TIMEOUT_MS = 5000;
@@ -119,7 +119,9 @@ export function createLive({ onDecisions, onState } = {}) {
     state.failingSince = null;
     const changed = Boolean(pulse.fingerprint) && pulse.fingerprint !== state.fingerprint;
     if (changed) state.fingerprint = pulse.fingerprint;
-    if (onDecisions && pulse.decisions) onDecisions(pulse.decisions);
+    // Le compteur de décisions (« À traiter ») est lu tout de suite au premier pouls,
+    // puis regroupé avec les espaces : il relit lui aussi le serveur (P79).
+    if (first && onDecisions && pulse.decisions) onDecisions(pulse.decisions);
     // Le tout premier pouls fixe la référence : l'espace vient d'être chargé,
     // il n'a rien à recharger.
     if (changed && !first) requestReload(pulse);
@@ -144,9 +146,17 @@ export function createLive({ onDecisions, onState } = {}) {
     reloading = true;
     lastReloadAt = Date.now();
     try {
-      await Promise.allSettled([...handlers].map(async (handler) => {
-        try { await handler(pulse); } catch (error) { console.error('actualisation de l\'espace :', error); }
-      }));
+      // Les lectures lancées ici (de façon synchrone) portent `live=1` : le serveur peut les resservir (P79).
+      const pending = duringLiveReload(() => {
+        if (onDecisions && pulse.decisions) {
+          try { onDecisions(pulse.decisions); } catch (error) { console.error('compteur de décisions :', error); }
+        }
+        return [...handlers].map((handler) => {
+          try { return Promise.resolve(handler(pulse)); } catch (error) { return Promise.reject(error); }
+        });
+      });
+      const results = await Promise.allSettled(pending);
+      for (const r of results) if (r.status === 'rejected') console.error('actualisation de l\'espace :', r.reason);
     } finally {
       reloading = false;
       if (pendingPulse) requestReload(pendingPulse);

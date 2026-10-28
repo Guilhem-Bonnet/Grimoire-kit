@@ -192,6 +192,13 @@ _ALLOWED_ACTIONS: dict[str, list[str]] = {
 }
 
 
+def _forget_live_reads() -> None:
+    """Vide le cache des lectures du direct (P79, :mod:`grimoire.tools.workspace_read_cache`) après une écriture."""
+    from grimoire.tools import workspace_read_cache
+
+    workspace_read_cache.clear()
+
+
 @dataclass(frozen=True)
 class _Mutation:
     """A governed write action — runs only with explicit confirmation."""
@@ -569,6 +576,14 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         self._send_json(200, payload)
 
     def do_POST(self) -> None:  # http.server contract
+        # P79 : toute écriture passée par le cockpit (tâche, agent, réglage…) peut changer ce que les lectures du direct
+        # rendent sans bouger l'empreinte du pouls ; leur cache est vidé une fois l'écriture faite.
+        try:
+            self._do_post()
+        finally:
+            _forget_live_reads()
+
+    def _do_post(self) -> None:
         # `withProject()` (web/workspace/api.js) ajoute `?project=<slug>` à
         # TOUTE requête, POST comprises — comme le fait déjà `do_GET` ci-dessus,
         # il faut donc comparer le chemin sans sa query string, sinon chaque
@@ -902,6 +917,12 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         })
 
     def do_PUT(self) -> None:  # http.server contract
+        try:
+            self._do_put()
+        finally:
+            _forget_live_reads()
+
+    def _do_put(self) -> None:
         """``PUT /api/blueprints/<id>`` — enregistrer un blueprint (issue #535).
 
         Même garde que ``/api/setup`` : seul le projet de lancement direct
