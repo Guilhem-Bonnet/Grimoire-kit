@@ -149,6 +149,9 @@ class FakeHost:
     def _gh(self, argv: list[str], cwd: Path) -> ExecResult:
         if self.gh_broken:
             return ExecResult(1, "", "gh : réseau indisponible")
+        if argv[1:3] == ["auth", "status"]:
+            # Le préflight d'assignation (P47) sonde l'authentification avant de lancer.
+            return ExecResult(0, "Logged in to github.com")
         if "-R" in argv:
             target = argv[argv.index("-R") + 1]
             if self.repo and target != self.repo:
