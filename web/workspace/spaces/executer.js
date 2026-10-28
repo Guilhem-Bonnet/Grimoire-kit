@@ -2543,6 +2543,80 @@ function assignBlock(ctx, detail, project) {
   return block;
 }
 
+// P88 : « Accepter… » — l'acceptation humaine de la preuve déclarative (#865), dans la colonne Revue seulement.
+// La page demande (ADR-007), le service décide : `accept` passe par le canal humain, comme `answer`, avec le
+// motif obligatoire ; Confirmer reste désactivé tant que le motif est vide. Le geste du pilote automatique (P82)
+// s'affiche dans le même bloc, en lecture seule.
+function acceptBlock(ctx, detail, trace, { taskId, project, portfolio, onWritten }) {
+  const verdicts = (trace?.entries || []).filter((e) => e.kind && e.kind.startsWith('verdict.')
+    && String(e.detail?.created_by || '').startsWith('orchestrator:'));
+  const inReview = detail.board === 'review';
+  if (!inReview && !verdicts.length) return null;
+  const block = document.createElement('section');
+  block.className = 'ex-insp-block';
+  block.dataset.role = 'accept-block';
+  block.append(text('h4', null, 'Acceptation'));
+  for (const v of verdicts) {
+    const line = document.createElement('div');
+    line.dataset.role = 'autopilot-acceptance';
+    line.append(text('div', 'lbl', `Acceptée par le pilote automatique (${v.detail.created_by})`));
+    const why = (v.detail.reasons || []).join(' ; ');
+    if (why) line.append(text('p', null, why));
+    block.append(line);
+  }
+  if (!inReview) return block;
+  const locked = !portfolio && ctx.host.readOnly;
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'btn';
+  open.dataset.role = 'accept-open';
+  open.textContent = 'Accepter…';
+  open.disabled = locked;
+  const form = document.createElement('div');
+  form.hidden = true;
+  form.dataset.role = 'accept-form';
+  const reason = document.createElement('textarea');
+  reason.className = 'input';
+  reason.rows = 3;
+  reason.dataset.role = 'accept-reason';
+  reason.placeholder = 'Ce qui a été relu, et pourquoi la preuve suffit, ou la dérogation';
+  reason.setAttribute('aria-label', "Motif de l'acceptation");
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'btn pri';
+  confirm.dataset.role = 'accept-confirm';
+  confirm.textContent = 'Confirmer';
+  confirm.disabled = true;
+  const status = actionStatus('');
+  status.dataset.role = 'accept-status';
+  reason.addEventListener('input', () => { confirm.disabled = !reason.value.trim(); });
+  open.addEventListener('click', () => { form.hidden = false; open.hidden = true; reason.focus(); });
+  confirm.addEventListener('click', async () => {
+    const motif = reason.value.trim();
+    if (!motif) return;
+    confirm.disabled = true;
+    reason.disabled = true;
+    const body = { reason: motif };
+    ctx.dock.echo(`grimoire task accept ${taskId} --reason ${JSON.stringify(motif)}${portfolio && project ? `  # projet ${project}` : ''}`);
+    setActionStatus(status, 'Acceptation…');
+    try {
+      const result = await (portfolio
+        ? ctx.api.portfolioTaskAction(taskId, 'accept', body, project)
+        : ctx.api.taskAction(taskId, 'accept', body));
+      if (result && result.blocked) throw new Error((result.refusals || []).map((r) => r.reason || r.evidence).join(' ; ') || 'acceptation refusée');
+      setActionStatus(status, 'Tâche acceptée.', 'ok');
+      onWritten();
+    } catch (error) {
+      reason.disabled = false;
+      confirm.disabled = !reason.value.trim();
+      setActionStatus(status, failureText(error), 'bad');
+    }
+  });
+  form.append(reason, confirm, status);
+  block.append(open, form);
+  return block;
+}
+
 async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = false, guard = {}) {
   const taskId = task.id;
   const project = portfolio ? task.project?.slug : undefined;
@@ -2769,6 +2843,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
   }
   gateBlock.append(moves, feedback);
   ctx.inspector.append(gateBlock);
+  appendIf(ctx.inspector, acceptBlock(ctx, detail, trace, { taskId, project, portfolio, onWritten }));
 
   // ── Critères d'acceptation : ce que la transition doit prouver ──────────
   const acceptance = document.createElement('div');

@@ -398,6 +398,10 @@ def _evidence_entries(evidence_path: Path, task_id: str) -> list[TimelineEntry]:
         out.append(TimelineEntry(
             verdict.created_at, "evidence", f"verdict.{verdict.verdict.value}",
             f"verdict {verdict.verdict.value} sur {verdict.evidence_pack_id}" + (f" — {raisons}" if raisons else ""),
-            failure=not passed, detail={"verdict_id": verdict.id, "pack_id": verdict.evidence_pack_id},
+            failure=not passed,
+            detail={
+                "verdict_id": verdict.id, "pack_id": verdict.evidence_pack_id, "created_by": verdict.created_by,
+                "reasons": [c.reason for c in verdict.checks if c.reason],
+            },
         ))
     return out

@@ -260,3 +260,66 @@ def mandate_revoke(
     _emit(ctx, {"revoked": revoked.to_dict()})
     if _fmt(ctx) != "json":
         console.print(f"[green]révoqué[/green] {revoked.id}" + (f" — {reason}" if reason else ""))
+
+
+# ── Pilote automatique (P82) ────────────────────────────────────────────────
+
+autopilot_app = typer.Typer(
+    help="Pilote automatique : l'orchestrateur tranche aussi les cas bloqués, sauf une liste fermée réservée à l'humain.",
+    no_args_is_help=True,
+)
+autonomy_app.add_typer(autopilot_app, name="autopilot")
+
+
+def _autopilot_switch(ctx: typer.Context, on: bool, project_root: Path, attest_from: Path | None) -> None:
+    from grimoire.missions.autopilot import AutopilotStore
+
+    try:
+        entry, attestation = AutopilotStore(project_root).request(on, attest_from=attest_from)
+    except GrimoireRuntimeError as exc:
+        _fail(ctx, exc)
+        return
+    except Exception as exc:  # MandateRefusedError : pas de mandat actif, politique invalide, journal rompu
+        _fail(ctx, GrimoireRuntimeError(str(exc)))
+        return
+    if entry is None:
+        message = (
+            f"awaiting_human : {attestation.reason} — {attestation.explain()}. Le pilote automatique ne s'active et ne "
+            f"se coupe que par un tour humain de la session qui le demande, postérieur au challenge, puis la même "
+            f"commande relancée. {LIMIT_NOTE}"
+        )
+        _awaiting(ctx, attestation, message, attest_from)
+        return
+    _emit(ctx, {"autopilot": entry["state"], "mandate_id": entry["mandate_id"], "ts": entry["ts"]})
+    if _fmt(ctx) != "json":
+        console.print(f"[green]pilote automatique {'activé' if on else 'coupé'}[/green] — mandat {entry['mandate_id'] or '—'}")
+
+
+@autopilot_app.command("on")
+def autopilot_on(ctx: typer.Context, project_root: _PROJECT_ROOT = Path(), attest_from: _ATTEST_FROM = None) -> None:
+    """Activer le pilote (il exige un mandat actif) : inscrit seulement attesté par un tour humain de cette session."""
+    _autopilot_switch(ctx, True, project_root, attest_from)
+
+
+@autopilot_app.command("off")
+def autopilot_off(ctx: typer.Context, project_root: _PROJECT_ROOT = Path(), attest_from: _ATTEST_FROM = None) -> None:
+    """Couper le pilote : même canal humain que l'activation (révoquer le mandat le coupe aussi, sans tour humain)."""
+    _autopilot_switch(ctx, False, project_root, attest_from)
+
+
+@autopilot_app.command("status")
+def autopilot_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -> None:
+    """Relire l'état du pilote, réévalué maintenant (mandat compris)."""
+    from grimoire.missions.autopilot import AutopilotStore, load_autopilot_policy
+
+    state = AutopilotStore(project_root).state()
+    policy = load_autopilot_policy(project_root.resolve())
+    _emit(ctx, {**state.to_dict(), "policy_error": policy.error, "extra_reserved": list(policy.extra)})
+    if _fmt(ctx) == "json":
+        return
+    if state.active:
+        console.print(f"[green]pilote actif[/green] — mandat {state.mandate_id}, depuis {state.since} ({state.via})")
+    else:
+        console.print(f"pilote inactif ({state.reason})")
+    if policy.error:
+        console.print(f"[red]politique du pilote invalide[/red] : {policy.error}", markup=True)

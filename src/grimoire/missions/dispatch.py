@@ -78,6 +78,7 @@ from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.grounding import GROUNDING_RULE
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
+from grimoire.missions.diff_fingerprint import signal_if_stuck
 from grimoire.missions.dispatch_history import recommend_start_tier
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.route_dispatch import record_route
@@ -1271,6 +1272,7 @@ def run_dispatch(
         return service.ledger.append_event("task.dispatched", task_id, "task", actor, payload)
 
     attempt_no = 0
+    previous_red_diff: str | None = None
     capped_before_next_tier = False
     cap_why: str | None = None
     for tier_idx, tier in enumerate(chain):
@@ -1378,6 +1380,11 @@ def run_dispatch(
                     last_event=last_event,
                 )
                 return unrunnable_report
+            if verdict == "red":
+                previous_red_diff = signal_if_stuck(
+                    service, task_id, actor, root, previous_red_diff,
+                    attempt=attempt_no, tier=tier, next_tier=chain[tier_idx + 1] if tier_idx + 1 < len(chain) else None,
+                )
             tier_settled = True
             break  # appel réussi : ce palier a son verdict, vert ou rouge
 

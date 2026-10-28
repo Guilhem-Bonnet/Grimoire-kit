@@ -354,6 +354,18 @@ commentaire en tête du `Cargo.toml` du crate.
 
 ## Publier une release
 
+### Entrées de CHANGELOG : un fragment par PR
+
+Une PR `feat:`, `fix:` ou `perf:` ne touche plus l'en-tête de `CHANGELOG.md` :
+elle dépose `changelog.d/<slug>.md` (une ou plusieurs puces, voir
+`changelog.d/README.md`). Deux PR n'écrivent jamais dans le même fichier, donc
+la fusion de l'une ne met plus l'autre en conflit ni ne relance sa CI. La
+garde `changelog` (`--dev`) accepte un fragment ou une entrée sous
+`[Unreleased]` (toléré pour les PR déjà ouvertes). À la release,
+`make release VERSION=x.y.z` appelle `scripts/changelog-assemble.py`, qui range
+les fragments sous `## [x.y.z]` et les supprime ; le garde de release refuse un
+tag où il reste un fragment.
+
 Il n'y a pas d'étage TestPyPI : le projet n'y a jamais été enregistré, et un
 job qui affiche une pré-vérification sans l'exécuter est pire qu'aucun (#195).
 Ce qui vérifie qu'une version s'installe avant qu'elle ne parte sur PyPI —

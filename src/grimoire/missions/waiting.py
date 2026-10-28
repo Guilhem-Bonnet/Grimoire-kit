@@ -121,6 +121,8 @@ class Question:
     blocking: bool = True
     why: str = ""
     key: str = ""
+    #: L'option que l'auteur de la question recommande (P82) : le pilote automatique la prend, sinon il tranche lui-même.
+    recommended: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -135,6 +137,8 @@ class Question:
             data["why"] = self.why
         if self.key:
             data["key"] = self.key
+        if self.recommended:
+            data["recommended"] = self.recommended
         return data
 
     @classmethod
@@ -149,6 +153,7 @@ class Question:
             blocking=d.get("blocking") is not False,
             why=str(d.get("why", "") or ""),
             key=str(d.get("key", "") or ""),
+            recommended=str(d.get("recommended", "") or ""),
         )
 
 

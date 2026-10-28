@@ -28,7 +28,7 @@ Closes # <!-- ou BM-XX -->
 
 ### Obligatoire
 - [ ] `grimoire gates repo` passe — les mêmes gardes que la CI : `ratchet`, `changelog`, `prose`, `waivers`, `actions-pinned`, `tenets`, `doc-audience`, `doc-commands`, `doc-claims`, `skills` (une seule : `grimoire gates repo --only changelog`)
-- [ ] Une PR `feat:`, `fix:` ou `perf:` ajoute son entrée sous `[Unreleased]` de `CHANGELOG.md` (garde `changelog`)
+- [ ] Une PR `feat:`, `fix:` ou `perf:` ajoute son fragment `changelog.d/<slug>.md` (ou, toléré, son entrée sous `[Unreleased]` de `CHANGELOG.md`) — garde `changelog`
 - [ ] Une PR `fix:` apporte un test qui échoue sur la base (job `regression-on-base`)
 - [ ] `bash -n grimoire-init.sh` passe (si grimoire-init.sh modifié)
 - [ ] `bash grimoire-init.sh validate --all` passe (si DNA modifié)
