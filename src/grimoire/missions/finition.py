@@ -18,7 +18,7 @@ from ruamel.yaml.error import YAMLError
 
 from grimoire.core.exceptions import GrimoireMissionError
 
-__all__ = ["FINITIONS", "PHASE_FINITION", "finition_for", "normalize_finition", "project_phase"]
+__all__ = ["FINITIONS", "PHASE_FINITION", "finition_for", "normalize_finition", "project_phase", "set_project_phase"]
 
 #: Valeurs machine, sans accent (ADR-007 §6) ; le même ensemble que ``MissionTask.finition``.
 FINITIONS: tuple[str, ...] = ("maquette", "peaufine")
@@ -62,3 +62,25 @@ def finition_for(project_root: Path, explicit: str = "") -> str:
     """La finition d'une tâche : celle demandée, sinon celle de la phase du projet, sinon ``""``."""
     chosen = normalize_finition(explicit)
     return chosen or PHASE_FINITION.get(project_phase(project_root), "")
+
+
+def set_project_phase(project_root: Path, phase: str) -> Path:
+    """Écrit la clé ``phase`` de ``project-context.yaml`` (commentaires préservés) ; refuse une phase inconnue."""
+    cleaned = phase.strip().lower()
+    if cleaned not in PHASE_FINITION:
+        raise GrimoireMissionError(f"phase inconnue : {phase!r} — parmi {', '.join(PHASE_FINITION)}")
+    path = project_root / "project-context.yaml"
+    yaml = YAML()  # aller-retour : les commentaires du fichier survivent
+    yaml.preserve_quotes = True
+    try:
+        raw: Any = yaml.load(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise GrimoireMissionError(f"project-context.yaml illisible : {exc}") from exc
+    except (ValueError, YAMLError) as exc:
+        raise GrimoireMissionError(f"project-context.yaml invalide : {exc}") from exc
+    if not isinstance(raw, dict):
+        raise GrimoireMissionError("project-context.yaml n'est pas un mapping")
+    raw["phase"] = cleaned
+    with path.open("w", encoding="utf-8") as handle:
+        yaml.dump(raw, handle)
+    return path

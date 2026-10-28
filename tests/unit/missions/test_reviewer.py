@@ -283,7 +283,7 @@ def test_un_recu_ready_du_relecteur_est_note_et_sa_session_arretee(projet: Path,
     receipt_from(Path(str(launch["cwd"])), tid, "READY", reviewer_sid(host))
     report = tick(projet, host)
     assert [(o.action, o.status) for o in report.reviews] == [("ready", "done")]
-    assert host.of("claude", "stop") == [["claude", "stop", review.payload["session"]]]
+    assert host.review_stops() == [["claude", "stop", review.payload["session"]]]
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION  # l'acceptation est au lot suivant
     assert tick(projet, host).reviews == ()  # jugé une fois
 
@@ -411,7 +411,7 @@ def test_un_relecteur_introuvable_est_arrete_sans_rien_inscrire_ni_sceller(proje
     assert [(o.action, o.status) for o in report.reviews] == [("launch", "failed")]
     assert "identité non résolue" in report.reviews[0].detail
     short = host.bg[-1]["id"]
-    assert host.bg[-1]["name"] == f"grimoire-review-{tid}" and host.of("claude", "stop") == [["claude", "stop", short]]
+    assert host.bg[-1]["name"] == f"grimoire-review-{tid}" and host.review_stops() == [["claude", "stop", short]]
     assert MandateStore(projet).sessions(role="reviewer") == []
     assert not [e for e in _store(projet).journal.read() if e.get("task_id") == tid and e.get("session_sha256")]
     assert not [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_LAUNCHED_EVENT]
@@ -490,7 +490,7 @@ def test_un_relecteur_refuse_au_journal_est_arrete_et_n_est_pas_relance(projet: 
     first = tick(projet, host)
     assert [(o.action, o.status) for o in first.reviews] == [("launch", "failed")]
     short = host.bg[-1]["id"]
-    assert host.of("claude", "stop") == [["claude", "stop", short]] and read_breaker(projet).failures == 1
+    assert host.review_stops() == [["claude", "stop", short]] and read_breaker(projet).failures == 1
     (failed,) = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_LAUNCH_FAILED_EVENT]
     assert failed.payload["halted"] is True and failed.payload["reason"] == "refused"
     bg = len(host.of("claude", "--bg"))
@@ -515,7 +515,7 @@ def test_un_relecteur_non_arrete_bloque_la_relance_jusqu_a_l_arret(projet: Path,
     bg = len(host.of("claude", "--bg"))
     second = tick(projet, host)
     assert [(o.action, o.status) for o in second.reviews] == [("launch", "skipped")] and len(host.of("claude", "--bg")) == bg
-    assert host.of("claude", "stop") == [["claude", "stop", short]] * 2  # l'arrêt est retenté
+    assert host.review_stops() == [["claude", "stop", short]] * 2  # l'arrêt est retenté
     host.stop_result, host.agents = ExecResult(0, "stopped\n"), None
     third = tick(projet, host)
     assert [(o.action, o.status) for o in third.reviews] == [("launch", "launched")]
@@ -628,7 +628,7 @@ def test_un_relecteur_muet_est_arrete_relance_puis_escalade(projet: Path, host: 
         assert [(o.action, o.status) for o in _stage(projet, host, later)] == [("timeout", "done")], n
     assert [(o.action, o.status) for o in _stage(projet, host, later)] == [("escalate", "done")]
     assert TaskService(projet).require(tid).status is TaskState.WAITING
-    assert len(host.of("claude", "stop")) == MAX_RELAUNCHES + 1  # chaque relecteur muet est arrêté
+    assert len(host.review_stops()) == MAX_RELAUNCHES + 1  # chaque relecteur muet est arrêté
 
 
 def test_un_ready_perime_est_relu(projet: Path, host: FakeHost) -> None:

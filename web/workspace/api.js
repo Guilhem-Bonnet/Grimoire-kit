@@ -194,6 +194,13 @@ export const api = {
     const query = params.toString();
     return withProject(WS + 'stream' + (query ? '?' + query : ''));
   },
+  // Chat de l'orchestrateur (ACP2). Le flux passe par `EventSource` (pas par `fetch`) : seule
+  // l'URL vit ici, avec la même cible que toute lecture. Un message est un tour humain : le
+  // cockpit le relaie à l'agent et n'écrit rien lui-même (ADR-007).
+  chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
+  chatSend: (text) => post(WS + 'chat/send', { text }),
+  chatPermission: (requestId, decision) => post(WS + 'chat/permission', { request_id: requestId, decision }),
+  chatCancel: () => post(WS + 'chat/cancel', {}),
   glossary: () => get(WS + 'glossary'),
   // Ce qui attend une décision humaine (P22), rangé par urgence. `portfolio`
   // lit tout le registre — la portée « Tous les projets » ; `probe` relance
@@ -356,6 +363,8 @@ export const api = {
     if (includeSuperseded) params.include_superseded = '1';
     return get(WS + 'memory/entries', params);
   },
+  // Le graphe complet (P81), en colonnes compactes : jamais échantillonné.
+  memoryGraph: () => get(WS + 'memory/graph'),
   // La fiche d'une entrée : provenance, chaîne de remplacement, nœuds liés.
   memoryEntry: (id, slug) => get(WS + 'memory/entry', slug ? { id, slug } : { id }),
   // Santé de la mémoire et file d'hygiène (P25) : une mesure fraîche d'un projet

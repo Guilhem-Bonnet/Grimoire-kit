@@ -1,0 +1,49 @@
+name: Grimoire CI — Stabilité Windows
+
+# Deux tests ont coûté une relance Windows complète (~45 min) : tantivy « Access is
+# denied » et le seuil de latence du flux. Ce job les rejoue en boucle, sans skip.
+on:
+  pull_request:
+    paths:
+      - "src/grimoire/memory/backends/tantivy_local.py"
+      - "src/grimoire/tools/workspace_pulse.py"
+      - "tests/unit/memory/test_retraction.py"
+      - "tests/unit/tools/test_workspace_stream.py"
+      - ".github/workflows/ci-flaky-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repeat-windows:
+    name: "Répétition (windows-latest)"
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev,search]"
+
+      - name: Tantivy présent (un skip ne compte pas)
+        run: python -c "import tantivy"
+
+      - name: test_retraction[tantivy] x50
+        shell: bash
+        run: |
+          for i in $(seq 1 50); do
+            python -m pytest tests/unit/memory/test_retraction.py -k tantivy -q -rs -p no:cacheprovider || { echo "échec à la passe $i"; exit 1; }
+          done
+
+      - name: test_workspace_stream x20
+        shell: bash
+        run: |
+          for i in $(seq 1 20); do
+            python -m pytest tests/unit/tools/test_workspace_stream.py -q -p no:cacheprovider || { echo "échec à la passe $i"; exit 1; }
+          done

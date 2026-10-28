@@ -146,7 +146,7 @@ def test_le_segmente_de_savoir_et_l_entree_par_la_recherche(sante: tuple[Page, d
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'memoire'")
 
     tabs = [t.strip() for t in page.locator("#section-tabs .tab").all_inner_texts()]
-    assert tabs == ["Santé et carte", "Recherche", "Rappel", "Journal"]
+    assert tabs == ["Santé et carte", "Recherche", "Rappel", "Carte 3D", "Journal"]
 
     page.locator("#section-tabs [data-section='sante']").click()
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'sante'")
