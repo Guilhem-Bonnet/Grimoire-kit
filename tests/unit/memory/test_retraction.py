@@ -17,6 +17,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -37,6 +38,23 @@ TEXT_A = "Décision : le backend vectoriel retenu est Qdrant."
 TEXT_B = "Décision : le backend vectoriel de secours est Weaviate."
 
 
+@functools.cache
+def _chroma_native_refusal() -> str:
+    """Pourquoi l'index natif de chromadb (hnswlib) ne se charge pas ici ; ``""`` s'il se charge.
+
+    Constat du 2026-10-28 (CI, Python 3.13) : sur certaines machines GitHub, l'import de ``local_hnsw`` meurt d'une
+    instruction illégale (SIGILL) ; le worker xdist tué, le job restait suspendu jusqu'à son plafond. L'import est
+    donc essayé une fois dans un sous-processus : seul lui meurt.
+    """
+    probe = subprocess.run([sys.executable, "-c", "import chromadb.segment.impl.vector.local_hnsw"],
+                           capture_output=True, text=True, timeout=120, check=False)
+    if probe.returncode == 0:
+        return ""
+    if probe.returncode == -signal.SIGILL:
+        return "chromadb : l'index natif (hnswlib) meurt d'une instruction illégale sur ce processeur (SIGILL)"
+    return f"chromadb : l'index natif ne se charge pas (code {probe.returncode}) : {probe.stderr.strip()[-200:]}"
+
+
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for var in ("GRIMOIRE_TASK_ID", "GRIMOIRE_ACTOR", "GRIMOIRE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
@@ -44,25 +62,6 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Rien ne sort du test : ni le HOME réel, ni la télémétrie de ChromaDB.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("ANONYMIZED_TELEMETRY", "False")
-
-
-@functools.cache
-def _chroma_runs_here() -> bool:
-    """Vrai si ChromaDB crée un client persistant sans planter le processus.
-
-    Sur certains runners, ses extensions natives meurent en SIGILL (instruction
-    absente du CPU) : hors processus, le test se saute au lieu de tuer le
-    worker xdist et de figer la suite.
-    """
-    import tempfile
-
-    code = "import sys, chromadb; chromadb.PersistentClient(path=sys.argv[1])"
-    with tempfile.TemporaryDirectory() as tmp:
-        try:
-            done = subprocess.run([sys.executable, "-c", code, tmp], capture_output=True, timeout=120, check=False)
-        except subprocess.TimeoutExpired:
-            return False
-    return done.returncode == 0
 
 
 def _offline_chroma_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,8 +86,7 @@ def _make_qdrant(tmp_path: Path) -> MemoryBackend:
             self._collection = "retraction-tests"
             self._client = QdrantClient(":memory:")
             self._client.create_collection(
-                collection_name=self._collection,
-                vectors_config=VectorParams(size=8, distance=Distance.COSINE),
+                collection_name=self._collection, vectors_config=VectorParams(size=8, distance=Distance.COSINE),
             )
 
         def _embed(self, text: str) -> list[float]:
@@ -115,8 +113,8 @@ def _make_backend(kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch | N
         return TantivyMemoryBackend(tmp_path / "tantivy")
     if kind == "mempalace":
         pytest.importorskip("chromadb")
-        if not _chroma_runs_here():
-            pytest.skip("ChromaDB ne s'initialise pas sur cette machine (plantage natif)")
+        if refusal := _chroma_native_refusal():
+            pytest.skip(refusal)
         from grimoire.memory.backends.mempalace import MemPalaceBackend
 
         assert monkeypatch is not None
@@ -234,11 +232,7 @@ class TestReadsFilterRetracted:
         assert a in _ids(mgr.search_taxonomy(QUERY, include_retracted=True))
 
     def test_recall_typed_hides_then_includes(self, kind: str, tmp_path: Path) -> None:
-        mgr = (
-            MemoryManager(_make_backend(kind, tmp_path), project_name="demo", project_root=tmp_path)
-            if kind in _SEARCHABLE
-            else None
-        )
+        mgr = MemoryManager(_make_backend(kind, tmp_path), project_name="demo", project_root=tmp_path) if kind in _SEARCHABLE else None
         if mgr is None:
             pytest.skip("pas de recherche hors ligne sur ce backend")
         # remember() range par identifiant déterministe et type : les valeurs de l'agent sont l'entrée.
@@ -286,10 +280,8 @@ class TestHybridKeepsRetractedOut:
         """Le compagnon lexical est une copie : sa marque peut être en retard, le store principal fait foi."""
         companion = LocalMemoryBackend(tmp_path / "lexical.json")
         mgr = MemoryManager(
-            LocalMemoryBackend(tmp_path / "primary.json"),
-            lexical_companion=companion,
-            project_name="demo",
-            project_root=tmp_path,
+            LocalMemoryBackend(tmp_path / "primary.json"), lexical_companion=companion,
+            project_name="demo", project_root=tmp_path,
         )
         a, b = _seed(mgr)
         assert _ids(mgr.hybrid_search(QUERY)) == {a, b}
@@ -363,9 +355,7 @@ class TestProjectBoundary:
     @pytest.fixture
     def foreign(self, mgr: MemoryManager) -> str:
         entry = mgr.backend.store(
-            "Souvenir d'un autre projet",
-            user_id="u",
-            tags=("t",),
+            "Souvenir d'un autre projet", user_id="u", tags=("t",),
             metadata={"project_name": "autre", "source_kind": "memory"},
         )
         return entry.id
@@ -448,9 +438,7 @@ class TestGraphMirror:
                 seen.append(entry)
 
         mgr = MemoryManager(
-            LocalMemoryBackend(tmp_path / "m.json"),
-            project_name="demo",
-            project_root=tmp_path,
+            LocalMemoryBackend(tmp_path / "m.json"), project_name="demo", project_root=tmp_path,
             memory_graph=_Graph(),
         )
         a, _ = _seed(mgr)
@@ -475,9 +463,7 @@ class TestProvenanceCardShowsTheCycle:
 
 class TestUnretractRemovesTheKey:
     def test_the_key_is_gone_on_replace_backends_and_neutral_on_merge_backends(
-        self,
-        kind: str,
-        mgr: MemoryManager,
+        self, kind: str, mgr: MemoryManager,
     ) -> None:
         a, _ = _seed(mgr)
         mgr.retract(a, reason="r")
@@ -535,9 +521,7 @@ class TestConsolidateNeverMixesStates:
     @pytest.fixture(params=("local", "lexical", "tantivy"))
     def cmgr(self, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemoryManager:
         return MemoryManager(
-            _make_backend(str(request.param), tmp_path, monkeypatch),
-            project_name="demo",
-            project_root=tmp_path,
+            _make_backend(str(request.param), tmp_path, monkeypatch), project_name="demo", project_root=tmp_path,
         )
 
     def test_retracted_copy_is_kept_with_its_reason_and_the_live_copy_too(self, cmgr: MemoryManager) -> None:
