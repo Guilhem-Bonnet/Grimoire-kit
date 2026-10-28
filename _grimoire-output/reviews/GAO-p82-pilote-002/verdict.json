@@ -1,0 +1,52 @@
+{
+ "schema": "grimoire-review-verdict/v1",
+ "verdict": "NOT-READY",
+ "criteria": [
+  {
+   "index": 1,
+   "status": "met",
+   "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'without_the_pilot or with_the_pilot_the_question'",
+   "note": "Tests présents et verts : sans pilote merge/retry_exhausted refusés, avec pilote tranché et autopilot.decided tracé."
+  },
+  {
+   "index": 2,
+   "status": "met",
+   "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'origin or human_turn or human_channel or revoking or cockpit'",
+   "note": "Origines non humaines refusées, CLI sans tour humain n'écrit rien, canal humain journalisé, révocation du mandat coupe le pilote."
+  },
+  {
+   "index": 3,
+   "status": "met",
+   "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'closed_list or policy'",
+   "note": "Liste fermée testée (12 cas), la politique ne peut qu'ajouter."
+  },
+  {
+   "index": 4,
+   "status": "unmet",
+   "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py::test_a_registered_session_answers_by_the_cli_with_its_justification_and_confidence",
+   "note": "Les tests recommended/confiance basse unitaires passent, mais le test de bout en bout (confiance basse via CLI) échoue ici : « appel depuis un worktree de tâche ». D'autres tests pré-existants (test_orchestrator_session) échouent pareillement dans un worktree : probablement l'environnement, non démontré vert."
+  },
+  {
+   "index": 5,
+   "status": "unverifiable",
+   "evidence_cmd": "uv run --frozen pytest tests/unit/missions/test_autopilot.py -k 'hand_made or presentations'",
+   "note": "Tests de présence ; critère de vérification manuelle."
+  },
+  {
+   "index": 6,
+   "status": "unmet",
+   "evidence_cmd": "gh pr checks 1036 --required",
+   "note": "Revue de sécurité jointe et entrée CHANGELOG présentes, mais aucun check CI rapporté sur la PR #1036 : « CI verte » non démontrée. De plus la revue admet que l'annulation est terminale (le ticket demandait réouvrable) et que l'acceptation sous dérogation n'est pas traitée."
+  }
+ ],
+ "findings": [
+  {
+   "summary": "Écarts au ticket : « abandonner » non réouvrable et acceptation sous dérogation hors lot ; à faire valider explicitement.",
+   "severity": "major"
+  },
+  {
+   "summary": "Échecs dans tests/unit/missions/test_route_dispatch.py (8) et test_orchestrator_session.py lancés depuis le worktree ; fichiers non touchés par le diff, à confirmer sur CI.",
+   "severity": "major"
+  }
+ ]
+}

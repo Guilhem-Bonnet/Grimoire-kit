@@ -529,6 +529,7 @@ def test_a_registered_session_answers_by_the_cli_with_its_justification_and_conf
 
     from grimoire.missions.orchestrator_session import SESSION_TIMEOUT
 
+    monkeypatch.chdir(project)  # hors de tout worktree de tâche, d'où qu'on lance la suite
     grant(project)
     pilot_on(project)
     service, tid, qid = asks(project, "Quelle couleur ?", options=("bleu", "vert"))
