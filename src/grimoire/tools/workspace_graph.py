@@ -27,12 +27,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+from grimoire.core.fsio import atomic_write
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -45,8 +48,17 @@ GRAPH_SCHEMA_VERSION = 1
 KINDS = ("souvenir", "code", "tache")
 #: Types de lien, dans l'ordre de ``etype`` (Uint8).
 EDGE_TYPES = (
-    "remplace", "contredit", "memoire-pour", "depend",
-    "imports", "calls", "defines", "inherits", "references", "tested_by", "overrides",
+    "remplace",
+    "contredit",
+    "memoire-pour",
+    "depend",
+    "imports",
+    "calls",
+    "defines",
+    "inherits",
+    "references",
+    "tested_by",
+    "overrides",
 )
 _EDGE_INDEX = {name: i for i, name in enumerate(EDGE_TYPES)}
 
@@ -241,14 +253,16 @@ def layout(n: int, src: np.ndarray, dst: np.ndarray, seed: int = 7) -> tuple[np.
     comm = np.minimum(where[comm], 4095)
     k = np.arange(count, dtype=np.float64) + 0.5
     phi = np.arccos(1 - 2 * k / max(count, 1))
-    theta = np.pi * (1 + 5 ** 0.5) * k
+    theta = np.pi * (1 + 5**0.5) * k
     big = 60.0 * max(n, 1) ** (1 / 3)
     centers = big * np.stack([np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi)], axis=1)
     radius = 3.0 * np.cbrt(sizes[rank].astype(np.float64))
     return _place(n, comm, count, centers, radius, rng), comm.astype(np.uint16)
 
 
-def _place(n: int, comm: np.ndarray, count: int, centers: np.ndarray, radius: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def _place(
+    n: int, comm: np.ndarray, count: int, centers: np.ndarray, radius: np.ndarray, rng: np.random.Generator
+) -> np.ndarray:
     c = np.minimum(comm, count - 1)
     spread = radius[c][:, None]
     placed: np.ndarray = (centers[c] + rng.normal(size=(n, 3)) * spread).astype(np.float32)
@@ -265,7 +279,9 @@ def _fingerprint(out: _Builder, src: np.ndarray, dst: np.ndarray) -> str:
     return h.hexdigest()[:20]
 
 
-def _layout_cached(project_root: Path, fp: str, n: int, src: np.ndarray, dst: np.ndarray) -> tuple[np.ndarray, np.ndarray, bool]:
+def _layout_cached(
+    project_root: Path, fp: str, n: int, src: np.ndarray, dst: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, bool]:
     folder = project_root / LAYOUT_DIR
     path = folder / f"{fp}.npz"
     with _LOCK:
@@ -284,9 +300,9 @@ def _layout_cached(project_root: Path, fp: str, n: int, src: np.ndarray, dst: np
             folder.mkdir(parents=True, exist_ok=True)
             for old in folder.glob("*.npz"):
                 old.unlink(missing_ok=True)
-            tmp = folder / f"{fp}.tmp.npz"
-            np.savez(tmp, pos=pos, comm=comm)
-            tmp.replace(path)
+            buffer = io.BytesIO()
+            np.savez(buffer, pos=pos, comm=comm)
+            atomic_write(path, buffer.getvalue())
         except OSError:
             pass  # lecture seule : la disposition est rendue sans être gardée
         return pos, comm, False

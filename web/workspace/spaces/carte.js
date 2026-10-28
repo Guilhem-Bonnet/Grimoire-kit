@@ -873,6 +873,7 @@ function start(wrap, ctx, g, began) {
     worker.onmessage = (event) => {
       const msg = event.data;
       if (msg.type === 'positions') {
+        if (!state.workerStartedAt) state.workerStartedAt = performance.now();
         state.workerTicks = msg.tick; state.longestSlice = Math.max(state.longestSlice, msg.ms);
         g.pos = msg.pos; state.positions = msg.pos;
         view.setPositions(msg.pos);
@@ -915,8 +916,11 @@ function start(wrap, ctx, g, began) {
     const flying = cam.step(now);
     if (state.autoRotate) { cam.yaw += 0.01; state.moving = true; }
     if (flying) state.moving = true;
+    // Pendant l'affinage, chaque pas du worker redessine : liens décimés comme en mouvement.
+    const refining = Boolean(worker) && !state.workerDone;
+    if (refining) view.edgeFraction = Math.min(view.edgeFraction, 0.1);
     if (state.dirty || state.autoRotate || flying) {
-      view.draw(cam, th, state.moving);
+      view.draw(cam, th, state.moving || refining);
       state.frames += 1;
       if (!state.first) {
         state.first = performance.now() - began;
@@ -926,14 +930,14 @@ function start(wrap, ctx, g, began) {
       if (view.mode === 'webgl' && performance.now() - lastLong > 2000) view.restFraction = Math.min(1, view.restFraction * 1.08);
       // Budget adaptatif sur l'intervalle réel entre images (le coût GPU n'est pas visible côté JS) :
       // trop lent, moins de liens pendant le mouvement ; large marge, on en rend à nouveau.
-      if (state.moving && lastFrame) {
+      if ((state.moving || refining) && lastFrame) {
         const dt = now - lastFrame;
         view.edgeFraction = Math.max(0.03, Math.min(1, view.edgeFraction * (dt > 30 ? 0.8 : dt < 20 ? 1.04 : 1)));
       }
       state.dirty = false;
       if (flying && !cam.flight) { state.moving = false; refreshLabels(); }
     }
-    lastFrame = state.moving ? now : 0;
+    lastFrame = state.moving || refining ? now : 0;
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
@@ -956,6 +960,7 @@ function start(wrap, ctx, g, began) {
     get frames() { return state.frames; },
     get workerTicks() { return state.workerTicks; },
     get workerDone() { return state.workerDone; },
+    get workerStartedAt() { return state.workerStartedAt || 0; },
     get layoutReused() { return Boolean(g.layout.reused); },
     get selected() { return state.selected; },
     get target() { return [...cam.target]; },
