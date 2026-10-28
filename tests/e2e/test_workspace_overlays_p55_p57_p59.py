@@ -481,6 +481,39 @@ _TOAST_CONTRAST_JS = """
 """
 
 
+def test_p52_a_390_px_un_geste_irreversible_demande_encore_sa_confirmation(
+    browser: Browser, served_lotb: dict[str, Any]
+) -> None:
+    """Sur mobile comme sur bureau : rien n'est supprimé avant la confirmation, jamais de toast « Annuler »."""
+    context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
+    shot = context.new_page()
+    try:
+        word = "mot" + uuid.uuid4().hex[:10]
+        entry_id = _seed(served_lotb, f"Brouillon {word}, à supprimer sur mobile.")
+        _open_entry(shot, served_lotb, word)
+        # Sous 900 px l'inspecteur est un tiroir : le rail l'ouvre.
+        shot.locator('.rail-btn[data-panel="inspector"]').click()
+        shot.locator("#inspector-body .kn-actions button", has_text="Supprimer…").click()
+        confirm = shot.locator("#inspector-body .kn-confirm")
+        confirm.wait_for()
+        assert confirm.is_visible()
+        go = confirm.locator("button", has_text="Supprimer définitivement")
+        box = go.bounding_box()
+        assert box and 0 <= box["x"] and box["x"] + box["width"] <= 390, f"confirmation hors de l'écran : {box}"
+        # Tant que la confirmation n'est pas donnée, le journal ne porte aucune suppression.
+        assert "delete" not in _journal_ops(served_lotb, entry_id)
+        assert shot.locator("#toast .toast-card").count() == 0
+        go.click()
+        shot.wait_for_function(
+            "() => (document.querySelector('#inspector-body')?.textContent || '').includes('Entrée supprimée')",
+            timeout=30_000,
+        )
+        assert "delete" in _journal_ops(served_lotb, entry_id)
+        assert shot.locator("#toast .toast-card").count() == 0
+    finally:
+        context.close()
+
+
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_p57_le_toast_tient_4_5_pour_1_dans_les_deux_themes(browser: Browser, served_lotb: dict[str, Any], scheme: str) -> None:
     context = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", color_scheme=scheme)
