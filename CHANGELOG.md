@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cockpit): actions typées A et B (ADR-008, P40, GAO-p40-actions-001) — `GET data/actions` (catalogue), `GET data/actions/journal`, `POST data/actions/<id>/plan|apply|rollback`. Composer la mémoire (`memory.compose`, copie de `project-context.yaml` restaurable), démarrer/arrêter une pile depuis les compose du kit (jamais de commande libre, jamais `-v`/`down`, pile existante réutilisée, conteneur d'un autre projet refusé, arrêt d'une pile partagée confirmé avec projets et sessions vivantes listés), interrupteur « redémarrer avec la machine » (`docker update --restart`, relu par `docker inspect`) ; les extras pip restent une commande affichée. `apply` refuse un plan périmé, expiré ou sans journal inscriptible.
+
 ## [3.73.0] - 2026-10-28
 
 - chore(release): correctifs intermédiaires des PR fusionnées par les lots #1041 et #1045 (commit de fusion), déjà décrits par l'entrée de leur PR : ad678a01, 8e56b3e4, 38ecc42d, 636b652a, 4dac071c, 8dfd0ea1, 1519bd3b, 9b09b950, 7a619722, aae9897c.

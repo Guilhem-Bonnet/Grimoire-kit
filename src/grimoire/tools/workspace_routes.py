@@ -477,6 +477,21 @@ def _data_machine(project_root: Path, _query: _Query) -> Any:
     return workspace_machine.machine_view(project_root)
 
 
+def _data_actions(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/data/actions`` — le catalogue des actions typées (ADR-008), sans rien exécuter."""
+    from grimoire.tools import workspace_actions
+
+    return workspace_actions.actions_catalogue(project_root)
+
+
+def _data_actions_journal(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/data/actions/journal`` — le journal ajout seul des actions, le plus récent d'abord."""
+    from grimoire.tools import workspace_actions
+
+    raw = _one(query, "limit") or ""
+    return workspace_actions.actions_journal(project_root, limit=int(raw) if raw.isdigit() else 100)
+
+
 def _setup_guide(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/setup/guide`` — la machine vue par le guide de premier lancement (P36).
 
@@ -611,6 +626,8 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/graph": _memory_graph,
     f"{PREFIX}memory/quality": _memory_quality,
     f"{PREFIX}data/machine": _data_machine,
+    f"{PREFIX}data/actions": _data_actions,
+    f"{PREFIX}data/actions/journal": _data_actions_journal,
     f"{PREFIX}setup/guide": _setup_guide,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
@@ -1329,6 +1346,21 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
                 return workspace_launch_apply.launch_apply(project_root, task_id, body)
             if task_id and action in TASK_ACTIONS:
                 return _task_action(project_root, task_id, action, body)
+        if path.startswith(f"{PREFIX}data/actions/"):
+            # Actions typées (ADR-008 D3) : plan → apply → rollback, journal ajout seul.
+            from grimoire.tools import workspace_actions
+
+            action_id, _, verb = path[len(f"{PREFIX}data/actions/") :].strip("/").rpartition("/")
+            handlers = {
+                "plan": workspace_actions.plan_action,
+                "apply": workspace_actions.apply_action,
+                "rollback": workspace_actions.rollback_action,
+            }
+            if action_id in workspace_actions.CATALOGUE and verb in handlers:
+                if verb != "plan" and not workspace_actions.CATALOGUE[action_id].applicable:
+                    return WORKSPACE_UNHANDLED
+                return handlers[verb](project_root, action_id, body)
+            return WORKSPACE_UNHANDLED
         portfolio_action = _portfolio_action_route(path)
         if portfolio_action is not None:
             return _portfolio_task_action(project_root, *portfolio_action, body)
