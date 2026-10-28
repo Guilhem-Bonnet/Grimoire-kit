@@ -8,6 +8,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(missions): le pilote signale « tourne en rond » — deux tentatives rouges consécutives d'un dispatch qui laissent le même diff écrivent un événement `pilot.signal` (`signal=stuck`, paliers de départ et d'arrivée) au ledger de la tâche, et la cascade passe au palier suivant (lot 4.4, `GAO-r59-lot-4.4-001`). Le diff ignore ce que la cascade écrit elle-même (`_grimoire-runtime-output`, `_grimoire-output`) ; hors dépôt git, pas de signal.
+- fix(init): la sonde « collection déjà remplie » de `grimoire init` ne laisse plus le nom de collection réécrire l'URL (CodeQL py/partial-ssrf, `cmd_init.py`) : nom hors de `[A-Za-z0-9][A-Za-z0-9_-]{0,127}` non sondé (lu comme vide, comme une sonde en échec), segment Qdrant encodé, requête Weaviate construite par `urlencode`.
+
+- fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).
+
+- fix(ci): les journaux de preuve (`_grimoire-runtime-output/`) et les reçus de relecture (`_grimoire-output/reviews/`) ne sont plus suivis par git. Commités par des workers (#1017, #1039), ils rendaient « périmée » chaque relecture (fichier suivi modifié par `task verify` ou la relecture), jusqu'à l'escalade à l'humain (P82, 2026-10-28).
 
 - feat(observatory): l'export lit le TraceLedger et le journal runtime réels (R15)
   - `observatory export` ne lisait que les fichiers de l'ère shell. Il lit désormais `_grimoire-output/traces/traces.jsonl` (TraceLedger) et `events/runtime-journal.jsonl`, via `grimoire.traces.observatory_feed` ; `framework/tools/observatory.py` (gelé) y délègue en six lignes.
