@@ -26,6 +26,7 @@ from grimoire.bridges.schemas import HostId
 VERSION_ENV = "GRIMOIRE_HOST_VERSION"
 _TAIL_BYTES = 64 * 1024
 _VERSION = re.compile(r"\d+(?:\.\d+){1,3}")
+VERSION_PATTERN = _VERSION
 _IN_LINE = re.compile(r'"version"\s*:\s*"(\d+(?:\.\d+){1,3})"')
 
 

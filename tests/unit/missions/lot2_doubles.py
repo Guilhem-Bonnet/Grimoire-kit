@@ -51,6 +51,7 @@ class FakeHost:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], Path, Mapping[str, str] | None]] = []
         self.bg_fails = False
+        self.version = ""  # ``claude --version`` ; vide : le faux binaire ne sait pas dire sa version
         #: ``claude agents --json`` ; ``None`` : les sessions ``--bg`` que ce double a lancées et pas arrêtées.
         self.agents: list[dict[str, str]] | None = None
         self.agents_fail = False  # ``claude agents --json`` sort en erreur : la lecture échoue
@@ -102,6 +103,8 @@ class FakeHost:
         return ExecResult(127, "", f"{argv[0]} : faux binaire inconnu")
 
     def _claude(self, argv: list[str], cwd: Path) -> ExecResult:
+        if argv[1:] == ["--version"]:
+            return ExecResult(0, f"{self.version} (Claude Code)\n") if self.version else ExecResult(2, "", "version inconnue")
         if argv[1] == "--bg":
             if self.bg_fails:
                 return ExecResult(1, "", "claude : échec simulé")

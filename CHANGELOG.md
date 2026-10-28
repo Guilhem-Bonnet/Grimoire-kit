@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(missions): plus de « reprendre ? » pour un worker silencieux (P86, GAO-p86-plus-de-001) : le lanceur lit `claude --version` une fois par tick, inscrit `host_version` au claim de chaque worker lancé et la passe à la consigne (`grimoire task attach --host-version`) ; la sonde du frein devient le réglage `orchestrator.probe_host: true|false` de la politique (désactivé par défaut, remplace `GRIMOIRE_HOST_PROBE`), lancée une seule fois par version d'hôte au premier bail perdu ; sur un hôte au frein prouvé, la session muette est relancée seule (`ready`), la question n'est posée que si le frein n'est pas prouvé ; `grimoire doctor` dit si le frein de la version courante est prouvé et sinon comment l'obtenir.
 - feat(cockpit): les contrôles préalables au lancement d'une session bloquent avec leur raison (P47 critère 2, GAO-p47-assigne-001) : dossier approuvé par Claude Code (~/.claude.json, sans lui une session --bg se bloque en silence), gh authentifié (le worker doit pouvoir ouvrir sa PR), PR ouverte sur les mêmes fichiers que le claim réserverait — trois vérifications de plus au préflight (8 au total), injectables, sondées par le même exec_ que le lanceur ; l'apply refuse tout plan pas prêt avec la raison du premier contrôle rouge
 ## [3.72.0] - 2026-10-27
 

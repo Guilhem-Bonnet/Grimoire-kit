@@ -610,6 +610,24 @@ def doctor(
             tag = "[green]OK[/green]" if trust_verdict.ok else "[red]FAIL[/red]"
             console.print(f"  {tag}  {trust_entry['detail']}")
 
+    # P86 : le frein de la version d'hôte courante est-il prouvé ? Sinon une session muette ne se relance pas
+    # seule. Jamais FAIL : un frein non prouvé est une question posée à l'humain, pas une panne.
+    with _timed_phase("host_brake"):
+        from grimoire.bridges.schemas import HostId
+        from grimoire.hosts.contract_probe import brake_state
+
+        brake_version, brake_status, brake_detail = brake_state(HostId.CLAUDE_CODE_CLI)
+        if brake_status != "absent":
+            brake_entry: dict[str, Any] = {
+                "name": "host_brake", "passed": True, "detail": brake_detail,
+                "level": "ok" if brake_status == "proved" else "warn",
+                "host_version": brake_version, "status": brake_status,
+            }
+            results.append(brake_entry)
+            if fmt != "json":
+                tag = "[green]OK[/green]" if brake_status == "proved" else "[yellow]WARN[/yellow]"
+                console.print(f"  {tag}  {brake_detail}")
+
     # 4quinquies. Override drift (issue #427) — un override est une copie ou
     # une extension du kit, jamais une garantie qu'il en reçoit encore les
     # mises à jour. Jamais FAIL : une dette de personnalisation, pas une
