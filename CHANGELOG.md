@@ -7,7 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- feat(cockpit): dix-neuf icônes d'action `i-act-*` dans le sprite (P38, GAO-p38-ic-nes-001) : exception Lucide accordée — pause, skip, edit, save, upload, send, settings, unlock, ban, erase, expand, shrink, back, next, approve, reject, exit, cut, open. Tracés Lucide (ISC) au trait 1,75, `web/workspace/icons/NOTICE` porte la licence, la charte écrit « aucune icône d'identité empruntée ». Aucun appel dans le cockpit encore.
+- feat(cockpit): dix-neuf icônes d'action `i-act-*` dans le sprite (P38, GAO-p38-ic-nes-001) : exception Lucide accordée — pause, skip, save, send, unlock, ban, back, next, approve, reject (déjà présentes), plus copy, close, preview, retry, add, filter, remove, launch, stop, choisies d après la fréquence des verbes du cockpit. Tracés Lucide (ISC) au trait 1,75, `web/workspace/icons/NOTICE` porte la licence, la charte écrit « aucune icône d'identité empruntée ». Aucun appel dans le cockpit encore.
 - fix(init): la sonde « collection déjà remplie » de `grimoire init` ne laisse plus le nom de collection réécrire l'URL (CodeQL py/partial-ssrf, `cmd_init.py`) : nom hors de `[A-Za-z0-9][A-Za-z0-9_-]{0,127}` non sondé (lu comme vide, comme une sonde en échec), segment Qdrant encodé, requête Weaviate construite par `urlencode`.
 
 - fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).

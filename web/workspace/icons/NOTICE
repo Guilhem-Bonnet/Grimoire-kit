@@ -1,9 +1,9 @@
 Icônes d'action i-act-* (docs/assets/action-icons, web/workspace/icons.svg)
 
 Tracés issus de Lucide (https://lucide.dev), importés tels quels puis adaptés :
-trait 1,75 et <title> français. Icônes reprises : pause, skip-forward, pencil,
-save, upload, send, settings, lock-open, ban, eraser, maximize-2, minimize-2,
-arrow-left, arrow-right, circle-check, circle-x, log-out, scissors, folder-open.
+trait 1,75 et <title> français. Icônes reprises : pause, skip-forward, save,
+send, lock-open, ban, arrow-left, arrow-right, circle-check, circle-x, copy, x,
+eye, rotate-ccw, plus, funnel, trash-2, play, square.
 Aucune icône d'identité (logo, marque, produit) n'est empruntée.
 
 ISC License

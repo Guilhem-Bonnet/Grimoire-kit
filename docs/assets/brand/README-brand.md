@@ -38,7 +38,7 @@ jamais plus de 32. Pas d'icône devant les titres du README.
 
 Exception P38 : les dix-neuf icônes d'action `i-act-*` (`docs/assets/action-icons/`) reprennent
 les tracés de Lucide (licence ISC, `web/workspace/icons/NOTICE`), trait ramené à 1,75 et
-`<title>` en français. Elles ne servent que des gestes (modifier, enregistrer, mettre en pause…) :
+`<title>` en français. Elles ne servent que des gestes (copier, enregistrer, relancer, mettre en pause…) :
 aucune icône d'identité empruntée, ni logo, ni marque, ni mascotte, ni icône de produit.
 
 ## Polices
