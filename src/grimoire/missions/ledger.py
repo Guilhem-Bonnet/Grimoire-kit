@@ -116,7 +116,8 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     ),
     # K6 : WAITING → RUNNING, la même session au même epoch (reprise sur place) ;
     # WAITING → READY, le tick seul (:meth:`MissionLedger.wake`, bail rendu) ; WAITING → CANCELLED, un humain.
-    TaskState.WAITING: frozenset({TaskState.RUNNING, TaskState.READY, TaskState.CANCELLED}),
+    # WAITING → FAILED : l'abandon décidé par le pilote automatique (P82) — la tâche reste réouvrable (FAILED → READY).
+    TaskState.WAITING: frozenset({TaskState.RUNNING, TaskState.READY, TaskState.FAILED, TaskState.CANCELLED}),
     TaskState.BLOCKED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     # NEEDS_VERIFICATION → CANCELLED (K3, issue #713) : une preuve remise peut être abandonnée.
     TaskState.NEEDS_VERIFICATION: frozenset(

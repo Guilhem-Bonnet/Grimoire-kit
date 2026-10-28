@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.acp import AcpClient, AcpError, PermissionRequest
+from grimoire.hosts import acp_hosts
 
 __all__ = [
     "AGENT_COMMAND_ENV",
@@ -50,6 +51,8 @@ __all__ = [
     "HOST_ENV",
     "STREAM_HEADERS",
     "chat_cancel",
+    "chat_host",
+    "chat_hosts",
     "chat_permission",
     "chat_send",
     "chat_state",
@@ -59,7 +62,7 @@ __all__ = [
 ]
 
 #: Hôte de l'orchestrateur (alias de ``grimoire chat --host``) ; Claude Code par défaut.
-HOST_ENV = "GRIMOIRE_CHAT_HOST"
+HOST_ENV = acp_hosts.HOST_ENV
 #: Remplace la commande ACP du profil d'hôte (tests, adaptateur installé hors PATH).
 AGENT_COMMAND_ENV = "GRIMOIRE_CHAT_AGENT_COMMAND"
 GRACE_ENV = "GRIMOIRE_CHAT_GRACE_SECONDS"
@@ -92,20 +95,37 @@ def _grace() -> float:
         return DEFAULT_GRACE_SECONDS
 
 
-def agent_command() -> tuple[str, ...]:
-    """La commande ACP de l'orchestrateur : variable d'environnement, sinon profil de l'hôte."""
+def chat_mode(root: Path | None = None) -> tuple[str, tuple[str, ...], str]:
+    """``(mode, commande, raison)`` du chat : ``acp`` avec la commande de l'hôte choisi, sinon ``kanban``.
+
+    Le repli kanban vaut pour l'hôte choisi sans mode ACP lançable (Copilot dans VS Code, hôte non
+    installé) ; la raison dit pourquoi, pour que le fil ne bascule pas en silence.
+    """
     override = os.environ.get(AGENT_COMMAND_ENV, "").strip()
     if override:
-        return tuple(shlex.split(override))
+        return "acp", tuple(shlex.split(override)), ""
+    from grimoire.hosts.acp_hosts import KANBAN, acp_availability, chosen_alias
     from grimoire.hosts.capabilities import profile_for, resolve_host
 
-    host_id = resolve_host(os.environ.get(HOST_ENV, "").strip() or "claude")
+    alias = chosen_alias(root) if root is not None else (os.environ.get(HOST_ENV, "").strip() or "claude")
+    if alias == KANBAN:
+        return "kanban", (), "repli choisi : le chat écrit dans le kanban"
+    host_id = resolve_host(alias)
     if host_id is None:
-        raise AcpError(f"hôte inconnu pour l'orchestrateur : {os.environ.get(HOST_ENV)!r}")
+        raise AcpError(f"hôte inconnu pour l'orchestrateur : {alias!r}")
     profile = profile_for(host_id)
-    if not profile.acp_command:
-        raise AcpError(f"{profile.display_name} n'a pas de mode ACP connu")
-    return profile.acp_command
+    available, reason = acp_availability(profile)
+    if not available:
+        return "kanban", (), f"{reason} : le chat écrit dans le kanban"
+    return "acp", profile.acp_command, ""
+
+
+def agent_command(root: Path | None = None) -> tuple[str, ...]:
+    """La commande ACP de l'orchestrateur : variable d'environnement, sinon profil de l'hôte choisi."""
+    mode, command, reason = chat_mode(root)
+    if mode != "acp":
+        raise AcpError(reason)
+    return command
 
 
 def _clip(value: Any) -> Any:
@@ -137,6 +157,8 @@ class Conversation:
         self._decision_ready: dict[str, threading.Event] = {}
         self.session_id: str | None = None
         self.resumed = False
+        self._kanban_seen: set[str] = set()
+        self._kanban_polled = float("-inf")
 
     # ── journal ──────────────────────────────────────────────────────────
 
@@ -256,7 +278,7 @@ class Conversation:
             self._starting = True
         try:
             self._emit({"type": "status", "state": "starting"})
-            client = AcpClient(agent_command(), self.root, observer=self._observe, request_timeout=120)
+            client = AcpClient(agent_command(self.root), self.root, observer=self._observe, request_timeout=120)
             client.start()
             stored = self._stored_session() if resume else None
             resumed = False
@@ -287,7 +309,10 @@ class Conversation:
 
     # ── tour ─────────────────────────────────────────────────────────────
 
-    def send(self, text: str) -> dict[str, Any]:
+    def send(self, text: str, task_id: str | None = None) -> dict[str, Any]:
+        mode, _command, reason = chat_mode(self.root)
+        if mode == "kanban":
+            return self._send_kanban(text, task_id, reason)
         with self._cond:
             if self._busy or self._starting:
                 raise ValueError("un tour est déjà en cours : attendez sa fin ou arrêtez-le")
@@ -299,6 +324,42 @@ class Conversation:
             raise
         threading.Thread(target=self._run_turn, args=(text,), name="chat-turn", daemon=True).start()
         return {"ok": True, "accepted": True}
+
+    def _send_kanban(self, text: str, task_id: str | None, reason: str) -> dict[str, Any]:
+        """Sans agent à qui parler : la consigne part au kanban, la réponse viendra par les notes de la session."""
+        from grimoire.tools import workspace_chat_kanban
+
+        posted = workspace_chat_kanban.post(self.root, text, task_id)
+        self._kanban_seen.add(posted["directive_id"])
+        self._emit({"type": "user", "text": text})
+        self._emit({"type": "kanban_sent", "task_id": posted["task_id"], "reason": reason})
+        return {"ok": True, "accepted": True, "mode": "kanban", **posted}
+
+    def pull_replies(self, *, interval: float = 2.0, clock: Callable[[], float] = time.monotonic) -> None:
+        """En repli kanban, publie dans le fil ce que les sessions ont déposé depuis la dernière lecture."""
+        now = clock()
+        if now - self._kanban_polled < interval:
+            return
+        self._kanban_polled = now
+        try:
+            if chat_mode(self.root)[0] != "kanban":
+                return
+            from grimoire.tools import workspace_chat_kanban
+
+            entries = workspace_chat_kanban.thread(self.root)
+        except Exception:  # un ledger illisible ne coupe pas le flux : la ligne suivante réessaie
+            return
+        for entry in entries:
+            if entry["id"] in self._kanban_seen:
+                continue
+            self._kanban_seen.add(entry["id"])
+            if entry["role"] == "user":
+                self._emit({"type": "user", "text": entry["text"]})
+            else:
+                self._emit({
+                    "type": "reply", "task_id": entry["task_id"], "actor": entry["actor"],
+                    "text": _clip(entry["text"]), "at": entry["at"],
+                })
 
     def _run_turn(self, text: str) -> None:
         try:
@@ -373,6 +434,7 @@ class Conversation:
     # ── lecture du flux ──────────────────────────────────────────────────
 
     def events_after(self, last: int, timeout: float) -> list[dict[str, Any]]:
+        self.pull_replies()
         with self._cond:
             if not any(e["seq"] > last for e in self._log[-1:]):
                 self._cond.wait(timeout=timeout)
@@ -449,7 +511,8 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("text requis : le message ne peut pas être vide")
-    return _conversation(root).send(text)
+    task_id = body.get("task_id")
+    return _conversation(root).send(text, task_id if isinstance(task_id, str) and task_id else None)
 
 
 def chat_permission(root: Path, body: dict[str, Any]) -> dict[str, Any]:
@@ -471,6 +534,31 @@ def chat_stop(root: Path, _body: dict[str, Any]) -> dict[str, Any]:
 
 def chat_state(root: Path, _query: dict[str, list[str]]) -> dict[str, Any]:
     return _conversation(root).state()
+
+
+def chat_hosts(root: Path, _query: dict[str, list[str]]) -> dict[str, Any]:
+    """Les hôtes que le chat sait parler : disponibles, ou grisés avec leur raison, et celui en vigueur."""
+    from grimoire.hosts.acp_hosts import chosen_alias, host_choices
+
+    mode, _command, reason = chat_mode(root)
+    return {
+        "chosen": chosen_alias(root),
+        "mode": mode,
+        "reason": reason,
+        "hosts": [c.to_dict() for c in host_choices(root)],
+    }
+
+
+def chat_host(root: Path, body: dict[str, Any]) -> dict[str, Any]:
+    """Règle l'hôte du chat de ce projet (``""`` : revenir à l'hôte détecté) ; l'agent en cours est arrêté."""
+    from grimoire.hosts.acp_hosts import set_chosen_alias
+
+    alias = body.get("host")
+    if not isinstance(alias, str):
+        raise ValueError("host requis (alias d'hôte, « kanban », ou chaîne vide pour l'hôte détecté)")
+    set_chosen_alias(root, alias)
+    _conversation(root).close()  # la prochaine conversation démarre sur le nouvel hôte
+    return chat_hosts(root, {})
 
 
 atexit.register(shutdown_all)  # les agents ne survivent pas au serveur
