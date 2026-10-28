@@ -9,6 +9,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).
 
+- fix(ci): les journaux de preuve (`_grimoire-runtime-output/`) et les reçus de relecture (`_grimoire-output/reviews/`) ne sont plus suivis par git. Commités par des workers (#1017, #1039), ils rendaient « périmée » chaque relecture (fichier suivi modifié par `task verify` ou la relecture), jusqu'à l'escalade à l'humain (P82, 2026-10-28).
+
+- feat(observatory): l'export lit le TraceLedger et le journal runtime réels (R15)
+  - `observatory export` ne lisait que les fichiers de l'ère shell. Il lit désormais `_grimoire-output/traces/traces.jsonl` (TraceLedger) et `events/runtime-journal.jsonl`, via `grimoire.traces.observatory_feed` ; `framework/tools/observatory.py` (gelé) y délègue en six lignes.
 - feat(cockpit): chat d'orchestrateur, étape 2 (ACP2, GAO-acp2-chat-d-001) : l'onglet « Orchestrateur » du dock parle à l'agent de l'hôte (Claude Code d'abord, adaptateur `claude-agent-acp`) par le pont ACP de l'étape 1
   - **L'agent est l'orchestrateur du projet** : lancé dans le dossier du projet, il tient son identité de ce que le kit projette déjà par hôte (`CLAUDE.md`, `AGENTS.md`, persona d'entrée, serveur MCP du kit). `GRIMOIRE_CHAT_HOST` choisit l'hôte, `GRIMOIRE_CHAT_AGENT_COMMAND` remplace sa commande ACP.
   - **Transport** : le serveur du cockpit tient le processus ACP et pousse le flux en SSE (`GET /api/workspace/chat/stream`, même mécanique que le pouls, `seq` par événement) ; les messages arrivent par `POST /api/workspace/chat/{send,permission,cancel,stop}` sous les gardes d'écriture du cockpit (loopback, jeton de session, Origin, projet servi seul). `GET /api/workspace/chat/state` dit où en est la conversation.
