@@ -728,7 +728,11 @@ def _verdict_steps(tid: str, model: str, pr: str) -> str:
     ``task/<id>`` ou numéro) dont les checks requis comptent."""
     return (
         "Vérifie qu'aucun fichier hors du périmètre de la tâche n'est modifié : un fichier réécrit sans raison (`uv.lock`, "
-        "un fichier généré) est un constat. Ne modifie aucun fichier suivi du dépôt. Écris ton verdict dans "
+        "un fichier généré) est un constat. Ne modifie aucun fichier suivi du dépôt. Note `git status --porcelain` avant "
+        "tes commandes et lance-les avec `uv run --frozen` (un `uv run` simple réécrit `uv.lock`). Avant `task review`, "
+        "remets l'arbre dans l'état noté : retire les fichiers non suivis que tes commandes ont créés (un rapport "
+        "rejoué…), restaure par `git checkout -- <chemin>` un fichier suivi qu'elles ont réécrit ; sinon ton verdict "
+        "ne porte pas sur la tête et il est périmé. Écris ton verdict dans "
         f"`_grimoire-output/reviews/{tid}/verdict.json` (schéma grimoire-review-verdict/v1 : `verdict` READY ou "
         "NOT-READY ; `criteria`, un objet par critère avec `index` à partir de 1, `status` met, unmet ou "
         "unverifiable, `evidence_cmd` et `note` ; `findings` facultatifs), puis lance "
