@@ -38,7 +38,6 @@ TEXT_A = "Décision : le backend vectoriel retenu est Qdrant."
 TEXT_B = "Décision : le backend vectoriel de secours est Weaviate."
 
 
-@pytest.fixture(autouse=True)
 @functools.cache
 def _chroma_native_refusal() -> str:
     """Pourquoi l'index natif de chromadb (hnswlib) ne se charge pas ici ; ``""`` s'il se charge.
@@ -56,6 +55,7 @@ def _chroma_native_refusal() -> str:
     return f"chromadb : l'index natif ne se charge pas (code {probe.returncode}) : {probe.stderr.strip()[-200:]}"
 
 
+@pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for var in ("GRIMOIRE_TASK_ID", "GRIMOIRE_ACTOR", "GRIMOIRE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
         monkeypatch.delenv(var, raising=False)
