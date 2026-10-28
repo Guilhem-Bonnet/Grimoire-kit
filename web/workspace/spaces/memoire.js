@@ -693,6 +693,9 @@ function askCorrection(entry, box, ctx, onDone) {
   const cancel = el('button', 'btn', 'Annuler', { type: 'button' });
   cancel.addEventListener('click', () => form.remove());
   const error = el('p', 'kn-ask-error', null, { role: 'alert' });
+  // Tant que « Annuler arrête la session » (GAO-annuler-arr-001) n'est pas livré, annuler la tâche
+  // créée n'arrête pas l'agent : on le dit avant l'envoi.
+  const stillWorks = el('p', 'kn-ask-note', 'Annuler la tâche créée n’arrête pas la session de l’agent : elle peut encore travailler après l’annulation.');
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     send.disabled = true;
@@ -705,7 +708,7 @@ function askCorrection(entry, box, ctx, onDone) {
       send.disabled = false;
     }
   });
-  form.append(select, note, send, cancel, error);
+  form.append(select, note, stillWorks, send, cancel, error);
   box.append(form);
 }
 
