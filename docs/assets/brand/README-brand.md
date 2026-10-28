@@ -36,6 +36,11 @@ rondes, `currentColor`, gris `#4a515c` / `#b9c0cb` quand le fichier est chargé 
 `icons.svg` est le sprite `<symbol>` généré depuis ce dossier. Taille d'usage : 16, 20 ou 24,
 jamais plus de 32. Pas d'icône devant les titres du README.
 
+Exception P38 : les dix-neuf icônes d'action `i-act-*` (`docs/assets/action-icons/`) reprennent
+les tracés de Lucide (licence ISC, `web/workspace/icons/NOTICE`), trait ramené à 1,75 et
+`<title>` en français. Elles ne servent que des gestes (modifier, enregistrer, mettre en pause…) :
+aucune icône d'identité empruntée, ni logo, ni marque, ni mascotte, ni icône de produit.
+
 ## Polices
 
 Instrument Sans et JetBrains Mono, sous licence OFL, auto-hébergées dans `web/fonts/`.
