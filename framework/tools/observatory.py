@@ -412,12 +412,6 @@ def _find_output_dir(project_root: Path) -> Path:
 
 def _find_trace(out_dir: Path) -> Path:
     """Find trace file."""
-    candidates = [
-        out_dir / TRACE_FILE,               # Grimoire_TRACE.md
-    ]
-    for f in candidates:
-        if f.exists():
-            return f
     return out_dir / TRACE_FILE
 
 
@@ -427,7 +421,7 @@ def load_all(project_root: Path, output_dir: Path | None = None) -> ObservatoryD
 
     traces, sessions = parse_trace(_find_trace(out_dir))
     events = parse_event_log(out_dir / EVENT_LOG_FILE)
-    try:  # sources runtime réelles : TraceLedger + journal (SDK, absent hors install)
+    try:  # TraceLedger + journal runtime réels (SDK, absent hors install)
         from grimoire.traces.observatory_feed import load_journal_events, load_ledger_traces
         traces += [TraceEntry(**d) for d in load_ledger_traces(project_root)]
         events += [EventEntry(**d) for d in load_journal_events(project_root)]
