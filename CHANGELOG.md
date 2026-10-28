@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(web): page de présentation en dix plans (P39, GAO-p39-page-de-001). `web/index.html` reste l'unique page : récit en plans avec scènes collantes liées au scroll, anneau de preuve piloté par le scroll, terminaux rendus depuis les bobines de P37 (`web/data/reels/`, aucun terminal écrit à la main), section « Ce qui n'est pas prouvé » citée et datée. `prefers-reduced-motion` supprime scènes collantes et animations liées au scroll. Budget verrouillé par `tests/unit/test_vitrine_budget.py` : HTML+CSS+JS ≤ 120 Ko hors images et polices, JS ≤ 20 Ko, aucune requête tierce.
+
 ## [3.73.0] - 2026-10-28
 
 - chore(release): correctifs intermédiaires des PR fusionnées par les lots #1041 et #1045 (commit de fusion), déjà décrits par l'entrée de leur PR : ad678a01, 8e56b3e4, 38ecc42d, 636b652a, 4dac071c, 8dfd0ea1, 1519bd3b, 9b09b950, 7a619722, aae9897c.
