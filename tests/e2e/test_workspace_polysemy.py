@@ -229,12 +229,12 @@ def test_source_affiche_des_lettres_facon_git(workspace: Page) -> None:
 
     workspace.route(_FILES, fulfil)
     _goto(workspace, "source")
-    workspace.wait_for_selector(".tree .sr-git", timeout=10_000)
+    workspace.wait_for_selector("#canvas .tree .sr-git", timeout=10_000)
 
     letters = {
         row["name"]: row
         for row in workspace.eval_on_selector_all(
-            ".tree .sr-tree-file",
+            "#canvas .tree .sr-tree-file",
             """(rows) => rows.filter((r) => r.querySelector('.sr-git')).map((r) => ({
                 name: r.querySelector('span').textContent,
                 letter: r.querySelector('.sr-git').textContent,
@@ -248,8 +248,8 @@ def test_source_affiche_des_lettres_facon_git(workspace: Page) -> None:
         assert row["title"], f"la lettre {letter} se dit aussi en clair"
     assert "3.0.0" in letters["p30-cas-u.md"]["title"]
     # Aucune pastille sans mot ne reste dans l'arbre.
-    assert workspace.locator(".tree .sr-tree-file .sico").count() == 0
-    workspace.locator(".tree .sr-tree-file", has_text="p30-cas-a.md").scroll_into_view_if_needed()
+    assert workspace.locator("#canvas .tree .sr-tree-file .sico").count() == 0
+    workspace.locator("#canvas .tree .sr-tree-file", has_text="p30-cas-a.md").scroll_into_view_if_needed()
     _capture(workspace, "p30-source")
 
 

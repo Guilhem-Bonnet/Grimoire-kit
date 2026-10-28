@@ -1,0 +1,41 @@
+{
+  "schema": "grimoire-reel/v1",
+  "id": "tri-v0-v1-v2",
+  "title": "Tri V0 / V1 / V2",
+  "summary": "La vérifiabilité d'une tâche se lit à ses critères et à ses checks.",
+  "command": [
+    "grimoire task add \"Tri mecanique\" -a \"le test passe\" --check \"true\" --ready",
+    "grimoire task add \"Tri par revue\" -a \"revue de code sans constat\" --ready",
+    "grimoire task add \"Tri sans check\" -a \"le rendu est elegant\" --ready",
+    "grimoire task list"
+  ],
+  "kit_version": "3.71.0",
+  "recorded_at": "2026-10-28T00:08:16Z",
+  "output_sha256": "829c760f88e3c8ad5960f782bbb237e2d33b4545b7869c65a27580162712c72b",
+  "frames": [
+    {
+      "kind": "run",
+      "command": "grimoire task add \"Tri mecanique\" -a \"le test passe\" --check \"true\" --ready",
+      "exit_code": 0,
+      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-tri-mecaniqu-001 — Tri mecanique (ready)\n  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task add \"Tri par revue\" -a \"revue de code sans constat\" --ready",
+      "exit_code": 0,
+      "output": "OK GAO-tri-par-revu-001 — Tri par revue (ready)\n  vérifiabilité : V1 — critère de revue (revue) : 'revue de code sans constat'"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task add \"Tri sans check\" -a \"le rendu est elegant\" --ready",
+      "exit_code": 0,
+      "output": "OK GAO-tri-sans-che-001 — Tri sans check (ready)\n  vérifiabilité : V2 — critère sans verdict reconnu : 'le rendu est elegant'\n    non reconnu : le rendu est elegant"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task list",
+      "exit_code": 0,
+      "output": "  GAO-tri-mecaniqu-001  [ready · ready]  Tri mecanique\n  GAO-tri-par-revu-001  [ready · ready]  Tri par revue\n  GAO-tri-sans-che-001  [ready · ready]  Tri sans check"
+    }
+  ]
+}

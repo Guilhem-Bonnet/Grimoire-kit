@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supersession d&#x27;une décision — bobine de rejeu</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1d1b17; --muted:#6b665c; --card:#fff; --line:#e3ded2; --ok:#1a7f4b; --ko:#b3261e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#16150f; --fg:#efece3; --muted:#a39e90; --card:#201e16; --line:#38352a; --ok:#5fcf90; --ko:#ff8a80; } }
+body { margin:0; padding:24px 16px; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+main { max-width:860px; margin:0 auto; }
+h1 { font-size:1.5rem; margin:0 0 4px; }
+.meta { color:var(--muted); font-size:.85rem; margin:0 0 20px; overflow-wrap:anywhere; }
+.frame { background:var(--card); border:1px solid var(--line); border-radius:8px; margin:0 0 12px; padding:12px 14px; }
+.cmd { font:600 .9rem ui-monospace, monospace; margin:0 0 6px; }
+.cmd .rc { float:right; font-weight:400; } .rc.ok { color:var(--ok); } .rc.ko { color:var(--ko); }
+pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+</style>
+</head>
+<body>
+<main>
+<h1>Supersession d&#x27;une décision</h1>
+<p>Une décision remplacée n&#x27;est plus servie, mais reste lisible.</p>
+<p class="meta">kit 3.71.0 · enregistrée le 2026-10-28T00:08:11Z · empreinte de sortie <code>373a530818bf20f177d7206ff3fddf17301754edbad40ccc193b5294cdc9005a</code></p>
+<section class="frame"><p class="cmd">$ grimoire memory remember &quot;Le cache est stocké en JSON&quot; --type decisions --agent fixture<span class="rc ok">sortie 0</span></p><pre>OK remembered [decisions] as &lt;uuid&gt; (agent: fixture)</pre></section>
+<section class="frame"><p class="cmd">$ grimoire memory remember &quot;Le cache est stocké en SQLite&quot; --type decisions --agent fixture<span class="rc ok">sortie 0</span></p><pre>OK remembered [decisions] as &lt;uuid&gt; (agent: fixture)</pre></section>
+<section class="frame"><p class="cmd">$ grimoire memory list<span class="rc ok">sortie 0</span></p><pre>                                        Memories (1–2 of 2)
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┓
+┃ ID           ┃ Text                 ┃ Wing          ┃ Hall       ┃ Room      ┃ Tags ┃ Created    ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━┩
+│ &lt;uuid&gt; │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ &lt;date&gt; │
+│              │ en JSON              │               │            │           │      │            │
+│ &lt;uuid&gt; │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ &lt;date&gt; │
+│              │ en SQLite            │               │            │           │      │            │
+└──────────────┴──────────────────────┴───────────────┴────────────┴───────────┴──────┴────────────┘</pre></section>
+<section class="frame"><p class="cmd">$ grimoire memory supersede &lt;ancien&gt; &lt;nouveau&gt;<span class="rc ok">sortie 0</span></p><pre>OK &lt;uuid&gt; remplacé par &lt;uuid&gt; (lisible
+avec --include-superseded)</pre></section>
+<section class="frame"><p class="cmd">$ grimoire memory list<span class="rc ok">sortie 0</span></p><pre>                                        Memories (1–1 of 1)
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┓
+┃ ID           ┃ Text                 ┃ Wing          ┃ Hall       ┃ Room      ┃ Tags ┃ Created    ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━┩
+│ &lt;uuid&gt; │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ &lt;date&gt; │
+│              │ en SQLite            │               │            │           │      │            │
+└──────────────┴──────────────────────┴───────────────┴────────────┴───────────┴──────┴────────────┘</pre></section>
+<section class="frame"><p class="cmd">$ grimoire memory list --include-superseded<span class="rc ok">sortie 0</span></p><pre>                                        Memories (1–2 of 2)
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┓
+┃ ID           ┃ Text                 ┃ Wing          ┃ Hall       ┃ Room      ┃ Tags ┃ Created    ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━┩
+│ &lt;uuid&gt; │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ &lt;date&gt; │
+│              │ en JSON              │               │            │           │      │            │
+│ &lt;uuid&gt; │ Le cache est stocké  │ agent-fixture │ hall_facts │ decisions │ —    │ &lt;date&gt; │
+│              │ en SQLite            │               │            │           │      │            │
+└──────────────┴──────────────────────┴───────────────┴────────────┴───────────┴──────┴────────────┘</pre></section>
+</main>
+</body>
+</html>

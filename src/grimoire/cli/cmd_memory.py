@@ -761,7 +761,11 @@ def memory_search(
 # ── grimoire memory bench ─────────────────────────────────────────────────────
 
 
-_bench_queries_arg = typer.Argument(..., help="Queries to replay against the memory read path.")
+_bench_queries_arg = typer.Argument(None, help="Queries to replay against the memory read path.")
+
+
+_bench_dataset_opt = typer.Option(None, "--dataset", help="LongMemEval JSON file (default: the bundled sample, declared as such).")
+_bench_out_dir_opt = typer.Option(Path("docs/bench"), "--out-dir", help="Where --longmemeval publishes its report.")
 
 
 @memory_app.command("bench")
@@ -770,12 +774,36 @@ def memory_bench(
     queries: list[str] = _bench_queries_arg,
     limit: int = typer.Option(5, "--limit", "-n", min=1, help="Results per query."),
     include_superseded: bool = typer.Option(False, "--include-superseded", help="Measure with replaced memories served (exposure baseline)."),
+    longmemeval: bool = typer.Option(False, "--longmemeval", help="Run the LongMemEval retrieval bench and publish the score under docs/bench/."),
+    dataset: Path | None = _bench_dataset_opt,
+    out_dir: Path = _bench_out_dir_opt,
 ) -> None:
     """Measure what memory search serves: stale-as-fact rate and recall tokens p95.
 
     A rate with no result served is null, not zero; tokens are an estimate
-    (chars/4), declared in the output.
+    (chars/4), declared in the output. With --longmemeval, measures session-level
+    retrieval recall instead (not comparable to published QA accuracy).
     """
+    if longmemeval:
+        from grimoire.memory.longmemeval import publish, run_longmemeval
+
+        try:
+            lme = run_longmemeval(dataset, k=limit)
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from None
+        written = publish(lme, out_dir)
+        if _get_fmt(ctx) == "json":
+            typer.echo(json.dumps({**lme, "published": [str(p) for p in written]}, indent=2, ensure_ascii=False))
+            return
+        score = lme["score"]
+        console.print(f"LongMemEval {lme['metric']} @ k={lme['k']} : {'null' if score is None else f'{score:.1%}'} ({lme['questions_scored']} questions, jeu {lme['dataset']['kind']})")
+        for p in written:
+            console.print(f"Publié : {p}")
+        return
+    if not queries:
+        console.print("[red]Give queries to replay, or use --longmemeval.[/red]")
+        raise typer.Exit(2)
     from grimoire.memory.supersession import bench_supersession
 
     report = bench_supersession(_load_manager(), list(queries), limit=limit, include_superseded=include_superseded)

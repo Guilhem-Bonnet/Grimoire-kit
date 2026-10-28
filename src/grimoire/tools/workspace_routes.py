@@ -453,6 +453,13 @@ def _memory_entry(project_root: Path, query: _Query) -> Any:
     return workspace_knowledge.memory_entry(project_root, _one(query, "id"), slug=_one(query, "slug") or None)
 
 
+def _memory_graph(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/graph`` — le graphe complet, en colonnes compactes (P81)."""
+    from grimoire.tools import workspace_graph
+
+    return workspace_graph.graph_view(project_root)
+
+
 def _memory_quality(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/memory/quality`` — santé de la mémoire d'un projet et sa file d'hygiène (P25).
 
@@ -601,6 +608,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/search": _memory_search,
     f"{PREFIX}memory/entries": _memory_entries,
     f"{PREFIX}memory/entry": _memory_entry,
+    f"{PREFIX}memory/graph": _memory_graph,
     f"{PREFIX}memory/quality": _memory_quality,
     f"{PREFIX}data/machine": _data_machine,
     f"{PREFIX}setup/guide": _setup_guide,
@@ -1312,6 +1320,13 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
         if path.startswith(f"{PREFIX}tasks/"):
             tail = path[len(f"{PREFIX}tasks/") :].strip("/")
             task_id, _, action = tail.partition("/")
+            if task_id and action == "launch":
+                # Apply d'assignation (P47 lot 3) : l'empreinte du plan engage
+                # le lancement (ADR-008) ; la garde d'écriture commune est déjà
+                # passée côté hôte, comme pour toute écriture.
+                from grimoire.tools import workspace_launch_apply
+
+                return workspace_launch_apply.launch_apply(project_root, task_id, body)
             if task_id and action in TASK_ACTIONS:
                 return _task_action(project_root, task_id, action, body)
         portfolio_action = _portfolio_action_route(path)

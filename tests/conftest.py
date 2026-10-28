@@ -18,6 +18,15 @@ os.environ["COLUMNS"] = "200"
 # ── Path setup ────────────────────────────────────────────────────────────────
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# `pythonpath = ["src"]` (pyproject) ne vaut que pour le processus pytest. Les
+# serveurs que les tests e2e lancent en sous-processus (`python -m grimoire …`)
+# importaient le kit du venv, parfois installé depuis un autre checkout : ils
+# servaient alors le `web/` de celui-ci et non celui de l'arbre testé (un
+# worktree). On fait donc pointer les sous-processus sur le même `src/`.
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    p for p in (str(ROOT / "src"), os.environ.get("PYTHONPATH", "")) if p
+)
 TOOLS = ROOT / "framework" / "tools"
 
 #: Le vrai répertoire personnel, capturé à l'import de ce module — donc avant

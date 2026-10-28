@@ -207,7 +207,7 @@ def _open_as_override(page: Page) -> None:
     # une longue liste flex (voir tests/e2e/test_workspace_source_language.py::_open,
     # PR #617) — le clic-coordonnées peut atterrir sur la ligne suivante de
     # l'arbre une fois celui-ci assez long.
-    page.locator(".tree .sr-tree-file", has_text=name).first.dispatch_event("click")
+    page.locator("#canvas .tree .sr-tree-file", has_text=name).first.dispatch_event("click")
     page.wait_for_function(
         "(p) => document.querySelector('.sr-docrow .mono')?.textContent === p", arg=kit_path
     )
@@ -230,7 +230,7 @@ def test_suggerer_a_une_aide_permanente_visible_sans_survol(workspace: Page) -> 
         ),
     )
     _goto(workspace, "source")
-    workspace.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
+    workspace.wait_for_selector("#canvas .tree .sr-tree-file", timeout=10_000)
     _open_as_override(workspace)
 
     workspace.wait_for_selector(".sr-assist-btn:not([hidden])", timeout=10_000)
@@ -257,7 +257,7 @@ def test_suggerer_indisponible_est_lisible_sans_survol(workspace: Page) -> None:
         ),
     )
     _goto(workspace, "source")
-    workspace.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
+    workspace.wait_for_selector("#canvas .tree .sr-tree-file", timeout=10_000)
     _open_as_override(workspace)
 
     workspace.wait_for_selector(".sr-assist-btn:not([hidden])", timeout=10_000)

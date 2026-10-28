@@ -39,6 +39,8 @@ janitor :
           wip: 1                  # sessions orchestrateur en même temps
           sessions_per_day: 12    # plafond de lancements par jour (UTC)
           permission_mode: dontAsk  # imposé : toute autre valeur rend la politique illisible (liste blanche d'outils)
+      probe_host: false           # P86 : sonder le frein de la version d'hôte à la récolte d'un bail perdu (deux appels
+                                  # modèle payants, une seule fois par version) ; faux : jamais, la reprise reste humaine
       breaker:
         threshold: 3              # échecs consécutifs avant l'ouverture du disjoncteur
       janitor:
@@ -177,6 +179,7 @@ class OrchestratorPolicy:
     base: str = ""
     breaker_threshold: int = DEFAULT_BREAKER_THRESHOLD
     close_issue: bool = False
+    probe_host: bool = False
     reviewer: ReviewerRole = field(default_factory=ReviewerRole)
     merger: MergerRole = field(default_factory=MergerRole)
     orchestrator: OrchestratorRole = field(default_factory=OrchestratorRole)
@@ -187,6 +190,7 @@ class OrchestratorPolicy:
             "orchestrator": self.orchestrator.to_dict(),
             "base": self.base,
             "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue,
+            "probe_host": self.probe_host,
         }
 
 
@@ -320,13 +324,16 @@ def _parse_orchestrator(raw: Any) -> OrchestratorRole:
 
 
 def _parse(block: Any) -> OrchestratorPolicy:
-    top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor"}))
+    top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor", "probe_host"}))
     roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer", "merger", "orchestrator"}))
     breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold"}))
     janitor = _table(top.get("janitor", {}), "orchestrator.janitor", frozenset({"close_issue"}))
     close_issue = janitor.get("close_issue", False)
     if not isinstance(close_issue, bool):
         raise _InvalidPolicyError(f"orchestrator.janitor.close_issue doit être un booléen, pas {close_issue!r}")
+    probe_host = top.get("probe_host", False)
+    if not isinstance(probe_host, bool):
+        raise _InvalidPolicyError(f"orchestrator.probe_host doit être un booléen, pas {probe_host!r}")
     base = _text(top.get("base", ""), "orchestrator.base")
     if base and not _BRANCH.fullmatch(base):
         raise _InvalidPolicyError(f"orchestrator.base : {base!r} n'est pas un nom de branche simple (lettres, chiffres, . _ / -)")
@@ -338,6 +345,7 @@ def _parse(block: Any) -> OrchestratorPolicy:
         base=base,
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
         close_issue=close_issue,
+        probe_host=probe_host,
     )
 
 

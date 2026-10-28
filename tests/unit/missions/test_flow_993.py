@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from lot2_doubles import FakeHost, git
 from test_merger import (
+    GREEN,
     REPO,
     advance_main,
     give_ready,
@@ -39,8 +40,9 @@ from grimoire.missions.merger import (
     MERGE_UNDRAFTED_EVENT,
     MERGE_WAITED_EVENT,
 )
+from grimoire.missions.review_receipt import ReviewFinding, write_receipt
 from grimoire.missions.review_seal import SEAL_ENTRY
-from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT
+from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import MERGED_EVENT, find_task_worktree
@@ -214,8 +216,10 @@ def test_un_check_ignore_ou_non_requis_en_echec_ne_defait_pas_le_ready(projet: P
 
 def test_une_ci_en_cours_ou_sans_pr_ne_defait_pas_le_ready(projet: Path, host: FakeHost) -> None:
     tid, wt = launch_and_work(projet, host)
+    tick(projet, host)  # le relecteur est lancé sur une CI verte ; elle repart ensuite
     host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    assert [o.action for o in review_ready(projet, host, tid, wt).reviews] == ["ready"]  # le merger attend la CI verte
+    give_ready(host, tid, wt)
+    assert [o.action for o in tick(projet, host).reviews] == ["ready"]  # le merger attend la CI verte
     other, wt2 = launch_and_work(projet, host, edit=("src/app/b.py", "b\n"))
     host.prs.pop(f"task/{other}")  # aucune PR : rien n'est conclu au relecteur
     tick(projet, host)
@@ -403,9 +407,48 @@ def test_la_consigne_du_relecteur_diffe_depuis_la_base_reelle_de_la_pr(projet: P
     prompt = prompt_of(host, f"grimoire-review-{tid}")
     assert f"{base_sha}...HEAD" not in prompt
     assert "git merge-base origin/main HEAD" in prompt and "gh pr diff" in prompt and "uv.lock" in prompt
+    # 2026-10-27 (R59, R60, R63) : ce que les commandes du relecteur créent périme son verdict ; il remet l'arbre en état.
+    assert "uv run --frozen" in prompt and "git checkout -- <chemin>" in prompt
     assert f"gh pr checks task/{tid} --required" in prompt
     found = re.search(r"`git diff (\S+)\.\.\.HEAD`", prompt)
     assert found is not None
     changed = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", f"{found.group(1)}...HEAD"],
                              capture_output=True, text=True, check=True).stdout.split()
     assert changed == ["src/app/route.py"]  # le travail de la tâche, pas tout main
+
+
+# ── P87 : la CI en cours diffère la relecture, un job de CI vert prouve un critère e2e ──────────────────────────
+
+
+def test_une_ci_en_cours_differe_la_relecture_sans_recu_ni_cycle_puis_elle_est_lancee(projet: Path, host: FakeHost) -> None:
+    tid, _wt = launch_and_work(projet, host)
+    host.checks[f"task/{tid}"] = [{"name": "Tests (Python 3.13)", "bucket": "pending"}]
+    for _ in range(3):
+        report = tick(projet, host)
+        assert [(o.action, o.status) for o in report.reviews] == [("launch", "skipped")], report.reviews
+        assert "CI en cours" in report.reviews[0].detail
+    assert host.of("claude", "--bg", "--name", f"grimoire-review-{tid}") == []
+    assert events(projet, tid, REVIEW_JUDGED_EVENT) == [] and events(projet, tid, REVIEW_LAUNCHED_EVENT) == []
+    host.checks[f"task/{tid}"] = list(GREEN)  # même tête, checks verts
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("launch", "launched")]
+
+
+def test_un_not_ready_rendu_pendant_que_la_ci_tourne_est_ecarte_sans_compter_de_cycle(projet: Path, host: FakeHost) -> None:
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)  # le relecteur est lancé, CI verte
+    host.checks[f"task/{tid}"] = [{"name": "Test e2e", "bucket": "pending"}]
+    give_ready(host, tid, wt)
+    write_receipt(wt, tid, "NOT-READY", findings=[ReviewFinding("e2e pas encore vu", "gh pr checks")], reviewer_id="reviewer",
+                  reviewer_session=host.session_of("grimoire-review-"))
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("deferred", "done")], report.reviews
+    assert [e.payload["verdict"] for e in events(projet, tid, REVIEW_JUDGED_EVENT)] == ["ci_pending"]
+    assert host.of("claude", "--bg", "--resume") == []
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_la_consigne_du_relecteur_permet_de_citer_un_job_de_ci_vert_comme_preuve(projet: Path, host: FakeHost) -> None:
+    tid, _wt = launch_and_work(projet, host)
+    tick(projet, host)
+    prompt = prompt_of(host, f"grimoire-review-{tid}")
+    assert "job de CI" in prompt and "son URL" in prompt and "evidence_cmd" in prompt and "pas à le rejouer" in prompt

@@ -356,6 +356,8 @@ export const api = {
     if (includeSuperseded) params.include_superseded = '1';
     return get(WS + 'memory/entries', params);
   },
+  // Le graphe complet (P81), en colonnes compactes : jamais échantillonné.
+  memoryGraph: () => get(WS + 'memory/graph'),
   // La fiche d'une entrée : provenance, chaîne de remplacement, nœuds liés.
   memoryEntry: (id, slug) => get(WS + 'memory/entry', slug ? { id, slug } : { id }),
   // Santé de la mémoire et file d'hygiène (P25) : une mesure fraîche d'un projet
@@ -420,6 +422,11 @@ export const api = {
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
   taskAction: (id, action, body) =>
     post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
+  // Apply d'assignation (P47 lot 3) : lance LA session que le plan a montrée —
+  // l'empreinte du plan voyage dans le corps, le serveur refuse si l'état a
+  // changé depuis (ADR-008). `post` : garde d'écriture commune comprise.
+  taskLaunch: (id, empreinte) =>
+    post(WS + 'tasks/' + encodeURIComponent(id) + '/launch', { empreinte }),
   // « Nouvelle tâche » (P35) : `TaskService.add` du projet servi, comme
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>

@@ -1,0 +1,53 @@
+[
+  {
+    "question_id": "sample-001",
+    "question_type": "single-session-user",
+    "question": "Which city did I say I was moving to for the new job?",
+    "answer": "Lisbon",
+    "haystack_session_ids": ["s1", "s2", "s3"],
+    "answer_session_ids": ["s2"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "Can you suggest a sourdough starter feeding schedule for a busy week?"}, {"role": "assistant", "content": "Feed it every twelve hours at room temperature, or once a day in the fridge."}],
+      [{"role": "user", "content": "I accepted the new job and I am moving to Lisbon next month, any tips for finding an apartment?"}, {"role": "assistant", "content": "Start with neighbourhood research and book viewings early."}],
+      [{"role": "user", "content": "How do I repot a monstera without damaging the roots?"}, {"role": "assistant", "content": "Loosen the root ball gently and use a pot one size larger."}]
+    ]
+  },
+  {
+    "question_id": "sample-002",
+    "question_type": "multi-session",
+    "question": "What instrument did I start learning and who is my teacher?",
+    "answer": "Cello, Ms Okafor",
+    "haystack_session_ids": ["a1", "a2", "a3", "a4"],
+    "answer_session_ids": ["a1", "a3"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "I just started learning the cello and I am nervous about my first lesson."}, {"role": "assistant", "content": "Beginners usually start with open strings and bow control."}],
+      [{"role": "user", "content": "What is a good rainy day activity for a seven year old?"}, {"role": "assistant", "content": "Try a blanket fort and a scavenger hunt indoors."}],
+      [{"role": "user", "content": "My cello teacher Ms Okafor wants me to practise scales every evening."}, {"role": "assistant", "content": "Short daily sessions work better than one long one."}],
+      [{"role": "user", "content": "Recommend a podcast about the history of maritime trade."}, {"role": "assistant", "content": "Look for series on the Hanseatic League and the spice routes."}]
+    ]
+  },
+  {
+    "question_id": "sample-003",
+    "question_type": "knowledge-update",
+    "question": "What is my current weekly running distance?",
+    "answer": "35 kilometres",
+    "haystack_session_ids": ["k1", "k2", "k3"],
+    "answer_session_ids": ["k3"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "I run about 20 kilometres a week at the moment."}, {"role": "assistant", "content": "A solid base for a half marathon."}],
+      [{"role": "user", "content": "Which laptop has the best battery life for travel?"}, {"role": "assistant", "content": "Compare ARM based ultrabooks first."}],
+      [{"role": "user", "content": "Update on training: I now run 35 kilometres every week."}, {"role": "assistant", "content": "Mind the ten percent rule for increases."}]
+    ]
+  },
+  {
+    "question_id": "sample-004_abs",
+    "question_type": "single-session-user",
+    "question": "What is the name of my dog?",
+    "answer": "unanswerable",
+    "haystack_session_ids": ["z1"],
+    "answer_session_ids": [],
+    "haystack_sessions": [
+      [{"role": "user", "content": "How long should I let bread dough proof overnight?"}, {"role": "assistant", "content": "Eight to twelve hours in the fridge."}]
+    ]
+  }
+]
