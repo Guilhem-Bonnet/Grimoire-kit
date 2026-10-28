@@ -60,8 +60,33 @@ def _pret(service: TaskService, mission: str, titre: str, **kw: object) -> Missi
     return task
 
 
+def _gh_ok(argv, cwd, env=None):  # type: ignore[no-untyped-def]
+    """Un faux gh toujours sain : authentifié, aucune PR ouverte."""
+    from grimoire.missions.launcher import ExecResult
+
+    if argv[:3] == ["gh", "auth", "status"]:
+        return ExecResult(0, "Logged in")
+    if argv[:3] == ["gh", "pr", "list"]:
+        return ExecResult(0, "[]")
+    return ExecResult(2, "", "sous-commande inconnue")
+
+
+def _trusted(projet: Path) -> Path:
+    """Un ~/.claude.json qui approuve *projet* (la clé vérifiée sur un vrai poste)."""
+    import json as _json
+
+    config = projet / "claude-config.json"
+    config.write_text(_json.dumps({"projects": {str(projet.resolve()): {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
+    return config
+
+
 def _plan(projet: Path, task_id: str, **kw: object) -> dict:
     kw.setdefault("probe", lambda: READING)
+    kw.setdefault("exec_", _gh_ok)
+    if "claude_config" not in kw:
+        # Pas de setdefault : il évaluerait _trusted() même clé fournie, et
+        # réécrirait le fichier de confiance qu'un test vient de poser.
+        kw["claude_config"] = _trusted(projet)
     return launch_preflight(projet, task_id, **kw)  # type: ignore[arg-type]
 
 
@@ -92,7 +117,14 @@ def test_le_payload_complet_d_une_tache_admissible_est_pret(
     # Les cinq vérifications, dans l'ordre de la maquette.
     assert [v["id"] for v in plan["verifications"]] == [
         "conflit_reservation", "plafond_sessions", "admission", "dependances", "quota",
+        "dossier_approuve", "gh_app", "pr_ouverte",
     ]
+    assert _verif(plan, "dossier_approuve")["verdict"] == "ok"
+    assert _verif(plan, "gh_app")["verdict"] == "ok"
+    assert _verif(plan, "pr_ouverte") == {
+        "id": "pr_ouverte", "libelle": "PR ouverte sur les mêmes fichiers", "verdict": "ok",
+        "detail": "aucun fichier déclaré : rien à croiser",
+    }
     assert _verif(plan, "conflit_reservation")["verdict"] == "ok"
     assert _verif(plan, "admission") == {
         "id": "admission", "libelle": "Admission", "verdict": "ok", "detail": "serait admise maintenant (Admit)",
@@ -455,7 +487,94 @@ def test_la_route_launch_plan_est_un_get_pur_vers_le_prefligh(
     task = _pret(service, mission, "par la route")
     payload = workspace_get(projet, f"/api/workspace/tasks/{task.id}/launch-plan", {})
     assert payload["task_id"] == task.id
-    assert payload["pret"] is True
+    # `pret` dépend ici du poste (vraie confiance Claude Code, vrai gh) : on
+    # vérifie la composition du plan, pas un verdict lié à l'environnement.
+    assert [v["id"] for v in payload["verifications"]] == [
+        "conflit_reservation", "plafond_sessions", "admission", "dependances", "quota",
+        "dossier_approuve", "gh_app", "pr_ouverte",
+    ]
+    assert payload["empreinte"]
     # Une tâche inconnue devient un 404 côté transport (FileNotFoundError), jamais un 500.
     with pytest.raises(FileNotFoundError):
         workspace_get(projet, "/api/workspace/tasks/GAO-fantome-001/launch-plan", {})
+
+
+# ── Contrôles préalables au lancement (critère 2 de P47) ─────────────────────
+
+
+def test_un_dossier_non_approuve_par_claude_code_est_bloquant_avec_le_remede(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    import json as _json
+
+    task = _pret(service, mission, "dossier non approuvé")
+    config = projet / "claude-config.json"
+    config.write_text(_json.dumps({"projects": {}}), encoding="utf-8")
+    plan = _plan(projet, task.id, claude_config=config)
+    verdict = _verif(plan, "dossier_approuve")
+    assert verdict["verdict"] == "bloquant"
+    assert "accepte la confiance du dossier" in verdict["detail"]
+    assert plan["pret"] is False
+    # Sans fichier de confiance du tout : bloquant aussi, jamais deviné.
+    missing = _plan(projet, task.id, claude_config=projet / "absent.json")
+    assert _verif(missing, "dossier_approuve")["verdict"] == "bloquant"
+    # Fichier illisible : on ne sait pas — inconnu, pas une estimation.
+    broken = projet / "casse.json"
+    broken.write_text("{pas du json", encoding="utf-8")
+    assert _verif(_plan(projet, task.id, claude_config=broken), "dossier_approuve")["verdict"] == "inconnu"
+
+
+def test_un_gh_non_authentifie_est_bloquant_et_un_gh_absent_inconnu(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    from grimoire.missions.launcher import ExecResult
+
+    task = _pret(service, mission, "gh malade")
+
+    def refuse(argv, cwd, env=None):  # type: ignore[no-untyped-def]
+        if argv[:3] == ["gh", "auth", "status"]:
+            return ExecResult(1, "", "You are not logged into any GitHub hosts")
+        return _gh_ok(argv, cwd, env)
+
+    plan = _plan(projet, task.id, exec_=refuse)
+    verdict = _verif(plan, "gh_app")
+    assert verdict["verdict"] == "bloquant"
+    assert "not logged" in verdict["detail"] and "ouvrir sa PR" in verdict["detail"]
+    assert plan["pret"] is False
+
+    def absent(argv, cwd, env=None):  # type: ignore[no-untyped-def]
+        return ExecResult(127, "", "gh : binaire introuvable")
+
+    assert _verif(_plan(projet, task.id, exec_=absent), "gh_app")["verdict"] == "inconnu"
+
+
+def test_une_pr_ouverte_sur_les_memes_fichiers_est_bloquante_avec_son_numero(
+    projet: Path, service: TaskService, mission: str
+) -> None:
+    import json as _json
+
+    from grimoire.missions.launcher import ExecResult
+
+    task = _pret(service, mission, "PR en face")
+    rows = [{"number": 12, "title": "chantier voisin", "files": [{"path": "src/a.py"}, {"path": "docs/b.md"}]}]
+
+    def with_pr(argv, cwd, env=None):  # type: ignore[no-untyped-def]
+        if argv[:3] == ["gh", "pr", "list"]:
+            return ExecResult(0, _json.dumps(rows))
+        return _gh_ok(argv, cwd, env)
+
+    plan = _plan(projet, task.id, files=("src/a.py",), exec_=with_pr)
+    verdict = _verif(plan, "pr_ouverte")
+    assert verdict["verdict"] == "bloquant"
+    assert "#12" in verdict["detail"] and "src/a.py" in verdict["detail"]
+    assert plan["pret"] is False
+    # Des fichiers déclarés mais disjoints : ok, nommé.
+    clear = _plan(projet, task.id, files=("src/autre.py",), exec_=with_pr)
+    assert _verif(clear, "pr_ouverte")["verdict"] == "ok"
+    # gh en échec : inconnu, le chevauchement n'est pas évaluable.
+    def broken(argv, cwd, env=None):  # type: ignore[no-untyped-def]
+        if argv[:3] == ["gh", "pr", "list"]:
+            return ExecResult(1, "", "réseau indisponible")
+        return _gh_ok(argv, cwd, env)
+
+    assert _verif(_plan(projet, task.id, files=("src/a.py",), exec_=broken), "pr_ouverte")["verdict"] == "inconnu"

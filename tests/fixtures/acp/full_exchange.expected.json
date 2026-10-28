@@ -1,0 +1,113 @@
+{
+ "final": {
+  "load_session": false,
+  "outstanding": [],
+  "pending_permissions": [],
+  "resolved_permissions": [],
+  "session_id": "sess-1",
+  "state": "idle"
+ },
+ "steps": [
+  {
+   "events": [],
+   "state": "initializing"
+  },
+  {
+   "events": [
+    {
+     "auth_methods": 0,
+     "load_session": false,
+     "protocol_version": 1,
+     "type": "initialized"
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "events": [],
+   "state": "opening"
+  },
+  {
+   "events": [
+    {
+     "loaded": false,
+     "session_id": "sess-1",
+     "type": "session_opened"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "kind": "agent_message_chunk",
+     "session_id": "sess-1",
+     "text": "Bon",
+     "type": "update"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "kind": "agent_message_chunk",
+     "session_id": "sess-1",
+     "text": "jour !",
+     "type": "update"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "kind": "agent_thought_chunk",
+     "session_id": "sess-1",
+     "text": "...",
+     "type": "update"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "session_id": "sess-1",
+     "stop_reason": "end_turn",
+     "type": "turn_ended"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "kind": "agent_message_chunk",
+     "session_id": "sess-1",
+     "text": "Oui.",
+     "type": "update"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "session_id": "sess-1",
+     "stop_reason": "max_tokens",
+     "type": "turn_ended"
+    }
+   ],
+   "state": "idle"
+  }
+ ]
+}

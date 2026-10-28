@@ -33,7 +33,7 @@ function ensureStylesheet() {
 function freshState() {
   return {
     tree: null,
-    treeEl: null,
+    treeEls: [],
     dirsOpen: new Set(),
     currentPath: null,
     currentEntry: null,
@@ -83,7 +83,7 @@ export async function mount(root, ctx) {
   if (ctx.signal.aborted) return;
   state.tree = tree;
   // L'arbre vit dans le contenu de la rubrique (P66), une colonne à gauche du
-  // fichier ouvert : l'explorateur d'atelier (⇧⌘L) reste celui de la coque.
+  // fichier ouvert, et reprise dans l'Explorateur de la coque (P78).
   const split = document.createElement('div');
   split.className = 'sr-split';
   const treeEl = document.createElement('nav');
@@ -93,7 +93,16 @@ export async function mount(root, ctx) {
   pane.className = 'sr-pane';
   split.append(treeEl, pane);
   root.replaceChildren(split);
-  state.treeEl = treeEl;
+  state.treeEls = [treeEl];
+  // P78 : l'Explorateur de la coque est celui des espaces qui ont une
+  // arborescence. Fichiers y pose la même, sans quoi le panneau se masque.
+  if (ctx.explorer) {
+    const shellTree = document.createElement('nav');
+    shellTree.className = 'tree sr-tree';
+    shellTree.setAttribute('aria-label', 'Arborescence des fichiers');
+    ctx.explorer.replaceChildren(shellTree);
+    state.treeEls.push(shellTree);
+  }
   root = pane;
   renderExplorer(ctx, root);
   renderCanvas(root, ctx);
@@ -168,19 +177,23 @@ function dirLabel(tier, dir) {
 }
 
 function renderExplorer(ctx, root) {
-  state.treeEl.replaceChildren();
+  for (const treeEl of state.treeEls) renderTree(ctx, root, treeEl);
+}
+
+function renderTree(ctx, root, treeEl) {
+  treeEl.replaceChildren();
   for (const tier of state.tree.tiers) {
     const head = document.createElement('div');
     head.className = 'sr-tree-tier';
     if (tier.term) head.dataset.term = tier.term;
     head.textContent = `${tier.label} · ${tier.count}${tier.truncated ? ' (+ )' : ''}`;
-    state.treeEl.append(head);
+    treeEl.append(head);
 
     if (!tier.exists) {
       const note = document.createElement('div');
       note.className = 'sr-tree-file lbl';
       note.textContent = tier.note ? `aucun fichier — ${tier.note}` : 'aucun fichier';
-      state.treeEl.append(note);
+      treeEl.append(note);
       continue;
     }
 
@@ -212,7 +225,7 @@ function renderExplorer(ctx, root) {
           else state.dirsOpen.delete('closed:' + dirKey);
           renderExplorer(ctx, root);
         });
-        state.treeEl.append(dirBtn);
+        treeEl.append(dirBtn);
       }
       if (!open && dir) continue;
       for (const file of files.sort((a, b) => a.path.localeCompare(b.path))) {
@@ -235,7 +248,7 @@ function renderExplorer(ctx, root) {
           row.append(letter);
         }
         row.addEventListener('click', () => openFile(ctx, root, file.path));
-        state.treeEl.append(row);
+        treeEl.append(row);
       }
     }
   }

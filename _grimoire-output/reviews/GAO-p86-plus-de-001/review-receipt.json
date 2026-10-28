@@ -1,0 +1,56 @@
+{
+  "$schema": "grimoire-review-receipt/v1",
+  "task_id": "GAO-p86-plus-de-001",
+  "verdict": "NOT-READY",
+  "findings": [
+    {
+      "summary": "Fichier hors diff de la PR: l'échec ruff vient de main. À corriger (retirer l'assignation 'base') ou rebaser sur un main corrigé; périmètre de la PR sinon propre (pas d'uv.lock modifié).",
+      "evidence_cmd": "",
+      "severity": "",
+      "grounded": false
+    }
+  ],
+  "reviewer_id": "reviewer",
+  "model": "sonnet",
+  "tree_fingerprint": "e7e008cb204696b5ceebf37a8f35fd01e0fbd609d7a20be50692aba44e117bf8",
+  "evidence_pack_sha256": "5dc45695d153e211fb96d7a026b3096787088678dfbdec591a1462b7ae515d8c",
+  "written_at": "2026-10-28T03:32:04.452417+00:00",
+  "reviewer_session": "569706ee-b5e3-40dd-9d51-d67540772ca6",
+  "criteria": [
+    {
+      "index": 1,
+      "criterion": "Test : un worker lancé par le tick porte host_version au claim (faux claude --version)",
+      "status": "met",
+      "evidence_cmd": "uv run --frozen pytest -q tests/unit/missions/test_launcher.py",
+      "note": "test_un_worker_lance_par_le_tick_porte_la_version_de_l_hote_au_claim passe (faux claude --version)."
+    },
+    {
+      "index": 2,
+      "criterion": "Test : bail perdu, frein prouvé pour cette version : reap rend la tâche ready sans poser de question ; frein non prouvé : resume_unfenced comme aujourd hui",
+      "status": "met",
+      "evidence_cmd": "uv run --frozen pytest -q tests/unit/missions/test_tick_recovery.py",
+      "note": "frein prouvé: ready sans question; non prouvé: resume_unfenced. Les deux tests passent."
+    },
+    {
+      "index": 3,
+      "criterion": "Test : avec orchestrator.probe_host true, la sonde n est lancée qu une fois par version (résultat gardé) ; avec false, jamais",
+      "status": "met",
+      "evidence_cmd": "uv run --frozen pytest -q tests/unit/missions/test_tick_recovery.py -k probe_host",
+      "note": "true: une sonde par version; false: jamais. Passent."
+    },
+    {
+      "index": 4,
+      "criterion": "Test : grimoire doctor rapporte l état du frein de la version courante",
+      "status": "met",
+      "evidence_cmd": "uv run --frozen pytest -q tests/unit/test_host_contracts.py -k brake",
+      "note": "test_doctor_reports_the_brake et brake_state passent; doctor ajoute la ligne host_brake (WARN avec la façon de prouver)."
+    },
+    {
+      "index": 5,
+      "criterion": "Fichier CHANGELOG.md : entrée [Unreleased] ; CI verte",
+      "status": "unmet",
+      "evidence_cmd": "gh pr checks task/GAO-p86-plus-de-001 --required",
+      "note": "Entrée CHANGELOG [Unreleased] présente, mais CI non verte: le check requis 'Ruff lint' échoue (F841 tests/e2e/test_workspace_live_pilot.py:467, 'base' inutilisée)."
+    }
+  ]
+}
