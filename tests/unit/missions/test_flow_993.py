@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -452,3 +453,67 @@ def test_la_consigne_du_relecteur_permet_de_citer_un_job_de_ci_vert_comme_preuve
     tick(projet, host)
     prompt = prompt_of(host, f"grimoire-review-{tid}")
     assert "job de CI" in prompt and "son URL" in prompt and "evidence_cmd" in prompt and "pas à le rejouer" in prompt
+
+
+# ── P89 : pas de boucle de relecture sur une CI qui n'a pas conclu, une tête dépassée ou un test instable ──────────
+
+
+def test_une_tete_poussee_sans_check_encore_inscrit_differe_la_relecture(projet: Path, host: FakeHost,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché (P79, 2026-10-28) : relecteur lancé juste après un push, GitHub n'ayant encore listé aucun check ;
+    il jugeait les e2e « injugeables » et l'escalade partait chez l'humain."""
+    from grimoire.missions import reviewer
+
+    tid, _wt = launch_and_work(projet, host)
+    host.checks.pop(f"task/{tid}")
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("launch", "skipped")], report.reviews
+    assert events(projet, tid, REVIEW_LAUNCHED_EVENT) == []
+    monkeypatch.setattr(reviewer, "CI_REGISTER_GRACE", timedelta(0))  # la même tête, vieillie : le dépôt n'a pas de CI
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("launch", "launched")]
+
+
+def test_un_not_ready_rendu_sans_check_encore_inscrit_est_ecarte_sans_cycle(projet: Path, host: FakeHost) -> None:
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)  # lancé sur une CI verte ; un push la fait repartir de zéro
+    host.checks.pop(f"task/{tid}")
+    give_ready(host, tid, wt)
+    write_receipt(wt, tid, "NOT-READY", findings=[ReviewFinding("e2e pas vu", "gh pr checks")], reviewer_id="reviewer",
+                  reviewer_session=host.session_of("grimoire-review-"))
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("deferred", "done")]
+    assert [e.payload["verdict"] for e in events(projet, tid, REVIEW_JUDGED_EVENT)] == ["ci_pending"]
+    assert host.of("claude", "--bg", "--resume") == [] and events(projet, tid, "task.review_escalated") == []
+
+
+def test_un_not_ready_sur_une_tete_que_la_pr_a_depassee_est_relu(projet: Path, host: FakeHost) -> None:
+    """Défaut empêché : un verdict rendu sur la tête d'avant un push renvoyait le worker corriger ce qui l'était déjà."""
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)
+    host.pr_heads[f"task/{tid}"] = "f" * 40
+    give_ready(host, tid, wt)
+    write_receipt(wt, tid, "NOT-READY", findings=[ReviewFinding("vieux constat", "git log")], reviewer_id="reviewer",
+                  reviewer_session=host.session_of("grimoire-review-"))
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("stale", "done")], report.reviews
+    assert [e.payload["verdict"] for e in events(projet, tid, REVIEW_JUDGED_EVENT)] == ["stale"]
+    assert host.of("claude", "--bg", "--resume") == []
+
+
+def test_un_ready_sur_une_ci_rouge_relance_d_abord_les_jobs_puis_tient(projet: Path, host: FakeHost,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché (P81, 2026-10-28) : un test de temps instable défaisait un READY et renvoyait le worker."""
+    from grimoire.missions import merger
+
+    host.rerun_error = ""  # l'App a ``actions:write``
+    tid, wt = launch_and_work(projet, host)
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pass"}, {"name": "E2E", "bucket": "fail"}]
+    report = review_ready(projet, host, tid, wt)
+    assert [o.action for o in report.reviews] == ["ready"], report.reviews
+    assert host.reruns == [101] and host.of("claude", "--bg", "--resume") == []
+    judged = events(projet, tid, REVIEW_JUDGED_EVENT)[-1]
+    assert judged.payload["verdict"] == "READY" and judged.payload["ci"] == "pending"
+    assert host.of("claude", "--bg", "--resume") == [] and events(projet, tid, MERGE_BOUNCED_EVENT) == []
+    monkeypatch.setattr(merger, "RERUN_SETTLE", timedelta(0))  # la relance a eu le temps de conclure
+    tick(projet, host)  # elle échoue encore : la tête a eu sa relance, le merger renvoie au worker
+    assert host.reruns == [101]
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]

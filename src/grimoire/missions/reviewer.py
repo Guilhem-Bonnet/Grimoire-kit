@@ -63,6 +63,7 @@ impossible ; seule une isolation par utilisateur du système la fermerait.
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -98,7 +99,9 @@ if TYPE_CHECKING:
 __all__ = [
     "CI_PENDING",
     "CI_RUNNING",
+    "HEAD_MOVED",
     "MAX_RELAUNCHES",
+    "NO_CHECKS",
     "REVIEWER_ACTOR",
     "REVIEW_ESCALATED_EVENT",
     "REVIEW_FORGED_EVENT",
@@ -130,9 +133,16 @@ REVIEW_TIMEOUT = timedelta(hours=2)
 MAX_RELAUNCHES = 2
 #: Le mot du détail ``pending`` de la CI quand des checks tournent encore (par opposition à « aucun check »).
 CI_RUNNING = "en cours"
+#: Le détail ``pending`` d'une tête dont aucun check n'est inscrit (un push tout juste fait, ou un dépôt sans CI).
+NO_CHECKS = "aucun check rapporté"
+#: Verdict de la CI lue pour le relecteur quand la PR a avancé au-delà de la tête relue : rien n'en est conclu (P89).
+HEAD_MOVED = "moved"
 #: Un ``NOT-READY`` rendu pendant que des checks de la tête tournent encore : écarté, la relecture est refaite sans
 #: compter ni cycle ni relance (P87).
 CI_PENDING = "ci_pending"
+#: P89 : une tête sans aucun check inscrit est tenue pour « CI pas encore partie » ce temps-là après son commit ;
+#: au-delà, le dépôt n'a pas de CI pour elle et la relecture se fait sans l'attendre.
+CI_REGISTER_GRACE = timedelta(minutes=10)
 #: Verdicts notés qui appellent une nouvelle relecture, et ceux qui clôturent la relecture.
 _RELAUNCH = frozenset({"timeout", "stale", CI_PENDING})
 #: Un autre modèle que celui du worker, quand la politique ne l'impose pas.
@@ -349,7 +359,7 @@ class ReviewStage:
         head = str(manual["head"]) if manual else branch_head(root, tid)
         # P87 : tant qu'un check de la tête tourne, aucun relecteur n'est lancé (ni reçu, ni cycle) : au tick suivant.
         ci, ci_detail = self._ci_of(tid, head, str(manual["pr"]) if manual else "")
-        if ci == "pending" and CI_RUNNING in ci_detail:
+        if self._ci_unsettled(ci, ci_detail, head):  # P89 : aussi une tête poussée dont la CI n'est pas encore inscrite
             return ReviewOutcome(tid, "launch", "skipped", f"CI en cours, relecture différée au tick suivant : {ci_detail}")
         if blocked := mandate_precheck(self._service, REVIEWER_ACTOR):
             return ReviewOutcome(tid, "launch", "skipped", blocked)
@@ -556,6 +566,10 @@ class ReviewStage:
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({refusal}) : relu de nouveau")
             ci, ci_detail = self._head_ci(task, review)
+            if ci == "red" and self._rerun_red(task, review, ci_detail):
+                # P89 : un test instable n'a rien à corriger ; le READY tient, le merger attend le verdict de la relance
+                # (sa clé de relance est la même : une seconde CI rouge sur cette tête renvoie au worker).
+                ci, ci_detail = "pending", f"{ci_detail} — jobs en échec relancés une fois"
             if ci == "red":
                 notes = f"READY rendu sur une CI rouge, la tête relue ne l'est pas : {ci_detail}"
                 return self._bounce(task, launch, review, receipt, notes=notes, extra={"ci": ci, "receipt_verdict": READY})
@@ -568,11 +582,51 @@ class ReviewStage:
             self._stop(review)
             return ReviewOutcome(tid, "ready", "done", f"READY, {len(receipt.criteria_met)} critère(s) tenu(s)")
         ci, ci_detail = self._head_ci(task, review)
-        if ci == "pending" and CI_RUNNING in ci_detail:  # P87 : ce NOT-READY a pu naître d'un check encore en cours
+        head = self._reviewed_head(task, review)
+        if self._ci_unsettled(ci, ci_detail, head):  # P87, P89 : ce NOT-READY a pu naître d'une CI pas encore conclue
             self._record_judged(task, review, CI_PENDING, 0, {"ci": ci})
             self._stop(review)
             return ReviewOutcome(tid, "deferred", "done", f"CI en cours ({ci_detail}) : NOT-READY écarté, relecture refaite sans compter de cycle")
+        if ci == HEAD_MOVED:  # P89 : la PR a avancé pendant la relecture ; ce verdict juge une tête qui n'est plus la sienne
+            self._record_judged(task, review, "stale", 0, {"ci": ci})
+            self._stop(review)
+            return ReviewOutcome(tid, "stale", "done", f"NOT-READY sur une tête dépassée ({ci_detail}) : relu de nouveau")
         return self._bounce(task, launch, review, receipt)
+
+    def _reviewed_head(self, task: MissionTask, review: LedgerEvent) -> str:
+        from grimoire.missions.review_seal import branch_head
+
+        return str(review.payload.get("head") or "") if review.payload.get(MANUAL_KEY) else branch_head(
+            self._service.home_root, task.id)
+
+    def _ci_unsettled(self, ci: str, detail: str, head: str) -> bool:
+        """La CI de *head* n'a pas conclu : des checks tournent (P87), ou aucun n'est encore inscrit sur une tête toute
+        neuve (P89 : juste après un push, GitHub n'a encore rien listé). Une tête plus vieille sans check : pas de CI."""
+        if ci != "pending":
+            return False
+        if CI_RUNNING in detail:
+            return True
+        return NO_CHECKS in detail and self._committed_within(head, CI_REGISTER_GRACE)
+
+    def _committed_within(self, head: str, delay: timedelta) -> bool:
+        if not head:
+            return False
+        done = subprocess.run(["git", "-C", str(self._service.home_root), "log", "-1", "--format=%ct", head],
+                              capture_output=True, text=True, encoding="utf-8", check=False)
+        stamp = done.stdout.strip()
+        if done.returncode != 0 or not stamp.isdigit():
+            return False  # tête inconnue ici : on ne diffère pas sans fin
+        return datetime.now(UTC) - datetime.fromtimestamp(int(stamp), UTC) < delay
+
+    def _rerun_red(self, task: MissionTask, review: LedgerEvent, detail: str) -> bool:
+        from grimoire.missions.merger import MergeStage
+
+        manual = bool(review.payload.get(MANUAL_KEY))
+        try:
+            return MergeStage(self._service, self._policy, exec_=self._exec, claude_bin=self._claude).rerun_failed_once(
+                task.id, self._reviewed_head(task, review), detail, selector=str(review.payload.get("pr") or "") if manual else "")
+        except Exception:  # une relance ratée ne change rien : le READY sur CI rouge est défait comme avant
+            return False
 
     def _head_ci(self, task: MissionTask, review: LedgerEvent) -> tuple[str, str]:
         """La CI de la PR sur la tête relue, lue par le merger (#993) ; ``("", …)`` quand rien n'en est conclu.
