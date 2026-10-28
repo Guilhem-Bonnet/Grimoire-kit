@@ -886,6 +886,8 @@ class TaskService:
         origin: str = "agent",
         epoch: int | None = None,
         question_id: str = "",
+        why: str = "",
+        recommended: str = "",
     ) -> TaskMove:
         """``claimed|running → waiting(human)`` avec sa question, tracée par ``task.question_asked``.
 
@@ -895,7 +897,13 @@ class TaskService:
         """
         task = self.require(task_id)
         moment = datetime.now(UTC).isoformat()
-        question = Question(question_id or new_question_id(), kind, text.strip(), tuple(options), origin, moment)
+        pick = recommended.strip()
+        if pick and options and pick.lower() not in (o.strip().lower() for o in options):
+            raise ValueError(f"la recommandation {pick!r} n'est pas l'une des options proposées")
+        question = Question(
+            question_id or new_question_id(), kind, text.strip(), tuple(options), origin, moment,
+            why=why.strip(), recommended=pick,
+        )
         waiting = Waiting("human", "", question, self._hint_of(task), moment)
         if problem := waiting.problem():
             raise ValueError(problem)
@@ -928,6 +936,7 @@ class TaskService:
     def answer(
         self, task_id: str, text: str, actor: str, *, origin: str, question_id: str = "",
         attested_by_flow: bool = False, provenance: Mapping[str, Any] | None = None,
+        justification: str = "", confidence: str = "",
     ) -> TaskMove:
         """Répond à la question en attente — **canal humain seulement** — puis réveille la tâche.
 
@@ -944,13 +953,15 @@ class TaskService:
         *attested_by_flow*. Répondre à sa place réveillerait la tâche sans rien décider.
         """
         task = self.require(task_id)
-        gesture, asked = "answer", None
+        gesture, asked, decision = "answer", None, None
         try:
             if origin == ORIGIN_ORCHESTRATOR:  # #962 : ce qu'une réponse sous mandat tranche, et sous quel geste
-                from grimoire.missions.orchestrator_session import answer_gesture
+                from grimoire.missions.orchestrator_session import answer_plan
 
                 asked = self._question_to_answer(task, question_id)
-                gesture = answer_gesture(self, task, asked, text)
+                gesture, decision = answer_plan(
+                    self, task, asked, text, justification=justification, confidence=confidence
+                )
             # Sous mandat (#876, verrou 6) : l'origine `orchestrator` répond si un mandat valide couvre ce geste
             # et ce type de tâche ; sans mandat, elle est refusée comme toute origine non humaine.
             authority = require_authority(
@@ -985,6 +996,13 @@ class TaskService:
             task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor,
             kind="comment" if authority else "directive", origin=origin,
         )
+        if decision is not None and authority is not None:  # P82 : chaque décision du pilote est au ledger
+            from grimoire.missions.autopilot import DECIDED_EVENT, decided_payload
+
+            self.ledger.append_event(
+                DECIDED_EVENT, task_id, "task", actor,
+                decided_payload(task_id, question, decision, gesture, authority.mandate_id),
+            )
         task = self.require(task_id)
         abandon = answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options)
         if task.status is TaskState.WAITING and not abandon and not group_settled(task):
@@ -993,7 +1011,10 @@ class TaskService:
         if task.status is not TaskState.WAITING:
             # W6-07 : réponse à une question non bloquante d'une tâche qui ne l'attendait pas : tracée, sans réveil.
             return TaskMove(task=task, previous=task.status, verdict=GateVerdict("", "", ()), board_path=None)
-        return self._settle_answer(task, question, answer, actor, in_place=attested_by_flow)
+        return self._settle_answer(
+            task, question, answer, actor, in_place=attested_by_flow,
+            abandon_reason=f"pilote automatique : {decision.justification}" if decision is not None else "",
+        )
 
     def _question_to_answer(self, task: MissionTask, question_id: str) -> Question:
         """La question visée par une réponse humaine : celle du lot en attente, ou une non bloquante encore ouverte.
@@ -1029,10 +1050,17 @@ class TaskService:
         return question_gestures.resolve_question(self, task_id, question_id, answer, source, actor)
 
     def _settle_answer(
-        self, task: MissionTask, question: Question, answer: str, actor: str, *, in_place: bool = False
+        self, task: MissionTask, question: Question, answer: str, actor: str, *, in_place: bool = False,
+        abandon_reason: str = "",
     ) -> TaskMove:
         if answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options):
-            return self.cancel(task.id, f"abandon sur réponse humaine à {question.id}", actor, force=True)
+            if abandon_reason:
+                # Pilote automatique (P82) : l'abandon se range en « failed » avec sa raison — réouvrable
+                # (``task move --to ready``), là où l'annulation est terminale.
+                return self.transition(task.id, TaskState.FAILED, actor, abandon_reason)
+            return self.cancel(
+                task.id, abandon_reason or f"abandon sur réponse humaine à {question.id}", actor, force=True
+            )
         woken = None
         if in_place and task.claim is not None and not task.claim.is_expired():
             # K6-S2-02 : le run lié continue chez son titulaire — la décision attestée le reprend sur
