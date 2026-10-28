@@ -252,9 +252,6 @@ jobs:
         # est un échec, pas un faux vert (tests/e2e/_strict.py).
         env:
           GRIMOIRE_E2E_STRICT: "1"
-          # Carte 3D (P81) : le runner rend en WebGL logiciel (SwiftShader), où la présentation d'une image occupe
-          # le fil principal ; 281 ms mesurés le 2026-10-28. L'exigence produit (100 ms) reste le défaut local.
-          GRIMOIRE_CARTE_MAX_LONGTASK_MS: "400"
           # Carte 3D (P81) sous WebGL logiciel (SwiftShader) : la présentation d'une image occupe le fil
           # principal ; l'exigence produit reste 100 ms (défaut du test), la CI sans GPU en tolère 200.
           GRIMOIRE_CARTE_MAX_LONGTASK_MS: "200"
