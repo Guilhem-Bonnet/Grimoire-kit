@@ -37,7 +37,7 @@ REPO = Path(__file__).resolve().parents[2]
 def _warm(model: str) -> None:
     """Charge le modèle en mémoire (les appels mesurés sont « chauds »)."""
     body = json.dumps({"model": model, "prompt": "ok", "stream": False, "keep_alive": "5m"}).encode()
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310 — Ollama local
         f"{ollama_base_url()}/api/generate", data=body, headers={"Content-Type": "application/json"}
     )
     urllib.request.urlopen(req, timeout=300).read()  # noqa: S310 — Ollama local
