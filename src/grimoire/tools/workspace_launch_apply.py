@@ -49,6 +49,8 @@ def launch_apply(
     *,
     now: datetime | None = None,
     exec_: Exec = default_exec,
+    claude_config: Path | None = None,
+    files: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Lance la session planifiée sur *task_id* si l'empreinte du corps est encore celle de l'état.
 
@@ -57,7 +59,10 @@ def launch_apply(
     :class:`GrimoireMissionError` (404 côté transport), tout autre refus est
     une réponse ``lance: false`` avec sa raison.
     """
-    pre = launch_preflight_full(project_root, task_id, now=now)
+    # Le même *exec_* sonde gh au préflight et lance claude ensuite : un seul point d'entrée des processus.
+    pre = launch_preflight_full(
+        project_root, task_id, now=now, exec_=exec_, claude_config=claude_config, files=files,
+    )
     service, task = pre.service, pre.task
     # Idempotence avant tout : une tâche déjà lancée et vivante rend sa session, rien n'est relancé.
     existing = launched_sessions(service).get(task.id)
