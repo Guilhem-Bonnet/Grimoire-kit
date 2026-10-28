@@ -11,6 +11,7 @@ import difflib
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -257,6 +258,11 @@ def memory_service_suggestion(detected: str) -> str | None:
     )
 
 
+#: Un nom de collection ne sert qu'à un segment de chemin ou un paramètre : ni « / », ni « ? », ni « .. ». Un nom
+#: hors de cette forme n'est pas sondé (lu comme vide, comme une sonde en échec).
+_SAFE_COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
 def _http_get_json(url: str, *, timeout: float = 2.0) -> dict[str, Any] | None:
     """GET *url* and parse it as JSON, or ``None`` on any failure.
 
@@ -280,8 +286,11 @@ def _weaviate_collection_has_content(collection: str, *, weaviate_url: str = _WE
     from grimoire.memory.backends.weaviate import normalize_weaviate_collection
 
     name = normalize_weaviate_collection(collection)
+    if not _SAFE_COLLECTION.fullmatch(name):
+        return False
     base = weaviate_url.rstrip("/")
-    data = _http_get_json(f"{base}/v1/objects?class={name}&limit=1")
+    query = urllib.parse.urlencode({"class": name, "limit": 1})
+    data = _http_get_json(f"{base}/v1/objects?{query}")
     if not data:
         return False
     return bool(data.get("objects"))
@@ -289,8 +298,10 @@ def _weaviate_collection_has_content(collection: str, *, weaviate_url: str = _WE
 
 def _qdrant_collection_has_content(collection: str, *, qdrant_url: str = _QDRANT_DEFAULT_URL) -> bool:
     """Whether *collection* already exists on Qdrant and holds points."""
+    if not _SAFE_COLLECTION.fullmatch(collection):
+        return False
     base = qdrant_url.rstrip("/")
-    data = _http_get_json(f"{base}/collections/{collection}")
+    data = _http_get_json(f"{base}/collections/{urllib.parse.quote(collection, safe='')}")
     if not data:
         return False
     result = data.get("result")
