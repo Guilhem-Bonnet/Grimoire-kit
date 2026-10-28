@@ -84,7 +84,7 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure
-from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, session_env
+from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
 from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT, entered_review_at
 from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR, TaskState
@@ -1088,18 +1088,16 @@ class MergeStage:
             ledger.transition_task(tid, TaskState.RUNNING, actor_id=MERGER_ACTOR, reason=f"fusion refusée ({reason}, cycle {cycle}/{max_cycles})")
         except GrimoireError as exc:
             return MergerOutcome(tid, "bounce", "failed", f"retour au worker refusé : {exc}", pr)
-        argv = [self._claude, "--bg", "--resume", worker]
-        if self._policy.worker.permission_mode:
-            argv += ["--permission-mode", self._policy.worker.permission_mode]
-        argv.append(
+        result = resume_worker(
+            self._service, self._exec, self._claude, tid, launch,
             f"La fusion de {tid} est refusée : {_clean(detail)}. La branche distante task/{tid} a pu être réalignée par le "
             f"merger (main fusionnée, ton worktree n'est pas touché) : `git pull --no-rebase origin task/{tid}` avant de "
             f"pousser. {hint}"
             f"Corrige dans ce worktree, commite, pousse sur task/{tid} (jamais de push forcé), revérifie avec les "
             f"checks de la tâche, puis remets-la en revue "
-            f"(`grimoire task move {tid} --to needs_verification`)."
+            f"(`grimoire task move {tid} --to needs_verification`).",
+            permission_mode=self._policy.worker.permission_mode,
         )
-        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env())
         if result.returncode != 0:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=MERGER_ACTOR, reason="reprise du worker échouée")
             return self._failed(tid, "bounce", f"worker non repris ({_err(result)}), tâche remise en revue", pr)

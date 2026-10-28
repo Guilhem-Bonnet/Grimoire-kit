@@ -77,6 +77,7 @@ from grimoire.missions.launcher import (
     launched_sessions,
     mandate_precheck,
     resolve_background_session,
+    resume_worker,
     session_env,
 )
 from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_reviews, manual_tasks
@@ -680,14 +681,12 @@ class ReviewStage:
             )
         except GrimoireError as exc:
             return ReviewOutcome(tid, "bounce", "failed", f"retour au worker refusé : {exc}")
-        argv = [self._claude, "--bg", "--resume", worker_session]
-        if self._policy.worker.permission_mode:
-            argv += ["--permission-mode", self._policy.worker.permission_mode]
-        argv.append(
+        result = resume_worker(
+            self._service, self._exec, self._claude, tid, launch,
             f"La relecture de {tid} rend NOT-READY : {notes} Corrige, revérifie avec les checks de la tâche, "
-            f"puis remets-la en revue (`grimoire task move {tid} --to needs_verification`)."
+            f"puis remets-la en revue (`grimoire task move {tid} --to needs_verification`).",
+            permission_mode=self._policy.worker.permission_mode,
         )
-        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env())
         if result.returncode != 0:
             # Personne ne reprend la tâche : elle revient en revue, la reprise sera retentée au tick suivant.
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="reprise du worker échouée")

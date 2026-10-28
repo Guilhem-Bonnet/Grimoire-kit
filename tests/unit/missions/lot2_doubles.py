@@ -303,5 +303,10 @@ class FakeHost:
             self.gh_broken = True
         return ExecResult(0, "")
 
+    def review_stops(self) -> list[list[str]]:
+        """Les ``claude stop`` visant une session de relecteur (pas celle d'un worker rangé en revue, arrêtée à part)."""
+        names = {b["id"]: b["name"] for b in self.bg}
+        return [c for c in self.of("claude", "stop") if names.get(c[2], "").startswith("grimoire-review-")]
+
     def of(self, binary: str, *first: str) -> list[list[str]]:
         return [a for a, _c, _e in self.calls if a[0] == binary and tuple(a[1:1 + len(first)]) == first]
