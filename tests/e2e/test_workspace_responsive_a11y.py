@@ -17,7 +17,7 @@ from collections.abc import Iterator
 import pytest
 from playwright.sync_api import Browser, Page
 
-from .conftest import open_atelier
+from .conftest import open_atelier, open_tree_space
 
 SPACES = ["a-traiter", "travail", "flotte", "savoir", "configuration"]
 
@@ -151,6 +151,7 @@ def test_a_390_px_les_panneaux_sont_fermes_au_chargement(phone: Page) -> None:
 def test_les_tiroirs_s_ouvrent_et_se_ferment_au_clavier(phone: Page) -> None:
     """Le bouton du rail ouvre le tiroir à Entrée, le focus y entre, Échap le
     referme et rend le focus au bouton du rail ; un seul tiroir à la fois."""
+    open_tree_space(phone)
     rail = phone.locator('.rail-btn[data-panel="explorer"]')
     rail.focus()
     phone.keyboard.press("Enter")
@@ -229,6 +230,7 @@ def test_un_tiroir_se_ferme_d_un_appui_tactile_hors_de_lui_et_rend_le_focus(brow
 def test_a_1440_px_les_panneaux_restent_en_colonnes(workspace: Page) -> None:
     """Le bureau ne change pas : explorateur et inspecteur épinglés à côté du centre."""
     open_atelier(workspace)
+    open_tree_space(workspace)
     assert workspace.evaluate("() => window.GrimoireWorkspace.panelState('explorer')") == "pinned"
     widths = workspace.evaluate(
         "() => ['panel-explorer', 'center', 'panel-inspector'].map((i) => document.getElementById(i).getBoundingClientRect().width)"
@@ -349,6 +351,7 @@ def test_le_theme_systeme_suit_le_reglage_du_systeme_en_direct(workspace: Page) 
 @pytest.mark.parametrize("pref", ["dark", "light"])
 def test_a_390_px_aucune_encre_sous_45_avec_un_tiroir_ouvert(phone: Page, pref: str) -> None:
     """Contraste mesuré sur le rendu, tiroir ouvert, dans les deux thèmes."""
+    open_tree_space(phone)
     _pick_theme(phone, pref)
     phone.locator('.rail-btn[data-panel="explorer"]').click()
     phone.locator("#panel-explorer").wait_for(state="visible")
@@ -396,21 +399,6 @@ def test_les_zones_de_donnees_sont_des_regions_polies(workspace: Page) -> None:
 
 
 # ── États vides ─────────────────────────────────────────────────────────────
-
-
-def test_un_explorateur_vide_dit_pourquoi_et_propose_ou_aller(workspace: Page) -> None:
-    """Cinq espaces sur six ne remplissent pas l'explorateur : il restait un
-    cadre muet. Il explique, et un bouton mène aux Fichiers de Configuration
-    (ex-Source), où vit l'arborescence."""
-    open_atelier(workspace)
-    workspace.evaluate("() => window.GrimoireWorkspace.goto('observer')")
-    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'observer'")
-    _settle(workspace)
-    body = workspace.locator("#explorer-body")
-    assert body.inner_text().strip(), "l'explorateur ne doit pas rester muet"
-    button = body.get_by_role("button", name="Ouvrir les fichiers")
-    button.click()
-    workspace.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
 
 
 def test_le_diagnostic_non_lance_se_lance_d_un_bouton(workspace: Page) -> None:

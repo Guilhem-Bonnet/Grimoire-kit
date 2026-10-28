@@ -1,0 +1,76 @@
+{
+  "schema": "grimoire-reel/v1",
+  "id": "cloture-refusee-puis-acceptee",
+  "title": "Clôture refusée, puis acceptée",
+  "summary": "Sans reçu de revue, la clôture d'une tâche V2 est refusée ; elle passe une fois la revue écrite.",
+  "command": [
+    "grimoire task add \"Livrer fichier\" -a \"le livrable est relu par un humain\" --check \"test -f livrable.txt\" --ready",
+    "grimoire task claim GAO-livrer-fichi-001",
+    "grimoire task move GAO-livrer-fichi-001 --to running",
+    "écrire livrable.txt",
+    "grimoire task move GAO-livrer-fichi-001 --to needs_verification",
+    "grimoire task verify GAO-livrer-fichi-001",
+    "grimoire task close GAO-livrer-fichi-001",
+    "grimoire task review GAO-livrer-fichi-001 --verdict READY --reviewer fixture",
+    "grimoire task close GAO-livrer-fichi-001"
+  ],
+  "kit_version": "3.71.0",
+  "recorded_at": "2026-10-28T00:08:05Z",
+  "output_sha256": "493b0203db612bc5104420aaf8d51a825426916f07d2b4b389afdeccc83b2c8f",
+  "frames": [
+    {
+      "kind": "run",
+      "command": "grimoire task add \"Livrer fichier\" -a \"le livrable est relu par un humain\" --check \"test -f livrable.txt\" --ready",
+      "exit_code": 0,
+      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-livrer-fichi-001 — Livrer fichier (ready)\n  vérifiabilité : V2 — critère sans verdict reconnu : 'le livrable est relu par un humain'\n    non reconnu : le livrable est relu par un humain"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task claim GAO-livrer-fichi-001",
+      "exit_code": 0,
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (ready → claimed) · V2 → aucun — omets le paramètre model,\ngarde celui de la session"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task move GAO-livrer-fichi-001 --to running",
+      "exit_code": 0,
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (claimed → running) · V2 → aucun — omets le paramètre\nmodel, garde celui de la session"
+    },
+    {
+      "kind": "write",
+      "command": "écrire livrable.txt",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task move GAO-livrer-fichi-001 --to needs_verification",
+      "exit_code": 0,
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (running → needs_verification) · V2 → aucun — omets le\nparamètre model, garde celui de la session"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task verify GAO-livrer-fichi-001",
+      "exit_code": 0,
+      "output": "OK GAO-livrer-fichi-001 — verdict passed (EVD-GAO-livrer-fichi-001-001,\nver-GAO-livrer-fichi-001-001)\n  - critère non couvert par les commandes : le livrable est relu par un humain"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task close GAO-livrer-fichi-001",
+      "exit_code": 1,
+      "output": "✗ Gate de preuve « review_receipt » : 1 exigence(s) non satisfaite(s)\n  - review.receipt_missing : aucun reçu de revue : la tâche exige une relecture avant de fermer\n    faire relire, puis : grimoire task review GAO-livrer-fichi-001 --verdict READY (attendu :\n_grimoire-output/reviews/GAO-livrer-fichi-001/review-receipt.json)"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task review GAO-livrer-fichi-001 --verdict READY --reviewer fixture",
+      "exit_code": 0,
+      "output": "OK reçu READY pour GAO-livrer-fichi-001 (empreinte <hex>, 0 constat(s) vérifiable(s))"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task close GAO-livrer-fichi-001",
+      "exit_code": 0,
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (needs_verification → closed) · V2 → aucun — omets le\nparamètre model, garde celui de la session"
+    }
+  ]
+}

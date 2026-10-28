@@ -20,7 +20,16 @@ from grimoire.cli.app import app
 from grimoire.missions import breaker as brk
 from grimoire.missions.admission import Admit
 from grimoire.missions.breaker import read_breaker, record_failure, record_success, reset, trip
-from grimoire.missions.launcher import LAUNCH_FAILED_EVENT, LAUNCHED_EVENT, WorkerLauncher, launched_sessions
+from grimoire.missions.launcher import (
+    LAUNCH_FAILED_EVENT,
+    LAUNCHED_EVENT,
+    WORKER_HALTED_EVENT,
+    ExecResult,
+    WorkerLauncher,
+    active_worker_ids,
+    launched_sessions,
+    resume_worker,
+)
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
 from grimoire.missions.schemas import TaskState
@@ -473,16 +482,91 @@ def test_modele_et_mode_ne_peuvent_pas_etre_une_option(projet: Path, key: str, v
     assert load_orchestrator_policy(projet).usable is False
 
 
-def test_le_wip_compte_aussi_les_sessions_bloquees_en_attente_de_verification(projet: Path, service: TaskService, host: FakeHost) -> None:
-    write_policy(projet, wip=1)
-    first = ready(service, "a")
-    tick(projet, host)
+def _to_review(projet: Path, tid: str) -> None:
     ledger = TaskService(projet).ledger
-    ledger.transition_task(first, TaskState.RUNNING, actor_id="worker")
-    ledger.transition_task(first, TaskState.NEEDS_VERIFICATION, actor_id="worker")  # la session vit encore, en attente de relecture
-    ready(TaskService(projet), "b")
-    again = tick(projet, host)
-    assert [o.status for o in again.launches] == ["skipped"] and len(host.of("claude", "--bg")) == 1
+    if ledger.get_task(tid).status is not TaskState.RUNNING:
+        ledger.transition_task(tid, TaskState.RUNNING, actor_id="worker")
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")
+
+
+def test_les_taches_en_revue_ne_comptent_plus_dans_le_wip(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, wip=12, per_day=30)
+    ids = [ready(service, f"t{i}") for i in range(10)]
+    launcher = WorkerLauncher(TaskService(projet), load_orchestrator_policy(projet).policy, exec_=host)  # type: ignore[arg-type]
+    assert [o.status for o in launcher(tuple(Admit(t) for t in ids))] == ["launched"] * 10
+    for tid in ids:
+        _to_review(projet, tid)
+    write_policy(projet, wip=2, per_day=30)
+    eleventh = ready(TaskService(projet), "onzieme")
+    small = WorkerLauncher(TaskService(projet), load_orchestrator_policy(projet).policy, exec_=host)  # type: ignore[arg-type]
+    again = small((Admit(eleventh),))  # dix sessions rangées, WIP de 2 : la onzième part quand même
+    assert [(o.task_id, o.status) for o in again] == [(eleventh, "launched")]
+    assert active_worker_ids(TaskService(projet)) == frozenset({eleventh})
+
+
+def test_au_passage_en_revue_la_session_du_worker_est_arretee_et_notee(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "a")
+    tick(projet, host)
+    short = launched_sessions(TaskService(projet))[tid]["session"]
+    _to_review(projet, tid)
+    tick(projet, host)
+    assert ["claude", "stop", short] in [c[0] for c in host.calls]
+    halted = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_HALTED_EVENT]
+    assert len(halted) == 1 and halted[0].payload["session"] == short
+    tick(projet, host)  # l'arrêt n'est ni rejoué ni noté deux fois
+    assert len([c for c in host.calls if c[0][:2] == ["claude", "stop"]]) == 1
+
+
+def test_un_arret_refuse_est_retente_au_tick_suivant(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "a")
+    tick(projet, host)
+    _to_review(projet, tid)
+    host.stop_result = ExecResult(1, "", "stop refusé")
+    tick(projet, host)
+    assert not [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_HALTED_EVENT]
+    host.stop_result = ExecResult(0, "stopped\n")
+    tick(projet, host)
+    assert [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_HALTED_EVENT]
+
+
+def test_un_renvoi_reprend_la_session_arretee_et_la_recompte(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, wip=1)
+    tid = ready(service, "a")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    _to_review(projet, tid)
+    tick(projet, host)
+    assert active_worker_ids(TaskService(projet)) == frozenset()
+    TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
+    result = resume_worker(TaskService(projet), host, "claude", tid, launch, "corrige", permission_mode="acceptEdits")
+    assert result.returncode == 0
+    assert host.of("claude", "--bg", "--resume")[-1][:4] == ["claude", "--bg", "--resume", launch["session_id"]]
+    assert active_worker_ids(TaskService(projet)) == frozenset({tid})
+    _to_review(projet, tid)  # renvoyée en revue : la session reprise est arrêtée à son tour
+    tick(projet, host)
+    assert len([c for c in host.calls if c[0][:2] == ["claude", "stop"]]) == 2
+
+
+def test_une_reprise_qui_echoue_relance_une_session_neuve_sur_le_meme_worktree(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "a")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    _to_review(projet, tid)
+    tick(projet, host)
+    TaskService(projet).ledger.transition_task(tid, TaskState.RUNNING, actor_id="reviewer")
+    real = host.__call__
+
+    def broken_resume(argv, cwd, env=None):  # type: ignore[no-untyped-def]
+        if "--resume" in argv:
+            return ExecResult(1, "", "conversation introuvable")
+        return real(argv, cwd, env)
+
+    result = resume_worker(TaskService(projet), broken_resume, "claude", tid, launch, "corrige")
+    assert result.returncode == 0
+    fresh = host.bg[-1]
+    assert fresh["name"] == f"grimoire-{tid}" and Path(fresh["cwd"]) == Path(launch["cwd"])
+    assert launched_sessions(TaskService(projet))[tid]["session"] == fresh["id"]
+    assert tid in active_worker_ids(TaskService(projet))
 
 
 def test_un_lancement_echoue_compte_au_plafond_du_jour(projet: Path, service: TaskService, host: FakeHost) -> None:
@@ -705,3 +789,48 @@ def test_un_dossier_atteint_par_un_lien_est_le_meme(tmp_path: Path) -> None:
         pytest.skip("liens symboliques indisponibles")
     entries = [{"id": SHORT, "kind": "background", "sessionId": SID, "cwd": str(link)}]
     assert resolve_background_session(_agents_exec(entries), wt, SHORT, session_cwd=wt, attempts=1) == SID
+
+
+# ── P86 : la version de l'hôte au claim ────────────────────────────────────────
+
+
+def test_un_worker_lance_par_le_tick_porte_la_version_de_l_hote_au_claim(projet: Path, service: TaskService, host: FakeHost) -> None:
+    host.version = "2.1.310"
+    first, second = ready(service, "une"), ready(service, "deux")
+    tick(projet, host)
+    after = TaskService(projet)
+    for tid in (first, second):
+        claim = after.require(tid).claim
+        assert claim is not None and claim.session_host_version == "2.1.310"
+        assert claim.session_id == host.session_of(f"grimoire-{tid}")
+    assert len(host.of("claude", "--version")) == 1  # lue une fois par tick, pas une fois par tâche
+    for argv, _c, _e in (c for c in host.calls if c[0][:2] == ["claude", "--bg"]):
+        assert "--host-version 2.1.310" in argv[-1]
+
+
+def test_version_illisible_le_claim_n_en_porte_pas(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "sans version")
+    tick(projet, host)
+    claim = TaskService(projet).require(tid).claim
+    assert claim is not None and claim.session_host_version == ""
+    (argv,) = host.of("claude", "--bg")
+    assert "--host-version" not in argv[-1]
+
+
+def test_task_attach_inscrit_la_version_donnee_par_la_consigne(projet: Path, service: TaskService) -> None:
+    tid = ready(service, "attache")
+    service.claim(tid, "worker", host="claude-code-cli")
+    result = runner.invoke(
+        app, ["task", "attach", tid, "--session-id", "sess-1", "--host-version", "2.1.310", "--project-root", str(projet)]
+    )
+    assert result.exit_code == 0, result.output
+    claim = TaskService(projet).require(tid).claim
+    assert claim is not None and claim.session_host_version == "2.1.310"
+
+
+def test_la_politique_probe_host_est_un_booleen_desactive_par_defaut(projet: Path) -> None:
+    assert load_orchestrator_policy(projet).policy.probe_host is False  # type: ignore[union-attr]
+    (projet / POLICY).write_text("orchestrator:\n  probe_host: true\n", encoding="utf-8")
+    assert load_orchestrator_policy(projet).policy.probe_host is True  # type: ignore[union-attr]
+    (projet / POLICY).write_text("orchestrator:\n  probe_host: oui\n", encoding="utf-8")
+    assert load_orchestrator_policy(projet).policy is None

@@ -148,10 +148,28 @@ def test_failed_gates_stop_everything() -> None:
     assert {n: r for n, r in results.items() if n != "gates"} == {
         "build": "skipped",
         "test": "skipped",
+        "installers": "skipped",
         "attest": "skipped",
         "publish-pypi": "skipped",
         "github-release": "skipped",
     }
+
+
+@pytest.mark.parametrize("stable", [True, False])
+def test_a_failed_installer_check_blocks_publication_and_release(stable: bool) -> None:
+    results = _simulate(stable=stable, failing=frozenset({"installers"}))
+    assert results["attest"] == "skipped"
+    assert results["publish-pypi"] == "skipped"
+    assert results["github-release"] == "skipped"
+
+
+def test_release_ships_attested_installers() -> None:
+    jobs = _load_workflows()["publish.yml"]["jobs"]
+    attest = next(s for s in jobs["attest"]["steps"] if "attest-build-provenance" in str(s.get("uses", "")))
+    subjects = attest["with"]["subject-path"]
+    assert "installers/install.sh" in subjects
+    assert "installers/install.ps1" in subjects
+    assert "installers/install.ps1" in _release_step()["with"]["files"]
 
 
 @pytest.mark.parametrize("stable", [True, False])

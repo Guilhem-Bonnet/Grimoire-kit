@@ -15,8 +15,8 @@ $schema: "grimoire-ceremony-budget/v1"
 
 calibration:
   calibrated: false
-  as_of: "2026-10-27"
-  kit_version: "3.72"
+  as_of: "2026-10-28"
+  kit_version: "3.73"
   method: "seuils posés à la main et rejoués sur le corpus ci-dessous ; aucun ajustement sur des runs réels"
 
 indices:

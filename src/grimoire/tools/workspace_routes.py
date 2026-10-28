@@ -71,7 +71,7 @@ import contextlib
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +80,7 @@ from grimoire.tools import (
     source_assist,
     workspace_api,
     workspace_attention,
+    workspace_chat,
     workspace_config,
     workspace_exec,
     workspace_hygiene,
@@ -97,6 +98,7 @@ from grimoire.tools import (
 )
 
 __all__ = [
+    "CHAT_STREAM_PATH",
     "GET_ROUTES",
     "POST_ROUTES",
     "PREFIX",
@@ -453,6 +455,13 @@ def _memory_entry(project_root: Path, query: _Query) -> Any:
     return workspace_knowledge.memory_entry(project_root, _one(query, "id"), slug=_one(query, "slug") or None)
 
 
+def _memory_graph(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/memory/graph`` — le graphe complet, en colonnes compactes (P81)."""
+    from grimoire.tools import workspace_graph
+
+    return workspace_graph.graph_view(project_root)
+
+
 def _memory_quality(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/memory/quality`` — santé de la mémoire d'un projet et sa file d'hygiène (P25).
 
@@ -601,11 +610,13 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/search": _memory_search,
     f"{PREFIX}memory/entries": _memory_entries,
     f"{PREFIX}memory/entry": _memory_entry,
+    f"{PREFIX}memory/graph": _memory_graph,
     f"{PREFIX}memory/quality": _memory_quality,
     f"{PREFIX}data/machine": _data_machine,
     f"{PREFIX}setup/guide": _setup_guide,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
+    f"{PREFIX}chat/state": workspace_chat.chat_state,
 }
 
 
@@ -622,7 +633,7 @@ STREAM_HEADERS: tuple[tuple[str, str], ...] = (
 )
 
 
-def workspace_stream(project_root: Path, query: _Query) -> Iterator[bytes]:
+def workspace_stream(project_root: Path, query: _Query) -> Generator[bytes, None, None]:
     """Le flux du pouls pour *project_root*, servi par l'hôte sur :data:`STREAM_PATH`.
 
     Mêmes paramètres que ``pulse`` : ``since`` (l'empreinte connue) et
@@ -633,6 +644,15 @@ def workspace_stream(project_root: Path, query: _Query) -> Iterator[bytes]:
         since=_one(query, "since") or None,
         portfolio=_one(query, "scope") == "portfolio",
     )
+
+
+#: Le flux du chat de l'orchestrateur (ACP2) : SSE, servi comme le pouls par l'hôte.
+CHAT_STREAM_PATH = f"{PREFIX}chat/stream"
+
+
+def chat_stream(project_root: Path, query: _Query) -> Generator[bytes, None, None]:
+    """Le flux de la conversation de l'orchestrateur du projet, servi sur :data:`CHAT_STREAM_PATH`."""
+    return workspace_chat.chat_stream(project_root, query)
 
 
 def _task_id(path: str, suffix: str = "") -> str:
@@ -895,6 +915,11 @@ def _mandate_revoke(project_root: Path, body: dict[str, Any]) -> Any:
 
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
+    # Chat de l'orchestrateur (ACP2) : un tour humain relayé à l'agent ; le cockpit n'écrit rien (ADR-007).
+    f"{PREFIX}chat/send": workspace_chat.chat_send,
+    f"{PREFIX}chat/permission": workspace_chat.chat_permission,
+    f"{PREFIX}chat/cancel": workspace_chat.chat_cancel,
+    f"{PREFIX}chat/stop": workspace_chat.chat_stop,
     f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
     f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,

@@ -1,0 +1,115 @@
+[
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "method": "initialize",
+   "params": {
+    "protocolVersion": 1,
+    "clientCapabilities": {},
+    "clientInfo": {
+     "name": "grimoire",
+     "version": "x"
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "loadSession": true,
+     "promptCapabilities": {}
+    },
+    "authMethods": []
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 2,
+   "method": "session/load",
+   "params": {
+    "sessionId": "old-7",
+    "cwd": "/work/project",
+    "mcpServers": []
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "old-7",
+    "update": {
+     "sessionUpdate": "user_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "avant"
+     }
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 2,
+   "result": null
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 3,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "old-7",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "suite"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "old-7",
+    "update": {
+     "sessionUpdate": "agent_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "reprise"
+     }
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 3,
+   "result": {
+    "stopReason": "end_turn"
+   }
+  }
+ }
+]
