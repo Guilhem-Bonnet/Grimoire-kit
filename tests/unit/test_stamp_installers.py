@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,7 @@ def test_invalid_version_refused(tmp_path):
     assert _load().main(["--version", "latest", "--out", str(tmp_path)]) == 2
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="install.sh est un script POSIX : le bash de Windows (WSL) ne voit pas ces chemins ni cet env")
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash absent")
 def test_unpinned_install_sh_demands_a_version():
     r = subprocess.run(["bash", str(ROOT / "install.sh")], capture_output=True, text=True,
@@ -46,6 +48,7 @@ def test_unpinned_install_sh_demands_a_version():
     assert "--version" in r.stderr
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="install.sh est un script POSIX : le bash de Windows (WSL) ne voit pas ces chemins")
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash absent")
 def test_install_sh_syntax():
     assert subprocess.run(["bash", "-n", str(ROOT / "install.sh")], check=False).returncode == 0
