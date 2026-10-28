@@ -385,6 +385,26 @@ class _ReviewSource:
     wait: float = workspace_reviews.ATTENTION_WAIT_S
 
 
+#: Les états de tâche dont la PR est relue puis fusionnée par le tick ; ``waiting``, ``blocked``,
+#: ``failed`` en sont absents : la tâche est revenue vers l'humain.
+_PILOTED_STATES = frozenset({"ready", "claimed", "running", "needs_verification"})
+_PILOT_GESTURES = frozenset({"accept", "merge"})
+
+
+def _pilot_covers_reviews(root: Path) -> bool:
+    """Vrai si un mandat actif couvre ``accept`` et ``merge`` : le relecteur du tick relit alors les PR de tâches."""
+    from grimoire.missions.mandate import MandateStore
+
+    state = MandateStore(root).state()
+    return state.active and state.mandate is not None and set(state.mandate.gestures) >= _PILOT_GESTURES
+
+
+def _piloted(pr: Mapping[str, Any]) -> bool:
+    """Une PR rattachée à une tâche que le tick prend en charge, et que le merger n'a pas lâchée (CI en échec)."""
+    task = pr["task"]
+    return bool(task) and task["status"] in _PILOTED_STATES and pr["checks"]["state"] != "failed"
+
+
 def _collect_reviews(read: _ProjectRead, source: _ReviewSource) -> None:
     """Une ligne par PR ouverte à revoir ; un état inconnu devient une sonde en échec, jamais un silence."""
     assert read.root is not None
@@ -392,10 +412,18 @@ def _collect_reviews(read: _ProjectRead, source: _ReviewSource) -> None:
         read.root, home_root=read.home_root, tasks=read.tasks,
         reader=source.reader, cache=source.cache, wait=source.wait,
     )
-    read.reviews = {"state": got["state"], "detail": got["detail"], "repo": got["repo"], "count": len(got["prs"])}
+    piloted = 0
+    if got["prs"] and _pilot_covers_reviews(read.root):
+        piloted = sum(1 for pr in got["prs"] if _piloted(pr))
+    read.reviews = {"state": got["state"], "detail": got["detail"], "repo": got["repo"],
+                    "count": len(got["prs"]) - piloted}
+    if piloted:  # sans mandat, la charge utile reste celle d'avant
+        read.reviews["piloted"] = piloted
     if got["state"] == workspace_reviews.UNKNOWN:
         _item(read, PROBE_FAILED, "pr", "PR à revoir", f"état des PR inconnu : {got['detail']}", repo=got["repo"])
     for pr in got["prs"]:
+        if piloted and _piloted(pr):
+            continue
         task = pr["task"] or {}
         _item(read, PR_REVIEW, f"{got['repo']}#{pr['number']}", f"#{pr['number']} {pr['title']}",
               workspace_reviews.review_reason(pr), since=pr["created_at"] or None,

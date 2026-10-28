@@ -48,7 +48,9 @@ curl -fsSL <url-install.sh> | bash -s -- --legacy \
   --user "Votre Nom"
 ```
 
-Sans `--legacy`, `install.sh` affiche les instructions SDK et s'arrête.
+Sans `--legacy`, `install.sh` installe uv s'il manque, puis grimoire-kit épinglé
+(`uv tool install`) ; `install.ps1` fait de même sous Windows. Les deux sont publiés,
+avec leur attestation de provenance, parmi les fichiers de chaque release.
 
 </details>
 

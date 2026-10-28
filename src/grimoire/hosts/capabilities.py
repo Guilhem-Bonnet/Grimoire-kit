@@ -77,6 +77,9 @@ class HostProfile:
     mcp_native: bool = False
     #: Entry-point file the host reads first, when it has one.
     instructions_entrypoint: str = ""
+    #: Command (argv) that starts the host's ACP agent over stdio, run from the
+    #: project folder (``grimoire chat``). Empty: no ACP mode known for this host.
+    acp_command: tuple[str, ...] = ()
     notes: str = ""
 
     @property
@@ -127,6 +130,7 @@ CLAUDE_CODE_PROFILE = HostProfile(
     permissions_native=True,
     mcp_native=True,
     instructions_entrypoint="CLAUDE.md",
+    acp_command=("claude-agent-acp",),
     notes=(
         "Every surface has a native counterpart. Starting inside an agent: `claude --agent <name>` "
         "(code.claude.com/docs/en/cli-reference) and the `agent` setting "
@@ -145,6 +149,7 @@ COPILOT_PROFILE = HostProfile(
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint=".github/copilot-instructions.md",
+    acp_command=("copilot", "--acp"),
     notes="No declarative permission table: permissions are enforced by the pre_tool_use hook instead.",
 )
 
@@ -158,6 +163,7 @@ CODEX_PROFILE = HostProfile(
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint="AGENTS.md",
+    acp_command=("codex-acp",),
     notes="Prose entrypoint plus MCP: agents, skills and commands degrade to a described catalog.",
 )
 
@@ -171,6 +177,7 @@ CURSOR_PROFILE = HostProfile(
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint=".cursor/rules/grimoire.mdc",
+    acp_command=("agent", "acp"),
     notes="Rule files plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
 
@@ -184,6 +191,7 @@ GEMINI_PROFILE = HostProfile(
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint="GEMINI.md",
+    acp_command=("gemini", "--acp"),
     notes="Prose entrypoint plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
 
@@ -197,6 +205,7 @@ OPENCODE_PROFILE = HostProfile(
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint=".opencode/grimoire.md",
+    acp_command=("opencode", "acp"),
     notes=(
         "Agents, skills, commands et MCP sont chargés depuis .opencode/ et opencode.json (vérifié, 1.17.11). "
         "Le seul hook est un plugin : tool.execute.before refuse un outil (fixture). Pas de SessionStart, "

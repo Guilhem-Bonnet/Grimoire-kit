@@ -51,6 +51,7 @@ c'est sans effet sur la garde, l'inscription précède tout tick qui jugerait se
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import subprocess
@@ -78,19 +79,26 @@ __all__ = [
     "ExecResult",
     "LaunchOutcome",
     "WorkerLauncher",
+    "active_worker_ids",
     "attest_session",
     "default_exec",
+    "halt_idle_workers",
     "launched_sessions",
     "live_background_sessions",
     "mandate_precheck",
     "renew_live_workers",
     "resolve_background_session",
+    "resume_worker",
     "session_env",
     "unhalted_sessions",
 ]
 
 LAUNCHED_EVENT = "task.session_launched"
 LAUNCH_FAILED_EVENT = "task.session_launch_failed"
+#: La session du worker, arrêtée (``claude stop``) quand sa tâche passe en revue ou en attente : la conversation reste.
+WORKER_HALTED_EVENT = "task.worker_session_halted"
+#: La session du worker, reprise (``claude --bg --resume``) ou repartie à neuf sur le même worktree après un renvoi.
+WORKER_RESUMED_EVENT = "task.worker_session_resumed"
 WORKER_ACTOR = "worker"
 _HOST = "claude-code-cli"
 _EXEC_TIMEOUT_S = 60.0
@@ -367,6 +375,115 @@ def _freeze_repository(service: TaskService, task_id: str) -> str:
 
 
 _LIVE = (TaskState.CLAIMED, TaskState.RUNNING, TaskState.BLOCKED, TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
+#: Les états où la session du worker travaille : seuls ceux-là occupent une place du WIP.
+_WORKING = (TaskState.CLAIMED, TaskState.RUNNING)
+#: Les états où le worker a rendu la main (revue, attente) : sa session est arrêtée, reprise si la tâche lui revient.
+_PARKED = (TaskState.NEEDS_VERIFICATION, TaskState.WAITING)
+
+
+def active_worker_ids(service: TaskService) -> frozenset[str]:
+    """Les tâches dont une session de worker occupe une place du WIP.
+
+    Une session compte quand elle travaille (``claimed``, ``running`` : une session reprise après un renvoi y revient
+    d'elle-même). Revue, fusion et attente ne comptent pas : leur session est arrêtée. Une session lancée puis
+    abandonnée sans arrêt confirmé (``halted: false``) tient encore son claim : elle compte tant qu'elle est vivante.
+    """
+    def status(tid: str) -> TaskState | None:
+        task = service.ledger.get_task(tid)
+        return task.status if task is not None else None
+
+    working = {tid for tid in launched_sessions(service) if status(tid) in _WORKING}
+    stray = {tid for tid in unhalted_sessions(service) if status(tid) in _LIVE}
+    return frozenset(working | stray)
+
+
+def _session_marks(service: TaskService, task_id: str) -> tuple[str, int, int]:
+    """``(session courante, rang de sa dernière mise en route, rang de son dernier arrêt)`` dans le ledger de la tâche."""
+    short, started, halted = "", -1, -1
+    for rank, event in enumerate(service.ledger.events_for(task_id)):
+        if event.event_type in (LAUNCHED_EVENT, WORKER_RESUMED_EVENT):
+            short, started = str(event.payload.get("session") or short), rank
+        elif event.event_type == WORKER_HALTED_EVENT:
+            halted = rank
+    return short, started, halted
+
+
+def halt_idle_workers(service: TaskService, exec_: Exec, claude_bin: str = "claude") -> tuple[str, ...]:
+    """Arrête (``claude stop``) la session de chaque worker dont la tâche est en revue ou en attente ; rend les tâches arrêtées.
+
+    La conversation reste : un renvoi du relecteur ou du merger la reprend (:func:`resume_worker`). L'arrêt est noté au
+    ledger (``task.worker_session_halted``) ; un arrêt refusé ne note rien et sera retenté au tick suivant, sauf si la
+    session n'est plus listée par ``claude agents`` (déjà finie : rien à arrêter, notée comme telle).
+    """
+    halted: list[str] = []
+    for tid, payload in launched_sessions(service).items():
+        task = service.ledger.get_task(tid)
+        if task is None or task.status not in _PARKED:
+            continue
+        short, started, last_halt = _session_marks(service, tid)
+        if not short or last_halt > started:
+            continue
+        cwd = Path(str(payload.get("cwd") or service.home_root))
+        confirmed, _ = _halt(exec_, cwd, short, claude_bin)
+        gone = False
+        if not confirmed:
+            agents = _read_agents(exec_, cwd, claude_bin)
+            gone = agents is not None and not any(str(a.get("id") or "") == short for a in agents)
+            if not gone:
+                continue
+        service.ledger.append_event(
+            WORKER_HALTED_EVENT, tid, "task", WORKER_ACTOR,
+            {"session": short, "status": task.status.value, "already_gone": gone},
+        )
+        halted.append(tid)
+    return tuple(halted)
+
+
+def resume_worker(
+    service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
+    permission_mode: str = "",
+) -> ExecResult:
+    """Rend la tâche à son worker : reprend la session arrêtée par ``claude --bg --resume``, à défaut en lance une neuve.
+
+    Une reprise qui échoue (conversation introuvable, hôte en erreur) ne laisse pas la tâche sans worker : une session
+    neuve repart sur le même worktree, avec la consigne du worker et *message* pour contexte. Le résultat est celui de
+    la reprise si les deux échouent. La session obtenue est notée (``task.worker_session_resumed``) : elle compte
+    de nouveau dans le WIP et c'est elle que le prochain arrêt vise.
+    """
+    cwd = Path(str(launch.get("cwd") or "."))
+    argv = [claude_bin, "--bg", "--resume", str(launch.get("session_id") or "")]
+    if permission_mode:
+        argv += ["--permission-mode", permission_mode]
+    result = exec_([*argv, message], cwd, session_env())
+    fresh = False
+    if result.returncode != 0:
+        fresh_argv = [claude_bin, "--bg", "--name", f"grimoire-{task_id}"]
+        if launch.get("model"):
+            fresh_argv += ["--model", str(launch["model"])]
+        if permission_mode:
+            fresh_argv += ["--permission-mode", permission_mode]
+        retry = exec_([*fresh_argv, f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}"], cwd, session_env())
+        if retry.returncode != 0:
+            return result
+        result, fresh = retry, True
+    match = _BG_ID.search(result.stdout)
+    short = match.group(1) if match else str(launch.get("session") or "")
+    payload: dict[str, Any] = {"session": short, "fresh": fresh, "name": f"grimoire-{task_id}"}
+    if fresh and match:
+        session_id = resolve_background_session(exec_, cwd, short, claude_bin, name=f"grimoire-{task_id}", session_cwd=cwd)
+        payload["session_id"] = session_id
+        refused, _code = attest_session(service, session_id, WORKER_ACTOR, task_id) if session_id else ("session non résolue", "")
+        if refused:
+            _halt(exec_, cwd, short, claude_bin)
+            return ExecResult(1, "", refused)
+        current = service.require(task_id).claim
+        service.ledger.append_event(
+            LAUNCHED_EVENT, task_id, "task", WORKER_ACTOR,
+            {**launch, "session": short, "session_id": session_id, "relaunch": True,
+             "lease_epoch": current.lease_epoch if current is not None else launch.get("lease_epoch", 0)},
+        )
+    service.ledger.append_event(WORKER_RESUMED_EVENT, task_id, "task", WORKER_ACTOR, payload)
+    return result
 
 
 def _day(stamp: str) -> str:
@@ -385,17 +502,13 @@ class WorkerLauncher:
         self._exec = exec_
         self._claude = claude_bin
         self._now = now
+        self._version: str | None = None
 
     # -- gardes -------------------------------------------------------------
 
     def _active(self) -> int:
-        """Les sessions de worker vivantes : tâches portant un lancement et tenant encore leur claim.
-
-        Une session qui attend (``blocked``, ``waiting``, ``needs_verification``) est vivante : elle compte. Une session
-        lancée puis abandonnée sans arrêt confirmé (``halted: false``) tient encore son claim : elle compte aussi.
-        """
-        tasks = set(launched_sessions(self._service)) | set(unhalted_sessions(self._service))
-        return sum(1 for tid in tasks if self._service.require(tid).status in _LIVE)
+        """Les sessions de worker qui occupent une place : celles qui travaillent (:func:`active_worker_ids`)."""
+        return len(active_worker_ids(self._service))
 
     def _launched_today(self) -> int:
         today = _day((self._now or datetime.now(UTC)).isoformat())
@@ -412,6 +525,22 @@ class WorkerLauncher:
         if route is not None and route.outcome == "route" and route.model and route.provider.lower() in {"anthropic", "claude", "claude-code"}:
             return route.model
         return _TIER_ALIAS.get(role.tier, "")
+
+    def _host_version(self) -> str:
+        """La version de l'hôte (``claude --version``), lue une fois par tick (P86) ; ``""`` si illisible.
+
+        C'est elle que le claim porte : le frein d'un hôte ne se prouve que pour une version exacte.
+        """
+        if self._version is None:
+            from grimoire.hosts.host_version import VERSION_PATTERN
+
+            try:
+                done = self._exec([self._claude, "--version"], self._service.home_root, None)
+                found = VERSION_PATTERN.search(done.stdout or "") if done.returncode == 0 else None
+            except (OSError, ValueError):
+                found = None
+            self._version = found.group(0) if found else ""
+        return self._version
 
     # -- lancement ----------------------------------------------------------
 
@@ -477,6 +606,11 @@ class WorkerLauncher:
 
             # Un refus de plafond révoque déjà le mandat ; un rôle en conflit ou un journal en erreur est une panne.
             return self._abandon(tid, session, wt.path, refused, count=code != CAP_EXCEEDED)
+        version = self._host_version()
+        if version:
+            # P86 : la session est nommée au claim avec la version de l'hôte ; sans elle le frein n'est jamais prouvé.
+            with contextlib.suppress(GrimoireError):
+                service.attach_session(tid, session_id, session_host=_HOST, actor=WORKER_ACTOR, host_version=version)
         current = service.require(tid).claim
         service.ledger.append_event(
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
@@ -557,15 +691,16 @@ class WorkerLauncher:
             argv += ["--model", model]
         if self._policy.worker.permission_mode:
             argv += ["--permission-mode", self._policy.worker.permission_mode]
-        argv.append(self._prompt(tid))
+        argv.append(self._prompt(tid, self._host_version()))
         return argv
 
     @staticmethod
-    def _prompt(tid: str) -> str:
+    def _prompt(tid: str, host_version: str = "") -> str:
         """La consigne du worker ; sa PR s'ouvre prête à relire : un brouillon n'est jamais fusionné (#993)."""
+        flag = f" --host-version {host_version}" if host_version else ""
         return (
             f"Tu es le worker de la tâche {tid}, dans son worktree task/{tid}. "
-            f"Rattache cette session à ton claim (`grimoire task attach {tid}`), lis `grimoire task show {tid}`, "
+            f"Rattache cette session à ton claim (`grimoire task attach {tid}{flag}`), lis `grimoire task show {tid}`, "
             "réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR "
             "prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), "
             f"et passe la tâche en revue (`grimoire task move {tid} --to running`, puis `--to needs_verification`) : "

@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page
 
-from .conftest import open_atelier
+from .conftest import open_atelier, open_tree_space
 
 #: Les cinq espaces de la coque (P31), et chacune de leurs rubriques.
 SPACES = ["a-traiter", "travail", "flotte", "savoir", "configuration"]
@@ -277,6 +277,7 @@ def test_les_cinq_espaces_s_ouvrent_dans_les_deux_themes_et_les_deux_densites(
 def test_les_trois_etats_de_panneau_repondent(workspace: Page) -> None:
     """Replié, entrouvert, épinglé — et `peek` ne redimensionne pas la grille."""
     open_atelier(workspace)
+    open_tree_space(workspace)
     api = "window.GrimoireWorkspace"
     workspace.evaluate(f"() => {api}.setPanel('explorer', 'pinned')")
     assert workspace.evaluate(f"() => {api}.panelState('explorer')") == "pinned"
@@ -298,6 +299,7 @@ def test_le_clic_sur_le_rail_ouvre_en_surimpression(workspace: Page) -> None:
     """« Clic sur l'icône du rail : ouvre en surimpression » (spec §3.1) —
     pas besoin d'épingler pour un coup d'œil, et la grille ne bouge pas."""
     open_atelier(workspace)
+    open_tree_space(workspace)
     api = "window.GrimoireWorkspace"
     workspace.evaluate(f"() => {api}.setPanel('explorer', 'collapsed')")
     before_width = workspace.locator("#center").bounding_box()["width"]
@@ -314,6 +316,7 @@ def test_le_clic_sur_le_rail_ouvre_en_surimpression(workspace: Page) -> None:
 def test_le_survol_du_rail_450ms_entrouvre(workspace: Page) -> None:
     """Le délai de la spec §3.1, mesuré : rien avant, entrouvert après."""
     open_atelier(workspace)
+    open_tree_space(workspace)
     api = "window.GrimoireWorkspace"
     workspace.evaluate(f"() => {api}.setPanel('explorer', 'collapsed')")
 
@@ -385,6 +388,7 @@ def test_le_clic_sur_une_tache_de_preuves_ouvre_le_pack_dans_source(workspace: P
 def test_le_cadenas_epingle_dans_la_grille(workspace: Page) -> None:
     """« Cadenas … épingle dans la grille, le contenu se redimensionne »."""
     open_atelier(workspace)
+    open_tree_space(workspace)
     api = "window.GrimoireWorkspace"
     workspace.evaluate(f"() => {api}.setPanel('explorer', 'collapsed')")
     collapsed_width = workspace.locator("#center").bounding_box()["width"]
@@ -415,6 +419,7 @@ def test_le_cmd_clic_sur_le_rail_epingle_sans_passer_par_l_entrouvert(workspace:
 def test_la_poignee_redimensionne_le_panneau_epingle(workspace: Page) -> None:
     """« le contenu se redimensionne » : la poignée tire la largeur à la souris."""
     open_atelier(workspace)
+    open_tree_space(workspace)
     api = "window.GrimoireWorkspace"
     workspace.evaluate(f"() => {api}.setPanel('explorer', 'pinned')")
     box = workspace.locator("#panel-explorer").bounding_box()

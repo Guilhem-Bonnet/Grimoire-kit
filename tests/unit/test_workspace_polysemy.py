@@ -86,7 +86,7 @@ def test_source_ecrit_ses_statuts_en_lettres_facon_git() -> None:
     letters = set(re.findall(r"letter: '([A-Z])'", body.group(1)))
     assert letters == {"A", "M", "D", "U", "O"}
     assert "stateIcon" not in body.group(1)
-    explorer = re.search(r"function renderExplorer\(ctx, root\) \{(.*?)\n\}", text, re.DOTALL)
+    explorer = re.search(r"function renderTree\(ctx, root, treeEl\) \{(.*?)\n\}", text, re.DOTALL)
     assert explorer and "stateIcon" not in explorer.group(1) and "sr-git" in explorer.group(1)
 
 

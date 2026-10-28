@@ -318,9 +318,16 @@ class FlowStatusView:
     #: dit « non vérifié » (run antérieur) : ``None`` ici ne veut alors pas dire « sain ».
     blueprint_drift: dict[str, Any] | None = None
     blueprint_sha256: str | None = None
+    #: Lot 4.6 (issue #564) — le reçu des questions : combien le run en a posé à l'humain via sa tâche
+    #: liée (``questions_asked``), et en combien d'interruptions (``question_interruptions`` : un lot
+    #: de blocages posés ensemble n'en fait qu'une). ``0`` sans tâche liée.
+    questions_asked: int = 0
+    question_interruptions: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "questions_asked": self.questions_asked,
+            "question_interruptions": self.question_interruptions,
             "directive": self.directive.to_dict() if self.directive else None,
             "blueprint_sha256": self.blueprint_sha256,
             "blueprint_drift": self.blueprint_drift,
