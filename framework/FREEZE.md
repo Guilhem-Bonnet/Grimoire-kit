@@ -55,23 +55,44 @@ Deux pièges vérifiés sur cet inventaire, encodés dans
   chargé par un outil référencé n'est pas supprimable même s'il n'a que des
   tests.
 
-## Décisions par outil (2026-10-25)
+## Décisions par outil (2026-10-26)
 
-L'inventaire régénéré le 2026-10-25 (47 fichiers `.py`, 35 475 lignes ; les 55
+L'inventaire régénéré le 2026-10-26 (47 fichiers `.py`, 35 369 lignes ; les 55
 fichiers suivis sous `framework/tools/` comptent aussi 8 non-`.py`) porte, pour
 chaque outil, la décision de la politique ci-dessus dans sa colonne `décision` :
 
-- 41 REFERENCED : **geler**, porter vers `src/` à la demande ; « geler » est leur état présent, la suppression de
-  l'original suit le portage (tableau ci-dessus), pas avant ;
-- 6 TRANSITIVE (`rag-indexer.py`, `rag-retriever.py`, `memory-sync.py`,
-  `llm-router.py`, `token-budget.py`, `incubator.py`) : **geler**, drainer
-  l'appelant d'abord ;
-- aucun outil UNREFERENCED, INTERNAL, DOCS_ONLY ni TEST_ONLY : **aucun outil à
-  supprimer** à cette date.
+- 47 REFERENCED : **geler**, porter vers `src/` à la demande ; « geler » est leur
+  état présent, la suppression de l'original suit le portage (tableau
+  ci-dessus), pas avant. Les 6 outils classés TRANSITIVE le 2026-10-25
+  (`rag-indexer.py`, `rag-retriever.py`, `memory-sync.py`, `llm-router.py`,
+  `token-budget.py`, `incubator.py`) ont désormais une référence runtime directe
+  et passent REFERENCED : même décision, geler ;
+- aucun outil UNREFERENCED, INTERNAL, DOCS_ONLY, TEST_ONLY ni TRANSITIVE : **aucun
+  outil à supprimer** à cette date.
+
+### Fichiers non-`.py` de `framework/tools/` (8)
+
+L'inventaire ne classe que les `.py` ; les 8 autres fichiers suivis reçoivent ici
+leur classe (mêmes libellés que ci-dessus, établie par `git grep` du basename hors
+index générés) et leur décision :
+
+| Fichier | Classe | Référencé par | Décision |
+| --- | --- | --- | --- |
+| `stigmergy_hooks/stigmergy-emit.json` | REFERENCED | `src/grimoire/tools/stigmergy_hooks.py`, tests | geler : actif installé par le SDK ; porter sous `src/` avec le module |
+| `stigmergy_hooks/stigmergy-sense.json` | REFERENCED | idem | geler (idem) |
+| `stigmergy_hooks/scripts/stigmergy-emit-post-edit.sh` | REFERENCED | `stigmergy-emit.json`, `stigmergy_hooks.py` | geler (idem) |
+| `stigmergy_hooks/scripts/stigmergy-emit-stop.sh` | REFERENCED | idem | geler (idem) |
+| `stigmergy_hooks/scripts/stigmergy-sense.sh` | REFERENCED | `stigmergy-sense.json`, `stigmergy_hooks.py` | geler (idem) |
+| `quick-check.sh` | REFERENCED | `framework/hooks/pre-push.sh` | geler ; disparaît avec le chemin shell (4.0.0) |
+| `grimoire-completion.zsh` | DOCS_ONLY | gabarit de bug-report, `README.md` | geler : pas de remplaçant SDK ; à réécrire vers la complétion du CLI `grimoire` avant suppression |
+| `README.md` | DOCS_ONLY | `docs/guides/choisir-un-archetype.md` | geler : à réécrire vers l'équivalent SDK, puis supprimer avec la zone |
+
+Aucune suppression pour ces 8 fichiers non plus : tous ont soit un appelant runtime,
+soit une documentation qui les cite et aucun remplaçant SDK.
 
 ### Suppressions
 
-Aucune suppression en attente au 2026-10-25. Les retraits déjà faits sont ceux du
+Aucune suppression en attente au 2026-10-26. Les retraits déjà faits sont ceux du
 drainage du 2026-08-10 (voir ci-dessous) et de #111 (128 fichiers de
 `framework/` drainés). Toute suppression future s'inscrit ici avec sa date et
 son outil.

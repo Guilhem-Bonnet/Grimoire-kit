@@ -235,8 +235,7 @@ def test_un_commit_sur_un_chemin_aveugle_avant_le_jugement_n_est_pas_scelle(proj
 def test_un_commit_sur_un_chemin_aveugle_apres_le_jugement_n_est_pas_fusionne(projet: Path, host: FakeHost, blind: str) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host)
-    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pending"}]
-    review_ready(projet, host, tid, wt)  # READY scellé sur h0
+    review_ready(projet, host, tid, wt, checks=[{"name": "tests", "bucket": "pending"}])  # READY scellé sur h0
     _commit_blind(projet, wt, tid, blind)
     host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "pass"}]
     report = tick(projet, host)
@@ -487,8 +486,7 @@ def test_une_remote_qui_ne_dit_pas_ce_que_dit_github_fait_attendre(projet: Path,
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     branch = f"task/{tid}"
-    host.checks[branch] = [{"name": "tests", "bucket": "pending"}]
-    review_ready(projet, host, tid, wt)
+    review_ready(projet, host, tid, wt, checks=[{"name": "tests", "bucket": "pending"}])
     host.pr_heads[branch] = git(wt, "rev-parse", "HEAD")  # GitHub annonce la tête relue…
     (wt / "src/app/route.py").write_text("autre chose\n", encoding="utf-8")
     git(wt, "commit", "-q", "-am", "poussé, pas encore vu par GitHub")

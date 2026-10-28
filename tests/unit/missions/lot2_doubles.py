@@ -51,6 +51,7 @@ class FakeHost:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], Path, Mapping[str, str] | None]] = []
         self.bg_fails = False
+        self.version = ""  # ``claude --version`` ; vide : le faux binaire ne sait pas dire sa version
         #: ``claude agents --json`` ; ``None`` : les sessions ``--bg`` que ce double a lancées et pas arrêtées.
         self.agents: list[dict[str, str]] | None = None
         self.agents_fail = False  # ``claude agents --json`` sort en erreur : la lecture échoue
@@ -91,6 +92,9 @@ class FakeHost:
         self.pr_created: dict[str, str] = {}  # branche → createdAt ; absente : l'instant de la lecture
         self.merged_at: dict[str, str] = {}  # branche → mergedAt, posé par ``pr merge``
         self.protected: set[str] = set()  # branches que ``gh api repos/…/branches/<b>`` dit protégées
+        self.rerun_error = "gh: Resource not accessible by integration (HTTP 403)"  # refus de ``rerun-failed-jobs`` ; "" : permis
+        self.failed_runs: dict[str, list[int]] = {}  # tête → runs en échec ; absente : un run, 101
+        self.reruns: list[int] = []  # runs relancés par ``rerun-failed-jobs``
         self.repo = ""  # le dépôt GitHub que ce faux gh sert : un ``-R`` autre est refusé (« could not resolve »)  # gh tombe juste après la fusion : le constat se fera au tick suivant
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
@@ -102,6 +106,8 @@ class FakeHost:
         return ExecResult(127, "", f"{argv[0]} : faux binaire inconnu")
 
     def _claude(self, argv: list[str], cwd: Path) -> ExecResult:
+        if argv[1:] == ["--version"]:
+            return ExecResult(0, f"{self.version} (Claude Code)\n") if self.version else ExecResult(2, "", "version inconnue")
         if argv[1] == "--bg":
             if self.bg_fails:
                 return ExecResult(1, "", "claude : échec simulé")
@@ -149,6 +155,9 @@ class FakeHost:
     def _gh(self, argv: list[str], cwd: Path) -> ExecResult:
         if self.gh_broken:
             return ExecResult(1, "", "gh : réseau indisponible")
+        if argv[1:3] == ["auth", "status"]:
+            # Le préflight d'assignation (P47) sonde l'authentification avant de lancer.
+            return ExecResult(0, "Logged in to github.com")
         if "-R" in argv:
             target = argv[argv.index("-R") + 1]
             if self.repo and target != self.repo:
@@ -156,6 +165,14 @@ class FakeHost:
             argv = argv[:argv.index("-R")] + argv[argv.index("-R") + 2:]
         if argv[1] == "api" and argv[2].endswith("/files"):
             return self._api_files(argv, cwd)
+        if argv[1] == "api" and "/actions/runs?" in argv[2]:
+            head = argv[2].split("head_sha=", 1)[1].split("&", 1)[0]
+            return ExecResult(0, "".join(f"{r}\n" for r in self.failed_runs.get(head, [101])))
+        if argv[1:4] == ["api", "-X", "POST"] and argv[4].endswith("/rerun-failed-jobs"):
+            if self.rerun_error:
+                return ExecResult(1, "", self.rerun_error)
+            self.reruns.append(int(argv[4].split("/")[-2]))
+            return ExecResult(0, "")
         if argv[1] == "api" and "/branches/" in argv[2]:
             branch = unquote(argv[2].split("/branches/", 1)[1])
             return ExecResult(0, "true\n" if branch in self.protected else "false\n")
@@ -299,6 +316,11 @@ class FakeHost:
         if self.broken_after_merge:
             self.gh_broken = True
         return ExecResult(0, "")
+
+    def review_stops(self) -> list[list[str]]:
+        """Les ``claude stop`` visant une session de relecteur (pas celle d'un worker rangé en revue, arrêtée à part)."""
+        names = {b["id"]: b["name"] for b in self.bg}
+        return [c for c in self.of("claude", "stop") if names.get(c[2], "").startswith("grimoire-review-")]
 
     def of(self, binary: str, *first: str) -> list[list[str]]:
         return [a for a, _c, _e in self.calls if a[0] == binary and tuple(a[1:1 + len(first)]) == first]

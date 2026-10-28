@@ -1723,6 +1723,8 @@ body[data-active-space] .panel-head {
 
 #dock {
   height: var(--h-dock);
+  max-height: 80vh;
+  position: relative;
   border-top: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -1732,6 +1734,33 @@ body[data-active-space] .panel-head {
 
 #dock[data-state="collapsed"] {
   display: none;
+}
+
+/* Poignée du bord haut : le dock grandit vers le haut, comme le panneau de
+ * VS Code. Absente sous 900 px, où le dock a une hauteur fixe. */
+.dock-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 5;
+  touch-action: none;
+  background: transparent;
+  transition: background var(--dur);
+}
+
+.dock-resize:hover,
+.dock-resize:focus-visible,
+.dock-resize[data-dragging] {
+  background: var(--accsoft);
+}
+
+@media (max-width: 900px) {
+  .dock-resize {
+    display: none;
+  }
 }
 
 #dock-tabs {
@@ -1783,6 +1812,48 @@ body[data-active-space] .panel-head {
   font-size: var(--t-min);
   color: var(--termink);
   flex: none;
+}
+
+.dock-console {
+  position: relative;
+}
+
+.dock-console-listbox {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 100%;
+  max-height: 14rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+  background: var(--term);
+  color: var(--termink);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  z-index: 5;
+}
+
+.dock-console-listbox[hidden] {
+  display: none;
+}
+
+.dock-console-listbox [role="option"] {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.dock-console-listbox [role="option"][aria-selected="true"] {
+  outline: 1px solid currentColor;
+  outline-offset: -1px;
+}
+
+.dock-console-listbox .opt-help {
+  opacity: 0.8;
+  font-style: italic;
 }
 
 .dock-console[hidden] {
@@ -3124,4 +3195,12 @@ body[data-active-space] .panel-head {
   #dock-tabs .tab[aria-selected="false"] .tab-lbl {
     display: none;
   }
+}
+
+/* P78 : un espace sans arborescence n'ouvre ni panneau Explorateur ni son
+   bouton de rail ; la place revient au contenu. `data-detail` est posé par
+   `syncDetail` selon que l'espace a écrit dans `ctx.explorer`. */
+#panel-explorer[data-detail="off"],
+html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
+  display: none !important;
 }

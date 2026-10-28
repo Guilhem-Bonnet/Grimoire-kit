@@ -1,0 +1,177 @@
+[
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "method": "initialize",
+   "params": {
+    "protocolVersion": 1,
+    "clientCapabilities": {},
+    "clientInfo": {
+     "name": "grimoire",
+     "version": "x"
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "loadSession": false,
+     "promptCapabilities": {}
+    },
+    "authMethods": []
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 2,
+   "method": "session/new",
+   "params": {
+    "cwd": "/work/project",
+    "mcpServers": []
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 2,
+   "result": {
+    "sessionId": "sess-1"
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 3,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "sess-1",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "bonjour"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "sess-1",
+    "update": {
+     "sessionUpdate": "agent_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "Bon"
+     }
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "sess-1",
+    "update": {
+     "sessionUpdate": "agent_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "jour !"
+     }
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "sess-1",
+    "update": {
+     "sessionUpdate": "agent_thought_chunk",
+     "content": {
+      "type": "text",
+      "text": "..."
+     }
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 3,
+   "result": {
+    "stopReason": "end_turn"
+   }
+  }
+ },
+ {
+  "dir": "out",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 4,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "sess-1",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "encore"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "sess-1",
+    "update": {
+     "sessionUpdate": "agent_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "Oui."
+     }
+    }
+   }
+  }
+ },
+ {
+  "dir": "in",
+  "msg": {
+   "jsonrpc": "2.0",
+   "id": 4,
+   "result": {
+    "stopReason": "max_tokens"
+   }
+  }
+ }
+]

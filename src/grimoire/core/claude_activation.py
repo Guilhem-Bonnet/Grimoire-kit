@@ -206,6 +206,14 @@ def _v0_notice(project_root: Path, task_id: str) -> str:
     return V0_DIRECTIVE_NOTICE if klass == "V0" else ""
 
 
+def _phase_notice(project_root: Path) -> str:
+    """« Projet en <phase>. » quand ``project-context.yaml`` déclare une phase, ``""`` sinon."""
+    from grimoire.missions.finition import project_phase
+
+    phase = project_phase(project_root)
+    return f"Projet en `{phase}`." if phase else ""
+
+
 def _append_notice(text: str, notice: str) -> str:
     """Ajoute *notice* comme phrase de fin, avant le saut de ligne final s'il y en a un."""
     if not notice:
@@ -236,7 +244,7 @@ def activation_context_text(project_root: Path, task_id: str = "bootstrap") -> s
         base = default_activation_directive(task_id) if _is_known_directive_rendering(text) else text.replace(TASK_ID_PLACEHOLDER, task_id)
     else:
         base = default_activation_directive(task_id)
-    return _append_notice(base, _v0_notice(project_root, task_id))
+    return _append_notice(_append_notice(base, _phase_notice(project_root)), _v0_notice(project_root, task_id))
 
 
 def activation_context_needs_refresh(project_root: Path) -> bool:

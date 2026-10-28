@@ -219,8 +219,9 @@ Six crates existent à ce jour :
 | `rust/grimoire-flows-core/` | `grimoire.flows.engine` (`check_output_against_contract`, node courant, `resume()`/`status()`) + `grimoire.runtime.kernel` (table de transitions, précondition de `advance_step`) | `GRIMOIRE_FLOWS_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-flows / cargo`, `rust-flows / parity`) |
 | `rust/grimoire-dispatch-core/` | `grimoire.missions.dispatch` (chaîne de paliers, rendu d'invocation, analyse de sortie d'ouvrier, classification de revue, verdict de cascade) + `grimoire.providers.routing` (ordre et refroidissement des fournisseurs) | `GRIMOIRE_DISPATCH_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-dispatch / cargo`, `rust-dispatch / parity`) |
 | `rust/grimoire-traces-core/` | `grimoire.traces.ledger` (agrégations du journal, `compute_agent_freshness`) + `grimoire.proposals` (nommage mécanique, résolution du porteur, décision de synchronisation d'une proposition) | `GRIMOIRE_TRACES_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-traces / cargo`, `rust-traces / parity`) |
+| `rust/grimoire-acp-core/` | `grimoire.acp.machine` (validation des messages ACP, machine d'états de session, routage des permissions) | `GRIMOIRE_ACP_BACKEND` | `.github/workflows/rust-cores.yml` (`rust-acp / cargo`, `rust-acp / parity`) |
 
-Les six crates partagent le même workflow CI : `changes` détecte quel(s)
+Les sept crates partagent le même workflow CI : `changes` détecte quel(s)
 crate(s) une PR ou un push touche et saute les jobs hors périmètre, et
 `rust-gate` — le check requis par la protection de `main` — agrège les
 douze jobs pour rendre `cargo fmt` et `cargo test` opposables sur toute PR,
@@ -294,6 +295,16 @@ maturin develop --release
 cd -
 
 pytest tests/unit/test_traces.py tests/unit/test_proposals.py tests/unit/test_traces_rust_parity.py
+```
+
+Pour `grimoire-acp-core` (les transcriptions de `tests/fixtures/acp/` sont lues par `cargo test` et par pytest) :
+
+```bash
+cd rust/grimoire-acp-core
+maturin develop --release
+cd -
+
+pytest tests/unit/test_acp.py
 ```
 
 Dans les six cas, les tests du module Python (`test_policies.py`,

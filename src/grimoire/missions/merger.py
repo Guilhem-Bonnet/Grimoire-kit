@@ -84,9 +84,9 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure
-from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, session_env
+from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
-from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT, entered_review_at
+from grimoire.missions.reviewer import CI_RUNNING, REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT, entered_review_at
 from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR, TaskState
 from grimoire.missions.task_worktree import MERGED_EVENT, TASK_BRANCH_PREFIX, find_task_worktree
 from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, new_question_id
@@ -112,6 +112,7 @@ __all__ = [
     "MERGE_REALIGNED_EVENT",
     "MERGE_REQUESTED_EVENT",
     "MERGE_REQUEUED_EVENT",
+    "MERGE_RERUN_EVENT",
     "MERGE_UNDRAFTED_EVENT",
     "MERGE_WAITED_EVENT",
     "MergeStage",
@@ -125,6 +126,8 @@ MERGE_REALIGNED_EVENT = "task.merge_realigned"
 MERGE_PUSHED_EVENT = "task.merge_pushed"
 MERGE_BOUNCED_EVENT = "task.merge_bounced"
 MERGE_CI_EVENT = "task.merge_ci"
+#: Une relance des jobs en échec de la tête (``rerun-failed-jobs``) : une seule par tête, ``outcome`` dit si GitHub l'a prise.
+MERGE_RERUN_EVENT = "task.merge_rerun"
 MERGE_REQUESTED_EVENT = "task.merge_requested"
 MERGE_ESCALATED_EVENT = "task.merge_escalated"
 MERGE_ACCEPTED_EVENT = "task.merge_accepted"
@@ -136,6 +139,8 @@ MERGE_WAITED_EVENT = "task.merge_waited"
 MAX_DESYNC_WAITS = 3
 #: Ce que GitHub dit d'une PR en conflit avec sa cible (``mergeable``, ``mergeStateStatus``).
 _CONFLICTING = frozenset({"CONFLICTING", "DIRTY"})
+#: Le début du détail CI quand GitHub ne rapporte aucun check : le cas d'une PR en conflit, dont il ne lance pas la CI.
+_NO_CHECKS = "aucun check rapporté"
 CHANGELOG = "CHANGELOG.md"
 #: Les chemins qui escaladent à l'humain, quoi que dise le mandat (``protected_paths`` de la politique s'y ajoute) :
 #: le code des gardes, la politique, les workflows et hooks, le packaging, ce qui s'exécute à l'import ou se compile.
@@ -456,8 +461,12 @@ class MergeStage:
         if ci == "unknown":
             return self._failed(tid, "wait", f"CI illisible : {detail}", pr.number)
         if ci == "red":
+            if (retry := self._rerun_once(tid, pr, detail)) is not None:
+                return retry
             return self._bounce(task, launch, "ci_red", detail, pr.number)
-        if ci != "green" and not self._desync_waits(tid):
+        # GitHub ne lance pas la CI d'une PR en conflit : l'attendre ne finirait jamais, le réalignement passe d'abord.
+        stalled = pr.conflicting and ci == "pending" and detail.startswith(_NO_CHECKS)
+        if ci != "green" and not self._desync_waits(tid) and not stalled:
             return MergerOutcome(tid, "wait", "waiting", f"CI : {detail}", pr.number)
         # CI verte, ou désaccord en cours de compte : la remote est relue (un tick sans désaccord remet le compte à zéro).
         got, refused = self._fetch(pr, wt.into, wt.branch)
@@ -469,9 +478,10 @@ class MergeStage:
             return self._desynced(task, launch, wt, pr, desync, side, remote_base)
         if self._desync_waits(tid):
             self._note(MERGE_WAITED_EVENT, tid, {"cleared": True, "head": pr.head, "base": target})
-        if ci != "green":
+        behind = self._git("merge-base", "--is-ancestor", target, pr.head).returncode != 0
+        if ci != "green" and not (stalled and behind):
             return MergerOutcome(tid, "wait", "waiting", f"CI : {detail}", pr.number)
-        if self._git("merge-base", "--is-ancestor", target, pr.head).returncode != 0:
+        if behind:
             if position >= self._policy.merger.realign_max:
                 if pr.conflicting and (hard := self._hard_conflicts(pr.head, target)):
                     return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {hard}", pr.number,
@@ -719,16 +729,50 @@ class MergeStage:
             rows = [r for r in every if not any(fnmatch.fnmatchcase(str(r.get("name", "")), pat) for pat in ignored)]
             scope = f"checks hors {', '.join(ignored)}" if ignored else "tous les checks"
         if not rows:
-            return "pending", f"aucun check rapporté ({scope}) : la CI verte est exigée"
+            return "pending", f"{_NO_CHECKS} ({scope}) : la CI verte est exigée"
         buckets = [str(r.get("bucket", "")) for r in rows]
         failed = [_clean(str(r.get("name")), 80) for r, b in zip(rows, buckets, strict=True) if b in red]
         if failed:
             return "red", f"{len(failed)}/{len(rows)} {scope} en échec : {', '.join(failed[:5])}"
         if any(b not in _GREEN_BUCKETS for b in buckets):
-            return "pending", f"{sum(1 for b in buckets if b not in _GREEN_BUCKETS)}/{len(rows)} {scope} en cours"
+            waiting = sum(1 for b in buckets if b not in _GREEN_BUCKETS)
+            # Un check annulé n'est pas en cours : seul un « pending » fait attendre le relecteur (P87).
+            state_word = CI_RUNNING if "pending" in buckets else "annulés ou non verts"
+            return "pending", f"{waiting}/{len(rows)} {scope} {state_word}"
         if "pass" not in buckets:
             return "pending", f"{len(rows)} {scope} tous sautés : rien n'a tourné"
         return "green", f"{len(rows)} {scope} verts"
+
+    def _rerun_once(self, tid: str, pr: _PullRequest, detail: str) -> MergerOutcome | None:
+        """Une tête rouge vue pour la première fois : ses jobs en échec sont relancés (un test instable n'a rien à corriger).
+
+        ``None`` : pas de relance, le retour au worker suit comme avant — la tête a déjà eu la sienne (prise ou refusée :
+        jamais une seconde, jamais de boucle), ou GitHub la refuse (403 : l'App sans ``actions:write``). Une nouvelle tête
+        (push) est une autre clé : elle remet le droit.
+        """
+        events = self._service.ledger.events_for(tid)
+        if any(e.event_type == MERGE_RERUN_EVENT and e.payload.get("head") == pr.head for e in events):
+            return None
+        listed = self._exec(["gh", "api", f"repos/{pr.slug}/actions/runs?head_sha={pr.head}&per_page=100", "--jq",
+                             '.workflow_runs[] | select(.conclusion=="failure" or .conclusion=="timed_out" '
+                             'or .conclusion=="cancelled") | .id'], self._home, None)
+        runs = [ln.strip() for ln in listed.stdout.splitlines() if ln.strip().isdigit()] if listed.returncode == 0 else []
+        errors = [] if listed.returncode == 0 else [_clean(listed.stderr.strip(), 200)]
+        done: list[str] = []
+        for run in runs:
+            result = self._exec(["gh", "api", "-X", "POST", f"repos/{pr.slug}/actions/runs/{run}/rerun-failed-jobs"],
+                                self._home, None)
+            if result.returncode == 0:
+                done.append(run)
+            else:
+                errors.append(_clean(result.stderr.strip(), 200))
+        outcome = "rerun" if done else "denied" if errors else "none"
+        self._note(MERGE_RERUN_EVENT, tid, {"head": pr.head, "outcome": outcome, "runs": done, "detail": detail[:600],
+                                            "error": errors[0] if errors else ""})
+        if not done:
+            return None
+        return MergerOutcome(tid, "wait", "waiting", f"CI rouge ({detail}) : jobs en échec relancés une fois "
+                             f"(run {', '.join(done)}), le retour au worker attend le verdict de cette relance", pr.number)
 
     def _stable_ci(self, tid: str, pr: _PullRequest, branch: str) -> tuple[str, str]:
         """Le verdict CI, vert seulement s'il l'était déjà au tick précédent pour cette tête (``task.merge_ci``)."""
@@ -1083,18 +1127,16 @@ class MergeStage:
             ledger.transition_task(tid, TaskState.RUNNING, actor_id=MERGER_ACTOR, reason=f"fusion refusée ({reason}, cycle {cycle}/{max_cycles})")
         except GrimoireError as exc:
             return MergerOutcome(tid, "bounce", "failed", f"retour au worker refusé : {exc}", pr)
-        argv = [self._claude, "--bg", "--resume", worker]
-        if self._policy.worker.permission_mode:
-            argv += ["--permission-mode", self._policy.worker.permission_mode]
-        argv.append(
+        result = resume_worker(
+            self._service, self._exec, self._claude, tid, launch,
             f"La fusion de {tid} est refusée : {_clean(detail)}. La branche distante task/{tid} a pu être réalignée par le "
             f"merger (main fusionnée, ton worktree n'est pas touché) : `git pull --no-rebase origin task/{tid}` avant de "
             f"pousser. {hint}"
             f"Corrige dans ce worktree, commite, pousse sur task/{tid} (jamais de push forcé), revérifie avec les "
             f"checks de la tâche, puis remets-la en revue "
-            f"(`grimoire task move {tid} --to needs_verification`)."
+            f"(`grimoire task move {tid} --to needs_verification`).",
+            permission_mode=self._policy.worker.permission_mode,
         )
-        result = self._exec(argv, Path(str(launch.get("cwd") or ".")), session_env())
         if result.returncode != 0:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=MERGER_ACTOR, reason="reprise du worker échouée")
             return self._failed(tid, "bounce", f"worker non repris ({_err(result)}), tâche remise en revue", pr)

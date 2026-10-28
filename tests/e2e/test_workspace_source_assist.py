@@ -183,7 +183,7 @@ def assist_page(browser: Browser, served_assist: str) -> Iterator[Page]:
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.evaluate("() => window.GrimoireWorkspace.goto('source')")
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'source'")
-    page.wait_for_selector(".tree .sr-tree-file", timeout=10_000)
+    page.wait_for_selector("#canvas .tree .sr-tree-file", timeout=10_000)
     try:
         yield page
     finally:
@@ -204,7 +204,7 @@ def _open_as_override(page: Page) -> str:
     # une longue liste flex (voir tests/e2e/test_workspace_source_language.py::_open,
     # PR #617) — le clic-coordonnées peut atterrir sur la ligne suivante de
     # l'arbre une fois celui-ci assez long.
-    page.locator(".tree .sr-tree-file", has_text=name).first.dispatch_event("click")
+    page.locator("#canvas .tree .sr-tree-file", has_text=name).first.dispatch_event("click")
     page.wait_for_function(
         "(p) => document.querySelector('.sr-docrow .mono')?.textContent === p", arg=kit_path
     )

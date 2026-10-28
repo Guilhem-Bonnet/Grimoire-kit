@@ -145,7 +145,7 @@ def unfenced_question(view: LeaseView) -> str:
     version = f" {view.host_version}" if view.host_version else ", version inconnue"
     return (
         f"{who} (hôte {view.host}{version}, sans frein) ne donne plus signe ; reprendre ? "
-        "Frein non prouvé pour cette version : GRIMOIRE_HOST_PROBE=1 la sonde au prochain tick "
+        "Frein non prouvé pour cette version : `orchestrator.probe_host: true` (politique) la sonde au prochain tick "
         "(deux appels payants à l'hôte), ou `grimoire host status --probe`."
     )
 
