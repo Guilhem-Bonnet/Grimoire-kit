@@ -1048,6 +1048,10 @@ class TaskService:
         abandon_reason: str = "",
     ) -> TaskMove:
         if answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options):
+            if abandon_reason:
+                # Pilote automatique (P82) : l'abandon se range en « failed » avec sa raison — réouvrable
+                # (``task move --to ready``), là où l'annulation est terminale.
+                return self.transition(task.id, TaskState.FAILED, actor, abandon_reason)
             return self.cancel(
                 task.id, abandon_reason or f"abandon sur réponse humaine à {question.id}", actor, force=True
             )

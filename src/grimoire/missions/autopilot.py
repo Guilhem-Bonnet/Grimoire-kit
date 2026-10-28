@@ -465,7 +465,7 @@ def decided_payload(
         "recommended": question.recommended[:_TEXT_SIZE],
         "gesture": gesture,
         "mandate_id": mandate_id,
-        "reversible": decision.answer.strip().lower() != "abandonner",
+        "reversible": True,  # « abandonner » range la tâche en failed : `task move --to ready` la rouvre
     }
 
 

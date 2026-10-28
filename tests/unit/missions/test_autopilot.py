@@ -157,7 +157,7 @@ def test_with_the_pilot_the_question_is_decided_and_the_decision_is_traced(
     assert given.payload["origin"] == ORIGIN_ORCHESTRATOR and given.payload["mandate_id"] == mandate.id
 
 
-def test_the_pilot_can_cancel_with_a_reason_and_never_without_one(project: Path) -> None:
+def test_the_pilot_can_abandon_with_a_reason_and_never_without_one(project: Path) -> None:
     grant(project)
     pilot_on(project)
     service, tid, qid = asks(
@@ -174,9 +174,10 @@ def test_the_pilot_can_cancel_with_a_reason_and_never_without_one(project: Path)
         confidence="high",
     )
     task = service.require(tid)
-    assert task.status is TaskState.CANCELLED
+    assert task.status is TaskState.FAILED  # rangée avec sa raison, pas annulée : réouvrable
     (decided,) = events(service, tid, DECIDED_EVENT)
-    assert decided.payload["reversible"] is False
+    assert decided.payload["reversible"] is True
+    assert service.transition(tid, TaskState.READY, "human", "reprise").task.status is TaskState.READY
 
 
 def test_without_the_pilot_abandoning_is_still_a_human_gesture(project: Path) -> None:

@@ -50,9 +50,9 @@ l'état du pilote, la liste fermée, la décision (recommandation, justification
    exiger que le tour nomme la demande n'est pas faisable sans hook de l'hôte.
 5. **Confiance et justification déclaratives.** Un LLM peut déclarer `high` à tort. Elles sont journalisées au
    ledger ; la garantie est la traçabilité et la révocation (couper le pilote ou le mandat), pas l'exactitude.
-6. **L'annulation décidée par le pilote est terminale** : la machine à états n'a pas de sortie de `cancelled`. La raison
-   est au ledger ; la rouvrir demande de recréer la tâche. (Le ticket attendait « réouvrable » : non tenable sans
-   changer la machine à états, hors périmètre.)
+6. **L'abandon décidé par le pilote reste réouvrable** : la machine à états n'a pas de sortie de `cancelled`, donc
+   le pilote range la tâche en `failed` (transition `waiting → failed`, ajoutée) avec sa raison au ledger ; un humain
+   la rouvre par `task move --to ready`. Il n'annule jamais.
 7. **Autres limites du lot** : l'acceptation sous dérogation n'est pas traitée (aucune notion de dérogation dans le
    kit) ; un checkpoint de flow reste à l'humain (sa décision s'atteste dans le flux).
 
