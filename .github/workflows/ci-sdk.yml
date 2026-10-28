@@ -152,7 +152,9 @@ jobs:
     # (défaut GitHub). Windows tenait 62-93 min tant que chaque `init -y` payait
     # ~43 s de sondes localhost sans réponse (#857) ; borné depuis, la jambe
     # est réarmée sur les PR. 120 min reste la borne de sécurité.
-    timeout-minutes: 120
+    # Ubuntu ~25 min : à 45, un pytest-xdist figé après la chute d'un worker (vu deux fois les 27-28/10) échoue vite
+    # et le merger relance le job (CI3) au lieu d'attendre deux heures. Windows et macOS gardent 120.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 45 || 120 }}
     env:
       # Sur une PR, Windows et macOS rendent leur check requis sans lancer la suite
       # (le nom du job reste, la protection de main l'exige) ; ubuntu la lance toujours.
