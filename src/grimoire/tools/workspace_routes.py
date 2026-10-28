@@ -862,6 +862,19 @@ def _task_add(project_root: Path, body: dict[str, Any]) -> Any:
     return added.to_dict()
 
 
+def _memory_correct(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Demander une correction » (P42) : ouvre la tâche et son critère généré, n'écrit pas la mémoire."""
+    from grimoire.memory.correction import request_correction
+
+    raw = body.get("entry_ids") or [body.get("entry_id") or ""]
+    if not isinstance(raw, list):
+        raise ValueError("`entry_ids` doit être une liste")
+    return request_correction(
+        project_root, entry_ids=[str(i) for i in raw], outcome=str(body.get("outcome") or ""),
+        description=str(body.get("description") or ""), actor=str(body.get("actor") or "workspace"),
+    )
+
+
 def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
 
@@ -911,6 +924,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}memory/correct": _memory_correct,
     f"{PREFIX}options": _options_write,
 }
 

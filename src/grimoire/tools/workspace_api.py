@@ -1132,11 +1132,30 @@ def proposals_view(project_root: Path) -> dict[str, Any]:
     # `accept_blocker` : le refus qu'« Accepter » rencontrerait à coup sûr
     # (même texte que `accept_proposal`), pour que la fiche montre ce qu'il
     # reste à faire à la main plutôt qu'un bouton qui échoue toujours.
-    return view_cache.cached(
+    view = view_cache.cached(
         f"proposals_view:{root}",
         signature,
         lambda: {"proposals": [{**p.to_dict(), "accept_blocker": accept_blocker(p)} for p in list_proposals(root)]},
     )
+    return _with_correction_state(root, view)
+
+
+def _with_correction_state(root: Path, view: dict[str, Any]) -> dict[str, Any]:
+    """P42 : une proposition de correction mémoire porte son état actuel (périmée ? aperçu).
+
+    Hors du cache : la péremption dépend du store mémoire, pas du dossier des propositions.
+    """
+    from grimoire.memory.correction import ARTIFACT_TYPE, correction_status
+
+    rows: list[dict[str, Any]] = []
+    for row in view.get("proposals", []):
+        if row.get("artifact_type") == ARTIFACT_TYPE and row.get("status") == "pending":
+            try:
+                row = {**row, "correction": correction_status(root, str(row.get("artifact_ref") or ""))}
+            except Exception as exc:  # mémoire illisible : la proposition reste visible, sans aperçu
+                row = {**row, "correction": {"error": str(exc)}}
+        rows.append(row)
+    return {**view, "proposals": rows}
 
 
 def _sheet_project_name(root: Path) -> str | None:

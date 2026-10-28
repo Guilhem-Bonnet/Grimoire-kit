@@ -676,7 +676,40 @@ export async function mount(root, ctx) {
 
     const ownProject = canDelete && (allScope ? entry.projectSlug === homeSlug : true);
     const actions = el('div', 'kn-actions');
-    const gesture = (kind, row) => {
+    // P42 : « Demander une correction » — résultat attendu + consigne ; une tâche est ouverte,
+// la mémoire ne bouge pas avant l'acceptation de la proposition de l'agent.
+const CORRECTION_OUTCOMES = [
+  ['replace', 'Remplacer par une entrée corrigée'],
+  ['attach_source', 'Rattacher une source'],
+  ['verify_decide', 'Vérifier puis décider'],
+];
+function askCorrection(entry, box, ctx, onDone) {
+  box.querySelector(':scope > .kn-ask')?.remove();
+  const form = el('form', 'kn-ask kn-g-form', null, { 'aria-label': 'Demander une correction' });
+  const select = el('select', null, null, { 'aria-label': 'Résultat attendu' });
+  for (const [value, label] of CORRECTION_OUTCOMES) select.append(el('option', null, label, { value }));
+  const note = el('textarea', null, null, { rows: '3', 'aria-label': 'Ce qui est faux', placeholder: 'Ce qui est faux, et ce que l’agent doit établir' });
+  const send = el('button', 'btn pri', 'Créer la tâche', { type: 'submit' });
+  const cancel = el('button', 'btn', 'Annuler', { type: 'button' });
+  cancel.addEventListener('click', () => form.remove());
+  const error = el('p', 'kn-ask-error', null, { role: 'alert' });
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    send.disabled = true;
+    try {
+      const out = await ctx.api.memoryCorrect({ entryId: entry.id, outcome: select.value, description: note.value });
+      form.remove();
+      await onDone(`Tâche ${out.task_id} créée : ${out.criterion}`);
+    } catch (err) {
+      error.textContent = err.message || String(err);
+      send.disabled = false;
+    }
+  });
+  form.append(select, note, send, cancel, error);
+  box.append(form);
+}
+
+const gesture = (kind, row) => {
       // Un nouveau geste efface le compte rendu du précédent.
       state.status = null;
       box.querySelector(':scope > .kn-status')?.remove();
@@ -710,7 +743,12 @@ export async function mount(root, ctx) {
       correct.addEventListener('click', () => gesture('correct'));
       const replace = el('button', 'btn', 'Marquer remplacée…', { type: 'button' });
       replace.addEventListener('click', () => gesture('supersede'));
-      actions.append(correct, replace);
+      const delegate = el('button', 'btn', 'Demander une correction…', { type: 'button' });
+      delegate.addEventListener('click', () => askCorrection(entry, box, ctx, (text) => {
+        state.status = { key: keyOf(entry), tone: 'ok', text };
+        return refresh({ stay: entry });
+      }));
+      actions.append(correct, replace, delegate);
       if (sup.state === 'retracted') {
         const restore = el('button', 'btn', 'Rendre au service…', { type: 'button' });
         restore.prepend(icon('undo'));

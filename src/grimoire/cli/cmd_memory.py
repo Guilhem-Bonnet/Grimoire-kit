@@ -900,6 +900,36 @@ def memory_recall(
     console.print(tbl)
 
 
+# ── grimoire memory correct propose (P42) ──────────────────────────────────
+
+
+correct_app = typer.Typer(help="Correction mémoire déléguée : l'agent propose, l'humain accepte.")
+memory_app.add_typer(correct_app, name="correct")
+
+
+@correct_app.command("propose")
+def memory_correct_propose(
+    task_id: str = typer.Argument(..., help="Tâche de correction ouverte par « Demander une correction »."),
+    action: str = typer.Option(..., "--action", help="replace | merge | attach_source | retract."),
+    text: str = typer.Option("", "--text", help="Texte corrigé (replace, merge)."),
+    source: str = typer.Option("", "--source", help="Source à rattacher (attach_source)."),
+    reason: str = typer.Option("", "--reason", help="Raison (retract)."),
+    by: str = typer.Option("", "--by", help="Qui propose (agent ou session)."),
+) -> None:
+    """Déposer la correction comme proposition à accepter ou refuser — sans écrire dans la mémoire."""
+    from grimoire.memory.correction import propose_correction
+
+    _, root = _load_config_context()
+    try:
+        out = propose_correction(
+            root, task_id, action=action, text=text, source=source, reason=reason, proposed_by=by
+        )
+    except (ValueError, GrimoireMemoryError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
+    console.print(f"Proposition {out['slug']} déposée (en attente) — à accepter : grimoire proposals accept {out['slug']}")
+
+
 # ── grimoire memory list ──────────────────────────────────────────────────────
 
 
