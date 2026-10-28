@@ -201,6 +201,9 @@ export const api = {
   chatSend: (text) => post(WS + 'chat/send', { text }),
   chatPermission: (requestId, decision) => post(WS + 'chat/permission', { request_id: requestId, decision }),
   chatCancel: () => post(WS + 'chat/cancel', {}),
+  // ACP3 : l'hôte du chat, par projet. Les hôtes absents reviennent grisés, avec leur raison.
+  chatHosts: () => get(WS + 'chat/hosts'),
+  chatHost: (host) => post(WS + 'chat/host', { host }),
   glossary: () => get(WS + 'glossary'),
   // Ce qui attend une décision humaine (P22), rangé par urgence. `portfolio`
   // lit tout le registre — la portée « Tous les projets » ; `probe` relance

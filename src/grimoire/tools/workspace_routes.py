@@ -617,6 +617,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
+    f"{PREFIX}chat/hosts": workspace_chat.chat_hosts,
 }
 
 
@@ -920,6 +921,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}chat/permission": workspace_chat.chat_permission,
     f"{PREFIX}chat/cancel": workspace_chat.chat_cancel,
     f"{PREFIX}chat/stop": workspace_chat.chat_stop,
+    f"{PREFIX}chat/host": workspace_chat.chat_host,
     f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
     f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,
