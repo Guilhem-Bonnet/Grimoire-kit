@@ -688,7 +688,9 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
             from grimoire.tools import workspace_pulse, workspace_read_cache
 
             plain = {k: v for k, v in query.items() if k != "live"}
-            portfolio = _one(plain, "scope") == "portfolio"
+            # Une lecture d'un autre projet que celui servi (`project=`, la fiche en portefeuille) ou du portefeuille
+            # suit l'empreinte de tous les projets : celle du seul projet servi ne bouge pas quand l'autre écrit.
+            portfolio = _one(plain, "scope") == "portfolio" or bool(_one(plain, "project"))
             return workspace_read_cache.cached_read(
                 path, project_root, plain, lambda: handler(project_root, plain),
                 lambda: workspace_pulse.fingerprint_of(project_root, portfolio=portfolio),

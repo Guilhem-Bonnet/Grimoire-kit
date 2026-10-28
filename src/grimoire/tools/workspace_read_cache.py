@@ -46,13 +46,18 @@ class _Entry:
 _lock = threading.Lock()
 _entries: OrderedDict[tuple[str, ...], _Entry] = OrderedDict()
 _flights: dict[tuple[str, ...], threading.Lock] = {}
+#: Monte à chaque :func:`clear` : un calcul commencé avant (une lecture en vol pendant une écriture du cockpit) rend
+#: sa réponse à son appelant mais ne la garde pas ; sinon l'état d'avant l'écriture serait resservi.
+_generation = 0
 
 
 def clear() -> None:
     """Oublie toutes les réponses gardées (tests, rechargement du serveur)."""
+    global _generation
     with _lock:
         _entries.clear()
         _flights.clear()
+        _generation += 1
 
 
 def _fresh(entry: _Entry | None, fingerprint: str, now: float) -> bool:
@@ -77,8 +82,11 @@ def cached_read(
             if _fresh(entry, mark, time.monotonic()):
                 _entries.move_to_end(key)
                 return entry.value  # type: ignore[union-attr]
+            started = _generation
         value = compute()
         with _lock:
+            if started != _generation:
+                return value  # une écriture a vidé le cache pendant le calcul : cette réponse peut la précéder
             _entries[key] = _Entry(mark, time.monotonic(), value)
             _entries.move_to_end(key)
             while len(_entries) > MAX_ENTRIES:

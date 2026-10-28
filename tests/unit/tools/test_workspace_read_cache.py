@@ -149,3 +149,35 @@ def test_sans_live_la_lecture_est_toujours_recalculee(tmp_path: Path, monkeypatc
     workspace_get(tmp_path, TASKS, {})
     workspace_get(tmp_path, TASKS, {})
     assert len(calls) == 3
+
+
+def test_un_calcul_en_vol_pendant_une_ecriture_n_est_pas_garde(tmp_path: Path) -> None:
+    """Défaut empêché (e2e portefeuille, CI du 2026-10-28) : une lecture commencée avant une écriture du cockpit,
+    finie après le vidage, remettait l'état d'avant au cache ; plus rien ne relisait, la page restait figée."""
+    calls: list[int] = []
+
+    def compute_during_write() -> str:
+        calls.append(1)
+        workspace_read_cache.clear()  # l'écriture du cockpit arrive pendant le calcul
+        return "avant l'écriture"
+
+    assert workspace_read_cache.cached_read("r", tmp_path, {}, compute_during_write, lambda: "même") == "avant l'écriture"
+    assert workspace_read_cache.cached_read("r", tmp_path, {}, lambda: "après", lambda: "même") == "après"
+
+
+def test_la_fiche_d_un_autre_projet_suit_l_empreinte_du_portefeuille(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché : la fiche d'un projet regardé en portefeuille, gardée avec l'empreinte du seul projet servi,
+    ne bougeait pas quand l'autre projet écrivait."""
+    from grimoire.tools import workspace_pulse
+
+    seen: list[bool] = []
+    real = workspace_pulse.fingerprint_of
+
+    def spy(root: Path, *, portfolio: bool = False, now: Any = None) -> str:
+        seen.append(portfolio)
+        return real(root, portfolio=portfolio)
+
+    monkeypatch.setattr(workspace_pulse, "fingerprint_of", spy)
+    workspace_get(tmp_path, f"{PREFIX}sheet", {"project": ["beta"], **LIVE})
+    workspace_get(tmp_path, f"{PREFIX}sheet", LIVE)
+    assert seen == [True, False]
