@@ -102,9 +102,8 @@ def _conflit(tasks: dict[str, MissionTask], task: MissionTask, files: tuple[str,
 
 
 def _actives(service: TaskService, tasks: dict[str, MissionTask]) -> int:
-    """Les sessions de worker vivantes — même règle que ``WorkerLauncher._active`` (lancées ou non arrêtées)."""
-    live = set(launcher.launched_sessions(service)) | set(launcher.unhalted_sessions(service))
-    return sum(1 for tid in live if (t := tasks.get(tid)) is not None and t.status in launcher._LIVE)
+    """Les sessions de worker qui travaillent — la même règle que ``WorkerLauncher._active``."""
+    return len([tid for tid in launcher.active_worker_ids(service) if tid in tasks])
 
 
 def _launched_today(service: TaskService, now: datetime) -> int:

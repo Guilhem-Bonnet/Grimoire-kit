@@ -225,6 +225,13 @@ def _one_pass(
     woken = tuple(service.wake_due(apply=True, now=now, pause=state))
     effects = tuple(reconcile(service, apply=True, probe=effect_probe))
     shared = once_per_tick(ci_probe)  # UNE lecture gh par tick, partagée par la réconciliation et la migration
+    if mode == "apply":  # les workers en revue ou en attente rendent leur place : session arrêtée, conversation gardée
+        from grimoire.missions.launcher import halt_idle_workers
+
+        try:
+            halt_idle_workers(service, exec_ or default_exec)
+        except Exception as exc:
+            heartbeat = heartbeat or f"arrêt des workers au repos : en erreur, retenté au tick suivant ({type(exc).__name__}: {exc})"
     ci = (*reconcile_ci(service, probe=shared, now=now), *migrate_orphan_slots(service, probe=shared, now=now))
     attention = [*state.attention(), *([heartbeat] if heartbeat else [])]
     policy, cleanup = _orchestrator_stage(service, mode, exec_, attention)
