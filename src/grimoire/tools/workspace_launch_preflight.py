@@ -4,8 +4,9 @@
 session worker sur une tâche, en lecture seule stricte (ADR-008, phase plan) :
 le modèle recommandé avec son palier et sa classe de vérifiabilité, le worktree
 et la branche que le lanceur créerait, les vérifications avant lancement
-(conflit de réservation, plafond de sessions, admission, dépendances, quota),
-et la commande équivalente à copier — jamais exécutée ici.
+(conflit de réservation, plafond de sessions, admission, dépendances, quota,
+dossier approuvé par Claude Code, ``gh`` authentifié, PR ouverte sur les mêmes
+fichiers), et la commande équivalente à copier — jamais exécutée ici.
 
 Tout vient des mêmes sources que le tick réel : :func:`grimoire.missions.
 admission.build_plan` (le plan à blanc de ``grimoire queue plan``),
@@ -45,6 +46,7 @@ from grimoire.missions.admission import (
     read_host,
 )
 from grimoire.missions.dispatch_advice import dispatch_advice
+from grimoire.missions.launcher import Exec, default_exec
 from grimoire.missions.ledger_rules import unclosed_blockers
 from grimoire.missions.orchestrator_policy import PolicyRead, WorkerRole, load_orchestrator_policy
 from grimoire.missions.pause import read_pause
@@ -176,6 +178,74 @@ def _quota(capacity: Capacity, view: LedgerView) -> dict[str, str]:
     return _verif("quota", libelle, _OK, f"mode fini — >= {used.tokens}/{plafond} tokens consommés")
 
 
+def _dossier_approuve(repo: Path, config: Path) -> dict[str, str]:
+    """Dossier approuvé par Claude Code : sans la confiance, ``claude --bg`` se bloque en silence.
+
+    Piège vérifié (2026-10-17) : une session de fond lancée dans un dépôt que
+    Claude Code n'a jamais approuvé reste bloquée sur « Workspace not
+    trusted » sans que rien ne le dise. La confiance se lit dans
+    ``~/.claude.json`` (``projects.<chemin>.hasTrustDialogAccepted``).
+    """
+    libelle = "Dossier approuvé par Claude Code"
+    remede = f"ouvre une session Claude Code dans {repo} et accepte la confiance du dossier"
+    try:
+        data = json.loads(config.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _verif("dossier_approuve", libelle, _BLOQUANT,
+                      f"aucun {config.name} sur ce poste : rien n'est approuvé — {remede}")
+    except (OSError, ValueError) as exc:
+        return _verif("dossier_approuve", libelle, _INCONNU,
+                      f"{config} illisible ({exc}) : confiance non vérifiable")
+    projects = data.get("projects") if isinstance(data, dict) else None
+    entry = projects.get(str(repo)) if isinstance(projects, dict) else None
+    if isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True:
+        return _verif("dossier_approuve", libelle, _OK, f"confiance accordée à {repo}")
+    return _verif("dossier_approuve", libelle, _BLOQUANT,
+                  f"dossier non approuvé : une session --bg s'y bloquerait en silence — {remede}")
+
+
+def _gh_app(repo: Path, exec_: Exec) -> dict[str, str]:
+    """``gh`` authentifié : sans lui, le worker finirait sans pouvoir ouvrir sa PR."""
+    libelle = "gh authentifié (GitHub App)"
+    result = exec_(["gh", "auth", "status"], repo, None)
+    if result.returncode == 0:
+        return _verif("gh_app", libelle, _OK, "gh auth status répond : le worker pourra ouvrir sa PR")
+    if result.returncode in (124, 126, 127):
+        # Binaire absent ou sonde expirée : on ne sait pas, on ne devine pas.
+        return _verif("gh_app", libelle, _INCONNU,
+                      f"gh non sondable ({(result.stderr or '').strip() or f'sortie {result.returncode}'})")
+    detail = (result.stderr or result.stdout).strip()[:160] or "aucun détail"
+    return _verif("gh_app", libelle, _BLOQUANT,
+                  f"gh non authentifié (sortie {result.returncode}) : {detail} — le worker ne pourrait pas ouvrir sa PR")
+
+
+def _pr_ouverte(repo: Path, files: tuple[str, ...], exec_: Exec) -> dict[str, str]:
+    """PR ouverte sur les mêmes fichiers : lancer dessus produirait deux PR en conflit."""
+    libelle = "PR ouverte sur les mêmes fichiers"
+    if not files:
+        return _verif("pr_ouverte", libelle, _OK, "aucun fichier déclaré : rien à croiser")
+    result = exec_(["gh", "pr", "list", "--state", "open", "--json", "number,title,files"], repo, None)
+    if result.returncode != 0:
+        return _verif("pr_ouverte", libelle, _INCONNU,
+                      f"gh pr list a échoué ({result.returncode}) : chevauchement non évaluable")
+    try:
+        rows = json.loads(result.stdout or "[]")
+    except ValueError:
+        return _verif("pr_ouverte", libelle, _INCONNU, "réponse de gh illisible : chevauchement non évaluable")
+    wanted = set(files)
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        touched = {str(f.get("path", "")) for f in row.get("files") or [] if isinstance(f, dict)}
+        hit = sorted(wanted & touched)
+        if hit:
+            return _verif("pr_ouverte", libelle, _BLOQUANT,
+                          f"la PR ouverte #{row.get('number', '?')} touche déjà {hit[0]} — "
+                          "fusionne-la d'abord, ou retire le fichier du claim")
+    return _verif("pr_ouverte", libelle, _OK,
+                  f"aucune PR ouverte ne touche les {len(files)} fichier(s) que le claim réserverait")
+
+
 # ── Modèle, worktree, commande ───────────────────────────────────────────────
 
 
@@ -305,6 +375,8 @@ def launch_preflight(
     probe: Callable[[], HostReading | None] = read_host,
     route_of: Callable[[MissionTask], RouteRef | None] | None = None,
     files: tuple[str, ...] | None = None,
+    exec_: Exec = default_exec,
+    claude_config: Path | None = None,
 ) -> dict[str, Any]:
     """Le plan d'assignation d'une session worker sur *task_id* — lecture pure, rien n'est lancé ni écrit.
 
@@ -316,7 +388,10 @@ def launch_preflight(
     réserverait (défaut : ceux du claim courant de la tâche, s'il y en a un).
     Une tâche inconnue lève :class:`GrimoireMissionError` (404 côté transport).
     """
-    return launch_preflight_full(project_root, task_id, now=now, probe=probe, route_of=route_of, files=files).payload
+    return launch_preflight_full(
+        project_root, task_id, now=now, probe=probe, route_of=route_of, files=files,
+        exec_=exec_, claude_config=claude_config,
+    ).payload
 
 
 def launch_preflight_full(
@@ -327,6 +402,8 @@ def launch_preflight_full(
     probe: Callable[[], HostReading | None] = read_host,
     route_of: Callable[[MissionTask], RouteRef | None] | None = None,
     files: tuple[str, ...] | None = None,
+    exec_: Exec = default_exec,
+    claude_config: Path | None = None,
 ) -> Preflight:
     """Comme :func:`launch_preflight`, mais rend aussi les lectures déjà faites (:class:`Preflight`).
 
@@ -350,12 +427,18 @@ def launch_preflight_full(
     tasks = {t.id: t for t in service.ledger.list_tasks()}
     read = load_orchestrator_policy(service.home_root)
     requested = files if files is not None else (task.claim.exclusive_files if task.claim is not None else ())
+    config = claude_config if claude_config is not None else Path.home() / ".claude.json"
     verifications = [
         _conflit(tasks, task, tuple(requested)),
         _plafond(read, service, tasks, moment),
         _admission(plan, task),
         _dependances(tasks, task),
         _quota(capacity, plan.view),
+        # Les contrôles préalables au lancement lui-même (critère 2 de P47) :
+        # sans eux, la session se bloquerait en silence ou finirait sans PR.
+        _dossier_approuve(service.home_root, config),
+        _gh_app(service.home_root, exec_),
+        _pr_ouverte(service.home_root, tuple(requested), exec_),
     ]
     modele, model = _modele(read, _route_of(plan, task.id), task)
     bad = [v for v in verifications if v["verdict"] in _NOT_READY]
