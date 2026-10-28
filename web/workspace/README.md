@@ -310,3 +310,12 @@ geste pour ça.
 Elles restent servies et fonctionnelles tant que les cinq lots ne sont pas
 livrés. Le basculement et les suppressions sont décrits dans l'ADR, section
 « Basculement ».
+
+## Chat de l'orchestrateur (ACP2)
+
+Le dock porte un onglet **Orchestrateur** (`chat.js`) : une conversation par projet avec l'agent de l'hôte,
+lancé par le serveur du cockpit en sous-processus ACP (`src/grimoire/tools/workspace_chat.py`). Le flux arrive
+en SSE (`/api/workspace/chat/stream`), les messages partent en POST sous les gardes d'écriture. Un message est
+un tour humain : la coque n'écrit rien, c'est l'agent qui agit, avec ses permissions (boutons « Autoriser une
+fois », « Toujours », « Refuser » dans le fil). Preuves : `tests/e2e/test_workspace_chat_acp2.py` (faux agent
+`tests/fixtures/acp/chat_agent.py`), captures dans `docs/captures/acp2-chat/`.
