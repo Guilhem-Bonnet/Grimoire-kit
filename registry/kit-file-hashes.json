@@ -3806,6 +3806,10 @@
    "version": "3.18.0",
    "path": "framework/memory/backends/backend_qdrant_local.py"
   },
+  "e2d150c4268edf1b4db4ee8f5cc82de0a4a1e2ea0a69ece1deb4d1a200dddf5d": {
+   "version": "3.72.0",
+   "path": "framework/glossary.yaml"
+  },
   "e2e027d948f564b7be0a930dc740ed90e7b4ed613115ca8c7e5df634001e675c": {
    "version": "3.16.0",
    "path": "framework/tools/synapse-config.py"
