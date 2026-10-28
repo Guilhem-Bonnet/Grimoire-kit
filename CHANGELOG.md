@@ -9,6 +9,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - feat(memory): correction mémoire déléguée à un agent (P42, GAO-p42-correct-001) : « Demander une correction… » ouvre une tâche au critère généré selon le résultat attendu (`corrects: <id>` pour remplacer ou fusionner) ; l'agent dépose sa correction par `grimoire memory correct propose` comme proposition `memory-correction` (`grimoire.proposals`), sans écrire en mémoire ; accepter applique par `MemoryManager`, le journal P14 porte `proposed_by` et `applied_by` ; une proposition dont une entrée a changé depuis la demande est périmée (refusée, aperçu sur l'état actuel).
 
+- fix(init): la sonde « collection déjà remplie » de `grimoire init` ne laisse plus le nom de collection réécrire l'URL (CodeQL py/partial-ssrf, `cmd_init.py`) : nom hors de `[A-Za-z0-9][A-Za-z0-9_-]{0,127}` non sondé (lu comme vide, comme une sonde en échec), segment Qdrant encodé, requête Weaviate construite par `urlencode`.
+
 - fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).
 
 - fix(ci): les journaux de preuve (`_grimoire-runtime-output/`) et les reçus de relecture (`_grimoire-output/reviews/`) ne sont plus suivis par git. Commités par des workers (#1017, #1039), ils rendaient « périmée » chaque relecture (fichier suivi modifié par `task verify` ou la relecture), jusqu'à l'escalade à l'humain (P82, 2026-10-28).
