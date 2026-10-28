@@ -165,19 +165,10 @@ def test_un_calcul_en_vol_pendant_une_ecriture_n_est_pas_garde(tmp_path: Path) -
     assert workspace_read_cache.cached_read("r", tmp_path, {}, lambda: "après", lambda: "même") == "après"
 
 
-def test_la_fiche_d_un_autre_projet_suit_l_empreinte_du_portefeuille(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Défaut empêché : la fiche d'un projet regardé en portefeuille, gardée avec l'empreinte du seul projet servi,
-    ne bougeait pas quand l'autre projet écrivait."""
-    from grimoire.tools import workspace_pulse
-
-    seen: list[bool] = []
-    real = workspace_pulse.fingerprint_of
-
-    def spy(root: Path, *, portfolio: bool = False, now: Any = None) -> str:
-        seen.append(portfolio)
-        return real(root, portfolio=portfolio)
-
-    monkeypatch.setattr(workspace_pulse, "fingerprint_of", spy)
-    workspace_get(tmp_path, f"{PREFIX}sheet", {"project": ["beta"], **LIVE})
-    workspace_get(tmp_path, f"{PREFIX}sheet", LIVE)
-    assert seen == [True, False]
+def test_une_lecture_d_un_autre_projet_ou_du_portefeuille_n_est_jamais_gardee(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché (e2e du portefeuille rouge en CI) : la fiche d'un projet regardé en portefeuille, gardée avec une
+    empreinte que les écritures de cet autre projet ne font pas bouger, restait figée après « Réaliser »."""
+    calls = _counted(monkeypatch)
+    for _ in range(2):
+        workspace_get(tmp_path, TASKS, {"scope": ["portfolio"], **LIVE})
+    assert len(calls) == 2

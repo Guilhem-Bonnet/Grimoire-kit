@@ -712,18 +712,19 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
 
     try:
         handler = GET_ROUTES.get(path)
-        if handler is not None and path in LIVE_ROUTES and _one(query, "live") == "1":
+        # Une lecture d'un autre projet que celui servi (`project=`, la fiche en portefeuille) ou du portefeuille n'est
+        # jamais gardée : son empreinte couvre des ledgers que ce serveur n'écrit pas (e2e du portefeuille rouge en CI
+        # seulement, 2026-10-28). Le cache reste celui du projet servi, le cas mesuré par P79.
+        foreign = _one(query, "scope") == "portfolio" or bool(_one(query, "project"))
+        if handler is not None and path in LIVE_ROUTES and _one(query, "live") == "1" and not foreign:
             # P79 : un rechargement du direct (`live=1`, posé par la page pendant un pouls changé) est servi une fois
             # par empreinte, pas une par onglet. Un chargement de page ou une navigation relisent toujours.
             from grimoire.tools import workspace_pulse, workspace_read_cache
 
             plain = {k: v for k, v in query.items() if k != "live"}
-            # Une lecture d'un autre projet que celui servi (`project=`, la fiche en portefeuille) ou du portefeuille
-            # suit l'empreinte de tous les projets : celle du seul projet servi ne bouge pas quand l'autre écrit.
-            portfolio = _one(plain, "scope") == "portfolio" or bool(_one(plain, "project"))
             return workspace_read_cache.cached_read(
                 path, project_root, plain, lambda: handler(project_root, plain),
-                lambda: workspace_pulse.fingerprint_of(project_root, portfolio=portfolio),
+                lambda: workspace_pulse.fingerprint_of(project_root),
             )
         if handler is not None:
             return handler(project_root, query)
