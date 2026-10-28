@@ -263,7 +263,18 @@ jobs:
           # Même cause pour la fluidité : 22 images/s mesurées sur main le 2026-10-28 (seuil local 30) ; la CI
           # vérifie que la rotation tourne, pas la cadence d'un GPU qu'elle n'a pas.
           GRIMOIRE_CARTE_MIN_FPS: "15"
+          # Un test qui échoue y laisse la capture et le HTML de ses pages (tests/e2e/conftest.py).
+          GRIMOIRE_E2E_FAILURE_DIR: e2e-failures
         run: pytest tests/e2e -q --tb=short
+
+      - name: Upload e2e failure captures
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: e2e-failures
+          path: e2e-failures/
+          if-no-files-found: ignore
+          retention-days: 7
 
   neo4j-service:
     name: "Neo4j 5.26 (service)"
