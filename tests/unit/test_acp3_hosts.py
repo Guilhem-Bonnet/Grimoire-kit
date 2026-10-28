@@ -148,6 +148,7 @@ def fake_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return bin_dir
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="faux hôtes en scripts à shebang : non exécutables sous Windows")
 def test_doctor_reports_each_installed_host_whose_acp_answers_initialize_without_a_prompt(
     fake_path: Path, tmp_path: Path
 ) -> None:
@@ -167,6 +168,7 @@ def test_doctor_reports_nothing_when_no_host_is_installed(fake_path: Path, tmp_p
     assert check_acp_hosts(tmp_path) == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="faux hôtes en scripts à shebang : non exécutables sous Windows")
 def test_doctor_marks_a_preview_host(fake_path: Path, tmp_path: Path) -> None:
     _fake_bin(fake_path, "copilot", f"#!{sys.executable}\nimport sys\nsys.exit(1)\n")
     (check,) = check_acp_hosts(tmp_path)

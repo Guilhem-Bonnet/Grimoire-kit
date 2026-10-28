@@ -77,6 +77,7 @@ import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -86,7 +87,14 @@ from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
-from grimoire.missions.reviewer import CI_RUNNING, REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT, entered_review_at
+from grimoire.missions.reviewer import (
+    CI_RUNNING,
+    HEAD_MOVED,
+    NO_CHECKS,
+    REVIEW_JUDGED_EVENT,
+    REVIEW_LAUNCHED_EVENT,
+    entered_review_at,
+)
 from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR, TaskState
 from grimoire.missions.task_worktree import MERGED_EVENT, TASK_BRANCH_PREFIX, find_task_worktree
 from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, new_question_id
@@ -128,6 +136,8 @@ MERGE_BOUNCED_EVENT = "task.merge_bounced"
 MERGE_CI_EVENT = "task.merge_ci"
 #: Une relance des jobs en échec de la tête (``rerun-failed-jobs``) : une seule par tête, ``outcome`` dit si GitHub l'a prise.
 MERGE_RERUN_EVENT = "task.merge_rerun"
+#: P89 : le temps qu'une relance de jobs met à remettre la CI en cours sur GitHub ; avant, le rouge lu est l'ancien.
+RERUN_SETTLE = timedelta(minutes=3)
 MERGE_REQUESTED_EVENT = "task.merge_requested"
 MERGE_ESCALATED_EVENT = "task.merge_escalated"
 MERGE_ACCEPTED_EVENT = "task.merge_accepted"
@@ -140,7 +150,7 @@ MAX_DESYNC_WAITS = 3
 #: Ce que GitHub dit d'une PR en conflit avec sa cible (``mergeable``, ``mergeStateStatus``).
 _CONFLICTING = frozenset({"CONFLICTING", "DIRTY"})
 #: Le début du détail CI quand GitHub ne rapporte aucun check : le cas d'une PR en conflit, dont il ne lance pas la CI.
-_NO_CHECKS = "aucun check rapporté"
+_NO_CHECKS = NO_CHECKS
 CHANGELOG = "CHANGELOG.md"
 #: Les chemins qui escaladent à l'humain, quoi que dise le mandat (``protected_paths`` de la politique s'y ajoute) :
 #: le code des gardes, la politique, les workflows et hooks, le packaging, ce qui s'exécute à l'import ou se compile.
@@ -463,6 +473,9 @@ class MergeStage:
         if ci == "red":
             if (retry := self._rerun_once(tid, pr, detail)) is not None:
                 return retry
+            if self._rerun_just_sent(tid, pr.head):  # P89 : relancée à l'instant (par le relecteur), GitHub lit encore l'échec
+                return MergerOutcome(tid, "wait", "waiting", f"CI rouge ({detail}) : relance de cette tête tout juste "
+                                     "demandée, son verdict est attendu", pr.number)
             return self._bounce(task, launch, "ci_red", detail, pr.number)
         # GitHub ne lance pas la CI d'une PR en conflit : l'attendre ne finirait jamais, le réalignement passe d'abord.
         stalled = pr.conflicting and ci == "pending" and detail.startswith(_NO_CHECKS)
@@ -696,7 +709,8 @@ class MergeStage:
         """La CI de la PR de ``task/<id>`` lue comme le merger la lit, pour le relecteur (#993) : ``(verdict, détail)``.
 
         ``green``, ``red``, ``pending`` ou ``unknown`` (gh en échec), seulement si la tête GitHub de la PR est *head* ;
-        ``""`` quand ce n'est pas la CI de *head* (dépôt non figé, aucune PR, PR à une autre tête) : rien n'en est conclu.
+        :data:`HEAD_MOVED` quand la PR a avancé au-delà de *head* ; ``""`` quand il n'y a rien à lire (dépôt non figé,
+        aucune PR) : dans ces deux cas rien n'en est conclu sur la CI.
         *selector* (#994) : la PR d'une tâche faite à la main, par son numéro, au lieu de ``task/<id>``.
         """
         pin, why = self._pin(task_id)
@@ -709,8 +723,22 @@ class MergeStage:
         if pr is None:
             return "", f"aucune PR pour {branch}"
         if pr.head != head:
-            return "", f"PR #{pr.number} à {pr.head[:12]}, tête relue {head[:12]}"
+            return HEAD_MOVED, f"PR #{pr.number} à {pr.head[:12]}, tête relue {head[:12]}"
         return self._ci(pr.slug, branch, red=frozenset({"fail"}))  # un check annulé reste au merger
+
+    def rerun_failed_once(self, task_id: str, head: str, detail: str, *, selector: str = "") -> bool:
+        """P89 : le relecteur relance une fois les jobs en échec de *head* avant de défaire un READY.
+
+        La clé est celle du merger (``task.merge_rerun`` par tête) : une tête n'a qu'une relance, quel que soit celui qui
+        l'a demandée. ``False`` : tête déjà relancée, PR à une autre tête, aucune PR ou GitHub qui refuse.
+        """
+        pin, _why = self._pin(task_id)
+        if pin is None:
+            return False
+        pr, error = self._view(selector or TASK_BRANCH_PREFIX + task_id, pin)
+        if error or pr is None or pr.head != head:
+            return False
+        return self._rerun_once(task_id, pr, detail) is not None
 
     def _ci(self, slug: str, branch: str, *, red: frozenset[str] = _RED_BUCKETS) -> tuple[str, str]:
         """``(green|red|pending|unknown, détail)`` : les checks requis, ou tous hors ignorés si gh dit qu'aucun n'est requis.
@@ -773,6 +801,18 @@ class MergeStage:
             return None
         return MergerOutcome(tid, "wait", "waiting", f"CI rouge ({detail}) : jobs en échec relancés une fois "
                              f"(run {', '.join(done)}), le retour au worker attend le verdict de cette relance", pr.number)
+
+    def _rerun_just_sent(self, tid: str, head: str) -> bool:
+        """Une relance de *head* partie il y a moins de :data:`RERUN_SETTLE` : la CI rouge lue est celle d'avant."""
+        sent = [e.created_at for e in self._service.ledger.events_for(tid)
+                if e.event_type == MERGE_RERUN_EVENT and e.payload.get("head") == head and e.payload.get("outcome") == "rerun"]
+        if not sent:
+            return False
+        try:
+            at = datetime.fromisoformat(sent[-1])
+        except ValueError:
+            return False
+        return datetime.now(UTC) - (at if at.tzinfo else at.replace(tzinfo=UTC)) < RERUN_SETTLE
 
     def _stable_ci(self, tid: str, pr: _PullRequest, branch: str) -> tuple[str, str]:
         """Le verdict CI, vert seulement s'il l'était déjà au tick précédent pour cette tête (``task.merge_ci``)."""

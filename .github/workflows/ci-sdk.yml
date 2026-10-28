@@ -260,6 +260,9 @@ jobs:
           # Carte 3D (P81) sous WebGL logiciel (SwiftShader) : la présentation d'une image occupe le fil
           # principal ; l'exigence produit reste 100 ms (défaut du test), la CI sans GPU en tolère 200.
           GRIMOIRE_CARTE_MAX_LONGTASK_MS: "200"
+          # Même cause pour la fluidité : 22 images/s mesurées sur main le 2026-10-28 (seuil local 30) ; la CI
+          # vérifie que la rotation tourne, pas la cadence d'un GPU qu'elle n'a pas.
+          GRIMOIRE_CARTE_MIN_FPS: "15"
         run: pytest tests/e2e -q --tb=short
 
   neo4j-service:

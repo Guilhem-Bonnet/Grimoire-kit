@@ -173,10 +173,10 @@ def test_memory_compose_rollback_refuse_si_fichier_modifie(tmp_path: Path, kit: 
     plan = wact.plan_action(root, "memory.compose", {"params": {"profile": "standard"}}, env=env)
     wact.apply_action(root, "memory.compose", {"plan_id": plan["plan_id"], "empreinte": plan["empreinte"]}, env=env)
     config = root / "project-context.yaml"
-    config.write_text(config.read_text() + "# édité à la main\n", encoding="utf-8")
+    config.write_text(config.read_text(encoding="utf-8") + "# édité à la main\n", encoding="utf-8")
     undone = wact.rollback_action(root, "memory.compose", {"run_id": plan["plan_id"]}, env=env)
     assert not undone["ok"] and "modifié" in undone["raison"]
-    assert "# édité à la main" in config.read_text()
+    assert "# édité à la main" in config.read_text(encoding="utf-8")
 
 
 # ── Contrat plan → apply ──────────────────────────────────────────────────────
