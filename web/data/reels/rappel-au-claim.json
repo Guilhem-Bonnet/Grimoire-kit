@@ -1,0 +1,76 @@
+{
+  "schema": "grimoire-reel/v1",
+  "id": "rappel-au-claim",
+  "title": "Rappel au claim",
+  "summary": "Réclamer une tâche voisine d'une tâche close rappelle ce que le projet en sait.",
+  "command": [
+    "grimoire task add \"Ecrire la doc de l API\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
+    "grimoire task claim GAO-ecrire-la-do-001",
+    "grimoire task move GAO-ecrire-la-do-001 --to running",
+    "grimoire task move GAO-ecrire-la-do-001 --to needs_verification",
+    "écrire DOC.md",
+    "grimoire task verify GAO-ecrire-la-do-001",
+    "grimoire task close GAO-ecrire-la-do-001",
+    "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
+    "grimoire task recall GAO-ecrire-la-do-002"
+  ],
+  "kit_version": "3.71.0",
+  "recorded_at": "2026-10-28T00:08:14Z",
+  "output_sha256": "652bbe35b1498cb6525002a7ccec427605c666aafc72596d9ed98e929aa74b43",
+  "frames": [
+    {
+      "kind": "run",
+      "command": "grimoire task add \"Ecrire la doc de l API\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
+      "exit_code": 0,
+      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready)\n  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task claim GAO-ecrire-la-do-001",
+      "exit_code": 0,
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready → claimed) · V0 → haiku"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task move GAO-ecrire-la-do-001 --to running",
+      "exit_code": 0,
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (claimed → running) · V0 → haiku"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task move GAO-ecrire-la-do-001 --to needs_verification",
+      "exit_code": 0,
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (running → needs_verification) · V0 → haiku"
+    },
+    {
+      "kind": "write",
+      "command": "écrire DOC.md",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task verify GAO-ecrire-la-do-001",
+      "exit_code": 0,
+      "output": "OK GAO-ecrire-la-do-001 — verdict passed (EVD-GAO-ecrire-la-do-001-001,\nver-GAO-ecrire-la-do-001-001)"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task close GAO-ecrire-la-do-001",
+      "exit_code": 0,
+      "output": "OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (needs_verification → closed) · V0 → haiku"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
+      "exit_code": 0,
+      "output": "OK GAO-ecrire-la-do-002 — Ecrire la doc du CLI (ready)\n  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict"
+    },
+    {
+      "kind": "run",
+      "command": "grimoire task recall GAO-ecrire-la-do-002",
+      "exit_code": 0,
+      "output": "[Grimoire — rappel de tâche] GAO-ecrire-la-do-002 :\nTâches voisines :\n  - GAO-ecrire-la-do-001 (même mission, closed) — clôturée\nMémoire du projet :\n  -  Tâche GAO-ecrire-la-do-001 clôturée : Ecrire la doc de l API. Critères : le test passe."
+    }
+  ]
+}
