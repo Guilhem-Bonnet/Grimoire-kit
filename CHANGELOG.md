@@ -8,6 +8,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - feat(cockpit): actions typées A et B (ADR-008, P40, GAO-p40-actions-001) — `GET data/actions` (catalogue), `GET data/actions/journal`, `POST data/actions/<id>/plan|apply|rollback`. Composer la mémoire (`memory.compose`, copie de `project-context.yaml` restaurable), démarrer/arrêter une pile depuis les compose du kit (jamais de commande libre, jamais `-v`/`down`, pile existante réutilisée, conteneur d'un autre projet refusé, arrêt d'une pile partagée confirmé avec projets et sessions vivantes listés), interrupteur « redémarrer avec la machine » (`docker update --restart`, relu par `docker inspect`) ; les extras pip restent une commande affichée. `apply` refuse un plan périmé, expiré ou sans journal inscriptible.
+- fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).
+
+- fix(ci): les journaux de preuve (`_grimoire-runtime-output/`) et les reçus de relecture (`_grimoire-output/reviews/`) ne sont plus suivis par git. Commités par des workers (#1017, #1039), ils rendaient « périmée » chaque relecture (fichier suivi modifié par `task verify` ou la relecture), jusqu'à l'escalade à l'humain (P82, 2026-10-28).
 
 - feat(observatory): l'export lit le TraceLedger et le journal runtime réels (R15)
   - `observatory export` ne lisait que les fichiers de l'ère shell. Il lit désormais `_grimoire-output/traces/traces.jsonl` (TraceLedger) et `events/runtime-journal.jsonl`, via `grimoire.traces.observatory_feed` ; `framework/tools/observatory.py` (gelé) y délègue en six lignes.
