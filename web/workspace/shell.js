@@ -57,6 +57,7 @@
 import { api, boot, host } from './api.js';
 import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
+import { createChat } from './chat.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -150,6 +151,7 @@ const DOCK_TABS = [
   { id: 'traces', icon: 'network',   label: 'Traces',   term: 'trace' },
   { id: 'timeline', icon: 'chart', label: 'Timeline', term: 'timeline' },
   { id: 'problemes', icon: 'alert', label: 'Problèmes', term: 'probleme' },
+  { id: 'orchestrateur', icon: 'agent', label: 'Orchestrateur', term: 'orchestrateur' },
 ];
 
 const PANELS = { explorer: 'panel-explorer', inspector: 'panel-inspector', evidence: 'panel-evidence' };
@@ -1492,6 +1494,7 @@ function buildDock() {
 
 function selectDockTab(id) {
   dockTab = id;
+  $('dock').dataset.tab = id;
   markSelectedTab($('dock-tabs'), document.querySelector(`[data-dock-tab="${id}"]`));
   $('dock-body').setAttribute('aria-labelledby', `tab-dock-${id}`);
   // Le champ n'appartient qu'à l'onglet Console : ailleurs il ne prend ni place ni focus.
@@ -1500,9 +1503,19 @@ function selectDockTab(id) {
   renderDock();
 }
 
+// Le chat de l'orchestrateur (ACP2) : monté une fois, son DOM et son flux survivent aux changements d'onglet.
+let orchestratorChat = null;
+
 function renderDock() {
   const body = $('dock-body');
   body.replaceChildren();
+  body.classList.toggle('is-chat', dockTab === 'orchestrateur');
+  if (dockTab === 'orchestrateur') {
+    orchestratorChat ||= createChat({ readOnly: () => host.readOnly });
+    body.append(orchestratorChat.element);
+    orchestratorChat.open();
+    return;
+  }
   const lines = dockBuffers[dockTab] || [];
   if (!lines.length) {
     const empty = document.createElement('div');
