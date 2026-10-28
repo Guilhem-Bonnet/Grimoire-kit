@@ -30,6 +30,7 @@ from grimoire.missions.merger import (
     MERGE_ESCALATED_EVENT,
     MERGE_REALIGNED_EVENT,
     MERGE_REQUEUED_EVENT,
+    MERGE_RERUN_EVENT,
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
@@ -307,6 +308,46 @@ def test_ci_rouge_renvoie_au_worker_comme_un_not_ready(projet: Path, host: FakeH
     assert resume[3] == launch["session_id"] and "tests" in resume[-1]
     assert TaskService(projet).require(tid).status is TaskState.RUNNING and host.of("gh", "pr", "merge") == []
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+
+
+def test_une_tete_rouge_est_relancee_une_fois_puis_renvoyee_si_elle_retombe(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    host.rerun_error = ""
+    tid, wt = launch_and_work(projet, host)
+    head = git(wt, "rev-parse", "HEAD")
+    report = red_after_ready(projet, host, tid, wt)
+    assert merges(report) == [("wait", "waiting")] and host.reruns == [101]
+    assert host.of("claude", "--bg", "--resume") == [] and events(projet, tid, MERGE_BOUNCED_EVENT) == []
+    [rerun] = events(projet, tid, MERGE_RERUN_EVENT)
+    assert rerun.payload["head"] == head and rerun.payload["outcome"] == "rerun" and rerun.payload["runs"] == ["101"]
+    assert any(a[:4] == ["gh", "api", "-X", "POST"] and a[4].endswith("/actions/runs/101/rerun-failed-jobs") for a, _c, _e in host.calls)
+    assert merges(tick(projet, host)) == [("bounce", "done")]  # la même tête, rouge de nouveau
+    assert host.reruns == [101] and len(host.of("claude", "--bg", "--resume")) == 1
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+
+
+def test_un_refus_403_de_la_relance_renvoie_au_worker_sans_boucle(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    assert merges(red_after_ready(projet, host, tid, wt)) == [("bounce", "done")]
+    assert host.reruns == [] and [e.payload["outcome"] for e in events(projet, tid, MERGE_RERUN_EVENT)] == ["denied"]
+    assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
+    calls = len([a for a, _c, _e in host.calls if a[:4] == ["gh", "api", "-X", "POST"]])
+    tick(projet, host)
+    assert len([a for a, _c, _e in host.calls if a[:4] == ["gh", "api", "-X", "POST"]]) == calls  # jamais une seconde tentative
+
+
+def test_une_nouvelle_tete_remet_le_droit_a_une_relance(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    host.rerun_error = ""
+    tid, wt = launch_and_work(projet, host)
+    ready_judged(projet, host, tid, wt)
+    service = TaskService(projet)
+    old = "a" * 40
+    service.ledger.append_event(MERGE_RERUN_EVENT, tid, "task", "merger", {"task_id": tid, "head": old, "outcome": "rerun"})
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
+    assert merges(tick(projet, host)) == [("wait", "waiting")] and host.reruns == [101]  # la tête courante n'a pas eu la sienne
+    assert [e.payload["head"] for e in events(projet, tid, MERGE_RERUN_EVENT)][-1] == git(wt, "rev-parse", "HEAD")
 
 
 def test_ci_en_attente_attend_puis_un_vert_se_confirme_au_tick_suivant(projet: Path, host: FakeHost) -> None:

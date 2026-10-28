@@ -112,6 +112,7 @@ __all__ = [
     "MERGE_REALIGNED_EVENT",
     "MERGE_REQUESTED_EVENT",
     "MERGE_REQUEUED_EVENT",
+    "MERGE_RERUN_EVENT",
     "MERGE_UNDRAFTED_EVENT",
     "MERGE_WAITED_EVENT",
     "MergeStage",
@@ -125,6 +126,8 @@ MERGE_REALIGNED_EVENT = "task.merge_realigned"
 MERGE_PUSHED_EVENT = "task.merge_pushed"
 MERGE_BOUNCED_EVENT = "task.merge_bounced"
 MERGE_CI_EVENT = "task.merge_ci"
+#: Une relance des jobs en échec de la tête (``rerun-failed-jobs``) : une seule par tête, ``outcome`` dit si GitHub l'a prise.
+MERGE_RERUN_EVENT = "task.merge_rerun"
 MERGE_REQUESTED_EVENT = "task.merge_requested"
 MERGE_ESCALATED_EVENT = "task.merge_escalated"
 MERGE_ACCEPTED_EVENT = "task.merge_accepted"
@@ -458,6 +461,8 @@ class MergeStage:
         if ci == "unknown":
             return self._failed(tid, "wait", f"CI illisible : {detail}", pr.number)
         if ci == "red":
+            if (retry := self._rerun_once(tid, pr, detail)) is not None:
+                return retry
             return self._bounce(task, launch, "ci_red", detail, pr.number)
         # GitHub ne lance pas la CI d'une PR en conflit : l'attendre ne finirait jamais, le réalignement passe d'abord.
         stalled = pr.conflicting and ci == "pending" and detail.startswith(_NO_CHECKS)
@@ -734,6 +739,37 @@ class MergeStage:
         if "pass" not in buckets:
             return "pending", f"{len(rows)} {scope} tous sautés : rien n'a tourné"
         return "green", f"{len(rows)} {scope} verts"
+
+    def _rerun_once(self, tid: str, pr: _PullRequest, detail: str) -> MergerOutcome | None:
+        """Une tête rouge vue pour la première fois : ses jobs en échec sont relancés (un test instable n'a rien à corriger).
+
+        ``None`` : pas de relance, le retour au worker suit comme avant — la tête a déjà eu la sienne (prise ou refusée :
+        jamais une seconde, jamais de boucle), ou GitHub la refuse (403 : l'App sans ``actions:write``). Une nouvelle tête
+        (push) est une autre clé : elle remet le droit.
+        """
+        events = self._service.ledger.events_for(tid)
+        if any(e.event_type == MERGE_RERUN_EVENT and e.payload.get("head") == pr.head for e in events):
+            return None
+        listed = self._exec(["gh", "api", f"repos/{pr.slug}/actions/runs?head_sha={pr.head}&per_page=100", "--jq",
+                             '.workflow_runs[] | select(.conclusion=="failure" or .conclusion=="timed_out" '
+                             'or .conclusion=="cancelled") | .id'], self._home, None)
+        runs = [ln.strip() for ln in listed.stdout.splitlines() if ln.strip().isdigit()] if listed.returncode == 0 else []
+        errors = [] if listed.returncode == 0 else [_clean(listed.stderr.strip(), 200)]
+        done: list[str] = []
+        for run in runs:
+            result = self._exec(["gh", "api", "-X", "POST", f"repos/{pr.slug}/actions/runs/{run}/rerun-failed-jobs"],
+                                self._home, None)
+            if result.returncode == 0:
+                done.append(run)
+            else:
+                errors.append(_clean(result.stderr.strip(), 200))
+        outcome = "rerun" if done else "denied" if errors else "none"
+        self._note(MERGE_RERUN_EVENT, tid, {"head": pr.head, "outcome": outcome, "runs": done, "detail": detail[:600],
+                                            "error": errors[0] if errors else ""})
+        if not done:
+            return None
+        return MergerOutcome(tid, "wait", "waiting", f"CI rouge ({detail}) : jobs en échec relancés une fois "
+                             f"(run {', '.join(done)}), le retour au worker attend le verdict de cette relance", pr.number)
 
     def _stable_ci(self, tid: str, pr: _PullRequest, branch: str) -> tuple[str, str]:
         """Le verdict CI, vert seulement s'il l'était déjà au tick précédent pour cette tête (``task.merge_ci``)."""
