@@ -11,6 +11,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - **CI pas encore inscrite** : juste après un push, GitHub ne liste encore aucun check ; le relecteur n'est plus lancé sur une tête de moins de 10 min sans check (au-delà : dépôt sans CI, la relecture se fait), et un NOT-READY rendu dans cet état est écarté sans compter de cycle, comme une CI en cours (P87).
   - **Tête dépassée** : un NOT-READY rendu sur une tête que la PR a dépassée pendant la relecture est relu, il ne renvoie plus le worker corriger ce qui l'est déjà.
   - **CI rouge sur un READY** : le relecteur relance d'abord une fois les jobs en échec (même clé que le merger : une seule relance par tête), le READY tient ; le merger attend le verdict de la relance (3 min) avant de renvoyer au worker si la tête retombe.
+- fix(init): la sonde « collection déjà remplie » de `grimoire init` ne laisse plus le nom de collection réécrire l'URL (CodeQL py/partial-ssrf, `cmd_init.py`) : nom hors de `[A-Za-z0-9][A-Za-z0-9_-]{0,127}` non sondé (lu comme vide, comme une sonde en échec), segment Qdrant encodé, requête Weaviate construite par `urlencode`.
 
 - fix(acp): `grimoire chat --agent-command` garde les antislashs d'un chemin Windows (`shlex` en mode POSIX lisait `C:\tools\python.exe` comme `C:toolspython.exe` ; CI Windows de main du 2026-10-28). Découpage selon le système (`split_command`).
 

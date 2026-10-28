@@ -143,6 +143,34 @@ class TestCollectionHasContent:
         ):
             assert collection_has_content("qdrant-server", "shared") is True
 
+    def test_a_collection_name_that_would_rewrite_the_url_is_never_probed(self) -> None:
+        """CodeQL py/partial-ssrf : le nom vient du projet ; « ../ », « ? » ou « / » ne doivent pas changer la requête."""
+        from grimoire.cli.cmd_init import collection_has_content
+
+        names = ("../admin", "a/b", "x?limit=9999", "", "a b")
+        with patch("grimoire.cli.cmd_init._http_get_json") as probe:
+            for name in names:
+                assert collection_has_content("qdrant-server", name) is False
+        probe.assert_not_called()
+        # Weaviate normalise d'abord le nom ; ce qui part au réseau garde un seul chemin et un seul « ? ».
+        with patch("grimoire.cli.cmd_init._http_get_json", return_value=None) as probe:
+            for name in names:
+                collection_has_content("weaviate-server", name)
+        for call in probe.call_args_list:
+            url = call.args[0]
+            assert ".." not in url and url.count("?") == 1
+            assert url.split("?")[0].endswith("/v1/objects")
+
+    def test_the_probe_url_carries_the_collection_as_one_encoded_component(self) -> None:
+        from grimoire.cli.cmd_init import collection_has_content
+
+        with patch("grimoire.cli.cmd_init._http_get_json", return_value=None) as probe:
+            collection_has_content("qdrant-server", "my-project_1")
+            collection_has_content("weaviate-server", "my-project_1")
+        urls = [c.args[0] for c in probe.call_args_list]
+        assert urls[0].endswith("/collections/my-project_1")
+        assert "/v1/objects?class=" in urls[1] and urls[1].endswith("&limit=1")
+
     def test_local_and_lexical_never_probe(self) -> None:
         from grimoire.cli.cmd_init import collection_has_content
 
