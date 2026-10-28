@@ -1,0 +1,56 @@
+{
+  "$schema": "grimoire-review-receipt/v1",
+  "task_id": "GAO-p77-intelli-001",
+  "verdict": "NOT-READY",
+  "findings": [
+    {
+      "summary": "Critère 5 « CI verte » non démontré : les 9 checks requis de la PR sont encore pending au moment de la relecture. Les critères 1 à 4 sont tenus (suite e2e p06 verte en local). À relire quand la CI est terminée.",
+      "evidence_cmd": "gh pr checks task/GAO-p77-intelli-001 --required",
+      "severity": "major",
+      "grounded": true
+    }
+  ],
+  "reviewer_id": "reviewer",
+  "model": "sonnet",
+  "tree_fingerprint": "87f6a4a805b1ee9bacaf40bab0aafb1955cac9f0f95360fc6d6268a334679af7",
+  "evidence_pack_sha256": "cc7388a1f015472ef0a86e95e183b5ed49cd30bf0f16e8f046590b4306bd3a2f",
+  "written_at": "2026-10-27T20:44:10.915492+00:00",
+  "reviewer_session": "4052f77b-c267-4c47-a9ce-e34709d2c712",
+  "criteria": [
+    {
+      "index": 1,
+      "criterion": "Test e2e : taper « grimoire ta » dans la console propose « task » ; Tab complète, puis « grimoire task sh » propose « show » avec son aide courte",
+      "status": "met",
+      "evidence_cmd": "PYTHONPATH=$PWD/src uv run --frozen pytest tests/e2e/test_workspace_console_p06.py -q -k p77_tab",
+      "note": "« grimoire ta » propose [task], Tab donne « grimoire task », « sh » propose [show] avec l'aide courte. Suite p06 : 19 verts en local."
+    },
+    {
+      "index": 2,
+      "criterion": "Test e2e : flèches haut/bas parcourent les propositions, Échap ferme la liste sans rien écrire, Entrée sans liste ouverte exécute comme avant",
+      "status": "met",
+      "evidence_cmd": "PYTHONPATH=$PWD/src uv run --frozen pytest tests/e2e/test_workspace_console_p06.py -q -k p77_fleches",
+      "note": "↑/↓ parcourent (aria-activedescendant), Échap ferme sans modifier la valeur, Entrée sans liste exécute « grimoire version »."
+    },
+    {
+      "index": 3,
+      "criterion": "Test : chaque proposition provient de /api/workspace/commands ; aucune commande hors workspace_exec.ALLOWED n'est proposée",
+      "status": "met",
+      "evidence_cmd": "PYTHONPATH=$PWD/src uv run --frozen pytest tests/e2e/test_workspace_console_p06.py -q -k p77_les_propositions",
+      "note": "Les premiers mots proposés égalent exactement ceux de workspace_exec.ALLOWED ; rien hors liste (blueprint -> aucune proposition)."
+    },
+    {
+      "index": 4,
+      "criterion": "Test e2e : la liste a role=listbox et le champ aria-autocomplete=list avec aria-activedescendant",
+      "status": "met",
+      "evidence_cmd": "PYTHONPATH=$PWD/src uv run --frozen pytest tests/e2e/test_workspace_console_p06.py -q -k p77_aria",
+      "note": "listbox role=listbox, champ aria-autocomplete=list, aria-controls, aria-expanded et aria-activedescendant vers une option."
+    },
+    {
+      "index": 5,
+      "criterion": "Fichier CHANGELOG.md : entrée [Unreleased] pour P77 ; CI verte",
+      "status": "unverifiable",
+      "evidence_cmd": "gh pr checks task/GAO-p77-intelli-001 --required",
+      "note": "Entrée [Unreleased] P77 présente dans CHANGELOG.md. Mais les 9 checks requis sont encore pending : « CI verte » n'est pas démontrée. À relire une fois la CI terminée."
+    }
+  ]
+}

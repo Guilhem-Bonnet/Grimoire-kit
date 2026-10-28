@@ -181,16 +181,17 @@ def test_fournisseurs_agents_et_fichiers_ont_leur_rubrique(cockpit_workspace: Pa
     page.wait_for_selector(".cf-wrap tbody tr", timeout=30_000)
     assert page.locator(".cf-wrap thead th").all_inner_texts()[:3] == ["Agent", "Couche", "Outils"]
 
-    # Fichiers : l'arbre est dans le contenu, jamais dans l'explorateur de la coque.
+    # Fichiers : l'arbre est dans le contenu ; l'Explorateur de la coque en
+    # reçoit une copie (P78), visible seulement dans l'atelier.
     page.locator("#section-tabs [data-section='fichiers']").click()
     page.wait_for_function("window.GrimoireWorkspace.section === 'fichiers'")
     page.wait_for_selector("#canvas .sr-tree .sr-tree-file", timeout=30_000)
     assert page.locator("#panel-explorer").is_hidden()
-    assert page.locator("#explorer-body .sr-tree-file").count() == 0
-    # L'atelier rouvre l'explorateur générique.
+    # L'atelier rouvre l'Explorateur, avec l'arborescence.
     page.keyboard.press("Control+Shift+L")
     page.wait_for_function("document.documentElement.dataset.atelier === 'on'")
     assert page.locator("#panel-explorer").is_visible()
+    assert page.locator("#explorer-body .sr-tree-file").count() > 0
 
 
 def test_mobile_sans_debordement(browser: Browser, payloads: dict[str, dict[str, Any]], served_cockpit: tuple[str, str]) -> None:

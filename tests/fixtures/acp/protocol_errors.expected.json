@@ -1,0 +1,242 @@
+{
+ "final": {
+  "load_session": false,
+  "outstanding": [],
+  "pending_permissions": [
+   "p1"
+  ],
+  "resolved_permissions": [],
+  "session_id": "sess-1",
+  "state": "closed"
+ },
+ "steps": [
+  {
+   "events": [
+    {
+     "code": "no_session",
+     "message": "aucune session ouverte",
+     "type": "error"
+    }
+   ],
+   "state": "new"
+  },
+  {
+   "events": [
+    {
+     "code": "unexpected_response",
+     "message": "reponse sans requete en attente",
+     "type": "error"
+    }
+   ],
+   "state": "new"
+  },
+  {
+   "events": [
+    {
+     "code": "invalid_message",
+     "message": "le message n'est pas un objet JSON",
+     "type": "error"
+    }
+   ],
+   "state": "new"
+  },
+  {
+   "events": [
+    {
+     "code": "invalid_message",
+     "message": "jsonrpc doit valoir \"2.0\"",
+     "type": "error"
+    }
+   ],
+   "state": "new"
+  },
+  {
+   "events": [
+    {
+     "code": "not_initialized",
+     "message": "initialize n'est pas termine",
+     "type": "error"
+    }
+   ],
+   "state": "new"
+  },
+  {
+   "events": [],
+   "state": "initializing"
+  },
+  {
+   "events": [
+    {
+     "auth_methods": 0,
+     "load_session": false,
+     "protocol_version": 1,
+     "type": "initialized"
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "events": [],
+   "state": "opening"
+  },
+  {
+   "events": [
+    {
+     "code": "agent_error",
+     "message": "auth requise",
+     "method": "session/new",
+     "rpc_code": -32000,
+     "type": "error"
+    }
+   ],
+   "state": "ready"
+  },
+  {
+   "events": [],
+   "state": "opening"
+  },
+  {
+   "events": [
+    {
+     "loaded": false,
+     "session_id": "sess-1",
+     "type": "session_opened"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [
+    {
+     "code": "unknown_session",
+     "message": "session/update pour une session inconnue",
+     "type": "error"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [
+    {
+     "method": "fs/read_text_file",
+     "request_id": "fs-1",
+     "type": "unsupported_request"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [
+    {
+     "request_id": "fs-1",
+     "type": "unsupported_replied"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [
+    {
+     "method": "custom/ping",
+     "type": "ignored_notification"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "code": "busy",
+     "message": "un tour est deja en cours",
+     "type": "error"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "options": [
+      {
+       "kind": "allow_once",
+       "name": "Autoriser",
+       "option_id": "allow"
+      },
+      {
+       "kind": "reject_once",
+       "name": "Refuser",
+       "option_id": "reject"
+      }
+     ],
+     "request_id": "p1",
+     "session_id": "sess-1",
+     "tool_call_id": "call-1",
+     "type": "permission_requested"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "code": "invalid_permission_response",
+     "message": "optionId inconnu de la demande",
+     "type": "error"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "code": "unknown_request",
+     "message": "aucune requete de l'agent avec cet id",
+     "type": "error"
+    }
+   ],
+   "state": "prompting"
+  },
+  {
+   "events": [
+    {
+     "code": "invalid_message",
+     "message": "session/prompt : stopReason inconnu ou absent",
+     "type": "error"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [
+    {
+     "code": "not_prompting",
+     "message": "aucun tour a annuler",
+     "type": "error"
+    }
+   ],
+   "state": "idle"
+  },
+  {
+   "events": [
+    {
+     "type": "closed"
+    }
+   ],
+   "state": "closed"
+  },
+  {
+   "events": [
+    {
+     "code": "closed",
+     "message": "la session est fermee",
+     "type": "error"
+    }
+   ],
+   "state": "closed"
+  }
+ ]
+}

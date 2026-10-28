@@ -514,7 +514,7 @@ class TestInstallSh:
         """--help prints usage."""
         result = _run([BASH, str(INSTALL_SH), "--help"], cwd=KIT_DIR)
         assert result.returncode == 0
-        assert "Bootstrap Installer" in result.stdout
+        assert "Installeur" in result.stdout
 
     def test_install_sh_has_shebang(self):
         """install.sh has proper shebang."""

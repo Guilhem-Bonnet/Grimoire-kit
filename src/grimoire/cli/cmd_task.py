@@ -378,6 +378,9 @@ def task_attach(
     session_id: Annotated[
         str, typer.Option("--session-id", help="Session d'hôte (défaut : GRIMOIRE_SESSION_ID ou CLAUDE_CODE_SESSION_ID).")
     ] = "",
+    host_version: Annotated[
+        str, typer.Option("--host-version", help="Version de l'hôte (claude --version) : le frein ne se prouve que pour elle.")
+    ] = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -385,6 +388,7 @@ def task_attach(
     """Rattache cette session au claim de la tâche — quand plusieurs claims coexistent."""
     from grimoire.core.exceptions import GrimoireError
     from grimoire.core.standard_state import current_session
+    from grimoire.hosts.host_version import valid_version
 
     env_session, env_host = current_session()
     sid = session_id.strip() or env_session
@@ -398,7 +402,8 @@ def task_attach(
     _require_task(service, task_id)
     try:
         task = service.attach_session(
-            task_id, sid, session_host=env_host if not session_id.strip() else "", actor=actor, explicit=True
+            task_id, sid, session_host=env_host if not session_id.strip() else "", actor=actor, explicit=True,
+            host_version=valid_version(host_version),
         )
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
