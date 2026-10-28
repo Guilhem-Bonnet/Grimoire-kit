@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.72.0] - 2026-10-27
+
 - docs(bench): parité de coût du lot K estimée sans rejeu payant (issue #642) — `docs/bench/rejeu-lot-k-2026-10-27.md`. Aucun run lancé (banc payant refusé) ; estimation tirée des lots K et L : excursions 8-17 % selon la définition, coût ≈ 120-125 % du nu (cible ≤ 105 % non atteinte), `gate check` 60/60.
 - fix(missions): la consigne du relecteur lui fait noter `git status`, lancer ses commandes avec `uv run --frozen` et remettre l'arbre en état avant `task review`. Un `uv.lock` réécrit ou un rapport de bench rejoué par ses propres commandes rendait son READY périmé (« modifications non commitées »), trois fois de suite, puis escaladait à l'humain (R59, R60, R63 le 2026-10-27).
 
