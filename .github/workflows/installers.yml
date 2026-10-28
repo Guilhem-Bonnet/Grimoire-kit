@@ -1,0 +1,106 @@
+name: Installeurs
+
+# install.sh / install.ps1 installent uv puis grimoire-kit épinglé (uv tool
+# install). Ce job le prouve sur les trois OS : depuis un shell neuf, hors de
+# tout venv, grimoire, grimoire-mcp et grimoire-hook se résolvent et
+# `grimoire --version` égale la version épinglée.
+#
+# La wheel est construite ici et passée par GRIMOIRE_SPEC : la version du tag
+# n'est pas encore sur PyPI quand publish.yml appelle ce workflow.
+
+on:
+  pull_request:
+    paths:
+      - install.sh
+      - install.ps1
+      - scripts/stamp-installers.py
+      - .github/workflows/installers.yml
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installers:
+    name: "Installeur (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+
+      - name: Wheel et installeurs estampillés
+        shell: bash
+        run: |
+          pip install build
+          python -m build --wheel
+          VERSION="$(tr -d '[:space:]' < version.txt)"
+          python scripts/stamp-installers.py --version "$VERSION" --out "$RUNNER_TEMP/installers"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # Chemin natif (D:\...) : le « /d/... » de git-bash est inconnu de uv sous Windows.
+          echo "WHEEL=$(python -c "import glob, os; print(os.path.abspath(glob.glob('dist/*.whl')[0]))")" >> "$GITHUB_ENV"
+
+      # uv n'est pas préinstallé : l'installeur doit le poser lui-même.
+      - name: install.sh (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GRIMOIRE_SPEC: ${{ env.WHEEL }}
+        run: |
+          if command -v uv; then echo "uv déjà présent : le test ne prouverait pas son installation"; exit 1; fi
+          bash "$RUNNER_TEMP/installers/install.sh"
+
+      - name: install.ps1 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GRIMOIRE_SPEC: ${{ env.WHEEL }}
+        run: |
+          if (Get-Command uv -ErrorAction SilentlyContinue) { throw "uv déjà présent" }
+          & "$env:RUNNER_TEMP\installers\install.ps1"
+
+      # Un shell neuf : nouveau processus, hors dépôt, sans venv, PATH réduit
+      # au système et au dossier des exécutables d'uv (ce que fait un nouveau
+      # terminal après `uv tool update-shell`).
+      - name: Résolution hors venv (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          BIN="$("$HOME/.local/bin/uv" tool dir --bin)"
+          VIRTUAL_ENV="" PATH="$BIN:/usr/bin:/bin" bash -c '
+            set -e
+            for t in grimoire grimoire-mcp grimoire-hook; do
+              p="$(command -v "$t")"; echo "$t -> $p"
+              case "$p" in "$HOME"/*) ;; *) echo "$t hors du dossier utilisateur"; exit 1 ;; esac
+            done
+            [ -z "$VIRTUAL_ENV" ]
+            got="$(grimoire --version)"; echo "$got"
+            [ "$got" = "grimoire-kit $EXPECTED" ]
+          '
+        env:
+          EXPECTED: ${{ env.VERSION }}
+
+      - name: Résolution hors venv (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Location $env:RUNNER_TEMP
+          $bin = (& "$env:USERPROFILE\.local\bin\uv.exe" tool dir --bin)
+          $env:VIRTUAL_ENV = $null
+          $env:Path = "$bin;$env:SystemRoot\System32;$env:SystemRoot"
+          foreach ($t in 'grimoire', 'grimoire-mcp', 'grimoire-hook') {
+            $c = Get-Command $t -ErrorAction Stop
+            Write-Host "$t -> $($c.Source)"
+          }
+          $got = (& grimoire --version | Out-String).Trim()
+          Write-Host $got
+          if ($got -ne "grimoire-kit $env:VERSION") { throw "version inattendue : $got" }
