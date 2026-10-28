@@ -464,7 +464,8 @@ def _execute(project_root: Path, state: dict[str, Any], step: dict[str, Any], en
 def _find(state: dict[str, Any], step_id: str) -> dict[str, Any]:
     for step in state["steps"]:
         if step["id"] == step_id:
-            return step
+            found: dict[str, Any] = step
+            return found
     raise ValueError(f"étape inconnue : {step_id!r}")
 
 
