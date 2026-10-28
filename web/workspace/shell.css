@@ -1723,6 +1723,8 @@ body[data-active-space] .panel-head {
 
 #dock {
   height: var(--h-dock);
+  max-height: 80vh;
+  position: relative;
   border-top: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -1732,6 +1734,33 @@ body[data-active-space] .panel-head {
 
 #dock[data-state="collapsed"] {
   display: none;
+}
+
+/* Poignée du bord haut : le dock grandit vers le haut, comme le panneau de
+ * VS Code. Absente sous 900 px, où le dock a une hauteur fixe. */
+.dock-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 5;
+  touch-action: none;
+  background: transparent;
+  transition: background var(--dur);
+}
+
+.dock-resize:hover,
+.dock-resize:focus-visible,
+.dock-resize[data-dragging] {
+  background: var(--accsoft);
+}
+
+@media (max-width: 900px) {
+  .dock-resize {
+    display: none;
+  }
 }
 
 #dock-tabs {
@@ -3174,4 +3203,241 @@ body[data-active-space] .panel-head {
 #panel-explorer[data-detail="off"],
 html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   display: none !important;
+}
+
+/* ── Chat de l'orchestrateur (ACP2) ────────────────────────────────────────
+ * Le dock reste un terminal sombre dans les deux thèmes : le texte prend donc
+ * toujours l'encre du terminal, et la couleur ne porte l'état que par des
+ * liserés (les `-mark`, lisibles sur fond sombre en clair comme en sombre),
+ * jamais par un texte coloré — la garde de contraste mesure ce fond-là. */
+
+#dock[data-tab="orchestrateur"] {
+  height: min(62vh, 480px);
+}
+
+#dock-body.is-chat {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+  font-family: var(--font);
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-status {
+  flex: none;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--termink);
+}
+
+.chat-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-msg,
+.chat-tool,
+.chat-plan,
+.chat-perm {
+  border-left: 3px solid var(--line);
+  padding: 4px 10px;
+  max-width: 100%;
+}
+
+.chat-msg.is-user {
+  border-left-color: var(--acc);
+}
+
+.chat-msg.is-agent {
+  border-left-color: var(--ok-mark);
+}
+
+.chat-msg.is-thought {
+  border-left-style: dotted;
+  font-style: italic;
+}
+
+.chat-who {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.chat-body {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.chat-msg.is-user .chat-body {
+  white-space: pre-wrap;
+}
+
+.chat-body p {
+  margin: 0 0 6px;
+}
+
+.chat-body ul {
+  margin: 0 0 6px;
+  padding-left: 20px;
+}
+
+.chat-body pre,
+.chat-tool-text,
+.chat-diff {
+  margin: 4px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-body code {
+  font-family: var(--mono);
+}
+
+.chat-body a {
+  color: var(--termink);
+  text-decoration: underline;
+}
+
+.chat-tool > summary,
+.chat-msg.is-thought > summary {
+  cursor: pointer;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.chat-tool-kind,
+.chat-tool-status {
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 0 8px;
+  font-family: var(--mono);
+}
+
+.chat-tool-status.is-completed {
+  border-color: var(--ok-mark);
+}
+
+.chat-tool-status.is-failed {
+  border-color: var(--bad-mark);
+}
+
+.chat-tool-status.is-in_progress {
+  border-color: var(--warn-mark);
+}
+
+.chat-diff .is-add {
+  border-left: 3px solid var(--ok-mark);
+  padding-left: 6px;
+}
+
+.chat-diff .is-del {
+  border-left: 3px solid var(--bad-mark);
+  padding-left: 6px;
+}
+
+.chat-diff-path {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.chat-plan-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-plan-list li {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.chat-plan-list li.is-completed span:not(.chat-plan-mark):not(.sr-only) {
+  text-decoration: line-through;
+}
+
+.chat-perm {
+  border-left-color: var(--warn-mark);
+  border: 1px solid var(--warn-mark);
+  border-left-width: 3px;
+  border-radius: var(--r);
+}
+
+.chat-perm.is-done {
+  border-color: var(--line);
+}
+
+.chat-perm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 6px 0 2px;
+}
+
+.chat-note {
+  border-left: 3px solid var(--line);
+  padding: 2px 10px;
+}
+
+.chat-note.is-error {
+  border-left-color: var(--bad-mark);
+}
+
+.chat-form {
+  flex: none;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-end;
+  padding: var(--sp-2) 14px;
+  border-top: 1px solid var(--line);
+  background: var(--term);
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--termink);
+}
+
+.chat-input::placeholder {
+  color: var(--termink);
+  opacity: 1;
+  font-style: italic;
+}
+
+.chat-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.chat-stop[hidden] {
+  display: none;
+}
+
+.chat-log:focus-visible,
+.chat-input:focus-visible {
+  outline: 2px solid var(--termink);
+  outline-offset: -2px;
 }
