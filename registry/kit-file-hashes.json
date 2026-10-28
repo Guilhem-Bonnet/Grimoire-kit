@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.71.0",
+ "generated_for": "3.72.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -2733,6 +2733,10 @@
   "a7f993121baea7dce5c9513bc70dc5cc0439ec28a5bb815b5ca4f2e14899e5d3": {
    "version": "3.21.1",
    "path": "framework/tools/sensory-buffer.py"
+  },
+  "a7fdcf3dfb634e09ea283340be922ba9cf58ac214dc429b360417767bc11dc02": {
+   "version": "3.72.0",
+   "path": "framework/FREEZE.md"
   },
   "a82d5b8665b9b448c99f10e34d2a35bf72ac1db0d7518d5dc1b0f11cb9eed8ad": {
    "version": "3.66.0",
