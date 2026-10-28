@@ -117,7 +117,7 @@ def test_catalogue_cinq_elements_et_classe_c_sans_apply(tmp_path: Path) -> None:
     for spec in wact.CATALOGUE.values():
         assert spec.preconditions and spec.plan and spec.effects and spec.verification and spec.inverse
     assert {s.id: s.klass for s in wact.CATALOGUE.values()} == {
-        "memory.compose": "A", "stack.start": "B", "stack.stop": "B", "stack.restart_policy": "B", "pip.extras": "C",
+        "memory.compose": "A", "memory.slot": "A", "memory.split": "D", "stack.start": "B", "stack.stop": "B", "stack.restart_policy": "B", "pip.extras": "C",
     }
     root = _project(tmp_path / "kit", "Kit")
     assert workspace_post(root, f"{PREFIX}data/actions/pip.extras/apply", {}) is WORKSPACE_UNHANDLED
@@ -131,7 +131,7 @@ def test_routes_get_catalogue_et_journal(tmp_path: Path) -> None:
     root = _project(tmp_path / "kit", "Kit")
     assert f"{PREFIX}data/actions" in GET_ROUTES and f"{PREFIX}data/actions/journal" in GET_ROUTES
     catalogue = workspace_get(root, f"{PREFIX}data/actions", {})
-    assert [a["id"] for a in catalogue["actions"]][:2] == ["memory.compose", "stack.start"]
+    assert [a["id"] for a in catalogue["actions"]][:2] == ["memory.compose", "memory.slot"]
     assert workspace_get(root, f"{PREFIX}data/actions/journal", {})["events"] == []
 
 
