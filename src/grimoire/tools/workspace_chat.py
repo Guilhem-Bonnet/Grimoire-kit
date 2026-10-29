@@ -160,6 +160,9 @@ class Conversation:
         self.resumed = False
         self._kanban_seen: set[str] = set()
         self._kanban_polled = float("-inf")
+        self._pilot_open: dict[tuple[str, str], dict[str, Any]] = {}
+        self._pilot_polled = float("-inf")
+        self._turn_text: list[str] = []
 
     # ── journal ──────────────────────────────────────────────────────────
 
@@ -261,7 +264,11 @@ class Conversation:
         if not isinstance(params, dict):
             return
         if method == "session/update" and isinstance(params.get("update"), dict):
-            self._emit({"type": "update", "update": _clip(params["update"])})
+            update = params["update"]
+            content = update.get("content")
+            if update.get("sessionUpdate") == "agent_message_chunk" and isinstance(content, dict):
+                self._turn_text.append(str(content.get("text") or ""))
+            self._emit({"type": "update", "update": _clip(update)})
         elif method == "session/request_permission" and "id" in msg:
             self._raw_permissions[str(msg["id"])] = _clip(params.get("toolCall") or {})
 
@@ -310,7 +317,11 @@ class Conversation:
 
     # ── tour ─────────────────────────────────────────────────────────────
 
-    def send(self, text: str, task_id: str | None = None) -> dict[str, Any]:
+    def send(
+        self, text: str, task_id: str | None = None, answer_to: tuple[str, str] | None = None
+    ) -> dict[str, Any]:
+        if answer_to is not None:
+            return self._answer_question(text, *answer_to)
         mode, _command, reason = chat_mode(self.root)
         if mode == "kanban":
             return self._send_kanban(text, task_id, reason)
@@ -325,6 +336,52 @@ class Conversation:
             raise
         threading.Thread(target=self._run_turn, args=(text,), name="chat-turn", daemon=True).start()
         return {"ok": True, "accepted": True}
+
+    def _answer_question(self, text: str, task_id: str, question_id: str) -> dict[str, Any]:
+        """La réponse tapée à une question du pilote : un tour humain qui tranche, sans passer par l'agent (ACP4)."""
+        from grimoire.tools import workspace_chat_pilot
+
+        result = workspace_chat_pilot.answer(self.root, task_id, question_id, text)
+        self._emit({"type": "user", "text": text})
+        self.pull_questions(interval=0.0)
+        return result
+
+    def pull_questions(self, *, interval: float = 2.0, clock: Callable[[], float] = time.monotonic) -> None:
+        """Pilote activé, publie dans le fil les questions qu'il laisse à l'humain, et celles qui viennent d'être tranchées."""
+        now = clock()
+        if now - self._pilot_polled < interval:
+            return
+        self._pilot_polled = now
+        try:
+            from grimoire.tools import workspace_chat_pilot
+
+            rows = workspace_chat_pilot.pending_questions(self.root)
+        except Exception:  # un ledger illisible ne coupe pas le flux : la ligne suivante réessaie
+            return
+        current = {(r["task_id"], r["question_id"]): r for r in rows}
+        for key, row in current.items():
+            if key not in self._pilot_open:
+                self._emit({"type": "question", **row})
+        for key in self._pilot_open.keys() - current.keys():
+            self._emit({"type": "question_resolved", "task_id": key[0], "question_id": key[1]})
+        self._pilot_open = current
+
+    def pilot_opening(self) -> list[dict[str, Any]]:
+        """Ce qu'une page qui s'ouvre doit voir de la part du pilote : le résumé, puis les questions encore posées."""
+        from grimoire.tools import workspace_chat_pilot
+
+        events: list[dict[str, Any]] = []
+        try:
+            digest = workspace_chat_pilot.summary(self.root)
+            if digest is not None:
+                events.append({"seq": 0, "type": "pilot_summary", **digest})
+            pending = workspace_chat_pilot.pending_questions(self.root)
+            events += [{"seq": 0, "type": "question", **r} for r in pending]
+            if digest is not None or pending:  # pilote activé seulement : un chat sans pilote n'écrit rien de plus
+                workspace_chat_pilot.mark_visit(self.root)
+        except Exception:  # le résumé est un confort : le chat s'ouvre sans lui
+            return []
+        return events
 
     def _send_kanban(self, text: str, task_id: str | None, reason: str) -> dict[str, Any]:
         """Sans agent à qui parler : la consigne part au kanban, la réponse viendra par les notes de la session."""
@@ -369,8 +426,10 @@ class Conversation:
             if client is None:
                 return
             self._emit({"type": "turn_started"})
+            self._turn_text = []
             for event in client.prompt(text, on_permission=self._ask):
                 if event["type"] == "turn_ended":
+                    self._propose_gestures()
                     self._emit({"type": "turn_ended", "stop_reason": event["stop_reason"]})
                 elif event["type"] == "error":
                     self._emit({"type": "error", "message": event.get("message", "")})
@@ -384,6 +443,14 @@ class Conversation:
                 self._busy = False
                 self._cond.notify_all()
             self._maybe_schedule_close()
+
+    def _propose_gestures(self) -> None:
+        """L'agent propose « active le pilote » / « coupe le pilote » : le fil en fait un bouton, rien n'est écrit ici."""
+        from grimoire.tools import workspace_chat_pilot
+
+        text, self._turn_text = "".join(self._turn_text), []
+        for on in dict.fromkeys(workspace_chat_pilot.proposals(text)):
+            self._emit({"type": "pilot_gesture", "on": on})
 
     def _ask(self, request: PermissionRequest) -> str | None:
         """Pose la demande à la page et attend sa réponse ; sans réponse, rien n'est accordé."""
@@ -436,6 +503,7 @@ class Conversation:
 
     def events_after(self, last: int, timeout: float) -> list[dict[str, Any]]:
         self.pull_replies()
+        self.pull_questions()
         with self._cond:
             if not any(e["seq"] > last for e in self._log[-1:]):
                 self._cond.wait(timeout=timeout)
@@ -489,6 +557,9 @@ def chat_stream(
             threading.Thread(target=_resume_quietly, args=(conv,), name="chat-resume", daemon=True).start()
         beat = clock()
         yield _sse({"seq": 0, "type": "hello", "state": conv.state()})
+        if last == 0:  # page neuve : le résumé du pilote et ses questions encore posées (le fil, lui, se rejoue)
+            for opening in conv.pilot_opening():
+                yield _sse(opening)
         while True:
             events = conv.events_after(last, 0.5)
             for event in events:
@@ -513,7 +584,14 @@ def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(text, str) or not text.strip():
         raise ValueError("text requis : le message ne peut pas être vide")
     task_id = body.get("task_id")
-    return _conversation(root).send(text, task_id if isinstance(task_id, str) and task_id else None)
+    target = body.get("answer_to")
+    answer_to = None
+    if target is not None:
+        if not (isinstance(target, dict) and isinstance(target.get("task_id"), str)
+                and isinstance(target.get("question_id"), str)):
+            raise ValueError("answer_to : {task_id, question_id} attendus")
+        answer_to = (target["task_id"], target["question_id"])
+    return _conversation(root).send(text, task_id if isinstance(task_id, str) and task_id else None, answer_to)
 
 
 def chat_permission(root: Path, body: dict[str, Any]) -> dict[str, Any]:
