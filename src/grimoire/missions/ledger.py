@@ -17,12 +17,11 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import os
 import re
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -45,6 +44,7 @@ from grimoire.missions.lease import (
     read_lease,
     write_lease,
 )
+from grimoire.missions.ledger_append import FileSig, append_bytes, file_sig
 from grimoire.missions.ledger_rules import (
     UnjudgedClaimError,
     blocks_path,
@@ -57,6 +57,10 @@ from grimoire.missions.ledger_rules import (
     unfenced_question,
     waiting_guard,
 )
+from grimoire.missions.ledger_views import HolderCheck as HolderCheck
+from grimoire.missions.ledger_views import LeaseView as LeaseView
+from grimoire.missions.ledger_views import ReapDecision as ReapDecision
+from grimoire.missions.ledger_views import ReapReport as ReapReport
 from grimoire.missions.questions import QUESTION_EVENTS
 from grimoire.missions.reclaim import release_lost_claim
 from grimoire.missions.schemas import (
@@ -172,68 +176,6 @@ _RESUMING = (TaskState.WAITING, TaskState.NEEDS_VERIFICATION)
 ORIGIN_REAP = "reap"
 
 
-@dataclass(frozen=True, slots=True)
-class LeaseView:
-    """L'état du bail d'une tâche tenue : ``valid``, ``lost`` ou ``unknown`` (horloge incohérente)."""
-
-    task_id: str
-    status: str
-    reason: str
-    epoch: int
-    actor_id: str
-    host: str
-    session_id: str = ""
-    #: Version de l'hôte de la session (K3) ; ``""`` = inconnue, donc hôte non fencé.
-    host_version: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class HolderCheck:
-    """Le verdict du contrôle d'epoch d'un titulaire — ``source`` : ``lease`` (cache) ou ``ledger``."""
-
-    ok: bool
-    reason: str
-    source: str
-
-
-@dataclass(frozen=True, slots=True)
-class ReapDecision:
-    """Ce que la récolte fait d'un bail perdu : ``ready`` (relancée) ou ``defer`` (cause nommée)."""
-
-    task_id: str
-    action: str
-    cause: str
-    epoch: int
-    attempts: int
-    retry_at: str = ""
-    written: bool = False
-    #: La question posée à l'humain quand la cause est ``resume_unfenced`` (K3) ; ``""`` sinon.
-    question: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "task_id": self.task_id,
-            "action": self.action,
-            "cause": self.cause,
-            "epoch": self.epoch,
-            "attempts": self.attempts,
-            "retry_at": self.retry_at,
-            "written": self.written,
-            **({"question": self.question} if self.question else {}),
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ReapReport:
-    """Le résultat d'une récolte : ``clock`` vaut ``unknown`` quand rien n'a pu être jugé."""
-
-    clock: str
-    decisions: tuple[ReapDecision, ...] = ()
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"clock": self.clock, "decisions": [d.to_dict() for d in self.decisions]}
-
-
 def _slug(title: str, limit: int) -> str:
     """Fragment d'identifiant sûr dans un chemin.
 
@@ -342,7 +284,7 @@ class MissionLedger:
         self.project_root: Path | None = None  #: #886 : projet des réglages d'hôte du frein ; None = cwd
         self._loaded = False
         #: Empreinte (taille, mtime, inode) des deux journaux au chargement : l'état en mémoire n'est cru que si elle tient encore.
-        self._loaded_key: tuple[tuple[int, int, int] | None, tuple[int, int, int] | None] | None = None
+        self._loaded_key: tuple[FileSig, FileSig] | None = None
         self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 
     # ── Private helpers ────────────────────────────────────────────────────
@@ -361,15 +303,8 @@ class MissionLedger:
         self._loaded_key = key
         self._loaded = True
 
-    def _file_key(self) -> tuple[tuple[int, int, int] | None, tuple[int, int, int] | None]:
-        def sig(path: Path) -> tuple[int, int, int] | None:
-            try:
-                st = path.stat()
-            except OSError:
-                return None
-            return (st.st_size, st.st_mtime_ns, st.st_ino)
-
-        return (sig(self._events_path), sig(self._incidents_path))
+    def _file_key(self) -> tuple[FileSig, FileSig]:
+        return (file_sig(self._events_path), file_sig(self._incidents_path))
 
     def _refresh(self) -> None:
         """Jette l'état en mémoire seulement si un journal a bougé depuis qu'il a été projeté.
@@ -571,7 +506,7 @@ class MissionLedger:
 
     def _atomic_append(
         self, path: Path, record: dict[str, Any]
-    ) -> tuple[tuple[int, int, int] | None, tuple[int, int, int] | None]:
+    ) -> tuple[FileSig, FileSig]:
         # Verrouillé : lire « existing » puis renommer un temporaire par-dessus
         # n'est atomique que pour un seul écrivain à la fois. Deux requêtes
         # concurrentes (cockpit multi-thread) sans ce verrou perdaient
@@ -582,7 +517,7 @@ class MissionLedger:
     @staticmethod
     def _write_appended(
         path: Path, record: dict[str, Any]
-    ) -> tuple[tuple[int, int, int] | None, tuple[int, int, int] | None]:
+    ) -> tuple[FileSig, FileSig]:
         """Ajoute *record* à *path* (``open('ab')``, un seul ``write``, ``fsync``) — l'appelant tient le verrou.
 
         Rend l'empreinte (taille, mtime, inode) du fichier juste avant puis juste après l'écriture ;
@@ -597,31 +532,7 @@ class MissionLedger:
         line = json.dumps(record, ensure_ascii=False) + "\n"
         # K12 : octets relus tels quels (une fin coupée dans un caractère ne rend pas le journal inécrivable),
         # et une fin tronquée sans saut de ligne ne colle pas l'événement suivant à sa ligne illisible.
-        created = not path.exists()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = line.encode("utf-8")
-        with open(path, "ab") as fh:
-            st = os.fstat(fh.fileno())
-            before: tuple[int, int, int] | None = (st.st_size, st.st_mtime_ns, st.st_ino)
-            if st.st_size:
-                with open(path, "rb") as probe:
-                    probe.seek(-1, os.SEEK_END)
-                    if probe.read(1) != b"\n":
-                        payload = b"\n" + payload
-                        before = None
-            fh.write(payload)
-            fh.flush()
-            # K2 (§2.3) : ajout puis ``fsync`` du fichier ; le dossier à la création.
-            os.fsync(fh.fileno())
-            st = os.fstat(fh.fileno())
-        if created and os.name == "posix":
-            with suppress(OSError):
-                dfd = os.open(path.parent, os.O_RDONLY)
-                try:
-                    os.fsync(dfd)
-                finally:
-                    os.close(dfd)
-        return before, (st.st_size, st.st_mtime_ns, st.st_ino)
+        return append_bytes(path, line.encode("utf-8"))
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
