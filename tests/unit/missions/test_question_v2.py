@@ -178,7 +178,7 @@ def test_task_ask_v2_par_la_cli_et_par_spec(tmp_path: Path, monkeypatch: pytest.
 
     from grimoire.cli.app import app
 
-    service, tid = _running(tmp_path)
+    _, tid = _running(tmp_path)
     monkeypatch.chdir(tmp_path)
     spec = tmp_path / "q.json"
     spec.write_text(json.dumps({"title": "Reprendre ?", "context": "La session s'est arrêtée.", "choices": [

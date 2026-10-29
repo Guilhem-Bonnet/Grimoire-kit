@@ -154,7 +154,7 @@ def deferred_waiting(
             else " et rien ne prouve qu'on peut la relancer sans risque."
         )
     choices = (retry, Choice("abandonner", "Abandonner", "Annule la tâche : plus aucune reprise", danger=True))
-    question = Question(
+    asked = Question(
         new_question_id(),
         kind,
         text,
@@ -165,7 +165,7 @@ def deferred_waiting(
         context=clip_context(context),
         choices=choices,
     )
-    return Waiting("human", "", question, hint, since)
+    return Waiting("human", "", asked, hint, since)
 
 def unfenced_question(view: LeaseView) -> str:
     """La question de §2.4 : un hôte sans frein vérifié ne se relance pas, on demande (K3)."""
