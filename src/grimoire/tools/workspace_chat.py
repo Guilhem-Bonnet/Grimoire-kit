@@ -375,8 +375,10 @@ class Conversation:
             digest = workspace_chat_pilot.summary(self.root)
             if digest is not None:
                 events.append({"seq": 0, "type": "pilot_summary", **digest})
-            workspace_chat_pilot.mark_visit(self.root)
-            events += [{"seq": 0, "type": "question", **r} for r in workspace_chat_pilot.pending_questions(self.root)]
+            pending = workspace_chat_pilot.pending_questions(self.root)
+            events += [{"seq": 0, "type": "question", **r} for r in pending]
+            if digest is not None or pending:  # pilote activé seulement : un chat sans pilote n'écrit rien de plus
+                workspace_chat_pilot.mark_visit(self.root)
         except Exception:  # le résumé est un confort : le chat s'ouvre sans lui
             return []
         return events
