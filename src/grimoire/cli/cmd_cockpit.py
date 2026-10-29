@@ -337,6 +337,15 @@ def _not_modified(headers: Any, etag: str, mtime: float) -> bool:
     return False
 
 
+def _warm_sheet(root: Path) -> None:
+    """Chauffe les caches de ``sheet`` et de ``tasks`` ; un échec ne coûte que la chauffe."""
+    with contextlib.suppress(Exception):
+        from grimoire.tools import workspace_api
+
+        workspace_api.sheet_view(root)
+        workspace_api.tasks_view(root)
+
+
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
@@ -1411,6 +1420,10 @@ def serve(
     console.print(f"[bold green]Cockpit[/bold green] → [link]{url}[/link]  [dim](Ctrl-C pour arrêter)[/dim]")
     if open_browser:
         webbrowser.open(url)
+    if _HOME_PATH is not None:
+        # P94 : la première lecture de la fiche paie imports et caches froids ;
+        # elle se fait ici, avant que la page ne la demande.
+        threading.Thread(target=_warm_sheet, args=(_HOME_PATH,), daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

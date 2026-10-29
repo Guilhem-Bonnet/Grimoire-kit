@@ -564,7 +564,7 @@ def _parse_stamp(raw: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _plain_c_loader() -> type | None:
+def _plain_c_loader() -> Any:
     """Chargeur libyaml (C) sans résolution de types, ou ``None`` s'il manque.
 
     Le board du standard pèse des centaines de Ko ; ruamel (Python pur) le lit en
@@ -573,15 +573,15 @@ def _plain_c_loader() -> type | None:
     « No » ou « 2026-10-29 » reste le texte écrit — ``str()`` ne le déforme pas.
     """
     try:
-        import yaml
+        import yaml  # type: ignore[import-untyped, unused-ignore]
     except ImportError:
         return None
-    base = getattr(yaml, "CSafeLoader", None)
+    base: Any = getattr(yaml, "CSafeLoader", None)
     if base is None:
         return None
     keep = {"tag:yaml.org,2002:null"}
 
-    class _Plain(base):  # type: ignore[valid-type, misc]
+    class _Plain(base):  # type: ignore[misc, unused-ignore]
         yaml_implicit_resolvers = {  # noqa: RUF012
             ch: [(tag, rx) for tag, rx in rules if tag in keep]
             for ch, rules in base.yaml_implicit_resolvers.items()
@@ -611,7 +611,7 @@ def _in_flight_tasks(project_root: Path) -> list[dict[str, str]]:
             return [dict(row) for row in cached[2]]
         text = source.read_text(encoding="utf-8")
         if _PLAIN_LOADER is not None:
-            import yaml
+            import yaml  # type: ignore[import-untyped, unused-ignore]
 
             data = yaml.load(text, Loader=_PLAIN_LOADER) or {}  # noqa: S506 — chargeur sûr, sans constructeurs d'objets
         else:
