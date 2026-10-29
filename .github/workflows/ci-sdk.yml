@@ -252,11 +252,16 @@ jobs:
           pip install -e ".[dev]" playwright
           playwright install --with-deps chromium
 
+      - name: Install axe-core (accessibility checks of the workspace e2e)
+        timeout-minutes: 5
+        run: npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/axe" axe-core@4.10.2
+
       - name: Run the workspace browser harness
         # Mode strict : un skip (Playwright, Chromium, `grimoire init` absents)
         # est un échec, pas un faux vert (tests/e2e/_strict.py).
         env:
           GRIMOIRE_E2E_STRICT: "1"
+          GRIMOIRE_AXE_JS: ${{ runner.temp }}/axe/node_modules/axe-core/axe.min.js
           # Carte 3D (P81) sous WebGL logiciel (SwiftShader) : la présentation d'une image occupe le fil
           # principal ; l'exigence produit reste 100 ms (défaut du test), la CI sans GPU en tolère 200.
           # 285 ms mesurées sur main le 2026-10-29 (runner sans GPU) : 200 ne tenait pas ; la CI vérifie que la
