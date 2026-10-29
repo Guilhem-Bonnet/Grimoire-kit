@@ -78,6 +78,7 @@ from typing import Any
 from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
+    workspace_actions,
     workspace_api,
     workspace_attention,
     workspace_chat,
@@ -482,22 +483,13 @@ def _data_machine(project_root: Path, _query: _Query) -> Any:
 
 def _data_actions(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/data/actions`` — le catalogue des actions typées (ADR-008), sans rien exécuter."""
-    from grimoire.tools import workspace_actions
-
     return workspace_actions.actions_catalogue(project_root)
 
 
 def _data_actions_journal(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/data/actions/journal`` — le journal ajout seul des actions, le plus récent d'abord."""
-    from grimoire.tools import workspace_actions
-
     raw = _one(query, "limit") or ""
     return workspace_actions.actions_journal(project_root, limit=int(raw) if raw.isdigit() else 100)
-
-
-def _setup_launch(project_root: Path, _query: _Query) -> Any:
-    """``GET /api/workspace/setup/launch`` — l'avancement du premier lancement (P45), tel qu'enregistré."""
-    return workspace_first_launch.launch_state(project_root)
 
 
 def _setup_guide(project_root: Path, _query: _Query) -> Any:
@@ -649,7 +641,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}data/actions": _data_actions,
     f"{PREFIX}data/actions/journal": _data_actions_journal,
     f"{PREFIX}setup/guide": _setup_guide,
-    f"{PREFIX}setup/launch": _setup_launch,
+    f"{PREFIX}setup/launch": workspace_first_launch.launch_state,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
@@ -1041,7 +1033,6 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/intake": _task_intake,
     f"{PREFIX}tasks/intake/create": _task_intake_create,
     f"{PREFIX}options": _options_write,
-    # Premier lancement (P45) : « Lancer » exécute les actions typées de P40, étape par étape.
     f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
 }
 
@@ -1467,8 +1458,6 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
                 return _task_action(project_root, task_id, action, body)
         if path.startswith(f"{PREFIX}data/actions/"):
             # Actions typées (ADR-008 D3) : plan → apply → rollback, journal ajout seul.
-            from grimoire.tools import workspace_actions
-
             action_id, _, verb = path[len(f"{PREFIX}data/actions/") :].strip("/").rpartition("/")
             handlers = {
                 "plan": workspace_actions.plan_action,

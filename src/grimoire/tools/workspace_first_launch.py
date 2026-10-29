@@ -226,7 +226,7 @@ def _view(project_root: Path, state: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def launch_state(project_root: Path) -> dict[str, Any]:
+def launch_state(project_root: Path, _query: Any = None) -> dict[str, Any]:
     """``GET setup/launch`` — l'avancement enregistré, ou « pas de lancement »."""
     return _view(project_root, _read(project_root))
 
