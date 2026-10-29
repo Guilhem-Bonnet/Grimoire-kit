@@ -28,7 +28,7 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-
     monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", proj.resolve())
     web = tmp_path / "web"
     web.mkdir()
-    (web / "app.js").write_text(BIG_JS)
+    (web / "app.js").write_bytes(BIG_JS.encode())
     (web / "tiny.js").write_text("x")
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(web))
@@ -87,7 +87,7 @@ def test_etag_304_then_200_after_change(server: tuple[int, Path]) -> None:
     assert (resp.status, body) == (304, b"")
     resp, body = _get(conn, "/app.js", **{"If-Modified-Since": resp.getheader("Date") or ""})
     assert resp.status in (200, 304)
-    (web / "app.js").write_text(BIG_JS + "export const y = 2;\n")
+    (web / "app.js").write_bytes((BIG_JS + "export const y = 2;\n").encode())
     resp, body = _get(conn, "/app.js", **{"If-None-Match": etag})
     assert resp.status == 200
     assert resp.getheader("ETag") != etag
