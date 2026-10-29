@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -313,7 +314,10 @@ def test_ci_rouge_renvoie_au_worker_comme_un_not_ready(projet: Path, host: FakeH
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
 
 
-def test_une_tete_rouge_est_relancee_une_fois_puis_renvoyee_si_elle_retombe(projet: Path, host: FakeHost) -> None:
+def test_une_tete_rouge_est_relancee_une_fois_puis_renvoyee_si_elle_retombe(projet: Path, host: FakeHost,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import merger
+
     grant(projet)
     host.rerun_error = ""
     tid, wt = launch_and_work(projet, host)
@@ -324,6 +328,7 @@ def test_une_tete_rouge_est_relancee_une_fois_puis_renvoyee_si_elle_retombe(proj
     [rerun] = events(projet, tid, MERGE_RERUN_EVENT)
     assert rerun.payload["head"] == head and rerun.payload["outcome"] == "rerun" and rerun.payload["runs"] == ["101"]
     assert any(a[:4] == ["gh", "api", "-X", "POST"] and a[4].endswith("/actions/runs/101/rerun-failed-jobs") for a, _c, _e in host.calls)
+    monkeypatch.setattr(merger, "RERUN_SETTLE", timedelta(0))  # le tick suivant, cinq minutes plus tard
     assert merges(tick(projet, host)) == [("bounce", "done")]  # la même tête, rouge de nouveau
     assert host.reruns == [101] and len(host.of("claude", "--bg", "--resume")) == 1
     assert [e.payload["reason"] for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == ["ci_red"]
@@ -378,7 +383,10 @@ def test_un_vert_qui_retombe_doit_se_confirmer_de_nouveau(projet: Path, host: Fa
     assert merges(tick(projet, host)) == [("accept", "done")]
 
 
-def test_une_pr_sans_aucun_check_n_est_pas_verte(projet: Path, host: FakeHost) -> None:
+def test_une_pr_sans_aucun_check_n_est_pas_verte(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import reviewer
+
+    monkeypatch.setattr(reviewer, "CI_REGISTER_GRACE", timedelta(0))  # une tête ancienne : le relecteur n'attend plus (P89)
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     host.checks.pop(f"task/{tid}")

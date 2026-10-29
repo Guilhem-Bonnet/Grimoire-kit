@@ -7,6 +7,7 @@ critères remplis, et aucune voie pour les fermer — ``review_gate`` refuse le 
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -120,4 +121,32 @@ def test_cli_accept_from_an_agent_session_is_refused(governed: Path, monkeypatch
     result = runner.invoke(app, ["task", "accept", tid, "--reason", "relu", "--project-root", str(governed)])
     assert result.exit_code == 1
     assert "canal humain" in result.output
+    assert TaskService(governed).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_service_accept_records_the_reason_and_closes_the_task(governed: Path) -> None:
+    """P88 : `TaskService.accept` est le geste du cockpit — verdict humain, motif commenté au ledger, tâche fermée."""
+    tid = _in_review(governed)
+    service = TaskService(governed)
+    move = service.accept(tid, "PR relue, dérogation sur le critère 3", "guilhem", origin=ORIGIN_HUMAN)
+    assert move.task.status is TaskState.CLOSED
+    verdicts = EvidenceService(governed / EVIDENCE).list_verdicts(tid)
+    assert verdicts[-1].created_by == "human:guilhem" and verdicts[-1].checks[0].reason == "PR relue, dérogation sur le critère 3"
+    assert "dérogation sur le critère 3" in json.dumps(
+        [e.payload for e in service.ledger.events_for(tid)], ensure_ascii=False
+    )
+
+
+@pytest.mark.parametrize("origin", [ORIGIN_AGENT, "unverified"])
+def test_service_accept_refuses_a_non_human_origin(governed: Path, origin: str) -> None:
+    tid = _in_review(governed)
+    with pytest.raises(GrimoireMissionError, match="canal humain"):
+        TaskService(governed).accept(tid, "c'est bon", "claude", origin=origin)
+    assert TaskService(governed).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_service_accept_without_a_reason_closes_nothing(governed: Path) -> None:
+    tid = _in_review(governed)
+    with pytest.raises(ValueError, match="--reason"):
+        TaskService(governed).accept(tid, "   ", "guilhem", origin=ORIGIN_HUMAN)
     assert TaskService(governed).require(tid).status is TaskState.NEEDS_VERIFICATION

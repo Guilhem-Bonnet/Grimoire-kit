@@ -450,6 +450,38 @@ les autres objets du même bloc restent gardés. Rien de tout cela ne change le
 verdict ni le code de sortie du dispatch. `task show` affiche les incertitudes
 du dernier dispatch.
 
+### Pilote automatique (P82)
+
+Un interrupteur par projet : l'orchestrateur tranche aussi les cas bloqués (`merge`, `resume_branch`,
+`retry_exhausted`, escalades du merger et du relecteur, tâches faites à la main, « abandonner » avec raison),
+sauf une **liste fermée** qui reste à l'humain. Sans pilote, rien ne change.
+
+```bash
+grimoire autonomy autopilot on        # attesté par un tour humain, comme le mandat ; exige un mandat actif
+grimoire autonomy autopilot status
+grimoire autonomy autopilot off       # même canal humain (révoquer le mandat le coupe aussi)
+```
+
+- **Autorité** : l'état (activé ou coupé, par qui, par quel canal, quand, pour quel mandat) est au journal
+  d'autorité. Il ne s'active et ne se coupe que par le canal humain : la CLI attestée par un tour humain, ou le
+  cockpit (`POST autonomy/autopilot`, derrière le jeton et la clé de contrôle). Le pilote est **lié au mandat** :
+  mandat révoqué, expiré ou remplacé, il est coupé, et un nouveau mandat ne le rallume pas.
+- **Liste fermée, dans le code** : identifiants, secrets, dépense payante, accès hors du dépôt (`permission` hors
+  du dépôt ou sans chemin), suppression de données utilisateur, mandat, réglages du dépôt. Le classement lit la
+  question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot.reserved` de
+  `orchestration-policy.yaml` peut **ajouter** des réservations (catégories d'escalade ou mots) ; toute autre clé
+  ou forme rend la politique invalide et le pilote ne décide plus rien.
+- **Comment il décide** : d'abord l'option recommandée par la question (`task ask --recommended <option> --why
+  "…"`, ou le champ `recommended` d'un lot), appliquée par le tick sans session. Sinon une session tranche avec les
+  critères, les directives et la mémoire, et chaque réponse porte `--why "<justification>" --confidence
+  high|medium|low` (`task answer`). Confiance basse, non déclarée ou sans justification : la question reste à
+  l'humain (`autopilot.deferred`, que le cockpit signale).
+- **Traçabilité** : chaque décision est un événement `autopilot.decided` (question, option, justification,
+  confiance, source de la recommandation, mandat). Sans borne de présentations (le plafond de sessions du jour et
+  le disjoncteur bornent encore).
+- **Limites** : une annulation décidée par le pilote est terminale (l'état `cancelled` n'a pas de sortie) ; la
+  raison est au ledger. L'acceptation sous dérogation n'est pas traitée (aucune dérogation n'existe dans le kit).
+
 ### Mandat de l'orchestrateur (#876, lot 1)
 
 Les gestes de validation (`task accept`, `task answer`, `task approve-check`, `orchestrate resume`,

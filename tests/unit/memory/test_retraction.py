@@ -14,8 +14,12 @@ embarqué (``:memory:``, vecteurs déterministes sans modèle).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +36,23 @@ from grimoire.memory.supersession import INCLUDE_ALL, RETRACTED_KEY, is_retracte
 QUERY = "décision backend vectoriel"
 TEXT_A = "Décision : le backend vectoriel retenu est Qdrant."
 TEXT_B = "Décision : le backend vectoriel de secours est Weaviate."
+
+
+@functools.cache
+def _chroma_native_refusal() -> str:
+    """Pourquoi l'index natif de chromadb (hnswlib) ne se charge pas ici ; ``""`` s'il se charge.
+
+    Constat du 2026-10-28 (CI, Python 3.13) : sur certaines machines GitHub, l'import de ``local_hnsw`` meurt d'une
+    instruction illégale (SIGILL) ; le worker xdist tué, le job restait suspendu jusqu'à son plafond. L'import est
+    donc essayé une fois dans un sous-processus : seul lui meurt.
+    """
+    probe = subprocess.run([sys.executable, "-c", "import chromadb.segment.impl.vector.local_hnsw"],
+                           capture_output=True, text=True, timeout=120, check=False)
+    if probe.returncode == 0:
+        return ""
+    if probe.returncode == -signal.SIGILL:
+        return "chromadb : l'index natif (hnswlib) meurt d'une instruction illégale sur ce processeur (SIGILL)"
+    return f"chromadb : l'index natif ne se charge pas (code {probe.returncode}) : {probe.stderr.strip()[-200:]}"
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +113,8 @@ def _make_backend(kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch | N
         return TantivyMemoryBackend(tmp_path / "tantivy")
     if kind == "mempalace":
         pytest.importorskip("chromadb")
+        if refusal := _chroma_native_refusal():
+            pytest.skip(refusal)
         from grimoire.memory.backends.mempalace import MemPalaceBackend
 
         assert monkeypatch is not None

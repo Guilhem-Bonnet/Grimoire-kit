@@ -50,9 +50,38 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Iterator[None]:
-    """Mode strict (``GRIMOIRE_E2E_STRICT=1``) : un skip d'exécution devient un échec."""
+    """Mode strict (``GRIMOIRE_E2E_STRICT=1``) : un skip d'exécution devient un échec.
+
+    Un test qui échoue, avec ``GRIMOIRE_E2E_FAILURE_DIR`` posée (la CI la pose et dépose le dossier en artefact),
+    laisse la capture et le HTML rendu de chacune de ses pages : un échec propre à la CI se lit sur pièce
+    (P79, 2026-10-28 : un e2e rouge seulement en CI, sans rien à regarder).
+    """
     outcome = yield
-    promote_skip(outcome.get_result())
+    report = outcome.get_result()
+    promote_skip(report)
+    if report.when == "call" and report.failed:
+        _keep_failure_pages(item)
+
+
+def _keep_failure_pages(item: pytest.Item) -> None:
+    target = os.environ.get("GRIMOIRE_E2E_FAILURE_DIR", "").strip()
+    if not target:
+        return
+    pages: list[Page] = []
+    for value in getattr(item, "funcargs", {}).values():
+        for candidate in value if isinstance(value, tuple) else (value,):
+            if isinstance(candidate, Page) and candidate not in pages:
+                pages.append(candidate)
+    out = Path(target)
+    out.mkdir(parents=True, exist_ok=True)
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", item.nodeid)[-150:]
+    for index, page in enumerate(pages):
+        name = f"{stem}-{index}" if len(pages) > 1 else stem
+        try:  # une page déjà fermée ou plantée ne doit pas masquer l'échec du test
+            page.screenshot(path=str(out / f"{name}.png"), full_page=True)
+            (out / f"{name}.html").write_text(page.content(), encoding="utf-8")
+        except Exception as exc:
+            (out / f"{name}.txt").write_text(f"capture impossible : {exc!r}\n", encoding="utf-8")
 
 #: Le vrai répertoire personnel, capturé à l'import de CE fichier — et non
 #: réimporté depuis ``tests/conftest.py``. Sans ``tests/__init__.py``, pytest
@@ -125,13 +154,20 @@ def served(real_project: Path, tmp_path_factory: pytest.TempPathFactory) -> Iter
         assert not _alive(process.pid), f"serveur survivant : pid {process.pid}"
 
 
-def _serve_empty_project(tmp_path_factory: pytest.TempPathFactory, label: str) -> Iterator[str]:
-    """Un projet `init` + `standard init`, ledger retiré, servi par `grimoire serve`."""
+def _serve_empty_project(
+    tmp_path_factory: pytest.TempPathFactory, label: str, roots: list[Path] | None = None
+) -> Iterator[str]:
+    """Un projet `init` + `standard init`, ledger retiré, servi par `grimoire serve`.
+
+    *roots*, s'il est donné, reçoit la racine du projet (pour les tests qui y écrivent).
+    """
     root = tmp_path_factory.mktemp(label) / "projet-vide"
     root.mkdir(parents=True)
+    if roots is not None:
+        roots.append(root)
     subprocess.run(["git", "init", "-q"], cwd=str(root), check=False, capture_output=True)
     created = subprocess.run(
-        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-vide"],
+        [sys.executable, "-m", "grimoire", "init", ".", "-y", "--name", "projet-vide", "--backend", "local"],
         cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=180,
     )
     if not (root / "_grimoire" / "kit").is_dir():

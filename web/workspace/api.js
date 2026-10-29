@@ -68,10 +68,27 @@ function withProject(path) {
   return `${base}?${params.toString()}`;
 }
 
+// P79 : vrai pendant qu'un pouls changé fait recharger les espaces (live.js). Les lectures GET lancées alors
+// portent `live=1` : le serveur peut les servir depuis son cache tant que l'empreinte n'a pas bougé. Un
+// chargement de page ou une navigation n'en portent pas : ils relisent toujours.
+let liveReload = false;
+export function duringLiveReload(run) {
+  liveReload = true;
+  try { return run(); } finally { liveReload = false; }
+}
+
+function liveMark(path, options) {
+  if (!liveReload || (options.method && options.method !== 'GET')) return path;
+  const [base, query = ''] = path.split('?');
+  const params = new URLSearchParams(query);
+  params.set('live', '1');
+  return `${base}?${params.toString()}`;
+}
+
 async function request(path, options = {}) {
   let response;
   try {
-    response = await fetch(withProject(path), {
+    response = await fetch(withProject(liveMark(path, options)), {
       headers: { 'Content-Type': 'application/json' },
       ...options,
     });
@@ -201,6 +218,9 @@ export const api = {
   chatSend: (text) => post(WS + 'chat/send', { text }),
   chatPermission: (requestId, decision) => post(WS + 'chat/permission', { request_id: requestId, decision }),
   chatCancel: () => post(WS + 'chat/cancel', {}),
+  // ACP3 : l'hôte du chat, par projet. Les hôtes absents reviennent grisés, avec leur raison.
+  chatHosts: () => get(WS + 'chat/hosts'),
+  chatHost: (host) => post(WS + 'chat/host', { host }),
   glossary: () => get(WS + 'glossary'),
   // Ce qui attend une décision humaine (P22), rangé par urgence. `portfolio`
   // lit tout le registre — la portée « Tous les projets » ; `probe` relance

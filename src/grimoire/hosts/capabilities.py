@@ -80,6 +80,13 @@ class HostProfile:
     #: Command (argv) that starts the host's ACP agent over stdio, run from the
     #: project folder (``grimoire chat``). Empty: no ACP mode known for this host.
     acp_command: tuple[str, ...] = ()
+    #: Exécutable dont la présence dit que l'hôte est installé, quand ce n'est pas
+    #: ``acp_command[0]`` (Codex se lance par ``npx`` mais s'installe en ``codex``).
+    acp_binary: str = ""
+    #: Le mode ACP de cet hôte est en preview : il peut changer ou casser sans préavis.
+    acp_preview: bool = False
+    #: Ce que l'utilisateur doit savoir du mode ACP de cet hôte (preview, migration d'outil…).
+    acp_note: str = ""
     notes: str = ""
 
     @property
@@ -150,6 +157,11 @@ COPILOT_PROFILE = HostProfile(
     mcp_native=True,
     instructions_entrypoint=".github/copilot-instructions.md",
     acp_command=("copilot", "--acp"),
+    acp_preview=True,
+    acp_note=(
+        "Copilot CLI (`copilot --acp`) est en preview : le protocole peut changer. "
+        "Copilot dans VS Code n'a aucune interface externe : le chat écrit alors dans le kanban."
+    ),
     notes="No declarative permission table: permissions are enforced by the pre_tool_use hook instead.",
 )
 
@@ -163,7 +175,9 @@ CODEX_PROFILE = HostProfile(
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint="AGENTS.md",
-    acp_command=("codex-acp",),
+    acp_command=("npx", "-y", "@agentclientprotocol/codex-acp"),
+    acp_binary="codex",
+    acp_note="Adaptateur ACP de Codex lancé par npx (@agentclientprotocol/codex-acp) : exige Node.js et la CLI `codex`.",
     notes="Prose entrypoint plus MCP: agents, skills and commands degrade to a described catalog.",
 )
 
@@ -192,6 +206,11 @@ GEMINI_PROFILE = HostProfile(
     mcp_native=True,
     instructions_entrypoint="GEMINI.md",
     acp_command=("gemini", "--acp"),
+    acp_note=(
+        "Gemini CLI cède la place à Antigravity CLI pour les comptes gratuits (juin 2026) : "
+        "`gemini --acp` reste valable tant que la CLI est installée ; sur un compte gratuit, "
+        "migrer vers Antigravity CLI et mettre à jour la commande ACP du profil."
+    ),
     notes="Prose entrypoint plus MCP; no lifecycle hooks, so governance is advisory only.",
 )
 

@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.73.0",
+ "generated_for": "3.74.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -1257,6 +1257,10 @@
   "520bd5961bc2ab350b86ea5884594f03ad2bb9edc04ee506c445b87072999ae9": {
    "version": "3.32.0",
    "path": "framework/agent-base-compact.md"
+  },
+  "528d9d6bd64add04fc5ba0ff6264dcd1b8991ab063fda0b6fc865c028c3a2e13": {
+   "version": "3.74.0",
+   "path": "framework/tools/observatory.py"
   },
   "529bf0ae42b47a114d168b9a33ee771d18ccbaba15aae433319e2dc2d7dc7892": {
    "version": "3.16.0",
