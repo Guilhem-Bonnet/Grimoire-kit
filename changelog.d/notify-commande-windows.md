@@ -1,0 +1,1 @@
+- fix(windows): la commande de notification d'une décision attendue se découpe comme le shell du système (`grimoire.core.command_line.split_command`, partagé avec le chat ACP) : sous Windows, un chemin `C:\…\python.exe` n'est plus réduit par `shlex` en mode POSIX (main rouge sous Windows, 2026-10-29).

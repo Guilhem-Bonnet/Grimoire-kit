@@ -20,13 +20,13 @@ que ``--check`` de ``task dispatch``. Elle n'est jamais passée à un shell (``s
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from grimoire.core.command_line import split_command
 from grimoire.missions.lease import parse_instant
 from grimoire.missions.questions import group_settled, open_in_group
 from grimoire.missions.schemas import TaskState
@@ -170,7 +170,7 @@ def _run(command: str, decision: PendingDecision) -> str:
     title = f"Grimoire : décision attendue sur {decision.task_id}"
     message = decision.question.text
     try:
-        argv = [part.replace("{title}", title).replace("{message}", message) for part in shlex.split(command)]
+        argv = [part.replace("{title}", title).replace("{message}", message) for part in split_command(command)]
     except ValueError as exc:
         return f"commande illisible : {exc}"
     if not argv:
