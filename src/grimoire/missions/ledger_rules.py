@@ -37,9 +37,11 @@ class UnjudgedClaimError(Exception):
 def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
     """Les objets d'un journal JSON ligne à ligne, et les numéros (base 1) des lignes illisibles, ignorées.
 
-    Une coupure de courant pendant un ajout laisse une dernière ligne tronquée, parfois au milieu
-    d'un caractère multi-octet : la ligne est sautée — le rejeu reste celui du préfixe cohérent — et
-    son numéro rendu, jamais tu (K12, scénario H). Chaque ligne est décodée seule, en UTF-8 strict :
+    Un dernier morceau sans ``\\n`` est un ajout en cours (un lecteur sans verrou le voit pendant
+    l'écriture) ou la trace d'une coupure : il n'est ni rejoué ni compté illisible. L'ajout suivant le
+    referme par un ``\\n`` de réparation (:func:`~grimoire.missions.ledger_append.append_bytes`) ; une
+    ligne tronquée — parfois au milieu d'un caractère multi-octet — est alors sautée, le rejeu reste
+    celui du préfixe cohérent, et son numéro rendu, jamais tu (K12, scénario H). Chaque ligne est décodée seule, en UTF-8 strict :
     un octet tronqué n'emporte pas tout le journal. Le découpage se fait sur ``\\n`` seulement — un
     ``U+2028`` écrit brut par ``ensure_ascii=False`` reste dans sa ligne (``str.splitlines`` la coupait).
     """
@@ -50,6 +52,9 @@ def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
 
 def parse_jsonl(data: bytes, first_line: int = 1) -> tuple[list[dict[str, Any]], tuple[int, ...]]:
     """Comme :func:`read_jsonl` sur des octets déjà lus ; ``first_line`` numérote la première ligne (queue d'un instantané, K12 x K13)."""
+    # Seules les lignes refermées par ``\n`` comptent : le morceau final sans fin de ligne est un ajout en
+    # cours, ni rejoué ni signalé illisible (pas de fausse alerte K12 chez un lecteur sans verrou).
+    data = data[: data.rfind(b"\n") + 1]
     records: list[dict[str, Any]] = []
     unreadable: list[int] = []
     for number, chunk in enumerate(data.split(b"\n"), start=first_line):
