@@ -292,6 +292,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     # fil au bout de ``timeout`` secondes.
     protocol_version = "HTTP/1.1"
     timeout = 60
+    # En-tête et corps partent en deux écritures : sans cela, Nagle + ACK différé
+    # retardent le corps d'~40 ms par réponse sur une connexion qui reste ouverte.
+    disable_nagle_algorithm = True
 
     def setup(self) -> None:
         super().setup()
