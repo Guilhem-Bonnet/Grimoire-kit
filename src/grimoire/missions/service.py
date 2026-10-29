@@ -48,6 +48,7 @@ from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.mandate import ANSWER_CHANNEL, require_authority
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
 from grimoire.missions.question_gestures import BatchOutcome
+from grimoire.missions.question_rounds import compose_question
 from grimoire.missions.questions import OPEN, QuestionSpec, group_settled, open_in_group, records_of
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.reservation import find_conflict, reservation_refusal
@@ -75,6 +76,7 @@ from grimoire.missions.waiting import (
     Question,
     ResumeHint,
     Waiting,
+    answer_data_payload,
     attention_rank,
     new_question_id,
     parse_until,
@@ -888,6 +890,7 @@ class TaskService:
         question_id: str = "",
         why: str = "",
         recommended: str = "",
+        **v2: Any,  # P92 : title, context, choices, answer_mode, attachments, recommendation
     ) -> TaskMove:
         """``claimed|running → waiting(human)`` avec sa question, tracée par ``task.question_asked``.
 
@@ -897,12 +900,9 @@ class TaskService:
         """
         task = self.require(task_id)
         moment = datetime.now(UTC).isoformat()
-        pick = recommended.strip()
-        if pick and options and pick.lower() not in (o.strip().lower() for o in options):
-            raise ValueError(f"la recommandation {pick!r} n'est pas l'une des options proposées")
-        question = Question(
-            question_id or new_question_id(), kind, text.strip(), tuple(options), origin, moment,
-            why=why.strip(), recommended=pick,
+        question = compose_question(
+            self.ledger, task_id, question_id or new_question_id(), kind, text, options, origin, moment,
+            task.title, why=why, recommended=recommended, **v2,
         )
         waiting = Waiting("human", "", question, self._hint_of(task), moment)
         if problem := waiting.problem():
@@ -936,7 +936,7 @@ class TaskService:
     def answer(
         self, task_id: str, text: str, actor: str, *, origin: str, question_id: str = "",
         attested_by_flow: bool = False, provenance: Mapping[str, Any] | None = None,
-        justification: str = "", confidence: str = "",
+        justification: str = "", confidence: str = "", answer_data: Mapping[str, Any] | None = None,
     ) -> TaskMove:
         """Répond à la question en attente — **canal humain seulement** — puis réveille la tâche.
 
@@ -988,6 +988,7 @@ class TaskService:
             HUMAN_ANSWERED_EVENT, task_id, "task", actor,
             {
                 "task_id": task_id, "question_id": question.id, "answer": answer, "origin": origin, "actor_id": actor,
+                **answer_data_payload(answer_data, question),
                 **({"mandate_id": authority.mandate_id, "provenance": dict(authority.provenance),
                     "gesture": authority.gesture} if authority else {}),
             },

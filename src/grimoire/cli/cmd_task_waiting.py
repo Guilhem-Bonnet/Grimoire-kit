@@ -63,12 +63,82 @@ def register(task_app: typer.Typer) -> None:
         from_file: Annotated[
             str, typer.Option("--from", help="Un lot de questions (JSON ou YAML, `-` : entrée standard), posé en une interruption.")
         ] = "",
+        title: Annotated[
+            str, typer.Option("--title", help="La décision en une ligne, sans identifiant ni jargon.")
+        ] = "",
+        context: Annotated[
+            str, typer.Option("--context", help="Deux lignes : le fait déclencheur, ce qui est en jeu.")
+        ] = "",
+        choice: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--choice", help="Un choix `VALEUR=LIBELLÉ[|CONSÉQUENCE]` (répétable ; `!VALEUR` : dangereux)."
+            ),
+        ] = None,
+        attach: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--attach", help="Une pièce `TYPE:REF[:LIBELLÉ]` (link, file, diff, ci, image, command ; répétable)."
+            ),
+        ] = None,
+        recommend: Annotated[str, typer.Option("--recommend", help="La valeur du choix que tu recommandes.")] = "",
+        because: Annotated[str, typer.Option("--because", help="Pourquoi, en une phrase (avec `--recommend`).")] = "",
+        spec: Annotated[
+            str, typer.Option("--spec", help="Une question v2 complète (fichier JSON ou YAML, `-` : entrée standard).")
+        ] = "",
         epoch: _EPOCH = None,
         project_root: _PROJECT_ROOT = Path(),
         ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
         actor: _ACTOR = "cli",
     ) -> None:
         """Pose une question à l'humain (ou un lot, `--from`) : la tâche se gare en `waiting(human)` et remonte au cockpit."""
+        v2 = bool(title or context or choice or attach or recommend or because or spec)
+        if v2 and (from_file or non_blocking or key):
+            console.print(
+                "[red]✗[/red] une question v2 (`--title`, `--choice`, `--spec`…) ne se mêle pas à `--from`, `--non-blocking` ni `--key`"
+            )
+            raise typer.Exit(1)
+        if v2:
+            from grimoire.cli.cmd_task_questions import read_mapping
+            from grimoire.core.exceptions import GrimoireError
+            from grimoire.missions.question_v2 import ask_kwargs
+
+            try:
+                raw = read_mapping(spec) if spec else {}
+                fields = ask_kwargs(
+                    title=title,
+                    context=context,
+                    choices=choice,
+                    attach=attach,
+                    recommend=recommend,
+                    because=because,
+                    spec=raw,
+                )
+                body, nature = text or str(raw.get("text", "") or ""), str(raw.get("kind", "") or kind)
+                if not (body.strip() or fields["title"].strip()):
+                    raise ValueError("une question v2 porte un titre (`--title`) ou un texte")
+                run(
+                    ctx,
+                    project_root,
+                    ledger_root,
+                    task_id,
+                    lambda s: s.ask(
+                        task_id,
+                        body,
+                        actor,
+                        kind=nature,
+                        options=tuple(option or ()),
+                        epoch=epoch,
+                        why=why,
+                        recommended=recommended,
+                        **fields,
+                    ),
+                    parking=True,
+                )
+            except (GrimoireError, ValueError) as exc:
+                console.print(f"[red]✗[/red] {exc}")
+                raise typer.Exit(1) from exc
+            return
         if not from_file and not (non_blocking or why or key or recommended):
             if not text.strip():
                 console.print("[red]✗[/red] une question (texte) ou un lot (`--from`)")

@@ -1058,6 +1058,7 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
         return service.answer(
             task_id, str(body.get("text") or ""), actor, origin=ORIGIN_HUMAN,
             question_id=str(body.get("question_id") or ""),
+            answer_data=body["answer_data"] if isinstance(body.get("answer_data"), dict) else None,
         )
     if action == "accept":
         # P88 : l'acceptation de la preuve déclarative (#865), même canal humain que `answer` — l'origine est

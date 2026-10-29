@@ -494,12 +494,14 @@ def test_une_carte_dit_sa_vivacite_son_dernier_signe_sa_duree_et_son_cout(
 
     card = _card(page, title)
     card.wait_for(timeout=APPEAR_MS)
-    facts = card.locator("[data-role='live-facts']")
+    facts = card.locator("[data-role='presence']")
     facts.wait_for()
     text = facts.inner_text()
-    assert "session vivante" in text, text
-    assert re.search(r"signe il y a [12] min", text), text
-    assert "durée 10 min" in text, "durée : du premier au dernier signe de vie (12 − 2 min)"
+    # P91 : la carte ne porte plus qu'UNE ligne d'état ; signe et durée vivent dans l'inspecteur.
+    assert "Au travail" in text, text
+    assert card.locator("[data-role='live-facts']").count() == 0 and "aucun signe" not in card.inner_text()
+    assert "durée inconnue" not in card.inner_text()
+    # (durée : du premier au dernier signe de vie, lue ci-dessous dans l'inspecteur : 12 − 2 min)
     _capture(page, "carte-vivacite")
 
     card.dispatch_event("click")
@@ -522,9 +524,8 @@ def test_un_cout_jamais_mesure_s_affiche_inconnu_et_jamais_zero(page: Page, serv
     _goto(page, "executer")
     _card(page, "Carte sans aucun dispatch").wait_for(timeout=APPEAR_MS)
 
-    unknown = _card(page, "Carte sans aucun dispatch").locator("[data-role='cost']")
-    assert unknown.inner_text() == "coût inconnu"
-    assert unknown.get_attribute("data-cost-status") == "unknown"
+    # P91 : un coût inconnu ne s'écrit plus sur la carte (la liste et l'inspecteur le disent).
+    assert _card(page, "Carte sans aucun dispatch").locator("[data-role='cost']").count() == 0
     low = _card(page, "Carte dont un appel manque de prix").locator("[data-role='cost']").inner_text()
     assert low.startswith("coût ≥ 0.4000 USD") and "1 non chiffré" in low, low
     assert _card(page, "Carte dont tout est chiffré").locator("[data-role='cost']").inner_text() == "coût 0.2500 USD (dispatch)"

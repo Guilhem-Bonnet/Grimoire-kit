@@ -88,6 +88,7 @@ def _board() -> dict[str, object]:
                     "updated_at": now,
                     "duration_s": 120,
                 },
+                presence={"state": "working", "sign_at": now},
             ),
             _card(
                 "GAO-p30-carte-002",
@@ -98,6 +99,7 @@ def _board() -> dict[str, object]:
                 session_id="sess-p30-inconnue-0002",
                 host="host-github-copilot",
                 session={"id": "sess-p30-inconnue-0002", "liveness": {"state": "inconnu"}},
+                presence={"state": "none"},
             ),
         ],
     }
@@ -150,8 +152,8 @@ def test_la_carte_porte_une_forme_par_sens(workspace: Page) -> None:
     assert workspace.locator(f"{first} .ex-card-meta .sico").count() == 0
 
     # Session : glyphe de vivacité (une forme par valeur) et pictogramme d'hôte générique.
-    assert "icons.svg#i-session-live" in _hrefs(workspace, f"{first} [data-role='live-facts'] use")
-    assert "icons.svg#i-session-unknown" in _hrefs(workspace, f"{second} [data-role='live-facts'] use")
+    assert "icons.svg#i-session-live" in _hrefs(workspace, f"{first} [data-role='presence'] use")
+    assert "icons.svg#i-session-unknown" in _hrefs(workspace, f"{second} [data-role='presence'] use")
     assert "icons.svg#i-host-cli" in _hrefs(workspace, f"{first} .ex-session use")
     assert "icons.svg#i-host-ide" in _hrefs(workspace, f"{second} .ex-session use")
     assert "Claude Code" in workspace.locator(f"{first} .ex-session").inner_text()
