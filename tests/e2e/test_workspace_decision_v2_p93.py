@@ -186,12 +186,19 @@ def test_captures_de_la_carte_v2(workspace: Page, real_project: Path) -> None:
     _answer_old(service)
     tid = _running(service, "Cockpit")
     _reprise(service, tid)
+    first = service.require(tid).waiting.question.id  # type: ignore[union-attr]
+    service.answer(tid, "reprendre", "guilhem", origin=ORIGIN_HUMAN, question_id=first, answer_data={"choices": ["reprendre"]})
+    for state in (TaskState.CLAIMED, TaskState.RUNNING):
+        claim = TaskClaim("agent-a", "host-claude-code-cli") if state is TaskState.CLAIMED else None
+        service.ledger.transition_task(tid, state, actor_id="agent-a", claim=claim)
+    _reprise(service, tid)  # la carte capturée est une 2e demande, avec sa demande précédente (artboard « reprise »)
     multi = _running(service, "Icônes")
     service.ask(
         multi, "", "agent-a", title="Accorder l'exception Lucide pour ces icônes ?",
         context="Il manque des icônes d'action au sprite maison.",
         choices=tuple(Choice(name, name, "Arrive dans le sprite.") for name in ICONS), answer_mode="multi",
     )
+    workspace.set_viewport_size({"width": 1280, "height": 1700})  # la carte tient sans défiler : l'en-tête collant ne la recouvre pas
     _open_decisions(workspace)
     card, many = _card(workspace, tid), _card(workspace, multi)
     for scheme in ("light", "dark"):
