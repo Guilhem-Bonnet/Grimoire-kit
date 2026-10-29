@@ -21,12 +21,18 @@
 //     flux se rouvre (ou un sondage part) tout de suite ;
 //   - deux sondages ne se chevauchent jamais (minuteur ré-armé APRÈS la réponse) ;
 //   - une API injoignable se voit (état `error` + durée), elle ne gèle pas
-//     silencieusement un « mis à jour il y a 2 s » mensonger.
+//     silencieusement un « mis à jour il y a 2 s » mensonger ;
+//   - les rechargements des espaces sont regroupés (P79) : un changement isolé
+//     part tout de suite, une rafale (huit workers qui écrivent) en donne au plus
+//     un par `MIN_RELOAD_MS`, jamais deux en même temps, et le dernier pouls est
+//     toujours rechargé.
 
-import { api, host } from './api.js';
+import { api, host, duringLiveReload } from './api.js';
 
 const DEFAULT_INTERVAL_MS = 5000;
 const FIRST_PULSE_TIMEOUT_MS = 5000;
+// Écart minimal entre deux rechargements des espaces : chacun relit tâches, attention et sessions.
+const MIN_RELOAD_MS = 3000;
 
 const hidden = () => document.visibilityState === 'hidden';
 
@@ -89,6 +95,11 @@ export function createLive({ onDecisions, onState } = {}) {
   let inflight = null;
   let source = null;
   let running = false;
+  // Regroupement des rechargements (P79) : le dernier pouls changé attend son tour.
+  let pendingPulse = null;
+  let reloadTimer = null;
+  let reloading = false;
+  let lastReloadAt = 0;
   // Résout l'attente de `start()` au premier pouls reçu, quel que soit le transport.
   let settle = () => {};
 
@@ -108,15 +119,53 @@ export function createLive({ onDecisions, onState } = {}) {
     state.failingSince = null;
     const changed = Boolean(pulse.fingerprint) && pulse.fingerprint !== state.fingerprint;
     if (changed) state.fingerprint = pulse.fingerprint;
-    if (onDecisions && pulse.decisions) onDecisions(pulse.decisions);
+    // Le compteur de décisions (« À traiter ») est lu tout de suite au premier pouls,
+    // puis regroupé avec les espaces : il relit lui aussi le serveur (P79).
+    if (first && onDecisions && pulse.decisions) onDecisions(pulse.decisions);
     // Le tout premier pouls fixe la référence : l'espace vient d'être chargé,
     // il n'a rien à recharger.
-    if (changed && !first) {
-      for (const handler of [...handlers]) {
-        try { handler(pulse); } catch (error) { console.error('actualisation de l\'espace :', error); }
-      }
-    }
+    if (changed && !first) requestReload(pulse);
     notifyState('ok');
+  }
+
+  function requestReload(pulse) {
+    pendingPulse = pulse;
+    if (reloadTimer !== null || reloading) return;
+    const wait = Math.max(0, lastReloadAt + MIN_RELOAD_MS - Date.now());
+    reloadTimer = setTimeout(runReload, wait);
+  }
+
+  async function runReload() {
+    reloadTimer = null;
+    // Onglet masqué : le pouls attend, il sera rechargé au retour (son empreinte est déjà connue,
+    // aucun pouls ne la redira).
+    if (!running || hidden()) return;
+    const pulse = pendingPulse;
+    pendingPulse = null;
+    if (!pulse) return;
+    reloading = true;
+    lastReloadAt = Date.now();
+    try {
+      // Les lectures lancées ici (de façon synchrone) portent `live=1` : le serveur peut les resservir (P79).
+      const pending = duringLiveReload(() => {
+        if (onDecisions && pulse.decisions) {
+          try { onDecisions(pulse.decisions); } catch (error) { console.error('compteur de décisions :', error); }
+        }
+        return [...handlers].map((handler) => {
+          try { return Promise.resolve(handler(pulse)); } catch (error) { return Promise.reject(error); }
+        });
+      });
+      const results = await Promise.allSettled(pending);
+      for (const r of results) if (r.status === 'rejected') console.error('actualisation de l\'espace :', r.reason);
+    } finally {
+      reloading = false;
+      if (pendingPulse) requestReload(pendingPulse);
+    }
+  }
+
+  function clearReload() {
+    if (reloadTimer !== null) { clearTimeout(reloadTimer); reloadTimer = null; }
+    pendingPulse = null;
   }
 
   function clearTimer() {
@@ -197,6 +246,7 @@ export function createLive({ onDecisions, onState } = {}) {
       notifyState('paused');
     } else {
       resume();
+      if (pendingPulse) requestReload(pendingPulse);
     }
   }
 
@@ -218,6 +268,7 @@ export function createLive({ onDecisions, onState } = {}) {
     stop() {
       running = false;
       clearTimer();
+      clearReload();
       if (inflight) inflight.abort();
       closeStream();
       document.removeEventListener('visibilitychange', onVisibility);
@@ -225,6 +276,6 @@ export function createLive({ onDecisions, onState } = {}) {
     /** Inscrit ce que l'espace courant fait quand le pouls annonce un changement. */
     on(handler) { handlers.push(handler); },
     /** La coque l'appelle à chaque changement d'espace : un espace démonté n'écoute plus. */
-    clear() { handlers = []; },
+    clear() { handlers = []; clearReload(); },
   };
 }

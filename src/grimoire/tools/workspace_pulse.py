@@ -58,6 +58,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "STREAM_RETRY_MS",
     "STREAM_TICK_SECONDS",
+    "fingerprint_of",
     "pulse_interval",
     "pulse_stream",
     "pulse_view",
@@ -138,6 +139,11 @@ def _roots(project_root: Path, portfolio: bool) -> list[tuple[str, Path]]:
     if not portfolio:
         return [(slug_for_path(project_root) or "", project_root)]
     return [(str(e.get("slug", "")), Path(str(e.get("path", "")))) for e in load_registry()]
+
+
+def fingerprint_of(project_root: Path, *, portfolio: bool = False, now: datetime | None = None) -> str:
+    """L'empreinte que le pouls annonce pour ce périmètre, celle qu'un cache de lecture compare (P79)."""
+    return _fingerprint(_roots(project_root, portfolio), now or datetime.now(UTC))
 
 
 def _decisions(roots: list[tuple[str, Path]], *, portfolio: bool) -> dict[str, Any]:
