@@ -246,15 +246,14 @@ def test_la_carte_en_cours_dit_palier_reel_effort_tokens_et_skills(page: Page) -
     assert "code-review" in skills.inner_text()
 
 
-def test_une_session_sans_journal_rapporte_se_dit_non_rapportee(page: Page) -> None:
+def test_une_session_sans_journal_rapporte_n_ecrit_aucune_absence_sur_la_carte(page: Page) -> None:
     card = _card(page, "sans journal rapporté")
     line = card.locator("[data-role='card-session']")
     assert line.locator("[data-role='work-model']").count() == 0, "aucun palier deviné sur la ligne session"
+    # P91 : ni « modèle non rapporté » ni « effort non rapporté » sur la carte (ils vivent dans l'inspecteur).
+    assert "non rapporté" not in card.inner_text()
     live = card.locator("[data-role='work-live']")
-    expect(live.locator("[data-role='work-model']")).to_have_text("modèle non rapporté")
-    expect(live.locator("[data-role='work-effort']")).to_have_text("effort non rapporté")
-    assert live.locator("[data-role='work-tokens']").count() == 0
-    assert live.locator("[data-role='work-skills']").count() == 0
+    assert live.count() == 0
 
 
 def test_l_inspecteur_liste_persona_modele_effort_skills_et_tokens(page: Page) -> None:
