@@ -8,7 +8,6 @@ demie avec des défilements imbriqués. Chaque test relit le DOM rendu par
 
 from __future__ import annotations
 
-import json
 import os
 import socket
 import subprocess
@@ -17,7 +16,6 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest

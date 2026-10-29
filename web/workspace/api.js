@@ -333,6 +333,10 @@ export const api = {
   // dans project-context.yaml (section cockpit) par le serveur.
   options: () => get(WS + 'options'),
   optionsWrite: (usdCad) => post(WS + 'options', { usd_cad: usdCad }),
+  // I1 : la commande de notification (options.notify.command), son écriture et son essai.
+  notify: () => get(WS + 'notify'),
+  notifyWrite: (command) => post(WS + 'notify', { command }),
+  notifyTest: (command) => post(WS + 'notify/test', command === undefined ? {} : { command }),
 
   // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
   // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue
@@ -396,6 +400,11 @@ export const api = {
   // Premier lancement (P36) : la machine vue par le guide — détection, profils
   // mémoire possibles ou non et pourquoi, plan, commandes à copier. Lecture seule.
   setupGuide: () => get(WS + 'setup/guide'),
+  // Premier lancement (P45) : l'avancement enregistré du « Lancer » du guide, et ses
+  // verbes (`start` avec `profile`, `next`, `retry`/`skip` avec `step`, `rollback`,
+  // `reset`). Chaque étape passe par une action typée de P40 (plan puis apply).
+  setupLaunchState: () => get(WS + 'setup/launch'),
+  setupLaunch: (verb, body) => post(WS + 'setup/launch', { verb, ...(body || {}) }),
   // Reçu de rappel (P27) : ce que la mémoire a servi à une tâche (`tasks/<id>/receipts`),
   // ou les derniers reçus du projet (`memory/recall`, `task` pour filtrer). Lecture seule.
   taskReceipts: (id, project) =>
@@ -458,6 +467,9 @@ export const api = {
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>
     post(WS + 'tasks/add', { title, acceptance, description }),
+  // « Une idée ? » (I2) : propositions de l'intake déterministe (aucune écriture), puis création des cochées.
+  taskIntake: (text) => post(WS + 'tasks/intake', { text }),
+  taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),
   // Action depuis le portefeuille (#638, lot C) : routée vers le projet
   // propriétaire par `?project=<slug>` explicite dans le chemin (donc jamais
   // doublé par `withProject`) et confirmée par `project` dans le corps —

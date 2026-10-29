@@ -158,6 +158,11 @@
       <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#refresh"/></svg><span id="st-live-text">actualisation…</span>
     </span>
     <span class="grow"></span>
+    <button class="chip" id="st-notify" type="button" aria-pressed="false"
+            title="Recevoir une notification du navigateur à chaque nouvelle décision attendue, même onglet masqué">
+      <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#bell"/></svg><span class="st-notify-label">Me prévenir dans le navigateur</span>
+    </button>
+    <span class="sr-only" id="notify-live" role="status" aria-live="polite"></span>
     <button class="chip" id="st-atelier" type="button" aria-pressed="false"
             title="Afficher ou masquer les panneaux d'atelier : rail, explorateur, inspecteur, dock (⇧⌘L)">Atelier <span class="kbd">⇧⌘L</span></button>
     <button class="chip" id="st-density" type="button" data-term="densite"
