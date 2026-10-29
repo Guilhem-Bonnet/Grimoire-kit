@@ -182,7 +182,8 @@ jobs:
     # rien apprendre. Celui-ci a tenu quarante minutes sur une invite
     # interactive de `grimoire-init.sh`, quand ubuntu finissait en secondes :
     # mieux vaut un échec net et rapide.
-    timeout-minutes: 15
+    # 15 → 20 min (P94) : Windows finit à ~13,5 min sur main, soit 1,5 min de marge ; un test de plus la crevait.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
