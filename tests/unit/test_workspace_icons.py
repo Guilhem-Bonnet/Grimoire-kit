@@ -12,7 +12,7 @@ dessine plus d'icône en ligne.
 P30 (fin du point polysémique) y ajoute les familles d'identité : types de
 tâche (`i-task-*`, un par valeur de `TaskType`), rôles de base (`i-store-*`),
 hôtes génériques sans logo (`i-host-*`), mémoire (`i-mem-*`), vivacité de
-session (`i-session-*`), profil de risque (`i-risk-*`) et huit compositions
+session (`i-session-*`, dont « à reprendre », P91), profil de risque (`i-risk-*`) et huit compositions
 d'état vide (`i-empty-*`, grille 96 × 64).
 """
 
@@ -133,7 +133,7 @@ FAMILIES = {
     "i-store-": 8,
     "i-host-": 5,
     "i-mem-": 6,
-    "i-session-": 4,
+    "i-session-": 5,
     "i-risk-": 4,
     "i-empty-": 8,
 }
