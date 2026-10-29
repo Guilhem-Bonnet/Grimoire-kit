@@ -68,6 +68,16 @@ def task_add(
             help="Propose, sans rien écrire, le type, le risque et les tâches d'une demande (JSON) : `task add --intake \"<texte>\"` (R07).",
         ),
     ] = "",
+    create: Annotated[
+        bool,
+        typer.Option(
+            "--create",
+            help="Avec --intake : crée les tâches proposées non critiques (prêtes si une --check les vérifie) au lieu de les seulement lister.",
+        ),
+    ] = False,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Avec --intake --create : rend les ids créés en JSON (comme `-o json`)."),
+    ] = False,
     project_root: Annotated[Path, typer.Option("--project-root", help="Racine du projet (pour les gates de preuve).")] = Path(),
     ledger_root: Annotated[Path, typer.Option("--ledger-root", help="Racine du Mission Ledger.")] = Path("_grimoire-runtime-output/ledger"),
     actor: Annotated[str, typer.Option("--actor", help="Qui agit.")] = "cli",
@@ -89,6 +99,12 @@ def task_add(
     from grimoire.missions.service import TaskRefusedError
 
     if intake:
+        if create:
+            _create_intake(
+                ctx, intake, title=title, acceptance=acceptance, check=check, as_json=json_out,
+                service=_service(project_root, ledger_root), actor=actor, console=console,
+            )
+            return
         _emit_intake(intake, title=title, acceptance=acceptance, console=console)
         return
     if not title.strip():
@@ -144,6 +160,43 @@ def _emit_intake(text: str, *, title: str, acceptance: list[str] | None, console
         console.print("[red]✗[/red] --intake attend le texte de la demande")
         raise typer.Exit(2)
     typer.echo(json.dumps(intake_proposal(text), indent=2, ensure_ascii=False))
+
+
+def _create_intake(
+    ctx: typer.Context, text: str, *, title: str, acceptance: list[str] | None, check: list[str] | None, as_json: bool,
+    service: Any, actor: str, console: Any,
+) -> None:
+    """`--intake --create` : crée les propositions non critiques ; les critiques sont listées, jamais créées."""
+    from grimoire.missions.intake_tasks import create_from_proposals, proposals_for
+
+    if title or acceptance:
+        console.print("[red]✗[/red] --intake --create ne se combine ni avec un titre ni avec --acceptance")
+        raise typer.Exit(2)
+    if not text.strip():
+        console.print("[red]✗[/red] --intake attend le texte de la demande")
+        raise typer.Exit(2)
+    proposals = proposals_for(text)
+    command = next((c.strip() for c in (check or ()) if c.strip()), "")
+    chosen = [p for p in proposals if p["checked"]]
+    skipped = [p["title"] for p in proposals if not p["checked"]]
+    try:
+        created = create_from_proposals(
+            service, [{**p, "check": command} for p in chosen], actor=actor, origin="cli",
+        )
+    except ValueError as exc:
+        console.print(f"[red]✗[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    from grimoire.cli.cmd_task import _fmt
+
+    if as_json or _fmt(ctx) == "json":
+        typer.echo(json.dumps({"created": created, "skipped_critical": skipped}, indent=2, ensure_ascii=False))
+        return
+    for entry in created:
+        console.print(f"[green]✓[/green] {entry['id']} ({entry['status']}) {escape(entry['title'])}")
+        if entry["reason"]:
+            console.print(f"    [yellow]{escape(entry['reason'])}[/yellow]")
+    for name in skipped:
+        console.print(f"[yellow]·[/yellow] non créée (risque critique, à décider à la main) : {escape(name)}")
 
 
 def _print_verifiability(task: Any) -> None:
