@@ -5,6 +5,7 @@ le test vérifie ce que l'agent a *vu*) et réagit au texte du prompt :
 
 - « permission » : demande ``session/request_permission`` et raconte le choix reçu ;
 - « lent »       : diffuse un morceau puis attend ``session/cancel`` avant de rendre ``cancelled`` ;
+- « geste »      : propose d'activer le pilote (marqueur ``[[pilote:on]]``), sans rien faire d'autre ;
 - « outils »     : un appel d'outil avec diff, puis un plan ;
 - sinon          : répond en markdown, en deux morceaux.
 
@@ -83,6 +84,8 @@ def main() -> int:
                     if nxt.get("method") == "session/cancel":
                         reason = "cancelled"
                         break
+            elif "geste" in text:
+                chunk(sid, "Je propose d'activer le pilote. [[pilote:on]]")
             elif "outils" in text:
                 update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Lire README.md", "kind": "read", "status": "in_progress"})
                 update(sid, {

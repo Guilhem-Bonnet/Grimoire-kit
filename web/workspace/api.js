@@ -215,7 +215,10 @@ export const api = {
   // l'URL vit ici, avec la même cible que toute lecture. Un message est un tour humain : le
   // cockpit le relaie à l'agent et n'écrit rien lui-même (ADR-007).
   chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
-  chatSend: (text) => post(WS + 'chat/send', { text }),
+  chatSend: (text, answerTo) => post(WS + 'chat/send', answerTo ? { text, answer_to: answerTo } : { text }),
+  // ACP4 : le geste du pilote automatique. Un bouton que la personne clique, avec la clé de contrôle
+  // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé.
+  autopilotSet: (on, controlKey) => post(WS + 'autonomy/autopilot', { on, control_key: controlKey }),
   chatPermission: (requestId, decision) => post(WS + 'chat/permission', { request_id: requestId, decision }),
   chatCancel: () => post(WS + 'chat/cancel', {}),
   // ACP3 : l'hôte du chat, par projet. Les hôtes absents reviennent grisés, avec leur raison.
