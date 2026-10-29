@@ -91,6 +91,10 @@ export function createLive({ onDecisions, onState } = {}) {
     requests: 0,
   };
   let handlers = [];
+  // I1 : l'interrupteur « Me prévenir dans le navigateur » est la seule exception au gel de
+  // l'onglet masqué. Sans lui (le défaut), `frozen()` vaut `hidden()` et rien ne change.
+  let keepHidden = false;
+  const frozen = () => hidden() && !keepHidden;
   let timer = null;
   let inflight = null;
   let source = null;
@@ -139,7 +143,15 @@ export function createLive({ onDecisions, onState } = {}) {
     reloadTimer = null;
     // Onglet masqué : le pouls attend, il sera rechargé au retour (son empreinte est déjà connue,
     // aucun pouls ne la redira).
-    if (!running || hidden()) return;
+    if (!running) return;
+    if (hidden()) {
+      // Onglet masqué mais prévenu (I1) : seul le compteur de décisions se met à jour ;
+      // les espaces attendent le retour, `pendingPulse` est gardé.
+      if (keepHidden && pendingPulse && onDecisions && pendingPulse.decisions) {
+        try { onDecisions(pendingPulse.decisions); } catch (error) { console.error('compteur de décisions :', error); }
+      }
+      return;
+    }
     const pulse = pendingPulse;
     pendingPulse = null;
     if (!pulse) return;
@@ -174,13 +186,13 @@ export function createLive({ onDecisions, onState } = {}) {
 
   function schedule() {
     clearTimer();
-    if (!running || hidden() || state.transport !== 'poll') return;
+    if (!running || frozen() || state.transport !== 'poll') return;
     timer = setTimeout(() => { poll(); }, state.intervalMs);
   }
 
   async function poll() {
     clearTimer();
-    if (!running || hidden() || inflight) return;
+    if (!running || frozen() || inflight) return;
     const controller = new AbortController();
     inflight = controller;
     state.requests += 1;
@@ -202,7 +214,7 @@ export function createLive({ onDecisions, onState } = {}) {
   }
 
   function openStream() {
-    if (source || !running || hidden()) return;
+    if (source || !running || frozen()) return;
     const stream = new EventSource(api.pulseStreamUrl(state.fingerprint, scope()));
     let heard = false;
     source = stream;
@@ -237,13 +249,19 @@ export function createLive({ onDecisions, onState } = {}) {
     else poll();
   }
 
+  function freeze() {
+    clearTimer();
+    if (inflight) inflight.abort();
+    closeStream();
+    notifyState('paused');
+  }
+
   function onVisibility() {
     if (!running) return;
-    if (hidden()) {
-      clearTimer();
-      if (inflight) inflight.abort();
-      closeStream();
-      notifyState('paused');
+    if (frozen()) {
+      freeze();
+    } else if (hidden()) {
+      resume();
     } else {
       resume();
       if (pendingPulse) requestReload(pendingPulse);
@@ -257,7 +275,7 @@ export function createLive({ onDecisions, onState } = {}) {
       if (running) return;
       running = true;
       document.addEventListener('visibilitychange', onVisibility);
-      if (hidden()) { notifyState('paused'); return; }
+      if (frozen()) { notifyState('paused'); return; }
       await new Promise((resolve) => {
         settle = () => { settle = () => {}; resolve(); };
         // Un flux muet (intermédiaire qui retient la réponse) ne bloque pas la coque.
@@ -272,6 +290,12 @@ export function createLive({ onDecisions, onState } = {}) {
       if (inflight) inflight.abort();
       closeStream();
       document.removeEventListener('visibilitychange', onVisibility);
+    },
+    /** I1 : garde le flux ouvert onglet masqué (l'interrupteur de notification) ; faux rend le gel. */
+    keepWhileHidden(keep) {
+      keepHidden = Boolean(keep);
+      if (!running || !hidden()) return;
+      if (keepHidden) resume(); else freeze();
     },
     /** Inscrit ce que l'espace courant fait quand le pouls annonce un changement. */
     on(handler) { handlers.push(handler); },

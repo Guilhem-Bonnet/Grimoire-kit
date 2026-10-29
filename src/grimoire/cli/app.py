@@ -606,7 +606,7 @@ def doctor(
 
     with _timed_phase("host_brake"):  # P86 : le frein de la version d'hôte courante est-il prouvé ?
         from grimoire.cli.doctor_brake import apply_host_brake_check
-        apply_host_brake_check(results, fmt=fmt, console=console)
+        apply_host_brake_check(results, fmt=fmt, console=console, project_root=target)
 
     # 4quinquies. Override drift (issue #427) — un override est une copie ou
     # une extension du kit, jamais une garantie qu'il en reçoit encore les

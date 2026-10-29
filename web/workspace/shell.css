@@ -3151,6 +3151,30 @@ body[data-active-space] .panel-head {
   }
 }
 
+/* I1 : l'interrupteur de notification garde son nom accessible quand la barre se resserre :
+   * le libellé est retiré de l'écran, pas de l'arbre d'accessibilité. */
+@container statusbar (max-width: 1099px) {
+  #st-notify .st-notify-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+#st-notify[aria-pressed="true"] {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--onfill);
+}
+
+#st-notify[data-state="denied"],
+#st-notify[data-state="unsupported"] {
+  color: var(--ink3);
+}
+
 @container statusbar (max-width: 1279px) {
   #statusbar .st-extra,
   #statusbar .st-pre,

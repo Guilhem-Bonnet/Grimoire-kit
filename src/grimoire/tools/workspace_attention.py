@@ -337,6 +337,7 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
             decision.question.text,
             since=decision.since,
             task_id=decision.task_id,
+            question_id=decision.question.id,
         )
         read.items[-1].update(_question_v2(service.ledger, decision.task_id, decision.question))
     for task, card in zip(tasks, cards, strict=True):
