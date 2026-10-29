@@ -158,7 +158,7 @@ export function createLive({ onDecisions, onState } = {}) {
     reloading = true;
     lastReloadAt = Date.now();
     try {
-      // Les lectures lancées ici (de façon synchrone) portent `live=1` : le serveur peut les resservir (P79).
+      // Les lectures lancées ici (de façon synchrone) portent `pulse_reload=1` : le serveur peut les resservir (P79).
       const pending = duringLiveReload(() => {
         if (onDecisions && pulse.decisions) {
           try { onDecisions(pulse.decisions); } catch (error) { console.error('compteur de décisions :', error); }
