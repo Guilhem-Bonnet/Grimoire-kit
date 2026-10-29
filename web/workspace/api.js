@@ -470,6 +470,10 @@ export const api = {
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>
     post(WS + 'tasks/add', { title, acceptance, description }),
+  // « Demander une correction » (P42) : ouvre la tâche et son critère généré ;
+  // la mémoire n'est touchée qu'à l'acceptation de la proposition de l'agent.
+  memoryCorrect: ({ entryId, outcome, description }) =>
+    post(WS + 'memory/correct', { entry_ids: [entryId], outcome, description }),
   // « Une idée ? » (I2) : propositions de l'intake déterministe (aucune écriture), puis création des cochées.
   taskIntake: (text) => post(WS + 'tasks/intake', { text }),
   taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),

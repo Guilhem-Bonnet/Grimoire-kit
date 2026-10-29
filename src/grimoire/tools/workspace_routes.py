@@ -72,6 +72,7 @@ from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
+from grimoire.memory.correction import request_correction_from_body as _memory_correct
 from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
@@ -1029,6 +1030,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}memory/correct": _memory_correct,
     f"{PREFIX}tasks/intake": _task_intake,
     f"{PREFIX}tasks/intake/create": _task_intake_create,
     f"{PREFIX}options": _options_write,
