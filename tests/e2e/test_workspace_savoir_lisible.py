@@ -187,7 +187,12 @@ def test_code_monospace(browser: Browser, served: dict[str, Any]) -> None:
         assert "mono" in pre.evaluate("el => getComputedStyle(el).fontFamily").lower() or pre.evaluate(
             "el => { const f = getComputedStyle(el).fontFamily.toLowerCase(); return f.includes('mono') || f.includes('monospace'); }")
         assert pre.evaluate("el => el.textContent") == _SOURCE, "retours à la ligne et indentation conservés"
-        assert pre.evaluate("el => getComputedStyle(el).whiteSpace") == "pre"
+        # Chromium récent décompose `white-space` (white-space-collapse + text-wrap-mode) : le raccourci peut se lire vide
+        # alors que le rendu est bien « pre » (CI du 2026-10-29). On vérifie les longhands quand ils existent.
+        ws = pre.evaluate(
+            "el => { const s = getComputedStyle(el); return [s.whiteSpace, s.whiteSpaceCollapse || '', s.textWrapMode || ''] }"
+        )
+        assert ws[0] == "pre" or (ws[1] == "preserve" and ws[2] == "nowrap"), ws
         assert pre.get_attribute("tabindex") == "0"
         assert pre.get_attribute("role") == "region"
         assert (pre.get_attribute("aria-label") or "").strip()
