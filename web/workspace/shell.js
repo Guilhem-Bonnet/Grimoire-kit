@@ -2571,6 +2571,11 @@ async function buildPalette() {
     command: 'grimoire cockpit serve # a-traiter?view=demarrer', run: () => goto('a-traiter', { view: 'demarrer' }),
   });
 
+  spaces.push({
+    section: 'Espaces', label: 'Travail › Une idée ?', hint: 'Raccourci n',
+    command: 'grimoire task add --intake "<idée>" --create', run: () => goto('travail', { idee: '1' }),
+  });
+
   const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
     await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks(), api.files()]);
 
@@ -2890,6 +2895,7 @@ async function runCommand(argv) {
 const SHORTCUTS = [
   ['⌘K', 'Ouvrir la palette, depuis tous les espaces'],
   ['⌘1 à ⌘5', "Aller à l'espace 1 à 5"],
+  ['N', 'Une idée ? : proposer des tâches depuis une phrase (espace Travail)'],
   ['J / K', 'Ligne suivante / précédente, dans toutes les listes'],
   ['Entrée', "Lancer l'action principale de la ligne tenue"],
   ['1 à 5', 'Ouvrir ou fermer un panneau'],
@@ -2976,6 +2982,7 @@ function bindShortcuts() {
       else triggerRailAction(item.id, event);
       return;
     }
+    if (event.key === 'n' && !meta && !event.altKey && !event.shiftKey) { event.preventDefault(); goto('travail', { idee: '1' }); return; }
     if (event.key === '`') { event.preventDefault(); focusConsole(); }
   });
 }

@@ -103,6 +103,7 @@ import { DONE_RECENT_LIMIT, splitRecent } from './board-split.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
 import { appendQuestionV2, isV2 } from './decision-card.js';
+import { ideaBlock, ideaButton, requestIdeaFocus } from './task-intake.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
 const COLUMN_LABEL = {
@@ -3655,6 +3656,7 @@ export async function mount(root, ctx) {
   // La portée de la coque (P31) : « Tous les projets » = le portefeuille.
   scope.mode = ctx.host.kind === 'cockpit' && ctx.scope && ctx.scope.all ? 'portfolio' : 'project';
   let board = await ctx.api.tasks();
+  if (ctx.params.idee) requestIdeaFocus();
 
   // Libellés français des artboards Travail (Tableau / Liste) et Sessions (P33) ; les
   // autres vues réelles gardent un nom clair. « Sessions » porte son compte quand il est lu.
@@ -3707,7 +3709,7 @@ export async function mount(root, ctx) {
     formula.className = 'ex-formula';
     formula.append(text('b', null, '›'), 'grimoire task list');
     // « Nouvelle tâche » (P35) : désactivé, raison écrite, hors du projet servi.
-    head.append(ask, row(formula, ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
+    head.append(ask, row(formula, ...ideaButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() }), ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
     head.lastElementChild.classList.add('ex-head-end');
     return head;
   }
@@ -3741,7 +3743,13 @@ export async function mount(root, ctx) {
       () => {},
     );
     appendIf(wrap, scopeToolbar(ctx, null, redraw));
-    wrap.append(row(...newTaskButton(ctx, { portfolio: false, onToggle: () => draw() })));
+    wrap.append(row(...ideaButton(ctx, { portfolio: false, onToggle: () => draw() }), ...newTaskButton(ctx, { portfolio: false, onToggle: () => draw() })));
+    appendIf(wrap, ideaBlock(ctx, {
+      portfolio: false,
+      onCreated: () => draw(),
+      onOpen: (id) => { selected = { id, project: '' }; draw(); },
+      onChange: () => draw(),
+    }));
     appendIf(wrap, newTask(false));
     wrap.append(ctx.empty(
       'Exécuter',
@@ -3850,6 +3858,12 @@ export async function mount(root, ctx) {
       return;
     }
     appendIf(wrap, scopeToolbar(ctx, portfolio, redraw));
+    appendIf(wrap, ideaBlock(ctx, {
+      portfolio: portfolioMode,
+      onCreated: () => draw(),
+      onOpen: (id) => { selected = { id, project: '' }; if (view === 'sessions' || view === 'decisions') view = 'board4'; draw(); },
+      onChange: () => draw(),
+    }));
     appendIf(wrap, newTask(portfolioMode));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);
