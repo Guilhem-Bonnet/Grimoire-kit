@@ -8,6 +8,11 @@
 // (`?task=`, et `of=` en portée « Tous les projets »), le reste sur la fiche
 // du projet (`#flotte?focus=…`). Rien ne se décide ici.
 //
+// File de triage : une ligne par tâche (`a-traiter-group.js`) — les motifs
+// d'une même tâche sont des puces-mots, l'action est celle du plus grave —, des
+// comptes en tâches distinctes, et des tuiles-filtres (boutons `aria-pressed` ;
+// Échap ou un second clic retire le filtre).
+//
 // États dits, jamais tus : vide (« Rien n'attend de décision » et l'heure de
 // la vérification), erreur partielle (« N projets n'ont pas répondu », avec
 // Réessayer, qui relance la sonde), lecture seule (actions désactivées, la
@@ -22,6 +27,7 @@
 import { copyText, glyph, kpiRow, listNav, rowActions, spaceHead } from '../shell.js';
 import { agoText } from '../live.js';
 import { mountSince } from './a-traiter-since.js';
+import { groupSections, kindsOf } from './a-traiter-group.js';
 
 const STYLE_ID = 'at-styles';
 
@@ -53,10 +59,22 @@ const CSS = `
 .at-rico[data-tone="warn"] { background: var(--warn-soft); color: var(--warn); }
 .at-rico[data-tone="bad"] { background: var(--bad-soft); color: var(--bad); }
 .at-rico[data-tone="ok"] { background: var(--ok-soft); color: var(--ok); }
-.at-title, .at-reason, .at-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.at-title, .at-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.at-reason { flex: 1 1 0; min-width: 0; text-align: left; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.at-section[data-section="decide"] .at-reason { -webkit-line-clamp: 3; line-clamp: 3; }
+.at-head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.at-head .at-title { min-width: 0; }
+.at-chips { display: flex; flex: none; gap: var(--sp-1); }
+.at-chip { padding: 0 8px; border-radius: 999px; background: var(--hover); color: var(--ink2);
+  font-size: var(--t-min); line-height: 20px; white-space: nowrap; }
+.at-tile { font: inherit; text-align: left; color: inherit; cursor: pointer; }
+.at-tile:hover { background: var(--hover); }
+.at-tile[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); }
+.at-tile:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .at-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .at-title { font-weight: 600; }
-.at-sub { display: flex; gap: var(--sp-1); min-width: 0; color: var(--ink2); }
+.at-sub { display: flex; align-items: baseline; gap: var(--sp-1); min-width: 0; color: var(--ink2); }
 .at-sub .at-project { flex: none; max-width: 40%; }
 .at-sub .at-sep { flex: none; }
 .at-since { color: var(--ink3); text-align: right; white-space: nowrap; font-size: var(--t-min); }
@@ -77,6 +95,13 @@ const CSS = `
   .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
   .at-sub { flex-wrap: wrap; column-gap: var(--sp-1); }
   .at-sub .at-project { max-width: 100%; }
+  .at-sub .at-reason { flex-basis: 100%; }
+  .at-head { flex-wrap: wrap; row-gap: 2px; }
+  .kpi.at-tiles { display: flex; overflow-x: auto; gap: var(--sp-2); padding-bottom: 2px; scrollbar-width: none; }
+  .at-tiles .kpi-item { flex: none; flex-direction: row; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 6px 14px;
+    border-radius: 999px; }
+  .at-tiles .kpi-val { font-size: 17px; line-height: 24px; }
+  .at-tiles .kpi-sub { display: none; }
   .at-since { grid-column: 2; text-align: left; }
   .at-act { grid-column: 3; grid-row: 1 / span 2; }
   .at-row .row-actions { grid-column: 2; grid-row: 3; justify-self: start; }
@@ -92,7 +117,7 @@ const KINDS = {
   pr_review: { word: 'PR à revoir', icon: 'pr', tone: '', action: 'Revoir' },
   review_blocked: { word: 'revue bloquée', icon: 'scale', tone: 'warn', action: 'Voir ce qui manque' },
   task_blocked: { word: 'tâche bloquée', icon: 'stop', tone: 'bad', action: 'Débloquer' },
-  directive_unacked: { word: 'consigne non accusée', icon: 'bell', tone: 'warn', action: 'Voir les consignes' },
+  directive_unacked: { word: 'consigne à lire', icon: 'bell', tone: 'warn', action: 'Voir les consignes' },
   claim_orphaned: { word: 'claim sans session', icon: 'terminal', tone: '', action: 'Reprendre' },
   service: { word: 'service', icon: 'server', tone: 'bad', action: 'Voir le service' },
   unreadable: { word: 'projet illisible', icon: 'alert', tone: 'bad', action: 'Voir le projet' },
@@ -355,7 +380,7 @@ function tilesOf(sections) {
     const times = (section.items || []).map((i) => Date.parse(i.since || '')).filter(Number.isFinite);
     const oldest = times.length ? agoText(Date.now() - Math.min(...times)).replace(/^il y a /, '') : '';
     tiles.push({
-      value: section.count, label: section.label, icon: tile.icon, tone: tile.tone,
+      id: section.id, value: section.count, label: section.label, icon: tile.icon, tone: tile.tone,
       sub: oldest ? `la plus ancienne : ${oldest}` : '',
     });
   }
@@ -422,9 +447,9 @@ export async function mount(root, ctx) {
   const load = (probe) => ctx.api.attention(ctx.scope.all, probe ? { probe: true } : undefined);
 
   const select = (id, { focus = false, remember = true } = {}) => {
-    const row = rows.find((r) => r.item.id === id) || rows[0];
+    const row = rows.find((r) => r.group.id === id && !r.el.closest('[hidden]')) || rows.find((r) => !r.el.closest('[hidden]'));
     if (!row) return;
-    selected = row.item.id;
+    selected = row.group.id;
     for (const r of rows) {
       const on = r === row;
       r.el.setAttribute('aria-current', String(on));
@@ -438,11 +463,57 @@ export async function mount(root, ctx) {
       row.el.focus();
       row.el.scrollIntoView({ block: 'nearest' });
     }
-    if (remember) ctx.setItem?.({ item: row.item.id });
+    if (remember) ctx.setItem?.({ item: row.group.id });
+  };
+
+  // Le filtre des tuiles : une section d'API, ou rien. Il ne fait que cacher les
+  // autres sections, sans rebâtir la page : le focus reste où il est.
+  let filter = '';
+  const applyFilter = () => {
+    for (const block of wrap.querySelectorAll('.at-section')) block.hidden = Boolean(filter) && block.dataset.section !== filter;
+    for (const tile of wrap.querySelectorAll('.at-tile')) tile.setAttribute('aria-pressed', String(tile.dataset.section === filter));
+  };
+  const setFilter = (id) => {
+    filter = filter === id ? '' : id;
+    applyFilter();
+    const current = rows.find((r) => r.group.id === selected);
+    if (!current || current.el.closest('[hidden]')) select(selected, { remember: false });
+  };
+  // Échap retire le filtre, sans voler la touche à une saisie ou à une palette.
+  const onEscape = (event) => {
+    if (event.key !== 'Escape' || !filter || event.defaultPrevented) return;
+    const target = event.target;
+    if (target && target.closest && target.closest('input, textarea, select, [role="dialog"]')) return;
+    event.preventDefault();
+    setFilter(filter);
+  };
+  document.addEventListener('keydown', onEscape);
+  ctx.signal.addEventListener('abort', () => document.removeEventListener('keydown', onEscape));
+
+  /** `kpiRow`, mais chaque tuile est un bouton-filtre (état annoncé par `aria-pressed`). */
+  const tilesRow = (tiles) => {
+    const row = kpiRow(tiles);
+    row.classList.add('at-tiles');
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', 'Filtrer par section');
+    [...row.children].forEach((cell, i) => {
+      const button = node('button', `${cell.className} at-tile`);
+      button.type = 'button';
+      Object.assign(button.dataset, cell.dataset, { section: tiles[i].id });
+      button.setAttribute('aria-pressed', 'false');
+      button.append(...cell.childNodes);
+      button.addEventListener('click', () => setFilter(tiles[i].id));
+      cell.replaceWith(button);
+    });
+    return row;
   };
 
   const render = (data) => {
     const hadFocus = wrap.contains(document.activeElement) && document.activeElement.classList.contains('at-row');
+    const tileFocus = wrap.contains(document.activeElement) && document.activeElement.classList.contains('at-tile')
+      ? document.activeElement.dataset.section : '';
+    const sections = groupSections(data.sections);
+    if (filter && !sections.some((s) => s.id === filter && s.count)) filter = '';
     const summary = data.summary || {};
     const count = summary.projects ?? 0;
     const formula = node('span', 'at-formula');
@@ -469,10 +540,10 @@ export async function mount(root, ctx) {
     }
     if (items && ctx.host.readOnly) wrap.append(Object.assign(node('p', 'at-ro', readOnlyReason(ctx)), { id: 'at-ro-reason' }));
 
-    const tiles = tilesOf(data.sections || []);
-    if (tiles.length) wrap.append(kpiRow(tiles));
+    const tiles = tilesOf(sections);
+    if (tiles.length) wrap.append(tilesRow(tiles));
 
-    for (const section of data.sections || []) {
+    for (const section of sections) {
       if (!section.count) continue;
       const block = node('section', 'at-section');
       block.dataset.section = section.id;
@@ -483,10 +554,11 @@ export async function mount(root, ctx) {
       if (HINTS[section.id]) heading.append(node('span', 'at-hint', HINTS[section.id]));
       const list = node('ul', 'at-list');
       list.setAttribute('aria-labelledby', title.id);
-      for (const item of section.items || []) {
+      for (const group of section.groups) {
+        const item = group.lead;
         const kind = kindOf(item);
         const li = node('li', 'at-row');
-        li.dataset.item = item.id;
+        li.dataset.item = group.id;
         li.dataset.kind = item.kind;
         li.tabIndex = -1;
         const pastille = node('span', 'at-rico');
@@ -503,11 +575,15 @@ export async function mount(root, ctx) {
         if (item.reason) sub.append(node('span', 'at-sep', '·'), reason);
         const title = node('span', 'at-title', item.title || kind.word);
         title.title = item.title || '';
-        text.append(title, sub);
+        const chips = node('span', 'at-chips');
+        for (const motif of kindsOf(group)) chips.append(node('span', 'at-chip', (KINDS[motif] || FALLBACK).word));
+        const head = node('span', 'at-head');
+        head.append(title, chips);
+        text.append(head, sub);
         li.append(pastille, text, sinceNode(item), rowActionsOf(ctx, item), actionNode(ctx, item));
-        li.addEventListener('click', () => select(item.id, { focus: true }));
+        li.addEventListener('click', () => select(group.id, { focus: true }));
         list.append(li);
-        rows.push({ item, el: li });
+        rows.push({ item, group, el: li });
       }
       block.append(heading, list);
       wrap.append(block);
@@ -521,6 +597,8 @@ export async function mount(root, ctx) {
       );
       wrap.append(fold);
     }
+    applyFilter();
+    if (tileFocus) wrap.querySelector(`.at-tile[data-section="${tileFocus}"]`)?.focus();
     if (rows.length) select(selected, { focus: hadFocus, remember: Boolean(ctx.params.item) || hadFocus });
     else ctx.inspector.replaceChildren();
   };

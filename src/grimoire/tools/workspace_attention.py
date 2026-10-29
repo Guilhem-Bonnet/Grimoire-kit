@@ -264,6 +264,18 @@ def _item(
     })
 
 
+def _question_v2(ledger: Any, task_id: str, question: Any) -> dict[str, Any]:
+    """La question v2 complète et ses rounds (P92) ; titre et contexte d'une question v1 sont tirés de son texte."""
+    from grimoire.missions.question_rounds import rounds_of
+    from grimoire.missions.waiting import split_legacy
+
+    data = question.to_dict()
+    if not data.get("title"):
+        data["title"], legacy_context = split_legacy(question.text, question.kind)
+        data.setdefault("context", legacy_context)
+    return {"question": data, "rounds": rounds_of(ledger, task_id, question)}
+
+
 def _guarded(read: _ProjectRead, source: str, collect: Callable[[], None]) -> None:
     """Une source qu'on ne lit pas devient un élément « sonde en échec », jamais un silence."""
     try:
@@ -317,8 +329,16 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
     last = _last_events(service.ledger)
 
     for decision in pending_decisions(service.ledger):
-        _item(read, QUESTION, decision.task_id, decision.title, decision.question.text,
-              since=decision.since, task_id=decision.task_id)
+        _item(
+            read,
+            QUESTION,
+            decision.task_id,
+            decision.title,
+            decision.question.text,
+            since=decision.since,
+            task_id=decision.task_id,
+        )
+        read.items[-1].update(_question_v2(service.ledger, decision.task_id, decision.question))
     for task, card in zip(tasks, cards, strict=True):
         since = last.get(task.id) or str(task.created_at)
         session = card.get("session")
@@ -348,7 +368,8 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
         unread = unread_directives(card)
         if unread:
             _item(read, DIRECTIVE_UNACKED, task.id, task.title,
-                  f"{unread} consigne(s) non accusée(s)", since=since, task_id=task.id, unread=unread)
+                  f"{unread} consigne{'s' if unread > 1 else ''} en attente de lecture par la session",
+                  since=since, task_id=task.id, unread=unread)
 
 
 def _collect_checkpoints(read: _ProjectRead) -> None:
