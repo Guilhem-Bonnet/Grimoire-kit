@@ -252,7 +252,7 @@ class MissionIntakeService:
             hints.append(PolicyHint(
                 rule_id="no_destructive_without_strict",
                 expected_verdict="block",
-                reason=f"Risk profile is {risk.value}",
+                reason=f"Profil de risque : {risk.value}",
             ))
         return hints
 
@@ -262,16 +262,16 @@ class MissionIntakeService:
                 title=self._extract_title(text),
                 task_type=primary_type,
                 risk_profile=risk,
-                rationale="Primary task detected from intent",
+                rationale="Tâche principale détectée dans la demande",
             )
         ]
         # Auto-suggest a TEST task if implementation detected and no test keywords present
         if primary_type == TaskType.IMPLEMENTATION and not re.search(r"\btest\b", text, re.IGNORECASE):
             proposals.append(TaskProposal(
-                title=f"Write tests for: {self._extract_title(text)}",
+                title=f"Écrire les tests : {self._extract_title(text)}",
                 task_type=TaskType.TEST,
                 risk_profile=RiskProfile.LIGHT,
-                rationale="Auto-suggested: implementation tasks require test evidence",
+                rationale="Suggérée automatiquement : une tâche d'implémentation demande une preuve par les tests",
             ))
         return proposals
 
