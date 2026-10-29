@@ -17,7 +17,7 @@ import { newTaskBlockedReason } from './task-create.js';
 
 const STYLE_ID = 'ti-styles';
 
-const state = { text: '', proposals: null, busy: false, result: null, focus: false };
+const state = { open: false, text: '', proposals: null, busy: false, result: null, focus: false };
 
 const RISK_LABEL = { light: 'Léger', standard: 'Standard', strict: 'Strict', critical: 'Critique', release: 'Release' };
 const RISK_ICON = { light: 'i-risk-light', standard: 'i-risk-standard', strict: 'i-risk-strict', critical: 'i-risk-critical', release: 'i-risk-critical' };
@@ -72,7 +72,21 @@ function el(tag, className, text, attrs) {
 }
 
 /** Ouvre le champ depuis le raccourci `n` ou la palette : le focus ira à la saisie au prochain dessin. */
-export function requestIdeaFocus() { state.focus = true; }
+export function requestIdeaFocus() { state.open = true; state.focus = true; }
+
+/** Le bouton « Une idée ? » de la tête du tableau : il ouvre le champ, replié par défaut pour ne pas rogner le tableau. */
+export function ideaButton(ctx, { portfolio, onToggle }) {
+  injectStyles();
+  if (newTaskBlockedReason(ctx, portfolio)) return [];
+  const button = el('button', 'btn', null, { type: 'button', 'data-role': 'idea-open', 'aria-expanded': String(state.open) });
+  button.append(icon('bolt'), el('span', null, 'Une idée ?'));
+  button.addEventListener('click', () => {
+    state.open = !state.open;
+    if (state.open) state.focus = true;
+    onToggle();
+  });
+  return [button];
+}
 
 function selected() { return state.proposals.filter((p) => p.checked); }
 
@@ -141,7 +155,9 @@ function card(ctx, onCreated, onChange) {
   label.append(input);
   const go = el('button', 'btn pri', 'Proposer des tâches', { type: 'submit', 'data-role': 'idea-submit' });
   go.disabled = state.busy;
-  ask.append(label, go);
+  const close = el('button', 'btn', 'Fermer', { type: 'button', 'data-role': 'idea-close' });
+  close.addEventListener('click', () => { Object.assign(state, { open: false, proposals: null }); onChange(); });
+  ask.append(label, go, close);
   const status = actionStatus();
   input.addEventListener('input', () => { state.text = input.value; });
   ask.addEventListener('submit', async (event) => {
@@ -198,6 +214,7 @@ function card(ctx, onCreated, onChange) {
         if (ctx.signal.aborted) return;
         state.result = out.created;
         state.proposals = null;
+        state.open = false;
         state.text = '';
         onCreated(out.created);
       } catch (error) {
@@ -230,7 +247,7 @@ export function ideaBlock(ctx, { portfolio, onCreated, onOpen, onChange }) {
   wrap.style.display = 'flex';
   wrap.style.flexDirection = 'column';
   wrap.style.gap = 'var(--sp-3)';
-  wrap.append(card(ctx, onCreated, onChange));
+  if (state.open || state.proposals) wrap.append(card(ctx, onCreated, onChange));
   if (state.result) wrap.append(resultView(onOpen, onChange));
-  return wrap;
+  return wrap.childElementCount ? wrap : null;
 }

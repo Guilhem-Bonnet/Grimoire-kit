@@ -126,6 +126,7 @@ def test_une_idee_devient_exactement_les_taches_cochees(page_idea: tuple[Page, d
     page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
     page.wait_for_selector("#canvas[aria-busy='false']", timeout=APPEAR_MS)
 
+    page.locator("[data-role='idea-open']").click()
     idea = page.locator("[data-role='idea-text']")
     idea.wait_for(timeout=APPEAR_MS)
     idea.fill(IDEE)
@@ -164,6 +165,7 @@ def test_mobile_390_cibles_de_44_px(browser: Browser, served_idea: dict[str, Any
     try:
         page.goto(f"{served_idea['base']}/workspace/index.html?project=forge-idea#travail", wait_until="domcontentloaded")
         page.wait_for_selector("body[data-ready='1']", timeout=APPEAR_MS)
+        page.keyboard.press('n')
         page.locator("[data-role='idea-text']").fill("drop table users")
         page.locator("[data-role='idea-submit']").click()
         page.locator("[data-role='idea-proposal']").first.wait_for(timeout=APPEAR_MS)

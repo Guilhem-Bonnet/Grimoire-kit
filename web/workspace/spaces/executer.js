@@ -102,7 +102,7 @@ import { activityBlockAsync } from '../activity.js';
 import { DONE_RECENT_LIMIT, splitRecent } from './board-split.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
-import { ideaBlock, requestIdeaFocus } from './task-intake.js';
+import { ideaBlock, ideaButton, requestIdeaFocus } from './task-intake.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
 const COLUMN_LABEL = {
@@ -3694,7 +3694,7 @@ export async function mount(root, ctx) {
     formula.className = 'ex-formula';
     formula.append(text('b', null, '›'), 'grimoire task list');
     // « Nouvelle tâche » (P35) : désactivé, raison écrite, hors du projet servi.
-    head.append(ask, row(formula, ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
+    head.append(ask, row(formula, ...ideaButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() }), ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
     head.lastElementChild.classList.add('ex-head-end');
     return head;
   }
@@ -3728,7 +3728,7 @@ export async function mount(root, ctx) {
       () => {},
     );
     appendIf(wrap, scopeToolbar(ctx, null, redraw));
-    wrap.append(row(...newTaskButton(ctx, { portfolio: false, onToggle: () => draw() })));
+    wrap.append(row(...ideaButton(ctx, { portfolio: false, onToggle: () => draw() }), ...newTaskButton(ctx, { portfolio: false, onToggle: () => draw() })));
     appendIf(wrap, ideaBlock(ctx, {
       portfolio: false,
       onCreated: () => draw(),
