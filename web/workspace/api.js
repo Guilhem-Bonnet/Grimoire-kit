@@ -403,6 +403,11 @@ export const api = {
   // Premier lancement (P36) : la machine vue par le guide — détection, profils
   // mémoire possibles ou non et pourquoi, plan, commandes à copier. Lecture seule.
   setupGuide: () => get(WS + 'setup/guide'),
+  // Premier lancement (P45) : l'avancement enregistré du « Lancer » du guide, et ses
+  // verbes (`start` avec `profile`, `next`, `retry`/`skip` avec `step`, `rollback`,
+  // `reset`). Chaque étape passe par une action typée de P40 (plan puis apply).
+  setupLaunchState: () => get(WS + 'setup/launch'),
+  setupLaunch: (verb, body) => post(WS + 'setup/launch', { verb, ...(body || {}) }),
   // Reçu de rappel (P27) : ce que la mémoire a servi à une tâche (`tasks/<id>/receipts`),
   // ou les derniers reçus du projet (`memory/recall`, `task` pour filtrer). Lecture seule.
   taskReceipts: (id, project) =>

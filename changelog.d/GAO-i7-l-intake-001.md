@@ -1,0 +1,1 @@
+- fix(intake): l'intake propose ses titres et justifications en français (« Écrire les tests : … », « Tâche principale détectée dans la demande », etc.), sans changer le découpage ni les types, risques et vérifiabilités proposés (GAO-i7-l-intake-001)

@@ -13,9 +13,10 @@
 //       plan, commandes.
 //
 // Refus tenus ici :
-// - AUCUNE écriture : ni POST, ni PUT, ni exécution. Chaque étape se termine
-//   par des commandes à copier ; « Copier » confirme sur place. Le bouton qui
-//   installerait relève d'ADR-008 (P40) et n'existe pas ;
+// - AUCUNE écriture à l'ouverture : ni POST, ni PUT. Les commandes restent à
+//   copier. Seul « Lancer » (P45) écrit, sur un clic, et uniquement par les
+//   actions typées de P40 (`POST setup/launch` : plan puis apply, avec journal),
+//   jamais une commande libre ;
 // - une lecture ratée se dit « inconnu », avec sa raison, jamais un faux S0 ;
 // - un profil impossible reste visible, grisé, avec sa raison.
 
@@ -95,6 +96,18 @@ const STYLES = `
 .dm-cmd .btn[data-copied="ok"] { color: var(--ok); }
 .dm-where { margin: 0; font-size: var(--t-min); color: var(--ink2); overflow-wrap: anywhere; }
 .dm-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dm-run { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dm-run-step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start;
+  padding: 10px 0; border-top: 1px solid var(--line); }
+.dm-run-label { font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.dm-run-detail, .dm-run-error, .dm-run-find { grid-column: 2 / 4; margin: 0; font-size: var(--t-min); color: var(--ink2); overflow-wrap: anywhere; }
+.dm-run-error { color: var(--ink); }
+.dm-run-error b { color: var(--bad); font-weight: 600; }
+.dm-run-find[data-state="bad"] { color: var(--ink); }
+.dm-run-buttons { grid-column: 2 / 4; display: flex; gap: 8px; flex-wrap: wrap; }
+.dm-run-step[data-status="running"] .dm-num { background: var(--acc); color: var(--card); }
+.dm-run-step[data-status="done"] .dm-num { background: var(--ok-soft, var(--acc-soft)); color: var(--ok); }
+.dm-run-step[data-status="failed"] .dm-num { color: var(--bad); }
 @container canvas (max-width: 1040px) {
   .dm-layout { grid-template-columns: minmax(0, 1fr); }
   .dm-aside { position: static; }
@@ -352,6 +365,94 @@ function commandsStep(state, profile, root, ctx) {
   return step;
 }
 
+const RUN_STATUS = {
+  pending: ['à venir', ''], running: ['en cours', 'acc'], done: ['fait', 'ok'], failed: ['échec', 'bad'],
+  skipped: ['sautée', ''], rolled_back: ['annulée', ''],
+};
+const SETTLED = ['done', 'skipped', 'rolled_back'];
+
+/**
+ * « Lancer » (P45) : le plan exécuté étape par étape par les actions typées de
+ * P40. `launch` est l'avancement enregistré côté serveur ; chaque bouton est un
+ * verbe de `POST setup/launch`, rien d'autre.
+ */
+function launchPanel(profile, launch, ctl) {
+  const card = el('section', 'dm-card dm-step', null, { 'aria-label': 'Lancer', 'data-role': 'setup-launch' });
+  card.append(stepHead(5, 'Lancer', 'le guide applique le plan, puis vérifie'));
+  const exists = launch && launch.exists;
+  if (exists) card.dataset.finished = String(Boolean(launch.finished));
+  const buttons = el('div', 'dm-actions');
+  if (!exists) {
+    card.append(el('p', 'dm-sentence', profile
+      ? `Profil ${profile.label} : la mémoire est composée par les actions typées du kit (plan, application, journal), puis vérifiée par un aller-retour réel. Chaque étape se rejoue, se saute si elle n’est pas bloquante, ou se défait.`
+      : 'Choisis d’abord un profil mémoire possible sur cette machine.'));
+    const go = el('button', 'btn pri', 'Lancer', { type: 'button', 'data-role': 'launch-start' });
+    go.disabled = ctl.busy || !profile;
+    go.addEventListener('click', () => ctl.start(profile.id));
+    buttons.append(go);
+  } else {
+    const list = el('ol', 'dm-run', null, { 'aria-label': 'Étapes du lancement' });
+    launch.steps.forEach((step, i) => {
+      const interrupted = launch.interrupted === step.id && !ctl.busy;
+      const [word, tone] = interrupted ? ['interrompue', 'warn'] : (RUN_STATUS[step.status] || [step.status, '']);
+      const row = el('li', 'dm-run-step');
+      row.dataset.step = step.id;
+      row.dataset.status = interrupted ? 'interrupted' : step.status;
+      row.append(el('span', 'dm-num', String(i + 1), { 'aria-hidden': 'true' }), el('span', 'dm-run-label', step.label), badge(word, tone));
+      if (step.detail && step.status !== 'failed') row.append(el('p', 'dm-run-detail', step.detail));
+      for (const f of step.findings || []) {
+        const line = el('p', 'dm-run-find', `${f.label} : ${f.detail}${f.remedy && f.state !== 'ok' ? ` — ${f.remedy}` : ''}`);
+        line.dataset.state = f.state;
+        row.append(line);
+      }
+      if (step.status === 'failed' && step.error) {
+        const err = el('p', 'dm-run-error', null, { role: 'alert', 'data-role': 'step-error' });
+        err.append(el('b', null, step.error.message), ' ', step.error.remedy || '');
+        row.append(err);
+        if (step.error.raw) row.append(el('p', 'dm-run-detail', `Motif : ${step.error.raw}`));
+        const own = el('div', 'dm-run-buttons');
+        const retry = el('button', 'btn', 'Réessayer', { type: 'button', 'data-role': 'step-retry' });
+        retry.disabled = ctl.busy;
+        retry.addEventListener('click', () => ctl.verb('retry', { step: step.id }));
+        own.append(retry);
+        if (step.skippable) {
+          const skip = el('button', 'btn', 'Sauter', { type: 'button', 'data-role': 'step-skip' });
+          skip.disabled = ctl.busy;
+          skip.addEventListener('click', () => ctl.verb('skip', { step: step.id }));
+          own.append(skip);
+        }
+        row.append(own);
+      }
+      list.append(row);
+    });
+    card.append(list);
+    if (launch.interrupted && !ctl.busy) {
+      card.append(el('p', 'dm-sentence', `Le lancement s’est arrêté à l’étape « ${(launch.steps.find((s) => s.id === launch.interrupted) || {}).label} » : il reprend là.`));
+    }
+    const blocked = launch.steps.some((s) => s.status === 'failed');
+    if (!launch.finished && !blocked) {
+      const resume = el('button', 'btn pri', launch.interrupted ? 'Reprendre' : 'Continuer', { type: 'button', 'data-role': 'launch-resume' });
+      resume.disabled = ctl.busy;
+      resume.addEventListener('click', () => ctl.runAll());
+      buttons.append(resume);
+    }
+    if (launch.canRollback) {
+      const back = el('button', 'btn', 'Revenir en arrière', { type: 'button', 'data-role': 'launch-rollback' });
+      back.disabled = ctl.busy;
+      back.addEventListener('click', () => ctl.verb('rollback'));
+      buttons.append(back);
+    }
+    const reset = el('button', 'btn', launch.finished ? 'Recommencer' : 'Abandonner', { type: 'button', 'data-role': 'launch-reset' });
+    reset.disabled = ctl.busy;
+    reset.addEventListener('click', () => ctl.verb('reset'));
+    buttons.append(reset);
+    if (launch.finished) card.append(el('p', 'dm-sentence', 'Lancement terminé : l’état du projet est relu ci-dessus.', { 'data-role': 'launch-done' }));
+  }
+  card.append(buttons);
+  if (ctl.message) card.append(actionStatus(ctl.message, 'bad'));
+  return card;
+}
+
 /**
  * Monte le guide. `prefetched.health` : la réponse de `/api/health` qu'À
  * traiter vient de lire pour décider de céder la place — pas relue deux fois.
@@ -371,17 +472,23 @@ export async function mount(root, ctx, prefetched = {}) {
   let guidePromise = settle(ctx.api.setupGuide());
   let selected = null;
   let health = prefetched.health ? Promise.resolve({ ok: true, data: prefetched.health }) : null;
+  // P45 : l'avancement du « Lancer » vit côté serveur ; la page le relit à chaque ouverture.
+  let launch = null;
+  let launchBusy = false;
+  let launchMessage = '';
 
   const paint = async () => {
     reread.disabled = true;
-    const [status, healthRead, setupRun, memory, guideRead] = await Promise.all([
+    const [status, healthRead, setupRun, memory, guideRead, launchRead] = await Promise.all([
       settle(ctx.api.status()),
       health || settle(ctx.api.health()),
       settle(ctx.api.setupRun()),
       settle(ctx.api.memoryStatus()),
       guidePromise,
+      launchBusy ? Promise.resolve({ ok: true, data: launch }) : settle(ctx.api.setupLaunchState()),
     ]);
     health = null;
+    if (launchRead.ok) launch = launchRead.data;
     if (ctx.signal.aborted) return;
     const reads = { status, health: healthRead, setupRun, memory };
     const state = classify(reads);
@@ -391,7 +498,7 @@ export async function mount(root, ctx, prefetched = {}) {
       : 'Premier lancement';
 
     const note = el('p', 'dm-note', null, { role: 'note', 'data-role': 'setup-readonly' });
-    note.append(icon('lock'), 'Ce guide n’écrit rien : il lit l’état du projet et de la machine, puis te donne les commandes à lancer toi-même. Aucun bouton n’installe.');
+    note.append(icon('lock'), 'Ce guide n’écrit rien tant que tu ne cliques pas sur Lancer : il lit l’état du projet et de la machine, te donne les commandes à copier, et « Lancer » n’applique que les actions typées du kit, journalisées et réversibles.');
     const main = el('div', 'dm-main');
     const aside = el('aside', 'dm-aside', null, { 'aria-label': 'À lancer' });
     const layout = el('div', 'dm-layout');
@@ -423,15 +530,60 @@ export async function mount(root, ctx, prefetched = {}) {
     profileStep.append(grid);
     main.append(profileStep);
     const planHost = el('div', 'dm-step');
+    const launchHost = el('div', 'dm-step');
     const cmdHost = el('div', 'dm-step');
     main.append(planHost);
-    aside.append(cmdHost);
+    aside.append(launchHost, cmdHost);
+
+    const renderLaunch = () => {
+      const profile = profiles.find((p) => p.id === (launch && launch.exists ? launch.profile.id : selected)) || null;
+      if (state.id === 'S3' && !(launch && launch.exists)) {
+        launchHost.replaceChildren();
+        return;
+      }
+      launchHost.replaceChildren(launchPanel(profile, launch, {
+        busy: launchBusy, message: launchMessage, start, verb, runAll,
+      }));
+    };
+    const settleLaunch = async (work) => {
+      launchBusy = true;
+      launchMessage = '';
+      renderLaunch();
+      try {
+        await work();
+      } catch (error) {
+        launchMessage = failureText(error);
+        const fresh = await settle(ctx.api.setupLaunchState());
+        if (fresh.ok) launch = fresh.data;
+      }
+      launchBusy = false;
+      if (!ctx.signal.aborted) renderLaunch();
+    };
+    // Une étape à la fois : la progression se voit, et un échec arrête la suite.
+    const runAll = () => settleLaunch(async () => {
+      for (let guard = 0; guard < 12; guard += 1) {
+        const current = launch.steps.find((s) => !SETTLED.includes(s.status));
+        if (!current || current.status === 'failed') break;
+        current.status = 'running';
+        launch.interrupted = null;
+        renderLaunch();
+        launch = await ctx.api.setupLaunch('next');
+        renderLaunch();
+      }
+    }).then(() => { if (!ctx.signal.aborted && launch && launch.finished) paint(); });
+    const start = (profileId) => settleLaunch(async () => {
+      launch = await ctx.api.setupLaunch('start', { profile: profileId });
+    }).then(() => (launch && launch.exists ? runAll() : null));
+    const verb = (name, body) => settleLaunch(async () => {
+      launch = await ctx.api.setupLaunch(name, body);
+    }).then(() => ((name === 'retry' || name === 'skip') && launch && !launch.finished && !launch.steps.some((s) => s.status === 'failed') ? runAll() : null));
 
     const renderChoice = () => {
       grid.replaceChildren(...profiles.map((p) => profileCard(p, p.id === selected, (id) => { selected = id; renderChoice(); })));
       const profile = profiles.find((p) => p.id === selected) || null;
       planHost.replaceChildren(...(profile && state.id !== 'S3' ? [planStep(profile, guide, guide.configured)] : []));
       cmdHost.replaceChildren(commandsStep(state, profile, projectRoot, ctx));
+      renderLaunch();
     };
     renderChoice();
     wrap.replaceChildren(...nodes);
