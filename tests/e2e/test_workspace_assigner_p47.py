@@ -203,7 +203,7 @@ def test_le_panneau_rend_le_plan_de_la_vraie_route(page: Page, p47_project: Path
         expect(worktree_line).to_contain_text("inconnu")
 
 
-def test_les_cinq_verifications_du_preflight_sont_listees_avec_leurs_verdicts(page: Page) -> None:
+def test_les_huit_verifications_du_preflight_sont_listees_avec_leurs_verdicts(page: Page) -> None:
     _open_panel(page, "Brancher le préflight")
     panel = page.locator(".ex-assign-panel")
     verifs = panel.locator("[data-role='assign-verif']")

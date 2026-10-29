@@ -479,6 +479,21 @@ def _data_machine(project_root: Path, _query: _Query) -> Any:
     return workspace_machine.machine_view(project_root)
 
 
+def _data_actions(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/data/actions`` — le catalogue des actions typées (ADR-008), sans rien exécuter."""
+    from grimoire.tools import workspace_actions
+
+    return workspace_actions.actions_catalogue(project_root)
+
+
+def _data_actions_journal(project_root: Path, query: _Query) -> Any:
+    """``GET /api/workspace/data/actions/journal`` — le journal ajout seul des actions, le plus récent d'abord."""
+    from grimoire.tools import workspace_actions
+
+    raw = _one(query, "limit") or ""
+    return workspace_actions.actions_journal(project_root, limit=int(raw) if raw.isdigit() else 100)
+
+
 def _setup_guide(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/setup/guide`` — la machine vue par le guide de premier lancement (P36).
 
@@ -574,7 +589,19 @@ def _mandate_state(project_root: Path, _query: _Query) -> Any:
     }
 
 
+def _autopilot_state(project_root: Path, _query: _Query) -> Any:
+    """État du pilote automatique (P82) : lecture seule, jamais d'activation ici ; les décisions sont au ledger."""
+    from grimoire.missions.autopilot import RESERVED, AutopilotStore, load_autopilot_policy
+
+    policy = load_autopilot_policy(project_root.resolve())
+    return {
+        **AutopilotStore(project_root).state().to_dict(),
+        "reserved": sorted(RESERVED), "extra_reserved": list(policy.extra), "policy_error": policy.error,
+    }
+
+
 GET_ROUTES: dict[str, _GetHandler] = {
+f"{PREFIX}autonomy/autopilot": _autopilot_state,
 f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}capacity": _capacity,
@@ -613,12 +640,19 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/graph": _memory_graph,
     f"{PREFIX}memory/quality": _memory_quality,
     f"{PREFIX}data/machine": _data_machine,
+    f"{PREFIX}data/actions": _data_actions,
+    f"{PREFIX}data/actions/journal": _data_actions_journal,
     f"{PREFIX}setup/guide": _setup_guide,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
+    f"{PREFIX}chat/hosts": workspace_chat.chat_hosts,
 }
 
+
+#: Les lectures que les espaces relancent à chaque pouls changé (P79) : gardées par empreinte
+#: (:mod:`grimoire.tools.workspace_read_cache`), seulement quand la requête porte ``live=1``.
+LIVE_ROUTES = frozenset({f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet"})
 
 #: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
 #: poussée dès qu'elle change au lieu d'être sondée.
@@ -678,6 +712,20 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
 
     try:
         handler = GET_ROUTES.get(path)
+        # Une lecture d'un autre projet que celui servi (`project=`, la fiche en portefeuille) ou du portefeuille n'est
+        # jamais gardée : son empreinte couvre des ledgers que ce serveur n'écrit pas (e2e du portefeuille rouge en CI
+        # seulement, 2026-10-28). Le cache reste celui du projet servi, le cas mesuré par P79.
+        foreign = _one(query, "scope") == "portfolio" or bool(_one(query, "project"))
+        if handler is not None and path in LIVE_ROUTES and _one(query, "live") == "1" and not foreign:
+            # P79 : un rechargement du direct (`live=1`, posé par la page pendant un pouls changé) est servi une fois
+            # par empreinte, pas une par onglet. Un chargement de page ou une navigation relisent toujours.
+            from grimoire.tools import workspace_pulse, workspace_read_cache
+
+            plain = {k: v for k, v in query.items() if k != "live"}
+            return workspace_read_cache.cached_read(
+                path, project_root, plain, lambda: handler(project_root, plain),
+                lambda: workspace_pulse.fingerprint_of(project_root),
+            )
         if handler is not None:
             return handler(project_root, query)
         if path.startswith(f"{PREFIX}sessions/"):
@@ -926,13 +974,37 @@ def _mandate_revoke(project_root: Path, body: dict[str, Any]) -> Any:
     return {"revoked": revoked.to_dict() if revoked else None}
 
 
+def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
+    """Active ou coupe le pilote automatique (P82) : l'origine humaine est posée ici, derrière la clé de contrôle.
+
+    Comme l'octroi du mandat, le jeton de session ne suffit pas (une page servie sur la loopback le porte) :
+    couper comme activer exige la clé de contrôle. Sans clé valide : 403, rien n'est écrit. L'activation exige un
+    mandat actif, auquel le pilote reste lié.
+    """
+    from grimoire.missions.autopilot import AutopilotStore
+    from grimoire.missions.mandate import JournalError, MandateRefusedError, verify_control_key
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
+    if not verify_control_key(body.get("control_key")):
+        raise PermissionError("clé de contrôle absente ou invalide : le pilote automatique est un geste d'humain")
+    if not isinstance(body.get("on"), bool):
+        raise ValueError("`on` (booléen) requis : true active, false coupe")
+    try:
+        entry = AutopilotStore(project_root).set(body["on"], origin=ORIGIN_HUMAN, via="cockpit")
+    except (MandateRefusedError, JournalError) as exc:
+        raise ValueError(str(exc)) from exc
+    return {"autopilot": entry["state"], "mandate_id": entry["mandate_id"], "ts": entry["ts"]}
+
+
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
+    f"{PREFIX}autonomy/autopilot": _autopilot_set,
     # Chat de l'orchestrateur (ACP2) : un tour humain relayé à l'agent ; le cockpit n'écrit rien (ADR-007).
     f"{PREFIX}chat/send": workspace_chat.chat_send,
     f"{PREFIX}chat/permission": workspace_chat.chat_permission,
     f"{PREFIX}chat/cancel": workspace_chat.chat_cancel,
     f"{PREFIX}chat/stop": workspace_chat.chat_stop,
+    f"{PREFIX}chat/host": workspace_chat.chat_host,
     f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
     f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,
@@ -966,6 +1038,10 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
             task_id, str(body.get("text") or ""), actor, origin=ORIGIN_HUMAN,
             question_id=str(body.get("question_id") or ""),
         )
+    if action == "accept":
+        # P88 : l'acceptation de la preuve déclarative (#865), même canal humain que `answer` — l'origine est
+        # posée ici ; le service refuse hors revue, sans motif ou sans pack.
+        return service.accept(task_id, str(body.get("reason") or ""), actor, origin=ORIGIN_HUMAN)
     directive_id = str(body.get("directive_id") or "")
     if not directive_id:
         raise ValueError("`directive_id` requis pour accuser réception")
@@ -975,7 +1051,7 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
 #: Les gestes de pilotage humain (issue #638) : jamais une transition d'état
 #: sauf `cancel`, qui passe par le même gate que `move --to cancelled` plus la
 #: raison obligatoire et le verrou de claim.
-_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack", "answer")
+_STEERING_ACTIONS = ("prioritize", "comment", "cancel", "ack", "answer", "accept")
 
 #: Les verbes qu'une tâche accepte depuis l'interface.
 TASK_ACTIONS = ("claim", "move", "block", "close", *_STEERING_ACTIONS)
@@ -1360,6 +1436,21 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
                 return workspace_launch_apply.launch_apply(project_root, task_id, body)
             if task_id and action in TASK_ACTIONS:
                 return _task_action(project_root, task_id, action, body)
+        if path.startswith(f"{PREFIX}data/actions/"):
+            # Actions typées (ADR-008 D3) : plan → apply → rollback, journal ajout seul.
+            from grimoire.tools import workspace_actions
+
+            action_id, _, verb = path[len(f"{PREFIX}data/actions/") :].strip("/").rpartition("/")
+            handlers = {
+                "plan": workspace_actions.plan_action,
+                "apply": workspace_actions.apply_action,
+                "rollback": workspace_actions.rollback_action,
+            }
+            if action_id in workspace_actions.CATALOGUE and verb in handlers:
+                if verb != "plan" and not workspace_actions.CATALOGUE[action_id].applicable:
+                    return WORKSPACE_UNHANDLED
+                return handlers[verb](project_root, action_id, body)
+            return WORKSPACE_UNHANDLED
         portfolio_action = _portfolio_action_route(path)
         if portfolio_action is not None:
             return _portfolio_task_action(project_root, *portfolio_action, body)

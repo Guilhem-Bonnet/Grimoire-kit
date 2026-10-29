@@ -192,6 +192,13 @@ _ALLOWED_ACTIONS: dict[str, list[str]] = {
 }
 
 
+def _forget_live_reads() -> None:
+    """Vide le cache des lectures du direct (P79, :mod:`grimoire.tools.workspace_read_cache`) après une écriture."""
+    from grimoire.tools import workspace_read_cache
+
+    workspace_read_cache.clear()
+
+
 @dataclass(frozen=True)
 class _Mutation:
     """A governed write action — runs only with explicit confirmation."""
@@ -577,13 +584,22 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         self._send_json(200, payload)
 
     def do_POST(self) -> None:  # http.server contract
+        # P79 : toute écriture passée par le cockpit (tâche, agent, réglage…) peut changer ce que les lectures du direct
+        # rendent sans bouger l'empreinte du pouls ; leur cache est vidé une fois l'écriture faite.
+        if not self._guard_mutation():
+            return
+        try:
+            self._do_post()
+        finally:
+            _forget_live_reads()
+
+    def _do_post(self) -> None:
+        """Le corps de ``do_POST``, appelé une fois la garde d'écriture passée."""
         # `withProject()` (web/workspace/api.js) ajoute `?project=<slug>` à
         # TOUTE requête, POST comprises — comme le fait déjà `do_GET` ci-dessus,
         # il faut donc comparer le chemin sans sa query string, sinon chaque
         # route ci-dessous reste injoignable dès qu'un projet est sélectionné.
         path = urlparse(self.path).path
-        if not self._guard_mutation():
-            return
         from grimoire.tools.workspace_routes import PREFIX as WORKSPACE_PREFIX
 
         if path == "/api/projects/select":
@@ -916,9 +932,16 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         (``_HOME_SLUG``) accepte l'écriture (#356) ; sans ``do_PUT``,
         ``http.server`` répondait 501 avant toute garde.
         """
-        path = urlparse(self.path).path
         if not self._guard_mutation():
             return
+        try:
+            self._do_put()
+        finally:
+            _forget_live_reads()
+
+    def _do_put(self) -> None:
+        """Le corps de ``do_PUT``, appelé une fois la garde d'écriture passée."""
+        path = urlparse(self.path).path
         if not path.startswith("/api/blueprints/"):
             self._send_json(404, {"ok": False, "error": "route inconnue"})
             return

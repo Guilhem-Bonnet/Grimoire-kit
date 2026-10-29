@@ -3230,6 +3230,25 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   min-height: 0;
 }
 
+.chat-hostbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 0;
+}
+
+.chat-host-label {
+  color: var(--ink3, inherit);
+  font-size: 12px;
+}
+
+.chat-host {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+}
+
 .chat-status {
   flex: none;
   padding: 4px 14px;
