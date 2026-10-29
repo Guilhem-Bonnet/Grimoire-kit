@@ -97,7 +97,7 @@ from grimoire.missions.reviewer import (
 )
 from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR, TaskState
 from grimoire.missions.task_worktree import MERGED_EVENT, TASK_BRANCH_PREFIX, find_task_worktree
-from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, new_question_id
+from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, Attachment, Choice, clip_context, new_question_id
 
 if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
@@ -1123,8 +1123,25 @@ class MergeStage:
                     f"`grimoire task accept {tid} --project-root {wt.path} --reason \"…\"`.")
         key = f"merger:{gesture}:{anchor}"
         try:
-            asked = self._service.ask_batch(tid, [QuestionSpec(text, kind="merge" if gesture == "merge" else "choice",
-                                                               blocking=False, key=key)], MERGER_ACTOR)
+            if gesture == "merge":
+                title, command = "Fusionner cette pull request ?", f"gh pr merge {pr} --squash"
+                context, label = f"Le merger ne la fusionne pas : {safe}", "Fusionner la PR"
+            else:
+                title, command = (
+                    "Accepter le travail livré ?",
+                    f'grimoire task accept {tid} --project-root {wt.path} --reason "…"',
+                )
+                context, label = f"La PR est fusionnée, le merger ne l'accepte pas : {safe}", "Accepter la tâche"
+            spec = QuestionSpec(
+                text,
+                kind="merge" if gesture == "merge" else "choice",
+                blocking=False,
+                key=key,
+                title=title,
+                context=clip_context(context),
+                attachments=(Attachment("command", label, primary=True, ref=command, excerpt=command, mutates=True),),
+            )
+            asked = self._service.ask_batch(tid, [spec], MERGER_ACTOR)
         except (GrimoireError, ValueError) as exc:
             return MergerOutcome(tid, "escalate", "failed", f"question à l'humain non posée ({exc})", pr)
         word = "fusionner" if gesture == "merge" else "accepter"
@@ -1194,8 +1211,20 @@ class MergeStage:
         except GrimoireError as exc:
             return MergerOutcome(tid, "escalate", "failed", f"escalade refusée : {exc}", pr)
         try:
-            self._service.ask(tid, f"La fusion de {tid} échoue à répétition ({why}) — reprendre la tâche ou l'abandonner ?",
-                              MERGER_ACTOR, kind="choice", options=("reprendre", ABANDON), question_id=qid)
+            self._service.ask(
+                tid,
+                f"La fusion de {tid} échoue à répétition ({why}) — reprendre la tâche ou l'abandonner ?",
+                MERGER_ACTOR,
+                kind="choice",
+                options=("reprendre", ABANDON),
+                question_id=qid,
+                title="Reprendre la tâche ou l'abandonner ?",
+                context=clip_context(f"La fusion de la pull request échoue à répétition : {_clean(why, 160)}"),
+                choices=(
+                    Choice("reprendre", "Reprendre la tâche", "Relance une session sur la branche existante"),
+                    Choice(ABANDON, "Abandonner", "Annule la tâche : plus aucune reprise", danger=True),
+                ),
+            )
         except (GrimoireError, ValueError) as exc:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=MERGER_ACTOR, reason="escalade non posée")
             return MergerOutcome(tid, "escalate", "failed", f"question à l'humain non posée ({exc}) : tâche remise en revue", pr)

@@ -19,7 +19,7 @@ from grimoire.missions.lease import MAX_ATTEMPTS, backoff_delay
 from grimoire.missions.questions import QUESTION_EVENTS, replay_question
 from grimoire.missions.schemas import DEFAULT_CLAIM_TTL_SECONDS, DependencyKind, MissionTask, TaskDependency, TaskState
 from grimoire.missions.session_link import resume_command
-from grimoire.missions.waiting import Question, ResumeHint, Waiting, answer_hint, new_question_id
+from grimoire.missions.waiting import Choice, Question, ResumeHint, Waiting, answer_hint, clip_context, new_question_id
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import LeaseView
@@ -137,7 +137,35 @@ def deferred_waiting(
         options, kind = ("réessayer", "abandonner"), "retry_exhausted"
     else:  # resume_unfenced (hôte sans frein) ou resume_branch (commits non poussés, K12) : le texte est fourni
         text, options, kind = question, ("reprendre", "abandonner"), cause
-    return Waiting("human", "", Question(new_question_id(), kind, text, options, "tick", since), hint, since)
+    if kind == "retry_exhausted":
+        title, retry = (
+            "Relancer la tâche ou l'abandonner ?",
+            Choice("réessayer", "Relancer la tâche", "Lance une nouvelle session"),
+        )
+        context = f"La session s'est arrêtée {attempts} fois de suite : la relancer encore ?"
+    else:
+        title, retry = (
+            "Reprendre la tâche ou l'abandonner ?",
+            Choice("reprendre", "Reprendre la tâche", "Relance une session sur la branche existante"),
+        )
+        context = "La session s'est arrêtée avant la fin" + (
+            ", du travail non poussé existe sur ton poste."
+            if kind == "resume_branch"
+            else " et rien ne prouve qu'on peut la relancer sans risque."
+        )
+    choices = (retry, Choice("abandonner", "Abandonner", "Annule la tâche : plus aucune reprise", danger=True))
+    question = Question(
+        new_question_id(),
+        kind,
+        text,
+        options,
+        "tick",
+        since,
+        title=title,
+        context=clip_context(context),
+        choices=choices,
+    )
+    return Waiting("human", "", question, hint, since)
 
 def unfenced_question(view: LeaseView) -> str:
     """La question de §2.4 : un hôte sans frein vérifié ne se relance pas, on demande (K3)."""

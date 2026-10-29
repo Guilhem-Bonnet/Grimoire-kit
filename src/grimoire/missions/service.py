@@ -21,7 +21,7 @@ from __future__ import annotations
 import contextlib
 import os
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -48,6 +48,7 @@ from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.mandate import ANSWER_CHANNEL, require_authority
 from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
 from grimoire.missions.question_gestures import BatchOutcome
+from grimoire.missions.question_rounds import next_round
 from grimoire.missions.questions import OPEN, QuestionSpec, group_settled, open_in_group, records_of
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
 from grimoire.missions.reservation import find_conflict, reservation_refusal
@@ -72,12 +73,16 @@ from grimoire.missions.waiting import (
     QUESTION_ASKED_EVENT,
     UNTIL_UNKNOWN,
     WAIT_REASONS,
+    Attachment,
+    Choice,
     Question,
+    Recommendation,
     ResumeHint,
     Waiting,
     attention_rank,
     new_question_id,
     parse_until,
+    question_problem,
 )
 
 _RISK_ORDER = (
@@ -888,6 +893,12 @@ class TaskService:
         question_id: str = "",
         why: str = "",
         recommended: str = "",
+        title: str = "",
+        context: str = "",
+        choices: tuple[Choice, ...] = (),
+        answer_mode: str = "",
+        attachments: tuple[Attachment, ...] = (),
+        recommendation: Recommendation | None = None,
     ) -> TaskMove:
         """``claimed|running → waiting(human)`` avec sa question, tracée par ``task.question_asked``.
 
@@ -897,13 +908,37 @@ class TaskService:
         """
         task = self.require(task_id)
         moment = datetime.now(UTC).isoformat()
+        if choices and not options:  # v2 : ``options`` reste renseigné (les valeurs, ce que `answer` accepte)
+            options = tuple(c.value for c in choices)
+        if not text.strip() and title.strip():  # v2 : ``text`` aussi — titre, puis contexte
+            text = f"{title.strip()} {context.strip()}".strip()
         pick = recommended.strip()
+        if not pick and recommendation is not None and isinstance(recommendation.value, str) and options:
+            pick = recommendation.value
         if pick and options and pick.lower() not in (o.strip().lower() for o in options):
             raise ValueError(f"la recommandation {pick!r} n'est pas l'une des options proposées")
         question = Question(
-            question_id or new_question_id(), kind, text.strip(), tuple(options), origin, moment,
-            why=why.strip(), recommended=pick,
+            question_id or new_question_id(),
+            kind,
+            text.strip(),
+            tuple(options),
+            origin,
+            moment,
+            why=why.strip(),
+            recommended=pick,
+            title=title.strip(),
+            context=context.strip(),
+            choices=tuple(choices),
+            answer_mode=answer_mode.strip(),
+            attachments=tuple(attachments),
+            recommendation=recommendation,
+            task_title=task.title,
         )
+        if question.is_v2:  # P92 : le round et le fil se lisent au ledger, jamais saisis
+            number, previous = next_round(self.ledger, task_id, question)
+            question = replace(question, round=number, supersedes=previous)
+        if problem := question_problem(question):
+            raise ValueError(problem)
         waiting = Waiting("human", "", question, self._hint_of(task), moment)
         if problem := waiting.problem():
             raise ValueError(problem)
@@ -934,9 +969,18 @@ class TaskService:
         return self.transition(task_id, TaskState.RUNNING, actor, "reprise sur place", lease_epoch=signed)
 
     def answer(
-        self, task_id: str, text: str, actor: str, *, origin: str, question_id: str = "",
-        attested_by_flow: bool = False, provenance: Mapping[str, Any] | None = None,
-        justification: str = "", confidence: str = "",
+        self,
+        task_id: str,
+        text: str,
+        actor: str,
+        *,
+        origin: str,
+        question_id: str = "",
+        attested_by_flow: bool = False,
+        provenance: Mapping[str, Any] | None = None,
+        justification: str = "",
+        confidence: str = "",
+        answer_data: Mapping[str, Any] | None = None,
     ) -> TaskMove:
         """Répond à la question en attente — **canal humain seulement** — puis réveille la tâche.
 
@@ -987,9 +1031,21 @@ class TaskService:
         self.ledger.append_event(
             HUMAN_ANSWERED_EVENT, task_id, "task", actor,
             {
-                "task_id": task_id, "question_id": question.id, "answer": answer, "origin": origin, "actor_id": actor,
-                **({"mandate_id": authority.mandate_id, "provenance": dict(authority.provenance),
-                    "gesture": authority.gesture} if authority else {}),
+                "task_id": task_id,
+                "question_id": question.id,
+                "answer": answer,
+                "origin": origin,
+                "actor_id": actor,
+                **_answer_data_payload(answer_data, question),
+                **(
+                    {
+                        "mandate_id": authority.mandate_id,
+                        "provenance": dict(authority.provenance),
+                        "gesture": authority.gesture,
+                    }
+                    if authority
+                    else {}
+                ),
             },
         )
         self.ledger.add_directive(
@@ -1497,3 +1553,24 @@ class TaskService:
             self.project_root, task_id,
             ledger_root=self.ledger_root, memory_manager=self.memory, token_budget=token_budget,
         )
+
+
+def _answer_data_payload(data: Mapping[str, Any] | None, question: Question) -> dict[str, Any]:
+    """``{"answer_data": …}`` pour ``task.human_answered`` (P92, cahier §9.3) ; ``{}`` sans donnée structurée.
+
+    ``{"choices": [value, …], "note": str, "question_id": str}`` — le texte sérialisé reste la réponse
+    de référence, ceci s'y ajoute. Refus (``ValueError``) d'un choix qui n'est pas l'un de ceux proposés.
+    """
+    if not data:
+        return {}
+    raw = data.get("choices") or ()
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        raise ValueError("`answer_data.choices` : une liste de valeurs")
+    picked = [str(v) for v in raw]
+    allowed = {c.value for c in question.choices}
+    if allowed and (unknown := [v for v in picked if v not in allowed]):
+        raise ValueError(f"choix inconnu pour {question.id} : {', '.join(unknown)}")
+    clean: dict[str, Any] = {"choices": picked, "question_id": question.id}
+    if note := str(data.get("note", "") or "").strip():
+        clean["note"] = note
+    return {"answer_data": clean}
