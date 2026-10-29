@@ -62,6 +62,26 @@ const scope = { mode: 'project', state: '', slug: '', live: false };
 // Au niveau du module, comme `scope` : revenir sur l'espace garde le réglage.
 const askMe = { on: false };
 
+// P91 : le filtre des cinq présences (`task.presence.state`, P90), au niveau du
+// module comme `askMe`. Vide = toutes les cartes ouvertes.
+const presenceFilter = { state: '' };
+
+// Les cinq présences d'une carte ouverte, dans l'ordre du cahier de vivacité
+// (§2) : un glyphe (la forme), un mot, un ton qui ne fait que doubler la forme.
+// « Bloquée » garde ses lignes d'attente (glyphe `user`/`hourglass`) : elle n'a
+// pas de ligne de présence en plus.
+const PRESENCE_UI = {
+  working: { word: 'Au travail', icon: 'i-session-live', tone: 'acc' },
+  silent: { word: 'Silencieuse', icon: 'i-session-idle', tone: '' },
+  resume: { word: 'À reprendre', icon: 'i-session-resume', tone: 'warn' },
+  blocked: { word: 'Bloquée', icon: 'hourglass', tone: 'warn' },
+  none: { word: 'Sans agent', icon: 'i-session-unknown', tone: '' },
+};
+const PRESENCE_ORDER = ['working', 'silent', 'resume', 'blocked', 'none'];
+// Tentatives avant « tentatives épuisées » (grimoire.missions.lease.MAX_ATTEMPTS).
+const RESUME_MAX_ATTEMPTS = 3;
+const presenceOf = (t) => (t.presence && t.presence.state) || '';
+
 // Panneau « Assigner une session » (P47 lot 2) : l'ouverture vit au niveau du
 // module, comme `scope` — le pouls live redessine l'inspecteur, et un panneau
 // rouvert doit se recharger au lieu de disparaître (pattern task-create.js).
@@ -79,8 +99,11 @@ import {
 } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 import { activityBlockAsync } from '../activity.js';
+import { DONE_RECENT_LIMIT, splitRecent } from './board-split.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
+import { appendQuestionV2, isV2 } from './decision-card.js';
+import { ideaBlock, ideaButton, requestIdeaFocus } from './task-intake.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
 const COLUMN_LABEL = {
@@ -97,12 +120,14 @@ const GROUPS4 = [
   // « En cours » et une section « Bloqué » repliée par défaut (`blockedFold`).
   { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'], blockedFold: true },
   { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
-  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'] },
+  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'], recentLimit: DONE_RECENT_LIMIT },
   { id: 'cancelled', icon: 'archive', label: 'Annulées', cols: ['archived'], folded: true },
 ];
 // Colonne repliée dépliée ou non — au niveau du module, comme `scope` : revenir
 // sur l'espace garde le dernier réglage.
 const unfolded = new Set();
+// I4 : colonne visible sur mobile (onglet actif) — au niveau du module, pour survivre aux re-rendus.
+let activeGroup = '';
 // P74 : une tâche close (acceptée, publiée, annulée) n'a plus de vivacité à
 // montrer sur sa carte — le travail est fini. Si la session existe encore,
 // c'est l'inspecteur qui le dit (bloc « Session »), jamais la carte.
@@ -190,9 +215,31 @@ function injectStyles() {
   style.textContent = `
     .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
     @container canvas (max-width: 720px) { .ex-wrap { padding: var(--sp-3); } }
-    .ex-board { display: flex; gap: var(--sp-3); align-items: flex-start; overflow-x: auto; flex-grow: 1; }
+    /* I4 : le board défile seul ; les colonnes s'étirent à la hauteur du contenu pour que chaque en-tête reste collé en haut (un sticky ne dépasse jamais sa colonne) ; sous 720 px, une colonne pleine largeur à la fois. */
+    .ex-board-shell { display: flex; flex-direction: column; gap: var(--sp-2); flex: 1 1 auto; min-height: 0; min-width: 0; }
+    .ex-board { display: flex; gap: var(--sp-3); align-items: stretch; overflow: auto; flex: 1 1 auto; min-height: 0; position: relative; }
+    .ex-tabs { display: none; flex: none; gap: var(--sp-2); overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+    .ex-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: 999px; background: var(--e2); color: var(--ink2); font-size: var(--t-s); cursor: pointer; }
+    .ex-tab .ico { width: 16px; height: 16px; }
+    .ex-tab .mono { color: var(--ink3); }
+    .ex-tab[aria-selected="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--ink); font-weight: 600; }
+    .ex-tab:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+    @container canvas (max-width: 720px) {
+      .ex-tabs { display: flex; }
+      .ex-board { scroll-snap-type: x mandatory; overscroll-behavior-x: contain; gap: var(--sp-3); }
+      .ex-board .ex-col { flex: 0 0 100%; max-width: 100%; scroll-snap-align: start; scroll-snap-stop: always; }
+    }
     .ex-col { flex: 1 0 240px; max-width: 340px; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
-    .ex-col-head { padding: 6px 2px; }
+    .ex-col-head { padding: 6px 2px; position: sticky; top: 0; z-index: 2; background: var(--e2); }
+    .ex-more { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 var(--sp-3); border: 1px dashed var(--line); border-radius: var(--r); background: transparent; color: var(--ink2); font-size: var(--t-s); cursor: pointer; }
+    .ex-more:hover { background: var(--hover); }
+    .ex-more:focus-visible, .ex-older-row:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+    .ex-older { display: flex; flex-direction: column; gap: 4px; }
+    .ex-older[hidden] { display: none; }
+    .ex-older-row { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); color: var(--ink); font-size: var(--t-s); text-align: left; cursor: pointer; min-width: 0; }
+    .ex-older-row:hover { background: var(--hover); }
+    .ex-older-row > .ex-older-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ex-older-row > time { flex: none; color: var(--ink3); font-size: var(--t-min); }
     .ex-col-title { font-size: var(--t-s); font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 6px; }
     .ex-col-title > .mono { color: var(--rub); font-weight: 600; }
     .ex-col-title .ico { width: 16px; height: 16px; color: var(--ink2); }
@@ -306,6 +353,21 @@ function injectStyles() {
     .ex-card-next .row-act, .ex-card-next .more-btn { width: 24px; min-width: 24px; padding: 0; }
     .ex-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--t-min); }
     .ex-cost { font-size: var(--t-min); }
+    .ex-presence { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: var(--t-s); color: var(--ink2); }
+    .ex-presence .ex-presence-word { font-weight: 600; color: var(--ink); }
+    .ex-presence.acc .glyph { color: var(--acc); }
+    .ex-presence.warn .glyph { color: var(--warn); }
+    .ex-presence-sub { flex: 1 0 100%; font-size: var(--t-min); color: var(--ink2); padding-left: 22px; }
+    .ex-presence-act { flex: 1 0 100%; padding-left: 22px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; font-size: var(--t-min); }
+    .ex-presence-act .btn { margin-left: auto; }
+    .ex-presence-act .btn { height: 24px; min-height: 24px; padding: 0 10px; font-size: var(--t-min); }
+    .ex-presence-filter { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .ex-presence-filter .chip[aria-pressed="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--ink); }
+    .ex-resume-group { display: flex; flex-direction: column; gap: var(--sp-2); border-left: 2px solid var(--warn); padding-left: var(--sp-2); }
+    .ex-col-count-resume { font-size: var(--t-min); color: var(--warn); background: var(--warn-soft); font-weight: 600; margin-left: 6px; padding: 2px 8px; border-radius: 999px; }
+    .ex-card[data-presence="resume"] { border-color: var(--warn); }
+    .ex-queue-title { font-size: var(--t-min); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); margin-top: var(--sp-2); }
+    .ex-resume-title { display: flex; align-items: center; gap: 6px; font-size: var(--t-min); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--warn); }
     .ex-list-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
     .ex-list { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
     .ex-list th { text-align: left; font-size: var(--t-min); color: var(--ink3); font-weight: 500; padding: 8px var(--sp-3); border-bottom: 1px solid var(--line); background: var(--bar); }
@@ -558,8 +620,6 @@ function cardSessionLine(task) {
   if (task.host) {
     if (HOST_ICON[task.host]) line.append(glyph(HOST_ICON[task.host], 'hôte'));
     line.append(text('span', 'lbl', HOST_LABEL[task.host] || task.host));
-  } else {
-    line.append(text('span', 'lbl', 'hôte inconnu'));
   }
   const claim = task.claim || {};
   const persona = claim.agent_id || claim.actor_id || '';
@@ -596,20 +656,14 @@ function workLiveRow(task) {
   const line = document.createElement('div');
   line.className = 'ex-facts lbl';
   line.dataset.role = 'work-live';
-  if (!work.tier && !work.model) {
-    // Le journal ne rapporte pas de modèle : le dire ici (la ligne session,
-    // en nowrap, tronquait la phrase) plutôt qu'afficher un palier deviné.
-    const missing = text('span', null, 'modèle non rapporté');
-    missing.dataset.role = 'work-model';
-    missing.title = "le journal de session n'est pas lisible d'ici : aucun palier affirmé";
-    line.append(missing);
+  // P91 : un fait absent ne s'écrit pas sur la carte (« modèle non rapporté »,
+  // « effort non rapporté » restent dans l'inspecteur) ; un fait connu s'affiche.
+  if (work.effort) {
+    const effort = text('span', null, `effort ${work.effort}`);
+    effort.dataset.role = 'work-effort';
+    effort.title = 'effort de raisonnement, lu du journal de session';
+    line.append(effort);
   }
-  const effort = text('span', null, work.effort ? `effort ${work.effort}` : 'effort non rapporté');
-  effort.dataset.role = 'work-effort';
-  effort.title = work.effort
-    ? 'effort de raisonnement, lu du journal de session'
-    : "l'hôte ne rapporte pas d'effort pour cette session";
-  line.append(effort);
   const usage = (task.work && task.work.usage) || null;
   if (usage && usage.usage_source === 'claude-code-transcript') {
     const tokens = text('span', null, tokensText(usage.total_tokens || 0));
@@ -624,7 +678,7 @@ function workLiveRow(task) {
     skills.title = `derniers skills invoqués par la session (liste complète dans le détail) : ${work.skills.join(', ')}`;
     line.append(skills);
   }
-  return line;
+  return line.childElementCount ? line : null;
 }
 
 // P75 : tokens compacts pour une carte — « 48,2 k tokens » au-delà du millier.
@@ -861,6 +915,63 @@ function proofRing(task) {
 /** Les actions secondaires d'une tâche (P56), sur sa carte comme sur sa ligne :
  *  révélées au survol et au focus, toutes dans le menu « … ». L'action
  *  principale reste le clic sur la carte (et Entrée) : ouvrir le détail. */
+// P91 : UNE ligne d'état par carte ouverte — glyphe + mot + âge, lue du seul
+// champ `task.presence` (P90) : la même vérité pour la forme, le mot et le temps.
+// Une absence ne s'écrit pas ici (« aucun signe de vie lu », « durée inconnue »
+// restent dans l'inspecteur). « Bloquée » est portée par les lignes d'attente.
+function ageWords(iso) {
+  const ms = Date.now() - Date.parse(iso);
+  return Number.isFinite(ms) ? agoText(ms).replace(/^il y a /, '') : '';
+}
+function clockText(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+function resumeNowButton(task) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn pri';
+  btn.dataset.role = 'resume-now';
+  btn.textContent = 'Reprendre maintenant';
+  btn.title = `Copie la commande qui reprend la tâche sans attendre la prochaine tentative : grimoire task claim ${task.id} (la webview n'exécute rien, ADR-007).`;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    copyText(`grimoire task claim ${task.id}`, btn);
+  });
+  return btn;
+}
+function presenceLine(task) {
+  const p = task.presence;
+  if (!p || isClosed(task) || p.state === 'blocked') return null;
+  const ui = PRESENCE_UI[p.state];
+  if (!ui) return null;
+  const line = document.createElement('div');
+  line.className = 'ex-presence' + (ui.tone ? ` ${ui.tone}` : '');
+  line.dataset.role = 'presence';
+  line.dataset.state = p.state;
+  line.append(glyph(ui.icon, ui.word, ui.tone), text('span', 'ex-presence-word', ui.word));
+  const sub = [];
+  if (p.state === 'working') {
+    if (p.sign_at) line.append(text('span', null, '·'), sinceNode(p.sign_at));
+  } else if (p.state === 'silent') {
+    line.append(text('span', null, '·'), text('span', null, p.sign_at ? `rien depuis ${ageWords(p.sign_at)}` : (p.cause || 'sans signal d’hôte')));
+    if (p.lease_left_s != null) sub.push(`reprise auto dans ${durationText(p.lease_left_s)} si ça continue`);
+  } else if (p.state === 'resume') {
+    if (p.attempt) line.append(text('span', null, '·'), text('span', null, `tentative ${p.attempt} sur ${RESUME_MAX_ATTEMPTS}`));
+    if (p.cause) sub.push(p.cause);
+  } else if (p.state === 'none' && p.queue_position != null) {
+    line.append(text('span', null, '·'), text('span', null, `en file, position ${p.queue_position}`));
+  }
+  if (sub.length) line.append(text('div', 'ex-presence-sub', sub.join(' · ')));
+  if (p.state === 'resume') {
+    const act = document.createElement('div');
+    act.className = 'ex-presence-act';
+    act.append(text('span', null, p.retry_at && clockText(p.retry_at) ? `retentée vers ${clockText(p.retry_at)}` : 'dès qu’un créneau se libère'), resumeNowButton(task));
+    line.append(act);
+  }
+  return line;
+}
+
 function taskActions(task, onTimeline) {
   return rowActions([
     { id: 'copy-id', label: `Copier l'identifiant ${task.id}`, icon: 'copy', run: (b) => copyText(task.id, b) },
@@ -874,6 +985,7 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   card.className = 'ex-card';
   if (selected) card.setAttribute('aria-current', 'true');
   card.tabIndex = 0;
+if (task.presence && !isClosed(task)) card.dataset.presence = task.presence.state;
   card.dataset.project = task.project?.slug || '';
   card.dataset.task = task.id;
   // P74 : liseré gauche stable par « ouverte par » (hash → token --owner-N).
@@ -954,7 +1066,8 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
     line.className = 'ex-wait' + (human ? ' human' : '');
     line.dataset.role = 'waiting';
     line.title = waitingText(task.waiting);
-    line.append(waitGlyph(task.waiting), text('span', null, waitingText(task.waiting)));
+    // P91 : « Bloquée » est le mot d'état, la cause nommée vient après.
+    line.append(waitGlyph(task.waiting), text('span', 'ex-presence-word', 'Bloquée'), text('span', null, `· ${human ? 'attend ta réponse' : waitingText(task.waiting)}`));
     if (human) line.append(text('span', 'lbl', QUESTION_KIND_LABEL[task.waiting.question.kind] || task.waiting.question.kind));
     card.append(line);
     if (human) card.append(text('div', 'lbl', task.waiting.question.text));
@@ -979,23 +1092,13 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   // absents tant qu'aucune session d'hôte n'a travaillé sous ce claim.
   // P74 : plus d'UUID sur la carte (hôte + persona + palier), et plus rien de
   // tout cela sur une tâche close — c'est l'inspecteur qui parle de sa session.
+  // P91 : la ligne de présence est LA ligne d'état ; en dessous, seulement les
+  // faits connus (hôte · persona · palier · effort · tokens), jamais une absence.
+  appendIf(card, presenceLine(task));
   if (task.session_id && !isClosed(task)) {
-    // La vivacité a son glyphe sur la ligne des faits, juste en dessous : pas
-    // de doublon ici.
-    card.append(cardSessionLine(task));
-    // P75 : effort, tokens en direct et derniers skills de la session.
+    appendIf(card, cardSessionLine(task));
     appendIf(card, workLiveRow(task));
   }
-  // UI-3 : vivacité, dernier signe, durée — en portefeuille l'état est déjà dans
-  // la ligne projet (portfolioRow), on n'y ajoute que signe et durée.
-  // Vivacité, signe, durée et coût sur une seule ligne de faits, chaque fait
-  // d'un bloc (le coût n'a sa propre ligne que sans session).
-  // P74 : la cause des « sessions vivantes » en colonne Fait était ici — le
-  // serveur pose `task.session` (claim, ou journal qui nomme la tâche) sans
-  // condition d'état, et la carte l'affichait tel quel. Une tâche close
-  // n'affiche plus de vivacité.
-  const facts = !isClosed(task) && task.session && task.session.id ? liveRow(task.session, { withState: !portfolio, compact: true }) : null;
-  if (facts) card.append(facts);
   // P69v2 : la dernière entrée du fil d'activité, en une ligne — le serveur ne
   // la pose que sur une tâche tenue dont la session est vivante.
   if (task.feed_last && task.feed_last.label) {
@@ -1009,9 +1112,8 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
   // CAD — c'est son bilan ; la ligne « coût (dispatch) » de P11 reste aux
   // cartes ouvertes (deux « coût inconnu » superposés ne disaient rien).
   const closedTotal = isClosed(task) && task.work ? workTotalRow(task.work) : null;
-  const cost = closedTotal ? null : costRow(task);
+  const cost = closedTotal || !(task.cost && task.cost.status && task.cost.status !== 'unknown') ? null : costRow(task);
   if (closedTotal) card.append(closedTotal);
-  if (cost && facts) facts.append(Object.assign(cost, { className: 'ex-cost' }));
   else if (cost) card.append(cost);
 
   const { forward, canBlock } = nextMoves(task);
@@ -1039,6 +1141,12 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
 }
 
 function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSelected = () => false, onTimeline = null) {
+  const shell = document.createElement('div');
+  shell.className = 'ex-board-shell';
+  const tabs = document.createElement('div');
+  tabs.className = 'ex-tabs';
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', 'Colonnes du tableau');
   const board = document.createElement('div');
   board.className = 'ex-board';
   const byColumn = new Map();
@@ -1050,6 +1158,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     const col = document.createElement('div');
     col.className = 'ex-col' + (group.folded ? ' ex-col-folded' : '');
     col.dataset.group = group.id;
+    col.id = `ex-col-${group.id}`;
     const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
     const folded = group.folded && !unfolded.has(group.id);
     // P72v2 : sur le board compact, les bloquées sortent du flux de la colonne —
@@ -1074,7 +1183,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
         if (unfolded.has(group.id)) unfolded.delete(group.id); else unfolded.add(group.id);
         const fresh = document.createElement('div');
         renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
-        board.replaceWith(fresh.firstElementChild);
+        shell.replaceWith(fresh.firstElementChild);
       });
       head.append(toggle);
       head.append(text('div', 'ex-col-gate', 'tâches annulées : ni faites, ni à reprendre'));
@@ -1105,7 +1214,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
         if (unfolded.has(foldKey)) unfolded.delete(foldKey); else unfolded.add(foldKey);
         const fresh = document.createElement('div');
         renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
-        board.replaceWith(fresh.firstElementChild);
+        shell.replaceWith(fresh.firstElementChild);
       });
       col.append(toggle);
       const section = document.createElement('div');
@@ -1118,18 +1227,127 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
       col.append(section);
     }
 
+    // P91 : le couloir « À reprendre » est un groupe en tête de « À faire » (pas
+    // de 5e colonne) : ces tâches sont `ready` au ledger, le glisser-déposer
+    // reste valide, et une tâche rendue passe avant une neuve.
+    const resuming = group.id === 'todo' ? shown.filter((t) => presenceOf(t) === 'resume') : [];
+    const rest = resuming.length ? shown.filter((t) => presenceOf(t) !== 'resume') : shown;
+    if (resuming.length) {
+      const pill = text('span', 'ex-col-count-resume', `${resuming.length} à reprendre`);
+      pill.dataset.role = 'resume-count';
+      head.querySelector('.ex-col-title').append(pill);
+    }
+
     const body = document.createElement('div');
     body.className = 'ex-col-body' + (shown.length ? '' : ' empty');
     body.hidden = folded;
+    // I4 : « Fait » garde les plus récentes en cartes ; le reste, en lignes compactes derrière un bouton.
+    const split = group.recentLimit && shown.length > group.recentLimit ? splitRecent(shown, group.recentLimit) : null;
     if (!shown.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of shown) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      if (resuming.length) {
+        const lane = document.createElement('section');
+        lane.className = 'ex-resume-group';
+        lane.dataset.role = 'resume-group';
+        lane.setAttribute('aria-label', `À reprendre, ${resuming.length}`);
+        const laneTitle = text('div', 'ex-resume-title', '');
+        laneTitle.append(glyph('i-session-resume', 'à reprendre', 'warn'), text('span', null, `À reprendre · ${resuming.length}`));
+        lane.append(laneTitle);
+        for (const task of resuming) lane.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+        body.append(lane);
+        if (rest.length) body.append(text('div', 'ex-queue-title', `En file · ${rest.length}`));
+      }
+      for (const task of split ? split.recent : rest) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+    }
+    if (split) {
+      const key = `${group.id}:older`;
+      const open = unfolded.has(key);
+      const listId = `ex-older-${group.id}`;
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'ex-more';
+      more.dataset.role = 'older-toggle';
+      more.setAttribute('aria-expanded', String(open));
+      more.setAttribute('aria-controls', listId);
+      more.textContent = open ? 'Replier les plus anciennes' : `Voir les ${split.remaining} autres`;
+      more.addEventListener('click', () => {
+        if (unfolded.has(key)) unfolded.delete(key); else unfolded.add(key);
+        const fresh = document.createElement('div');
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
+        shell.replaceWith(fresh.firstElementChild);
+      });
+      const older = document.createElement('div');
+      older.className = 'ex-older';
+      older.id = listId;
+      older.hidden = !open;
+      for (const task of split.older) {
+        const rowBtn = document.createElement('button');
+        rowBtn.type = 'button';
+        rowBtn.className = 'ex-older-row';
+        rowBtn.dataset.task = task.id;
+        rowBtn.dataset.project = task.project?.slug || '';
+        if (isSelected(task)) rowBtn.setAttribute('aria-current', 'true');
+        rowBtn.title = task.title || task.id;
+        rowBtn.append(text('span', 'ex-older-title', titleParts(task.title || task.id).title));
+        const at = task.in_state_since || '';
+        if (at && !Number.isNaN(Date.parse(at))) rowBtn.append(sinceNode(at));
+        rowBtn.addEventListener('click', () => onSelect(task));
+        older.append(rowBtn);
+      }
+      body.append(more, older);
     }
     col.append(body);
     board.append(col);
+
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'ex-tab';
+    tab.id = `ex-tab-${group.id}`;
+    tab.dataset.group = group.id;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', col.id);
+    tab.append(icon(group.icon), text('span', null, group.label), text('span', 'mono', String(inColumn.length)));
+    tabs.append(tab);
   }
-  root.append(board);
+
+  // I4 : sous 720 px une colonne à la fois ; l'onglet actif suit la colonne visible.
+  const tabEls = [...tabs.children];
+  const cols = [...board.children];
+  const select = (index, { scroll = false, focus = false } = {}) => {
+    const i = Math.max(0, Math.min(tabEls.length - 1, index));
+    tabEls.forEach((t, k) => {
+      t.setAttribute('aria-selected', String(k === i));
+      t.tabIndex = k === i ? 0 : -1;
+    });
+    activeGroup = cols[i]?.dataset.group || '';
+    if (scroll && cols[i]) board.scrollLeft = cols[i].offsetLeft;
+    if (focus) tabEls[i]?.focus();
+  };
+  tabEls.forEach((t, k) => t.addEventListener('click', () => select(k, { scroll: true })));
+  tabs.addEventListener('keydown', (e) => {
+    const k = tabEls.indexOf(document.activeElement);
+    if (k < 0) return;
+    const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    const target = e.key === 'Home' ? 0 : e.key === 'End' ? tabEls.length - 1 : k + delta;
+    if (!delta && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    select(target, { scroll: true, focus: true });
+  });
+  board.addEventListener('scroll', () => {
+    if (!cols.length || !board.clientWidth) return;
+    // Seule la mise en page mobile (colonnes pleine largeur) lie défilement et onglet.
+    if (cols[0].offsetWidth < board.clientWidth - 2) return;
+    const step = cols.length > 1 ? cols[1].offsetLeft - cols[0].offsetLeft : board.clientWidth;
+    const i = Math.max(0, Math.min(cols.length - 1, Math.round(board.scrollLeft / step)));
+    if (tabEls[i]?.getAttribute('aria-selected') !== 'true') select(i);
+  }, { passive: true });
+  const start = Math.max(0, cols.findIndex((c) => c.dataset.group === activeGroup));
+  select(start);
+  if (start > 0) requestAnimationFrame(() => { if (cols[0].offsetWidth >= board.clientWidth - 2) board.scrollLeft = cols[start].offsetLeft; });
+
+  shell.append(tabs, board);
+  root.append(shell);
 }
 
 function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = () => false, onTimeline = null) {
@@ -1442,8 +1660,8 @@ function decisionChip(label, { icon: iconName = '', tone = '', title = '' } = {}
   return chipNode;
 }
 
-function postAnswer(ctx, task, q, answer, portfolio) {
-  const body = { text: answer, question_id: q.id };
+function postAnswer(ctx, task, q, answer, portfolio, data) {
+  const body = { text: answer, question_id: q.id, ...(data ? { answer_data: data } : {}) };
   ctx.dock.echo(`grimoire task answer ${task.id} "${answer}" --question ${q.id}` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
   return portfolio
     ? ctx.api.portfolioTaskAction(task.id, 'answer', body, task.project?.slug)
@@ -1473,6 +1691,9 @@ function decisionCard(ctx, task, portfolio, onWritten) {
   const kindLabel = type === 'libre' ? 'question libre' : (QUESTION_KIND_LABEL[q.kind] || q.kind);
   chips.append(decisionChip(kindLabel, { icon: DECISION_TYPE[type].icon, tone: 'warn' }));
   if (open.length > 1) chips.append(decisionChip(`${open.length} questions en un lot`));
+  const round = Number(q.round) || (task.waiting.rounds || []).length || 1;
+  if (isV2(q) && round > 1) chips.append(decisionChip(`${round}e demande`, { icon: 'history' }));
+  if (isV2(q) && q.blocking === false) chips.append(decisionChip('Non bloquant'));
   if (portfolio) {
     const projectName = task.project?.name || task.project?.slug || 'projet';
     const project = decisionChip(projectName);
@@ -1499,6 +1720,17 @@ function decisionCard(ctx, task, portfolio, onWritten) {
       box.dataset.role = 'decision-question';
       box.dataset.question = question.id;
       node.append(box);
+    }
+    if (isV2(question)) {
+      appendQuestionV2(box, task, question, {
+        locked,
+        onWritten,
+        article: open.length > 1 ? null : node,
+        rounds: (task.waiting.rounds || []),
+        post: (answer, data) => postAnswer(ctx, task, question, answer, portfolio, data),
+        failure: failureText,
+      });
+      continue;
     }
     appendQuestionForm(ctx, box, task, question, { portfolio, locked, onWritten, grouped: open.length > 1, ref });
   }
@@ -3315,6 +3547,35 @@ function scopeToolbar(ctx, portfolio, onChange) {
   return bar;
 }
 
+// P91 : combien de cartes ouvertes par présence — les cinq états sont exclusifs,
+// leur somme est donc le nombre de cartes ouvertes.
+function presenceTally(tasks) {
+  const counts = Object.fromEntries(PRESENCE_ORDER.map((k) => [k, 0]));
+  for (const t of tasks) if (counts[presenceOf(t)] !== undefined) counts[presenceOf(t)] += 1;
+  return counts;
+}
+
+function presenceFilterBar(counts, onChange) {
+  if (!PRESENCE_ORDER.some((k) => counts[k])) return null;
+  const bar = document.createElement('div');
+  bar.className = 'ex-presence-filter';
+  bar.dataset.role = 'presence-filter';
+  bar.setAttribute('role', 'group');
+  bar.setAttribute('aria-label', 'Filtrer par présence');
+  for (const state of PRESENCE_ORDER) {
+    const ui = PRESENCE_UI[state];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip';
+    btn.dataset.state = state;
+    btn.setAttribute('aria-pressed', String(presenceFilter.state === state));
+    btn.append(glyph(ui.icon, ui.word, ui.tone), text('span', null, ui.word), text('span', 'mono lbl', String(counts[state])));
+    btn.addEventListener('click', () => { presenceFilter.state = presenceFilter.state === state ? '' : state; onChange(); });
+    bar.append(btn);
+  }
+  return bar;
+}
+
 function appendIf(host, child) {
   if (child) host.append(child);
 }
@@ -3395,6 +3656,7 @@ export async function mount(root, ctx) {
   // La portée de la coque (P31) : « Tous les projets » = le portefeuille.
   scope.mode = ctx.host.kind === 'cockpit' && ctx.scope && ctx.scope.all ? 'portfolio' : 'project';
   let board = await ctx.api.tasks();
+  if (ctx.params.idee) requestIdeaFocus();
 
   // Libellés français des artboards Travail (Tableau / Liste) et Sessions (P33) ; les
   // autres vues réelles gardent un nom clair. « Sessions » porte son compte quand il est lu.
@@ -3447,7 +3709,7 @@ export async function mount(root, ctx) {
     formula.className = 'ex-formula';
     formula.append(text('b', null, '›'), 'grimoire task list');
     // « Nouvelle tâche » (P35) : désactivé, raison écrite, hors du projet servi.
-    head.append(ask, row(formula, ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
+    head.append(ask, row(formula, ...ideaButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() }), ...newTaskButton(ctx, { portfolio: scope.mode === 'portfolio', onToggle: () => draw() })));
     head.lastElementChild.classList.add('ex-head-end');
     return head;
   }
@@ -3481,7 +3743,13 @@ export async function mount(root, ctx) {
       () => {},
     );
     appendIf(wrap, scopeToolbar(ctx, null, redraw));
-    wrap.append(row(...newTaskButton(ctx, { portfolio: false, onToggle: () => draw() })));
+    wrap.append(row(...ideaButton(ctx, { portfolio: false, onToggle: () => draw() }), ...newTaskButton(ctx, { portfolio: false, onToggle: () => draw() })));
+    appendIf(wrap, ideaBlock(ctx, {
+      portfolio: false,
+      onCreated: () => draw(),
+      onOpen: (id) => { selected = { id, project: '' }; draw(); },
+      onChange: () => draw(),
+    }));
     appendIf(wrap, newTask(false));
     wrap.append(ctx.empty(
       'Exécuter',
@@ -3581,12 +3849,21 @@ export async function mount(root, ctx) {
     wrap.replaceChildren();
     const everyTask = tasks;
     if (askMe.on) tasks = tasks.filter(needsHuman);
+    const presenceCounts = presenceTally(tasks);
+    if (presenceFilter.state) tasks = tasks.filter((t) => presenceOf(t) === presenceFilter.state);
     wrap.append(renderHead(everyTask.filter(needsHuman).length));
+    if (view !== 'sessions') appendIf(wrap, presenceFilterBar(presenceCounts, draw));
     if (view === 'sessions') {
       drawSessions(sessions, portfolioMode, kept, opts);
       return;
     }
     appendIf(wrap, scopeToolbar(ctx, portfolio, redraw));
+    appendIf(wrap, ideaBlock(ctx, {
+      portfolio: portfolioMode,
+      onCreated: () => draw(),
+      onOpen: (id) => { selected = { id, project: '' }; if (view === 'sessions' || view === 'decisions') view = 'board4'; draw(); },
+      onChange: () => draw(),
+    }));
     appendIf(wrap, newTask(portfolioMode));
     if (portfolio) {
       const notice = unreadableNotice(portfolio);

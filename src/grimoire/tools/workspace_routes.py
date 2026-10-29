@@ -51,18 +51,15 @@ gate de preuve compris ; un ``project`` du corps qui ne confirme pas la
 racine résolue est refusé. Le chemin historique ``tasks/<id>/<action>`` reste
 ``_HOME_SLUG`` seulement.
 
-Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche
-par le chemin historique, créer un override — reste strictement
-``_HOME_SLUG`` : chaque dérogation est nommée, jamais générale.
+Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche par le
+chemin historique, créer un override — reste ``_HOME_SLUG`` : chaque dérogation est nommée.
 
 Le flux du pouls (``GET /api/workspace/stream``, P10) n'est pas une entrée de
-:data:`GET_ROUTES` : celles-ci rendent une charge utile, lui un flux sans fin.
-:func:`workspace_stream` rend le générateur, l'hôte le recopie sur la socket
-avec :data:`STREAM_HEADERS`.
+:data:`GET_ROUTES` (charge utile) mais un flux sans fin : :func:`workspace_stream`
+rend le générateur, l'hôte le recopie sur la socket avec :data:`STREAM_HEADERS`.
 
-Ajouter une lecture : une entrée dans :data:`GET_ROUTES`. Ajouter une écriture :
-une entrée dans :data:`POST_ROUTES`. Les deux tables sont énumérées par les
-tests, donc une route ajoutée sans test de cible se voit.
+Ajouter une lecture ou une écriture : une entrée dans :data:`GET_ROUTES` ou
+:data:`POST_ROUTES`, énumérées par les tests — une route sans test de cible se voit.
 """
 
 from __future__ import annotations
@@ -78,16 +75,19 @@ from typing import Any
 from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
+    workspace_actions,
     workspace_api,
     workspace_attention,
     workspace_chat,
     workspace_config,
     workspace_exec,
+    workspace_first_launch,
     workspace_hygiene,
     workspace_knowledge,
     workspace_language,
     workspace_machine,
     workspace_memory,
+    workspace_notify,
     workspace_portfolio,
     workspace_pulse,
     workspace_recall,
@@ -481,15 +481,11 @@ def _data_machine(project_root: Path, _query: _Query) -> Any:
 
 def _data_actions(project_root: Path, _query: _Query) -> Any:
     """``GET /api/workspace/data/actions`` — le catalogue des actions typées (ADR-008), sans rien exécuter."""
-    from grimoire.tools import workspace_actions
-
     return workspace_actions.actions_catalogue(project_root)
 
 
 def _data_actions_journal(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/data/actions/journal`` — le journal ajout seul des actions, le plus récent d'abord."""
-    from grimoire.tools import workspace_actions
-
     raw = _one(query, "limit") or ""
     return workspace_actions.actions_journal(project_root, limit=int(raw) if raw.isdigit() else 100)
 
@@ -623,6 +619,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}hooks": _hooks,
     f"{PREFIX}providers": _providers,
     f"{PREFIX}options": _options,
+    **workspace_notify.GET_ROUTES,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -643,6 +640,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}data/actions": _data_actions,
     f"{PREFIX}data/actions/journal": _data_actions_journal,
     f"{PREFIX}setup/guide": _setup_guide,
+    f"{PREFIX}setup/launch": workspace_first_launch.launch_state,
     f"{PREFIX}memory/recall": _memory_recall,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
@@ -652,6 +650,8 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 
 #: Les lectures que les espaces relancent à chaque pouls changé (P79) : gardées par empreinte
 #: (:mod:`grimoire.tools.workspace_read_cache`), seulement quand la requête porte ``live=1``.
+#: Le paramètre que la page pose sur une lecture du direct (P79) ; il ne change jamais la réponse.
+PULSE_RELOAD = "pulse_reload"
 LIVE_ROUTES = frozenset({f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet"})
 
 #: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
@@ -716,12 +716,17 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
         # jamais gardée : son empreinte couvre des ledgers que ce serveur n'écrit pas (e2e du portefeuille rouge en CI
         # seulement, 2026-10-28). Le cache reste celui du projet servi, le cas mesuré par P79.
         foreign = _one(query, "scope") == "portfolio" or bool(_one(query, "project"))
-        if handler is not None and path in LIVE_ROUTES and _one(query, "live") == "1" and not foreign:
+        # Le marqueur du direct n'est jamais un paramètre de route : retiré avant toute lecture. Il s'appelait `live`,
+        # déjà le filtre « Sessions vivantes » de `tasks` en portefeuille : la fiche du projet B y disparaissait (CI de
+        # main, 2026-10-29).
+        reload = _one(query, PULSE_RELOAD) == "1"
+        query = {k: v for k, v in query.items() if k != PULSE_RELOAD}
+        if handler is not None and path in LIVE_ROUTES and reload and not foreign:
             # P79 : un rechargement du direct (`live=1`, posé par la page pendant un pouls changé) est servi une fois
             # par empreinte, pas une par onglet. Un chargement de page ou une navigation relisent toujours.
             from grimoire.tools import workspace_pulse, workspace_read_cache
 
-            plain = {k: v for k, v in query.items() if k != "live"}
+            plain = query
             return workspace_read_cache.cached_read(
                 path, project_root, plain, lambda: handler(project_root, plain),
                 lambda: workspace_pulse.fingerprint_of(project_root),
@@ -935,6 +940,30 @@ def _memory_correct(project_root: Path, body: dict[str, Any]) -> Any:
     )
 
 
+def _task_intake(_project_root: Path, body: dict[str, Any]) -> Any:
+    """« Une idée ? » de Travail : les propositions de l'intake déterministe, sans rien écrire ni LLM."""
+    from grimoire.missions.intake_tasks import proposals_for
+
+    return {"proposals": proposals_for(str(body.get("text") or "")), "written": False}
+
+
+def _task_intake_create(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Créer N tâches » : les propositions cochées par ``TaskService.add``, comme ``tasks/add``.
+
+    Un refus du gate laisse la tâche en ``proposed`` ; la raison revient avec elle.
+    """
+    from grimoire.missions.intake_tasks import create_from_proposals
+    from grimoire.missions.service import TaskService
+
+    items = body.get("tasks")
+    if not isinstance(items, list) or not items:
+        raise ValueError("`tasks` doit lister au moins une proposition")
+    created = create_from_proposals(
+        TaskService(project_root.resolve()), items, actor=str(body.get("actor") or "workspace"), origin="cockpit",
+    )
+    return {"created": created}
+
+
 def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
 
@@ -1014,7 +1043,11 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
     f"{PREFIX}memory/correct": _memory_correct,
+    f"{PREFIX}tasks/intake": _task_intake,
+    f"{PREFIX}tasks/intake/create": _task_intake_create,
     f"{PREFIX}options": _options_write,
+    f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
+    **workspace_notify.POST_ROUTES,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
@@ -1037,6 +1070,7 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
         return service.answer(
             task_id, str(body.get("text") or ""), actor, origin=ORIGIN_HUMAN,
             question_id=str(body.get("question_id") or ""),
+            answer_data=body["answer_data"] if isinstance(body.get("answer_data"), dict) else None,
         )
     if action == "accept":
         # P88 : l'acceptation de la preuve déclarative (#865), même canal humain que `answer` — l'origine est
@@ -1438,8 +1472,6 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
                 return _task_action(project_root, task_id, action, body)
         if path.startswith(f"{PREFIX}data/actions/"):
             # Actions typées (ADR-008 D3) : plan → apply → rollback, journal ajout seul.
-            from grimoire.tools import workspace_actions
-
             action_id, _, verb = path[len(f"{PREFIX}data/actions/") :].strip("/").rpartition("/")
             handlers = {
                 "plan": workspace_actions.plan_action,

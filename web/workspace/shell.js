@@ -58,6 +58,7 @@ import { api, boot, host } from './api.js';
 import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
 import { createChat } from './chat.js';
+import { createNotify } from './notify.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -2446,6 +2447,7 @@ async function refreshAttentionCount({ maxAgeMs = 0 } = {}) {
     if (seq !== attentionSeq) return;
     const unreadable = (data.projects || []).filter((p) => p.state === 'unreadable').length;
     renderAttentionCount(Number(data.count) || 0, unreadable);
+    notify.update(Number(data.count) || 0, data);
   } catch { /* le compteur garde sa dernière valeur : l'espace dit l'erreur */ }
 }
 
@@ -2456,7 +2458,7 @@ function onPulseDecisions() {
   if (attentionFirstRead) {
     attentionFirstRead = false;
     firstSpaceMounted.then(() => {
-      if (document.hidden) {
+      if (document.hidden && !notify.active) {
         // Reprise au prochain pouls visible, par le même chemin.
         attentionFirstRead = true;
         attentionPrint = null;
@@ -2479,6 +2481,15 @@ function openDecisions() {
 const live = createLive({
   onDecisions: onPulseDecisions,
   onState: () => renderLiveStamp(),
+});
+
+// I1 : titre d'onglet, pastille du favicon et notification du navigateur pour une décision attendue.
+const notify = createNotify({
+  live,
+  openDecisions: () => openDecisions(),
+  refresh: () => refreshAttentionCount(),
+  button: $('st-notify'),
+  announce: (text) => { $('notify-live').textContent = text; },
 });
 
 // « mis à jour il y a 4 s » : écrit par le minuteur d'une seconde (aucune requête),
@@ -2569,6 +2580,11 @@ async function buildPalette() {
   spaces.splice(1, 0, {
     section: 'Espaces', label: 'À traiter › Démarrer', hint: 'Premier lancement, lecture seule',
     command: 'grimoire cockpit serve # a-traiter?view=demarrer', run: () => goto('a-traiter', { view: 'demarrer' }),
+  });
+
+  spaces.push({
+    section: 'Espaces', label: 'Travail › Une idée ?', hint: 'Raccourci n',
+    command: 'grimoire task add --intake "<idée>" --create', run: () => goto('travail', { idee: '1' }),
   });
 
   const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
@@ -2890,6 +2906,7 @@ async function runCommand(argv) {
 const SHORTCUTS = [
   ['⌘K', 'Ouvrir la palette, depuis tous les espaces'],
   ['⌘1 à ⌘5', "Aller à l'espace 1 à 5"],
+  ['N', 'Une idée ? : proposer des tâches depuis une phrase (espace Travail)'],
   ['J / K', 'Ligne suivante / précédente, dans toutes les listes'],
   ['Entrée', "Lancer l'action principale de la ligne tenue"],
   ['1 à 5', 'Ouvrir ou fermer un panneau'],
@@ -2976,6 +2993,7 @@ function bindShortcuts() {
       else triggerRailAction(item.id, event);
       return;
     }
+    if (event.key === 'n' && !meta && !event.altKey && !event.shiftKey) { event.preventDefault(); goto('travail', { idee: '1' }); return; }
     if (event.key === '`') { event.preventDefault(); focusConsole(); }
   });
 }

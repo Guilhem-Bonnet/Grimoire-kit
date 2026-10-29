@@ -402,7 +402,7 @@ const ATTENTION_WORDS = {
   proposal: ['proposition', 'propositions', 'warn'],
   review_blocked: ['revue bloquée', 'revues bloquées', 'warn'],
   task_blocked: ['tâche bloquée', 'tâches bloquées', 'bad'],
-  directive_unacked: ['consigne non accusée', 'consignes non accusées', 'warn'],
+  directive_unacked: ['consigne en attente de lecture', 'consignes en attente de lecture', 'warn'],
   claim_orphaned: ['claim sans session', 'claims sans session', 'warn'],
   service: ['service en échec', 'services en échec', 'bad'],
   unreadable: ['projet illisible', 'projets illisibles', 'bad'],

@@ -160,7 +160,8 @@ def _word() -> str:
     return "mot" + uuid.uuid4().hex[:10]
 
 
-def _open_entry(page: Page, srv: dict[str, Any], term: str, title: str, *, project: str = "forge_slug") -> None:
+def _open_entry(page: Page, srv: dict[str, Any], term: str, title: str, *, project: str = "forge_slug",
+                projection: bool = False) -> None:
     page.goto(f"{srv['base']}/workspace/index.html?project={srv[project]}#savoir/memoire", wait_until="domcontentloaded")
     page.wait_for_selector("body[data-ready='1']", timeout=30_000)
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'memoire'")
@@ -173,6 +174,8 @@ def _open_entry(page: Page, srv: dict[str, Any], term: str, title: str, *, proje
         " && document.querySelector('.kn-summary')?.textContent.includes('résultat')",
         arg=term, timeout=30_000,
     )
+    if projection:  # les projections de code sont décochées d'office : « +N projections » les rend
+        page.locator(".kn-proj-more").click()
     page.locator(".kn-res", has_text=title).first.click()
     page.wait_for_function(
         "(t) => document.querySelector('#inspector-body .kn-detail h2')?.textContent.includes(t)", arg=title,
@@ -389,7 +392,7 @@ def test_une_projection_montre_corriger_la_source(page_p34: tuple[Page, dict[str
         "meta": {"projection_group": "code", "source_kind": "projection", "file_path": "project-context.yaml",
                  "line_start": 3},
     }])
-    _open_entry(page, srv, word, f"Projection {word}")
+    _open_entry(page, srv, word, f"Projection {word}", projection=True)
     detail = page.locator("#inspector-body .kn-detail")
     fix = detail.locator(".kn-fix[data-fix='source']")
     assert "elle se corrige à sa source" in fix.inner_text()

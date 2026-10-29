@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Génère web/workspace/icons.svg (sprite de <symbol>) depuis docs/assets/icons/*.svg
-et docs/assets/cockpit-icons/*.svg.
+docs/assets/cockpit-icons/*.svg et docs/assets/action-icons/*.svg
+(`i-act-*`, tracés Lucide sous licence ISC, trait ramené à 1,75).
 
 Les deux dossiers suivent la même grammaire (direction « Douce » : grille 24,
 trait 1,75, `stroke="currentColor"` porté par la racine <svg>). Seules
@@ -30,6 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "docs" / "assets" / "icons"
 SRC_COCKPIT = ROOT / "docs" / "assets" / "cockpit-icons"
+SRC_ACTION = ROOT / "docs" / "assets" / "action-icons"
 OUT = ROOT / "web" / "workspace" / "icons.svg"
 
 #: Ancien nom cité par web/workspace → icône de la famille Douce qui le remplace
@@ -83,6 +85,10 @@ def build() -> str:
         parts.append(f'  <symbol id="{old}" {attrs}>{body}</symbol>')
     parts.append("  <!-- Icônes Douce du cockpit (docs/assets/cockpit-icons), copiées telles quelles. -->")
     for path in sorted(SRC_COCKPIT.glob("*.svg")):
+        attrs, body = _symbol(path.read_text(encoding="utf-8"))
+        parts.append(f'  <symbol id="{path.stem}" {attrs}>{body}</symbol>')
+    parts.append("  <!-- Icônes d'action (docs/assets/action-icons) : tracés Lucide (ISC), voir web/workspace/icons/NOTICE. -->")
+    for path in sorted(SRC_ACTION.glob("*.svg")):
         attrs, body = _symbol(path.read_text(encoding="utf-8"))
         parts.append(f'  <symbol id="{path.stem}" {attrs}>{body}</symbol>')
     parts.append("</svg>")

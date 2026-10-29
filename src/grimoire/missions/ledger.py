@@ -21,13 +21,13 @@ import re
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
-from grimoire.core.fsio import atomic_write, locked
+from grimoire.core.fsio import locked
 from grimoire.missions import ledger_snapshot as snapshot
 from grimoire.missions.lease import (
     CLOCK_TOLERANCE_SECONDS,
@@ -44,6 +44,7 @@ from grimoire.missions.lease import (
     read_lease,
     write_lease,
 )
+from grimoire.missions.ledger_append import FileSig, append_bytes, file_sig
 from grimoire.missions.ledger_rules import (
     UnjudgedClaimError,
     blocks_path,
@@ -56,6 +57,10 @@ from grimoire.missions.ledger_rules import (
     unfenced_question,
     waiting_guard,
 )
+from grimoire.missions.ledger_views import HolderCheck as HolderCheck
+from grimoire.missions.ledger_views import LeaseView as LeaseView
+from grimoire.missions.ledger_views import ReapDecision as ReapDecision
+from grimoire.missions.ledger_views import ReapReport as ReapReport
 from grimoire.missions.questions import QUESTION_EVENTS
 from grimoire.missions.reclaim import release_lost_claim
 from grimoire.missions.schemas import (
@@ -171,68 +176,6 @@ _RESUMING = (TaskState.WAITING, TaskState.NEEDS_VERIFICATION)
 ORIGIN_REAP = "reap"
 
 
-@dataclass(frozen=True, slots=True)
-class LeaseView:
-    """L'état du bail d'une tâche tenue : ``valid``, ``lost`` ou ``unknown`` (horloge incohérente)."""
-
-    task_id: str
-    status: str
-    reason: str
-    epoch: int
-    actor_id: str
-    host: str
-    session_id: str = ""
-    #: Version de l'hôte de la session (K3) ; ``""`` = inconnue, donc hôte non fencé.
-    host_version: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class HolderCheck:
-    """Le verdict du contrôle d'epoch d'un titulaire — ``source`` : ``lease`` (cache) ou ``ledger``."""
-
-    ok: bool
-    reason: str
-    source: str
-
-
-@dataclass(frozen=True, slots=True)
-class ReapDecision:
-    """Ce que la récolte fait d'un bail perdu : ``ready`` (relancée) ou ``defer`` (cause nommée)."""
-
-    task_id: str
-    action: str
-    cause: str
-    epoch: int
-    attempts: int
-    retry_at: str = ""
-    written: bool = False
-    #: La question posée à l'humain quand la cause est ``resume_unfenced`` (K3) ; ``""`` sinon.
-    question: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "task_id": self.task_id,
-            "action": self.action,
-            "cause": self.cause,
-            "epoch": self.epoch,
-            "attempts": self.attempts,
-            "retry_at": self.retry_at,
-            "written": self.written,
-            **({"question": self.question} if self.question else {}),
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ReapReport:
-    """Le résultat d'une récolte : ``clock`` vaut ``unknown`` quand rien n'a pu être jugé."""
-
-    clock: str
-    decisions: tuple[ReapDecision, ...] = ()
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"clock": self.clock, "decisions": [d.to_dict() for d in self.decisions]}
-
-
 def _slug(title: str, limit: int) -> str:
     """Fragment d'identifiant sûr dans un chemin.
 
@@ -279,13 +222,14 @@ def _confined_ledger_file(path: Path) -> Path:
 def _ledger_file_lock(target_path: Path) -> Iterator[None]:
     """Verrou exclusif inter-processus sur *target_path* — :func:`grimoire.core.fsio.locked`.
 
-    ``_atomic_append`` lit le fichier entier, ajoute une ligne, puis renomme
-    un temporaire par-dessus : sans ce verrou, deux écrivains concurrents
-    (deux requêtes HTTP du cockpit servies par des threads séparés,
-    typiquement) peuvent tous deux lire le même contenu avant que l'un des
-    deux n'écrive — le second écrase alors l'événement du premier, silencieux
-    (« lost update »). :meth:`MissionLedger.transition_task` relit et valide
-    sous ce même verrou : un compare-and-set (issue #710).
+    ``_atomic_append`` ajoute une ligne en fin de fichier (``open('ab')``, un
+    seul ``write``, ``fsync``) ; le verrou sérialise les écrivains (deux
+    requêtes HTTP du cockpit servies par des threads séparés, typiquement) :
+    la réparation d'une fin tronquée et l'empreinte « avant / après » de
+    l'ajout ne valent que pour un seul écrivain à la fois, et
+    :meth:`MissionLedger.transition_task` relit et valide sous ce même
+    verrou : un compare-and-set (issue #710). Les lecteurs n'en ont pas
+    besoin : une dernière ligne sans ``\\n`` (ajout en cours) n'est pas lue.
 
     Un verrou impossible à prendre (délai dépassé, système de fichiers sans
     ``flock``) lève :class:`GrimoireMissionError` au lieu d'écrire sans
@@ -340,16 +284,37 @@ class MissionLedger:
         self.claim_guard: Callable[..., str] | None = None
         self.project_root: Path | None = None  #: #886 : projet des réglages d'hôte du frein ; None = cwd
         self._loaded = False
+        #: Empreinte (taille, mtime, inode) des deux journaux au chargement : l'état en mémoire n'est cru que si elle tient encore.
+        self._loaded_key: tuple[FileSig, FileSig] | None = None
         self._snapshot: snapshot.Cover | None = None  # K13 : ce que l'instantané restauré couvre
 
     # ── Private helpers ────────────────────────────────────────────────────
 
     def _load(self) -> None:
+        # Un journal qui a bougé hors de cette instance (autre processus, autre `TaskService`) rend l'état périmé :
+        # avant l'ajout en direct, chaque écriture jetait l'état, ce qui le rafraîchissait de fait.
         if self._loaded:
-            return
+            if self._loaded_key == self._file_key():
+                return
+            self._invalidate()
+        # Empreinte prise *avant* la lecture : un ajout concurrent entre les deux la fait diverger, jamais l'inverse.
+        key = self._file_key()
         self._replay_events()
         self._replay_incidents()
+        self._loaded_key = key
         self._loaded = True
+
+    def _file_key(self) -> tuple[FileSig, FileSig]:
+        return (file_sig(self._events_path), file_sig(self._incidents_path))
+
+    def _refresh(self) -> None:
+        """Jette l'état en mémoire seulement si un journal a bougé depuis qu'il a été projeté.
+
+        Sous le verrou, c'est le « relire pour juger sur l'état frais » de #710 sans le coût d'un
+        rejeu complet quand personne d'autre n'a écrit (taille, mtime et inode inchangés).
+        """
+        if not self._loaded or self._loaded_key != self._file_key():
+            self._invalidate()
 
     def _replay_events(self) -> None:
         if not self._events_path.exists():
@@ -358,74 +323,78 @@ class MissionLedger:
         replay = snapshot.resume_from_snapshot(self)  # K13 : l'état d'un instantané prouvé, puis la suite seule
         records, self._unreadable = replay.records()  # K12 : lignes illisibles numérotées sur tout le journal
         for raw in records:
-            evt_type = raw.get("event_type", "")
-            payload = raw.get("payload", {})
-            if evt_type == "mission.created":
-                m = Mission.from_dict(payload)
-                self._missions[m.id] = m
-            elif evt_type == "mission.transitioned":
-                mid = payload["mission_id"]
-                if mid in self._missions:
-                    old = self._missions[mid]
-                    self._missions[mid] = Mission.from_dict({**old.to_dict(), "status": payload["to_state"]})
-            elif evt_type == "task.created":
-                t = MissionTask.from_dict(payload)
-                self._tasks[t.id] = t
-            elif evt_type == "task.transitioned":
-                tid = payload["task_id"]
-                if tid in self._tasks:
-                    refusal = self._effect_refusal(tid, payload)
-                    if refusal:
-                        self._rejected[str(raw.get("id", ""))] = refusal
-                    else:
-                        self._apply_transition(tid, payload, str(raw.get("created_at", "")))
-            elif evt_type == LEASE_RENEWED_EVENT:
-                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
-                refusal = self._effect_refusal(tid, payload)
-                current = self._tasks.get(tid)
-                if refusal or current is None or current.claim is None:
-                    self._rejected[str(raw.get("id", ""))] = refusal or "aucun claim à renouveler"
-                else:
-                    claim = replace(current.claim, expires_at=str(payload.get("expires_at", "") or ""))
-                    self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
-            elif evt_type in _STEERING_EVENTS:
-                replay_steering(self._tasks, evt_type, payload, str(raw.get("created_at", "") or ""))
-            elif evt_type == SESSION_ATTACHED_EVENT:
-                # Issue #638 lot A : le claim apprend sa session après coup. Un
-                # événement de plus dans le journal, jamais une ligne réécrite ;
-                # sans claim au rejeu (tâche jamais réclamée, ou événement
-                # orphelin), il n'y a rien à compléter et rien n'est inventé.
-                # La tâche ciblée est ``entity_id`` — la clé que tout événement
-                # du journal porte — et non une copie dans le payload qui
-                # pourrait manquer ou diverger (revue Copilot, PR #639).
-                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
-                current = self._tasks.get(tid)
-                if current is not None and current.claim is not None:
-                    claim = current.claim.with_session(
-                        str(payload.get("session_id", "") or ""),
-                        canonical_host(str(payload.get("session_host", "") or "")),
-                        # Issue #695 : seul un ``task attach`` marque ``explicit``.
-                        explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
-                        host_version=str(payload.get("session_host_version", "") or ""),
-                        agent_id=str(payload.get("agent_id", "") or ""),
-                    )
-                    self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
-            elif evt_type in (TASK_LINKED_EVENT, _LEGACY_LINK_EVENT, TASK_UNLINKED_EVENT):
-                # W5-01 : avant, aucun lien n'était rejoué ; #906 : un retrait se rejoue aussi.
-                replay_link(self._tasks, raw, payload, remove=evt_type == TASK_UNLINKED_EVENT)
-            elif evt_type == RISK_ACCEPTED_EVENT:
-                # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
-                # Un événement orphelin n'invente rien ; l'horodatage de
-                # l'événement est gardé (``ts``) pour l'affichage.
-                tid = str(raw.get("entity_id") or payload.get("task_id") or "")
-                current = self._tasks.get(tid)
-                if current is not None:
-                    risk = {**payload, "ts": str(raw.get("created_at", "") or "")}
-                    self._tasks[tid] = MissionTask.from_dict(
-                        {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
-                    )
-            self._events.append(LedgerEvent.from_dict(raw))
+            self._apply_record(raw)
         snapshot.save_if_slow(self, replay)
+
+    def _apply_record(self, raw: dict[str, Any]) -> None:
+        """Projette un événement du journal sur l'état en mémoire — le rejeu comme l'ajout en direct."""
+        evt_type = raw.get("event_type", "")
+        payload = raw.get("payload", {})
+        if evt_type == "mission.created":
+            m = Mission.from_dict(payload)
+            self._missions[m.id] = m
+        elif evt_type == "mission.transitioned":
+            mid = payload["mission_id"]
+            if mid in self._missions:
+                old = self._missions[mid]
+                self._missions[mid] = Mission.from_dict({**old.to_dict(), "status": payload["to_state"]})
+        elif evt_type == "task.created":
+            t = MissionTask.from_dict(payload)
+            self._tasks[t.id] = t
+        elif evt_type == "task.transitioned":
+            tid = payload["task_id"]
+            if tid in self._tasks:
+                refusal = self._effect_refusal(tid, payload)
+                if refusal:
+                    self._rejected[str(raw.get("id", ""))] = refusal
+                else:
+                    self._apply_transition(tid, payload, str(raw.get("created_at", "")))
+        elif evt_type == LEASE_RENEWED_EVENT:
+            tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+            refusal = self._effect_refusal(tid, payload)
+            current = self._tasks.get(tid)
+            if refusal or current is None or current.claim is None:
+                self._rejected[str(raw.get("id", ""))] = refusal or "aucun claim à renouveler"
+            else:
+                claim = replace(current.claim, expires_at=str(payload.get("expires_at", "") or ""))
+                self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
+        elif evt_type in _STEERING_EVENTS:
+            replay_steering(self._tasks, evt_type, payload, str(raw.get("created_at", "") or ""))
+        elif evt_type == SESSION_ATTACHED_EVENT:
+            # Issue #638 lot A : le claim apprend sa session après coup. Un
+            # événement de plus dans le journal, jamais une ligne réécrite ;
+            # sans claim au rejeu (tâche jamais réclamée, ou événement
+            # orphelin), il n'y a rien à compléter et rien n'est inventé.
+            # La tâche ciblée est ``entity_id`` — la clé que tout événement
+            # du journal porte — et non une copie dans le payload qui
+            # pourrait manquer ou diverger (revue Copilot, PR #639).
+            tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+            current = self._tasks.get(tid)
+            if current is not None and current.claim is not None:
+                claim = current.claim.with_session(
+                    str(payload.get("session_id", "") or ""),
+                    canonical_host(str(payload.get("session_host", "") or "")),
+                    # Issue #695 : seul un ``task attach`` marque ``explicit``.
+                    explicit_at=str(raw.get("created_at", "") or "") if payload.get("explicit") else "",
+                    host_version=str(payload.get("session_host_version", "") or ""),
+                    agent_id=str(payload.get("agent_id", "") or ""),
+                )
+                self._tasks[tid] = MissionTask.from_dict({**current.to_dict(), "claim": claim.to_dict()})
+        elif evt_type in (TASK_LINKED_EVENT, _LEGACY_LINK_EVENT, TASK_UNLINKED_EVENT):
+            # W5-01 : avant, aucun lien n'était rejoué ; #906 : un retrait se rejoue aussi.
+            replay_link(self._tasks, raw, payload, remove=evt_type == TASK_UNLINKED_EVENT)
+        elif evt_type == RISK_ACCEPTED_EVENT:
+            # W2-10 : la tâche ciblée est ``entity_id``, comme pour la session.
+            # Un événement orphelin n'invente rien ; l'horodatage de
+            # l'événement est gardé (``ts``) pour l'affichage.
+            tid = str(raw.get("entity_id") or payload.get("task_id") or "")
+            current = self._tasks.get(tid)
+            if current is not None:
+                risk = {**payload, "ts": str(raw.get("created_at", "") or "")}
+                self._tasks[tid] = MissionTask.from_dict(
+                    {**current.to_dict(), "accepted_risks": [*(dict(r) for r in current.accepted_risks), risk]}
+                )
+        self._events.append(LedgerEvent.from_dict(raw))
 
     def _apply_transition(self, tid: str, payload: dict[str, Any], at: str = "") -> None:
         old_task = self._tasks[tid]
@@ -487,6 +456,7 @@ class MissionLedger:
         self._idem_seen = set()
         self._unreadable = ()
         self._snapshot = None
+        self._loaded_key = None
         self._loaded = False
 
     def unreadable_lines(self) -> tuple[int, ...]:
@@ -517,24 +487,38 @@ class MissionLedger:
             created_at=_now_iso(),
             payload=payload,
         )
+        record = evt.to_dict()
         if lock_held:
-            self._write_appended(self._events_path, evt.to_dict())
+            before, after = self._write_appended(self._events_path, record)
         else:
-            self._atomic_append(self._events_path, evt.to_dict())
-        self._invalidate()
+            before, after = self._atomic_append(self._events_path, record)
+        # L'événement s'applique à l'état en mémoire si le journal n'avait pas bougé depuis son chargement
+        # (même empreinte avant l'écriture, fin non réparée) ; sinon l'état est jeté et rejoué à la demande.
+        if self._loaded and self._loaded_key is not None and before is not None and self._loaded_key[0] == before:
+            try:
+                self._apply_record(json.loads(json.dumps(record, ensure_ascii=False)))
+            except Exception:  # l'état à demi appliqué ne se garde pas : le rejeu fait foi
+                self._invalidate()
+            else:
+                self._loaded_key = (after, self._loaded_key[1])
+        else:
+            self._invalidate()
         return evt
 
-    def _atomic_append(self, path: Path, record: dict[str, Any]) -> None:
-        # Verrouillé : lire « existing » puis renommer un temporaire par-dessus
-        # n'est atomique que pour un seul écrivain à la fois. Deux requêtes
-        # concurrentes (cockpit multi-thread) sans ce verrou perdaient
-        # silencieusement l'une des deux écritures (« lost update »).
+    def _atomic_append(self, path: Path, record: dict[str, Any]) -> tuple[FileSig, FileSig]:
+        # Verrouillé : sans verrou, deux ajouts concurrents (cockpit multi-thread)
+        # pourraient s'entrelacer avec la réparation d'une fin tronquée et fausser
+        # l'empreinte « avant » qui décide si l'état en mémoire suit l'ajout.
         with _ledger_file_lock(path):
-            self._write_appended(path, record)
+            return self._write_appended(path, record)
 
     @staticmethod
-    def _write_appended(path: Path, record: dict[str, Any]) -> None:
-        """Ajoute *record* à *path* par temporaire + rename — l'appelant tient le verrou.
+    def _write_appended(path: Path, record: dict[str, Any]) -> tuple[FileSig, FileSig]:
+        """Ajoute *record* à *path* (``open('ab')``, un seul ``write``, ``fsync``) — l'appelant tient le verrou.
+
+        Rend l'empreinte (taille, mtime, inode) du fichier juste avant puis juste après l'écriture ;
+        « avant » est ``None`` si la fin tronquée a dû être refermée (l'état en mémoire ne la suit pas).
+        Le coût ne dépend plus de la taille du journal : plus de relecture ni de réécriture complète.
 
         ``flock`` n'est pas réentrant d'un descripteur à l'autre : qui tient déjà
         :func:`_ledger_file_lock` (``transition_task``) écrit par ici, jamais
@@ -544,11 +528,7 @@ class MissionLedger:
         line = json.dumps(record, ensure_ascii=False) + "\n"
         # K12 : octets relus tels quels (une fin coupée dans un caractère ne rend pas le journal inécrivable),
         # et une fin tronquée sans saut de ligne ne colle pas l'événement suivant à sa ligne illisible.
-        existing = path.read_bytes() if path.exists() else b""
-        existing += b"\n" if existing and not existing.endswith(b"\n") else b""
-        # K2 (§2.3) : ajout puis ``fsync`` — ``atomic_write`` synchronise le
-        # fichier et le dossier avant de rendre la main.
-        atomic_write(path, existing + line.encode("utf-8"))
+        return append_bytes(path, line.encode("utf-8"))
 
     def _next_seq(self, prefix: str, id_map: dict[str, Any]) -> str:
         existing = [k for k in id_map if k.startswith(prefix)]
@@ -702,7 +682,7 @@ class MissionLedger:
         ``RUNNING → READY`` est réservé à la récolte (:meth:`reap`).
         """
         with _ledger_file_lock(self._events_path):
-            self._invalidate()
+            self._refresh()
             self._load()
             return self._transition_locked(
                 task_id, to_state, actor_id, reason, claim, extra_payload, expected_from, lease_epoch, step
@@ -833,7 +813,7 @@ class MissionLedger:
         un nouveau claim (``resume_hint`` dit comment). *cause* nomme ce qui a réveillé la tâche.
         """
         with _ledger_file_lock(self._events_path):
-            self._invalidate()
+            self._refresh()
             self._load()
             task = self._tasks.get(task_id)
             if task is None:
@@ -855,7 +835,7 @@ class MissionLedger:
     def resume_attested(self, task_id: str, *, actor_id: str, reason: str) -> MissionTask:
         """``waiting → running`` sur place (K6-S2-02) : décision de checkpoint attestée, le run continue chez son titulaire."""
         with _ledger_file_lock(self._events_path):
-            self._invalidate()
+            self._refresh()
             self._load()
             task = self._tasks.get(task_id)
             if task is None or task.claim is None:
@@ -875,7 +855,7 @@ class MissionLedger:
         présent est un succès sans nouvel événement.
         """
         with _ledger_file_lock(self._events_path):
-            self._invalidate()
+            self._refresh()
             self._load()
             task = self._tasks.get(task_id)
             if task is None:
@@ -1015,7 +995,7 @@ class MissionLedger:
         claim et que l'horloge est cohérente : au plus un événement par demi-TTL.
         """
         with _ledger_file_lock(self._events_path):
-            self._invalidate()
+            self._refresh()
             self._load()
             task = self._tasks.get(task_id)
             if task is None:
@@ -1052,7 +1032,7 @@ class MissionLedger:
         if not text:
             raise GrimoireMissionError("Une note de progression ne peut pas être vide")
         with _ledger_file_lock(self._events_path):
-            self._invalidate()
+            self._refresh()
             self._load()
             task = self._tasks.get(task_id)
             if task is None:
@@ -1132,7 +1112,7 @@ class MissionLedger:
         """
         is_quota = quota_blocked or self._last_route_quota
         with _ledger_file_lock(self._events_path):
-            self._invalidate()
+            self._refresh()
             self._load()
             moment = now or self._now()
             if self.clock_state(moment) == "unknown":

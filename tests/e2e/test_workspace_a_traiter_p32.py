@@ -490,7 +490,7 @@ def test_p52_a_390_px_une_colonne_une_action_par_decision_sans_defilement_horizo
         assert len({round(r["right"]) for r in measured["rows"]}) == 1, measured["rows"]
         for row in measured["rows"]:
             left, right, width, height = row["act"]
-            assert 0 <= left and right <= iw, f"action hors de l'écran : {row}"
+            assert left >= 0 and right <= iw, f"action hors de l'écran : {row}"
             assert width > 0 and height > 0, f"action invisible : {row}"
         for kind in ("question", "proposal", "task_blocked"):
             action = shot.locator(f".at-row[data-kind='{kind}'] .at-act")

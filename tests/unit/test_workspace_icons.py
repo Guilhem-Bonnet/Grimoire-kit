@@ -12,7 +12,7 @@ dessine plus d'icône en ligne.
 P30 (fin du point polysémique) y ajoute les familles d'identité : types de
 tâche (`i-task-*`, un par valeur de `TaskType`), rôles de base (`i-store-*`),
 hôtes génériques sans logo (`i-host-*`), mémoire (`i-mem-*`), vivacité de
-session (`i-session-*`), profil de risque (`i-risk-*`) et huit compositions
+session (`i-session-*`, dont « à reprendre », P91), profil de risque (`i-risk-*`) et huit compositions
 d'état vide (`i-empty-*`, grille 96 × 64).
 """
 
@@ -41,6 +41,7 @@ def _aliases() -> dict[str, str]:
 
 
 COCKPIT_ICONS = ROOT / "docs" / "assets" / "cockpit-icons"
+ACTION_ICONS = ROOT / "docs" / "assets" / "action-icons"
 _SYMBOL_RE = re.compile(r'<symbol id="(i-[a-z0-9-]+)"([^>]*)>(.*?)</symbol>', re.DOTALL)
 _TAG_RE = re.compile(r"<([a-zA-Z]+)\b([^>]*)>")
 _ATTR_RE = re.compile(r'([a-zA-Z-]+)="([^"]*)"')
@@ -104,10 +105,11 @@ def test_every_source_icon_is_in_sprite() -> None:
     sources = {p.stem for p in (ROOT / "docs" / "assets" / "icons").glob("*.svg")}
     cockpit = {p.stem for p in COCKPIT_ICONS.glob("*.svg")}
     aliases = _aliases()
+    action = {p.stem for p in ACTION_ICONS.glob("*.svg")}
     assert sources and cockpit and not (sources & cockpit)
     assert not (set(aliases) & (sources | cockpit)), "un alias masque une icône réelle"
     assert set(aliases.values()) <= sources, "un alias pointe hors de la famille"
-    assert sources | cockpit | set(aliases) == _symbols()
+    assert sources | cockpit | action | set(aliases) == _symbols()
 
 
 def test_sprite_follows_current_color() -> None:
@@ -133,9 +135,10 @@ FAMILIES = {
     "i-store-": 8,
     "i-host-": 5,
     "i-mem-": 6,
-    "i-session-": 4,
+    "i-session-": 5,
     "i-risk-": 4,
     "i-empty-": 8,
+    "i-act-": 19,
 }
 
 
@@ -242,3 +245,13 @@ def _resolve(raw: dict[str, str]) -> dict[str, str]:
             seen += 1
         out[name] = value
     return out
+
+
+def test_les_dix_neuf_icones_d_action_portent_la_licence_lucide() -> None:
+    """P38 : exception Lucide accordée, donc NOTICE ISC et charte sans icône d'identité empruntée."""
+    ids = [sid for sid, _, _ in _douce_symbols() if sid.startswith("i-act-")]
+    assert len(ids) == 19
+    notice = (WORKSPACE / "icons" / "NOTICE").read_text(encoding="utf-8")
+    assert "ISC License" in notice and "Lucide" in notice
+    charter = (ROOT / "docs" / "assets" / "brand" / "README-brand.md").read_text(encoding="utf-8")
+    assert "aucune icône d'identité empruntée" in charter
