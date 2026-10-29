@@ -103,7 +103,8 @@ def chat_mode(root: Path | None = None) -> tuple[str, tuple[str, ...], str]:
     """
     override = os.environ.get(AGENT_COMMAND_ENV, "").strip()
     if override:
-        return "acp", tuple(shlex.split(override)), ""
+        # Windows : le découpage POSIX mange les « \ » des chemins.
+        return "acp", tuple(shlex.split(override, posix=os.name != "nt")), ""
     from grimoire.hosts.acp_hosts import KANBAN, acp_availability, chosen_alias
     from grimoire.hosts.capabilities import profile_for, resolve_host
 
