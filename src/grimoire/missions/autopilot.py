@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import re
 import unicodedata
 import uuid
@@ -144,7 +145,9 @@ def _outside_repo(texts: list[str], project_root: Path) -> bool:
     if not found:
         return True
     for raw in found:
-        if raw.startswith(("~", "..")) or re.match(r"[a-zA-Z]:", raw):
+        # Une lettre de lecteur n'est « hors dépôt » d'office que hors Windows, où elle ne désigne rien ;
+        # sous Windows c'est un chemin absolu ordinaire, jugé par `relative_to` comme les autres.
+        if raw.startswith(("~", "..")) or (os.name != "nt" and re.match(r"[a-zA-Z]:", raw)):
             return True
         try:
             Path(raw).resolve().relative_to(root)
