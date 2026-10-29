@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -35,9 +35,13 @@ from grimoire.missions.waiting import (
     HUMAN_ANSWERED_EVENT,
     QUESTION_ASKED_EVENT,
     QUESTION_KINDS,
+    Attachment,
+    Choice,
     Question,
+    Recommendation,
     Waiting,
     new_question_id,
+    question_problem,
 )
 
 if TYPE_CHECKING:
@@ -285,6 +289,12 @@ class QuestionSpec:
     #: Réponse déduite (non bloquante seulement), avec ``source`` obligatoire : jamais posée à l'humain.
     answer: str = ""
     source: str = ""
+    #: P92 : les champs de la question v2, repris tels quels dans la ``Question`` du lot.
+    title: str = ""
+    context: str = ""
+    choices: tuple[Choice, ...] = ()
+    attachments: tuple[Attachment, ...] = ()
+    recommendation: Recommendation | None = None
 
     def problem(self) -> str:
         if not self.text.strip():
@@ -318,6 +328,11 @@ class QuestionSpec:
             recommended=str(d.get("recommended", "") or ""),
             answer=str(d.get("answer", "") or ""),
             source=str(d.get("source", "") or ""),
+            title=str(d.get("title", "") or ""),
+            context=str(d.get("context", "") or ""),
+            choices=tuple(Choice.from_dict(c) for c in d.get("choices") or () if isinstance(c, dict)),
+            attachments=tuple(Attachment.from_dict(a) for a in d.get("attachments") or () if isinstance(a, dict)),
+            recommendation=Recommendation.from_dict(r) if isinstance(r := d.get("recommendation"), dict) else None,
         )
 
 
@@ -352,6 +367,12 @@ class BatchPlan:
         }
 
 
+def _next_round_in(task: MissionTask, question: Question) -> tuple[int, str]:
+    """``(round, supersedes)`` : les questions déjà au registre de la tâche sous la même clé."""
+    same = [r.question for r in records_of(task) if r.question.key == question.key]
+    return (len(same) + 1, same[-1].id) if same else (1, "")
+
+
 def plan_batch(task: MissionTask, specs: list[QuestionSpec], *, origin: str = "agent") -> BatchPlan:
     """Le plan d'un lot, sans rien écrire. Lève ``ValueError`` sur une question invalide.
 
@@ -376,9 +397,27 @@ def plan_batch(task: MissionTask, specs: list[QuestionSpec], *, origin: str = "a
             reused.append(known[key])
             continue
         question = Question(
-            new_question_id(), spec.kind, spec.text.strip(), spec.options, origin, moment,
-            blocking=spec.blocking, why=spec.why.strip(), key=key, recommended=spec.recommended.strip(),
+            new_question_id(),
+            spec.kind,
+            spec.text.strip(),
+            spec.options,
+            origin,
+            moment,
+            blocking=spec.blocking,
+            why=spec.why.strip(),
+            key=key,
+            recommended=spec.recommended.strip(),
+            title=spec.title.strip(),
+            context=spec.context.strip(),
+            choices=spec.choices,
+            attachments=spec.attachments,
+            recommendation=spec.recommendation,
         )
+        if question.is_v2:  # le fil se lit au ledger : même clé, round suivant
+            number, previous = _next_round_in(task, question)
+            question = replace(question, round=number, supersedes=previous)
+        if problem := question_problem(question):
+            raise ValueError(problem)
         if spec.answer.strip():
             deduced.append((question, spec))
         else:

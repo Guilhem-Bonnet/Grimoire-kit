@@ -650,6 +650,8 @@ def test_sans_mandat_une_question_non_bloquante_puis_l_humain_fusionne_et_accept
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION  # pas garée : l'humain peut agir
     [question] = questions(projet, tid)
     assert question.text.startswith("Fusionner la PR #7") and "aucun mandat" in question.text and not question.blocking
+    assert question.title == "Fusionner cette pull request ?" and tid not in question.title  # P92 : la décision, sans identifiant
+    assert [a.type for a in question.attachments] == ["command"] and question.attachments[0].mutates
     assert merges(tick(projet, host)) == [("human", "waiting")] and len(questions(projet, tid)) == 1  # posée une fois
     human_merges(projet, host, tid)
     report = tick(projet, host)  # la fusion constatée ; l'acceptation reste à l'humain
@@ -658,6 +660,7 @@ def test_sans_mandat_une_question_non_bloquante_puis_l_humain_fusionne_et_accept
     assert merged.payload["origin"] == "remote" and merged.payload["mandate_id"] == ""
     accept_q = questions(projet, tid)[-1]
     assert accept_q.text.startswith(f"Accepter {tid}") and f"--project-root {wt}" in accept_q.text
+    assert accept_q.title == "Accepter le travail livré ?" and tid not in accept_q.title and tid not in accept_q.context
     task = TaskService(wt).require(tid)
     accept_task(task, wt, wt / EVIDENCE, "relu et fusionné", "guilhem", origin=ORIGIN_HUMAN)  # ce que `task accept` fait
     TaskService(wt).transition(tid, TaskState.CLOSED, "guilhem")
@@ -1116,6 +1119,9 @@ def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost)
     assert merges(report) == [("escalate", "done")]
     task = TaskService(projet).require(tid)
     assert task.status is TaskState.WAITING and "échoue à répétition" in task.waiting.question.text  # type: ignore[union-attr]
+    v2 = task.waiting.question  # type: ignore[union-attr]
+    assert v2.title == "Reprendre la tâche ou l'abandonner ?" and tid not in v2.title + v2.context
+    assert [c.value for c in v2.choices] == ["reprendre", "abandonner"] and v2.options == ("reprendre", "abandonner")
     assert len(host.of("claude", "--bg", "--resume")) == 1
     assert [e.payload.get("escalated", False) for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == [False, True]
     assert len(events(projet, tid, MERGE_ESCALATED_EVENT)) == 1

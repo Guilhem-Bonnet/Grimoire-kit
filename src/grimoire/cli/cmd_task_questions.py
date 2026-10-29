@@ -31,6 +31,20 @@ def _fmt(ctx: typer.Context) -> str:
     return str((ctx.obj or {}).get("output", "text"))
 
 
+def read_mapping(source: str) -> dict[str, Any]:
+    """Une question v2 d'un fichier JSON ou YAML (``-`` : l'entrée standard). Lève ``ValueError``."""
+    from ruamel.yaml import YAML
+
+    try:
+        text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+        raw = YAML(typ="safe").load(text)
+    except Exception as exc:
+        raise ValueError(f"question illisible : {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("`--spec` : un objet (une seule question)")
+    return dict(raw)
+
+
 def read_specs(source: str) -> list[Any]:
     """Les questions d'un fichier JSON ou YAML (``-`` : l'entrée standard). Lève ``ValueError``."""
     from ruamel.yaml import YAML
