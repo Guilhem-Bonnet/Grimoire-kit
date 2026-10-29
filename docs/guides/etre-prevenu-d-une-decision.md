@@ -22,7 +22,7 @@ Ce qu'il faut savoir sur l'interrupteur :
 
 ## Hors du navigateur : `notify.command`
 
-Pour être prévenu même navigateur fermé, `grimoire tick` lance une commande de ton choix, une fois par question en attente. Déclare-la dans **Configuration › Fournisseurs et budgets › Commande de notification**, ou dans `_grimoire/standard/standard-profile.yaml` :
+Pour être prévenu même navigateur fermé, `grimoire task wake --apply` (la part « attente » du tick) lance une commande de ton choix, une fois par question en attente. Déclare-la dans **Configuration › Fournisseurs et budgets › Commande de notification**, ou dans `_grimoire/standard/standard-profile.yaml` :
 
 ```yaml
 options:
