@@ -368,7 +368,8 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
         unread = unread_directives(card)
         if unread:
             _item(read, DIRECTIVE_UNACKED, task.id, task.title,
-                  f"{unread} consigne(s) non accusée(s)", since=since, task_id=task.id, unread=unread)
+                  f"{unread} consigne{'s' if unread > 1 else ''} en attente de lecture par la session",
+                  since=since, task_id=task.id, unread=unread)
 
 
 def _collect_checkpoints(read: _ProjectRead) -> None:

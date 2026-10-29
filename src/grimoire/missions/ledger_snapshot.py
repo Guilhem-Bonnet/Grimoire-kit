@@ -117,7 +117,7 @@ def _read_valid(ledger: MissionLedger, data: bytes) -> tuple[dict[str, Any], int
             and not isinstance(offset, bool)
             and 0 < offset <= len(data)
             and data[offset - 1 : offset] == b"\n"
-            and raw["prefix_sha256"] == hashlib.sha256(data[:offset]).hexdigest()
+            and raw["prefix_sha256"] == hashlib.sha256(memoryview(data)[:offset]).hexdigest()
         )
         return (raw, offset) if valid else None
     except (OSError, ValueError, KeyError, TypeError):

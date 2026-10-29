@@ -499,7 +499,7 @@ def test_p52_a_390_px_un_geste_irreversible_demande_encore_sa_confirmation(
         assert confirm.is_visible()
         go = confirm.locator("button", has_text="Supprimer définitivement")
         box = go.bounding_box()
-        assert box and 0 <= box["x"] and box["x"] + box["width"] <= 390, f"confirmation hors de l'écran : {box}"
+        assert box and box["x"] >= 0 and box["x"] + box["width"] <= 390, f"confirmation hors de l'écran : {box}"
         # Tant que la confirmation n'est pas donnée, le journal ne porte aucune suppression.
         assert "delete" not in _journal_ops(served_lotb, entry_id)
         assert shot.locator("#toast .toast-card").count() == 0
