@@ -29,6 +29,7 @@
 
 import { badge, icon, listNav, monogram, undoToast } from '../shell.js';
 import { formatScore } from '../score.js';
+import { parseCodeProjection } from './code-projection.js';
 import { GESTURE_STYLES, INVERSE_GESTURE, historyList, openGesture, undoGesture } from './memoire-gestes.js';
 
 const STYLE_ID = 'kn-styles';
@@ -62,7 +63,7 @@ const STYLES = `
 .kn-res:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
 /* La colonne du type s'ajuste au libellé (« Apprentissage » entier, jamais ellipsé) ;
  * fit-content(130px) borne les types inconnus trop bavards. */
-.kn-res > .badge { justify-self: start; max-width: 130px; }
+.kn-res > .kn-badges { justify-self: start; max-width: 130px; align-self: start; }
 .kn-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .kn-title { font-weight: 600; overflow-wrap: anywhere; }
 .kn-excerpt { color: var(--ink2); overflow-wrap: anywhere; }
@@ -78,11 +79,22 @@ const STYLES = `
 .kn-note { margin: 0; color: var(--ink2); font-size: var(--t-s); }
 .kn-more { align-self: flex-start; }
 .kn-more[hidden] { display: none; }
-.kn-detail { display: flex; flex-direction: column; gap: 16px; }
+.kn-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .kn-head { display: flex; flex-direction: column; gap: 6px; }
 .kn-badges { display: flex; gap: 8px; flex-wrap: wrap; }
 .kn-detail h2 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
 .kn-lead { margin: 0; color: var(--ink2); font-size: 14px; line-height: 20px; overflow-wrap: anywhere; white-space: pre-line; }
+.kn-mono { font-family: var(--mono); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.kn-sig { color: var(--ink2); }
+.kn-codemeta { margin: 0; color: var(--ink2); }
+.kn-code { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kn-code-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kn-code pre:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.kn-code pre { margin: 0; padding: 10px 12px; max-height: 360px; overflow: auto; max-width: 100%; box-sizing: border-box;
+  background: var(--hover); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r);
+  font-family: var(--mono); font-size: 12px; line-height: 18px; white-space: pre; tab-size: 4; }
+.kn-proj-more { align-self: flex-start; }
+.kn-proj-more[hidden] { display: none; }
 .kn-kv { margin: 0; display: flex; flex-direction: column; }
 .kn-kv > div { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
 .kn-kv dt { margin: 0; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink3); }
@@ -111,7 +123,7 @@ const STYLES = `
   .kn-main { padding: var(--sp-4); }
   .kn-searchbar { flex-wrap: wrap; }
   .kn-res { grid-template-columns: minmax(0, 1fr) auto; }
-  .kn-res > .badge { grid-column: 1 / -1; }
+  .kn-res > .kn-badges { grid-column: 1 / -1; }
 }
 `;
 
@@ -156,12 +168,20 @@ const TYPES = [
   { id: 'learning', filter: 'Apprentissage', label: 'Apprentissage', tone: '' },
   { id: 'story', filter: 'Récit', label: 'Récit', tone: '' },
   { id: 'untyped', filter: 'Fait non typé', label: 'Fait', tone: '', always: true, off: true },
-  { id: 'code', filter: 'Code (projection)', label: 'Code', tone: '' },
+  { id: 'code', filter: 'Code (projection)', label: 'Code', tone: '', off: true },
   { id: 'docs', filter: 'Documentation (projection)', label: 'Doc', tone: '' },
-  { id: 'task', filter: 'Tâche (projection)', label: 'Tâche', tone: '' },
+  { id: 'task', filter: 'Tâche (projection)', label: 'Tâche', tone: '', off: true },
   { id: 'projection', filter: 'Autre projection', label: 'Projection', tone: '' },
 ];
 const TYPE = Object.fromEntries(TYPES.map((t) => [t.id, t]));
+// Les décisions, conventions et incidents passent avant le reste.
+const HUMAN = ['decision', 'convention', 'incident'];
+const humanRank = (entry) => { const i = HUMAN.indexOf(entry.type); return i < 0 ? HUMAN.length : i; };
+const byHuman = (items) => items
+  .map((entry, i) => ({ entry, i }))
+  .sort((a, b) => humanRank(a.entry) - humanRank(b.entry) || a.i - b.i)
+  .map((x) => x.entry);
+const HIDDEN_PROJECTIONS = ['code', 'task'];
 const KINDS = [
   { id: 'souvenir', label: 'Souvenirs' },
   { id: 'projection', label: 'Projections' },
@@ -301,7 +321,14 @@ export async function mount(root, ctx) {
   const notes = el('div', 'kn-notes');
   const more = el('button', 'btn kn-more', 'Plus d’entrées', { type: 'button' });
   more.hidden = true;
-  main.append(searchbar, summary, results, notes, more);
+  // Projections de code et de tâche décochées d'office : « +N projections » les rend.
+  const projMore = el('button', 'btn kn-proj-more', null, { type: 'button' });
+  projMore.hidden = true;
+  projMore.addEventListener('click', () => {
+    for (const t of HIDDEN_PROJECTIONS) state.types.add(t);
+    refresh();
+  });
+  main.append(searchbar, summary, projMore, results, notes, more);
 
   const command = () => (state.q ? `grimoire memory search "${state.q}"` : 'grimoire memory list');
   const drawFormula = () => {
@@ -438,7 +465,7 @@ export async function mount(root, ctx) {
       for (const list of lists) if (i < list.length) merged.push(list[i]);
     }
     state.counts = counts;
-    state.items = append ? state.items.concat(merged) : merged;
+    state.items = byHuman(append ? state.items.concat(merged) : merged);
     state.filteredOut = [...state.perProject.values()].reduce((n, p) => n + (p.filtered || 0), 0);
   };
 
@@ -505,7 +532,7 @@ export async function mount(root, ctx) {
     // `stay` : l'entrée qu'un geste vient de corriger reste ouverte, même si la
     // liste ne la sert plus (retirée, remplacée).
     const kept = stay && keyOf(stay) === state.selectedKey ? stay : null;
-    const keep = state.items.find((e) => keyOf(e) === state.selectedKey) || kept || state.items[0];
+    const keep = state.items.find((e) => keyOf(e) === state.selectedKey) || kept || state.items.find((e) => HUMAN.includes(e.type)) || state.items[0];
     if (keep) select(keep, { focus: false });
     else { state.selectedKey = ''; ctx.inspector.replaceChildren(); }
   };
@@ -527,8 +554,15 @@ export async function mount(root, ctx) {
     article.dataset.project = entry.projectSlug || '';
     article.setAttribute('aria-current', String(keyOf(entry) === state.selectedKey));
     const body = el('span', 'kn-body');
-    body.append(el('span', 'kn-title', entry.title || entry.text || '(entrée vide)'));
-    if (entry.excerpt) body.append(el('span', 'kn-excerpt', entry.excerpt));
+    const code = entry.type === 'code' ? parseCodeProjection(entry.text) : null;
+    if (code) {
+      body.append(el('span', 'kn-title', code.name));
+      body.append(el('span', 'kn-mono kn-codemeta', `${code.file}:${code.lines.replace('-', '–')}`));
+      if (code.signature) body.append(el('span', 'kn-mono kn-sig', code.signature));
+    } else {
+      body.append(el('span', 'kn-title', entry.title || entry.text || '(entrée vide)'));
+      if (entry.excerpt) body.append(el('span', 'kn-excerpt', entry.excerpt));
+    }
     const src = el('span', 'kn-src');
     const sup = entry.supersession || {};
     const stateNode = el('span', sup.state === 'live' ? 'kn-state' : 'kn-state kn-state-old', stateText(entry));
@@ -540,7 +574,10 @@ export async function mount(root, ctx) {
     body.append(src);
     const date = el('span', 'kn-date', shortDate(entry.date));
     if (entry.date) date.title = String(entry.date);
-    article.append(badge(type.label, type.tone), body, date);
+    const badges = el('span', 'kn-badges');
+    badges.append(badge(type.label, type.tone));
+    if (code && code.test) badges.append(badge('Test', ''));
+    article.append(badges, body, date);
     article.addEventListener('click', () => select(entry, { focus: false }));
     // Entrée (P58) passe par le contrôleur de liste de la coque (le clic du résultat).
     article.addEventListener('keydown', (event) => {
@@ -557,6 +594,11 @@ export async function mount(root, ctx) {
     const noun = state.q ? plural(n, 'résultat', 'résultats') : plural(n, 'entrée', 'entrées');
     const masked = state.filteredOut ? ` · ${plural(state.filteredOut, 'masquée par les filtres', 'masquées par les filtres')}` : '';
     summary.textContent = `${noun} sur ${scopeLabel()} · ${sort}${masked}`;
+    const unseen = HIDDEN_PROJECTIONS.filter((t) => !state.types.has(t))
+      .reduce((sum, t) => sum + (state.counts.type[t] || 0), 0);
+    projMore.hidden = !unseen;
+    projMore.textContent = `+${plural(unseen, 'projection', 'projections')}`;
+    projMore.title = 'Afficher les projections de code et de tâche';
 
     if (!visibleProjects().length) {
       results.replaceChildren(ctx.empty('Mémoire', 'Coche au moins un projet pour lire sa mémoire.', '', undefined, { compact: true, art: 'i-empty-memory' }));
@@ -634,9 +676,21 @@ export async function mount(root, ctx) {
     const text = String(entry.text || '').trim();
     // Le titre est la première phrase : le corps reprend la suite, pas tout le texte.
     const rest = !title.endsWith('…') && text.startsWith(title) ? text.slice(title.length).trim() : text;
-    head.append(badges, el('h2', null, title));
-    if (rest) head.append(el('p', 'kn-lead', rest));
-    box.append(head);
+    const code = entry.type === 'code' ? parseCodeProjection(entry.text) : null;
+    if (code) {
+      badges.append(badge(code.kind, ''));
+      if (code.test) badges.append(badge('Test', ''));
+      head.append(badges, el('h2', null, code.name));
+      head.append(el('p', 'kn-mono kn-codemeta', `${code.file}:${code.lines.replace('-', '–')}`));
+      if (code.signature) head.append(el('p', 'kn-mono kn-sig', code.signature));
+      if (code.docstring) head.append(el('p', 'kn-lead', code.docstring));
+      box.append(head);
+      if (code.source) box.append(codeBlock(code));
+    } else {
+      head.append(badges, el('h2', null, title));
+      if (rest) head.append(el('p', 'kn-lead', rest));
+      box.append(head);
+    }
 
     const kv = el('dl', 'kn-kv');
     const add = (key, value) => {
@@ -836,6 +890,29 @@ export async function mount(root, ctx) {
 
   drawFilters();
   await refresh();
+}
+
+/** La source du symbole : <pre> mono, focalisable, avec bouton « Copier ». */
+function codeBlock(code) {
+  const wrap = el('div', 'kn-code');
+  const bar = el('div', 'kn-code-bar');
+  const copy = el('button', 'btn', 'Copier', { type: 'button', title: 'Copier le code' });
+  copy.prepend(icon('copy'));
+  const status = el('span', 'sr-only', null, { role: 'status' });
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(code.source);
+      status.textContent = 'Code copié.';
+    } catch {
+      status.textContent = 'Copie refusée : sélectionne le code.';
+    }
+  });
+  bar.append(el('p', 'kn-eyebrow', 'Code source'), copy, status);
+  // Le <pre> défile : c'est lui qui prend le focus clavier, nommé comme région.
+  const pre = el('pre', null, null, { role: 'region', tabindex: '0', 'aria-label': `Code source de ${code.name}` });
+  pre.append(el('code', null, code.source));
+  wrap.append(bar, pre);
+  return wrap;
 }
 
 function mergeOthers(previous, next) {
