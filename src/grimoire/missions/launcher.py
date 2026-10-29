@@ -223,6 +223,8 @@ def release_ended_workers(
     Sans ce geste, une session finie (``done``/``stopped``/``failed``) qui tient encore sa tâche la gardait jusqu'à
     la fin du bail (20 min). Le lancement doit être celui du claim courant ; une sonde en échec ne rend rien.
     """
+    from grimoire.missions.ended import release_ended
+
     held = {
         tid: payload for tid, payload in launched_sessions(service).items()
         if (task := service.ledger.get_task(tid)) is not None and task.status in (TaskState.CLAIMED, TaskState.RUNNING)
@@ -242,7 +244,7 @@ def release_ended_workers(
         if (str(payload.get("session", "")), f"grimoire-{tid}") not in ended:
             continue
         try:
-            decision = service.ledger.release_ended(tid, int(payload["lease_epoch"]), actor_id="tick", now=now)
+            decision = release_ended(service.ledger, tid, int(payload["lease_epoch"]), actor_id="tick", now=now)
         except GrimoireError:
             continue
         if decision is not None:

@@ -1211,39 +1211,6 @@ class MissionLedger:
         )
         return ReapDecision(task.id, "ready", view.reason, view.epoch, attempt, retry_at, written=True)
 
-    def release_ended(
-        self, task_id: str, lease_epoch: int, *, actor_id: str = "tick", now: datetime | None = None
-    ) -> ReapDecision | None:
-        """Rend ``ready`` une tâche tenue dont la session sondée est terminée, sans attendre la fin du bail (P90, P2).
-
-        Même geste que la récolte (barrière d'epoch, ``lease_lost`` avec tentative et ``retry_at``), motif
-        ``session_ended``. Rien n'est écrit — ``None`` — si la tâche n'est plus tenue à cet epoch, si l'horloge est
-        incohérente ou si les tentatives sont épuisées : la récolte ordinaire jugera à l'expiration du bail, avec
-        ses gardes (quota, frein d'hôte, travail local non poussé).
-        """
-        with _ledger_file_lock(self._events_path):
-            self._invalidate()
-            self._load()
-            moment = now or self._now()
-            task = self._tasks.get(task_id)
-            if (
-                task is None or task.status not in _HELD or task.claim is None
-                or task.claim.lease_epoch != lease_epoch or self.clock_state(moment) == "unknown"
-            ):
-                return None
-            attempt = self.attempts(task_id) + 1
-            if attempt > MAX_ATTEMPTS:
-                return None
-            retry_at = (moment + backoff_delay(attempt)).isoformat()
-            fence = self._epoch_high.get(task_id, lease_epoch) + 1
-            write_lease(lease_path(self._root, task_id), LeaseFile(task_id, fence, moment.isoformat(), holder=False, origin=ORIGIN_REAP))
-            lost = {"epoch": lease_epoch, "reason": "session_ended", "attempt": attempt, "retry_at": retry_at}
-            self._transition_locked(
-                task_id, TaskState.READY, actor_id, "session terminée sans rendre la tâche", None,
-                {LEASE_LOST_KEY: lost, "fence_epoch": fence}, None, reaper=True,
-            )
-            return ReapDecision(task_id, "ready", "session_ended", lease_epoch, attempt, retry_at, written=True)
-
     def _already_deferred(self, task_id: str, epoch: int, cause: str) -> bool:
         return any(
             e.payload.get("lease_epoch_lost") == epoch and e.payload.get("cause") == cause
