@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 import sys
 import threading
 import urllib.error
@@ -61,10 +60,11 @@ def _writer(tmp_path: Path) -> tuple[str, Path]:
     script = tmp_path / "notifier.py"
     script.write_text(
         "import os, sys, pathlib\n"
-        f"pathlib.Path({str(out)!r}).write_text(os.environ['GRIMOIRE_NOTIFY_TITLE'] + '|' + sys.argv[1])\n",
+        f"pathlib.Path({str(out)!r}).write_text(os.environ['GRIMOIRE_NOTIFY_TITLE'] + '|' + sys.argv[1], encoding='utf-8')\n",
         encoding="utf-8",
     )
-    return f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {{message}}", out
+    # Guillemets doubles : le découpage des commandes suit le shell du système, et Windows ne lit pas les simples.
+    return f'"{sys.executable}" "{script}" {{message}}', out
 
 
 def test_le_test_execute_la_commande_configuree(atelier: tuple[int, Path], tmp_path: Path) -> None:
@@ -79,7 +79,7 @@ def test_le_test_execute_la_commande_configuree(atelier: tuple[int, Path], tmp_p
 
 def test_une_commande_qui_echoue_se_dit(atelier: tuple[int, Path]) -> None:
     port, _ = atelier
-    assert _call(port, "POST", "/api/workspace/notify", {"command": f"{sys.executable} -c 'raise SystemExit(3)'"})[0] == 200
+    assert _call(port, "POST", "/api/workspace/notify", {"command": f'"{sys.executable}" -c "raise SystemExit(3)"'})[0] == 200
     status, body = _call(port, "POST", "/api/workspace/notify/test", {})
     assert status == 200 and body["ok"] is False and body["code"] != 0 and "3" in body["error"]
 
