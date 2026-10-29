@@ -1,1 +1,0 @@
-- fix(cockpit): le marqueur des lectures du direct s'appelle `pulse_reload` et n'atteint plus jamais une route : nommé `live`, il activait le filtre « Sessions vivantes » de la liste du portefeuille, où les tâches sans session vivante disparaissaient après chaque pouls (E2E de main rouge depuis P79).
