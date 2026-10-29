@@ -564,6 +564,36 @@ def _parse_stamp(raw: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _plain_c_loader() -> Any:
+    """Chargeur libyaml (C) sans résolution de types, ou ``None`` s'il manque.
+
+    Le board du standard pèse des centaines de Ko ; ruamel (Python pur) le lit en
+    ~3 s, libyaml en ~0,06 s. PyYAML n'est pas une dépendance du kit : on s'en sert
+    quand il est là. Sans résolveurs implicites (bool, int, date…), un titre
+    « No » ou « 2026-10-29 » reste le texte écrit — ``str()`` ne le déforme pas.
+    """
+    try:
+        import yaml  # type: ignore[import-untyped, unused-ignore]
+    except ImportError:
+        return None
+    base: Any = getattr(yaml, "CSafeLoader", None)
+    if base is None:
+        return None
+    keep = {"tag:yaml.org,2002:null"}
+
+    class _Plain(base):  # type: ignore[misc, unused-ignore]
+        yaml_implicit_resolvers = {  # noqa: RUF012
+            ch: [(tag, rx) for tag, rx in rules if tag in keep]
+            for ch, rules in base.yaml_implicit_resolvers.items()
+        }
+
+    return _Plain
+
+
+_PLAIN_LOADER = _plain_c_loader()
+_BOARD_CACHE: dict[str, tuple[int, int, list[dict[str, str]]]] = {}
+
+
 def _in_flight_tasks(project_root: Path) -> list[dict[str, str]]:
     """Ce que le board du projet déclare engagé — sa position, dite par lui."""
     source = next(
@@ -572,14 +602,28 @@ def _in_flight_tasks(project_root: Path) -> list[dict[str, str]]:
     )
     if source is None:
         return []
+    # Le board ne change qu'à une transition : la liste engagée est gardée tant
+    # que le fichier n'a ni changé de date ni de taille (P94).
     try:
-        data = _yaml.load(source.read_text(encoding="utf-8")) or {}
+        stat = source.stat()
+        cached = _BOARD_CACHE.get(str(source))
+        if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
+            return [dict(row) for row in cached[2]]
+        text = source.read_text(encoding="utf-8")
+        if _PLAIN_LOADER is not None:
+            import yaml  # type: ignore[import-untyped, unused-ignore]
+
+            data = yaml.load(text, Loader=_PLAIN_LOADER) or {}  # noqa: S506 — chargeur sûr, sans constructeurs d'objets
+        else:
+            data = _yaml.load(text) or {}
     except (OSError, YAMLError):
+        return []
+    except Exception:  # YAMLError de PyYAML : même repli que ruamel
         return []
     tasks = data.get("tasks") if isinstance(data, dict) else None
     if not isinstance(tasks, list):
         return []
-    return [
+    rows = [
         {
             "id": str(t.get("task_id", "")),
             "title": str(t.get("title", "")),
@@ -588,6 +632,8 @@ def _in_flight_tasks(project_root: Path) -> list[dict[str, str]]:
         for t in tasks
         if isinstance(t, dict) and str(t.get("status", "")) in IN_FLIGHT_STATUSES
     ]
+    _BOARD_CACHE[str(source)] = (stat.st_mtime_ns, stat.st_size, rows)
+    return [dict(row) for row in rows]
 
 
 def activity(project_root: Path, *, now: datetime | None = None) -> dict[str, Any]:

@@ -462,6 +462,9 @@ export const api = {
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>
     post(WS + 'tasks/add', { title, acceptance, description }),
+  // « Une idée ? » (I2) : propositions de l'intake déterministe (aucune écriture), puis création des cochées.
+  taskIntake: (text) => post(WS + 'tasks/intake', { text }),
+  taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),
   // Action depuis le portefeuille (#638, lot C) : routée vers le projet
   // propriétaire par `?project=<slug>` explicite dans le chemin (donc jamais
   // doublé par `withProject`) et confirmée par `project` dans le corps —

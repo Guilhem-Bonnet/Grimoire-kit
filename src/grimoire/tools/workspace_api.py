@@ -300,6 +300,28 @@ def annotate_gates(project_root: Path, tasks: list[Any], cards: list[dict[str, A
             card["next_gate"] = entry
 
 
+# P94 : ce que la liste des cartes ne montre pas — le détail (consignes, texte
+# long, garde-fous, dépendances) se lit par ``GET /api/workspace/tasks/<id>``.
+# Les compteurs ``directives_*`` restent dans la carte.
+_CARD_DROPPED = ("directives", "description", "guardrails", "dependencies")
+
+
+def _task_card(task: Any) -> dict[str, Any]:
+    """:func:`_task_json` sans le poids que seule la fiche détaillée affiche."""
+    card = _task_json(task)
+    for key in _CARD_DROPPED:
+        card.pop(key, None)
+    # La carte « en attente » ne lit des questions que les réponses humaines
+    # (``openQuestions`` côté Exécuter) : l'identifiant suffit.
+    card["questions"] = [
+        {"answer_origin": r["answer_origin"], "question": {"id": r["question"]["id"]}}
+        for r in card.get("questions") or []
+        if isinstance(r, dict) and r.get("answer_origin") == "human"
+        and isinstance(r.get("question"), dict) and "id" in r["question"]
+    ]
+    return card
+
+
 def tasks_view(
     project_root: Path,
     *,
@@ -348,7 +370,7 @@ def tasks_view(
             payload["note"] = "aucun Mission Ledger — `grimoire task add` en ouvre un"
         return payload
     tasks = service.list_tasks(mission or None, status or None)
-    cards = [_task_json(t) for t in tasks]
+    cards = [_task_card(t) for t in tasks]
     # UI-3 : la vivacité, le dernier signe de vie, la durée et le coût de chaque
     # carte — la même arithmétique que le portefeuille, pas une seconde copie.
     from grimoire.tools.workspace_portfolio import annotate_cards

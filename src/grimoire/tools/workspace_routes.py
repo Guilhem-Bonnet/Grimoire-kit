@@ -952,6 +952,30 @@ def _task_add(project_root: Path, body: dict[str, Any]) -> Any:
     return added.to_dict()
 
 
+def _task_intake(_project_root: Path, body: dict[str, Any]) -> Any:
+    """« Une idée ? » de Travail : les propositions de l'intake déterministe, sans rien écrire ni LLM."""
+    from grimoire.missions.intake_tasks import proposals_for
+
+    return {"proposals": proposals_for(str(body.get("text") or "")), "written": False}
+
+
+def _task_intake_create(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Créer N tâches » : les propositions cochées par ``TaskService.add``, comme ``tasks/add``.
+
+    Un refus du gate laisse la tâche en ``proposed`` ; la raison revient avec elle.
+    """
+    from grimoire.missions.intake_tasks import create_from_proposals
+    from grimoire.missions.service import TaskService
+
+    items = body.get("tasks")
+    if not isinstance(items, list) or not items:
+        raise ValueError("`tasks` doit lister au moins une proposition")
+    created = create_from_proposals(
+        TaskService(project_root.resolve()), items, actor=str(body.get("actor") or "workspace"), origin="cockpit",
+    )
+    return {"created": created}
+
+
 def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
 
@@ -1030,6 +1054,8 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}tasks/intake": _task_intake,
+    f"{PREFIX}tasks/intake/create": _task_intake_create,
     f"{PREFIX}options": _options_write,
     f"{PREFIX}notify": _notify_write,
     f"{PREFIX}notify/test": _notify_test,
