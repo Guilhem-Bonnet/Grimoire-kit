@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -563,3 +564,24 @@ def attention_rank(task: Any) -> int:
     waiting = getattr(task, "waiting", None)
     status = getattr(getattr(task, "status", None), "value", "")
     return 0 if status == "waiting" and waiting is not None and waiting.is_human else 1
+
+
+def answer_data_payload(data: Mapping[str, Any] | None, question: Question) -> dict[str, Any]:
+    """``{"answer_data": …}`` pour ``task.human_answered`` (P92, cahier §9.3) ; ``{}`` sans donnée structurée.
+
+    ``{"choices": [value, …], "note": str, "question_id": str}`` — le texte sérialisé reste la réponse
+    de référence, ceci s'y ajoute. Refus (``ValueError``) d'un choix qui n'est pas l'un de ceux proposés.
+    """
+    if not data:
+        return {}
+    raw = data.get("choices") or ()
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        raise ValueError("`answer_data.choices` : une liste de valeurs")
+    picked = [str(v) for v in raw]
+    allowed = {c.value for c in question.choices}
+    if allowed and (unknown := [v for v in picked if v not in allowed]):
+        raise ValueError(f"choix inconnu pour {question.id} : {', '.join(unknown)}")
+    clean: dict[str, Any] = {"choices": picked, "question_id": question.id}
+    if note := str(data.get("note", "") or "").strip():
+        clean["note"] = note
+    return {"answer_data": clean}

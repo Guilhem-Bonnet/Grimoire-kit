@@ -8,15 +8,24 @@ Tout vient du ledger, rien n'est déduit : la demande (``task.question_asked``),
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, QUESTION_ASKED_EVENT, Question
+from grimoire.missions.waiting import (
+    HUMAN_ANSWERED_EVENT,
+    QUESTION_ASKED_EVENT,
+    Attachment,
+    Choice,
+    Question,
+    Recommendation,
+    question_problem,
+)
 
 if TYPE_CHECKING:
     from grimoire.missions.ledger import MissionLedger
     from grimoire.missions.schemas import LedgerEvent
 
-__all__ = ["next_round", "rounds_of"]
+__all__ = ["compose_question", "next_round", "rounds_of"]
 
 #: Les événements qui racontent une suite ; le bruit (bail, directives, notification) n'en fait pas partie.
 _AFTERMATH_EVENTS = frozenset({"task.transitioned", "task.linked", QUESTION_ASKED_EVENT})
@@ -106,3 +115,33 @@ def rounds_of(ledger: MissionLedger, task_id: str, question: Question) -> list[d
             }
         )
     return rounds
+
+
+def compose_question(
+    ledger: MissionLedger, task_id: str, question_id: str, kind: str, text: str, options: tuple[str, ...],
+    origin: str, moment: str, task_title: str, *, why: str = "", recommended: str = "", title: str = "",
+    context: str = "", choices: tuple[Choice, ...] = (), answer_mode: str = "",
+    attachments: tuple[Attachment, ...] = (), recommendation: Recommendation | None = None,
+) -> Question:
+    """La question prête à être posée (v1 ou v2) ; ``ValueError`` si elle est invalide."""
+    if choices and not options:  # v2 : ``options`` reste renseigné (les valeurs, ce que `answer` accepte)
+        options = tuple(c.value for c in choices)
+    if not text.strip() and title.strip():  # v2 : ``text`` aussi — titre, puis contexte
+        text = f"{title.strip()} {context.strip()}".strip()
+    pick = recommended.strip()
+    if not pick and recommendation is not None and isinstance(recommendation.value, str) and options:
+        pick = recommendation.value
+    if pick and options and pick.lower() not in (o.strip().lower() for o in options):
+        raise ValueError(f"la recommandation {pick!r} n'est pas l'une des options proposées")
+    question = Question(
+        question_id, kind, text.strip(), tuple(options), origin, moment,
+        why=why.strip(), recommended=pick, title=title.strip(), context=context.strip(),
+        choices=tuple(choices), answer_mode=answer_mode.strip(), attachments=tuple(attachments),
+        recommendation=recommendation, task_title=task_title,
+    )
+    if question.is_v2:  # P92 : le round et le fil se lisent au ledger, jamais saisis
+        number, previous = next_round(ledger, task_id, question)
+        question = replace(question, round=number, supersedes=previous)
+    if problem := question_problem(question):
+        raise ValueError(problem)
+    return question
