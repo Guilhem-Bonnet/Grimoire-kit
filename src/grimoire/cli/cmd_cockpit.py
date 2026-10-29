@@ -14,8 +14,6 @@ Override the home dir with ``GRIMOIRE_COCKPIT_HOME``.
 from __future__ import annotations
 
 import contextlib
-import gzip
-import hashlib
 import json
 import os
 import shutil
@@ -27,7 +25,6 @@ import threading
 import time
 import webbrowser
 from dataclasses import dataclass
-from email.utils import formatdate, parsedate_to_datetime
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +35,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from grimoire.cli.cockpit_http import DRAIN_LIMIT, CountingReader, gzip_body, serve_asset, warm_sheet
 from grimoire.data import site_script, web_path
 from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES, registry_post
 from grimoire.tools.project_registry import (
@@ -85,11 +83,13 @@ console = Console(stderr=True)
 # écrivent le même fichier, et deux copies de cette logique finiraient par
 # diverger. Seul le dossier de service reste propre au cockpit.
 
+
 def _serve_dir() -> Path:
     return registry_home() / "serve"
 
 
 # ── Daemon helpers (background start/stop) ────────────────────────────────────
+
 
 def _read_state() -> dict[str, Any] | None:
     """État du démon, ``None`` quand il n'y en a pas — les appelants testent la
@@ -130,6 +130,7 @@ def _terminate(pid: int) -> bool:
 
 # ── Registry I/O ──────────────────────────────────────────────────────────────
 # Délégué à ``grimoire.tools.project_registry`` (voir les imports en tête).
+
 
 def _resolve_project_path(slug: str | None) -> Path | None:
     """Map a registry slug to its absolute project path (first project if slug is empty)."""
@@ -279,80 +280,6 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
         pool.shutdown(wait=False)
 
 
-#: Borne du drainage d'un corps refusé, comme ``request_guard.drain_body``.
-_DRAIN_LIMIT = 1 << 20
-
-
-class _CountingReader:
-    """``rfile`` qui compte les octets lus — pour savoir ce qu'il reste du corps.
-
-    ``http.client`` envoie l'en-tête et le corps en deux ``send`` distincts ;
-    sous charge, le serveur peut parser l'en-tête, refuser (403/404), répondre
-    et fermer avant que le corps n'arrive. Le corps atteint alors un socket
-    fermé : RST, que Windows répercute au client en jetant la réponse déjà
-    reçue (``WinError 10053``, #857). Compter ce qui a été lu permet à
-    :meth:`_CockpitHandler._drain_unread_body` de consommer *exactement* le
-    reste déclaré par ``Content-Length`` avant de répondre, sans jamais
-    bloquer sur un corps déjà lu.
-    """
-
-    def __init__(self, raw: Any) -> None:
-        self._raw = raw
-        self.consumed = 0
-
-    def read(self, *args: Any) -> bytes:
-        data: bytes = self._raw.read(*args)
-        self.consumed += len(data)
-        return data
-
-    def readline(self, *args: Any) -> bytes:
-        data: bytes = self._raw.readline(*args)
-        self.consumed += len(data)
-        return data
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._raw, name)
-
-
-# P94 — au-delà de ce seuil (octets), JSON et fichiers texte partent en gzip.
-_GZIP_MIN = 1024
-_GZIP_TEXT_SUFFIXES = {".js", ".mjs", ".css", ".html", ".svg", ".json", ".txt", ".md"}
-_ASSET_CACHE: dict[str, tuple[int, int, bytes, str, bytes | None]] = {}
-
-
-def _accepts_gzip(header: str | None) -> bool:
-    """Vrai si ``Accept-Encoding`` admet gzip (et ne le refuse pas par ``q=0``)."""
-    for part in (header or "").split(","):
-        name, _, params = part.strip().partition(";")
-        if name.strip().lower() in {"gzip", "x-gzip"}:
-            return params.replace(" ", "").lower() not in {"q=0", "q=0.0", "q=0.00", "q=0.000"}
-    return False
-
-
-def _not_modified(headers: Any, etag: str, mtime: float) -> bool:
-    """Validation conditionnelle : ``If-None-Match`` prime sur ``If-Modified-Since``."""
-    candidates = headers.get("If-None-Match")
-    if candidates:
-        wanted = {c.strip().removeprefix("W/") for c in candidates.split(",")}
-        return "*" in wanted or etag in wanted
-    since = headers.get("If-Modified-Since")
-    if since:
-        try:
-            return int(mtime) <= int(parsedate_to_datetime(since).timestamp())
-        except (TypeError, ValueError, OverflowError):
-            return False
-    return False
-
-
-def _warm_sheet(root: Path) -> None:
-    """Chauffe les caches de ``sheet`` et de ``tasks`` ; un échec ne coûte que la chauffe."""
-    with contextlib.suppress(Exception):
-        from grimoire.tools import workspace_api
-
-        workspace_api.sheet_view(root)
-        workspace_api.tasks_view(root)
-
-
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
@@ -368,13 +295,13 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
 
     def setup(self) -> None:
         super().setup()
-        self.rfile = _CountingReader(self.rfile)  # type: ignore[assignment]
+        self.rfile = CountingReader(self.rfile)  # type: ignore[assignment]
 
     def parse_request(self) -> bool:
         ok = super().parse_request()
         # Les octets lus jusqu'ici sont la ligne de requête et les en-têtes ;
         # à partir de maintenant, le compteur ne mesure que le corps.
-        cast(_CountingReader, self.rfile).consumed = 0
+        cast(CountingReader, self.rfile).consumed = 0
         return ok
 
     def _drain_unread_body(self) -> None:
@@ -385,12 +312,12 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         réponse (``ConnectionAbortedError``). Le reste est borné par
         ``Content-Length`` et ignoré, jamais interprété.
         """
-        rfile = cast(_CountingReader, self.rfile)
+        rfile = cast(CountingReader, self.rfile)
         try:
             declared = int(self.headers.get("Content-Length") or 0)
         except (ValueError, TypeError):
             return
-        remaining = min(declared - rfile.consumed, _DRAIN_LIMIT)
+        remaining = min(declared - rfile.consumed, DRAIN_LIMIT)
         if remaining > 0:
             with contextlib.suppress(OSError, ValueError):
                 rfile.read(remaining)
@@ -448,27 +375,13 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        body = self._maybe_gzip(body)
+        body = gzip_body(self, body)
         self.send_header("Content-Length", str(len(body)))
         if self.close_connection:  # le client l'a demandé (ou l'erreur de requête l'impose) : on le dit
             self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
         self.wfile.flush()
-
-    def _maybe_gzip(self, body: bytes, *, text: bool = True) -> bytes:
-        """Compresse ``body`` si le client l'accepte et qu'il dépasse le seuil.
-
-        Pose ``Vary`` (la réponse dépend de l'en-tête) et, le cas échéant,
-        ``Content-Encoding`` — à appeler avant ``Content-Length``.
-        """
-        if not text:
-            return body
-        self.send_header("Vary", "Accept-Encoding")
-        if len(body) < _GZIP_MIN or not _accepts_gzip(self.headers.get("Accept-Encoding")):
-            return body
-        self.send_header("Content-Encoding", "gzip")
-        return gzip.compress(body, compresslevel=5, mtime=0)
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
         # Même contrat pour les refus de ``http.server`` lui-même (501, 404
@@ -508,64 +421,12 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
-            body = self._maybe_gzip(body)
+            body = gzip_body(self, body)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
             return
-        self._serve_asset(target)
-
-    def _serve_asset(self, target: Path) -> None:
-        """Fichier statique avec ``ETag`` (empreinte du contenu) et réponse 304.
-
-        ``Cache-Control: no-cache`` pour JS/CSS : le navigateur revalide à chaque
-        chargement et ne reçoit le corps que si le fichier a changé — jamais un
-        module périmé après une mise à jour du kit. Icônes et polices gardent
-        une minute de fraîcheur.
-        """
-        try:
-            stat = target.stat()
-            key = str(target)
-            cached = _ASSET_CACHE.get(key)
-            if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
-                _, _, data, etag, packed = cached
-            else:
-                data = target.read_bytes()
-                etag = f'"{hashlib.sha256(data).hexdigest()[:32]}"'
-                packed = (
-                    gzip.compress(data, compresslevel=6, mtime=0)
-                    if len(data) >= _GZIP_MIN and target.suffix.lower() in _GZIP_TEXT_SUFFIXES
-                    else None
-                )
-                _ASSET_CACHE[key] = (stat.st_mtime_ns, stat.st_size, data, etag, packed)
-        except OSError:
-            self.send_error(404, "File not found")
-            return
-        suffix = target.suffix.lower()
-        cache = "no-cache" if suffix in {".js", ".mjs", ".css"} else "max-age=60"
-        compressible = suffix in _GZIP_TEXT_SUFFIXES
-        if _not_modified(self.headers, etag, stat.st_mtime):
-            self.send_response(304)
-            self.send_header("ETag", etag)
-            self.send_header("Cache-Control", cache)
-            if compressible:
-                self.send_header("Vary", "Accept-Encoding")
-            self.end_headers()
-            return
-        body = data
-        self.send_response(200)
-        self.send_header("Content-Type", self.guess_type(str(target)))
-        self.send_header("ETag", etag)
-        self.send_header("Last-Modified", formatdate(stat.st_mtime, usegmt=True))
-        self.send_header("Cache-Control", cache)
-        if compressible:
-            self.send_header("Vary", "Accept-Encoding")
-            if packed is not None and _accepts_gzip(self.headers.get("Accept-Encoding")):
-                self.send_header("Content-Encoding", "gzip")
-                body = packed
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        serve_asset(self, target)
 
     def do_GET(self) -> None:  # http.server contract
         parsed = urlparse(self.path)
@@ -995,6 +856,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return
         if gesture:
             from grimoire.tools.workspace_memory_gestures import handle as memory_gesture
+
             self._send_json(*memory_gesture(proot, data))
             return
         subcmd = action
@@ -1032,11 +894,17 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         except TimeoutError:
             self._send_json(504, {"ok": False, "error": "timeout"})
             return
-        self._send_json(200, {
-            "ok": res.returncode == 0, "code": res.returncode,
-            "stdout": res.stdout, "stderr": res.stderr, "action": action,
-            "mutation": is_mutation,
-        })
+        self._send_json(
+            200,
+            {
+                "ok": res.returncode == 0,
+                "code": res.returncode,
+                "stdout": res.stdout,
+                "stderr": res.stderr,
+                "action": action,
+                "mutation": is_mutation,
+            },
+        )
 
     def do_PUT(self) -> None:  # http.server contract
         """``PUT /api/blueprints/<id>`` — enregistrer un blueprint (issue #535).
@@ -1081,6 +949,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
+
 
 @cockpit_app.command("add")
 def add(
@@ -1384,7 +1253,9 @@ def _generate_data(serve_dir: Path, with_tests: bool) -> bool:
 
 @cockpit_app.command("refresh")
 def refresh(
-    with_tests: Annotated[bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")] = False,
+    with_tests: Annotated[
+        bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")
+    ] = False,
 ) -> None:
     """Regenerate the cockpit data layer without serving."""
     serve_dir = _serve_dir()
@@ -1392,8 +1263,7 @@ def refresh(
     if _generate_data(serve_dir, with_tests):
         console.print(f"[green]✓[/green] Données régénérées → {serve_dir / 'data'}")
     else:
-        console.print("[dim]Aucun projet enregistré — rien à générer. "
-                      "[b]grimoire cockpit scan <dossier>[/b][/dim]")
+        console.print("[dim]Aucun projet enregistré — rien à générer. [b]grimoire cockpit scan <dossier>[/b][/dim]")
 
 
 @cockpit_app.command("serve")
@@ -1401,7 +1271,9 @@ def serve(
     port: Annotated[int, typer.Option("--port", "-p", help="Local port.")] = 8420,
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
     do_refresh: Annotated[bool, typer.Option("--refresh/--no-refresh", help="Regenerate data before serving.")] = True,
-    with_tests: Annotated[bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")] = False,
+    with_tests: Annotated[
+        bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")
+    ] = False,
     project_root: Annotated[
         Path | None,
         typer.Option("--project-root", help="Projet à ouvrir (défaut : dossier courant)."),
@@ -1418,8 +1290,10 @@ def serve(
             console.print("[green]✓[/green] Data layer régénéré depuis le registre.")
         else:
             console.print("[dim]Registre vide → cockpit vide (aucune donnée inventée).[/dim]")
-            console.print("[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b] "
-                          "ou [b]grimoire cockpit scan <dossier>[/b][/dim]")
+            console.print(
+                "[dim]Ajoute des projets : [b]grimoire cockpit add <path>[/b] "
+                "ou [b]grimoire cockpit scan <dossier>[/b][/dim]"
+            )
     if cwd_notice is None:
         notice = _unregistered_cwd_notice(load_registry())
         if notice:
@@ -1446,7 +1320,7 @@ def serve(
     if _HOME_PATH is not None:
         # P94 : la première lecture de la fiche paie imports et caches froids ;
         # elle se fait ici, avant que la page ne la demande.
-        threading.Thread(target=_warm_sheet, args=(_HOME_PATH,), daemon=True).start()
+        threading.Thread(target=warm_sheet, args=(_HOME_PATH,), daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -1459,7 +1333,9 @@ def serve(
 def start(
     port: Annotated[int, typer.Option("--port", "-p", help="Local port.")] = 8420,
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the browser.")] = True,
-    with_tests: Annotated[bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")] = False,
+    with_tests: Annotated[
+        bool, typer.Option("--with-tests", help="Run pytest --collect-only per project (slow).")
+    ] = False,
 ) -> None:
     """Start the cockpit in the background (non-blocking) and open it."""
     state = _read_state()
@@ -1478,11 +1354,11 @@ def start(
     if _generate_data(serve_dir, with_tests):
         console.print("[green]✓[/green] Data layer régénéré depuis le registre.")
     else:
-        console.print("[dim]Registre vide → cockpit vide. "
-                      "[b]grimoire cockpit add <path>[/b] ou [b]scan <dossier>[/b][/dim]")
+        console.print(
+            "[dim]Registre vide → cockpit vide. [b]grimoire cockpit add <path>[/b] ou [b]scan <dossier>[/b][/dim]"
+        )
 
-    cmd = [sys.executable, "-m", "grimoire", "cockpit", "serve",
-           "--port", str(port), "--no-open", "--no-refresh"]
+    cmd = [sys.executable, "-m", "grimoire", "cockpit", "serve", "--port", str(port), "--no-open", "--no-refresh"]
     pid = _spawn_detached(cmd)
     url = f"http://127.0.0.1:{port}/workspace/index.html"
     for _ in range(24):
@@ -1540,15 +1416,21 @@ def status() -> None:
 # Le parcours est dans ``project_registry`` : ``grimoire serve`` expose la même
 # découverte depuis l'atelier (POST /api/projects/scan).
 
+
 @cockpit_app.command("scan")
 def scan(
     root: Annotated[Path, typer.Argument(help="Root directory to crawl for local projects.")],
     depth: Annotated[int, typer.Option("--depth", help="Maximum crawl depth.")] = 4,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Enrol all grimoire-managed projects without prompting.")] = False,
-    include_uninitialized: Annotated[bool, typer.Option(
-        "--include-uninitialized",
-        help="Also enrol bare git repos that are not grimoire-initialized.",
-    )] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Enrol all grimoire-managed projects without prompting.")
+    ] = False,
+    include_uninitialized: Annotated[
+        bool,
+        typer.Option(
+            "--include-uninitialized",
+            help="Also enrol bare git repos that are not grimoire-initialized.",
+        ),
+    ] = False,
 ) -> None:
     """Discover projects under a root directory and enrol them in the cockpit."""
     base = root.expanduser().resolve()
@@ -1576,10 +1458,7 @@ def scan(
         table.add_row(_rel(cand.path), kind, reg)
     console.print(table)
 
-    to_enrol = [
-        c for c in candidates
-        if (c.managed or include_uninitialized) and str(c.path) not in registered_paths
-    ]
+    to_enrol = [c for c in candidates if (c.managed or include_uninitialized) and str(c.path) not in registered_paths]
     uninitialized = [c for c in candidates if not c.managed]
 
     if to_enrol:
