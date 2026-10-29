@@ -271,6 +271,8 @@ class TestRouteFleet:
             (wa.PROPOSAL, "relecteur-migrations"),
         } <= alpha
         assert (wa.CHECKPOINT, "run-fini") not in alpha
+        [asked] = [i for i in _items(view) if i["kind"] == wa.QUESTION and i["project"]["slug"] == "projet-a"]
+        assert asked["question"]["title"] and asked["rounds"][0]["round"] == 1  # P92 : la question v2 et ses rounds
         assert not any(i["ref"].get("task_id") == ids["calm"] for i in _items(view))
         assert wa.KIT_BEHIND in _kinds(view, "projet-a")
         assert _kinds(view, "projet-b") == {wa.PROBE_FAILED}
