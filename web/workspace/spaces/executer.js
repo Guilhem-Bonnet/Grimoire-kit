@@ -102,6 +102,7 @@ import { activityBlockAsync } from '../activity.js';
 import { DONE_RECENT_LIMIT, splitRecent } from './board-split.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
+import { appendQuestionV2, isV2 } from './decision-card.js';
 import { ideaBlock, ideaButton, requestIdeaFocus } from './task-intake.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
@@ -1659,8 +1660,8 @@ function decisionChip(label, { icon: iconName = '', tone = '', title = '' } = {}
   return chipNode;
 }
 
-function postAnswer(ctx, task, q, answer, portfolio) {
-  const body = { text: answer, question_id: q.id };
+function postAnswer(ctx, task, q, answer, portfolio, data) {
+  const body = { text: answer, question_id: q.id, ...(data ? { answer_data: data } : {}) };
   ctx.dock.echo(`grimoire task answer ${task.id} "${answer}" --question ${q.id}` + (portfolio ? `  # projet ${task.project?.slug}` : ''));
   return portfolio
     ? ctx.api.portfolioTaskAction(task.id, 'answer', body, task.project?.slug)
@@ -1690,6 +1691,9 @@ function decisionCard(ctx, task, portfolio, onWritten) {
   const kindLabel = type === 'libre' ? 'question libre' : (QUESTION_KIND_LABEL[q.kind] || q.kind);
   chips.append(decisionChip(kindLabel, { icon: DECISION_TYPE[type].icon, tone: 'warn' }));
   if (open.length > 1) chips.append(decisionChip(`${open.length} questions en un lot`));
+  const round = Number(q.round) || (task.waiting.rounds || []).length || 1;
+  if (isV2(q) && round > 1) chips.append(decisionChip(`${round}e demande`, { icon: 'history' }));
+  if (isV2(q) && q.blocking === false) chips.append(decisionChip('Non bloquant'));
   if (portfolio) {
     const projectName = task.project?.name || task.project?.slug || 'projet';
     const project = decisionChip(projectName);
@@ -1716,6 +1720,17 @@ function decisionCard(ctx, task, portfolio, onWritten) {
       box.dataset.role = 'decision-question';
       box.dataset.question = question.id;
       node.append(box);
+    }
+    if (isV2(question)) {
+      appendQuestionV2(box, task, question, {
+        locked,
+        onWritten,
+        article: open.length > 1 ? null : node,
+        rounds: (task.waiting.rounds || []),
+        post: (answer, data) => postAnswer(ctx, task, question, answer, portfolio, data),
+        failure: failureText,
+      });
+      continue;
     }
     appendQuestionForm(ctx, box, task, question, { portfolio, locked, onWritten, grouped: open.length > 1, ref });
   }
