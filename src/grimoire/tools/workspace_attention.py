@@ -318,7 +318,7 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
 
     for decision in pending_decisions(service.ledger):
         _item(read, QUESTION, decision.task_id, decision.title, decision.question.text,
-              since=decision.since, task_id=decision.task_id)
+              since=decision.since, task_id=decision.task_id, question_id=decision.question.id)
     for task, card in zip(tasks, cards, strict=True):
         since = last.get(task.id) or str(task.created_at)
         session = card.get("session")

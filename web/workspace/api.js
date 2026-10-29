@@ -333,6 +333,10 @@ export const api = {
   // dans project-context.yaml (section cockpit) par le serveur.
   options: () => get(WS + 'options'),
   optionsWrite: (usdCad) => post(WS + 'options', { usd_cad: usdCad }),
+  // I1 : la commande de notification (options.notify.command), son écriture et son essai.
+  notify: () => get(WS + 'notify'),
+  notifyWrite: (command) => post(WS + 'notify', { command }),
+  notifyTest: (command) => post(WS + 'notify/test', command === undefined ? {} : { command }),
 
   // Agents du projet — clause d'emploi, outils, contexte, skills, usage réel
   // (#374). `{agents[], skills[], entry_point}` — `skills[]` est le catalogue

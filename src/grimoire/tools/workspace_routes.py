@@ -267,6 +267,31 @@ def _options_write(project_root: Path, body: dict[str, Any]) -> Any:
     return write_usd_cad(project_root, float(raw))
 
 
+def _notify(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/notify`` — la commande de notification effective et sa provenance (I1)."""
+    from grimoire.tools.workspace_notify import notify_state
+
+    return notify_state(project_root)
+
+
+def _notify_write(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/notify`` — pose (ou retire) ``options.notify.command`` du profil du standard (I1)."""
+    from grimoire.tools.workspace_notify import write_notify_command
+
+    raw = body.get("command")
+    if not isinstance(raw, str):
+        raise ValueError("`command` doit être une chaîne (vide pour la retirer)")
+    return write_notify_command(project_root, raw)
+
+
+def _notify_test(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/notify/test`` — lance la commande configurée avec une décision d'essai (I1)."""
+    from grimoire.tools.workspace_notify import test_notify_command
+
+    raw = body.get("command")
+    return test_notify_command(project_root, raw if isinstance(raw, str) else None)
+
+
 def _proposals(project_root: Path, _query: _Query) -> Any:
     return workspace_api.proposals_view(project_root)
 
@@ -623,6 +648,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}hooks": _hooks,
     f"{PREFIX}providers": _providers,
     f"{PREFIX}options": _options,
+    f"{PREFIX}notify": _notify,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -1001,6 +1027,8 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
     f"{PREFIX}options": _options_write,
+    f"{PREFIX}notify": _notify_write,
+    f"{PREFIX}notify/test": _notify_test,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:
