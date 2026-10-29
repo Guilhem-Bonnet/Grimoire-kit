@@ -72,6 +72,7 @@ from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
+from grimoire.memory.correction import request_correction_from_body as _memory_correct
 from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
@@ -925,19 +926,6 @@ def _task_add(project_root: Path, body: dict[str, Any]) -> Any:
     except GrimoireMissionError as exc:  # description trop longue, critère refusé : un 400, pas un 404
         raise ValueError(str(exc)) from exc
     return added.to_dict()
-
-
-def _memory_correct(project_root: Path, body: dict[str, Any]) -> Any:
-    """« Demander une correction » (P42) : ouvre la tâche et son critère généré, n'écrit pas la mémoire."""
-    from grimoire.memory.correction import request_correction
-
-    raw = body.get("entry_ids") or [body.get("entry_id") or ""]
-    if not isinstance(raw, list):
-        raise ValueError("`entry_ids` doit être une liste")
-    return request_correction(
-        project_root, entry_ids=[str(i) for i in raw], outcome=str(body.get("outcome") or ""),
-        description=str(body.get("description") or ""), actor=str(body.get("actor") or "workspace"),
-    )
 
 
 def _task_intake(_project_root: Path, body: dict[str, Any]) -> Any:

@@ -304,3 +304,14 @@ def apply_correction(
     request["applied_by"] = applied_by
     _save(project_root, task_id, request)
     return result
+
+
+def request_correction_from_body(project_root: Path, body: dict[str, Any]) -> Any:
+    """Gestionnaire POST du workspace : « Demander une correction » (P42), n'écrit pas la mémoire."""
+    raw = body.get("entry_ids") or [body.get("entry_id") or ""]
+    if not isinstance(raw, list):
+        raise ValueError("`entry_ids` doit être une liste")
+    return request_correction(
+        project_root, entry_ids=[str(i) for i in raw], outcome=str(body.get("outcome") or ""),
+        description=str(body.get("description") or ""), actor=str(body.get("actor") or "workspace"),
+    )
