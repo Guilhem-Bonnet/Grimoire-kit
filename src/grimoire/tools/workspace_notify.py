@@ -88,3 +88,29 @@ def test_notify_command(project_root: Path, command: str | None = None) -> dict[
     question = Question(id="notify-test", kind="test", text="Ceci est un essai de notification.")
     error = _run(cmd, PendingDecision("notify-test", "Essai de notification", question, "", ()))
     return {"ok": not error, "code": 0 if not error else 1, "error": error}
+
+
+def notify_route(project_root: Path, _query: dict[str, list[str]]) -> Any:
+    """``GET /api/workspace/notify`` — la commande de notification effective et sa provenance (I1)."""
+    return notify_state(project_root)
+
+
+def notify_write_route(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/notify`` — pose (ou retire) ``options.notify.command`` du profil du standard (I1)."""
+    raw = body.get("command")
+    if not isinstance(raw, str):
+        raise ValueError("`command` doit être une chaîne (vide pour la retirer)")
+    return write_notify_command(project_root, raw)
+
+
+def notify_test_route(project_root: Path, body: dict[str, Any]) -> Any:
+    """``POST /api/workspace/notify/test`` — lance la commande configurée avec une décision d'essai (I1)."""
+    raw = body.get("command")
+    return test_notify_command(project_root, raw if isinstance(raw, str) else None)
+
+
+GET_ROUTES = {"/api/workspace/notify": notify_route}
+POST_ROUTES = {
+    "/api/workspace/notify": notify_write_route,
+    "/api/workspace/notify/test": notify_test_route,
+}
