@@ -20,7 +20,7 @@ from grimoire.tools import workspace_api, workspace_read_cache
 from grimoire.tools.workspace_routes import LIVE_ROUTES, PREFIX, workspace_get
 
 TASKS = f"{PREFIX}tasks"
-LIVE = {"live": ["1"]}
+LIVE = {"pulse_reload": ["1"]}
 
 
 @pytest.fixture(autouse=True)
@@ -172,3 +172,21 @@ def test_une_lecture_d_un_autre_projet_ou_du_portefeuille_n_est_jamais_gardee(tm
     for _ in range(2):
         workspace_get(tmp_path, TASKS, {"scope": ["portfolio"], **LIVE})
     assert len(calls) == 2
+
+
+def test_le_marqueur_du_direct_ne_filtre_jamais_le_portefeuille(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché (CI de main, 2026-10-29) : le marqueur s'appelait `live`, le filtre « Sessions vivantes » de la
+    liste du portefeuille ; un rechargement du direct ne gardait que les tâches tenues par une session vivante."""
+    from grimoire.tools import workspace_portfolio
+
+    seen: list[bool] = []
+
+    def spy(root: Path, **kwargs: Any) -> dict[str, Any]:
+        seen.append(bool(kwargs.get("live")))
+        return {"tasks": [], "count": 0}
+
+    monkeypatch.setattr(workspace_portfolio, "portfolio_tasks", spy)
+    route = f"{PREFIX}portfolio/tasks"
+    workspace_get(tmp_path, route, dict(LIVE))  # rechargement du direct : aucun filtre
+    workspace_get(tmp_path, route, {"live": ["1"], **LIVE})  # filtre « Sessions vivantes » demandé
+    assert seen == [False, True]
