@@ -404,6 +404,19 @@ def _blocked_cause(task: Any, card: dict[str, Any]) -> str:
     return str(card.get("blocked_reason") or "")
 
 
+def _attach_rounds(service: Any, task: Any, card: dict[str, Any]) -> None:
+    """P93 : les demandes précédentes d'une tâche qui attend un humain, lues au ledger (``waiting.rounds``)."""
+    waiting = task.waiting
+    if waiting is None or waiting.question is None or not isinstance(card.get("waiting"), dict):
+        return
+    from grimoire.missions.question_rounds import rounds_of
+
+    try:
+        card["waiting"]["rounds"] = rounds_of(service.ledger, task.id, waiting.question)
+    except Exception:  # frontière : un fil illisible n'éteint pas la carte
+        card["waiting"]["rounds"] = []
+
+
 def annotate_cards(
     project_root: Path,
     service: Any,
@@ -455,6 +468,7 @@ def annotate_cards(
             claimed_at=claim_time(service.ledger, task.id) if held else None,
         )
         card["cost"] = cost_of(costs, task.id)
+        _attach_rounds(service, task, card)
         if held and not traced_done:
             from grimoire.tools.workspace_sessions import recent_tool_calls
 
