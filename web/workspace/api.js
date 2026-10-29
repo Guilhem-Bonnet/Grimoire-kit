@@ -69,7 +69,7 @@ function withProject(path) {
 }
 
 // P79 : vrai pendant qu'un pouls changé fait recharger les espaces (live.js). Les lectures GET lancées alors
-// portent `live=1` : le serveur peut les servir depuis son cache tant que l'empreinte n'a pas bougé. Un
+// portent `pulse_reload=1` (jamais `live`, déjà le filtre « Sessions vivantes » du portefeuille) : le serveur peut les servir depuis son cache tant que l'empreinte n'a pas bougé. Un
 // chargement de page ou une navigation n'en portent pas : ils relisent toujours.
 let liveReload = false;
 export function duringLiveReload(run) {
@@ -81,7 +81,7 @@ function liveMark(path, options) {
   if (!liveReload || (options.method && options.method !== 'GET')) return path;
   const [base, query = ''] = path.split('?');
   const params = new URLSearchParams(query);
-  params.set('live', '1');
+  params.set('pulse_reload', '1');
   return `${base}?${params.toString()}`;
 }
 
