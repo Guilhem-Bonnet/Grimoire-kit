@@ -51,18 +51,15 @@ gate de preuve compris ; un ``project`` du corps qui ne confirme pas la
 racine résolue est refusé. Le chemin historique ``tasks/<id>/<action>`` reste
 ``_HOME_SLUG`` seulement.
 
-Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche
-par le chemin historique, créer un override — reste strictement
-``_HOME_SLUG`` : chaque dérogation est nommée, jamais générale.
+Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche par le
+chemin historique, créer un override — reste ``_HOME_SLUG`` : chaque dérogation est nommée.
 
 Le flux du pouls (``GET /api/workspace/stream``, P10) n'est pas une entrée de
-:data:`GET_ROUTES` : celles-ci rendent une charge utile, lui un flux sans fin.
-:func:`workspace_stream` rend le générateur, l'hôte le recopie sur la socket
-avec :data:`STREAM_HEADERS`.
+:data:`GET_ROUTES` (charge utile) mais un flux sans fin : :func:`workspace_stream`
+rend le générateur, l'hôte le recopie sur la socket avec :data:`STREAM_HEADERS`.
 
-Ajouter une lecture : une entrée dans :data:`GET_ROUTES`. Ajouter une écriture :
-une entrée dans :data:`POST_ROUTES`. Les deux tables sont énumérées par les
-tests, donc une route ajoutée sans test de cible se voit.
+Ajouter une lecture ou une écriture : une entrée dans :data:`GET_ROUTES` ou
+:data:`POST_ROUTES`, énumérées par les tests — une route sans test de cible se voit.
 """
 
 from __future__ import annotations
@@ -90,6 +87,7 @@ from grimoire.tools import (
     workspace_language,
     workspace_machine,
     workspace_memory,
+    workspace_notify,
     workspace_portfolio,
     workspace_pulse,
     workspace_recall,
@@ -621,6 +619,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}hooks": _hooks,
     f"{PREFIX}providers": _providers,
     f"{PREFIX}options": _options,
+    **workspace_notify.GET_ROUTES,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -1034,6 +1033,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}tasks/intake/create": _task_intake_create,
     f"{PREFIX}options": _options_write,
     f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
+    **workspace_notify.POST_ROUTES,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:

@@ -33,6 +33,8 @@ function injectStyles() {
     .cf-card { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); }
     .cf-card h3 { margin: 0; font-size: var(--t-m); font-weight: 500; color: var(--ink); }
     .cf-foot { margin-top: auto; }
+    .cf-line { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+    .cf-input { flex: 1 1 220px; min-width: 0; font-family: var(--mono); }
     @container canvas (max-width: 720px) { .cf-wrap { padding: var(--sp-3); } }
     @container canvas (max-width: 700px) { .cf-wrap .tbl { table-layout: auto; } .cf-wrap .tbl th, .cf-wrap .tbl td { white-space: nowrap; } }
   `;
@@ -168,6 +170,60 @@ function optionsCard(ctx) {
   return card;
 }
 
+// I1 : la commande qui prévient hors du navigateur quand une décision attend (options.notify.command
+// du profil du standard, lue par `grimoire tick`). « Tester » la lance avec une décision d'essai.
+function notifyCard(ctx) {
+  const card = el('section', 'cf-card');
+  card.dataset.role = 'notify-options';
+  card.setAttribute('aria-label', 'Commande de notification');
+  card.append(el('h3', null, 'Commande de notification'));
+  const note = el('p', 'cf-note', 'Lancée une fois par décision attendue, sans shell. {title} et {message} y sont remplacés ; les variables GRIMOIRE_NOTIFY_* sont aussi posées.');
+  const source = el('p', 'cf-note', 'lecture de la commande…');
+  source.dataset.role = 'notify-source';
+  const line = el('div', 'cf-line');
+  const input = el('input', 'cf-input', null, {
+    type: 'text', 'aria-label': 'Commande de notification', 'data-role': 'notify-input',
+    placeholder: 'notify-send {title} {message}', autocomplete: 'off', spellcheck: 'false',
+  });
+  const save = el('button', 'btn', 'Enregistrer', { type: 'button', 'data-role': 'notify-save' });
+  const test = el('button', 'btn', 'Tester', { type: 'button', 'data-role': 'notify-test' });
+  const status = el('p', 'cf-note', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'notify-status' });
+  line.append(input, save, test);
+  const describe = (data) => {
+    if (data.source === 'env') source.textContent = 'Fixée par la variable GRIMOIRE_NOTIFY_COMMAND : elle prime sur le profil.';
+    else if (data.source === 'profile') source.textContent = 'Déclarée par le profil du standard (options.notify.command).';
+    else source.textContent = 'Aucune commande : seuls le titre de l\'onglet et les notifications du navigateur préviennent.';
+    if (data.problem) status.textContent = `Commande illisible : ${data.problem}`;
+  };
+  ctx.api.notify()
+    .then((data) => { if (ctx.signal.aborted) return; input.value = data.command || ''; describe(data); })
+    .catch((error) => { source.textContent = `Commande injoignable : ${error.message}`; });
+  save.addEventListener('click', async () => {
+    try {
+      const data = await ctx.api.notifyWrite(input.value);
+      describe(data);
+      status.textContent = data.command ? 'Commande enregistrée.' : 'Commande retirée.';
+    } catch (error) {
+      status.textContent = `Écriture refusée : ${error.message}`;
+    }
+  });
+  test.addEventListener('click', async () => {
+    test.disabled = true;
+    status.textContent = 'Essai en cours…';
+    try {
+      // Ce qui est dans le champ s'essaie tel quel, sans l'enregistrer.
+      const result = await ctx.api.notifyTest(input.value.trim() || undefined);
+      status.textContent = result.ok ? 'Essai réussi : la commande est sortie avec le code 0.' : `Essai échoué (code ${result.code}) : ${result.error}`;
+    } catch (error) {
+      status.textContent = `Essai impossible : ${error.message}`;
+    } finally {
+      test.disabled = false;
+    }
+  });
+  card.append(note, line, source, status);
+  return card;
+}
+
 function budgetsCard() {
   const card = el('section', 'cf-card');
   card.setAttribute('aria-label', 'Budgets de session');
@@ -239,7 +295,7 @@ async function mountProviders(root, ctx) {
   } else if (!data.error) {
     wrap.append(ctx.empty('Aucun fournisseur déclaré', 'Le registre des fournisseurs est absent ou vide.', 'grimoire standard init'));
   }
-  wrap.append(budgetsCard(), optionsCard(ctx));
+  wrap.append(budgetsCard(), optionsCard(ctx), notifyCard(ctx));
   root.replaceChildren(wrap);
 }
 
