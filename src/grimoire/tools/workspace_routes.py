@@ -652,6 +652,8 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 
 #: Les lectures que les espaces relancent à chaque pouls changé (P79) : gardées par empreinte
 #: (:mod:`grimoire.tools.workspace_read_cache`), seulement quand la requête porte ``live=1``.
+#: Le paramètre que la page pose sur une lecture du direct (P79) ; il ne change jamais la réponse.
+PULSE_RELOAD = "pulse_reload"
 LIVE_ROUTES = frozenset({f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet"})
 
 #: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
@@ -716,12 +718,17 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
         # jamais gardée : son empreinte couvre des ledgers que ce serveur n'écrit pas (e2e du portefeuille rouge en CI
         # seulement, 2026-10-28). Le cache reste celui du projet servi, le cas mesuré par P79.
         foreign = _one(query, "scope") == "portfolio" or bool(_one(query, "project"))
-        if handler is not None and path in LIVE_ROUTES and _one(query, "live") == "1" and not foreign:
+        # Le marqueur du direct n'est jamais un paramètre de route : retiré avant toute lecture. Il s'appelait `live`,
+        # déjà le filtre « Sessions vivantes » de `tasks` en portefeuille : la fiche du projet B y disparaissait (CI de
+        # main, 2026-10-29).
+        reload = _one(query, PULSE_RELOAD) == "1"
+        query = {k: v for k, v in query.items() if k != PULSE_RELOAD}
+        if handler is not None and path in LIVE_ROUTES and reload and not foreign:
             # P79 : un rechargement du direct (`live=1`, posé par la page pendant un pouls changé) est servi une fois
             # par empreinte, pas une par onglet. Un chargement de page ou une navigation relisent toujours.
             from grimoire.tools import workspace_pulse, workspace_read_cache
 
-            plain = {k: v for k, v in query.items() if k != "live"}
+            plain = query
             return workspace_read_cache.cached_read(
                 path, project_root, plain, lambda: handler(project_root, plain),
                 lambda: workspace_pulse.fingerprint_of(project_root),
@@ -1023,6 +1030,7 @@ def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[
         return service.answer(
             task_id, str(body.get("text") or ""), actor, origin=ORIGIN_HUMAN,
             question_id=str(body.get("question_id") or ""),
+            answer_data=body["answer_data"] if isinstance(body.get("answer_data"), dict) else None,
         )
     if action == "accept":
         # P88 : l'acceptation de la preuve déclarative (#865), même canal humain que `answer` — l'origine est

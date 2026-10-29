@@ -87,7 +87,7 @@ from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_r
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import find_task_worktree
-from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, new_question_id
+from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, Choice, clip_context, new_question_id
 
 if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
@@ -788,8 +788,20 @@ class ReviewStage:
         )
         try:
             self._service.ask(
-                tid, f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
-                REVIEWER_ACTOR, kind="choice", options=("reprendre", "abandonner"), question_id=qid,
+                tid,
+                f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
+                REVIEWER_ACTOR,
+                kind="choice",
+                options=("reprendre", "abandonner"),
+                question_id=qid,
+                title="Reprendre la tâche ou l'abandonner ?",
+                context=clip_context(
+                    f"Le relecteur refuse encore le travail rendu, malgré les reprises ({why}){detail}"
+                ),
+                choices=(
+                    Choice("reprendre", "Reprendre la tâche", "Relance une session sur la branche existante"),
+                    Choice("abandonner", "Abandonner", "Annule la tâche : plus aucune reprise", danger=True),
+                ),
             )
         except (GrimoireError, ValueError) as exc:
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="escalade non posée")

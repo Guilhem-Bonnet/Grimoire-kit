@@ -313,3 +313,27 @@ def test_the_snapshot_proves_the_journal_prefix_not_the_state_it_carries(
     reached = [json.loads(line)["payload"].get("to_state") for line in lines if '"task.transitioned"' in line]
     assert TaskState.CLOSED.value not in reached  # le journal ne clôt rien
     assert _fresh(root).get_task(tid).status is TaskState.CLOSED  # le rejeu restaure l'état falsifié
+
+
+def test_live_appended_state_equals_full_replay_and_altered_prefix_is_rejected(
+    tmp_path: Path, always_snapshot: Callable[[], None]
+) -> None:
+    """I3 : l'état tenu en mémoire pendant les ajouts == le rejeu complet ; un octet changé dans le préfixe écarte l'instantané."""
+    service = TaskService(tmp_path)
+    root = service.ledger._root
+    ids = [service.add(f"T{i}", ("ok",), owner="g", actor="claude", ready=True).task.id for i in range(3)]
+    service.claim(ids[0], "claude", host="local")
+    service.note_progress(ids[0], "pas", "claude")
+    service.ledger.link_tasks(ids[2], ids[1], DependencyKind.BLOCKS)
+    assert _view(service.ledger) == _view(_fresh(root))  # état vivant == rejeu complet
+
+    always_snapshot()
+    _view(_fresh(root))
+    assert (root / SNAPSHOT).is_file()
+    path = root / "events.jsonl"
+    data = bytearray(path.read_bytes())
+    data[10] ^= 0x01  # altère le préfixe couvert (même taille)
+    path.write_bytes(bytes(data))
+    ledger = _fresh(root)
+    ledger._load()
+    assert ledger._snapshot is None  # rejeté : rejeu complet
