@@ -86,8 +86,8 @@ def _split_post(port: int, path: str, payload: dict[str, object]) -> tuple[bool,
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
-        ("/api/other", b"HTTP/1.0 404"),
-        ("/api/blueprints/demo/compile?project=nulle-part", b"HTTP/1.0 403"),
+        ("/api/other", b"HTTP/1.1 404"),
+        ("/api/blueprints/demo/compile?project=nulle-part", b"HTTP/1.1 403"),
     ],
 )
 def test_le_cockpit_lit_le_corps_avant_de_refuser(cockpit_port: int, path: str, expected: bytes) -> None:

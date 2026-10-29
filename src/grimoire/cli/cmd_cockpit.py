@@ -14,6 +14,8 @@ Override the home dir with ``GRIMOIRE_COCKPIT_HOME``.
 from __future__ import annotations
 
 import contextlib
+import gzip
+import hashlib
 import json
 import os
 import shutil
@@ -25,6 +27,7 @@ import threading
 import time
 import webbrowser
 from dataclasses import dataclass
+from email.utils import formatdate, parsedate_to_datetime
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -304,21 +307,48 @@ class _CountingReader:
         return getattr(self._raw, name)
 
 
+# P94 — au-delà de ce seuil (octets), JSON et fichiers texte partent en gzip.
+_GZIP_MIN = 1024
+_GZIP_TEXT_SUFFIXES = {".js", ".mjs", ".css", ".html", ".svg", ".json", ".txt", ".md"}
+_ASSET_CACHE: dict[str, tuple[int, int, bytes, str, bytes | None]] = {}
+
+
+def _accepts_gzip(header: str | None) -> bool:
+    """Vrai si ``Accept-Encoding`` admet gzip (et ne le refuse pas par ``q=0``)."""
+    for part in (header or "").split(","):
+        name, _, params = part.strip().partition(";")
+        if name.strip().lower() in {"gzip", "x-gzip"}:
+            return params.replace(" ", "").lower() not in {"q=0", "q=0.0", "q=0.00", "q=0.000"}
+    return False
+
+
+def _not_modified(headers: Any, etag: str, mtime: float) -> bool:
+    """Validation conditionnelle : ``If-None-Match`` prime sur ``If-Modified-Since``."""
+    candidates = headers.get("If-None-Match")
+    if candidates:
+        wanted = {c.strip().removeprefix("W/") for c in candidates.split(",")}
+        return "*" in wanted or etag in wanted
+    since = headers.get("If-Modified-Since")
+    if since:
+        try:
+            return int(mtime) <= int(parsedate_to_datetime(since).timestamp())
+        except (TypeError, ValueError, OverflowError):
+            return False
+    return False
+
+
 class _CockpitHandler(SimpleHTTPRequestHandler):
     """Static file server + a tiny POST ``/api/memory`` governance endpoint."""
 
     def log_message(self, *args: object) -> None:
         return  # quiet by default
 
-    def send_header(self, keyword: str, value: str) -> None:
-        super().send_header(keyword, value)
-        # Seuls les fichiers statiques portent ``Last-Modified``. Sans
-        # ``Cache-Control``, le navigateur gardait d'anciens modules JS/CSS
-        # après une mise à jour du kit ; icons.svg et polices prennent une
-        # minute (``no-cache`` y coûtait une requête par rendu d'icône).
-        if keyword.lower() == "last-modified":
-            js_css = Path(urlparse(self.path).path).suffix.lower() in {".js", ".mjs", ".css"}
-            super().send_header("Cache-Control", "no-cache" if js_css else "max-age=60")
+    # P94 : HTTP/1.1 et keep-alive — une connexion TCP sert plusieurs requêtes.
+    # Chaque réponse porte un ``Content-Length`` ; seuls les flux SSE
+    # (``Connection: close``) n'en ont pas. Un client silencieux libère son
+    # fil au bout de ``timeout`` secondes.
+    protocol_version = "HTTP/1.1"
+    timeout = 60
 
     def setup(self) -> None:
         super().setup()
@@ -399,14 +429,30 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # (``HTTP/1.0``), l'en-tête le dit au client, et le tampon est vidé
         # avant que ``finish`` ne ferme le socket.
         self._drain_unread_body()
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        body = self._maybe_gzip(body)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
+        if self.close_connection:  # le client l'a demandé (ou l'erreur de requête l'impose) : on le dit
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
         self.wfile.flush()
+
+    def _maybe_gzip(self, body: bytes, *, text: bool = True) -> bytes:
+        """Compresse ``body`` si le client l'accepte et qu'il dépasse le seuil.
+
+        Pose ``Vary`` (la réponse dépend de l'en-tête) et, le cas échéant,
+        ``Content-Encoding`` — à appeler avant ``Content-Length``.
+        """
+        if not text:
+            return body
+        self.send_header("Vary", "Accept-Encoding")
+        if len(body) < _GZIP_MIN or not _accepts_gzip(self.headers.get("Accept-Encoding")):
+            return body
+        self.send_header("Content-Encoding", "gzip")
+        return gzip.compress(body, compresslevel=5, mtime=0)
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
         # Même contrat pour les refus de ``http.server`` lui-même (501, 404
@@ -438,14 +484,70 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         target = Path(self.translate_path(self.path))
         if target.is_dir():
             target = target / "index.html"
-        if target.suffix.lower() != ".html" or not target.is_file():
+        if not target.is_file():
             super().do_GET()
             return
-        body = inject_session_token(target.read_bytes())
+        if target.suffix.lower() == ".html":
+            body = inject_session_token(target.read_bytes())
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            body = self._maybe_gzip(body)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self._serve_asset(target)
+
+    def _serve_asset(self, target: Path) -> None:
+        """Fichier statique avec ``ETag`` (empreinte du contenu) et réponse 304.
+
+        ``Cache-Control: no-cache`` pour JS/CSS : le navigateur revalide à chaque
+        chargement et ne reçoit le corps que si le fichier a changé — jamais un
+        module périmé après une mise à jour du kit. Icônes et polices gardent
+        une minute de fraîcheur.
+        """
+        try:
+            stat = target.stat()
+            key = str(target)
+            cached = _ASSET_CACHE.get(key)
+            if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+                _, _, data, etag, packed = cached
+            else:
+                data = target.read_bytes()
+                etag = f'"{hashlib.sha256(data).hexdigest()[:32]}"'
+                packed = (
+                    gzip.compress(data, compresslevel=6, mtime=0)
+                    if len(data) >= _GZIP_MIN and target.suffix.lower() in _GZIP_TEXT_SUFFIXES
+                    else None
+                )
+                _ASSET_CACHE[key] = (stat.st_mtime_ns, stat.st_size, data, etag, packed)
+        except OSError:
+            self.send_error(404, "File not found")
+            return
+        suffix = target.suffix.lower()
+        cache = "no-cache" if suffix in {".js", ".mjs", ".css"} else "max-age=60"
+        compressible = suffix in _GZIP_TEXT_SUFFIXES
+        if _not_modified(self.headers, etag, stat.st_mtime):
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", cache)
+            if compressible:
+                self.send_header("Vary", "Accept-Encoding")
+            self.end_headers()
+            return
+        body = data
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", self.guess_type(str(target)))
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", formatdate(stat.st_mtime, usegmt=True))
+        self.send_header("Cache-Control", cache)
+        if compressible:
+            self.send_header("Vary", "Accept-Encoding")
+            if packed is not None and _accepts_gzip(self.headers.get("Accept-Encoding")):
+                self.send_header("Content-Encoding", "gzip")
+                body = packed
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -498,6 +600,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             for name, value in STREAM_HEADERS:
                 self.send_header(name, value)
+            # Un flux n'a pas de longueur : sous HTTP/1.1 il se clôt avec la connexion.
+            self.send_header("Connection", "close")
             self.end_headers()
             self.close_connection = True
             try:
