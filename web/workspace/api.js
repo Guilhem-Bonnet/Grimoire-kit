@@ -251,6 +251,12 @@ export const api = {
   attentionSince: (portfolio, since) =>
     get(WS + 'attention/since', { ...(portfolio ? { scope: 'portfolio' } : {}), since }),
   tasks: (params) => get(WS + 'tasks', params),
+  // Pilote automatique (P83) : l'état, le journal des décisions, le geste humain (clé du cockpit) et « Revenir ».
+  autopilotState: () => get(WS + 'autonomy/autopilot'),
+  mandateState: () => get(WS + 'autonomy/mandate'),
+  autopilotDecisions: () => get(WS + 'autonomy/autopilot/decisions'),
+  autopilotSet: (on, controlKey) => post(WS + 'autonomy/autopilot', { on, control_key: controlKey }),
+  autopilotRevert: (taskId, questionId) => post(WS + 'autonomy/autopilot/revert', { task_id: taskId, question_id: questionId }),
   // `project` cible un AUTRE projet que celui déjà résolu par l'hôte — même
   // convention que `health()` : l'inspecteur du portefeuille (#638, lot C)
   // lit la tâche d'un projet du registre qui n'est pas celui de la

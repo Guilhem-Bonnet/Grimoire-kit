@@ -50,6 +50,13 @@
         <span class="project-count" id="project-count" hidden></span>
         <span class="chevron" aria-hidden="true"></span>
       </button>
+      <!-- Pilote automatique (P83) : interrupteur à glissière, visible de tous les espaces. -->
+      <button class="switch" id="autopilot-switch" type="button" role="switch" aria-checked="false"
+              aria-describedby="autopilot-why" disabled>
+        <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+        <span class="switch-label">Pilote automatique</span>
+      </button>
+      <span class="switch-why" id="autopilot-why" hidden></span>
     </div>
     <nav class="spaces-nav" aria-label="Espaces de travail">
       <div id="spaces" role="tablist" aria-label="Espaces de travail"></div>
@@ -157,6 +164,7 @@
     <span class="row" id="st-live" style="gap:6px" title="Actualisation automatique">
       <svg class="ico ico-s" aria-hidden="true"><use href="icons.svg#refresh"/></svg><span id="st-live-text">actualisation…</span>
     </span>
+    <span id="st-autopilot" class="st-autopilot" role="status" hidden></span>
     <span class="grow"></span>
     <button class="chip" id="st-notify" type="button" aria-pressed="false"
             title="Recevoir une notification du navigateur à chaque nouvelle décision attendue, même onglet masqué">
@@ -203,6 +211,21 @@
     </div>
     <dl id="shortcuts-list"></dl>
   </div>
+</dialog>
+
+<!-- Clé du cockpit (P83) : activer le pilote est un geste d'humain, le jeton de session ne suffit pas. -->
+<dialog id="autopilot-key" aria-labelledby="autopilot-key-title" closedby="any">
+  <form id="autopilot-key-form" method="dialog" class="ap-key">
+    <h2 id="autopilot-key-title">Clé du cockpit</h2>
+    <p>Le pilote automatique est un geste d’humain. Collez la clé du cockpit, lue dans votre terminal :</p>
+    <code id="autopilot-key-path"></code>
+    <p id="autopilot-key-note" class="ap-key-note" role="alert"></p>
+    <input id="autopilot-key-input" type="password" autocomplete="off" spellcheck="false" aria-label="Clé du cockpit">
+    <div class="ap-key-actions">
+      <button class="btn ghost" id="autopilot-key-cancel" type="button">Annuler</button>
+      <button class="btn pri" id="autopilot-key-ok" type="submit">Valider</button>
+    </div>
+  </form>
 </dialog>
 
 <!-- Retour d'un geste réversible (P57) : un seul toast, annoncé poliment -->

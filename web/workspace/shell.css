@@ -3484,3 +3484,67 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   outline: 2px solid var(--termink);
   outline-offset: -2px;
 }
+
+
+/* ── Pilote automatique (P83) : interrupteur à glissière ─────────────────── */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--e2);
+  color: var(--ink2);
+  font: inherit;
+  font-size: var(--t-min);
+  cursor: pointer;
+}
+.switch:hover:not(:disabled) { background: var(--e3); color: var(--ink); }
+.switch:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.switch:disabled { cursor: not-allowed; opacity: 1; color: var(--ink3); }
+.switch-track {
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--e3);
+  border: 1px solid var(--ink3);
+  transition: background 120ms, border-color 120ms;
+}
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink2);
+  transition: transform 120ms, background 120ms;
+}
+.switch[aria-checked="true"] { color: var(--ink); border-color: var(--acc); }
+.switch[aria-checked="true"] .switch-track { background: var(--acc-soft); border-color: var(--acc); }
+.switch[aria-checked="true"] .switch-thumb { transform: translateX(14px); background: var(--acc); }
+.switch-why {
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-min);
+  color: var(--ink2);
+}
+.switch-why[hidden] { display: none; }
+.switch-why[data-tone="bad"] { color: var(--bad); }
+.st-autopilot { color: var(--ink2); font-size: var(--t-min); }
+.st-autopilot[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .switch-track, .switch-thumb { transition: none; } }
+@media (max-width: 900px) { .switch-why, .switch-label { display: none; } }
+.ap-key { display: flex; flex-direction: column; gap: var(--sp-3); min-width: min(420px, 86vw); }
+.ap-key h2 { margin: 0; font-size: 17px; }
+.ap-key p { margin: 0; color: var(--ink2); }
+.ap-key code { font-family: var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+.ap-key-note { color: var(--bad); }
+.ap-key-note:empty { display: none; }
+.ap-key input { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); }
+.ap-key-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
