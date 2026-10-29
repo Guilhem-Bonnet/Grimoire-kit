@@ -296,7 +296,9 @@ def test_une_carte_dit_son_identifiant_sa_route_sa_preuve_sa_session_et_son_bloc
     session_line = running.locator(".ex-session").inner_text()
     assert "41c89d23" not in running.inner_text()
     assert "Claude Code" in session_line and "agent-a" in session_line
-    assert "session vivante" in running.locator("[data-role='live-facts']").inner_text()
+    # P91 : une seule ligne d'état (le champ `presence`), plus de « session vivante ».
+    assert running.locator("[data-role='live-facts']").count() == 0
+    assert running.locator("[data-role='presence']").count() == 1
     assert page.evaluate(
         "(t) => getComputedStyle([...document.querySelectorAll('.ex-card-title')].find((n) => n.textContent === t)).webkitLineClamp",
         RUNNING_TITLE,
