@@ -8,6 +8,8 @@ Ici, on atteint un but précis, avec un projet déjà installé.
 
 **Installer et mettre à jour** : [Installer par besoins](installer-par-besoins.md) · [Mettre à jour un projet](mettre-a-jour.md) · [Migration de la version 2 à la version 3](migration-v2-v3.md) · [Dépanner](depannage.md) · [Questions fréquentes](faq.md)
 
+**Être prévenu** : [Être prévenu quand une décision t'attend](etre-prevenu-d-une-decision.md)
+
 **Rendre la preuve bloquante** : [Rendre la preuve bloquante](rendre-la-preuve-bloquante.md)
 
 **Brancher les outils** : [VS Code](vscode.md) · [Serveur MCP](mcp.md) · [SDK Python](sdk-python.md) · [Extensions](extensions.md) · [Développer un plugin](developper-un-plugin.md)
