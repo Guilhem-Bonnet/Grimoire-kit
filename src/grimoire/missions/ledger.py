@@ -222,13 +222,14 @@ def _confined_ledger_file(path: Path) -> Path:
 def _ledger_file_lock(target_path: Path) -> Iterator[None]:
     """Verrou exclusif inter-processus sur *target_path* — :func:`grimoire.core.fsio.locked`.
 
-    ``_atomic_append`` lit le fichier entier, ajoute une ligne, puis renomme
-    un temporaire par-dessus : sans ce verrou, deux écrivains concurrents
-    (deux requêtes HTTP du cockpit servies par des threads séparés,
-    typiquement) peuvent tous deux lire le même contenu avant que l'un des
-    deux n'écrive — le second écrase alors l'événement du premier, silencieux
-    (« lost update »). :meth:`MissionLedger.transition_task` relit et valide
-    sous ce même verrou : un compare-and-set (issue #710).
+    ``_atomic_append`` ajoute une ligne en fin de fichier (``open('ab')``, un
+    seul ``write``, ``fsync``) ; le verrou sérialise les écrivains (deux
+    requêtes HTTP du cockpit servies par des threads séparés, typiquement) :
+    la réparation d'une fin tronquée et l'empreinte « avant / après » de
+    l'ajout ne valent que pour un seul écrivain à la fois, et
+    :meth:`MissionLedger.transition_task` relit et valide sous ce même
+    verrou : un compare-and-set (issue #710). Les lecteurs n'en ont pas
+    besoin : une dernière ligne sans ``\\n`` (ajout en cours) n'est pas lue.
 
     Un verrou impossible à prendre (délai dépassé, système de fichiers sans
     ``flock``) lève :class:`GrimoireMissionError` au lieu d'écrire sans
@@ -504,20 +505,15 @@ class MissionLedger:
             self._invalidate()
         return evt
 
-    def _atomic_append(
-        self, path: Path, record: dict[str, Any]
-    ) -> tuple[FileSig, FileSig]:
-        # Verrouillé : lire « existing » puis renommer un temporaire par-dessus
-        # n'est atomique que pour un seul écrivain à la fois. Deux requêtes
-        # concurrentes (cockpit multi-thread) sans ce verrou perdaient
-        # silencieusement l'une des deux écritures (« lost update »).
+    def _atomic_append(self, path: Path, record: dict[str, Any]) -> tuple[FileSig, FileSig]:
+        # Verrouillé : sans verrou, deux ajouts concurrents (cockpit multi-thread)
+        # pourraient s'entrelacer avec la réparation d'une fin tronquée et fausser
+        # l'empreinte « avant » qui décide si l'état en mémoire suit l'ajout.
         with _ledger_file_lock(path):
             return self._write_appended(path, record)
 
     @staticmethod
-    def _write_appended(
-        path: Path, record: dict[str, Any]
-    ) -> tuple[FileSig, FileSig]:
+    def _write_appended(path: Path, record: dict[str, Any]) -> tuple[FileSig, FileSig]:
         """Ajoute *record* à *path* (``open('ab')``, un seul ``write``, ``fsync``) — l'appelant tient le verrou.
 
         Rend l'empreinte (taille, mtime, inode) du fichier juste avant puis juste après l'écriture ;

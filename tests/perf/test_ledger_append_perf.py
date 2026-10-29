@@ -7,10 +7,14 @@ import statistics
 import time
 from typing import TYPE_CHECKING
 
+import pytest
+
 from grimoire.missions.ledger import MissionLedger
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+pytestmark = pytest.mark.perf
 
 _LINE = (
     json.dumps(

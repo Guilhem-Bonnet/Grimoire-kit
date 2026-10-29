@@ -41,10 +41,18 @@ def append_bytes(path: Path, payload: bytes) -> tuple[FileSig, FileSig]:
                 if probe.read(1) != b"\n":
                     payload = b"\n" + payload
                     before = None
-        fh.write(payload)
-        fh.flush()
-        # K2 (§2.3) : ajout puis ``fsync`` du fichier ; le dossier à la création.
-        os.fsync(fh.fileno())
+        try:
+            fh.write(payload)
+            fh.flush()
+            # K2 (§2.3) : ajout puis ``fsync`` du fichier ; le dossier à la création.
+            os.fsync(fh.fileno())
+        except OSError:
+            # EIO, ENOSPC… : l'appelant reçoit une erreur, l'événement ne doit donc pas rester au journal
+            # (un nouvel essai le doublerait). Retour à la taille d'avant, au mieux, puis l'erreur d'origine.
+            with suppress(OSError):
+                os.ftruncate(fh.fileno(), st.st_size)
+                os.fsync(fh.fileno())
+            raise
         st = os.fstat(fh.fileno())
     if created and os.name == "posix":
         with suppress(OSError):
