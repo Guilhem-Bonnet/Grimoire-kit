@@ -299,7 +299,8 @@ def test_classe_modele_et_cout_se_lisent_sur_la_carte_et_dans_l_inspecteur(
         assert route.inner_text() == f"{expected_class[title]} · {model}"
         assert "classe de route" in (route.get_attribute("title") or "")
         # Le coût est sur chaque carte, backlog compris : personne ne l'a mesuré, il est inconnu.
-        assert card.locator("[data-role='cost']").inner_text() == "coût inconnu"
+        # P91 : « coût inconnu » ne s'écrit plus sur la carte (il reste dans l'inspecteur).
+        assert card.locator("[data-role='cost']").count() == 0
 
         card.click()
         inspector = page.locator("#inspector-body")
