@@ -107,7 +107,10 @@ def test_le_resume_liste_les_decisions_depuis_la_derniere_visite(project: Path) 
     assert workspace_chat_pilot.summary(project) is None
 
 
-def test_l_agent_du_chat_ne_peut_ni_activer_ni_couper_le_pilote(project: Path) -> None:
+def test_l_agent_du_chat_ne_peut_ni_activer_ni_couper_le_pilote(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Sans page à l'écoute, une grâce de 0 ferme la conversation (et vide son fil) dès la fin du tour :
+    # le test lirait alors un fil déjà effacé.
+    monkeypatch.setenv(workspace_chat.GRACE_ENV, "60")
     _pilot_on(project)
     before = AutopilotStore(project).history()
     conv = workspace_chat._conversation(project)
