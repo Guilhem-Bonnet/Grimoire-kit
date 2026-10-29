@@ -103,6 +103,11 @@ export function createChat({ readOnly = () => false } = {}) {
   let current = null;
   const tools = new Map();
   const permissions = new Map();
+  const questions = new Map();
+  const gestures = new Set();
+  let summaryShown = false;
+  /** La question du pilote à laquelle la prochaine saisie répond (ACP4), ou null. */
+  let target = null;
 
   const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const append = (node) => {
@@ -144,6 +149,7 @@ export function createChat({ readOnly = () => false } = {}) {
       current = { role, body, text: '' };
     }
     current.text += text;
+    if (role === 'agent') current.text = current.text.replace(/\[\[pilote:(on|off)\]\]/g, '');
     if (role === 'user') current.body.textContent = current.text;
     else markdownInto(current.body, current.text);
     if (follow) scrollDown();
@@ -252,6 +258,88 @@ export function createChat({ readOnly = () => false } = {}) {
     entry.box.classList.add('is-done');
   }
 
+  // ── Le pilote automatique (ACP4) ─────────────────────────────────────────
+  function pilotSummary(event) {
+    if (summaryShown) return;
+    summaryShown = true;
+    current = null;
+    const list = mk('ul', { class: 'chat-pilot-list' });
+    for (const d of event.decisions || []) {
+      list.append(mk('li', {}, mk('strong', { text: `${d.task_id} — ` }), mk('span', { text: `${d.question} → ${d.option}` })));
+    }
+    const since = event.since ? ` depuis votre dernière visite` : '';
+    append(mk('section', { class: 'chat-pilot', role: 'note', 'aria-label': 'Décisions du pilote' },
+      mk('div', { class: 'chat-who', text: 'Pilote automatique' }),
+      mk('p', { text: `${event.count} décision${event.count > 1 ? 's' : ''} prise${event.count > 1 ? 's' : ''}${since}.` }),
+      list,
+      mk('a', { class: 'chat-pilot-link', href: event.journal || '#journal', text: 'Décidé par le pilote — voir le journal' })));
+  }
+
+  function setTarget(entry) {
+    target = entry;
+    for (const other of questions.values()) other.box.classList.toggle('is-target', other === entry);
+    input.placeholder = entry
+      ? `Votre réponse à ${entry.task_id} — Entrée tranche la question`
+      : 'Parler à l’orchestrateur — Entrée envoie, Maj+Entrée saute une ligne';
+    if (entry) input.focus({ preventScroll: true });
+  }
+
+  function question(event) {
+    const key = `${event.task_id}/${event.question_id}`;
+    if (questions.has(key)) return;
+    current = null;
+    const reply = mk('button', { type: 'button', class: 'btn pri chat-question-reply', text: 'Répondre ici' });
+    const state = mk('div', { class: 'chat-question-state', role: 'status' });
+    const parts = [
+      mk('div', { class: 'chat-who', text: 'Question pour vous' }),
+      mk('div', { class: 'chat-question-text', text: event.text }),
+      mk('div', { class: 'chat-question-kept', text: event.kept }),
+    ];
+    if (event.options && event.options.length) parts.push(mk('div', { class: 'chat-question-options', text: `Options : ${event.options.join(' · ')}` }));
+    if (event.recommended) parts.push(mk('div', { class: 'chat-question-reco', text: `Recommandée : ${event.recommended}` }));
+    const box = mk('section', { class: 'chat-question', role: 'group', 'aria-label': `Question sur ${event.task_id}`, 'data-question': key },
+      ...parts, mk('div', { class: 'chat-question-actions' }, reply), state);
+    const entry = { box, reply, state, task_id: event.task_id, question_id: event.question_id };
+    questions.set(key, entry);
+    reply.addEventListener('click', () => setTarget(target === entry ? null : entry));
+    append(box);
+  }
+
+  function questionResolved(event) {
+    const entry = questions.get(`${event.task_id}/${event.question_id}`);
+    if (!entry) return;
+    entry.box.classList.add('is-done');
+    entry.reply.disabled = true;
+    entry.state.textContent = 'Tranchée.';
+    if (target === entry) setTarget(null);
+  }
+
+  function gesture(event) {
+    const key = event.on ? 'on' : 'off';
+    if (gestures.has(key) && !event.seq) return;
+    gestures.add(key);
+    current = null;
+    const label = event.on ? 'Activer le pilote' : 'Couper le pilote';
+    const keyField = mk('input', { type: 'password', class: 'chat-gesture-key', autocomplete: 'off', 'aria-label': 'Clé de contrôle', placeholder: 'Clé de contrôle' });
+    const button = mk('button', { type: 'button', class: 'btn pri chat-gesture-btn', 'data-pilot': key, text: label });
+    const result = mk('div', { class: 'chat-gesture-result', role: 'status' });
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await api.autopilotSet(event.on, keyField.value);
+        keyField.value = '';
+        result.textContent = event.on ? 'Pilote activé.' : 'Pilote coupé.';
+      } catch (error) {
+        button.disabled = false;
+        result.textContent = `Geste refusé : ${error.message}`;
+      }
+    });
+    append(mk('section', { class: 'chat-gesture', role: 'group', 'aria-label': 'Geste proposé par l’orchestrateur' },
+      mk('div', { class: 'chat-who', text: 'L’orchestrateur propose' }),
+      mk('div', { text: `${label} ? Le geste reste le vôtre : saisissez la clé de contrôle et cliquez.` }),
+      mk('div', { class: 'chat-gesture-actions' }, keyField, button), result));
+  }
+
   // ── L'hôte (ACP3) : réglage du projet, hôte détecté par défaut ───────────
   async function loadHosts() {
     let state;
@@ -287,6 +375,12 @@ export function createChat({ readOnly = () => false } = {}) {
   });
 
   // ── Le flux ─────────────────────────────────────────────────────────────
+  /** L'ouverture du pilote arrive hors journal (seq 0) : elle ne touche pas au compteur de rejeu. */
+  function handle0(event) {
+    if (event.type === 'pilot_summary') pilotSummary(event);
+    else question(event);
+  }
+
   function handle(event) {
     if (event.type === 'reply' || event.type === 'kanban_sent') {
       if (event.seq && event.seq <= lastSeq) return;
@@ -300,6 +394,7 @@ export function createChat({ readOnly = () => false } = {}) {
       }
       return;
     }
+    if (event.seq === 0 && ['pilot_summary', 'question'].includes(event.type)) { handle0(event); return; }
     if (event.seq && event.seq <= lastSeq) return; // un rejeu après reconnexion
     if (event.seq) lastSeq = event.seq;
     switch (event.type) {
@@ -333,6 +428,18 @@ export function createChat({ readOnly = () => false } = {}) {
         else if (kind === 'plan') plan(update.entries);
         break;
       }
+      case 'pilot_summary':
+        pilotSummary(event);
+        break;
+      case 'question':
+        question(event);
+        break;
+      case 'question_resolved':
+        questionResolved(event);
+        break;
+      case 'pilot_gesture':
+        gesture(event);
+        break;
       case 'permission':
         permission(event);
         break;
@@ -377,6 +484,18 @@ export function createChat({ readOnly = () => false } = {}) {
     const text = input.value.trim();
     if (!text || busy || readOnly()) return;
     input.value = '';
+    const answering = target;
+    if (answering) {
+      try {
+        await api.chatSend(text, { task_id: answering.task_id, question_id: answering.question_id });
+        answering.state.textContent = 'Réponse transmise : tranchée par vous.';
+        setTarget(null);
+      } catch (error) {
+        input.value = text;
+        note(`Réponse non transmise : ${error.message}`, 'error');
+      }
+      return;
+    }
     setBusy(true);
     try {
       await api.chatSend(text);
