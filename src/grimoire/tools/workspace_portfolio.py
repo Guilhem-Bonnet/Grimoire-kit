@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.costs import Cost
-from grimoire.missions.lease import DEFAULT_LEASE_TTL_SECONDS, LeaseFile
+from grimoire.missions.lease import DEFAULT_LEASE_TTL_SECONDS, LeaseFile, parse_instant
 from grimoire.missions.liveness import (
     DEFAULT_ACTIVE_MINUTES,
     INACTIF,
@@ -44,7 +44,9 @@ from grimoire.missions.liveness import (
     VIVANT,
     SessionProbe,
     attention,
+    last_sign,
     liveness,
+    presence,
     task_progress,
 )
 from grimoire.missions.liveness import claimed_at as claim_time
@@ -374,6 +376,34 @@ def transition_times(ledger: Any) -> dict[str, str]:
     return times
 
 
+def lease_losses(ledger: Any) -> dict[str, dict[str, Any]]:
+    """Par tâche, le ``lease_lost`` de sa **dernière** transition, si c'est lui qui l'a rendue ``ready`` (P90).
+
+    Une transition ultérieure sans ``lease_lost`` (claim, réveil, retour) l'efface : « à reprendre » ne
+    survit pas à la reprise.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for event in ledger.list_events():
+        if event.event_type != "task.transitioned":
+            continue
+        lost = event.payload.get("lease_lost")
+        if isinstance(lost, dict) and event.payload.get("to_state") == "ready":
+            found[event.entity_id] = dict(lost)
+        else:
+            found.pop(event.entity_id, None)
+    return found
+
+
+def _blocked_cause(task: Any, card: dict[str, Any]) -> str:
+    waiting = getattr(task, "waiting", None)
+    if waiting is not None:
+        if waiting.question is not None:
+            return f"attend une réponse : {waiting.question.text}"
+        until = f" jusqu'à {waiting.until}" if waiting.until else ""
+        return f"attend ({waiting.reason}){until}"
+    return str(card.get("blocked_reason") or "")
+
+
 def annotate_cards(
     project_root: Path,
     service: Any,
@@ -404,6 +434,9 @@ def annotate_cards(
 
     held_ids = {t.id for t in tasks if t.status in (TaskState.CLAIMED, TaskState.RUNNING, TaskState.WAITING)}
     feed_last = last_feed_labels(service, held_ids)
+    losses = lease_losses(service.ledger)
+    traced: dict[str, Any] | None = None
+    traced_done = False
     closed: frozenset[str] | None = None
     probed: Mapping[str, str] | None = None
     probe_done = False
@@ -422,6 +455,10 @@ def annotate_cards(
             claimed_at=claim_time(service.ledger, task.id) if held else None,
         )
         card["cost"] = cost_of(costs, task.id)
+        if held and not traced_done:
+            from grimoire.tools.workspace_sessions import recent_tool_calls
+
+            traced, traced_done = recent_tool_calls(project_root, now=now), True
         # P69v2 : la dernière entrée du fil, en une ligne, seulement quand la
         # session de la carte est vivante — sinon la ligne raconterait le passé.
         session = card["session"]
@@ -436,12 +473,59 @@ def annotate_cards(
                 closed = frozenset(t.id for t in service.ledger.list_tasks() if t.status is TaskState.CLOSED)
             fallback = blockers_of(task, closed or frozenset())
             card["blocked_reason"] = reasons.get(task.id) or (fallback[0]["reason"] if fallback else "")
+        card["presence"] = _presence_for(task, card, sessions, now=now, lease=service.ledger.lease_file(task.id) if held else None,
+                                         probe=probed, traced=traced, loss=losses.get(task.id))
     # P75 : qui travaille, avec quoi, à quel coût — usage replié (task_usage),
     # coût en CAD au taux des options du projet, et pour une tâche tenue ce que
     # le journal de session rapporte (modèle réel, effort, skills).
     from grimoire.tools.workspace_work import annotate_work
 
     annotate_work(project_root, tasks, cards)
+
+
+def _presence_for(
+    task: Any,
+    card: dict[str, Any],
+    sessions: dict[str, dict[str, Any]],
+    *,
+    now: datetime,
+    lease: LeaseFile | None,
+    probe: Mapping[str, str] | None,
+    traced: Mapping[str, Any] | None,
+    loss: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Le champ ``presence`` de la carte (P90) : une seule vérité pour le glyphe, le mot et le temps.
+
+    Le dernier signe réunit la sonde (lue à cet instant quand l'hôte la dit occupée), le dernier outil
+    tracé, le battement du bail et le journal de hooks : le plus récent gagne. ``None`` pour une tâche
+    close ou annulée.
+    """
+    status = str(getattr(task.status, "value", task.status))
+    if status in ("closed", "cancelled", "unknown"):
+        return None
+    session = card.get("session") or {}
+    session_id = str(session.get("id") or "")
+    probe_status = (probe or {}).get(session_id) if session_id else None
+    journal = sessions.get(session_id) if session_id else None
+    activity = (traced or {}).get(session_id) if session_id else None
+    beat = parse_instant(lease.renewed_at) if lease is not None else None
+    stamp, source = last_sign(
+        sonde=now if probe_status in ("busy", "waiting") else None,
+        outil=getattr(activity, "last_at", None),
+        battement=beat,
+        journal=_parse_iso(journal["updated_at"]) if journal else None,
+    )
+    return presence(
+        now=now,
+        status=status,
+        blocked_cause=_blocked_cause(task, card),
+        lease=lease,
+        probe_status=probe_status,
+        ended=bool(journal and journal.get("ended")),
+        sign_at=stamp,
+        sign_source=source,
+        lease_lost=loss,
+    ).to_dict()
 
 
 def _project_cards(

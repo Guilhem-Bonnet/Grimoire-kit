@@ -215,6 +215,41 @@ def renew_live_workers(
     return tuple(renewed)
 
 
+def release_ended_workers(
+    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None
+) -> tuple[str, ...]:
+    """P2 de la vivacité (P90) : rend ``ready`` la tâche tenue dont la session lancée est sondée terminée.
+
+    Sans ce geste, une session finie (``done``/``stopped``/``failed``) qui tient encore sa tâche la gardait jusqu'à
+    la fin du bail (20 min). Le lancement doit être celui du claim courant ; une sonde en échec ne rend rien.
+    """
+    held = {
+        tid: payload for tid, payload in launched_sessions(service).items()
+        if (task := service.ledger.get_task(tid)) is not None and task.status in (TaskState.CLAIMED, TaskState.RUNNING)
+        and task.claim is not None and payload.get("lease_epoch") == task.claim.lease_epoch
+    }
+    if not held:
+        return ()
+    raw = _read_agents(exec_, service.home_root, claude_bin)
+    if raw is None:
+        return ()
+    ended = {
+        (str(a["id"]), str(a.get("name", ""))) for a in raw
+        if a.get("kind") == "background" and a.get("state") in ("done", "stopped", "failed") and a.get("id")
+    }
+    released: list[str] = []
+    for tid, payload in held.items():
+        if (str(payload.get("session", "")), f"grimoire-{tid}") not in ended:
+            continue
+        try:
+            decision = service.ledger.release_ended(tid, int(payload["lease_epoch"]), actor_id="tick", now=now)
+        except GrimoireError:
+            continue
+        if decision is not None:
+            released.append(tid)
+    return tuple(released)
+
+
 def _read_agents(exec_: Exec, cwd: Path, claude_bin: str) -> list[dict[str, Any]] | None:
     result = exec_([claude_bin, "agents", "--json"], cwd, None)
     if result.returncode != 0:
