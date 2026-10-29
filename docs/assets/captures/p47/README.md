@@ -1,3 +1,7 @@
+---
+audience: contributeur
+---
+
 # Captures P47 — panneau « Assigner une session »
 
 `assigner-panneau.png` : cockpit 8420, kit 3.73.0, tâche prête `GAO-p45-premier-001`, Playwright 1440 × 900, le 2026-10-28.
