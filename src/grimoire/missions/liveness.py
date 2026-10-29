@@ -40,17 +40,22 @@ __all__ = [
     "DEFAULT_PROGRESS_THRESHOLD",
     "INACTIF",
     "INCONNU",
+    "PRESENCE_STATES",
+    "PRESENCE_WORKING_MINUTES",
     "PROGRESS_EVENT_TYPES",
     "PROGRESS_TRANSITIONS",
     "TERMINE",
     "VIVANT",
     "Attention",
     "Liveness",
+    "Presence",
     "attention",
     "claimed_at",
     "git_commit_at",
     "label",
+    "last_sign",
     "liveness",
+    "presence",
     "probe_claude_agents",
     "probe_entries",
     "progress_at",
@@ -79,6 +84,12 @@ def label(state: str) -> str:
 #: disait 15 min et Travail 30 : la même session était vivante dans un espace, pas dans l'autre.
 DEFAULT_ACTIVE_MINUTES = 30
 DEFAULT_ACTIVE_WINDOW = timedelta(minutes=DEFAULT_ACTIVE_MINUTES)
+#: Seuil d'affichage de la **carte de tâche** (P90) : un signe de moins de 5 min vaut « au
+#: travail », au-delà la tâche tenue est « silencieuse ». Même ``liveness()`` en dessous ; seule
+#: la fenêtre diffère de ``DEFAULT_ACTIVE_MINUTES`` (30 min, « projet actif » de la Flotte) :
+#: appeler « vivante » une session muette depuis 30 min rendait le tableau trompeur.
+PRESENCE_WORKING_MINUTES = 5
+PRESENCE_WORKING_WINDOW = timedelta(minutes=PRESENCE_WORKING_MINUTES)
 #: Au-delà (D19, §2.5), un vivant sans progression monte en attention.
 DEFAULT_PROGRESS_THRESHOLD = timedelta(minutes=45)
 #: Événement du ledger qui compte comme une progression : la note du titulaire
@@ -351,3 +362,101 @@ def self_view_line(
             bail += " — PERDU"
     avance = f"dernière progression il y a {_ago(progress, now)}" if progress else "aucune progression observée"
     return f"[Grimoire] Vue de soi — {task_id} : {bail} ; session {label(live.state)} ; {avance}."
+
+
+#: Les cinq présences d'une tâche ouverte, mutuellement exclusives, dans l'ordre d'évaluation.
+PRESENCE_STATES = ("blocked", "resume", "working", "silent", "none")
+
+
+def last_sign(**moments: datetime | None) -> tuple[datetime | None, str]:
+    """Le dernier signe unifié : le plus récent des instants nommés (sonde, outil, battement, journal…).
+
+    Rend ``(instant, nom)`` ; ``(None, "")`` si aucun n'est connu. À égalité, le premier nommé gagne.
+    """
+    known = [(m, name) for name, m in moments.items() if m is not None]
+    if not known:
+        return None, ""
+    best = known[0]
+    for item in known[1:]:
+        if item[0] > best[0]:
+            best = item
+    return best
+
+
+@dataclass(frozen=True, slots=True)
+class Presence:
+    """« Qui travaille sur cette tâche » : un état parmi :data:`PRESENCE_STATES`, calculé à la lecture."""
+
+    state: str
+    sign_at: str = ""
+    sign_source: str = ""
+    cause: str = ""
+    lease_left_s: int | None = None
+    #: ``silent`` : l'échéance de la reprise automatique (perte du bail).
+    resume_at: str = ""
+    attempt: int | None = None
+    retry_at: str = ""
+    queue_position: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "sign_at": self.sign_at or None,
+            "sign_source": self.sign_source or None,
+            "cause": self.cause,
+            "lease_left_s": self.lease_left_s,
+            "resume_at": self.resume_at or None,
+            "attempt": self.attempt,
+            "retry_at": self.retry_at or None,
+            "queue_position": self.queue_position,
+        }
+
+
+def presence(
+    *,
+    now: datetime,
+    status: str,
+    blocked_cause: str = "",
+    lease: LeaseFile | None = None,
+    probe_status: str | None = None,
+    ended: bool = False,
+    sign_at: datetime | None = None,
+    sign_source: str = "",
+    lease_lost: Mapping[str, Any] | None = None,
+    queue_position: int | None = None,
+    window: timedelta = PRESENCE_WORKING_WINDOW,
+) -> Presence:
+    """La présence d'une tâche ouverte — fonction pure, cinq valeurs exclusives, premier qui s'applique gagne.
+
+    ``blocked`` (``waiting``/``blocked``/``failed``, avec sa cause) ; ``resume`` (``ready`` rendue après un
+    bail perdu — *lease_lost* — ou tenue par une session terminée) ; ``working`` (tenue, sonde occupée ou
+    signe de moins de *window*, ou outil long déclaré sous bail valide) ; ``silent`` (tenue, plus de signe,
+    avec l'échéance de la reprise auto) ; ``none`` (sans agent, position en file si connue).
+    """
+    stamp = sign_at.isoformat() if sign_at else ""
+    if status in ("waiting", "blocked", "failed"):
+        return Presence("blocked", cause=blocked_cause)
+    held = status in ("claimed", "running")
+    if status == "ready" and lease_lost:
+        raw_attempt = lease_lost.get("attempt")
+        return Presence(
+            "resume",
+            cause=f"bail perdu ({lease_lost.get('reason') or 'inconnu'})",
+            attempt=raw_attempt if isinstance(raw_attempt, int) else None,
+            retry_at=str(lease_lost.get("retry_at") or ""),
+        )
+    if held and (ended or probe_status == "ended"):
+        return Presence("resume", sign_at=stamp, sign_source=sign_source, cause="session terminée sans rendre la tâche")
+    if not held:
+        return Presence("none", queue_position=queue_position)
+    lost = lease.lost_at() if lease is not None and lease.holder else None
+    left = max(int((lost - now).total_seconds()), 0) if lost is not None else None
+    busy = parse_instant(lease.busy_until) if lease is not None else None
+    long_tool = busy is not None and busy > now and lease is not None and not lease.is_lost(now)
+    if probe_status in ("busy", "waiting") or recent_sign(sign_at, now, window) or long_tool:
+        return Presence("working", sign_at=stamp, sign_source=sign_source, lease_left_s=left)
+    return Presence(
+        "silent", sign_at=stamp, sign_source=sign_source, lease_left_s=left,
+        resume_at=lost.isoformat() if lost is not None else "",
+        cause="sans signal d'hôte" if probe_status is None else "",
+    )
