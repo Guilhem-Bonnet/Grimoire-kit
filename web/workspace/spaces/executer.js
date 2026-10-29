@@ -79,6 +79,7 @@ import {
 } from '../shell.js';
 import { agoText, costText, durationText } from '../live.js';
 import { activityBlockAsync } from '../activity.js';
+import { DONE_RECENT_LIMIT, splitRecent } from './board-split.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
@@ -97,12 +98,14 @@ const GROUPS4 = [
   // « En cours » et une section « Bloqué » repliée par défaut (`blockedFold`).
   { id: 'doing', icon: 'bolt', label: 'En cours', cols: ['in_progress', 'blocked'], blockedFold: true },
   { id: 'review', icon: 'microscope', label: 'Revue', cols: ['review'] },
-  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'] },
+  { id: 'done', icon: 'seal', label: 'Fait', cols: ['accepted', 'released'], recentLimit: DONE_RECENT_LIMIT },
   { id: 'cancelled', icon: 'archive', label: 'Annulées', cols: ['archived'], folded: true },
 ];
 // Colonne repliée dépliée ou non — au niveau du module, comme `scope` : revenir
 // sur l'espace garde le dernier réglage.
 const unfolded = new Set();
+// I4 : colonne visible sur mobile (onglet actif) — au niveau du module, pour survivre aux re-rendus.
+let activeGroup = '';
 // P74 : une tâche close (acceptée, publiée, annulée) n'a plus de vivacité à
 // montrer sur sa carte — le travail est fini. Si la session existe encore,
 // c'est l'inspecteur qui le dit (bloc « Session »), jamais la carte.
@@ -190,9 +193,31 @@ function injectStyles() {
   style.textContent = `
     .ex-wrap { padding: var(--sp-4) var(--sp-5); height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); }
     @container canvas (max-width: 720px) { .ex-wrap { padding: var(--sp-3); } }
-    .ex-board { display: flex; gap: var(--sp-3); align-items: flex-start; overflow-x: auto; flex-grow: 1; }
+    /* I4 : le board défile seul ; les colonnes s'étirent à la hauteur du contenu pour que chaque en-tête reste collé en haut (un sticky ne dépasse jamais sa colonne) ; sous 720 px, une colonne pleine largeur à la fois. */
+    .ex-board-shell { display: flex; flex-direction: column; gap: var(--sp-2); flex: 1 1 auto; min-height: 0; min-width: 0; }
+    .ex-board { display: flex; gap: var(--sp-3); align-items: stretch; overflow: auto; flex: 1 1 auto; min-height: 0; position: relative; }
+    .ex-tabs { display: none; flex: none; gap: var(--sp-2); overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+    .ex-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: 999px; background: var(--e2); color: var(--ink2); font-size: var(--t-s); cursor: pointer; }
+    .ex-tab .ico { width: 16px; height: 16px; }
+    .ex-tab .mono { color: var(--ink3); }
+    .ex-tab[aria-selected="true"] { background: var(--acc-soft); border-color: var(--acc); color: var(--ink); font-weight: 600; }
+    .ex-tab:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+    @container canvas (max-width: 720px) {
+      .ex-tabs { display: flex; }
+      .ex-board { scroll-snap-type: x mandatory; overscroll-behavior-x: contain; gap: var(--sp-3); }
+      .ex-board .ex-col { flex: 0 0 100%; max-width: 100%; scroll-snap-align: start; scroll-snap-stop: always; }
+    }
     .ex-col { flex: 1 0 240px; max-width: 340px; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
-    .ex-col-head { padding: 6px 2px; }
+    .ex-col-head { padding: 6px 2px; position: sticky; top: 0; z-index: 2; background: var(--e2); }
+    .ex-more { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 var(--sp-3); border: 1px dashed var(--line); border-radius: var(--r); background: transparent; color: var(--ink2); font-size: var(--t-s); cursor: pointer; }
+    .ex-more:hover { background: var(--hover); }
+    .ex-more:focus-visible, .ex-older-row:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+    .ex-older { display: flex; flex-direction: column; gap: 4px; }
+    .ex-older[hidden] { display: none; }
+    .ex-older-row { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--e2); color: var(--ink); font-size: var(--t-s); text-align: left; cursor: pointer; min-width: 0; }
+    .ex-older-row:hover { background: var(--hover); }
+    .ex-older-row > .ex-older-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ex-older-row > time { flex: none; color: var(--ink3); font-size: var(--t-min); }
     .ex-col-title { font-size: var(--t-s); font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 6px; }
     .ex-col-title > .mono { color: var(--rub); font-weight: 600; }
     .ex-col-title .ico { width: 16px; height: 16px; color: var(--ink2); }
@@ -1039,6 +1064,12 @@ function taskCard(task, onSelect, portfolio = false, selected = false, onTimelin
 }
 
 function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSelected = () => false, onTimeline = null) {
+  const shell = document.createElement('div');
+  shell.className = 'ex-board-shell';
+  const tabs = document.createElement('div');
+  tabs.className = 'ex-tabs';
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', 'Colonnes du tableau');
   const board = document.createElement('div');
   board.className = 'ex-board';
   const byColumn = new Map();
@@ -1050,6 +1081,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     const col = document.createElement('div');
     col.className = 'ex-col' + (group.folded ? ' ex-col-folded' : '');
     col.dataset.group = group.id;
+    col.id = `ex-col-${group.id}`;
     const inColumn = group.cols.flatMap((c) => byColumn.get(c) || []).sort(byPriority);
     const folded = group.folded && !unfolded.has(group.id);
     // P72v2 : sur le board compact, les bloquées sortent du flux de la colonne —
@@ -1074,7 +1106,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
         if (unfolded.has(group.id)) unfolded.delete(group.id); else unfolded.add(group.id);
         const fresh = document.createElement('div');
         renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
-        board.replaceWith(fresh.firstElementChild);
+        shell.replaceWith(fresh.firstElementChild);
       });
       head.append(toggle);
       head.append(text('div', 'ex-col-gate', 'tâches annulées : ni faites, ni à reprendre'));
@@ -1105,7 +1137,7 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
         if (unfolded.has(foldKey)) unfolded.delete(foldKey); else unfolded.add(foldKey);
         const fresh = document.createElement('div');
         renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
-        board.replaceWith(fresh.firstElementChild);
+        shell.replaceWith(fresh.firstElementChild);
       });
       col.append(toggle);
       const section = document.createElement('div');
@@ -1121,15 +1153,101 @@ function renderBoard(root, ctx, tasks, groups, onSelect, portfolio = false, isSe
     const body = document.createElement('div');
     body.className = 'ex-col-body' + (shown.length ? '' : ' empty');
     body.hidden = folded;
+    // I4 : « Fait » garde les plus récentes en cartes ; le reste, en lignes compactes derrière un bouton.
+    const split = group.recentLimit && shown.length > group.recentLimit ? splitRecent(shown, group.recentLimit) : null;
     if (!shown.length) {
       body.append(text('span', null, 'vide'));
     } else {
-      for (const task of shown) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+      for (const task of split ? split.recent : shown) body.append(taskCard(task, onSelect, portfolio, isSelected(task), onTimeline));
+    }
+    if (split) {
+      const key = `${group.id}:older`;
+      const open = unfolded.has(key);
+      const listId = `ex-older-${group.id}`;
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'ex-more';
+      more.dataset.role = 'older-toggle';
+      more.setAttribute('aria-expanded', String(open));
+      more.setAttribute('aria-controls', listId);
+      more.textContent = open ? 'Replier les plus anciennes' : `Voir les ${split.remaining} autres`;
+      more.addEventListener('click', () => {
+        if (unfolded.has(key)) unfolded.delete(key); else unfolded.add(key);
+        const fresh = document.createElement('div');
+        renderBoard(fresh, ctx, tasks, groups, onSelect, portfolio, isSelected, onTimeline);
+        shell.replaceWith(fresh.firstElementChild);
+      });
+      const older = document.createElement('div');
+      older.className = 'ex-older';
+      older.id = listId;
+      older.hidden = !open;
+      for (const task of split.older) {
+        const rowBtn = document.createElement('button');
+        rowBtn.type = 'button';
+        rowBtn.className = 'ex-older-row';
+        rowBtn.dataset.task = task.id;
+        rowBtn.dataset.project = task.project?.slug || '';
+        if (isSelected(task)) rowBtn.setAttribute('aria-current', 'true');
+        rowBtn.title = task.title || task.id;
+        rowBtn.append(text('span', 'ex-older-title', titleParts(task.title || task.id).title));
+        const at = task.in_state_since || '';
+        if (at && !Number.isNaN(Date.parse(at))) rowBtn.append(sinceNode(at));
+        rowBtn.addEventListener('click', () => onSelect(task));
+        older.append(rowBtn);
+      }
+      body.append(more, older);
     }
     col.append(body);
     board.append(col);
+
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'ex-tab';
+    tab.id = `ex-tab-${group.id}`;
+    tab.dataset.group = group.id;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', col.id);
+    tab.append(icon(group.icon), text('span', null, group.label), text('span', 'mono', String(inColumn.length)));
+    tabs.append(tab);
   }
-  root.append(board);
+
+  // I4 : sous 720 px une colonne à la fois ; l'onglet actif suit la colonne visible.
+  const tabEls = [...tabs.children];
+  const cols = [...board.children];
+  const select = (index, { scroll = false, focus = false } = {}) => {
+    const i = Math.max(0, Math.min(tabEls.length - 1, index));
+    tabEls.forEach((t, k) => {
+      t.setAttribute('aria-selected', String(k === i));
+      t.tabIndex = k === i ? 0 : -1;
+    });
+    activeGroup = cols[i]?.dataset.group || '';
+    if (scroll && cols[i]) board.scrollLeft = cols[i].offsetLeft;
+    if (focus) tabEls[i]?.focus();
+  };
+  tabEls.forEach((t, k) => t.addEventListener('click', () => select(k, { scroll: true })));
+  tabs.addEventListener('keydown', (e) => {
+    const k = tabEls.indexOf(document.activeElement);
+    if (k < 0) return;
+    const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    const target = e.key === 'Home' ? 0 : e.key === 'End' ? tabEls.length - 1 : k + delta;
+    if (!delta && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    select(target, { scroll: true, focus: true });
+  });
+  board.addEventListener('scroll', () => {
+    if (!cols.length || !board.clientWidth) return;
+    // Seule la mise en page mobile (colonnes pleine largeur) lie défilement et onglet.
+    if (cols[0].offsetWidth < board.clientWidth - 2) return;
+    const step = cols.length > 1 ? cols[1].offsetLeft - cols[0].offsetLeft : board.clientWidth;
+    const i = Math.max(0, Math.min(cols.length - 1, Math.round(board.scrollLeft / step)));
+    if (tabEls[i]?.getAttribute('aria-selected') !== 'true') select(i);
+  }, { passive: true });
+  const start = Math.max(0, cols.findIndex((c) => c.dataset.group === activeGroup));
+  select(start);
+  if (start > 0) requestAnimationFrame(() => { if (cols[0].offsetWidth >= board.clientWidth - 2) board.scrollLeft = cols[start].offsetLeft; });
+
+  shell.append(tabs, board);
+  root.append(shell);
 }
 
 function renderList(root, ctx, tasks, onSelect, portfolio = false, isSelected = () => false, onTimeline = null) {
