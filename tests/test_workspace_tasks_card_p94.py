@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from grimoire.missions.service import TaskService
 from grimoire.tools import workspace_api
 
@@ -23,35 +25,56 @@ def _seed(root: Path) -> TaskService:
         # Le poids réel d'un ledger : des consignes, tour après tour.
         for n in range(6):
             service.ledger.add_directive(
-                added.task.id, f"Consigne {n} : reprends le point précédent et vérifie les preuves.",
-                actor_id="guilhem", kind="comment",
+                added.task.id,
+                f"Consigne {n} : reprends le point précédent et vérifie les preuves.",
+                actor_id="guilhem",
+                kind="comment",
             )
     return service
 
 
-def test_tasks_view_is_under_half_of_full_ledger(tmp_path: Path) -> None:
-    service = _seed(tmp_path)
-    before = sum(len(json.dumps(workspace_api._task_json(t))) for t in service.list_tasks())
-    view = workspace_api.tasks_view(tmp_path)
+@pytest.fixture(scope="module")
+def ledger(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, int]:
+    """Le ledger de 300 tâches, construit une fois (lecture seule pour les tests) :
+    sa racine et son poids complet, ``_task_json`` avant allègement."""
+    root = tmp_path_factory.mktemp("p94-ledger")
+    service = _seed(root)
+    return root, sum(len(json.dumps(workspace_api._task_json(t))) for t in service.list_tasks())
+
+
+def test_tasks_view_is_under_half_of_full_ledger(ledger: tuple[Path, int]) -> None:
+    root, before = ledger
+    view = workspace_api.tasks_view(root)
     after = len(json.dumps(view["tasks"]))
     assert view["count"] == TASKS
     assert after < before * 0.75, (after, before)  # en clair ; la moitié se mesure sur le fil, ci-dessous
 
 
-def test_card_keeps_display_fields_and_drops_detail(tmp_path: Path) -> None:
-    _seed(tmp_path)
-    card = workspace_api.tasks_view(tmp_path)["tasks"][0]
-    for kept in ("id", "title", "status", "board", "acceptance", "expected_evidence",
-                 "directives_pending", "directives_unacknowledged", "effective_priority"):
+def test_card_keeps_display_fields_and_drops_detail(ledger: tuple[Path, int]) -> None:
+    root, _ = ledger
+    card = workspace_api.tasks_view(root)["tasks"][0]
+    for kept in (
+        "id",
+        "title",
+        "status",
+        "board",
+        "acceptance",
+        "expected_evidence",
+        "directives_pending",
+        "directives_unacknowledged",
+        "effective_priority",
+    ):
         assert kept in card
     for dropped in ("directives", "description", "guardrails", "dependencies"):
         assert dropped not in card
-    detail = workspace_api.task_view(tmp_path, card["id"])
+    detail = workspace_api.task_view(root, card["id"])
     assert detail["description"].startswith("Contexte et pistes")
     assert len(detail["directives"]) == 6
 
 
-def test_tasks_response_on_the_wire_is_under_half_of_before(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_tasks_response_on_the_wire_is_under_half_of_before(
+    tmp_path: Path, ledger: tuple[Path, int], monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
     """Le critère « pèse moins de la moitié » : les octets réellement reçus par le client."""
     import http.client
     import threading
@@ -61,9 +84,7 @@ def test_tasks_response_on_the_wire_is_under_half_of_before(tmp_path: Path, monk
     from grimoire.tools import project_registry
 
     monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "home"))
-    proj = tmp_path / "served"
-    service = _seed(proj)
-    before = sum(len(json.dumps(workspace_api._task_json(t))) for t in service.list_tasks())
+    proj, before = ledger
     project_registry.save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
     monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "served")
     monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", proj.resolve())
