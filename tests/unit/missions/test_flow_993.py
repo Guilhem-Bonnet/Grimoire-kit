@@ -448,6 +448,31 @@ def test_un_not_ready_rendu_pendant_que_la_ci_tourne_est_ecarte_sans_compter_de_
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
 
 
+def test_un_not_ready_dont_un_check_requis_tourne_dans_un_run_relance_est_ecarte(projet: Path, host: FakeHost) -> None:
+    """I8 : deux runs pour la même tête (échec ancien + relance en cours) ne font pas une CI rouge."""
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)
+    host.checks[f"task/{tid}"] = [{"name": "E2E (chromium)", "bucket": "fail"}, {"name": "E2E (chromium)", "bucket": "pending"}]
+    give_ready(host, tid, wt)
+    write_receipt(wt, tid, "NOT-READY", findings=[ReviewFinding("e2e inconnu", "gh pr checks")], reviewer_id="reviewer",
+                  reviewer_session=host.session_of("grimoire-review-"))
+    assert [(o.action, o.status) for o in tick(projet, host).reviews] == [("deferred", "done")]
+    judged = events(projet, tid, REVIEW_JUDGED_EVENT)
+    assert [e.payload["verdict"] for e in judged] == ["ci_pending"]
+    assert judged[0].payload["ci"] == "pending" and "en cours" in judged[0].payload["ci_detail"]
+
+
+def test_chaque_jugement_porte_le_verdict_ci_lu(projet: Path, host: FakeHost) -> None:
+    tid, wt = launch_and_work(projet, host)
+    tick(projet, host)
+    give_ready(host, tid, wt)
+    write_receipt(wt, tid, "NOT-READY", findings=[ReviewFinding("manque", "x")], reviewer_id="reviewer",
+                  reviewer_session=host.session_of("grimoire-review-"))
+    tick(projet, host)
+    judged = events(projet, tid, REVIEW_JUDGED_EVENT)
+    assert judged and all(e.payload.get("ci") and e.payload.get("ci_detail") for e in judged), [e.payload for e in judged]
+
+
 def test_la_consigne_du_relecteur_permet_de_citer_un_job_de_ci_vert_comme_preuve(projet: Path, host: FakeHost) -> None:
     tid, _wt = launch_and_work(projet, host)
     tick(projet, host)

@@ -289,7 +289,7 @@ def test_la_colonne_fait_affiche_total_et_cad_ou_cout_inconnu(page: Page) -> Non
     total = done.locator("[data-role='work-total']")
     expect(total).to_have_count(1)
     # 3,1 M tokens, 7 USD exacts × 1,40 (défaut) = 9,80 $ CAD.
-    expect(total).to_have_text("total 3100 k tokens · ≈ 9,80 $ CAD")
+    expect(total).to_have_text("1 appel · total 3100 k tokens · ≈ 9,80 $ CAD")
     assert total.get_attribute("data-usage-source") == "claude-code-transcript"
     assert "défaut du kit" in (total.get_attribute("title") or "")
     unknown = _card(page, "sans source d'usage").locator("[data-role='work-total']")
@@ -315,7 +315,7 @@ def test_le_taux_cad_se_change_dans_configuration_et_la_colonne_fait_suit(page: 
     page.evaluate("(id) => window.GrimoireWorkspace.goto(id)", "travail")
     page.wait_for_selector(".ex-card:visible", timeout=APPEAR_MS)
     total = _card(page, "coût replié").locator("[data-role='work-total']")
-    expect(total).to_have_text("total 3100 k tokens · ≈ 14,00 $ CAD")
+    expect(total).to_have_text("1 appel · total 3100 k tokens · ≈ 14,00 $ CAD")
 
 
 def take_capture(page: Page, out: Path) -> None:

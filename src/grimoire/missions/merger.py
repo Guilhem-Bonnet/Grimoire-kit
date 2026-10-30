@@ -168,6 +168,13 @@ _SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 #: ``gh pr checks`` : 0 tout passe, 1 un check échoue, 8 des checks attendent — le JSON vaut dans les trois cas.
 _GH_CHECKS_EXIT = (0, 1, 8)
 _RED_BUCKETS = frozenset({"fail", "cancel"})
+
+
+def _latest_runs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Un check relancé figure deux fois pour la même tête (ancien run en échec, nouveau en cours) : le run en cours
+    remplace l'échec du même nom, qui n'est plus le verdict de la tête."""
+    running = {str(r.get("name", "")) for r in rows if r.get("bucket") == "pending"}
+    return [r for r in rows if r.get("bucket") == "pending" or str(r.get("name", "")) not in running]
 _GREEN_BUCKETS = frozenset({"pass", "skipping"})
 #: Ce qui fait d'un échec de ``gh pr merge`` une panne (comptée) plutôt qu'un refus du dépôt (escaladé).
 _TECHNICAL = ("could not resolve", "timeout", "timed out", "connection", "network", "http 5", "error connecting",
@@ -758,6 +765,7 @@ class MergeStage:
             scope = f"checks hors {', '.join(ignored)}" if ignored else "tous les checks"
         if not rows:
             return "pending", f"{_NO_CHECKS} ({scope}) : la CI verte est exigée"
+        rows = _latest_runs(rows)
         buckets = [str(r.get("bucket", "")) for r in rows]
         failed = [_clean(str(r.get("name")), 80) for r, b in zip(rows, buckets, strict=True) if b in red]
         if failed:

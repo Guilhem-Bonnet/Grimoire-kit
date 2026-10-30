@@ -2258,7 +2258,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
     loading: (label, rows, shape) => loadingNodes(label, rows, { shape }),
     params: params || {},
     rail: { on: whileMounted(registerRailAction), reason: whileMounted(setRailReason) },
-    live: { on: (handler) => live.on(handler) },
+    live: { on: (handler, options) => live.on(handler, options) },
   };
   try {
     if (section.module) {
@@ -2468,7 +2468,10 @@ async function refreshAttentionCount({ maxAgeMs = 0 } = {}) {
   } catch { /* le compteur garde sa dernière valeur : l'espace dit l'erreur */ }
 }
 
-function onPulseDecisions() {
+function onPulseDecisions(_decisions, info) {
+  // I11 : le compteur est celui du projet affiché ; un autre projet qui bouge ne le relit pas.
+  const changed = info && Array.isArray(info.changed) ? info.changed : null;
+  if (changed && !host.scopeAll && host.project && !changed.includes(host.project)) return;
   const print = live.state.fingerprint;
   if (print !== null && print === attentionPrint) return;
   attentionPrint = print;
@@ -2545,6 +2548,8 @@ function renderLiveStamp() {
   lead.className = 'live-pre';
   lead.textContent = pre;
   text.replaceChildren(lead, document.createTextNode(tail));
+  const reloads = live.reloadsPerMinute();
+  $('st-reloads').textContent = reloads ? ` · ${reloads} relecture${reloads > 1 ? 's' : ''} / min` : '';
 }
 
 let stampTimer = null;

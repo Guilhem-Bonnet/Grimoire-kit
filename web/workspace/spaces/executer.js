@@ -710,11 +710,13 @@ function workTotalRow(work) {
   line.dataset.usageSource = usage.usage_source || 'none';
   const parts = [];
   if (usage.usage_source === 'claude-code-transcript') {
+    if (usage.calls) parts.push(`${usage.calls} appel${usage.calls > 1 ? 's' : ''}`);
     parts.push(`total ${tokensText(usage.total_tokens || 0)}`);
     if (work.cost_cad != null) parts.push(`${usage.cost_status === 'lower_bound' ? 'au moins ' : '≈ '}${cadText(work.cost_cad)}`);
     else parts.push('coût inconnu');
   } else {
-    parts.push('coût inconnu');
+    // Un journal absent ou purgé n'est pas « zéro » : le serveur le dit (usage_note).
+    parts.push(work.usage_note || 'coût inconnu');
   }
   line.textContent = parts.join(' · ');
   const source = USAGE_SOURCE_WORDS[usage.usage_source];
@@ -4000,7 +4002,7 @@ export async function mount(root, ctx) {
     refreshPending = false;
     draw({ live: true });
   };
-  ctx.live.on(refresh);
+  ctx.live.on(refresh, { scope: () => (scope.mode === 'portfolio' ? 'portfolio' : 'project') });
   const retry = () => { if (refreshPending) setTimeout(refresh, 0); };
   wrap.addEventListener('focusout', retry, { signal: ctx.signal });
   ctx.inspector.addEventListener('focusout', retry, { signal: ctx.signal });

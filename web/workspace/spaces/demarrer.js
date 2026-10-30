@@ -596,6 +596,6 @@ export async function mount(root, ctx, prefetched = {}) {
   });
   // Une commande lancée dans un terminal change le ledger : le pouls le dit,
   // le guide relit l'état (pas la machine, plus lente à sonder).
-  ctx.live.on(() => { if (!ctx.signal.aborted) paint(); });
+  ctx.live.on(() => { if (!ctx.signal.aborted) paint(); }, { scope: () => (ctx.scope.all ? 'portfolio' : 'project') });
   await paint();
 }
