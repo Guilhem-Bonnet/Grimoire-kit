@@ -337,6 +337,11 @@ def annotate_work(project_root: Path, tasks: list[Any], cards: list[dict[str, An
             "usd_cad_source": options["usd_cad_source"],
         }
         session_id = str(card.get("session_id") or "")
+        if usage["usage_source"] == "none" and session_id:
+            from grimoire.missions.usage_fold import MISSING_LABEL, transcript_is_missing
+
+            # Un journal absent ou purgé n'est pas « zéro » : la carte le dit (GAO-i12).
+            work["usage_note"] = MISSING_LABEL if transcript_is_missing(session_id) else None
         if session_id and task.status in (TaskState.CLAIMED, TaskState.RUNNING):
             work["session"] = session_work(project_root, session_id, str(card.get("host") or ""))
         else:

@@ -109,6 +109,7 @@ class TickReport:
     reviews: tuple[ReviewOutcome, ...] = ()
     merges: tuple[MergerOutcome, ...] = ()
     orchestrator: tuple[OrchestratorOutcome, ...] = ()
+    usage: tuple[Any, ...] = ()  # GAO-i12 : les journaux repliés à ce tick (FoldOutcome)
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -137,6 +138,8 @@ class TickReport:
             payload["merges"] = [o.to_dict() for o in self.merges]
         if self.orchestrator:  # #962 : même règle
             payload["orchestrator"] = [o.to_dict() for o in self.orchestrator]
+        if self.usage:  # GAO-i12 : même règle
+            payload["usage"] = [o.to_dict() for o in self.usage]
         return payload
 
 
@@ -261,6 +264,7 @@ def _one_pass(
         except Exception as exc:  # une étape en erreur ne casse pas le tick : récolte, admission et lancements sont faits
             attention.append(f"relecteur : étape en erreur, rien n'est jugé à ce tick ({type(exc).__name__}: {exc})")
     merges = _merger_stage(service, policy, mode, exec_, now, attention)
+    usage = _usage_stage(service, mode, attention)
     answers = _orchestrator_session_stage(service, policy, mode, exec_, now, attention)
     from grimoire.missions.breaker import read_breaker
 
@@ -298,8 +302,28 @@ def _one_pass(
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
-        launches, cleanup, breaker, reviews, merges, answers,
+        launches, cleanup, breaker, reviews, merges, answers, usage,
     )
+
+
+def _usage_stage(service: TaskService, mode: str, attention: list[str]) -> tuple[Any, ...]:
+    """Replie l'usage des sessions rattachées (GAO-i12), appliqué seulement ; une étape en erreur ne casse pas le tick.
+
+    Ne rend que ce qui s'est passé (journal replié, reporté, en erreur) : un journal introuvable n'est pas du bruit de tick.
+    """
+    if mode != "apply":
+        return ()
+    from grimoire.missions.usage_fold import fold_pending
+
+    try:
+        report = fold_pending(service)
+    except Exception as exc:  # récolte, admission, lancements et relectures sont faits
+        attention.append(f"usage : étape en erreur, rien n'est replié à ce tick ({type(exc).__name__}: {exc})")
+        return ()
+    for outcome in report.outcomes:
+        if outcome.status == "error" or (outcome.status == "deferred" and outcome.detail.startswith("journal de")):
+            attention.append(f"usage : {outcome.task_id} {outcome.status} ({outcome.detail})")
+    return tuple(o for o in report.outcomes if o.status in ("folded", "deferred", "error") and (o.new_calls or o.status != "folded"))
 
 
 def _autonomous(service: TaskService) -> bool:

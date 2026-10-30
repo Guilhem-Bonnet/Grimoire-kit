@@ -662,7 +662,7 @@ export async function mount(root, ctx) {
   });
 
   // Le pouls (P10) annonce un changement : la liste se relit, la sélection reste.
-  ctx.live.on(() => refresh(false));
+  ctx.live.on(() => refresh(false), { scope: () => (ctx.scope.all ? 'portfolio' : 'project') });
 
   await refresh(false);
   // Après le premier rendu, jamais devant lui.
