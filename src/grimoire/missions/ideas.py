@@ -13,6 +13,7 @@ comme ``grimoire task add --intake --create``.
 
 from __future__ import annotations
 
+import builtins
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -68,12 +69,12 @@ class IdeaStore:
 
     # ── lecture ──────────────────────────────────────────────────────────────
 
-    def _events(self) -> list[dict[str, Any]]:
+    def _events(self) -> builtins.list[dict[str, Any]]:
         try:
             raw = self.path.read_text(encoding="utf-8")
         except OSError:
             return []
-        events: list[dict[str, Any]] = []
+        events: builtins.list[dict[str, Any]] = []
         for line in raw.splitlines():
             try:
                 event = json.loads(line)
@@ -84,7 +85,7 @@ class IdeaStore:
         return events
 
     @staticmethod
-    def _fold(events: list[dict[str, Any]]) -> dict[str, Idea]:
+    def _fold(events: builtins.list[dict[str, Any]]) -> dict[str, Idea]:
         ideas: dict[str, Idea] = {}
         for event in events:
             kind, idea_id = event.get("event"), str(event.get("id") or "")
@@ -108,7 +109,7 @@ class IdeaStore:
                 idea.tasks = [str(t) for t in event.get("tasks") or ()]
         return ideas
 
-    def list(self, state: str = "") -> list[Idea]:
+    def list(self, state: str = "") -> builtins.list[Idea]:
         """Les idées dans l'ordre d'ajout ; *state* filtre (``open``, ``promoted``, ``dropped``)."""
         return [i for i in self._fold(self._events()).values() if not state or i.state == state]
 
@@ -155,7 +156,7 @@ class IdeaStore:
     def restore(self, idea_id: str) -> Idea:
         return self._transition(idea_id, "restore", "dropped", "seule une idée écartée se restaure")
 
-    def mark_promoted(self, idea_id: str, task_ids: list[str]) -> Idea:
+    def mark_promoted(self, idea_id: str, task_ids: builtins.list[str]) -> Idea:
         """Marque l'idée ``promoted`` avec les tâches créées (le cockpit crée par l'intake, puis marque)."""
         return self._transition(
             idea_id,
@@ -167,7 +168,7 @@ class IdeaStore:
 
     def promote(
         self, idea_id: str, service: Any, *, actor: str = "cli", origin: str = "cli"
-    ) -> tuple[Idea, list[dict[str, Any]]]:
+    ) -> tuple[Idea, builtins.list[dict[str, Any]]]:
         """Crée les tâches non critiques que l'intake propose, puis marque l'idée ``promoted``.
 
         Une seconde promotion est refusée avant toute création. Les propositions critiques

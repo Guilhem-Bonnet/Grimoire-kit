@@ -478,9 +478,10 @@ def test_task_intake_refuse_un_texte_blanc(tmp_path: Path) -> None:
 
 
 def test_idea_add_borne_le_texte_et_la_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from grimoire.mcp.server import IDEA_ADD_LIMIT, idea_add
+    from grimoire.mcp import idea_tools
+    from grimoire.mcp.idea_tools import IDEA_ADD_LIMIT, idea_add
 
-    monkeypatch.setattr(server_module, "_idea_adds", {})
+    monkeypatch.setattr(idea_tools, "_idea_adds", {})
     monkeypatch.delenv("GRIMOIRE_SESSION_ID", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     too_long = _json(idea_add("x" * 501, project_path=str(tmp_path)))
