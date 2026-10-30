@@ -84,7 +84,7 @@ def test_au_plus_quatre_lectures_yaml_par_requete(tmp_path: Path, monkeypatch: p
     root = _project(tmp_path, ["in_progress"] * 60 + ["archived"] * 140)
     reads.clear()
 
-    payload = wa.evidence_view(root, include_all=True)
+    payload = wa.evidence_view(root, include_all=True, budget=600)
 
     assert payload["count"] == 200
     assert len(reads) <= 4, [p.name for p in reads]
@@ -105,13 +105,13 @@ def test_parite_des_gates_des_taches_actives_et_decompte_terminal(tmp_path: Path
         assert entry["gates"]["missing"] == list(gate.missing)
         assert [c["id"] for c in entry["gates"]["checks"]] == [c.id for c in gate.checks]
 
-    full = wa.evidence_view(root, include_all=True)
+    full = wa.evidence_view(root, include_all=True, budget=600)
     assert full["count"] == len(statuses)
 
 
 def test_all_rend_les_283_entrees(tmp_path: Path) -> None:
     root = _project(tmp_path, ["archived"] * 200 + ["accepted"] * 80 + ["in_progress"] * 3)
-    assert wa.evidence_view(root, include_all=True)["count"] == 283
+    assert wa.evidence_view(root, include_all=True, budget=600)["count"] == 283
     assert wa.evidence_view(root)["count"] == 3
 
 
