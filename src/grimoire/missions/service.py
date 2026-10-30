@@ -112,10 +112,6 @@ DEFAULT_LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
 BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 
 
-#: La raison de l'acquittement posé à la clôture d'une tâche.
-CLOSED_ACK_REASON = "tâche close"
-
-
 class TaskRefusedError(GrimoireMissionError):
     """Le gate de preuve refuse la transition. Porte le verdict, pour qu'un
     appelant puisse le rendre tel quel — le refus nomme la preuve et le remède."""
@@ -1293,16 +1289,8 @@ class TaskService:
             expected_from=task.status,
             lease_epoch=lease_epoch,
         )
-        if target in (TaskState.CLOSED, TaskState.CANCELLED):
-            moved = self._acknowledge_remaining(moved, actor)
         self._consolidate(moved, target, actor=actor, reason=reason)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
-
-    def _acknowledge_remaining(self, task: MissionTask, actor: str) -> MissionTask:
-        """Une tâche finie n'a plus de session pour lire : ses consignes restantes sont acquittées, raison « tâche close »."""
-        for directive in task.unacknowledged_directives:
-            task = self.ledger.acknowledge_directive(task.id, directive.id, actor_id=actor, reason=CLOSED_ACK_REASON)
-        return task
 
     # ── Pilotage humain (issue #638, lot B) ────────────────────────────────
     #

@@ -53,12 +53,11 @@ def served_quiet(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str,
     service = TaskService(home)
     for n in range(CLOSED):
         tid = _task(home, f"Tâche finie numéro {n}", env)
-        for text in ("première", "seconde"):
-            service.comment(tid, text, "guilhem", kind="directive", origin=ORIGIN_HUMAN)
-        # Le ledger brut : la clôture du service acquitterait déjà les consignes, et c'est le cas du
-        # ledger hérité, écrit avant ce correctif, que l'écran doit aussi savoir taire.
         for state in (TaskState.RUNNING, TaskState.NEEDS_VERIFICATION, TaskState.CLOSED):
             service.ledger.transition_task(tid, state, actor_id="t")
+        # Posées après la clôture : le ledger hérité, écrit avant que la clôture acquitte, garde ces consignes.
+        for text in ("première", "seconde"):
+            service.comment(tid, text, "guilhem", kind="directive", origin=ORIGIN_HUMAN)
 
     _grimoire(base, "cockpit", "add", str(home), env=env)
     port = _free_port()

@@ -537,10 +537,12 @@ class TestExpiredMemoryProbe:
 
 
 def _finish(service: TaskService, tid: str, target: TaskState) -> None:
-    """Termine la tâche au ledger, sans la clôture du service : les consignes restent non acquittées."""
+    """Termine la tâche, puis lui laisse trois consignes : le ledger hérité, écrit avant que la clôture acquitte."""
     if target is TaskState.CLOSED:
         service.ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="t")
     service.ledger.transition_task(tid, target, actor_id="t")
+    for text in ("un", "deux", "trois"):
+        service.comment(tid, text, "guilhem", kind="directive", origin=ORIGIN_HUMAN)
 
 
 class TestConsignesDesTachesFinies:
@@ -575,7 +577,8 @@ class TestConsignesDesTachesFinies:
 
     @pytest.mark.parametrize("target", [TaskState.CLOSED, TaskState.CANCELLED])
     def test_une_tache_finie_ne_produit_aucune_consigne(self, tmp_path: Path, target: TaskState) -> None:
-        service, tid = self._with_directives(tmp_path)
+        service = TaskService(tmp_path)
+        tid = _task(service, "Tâche finie")
         _finish(service, tid, target)
 
         assert self._unacked(tmp_path) == []

@@ -684,9 +684,13 @@ class MissionLedger:
         with _ledger_file_lock(self._events_path):
             self._refresh()
             self._load()
-            return self._transition_locked(
+            moved = self._transition_locked(
                 task_id, to_state, actor_id, reason, claim, extra_payload, expected_from, lease_epoch, step
             )
+        if to_state in (TaskState.CLOSED, TaskState.CANCELLED):  # plus de session pour lire : tout est acquitté
+            for directive in moved.unacknowledged_directives:
+                moved = self.acknowledge_directive(task_id, directive.id, actor_id=actor_id, reason="tâche close")
+        return moved
 
     def _transition_locked(
         self,
