@@ -15,8 +15,9 @@ from rich.markup import escape
 
 
 def register_usage_commands(app: typer.Typer) -> None:
-    """Accroche ``fold-usage`` au groupe *app*."""
+    """Accroche ``fold-usage`` et ``usage`` au groupe *app*."""
     app.command("fold-usage")(task_fold_usage)
+    app.command("usage")(task_usage_fold)
 
 
 def _usage_of(task: Any, root: Path) -> dict[str, Any]:
@@ -103,3 +104,36 @@ def task_fold_usage(
             f"[yellow]![/yellow] {count} appel(s) déjà attribué(s) à {escape(holder)}, non réattribués"
             " (un appel n'appartient qu'à une tâche ; --since/--until répartit un journal)."
         )
+
+
+def task_usage_fold(
+    ctx: typer.Context,
+    backfill: Annotated[bool, typer.Option("--backfill", help="Les tâches closes déjà là, sans plafond de journaux.")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dit combien de journaux et d'octets seraient lus, n'écrit rien.")] = False,
+    project_root: Annotated[Path, typer.Option("--project-root", help="Racine du projet.")] = Path(),
+    ledger_root: Annotated[Path, typer.Option("--ledger-root", help="Racine du Mission Ledger.")] = Path("_grimoire-runtime-output/ledger"),
+) -> None:
+    """Replie l'usage des sessions rattachées aux tâches, comme le fait le tick (GAO-i12).
+
+    Sans option : le pas du tick (au plus 5 journaux et 50 Mo). ``--backfill`` :
+    les tâches closes seulement, tous leurs journaux d'une traite. Un journal
+    absent est dit « journal de session introuvable », jamais compté pour zéro.
+    """
+    from grimoire.cli.cmd_task import _fmt, _service, console
+    from grimoire.missions.usage_fold import MAX_LOGS, fold_pending
+
+    service = _service(project_root.resolve(), ledger_root)
+    report = fold_pending(service, max_logs=0 if backfill else MAX_LOGS, only_terminal=backfill, dry_run=dry_run)
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+        return
+    if dry_run:
+        console.print(f"{report.logs} journal(aux), {report.bytes} octet(s) seraient lus ; rien n'est écrit.")
+    else:
+        console.print(f"[green]OK[/green] {report.logs} journal(aux) lu(s) : {report.new_calls} appel(s) replié(s), {report.already_folded} déjà connu(s)")
+    for status in ("missing", "refused", "deferred", "error"):
+        outcomes = report.of(status)
+        if outcomes:
+            console.print(f"[yellow]![/yellow] {len(outcomes)} {status} :")
+            for o in outcomes[:10]:
+                console.print(f"  {escape(o.task_id)} — {escape(o.detail)}")
