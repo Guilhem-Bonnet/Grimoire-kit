@@ -80,6 +80,24 @@ def _names(page: Page) -> list[str]:
     return page.locator(".pl-fleet .tbl tbody tr .pl-name").all_inner_texts()
 
 
+def _settled_names(page: Page, expected: list[str]) -> list[str]:
+    """Attend que la table affiche exactement ``expected`` (ordre libre), puis la relit.
+
+    Un segment ou le filtre texte redessine la table après le clic ; la lire tout
+    de suite voit parfois l'état d'avant (CI chargée). On attend l'état observable.
+    """
+    page.wait_for_function(
+        """(want) => {
+            const got = [...document.querySelectorAll('.pl-fleet .tbl tbody tr .pl-name')]
+                .map((e) => e.textContent.trim()).sort();
+            return JSON.stringify(got) === JSON.stringify([...want].sort());
+        }""",
+        arg=expected,
+        timeout=30_000,
+    )
+    return _names(page)
+
+
 def test_en_tete_titre_comptes_reels_et_formule(page: Page, served_inbox: dict[str, str]) -> None:
     _open(page, served_inbox)
     title = page.locator(".pl-fleet .space-title")
@@ -124,23 +142,27 @@ def test_les_segments_et_le_filtre_texte_reduisent_la_table(page: Page, served_i
     assert [b.get_attribute("aria-pressed") for b in seg.locator("button").all()] == ["true", "false", "false"]
 
     seg.get_by_role("button", name="Kit en retard").click()
-    assert _names(page) == [STUDIO]
+    assert _settled_names(page, [STUDIO]) == [STUDIO]
     seg.get_by_role("button", name="Demandent une action").click()
-    assert sorted(_names(page)) == sorted([HOME_NAME, STUDIO, MISSING])
+    assert sorted(_settled_names(page, [HOME_NAME, STUDIO, MISSING])) == sorted([HOME_NAME, STUDIO, MISSING])
     seg.get_by_role("button", name="Tous").click()
-    assert len(_names(page)) == 4
+    assert len(_settled_names(page, [HOME_NAME, STUDIO, CALM, MISSING])) == 4
 
     page.get_by_label("Filtrer les projets").fill("calme")
-    assert _names(page) == [CALM]
+    assert _settled_names(page, [CALM]) == [CALM]
     page.get_by_label("Filtrer les projets").fill("zzz-introuvable")
-    assert page.locator(".pl-none").is_visible()
-    assert page.locator(".pl-fleet .tbl-wrap").is_hidden()
+    page.wait_for_selector(".pl-none", state="visible", timeout=30_000)
+    page.wait_for_selector(".pl-fleet .tbl-wrap", state="hidden", timeout=30_000)
 
 
 def test_ouvrir_une_ligne_change_la_portee_vers_le_projet(page: Page, served_inbox: dict[str, str]) -> None:
     _open(page, served_inbox)
     page.get_by_role("button", name=f"Ouvrir {STUDIO}").click()
-    page.wait_for_url(lambda url: f"project={served_inbox['studio']}" in url, timeout=30_000)
+    # « Ouvrir » recharge la page entière (``location.assign``) : on attend la
+    # navigation (``commit``), pas son événement ``load``, puis l'état prêt de la coque.
+    page.wait_for_url(lambda url: f"project={served_inbox['studio']}" in url, wait_until="commit", timeout=30_000)
+    page.wait_for_selector("body[data-ready='1']", timeout=60_000)
+    page.wait_for_function("() => window.GrimoireWorkspace.scope.project !== null")
 
 
 def test_pas_de_selection_multiple_ni_d_action_groupee(page: Page, served_inbox: dict[str, str]) -> None:

@@ -189,10 +189,21 @@ def test_code_monospace(browser: Browser, served: dict[str, Any]) -> None:
         assert pre.evaluate("el => el.textContent") == _SOURCE, "retours à la ligne et indentation conservés"
         # Chromium récent décompose `white-space` (white-space-collapse + text-wrap-mode) : le raccourci peut se lire vide
         # alors que le rendu est bien « pre » (CI du 2026-10-29). On vérifie les longhands quand ils existent.
-        ws = pre.evaluate(
-            "el => { const s = getComputedStyle(el); return [s.whiteSpace, s.whiteSpaceCollapse || '', s.textWrapMode || ''] }"
+        # Sous charge l'inspecteur peut se redessiner entre la résolution du nœud et la lecture
+        # (getComputedStyle d'un nœud détaché rend ''): on attend un état observable — le style
+        # calculé, ou à défaut le rendu (innerText ne garde les retours à la ligne que si white-space les préserve).
+        page.wait_for_function(
+            """(source) => {
+                const el = document.querySelector('#inspector-body .kn-code pre');
+                if (!el || !el.isConnected) return false;
+                const s = getComputedStyle(el);
+                return s.whiteSpace === 'pre'
+                    || (s.whiteSpaceCollapse === 'preserve' && s.textWrapMode === 'nowrap')
+                    || el.innerText === source;
+            }""",
+            arg=_SOURCE,
+            timeout=30_000,
         )
-        assert ws[0] == "pre" or (ws[1] == "preserve" and ws[2] == "nowrap"), ws
         assert pre.get_attribute("tabindex") == "0"
         assert pre.get_attribute("role") == "region"
         assert (pre.get_attribute("aria-label") or "").strip()
