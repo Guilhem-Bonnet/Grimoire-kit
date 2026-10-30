@@ -587,8 +587,9 @@ function holdToast(held) {
 }
 
 /** Montre le toast d'un geste qui vient de partir. `undo()` rejoue la route
- *  inverse et rend une promesse ; `undone` est le message de réussite. */
-export function undoToast(message, { undo, undone = 'Geste annulé.' } = {}) {
+ *  inverse et rend une promesse ; `undone` est le message de réussite ;
+ *  `delay` borne la fenêtre d'annulation (10 s par défaut). */
+export function undoToast(message, { undo, undone = 'Geste annulé.', delay = UNDO_DELAY_MS } = {}) {
   dropToast();
   const region = $('toast');
   if (!region || typeof undo !== 'function') return null;
@@ -596,8 +597,8 @@ export function undoToast(message, { undo, undone = 'Geste annulé.' } = {}) {
   const action = mk('button', { type: 'button', class: 'btn pri toast-undo', 'data-role': 'toast-undo' },
     icon('undo'), mk('span', { text: 'Annuler' }));
   const close = mk('button', { type: 'button', class: 'btn ghost toast-close', 'aria-label': 'Fermer', title: 'Fermer' }, icon('cross'));
-  const card = mk('div', { class: 'toast-card', 'data-phase': 'pending', 'data-duration': String(UNDO_DELAY_MS) }, text, action, close);
-  const own = { card, phase: 'pending', held: false, timer: null, remaining: UNDO_DELAY_MS, started: 0 };
+  const card = mk('div', { class: 'toast-card', 'data-phase': 'pending', 'data-duration': String(delay) }, text, action, close);
+  const own = { card, phase: 'pending', held: false, timer: null, remaining: delay, started: 0 };
   toast = own;
   card.addEventListener('pointerenter', () => holdToast(true));
   card.addEventListener('pointerleave', () => holdToast(card.contains(document.activeElement)));
@@ -629,7 +630,7 @@ export function undoToast(message, { undo, undone = 'Geste annulé.' } = {}) {
     close.focus({ preventScroll: true });
   });
   region.replaceChildren(card);
-  armToast(UNDO_DELAY_MS);
+  armToast(delay);
   return card;
 }
 

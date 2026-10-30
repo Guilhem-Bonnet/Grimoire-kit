@@ -472,3 +472,28 @@ def test_task_intake_refuse_un_texte_blanc(tmp_path: Path) -> None:
 
     refus = task_intake("   ", project_path=str(tmp_path))
     assert "attend le texte" in json.dumps(refus.model_dump() if hasattr(refus, "model_dump") else refus, ensure_ascii=False)
+
+
+# ── idea_add (I13) ───────────────────────────────────────────────────────────
+
+
+def test_idea_add_borne_le_texte_et_la_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.mcp import idea_tools
+    from grimoire.mcp.idea_tools import IDEA_ADD_LIMIT, idea_add
+
+    monkeypatch.setattr(idea_tools, "_idea_adds", {})
+    monkeypatch.delenv("GRIMOIRE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    too_long = _json(idea_add("x" * 501, project_path=str(tmp_path)))
+    assert "501" in too_long["error"] and "500" in too_long["error"]
+    assert not (tmp_path / "_grimoire-runtime-output" / "ledger" / "ideas.jsonl").exists()
+    for n in range(IDEA_ADD_LIMIT):
+        got = _json(idea_add(f"idée {n}", project_path=str(tmp_path)))
+        assert got["source"] == "agent" and got["state"] == "open"
+    refused = _json(idea_add("de trop", project_path=str(tmp_path)))
+    assert "20" in refused["error"] and "session" in refused["error"]
+    journal = tmp_path / "_grimoire-runtime-output" / "ledger" / "ideas.jsonl"
+    assert len(journal.read_text(encoding="utf-8").splitlines()) == IDEA_ADD_LIMIT
+    # Une autre session repart de zéro.
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "autre")
+    assert _json(idea_add("nouvelle session", project_path=str(tmp_path)))["id"]

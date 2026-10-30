@@ -306,3 +306,33 @@ def test_a_task_for_another_project_than_the_served_one_is_refused(server: dict[
     )
     assert status == 403 and body["error"] == "hôte en lecture seule"
     assert _tasks(server["other"]) == [] and _tasks(server["served"]) == []
+
+
+# ── 5. Boîte à idées (I13) : les trois routes d'écriture suivent la même garde ──────────────
+
+IDEA_POSTS = [f"{PREFIX}ideas/add", f"{PREFIX}ideas/drop", f"{PREFIX}ideas/promote"]
+
+
+def _ideas_file(root: Path) -> Path:
+    return root / "_grimoire-runtime-output" / "ledger" / "ideas.jsonl"
+
+
+@pytest.mark.no_session_token
+@pytest.mark.parametrize("path", IDEA_POSTS)
+def test_an_idea_write_without_the_session_token_writes_nothing(server: dict[str, Any], path: str) -> None:
+    body = {"text": "une idée", "id": "IDEA-0001"}
+    assert _raw(server["port"], f"{path}?project=servi", body, {"Content-Type": "application/json"}) == 403
+    assert not _ideas_file(server["served"]).exists()
+
+
+@pytest.mark.parametrize("path", IDEA_POSTS)
+def test_an_idea_write_is_absent_on_a_read_only_host(server: dict[str, Any], path: str) -> None:
+    status, body = _cockpit_http.post(server["port"], f"{path}?project=voisin", {"text": "une idée", "id": "IDEA-0001"})
+    assert status == 403 and body["error"] == "hôte en lecture seule"
+    assert not _ideas_file(server["other"]).exists() and not _ideas_file(server["served"]).exists()
+
+
+def test_an_idea_write_on_the_served_project_goes_through(server: dict[str, Any]) -> None:
+    status, body = _cockpit_http.post(server["port"], f"{PREFIX}ideas/add?project=servi", {"text": "une idée"})
+    assert status == 200 and body["state"] == "open"
+    assert _ideas_file(server["served"]).exists()
