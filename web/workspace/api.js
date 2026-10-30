@@ -304,7 +304,7 @@ export const api = {
   // l'état de leurs gates et le chemin de leur pack — jamais construit ici
   // depuis les fichiers, toujours la même lecture que `grimoire standard
   // verify`, côté serveur.
-  evidence: () => get(WS + 'evidence'),
+  evidence: (all) => get(WS + 'evidence', all ? { all: '1' } : undefined),
   doctor: (project) => get(WS + 'doctor', project ? { project } : undefined),
   // IntelliSense de l'éditeur Source (#280) : tokens + diagnostics toujours,
   // complétions seulement si `pos` est fourni. `text` porte le brouillon en

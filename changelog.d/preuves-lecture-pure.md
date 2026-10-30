@@ -1,0 +1,2 @@
+- perf(cockpit): le panneau Preuves lit le board et les politiques une fois par requête, ne calcule que les tâches actives (les terminales sont comptées, `?all=1` les détaille) et borne son calcul à 5 s (`truncated`) — 283 tâches en moins de 1,5 s au lieu de plus de 30 s (GAO-i9-rendre-l-001)
+- fix(cockpit): `GET /api/workspace/evidence` n'écrit plus de `gate.checked` dans `runtime-journal.jsonl` (`check_evidence_gates(record=False)`), un journal périmé n'est plus rendu « frais » par l'ouverture du panneau (GAO-i9-rendre-l-001)

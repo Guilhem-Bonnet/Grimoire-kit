@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core import standard_generation as gen
+from grimoire.core.request_memo import memoized
 from grimoire.core.standard_checks.base import (
     BOARD_STATES as BOARD_STATES,
 )
@@ -65,10 +66,7 @@ from grimoire.core.standard_checks.registry import (
 from grimoire.core.standard_checks.registry import (
     dimension_for,
 )
-from grimoire.core.standard_checks.verifiers import (
-    _verify_memory_policy,
-    run_verifiers,
-)
+from grimoire.core.standard_checks.verifiers import memory_policy_checks, run_verifiers
 from grimoire.core.standard_effective_profile import effective_manifest_profile
 from grimoire.core.standard_generation import (
     CONTEXT_DIR,
@@ -909,11 +907,13 @@ def verify_standard_profile(
     return result
 
 
+@memoized
 def _selected_profile(project_root: Path, profile_id: str | None) -> StandardProfile:
     selected_profile = profile_id or effective_manifest_profile(project_root) or "starter"
     return get_profile(selected_profile)
 
 
+@memoized
 def _read_yaml_mapping(root: Path, rel_path: Path) -> dict[str, Any]:
     path = root / rel_path
     if not path.is_file():
@@ -1447,8 +1447,9 @@ def check_evidence_gates(
     task_id: str = "bootstrap",
     target_state: str | None = None,
     profile_id: str | None = None,
+    record: bool = True,
 ) -> StandardGateResult:
-    """Evaluate task evidence gates against generated runtime artifacts."""
+    """Evaluate task evidence gates; ``record=False`` n'écrit rien au journal (lecture pure du cockpit)."""
     root = project_root.resolve()
     normalized_task_id = normalize_task_id(task_id)
     profile = _selected_profile(root, profile_id)
@@ -1495,9 +1496,7 @@ def check_evidence_gates(
         if not (root / required_paths["memory_policy"]).is_file():
             missing.append("memory_policy")
         else:
-            memory_result = StandardVerificationResult(profile=profile.id, project_root=root)
-            _verify_memory_policy(root, profile, memory_result)
-            checks.extend(memory_result.checks)
+            checks.extend(memory_policy_checks(root, profile))
     if state in {"review", "accepted", "released"}:
         for key in ("evidence_pack", "claim_ledger", "decision_trace"):
             if not (root / required_paths[key]).is_file():
@@ -1519,7 +1518,8 @@ def check_evidence_gates(
             path=required_paths.get(key),
         ))
     ok = not any(check.is_error for check in checks)
-    _append_runtime_event(root, event_type="gate.checked", task_id=normalized_task_id, profile=profile.id, details={"ok": ok, "target_state": state, "missing": missing})
+    if record:
+        _append_runtime_event(root, event_type="gate.checked", task_id=normalized_task_id, profile=profile.id, details={"ok": ok, "target_state": state, "missing": missing})
     return StandardGateResult(ok=ok, task_id=normalized_task_id, profile=profile.id, state=state or None, missing=tuple(missing), checks=tuple(checks))
 
 
