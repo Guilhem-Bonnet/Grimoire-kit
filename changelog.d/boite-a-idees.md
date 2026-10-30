@@ -1,1 +1,0 @@
-- feat(missions): boîte à idées — `grimoire idea add|list|drop|promote`, outil MCP `idea_add` et « Garder pour plus tard » dans « Une idée ? » du cockpit : une idée se garde sans être triée, et se transforme en tâches plus tard (I13)

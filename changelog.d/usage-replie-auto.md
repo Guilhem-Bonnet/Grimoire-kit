@@ -1,1 +1,0 @@
-- feat(missions): l'usage réel de chaque session est replié dans sa tâche à chaque tick (journal retrouvé dans le worktree ou par identifiant de session, au plus 5 journaux et 50 Mo par tick) ; `grimoire task usage --backfill [--dry-run]` rattrape les tâches closes ; un journal absent est dit « journal de session introuvable »
