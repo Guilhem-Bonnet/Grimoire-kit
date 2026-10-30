@@ -1,0 +1,1 @@
+- fix(missions): le relecteur ne juge plus une tâche sur un run d'E2E périmé — un check relancé (échec ancien, run en cours) est en cours, pas rouge — et chaque `task.review_judged` porte le verdict CI lu (`ci`, `ci_detail`) (GAO-i8-le-relec-001)
