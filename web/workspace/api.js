@@ -215,7 +215,10 @@ export const api = {
   // l'URL vit ici, avec la même cible que toute lecture. Un message est un tour humain : le
   // cockpit le relaie à l'agent et n'écrit rien lui-même (ADR-007).
   chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
-  chatSend: (text) => post(WS + 'chat/send', { text }),
+  chatSend: (text, answerTo) => post(WS + 'chat/send', answerTo ? { text, answer_to: answerTo } : { text }),
+  // ACP4 : le geste du pilote automatique. Un bouton que la personne clique, avec la clé de contrôle
+  // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé.
+  autopilotSet: (on, controlKey) => post(WS + 'autonomy/autopilot', { on, control_key: controlKey }),
   chatPermission: (requestId, decision) => post(WS + 'chat/permission', { request_id: requestId, decision }),
   chatCancel: () => post(WS + 'chat/cancel', {}),
   // ACP3 : l'hôte du chat, par projet. Les hôtes absents reviennent grisés, avec leur raison.
@@ -307,7 +310,7 @@ export const api = {
   // l'état de leurs gates et le chemin de leur pack — jamais construit ici
   // depuis les fichiers, toujours la même lecture que `grimoire standard
   // verify`, côté serveur.
-  evidence: () => get(WS + 'evidence'),
+  evidence: (all) => get(WS + 'evidence', all ? { all: '1' } : undefined),
   doctor: (project) => get(WS + 'doctor', project ? { project } : undefined),
   // IntelliSense de l'éditeur Source (#280) : tokens + diagnostics toujours,
   // complétions seulement si `pos` est fourni. `text` porte le brouillon en
@@ -473,9 +476,18 @@ export const api = {
   // `grimoire task add`. `post`, pas `postOpen` : aucune dérogation à P02.
   taskAdd: ({ title, acceptance, description }) =>
     post(WS + 'tasks/add', { title, acceptance, description }),
+  // « Demander une correction » (P42) : ouvre la tâche et son critère généré ;
+  // la mémoire n'est touchée qu'à l'acceptation de la proposition de l'agent.
+  memoryCorrect: ({ entryId, outcome, description }) =>
+    post(WS + 'memory/correct', { entry_ids: [entryId], outcome, description }),
   // « Une idée ? » (I2) : propositions de l'intake déterministe (aucune écriture), puis création des cochées.
   taskIntake: (text) => post(WS + 'tasks/intake', { text }),
   taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),
+  // Boîte à idées (I13) : garder sans trier ; « annuler » d'un écart est `undo: true`, un événement de plus.
+  ideas: () => get(WS + 'ideas'),
+  ideaAdd: (text) => post(WS + 'ideas/add', { text }),
+  ideaDrop: (id, undo = false) => post(WS + 'ideas/drop', { id, undo }),
+  ideaPromote: (id, tasks) => post(WS + 'ideas/promote', { id, tasks }),
   // Action depuis le portefeuille (#638, lot C) : routée vers le projet
   // propriétaire par `?project=<slug>` explicite dans le chemin (donc jamais
   // doublé par `withProject`) et confirmée par `project` dans le corps —

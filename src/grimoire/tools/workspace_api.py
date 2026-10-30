@@ -382,20 +382,33 @@ def tasks_view(
     return payload
 
 
-def evidence_view(project_root: Path) -> dict[str, Any]:
-    """Les tâches du standard gouverné, leur enveloppe, leurs gates et leur pack.
+#: Les états où une tâche n'attend plus rien de ses gates : le panneau les compte.
+_TERMINAL_STATES = ("accepted", "released", "archived")
+#: Borne de temps du calcul des gates d'une requête (secondes).
+EVIDENCE_BUDGET_SECONDS = 5.0
+
+
+def evidence_view(
+    project_root: Path, *, include_all: bool = False, budget: float = EVIDENCE_BUDGET_SECONDS,
+) -> dict[str, Any]:
+    """Les tâches actives du standard gouverné, leur enveloppe, leurs gates et leur pack.
 
     Distinct de :func:`tasks_view` : celle-ci lit le Mission Ledger (des
     tâches de travail) ; ceci lit ``_grimoire/standard/task-board.yaml`` (le
     board de conformité du standard agentique) — la même donnée que
-    ``grimoire standard verify``/``grimoire_standard_gate``, jamais une
-    relecture parallèle des fichiers. Sert le panneau « Preuves » du rail
-    (issue #534) : ``enrolled: false`` quand le projet n'a pas encore
-    `grimoire standard init`, sinon une entrée par tâche du board avec l'état
-    de ses gates (:func:`grimoire.core.agentic_standard.check_evidence_gates`)
-    et le chemin de son pack de preuve.
+    ``grimoire standard verify``/``grimoire_standard_gate``. Sert le panneau
+    « Preuves » du rail (issue #534) : ``enrolled: false`` quand le projet n'a
+    pas encore `grimoire standard init`.
+
+    Lecture pure (``record=False`` : rien dans le journal d'exécution), board
+    et politiques lus une fois par requête, tâches terminales comptées par
+    état dans ``terminal`` (``include_all`` les détaille). Au-delà de
+    ``budget`` secondes la réponse est partielle et le dit (``truncated``).
     """
+    import time
+
     from grimoire.core.agentic_standard import check_evidence_gates, list_board_tasks
+    from grimoire.core.request_memo import request_memo as yaml_read_memo
     from grimoire.core.standard_generation import EVIDENCE_DIR, normalize_task_id
     from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 
@@ -408,30 +421,55 @@ def evidence_view(project_root: Path) -> dict[str, Any]:
         }
     profile = active_profile_id(root, write_cache=False)
     tasks: list[dict[str, Any]] = []
-    for task in list_board_tasks(root):
-        task_id = str(task.get("task_id") or "").strip()
-        if not task_id:
-            continue
-        status = task.get("status")
-        gate = check_evidence_gates(root, task_id=task_id, target_state=status)
-        pack_ref = task.get("evidence_pack_ref")
-        pack_path = Path(pack_ref) if pack_ref else EVIDENCE_DIR / normalize_task_id(task_id) / "evidence-pack.md"
-        tasks.append({
-            "task_id": task_id,
-            "title": task.get("title"),
-            "status": status,
-            "gates": {
-                "ok": gate.ok,
-                "missing": list(gate.missing),
-                "checks": [
-                    {"id": c.id, "severity": c.severity, "message": c.message}
-                    for c in gate.checks
-                ],
-            },
-            "pack_path": pack_path.as_posix(),
-            "pack_exists": (root / pack_path).is_file(),
-        })
-    return {"enrolled": True, "profile": profile, "tasks": tasks, "count": len(tasks)}
+    terminal: dict[str, int] = {}
+    deadline = time.monotonic() + budget
+    truncated = False
+    with yaml_read_memo():
+        board = list_board_tasks(root)
+        for task in board:
+            task_id = str(task.get("task_id") or "").strip()
+            if not task_id:
+                continue
+            status = task.get("status")
+            if status in _TERMINAL_STATES:
+                terminal[status] = terminal.get(status, 0) + 1
+                if not include_all:
+                    continue
+            if time.monotonic() > deadline:
+                truncated = True
+                break
+            gate = check_evidence_gates(root, task_id=task_id, target_state=status, record=False)
+            pack_ref = task.get("evidence_pack_ref")
+            pack_path = Path(pack_ref) if pack_ref else EVIDENCE_DIR / normalize_task_id(task_id) / "evidence-pack.md"
+            tasks.append({
+                "task_id": task_id,
+                "title": task.get("title"),
+                "status": status,
+                "gates": {
+                    "ok": gate.ok,
+                    "missing": list(gate.missing),
+                    "checks": [
+                        {"id": c.id, "severity": c.severity, "message": c.message}
+                        for c in gate.checks
+                    ],
+                },
+                "pack_path": pack_path.as_posix(),
+                "pack_exists": (root / pack_path).is_file(),
+            })
+    if truncated:
+        # Le décompte des terminales doit rester complet même si les gates ne le sont pas.
+        terminal = {}
+        for task in board:
+            if task.get("status") in _TERMINAL_STATES:
+                terminal[task["status"]] = terminal.get(task["status"], 0) + 1
+    return {
+        "enrolled": True,
+        "profile": profile,
+        "tasks": tasks,
+        "count": len(tasks),
+        "terminal": terminal,
+        "truncated": truncated,
+    }
 
 
 def task_view(project_root: Path, task_id: str) -> dict[str, Any]:
@@ -1154,11 +1192,30 @@ def proposals_view(project_root: Path) -> dict[str, Any]:
     # `accept_blocker` : le refus qu'« Accepter » rencontrerait à coup sûr
     # (même texte que `accept_proposal`), pour que la fiche montre ce qu'il
     # reste à faire à la main plutôt qu'un bouton qui échoue toujours.
-    return view_cache.cached(
+    view = view_cache.cached(
         f"proposals_view:{root}",
         signature,
         lambda: {"proposals": [{**p.to_dict(), "accept_blocker": accept_blocker(p)} for p in list_proposals(root)]},
     )
+    return _with_correction_state(root, view)
+
+
+def _with_correction_state(root: Path, view: dict[str, Any]) -> dict[str, Any]:
+    """P42 : une proposition de correction mémoire porte son état actuel (périmée ? aperçu).
+
+    Hors du cache : la péremption dépend du store mémoire, pas du dossier des propositions.
+    """
+    from grimoire.memory.correction import ARTIFACT_TYPE, correction_status
+
+    rows: list[dict[str, Any]] = []
+    for row in view.get("proposals", []):
+        if row.get("artifact_type") == ARTIFACT_TYPE and row.get("status") == "pending":
+            try:
+                row = {**row, "correction": correction_status(root, str(row.get("artifact_ref") or ""))}
+            except Exception as exc:  # mémoire illisible : la proposition reste visible, sans aperçu
+                row = {**row, "correction": {"error": str(exc)}}
+        rows.append(row)
+    return {**view, "proposals": rows}
 
 
 def _sheet_project_name(root: Path) -> str | None:

@@ -588,8 +588,9 @@ function holdToast(held) {
 }
 
 /** Montre le toast d'un geste qui vient de partir. `undo()` rejoue la route
- *  inverse et rend une promesse ; `undone` est le message de réussite. */
-export function undoToast(message, { undo, undone = 'Geste annulé.' } = {}) {
+ *  inverse et rend une promesse ; `undone` est le message de réussite ;
+ *  `delay` borne la fenêtre d'annulation (10 s par défaut). */
+export function undoToast(message, { undo, undone = 'Geste annulé.', delay = UNDO_DELAY_MS } = {}) {
   dropToast();
   const region = $('toast');
   if (!region || typeof undo !== 'function') return null;
@@ -597,8 +598,8 @@ export function undoToast(message, { undo, undone = 'Geste annulé.' } = {}) {
   const action = mk('button', { type: 'button', class: 'btn pri toast-undo', 'data-role': 'toast-undo' },
     icon('undo'), mk('span', { text: 'Annuler' }));
   const close = mk('button', { type: 'button', class: 'btn ghost toast-close', 'aria-label': 'Fermer', title: 'Fermer' }, icon('cross'));
-  const card = mk('div', { class: 'toast-card', 'data-phase': 'pending', 'data-duration': String(UNDO_DELAY_MS) }, text, action, close);
-  const own = { card, phase: 'pending', held: false, timer: null, remaining: UNDO_DELAY_MS, started: 0 };
+  const card = mk('div', { class: 'toast-card', 'data-phase': 'pending', 'data-duration': String(delay) }, text, action, close);
+  const own = { card, phase: 'pending', held: false, timer: null, remaining: delay, started: 0 };
   toast = own;
   card.addEventListener('pointerenter', () => holdToast(true));
   card.addEventListener('pointerleave', () => holdToast(card.contains(document.activeElement)));
@@ -630,7 +631,7 @@ export function undoToast(message, { undo, undone = 'Geste annulé.' } = {}) {
     close.focus({ preventScroll: true });
   });
   region.replaceChildren(card);
-  armToast(UNDO_DELAY_MS);
+  armToast(delay);
   return card;
 }
 
@@ -1006,28 +1007,28 @@ function restorePanelsForSpace() {
 // `grimoire standard verify`/`grimoire_standard_gate`.
 let evidenceRequest = 0;
 
-async function loadEvidencePanel() {
+async function loadEvidencePanel(all = false) {
   const body = $('evidence-body');
   const requestId = ++evidenceRequest;
   body.replaceChildren(...loadingNodes('Chargement des preuves…', 3));
   body.setAttribute('aria-busy', 'true');
   let payload;
   try {
-    payload = await api.evidence();
+    payload = await api.evidence(all === true);
   } catch (error) {
     if (requestId !== evidenceRequest) return;
     body.setAttribute('aria-busy', 'false');
     body.replaceChildren(empty('Preuves indisponibles', error.message, 'grimoire standard doctor', {
-      label: 'Réessayer', run: loadEvidencePanel,
+      label: 'Réessayer', run: () => loadEvidencePanel(),
     }));
     return;
   }
   body.setAttribute('aria-busy', 'false');
   if (requestId !== evidenceRequest) return;
-  renderEvidencePanel(body, payload);
+  renderEvidencePanel(body, payload, all === true);
 }
 
-function renderEvidencePanel(body, payload) {
+function renderEvidencePanel(body, payload, all = false) {
   body.replaceChildren();
   if (!payload.enrolled) {
     body.append(empty(
@@ -1037,7 +1038,9 @@ function renderEvidencePanel(body, payload) {
     ));
     return;
   }
-  if (!payload.tasks || !payload.tasks.length) {
+  const terminal = payload.terminal || {};
+  const terminalCount = Object.values(terminal).reduce((n, v) => n + v, 0);
+  if ((!payload.tasks || !payload.tasks.length) && !terminalCount) {
     body.append(empty(
       'Preuves',
       'Le standard est initialisé mais le board ne porte encore aucune tâche.',
@@ -1065,9 +1068,24 @@ function renderEvidencePanel(body, payload) {
     row.addEventListener('click', () => goto('source', { file: task.pack_path }));
     body.append(row);
   }
+  if (payload.truncated) {
+    body.append(mk('p', {
+      class: 'ev-note', role: 'status',
+      text: 'Réponse partielle : le calcul des gates a dépassé sa borne de temps.',
+    }));
+  }
+  if (terminalCount && !all) {
+    const detail = Object.entries(terminal).map(([k, v]) => `${v} ${k}`).join(', ');
+    const more = mk('button', { type: 'button', class: 'ev-row ev-terminal' },
+      mk('span', { class: 'ev-title', text: `${terminalCount} terminées (${detail})` }),
+      mk('span', { class: 'grow' }),
+      mk('span', { class: 'chip pill', text: 'Tout voir' }));
+    more.addEventListener('click', () => loadEvidencePanel(true));
+    body.append(more);
+  }
 }
 
-PANEL_ON_OPEN.evidence = loadEvidencePanel;
+PANEL_ON_OPEN.evidence = () => loadEvidencePanel();
 
 /** Petit constructeur DOM local — shell.js n'importe rien de `spaces/*.js`
  * (README : aucun espace ne touche le DOM d'un autre, et ça vaut à l'envers).
@@ -2242,7 +2260,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
     loading: (label, rows, shape) => loadingNodes(label, rows, { shape }),
     params: params || {},
     rail: { on: whileMounted(registerRailAction), reason: whileMounted(setRailReason) },
-    live: { on: (handler) => live.on(handler) },
+    live: { on: (handler, options) => live.on(handler, options) },
   };
   try {
     if (section.module) {
@@ -2452,7 +2470,10 @@ async function refreshAttentionCount({ maxAgeMs = 0 } = {}) {
   } catch { /* le compteur garde sa dernière valeur : l'espace dit l'erreur */ }
 }
 
-function onPulseDecisions() {
+function onPulseDecisions(_decisions, info) {
+  // I11 : le compteur est celui du projet affiché ; un autre projet qui bouge ne le relit pas.
+  const changed = info && Array.isArray(info.changed) ? info.changed : null;
+  if (changed && !host.scopeAll && host.project && !changed.includes(host.project)) return;
   const print = live.state.fingerprint;
   if (print !== null && print === attentionPrint) return;
   attentionPrint = print;
@@ -2529,6 +2550,8 @@ function renderLiveStamp() {
   lead.className = 'live-pre';
   lead.textContent = pre;
   text.replaceChildren(lead, document.createTextNode(tail));
+  const reloads = live.reloadsPerMinute();
+  $('st-reloads').textContent = reloads ? ` · ${reloads} relecture${reloads > 1 ? 's' : ''} / min` : '';
 }
 
 let stampTimer = null;

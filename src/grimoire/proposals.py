@@ -958,6 +958,7 @@ def accept_proposal(project_root: Path, slug: str) -> dict[str, Any]:
         "memory-link": _accept_memory_link,
         "needs-hosts": _accept_needs_hosts,
         "repair": _accept_repair,
+        "memory-correction": _accept_memory_correction,
     }
     accept_fn = accept_by_type.get(proposal.artifact_type, _accept_agent)
 
@@ -1011,6 +1012,9 @@ def accept_blocker(proposal: Proposal) -> str:
             )
         if not proposal.artifact_ref:
             return "proposition sans fiche à raccorder (artifact_ref vide)"
+    elif kind == "memory-correction":
+        if not proposal.artifact_ref:
+            return "proposition sans demande de correction (artifact_ref vide)"
     elif kind == "skill":
         if not proposal.target_agent:
             return "aucun agent de repli à qui attacher ce skill"
@@ -1125,6 +1129,14 @@ def _accept_override_migration(project_root: Path, proposal: Proposal) -> dict[s
     except (FileNotFoundError, OverrideConversionRefusedError) as exc:
         raise RuntimeError(str(exc)) from exc
     return {"status": "converted", "artifact_type": "override-migration", "path": result.override_ref}
+
+
+def _accept_memory_correction(project_root: Path, proposal: Proposal) -> dict[str, Any]:
+    """Apply a ``"memory-correction"`` proposal (P42) through ``MemoryManager`` — refused when stale."""
+    from grimoire.memory.correction import apply_correction
+
+    result = apply_correction(project_root, proposal.artifact_ref, applied_by="cockpit")
+    return {"status": "applied", "artifact_type": "memory-correction", "path": proposal.artifact_ref, **result}
 
 
 def _accept_memory_link(project_root: Path, proposal: Proposal) -> dict[str, Any]:

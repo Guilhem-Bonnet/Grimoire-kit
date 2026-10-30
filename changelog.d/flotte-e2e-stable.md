@@ -1,0 +1,1 @@
+- fix(cockpit): la Flotte ne rend plus une santé en erreur sous charge (lecteur YAML partagé entre threads) ; ses tests e2e attendent l'état de la table et la fin de la navigation « Ouvrir » (GAO-i15-stabili-001)

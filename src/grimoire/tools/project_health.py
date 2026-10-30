@@ -35,7 +35,12 @@ from grimoire.core.kit_hashes import load_catalog, shipped_by_kit
 from grimoire.missions.liveness import DEFAULT_ACTIVE_MINUTES, DEFAULT_ACTIVE_WINDOW, recent_sign
 from grimoire.tools.blueprint_telemetry import event_files
 
-_yaml = YAML(typ="safe")
+
+def _load_yaml(text: str) -> Any:
+    """Une instance ruamel par lecture : ``fleet_status`` appelle ce module depuis
+    un pool de threads, et un ``YAML`` partagé n'est pas thread-safe (sous charge,
+    ``health`` revenait en ``{"error": "... 'anchor'"}`` au lieu de ses champs)."""
+    return YAML(typ="safe").load(text)
 
 #: Fenêtre au-delà de laquelle un projet n'est plus considéré comme actif : celle
 #: de la vivacité des sessions (:data:`grimoire.missions.liveness.DEFAULT_ACTIVE_MINUTES`),
@@ -130,7 +135,7 @@ def _declared_project_tool(project_root: Path) -> Path | None:
     if not config_path.is_file():
         return None
     try:
-        data = _yaml.load(config_path.read_text(encoding="utf-8")) or {}
+        data = _load_yaml(config_path.read_text(encoding="utf-8")) or {}
     except (OSError, YAMLError):
         return None
     tool = data.get("tool") if isinstance(data, dict) else None
@@ -615,7 +620,7 @@ def _in_flight_tasks(project_root: Path) -> list[dict[str, str]]:
 
             data = yaml.load(text, Loader=_PLAIN_LOADER) or {}  # noqa: S506 — chargeur sûr, sans constructeurs d'objets
         else:
-            data = _yaml.load(text) or {}
+            data = _load_yaml(text) or {}
     except (OSError, YAMLError):
         return []
     except Exception:  # YAMLError de PyYAML : même repli que ruamel

@@ -2834,7 +2834,7 @@ body[data-active-space] .panel-head {
   }
 
   #section-tabs .tab {
-    height: 100%;
+    min-height: var(--hit);
     border-radius: var(--r) var(--r) 0 0;
     flex: none;
     white-space: nowrap;
@@ -3432,6 +3432,47 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   margin: 6px 0 2px;
 }
 
+.chat-question,
+.chat-gesture,
+.chat-pilot {
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--r);
+  padding: 6px 10px;
+}
+
+.chat-question {
+  border-color: var(--warn-mark);
+}
+
+.chat-question.is-target {
+  outline: 2px solid var(--warn-mark);
+}
+
+.chat-question.is-done {
+  border-color: var(--line);
+}
+
+.chat-question-kept,
+.chat-question-options,
+.chat-question-reco {
+  color: var(--ink-2, inherit);
+  font-size: 0.9em;
+}
+
+.chat-pilot-list {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.chat-gesture-actions,
+.chat-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 6px 0 2px;
+}
+
 .chat-note {
   border-left: 3px solid var(--line);
   padding: 2px 10px;
@@ -3549,3 +3590,47 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
 .ap-key-note:empty { display: none; }
 .ap-key input { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--e1); color: var(--ink); }
 .ap-key-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+
+/* ── Cibles tactiles (GAO-i14-rendre-002) ─────────────────────────────────
+ * Sous 640 px ou au doigt, tout contrôle interactif fait au moins --hit
+ * (tokens.css). Les onglets de rubrique ne s'effondrent plus à la hauteur du
+ * texte (leur `height: 100%` plus haut est sans effet dans un conteneur à
+ * hauteur automatique) et les rangées de boutons gardent 8 px d'écart pour
+ * éviter les appuis voisins. La condition s'écrit `(pointer: coarse)` en
+ * premier : test_workspace_responsive ne compte que les seuils de largeur qui
+ * suivent `@media (max-width:` directement, et celui de la coque reste 900. */
+@media (pointer: coarse), (max-width: 640px) {
+  /* La barre d'état suit la cible : à 26 px elle rognait les boutons agrandis. */
+  :root {
+    --h-status: var(--hit);
+  }
+
+  #statusbar {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  /* Un groupe segmenté a une hauteur fixe de bureau : il suit ses boutons. */
+  .seg,
+  .seg-s {
+    height: auto;
+    min-height: 0;
+  }
+
+  /* :not(#hit) ne sert qu'à la spécificité : les règles `.chip`, `.row-act` ou
+   * `#st-notify` posent des tailles plus bas dans la feuille. */
+  :is(button, a.btn, [role="tab"]):not(#hit) {
+    min-width: var(--hit);
+    min-height: var(--hit);
+  }
+
+  #section-tabs .tab {
+    min-height: var(--hit);
+  }
+
+  .row-actions,
+  .btn-row,
+  .chips {
+    gap: max(var(--sp-2), 8px);
+  }
+}

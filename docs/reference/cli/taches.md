@@ -754,3 +754,12 @@ fusions sont décidées et testées : `claimed` et `running` deviennent
 (avec un motif), `closed` devient `accepted`, `cancelled` devient `archived`.
 
 ---
+
+### Boîte à idées
+
+`grimoire idea add "<texte>"` garde une idée sans la trier (500 caractères au plus) dans le
+journal append-only `_grimoire-runtime-output/ledger/ideas.jsonl` ; `idea list [--json]`
+les rend dans l'ordre, `idea drop <id>` en écarte une, `idea promote <id>` crée les tâches
+non critiques de l'intake déterministe (comme `task add --intake --create`) et marque
+l'idée `promoted` avec leurs ids ; une seconde promotion est refusée. L'outil MCP `idea_add`
+et le bouton « Garder pour plus tard » du cockpit écrivent le même journal.

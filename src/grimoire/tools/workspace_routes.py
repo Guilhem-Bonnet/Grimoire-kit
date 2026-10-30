@@ -72,6 +72,7 @@ from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
+from grimoire.memory.correction import request_correction_from_body as _memory_correct
 from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
@@ -84,6 +85,7 @@ from grimoire.tools import (
     workspace_exec,
     workspace_first_launch,
     workspace_hygiene,
+    workspace_ideas,
     workspace_knowledge,
     workspace_language,
     workspace_machine,
@@ -414,14 +416,14 @@ def _reviews(project_root: Path, query: _Query) -> Any:
     )
 
 
-def _evidence(project_root: Path, _query: _Query) -> Any:
+def _evidence(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
-    Lecture pure du board du standard (``check_evidence_gates`` par tâche) :
-    jamais d'écriture, jamais une relecture parallèle des artefacts que le
-    standard sait déjà lire lui-même.
+    Lecture pure du board du standard (``check_evidence_gates(record=False)``
+    pour les tâches actives) : jamais d'écriture, jamais une relecture
+    parallèle des artefacts. ``?all=1`` détaille aussi les tâches terminales.
     """
-    return workspace_api.evidence_view(project_root)
+    return workspace_api.evidence_view(project_root, include_all=_one(query, "all") == "1")
 
 
 def _memory_search(project_root: Path, query: _Query) -> Any:
@@ -611,6 +613,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}providers": _providers,
     f"{PREFIX}options": _options,
     **workspace_notify.GET_ROUTES,
+    **workspace_ideas.GET_ROUTES,
     f"{PREFIX}proposals": _proposals,
     f"{PREFIX}sheet": _sheet,
     f"{PREFIX}evidence": _evidence,
@@ -918,30 +921,6 @@ def _task_add(project_root: Path, body: dict[str, Any]) -> Any:
     return added.to_dict()
 
 
-def _task_intake(_project_root: Path, body: dict[str, Any]) -> Any:
-    """« Une idée ? » de Travail : les propositions de l'intake déterministe, sans rien écrire ni LLM."""
-    from grimoire.missions.intake_tasks import proposals_for
-
-    return {"proposals": proposals_for(str(body.get("text") or "")), "written": False}
-
-
-def _task_intake_create(project_root: Path, body: dict[str, Any]) -> Any:
-    """« Créer N tâches » : les propositions cochées par ``TaskService.add``, comme ``tasks/add``.
-
-    Un refus du gate laisse la tâche en ``proposed`` ; la raison revient avec elle.
-    """
-    from grimoire.missions.intake_tasks import create_from_proposals
-    from grimoire.missions.service import TaskService
-
-    items = body.get("tasks")
-    if not isinstance(items, list) or not items:
-        raise ValueError("`tasks` doit lister au moins une proposition")
-    created = create_from_proposals(
-        TaskService(project_root.resolve()), items, actor=str(body.get("actor") or "workspace"), origin="cockpit",
-    )
-    return {"created": created}
-
-
 def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
 
@@ -1021,11 +1000,13 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
-    f"{PREFIX}tasks/intake": _task_intake,
-    f"{PREFIX}tasks/intake/create": _task_intake_create,
+    f"{PREFIX}memory/correct": _memory_correct,
+    f"{PREFIX}tasks/intake": workspace_ideas.task_intake,
+    f"{PREFIX}tasks/intake/create": workspace_ideas.task_intake_create,
     f"{PREFIX}options": _options_write,
     f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
     **workspace_notify.POST_ROUTES,
+    **workspace_ideas.POST_ROUTES,
 }
 
 def _task_steer(service: Any, task_id: str, action: str, actor: str, body: dict[str, Any]) -> Any:

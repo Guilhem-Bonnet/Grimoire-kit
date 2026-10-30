@@ -27,10 +27,10 @@
     "review": [],
     "unblock": [
       "review_blocked:alpha:t3", "task_blocked:beta:t2", "task_blocked:alpha:t6",
-      "directive_unacked:alpha:t5", "claim_orphaned:beta:t4"
+      "claim_orphaned:beta:t4"
     ],
     "repair": ["service:alpha:qdrant", "unreadable:gamma:project", "probe_failed:beta:memory"],
-    "maintain": ["kit_behind:alpha:kit"],
+    "maintain": ["directive_unacked:alpha:t5", "kit_behind:alpha:kit"],
     "resolved": ["service_resolved:beta:neo4j"],
     "other": ["mystere:alpha:x"]
   }

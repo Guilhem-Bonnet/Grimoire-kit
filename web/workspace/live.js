@@ -32,7 +32,15 @@ import { api, host, duringLiveReload } from './api.js';
 const DEFAULT_INTERVAL_MS = 5000;
 const FIRST_PULSE_TIMEOUT_MS = 5000;
 // Écart minimal entre deux rechargements des espaces : chacun relit tâches, attention et sessions.
+// Il s'adapte (I11) : deux fois la durée du dernier rechargement, borné — un serveur lent n'est pas
+// noyé par les relectures qu'il met déjà longtemps à servir.
 const MIN_RELOAD_MS = 3000;
+const MAX_RELOAD_MS = 15000;
+/** Écart avant le prochain rechargement, selon la durée réelle du dernier. */
+export function reloadGap(lastDurationMs) {
+  const d = Number(lastDurationMs) || 0;
+  return Math.min(MAX_RELOAD_MS, Math.max(MIN_RELOAD_MS, 2 * d));
+}
 
 const hidden = () => document.visibilityState === 'hidden';
 
@@ -89,8 +97,15 @@ export function createLive({ onDecisions, onState } = {}) {
     lastOkAt: null,
     failingSince: null,
     requests: 0,
+    // I11 : diagnostic — relectures des espaces sur la dernière minute, écart courant entre deux.
+    reloadAts: [],
+    reloadGapMs: MIN_RELOAD_MS,
+    projects: null,
   };
   let handlers = [];
+  // Slugs changés en attente (union des pouls regroupés) ; null = on ne sait pas lesquels.
+  let pendingChanged = new Set();
+  let lastReloadMs = 0;
   // I1 : l'interrupteur « Me prévenir dans le navigateur » est la seule exception au gel de
   // l'onglet masqué. Sans lui (le défaut), `frozen()` vaut `hidden()` et rien ne change.
   let keepHidden = false;
@@ -114,6 +129,23 @@ export function createLive({ onDecisions, onState } = {}) {
     if (onState) onState(state);
   };
 
+  /** Slugs dont l'empreinte a bougé depuis le pouls précédent ; null si le pouls ne le dit pas. */
+  function changedProjects(pulse) {
+    const now = pulse.projects && typeof pulse.projects === 'object' ? pulse.projects : null;
+    const before = state.projects;
+    if (now) state.projects = { ...now };
+    if (!now || !before) return now ? new Set() : null;
+    return new Set(Object.keys(now).filter((slug) => now[slug] !== before[slug]));
+  }
+
+  /** Un abonné de portée `project` ne recharge que si le projet affiché a bougé. */
+  function concerned(entry, changed) {
+    const wanted = typeof entry.scope === 'function' ? entry.scope() : entry.scope;
+    if (wanted !== 'project') return true;
+    if (changed === null || !host.project) return true;
+    return changed.has(host.project);
+  }
+
   /** Un pouls, sondé ou poussé : même traitement. */
   function receive(pulse) {
     const seconds = Number(pulse.interval_seconds);
@@ -123,19 +155,23 @@ export function createLive({ onDecisions, onState } = {}) {
     state.failingSince = null;
     const changed = Boolean(pulse.fingerprint) && pulse.fingerprint !== state.fingerprint;
     if (changed) state.fingerprint = pulse.fingerprint;
+    const slugs = changedProjects(pulse);
     // Le compteur de décisions (« À traiter ») est lu tout de suite au premier pouls,
     // puis regroupé avec les espaces : il relit lui aussi le serveur (P79).
     if (first && onDecisions && pulse.decisions) onDecisions(pulse.decisions);
     // Le tout premier pouls fixe la référence : l'espace vient d'être chargé,
     // il n'a rien à recharger.
-    if (changed && !first) requestReload(pulse);
+    if (changed && !first) requestReload(pulse, slugs);
     notifyState('ok');
   }
 
-  function requestReload(pulse) {
+  function requestReload(pulse, slugs) {
     pendingPulse = pulse;
+    if (slugs !== undefined) {
+      pendingChanged = slugs === null || pendingChanged === null ? null : new Set([...pendingChanged, ...slugs]);
+    }
     if (reloadTimer !== null || reloading) return;
-    const wait = Math.max(0, lastReloadAt + MIN_RELOAD_MS - Date.now());
+    const wait = Math.max(0, lastReloadAt + state.reloadGapMs - Date.now());
     reloadTimer = setTimeout(runReload, wait);
   }
 
@@ -153,31 +189,40 @@ export function createLive({ onDecisions, onState } = {}) {
       return;
     }
     const pulse = pendingPulse;
+    const changedNow = pendingChanged;
     pendingPulse = null;
+    pendingChanged = new Set();
     if (!pulse) return;
+    const targets = handlers.filter((entry) => concerned(entry, changedNow));
+    if (onDecisions && pulse.decisions) {
+      try { onDecisions(pulse.decisions, { changed: changedNow === null ? null : [...changedNow] }); } catch (error) { console.error('compteur de décisions :', error); }
+    }
+    // Rien n'a bougé là où l'espace regarde : aucune relecture.
+    if (!targets.length) return;
     reloading = true;
     lastReloadAt = Date.now();
+    state.reloadAts.push(lastReloadAt);
     try {
       // Les lectures lancées ici (de façon synchrone) portent `pulse_reload=1` : le serveur peut les resservir (P79).
       const pending = duringLiveReload(() => {
-        if (onDecisions && pulse.decisions) {
-          try { onDecisions(pulse.decisions); } catch (error) { console.error('compteur de décisions :', error); }
-        }
-        return [...handlers].map((handler) => {
-          try { return Promise.resolve(handler(pulse)); } catch (error) { return Promise.reject(error); }
+        return targets.map((entry) => {
+          try { return Promise.resolve(entry.fn(pulse, { changed: changedNow === null ? null : [...changedNow] })); } catch (error) { return Promise.reject(error); }
         });
       });
       const results = await Promise.allSettled(pending);
       for (const r of results) if (r.status === 'rejected') console.error('actualisation de l\'espace :', r.reason);
     } finally {
       reloading = false;
-      if (pendingPulse) requestReload(pendingPulse);
+      lastReloadMs = Date.now() - lastReloadAt;
+      state.reloadGapMs = reloadGap(lastReloadMs);
+      if (pendingPulse) requestReload(pendingPulse, undefined);
     }
   }
 
   function clearReload() {
     if (reloadTimer !== null) { clearTimeout(reloadTimer); reloadTimer = null; }
     pendingPulse = null;
+    pendingChanged = new Set();
   }
 
   function clearTimer() {
@@ -263,8 +308,10 @@ export function createLive({ onDecisions, onState } = {}) {
     } else if (hidden()) {
       resume();
     } else {
+      // Retour d'un onglet masqué : l'écart redevient le plancher.
+      state.reloadGapMs = MIN_RELOAD_MS;
       resume();
-      if (pendingPulse) requestReload(pendingPulse);
+      if (pendingPulse) requestReload(pendingPulse, undefined);
     }
   }
 
@@ -298,7 +345,13 @@ export function createLive({ onDecisions, onState } = {}) {
       if (keepHidden) resume(); else freeze();
     },
     /** Inscrit ce que l'espace courant fait quand le pouls annonce un changement. */
-    on(handler) { handlers.push(handler); },
+    on(handler, options = {}) { handlers.push({ fn: handler, scope: options.scope || 'portfolio' }); },
+    /** Relectures lancées sur la dernière minute (diagnostic de la barre d'état). */
+    reloadsPerMinute() {
+      const since = Date.now() - 60000;
+      state.reloadAts = state.reloadAts.filter((at) => at >= since);
+      return state.reloadAts.length;
+    },
     /** La coque l'appelle à chaque changement d'espace : un espace démonté n'écoute plus. */
     clear() { handlers = []; clearReload(); },
   };

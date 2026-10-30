@@ -108,3 +108,7 @@ def register(tool: Callable[[Any], Callable[[Any], Any]], writes: Callable[..., 
     tool(writes(destructive=False, idempotent=False))(grimoire_memory_retract)
     tool(writes(destructive=False, idempotent=False))(grimoire_memory_unretract)
     tool(writes(destructive=False, idempotent=True))(grimoire_memory_update_tags)
+    # Boîte à idées (I13) : même raison, ``server.py`` est au plafond du cliquet de lignes.
+    from grimoire.mcp import idea_tools
+
+    idea_tools.register(tool, writes)

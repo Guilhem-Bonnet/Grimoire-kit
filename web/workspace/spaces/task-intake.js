@@ -10,14 +10,37 @@
 // n'est jamais cochée d'office.
 //
 // L'état vit au niveau du module : un rafraîchissement du tableau redessine la
-// carte sans perdre la saisie ni les cases.
+// carte sans perdre la saisie ni les cases. La saisie et l'ouverture survivent
+// aussi au rechargement de la page (`localStorage`, best-effort).
+//
+// Boîte à idées (I13) : « Garder pour plus tard » écrit la phrase dans
+// `ideas.jsonl` sans la trier ; la liste « Idées (N) », repliée sous la carte,
+// offre « Transformer en tâches » (préremplit l'intake avec le texte) et
+// « Écarter » (annulable 8 s : l'annulation est un événement de plus au journal).
 
-import { actionStatus, failureText, icon, setActionStatus } from '../shell.js';
+import { actionStatus, failureText, icon, setActionStatus, undoToast } from '../shell.js';
 import { newTaskBlockedReason } from './task-create.js';
 
 const STYLE_ID = 'ti-styles';
 
-const state = { open: false, text: '', proposals: null, busy: false, result: null, focus: false };
+const DRAFT_KEY = 'grimoire.idea.draft';
+const UNDO_MS = 8000;
+
+function readDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
+    return { open: draft.open === true, text: typeof draft.text === 'string' ? draft.text : '' };
+  } catch { return { open: false, text: '' }; }
+}
+
+const state = {
+  ...readDraft(), proposals: null, busy: false, result: null, focus: false,
+  ideas: [], ideasLoaded: false, fromIdea: '', boxOpen: false,
+};
+
+function persist() {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ open: state.open, text: state.text })); } catch { /* stockage refusé : on s'en passe */ }
+}
 
 const RISK_LABEL = { light: 'Léger', standard: 'Standard', strict: 'Strict', critical: 'Critique', release: 'Release' };
 const RISK_ICON = { light: 'i-risk-light', standard: 'i-risk-standard', strict: 'i-risk-strict', critical: 'i-risk-critical', release: 'i-risk-critical' };
@@ -59,6 +82,14 @@ function injectStyles() {
     .ti-res { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
     .ti-res a { color: var(--acc); }
     .ti-why { color: var(--ink2); font-size: var(--t-s); display: block; }
+    .ti-box { max-width: 720px; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); }
+    .ti-box > summary { min-height: 44px; display: flex; align-items: center; padding: 0 var(--sp-4); cursor: pointer;
+      font-weight: 600; color: var(--ink); }
+    .ti-box .ti-list { padding: 0 var(--sp-4) var(--sp-4); }
+    .ti-idea { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; padding: var(--sp-3);
+      border: 1px solid var(--line); border-radius: var(--r); }
+    .ti-idea-text { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+    .ti-box .btn { min-height: 44px; }
   `;
   document.head.append(style);
 }
@@ -83,6 +114,7 @@ export function ideaButton(ctx, { portfolio, onToggle }) {
   button.addEventListener('click', () => {
     state.open = !state.open;
     if (state.open) state.focus = true;
+    persist();
     onToggle();
   });
   return [button];
@@ -156,10 +188,33 @@ function card(ctx, onCreated, onChange) {
   const go = el('button', 'btn pri', 'Proposer des tâches', { type: 'submit', 'data-role': 'idea-submit' });
   go.disabled = state.busy;
   const close = el('button', 'btn', 'Fermer', { type: 'button', 'data-role': 'idea-close' });
-  close.addEventListener('click', () => { Object.assign(state, { open: false, proposals: null }); onChange(); });
-  ask.append(label, go, close);
+  close.addEventListener('click', () => { Object.assign(state, { open: false, proposals: null, fromIdea: '' }); persist(); onChange(); });
+  const keep = el('button', 'btn', 'Garder pour plus tard', { type: 'button', 'data-role': 'idea-keep' });
+  keep.addEventListener('click', async () => {
+    const text = input.value.trim();
+    if (!text) {
+      setActionStatus(status, 'Écris ton idée d’abord.', 'bad');
+      input.focus();
+      return;
+    }
+    keep.disabled = true;
+    setActionStatus(status, 'Je la garde…');
+    ctx.dock.echo(`grimoire idea add "${text}"`);
+    try {
+      const idea = await ctx.api.ideaAdd(text);
+      if (ctx.signal.aborted) return;
+      state.ideas = [...state.ideas, idea];
+      Object.assign(state, { text: '', proposals: null, fromIdea: '', boxOpen: true });
+      persist();
+      onChange();
+    } catch (error) {
+      keep.disabled = false;
+      setActionStatus(status, failureText(error), 'bad');
+    }
+  });
+  ask.append(label, go, keep, close);
   const status = actionStatus();
-  input.addEventListener('input', () => { state.text = input.value; });
+  input.addEventListener('input', () => { state.text = input.value; persist(); });
   ask.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!input.value.trim()) {
@@ -216,6 +271,16 @@ function card(ctx, onCreated, onChange) {
         state.proposals = null;
         state.open = false;
         state.text = '';
+        persist();
+        const origin = state.fromIdea;
+        state.fromIdea = '';
+        if (origin) {
+          // L'idée dont les tâches viennent d'être créées n'est plus à trier : marquée promue, avec leurs ids.
+          try {
+            await ctx.api.ideaPromote(origin, out.created.map((t) => t.id));
+            state.ideas = state.ideas.filter((i) => i.id !== origin);
+          } catch { state.ideasLoaded = false; }
+        }
         onCreated(out.created);
       } catch (error) {
         state.busy = false;
@@ -234,6 +299,71 @@ function card(ctx, onCreated, onChange) {
   return root;
 }
 
+function ideaRow(ctx, idea, onChange) {
+  const item = el('li', 'ti-idea', null, { 'data-role': 'idea-entry', 'data-id': idea.id });
+  const turn = el('button', 'btn pri', 'Transformer en tâches', { type: 'button', 'data-role': 'idea-promote' });
+  turn.addEventListener('click', async () => {
+    Object.assign(state, { open: true, text: idea.text, proposals: null, result: null, fromIdea: idea.id, focus: true });
+    persist();
+    turn.disabled = true;
+    ctx.dock.echo(`grimoire task add --intake "${idea.text}"`);
+    try {
+      const out = await ctx.api.taskIntake(idea.text);
+      if (ctx.signal.aborted) return;
+      state.proposals = out.proposals.map((p) => ({ ...p, check: '' }));
+    } catch { /* l'intake est relançable depuis « Proposer des tâches » ; le texte est déjà prérempli */ }
+    onChange();
+  });
+  const drop = el('button', 'btn', 'Écarter', { type: 'button', 'data-role': 'idea-drop' });
+  drop.addEventListener('click', async () => {
+    drop.disabled = true;
+    try {
+      await ctx.api.ideaDrop(idea.id);
+    } catch {
+      drop.disabled = false;
+      return;
+    }
+    if (ctx.signal.aborted) return;
+    state.ideas = state.ideas.filter((i) => i.id !== idea.id);
+    onChange();
+    undoToast(`Idée écartée : ${idea.text.slice(0, 60)}`, {
+      delay: UNDO_MS,
+      undone: 'Idée restaurée.',
+      undo: async () => {
+        const back = await ctx.api.ideaDrop(idea.id, true);
+        state.ideas = [...state.ideas.filter((i) => i.id !== idea.id), back].sort((a, b) => a.id.localeCompare(b.id));
+        state.boxOpen = true;
+        onChange();
+      },
+    });
+  });
+  item.append(el('span', 'ti-idea-text', idea.text), turn, drop);
+  return item;
+}
+
+function ideaBox(ctx, onChange) {
+  if (!state.ideas.length) return null;
+  const box = el('details', 'ti-box', null, { 'data-role': 'idea-box' });
+  box.open = state.boxOpen;
+  box.addEventListener('toggle', () => { state.boxOpen = box.open; });
+  box.append(el('summary', null, `Idées (${state.ideas.length})`, { 'data-role': 'idea-box-title' }));
+  const list = el('ul', 'ti-list', null, { 'aria-label': 'Idées gardées' });
+  for (const idea of state.ideas) list.append(ideaRow(ctx, idea, onChange));
+  box.append(list);
+  return box;
+}
+
+/** Lit la boîte une fois par chargement de page : les gestes suivants tiennent la liste à jour eux-mêmes. */
+function loadIdeas(ctx, onChange) {
+  if (state.ideasLoaded) return;
+  state.ideasLoaded = true;
+  ctx.api.ideas().then((out) => {
+    if (ctx.signal.aborted) return;
+    state.ideas = (out.ideas || []).filter((i) => i.state === 'open');
+    onChange();
+  }).catch(() => { state.ideasLoaded = false; });
+}
+
 /**
  * Ce que le tableau pose sous sa tête : le champ « Une idée ? » avec ses
  * propositions, puis le récapitulatif de la dernière création. `null` quand le
@@ -249,5 +379,8 @@ export function ideaBlock(ctx, { portfolio, onCreated, onOpen, onChange }) {
   wrap.style.gap = 'var(--sp-3)';
   if (state.open || state.proposals) wrap.append(card(ctx, onCreated, onChange));
   if (state.result) wrap.append(resultView(onOpen, onChange));
+  loadIdeas(ctx, onChange);
+  const box = ideaBox(ctx, onChange);
+  if (box) wrap.append(box);
   return wrap.childElementCount ? wrap : null;
 }

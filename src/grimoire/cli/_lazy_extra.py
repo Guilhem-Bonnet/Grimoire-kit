@@ -13,4 +13,5 @@ from grimoire.cli._lazy import LazyGroupSpec
 #: Nom → groupe, dans l'ordre d'affichage de ``grimoire --help --all``.
 EXTRA_GROUPS: dict[str, LazyGroupSpec] = {
     "steward": LazyGroupSpec("grimoire.cli.cmd_steward", "steward_app", rich_help_panel="Project"),
+    "idea": LazyGroupSpec("grimoire.cli.cmd_idea", "idea_app", rich_help_panel="Project"),
 }

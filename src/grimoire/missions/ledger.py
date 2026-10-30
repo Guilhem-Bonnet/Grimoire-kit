@@ -684,9 +684,13 @@ class MissionLedger:
         with _ledger_file_lock(self._events_path):
             self._refresh()
             self._load()
-            return self._transition_locked(
+            moved = self._transition_locked(
                 task_id, to_state, actor_id, reason, claim, extra_payload, expected_from, lease_epoch, step
             )
+        if to_state in (TaskState.CLOSED, TaskState.CANCELLED):  # plus de session pour lire : tout est acquitté
+            for directive in moved.unacknowledged_directives:
+                moved = self.acknowledge_directive(task_id, directive.id, actor_id=actor_id, reason="tâche close")
+        return moved
 
     def _transition_locked(
         self,
@@ -1259,8 +1263,10 @@ class MissionLedger:
         self._load()
         return self._tasks[task_id]
 
-    def acknowledge_directive(self, task_id: str, directive_id: str, *, actor_id: str) -> MissionTask:
-        """Horodate l'accusé de réception d'une consigne connue de la tâche."""
+    def acknowledge_directive(
+        self, task_id: str, directive_id: str, *, actor_id: str, reason: str = ""
+    ) -> MissionTask:
+        """Horodate l'accusé de réception d'une consigne connue de la tâche ; *reason* dit pourquoi, s'il y a lieu."""
         self._load()
         task = self._tasks.get(task_id)
         if task is None:
@@ -1269,7 +1275,8 @@ class MissionLedger:
             raise GrimoireMissionError(f"Consigne inconnue sur {task_id} : {directive_id}")
         self._append_event(
             "task.directive_acknowledged", task_id, "task", actor_id,
-            {"task_id": task_id, "directive_id": directive_id, "acknowledged_at": _now_iso(), "actor_id": actor_id},
+            {"task_id": task_id, "directive_id": directive_id, "acknowledged_at": _now_iso(), "actor_id": actor_id,
+             **({"reason": reason} if reason else {})},
         )
         self._load()
         return self._tasks[task_id]
