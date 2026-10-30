@@ -364,6 +364,6 @@ export async function mount(root, ctx) {
   };
 
   wrap.append(list, main);
-  ctx.live.on(() => refresh());
+  ctx.live.on(() => refresh(), { scope: () => (ctx.scope.all ? 'portfolio' : 'project') });
   await refresh();
 }

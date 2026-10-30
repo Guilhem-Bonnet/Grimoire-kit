@@ -199,6 +199,27 @@ def test_la_portee_flotte_compte_tout_le_registre_et_nomme_l_illisible(tmp_path:
     assert _pulse(tmp_path)["decisions"]["pending"] == 0, "sans `scope`, le projet servi seul"
 
 
+def test_le_pouls_du_portefeuille_porte_une_empreinte_par_projet(tmp_path: Path) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    for root in (a, b):
+        (root / LEDGER).mkdir(parents=True)
+    reg.save_registry([
+        {"slug": "a", "name": "Alpha", "path": str(a)},
+        {"slug": "b", "name": "Beta", "path": str(b)},
+    ])
+
+    before = _pulse(tmp_path, scope="portfolio")
+    assert set(before["projects"]) == {"a", "b"}
+    assert before["fingerprint"], "le champ historique reste"
+
+    (b / LEDGER / "events.jsonl").write_text('{"x": 1}\n')
+    after = _pulse(tmp_path, scope="portfolio")
+
+    assert after["projects"]["a"] == before["projects"]["a"]
+    assert after["projects"]["b"] != before["projects"]["b"]
+    assert after["fingerprint"] != before["fingerprint"]
+
+
 # ── Coût, durée, vivacité par carte ─────────────────────────────────────────
 
 

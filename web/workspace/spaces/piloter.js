@@ -2419,7 +2419,7 @@ export async function mount(root, ctx) {
   // coque (UI-3), jamais par une boucle dédiée. Un seul handler pour tout le
   // montage ; la fiche courante y branche son `refresh`, la Flotte le défait.
   const capacityLive = { refresh: null };
-  ctx.live.on(() => { if (capacityLive.refresh) capacityLive.refresh(); });
+  ctx.live.on(() => { if (capacityLive.refresh) capacityLive.refresh(); }, { scope: 'portfolio' });
 
   const stateKey = () => level + '|' + (level === 'projet' ? selected : view);
 

@@ -4000,7 +4000,7 @@ export async function mount(root, ctx) {
     refreshPending = false;
     draw({ live: true });
   };
-  ctx.live.on(refresh);
+  ctx.live.on(refresh, { scope: () => (scope.mode === 'portfolio' ? 'portfolio' : 'project') });
   const retry = () => { if (refreshPending) setTimeout(refresh, 0); };
   wrap.addEventListener('focusout', retry, { signal: ctx.signal });
   ctx.inspector.addEventListener('focusout', retry, { signal: ctx.signal });
