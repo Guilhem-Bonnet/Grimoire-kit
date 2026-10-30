@@ -119,20 +119,35 @@ def _watched(root: Path) -> list[Path]:
     return files
 
 
+def _root_fingerprint(slug: str, root: Path, window_start: float) -> str:
+    digest = hashlib.sha256()
+    in_window = 0
+    digest.update(f"{slug}\0{root}\0".encode())
+    for path in _watched(root):
+        stamp = _stat(path)
+        digest.update(repr((str(path.relative_to(root)), stamp)).encode())
+        if stamp is not None and path.name.startswith("session-") and stamp[1] / 1e9 >= window_start:
+            in_window += 1
+    digest.update(f"window={in_window}".encode())
+    return digest.hexdigest()[:20]
+
+
+def _project_fingerprints(roots: list[tuple[str, Path]], now: datetime) -> dict[str, str]:
+    """Une empreinte par projet : de quoi dire LEQUEL a bougé (I11)."""
+    window_start = (now - timedelta(minutes=DEFAULT_LIVE_MINUTES)).timestamp()
+    return {slug: _root_fingerprint(slug, root, window_start) for slug, root in roots}
+
+
+def _combine(per_project: dict[str, str]) -> str:
+    digest = hashlib.sha256()
+    for slug, print_ in per_project.items():
+        digest.update(f"{slug}\0{print_}\0".encode())
+    return digest.hexdigest()[:20]
+
+
 def _fingerprint(roots: list[tuple[str, Path]], now: datetime) -> str:
     """Empreinte de ce que l'interface affiche : dates et tailles, plus les sessions encore dans la fenêtre."""
-    window_start = (now - timedelta(minutes=DEFAULT_LIVE_MINUTES)).timestamp()
-    digest = hashlib.sha256()
-    for slug, root in roots:
-        in_window = 0
-        digest.update(f"{slug}\0{root}\0".encode())
-        for path in _watched(root):
-            stamp = _stat(path)
-            digest.update(repr((str(path.relative_to(root)), stamp)).encode())
-            if stamp is not None and path.name.startswith("session-") and stamp[1] / 1e9 >= window_start:
-                in_window += 1
-        digest.update(f"window={in_window}".encode())
-    return digest.hexdigest()[:20]
+    return _combine(_project_fingerprints(roots, now))
 
 
 def _roots(project_root: Path, portfolio: bool) -> list[tuple[str, Path]]:
@@ -195,13 +210,15 @@ def pulse_view(
     """
     moment = now or datetime.now(UTC)
     roots = _roots(project_root, portfolio)
-    fingerprint = _fingerprint(roots, moment)
+    per_project = _project_fingerprints(roots, moment)
+    fingerprint = _combine(per_project)
     payload: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "generated_at": moment.isoformat(),
         "interval_seconds": pulse_interval(),
         "scope": "portfolio" if portfolio else "project",
         "fingerprint": fingerprint,
+        "projects": per_project,
         "changed": since != fingerprint,
     }
     if payload["changed"]:

@@ -572,26 +572,26 @@ class ReviewStage:
                 ci, ci_detail = "pending", f"{ci_detail} — jobs en échec relancés une fois"
             if ci == "red":
                 notes = f"READY rendu sur une CI rouge, la tête relue ne l'est pas : {ci_detail}"
-                return self._bounce(task, launch, review, receipt, notes=notes, extra={"ci": ci, "receipt_verdict": READY})
+                return self._bounce(task, launch, review, receipt, notes=notes, extra={"ci": ci, "ci_detail": ci_detail[:300], "receipt_verdict": READY})
             sealed, why = self._seal(task, review, receipt, root)
             if why:
                 self._record_judged(task, review, "stale", 0)
                 self._stop(review)
                 return ReviewOutcome(tid, "stale", "done", f"READY non tenu ({why}) : relu de nouveau")
-            self._record_judged(task, review, READY, 0, {**sealed, **({"ci": ci} if ci else {})})
+            self._record_judged(task, review, READY, 0, {**sealed, "ci": ci, "ci_detail": ci_detail[:300]})
             self._stop(review)
             return ReviewOutcome(tid, "ready", "done", f"READY, {len(receipt.criteria_met)} critère(s) tenu(s)")
         ci, ci_detail = self._head_ci(task, review)
         head = self._reviewed_head(task, review)
         if self._ci_unsettled(ci, ci_detail, head):  # P87, P89 : ce NOT-READY a pu naître d'une CI pas encore conclue
-            self._record_judged(task, review, CI_PENDING, 0, {"ci": ci})
+            self._record_judged(task, review, CI_PENDING, 0, {"ci": ci, "ci_detail": ci_detail[:300]})
             self._stop(review)
             return ReviewOutcome(tid, "deferred", "done", f"CI en cours ({ci_detail}) : NOT-READY écarté, relecture refaite sans compter de cycle")
         if ci == HEAD_MOVED:  # P89 : la PR a avancé pendant la relecture ; ce verdict juge une tête qui n'est plus la sienne
-            self._record_judged(task, review, "stale", 0, {"ci": ci})
+            self._record_judged(task, review, "stale", 0, {"ci": ci, "ci_detail": ci_detail[:300]})
             self._stop(review)
             return ReviewOutcome(tid, "stale", "done", f"NOT-READY sur une tête dépassée ({ci_detail}) : relu de nouveau")
-        return self._bounce(task, launch, review, receipt)
+        return self._bounce(task, launch, review, receipt, extra={"ci": ci, "ci_detail": ci_detail[:300]})
 
     def _reviewed_head(self, task: MissionTask, review: LedgerEvent) -> str:
         from grimoire.missions.review_seal import branch_head
@@ -708,9 +708,14 @@ class ReviewStage:
     def _record_judged(
         self, task: MissionTask, review: LedgerEvent, verdict: str, cycle: int, extra: dict[str, Any] | None = None,
     ) -> None:
+        # I8 : le verdict CI que ce jugement a lu s'inscrit toujours (``ci`` et son détail), lu ici quand l'appelant n'a pas lu.
+        ci_read: dict[str, Any] = {}
+        if not extra or "ci" not in extra:
+            ci, detail = self._head_ci(task, review)
+            ci_read = {"ci": ci, "ci_detail": detail[:300]}
         self._service.ledger.append_event(
             REVIEW_JUDGED_EVENT, task.id, "task", REVIEWER_ACTOR,
-            {"task_id": task.id, "review": review.id, "verdict": verdict, "cycle": cycle, **(extra or {})},
+            {"task_id": task.id, "review": review.id, "verdict": verdict, "cycle": cycle, **ci_read, **(extra or {})},
         )
 
     def _stop(self, review: LedgerEvent) -> None:
