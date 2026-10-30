@@ -64,3 +64,18 @@ def test_les_zones_de_donnees_sont_des_regions_polies() -> None:
     for zone in ("canvas", "explorer-body", "inspector-body", "evidence-body"):
         tag = re.search(rf'<[^>]*id="{zone}"[^>]*>', INDEX)
         assert tag and 'aria-live="polite"' in tag.group(0), zone
+
+
+def test_aucun_media_ne_remet_height_100_pour_cet_onglet_de_rubrique() -> None:
+    """``height: 100%`` dans un conteneur à hauteur automatique s'effondre à la
+    hauteur du texte (18 px à 390 px) : la hauteur d'un onglet de rubrique vient
+    de ``min-height: var(--hit)``, jamais d'un pourcentage dans un ``@media``."""
+    for media in re.finditer(r"@media[^{]*\{", SHELL_CSS):
+        depth, i = 1, media.end()
+        while depth and i < len(SHELL_CSS):
+            depth += {"{": 1, "}": -1}.get(SHELL_CSS[i], 0)
+            i += 1
+        body = SHELL_CSS[media.end() : i]
+        for rule in re.finditer(r"([^{}]+)\{([^{}]*)\}", body):
+            if "#section-tabs .tab" in rule.group(1):
+                assert not re.search(r"(?<!min-)(?<!max-)height\s*:\s*100%", rule.group(2)), media.group(0)

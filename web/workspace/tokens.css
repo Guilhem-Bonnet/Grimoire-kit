@@ -48,6 +48,11 @@
 :root {
   color-scheme: dark;
 
+  /* Taille tactile minimale d'une cible (WCAG 2.5.5, ~44 CSS px). Appliquée par
+   * shell.css sous (pointer: coarse) ou (max-width: 640px) ; le bureau garde ses
+   * dimensions. */
+  --hit: 44px;
+
   /* ── Surfaces ─────────────────────────────────────────────────────────── *
    * Première passe (#525) : les cinq niveaux, mesurés à 1,06-1,17 de rapport
    * de luminance entre voisins, sont rouverts à ~1,30. Seconde passe, plus
