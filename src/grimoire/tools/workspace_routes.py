@@ -414,14 +414,14 @@ def _reviews(project_root: Path, query: _Query) -> Any:
     )
 
 
-def _evidence(project_root: Path, _query: _Query) -> Any:
+def _evidence(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/evidence`` — le panneau « Preuves » du rail (#534).
 
-    Lecture pure du board du standard (``check_evidence_gates`` par tâche) :
-    jamais d'écriture, jamais une relecture parallèle des artefacts que le
-    standard sait déjà lire lui-même.
+    Lecture pure du board du standard (``check_evidence_gates(record=False)``
+    pour les tâches actives) : jamais d'écriture, jamais une relecture
+    parallèle des artefacts. ``?all=1`` détaille aussi les tâches terminales.
     """
-    return workspace_api.evidence_view(project_root)
+    return workspace_api.evidence_view(project_root, include_all=_one(query, "all") == "1")
 
 
 def _memory_search(project_root: Path, query: _Query) -> Any:
