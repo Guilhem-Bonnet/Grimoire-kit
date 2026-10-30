@@ -98,7 +98,7 @@ def page(browser: Browser) -> Iterator[Page]:
 
 
 def test_l_api_ne_compte_que_les_gestes(served_quiet: dict[str, str]) -> None:
-    with urllib.request.urlopen(f"{served_quiet['url']}/api/workspace/attention", timeout=30)  # noqa: S310 — http local as response:
+    with urllib.request.urlopen(f"{served_quiet['url']}/api/workspace/attention", timeout=30) as response:  # noqa: S310 — http local
         data = json.load(response)
     assert data["count"] == 2
     assert data["counts"].get("directive_unacked", 0) == 0
