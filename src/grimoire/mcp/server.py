@@ -853,6 +853,43 @@ def task_intake(text: str, project_path: str = ".") -> str:
         return _tool_error({"error": str(exc)})
 
 
+#: Idées qu'une session peut garder (I13) : de quoi ne pas perdre ce qu'on croise, pas de quoi noyer la boîte.
+IDEA_ADD_LIMIT = 20
+_idea_adds: dict[str, int] = {}
+
+
+@_tool(_writes(destructive=False, idempotent=False))
+def idea_add(text: str, project_path: str = ".", ledger_root: str = "_grimoire-runtime-output/ledger") -> str:
+    """Park an out-of-scope idea in the project's idea box instead of losing it (I13).
+
+    Use it when you cross an idea that does not belong to your task: it is appended to
+    `ideas.jsonl` (source `agent`) and a human decides later with `grimoire idea promote|drop`
+    or from the cockpit. Nothing is triaged and no task is created. Bounded: 500 characters
+    per idea, 20 ideas per session; a refused call says why.
+
+    Args:
+        text: The idea, one or two sentences, at most 500 characters.
+        project_path: Path to project root (default: current directory).
+        ledger_root: Mission Ledger directory, relative to the project root.
+    """
+    import os
+
+    from grimoire.missions.ideas import IDEA_MAX_CHARS, IdeaError, IdeaStore
+
+    session = os.environ.get("GRIMOIRE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    key = f"{Path(project_path).resolve()}|{session}"
+    if len(text.strip()) > IDEA_MAX_CHARS:
+        return _tool_error({"error": f"idée trop longue : {len(text.strip())} caractères, {IDEA_MAX_CHARS} au plus"})
+    if _idea_adds.get(key, 0) >= IDEA_ADD_LIMIT:
+        return _tool_error({"error": f"limite atteinte : {IDEA_ADD_LIMIT} idées par session ; le reste attend la prochaine session"})
+    try:
+        idea = IdeaStore(Path(project_path).resolve(), Path(ledger_root)).add(text, "agent")
+    except (IdeaError, OSError) as exc:
+        return _tool_error({"error": str(exc)})
+    _idea_adds[key] = _idea_adds.get(key, 0) + 1
+    return json.dumps(idea.to_dict(), indent=2, ensure_ascii=False)
+
+
 @_tool(_reads())
 def task_list_ready(
     project_path: str = ".", mission: str = "", ledger_root: str = "_grimoire-runtime-output/ledger"

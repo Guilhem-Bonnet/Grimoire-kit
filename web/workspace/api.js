@@ -477,6 +477,11 @@ export const api = {
   // « Une idée ? » (I2) : propositions de l'intake déterministe (aucune écriture), puis création des cochées.
   taskIntake: (text) => post(WS + 'tasks/intake', { text }),
   taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),
+  // Boîte à idées (I13) : garder sans trier ; « annuler » d'un écart est `undo: true`, un événement de plus.
+  ideas: () => get(WS + 'ideas'),
+  ideaAdd: (text) => post(WS + 'ideas/add', { text }),
+  ideaDrop: (id, undo = false) => post(WS + 'ideas/drop', { id, undo }),
+  ideaPromote: (id, tasks) => post(WS + 'ideas/promote', { id, tasks }),
   // Action depuis le portefeuille (#638, lot C) : routée vers le projet
   // propriétaire par `?project=<slug>` explicite dans le chemin (donc jamais
   // doublé par `withProject`) et confirmée par `project` dans le corps —

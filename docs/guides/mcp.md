@@ -86,6 +86,7 @@ Dans `claude_desktop_config.json` :
 | `grimoire_providers_status` | Fournisseurs LLM activés, modèles par palier (cheap/mid/strong), refroidissement, dernier audit (`available`/`probed_at`/`models_seen`/`probe_note`, issue #330) et prochain choix — même donnée que `grimoire providers status` | lecture, monde ouvert |
 | `task_add` | Ouvrir une tâche (titre, critères d'acceptation ≥ 1, owner, mission, preuves attendues) — `ready=true` la rend réclamable tout de suite ; même service et même validation que `grimoire task add` (issue #638) | écriture |
 | `task_intake` | Proposer, sans rien écrire, le type, le risque, le périmètre et les tâches d'une demande — même fonction et même JSON que `grimoire task add --intake` (R07) ; les tâches retenues s'ouvrent ensuite par `task_add` | lecture |
+| `idea_add` | Garder une idée hors périmètre dans la boîte à idées (`ideas.jsonl`, source `agent`) au lieu de la perdre : 500 caractères au plus, 20 par session, refus motivé au-delà ; l'humain décide ensuite (`grimoire idea promote\|drop`, cockpit) (I13) | écriture, non destructif |
 | `task_list_ready` | Les tâches qu'un agent peut réclamer maintenant | lecture |
 | `task_show` | Une tâche : état, acceptation, claim, et ce que chaque prochain pas exigera ; `claim_blocked_by` nomme le checkpoint de vague qui ferme son claim (vide sinon) | lecture |
 | `task_waves` | Les vagues du plan ; avec `mission`, le checkpoint de chaque vague (statut, empreinte du diff fusionné, tâches couvertes) et `claim_blocked`, le motif de refus par tâche (W5-05) | lecture |

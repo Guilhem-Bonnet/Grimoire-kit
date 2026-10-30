@@ -189,6 +189,13 @@ def _tasks(project_root: Path, query: _Query) -> Any:
     )
 
 
+def _ideas(project_root: Path, _query: _Query) -> Any:
+    """``GET /api/workspace/ideas`` — la boîte à idées (I13), dans l'ordre où elles ont été gardées."""
+    from grimoire.missions.ideas import IdeaStore
+
+    return {"ideas": [i.to_dict() for i in IdeaStore(project_root.resolve()).list()]}
+
+
 def _waves(project_root: Path, query: _Query) -> Any:
     """``GET /api/workspace/waves[?mission=<id>]`` — les vagues du plan et, pour une mission, le checkpoint de chacune (W5-05).
 
@@ -603,6 +610,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}capacity": _capacity,
     f"{PREFIX}tasks": _tasks,
+    f"{PREFIX}ideas": _ideas,
     f"{PREFIX}waves": _waves,
     f"{PREFIX}files": _files,
     f"{PREFIX}file": _file,
@@ -952,6 +960,47 @@ def _task_intake_create(project_root: Path, body: dict[str, Any]) -> Any:
     return {"created": created}
 
 
+def _idea_add(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Garder pour plus tard » : une ligne de plus dans ``ideas.jsonl``, sans trier ni créer de tâche."""
+    from grimoire.missions.ideas import IdeaError, IdeaStore
+
+    try:
+        return IdeaStore(project_root.resolve()).add(str(body.get("text") or ""), "cockpit").to_dict()
+    except IdeaError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _idea_drop(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Écarter » une idée ; ``undo: true`` la restaure (l'annulation est un événement de plus, pas une ligne retirée)."""
+    from grimoire.missions.ideas import IdeaError, IdeaStore
+
+    store, idea_id = IdeaStore(project_root.resolve()), str(body.get("id") or "")
+    try:
+        return (store.restore(idea_id) if body.get("undo") is True else store.drop(idea_id)).to_dict()
+    except IdeaError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _idea_promote(project_root: Path, body: dict[str, Any]) -> Any:
+    """Promeut une idée : avec ``tasks`` (créées par l'intake du cockpit) elle est seulement marquée ;
+    sans, l'intake déterministe crée les tâches, comme ``grimoire idea promote``."""
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.ideas import IdeaError, IdeaStore
+    from grimoire.missions.service import TaskService
+
+    store, idea_id = IdeaStore(project_root.resolve()), str(body.get("id") or "")
+    try:
+        tasks = body.get("tasks")
+        if isinstance(tasks, list) and tasks:
+            return {"idea": store.mark_promoted(idea_id, [str(t) for t in tasks]).to_dict(), "created": []}
+        idea, created = store.promote(
+            idea_id, TaskService(project_root.resolve()), actor=str(body.get("actor") or "workspace"), origin="cockpit",
+        )
+        return {"idea": idea.to_dict(), "created": created}
+    except (IdeaError, GrimoireError) as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
     """Accorde le mandat de l'orchestrateur (#876, lot 1, verrou 15) : l'origine humaine est posée ici.
 
@@ -1033,6 +1082,9 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}memory/correct": _memory_correct,
     f"{PREFIX}tasks/intake": _task_intake,
     f"{PREFIX}tasks/intake/create": _task_intake_create,
+    f"{PREFIX}ideas/add": _idea_add,
+    f"{PREFIX}ideas/drop": _idea_drop,
+    f"{PREFIX}ideas/promote": _idea_promote,
     f"{PREFIX}options": _options_write,
     f"{PREFIX}setup/launch": workspace_first_launch.launch_verb,
     **workspace_notify.POST_ROUTES,
