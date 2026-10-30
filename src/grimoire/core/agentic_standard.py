@@ -926,7 +926,8 @@ def _selected_profile(project_root: Path, profile_id: str | None) -> StandardPro
         selected_profile = profile_id or effective_manifest_profile(project_root) or "starter"
         return get_profile(selected_profile)
 
-    return _memoized(("profile", project_root, profile_id), compute)
+    profile: StandardProfile = _memoized(("profile", project_root, profile_id), compute)
+    return profile
 
 
 _YAML_MEMO: contextvars.ContextVar[dict[Any, Any] | None] = contextvars.ContextVar("grimoire_yaml_memo", default=None)
@@ -950,7 +951,8 @@ def _read_yaml_mapping(root: Path, rel_path: Path) -> dict[str, Any]:
     path = root / rel_path
     memo = _YAML_MEMO.get()
     if memo is not None and path in memo:
-        return memo[path]
+        cached: dict[str, Any] = memo[path]
+        return cached
     if not path.is_file():
         return {}
     data = _yaml().load(path)
