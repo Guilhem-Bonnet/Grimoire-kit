@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.77.0] - 2026-10-30
+
+- chore(release): correctifs intermédiaires des PR fusionnées par commit de fusion, déjà décrits par le fragment de leur PR : e56b9bde, 643cd839, 45360126, ea109781, efb3ea4e, 00f1a297, 195fcb60
+- fix(missions): le relecteur ne juge plus une tâche sur un run d'E2E périmé — un check relancé (échec ancien, run en cours) est en cours, pas rouge — et chaque `task.review_judged` porte le verdict CI lu (`ci`, `ci_detail`) (GAO-i8-le-relec-001)
+- fix(cockpit): « À traiter » ne compte plus les consignes des tâches finies ; une consigne non lue sur une tâche ouverte est « à entretenir », le badge et le titre d'onglet ne comptent que les gestes, et clôturer une tâche acquitte ses consignes (raison « tâche close »)
+- feat(missions): boîte à idées — `grimoire idea add|list|drop|promote`, outil MCP `idea_add` et « Garder pour plus tard » dans « Une idée ? » du cockpit : une idée se garde sans être triée, et se transforme en tâches plus tard (I13)
+- fix(cockpit): les cibles tactiles font 44 px à 390 px ou au doigt (jeton `--hit`) et les rubriques de Savoir et de Configuration ne s'effondrent plus à 18 px (GAO-i14-rendre-002)
+- perf(cockpit): le pouls porte une empreinte par projet et l'interface ne relit que le projet affiché quand il a bougé ; l'écart entre deux relectures suit leur durée réelle (3 à 15 s) et la barre d'état compte les relectures par minute (GAO-i11-ne-rech-001)
+- perf(cockpit): le panneau Preuves lit le board et les politiques une fois par requête, ne calcule que les tâches actives (les terminales sont comptées, `?all=1` les détaille) et borne son calcul à 5 s (`truncated`) — 283 tâches en moins de 1,5 s au lieu de plus de 30 s (GAO-i9-rendre-l-001)
+- fix(cockpit): `GET /api/workspace/evidence` n'écrit plus de `gate.checked` dans `runtime-journal.jsonl` (`check_evidence_gates(record=False)`), un journal périmé n'est plus rendu « frais » par l'ouverture du panneau (GAO-i9-rendre-l-001)
+- feat(missions): l'usage réel de chaque session est replié dans sa tâche à chaque tick (journal retrouvé dans le worktree ou par identifiant de session, au plus 5 journaux et 50 Mo par tick) ; `grimoire task usage --backfill [--dry-run]` rattrape les tâches closes ; un journal absent est dit « journal de session introuvable »
+
 ## [3.76.0] - 2026-10-29
 
 - chore(release): correctifs intermédiaires des PR fusionnées par commit de fusion, déjà décrits par le fragment de leur PR : a4b0e8a7, 077bba97, e82f2a3f, 7198f1de, abd4ef41, d17c4672, 27fe2020, 5de84791, 773d7441, bcb735df

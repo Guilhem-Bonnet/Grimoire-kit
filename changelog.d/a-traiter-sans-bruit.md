@@ -1,1 +1,0 @@
-- fix(cockpit): « À traiter » ne compte plus les consignes des tâches finies ; une consigne non lue sur une tâche ouverte est « à entretenir », le badge et le titre d'onglet ne comptent que les gestes, et clôturer une tâche acquitte ses consignes (raison « tâche close »)
