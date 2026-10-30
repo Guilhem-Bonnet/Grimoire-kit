@@ -78,6 +78,7 @@ from grimoire.tools import (
     workspace_actions,
     workspace_api,
     workspace_attention,
+    workspace_autopilot,
     workspace_chat,
     workspace_config,
     workspace_exec,
@@ -585,31 +586,9 @@ def _mandate_state(project_root: Path, _query: _Query) -> Any:
     }
 
 
-def _autopilot_state(project_root: Path, _query: _Query) -> Any:
-    """État du pilote automatique (P82) : lecture seule, jamais d'activation ici ; les décisions sont au ledger."""
-    from grimoire.missions.autopilot import RESERVED, AutopilotStore, load_autopilot_policy
-
-    policy = load_autopilot_policy(project_root.resolve())
-    return {
-        **AutopilotStore(project_root).state().to_dict(),
-        "reserved": sorted(RESERVED), "extra_reserved": list(policy.extra), "policy_error": policy.error,
-    }
-
-
-def _autopilot_decisions(project_root: Path, query: _Query) -> Any:
-    """Le journal « Décidé par le pilote » (P83) : les décisions du ledger, la plus récente d'abord. Lecture seule."""
-    from grimoire.missions.autopilot_view import journal
-    from grimoire.missions.service import TaskService
-
-    service = TaskService(project_root.resolve())
-    if not service.has_ledger:
-        return {"decisions": []}
-    return {"decisions": journal(service)}
-
-
 GET_ROUTES: dict[str, _GetHandler] = {
-f"{PREFIX}autonomy/autopilot/decisions": _autopilot_decisions,
-f"{PREFIX}autonomy/autopilot": _autopilot_state,
+f"{PREFIX}autonomy/autopilot/decisions": workspace_autopilot.decisions,
+f"{PREFIX}autonomy/autopilot": workspace_autopilot.state,
 f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}capacity": _capacity,
@@ -1024,22 +1003,10 @@ def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
     return {"autopilot": entry["state"], "mandate_id": entry["mandate_id"], "ts": entry["ts"]}
 
 
-def _autopilot_revert(project_root: Path, body: dict[str, Any]) -> Any:
-    """« Revenir » sur une décision du pilote (P83) : rouvre la tâche ou la rend à l'humain. Le jeton suffit :
-    c'est reprendre une décision, pas en prendre une."""
-    from grimoire.missions.autopilot_view import revert
-    from grimoire.missions.service import TaskService
-
-    task_id, question_id = str(body.get("task_id") or ""), str(body.get("question_id") or "")
-    if not task_id or not question_id:
-        raise ValueError("`task_id` et `question_id` requis")
-    return revert(TaskService(project_root.resolve()), task_id, question_id, str(body.get("actor") or "workspace"))
-
-
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}autonomy/autopilot": _autopilot_set,
-    f"{PREFIX}autonomy/autopilot/revert": _autopilot_revert,
+    f"{PREFIX}autonomy/autopilot/revert": workspace_autopilot.revert,
     # Chat de l'orchestrateur (ACP2) : un tour humain relayé à l'agent ; le cockpit n'écrit rien (ADR-007).
     f"{PREFIX}chat/send": workspace_chat.chat_send,
     f"{PREFIX}chat/permission": workspace_chat.chat_permission,

@@ -3527,13 +3527,14 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
 .switch[aria-checked="true"] .switch-track { background: var(--acc-soft); border-color: var(--acc); }
 .switch[aria-checked="true"] .switch-thumb { transform: translateX(14px); background: var(--acc); }
 .switch-why {
-  max-width: 34ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
   font-size: var(--t-min);
   color: var(--ink2);
 }
+.switch-label { white-space: nowrap; }
+/* Sous 1680 px la raison ne tient plus sur la barre sans être coupée : elle reste au titre du bouton. */
+@container appbar (max-width: 1679px) { .switch-why { display: none; } }
 .switch-why[hidden] { display: none; }
 .switch-why[data-tone="bad"] { color: var(--bad); }
 .st-autopilot { color: var(--ink2); font-size: var(--t-min); }
