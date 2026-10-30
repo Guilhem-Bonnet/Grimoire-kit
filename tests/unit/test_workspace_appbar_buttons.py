@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = ROOT / "web" / "workspace"
 INDEX_HTML = WORKSPACE / "index.html"
 SHELL_JS = WORKSPACE / "shell.js"
+AUTOPILOT_JS = WORKSPACE / "autopilot.js"
 
 _APPBAR_BLOCK = re.compile(r'<header id="appbar">(.*?)</header>', re.DOTALL)
 _BUTTON_TAG = re.compile(r"<button\b[^>]*>", re.IGNORECASE)
@@ -57,6 +58,8 @@ def test_index_html_expose_bien_lappbar_attendu() -> None:
 
 def test_aucun_bouton_dappbar_sans_ecouteur_ni_glossaire() -> None:
     shell_js = SHELL_JS.read_text(encoding="utf-8")
+    # L'interrupteur du pilote (P83) vit dans son propre module : `const button = $('…')`.
+    autopilot_js = AUTOPILOT_JS.read_text(encoding="utf-8")
     orphelins = []
     for tag in _appbar_buttons():
         if _DATA_TERM_ATTR.search(tag):
@@ -70,6 +73,12 @@ def test_aucun_bouton_dappbar_sans_ecouteur_ni_glossaire() -> None:
             rf"\$\(\s*['\"]{re.escape(button_id)}['\"]\s*\)\s*\.addEventListener\(",
             shell_js,
         )
+        bound = re.search(
+            rf"const\s+(\w+)\s*=\s*\$\(\s*['\"]{re.escape(button_id)}['\"]\s*\)",
+            autopilot_js,
+        )
+        if bound and re.search(rf"\b{bound.group(1)}\.addEventListener\(", autopilot_js):
+            wired = True
         if not wired:
             orphelins.append(tag)
     assert not orphelins, (

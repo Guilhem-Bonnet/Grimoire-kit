@@ -79,6 +79,7 @@ from grimoire.tools import (
     workspace_actions,
     workspace_api,
     workspace_attention,
+    workspace_autopilot,
     workspace_chat,
     workspace_config,
     workspace_exec,
@@ -587,19 +588,9 @@ def _mandate_state(project_root: Path, _query: _Query) -> Any:
     }
 
 
-def _autopilot_state(project_root: Path, _query: _Query) -> Any:
-    """État du pilote automatique (P82) : lecture seule, jamais d'activation ici ; les décisions sont au ledger."""
-    from grimoire.missions.autopilot import RESERVED, AutopilotStore, load_autopilot_policy
-
-    policy = load_autopilot_policy(project_root.resolve())
-    return {
-        **AutopilotStore(project_root).state().to_dict(),
-        "reserved": sorted(RESERVED), "extra_reserved": list(policy.extra), "policy_error": policy.error,
-    }
-
-
 GET_ROUTES: dict[str, _GetHandler] = {
-f"{PREFIX}autonomy/autopilot": _autopilot_state,
+f"{PREFIX}autonomy/autopilot/decisions": workspace_autopilot.decisions,
+f"{PREFIX}autonomy/autopilot": workspace_autopilot.state,
 f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}capacity": _capacity,
@@ -994,6 +985,7 @@ def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}autonomy/autopilot": _autopilot_set,
+    f"{PREFIX}autonomy/autopilot/revert": workspace_autopilot.revert,
     # Chat de l'orchestrateur (ACP2) : un tour humain relayé à l'agent ; le cockpit n'écrit rien (ADR-007).
     f"{PREFIX}chat/send": workspace_chat.chat_send,
     f"{PREFIX}chat/permission": workspace_chat.chat_permission,

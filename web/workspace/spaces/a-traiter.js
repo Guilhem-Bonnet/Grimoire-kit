@@ -40,6 +40,7 @@ const CSS = `
 .at-partial strong { color: var(--ink); font-weight: 600; }
 .at-partial .btn { margin-left: auto; }
 .at-ro { margin: 0; color: var(--ink2); }
+.at-pilot { color: var(--ink2); font-style: italic; overflow-wrap: anywhere; }
 .at-section { border: 1px solid var(--line); border-radius: var(--r-l); background: var(--card); box-shadow: var(--shadow);
   overflow: hidden; padding: var(--sp-1) 0 var(--sp-2); }
 .at-section-head { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
@@ -344,6 +345,11 @@ function renderDetail(ctx, item) {
     node('h3', null, item.title || kind.word),
     node('p', 'at-lead', item.reason || ''),
   );
+  if (item.pilot) {
+    const held = node('p', 'at-lead at-pilot', `Pilote automatique : ${item.pilot.reason}`);
+    held.dataset.role = 'pilot-reason';
+    box.append(held);
+  }
   const at = Date.parse(item.since || '');
   box.append(kv([
     ['Projet', projectName(item)],
@@ -589,6 +595,15 @@ export async function mount(root, ctx) {
         reason.title = item.reason || '';
         sub.append(project);
         if (item.reason) sub.append(node('span', 'at-sep', '·'), reason);
+        // Pilote activé (P83) : ce qui reste à l'humain dit pourquoi le pilote ne le prend pas.
+        const held = group.items.map((i) => i.pilot).find(Boolean);
+        if (held) {
+          const why = node('span', 'at-pilot', `Pilote : ${held.reason}`);
+          why.dataset.role = 'pilot-reason';
+          why.dataset.pilot = held.kind;
+          why.title = held.reason;
+          sub.append(node('span', 'at-sep', '·'), why);
+        }
         const title = node('span', 'at-title', item.title || kind.word);
         title.title = item.title || '';
         const chips = node('span', 'at-chips');

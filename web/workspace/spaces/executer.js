@@ -103,6 +103,7 @@ import { DONE_RECENT_LIMIT, splitRecent } from './board-split.js';
 import { renderSessionInspector, renderSessions } from './sessions.js';
 import { newTaskBlock, newTaskButton } from './task-create.js';
 import { appendQuestionV2, isV2 } from './decision-card.js';
+import { pilotJournalBlock } from './pilote-journal.js';
 import { ideaBlock, ideaButton, requestIdeaFocus } from './task-intake.js';
 import { el as rcEl, injectRecallStyles, plural as rcPlural, receiptMeta, replayControl, servedList, whenText } from './recall-receipt.js';
 
@@ -3890,6 +3891,8 @@ export async function mount(root, ctx) {
     }
     if (view === 'decisions') {
       renderDecisions(wrap, ctx, tasks, portfolioMode, () => draw());
+      // P83 : le journal du pilote se lit par projet ; en portée « Tous les projets » il n'y a pas de ledger unique.
+      if (!portfolioMode) wrap.append(pilotJournalBlock(() => draw()));
     } else if (view === 'board4') {
       renderBoard(wrap, ctx, tasks, GROUPS4, onSelect, portfolioMode, same, onRowTimeline);
     } else if (view === 'board8') {
