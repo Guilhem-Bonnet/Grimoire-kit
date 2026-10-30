@@ -156,6 +156,21 @@ const TILES = {
   maintain: { icon: 'seal', tone: '' },
 };
 
+/** Le sous-titre : ce qui demande un geste, puis « N à entretenir » ; vide, la phrase d'accueil. */
+function summaryLine(sections) {
+  const n = (id) => (sections.find((s) => s.id === id) || {}).count || 0;
+  const plural = (k, one, many) => `${k} ${k > 1 ? many : one}`;
+  const parts = [];
+  if (n('decide')) parts.push(plural(n('decide'), 'décision', 'décisions'));
+  if (n('review')) parts.push(plural(n('review'), 'PR', 'PR'));
+  if (n('unblock')) parts.push(plural(n('unblock'), 'blocage', 'blocages'));
+  if (n('repair')) parts.push(plural(n('repair'), 'réparation', 'réparations'));
+  const maintain = n('maintain');
+  const head = parts.join(', ');
+  if (!head && !maintain) return '';
+  return head + (maintain ? `${head ? ' · ' : ''}${maintain} à entretenir` : '');
+}
+
 /** L'équivalent en ligne de commande, quand le serveur en connaît un vrai. */
 function cliOf(item) {
   const ref = item.ref || {};
@@ -518,9 +533,10 @@ export async function mount(root, ctx) {
     const count = summary.projects ?? 0;
     const formula = node('span', 'at-formula');
     formula.append(node('b', null, '›'), 'grimoire status');
-    const head = spaceHead('À traiter', ctx.scope.all
+    const line = summaryLine(sections);
+    const head = spaceHead('À traiter', line || (ctx.scope.all
       ? `Ce qui attend une décision de toi, sur ${count} projet${count > 1 ? 's' : ''}.`
-      : `Ce qui attend une décision de toi dans ${ctx.scope.name}.`, formula);
+      : `Ce qui attend une décision de toi dans ${ctx.scope.name}.`), formula);
     wrap.replaceChildren(head, since);
     rows = [];
 

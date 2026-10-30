@@ -23,6 +23,7 @@ import pytest
 from grimoire.memory import health_cache
 from grimoire.memory.backends.base import BackendStatus
 from grimoire.memory.manager import MemoryManager
+from grimoire.missions.gates import GateVerdict
 from grimoire.missions.schemas import ORIGIN_HUMAN, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.tools import flow_runs
@@ -127,7 +128,7 @@ class TestAttentionOrder:
 
         assert unblock == [
             "review_blocked:alpha:t3", "task_blocked:alpha:t6", "task_blocked:beta:t2",
-            "directive_unacked:alpha:t5", "claim_orphaned:beta:t4",
+            "claim_orphaned:beta:t4",
         ]
 
     def test_chaque_type_connu_a_une_seule_section(self) -> None:
@@ -276,7 +277,9 @@ class TestRouteFleet:
         assert not any(i["ref"].get("task_id") == ids["calm"] for i in _items(view))
         assert wa.KIT_BEHIND in _kinds(view, "projet-a")
         assert _kinds(view, "projet-b") == {wa.PROBE_FAILED}
-        assert view["count"] == sum(view["counts"].values())
+        # Le badge ne compte que les gestes : les consignes à lire sont « à entretenir ».
+        assert view["count"] + view["maintainCount"] == sum(view["counts"].values())
+        assert view["maintainCount"] >= view["counts"][wa.DIRECTIVE_UNACKED]
 
     def test_les_raisons_sont_concretes(self, fleet: dict[str, Any]) -> None:
         view = wa.attention_view(fleet["root"], portfolio=True, now=fleet["now"],
@@ -531,3 +534,63 @@ class TestExpiredMemoryProbe:
         assert probed["probed"] is True
         repair = next(s for s in cached["sections"] if s["id"] == "repair")
         assert [i["project"]["slug"] for i in repair["items"]] == ["projet-lent"]
+
+
+def _finish(service: TaskService, tid: str, target: TaskState) -> None:
+    """Termine la tâche au ledger, sans la clôture du service : les consignes restent non acquittées."""
+    if target is TaskState.CLOSED:
+        service.ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="t")
+    service.ledger.transition_task(tid, target, actor_id="t")
+
+
+class TestConsignesDesTachesFinies:
+    """I10 : une tâche finie ne produit plus de consigne à lire ; ouverte, elle est « à entretenir »."""
+
+    @staticmethod
+    def _with_directives(root: Path) -> tuple[TaskService, str]:
+        service = TaskService(root)
+        tid = _task(service, "Tâche à consignes")
+        for text in ("un", "deux", "trois"):
+            service.comment(tid, text, "guilhem", kind="directive", origin=ORIGIN_HUMAN)
+        return service, tid
+
+    @staticmethod
+    def _unacked(root: Path) -> list[dict[str, Any]]:
+        view = wa.attention_view(root, now=datetime.now(UTC), service_probe=_never_probe, watch=wa.ServiceWatch())
+        return [
+            {"section": s["id"], **i} for s in view["sections"] for i in s["items"] if i["kind"] == wa.DIRECTIVE_UNACKED
+        ]
+
+    def test_une_tache_ouverte_range_sa_consigne_dans_a_entretenir(self, tmp_path: Path) -> None:
+        service, tid = self._with_directives(tmp_path)
+        service.wait(tid, "paused", "agent-a")
+
+        [item] = self._unacked(tmp_path)
+
+        assert item["section"] == "maintain"
+        assert item["ref"]["unread"] == 3
+        view = wa.attention_view(tmp_path, now=datetime.now(UTC), service_probe=_never_probe, watch=wa.ServiceWatch())
+        assert view["count"] == 0  # rien ne demande un geste
+        assert view["maintainCount"] == 1
+
+    @pytest.mark.parametrize("target", [TaskState.CLOSED, TaskState.CANCELLED])
+    def test_une_tache_finie_ne_produit_aucune_consigne(self, tmp_path: Path, target: TaskState) -> None:
+        service, tid = self._with_directives(tmp_path)
+        _finish(service, tid, target)
+
+        assert self._unacked(tmp_path) == []
+        assert len(service.require(tid).unacknowledged_directives) == 3  # inchangé : lisibles dans l'inspecteur
+
+    def test_cloturer_acquitte_les_consignes_avec_la_raison(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service, tid = self._with_directives(tmp_path)
+
+        service.transition(tid, TaskState.NEEDS_VERIFICATION, "agent-a")
+        monkeypatch.setattr(service, "gate", lambda task, target: GateVerdict("t", "advisory", ()))
+        service.transition(tid, TaskState.CLOSED, "guilhem", reason="fini")
+
+        assert service.require(tid).unacknowledged_directives == ()
+        acks = [e for e in service.ledger.list_events(tid) if e.event_type == "task.directive_acknowledged"]
+        assert len(acks) == 3
+        assert {e.payload["reason"] for e in acks} == {"tâche close"}

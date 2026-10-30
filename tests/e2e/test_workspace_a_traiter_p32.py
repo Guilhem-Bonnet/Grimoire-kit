@@ -398,7 +398,7 @@ def test_p63_tuiles_de_comptes_reelles_et_formule_en_tete(page: Page, served_inb
     _open(page, served_inbox, f"?project={served_inbox['home']}#a-traiter")
     assert page.locator(".space-title").inner_text() == "À traiter"
     assert page.locator(".space-title").evaluate("e => getComputedStyle(e).fontSize") == "32px"
-    assert page.locator(".space-sub").inner_text().startswith("Ce qui attend une décision de toi")
+    assert page.locator(".space-sub").inner_text().startswith("2 décisions, 1 blocage")
     assert page.locator(".space-head .at-formula").inner_text().replace("\n", "").strip() == "›grimoire status"
     tiles = page.locator(".kpi .kpi-item")
     # Atelier Nord : 2 à décider (question, proposition), 1 à débloquer — les comptes de l'API.
@@ -444,7 +444,12 @@ def test_p63_le_badge_de_l_onglet_est_la_somme_des_tuiles(page: Page, served_inb
         assert page.locator("#decisions-pill").count() == 0
         page.wait_for_function("() => !document.getElementById('decisions-count').hidden")
         badge = int(page.locator("#tab-space-a-traiter #decisions-count").inner_text())
-        total = sum(int(v) for v in page.locator(".kpi .kpi-val").all_inner_texts())
+        # « À entretenir » ne demande aucun geste (I10) : sa tuile n'entre pas dans le badge.
+        total = sum(
+            int(item.locator(".kpi-val").inner_text())
+            for item in page.locator(".kpi .kpi-item").all()
+            if item.get_attribute("data-section") != "maintain"
+        )
         count = page.evaluate("async () => (await (await fetch('/api/workspace/attention' + (new URLSearchParams(location.search).get('scope') === 'all' ? '?scope=portfolio' : ''))).json()).count")
         assert badge == total == count > 0, (suffix, badge, total, count)
 

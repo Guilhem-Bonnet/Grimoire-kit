@@ -1259,8 +1259,10 @@ class MissionLedger:
         self._load()
         return self._tasks[task_id]
 
-    def acknowledge_directive(self, task_id: str, directive_id: str, *, actor_id: str) -> MissionTask:
-        """Horodate l'accusé de réception d'une consigne connue de la tâche."""
+    def acknowledge_directive(
+        self, task_id: str, directive_id: str, *, actor_id: str, reason: str = ""
+    ) -> MissionTask:
+        """Horodate l'accusé de réception d'une consigne connue de la tâche ; *reason* dit pourquoi, s'il y a lieu."""
         self._load()
         task = self._tasks.get(task_id)
         if task is None:
@@ -1269,7 +1271,8 @@ class MissionLedger:
             raise GrimoireMissionError(f"Consigne inconnue sur {task_id} : {directive_id}")
         self._append_event(
             "task.directive_acknowledged", task_id, "task", actor_id,
-            {"task_id": task_id, "directive_id": directive_id, "acknowledged_at": _now_iso(), "actor_id": actor_id},
+            {"task_id": task_id, "directive_id": directive_id, "acknowledged_at": _now_iso(), "actor_id": actor_id,
+             **({"reason": reason} if reason else {})},
         )
         self._load()
         return self._tasks[task_id]
