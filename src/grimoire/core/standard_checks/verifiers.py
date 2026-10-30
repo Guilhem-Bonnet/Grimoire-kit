@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.request_memo import memoized
 from grimoire.core.standard_checks.base import (
     BOARD_STATES,
     KNOWN_HOOK_ACTIONS,
@@ -883,6 +884,14 @@ def _verify_memory_os_contract(
             f"Memory OS runtime command evidence should include: {', '.join(missing_commands)}.",
             path=path,
         )
+
+
+@memoized
+def memory_policy_checks(root: Path, profile: StandardProfile) -> tuple[Any, ...]:
+    """Constats de la politique mémoire, lus une fois par requête (voir request_memo)."""
+    result = StandardVerificationResult(profile=profile.id, project_root=root)
+    _verify_memory_policy(root, profile, result)
+    return tuple(result.checks)
 
 
 def _verify_memory_policy(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:

@@ -1006,28 +1006,28 @@ function restorePanelsForSpace() {
 // `grimoire standard verify`/`grimoire_standard_gate`.
 let evidenceRequest = 0;
 
-async function loadEvidencePanel() {
+async function loadEvidencePanel(all = false) {
   const body = $('evidence-body');
   const requestId = ++evidenceRequest;
   body.replaceChildren(...loadingNodes('Chargement des preuves…', 3));
   body.setAttribute('aria-busy', 'true');
   let payload;
   try {
-    payload = await api.evidence();
+    payload = await api.evidence(all === true);
   } catch (error) {
     if (requestId !== evidenceRequest) return;
     body.setAttribute('aria-busy', 'false');
     body.replaceChildren(empty('Preuves indisponibles', error.message, 'grimoire standard doctor', {
-      label: 'Réessayer', run: loadEvidencePanel,
+      label: 'Réessayer', run: () => loadEvidencePanel(),
     }));
     return;
   }
   body.setAttribute('aria-busy', 'false');
   if (requestId !== evidenceRequest) return;
-  renderEvidencePanel(body, payload);
+  renderEvidencePanel(body, payload, all === true);
 }
 
-function renderEvidencePanel(body, payload) {
+function renderEvidencePanel(body, payload, all = false) {
   body.replaceChildren();
   if (!payload.enrolled) {
     body.append(empty(
@@ -1037,7 +1037,9 @@ function renderEvidencePanel(body, payload) {
     ));
     return;
   }
-  if (!payload.tasks || !payload.tasks.length) {
+  const terminal = payload.terminal || {};
+  const terminalCount = Object.values(terminal).reduce((n, v) => n + v, 0);
+  if ((!payload.tasks || !payload.tasks.length) && !terminalCount) {
     body.append(empty(
       'Preuves',
       'Le standard est initialisé mais le board ne porte encore aucune tâche.',
@@ -1065,9 +1067,24 @@ function renderEvidencePanel(body, payload) {
     row.addEventListener('click', () => goto('source', { file: task.pack_path }));
     body.append(row);
   }
+  if (payload.truncated) {
+    body.append(mk('p', {
+      class: 'ev-note', role: 'status',
+      text: 'Réponse partielle : le calcul des gates a dépassé sa borne de temps.',
+    }));
+  }
+  if (terminalCount && !all) {
+    const detail = Object.entries(terminal).map(([k, v]) => `${v} ${k}`).join(', ');
+    const more = mk('button', { type: 'button', class: 'ev-row ev-terminal' },
+      mk('span', { class: 'ev-title', text: `${terminalCount} terminées (${detail})` }),
+      mk('span', { class: 'grow' }),
+      mk('span', { class: 'chip pill', text: 'Tout voir' }));
+    more.addEventListener('click', () => loadEvidencePanel(true));
+    body.append(more);
+  }
 }
 
-PANEL_ON_OPEN.evidence = loadEvidencePanel;
+PANEL_ON_OPEN.evidence = () => loadEvidencePanel();
 
 /** Petit constructeur DOM local — shell.js n'importe rien de `spaces/*.js`
  * (README : aucun espace ne touche le DOM d'un autre, et ça vaut à l'envers).

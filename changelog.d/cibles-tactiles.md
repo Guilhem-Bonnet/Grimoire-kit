@@ -1,0 +1,1 @@
+- fix(cockpit): les cibles tactiles font 44 px à 390 px ou au doigt (jeton `--hit`) et les rubriques de Savoir et de Configuration ne s'effondrent plus à 18 px (GAO-i14-rendre-002)
