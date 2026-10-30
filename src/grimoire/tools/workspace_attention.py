@@ -97,13 +97,16 @@ SERVICE_RESOLVED = "service_resolved"
 SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("decide", "À décider", (CHECKPOINT, QUESTION, PROPOSAL)),
     ("review", "PR à revoir", (PR_REVIEW,)),
-    ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, DIRECTIVE_UNACKED, CLAIM_ORPHANED)),
+    ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
-    ("maintain", "À entretenir", (*HYGIENE_KINDS, KIT_BEHIND)),
+    ("maintain", "À entretenir", (DIRECTIVE_UNACKED, *HYGIENE_KINDS, KIT_BEHIND)),
     ("resolved", "Résolu automatiquement", (SERVICE_RESOLVED,)),
 )
 #: Un type que :data:`SECTIONS` ne connaît pas tombe ici : jamais perdu.
 OTHER_SECTION = ("other", "Autre")
+
+#: Les états où plus aucune session ne lira une consigne.
+_FINISHED_STATES = frozenset({"closed", "cancelled"})
 
 KINDS: tuple[str, ...] = tuple(kind for _, _, kinds in SECTIONS for kind in kinds)
 _SECTION_OF: dict[str, tuple[str, int]] = {
@@ -367,7 +370,7 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
             _item(read, TASK_BLOCKED, task.id, task.title, str(card.get("blocked_reason") or "bloquée"),
                   since=since, task_id=task.id)
         unread = unread_directives(card)
-        if unread:
+        if unread and task.status.value not in _FINISHED_STATES:
             _item(read, DIRECTIVE_UNACKED, task.id, task.title,
                   f"{unread} consigne{'s' if unread > 1 else ''} en attente de lecture par la session",
                   since=since, task_id=task.id, unread=unread)
@@ -652,6 +655,7 @@ def attention_view(
     items = _dedupe_reviews(item for read in reads for item in read.items)
     sections = attention_order(items)
     active = [i for i in items if i["kind"] != SERVICE_RESOLVED]
+    gestures = [i for i in active if _SECTION_OF.get(i["kind"], ("other",))[0] not in ("maintain", "resolved")]
     counts: dict[str, int] = {}
     for item in active:
         counts[item["kind"]] = counts.get(item["kind"], 0) + 1
@@ -662,7 +666,8 @@ def attention_view(
         "filters": {"project": slug or ""},
         "probed": probe,
         "sections": sections,
-        "count": len(active),
+        "count": len(gestures),
+        "maintainCount": len(active) - len(gestures),
         "counts": counts,
         "projects": [read.row for read in reads],
         "reviews": [{"project": read.row["slug"], **read.reviews} for read in reads if read.reviews],

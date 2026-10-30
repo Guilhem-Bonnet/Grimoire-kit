@@ -114,16 +114,17 @@ def test_une_ligne_par_tache(page: Page) -> None:
     assert section.locator(".at-section-head .at-n").inner_text() == "8"
     tile = page.locator(".at-tile[data-section='unblock']")
     assert tile.locator(".kpi-val").inner_text() == "8"
-    # Les quatre tâches à consigne portent les deux motifs en puces-mots.
-    assert sum(1 for row in rows.all() if row.locator(".at-chip").count() == 2) == 4
-    assert "consigne" in section.inner_text()
+    # Les quatre consignes en attente ne sont plus un blocage : elles vont dans « À entretenir ».
+    assert sum(1 for row in rows.all() if row.locator(".at-chip").count() == 2) == 0
+    assert "consigne" not in section.inner_text()
+    assert page.locator(".at-section[data-section='maintain'] .at-row").count() == 4
     assert "consigne(s)" not in page.locator("#canvas").inner_text()
 
 
 def test_tuile_filtre(page: Page) -> None:
     decide = page.locator(".at-tile[data-section='decide']")
     sections = page.locator(".at-section")
-    assert sections.count() == 2
+    assert sections.count() == 3
     assert decide.get_attribute("aria-pressed") == "false"
     decide.click()
     assert decide.get_attribute("aria-pressed") == "true"
@@ -132,11 +133,11 @@ def test_tuile_filtre(page: Page) -> None:
     # Le focus reste sur la tuile ; Échap remet toutes les sections.
     assert page.evaluate("() => document.activeElement.dataset.section") == "decide"
     page.keyboard.press("Escape")
-    assert page.locator(".at-section:visible").count() == 2
+    assert page.locator(".at-section:visible").count() == 3
     assert decide.get_attribute("aria-pressed") == "false"
     decide.click()
     decide.click()
-    assert page.locator(".at-section:visible").count() == 2
+    assert page.locator(".at-section:visible").count() == 3
     assert page.evaluate("() => document.activeElement.dataset.section") == "decide"
 
 
