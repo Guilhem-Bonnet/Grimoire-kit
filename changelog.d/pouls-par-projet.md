@@ -1,1 +1,0 @@
-- perf(cockpit): le pouls porte une empreinte par projet et l'interface ne relit que le projet affiché quand il a bougé ; l'écart entre deux relectures suit leur durée réelle (3 à 15 s) et la barre d'état compte les relectures par minute (GAO-i11-ne-rech-001)
