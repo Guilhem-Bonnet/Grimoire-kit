@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import io
 import json
 import os
 import shutil
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from grimoire.core import standard_generation as gen
+from grimoire.core.request_memo import memoized
 from grimoire.core.standard_checks.base import (
     BOARD_STATES as BOARD_STATES,
 )
@@ -67,10 +66,7 @@ from grimoire.core.standard_checks.registry import (
 from grimoire.core.standard_checks.registry import (
     dimension_for,
 )
-from grimoire.core.standard_checks.verifiers import (
-    _verify_memory_policy,
-    run_verifiers,
-)
+from grimoire.core.standard_checks.verifiers import memory_policy_checks, run_verifiers
 from grimoire.core.standard_effective_profile import effective_manifest_profile
 from grimoire.core.standard_generation import (
     CONTEXT_DIR,
@@ -911,48 +907,15 @@ def verify_standard_profile(
     return result
 
 
-def _memoized(key: Any, compute: Any) -> Any:
-    """``compute()`` une fois par bloc :func:`yaml_read_memo`, à chaque appel hors bloc."""
-    memo = _YAML_MEMO.get()
-    if memo is None:
-        return compute()
-    if key not in memo:
-        memo[key] = compute()
-    return memo[key]
-
-
+@memoized
 def _selected_profile(project_root: Path, profile_id: str | None) -> StandardProfile:
-    def compute() -> StandardProfile:
-        selected_profile = profile_id or effective_manifest_profile(project_root) or "starter"
-        return get_profile(selected_profile)
-
-    profile: StandardProfile = _memoized(("profile", project_root, profile_id), compute)
-    return profile
+    selected_profile = profile_id or effective_manifest_profile(project_root) or "starter"
+    return get_profile(selected_profile)
 
 
-_YAML_MEMO: contextvars.ContextVar[dict[Any, Any] | None] = contextvars.ContextVar("grimoire_yaml_memo", default=None)
-
-
-@contextlib.contextmanager
-def yaml_read_memo() -> Iterator[None]:
-    """Mémo de ``_read_yaml_mapping`` borné à ce bloc — jamais entre deux requêtes.
-
-    Une surface qui évalue beaucoup de tâches d'un coup (le panneau Preuves)
-    relirait sinon le board et les politiques à chaque tâche.
-    """
-    token = _YAML_MEMO.set({})
-    try:
-        yield
-    finally:
-        _YAML_MEMO.reset(token)
-
-
+@memoized
 def _read_yaml_mapping(root: Path, rel_path: Path) -> dict[str, Any]:
     path = root / rel_path
-    memo = _YAML_MEMO.get()
-    if memo is not None and path in memo:
-        cached: dict[str, Any] = memo[path]
-        return cached
     if not path.is_file():
         return {}
     data = _yaml().load(path)
@@ -961,8 +924,6 @@ def _read_yaml_mapping(root: Path, rel_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         msg = f"{rel_path} must be a YAML mapping."
         raise ValueError(msg)
-    if memo is not None:
-        memo[path] = data
     return data
 
 
@@ -1488,11 +1449,7 @@ def check_evidence_gates(
     profile_id: str | None = None,
     record: bool = True,
 ) -> StandardGateResult:
-    """Evaluate task evidence gates against generated runtime artifacts.
-
-    ``record=False`` : lecture pure, rien n'est ajouté au journal d'exécution
-    (le cockpit lit ; seuls le CLI, MCP et les hooks consignent).
-    """
+    """Evaluate task evidence gates; ``record=False`` n'écrit rien au journal (lecture pure du cockpit)."""
     root = project_root.resolve()
     normalized_task_id = normalize_task_id(task_id)
     profile = _selected_profile(root, profile_id)
@@ -1539,13 +1496,7 @@ def check_evidence_gates(
         if not (root / required_paths["memory_policy"]).is_file():
             missing.append("memory_policy")
         else:
-            def verify_memory() -> StandardVerificationResult:
-                result = StandardVerificationResult(profile=profile.id, project_root=root)
-                _verify_memory_policy(root, profile, result)
-                return result
-
-            memory_result = _memoized(("memory_policy", root, profile.id), verify_memory)
-            checks.extend(memory_result.checks)
+            checks.extend(memory_policy_checks(root, profile))
     if state in {"review", "accepted", "released"}:
         for key in ("evidence_pack", "claim_ledger", "decision_trace"):
             if not (root / required_paths[key]).is_file():

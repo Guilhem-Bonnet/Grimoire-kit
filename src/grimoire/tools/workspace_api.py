@@ -407,7 +407,8 @@ def evidence_view(
     """
     import time
 
-    from grimoire.core.agentic_standard import check_evidence_gates, list_board_tasks, yaml_read_memo
+    from grimoire.core.agentic_standard import check_evidence_gates, list_board_tasks
+    from grimoire.core.request_memo import request_memo as yaml_read_memo
     from grimoire.core.standard_generation import EVIDENCE_DIR, normalize_task_id
     from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 
