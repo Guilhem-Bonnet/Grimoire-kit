@@ -160,6 +160,11 @@ def test_le_compteur_dit_le_bon_nombre_sous_en_cours_et_porte_le_ton_warn(page: 
     expect(counter).to_have_count(1)
     expect(counter).to_be_visible()
     assert "2 bloquées" in counter.inner_text()
+    # Sous charge, la feuille de style peut arriver après le premier rendu : attendre le ton calculé.
+    counter.page.wait_for_function(
+        "() => { const n = document.querySelector(\"[data-role='blocked-count']\");"
+        " return !!n && !!getComputedStyle(n).color && !!getComputedStyle(n).borderTopColor; }"
+    )
     # Le ton vient des tokens warn (var(--warn), var(--warn-soft)), jamais d'un littéral.
     tones = counter.evaluate(
         "(n) => { const cs = getComputedStyle(n); const root = getComputedStyle(document.documentElement);"
