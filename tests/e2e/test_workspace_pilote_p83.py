@@ -155,8 +155,13 @@ def test_pilote_active_a_traiter_ne_garde_que_le_reserve_et_la_confiance_basse(w
     reasons = workspace.locator("[data-role='pilot-reason']").all_inner_texts()
     assert any("identifiants" in r for r in reasons)
     assert any("confiance basse" in r for r in reasons)
+    # Le compteur ne compte que les gestes : « maintenir » et « résolu » en sont exclus, et le projet partagé de la
+    # session y porte les tâches laissées par d'autres tests.
+    gestures = workspace.locator(
+        ".at-section:not([data-section='maintain']):not([data-section='resolved']) .at-row .at-title"
+    ).count()
     count = workspace.locator("#decisions-count")
-    assert int(count.get_attribute("data-pending") or "0") == len(titles)
+    assert int(count.get_attribute("data-pending") or "0") == gestures
 
 
 def test_le_journal_liste_la_decision_et_revenir_la_rend_a_l_humain(workspace: Page, mandated: Path) -> None:
