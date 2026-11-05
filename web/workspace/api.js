@@ -332,6 +332,10 @@ export const api = {
   // modèles, deux lectures (jamais d'écriture : les gestes sont des commandes).
   hooks: () => get(WS + 'hooks'),
   providers: () => get(WS + 'providers'),
+  providersSetKey: (providerId, envVar, value, controlKey) =>
+    post(WS + 'providers/set-key', { provider_id: providerId, env_var: envVar, value, control_key: controlKey }),
+  providersSetEnabled: (providerId, enabled, controlKey) =>
+    post(WS + 'providers', { action: enabled ? 'enable' : 'disable', provider_id: providerId, control_key: controlKey }),
   // Options du projet (P75) : taux USD→CAD de la colonne Fait, lu et écrit
   // dans project-context.yaml (section cockpit) par le serveur.
   options: () => get(WS + 'options'),
