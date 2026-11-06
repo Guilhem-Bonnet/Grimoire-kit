@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -996,10 +997,13 @@ def test_un_worker_route_passe_par_ses_reglages_jamais_par_l_environnement(route
     settings = Path(argv[argv.index("--settings") + 1])
     assert "sk-secret-de-test" not in " ".join(argv)
     assert not any("sk-secret-de-test" in str(env) for _argv, _cwd, env in host.calls)
-    assert settings.stat().st_mode & 0o777 == 0o600 or os.name == "nt"
+    assert "sk-secret-de-test" not in settings.read_text(encoding="utf-8")
     data = json.loads(settings.read_text(encoding="utf-8"))
     assert data["env"]["ANTHROPIC_BASE_URL"] == "https://api.example.test/anthropic"
-    assert data["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-secret-de-test"  # noqa: S105
+    assert "ANTHROPIC_AUTH_TOKEN" not in data["env"]
+    if os.name != "nt":  # le minuteur du tick est une unité systemd ; le relais passe par sed
+        relu = subprocess.run(data["apiKeyHelper"], shell=True, capture_output=True, text=True, encoding="utf-8", check=True)  # noqa: S602
+        assert relu.stdout.strip() == "sk-secret-de-test"
     assert data["env"]["CLAUDE_CODE_SUBAGENT_MODEL"] == "deepseek-chat"
     assert "Read(~/.env-store/**)" in data["permissions"]["deny"]
     assert launched_sessions(TaskService(route_prete))[tid]["provider"] == "deepseek"

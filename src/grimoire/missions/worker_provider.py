@@ -11,6 +11,7 @@ modèle habituel. Une tâche V2 n'est jamais routée : rien ne pourrait juger se
 from __future__ import annotations
 
 import json
+import shlex
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -44,20 +45,19 @@ def settings_path(provider: str) -> Path:
     return store_dir() / f"{provider}.claude-settings.json"
 
 
-def _token(provider: str) -> str:
-    secrets = env_for_provider(provider)
-    return secrets.get(f"{provider.upper().replace('-', '_')}_API_KEY", "")
+def _key_var(provider: str) -> str:
+    """La variable de la clé dans le magasin, vide si elle n'y est pas."""
+    name = f"{provider.upper().replace('-', '_')}_API_KEY"
+    return name if env_for_provider(provider).get(name) else ""
 
 
-def _write_settings(provider: str, base_url: str, model: str, token: str) -> Path:
-    env = {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_AUTH_TOKEN": token}
+def _write_settings(provider: str, base_url: str, model: str, key_var: str) -> Path:
+    """Les réglages de la session : la clé reste dans le magasin, `apiKeyHelper` l'y relit à chaque besoin."""
+    env = {"ANTHROPIC_BASE_URL": base_url}
     env.update(dict.fromkeys(_SUBAGENT_MODEL_VARS, model))
+    helper = f"sed -n 's/^{key_var}=//p' {shlex.quote(str(store_dir() / f'{provider}.env'))}"
     path = settings_path(provider)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Créé fermé d'abord : `atomic_write` conserve le mode d'une cible existante, la clé n'est jamais lisible.
-    path.touch(mode=0o600)
-    path.chmod(0o600)
-    atomic_write(path, json.dumps({"env": env, "permissions": {"deny": list(_DENIED_READS)}}))
+    atomic_write(path, json.dumps({"apiKeyHelper": helper, "env": env, "permissions": {"deny": list(_DENIED_READS)}}))
     return path
 
 
@@ -73,8 +73,8 @@ def route_worker(
     moment = now or datetime.now().astimezone()
     state = load_state(root)
     models = available_models(provider, tier, state, now=moment) or available_models(provider, "cheap", state, now=moment)
-    token = _token(provider.id)
-    if not models or not token:
+    key_var = _key_var(provider.id)
+    if not models or not key_var:
         return None
-    settings = _write_settings(provider.id, str(provider.anthropic_base_url), models[0].id, token)
+    settings = _write_settings(provider.id, str(provider.anthropic_base_url), models[0].id, key_var)
     return WorkerRoute(provider.id, models[0].id, settings)
