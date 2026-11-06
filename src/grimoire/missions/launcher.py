@@ -401,6 +401,29 @@ def _halt(exec_: Exec, cwd: Path, short: str, claude_bin: str) -> tuple[bool, st
     return False, f", session {short} NON arrêtée ({why})"
 
 
+def _worktree_hooks(wt_path: Path) -> str:
+    """#957 : le worktree du worker porte le hook PreToolUse ; ``""`` ou la raison d'un refus.
+
+    Un dépôt qui ne suit pas ses fichiers d'hôte (``.claude/`` non suivi) donne un worktree sans hooks : on y rejoue la
+    synchronisation de l'hôte Claude (fichiers non suivis, retirés avec le worktree), puis on vérifie. Échec fermé.
+    """
+    from grimoire.hosts.sync import sync_host_surfaces
+
+    def armed() -> bool:
+        try:
+            data = json.loads((wt_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            return bool(data.get("hooks", {}).get("PreToolUse"))
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    if armed():
+        return ""
+    outcome = sync_host_surfaces(wt_path)
+    if armed():
+        return ""
+    return f"worktree sans hook PreToolUse Grimoire après host sync ({outcome.error or outcome.warning or 'hook absent'})"
+
+
 def _freeze_repository(service: TaskService, task_id: str) -> str:
     """Lot 4 : fige le dépôt GitHub de la tâche au journal d'autorité, avant le worker ; ``""`` ou la raison d'un refus."""
     from grimoire.missions.review_seal import freeze_repository
@@ -623,7 +646,7 @@ class WorkerLauncher:
         except (GrimoireError, ValueError, OSError) as exc:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
-        refused = _freeze_repository(service, tid)
+        refused = _worktree_hooks(wt.path) or _freeze_repository(service, tid)
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
