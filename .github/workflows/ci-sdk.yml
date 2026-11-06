@@ -159,16 +159,19 @@ jobs:
     # et le merger relance le job (CI3) au lieu d'attendre deux heures. Windows et macOS gardent 120.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 45 || 120 }}
     env:
-      # Sur une PR, seul ubuntu 3.12 lance la suite ; les autres jambes rendent leur check
-      # requis sans la lancer (le nom du job reste, la protection de main l'exige). Une PR
-      # de release ajoute ubuntu 3.13 : dernier passage avant la publication.
-      FULL_SUITE: "${{ github.event_name != 'pull_request' || (matrix.os == 'ubuntu-latest' && (matrix.python-version == '3.12' || startsWith(github.event.pull_request.title, 'chore: release'))) }}"
+      # Ubuntu 3.12 passe par test-shard. Sur une PR, les autres jambes rendent leur check
+      # requis sans lancer la suite (le nom du job reste, la protection de main l'exige).
+      # Une PR de release ajoute ubuntu 3.13 : dernier passage avant la publication.
+      FULL_SUITE: "${{ github.event_name != 'pull_request' || (matrix.os == 'ubuntu-latest' && startsWith(github.event.pull_request.title, 'chore: release')) }}"
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
         os: [ubuntu-latest, windows-latest, macos-latest]
         exclude:
+          # Porté par test-shard et test-aggregate, sous le même nom de check.
+          - os: ubuntu-latest
+            python-version: "3.12"
           # Keep matrix lean: Windows/macOS only on 3.12
           - os: windows-latest
             python-version: "3.13"
@@ -214,8 +217,85 @@ jobs:
             --cov-report=term-missing \
             --cov-fail-under=75
 
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          echo "### Python ${{ matrix.python-version }} Tests" >> $GITHUB_STEP_SUMMARY
+          echo "See the test step logs for the full result." >> $GITHUB_STEP_SUMMARY
+
+  # La suite 3.12 tenait 24 min sur 4 cœurs, sans test dominant : seule une répartition sur
+  # plusieurs jobs réduit l'attente d'une PR. Le nombre de jobs vit ici et dans --of.
+  test-shard:
+    name: "Tests 3.12 ubuntu (${{ matrix.shard }}/4)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Run this part of the suite with coverage
+        shell: bash
+        run: |
+          mapfile -t FILES < <(python scripts/ci-test-shards.py --shard ${{ matrix.shard }} --of 4)
+          pytest "${FILES[@]}" -q --tb=short -n auto --dist loadfile \
+            --timeout=300 --timeout-method=thread --durations=10 \
+            --cov=src/grimoire --cov-report=
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  test-aggregate:
+    name: "Tests (Python 3.12, ubuntu-latest)"
+    needs: [test-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tous les jobs de la suite doivent être verts
+        shell: bash
+        env:
+          SHARDS_RESULT: ${{ needs.test-shard.result }}
+        run: test "$SHARDS_RESULT" = "success"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          pattern: coverage-shard-*
+          path: coverage-shards
+
+      - name: Combine coverage
+        shell: bash
+        run: |
+          coverage combine coverage-shards/coverage-shard-*/.coverage
+          coverage xml
+          coverage report --fail-under=75
+
       - name: Upload coverage
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: coverage-report
@@ -223,19 +303,11 @@ jobs:
           retention-days: 14
 
       - name: Upload coverage reports to Codecov
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: false
-
-      - name: Report
-        if: always()
-        shell: bash
-        run: |
-          echo "### Python ${{ matrix.python-version }} Tests" >> $GITHUB_STEP_SUMMARY
-          echo "See the test step logs for the full result." >> $GITHUB_STEP_SUMMARY
 
   e2e:
     name: "E2E (chromium, ubuntu-latest)"
@@ -399,7 +471,7 @@ jobs:
   build:
     name: "Build package"
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, dep-audit, test, neo4j-service]
+    needs: [lint, typecheck, dep-audit, test, test-aggregate, neo4j-service]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 

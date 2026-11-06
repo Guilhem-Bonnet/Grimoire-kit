@@ -244,9 +244,8 @@ def test_windows_et_macos_passent_la_suite_complete_hors_pr_seulement() -> None:
     assert {"windows-latest", "macos-latest"} <= set(job["strategy"]["matrix"]["os"])  # le nom du check requis reste
 
 
-def test_une_pr_ne_lance_la_suite_que_sur_ubuntu_312_sauf_release() -> None:
+def test_une_pr_ne_lance_le_job_test_que_pour_une_release() -> None:
     gate = _job("test")["env"]["FULL_SUITE"]
-    assert "matrix.python-version == '3.12'" in gate
     assert "startsWith(github.event.pull_request.title, 'chore: release')" in gate
     assert {"3.12", "3.13"} <= set(_job("test")["strategy"]["matrix"]["python-version"])  # noms des checks requis
 
