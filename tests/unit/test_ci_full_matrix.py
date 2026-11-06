@@ -244,9 +244,8 @@ def test_windows_et_macos_passent_la_suite_complete_hors_pr_seulement() -> None:
     assert {"windows-latest", "macos-latest"} <= set(job["strategy"]["matrix"]["os"])  # le nom du check requis reste
 
 
-def test_une_pr_ne_lance_la_suite_que_sur_ubuntu_312_sauf_release() -> None:
+def test_une_pr_ne_lance_le_job_test_que_pour_une_release() -> None:
     gate = _job("test")["env"]["FULL_SUITE"]
-    assert "matrix.python-version == '3.12'" in gate
     assert "startsWith(github.event.pull_request.title, 'chore: release')" in gate
     assert {"3.12", "3.13"} <= set(_job("test")["strategy"]["matrix"]["python-version"])  # noms des checks requis
 
@@ -274,3 +273,17 @@ def test_la_suite_complete_avec_coeur_rust_reste_sur_main() -> None:
     etapes = [s for job in workflow["jobs"].values() for s in job.get("steps", []) if s.get("name") == "Full SDK suite with the compiled core loaded"]
     assert len(etapes) == 7
     assert all(s["if"] == "github.event_name != 'pull_request'" for s in etapes)
+
+
+def test_windows_framework_tourne_hors_pr_et_sur_les_releases() -> None:
+    workflow = YAML(typ="safe").load((_CI.parent / "ci-validate.yml").read_text(encoding="utf-8"))
+    triggers = workflow.get("on") or workflow.get(True)
+    assert "schedule" in triggers and "workflow_dispatch" in triggers
+    assert "src/**" in triggers["push"]["paths"]
+    job = workflow["jobs"]["framework-tests"]
+    gate = job["env"]["FULL_SUITE"]
+    assert "github.event_name != 'pull_request'" in gate and "matrix.os == 'ubuntu-latest'" in gate
+    assert "chore: release" in gate
+    suite = next(s for s in job["steps"] if "pytest tests/test_" in str(s.get("run", "")))
+    assert suite["if"] == "env.FULL_SUITE == 'true'"
+    assert "windows-latest" in job["strategy"]["matrix"]["os"]  # le nom du check requis reste
