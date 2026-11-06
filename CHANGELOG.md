@@ -7,7 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- feat(providers): écrire le registre de fournisseurs LLM (`grimoire providers add|enable|disable|remove`) et poser une clé en saisie masquée (`set-key`/`remove-key`/`secrets`) dans un magasin léger `~/.env-store/`, jamais dans le registre ; `task dispatch` fusionne désormais ces variables dans l'environnement du sous-processus avant d'invoquer le fournisseur
+## [3.78.0] - 2026-11-05
+
+- feat(providers): écrire le registre de fournisseurs LLM (`grimoire providers add|enable|disable|remove`) et poser une clé en saisie masquée (`set-key`/`remove-key`/`secrets`) dans un magasin léger `~/.env-store/`, jamais dans le registre ; `task dispatch` fusionne désormais ces variables dans l'environnement du sous-processus avant d'invoquer le fournisseur (#1099)
+- fix(cockpit): la Flotte ne rend plus une santé en erreur sous charge (lecteur YAML partagé entre threads) ; ses tests e2e attendent l'état de la table et la fin de la navigation « Ouvrir » (GAO-i15-stabili-001) (#1096)
 
 ## [3.77.0] - 2026-10-30
 
