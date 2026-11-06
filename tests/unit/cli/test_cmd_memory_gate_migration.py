@@ -95,3 +95,10 @@ def test_bundle_present_garde_la_verification_stricte(projet: Path) -> None:
     data = json.loads(result.output)
     assert data["issues"] == ["Bundle manifest missing"]
     assert "notice" not in data["migration"]
+
+
+def test_le_rendu_texte_nomme_le_constat(projet: Path) -> None:
+    result = runner.invoke(app, ["memory", "gate", "--paths", "src", "--no-sync", "--skip-graph", "--skip-vectors"])
+
+    assert result.exit_code == 0, result.output
+    assert "aucune migration en cours sur ce poste" in result.output
