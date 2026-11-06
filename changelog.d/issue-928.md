@@ -1,0 +1,1 @@
+- test(missions): le janitor garde le worktree et rapporte `failed` quand la copie des preuves est impossible (#928)

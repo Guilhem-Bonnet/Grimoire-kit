@@ -66,6 +66,7 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import create_task_worktree
+from grimoire.missions.worker_provider import WorkerRoute, route_worker, settings_path
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import Admit
@@ -489,12 +490,15 @@ def resume_worker(
     """
     cwd = Path(str(launch.get("cwd") or "."))
     argv = [claude_bin, "--bg", "--resume", str(launch.get("session_id") or "")]
+    # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
+    routed = ["--settings", str(settings_path(str(launch["provider"])))] if launch.get("provider") else []
+    argv += routed
     if permission_mode:
         argv += ["--permission-mode", permission_mode]
     result = exec_([*argv, message], cwd, session_env())
     fresh = False
     if result.returncode != 0:
-        fresh_argv = [claude_bin, "--bg", "--name", f"grimoire-{task_id}"]
+        fresh_argv = [claude_bin, "--bg", "--name", f"grimoire-{task_id}", *routed]
         if launch.get("model"):
             fresh_argv += ["--model", str(launch["model"])]
         if permission_mode:
@@ -623,8 +627,9 @@ class WorkerLauncher:
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
-        model = self._model_for(admit)
-        result = self._exec(self._argv(tid, model), wt.path, session_env())
+        route = route_worker(service.home_root, self._policy.worker.provider, self._policy.worker.tier, service.require(tid))
+        model = route.model if route is not None else self._model_for(admit)
+        result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}, aucun identifiant de session"
@@ -653,6 +658,7 @@ class WorkerLauncher:
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
             {
                 "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
+                "provider": route.provider if route is not None else "",
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
             },
@@ -721,9 +727,11 @@ class WorkerLauncher:
             detail += " — disjoncteur ouvert"
         return LaunchOutcome(tid, "failed", detail)
 
-    def _argv(self, tid: str, model: str) -> list[str]:
+    def _argv(self, tid: str, model: str, route: WorkerRoute | None = None) -> list[str]:
         # Pas de ``--session-id`` : ``claude --bg`` l'ignore (#966), l'identité se lit après le lancement.
         argv = [self._claude, "--bg", "--name", f"grimoire-{tid}"]
+        if route is not None:
+            argv += ["--settings", str(route.settings)]
         if model:
             argv += ["--model", model]
         if self._policy.worker.permission_mode:

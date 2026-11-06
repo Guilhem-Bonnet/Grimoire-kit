@@ -13,6 +13,7 @@ janitor :
         worker:
           enabled: false          # défaut : rien n'est lancé, le comportement actuel est inchangé
           model: ""               # alias ou nom complet ; vide : la route du routeur, sinon le palier
+          provider: ""            # fournisseur du registre avec anthropic_base_url : route ses tâches V0/V1
           tier: ""                # cheap | mid | strong (repli quand ni model ni route ne donnent de modèle)
           wip: 1                  # sessions de worker en même temps
           sessions_per_day: 5     # plafond de lancements par jour (UTC)
@@ -90,7 +91,7 @@ TIERS = ("cheap", "mid", "strong")
 _BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
-_WORKER_KEYS = frozenset({"enabled", "model", "tier", "wip", "sessions_per_day", "permission_mode"})
+_WORKER_KEYS = frozenset({"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode"})
 _REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode"})
 DEFAULT_MAX_CYCLES = 2
 _MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths"})
@@ -113,11 +114,13 @@ class WorkerRole:
     wip: int = 1
     sessions_per_day: int = 5
     permission_mode: str = ""
+    provider: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
             "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode,
+            "provider": self.provider,
         }
 
 
@@ -265,6 +268,7 @@ def _parse_worker(raw: Any) -> WorkerRole:
         wip=_positive(data.get("wip", 1), "orchestrator.roles.worker.wip"),
         sessions_per_day=_positive(data.get("sessions_per_day", 5), "orchestrator.roles.worker.sessions_per_day"),
         permission_mode=mode,
+        provider=_text(data.get("provider", ""), "orchestrator.roles.worker.provider"),
     )
 
 
