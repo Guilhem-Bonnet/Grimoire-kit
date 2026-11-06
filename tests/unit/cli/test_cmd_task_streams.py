@@ -74,3 +74,28 @@ def test_pack_rend_le_pack_sur_stdout(projet: Path) -> None:
     assert pack.id in res.stdout
     assert "Critères couverts" in res.stdout
     assert res.stderr == ""
+
+
+def test_show_rend_aussi_le_dernier_dispatch_et_la_finition_sur_stdout(projet: Path) -> None:
+    tid = task_id(projet)
+    MissionLedger(projet / LEDGER).append_event(
+        "task.dispatched",
+        tid,
+        "task",
+        "test",
+        {
+            "verdict": "green",
+            "review": "review_required",
+            "review_files": ["src/a.py"],
+            "review_note": "note de relecture",
+            "uncertainties": [{"where": "src/a.py", "what": "point douteux", "why": "non vérifié"}],
+            "uncertainty_warnings": ["bloc incomplet"],
+        },
+    )
+
+    res = runner.invoke(task_app, ["show", tid, "--project-root", str(projet)])
+
+    assert res.exit_code == 0, res.output
+    for attendu in ("src/a.py", "note de relecture", "point douteux", "bloc incomplet"):
+        assert attendu in res.stdout
+    assert res.stderr == ""
