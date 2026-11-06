@@ -1,0 +1,1 @@
+- feat(orchestrate): le tick peut lancer ses workers V0/V1 sur un fournisseur compatible Anthropic comme DeepSeek (`orchestrator.roles.worker.provider`), avec les outils et les hooks de Claude Code ; le relecteur reste à part
