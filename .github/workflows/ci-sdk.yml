@@ -311,14 +311,14 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
 
-  e2e:
-    name: "E2E (chromium, ubuntu-latest)"
+  e2e-gate:
+    name: "E2E : décider si la suite tourne"
     runs-on: ubuntu-latest
-    # ~20 min d'ordinaire ; sans borne, une installation figée tient 6 h.
-    timeout-minutes: 40
     permissions:
       contents: read
       pull-requests: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
@@ -341,33 +341,44 @@ jobs:
 
       # Une PR qui ne touche pas au cockpit rend le check requis sans la suite ; main,
       # la nuit et les PR de release la passent toujours.
-      - name: Décider si la suite tourne
+      - name: Décider
         id: gate
         shell: bash
         env:
           RUN_E2E: "${{ github.event_name != 'pull_request' || steps.filter.outputs.ui == 'true' || startsWith(github.event.pull_request.title, 'chore: release') }}"
         run: echo "run=$RUN_E2E" >> "$GITHUB_OUTPUT"
 
-      - if: steps.gate.outputs.run == 'true'
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+  # ~20 min en série : réparti comme la suite SDK. Le nombre de jobs vit ici et dans --of.
+  e2e:
+    name: "E2E chromium (${{ matrix.shard }}/3)"
+    needs: [e2e-gate]
+    if: needs.e2e-gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    # Sans borne, une installation figée tient 6 h.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
 
       - name: Install package + dev deps + Playwright
-        if: steps.gate.outputs.run == 'true'
         timeout-minutes: 15
         run: |
           pip install -e ".[dev]" playwright
           playwright install --with-deps chromium
 
       - name: Install axe-core (accessibility checks of the workspace e2e)
-        if: steps.gate.outputs.run == 'true'
         timeout-minutes: 5
         run: npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/axe" axe-core@4.10.2
 
       - name: Run the workspace browser harness
-        if: steps.gate.outputs.run == 'true'
         # Mode strict : un skip (Playwright, Chromium, `grimoire init` absents)
         # est un échec, pas un faux vert (tests/e2e/_strict.py).
         env:
@@ -383,16 +394,35 @@ jobs:
           GRIMOIRE_CARTE_MIN_FPS: "15"
           # Un test qui échoue y laisse la capture et le HTML de ses pages (tests/e2e/conftest.py).
           GRIMOIRE_E2E_FAILURE_DIR: e2e-failures
-        run: pytest tests/e2e -q --tb=short
+        shell: bash
+        run: |
+          mapfile -t FILES < <(python scripts/ci-test-shards.py --suite e2e --shard ${{ matrix.shard }} --of 3)
+          pytest "${FILES[@]}" -q --tb=short
 
       - name: Upload e2e failure captures
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
-          name: e2e-failures
+          name: e2e-failures-${{ matrix.shard }}
           path: e2e-failures/
           if-no-files-found: ignore
           retention-days: 7
+
+  e2e-aggregate:
+    name: "E2E (chromium, ubuntu-latest)"
+    needs: [e2e-gate, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: La décision doit exister, et chaque part lancée doit être verte
+        shell: bash
+        env:
+          GATE_RESULT: ${{ needs.e2e-gate.result }}
+          RUN_E2E: ${{ needs.e2e-gate.outputs.run }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          test "$GATE_RESULT" = "success"
+          if [ "$RUN_E2E" = "true" ]; then test "$E2E_RESULT" = "success"; else test "$RUN_E2E" = "false"; fi
 
   neo4j-service:
     name: "Neo4j 5.26 (service)"

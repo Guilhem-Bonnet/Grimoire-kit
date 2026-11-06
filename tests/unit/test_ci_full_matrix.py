@@ -97,7 +97,7 @@ def test_xdist_distributes_by_file() -> None:
 
 
 def test_e2e_job_is_strict() -> None:
-    step = next(s for s in _job("e2e")["steps"] if "tests/e2e" in str(s.get("run", "")))
+    step = next(s for s in _job("e2e")["steps"] if "--suite e2e" in str(s.get("run", "")))
     assert step["env"]["GRIMOIRE_E2E_STRICT"] == "1"
 
 
@@ -251,13 +251,29 @@ def test_une_pr_ne_lance_le_job_test_que_pour_une_release() -> None:
 
 
 def test_l_e2e_ne_saute_jamais_sa_suite_hors_pr() -> None:
-    job = _job("e2e")
-    gate = next(s for s in job["steps"] if s.get("id") == "gate")["env"]["RUN_E2E"]
+    decision = _job("e2e-gate")
+    gate = next(s for s in decision["steps"] if s.get("id") == "gate")["env"]["RUN_E2E"]
     assert "github.event_name != 'pull_request'" in gate and "chore: release" in gate
-    suite = next(s for s in job["steps"] if "pytest tests/e2e" in str(s.get("run", "")))
-    assert suite["if"] == "steps.gate.outputs.run == 'true'"
-    filtres = next(s for s in job["steps"] if s.get("id") == "filter")["with"]["filters"]
+    filtres = next(s for s in decision["steps"] if s.get("id") == "filter")["with"]["filters"]
     assert "web/**" in filtres and "tests/e2e/**" in filtres
+    assert _job("e2e")["if"] == "needs.e2e-gate.outputs.run == 'true'"
+
+
+def test_l_agregateur_e2e_porte_le_check_requis_et_ne_tolere_qu_un_saut_decide() -> None:
+    job = _job("e2e-aggregate")
+    assert job["name"] == "E2E (chromium, ubuntu-latest)"
+    assert job["if"] == "always()"
+    run = job["steps"][0]["run"]
+    assert 'test "$GATE_RESULT" = "success"' in run
+    assert 'test "$E2E_RESULT" = "success"' in run and 'test "$RUN_E2E" = "false"' in run
+
+
+def test_la_matrice_e2e_et_le_script_parlent_du_meme_nombre_de_jobs() -> None:
+    job = _job("e2e")
+    shards = job["strategy"]["matrix"]["shard"]
+    run = next(str(s["run"]) for s in job["steps"] if "--suite e2e" in str(s.get("run", "")))
+    assert shards == list(range(1, len(shards) + 1)) and f"--of {len(shards)}" in run
+    assert "-x" not in run.split()
 
 
 def test_main_rejoue_l_e2e_quand_le_cockpit_change() -> None:
