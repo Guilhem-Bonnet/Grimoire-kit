@@ -1201,8 +1201,12 @@ class ProjectScaffolder:
 
         # Agent manifest (enriched with category + description)
         manifest_lines = ["name,file,category,description,icon\n"]
+        listed: set[str] = set()
         for fc in p.copies:
             if not _is_agent_markdown(fc.dst):
+                continue
+            # Un même agent planifié deux fois (pile + archétype) ne compte qu'une ligne (#908).
+            if fc.dst.stem in listed:
                 continue
             # The blank `custom-agent.md` template ships with an unrendered
             # `name: "{{agent_tag}}"` — not yet an agent (see `layout.
@@ -1213,6 +1217,7 @@ class ProjectScaffolder:
             if self._agent_identity(fc.src) is None:
                 continue
             name = fc.dst.stem
+            listed.add(name)
             category = fc.label.split("/")[0] if fc.label and "/" in fc.label else "—"
             desc = self._extract_agent_description(fc.src).replace(",", ";").replace("'", "''")
             manifest_lines.append(f"{name},{name}.md,{category},{desc},\n")
