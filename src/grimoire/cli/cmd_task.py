@@ -32,8 +32,10 @@ task_app = typer.Typer(
 board_app = typer.Typer(help="Le board gouverné, projeté depuis le ledger.", no_args_is_help=True)
 task_app.add_typer(board_app, name="board")
 
-# Le rendu humain part sur stderr : le JSON de stdout reste pipeable.
+# Faute de sortie (erreurs, diagnostics, transitions) sur stderr : stdout reste
+# celui du rendu nominal et du JSON, seuls `out` écrivent là (issue #879).
 console = Console(stderr=True)
+out = Console()
 
 _BOARD_RELPATH = Path("_grimoire/standard/task-board.yaml")
 _DEFAULT_LEDGER = Path("_grimoire-runtime-output/ledger")
@@ -251,13 +253,15 @@ def task_list(
         typer.echo(json.dumps([t.to_dict() for t in tasks], indent=2, ensure_ascii=False))
         return
     if not tasks:
-        console.print("[dim]Aucune tâche.[/dim]")
+        out.print("[dim]Aucune tâche.[/dim]")
         return
     for task in tasks:
         # Sans échappement, Rich prend les crochets pour une balise de style
         # et fait disparaître l'état — la ligne restait muette sur l'essentiel.
         etat = escape(f"[{task.status_label} · {board_status_of(task.status)}]")
-        console.print(f"  {task.id}  {etat}  {task.title}")
+        out.print(f"  {task.id}  {etat}  {task.title}")
+
+
 @task_app.command("show")
 def task_show(
     ctx: typer.Context,
@@ -295,46 +299,47 @@ def task_show(
         payload["usage"] = usage
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
-    console.print(f"[bold]{task.id}[/bold] — {task.title}")
-    console.print(f"  état    : {task.status_label} (board : {board_status_of(task.status)})")
+    out.print(f"[bold]{task.id}[/bold] — {task.title}")
+    out.print(f"  état    : {task.status_label} (board : {board_status_of(task.status)})")
     if task.description:
         first, *rest = task.description.splitlines()
-        console.print(f"  description : {escape(first)}")
+        out.print(f"  description : {escape(first)}")
         for line in rest:
-            console.print(f"                {escape(line)}")
-    console.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
-    console.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
-    console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
+            out.print(f"                {escape(line)}")
+    out.print(f"  accepte : {', '.join(task.acceptance) or '—'}")
+    out.print(f"  vérifiabilité : {verifiabilite['class']} — {verifiabilite['explanation']}")
+    out.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
     for risque in task.accepted_risks:
-        console.print(
+        out.print(
             f"  [yellow]risque accepté[/yellow] : {escape(str(risque.get('reason', '')))} "
             f"[dim]({risque.get('amendments')}/{risque.get('cap')} amendements, run {risque.get('run_id')})[/dim]"
         )
     for entree in verifiabilite["criteria"]:
         motif = entree["pattern"] or "non reconnu"
-        console.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
+        out.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
     if last_dispatch is not None:
         if last_dispatch.get("review") is not None:
             _print_review(
                 last_dispatch["review"],
                 [str(p) for p in last_dispatch.get("review_files") or ()],
                 last_dispatch.get("review_note"),
+                out,
             )
-        _print_uncertainties(list(last_dispatch.get("uncertainties") or ()))
+        _print_uncertainties(list(last_dispatch.get("uncertainties") or ()), out)
         for warning in last_dispatch.get("uncertainty_warnings") or ():
-            console.print(f"  [yellow]![/yellow] {escape(str(warning))}")
-    console.print(f"  usage   : {_usage_line(usage)}")
+            out.print(f"  [yellow]![/yellow] {escape(str(warning))}")
+    out.print(f"  usage   : {_usage_line(usage)}")
     if task.finition:
-        console.print(f"  finition : {task.finition}")
+        out.print(f"  finition : {task.finition}")
     if task.owner or task.claim:
-        console.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
+        out.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
         from grimoire.missions.recall import directive_status
 
-        console.print("  consignes de l'orchestrateur :")
+        out.print("  consignes de l'orchestrateur :")
         for directive in task.directives:
             marque = escape(f"[{directive.kind}, {directive.origin}, {directive_status(directive)}]")
-            console.print(
+            out.print(
                 f"    - {marque} {escape(directive.author)}, "
                 f"{directive.created_at[:16]} : {escape(directive.text)}  [dim]{directive.id}[/dim]"
             )
@@ -342,11 +347,11 @@ def task_show(
     try:
         transitions = declared_transitions(project_root.resolve())
     except GatesFileError as exc:
-        console.print(f"  [yellow]![/yellow] {exc} — aucune transition ne passera tant qu'il n'est pas réparé")
+        out.print(f"  [yellow]![/yellow] {exc} — aucune transition ne passera tant qu'il n'est pas réparé")
         return
     exigences = {to: e.get("required_evidence", []) for (src, to), e in transitions.items() if src == here}
     for to, req in exigences.items():
-        console.print(f"  [dim]vers {to} : {', '.join(str(r) for r in req)}[/dim]")
+        out.print(f"  [dim]vers {to} : {', '.join(str(r) for r in req)}[/dim]")
 
 
 @task_app.command("claim")
@@ -1042,15 +1047,15 @@ def task_pack(
         typer.echo(json.dumps(pack.to_dict(), indent=2, ensure_ascii=False, default=str))
         return
 
-    console.print(f"[bold]{pack.id}[/bold] — tâche {pack.task_id}, profil {pack.profile.value}  [dim]({pack.created_at})[/dim]")
+    out.print(f"[bold]{pack.id}[/bold] — tâche {pack.task_id}, profil {pack.profile.value}  [dim]({pack.created_at})[/dim]")
     if pack.coverage is not None:
         couverts = ", ".join(pack.coverage.acceptance_covered) or "—"
-        console.print(f"  Critères couverts  : {couverts}")
+        out.print(f"  Critères couverts  : {couverts}")
         if pack.coverage.acceptance_missing:
             manquants = ", ".join(pack.coverage.acceptance_missing)
-            console.print(f"  [red]Critères manquants[/red] : {manquants}")
+            out.print(f"  [red]Critères manquants[/red] : {manquants}")
     for item in pack.items:
-        console.print(f"  - [{item.kind.value}] {escape(item.summary or item.uri)}  [dim]{item.uri}[/dim]")
+        out.print(f"  - [{item.kind.value}] {escape(item.summary or item.uri)}  [dim]{item.uri}[/dim]")
 
 
 @task_app.command("verify")
@@ -1235,24 +1240,31 @@ def _emit_dispatch(ctx: typer.Context, report: Any) -> None:
     raise typer.Exit(report.exit_code)
 
 
-def _print_review(review: str, review_files: list[str], review_note: str | None) -> None:
-    """Rendu texte de la classe de relisibilité (#327) — les mêmes données que ``to_dict()``."""
+def _print_review(
+    review: str, review_files: list[str], review_note: str | None, target: Console | None = None
+) -> None:
+    """Rendu texte de la classe de relisibilité (#327) — les mêmes données que ``to_dict()``.
+
+    ``target`` : la console du rendu appelant (``out`` pour ``show``) ; défaut stderr.
+    """
+    cible = target or console
     label = "[red]requise[/red]" if review == "review_required" else "[dim]optionnelle[/dim]"
-    console.print(f"[bold]relecture[/bold] : {label}")
+    cible.print(f"[bold]relecture[/bold] : {label}")
     for path in review_files:
-        console.print(f"  [dim]- {escape(path)}[/dim]")
+        cible.print(f"  [dim]- {escape(path)}[/dim]")
     if review_note:
-        console.print(f"  [dim]{escape(review_note)}[/dim]")
+        cible.print(f"  [dim]{escape(review_note)}[/dim]")
 
 
-def _print_uncertainties(uncertainties: list[dict[str, Any]]) -> None:
+def _print_uncertainties(uncertainties: list[dict[str, Any]], target: Console | None = None) -> None:
     """Rendu texte des incertitudes déclarées (#328) — silencieux si la liste est vide."""
     if not uncertainties:
         return
-    console.print(f"[bold]incertitudes déclarées[/bold] ({len(uncertainties)}) :")
+    cible = target or console
+    cible.print(f"[bold]incertitudes déclarées[/bold] ({len(uncertainties)}) :")
     for item in uncertainties:
-        console.print(f"  - {escape(str(item.get('where', '')))} : {escape(str(item.get('what', '')))}")
-        console.print(f"    [dim]{escape(str(item.get('why', '')))}[/dim]")
+        cible.print(f"  - {escape(str(item.get('where', '')))} : {escape(str(item.get('what', '')))}")
+        cible.print(f"    [dim]{escape(str(item.get('why', '')))}[/dim]")
 
 
 @task_app.command("dispatch")
