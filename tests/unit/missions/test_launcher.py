@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -907,6 +908,7 @@ def test_la_politique_probe_host_est_un_booleen_desactive_par_defaut(projet: Pat
     assert load_orchestrator_policy(projet).policy is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="un nom de dossier ne peut pas contenir de fin de ligne")
 def test_un_chemin_a_fin_de_ligne_n_entre_jamais_dans_l_unite(tmp_path: Path) -> None:
     from grimoire.missions.timer import _unit_path
 
