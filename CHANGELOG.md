@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.78.1] - 2026-11-06
+
+- fix(missions): la relecture d'un dispatch ne porte plus que sur ce que l'ouvrier a changé : plus de fausse alerte sur un arbre déjà modifié, et les fichiers qu'il crée ne lui échappent plus (#1101)
+
 ## [3.78.0] - 2026-11-05
 
 - feat(providers): écrire le registre de fournisseurs LLM (`grimoire providers add|enable|disable|remove`) et poser une clé en saisie masquée (`set-key`/`remove-key`/`secrets`) dans un magasin léger `~/.env-store/`, jamais dans le registre ; `task dispatch` fusionne désormais ces variables dans l'environnement du sous-processus avant d'invoquer le fournisseur (#1099)
