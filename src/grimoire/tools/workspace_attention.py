@@ -313,6 +313,7 @@ def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
 
 
 def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe | None) -> None:
+    from grimoire.missions.autopilot_view import partition
     from grimoire.missions.decisions import pending_decisions
     from grimoire.missions.schemas import TaskState
     from grimoire.missions.service import TaskService
@@ -331,7 +332,12 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
     annotate_cards(read.root, service, tasks, cards, now=now, probe=host_probe)
     last = _last_events(service.ledger)
 
+    pilot_on, held = partition(service)
+    held_by_task = {h.decision.task_id: h for h in held}
     for decision in pending_decisions(service.ledger):
+        pilot = held_by_task.get(decision.task_id)
+        if pilot_on and pilot is None:
+            continue  # pilote activé : l'orchestrateur la tranchera, elle ne compte pas
         _item(
             read,
             QUESTION,
@@ -343,6 +349,8 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
             question_id=decision.question.id,
         )
         read.items[-1].update(_question_v2(service.ledger, decision.task_id, decision.question))
+        if pilot is not None:
+            read.items[-1]['pilot'] = pilot.to_dict()
     for task, card in zip(tasks, cards, strict=True):
         since = last.get(task.id) or str(task.created_at)
         session = card.get("session")
