@@ -35,6 +35,8 @@ from grimoire.missions.orchestrator_policy import load_orchestrator_policy
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import find_task_worktree
+from grimoire.missions.worker_provider import settings_path
+from grimoire.providers.secrets import remove_secret, set_secret
 
 POLICY = Path("_grimoire/standard/orchestration-policy.yaml")
 runner = CliRunner()
@@ -940,3 +942,116 @@ def test_des_reglages_de_hooks_illisibles_n_ajoutent_rien_au_path(
     (config / "settings.json").write_text(reglages, encoding="utf-8")
 
     assert _unit_path("", None, projet_vide) == attendu
+
+
+# ── Router un worker vers un fournisseur compatible Anthropic ─────────────────
+
+
+_REGISTRE_ROUTE = """\
+$schema: "grimoire-llm-provider-registry/v1"
+metadata: {project: demo, owner: "", policy: x}
+providers:
+  - id: deepseek
+    enabled: true
+    provider_type: hosted
+    allowed_capabilities: [code]
+    default_models: [deepseek-chat]
+    currency: api
+    anthropic_base_url: https://api.example.test/anthropic
+    models:
+      - {id: deepseek-chat, tier: cheap}
+    data_policy: {allowed_data_classes: [], forbidden_data_classes: [], retention_notes: ""}
+    fallback_order: []
+    audit: {log_prompts: false, log_metadata: true}
+routing: {default_provider: deepseek, default_fallback_chain: [], require_capability_match: true, require_data_policy_match: true}
+"""
+
+
+@pytest.fixture
+def route_prete(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (projet / "_grimoire" / "standard" / "llm-provider-registry.yaml").write_text(_REGISTRE_ROUTE, encoding="utf-8")
+    write_policy(projet, extra="      provider: deepseek\n      tier: cheap\n")
+    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-secret-de-test")
+    return projet
+
+
+def ready_v0(service: TaskService, title: str) -> str:
+    mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Lot", origin="t", created_by="t")
+    task = service.ledger.create_task(mission.id, title, acceptance=("pytest tests/x.py : le code de sortie vaut 0",), owner="amelia")
+    service.ledger.transition_task(task.id, TaskState.READY)
+    return task.id
+
+
+def test_un_worker_route_passe_par_ses_reglages_jamais_par_l_environnement(route_prete: Path, host: FakeHost) -> None:
+    service = TaskService(route_prete)
+    tid = ready_v0(service, "routée")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "deepseek-chat"
+    settings = Path(argv[argv.index("--settings") + 1])
+    assert "sk-secret-de-test" not in " ".join(argv)
+    assert not any("sk-secret-de-test" in str(env) for _argv, _cwd, env in host.calls)
+    assert settings.stat().st_mode & 0o777 == 0o600 or os.name == "nt"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "https://api.example.test/anthropic"
+    assert data["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-secret-de-test"  # noqa: S105
+    assert data["env"]["CLAUDE_CODE_SUBAGENT_MODEL"] == "deepseek-chat"
+    assert "Read(~/.env-store/**)" in data["permissions"]["deny"]
+    assert launched_sessions(TaskService(route_prete))[tid]["provider"] == "deepseek"
+
+
+def test_une_tache_v2_garde_le_modele_habituel(route_prete: Path, host: FakeHost) -> None:
+    ready(TaskService(route_prete), "le travail est fait, sans verdict")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv and "deepseek-chat" not in argv
+
+
+def test_sans_cle_le_worker_garde_le_modele_habituel(route_prete: Path, host: FakeHost) -> None:
+    remove_secret("deepseek")
+    ready_v0(TaskService(route_prete), "sans clé")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv and "deepseek-chat" not in argv
+
+
+@pytest.mark.parametrize("url", ["http://api.example.test/anthropic", ""])
+def test_une_adresse_non_https_n_est_pas_une_route(route_prete: Path, host: FakeHost, url: str) -> None:
+    registre = route_prete / "_grimoire" / "standard" / "llm-provider-registry.yaml"
+    registre.write_text(_REGISTRE_ROUTE.replace("https://api.example.test/anthropic", url), encoding="utf-8")
+    ready_v0(TaskService(route_prete), "http")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv
+
+
+def test_un_fournisseur_inconnu_n_est_pas_une_route(route_prete: Path, host: FakeHost) -> None:
+    write_policy(route_prete, extra="      provider: inconnu\n      tier: cheap\n")
+    ready_v0(TaskService(route_prete), "inconnu")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv
+
+
+def test_une_reprise_reste_chez_le_fournisseur_du_lancement(route_prete: Path, host: FakeHost) -> None:
+    service = TaskService(route_prete)
+    launch = {"session_id": "abc", "cwd": str(route_prete), "provider": "deepseek", "model": "deepseek-chat", "session": "abc"}
+    tid = ready_v0(service, "reprise")
+
+    resume_worker(service, host, "claude", tid, launch, "reprends")
+
+    argv = next(a for a, _c, _e in host.calls if "--resume" in a)
+    assert argv[argv.index("--settings") + 1] == str(settings_path("deepseek"))
