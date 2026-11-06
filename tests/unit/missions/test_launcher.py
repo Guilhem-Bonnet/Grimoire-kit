@@ -346,14 +346,16 @@ def test_le_minuteur_porte_le_path_du_poste_reduit_aux_outils_utiles(projet: Pat
     good = _shim(tmp_path / "bin", "claude", "gh")
     git_dir = _shim(tmp_path / "gitbin", "git")
     agent_tmp = tmp_path / "scratch"
+    trace = agent_tmp / "claude-session-1a2b" / "bin"
     shim = _shim(agent_tmp / "claude-session-1a2b" / "bin", "claude", "gh")  # le PATH d'une session d'agent
     secret = _shim(tmp_path / "secret-token-AKIA123" / "bin", "unrelated")
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(agent_tmp))
     monkeypatch.setenv("PATH", os.pathsep.join([str(shim), "relatif/bin", str(secret), str(good), str(git_dir), str(tmp_path / "absent")]))
     service = plan_timer(projet).service
     line = next(row for row in service.splitlines() if row.startswith("Environment="))
-    assert str(good) in line and str(git_dir) in line  # claude, gh et git y sont
-    for banned in (str(shim), "relatif", "secret-token", "absent", "claude-session"):
+    entries = line.split("PATH=", 1)[1].rstrip('"\\n').split(os.pathsep)
+    assert str(good) in entries and str(git_dir) in entries  # claude, gh et git y sont
+    for banned in (str(shim), "relatif", "secret-token", str(trace), "absent"):
         assert banned not in line
     assert "/usr/bin" in line  # les dossiers système restent
 
@@ -384,6 +386,72 @@ def test_sans_aucun_outil_utile_le_minuteur_ne_fige_que_les_dossiers_systeme(pro
     monkeypatch.setenv("PATH", str(_shim(tmp_path / "vide", "autre")))
     line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
     assert "vide" not in line and "/usr/bin" in line
+
+
+def _reglages(directory: Path, hooks: dict[str, list[dict[str, object]]]) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "settings.json"
+    path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+    return path
+
+
+def _pre_tool_use(*commands: str) -> dict[str, list[dict[str, object]]]:
+    return {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": c} for c in commands]}]}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_le_minuteur_garde_le_dossier_d_un_hook_de_l_hote(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1022 : un hook qui réécrit `git status` en `rtk git status` doit pouvoir résoudre `rtk` dans l'unité."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "ailleurs"))  # tmp_path n'est pas un dossier de session
+    rtk = _shim(tmp_path / "cargo" / "bin", "rtk")
+    _reglages(tmp_path / "claude", _pre_tool_use(f"{rtk / 'rtk'} hook claude"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("PATH", str(_shim(tmp_path / "bin", "claude", "gh")))
+    line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
+    assert str(rtk) in line
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_un_hook_de_projet_appele_par_chemin_absolu_garde_son_dossier(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le chemin de hook d'un réglage projet (`.claude/settings.json`) le rejoint ; une commande nue n'ajoute rien."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "ailleurs"))
+    outil = _shim(tmp_path / "outils" / "bin", "rtk")
+    _reglages(projet / ".claude", _pre_tool_use(f'"{outil / "rtk"}" hook claude', "rtk hook claude"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "sans-reglages"))
+    monkeypatch.setenv("PATH", str(_shim(tmp_path / "vide", "autre")))
+    line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
+    entries = line.split("PATH=", 1)[1].rstrip('"\\n').split(os.pathsep)
+    assert str(outil) in entries
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_un_hook_hors_des_regles_ne_fait_pas_entrer_son_dossier(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mêmes exclusions que le reste : dossier temporaire, relatif ou absent n'entre pas dans le PATH de l'unité."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    agent_tmp = tmp_path / "scratch"
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(agent_tmp))
+    temporaire = _shim(agent_tmp / "session-1a2b" / "bin", "rtk")
+    _reglages(
+        tmp_path / "claude",
+        _pre_tool_use(
+            f"{temporaire / 'rtk'} hook claude", "outils/bin/rtk hook claude", f"{tmp_path / 'absent' / 'rtk'} hook claude"
+        ),
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("PATH", str(_shim(tmp_path / "vide", "autre")))
+    line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
+    assert "scratch" not in line and "outils" not in line and "absent" not in line
 
 
 # ── Fumée réelle, désactivée par défaut ─────────────────────────────────────────
@@ -834,3 +902,13 @@ def test_la_politique_probe_host_est_un_booleen_desactive_par_defaut(projet: Pat
     assert load_orchestrator_policy(projet).policy.probe_host is True  # type: ignore[union-attr]
     (projet / POLICY).write_text("orchestrator:\n  probe_host: oui\n", encoding="utf-8")
     assert load_orchestrator_policy(projet).policy is None
+
+
+def test_un_chemin_a_fin_de_ligne_n_entre_jamais_dans_l_unite(tmp_path: Path) -> None:
+    from grimoire.missions.timer import _unit_path
+
+    piege = tmp_path / "bin\nExecStartPre=evil"
+    piege.mkdir()
+    (piege / "git").write_text("", encoding="utf-8")
+
+    assert "ExecStartPre" not in _unit_path(str(piege))
