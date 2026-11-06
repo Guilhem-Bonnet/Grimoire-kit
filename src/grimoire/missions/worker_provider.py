@@ -11,11 +11,11 @@ modèle habituel. Une tâche V2 n'est jamais routée : rien ne pourrait juger se
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from grimoire.core.fsio import atomic_write
 from grimoire.missions.schemas import MissionTask
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.registry import read_registry
@@ -54,11 +54,10 @@ def _write_settings(provider: str, base_url: str, model: str, token: str) -> Pat
     env.update(dict.fromkeys(_SUBAGENT_MODEL_VARS, model))
     path = settings_path(provider)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(".tmp")
-    descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        json.dump({"env": env, "permissions": {"deny": list(_DENIED_READS)}}, stream)
-    temp.replace(path)
+    # Créé fermé d'abord : `atomic_write` conserve le mode d'une cible existante, la clé n'est jamais lisible.
+    path.touch(mode=0o600)
+    path.chmod(0o600)
+    atomic_write(path, json.dumps({"env": env, "permissions": {"deny": list(_DENIED_READS)}}))
     return path
 
 
