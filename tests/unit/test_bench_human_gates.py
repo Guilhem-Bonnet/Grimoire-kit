@@ -564,3 +564,39 @@ def test_the_hook_writes_the_ask_that_the_count_reads(tmp_path: Path) -> None:
     run = _by_arm(bench)["kit-gov"]
     assert run["by_kind"]["refusal"] == 1
     assert run["human_gates"] == 1
+
+
+# --- #1117 : le frein du bail ne gèle pas la session qui remet sa tâche en revue ----------------------------------------
+
+
+def _review_handed_task(tmp_path: Path) -> tuple[Path, str, int]:
+    from grimoire.missions.schemas import TaskState
+    from grimoire.missions.service import TaskService
+
+    service = TaskService(tmp_path)
+    tid = service.add("t", ("le frein se tait",), owner="o", actor="a", ready=True).task.id
+    service.context(tid)
+    service.claim(tid, "a", host="local")
+    epoch = service.require(tid).claim.lease_epoch  # type: ignore[union-attr]
+    service.ledger.transition_task(tid, TaskState.RUNNING, actor_id="a")
+    service.ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="a")
+    return service.ledger_root, tid, epoch
+
+
+def test_a_session_that_handed_its_task_to_review_is_not_braked(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.lease_brake import _lease_state
+    from grimoire.missions.lease import lease_path
+
+    root, tid, epoch = _review_handed_task(tmp_path)
+    lease_path(root, tid).unlink(missing_ok=True)  # défaut de cache : le ledger tranche
+    assert _lease_state(root, tid, epoch) == ("released", "")
+
+
+def test_a_lease_taken_over_by_another_session_stays_refused(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.lease_brake import _lease_state
+    from grimoire.missions.lease import lease_path
+
+    root, tid, epoch = _review_handed_task(tmp_path)
+    lease_path(root, tid).unlink(missing_ok=True)
+    state, reason = _lease_state(root, tid, epoch + 1)  # la session croit tenir un autre epoch que le claim
+    assert state == "stale_epoch" and reason
