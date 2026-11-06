@@ -307,8 +307,9 @@ def test_un_clic_sur_la_carte_elle_meme_selectionne_la_tache(
     """Contre-épreuve du test précédent : le même écouteur voit bien un clic sur la carte."""
     task_id = _QUICK["id"]
     card = exec_page.locator(".ex-card", has_text=_QUICK_TITLE).first
+    # Sur le document : un rafraîchissement peut remplacer la carte entre la pose de l'écouteur et le clic.
     card.evaluate(
-        "(el) => { window.__parentClicks = 0; el.addEventListener('click', () => { window.__parentClicks += 1; }); }"
+        "() => { window.__parentClicks = 0; document.addEventListener('click', (e) => { if (e.target.closest('.ex-card')) window.__parentClicks += 1; }); }"
     )
 
     card.locator("h4, .ex-card-title, strong").first.click()

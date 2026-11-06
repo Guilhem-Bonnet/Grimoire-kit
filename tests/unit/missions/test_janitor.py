@@ -7,6 +7,7 @@ peut pas dire fusionnée n'est jamais supprimée, et un échec est rapporté san
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -515,6 +516,7 @@ def test_une_simple_mention_d_issue_ne_la_ferme_pas(projet: Path, host: FakeHost
     assert by_action(sweep(projet, host))["issue"] == "skipped" and host.closed_issues == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod ne met pas un dossier en lecture seule")
 def test_une_copie_impossible_laisse_le_worktree_et_rapporte_failed(projet: Path, host: FakeHost) -> None:
     tid = worked_task(projet, host)
     wt = find_task_worktree(TaskService(projet), tid)
