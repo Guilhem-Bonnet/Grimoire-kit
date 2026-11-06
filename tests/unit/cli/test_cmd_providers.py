@@ -366,6 +366,7 @@ def test_enable_unknown_provider_fails(tmp_path: Path) -> None:
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ces commandes écrivent dans ``$HOME`` — jamais celui de la machine de CI."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # Path.home() le lit sous Windows
 
 
 def test_set_key_then_secrets_list_shows_it_without_the_value(tmp_path: Path) -> None:
