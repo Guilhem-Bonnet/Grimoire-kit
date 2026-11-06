@@ -6,11 +6,18 @@ on:
     paths:
       - "archetypes/**"
       - "framework/**"
+      - "src/**"
       - "tests/**"
       - "grimoire-init.sh"
       - ".github/workflows/ci-validate.yml"
   pull_request:
     branches: [main]
+    # `edited` : un titre de PR de release décide si Windows tourne.
+    types: [opened, synchronize, reopened, edited]
+  # Windows ne tourne plus sur chaque PR : main et cette passe de nuit sont son filet.
+  schedule:
+    - cron: "47 6 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -184,6 +191,10 @@ jobs:
     # mieux vaut un échec net et rapide.
     # 15 → 20 min (P94) : Windows finit à ~13,5 min sur main, soit 1,5 min de marge ; un test de plus la crevait.
     timeout-minutes: 20
+    env:
+      # Sur une PR, Windows rend son check requis sans lancer la suite (~14 min), sauf
+      # pour une release : dernier passage avant la publication.
+      FULL_SUITE: "${{ github.event_name != 'pull_request' || matrix.os == 'ubuntu-latest' || startsWith(github.event.pull_request.title, 'chore: release') }}"
     strategy:
       fail-fast: false
       matrix:
@@ -193,9 +204,16 @@ jobs:
     # (#257, un chemin comparé en str) soient traités ; c'est fait, et un job
     # qu'on ignore en permanence ne protège rien.
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Suite réservée à main, la nuit, la demande et aux releases
+        if: env.FULL_SUITE != 'true'
+        shell: bash
+        run: echo "Suite sautée sur PR pour ${{ matrix.os }}."
+
+      - if: env.FULL_SUITE == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Setup Python
+        if: env.FULL_SUITE == 'true'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
@@ -210,9 +228,11 @@ jobs:
       # doit exercer la validation complète — sinon il vérifierait le chemin
       # dégradé et déclarerait vert un contrôle qui n'a pas eu lieu.
       - name: Install test deps
+        if: env.FULL_SUITE == 'true'
         run: pip install -e . pytest pyyaml jsonschema
 
       - name: Run framework tests
+        if: env.FULL_SUITE == 'true'
         shell: bash
         run: |
           # Le code de sortie de pytest décide, pas la forme de sa dernière
