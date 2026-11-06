@@ -387,3 +387,65 @@ def test_remove_key_clears_the_entry(tmp_path: Path) -> None:
 
     secrets_result = runner.invoke(app, ["providers", "secrets"])
     assert "deepseek" not in secrets_result.stdout
+
+
+def test_add_rejects_model_with_invalid_tier(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["providers", "add", "mistral", "--invocation", "x {model} {prompt}", "--model", "mistral-small:ultra",
+         "--project-root", str(root)],
+    )
+
+    assert result.exit_code != 0
+    assert "tier" in result.stdout
+
+
+def test_add_non_api_currency_does_not_suggest_set_key(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["providers", "add", "localmodel", "--invocation", "x {model} {prompt}", "--currency", "local",
+         "--project-root", str(root)],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "set-key" not in result.stdout
+
+
+def test_disable_unknown_provider_fails(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(app, ["providers", "disable", "nope", "--project-root", str(root)])
+
+    assert result.exit_code != 0
+    assert "introuvable" in result.stdout
+
+
+def test_remove_unknown_provider_fails(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(app, ["providers", "remove", "nope", "--project-root", str(root)])
+
+    assert result.exit_code != 0
+    assert "introuvable" in result.stdout
+
+
+def test_set_key_blank_value_fails(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="   \n")
+
+    assert result.exit_code != 0
+    assert "vide" in result.stdout
+
+
+def test_secrets_json_output(tmp_path: Path) -> None:
+    runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="sk-test-abc\n")
+
+    result = runner.invoke(app, ["providers", "secrets", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload[0]["provider"] == "deepseek"
+    assert "sk-test-abc" not in result.stdout

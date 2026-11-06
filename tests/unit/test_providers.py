@@ -742,3 +742,26 @@ def test_remove_provider_unknown_id_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ProviderWriteError, match="introuvable"):
         remove_provider(tmp_path, "nope")
+
+
+def test_add_provider_rejects_invalid_currency(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    with pytest.raises(ProviderWriteError, match="currency"):
+        add_provider(tmp_path, "mistral", invocation="x {prompt}", currency="crypto")
+
+
+def test_add_provider_unreadable_yaml_raises_registry_error(tmp_path: Path) -> None:
+    (tmp_path / STANDARD).mkdir(parents=True, exist_ok=True)
+    (tmp_path / REGISTRY_PATH).write_text("providers: [this is: not: valid: yaml", encoding="utf-8")
+
+    with pytest.raises(ProviderRegistryError, match="illisible"):
+        add_provider(tmp_path, "mistral", invocation="x {prompt}")
+
+
+def test_add_provider_non_dict_registry_raises(tmp_path: Path) -> None:
+    (tmp_path / STANDARD).mkdir(parents=True, exist_ok=True)
+    (tmp_path / REGISTRY_PATH).write_text("- juste\n- une\n- liste\n", encoding="utf-8")
+
+    with pytest.raises(ProviderRegistryError, match="table YAML"):
+        add_provider(tmp_path, "mistral", invocation="x {prompt}")

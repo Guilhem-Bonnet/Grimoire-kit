@@ -94,3 +94,26 @@ def test_set_secret_never_leaks_value_into_index_file(tmp_path: Path) -> None:
 
     index_text = (store_dir() / "index.json").read_text(encoding="utf-8")
     assert "sk-should-not-appear-in-index" not in index_text
+
+
+def test_env_file_skips_blank_comment_and_malformed_lines(tmp_path: Path) -> None:
+    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-a")
+    path = store_dir() / "deepseek.env"
+    path.write_text(path.read_text(encoding="utf-8") + "\n# un commentaire\n\nligne-sans-egal\n", encoding="utf-8")
+
+    assert env_for_provider("deepseek") == {"DEEPSEEK_API_KEY": "sk-a"}
+
+
+def test_list_secrets_tolerates_corrupted_index_json(tmp_path: Path) -> None:
+    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-a")
+    (store_dir() / "index.json").write_text("{ceci n'est pas du json", encoding="utf-8")
+
+    assert list_secrets() == ()
+
+
+def test_remove_secret_unknown_var_is_a_noop(tmp_path: Path) -> None:
+    set_secret("openai", "OPENAI_API_KEY", "sk-a")
+
+    remove_secret("openai", "NE_EXISTE_PAS")
+
+    assert env_for_provider("openai") == {"OPENAI_API_KEY": "sk-a"}

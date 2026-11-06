@@ -146,3 +146,47 @@ def test_set_key_with_control_key_writes_to_the_store_not_the_registry(tmp_path:
     assert env_for_provider("deepseek") == {"DEEPSEEK_API_KEY": "sk-test-abc"}
     registry_text = (root / REGISTRY_PATH).read_text(encoding="utf-8")
     assert "sk-test-abc" not in registry_text  # jamais dans le registre du projet
+
+
+def test_add_with_empty_provider_id_is_a_value_error_even_with_a_valid_control_key(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    handler = POST_ROUTES[f"{PREFIX}providers"]
+
+    with pytest.raises(ValueError, match="provider_id"):
+        handler(root, {"action": "add", "provider_id": "", "control_key": _control_key()})
+
+
+def test_remove_via_route(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    handler = POST_ROUTES[f"{PREFIX}providers"]
+
+    handler(root, {"action": "remove", "provider_id": "anthropic", "control_key": _control_key()})
+
+    assert read_registry(root) == ()
+
+
+def test_enable_unknown_provider_via_route_is_a_value_error(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    handler = POST_ROUTES[f"{PREFIX}providers"]
+
+    with pytest.raises(ValueError, match="introuvable"):
+        handler(root, {"action": "enable", "provider_id": "nope", "control_key": _control_key()})
+
+
+def test_set_key_with_empty_fields_is_a_value_error_even_with_a_valid_control_key(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    handler = POST_ROUTES[f"{PREFIX}providers/set-key"]
+
+    with pytest.raises(ValueError, match="provider_id"):
+        handler(root, {"provider_id": "", "env_var": "", "value": "sk-test", "control_key": _control_key()})
+
+
+def test_set_key_with_blank_value_via_route_is_a_value_error(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+    handler = POST_ROUTES[f"{PREFIX}providers/set-key"]
+
+    with pytest.raises(ValueError, match="vide"):
+        handler(
+            root,
+            {"provider_id": "deepseek", "env_var": "DEEPSEEK_API_KEY", "value": "   ", "control_key": _control_key()},
+        )
