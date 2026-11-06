@@ -1,0 +1,1 @@
+- fix(missions): la relecture d'un dispatch ne porte plus que sur ce que l'ouvrier a changé : plus de fausse alerte sur un arbre déjà modifié, et les fichiers qu'il crée ne lui échappent plus

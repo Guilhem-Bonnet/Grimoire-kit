@@ -404,6 +404,53 @@ def test_diff_touchant_le_cli_est_review_required_avec_le_fichier_nomme(tmp_path
     assert report.review_note is None
 
 
+def _worker_qui_cree_marker(tmp_path: Path, *lignes: str) -> str:
+    corps = "\n".join(("from pathlib import Path", *lignes, 'Path("marker.txt").write_text("done", encoding="utf-8")'))
+    return _invocation(_script(tmp_path, "worker.py", corps))
+
+
+def test_un_fichier_deja_modifie_que_l_ouvrier_ne_touche_pas_n_est_pas_a_relire(tmp_path: Path) -> None:
+    cible = tmp_path / "src" / "grimoire" / "cli" / "x.py"
+    _git_repo(tmp_path, cible)
+    cible.write_text("modifié avant le dispatch\n", encoding="utf-8")
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _worker_qui_cree_marker(tmp_path)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_optional"
+    assert report.review_files == ()
+
+
+def test_un_fichier_deja_modifie_que_l_ouvrier_retouche_est_a_relire(tmp_path: Path) -> None:
+    cible = tmp_path / "src" / "grimoire" / "cli" / "x.py"
+    _git_repo(tmp_path, cible)
+    cible.write_text("modifié avant le dispatch\n", encoding="utf-8")
+    worker = _worker_qui_cree_marker(tmp_path, 'Path("src/grimoire/cli/x.py").write_text("retouché et plus long\\n", encoding="utf-8")')
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", worker))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_required"
+    assert "src/grimoire/cli/x.py" in report.review_files
+
+
+def test_un_nouveau_fichier_cree_par_l_ouvrier_sur_une_surface_est_a_relire(tmp_path: Path) -> None:
+    _git_repo(tmp_path, tmp_path / "src" / "grimoire" / "cli" / "x.py")
+    worker = _worker_qui_cree_marker(tmp_path, 'Path("src/grimoire/cli/nouveau.py").write_text("x\\n", encoding="utf-8")')
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", worker))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_required"
+    assert "src/grimoire/cli/nouveau.py" in report.review_files
+
+
 def test_diff_limite_a_tests_est_review_optional(tmp_path: Path) -> None:
     """Critère d'arrêt de l'issue : un diff limité à `tests/` est `optional`."""
     cible = tmp_path / "tests" / "test_x.py"

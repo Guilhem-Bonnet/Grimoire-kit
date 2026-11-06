@@ -80,6 +80,7 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.diff_fingerprint import signal_if_stuck
 from grimoire.missions.dispatch_history import recommend_start_tier
+from grimoire.missions.dispatch_worktree import changed_since, worktree_fingerprint
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.route_dispatch import record_route
 from grimoire.missions.schemas import TaskState
@@ -98,6 +99,8 @@ from grimoire.providers.state import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from grimoire.missions.schemas import LedgerEvent, MissionTask
     from grimoire.missions.service import TaskService
 
@@ -495,24 +498,18 @@ def _matches_review_surface(path: str, surfaces: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in surfaces)
 
 
-def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | None]:
-    """Classe le diff courant — ``(review, review_files, review_note)`` (issue #327).
+def _classify_review(
+    project_root: Path, before: Mapping[str, str] | None = None
+) -> tuple[str, tuple[str, ...], str | None]:
+    """Classe ce qui a changé depuis ``before`` — ``(review, review_files, review_note)`` (issue #327).
 
-    ``git diff --name-only`` plutôt qu'une lecture du working tree : c'est
-    exactement ce que le prochain relecteur verra. Un projet non versionné ne
-    permet pas de calculer quoi que ce soit ; le déclarer ``review_required``
-    par défaut inventerait une garantie qu'on ne peut pas tenir, donc
-    ``review_optional`` avec une note plutôt qu'un silence trompeur.
+    Un projet non versionné ne permet pas de calculer quoi que ce soit ; le
+    déclarer ``review_required`` par défaut inventerait une garantie qu'on ne
+    peut pas tenir, donc ``review_optional`` avec une note plutôt qu'un silence.
     """
-    try:
-        completed = subprocess.run(
-            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return "review_optional", (), "projet non versionné (git indisponible) : relisibilité non calculée"
-    if completed.returncode != 0:
-        return "review_optional", (), "projet non versionné (pas un dépôt git) : relisibilité non calculée"
-    files = tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
+    files = changed_since(project_root, before or {})
+    if files is None:
+        return "review_optional", (), "projet non versionné (git illisible) : relisibilité non calculée"
     surfaces = _review_surfaces(project_root)
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
@@ -1277,6 +1274,7 @@ def run_dispatch(
         )
         return service.ledger.append_event("task.dispatched", task_id, "task", actor, payload)
 
+    tree_before = worktree_fingerprint(root)
     attempt_no = 0
     previous_red_diff: str | None = None
     capped_before_next_tier = False
@@ -1341,7 +1339,7 @@ def run_dispatch(
             green = verdict == "green"
             # La relecture ne se pose qu'une fois le résultat accepté (#327) —
             # un check rouge n'a rien produit qu'on ait besoin de relire.
-            review, review_files, review_note = _classify_review(root) if green else (None, (), None)
+            review, review_files, review_note = _classify_review(root, tree_before) if green else (None, (), None)
             # L'incertitude déclarée, elle, vaut pour tout appel qui a répondu,
             # vert ou rouge (#328) : l'ouvrier peut avoir douté d'un travail
             # que le check juge encore insuffisant.
