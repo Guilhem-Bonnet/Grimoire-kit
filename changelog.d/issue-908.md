@@ -1,0 +1,1 @@
+- fix(up): `agent-manifest.csv` ne liste plus deux fois le même agent, un projet à jour ne montre plus de fichier à écrire (#908)

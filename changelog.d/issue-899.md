@@ -1,0 +1,1 @@
+- fix(cockpit): les questions du wizard s'affichent dans la langue du cockpit (`?lang=`, repli anglais), la CLI reste inchangée (#899)

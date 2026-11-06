@@ -113,7 +113,10 @@ def build_setup_plan(
     return plan
 
 
-def setup_questions_view(project_root: Path, query: dict[str, list[str]]) -> dict[str, Any]:
+def setup_questions_view(
+    project_root: Path,
+    query: dict[str, list[str]],
+) -> dict[str, Any]:
     """Les trois questions du wizard (#888), pré-remplies par la détection de CE projet.
 
     Même fonction que la CLI (:func:`grimoire.cli.init_questions.questions_payload`),
@@ -121,15 +124,20 @@ def setup_questions_view(project_root: Path, query: dict[str, list[str]]) -> dic
     remplace les réponses par défaut ; ``?prefill=0`` ignore la détection (le
     formulaire « nouveau projet » du portefeuille vise un autre dossier). Une
     réponse invalide rend ``error`` avec la déduction des réponses par défaut,
-    jamais une 500.
+    jamais une 500. Les libellés suivent ``?lang=`` (repli anglais).
     """
-    from grimoire.cli.init_questions import questions_payload
+    from grimoire.cli.init_questions import questions_payload, resolve_lang
     from grimoire.core.scanner import StackScanner
 
     def _first(key: str) -> str:
         values = query.get(key) or []
         return str(values[0]) if values else ""
 
+    # Clé `stack` présente mais vide = « aucune pile » (décochage total), pas « défaut ».
+    answers = {key: _first(key) for key in ("who", "domain") if _first(key)}
+    if "stack" in query:
+        answers["stack"] = _first("stack")
+    lang = resolve_lang(_first("lang"))
     use_prefill = _first("prefill") not in ("0", "false", "no")
     scan = None
     if use_prefill:
@@ -137,14 +145,10 @@ def setup_questions_view(project_root: Path, query: dict[str, list[str]]) -> dic
             scan = StackScanner(project_root).scan()
         except (OSError, ValueError):
             scan = None
-    # Clé `stack` présente mais vide = « aucune pile » (décochage total), pas « défaut ».
-    answers = {key: _first(key) for key in ("who", "domain") if _first(key)}
-    if "stack" in query:
-        answers["stack"] = _first("stack")
     try:
-        return questions_payload(scan, answers)
+        return questions_payload(scan, answers, lang)
     except ValueError as exc:
-        return {"error": str(exc), **questions_payload(scan, {})}
+        return {"error": str(exc), **questions_payload(scan, {}, lang)}
 
 
 def needs_catalogue(project_root: Path) -> dict[str, Any]:

@@ -7,6 +7,7 @@ du projet, dans le profil de l'utilisateur, et ne doit jamais toucher le
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from grimoire.providers.secrets import env_for_provider, list_secrets, remove_se
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # Path.home() le lit sous Windows
 
 
 def test_set_secret_writes_file_and_index(tmp_path: Path) -> None:
@@ -30,6 +32,7 @@ def test_set_secret_writes_file_and_index(tmp_path: Path) -> None:
     assert entries[0].env_var == "DEEPSEEK_API_KEY"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod ne restreint rien sous Windows")
 def test_set_secret_restricts_file_permissions(tmp_path: Path) -> None:
     path = set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-test-123")
 

@@ -1,0 +1,1 @@
+- fix(cli): le rendu texte de `task show`, `task list` et `task pack` part sur stdout et stderr ne garde que les erreurs (#879)

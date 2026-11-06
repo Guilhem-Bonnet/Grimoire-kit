@@ -27,7 +27,10 @@ from pathlib import Path
 
 
 def store_dir() -> Path:
-    """``~/.env-store`` — jamais dans le dépôt du projet, jamais versionné."""
+    """``~/.env-store`` — jamais dans le dépôt du projet, jamais versionné.
+
+    Sous Windows, ``chmod`` ne restreint rien : seuls les droits du profil utilisateur protègent ce dossier.
+    """
     return Path.home() / ".env-store"
 
 
