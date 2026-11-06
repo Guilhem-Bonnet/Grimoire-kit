@@ -183,10 +183,23 @@ def record_chain_ack_request(hook: HookInput) -> tuple[str, dict[str, Any]]:
         _append(hook.project_root, task_id, entry)
     except Exception as exc:
         return _refused(f"{acks_relpath(task_id).as_posix()} n'a pas pu être écrit ({type(exc).__name__})")
+    from grimoire.core.standard_checks.evidence_chain import reanchor_explained
+
+    log_path = hook.project_root / evidence_log_relpath(task_id)
+    acks = read_acks(hook.project_root, task_id)
+    try:
+        reanchored = reanchor_explained(log_path, lambda item: covering_ack(acks, task_id, item) is not None)
+    except OSError:  # silent-ok — ancre non réécrite : elle reste figée (fail-closed), l'acquittement est déjà écrit
+        reanchored = False
+    anchor_note = (
+        "L'ancre du journal reprend à sa dernière ligne (la troncature est de nouveau détectée). "
+        if reanchored
+        else ""
+    )
     context = (
         f"[Grimoire] Rupture expliquée {entry['ack_id']} pour {task_id}, ligne {target.line} (raison : {entry['reason']}). "
         "`standard verify` la passe en avertissement `evidence.chain_break_explained` et la liste toujours ; "
-        f"le journal n'est pas modifié. {_LIMIT}"
+        f"le journal n'est pas modifié. {anchor_note}{_LIMIT}"
     )
     return context, {
         "chain_ack": {"status": "recorded", "ack_id": entry["ack_id"], "task_id": task_id, "line": target.line}

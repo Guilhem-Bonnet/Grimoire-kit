@@ -43,6 +43,8 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.fsio import atomic_write, locked
 
 if TYPE_CHECKING:  # base importe ruamel : hors du chemin chaud des hooks (issue #419)
+    from collections.abc import Callable
+
     from grimoire.core.standard_checks.base import StandardVerificationResult
 
 __all__ = [
@@ -56,6 +58,7 @@ __all__ = [
     "dropped_writes",
     "head_path",
     "process_dropped_writes",
+    "reanchor_explained",
     "record_dropped_write",
     "verify_evidence_chain",
 ]
@@ -219,6 +222,35 @@ def append_chained(path: Path, event: dict[str, Any]) -> None:
         except BaseException:
             _restore_head(path, state)
             raise
+
+
+def reanchor_explained(path: Path, is_covered: Callable[[InsertedLine], bool]) -> bool:
+    """Ré-ancre le journal *path* quand tout l'écart avec l'ancre est expliqué ; rend ``True`` si l'ancre a avancé.
+
+    Conditions, toutes requises (sinon rien n'est écrit, l'échec reste fermé) : la chaîne est
+    ``unchained_inserted`` (elle continue autour des lignes sans ``prev``), l'ancre est figée juste
+    avant la première de ces lignes, et ``is_covered`` valide *chaque* ligne intercalée. L'ancre
+    désigne alors la dernière ligne ; supprimer celle-ci redevient ``truncated``. Le journal n'est
+    jamais modifié, et la rupture reste listée (``evidence.chain_break_explained``). Sous le verrou
+    d'``append_chained`` : aucun ajout ne s'intercale entre l'analyse et l'écriture.
+    """
+    with locked(path, timeout=_LOCK_TIMEOUT_S):
+        report = analyze_chain(path)
+        state = _read_head(path)
+        if (
+            state is None
+            or report.status != "broken"
+            or report.kind != "unchained_inserted"
+            or not report.anchor_frozen
+            or not report.inserted
+            or not all(is_covered(item) for item in report.inserted)
+        ):
+            return False
+        last, _ = _tail(path)
+        if last is None or report.chained <= state.count:
+            return False
+        _write_head(path, _Head(report.chained, _digest(last), state.dropped), durable=True)
+        return True
 
 
 def _append_bytes(path: Path, line: bytes, clean_end: bool) -> None:
