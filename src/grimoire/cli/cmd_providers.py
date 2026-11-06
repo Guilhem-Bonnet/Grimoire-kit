@@ -16,6 +16,7 @@ départ que ``grimoire task dispatch`` en tire.
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -25,8 +26,19 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.providers.audit import audit_providers
-from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, ProviderSpec, read_registry
+from grimoire.providers.registry import (
+    SUPPORTED_CURRENCIES,
+    SUPPORTED_MODEL_TIERS,
+    ModelSpec,
+    ProviderRegistryError,
+    ProviderSpec,
+    add_provider,
+    read_registry,
+    remove_provider,
+    set_provider_enabled,
+)
 from grimoire.providers.routing import choose
+from grimoire.providers.secrets import list_secrets, remove_secret, set_secret
 from grimoire.providers.state import ProviderRuntimeState, clear_unknown_suspensions, load_state, record_failure
 
 providers_app = typer.Typer(
@@ -392,3 +404,139 @@ def providers_history(
     console.print(table)
     for history in histories:
         console.print(f"[dim]{history.task_type}/{history.verifiability} : {history.reason}[/dim]")
+
+
+def _parse_model_specs(raw: list[str]) -> tuple[ModelSpec, ...]:
+    """``id:tier`` → :class:`ModelSpec` ; ``typer.Exit`` sur une entrée mal formée."""
+    specs: list[ModelSpec] = []
+    for item in raw:
+        model_id, _, tier = item.partition(":")
+        if not model_id or not tier:
+            console.print(f"[red]modèle invalide {item!r} — attendu id:tier (ex: deepseek-chat:cheap).[/red]")
+            raise typer.Exit(2)
+        if tier not in SUPPORTED_MODEL_TIERS:
+            console.print(f"[red]tier {tier!r} invalide — l'un de {SUPPORTED_MODEL_TIERS}.[/red]")
+            raise typer.Exit(2)
+        specs.append(ModelSpec(id=model_id, tier=tier))
+    return tuple(specs)
+
+
+@providers_app.command("add")
+def providers_add(
+    provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur (ex: deepseek, mistral, kimi).")],
+    invocation: Annotated[str, typer.Option("--invocation", help="Commande gabarit avec {model} et {prompt}.")],
+    model: Annotated[
+        list[str], typer.Option("--model", help="Modèle déclaré, format id:tier (ex: deepseek-chat:cheap). Répétable.")
+    ] = [],  # noqa: B006 — Typer a besoin d'un défaut mutable littéral pour un Option répétable
+    currency: Annotated[str, typer.Option("--currency", help=f"L'une de {SUPPORTED_CURRENCIES}.")] = "api",
+    enabled: Annotated[bool, typer.Option("--enabled/--disabled", help="Activer tout de suite.")] = True,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+) -> None:
+    """Déclarer un nouveau fournisseur LLM — jamais de clé ici (voir `set-key`)."""
+    root = project_root.resolve()
+    models = _parse_model_specs(model)
+    try:
+        add_provider(root, provider_id, invocation=invocation, models=models, currency=currency, enabled=enabled)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓[/green] fournisseur {provider_id!r} ajouté ({'activé' if enabled else 'désactivé'}).")
+    if currency == "api":
+        console.print(f"  Pose la clé : [bold]grimoire providers set-key {provider_id} <NOM_VARIABLE>[/bold]")
+
+
+@providers_app.command("enable")
+def providers_enable(
+    provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+) -> None:
+    """Activer un fournisseur déjà déclaré."""
+    root = project_root.resolve()
+    try:
+        set_provider_enabled(root, provider_id, enabled=True)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓[/green] {provider_id!r} activé.")
+
+
+@providers_app.command("disable")
+def providers_disable(
+    provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+) -> None:
+    """Désactiver un fournisseur déjà déclaré."""
+    root = project_root.resolve()
+    try:
+        set_provider_enabled(root, provider_id, enabled=False)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[yellow]●[/yellow] {provider_id!r} désactivé.")
+
+
+@providers_app.command("remove")
+def providers_remove(
+    provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+) -> None:
+    """Retirer un fournisseur du registre (le magasin de clés n'est pas touché)."""
+    root = project_root.resolve()
+    try:
+        remove_provider(root, provider_id)
+    except ProviderRegistryError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[yellow]●[/yellow] {provider_id!r} retiré du registre.")
+
+
+@providers_app.command("set-key")
+def providers_set_key(
+    provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
+    env_var: Annotated[str, typer.Argument(help="Nom de la variable d'environnement (ex: DEEPSEEK_API_KEY).")],
+) -> None:
+    """Poser une clé API en saisie masquée — jamais en argument, jamais dans le registre.
+
+    Écrit dans ``~/.env-store/`` (``grimoire.providers.secrets``), lu
+    automatiquement par `grimoire task dispatch` au moment d'invoquer ce
+    fournisseur.
+    """
+    import getpass
+
+    value = getpass.getpass(f"Valeur pour {env_var} ({provider_id}) — saisie masquée : ")
+    try:
+        path = set_secret(provider_id, env_var, value)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓[/green] {env_var} enregistré pour {provider_id!r} ({path}, chmod 600).")
+
+
+@providers_app.command("remove-key")
+def providers_remove_key(
+    provider_id: Annotated[str, typer.Argument(help="Identifiant du fournisseur.")],
+    env_var: Annotated[
+        str | None, typer.Argument(help="Variable à retirer ; toutes les clés du fournisseur si omis.")
+    ] = None,
+) -> None:
+    """Retirer une clé (ou toutes celles d'un fournisseur) du magasin de secrets."""
+    remove_secret(provider_id, env_var)
+    console.print(f"[yellow]●[/yellow] retiré : {provider_id!r}" + (f" / {env_var}" if env_var else " (toutes les clés)"))
+
+
+@providers_app.command("secrets")
+def providers_secrets_list(ctx: typer.Context, json_output: Annotated[bool, _JSON_OPTION] = False) -> None:
+    """Lister les clés posées (fournisseur, variable, date) — jamais les valeurs."""
+    entries = list_secrets()
+    if json_output or _get_fmt(ctx) == "json":
+        typer.echo(json.dumps([asdict(entry) for entry in entries], indent=2, ensure_ascii=False))
+        return
+    if not entries:
+        console.print("[dim]Aucune clé posée (`grimoire providers set-key`).[/dim]")
+        return
+    table = Table(title="Clés posées")
+    for column in ("Fournisseur", "Variable", "Fichier", "Posée le"):
+        table.add_column(column)
+    for entry in entries:
+        table.add_row(entry.provider, entry.env_var, entry.file, entry.added_at)
+    console.print(table)

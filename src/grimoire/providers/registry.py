@@ -158,6 +158,137 @@ def read_registry(root: Path) -> tuple[ProviderSpec, ...]:
     return tuple(spec for spec in specs if spec is not None)
 
 
+class ProviderWriteError(ProviderRegistryError):
+    """Une écriture sur le registre a été refusée (id dupliqué, vocabulaire invalide...)."""
+
+
+def _yaml_roundtrip() -> YAML:
+    """Round-trip (``typ="rt"``) : préserve commentaires et mise en forme du fichier existant.
+
+    Distinct de :func:`_yaml` (``typ="safe"``) — un lecteur n'a pas besoin de
+    préserver la forme, une écriture ne doit jamais effacer les commentaires
+    qui documentent le reste du registre.
+    """
+    yaml = YAML(typ="rt")
+    yaml.preserve_quotes = True
+    return yaml
+
+
+def _load_registry_for_write(root: Path) -> Any:
+    """Document round-trip ; lève si le registre n'existe pas encore.
+
+    Contrairement à :func:`_load_registry_mapping` (lecture, ``{}`` toléré),
+    une écriture sur un registre absent n'a pas de sens : il n'y a pas de
+    ``routing``/``metadata`` à préserver, et en créer un à la volée devinerait
+    une politique que seul ``grimoire standard init`` doit poser.
+    """
+    path = root / REGISTRY_FILE
+    if not path.is_file():
+        msg = f"{REGISTRY_FILE} absent — lancer `grimoire standard init` avant d'ajouter un fournisseur."
+        raise ProviderRegistryError(msg)
+    try:
+        data = _yaml_roundtrip().load(path.read_text(encoding="utf-8"))
+    except (YAMLError, OSError, UnicodeDecodeError) as exc:
+        msg = f"{REGISTRY_FILE} illisible : {type(exc).__name__}: {exc}"
+        raise ProviderRegistryError(msg) from exc
+    if not isinstance(data, dict):
+        msg = f"{REGISTRY_FILE} doit être une table YAML."
+        raise ProviderRegistryError(msg)
+    return data
+
+
+def _save_registry(root: Path, data: Any) -> None:
+    path = root / REGISTRY_FILE
+    with path.open("w", encoding="utf-8") as handle:
+        _yaml_roundtrip().dump(data, handle)
+
+
+def add_provider(
+    root: Path,
+    provider_id: str,
+    *,
+    invocation: str,
+    models: tuple[ModelSpec, ...] = (),
+    currency: str = "api",
+    provider_type: str = "hosted",
+    allowed_capabilities: tuple[str, ...] = ("chat", "code"),
+    enabled: bool = True,
+) -> None:
+    """Déclare un nouveau fournisseur — jamais de clé ici, voir ``grimoire.providers.secrets``.
+
+    Refuse un ``id`` déjà présent (utiliser :func:`set_provider_enabled` pour
+    une bascule), un ``currency``/``tier`` hors vocabulaire, ou une
+    ``invocation`` sans ``{prompt}`` — les mêmes règles que
+    ``standard_checks.verifiers._verify_provider_currency_and_tiers``,
+    vérifiées ici pour ne jamais écrire une entrée qu'un
+    ``grimoire standard verify`` rejetterait ensuite.
+    """
+    if currency not in SUPPORTED_CURRENCIES:
+        msg = f"currency {currency!r} doit être l'une de {SUPPORTED_CURRENCIES}."
+        raise ProviderWriteError(msg)
+    for model in models:
+        if model.tier not in SUPPORTED_MODEL_TIERS:
+            msg = f"tier {model.tier!r} (modèle {model.id!r}) doit être l'un de {SUPPORTED_MODEL_TIERS}."
+            raise ProviderWriteError(msg)
+    if "{prompt}" not in invocation:
+        msg = f"invocation {invocation!r} sans placeholder {{prompt}} : le prompt n'atteindrait jamais la commande."
+        raise ProviderWriteError(msg)
+
+    data = _load_registry_for_write(root)
+    providers = data.setdefault("providers", [])
+    if any(isinstance(entry, dict) and entry.get("id") == provider_id for entry in providers):
+        msg = f"fournisseur {provider_id!r} déjà déclaré — utiliser `grimoire providers enable/disable`."
+        raise ProviderWriteError(msg)
+
+    providers.append(
+        {
+            "id": provider_id,
+            "enabled": enabled,
+            "provider_type": provider_type,
+            "allowed_capabilities": list(allowed_capabilities),
+            "default_models": [model.id for model in models],
+            "currency": currency,
+            "invocation": invocation,
+            "models": [{"id": model.id, "tier": model.tier} for model in models],
+            "data_policy": {
+                "allowed_data_classes": ["public-docs", "project-source", "generated-artifacts", "non-secret-metadata"],
+                "forbidden_data_classes": ["secrets", "credentials", "personal-data", "regulated-data"],
+                "retention_notes": (
+                    "Ajouté via `grimoire providers add` — clé lue depuis le magasin de secrets "
+                    "(grimoire.providers.secrets), jamais dans ce registre."
+                ),
+            },
+            "fallback_order": [],
+            "audit": {"log_prompts": False, "log_metadata": True},
+        }
+    )
+    _save_registry(root, data)
+
+
+def set_provider_enabled(root: Path, provider_id: str, enabled: bool) -> None:
+    """Bascule ``enabled`` pour *provider_id* ; lève si l'id n'est pas déclaré."""
+    data = _load_registry_for_write(root)
+    for entry in data.get("providers") or []:
+        if isinstance(entry, dict) and entry.get("id") == provider_id:
+            entry["enabled"] = enabled
+            _save_registry(root, data)
+            return
+    msg = f"fournisseur {provider_id!r} introuvable dans le registre."
+    raise ProviderWriteError(msg)
+
+
+def remove_provider(root: Path, provider_id: str) -> None:
+    """Retire *provider_id* du registre — le magasin de secrets n'est pas touché."""
+    data = _load_registry_for_write(root)
+    providers = data.get("providers") or []
+    kept = [entry for entry in providers if not (isinstance(entry, dict) and entry.get("id") == provider_id)]
+    if len(kept) == len(providers):
+        msg = f"fournisseur {provider_id!r} introuvable dans le registre."
+        raise ProviderWriteError(msg)
+    data["providers"] = kept
+    _save_registry(root, data)
+
+
 def read_default_fallback_chain(root: Path) -> tuple[str, ...]:
     """``routing.default_fallback_chain`` — le filet posé au niveau registre.
 

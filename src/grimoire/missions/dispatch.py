@@ -87,6 +87,7 @@ from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
 from grimoire.providers.routing import candidates as provider_candidates
+from grimoire.providers.secrets import env_for_provider
 from grimoire.providers.state import (
     available_models,
     load_state,
@@ -850,9 +851,14 @@ def _run_provider_call(
     """
     argv = render_invocation(provider.invocation or "", prompt=prompt, model=model)
     started = time.monotonic()
+    # Issue #310 suite : la clé d'un fournisseur `currency: api` vient du magasin de
+    # secrets (grimoire.providers.secrets, `~/.env-store/`), jamais du registre ni d'un
+    # argument — fusionnée ici pour que le script d'invocation n'ait rien à en savoir.
+    env = {**os.environ, **env_for_provider(provider.id)}
     try:
         completed = subprocess.run(
-            argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=call_timeout, shell=False
+            argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=call_timeout, shell=False, env=env,
         )
     except subprocess.TimeoutExpired:
         return None, "", "", time.monotonic() - started, "timeout", None

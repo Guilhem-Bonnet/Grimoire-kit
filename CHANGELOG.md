@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(providers): écrire le registre de fournisseurs LLM (`grimoire providers add|enable|disable|remove`) et poser une clé en saisie masquée (`set-key`/`remove-key`/`secrets`) dans un magasin léger `~/.env-store/`, jamais dans le registre ; `task dispatch` fusionne désormais ces variables dans l'environnement du sous-processus avant d'invoquer le fournisseur
+
 ## [3.77.0] - 2026-10-30
 
 - chore(release): correctifs intermédiaires des PR fusionnées par commit de fusion, déjà décrits par le fragment de leur PR : e56b9bde, 643cd839, 45360126, ea109781, efb3ea4e, 00f1a297, 195fcb60
