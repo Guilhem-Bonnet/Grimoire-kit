@@ -13,6 +13,9 @@ on:
       # le garde doit relancer le job qui l'exécute.
       - ".github/workflows/**"
       - "scripts/check-*.py"
+      # L'E2E peut être sauté sur une PR : main reste son filet, il doit donc tourner ici.
+      - "web/**"
+      - "tests/e2e/**"
       # Lus par les gardes du dépôt (`grimoire gates repo`) : les modifier sans
       # relancer le job qui les juge rendrait la garde décorative.
       - "docs/**"
@@ -156,9 +159,10 @@ jobs:
     # et le merger relance le job (CI3) au lieu d'attendre deux heures. Windows et macOS gardent 120.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 45 || 120 }}
     env:
-      # Sur une PR, Windows et macOS rendent leur check requis sans lancer la suite
-      # (le nom du job reste, la protection de main l'exige) ; ubuntu la lance toujours.
-      FULL_SUITE: ${{ matrix.os == 'ubuntu-latest' || github.event_name != 'pull_request' }}
+      # Sur une PR, seul ubuntu 3.12 lance la suite ; les autres jambes rendent leur check
+      # requis sans la lancer (le nom du job reste, la protection de main l'exige). Une PR
+      # de release ajoute ubuntu 3.13 : dernier passage avant la publication.
+      FULL_SUITE: "${{ github.event_name != 'pull_request' || (matrix.os == 'ubuntu-latest' && (matrix.python-version == '3.12' || startsWith(github.event.pull_request.title, 'chore: release'))) }}"
     strategy:
       fail-fast: false
       matrix:
@@ -174,7 +178,7 @@ jobs:
       - name: Suite complète réservée à main, la nuit et la demande
         if: env.FULL_SUITE != 'true'
         shell: bash
-        run: echo "Suite sautée sur PR pour ${{ matrix.os }}, elle tourne sur main, chaque nuit et à la demande."
+        run: echo "Suite sautée sur PR pour ${{ matrix.os }} / ${{ matrix.python-version }}, elle tourne sur main, chaque nuit et à la demande."
 
       - if: env.FULL_SUITE == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -236,27 +240,60 @@ jobs:
   e2e:
     name: "E2E (chromium, ubuntu-latest)"
     runs-on: ubuntu-latest
-    # ~16 min d'ordinaire ; sans borne, une installation figée tient 6 h.
+    # ~20 min d'ordinaire ; sans borne, une installation figée tient 6 h.
     timeout-minutes: 40
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            ui:
+              - "web/**"
+              - "tests/e2e/**"
+              - "src/grimoire/tools/workspace*"
+              - "src/grimoire/tools/cockpit*"
+              - "src/grimoire/cli/cmd_cockpit.py"
+              - "src/grimoire/cli/cmd_web.py"
+              - "src/grimoire/cli/cmd_serve.py"
+              - "src/grimoire/cli/cockpit_http.py"
+              - "pyproject.toml"
+              - ".github/workflows/ci-sdk.yml"
+
+      # Une PR qui ne touche pas au cockpit rend le check requis sans la suite ; main,
+      # la nuit et les PR de release la passent toujours.
+      - name: Décider si la suite tourne
+        id: gate
+        shell: bash
+        env:
+          RUN_E2E: "${{ github.event_name != 'pull_request' || steps.filter.outputs.ui == 'true' || startsWith(github.event.pull_request.title, 'chore: release') }}"
+        run: echo "run=$RUN_E2E" >> "$GITHUB_OUTPUT"
+
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
 
       - name: Install package + dev deps + Playwright
+        if: steps.gate.outputs.run == 'true'
         timeout-minutes: 15
         run: |
           pip install -e ".[dev]" playwright
           playwright install --with-deps chromium
 
       - name: Install axe-core (accessibility checks of the workspace e2e)
+        if: steps.gate.outputs.run == 'true'
         timeout-minutes: 5
         run: npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/axe" axe-core@4.10.2
 
       - name: Run the workspace browser harness
+        if: steps.gate.outputs.run == 'true'
         # Mode strict : un skip (Playwright, Chromium, `grimoire init` absents)
         # est un échec, pas un faux vert (tests/e2e/_strict.py).
         env:
