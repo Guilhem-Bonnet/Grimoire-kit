@@ -402,8 +402,10 @@ def analyze_chain(path: Path) -> ChainReport:
         # Rien ne prolonge la dernière ligne non chaînée : indiscernable d'une ligne ajoutée à la main en queue.
         broken = (inserted[-1]["prev_line"], inserted[-1]["line"], "n'est pas chaînée et aucune ligne ne la prolonge")
     if broken is None and inserted and head is not None:
-        before = inserted[0]["chained_before"]
-        frozen = head.count == before and chained_hashes[before - 1] == head.head
+        # L'ancre est figée juste avant l'une des lignes intercalées (la première, ou une suivante après une ré-ancre).
+        frozen = head.count > 0 and any(
+            item["chained_before"] == head.count and chained_hashes[head.count - 1] == head.head for item in inserted
+        )
     if broken is None and head is not None and not frozen:
         if head.count > chained:
             truncated = head.count - chained

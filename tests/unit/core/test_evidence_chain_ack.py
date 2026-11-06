@@ -112,7 +112,7 @@ def test_human_typed_phrase_turns_the_error_into_a_listed_warning_and_never_rewr
     [shown] = [c for c in result.checks if c.id == "evidence.chain_break_explained"]
     assert f"ligne {line}" in shown.message and "pip install" in shown.message and "s-1" in shown.message
     assert ack["ts"] in shown.message  # la raison, l'auteur et la date sont cités : jamais masquée
-    assert checks["evidence.chain_anchor_frozen"] == "warning"  # l'ancre figée à la rupture est dite
+    assert "evidence.chain_anchor_frozen" not in checks  # l'ancre reprend après l'acquittement (#918)
 
 
 def test_typed_phrase_goes_through_the_user_prompt_hook(broken: tuple[Path, int]) -> None:
