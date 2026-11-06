@@ -329,3 +329,32 @@ class TestUpReadsTheDeducedNeeds:
         cmd_up.run_up_pipeline(ctx, tmp_path, name="x", user="u", archetypes=[], backend="lexical", no_standard=False, needs=[], dry_run=False, no_cockpit=True, interactive=True, quiet=True)
         assert seen.get("needs") == ["multi-agent-orchestration"]
         assert "init_deduced_needs" not in ctx.obj
+
+
+def test_en_francais_aucun_libelle_ne_reste_en_anglais() -> None:
+    francais = questions_payload(None, {}, "fr")
+    anglais = questions_payload(None, {}, "en")
+    for fr, en in zip(francais["questions"], anglais["questions"], strict=True):
+        assert fr["prompt"] != en["prompt"]
+        for option_fr, option_en in zip(fr["options"], en["options"], strict=True):
+            if fr["id"] != STACK_QUESTION.id:  # une pile se nomme pareil dans les deux langues
+                assert option_fr["label"] != option_en["label"], option_en["label"]
+            if option_en["hint"]:
+                assert option_fr["hint"] != option_en["hint"], option_en["hint"]
+
+
+def test_la_langue_ne_change_que_les_libelles() -> None:
+    francais = questions_payload(None, {}, "fr")
+    anglais = questions_payload(None, {}, "en")
+
+    assert questions_payload(None, {}) == anglais
+    assert francais["answers"] == anglais["answers"]
+    ids = [[o["id"] for o in q["options"]] for q in francais["questions"]]
+    assert ids == [[o["id"] for o in q["options"]] for q in anglais["questions"]]
+
+
+def test_la_route_lit_la_langue_demandee(tmp_path: Path) -> None:
+    from grimoire.tools.project_setup import setup_questions_view
+
+    assert setup_questions_view(tmp_path, {"lang": ["fr"]})["questions"][0]["prompt"] == "Quelle pile technique ce projet utilise-t-il ?"
+    assert setup_questions_view(tmp_path, {"lang": ["de"]})["questions"][0]["prompt"] == setup_questions_view(tmp_path, {})["questions"][0]["prompt"]

@@ -23,7 +23,7 @@ même réponse donne le même archétype des deux côtés. Module séparé de
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from grimoire.core.archetype_resolver import ArchetypeResolver, ResolvedArchetype
@@ -44,6 +44,7 @@ __all__ = [
     "prefill",
     "question",
     "questions_payload",
+    "resolve_lang",
 ]
 
 
@@ -52,11 +53,20 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class Option:
-    """Une réponse possible à une question."""
+    """Une réponse possible à une question.
+
+    ``texts`` ne porte que les langues autres que ``label``/``hint``
+    (l'anglais) : ``label`` et ``hint`` restent la référence de la CLI.
+    """
 
     id: str
     label: str
     hint: str = ""
+    texts: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+    def localized(self, lang: str = "en") -> tuple[str, str]:
+        """``(label, hint)`` dans la langue demandée, anglais par défaut."""
+        return self.texts.get(lang, (self.label, self.hint))
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +77,12 @@ class Question:
     prompt: str
     options: tuple[Option, ...]
     multiple: bool = False
+    #: Même règle que :class:`Option` : une entrée par langue non anglaise.
+    prompts: dict[str, str] = field(default_factory=dict)
+
+    def localized_prompt(self, lang: str = "en") -> str:
+        """L'énoncé dans la langue demandée, anglais par défaut."""
+        return self.prompts.get(lang, self.prompt)
 
     def option_ids(self) -> tuple[str, ...]:
         return tuple(o.id for o in self.options)
@@ -79,10 +95,14 @@ class Question:
 STACK_QUESTION = Question(
     id="stack",
     prompt="Which technical stack does this project use?",
+    prompts={"fr": "Quelle pile technique ce projet utilise-t-il ?"},
     multiple=True,
     options=(
         Option("python", "Python"),
-        Option("typescript", "JavaScript / TypeScript", "Node, React, Vue included"),
+        Option(
+            "typescript", "JavaScript / TypeScript", "Node, React, Vue included",
+            texts={"fr": ("JavaScript / TypeScript", "Node, React et Vue compris")},
+        ),
         Option("go", "Go"),
         Option("rust", "Rust"),
         Option("java", "Java / Kotlin"),
@@ -98,30 +118,77 @@ STACK_QUESTION = Question(
 WHO_QUESTION = Question(
     id="who",
     prompt="Who works on this project?",
+    prompts={"fr": "Qui travaille sur ce projet ?"},
     options=(
-        Option("solo", "Just me, I know my stack"),
-        Option("learning", "Just me, I am learning"),
-        Option("team", "A small team of developers"),
-        Option("team-ops", "A team with ops or platform people"),
-        Option("agents", "Mostly AI agents that I supervise"),
+        Option("solo", "Just me, I know my stack", texts={"fr": ("Moi seul, je connais ma pile", "")}),
+        Option("learning", "Just me, I am learning", texts={"fr": ("Moi seul, j'apprends", "")}),
+        Option("team", "A small team of developers", texts={"fr": ("Une petite équipe de développeurs", "")}),
+        Option(
+            "team-ops", "A team with ops or platform people",
+            texts={"fr": ("Une équipe avec des profils ops ou plateforme", "")},
+        ),
+        Option(
+            "agents", "Mostly AI agents that I supervise",
+            texts={"fr": ("Surtout des agents IA que je supervise", "")},
+        ),
     ),
 )
 
 DOMAIN_QUESTION = Question(
     id="domain",
     prompt="What is the project about?",
+    prompts={"fr": "Quel est le sujet du projet ?"},
     options=(
-        Option("none", "A library, a CLI, a service", "no asserted domain"),
-        Option("web", "A web application", "frontend and/or API"),
-        Option("infra", "Infrastructure, deployment, homelab"),
-        Option("platform", "An internal platform", "contracts between teams"),
-        Option("creative", "Content, design, brand"),
-        Option("fixloop", "Maintenance with a certified fix loop", "TDD proofs, incidents"),
-        Option("standard", "The agentic standard itself", "traceability, evidence gates"),
+        Option(
+            "none", "A library, a CLI, a service", "no asserted domain",
+            texts={"fr": ("Une bibliothèque, une CLI, un service", "aucun domaine affirmé")},
+        ),
+        Option(
+            "web", "A web application", "frontend and/or API",
+            texts={"fr": ("Une application web", "frontend et/ou API")},
+        ),
+        Option(
+            "infra", "Infrastructure, deployment, homelab",
+            texts={"fr": ("Infrastructure, déploiement, homelab", "")},
+        ),
+        Option(
+            "platform", "An internal platform", "contracts between teams",
+            texts={"fr": ("Une plateforme interne", "contrats entre équipes")},
+        ),
+        Option("creative", "Content, design, brand", texts={"fr": ("Contenu, design, marque", "")}),
+        Option(
+            "fixloop", "Maintenance with a certified fix loop", "TDD proofs, incidents",
+            texts={"fr": ("Maintenance avec une boucle de correction certifiée", "preuves TDD, incidents")},
+        ),
+        Option(
+            "standard", "The agentic standard itself", "traceability, evidence gates",
+            texts={"fr": ("Le standard agentique lui-même", "traçabilité, barrières de preuve")},
+        ),
     ),
 )
 
 QUESTIONS: tuple[Question, Question, Question] = (STACK_QUESTION, WHO_QUESTION, DOMAIN_QUESTION)
+
+#: Langue de repli, celle des libellés écrits en dur et de la CLI.
+DEFAULT_LANG = "en"
+
+
+def resolve_lang(*values: str | None) -> str:
+    """Langue retenue : le premier ``fr``/``en`` reconnu, sinon l'anglais.
+
+    Utilisée pour ``?lang=`` puis ``Accept-Language`` : un en-tête y met des
+    poids (``fr-CH,fr;q=0.9,en;q=0.8``), d'où la lecture par préférence
+    décroissante plutôt que l'égalité.
+    """
+    for value in values:
+        for tag in str(value or "").split(","):
+            code = tag.split(";")[0].strip().lower()
+            if not code:
+                continue
+            lang = code.split("-")[0].split("_")[0]
+            if lang in {"fr", "en"}:
+                return lang
+    return DEFAULT_LANG
 
 
 def question(question_id: str) -> Question:
@@ -403,29 +470,59 @@ def _recommended_expertises(stacks: tuple[str, ...], stack_skills: tuple[str, ..
     return tuple(out)
 
 
-def deduce(answers: Answers, *, extra_expertises: tuple[str, ...] = ()) -> Deduction:
+#: La ligne de déduction du cockpit, seule sortie mise en mots (la CLI imprime
+#: son propre résumé, en anglais, indépendamment de celle-ci).
+_DEDUCTION_WORDING: dict[str, dict[str, str]] = {
+    "en": {
+        "ops_infra": "ops people + infra stack declared → infra-ops added",
+        "no_need": "no need",
+        "who": "« {label} » → {level}, standard profile {profile} ({needs})",
+        "stack_skills": "stack skills attached to Atlas: ",
+        "expertises": "expertises to attach on request: ",
+    },
+    "fr": {
+        "ops_infra": "profils ops + pile d'infrastructure déclarée → infra-ops ajouté",
+        "no_need": "aucun besoin",
+        "who": "« {label} » → {level}, profil du standard {profile} ({needs})",
+        "stack_skills": "skills de pile attachés à Atlas : ",
+        "expertises": "expertises à attacher sur demande : ",
+    },
+}
+
+
+def deduce(
+    answers: Answers, *, extra_expertises: tuple[str, ...] = (), lang: str = DEFAULT_LANG
+) -> Deduction:
     """Archétype, niveau, besoins, profil, skills et expertises impliqués par les réponses.
 
     ``extra_expertises`` : identifiants déjà recommandés par la détection sur
     disque (famille cloud, :func:`grimoire.core.expertises.detect_expertises`)
     que la fonction pure ne peut pas voir ; ajoutés tels quels, dédupliqués.
+    ``lang`` ne change que le texte des ``reasons`` (le cockpit les affiche).
     """
+    words = _DEDUCTION_WORDING.get(lang, _DEDUCTION_WORDING[DEFAULT_LANG])
     reasons: list[str] = []
     primary = _DOMAIN_TO_ARCHETYPE.get(answers.domain, "stack")
     archetypes = [primary]
-    domain_label = next((o.label for o in DOMAIN_QUESTION.options if o.id == answers.domain), answers.domain)
+    domain_label = next(
+        (o.localized(lang)[0] for o in DOMAIN_QUESTION.options if o.id == answers.domain), answers.domain
+    )
     reasons.append(f"domain « {domain_label} » → {primary}")
 
     if answers.who == "team-ops" and primary != "infra-ops" and _INFRA_STACKS & set(answers.stacks):
         archetypes.append("infra-ops")
-        reasons.append("ops people + infra stack declared → infra-ops added")
+        reasons.append(words["ops_infra"])
 
     skill_level = _WHO_TO_SKILL_LEVEL.get(answers.who, "intermediate")
     needs = _WHO_TO_NEEDS.get(answers.who, ())
     profile = _standard_profile_for(needs)
-    who_label = next((o.label for o in WHO_QUESTION.options if o.id == answers.who), answers.who)
-    needs_text = ", ".join(needs) if needs else "no need"
-    reasons.append(f"« {who_label} » → {skill_level}, standard profile {profile} ({needs_text})")
+    who_label = next(
+        (o.localized(lang)[0] for o in WHO_QUESTION.options if o.id == answers.who), answers.who
+    )
+    needs_text = ", ".join(needs) if needs else words["no_need"]
+    reasons.append(
+        words["who"].format(label=who_label, level=skill_level, profile=profile, needs=needs_text)
+    )
 
     stack_skills = tuple(
         STACK_SKILL_BY_DETECTION[_STACK_TO_SCANNER[s]]
@@ -437,9 +534,9 @@ def deduce(answers: Answers, *, extra_expertises: tuple[str, ...] = ()) -> Deduc
         if extra not in expertises:
             expertises.append(extra)
     if stack_skills:
-        reasons.append("stack skills attached to Atlas: " + ", ".join(stack_skills))
+        reasons.append(words["stack_skills"] + ", ".join(stack_skills))
     if expertises:
-        reasons.append("expertises to attach on request: " + ", ".join(expertises))
+        reasons.append(words["expertises"] + ", ".join(expertises))
 
     return Deduction(
         archetypes=tuple(archetypes),
@@ -482,11 +579,17 @@ def answers_to_scan(answers: Answers, base: ScanResult | None, root: Any) -> Sca
 # ── Charge utile partagée avec le cockpit ─────────────────────────────────────
 
 
-def questions_payload(scan: ScanResult | None, raw_answers: dict[str, Any] | None = None) -> dict[str, Any]:
+def questions_payload(
+    scan: ScanResult | None,
+    raw_answers: dict[str, Any] | None = None,
+    lang: str = DEFAULT_LANG,
+) -> dict[str, Any]:
     """Questions, réponses par défaut, réponses effectives et déduction — en JSON.
 
     Ce que ``GET /api/setup/questions`` rend au cockpit : les mêmes fonctions
     que la CLI, pour que l'archétype déduit soit identique des deux côtés.
+    ``lang`` ne change que les libellés (question, option, aide, déduction) ;
+    la CLI garde l'anglais, son défaut.
     """
     defaults = prefill(scan)
     answers = answers_from_dict(raw_answers or {}, defaults)
@@ -494,13 +597,16 @@ def questions_payload(scan: ScanResult | None, raw_answers: dict[str, Any] | Non
         "questions": [
             {
                 "id": q.id,
-                "prompt": q.prompt,
+                "prompt": q.localized_prompt(lang),
                 "multiple": q.multiple,
-                "options": [{"id": o.id, "label": o.label, "hint": o.hint} for o in q.options],
+                "options": [
+                    {"id": o.id, "label": o.localized(lang)[0], "hint": o.localized(lang)[1]}
+                    for o in q.options
+                ],
             }
             for q in QUESTIONS
         ],
         "defaults": defaults.to_dict(),
         "answers": answers.to_dict(),
-        "deduction": deduce(answers).to_dict(),
+        "deduction": deduce(answers, lang=lang).to_dict(),
     }
