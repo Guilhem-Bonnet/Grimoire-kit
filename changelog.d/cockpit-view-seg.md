@@ -1,0 +1,1 @@
+- fix(cockpit): changer vite d'espace n'efface plus l'espace ouvert ni son sélecteur de vues (un espace quitté se montait quand même)
