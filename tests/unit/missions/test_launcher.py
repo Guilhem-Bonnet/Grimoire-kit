@@ -912,3 +912,31 @@ def test_un_chemin_a_fin_de_ligne_n_entre_jamais_dans_l_unite(tmp_path: Path) ->
     (piege / "git").write_text("", encoding="utf-8")
 
     assert "ExecStartPre" not in _unit_path(str(piege))
+
+
+@pytest.mark.parametrize(
+    "reglages",
+    [
+        "{pas du json",
+        "[]",
+        '{"hooks": "x"}',
+        '{"hooks": {"PreToolUse": "x"}}',
+        '{"hooks": {"PreToolUse": ["x", {"hooks": "x"}]}}',
+        '{"hooks": {"PreToolUse": [{"hooks": ["x", {"command": 1}, {"command": ""}, {"command": "\'non-ferme"}, {"command": "relatif/rtk hook"}]}]}}',
+    ],
+)
+def test_des_reglages_de_hooks_illisibles_n_ajoutent_rien_au_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reglages: str
+) -> None:
+    from grimoire.missions.timer import _unit_path
+
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    projet_vide = tmp_path / "vide"
+    projet_vide.mkdir()
+    attendu = _unit_path("", None, projet_vide)
+
+    (config / "settings.json").write_text(reglages, encoding="utf-8")
+
+    assert _unit_path("", None, projet_vide) == attendu
