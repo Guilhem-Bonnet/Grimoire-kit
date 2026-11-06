@@ -1,0 +1,1 @@
+- fix(lease): le frein du bail ne gèle plus la session qui a remis sa tâche en revue (`needs_verification`) quand le fichier de bail manque ; un bail repris par une autre session reste refusé (#1117)
