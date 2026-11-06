@@ -246,12 +246,14 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run this part of the suite with coverage
+        # Une part ne couvre qu'un morceau du code : le plancher du pyproject la ferait
+        # toujours échouer, il s'applique à la couverture recombinée dans test-aggregate.
         shell: bash
         run: |
           mapfile -t FILES < <(python scripts/ci-test-shards.py --shard ${{ matrix.shard }} --of 4)
           pytest "${FILES[@]}" -q --tb=short -n auto --dist loadfile \
             --timeout=300 --timeout-method=thread --durations=10 \
-            --cov=src/grimoire --cov-report=
+            --cov=src/grimoire --cov-report= --cov-fail-under=0
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:

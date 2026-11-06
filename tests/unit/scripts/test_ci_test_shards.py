@@ -139,3 +139,4 @@ def test_une_part_passe_les_memes_options_que_les_autres_systemes() -> None:
     for option in ("--dist loadfile", "-n auto", "--timeout=300", "--timeout-method=thread", "--cov=src/grimoire"):
         assert option in shard_run
     assert "-x" not in shard_run.split()
+    assert "--cov-fail-under=0" in shard_run  # le plancher se juge sur la couverture recombinée
