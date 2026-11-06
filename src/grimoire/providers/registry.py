@@ -67,6 +67,7 @@ class ProviderSpec:
     currency: str | None = None
     invocation: str | None = None
     models: tuple[ModelSpec, ...] = field(default_factory=tuple)
+    anthropic_base_url: str | None = None
 
     def models_for_tier(self, tier: str) -> tuple[ModelSpec, ...]:
         """Modèles déclarés pour *tier*, dans l'ordre du registre."""
@@ -130,6 +131,7 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
         return None
     currency = entry.get("currency")
     invocation = entry.get("invocation")
+    base_url = entry.get("anthropic_base_url")
     return ProviderSpec(
         id=str(provider_id),
         enabled=entry.get("enabled") is True,
@@ -140,6 +142,7 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
         currency=str(currency) if isinstance(currency, str) and currency else None,
         invocation=str(invocation) if isinstance(invocation, str) and invocation else None,
         models=_model_specs(entry.get("models")),
+        anthropic_base_url=str(base_url) if isinstance(base_url, str) and base_url else None,
     )
 
 
