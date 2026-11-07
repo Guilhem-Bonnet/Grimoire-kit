@@ -125,8 +125,9 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.WAITING: frozenset({TaskState.RUNNING, TaskState.READY, TaskState.FAILED, TaskState.CANCELLED}),
     TaskState.BLOCKED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     # NEEDS_VERIFICATION → CANCELLED (K3, issue #713) : une preuve remise peut être abandonnée.
+    # NEEDS_VERIFICATION → BLOCKED (issue #1124) : une revue rejetée gare la tâche sans passer par un état réclamable.
     TaskState.NEEDS_VERIFICATION: frozenset(
-        {TaskState.CLOSED, TaskState.RUNNING, TaskState.FAILED, TaskState.CANCELLED}
+        {TaskState.CLOSED, TaskState.RUNNING, TaskState.FAILED, TaskState.CANCELLED, TaskState.BLOCKED}
     ),
     TaskState.FAILED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     TaskState.CLOSED: frozenset(),
