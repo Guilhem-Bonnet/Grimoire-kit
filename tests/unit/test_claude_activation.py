@@ -382,3 +382,33 @@ def test_activation_context_has_no_notice_without_a_board(tmp_path: Path) -> Non
     """Aucun board du tout (`grimoire standard init` jamais lancé) : silencieux, jamais un faux « rien à faire »."""
     directive = activation_context_text(tmp_path, task_id="bootstrap")
     assert directive == default_activation_directive("bootstrap")
+
+
+def _write_board(root: Path, task_ids: list[str]) -> None:
+    board = root / "_grimoire" / "standard" / "task-board.yaml"
+    board.parent.mkdir(parents=True, exist_ok=True)
+    tasks = "".join(f"  - task_id: {t}\n    status: in_progress\n" for t in task_ids)
+    board.write_text(f"tasks:\n{tasks}" if tasks else "tasks: []\n", encoding="utf-8")
+
+
+def test_sentinel_absent_from_board_gets_no_gate_instruction(tmp_path: Path) -> None:
+    """#1127 : la consigne ne demande pas un gate qui échouerait sur `bootstrap`."""
+    _write_board(tmp_path, ["GAO-reel-001"])
+    directive = activation_context_text(tmp_path, task_id="bootstrap")
+    assert "gate check" not in directive
+    assert "bootstrap" not in directive
+
+
+def test_sentinel_present_on_board_keeps_the_gate_instruction(tmp_path: Path) -> None:
+    _write_board(tmp_path, ["bootstrap"])
+    assert "gate check --task-id bootstrap --strict" in activation_context_text(tmp_path, task_id="bootstrap")
+
+
+def test_misspelled_task_id_keeps_the_gate_instruction(tmp_path: Path) -> None:
+    """Un identifiant mal orthographié reste une erreur : la consigne est conservée."""
+    _write_board(tmp_path, ["GAO-reel-001"])
+    assert "gate check --task-id GAO-reel-0001 --strict" in activation_context_text(tmp_path, task_id="GAO-reel-0001")
+
+
+def test_sentinel_without_any_board_keeps_the_gate_instruction(tmp_path: Path) -> None:
+    assert "gate check --task-id bootstrap --strict" in activation_context_text(tmp_path, task_id="bootstrap")
