@@ -18,7 +18,9 @@ payante, accès hors du dépôt, suppression de données utilisateur, octroi ou 
 Elle est dans le code. La section ``autopilot`` de ``orchestration-policy.yaml`` peut seulement **ajouter** des
 réservations (``autopilot.reserved``, une liste de catégories d'escalade ou de mots) ; toute autre clé, toute forme
 inattendue rend la politique invalide et le pilote ne décide plus rien (échec fermé). Le classement lit la question, ses
-options, sa raison et la tâche, sans accents ni casse ni caractères invisibles ; il préfère réserver à tort que décider
+options, sa raison et la tâche, sans accents ni casse ni caractères invisibles ; une question de conduite à options
+fermées écrite par le kit (``resume_branch``, désaccord persistant) se juge sur son texte, pas sur le titre de la tâche
+(#1159). Il préfère réserver à tort que décider
 à tort — un faux positif coûte une question à l'humain, un faux négatif une décision que la liste devait lui garder.
 
 **Comment il décide** (:func:`judge`) — d'abord l'option **recommandée** par la question (``task ask --recommended``,
@@ -127,6 +129,13 @@ RESERVED: dict[str, re.Pattern[str]] = {
 }
 #: La catégorie propre aux permissions : un accès hors du dépôt, ou sans chemin pour en juger.
 _OUTSIDE_REPO = "hors-depot"
+#: Les natures de question que le kit écrit lui-même sur la conduite d'une tâche, à options fermées : la récolte
+#: (``resume_branch``, ``resume_unfenced``) et les tentatives épuisées (``retry_exhausted``).
+_KIT_CONDUCT_KINDS = frozenset({"resume_branch", "resume_unfenced", "retry_exhausted"})
+#: Les couples d'options fermées du kit quand la nature ne suffit pas à le reconnaître : le désaccord persistant du
+#: relecteur est un ``choice`` « reprendre / abandonner » (``reviewer.py``), les tentatives épuisées « réessayer /
+#: abandonner ». Une question libre, aux options propres à son auteur, n'en fait pas partie.
+_KIT_CONDUCT_OPTIONS = (frozenset({"reprendre", "abandonner"}), frozenset({"reessayer", "abandonner"}))
 
 
 def _fold(text: object) -> str:
@@ -134,6 +143,18 @@ def _fold(text: object) -> str:
     cleaned = _INVISIBLE.sub("", str(text))
     folded = "".join(c for c in unicodedata.normalize("NFKD", cleaned) if not unicodedata.combining(c))
     return " ".join(folded.lower().split())
+
+
+def _kit_conduct(question: Question) -> bool:
+    """Vrai si le kit écrit *question* lui-même, à options fermées, sur la conduite de la tâche.
+
+    Son texte et ses options disent alors tout ce qu'il y a à juger : le titre de la tâche — qui peut parler de tarif
+    ou de coût sans que la question porte sur une dépense — n'entre pas dans le classement (#1159). Une question
+    d'agent, ou une question libre, garde le titre.
+    """
+    if question.kind in _KIT_CONDUCT_KINDS:
+        return True
+    return frozenset(_fold(option) for option in question.options) in _KIT_CONDUCT_OPTIONS
 
 
 def _outside_repo(texts: list[str], project_root: Path) -> bool:
@@ -204,7 +225,9 @@ def reserved_reason(
     policy = load_autopilot_policy(project_root) if policy is None else policy
     if policy.error:
         return f"politique du pilote invalide ({policy.error}) : tout reste à l'humain"
-    texts = [question.text, question.why, *question.options, task.title]
+    texts = [question.text, question.why, *question.options]
+    if not _kit_conduct(question):  # #1159 : une question de conduite écrite par le kit ne se juge pas sur le titre
+        texts.append(task.title)
     folded = _fold(" ".join(texts))
     if _LOOKALIKE.search(folded):
         return "catégorie réservée à l'humain, même pilote activé : texte aux lettres non latines (homoglyphes possibles)"
