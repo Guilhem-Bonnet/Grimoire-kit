@@ -55,7 +55,7 @@ def _provider(pid: str, tier: str, script: Path) -> str:
     return (
         f'  - id: "{pid}"\n'
         f"    enabled: true\n"
-        f'    provider_type: "hosted"\n'
+        f'    provider_type: "hosted"\n    data_policy:\n      allowed_data_classes: [project-source]\n'
         f'    allowed_capabilities: ["chat", "code"]\n'
         f'    default_models: ["{pid}-model"]\n'
         f'    currency: "api"\n'
@@ -73,7 +73,7 @@ def _registry(root: Path, *providers: str) -> None:
         '$schema: "grimoire-llm-provider-registry/v1"\n'
         'metadata:\n  project: "demo"\n  owner: ""\n  policy: "No provider/model call outside this registry."\n'
         "providers:\n" + "\n".join(providers) + "\n"
-        'routing:\n  default_provider: ""\n  default_fallback_chain: []\n'
+        'routing:\n  default_data_class: project-source\n  default_provider: ""\n  default_fallback_chain: []\n'
         "  require_capability_match: true\n  require_data_policy_match: true\n",
         encoding="utf-8",
     )
