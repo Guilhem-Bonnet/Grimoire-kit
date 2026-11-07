@@ -30,8 +30,10 @@ from grimoire.missions.orchestrator_session import (
     ORCH_ENDED_EVENT,
     ORCH_LAUNCH_FAILED_EVENT,
     ORCH_LAUNCHED_EVENT,
+    PILOT_RETRY_DELAY,
     SESSION_NAME,
     SESSION_TIMEOUT,
+    OrchestratorStage,
     eligible_questions,
     mandate_gesture,
 )
@@ -779,3 +781,50 @@ def test_une_presentation_dont_toutes_les_reponses_sont_refusees_est_neutralisee
     assert (last.action, last.status) == ("end", "done") and f"laissées à l'humain : {tid}/{qid}" in last.detail
     assert tick(projet, host).orchestrator == ()
     assert len([a for a in host.of("claude", "--bg") if SESSION_NAME in a]) == 3
+
+
+# ── Pilote activé : pas de relance à vide ──────────────────────────────────────
+
+
+def _lancements(projet: Path) -> int:
+    return sum(1 for e in TaskService(projet).ledger.list_events() if e.event_type == ORCH_LAUNCHED_EVENT)
+
+
+@pytest.fixture
+def pilote(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Pilote activé, une question présentée une fois à une session terminée sans y répondre."""
+    monkeypatch.setattr(OrchestratorStage, "_pilot", lambda _self: True)
+    grant(projet)
+    tid, _qid = worker_asks(projet, host)
+    short = tick(projet, host).orchestrator[-1]
+    assert (short.action, short.status) == ("launch", "launched"), short
+    host.stopped.add(short.session)
+    return tid
+
+
+def test_sans_progres_le_pilote_ne_represente_pas_la_question(projet: Path, host: FakeHost, pilote: str) -> None:
+    tick(projet, host)
+    tick(projet, host)
+    assert _lancements(projet) == 1
+
+
+def test_un_evenement_sur_la_tache_rouvre_la_presentation(projet: Path, host: FakeHost, pilote: str) -> None:
+    tick(projet, host)
+    TaskService(projet).ledger.append_event("task.progress_noted", pilote, "task", "amelia", {"note": "du nouveau"})
+    tick(projet, host)
+    assert _lancements(projet) == 2
+
+
+def test_passe_le_delai_le_pilote_represente_quand_meme(projet: Path, host: FakeHost, pilote: str) -> None:
+    tick(projet, host)
+    tick(projet, host, now=datetime.now(UTC) + PILOT_RETRY_DELAY + timedelta(minutes=1))
+    assert _lancements(projet) == 2
+
+
+def test_sans_pilote_le_plafond_de_presentations_reste_seul_juge(projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    grant(projet)
+    worker_asks(projet, host)
+    short = tick(projet, host).orchestrator[-1]
+    host.stopped.add(short.session)
+    tick(projet, host)
+    assert _lancements(projet) == 2
