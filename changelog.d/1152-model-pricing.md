@@ -1,0 +1,1 @@
+- feat(providers): un tarif optionnel `models[].pricing` dans `llm-provider-registry.yaml` chiffre l'usage d'un worker routé vers un fournisseur externe ; sans tarif, le coût reste inconnu, jamais 0 (#1152)

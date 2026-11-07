@@ -175,12 +175,14 @@ def fold_pending(
     """
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.missions.task_worktree import find_task_worktree
+    from grimoire.providers.registry import read_model_pricing
     from grimoire.traces.ledger import TraceLedger
     from grimoire.traces.transcript_usage import SOURCE_CLAUDE_TRANSCRIPT, SOURCE_TAG_PREFIX, fold_claude_transcript
 
     report = UsageFoldReport(dry_run=dry_run)
     traces_path = service.home_root / TRACES_DIR
     ledger = TraceLedger(traces_path)
+    pricing_for = read_model_pricing(service.home_root).get
     has_traces = (traces_path / "traces.jsonl").is_file()
     folded_tasks = {
         t.task_id
@@ -234,7 +236,13 @@ def fold_pending(
         since, until = _claim_window(service, task)
         try:
             result = fold_claude_transcript(
-                ledger, path, task_id=task.id, mission_id=task.mission_id, since=since, until=until
+                ledger,
+                path,
+                task_id=task.id,
+                mission_id=task.mission_id,
+                since=since,
+                until=until,
+                pricing_for=pricing_for,
             )
         except (OSError, ValueError) as exc:
             report.outcomes.append(FoldOutcome(task.id, "error", size_bytes=size, detail=f"{type(exc).__name__}: {exc}"))
