@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.memory.backends.base import BackendStatus, MemoryBackend, MemoryEntry
+from grimoire.memory.chromadb_native_probe import ensure_native_index
 from grimoire.memory.taxonomy import build_taxonomy
 
 _DEFAULT_COLLECTION = "mempalace_drawers"
@@ -93,6 +94,11 @@ class MemPalaceBackend(MemoryBackend):
             raise ImportError("MemPalace path is required")
         self._palace_path = str(Path(path).expanduser().resolve())
         self._collection_name = collection_name
+        # #1059 : l'import natif de chromadb peut tuer le processus (SIGILL) sur
+        # un processeur sans les instructions de la roue hnswlib. La sonde tourne
+        # dans un sous-processus et refuse « mempalace » avec un repli clair,
+        # avant PersistentClient qui chargerait cet index.
+        ensure_native_index()
         self._client: Any = chromadb.PersistentClient(path=self._palace_path)
         self._collection: Any = self._client.get_or_create_collection(name=collection_name)
 
