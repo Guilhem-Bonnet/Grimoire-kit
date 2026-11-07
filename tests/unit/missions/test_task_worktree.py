@@ -133,6 +133,21 @@ def test_deux_enfants_en_conflit_le_second_est_refuse_bloque_et_garde(repo: Path
     assert "a.txt" in second.reason
 
 
+def test_un_conflit_ne_rouvre_pas_une_tache_annulee(repo: Path, service: TaskService) -> None:
+    a, b = _tache(service, "Enfant A"), _tache(service, "Enfant B")
+    wa = create_task_worktree(service, a, repo=repo)
+    wb = create_task_worktree(service, b, repo=repo)
+    _commit(wa.path, "a.txt", "version A\n", "A")
+    _commit(wb.path, "a.txt", "version B\n", "B")
+    assert merge_task(service, a, repo=repo, check=OK).status == "merged"
+    service.cancel(b, "abandonnée avant la fusion", "cli", force=True)
+
+    second = merge_task(service, b, repo=repo, check=OK)
+
+    assert second.status == "conflict"
+    assert service.require(b).status is TaskState.CANCELLED  # pas de transition vers blocked
+
+
 def test_un_head_different_du_sha_verifie_bloque_le_merge(repo: Path, service: TaskService) -> None:
     tid = _tache(service, "Enfant A")
     wt = create_task_worktree(service, tid, repo=repo)

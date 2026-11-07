@@ -1066,6 +1066,42 @@ def test_une_reprise_reste_chez_le_fournisseur_du_lancement(route_prete: Path, h
     assert argv[argv.index("--settings") + 1] == str(settings_path("deepseek"))
 
 
+# ── #957 : le worktree du worker porte les hooks Grimoire ──────────────────────
+
+
+def test_le_worktree_d_un_depot_sans_fichiers_d_hote_suivis_porte_le_hook_avant_claude_bg(
+    projet: Path, service: TaskService, host: FakeHost
+) -> None:
+    assert git(projet, "ls-files", ".claude") == ""
+    tid = ready(service, "hooks")
+    tick(projet, host)
+    (_argv, cwd, _env) = next(c for c in host.calls if c[0][:2] == ["claude", "--bg"])
+    assert cwd.name == tid
+    settings = json.loads((cwd / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"]
+
+
+def test_hook_introuvable_apres_la_synchronisation_le_lancement_est_refuse(
+    projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.hosts.sync import HostSyncOutcome
+
+    monkeypatch.setattr("grimoire.hosts.sync.sync_host_surfaces", lambda root, **_kw: HostSyncOutcome(error="boom"))
+    tid = ready(service, "refus")
+    report = tick(projet, host)
+    assert host.of("claude", "--bg") == []
+    (outcome,) = [o for o in report.launches if o.task_id == tid]
+    assert outcome.status == "skipped" and "PreToolUse" in outcome.detail
+    assert TaskService(projet).require(tid).status is TaskState.READY
+
+
+def test_les_fichiers_d_hote_generes_ne_salissent_pas_le_worktree(projet: Path, service: TaskService, host: FakeHost) -> None:
+    ready(service, "propre")
+    tick(projet, host)
+    (_argv, cwd, _env) = next(c for c in host.calls if c[0][:2] == ["claude", "--bg"])
+    assert (cwd / ".claude" / "settings.json").is_file() and git(cwd, "status", "--porcelain", "--untracked-files=all") == ""
+
+
 # ── Coût des sessions : profil allégé et palier par classe ────────────────────
 
 

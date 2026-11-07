@@ -306,3 +306,129 @@ def test_le_nom_de_l_instantane_est_celui_du_ledger() -> None:
     from grimoire.missions.ledger_snapshot import SNAPSHOT_FILENAME as LEDGER_SNAPSHOT_FILENAME
 
     assert SNAPSHOT_FILENAME == LEDGER_SNAPSHOT_FILENAME
+
+
+# ── #1125 : lire ou citer l'instantané n'est pas l'écrire ────────────────────
+
+_PY_READ = f"python3 -I - <<'P'\nimport json\ns = json.load(open('{_SNAPSHOT}'))\nprint(len(s))\nP"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _PY_READ,
+        f"gh issue create --title t --body-file - <<'EOF'\nle fichier {_SNAPSHOT} est refusé\nEOF",
+        f"git commit -m 'cite {_SNAPSHOT}'",
+        f"grep waiting {_SNAPSHOT}",
+        f"head -c 200 {_SNAPSHOT}",
+    ],
+)
+def test_lire_ou_citer_l_instantane_est_permis(tmp_path: Path, command: str) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": command})
+    assert decision.outcome is not Outcome.DENY, decision
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"echo '{{}}' > {_SNAPSHOT}",
+        f"echo '{{}}' >> {_SNAPSHOT}",
+        f"tee {_SNAPSHOT} < forged",
+        f"sed -i 's/a/b/' {_SNAPSHOT}",
+        f"cp forged.json {_SNAPSHOT}",
+        f"mv forged.json {_SNAPSHOT}",
+        f"ln -sf forged.json {_SNAPSHOT}",
+        f"python3 -I - <<'P'\nopen('{_SNAPSHOT}', 'w').write('x')\nP",
+        f"python3 -I - <<'P'\nimport json\njson.dump({{}}, open('{_SNAPSHOT}', 'w'))\nP",
+        f"python3 -I - <<'P'\nfrom pathlib import Path\nPath('{_SNAPSHOT}').write_text('x')\nP",
+        f"python3 -I - <<'P'\nimport os\nos.remove('{_SNAPSHOT}')\nP",
+        f"python3 -c \"open('{_SNAPSHOT}', 'w').write('x')\"",
+        f"python3 - <<P\nopen('{_SNAPSHOT}', 'w')\nP",
+        f"cat {_SNAPSHOT} > {_SNAPSHOT}",
+    ],
+)
+def test_ecrire_l_instantane_reste_refuse(tmp_path: Path, command: str) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": command})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "ledger-snapshot"
+
+
+# ── #1132 : chaque branche de refus de la lecture python prouvée ─────────────
+
+_Q = f"'{_SNAPSHOT}'"
+
+
+def _py(body: str, head: str = "python3 -I - <<'P'", tail: str = "P") -> str:
+    """Un script python lu sur stdin ; ces chaînes ne servent qu'à la garde, elles ne sont jamais exécutées."""
+    return f"{head}\n{body}\n{tail}"
+
+
+_PY_REFUSES = {
+    "open-w": f"open({_Q}, 'w')",
+    "open-a": f"open({_Q}, 'a')",
+    "open-r+": f"open({_Q}, 'r+')",
+    "open-mode-kw-w": f"open({_Q}, mode='w')",
+    "open-mode-non-constant": f"m = 'w'\nopen({_Q}, m)",
+    "open-mode-kw-non-constant": f"m = 'w'\nopen({_Q}, mode=m)",
+    "open-path-non-constant": f"p = {_Q}\nopen(p)",
+    "open-opener": f"open({_Q}, opener=None)",
+    "open-buffering": f"open({_Q}, buffering=0)",
+    "open-sans-argument": f"n = {_Q}\nopen()",
+    "open-trois-positionnels": f"open({_Q}, 'r', 1)",
+    "write": f"open({_Q}).write('x')",
+    "import-os": f"import os\nn = {_Q}",
+    "import-json-as": f"import json as j\nn = {_Q}",
+    "from-import": f"from json import load\nn = {_Q}",
+    "getattr": f"getattr(open({_Q}), 'read')()",
+    "exec": f"exec('open({_Q}, \"w\")')",
+    "dunder-import": f"__import__('os').remove({_Q})",
+    "attribut-prive": f"n = {_Q}\nn._x",
+    "alias-open": f"o = open\no({_Q}, 'w')",
+    "open-dans-liste": f"[open][0]({_Q}, 'w')",
+    "print-file": f"f = open({_Q})\nprint('x', file=f)",
+    "print-double-etoile": f"k = {{}}\nn = {_Q}\nprint(**k)",
+    "def": f"def f():\n    return open({_Q})",
+    "lambda": f"n = {_Q}\ng = lambda: n",
+    "with": f"with open({_Q}) as f:\n    pass",
+    "try": f"try:\n    n = {_Q}\nexcept Exception:\n    pass",
+    "syntaxe-invalide": f"n = {_Q} (",
+}
+
+
+@pytest.mark.parametrize("body", list(_PY_REFUSES.values()), ids=list(_PY_REFUSES))
+def test_un_script_python_non_prouve_en_lecture_reste_refuse(tmp_path: Path, body: str) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": _py(body)})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "ledger-snapshot"
+
+
+_PY_LECTURE = f"import json\ns = json.load(open({_Q}))\nprint(len(s))"
+_PY_FORME_REFUSEE = {
+    "tag-non-quote": _py(_PY_LECTURE, head="python3 -I - <<P"),
+    "option-inconnue": _py(_PY_LECTURE, head="python3 -X dev - <<'P'"),
+    "script-qui-n-est-pas-stdin": _py(_PY_LECTURE, head="python3 -I script.py <<'P'"),
+    "redirection-de-sortie-vers-l-instantane": _py(_PY_LECTURE, head=f"python3 -I - <<'P' > {_SNAPSHOT}"),
+    "deux-heredocs": _py(_PY_LECTURE, head="python3 -I - <<'P' <<'Q'", tail="P\nx\nQ"),
+}
+
+
+@pytest.mark.parametrize("command", list(_PY_FORME_REFUSEE.values()), ids=list(_PY_FORME_REFUSEE))
+def test_une_forme_de_commande_python_non_prouvee_reste_refusee(tmp_path: Path, command: str) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": command})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "ledger-snapshot"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _py(f"import json\ns = json.load(open({_Q}))\nprint(len(s))"),
+        _py(f"import json\ns = json.load(open({_Q}, mode='r'))\nprint(len(s))"),
+        _py(f"import json\ns = json.load(open({_Q}, 'rb'))\nprint(len(s))"),
+        _py(f"import json\ns = json.load(open({_Q}, encoding='utf-8'))\nprint(len(s))", head="python3 -I -B - <<'P'"),
+    ],
+    ids=["sans-mode", "mode-kw-r", "mode-positionnel-rb", "flags-I-B"],
+)
+def test_une_lecture_python_prouvee_est_permise(tmp_path: Path, command: str) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": command})
+    assert decision.outcome is not Outcome.DENY, decision
