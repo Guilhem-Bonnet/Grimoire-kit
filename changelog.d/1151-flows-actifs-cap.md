@@ -1,0 +1,1 @@
+- fix(flows): la capsule ne relit que les 3 flows actifs les plus récents, puis une ligne « + N autres, grimoire flow list » (#1151)
