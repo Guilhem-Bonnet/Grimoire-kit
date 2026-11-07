@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from grimoire.missions.breaker import BreakerState
     from grimoire.missions.ci_slots import CiOutcome, CiProbe
     from grimoire.missions.effects import EffectOutcome, Probe
+    from grimoire.missions.external_merge import ExternalMergeOutcome
     from grimoire.missions.janitor import JanitorOutcome
     from grimoire.missions.launcher import Exec, LaunchOutcome
     from grimoire.missions.merger import MergerOutcome
@@ -110,6 +111,7 @@ class TickReport:
     merges: tuple[MergerOutcome, ...] = ()
     orchestrator: tuple[OrchestratorOutcome, ...] = ()
     usage: tuple[Any, ...] = ()  # GAO-i12 : les journaux repliés à ce tick (FoldOutcome)
+    external_merges: tuple[ExternalMergeOutcome, ...] = ()  # #1162 : les PR fusionnées hors merger, soldées
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -140,6 +142,8 @@ class TickReport:
             payload["orchestrator"] = [o.to_dict() for o in self.orchestrator]
         if self.usage:  # GAO-i12 : même règle
             payload["usage"] = [o.to_dict() for o in self.usage]
+        if self.external_merges:  # #1162 : même règle
+            payload["external_merges"] = [o.to_dict() for o in self.external_merges]
         return payload
 
 
@@ -217,19 +221,54 @@ def _one_pass(
     """Récolte, réveils, effets, admission — les mêmes gestes en plan (sur la copie) et appliqués."""
     from grimoire.missions.ci_slots import migrate_orphan_slots, once_per_tick, reconcile_ci
     from grimoire.missions.effects import reconcile
-    from grimoire.missions.launcher import default_exec, release_ended_workers, renew_live_workers
+    from grimoire.missions.external_merge import reconcile_external_merges
+    from grimoire.missions.launcher import (
+        default_exec,
+        release_ended_workers,
+        renew_live_workers,
+        resume_provider_failed_workers,
+    )
 
     heartbeat = ""
+    provider_notes: list[str] = []
     try:  # le battement des workers au travail, avant la récolte (#961) ; en erreur, la récolte juge comme avant
         renew_live_workers(service, exec_ or default_exec, now=now)
     except Exception as exc:
         heartbeat = f"battement des workers : en erreur, aucun bail renouvelé à ce tick ({type(exc).__name__}: {exc})"
+    if mode == "apply":
+        # #1158 : un tour fini sur une erreur transitoire du fournisseur (5xx, 429, overloaded) ne se paie pas
+        # d'un bail perdu. Avant ``release_ended`` et la récolte, la session est reprise sur place ; au-delà du
+        # plafond, la tâche se gare avec la question qui nomme l'erreur — jamais « bail perdu (heartbeat) ».
+        from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+        read_policy = load_orchestrator_policy(service.home_root)
+        permission_mode = read_policy.policy.worker.permission_mode if read_policy.policy is not None else ""
+        try:
+            for resumed in resume_provider_failed_workers(
+                service, exec_ or default_exec, now=now, permission_mode=permission_mode
+            ):
+                if resumed.action == "parked":
+                    provider_notes.append(
+                        f"worker : {resumed.task_id} garée après épuisement des reprises sur une erreur du "
+                        f"fournisseur ({resumed.detail[:160]})"
+                    )
+                elif resumed.action == "failed":
+                    provider_notes.append(
+                        f"worker : {resumed.task_id} non reprise après une erreur du fournisseur ({resumed.detail})"
+                    )
+        except Exception as exc:
+            provider_notes.append(
+                f"reprises après erreur du fournisseur : en erreur, la récolte jugera comme avant "
+                f"({type(exc).__name__}: {exc})"
+            )
     if mode == "apply":  # P90 : une session terminée rend sa tâche au tick suivant, sans attendre la fin du bail
         try:
             release_ended_workers(service, exec_ or default_exec, now=now)
         except Exception as exc:
             heartbeat = heartbeat or f"sessions terminées : en erreur, retenté au tick suivant ({type(exc).__name__}: {exc})"
     report = service.reap(apply=True, now=now, probe_hosts=mode == "apply")
+    # #1162 : une PR fusionnée à la main solde sa tâche avant toute admission, relecture ou relance.
+    external_merges = reconcile_external_merges(service, exec_=exec_ or default_exec)
     woken = tuple(service.wake_due(apply=True, now=now, pause=state))
     effects = tuple(reconcile(service, apply=True, probe=effect_probe))
     shared = once_per_tick(ci_probe)  # UNE lecture gh par tick, partagée par la réconciliation et la migration
@@ -241,7 +280,7 @@ def _one_pass(
         except Exception as exc:
             heartbeat = heartbeat or f"arrêt des workers au repos : en erreur, retenté au tick suivant ({type(exc).__name__}: {exc})"
     ci = (*reconcile_ci(service, probe=shared, now=now), *migrate_orphan_slots(service, probe=shared, now=now))
-    attention = [*state.attention(), *([heartbeat] if heartbeat else [])]
+    attention = [*state.attention(), *provider_notes, *([heartbeat] if heartbeat else [])]
     policy, cleanup = _orchestrator_stage(service, mode, exec_, attention)
     plan = service.queue_plan(now=now, pause=state)
     dispatched: tuple[str, ...] = ()
@@ -284,6 +323,9 @@ def _one_pass(
     for merge in merges:
         if merge.status in ("failed", "refused") or merge.action == "escalate":
             attention.append(f"merger : {merge.task_id} {merge.action} {merge.status} ({merge.detail})")
+    for external in external_merges:
+        if external.status == "failed":
+            attention.append(f"fusion externe : {external.task_id} {external.status} ({external.detail})")
     for answer in answers:
         if answer.status == "failed" or "laissées à l'humain" in answer.detail:
             attention.append(f"orchestrateur : {answer.action} {answer.status} ({answer.detail})")
@@ -302,7 +344,7 @@ def _one_pass(
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
-        launches, cleanup, breaker, reviews, merges, answers, usage,
+        launches, cleanup, breaker, reviews, merges, answers, usage, external_merges,
     )
 
 

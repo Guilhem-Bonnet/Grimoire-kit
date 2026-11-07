@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.80.1",
+ "generated_for": "3.82.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -373,6 +373,10 @@
   "19eee4058781490c97821ccaa2ecd616814e1d3580f9426d29f9f182fdca049e": {
    "version": "3.6.0",
    "path": "framework/agentic-standard/templates/merge-lane.yaml"
+  },
+  "19f1b8b7fa388419d9a31a120b206b7f3b872c83e291586b1e740c52c3c40695": {
+   "version": "3.82.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
   },
   "19fbac8504ac73614f4e7679f352253da556237c4f2395944dc4c3d612db2dd1": {
    "version": "3.7.0",
@@ -2661,6 +2665,10 @@
   "a476c91f146e0074b7c941e5baf43ff183b2cc6a98057c69d7c876ee9af8afaa": {
    "version": "3.16.0",
    "path": "framework/tools/grimoire-completion.zsh"
+  },
+  "a4ae3b69ee2e9e4b66795f2f2434af74a429773234a149dd3dac8915db401c29": {
+   "version": "3.81.0",
+   "path": "framework/agentic-standard/templates/context-contract.yaml"
   },
   "a4bf5bd1a3f1129f5185a7a1a03c69b24c29fb15d5626356f49d7f0d6044439c": {
    "version": "3.12.0",

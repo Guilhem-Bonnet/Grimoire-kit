@@ -7,6 +7,39 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.82.0] - 2026-11-07
+
+### Added
+
+- feat(providers): un tarif optionnel `models[].pricing` dans `llm-provider-registry.yaml` chiffre l'usage d'un worker routé vers un fournisseur externe ; sans tarif, le coût reste inconnu, jamais 0 (#1152, PR #1164)
+
+### Fixed
+
+- fix(missions): une erreur 5xx/429/overloaded du fournisseur relance le worker sur sa session au lieu de le faire récolter, puis le gare en nommant la vraie cause au-delà du plafond ; seule une entrée marquée `isApiErrorMessage` par l'hôte déclenche la reprise, un tour ordinaire qui cite « 500 » n'est pas repris (#1158, PR #1166)
+- fix(autopilot): une question de conduite à options fermées écrite par le kit est jugée sur son texte, pas sur le titre de la tâche (#1159, PR #1165)
+- fix(missions): une PR `task/<id>` fusionnée hors merger solde sa tâche au tick, sans relancer worker ni relecteur (#1162, PR #1167)
+- fix(mandate): un challenge de mandat servi est clos (lu sur `grant_challenge_used`) ; la même demande relancée en émet un nouveau au lieu de réutiliser l'ancien (#939, PR #1168)
+
+## [3.81.0] - 2026-11-07
+
+### Changed
+
+- **Une tâche ne part plus sur un fournisseur externe sans classe de données déclarée et admise.** `data_policy` existait dans le registre sans que rien ne la lise. Le worker du tick et `grimoire task dispatch` l'appliquent désormais, en échec fermé. À faire après la mise à jour pour garder un fournisseur externe : poser `routing.default_data_class` dans `llm-provider-registry.yaml`, ou `task add --data-class`. Sinon le worker garde le modèle de l'hôte et `task dispatch` refuse avec le motif `data_policy`. `grimoire task show` affiche la classe retenue. Cette règle reste une déclaration : la documentation dit ce qu'elle ne garantit pas (#1133, PR #1145).
+- feat(context): `memory_inclusions` du context-bundle porte les entrées liées aux fichiers et aux mots de la tâche, via le backend lexical et sous budget de jetons (#1134, PR #1142)
+
+### Fixed
+
+- fix(ci): le rejeu de régression sur la base écarte les tests `tests/e2e/` (navigateur absent du job) et rend « non rejoué », sans échec, quand la PR n'a que ces tests ; une PR mixte ne rejoue que ses tests hors E2E (#1148, PR #1155)
+- **Une reprise vers `running` rouvre le bail.** Après `task move --to running` depuis `needs_verification` ou `waiting`, un claim déjà échu faisait récolter la tâche au tick suivant, alors que sa session vivait encore, et la tâche partait en attente humaine (#1149, PR #1150).
+- fix(flows): la capsule ne relit que les 3 flows actifs les plus récents, puis une ligne « + N autres, grimoire flow list » (#1151, PR #1156)
+- fix(hosts): une tâche en attente (`waiting`) que la session ne réclame pas n'est plus annoncée comme « Tâche courante » ni jugée par le `Stop` — son claim garé ne désigne plus la tâche active, et une carte de board périmée pour elle ne la ramène pas (#1153, PR #1157)
+- fix(missions): le profil allégé (`lean`) passe `--tools=<liste>` en un seul jeton : en deux, l'option variadique avalait la consigne du relecteur (25 relectures muettes sur 26) et le message de reprise d'un worker sans `permission_mode` (#1160, PR #1161)
+- fix(doctor): signaler un hook de l'hôte dont l'exécutable ne se résout pas dans le PATH de l'unité du tick (#1022, PR #1147)
+- fix(memory): refuser `mempalace` avec un message Python clair quand l'index natif de chromadb tue le processus (SIGILL) ; `grimoire doctor` rend le même verdict depuis une sonde en sous-processus, mise en cache par version de chromadb et par machine (#1059, PR #1146)
+- fix(orchestrate): une session peut lever la pause qu'elle a posée elle-même ; celle d'un humain, du disjoncteur ou d'une autre session reste réservée (#1119, PR #1141)
+- fix(cockpit): une carte de décision garde le focus clavier après un rafraîchissement du ledger, donc ses raccourcis (`2`, `r`, `e`, `h`) continuent d'agir (#1122, PR #1143)
+- fix(memory): le statut mémoire sonde les services en parallèle et borne à 0,3 s les connexions de boucle locale ; un délai dépassé reste « inconnu » (#954, PR #1144)
+
 ## [3.80.1] - 2026-11-06
 
 - fix(missions): un worker part aussi depuis un dépôt qui ne suit pas son contexte projet : les hooks sont posés dans le worktree au lieu de bloquer tout lancement (#1139)

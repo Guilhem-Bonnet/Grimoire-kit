@@ -7,13 +7,15 @@ code : ``ProviderSpec``/``ModelSpec`` pour le routage par palier de coût
 ni contraindre les champs déjà consommés ailleurs (``allowed_capabilities``,
 ``data_policy``, ``fallback_order``...).
 
-Les champs ``currency``, ``invocation`` et ``models`` sont optionnels : un
-registre v1 qui ne les déclare pas se lit toujours, juste sans fournisseur
-utilisable par ``choose()`` (aucun modèle affecté à un palier).
+Les champs ``currency``, ``invocation``, ``models`` et ``models[].pricing``
+sont optionnels : un registre v1 qui ne les déclare pas se lit toujours, juste
+sans fournisseur utilisable par ``choose()`` (aucun modèle affecté à un palier)
+et sans tarif pour chiffrer l'usage (issue #1152).
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,11 +44,49 @@ class ProviderRegistryError(GrimoireRegistryError):
 
 
 @dataclass(frozen=True, slots=True)
+class ModelPricing:
+    """Tarif catalogue optionnel d'un modèle, en dollars par million de tokens (#1152).
+
+    Déclaré sous ``models[].pricing``, il est la seule source qui permet de
+    chiffrer l'usage d'un modèle absent de :data:`grimoire.tools.cost_model.MODEL_RATES`
+    (un fournisseur externe, par exemple). Un tarif manquant n'est jamais
+    compté ``0.0`` : :meth:`cost_usd` rend ``None``, et l'appel reste inchiffré.
+    """
+
+    input_per_mtok: float
+    output_per_mtok: float
+    cache_read_per_mtok: float | None = None
+
+    def cost_usd(
+        self,
+        *,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+    ) -> float | None:
+        """Coût $ de l'appel, ou ``None`` dès qu'un compteur n'a pas de tarif déclaré.
+
+        Les tokens de cache lus sont facturés à ``cache_read_per_mtok`` ; sans ce
+        tarif (ou avec des tokens de cache écrits, que ce champ ne modélise pas),
+        l'appel reste inconnu plutôt que de prendre le tarif d'entrée — un
+        chiffre faux ferait croire à une facture qu'on n'a pas (#1152).
+        """
+        if cache_creation_tokens or (cache_read_tokens and self.cache_read_per_mtok is None):
+            return None
+        total = input_tokens * self.input_per_mtok + output_tokens * self.output_per_mtok
+        if cache_read_tokens and self.cache_read_per_mtok is not None:
+            total += cache_read_tokens * self.cache_read_per_mtok
+        return round(total / 1_000_000, 6)
+
+
+@dataclass(frozen=True, slots=True)
 class ModelSpec:
     """Un modèle déclaré sous un fournisseur, affecté à un palier de coût."""
 
     id: str
     tier: str
+    pricing: ModelPricing | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +151,33 @@ def _str_tuple(value: Any) -> tuple[str, ...]:
     return tuple(str(item) for item in value if str(item).strip())
 
 
+def _rate(value: Any) -> float | None:
+    """Un tarif valide : réel fini, positif ou nul, jamais un booléen."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
+
+
+def _model_pricing(value: Any) -> ModelPricing | None:
+    """``models[].pricing`` typé, ou ``None`` si le bloc est absent ou invalide.
+
+    Un tarif invalide (champ manquant, négatif, non numérique) n'est pas une
+    erreur de lecture : le modèle reste utilisable, simplement non chiffré — le
+    pire des deux maux serait un coût inventé.
+    """
+    if not isinstance(value, dict):
+        return None
+    input_rate = _rate(value.get("input_per_mtok"))
+    output_rate = _rate(value.get("output_per_mtok"))
+    if input_rate is None or output_rate is None:
+        return None
+    raw_cache_read = value.get("cache_read_per_mtok")
+    cache_read_rate = None if raw_cache_read is None else _rate(raw_cache_read)
+    if raw_cache_read is not None and cache_read_rate is None:
+        return None
+    return ModelPricing(input_rate, output_rate, cache_read_rate)
+
+
 def _model_specs(value: Any) -> tuple[ModelSpec, ...]:
     if not isinstance(value, list):
         return ()
@@ -122,8 +189,22 @@ def _model_specs(value: Any) -> tuple[ModelSpec, ...]:
         tier = entry.get("tier")
         if not model_id or not tier:
             continue
-        specs.append(ModelSpec(id=str(model_id), tier=str(tier)))
+        specs.append(ModelSpec(id=str(model_id), tier=str(tier), pricing=_model_pricing(entry.get("pricing"))))
     return tuple(specs)
+
+
+def _model_entry(model: ModelSpec) -> dict[str, Any]:
+    """Forme YAML de *model* — le tarif reste absent s'il n'est pas déclaré."""
+    entry: dict[str, Any] = {"id": model.id, "tier": model.tier}
+    if model.pricing is not None:
+        pricing: dict[str, Any] = {
+            "input_per_mtok": model.pricing.input_per_mtok,
+            "output_per_mtok": model.pricing.output_per_mtok,
+        }
+        if model.pricing.cache_read_per_mtok is not None:
+            pricing["cache_read_per_mtok"] = model.pricing.cache_read_per_mtok
+        entry["pricing"] = pricing
+    return entry
 
 
 def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
@@ -164,6 +245,33 @@ def read_registry(root: Path) -> tuple[ProviderSpec, ...]:
         return ()
     specs = (_provider_spec(entry) for entry in providers if isinstance(entry, dict))
     return tuple(spec for spec in specs if spec is not None)
+
+
+def read_model_pricing(root: Path) -> dict[str, ModelPricing]:
+    """Tarifs déclarés par id de modèle (``models[].pricing``), premier fournisseur gagnant.
+
+    Un modèle déclaré sans ``pricing`` n'apparaît pas : le tarifer par famille,
+    par palier ou par défaut serait un chiffre inventé (issue #1152). Un même id
+    déclaré par plusieurs fournisseurs garde le tarif du premier dans l'ordre du
+    registre — le registre est la seule autorité, et l'ordre y est stable.
+
+    Un registre illisible ne fait pas échouer le chiffrage : ce tarif n'est
+    qu'une métadonnée optionnelle, et son absence laisse le coût inconnu —
+    jamais ``0``. La panne du registre, elle, est déjà dite par
+    ``grimoire providers status`` et les gates ; faire tomber ``task show`` ou
+    le repli d'usage sur un fichier de configuration corrompu serait un second
+    dégât, pas un signal.
+    """
+    try:
+        providers = read_registry(root)
+    except ProviderRegistryError:
+        return {}
+    pricing: dict[str, ModelPricing] = {}
+    for provider in providers:
+        for model in provider.models:
+            if model.pricing is not None and model.id not in pricing:
+                pricing[model.id] = model.pricing
+    return pricing
 
 
 class ProviderWriteError(ProviderRegistryError):
@@ -257,7 +365,7 @@ def add_provider(
             "default_models": [model.id for model in models],
             "currency": currency,
             "invocation": invocation,
-            "models": [{"id": model.id, "tier": model.tier} for model in models],
+            "models": [_model_entry(model) for model in models],
             "data_policy": {
                 "allowed_data_classes": ["public-docs", "project-source", "generated-artifacts", "non-secret-metadata"],
                 "forbidden_data_classes": ["secrets", "credentials", "personal-data", "regulated-data"],
