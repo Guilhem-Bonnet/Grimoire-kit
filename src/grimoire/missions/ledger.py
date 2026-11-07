@@ -808,7 +808,14 @@ class MissionLedger:
             )
         self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
-        return self._tasks[task_id]
+        moved = self._tasks[task_id]
+        if to_state is TaskState.RUNNING and task.status in _RESUMING and moved.claim is not None:
+            # #1149 : une reprise rouvre le bail, sinon un claim échu la fait récolter au tick suivant.
+            epoch = moved.claim.lease_epoch
+            cached = read_lease(lease_path(self._root, task_id))
+            if cached is None or cached.epoch <= epoch:  # un fichier en avance est une barrière : on n'y touche pas
+                return self._renew_locked(moved, epoch, self._now(), DEFAULT_LEASE_TTL_SECONDS, "", actor_id)
+        return moved
 
     def wake(self, task_id: str, *, actor_id: str = "tick", reason: str = "", cause: str = "") -> MissionTask:
         """``waiting → ready`` — le seul chemin, réservé au tick : réponse reçue, échéance passée, quota ou CI rendus.
@@ -1010,22 +1017,26 @@ class MissionLedger:
             refusal = self._holder_refusal(task, lease_epoch)
             if refusal:
                 raise GrimoireMissionError(f"Renouvellement refusé pour {task_id} : {refusal}")
-            moment = now or self._now()
-            path = lease_path(self._root, task_id)
-            previous = read_lease(path)
-            busy = busy_until.isoformat() if busy_until else (previous.busy_until if previous else "")
-            write_lease(path, LeaseFile(task_id, lease_epoch, moment.isoformat(), ttl_seconds, busy))
-            expires = parse_instant(task.claim.expires_at)
-            if (
-                expires is not None
-                and expires - moment < timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS / 2)
-                and self.clock_state(moment) == "ok"
-            ):
-                pushed = (moment + timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS)).isoformat()
-                payload = {"task_id": task_id, "lease_epoch": lease_epoch, "expires_at": pushed, "actor_id": actor_id}
-                self._append_event(LEASE_RENEWED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
-                self._load()
-            return self._tasks[task_id]
+            busy = busy_until.isoformat() if busy_until else ""
+            return self._renew_locked(task, lease_epoch, now or self._now(), ttl_seconds, busy, actor_id)
+
+    def _renew_locked(
+        self, task: MissionTask, lease_epoch: int, moment: datetime, ttl_seconds: int, busy: str, actor_id: str
+    ) -> MissionTask:
+        """Réécrit le fichier de bail et repousse le plafond s'il approche. L'appelant tient le verrou du journal."""
+        task_id, claim = task.id, task.claim
+        assert claim is not None  # les deux appelants l'ont vérifié
+        path = lease_path(self._root, task_id)
+        previous = read_lease(path)
+        write_lease(path, LeaseFile(task_id, lease_epoch, moment.isoformat(), ttl_seconds, busy or (previous.busy_until if previous else "")))
+        expires = parse_instant(claim.expires_at)
+        half = timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS / 2)
+        if expires is not None and expires - moment < half and self.clock_state(moment) == "ok":
+            pushed = (moment + timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS)).isoformat()
+            payload = {"task_id": task_id, "lease_epoch": lease_epoch, "expires_at": pushed, "actor_id": actor_id}
+            self._append_event(LEASE_RENEWED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
+            self._load()
+        return self._tasks[task_id]
 
     def note_progress(self, task_id: str, text: str, *, actor_id: str = "system") -> LedgerEvent:
         """Note de progression du titulaire : ce que ``progress_at`` (K5) lit, sans changer d'état.
