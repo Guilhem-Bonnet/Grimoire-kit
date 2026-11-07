@@ -242,3 +242,94 @@ def test_une_sonde_sans_verdict_ne_refuse_pas_et_n_est_pas_cachee(tmp_path: Path
     assert verdict.ok
     assert "sans verdict" in verdict.detail
     assert not cache.exists()
+
+
+def test_chromadb_absent_rend_une_sonde_sans_objet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(probe, "installed_chromadb_version", lambda: "")
+
+    verdict = probe_native_index(cache_path=tmp_path / "c.json", runner=_forbidden_runner)
+
+    assert verdict.ok
+    assert "pas installé" in verdict.detail
+
+
+def test_un_demarrage_impossible_ne_refuse_pas(tmp_path: Path) -> None:
+    def _absent(*_args: object, **_kwargs: object) -> None:
+        raise OSError("binaire absent")
+
+    verdict = ensure_native_index(cache_path=tmp_path / "c.json", runner=_absent)
+
+    assert verdict.ok
+    assert "sans verdict" in verdict.detail
+
+
+@pytest.mark.parametrize("contenu", ["pas du json", "[1]", '{"schema": 99}'])
+def test_un_cache_illisible_relance_la_sonde(tmp_path: Path, contenu: str) -> None:
+    cache = tmp_path / "c.json"
+    cache.write_text(contenu, encoding="utf-8")
+    runner = _Runner(0)
+
+    assert probe_native_index(cache_path=cache, runner=runner).ok
+    assert runner.calls == 1
+
+
+def test_un_cache_qu_on_ne_peut_ecrire_ne_fait_pas_echouer_la_sonde(tmp_path: Path) -> None:
+    bloque = tmp_path / "fichier"
+    bloque.write_text("", encoding="utf-8")
+
+    assert probe_native_index(cache_path=bloque / "c.json", runner=_Runner(0)).ok
+
+
+def test_doctor_signale_une_pile_memoire_non_demarree(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from rich.console import Console
+
+    from grimoire.cli import doctor_memory
+
+    monkeypatch.setattr("grimoire.tools.memory_setup.unreached_configured_services", lambda _m: ["qdrant"])
+    monkeypatch.setattr(doctor_memory, "_native_index_check", lambda *_a, **_k: None)
+    cfg = SimpleNamespace(memory=SimpleNamespace(layer_profile="complet", backend="local"))
+    results: list[dict[str, object]] = []
+
+    doctor_memory.apply_memory_checks(cfg, results, fmt="text", console=Console(quiet=True))  # type: ignore[arg-type]
+
+    assert results[0]["name"] == "memory_stack_started"
+    assert results[0]["level"] == "warn"
+    assert "grimoire memory up --profile complet" in str(results[0]["detail"])
+
+
+@pytest.mark.parametrize(("ok", "attendu"), [(True, True), (False, False)])
+def test_doctor_rend_le_verdict_en_mode_texte(monkeypatch: pytest.MonkeyPatch, ok: bool, attendu: bool) -> None:
+    from types import SimpleNamespace
+
+    from rich.console import Console
+
+    from grimoire.cli import doctor_memory
+
+    monkeypatch.setattr("grimoire.tools.memory_setup.unreached_configured_services", lambda _m: [])
+    monkeypatch.setattr("importlib.util.find_spec", lambda _n: object())
+    monkeypatch.setattr(probe, "probe_native_index", lambda: NativeIndexVerdict(ok=ok, detail="sonde"))
+    cfg = SimpleNamespace(memory=SimpleNamespace(layer_profile="p", backend="mempalace"))
+    results: list[dict[str, object]] = []
+
+    doctor_memory.apply_memory_checks(cfg, results, fmt="text", console=Console(quiet=True))  # type: ignore[arg-type]
+
+    assert results[0]["passed"] is attendu
+
+
+def test_doctor_se_tait_sans_chromadb(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from rich.console import Console
+
+    from grimoire.cli import doctor_memory
+
+    monkeypatch.setattr("grimoire.tools.memory_setup.unreached_configured_services", lambda _m: [])
+    monkeypatch.setattr("importlib.util.find_spec", lambda _n: None)
+    cfg = SimpleNamespace(memory=SimpleNamespace(layer_profile="p", backend="local"))
+    results: list[dict[str, object]] = []
+
+    doctor_memory.apply_memory_checks(cfg, results, fmt="text", console=Console(quiet=True))  # type: ignore[arg-type]
+
+    assert results == []
