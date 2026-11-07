@@ -1,1 +1,0 @@
-- fix(ci): le rejeu de régression sur la base écarte les tests `tests/e2e/` (navigateur absent du job) et rend « non rejoué », sans échec, quand la PR n'a que ces tests ; une PR mixte ne rejoue que ses tests hors E2E (#1148)

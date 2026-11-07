@@ -1,3 +1,0 @@
-### Changed
-
-- **Une tâche ne part plus sur un fournisseur externe sans classe de données déclarée et admise.** `data_policy` existait dans le registre sans que rien ne la lise. Le worker du tick et `grimoire task dispatch` l'appliquent désormais, en échec fermé. À faire après la mise à jour pour garder un fournisseur externe : poser `routing.default_data_class` dans `llm-provider-registry.yaml`, ou `task add --data-class`. Sinon le worker garde le modèle de l'hôte et `task dispatch` refuse avec le motif `data_policy`. `grimoire task show` affiche la classe retenue. Cette règle reste une déclaration : la documentation dit ce qu'elle ne garantit pas (#1133).

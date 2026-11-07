@@ -1,1 +1,0 @@
-- fix(doctor): signaler un hook de l'hôte dont l'exécutable ne se résout pas dans le PATH de l'unité du tick (#1022)
