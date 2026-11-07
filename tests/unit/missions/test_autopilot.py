@@ -468,7 +468,9 @@ def test_presentations_are_no_longer_bounded_with_the_pilot(project: Path) -> No
         )
     assert (tid, qid) in stage._not_relisted()  # bornée aujourd'hui
     pilot_on(project)
-    assert (tid, qid) not in stage._not_relisted()  # sans borne pilote activé
+    assert (tid, qid) in stage._not_relisted()  # pilote activé, mais rien n'a progressé depuis la présentation
+    service.ledger.append_event("task.progress_noted", tid, "task", "amelia", {"note": "du nouveau"})
+    assert (tid, qid) not in stage._not_relisted()  # sans borne dès que la tâche a bougé
 
 
 def test_the_prompt_tells_the_session_how_to_decide_only_under_the_pilot(project: Path) -> None:
