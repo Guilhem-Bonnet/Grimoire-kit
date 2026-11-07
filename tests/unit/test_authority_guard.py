@@ -306,3 +306,48 @@ def test_le_nom_de_l_instantane_est_celui_du_ledger() -> None:
     from grimoire.missions.ledger_snapshot import SNAPSHOT_FILENAME as LEDGER_SNAPSHOT_FILENAME
 
     assert SNAPSHOT_FILENAME == LEDGER_SNAPSHOT_FILENAME
+
+
+# ── #1125 : lire ou citer l'instantané n'est pas l'écrire ────────────────────
+
+_PY_READ = f"python3 -I - <<'P'\nimport json\ns = json.load(open('{_SNAPSHOT}'))\nprint(len(s))\nP"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _PY_READ,
+        f"gh issue create --title t --body-file - <<'EOF'\nle fichier {_SNAPSHOT} est refusé\nEOF",
+        f"git commit -m 'cite {_SNAPSHOT}'",
+        f"grep waiting {_SNAPSHOT}",
+        f"head -c 200 {_SNAPSHOT}",
+    ],
+)
+def test_lire_ou_citer_l_instantane_est_permis(tmp_path: Path, command: str) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": command})
+    assert decision.outcome is not Outcome.DENY, decision
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"echo '{{}}' > {_SNAPSHOT}",
+        f"echo '{{}}' >> {_SNAPSHOT}",
+        f"tee {_SNAPSHOT} < forged",
+        f"sed -i 's/a/b/' {_SNAPSHOT}",
+        f"cp forged.json {_SNAPSHOT}",
+        f"mv forged.json {_SNAPSHOT}",
+        f"ln -sf forged.json {_SNAPSHOT}",
+        f"python3 -I - <<'P'\nopen('{_SNAPSHOT}', 'w').write('x')\nP",
+        f"python3 -I - <<'P'\nimport json\njson.dump({{}}, open('{_SNAPSHOT}', 'w'))\nP",
+        f"python3 -I - <<'P'\nfrom pathlib import Path\nPath('{_SNAPSHOT}').write_text('x')\nP",
+        f"python3 -I - <<'P'\nimport os\nos.remove('{_SNAPSHOT}')\nP",
+        f"python3 -c \"open('{_SNAPSHOT}', 'w').write('x')\"",
+        f"python3 - <<P\nopen('{_SNAPSHOT}', 'w')\nP",
+        f"cat {_SNAPSHOT} > {_SNAPSHOT}",
+    ],
+)
+def test_ecrire_l_instantane_reste_refuse(tmp_path: Path, command: str) -> None:
+    decision = _pre(tmp_path, "Bash", {"command": command})
+    assert decision.outcome is Outcome.DENY, decision
+    assert decision.detail["authority_vector"] == "ledger-snapshot"
