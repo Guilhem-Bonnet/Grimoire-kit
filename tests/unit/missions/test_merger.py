@@ -143,7 +143,7 @@ def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (
     if changelog:
         (wt / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
         files.append("CHANGELOG.md")
-    git(wt, "add", "--", *files)
+    git(wt, "add", "-f", "--", *files)  # -f : le lanceur ignore `.claude/` dans le worktree (#957), le chemin protégé y est
     git(wt, "commit", "-q", "-m", f"travail de {task.id}")
     git(wt, "push", "-q", "origin", f"task/{task.id}")
     branch = f"task/{task.id}"
