@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.80.1] - 2026-11-06
+
+- fix(missions): un worker part aussi depuis un dépôt qui ne suit pas son contexte projet : les hooks sont posés dans le worktree au lieu de bloquer tout lancement (#1139)
+
 ## [3.80.0] - 2026-11-06
 
 - fix(standard): la consigne de démarrage ne demande plus `gate check --task-id bootstrap` quand cette tâche n'est pas sur le board (#1127) (#1131)
