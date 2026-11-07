@@ -1,0 +1,1 @@
+- perf(cockpit): le cache de lecture sert aussi l'ouverture de page — `tasks`, `attention`, `sessions` et `sheet` sont servis depuis le cache sans `pulse_reload`, l'empreinte du pouls couvre désormais `traces.jsonl` et les journaux écrits hors cockpit (tick, flows, preuves, reçus de revue), et ces routes JSON répondent `304` sur `If-None-Match`

@@ -1,9 +1,11 @@
-"""Le cache des lectures que le flux en direct relance (P79) : un calcul par changement, pas un par onglet.
+"""Le cache des lectures lourdes du cockpit (P79) : un calcul par changement, pas un par onglet ni par page.
 
 Le 2026-10-27, huit workers actifs faisaient bouger l'empreinte du pouls plusieurs fois par seconde ; chaque
 onglet ouvert relisait alors ``tasks``, ``attention`` et ``sessions``, et le serveur recalculait tout à chaque
 fois. Seules, ces lectures coûtent ~0,6 s ; à plusieurs onglets, le serveur saturait (``attention`` 7,6 s, une
-lecture lourde voisine 67 s au lieu de 0,35 s).
+lecture lourde voisine 67 s au lieu de 0,35 s). Depuis GAO-perf-cockpit-002, l'ouverture de page et la navigation
+passent par le même cache : c'est là que l'utilisateur sent la lenteur, pas seulement lors d'un rechargement du
+direct.
 
 Deux règles, sans changer ce que la page reçoit :
 
