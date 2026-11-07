@@ -92,7 +92,15 @@ from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.core.fsio import locked
 from grimoire.core.standard_state import current_session
 from grimoire.hosts.decisions.authority_guard import AUTHORITY_SUFFIX, LIMIT_NOTE
-from grimoire.hosts.decisions.human_turns import ORIGIN_USER, TURNS_RELPATH, is_unattended, load_turns, turns_path
+from grimoire.hosts.decisions.human_turns import (
+    HOST_HUMAN_ORIGIN,
+    ORIGIN_USER,
+    TURNS_RELPATH,
+    host_turn_origin,
+    is_unattended,
+    load_turns,
+    turns_path,
+)
 
 __all__ = [
     "ATTESTED",
@@ -136,6 +144,8 @@ GRANTED_PREFIX = "granted:"
 GrantLookup = Callable[[], tuple[str, str] | None]
 
 NO_HUMAN_TURN = "no_human_turn_since_challenge"
+#: Le seul tour candidat n'a pas été écrit par l'humain d'après le journal de l'hôte (réveil, notification, `-p`).
+TURN_NOT_HUMAN = "turn_not_written_by_human"
 PLAN_DRIFTED = "plan_drifted"
 #: Les fournisseurs de plan que ``config.checkpoint.plan`` peut nommer (W2-11).
 PLAN_PROVIDERS: tuple[str, ...] = ("upgrade-removals",)
@@ -593,6 +603,7 @@ def attest(
     if since is None:
         return _no("no_challenge")
     consumed = frozenset(consumed) | _turn_keys(user_consumed_path())
+    not_human = ""
     for turn in reversed(turns):
         when = _parse(turn.ts)
         if (
@@ -602,8 +613,14 @@ def attest(
             and when > since
             and (turn.session_id, turn.ts, turn.prompt_sha256) not in consumed
         ):
+            # #992 : un réveil programmé, une notification de tâche de fond ou un `claude -p` passent aussi par
+            # UserPromptSubmit. Quand l'hôte a noté l'identifiant du prompt, son journal dit qui l'a écrit.
+            host_origin = host_turn_origin(turn)
+            if host_origin and host_origin != HOST_HUMAN_ORIGIN:
+                not_human = not_human or host_origin
+                continue
             return Attestation(ATTESTED, "", challenge_id, decider, turn.ts, turn.prompt_sha256, source)
-    return _no(NO_HUMAN_TURN)
+    return _no(f"{TURN_NOT_HUMAN}:{not_human}" if not_human else NO_HUMAN_TURN)
 
 
 def turns_source(raw: Path) -> Path:
