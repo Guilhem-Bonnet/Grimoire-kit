@@ -814,3 +814,17 @@ def test_a_task_taken_back_by_another_claim_still_brakes_the_session(governed: P
     rendered, _ = _pre(governed, _real_pretooluse(governed, command="make test", timeout=600_000))
 
     assert _verdict(rendered) == "deny"
+
+
+def test_only_the_same_claim_in_review_counts_as_handed_over(governed: Path) -> None:
+    from grimoire.hosts.decisions.lease_brake import _handed_to_review
+
+    tid, _path = _in_review_with_an_old_lease(governed)
+    root = TaskService(governed).ledger_root
+    epoch = TaskService(governed).require(tid).claim.lease_epoch  # type: ignore[union-attr]
+
+    assert _handed_to_review(root, tid, epoch)
+    assert not _handed_to_review(root, tid, epoch + 1)
+    assert not _handed_to_review(root, "GAO-inconnue-001", epoch)
+    TaskService(governed).ledger.transition_task(tid, TaskState.RUNNING, actor_id="claude")
+    assert not _handed_to_review(root, tid, epoch)
