@@ -278,6 +278,7 @@ def task_show(
     from grimoire.missions.board import board_status_of
     from grimoire.missions.dispatch_advice import dispatch_advice, model_hint
     from grimoire.missions.gates import GatesFileError, declared_transitions
+    from grimoire.providers.data_policy import declared_data_class
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
@@ -290,8 +291,11 @@ def task_show(
     dispatch_events = [e for e in service.ledger.list_events(task_id) if e.event_type == "task.dispatched"]
     last_dispatch = dispatch_events[-1].payload if dispatch_events else None
     usage = _usage_of(task, project_root.resolve())
+    data_class, data_class_source = declared_data_class(project_root.resolve(), task.data_class)
     if _fmt(ctx) == "json":
         payload = task.to_dict()
+        payload["data_class"] = data_class
+        payload["data_class_source"] = data_class_source
         payload["verifiability"] = verifiabilite
         payload["recommended_model"] = advice["recommended_model"]
         payload["model_tier"] = advice["model_tier"]
@@ -331,6 +335,10 @@ def task_show(
     out.print(f"  usage   : {_usage_line(usage)}")
     if task.finition:
         out.print(f"  finition : {task.finition}")
+    if data_class:
+        out.print(f"  données : {escape(data_class)} [dim](déclarée par : {data_class_source})[/dim]")
+    else:
+        out.print("  données : classe non déclarée [dim](aucun fournisseur externe)[/dim]")
     if task.owner or task.claim:
         out.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:

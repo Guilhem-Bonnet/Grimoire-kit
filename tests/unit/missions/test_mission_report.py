@@ -428,6 +428,8 @@ def _registry(root: Path, invocation: str) -> None:
               - id: "local"
                 enabled: true
                 provider_type: "hosted"
+                data_policy:
+                  allowed_data_classes: ["project-source"]
                 allowed_capabilities: ["chat", "code"]
                 default_models: ["local-model"]
                 currency: "api"
@@ -437,6 +439,7 @@ def _registry(root: Path, invocation: str) -> None:
                     tier: "cheap"
                 fallback_order: []
             routing:
+              default_data_class: "project-source"
               default_provider: ""
               default_fallback_chain: []
               require_capability_match: true

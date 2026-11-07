@@ -72,7 +72,7 @@ def _provider_yaml(pid: str, tier: str, invocation: str | None) -> str:
     return (
         f'  - id: "{pid}"\n'
         f"    enabled: true\n"
-        f'    provider_type: "hosted"\n'
+        f'    provider_type: "hosted"\n    data_policy:\n      allowed_data_classes: ["project-source"]\n'
         f'    allowed_capabilities: ["chat", "code"]\n'
         f'    default_models: ["{pid}-model"]\n'
         f'    currency: "api"\n'
@@ -97,6 +97,7 @@ metadata:
 providers:
 {body}
 routing:
+  default_data_class: "project-source"
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true
@@ -1040,3 +1041,40 @@ def test_max_cost_usd_absent_ne_change_rien(tmp_path: Path) -> None:
     assert report.succeeded is True
     assert report.cost_capped is None
     assert len(report.attempts) == 2
+
+
+# ── Politique de données (#1133) ──────────────────────────────────────────────
+
+
+def test_sans_classe_declaree_la_cascade_refuse_sans_rien_envoyer(tmp_path: Path) -> None:
+    script = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("ext", "cheap", _invocation(script)))
+    registry = tmp_path / REGISTRY
+    registry.write_text(registry.read_text(encoding="utf-8").replace('  default_data_class: "project-source"\n', ""), encoding="utf-8")
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.exit_code == 2
+    assert report.refusal == "data_policy"
+    assert report.start_tier_reason is not None
+    assert "aucune classe de données" in report.start_tier_reason
+    assert report.attempts == ()
+    assert not (tmp_path / "marker.txt").exists()
+
+
+def test_un_fournisseur_qui_refuse_la_classe_laisse_la_place_au_suivant(tmp_path: Path) -> None:
+    ferme = _script(tmp_path, "ferme.py", _WRITE_MARKER)
+    ouvert = _script(tmp_path, "ouvert.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("ferme", "cheap", _invocation(ferme)).replace('["project-source"]', '["autre-classe"]'),
+        _provider_yaml("ouvert", "cheap", _invocation(ouvert)),
+    )
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert [a.provider for a in report.attempts] == ["ouvert"]

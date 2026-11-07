@@ -47,7 +47,7 @@ def _registry(root: Path, providers: dict[str, list[str]], *, tier: str = "cheap
     for pid, models in providers.items():
         listing = "\n".join(f'      - {{id: "{m}", tier: "{tier}"}}' for m in models)
         blocks.append(
-            f'  - id: "{pid}"\n    enabled: true\n    provider_type: "hosted"\n'
+            f'  - id: "{pid}"\n    enabled: true\n    provider_type: "hosted"\n    data_policy:\n      allowed_data_classes: [project-source]\n'
             f'    allowed_capabilities: ["chat", "code"]\n    default_models: ["{models[0]}"]\n    currency: "api"\n'
             f'    invocation: "{Path(sys.executable).as_posix()} {script.as_posix()} {{prompt}} --model {{model}}"\n'
             f"    models:\n{listing}\n    fallback_order: []\n"
@@ -56,7 +56,7 @@ def _registry(root: Path, providers: dict[str, list[str]], *, tier: str = "cheap
     std.mkdir(parents=True, exist_ok=True)
     (std / "llm-provider-registry.yaml").write_text(
         '$schema: "grimoire-llm-provider-registry/v1"\nproviders:\n' + "".join(blocks)
-        + "routing:\n  default_provider: \"\"\n  default_fallback_chain: []\n",
+        + "routing:\n  default_data_class: project-source\n  default_provider: \"\"\n  default_fallback_chain: []\n",
         encoding="utf-8",
     )
 
@@ -70,7 +70,7 @@ def _registry_with_currency(root: Path, providers: dict[str, tuple[str, list[tup
     for pid, (currency, models) in providers.items():
         listing = "\n".join(f'      - {{id: "{m}", tier: "{tier}"}}' for m, tier in models)
         blocks.append(
-            f'  - id: "{pid}"\n    enabled: true\n    provider_type: "hosted"\n'
+            f'  - id: "{pid}"\n    enabled: true\n    provider_type: "hosted"\n    data_policy:\n      allowed_data_classes: [project-source]\n'
             f'    allowed_capabilities: ["chat", "code"]\n    default_models: ["{models[0][0]}"]\n    currency: "{currency}"\n'
             f'    invocation: "{Path(sys.executable).as_posix()} {script.as_posix()} {{prompt}} --model {{model}}"\n'
             f"    models:\n{listing}\n    fallback_order: []\n"
@@ -79,7 +79,7 @@ def _registry_with_currency(root: Path, providers: dict[str, tuple[str, list[tup
     std.mkdir(parents=True, exist_ok=True)
     (std / "llm-provider-registry.yaml").write_text(
         '$schema: "grimoire-llm-provider-registry/v1"\nproviders:\n' + "".join(blocks)
-        + "routing:\n  default_provider: \"\"\n  default_fallback_chain: []\n",
+        + "routing:\n  default_data_class: project-source\n  default_provider: \"\"\n  default_fallback_chain: []\n",
         encoding="utf-8",
     )
 
@@ -664,7 +664,7 @@ def _eval_project(root: Path) -> None:
     std = root / "_grimoire" / "standard"
     std.mkdir(parents=True)
     (std / "llm-provider-registry.yaml").write_text(
-        'providers:\n  - id: "a"\n    enabled: true\n    provider_type: "hosted"\n    currency: "api"\n    models:\n'
+        'providers:\n  - id: "a"\n    enabled: true\n    provider_type: "hosted"\n    data_policy:\n      allowed_data_classes: [project-source]\n    currency: "api"\n    models:\n'
         '      - {id: "haiku", tier: "cheap"}\n      - {id: "sonnet", tier: "mid"}\n      - {id: "opus", tier: "strong"}\n',
         encoding="utf-8",
     )

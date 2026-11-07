@@ -14,8 +14,8 @@
     "grimoire task review GAO-livrer-fichi-001 --verdict READY --reviewer fixture",
     "grimoire task close GAO-livrer-fichi-001"
   ],
-  "kit_version": "3.71.0",
-  "recorded_at": "2026-10-28T00:08:05Z",
+  "kit_version": "3.80.1",
+  "recorded_at": "2026-11-07T06:20:23Z",
   "output_sha256": "493b0203db612bc5104420aaf8d51a825426916f07d2b4b389afdeccc83b2c8f",
   "frames": [
     {
