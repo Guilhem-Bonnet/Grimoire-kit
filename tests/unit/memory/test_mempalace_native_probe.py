@@ -228,3 +228,17 @@ def test_backend_probes_before_opening_persistent_client(tmp_path: Path, monkeyp
 
     with pytest.raises(ChromaNativeIndexUnavailableError):
         backend_module.MemPalaceBackend(palace_path=str(tmp_path / "palace"))
+
+
+def test_une_sonde_sans_verdict_ne_refuse_pas_et_n_est_pas_cachee(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.memory.chromadb_native_probe.installed_chromadb_version", lambda: "1.0.0")
+    cache = tmp_path / "cache.json"
+
+    def _bloquee(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired("python", 1.0)
+
+    verdict = ensure_native_index(cache_path=cache, timeout=1.0, runner=_bloquee)
+
+    assert verdict.ok
+    assert "sans verdict" in verdict.detail
+    assert not cache.exists()

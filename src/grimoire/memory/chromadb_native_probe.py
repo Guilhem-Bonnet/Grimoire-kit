@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import platform
 import signal
 import subprocess
@@ -31,6 +30,7 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 
 from grimoire.core.exceptions import GrimoireMemoryError
+from grimoire.core.fsio import atomic_write
 
 #: L'import qui charge effectivement la roue native. ``import chromadb`` seul
 #: ne suffit pas : le module fautif est chargé paresseusement par le client.
@@ -40,7 +40,7 @@ _CACHE_FILENAME = "chromadb-native-probe.json"
 _CACHE_SCHEMA = 1
 
 #: Un premier import de chromadb peut être lent (disque froid, wheel volumineuse) ;
-#: au-delà, la sonde est considérée comme bloquée et n'est pas mise en cache.
+#: au-delà, la sonde rend sans verdict : ni refus, ni cache.
 DEFAULT_PROBE_TIMEOUT_SECONDS = 60.0
 
 #: ``subprocess.run`` réduit à ce que la sonde utilise, pour que les tests
@@ -79,17 +79,7 @@ def installed_chromadb_version() -> str:
 
 
 def user_state_dir() -> Path:
-    """Racine de l'état utilisateur, hors projet.
-
-    ``GRIMOIRE_USER_STATE_DIR`` d'abord (tests, installations exotiques), puis
-    ``XDG_STATE_HOME/grimoire``, puis ``~/.grimoire/cache``.
-    """
-    explicit = os.environ.get("GRIMOIRE_USER_STATE_DIR", "")
-    if explicit:
-        return Path(explicit).expanduser()
-    xdg_state = os.environ.get("XDG_STATE_HOME", "")
-    if xdg_state:
-        return Path(xdg_state).expanduser() / "grimoire"
+    """Racine de l'état utilisateur, hors projet."""
     return Path.home() / ".grimoire" / "cache"
 
 
@@ -183,9 +173,7 @@ def _write_cache(path: Path, verdict: NativeIndexVerdict) -> None:
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     except OSError:
         return
 
@@ -208,8 +196,9 @@ def probe_native_index(
     """Sonde l'import natif de chromadb, en cache par version + machine.
 
     Ne lève jamais pour cause de machine : un sous-processus tué par un signal
-    rend un verdict ``ok=False`` porteur du nom du signal. Les erreurs qui ne
-    sont pas un signal (délai, binaire absent…) ne sont pas cachées.
+    rend un verdict ``ok=False`` porteur du nom du signal. Une sonde sans verdict
+    (délai, démarrage impossible) ne prouve pas que l'index est fatal : elle ne
+    refuse pas, et rien de ce qui n'est pas un signal ou un succès n'est caché.
     """
     chromadb_version = installed_chromadb_version()
     fingerprint = _machine_fingerprint()
@@ -238,16 +227,16 @@ def probe_native_index(
         )
     except subprocess.TimeoutExpired:
         return NativeIndexVerdict(
-            ok=False,
-            detail=f"la sonde n'a pas rendu la main en {timeout:.0f} s",
+            ok=True,
+            detail=f"sonde sans verdict : pas de réponse en {timeout:.0f} s",
             chromadb_version=chromadb_version,
             machine_key=machine_key,
             probed_at=_now(),
         )
     except OSError as exc:
         return NativeIndexVerdict(
-            ok=False,
-            detail=f"la sonde n'a pas pu démarrer : {exc}",
+            ok=True,
+            detail=f"sonde sans verdict : démarrage impossible ({exc})",
             chromadb_version=chromadb_version,
             machine_key=machine_key,
             probed_at=_now(),
