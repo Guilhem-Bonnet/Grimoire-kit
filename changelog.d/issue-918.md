@@ -1,0 +1,1 @@
+- fix(evidence): après l'acquittement (CHAIN-ACK) d'une rupture `unchained_inserted`, l'ancre `evidence-log.head.json` reprend à la dernière ligne au lieu de rester figée ; la troncature est de nouveau détectée, la rupture reste listée. Toute divergence non couverte garde l'ancre figée. (#918)
