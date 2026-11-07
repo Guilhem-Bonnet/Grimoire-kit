@@ -1,1 +1,0 @@
-- fix(orchestrate): une session peut lever la pause qu'elle a posée elle-même ; celle d'un humain, du disjoncteur ou d'une autre session reste réservée (#1119)

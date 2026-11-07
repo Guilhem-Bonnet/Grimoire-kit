@@ -1,1 +1,0 @@
-- fix(hosts): une tâche en attente (`waiting`) que la session ne réclame pas n'est plus annoncée comme « Tâche courante » ni jugée par le `Stop` — son claim garé ne désigne plus la tâche active, et une carte de board périmée pour elle ne la ramène pas (#1153)

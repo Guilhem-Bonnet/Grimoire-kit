@@ -1,1 +1,0 @@
-- fix(cockpit): une carte de décision garde le focus clavier après un rafraîchissement du ledger, donc ses raccourcis (`2`, `r`, `e`, `h`) continuent d'agir (#1122)
