@@ -37,6 +37,7 @@ source_priority:
 budget:
   max_context_items: 24
   max_memory_items: 8
+  max_memory_tokens: 1200
   max_knowledge_sources: 8
 redaction:
   required: true
