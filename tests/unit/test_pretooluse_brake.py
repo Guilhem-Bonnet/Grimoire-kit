@@ -828,3 +828,13 @@ def test_only_the_same_claim_in_review_counts_as_handed_over(governed: Path) -> 
     assert not _handed_to_review(root, "GAO-inconnue-001", epoch)
     TaskService(governed).ledger.transition_task(tid, TaskState.RUNNING, actor_id="claude")
     assert not _handed_to_review(root, tid, epoch)
+
+
+def test_a_refused_renewal_outside_review_still_brakes_the_session(governed: Path) -> None:
+    tid, path = _in_review_with_an_old_lease(governed)
+    TaskService(governed).ledger.transition_task(tid, TaskState.FAILED, actor_id="claude")
+    write_lease(path, LeaseFile(tid, 1, (datetime.now(UTC) - timedelta(minutes=19)).isoformat()))
+
+    rendered, _ = _pre(governed, _real_pretooluse(governed, command="make test", timeout=600_000))
+
+    assert _verdict(rendered) == "deny"
