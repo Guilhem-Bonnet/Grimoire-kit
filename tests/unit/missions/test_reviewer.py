@@ -765,3 +765,32 @@ def test_ci_rouge_sur_la_tete_en_relecture_renvoie_au_worker_sans_recu(pr_projet
     assert task.status is TaskState.RUNNING and any("CI de la tête relue est rouge" in d.text for d in task.directives)
     assert len(pr_host.of("claude", "--bg", "--resume")) == 1
     assert _judged(pr_projet, tid) == ["NOT-READY"]
+
+
+def test_lecture_de_claude_agents_en_echec_ne_juge_pas_le_relecteur_arrete(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    _reviewer_goes_idle(pr_host)
+    pr_host.agents_fail = True  # échec fermé : le délai de REVIEW_TIMEOUT reste la garde
+    assert merger_tick(pr_projet, pr_host).reviews == ()
+    assert _judged(pr_projet, tid) == []
+
+
+def test_relecteur_absent_de_claude_agents_sans_recu_est_note_silencieux(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    pr_host.agents = []  # la session n'est plus listée du tout
+    report = merger_tick(pr_projet, pr_host)
+    assert [(o.action, o.status) for o in report.reviews] == [("silent", "done")], report.reviews
+    assert _judged(pr_projet, tid) == ["silent"]
+
+
+def test_ci_rouge_sur_un_relecteur_arrete_est_relancee_une_fois_avant_de_renvoyer_au_worker(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    pr_host.checks[f"task/{tid}"] = [{"name": "Tests (Python 3.13)", "bucket": "fail", "link": "https://github.com/o/r/actions/runs/101/job/9"}]
+    pr_host.rerun_error = ""
+    _reviewer_goes_idle(pr_host)
+    report = merger_tick(pr_projet, pr_host)
+    assert report.reviews == () and pr_host.reruns == [101], (report.reviews, pr_host.reruns)
+    assert _judged(pr_projet, tid) == [] and pr_host.of("claude", "--bg", "--resume") == []
