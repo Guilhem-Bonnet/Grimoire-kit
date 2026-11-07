@@ -1,0 +1,1 @@
+- feat(cli): `grimoire digest` résume un fichier ou stdin par le fournisseur `chat`/`cheap` le moins cher (local préféré), découpe les textes longs et cite les lignes d'erreur mot pour mot ; les séquences ANSI (CSI/OSC) sont retirées de toute sortie de fournisseur, y compris pour `task dispatch`.

@@ -74,6 +74,7 @@ from typing import TYPE_CHECKING, Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core.ansi import strip_ansi
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.grounding import GROUNDING_RULE
 from grimoire.core.standard_generation import STANDARD_DIR
@@ -862,6 +863,8 @@ def _run_provider_call(
     except subprocess.TimeoutExpired:
         return None, "", "", time.monotonic() - started, "timeout", None
     duration = time.monotonic() - started
+    # `ollama run` colore même hors terminal : nettoyé ici, pour tout appelant.
+    stdout, stderr = strip_ansi(completed.stdout), strip_ansi(completed.stderr)
     # Une saturation (429, quota) et une panne locale (CLI absent, script qui
     # plante) n'ont pas le même sens pour l'état runtime : la première dit que
     # le fournisseur est bon mais occupé, la seconde qu'il est cassé ici. Les
@@ -871,16 +874,14 @@ def _run_provider_call(
     # sur leur statut : le nom de l'événement contient « rate_limit », que la
     # recherche de mots (`_looks_rate_limited`) prenait pour un refus même à
     # l'état `allowed`.
-    signal = classify_failure(
-        completed.stdout, completed.stderr, now=datetime.now().astimezone(), returncode=completed.returncode
-    )
+    signal = classify_failure(stdout, stderr, now=datetime.now().astimezone(), returncode=completed.returncode)
     if signal is not None:
         kind: str | None = signal.kind
     elif completed.returncode != 0:
         kind = "error"
     else:
         kind = None
-    return completed.returncode, completed.stdout, completed.stderr, duration, kind, signal
+    return completed.returncode, stdout, stderr, duration, kind, signal
 
 
 def _record_call_failure(
