@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core import standard_generation as gen
-from grimoire.core.context_bundle_memory import lexical_store_path, select_memory_inclusions
+from grimoire.core.context_bundle_memory import memory_store_ref, select_memory_inclusions
 from grimoire.core.request_memo import memoized
 from grimoire.core.standard_checks.base import (
     BOARD_STATES as BOARD_STATES,
@@ -1040,9 +1040,6 @@ def build_context_bundle(
         for source in knowledge_registry.get("sources", [])
         if isinstance(source, dict) and source.get("enabled") is True and source.get("id")
     ]
-    # #1134 : le bundle porte des entrées de mémoire, pas seulement les types
-    # déclarés par la politique — sélectionnées par le backend lexical existant,
-    # avec les fichiers et les mots de la tâche, sous le budget du contrat.
     memory_inclusions = select_memory_inclusions(
         root,
         task,
@@ -1095,8 +1092,7 @@ def build_context_bundle(
         "decision_inputs": {
             "task_ref": (STANDARD_DIR / "task-board.yaml").as_posix(),
             "memory_policy_ref": (STANDARD_DIR / "memory-policy.yaml").as_posix(),
-            # #1134 : la référence qui permet de lire une entrée entière à la demande.
-            "memory_store_ref": lexical_store_path(root).relative_to(root).as_posix(),
+            "memory_store_ref": memory_store_ref(root),
             "provider_registry_ref": (STANDARD_DIR / "llm-provider-registry.yaml").as_posix(),
         },
         "evidence_requirements": [

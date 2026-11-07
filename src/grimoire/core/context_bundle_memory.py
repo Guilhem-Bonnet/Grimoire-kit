@@ -32,6 +32,7 @@ __all__ = [
     "TaskMemoryTerms",
     "extract_task_memory_terms",
     "lexical_store_path",
+    "memory_store_ref",
     "select_memory_inclusions",
 ]
 
@@ -150,6 +151,12 @@ def lexical_store_path(project_root: Path) -> Path:
         except Exception:  # la mémoire reste une couche optionnelle
             prefix = DEFAULT_COLLECTION_PREFIX
     return root / "_grimoire" / "_memory" / f"{prefix}_lexical.sqlite3"
+
+
+def memory_store_ref(project_root: Path) -> str:
+    """Le store lexical relatif à la racine — la référence pour lire une entrée entière."""
+    root = project_root.resolve()
+    return lexical_store_path(root).relative_to(root).as_posix()
 
 
 def _entry_paths(entry: MemoryEntry) -> tuple[str, ...]:
