@@ -14,6 +14,8 @@ from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
     NO_ACTIVE_TASK,
     TASK_UNPARKED,
+    acknowledge_mutations,
+    acknowledged_mutation_count,
     ambiguity_text,
     expired_text,
     no_task_stop_reason,
@@ -576,11 +578,12 @@ def _no_task_closure(
     goes through. Returns ``None`` when there is nothing to say.
     """
     mutations = session_mutation_count(hook)
-    if mutations <= 0:
-        return None
+    if mutations <= 0 or mutations <= acknowledged_mutation_count(hook):
+        return None  # rien écrit, ou rappel déjà rendu pour ces écritures (issue #1126)
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
     detail["unattached_work"] = record_unattached_work(hook, mutations)
     reason = no_task_stop_reason(profile, mutations, candidates, expired, unreadable)
+    acknowledge_mutations(hook, mutations)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)
