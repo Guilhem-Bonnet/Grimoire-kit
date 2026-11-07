@@ -252,10 +252,13 @@ class TestMemoryDoctor:
         assert data["not_started"] == []
 
     def test_not_started_stack_is_reported_with_the_start_command(
-        self, doctor_context, monkeypatch: pytest.MonkeyPatch,
+        self, doctor_context,
     ) -> None:
-        monkeypatch.setattr("grimoire.tools.memory_setup._tcp_reachable", lambda *a, **k: False)
-        result = runner.invoke(app, ["memory", "doctor"])
+        # `patch` imbriqué, pas `monkeypatch` : au teardown, `monkeypatch` restaure
+        # le MagicMock posé par `doctor_context` (il l'a lu après son entrée), si
+        # bien que le mock fuyait vers les tests suivants (test_memory_probe_parallel).
+        with patch("grimoire.tools.memory_setup._tcp_reachable", lambda *a, **k: False):
+            result = runner.invoke(app, ["memory", "doctor"])
         assert result.exit_code == 0, result.output
         assert "Pile non démarrée" in result.output
         assert "grimoire memory up --profile graphe --start --apply" in result.output

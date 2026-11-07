@@ -691,25 +691,14 @@ def doctor(
                     if fmt != "json":
                         console.print(f"  [dim]○[/dim]  {detail}")
 
-    # 5ter. Memory stack configured but not started (2026-09-18 arbitrage on
-    # #619) — `grimoire init` can write a `complet`/`graphe` composition
-    # (backend pinned, connection settings written) without ever starting
-    # the containers it names, when no consent was given (bare non-TTY run,
-    # no `-y`, no `--memory-stack up`). Never FAIL: an unstarted stack is a
-    # gap to close, not a broken project.
+    # 5ter. Contrôles mémoire de `doctor` (#619 pile non démarrée, #1059 index
+    # natif de chromadb fatal). Le détail vit hors de ce fichier, sous cliquet
+    # de taille : ce fichier ne peut que rétrécir.
     if cfg:
-        with _timed_phase("memory_stack_check"):
-            from grimoire.tools.memory_setup import unreached_configured_services
+        with _timed_phase("memory_checks"):
+            from grimoire.cli.doctor_memory import apply_memory_checks
 
-            missing = unreached_configured_services(cfg.memory)
-            if missing:
-                detail = (
-                    f"memory stack not started ({', '.join(missing)}): "
-                    f"grimoire memory up --profile {cfg.memory.layer_profile} --start --apply"
-                )
-                results.append({"name": "memory_stack_started", "passed": True, "detail": detail, "level": "warn"})
-                if fmt != "json":
-                    console.print(f"  [yellow]WARN[/yellow]  {detail}")
+            apply_memory_checks(cfg, results, fmt=fmt, console=console)
 
     # 6. Optional dependencies
     with _timed_phase("dependency_scan"):
