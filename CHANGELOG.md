@@ -7,6 +7,76 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.82.0] - 2026-11-07
+
+### Added
+
+- feat(providers): un tarif optionnel `models[].pricing` dans `llm-provider-registry.yaml` chiffre l'usage d'un worker routé vers un fournisseur externe ; sans tarif, le coût reste inconnu, jamais 0 (#1152, PR #1164)
+
+### Fixed
+
+- fix(missions): une erreur 5xx/429/overloaded du fournisseur relance le worker sur sa session au lieu de le faire récolter, puis le gare en nommant la vraie cause au-delà du plafond ; seule une entrée marquée `isApiErrorMessage` par l'hôte déclenche la reprise, un tour ordinaire qui cite « 500 » n'est pas repris (#1158, PR #1166)
+- fix(autopilot): une question de conduite à options fermées écrite par le kit est jugée sur son texte, pas sur le titre de la tâche (#1159, PR #1165)
+- fix(missions): une PR `task/<id>` fusionnée hors merger solde sa tâche au tick, sans relancer worker ni relecteur (#1162, PR #1167)
+- fix(mandate): un challenge de mandat servi est clos (lu sur `grant_challenge_used`) ; la même demande relancée en émet un nouveau au lieu de réutiliser l'ancien (#939, PR #1168)
+
+## [3.81.0] - 2026-11-07
+
+### Changed
+
+- **Une tâche ne part plus sur un fournisseur externe sans classe de données déclarée et admise.** `data_policy` existait dans le registre sans que rien ne la lise. Le worker du tick et `grimoire task dispatch` l'appliquent désormais, en échec fermé. À faire après la mise à jour pour garder un fournisseur externe : poser `routing.default_data_class` dans `llm-provider-registry.yaml`, ou `task add --data-class`. Sinon le worker garde le modèle de l'hôte et `task dispatch` refuse avec le motif `data_policy`. `grimoire task show` affiche la classe retenue. Cette règle reste une déclaration : la documentation dit ce qu'elle ne garantit pas (#1133, PR #1145).
+- feat(context): `memory_inclusions` du context-bundle porte les entrées liées aux fichiers et aux mots de la tâche, via le backend lexical et sous budget de jetons (#1134, PR #1142)
+
+### Fixed
+
+- fix(ci): le rejeu de régression sur la base écarte les tests `tests/e2e/` (navigateur absent du job) et rend « non rejoué », sans échec, quand la PR n'a que ces tests ; une PR mixte ne rejoue que ses tests hors E2E (#1148, PR #1155)
+- **Une reprise vers `running` rouvre le bail.** Après `task move --to running` depuis `needs_verification` ou `waiting`, un claim déjà échu faisait récolter la tâche au tick suivant, alors que sa session vivait encore, et la tâche partait en attente humaine (#1149, PR #1150).
+- fix(flows): la capsule ne relit que les 3 flows actifs les plus récents, puis une ligne « + N autres, grimoire flow list » (#1151, PR #1156)
+- fix(hosts): une tâche en attente (`waiting`) que la session ne réclame pas n'est plus annoncée comme « Tâche courante » ni jugée par le `Stop` — son claim garé ne désigne plus la tâche active, et une carte de board périmée pour elle ne la ramène pas (#1153, PR #1157)
+- fix(missions): le profil allégé (`lean`) passe `--tools=<liste>` en un seul jeton : en deux, l'option variadique avalait la consigne du relecteur (25 relectures muettes sur 26) et le message de reprise d'un worker sans `permission_mode` (#1160, PR #1161)
+- fix(doctor): signaler un hook de l'hôte dont l'exécutable ne se résout pas dans le PATH de l'unité du tick (#1022, PR #1147)
+- fix(memory): refuser `mempalace` avec un message Python clair quand l'index natif de chromadb tue le processus (SIGILL) ; `grimoire doctor` rend le même verdict depuis une sonde en sous-processus, mise en cache par version de chromadb et par machine (#1059, PR #1146)
+- fix(orchestrate): une session peut lever la pause qu'elle a posée elle-même ; celle d'un humain, du disjoncteur ou d'une autre session reste réservée (#1119, PR #1141)
+- fix(cockpit): une carte de décision garde le focus clavier après un rafraîchissement du ledger, donc ses raccourcis (`2`, `r`, `e`, `h`) continuent d'agir (#1122, PR #1143)
+- fix(memory): le statut mémoire sonde les services en parallèle et borne à 0,3 s les connexions de boucle locale ; un délai dépassé reste « inconnu » (#954, PR #1144)
+
+## [3.80.1] - 2026-11-06
+
+- fix(missions): un worker part aussi depuis un dépôt qui ne suit pas son contexte projet : les hooks sont posés dans le worktree au lieu de bloquer tout lancement (#1139)
+
+## [3.80.0] - 2026-11-06
+
+- fix(standard): la consigne de démarrage ne demande plus `gate check --task-id bootstrap` quand cette tâche n'est pas sur le board (#1127) (#1131)
+- fix(lease): une session qui a remis sa tâche en revue n'est plus gelée quand une commande dépasse le bail restant (#1117) (#1137)
+- fix(reviewer): un relecteur arrêté (`idle`) sans reçu n'attend plus `REVIEW_TIMEOUT` (2 h) : relancé au tick suivant une fois la CI de la tête terminée (compté dans `MAX_RELAUNCHES`) ; une CI rouge sur la tête en relecture renvoie la tâche au worker sans reçu (#1123) (#1128)
+- fix(missions): `task block` gare directement une tâche en `needs_verification` sans la repasser par un état réclamable (#1124) (#1136)
+- fix(authority): la garde ne refuse plus la lecture ni la simple mention de l'instantané du ledger ; toute écriture reste refusée (#1125) (#1132)
+- fix(evidence): après l'acquittement (CHAIN-ACK) d'une rupture `unchained_inserted`, l'ancre `evidence-log.head.json` reprend à la dernière ligne au lieu de rester figée ; la troncature est de nouveau détectée, la rupture reste listée. Toute divergence non couverte garde l'ancre figée. (#918) (#1116)
+- fix(missions): le lanceur du tick rejoue la synchronisation de l'hôte dans le worktree du worker, ou refuse le lancement si le hook PreToolUse manque (#957) (#1120)
+- feat(orchestrate): réduire le coût des sessions du tick : profil allégé `lean` des workers et relecteurs (45 k à 10 k jetons au premier tour, mesuré), palier par classe `model_by_class`, et pilote qui n'interroge plus sans progrès (#1130)
+- fix(stop): le rappel « Clôture hors tâche » n'est plus relancé à chaque tour tant que la session n'a pas écrit de nouveau (#1126) (#1135)
+
+## [3.79.0] - 2026-11-06
+
+- fix(cockpit): changer vite d'espace n'efface plus l'espace ouvert ni son sélecteur de vues (un espace quitté se montait quand même) (#1112)
+- fix(missions): le PATH de l'unité du tick garde le dossier des exécutables appelés par chemin absolu dans les hooks des réglages Claude Code utilisateur et projet (#1022) (#1111)
+- fix(memory): `memory gate` ne vérifie la migration que si le bundle existe, sinon il affiche « aucune migration en cours sur ce poste » sans échouer (`--require-migration` pour garder le FAIL) (#1042) (#1109)
+- fix(lease): le frein du bail ne gèle plus la session qui a remis sa tâche en revue (`needs_verification`) quand le fichier de bail manque ; un bail repris par une autre session reste refusé (#1117) (#1118)
+- fix(cli): le rendu texte de `task show`, `task list` et `task pack` part sur stdout et stderr ne garde que les erreurs (#879) (#1107)
+- fix(cockpit): les questions du wizard s'affichent dans la langue du cockpit (`?lang=`, repli anglais), la CLI reste inchangée (#899) (#1110)
+- fix(up): `agent-manifest.csv` ne liste plus deux fois le même agent, un projet à jour ne montre plus de fichier à écrire (#908) (#1108)
+- test(missions): le janitor garde le worktree et rapporte `failed` quand la copie des preuves est impossible (#928) (#1115)
+- feat(orchestrate): le tick peut lancer ses workers V0/V1 sur un fournisseur compatible Anthropic comme DeepSeek (`orchestrator.roles.worker.provider`), avec les outils et les hooks de Claude Code ; le relecteur reste à part (#1113)
+
+## [3.78.1] - 2026-11-06
+
+- fix(missions): la relecture d'un dispatch ne porte plus que sur ce que l'ouvrier a changé : plus de fausse alerte sur un arbre déjà modifié, et les fichiers qu'il crée ne lui échappent plus (#1101)
+
+## [3.78.0] - 2026-11-05
+
+- feat(providers): écrire le registre de fournisseurs LLM (`grimoire providers add|enable|disable|remove`) et poser une clé en saisie masquée (`set-key`/`remove-key`/`secrets`) dans un magasin léger `~/.env-store/`, jamais dans le registre ; `task dispatch` fusionne désormais ces variables dans l'environnement du sous-processus avant d'invoquer le fournisseur (#1099)
+- fix(cockpit): la Flotte ne rend plus une santé en erreur sous charge (lecteur YAML partagé entre threads) ; ses tests e2e attendent l'état de la table et la fin de la navigation « Ouvrir » (GAO-i15-stabili-001) (#1096)
+
 ## [3.77.0] - 2026-10-30
 
 - chore(release): correctifs intermédiaires des PR fusionnées par commit de fusion, déjà décrits par le fragment de leur PR : e56b9bde, 643cd839, 45360126, ea109781, efb3ea4e, 00f1a297, 195fcb60

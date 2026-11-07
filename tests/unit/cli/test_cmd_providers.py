@@ -22,6 +22,13 @@ pytestmark = pytest.mark.covers(
     "cli:providers cooldown",
     "cli:providers history",
     "cli:providers status",
+    "cli:providers add",
+    "cli:providers enable",
+    "cli:providers disable",
+    "cli:providers remove",
+    "cli:providers set-key",
+    "cli:providers remove-key",
+    "cli:providers secrets",
 )
 
 runner = CliRunner()
@@ -269,3 +276,177 @@ def test_history_texte_liste_le_couple_et_le_depart_recommande(tmp_path: Path) -
     assert result.exit_code == 0, result.stdout
     assert "documentation" in result.stdout
     assert "V0" in result.stdout
+
+
+# ── add / enable / disable / remove : écriture du registre ───────────────────
+
+
+def test_add_then_status_shows_new_provider(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    add_result = runner.invoke(
+        app,
+        [
+            "providers", "add", "mistral",
+            "--invocation", "mistral-cli --model {model} {prompt}",
+            "--model", "mistral-small:cheap",
+            "--project-root", str(root),
+        ],
+    )
+    assert add_result.exit_code == 0, add_result.stdout
+
+    status = runner.invoke(app, ["providers", "status", "--project-root", str(root), "--json"])
+    payload = json.loads(status.stdout)
+    assert "mistral" in {p["id"] for p in payload["providers"]}
+
+
+def test_add_duplicate_id_fails_with_clear_message(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(
+        app, ["providers", "add", "anthropic", "--invocation", "x {prompt}", "--project-root", str(root)]
+    )
+
+    assert result.exit_code != 0
+    assert "déjà déclaré" in result.stdout
+
+
+def test_add_invalid_model_spec_rejected_before_writing(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["providers", "add", "mistral", "--invocation", "x {model} {prompt}", "--model", "sans-tier",
+         "--project-root", str(root)],
+    )
+
+    assert result.exit_code != 0
+    assert "invalide" in result.stdout
+
+
+def test_disable_then_enable_roundtrip(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    disable = runner.invoke(app, ["providers", "disable", "local", "--project-root", str(root)])
+    assert disable.exit_code == 0, disable.stdout
+    status = runner.invoke(app, ["providers", "status", "--project-root", str(root), "--json"])
+    local = next(p for p in json.loads(status.stdout)["providers"] if p["id"] == "local")
+    assert local["enabled"] is False
+
+    enable = runner.invoke(app, ["providers", "enable", "local", "--project-root", str(root)])
+    assert enable.exit_code == 0, enable.stdout
+    status = runner.invoke(app, ["providers", "status", "--project-root", str(root), "--json"])
+    local = next(p for p in json.loads(status.stdout)["providers"] if p["id"] == "local")
+    assert local["enabled"] is True
+
+
+def test_remove_drops_provider_from_status(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(app, ["providers", "remove", "local", "--project-root", str(root)])
+    assert result.exit_code == 0, result.stdout
+
+    status = runner.invoke(app, ["providers", "status", "--project-root", str(root), "--json"])
+    assert "local" not in {p["id"] for p in json.loads(status.stdout)["providers"]}
+
+
+def test_enable_unknown_provider_fails(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(app, ["providers", "enable", "nope", "--project-root", str(root)])
+
+    assert result.exit_code != 0
+    assert "introuvable" in result.stdout
+
+
+# ── set-key / remove-key / secrets : magasin ~/.env-store, HOME isolé ────────
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ces commandes écrivent dans ``$HOME`` — jamais celui de la machine de CI."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # Path.home() le lit sous Windows
+
+
+def test_set_key_then_secrets_list_shows_it_without_the_value(tmp_path: Path) -> None:
+    set_result = runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="sk-test-abc\n")
+    assert set_result.exit_code == 0, set_result.stdout
+
+    secrets_result = runner.invoke(app, ["providers", "secrets"])
+    assert secrets_result.exit_code == 0, secrets_result.stdout
+    assert "deepseek" in secrets_result.stdout
+    assert "DEEPSEEK_API_KEY" in secrets_result.stdout
+    assert "sk-test-abc" not in secrets_result.stdout
+
+
+def test_remove_key_clears_the_entry(tmp_path: Path) -> None:
+    runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="sk-test-abc\n")
+
+    remove_result = runner.invoke(app, ["providers", "remove-key", "deepseek"])
+    assert remove_result.exit_code == 0, remove_result.stdout
+
+    secrets_result = runner.invoke(app, ["providers", "secrets"])
+    assert "deepseek" not in secrets_result.stdout
+
+
+def test_add_rejects_model_with_invalid_tier(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["providers", "add", "mistral", "--invocation", "x {model} {prompt}", "--model", "mistral-small:ultra",
+         "--project-root", str(root)],
+    )
+
+    assert result.exit_code != 0
+    assert "tier" in result.stdout
+
+
+def test_add_non_api_currency_does_not_suggest_set_key(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["providers", "add", "localmodel", "--invocation", "x {model} {prompt}", "--currency", "local",
+         "--project-root", str(root)],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "set-key" not in result.stdout
+
+
+def test_disable_unknown_provider_fails(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(app, ["providers", "disable", "nope", "--project-root", str(root)])
+
+    assert result.exit_code != 0
+    assert "introuvable" in result.stdout
+
+
+def test_remove_unknown_provider_fails(tmp_path: Path) -> None:
+    root = _project(tmp_path)
+
+    result = runner.invoke(app, ["providers", "remove", "nope", "--project-root", str(root)])
+
+    assert result.exit_code != 0
+    assert "introuvable" in result.stdout
+
+
+def test_set_key_blank_value_fails(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="   \n")
+
+    assert result.exit_code != 0
+    assert "vide" in result.stdout
+
+
+def test_secrets_json_output(tmp_path: Path) -> None:
+    runner.invoke(app, ["providers", "set-key", "deepseek", "DEEPSEEK_API_KEY"], input="sk-test-abc\n")
+
+    result = runner.invoke(app, ["providers", "secrets", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload[0]["provider"] == "deepseek"
+    assert "sk-test-abc" not in result.stdout

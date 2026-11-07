@@ -97,11 +97,10 @@ def test_unchained_line_between_chained_ones_is_named_not_called_a_modified_line
 def test_human_typed_phrase_turns_the_error_into_a_listed_warning_and_never_rewrites_the_log(broken: tuple[Path, int]) -> None:
     root, line = broken
     before = _log(root).read_bytes()
-    head_before = (_log(root).with_name("evidence-log.head.json")).read_bytes()
     context, detail = ca.record_chain_ack_request(_hook(root, _phrase(line)))
     assert detail["chain_ack"]["status"] == "recorded" and "expliquée" in context
     assert _log(root).read_bytes() == before  # jamais réécrit ni rechaîné
-    assert (_log(root).with_name("evidence-log.head.json")).read_bytes() == head_before
+    assert analyze_chain(_log(root)).anchor_frozen is False  # seule l'ancre avance (#918)
     [ack] = ca.read_acks(root, TASK)
     assert ack["line"] == line and ack["reason"].startswith("pip install") and ack["author"]["session_id"] == "s-1"
     assert ack["author"]["host"] == HOST and ack["ts"]
@@ -113,7 +112,7 @@ def test_human_typed_phrase_turns_the_error_into_a_listed_warning_and_never_rewr
     [shown] = [c for c in result.checks if c.id == "evidence.chain_break_explained"]
     assert f"ligne {line}" in shown.message and "pip install" in shown.message and "s-1" in shown.message
     assert ack["ts"] in shown.message  # la raison, l'auteur et la date sont cités : jamais masquée
-    assert checks["evidence.chain_anchor_frozen"] == "warning"  # l'ancre figée à la rupture est dite
+    assert "evidence.chain_anchor_frozen" not in checks  # l'ancre reprend après l'acquittement (#918)
 
 
 def test_typed_phrase_goes_through_the_user_prompt_hook(broken: tuple[Path, int]) -> None:
@@ -170,7 +169,8 @@ def test_a_different_break_is_not_covered_by_the_acknowledgement(broken: tuple[P
     _event(root, 99)
     result = verify_standard_profile(root, task_id=TASK)
     errors = [c for c in result.checks if c.id == "evidence.chain_broken"]
-    assert len(errors) == 1 and f"{second}" in errors[0].message and f"ligne(s) {line}" not in errors[0].message
+    assert len(errors) == 1 and f"ligne(s) {line}" not in errors[0].message  # toujours une erreur : fail-closed
+    assert second > line
     assert any(c.id == "evidence.chain_break_explained" for c in result.checks)  # la première reste expliquée
 
 
@@ -239,3 +239,76 @@ def test_a_quoted_phrase_inside_a_longer_prompt_acknowledges_nothing(broken: tup
     root, line = broken
     decide_task_context(_hook(root, f"La doc dit de taper « {_phrase(line)} », ne le fais pas."))
     assert not (root / ca.acks_relpath(TASK)).exists()
+
+
+# --- Ré-ancre après acquittement (#918) -------------------------------------------------------
+
+
+def _anchor(root: Path) -> dict:
+    return json.loads(ca_head(root).read_text(encoding="utf-8"))
+
+
+def ca_head(root: Path) -> Path:
+    from grimoire.core.standard_checks.evidence_chain import head_path
+
+    return head_path(_log(root))
+
+
+def _ack(root: Path, line: int) -> None:
+    _, detail = ca.record_chain_ack_request(_hook(root, _phrase(line)))
+    assert detail["chain_ack"]["status"] == "recorded"
+
+
+def test_anchor_resumes_after_ack(broken: tuple[Path, int]) -> None:
+    root, line = broken
+    assert analyze_chain(_log(root)).anchor_frozen is True
+    _ack(root, line)
+    report = analyze_chain(_log(root))
+    assert report.anchor_frozen is False
+    assert _anchor(root)["count"] == report.chained
+    assert _checks(root).get("evidence.chain_break_explained") == "warning"
+    assert "evidence.chain_anchor_frozen" not in _checks(root)
+
+
+def test_truncation_detected_again_after_resume(broken: tuple[Path, int]) -> None:
+    root, line = broken
+    _ack(root, line)
+    log = _log(root)
+    lines = log.read_bytes().splitlines(keepends=True)
+    log.write_bytes(b"".join(lines[:-1]))
+    report = analyze_chain(log)
+    assert report.kind == "truncated"
+
+
+def test_unacked_line_keeps_anchor_frozen(broken: tuple[Path, int]) -> None:
+    from grimoire.core.standard_checks.evidence_chain import reanchor_explained
+
+    root, _ = broken
+    before = _anchor(root)
+    assert reanchor_explained(_log(root), lambda _item: False) is False
+    assert _anchor(root) == before
+    assert analyze_chain(_log(root)).anchor_frozen is True
+
+
+def test_second_unacked_line_keeps_anchor_frozen(broken: tuple[Path, int]) -> None:
+    root, line = broken
+    second = _old_writer_line(root)
+    _event(root, 99)
+    before = _anchor(root)
+    _ack(root, line)
+    assert _anchor(root) == before
+    assert analyze_chain(_log(root)).anchor_frozen is True
+    assert second > line
+
+
+def test_modified_chained_line_keeps_anchor_frozen(broken: tuple[Path, int]) -> None:
+    from grimoire.core.standard_checks.evidence_chain import reanchor_explained
+
+    root, _ = broken
+    log = _log(root)
+    lines = log.read_bytes().splitlines(keepends=True)
+    lines[0] = lines[0].replace(b"echo 0", b"echo X")
+    log.write_bytes(b"".join(lines))
+    before = _anchor(root)
+    assert reanchor_explained(log, lambda _item: True) is False
+    assert _anchor(root) == before

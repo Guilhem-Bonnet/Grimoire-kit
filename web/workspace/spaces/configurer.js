@@ -170,6 +170,80 @@ function optionsCard(ctx) {
   return card;
 }
 
+// Issue #310 suite : gouvernance des fournisseurs — activer/désactiver un
+// fournisseur déjà déclaré, et poser une clé API (jamais dans le registre du
+// projet : ~/.env-store/ seulement, lu par `grimoire task dispatch`). Même
+// garde que l'autopilote (chat.js, `gesture()`) : la clé de contrôle se lit
+// depuis le terminal de l'humain, le jeton de session servi sur la loopback
+// n'y suffit pas. `grimoire providers add` (déclarer un NOUVEAU fournisseur,
+// invocation + modèles) reste CLI-only — formula ci-dessous, pas de formulaire.
+function providerGovernanceCard(ctx, onChanged) {
+  const card = el('section', 'cf-card');
+  card.dataset.role = 'provider-governance';
+  card.setAttribute('aria-label', 'Gouvernance des fournisseurs');
+  card.append(el('h3', null, 'Activer, désactiver, poser une clé'));
+  card.append(el('p', 'cf-note', 'Geste d’humain : saisissez la clé de contrôle (lue dans le terminal), jamais automatique.'));
+
+  const idInput = el('input', 'cf-input', null, {
+    type: 'text', 'aria-label': 'Identifiant du fournisseur', placeholder: 'deepseek', autocomplete: 'off',
+  });
+  const keyInput = el('input', 'cf-input', null, {
+    type: 'password', 'aria-label': 'Clé de contrôle', placeholder: 'Clé de contrôle', autocomplete: 'off',
+  });
+  const status = el('p', 'cf-note', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'governance-status' });
+
+  const toggleLine = el('div', 'cf-line');
+  const enableBtn = el('button', 'btn', 'Activer', { type: 'button' });
+  const disableBtn = el('button', 'btn', 'Désactiver', { type: 'button' });
+  toggleLine.append(idInput, enableBtn, disableBtn);
+
+  const setEnabled = async (enabled) => {
+    const providerId = idInput.value.trim();
+    if (!providerId) { status.textContent = 'identifiant de fournisseur requis'; return; }
+    try {
+      await ctx.api.providersSetEnabled(providerId, enabled, keyInput.value);
+      status.textContent = `${providerId} ${enabled ? 'activé' : 'désactivé'}.`;
+      keyInput.value = '';
+      onChanged();
+    } catch (error) {
+      status.textContent = `refusé : ${error.message}`;
+    }
+  };
+  enableBtn.addEventListener('click', () => setEnabled(true));
+  disableBtn.addEventListener('click', () => setEnabled(false));
+
+  const envInput = el('input', 'cf-input', null, {
+    type: 'text', 'aria-label': 'Variable d’environnement', placeholder: 'DEEPSEEK_API_KEY', autocomplete: 'off',
+  });
+  const valueInput = el('input', 'cf-input', null, {
+    type: 'password', 'aria-label': 'Valeur de la clé', placeholder: 'Valeur de la clé', autocomplete: 'off',
+  });
+  const saveKey = el('button', 'btn pri', 'Poser la clé', { type: 'button' });
+  const keyLine = el('div', 'cf-line');
+  keyLine.append(envInput, valueInput, saveKey);
+
+  saveKey.addEventListener('click', async () => {
+    const providerId = idInput.value.trim();
+    const envVar = envInput.value.trim();
+    if (!providerId || !envVar || !valueInput.value) {
+      status.textContent = 'identifiant, variable et valeur requis';
+      return;
+    }
+    try {
+      const result = await ctx.api.providersSetKey(providerId, envVar, valueInput.value, keyInput.value);
+      status.textContent = `${envVar} posée pour ${providerId} (${result.file}).`;
+      valueInput.value = '';
+      keyInput.value = '';
+    } catch (error) {
+      status.textContent = `refusé : ${error.message}`;
+    }
+  });
+
+  card.append(toggleLine, keyLine, keyInput, status);
+  card.append(formula('grimoire providers add <id> --invocation "<cmd> {model} {prompt}" --model <id:tier>'));
+  return card;
+}
+
 // I1 : la commande qui prévient hors du navigateur quand une décision attend (options.notify.command
 // du profil du standard, lue par `grimoire tick`). « Tester » la lance avec une décision d'essai.
 function notifyCard(ctx) {
@@ -295,6 +369,7 @@ async function mountProviders(root, ctx) {
   } else if (!data.error) {
     wrap.append(ctx.empty('Aucun fournisseur déclaré', 'Le registre des fournisseurs est absent ou vide.', 'grimoire standard init'));
   }
+  wrap.append(providerGovernanceCard(ctx, () => { if (!ctx.signal.aborted) mountProviders(root, ctx); }));
   wrap.append(budgetsCard(), optionsCard(ctx), notifyCard(ctx));
   root.replaceChildren(wrap);
 }

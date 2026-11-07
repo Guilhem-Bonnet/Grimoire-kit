@@ -80,13 +80,16 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.diff_fingerprint import signal_if_stuck
 from grimoire.missions.dispatch_history import recommend_start_tier
+from grimoire.missions.dispatch_worktree import changed_since, worktree_fingerprint
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.route_dispatch import record_route
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
+from grimoire.providers.data_policy import split_by_data_policy
 from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
 from grimoire.providers.routing import candidates as provider_candidates
+from grimoire.providers.secrets import env_for_provider
 from grimoire.providers.state import (
     available_models,
     load_state,
@@ -97,6 +100,8 @@ from grimoire.providers.state import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from grimoire.missions.schemas import LedgerEvent, MissionTask
     from grimoire.missions.service import TaskService
 
@@ -494,24 +499,18 @@ def _matches_review_surface(path: str, surfaces: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in surfaces)
 
 
-def _classify_review(project_root: Path) -> tuple[str, tuple[str, ...], str | None]:
-    """Classe le diff courant — ``(review, review_files, review_note)`` (issue #327).
+def _classify_review(
+    project_root: Path, before: Mapping[str, str] | None = None
+) -> tuple[str, tuple[str, ...], str | None]:
+    """Classe ce qui a changé depuis ``before`` — ``(review, review_files, review_note)`` (issue #327).
 
-    ``git diff --name-only`` plutôt qu'une lecture du working tree : c'est
-    exactement ce que le prochain relecteur verra. Un projet non versionné ne
-    permet pas de calculer quoi que ce soit ; le déclarer ``review_required``
-    par défaut inventerait une garantie qu'on ne peut pas tenir, donc
-    ``review_optional`` avec une note plutôt qu'un silence trompeur.
+    Un projet non versionné ne permet pas de calculer quoi que ce soit ; le
+    déclarer ``review_required`` par défaut inventerait une garantie qu'on ne
+    peut pas tenir, donc ``review_optional`` avec une note plutôt qu'un silence.
     """
-    try:
-        completed = subprocess.run(
-            ["git", "diff", "--name-only"], cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHECK_TIMEOUT_S
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return "review_optional", (), "projet non versionné (git indisponible) : relisibilité non calculée"
-    if completed.returncode != 0:
-        return "review_optional", (), "projet non versionné (pas un dépôt git) : relisibilité non calculée"
-    files = tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
+    files = changed_since(project_root, before or {})
+    if files is None:
+        return "review_optional", (), "projet non versionné (git illisible) : relisibilité non calculée"
     surfaces = _review_surfaces(project_root)
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
@@ -704,6 +703,7 @@ _REFUSAL_MESSAGES: dict[str, str] = {
     "no_check": "au moins un `--check` est requis : la classe dit que le verdict est mécanique, la commande dit lequel",
     "no_tier": "aucun palier disponible entre le plancher de la classe et --max-tier",
     "no_provider": "aucun fournisseur invocable sur la chaîne de paliers prévue",
+    "data_policy": "la politique de données ferme tous les fournisseurs de la chaîne (#1133)",
     "routing_policy_invalid": "politique de routage illisible : aucune route autonome (`on_invalid: refuse`)",
     "routed_to_session": "le routeur actif décide `session` : aucun appel autonome, la session tranche",
     "routed_defer": "le routeur actif décide `defer` : aucun modèle admis disponible, attente",
@@ -850,9 +850,14 @@ def _run_provider_call(
     """
     argv = render_invocation(provider.invocation or "", prompt=prompt, model=model)
     started = time.monotonic()
+    # Issue #310 suite : la clé d'un fournisseur `currency: api` vient du magasin de
+    # secrets (grimoire.providers.secrets, `~/.env-store/`), jamais du registre ni d'un
+    # argument — fusionnée ici pour que le script d'invocation n'ait rien à en savoir.
+    env = {**os.environ, **env_for_provider(provider.id)}
     try:
         completed = subprocess.run(
-            argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=call_timeout, shell=False
+            argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=call_timeout, shell=False, env=env,
         )
     except subprocess.TimeoutExpired:
         return None, "", "", time.monotonic() - started, "timeout", None
@@ -1271,15 +1276,15 @@ def run_dispatch(
         )
         return service.ledger.append_event("task.dispatched", task_id, "task", actor, payload)
 
+    tree_before = worktree_fingerprint(root)
+    data_refusals: dict[str, str] = {}
     attempt_no = 0
     previous_red_diff: str | None = None
     capped_before_next_tier = False
     cap_why: str | None = None
     for tier_idx, tier in enumerate(chain):
-        # Un fournisseur sans `invocation` déclarée n'est jamais candidat ici :
-        # `candidates()` sert aussi `providers status`, où un fournisseur sans
-        # commande d'appel reste une information utile à afficher — seule la
-        # cascade, qui doit réellement l'exécuter, a besoin de l'exclure.
+        # Un fournisseur sans `invocation` n'est jamais candidat ici : `candidates()` sert aussi `providers status`,
+        # où il reste utile à afficher ; seule la cascade, qui doit l'exécuter, a besoin de l'exclure.
         # En exécution sans humain (`GRIMOIRE_UNATTENDED=1`), un fournisseur
         # jamais sondé n'est pas candidat : personne ne verrait qu'il est cassé.
         autonomous = os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1"
@@ -1287,6 +1292,8 @@ def run_dispatch(
         tier_candidates = routing.order(tier, tier_candidates)
         if provider_id:
             tier_candidates = tuple(p for p in tier_candidates if p.id == provider_id)
+        tier_candidates, refused_here = split_by_data_policy(root, tier_candidates, task.data_class)
+        data_refusals.update(refused_here)
         tier_settled = False
         for provider in tier_candidates:
             if routing.exhausted(attempt_no):
@@ -1335,7 +1342,7 @@ def run_dispatch(
             green = verdict == "green"
             # La relecture ne se pose qu'une fois le résultat accepté (#327) —
             # un check rouge n'a rien produit qu'on ait besoin de relire.
-            review, review_files, review_note = _classify_review(root) if green else (None, (), None)
+            review, review_files, review_note = _classify_review(root, tree_before) if green else (None, (), None)
             # L'incertitude déclarée, elle, vaut pour tout appel qui a répondu,
             # vert ou rouge (#328) : l'ouvrier peut avoir douté d'un travail
             # que le check juge encore insuffisant.
@@ -1430,19 +1437,17 @@ def run_dispatch(
         return capped_report
 
     if not attempts:
-        # Aucun fournisseur candidat sur toute la chaîne : la cascade n'a
-        # jamais appelé personne. Distinct d'une chaîne épuisée (des
-        # tentatives ont eu lieu, aucune n'est allée au vert) — c'est un
-        # refus, pas un échec de la délégation elle-même.
+        # Aucun candidat sur toute la chaîne : personne n'a été appelé. Distinct d'une chaîne épuisée (des tentatives,
+        # aucune au vert) : c'est un refus, pas un échec de la délégation elle-même.
         return DispatchReport(
             task_id=task_id,
             verifiability=verifiability.value,
             dry_run=False,
             planned_chain=chain,
             prompt=prompt,
-            refusal="no_provider",
-            start_tier=chosen_tier,
-            start_tier_reason=start_tier_reason,
+            refusal="data_policy" if data_refusals else "no_provider",
+            start_tier=None if data_refusals else chosen_tier,
+            start_tier_reason="; ".join(data_refusals.values()) if data_refusals else start_tier_reason,
         )
 
     report = DispatchReport(

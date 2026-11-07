@@ -785,3 +785,56 @@ def test_reinstalling_the_fence_keeps_pointing_at_the_original_hooks(tmp_path: P
     assert refused.returncode != 0 and "depot-pre-commit" in refused.stderr
     fence = json.loads((repo / ".git" / "worktrees" / "wt" / "grimoire-fence" / "fence.json").read_text(encoding="utf-8"))
     assert fence["epoch"] == 2 and Path(fence["hooks_dir"]) == repo / ".git" / "hooks"
+
+
+def _in_review_with_an_old_lease(root: Path) -> tuple[str, Path]:
+    tid = _claimed(root)
+    _prompt(root)
+    service = TaskService(root)
+    service.ledger.transition_task(tid, TaskState.RUNNING, actor_id="claude")
+    service.ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="claude")
+    path = lease_path(service.ledger_root, tid)
+    write_lease(path, LeaseFile(tid, 1, (datetime.now(UTC) - timedelta(minutes=19)).isoformat()))
+    return tid, path
+
+
+def test_a_long_command_does_not_freeze_a_session_whose_task_is_in_review(governed: Path) -> None:
+    """#1117 : le fichier de bail survit à la revue ; quand la commande dépasse le bail restant, le renouvellement est refusé."""
+    _in_review_with_an_old_lease(governed)
+
+    rendered, _ = _pre(governed, _real_pretooluse(governed, command="make test", timeout=600_000))
+
+    assert _verdict(rendered) != "deny"
+
+
+def test_a_task_taken_back_by_another_claim_still_brakes_the_session(governed: Path) -> None:
+    tid, path = _in_review_with_an_old_lease(governed)
+    write_lease(path, LeaseFile(tid, 2, datetime.now(UTC).isoformat()))
+
+    rendered, _ = _pre(governed, _real_pretooluse(governed, command="make test", timeout=600_000))
+
+    assert _verdict(rendered) == "deny"
+
+
+def test_only_the_same_claim_in_review_counts_as_handed_over(governed: Path) -> None:
+    from grimoire.hosts.decisions.lease_brake import _handed_to_review
+
+    tid, _path = _in_review_with_an_old_lease(governed)
+    root = TaskService(governed).ledger_root
+    epoch = TaskService(governed).require(tid).claim.lease_epoch  # type: ignore[union-attr]
+
+    assert _handed_to_review(root, tid, epoch)
+    assert not _handed_to_review(root, tid, epoch + 1)
+    assert not _handed_to_review(root, "GAO-inconnue-001", epoch)
+    TaskService(governed).ledger.transition_task(tid, TaskState.RUNNING, actor_id="claude")
+    assert not _handed_to_review(root, tid, epoch)
+
+
+def test_a_refused_renewal_outside_review_still_brakes_the_session(governed: Path) -> None:
+    tid, path = _in_review_with_an_old_lease(governed)
+    TaskService(governed).ledger.transition_task(tid, TaskState.FAILED, actor_id="claude")
+    write_lease(path, LeaseFile(tid, 1, (datetime.now(UTC) - timedelta(minutes=19)).isoformat()))
+
+    rendered, _ = _pre(governed, _real_pretooluse(governed, command="make test", timeout=600_000))
+
+    assert _verdict(rendered) == "deny"

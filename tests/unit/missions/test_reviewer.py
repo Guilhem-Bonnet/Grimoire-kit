@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 from lot2_doubles import FakeHost, make_repo
+from test_merger import REPO, launch_and_work
+from test_merger import make_projet as merger_projet
+from test_merger import tick as merger_tick
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
@@ -702,3 +705,104 @@ def test_une_etape_de_relecture_en_erreur_ne_casse_pas_le_tick(projet: Path, hos
     monkeypatch.setattr(reviewer.ReviewStage, "__call__", boom)
     report = tick(projet, host)
     assert report.status == "ran" and any("étape en erreur" in a for a in report.attention)
+
+
+# ── Un relecteur arrêté sans verdict n'attend pas REVIEW_TIMEOUT (#1123) ───────
+
+
+@pytest.fixture
+def pr_projet(tmp_path: Path) -> Path:
+    """Un dépôt avec sa remote et ses PR, où la CI de la tête se lit (comme au merger)."""
+    return merger_projet(tmp_path)
+
+
+@pytest.fixture
+def pr_host() -> FakeHost:
+    fake = FakeHost()
+    fake.repo = REPO
+    return fake
+
+
+def _reviewer_goes_idle(host: FakeHost) -> None:
+    for agent in host.bg:
+        if str(agent["name"]).startswith("grimoire-review-"):
+            agent["status"] = "idle"
+
+
+def _judged(projet: Path, tid: str) -> list[str]:
+    return [str(e.payload["verdict"]) for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_JUDGED_EVENT]
+
+
+def test_relecteur_idle_sans_recu_et_ci_terminee_est_relance_au_tick_suivant_et_compte(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)  # relecteur lancé, CI verte
+    assert merger_tick(pr_projet, pr_host).reviews == ()  # encore au travail : rien ne bouge
+    _reviewer_goes_idle(pr_host)
+    first = merger_tick(pr_projet, pr_host)
+    assert [(o.action, o.status) for o in first.reviews] == [("silent", "done")], first.reviews
+    assert _judged(pr_projet, tid) == ["silent"]
+    assert [(o.action, o.status) for o in merger_tick(pr_projet, pr_host).reviews] == [("launch", "launched")]
+    assert len(pr_host.of("claude", "--bg", "--name", f"grimoire-review-{tid}")) == 2
+
+
+def test_relecteur_idle_sans_recu_attend_une_ci_en_cours(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    pr_host.checks[f"task/{tid}"] = [{"name": "Tests (Python 3.13)", "bucket": "pending"}]
+    _reviewer_goes_idle(pr_host)
+    assert merger_tick(pr_projet, pr_host).reviews == ()
+    assert _judged(pr_projet, tid) == []
+
+
+def test_ci_rouge_sur_la_tete_en_relecture_renvoie_au_worker_sans_recu(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    pr_host.checks[f"task/{tid}"] = [{"name": "Tests (Python 3.13)", "bucket": "fail"}]
+    _reviewer_goes_idle(pr_host)
+    report = merger_tick(pr_projet, pr_host)
+    assert [(o.action, o.status) for o in report.reviews] == [("bounce", "done")], report.reviews
+    task = TaskService(pr_projet).require(tid)
+    assert task.status is TaskState.RUNNING and any("CI de la tête relue est rouge" in d.text for d in task.directives)
+    assert len(pr_host.of("claude", "--bg", "--resume")) == 1
+    assert _judged(pr_projet, tid) == ["NOT-READY"]
+
+
+def test_lecture_de_claude_agents_en_echec_ne_juge_pas_le_relecteur_arrete(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    _reviewer_goes_idle(pr_host)
+    pr_host.agents_fail = True  # échec fermé : le délai de REVIEW_TIMEOUT reste la garde
+    assert merger_tick(pr_projet, pr_host).reviews == ()
+    assert _judged(pr_projet, tid) == []
+
+
+def test_relecteur_absent_de_claude_agents_sans_recu_est_note_silencieux(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    pr_host.agents = []  # la session n'est plus listée du tout
+    report = merger_tick(pr_projet, pr_host)
+    assert [(o.action, o.status) for o in report.reviews] == [("silent", "done")], report.reviews
+    assert _judged(pr_projet, tid) == ["silent"]
+
+
+def test_ci_rouge_sur_un_relecteur_arrete_est_relancee_une_fois_avant_de_renvoyer_au_worker(pr_projet: Path, pr_host: FakeHost) -> None:
+    tid, _wt = launch_and_work(pr_projet, pr_host)
+    merger_tick(pr_projet, pr_host)
+    pr_host.checks[f"task/{tid}"] = [{"name": "Tests (Python 3.13)", "bucket": "fail", "link": "https://github.com/o/r/actions/runs/101/job/9"}]
+    pr_host.rerun_error = ""
+    _reviewer_goes_idle(pr_host)
+    report = merger_tick(pr_projet, pr_host)
+    assert report.reviews == () and pr_host.reruns == [101], (report.reviews, pr_host.reruns)
+    assert _judged(pr_projet, tid) == [] and pr_host.of("claude", "--bg", "--resume") == []
+
+
+def test_le_relecteur_allege_retire_les_mcp_et_borne_les_outils(projet: Path, host: FakeHost) -> None:
+    policy = projet / POLICY
+    policy.write_text(policy.read_text(encoding="utf-8").replace("    reviewer:\n", "    reviewer:\n      lean: true\n"), encoding="utf-8")
+    launched_and_in_review(projet, host)
+    tick(projet, host)
+    _worker, review_argv = host.of("claude", "--bg")
+    assert "--strict-mcp-config" in review_argv
+    # #1160 : en deux jetons, `--tools` (variadique) avalait la consigne posée juste après : relecteur muet.
+    assert "--tools=Bash,Read,Edit,Write,Glob,Grep" in review_argv and "--tools" not in review_argv
+    assert review_argv[-2] == "--tools=Bash,Read,Edit,Write,Glob,Grep" and len(review_argv[-1]) > 200

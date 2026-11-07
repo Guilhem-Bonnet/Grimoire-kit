@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.77.0",
+ "generated_for": "3.82.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -374,6 +374,10 @@
    "version": "3.6.0",
    "path": "framework/agentic-standard/templates/merge-lane.yaml"
   },
+  "19f1b8b7fa388419d9a31a120b206b7f3b872c83e291586b1e740c52c3c40695": {
+   "version": "3.82.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
+  },
   "19fbac8504ac73614f4e7679f352253da556237c4f2395944dc4c3d612db2dd1": {
    "version": "3.7.0",
    "path": "framework/agentic-standard/profile-map.yaml"
@@ -733,6 +737,10 @@
   "2dfdb384d4f7ef7b52411c1c17ba0a613664285727253d8d7319a83c5bca0250": {
    "version": "3.4.2",
    "path": "framework/tools/time-travel.py"
+  },
+  "2e1a4787b770307123c4f5ba1d7982b8a49e8545d0d3cfc497775e34edfb5bbd": {
+   "version": "3.80.1",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
   },
   "2e8b824a9bbec88c8b14fe17270fa2c52357e78d998ebfbebc45575c97d46526": {
    "version": "3.65.0",
@@ -2657,6 +2665,10 @@
   "a476c91f146e0074b7c941e5baf43ff183b2cc6a98057c69d7c876ee9af8afaa": {
    "version": "3.16.0",
    "path": "framework/tools/grimoire-completion.zsh"
+  },
+  "a4ae3b69ee2e9e4b66795f2f2434af74a429773234a149dd3dac8915db401c29": {
+   "version": "3.81.0",
+   "path": "framework/agentic-standard/templates/context-contract.yaml"
   },
   "a4bf5bd1a3f1129f5185a7a1a03c69b24c29fb15d5626356f49d7f0d6044439c": {
    "version": "3.12.0",

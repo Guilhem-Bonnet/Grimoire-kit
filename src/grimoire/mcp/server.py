@@ -789,7 +789,7 @@ def task_add(
     actor: str = "mcp-agent",
     ready: bool = False,
     description: str = "",
-    finition: str = "",
+    finition: str = "", data_class: str = "",
     project_path: str = ".",
     ledger_root: str = "_grimoire-runtime-output/ledger",
 ) -> str:
@@ -797,8 +797,7 @@ def task_add(
 
     At least one non-blank acceptance criterion is required (the ledger refuses
     otherwise, exactly as the CLI does). In a governed project, a session that
-    writes files without an active task is refused at Stop: open one here, then
-    `task_claim` it (issue #638).
+    writes files without an active task is refused at Stop: open one here, then `task_claim` it (issue #638).
 
     Args:
         title: What the task accomplishes.
@@ -810,6 +809,7 @@ def task_add(
         ready: Also move it `proposed → ready` so it can be claimed right away (through the gate).
         description: Context, rationale and leads for whoever claims the task — plain text, at most 4000 characters (#714). Shown by `task_show`, `task_context` and the cockpit card.
         finition: `maquette` or `peaufine`. Empty string inherits the project phase declared in project-context.yaml (exploration → maquette, construction/exploitation → peaufine), or stays undeclared.
+        data_class: Class of the data the task reads. Empty string uses `routing.default_data_class` of the provider registry; with neither, no external provider receives the task (#1133).
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
     """
@@ -824,7 +824,7 @@ def task_add(
             origin="mcp",
             ready=ready,
             description=description,
-            finition=finition,
+            finition=finition, data_class=data_class,
         )
         return json.dumps(added.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:

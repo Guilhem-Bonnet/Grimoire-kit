@@ -64,20 +64,29 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
 from grimoire.missions.breaker import read_breaker, record_failure
+from grimoire.missions.liveness import probe_status
+from grimoire.missions.provider_failure import transient_api_error
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import create_task_worktree
+from grimoire.missions.verifiability import Verifiability, classify
+from grimoire.missions.worker_provider import WorkerRoute, route_refusal, route_worker, settings_path
+from grimoire.tools.workspace_work import transcript_path
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import Admit
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
+    from grimoire.missions.schemas import MissionTask
     from grimoire.missions.service import TaskService
 
 __all__ = [
     "LAUNCHED_EVENT",
     "LAUNCH_FAILED_EVENT",
+    "MAX_PROVIDER_RESUMES",
+    "PROVIDER_ERROR_CAUSE",
     "WORKER_ACTOR",
     "ExecResult",
     "LaunchOutcome",
+    "ProviderResume",
     "WorkerLauncher",
     "active_worker_ids",
     "attest_session",
@@ -86,8 +95,10 @@ __all__ = [
     "launched_sessions",
     "live_background_sessions",
     "mandate_precheck",
+    "provider_resumes",
     "renew_live_workers",
     "resolve_background_session",
+    "resume_provider_failed_workers",
     "resume_worker",
     "session_env",
     "unhalted_sessions",
@@ -99,6 +110,16 @@ LAUNCH_FAILED_EVENT = "task.session_launch_failed"
 WORKER_HALTED_EVENT = "task.worker_session_halted"
 #: La session du worker, reprise (``claude --bg --resume``) ou repartie à neuf sur le même worktree après un renvoi.
 WORKER_RESUMED_EVENT = "task.worker_session_resumed"
+#: La reprise automatique qui suit une erreur transitoire du fournisseur (#1158) : sa cause au ledger.
+PROVIDER_ERROR_CAUSE = "provider_error"
+#: Plafond des reprises automatiques après une erreur du fournisseur ; au-delà, la tâche se gare.
+MAX_PROVIDER_RESUMES = 3
+#: La consigne de reprise : repartir de l'état du worktree, sans refaire ce qui est fait.
+PROVIDER_RESUME_MESSAGE = (
+    "Ton dernier tour s'est arrêté sur une erreur transitoire du fournisseur. Reprends où tu en étais : "
+    "relis l'état du worktree et de la tâche avant d'agir, ne recommence pas ce qui est déjà fait, et "
+    "poursuis jusqu'à la PR prête à relire et la tâche passée en revue."
+)
 WORKER_ACTOR = "worker"
 _HOST = "claude-code-cli"
 _EXEC_TIMEOUT_S = 60.0
@@ -111,6 +132,10 @@ _RESOLVE_ATTEMPTS = 10
 _RESOLVE_PAUSE_S = 1.0
 #: Palier de la politique → alias de modèle que ``claude --model`` accepte.
 _TIER_ALIAS = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
+#: Mesuré le 2026-11-06 : 45 k jetons de contexte au premier tour sans ces options, 10 k avec. Sans ``Skill`` ni ``Agent``.
+#: ``--tools`` est variadique : en deux jetons, il avale la consigne qui le suit (relecteur muet, #1160).
+LEAN_TOOLS = "Bash,Read,Edit,Write,Glob,Grep"
+LEAN_SESSION_ARGS = ("--strict-mcp-config", f"--tools={LEAN_TOOLS}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,15 +194,17 @@ def launched_sessions(service: TaskService) -> dict[str, dict[str, Any]]:
 def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude") -> frozenset[tuple[str, str]] | None:
     """Les sessions de fond au travail (``claude agents --json``), en ``(id court, nom)`` ; ``None`` si la lecture échoue.
 
-    Seul ``busy`` compte : une session ``idle`` a fini son tour (question posée, travail rendu sans transition) et ne
-    travaille plus ; la tenir pour vivante repousserait sans fin le plafond dur du claim.
+    Seul le statut ``busy`` compte : une session ``idle`` (ou ``blocked``) a fini son tour (question posée,
+    travail rendu sans transition) et ne travaille plus ; la tenir pour vivante repousserait sans fin le
+    plafond dur du claim. Le statut se lit par :func:`~grimoire.missions.liveness.probe_status` : Claude Code
+    2.1.319 rend ``state: "working"`` pour une session de fond, pas ``status: "busy"``.
     """
     raw = _read_agents(exec_, cwd, claude_bin)
     if raw is None:
         return None
     return frozenset(
         (str(a["id"]), str(a.get("name", ""))) for a in raw
-        if a.get("kind") == "background" and a.get("status") == "busy" and a.get("id")
+        if a.get("kind") == "background" and probe_status(a) == "busy" and a.get("id")
     )
 
 
@@ -204,8 +231,9 @@ def renew_live_workers(
     if alive is None:
         return ()
     renewed: list[str] = []
-    for tid, (payload, epoch) in held.items():
-        if (str(payload.get("session", "")), f"grimoire-{tid}") not in alive:
+    for tid, (_payload, epoch) in held.items():
+        short, _started, _halted = _session_marks(service, tid)  # la dernière session, reprise comprise
+        if not short or (short, f"grimoire-{tid}") not in alive:
             continue
         try:
             service.ledger.renew_lease(tid, epoch, actor_id="tick", now=now)
@@ -241,7 +269,8 @@ def release_ended_workers(
     }
     released: list[str] = []
     for tid, payload in held.items():
-        if (str(payload.get("session", "")), f"grimoire-{tid}") not in ended:
+        short, _started, _halted = _session_marks(service, tid)  # la dernière session, reprise comprise
+        if not short or (short, f"grimoire-{tid}") not in ended:
             continue
         try:
             decision = release_ended(service.ledger, tid, int(payload["lease_epoch"]), actor_id="tick", now=now)
@@ -250,6 +279,116 @@ def release_ended_workers(
         if decision is not None:
             released.append(tid)
     return tuple(released)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderResume:
+    """Ce que le tick a fait d'un worker dont la session a fini sur une erreur du fournisseur (#1158)."""
+
+    task_id: str
+    action: str  # ``resumed`` | ``parked`` | ``failed``
+    detail: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {"task_id": self.task_id, "action": self.action, "detail": self.detail}
+
+
+def provider_resumes(service: TaskService, task_id: str) -> int:
+    """Les reprises automatiques déjà tentées depuis le dernier lancement, pour une erreur du fournisseur.
+
+    Le plafond se compte par *série* : un nouveau lancement (``task.session_launched``) ou une reprise
+    venue d'ailleurs (relecteur, merger) repart à neuf. Seules les reprises de cause
+    :data:`PROVIDER_ERROR_CAUSE` s'accumulent.
+    """
+    count = 0
+    for event in reversed(service.ledger.events_for(task_id)):
+        if event.event_type == LAUNCHED_EVENT:
+            break
+        if event.event_type != WORKER_RESUMED_EVENT:
+            continue
+        if event.payload.get("cause") != PROVIDER_ERROR_CAUSE:
+            break
+        count += 1
+    return count
+
+
+def _park_provider_error(service: TaskService, task: MissionTask, error: str, tried: int) -> bool:
+    """Gare la tâche ``waiting(human)`` avec la question qui nomme l'erreur du fournisseur ; vrai si écrite.
+
+    Ce n'est pas un simple « bail perdu (heartbeat) : resume_branch » : l'humain lit la vraie cause et
+    choisit entre relancer et abandonner.
+    """
+    claim = task.claim
+    if claim is None:
+        return False
+    question = (
+        f"La session de {task.id} s'est arrêtée sur une erreur du fournisseur ({error[:300]}) "
+        f"et {tried} reprise(s) automatique(s) n'ont pas suffi. La relancer encore, ou l'abandonner ?"
+    )
+    try:
+        service.ask(
+            task.id, question, "tick", kind="retry_exhausted",
+            options=("réessayer", "abandonner"), epoch=claim.lease_epoch,
+        )
+    except GrimoireError:
+        return False  # la récolte ordinaire jugera à l'expiration du bail
+    return True
+
+
+def resume_provider_failed_workers(
+    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None,
+    permission_mode: str = "", max_resumes: int = MAX_PROVIDER_RESUMES,
+) -> tuple[ProviderResume, ...]:
+    """Relance sur la même session le worker dont le dernier tour a fini sur une erreur du fournisseur (#1158).
+
+    Un bail ne se renouvelle que pour une session ``busy`` : une erreur transitoire du fournisseur
+    (5xx, 429, ``overloaded``) laisse la session au repos, donc muette pour le battement, et la récolte
+    la garerait vingt minutes plus tard alors que la conversation est intacte. Le tick relit la fin du
+    journal de session (:func:`~grimoire.missions.provider_failure.transient_api_error`) et reprend la
+    session (``task.worker_session_resumed``) jusqu'à *max_resumes* fois ; au-delà, la tâche est garée
+    ``waiting(human)`` avec une question qui nomme l'erreur du fournisseur.
+
+    Une session encore ``busy``, un journal qui ne finit pas sur une erreur transitoire, ou une lecture de
+    ``claude agents`` en échec ne déclenchent rien : l'échec reste fermé, la récolte juge comme avant.
+    """
+    launches = launched_sessions(service)
+    if not launches:
+        return ()
+    alive = live_background_sessions(exec_, service.home_root, claude_bin)
+    if alive is None:
+        return ()  # sonde muette : on ne juge pas une session qu'on ne voit pas
+    outcomes: list[ProviderResume] = []
+    for tid, launch in launches.items():
+        task = service.ledger.get_task(tid)
+        if task is None or task.status not in (TaskState.CLAIMED, TaskState.RUNNING) or task.claim is None:
+            continue
+        if launch.get("lease_epoch") != task.claim.lease_epoch:
+            continue
+        short, _started, _halted = _session_marks(service, tid)
+        if not short or (short, f"grimoire-{tid}") in alive:
+            continue  # elle travaille encore : rien à reprendre
+        error = transient_api_error(
+            transcript_path(Path(str(launch.get("cwd") or "")), str(launch.get("session_id") or ""))
+        )
+        if not error:
+            continue
+        tried = provider_resumes(service, tid)
+        if tried >= max_resumes:
+            if _park_provider_error(service, task, error, tried):
+                outcomes.append(ProviderResume(tid, "parked", error))
+            continue
+        result = resume_worker(
+            service, exec_, claude_bin, tid, launch, PROVIDER_RESUME_MESSAGE,
+            permission_mode=str(launch.get("permission_mode") or permission_mode), cause=PROVIDER_ERROR_CAUSE,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}"
+            outcomes.append(ProviderResume(tid, "failed", detail))
+            continue
+        with contextlib.suppress(GrimoireError):  # la session reprise vit : son bail repart maintenant
+            service.ledger.renew_lease(tid, task.claim.lease_epoch, actor_id="tick", now=now)
+        outcomes.append(ProviderResume(tid, "resumed", error))
+    return tuple(outcomes)
 
 
 def _read_agents(exec_: Exec, cwd: Path, claude_bin: str) -> list[dict[str, Any]] | None:
@@ -400,6 +539,33 @@ def _halt(exec_: Exec, cwd: Path, short: str, claude_bin: str) -> tuple[bool, st
     return False, f", session {short} NON arrêtée ({why})"
 
 
+def _worktree_hooks(wt_path: Path) -> str:
+    """#957 : le worktree du worker porte le hook PreToolUse ; ``""`` ou la raison d'un refus.
+
+    Un dépôt qui ne suit pas ses fichiers d'hôte (``.claude/`` non suivi) donne un worktree sans hooks : on y rejoue la
+    synchronisation de l'hôte Claude (fichiers non suivis, retirés avec le worktree), puis on vérifie. Échec fermé.
+    """
+    from grimoire.bridges.schemas import HostId
+    from grimoire.hosts.sync import sync_host_surfaces
+
+    def armed() -> bool:
+        try:
+            data = json.loads((wt_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            return bool(data.get("hooks", {}).get("PreToolUse"))
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    if armed():
+        return ""
+    outcome = sync_host_surfaces(wt_path, only=frozenset({HostId.CLAUDE_CODE_CLI}))
+    if armed():
+        # Fichiers générés, propres à ce worktree : ignorés par lui seul, sinon le relecteur et le janitor y verraient
+        # des « modifications non commitées » et refuseraient de relire ou de ranger.
+        (wt_path / ".claude" / ".gitignore").write_text("*\n", encoding="utf-8")
+        return ""
+    return f"worktree sans hook PreToolUse Grimoire après host sync ({outcome.error or outcome.warning or 'hook absent'})"
+
+
 def _freeze_repository(service: TaskService, task_id: str) -> str:
     """Lot 4 : fige le dépôt GitHub de la tâche au journal d'autorité, avant le worker ; ``""`` ou la raison d'un refus."""
     from grimoire.missions.review_seal import freeze_repository
@@ -478,23 +644,29 @@ def halt_idle_workers(service: TaskService, exec_: Exec, claude_bin: str = "clau
 
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
-    permission_mode: str = "",
+    permission_mode: str = "", cause: str = "",
 ) -> ExecResult:
     """Rend la tâche à son worker : reprend la session arrêtée par ``claude --bg --resume``, à défaut en lance une neuve.
 
     Une reprise qui échoue (conversation introuvable, hôte en erreur) ne laisse pas la tâche sans worker : une session
     neuve repart sur le même worktree, avec la consigne du worker et *message* pour contexte. Le résultat est celui de
     la reprise si les deux échouent. La session obtenue est notée (``task.worker_session_resumed``) : elle compte
-    de nouveau dans le WIP et c'est elle que le prochain arrêt vise.
+    de nouveau dans le WIP et c'est elle que le prochain arrêt vise. *cause* nomme l'origine de la reprise
+    (``provider_error`` pour le tick, #1158) ; elle est notée au ledger et plafonne les reprises automatiques.
     """
     cwd = Path(str(launch.get("cwd") or "."))
     argv = [claude_bin, "--bg", "--resume", str(launch.get("session_id") or "")]
+    # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
+    routed = ["--settings", str(settings_path(str(launch["provider"])))] if launch.get("provider") else []
+    if launch.get("lean"):
+        routed += LEAN_SESSION_ARGS
+    argv += routed
     if permission_mode:
         argv += ["--permission-mode", permission_mode]
     result = exec_([*argv, message], cwd, session_env())
     fresh = False
     if result.returncode != 0:
-        fresh_argv = [claude_bin, "--bg", "--name", f"grimoire-{task_id}"]
+        fresh_argv = [claude_bin, "--bg", "--name", f"grimoire-{task_id}", *routed]
         if launch.get("model"):
             fresh_argv += ["--model", str(launch["model"])]
         if permission_mode:
@@ -506,6 +678,8 @@ def resume_worker(
     match = _BG_ID.search(result.stdout)
     short = match.group(1) if match else str(launch.get("session") or "")
     payload: dict[str, Any] = {"session": short, "fresh": fresh, "name": f"grimoire-{task_id}"}
+    if cause:
+        payload["cause"] = cause
     if fresh and match:
         session_id = resolve_background_session(exec_, cwd, short, claude_bin, name=f"grimoire-{task_id}", session_cwd=cwd)
         payload["session_id"] = session_id
@@ -554,14 +728,21 @@ class WorkerLauncher:
             if e.event_type in (LAUNCHED_EVENT, LAUNCH_FAILED_EVENT) and _day(e.created_at) == today
         )
 
-    def _model_for(self, admit: Admit) -> str:
+    def _tier_for(self, task: MissionTask) -> str:
+        """Le palier de cette tâche : ``cheap`` pour une V0 sous ``model_by_class``, sinon celui du rôle."""
+        role = self._policy.worker
+        return "cheap" if role.model_by_class and classify(task) is Verifiability.V0 else role.tier
+
+    def _model_for(self, admit: Admit, tier: str | None = None) -> str:
         role = self._policy.worker
         if role.model:
             return role.model
+        if role.model_by_class and tier == "cheap":
+            return _TIER_ALIAS["cheap"]  # un verdict mécanique juge seul : la route du routeur ne remonte pas ce palier
         route = admit.route
         if route is not None and route.outcome == "route" and route.model and route.provider.lower() in {"anthropic", "claude", "claude-code"}:
             return route.model
-        return _TIER_ALIAS.get(role.tier, "")
+        return _TIER_ALIAS.get(tier if tier is not None else role.tier, "")
 
     def _host_version(self) -> str:
         """La version de l'hôte (``claude --version``), lue une fois par tick (P86) ; ``""`` si illisible.
@@ -619,12 +800,15 @@ class WorkerLauncher:
         except (GrimoireError, ValueError, OSError) as exc:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
-        refused = _freeze_repository(service, tid)
+        refused = _worktree_hooks(wt.path) or _freeze_repository(service, tid)
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
-        model = self._model_for(admit)
-        result = self._exec(self._argv(tid, model), wt.path, session_env())
+        tier = self._tier_for(service.require(tid))
+        route = route_worker(service.home_root, self._policy.worker.provider, tier, service.require(tid))
+        data_refusal = route_refusal(service.home_root, self._policy.worker.provider, service.require(tid))
+        model = route.model if route is not None else self._model_for(admit, tier)
+        result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}, aucun identifiant de session"
@@ -653,6 +837,10 @@ class WorkerLauncher:
             LAUNCHED_EVENT, tid, "task", WORKER_ACTOR,
             {
                 "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
+                "provider": route.provider if route is not None else "",
+                "provider_refused": data_refusal,
+                "lean": self._policy.worker.lean,
+                "permission_mode": self._policy.worker.permission_mode,
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
             },
@@ -721,9 +909,13 @@ class WorkerLauncher:
             detail += " — disjoncteur ouvert"
         return LaunchOutcome(tid, "failed", detail)
 
-    def _argv(self, tid: str, model: str) -> list[str]:
+    def _argv(self, tid: str, model: str, route: WorkerRoute | None = None) -> list[str]:
         # Pas de ``--session-id`` : ``claude --bg`` l'ignore (#966), l'identité se lit après le lancement.
         argv = [self._claude, "--bg", "--name", f"grimoire-{tid}"]
+        if route is not None:
+            argv += ["--settings", str(route.settings)]
+        if self._policy.worker.lean:
+            argv += LEAN_SESSION_ARGS
         if model:
             argv += ["--model", model]
         if self._policy.worker.permission_mode:

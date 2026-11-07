@@ -13,6 +13,9 @@ janitor :
         worker:
           enabled: false          # défaut : rien n'est lancé, le comportement actuel est inchangé
           model: ""               # alias ou nom complet ; vide : la route du routeur, sinon le palier
+          provider: ""            # fournisseur du registre avec anthropic_base_url : route ses tâches V0/V1
+          lean: false             # session allégée : outils de fichiers et Bash seuls, sans MCP ni skills
+          model_by_class: false   # une tâche V0 part au palier cheap, le reste au palier du rôle
           tier: ""                # cheap | mid | strong (repli quand ni model ni route ne donnent de modèle)
           wip: 1                  # sessions de worker en même temps
           sessions_per_day: 5     # plafond de lancements par jour (UTC)
@@ -90,8 +93,10 @@ TIERS = ("cheap", "mid", "strong")
 _BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
-_WORKER_KEYS = frozenset({"enabled", "model", "tier", "wip", "sessions_per_day", "permission_mode"})
-_REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode"})
+_WORKER_KEYS = frozenset(
+    {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class"}
+)
+_REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean"})
 DEFAULT_MAX_CYCLES = 2
 _MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths"})
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
@@ -113,11 +118,15 @@ class WorkerRole:
     wip: int = 1
     sessions_per_day: int = 5
     permission_mode: str = ""
+    provider: str = ""
+    lean: bool = False
+    model_by_class: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
             "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode,
+            "provider": self.provider, "lean": self.lean, "model_by_class": self.model_by_class,
         }
 
 
@@ -131,11 +140,12 @@ class ReviewerRole:
     wip: int = 1
     max_cycles: int = DEFAULT_MAX_CYCLES
     permission_mode: str = ""
+    lean: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
-            "max_cycles": self.max_cycles, "permission_mode": self.permission_mode,
+            "max_cycles": self.max_cycles, "permission_mode": self.permission_mode, "lean": self.lean,
         }
 
 
@@ -255,6 +265,13 @@ def _session_role(data: dict[str, Any], role: str) -> tuple[bool, str, str, str]
     return enabled, model, tier, mode
 
 
+def _flag(data: dict[str, Any], key: str, where: str) -> bool:
+    value = data.get(key, False)
+    if not isinstance(value, bool):
+        raise _InvalidPolicyError(f"{where}.{key} doit être un booléen, pas {value!r}")
+    return value
+
+
 def _parse_worker(raw: Any) -> WorkerRole:
     data = _table(raw, "orchestrator.roles.worker", _WORKER_KEYS)
     enabled, model, tier, mode = _session_role(data, "worker")
@@ -265,6 +282,9 @@ def _parse_worker(raw: Any) -> WorkerRole:
         wip=_positive(data.get("wip", 1), "orchestrator.roles.worker.wip"),
         sessions_per_day=_positive(data.get("sessions_per_day", 5), "orchestrator.roles.worker.sessions_per_day"),
         permission_mode=mode,
+        provider=_text(data.get("provider", ""), "orchestrator.roles.worker.provider"),
+        lean=_flag(data, "lean", "orchestrator.roles.worker"),
+        model_by_class=_flag(data, "model_by_class", "orchestrator.roles.worker"),
     )
 
 
@@ -278,6 +298,7 @@ def _parse_reviewer(raw: Any) -> ReviewerRole:
         wip=_positive(data.get("wip", 1), "orchestrator.roles.reviewer.wip"),
         max_cycles=_positive(data.get("max_cycles", DEFAULT_MAX_CYCLES), "orchestrator.roles.reviewer.max_cycles"),
         permission_mode=mode,
+        lean=_flag(data, "lean", "orchestrator.roles.reviewer"),
     )
 
 

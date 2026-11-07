@@ -449,11 +449,11 @@ def _tampered_paths(repo: Path, base: str, head: str, protect: tuple[str, ...]) 
 
 
 def _block(service: TaskService, task_id: str, reason: str, actor: str) -> str:
-    """Passe la tâche en ``blocked`` (via ``running`` depuis ``needs_verification``) ; rend un motif si le gate refuse."""
+    """Passe la tâche en ``blocked`` ; rend un motif si le gate refuse."""
     try:
-        if service.require(task_id).status is TaskState.NEEDS_VERIFICATION:
-            service.transition(task_id, TaskState.RUNNING, actor, reason)
-        if service.require(task_id).status in (TaskState.READY, TaskState.CLAIMED, TaskState.RUNNING):
+        if service.require(task_id).status in (
+            TaskState.READY, TaskState.CLAIMED, TaskState.RUNNING, TaskState.NEEDS_VERIFICATION,
+        ):
             service.transition(task_id, TaskState.BLOCKED, actor, reason)
     except GrimoireError as exc:
         return f" ; blocage non écrit : {exc}"

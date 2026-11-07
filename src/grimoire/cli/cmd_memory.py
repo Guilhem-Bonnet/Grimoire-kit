@@ -76,7 +76,16 @@ _gate_bundle_opt = typer.Option(
 )
 _gate_sync_opt = typer.Option(True, "--sync/--no-sync", help="Sync Neo4j graph projections before verification.")
 _gate_soft_opt = typer.Option(False, "--soft", help="Report failures without returning a non-zero exit code.")
-_gate_skip_migration_opt = typer.Option(False, "--skip-migration", help="Skip Weaviate/Neo4j migration parity check.")
+_gate_skip_migration_opt = typer.Option(
+    False,
+    "--skip-migration",
+    help="Skip Weaviate/Neo4j migration parity check outright, even when a bundle exists.",
+)
+_gate_require_migration_opt = typer.Option(
+    False,
+    "--require-migration",
+    help="Fail when the migration bundle is missing instead of noting that no migration is running.",
+)
 _gate_skip_graph_opt = typer.Option(False, "--skip-graph", help="Skip code/task graph projection check.")
 _gate_sync_vectors_opt = typer.Option(False, "--sync-vectors/--no-sync-vectors", help="Sync semantic code/task vector projections before verification.")
 _gate_skip_vectors_opt = typer.Option(False, "--skip-vectors", help="Skip semantic code/task vector projection check.")
@@ -227,6 +236,15 @@ def _append_gate_issue(report: dict[str, Any], message: str) -> None:
     report.setdefault("issues", []).append(message)
 
 
+#: Constat, jamais une issue : sur ce poste aucune migration n'est vérifiable ni n'a été demandée.
+_NO_MIGRATION_NOTICE = "aucune migration en cours sur ce poste"
+
+_GATE_MIGRATION_REMEDY = (
+    "run `grimoire memory migrate export-bundle --bundle <dir>`, then "
+    "`grimoire memory migrate import-weaviate` / `import-neo4j`, then "
+    "`grimoire memory migrate verify`, or pass --skip-migration"
+)
+
 
 # ── grimoire memory gate ─────────────────────────────────────────────────────
 
@@ -243,6 +261,7 @@ def memory_gate(
     sync: bool = _gate_sync_opt,
     soft: bool = _gate_soft_opt,
     skip_migration: bool = _gate_skip_migration_opt,
+    require_migration: bool = _gate_require_migration_opt,
     skip_graph: bool = _gate_skip_graph_opt,
     sync_vectors: bool = _gate_sync_vectors_opt,
     skip_vectors: bool = _gate_skip_vectors_opt,
@@ -278,8 +297,11 @@ def memory_gate(
     if not skip_migration:
         bundle_path = _default_migration_bundle(cfg, root, bundle)
         report["migration"] = {"skipped": True, "bundle": str(bundle_path)}
-        if not bundle_path.exists():
-            _append_gate_issue(report, f"Migration bundle not found: {bundle_path}")
+        # Opt-in par présence : sans dossier bundle, aucune migration n'est en cours — un constat, pas un FAIL.
+        if not bundle_path.is_dir() and not require_migration:
+            report["migration"]["notice"] = _NO_MIGRATION_NOTICE
+        elif not bundle_path.is_dir():
+            _append_gate_issue(report, f"Migration bundle not found: {bundle_path} — {_GATE_MIGRATION_REMEDY}")
         elif not cfg.memory.weaviate_url:
             _append_gate_issue(report, "memory.weaviate_url is required for migration verification")
         else:
@@ -399,7 +421,8 @@ def memory_gate(
                 f"Weaviate {report['migration']['weaviate']['count']}"
             )
         else:
-            console.print("  Migration : skipped")
+            notice = report["migration"].get("notice")
+            console.print(f"  Migration : skipped ({notice})" if notice else "  Migration : skipped")
         if not report["graph_verify"].get("skipped"):
             actual = report["graph_verify"].get("actual", {})
             console.print(

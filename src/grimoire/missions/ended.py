@@ -28,9 +28,10 @@ def release_ended(
     incohérente ou si les tentatives sont épuisées : la récolte ordinaire jugera à l'expiration du bail, avec
     ses gardes (quota, frein d'hôte, travail local non poussé).
     """
-    from grimoire.missions.ledger import LEASE_LOST_KEY, ORIGIN_REAP, ReapDecision, _ledger_file_lock
+    from grimoire.missions.ledger import LEASE_LOST_KEY, ORIGIN_REAP, ReapDecision
+    from grimoire.missions.ledger_files import ledger_file_lock
 
-    with _ledger_file_lock(ledger._events_path):
+    with ledger_file_lock(ledger._events_path):
         ledger._invalidate()
         ledger._load()
         moment = now or ledger._now()

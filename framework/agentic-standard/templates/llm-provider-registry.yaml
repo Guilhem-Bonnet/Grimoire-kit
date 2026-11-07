@@ -12,9 +12,25 @@ metadata:
 #   invocation  : commande headless pour appeler ce fournisseur hors chat,
 #                 avec {prompt} et {model} comme gabarits littéraux ; {prompt}
 #                 est obligatoire (providers.invocation_prompt_missing).
-#   models      : liste de {id, tier}, tier ∈ "cheap" | "mid" | "strong" — la
-#                 base sur laquelle `grimoire providers status`/`choose()`
-#                 route par palier de coût plutôt que par nom de modèle.
+#   models      : liste de {id, tier, pricing?}, tier ∈ "cheap" | "mid" |
+#                 "strong" — la base sur laquelle `grimoire providers status` /
+#                 `choose()` route par palier de coût plutôt que par nom de
+#                 modèle.
+#   pricing     : tarif catalogue optionnel d'un modèle (issue #1152), en
+#                 dollars par million de tokens :
+#                   {input_per_mtok: 0.27, output_per_mtok: 1.10,
+#                    cache_read_per_mtok: 0.07}
+#                 `cache_read_per_mtok` est facultatif, `input_per_mtok` et
+#                 `output_per_mtok` sont requis ; `grimoire task show` en chiffre
+#                 l'usage des appels repliés depuis le journal de session. Sans
+#                 pricing (ou sans tarif pour le cache lu), le coût reste
+#                 inconnu, jamais 0. Exemple commenté :
+#                   #   - id: "mon-modele"
+#                   #     tier: "mid"
+#                   #     pricing:
+#                   #       input_per_mtok: 0.27
+#                   #       output_per_mtok: 1.10
+#                   #       cache_read_per_mtok: 0.07
 # Un tier ou une currency hors de ce vocabulaire est une erreur de vérification
 # (providers.model_tier_invalid / providers.currency_invalid).
 
@@ -120,6 +136,10 @@ providers:
       log_metadata: true
 
 routing:
+  # Classe des données du projet (#1133). Vide : aucun fournisseur hors `provider_type: local` ne reçoit de tâche,
+  # sauf si la tâche déclare la sienne (`task add --data-class`). Elle doit figurer dans `allowed_data_classes`
+  # du fournisseur, et ne pas figurer dans `forbidden_data_classes`.
+  default_data_class: ""
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true

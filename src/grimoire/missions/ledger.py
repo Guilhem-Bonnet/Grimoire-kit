@@ -14,20 +14,16 @@ module onto that one catalogue instead of two disconnected namings.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
-import re
-import uuid
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager, suppress
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
-from grimoire.core.fsio import locked
 from grimoire.missions import ledger_snapshot as snapshot
 from grimoire.missions.lease import (
     CLOCK_TOLERANCE_SECONDS,
@@ -45,6 +41,21 @@ from grimoire.missions.lease import (
     write_lease,
 )
 from grimoire.missions.ledger_append import FileSig, append_bytes, file_sig
+from grimoire.missions.ledger_files import (
+    confined_ledger_file as _confined_ledger_file,
+)
+from grimoire.missions.ledger_files import (
+    ledger_file_lock as _ledger_file_lock,
+)
+from grimoire.missions.ledger_files import (
+    new_id as _new_id,
+)
+from grimoire.missions.ledger_files import (
+    now_iso as _now_iso,
+)
+from grimoire.missions.ledger_files import (
+    slug as _slug,
+)
 from grimoire.missions.ledger_rules import (
     UnjudgedClaimError,
     blocks_path,
@@ -125,14 +136,19 @@ _TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.WAITING: frozenset({TaskState.RUNNING, TaskState.READY, TaskState.FAILED, TaskState.CANCELLED}),
     TaskState.BLOCKED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     # NEEDS_VERIFICATION → CANCELLED (K3, issue #713) : une preuve remise peut être abandonnée.
+    # NEEDS_VERIFICATION → BLOCKED (issue #1124) : une revue rejetée gare la tâche sans passer par un état réclamable.
     TaskState.NEEDS_VERIFICATION: frozenset(
-        {TaskState.CLOSED, TaskState.RUNNING, TaskState.FAILED, TaskState.CANCELLED}
+        {TaskState.CLOSED, TaskState.RUNNING, TaskState.FAILED, TaskState.CANCELLED, TaskState.BLOCKED}
     ),
     TaskState.FAILED: frozenset({TaskState.READY, TaskState.CANCELLED}),
     TaskState.CLOSED: frozenset(),
     TaskState.CANCELLED: frozenset(),
 }
 
+
+#: Une PR ``task/<id>`` fusionnée hors de la file du merger, constatée au tick (#1162). Ce n'est pas
+#: ``task.merged`` : celui-ci atteste une fusion prise par le merger, sous mandat et après relecture.
+EXTERNAL_MERGED_EVENT = "task.merged_externally"
 
 #: Événements du pilotage humain (issue #638, lot B) rejoués par
 #: :func:`~grimoire.missions.ledger_rules.replay_steering`.
@@ -174,78 +190,6 @@ _HOLDING = (*_HELD, TaskState.WAITING)
 _RESUMING = (TaskState.WAITING, TaskState.NEEDS_VERIFICATION)
 #: Origine d'une barrière du fichier de bail (K2-S2-02) : voir :class:`LeaseFile`.
 ORIGIN_REAP = "reap"
-
-
-def _slug(title: str, limit: int) -> str:
-    """Fragment d'identifiant sûr dans un chemin.
-
-    Le slug naïf recopiait le titre : « Ajouter /health » donnait
-    ``GAO-ajouter-/hea-001``, un identifiant que ``normalize_task_id`` refuse et
-    qui, employé tel quel, ouvrait un chemin de plus d'un segment. Les
-    identifiants du ledger servent de nom de dossier aux artefacts du standard :
-    ils ne peuvent contenir que ce que ce contrat autorise.
-    """
-    kept = [c if c.isascii() and (c.isalnum() or c in "_.-") else "-" for c in title.lower()]
-    slug = re.sub(r"-{2,}", "-", "".join(kept))[:limit].strip("-._")
-    return slug or "task"
-
-
-def _now_iso() -> str:
-    return datetime.now(tz=UTC).isoformat()
-
-
-def _new_id(prefix: str) -> str:
-    return f"{prefix}-{uuid.uuid4().hex[:12]}"
-
-
-#: Les seuls journaux que le ledger écrit sous sa racine.
-_LEDGER_FILES = frozenset({"events.jsonl", "incidents.jsonl"})
-
-
-def _confined_ledger_file(path: Path) -> Path:
-    """Résout *path* et refuse tout ce qui n'est pas un journal du ledger sous sa racine.
-
-    La racine vient du CLI (``--ledger-root``) : on n'écrit que ``events.jsonl``
-    et ``incidents.jsonl``, et le chemin résolu (liens symboliques compris) doit
-    rester directement sous le dossier résolu de la racine.
-    """
-    if path.name not in _LEDGER_FILES:
-        raise GrimoireMissionError(f"Fichier de ledger non autorisé : {path.name!r}")
-    base = path.parent.resolve()
-    resolved = (base / path.name).resolve()
-    if resolved.parent != base or not resolved.is_relative_to(base):
-        raise GrimoireMissionError(f"Fichier de ledger hors de sa racine : {path.name!r}")
-    return resolved
-
-
-@contextmanager
-def _ledger_file_lock(target_path: Path) -> Iterator[None]:
-    """Verrou exclusif inter-processus sur *target_path* — :func:`grimoire.core.fsio.locked`.
-
-    ``_atomic_append`` ajoute une ligne en fin de fichier (``open('ab')``, un
-    seul ``write``, ``fsync``) ; le verrou sérialise les écrivains (deux
-    requêtes HTTP du cockpit servies par des threads séparés, typiquement) :
-    la réparation d'une fin tronquée et l'empreinte « avant / après » de
-    l'ajout ne valent que pour un seul écrivain à la fois, et
-    :meth:`MissionLedger.transition_task` relit et valide sous ce même
-    verrou : un compare-and-set (issue #710). Les lecteurs n'en ont pas
-    besoin : une dernière ligne sans ``\\n`` (ajout en cours) n'est pas lue.
-
-    Un verrou impossible à prendre (délai dépassé, système de fichiers sans
-    ``flock``) lève :class:`GrimoireMissionError` au lieu d'écrire sans
-    exclusion : deux titulaires valent pire qu'une écriture à refaire. Un
-    ledger partagé par un système de fichiers réseau n'est pas supporté.
-    """
-    with contextlib.ExitStack() as stack:
-        try:
-            stack.enter_context(locked(target_path))
-        except (TimeoutError, OSError) as exc:
-            raise GrimoireMissionError(
-                f"Écriture refusée : aucun verrou inter-processus n'a pu être pris sur {target_path.name} ({exc}) "
-                "— sans lui, deux écritures simultanées pourraient réussir toutes les deux. "
-                "Réessaie ; si cela persiste, le système de fichiers ne supporte pas le verrouillage."
-            ) from exc
-        yield
 
 
 class MissionLedger:
@@ -612,6 +556,7 @@ class MissionLedger:
         checks: tuple[TaskCheck, ...] = (),
         test_depth: str = "",
         finition: str = "",
+        data_class: str = "",
     ) -> MissionTask:
         self._load()
         if mission_id not in self._missions:
@@ -643,6 +588,7 @@ class MissionLedger:
             checks=checks,
             test_depth=test_depth,
             finition=finition,
+            data_class=data_class,
         )
         self._append_event("task.created", task.id, "task", owner or "system", task.to_dict())
         return task
@@ -692,6 +638,51 @@ class MissionLedger:
                 moved = self.acknowledge_directive(task_id, directive.id, actor_id=actor_id, reason="tâche close")
         return moved
 
+    def close_merged_externally(
+        self,
+        task_id: str,
+        *,
+        pr: int,
+        merged_sha: str,
+        branch: str = "",
+        into: str = "",
+        head_sha: str = "",
+        actor_id: str = "tick",
+    ) -> MissionTask:
+        """Clôt une tâche ouverte dont la PR ``task/<id>`` est ``MERGED`` hors de la file du merger (#1162).
+
+        ``task.merged_externally`` garde la preuve (PR, SHA de fusion, cible), puis la transition vers ``closed``
+        nomme la PR et le SHA dans son motif. Une tâche déjà terminale rend son état sans rien écrire : le tick
+        peut rejouer le constat. Aucune autre voie ne clôt depuis ``ready``, ``claimed``, ``running``, ``waiting``
+        ou ``blocked`` — ce chemin-là est le seul, et il ne contourne que la table des transitions, jamais le verrou.
+        """
+        with _ledger_file_lock(self._events_path):
+            self._refresh()
+            self._load()
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise GrimoireMissionError(f"Task not found: {task_id}")
+            if task.is_unknown_state:
+                raise GrimoireMissionError(
+                    f"Task {task_id} est dans un état inconnu de cette version ({task.raw_status!r}) : "
+                    "clôture hors merger refusée, mettre grimoire à jour"
+                )
+            if task.status in (TaskState.CLOSED, TaskState.CANCELLED, TaskState.FAILED):
+                return task
+            reason = f"PR #{pr} fusionnée hors merger à {merged_sha[:12]} (task.merged_externally)"
+            self._append_event(
+                EXTERNAL_MERGED_EVENT, task_id, "task", actor_id,
+                {"pr": pr, "merged_sha": merged_sha, "branch": branch, "into": into, "head_sha": head_sha},
+                lock_held=True,
+            )
+            self._load()
+            moved = self._transition_locked(
+                task_id, TaskState.CLOSED, actor_id, reason, None, None, task.status, external_merge=True
+            )
+        for directive in moved.unacknowledged_directives:  # plus de session pour lire : tout est acquitté
+            moved = self.acknowledge_directive(task_id, directive.id, actor_id=actor_id, reason="tâche close")
+        return moved
+
     def _transition_locked(
         self,
         task_id: str,
@@ -706,6 +697,7 @@ class MissionLedger:
         *,
         reaper: bool = False,
         attested: bool = False,
+        external_merge: bool = False,
     ) -> MissionTask:
         task = self._tasks.get(task_id)
         if task is None:
@@ -742,6 +734,9 @@ class MissionLedger:
                 f"({expected_from.value} attendu, {judged.value} trouvé) — relire la tâche puis réessayer"
             )
         allowed = _TASK_TRANSITIONS.get(task.status, frozenset())
+        # #1162 : la seule voie de clôture hors relecture, ouverte au cas par cas par ``close_merged_externally``.
+        if external_merge and to_state is TaskState.CLOSED and not task.is_unknown_state:
+            allowed = allowed | {TaskState.CLOSED}
         if to_state not in allowed:
             if task.is_unknown_state:
                 raise GrimoireMissionError(
@@ -807,7 +802,13 @@ class MissionLedger:
             )
         self._append_event("task.transitioned", task_id, "task", actor_id, payload, lock_held=True)
         self._load()
-        return self._tasks[task_id]
+        moved = self._tasks[task_id]
+        if to_state is TaskState.RUNNING and task.status in _RESUMING and moved.claim is not None:
+            # #1149 : une reprise rouvre le bail, sinon un claim échu la fait récolter au tick suivant.
+            epoch, cached = moved.claim.lease_epoch, read_lease(lease_path(self._root, task_id))
+            if cached is None or cached.epoch <= epoch:  # un fichier en avance est une barrière : on n'y touche pas
+                return self._renew_locked(moved, epoch, self._now(), DEFAULT_LEASE_TTL_SECONDS, "", actor_id)
+        return moved
 
     def wake(self, task_id: str, *, actor_id: str = "tick", reason: str = "", cause: str = "") -> MissionTask:
         """``waiting → ready`` — le seul chemin, réservé au tick : réponse reçue, échéance passée, quota ou CI rendus.
@@ -1009,22 +1010,26 @@ class MissionLedger:
             refusal = self._holder_refusal(task, lease_epoch)
             if refusal:
                 raise GrimoireMissionError(f"Renouvellement refusé pour {task_id} : {refusal}")
-            moment = now or self._now()
-            path = lease_path(self._root, task_id)
-            previous = read_lease(path)
-            busy = busy_until.isoformat() if busy_until else (previous.busy_until if previous else "")
-            write_lease(path, LeaseFile(task_id, lease_epoch, moment.isoformat(), ttl_seconds, busy))
-            expires = parse_instant(task.claim.expires_at)
-            if (
-                expires is not None
-                and expires - moment < timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS / 2)
-                and self.clock_state(moment) == "ok"
-            ):
-                pushed = (moment + timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS)).isoformat()
-                payload = {"task_id": task_id, "lease_epoch": lease_epoch, "expires_at": pushed, "actor_id": actor_id}
-                self._append_event(LEASE_RENEWED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
-                self._load()
-            return self._tasks[task_id]
+            busy = busy_until.isoformat() if busy_until else ""
+            return self._renew_locked(task, lease_epoch, now or self._now(), ttl_seconds, busy, actor_id)
+
+    def _renew_locked(
+        self, task: MissionTask, lease_epoch: int, moment: datetime, ttl_seconds: int, busy: str, actor_id: str
+    ) -> MissionTask:
+        """Réécrit le fichier de bail et repousse le plafond s'il approche. L'appelant tient le verrou du journal."""
+        task_id, claim = task.id, task.claim
+        assert claim is not None  # les deux appelants l'ont vérifié
+        path = lease_path(self._root, task_id)
+        kept = previous.busy_until if (previous := read_lease(path)) else ""
+        write_lease(path, LeaseFile(task_id, lease_epoch, moment.isoformat(), ttl_seconds, busy or kept))
+        expires = parse_instant(claim.expires_at)
+        half = timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS / 2)
+        if expires is not None and expires - moment < half and self.clock_state(moment) == "ok":
+            pushed = (moment + timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS)).isoformat()
+            payload = {"task_id": task_id, "lease_epoch": lease_epoch, "expires_at": pushed, "actor_id": actor_id}
+            self._append_event(LEASE_RENEWED_EVENT, task_id, "task", actor_id, payload, lock_held=True)
+            self._load()
+        return self._tasks[task_id]
 
     def note_progress(self, task_id: str, text: str, *, actor_id: str = "system") -> LedgerEvent:
         """Note de progression du titulaire : ce que ``progress_at`` (K5) lit, sans changer d'état.

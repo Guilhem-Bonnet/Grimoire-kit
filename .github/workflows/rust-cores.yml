@@ -208,10 +208,11 @@ jobs:
         run: pytest tests/unit/test_policies.py tests/unit/test_policies_rust_parity.py tests/unit/test_security_policies.py -q --tb=short
 
       - name: Full SDK suite with the compiled core loaded
+        if: github.event_name != 'pull_request'
         # Preuve que rien d'autre dans le kit ne dépend de l'absence du
         # module compilé (import optionnel, aucun autre appelant ne le
         # regarde) : la suite complète doit rester verte avec lui présent.
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x -n auto --dist loadfile --timeout=300 --timeout-method=thread
 
   rust-schema-cargo:
     name: "rust-schema / cargo"
@@ -287,10 +288,11 @@ jobs:
         run: pytest tests/unit/core/test_schema.py tests/unit/core/test_validator.py tests/unit/test_schema_validator_rust_parity.py -q --tb=short
 
       - name: Full SDK suite with the compiled core loaded
+        if: github.event_name != 'pull_request'
         # Preuve que rien d'autre dans le kit ne dépend de l'absence du
         # module compilé (import optionnel, aucun autre appelant ne le
         # regarde) : la suite complète doit rester verte avec lui présent.
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x -n auto --dist loadfile --timeout=300 --timeout-method=thread
 
   rust-hosts-cargo:
     name: "rust-hosts / cargo"
@@ -366,10 +368,11 @@ jobs:
         run: pytest tests/unit/test_hosts.py tests/unit/test_hosts_rust_parity.py -q --tb=short
 
       - name: Full SDK suite with the compiled core loaded
+        if: github.event_name != 'pull_request'
         # Preuve que rien d'autre dans le kit ne dépend de l'absence du
         # module compilé (import optionnel, aucun autre appelant ne le
         # regarde) : la suite complète doit rester verte avec lui présent.
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x -n auto --dist loadfile --timeout=300 --timeout-method=thread
 
   rust-flows-cargo:
     name: "rust-flows / cargo"
@@ -448,10 +451,11 @@ jobs:
         run: pytest tests/unit/test_flows_engine.py tests/unit/test_runtime.py tests/unit/test_flows_rust_parity.py -q --tb=short
 
       - name: Full SDK suite with the compiled core loaded
+        if: github.event_name != 'pull_request'
         # Preuve que rien d'autre dans le kit ne dépend de l'absence du
         # module compilé (import optionnel, aucun autre appelant ne le
         # regarde) : la suite complète doit rester verte avec lui présent.
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x -n auto --dist loadfile --timeout=300 --timeout-method=thread
 
   rust-dispatch-cargo:
     name: "rust-dispatch / cargo"
@@ -537,10 +541,11 @@ jobs:
             -q --tb=short
 
       - name: Full SDK suite with the compiled core loaded
+        if: github.event_name != 'pull_request'
         # Preuve que rien d'autre dans le kit ne dépend de l'absence du
         # module compilé (import optionnel, aucun autre appelant ne le
         # regarde) : la suite complète doit rester verte avec lui présent.
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x -n auto --dist loadfile --timeout=300 --timeout-method=thread
 
   rust-traces-cargo:
     name: "rust-traces / cargo"
@@ -627,10 +632,11 @@ jobs:
             -q --tb=short
 
       - name: Full SDK suite with the compiled core loaded
+        if: github.event_name != 'pull_request'
         # Preuve que rien d'autre dans le kit ne dépend de l'absence du
         # module compilé (import optionnel, aucun autre appelant ne le
         # regarde) : la suite complète doit rester verte avec lui présent.
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x -n auto --dist loadfile --timeout=300 --timeout-method=thread
 
   rust-acp-cargo:
     name: "rust-acp / cargo"
@@ -644,7 +650,7 @@ jobs:
         with:
           components: rustfmt
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: "rust/grimoire-acp-core -> target"
 
@@ -671,11 +677,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249  # stable
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: "rust/grimoire-acp-core -> target"
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -709,10 +715,11 @@ jobs:
           pytest tests/unit/test_acp.py -q --tb=short
 
       - name: Full SDK suite with the compiled core loaded
+        if: github.event_name != 'pull_request'
         # Preuve que rien d'autre dans le kit ne dépend de l'absence du
         # module compilé (import optionnel, aucun autre appelant ne le
         # regarde) : la suite complète doit rester verte avec lui présent.
-        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x
+        run: pytest tests/unit/ tests/test_agentic_standard.py -q --tb=short -x -n auto --dist loadfile --timeout=300 --timeout-method=thread
 
   rust-gate:
     name: rust-gate

@@ -338,6 +338,10 @@ export const api = {
   // modèles, deux lectures (jamais d'écriture : les gestes sont des commandes).
   hooks: () => get(WS + 'hooks'),
   providers: () => get(WS + 'providers'),
+  providersSetKey: (providerId, envVar, value, controlKey) =>
+    post(WS + 'providers/set-key', { provider_id: providerId, env_var: envVar, value, control_key: controlKey }),
+  providersSetEnabled: (providerId, enabled, controlKey) =>
+    post(WS + 'providers', { action: enabled ? 'enable' : 'disable', provider_id: providerId, control_key: controlKey }),
   // Options du projet (P75) : taux USD→CAD de la colonne Fait, lu et écrit
   // dans project-context.yaml (section cockpit) par le serveur.
   options: () => get(WS + 'options'),
@@ -570,7 +574,7 @@ export const api = {
   // ({ stack: 'a,b', who, domain }) remplace les défauts ; `prefill: false`
   // ignore la détection (formulaire « nouveau projet », autre dossier).
   setupQuestions: (answers, prefill = true) =>
-    get('/api/setup/questions', { ...(answers || {}), ...(prefill ? {} : { prefill: '0' }) }),
+    get('/api/setup/questions', { lang: document.documentElement.lang, ...(answers || {}), ...(prefill ? {} : { prefill: '0' }) }),
   // Exécute réellement le plan (même mécanique que `grimoire up`, jamais un
   // sous-processus — voir project_setup.execute_setup_plan). Refusé côté
   // serveur, fail-closed, avant toute écriture si le plan ne peut pas

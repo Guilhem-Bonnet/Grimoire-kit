@@ -2191,7 +2191,10 @@ async function goto(id, params, { fromUrl = false } = {}) {
   // du module, lui, reste hors transition (il peut durer).
   const canvas = $('canvas');
   let swapped = false;
+  const owner = controller;
   const swapShell = () => {
+    // Le rappel d'une transition écartée s'exécute quand même : il viderait le canevas du montage suivant.
+    if (controller !== owner) { swapped = true; return; }
     document.body.dataset.activeSpace = section.module || section.id;
     document.body.dataset.activeArea = space.id;
     const tab = document.querySelector(`#spaces [data-space="${space.id}"]`);
@@ -2218,8 +2221,9 @@ async function goto(id, params, { fromUrl = false } = {}) {
       transition.finished.catch(() => {});
       await transition.updateCallbackDone;
     } catch { /* API qui lève, ou rappel qui a échoué : le repli ci-dessous reprend */ }
-    // Un `goto()` plus récent a repris la main pendant la transition.
-    if (controller.signal.aborted) return;
+    // Un `goto()` plus récent a repris la main pendant la transition. `owner` et non
+    // `controller` : celui-ci désigne déjà le plus récent, jamais abandonné.
+    if (owner.signal.aborted) return;
   }
   // Repli : pas de transition, ou le rappel n'est pas allé au bout.
   if (!swapped) swapShell();
@@ -2241,7 +2245,7 @@ async function goto(id, params, { fromUrl = false } = {}) {
   // celui qui venait de s'ouvrir. Chaque écriture de la coque passe par
   // `ctx.signal` ; les modules testent aussi `ctx.signal.aborted` pour ce qui
   // reste dans leur propre DOM.
-  const signal = controller.signal;
+  const signal = owner.signal;
   const whileMounted = (fn) => (...args) => (signal.aborted ? undefined : fn(...args));
   const spaceDock = Object.fromEntries(Object.entries(dock).map(([key, fn]) => [key, whileMounted(fn)]));
   const spaceDocbar = Object.fromEntries(Object.entries(docbar).map(([key, fn]) => [key, whileMounted(fn)]));

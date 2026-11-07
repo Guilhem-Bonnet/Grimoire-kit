@@ -95,10 +95,10 @@ def pilot_on(root: Path) -> None:
     AutopilotStore(root).set(True, origin=ORIGIN_HUMAN, via="test")
 
 
-def asks(root: Path, text: str = "Quelle voie ?", **ask: Any) -> tuple[TaskService, str, str]:
+def asks(root: Path, text: str = "Quelle voie ?", *, title: str = "Correctif", **ask: Any) -> tuple[TaskService, str, str]:
     """Une tâche faite à la main (jamais lancée par le tick) qui attend une réponse : ``(service, tâche, question)``."""
     service = TaskService(root)
-    tid = service.add("Correctif", ACC, owner="w", actor="w", ready=True).task.id
+    tid = service.add(title, ACC, owner="w", actor="w", ready=True).task.id
     service.context(tid)
     service.claim(tid, "w")
     service.transition(tid, TaskState.RUNNING, "w")
@@ -310,6 +310,72 @@ def test_a_permission_inside_the_repository_is_not_reserved(project: Path) -> No
     assert service.require(tid).status is TaskState.READY
 
 
+# ── #1159 : une question de conduite écrite par le kit se juge sur son texte, pas sur le titre de la tâche ──
+
+TARIFF = "Tarif par modèle dans le registre pour chiffrer un worker routé"
+
+
+@pytest.mark.parametrize(
+    ("kind", "options"),
+    [
+        ("resume_branch", ("reprendre", "abandonner")),
+        ("resume_unfenced", ("reprendre", "abandonner")),
+        ("retry_exhausted", ("réessayer", "abandonner")),
+    ],
+)
+def test_a_kit_conduct_question_is_judged_on_its_text_not_the_task_title(
+    project: Path, kind: str, options: tuple[str, ...]
+) -> None:
+    """Un titre qui parle de tarif ne fait pas d'une reprise une dépense : la question à options fermées est tranchée."""
+    grant(project)
+    pilot_on(project)
+    service, tid, qid = asks(
+        project,
+        "GAO-1 a perdu son bail avec du travail local : reprendre la branche ou abandonner ?",
+        title=TARIFF,
+        kind=kind,
+        options=options,
+        origin="tick",
+    )
+    task = service.require(tid)
+    assert not reserved_reason(task.waiting.question, task, project)  # type: ignore[union-attr]
+    answer(service, tid, qid, options[0], justification=WHY, confidence="high")
+    assert events(service, tid, DECIDED_EVENT)
+
+
+def test_a_persistent_review_disagreement_is_judged_on_its_text_not_the_task_title(project: Path) -> None:
+    """Le désaccord persistant du relecteur est un ``choice`` reprendre/abandonner : le kit l'a écrit, le titre ne compte pas."""
+    grant(project)
+    pilot_on(project)
+    service, tid, qid = asks(
+        project,
+        "Désaccord persistant sur GAO-1 (2 relectures NOT-READY) — reprendre la tâche ou l'abandonner ?",
+        title="Cockpit Flotte : coût par modèle dans le registre",
+        options=("reprendre", "abandonner"),
+    )
+    task = service.require(tid)
+    assert not reserved_reason(task.waiting.question, task, project)  # type: ignore[union-attr]
+    answer(service, tid, qid, "reprendre", justification=WHY, confidence="high")
+    assert events(service, tid, DECIDED_EVENT)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Faut-il payer le fournisseur pour ce run ?",  # la question elle-même parle de dépense
+        "Quelle couleur pour le bouton ?",  # le titre « Tarif » compte encore pour une question libre
+    ],
+)
+def test_a_free_question_still_reads_the_task_title(project: Path, text: str) -> None:
+    grant(project)
+    pilot_on(project)
+    service, tid, qid = asks(project, text, title=TARIFF, options=("oui", "non"))
+    with pytest.raises(GrimoireMissionError, match="réservée à l'humain"):
+        answer(service, tid, qid, "non", justification=WHY, confidence="high")
+    assert not events(service, tid, DECIDED_EVENT)
+    assert service.require(tid).status is TaskState.WAITING
+
+
 def write_policy(root: Path, body: str) -> None:
     (root / POLICY).parent.mkdir(parents=True, exist_ok=True)
     (root / POLICY).write_text(body, encoding="utf-8")
@@ -468,7 +534,9 @@ def test_presentations_are_no_longer_bounded_with_the_pilot(project: Path) -> No
         )
     assert (tid, qid) in stage._not_relisted()  # bornée aujourd'hui
     pilot_on(project)
-    assert (tid, qid) not in stage._not_relisted()  # sans borne pilote activé
+    assert (tid, qid) in stage._not_relisted()  # pilote activé, mais rien n'a progressé depuis la présentation
+    service.ledger.append_event("task.progress_noted", tid, "task", "amelia", {"note": "du nouveau"})
+    assert (tid, qid) not in stage._not_relisted()  # sans borne dès que la tâche a bougé
 
 
 def test_the_prompt_tells_the_session_how_to_decide_only_under_the_pilot(project: Path) -> None:

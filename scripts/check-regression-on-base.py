@@ -12,6 +12,12 @@ PR, une ligne `no-regression-test: <justification>`. L'étiquette seule ne
 suffit pas. Le recours est listé dans le résumé de la CI, pour le rapport de
 barrière.
 
+Tests E2E : le job n'installe pas de navigateur (Playwright/Chromium). Un test
+sous `tests/e2e/` ne peut donc pas y prouver sa régression, et le rejouer
+produirait un faux rouge. Ces tests sont écartés du rejeu : si la PR n'en
+contient pas d'autres, le verdict est `not-replayable` — sans échec, et le
+résumé dit pourquoi. Une PR mixte ne rejoue que ses tests hors `tests/e2e/`.
+
 Usage (CI)::
 
     PR_TITLE=... PR_BODY=... PR_LABELS='["fix"]' \\
@@ -56,15 +62,21 @@ _MIN_JUSTIFICATION = 10
 #: sinon `inconclusive`. 3 et 4 (erreur interne, usage) : toujours `inconclusive`.
 _NOT_FAILING = (0, 5)
 _RED_CODES = (1, 2)
+#: Les tests E2E exigent un navigateur que ce job n'installe pas.
+_E2E_PREFIX = "tests/e2e/"
 
 
 @dataclass
 class Verdict:
     ok: bool
-    status: str  # skipped | escaped | red-on-base | green-on-base | red-on-head | inconclusive | no-tests | bad-escape
+    status: str  # skipped | escaped | not-replayable | red-on-base | green-on-base | red-on-head | inconclusive | no-tests | bad-escape
     message: str
     tests: list[str] = field(default_factory=list)
     justification: str = ""
+
+
+def is_e2e_test(rel: str) -> bool:
+    return rel.startswith(_E2E_PREFIX)
 
 
 def is_fix_title(title: str) -> bool:
@@ -313,11 +325,27 @@ def evaluate(
             "PR `fix:` sans test ajouté ou modifié. Ajoutez le test de régression, "
             f"ou posez `{ESCAPE_LABEL}` avec une justification.",
         )
+    e2e = [t for t in tests if is_e2e_test(t)]
+    replayable = [t for t in tests if not is_e2e_test(t)]
+    if not replayable:
+        return Verdict(
+            True,
+            "not-replayable",
+            "Tous les tests de la PR sont sous `tests/e2e/` : ce job n'installe pas de navigateur "
+            "(Playwright/Chromium), le rejeu sur la base n'y est donc pas possible. "
+            "Aucun échec : une preuve E2E doit venir d'un job qui installe le navigateur.",
+            tests,
+        )
     try:
-        replay = run_replay(repo, base, head, tests, support, verify)
+        replay = run_replay(repo, base, head, replayable, support, verify)
     except RuntimeError as exc:
-        return _inconclusive_git(exc, tests)
-    verdict = _judge(replay, tests, verify)
+        return _inconclusive_git(exc, replayable)
+    verdict = _judge(replay, replayable, verify)
+    if e2e:
+        skipped = ", ".join(f"`{t}`" for t in e2e)
+        verdict.message += (
+            f" Test(s) E2E non rejoué(s) ici (navigateur absent du job) : {skipped}."
+        )
     verdict.message += note
     return verdict
 
@@ -357,11 +385,15 @@ def _judge(replay: Replay, tests: list[str], verify: str | None) -> Verdict:
 
 
 def render_summary(v: Verdict) -> str:
-    lines = [f"### Rejeu du test de régression sur la base : {'OK' if v.ok else 'ÉCHEC'}", "", v.message]
+    state = "OK" if v.ok else "ÉCHEC"
+    if v.status == "not-replayable":
+        state = "NON REJOUÉ"
+    lines = [f"### Rejeu du test de régression sur la base : {state}", "", v.message]
     if v.status == "escaped":
         lines += ["", f"Recours à l'échappatoire `{ESCAPE_LABEL}` (à compter dans le rapport de barrière)."]
     if v.tests:
-        lines += ["", "Tests rejoués :", *[f"- `{t}`" for t in v.tests]]
+        label = "Tests concernés" if v.status == "not-replayable" else "Tests rejoués"
+        lines += ["", f"{label} :", *[f"- `{t}`" for t in v.tests]]
     return "\n".join(lines) + "\n"
 
 

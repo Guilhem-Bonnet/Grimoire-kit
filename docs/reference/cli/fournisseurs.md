@@ -43,6 +43,33 @@ observations à ce palier n'ont plus escaladé, et qui n'a pas retenté
 plancher d'une tâche V1). La colonne « départ recommandé » est exactement
 ce que `grimoire task dispatch` retient par défaut pour ce couple.
 
+## Politique de données : ce qui peut partir chez un fournisseur
+
+Une tâche ne part sur un fournisseur que si sa classe de données est déclarée et
+admise par ce fournisseur. La règle vaut pour le worker du tick et pour
+`grimoire task dispatch`. Elle ne concerne pas `provider_type: local`, dont rien
+ne sort de la machine.
+
+- **Déclarer :** `routing.default_data_class` dans `llm-provider-registry.yaml`
+  pour le projet, ou `grimoire task add --data-class <classe>` pour une tâche.
+  La classe de la tâche prime. `grimoire task show` affiche la classe retenue et
+  son origine.
+- **Admettre :** la classe figure dans `data_policy.allowed_data_classes` du
+  fournisseur et pas dans `forbidden_data_classes`.
+- **Sans déclaration, ou classe non admise :** pas de route. Le worker garde le
+  modèle de l'hôte et le motif s'inscrit dans `provider_refused` de son
+  événement de lancement. `task dispatch` s'arrête avec le refus `data_policy`
+  et son motif, ou passe au fournisseur suivant si un autre est admis.
+
+**Ce que cette règle garantit :** une tâche déclarée interdite n'est pas confiée
+à ce fournisseur.
+
+**Ce qu'elle ne garantit pas :** une classe n'est qu'une déclaration, personne ne
+vérifie ce que contient le projet. Une fois routé, un worker lit avec Bash tout
+ce que son compte peut lire, et le fournisseur reçoit ce qu'il lit. Pour des
+données qui ne doivent vraiment pas sortir, écartez-les du poste du worker :
+conteneur ou copie isolée, sans ces données.
+
 ## Routeur de LLM : une politique déclarative, tracée avant d'être activée
 
 `grimoire task dispatch` choisit un palier de départ par la classe de
@@ -190,7 +217,7 @@ le ledger, et un tick qui le lit en premier.
 | Commande | Description |
 | --- | --- |
 | `grimoire orchestrate pause [--drain\|--hold] [--project\|--global] [--task <id>...] [--reason ...]` | Pose le drapeau (`drain` par défaut) ; `--global` (toute la machine) est un geste d'humain |
-| `grimoire orchestrate resume [--global] [--task <id>...]` | Lève le drapeau, ou seulement ces tâches ; geste d'humain (l'origine humaine est exigée, comme pour `queue release`) |
+| `grimoire orchestrate resume [--global] [--task <id>...]` | Lève le drapeau, ou seulement ces tâches ; un humain lève tout, une session ne lève que la pause qu'elle a posée elle-même (son identifiant est noté dans le drapeau) ; `--global` reste un geste d'humain (l'origine humaine est exigée, comme pour `queue release`) |
 | `grimoire orchestrate status [--json]` | Les drapeaux en vigueur et, pour chaque tâche tenue, ce que `hold` fait sur son hôte (« hold dégradé en drain (hôte sans frein) ») |
 | `grimoire orchestrate tick [--apply\|--plan] [--json]` | Un tick : lit la pause, puis récolte, rend les attentes levées, constate les effets externes et calcule l'admission ; sans `--apply` (ou avec `--plan`), le même tick joué sur une copie du ledger, rien n'est écrit ; sous pause, sort en 0 sans ouvrir le ledger ; un second tick simultané saute, en 0 |
 | `grimoire orchestrate install-timer [--interval 5m] [--no-enable]` | Pose le minuteur optionnel du tick (unité systemd utilisateur `oneshot` et son `.timer`) ; sans systemd, rend la ligne crontab à poser à la main |

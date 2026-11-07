@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,7 +25,9 @@ from grimoire.missions.breaker import read_breaker, record_failure, record_succe
 from grimoire.missions.launcher import (
     LAUNCH_FAILED_EVENT,
     LAUNCHED_EVENT,
+    MAX_PROVIDER_RESUMES,
     WORKER_HALTED_EVENT,
+    WORKER_RESUMED_EVENT,
     ExecResult,
     WorkerLauncher,
     active_worker_ids,
@@ -32,9 +36,11 @@ from grimoire.missions.launcher import (
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.schemas import TaskCheck, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import find_task_worktree
+from grimoire.missions.worker_provider import settings_path
+from grimoire.providers.secrets import remove_secret, set_secret
 
 POLICY = Path("_grimoire/standard/orchestration-policy.yaml")
 runner = CliRunner()
@@ -346,14 +352,16 @@ def test_le_minuteur_porte_le_path_du_poste_reduit_aux_outils_utiles(projet: Pat
     good = _shim(tmp_path / "bin", "claude", "gh")
     git_dir = _shim(tmp_path / "gitbin", "git")
     agent_tmp = tmp_path / "scratch"
+    trace = agent_tmp / "claude-session-1a2b" / "bin"
     shim = _shim(agent_tmp / "claude-session-1a2b" / "bin", "claude", "gh")  # le PATH d'une session d'agent
     secret = _shim(tmp_path / "secret-token-AKIA123" / "bin", "unrelated")
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(agent_tmp))
     monkeypatch.setenv("PATH", os.pathsep.join([str(shim), "relatif/bin", str(secret), str(good), str(git_dir), str(tmp_path / "absent")]))
     service = plan_timer(projet).service
     line = next(row for row in service.splitlines() if row.startswith("Environment="))
-    assert str(good) in line and str(git_dir) in line  # claude, gh et git y sont
-    for banned in (str(shim), "relatif", "secret-token", "absent", "claude-session"):
+    entries = line.split("PATH=", 1)[1].rstrip('"\\n').split(os.pathsep)
+    assert str(good) in entries and str(git_dir) in entries  # claude, gh et git y sont
+    for banned in (str(shim), "relatif", "secret-token", str(trace), "absent"):
         assert banned not in line
     assert "/usr/bin" in line  # les dossiers système restent
 
@@ -384,6 +392,72 @@ def test_sans_aucun_outil_utile_le_minuteur_ne_fige_que_les_dossiers_systeme(pro
     monkeypatch.setenv("PATH", str(_shim(tmp_path / "vide", "autre")))
     line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
     assert "vide" not in line and "/usr/bin" in line
+
+
+def _reglages(directory: Path, hooks: dict[str, list[dict[str, object]]]) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "settings.json"
+    path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+    return path
+
+
+def _pre_tool_use(*commands: str) -> dict[str, list[dict[str, object]]]:
+    return {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": c} for c in commands]}]}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_le_minuteur_garde_le_dossier_d_un_hook_de_l_hote(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1022 : un hook qui réécrit `git status` en `rtk git status` doit pouvoir résoudre `rtk` dans l'unité."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "ailleurs"))  # tmp_path n'est pas un dossier de session
+    rtk = _shim(tmp_path / "cargo" / "bin", "rtk")
+    _reglages(tmp_path / "claude", _pre_tool_use(f"{rtk / 'rtk'} hook claude"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("PATH", str(_shim(tmp_path / "bin", "claude", "gh")))
+    line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
+    assert str(rtk) in line
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_un_hook_de_projet_appele_par_chemin_absolu_garde_son_dossier(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le chemin de hook d'un réglage projet (`.claude/settings.json`) le rejoint ; une commande nue n'ajoute rien."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "ailleurs"))
+    outil = _shim(tmp_path / "outils" / "bin", "rtk")
+    _reglages(projet / ".claude", _pre_tool_use(f'"{outil / "rtk"}" hook claude', "rtk hook claude"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "sans-reglages"))
+    monkeypatch.setenv("PATH", str(_shim(tmp_path / "vide", "autre")))
+    line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
+    entries = line.split("PATH=", 1)[1].rstrip('"\\n').split(os.pathsep)
+    assert str(outil) in entries
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unité systemd et faux binaires à shebang : harnais POSIX")
+def test_un_hook_hors_des_regles_ne_fait_pas_entrer_son_dossier(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mêmes exclusions que le reste : dossier temporaire, relatif ou absent n'entre pas dans le PATH de l'unité."""
+    import tempfile
+
+    from grimoire.missions.timer import plan_timer
+
+    agent_tmp = tmp_path / "scratch"
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(agent_tmp))
+    temporaire = _shim(agent_tmp / "session-1a2b" / "bin", "rtk")
+    _reglages(
+        tmp_path / "claude",
+        _pre_tool_use(
+            f"{temporaire / 'rtk'} hook claude", "outils/bin/rtk hook claude", f"{tmp_path / 'absent' / 'rtk'} hook claude"
+        ),
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("PATH", str(_shim(tmp_path / "vide", "autre")))
+    line = next(row for row in plan_timer(projet).service.splitlines() if row.startswith("Environment="))
+    assert "scratch" not in line and "outils" not in line and "absent" not in line
 
 
 # ── Fumée réelle, désactivée par défaut ─────────────────────────────────────────
@@ -658,6 +732,151 @@ def test_un_battement_en_erreur_ne_casse_pas_le_tick(projet: Path, service: Task
     assert report.reaped and any("battement des workers" in line for line in report.attention)
 
 
+# ── #1158 : une erreur transitoire du fournisseur relance le worker ────────────
+
+
+def _session_transcript(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, launch: dict, *entries: dict[str, object]
+) -> Path:
+    """Pose le journal de session que le tick relira, à l'endroit où Claude Code l'écrit."""
+    import re
+
+    config = tmp_path / "claude"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(Path(str(launch["cwd"])).resolve()))
+    folder = config / "projects" / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{launch['session_id']}.jsonl"
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    return path
+
+
+def _api_error(text: str) -> dict[str, object]:
+    return {
+        "type": "assistant",
+        "isApiErrorMessage": True,
+        "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+    }
+
+
+def _assistant(text: str) -> dict[str, object]:
+    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def test_une_erreur_500_relance_la_meme_session_au_lieu_de_la_recolter(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le dernier tour finit sur `API Error: 500` : la session est reprise, la tâche n'est ni récoltée ni garée."""
+    tid = ready(service, "erreur 500")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []  # plus `busy` : le fournisseur a rendu la main sur son erreur
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error (server-side)"))
+
+    report = tick(projet, host, now=_later(5))
+
+    assert not report.reaped
+    resumed = [a for a, _cwd, _env in host.calls if "--resume" in a]
+    assert resumed and resumed[-1][:4] == ["claude", "--bg", "--resume", launch["session_id"]]
+    after = TaskService(projet)
+    assert after.require(tid).status is TaskState.CLAIMED
+    events = [e for e in after.ledger.events_for(tid) if e.event_type == WORKER_RESUMED_EVENT]
+    assert events and events[-1].payload["cause"] == "provider_error"
+
+
+def test_un_tour_fini_normalement_garde_le_comportement_actuel(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une session au repos dont le journal ne finit pas sur une erreur du fournisseur n'est pas reprise."""
+    tid = ready(service, "au repos")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []
+    _session_transcript(monkeypatch, tmp_path, launch, _assistant("J'ai fini ce tour, à toi."))
+
+    report = tick(projet, host, now=_later(25))
+
+    assert [d.task_id for d in report.reaped] == [tid]
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a]
+
+
+def test_au_dela_du_plafond_la_tache_se_gare_en_nommant_l_erreur_du_fournisseur(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Au-delà de `MAX_PROVIDER_RESUMES`, la question d'attente nomme l'erreur — plus un simple « bail perdu »."""
+    tid = ready(service, "plafond")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error"))
+
+    for _ in range(MAX_PROVIDER_RESUMES):
+        tick(projet, host, now=_later(5))
+    resumed = len([a for a, _cwd, _env in host.calls if "--resume" in a])
+    assert resumed == MAX_PROVIDER_RESUMES
+
+    report = tick(projet, host, now=_later(5))
+
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a][resumed:]  # aucune reprise de plus
+    task = TaskService(projet).require(tid)
+    assert task.status is TaskState.WAITING and task.waiting is not None
+    assert task.waiting.reason == "human"
+    assert "erreur du fournisseur" in task.waiting.question.text and "API Error: 500" in task.waiting.question.text
+    assert any("erreur du fournisseur" in line for line in report.attention)
+
+
+def test_une_session_encore_au_travail_n_est_pas_reprise_meme_sur_une_erreur_en_journal(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code 2.1.319 rend ``state: "working"`` sans ``status`` : la session vit, rien n'est repris."""
+    tid = ready(service, "au travail")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = [{
+        "id": str(launch["session"]), "name": f"grimoire-{tid}", "kind": "background",
+        "state": "working", "sessionId": str(launch["session_id"]),
+    }]
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error"))
+
+    report = tick(projet, host, now=_later(5))
+
+    assert not report.reaped
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a]
+
+
+def test_une_reprise_qui_echoue_est_dite_au_tick_sans_rien_casser(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reprise et session neuve refusées par l'hôte : le tick le dit en attention, la récolte jugera ensuite."""
+    tid = ready(service, "reprise refusée")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []
+    host.bg_fails = True
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 503 Service Unavailable"))
+
+    report = tick(projet, host, now=_later(5))
+
+    assert any("non reprise après une erreur du fournisseur" in line for line in report.attention)
+    events = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_RESUMED_EVENT]
+    assert not events
+
+
+def test_une_sonde_claude_agents_muette_ne_reprend_rien(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``claude agents`` en échec : on ne juge pas une session qu'on ne voit pas (échec fermé)."""
+    tid = ready(service, "sonde muette")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents_fail = True
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error"))
+
+    tick(projet, host, now=_later(5))
+
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a]
+
+
 # ── #966 : l'identité d'une session de fond se lit après le lancement ──────────────
 
 
@@ -834,3 +1053,277 @@ def test_la_politique_probe_host_est_un_booleen_desactive_par_defaut(projet: Pat
     assert load_orchestrator_policy(projet).policy.probe_host is True  # type: ignore[union-attr]
     (projet / POLICY).write_text("orchestrator:\n  probe_host: oui\n", encoding="utf-8")
     assert load_orchestrator_policy(projet).policy is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="un nom de dossier ne peut pas contenir de fin de ligne")
+def test_un_chemin_a_fin_de_ligne_n_entre_jamais_dans_l_unite(tmp_path: Path) -> None:
+    from grimoire.missions.timer import _unit_path
+
+    piege = tmp_path / "bin\nExecStartPre=evil"
+    piege.mkdir()
+    (piege / "git").write_text("", encoding="utf-8")
+
+    assert "ExecStartPre" not in _unit_path(str(piege))
+
+
+@pytest.mark.parametrize(
+    "reglages",
+    [
+        "{pas du json",
+        "[]",
+        '{"hooks": "x"}',
+        '{"hooks": {"PreToolUse": "x"}}',
+        '{"hooks": {"PreToolUse": ["x", {"hooks": "x"}]}}',
+        '{"hooks": {"PreToolUse": [{"hooks": ["x", {"command": 1}, {"command": ""}, {"command": "\'non-ferme"}, {"command": "relatif/rtk hook"}]}]}}',
+    ],
+)
+def test_des_reglages_de_hooks_illisibles_n_ajoutent_rien_au_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reglages: str
+) -> None:
+    from grimoire.missions.timer import _unit_path
+
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    projet_vide = tmp_path / "vide"
+    projet_vide.mkdir()
+    attendu = _unit_path("", None, projet_vide)
+
+    (config / "settings.json").write_text(reglages, encoding="utf-8")
+
+    assert _unit_path("", None, projet_vide) == attendu
+
+
+# ── Router un worker vers un fournisseur compatible Anthropic ─────────────────
+
+
+_REGISTRE_ROUTE = """\
+$schema: "grimoire-llm-provider-registry/v1"
+metadata: {project: demo, owner: "", policy: x}
+providers:
+  - id: deepseek
+    enabled: true
+    provider_type: hosted
+    allowed_capabilities: [code]
+    default_models: [deepseek-chat]
+    currency: api
+    anthropic_base_url: https://api.example.test/anthropic
+    models:
+      - {id: deepseek-chat, tier: cheap}
+    data_policy: {allowed_data_classes: [project-source], forbidden_data_classes: [], retention_notes: ""}
+    fallback_order: []
+    audit: {log_prompts: false, log_metadata: true}
+routing: {default_data_class: project-source, default_provider: deepseek, default_fallback_chain: [], require_capability_match: true, require_data_policy_match: true}
+"""
+
+
+@pytest.fixture
+def route_prete(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (projet / "_grimoire" / "standard" / "llm-provider-registry.yaml").write_text(_REGISTRE_ROUTE, encoding="utf-8")
+    write_policy(projet, extra="      provider: deepseek\n      tier: cheap\n")
+    set_secret("deepseek", "DEEPSEEK_API_KEY", "sk-secret-de-test")
+    return projet
+
+
+def ready_v0(service: TaskService, title: str) -> str:
+    mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Lot", origin="t", created_by="t")
+    task = service.ledger.create_task(
+        mission.id, title, acceptance=("pytest tests/x.py : le code de sortie vaut 0",), owner="amelia",
+        checks=(TaskCheck(cmd="pytest tests/x.py"),),
+    )
+    service.ledger.transition_task(task.id, TaskState.READY)
+    return task.id
+
+
+def test_un_worker_route_passe_par_ses_reglages_jamais_par_l_environnement(route_prete: Path, host: FakeHost) -> None:
+    service = TaskService(route_prete)
+    tid = ready_v0(service, "routée")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "deepseek-chat"
+    settings = Path(argv[argv.index("--settings") + 1])
+    assert "sk-secret-de-test" not in " ".join(argv)
+    assert not any("sk-secret-de-test" in str(env) for _argv, _cwd, env in host.calls)
+    assert "sk-secret-de-test" not in settings.read_text(encoding="utf-8")
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "https://api.example.test/anthropic"
+    assert "ANTHROPIC_AUTH_TOKEN" not in data["env"]
+    if os.name != "nt":  # le minuteur du tick est une unité systemd ; le relais passe par sed
+        relu = subprocess.run(data["apiKeyHelper"], shell=True, capture_output=True, text=True, encoding="utf-8", check=True)  # noqa: S602
+        assert relu.stdout.strip() == "sk-secret-de-test"
+    assert data["env"]["CLAUDE_CODE_SUBAGENT_MODEL"] == "deepseek-chat"
+    assert "Read(~/.env-store/**)" in data["permissions"]["deny"]
+    assert launched_sessions(TaskService(route_prete))[tid]["provider"] == "deepseek"
+
+
+def test_une_tache_v2_garde_le_modele_habituel(route_prete: Path, host: FakeHost) -> None:
+    ready(TaskService(route_prete), "le travail est fait, sans verdict")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv and "deepseek-chat" not in argv
+
+
+def test_sans_cle_le_worker_garde_le_modele_habituel(route_prete: Path, host: FakeHost) -> None:
+    remove_secret("deepseek")
+    ready_v0(TaskService(route_prete), "sans clé")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv and "deepseek-chat" not in argv
+
+
+@pytest.mark.parametrize("url", ["http://api.example.test/anthropic", ""])
+def test_une_adresse_non_https_n_est_pas_une_route(route_prete: Path, host: FakeHost, url: str) -> None:
+    registre = route_prete / "_grimoire" / "standard" / "llm-provider-registry.yaml"
+    registre.write_text(_REGISTRE_ROUTE.replace("https://api.example.test/anthropic", url), encoding="utf-8")
+    ready_v0(TaskService(route_prete), "http")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv
+
+
+def test_un_fournisseur_inconnu_n_est_pas_une_route(route_prete: Path, host: FakeHost) -> None:
+    write_policy(route_prete, extra="      provider: inconnu\n      tier: cheap\n")
+    ready_v0(TaskService(route_prete), "inconnu")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv
+
+
+def test_une_reprise_reste_chez_le_fournisseur_du_lancement(route_prete: Path, host: FakeHost) -> None:
+    service = TaskService(route_prete)
+    launch = {"session_id": "abc", "cwd": str(route_prete), "provider": "deepseek", "model": "deepseek-chat", "session": "abc"}
+    tid = ready_v0(service, "reprise")
+
+    resume_worker(service, host, "claude", tid, launch, "reprends")
+
+    argv = next(a for a, _c, _e in host.calls if "--resume" in a)
+    assert argv[argv.index("--settings") + 1] == str(settings_path("deepseek"))
+
+
+# ── #957 : le worktree du worker porte les hooks Grimoire ──────────────────────
+
+
+def test_le_worktree_d_un_depot_sans_fichiers_d_hote_suivis_porte_le_hook_avant_claude_bg(
+    projet: Path, service: TaskService, host: FakeHost
+) -> None:
+    assert git(projet, "ls-files", ".claude") == ""
+    tid = ready(service, "hooks")
+    tick(projet, host)
+    (_argv, cwd, _env) = next(c for c in host.calls if c[0][:2] == ["claude", "--bg"])
+    assert cwd.name == tid
+    settings = json.loads((cwd / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"]
+
+
+def test_hook_introuvable_apres_la_synchronisation_le_lancement_est_refuse(
+    projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.hosts.sync import HostSyncOutcome
+
+    monkeypatch.setattr("grimoire.hosts.sync.sync_host_surfaces", lambda root, **_kw: HostSyncOutcome(error="boom"))
+    tid = ready(service, "refus")
+    report = tick(projet, host)
+    assert host.of("claude", "--bg") == []
+    (outcome,) = [o for o in report.launches if o.task_id == tid]
+    assert outcome.status == "skipped" and "PreToolUse" in outcome.detail
+    assert TaskService(projet).require(tid).status is TaskState.READY
+
+
+def test_les_fichiers_d_hote_generes_ne_salissent_pas_le_worktree(projet: Path, service: TaskService, host: FakeHost) -> None:
+    ready(service, "propre")
+    tick(projet, host)
+    (_argv, cwd, _env) = next(c for c in host.calls if c[0][:2] == ["claude", "--bg"])
+    assert (cwd / ".claude" / "settings.json").is_file() and git(cwd, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+# ── Coût des sessions : profil allégé et palier par classe ────────────────────
+
+
+def test_le_profil_allege_retire_les_mcp_et_borne_les_outils(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      lean: true\n")
+    tid = ready(service, "allégée")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert "--strict-mcp-config" in argv
+    # #1160 : un seul jeton, sinon `--tools` (variadique) avale la consigne qui le suit.
+    assert "--tools=Bash,Read,Edit,Write,Glob,Grep" in argv and "--tools" not in argv
+    assert launched_sessions(TaskService(projet))[tid]["lean"] is True
+
+
+def test_sans_profil_allege_rien_ne_change(projet: Path, service: TaskService, host: FakeHost) -> None:
+    ready(service, "habituelle")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert "--strict-mcp-config" not in argv and not any(a.startswith("--tools") for a in argv)
+
+
+def test_une_reprise_garde_le_profil_allege(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "reprise allégée")
+    launch = {"session_id": "abc", "cwd": str(projet), "model": "sonnet", "session": "abc", "lean": True}
+
+    resume_worker(service, host, "claude", tid, launch, "reprends")
+
+    argv = next(a for a, _c, _e in host.calls if "--resume" in a)
+    assert "--strict-mcp-config" in argv and "--tools=Bash,Read,Edit,Write,Glob,Grep" in argv
+    assert argv[-1] == "reprends"  # la consigne de reprise n'est pas prise pour un outil (#1160)
+
+
+def test_une_tache_v0_part_au_palier_cheap_sous_model_by_class(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: mid\n      model_by_class: true\n")
+    ready_v0(service, "mécanique")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "haiku"
+
+
+def test_une_tache_non_v0_garde_le_palier_du_role(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: mid\n      model_by_class: true\n")
+    ready(service, "à juger")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "sonnet"
+
+
+def test_un_modele_explicite_prime_sur_la_classe(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      model: opus\n      model_by_class: true\n")
+    ready_v0(service, "explicite")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+
+
+def test_sans_model_by_class_une_v0_garde_le_palier_du_role(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: mid\n")
+    ready_v0(service, "sans classe")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "sonnet"
+
+
+def test_une_classe_de_donnees_non_declaree_garde_le_worker_sur_l_hote(route_prete: Path, host: FakeHost) -> None:
+    registre = route_prete / "_grimoire" / "standard" / "llm-provider-registry.yaml"
+    registre.write_text(registre.read_text(encoding="utf-8").replace("default_data_class: project-source, ", ""), encoding="utf-8")
+    service = TaskService(route_prete)
+    tid = ready_v0(service, "non déclarée")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv
+    assert "deepseek-chat" not in argv
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["provider"] == ""
+    assert "aucune classe de données" in lancement.payload["provider_refused"]

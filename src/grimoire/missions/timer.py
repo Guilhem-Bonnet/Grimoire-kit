@@ -13,18 +13,22 @@ même avec un forfait épuisé, et il sort tout de suite sous une pause.
 Lot 2 de #876 : le minuteur est le déclencheur du lanceur. Il lance ``orchestrate tick --apply`` qui, si le rôle
 ``worker`` de la politique d'orchestration est activé, lance les sessions détachées ; l'unité reçoit donc un ``PATH`` réduit aux dossiers
 outils du poste à l'installation (:func:`_unit_path`), car l'environnement minimal d'un service utilisateur ne trouve ni ``claude`` ni ``gh``.
+Ce ``PATH`` garde aussi, avec les mêmes exclusions, le dossier de chaque exécutable appelé par chemin absolu dans les
+hooks des réglages Claude Code utilisateur et projet (#1022 : un hook qui réécrit ``git status`` en ``rtk git status``
+faisait échouer le tick en 127).
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -104,13 +108,81 @@ def _has_tool(directory: Path, tool: str) -> bool:
     return candidate.is_file() and os.access(candidate, os.X_OK)
 
 
-def _unit_path(raw: str, tick_bin: Path | None = None) -> str:
+def _hook_commands(hooks: object) -> Iterator[str]:
+    """Les commandes de hook d'une table ``hooks`` de réglages Claude Code, imbrication comprise."""
+    if not isinstance(hooks, dict):
+        return
+    for entries in hooks.values():
+        for entry in entries if isinstance(entries, list) else ():
+            inner = entry.get("hooks") if isinstance(entry, dict) else None
+            for spec in inner if isinstance(inner, list) else ():
+                command = spec.get("command") if isinstance(spec, dict) else None
+                if isinstance(command, str):
+                    yield command
+
+
+def _hook_program(command: str) -> str | None:
+    """Le programme d'une commande de hook ; ``None`` pour une commande vide ou aux guillemets non fermés."""
+    try:
+        parts = shlex.split(command, posix=os.name != "nt") if command.strip() else []
+    except ValueError:  # guillemets non fermés : ce hook ne se résout pas, mais ne fait pas échouer le plan
+        return None
+    return parts[0] if parts else None
+
+
+def _hook_dir(command: str) -> Path | None:
+    """Le dossier d'un exécutable de hook appelé par chemin absolu ; ``None`` pour un nom nu ou un chemin relatif."""
+    program = _hook_program(command)
+    if program is None or Path(program.replace("\\", "/")).name in ("~", "$HOME"):
+        return None
+    directory = Path(program).parent
+    return directory if directory.is_absolute() else None
+
+
+def _hook_settings(project_root: Path) -> list[Path]:
+    """Les réglages Claude Code qui peuvent porter des hooks : utilisateur puis projet."""
+    claude = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    sources = [Path(claude) / "settings.json" if claude else Path.home() / ".claude" / "settings.json"]
+    return [
+        *sources,
+        project_root / ".claude" / "settings.json",
+        project_root / ".claude" / "settings.local.json",
+    ]
+
+
+def _hook_commands_with_settings(project_root: Path) -> Iterator[tuple[Path, str]]:
+    """``(réglages, commande)`` de chaque hook utilisateur et projet ; un fichier illisible n'ajoute rien."""
+    for path in _hook_settings(project_root):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue  # un fichier absent ou illisible ne prouve rien : il n'ajoute rien
+        for command in _hook_commands(data.get("hooks") if isinstance(data, dict) else None):
+            yield path, command
+
+
+def _hook_dirs(project_root: Path) -> list[Path]:
+    """Les dossiers des exécutables appelés par chemin absolu dans les hooks utilisateur et projet de Claude Code."""
+    found: list[Path] = []
+    for _settings, command in _hook_commands_with_settings(project_root):
+        directory = _hook_dir(command)
+        if directory is not None:
+            found.append(directory)
+    return found
+
+
+def _unit_path(raw: str, tick_bin: Path | None = None, project_root: Path | None = None) -> str:
     """Le ``PATH`` de l'unité : seulement les dossiers du poste qui portent un outil utile, plus les dossiers système.
 
     Ce n'est pas le ``PATH`` du poste recopié tel quel : celui d'une session d'agent contient des dossiers temporaires
     propres à la session (ils disparaissent, et un exécutable y a pu être posé), et n'importe quel PATH peut porter un
     dossier qui n'a rien à faire dans un service persistant. Sont écartés : les chemins relatifs, les dossiers absents
     ou temporaires, ceux sans ``claude``, ``gh``, ``git`` ni ``node``.
+
+    Les dossiers des exécutables appelés par chemin absolu dans les hooks des réglages Claude Code utilisateur et projet
+    (*project_root*) sont gardés sous les mêmes exclusions (#1022) : un hook qui réécrit une commande en
+    ``rtk git status`` doit pouvoir la résoudre, sinon le tick échoue en 127. Une commande de hook nue se résout dans le
+    ``PATH`` courant comme avant.
 
     *tick_bin* (le dossier de l'interpréteur qui pose le minuteur) passe en tête s'il porte ``grimoire`` : les sessions
     que le tick lance appellent ``grimoire task …`` par le ``PATH``, et doivent exécuter la version du tick, pas un autre
@@ -124,21 +196,24 @@ def _unit_path(raw: str, tick_bin: Path | None = None) -> str:
     if tick_bin is not None and tick_bin.is_absolute() and _has_tool(tick_bin, "grimoire") \
             and not _under(tick_bin, temp) and not _under(tick_bin.resolve(), temp):
         kept.append(str(tick_bin))
-    for entry in raw.split(os.pathsep):
-        if not entry or "\n" in entry or "\r" in entry:
-            continue
+    hooks = [d for d in _hook_dirs(project_root or Path.cwd()) if d.is_dir()]
+    # Le dossier du poste écrit tel quel (dédoublonné) ; un dossier de hook le rejoint s'il passe les mêmes exclusions.
+    entries = list(dict.fromkeys([entry for entry in raw.split(os.pathsep) if entry] + [str(d) for d in hooks]))
+    for entry in entries:
+        if "\n" in entry or "\r" in entry:
+            continue  # une fin de ligne injecterait une directive dans le fichier d'unité
         directory = Path(entry)
         if not directory.is_absolute() or not directory.is_dir() or _under(directory, temp) or _under(directory.resolve(), temp):
             continue
-        if entry not in kept and any(_has_tool(directory, tool) for tool in _TOOLS):
+        if entry not in kept and (directory in hooks or any(_has_tool(directory, tool) for tool in _TOOLS)):
             kept.append(entry)
     kept += [d for d in _SYSTEM_DIRS if d not in kept]
     return os.pathsep.join(kept)
 
 
-def _path_line(python: str) -> str:
-    """``Environment="PATH=…"`` pour l'unité : le ``grimoire`` du tick d'abord, puis ``claude`` et ``gh`` (voir :func:`_unit_path`)."""
-    return f"Environment={_systemd_quote('PATH=' + _unit_path(os.environ.get('PATH', ''), Path(python).parent))}\n"
+def _path_line(python: str, project_root: Path) -> str:
+    """``Environment="PATH=…"`` pour l'unité : le ``grimoire`` du tick d'abord, puis ``claude``, ``gh`` et les hooks (voir :func:`_unit_path`)."""
+    return f"Environment={_systemd_quote('PATH=' + _unit_path(os.environ.get('PATH', ''), Path(python).parent, project_root))}\n"
 
 
 def _command(project_root: Path, python: str) -> list[str]:
@@ -198,7 +273,7 @@ def plan_timer(project_root: Path, interval: str = DEFAULT_INTERVAL, *, python: 
         # Le tick lance des sessions `claude --bg` : en `control-group` (défaut), systemd tue leur démon dès la fin du tick.
         "KillMode=process\n"
         f"WorkingDirectory={_spec(str(root))}\n"
-        f"{_path_line(exe)}"
+        f"{_path_line(exe, root)}"
         f"ExecStart={exec_start}\n"
     )
     timer = (

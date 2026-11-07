@@ -117,17 +117,10 @@ def _agent_file(root: Path) -> Path:
     return files[0]
 
 
-#: Défaut du kit constaté à la livraison de P44 (hors portée) : le plan de `up`
-#: réécrit toujours `agent-manifest.csv` avec une ligne `stack-engineer` en
-#: double, et un vrai `up` ne le résorbe pas. La lecture le montre fidèlement ;
-#: ce test n'exige donc « rien d'autre » que ce seul fichier.
-_MANIFESTE = "_grimoire/kit/agent-manifest.csv"
-
-
 def test_un_projet_fraichement_initialise_n_a_pas_d_autre_changement(projet: Path) -> None:
     view = upgrade_changes.changes_view(projet)
     paths = [f["path"] for c in view["categories"] for f in c["files"]]
-    assert set(paths) <= {_MANIFESTE}, paths
+    assert paths == []
     assert view["unchanged"] > 0
 
 

@@ -238,6 +238,10 @@ def test_p54_des_goto_rapproches_ne_levent_aucune_erreur(browser: Browser, serve
         page.wait_for_function("() => window.GrimoireWorkspace.section === 'travail'")
         page.wait_for_function("() => document.querySelector('#canvas').getAttribute('aria-busy') === 'false'")
         page.wait_for_timeout(500)
+        assert page.evaluate("() => document.getElementById('view-seg') !== null")
+        assert page.locator("#canvas .ex-wrap").count() == 1  # l'espace ouvert n'est pas effacé par un espace quitté
+        _goto(page, "flotte")
+        assert page.evaluate("() => document.querySelector('#docbar #view-seg') !== null")
     assert not errors, errors
 
 

@@ -72,7 +72,7 @@ def _provider_yaml(pid: str, tier: str, invocation: str | None) -> str:
     return (
         f'  - id: "{pid}"\n'
         f"    enabled: true\n"
-        f'    provider_type: "hosted"\n'
+        f'    provider_type: "hosted"\n    data_policy:\n      allowed_data_classes: ["project-source"]\n'
         f'    allowed_capabilities: ["chat", "code"]\n'
         f'    default_models: ["{pid}-model"]\n'
         f'    currency: "api"\n'
@@ -97,6 +97,7 @@ metadata:
 providers:
 {body}
 routing:
+  default_data_class: "project-source"
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true
@@ -402,6 +403,53 @@ def test_diff_touchant_le_cli_est_review_required_avec_le_fichier_nomme(tmp_path
     assert report.review == "review_required"
     assert "src/grimoire/cli/x.py" in report.review_files
     assert report.review_note is None
+
+
+def _worker_qui_cree_marker(tmp_path: Path, *lignes: str) -> str:
+    corps = "\n".join(("from pathlib import Path", *lignes, 'Path("marker.txt").write_text("done", encoding="utf-8")'))
+    return _invocation(_script(tmp_path, "worker.py", corps))
+
+
+def test_un_fichier_deja_modifie_que_l_ouvrier_ne_touche_pas_n_est_pas_a_relire(tmp_path: Path) -> None:
+    cible = tmp_path / "src" / "grimoire" / "cli" / "x.py"
+    _git_repo(tmp_path, cible)
+    cible.write_text("modifié avant le dispatch\n", encoding="utf-8")
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", _worker_qui_cree_marker(tmp_path)))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_optional"
+    assert report.review_files == ()
+
+
+def test_un_fichier_deja_modifie_que_l_ouvrier_retouche_est_a_relire(tmp_path: Path) -> None:
+    cible = tmp_path / "src" / "grimoire" / "cli" / "x.py"
+    _git_repo(tmp_path, cible)
+    cible.write_text("modifié avant le dispatch\n", encoding="utf-8")
+    worker = _worker_qui_cree_marker(tmp_path, 'Path("src/grimoire/cli/x.py").write_text("retouché et plus long\\n", encoding="utf-8")')
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", worker))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_required"
+    assert "src/grimoire/cli/x.py" in report.review_files
+
+
+def test_un_nouveau_fichier_cree_par_l_ouvrier_sur_une_surface_est_a_relire(tmp_path: Path) -> None:
+    _git_repo(tmp_path, tmp_path / "src" / "grimoire" / "cli" / "x.py")
+    worker = _worker_qui_cree_marker(tmp_path, 'Path("src/grimoire/cli/nouveau.py").write_text("x\\n", encoding="utf-8")')
+    _write_registry(tmp_path, _provider_yaml("worker", "cheap", worker))
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.review == "review_required"
+    assert "src/grimoire/cli/nouveau.py" in report.review_files
 
 
 def test_diff_limite_a_tests_est_review_optional(tmp_path: Path) -> None:
@@ -993,3 +1041,40 @@ def test_max_cost_usd_absent_ne_change_rien(tmp_path: Path) -> None:
     assert report.succeeded is True
     assert report.cost_capped is None
     assert len(report.attempts) == 2
+
+
+# ── Politique de données (#1133) ──────────────────────────────────────────────
+
+
+def test_sans_classe_declaree_la_cascade_refuse_sans_rien_envoyer(tmp_path: Path) -> None:
+    script = _script(tmp_path, "green.py", _WRITE_MARKER)
+    _write_registry(tmp_path, _provider_yaml("ext", "cheap", _invocation(script)))
+    registry = tmp_path / REGISTRY
+    registry.write_text(registry.read_text(encoding="utf-8").replace('  default_data_class: "project-source"\n', ""), encoding="utf-8")
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert report.exit_code == 2
+    assert report.refusal == "data_policy"
+    assert report.start_tier_reason is not None
+    assert "aucune classe de données" in report.start_tier_reason
+    assert report.attempts == ()
+    assert not (tmp_path / "marker.txt").exists()
+
+
+def test_un_fournisseur_qui_refuse_la_classe_laisse_la_place_au_suivant(tmp_path: Path) -> None:
+    ferme = _script(tmp_path, "ferme.py", _WRITE_MARKER)
+    ouvert = _script(tmp_path, "ouvert.py", _WRITE_MARKER)
+    _write_registry(
+        tmp_path,
+        _provider_yaml("ferme", "cheap", _invocation(ferme)).replace('["project-source"]', '["autre-classe"]'),
+        _provider_yaml("ouvert", "cheap", _invocation(ouvert)),
+    )
+    service = _service(tmp_path)
+    tid = _task(service, acceptance=(V0_CRITERION,))
+
+    report = run_dispatch(service, tid, checks=("test -f marker.txt",))
+
+    assert [a.provider for a in report.attempts] == ["ouvert"]

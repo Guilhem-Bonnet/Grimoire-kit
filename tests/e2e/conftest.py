@@ -806,6 +806,9 @@ def served_cockpit_upgrade(
     (learnings / "monitoring.md").write_text(
         "# Monitoring\n\nSurveiller les métriques clés.\n", encoding="utf-8"
     )
+    # Un projet à jour n'a rien à écrire (#908) : ce manifeste d'une version passée donne à `up` un vrai changement.
+    manifest = root / "_grimoire" / "kit" / "agent-manifest.csv"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "ancien-agent,ancien-agent.md,meta,retiré,\n", encoding="utf-8")
 
     port = _free_port()
     cockpit_home = tmp_path_factory.mktemp("cockpit-upgrade-home")

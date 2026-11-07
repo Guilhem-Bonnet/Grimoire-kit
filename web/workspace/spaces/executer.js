@@ -3596,12 +3596,18 @@ function unreadableNotice(portfolio) {
   return notice;
 }
 
+// Les nœuds qui portent le focus clavier d'une carte : une carte du board ou de
+// la liste, et la carte de décision. La carte de décision (v1 comme v2) porte
+// `[data-role="decision"]` et enveloppe ses contrôles `.dc-*` (choix, puces,
+// note) : `closest` ramène donc à la carte, celle qui tient les raccourcis.
+const FOCUS_CARDS = '.ex-card, tr[data-task], [data-role="decision"]';
+
 // Ce qu'une actualisation conserve : défilement de la toile et du board / de la
 // liste, et la carte qui avait le focus clavier.
 function captureView(wrap) {
   const canvas = wrap.parentElement;
   const board = wrap.querySelector('.ex-board, .ex-list-wrap');
-  const focus = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.ex-card, tr[data-task]') : null;
+  const focus = document.activeElement && document.activeElement.closest ? document.activeElement.closest(FOCUS_CARDS) : null;
   // Décisions (P68) : un bouton de choix, de filtre ou de lot garde le focus après une actualisation.
   const keyed = document.activeElement && wrap.contains(document.activeElement) ? document.activeElement.dataset?.focusKey || '' : '';
   return {
@@ -3621,7 +3627,7 @@ function restoreView(wrap, kept) {
   const board = wrap.querySelector('.ex-board, .ex-list-wrap');
   if (board) { board.scrollLeft = kept.boardLeft; board.scrollTop = kept.boardTop; }
   if (kept.focus && kept.focus.task) {
-    const same = [...wrap.querySelectorAll('.ex-card, tr[data-task]')]
+    const same = [...wrap.querySelectorAll(FOCUS_CARDS)]
       .find((n) => n.dataset.task === kept.focus.task && (n.dataset.project || '') === kept.focus.project);
     if (same && typeof same.focus === 'function') same.focus({ preventScroll: true });
   }

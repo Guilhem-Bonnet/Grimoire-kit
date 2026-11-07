@@ -74,7 +74,9 @@ from grimoire.missions.breaker import read_breaker, record_failure, trip
 from grimoire.missions.launcher import (
     _BG_ID,
     _TIER_ALIAS,
+    LEAN_SESSION_ARGS,
     _halt,
+    _read_agents,
     attest_session,
     default_exec,
     launched_sessions,
@@ -110,6 +112,7 @@ __all__ = [
     "REVIEW_LAUNCHED_EVENT",
     "REVIEW_LAUNCH_FAILED_EVENT",
     "REVIEW_TIMEOUT",
+    "SILENT",
     "ReviewOutcome",
     "ReviewStage",
     "entered_review_at",
@@ -144,7 +147,9 @@ CI_PENDING = "ci_pending"
 #: au-delà, le dépôt n'a pas de CI pour elle et la relecture se fait sans l'attendre.
 CI_REGISTER_GRACE = timedelta(minutes=10)
 #: Verdicts notés qui appellent une nouvelle relecture, et ceux qui clôturent la relecture.
-_RELAUNCH = frozenset({"timeout", "stale", CI_PENDING})
+SILENT = "silent"
+
+_RELAUNCH = frozenset({"timeout", "stale", CI_PENDING, SILENT})
 #: Un autre modèle que celui du worker, quand la politique ne l'impose pas.
 _ALTERNATE = {"opus": "sonnet", "sonnet": "opus", "haiku": "sonnet"}
 _DEFAULT_MODEL = "sonnet"
@@ -369,6 +374,8 @@ class ReviewStage:
         # #994 : les réglages, hooks et serveurs MCP que la PR apporte (.claude/, .mcp.json) ne s'appliquent pas au
         # relecteur d'une tâche faite à la main ; il garde son dossier dans le worktree pour rejouer les preuves.
         isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual else []
+        if role.lean:
+            isolate += [arg for arg in LEAN_SESSION_ARGS if arg not in isolate]
         argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,
                 "--permission-mode", role.permission_mode, *isolate, prompt]
         result = self._exec(argv, cwd, session_env())
@@ -545,7 +552,40 @@ class ReviewStage:
             return ReviewOutcome(tid, "refused", "refused", f"reçu illisible : {unreadable}")
         if receipt is not None and fresh:
             return ReviewOutcome(tid, "refused", "refused", "reçu d'une autre session que le relecteur lancé : ignoré")
-        return None  # la relecture n'a pas encore rendu son reçu
+        return self._judge_silent(task, launch, review)  # pas de reçu : le relecteur travaille-t-il encore ?
+
+    def _reviewer_stopped(self, review: LedgerEvent) -> bool:
+        """Le relecteur a fini son tour (``idle``) ou n'est plus listé : plus rien ne viendra écrire de reçu.
+
+        Lecture de ``claude agents`` en échec : ``False`` (échec fermé, le délai de :data:`REVIEW_TIMEOUT` reste la garde).
+        """
+        short = str(review.payload.get("session") or "")
+        agents = _read_agents(self._exec, Path(str(review.payload.get("cwd") or ".")), self._claude)
+        if not short or agents is None:
+            return False
+        mine = [a for a in agents if str(a.get("id") or "") == short]
+        return not mine or all(a.get("status") != "busy" for a in mine)
+
+    def _judge_silent(self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent) -> ReviewOutcome | None:
+        """Un relecteur arrêté sans reçu (typiquement : CI en cours à sa lecture, il rend la main sans verdict) n'attend
+        pas :data:`REVIEW_TIMEOUT`. CI de la tête en cours : on attend. CI rouge : la tâche repart au worker, comme un
+        ``NOT-READY``, sans reçu. Sinon la relecture est notée ``silent`` et relancée au tick suivant, comptée aux
+        relances (:data:`MAX_RELAUNCHES`)."""
+        tid = task.id
+        if not self._reviewer_stopped(review):
+            return None
+        ci, ci_detail = self._head_ci(task, review)
+        head = self._reviewed_head(task, review)
+        if self._ci_unsettled(ci, ci_detail, head):
+            return None
+        if ci == "red" and self._rerun_red(task, review, ci_detail):
+            return None  # test instable : relancé une fois, le verdict de la relance décide
+        if ci == "red":
+            notes = f"relecteur arrêté sans verdict, et la CI de la tête relue est rouge : {ci_detail}"
+            return self._bounce(task, launch, review, None, notes=notes, extra={"ci": ci, "ci_detail": ci_detail[:300], "receipt_verdict": ""})
+        self._record_judged(task, review, SILENT, 0, {"ci": ci, "ci_detail": ci_detail[:300]})
+        self._stop(review)
+        return ReviewOutcome(tid, "silent", "done", "relecteur arrêté sans reçu : relancé au tick suivant")
 
     def _judge_attested(
         self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent, receipt: ReviewReceipt, root: Path
@@ -736,7 +776,7 @@ class ReviewStage:
         )
 
     def _bounce(
-        self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent, receipt: ReviewReceipt, *, notes: str = "",
+        self, task: MissionTask, launch: dict[str, Any], review: LedgerEvent, receipt: ReviewReceipt | None, *, notes: str = "",
         extra: dict[str, Any] | None = None,
     ) -> ReviewOutcome:
         """``NOT-READY`` : retour au worker avec les constats (*notes*, à défaut ceux du reçu), ou escalade au cycle
@@ -745,7 +785,7 @@ class ReviewStage:
         breaker = read_breaker(self._service.home_root)
         if breaker.open:
             return ReviewOutcome(tid, "bounce", "skipped", f"disjoncteur ouvert : {breaker.reason}")
-        cycle, notes = self._cycle(tid), notes or _findings_text(receipt)
+        cycle, notes = self._cycle(tid), notes or (_findings_text(receipt) if receipt is not None else "aucun reçu")
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:
             why = f"{cycle} relecture(s) NOT-READY" if worker_session else "aucune session de worker à reprendre"

@@ -97,7 +97,7 @@ def test_xdist_distributes_by_file() -> None:
 
 
 def test_e2e_job_is_strict() -> None:
-    step = next(s for s in _job("e2e")["steps"] if "tests/e2e" in str(s.get("run", "")))
+    step = next(s for s in _job("e2e")["steps"] if "--suite e2e" in str(s.get("run", "")))
     assert step["env"]["GRIMOIRE_E2E_STRICT"] == "1"
 
 
@@ -242,3 +242,64 @@ def test_windows_et_macos_passent_la_suite_complete_hors_pr_seulement() -> None:
     suite = next(s for s in job["steps"] if "pytest tests/unit/" in str(s.get("run", "")))
     assert suite.get("if") == "env.FULL_SUITE == 'true'"
     assert {"windows-latest", "macos-latest"} <= set(job["strategy"]["matrix"]["os"])  # le nom du check requis reste
+
+
+def test_une_pr_ne_lance_le_job_test_que_pour_une_release() -> None:
+    gate = _job("test")["env"]["FULL_SUITE"]
+    assert "startsWith(github.event.pull_request.title, 'chore: release')" in gate
+    assert {"3.12", "3.13"} <= set(_job("test")["strategy"]["matrix"]["python-version"])  # noms des checks requis
+
+
+def test_l_e2e_ne_saute_jamais_sa_suite_hors_pr() -> None:
+    decision = _job("e2e-gate")
+    gate = next(s for s in decision["steps"] if s.get("id") == "gate")["env"]["RUN_E2E"]
+    assert "github.event_name != 'pull_request'" in gate and "chore: release" in gate
+    filtres = next(s for s in decision["steps"] if s.get("id") == "filter")["with"]["filters"]
+    assert "web/**" in filtres and "tests/e2e/**" in filtres
+    assert _job("e2e")["if"] == "needs.e2e-gate.outputs.run == 'true'"
+
+
+def test_l_agregateur_e2e_porte_le_check_requis_et_ne_tolere_qu_un_saut_decide() -> None:
+    job = _job("e2e-aggregate")
+    assert job["name"] == "E2E (chromium, ubuntu-latest)"
+    assert job["if"] == "always()"
+    run = job["steps"][0]["run"]
+    assert 'test "$GATE_RESULT" = "success"' in run
+    assert 'test "$E2E_RESULT" = "success"' in run and 'test "$RUN_E2E" = "false"' in run
+
+
+def test_la_matrice_e2e_et_le_script_parlent_du_meme_nombre_de_jobs() -> None:
+    job = _job("e2e")
+    shards = job["strategy"]["matrix"]["shard"]
+    run = next(str(s["run"]) for s in job["steps"] if "--suite e2e" in str(s.get("run", "")))
+    assert shards == list(range(1, len(shards) + 1)) and f"--of {len(shards)}" in run
+    assert "-x" not in run.split()
+
+
+def test_main_rejoue_l_e2e_quand_le_cockpit_change() -> None:
+    workflow = YAML(typ="safe").load(_CI.read_text(encoding="utf-8"))
+    paths = (workflow.get("on") or workflow.get(True))["push"]["paths"]
+    assert {"web/**", "tests/e2e/**", "src/**"} <= set(paths)
+
+
+def test_la_suite_complete_avec_coeur_rust_reste_sur_main() -> None:
+    workflow = YAML(typ="safe").load((_CI.parent / "rust-cores.yml").read_text(encoding="utf-8"))
+    triggers = workflow.get("on") or workflow.get(True)
+    assert "push" in triggers
+    etapes = [s for job in workflow["jobs"].values() for s in job.get("steps", []) if s.get("name") == "Full SDK suite with the compiled core loaded"]
+    assert len(etapes) == 7
+    assert all(s["if"] == "github.event_name != 'pull_request'" for s in etapes)
+
+
+def test_windows_framework_tourne_hors_pr_et_sur_les_releases() -> None:
+    workflow = YAML(typ="safe").load((_CI.parent / "ci-validate.yml").read_text(encoding="utf-8"))
+    triggers = workflow.get("on") or workflow.get(True)
+    assert "schedule" in triggers and "workflow_dispatch" in triggers
+    assert "src/**" in triggers["push"]["paths"]
+    job = workflow["jobs"]["framework-tests"]
+    gate = job["env"]["FULL_SUITE"]
+    assert "github.event_name != 'pull_request'" in gate and "matrix.os == 'ubuntu-latest'" in gate
+    assert "chore: release" in gate
+    suite = next(s for s in job["steps"] if "pytest tests/test_" in str(s.get("run", "")))
+    assert suite["if"] == "env.FULL_SUITE == 'true'"
+    assert "windows-latest" in job["strategy"]["matrix"]["os"]  # le nom du check requis reste

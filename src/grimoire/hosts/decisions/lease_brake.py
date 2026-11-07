@@ -129,8 +129,8 @@ _CANCELLED = "cancelled"
 def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
     """``(état, motif)`` du bail que la session croit tenir : ``held``, ``released``, ``stale_epoch`` ou ``cancelled``.
 
-    ``released`` : la session a quitté son bail par la porte — release, blocage, échec ou
-    clôture (barrière ``hand_back`` à l'epoch suivant le sien). Elle ne tient plus rien,
+    ``released`` : la session a quitté son bail par la porte — release, blocage, échec,
+    remise en revue (``needs_verification``) ou clôture (barrière ``hand_back`` à l'epoch suivant le sien). Elle ne tient plus rien,
     mais personne ne lui a pris : le frein se tait, comme pour une session sans bail
     (K3-S1-01). Une barrière posée par la récolte, un autre titulaire, un autre epoch ou
     une annulation restent des refus.
@@ -162,9 +162,12 @@ def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
         task is not None
         and task.claim is not None
         and task.claim.lease_epoch == epoch
-        and task.status in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED)
+        and task.status in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED, TaskState.NEEDS_VERIFICATION)
     ):
-        return _RELEASED, ""  # le claim de la session, rendu par une sortie légitime
+        # le claim de la session, rendu par une sortie légitime. ``needs_verification`` en est une : la
+        # transition garde le claim (le titulaire a remis sa preuve), mais ``check_holder`` ne la tient
+        # plus pour un bail — fichier de bail absent, la session était gelée (#1117). Un autre epoch reste refusé.
+        return _RELEASED, ""
     return _STALE, check.reason
 
 
@@ -212,6 +215,20 @@ def _mark_busy(root: Path, task_id: str, epoch: int, cached: LeaseFile | None, t
     except Exception:
         return ""
     return ""
+
+
+def _handed_to_review(root: Path, task_id: str, epoch: int) -> bool:
+    """La session a remis sa tâche en revue : son fichier de bail existe encore, mais rien n'est à renouveler (#1117)."""
+    from grimoire.missions.ledger import MissionLedger
+    from grimoire.missions.schemas import TaskState
+
+    task = MissionLedger(root).get_task(task_id)
+    return (
+        task is not None
+        and task.status is TaskState.NEEDS_VERIFICATION
+        and task.claim is not None
+        and task.claim.lease_epoch == epoch
+    )
 
 
 def _deny(hook: HookInput, task_id: str, epoch: int, what: str, detail_kind: str) -> Decision:
@@ -267,7 +284,7 @@ def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
             # l'humain (``ledger_rules``, inchangé).
             return None
         refused = _mark_busy(root, task_id, epoch, cached, _declared_timeout_ms(hook, facts))
-        if refused:
+        if refused and not _handed_to_review(root, task_id, epoch):
             return _deny(hook, task_id, epoch, refused, "stale_epoch")
     except Exception as exc:
         return Decision(

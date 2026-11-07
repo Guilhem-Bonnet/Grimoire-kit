@@ -23,7 +23,15 @@ import pytest
 from grimoire.core.agentic_standard import verify_standard_profile
 from grimoire.missions.gates import _resolve_provider_policy
 from grimoire.providers.audit import audit_providers, probe_provider
-from grimoire.providers.registry import ProviderRegistryError, read_registry
+from grimoire.providers.registry import (
+    ModelSpec,
+    ProviderRegistryError,
+    ProviderWriteError,
+    add_provider,
+    read_registry,
+    remove_provider,
+    set_provider_enabled,
+)
 from grimoire.providers.routing import candidates, choose
 from grimoire.providers.state import cooling_down_entry, load_state, record_failure, record_success, save_state
 
@@ -643,3 +651,117 @@ def test_state_ids_outside_the_llm_registry_never_enter_routing(tmp_path: Path) 
     # lit que le registre déclaratif, jamais les clés brutes de l'état.
     state = load_state(tmp_path)
     assert set(state) >= {"memory:qdrant", "memory:weaviate", "source_assist:ollama"}
+
+
+# ── Écriture du registre : add_provider / set_provider_enabled / remove_provider ──
+#
+# La clé elle-même n'est jamais écrite ici — ``grimoire.providers.secrets``
+# porte ce chemin séparé (``tests/unit/test_provider_secrets.py``). Ces tests
+# couvrent seulement ce que le registre déclare : id, invocation, modèles.
+
+
+def test_add_provider_appends_entry_preserving_existing_ones(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    add_provider(
+        tmp_path,
+        "mistral",
+        invocation="mistral-cli --model {model} {prompt}",
+        models=(ModelSpec(id="mistral-small", tier="cheap"), ModelSpec(id="mistral-large", tier="mid")),
+    )
+
+    providers = read_registry(tmp_path)
+    ids = [p.id for p in providers]
+    assert ids[:2] == ["anthropic", "local"]  # ordre préservé, rien perdu
+    mistral = next(p for p in providers if p.id == "mistral")
+    assert mistral.enabled is True
+    assert mistral.currency == "api"
+    assert [m.id for m in mistral.models_for_tier("cheap")] == ["mistral-small"]
+    assert [m.id for m in mistral.models_for_tier("mid")] == ["mistral-large"]
+
+
+def test_add_provider_rejects_duplicate_id(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    with pytest.raises(ProviderWriteError, match="déjà déclaré"):
+        add_provider(tmp_path, "anthropic", invocation="x {prompt}")
+
+
+def test_add_provider_rejects_invalid_tier(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    with pytest.raises(ProviderWriteError, match="tier"):
+        add_provider(
+            tmp_path, "mistral", invocation="x {model} {prompt}", models=(ModelSpec(id="m", tier="free"),)
+        )
+
+
+def test_add_provider_rejects_invocation_without_prompt_placeholder(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    with pytest.raises(ProviderWriteError, match=r"\{prompt\}"):
+        add_provider(tmp_path, "mistral", invocation="mistral-cli --model {model}")
+
+
+def test_add_provider_without_registry_file_raises(tmp_path: Path) -> None:
+    with pytest.raises(ProviderRegistryError, match="standard init"):
+        add_provider(tmp_path, "mistral", invocation="x {prompt}")
+
+
+def test_set_provider_enabled_toggles_only_that_flag(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    set_provider_enabled(tmp_path, "local", enabled=False)
+
+    providers = read_registry(tmp_path)
+    local = next(p for p in providers if p.id == "local")
+    anthropic = next(p for p in providers if p.id == "anthropic")
+    assert local.enabled is False
+    assert anthropic.enabled is True  # inchangé
+    assert local.invocation == "ollama run {model}"  # inchangé
+
+
+def test_set_provider_enabled_unknown_id_raises(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    with pytest.raises(ProviderWriteError, match="introuvable"):
+        set_provider_enabled(tmp_path, "nope", enabled=True)
+
+
+def test_remove_provider_drops_only_that_entry(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    remove_provider(tmp_path, "local")
+
+    providers = read_registry(tmp_path)
+    assert [p.id for p in providers] == ["anthropic"]
+
+
+def test_remove_provider_unknown_id_raises(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    with pytest.raises(ProviderWriteError, match="introuvable"):
+        remove_provider(tmp_path, "nope")
+
+
+def test_add_provider_rejects_invalid_currency(tmp_path: Path) -> None:
+    _write_registry(tmp_path, _TIERED_REGISTRY)
+
+    with pytest.raises(ProviderWriteError, match="currency"):
+        add_provider(tmp_path, "mistral", invocation="x {prompt}", currency="crypto")
+
+
+def test_add_provider_unreadable_yaml_raises_registry_error(tmp_path: Path) -> None:
+    (tmp_path / STANDARD).mkdir(parents=True, exist_ok=True)
+    (tmp_path / REGISTRY_PATH).write_text("providers: [this is: not: valid: yaml", encoding="utf-8")
+
+    with pytest.raises(ProviderRegistryError, match="illisible"):
+        add_provider(tmp_path, "mistral", invocation="x {prompt}")
+
+
+def test_add_provider_non_dict_registry_raises(tmp_path: Path) -> None:
+    (tmp_path / STANDARD).mkdir(parents=True, exist_ok=True)
+    (tmp_path / REGISTRY_PATH).write_text("- juste\n- une\n- liste\n", encoding="utf-8")
+
+    with pytest.raises(ProviderRegistryError, match="table YAML"):
+        add_provider(tmp_path, "mistral", invocation="x {prompt}")
