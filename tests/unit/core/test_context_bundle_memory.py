@@ -12,7 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
 from grimoire.core.agentic_standard import build_context_bundle
+from grimoire.core.context_bundle_memory import lexical_store_path, select_memory_inclusions
 from grimoire.memory.backends.lexical import LexicalMemoryBackend
 
 _TASK_ID = "context-memory"
@@ -121,10 +124,12 @@ def test_entry_linked_to_a_task_file_is_included(tmp_path: Path) -> None:
     _write_context_contract(tmp_path)
     (entry_id,) = _store(
         tmp_path,
-        [{
-            "text": "Le bundle ne doit pas lire la mémoire en entier.",
-            "metadata": {"type": "project", "source_uri": _TASK_FILE},
-        }],
+        [
+            {
+                "text": "Le bundle ne doit pas lire la mémoire en entier.",
+                "metadata": {"type": "project", "source_uri": _TASK_FILE},
+            }
+        ],
     )
 
     data = _bundle(tmp_path)
@@ -179,8 +184,14 @@ def test_retracted_or_superseded_entries_are_not_served(tmp_path: Path) -> None:
     _store(
         tmp_path,
         [
-            {"text": "Le cache lexical garde les faits retirés.", "metadata": {"type": "project", "retracted": {"at": "2026-01-01"}}},
-            {"text": "Le cache lexical garde les faits remplacés.", "metadata": {"type": "project", "superseded_by": "other-id"}},
+            {
+                "text": "Le cache lexical garde les faits retirés.",
+                "metadata": {"type": "project", "retracted": {"at": "2026-01-01"}},
+            },
+            {
+                "text": "Le cache lexical garde les faits remplacés.",
+                "metadata": {"type": "project", "superseded_by": "other-id"},
+            },
             {"text": "Le cache lexical survit aux redémarrages.", "metadata": {"type": "project"}},
         ],
     )
@@ -230,10 +241,7 @@ def test_memory_token_budget_is_enforced(tmp_path: Path) -> None:
     _write_context_contract(tmp_path, max_memory_items=8, max_memory_tokens=40)
     _store(
         tmp_path,
-        [
-            {"text": ("Le cache lexical se reconstruit. " * 60), "metadata": {"type": "project"}}
-            for _ in range(4)
-        ],
+        [{"text": ("Le cache lexical se reconstruit. " * 60), "metadata": {"type": "project"}} for _ in range(4)],
     )
 
     inclusions = _bundle(tmp_path)["memory_inclusions"]
@@ -297,3 +305,28 @@ def test_collection_prefix_from_project_config_is_followed(tmp_path: Path) -> No
 
     assert [inclusion["id"] for inclusion in data["memory_inclusions"]] == [entry_id]
     assert data["decision_inputs"]["memory_store_ref"] == custom_store.as_posix()
+
+
+def test_une_tache_sans_mots_ni_fichiers_n_inclut_rien(tmp_path: Path) -> None:
+    assert select_memory_inclusions(tmp_path, {}) == []
+
+
+def test_un_store_absent_n_inclut_rien(tmp_path: Path) -> None:
+    assert select_memory_inclusions(tmp_path, {"title": "cache lexical"}) == []
+
+
+def test_un_store_corrompu_rend_un_bundle_sans_inclusions(tmp_path: Path) -> None:
+    store = lexical_store_path(tmp_path)
+    store.parent.mkdir(parents=True)
+    store.write_bytes(b"ceci n'est pas une base sqlite")
+
+    assert select_memory_inclusions(tmp_path, {"title": "cache lexical"}) == []
+
+
+@pytest.mark.parametrize("budget", [{"max_memory_items": 0}, {"max_memory_tokens": 0}])
+def test_un_budget_nul_n_inclut_rien(tmp_path: Path, budget: dict[str, int]) -> None:
+    assert select_memory_inclusions(tmp_path, {"title": "cache lexical"}, budget=budget) == []
+
+
+def test_un_budget_illisible_retombe_sur_le_defaut(tmp_path: Path) -> None:
+    assert select_memory_inclusions(tmp_path, {"title": "cache lexical"}, budget={"max_memory_items": "beaucoup"}) == []
