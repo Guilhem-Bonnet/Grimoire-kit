@@ -17,10 +17,12 @@ from grimoire.providers.registry import (
     REGISTRY_FILE,
     SUPPORTED_CURRENCIES,
     SUPPORTED_MODEL_TIERS,
+    ModelPricing,
     ModelSpec,
     ProviderRegistryError,
     ProviderSpec,
     read_default_fallback_chain,
+    read_model_pricing,
     read_registry,
 )
 from grimoire.providers.routing import choose
@@ -44,6 +46,7 @@ __all__ = [
     "REGISTRY_FILE",
     "SUPPORTED_CURRENCIES",
     "SUPPORTED_MODEL_TIERS",
+    "ModelPricing",
     "ModelSpec",
     "ProbeResult",
     "ProviderRegistryError",
@@ -62,6 +65,7 @@ __all__ = [
     "observe_window",
     "probe_provider",
     "read_default_fallback_chain",
+    "read_model_pricing",
     "read_registry",
     "record_failure",
     "record_quota_observation",
