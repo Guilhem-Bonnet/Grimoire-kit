@@ -54,6 +54,8 @@ providers:
   - id: "{pid}"
     enabled: true
     provider_type: "hosted"
+    data_policy:
+      allowed_data_classes: ["project-source"]
     allowed_capabilities: ["chat", "code"]
     default_models: ["{pid}-model"]
     currency: "api"
@@ -63,6 +65,7 @@ providers:
         tier: "{tier}"
     fallback_order: []
 routing:
+  default_data_class: "project-source"
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true
@@ -347,3 +350,15 @@ def test_task_show_affiche_les_uncertainties_du_dernier_dispatch(tmp_path: Path)
     assert payload["last_dispatch"]["uncertainties"] == [
         {"where": "src/x.py", "what": "cas limite", "why": "non testé"}
     ]
+
+
+def test_task_show_dit_quelle_classe_de_donnees_est_retenue_et_d_ou_elle_vient(tmp_path: Path) -> None:
+    res = run(tmp_path, "add", "Avec classe", "-a", "Le relecteur la juge READY", "--data-class", "proprietary-game-data")
+    assert res.exit_code == 0, res.output
+    avec = next(mot for mot in res.output.split() if mot.startswith("GAO-"))
+    res = run(tmp_path, "add", "Sans classe", "-a", "Le relecteur la juge READY")
+    sans = next(mot for mot in res.output.split() if mot.startswith("GAO-"))
+
+    assert "proprietary-game-data" in run(tmp_path, "show", avec).output
+    assert "déclarée par : tâche" in run(tmp_path, "show", avec).output
+    assert "classe non déclarée" in run(tmp_path, "show", sans).output

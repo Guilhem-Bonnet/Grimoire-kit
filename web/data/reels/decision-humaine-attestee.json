@@ -11,9 +11,9 @@
     "grimoire task answer GAO-choisir-base-001 sqlite",
     "grimoire task show GAO-choisir-base-001"
   ],
-  "kit_version": "3.71.0",
-  "recorded_at": "2026-10-28T00:08:08Z",
-  "output_sha256": "dbb19df8db3d0d86ed04334ea75e5de19cde8eba4b7ae3c701d441c428f18f5f",
+  "kit_version": "3.80.1",
+  "recorded_at": "2026-11-07T06:20:37Z",
+  "output_sha256": "34d20df0a030aee0a5a2e3bfbca4bf3d7b21591e3313697b55282a97033b7184",
   "frames": [
     {
       "kind": "run",
@@ -37,7 +37,7 @@
       "kind": "run",
       "command": "grimoire task show GAO-choisir-base-001",
       "exit_code": 0,
-      "output": "GAO-choisir-base-001 — Choisir base\n  état    : waiting (board : blocked)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n  usage   : none\n  porté par : cli"
+      "output": "GAO-choisir-base-001 — Choisir base\n  état    : waiting (board : blocked)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n  usage   : none\n  données : classe non déclarée (aucun fournisseur externe)\n  porté par : cli"
     },
     {
       "kind": "run",
@@ -49,7 +49,7 @@
       "kind": "run",
       "command": "grimoire task show GAO-choisir-base-001",
       "exit_code": 0,
-      "output": "GAO-choisir-base-001 — Choisir base\n  état    : ready (board : ready)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n  usage   : none\n  porté par : cli\n  consignes de l'orchestrateur :\n    - [directive, human, non lue] cli, <date> : Réponse à « Quelle base de données ? » :\nsqlite  dir-<hex>"
+      "output": "GAO-choisir-base-001 — Choisir base\n  état    : ready (board : ready)\n  accepte : le choix est tranche par un humain\n  vérifiabilité : V2 — Au moins un critère ne nomme ni verdict mécanique reconnu ni revue reconnue —\nou la tâche n'a aucun critère : sa vérifiabilité reste à démontrer.\n  modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)\n    - le choix est tranche par un humain → non reconnu\n  usage   : none\n  données : classe non déclarée (aucun fournisseur externe)\n  porté par : cli\n  consignes de l'orchestrateur :\n    - [directive, human, non lue] cli, <date> : Réponse à « Quelle base de données ? » :\nsqlite  dir-<hex>"
     }
   ]
 }

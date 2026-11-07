@@ -67,7 +67,7 @@ from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import create_task_worktree
 from grimoire.missions.verifiability import Verifiability, classify
-from grimoire.missions.worker_provider import WorkerRoute, route_worker, settings_path
+from grimoire.missions.worker_provider import WorkerRoute, route_refusal, route_worker, settings_path
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import Admit
@@ -669,6 +669,7 @@ class WorkerLauncher:
             return LaunchOutcome(tid, "skipped", refused)
         tier = self._tier_for(service.require(tid))
         route = route_worker(service.home_root, self._policy.worker.provider, tier, service.require(tid))
+        data_refusal = route_refusal(service.home_root, self._policy.worker.provider, service.require(tid))
         model = route.model if route is not None else self._model_for(admit, tier)
         result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
@@ -700,6 +701,7 @@ class WorkerLauncher:
             {
                 "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
                 "provider": route.provider if route is not None else "",
+                "provider_refused": data_refusal,
                 "lean": self._policy.worker.lean,
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
