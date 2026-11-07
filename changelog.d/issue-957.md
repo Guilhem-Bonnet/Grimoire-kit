@@ -1,0 +1,1 @@
+- fix(missions): le lanceur du tick rejoue la synchronisation de l'hôte dans le worktree du worker, ou refuse le lancement si le hook PreToolUse manque (#957)
