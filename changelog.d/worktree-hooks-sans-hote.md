@@ -1,0 +1,1 @@
+- fix(missions): un worker part aussi depuis un dépôt qui ne suit pas son contexte projet : les hooks sont posés dans le worktree au lieu de bloquer tout lancement
