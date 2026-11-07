@@ -124,6 +124,31 @@ def test_un_hote_sans_prompt_id_garde_la_regle_d_avant(project: Path) -> None:
     assert attest(project, challenge).status == ATTESTED
 
 
+def test_le_journal_est_lu_prudemment(tmp_path: Path) -> None:
+    """Lignes illisibles, entrées d'autres types au même promptId, prompt absent, entrée sans marque d'origine."""
+    from grimoire.hosts.decisions.human_turns import HumanTurn, host_turn_origin
+
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        '{"promptId": "P1", coupée\n'
+        + json.dumps({"type": "assistant", "promptId": "P1"})
+        + "\n"
+        + json.dumps(_user("P1", turnOrigin="human"))
+        + "\n"
+        + json.dumps(_user("P3"))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def turn(prompt_id: str) -> HumanTurn:
+        return HumanTurn("S1", "x", "2026-11-07T00:00:00+00:00", "user", prompt_id, str(path))
+
+    assert host_turn_origin(turn("P1")) == "human"  # la ligne coupée et l'entrée assistant sont sautées
+    assert host_turn_origin(turn("P2")) == "unknown"  # journal lisible, prompt absent
+    assert host_turn_origin(turn("P3")) == "unknown"  # entrée user sans turnOrigin ni origin
+    assert host_turn_origin(turn("")) == ""  # pas d'identifiant : règle d'avant
+
+
 def test_sans_aucun_tour_le_motif_reste_le_meme(project: Path) -> None:
     challenge = _challenge()
     _turn(project)  # un tour avant le challenge ne compte pas
