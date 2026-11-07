@@ -34,7 +34,7 @@ from grimoire.missions.launcher import (
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.schemas import TaskCheck, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import find_task_worktree
 from grimoire.missions.worker_provider import settings_path
@@ -983,7 +983,10 @@ def route_prete(projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 def ready_v0(service: TaskService, title: str) -> str:
     mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Lot", origin="t", created_by="t")
-    task = service.ledger.create_task(mission.id, title, acceptance=("pytest tests/x.py : le code de sortie vaut 0",), owner="amelia")
+    task = service.ledger.create_task(
+        mission.id, title, acceptance=("pytest tests/x.py : le code de sortie vaut 0",), owner="amelia",
+        checks=(TaskCheck(cmd="pytest tests/x.py"),),
+    )
     service.ledger.transition_task(task.id, TaskState.READY)
     return task.id
 
@@ -1061,3 +1064,65 @@ def test_une_reprise_reste_chez_le_fournisseur_du_lancement(route_prete: Path, h
 
     argv = next(a for a, _c, _e in host.calls if "--resume" in a)
     assert argv[argv.index("--settings") + 1] == str(settings_path("deepseek"))
+
+
+# ── Coût des sessions : profil allégé et palier par classe ────────────────────
+
+
+def test_le_profil_allege_retire_les_mcp_et_borne_les_outils(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      lean: true\n")
+    tid = ready(service, "allégée")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert "--strict-mcp-config" in argv
+    assert argv[argv.index("--tools") + 1] == "Bash,Read,Edit,Write,Glob,Grep"
+    assert launched_sessions(TaskService(projet))[tid]["lean"] is True
+
+
+def test_sans_profil_allege_rien_ne_change(projet: Path, service: TaskService, host: FakeHost) -> None:
+    ready(service, "habituelle")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert "--strict-mcp-config" not in argv and "--tools" not in argv
+
+
+def test_une_reprise_garde_le_profil_allege(projet: Path, service: TaskService, host: FakeHost) -> None:
+    tid = ready(service, "reprise allégée")
+    launch = {"session_id": "abc", "cwd": str(projet), "model": "sonnet", "session": "abc", "lean": True}
+
+    resume_worker(service, host, "claude", tid, launch, "reprends")
+
+    argv = next(a for a, _c, _e in host.calls if "--resume" in a)
+    assert "--strict-mcp-config" in argv and "--tools" in argv
+
+
+def test_une_tache_v0_part_au_palier_cheap_sous_model_by_class(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: mid\n      model_by_class: true\n")
+    ready_v0(service, "mécanique")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "haiku"
+
+
+def test_une_tache_non_v0_garde_le_palier_du_role(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: mid\n      model_by_class: true\n")
+    ready(service, "à juger")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "sonnet"
+
+
+def test_un_modele_explicite_prime_sur_la_classe(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      model: opus\n      model_by_class: true\n")
+    ready_v0(service, "explicite")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+
+
+def test_sans_model_by_class_une_v0_garde_le_palier_du_role(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: mid\n")
+    ready_v0(service, "sans classe")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "sonnet"
