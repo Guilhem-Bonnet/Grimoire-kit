@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grimoire.bridges.schemas import HostId
 from grimoire.hosts import collect
 from grimoire.hosts.detection import enabled_host_ids
 from grimoire.hosts.emitters import EmitPlan, EmitResult, apply_plans, conflict_exits, emitter_for, supported_hosts
@@ -54,7 +55,7 @@ class HostSyncOutcome:
         return {"ok": self.ok, "written": list(self.written), "error": self.error, "conflicts": list(self.conflicts), "preserved": list(self.preserved)}
 
 
-def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
+def sync_host_surfaces(project_root: Path, *, only: frozenset[HostId] | None = None) -> HostSyncOutcome:
     """Render the project onto every known host. Never raises, never hides.
 
     An emitter problem must not fail an otherwise successful install or
@@ -74,7 +75,7 @@ def sync_host_surfaces(project_root: Path) -> HostSyncOutcome:
         enabled = enabled_host_ids(project_root)
         plans: list[EmitPlan] = []
         for host_id in supported_hosts():
-            if host_id not in enabled:
+            if host_id not in enabled or (only is not None and host_id not in only):
                 continue
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - registry is complete

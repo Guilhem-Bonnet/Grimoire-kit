@@ -407,6 +407,7 @@ def _worktree_hooks(wt_path: Path) -> str:
     Un dépôt qui ne suit pas ses fichiers d'hôte (``.claude/`` non suivi) donne un worktree sans hooks : on y rejoue la
     synchronisation de l'hôte Claude (fichiers non suivis, retirés avec le worktree), puis on vérifie. Échec fermé.
     """
+    from grimoire.bridges.schemas import HostId
     from grimoire.hosts.sync import sync_host_surfaces
 
     def armed() -> bool:
@@ -418,8 +419,11 @@ def _worktree_hooks(wt_path: Path) -> str:
 
     if armed():
         return ""
-    outcome = sync_host_surfaces(wt_path)
+    outcome = sync_host_surfaces(wt_path, only=frozenset({HostId.CLAUDE_CODE_CLI}))
     if armed():
+        # Fichiers générés, propres à ce worktree : ignorés par lui seul, sinon le relecteur et le janitor y verraient
+        # des « modifications non commitées » et refuseraient de relire ou de ranger.
+        (wt_path / ".claude" / ".gitignore").write_text("*\n", encoding="utf-8")
         return ""
     return f"worktree sans hook PreToolUse Grimoire après host sync ({outcome.error or outcome.warning or 'hook absent'})"
 
