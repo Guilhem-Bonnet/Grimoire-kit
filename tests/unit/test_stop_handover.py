@@ -205,3 +205,96 @@ def test_a_new_write_after_the_acknowledgement_is_refused_again(governed: Path) 
     _unattached(governed)
     _, decision = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
     assert decision.outcome is Outcome.BLOCK and decision.detail["mutations"] == 2
+
+
+# --- Compteur d'écritures acquittées : bornes du journal et de l'adaptateur (issue #1126) ---
+
+NOW = "2026-11-06T00:00:00+00:00"
+
+
+def _hook_input(root: Path, session: str) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(project_root=root, session_id=session)
+
+
+def test_acknowledged_mutations_without_session_id_is_zero_and_writes_nothing(tmp_path: Path) -> None:
+    from grimoire.policies.session_state import note_acknowledged_mutations, session_acknowledged_mutations
+
+    note_acknowledged_mutations(tmp_path, "", 5, now_iso=NOW)
+    assert session_acknowledged_mutations(tmp_path, "") == 0
+    assert not any(tmp_path.rglob("*.json"))
+
+
+def test_acknowledged_mutations_never_goes_back_down(tmp_path: Path) -> None:
+    from grimoire.policies.session_state import (
+        note_acknowledged_mutations,
+        session_acknowledged_mutations,
+        session_state_path,
+    )
+
+    note_acknowledged_mutations(tmp_path, "s", 3, now_iso=NOW)
+    note_acknowledged_mutations(tmp_path, "s", 1, now_iso=NOW)
+    note_acknowledged_mutations(tmp_path, "s", 3, now_iso=NOW)
+    assert session_acknowledged_mutations(tmp_path, "s") == 3
+    note_acknowledged_mutations(tmp_path, "s", 4, now_iso=NOW)
+    assert session_acknowledged_mutations(tmp_path, "s") == 4
+    assert session_state_path(tmp_path, "s").is_file()
+
+
+@pytest.mark.parametrize("bad", ["7", True, None, [4]])
+def test_invalid_acknowledged_mutations_in_the_journal_read_as_zero(tmp_path: Path, bad: Any) -> None:
+    from grimoire.policies.session_state import session_acknowledged_mutations, session_state_path
+
+    path = session_state_path(tmp_path, "s")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"session_id": "s", "acknowledged_mutations": bad}), encoding="utf-8")
+    assert session_acknowledged_mutations(tmp_path, "s") == 0
+
+
+def test_acknowledged_mutation_adapter_without_session_is_zero_and_silent(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.enrolment import acknowledge_mutations, acknowledged_mutation_count
+
+    hook = _hook_input(tmp_path, "")
+    acknowledge_mutations(hook, 4)
+    assert acknowledged_mutation_count(hook) == 0
+    assert not any(tmp_path.rglob("*.json"))
+
+
+def test_acknowledged_mutation_adapter_swallows_journal_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.hosts.decisions.enrolment import acknowledge_mutations, acknowledged_mutation_count
+    from grimoire.policies import session_state
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("journal illisible")
+
+    monkeypatch.setattr(session_state, "session_acknowledged_mutations", boom)
+    monkeypatch.setattr(session_state, "note_acknowledged_mutations", boom)
+    hook = _hook_input(tmp_path, "s")
+    assert acknowledged_mutation_count(hook) == 0
+    acknowledge_mutations(hook, 2)  # ne lève pas
+
+
+def test_acknowledged_mutation_adapter_round_trips(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.enrolment import acknowledge_mutations, acknowledged_mutation_count
+
+    hook = _hook_input(tmp_path, "s")
+    acknowledge_mutations(hook, 2)
+    assert acknowledged_mutation_count(hook) == 2
+
+
+def test_each_further_write_after_an_acknowledgement_brings_the_reminder_back(governed: Path) -> None:
+    """Le gate n'est pas désarmé : rappel, silence, nouvelle écriture, rappel, silence."""
+    _unattached(governed)
+    _, first = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert first.outcome is Outcome.BLOCK
+    _, quiet = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert quiet.outcome is Outcome.ALLOW
+
+    _unattached(governed)
+    _, back = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert back.outcome is Outcome.BLOCK and back.detail["mutations"] == 2
+    _, quiet_again = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert quiet_again.outcome is Outcome.ALLOW
