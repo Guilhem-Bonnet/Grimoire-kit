@@ -61,6 +61,13 @@ def task_add(
             help="Finition du livrable : maquette ou peaufine. Sans option, celle de la phase de project-context.yaml (R24).",
         ),
     ] = "",
+    data_class: Annotated[
+        str,
+        typer.Option(
+            "--data-class",
+            help="Classe des données que la tâche fait lire. Sans option, `routing.default_data_class` du registre ; sans les deux, aucun fournisseur externe (#1133).",
+        ),
+    ] = "",
     intake: Annotated[
         str,
         typer.Option(
@@ -131,7 +138,7 @@ def task_add(
             title, tuple(acceptance), mission_id=mission, owner=owner,
             expected_evidence=tuple(evidence or ()), actor=actor, ready=ready,
             checks=checks, files=tuple(files or ()), test_depth=test_depth,
-            description=description, finition=finition,
+            description=description, finition=finition, data_class=data_class,
         )
     except TaskRefusedError as refused:
         _refuse(ctx, refused)

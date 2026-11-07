@@ -442,7 +442,7 @@ class TaskService:
         description: str = "",
         priority: str = "",
         extra: Mapping[str, Any] | None = None,
-        finition: str = "",
+        finition: str = "", data_class: str = "",
     ) -> TaskAdded:
         """Ouvre une tâche — le geste que ``grimoire task add`` et ``task_add`` (MCP) partagent.
 
@@ -501,7 +501,7 @@ class TaskService:
         task = ledger.create_task(
             mission_id, title, acceptance=acceptance, owner=owner, expected_evidence=expected_evidence,
             risk_profile=risk, checks=checks, test_depth=test_depth, description=description,
-            priority=priority, extra=fields or None, finition=finition,
+            priority=priority, extra=fields or None, finition=finition, data_class=data_class.strip(),
         )
         if checks:
             self._seal_checks(task.id, checks, actor)

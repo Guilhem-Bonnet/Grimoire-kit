@@ -90,6 +90,8 @@ def _write_registry(root: Path) -> None:
   - id: "{pid}"
     enabled: true
     provider_type: "hosted"
+    data_policy:
+      allowed_data_classes: ["project-source"]
     allowed_capabilities: ["chat", "code"]
     default_models: ["{pid}-model"]
     currency: "api"
@@ -111,6 +113,7 @@ metadata:
 providers:
 {providers}
 routing:
+  default_data_class: "project-source"
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true

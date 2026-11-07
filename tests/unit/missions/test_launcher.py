@@ -963,10 +963,10 @@ providers:
     anthropic_base_url: https://api.example.test/anthropic
     models:
       - {id: deepseek-chat, tier: cheap}
-    data_policy: {allowed_data_classes: [], forbidden_data_classes: [], retention_notes: ""}
+    data_policy: {allowed_data_classes: [project-source], forbidden_data_classes: [], retention_notes: ""}
     fallback_order: []
     audit: {log_prompts: false, log_metadata: true}
-routing: {default_provider: deepseek, default_fallback_chain: [], require_capability_match: true, require_data_policy_match: true}
+routing: {default_data_class: project-source, default_provider: deepseek, default_fallback_chain: [], require_capability_match: true, require_data_policy_match: true}
 """
 
 
@@ -1162,3 +1162,19 @@ def test_sans_model_by_class_une_v0_garde_le_palier_du_role(projet: Path, servic
     tick(projet, host)
     (argv,) = host.of("claude", "--bg")
     assert argv[argv.index("--model") + 1] == "sonnet"
+
+
+def test_une_classe_de_donnees_non_declaree_garde_le_worker_sur_l_hote(route_prete: Path, host: FakeHost) -> None:
+    registre = route_prete / "_grimoire" / "standard" / "llm-provider-registry.yaml"
+    registre.write_text(registre.read_text(encoding="utf-8").replace("default_data_class: project-source, ", ""), encoding="utf-8")
+    service = TaskService(route_prete)
+    tid = ready_v0(service, "non déclarée")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert "--settings" not in argv
+    assert "deepseek-chat" not in argv
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["provider"] == ""
+    assert "aucune classe de données" in lancement.payload["provider_refused"]

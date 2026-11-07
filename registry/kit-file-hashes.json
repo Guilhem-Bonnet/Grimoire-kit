@@ -734,6 +734,10 @@
    "version": "3.4.2",
    "path": "framework/tools/time-travel.py"
   },
+  "2e1a4787b770307123c4f5ba1d7982b8a49e8545d0d3cfc497775e34edfb5bbd": {
+   "version": "3.80.1",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
+  },
   "2e8b824a9bbec88c8b14fe17270fa2c52357e78d998ebfbebc45575c97d46526": {
    "version": "3.65.0",
    "path": "framework/agent-base-compact.md"
