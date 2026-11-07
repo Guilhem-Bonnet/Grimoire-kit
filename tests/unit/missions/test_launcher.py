@@ -25,7 +25,9 @@ from grimoire.missions.breaker import read_breaker, record_failure, record_succe
 from grimoire.missions.launcher import (
     LAUNCH_FAILED_EVENT,
     LAUNCHED_EVENT,
+    MAX_PROVIDER_RESUMES,
     WORKER_HALTED_EVENT,
+    WORKER_RESUMED_EVENT,
     ExecResult,
     WorkerLauncher,
     active_worker_ids,
@@ -728,6 +730,99 @@ def test_un_battement_en_erreur_ne_casse_pas_le_tick(projet: Path, service: Task
     monkeypatch.setattr(launcher, "renew_live_workers", boom)
     report = tick(projet, host, now=_later(25))
     assert report.reaped and any("battement des workers" in line for line in report.attention)
+
+
+# ── #1158 : une erreur transitoire du fournisseur relance le worker ────────────
+
+
+def _session_transcript(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, launch: dict, *entries: dict[str, object]
+) -> Path:
+    """Pose le journal de session que le tick relira, à l'endroit où Claude Code l'écrit."""
+    import re
+
+    config = tmp_path / "claude"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(Path(str(launch["cwd"])).resolve()))
+    folder = config / "projects" / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{launch['session_id']}.jsonl"
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    return path
+
+
+def _api_error(text: str) -> dict[str, object]:
+    return {
+        "type": "assistant",
+        "isApiErrorMessage": True,
+        "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+    }
+
+
+def _assistant(text: str) -> dict[str, object]:
+    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def test_une_erreur_500_relance_la_meme_session_au_lieu_de_la_recolter(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le dernier tour finit sur `API Error: 500` : la session est reprise, la tâche n'est ni récoltée ni garée."""
+    tid = ready(service, "erreur 500")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []  # plus `busy` : le fournisseur a rendu la main sur son erreur
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error (server-side)"))
+
+    report = tick(projet, host, now=_later(5))
+
+    assert not report.reaped
+    resumed = [a for a, _cwd, _env in host.calls if "--resume" in a]
+    assert resumed and resumed[-1][:4] == ["claude", "--bg", "--resume", launch["session_id"]]
+    after = TaskService(projet)
+    assert after.require(tid).status is TaskState.CLAIMED
+    events = [e for e in after.ledger.events_for(tid) if e.event_type == WORKER_RESUMED_EVENT]
+    assert events and events[-1].payload["cause"] == "provider_error"
+
+
+def test_un_tour_fini_normalement_garde_le_comportement_actuel(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une session au repos dont le journal ne finit pas sur une erreur du fournisseur n'est pas reprise."""
+    tid = ready(service, "au repos")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []
+    _session_transcript(monkeypatch, tmp_path, launch, _assistant("J'ai fini ce tour, à toi."))
+
+    report = tick(projet, host, now=_later(25))
+
+    assert [d.task_id for d in report.reaped] == [tid]
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a]
+
+
+def test_au_dela_du_plafond_la_tache_se_gare_en_nommant_l_erreur_du_fournisseur(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Au-delà de `MAX_PROVIDER_RESUMES`, la question d'attente nomme l'erreur — plus un simple « bail perdu »."""
+    tid = ready(service, "plafond")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error"))
+
+    for _ in range(MAX_PROVIDER_RESUMES):
+        tick(projet, host, now=_later(5))
+    resumed = len([a for a, _cwd, _env in host.calls if "--resume" in a])
+    assert resumed == MAX_PROVIDER_RESUMES
+
+    report = tick(projet, host, now=_later(5))
+
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a][resumed:]  # aucune reprise de plus
+    task = TaskService(projet).require(tid)
+    assert task.status is TaskState.WAITING and task.waiting is not None
+    assert task.waiting.reason == "human"
+    assert "erreur du fournisseur" in task.waiting.question.text and "API Error: 500" in task.waiting.question.text
+    assert any("erreur du fournisseur" in line for line in report.attention)
 
 
 # ── #966 : l'identité d'une session de fond se lit après le lancement ──────────────

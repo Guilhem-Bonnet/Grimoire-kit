@@ -58,6 +58,7 @@ __all__ = [
     "presence",
     "probe_claude_agents",
     "probe_entries",
+    "probe_status",
     "progress_at",
     "recent_sign",
     "self_view_line",
@@ -211,11 +212,14 @@ def attention(
 
 
 #: ``state`` des sessions d'arrière-plan de ``claude agents --json`` → statut de sonde.
-#: Relevé sur la sortie réelle (2026-10-25) : ``done`` et ``stopped`` ; ``running`` et
-#: ``waiting`` sont les états en cours que l'hôte documente. Un état absent d'ici
+#: Relevé sur la sortie réelle (2.1.319, 2026-11-07) : ``working``, ``blocked``, ``done``,
+#: ``stopped``, ``failed``. ``running`` et ``waiting`` restent lus : l'hôte les a documentés,
+#: et une version qui les rend encore ne doit pas devenir invisible. Un état absent d'ici
 #: n'est pas lu : il ne prouve rien.
 _BACKGROUND_STATES = {
+    "working": "busy",
     "running": "busy",
+    "blocked": "waiting",
     "waiting": "waiting",
     "done": "ended",
     "stopped": "ended",
@@ -223,7 +227,14 @@ _BACKGROUND_STATES = {
 }
 
 
-def _probe_status(entry: Mapping[str, Any]) -> str | None:
+def probe_status(entry: Mapping[str, Any]) -> str | None:
+    """Le statut de sonde d'une entrée de ``claude agents --json`` ; ``None`` si son état n'est pas reconnu.
+
+    Le champ ``status`` (sessions interactives : ``busy`` | ``idle``) prime ; à défaut, le champ
+    ``state`` des sessions d'arrière-plan passe par :data:`_BACKGROUND_STATES`. Deux formes de la
+    même vérité selon la version et le type de session — les surfaces qui jugent une session
+    vivante lisent ici, jamais un ``busy`` supposé.
+    """
     if entry.get("waitingFor"):
         return "waiting"
     status = entry.get("status")
@@ -262,7 +273,7 @@ def probe_entries(
     for e in data:
         if not isinstance(e, dict) or not e.get("sessionId"):
             continue
-        status = _probe_status(e)
+        status = probe_status(e)
         if status is None:
             continue
         started = e.get("startedAt")
