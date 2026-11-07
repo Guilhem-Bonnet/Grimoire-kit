@@ -1111,7 +1111,8 @@ def test_le_profil_allege_retire_les_mcp_et_borne_les_outils(projet: Path, servi
     tick(projet, host)
     (argv,) = host.of("claude", "--bg")
     assert "--strict-mcp-config" in argv
-    assert argv[argv.index("--tools") + 1] == "Bash,Read,Edit,Write,Glob,Grep"
+    # #1160 : un seul jeton, sinon `--tools` (variadique) avale la consigne qui le suit.
+    assert "--tools=Bash,Read,Edit,Write,Glob,Grep" in argv and "--tools" not in argv
     assert launched_sessions(TaskService(projet))[tid]["lean"] is True
 
 
@@ -1119,7 +1120,7 @@ def test_sans_profil_allege_rien_ne_change(projet: Path, service: TaskService, h
     ready(service, "habituelle")
     tick(projet, host)
     (argv,) = host.of("claude", "--bg")
-    assert "--strict-mcp-config" not in argv and "--tools" not in argv
+    assert "--strict-mcp-config" not in argv and not any(a.startswith("--tools") for a in argv)
 
 
 def test_une_reprise_garde_le_profil_allege(projet: Path, service: TaskService, host: FakeHost) -> None:
@@ -1129,7 +1130,8 @@ def test_une_reprise_garde_le_profil_allege(projet: Path, service: TaskService, 
     resume_worker(service, host, "claude", tid, launch, "reprends")
 
     argv = next(a for a, _c, _e in host.calls if "--resume" in a)
-    assert "--strict-mcp-config" in argv and "--tools" in argv
+    assert "--strict-mcp-config" in argv and "--tools=Bash,Read,Edit,Write,Glob,Grep" in argv
+    assert argv[-1] == "reprends"  # la consigne de reprise n'est pas prise pour un outil (#1160)
 
 
 def test_une_tache_v0_part_au_palier_cheap_sous_model_by_class(projet: Path, service: TaskService, host: FakeHost) -> None:
