@@ -258,14 +258,14 @@ def test_deux_processus_cinquante_essais_exactement_un_gagnant(tmp_path: Path) -
 
 def test_un_claim_sans_verrou_disponible_est_refuse(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail-closed : sans verrou inter-processus, un claim n'est pas un compare-and-set — refusé."""
-    from grimoire.missions import ledger as ledger_mod
+    import grimoire.missions.ledger_files as ledger_files_mod
 
     tid = _ready(governed, "Sans verrou")
 
     def no_lock(path: Path) -> Any:
         raise TimeoutError(f"verrou {path} non obtenu")
 
-    monkeypatch.setattr(ledger_mod, "locked", no_lock)
+    monkeypatch.setattr(ledger_files_mod, "locked", no_lock)
     with pytest.raises(GrimoireMissionError, match="verrou"):
         TaskService(governed).claim(tid, "agent-a")
     assert TaskService(governed).require(tid).status is TaskState.READY
