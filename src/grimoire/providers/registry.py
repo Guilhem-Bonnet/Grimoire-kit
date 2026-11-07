@@ -53,9 +53,8 @@ class ModelSpec:
 class ProviderSpec:
     """Vue typée d'une entrée ``providers[]`` du registre.
 
-    Ne porte que ce dont le routage a besoin. Les champs de gouvernance
-    (``audit``, ``data_policy`` en détail...) restent dans le YAML brut ; les
-    relire en typé n'apporterait rien à ``choose()``.
+    Ne porte que ce dont le routage a besoin : les classes de ``data_policy`` en font partie (#1133). Le reste de la
+    gouvernance (``audit``, ``retention_notes``...) demeure dans le YAML brut.
     """
 
     id: str
@@ -68,6 +67,8 @@ class ProviderSpec:
     invocation: str | None = None
     models: tuple[ModelSpec, ...] = field(default_factory=tuple)
     anthropic_base_url: str | None = None
+    allowed_data_classes: tuple[str, ...] = ()
+    forbidden_data_classes: tuple[str, ...] = ()
 
     def models_for_tier(self, tier: str) -> tuple[ModelSpec, ...]:
         """Modèles déclarés pour *tier*, dans l'ordre du registre."""
@@ -132,6 +133,8 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
     currency = entry.get("currency")
     invocation = entry.get("invocation")
     base_url = entry.get("anthropic_base_url")
+    data_policy = entry.get("data_policy")
+    data_policy = data_policy if isinstance(data_policy, dict) else {}
     return ProviderSpec(
         id=str(provider_id),
         enabled=entry.get("enabled") is True,
@@ -143,6 +146,8 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
         invocation=str(invocation) if isinstance(invocation, str) and invocation else None,
         models=_model_specs(entry.get("models")),
         anthropic_base_url=str(base_url) if isinstance(base_url, str) and base_url else None,
+        allowed_data_classes=_str_tuple(data_policy.get("allowed_data_classes")),
+        forbidden_data_classes=_str_tuple(data_policy.get("forbidden_data_classes")),
     )
 
 
@@ -290,6 +295,13 @@ def remove_provider(root: Path, provider_id: str) -> None:
         raise ProviderWriteError(msg)
     data["providers"] = kept
     _save_registry(root, data)
+
+
+def read_default_data_class(root: Path) -> str:
+    """``routing.default_data_class`` : la classe des données du projet, vide si elle n'est pas déclarée (#1133)."""
+    routing = _load_registry_mapping(root).get("routing")
+    value = routing.get("default_data_class") if isinstance(routing, dict) else None
+    return value.strip() if isinstance(value, str) else ""
 
 
 def read_default_fallback_chain(root: Path) -> tuple[str, ...]:

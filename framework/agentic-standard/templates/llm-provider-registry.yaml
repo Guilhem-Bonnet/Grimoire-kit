@@ -120,6 +120,10 @@ providers:
       log_metadata: true
 
 routing:
+  # Classe des données du projet (#1133). Vide : aucun fournisseur hors `provider_type: local` ne reçoit de tâche,
+  # sauf si la tâche déclare la sienne (`task add --data-class`). Elle doit figurer dans `allowed_data_classes`
+  # du fournisseur, et ne pas figurer dans `forbidden_data_classes`.
+  default_data_class: ""
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true
