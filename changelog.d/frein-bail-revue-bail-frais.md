@@ -1,0 +1,1 @@
+- fix(lease): une session qui a remis sa tâche en revue n'est plus gelée quand une commande dépasse le bail restant (#1117)
