@@ -1,0 +1,1 @@
+- fix(memory): refuser `mempalace` avec un message Python clair quand l'index natif de chromadb tue le processus (SIGILL) ; `grimoire doctor` rend le même verdict depuis une sonde en sous-processus, mise en cache par version de chromadb et par machine (#1059)

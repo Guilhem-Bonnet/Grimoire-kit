@@ -803,4 +803,6 @@ def test_le_relecteur_allege_retire_les_mcp_et_borne_les_outils(projet: Path, ho
     tick(projet, host)
     _worker, review_argv = host.of("claude", "--bg")
     assert "--strict-mcp-config" in review_argv
-    assert review_argv[review_argv.index("--tools") + 1] == "Bash,Read,Edit,Write,Glob,Grep"
+    # #1160 : en deux jetons, `--tools` (variadique) avalait la consigne posée juste après : relecteur muet.
+    assert "--tools=Bash,Read,Edit,Write,Glob,Grep" in review_argv and "--tools" not in review_argv
+    assert review_argv[-2] == "--tools=Bash,Read,Edit,Write,Glob,Grep" and len(review_argv[-1]) > 200

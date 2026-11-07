@@ -845,3 +845,33 @@ def test_cli_note_writes_a_progress_event_and_refuses_a_task_nobody_holds(tmp_pa
     ledger.transition_task(tid, TaskState.CANCELLED, actor_id="cli")
     res = runner.invoke(task_app, ["note", tid, "trop tard", *common])
     assert res.exit_code == 1 and "refusée" in res.output
+
+
+def test_une_reprise_depuis_la_verification_rouvre_le_bail(tmp_path: Path) -> None:
+    """#1149 : `task move --to running` après un plafond passé ne doit pas se faire récolter au tick suivant."""
+    clock = _Clock()
+    ledger = _ledger(tmp_path, clock)
+    tid = _running(ledger)
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="a")
+    clock.now += timedelta(hours=5)
+
+    task = ledger.transition_task(tid, TaskState.RUNNING, actor_id="a", reason="reprise")
+
+    assert task.claim is not None and task.claim.expires_at == (clock.now + timedelta(hours=4)).isoformat()
+    assert ledger.expired_claims(clock.now) == []
+    assert ledger.expired_claims(clock.now + timedelta(minutes=19)) == []
+    assert [v.task_id for v in ledger.expired_claims(clock.now + timedelta(minutes=21))] == [tid]
+
+
+def test_une_reprise_ne_touche_pas_une_barriere_posee_sur_le_bail(tmp_path: Path) -> None:
+    clock = _Clock()
+    ledger = _ledger(tmp_path, clock)
+    tid = _running(ledger)
+    ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="a")
+    path = lease_path(tmp_path, tid)
+    write_lease(path, LeaseFile(tid, 7, clock.now.isoformat(), holder=False))
+
+    ledger.transition_task(tid, TaskState.RUNNING, actor_id="a", reason="reprise")
+
+    relu = read_lease(path)
+    assert relu is not None and relu.epoch == 7

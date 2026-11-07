@@ -54,6 +54,9 @@ jobs:
         # fusionnés sur ce vieux code donnerait un faux rouge. Le garde remplace
         # alors la base par le premier parent du commit de fusion et le dit dans
         # le résumé ; ce pas ne compare pas BASE_SHA et MERGE_SHA lui-même.
+        # Ce job n'installe pas de navigateur : un test sous tests/e2e/ n'y est
+        # pas rejouable. Le garde l'écarte et rend « NON REJOUÉ » sans échec
+        # quand il n'y a que des tests E2E ; une preuve E2E reste à la CI E2E.
         run: |
           guard=scripts/check-regression-on-base.py
           if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then

@@ -121,33 +121,53 @@ def _hook_commands(hooks: object) -> Iterator[str]:
                     yield command
 
 
-def _hook_dir(command: str) -> Path | None:
-    """Le dossier d'un exécutable de hook appelé par chemin absolu ; ``None`` pour un nom nu ou un chemin relatif."""
+def _hook_program(command: str) -> str | None:
+    """Le programme d'une commande de hook ; ``None`` pour une commande vide ou aux guillemets non fermés."""
     try:
-        program = shlex.split(command, posix=os.name != "nt")[0] if command.strip() else ""
+        parts = shlex.split(command, posix=os.name != "nt") if command.strip() else []
     except ValueError:  # guillemets non fermés : ce hook ne se résout pas, mais ne fait pas échouer le plan
         return None
-    if not program or Path(program.replace("\\", "/")).name in ("~", "$HOME"):
+    return parts[0] if parts else None
+
+
+def _hook_dir(command: str) -> Path | None:
+    """Le dossier d'un exécutable de hook appelé par chemin absolu ; ``None`` pour un nom nu ou un chemin relatif."""
+    program = _hook_program(command)
+    if program is None or Path(program.replace("\\", "/")).name in ("~", "$HOME"):
         return None
     directory = Path(program).parent
     return directory if directory.is_absolute() else None
 
 
-def _hook_dirs(project_root: Path) -> list[Path]:
-    """Les dossiers des exécutables appelés par chemin absolu dans les hooks utilisateur et projet de Claude Code."""
+def _hook_settings(project_root: Path) -> list[Path]:
+    """Les réglages Claude Code qui peuvent porter des hooks : utilisateur puis projet."""
     claude = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
     sources = [Path(claude) / "settings.json" if claude else Path.home() / ".claude" / "settings.json"]
-    sources += [project_root / ".claude" / "settings.json", project_root / ".claude" / "settings.local.json"]
-    found: list[Path] = []
-    for path in sources:
+    return [
+        *sources,
+        project_root / ".claude" / "settings.json",
+        project_root / ".claude" / "settings.local.json",
+    ]
+
+
+def _hook_commands_with_settings(project_root: Path) -> Iterator[tuple[Path, str]]:
+    """``(réglages, commande)`` de chaque hook utilisateur et projet ; un fichier illisible n'ajoute rien."""
+    for path in _hook_settings(project_root):
         try:
             data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, ValueError, UnicodeDecodeError):
             continue  # un fichier absent ou illisible ne prouve rien : il n'ajoute rien
         for command in _hook_commands(data.get("hooks") if isinstance(data, dict) else None):
-            directory = _hook_dir(command)
-            if directory is not None:
-                found.append(directory)
+            yield path, command
+
+
+def _hook_dirs(project_root: Path) -> list[Path]:
+    """Les dossiers des exécutables appelés par chemin absolu dans les hooks utilisateur et projet de Claude Code."""
+    found: list[Path] = []
+    for _settings, command in _hook_commands_with_settings(project_root):
+        directory = _hook_dir(command)
+        if directory is not None:
+            found.append(directory)
     return found
 
 

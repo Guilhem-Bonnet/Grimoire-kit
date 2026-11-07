@@ -448,8 +448,14 @@ def _held_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
     return _held_claims_checked(project_root, actor=actor)[0]
 
 
-def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_Claim], str]:
-    """Les claims tenus, et ce que le ledger a d'illisible (``""`` s'il se lit en entier).
+def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_Claim], str, dict[str, str]]:
+    """Les claims tenus, ce que le ledger a d'illisible (``""`` s'il se lit en entier), et les tâches garées.
+
+    Troisième valeur : les tâches ``waiting``, de leur identifiant vers la session
+    du claim qui les a garées (``""`` si le ledger n'en porte aucun). Ce ne sont
+    pas des claims tenus — la tâche est garée — mais la résolution les connaît
+    pour ne pas les reprendre depuis un ``GRIMOIRE_TASK_ID`` ou une carte de board
+    périmée quand la session ne les détient pas (issue #1153).
 
     Un ledger absent est légitime (projet qui n'a jamais ouvert de tâche) : pas
     de problème. Un ledger présent mais dont des lignes sont corrompues, ou que
@@ -458,7 +464,7 @@ def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_
     """
     events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
     if not events.is_file():
-        return [], _not_a_file(events, f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl")
+        return [], _not_a_file(events, f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl"), {}
     try:
         from grimoire.missions.ledger import MissionLedger
         from grimoire.missions.schemas import TaskState
@@ -467,7 +473,7 @@ def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_
         tasks = ledger.list_tasks()
         bad_lines = ledger.unreadable_lines()
     except Exception as exc:  # frontière de hook : ne jamais casser une session
-        return [], f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl illisible ({type(exc).__name__})"
+        return [], f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl illisible ({type(exc).__name__})", {}
     problem = ""
     if bad_lines:
         shown = ", ".join(str(n) for n in bad_lines[:5]) + (" …" if len(bad_lines) > 5 else "")
@@ -487,7 +493,8 @@ def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_
         for t in active
         if t.claim is not None
     ]
-    return claims, problem
+    parked = {t.id: (t.claim.session_id if t.claim is not None else "") for t in tasks if t.status is TaskState.WAITING}
+    return claims, problem, parked
 
 
 def _active_claims(project_root: Path, *, actor: str = "") -> list[_Claim]:
@@ -584,6 +591,14 @@ def resolve_active_task(
        written by hand, or imported, and has no ledger.
     5. ``bootstrap``.
 
+    A task the ledger records as ``waiting`` is parked, not current: a session
+    that does not hold its claim never takes it from ``GRIMOIRE_TASK_ID`` or
+    from a stale board card (issue #1153). A claimed task, waiting or not,
+    keeps the behaviour above — ``waiting`` simply never qualifies as a
+    ``claimed``/``running`` claim, so a session that parked its own task falls
+    back here and :func:`grimoire.hosts.decisions.enrolment.parked_task_of_session`
+    names it at ``Stop``.
+
     Claims whose lease has expired (:meth:`TaskClaim.is_expired`, issue #710)
     take part in none of these rules, a session's own included: the answer
     falls back and names them in ``expired``. Hence a claim without a session
@@ -599,14 +614,21 @@ def resolve_active_task(
     """
     environ = os.environ if env is None else env
     override = str(environ.get(TASK_ENV, "")).strip()
-    if override:
-        return ActiveTask(normalize_task_id(override), "env")
-
     session = session_id.strip() or current_session_id(environ)
     actor = str(environ.get(ACTOR_ENV, "")).strip()
     # Un seul rejeu du ledger par résolution (K13) : les claims tenus servent à la règle 2
-    # comme à la règle 3, qui les relisaient chacune en entier.
-    every_held, ledger_problem = _held_claims_checked(project_root)
+    # comme à la règle 3, qui les relisaient chacune en entier ; les tâches garées servent
+    # à écarter une attente que cette session ne détient pas (issue #1153).
+    every_held, ledger_problem, waiting = _held_claims_checked(project_root)
+    # Une tâche ``waiting`` n'est pas un claim tenu : elle est garée. Une session qui ne
+    # détient pas son claim ne la reprend pas comme tâche courante, même nommée par
+    # ``GRIMOIRE_TASK_ID`` ou par une carte de board périmée. Réclamée par la session,
+    # elle garde le comportement d'avant.
+    parked_elsewhere = {tid for tid, claim_session in waiting.items() if not (session and claim_session == session)}
+    named = normalize_task_id(override) if override else ""
+    if named and named not in parked_elsewhere:
+        return ActiveTask(named, "env")
+
     ledger_unreadable = (ledger_problem,) if ledger_problem else ()
     if session:
         mine = [c for c in every_held if not c.expired and c.session_id == session]
@@ -655,9 +677,11 @@ def resolve_active_task(
     unreadable = tuple(p for p in (ledger_problem, board_problem) if p)
     # Le board projette les claims du ledger en `in_progress` : sans ce filtre,
     # un claim expiré ou tenu par une autre session reviendrait par la règle 4.
+    # Une carte `in_progress` que le ledger sait garée en `waiting` est périmée
+    # (projection interrompue, board écrit à la main) : elle ne désigne rien.
     disqualified = {
         c.task_id for c in every_held if c.expired or (session and c.session_id not in ("", session))
-    }
+    } | parked_elsewhere
     in_progress = [tid for tid in in_progress if tid not in disqualified]
     if len(in_progress) == 1:
         return ActiveTask(normalize_task_id(in_progress[0]), "board", unreadable=unreadable)
