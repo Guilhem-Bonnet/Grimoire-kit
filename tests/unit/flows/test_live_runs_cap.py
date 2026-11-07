@@ -124,3 +124,16 @@ def test_the_shown_lines_are_the_most_recent_by_created_at(tmp_path: Path) -> No
     assert len(lines) == 4
     assert run_ids[0] in lines[0]
     assert lines[-1] == "+ 2 autres, grimoire flow list"
+
+
+def test_unreadable_meta_does_not_drop_the_run(tmp_path: Path) -> None:
+    """Une méta illisible ne retire pas la ligne du run : il est classé après les runs datés."""
+    run_ids = _start_runs(tmp_path, 4)
+    meta = tmp_path / "_grimoire-runtime-output" / "flows" / f"{run_ids[-1]}.json"
+    meta.write_text("{corrompu", encoding="utf-8")
+
+    lines = active_flow_lines(tmp_path)
+
+    assert len(lines) == 4
+    assert lines[-1] == "+ 1 autres, grimoire flow list"
+    assert run_ids[-1] not in "\n".join(lines[:3])
