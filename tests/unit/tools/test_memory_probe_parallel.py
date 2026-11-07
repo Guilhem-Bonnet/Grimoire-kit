@@ -91,28 +91,6 @@ class TestParallelProbes:
         ("redis", "redis://127.0.0.1:6379/0"),
     )
 
-    def test_service_states_sonde_les_services_de_front(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # La barrière ne se libère que si les trois sondes sont en vol en même
-        # temps : une implémentation en série y resterait bloquée jusqu'au
-        # dépassement, donc ce test échoue de façon déterministe sur `main`.
-        barrier = threading.Barrier(len(self.SERVICES), timeout=2.0)
-
-        def _slow(service: str, url: str, *, timeout: float | None = None) -> str:
-            barrier.wait()
-            time.sleep(0.2)
-            return ms.SERVICE_STOPPED
-
-        monkeypatch.setattr(ms, "service_state", _slow)
-
-        started = time.perf_counter()
-        states = ms.service_states(self.SERVICES)
-        elapsed = time.perf_counter() - started
-
-        assert states == {service: ms.SERVICE_STOPPED for service, _url in self.SERVICES}
-        assert elapsed < 0.5  # ~0,2 s de front, ~0,6 s en série
-
     def test_probe_services_sonde_les_services_de_front(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

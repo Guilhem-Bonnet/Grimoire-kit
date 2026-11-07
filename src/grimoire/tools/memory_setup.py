@@ -25,7 +25,6 @@ import shutil
 import socket
 import subprocess
 import time
-from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib.util import find_spec
@@ -370,25 +369,6 @@ def service_state(service: str, url: str, *, timeout: float | None = None) -> st
         return SERVICE_UNKNOWN
     except OSError:
         return SERVICE_FAILED
-
-
-def service_states(services: Iterable[tuple[str, str]], *, timeout: float | None = None) -> dict[str, str]:
-    """État de plusieurs services, sondés **en parallèle**. Ne lève jamais.
-
-    Les sondes sont indépendantes : la durée totale suit la plus lente, pas
-    leur somme — trois services absents coûtent un délai, pas trois (#954).
-    Chaque sonde suit le contrat de :func:`service_state`, délai dépassé
-    compris : ``inconnu``, jamais ``arrete``. ``timeout`` absent : 0,3 s en
-    boucle locale, 0,5 s ailleurs. Le résultat garde l'ordre d'entrée.
-    """
-    ordered = list(services)
-    if not ordered:
-        return {}
-    with ThreadPoolExecutor(
-        max_workers=min(len(ordered), 8), thread_name_prefix="grimoire-service-probe"
-    ) as pool:
-        states = list(pool.map(lambda pair: service_state(pair[0], pair[1], timeout=timeout), ordered))
-    return {service: state for (service, _url), state in zip(ordered, states, strict=True)}
 
 
 def probe_services(urls: dict[str, str] | None = None) -> dict[str, ServiceProbe]:
