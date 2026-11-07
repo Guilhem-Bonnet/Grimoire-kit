@@ -129,8 +129,8 @@ _CANCELLED = "cancelled"
 def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
     """``(état, motif)`` du bail que la session croit tenir : ``held``, ``released``, ``stale_epoch`` ou ``cancelled``.
 
-    ``released`` : la session a quitté son bail par la porte — release, blocage, échec ou
-    clôture (barrière ``hand_back`` à l'epoch suivant le sien). Elle ne tient plus rien,
+    ``released`` : la session a quitté son bail par la porte — release, blocage, échec,
+    remise en revue (``needs_verification``) ou clôture (barrière ``hand_back`` à l'epoch suivant le sien). Elle ne tient plus rien,
     mais personne ne lui a pris : le frein se tait, comme pour une session sans bail
     (K3-S1-01). Une barrière posée par la récolte, un autre titulaire, un autre epoch ou
     une annulation restent des refus.
@@ -162,9 +162,12 @@ def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
         task is not None
         and task.claim is not None
         and task.claim.lease_epoch == epoch
-        and task.status in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED)
+        and task.status in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED, TaskState.NEEDS_VERIFICATION)
     ):
-        return _RELEASED, ""  # le claim de la session, rendu par une sortie légitime
+        # le claim de la session, rendu par une sortie légitime. ``needs_verification`` en est une : la
+        # transition garde le claim (le titulaire a remis sa preuve), mais ``check_holder`` ne la tient
+        # plus pour un bail — fichier de bail absent, la session était gelée (#1117). Un autre epoch reste refusé.
+        return _RELEASED, ""
     return _STALE, check.reason
 
 

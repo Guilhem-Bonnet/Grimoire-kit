@@ -299,10 +299,12 @@ def test_les_etats_vides_portent_leur_composition(empty_workspace: Page) -> None
         assert block is not None
         assert _hrefs(empty_workspace, f".empty[data-art='{art}'] svg.empty-art use") == [f"icons.svg#{art}"]
         # L'encre vient du CSS (le symbole n'en porte aucune) : sans elle, la scène serait invisible.
-        stroke = empty_workspace.eval_on_selector(
-            f".empty[data-art='{art}'] svg.empty-art", "(n) => getComputedStyle(n).stroke"
+        # Attendue, pas lue une fois : un rendu de l'espace peut remplacer le bloc entre-temps.
+        empty_workspace.wait_for_function(
+            """(sel) => { const n = document.querySelector(sel); const s = n && getComputedStyle(n).stroke; return s && s !== 'none'; }""",
+            arg=f".empty[data-art='{art}'] svg.empty-art",
+            timeout=10_000,
         )
-        assert stroke not in ("", "none")
         # La composition remplace la petite icône de bac du titre.
         assert empty_workspace.locator(f".empty[data-art='{art}'] h2 svg").count() == 0
         _capture(empty_workspace, f"p30-vide-{space}")

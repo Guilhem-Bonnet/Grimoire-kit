@@ -168,6 +168,8 @@ SESSION_TIMEOUT = timedelta(minutes=30)
 MAX_RESUMES = 2
 #: Présentations d'une même question à l'orchestrateur : une session terminée sans y répondre en vaut une seconde.
 MAX_PRESENTATIONS = 2
+#: Pilote activé : sans progrès sur la tâche, une question attend ce délai multiplié par ses présentations.
+PILOT_RETRY_DELAY = timedelta(hours=1)
 #: Questions listées par session ; les suivantes attendent la session d'après.
 MAX_LISTED = 12
 #: Le mode de la session, imposé : refuse sans demander tout outil hors de :data:`ALLOWED_TOOLS`.
@@ -615,8 +617,28 @@ class OrchestratorStage:
         """Les questions qu'aucune session ne se voit présenter : tenues par une session ouverte, déjà présentées
         :data:`MAX_PRESENTATIONS` fois (pilote activé : sans borne), ou déjà répondues par l'orchestrateur."""
         count, held = self._presentations()
-        cap = self._presentation_cap(self._pilot())
-        return held | {key for key, n in count.items() if n >= cap or self._answered_by_orchestrator(*key)}
+        pilot = self._pilot()
+        cap = self._presentation_cap(pilot)
+        skipped = held | {key for key, n in count.items() if n >= cap or self._answered_by_orchestrator(*key)}
+        return skipped | {key for key, n in count.items() if pilot and n and key not in skipped and self._stalled(key, n)}
+
+    def _stalled(self, key: tuple[str, str], presented: int) -> bool:
+        """Pilote activé : rien n'a bougé sur la tâche depuis la dernière présentation et le délai n'est pas écoulé.
+
+        Le 2026-10-29, 144 lancements sur 163 n'ont présenté que des questions déjà vues : la même question 151 fois.
+        """
+        last = max(
+            (e.created_at for e in self._events(ORCH_LAUNCHED_EVENT)
+             if any(isinstance(q, dict) and (str(q.get("task_id")), str(q.get("question_id"))) == key
+                    for q in e.payload.get("questions") or ())),
+            default="",
+        )
+        if not last:
+            return False
+        if any(e.created_at > last and e.actor_id != ORCHESTRATOR_ACTOR for e in self._service.ledger.events_for(key[0])):
+            return False
+        now = self._now or datetime.now(UTC)
+        return now - datetime.fromisoformat(last) < PILOT_RETRY_DELAY * presented
 
     def _launched_today(self) -> int:
         today = (self._now or datetime.now(UTC)).astimezone(UTC).date().isoformat()

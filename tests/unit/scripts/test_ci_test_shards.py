@@ -53,6 +53,22 @@ def test_chaque_fichier_du_depot_part_exactement_une_fois() -> None:
     assert all(parts)
 
 
+def test_chaque_fichier_e2e_part_exactement_une_fois() -> None:
+    module = _module()
+    parts = module.shards(_REPO, 3, "e2e")
+    placed = Counter(name for part in parts for name in part)
+
+    assert set(placed) == {p.relative_to(_REPO).as_posix() for p in (_REPO / "tests" / "e2e").glob("test_*.py")}
+    assert set(placed.values()) == {1}
+    assert all(parts)
+
+
+def test_les_suites_ne_se_melangent_pas(tmp_path: Path) -> None:
+    root = _tree(tmp_path, {"tests/test_agentic_standard.py": 1, "tests/unit/test_a.py": 1, "tests/e2e/test_b.py": 1})
+    names = [p.relative_to(root).as_posix() for p in _module().test_files(root, "e2e")]
+    assert names == ["tests/e2e/test_b.py"]
+
+
 def test_les_motifs_de_pytest_sont_tous_couverts(tmp_path: Path) -> None:
     root = _tree(
         tmp_path,

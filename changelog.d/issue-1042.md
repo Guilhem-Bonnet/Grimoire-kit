@@ -1,1 +1,0 @@
-- fix(memory): `memory gate` ne vérifie la migration que si le bundle existe, sinon il affiche « aucune migration en cours sur ce poste » sans échouer (`--require-migration` pour garder le FAIL) (#1042)
