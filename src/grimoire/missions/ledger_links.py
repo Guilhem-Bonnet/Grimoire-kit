@@ -39,12 +39,13 @@ def unlink_tasks(
     Un lien absent est un refus et non un succès muet : une faute de frappe dans
     l'identifiant ne doit pas laisser croire que le blocage est levé.
     """
-    from grimoire.missions.ledger import TASK_UNLINKED_EVENT, _ledger_file_lock
+    from grimoire.missions.ledger import TASK_UNLINKED_EVENT
+    from grimoire.missions.ledger_files import ledger_file_lock
 
     motive = reason.strip()
     if not motive:
         raise GrimoireMissionError(f"Retrait refusé pour {task_id} : dites pourquoi le lien tombe (--reason)")
-    with _ledger_file_lock(ledger._events_path):
+    with ledger_file_lock(ledger._events_path):
         ledger._invalidate()
         ledger._load()
         task = ledger._tasks.get(task_id)
