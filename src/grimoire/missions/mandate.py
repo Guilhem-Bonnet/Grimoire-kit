@@ -627,7 +627,9 @@ class MandateStore:
         source = turns_source(attest_from) if attest_from is not None else None
         entries = self.journal.read()
         session_id, _host = current_session(env)
-        used = {e.get("challenge_id") for e in entries if e.get("type") == "grant"}
+        # Un challenge est clos par son entrée ``grant_challenge_used`` : l'entrée ``grant`` ne porte pas de
+        # ``challenge_id``, et la lire là laissait tout vieux challenge réutilisable (#939).
+        used = {e.get("challenge_id") for e in entries if e.get("type") == "grant_challenge_used"}
         challenge = next(
             (
                 e

@@ -1,0 +1,1 @@
+- fix(mandate): un challenge de mandat servi est clos (lu sur `grant_challenge_used`) ; la même demande relancée en émet un nouveau au lieu de réutiliser l'ancien (#939)

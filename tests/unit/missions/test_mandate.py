@@ -170,6 +170,37 @@ def test_request_grant_needs_an_attested_human_turn(project: Path, monkeypatch: 
     assert store.state().active
 
 
+def test_a_used_challenge_is_closed_and_the_same_request_gets_a_new_one(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#939 : après un octroi, la même demande relancée n'hérite pas du challenge déjà servi."""
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "S1")
+    store = MandateStore(project)
+    request = MandateRequest.build(("accept",), ("implementation",), 2, "+1h")
+    _pending, first = store.request_grant(request)
+    from grimoire.hosts.decisions import HookInput, run_decision
+    from grimoire.hosts.events import HookEvent
+
+    time.sleep(0.02)
+    run_decision(
+        "grimoire.task-context",
+        HookInput(
+            event=HookEvent.USER_PROMPT_SUBMIT, project_root=project, prompt="ok", session_id="S1",
+            host="host-claude-code-cli",
+        ),
+    )
+    time.sleep(0.02)
+    mandate, granted = store.request_grant(request)
+    assert mandate is not None and granted.challenge_id == first.challenge_id
+
+    again, retry = store.request_grant(request)
+
+    assert again is None and not retry.attested  # le tour humain est consommé : il faut un nouveau tour
+    assert retry.challenge_id and retry.challenge_id != first.challenge_id
+    challenges = [e for e in store.journal.read() if e.get("type") == "grant_challenge"]
+    assert len(challenges) == 2
+
+
 # ── Sans mandat rien ne change ; avec un mandat qui couvre, l'orchestrateur agit et se journalise ─
 
 
