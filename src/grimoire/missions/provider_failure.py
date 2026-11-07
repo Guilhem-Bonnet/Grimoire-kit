@@ -54,8 +54,9 @@ def _text_of(entry: dict[str, object]) -> str:
 def transient_api_error(path: str | os.PathLike[str] | None) -> str:
     """Le texte de l'erreur transitoire sur laquelle le journal se termine ; ``""`` sinon.
 
-    Seule la dernière entrée de conversation compte : un tour qui a repris après l'erreur la
-    lave. Un journal absent, illisible, vide ou en cours d'écriture rend ``""`` (échec fermé :
+    Seule la dernière entrée de conversation compte, et seulement si l'hôte l'a marquée
+    ``isApiErrorMessage`` : un tour qui a repris après l'erreur la lave, et un tour ordinaire qui
+    cite un code d'erreur n'en est pas une. Un journal absent, illisible, vide ou en cours d'écriture rend ``""`` (échec fermé :
     rien n'est repris sur une lecture qu'on ne comprend pas).
     """
     if not path:
@@ -77,14 +78,13 @@ def transient_api_error(path: str | os.PathLike[str] | None) -> str:
             continue  # première ligne d'une queue : coupée au milieu, elle ne prouve rien
         if not isinstance(entry, dict) or entry.get("isSidechain") is True:
             continue
-        if entry.get("isApiErrorMessage") is True:
-            text = _text_of(entry)
-            return text if text and TRANSIENT_API_ERROR.search(text) else ""
-        kind = entry.get("type")
-        if kind in _METADATA_TYPES:
+        if entry.get("type") in _METADATA_TYPES:
             continue
-        if kind != "assistant":
-            return ""  # le dernier tour est une réponse humaine / un résultat d'outil : rien à reprendre
+        if entry.get("isApiErrorMessage") is not True:
+            # Un tour ordinaire (réponse du modèle, résultat d'outil, message humain) n'est pas une erreur, même
+            # s'il cite « 500 » : un worker qui résume « corrigé la gestion des HTTP 500 » a fini, il ne doit pas
+            # être repris. L'hôte marque ses vraies erreurs d'API (vérifié sur le journal réel du 2026-11-07).
+            return ""
         text = _text_of(entry)
         return text if text and TRANSIENT_API_ERROR.search(text) else ""
     return ""

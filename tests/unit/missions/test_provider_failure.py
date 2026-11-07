@@ -95,3 +95,24 @@ def test_journal_absent_ou_illisible_rend_vide(tmp_path: Path) -> None:
     broken = tmp_path / "broken.jsonl"
     broken.write_bytes(b"\xff\xfe not json\n")
     assert transient_api_error(broken) == ""
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "J'ai corrigé la gestion des API Error: 500 dans launcher.py, PR ouverte.",
+        "Le fournisseur était overloaded pendant les tests, mais tout est vert maintenant.",
+    ),
+)
+def test_un_tour_ordinaire_qui_cite_une_erreur_ne_declenche_rien(tmp_path: Path, text: str) -> None:
+    """Sans la marque ``isApiErrorMessage`` de l'hôte, le dernier tour est une réponse : rien à reprendre."""
+    path = _write(tmp_path / "s.jsonl", _assistant(text))
+    assert transient_api_error(path) == ""
+
+
+def test_une_queue_coupee_au_milieu_d_une_ligne_est_ignoree(tmp_path: Path) -> None:
+    """La première ligne d'une queue de 64 Kio est coupée : elle ne prouve rien, l'erreur qui suit compte."""
+    path = tmp_path / "s.jsonl"
+    filler = json.dumps(_assistant("x" * (70 * 1024)))
+    path.write_text(filler + "\n" + json.dumps(_assistant("API Error: 503", error=True)) + "\n\n", encoding="utf-8")
+    assert transient_api_error(path) == "API Error: 503"

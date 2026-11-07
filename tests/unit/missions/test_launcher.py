@@ -825,6 +825,58 @@ def test_au_dela_du_plafond_la_tache_se_gare_en_nommant_l_erreur_du_fournisseur(
     assert any("erreur du fournisseur" in line for line in report.attention)
 
 
+def test_une_session_encore_au_travail_n_est_pas_reprise_meme_sur_une_erreur_en_journal(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code 2.1.319 rend ``state: "working"`` sans ``status`` : la session vit, rien n'est repris."""
+    tid = ready(service, "au travail")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = [{
+        "id": str(launch["session"]), "name": f"grimoire-{tid}", "kind": "background",
+        "state": "working", "sessionId": str(launch["session_id"]),
+    }]
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error"))
+
+    report = tick(projet, host, now=_later(5))
+
+    assert not report.reaped
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a]
+
+
+def test_une_reprise_qui_echoue_est_dite_au_tick_sans_rien_casser(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reprise et session neuve refusées par l'hôte : le tick le dit en attention, la récolte jugera ensuite."""
+    tid = ready(service, "reprise refusée")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents = []
+    host.bg_fails = True
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 503 Service Unavailable"))
+
+    report = tick(projet, host, now=_later(5))
+
+    assert any("non reprise après une erreur du fournisseur" in line for line in report.attention)
+    events = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == WORKER_RESUMED_EVENT]
+    assert not events
+
+
+def test_une_sonde_claude_agents_muette_ne_reprend_rien(
+    projet: Path, service: TaskService, host: FakeHost, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``claude agents`` en échec : on ne juge pas une session qu'on ne voit pas (échec fermé)."""
+    tid = ready(service, "sonde muette")
+    tick(projet, host)
+    launch = launched_sessions(TaskService(projet))[tid]
+    host.agents_fail = True
+    _session_transcript(monkeypatch, tmp_path, launch, _api_error("API Error: 500 Internal Server Error"))
+
+    tick(projet, host, now=_later(5))
+
+    assert not [a for a, _cwd, _env in host.calls if "--resume" in a]
+
+
 # ── #966 : l'identité d'une session de fond se lit après le lancement ──────────────
 
 
