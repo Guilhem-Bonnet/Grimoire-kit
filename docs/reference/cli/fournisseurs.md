@@ -190,7 +190,7 @@ le ledger, et un tick qui le lit en premier.
 | Commande | Description |
 | --- | --- |
 | `grimoire orchestrate pause [--drain\|--hold] [--project\|--global] [--task <id>...] [--reason ...]` | Pose le drapeau (`drain` par défaut) ; `--global` (toute la machine) est un geste d'humain |
-| `grimoire orchestrate resume [--global] [--task <id>...]` | Lève le drapeau, ou seulement ces tâches ; geste d'humain (l'origine humaine est exigée, comme pour `queue release`) |
+| `grimoire orchestrate resume [--global] [--task <id>...]` | Lève le drapeau, ou seulement ces tâches ; un humain lève tout, une session ne lève que la pause qu'elle a posée elle-même (son identifiant est noté dans le drapeau) ; `--global` reste un geste d'humain (l'origine humaine est exigée, comme pour `queue release`) |
 | `grimoire orchestrate status [--json]` | Les drapeaux en vigueur et, pour chaque tâche tenue, ce que `hold` fait sur son hôte (« hold dégradé en drain (hôte sans frein) ») |
 | `grimoire orchestrate tick [--apply\|--plan] [--json]` | Un tick : lit la pause, puis récolte, rend les attentes levées, constate les effets externes et calcule l'admission ; sans `--apply` (ou avec `--plan`), le même tick joué sur une copie du ledger, rien n'est écrit ; sous pause, sort en 0 sans ouvrir le ledger ; un second tick simultané saute, en 0 |
 | `grimoire orchestrate install-timer [--interval 5m] [--no-enable]` | Pose le minuteur optionnel du tick (unité systemd utilisateur `oneshot` et son `.timer`) ; sans systemd, rend la ligne crontab à poser à la main |

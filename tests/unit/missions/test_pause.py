@@ -61,6 +61,7 @@ def _isolated_control_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch
     for var in (
         "GRIMOIRE_TASK_ID", "GRIMOIRE_ACTOR", "GRIMOIRE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GRIMOIRE_HOST_VERSION",
         "GRIMOIRE_UNATTENDED", "AI_AGENT", "CLAUDECODE", "CURSOR_AGENT", "GEMINI_CLI", "CODEX_SANDBOX",
+        "CODEX_SANDBOX_NETWORK_DISABLED", "GRIMOIRE_PRINCIPAL", "GRIMOIRE_PROVENANCE",
     ):
         monkeypatch.delenv(var, raising=False)
     return home
@@ -463,6 +464,53 @@ def test_resume_and_global_pause_are_human_gestures(projet: Path, machine: Path,
     assert json.loads((machine / "pause.json").read_text(encoding="utf-8"))["mode"] == "hold"
     assert runner.invoke(app, ["orchestrate", "resume", "--global", *root]).exit_code == 0
     assert not (machine / "pause.json").exists()
+
+
+# ── #1119 : une session lève la pause qu'elle a posée ───────────────────────
+
+
+@pytest.mark.covers("cli:orchestrate pause", "cli:orchestrate resume")
+def test_session_lifts_the_pause_it_posed(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session A pose, session A lève : accepté — la pause note son origine et sa session."""
+    root = ["--project-root", str(projet)]
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "session-a")
+
+    posted = runner.invoke(app, ["orchestrate", "pause", "--hold", "--reason", "essai", *root])
+    assert posted.exit_code == 0, posted.output
+    flag = json.loads((projet / PAUSE_RELPATH).read_text(encoding="utf-8"))
+    assert (flag["origin"], flag["session"]) == ("agent", "session-a")
+
+    lifted = runner.invoke(app, ["orchestrate", "resume", *root])
+    assert lifted.exit_code == 0, lifted.output
+    assert not (projet / PAUSE_RELPATH).exists()
+
+
+@pytest.mark.covers("cli:orchestrate pause", "cli:orchestrate resume")
+def test_other_session_cannot_lift_the_pause(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session A pose, session B lève : refusé, la pause reste en place."""
+    root = ["--project-root", str(projet)]
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "session-a")
+    assert runner.invoke(app, ["orchestrate", "pause", *root]).exit_code == 0
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "session-b")
+    refused = runner.invoke(app, ["orchestrate", "resume", *root])
+    assert refused.exit_code == 1
+    assert (projet / PAUSE_RELPATH).exists()
+
+
+@pytest.mark.covers("cli:orchestrate pause", "cli:orchestrate resume")
+def test_session_cannot_lift_a_human_pause(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Humain pose (aucun signal d'agent), session lève : refusé, la pause reste en place."""
+    root = ["--project-root", str(projet)]
+    posted = runner.invoke(app, ["orchestrate", "pause", "--hold", *root])
+    assert posted.exit_code == 0, posted.output
+    flag = json.loads((projet / PAUSE_RELPATH).read_text(encoding="utf-8"))
+    assert (flag["origin"], flag["session"]) == ("human", "")
+
+    monkeypatch.setenv("GRIMOIRE_SESSION_ID", "session-a")
+    refused = runner.invoke(app, ["orchestrate", "resume", *root])
+    assert refused.exit_code == 1
+    assert (projet / PAUSE_RELPATH).exists()
 
 
 @pytest.mark.covers("cli:queue plan")
