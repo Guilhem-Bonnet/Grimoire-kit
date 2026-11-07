@@ -221,6 +221,39 @@ def _append_notice(text: str, notice: str) -> str:
     return f"{text[:-1]} {notice}\n" if text.endswith("\n") else f"{text} {notice}"
 
 
+#: Issue #1127 : sentinelle de repli quand aucune tâche n'est résolue.
+SENTINEL_TASK_ID = "bootstrap"
+
+#: Rendu par défaut quand la tâche sentinelle n'est pas sur le board : le gate
+#: n'aurait rien à évaluer (``gate.task_not_on_board``), la consigne de le
+#: lancer serait inexécutable.
+NO_TASK_DIRECTIVE = (
+    "[Grimoire Standard] Aucune tâche n'est ouverte sur le board : il n'y a pas de gate à exécuter. "
+    "Fais le travail demandé ; ouvre une tâche (`grimoire task`) pour le gouverner.\n"
+)
+
+
+def _sentinel_missing_from_board(project_root: Path, task_id: str) -> bool:
+    """True pour la tâche sentinelle quand un board existe sans elle.
+
+    Un autre identifiant absent du board reste une erreur du gate (faute de
+    frappe) : seule la sentinelle, qui n'est jamais une vraie tâche, est exemptée.
+    """
+    from grimoire.core.standard_generation import STANDARD_DIR
+    from grimoire.core.standard_state import _load_mapping, board_omits_task, task_from_board
+
+    if task_id != SENTINEL_TASK_ID:
+        return False
+    board = _load_mapping(project_root / STANDARD_DIR / "task-board.yaml")
+    return board_omits_task(project_root, task_from_board(board, task_id))
+
+
+def _default_for(project_root: Path, task_id: str) -> str:
+    if _sentinel_missing_from_board(project_root, task_id):
+        return NO_TASK_DIRECTIVE
+    return default_activation_directive(task_id)
+
+
 def activation_context_text(project_root: Path, task_id: str = "bootstrap") -> str:
     """Project-level directive if present, built-in default otherwise — for *task_id*.
 
@@ -241,9 +274,12 @@ def activation_context_text(project_root: Path, task_id: str = "bootstrap") -> s
     context_path = project_root / ACTIVATION_CONTEXT_RELPATH
     if context_path.is_file():
         text = context_path.read_text(encoding="utf-8")
-        base = default_activation_directive(task_id) if _is_known_directive_rendering(text) else text.replace(TASK_ID_PLACEHOLDER, task_id)
+        if _is_known_directive_rendering(text):
+            base = _default_for(project_root, task_id)
+        else:
+            base = text.replace(TASK_ID_PLACEHOLDER, task_id)
     else:
-        base = default_activation_directive(task_id)
+        base = _default_for(project_root, task_id)
     return _append_notice(_append_notice(base, _phase_notice(project_root)), _v0_notice(project_root, task_id))
 
 
