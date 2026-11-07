@@ -7,6 +7,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.82.0] - 2026-11-07
+
+### Added
+
+- feat(providers): un tarif optionnel `models[].pricing` dans `llm-provider-registry.yaml` chiffre l'usage d'un worker routé vers un fournisseur externe ; sans tarif, le coût reste inconnu, jamais 0 (#1152, PR #1164)
+
+### Fixed
+
+- fix(missions): une erreur 5xx/429/overloaded du fournisseur relance le worker sur sa session au lieu de le faire récolter, puis le gare en nommant la vraie cause au-delà du plafond ; seule une entrée marquée `isApiErrorMessage` par l'hôte déclenche la reprise, un tour ordinaire qui cite « 500 » n'est pas repris (#1158, PR #1166)
+- fix(autopilot): une question de conduite à options fermées écrite par le kit est jugée sur son texte, pas sur le titre de la tâche (#1159, PR #1165)
+- fix(missions): une PR `task/<id>` fusionnée hors merger solde sa tâche au tick, sans relancer worker ni relecteur (#1162, PR #1167)
+- fix(mandate): un challenge de mandat servi est clos (lu sur `grant_challenge_used`) ; la même demande relancée en émet un nouveau au lieu de réutiliser l'ancien (#939, PR #1168)
+
 ## [3.81.0] - 2026-11-07
 
 ### Changed

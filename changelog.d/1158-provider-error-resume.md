@@ -1,2 +1,0 @@
-- fix(missions): une erreur 5xx/429/overloaded du fournisseur relance le worker sur sa session au lieu de le faire récolter, puis le gare en nommant la vraie cause au-delà du plafond (#1158)
-- fix(missions): seule une entrée marquée `isApiErrorMessage` par l'hôte déclenche la reprise ; un tour ordinaire qui cite « 500 » n'est plus repris (#1158)
