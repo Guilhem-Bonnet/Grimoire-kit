@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.79.0] - 2026-11-06
+
+- fix(cockpit): changer vite d'espace n'efface plus l'espace ouvert ni son sélecteur de vues (un espace quitté se montait quand même) (#1112)
+- fix(missions): le PATH de l'unité du tick garde le dossier des exécutables appelés par chemin absolu dans les hooks des réglages Claude Code utilisateur et projet (#1022) (#1111)
+- fix(memory): `memory gate` ne vérifie la migration que si le bundle existe, sinon il affiche « aucune migration en cours sur ce poste » sans échouer (`--require-migration` pour garder le FAIL) (#1042) (#1109)
+- fix(lease): le frein du bail ne gèle plus la session qui a remis sa tâche en revue (`needs_verification`) quand le fichier de bail manque ; un bail repris par une autre session reste refusé (#1117) (#1118)
+- fix(cli): le rendu texte de `task show`, `task list` et `task pack` part sur stdout et stderr ne garde que les erreurs (#879) (#1107)
+- fix(cockpit): les questions du wizard s'affichent dans la langue du cockpit (`?lang=`, repli anglais), la CLI reste inchangée (#899) (#1110)
+- fix(up): `agent-manifest.csv` ne liste plus deux fois le même agent, un projet à jour ne montre plus de fichier à écrire (#908) (#1108)
+- test(missions): le janitor garde le worktree et rapporte `failed` quand la copie des preuves est impossible (#928) (#1115)
+- feat(orchestrate): le tick peut lancer ses workers V0/V1 sur un fournisseur compatible Anthropic comme DeepSeek (`orchestrator.roles.worker.provider`), avec les outils et les hooks de Claude Code ; le relecteur reste à part (#1113)
+
 ## [3.78.1] - 2026-11-06
 
 - fix(missions): la relecture d'un dispatch ne porte plus que sur ce que l'ouvrier a changé : plus de fausse alerte sur un arbre déjà modifié, et les fichiers qu'il crée ne lui échappent plus (#1101)
