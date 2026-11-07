@@ -1,0 +1,1 @@
+- fix(autopilot): une question de conduite à options fermées écrite par le kit est jugée sur son texte, pas sur le titre de la tâche (#1159)
