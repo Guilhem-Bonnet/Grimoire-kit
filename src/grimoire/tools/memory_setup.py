@@ -25,6 +25,7 @@ import shutil
 import socket
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from pathlib import Path
@@ -40,6 +41,14 @@ MEMORY_SETUP_SCHEMA_VERSION = "grimoire-memory-setup/v1"
 
 #: Budget de sonde — identique à ``cmd_up`` : jamais bloquant.
 _SOCKET_TIMEOUT = 0.5
+
+#: Délai de connexion propre à la boucle locale (#954). Une connexion locale
+#: répond en microsecondes quand elle écoute ; sous Windows, un port fermé
+#: n'est pas refusé tout de suite (relances SYN, ~2 s), donc le budget
+#: générique y était payé à chaque service absent. Une boucle locale n'a
+#: aucune raison de laisser ce délai au système.
+_LOOPBACK_CONNECT_TIMEOUT = 0.3
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 _DEFAULT_URLS = {
     "weaviate": "http://localhost:8080",
@@ -145,8 +154,24 @@ class MemoryPlan:
         }
 
 
-def _tcp_reachable(url: str, default_port: int, *, timeout: float = _SOCKET_TIMEOUT) -> bool:
-    """Vrai si un connect TCP aboutit dans *timeout* secondes."""
+def _connect_timeout(host: str, timeout: float | None) -> float:
+    """Délai de connexion applicable à *host*.
+
+    Un délai explicite gagne toujours ; sinon la boucle locale reçoit le
+    plafond court :data:`_LOOPBACK_CONNECT_TIMEOUT` (0,3 s) et le reste le
+    budget historique :data:`_SOCKET_TIMEOUT` (#954).
+    """
+    if timeout is not None:
+        return timeout
+    return _LOOPBACK_CONNECT_TIMEOUT if (host or "").lower() in _LOOPBACK_HOSTS else _SOCKET_TIMEOUT
+
+
+def _tcp_reachable(url: str, default_port: int, *, timeout: float | None = None) -> bool:
+    """Vrai si un connect TCP aboutit dans *timeout* secondes.
+
+    ``timeout`` absent : 0,3 s pour 127.0.0.1/localhost, 0,5 s ailleurs
+    (:func:`_connect_timeout`).
+    """
     raw = url if "//" in url else f"//{url}"
     try:
         parsed = urlparse(raw)
@@ -155,7 +180,7 @@ def _tcp_reachable(url: str, default_port: int, *, timeout: float = _SOCKET_TIME
     except ValueError:
         return False
     try:
-        with socket.create_connection((host, port), timeout=timeout):
+        with socket.create_connection((host, port), timeout=_connect_timeout(host, timeout)):
             return True
     except OSError:
         return False
@@ -197,7 +222,7 @@ def docker_daemon_reachable(*, timeout: float = 2.0) -> bool:
     return result.returncode == 0
 
 
-def _ollama_usable(*, timeout: float = _SOCKET_TIMEOUT) -> bool:
+def _ollama_usable(*, timeout: float | None = None) -> bool:
     """Whether a local Ollama both answers and has its python extra installed.
 
     The single live check :func:`local_embedding_available` needs when it was
@@ -314,12 +339,17 @@ SERVICE_FAILED = "en_echec"
 SERVICE_UNKNOWN = "inconnu"
 
 
-def service_state(service: str, url: str, *, timeout: float = _SOCKET_TIMEOUT) -> str:
+def service_state(service: str, url: str, *, timeout: float | None = None) -> str:
     """État d'un service mémoire à cet instant, par un connect TCP. Ne lève jamais.
 
     Connexion acceptée : ``en_ligne`` ; refusée (rien n'écoute) : ``arrete`` ;
     délai dépassé : ``inconnu`` — une sonde expirée ne dit pas que le service
     est arrêté ; toute autre erreur (nom introuvable, réseau) : ``en_echec``.
+
+    ``timeout`` absent : 0,3 s pour 127.0.0.1/localhost, 0,5 s ailleurs
+    (:func:`_connect_timeout`). Le délai court est sûr parce que le verdict
+    d'une sonde expirée reste ``inconnu`` : on ne confond jamais lenteur et
+    arrêt, on cesse seulement d'attendre (#954).
     """
     raw = url if "//" in url else f"//{url}"
     try:
@@ -331,7 +361,7 @@ def service_state(service: str, url: str, *, timeout: float = _SOCKET_TIMEOUT) -
     if not port:
         return SERVICE_UNKNOWN
     try:
-        with socket.create_connection((host, port), timeout=timeout):
+        with socket.create_connection((host, port), timeout=_connect_timeout(host, timeout)):
             return SERVICE_ONLINE
     except ConnectionRefusedError:
         return SERVICE_STOPPED
@@ -342,19 +372,33 @@ def service_state(service: str, url: str, *, timeout: float = _SOCKET_TIMEOUT) -
 
 
 def probe_services(urls: dict[str, str] | None = None) -> dict[str, ServiceProbe]:
-    """Sonde chaque service mémoire connu sur cette machine. Ne lève jamais."""
+    """Sonde chaque service mémoire connu sur cette machine. Ne lève jamais.
+
+    Les sondes TCP sont indépendantes : elles partent de front, la durée
+    totale suit la plus lente et non leur somme (#954). L'ordre du résultat
+    reste celui de ``_EXTRA_MODULES``.
+    """
     resolved = {**_DEFAULT_URLS, **(urls or {})}
-    probes: dict[str, ServiceProbe] = {}
-    for service, (extra, modules) in _EXTRA_MODULES.items():
+
+    def _probe(item: tuple[str, tuple[str, tuple[str, ...]]]) -> ServiceProbe:
+        service, (extra, modules) = item
         url = resolved[service]
-        probes[service] = ServiceProbe(
+        return ServiceProbe(
             id=service,
             url=url,
             reachable=_tcp_reachable(url, _DEFAULT_PORTS[service]),
             extra=extra,
             extra_installed=_module_installed(modules),
         )
-    return probes
+
+    items = list(_EXTRA_MODULES.items())
+    if not items:
+        return {}
+    with ThreadPoolExecutor(
+        max_workers=min(len(items), 8), thread_name_prefix="grimoire-service-probe"
+    ) as pool:
+        probes = list(pool.map(_probe, items))
+    return {probe.id: probe for probe in probes}
 
 
 def _slug(text: str) -> str:
