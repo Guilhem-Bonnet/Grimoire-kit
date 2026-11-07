@@ -74,6 +74,7 @@ from grimoire.missions.breaker import read_breaker, record_failure, trip
 from grimoire.missions.launcher import (
     _BG_ID,
     _TIER_ALIAS,
+    LEAN_SESSION_ARGS,
     _halt,
     _read_agents,
     attest_session,
@@ -373,6 +374,8 @@ class ReviewStage:
         # #994 : les réglages, hooks et serveurs MCP que la PR apporte (.claude/, .mcp.json) ne s'appliquent pas au
         # relecteur d'une tâche faite à la main ; il garde son dossier dans le worktree pour rejouer les preuves.
         isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual else []
+        if role.lean:
+            isolate += [arg for arg in LEAN_SESSION_ARGS if arg not in isolate]
         argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,
                 "--permission-mode", role.permission_mode, *isolate, prompt]
         result = self._exec(argv, cwd, session_env())

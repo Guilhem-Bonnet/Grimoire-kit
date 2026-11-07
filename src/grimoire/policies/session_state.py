@@ -109,6 +109,10 @@ class SessionState:
     #: jamais leur contenu. C'est ce que ``Stop`` lit pour distinguer une
     #: session qui a travaillé hors tâche d'une session qui n'a fait que lire.
     mutations: int = 0
+    #: Compteur ``mutations`` au moment où ``Stop`` a rendu son rappel « Clôture hors tâche »
+    #: (issue #1126). Le rappel n'est relancé que si le compteur dépasse cette valeur :
+    #: une session qui a répondu au rappel sans écrire de nouveau n'est pas relancée à chaque tour.
+    acknowledged_mutations: int = 0
     #: Approbations en attente, par identifiant d'appel d'outil de l'hôte :
     #: ``{"fingerprint": ..., "rules": [...]}`` posé au PreToolUse, repris au
     #: PostToolUse (W1-09). Le PostToolUse peut recevoir une entrée réécrite par
@@ -141,6 +145,7 @@ class SessionState:
             "lease_epoch": self.lease_epoch,
             "unattached_work": dict(self.unattached_work),
             "mutations": self.mutations,
+            "acknowledged_mutations": self.acknowledged_mutations,
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
             "armed": dict(self.armed),
             "instruction_scan": dict(self.instruction_scan),
@@ -155,6 +160,7 @@ class SessionState:
             if isinstance(state, dict)
         } if isinstance(rules_raw, dict) else {}
         mutations = d.get("mutations", 0)
+        acked = d.get("acknowledged_mutations", 0)
         pending_raw = d.get("pending_approvals", {})
         pending: dict[str, dict[str, Any]] = {}
         if isinstance(pending_raw, dict):
@@ -179,6 +185,7 @@ class SessionState:
             lease_epoch=_epoch_of(d.get("lease_epoch")),
             unattached_work=dict(d["unattached_work"]) if isinstance(d.get("unattached_work"), dict) else {},
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
+            acknowledged_mutations=int(acked) if isinstance(acked, int | float) and not isinstance(acked, bool) else 0,
             pending_approvals=pending,
             armed=armed,
             instruction_scan=dict(d["instruction_scan"]) if isinstance(d.get("instruction_scan"), dict) else {},
@@ -305,3 +312,21 @@ def session_mutations(project_root: Path, session_id: str) -> int:
     if not session_id:
         return 0
     return load_session_state(project_root, session_id, now_iso="").mutations
+
+
+def session_acknowledged_mutations(project_root: Path, session_id: str) -> int:
+    """Le compteur d'écritures déjà signalé par ``Stop`` (issue #1126) — ``0`` sans journal ou sans id."""
+    if not session_id:
+        return 0
+    return load_session_state(project_root, session_id, now_iso="").acknowledged_mutations
+
+
+def note_acknowledged_mutations(project_root: Path, session_id: str, mutations: int, *, now_iso: str) -> None:
+    """Mémorise que ``Stop`` a signalé *mutations* écritures hors tâche : pas de rappel tant que le compteur n'augmente pas."""
+    if not session_id:
+        return
+    state = load_session_state(project_root, session_id, now_iso=now_iso)
+    if mutations <= state.acknowledged_mutations:
+        return
+    state.acknowledged_mutations = mutations
+    save_session_state(project_root, state, now_iso=now_iso)

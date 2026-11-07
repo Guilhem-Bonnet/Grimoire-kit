@@ -794,3 +794,13 @@ def test_ci_rouge_sur_un_relecteur_arrete_est_relancee_une_fois_avant_de_renvoye
     report = merger_tick(pr_projet, pr_host)
     assert report.reviews == () and pr_host.reruns == [101], (report.reviews, pr_host.reruns)
     assert _judged(pr_projet, tid) == [] and pr_host.of("claude", "--bg", "--resume") == []
+
+
+def test_le_relecteur_allege_retire_les_mcp_et_borne_les_outils(projet: Path, host: FakeHost) -> None:
+    policy = projet / POLICY
+    policy.write_text(policy.read_text(encoding="utf-8").replace("    reviewer:\n", "    reviewer:\n      lean: true\n"), encoding="utf-8")
+    launched_and_in_review(projet, host)
+    tick(projet, host)
+    _worker, review_argv = host.of("claude", "--bg")
+    assert "--strict-mcp-config" in review_argv
+    assert review_argv[review_argv.index("--tools") + 1] == "Bash,Read,Edit,Write,Glob,Grep"

@@ -66,11 +66,13 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import create_task_worktree
+from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.missions.worker_provider import WorkerRoute, route_worker, settings_path
 
 if TYPE_CHECKING:
     from grimoire.missions.admission import Admit
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
+    from grimoire.missions.schemas import MissionTask
     from grimoire.missions.service import TaskService
 
 __all__ = [
@@ -112,6 +114,8 @@ _RESOLVE_ATTEMPTS = 10
 _RESOLVE_PAUSE_S = 1.0
 #: Palier de la politique → alias de modèle que ``claude --model`` accepte.
 _TIER_ALIAS = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
+#: Mesuré le 2026-11-06 : 45 k jetons de contexte au premier tour sans ces options, 10 k avec. Sans ``Skill`` ni ``Agent``.
+LEAN_SESSION_ARGS = ("--strict-mcp-config", "--tools", "Bash,Read,Edit,Write,Glob,Grep")
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +405,33 @@ def _halt(exec_: Exec, cwd: Path, short: str, claude_bin: str) -> tuple[bool, st
     return False, f", session {short} NON arrêtée ({why})"
 
 
+def _worktree_hooks(wt_path: Path) -> str:
+    """#957 : le worktree du worker porte le hook PreToolUse ; ``""`` ou la raison d'un refus.
+
+    Un dépôt qui ne suit pas ses fichiers d'hôte (``.claude/`` non suivi) donne un worktree sans hooks : on y rejoue la
+    synchronisation de l'hôte Claude (fichiers non suivis, retirés avec le worktree), puis on vérifie. Échec fermé.
+    """
+    from grimoire.bridges.schemas import HostId
+    from grimoire.hosts.sync import sync_host_surfaces
+
+    def armed() -> bool:
+        try:
+            data = json.loads((wt_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            return bool(data.get("hooks", {}).get("PreToolUse"))
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    if armed():
+        return ""
+    outcome = sync_host_surfaces(wt_path, only=frozenset({HostId.CLAUDE_CODE_CLI}))
+    if armed():
+        # Fichiers générés, propres à ce worktree : ignorés par lui seul, sinon le relecteur et le janitor y verraient
+        # des « modifications non commitées » et refuseraient de relire ou de ranger.
+        (wt_path / ".claude" / ".gitignore").write_text("*\n", encoding="utf-8")
+        return ""
+    return f"worktree sans hook PreToolUse Grimoire après host sync ({outcome.error or outcome.warning or 'hook absent'})"
+
+
 def _freeze_repository(service: TaskService, task_id: str) -> str:
     """Lot 4 : fige le dépôt GitHub de la tâche au journal d'autorité, avant le worker ; ``""`` ou la raison d'un refus."""
     from grimoire.missions.review_seal import freeze_repository
@@ -492,6 +523,8 @@ def resume_worker(
     argv = [claude_bin, "--bg", "--resume", str(launch.get("session_id") or "")]
     # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
     routed = ["--settings", str(settings_path(str(launch["provider"])))] if launch.get("provider") else []
+    if launch.get("lean"):
+        routed += LEAN_SESSION_ARGS
     argv += routed
     if permission_mode:
         argv += ["--permission-mode", permission_mode]
@@ -558,14 +591,21 @@ class WorkerLauncher:
             if e.event_type in (LAUNCHED_EVENT, LAUNCH_FAILED_EVENT) and _day(e.created_at) == today
         )
 
-    def _model_for(self, admit: Admit) -> str:
+    def _tier_for(self, task: MissionTask) -> str:
+        """Le palier de cette tâche : ``cheap`` pour une V0 sous ``model_by_class``, sinon celui du rôle."""
+        role = self._policy.worker
+        return "cheap" if role.model_by_class and classify(task) is Verifiability.V0 else role.tier
+
+    def _model_for(self, admit: Admit, tier: str | None = None) -> str:
         role = self._policy.worker
         if role.model:
             return role.model
+        if role.model_by_class and tier == "cheap":
+            return _TIER_ALIAS["cheap"]  # un verdict mécanique juge seul : la route du routeur ne remonte pas ce palier
         route = admit.route
         if route is not None and route.outcome == "route" and route.model and route.provider.lower() in {"anthropic", "claude", "claude-code"}:
             return route.model
-        return _TIER_ALIAS.get(role.tier, "")
+        return _TIER_ALIAS.get(tier if tier is not None else role.tier, "")
 
     def _host_version(self) -> str:
         """La version de l'hôte (``claude --version``), lue une fois par tick (P86) ; ``""`` si illisible.
@@ -623,12 +663,13 @@ class WorkerLauncher:
         except (GrimoireError, ValueError, OSError) as exc:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
-        refused = _freeze_repository(service, tid)
+        refused = _worktree_hooks(wt.path) or _freeze_repository(service, tid)
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
-        route = route_worker(service.home_root, self._policy.worker.provider, self._policy.worker.tier, service.require(tid))
-        model = route.model if route is not None else self._model_for(admit)
+        tier = self._tier_for(service.require(tid))
+        route = route_worker(service.home_root, self._policy.worker.provider, tier, service.require(tid))
+        model = route.model if route is not None else self._model_for(admit, tier)
         result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
@@ -659,6 +700,7 @@ class WorkerLauncher:
             {
                 "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
                 "provider": route.provider if route is not None else "",
+                "lean": self._policy.worker.lean,
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
             },
@@ -732,6 +774,8 @@ class WorkerLauncher:
         argv = [self._claude, "--bg", "--name", f"grimoire-{tid}"]
         if route is not None:
             argv += ["--settings", str(route.settings)]
+        if self._policy.worker.lean:
+            argv += LEAN_SESSION_ARGS
         if model:
             argv += ["--model", model]
         if self._policy.worker.permission_mode:
