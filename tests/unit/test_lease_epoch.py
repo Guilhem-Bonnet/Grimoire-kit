@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+import grimoire.missions.ledger_files as ledger_files_mod
 from grimoire.cli.cmd_task import task_app
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions import ledger as ledger_mod
@@ -529,7 +530,7 @@ def test_any_write_without_lock_is_refused(tmp_path: Path, monkeypatch: pytest.M
     def no_lock(path: Path) -> Any:
         raise OSError("flock non supporté")
 
-    monkeypatch.setattr(ledger_mod, "locked", no_lock)
+    monkeypatch.setattr(ledger_files_mod, "locked", no_lock)
     with pytest.raises(GrimoireMissionError, match="aucun verrou"):
         ledger.transition_task(tid, TaskState.BLOCKED)
     with pytest.raises(GrimoireMissionError, match="aucun verrou"):
@@ -606,7 +607,7 @@ def test_cli_reap_says_clock_unknown_and_lock_refusal(tmp_path: Path, monkeypatc
     def no_lock(path: Path) -> Any:
         raise TimeoutError("verrou occupé")
 
-    monkeypatch.setattr(ledger_mod, "locked", no_lock)
+    monkeypatch.setattr(ledger_files_mod, "locked", no_lock)
     res = runner.invoke(task_app, ["reap", *common])
     assert res.exit_code == 1 and "aucun verrou" in res.output
 
