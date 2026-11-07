@@ -1,1 +1,0 @@
-- fix(reviewer): un relecteur arrêté (`idle`) sans reçu n'attend plus `REVIEW_TIMEOUT` (2 h) : relancé au tick suivant une fois la CI de la tête terminée (compté dans `MAX_RELAUNCHES`) ; une CI rouge sur la tête en relecture renvoie la tâche au worker sans reçu (#1123)

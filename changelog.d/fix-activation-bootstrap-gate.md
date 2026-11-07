@@ -1,1 +1,0 @@
-- fix(standard): la consigne de démarrage ne demande plus `gate check --task-id bootstrap` quand cette tâche n'est pas sur le board (#1127)
