@@ -87,16 +87,26 @@ def backend_catalogue() -> dict[str, Any]:
     }
 
 
-def _store_graph_parity(manager: Any, entries: int) -> dict[str, Any]:
+def _store_graph_parity(manager: Any, entries: int, *, backend_status: Any | None = None) -> dict[str, Any]:
     """Dérive store ↔ graphe : le signal qu'une projection cassée produit.
 
     Trois COUNT sur Neo4j — assez léger pour une route de statut, là où
     ``memory graph verify`` reconstruit tout le code graph. Dict vide quand
     aucun graphe n'est câblé : une absence de graphe n'est pas une dérive.
+
+    ``backend_status`` (la sonde de santé déjà rendue) évite une seconde
+    sonde séquentielle : ``MemoryManager.health_check`` interroge le graphe
+    **en parallèle** des autres services, borné à 0,3 s. Quand ce verdict dit
+    le graphe en erreur ou désactivé, relancer ``stats()`` ici repayait le
+    délai d'un Neo4j absent — exactement ce que #954 supprime.
     """
     graph = getattr(manager, "memory_graph", None)
     if graph is None:
         return {}
+    detail = getattr(backend_status, "detail", None) or {}
+    if detail.get("neo4j_graph_sync") in ("error", "disabled"):
+        reason = (detail.get("neo4j_graph_sync_detail") or {}).get("reason") or "graphe Neo4j indisponible"
+        return {"error": str(reason)}
     try:
         stats = graph.stats()
         graph_memories = int(stats.get("memories", 0))
@@ -145,6 +155,12 @@ def _probe_memory_link_status(project_root: Path, cfg: Any, manager: Any | None 
     ``manager`` : un ``MemoryManager`` déjà construit par l'appelant, réutilisé
     tel quel — l'aperçu de flotte n'en ouvre qu'un par projet.
 
+    Les services (backend vectoriel, Redis, Neo4j) sont sondés **de front**
+    par ``MemoryManager.health_check``, chacune bornée à 0,3 s : la durée
+    suit la sonde la plus lente, pas leur somme (#954). Le verdict du graphe
+    déjà obtenu sert ensuite à :func:`_store_graph_parity`, qui n'ajoute
+    aucune sonde séquentielle.
+
     Une sonde en échec (backend malade, sonde expirée) rend ``entries: None``
     et sa raison dans ``error`` : une lecture ratée n'est pas un zéro (#264).
     """
@@ -164,7 +180,7 @@ def _probe_memory_link_status(project_root: Path, cfg: Any, manager: Any | None 
         if health.healthy:
             status["state"] = "ok"
             status["entries"] = health.entries
-            status["parity"] = _store_graph_parity(mgr, health.entries)
+            status["parity"] = _store_graph_parity(mgr, health.entries, backend_status=health)
         else:
             status["state"] = "unavailable"
             status["error"] = str(
@@ -209,9 +225,11 @@ def memory_link_status(project_root: Path, *, probe: bool = False, manager: Any 
     (``True`` passé le TTL du cache, ou si rien n'a jamais été sondé) — jamais
     une donnée périmée présentée comme fraîche. Sans cache, il rend la config
     connue seule (``configuredBackend``), sans sonder. ``probe=True`` force
-    une sonde fraîche (coûteuse : réseau, jusqu'à trois services) et
-    rafraîchit le cache pour les lectures rapides suivantes ; ``manager``
-    (sonde seulement) réutilise un ``MemoryManager`` déjà ouvert.
+    une sonde fraîche (coûteuse : réseau, jusqu'à trois services, mais
+    sondés de front et bornés à 0,3 s chacun — la durée suit le plus lent,
+    pas leur somme, #954) et rafraîchit le cache pour les lectures rapides
+    suivantes ; ``manager`` (sonde seulement) réutilise un ``MemoryManager``
+    déjà ouvert.
     """
     from grimoire.core.config import GrimoireConfig
     from grimoire.core.exceptions import GrimoireConfigError

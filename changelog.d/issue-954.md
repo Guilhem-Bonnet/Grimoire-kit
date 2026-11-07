@@ -1,0 +1,1 @@
+- fix(memory): le statut mémoire sonde les services en parallèle et borne à 0,3 s les connexions de boucle locale ; un délai dépassé reste « inconnu » (#954)
