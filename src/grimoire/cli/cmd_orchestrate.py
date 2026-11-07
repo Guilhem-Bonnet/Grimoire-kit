@@ -3,8 +3,9 @@
 ``pause`` pose un drapeau fichier (projet, machine ou tâches nommées), ``resume`` le lève, ``status`` dit ce
 qui est en pause et ce qu'un ``hold`` fait vraiment sur chaque hôte, ``tick`` est la fonction que les
 déclencheurs appellent (``--plan`` : le tick joué sur une copie du ledger, rien n'est écrit), ``install-timer``
-et ``uninstall-timer`` posent et retirent son minuteur optionnel. Aucune de ces commandes n'appelle de LLM. ``resume`` et la pause de toute la
-machine sont des gestes d'humain : l'origine humaine est exigée comme pour ``queue release``.
+et ``uninstall-timer`` posent et retirent son minuteur optionnel. Aucune de ces commandes n'appelle de LLM. La pause
+de toute la machine reste un geste d'humain, et ``resume`` en est un sauf pour la session qui a posé la pause elle-même
+(son identifiant est noté dans le drapeau) : l'origine humaine est exigée comme pour ``queue release``.
 """
 
 from __future__ import annotations
@@ -57,6 +58,25 @@ def _require_human(what: str, *, gesture: str = "", project_root: Path | None = 
     raise typer.Exit(1)
 
 
+def _pause_origin() -> tuple[str, str]:
+    """L'origine d'une pause et la session qui la pose — notées dans le drapeau, jamais ``--actor``.
+
+    Pas de confirmation interactive : pauser est le sens sûr. Une session se reconnaît à l'identifiant que
+    l'hôte exporte, aux variables d'agent ou à ``GRIMOIRE_UNATTENDED=1`` ; sans aucun signal, l'appelant est un
+    humain. Ce n'est pas une preuve, mais deux sessions n'ont pas le même identifiant : c'est ce que ``resume``
+    compare pour laisser une session lever sa propre pause.
+    """
+    import os
+
+    from grimoire.core.standard_state import agent_marker, current_session_id
+    from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN
+
+    session = current_session_id()
+    if session or agent_marker() or os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1":
+        return ORIGIN_AGENT, session
+    return ORIGIN_HUMAN, ""
+
+
 @orchestrate_app.command("pause")
 def orchestrate_pause(
     ctx: typer.Context,
@@ -87,10 +107,11 @@ def orchestrate_pause(
             typer.echo("--task ne se combine pas avec --global : un drapeau de machine ne nomme pas de tâche.", err=True)
             raise typer.Exit(2)
         _require_human("Pauser toute la machine")
+    origin, session = _pause_origin()
     try:
         flag = write_pause(
             project_root.resolve(), mode=HOLD if hold else DRAIN, scope=SCOPE_GLOBAL if global_scope else SCOPE_PROJECT,
-            tasks=tuple(task or ()), actor=actor, reason=reason,
+            tasks=tuple(task or ()), actor=actor, reason=reason, origin=origin, session=session,
         )
     except PauseError as exc:
         typer.echo(str(exc), err=True)
@@ -99,7 +120,7 @@ def orchestrate_pause(
         typer.echo(json.dumps(flag.to_dict(), indent=2, ensure_ascii=False))
         return
     console.print(f"Pause posée : {flag.label}.")
-    console.print("[dim]`grimoire orchestrate resume` la lève ; le tick suivant rend alors les attentes `paused`.[/dim]")
+    console.print("[dim]`grimoire orchestrate resume` la lève : un humain, ou la session qui l'a posée.[/dim]")
 
 
 @orchestrate_app.command("resume")
@@ -110,13 +131,29 @@ def orchestrate_resume(
     project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
     json_output: Annotated[bool, _JSON_OPTION] = False,
 ) -> None:
-    """Lève le drapeau (geste d'humain). Le tick suivant repasse les `waiting(paused)` en `ready`, dans l'ordre de la file."""
-    from grimoire.missions.pause import SCOPE_GLOBAL, SCOPE_PROJECT, PauseError, clear_pause
+    """Lève le drapeau. Une session ne lève que la pause qu'elle a posée ; les autres sont des gestes d'humain.
 
-    _require_human("Reprendre", gesture="" if global_scope else "resume", project_root=project_root)
+    Le tick suivant repasse les `waiting(paused)` en `ready`, dans l'ordre de la file.
+    """
+    from grimoire.cli.cmd_task import _comment_origin
+    from grimoire.core.standard_state import current_session_id
+    from grimoire.missions.mandate import gesture_origin
+    from grimoire.missions.pause import SCOPE_GLOBAL, SCOPE_PROJECT, PauseError, clear_pause
+    from grimoire.missions.schemas import ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR
+
+    if global_scope:
+        _require_human("Reprendre", project_root=project_root)
+        origin, session = ORIGIN_HUMAN, ""
+    else:
+        origin, _provenance = gesture_origin(_comment_origin())
+        session = current_session_id()
+        if origin == ORIGIN_ORCHESTRATOR:
+            # Le mandat peut couvrir une pause posée par un humain ou le disjoncteur (#876, verrou 6).
+            _require_human("Reprendre", gesture="resume", project_root=project_root)
     try:
         lifted = clear_pause(
-            project_root.resolve(), scope=SCOPE_GLOBAL if global_scope else SCOPE_PROJECT, tasks=tuple(task or ())
+            project_root.resolve(), scope=SCOPE_GLOBAL if global_scope else SCOPE_PROJECT, tasks=tuple(task or ()),
+            origin=origin, session=session,
         )
     except PauseError as exc:
         typer.echo(str(exc), err=True)

@@ -14,6 +14,10 @@ Le tick et le frein d'outil lisent les deux (au plus deux lectures) et appliquen
 l'emporte sur ``drain``. Un drapeau **illisible** (JSON invalide, permission, schéma ou mode inconnu) vaut
 ``drain`` à son niveau, avec une ligne d'attention : une garde qui ne sait pas lire refuse, elle ne laisse pas passer.
 
+Le drapeau note qui l'a posé (``origin`` : ``human`` ou ``agent``) et, pour une session, son identifiant
+(``session``). Une session lève la pause qu'elle a posée elle-même ; celle d'un humain, du disjoncteur ou
+d'une autre session reste réservée à l'humain (ou à l'orchestrateur sous mandat, contrôlé par l'appelant).
+
 - ``drain`` : rien n'est admis, les agents en cours finissent leur tâche ;
 - ``hold`` : en plus, sur un hôte dont le refus d'outil est prouvé (``hosts.capabilities``), le frein refuse les
   outils mutants, sauf **une** écriture, le point de reprise ``waiting(paused)``. Sur un hôte sans frein, il se
@@ -92,6 +96,10 @@ class PauseFlag:
     actor: str = ""
     reason: str = ""
     unreadable: str = ""
+    #: Le canal qui a posé la pause (``human``, ``agent``) ; ``""`` pour un drapeau antérieur au champ.
+    origin: str = ""
+    #: La session qui a posé la pause (:func:`grimoire.core.standard_state.current_session_id`) ; ``""`` si aucune.
+    session: str = ""
 
     def covers(self, task_id: str | None) -> bool:
         """Le drapeau porte sur *task_id* ; ``None`` interroge le périmètre du projet entier."""
@@ -110,6 +118,7 @@ class PauseFlag:
         return {
             "scope": self.scope, "mode": self.mode, "tasks": list(self.tasks), "since": self.since,
             "actor": self.actor, "reason": self.reason, "unreadable": self.unreadable,
+            "origin": self.origin, "session": self.session,
         }
 
 
@@ -231,7 +240,8 @@ def read_flag(path: Path, scope: str) -> PauseFlag | None:
         return value if isinstance(value, str) else ""
 
     return PauseFlag(
-        scope, str(mode), tuple(t.strip() for t in tasks), text("since"), text("actor"), text("reason")
+        scope, str(mode), tuple(t.strip() for t in tasks), text("since"), text("actor"), text("reason"),
+        origin=text("origin"), session=text("session"),
     )
 
 
@@ -270,6 +280,8 @@ def write_pause(
     tasks: Iterable[str] = (),
     actor: str = "cli",
     reason: str = "",
+    origin: str = "",
+    session: str = "",
     now: datetime | None = None,
     control_home: Path | None = None,
 ) -> PauseFlag:
@@ -277,6 +289,9 @@ def write_pause(
 
     Une pause de tâches sous une pause de tout le périmètre est refusée si elle ne la renforce pas
     (un seul drapeau par niveau : ``drain`` projet + ``hold`` d'une tâche ne tient pas dans un fichier).
+
+    *origin* et *session* disent qui pose la pause ; sans eux, ceux du drapeau existant sont conservés. C'est ce
+    que :func:`clear_pause` vérifie pour laisser une session lever sa propre pause.
     """
     if mode not in MODES:
         raise PauseError(f"mode inconnu : {mode!r} (attendu : {', '.join(MODES)})")
@@ -296,14 +311,41 @@ def write_pause(
             )
         if names and existing.tasks and existing.mode == mode:
             names = tuple(dict.fromkeys((*existing.tasks, *names)))
+        # Sans origine neuve, le drapeau garde son titulaire : un appel de code ne réécrit pas qui l'a posé.
+        origin = origin or existing.origin
+        session = session or existing.session
     stamp = (now or datetime.now(UTC)).isoformat()
-    flag = PauseFlag(scope, mode, names, stamp, actor, reason)
+    flag = PauseFlag(scope, mode, names, stamp, actor, reason, origin=origin, session=session)
     payload = {
         "schema": SCHEMA, "mode": mode, "tasks": list(names), "since": stamp, "actor": actor, "reason": reason,
+        "origin": origin, "session": session,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     return flag
+
+
+def _lift_refusal(existing: PauseFlag, *, origin: str, session: str) -> str:
+    """Pourquoi l'appelant (``origin``, ``session``) ne peut pas lever *existing* ; ``""`` : il peut.
+
+    L'humain lève tout. L'orchestrateur sous mandat aussi : son mandat est contrôlé par l'appelant
+    (:func:`grimoire.missions.mandate.require_authority`), jamais ici. Une session d'agent ne lève que la pause
+    qu'elle a posée : même origine ``agent`` et même identifiant de session, tous deux non vides. Sans origine
+    (appel de code du kit, tests), le contrôle ne s'applique pas. Un drapeau antérieur au champ n'a pas d'origine :
+    il reste réservé à l'humain, comme un drapeau illisible qui ne se supprime que pour se réparer.
+    """
+    from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR
+
+    if not origin or origin in (ORIGIN_HUMAN, ORIGIN_ORCHESTRATOR):
+        return ""
+    if existing.origin == ORIGIN_AGENT and existing.session and session and existing.session == session:
+        return ""
+    if existing.origin == ORIGIN_AGENT:
+        who = "une autre session" if existing.session else "une session non identifiée"
+        return f"pause posée par {who} : elle seule ou un humain la lève"
+    if existing.origin == ORIGIN_HUMAN:
+        return "pause posée par un humain : seul un humain la lève"
+    return "origine de la pause non établie : seul un humain la lève"
 
 
 def clear_pause(
@@ -312,16 +354,26 @@ def clear_pause(
     scope: str = SCOPE_PROJECT,
     tasks: Iterable[str] = (),
     control_home: Path | None = None,
+    origin: str = "",
+    session: str = "",
 ) -> PauseFlag | None:
     """Lève la pause. Sans *tasks*, le drapeau est supprimé ; avec, ces tâches en sortent et le drapeau reste pour les autres.
 
     Renvoie le drapeau tel qu'il était (``None`` s'il n'y en avait pas). Un drapeau illisible se supprime : c'est
     le seul moyen de le réparer. Une reprise de tâches sur une pause de tout le périmètre est refusée.
+
+    *origin* et *session* disent qui lève : une session d'agent ne lève que la pause qu'elle a posée elle-même
+    (:func:`_lift_refusal`) ; une pause humaine ou posée par une autre session lève :class:`PauseError`. Sans
+    origine, l'appel de code n'est pas soumis à la règle.
     """
     path = _target(project_root, scope, control_home)
     existing = read_flag(path, scope)
     if existing is None:
         return None
+    if not existing.unreadable:
+        refusal = _lift_refusal(existing, origin=origin, session=session)
+        if refusal:
+            raise PauseError(refusal)
     names = tuple(dict.fromkeys(t.strip() for t in tasks if t and t.strip()))
     if names and not existing.unreadable:
         if not existing.tasks:
