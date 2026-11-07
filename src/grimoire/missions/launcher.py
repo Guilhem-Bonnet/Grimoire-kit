@@ -115,7 +115,9 @@ _RESOLVE_PAUSE_S = 1.0
 #: Palier de la politique → alias de modèle que ``claude --model`` accepte.
 _TIER_ALIAS = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
 #: Mesuré le 2026-11-06 : 45 k jetons de contexte au premier tour sans ces options, 10 k avec. Sans ``Skill`` ni ``Agent``.
-LEAN_SESSION_ARGS = ("--strict-mcp-config", "--tools", "Bash,Read,Edit,Write,Glob,Grep")
+#: ``--tools`` est variadique : en deux jetons, il avale la consigne qui le suit (relecteur muet, #1160).
+LEAN_TOOLS = "Bash,Read,Edit,Write,Glob,Grep"
+LEAN_SESSION_ARGS = ("--strict-mcp-config", f"--tools={LEAN_TOOLS}")
 
 
 @dataclass(frozen=True, slots=True)

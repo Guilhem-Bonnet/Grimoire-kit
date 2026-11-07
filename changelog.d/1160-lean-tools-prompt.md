@@ -1,0 +1,1 @@
+- fix(missions): le profil allégé (`lean`) passe `--tools=<liste>` en un seul jeton : en deux, l'option variadique avalait la consigne du relecteur (25 relectures muettes sur 26) et le message de reprise d'un worker sans `permission_mode` (#1160)
