@@ -73,12 +73,21 @@ EXPECTED_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     S.CLAIMED: frozenset({S.RUNNING, S.READY, S.BLOCKED, S.FAILED, S.CANCELLED, S.WAITING}),
     S.RUNNING: frozenset({S.NEEDS_VERIFICATION, S.BLOCKED, S.FAILED, S.CANCELLED, S.READY, S.WAITING}),
     S.BLOCKED: frozenset({S.READY, S.CANCELLED}),
-    S.NEEDS_VERIFICATION: frozenset({S.CLOSED, S.RUNNING, S.FAILED, S.CANCELLED}),
+    S.NEEDS_VERIFICATION: frozenset({S.CLOSED, S.RUNNING, S.FAILED, S.CANCELLED, S.BLOCKED}),
     S.FAILED: frozenset({S.READY, S.CANCELLED}),
     S.CLOSED: frozenset(),
     S.CANCELLED: frozenset(),
     S.WAITING: frozenset({S.RUNNING, S.READY, S.FAILED, S.CANCELLED}),  # FAILED : l'abandon du pilote (P82), réouvrable
 }
+
+def test_needs_verification_to_blocked_directly(tmp_path: Path) -> None:
+    """Issue #1124 : une tâche en revue se gare sans repasser par un état réclamable."""
+    ledger = MissionLedger(tmp_path)
+    tid = _in_state(ledger, S.NEEDS_VERIFICATION)
+    ledger.transition_task(tid, S.BLOCKED, reason="revue rejetée", actor_id="reviewer")
+    task = ledger.get_task(tid)
+    assert task is not None and task.status is S.BLOCKED
+
 
 _WAITING_PAYLOAD = {"waiting": Waiting("quota", "unknown", None, None, "2026-10-17T00:00:00+00:00").to_dict()}
 
