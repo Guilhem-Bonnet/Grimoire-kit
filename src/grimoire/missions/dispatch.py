@@ -85,6 +85,7 @@ from grimoire.missions.empty_green import classify_empty_green, invokes_test_run
 from grimoire.missions.route_dispatch import record_route
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.verifiability import Verifiability, classify
+from grimoire.providers.data_policy import split_by_data_policy
 from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
 from grimoire.providers.routing import candidates as provider_candidates
@@ -702,6 +703,7 @@ _REFUSAL_MESSAGES: dict[str, str] = {
     "no_check": "au moins un `--check` est requis : la classe dit que le verdict est mécanique, la commande dit lequel",
     "no_tier": "aucun palier disponible entre le plancher de la classe et --max-tier",
     "no_provider": "aucun fournisseur invocable sur la chaîne de paliers prévue",
+    "data_policy": "la politique de données ferme tous les fournisseurs de la chaîne (#1133)",
     "routing_policy_invalid": "politique de routage illisible : aucune route autonome (`on_invalid: refuse`)",
     "routed_to_session": "le routeur actif décide `session` : aucun appel autonome, la session tranche",
     "routed_defer": "le routeur actif décide `defer` : aucun modèle admis disponible, attente",
@@ -1275,15 +1277,14 @@ def run_dispatch(
         return service.ledger.append_event("task.dispatched", task_id, "task", actor, payload)
 
     tree_before = worktree_fingerprint(root)
+    data_refusals: dict[str, str] = {}
     attempt_no = 0
     previous_red_diff: str | None = None
     capped_before_next_tier = False
     cap_why: str | None = None
     for tier_idx, tier in enumerate(chain):
-        # Un fournisseur sans `invocation` déclarée n'est jamais candidat ici :
-        # `candidates()` sert aussi `providers status`, où un fournisseur sans
-        # commande d'appel reste une information utile à afficher — seule la
-        # cascade, qui doit réellement l'exécuter, a besoin de l'exclure.
+        # Un fournisseur sans `invocation` n'est jamais candidat ici : `candidates()` sert aussi `providers status`,
+        # où il reste utile à afficher ; seule la cascade, qui doit l'exécuter, a besoin de l'exclure.
         # En exécution sans humain (`GRIMOIRE_UNATTENDED=1`), un fournisseur
         # jamais sondé n'est pas candidat : personne ne verrait qu'il est cassé.
         autonomous = os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1"
@@ -1291,6 +1292,8 @@ def run_dispatch(
         tier_candidates = routing.order(tier, tier_candidates)
         if provider_id:
             tier_candidates = tuple(p for p in tier_candidates if p.id == provider_id)
+        tier_candidates, refused_here = split_by_data_policy(root, tier_candidates, task.data_class)
+        data_refusals.update(refused_here)
         tier_settled = False
         for provider in tier_candidates:
             if routing.exhausted(attempt_no):
@@ -1434,19 +1437,17 @@ def run_dispatch(
         return capped_report
 
     if not attempts:
-        # Aucun fournisseur candidat sur toute la chaîne : la cascade n'a
-        # jamais appelé personne. Distinct d'une chaîne épuisée (des
-        # tentatives ont eu lieu, aucune n'est allée au vert) — c'est un
-        # refus, pas un échec de la délégation elle-même.
+        # Aucun candidat sur toute la chaîne : personne n'a été appelé. Distinct d'une chaîne épuisée (des tentatives,
+        # aucune au vert) : c'est un refus, pas un échec de la délégation elle-même.
         return DispatchReport(
             task_id=task_id,
             verifiability=verifiability.value,
             dry_run=False,
             planned_chain=chain,
             prompt=prompt,
-            refusal="no_provider",
-            start_tier=chosen_tier,
-            start_tier_reason=start_tier_reason,
+            refusal="data_policy" if data_refusals else "no_provider",
+            start_tier=None if data_refusals else chosen_tier,
+            start_tier_reason="; ".join(data_refusals.values()) if data_refusals else start_tier_reason,
         )
 
     report = DispatchReport(

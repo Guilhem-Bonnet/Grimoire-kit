@@ -458,7 +458,7 @@ def _write_registry(root: Path, provider_ids: list[str], *, tier: str = "cheap")
     entries = "\n".join(
         f'  - id: "{pid}"\n'
         f"    enabled: true\n"
-        f'    provider_type: "hosted"\n'
+        f'    provider_type: "hosted"\n    data_policy:\n      allowed_data_classes: ["project-source"]\n'
         f'    allowed_capabilities: ["chat"]\n'
         f'    default_models: ["{pid}-model"]\n'
         f'    currency: "api"\n'
@@ -479,6 +479,7 @@ metadata:
 providers:
 {entries}
 routing:
+  default_data_class: "project-source"
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true
@@ -564,6 +565,8 @@ providers:
   - id: "{pid}"
     enabled: true
     provider_type: "hosted"
+    data_policy:
+      allowed_data_classes: ["project-source"]
     allowed_capabilities: ["chat"]
     default_models: ["{pid}-model"]
     currency: "api"
@@ -573,6 +576,7 @@ providers:
         tier: "{tier}"
     fallback_order: []
 routing:
+  default_data_class: "project-source"
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true
@@ -640,6 +644,7 @@ metadata:
   policy: "No provider/model call outside this registry."
 providers: []
 routing:
+  default_data_class: "project-source"
   default_provider: ""
   default_fallback_chain: []
   require_capability_match: true

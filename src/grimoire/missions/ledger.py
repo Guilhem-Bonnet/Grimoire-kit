@@ -613,6 +613,7 @@ class MissionLedger:
         checks: tuple[TaskCheck, ...] = (),
         test_depth: str = "",
         finition: str = "",
+        data_class: str = "",
     ) -> MissionTask:
         self._load()
         if mission_id not in self._missions:
@@ -644,6 +645,7 @@ class MissionLedger:
             checks=checks,
             test_depth=test_depth,
             finition=finition,
+            data_class=data_class,
         )
         self._append_event("task.created", task.id, "task", owner or "system", task.to_dict())
         return task
