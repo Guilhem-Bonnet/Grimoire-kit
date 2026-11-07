@@ -75,7 +75,8 @@ def sync_host_surfaces(project_root: Path, *, only: frozenset[HostId] | None = N
         enabled = enabled_host_ids(project_root)
         plans: list[EmitPlan] = []
         for host_id in supported_hosts():
-            if host_id not in enabled or (only is not None and host_id not in only):
+            # `only` est une demande explicite : elle prime sur la détection, qu'un worktree sans contexte projet rend vide.
+            if host_id not in (only if only is not None else enabled):
                 continue
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - registry is complete
