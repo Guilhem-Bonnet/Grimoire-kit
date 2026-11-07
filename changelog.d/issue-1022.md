@@ -1,1 +1,0 @@
-- fix(missions): le PATH de l'unité du tick garde le dossier des exécutables appelés par chemin absolu dans les hooks des réglages Claude Code utilisateur et projet (#1022)
