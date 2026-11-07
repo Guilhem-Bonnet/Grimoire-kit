@@ -813,8 +813,7 @@ class MissionLedger:
         moved = self._tasks[task_id]
         if to_state is TaskState.RUNNING and task.status in _RESUMING and moved.claim is not None:
             # #1149 : une reprise rouvre le bail, sinon un claim échu la fait récolter au tick suivant.
-            epoch = moved.claim.lease_epoch
-            cached = read_lease(lease_path(self._root, task_id))
+            epoch, cached = moved.claim.lease_epoch, read_lease(lease_path(self._root, task_id))
             if cached is None or cached.epoch <= epoch:  # un fichier en avance est une barrière : on n'y touche pas
                 return self._renew_locked(moved, epoch, self._now(), DEFAULT_LEASE_TTL_SECONDS, "", actor_id)
         return moved
@@ -1029,8 +1028,8 @@ class MissionLedger:
         task_id, claim = task.id, task.claim
         assert claim is not None  # les deux appelants l'ont vérifié
         path = lease_path(self._root, task_id)
-        previous = read_lease(path)
-        write_lease(path, LeaseFile(task_id, lease_epoch, moment.isoformat(), ttl_seconds, busy or (previous.busy_until if previous else "")))
+        kept = previous.busy_until if (previous := read_lease(path)) else ""
+        write_lease(path, LeaseFile(task_id, lease_epoch, moment.isoformat(), ttl_seconds, busy or kept))
         expires = parse_instant(claim.expires_at)
         half = timedelta(seconds=DEFAULT_CLAIM_TTL_SECONDS / 2)
         if expires is not None and expires - moment < half and self.clock_state(moment) == "ok":
