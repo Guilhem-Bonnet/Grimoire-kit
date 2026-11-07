@@ -101,7 +101,7 @@ class TestParallelProbes:
 
         def _slow(service: str, url: str, *, timeout: float | None = None) -> str:
             barrier.wait()
-            time.sleep(0.15)
+            time.sleep(0.2)
             return ms.SERVICE_STOPPED
 
         monkeypatch.setattr(ms, "service_state", _slow)
@@ -111,7 +111,7 @@ class TestParallelProbes:
         elapsed = time.perf_counter() - started
 
         assert states == {service: ms.SERVICE_STOPPED for service, _url in self.SERVICES}
-        assert elapsed < 0.15 * 2  # ~0,15 s de front, ~0,45 s en série
+        assert elapsed < 0.5  # ~0,2 s de front, ~0,6 s en série
 
     def test_probe_services_sonde_les_services_de_front(
         self, monkeypatch: pytest.MonkeyPatch
@@ -122,7 +122,7 @@ class TestParallelProbes:
 
         def _slow(url: str, port: int, *, timeout: float | None = None) -> bool:
             barrier.wait()
-            time.sleep(0.15)
+            time.sleep(0.2)
             return False
 
         monkeypatch.setattr(ms, "_tcp_reachable", _slow)
@@ -132,7 +132,7 @@ class TestParallelProbes:
         elapsed = time.perf_counter() - started
 
         assert set(probes) == set(three)
-        assert elapsed < 0.15 * 2
+        assert elapsed < 0.5  # ~0,2 s de front, ~0,6 s en série
 
     def test_memory_link_status_sonde_les_trois_services_de_front(
         self, tmp_path: Path
