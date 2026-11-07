@@ -413,6 +413,28 @@ def dirty_files(hook: HookInput) -> tuple[str, ...]:
     return tuple(lines[:_MAX_UNATTACHED_FILES])
 
 
+def acknowledged_mutation_count(hook: HookInput) -> int:
+    """Le compteur d'écritures que ``Stop`` a déjà signalé hors tâche (issue #1126) — ``0`` sans journal."""
+    if not hook.session_id:
+        return 0
+    try:
+        from grimoire.policies.session_state import session_acknowledged_mutations
+
+        return session_acknowledged_mutations(hook.project_root, hook.session_id)
+    except Exception:
+        return 0
+
+
+def acknowledge_mutations(hook: HookInput, mutations: int) -> None:
+    """Best-effort : retient *mutations* comme signalé, pour ne relancer que si le compteur augmente."""
+    with contextlib.suppress(Exception):
+        from grimoire.policies.session_state import note_acknowledged_mutations
+
+        note_acknowledged_mutations(
+            hook.project_root, hook.session_id, mutations, now_iso=datetime.now(UTC).isoformat()
+        )
+
+
 def record_unattached_work(hook: HookInput, mutations: int) -> dict[str, Any]:
     """Journalise ``session.unattached_work{files, mutations}`` (§5.1) et le rend pour le détail de la décision.
 

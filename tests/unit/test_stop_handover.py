@@ -183,3 +183,25 @@ def test_another_session_is_not_let_through_by_a_handed_over_task(governed: Path
     _edit(governed, session="autre")
     _, decision = _hook(governed, HookEvent.STOP, session="autre", stop_hook_active=False)
     assert decision.outcome is Outcome.BLOCK and decision.detail["blocked_on"] == "no_active_task"
+
+
+def _unattached(root: Path, session: str = "libre") -> None:
+    _edit(root, session=session)
+
+
+def test_the_no_task_reminder_is_not_repeated_without_new_writes(governed: Path) -> None:
+    """Issue #1126 : le rappel « Clôture hors tâche » n'est rendu qu'une fois par palier d'écritures."""
+    _unattached(governed)
+    _, first = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert first.outcome is Outcome.BLOCK and first.detail["blocked_on"] == "no_active_task"
+
+    _, again = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert again.outcome is Outcome.ALLOW, again.reason
+
+
+def test_a_new_write_after_the_acknowledgement_is_refused_again(governed: Path) -> None:
+    _unattached(governed)
+    _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    _unattached(governed)
+    _, decision = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert decision.outcome is Outcome.BLOCK and decision.detail["mutations"] == 2

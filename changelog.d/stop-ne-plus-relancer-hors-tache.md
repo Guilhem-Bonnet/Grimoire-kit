@@ -1,0 +1,1 @@
+- fix(stop): le rappel « Clôture hors tâche » n'est plus relancé à chaque tour tant que la session n'a pas écrit de nouveau (#1126)
