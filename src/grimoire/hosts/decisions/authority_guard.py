@@ -53,10 +53,11 @@ governed, fail-closed).
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from itertools import pairwise
 from pathlib import Path
@@ -398,6 +399,8 @@ class _Segment:
     words: list[str]
     redirects: list[tuple[str, str]]
     heredocs: int = 0
+    #: Les corps de heredoc à tag quoté (aucune expansion de shell) ; un tag non quoté y met ``None``.
+    bodies: list[str | None] = field(default_factory=list)
 
 
 class _Unreadable(Exception):  # noqa: N818 — signal interne : la commande sort de ce que la liste blanche sait lire
@@ -417,7 +420,7 @@ def _parse_strict(command: str) -> list[_Segment]:
     seg = _Segment([], [])
     word: list[str] = []
     in_word = quoted = False
-    pending: list[tuple[str, bool]] = []
+    pending: list[tuple[str, bool, _Segment, bool]] = []
     redirect = ""
     i, n = 0, len(command)
 
@@ -532,7 +535,7 @@ def _parse_strict(command: str) -> list[_Segment]:
                 tag = re.match(r"""(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1""", command[j:])
                 if tag is None:
                     raise _Unreadable("heredoc illisible")
-                pending.append((tag.group(2), strip_tabs))
+                pending.append((tag.group(2), strip_tabs, seg, bool(tag.group(1))))
                 seg.heredocs += 1
                 i = j + tag.end()
                 continue
@@ -552,11 +555,15 @@ def _parse_strict(command: str) -> list[_Segment]:
     return segments
 
 
-def _skip_heredoc_bodies(command: str, start: int, pending: list[tuple[str, bool]]) -> int:
-    """Saute le corps de chaque heredoc en attente ; un heredoc sans ligne de fin est illisible."""
+def _skip_heredoc_bodies(command: str, start: int, pending: list[tuple[str, bool, _Segment, bool]]) -> int:
+    """Saute le corps de chaque heredoc en attente ; un heredoc sans ligne de fin est illisible.
+
+    Le corps est gardé sur son segment quand le tag est quoté (rien n'y est développé par le shell).
+    """
     i = start
     while pending:
-        tag, strip_tabs = pending.pop(0)
+        tag, strip_tabs, owner, quoted = pending.pop(0)
+        lines: list[str] = []
         while True:
             if i > len(command):
                 raise _Unreadable("heredoc sans fin")
@@ -565,6 +572,8 @@ def _skip_heredoc_bodies(command: str, start: int, pending: list[tuple[str, bool
             i = len(command) + 1 if end < 0 else end + 1
             if (line.lstrip("\t") if strip_tabs else line) == tag:
                 break
+            lines.append(line.lstrip("\t") if strip_tabs else line)
+        owner.bodies.append("\n".join(lines) if quoted else None)
     return min(i, len(command))
 
 
@@ -590,7 +599,95 @@ def _stdin_option(words: list[str], options: tuple[str, ...]) -> bool:
     return any(a in options and b == "-" for a, b in pairwise(words)) or any(f"{o}=-" in words for o in options)
 
 
-def _harmless_segment(seg: _Segment, reaches: list[bool]) -> bool:
+# ── Lecture python prouvée (#1125) ───────────────────────────────────────────
+#
+# ``python3 -I - <<'P' … json.load(open('…/ledger.snapshot.json')) … P`` ne fait que lire. On ne le prouve que
+# sur l'arbre syntaxique, en liste blanche : le seul import est ``json``, ``open`` n'a que le mode de lecture,
+# les seuls appels sont des fonctions pures ou des méthodes de lecture de données. Tout le reste — autre
+# module, ``getattr``, ``exec``, nom ou attribut à double soulignement, ``.write``, ``Path`` — n'est pas prouvé.
+
+_PY_SAFE_FUNCS = frozenset(
+    {"print", "len", "sorted", "sum", "min", "max", "set", "list", "dict", "tuple", "str", "int", "float", "bool",
+     "enumerate", "range", "any", "all", "isinstance", "zip", "reversed", "abs", "round"}
+)
+_PY_SAFE_METHODS = frozenset(
+    {"get", "items", "keys", "values", "join", "format", "count", "startswith", "endswith", "split", "strip",
+     "lower", "upper", "index", "load", "loads", "dumps", "read", "copy"}
+)
+_PY_READ_MODES = frozenset({"r", "rb", "rt"})
+
+
+def _py_open_is_read(call: ast.Call) -> bool:
+    if not call.args or len(call.args) > 2 or not isinstance(call.args[0], ast.Constant):
+        return False
+    if len(call.args) == 2 and not (isinstance(call.args[1], ast.Constant) and call.args[1].value in _PY_READ_MODES):
+        return False
+    for kw in call.keywords:
+        if kw.arg == "mode":
+            if not (isinstance(kw.value, ast.Constant) and kw.value.value in _PY_READ_MODES):
+                return False
+        elif kw.arg != "encoding":
+            return False
+    return True
+
+
+def _python_reads_only(body: str) -> bool:
+    """Vrai seulement si le script python *body* est prouvé sans écriture ni effet de bord (liste blanche d'AST)."""
+    try:
+        tree = ast.parse(body)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(a.name != "json" or a.asname for a in node.names):
+                    return False
+            elif isinstance(node, ast.Call):
+                fn = node.func
+                if isinstance(fn, ast.Name):
+                    if fn.id == "open":
+                        if not _py_open_is_read(node):
+                            return False
+                    elif fn.id not in _PY_SAFE_FUNCS:
+                        return False
+                elif isinstance(fn, ast.Attribute):
+                    if fn.attr not in _PY_SAFE_METHODS:
+                        return False
+                else:
+                    return False
+                if fn_has_file_kw(node):
+                    return False
+            elif isinstance(node, ast.Name):
+                if node.id.startswith("__") or node.id in {"eval", "exec", "compile", "getattr", "setattr", "globals",
+                                                           "locals", "vars", "input", "breakpoint", "os", "sys"}:
+                    return False
+            elif isinstance(node, ast.Attribute):
+                if node.attr.startswith("_"):
+                    return False
+            elif isinstance(node, (ast.ImportFrom, ast.Global, ast.Nonlocal, ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom, ast.Delete,
+                                   ast.With, ast.Try)):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def fn_has_file_kw(call: ast.Call) -> bool:
+    """``print(…, file=f)`` écrit ailleurs que sur la sortie standard."""
+    return any(kw.arg == "file" or kw.arg is None for kw in call.keywords)
+
+
+def _python_stdin_segment(seg: _Segment) -> bool:
+    """``python[3] [-I|-B|-u|-S|-E]… -`` avec un seul heredoc à tag quoté dont le corps est prouvé en lecture seule."""
+    words = seg.words
+    if not words or not _PYTHON.match(words[0]) or seg.redirects or seg.heredocs != 1:
+        return False
+    flags = words[1:-1]
+    if words[-1] != "-" or any(f not in ("-I", "-B", "-u", "-S", "-E", "-s") for f in flags):
+        return False
+    body = seg.bodies[0] if seg.bodies else None
+    return body is not None and _python_reads_only(body)
+
+
+def _harmless_segment(seg: _Segment, reaches: list[bool], *, python_reads: bool = False) -> bool:
     """Le segment cite la zone seulement là où la liste blanche l'admet (voir :func:`is_harmless_mention`)."""
     words = seg.words
     if not words or "/" in words[0] or _ENV_ASSIGNMENT.match(words[0]):
@@ -625,10 +722,12 @@ def _harmless_segment(seg: _Segment, reaches: list[bool]) -> bool:
         return mentions <= _prose_positions(words, 3, _GH_PROSE)
     if program in _PLAIN:
         return not mentions and not seg.heredocs
+    if python_reads and _PYTHON.match(program):  # #1125 : lecture python prouvée (heredoc quoté lu sur l'AST)
+        return _python_stdin_segment(seg)
     return False
 
 
-def is_harmless_mention(command: str) -> bool:
+def is_harmless_mention(command: str, *, snapshot: bool = False) -> bool:
     """Vrai seulement si *command* cite la zone de contrôle de façon **prouvée** inoffensive (#982).
 
     La zone (chemin, nom d'un de ses fichiers, ou chemin résolu qui l'atteint) n'apparaît que dans : la valeur
@@ -639,6 +738,10 @@ def is_harmless_mention(command: str) -> bool:
     pas sous ``~/.grimoire`` ; aucune redirection en écriture ne l'atteint. Tout le reste — ``$``, ``$(…)``,
     backtick, ``eval``, ``| bash``, ``<(…)``, ``source``, guillemet non fermé, programme ou préfixe inconnu —
     rend faux : l'appelant révoque (échec fermé). Une exception ici rend faux aussi.
+
+    ``snapshot=True`` (#1125) : même liste blanche, appliquée à l'instantané du ledger — ``reaches`` y compte les
+    mots qui nomment un fichier protégé, et un script python lu sur stdin (heredoc quoté) passe s'il est prouvé
+    en lecture seule (:func:`_python_reads_only`).
     """
     try:
         segments = _parse_strict(command)
@@ -646,7 +749,8 @@ def is_harmless_mention(command: str) -> bool:
         dirs = [_cwd()]
 
         def reaches(word: str) -> bool:
-            if _names_protected(word) == CONTROL_ZONE_MARKER:
+            named = _names_protected(word)
+            if named == CONTROL_ZONE_MARKER or (snapshot and named):
                 return True
             return any(
                 any(_reaches(normal, real, z) for z in zones) or _inside(normal, grimoire) or _inside(real, grimoire)
@@ -664,7 +768,7 @@ def is_harmless_mention(command: str) -> bool:
                 continue
             if any(op in _OUT_REDIRECTS and reaches(target) for op, target in seg.redirects):
                 return False
-            if not _harmless_segment(seg, [reaches(w) for w in seg.words]):
+            if not _harmless_segment(seg, [reaches(w) for w in seg.words], python_reads=snapshot):
                 return False
         return True
     except Exception:  # _Unreadable compris : ce qu'on ne sait pas lire révoque
@@ -897,6 +1001,9 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
                 "(`git commit -F`, `--body-file`)",
                 revokes=False,
             )
+        # #1125 : l'instantané seulement lu ou cité dans de la prose, prouvé par la liste blanche, n'est pas refusé.
+        if marker == SNAPSHOT_FILENAME and is_harmless_mention(command, snapshot=True):
+            marker = ""
         if marker:
             return _write_vector(
                 marker,
