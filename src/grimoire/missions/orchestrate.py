@@ -222,13 +222,45 @@ def _one_pass(
     from grimoire.missions.ci_slots import migrate_orphan_slots, once_per_tick, reconcile_ci
     from grimoire.missions.effects import reconcile
     from grimoire.missions.external_merge import reconcile_external_merges
-    from grimoire.missions.launcher import default_exec, release_ended_workers, renew_live_workers
+    from grimoire.missions.launcher import (
+        default_exec,
+        release_ended_workers,
+        renew_live_workers,
+        resume_provider_failed_workers,
+    )
 
     heartbeat = ""
+    provider_notes: list[str] = []
     try:  # le battement des workers au travail, avant la récolte (#961) ; en erreur, la récolte juge comme avant
         renew_live_workers(service, exec_ or default_exec, now=now)
     except Exception as exc:
         heartbeat = f"battement des workers : en erreur, aucun bail renouvelé à ce tick ({type(exc).__name__}: {exc})"
+    if mode == "apply":
+        # #1158 : un tour fini sur une erreur transitoire du fournisseur (5xx, 429, overloaded) ne se paie pas
+        # d'un bail perdu. Avant ``release_ended`` et la récolte, la session est reprise sur place ; au-delà du
+        # plafond, la tâche se gare avec la question qui nomme l'erreur — jamais « bail perdu (heartbeat) ».
+        from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+        read_policy = load_orchestrator_policy(service.home_root)
+        permission_mode = read_policy.policy.worker.permission_mode if read_policy.policy is not None else ""
+        try:
+            for resumed in resume_provider_failed_workers(
+                service, exec_ or default_exec, now=now, permission_mode=permission_mode
+            ):
+                if resumed.action == "parked":
+                    provider_notes.append(
+                        f"worker : {resumed.task_id} garée après épuisement des reprises sur une erreur du "
+                        f"fournisseur ({resumed.detail[:160]})"
+                    )
+                elif resumed.action == "failed":
+                    provider_notes.append(
+                        f"worker : {resumed.task_id} non reprise après une erreur du fournisseur ({resumed.detail})"
+                    )
+        except Exception as exc:
+            provider_notes.append(
+                f"reprises après erreur du fournisseur : en erreur, la récolte jugera comme avant "
+                f"({type(exc).__name__}: {exc})"
+            )
     if mode == "apply":  # P90 : une session terminée rend sa tâche au tick suivant, sans attendre la fin du bail
         try:
             release_ended_workers(service, exec_ or default_exec, now=now)
@@ -248,7 +280,7 @@ def _one_pass(
         except Exception as exc:
             heartbeat = heartbeat or f"arrêt des workers au repos : en erreur, retenté au tick suivant ({type(exc).__name__}: {exc})"
     ci = (*reconcile_ci(service, probe=shared, now=now), *migrate_orphan_slots(service, probe=shared, now=now))
-    attention = [*state.attention(), *([heartbeat] if heartbeat else [])]
+    attention = [*state.attention(), *provider_notes, *([heartbeat] if heartbeat else [])]
     policy, cleanup = _orchestrator_stage(service, mode, exec_, attention)
     plan = service.queue_plan(now=now, pause=state)
     dispatched: tuple[str, ...] = ()
