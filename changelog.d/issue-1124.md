@@ -1,1 +1,0 @@
-- fix(missions): `task block` gare directement une tâche en `needs_verification` sans la repasser par un état réclamable (#1124)

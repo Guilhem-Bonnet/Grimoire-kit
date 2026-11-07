@@ -7,6 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.80.0] - 2026-11-06
+
+- fix(standard): la consigne de démarrage ne demande plus `gate check --task-id bootstrap` quand cette tâche n'est pas sur le board (#1127) (#1131)
+- fix(lease): une session qui a remis sa tâche en revue n'est plus gelée quand une commande dépasse le bail restant (#1117) (#1137)
+- fix(reviewer): un relecteur arrêté (`idle`) sans reçu n'attend plus `REVIEW_TIMEOUT` (2 h) : relancé au tick suivant une fois la CI de la tête terminée (compté dans `MAX_RELAUNCHES`) ; une CI rouge sur la tête en relecture renvoie la tâche au worker sans reçu (#1123) (#1128)
+- fix(missions): `task block` gare directement une tâche en `needs_verification` sans la repasser par un état réclamable (#1124) (#1136)
+- fix(authority): la garde ne refuse plus la lecture ni la simple mention de l'instantané du ledger ; toute écriture reste refusée (#1125) (#1132)
+- fix(evidence): après l'acquittement (CHAIN-ACK) d'une rupture `unchained_inserted`, l'ancre `evidence-log.head.json` reprend à la dernière ligne au lieu de rester figée ; la troncature est de nouveau détectée, la rupture reste listée. Toute divergence non couverte garde l'ancre figée. (#918) (#1116)
+- fix(missions): le lanceur du tick rejoue la synchronisation de l'hôte dans le worktree du worker, ou refuse le lancement si le hook PreToolUse manque (#957) (#1120)
+- feat(orchestrate): réduire le coût des sessions du tick : profil allégé `lean` des workers et relecteurs (45 k à 10 k jetons au premier tour, mesuré), palier par classe `model_by_class`, et pilote qui n'interroge plus sans progrès (#1130)
+- fix(stop): le rappel « Clôture hors tâche » n'est plus relancé à chaque tour tant que la session n'a pas écrit de nouveau (#1126) (#1135)
+
 ## [3.79.0] - 2026-11-06
 
 - fix(cockpit): changer vite d'espace n'efface plus l'espace ouvert ni son sélecteur de vues (un espace quitté se montait quand même) (#1112)

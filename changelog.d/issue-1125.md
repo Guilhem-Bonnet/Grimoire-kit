@@ -1,1 +1,0 @@
-- fix(authority): la garde ne refuse plus la lecture ni la simple mention de l'instantané du ledger ; toute écriture reste refusée (#1125)

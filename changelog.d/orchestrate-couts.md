@@ -1,1 +1,0 @@
-- feat(orchestrate): réduire le coût des sessions du tick : profil allégé `lean` des workers et relecteurs (45 k à 10 k jetons au premier tour, mesuré), palier par classe `model_by_class`, et pilote qui n'interroge plus sans progrès
