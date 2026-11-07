@@ -21,9 +21,15 @@ def register_usage_commands(app: typer.Typer) -> None:
 
 
 def _usage_of(task: Any, root: Path) -> dict[str, Any]:
-    """Tokens et coût repliés pour cette tâche (W4-01), sans rien créer sur le disque."""
+    """Tokens et coût repliés pour cette tâche (W4-01), sans rien créer sur le disque.
+
+    Le tarif déclaré par modèle dans le registre du projet (``models[].pricing``,
+    issue #1152) chiffre les appels d'un modèle hors de la table versionnée ; sans
+    tarif, le coût reste inconnu — jamais ``0``.
+    """
     from grimoire.core.standard_generation import TRACES_DIR
     from grimoire.hosts.capabilities import recorded_contract, resolve_host
+    from grimoire.providers.registry import read_model_pricing
     from grimoire.traces.ledger import TraceLedger
     from grimoire.traces.transcript_usage import task_usage
 
@@ -31,7 +37,7 @@ def _usage_of(task: Any, root: Path) -> dict[str, Any]:
     traces = TraceLedger(traces_path).list_traces(task_id=task.id) if (traces_path / "traces.jsonl").is_file() else []
     host = resolve_host(task.claim.host_id) if task.claim else None
     available = None if host is None else recorded_contract(host).verified("local_token_usage")
-    return task_usage(traces, host_usage_available=available)
+    return task_usage(traces, host_usage_available=available, pricing_for=read_model_pricing(root).get)
 
 
 def _usage_line(usage: dict[str, Any]) -> str:
@@ -74,6 +80,7 @@ def task_fold_usage(
     reçoit tout) ; les appels déjà tenus par une autre tâche sont nommés.
     """
     from grimoire.cli.cmd_task import _fmt, _require_task, _service, console
+    from grimoire.providers.registry import read_model_pricing
     from grimoire.traces.ledger import TraceLedger
     from grimoire.traces.transcript_usage import fold_claude_transcript
 
@@ -82,7 +89,13 @@ def task_fold_usage(
     traces_path = traces_root if traces_root.is_absolute() else root / traces_root
     try:
         result = fold_claude_transcript(
-            TraceLedger(traces_path), transcript, task_id=task_id, mission_id=mission_id, since=since, until=until
+            TraceLedger(traces_path),
+            transcript,
+            task_id=task_id,
+            mission_id=mission_id,
+            since=since,
+            until=until,
+            pricing_for=read_model_pricing(root).get,
         )
     except ValueError as exc:
         console.print(f"[red]✗[/red] {escape(str(exc))}")

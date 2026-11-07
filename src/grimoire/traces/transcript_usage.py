@@ -21,7 +21,9 @@ Règles, chacune prise sur le journal réel :
   invalides est comptée dans ``invalid_usage``, pas ajoutée. Le coût d'un appel est
   inconnu (``None``) quand le modèle n'est pas tarifé ou que des tokens de cache
   existent : la table de tarifs (:mod:`grimoire.tools.cost_model`) ne modélise pas
-  les tarifs de cache, les chiffrer au tarif d'entrée serait faux.
+  les tarifs de cache, les chiffrer au tarif d'entrée serait faux. Le tarif
+  optionnel ``models[].pricing`` du registre du projet (issue #1152) prime quand
+  il existe, y compris pour le cache lu ; absent, le coût reste inconnu.
 
 * **Une tâche à la fois, sur une fenêtre.** Un journal de session peut couvrir
   plusieurs tâches successives ; ses appels n'appartiennent qu'à une seule trace
@@ -39,16 +41,22 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from grimoire.costs import Cost
 from grimoire.tools.cost_model import rate_for
 from grimoire.traces.ledger import TraceLedger
 from grimoire.traces.schemas import TokenUsage, TraceOutcome, TraceRecord
+
+if TYPE_CHECKING:
+    from grimoire.providers.registry import ModelPricing
+
+#: Résout le tarif catalogue d'un modèle depuis le registre du projet (issue #1152) ; ``None`` sans tarif.
+PricingLookup = Callable[[str], "ModelPricing | None"]
 
 #: Valeur de ``usage_source`` pour un appel replié du journal de session Claude Code.
 SOURCE_CLAUDE_TRANSCRIPT = "claude-code-transcript"
@@ -222,12 +230,22 @@ def usage_key(source: str, message_id: str) -> str:
     return digest[:24]
 
 
-def call_cost_usd(call: UsageCall) -> float | None:
+def call_cost_usd(call: UsageCall, pricing: ModelPricing | None = None) -> float | None:
     """Coût d'un appel au tarif de sa version exacte ; ``None`` si on ne peut pas l'affirmer.
 
-    Des tokens de cache ou un modèle absent de la table donnent ``None`` : la
-    table ne porte ni tarif de cache ni famille de repli.
+    *pricing* est le tarif catalogue que le registre du projet déclare pour ce
+    modèle (``models[].pricing``, issue #1152) : quand il existe, il prime et
+    couvre aussi les tokens de cache lus. Sinon, la table versionnée
+    :mod:`grimoire.tools.cost_model` s'applique, et des tokens de cache ou un
+    modèle absent de la table donnent ``None`` — jamais ``0.0``.
     """
+    if pricing is not None:
+        return pricing.cost_usd(
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            cache_read_tokens=call.cache_read_tokens,
+            cache_creation_tokens=call.cache_creation_tokens,
+        )
     if call.cache_read_tokens or call.cache_creation_tokens:
         return None
     rates = rate_for(call.model)
@@ -236,8 +254,10 @@ def call_cost_usd(call: UsageCall) -> float | None:
     return round((call.input_tokens * rates["in"] + call.output_tokens * rates["out"]) / 1_000_000, 6)
 
 
-def _trace_for(call: UsageCall, *, source: str, task_id: str, mission_id: str) -> TraceRecord:
-    cost = call_cost_usd(call)
+def _trace_for(
+    call: UsageCall, *, source: str, task_id: str, mission_id: str, pricing: ModelPricing | None = None
+) -> TraceRecord:
+    cost = call_cost_usd(call, pricing)
     total = call.input_tokens + call.output_tokens + call.cache_read_tokens + call.cache_creation_tokens
     return TraceRecord(
         id=f"TRC-usage-{usage_key(source, call.message_id)}",
@@ -298,6 +318,7 @@ def fold_claude_transcript(
     mission_id: str = "",
     since: str = "",
     until: str = "",
+    pricing_for: PricingLookup | None = None,
 ) -> FoldResult:
     """Replie les appels d'un journal Claude Code dans le *ledger*, rattachés à *task_id*.
 
@@ -308,6 +329,11 @@ def fold_claude_transcript(
     c'est ce qui permet à un journal qui couvre plusieurs tâches d'être réparti.
     Le fichier source est identifié par son chemin résolu. Lève ``ValueError``
     si *since* ou *until* n'est pas un instant ISO 8601 ou si la fenêtre est vide.
+
+    *pricing_for* résout le tarif catalogue déclaré dans le registre du projet
+    (``models[].pricing``, issue #1152) : le coût replié est alors exact pour un
+    modèle absent de :mod:`grimoire.tools.cost_model`, et reste inconnu s'il n'y
+    a pas de tarif.
     """
     start = _parse_instant(since) if since else None
     end = _parse_instant(until) if until else None
@@ -318,7 +344,16 @@ def fold_claude_transcript(
     source = str(path.resolve()).encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
     read = read_claude_transcript(path)
     kept = [call for call in read.calls if _in_window(call, start, end)]
-    traces = [_trace_for(call, source=source, task_id=task_id, mission_id=mission_id) for call in kept]
+    traces = [
+        _trace_for(
+            call,
+            source=source,
+            task_id=task_id,
+            mission_id=mission_id,
+            pricing=pricing_for(call.model) if pricing_for is not None else None,
+        )
+        for call in kept
+    ]
     written = ledger.append_new(traces)
     written_ids = {t.id for t in written}
     held: dict[str, int] = {}
@@ -351,7 +386,31 @@ def _tag_count(tags: Iterable[str], prefix: str) -> int:
     return int(value) if value.isdigit() else 0
 
 
-def task_usage(traces: Sequence[TraceRecord], *, host_usage_available: bool | None = None) -> dict[str, Any]:
+def _trace_cost(trace: TraceRecord, pricing_for: PricingLookup | None) -> Cost:
+    """Coût d'une trace repliée, re-tarifé par le registre quand il price son modèle.
+
+    La re-tarification lit les compteurs de la trace (tokens et cache, portés par
+    les tags) : un registre mis à jour chiffre donc aussi les appels repliés
+    avant lui. Sans tarif pour le modèle, le coût replié au moment du fold reste
+    la source — un inconnu n'est jamais remplacé par ``0.0`` (issue #1152).
+    """
+    if pricing_for is not None and trace.model:
+        pricing = pricing_for(trace.model)
+        if pricing is not None:
+            return Cost.from_parts(
+                pricing.cost_usd(
+                    input_tokens=trace.token_usage.prompt_tokens,
+                    output_tokens=trace.token_usage.completion_tokens,
+                    cache_read_tokens=_tag_count(trace.tags, CACHE_READ_TAG_PREFIX),
+                    cache_creation_tokens=_tag_count(trace.tags, CACHE_CREATION_TAG_PREFIX),
+                )
+            )
+    return trace.token_usage.cost
+
+
+def task_usage(
+    traces: Sequence[TraceRecord], *, host_usage_available: bool | None = None, pricing_for: PricingLookup | None = None
+) -> dict[str, Any]:
     """Les tokens et le coût d'une tâche (*traces* : celles de la tâche), avec la provenance de chaque chiffre.
 
     ``usage_source`` dit d'où vient le chiffre : ``claude-code-transcript``
@@ -360,13 +419,18 @@ def task_usage(traces: Sequence[TraceRecord], *, host_usage_available: bool | No
     vérifiée, *host_usage_available* est ``False``) ou ``none`` (rien replié).
     ``cost_known`` n'est vrai que si tous les appels comptés sont tarifés.
 
+    *pricing_for* résout le tarif catalogue déclaré dans le registre du projet
+    (``models[].pricing``, issue #1152) : il re-chiffre les traces repliées et
+    prime sur le coût enregistré au fold. Sans tarif, ce coût enregistré reste
+    la source, inconnu compris.
+
     Le coût du journal et le coût rapporté ne s'additionnent pas (ce sont deux
     vues des mêmes dépenses) : ils sont exposés côte à côte, et un écart
     supérieur à :data:`DISCREPANCY_RATIO` est signalé dans ``discrepancy``.
     """
     folded = [t for t in traces if _tag_value(t.tags, SOURCE_TAG_PREFIX) == SOURCE_CLAUDE_TRANSCRIPT]
     reported = [t for t in traces if t.recipe_id in REPORTED_RECIPE_IDS]
-    cost = Cost.total(t.token_usage.cost for t in folded)
+    cost = Cost.total(_trace_cost(t, pricing_for) for t in folded)
     reported_cost = Cost.total(t.token_usage.cost for t in reported)
 
     if folded:
