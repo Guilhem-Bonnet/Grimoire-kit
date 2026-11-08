@@ -2849,7 +2849,7 @@ def test_agent_autostart_is_declared_per_host_with_its_source(project: Path) -> 
             assert profile.instructions_entrypoint in gap.fallback
 
 
-def _write_agent_in(root: Path, tier_dir: str, name: str) -> None:
+def _write_agent_in(root: Path, tier_dir: str, name: str, *, body: str = "Tu lis et tu édites.") -> None:
     """Un agent au faisceau volontairement banal, dans la couche demandée."""
     d = root / tier_dir
     d.mkdir(parents=True, exist_ok=True)
@@ -2861,7 +2861,7 @@ def _write_agent_in(root: Path, tier_dir: str, name: str) -> None:
                 f'description: "{name} — rôle de test"',
                 'tools: "read, edit"',
                 "---",
-                "Tu lis et tu édites.",
+                body,
                 "",
             ]
         ),
@@ -2891,8 +2891,68 @@ def test_un_agent_override_au_meme_faisceau_qu_un_autre_est_refuse(tmp_path: Pat
     _write_agent_in(tmp_path, "_grimoire/kit/agents", "kit-a")
     _write_agent_in(tmp_path, "_grimoire/overrides/agents", "mon-agent")
 
-    with pytest.raises(GrimoireAgentError, match="faisceau identique"):
+    with pytest.raises(GrimoireAgentError, match="même faisceau et la même fiche"):
         build_surface(tmp_path)
+
+
+def test_deux_overrides_au_meme_faisceau_mais_a_des_fiches_differentes_sont_acceptes(
+    tmp_path: Path,
+) -> None:
+    """#1180 : le corps (la fiche) suffit à distinguer deux personas à faisceau
+    identique — un projet n'a plus besoin de garder un document de contexte
+    propre à chacune rien que pour échapper au refus."""
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(
+        tmp_path, "_grimoire/overrides/agents", "archiviste", body="Tu classes et tu inventories."
+    )
+    _write_agent_in(
+        tmp_path, "_grimoire/overrides/agents", "greffier", body="Tu consignes et tu horodates."
+    )
+
+    surface = build_surface(tmp_path)  # ne doit pas lever GrimoireAgentError
+
+    assert surface.notes == ()
+
+
+def test_deux_overrides_au_meme_faisceau_et_a_la_meme_fiche_sont_refuses(tmp_path: Path) -> None:
+    """#1180 : deux définitions réellement identiques (faisceau + corps) restent
+    le même agent sous deux noms."""
+    from grimoire.core.exceptions import GrimoireAgentError
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "jumeau-a", body="Même fiche.")
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "jumeau-b", body="Même fiche.")
+
+    with pytest.raises(GrimoireAgentError, match="même faisceau et la même fiche"):
+        build_surface(tmp_path)
+
+
+def test_la_fiche_est_normalisee_avant_d_etre_comparee(tmp_path: Path) -> None:
+    """#1180 : réenregistrer un fichier (espaces de fin de ligne) ne crée pas
+    une nouvelle persona — deux corps identiques à la normalisation près
+    restent la même fiche."""
+    from grimoire.core.exceptions import GrimoireAgentError
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "jumeau-a", body="Même fiche.")
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "jumeau-b", body="Même fiche.   ")
+
+    with pytest.raises(GrimoireAgentError, match="même faisceau et la même fiche"):
+        build_surface(tmp_path)
+
+
+def test_agent_sans_corps_se_distingue_par_sa_description() -> None:
+    """#1180 : à défaut de corps, la description porte l'identité de la fiche —
+    sinon deux agents sans corps au même faisceau seraient refusés à tort."""
+    from grimoire.hosts.surface import AgentSpec
+
+    classe = AgentSpec(name="classe", description="classe les artefacts", definition_ref="a.md")
+    inventorie = AgentSpec(
+        name="inventorie", description="inventorie les artefacts", definition_ref="b.md"
+    )
+
+    assert classe.identity_fingerprint() != inventorie.identity_fingerprint()
 
 
 def test_deux_agents_distincts_ne_laissent_aucune_note(tmp_path: Path) -> None:

@@ -37,6 +37,7 @@ from grimoire.hosts.surface import (
     SkillSpec,
     ToolVerb,
     _partition_duplicate_pairs,
+    body_fingerprint,
 )
 
 try:
@@ -536,6 +537,7 @@ def collect_agents(
                 context=context,
                 override_ref=override_ref,
                 override_kind=override_kind,
+                body_fingerprint=body_fingerprint(body),
             )
         )
     return tuple(specs)
@@ -819,11 +821,16 @@ def build_surface(
     tool_notes: list[str] = []
     agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills), notes=tool_notes)
     # Deux régimes, parce que deux responsabilités. Un agent créé dans les
-    # overrides du projet qui a le même faisceau qu'un autre est une erreur de
-    # l'utilisateur, et le système émergent repose sur ce refus : on lève. Deux
-    # agents livrés par le kit au même faisceau sont une dette du kit (#375) ;
-    # la faire porter à chaque projet en bloquant son `init` reviendrait à
-    # punir l'utilisateur pour notre retard. On la garde visible, sans bloquer.
+    # overrides du projet qui partage le faisceau *et* la fiche d'un autre est
+    # une erreur de l'utilisateur, et le système émergent repose sur ce refus :
+    # on lève. Depuis #1180 le faisceau seul ne suffit plus à condamner deux
+    # agents : deux personas peuvent déclarer les mêmes outils, contexte et
+    # skills tant que leur corps (ou, à défaut de corps, leur description)
+    # diffère — sans quoi il fallait garder un document de contexte propre à
+    # chacune juste pour rester distinctes. Deux agents livrés par le kit au
+    # même faisceau et à la même fiche sont une dette du kit (#375) ; la faire
+    # porter à chaque projet en bloquant son `init` reviendrait à punir
+    # l'utilisateur pour notre retard. On la garde visible, sans bloquer.
     # `_partition_duplicate_pairs` (grimoire.hosts.surface) porte la logique
     # a deux regimes elle-meme (issue #354) : delegue a
     # `grimoire_hosts_core.partition_duplicate_pairs` en un seul appel quand
@@ -834,17 +841,17 @@ def build_surface(
     if strict:
         pairs = ", ".join(f"{a} == {b}" for a, b in strict)
         raise GrimoireAgentError(
-            f"Agents au faisceau identique (outils, contexte, skills) : {pairs}. "
-            "Deux agents avec le même faisceau sont le même agent sous deux noms — "
-            "fusionnez-les ou distinguez leur périmètre réel."
+            f"Agents au même faisceau et à la même fiche (outils, contexte, skills + corps) : {pairs}. "
+            "Deux agents avec le même faisceau et la même fiche sont le même agent sous deux noms — "
+            "fusionnez-les ou distinguez leur périmètre réel (outils, contexte, skills ou corps)."
         )
     notes: tuple[str, ...] = tuple(tool_notes)
     if duplicates:
         pairs = ", ".join(f"{a} == {b}" for a, b in duplicates)
         notes = (
             *notes,
-            f"Agents livrés par le kit au faisceau identique (outils, contexte, skills) : {pairs}. "
-            "Dette connue du kit (Grimoire-kit#375), sans effet sur ce projet.",
+            f"Agents livrés par le kit au même faisceau et à la même fiche (outils, contexte, skills + corps) : "
+            f"{pairs}. Dette connue du kit (Grimoire-kit#375), sans effet sur ce projet.",
         )
     return ProjectSurface(
         notes=notes,

@@ -48,6 +48,7 @@ module and the reverse would cycle. See
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -184,6 +185,14 @@ class AgentSpec:
     (``extends: kit``, only the fields it declares), or ``None`` (no
     override). Set together with :attr:`override_ref` by
     :func:`grimoire.hosts.collect.collect_agents`."""
+    body_fingerprint: str = ""
+    """Digest of the agent's normalized **fiche** (its body), or ``""`` when
+    that body is empty. With :attr:`description` it carries the persona's
+    identity beyond the faisceau (issue #1180): two agents may share tools,
+    context and skills as long as their fiche differs, so a project no longer
+    has to keep a context document alive only to tell two personas apart.
+    Computed by :func:`body_fingerprint` from the resolved body — the kit
+    file's for a partial override (``extends: kit``)."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -202,14 +211,18 @@ class AgentSpec:
         }
 
     def fingerprint(self) -> tuple[str, ...]:
-        """The faisceau (tools, context, skills) that must distinguish this
-        agent from every other one (issue #372's distinction guard).
+        """The faisceau (tools, context, skills) of this agent.
+
+        Alone it no longer decides the distinction guard (issue #1180): see
+        :meth:`identity_fingerprint`, which appends the fiche. Kept as its own
+        method so ``grimoire host status`` and the scaffolder's archetype
+        check can still reason about the tool/context/skill beam in
+        isolation.
 
         Deliberately excludes ``name``, ``description`` and ``affinity``:
-        those are prose, and prose is exactly what let nine phantom agents
-        through in #346 — two agents that grant the same tools, read the
-        same context and own the same skills are the same agent wearing two
-        names, no matter how differently they are described.
+        those are prose, and prose alone is what let nine phantom agents
+        through in #346.
+
         """
         if _use_rust_backend():
             assert _rust_core is not None  # guarded by _use_rust_backend
@@ -224,6 +237,49 @@ class AgentSpec:
             *sorted(self.skills),
         )
 
+    def fiche_fingerprint(self) -> str:
+        """What identifies this persona's **fiche**: its normalized body when
+        there is one, its description otherwise.
+
+        The fallback is what the issue means by « même corps normalisé …, ou
+        même description » (#1180): an agent file with an empty body has no
+        body fingerprint, and refusing it purely on its (identical) faisceau
+        would be the bug this issue fixes. A non-empty body always wins over
+        the description — the body is what the host actually loads as the
+        persona's instructions.
+        """
+        return self.body_fingerprint or self.description
+
+    def identity_fingerprint(self) -> tuple[str, ...]:
+        """The faisceau **and** the fiche — what the distinction guard
+        compares (issue #1180). Two agents sharing this tuple are one agent
+        under two names (same tools, context, skills and fiche); anything
+        that differs in the fiche makes them distinct personas even when
+        their faisceau is identical."""
+        return (*self.fingerprint(), "|", self.fiche_fingerprint())
+
+
+def body_fingerprint(body: str) -> str:
+    """Normalize an agent body and return its SHA-256 digest, or ``""``.
+
+    "Normalized" means line-ending agnostic, trailing whitespace per line
+    dropped, surrounding blank lines trimmed: an editor re-saving a file (or
+    a CRLF checkout on Windows) is not a new persona. A body that is empty
+    after normalization yields ``""`` so :meth:`AgentSpec.fiche_fingerprint`
+    can fall back to the description instead of making every bodyless agent
+    share the digest of the empty string.
+
+    Hashed rather than kept verbatim: the digest is all the guard needs, and
+    :class:`AgentSpec` (the IR handed to every emitter) need not carry every
+    agent body in memory.
+    """
+    normalized = "\n".join(
+        line.rstrip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ).strip()
+    if not normalized:
+        return ""
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
 
 def _partition_duplicate_pairs(
     agents: tuple[AgentSpec, ...],
@@ -236,6 +292,10 @@ def _partition_duplicate_pairs(
     :mod:`grimoire.hosts.collect`'s ``build_surface`` (override-aware),
     delegated to :func:`grimoire_hosts_core.partition_duplicate_pairs` as a
     single call when the Rust backend is active.
+
+    Compares :meth:`AgentSpec.identity_fingerprint` (faisceau + fiche), not
+    the bare faisceau: issue #1180 lets two personas share tools, context and
+    skills when their body (or, without a body, their description) differs.
     """
     if _use_rust_backend():
         assert _rust_core is not None  # guarded by _use_rust_backend
@@ -246,6 +306,7 @@ def _partition_duplicate_pairs(
                 [t.value for t in agent.tools],
                 list(agent.context),
                 list(agent.skills),
+                agent.fiche_fingerprint(),
             )
             for agent in agents
         ]
@@ -254,7 +315,7 @@ def _partition_duplicate_pairs(
 
     by_fingerprint: dict[tuple[str, ...], list[str]] = {}
     for agent in agents:
-        by_fingerprint.setdefault(agent.fingerprint(), []).append(agent.name)
+        by_fingerprint.setdefault(agent.identity_fingerprint(), []).append(agent.name)
     duplicates: list[tuple[str, str]] = []
     for names in by_fingerprint.values():
         if len(names) < 2:
@@ -269,7 +330,14 @@ def _partition_duplicate_pairs(
 
 
 def duplicate_agent_fingerprints(agents: tuple[AgentSpec, ...]) -> tuple[tuple[str, str], ...]:
-    """Pairs of agent names sharing an identical faisceau (issue #372).
+    """Pairs of agent names sharing an identical faisceau **and** fiche
+    (issues #372, #1180).
+
+    A pair collides when tools, context and skills are the same *and* so is
+    the fiche — the normalized body, or the description for an agent with no
+    body. Same-faisceau agents with distinct bodies are distinct personas
+    (the #1180 use case: a project should not have to keep a context document
+    alive merely to tell two personas apart).
 
     Exact-duplicate detection only — two agents differing by one trivial
     context path pass this guard while being functionally identical. That
@@ -418,8 +486,9 @@ class ProjectSurface:
     with no gates to check would fail closed on nothing."""
     notes: tuple[str, ...] = ()
     """Constats non bloquants relevés en construisant la surface — par exemple
-    deux agents livrés par le kit au faisceau identique. Une dette du kit ne
-    doit pas empêcher un projet de se synchroniser ; elle doit rester visible."""
+    deux agents livrés par le kit au même faisceau et à la même fiche. Une
+    dette du kit ne doit pas empêcher un projet de se synchroniser ; elle doit
+    rester visible."""
 
     def entry_agent(self) -> AgentSpec | None:
         for agent in self.agents:
