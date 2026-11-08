@@ -183,6 +183,7 @@ nav:
           - La mise à jour: reference/cli/mise-a-jour.md
           - Les flows: reference/cli/flows.md
           - Fournisseurs, routeur, file, pause et tick: reference/cli/fournisseurs.md
+          - "Textes longs : résumé par le fournisseur le moins cher": reference/cli/digest.md
           - Configuration, registre et divers: reference/cli/divers.md
       - Configuration: reference/configuration.md
       - grimoire.yaml: reference/grimoire-yaml.md

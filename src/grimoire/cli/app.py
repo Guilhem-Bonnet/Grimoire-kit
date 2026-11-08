@@ -1311,6 +1311,7 @@ LazyTyperGroup.configure(
         "up": LazyCommandSpec("grimoire.cli.cmd_up", "up", rich_help_panel="Project"),
         "chat": LazyCommandSpec("grimoire.cli.cmd_chat", "chat_command", rich_help_panel="Project"),
         "context-pack": LazyCommandSpec("grimoire.cli.cmd_context_pack", "context_pack_command", rich_help_panel="Data"),
+        "digest": LazyCommandSpec("grimoire.cli.cmd_digest", "digest_command", rich_help_panel="Data"),
         "migrate": LazyCommandSpec("grimoire.cli.cmd_migrate", "migrate_command", rich_help_panel="Project"),
         "upgrade": LazyCommandSpec("grimoire.cli.cmd_upgrade", "upgrade_command", rich_help_panel="Utilities"),
         "verify-install": LazyCommandSpec("grimoire.cli.cmd_verify_install", "verify_install_command", rich_help_panel="Utilities"),
@@ -1322,7 +1323,7 @@ LazyTyperGroup.configure(
     # `LazyTyperGroup.configure`'s docstring for why this is needed.
     order=[
         "version", "init", "doctor", "status", "add", "remove", "agent-miss",
-        "validate", "lint", "update", "up", "context-pack", "migrate", "upgrade", "verify-install",
+        "validate", "lint", "update", "up", "context-pack", "digest", "migrate", "upgrade", "verify-install",
         "serve", "diff", "schema", "check", "merge", "setup", "env", "history",
         "repair",
         "memory", "hooks", "cadrage", "phase", "debugger", "dbg", "registry", "workflows",
