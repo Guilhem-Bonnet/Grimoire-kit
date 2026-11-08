@@ -86,6 +86,10 @@ const presenceOf = (t) => (t.presence && t.presence.state) || '';
 // module, comme `scope` — le pouls live redessine l'inspecteur, et un panneau
 // rouvert doit se recharger au lieu de disparaître (pattern task-create.js).
 const assignUi = { task: '', open: false };
+// Une écriture de porte en vol (« Réaliser ») : le pouls ne reconstruit pas l'inspecteur pendant la réponse. Sans
+// cette garde, le refus s'affiche dans le bloc de retour déjà détaché par le redessin et la page ne montre rien
+// (flaky e2e de GAO-perf-cockpit-002 : lectures servies par le cache, le redessin gagne la course).
+let gateWrites = 0;
 const needsHuman = (t) => isHumanWait(t) || t.board === 'review' || t.board === 'blocked';
 
 // Les vues que l'URL peut demander (`#travail?view=liste`).
@@ -3021,6 +3025,7 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
       // P57 : un passage dont le ledger connaît le chemin retour s'annule
       // 10 s durant ; l'annulation rappelle `move` vers l'état de départ.
       const back = reverseMove(detail.status, target);
+      gateWrites += 1;
       try {
         const result = await send(action, body);
         feedback.replaceChildren();
@@ -3046,6 +3051,8 @@ async function renderInspector(ctx, task, onWritten, onTimeline, portfolio = fal
         }
       } catch (error) {
         feedback.replaceChildren(text('div', 'ex-refusal', 'échec : ' + error.message));
+      } finally {
+        gateWrites -= 1;
       }
     };
     btn.addEventListener('click', () => {
@@ -3991,7 +3998,8 @@ export async function mount(root, ctx) {
   // Actualisation sans rechargement (UI-3) : quand le pouls annonce un changement,
   // l'espace relit SES données. Rien n'est jeté sous les doigts de l'utilisateur :
   // tant qu'il écrit une réponse ou une consigne (champ actif, ou texte déjà
-  // saisi), l'actualisation attend — elle repart à la sortie du champ.
+  // saisi), l'actualisation attend — elle repart à la sortie du champ. Une
+  // écriture de porte en vol la reporte aussi (`gateWrites`).
   let refreshPending = false;
   const editing = () => {
     const active = document.activeElement;
@@ -4005,7 +4013,7 @@ export async function mount(root, ctx) {
     return [...typed(wrap), ...typed(ctx.inspector)].some((field) => field.value.trim() !== '');
   };
   const refresh = () => {
-    if (editing()) { refreshPending = true; return; }
+    if (editing() || gateWrites > 0) { refreshPending = true; return; }
     refreshPending = false;
     draw({ live: true });
   };
