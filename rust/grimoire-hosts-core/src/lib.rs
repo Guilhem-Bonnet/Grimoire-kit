@@ -19,6 +19,10 @@
 //!   `context:`, laissees a `collect_agents` cote Python).
 //! - `AgentSpec.fingerprint()` et `duplicate_agent_fingerprints()`
 //!   (`surface.py`) : l'empreinte de faisceau et la detection de collision.
+//!   La garde de distinction (#1180) compare le faisceau *et* la fiche :
+//!   cette derniere est normalisee et hashee cote Python
+//!   (`AgentSpec.fiche_fingerprint`), le coeur Rust ne recoit que la cle
+//!   deja calculee et l'ajoute a l'empreinte.
 //! - La logique a deux regimes de `build_surface` (`collect.py`) : une
 //!   collision impliquant un agent d'override leve, une collision purement
 //!   cote kit devient une note — exposee ici sous forme pure
@@ -666,23 +670,36 @@ fn fingerprint_core(tools: &[String], context: &[String], skills: &[String]) -> 
 /// definition vit dans la couche d'override du projet (`_is_override`, deja
 /// calcule cote Python a partir de `definition_ref` — ce module ne connait
 /// pas la convention de chemin `layout.OVERRIDES_DIR`, il recoit le
-/// verdict), et son faisceau (outils/contexte/skills, deja en chaines).
+/// verdict), son faisceau (outils/contexte/skills, deja en chaines), et sa
+/// fiche (`fiche`, la cle d'identite du corps normalise — ou la description
+/// quand le corps est vide — calculee cote Python par
+/// `body_fingerprint`/`AgentSpec.fiche_fingerprint`, #1180).
 struct AgentRecord {
     name: String,
     is_override: bool,
     tools: Vec<String>,
     context: Vec<String>,
     skills: Vec<String>,
+    fiche: String,
+}
+
+/// Reproduit `AgentSpec.identity_fingerprint()` : le faisceau suivi de la
+/// fiche, sous la meme forme de tuple que Python (marqueur `"|"` litteral).
+fn identity_core(agent: &AgentRecord) -> Vec<String> {
+    let mut out = fingerprint_core(&agent.tools, &agent.context, &agent.skills);
+    out.push("|".to_string());
+    out.push(agent.fiche.clone());
+    out
 }
 
 /// Reproduit `duplicate_agent_fingerprints(agents)` : les groupes d'agents
-/// au meme faisceau, dans l'ordre de premiere apparition de chaque
-/// empreinte, chaque groupe donnant toutes les paires (noms tries).
+/// au meme faisceau *et* a la meme fiche, dans l'ordre de premiere apparition
+/// de chaque empreinte, chaque groupe donnant toutes les paires (noms tries).
 fn duplicate_pairs_core(agents: &[AgentRecord]) -> Vec<(String, String)> {
     let mut seen_fingerprints: Vec<Vec<String>> = Vec::new();
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for (i, agent) in agents.iter().enumerate() {
-        let fp = fingerprint_core(&agent.tools, &agent.context, &agent.skills);
+        let fp = identity_core(agent);
         match seen_fingerprints.iter().position(|k| k == &fp) {
             Some(pos) => groups[pos].push(i),
             None => {
@@ -957,23 +974,28 @@ mod py_bridge {
 
     /// Frontiere PyO3 pour le regime a deux niveaux de `build_surface`.
     /// `agents` est une liste de tuples `(name, is_override, tools,
-    /// context, skills)` — `is_override` deja calcule cote Python
+    /// context, skills, fiche)` — `is_override` deja calcule cote Python
     /// (`_is_override(definition_ref)`, qui connait la convention de
-    /// chemin `layout.OVERRIDES_DIR`). Retourne `(strict, duplicates)`.
+    /// chemin `layout.OVERRIDES_DIR`) et `fiche` deja normalisee cote
+    /// Python (`AgentSpec.fiche_fingerprint`, #1180). Retourne `(strict,
+    /// duplicates)`.
     #[pyfunction]
     #[allow(clippy::type_complexity)]
     fn partition_duplicate_pairs(
-        agents: Vec<(String, bool, Vec<String>, Vec<String>, Vec<String>)>,
+        agents: Vec<(String, bool, Vec<String>, Vec<String>, Vec<String>, String)>,
     ) -> (Vec<(String, String)>, Vec<(String, String)>) {
         let records: Vec<AgentRecord> = agents
             .into_iter()
-            .map(|(name, is_override, tools, context, skills)| AgentRecord {
-                name,
-                is_override,
-                tools,
-                context,
-                skills,
-            })
+            .map(
+                |(name, is_override, tools, context, skills, fiche)| AgentRecord {
+                    name,
+                    is_override,
+                    tools,
+                    context,
+                    skills,
+                    fiche,
+                },
+            )
             .collect();
         partition_duplicate_pairs_core(&records)
     }
@@ -1262,12 +1284,22 @@ mod tests {
     }
 
     fn record(name: &str, is_override: bool, tools: &[&str]) -> AgentRecord {
+        record_with_fiche(name, is_override, tools, "")
+    }
+
+    fn record_with_fiche(
+        name: &str,
+        is_override: bool,
+        tools: &[&str],
+        fiche: &str,
+    ) -> AgentRecord {
         AgentRecord {
             name: name.to_string(),
             is_override,
             tools: tools.iter().map(|s| s.to_string()).collect(),
             context: vec![],
             skills: vec![],
+            fiche: fiche.to_string(),
         }
     }
 
@@ -1307,6 +1339,33 @@ mod tests {
         assert_eq!(duplicates.len(), 3);
         assert_eq!(strict.len(), 2);
         assert!(!strict.contains(&("kit-a".to_string(), "kit-b".to_string())));
+    }
+
+    #[test]
+    fn same_faisceau_but_different_fiche_is_not_a_duplicate() {
+        // #1180 : deux personas au meme faisceau restent distinctes quand
+        // leur corps (fiche) differe.
+        let agents = vec![
+            record_with_fiche("kit-a", false, &["read", "edit"], "fiche-a"),
+            record_with_fiche("kit-b", false, &["read", "edit"], "fiche-b"),
+        ];
+        let (strict, duplicates) = partition_duplicate_pairs_core(&agents);
+        assert!(strict.is_empty());
+        assert!(duplicates.is_empty());
+    }
+
+    #[test]
+    fn same_faisceau_and_same_fiche_stays_a_duplicate() {
+        let agents = vec![
+            record_with_fiche("kit-a", false, &["read", "edit"], "meme-fiche"),
+            record_with_fiche("override-b", true, &["read", "edit"], "meme-fiche"),
+        ];
+        let (strict, duplicates) = partition_duplicate_pairs_core(&agents);
+        assert_eq!(strict, duplicates);
+        assert_eq!(
+            strict,
+            vec![("kit-a".to_string(), "override-b".to_string())]
+        );
     }
 
     #[test]
