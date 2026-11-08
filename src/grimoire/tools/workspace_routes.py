@@ -52,6 +52,7 @@ from grimoire.memory.correction import request_correction_from_body as _memory_c
 from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
+    workspace_accept_merged,
     workspace_actions,
     workspace_api,
     workspace_attention,
@@ -613,6 +614,7 @@ def _autopilot_state(project_root: Path, _query: _Query) -> Any:
 GET_ROUTES: dict[str, _GetHandler] = {
 f"{PREFIX}autonomy/autopilot": _autopilot_state,
 f"{PREFIX}autonomy/mandate": _mandate_state,
+    f"{PREFIX}tasks/accept-merged": workspace_accept_merged.accept_merged_view,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}capacity": _capacity,
     f"{PREFIX}tasks": _tasks,
@@ -668,7 +670,9 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 #: gardé » (portefeuille et sonde exclus) vit avec le cache ; ``pulse_reload``, que la page posait sur un
 #: rechargement du direct, reste accepté (et retiré) : il ne change jamais la réponse.
 PULSE_RELOAD = "pulse_reload"
-LIVE_ROUTES = frozenset({f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet"})
+LIVE_ROUTES = frozenset(
+    {f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet", f"{PREFIX}tasks/accept-merged"}
+)
 
 
 #: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
@@ -1021,6 +1025,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}tasks/accept-merged": workspace_accept_merged.accept_merged,
     f"{PREFIX}memory/correct": _memory_correct,
     f"{PREFIX}tasks/intake": workspace_ideas.task_intake,
     f"{PREFIX}tasks/intake/create": workspace_ideas.task_intake_create,

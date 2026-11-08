@@ -593,6 +593,12 @@ export const api = {
   // ── Écritures : atelier seulement, refusées côté cockpit ──────────────────
   taskAction: (id, action, body) =>
     post(WS + 'tasks/' + encodeURIComponent(id) + '/' + action, body),
+  // GAO-cockpit-tout-001 : « Tout accepter » — les tâches qu'une PR fusionnée a laissées en revue,
+  // relues READY par le relecteur du tick. La lecture alimente le compteur du bouton ; l'écriture
+  // exige la clé de contrôle, saisie par la personne (le jeton de session ne suffit pas à fermer
+  // des tâches, comme pour le mandat et le pilote automatique).
+  acceptMergedCandidates: () => get(WS + 'tasks/accept-merged'),
+  acceptMerged: (controlKey) => post(WS + 'tasks/accept-merged', { control_key: controlKey }),
   // Apply d'assignation (P47 lot 3) : lance LA session que le plan a montrée —
   // l'empreinte du plan voyage dans le corps, le serveur refuse si l'état a
   // changé depuis (ADR-008). `post` : garde d'écriture commune comprise.
