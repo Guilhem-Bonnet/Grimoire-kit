@@ -1,1 +1,0 @@
-- feat(cockpit): gestes sensibles sur un autre projet avec confirmation nommée (lot 2)
