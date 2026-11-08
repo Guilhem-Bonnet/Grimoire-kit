@@ -28,6 +28,7 @@ from typing import Any
 
 __all__ = [
     "DEFAULT_USD_CAD",
+    "MAX_READ_BYTES",
     "annotate_work",
     "cad_of",
     "model_tier",
@@ -120,6 +121,16 @@ class _TranscriptState:
 _TRANSCRIPT_CACHE: dict[str, _TranscriptState] = {}
 
 
+#: Ce qu'on relit au plus, en une passe, au premier regard sur un journal ou
+#: après une longue interruption (issue #1010) : les trois champs servis
+#: (modèle, effort, skills) décrivent l'état *récent* du travail, pas son
+#: histoire. Sans cette borne, la première lecture d'un journal de session
+#: actif payait tout son contenu — mesuré à 1,9 s pour cinq journaux de 20 Mo
+#: (100 Mo au total) — et cette lecture se fait dans la fenêtre interactive du
+#: cockpit, avant même le premier appel à ``/api/fleet``.
+MAX_READ_BYTES = 1 << 20
+
+
 def _note_skill(state: _TranscriptState, name: str) -> None:
     """Ajoute *name* à la liste ordonnée des skills (dernière invocation en queue, sans doublon)."""
     if name in state.skills:
@@ -158,12 +169,18 @@ def _fold_line(state: _TranscriptState, raw: bytes) -> None:
 
 
 def read_transcript_work(path: Path) -> dict[str, Any]:
-    """Modèle réel, effort et skills du journal *path* — lecture incrémentale.
+    """Modèle réel, effort et skills du journal *path* — lecture incrémentale et bornée.
 
     Seules les lignes complètes (terminées par ``\\n``) sont repliées : la
     dernière ligne d'un journal en cours d'écriture attend le prochain passage.
     Un fichier raccourci (session réécrite) repart de zéro. Lève ``OSError``
     si le fichier est illisible : l'appelant le dit, il ne l'avale pas.
+
+    Une passe ne lit jamais plus de :data:`MAX_READ_BYTES` : au premier regard
+    comme après une longue interruption, on repart des derniers octets et on
+    saute la ligne partielle en tête de fenêtre. Le prix d'une lecture ne
+    dépend donc plus de la taille du journal (issue #1010) ; il ne dépend que
+    de ce qui a été écrit depuis la passe précédente, plafonné à la borne.
     """
     key = str(path.resolve())
     state = _TRANSCRIPT_CACHE.get(key)
@@ -171,16 +188,28 @@ def read_transcript_work(path: Path) -> dict[str, Any]:
     if state is None or size < state.offset:
         state = _TranscriptState()
         _TRANSCRIPT_CACHE[key] = state
-    if size > state.offset:
-        with path.open("rb") as handle:
-            handle.seek(state.offset)
-            chunk = handle.read(size - state.offset)
-        complete, newline, _partial = chunk.rpartition(b"\n")
-        if newline:
-            for raw in complete.split(b"\n"):
-                if raw.strip():
-                    _fold_line(state, raw)
-            state.offset += len(complete) + len(newline)
+    if size <= state.offset:
+        return state.as_work()
+    start = max(state.offset, size - MAX_READ_BYTES)
+    with path.open("rb") as handle:
+        handle.seek(start)
+        chunk = handle.read(size - start)
+    if start > state.offset:
+        # Fenêtre ouverte au milieu du fichier : la première ligne peut être
+        # tronquée. On la jette jusqu'au premier saut, jamais l'inverse (une
+        # ligne à moitié repliée inventerait un modèle ou un skill décalés).
+        cut = chunk.find(b"\n")
+        if cut < 0:  # aucune ligne complète dans la fenêtre : on réessaiera
+            return state.as_work()
+        chunk = chunk[cut + 1 :]
+        start += cut + 1
+        state.offset = start
+    complete, newline, _partial = chunk.rpartition(b"\n")
+    if newline:
+        for raw in complete.split(b"\n"):
+            if raw.strip():
+                _fold_line(state, raw)
+        state.offset += len(complete) + len(newline)
     return state.as_work()
 
 
