@@ -380,18 +380,15 @@ def test_a_chat_post_from_another_origin_is_refused_even_with_the_token(
     assert workspace_chat.chat_state(server["root"], {})["seq"] == 0
 
 
-def test_a_chat_post_on_a_project_that_is_only_watched_is_read_only(server: dict[str, Any], tmp_path: Path) -> None:
-    other = tmp_path / "voisin"
-    (other / ".git").mkdir(parents=True)
-    reg.save_registry(
-        [
-            {"name": "Projet", "path": str(server["root"].resolve()), "slug": "projet"},
-            {"name": "Voisin", "path": str(other.resolve()), "slug": "voisin"},
-        ]
-    )
-    status, body = _cockpit_http.post(server["port"], f"{SEND}?project=voisin", {"text": "bonjour"})
+def test_a_chat_post_on_an_unregistered_project_is_refused(server: dict[str, Any]) -> None:
+    """Depuis le lot 1, un projet simplement REGARDÉ n'est plus en lecture
+    seule — il suffit qu'il soit enrôlé. Le refus ne vise donc plus que le
+    slug que le registre ne résout pas."""
+    fantome = server["root"].parent / "fantome"
+    (fantome / ".git").mkdir(parents=True, exist_ok=True)
+    status, body = _cockpit_http.post(server["port"], f"{SEND}?project=fantome", {"text": "bonjour"})
     assert status == 403 and body["error"] == "hôte en lecture seule"
-    assert workspace_chat.chat_state(other, {})["running"] is False
+    assert workspace_chat.chat_state(fantome, {})["running"] is False
 
 
 def test_over_http_the_reply_streams_then_the_turn_ends(server: dict[str, Any]) -> None:

@@ -34,8 +34,10 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _post(host: Host, body: dict[str, object], *, token: bool) -> int:
+    # Lot 1 : toute écriture de la vue de travail nomme son projet — le
+    # cockpit ne devine plus la cible par la sélection partagée.
     headers = {**JSON, **({SESSION_HEADER: request_guard.session_token()} if token else {})}
-    return host.request("POST", GRANT, json.dumps(body).encode(), headers)
+    return host.request("POST", f"{GRANT}?project={host.slug}", json.dumps(body).encode(), headers)
 
 
 def test_the_session_token_alone_never_grants_a_mandate(cockpit: Host) -> None:  # noqa: F811
