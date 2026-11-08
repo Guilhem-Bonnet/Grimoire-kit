@@ -132,10 +132,12 @@ def test_reject_marks_without_writing_an_artifact(duo_server: Any) -> None:
     assert list_proposals(beta)[0].status == "rejected"
 
 
-def test_a_project_outside_the_registry_is_404(duo_server: Any) -> None:
+def test_a_project_outside_the_registry_is_refused(duo_server: Any) -> None:
+    """Depuis le lot 1, le slug doit être ENRÔLÉ : la garde commune répond
+    403 avant même de chercher la proposition."""
     port, _alpha, _beta = duo_server
     status, body = _post(port, "/api/workspace/proposals/whatever/accept?project=ghost")
-    assert status == 404
+    assert status == 403
     assert body["ok"] is False
 
 
@@ -173,11 +175,11 @@ def test_accept_works_on_a_non_home_project_even_when_another_is_home(
     assert body["ok"] is True
 
 
-def test_other_workspace_writes_stay_home_only(duo_server: Any) -> None:
-    """La dérogation de #490 est nommée, pas générale : écrire un fichier —
-    ou toute autre écriture de la vue de travail — reste bloqué hors du
-    projet de lancement direct, sinon la Flotte deviendrait éditable à
-    distance dans son ensemble plutôt que seulement sur ses propositions."""
+def test_file_write_stays_on_the_opening_project(duo_server: Any) -> None:
+    """Lot 1 de l'écriture multi-projets : les autres écritures de la vue de
+    travail visent n'importe quel projet enrôlé, mais ``file/write`` reste
+    réservée au projet d'ouverture (lot 2) — sinon la Flotte deviendrait
+    éditable fichier par fichier à distance."""
     port, _alpha, _beta = duo_server
     status, body = _post(
         port, "/api/workspace/file/write?project=beta", {"path": "README.md", "text": "x"}

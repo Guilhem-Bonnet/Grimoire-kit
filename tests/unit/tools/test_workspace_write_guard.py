@@ -56,6 +56,20 @@ def test_une_ecriture_legitime_passe_et_est_journalisee(tmp_path: Path) -> None:
     assert "ts" in line and "code" not in line
 
 
+def test_le_slug_du_projet_vise_est_journalise_quand_l_hote_le_connait(tmp_path: Path) -> None:
+    """Lot 1 : un journal multi-projets doit dire OÙ chaque écriture tentait
+    d'aller — un slug absent (atelier mono-projet) n'ajoute pas la clé."""
+    with_slug = tmp_path / "avec.jsonl"
+    guard_write(
+        _ok_headers(), 80, method="POST", route="/api/x", journal=with_slug, with_body=True, project="foreign",
+    )
+    assert _lines(with_slug)[0]["project"] == "foreign"
+
+    without_slug = tmp_path / "sans.jsonl"
+    guard_write(_ok_headers(), 80, method="POST", route="/api/x", journal=without_slug, with_body=True)
+    assert "project" not in _lines(without_slug)[0]
+
+
 def test_le_jeton_absent_est_refuse_avec_la_marche_a_suivre(tmp_path: Path) -> None:
     journal = tmp_path / "write-guard.jsonl"
     verdict = guard_write(

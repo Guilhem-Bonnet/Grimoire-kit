@@ -7,8 +7,8 @@ vérifié contre un vrai ``_CockpitHandler`` — le même défaut qui a touché
 
 - ``/compile`` manquait effectivement (``do_POST`` n'avait aucune branche
   pour lui, retour 404 « route inconnue ») ; câblé ici même garde que
-  ``/api/setup`` et ``PUT`` (#543) — seul le projet de lancement direct
-  (``_HOME_SLUG``) peut compiler, une vraie écriture disque (artefact
+  ``/api/setup`` et ``PUT`` — le projet visé doit être ENRÔLÉ (lot 1 de
+  l'écriture multi-projets), et ``/compile`` y écrit réellement (artefact
   ``.prompt.md`` + section ``compiled`` persistée dans le blueprint).
 - ``/validate`` et ``/simulate`` étaient déjà câblés et volontairement SANS
   garde ``_HOME_SLUG`` (calcul pur, jamais d'écriture — voir le commentaire
@@ -104,21 +104,33 @@ def test_route_is_a_404_on_an_unknown_blueprint(duo_server: Any, route: str) -> 
     assert body["ok"] is False
 
 
-# ── `/compile` écrit réellement : garde `_HOME_SLUG`, comme `/api/setup`/`PUT` ─
+# ── `/compile` écrit réellement : la cible doit être ENRÔLÉE (lot 1) ────────
 
 
-def test_compile_is_refused_on_a_non_home_registry_project(duo_server: Any) -> None:
-    """Régression #546 : jusqu'ici ``/compile`` n'avait AUCUNE branche dans
-    ``do_POST`` (404 « route inconnue » avant même d'atteindre une garde,
-    exactement comme ``PUT`` avant #543) — jamais un 403 nommé."""
-    port, _home, foreign = duo_server
+def test_compile_writes_the_artifact_on_another_enrolled_project(duo_server: Any) -> None:
+    """Lot 1 : ``/compile`` écrit chez tout projet enrôlé, pas seulement chez
+    celui qui a lancé le process. La racine vient du registre, donc l'artefact
+    atterrit chez ``foreign`` et non chez ``home``."""
+    port, home, foreign = duo_server
 
     status, body = _post(port, "/api/blueprints/demo/compile?project=foreign", _BLUEPRINT)
 
+    assert status == 200, body
+    assert body["compiled"] == "demo"
+    artifact = foreign / body["artifact"]
+    assert artifact.is_file()
+    assert not (home / body["artifact"]).exists()
+
+
+def test_compile_is_refused_on_a_slug_outside_the_registry(duo_server: Any) -> None:
+    """Un slug absent du registre ne résout aucune racine : 403, rien d'écrit."""
+    port, _home, foreign = duo_server
+
+    status, body = _post(port, "/api/blueprints/demo/compile?project=ghost", _BLUEPRINT)
+
     assert status == 403
     assert body["ok"] is False
-    assert not (foreign / "_grimoire" / "blueprints" / "demo.blueprint.json").exists()
-    assert not list((foreign / ".github").rglob("*.prompt.md")) if (foreign / ".github").exists() else True
+    assert not list(foreign.rglob("*.prompt.md"))
 
 
 def test_compile_writes_the_artifact_on_the_home_project(duo_server: Any) -> None:

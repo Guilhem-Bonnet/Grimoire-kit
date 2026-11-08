@@ -265,7 +265,7 @@ function open(ctx, item) {
 }
 
 function readOnlyReason(ctx) {
-  return `Lecture seule : ${ctx.scope.name} se consulte d’ici, rien ne s’y décide. Le bandeau en tête dit comment ouvrir l’écriture.`;
+  return `Lecture seule : ${ctx.scope.name} n’est pas enrôlé dans ce cockpit, ou son dossier a disparu. Le bandeau en tête dit comment l’enrôler.`;
 }
 
 /** L'action en ligne : un vrai lien (copiable, ouvrable dans un autre onglet),

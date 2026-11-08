@@ -531,7 +531,7 @@ export function setActionStatus(box, message, tone) {
  *  alors `code: 0`), « Refusé » sinon — le serveur a répondu non. */
 export function failureText(error) {
   if (error && error.payload && error.payload.readOnly) {
-    return "Refusé : lecture seule — ce cockpit n'écrit que dans le projet qu'il sert. Lancez « grimoire cockpit serve » dans ce projet pour le modifier.";
+    return "Refusé : lecture seule — ce projet n'est pas enrôlé dans le cockpit, ou son dossier a disparu. Enrôlez-le (« grimoire cockpit add ») puis réessayez.";
   }
   const message = (error && error.message) || 'motif non communiqué';
   return error && error.code === 0 ? `Échec : ${message}` : `Refusé : ${message}`;
@@ -2398,30 +2398,22 @@ function renderScopeChip() {
   $('project-chip').setAttribute('aria-label', `Portée : ${scopeName()} — changer de portée`);
 }
 
-// Lecture seule (M6) : dit en tête de la toile, pas seulement dans la barre
-// d'état, avec le geste qui rend l'écriture — revenir au projet ouvert, ou
-// ouvrir le cockpit depuis celui-ci.
+// Lecture seule (M6) : depuis le lot 1 de l'écriture multi-projets, TOUT
+// projet enrôlé accepte une écriture. Le bandeau ne s'affiche donc plus pour
+// un projet consulté depuis la Flotte : seulement quand la cible n'est plus
+// résoluble — absente du registre, ou dossier disparu.
 function renderReadOnlyBanner() {
   const banner = $('readonly-banner');
   banner.hidden = !host.readOnly;
   banner.replaceChildren();
   if (!host.readOnly) return;
-  const home = host.status && host.status.home;
-  const away = home && home !== host.project;
-  const sentence = away
-    ? `${scopeName()} est consulté depuis le cockpit ouvert sur ${projectName(home)} : seul le projet ouvert accepte une écriture.`
-    : "Ce cockpit n'a été ouvert depuis aucun projet : il lit le registre sans y écrire.";
+  const sentence = "Ce projet n'est pas enrôlé dans ce cockpit, ou son dossier a disparu : il reste en lecture seule.";
   const actions = mk('div', { class: 'ro-actions' });
-  if (away) {
-    const back = mk('button', { type: 'button', class: 'btn pri', 'data-ro-action': 'home', text: `Revenir à ${projectName(home)}` });
-    back.addEventListener('click', () => setScope(home, locationHash(SECTIONS.get(current) || SPACES[0].sections[0], {})));
-    actions.append(back);
-  }
   const path = (projectEntry(host.project) || {}).path || (host.status && host.status.projectRoot);
   if (path && !host.scopeAll) {
-    const command = `grimoire cockpit serve --project-root "${path}"`;
+    const command = `grimoire cockpit add "${path}"`;
     const copy = mk('button', { type: 'button', class: 'btn', 'data-ro-action': 'copy', text: 'Copier la commande' });
-    copy.title = `Ouvre le cockpit sur ce projet, en écriture : ${command}`;
+    copy.title = `Enrôle ce projet dans le cockpit : ${command}`;
     copy.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(command); copy.textContent = 'Commande copiée'; } catch { copy.textContent = 'Copie refusée : recopiez la commande'; }
     });
@@ -2633,7 +2625,10 @@ async function buildPalette() {
   });
 
   const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
-    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks(), api.files()]);
+    // La palette ne lit que ``id``/``title`` : sans annotations (vivacité,
+    // coût, payload ``work`` des journaux de session, gates), la Flotte mount
+    // plus tôt — cet appel est sur son chemin critique (issue #1010).
+    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ annotations: 0 }), api.files()]);
 
   const catalogue = settle(commandsResult, {}).commands || [];
   consoleCatalogue = new Map(catalogue.map((c) => [c.key, { flags: new Set(c.flags || []), positionals: c.positionals || 0 }]));

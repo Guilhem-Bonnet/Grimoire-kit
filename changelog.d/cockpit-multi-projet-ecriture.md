@@ -1,0 +1,1 @@
+- feat(cockpit): écrire sur n'importe quel projet enrôlé depuis un seul cockpit (lot 1)

@@ -413,7 +413,10 @@ def test_hors_du_projet_servi_les_gestes_sont_absents_avec_leur_raison(page_p34:
     detail = page.locator("#inspector-body .kn-detail")
     assert detail.locator("button", has_text="Corriger").count() == 0
     assert detail.locator(".kn-actions").count() == 0
-    assert "lecture seule" in detail.locator(".kn-note[data-note='readonly']").inner_text()
+    # Lot 1 : le projet est enrôlé, donc plus « lecture seule » ; les mutations
+    # de mémoire (lot 2) restent réservées au projet d'ouverture, et la note
+    # le dit.
+    assert "réservée au projet que ce cockpit sert" in detail.locator(".kn-note[data-note='readonly']").inner_text()
 
 
 def test_p42_captures_de_relecture(browser: Browser, served_p34: dict[str, Any]) -> None:

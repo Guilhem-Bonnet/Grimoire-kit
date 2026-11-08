@@ -3,16 +3,17 @@
 Le cockpit sert un projet au nom accentué, « Référence agentique », dont le
 registre tire le slug mutilé ``r-f-rence-agentique`` (le cas réel de la revue
 UX, M6), plus treize autres projets : au-delà des douze que la palette
-plafonnait par section. Le projet accentué est le projet ouvert (écriture
-honorée) ; les autres ne se consultent qu'en lecture seule.
+plafonnait par section. Le projet accentué est le projet ouvert ; tous les
+projets présents et enrôlés acceptent l'écriture depuis le lot 1, seule une
+entrée morte (dossier disparu) reste en lecture seule.
 
 Ce que chaque test prouve :
 
 - cinq espaces, dans l'ordre, le 4e nommé par ``glossary.js`` ;
 - un lien profond (portée, espace, élément) rouvre le même écran sur la même
   sélection, et l'URL suit la navigation ;
-- la lecture seule s'annonce par un bandeau en tête, avec le geste qui rend
-  l'écriture ;
+- la lecture seule ne s'annonce que pour une cible irrésoluble, avec le geste
+  qui la réenrôle ;
 - le sélecteur de portée liste tout le registre ;
 - la puce et le fil d'Ariane disent le nom, jamais le slug, et choisir un
   projet ouvre sa fiche, pas la table de la Flotte ;
@@ -37,9 +38,11 @@ from playwright.sync_api import Browser, Page
 from .conftest import _alive, _free_port, _wait_ready
 
 HOME_NAME = "Référence agentique"
+DEAD_NAME = "Disparu"
 TASK_TITLE = "Câbler le lien profond de la coque"
-#: Treize projets de plus que le projet ouvert : 14 au registre, plus
-#: « Tous les projets » — au-delà du plafond de 12 par section de la palette.
+#: Treize projets de plus que le projet ouvert, plus une entrée morte
+#: (`Disparu`, dossier absent) : 15 au registre, plus « Tous les projets » —
+#: au-delà du plafond de 12 par section de la palette.
 OTHERS = (
     "Arcanum-Royale",
     "Investissement",
@@ -114,11 +117,15 @@ def served_coque(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str,
     if not home_slug:
         pytest.skip("slug du projet ouvert introuvable au registre")
     # Les autres projets n'ont pas besoin d'un `init` : le sélecteur les liste
-    # depuis le registre, et l'un d'eux (PC) sert le cas « lecture seule ».
+    # depuis le registre, et une entrée morte (dossier absent) sert le cas
+    # « lecture seule » — depuis le lot 1, un projet enrôlé et présent est
+    # inscriptible même s'il n'est pas le projet d'ouverture.
     for index, name in enumerate(OTHERS):
         folder = base / name
         (folder / "_grimoire").mkdir(parents=True)
         registry.append({"name": name, "path": str(folder.resolve()), "slug": f"autre-{index:02d}"})
+    dead = base / DEAD_NAME
+    registry.append({"name": DEAD_NAME, "path": str(dead.resolve()), "slug": "disparu"})
     registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
     pc_slug = f"autre-{OTHERS.index('PC'):02d}"
 
@@ -144,7 +151,10 @@ def served_coque(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str,
     )
     try:
         _wait_ready(port, time.monotonic() + 60)
-        yield {"url": f"http://127.0.0.1:{port}", "home": home_slug, "pc": pc_slug, "task": task.id}
+        yield {
+            "url": f"http://127.0.0.1:{port}", "home": home_slug, "pc": pc_slug,
+            "dead": "disparu", "task": task.id,
+        }
     finally:
         process.terminate()
         try:
@@ -237,22 +247,26 @@ def test_un_ancien_lien_d_espace_mene_a_sa_rubrique(page: Page, served_coque: di
 # ── Lecture seule ───────────────────────────────────────────────────────────
 
 
-def test_la_lecture_seule_s_annonce_en_tete_avec_le_geste_qui_la_leve(page: Page, served_coque: dict[str, str]) -> None:
-    _open(page, served_coque, f"?project={served_coque['pc']}#flotte")
+def test_la_lecture_seule_ne_reste_que_pour_une_cible_irresoluble(
+    page: Page, served_coque: dict[str, str]
+) -> None:
+    """Lot 1 : un projet enrôlé et présent n'est plus en lecture seule. Le
+    bandeau ne parle plus que de la cible irrésoluble (dossier disparu) et
+    propose le geste qui l'enrôle à nouveau."""
+    _open(page, served_coque, f"?project={served_coque['dead']}#flotte")
     banner = page.locator("#readonly-banner")
     assert banner.is_visible()
     assert "Lecture seule" in banner.inner_text()
+    assert "n'est pas enrôlé" in banner.inner_text() or "dossier a disparu" in banner.inner_text()
     # En tête : au-dessus de la toile, au sommet du centre (la barre de document
     # n'existe plus hors atelier quand l'écran n'a ni fil d'Ariane ni vue : P62).
     banner_top = banner.bounding_box()["y"]
     assert banner_top < page.locator("#canvas").bounding_box()["y"]
-    assert page.locator("#readonly-banner code").inner_text().startswith("grimoire cockpit serve --project-root")
+    assert page.locator("#readonly-banner code").inner_text().startswith("grimoire cockpit add")
+    assert page.locator("#readonly-banner [data-ro-action='copy']").is_visible()
 
-    back = banner.locator("[data-ro-action='home']")
-    assert back.inner_text() == f"Revenir à {HOME_NAME}"
-    back.click()
-    page.wait_for_url(f"**project={served_coque['home']}**")
-    page.wait_for_selector("body[data-ready='1']", timeout=30_000)
+    # Le projet d'ouverture, lui, reste inscriptible sans bandeau.
+    _open(page, served_coque, f"?project={served_coque['home']}#flotte")
     assert page.evaluate("() => window.GrimoireWorkspace.host.readOnly") is False
     assert page.locator("#readonly-banner").is_hidden()
 
@@ -266,9 +280,10 @@ def test_le_selecteur_de_portee_liste_tout_le_registre_sans_plafond(page: Page, 
     options = page.locator("#palette-list li[role='option']")
     page.wait_for_function("() => document.querySelectorAll('#palette-list li[role=option]').length > 0")
     names = [options.nth(i).locator("span").first.inner_text() for i in range(options.count())]
-    assert len(names) == 2 + len(OTHERS) > 12
+    # home + les treize OTHERS + l'entrée morte, plus « Tous les projets ».
+    assert len(names) == 3 + len(OTHERS) > 12
     assert names[0] == "Tous les projets"
-    assert set(OTHERS) | {HOME_NAME} <= set(names)
+    assert set(OTHERS) | {HOME_NAME, DEAD_NAME} <= set(names)
     # Le sélecteur ne montre que la portée : aucune autre section.
     sections = page.locator("#palette-list .palette-section").all_inner_texts()
     assert [section.strip().lower() for section in sections] == ["projets"]
