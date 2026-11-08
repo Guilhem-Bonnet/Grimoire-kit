@@ -40,6 +40,28 @@ export const host = {
   status: null,
 };
 
+// ── Le projet de CET onglet (lot 4) ─────────────────────────────────────────
+//
+// `sessionStorage` est propre à chaque onglet : deux onglets peuvent regarder
+// deux projets sans que l'un déplace l'autre. Le serveur garde une sélection
+// globale (`selected_project`) comme repli pour les liens anciens, mais elle
+// n'est plus ce qui décide du projet affiché une fois l'onglet routé.
+
+/** Clé de session du projet retenu par cet onglet. */
+const PROJECT_KEY = 'grimoire.workspace.project';
+
+function storedProject() {
+  try { return sessionStorage.getItem(PROJECT_KEY) || null; } catch { return null; }
+}
+
+/** Retient le projet de cet onglet ; `null` efface (portée « Tous les projets »). */
+export function rememberProject(slug) {
+  try {
+    if (slug) sessionStorage.setItem(PROJECT_KEY, slug);
+    else sessionStorage.removeItem(PROJECT_KEY);
+  } catch { /* navigation privée : l'URL reste la seule source */ }
+}
+
 class ApiError extends Error {
   constructor(message, code, payload) {
     super(message);
@@ -228,16 +250,32 @@ async function sensitiveWrite(path, body, targetSlug) {
 export async function boot() {
   const params = new URLSearchParams(location.search);
   const wanted = params.get('project');
-  if (wanted) host.project = wanted;
+  const all = params.get('scope') === 'all';
+  // Un projet explicite ouvre le sien ; sinon l'onglet retrouve celui qu'il a
+  // retenu. Les deux partent dans la requête de statut, pour que `readOnly`
+  // parle déjà du projet que l'onglet regarde (l'atelier ignore `project`).
+  const remembered = all ? null : storedProject();
+  if (wanted || remembered) host.project = wanted || remembered;
   const status = await get('/api/status');
   host.status = status;
   host.kind = status.host === 'cockpit' ? 'cockpit' : 'atelier';
   host.readOnly = status.readOnly === true;
   host.projectFromUrl = host.kind === 'cockpit' && Boolean(wanted);
-  if (host.kind === 'cockpit') host.project = host.project || status.project || status.slug;
-  else host.project = null;
+  if (host.kind === 'cockpit') {
+    // Lot 4 : le projet est celui de CET onglet. `?project=` l'emporte et
+    // devient le projet de l'onglet ; à défaut, le projet retenu ; la
+    // sélection du serveur ne sert plus qu'à ouvrir un onglet neuf ou un lien
+    // ancien. Changer de projet ici ne déplace plus les autres onglets.
+    if (all && !wanted) host.project = null;
+    else host.project = wanted || remembered || status.project || status.slug;
+    // Ce que l'onglet regarde est retenu, y compris le repli serveur : un
+    // rechargement sans paramètre ne le fait plus dépendre d'un autre onglet.
+    // Un lien mort (`?project=inconnu`) ne fige pas l'onglet sur un slug qui
+    // ne résout pas : la cible en lecture seule n'est pas un projet.
+    rememberProject(host.readOnly ? null : host.project);
+  } else host.project = null;
   // `?project=` l'emporte : un lien vers un projet ouvre ce projet.
-  host.scopeAll = host.kind === 'cockpit' && ((params.get('scope') === 'all' && !wanted) || !host.project);
+  host.scopeAll = host.kind === 'cockpit' && ((all && !wanted) || !host.project);
   return status;
 }
 

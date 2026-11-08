@@ -54,7 +54,7 @@
 //                  changement du ledger ou des sessions ; l'espace recharge SES
 //                  données. Remis à zéro à chaque changement d'espace.
 
-import { api, boot, host } from './api.js';
+import { api, boot, host, rememberProject } from './api.js';
 import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
 import { createChat } from './chat.js';
@@ -2373,8 +2373,12 @@ function scopeUrl(slug, hash) {
 
 /** Change la portée partout. Choisir un projet ouvre sa fiche (Flotte en
  * portée projet), pas la table de la Flotte ; revenir à « Tous les projets »
- * garde l'espace courant. `target` impose un autre écran (lien profond). */
+ * garde l'espace courant. `target` impose un autre écran (lien profond).
+ * Lot 4 : le choix est rangé dans l'onglet avant la navigation — `api.js` le
+ * relit à l'amorçage et chaque requête porte `?project=`. Un autre onglet
+ * garde donc son propre projet. */
 function setScope(slug, target) {
+  rememberProject(slug || null);
   const section = SECTIONS.get(current) || SPACES[0].sections[0];
   const hash = target ?? (slug ? '#flotte' : locationHash(section, {}));
   location.assign(scopeUrl(slug || null, hash));
