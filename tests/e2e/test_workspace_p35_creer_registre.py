@@ -2,7 +2,8 @@
 
 Un cockpit sert un projet initialisé pour de vrai, sous un HOME jetable : son
 registre ne touche jamais celui du poste ni ``real_project``. Le registre porte
-en plus un voisin (lecture seule), un projet à retirer et une entrée morte ;
+en plus un voisin (enrôlé, donc inscriptible depuis le lot 1), un projet à
+retirer et une entrée morte ;
 un dossier à ajouter et un dossier à scanner attendent à côté.
 
 Prouvé par navigateur, puis relu sur disque :
@@ -11,8 +12,8 @@ Prouvé par navigateur, puis relu sur disque :
   (la tâche est relue dans le ledger du projet servi) ; la confirmation
   s'affiche sur place avec un lien qui ouvre la tâche ; un formulaire
   incomplet est refusé sur place ;
-- en portée « Tous les projets » et sur un autre projet, le bouton est
-  désactivé et la raison est écrite ;
+- en portée « Tous les projets », le bouton est désactivé et la raison est
+  écrite ; sur un autre projet enrôlé, il ouvre le formulaire (lot 1) ;
 - ajouter, scanner puis ajouter, retirer (aperçu puis confirmation dans la
   page) et purger (aperçu puis confirmation) changent le registre, jamais le
   dossier d'un projet ; le projet servi ne se retire pas.
@@ -273,7 +274,9 @@ def test_nouvelle_tache_appelle_task_service_et_confirme_sur_place(page_p35: tup
     page.wait_for_function("() => !document.querySelector(\"[data-role='new-task-done']\")")
 
 
-def test_nouvelle_tache_desactivee_hors_du_projet_servi(page_p35: tuple[Page, dict[str, Any]]) -> None:
+def test_nouvelle_tache_ouverte_sur_le_projet_regarde(page_p35: tuple[Page, dict[str, Any]]) -> None:
+    """Lot 1 : un projet enrôlé autre que le projet servi n'est plus en
+    lecture seule — « Nouvelle tâche » y ouvre son formulaire."""
     page, srv = page_p35
     _open(page, srv, "?scope=all", "travail")
     button = page.locator("[data-role='new-task']")
@@ -284,9 +287,10 @@ def test_nouvelle_tache_desactivee_hors_du_projet_servi(page_p35: tuple[Page, di
     _open(page, srv, "?project=voisin-p35", "travail")
     button = page.locator("[data-role='new-task']")
     button.wait_for(timeout=APPEAR_MS)
-    assert button.is_disabled()
-    assert "Lecture seule" in page.locator("[data-role='new-task-reason']").inner_text()
-    assert page.locator("[data-role='new-task-form']").count() == 0
+    assert button.is_enabled()
+    assert page.locator("[data-role='new-task-reason']").count() == 0
+    button.click()
+    page.wait_for_selector("[data-role='new-task-form']")
 
 
 # ── Configuration › Projets ────────────────────────────────────────────────

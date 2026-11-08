@@ -5,7 +5,7 @@ une question posée par ``task ask``, une proposition en attente et une tâche
 bloquée. Le registre compte trois autres projets :
 
 - « Studio Pixel », initialisé, une tâche bloquée — consulté depuis le cockpit
-  d'Atelier Nord, donc en lecture seule ;
+  d'Atelier Nord mais enrôlé, donc inscriptible depuis le lot 1 ;
 - « Calme », un dossier sans ledger — rien n'y attend ;
 - « Banc d'essai », dont le dossier n'existe pas — il ne répond pas.
 
@@ -19,11 +19,12 @@ Ce que chaque test prouve :
 - état vide : « Rien n'attend de décision » et l'heure de la vérification ;
 - erreur partielle : « 1 projet n'a pas répondu », et Réessayer relance la
   lecture avec la sonde ;
-- lecture seule : actions désactivées, la raison écrite à côté ;
+- lecture seule : l'état n'existe plus pour un projet enrôlé (lot 1) — les
+  actions restent des liens, sans bouton grisé ni raison affichée ;
 - clavier : j / k passent d'une ligne à l'autre, Entrée ouvre l'action.
 
 Avec ``GRIMOIRE_E2E_CAPTURES=<dossier>``, le dernier test y écrit les captures
-de l'écran (clair, sombre, mobile, vide, lecture seule) pour la relecture ;
+de l'écran (clair, sombre, mobile, vide, projet consulté) pour la relecture ;
 sans la variable il ne fait rien (il ne se skippe pas : le mode strict de la CI
 promeut tout skip en échec).
 """
@@ -302,7 +303,7 @@ def test_la_proposition_ouvre_la_fiche_du_projet_sur_elle(page: Page, served_inb
     assert _fragment(page) == ("flotte", {"focus": ["proposal"], "proposal": [served_inbox["proposal"]]})
 
 
-# ── États : vide, erreur partielle, lecture seule ───────────────────────────
+# ── États : vide, erreur partielle, projet seulement consulté ───────────────
 
 
 def test_etat_vide_dit_rien_n_attend_et_l_heure_de_verification(page: Page, served_inbox: dict[str, str]) -> None:
@@ -334,23 +335,18 @@ def test_erreur_partielle_nomme_le_projet_muet_et_reessaie_avec_la_sonde(
     )
 
 
-def test_lecture_seule_desactive_les_actions_et_dit_pourquoi(page: Page, served_inbox: dict[str, str]) -> None:
+def test_un_projet_enrole_non_ouvert_autorise_les_actions(page: Page, served_inbox: dict[str, str]) -> None:
+    """Lot 1 de l'écriture multi-projets : `studio` est enrôlé mais n'est pas
+    le projet d'ouverture (`--project-root home`) — il n'est plus en lecture
+    seule. Les actions sont des liens vers l'écran de décision, pas des
+    boutons désactivés."""
     _open(page, served_inbox, f"?project={served_inbox['studio']}#a-traiter")
-    assert page.evaluate("() => window.GrimoireWorkspace.host.readOnly") is True
+    assert page.evaluate("() => window.GrimoireWorkspace.host.readOnly") is False
     row = _row(page, STUDIO_TASK)
     action = row.locator(".at-act")
-    assert action.evaluate("el => el.tagName") == "BUTTON"
-    assert action.is_disabled()
-    assert action.get_attribute("aria-describedby") == "at-ro-reason"
-    reason = page.locator("#at-ro-reason")
-    assert reason.is_visible()
-    assert reason.inner_text().startswith(f"Lecture seule : {STUDIO} se consulte d’ici")
-    # Entrée sur la ligne n'ouvre rien : la décision ne se prend pas d'ici.
-    row.click()
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(300)
-    assert page.evaluate("() => window.GrimoireWorkspace.space") == "a-traiter"
-    assert page.locator("#inspector-body .at-detail .at-act").is_disabled()
+    assert action.evaluate("el => el.tagName") == "A"
+    assert action.get_attribute("aria-describedby") is None
+    assert page.locator("#at-ro-reason").count() == 0
 
 
 # ── Clavier ─────────────────────────────────────────────────────────────────
@@ -523,7 +519,7 @@ def test_captures_de_relecture(browser: Browser, served_inbox: dict[str, str]) -
         ("p32-a-traiter-projet-clair", f"?project={served_inbox['home']}#a-traiter", "light", (1440, 900)),
         ("p32-a-traiter-mobile", "?scope=all#a-traiter", "light", (390, 844)),
         ("p32-a-traiter-vide", f"?project={served_inbox['calm']}#a-traiter", "light", (1440, 900)),
-        ("p32-a-traiter-lecture-seule", f"?project={served_inbox['studio']}#a-traiter", "dark", (1440, 900)),
+        ("p32-a-traiter-projet-consulte", f"?project={served_inbox['studio']}#a-traiter", "dark", (1440, 900)),
     )
     for name, suffix, scheme, (width, height) in shots:
         context = browser.new_context(

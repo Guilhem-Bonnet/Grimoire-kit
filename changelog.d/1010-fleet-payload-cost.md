@@ -1,0 +1,1 @@
+- perf(cockpit): la lecture du journal de session qui nourrit le payload `work` est bornée à 1 Mio par passe (1,9 s → 188 ms sur cinq journaux de 20 Mo), et la palette de la coque demande `annotations=0` pour que le montage de la Flotte ne paie plus jamais cette lecture (#1010)

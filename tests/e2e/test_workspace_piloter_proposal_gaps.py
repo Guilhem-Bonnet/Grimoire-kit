@@ -71,17 +71,17 @@ def test_ouvrir_le_fichier_d_une_reparation_selectionne_la_ligne_citee(workspace
         cited.unlink(missing_ok=True)
 
 
-def test_accepter_une_proposition_depuis_un_projet_qui_n_est_pas_le_projet_de_lancement(
+def test_accepter_une_proposition_depuis_un_projet_enrole_qui_n_est_pas_le_projet_de_lancement(
     cockpit_upgrade_workspace: Page, served_cockpit_upgrade: tuple[str, str, Path]
 ) -> None:
     """Le cockpit est lancé sans projet de lancement (``_HOME_SLUG`` vide) : le
-    projet regardé est donc en lecture seule pour toute écriture, SAUF décider
-    une proposition (#490). Le clic « Accepter » doit écrire l'artefact."""
+    projet regardé est enrôlé, donc inscriptible depuis le lot 1 de l'écriture
+    multi-projets. Le clic « Accepter » doit écrire l'artefact."""
     from grimoire.proposals import create_manual_proposal
 
     served, slug, root = served_cockpit_upgrade
     with urllib.request.urlopen(f"{served}/api/status?project={slug}", timeout=10) as resp:  # noqa: S310 — loopback
-        assert json.loads(resp.read())["readOnly"] is True, "le projet regardé doit être en lecture seule"
+        assert json.loads(resp.read())["readOnly"] is False, "un projet enrôlé n'est plus en lecture seule"
 
     skill = "orbital-nonhome-accept"
     dest = root / "_grimoire" / "overrides" / "skills" / f"{skill}.md"

@@ -329,6 +329,7 @@ def tasks_view(
     status: str | None = None,
     probe: SessionProbe | None = None,
     now: datetime | None = None,
+    annotations: bool = True,
 ) -> dict[str, Any]:
     """Les tâches du projet et les colonnes du board gouverné.
 
@@ -343,6 +344,13 @@ def tasks_view(
     que l'espace Exécuter propose l'action au lieu du seul rappel de
     `grimoire task add` — voir ``POST /api/workspace/tasks/migrate-standard``
     (``workspace_routes.py``).
+
+    ``annotations=False`` sert la même liste sans la couche chère que seule la
+    vue Exécuter affiche (vivacité, coût, fil d'activité, payload ``work`` lu
+    dans les journaux de session, gates de preuve). La palette de commandes de
+    la coque n'a besoin que de ``id``/``title`` : depuis l'issue #1010 elle
+    demande cette forme, pour que le chargement de la Flotte — elles sont sur
+    le même chemin — ne paie jamais la lecture d'un journal de session.
     """
     from grimoire.missions.board import BOARD_LIFECYCLE, PRIORITIES
     from grimoire.missions.schemas import TaskState
@@ -371,12 +379,13 @@ def tasks_view(
         return payload
     tasks = service.list_tasks(mission or None, status or None)
     cards = [_task_card(t) for t in tasks]
-    # UI-3 : la vivacité, le dernier signe de vie, la durée et le coût de chaque
-    # carte — la même arithmétique que le portefeuille, pas une seconde copie.
-    from grimoire.tools.workspace_portfolio import annotate_cards
+    if annotations:
+        # UI-3 : la vivacité, le dernier signe de vie, la durée et le coût de chaque
+        # carte — la même arithmétique que le portefeuille, pas une seconde copie.
+        from grimoire.tools.workspace_portfolio import annotate_cards
 
-    annotate_cards(project_root, service, tasks, cards, now=now or datetime.now(UTC), probe=probe)
-    annotate_gates(service.project_root, tasks, cards)
+        annotate_cards(project_root, service, tasks, cards, now=now or datetime.now(UTC), probe=probe)
+        annotate_gates(service.project_root, tasks, cards)
     payload["tasks"] = cards
     payload["count"] = len(tasks)
     return payload
@@ -554,10 +563,36 @@ def _catalog() -> _Catalog:
     return _Catalog(load_catalog())
 
 
-def _digest(path: Path) -> str:
+#: Empreinte par chemin pour la vue Source : ``(mtime_ns, taille, digest)``. Mémo du cockpit SEULEMENT :
+#: ``kit_hashes.digest_of`` reste exact (il relit toujours), parce que la vérification d'intégrité du kit
+#: (``verify``, ``doctor``, ``upgrade``) ne doit pas se fier à un mtime qu'une copie ``cp -p`` conserve.
+_DIGESTS: dict[str, tuple[int, int, str]] = {}
+
+
+def cached_digest(path: Path) -> str:
+    """SHA-256 de *path* pour l'affichage, recalculé seulement si ``(mtime_ns, taille)`` a changé.
+
+    ``""`` si le fichier ne se lit pas ; un échec n'est pas mémoïsé, il sera retenté.
+    """
     from grimoire.core.kit_hashes import digest_of
 
-    return digest_of(path)
+    key = str(path.absolute())
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    fingerprint = (stat.st_mtime_ns, stat.st_size)
+    cached = _DIGESTS.get(key)
+    if cached is not None and cached[:2] == fingerprint:
+        return cached[2]
+    digest = digest_of(path)
+    if digest:
+        _DIGESTS[key] = (*fingerprint, digest)
+    return digest
+
+
+def _digest(path: Path) -> str:
+    return cached_digest(path)
 
 
 def _file_entry(project_root: Path, path: Path, tier: dict[str, Any], catalog: _Catalog) -> dict[str, Any]:

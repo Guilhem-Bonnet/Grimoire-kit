@@ -169,7 +169,10 @@ def test_compiler_en_lecture_seule_dit_comment_ecrire(workflow: Page) -> None:
     page.wait_for_function("(sel) => document.querySelector(sel)?.textContent.includes('lecture seule')", arg=STATUS_CV)
     text = page.locator(STATUS_CV).inner_text()
     assert text.startswith("Compilation — Refusé")
-    assert "grimoire cockpit serve" in text, "le refus dit quoi faire, pas seulement non"
+    # Depuis le lot 1, la lecture seule ne frappe plus un projet enrôlé : le
+    # refus ne peut venir que d'une cible irrésoluble, et le geste qui répare
+    # est l'enrôlement, pas le lancement du serveur.
+    assert "grimoire cockpit add" in text, "le refus dit quoi faire, pas seulement non"
 
 
 def test_le_retour_ne_recouvre_aucun_noeud(workflow: Page) -> None:
