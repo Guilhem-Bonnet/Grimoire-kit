@@ -137,6 +137,93 @@ function put(path, body) {
   return request(path, { method: 'PUT', body: JSON.stringify(body || {}) });
 }
 
+// ── Gestes sensibles : confirmation NAMED avant l'envoi (lot 2) ─────────────
+//
+// `file/write`, `file/override`, `command` et `memory delete` touchent des
+// fichiers ou lancent un processus. Sur un AUTRE projet que celui d'ouverture,
+// le serveur exige `confirm_project: "<slug>"` égal au slug visé : le front
+// demande d'abord, dans une modale qui nomme le projet, puis ajoute le champ.
+// Le projet d'ouverture garde le geste historique (aucune modale : c'est le
+// projet que l'on a ouvert). Une modale annulée ne part pas.
+const projectNames = new Map();
+
+async function projectName(slug) {
+  if (projectNames.has(slug)) return projectNames.get(slug);
+  let name = slug;
+  try {
+    const payload = await api.projects();
+    const entry = (payload.projects || []).find((p) => p.slug === slug);
+    if (entry && entry.name) name = entry.name;
+  } catch {
+    // Le registre illisible n'empêche pas de nommer la cible : le slug suffit.
+  }
+  projectNames.set(slug, name);
+  return name;
+}
+
+/** `true` si la personne confirme le geste ; la promesse rend `false` sinon. */
+function askProjectWrite(name) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'kn-confirm-project';
+    dialog.setAttribute('aria-labelledby', 'kn-confirm-project-title');
+    dialog.setAttribute('closedby', 'any');
+
+    const box = document.createElement('form');
+    box.className = 'kn-confirm-project-box';
+    box.method = 'dialog';
+
+    const title = document.createElement('h2');
+    title.id = 'kn-confirm-project-title';
+    title.textContent = `Écrire dans ${name} ?`;
+    const note = document.createElement('p');
+    note.textContent =
+      'Ce geste modifie les fichiers de ce projet, ou y lance une commande. Il vise un autre projet que celui que ce cockpit a ouvert.';
+    const actions = document.createElement('div');
+    actions.className = 'kn-confirm-project-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn';
+    cancel.textContent = 'Annuler';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'btn pri';
+    confirm.textContent = `Écrire dans ${name}`;
+    actions.append(cancel, confirm);
+    box.append(title, note, actions);
+    dialog.append(box);
+
+    const close = (answer) => {
+      dialog.remove();
+      resolve(answer);
+    };
+    cancel.addEventListener('click', () => close(false));
+    confirm.addEventListener('click', () => close(true));
+    // Échap ou clic sur le fond : `close` (valeurs `closedby`/navigateur).
+    dialog.addEventListener('close', () => {
+      if (dialog.isConnected) close(false);
+    });
+    document.body.append(dialog);
+    cancel.focus();
+    dialog.showModal();
+  });
+}
+
+/**
+ * Envoie un geste sensible ; sur un autre projet enrôlé, demande d'abord à la
+ * personne de nommer la cible, puis signe le corps avec `confirm_project`.
+ */
+async function sensitiveWrite(path, body, targetSlug) {
+  const slug = targetSlug || host.project;
+  const home = (host.status && host.status.home) || null;
+  if (host.kind !== 'cockpit' || !slug || slug === home) return post(path, body);
+  const name = await projectName(slug);
+  if (!(await askProjectWrite(name))) {
+    throw new ApiError(`écriture annulée : ${name} n'a pas été confirmé`, 499, { cancelled: true });
+  }
+  return post(path, { ...(body || {}), confirm_project: slug });
+}
+
 /** Amorçage : résout l'hôte et le projet ciblé. À appeler une fois. */
 export async function boot() {
   const params = new URLSearchParams(location.search);
@@ -436,8 +523,11 @@ export const api = {
     return get(WS + 'memory/recall/replay', params);
   },
   // Suppression gouvernée du cockpit (`POST /api/memory`) : confirmation
-  // explicite, et le serveur la refuse (403) hors du projet qu'il sert.
-  memoryDelete: (id, project) => post('/api/memory', { action: 'delete', id, project, confirm: true }),
+  // explicite, et — lot 2 — accepte tout projet enrôlé après la modale qui
+  // nomme la cible (`confirm_project`). Le serveur refuse encore les gestes
+  // hors du projet servi ; la suppression, elle, suit cette règle nommée.
+  memoryDelete: (id, project) =>
+    sensitiveWrite('/api/memory', { action: 'delete', id, project, confirm: true }, project),
   // Correction directe d'une entrée (P34), même route et mêmes gardes :
   // `mode: 'preview'` rend l'avant/après et la version des entrées en jeu ;
   // `mode: 'apply'` renvoie cette version avec `confirm: true` (409 et aperçu
@@ -515,9 +605,9 @@ export const api = {
   // ajoute déjà le slug du projet affiché tant qu'aucun n'est présent dans le
   // chemin, sans jamais le dupliquer (piège #507).
   migrateStandardTasks: () => postOpen(WS + 'tasks/migrate-standard', {}),
-  createOverride: (path) => post(WS + 'file/override', { path }),
-  writeFile: (path, text) => post(WS + 'file/write', { path, text }),
-  run: (argv) => post(WS + 'command', { argv }),
+  createOverride: (path) => sensitiveWrite(WS + 'file/override', { path }),
+  writeFile: (path, text) => sensitiveWrite(WS + 'file/write', { path, text }),
+  run: (argv) => sensitiveWrite(WS + 'command', { argv }),
   // Assigner/retirer un skill, ou modifier la clause d'emploi/outils/contexte
   // d'un agent (#374) — porte toujours sur sa copie `overrides`, jamais sur
   // le kit ; refusé côté serveur hors projet d'accueil, comme le reste.

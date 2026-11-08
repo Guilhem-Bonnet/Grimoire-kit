@@ -3569,3 +3569,45 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
     gap: max(var(--sp-2), 8px);
   }
 }
+
+/* ── Confirmation nommée d'une écriture sensible (lot 2) ─────────────────── */
+
+/* Une modale `<dialog>` qui nomme le projet visé avant d'écrire un fichier,
+ * de créer un override, de lancer une commande ou de supprimer une entrée de
+ * mémoire sur un AUTRE projet que celui d'ouverture. */
+dialog.kn-confirm-project {
+  width: min(440px, calc(100% - 32px));
+  max-width: none;
+  margin: 18vh auto auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.kn-confirm-project-box {
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-tip);
+  color: var(--ink);
+}
+
+.kn-confirm-project-box h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--t-l);
+  line-height: 22px;
+}
+
+.kn-confirm-project-box p {
+  margin: 0 0 var(--sp-4);
+  color: var(--ink2);
+  overflow-wrap: anywhere;
+}
+
+.kn-confirm-project-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
