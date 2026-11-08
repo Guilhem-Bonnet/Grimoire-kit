@@ -1069,7 +1069,7 @@ def _accept_agent(project_root: Path, proposal: Proposal) -> dict[str, Any]:
     except GrimoireAgentError as exc:
         dest.unlink(missing_ok=True)
         raise RuntimeError(
-            f"agent créé puis annulé : {exc} (faisceau identique à un agent existant)"
+            f"agent créé puis annulé : {exc} (même faisceau et même fiche qu'un agent existant)"
         ) from exc
     return result
 
