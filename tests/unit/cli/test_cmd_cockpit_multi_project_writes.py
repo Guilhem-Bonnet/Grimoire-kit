@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from grimoire.cli import cmd_cockpit
+from grimoire.cli import cmd_cockpit, cockpit_write_target
 from grimoire.missions.service import TaskService
 from grimoire.tools import project_registry, workspace_exec
 from grimoire.tools.workspace_routes import PREFIX
@@ -323,6 +323,50 @@ def test_une_mutation_memoire_sans_confirmation_nommee_est_refusee(
 
     assert status == 403, body
     assert body["error"] == "hôte en lecture seule"
+
+
+def test_un_journal_non_inscriptible_refuse_l_ecriture_sensible(
+    duo_server: tuple[int, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail-closed du lot 2 : la confirmation ne compte que si le journal peut
+    la garder. Sans journal, la route répond 503 et n'écrit rien."""
+    port, home, foreign = duo_server
+
+    def _broken(*_args: Any, **_kwargs: Any) -> None:
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(cockpit_write_target, "journal_event", _broken)
+
+    status, body = _cockpit_http.post(
+        port,
+        f"{PREFIX}file/write?project=foreign",
+        {"path": "_grimoire/overrides/note.md", "text": "x", "confirm_project": "foreign"},
+    )
+
+    assert status == 503, body
+    assert "journal" in body["error"]
+    assert not (foreign / "_grimoire" / "overrides" / "note.md").exists()
+    assert not (home / "_grimoire" / "overrides" / "note.md").exists()
+
+
+def test_un_journal_non_inscriptible_refuse_la_mutation_memoire(
+    duo_server: tuple[int, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    port, _home, _foreign = duo_server
+
+    def _broken(*_args: Any, **_kwargs: Any) -> None:
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(cockpit_write_target, "journal_event", _broken)
+
+    status, body = _cockpit_http.post(
+        port,
+        "/api/memory",
+        {"action": "gc", "project": "foreign", "confirm": True, "confirm_project": "foreign"},
+    )
+
+    assert status == 503, body
+    assert "journal" in body["error"]
 
 
 @pytest.mark.parametrize(("action", "extra"), MEMORY_MUTATIONS)
