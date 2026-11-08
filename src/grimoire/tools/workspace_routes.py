@@ -52,6 +52,7 @@ from grimoire.memory.correction import request_correction_from_body as _memory_c
 from grimoire.missions.liveness import probe_entries
 from grimoire.tools import (
     source_assist,
+    workspace_accept_merged,
     workspace_actions,
     workspace_api,
     workspace_attention,
@@ -610,9 +611,16 @@ def _autopilot_state(project_root: Path, _query: _Query) -> Any:
     }
 
 
+def _accept_merged_candidates(project_root: Path, _query: _Query) -> Any:
+    """Candidates de « Tout accepter » (GAO-cockpit-tout-001) : lecture seule, pour le compteur du bouton."""
+    rows = workspace_accept_merged.accept_merged_candidates(project_root)
+    return {"candidates": rows, "count": len(rows)}
+
+
 GET_ROUTES: dict[str, _GetHandler] = {
 f"{PREFIX}autonomy/autopilot": _autopilot_state,
 f"{PREFIX}autonomy/mandate": _mandate_state,
+    f"{PREFIX}tasks/accept-merged": _accept_merged_candidates,
     f"{PREFIX}glossary": _glossary,
     f"{PREFIX}capacity": _capacity,
     f"{PREFIX}tasks": _tasks,
@@ -668,7 +676,9 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 #: gardé » (portefeuille et sonde exclus) vit avec le cache ; ``pulse_reload``, que la page posait sur un
 #: rechargement du direct, reste accepté (et retiré) : il ne change jamais la réponse.
 PULSE_RELOAD = "pulse_reload"
-LIVE_ROUTES = frozenset({f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet"})
+LIVE_ROUTES = frozenset(
+    {f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet", f"{PREFIX}tasks/accept-merged"}
+)
 
 
 #: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
@@ -912,6 +922,17 @@ def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
     return migrate_standard_tasks(project_root).to_dict()
 
 
+def _accept_merged(project_root: Path, body: dict[str, Any]) -> Any:
+    """« Tout accepter » (GAO-cockpit-tout-001) : ferme les tâches fusionnées, relues READY, en un geste.
+
+    Geste d'humain derrière la clé de contrôle, comme l'octroi du mandat et le
+    pilote automatique : sans clé valide, 403 et rien n'est écrit. Chaque tâche
+    passe par :func:`grimoire.missions.human_acceptance.accept_task` ; une tâche
+    qui échoue est rapportée, les autres continuent.
+    """
+    return workspace_accept_merged.accept_merged(project_root, body)
+
+
 def _task_add(project_root: Path, body: dict[str, Any]) -> Any:
     """« Nouvelle tâche » de Travail (P35) : ``TaskService.add``, l'entrée de ``grimoire task add`` et de ``task_add``.
 
@@ -1021,6 +1042,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}assist": _assist,
     f"{PREFIX}tasks/migrate-standard": _task_migrate_standard,
     f"{PREFIX}tasks/add": _task_add,
+    f"{PREFIX}tasks/accept-merged": _accept_merged,
     f"{PREFIX}memory/correct": _memory_correct,
     f"{PREFIX}tasks/intake": workspace_ideas.task_intake,
     f"{PREFIX}tasks/intake/create": workspace_ideas.task_intake_create,
