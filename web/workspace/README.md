@@ -249,7 +249,8 @@ le résout dans son registre — tout projet ENRÔLÉ est inscriptible, pas
 seulement celui qu'il a ouvert (lot 1, 2026-11-07). Les écritures SENSIBLES
 (fichier, override, commande, mutations mémoire) exigent en plus, sur un autre
 projet que celui d'ouverture, `confirm_project: "<slug>"` égal au slug visé
-(lot 2).
+(lot 2). Les écritures d'AUTORITÉ — mandat, pilote automatique, fournisseurs —
+nomment en plus leur projet dans le corps (lot 3, voir plus bas).
 
 ### Lectures — atelier et cockpit
 
@@ -314,6 +315,34 @@ règle : n'importe quel projet enrôlé, à condition que `project` et
 Les écritures d'agents (`skill`, `fields`), les mouvements de tâche, les
 blueprints et `/compile` ont suivi la même ouverture au lot 1 : tout projet
 enrôlé est inscriptible, le slug venant de `?project=` et jamais d'un chemin.
+
+### Écritures d'autorité — mandat, pilote, fournisseurs (lot 3)
+
+Depuis un seul cockpit, le mandat, le pilote automatique et les fournisseurs de
+**n'importe quel projet enrôlé** se pilotent par les mêmes routes qu'avant ;
+seule la résolution change. Le projet visé est nommé **dans l'URL et dans le
+corps** (`{"project": "<slug>", ...}`) :
+
+| Route | Corps (en plus de `project`) |
+|---|---|
+| `POST /api/workspace/autonomy/mandate/grant` | `{gestures[], task_types[], max_sessions_per_day, until, control_key}` |
+| `POST /api/workspace/autonomy/mandate/revoke` | `{reason?}` |
+| `POST /api/workspace/autonomy/autopilot` | `{on: bool, control_key}` |
+| `POST /api/workspace/providers` | `{action: enable\|disable, provider_id, control_key}` |
+| `POST /api/workspace/providers/set-key` | `{provider_id, env_var, value, control_key}` |
+
+Le slug est résolu par le registre (`registered_root`) — jamais un chemin envoyé
+par le client. Un `project` de corps qui ne désigne pas la racine de `?project=`
+est refusé (400), y compris pour un appel direct à la route ; absent, il ne dit
+rien (compatibilité des appels historiques). Une écriture d'autorité sans slug
+d'URL vaut 400 (« projet non nommé ») et un slug inconnu, non enrôlé ou dont le
+dossier a disparu vaut 404 — au lieu du 403 « lecture seule » générique des
+autres écritures. La garde de la clé de contrôle reste **identique** sur tous les
+projets : `control_key_path()`, la même clé lue dans le terminal, les mêmes
+refus (403 sans clé valide). Le front nomme le projet cible avant le champ de la
+clé (carte Fournisseurs, rubrique Mandat et pilote, geste du pilote dans le
+chat) ; en portée « Tous les projets », il invite à choisir un projet au lieu de
+deviner la cible.
 
 ## Ce que la Console accepte
 

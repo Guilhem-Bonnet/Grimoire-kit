@@ -76,6 +76,7 @@ from grimoire.tools import (
     workspace_setup_guide,
     workspace_since,
 )
+from grimoire.tools.project_registry import refuse_foreign_body
 
 __all__ = [
     "CHAT_STREAM_PATH",
@@ -121,6 +122,7 @@ def is_sensitive_write(path: str) -> bool:
     d'ouverture ; le projet d'ouverture garde le geste historique.
     """
     return path in SENSITIVE_WRITES
+
 
 #: Sentinelle, même contrat que ``forge_routes.API_GET_UNHANDLED`` : distingue
 #: « chemin inconnu » d'une route qui rendrait légitimement ``None``.
@@ -964,7 +966,7 @@ def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
         verify_control_key,
     )
     from grimoire.missions.schemas import ORIGIN_HUMAN
-
+    refuse_foreign_body(project_root, body)
     if not verify_control_key(body.get("control_key")):
         raise PermissionError("clé de contrôle absente ou invalide : accorder un mandat est un geste d'humain")
     try:
@@ -981,7 +983,7 @@ def _mandate_grant(project_root: Path, body: dict[str, Any]) -> Any:
 def _mandate_revoke(project_root: Path, body: dict[str, Any]) -> Any:
     """Révoque le mandat actif — toujours permis derrière le jeton : retirer une autorité n'en demande aucune."""
     from grimoire.missions.mandate import REVOKE_MANUAL, MandateStore
-
+    refuse_foreign_body(project_root, body)
     revoked = MandateStore(project_root).revoke(REVOKE_MANUAL, str(body.get("reason") or ""))
     return {"revoked": revoked.to_dict() if revoked else None}
 
@@ -996,7 +998,7 @@ def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
     from grimoire.missions.autopilot import AutopilotStore
     from grimoire.missions.mandate import JournalError, MandateRefusedError, verify_control_key
     from grimoire.missions.schemas import ORIGIN_HUMAN
-
+    refuse_foreign_body(project_root, body)
     if not verify_control_key(body.get("control_key")):
         raise PermissionError("clé de contrôle absente ou invalide : le pilote automatique est un geste d'humain")
     if not isinstance(body.get("on"), bool):

@@ -1,0 +1,1 @@
+- feat(cockpit): mandat, pilote et fournisseurs de n'importe quel projet (lot 3)

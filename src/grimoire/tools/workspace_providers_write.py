@@ -31,7 +31,11 @@ def providers_write_route(project_root: Path, body: dict[str, Any]) -> Any:
         set_provider_enabled,
     )
     from grimoire.tools import workspace_config
+    from grimoire.tools.project_registry import body_project_refusal
 
+    refusal = body_project_refusal(project_root, body)
+    if refusal is not None:
+        raise ValueError(refusal)
     if not verify_control_key(body.get("control_key")):
         raise PermissionError("clé de contrôle absente ou invalide : modifier les fournisseurs est un geste d'humain")
     action = str(body.get("action") or "")
@@ -70,7 +74,11 @@ def providers_set_key_route(project_root: Path, body: dict[str, Any]) -> Any:
     """``POST /api/workspace/providers/set-key`` — pose une clé API en magasin, jamais dans le registre."""
     from grimoire.missions.mandate import verify_control_key
     from grimoire.providers.secrets import set_secret
+    from grimoire.tools.project_registry import body_project_refusal
 
+    refusal = body_project_refusal(project_root, body)
+    if refusal is not None:
+        raise ValueError(refusal)
     if not verify_control_key(body.get("control_key")):
         raise PermissionError("clé de contrôle absente ou invalide : poser une clé API est un geste d'humain")
     provider_id = str(body.get("provider_id") or "")
