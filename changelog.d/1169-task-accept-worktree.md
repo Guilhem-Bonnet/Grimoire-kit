@@ -1,1 +1,0 @@
-- fix(missions): `task accept` lit le pack de preuve dans le worktree de la tâche, sans `--evidence-root`, et la question du merger donne la commande complète (#1169)
