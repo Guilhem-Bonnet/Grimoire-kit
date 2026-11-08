@@ -182,7 +182,7 @@ function providerGovernanceCard(ctx, onChanged) {
   card.dataset.role = 'provider-governance';
   card.setAttribute('aria-label', 'Gouvernance des fournisseurs');
   card.append(el('h3', null, 'Activer, désactiver, poser une clé'));
-  if (!ctx.scope.project) {
+  if (ctx.scope.all) {
     // Le registre visé est celui d'UN projet : écrire depuis « Tous les projets »
     // reviendrait à deviner la cible. Le corps d'écriture ne porte aucun slug
     // dans cette portée, l'hôte refuserait (400).
@@ -495,7 +495,8 @@ function autonomyCard(ctx, data, pilot, onChanged) {
 }
 
 async function mountMandate(root, ctx) {
-  if (!ctx.scope.project) {
+  // « Tous les projets » n'a pas de mandat ni de registre : on ne devine pas.
+  if (ctx.scope.all) {
     root.replaceChildren(ctx.empty(
       'Choisissez un projet',
       'Le mandat et le pilote sont propres à un projet : sélectionnez-en un dans la portée (en haut).',
