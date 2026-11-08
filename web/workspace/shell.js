@@ -105,6 +105,9 @@ const SPACES = [
       { id: 'blueprints', module: 'concevoir', label: 'Blueprints', count: (api) => api.blueprintContainers().then((d) => d.count) },
       { id: 'hotes', module: 'configurer', label: 'Hôtes et hooks', skeleton: 'table', count: (api) => api.hooks().then((d) => d.total) },
       { id: 'fournisseurs', module: 'configurer', label: 'Fournisseurs et budgets' },
+      // Lot 3 du cockpit multi-projet : mandat et pilote du projet de la portée,
+      // y compris un autre projet enrôlé que celui d'ouverture.
+      { id: 'mandat', module: 'configurer', label: 'Mandat et pilote' },
       // Le registre des projets du cockpit (P35) : ajouter, scanner, retirer, purger. Sans compte
       // sur l'onglet : il serait lu une fois par portée, donc faux dès le premier retrait.
       { id: 'projets', module: 'registre', label: 'Projets', skeleton: 'table' },

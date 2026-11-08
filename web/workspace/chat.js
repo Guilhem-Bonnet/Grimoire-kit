@@ -14,7 +14,7 @@
 // clavier — Entrée envoie, Maj+Entrée saute une ligne — et les boutons de permission
 // reçoivent le focus quand la demande apparaît.
 
-import { api } from './api.js';
+import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
 
 const SAFE_HREF = /^(https?:|mailto:|#)/i;
@@ -323,6 +323,12 @@ export function createChat({ readOnly = () => false } = {}) {
     const keyField = mk('input', { type: 'password', class: 'chat-gesture-key', autocomplete: 'off', 'aria-label': 'Clé de contrôle', placeholder: 'Clé de contrôle' });
     const button = mk('button', { type: 'button', class: 'btn pri chat-gesture-btn', 'data-pilot': key, text: label });
     const result = mk('div', { class: 'chat-gesture-result', role: 'status' });
+    // Lot 3 : le geste vise le projet de la portée (le corps le nomme aussi).
+    // Le nom du projet s'affiche AVANT le champ de la clé de contrôle.
+    const targetLine = mk('div', { class: 'chat-gesture-target' });
+    if (host.project) {
+      projectName(host.project).then((name) => { targetLine.textContent = `Cible : ${name}.`; });
+    }
     button.addEventListener('click', async () => {
       button.disabled = true;
       try {
@@ -337,7 +343,7 @@ export function createChat({ readOnly = () => false } = {}) {
     append(mk('section', { class: 'chat-gesture', role: 'group', 'aria-label': 'Geste proposé par l’orchestrateur' },
       mk('div', { class: 'chat-who', text: 'L’orchestrateur propose' }),
       mk('div', { text: `${label} ? Le geste reste le vôtre : saisissez la clé de contrôle et cliquez.` }),
-      mk('div', { class: 'chat-gesture-actions' }, keyField, button), result));
+      targetLine, mk('div', { class: 'chat-gesture-actions' }, keyField, button), result));
   }
 
   // ── L'hôte (ACP3) : réglage du projet, hôte détecté par défaut ───────────
