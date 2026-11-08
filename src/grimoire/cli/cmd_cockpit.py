@@ -82,6 +82,7 @@ from grimoire.tools.request_guard import (
     new_session_token,
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
+from grimoire.tools.workspace_read_cache import cacheable_read
 from grimoire.tools.workspace_write_guard import cockpit_journal_path, guard_write
 
 cockpit_app = typer.Typer(
@@ -480,9 +481,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return
         from grimoire.tools.workspace_routes import (
             CHAT_STREAM_PATH,
+            LIVE_ROUTES,
             STREAM_HEADERS,
             STREAM_PATH,
-            cacheable_read,
             chat_stream,
             workspace_stream,
         )
@@ -572,7 +573,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 "project": slug,
                 "home": _HOME_SLUG or None,
             }
-        self._send_json(200, payload, etag=cacheable_read(path, query))
+        self._send_json(200, payload, etag=cacheable_read(path, query, live_routes=LIVE_ROUTES))
 
     def do_POST(self) -> None:  # http.server contract
         # P79 : toute écriture passée par le cockpit (tâche, agent, réglage…) peut changer ce que les lectures du direct

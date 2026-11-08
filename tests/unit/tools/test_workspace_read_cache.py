@@ -20,7 +20,8 @@ import pytest
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
 from grimoire.tools import workspace_api, workspace_read_cache
-from grimoire.tools.workspace_routes import LIVE_ROUTES, PREFIX, cacheable_read, workspace_get
+from grimoire.tools.workspace_read_cache import cacheable_read
+from grimoire.tools.workspace_routes import LIVE_ROUTES, PREFIX, workspace_get
 
 TASKS = f"{PREFIX}tasks"
 ATTENTION = f"{PREFIX}attention"
@@ -64,14 +65,14 @@ def test_les_lectures_du_direct_sont_gardees() -> None:
 def test_les_quatre_vues_lourdes_passent_par_le_cache_sans_marqueur() -> None:
     """L'ouverture de page n'envoie pas ``pulse_reload`` : elle doit pourtant être servie par le cache."""
     for path in (TASKS, ATTENTION, SESSIONS, SHEET):
-        assert cacheable_read(path, {}), path
-        assert cacheable_read(path, dict(LIVE)), path
+        assert cacheable_read(path, {}, live_routes=LIVE_ROUTES), path
+        assert cacheable_read(path, dict(LIVE), live_routes=LIVE_ROUTES), path
 
 
 def test_le_portefeuille_et_une_sonde_demandee_ne_sont_jamais_gardes() -> None:
-    assert not cacheable_read(TASKS, {"scope": ["portfolio"]})
-    assert not cacheable_read(ATTENTION, {"probe": ["1"]})
-    assert cacheable_read(ATTENTION, {"probe": ["0"]})
+    assert not cacheable_read(TASKS, {"scope": ["portfolio"]}, live_routes=LIVE_ROUTES)
+    assert not cacheable_read(ATTENTION, {"probe": ["1"]}, live_routes=LIVE_ROUTES)
+    assert cacheable_read(ATTENTION, {"probe": ["0"]}, live_routes=LIVE_ROUTES)
 
 
 def test_deux_get_sans_pulse_reload_font_un_seul_calcul(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

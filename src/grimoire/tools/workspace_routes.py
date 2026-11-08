@@ -663,28 +663,11 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 
 
 #: Les lectures lourdes servies par le cache de lecture (P79, :mod:`grimoire.tools.workspace_read_cache`) :
-#: l'ouverture de page, la navigation et le rechargement du direct passent les mêmes.
-#: Le paramètre ``pulse_reload`` que la page posait sur un rechargement du direct reste accepté (et retiré) :
-#: il ne change jamais la réponse, et une page plus ancienne continue de fonctionner.
+#: l'ouverture de page, la navigation et le rechargement du direct passent les mêmes. La règle « ce qui est
+#: gardé » (portefeuille et sonde exclus) vit avec le cache ; ``pulse_reload``, que la page posait sur un
+#: rechargement du direct, reste accepté (et retiré) : il ne change jamais la réponse.
 PULSE_RELOAD = "pulse_reload"
 LIVE_ROUTES = frozenset({f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet"})
-
-
-def _fresh_probe(query: _Query) -> bool:
-    """Vrai si la requête demande une sonde fraîche (``probe=1``, « Réessayer ») : jamais servie du cache."""
-    return _one(query, "probe") not in (None, "", "0", "false")
-
-
-def cacheable_read(path: str, query: _Query) -> bool:
-    """Vrai si cette lecture passe par le cache de lecture (:mod:`grimoire.tools.workspace_read_cache`).
-
-    Le portefeuille (``scope=portfolio``) agrège des projets que ce serveur n'écrit pas — son empreinte est
-    celle du projet servi, pas la leur : il n'est jamais gardé. Un ``project=`` est, lui, résolu par l'hôte
-    *avant* la route (``_CockpitHandler.do_GET``) et la lecture porte alors sur cette racine, dont l'empreinte
-    couvre les fichiers : il n'est donc pas « étranger ». Une sonde explicitement demandée (``probe=1``) force
-    un calcul, sinon « Réessayer » resservirait la sonde qu'il devait remplacer.
-    """
-    return path in LIVE_ROUTES and _one(query, "scope") != "portfolio" and not _fresh_probe(query)
 
 
 #: Le flux Server-Sent Events du pouls (P10) : même charge utile que ``pulse``,
@@ -750,18 +733,18 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
         # main, 2026-10-29). Il ne conditionne plus le cache (GAO-perf-cockpit-002) : une page ouverte le même jour
         # qu'un onglet qui se rafraîchit doit lire la même réponse pour la même empreinte.
         query = {k: v for k, v in query.items() if k != PULSE_RELOAD}
-        if handler is not None and cacheable_read(path, query):
+        if handler is not None:
             # P79 : une lecture lourde est servie une fois par empreinte, pas une par onglet ni une par page. Un
             # changement des fichiers de l'empreinte (ledger, traces, journaux du tick, reçus) la fait recalculer ;
             # une écriture du cockpit la vide (:func:`grimoire.cli.cmd_cockpit._forget_live_reads`).
             from grimoire.tools import workspace_pulse, workspace_read_cache
 
-            plain = query
-            return workspace_read_cache.cached_read(
-                path, project_root, plain, lambda: handler(project_root, plain),
-                lambda: workspace_pulse.fingerprint_of(project_root),
-            )
-        if handler is not None:
+            if workspace_read_cache.cacheable_read(path, query, live_routes=LIVE_ROUTES):
+                plain = query
+                return workspace_read_cache.cached_read(
+                    path, project_root, plain, lambda: handler(project_root, plain),
+                    lambda: workspace_pulse.fingerprint_of(project_root),
+                )
             return handler(project_root, query)
         if path.startswith(f"{PREFIX}sessions/"):
             # Bloc Activité d'une session (P69v2) : le fil des tâches que son claim tient.
