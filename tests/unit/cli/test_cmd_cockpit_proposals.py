@@ -175,14 +175,14 @@ def test_accept_works_on_a_non_home_project_even_when_another_is_home(
     assert body["ok"] is True
 
 
-def test_file_write_stays_on_the_opening_project(duo_server: Any) -> None:
-    """Lot 1 de l'écriture multi-projets : les autres écritures de la vue de
-    travail visent n'importe quel projet enrôlé, mais ``file/write`` reste
-    réservée au projet d'ouverture (lot 2) — sinon la Flotte deviendrait
-    éditable fichier par fichier à distance."""
+def test_file_write_on_another_project_requires_a_named_confirmation(duo_server: Any) -> None:
+    """Lot 2 de l'écriture multi-projets : ``file/write`` accepte un autre
+    projet enrôlé, mais seulement quand le corps nomme la cible
+    (``confirm_project``). Sans cela, la Flotte ne devient pas éditable
+    fichier par fichier à distance sur un simple clic."""
     port, _alpha, _beta = duo_server
     status, body = _post(
         port, "/api/workspace/file/write?project=beta", {"path": "README.md", "text": "x"}
     )
     assert status == 403
-    assert body["error"] == "hôte en lecture seule"
+    assert "confirm_project" in body["error"]

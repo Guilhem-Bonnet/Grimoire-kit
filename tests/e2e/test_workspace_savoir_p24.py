@@ -13,8 +13,8 @@ Prouvé par navigateur :
 - en portée « Projet X », les entrées de l'autre projet du même fichier ne
   sont que comptées, jamais montrées ;
 - la suppression demande une confirmation dans la page (aucune boîte native)
-  et dit son résultat sur place ; hors du projet servi, elle n'est pas
-  proposée.
+  et dit son résultat sur place ; depuis le lot 2, elle est proposée sur tout
+  projet enrôlé, derrière une modale qui nomme le projet visé.
 """
 
 from __future__ import annotations
@@ -348,9 +348,24 @@ def test_la_suppression_se_confirme_dans_la_page(savoir: tuple[Page, dict[str, s
     assert not [e for e in after["entries"] if "6333" in e["text"]], "l'entrée a quitté le store"
 
 
-def test_hors_du_projet_servi_la_suppression_n_est_pas_proposee(savoir: tuple[Page, dict[str, str]]) -> None:
+def test_hors_du_projet_servi_la_suppression_est_proposee_avec_confirmation_nommee(
+    savoir: tuple[Page, dict[str, str]],
+) -> None:
+    """Lot 2 : la suppression accepte tout projet enrôlé, derrière une modale
+    qui nomme le projet visé ; annuler ne supprime rien."""
     page, srv = savoir
     _open(page, srv["base"], f"project={srv['poste']}")
     page.locator(".kn-res").first.click()
     page.wait_for_selector("#inspector-body .kn-detail")
-    assert page.locator("#inspector-body button", has_text="Supprimer").count() == 0
+    remove = page.locator("#inspector-body button", has_text="Supprimer…")
+    assert remove.count() == 1
+
+    remove.click()
+    page.locator("#inspector-body .kn-confirm button", has_text="Supprimer définitivement").click()
+    dialog = page.locator("dialog.kn-confirm-project")
+    dialog.wait_for()
+    assert "poste" in dialog.inner_text(), "la modale doit nommer le projet visé"
+    dialog.locator("button", has_text="Annuler").click()
+    assert page.locator("dialog.kn-confirm-project").count() == 0
+    assert page.locator(".kn-res").count() >= 1, "annuler ne supprime rien"
+

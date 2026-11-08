@@ -9,8 +9,9 @@ Depuis le lot 1 de l'écriture multi-projets (2026-11-07), une écriture vise
 n'importe quel projet ENRÔLÉ : le slug de ``?project=`` est **obligatoire** et
 sert de clé à :func:`registered_root`, jamais de chemin ; le dossier doit
 exister. Aucun repli sur ``selected_slug()`` (état partagé entre onglets).
-``file/write``, ``file/override`` et ``command`` restent réservés au projet
-d'ouverture (lot 2), comme les mutations mémoire.
+Depuis le lot 2 (2026-11-08), ``file/write``, ``file/override``, ``command``
+et les mutations mémoire suivent la même résolution ; leur confirmation
+nommée (``confirm_project``) est appliquée par ``cmd_cockpit``.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from grimoire.tools.project_registry import registered_root, selected_slug
+from grimoire.tools.workspace_write_guard import cockpit_journal_path, journal_event
 
 
 def query_slug(path: str) -> str:
@@ -55,19 +57,6 @@ def enrolled_write_root(path: str) -> Path | None:
     return registered_root(slug=slug) if slug else None
 
 
-def home_write_root(path: str, home_slug: str | None) -> Path | None:
-    """Racine du projet d'OUVERTURE pour les écritures qui y restent limitées.
-
-    Lot 2 : ``file/write``, ``command``, ``file/override`` et les mutations
-    mémoire gardent la règle historique. Le slug explicite doit être celui du
-    lancement, et il doit toujours résoudre dans le registre.
-    """
-    slug = explicit_query_slug(path)
-    if not home_slug or slug != home_slug:
-        return None
-    return registered_root(slug=slug)
-
-
 def body_confirms_slug(body: Any, path: str) -> bool:
     """Le ``project`` du corps, s'il est présent, doit viser le même projet.
 
@@ -81,6 +70,46 @@ def body_confirms_slug(body: Any, path: str) -> bool:
         return True
     wanted = str(body.get("project") or "").strip()
     return not wanted or wanted == explicit_query_slug(path)
+
+
+def sensitive_write_refusal(body: Any, path: str, home_slug: str | None) -> str | None:
+    """Message de refus d'une écriture sensible, ou ``None`` si elle est confirmée.
+
+    Lot 2 : ``file/write``, ``file/override`` et ``command`` acceptent n'importe
+    quel projet enrôlé, mais un projet AUTRE que celui d'ouverture exige
+    ``confirm_project`` égal au slug visé. Le projet d'ouverture garde le geste
+    historique (sans confirmation) ; un corps qui nomme un autre slug reste
+    refusé, comme pour les autres écritures.
+    """
+    slug = explicit_query_slug(path)
+    confirmed = str(body.get("confirm_project") or "").strip() if isinstance(body, dict) else ""
+    if slug == home_slug or confirmed == slug:
+        return None
+    return f"écriture sensible sur « {slug} » : `confirm_project` = « {slug} » requis"
+
+
+def journal_confirmation(method: str, route: str, project: str, confirm_project: str) -> str | None:
+    """Inscrit la confirmation nommée au journal de la garde d'écriture.
+
+    ``guard_write`` journalise avant la lecture du corps, donc il ne peut pas
+    connaître ``confirm_project``. Une écriture sensible validée ajoute cette
+    seconde ligne (geste ``confirm_project``). Fail-closed comme la garde : sur
+    ``OSError``, rend le message du 503 et l'écriture ne doit pas avoir lieu.
+    """
+    try:
+        journal_event(
+            cockpit_journal_path(),
+            {
+                "route": route,
+                "method": method,
+                "gesture": "confirm_project",
+                "project": project,
+                "confirm_project": confirm_project,
+            },
+        )
+    except OSError as exc:
+        return f"journal de la garde non inscriptible ({cockpit_journal_path()}) : écriture refusée — {exc}"
+    return None
 
 
 def unresolvable_status(path: str, home_slug: str | None) -> dict[str, object] | None:

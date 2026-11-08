@@ -235,8 +235,12 @@ d'écrire l'entrée, jamais de retirer la citation.
 ## Les routes
 
 Tout ce que la vue de travail ajoute vit sous `/api/workspace/`. Les lectures
-sont servies par **les deux hôtes** ; les écritures n'existent que sur
-l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
+sont servies par **les deux hôtes**. Les écritures visent le projet désigné
+par `?project=` : l'atelier l'ignore (il n'en sert qu'un), le cockpit le résout
+dans son registre — tout projet ENRÔLÉ est inscriptible, pas seulement celui
+qu'il a ouvert (lot 1, 2026-11-07). Les écritures SENSIBLES (fichier, override,
+commande, mutations mémoire) exigent en plus, sur un autre projet que celui
+d'ouverture, `confirm_project: "<slug>"` égal au slug visé (lot 2).
 
 ### Lectures — atelier et cockpit
 
@@ -262,7 +266,7 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `GET /api/workspace/assist` | Suggestions par modèle local (issue 280, voie 2), lecture sans coût — jamais d'appel au modèle : `{enabled, model, available, reason}`. `enabled: false` = opt-in absent (`source.assist.model` vide) ; `available: false` avec `enabled: true` = Ollama indisponible ou modèle absent de `ollama list` |
 | `GET /api/workspace/evidence` | Panneau « Preuves » du rail, possédé par la coque (issue #534) : `{enrolled, profile?, tasks[], count?, note?}` — `enrolled: false` = pas de `grimoire standard init` (`note` nomme la commande) ; `tasks[]` : `{task_id, title, status, gates: {ok, missing[], checks[]}, pack_path, pack_exists}`, la même lecture que `grimoire standard verify`/`grimoire_standard_gate`, jamais une relecture parallèle des fichiers |
 
-### Écritures — atelier seulement (404 sur le cockpit)
+### Écritures — atelier et cockpit, projet nommé par `?project=`
 
 | Route | Corps | Rend |
 |---|---|---|
@@ -270,9 +274,9 @@ l'atelier mono-projet, parce que le cockpit se déclare `readOnly`.
 | `POST /api/workspace/tasks/<id>/move` | `{to, reason?, actor?}` | idem |
 | `POST /api/workspace/tasks/<id>/block` | `{reason, actor?}` | idem |
 | `POST /api/workspace/tasks/<id>/close` | `{actor?}` | idem |
-| `POST /api/workspace/file/override` | `{path}` | `{created, override_path, from?}` |
-| `POST /api/workspace/file/write` | `{path, text}` | Le fichier relu |
-| `POST /api/workspace/command` | `{argv[]}` | `{ok, command, argv, code, stdout, stderr, output, timed_out, duration_ms}` |
+| `POST /api/workspace/file/override` | `{path, confirm_project?}` | `{created, override_path, from?}` |
+| `POST /api/workspace/file/write` | `{path, text, confirm_project?}` | Le fichier relu |
+| `POST /api/workspace/command` | `{argv[], confirm_project?}` | `{ok, command, argv, code, stdout, stderr, output, timed_out, duration_ms}` |
 | `POST /api/workspace/agents/<nom>/skill` | `{skill, action: "assign"\|"remove"}` | `{agents[], skills[], entry_point}` (la vue rafraîchie) — écrit toujours dans `overrides`, jamais dans le kit ; skill inconnu refusé avec le message que `collect_agents` produit déjà (#374) |
 | `POST /api/workspace/agents/<nom>/fields` | Un sous-ensemble de `{use_when, dont_use_when, tool_boundary, tools[], context[]}` | idem — `tools` validé contre les verbes connus, `context` contre l'existence sur disque |
 | `POST /api/workspace/assist` | `{path, text, position: {line, col}, intent: "complete-clause"\|"draft-body"\|"explain-diagnostic", diagnostic?}` | `{available, model?, intent?, suggestion?, unknown?[], reason?}` — `available: false` est une réponse normale (opt-in absent, Ollama indisponible, délai dépassé à 10 s), jamais une exception ; `unknown[]` : `{text, kind, line, start, end}`, les identifiants cités par le modèle mais absents du paquet de langage. N'écrit jamais de fichier — l'insertion reste un geste de l'éditeur |
@@ -282,13 +286,25 @@ Un gate de preuve rouge **n'est pas une erreur** : il revient en 200 avec
 l'avale pas.
 
 Codes : 400 refus explicable (commande hors liste blanche, état inconnu, skill
-ou contexte d'agent introuvable), 403 chemin hors projet ou étage non
-éditable, 404 tâche, agent ou route inconnue.
+ou contexte d'agent introuvable), 403 chemin hors projet, étage non éditable,
+ou écriture sensible sur un autre projet sans `confirm_project` nommant le slug
+visé, 404 tâche, agent ou route inconnue.
 
-Les écritures d'agents sont un cas particulier de « atelier seulement » : le
-cockpit les honore aussi, mais uniquement pour son **projet de lancement**
-(celui depuis lequel `grimoire cockpit serve` a démarré, `#356`) — jamais pour
-un autre projet du registre qu'on ne fait que regarder.
+`file/write`, `file/override` et `command` sont les écritures **sensibles** :
+sur le cockpit, viser un projet autre que celui d'ouverture exige
+`confirm_project: "<slug>"` égal au slug de `?project=` (403 sinon, y compris
+quand le corps nomme un autre projet). Le front ouvre avant l'envoi une modale
+« Écrire dans <nom du projet> ? » qui pose ce champ. Le projet d'ouverture garde
+le geste sans confirmation. Chaque confirmation est inscrite dans le journal de
+la garde d'écriture (`gesture: "confirm_project"`, route, projet et valeur
+confirmée) ; si le journal n'est pas inscriptible, l'écriture est refusée (503).
+Les mutations mémoire (`delete`, `gc`, `sync` sur `/api/memory`) suivent la même
+règle : n'importe quel projet enrôlé, à condition que `project` et
+`confirm_project` nomment le même slug.
+
+Les écritures d'agents (`skill`, `fields`), les mouvements de tâche, les
+blueprints et `/compile` ont suivi la même ouverture au lot 1 : tout projet
+enrôlé est inscriptible, le slug venant de `?project=` et jamais d'un chemin.
 
 ## Ce que la Console accepte
 

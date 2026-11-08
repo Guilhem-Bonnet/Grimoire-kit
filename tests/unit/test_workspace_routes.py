@@ -9,9 +9,9 @@ lui a désigné — jamais pour l'autre, jamais pour « le dernier sélectionné
 Le second volet est le contraire : le cockpit n'est en lecture seule que sur
 une cible qu'il ne peut pas résoudre. Depuis le lot 1 de l'écriture
 multi-projets (2026-11-07), tout projet ENRÔLÉ accepte une écriture, même
-s'il n'est pas le projet d'ouverture (``_HOME_SLUG``, résolu au lancement) ;
-seules ``file/write``, ``file/override`` et ``command`` restent réservées à ce
-projet d'ouverture (lot 2).
+s'il n'est pas le projet d'ouverture (``_HOME_SLUG``, résolu au lancement).
+Depuis le lot 2 (2026-11-08), ``file/write``, ``file/override`` et
+``command`` y ajoutent une confirmation nommée (``confirm_project``).
 """
 
 from __future__ import annotations
@@ -35,9 +35,9 @@ from grimoire.tools.workspace_routes import (
     GET_ROUTES,
     POST_ROUTES,
     PREFIX,
-    is_opening_project_only_write,
     is_proposal_decision,
     is_registry_scoped_write,
+    is_sensitive_write,
     workspace_get,
 )
 
@@ -174,30 +174,37 @@ def test_un_projet_inconnu_est_refuse_par_le_cockpit(cockpit: int) -> None:
     assert code == 404
 
 
-# ── 2. Les écritures visent un projet enrôlé, sauf trois réservées ──────────
+# ── 2. Les écritures visent un projet enrôlé ; les sensibles exigent une
+# confirmation nommée ───────────────────────────────────────────────────────
 
 
 def _is_guard_refusal(payload: dict[str, Any]) -> bool:
     return payload.get("error") == "hôte en lecture seule"
 
 
+def _is_missing_confirmation(payload: dict[str, Any]) -> bool:
+    return "confirm_project" in str(payload.get("error", ""))
+
+
 @pytest.mark.parametrize("route", sorted(POST_ROUTES))
-def test_le_cockpit_ecrit_sur_tout_projet_enrole_sauf_les_trois_reservees(
+def test_le_cockpit_ecrit_sur_tout_projet_enrole_les_sensibles_sur_confirmation(
     route: str, cockpit: int
 ) -> None:
-    """Lot 1 de l'écriture multi-projets : tout projet ENRÔLÉ est inscriptible.
+    """Lot 1 et lot 2 de l'écriture multi-projets : tout projet ENRÔLÉ est
+    inscriptible.
 
     Cette fixture n'a pas de projet d'ouverture (`_select_cwd_project` n'a
     jamais tourné) : `projet-a` et `projet-b` sont deux entrées du registre,
-    et le cockpit doit pourtant accepter d'écrire chez elles. Seules les
-    écritures de :data:`OPENING_PROJECT_ONLY_WRITES` (lot 2) gardent la garde
-    historique — un 403 nommé, pas le refus métier de la route.
+    et le cockpit doit pourtant accepter d'écrire chez elles. Depuis le lot 2,
+    les écritures de :data:`SENSITIVE_WRITES` acceptent aussi un autre projet,
+    à condition que le corps porte ``confirm_project`` ; sans lui, elles
+    refusent en le nommant — pas le refus métier de la route.
     """
     code, payload = _post(cockpit, f"{route}?project=projet-a", {"path": "x", "argv": ["version"]})
 
-    if is_opening_project_only_write(route):
+    if is_sensitive_write(route):
         assert code == 403
-        assert _is_guard_refusal(payload)
+        assert _is_missing_confirmation(payload)
     else:
         assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
 
@@ -209,14 +216,15 @@ def test_l_autre_projet_enrole_reste_inscriptible_meme_avec_un_lancement_direct(
     """`cockpit_home` sert `projet-a` en direct — et `projet-b` reste inscriptible.
 
     Le lot 1 a remplacé la garde « projet d'ouverture » par « projet enrôlé » :
-    un cockpit ouvert sur `projet-a` n'est plus le seul à pouvoir écrire. Seules
-    les trois écritures réservées au lot 2 répondent encore « lecture seule ».
+    un cockpit ouvert sur `projet-a` n'est plus le seul à pouvoir écrire. Les
+    trois écritures sensibles (lot 2) acceptent aussi `projet-b`, mais
+    seulement sur confirmation nommée.
     """
     code, payload = _post(cockpit_home, f"{route}?project=projet-b", {"path": "x", "argv": ["version"]})
 
-    if is_opening_project_only_write(route):
+    if is_sensitive_write(route):
         assert code == 403
-        assert _is_guard_refusal(payload)
+        assert _is_missing_confirmation(payload)
     else:
         assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
 

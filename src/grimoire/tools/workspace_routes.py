@@ -18,10 +18,11 @@ ENRÔLÉ, nommé par ``?project=`` et résolu par le registre seul : un seul
 cockpit écrit donc sur toute sa flotte, pas seulement sur le projet qu'il a
 ouvert (lot 1 de l'écriture multi-projets, 2026-11-07).
 
-Trois écritures restent réservées au projet d'ouverture (lot 2) : écrire un
-fichier, créer un override et lancer une commande — voir
-:func:`is_opening_project_only_write`. Leur résolution multi-projets n'est pas
-encore décidée.
+Trois écritures sont SENSIBLES (lot 2, 2026-11-08) : écrire un fichier, créer
+un override et lancer une commande — voir :func:`is_sensitive_write`. Elles
+acceptent désormais n'importe quel projet ENRÔLÉ, à condition que le corps
+porte ``confirm_project`` égal au slug visé : l'hôte refuse une cible dont la
+confirmation est absente ou ne la nomme pas.
 
 Les anciennes dérogations nommées (décider une proposition, #490 ; migrer un
 board, #559/#560 ; agir depuis le portefeuille, #638) gardent leur sens comme
@@ -84,9 +85,9 @@ __all__ = [
     "STREAM_HEADERS",
     "STREAM_PATH",
     "WORKSPACE_UNHANDLED",
-    "is_opening_project_only_write",
     "is_proposal_decision",
     "is_registry_scoped_write",
+    "is_sensitive_write",
     "workspace_get",
     "workspace_post",
     "workspace_stream",
@@ -96,12 +97,13 @@ __all__ = [
 #: possible avec les routes héritées, et un seul `startswith` à câbler par hôte.
 PREFIX = "/api/workspace/"
 
-#: Écritures qui restent réservées au projet d'ouverture du cockpit (lot 2).
-#: Le lot 1 ouvre les autres à tout projet enrôlé ; ces trois-là touchent des
-#: fichiers ou lancent un processus hors du contrat « tâche/proposition » et
-#: gardent la garde historique tant que leur cible multi-projets n'est pas
-#: décidée.
-OPENING_PROJECT_ONLY_WRITES = frozenset(
+#: Écritures SENSIBLES : elles touchent des fichiers ou lancent un processus
+#: hors du contrat « tâche/proposition ». Depuis le lot 2 (2026-11-08), elles
+#: acceptent n'importe quel projet ENRÔLÉ, à condition que le corps porte
+#: ``confirm_project: "<slug>"`` égal au slug visé — le front ouvre d'abord une
+#: modale qui nomme le projet. L'hôte applique la condition ; la liste des
+#: routes concernées vit ici, près des routes qu'elle décrit.
+SENSITIVE_WRITES = frozenset(
     {
         f"{PREFIX}command",
         f"{PREFIX}file/override",
@@ -110,16 +112,15 @@ OPENING_PROJECT_ONLY_WRITES = frozenset(
 )
 
 
-def is_opening_project_only_write(path: str) -> bool:
-    """Vrai pour une écriture encore réservée au projet d'ouverture (lot 2).
+def is_sensitive_write(path: str) -> bool:
+    """Vrai pour une écriture qui exige ``confirm_project`` sur un autre projet.
 
-    Le cockpit résout désormais toute autre écriture de la vue de travail par
-    le registre (``_is_enrolled_write_target``) : un projet enrôlé, même
-    seulement regardé, accepte une réclamation de tâche ou une décision de
-    proposition. ``file/write``, ``file/override`` et ``command`` restent à
-    part en attendant leur propre résolution multi-projets.
+    Le cockpit résout toute écriture de la vue de travail par le registre
+    (``enrolled_write_root``). ``file/write``, ``file/override`` et ``command``
+    y ajoutent la confirmation nommée dès que la cible n'est pas le projet
+    d'ouverture ; le projet d'ouverture garde le geste historique.
     """
-    return path in OPENING_PROJECT_ONLY_WRITES
+    return path in SENSITIVE_WRITES
 
 #: Sentinelle, même contrat que ``forge_routes.API_GET_UNHANDLED`` : distingue
 #: « chemin inconnu » d'une route qui rendrait légitimement ``None``.
@@ -768,7 +769,8 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
     return WORKSPACE_UNHANDLED
 
 
-# ── Écritures — hôte mono-projet seulement ──────────────────────────────────
+# ── Écritures (cible résolue par l'hôte ; confirmation nommée pour les plus
+# sensibles depuis le lot 2) ─────────────────────────────────────────────────
 
 
 def _create_override(project_root: Path, body: dict[str, Any]) -> Any:
