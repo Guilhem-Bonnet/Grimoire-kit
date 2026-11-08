@@ -7,6 +7,21 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.83.0] - 2026-11-08
+
+- perf(cockpit): la lecture du journal de session qui nourrit le payload `work` est bornée à 1 Mio par passe (1,9 s → 188 ms sur cinq journaux de 20 Mo), et la palette de la coque demande `annotations=0` pour que le montage de la Flotte ne paie plus jamais cette lecture (#1010) (#1171)
+- fix(missions): `task accept` lit le pack de preuve dans le worktree de la tâche, sans `--evidence-root`, et la question du merger donne la commande complète (#1169) (#1181)
+- fix(hosts): deux personas au même faisceau (outils, contexte, skills) restent distinctes quand leur corps (fiche) diffère — le refus « même faisceau et même fiche » ne frappe plus que des définitions réellement identiques (corps normalisé, ou description à défaut de corps) (#1180) (#1182)
+- fix(flows): un réveil programmé, une notification de tâche de fond ou un `claude -p` n'attestent plus un geste humain ; l'origine du tour est lue dans le journal de session de l'hôte par `prompt_id` (#992) (#1172)
+- feat(cockpit): écrire sur n'importe quel projet enrôlé depuis un seul cockpit (lot 1) (#1178)
+- feat(cockpit): gestes sensibles sur un autre projet avec confirmation nommée (lot 2) (#1184)
+- feat(cli): `grimoire digest` résume un fichier ou stdin par le fournisseur `chat`/`cheap` le moins cher (local préféré), découpe les textes longs et cite les lignes d'erreur mot pour mot ; les séquences ANSI (CSI/OSC) sont retirées de toute sortie de fournisseur, y compris pour `task dispatch`. (#1174)
+- perf(cockpit): les digests des fichiers de l'espace Source sont mémoïsés par `(mtime_ns, taille)` — seule une modification recalcule son empreinte (#1175)
+- perf(cockpit): le cache de lecture sert aussi l'ouverture de page — `tasks`, `attention`, `sessions` et `sheet` sont servis depuis le cache sans `pulse_reload`, l'empreinte du pouls couvre désormais `traces.jsonl` et les journaux écrits hors cockpit (tick, flows, preuves, reçus de revue), et ces routes JSON répondent `304` sur `If-None-Match` (#1176)
+- fix(cockpit): le refus d'une porte reste affiché — le pouls ne reconstruit plus l'inspecteur pendant une écriture en vol, sinon le refus partait dans un bloc déjà détaché et la page ne montrait rien (#1176)
+- fix(cockpit): une ouverture de page ne se dessine qu'une fois — la réponse de la boîte à idées ne relance plus un dessin complet quand la liste n'a pas changé (le tableau était reconstruit ~0,5 s après l'ouverture, faisait relire `tasks`/`sessions` et détachait le DOM sous les yeux de l'e2e mobile) (#1176)
+- perf(cockpit): `/api/workspace/tasks` et `/api/workspace/attention` ne reparcourent plus les 11 Mo de `traces.jsonl` à chaque requête — un index incrémental par `task_id` garde le regroupement en mémoire, indexé par `(mtime_ns, size)`, ne consomme que les lignes complètes ajoutées, et reconstruit sur troncature ou changement d'inode. Mesuré le 2026-11-07 (`curl -w %{time_total}`, journal de 10,5 Mo / 11 658 lignes) : `tasks` de 0,54–0,85 s à 0,24–0,27 s, `attention` de 0,81–1,25 s à 0,26–0,59 s à chaud ; la chaîne de regroupement des traces passe de 0,240 s à 0,0002 s après un unique parse complet (GAO-perf-cockpit-001) (#1177)
+
 ## [3.82.0] - 2026-11-07
 
 ### Added
