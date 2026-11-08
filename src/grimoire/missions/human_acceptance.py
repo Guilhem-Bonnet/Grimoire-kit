@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
@@ -39,17 +40,38 @@ from grimoire.evidence.service import EvidenceService
 from grimoire.missions.mandate import MandateStore, require_authority
 from grimoire.missions.review_receipt import READY, ReviewReceipt, read_receipt, write_receipt
 from grimoire.missions.schemas import TaskState
+from grimoire.missions.task_worktree import find_task_worktree
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
     from grimoire.missions.schemas import MissionTask
+    from grimoire.missions.service import TaskService
 
-__all__ = ["HUMAN_VERIFIER_PREFIX", "HumanAcceptance", "accept_task"]
+__all__ = ["EVIDENCE_RELPATH", "HUMAN_VERIFIER_PREFIX", "HumanAcceptance", "accept_task", "acceptance_roots"]
 
 #: Préfixe du ``created_by`` d'un verdict humain : ``human:<acteur>``.
 HUMAN_VERIFIER_PREFIX = "human:"
+#: Là où le kit range packs et verdicts, à la racine du projet comme dans un worktree de tâche.
+EVIDENCE_RELPATH = Path("_grimoire-runtime-output") / "evidence"
+
+
+def acceptance_roots(service: TaskService, task_id: str) -> tuple[Path, Path]:
+    """``(evidence_root, proof_root)`` où lire la preuve de *task_id* — le worktree noté quand il la porte (#1169).
+
+    Le merger écrit le pack dans le worktree ``task/<id>`` et y lit les reçus de revue
+    (``proof_root``) : ``grimoire task accept`` lancé depuis la racine du projet doit lire le
+    même endroit. Le worktree noté ne prend la main que s'il porte un pack pour cette tâche ;
+    sinon (tâche sans worktree, worktree nettoyé, pack resté à la racine), c'est la racine du
+    service qui décide.
+    """
+    wt = find_task_worktree(service, task_id)
+    if wt is not None and wt.path.is_dir():
+        evidence_root = wt.path / EVIDENCE_RELPATH
+        if (evidence_root / "packs.jsonl").is_file() and EvidenceService(evidence_root).list_packs(task_id):
+            return evidence_root, wt.path
+    root = service.project_root
+    return root / EVIDENCE_RELPATH, root
 
 
 @dataclass(frozen=True, slots=True)
