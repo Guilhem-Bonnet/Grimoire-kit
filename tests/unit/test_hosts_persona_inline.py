@@ -14,6 +14,7 @@ Trois propriétés, celles de l'issue :
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,39 @@ def test_declared_context_is_consulted_on_demand_with_its_size(tmp_path: Path, h
     assert "Lis ton contexte déclaré" not in text, "le contexte déclaré n'est plus un ordre de lecture"
 
 
+def test_each_declared_document_is_listed_with_its_own_size(tmp_path: Path) -> None:
+    """Plusieurs documents : chacun porte sa taille, d'où le choix d'ouvrir ou non."""
+    (tmp_path / "small.md").write_text("x" * 2048, encoding="utf-8")
+    (tmp_path / "big.md").write_bytes(b"x" * (1536 * 1024))
+    _write_agent(tmp_path, "scribe", "Tu rédiges.", context=("small.md", "big.md"))
+
+    _emit(tmp_path, HostId.CLAUDE_CODE_CLI)
+    text = _definition(tmp_path, HostId.CLAUDE_CODE_CLI)
+
+    assert "`small.md` (2,0 Ko)" in text
+    assert "`big.md` (1,5 Mo)" in text, "au-delà du mégaoctet, la taille reste lisible"
+    assert "et seulement si la tâche le demande" in text
+
+
+def test_an_invalid_inline_persona_setting_is_reported(tmp_path: Path) -> None:
+    """``hosts.inline_persona`` n'accepte qu'un booléen : une chaîne est une erreur de config."""
+    from grimoire.core.config import HostsConfig
+    from grimoire.core.exceptions import GrimoireConfigError
+
+    with pytest.raises(GrimoireConfigError, match="inline_persona"):
+        HostsConfig.from_dict({"inline_persona": "oui"})
+
+
+def test_an_unreadable_project_context_falls_back_to_inlining(tmp_path: Path, persona_body: str) -> None:
+    """Un ``project-context.yaml`` illisible ne casse pas la surface : le défaut reste l'intégration."""
+    _write_agent(tmp_path, "scribe", persona_body)
+    (tmp_path / "project-context.yaml").write_text("hosts: [unclosed\n", encoding="utf-8")
+
+    (agent,) = [a for a in build_surface(tmp_path).agents if a.name == "scribe"]
+
+    assert agent.definition_body == persona_body
+
+
 def test_an_oversized_persona_keeps_the_pointer_and_warns_on_sync(tmp_path: Path) -> None:
     oversized = "Tu rédiges. " + ("détail " * (MAX_INLINE_PERSONA_BYTES // 7 + 1))
     assert len(oversized.encode("utf-8")) > MAX_INLINE_PERSONA_BYTES
@@ -128,6 +162,32 @@ def test_host_sync_prints_the_oversize_warning(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "plafond" in result.output
     assert "scribe" in result.output
+
+
+def test_host_sync_json_output_carries_the_oversize_note(tmp_path: Path) -> None:
+    oversized = "Tu rédiges. " + ("détail " * (MAX_INLINE_PERSONA_BYTES // 7 + 1))
+    _write_agent(tmp_path, "scribe", oversized)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "-o",
+            "json",
+            "host",
+            "sync",
+            "--host",
+            "claude",
+            "--force-host",
+            "--project-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    notes = " ".join(payload["notes"])
+    assert "plafond" in notes
+    assert "scribe" in notes
 
 
 def test_the_collected_body_is_the_persona_text_without_frontmatter(tmp_path: Path, persona_body: str) -> None:
