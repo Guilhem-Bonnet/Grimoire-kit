@@ -53,10 +53,12 @@ from grimoire.cli.cockpit_write_target import (
     body_confirms_slug,
     enrolled_write_root,
     explicit_query_slug,
+    is_authority_write,
     journal_confirmation,
     query_slug,
     sensitive_write_refusal,
     unresolvable_status,
+    write_refusal_status,
 )
 from grimoire.data import site_script, web_path
 from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES, registry_post
@@ -698,9 +700,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 workspace_post,
             )
 
+            # Lot 3 : les écritures d'autorité (mandat, pilote, fournisseurs)
+            # nomment leur projet dans le corps. Un slug d'URL non enrôlé est un
+            # 404, un corps qui contredit l'URL un 400 — les autres écritures
+            # gardent le refus générique « lecture seule » (403) du lot 1.
+            authority = is_authority_write(path)
             proot = self._enrolled_write_root()
             if proot is None:
-                self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+                code, error = write_refusal_status(self.path)
+                self._send_json(code, {"ok": False, "error": error})
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -709,7 +717,10 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "bad json"})
                 return
             if not self._body_confirms_slug(body):
-                self._send_json(403, {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
+                self._send_json(
+                    400 if authority else 403,
+                    {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"},
+                )
                 return
             slug = self._explicit_query_slug()
             if is_sensitive_write(path):

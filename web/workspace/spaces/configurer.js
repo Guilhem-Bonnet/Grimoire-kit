@@ -182,7 +182,17 @@ function providerGovernanceCard(ctx, onChanged) {
   card.dataset.role = 'provider-governance';
   card.setAttribute('aria-label', 'Gouvernance des fournisseurs');
   card.append(el('h3', null, 'Activer, désactiver, poser une clé'));
-  card.append(el('p', 'cf-note', 'Geste d’humain : saisissez la clé de contrôle (lue dans le terminal), jamais automatique.'));
+  if (!ctx.scope.project) {
+    // Le registre visé est celui d'UN projet : écrire depuis « Tous les projets »
+    // reviendrait à deviner la cible. Le corps d'écriture ne porte aucun slug
+    // dans cette portée, l'hôte refuserait (400).
+    card.append(el('p', 'cf-note', 'Choisissez un projet dans la portée (en haut) : les fournisseurs sont propres à un projet.'));
+    return card;
+  }
+  // Lot 3 : la cible est nommée AVANT la saisie de la clé, et le corps des
+  // écritures porte son slug (voir `projectBody` dans api.js).
+  card.append(el('p', 'cf-note',
+    `Cible : ${ctx.scope.name}. Geste d’humain : saisissez la clé de contrôle (lue dans le terminal), jamais automatique.`));
 
   const idInput = el('input', 'cf-input', null, {
     type: 'text', 'aria-label': 'Identifiant du fournisseur', placeholder: 'deepseek', autocomplete: 'off',
@@ -374,6 +384,140 @@ async function mountProviders(root, ctx) {
   root.replaceChildren(wrap);
 }
 
+// ── Mandat et pilote (lot 3 du cockpit multi-projet) ────────────────────────
+//
+// Depuis un seul cockpit, accorder ou révoquer le mandat et activer ou couper
+// le pilote de N'IMPORTE QUEL projet enrôlé. Le projet visé est celui de la
+// portée courante (`ctx.scope.name`) : la carte le nomme AVANT le champ de la
+// clé de contrôle, et le corps des requêtes porte son slug (`?project=` y est
+// ajouté par `api.js`). La clé reste celle du terminal
+// (`~/.grimoire/control/cockpit-key`), jamais un secret dérivé du projet.
+function autonomyCard(ctx, data, pilot, onChanged) {
+  const target = ctx.scope.name;
+  const active = Boolean(data.active);
+  const card = el('section', 'cf-card');
+  card.dataset.role = 'mandate-governance';
+  card.setAttribute('aria-label', `Mandat et pilote de ${target}`);
+  card.append(el('h3', null, `Mandat et pilote — ${target}`));
+  card.append(el('p', 'cf-note', active
+    ? `Mandat actif jusqu’à ${data.mandate.until} — gestes : ${data.mandate.gestures.join(', ')} · `
+      + `${data.sessions_today}/${data.mandate.max_sessions_per_day} sessions aujourd’hui.`
+    : `Aucun mandat actif${data.detail || data.reason ? ` (${data.detail || data.reason})` : ''}.`));
+  card.append(el('p', 'cf-note', `Cible : ${target}. La clé de contrôle se lit dans le terminal ; elle n’est jamais gardée après l’envoi.`));
+
+  const keyInput = el('input', 'cf-input', null, {
+    type: 'password', 'aria-label': `Clé de contrôle pour ${target}`, placeholder: 'Clé de contrôle', autocomplete: 'off',
+  });
+  const status = el('p', 'cf-note', '', { role: 'status', 'aria-live': 'polite', 'data-role': 'mandate-status' });
+
+  // Gestes couverts : une case par geste annoncé par le serveur.
+  const gestures = el('div', 'cf-line');
+  gestures.style.flexWrap = 'wrap';
+  const boxes = (data.gestures || []).map((gesture) => {
+    const box = el('input', null, null, { type: 'checkbox', value: gesture });
+    box.checked = gesture === 'accept';
+    const label = el('label', 'cf-note');
+    label.style.display = 'flex';
+    label.style.alignItems = 'center';
+    label.style.gap = '4px';
+    label.append(box, document.createTextNode(gesture));
+    gestures.append(label);
+    return box;
+  });
+
+  const types = el('input', 'cf-input', null, {
+    type: 'text', value: 'implementation', 'aria-label': 'Types de tâche couverts', placeholder: 'implementation, test',
+    autocomplete: 'off',
+  });
+  const cap = el('input', 'cf-input', null, {
+    type: 'number', min: '1', max: '1000', value: '2', 'aria-label': 'Sessions par jour au plus',
+  });
+  const until = el('input', 'cf-input', null, {
+    type: 'text', value: '+1h', 'aria-label': 'Échéance du mandat', placeholder: '+1h', autocomplete: 'off',
+  });
+
+  const grant = el('button', 'btn pri', 'Accorder le mandat', { type: 'button', 'data-role': 'mandate-grant' });
+  const revoke = el('button', 'btn', 'Révoquer', { type: 'button', 'data-role': 'mandate-revoke' });
+  revoke.disabled = !active;
+  const pilotLabel = pilot.active ? 'Couper le pilote' : 'Activer le pilote';
+  const pilotBtn = el('button', 'btn', pilotLabel, { type: 'button', 'data-role': 'autopilot-toggle' });
+  pilotBtn.title = active ? '' : 'Le pilote exige un mandat actif.';
+
+  grant.addEventListener('click', async () => {
+    const picked = boxes.filter((box) => box.checked).map((box) => box.value);
+    if (!picked.length) { status.textContent = 'nommez au moins un geste couvert'; return; }
+    try {
+      await ctx.api.mandateGrant({
+        gestures: picked,
+        task_types: types.value.split(',').map((s) => s.trim()).filter(Boolean),
+        max_sessions_per_day: Number(cap.value),
+        until: until.value,
+      }, keyInput.value);
+      keyInput.value = '';
+      status.textContent = `mandat accordé sur ${target}`;
+      onChanged();
+    } catch (error) {
+      status.textContent = `refusé : ${error.message}`;
+    }
+  });
+
+  revoke.addEventListener('click', async () => {
+    try {
+      await ctx.api.mandateRevoke('cockpit');
+      keyInput.value = '';
+      status.textContent = `mandat révoqué sur ${target}`;
+      onChanged();
+    } catch (error) {
+      status.textContent = `refusé : ${error.message}`;
+    }
+  });
+
+  pilotBtn.addEventListener('click', async () => {
+    try {
+      await ctx.api.autopilotSet(!pilot.active, keyInput.value);
+      keyInput.value = '';
+      status.textContent = pilot.active ? `pilote coupé sur ${target}` : `pilote activé sur ${target}`;
+      onChanged();
+    } catch (error) {
+      status.textContent = `refusé : ${error.message}`;
+    }
+  });
+
+  const typesLine = el('div', 'cf-line');
+  typesLine.append(types, cap, until);
+  const keyLine = el('div', 'cf-line');
+  keyLine.append(keyInput);
+  const actions = el('div', 'cf-line');
+  actions.append(grant, revoke, pilotBtn);
+  card.append(gestures, typesLine, keyLine, actions, status);
+  card.append(formula('grimoire autonomy mandate status'));
+  return card;
+}
+
+async function mountMandate(root, ctx) {
+  if (!ctx.scope.project) {
+    root.replaceChildren(ctx.empty(
+      'Choisissez un projet',
+      'Le mandat et le pilote sont propres à un projet : sélectionnez-en un dans la portée (en haut).',
+      'grimoire autonomy mandate status',
+    ));
+    return;
+  }
+  let data;
+  let pilot;
+  try {
+    [data, pilot] = await Promise.all([ctx.api.mandate(), ctx.api.autopilot()]);
+  } catch (error) {
+    failure(ctx, root, 'Mandat', error);
+    return;
+  }
+  const source = data.escalation && data.escalation.error ? ` · politique : ${data.escalation.error}` : '';
+  const wrap = el('div', 'cf-wrap');
+  wrap.append(spaceHead('Mandat et pilote', `Portée : ${ctx.scope.name}${source}`, formula('grimoire autonomy mandate status')));
+  wrap.append(autonomyCard(ctx, data, pilot, () => { if (!ctx.signal.aborted) mountMandate(root, ctx); }));
+  root.replaceChildren(wrap);
+}
+
 // ── Hôtes et hooks ──────────────────────────────────────────────────────────
 
 function hooksSub(data) {
@@ -482,5 +626,6 @@ export async function mount(root, ctx) {
   injectStyles();
   if (ctx.section === 'agents') return mountAgents(root, ctx);
   if (ctx.section === 'fournisseurs') return mountProviders(root, ctx);
+  if (ctx.section === 'mandat') return mountMandate(root, ctx);
   return mountHooks(root, ctx);
 }
