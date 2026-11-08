@@ -13,8 +13,8 @@ Prouvé par navigateur :
 - en portée « Projet X », les entrées de l'autre projet du même fichier ne
   sont que comptées, jamais montrées ;
 - la suppression demande une confirmation dans la page (aucune boîte native)
-  et dit son résultat sur place ; hors du projet servi, elle n'est pas
-  proposée.
+  et dit son résultat sur place ; depuis le lot 2, elle est proposée sur tout
+  projet enrôlé, derrière une modale qui nomme le projet visé.
 """
 
 from __future__ import annotations

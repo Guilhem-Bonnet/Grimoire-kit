@@ -36,12 +36,19 @@ from rich.console import Console
 from rich.table import Table
 
 from grimoire.cli.cockpit_http import DRAIN_LIMIT, CountingReader, gzip_body, serve_asset, warm_sheet
+from grimoire.cli.cockpit_memory import (
+    ALLOWED_ACTIONS,
+    MEMORY_TIMEOUT_S,
+    MUTATION_ACTIONS,
+    is_plain_argument,
+)
 from grimoire.cli.cockpit_write_target import (
     body_confirms_slug,
     enrolled_write_root,
     explicit_query_slug,
-    home_write_root,
+    journal_confirmation,
     query_slug,
+    sensitive_write_refusal,
     unresolvable_status,
 )
 from grimoire.data import site_script, web_path
@@ -154,7 +161,8 @@ def _resolve_project_path(slug: str | None) -> Path | None:
 # Slug du projet ouvert par défaut par CE process (#351/#356), figé au
 # démarrage. Depuis le lot 1 (2026-11-07), il ne restreint plus les écritures
 # (voir `cockpit_write_target`) ; il sert au repli de lecture (`home` de
-# `/api/status`) et aux écritures réservées au projet d'ouverture (lot 2).
+# `/api/status`) et, depuis le lot 2, à distinguer le projet d'ouverture (geste
+# historique) d'un autre projet enrôlé (confirmation nommée).
 _HOME_SLUG: str | None = None
 
 # Chemin du projet servi, figé au démarrage : la garde P02 compare des chemins,
@@ -193,13 +201,10 @@ def _project_api(proot: Path) -> Any:
 # Governance API (127.0.0.1 only): allowlisted ``grimoire memory`` reads, confirmed
 # mutations and correction gestures (P34), the last two on the served project only.
 
-_ALLOWED_ACTIONS: dict[str, list[str]] = {
-    "status": [],
-    "gate": ["--soft"],
-    "search": [],  # requires a query argument
-    "list": [],
-    "taxonomy": [],
-}
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+# Les actions mémoire (listes blanches, mutations, arguments sûrs) vivent dans
+# ``grimoire.cli.cockpit_memory`` pour tenir le cliquet de taille de ce module.
 
 
 def _forget_live_reads() -> None:
@@ -209,40 +214,6 @@ def _forget_live_reads() -> None:
     workspace_read_cache.clear()
 
 
-@dataclass(frozen=True)
-class _Mutation:
-    """A governed write action — runs only with explicit confirmation."""
-
-    args: tuple[str, ...] = ()
-    needs_id: bool = False
-    subcommand: str | None = None  # defaults to the action name
-
-
-# Each mutation maps to a real ``grimoire memory`` command and needs ``confirm: true``.
-_MUTATION_ACTIONS: dict[str, _Mutation] = {
-    "gc": _Mutation(),  # consolidate / compact the store
-    "delete": _Mutation(args=("--yes",), needs_id=True),  # remove one entry by id
-    # resync the Weaviate / Neo4j projections from the source store (reindex, no loss)
-    "sync": _Mutation(subcommand="gate", args=("--sync", "--soft")),
-}
-_LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-
-# Longueur d'argument bornée : une requête n'a pas à pousser un roman dans argv.
-_MAX_ARGUMENT_LEN = 512
-
-
-def _is_plain_argument(value: str) -> bool:
-    """Vrai si la valeur peut être passée à la CLI comme simple positionnel.
-
-    Le dispatch n'utilise pas de shell, donc il n'y a pas d'injection de shell
-    possible — mais une valeur commençant par ``-`` serait lue comme une option
-    par la sous-commande. On refuse ce cas, les octets nuls et les longueurs
-    déraisonnables, et on passe malgré tout les valeurs après ``--``.
-    """
-    return bool(value) and not value.startswith("-") and "\x00" not in value and len(value) <= _MAX_ARGUMENT_LEN
-
-
-_MEMORY_TIMEOUT_S = 30
 # CliRunner remplace ``sys.stdout``/``sys.stderr`` pour tout le processus : deux
 # invocations simultanées s'écraseraient la sortie. Ce verrou ne protège que cela
 # (pas le répertoire courant, jamais modifié).
@@ -279,7 +250,7 @@ def _run_memory_in_process(proot: Path, argv: list[str]) -> _CliResult:
 
     pool = ThreadPoolExecutor(max_workers=1)
     try:
-        return pool.submit(_invoke_memory_cli, proot, argv).result(timeout=_MEMORY_TIMEOUT_S)
+        return pool.submit(_invoke_memory_cli, proot, argv).result(timeout=MEMORY_TIMEOUT_S)
     except FutureTimeout:
         raise TimeoutError from None
     finally:
@@ -376,6 +347,14 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return False
         return True
 
+    def _journal_confirmation(self, route: str, project: str, confirm_project: str) -> bool:
+        """Lot 2 : le journal de la garde note le slug ET la confirmation nommée."""
+        error = journal_confirmation(self.command, route, project, confirm_project)
+        if error:
+            self._send_json(503, {"ok": False, "error": error})
+            return False
+        return True
+
     def _send_json(self, code: int, payload: dict[str, object]) -> None:
         # Le corps de la requête est lu en entier avant la première ligne de
         # réponse (#857) ; la connexion est fermée après cette réponse
@@ -418,9 +397,6 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         registre, ou un dossier disparu, ferme la porte (échec fermé).
         """
         return self._enrolled_write_root() is not None
-
-    def _home_write_root(self) -> Path | None:
-        return home_write_root(self.path, _HOME_SLUG)
 
     def _body_confirms_slug(self, body: Any) -> bool:
         return body_confirms_slug(body, self.path)
@@ -716,17 +692,17 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # Lot 1 de l'écriture multi-projets : la cible est le projet
             # ENRÔLÉ nommé par `?project=`, résolu par le registre seul — le
             # cockpit peut donc écrire sur n'importe quel projet qu'il pilote,
-            # pas seulement sur celui qu'il a ouvert. `file/write`,
-            # `file/override` et `command` restent, eux, limités au projet
-            # d'ouverture en attendant le lot 2 (voir
-            # `is_opening_project_only_write`).
+            # pas seulement sur celui qu'il a ouvert. Lot 2 : `file/write`,
+            # `file/override` et `command` suivent la même résolution, mais
+            # exigent `confirm_project` égal au slug visé dès que la cible
+            # n'est pas le projet d'ouverture (voir `is_sensitive_write`).
             from grimoire.tools.workspace_routes import (
                 WORKSPACE_UNHANDLED,
-                is_opening_project_only_write,
+                is_sensitive_write,
                 workspace_post,
             )
 
-            proot = self._home_write_root() if is_opening_project_only_write(path) else self._enrolled_write_root()
+            proot = self._enrolled_write_root()
             if proot is None:
                 self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
                 return
@@ -739,6 +715,15 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             if not self._body_confirms_slug(body):
                 self._send_json(403, {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
                 return
+            slug = self._explicit_query_slug()
+            if is_sensitive_write(path):
+                refusal = sensitive_write_refusal(body, self.path, _HOME_SLUG)
+                if refusal:
+                    self._send_json(403, {"ok": False, "error": refusal})
+                    return
+                confirmed = str(body.get("confirm_project") or "").strip() if isinstance(body, dict) else ""
+                if not self._journal_confirmation(path, slug, confirmed):
+                    return
 
             # Même traduction que l'atelier (``forge_http.py::do_POST``) : sans
             # elle, un refus métier (skill inconnu, agent introuvable, chemin
@@ -841,8 +826,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "bad json"})
             return
         action = str(data.get("action", ""))
-        is_read = action in _ALLOWED_ACTIONS
-        is_mutation = action in _MUTATION_ACTIONS
+        is_read = action in ALLOWED_ACTIONS
+        is_mutation = action in MUTATION_ACTIONS
         gesture = action == "gesture"  # P34 : aperçu puis application (workspace_memory_gestures)
         if not (is_read or is_mutation or gesture):
             self._send_json(400, {"ok": False, "error": f"action non autorisée: {action}"})
@@ -850,14 +835,22 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if is_mutation and data.get("confirm") is not True:
             self._send_json(403, {"ok": False, "error": "confirmation explicite requise"})
             return
-        proot = _resolve_project_path(str(data.get("project", "")) or None)
+        project_slug = str(data.get("project", "")).strip()
+        proot = _resolve_project_path(project_slug or None)
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
         if (is_mutation or gesture) and not _is_served_project(proot):
-            # P02 : delete/gc/sync et gestes n'agissent que sur le projet servi (échec fermé).
-            self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
-            return
+            # P02 : un geste de correction (aperçu/apply) reste réservé au
+            # projet servi. Lot 2 : une MUTATION mémoire (delete/gc/sync)
+            # accepte n'importe quel projet ENRÔLÉ, à condition que la
+            # personne l'ait nommé (`confirm_project` égal au slug visé).
+            confirmed = str(data.get("confirm_project") or "").strip()
+            if not is_mutation or not project_slug or confirmed != project_slug:
+                self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+                return
+            if not self._journal_confirmation("/api/memory", project_slug, confirmed):
+                return
         if gesture:
             from grimoire.tools.workspace_memory_gestures import handle as memory_gesture
 
@@ -866,7 +859,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         subcmd = action
         values: list[str] = []
         if is_read:
-            flags = list(_ALLOWED_ACTIONS[action])
+            flags = list(ALLOWED_ACTIONS[action])
             if action == "search":
                 query = str(data.get("query", "")).strip()
                 if not query:
@@ -874,7 +867,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                     return
                 values = [query]
         else:
-            spec = _MUTATION_ACTIONS[action]
+            spec = MUTATION_ACTIONS[action]
             subcmd = spec.subcommand or action
             flags = list(spec.args)
             if spec.needs_id:
@@ -883,7 +876,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                     self._send_json(400, {"ok": False, "error": "id d'entrée requis"})
                     return
                 values = [entry_id]
-        if not all(_is_plain_argument(v) for v in values):
+        if not all(is_plain_argument(v) for v in values):
             self._send_json(400, {"ok": False, "error": "valeur d'argument refusée"})
             return
         # La commande est rejouée dans le processus, via l'application Typer :
@@ -1090,11 +1083,11 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     ``None`` si rien n'a changé.
 
     Retient aussi ce slug dans ``_HOME_SLUG`` : c'est le projet que le
-    cockpit ouvre par défaut (``home`` de ``/api/status``) et celui auquel
-    restent réservées les écritures du lot 2 (``file/write``, ``command``,
-    ``file/override``, mutations mémoire) — voir
-    ``_CockpitHandler._home_write_root``. Son chemin résolu va dans
-    ``_HOME_PATH`` (garde P02 des mutations mémoire).
+    cockpit ouvre par défaut (``home`` de ``/api/status``) et celui qui garde
+    le geste historique pour les écritures sensibles du lot 2 (``file/write``,
+    ``command``, ``file/override``, mutations mémoire) ; un AUTRE projet
+    enrôlé exige ``confirm_project``. Son chemin résolu va dans
+    ``_HOME_PATH`` (garde P02 des gestes mémoire).
     """
     global _HOME_PATH, _HOME_SLUG
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):
