@@ -1,9 +1,10 @@
-"""Cibles d'écriture du cockpit : slug de requête, racine enrôlée, corps.
+"""Cibles du cockpit : slug de requête, racine enrôlée, corps.
 
 Sorti de ``cmd_cockpit`` pour ne pas en gonfler le module (cliquet de taille) :
 les fonctions ici sont pures — elles prennent le chemin de requête ou le slug
-déjà extrait — et toute la politique d'écriture multi-projets vit à un seul
-endroit, avec sa documentation.
+déjà extrait — et toute la politique de résolution multi-projets vit à un seul
+endroit, avec sa documentation. Les écritures (lots 1 et 2) et les lectures
+(lot 4) résolvent leur projet ici.
 
 Depuis le lot 1 de l'écriture multi-projets (2026-11-07), une écriture vise
 n'importe quel projet ENRÔLÉ : le slug de ``?project=`` est **obligatoire** et
@@ -92,6 +93,23 @@ def enrolled_write_root(path: str) -> Path | None:
     """
     slug = explicit_query_slug(path)
     return registered_root(slug=slug) if slug else None
+
+
+def read_root(path: str) -> Path | None:
+    """Racine ENRÔLÉE visée par une LECTURE, ou ``None`` (404).
+
+    Lot 4 (2026-11-08) : une lecture nomme son projet comme une écriture. Le
+    slug de ``?project=`` sert de clé à ``registered_root`` — jamais de chemin —
+    et un slug inconnu ne mène à aucune racine, au lieu de retomber en silence
+    sur un autre projet. Deux onglets peuvent donc lire deux projets différents
+    sans partager d'état.
+
+    Sans paramètre, le repli historique reste en place : la sélection courante
+    (``selected_slug``, elle-même retombant sur le projet primaire), pour que
+    les liens ouverts avant le lot 4 continuent de marcher.
+    """
+    slug = explicit_query_slug(path)
+    return registered_root(slug=slug or selected_slug())
 
 
 def body_confirms_slug(body: Any, path: str) -> bool:
