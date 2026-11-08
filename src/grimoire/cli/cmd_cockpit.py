@@ -35,7 +35,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from grimoire.cli.cockpit_http import DRAIN_LIMIT, CountingReader, gzip_body, serve_asset, warm_sheet
+from grimoire.cli.cockpit_http import (
+    DRAIN_LIMIT,
+    CountingReader,
+    gzip_body,
+    send_json,
+    serve_asset,
+    warm_sheet,
+)
 from grimoire.cli.cockpit_write_target import (
     body_confirms_slug,
     enrolled_write_root,
@@ -75,6 +82,7 @@ from grimoire.tools.request_guard import (
     new_session_token,
 )
 from grimoire.tools.workspace_legacy import legacy_redirect_target
+from grimoire.tools.workspace_read_cache import cacheable_read
 from grimoire.tools.workspace_write_guard import cockpit_journal_path, guard_write
 
 cockpit_app = typer.Typer(
@@ -376,22 +384,8 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return False
         return True
 
-    def _send_json(self, code: int, payload: dict[str, object]) -> None:
-        # Le corps de la requête est lu en entier avant la première ligne de
-        # réponse (#857) ; la connexion est fermée après cette réponse
-        # (``HTTP/1.0``), l'en-tête le dit au client, et le tampon est vidé
-        # avant que ``finish`` ne ferme le socket.
-        self._drain_unread_body()
-        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        body = gzip_body(self, body)
-        self.send_header("Content-Length", str(len(body)))
-        if self.close_connection:  # le client l'a demandé (ou l'erreur de requête l'impose) : on le dit
-            self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(body)
-        self.wfile.flush()
+    def _send_json(self, code: int, payload: dict[str, object], *, etag: bool = False) -> None:
+        send_json(self, code, payload, etag=etag)
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
         # Même contrat pour les refus de ``http.server`` lui-même (501, 404
@@ -487,6 +481,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return
         from grimoire.tools.workspace_routes import (
             CHAT_STREAM_PATH,
+            LIVE_ROUTES,
             STREAM_HEADERS,
             STREAM_PATH,
             chat_stream,
@@ -512,10 +507,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             except ConnectionError:
                 pass  # la page est partie : fin du flux, pas une panne
             return
+        query = parse_qs(urlparse(self.path).query)
         try:
             from grimoire.tools.forge_routes import API_GET_UNHANDLED, api_get
 
-            payload = api_get(_project_api(proot), path, parse_qs(urlparse(self.path).query))
+            payload = api_get(_project_api(proot), path, query)
         except FileNotFoundError as exc:
             # Même traduction que l'atelier (``forge_http.py::do_GET``) et que
             # ``do_POST`` ci-dessous : un refus métier (tâche inconnue, chemin hors
@@ -577,7 +573,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 "project": slug,
                 "home": _HOME_SLUG or None,
             }
-        self._send_json(200, payload)
+        self._send_json(200, payload, etag=cacheable_read(path, query, live_routes=LIVE_ROUTES))
 
     def do_POST(self) -> None:  # http.server contract
         # P79 : toute écriture passée par le cockpit (tâche, agent, réglage…) peut changer ce que les lectures du direct

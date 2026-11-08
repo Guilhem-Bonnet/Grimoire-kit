@@ -359,8 +359,14 @@ function loadIdeas(ctx, onChange) {
   state.ideasLoaded = true;
   ctx.api.ideas().then((out) => {
     if (ctx.signal.aborted) return;
-    state.ideas = (out.ideas || []).filter((i) => i.state === 'open');
-    onChange();
+    const loaded = (out.ideas || []).filter((i) => i.state === 'open');
+    // La réponse arrive après le premier dessin : ne le refaire que si la boîte a vraiment du neuf à montrer.
+    // Sur une liste d'idées vide, redessiner l'espace entier payait `tasks` et `sessions` une seconde fois à
+    // l'ouverture de page, et détachait le DOM que l'utilisateur (ou un test e2e) était en train de lire.
+    const unchanged = loaded.length === state.ideas.length
+      && loaded.every((idea, k) => idea.id === state.ideas[k].id && idea.text === state.ideas[k].text);
+    state.ideas = loaded;
+    if (!unchanged) onChange();
   }).catch(() => { state.ideasLoaded = false; });
 }
 

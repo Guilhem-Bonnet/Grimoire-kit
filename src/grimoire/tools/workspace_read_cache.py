@@ -1,9 +1,11 @@
-"""Le cache des lectures que le flux en direct relance (P79) : un calcul par changement, pas un par onglet.
+"""Le cache des lectures lourdes du cockpit (P79) : un calcul par changement, pas un par onglet ni par page.
 
 Le 2026-10-27, huit workers actifs faisaient bouger l'empreinte du pouls plusieurs fois par seconde ; chaque
 onglet ouvert relisait alors ``tasks``, ``attention`` et ``sessions``, et le serveur recalculait tout à chaque
 fois. Seules, ces lectures coûtent ~0,6 s ; à plusieurs onglets, le serveur saturait (``attention`` 7,6 s, une
-lecture lourde voisine 67 s au lieu de 0,35 s).
+lecture lourde voisine 67 s au lieu de 0,35 s). Depuis GAO-perf-cockpit-002, l'ouverture de page et la navigation
+passent par le même cache : c'est là que l'utilisateur sent la lenteur, pas seulement lors d'un rechargement du
+direct.
 
 Deux règles, sans changer ce que la page reçoit :
 
@@ -23,17 +25,38 @@ from __future__ import annotations
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__all__ = ["MAX_AGE_SECONDS", "MAX_ENTRIES", "cached_read", "clear"]
+__all__ = ["MAX_AGE_SECONDS", "MAX_ENTRIES", "cacheable_read", "cached_read", "clear"]
 
 #: Âge au-delà duquel une réponse est recalculée, empreinte immobile ou non.
 MAX_AGE_SECONDS = 15.0
 #: Clés gardées au plus (route, projet, paramètres) ; la plus ancienne sort.
 MAX_ENTRIES = 64
+
+
+def _first(query: Mapping[str, list[str]], key: str) -> str | None:
+    values = query.get(key)
+    return values[0] if values else None
+
+
+def cacheable_read(route: str, query: Mapping[str, list[str]], *, live_routes: frozenset[str]) -> bool:
+    """Vrai si cette lecture peut être gardée (:func:`cached_read`), pour la route et la requête données.
+
+    Le portefeuille (``scope=portfolio``) agrège des projets que ce serveur n'écrit pas — l'empreinte est celle
+    du projet servi, pas la leur : il n'est jamais gardé. Un ``project=`` est, lui, résolu par l'hôte *avant* la
+    route (``_CockpitHandler.do_GET``) et la lecture porte alors sur cette racine, dont l'empreinte couvre les
+    fichiers : il n'est donc pas « étranger ». Une sonde explicitement demandée (``probe=1``) force un calcul,
+    sinon « Réessayer » resservirait la sonde qu'il devait remplacer.
+    """
+    return (
+        route in live_routes
+        and _first(query, "scope") != "portfolio"
+        and _first(query, "probe") in (None, "", "0", "false")
+    )
 
 
 @dataclass(slots=True)
