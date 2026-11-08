@@ -1,1 +1,0 @@
-- perf(cockpit): les digests des fichiers de l'espace Source sont mémoïsés par `(mtime_ns, taille)` — seule une modification recalcule son empreinte
