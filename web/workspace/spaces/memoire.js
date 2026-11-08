@@ -263,8 +263,11 @@ export async function mount(root, ctx) {
   ctx.docbar.setViews([], null);
 
   const allScope = Boolean(ctx.scope && ctx.scope.all);
-  const canDelete = ctx.host.kind === 'cockpit' && !ctx.host.readOnly;
   const homeSlug = (ctx.host.status && ctx.host.status.home) || ctx.host.project || '';
+  // Les mutations de mémoire (lot 2) restent réservées au projet d'ouverture :
+  // depuis le lot 1, « enrôlé » ne suffit plus à les autoriser côté serveur.
+  const canDelete = ctx.host.kind === 'cockpit' && !ctx.host.readOnly
+    && Boolean(homeSlug) && (allScope || ctx.host.project === homeSlug);
   const params = ctx.params || {};
 
   // `types` dans l'URL (clic sur un hall de la carte, P73) : la vue s'ouvre
@@ -841,7 +844,7 @@ const gesture = (kind, row) => {
 
   const readOnlyReason = () => {
     if (ctx.host.kind !== 'cockpit') return 'Correction depuis le cockpit seulement : lance « grimoire cockpit serve » dans ce projet.';
-    if (ctx.host.readOnly) return 'Ce cockpit est en lecture seule : il n’écrit que dans le projet qu’il sert.';
+    if (ctx.host.readOnly) return 'Ce projet n’est pas enrôlé dans ce cockpit, ou son dossier a disparu : rien ne s’y écrit.';
     return `Correction réservée au projet que ce cockpit sert (${homeSlug || 'projet de lancement'}) : lance « grimoire cockpit serve » dans ce projet-ci pour le corriger.`;
   };
 

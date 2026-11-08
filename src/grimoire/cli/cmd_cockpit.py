@@ -43,6 +43,14 @@ from grimoire.cli.cockpit_http import (
     serve_asset,
     warm_sheet,
 )
+from grimoire.cli.cockpit_write_target import (
+    body_confirms_slug,
+    enrolled_write_root,
+    explicit_query_slug,
+    home_write_root,
+    query_slug,
+    unresolvable_status,
+)
 from grimoire.data import site_script, web_path
 from grimoire.tools.cockpit_registry_routes import REGISTRY_ROUTES, registry_post
 from grimoire.tools.project_registry import (
@@ -55,11 +63,11 @@ from grimoire.tools.project_registry import (
     projects_payload,
     read_state,
     register_project,
+    registered_root,
     registry_file,
     registry_home,
     resolve_within_allowed,
     save_registry,
-    selected_slug,
     set_selected_slug,
     slug_for_path,
     state_file,
@@ -150,12 +158,10 @@ def _resolve_project_path(slug: str | None) -> Path | None:
     return Path(projects[0]["path"]) if projects else None
 
 
-# Slug du projet servi en direct par CE process (#351/#356) — distinct de
-# `selected_slug()` (la sélection courante, persistée au disque, qui dérive
-# librement dès que l'UI navigue vers un autre projet du registre). Réglé une
-# fois, avant `serve_forever()` (voir `_select_cwd_project`), jamais ensuite :
-# c'est ce qui garde l'écriture ouverte sur LE projet de lancement même après
-# une navigation Flotte, et fermée sur tout autre projet du registre.
+# Slug du projet ouvert par défaut par CE process (#351/#356), figé au
+# démarrage. Depuis le lot 1 (2026-11-07), il ne restreint plus les écritures
+# (voir `cockpit_write_target`) ; il sert au repli de lecture (`home` de
+# `/api/status`) et aux écritures réservées au projet d'ouverture (lot 2).
 _HOME_SLUG: str | None = None
 
 # Chemin du projet servi, figé au démarrage : la garde P02 compare des chemins,
@@ -369,6 +375,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             journal=cockpit_journal_path(),
             with_body=has_body(self.headers),
             peer=self.client_address[0],
+            project=self._explicit_query_slug() or None,
         )
         if refused:
             self._send_json(refused[0], {"ok": False, "error": refused[1]})
@@ -389,20 +396,27 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     # ── Lectures : registre + API projet, repli statique ──────────────────
 
     def _query_slug(self) -> str:
-        """Projet visé par la requête : ``?project=`` explicite, sinon la sélection courante."""
-        asked = parse_qs(urlparse(self.path).query).get("project", [""])[0]
-        return asked or selected_slug()
+        return query_slug(self.path)
 
-    def _is_home_request(self) -> bool:
-        """Vrai si la requête cible le projet servi en direct par ce process.
+    def _explicit_query_slug(self) -> str:
+        return explicit_query_slug(self.path)
 
-        `_HOME_SLUG` ne bouge jamais après le démarrage ; `_query_slug()` peut
-        pointer ailleurs dès que l'UI navigue vers un autre projet du
-        registre (carte Flotte, `?project=` explicite) — cette requête-là
-        reste en lecture seule, comme toute navigation cockpit vers un projet
-        qu'on ne fait que regarder (#356).
+    def _enrolled_write_root(self) -> Path | None:
+        return enrolled_write_root(self.path)
+
+    def _is_enrolled_write_target(self) -> bool:
+        """Vrai si l'écriture vise un projet enrôlé au dossier présent.
+
+        Remplace ``_is_home_request()`` : un slug absent de l'URL ou du
+        registre, ou un dossier disparu, ferme la porte (échec fermé).
         """
-        return bool(_HOME_SLUG) and self._query_slug() == _HOME_SLUG
+        return self._enrolled_write_root() is not None
+
+    def _home_write_root(self) -> Path | None:
+        return home_write_root(self.path, _HOME_SLUG)
+
+    def _body_confirms_slug(self, body: Any) -> bool:
+        return body_confirms_slug(body, self.path)
 
     def _serve_static(self) -> None:
         """Fichier statique ; une page HTML reçoit le jeton de session."""
@@ -455,6 +469,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             except PermissionError as exc:
                 self._send_json(403, {"ok": False, "error": str(exc)})
             return
+        if path == "/api/status":
+            readonly = unresolvable_status(self.path, _HOME_SLUG)
+            if readonly is not None:
+                self._send_json(200, readonly)
+                return
         proot = _resolve_project_path(self._query_slug() or None)
         if proot is None or not proot.is_dir():
             self._send_json(404, {"ok": False, "error": "projet inconnu"})
@@ -539,18 +558,18 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         # Même forme de réponse que l'atelier : la charge utile brute, pour que
         # le même code de page fonctionne contre les deux serveurs. Seul
         # ``/api/status`` est enrichi, pour que l'UI sache si l'hôte accepte
-        # des mutations. Depuis #356 ce n'est plus toujours faux : le projet
-        # de lancement direct (``_HOME_SLUG``) les honore, exactement comme le
-        # faisait l'ancien atelier avant que #351 ne l'y fasse succéder —
-        # naviguer vers un AUTRE projet du registre reste en lecture seule.
-        # ``home`` nomme ce projet ouvert (P31) : le bandeau de lecture seule
-        # en tire le geste « Revenir à … », ``None`` si le cockpit n'en a pas.
+        # des mutations. Depuis le lot 1 de l'écriture multi-projets, TOUT
+        # projet enrôlé en accepte : ``readOnly`` ne veut plus dire « pas le
+        # projet d'ouverture » mais « projet absent du registre, ou dossier
+        # disparu » — la seule cible qu'une écriture ne peut pas résoudre.
+        # ``home`` nomme le projet ouvert par défaut (P31).
         if path == "/api/status" and isinstance(payload, dict):
+            slug = self._query_slug()
             payload = {
                 **payload,
                 "host": "cockpit",
-                "readOnly": not self._is_home_request(),
-                "project": self._query_slug(),
+                "readOnly": not slug or registered_root(slug=slug) is None,
+                "project": slug,
                 "home": _HOME_SLUG or None,
             }
         self._send_json(200, payload, etag=cacheable_read(path, query))
@@ -625,22 +644,21 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # Le wizard exécute (issue #171) : `grimoire serve` n'est plus
             # qu'un alias déprécié de cette commande (#351), donc c'est ICI —
             # pas dans `forge_http.py` — que passe toute requête réelle du
-            # navigateur. Même garde que la vue de travail juste en dessous :
-            # seul le projet de lancement direct (`_HOME_SLUG`) accepte cette
-            # écriture, regarder un AUTRE projet du registre reste en lecture
-            # seule.
-            if not self._is_home_request():
+            # navigateur. Depuis le lot 1 de l'écriture multi-projets, le
+            # projet visé doit être ENRÔLÉ (résolu par le registre seul), pas
+            # forcément celui que ce process a ouvert.
+            proot = self._enrolled_write_root()
+            if proot is None:
                 self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
-                return
-            proot = _resolve_project_path(self._query_slug() or None)
-            if proot is None or not proot.is_dir():
-                self._send_json(404, {"ok": False, "error": "projet inconnu"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length) or b"{}") if length else {}
             except (ValueError, json.JSONDecodeError):
                 self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            if not self._body_confirms_slug(body):
+                self._send_json(403, {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
                 return
             try:
                 result = _project_api(proot).setup_plan(body)
@@ -689,45 +707,32 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return
         if path.startswith(WORKSPACE_PREFIX):
             # Écritures de la vue de travail (réclamer/réaliser une tâche,
-            # écrire un fichier, créer un override, lancer une commande) :
-            # l'ancien atelier les honorait, `cockpit serve` en a hérité sans
-            # les câbler quand #351 a fait de lui le seul serveur restant —
-            # même trouvaille que `--project-root` (d5047fc6), pour la même
-            # raison : fusionner deux commandes ne devait pas couper une
-            # capacité (#356). Restreint à `_HOME_SLUG` : le projet qu'on ne
-            # fait que regarder via le registre reste en lecture seule —
-            # SAUF décider une proposition (`is_proposal_decision`, #490) ou
-            # migrer les tâches d'un board vers le Mission Ledger
-            # (`is_registry_scoped_write`, #559 suite/#560) : ces deux
-            # écritures-là ouvrent la même porte que
-            # `POST /api/projects/update` juste au-dessus, parce que valider
-            # ou refuser un artefact déjà proposé, ou migrer les tâches d'un
-            # projet qu'on pilote depuis la flotte, sont les gestes explicites
-            # et ponctuels que le cockpit existe pour rendre possible sur
-            # toute la flotte, pas seulement sur le projet de lancement.
-            # Chaque dérogation est nommée : le reste de `WORKSPACE_PREFIX`
-            # (écrire un fichier, réclamer une tâche…) reste `_HOME_SLUG`
-            # seulement.
+            # décider une proposition, migrer un board, écrire un fichier…).
+            # Lot 1 de l'écriture multi-projets : la cible est le projet
+            # ENRÔLÉ nommé par `?project=`, résolu par le registre seul — le
+            # cockpit peut donc écrire sur n'importe quel projet qu'il pilote,
+            # pas seulement sur celui qu'il a ouvert. `file/write`,
+            # `file/override` et `command` restent, eux, limités au projet
+            # d'ouverture en attendant le lot 2 (voir
+            # `is_opening_project_only_write`).
             from grimoire.tools.workspace_routes import (
                 WORKSPACE_UNHANDLED,
-                is_proposal_decision,
-                is_registry_scoped_write,
+                is_opening_project_only_write,
                 workspace_post,
             )
 
-            registry_scoped = is_proposal_decision(path) or is_registry_scoped_write(path)
-            if not registry_scoped and not self._is_home_request():
+            proot = self._home_write_root() if is_opening_project_only_write(path) else self._enrolled_write_root()
+            if proot is None:
                 self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
-                return
-            proot = _resolve_project_path(self._query_slug() or None)
-            if proot is None or not proot.is_dir():
-                self._send_json(404, {"ok": False, "error": "projet inconnu"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length) or b"{}") if length else {}
             except (ValueError, json.JSONDecodeError):
                 self._send_json(400, {"ok": False, "error": "bad json"})
+                return
+            if not self._body_confirms_slug(body):
+                self._send_json(403, {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
                 return
 
             # Même traduction que l'atelier (``forge_http.py::do_POST``) : sans
@@ -760,14 +765,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # persiste la section `compiled` dans le blueprint d'origine
             # (voir sa docstring) : ce n'est pas un calcul comme
             # `/validate`/`/simulate` juste en dessous. Même garde que
-            # `/api/setup` et `PUT` : seul le projet de lancement direct
-            # (`_HOME_SLUG`) accepte cette écriture.
-            if not self._is_home_request():
+            # `/api/setup` et `PUT` : le projet visé doit être enrôlé (lot 1
+            # de l'écriture multi-projets).
+            proot = self._enrolled_write_root()
+            if proot is None:
                 self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
-                return
-            proot = _resolve_project_path(self._query_slug() or None)
-            if proot is None or not proot.is_dir():
-                self._send_json(404, {"ok": False, "error": "projet inconnu"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -791,12 +793,11 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # Calcul, pas écriture : `blueprint_lint`/`blueprint_simulate` ne
             # touchent jamais le disque (voir leurs docstrings — la simulation
             # « ne produit aucun effet »). Contrairement à `/compile` et `PUT`
-            # ci-dessus, aucune garde `_HOME_SLUG` ici — Concevoir doit
-            # pouvoir valider/simuler le projet déjà sélectionné sur le
-            # cockpit, comme sur l'atelier (#356), y compris un projet du
-            # registre qu'on ne fait que regarder. Vérifié par un test sur un
-            # vrai handler (`test_cmd_cockpit_blueprint_writes.py`, #546),
-            # pas seulement supposé sur la base de ce commentaire.
+            # ci-dessus, aucune résolution enrôlée obligatoire ici — la
+            # lecture reste ouverte à tout projet du registre, comme sur
+            # l'atelier (#356). Vérifié par un test sur un vrai handler
+            # (`test_cmd_cockpit_blueprint_writes.py`, #546), pas seulement
+            # supposé sur la base de ce commentaire.
             proot = _resolve_project_path(self._query_slug() or None)
             if proot is None or not proot.is_dir():
                 self._send_json(404, {"ok": False, "error": "projet inconnu"})
@@ -907,9 +908,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def do_PUT(self) -> None:  # http.server contract
         """``PUT /api/blueprints/<id>`` — enregistrer un blueprint (issue #535).
 
-        Même garde que ``/api/setup`` : seul le projet de lancement direct
-        (``_HOME_SLUG``) accepte l'écriture (#356) ; sans ``do_PUT``,
-        ``http.server`` répondait 501 avant toute garde.
+        Même garde que ``/api/setup`` : le projet visé doit être enrôlé (lot 1
+        de l'écriture multi-projets) ; sans ``do_PUT``, ``http.server``
+        répondait 501 avant toute garde.
         """
         if not self._guard_mutation():
             return
@@ -924,12 +925,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if not path.startswith("/api/blueprints/"):
             self._send_json(404, {"ok": False, "error": "route inconnue"})
             return
-        if not self._is_home_request():
+        proot = self._enrolled_write_root()
+        if proot is None:
             self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
-            return
-        proot = _resolve_project_path(self._query_slug() or None)
-        if proot is None or not proot.is_dir():
-            self._send_json(404, {"ok": False, "error": "projet inconnu"})
             return
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -1086,10 +1084,12 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     Renvoie un message à afficher quand le projet vient d'être enregistré, ou
     ``None`` si rien n'a changé.
 
-    Retient aussi ce slug dans ``_HOME_SLUG`` (#356) : c'est le seul projet
-    pour lequel *ce* process honorera une écriture, même après que l'UI ait
-    navigué ailleurs dans le registre — voir ``_CockpitHandler._is_home_request``.
-    Son chemin résolu va dans ``_HOME_PATH`` (garde P02).
+    Retient aussi ce slug dans ``_HOME_SLUG`` : c'est le projet que le
+    cockpit ouvre par défaut (``home`` de ``/api/status``) et celui auquel
+    restent réservées les écritures du lot 2 (``file/write``, ``command``,
+    ``file/override``, mutations mémoire) — voir
+    ``_CockpitHandler._home_write_root``. Son chemin résolu va dans
+    ``_HOME_PATH`` (garde P02 des mutations mémoire).
     """
     global _HOME_PATH, _HOME_SLUG
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):

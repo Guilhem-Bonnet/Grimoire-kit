@@ -12,8 +12,9 @@ ou ``None`` :
   ``request_guard.check_mutation``, inchangée ; s'y ajoute le pair réseau
   (``peer``) qui doit être la loopback.
 * **Journal** — chaque écriture, acceptée OU refusée, ajoute une ligne JSONL
-  (horodatage UTC, route, méthode, verdict, code et raison du refus) au
-  journal de la garde, en ajout seul — jamais de réécriture. Cockpit :
+  (horodatage UTC, route, méthode, verdict, code et raison du refus, et le
+  slug du projet visé quand l'hôte en connaît un) au journal de la garde, en
+  ajout seul — jamais de réécriture. Cockpit :
   ``registry_home()/write-guard.jsonl`` (:func:`cockpit_journal_path`) ;
   atelier : ``_grimoire-runtime-output/cockpit/write-guard.jsonl`` du projet.
 * **Fail-closed** — un journal non inscriptible refuse l'écriture (503) avec
@@ -97,12 +98,16 @@ def guard_write(
     journal: Path,
     with_body: bool,
     peer: str | None = None,
+    project: str | None = None,
 ) -> Refusal | None:
     """Le verdict de la garde commune pour UNE écriture, journalisé.
 
     ``peer`` est l'adresse du client quand le serveur la connaît (cockpit) ;
     ``None`` laisse ce contrôle au serveur appelant. ``route`` est le chemin
     sans sa query string ; ``journal`` le fichier JSONL de la garde.
+    ``project`` est le slug que l'hôte a résolu pour l'écriture — consigné
+    tel quel pour qu'un journal multi-projets dise OÙ chaque ligne a tenté
+    d'écrire ; ``None`` (atelier mono-projet) n'ajoute pas la clé.
     """
     refused: Refusal | None
     if peer is not None and peer not in LOOPBACK_NAMES:
@@ -116,6 +121,8 @@ def guard_write(
         "method": method,
         "verdict": "refusée" if refused else "acceptée",
     }
+    if project:
+        event["project"] = project
     if refused is not None:
         event["code"], event["reason"] = refused
     try:

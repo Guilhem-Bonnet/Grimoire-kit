@@ -2531,8 +2531,9 @@ function receiptBlock(ctx, taskId, payload, project) {
 
 // `task` porte l'id et, en portefeuille, `project.slug` (cible des lectures et
 // des actions) et `session` (bloc « Session »). `portfolio` choisit la porte
-// d'écriture : `portfolioTaskAction` (dérogation nommée, tout projet du
-// registre) plutôt que `taskAction` (projet de lancement seulement).
+// d'écriture : `portfolioTaskAction` (projet propriétaire explicite, y compris
+// hors du projet affiché) plutôt que `taskAction` (projet affiché — tout
+// projet enrôlé accepte l'écriture depuis le lot 1).
 //
 // Le panneau de détail (P64) suit l'artboard Travail : identifiant et état, titre,
 // carte « Pour passer en … » (conditions vertes ou rouges et leur gate, puis les

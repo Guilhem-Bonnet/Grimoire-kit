@@ -440,12 +440,16 @@ def test_memoire_s_ouvre_sur_la_recherche(workspace: Page) -> None:
     assert legends[:2] == ["Type", "Source"]
 
 
-# ── Cockpit : écritures désactivées (spec §5, critère 8) ───────────────────
+# ── Cockpit : un projet enrôlé accepte les écritures (lot 1) ───────────────
 
 
-def test_cockpit_desactive_les_ecritures_d_executer(cockpit_workspace: Page) -> None:
+def test_cockpit_autorise_les_ecritures_d_executer(cockpit_workspace: Page) -> None:
+    """Lot 1 de l'écriture multi-projets : le projet servi est enrôlé, donc
+    l'écriture depuis le cockpit est ouverte — même s'il n'est pas le projet
+    d'ouverture du process. L'ancien verrou « Écriture désactivée » a disparu."""
     workspace = cockpit_workspace
-    assert workspace.evaluate("() => window.GrimoireWorkspace.host.readOnly") is True
+    assert workspace.evaluate("() => window.GrimoireWorkspace.host.readOnly") is False
+    assert workspace.locator("#readonly-banner").is_hidden()
 
     _goto(workspace, "executer")
     workspace.wait_for_selector(".ex-col, .empty")
@@ -453,6 +457,7 @@ def test_cockpit_desactive_les_ecritures_d_executer(cockpit_workspace: Page) -> 
     if cards.count() == 0:
         pytest.skip("aucune tâche visible côté cockpit pour ce projet")
     cards.first.click()
-    button = workspace.locator("#inspector-body button", has_text="Écriture désactivée").first
-    button.wait_for(state="visible")
-    assert button.is_disabled()
+    assert workspace.locator("#inspector-body button", has_text="Écriture désactivée").count() == 0
+    transition = workspace.locator("#inspector-body button[data-role='transition']").first
+    if transition.count():
+        assert transition.is_enabled()

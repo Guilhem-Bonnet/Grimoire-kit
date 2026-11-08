@@ -7,11 +7,13 @@
 // `api.taskAdd` → `POST /api/workspace/tasks/add` → `TaskService.add`, la même
 // entrée que `grimoire task add` et l'outil MCP `task_add`.
 //
-// Le cockpit n'écrit des tâches que dans le projet qu'il sert (P02) : en portée
-// « Tous les projets », ou sur un projet qu'on ne fait que regarder, le bouton
-// est désactivé et la raison est écrite à côté. Le retour est sur place : la
-// tâche créée s'annonce avec un lien qui l'ouvre ; un refus garde le formulaire
-// et dit pourquoi.
+// Depuis le lot 1 de l'écriture multi-projets, le cockpit ouvre une tâche dans
+// tout projet ENRÔLÉ, y compris un projet consulté depuis la Flotte. Le bouton
+// n'est donc désactivé qu'en portée « Tous les projets » (il faut choisir une
+// cible) ou quand le projet visé n'est plus résoluble (absent du registre,
+// dossier disparu) — la raison est alors écrite à côté. Le retour est sur
+// place : la tâche créée s'annonce avec un lien qui l'ouvre ; un refus garde
+// le formulaire et dit pourquoi.
 //
 // L'état vit au niveau du module : un rafraîchissement du tableau redessine
 // la carte sans perdre la saisie ni la confirmation.
@@ -59,7 +61,7 @@ function el(tag, className, text, attrs) {
 /** Pourquoi le cockpit refuse ici d'ouvrir une tâche, ou `''` s'il le peut. */
 export function newTaskBlockedReason(ctx, portfolio) {
   if (portfolio) return 'Choisis un projet dans la portée : une tâche s’ouvre dans un projet, pas dans tous.';
-  if (ctx.host.readOnly) return 'Lecture seule : ce cockpit n’ouvre des tâches que dans le projet qu’il sert.';
+  if (ctx.host.readOnly) return 'Lecture seule : ce projet n’est pas enrôlé dans ce cockpit, ou son dossier a disparu.';
   return '';
 }
 

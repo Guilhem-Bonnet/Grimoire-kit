@@ -10,9 +10,9 @@ client — la moitié serveur du bug, distincte de la moitié client
 (``addNode`` n'appelait jamais ``blueprintPut``) que
 ``tests/e2e/test_workspace_concevoir.py`` couvre.
 
-Même garde que ``/api/setup``/``do_POST`` du même module : seul le projet de
-lancement direct (``_HOME_SLUG``) accepte l'écriture, un projet du registre
-qu'on ne fait que regarder via le cockpit reste en lecture seule (#356).
+Même garde que ``/api/setup``/``do_POST`` du même module : le projet visé
+doit être ENRÔLÉ (lot 1 de l'écriture multi-projets) ; un slug absent du
+registre reste en lecture seule.
 """
 
 from __future__ import annotations
@@ -100,17 +100,32 @@ def test_put_writes_the_blueprint_on_the_home_project(duo_server: Any) -> None:
     assert saved == blueprint
 
 
-def test_put_is_refused_on_a_non_home_registry_project(duo_server: Any) -> None:
-    """Écrire un blueprint sur un AUTRE projet du registre — qu'on ne fait
-    que regarder via le cockpit — doit rester 403, comme le reste des
-    écritures de la vue de travail (#356)."""
-    port, _home, foreign = duo_server
+def test_put_writes_the_blueprint_on_another_enrolled_project(duo_server: Any) -> None:
+    """Lot 1 : un projet ENRÔLÉ accepte l'écriture même s'il n'est pas celui
+    que le process a ouvert. La racine vient du registre, donc le blueprint
+    atterrit chez ``foreign``, pas chez ``home``."""
+    port, home, foreign = duo_server
     blueprint = {"id": "demo", "nodes": [], "edges": []}
 
     status, body = _put(port, "/api/blueprints/demo?project=foreign", blueprint)
 
+    assert status == 200
+    assert body["saved"] == "demo"
+    saved = json.loads((foreign / "_grimoire" / "blueprints" / "demo.blueprint.json").read_text(encoding="utf-8"))
+    assert saved == blueprint
+    assert not (home / "_grimoire" / "blueprints" / "demo.blueprint.json").exists()
+
+
+def test_put_is_refused_on_a_slug_outside_the_registry(duo_server: Any) -> None:
+    """Un slug absent du registre ne résout aucune racine : 403, rien d'écrit."""
+    port, home, foreign = duo_server
+    blueprint = {"id": "demo", "nodes": [], "edges": []}
+
+    status, body = _put(port, "/api/blueprints/demo?project=ghost", blueprint)
+
     assert status == 403
     assert body["ok"] is False
+    assert not (home / "_grimoire" / "blueprints" / "demo.blueprint.json").exists()
     assert not (foreign / "_grimoire" / "blueprints" / "demo.blueprint.json").exists()
 
 
