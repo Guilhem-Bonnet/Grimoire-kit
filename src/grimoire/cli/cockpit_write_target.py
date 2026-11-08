@@ -22,7 +22,54 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from grimoire.tools.project_registry import registered_root, selected_slug
+from grimoire.tools.workspace_routes import PREFIX
 from grimoire.tools.workspace_write_guard import cockpit_journal_path, journal_event
+
+#: Écritures d'AUTORITÉ (lot 3, 2026-11-08) : le mandat, le pilote automatique
+#: et les fournisseurs. Comme toute écriture de la vue de travail, elles visent
+#: la racine ENRÔLÉE résolue depuis ``?project=``. Elles nomment en plus leur
+#: projet dans le corps : un slug d'URL inconnu est un 404 et un slug du corps
+#: qui ne désigne pas la même racine est un 400 — plutôt que le refus générique
+#: « lecture seule » (403) des autres écritures. Absent du corps, le slug ne dit
+#: rien (compatibilité des appels historiques).
+AUTHORITY_WRITES = frozenset(
+    {
+        f"{PREFIX}autonomy/autopilot",
+        f"{PREFIX}autonomy/mandate/grant",
+        f"{PREFIX}autonomy/mandate/revoke",
+        f"{PREFIX}providers",
+        f"{PREFIX}providers/set-key",
+    }
+)
+
+
+def is_authority_write(path: str) -> bool:
+    """Vrai pour une écriture qui nomme son projet dans le corps (mandat, pilote, fournisseurs)."""
+    return path in AUTHORITY_WRITES
+
+
+def write_refusal_status(path: str) -> tuple[int, str]:
+    """``(code, message)`` quand la cible d'une écriture ne résout pas.
+
+    Les autres écritures gardent le 403 « lecture seule » du lot 1. Une écriture
+    d'autorité (lot 3) nomme sa cible : slug absent de l'URL → 400 (rien ne dit
+    où écrire), slug inconnu ou dossier disparu → 404 (le registre ne le rend pas).
+    """
+    if not is_authority_write(urlparse(path).path):
+        return 403, "hôte en lecture seule"
+    if not explicit_query_slug(path):
+        return 400, "projet non nommé"
+    return 404, "projet inconnu ou non enrôlé"
+
+
+def body_mismatch_status(path: str) -> int:
+    """Code de refus quand le ``project`` du corps contredit ``?project=``.
+
+    Une écriture d'autorité (lot 3) nomme sa cible dans le corps : le
+    contredire est une requête mal formée, donc 400. Les autres écritures
+    gardent le refus du lot 1 (403), qui ne promettait pas de cible au corps.
+    """
+    return 400 if is_authority_write(urlparse(path).path) else 403
 
 
 def query_slug(path: str) -> str:

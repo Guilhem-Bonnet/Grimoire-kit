@@ -90,6 +90,15 @@ function withProject(path) {
   return `${base}?${params.toString()}`;
 }
 
+// Les écritures d'AUTORITÉ (mandat, pilote, fournisseurs — lot 3) nomment leur
+// cible dans le corps en plus de `?project=`. L'hôte refuse alors un corps qui
+// contredit l'URL (400), et un slug absent de l'URL (400) plutôt que de deviner
+// la sélection partagée entre onglets. En atelier, `host.project` est nul : le
+// corps reste inchangé.
+function projectBody() {
+  return host.project ? { project: host.project } : {};
+}
+
 // P79 : vrai pendant qu'un pouls changé fait recharger les espaces (live.js). Les lectures GET lancées alors
 // portent `pulse_reload=1` (jamais `live`, déjà le filtre « Sessions vivantes » du portefeuille) : le serveur peut les servir depuis son cache tant que l'empreinte n'a pas bougé. Un
 // chargement de page ou une navigation n'en portent pas : ils relisent toujours.
@@ -169,7 +178,7 @@ function put(path, body) {
 // projet que l'on a ouvert). Une modale annulée ne part pas.
 const projectNames = new Map();
 
-async function projectName(slug) {
+export async function projectName(slug) {
   if (projectNames.has(slug)) return projectNames.get(slug);
   let name = slug;
   try {
@@ -342,8 +351,19 @@ export const api = {
   chatStreamUrl: (resume) => withProject(WS + 'chat/stream' + (resume ? '?resume=1' : '')),
   chatSend: (text, answerTo) => post(WS + 'chat/send', answerTo ? { text, answer_to: answerTo } : { text }),
   // ACP4 : le geste du pilote automatique. Un bouton que la personne clique, avec la clé de contrôle
-  // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé.
-  autopilotSet: (on, controlKey) => post(WS + 'autonomy/autopilot', { on, control_key: controlKey }),
+  // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé. Lot 3 : le
+  // corps nomme aussi le projet visé, pour que l'hôte vérifie l'URL et le corps ensemble.
+  autopilot: () => get(WS + 'autonomy/autopilot'),
+  autopilotSet: (on, controlKey) =>
+    post(WS + 'autonomy/autopilot', { on, control_key: controlKey, ...projectBody() }),
+  // Lot 3 : le mandat de n'importe quel projet enrôlé. Octroyer et couper le pilote
+  // passent par la clé de contrôle ; révoquer reste permis derrière le jeton (retirer
+  // une autorité n'en demande aucune).
+  mandate: () => get(WS + 'autonomy/mandate'),
+  mandateGrant: (request, controlKey) =>
+    post(WS + 'autonomy/mandate/grant', { ...request, control_key: controlKey, ...projectBody() }),
+  mandateRevoke: (reason) =>
+    post(WS + 'autonomy/mandate/revoke', { reason: reason || 'manual', ...projectBody() }),
   chatPermission: (requestId, decision) => post(WS + 'chat/permission', { request_id: requestId, decision }),
   chatCancel: () => post(WS + 'chat/cancel', {}),
   // ACP3 : l'hôte du chat, par projet. Les hôtes absents reviennent grisés, avec leur raison.
@@ -458,9 +478,13 @@ export const api = {
   hooks: () => get(WS + 'hooks'),
   providers: () => get(WS + 'providers'),
   providersSetKey: (providerId, envVar, value, controlKey) =>
-    post(WS + 'providers/set-key', { provider_id: providerId, env_var: envVar, value, control_key: controlKey }),
+    post(WS + 'providers/set-key', {
+      provider_id: providerId, env_var: envVar, value, control_key: controlKey, ...projectBody(),
+    }),
   providersSetEnabled: (providerId, enabled, controlKey) =>
-    post(WS + 'providers', { action: enabled ? 'enable' : 'disable', provider_id: providerId, control_key: controlKey }),
+    post(WS + 'providers', {
+      action: enabled ? 'enable' : 'disable', provider_id: providerId, control_key: controlKey, ...projectBody(),
+    }),
   // Options du projet (P75) : taux USD→CAD de la colonne Fait, lu et écrit
   // dans project-context.yaml (section cockpit) par le serveur.
   options: () => get(WS + 'options'),

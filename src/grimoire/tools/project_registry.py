@@ -268,6 +268,36 @@ def registered_root(*, slug: str = "", path: str = "") -> Path | None:
     return None
 
 
+def body_project_refusal(project_root: Path, body: Any) -> str | None:
+    """Refus si le ``project`` du corps ne désigne pas ``project_root`` dans le registre.
+
+    Pendant de :func:`grimoire.cli.cockpit_write_target.body_confirms_slug`, côté
+    route : le transport compare le corps au slug de l'URL, mais une route ne
+    reçoit que la racine déjà résolue. Absent, le champ ne dit rien — les appels
+    historiques ne le portent pas. Présent, il doit nommer CETTE racine et rester
+    un slug du registre : un slug non enrôlé n'est jamais accepté, et un chemin
+    fourni par le client ne résout rien (``registered_root`` ne lit que des slugs).
+    """
+    wanted = str(body.get("project") or "").strip() if isinstance(body, dict) else ""
+    if not wanted:
+        return None
+    if registered_root(slug=wanted) != project_root.resolve():
+        return f"le corps visait le projet {wanted!r}, la cible résolue diffère"
+    return None
+
+
+def refuse_foreign_body(project_root: Path, body: Any) -> None:
+    """Lève ``ValueError`` (400) si le ``project`` du corps vise une autre racine.
+
+    Variante levante de :func:`body_project_refusal` : les routes d'écriture du
+    workspace traduisent ``ValueError`` en 400, ce qui évite de répéter le test
+    dans chaque geste d'autorité (mandat, pilote, fournisseurs) — lot 3.
+    """
+    refusal = body_project_refusal(project_root, body)
+    if refusal is not None:
+        raise ValueError(refusal)
+
+
 def primary_slug() -> str:
     projects = load_registry()
     return str(projects[0].get("slug", "")) if projects else ""
