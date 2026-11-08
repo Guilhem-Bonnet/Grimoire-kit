@@ -55,6 +55,7 @@ from grimoire.cli.cockpit_write_target import (
     explicit_query_slug,
     journal_confirmation,
     query_slug,
+    read_root,
     sensitive_write_refusal,
     unresolvable_status,
 )
@@ -451,7 +452,9 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             if readonly is not None:
                 self._send_json(200, readonly)
                 return
-        proot = _resolve_project_path(self._query_slug() or None)
+        # Lot 4 : une lecture nomme son projet (`?project=<slug>`), résolu par
+        # le registre ; sans paramètre, le repli reste la sélection courante.
+        proot = read_root(self.path)
         if proot is None or not proot.is_dir():
             self._send_json(404, {"ok": False, "error": "projet inconnu"})
             return
@@ -784,7 +787,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             # l'atelier (#356). Vérifié par un test sur un vrai handler
             # (`test_cmd_cockpit_blueprint_writes.py`, #546), pas seulement
             # supposé sur la base de ce commentaire.
-            proot = _resolve_project_path(self._query_slug() or None)
+            proot = read_root(self.path)
             if proot is None or not proot.is_dir():
                 self._send_json(404, {"ok": False, "error": "projet inconnu"})
                 return

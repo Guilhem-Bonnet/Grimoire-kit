@@ -20,9 +20,14 @@ haut (`#project-chip`, palette réduite aux projets, sans plafond). Plus de zoom
 Flotte/Projet par espace. **L'URL dit tout** : `?project=<slug>` ou
 `?scope=all`, puis `#<espace>[/<rubrique>][?<élément>]` — par exemple
 `?project=grimoire-forge#travail?task=GAO-12`. Les anciens `#piloter`,
-`#executer`… mènent à la rubrique qui les remplace. Un projet consulté depuis
-un cockpit ouvert ailleurs est en **lecture seule** : un bandeau le dit en tête,
-avec « Revenir à … » et la commande qui l'ouvre en écriture.
+`#executer`… mènent à la rubrique qui les remplace. **Le projet est celui de
+l'onglet** (lot 4) : le choix est retenu dans `sessionStorage` et chaque
+requête porte `?project=` ; deux onglets sur deux projets ne se déplacent
+plus l'un l'autre, et le chat de l'orchestrateur suit l'onglet. La sélection
+globale du serveur ne sert plus qu'à ouvrir un onglet neuf ou un lien ancien
+sans paramètre. Un projet absent du registre, ou dont le dossier a disparu,
+reste en **lecture seule** : un bandeau le dit en tête, avec la commande qui
+le réenrôle.
 
 Décisions et alternatives écartées :
 [`docs/adr-006-vue-de-travail.md`](../../docs/adr-006-vue-de-travail.md).
@@ -235,12 +240,16 @@ d'écrire l'entrée, jamais de retirer la citation.
 ## Les routes
 
 Tout ce que la vue de travail ajoute vit sous `/api/workspace/`. Les lectures
-sont servies par **les deux hôtes**. Les écritures visent le projet désigné
-par `?project=` : l'atelier l'ignore (il n'en sert qu'un), le cockpit le résout
-dans son registre — tout projet ENRÔLÉ est inscriptible, pas seulement celui
-qu'il a ouvert (lot 1, 2026-11-07). Les écritures SENSIBLES (fichier, override,
-commande, mutations mémoire) exigent en plus, sur un autre projet que celui
-d'ouverture, `confirm_project: "<slug>"` égal au slug visé (lot 2).
+sont servies par **les deux hôtes**. Depuis le lot 4, une lecture nomme elle
+aussi son projet : `?project=<slug>` est résolu par le registre, un slug
+inconnu est un 404, et sans paramètre le cockpit garde son repli historique
+(sélection courante, sinon projet primaire). Les écritures visent le projet
+désigné par `?project=` : l'atelier l'ignore (il n'en sert qu'un), le cockpit
+le résout dans son registre — tout projet ENRÔLÉ est inscriptible, pas
+seulement celui qu'il a ouvert (lot 1, 2026-11-07). Les écritures SENSIBLES
+(fichier, override, commande, mutations mémoire) exigent en plus, sur un autre
+projet que celui d'ouverture, `confirm_project: "<slug>"` égal au slug visé
+(lot 2).
 
 ### Lectures — atelier et cockpit
 
