@@ -259,18 +259,18 @@ def usage_of(project_root: Path, task: Any, *, traces: list[Any] | None = None) 
 
 
 def _traces_by_task(project_root: Path) -> dict[str, list[Any]]:
-    """Les traces du projet groupées par tâche — un seul passage sur ``traces.jsonl``."""
-    from grimoire.core.standard_generation import TRACES_DIR
-    from grimoire.traces.ledger import TraceLedger
+    """Les traces du projet groupées par tâche — par l'index incrémental de ``traces.jsonl``.
 
-    traces_path = project_root / TRACES_DIR
-    grouped: dict[str, list[Any]] = {}
-    if not (traces_path / "traces.jsonl").is_file():
-        return grouped
-    for trace in TraceLedger(traces_path).list_traces():
-        if trace.task_id:
-            grouped.setdefault(trace.task_id, []).append(trace)
-    return grouped
+    Le journal n'est plus relu en entier à chaque appel : ``traces.task_index``
+    garde le regroupement en mémoire et ne consomme que les lignes ajoutées.
+    """
+    from grimoire.core.standard_generation import TRACES_DIR
+    from grimoire.traces.task_index import traces_by_task
+
+    traces_file = project_root / TRACES_DIR / "traces.jsonl"
+    if not traces_file.is_file():
+        return {}
+    return traces_by_task(traces_file)
 
 
 def cad_of(usd: float | None, rate: float) -> float | None:
