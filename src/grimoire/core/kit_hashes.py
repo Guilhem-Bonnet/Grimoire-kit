@@ -54,35 +54,12 @@ def load_catalog() -> dict[str, dict[str, Any]]:
     return {}
 
 
-#: Empreinte par chemin : ``(mtime_ns, taille, digest)``. La vue Source relit
-#: des milliers de fichiers à chaque requête ; sans ce mémo, chacun coûtait une
-#: lecture complète. ``(mtime_ns, taille)`` est la clé de fraîcheur : un fichier
-#: modifié change l'une des deux et seul son digest est recalculé.
-_DIGESTS: dict[str, tuple[int, int, str]] = {}
-
-
 def digest_of(path: Path) -> str:
-    """SHA-256 of *path*, or ``""`` when it cannot be read.
-
-    Le digest est mémoïsé par chemin et validé par ``(mtime_ns, taille)`` : un
-    fichier inchangé ne se relit pas. Un fichier non lisible n'est pas mémoïsé,
-    pour qu'il soit recalculé dès qu'il le redevient.
-    """
-    key = str(path.absolute())
+    """SHA-256 of *path*, or ``""`` when it cannot be read."""
     try:
-        stat = path.stat()
+        return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
         return ""
-    fingerprint = (stat.st_mtime_ns, stat.st_size)
-    cached = _DIGESTS.get(key)
-    if cached is not None and cached[:2] == fingerprint:
-        return cached[2]
-    try:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return ""
-    _DIGESTS[key] = (*fingerprint, digest)
-    return digest
 
 
 def shipped_by_kit(path: Path) -> dict[str, Any] | None:

@@ -554,10 +554,36 @@ def _catalog() -> _Catalog:
     return _Catalog(load_catalog())
 
 
-def _digest(path: Path) -> str:
+#: Empreinte par chemin pour la vue Source : ``(mtime_ns, taille, digest)``. Mémo du cockpit SEULEMENT :
+#: ``kit_hashes.digest_of`` reste exact (il relit toujours), parce que la vérification d'intégrité du kit
+#: (``verify``, ``doctor``, ``upgrade``) ne doit pas se fier à un mtime qu'une copie ``cp -p`` conserve.
+_DIGESTS: dict[str, tuple[int, int, str]] = {}
+
+
+def cached_digest(path: Path) -> str:
+    """SHA-256 de *path* pour l'affichage, recalculé seulement si ``(mtime_ns, taille)`` a changé.
+
+    ``""`` si le fichier ne se lit pas ; un échec n'est pas mémoïsé, il sera retenté.
+    """
     from grimoire.core.kit_hashes import digest_of
 
-    return digest_of(path)
+    key = str(path.absolute())
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    fingerprint = (stat.st_mtime_ns, stat.st_size)
+    cached = _DIGESTS.get(key)
+    if cached is not None and cached[:2] == fingerprint:
+        return cached[2]
+    digest = digest_of(path)
+    if digest:
+        _DIGESTS[key] = (*fingerprint, digest)
+    return digest
+
+
+def _digest(path: Path) -> str:
+    return cached_digest(path)
 
 
 def _file_entry(project_root: Path, path: Path, tier: dict[str, Any], catalog: _Catalog) -> dict[str, Any]:
