@@ -1613,6 +1613,9 @@ function decisionType(q) {
 // choix en cours, « Autre réponse… » ouvert, détails dépliés, confirmation et
 // bilan d'un lot. Au niveau du module, comme `scope`.
 const decisionUi = { filter: '', picked: new Map(), other: new Set(), details: new Set(), confirm: '', bulk: null };
+// Le dernier bilan de « Tout accepter » survit au redessin du pouls : la vue est remplacée en
+// entier, et un résultat par tâche qui disparaîtrait aussitôt ne serait pas affiché.
+const acceptMergedUi = { result: null };
 const decisionKey = (task, q) => `${task.project?.slug || ''}|${task.id}|${q.id}`;
 
 const isAbandon = (option) => String(option).trim().toLowerCase() === 'abandonner';
@@ -2098,6 +2101,90 @@ function bulkControls(ctx, tasks, portfolio, onWritten) {
   return box.childElementCount ? { box, confirmSlot } : null;
 }
 
+// GAO-cockpit-tout-001 : « Tout accepter (N) » — les tâches qu'une PR fusionnée a laissées en revue,
+// relues READY par le relecteur du tick. Le serveur ne retient que celles dont la dernière question
+// ouverte est celle du merger (`task.merge_escalated`) ; la clé de contrôle est demandée ici, comme
+// pour le pilote automatique : le jeton de session ne suffit pas à fermer des tâches. Le résultat est
+// affiché par tâche, et une tâche refusée laisse les autres continuer.
+function acceptMergedBlock(ctx, onWritten) {
+  const box = document.createElement('div');
+  box.className = 'ex-dec-bulk';
+  box.dataset.role = 'accept-merged';
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'btn';
+  open.dataset.role = 'accept-merged-open';
+  open.hidden = true;
+  const form = document.createElement('div');
+  form.hidden = true;
+  form.dataset.role = 'accept-merged-form';
+  const note = text('p', 'lbl', 'Geste d’humain : saisissez la clé de contrôle (lue dans le terminal).');
+  const key = document.createElement('input');
+  key.type = 'password';
+  key.className = 'input';
+  key.autocomplete = 'off';
+  key.placeholder = 'Clé de contrôle';
+  key.dataset.role = 'accept-merged-key';
+  key.setAttribute('aria-label', 'Clé de contrôle');
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'btn pri';
+  go.dataset.role = 'accept-merged-confirm';
+  go.textContent = 'Accepter';
+  go.disabled = true;
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn';
+  cancel.dataset.role = 'accept-merged-cancel';
+  cancel.textContent = 'Annuler';
+  const status = actionStatus(
+    acceptMergedUi.result ? acceptMergedUi.result.text : '',
+    acceptMergedUi.result ? acceptMergedUi.result.tone : undefined,
+  );
+  status.dataset.role = 'accept-merged-status';
+  key.addEventListener('input', () => { go.disabled = !key.value.trim(); });
+  open.addEventListener('click', () => { form.hidden = false; open.hidden = true; key.focus(); });
+  cancel.addEventListener('click', () => { form.hidden = true; key.value = ''; go.disabled = true; open.hidden = false; });
+  go.addEventListener('click', async () => {
+    if (!key.value.trim()) return;
+    go.disabled = true;
+    setActionStatus(status, 'Acceptation en cours…');
+    try {
+      const result = await ctx.api.acceptMerged(key.value);
+      key.value = '';
+      form.hidden = true;
+      const accepted = result.accepted || [];
+      const refused = result.refused || [];
+      const parts = [];
+      if (accepted.length) parts.push(`${accepted.length} acceptée${accepted.length > 1 ? 's' : ''}`);
+      if (refused.length) parts.push(`${refused.length} refusée${refused.length > 1 ? 's' : ''} (${refused.map((r) => `${r.task_id} : ${r.reason}`).join(' ; ')})`);
+      const message = parts.length ? parts.join(' ; ') : 'Aucune tâche à accepter.';
+      const tone = refused.length ? 'bad' : 'ok';
+      acceptMergedUi.result = { text: message, tone };
+      setActionStatus(status, message, tone);
+      onWritten();
+    } catch (error) {
+      go.disabled = !key.value.trim();
+      const message = failureText(error);
+      acceptMergedUi.result = { text: message, tone: 'bad' };
+      setActionStatus(status, message, 'bad');
+    }
+  });
+  form.append(note, row(key, go, cancel));
+  box.append(open, form, status);
+  // Le compteur vient du serveur : lui seul sait quelles tâches réunissent fusion, question du
+  // merger et reçu READY. Le pouls redessine la vue ; une réponse arrivée après le remplacement du
+  // nœud ne doit pas peindre un bouton détaché.
+  ctx.api.acceptMergedCandidates().then((data) => {
+    if (!open.isConnected) return;
+    const count = Number((data && data.count) || ((data && data.candidates) || []).length);
+    if (!count) return;
+    open.textContent = `Tout accepter (${count})`;
+    open.hidden = false;
+  }).catch(() => {});
+  return box;
+}
+
 function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
   const pending = tasks.filter(isHumanWait);
   const wrap = document.createElement('div');
@@ -2106,7 +2193,11 @@ function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
   const bulkStatus = actionStatus('');
   bulkStatus.dataset.role = 'bulk-status';
   if (!pending.length) {
-    wrap.append(bulkStatus, ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions', undefined, { art: 'i-empty-inbox' }));
+    wrap.append(bulkStatus);
+    // GAO-cockpit-tout-001 : une tâche fusionnée attend « Accepter … ? » sans être en attente
+    // bloquante — son bouton de lot vit donc aussi dans l'état vide des décisions.
+    if (!portfolio) wrap.append(acceptMergedBlock(ctx, onWritten));
+    wrap.append(ctx.empty('Décisions en attente', "Aucune décision n'attend un humain.", 'grimoire task decisions', undefined, { art: 'i-empty-inbox' }));
     root.append(wrap);
     paintBulk();
     return;
@@ -2155,6 +2246,7 @@ function renderDecisions(root, ctx, tasks, portfolio, onWritten) {
   }
   bar.append(filters);
   wrap.append(bar, bulkStatus);
+  if (!portfolio) wrap.append(acceptMergedBlock(ctx, onWritten));
 
   for (const type of DECISION_TYPES) {
     const list = groups.get(type.id);
