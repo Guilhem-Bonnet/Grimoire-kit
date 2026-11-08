@@ -2955,6 +2955,29 @@ def test_agent_sans_corps_se_distingue_par_sa_description() -> None:
     assert classe.identity_fingerprint() != inventorie.identity_fingerprint()
 
 
+def test_body_fingerprint_normalise_et_ignore_un_corps_vide() -> None:
+    """#1180 : la fiche est comparée après normalisation, et un corps vide ne
+    produit pas d'empreinte (la description prend alors le relais)."""
+    from grimoire.hosts.surface import body_fingerprint
+
+    assert body_fingerprint("Tu classes.\r\n  \n") == body_fingerprint("Tu classes.")
+    assert body_fingerprint("   \n\n") == ""
+
+
+def test_agents_sans_corps_a_descriptions_differentes_sont_acceptes(tmp_path: Path) -> None:
+    """#1180 : deux agents au même faisceau et tous deux sans corps restent
+    distincts par leur description (le cas des fichiers de persona réduits au
+    strict minimum)."""
+    from grimoire.hosts.collect import build_surface
+
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "archiviste", body="")
+    _write_agent_in(tmp_path, "_grimoire/overrides/agents", "greffier", body="")
+
+    surface = build_surface(tmp_path)  # ne doit pas lever GrimoireAgentError
+
+    assert surface.notes == ()
+
+
 def test_deux_agents_distincts_ne_laissent_aucune_note(tmp_path: Path) -> None:
     from grimoire.hosts.collect import build_surface
 
