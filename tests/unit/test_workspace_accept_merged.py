@@ -80,6 +80,22 @@ def _merged_candidate(root: Path, title: str, pr: int = 42) -> str:
     return tid
 
 
+def _text_only_candidate(root: Path, title: str, pr: int = 43) -> str:
+    """Une candidate sans ``task.merge_escalated`` : le texte de la question suffit à la reconnaître."""
+    tid = _in_review(root, title)
+    write_receipt(root, tid, READY, reviewer_id="reviewer")
+    service = TaskService(root)
+    spec = QuestionSpec(
+        f"Accepter {tid} (PR #{pr} fusionnée) ? Le merger ne l'accepte pas : chemins réservés.",
+        kind="choice",
+        blocking=False,
+        key=f"merger:accept:{tid}",
+    )
+    service.ask_batch(tid, [spec], "merger")
+    service.ledger.append_event(MERGED_EVENT, tid, "task", "merger", {"pr": pr, "merged_sha": "b" * 40, "into": "main"})
+    return tid
+
+
 def _post(host: Host, body: dict[str, Any]) -> int:
     path = f"{PREFIX}tasks/accept-merged?project={host.slug}"
     return host.request("POST", path, json.dumps(body).encode(), JSON)
@@ -99,6 +115,32 @@ def test_seules_les_taches_fusionnees_relues_ready_sont_candidates(tmp_path: Pat
 
     assert [row["task_id"] for row in candidates] == [merged]
     assert candidates[0]["pr"] == 42
+
+
+def test_la_question_du_merger_se_reconnait_a_son_texte(tmp_path: Path) -> None:
+    """Le brief admet le texte seul : « Accepter <id> (PR #N fusionnée) ? » suffit, sans événement."""
+    repo = tmp_path / "projet"
+    repo.mkdir()
+    tid = _text_only_candidate(repo, "Candidate reconnue par le texte")
+
+    candidates = workspace_accept_merged.accept_merged_candidates(repo)
+
+    assert [row["task_id"] for row in candidates] == [tid]
+    assert candidates[0]["pr"] == 43
+
+
+def test_un_recu_illisible_n_est_pas_un_ready(tmp_path: Path) -> None:
+    repo = tmp_path / "projet"
+    repo.mkdir()
+    tid = _merged_candidate(repo, "Candidate au reçu illisible")
+    receipt = repo / "_grimoire-output/reviews" / tid / "review-receipt.json"
+    receipt.write_text("{pas du json", encoding="utf-8")
+
+    assert workspace_accept_merged.accept_merged_candidates(repo) == []
+
+
+def test_un_projet_sans_ledger_n_offre_aucune_candidate(tmp_path: Path) -> None:
+    assert workspace_accept_merged.accept_merged_candidates(tmp_path / "vide") == []
 
 
 def test_la_lecture_liste_les_candidates_pour_le_compteur(tmp_path: Path) -> None:
