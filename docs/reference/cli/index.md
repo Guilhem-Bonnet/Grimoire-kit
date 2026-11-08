@@ -23,4 +23,5 @@ Toutes les commandes disponibles via `grimoire [commande]`, rangées par outil, 
 | [La mise à jour](mise-a-jour.md) | `grimoire self update`, canaux et bundle hors ligne |
 | [Les flows](flows.md) | blueprints, flows, workflows, besoins d'exécution |
 | [Fournisseurs, routeur, file, pause et tick](fournisseurs.md) | le routage des modèles et l'exécution différée |
+| [Textes longs : résumé par le fournisseur le moins cher](digest.md) | `grimoire digest` : résumer journaux et transcripts, erreurs citées mot pour mot |
 | [Configuration, registre et divers](divers.md) | `config`, `self`, `registry`, options globales, sortie JSON, codes d'erreur |
