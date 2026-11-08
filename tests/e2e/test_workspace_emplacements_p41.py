@@ -18,8 +18,10 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterator
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -84,9 +86,26 @@ def _token(base: str) -> str:
     raise AssertionError("jeton de session absent des pages servies")
 
 
+@cache
+def _project_slug(base: str) -> str:
+    """Slug du projet ouvert, tel que ``/api/status`` le publie.
+
+    Depuis le lot 1 de l'écriture multi-projets, toute écriture exige
+    ``?project=<slug>`` : le serveur ne retombe plus sur la sélection courante
+    (état partagé entre onglets). Ces tests parlent au serveur en direct, sans
+    passer par ``withProject()``, donc ils doivent nommer la cible eux-mêmes.
+    """
+    with urllib.request.urlopen(f"{base}/api/status", timeout=30) as response:  # noqa: S310 - loopback
+        status = json.loads(response.read())
+    slug = str(status.get("project") or status.get("home") or "")
+    assert slug, f"projet ouvert sans slug : {status}"
+    return slug
+
+
 def _post(base: str, action: str, verb: str, body: dict[str, Any]) -> dict[str, Any]:
+    query = urllib.parse.urlencode({"project": _project_slug(base)})
     request = urllib.request.Request(  # noqa: S310 - loopback
-        f"{base}{_PREFIX}/{action}/{verb}", data=json.dumps(body).encode(), method="POST",
+        f"{base}{_PREFIX}/{action}/{verb}?{query}", data=json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json", "Origin": base, "Sec-Fetch-Site": "same-origin", "X-Grimoire-Session": _token(base)},
     )
     try:
