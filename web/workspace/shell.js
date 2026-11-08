@@ -2615,7 +2615,10 @@ async function buildPalette() {
   });
 
   const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
-    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks(), api.files()]);
+    // La palette ne lit que ``id``/``title`` : sans annotations (vivacité,
+    // coût, payload ``work`` des journaux de session, gates), la Flotte mount
+    // plus tôt — cet appel est sur son chemin critique (issue #1010).
+    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ annotations: 0 }), api.files()]);
 
   const catalogue = settle(commandsResult, {}).commands || [];
   consoleCatalogue = new Map(catalogue.map((c) => [c.key, { flags: new Set(c.flags || []), positionals: c.positionals || 0 }]));

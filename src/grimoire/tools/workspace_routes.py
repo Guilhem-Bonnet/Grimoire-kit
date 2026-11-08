@@ -186,8 +186,17 @@ def _host_probe() -> Mapping[str, str] | None:
 
 
 def _tasks(project_root: Path, query: _Query) -> Any:
+    # ``annotations=0`` (issue #1010) : la palette de commandes de la coque ne
+    # lit que ``id``/``title`` — inutile de payer la vivacité, les coûts, le
+    # payload ``work`` (journaux de session) et les gates à chaque amorçage.
+    raw = _one(query, "annotations")
+    annotations = raw is None or raw.strip().lower() not in ("0", "false", "no", "off")
     return workspace_api.tasks_view(
-        project_root, mission=_one(query, "mission"), status=_one(query, "status"), probe=_host_probe
+        project_root,
+        mission=_one(query, "mission"),
+        status=_one(query, "status"),
+        probe=_host_probe,
+        annotations=annotations,
     )
 
 
