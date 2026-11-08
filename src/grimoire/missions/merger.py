@@ -85,6 +85,7 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure
+from grimoire.missions.human_acceptance import EVIDENCE_RELPATH
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
 from grimoire.missions.reviewer import (
@@ -180,7 +181,7 @@ _GREEN_BUCKETS = frozenset({"pass", "skipping"})
 _TECHNICAL = ("could not resolve", "timeout", "timed out", "connection", "network", "http 5", "error connecting",
               "authentication", "gh auth login", "rate limit", "unexpected eof", "binaire introuvable", "délai")
 _PUSH_TIMEOUT_S = 600
-_EVIDENCE = Path("_grimoire-runtime-output") / "evidence"
+_EVIDENCE = EVIDENCE_RELPATH
 #: Les refs du tick : jamais ``refs/remotes/…``, que le worker peut écrire et que ``remote.*.fetch`` redirige.
 _TICK_REFS = "refs/grimoire/tick"
 #: Ce qui sort d'un texte que la PR contrôle avant d'entrer dans une question : contrôles, échappements, balisage.
@@ -1127,18 +1128,17 @@ class MergeStage:
             text = (f"Fusionner la PR #{pr} de {_clean(wt.branch, 80)} ? Le merger ne la fusionne pas : {safe}. Fusionne-la toi-même "
                     f"(`gh pr merge {pr} --squash`) si elle te convient : le tick constatera la fusion.")
         else:
+            # Commande complète : la preuve est dans le worktree, où le merger l'a écrite (#1169).
+            accept = f"grimoire task accept {tid} --project-root {wt.path} --evidence-root {wt.path / _EVIDENCE} --reason \"…\""
             text = (f"Accepter {tid} (PR #{pr} fusionnée) ? Le merger ne l'accepte pas : {safe}. Accepte-la toi-même : "
-                    f"`grimoire task accept {tid} --project-root {wt.path} --reason \"…\"`.")
+                    f"`{accept}`.")
         key = f"merger:{gesture}:{anchor}"
         try:
             if gesture == "merge":
                 title, command = "Fusionner cette pull request ?", f"gh pr merge {pr} --squash"
                 context, label = f"Le merger ne la fusionne pas : {safe}", "Fusionner la PR"
             else:
-                title, command = (
-                    "Accepter le travail livré ?",
-                    f'grimoire task accept {tid} --project-root {wt.path} --reason "…"',
-                )
+                title, command = "Accepter le travail livré ?", accept
                 context, label = f"La PR est fusionnée, le merger ne l'accepte pas : {safe}", "Accepter la tâche"
             spec = QuestionSpec(
                 text,

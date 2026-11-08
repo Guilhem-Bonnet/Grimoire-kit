@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import gzip
 import hashlib
+import json
 from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
@@ -45,12 +46,24 @@ def accepts_gzip(header: str | None) -> bool:
     return False
 
 
+def etag_of(body: bytes) -> str:
+    """L'``ETag`` d'un corps : l'empreinte de son contenu, entre guillemets (RFC 9110, forme forte)."""
+    return f'"{hashlib.blake2b(body, digest_size=16).hexdigest()}"'
+
+
+def if_none_match(headers: Any, etag: str) -> bool:
+    """Vrai si ``If-None-Match`` nomme *etag* (ou ``*``) ; sans l'en-tête, aucun match."""
+    candidates = headers.get("If-None-Match")
+    if not candidates:
+        return False
+    wanted = {c.strip().removeprefix("W/") for c in candidates.split(",")}
+    return "*" in wanted or etag in wanted
+
+
 def not_modified(headers: Any, etag: str, mtime: float) -> bool:
     """Validation conditionnelle : ``If-None-Match`` prime sur ``If-Modified-Since``."""
-    candidates = headers.get("If-None-Match")
-    if candidates:
-        wanted = {c.strip().removeprefix("W/") for c in candidates.split(",")}
-        return "*" in wanted or etag in wanted
+    if headers.get("If-None-Match"):
+        return if_none_match(headers, etag)
     since = headers.get("If-Modified-Since")
     if since:
         try:
@@ -58,6 +71,37 @@ def not_modified(headers: Any, etag: str, mtime: float) -> bool:
         except (TypeError, ValueError, OverflowError):
             return False
     return False
+
+
+def send_json(handler: Any, code: int, payload: dict[str, object], *, etag: bool = False) -> None:
+    """Réponse JSON du cockpit ; ``etag`` pose l'empreinte du corps et honore ``If-None-Match`` (304).
+
+    Le corps de la requête est lu en entier avant la première ligne de réponse (#857) ; la connexion est
+    ensuite fermée (``HTTP/1.0``), l'en-tête le dit au client, et le tampon est vidé avant que ``finish``
+    ne ferme le socket. L'``ETag`` porte sur le corps *décompressé* (GAO-perf-cockpit-002) : le client qui
+    le renvoie ne reçoit pas les 88 à 215 Ko inchangés ; ``Vary: Accept-Encoding`` dit que l'encodage varie.
+    """
+    handler._drain_unread_body()
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    tag = etag_of(body) if etag and code == 200 else ""
+    if tag and if_none_match(handler.headers, tag):
+        handler.send_response(304)
+        handler.send_header("ETag", tag)
+        handler.send_header("Vary", "Accept-Encoding")
+        handler.end_headers()
+        handler.wfile.flush()
+        return
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    if tag:
+        handler.send_header("ETag", tag)
+    body = gzip_body(handler, body)
+    handler.send_header("Content-Length", str(len(body)))
+    if handler.close_connection:  # le client l'a demandé (ou l'erreur de requête l'impose) : on le dit
+        handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.wfile.write(body)
+    handler.wfile.flush()
 
 
 def warm_sheet(root: Path) -> None:

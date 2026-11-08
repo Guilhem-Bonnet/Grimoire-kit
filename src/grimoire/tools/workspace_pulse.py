@@ -17,6 +17,12 @@ de vie : la vivacité se calcule avec l'horloge (``missions.liveness``), donc un
 session qui se tait passe de ``vivante`` à ``inactive`` sans qu'aucun fichier ne
 bouge. Sans ce terme, l'interface afficherait « vivante » indéfiniment.
 
+Elle couvre enfin les fichiers que le tick et les commandes hors cockpit écrivent
+et que ces vues lisent — le TraceLedger (replis d'usage, refus de gate), les
+journaux du moteur de flux, les packs d'évidence et les reçus de revue — pour
+qu'une écriture faite hors du cockpit fasse bouger l'empreinte, et donc jamais
+une lecture gardée (:mod:`grimoire.tools.workspace_read_cache`) ne la devance.
+
 Le compteur de décisions est la lecture de ``grimoire status`` et de la
 notification (:func:`grimoire.missions.decisions.pending_decisions`), pas une
 seconde définition. ``scope=portfolio`` agrège le registre du cockpit ; un projet
@@ -44,7 +50,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.standard_generation import PROPOSALS_DIR
+from grimoire.core.standard_generation import PROPOSALS_DIR, TRACES_DIR
 from grimoire.core.standard_state import LEDGER_RELPATH
 from grimoire.missions.lease import LEASES_DIRNAME, parse_instant
 from grimoire.tools.project_registry import load_registry, slug_for_path
@@ -89,6 +95,23 @@ def pulse_interval() -> int:
 
 _CONTENT_HASH_MAX_BYTES = 64 * 1024
 
+#: Le journal des traces (dispatch, agent-miss, replis d'usage, refus de gate) : ``tasks``,
+#: ``sessions`` et ``attention`` en lisent la queue à chaque requête. Écrit par le tick et par
+#: les hooks, jamais par le cockpit.
+TRACES_RELPATH = TRACES_DIR / "traces.jsonl"
+#: Les journaux du tick : le moteur de flux y écrit ses instances, événements et checkpoints,
+#: et une métadonnée de run par exécution ; ``attention`` et ``sheet`` les lisent.
+RUNTIME_RELPATH = Path("_grimoire-runtime-output") / "runtime"
+FLOWS_RELPATH = Path("_grimoire-runtime-output") / "flows"
+RUNTIME_JOURNALS = ("instances.jsonl", "run_events.jsonl", "checkpoints.jsonl")
+#: Ce que ``grimoire task verify`` et ``accept`` écrivent hors du cockpit : un pack ou un
+#: verdict change les conditions de gate affichées sur une carte.
+EVIDENCE_RELPATH = Path("_grimoire-runtime-output") / "evidence"
+EVIDENCE_JOURNALS = ("packs.jsonl", "verdicts.jsonl")
+#: Ce que le relecteur du tick écrit hors du cockpit : le reçu qui autorise ``review → accepted``.
+REVIEWS_RELPATH = Path("_grimoire-output") / "reviews"
+REVIEW_RECEIPT_NAME = "review-receipt.json"
+
 
 def _stat(path: Path) -> tuple[str, int, int, str] | None:
     try:
@@ -116,6 +139,19 @@ def _watched(root: Path) -> list[Path]:
     proposals = root / PROPOSALS_DIR
     if proposals.is_dir():
         files.extend(sorted(proposals.glob("*.yaml")))
+    # Hors du cockpit, le tick et les commandes humaines écrivent aussi : sans ces fichiers dans
+    # l'empreinte, une lecture gardée (page ouverte, direct) resservirait l'état d'avant.
+    files.append(root / TRACES_RELPATH)
+    runtime = root / RUNTIME_RELPATH
+    files.extend(runtime / name for name in RUNTIME_JOURNALS)
+    flows = root / FLOWS_RELPATH
+    if flows.is_dir():
+        files.extend(sorted(flows.glob("*.json")))
+    evidence = root / EVIDENCE_RELPATH
+    files.extend(evidence / name for name in EVIDENCE_JOURNALS)
+    reviews = root / REVIEWS_RELPATH
+    if reviews.is_dir():
+        files.extend(sorted(reviews.glob(f"*/{REVIEW_RECEIPT_NAME}")))
     return files
 
 
