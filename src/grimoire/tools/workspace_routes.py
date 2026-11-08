@@ -13,46 +13,21 @@ Les écritures sont ailleurs dans le même fichier, mais derrière une porte
 différente : :func:`workspace_post` reste agnostique de l'hôte appelant (il
 exécute pour le ``project_root`` qu'on lui donne, un point c'est tout), mais
 qui a le droit de l'appeler ne l'est pas. L'atelier le câble sans condition.
-Le cockpit (``cmd_cockpit.py::_CockpitHandler.do_POST``) ne le câble que pour
-le projet qu'il sert en direct — ``_HOME_SLUG``, résolu une fois au lancement,
-jamais pour un autre projet du registre qu'on ne fait que regarder (#351/#356).
-Lui donner de quoi réclamer une tâche ou créer un override dans un dépôt qu'il
-ne sert pas serait une régression de gouvernance, pas une commodité.
+Le cockpit (``cmd_cockpit.py::_CockpitHandler.do_POST``) exige un projet
+ENRÔLÉ, nommé par ``?project=`` et résolu par le registre seul : un seul
+cockpit écrit donc sur toute sa flotte, pas seulement sur le projet qu'il a
+ouvert (lot 1 de l'écriture multi-projets, 2026-11-07).
 
-Une exception nommée à cette règle (issue #490) : décider une proposition
-(``proposals/<slug>/accept|reject``, voir :func:`is_proposal_decision`). La
-doctrine du déclencheur (:mod:`grimoire.proposals`) est « proposée puis
-validée, jamais automatique » — le cockpit est précisément l'endroit où
-l'humain qui pilote une flotte valide, y compris pour un projet qu'il ne fait
-que regarder via le registre. C'est la même porte que
-``POST /api/projects/update`` (le bouton « Mettre à jour ») ouvre déjà pour
-n'importe quel projet du registre : une décision explicite sur un artefact
-proposé n'est pas une mutation plus dangereuse qu'un ``grimoire up`` distant.
+Trois écritures restent réservées au projet d'ouverture (lot 2) : écrire un
+fichier, créer un override et lancer une commande — voir
+:func:`is_opening_project_only_write`. Leur résolution multi-projets n'est pas
+encore décidée.
 
-Deuxième exception nommée, même précédent (issue #559 suite, #560) : migrer
-les tâches d'un board du standard vers le Mission Ledger
-(``tasks/migrate-standard``, voir :func:`is_registry_scoped_write`). Le
-cockpit pilote une flotte — jongler entre plusieurs projets déjà enrôlés — et
-cette migration est le même genre de geste explicite et ponctuel que mettre à
-jour ou décider une proposition, jamais une écriture continue comme réclamer
-une tâche. Elle suit donc la même route de résolution que
-``POST /api/projects/update`` (le registre, jamais un chemin libre fourni par
-le client) plutôt que la garde ``_HOME_SLUG``.
-
-Troisième exception nommée (issue #638, lot C) : agir sur une tâche depuis le
-**portefeuille** (``portfolio/tasks/<id>/<action>``, voir
-:func:`is_registry_scoped_write`). L'orchestrateur humain pilote depuis le
-cockpit les chantiers de tous les projets du registre — prioriser, bloquer,
-annuler une tâche d'un projet qu'il ne fait que regarder est précisément ce
-que le portefeuille existe pour permettre. L'action est routée vers le projet
-propriétaire (``?project=<slug>``, résolu par le registre comme
-``POST /api/projects/update``) et passe par le ``TaskService`` de CE projet,
-gate de preuve compris ; un ``project`` du corps qui ne confirme pas la
-racine résolue est refusé. Le chemin historique ``tasks/<id>/<action>`` reste
-``_HOME_SLUG`` seulement.
-
-Le reste de :data:`POST_ROUTES` — écrire un fichier, réclamer une tâche par le
-chemin historique, créer un override — reste ``_HOME_SLUG`` : chaque dérogation est nommée.
+Les anciennes dérogations nommées (décider une proposition, #490 ; migrer un
+board, #559/#560 ; agir depuis le portefeuille, #638) gardent leur sens comme
+CONTRAT de corps : le ``project`` du corps, quand il est présent, doit
+confirmer le slug de l'URL. Elles ne dérogent plus à rien — la porte générale
+est déjà ouverte à tout projet enrôlé.
 
 Le flux du pouls (``GET /api/workspace/stream``, P10) n'est pas une entrée de
 :data:`GET_ROUTES` (charge utile) mais un flux sans fin : :func:`workspace_stream`
@@ -108,6 +83,7 @@ __all__ = [
     "STREAM_HEADERS",
     "STREAM_PATH",
     "WORKSPACE_UNHANDLED",
+    "is_opening_project_only_write",
     "is_proposal_decision",
     "is_registry_scoped_write",
     "workspace_get",
@@ -118,6 +94,31 @@ __all__ = [
 #: Tout ce que la vue de travail ajoute vit sous ce préfixe : aucune collision
 #: possible avec les routes héritées, et un seul `startswith` à câbler par hôte.
 PREFIX = "/api/workspace/"
+
+#: Écritures qui restent réservées au projet d'ouverture du cockpit (lot 2).
+#: Le lot 1 ouvre les autres à tout projet enrôlé ; ces trois-là touchent des
+#: fichiers ou lancent un processus hors du contrat « tâche/proposition » et
+#: gardent la garde historique tant que leur cible multi-projets n'est pas
+#: décidée.
+OPENING_PROJECT_ONLY_WRITES = frozenset(
+    {
+        f"{PREFIX}command",
+        f"{PREFIX}file/override",
+        f"{PREFIX}file/write",
+    }
+)
+
+
+def is_opening_project_only_write(path: str) -> bool:
+    """Vrai pour une écriture encore réservée au projet d'ouverture (lot 2).
+
+    Le cockpit résout désormais toute autre écriture de la vue de travail par
+    le registre (``_is_enrolled_write_target``) : un projet enrôlé, même
+    seulement regardé, accepte une réclamation de tâche ou une décision de
+    proposition. ``file/write``, ``file/override`` et ``command`` restent à
+    part en attendant leur propre résolution multi-projets.
+    """
+    return path in OPENING_PROJECT_ONLY_WRITES
 
 #: Sentinelle, même contrat que ``forge_routes.API_GET_UNHANDLED`` : distingue
 #: « chemin inconnu » d'une route qui rendrait légitimement ``None``.
@@ -891,9 +892,10 @@ def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:
     Même moteur que ``grimoire task migrate-standard`` (`missions.task_unification`,
     lot 4.1 1/3) : idempotent, réversible par instantané horodaté — jamais
     exposé ici, la restauration reste un geste CLI délibéré. ``project_root``
-    est déjà résolu par l'appelant (le registre, via :func:`is_registry_scoped_write`
-    côté cockpit — issue #559 suite, #560) : n'importe quel projet du
-    registre, pas seulement celui de lancement direct.
+    est déjà résolu par l'appelant (le registre, via la garde des projets
+    enrôlés côté cockpit — issue #559 suite, #560 ; lot 1 de l'écriture
+    multi-projets) : n'importe quel projet du registre, pas seulement celui de
+    lancement direct.
     """
     from grimoire.missions.task_unification import migrate_standard_tasks
 
@@ -1365,20 +1367,14 @@ def _portfolio_action_route(path: str) -> tuple[str, str] | None:
 
 def is_registry_scoped_write(path: str) -> bool:
     """Vrai pour ``tasks/migrate-standard`` et pour une action du portefeuille
-    ``portfolio/tasks/<id>/<claim|move|block|close>`` — dérogations nommées à
-    ``_HOME_SLUG``.
+    ``portfolio/tasks/<id>/<claim|move|block|close>``.
 
-    Même famille que :func:`is_proposal_decision` (issue #490) : le point
-    d'entrée que ``cmd_cockpit.py`` interroge pour ouvrir, pour ces écritures
-    précises, la même porte que ``POST /api/projects/update`` plutôt que la
-    garde ``_HOME_SLUG`` générale (issue #559 suite, #560, voir le docstring
-    du module). Migrer un board du standard vers le Mission Ledger est un
-    geste explicite et ponctuel sur un projet du registre qu'on pilote depuis
-    la flotte ; agir sur une carte depuis le portefeuille (issue #638, lot C)
-    est le geste même de l'orchestrateur humain sur sa flotte — le
-    ``TaskService`` du projet propriétaire garde la transition. Réclamer une
-    tâche ou écrire un fichier par les chemins historiques reste soumis à la
-    garde générale.
+    Historiquement, les dérogations nommées à la garde ``_HOME_SLUG`` (issue
+    #559 suite, #560, #638). Depuis le lot 1 de l'écriture multi-projets,
+    toutes ces routes passent par la porte commune des projets enrôlés ; le
+    prédicat reste le point d'entrée qui nomme ces écritures et les tests
+    s'en servent pour les distinguer. Le ``TaskService`` du projet
+    propriétaire garde la transition.
     """
     return path == f"{PREFIX}tasks/migrate-standard" or _portfolio_action_route(path) is not None
 

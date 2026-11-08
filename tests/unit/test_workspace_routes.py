@@ -6,14 +6,12 @@ route honore la cible**. Deux projets réels sont initialisés, servis par les
 deux hôtes en même temps, et chaque lecture doit répondre pour le projet qu'on
 lui a désigné — jamais pour l'autre, jamais pour « le dernier sélectionné ».
 
-Le second volet est le contraire : le cockpit se déclare ``readOnly`` — sauf
-pour le projet qu'il sert en direct (``_HOME_SLUG``, résolu au lancement
-depuis le dossier courant, #351/#356 : fusionner ``serve`` dans ``cockpit
-serve`` ne devait pas retirer la capacité d'écrire depuis ce projet-là). Les
-écritures de la vue de travail (réclamer une tâche, prendre un override,
-lancer une commande) restent donc refusées sur tout AUTRE projet du registre —
-celui qu'on ne fait que regarder — mais honorées sur le projet de lancement,
-exactement comme sur l'hôte mono-projet historique.
+Le second volet est le contraire : le cockpit n'est en lecture seule que sur
+une cible qu'il ne peut pas résoudre. Depuis le lot 1 de l'écriture
+multi-projets (2026-11-07), tout projet ENRÔLÉ accepte une écriture, même
+s'il n'est pas le projet d'ouverture (``_HOME_SLUG``, résolu au lancement) ;
+seules ``file/write``, ``file/override`` et ``command`` restent réservées à ce
+projet d'ouverture (lot 2).
 """
 
 from __future__ import annotations
@@ -25,6 +23,7 @@ from collections.abc import Iterator
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,24 +35,13 @@ from grimoire.tools.workspace_routes import (
     GET_ROUTES,
     POST_ROUTES,
     PREFIX,
+    is_opening_project_only_write,
     is_proposal_decision,
     is_registry_scoped_write,
     workspace_get,
 )
 
 from . import _cockpit_http
-
-#: Routes de :data:`POST_ROUTES` qui suivent la même dérogation nommée que
-#: les décisions de proposition (:func:`is_proposal_decision`) plutôt que la
-#: garde ``_HOME_SLUG`` générale — voir :func:`is_registry_scoped_write`
-#: (issue #559 suite, #560). Contrairement aux décisions de proposition
-#: (chemin dynamique ``proposals/<slug>/accept|reject``, jamais une entrée
-#: fixe de la table), celle-ci EST une entrée de :data:`POST_ROUTES` : les
-#: deux tests paramétrés sur cette table doivent l'exclure explicitement pour
-#: ne pas prouver le contraire de ce que #560 vient d'ouvrir.
-_REGISTRY_SCOPED_POST_ROUTES = frozenset(
-    route for route in POST_ROUTES if is_registry_scoped_write(route)
-)
 
 # Les lectures sans paramètre obligatoire : celles qu'on peut interroger telles
 # quelles sur les deux hôtes. `file`, `file/diff`, `file/usage` et
@@ -186,48 +174,51 @@ def test_un_projet_inconnu_est_refuse_par_le_cockpit(cockpit: int) -> None:
     assert code == 404
 
 
-# ── 2. Les écritures n'existent que sur le projet de lancement ──────────────
+# ── 2. Les écritures visent un projet enrôlé, sauf trois réservées ──────────
 
 
-@pytest.mark.parametrize("route", sorted(set(POST_ROUTES) - _REGISTRY_SCOPED_POST_ROUTES))
-def test_le_cockpit_refuse_les_ecritures_sur_un_projet_qu_il_ne_lance_pas(
+def _is_guard_refusal(payload: dict[str, Any]) -> bool:
+    return payload.get("error") == "hôte en lecture seule"
+
+
+@pytest.mark.parametrize("route", sorted(POST_ROUTES))
+def test_le_cockpit_ecrit_sur_tout_projet_enrole_sauf_les_trois_reservees(
     route: str, cockpit: int
 ) -> None:
-    """Le cockpit se déclare `readOnly` — sauf sur son projet de lancement.
+    """Lot 1 de l'écriture multi-projets : tout projet ENRÔLÉ est inscriptible.
 
-    Cette fixture n'en a pas (`_select_cwd_project` n'a jamais tourné) : les
-    deux projets du registre sont donc de simples entrées qu'on regarde, pas
-    celui qu'on sert en direct. Réclamer une tâche ou créer un override dans
-    l'un ou l'autre resterait une régression de gouvernance — la route
-    EXISTE désormais des deux côtés (#356), le refus est donc un 403, plus
-    précis que le 404 d'avant sa fusion dans `cockpit serve` (#351).
-
-    Exclut `_REGISTRY_SCOPED_POST_ROUTES` (`tasks/migrate-standard`, #560) :
-    cette route-là suit délibérément la porte inverse, prouvée par la section
-    3bis plus bas.
+    Cette fixture n'a pas de projet d'ouverture (`_select_cwd_project` n'a
+    jamais tourné) : `projet-a` et `projet-b` sont deux entrées du registre,
+    et le cockpit doit pourtant accepter d'écrire chez elles. Seules les
+    écritures de :data:`OPENING_PROJECT_ONLY_WRITES` (lot 2) gardent la garde
+    historique — un 403 nommé, pas le refus métier de la route.
     """
-    code, _ = _post(cockpit, f"{route}?project=projet-a", {"path": "x", "argv": ["version"]})
+    code, payload = _post(cockpit, f"{route}?project=projet-a", {"path": "x", "argv": ["version"]})
 
-    assert code == 403
+    if is_opening_project_only_write(route):
+        assert code == 403
+        assert _is_guard_refusal(payload)
+    else:
+        assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
 
 
-@pytest.mark.parametrize("route", sorted(set(POST_ROUTES) - _REGISTRY_SCOPED_POST_ROUTES))
-def test_le_cockpit_refuse_toujours_l_autre_projet_meme_avec_un_lancement_direct(
+@pytest.mark.parametrize("route", sorted(POST_ROUTES))
+def test_l_autre_projet_enrole_reste_inscriptible_meme_avec_un_lancement_direct(
     route: str, cockpit_home: int
 ) -> None:
-    """`cockpit_home` sert `projet-a` en direct — mais pas `projet-b`.
+    """`cockpit_home` sert `projet-a` en direct — et `projet-b` reste inscriptible.
 
-    Le pilier de la garantie #356 : avoir UN projet ouvert en écriture ne rend
-    pas le cockpit généralement inscriptible. Un clic malheureux sur une autre
-    carte du registre ne doit jamais écrire là où l'utilisateur ne fait que
-    regarder.
-
-    Exclut `_REGISTRY_SCOPED_POST_ROUTES` pour la même raison que le test
-    ci-dessus.
+    Le lot 1 a remplacé la garde « projet d'ouverture » par « projet enrôlé » :
+    un cockpit ouvert sur `projet-a` n'est plus le seul à pouvoir écrire. Seules
+    les trois écritures réservées au lot 2 répondent encore « lecture seule ».
     """
-    code, _ = _post(cockpit_home, f"{route}?project=projet-b", {"path": "x", "argv": ["version"]})
+    code, payload = _post(cockpit_home, f"{route}?project=projet-b", {"path": "x", "argv": ["version"]})
 
-    assert code == 403
+    if is_opening_project_only_write(route):
+        assert code == 403
+        assert _is_guard_refusal(payload)
+    else:
+        assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
 
 
 def test_le_cockpit_execute_une_commande_de_la_liste_blanche_sur_son_projet_de_lancement(
@@ -671,23 +662,22 @@ def test_une_transition_refusee_nomme_la_preuve_manquante_via_le_cockpit(
     assert all(r["remedy"] for r in payload["refusals"]), "chaque refus nomme aussi un remède"
 
 
-def test_une_transition_de_tache_est_refusee_hors_projet_de_lancement(
+def test_une_transition_de_tache_sur_un_autre_projet_enrole_est_autorisee(
     tasks_home: tuple[int, Path],
 ) -> None:
-    """Le pilier #356 vu depuis les tâches : ``projet-tasks-away`` n'est qu'un
-    projet du registre que ce cockpit regarde, jamais celui qu'il sert en
-    direct — la carte ne doit pas bouger, gate rouge ou pas. Le corps cible
-    délibérément une tâche qui n'existe même pas dans ``projet-tasks-away`` :
-    le refus doit intervenir avant toute résolution de tâche, sur la seule
-    base du projet visé.
+    """Lot 1 : ``projet-tasks-away`` n'est plus « seulement regardé ».
+
+    La garde pose la racine du projet enrôlé, puis le ``TaskService`` de CE
+    projet répond — ici 404 parce que la tâche n'existe pas chez lui. Un 403
+    « lecture seule » signalerait que la garde n'a pas été ouverte.
     """
     port, _home_root = tasks_home
     code, payload = _post(
         port, f"{PREFIX}tasks/GAO-quelconque-001/move?project=projet-tasks-away", {"to": "ready"}
     )
 
-    assert code == 403
-    assert "lecture seule" in payload["error"].lower()
+    assert code == 404, payload
+    assert "lecture seule" not in payload["error"].lower()
 
 
 def test_un_mouvement_de_tache_vers_un_etat_inconnu_est_un_400(
@@ -778,28 +768,27 @@ def test_post_migrate_standard_fonctionne_sur_un_projet_du_registre_hors_lanceme
     assert away_service.has_ledger
 
 
-def test_post_migrate_standard_sur_un_slug_inconnu_est_un_404(cockpit: int) -> None:
-    """Même résolution que `POST /api/projects/update` : un slug absent du
-    registre est un 404 explicite, jamais une écriture au hasard sur le
-    premier projet venu."""
+def test_post_migrate_standard_sur_un_slug_inconnu_est_refuse(cockpit: int) -> None:
+    """Le slug sert de clé au registre : absent, aucune racine n'est résolue.
+
+    Depuis le lot 1, la garde commune des écritures répond 403 « lecture
+    seule » — le même refus fermé que pour tout slug inconnu — au lieu de
+    laisser la route résoudre elle-même un 404.
+    """
     code, payload = _post(cockpit, f"{PREFIX}tasks/migrate-standard?project=projet-fantome", {})
 
-    assert code == 404
-    assert "inconnu" in payload["error"].lower()
+    assert code == 403
+    assert "lecture seule" in payload["error"].lower()
 
 
 def test_post_migrate_standard_sur_un_slug_malforme_reste_refuse(cockpit: int) -> None:
-    """Un slug qui ne peut correspondre à aucune entrée du registre (forme
-    invalide au sens de `SLUG_RE`, `forge_server.py`) ne trouve jamais de
-    correspondance dans `_resolve_project_path` : le refus reste un 404
-    (« projet inconnu »), jamais une exception non attrapée ni une écriture
-    sur le mauvais projet — 400 aurait été acceptable aussi, mais un slug mal
-    formé n'a jamais de raison de se résoudre vers un projet réel."""
+    """Un slug qui ne correspond à aucune entrée du registre est refusé, jamais
+    résolu vers un projet réel ni laissé lever une exception non attrapée."""
     code, payload = _post(
         cockpit, f"{PREFIX}tasks/migrate-standard?project=Not_a-Valid--Slug!", {}
     )
 
-    assert code in (400, 404)
+    assert code == 403
     assert payload.get("error")
 
 
@@ -935,25 +924,27 @@ def test_post_portfolio_avec_un_projet_du_corps_qui_ne_correspond_pas_est_refuse
     assert TaskService(second_project).require(task_id).status.value == "ready"
 
 
-def test_le_chemin_historique_des_actions_reste_home_slug_seulement(
+def test_le_chemin_historique_des_actions_ecrit_sur_tout_projet_enrole(
     cockpit_home: int, second_project: Path
 ) -> None:
+    """Lot 1 : le chemin historique ``tasks/<id>/<action>`` n'est plus réservé
+    au projet d'ouverture — c'est l'écriture même que la vue de travail émet
+    quand on réclame ou bloque une tâche depuis la Flotte."""
     task_id = _open_ready_task(second_project, "Tâche hors portefeuille")
 
-    code, _ = _post(cockpit_home, f"{PREFIX}tasks/{task_id}/block?project=projet-b", {"reason": "x"})
+    code, payload = _post(cockpit_home, f"{PREFIX}tasks/{task_id}/block?project=projet-b", {"reason": "x"})
 
-    assert code == 403
+    assert code == 200, payload
 
 
-def test_post_portfolio_action_inconnue_n_est_pas_une_derogation(cockpit_home: int) -> None:
-    """Une action hors `TASK_ACTIONS` sous le préfixe du portefeuille ne
-    dérobe rien à la garde générale : 403 sur le projet seulement regardé,
-    404 (« route inconnue ») sur le projet de lancement."""
+def test_post_portfolio_action_inconnue_reste_un_404(cockpit_home: int) -> None:
+    """Une action hors `TASK_ACTIONS` sous le préfixe du portefeuille ne dérobe
+    rien : la table ne la connaît pas, et la résolution enrôlée ne la fait pas
+    exister non plus — 404 « route inconnue » sur les deux projets."""
     code_away, _ = _post(cockpit_home, f"{PREFIX}portfolio/tasks/GAO-x-001/teleport?project=projet-b", {})
     code_home, _ = _post(cockpit_home, f"{PREFIX}portfolio/tasks/GAO-x-001/teleport?project=projet-a", {})
 
-    assert code_away == 403
-    assert code_home == 404
+    assert (code_away, code_home) == (404, 404)
 
 
 @pytest.mark.parametrize(

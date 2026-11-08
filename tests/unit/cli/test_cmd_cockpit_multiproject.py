@@ -131,13 +131,30 @@ def test_select_rejects_an_unknown_project(duo_server: Any) -> None:
     assert body["ok"] is False
 
 
-def test_status_advertises_a_read_only_host(duo_server: Any) -> None:
-    """The UI must know it is on the cockpit, so it stops offering mutations."""
+def test_status_advertises_a_writable_enrolled_project(duo_server: Any) -> None:
+    """Lot 1 : un projet enrôlé n'est plus en lecture seule, même s'il n'est
+    pas celui que le cockpit a ouvert. L'UI peut cesser de masquer les gestes
+    d'écriture dès qu'un projet du registre est ciblé."""
     port, _alpha, _beta = duo_server
     _status, body = _get_api(port, "/api/status")
     assert body["host"] == "cockpit"
-    assert body["readOnly"] is True
+    assert body["readOnly"] is False
     assert body["project"] == "alpha"
+
+    _status, foreign = _get_api(port, "/api/status?project=beta")
+    assert foreign["readOnly"] is False
+    assert foreign["project"] == "beta"
+
+
+def test_status_is_read_only_for_a_project_outside_the_registry(duo_server: Any) -> None:
+    """``readOnly`` veut désormais dire « projet absent du registre (ou dossier
+    disparu) » : le statut reste servi, en lecture seule, au lieu d'un 404 qui
+    ferait croire l'API injoignable."""
+    port, _alpha, _beta = duo_server
+    status, body = _get_api(port, "/api/status?project=ghost")
+    assert status == 200
+    assert body["readOnly"] is True
+    assert body["project"] == "ghost"
 
 
 def test_unknown_api_path_is_404_not_a_static_probe(duo_server: Any) -> None:
@@ -394,7 +411,7 @@ def test_portfolio_action_on_an_unregistered_project_is_refused_and_writes_nothi
             "/api/workspace/portfolio/tasks/T-1/claim?project=" + urllib.parse.quote(key, safe=""),
             {"project": key, "actor": "x"},
         )
-        assert status == 404, key
+        assert status == 403, key  # la garde exige un slug ENRÔLÉ, jamais un chemin
     assert files() == before
     assert not list(tmp_path.rglob("events.jsonl"))
     assert alpha.is_dir() and beta.is_dir()

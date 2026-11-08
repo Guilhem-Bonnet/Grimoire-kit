@@ -300,12 +300,15 @@ def test_a_foreign_page_with_the_token_still_writes_nothing(
     assert _slugs() == ["servi", "voisin", "disparu"]
 
 
-def test_a_task_for_another_project_than_the_served_one_is_refused(server: dict[str, Any]) -> None:
+def test_a_task_for_another_enrolled_project_lands_there(server: dict[str, Any]) -> None:
+    """Lot 1 : `tasks/add` sur `voisin` n'est plus refusé — la tâche est
+    créée dans la racine du projet visé, pas dans celle du projet servi."""
     status, body = _cockpit_http.post(
         server["port"], f"{TASK_ADD}?project=voisin", {"title": "t", "acceptance": ["a"]},
     )
-    assert status == 403 and body["error"] == "hôte en lecture seule"
-    assert _tasks(server["other"]) == [] and _tasks(server["served"]) == []
+    assert status == 200, body
+    assert [t.title for t in _tasks(server["other"])] == ["t"]
+    assert _tasks(server["served"]) == []
 
 
 # ── 5. Boîte à idées (I13) : les trois routes d'écriture suivent la même garde ──────────────
@@ -326,10 +329,18 @@ def test_an_idea_write_without_the_session_token_writes_nothing(server: dict[str
 
 
 @pytest.mark.parametrize("path", IDEA_POSTS)
-def test_an_idea_write_is_absent_on_a_read_only_host(server: dict[str, Any], path: str) -> None:
-    status, body = _cockpit_http.post(server["port"], f"{path}?project=voisin", {"text": "une idée", "id": "IDEA-0001"})
-    assert status == 403 and body["error"] == "hôte en lecture seule"
-    assert not _ideas_file(server["other"]).exists() and not _ideas_file(server["served"]).exists()
+def test_an_idea_write_reaches_another_enrolled_project(server: dict[str, Any], path: str) -> None:
+    """Lot 1 : les écritures d'idées ne sont plus réservées au projet servi.
+    `add` réussit chez `voisin` ; `drop`/`promote` y répondent pour leur
+    propre raison métier (id inconnu → 400), jamais « lecture seule »."""
+    status, body = _cockpit_http.post(
+        server["port"], f"{path}?project=voisin", {"text": "une idée", "id": "IDEA-0001"}
+    )
+    assert not (status == 403 and body.get("error") == "hôte en lecture seule"), body
+    if path.endswith("/add"):
+        assert status == 200
+        assert _ideas_file(server["other"]).exists()
+        assert not _ideas_file(server["served"]).exists()
 
 
 def test_an_idea_write_on_the_served_project_goes_through(server: dict[str, Any]) -> None:
