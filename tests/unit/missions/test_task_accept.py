@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+from lot2_doubles import make_repo
 from typer.testing import CliRunner
 
 from grimoire.cli import cmd_task
@@ -19,9 +20,10 @@ from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.evidence.schemas import VerdictResult
 from grimoire.evidence.service import EvidenceService
-from grimoire.missions.human_acceptance import accept_task
+from grimoire.missions.human_acceptance import accept_task, acceptance_roots
 from grimoire.missions.schemas import ORIGIN_AGENT, ORIGIN_HUMAN, TaskState
 from grimoire.missions.service import TaskService
+from grimoire.missions.task_worktree import create_task_worktree
 
 ACC = ("la PR est fusionnée", "la CI est verte sous Windows")
 STANDARD = Path("_grimoire/standard")
@@ -150,3 +152,49 @@ def test_service_accept_without_a_reason_closes_nothing(governed: Path) -> None:
     with pytest.raises(ValueError, match="--reason"):
         TaskService(governed).accept(tid, "   ", "guilhem", origin=ORIGIN_HUMAN)
     assert TaskService(governed).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+# ── #1169 : le pack est dans le worktree de la tâche, pas à la racine du projet ─
+
+
+def _worktree_in_review(tmp_path: Path) -> tuple[Path, str, Path]:
+    """Une tâche revue dont le pack n'existe que dans son worktree — ce qu'un worker lancé par le tick laisse."""
+    repo = make_repo(tmp_path)
+    service = TaskService(repo)
+    tid = service.add("Correctif livré en worktree", ACC, owner="guilhem", actor="claude", ready=True).task.id
+    service.context(tid)
+    service.claim(tid, "claude")
+    service.transition(tid, TaskState.RUNNING, "claude")
+    wt = create_task_worktree(service, tid, repo=repo).path
+    (wt / "preuve.md").write_text("# PR fusionnée, CI verte\n", encoding="utf-8")
+    verified = runner.invoke(app, ["task", "verify", tid, "--project-root", str(wt), "--evidence", "preuve.md"])
+    assert verified.exit_code == 4, verified.output
+    service.transition(tid, TaskState.NEEDS_VERIFICATION, "claude")
+    assert not (repo / EVIDENCE / "packs.jsonl").exists()  # le pack n'est QUE dans le worktree
+    return repo, tid, wt
+
+
+def test_cli_accept_from_the_project_root_reads_the_pack_left_in_the_task_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1169 : `task accept <id>` lancé à la racine trouve le pack que le merger a écrit dans le worktree."""
+    repo, tid, wt = _worktree_in_review(tmp_path)
+    monkeypatch.setattr(cmd_task, "_comment_origin", lambda: ORIGIN_HUMAN)
+
+    result = runner.invoke(
+        app, ["task", "accept", tid, "--reason", "relu", "--project-root", str(repo), "--actor", "guilhem"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert TaskService(repo).require(tid).status is TaskState.CLOSED
+    pack = EvidenceService(wt / EVIDENCE).list_packs(tid)[-1]
+    assert pack.coverage is not None and not pack.coverage.acceptance_missing
+    assert any(item.uri == "human:guilhem" for item in pack.items)  # l'attestation est allée là où le pack vivait
+
+
+def test_acceptance_roots_falls_back_to_the_project_root_without_a_pack_in_the_worktree(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    service = TaskService(repo)
+    tid = service.add("Sans pack dans son worktree", ACC, owner="guilhem", actor="claude", ready=True).task.id
+    create_task_worktree(service, tid, repo=repo)
+    assert acceptance_roots(service, tid) == (repo / EVIDENCE, repo)

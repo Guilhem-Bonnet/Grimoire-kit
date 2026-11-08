@@ -205,25 +205,35 @@ def register(task_app: typer.Typer) -> None:
         project_root: _PROJECT_ROOT = Path(),
         ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
         evidence_root: Annotated[
-            Path, typer.Option("--evidence-root", help="Racine de l'EvidenceService.")
-        ] = Path("_grimoire-runtime-output/evidence"),
+            Path | None,
+            typer.Option(
+                "--evidence-root",
+                help="Racine de l'EvidenceService (défaut : le worktree noté de la tâche s'il porte le pack, sinon le projet).",
+            ),
+        ] = None,
         actor: _ACTOR = "cli",
     ) -> None:
         """Accepte la preuve déclarative d'une tâche en revue — canal humain seulement — puis la ferme (#865)."""
         from grimoire.core.exceptions import GrimoireError
-        from grimoire.missions.human_acceptance import accept_task
+        from grimoire.missions.human_acceptance import accept_task, acceptance_roots
+        from grimoire.missions.mandate import gesture_origin
         from grimoire.missions.schemas import TaskState
 
         service = ct._service(project_root, ledger_root)
         task = ct._require_task(service, task_id)
         root = project_root.resolve()
-        from grimoire.missions.mandate import gesture_origin
+        if evidence_root is None:
+            # Le merger range le pack dans le worktree de la tâche : le lire là, comme lui, même lancé de la racine (#1169).
+            resolved_evidence, proof_root = acceptance_roots(service, task_id)
+        else:
+            resolved_evidence = evidence_root if evidence_root.is_absolute() else root / evidence_root
+            proof_root = root
 
         origin, provenance = gesture_origin(ct._comment_origin())
         try:
             outcome = accept_task(
-                task, root, evidence_root if evidence_root.is_absolute() else root / evidence_root, reason, actor,
-                origin=origin, provenance=provenance,
+                task, root, resolved_evidence, reason, actor,
+                origin=origin, provenance=provenance, proof_root=proof_root,
             )
         except (GrimoireError, ValueError) as exc:
             console.print(f"[red]✗[/red] {exc}")
@@ -241,7 +251,9 @@ def register(task_app: typer.Typer) -> None:
                 f"{outcome.verdict.created_by}), pack {outcome.pack.id}"
             )
         if close:
-            ct._transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
+            # La clôture relit la preuve et le reçu là où l'acceptation vient de les écrire : dans le
+            # worktree noté, un TaskService posé là retrouve le ledger du projet par son marqueur.
+            ct._transition(ctx, task_id, TaskState.CLOSED, proof_root, ledger_root, actor)
 
     @task_app.command("wait")
     def task_wait(

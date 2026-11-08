@@ -659,7 +659,9 @@ def test_sans_mandat_une_question_non_bloquante_puis_l_humain_fusionne_et_accept
     [merged] = events(projet, tid, MERGED_EVENT)
     assert merged.payload["origin"] == "remote" and merged.payload["mandate_id"] == ""
     accept_q = questions(projet, tid)[-1]
+    # #1169 : la commande est complète — la preuve est dans le worktree, où le merger l'a écrite.
     assert accept_q.text.startswith(f"Accepter {tid}") and f"--project-root {wt}" in accept_q.text
+    assert f"--evidence-root {wt / EVIDENCE}" in accept_q.text
     assert accept_q.title == "Accepter le travail livré ?" and tid not in accept_q.title and tid not in accept_q.context
     task = TaskService(wt).require(tid)
     accept_task(task, wt, wt / EVIDENCE, "relu et fusionné", "guilhem", origin=ORIGIN_HUMAN)  # ce que `task accept` fait
