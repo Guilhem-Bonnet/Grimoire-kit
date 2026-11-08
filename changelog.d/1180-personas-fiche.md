@@ -1,0 +1,1 @@
+- fix(hosts): deux personas au même faisceau (outils, contexte, skills) restent distinctes quand leur corps (fiche) diffère — le refus « même faisceau et même fiche » ne frappe plus que des définitions réellement identiques (corps normalisé, ou description à défaut de corps) (#1180)

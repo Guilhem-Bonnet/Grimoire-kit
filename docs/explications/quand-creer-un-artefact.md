@@ -94,9 +94,10 @@ artefact à documenter de force : voir le test des deux questions ci-dessus.
   n'appartenait à personne : dix skills livrés, zéro rattaché. Les prompts restent transversaux :
   ils ne se chargent qu'à l'invocation, leur rattachement n'a pas d'enjeu économique.
   Voir `tests/unit/test_skill_attachment_cost.py` pour la mesure chiffrée (tokens par tour, avec
-  et sans attachement) et `AgentSpec.fingerprint()` / `duplicate_agent_fingerprints()`
-  (`src/grimoire/hosts/surface.py`) pour la garde qui interdit à deux agents de déclarer le même
-  faisceau outils + contexte + skills.
+  et sans attachement) et `AgentSpec.identity_fingerprint()` /
+  `duplicate_agent_fingerprints()` (`src/grimoire/hosts/surface.py`) pour la garde qui interdit à
+  deux agents de déclarer le même faisceau outils + contexte + skills **et** la même fiche
+  (corps normalisé, ou description à défaut de corps — voir #1180).
 
 ## Vérification
 

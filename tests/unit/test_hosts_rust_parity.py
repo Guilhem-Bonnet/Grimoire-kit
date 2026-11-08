@@ -270,14 +270,26 @@ def test_model_affinity_present_null_is_not_the_absent_default() -> None:
 # ── AgentSpec.fingerprint / duplicate_agent_fingerprints / build_surface ───
 
 
-def _agent(name: str, tools: tuple[ToolVerb, ...]) -> AgentSpec:
-    return AgentSpec(name=name, description=name, definition_ref=f"{name}.md", tools=tools)
+def _agent(
+    name: str,
+    tools: tuple[ToolVerb, ...],
+    *,
+    description: str = "même fiche",
+    body_fingerprint: str = "",
+) -> AgentSpec:
+    return AgentSpec(
+        name=name,
+        description=description,
+        definition_ref=f"{name}.md",
+        tools=tools,
+        body_fingerprint=body_fingerprint,
+    )
 
 
 @requires_rust_core
 def test_fingerprint_agrees_across_backends_and_is_order_independent(monkeypatch: pytest.MonkeyPatch) -> None:
-    agent_a = _agent("a", (ToolVerb.EDIT, ToolVerb.READ))
-    agent_b = _agent("b", (ToolVerb.READ, ToolVerb.EDIT))
+    agent_a = _agent("a", (ToolVerb.EDIT, ToolVerb.READ), description="a")
+    agent_b = _agent("b", (ToolVerb.READ, ToolVerb.EDIT), description="b")
 
     _with_backend("python", monkeypatch)
     python_fp_a, python_fp_b = agent_a.fingerprint(), agent_b.fingerprint()
@@ -290,17 +302,45 @@ def test_fingerprint_agrees_across_backends_and_is_order_independent(monkeypatch
 
 
 @requires_rust_core
+def test_identity_fingerprint_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The #1180 fiche key is composed in Python (body digest) and compared
+    in Rust; both backends must build the same identity tuple."""
+    agent = _agent("a", (ToolVerb.READ,), body_fingerprint="abc")
+
+    _with_backend("python", monkeypatch)
+    python_identity = agent.identity_fingerprint()
+    _with_backend("rust", monkeypatch)
+    rust_identity = agent.identity_fingerprint()
+
+    assert python_identity == rust_identity
+    assert python_identity[-1] == "abc"
+
+
+@requires_rust_core
 def test_duplicate_agent_fingerprints_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     agents = (
-        _agent("kit-a", (ToolVerb.READ, ToolVerb.EDIT)),
-        _agent("kit-b", (ToolVerb.EDIT, ToolVerb.READ)),
-        _agent("kit-c", (ToolVerb.READ,)),
+        _agent("kit-a", (ToolVerb.READ, ToolVerb.EDIT), body_fingerprint="même-fiche"),
+        _agent("kit-b", (ToolVerb.EDIT, ToolVerb.READ), body_fingerprint="même-fiche"),
+        _agent("kit-c", (ToolVerb.READ,), body_fingerprint="même-fiche"),
     )
     _with_backend("python", monkeypatch)
     python_pairs = duplicate_agent_fingerprints(agents)
     _with_backend("rust", monkeypatch)
     rust_pairs = duplicate_agent_fingerprints(agents)
     assert python_pairs == rust_pairs == (("kit-a", "kit-b"),)
+
+
+@requires_rust_core
+def test_same_faisceau_different_fiche_agrees_across_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    agents = (
+        _agent("kit-a", (ToolVerb.READ, ToolVerb.EDIT), body_fingerprint="fiche-a"),
+        _agent("kit-b", (ToolVerb.READ, ToolVerb.EDIT), body_fingerprint="fiche-b"),
+    )
+    _with_backend("python", monkeypatch)
+    python_pairs = duplicate_agent_fingerprints(agents)
+    _with_backend("rust", monkeypatch)
+    rust_pairs = duplicate_agent_fingerprints(agents)
+    assert python_pairs == rust_pairs == ()
 
 
 def _write_agent_in(root: Path, tier_dir: str, name: str) -> None:
@@ -347,7 +387,7 @@ def test_build_surface_two_regime_override_collision_raises_on_both_backends(
 
     for backend in ("python", "rust"):
         _with_backend(backend, monkeypatch)
-        with pytest.raises(GrimoireAgentError, match="faisceau identique"):
+        with pytest.raises(GrimoireAgentError, match="même faisceau et la même fiche"):
             build_surface(tmp_path)
 
 
