@@ -52,7 +52,9 @@ def _in_review(root: Path, title: str) -> str:
     service.claim(tid, "claude")
     service.transition(tid, TaskState.RUNNING, "claude")
     (root / "preuve.md").write_text("# PR fusionnée\n", encoding="utf-8")
-    item = EvidenceItem("doc-01", EvidenceKind.DOC, "file:preuve.md", f"sha256-{sha256(b'preuve').hexdigest()}", "PR relue")
+    item = EvidenceItem(
+        "doc-01", EvidenceKind.DOC, "file:preuve.md", f"sha256-{sha256(b'preuve').hexdigest()}", "PR relue"
+    )
     EvidenceService(root / EVIDENCE).create_pack(tid, EvidenceProfile.STANDARD, [item], acceptance=ACC)
     service.transition(tid, TaskState.NEEDS_VERIFICATION, "claude")
     return tid
@@ -73,7 +75,10 @@ def _merged_candidate(root: Path, title: str, pr: int = 42) -> str:
     asked = service.ask_batch(tid, [spec], "merger")
     question_id = asked.plan.asked[0].id
     service.ledger.append_event(
-        MERGE_ESCALATED_EVENT, tid, "task", "merger",
+        MERGE_ESCALATED_EVENT,
+        tid,
+        "task",
+        "merger",
         {"gesture": "accept", "question_id": question_id, "pr": pr, "blocking": False, "anchor": "sha"},
     )
     service.ledger.append_event(MERGED_EVENT, tid, "task", "merger", {"pr": pr, "merged_sha": "b" * 40, "into": "main"})

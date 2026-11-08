@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from grimoire.missions.questions import QuestionRecord
     from grimoire.missions.schemas import LedgerEvent, MissionTask
 
-__all__ = ["ACTOR", "accept_merged", "accept_merged_candidates"]
+__all__ = ["ACTOR", "accept_merged", "accept_merged_candidates", "accept_merged_view"]
 
 #: L'acteur inscrit au ledger : le canal, jamais un nom fourni par le corps.
 ACTOR = "cockpit"
@@ -157,6 +157,12 @@ def accept_merged_candidates(project_root: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def accept_merged_view(project_root: Path, _query: Any) -> dict[str, Any]:
+    """La lecture de la route GET : candidates et compte, pour le libellé du bouton."""
+    rows = accept_merged_candidates(project_root)
+    return {"candidates": rows, "count": len(rows)}
+
+
 def _reason(pr: int) -> str:
     """Le motif fixe : il nomme le lot (et son canal), et la PR, jamais une justification inventée par tâche."""
     return f"Tout accepter (lot cockpit) : PR #{pr} fusionnée, relue READY"
@@ -181,7 +187,13 @@ def accept_merged(project_root: Path, body: dict[str, Any]) -> dict[str, Any]:
             evidence_root, proof_root = acceptance_roots(service, task_id)
             reason = _reason(int(row.get("pr") or 0))
             outcome = accept_task(
-                task, root, evidence_root, reason, ACTOR, origin=ORIGIN_HUMAN, proof_root=proof_root,
+                task,
+                root,
+                evidence_root,
+                reason,
+                ACTOR,
+                origin=ORIGIN_HUMAN,
+                proof_root=proof_root,
             )
             service.comment(
                 task_id,
