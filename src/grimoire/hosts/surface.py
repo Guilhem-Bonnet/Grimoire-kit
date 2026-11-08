@@ -104,6 +104,23 @@ def _use_rust_backend() -> bool:
     return _rust_core is not None
 
 
+#: Plafond (octets UTF-8) du corps de persona qu'une définition d'hôte intègre
+#: (#1179). En deçà, la session de sous-agent reçoit la fiche directement au
+#: lieu de payer un tour de lecture ; au-delà, la définition garde le pointeur
+#: et ``grimoire host sync`` le signale. Un fichier d'agent reste une consigne
+#: de session, pas une copie de documentation.
+MAX_INLINE_PERSONA_BYTES = 16 * 1024
+
+
+def format_bytes(count: int) -> str:
+    """Taille lisible pour une consigne de session : ``512 o``, ``11,4 Ko``."""
+    if count < 1024:
+        return f"{count} o"
+    if count < 1024 * 1024:
+        return f"{count / 1024:.1f}".replace(".", ",") + " Ko"
+    return f"{count / (1024 * 1024):.1f}".replace(".", ",") + " Mo"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelAffinity:
     """What an agent needs from a model, without naming one."""
@@ -169,6 +186,17 @@ class AgentSpec:
     :mod:`grimoire.tools.context_router`, not proof that a session actually
     loads it — the router plans context adaptively and this field only says
     what the agent claims to need."""
+    definition_body: str = ""
+    """The persona file's body, frontmatter excluded (#1179).
+
+    Empty when inlining is disabled (``hosts.inline_persona: false``) or when
+    the source file has no body. Emitters hand it to the host only when it
+    fits :data:`MAX_INLINE_PERSONA_BYTES` — see :meth:`inline_body`."""
+    context_sizes: tuple[tuple[str, int], ...] = ()
+    """``(path, size in bytes)`` for each declared context file, in
+    :attr:`context` order (#1179). The generated definition lists those sizes
+    so a sub-agent can decide what is worth opening: a 28 Ko document and a
+    780 Ko one are not the same errand."""
     override_ref: str | None = None
     """Project-relative path of the project's own customisation of this
     agent, when one exists — ``None`` for an agent the kit ships unmodified.
@@ -200,6 +228,24 @@ class AgentSpec:
             "override_ref": self.override_ref,
             "override_kind": self.override_kind,
         }
+
+    def body_size(self) -> int:
+        """Size of :attr:`definition_body` in UTF-8 bytes; ``0`` when empty."""
+        return len(self.definition_body.encode("utf-8"))
+
+    def inline_body(self) -> str | None:
+        """The persona body to fold into a host definition, or ``None``.
+
+        ``None`` — keep the pointer — when inlining was disabled at
+        collection time (empty :attr:`definition_body`) or when the body
+        exceeds :data:`MAX_INLINE_PERSONA_BYTES`. Emitters and the sync
+        warning both read this one rule so they cannot disagree.
+        """
+        if not self.definition_body:
+            return None
+        if self.body_size() > MAX_INLINE_PERSONA_BYTES:
+            return None
+        return self.definition_body
 
     def fingerprint(self) -> tuple[str, ...]:
         """The faisceau (tools, context, skills) that must distinguish this

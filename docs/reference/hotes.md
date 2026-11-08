@@ -173,6 +173,28 @@ hôte désactivé, WARN si un hôte activé n'a encore rien émis (généralemen
 fichier hôte est préservé sans avoir été déclaré (voir ci-dessous) — `doctor` ne
 peut pas répondre « tout va bien » quand `grimoire up` échoue.
 
+### Définitions d'agent : persona intégrée
+
+Depuis [#1179](https://github.com/Guilhem-Bonnet/Grimoire-kit/issues/1179),
+`grimoire host sync` recopie le corps de la fiche de persona dans la définition
+générée (`.claude/agents/<nom>.md`, `.github/agents/<nom>.agent.md`,
+`.opencode/agent/<nom>.md`) au lieu d'y laisser un simple pointeur. Une session
+de sous-agent reçoit ainsi sa persona d'emblée, sans payer un tour d'outil et
+la lecture de la fiche (~10 Ko, mesurés sur 89 des 116 jurés des 7–8/11/2026).
+La fiche source n'est plus citée que pour sa mise à jour.
+
+Plafond : 16 Ko de corps. Au-delà, la définition garde le pointeur, et
+`grimoire host sync` affiche un avertissement nommant la persona et sa taille.
+
+```yaml
+hosts:
+  inline_persona: false   # défaut : true — revenir au pointeur seul
+```
+
+Le contexte déclaré (`context:` dans la fiche) n'est plus un ordre de lecture :
+la définition le présente « à consulter au besoin », avec la taille de chaque
+document, pour que le sous-agent juge ce qui sert à sa tâche.
+
 ### Un fichier hôte qui est à vous : `hosts.preserve`
 
 Le kit n'écrase jamais un fichier de chemin géré qu'il n'a pas écrit (un

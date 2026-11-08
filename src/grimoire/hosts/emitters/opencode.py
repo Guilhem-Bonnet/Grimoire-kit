@@ -36,6 +36,7 @@ from grimoire.hosts.emitters.base import (
     JsonMerge,
     context_load_instruction,
     managed_header,
+    persona_section,
 )
 from grimoire.hosts.emitters.copilot import _dispatch_policy_section
 from grimoire.hosts.emitters.rules import with_rule_layers
@@ -110,18 +111,20 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         if agent.entry_point
         else "Agent routé en interne : tu traites une tranche de travail, tu ne clos pas la tâche globale."
     )
+    persona = persona_section(agent)
     body = f"""{header}
 {managed_header(".md")}
 
 Tu incarnes la persona Grimoire **{agent.name}** du projet {surface.project_name}.
 
-1. Lis `{agent.definition_ref}` en entier — persona, règles, protocole d'activation.
-2. {context_load_instruction(agent)}
-3. {role}
-4. Frontière d'outils : {", ".join(v.value for v in agent.tools)}. N'en sors pas.
-5. {GROUNDING_RULE}
+{persona}
+
+1. {context_load_instruction(agent)}
+2. {role}
+3. Frontière d'outils : {", ".join(v.value for v in agent.tools)}. N'en sors pas.
+4. {GROUNDING_RULE}
 """
-    body = f"{body}\n{_dispatch_policy_section()}" if agent.entry_point else f"{body}6. {UNCERTAINTIES_BLOCK_RULE}\n"
+    body = f"{body}\n{_dispatch_policy_section()}" if agent.entry_point else f"{body}5. {UNCERTAINTIES_BLOCK_RULE}\n"
     for skill in owned_skills:
         body = f"{body}{_skill_section(skill)}"
     return EmittedFile(relpath=OC_DIR / "agent" / f"{agent.name}.md", content=body)
