@@ -14,10 +14,13 @@
 // - les entrées d'un AUTRE projet d'un emplacement partagé n'apparaissent
 //   qu'en comptes (le serveur ne les rend jamais) ;
 // - aucun bouton inerte : Corriger, Marquer remplacée… (P34, `memoire-gestes.js`)
-//   et Supprimer… passent par `POST /api/memory`, gouvernée côté cockpit et
-//   ouverte au seul projet servi ; chaque geste s'ouvre dans le panneau, avec
-//   aperçu avant/après ou confirmation, et dit son résultat sur place ; hors du
-//   projet servi, ils sont absents et la raison est écrite ;
+//   et Supprimer… passent par `POST /api/memory`, gouvernée côté cockpit.
+//   Les gestes de correction restent ouverts au seul projet servi (P02) ;
+//   depuis le lot 2, la suppression accepte tout projet enrôlé, après une
+//   modale qui nomme le projet visé (`confirm_project`). Chaque geste s'ouvre
+//   dans le panneau, avec aperçu avant/après ou confirmation, et dit son
+//   résultat sur place ; hors de toute cible enrôlée, ils sont absents et la
+//   raison est écrite ;
 // - une projection (copie régénérable) ne montre aucun geste d'édition :
 //   « Corriger la source » mène au fichier ou à la tâche dont elle vient ;
 // - la santé de la mémoire est la rubrique voisine (`sante.js`, P25) ;
@@ -264,10 +267,14 @@ export async function mount(root, ctx) {
 
   const allScope = Boolean(ctx.scope && ctx.scope.all);
   const homeSlug = (ctx.host.status && ctx.host.status.home) || ctx.host.project || '';
-  // Les mutations de mémoire (lot 2) restent réservées au projet d'ouverture :
-  // depuis le lot 1, « enrôlé » ne suffit plus à les autoriser côté serveur.
-  const canDelete = ctx.host.kind === 'cockpit' && !ctx.host.readOnly
-    && Boolean(homeSlug) && (allScope || ctx.host.project === homeSlug);
+  // Lot 2 : la suppression accepte tout projet ENRÔLÉ — le serveur exige
+  // `confirm_project`, et `api.memoryDelete` ouvre la modale qui nomme le
+  // projet avant l'envoi. Les gestes de correction, eux, restent réservés au
+  // projet d'ouverture (P02) : leur aperçu/application n'a pas cette
+  // confirmation nommée.
+  const canDelete = ctx.host.kind === 'cockpit' && !ctx.host.readOnly;
+  const canCorrect = canDelete && Boolean(homeSlug)
+    && (allScope ? false : ctx.host.project === homeSlug);
   const params = ctx.params || {};
 
   // `types` dans l'URL (clic sur un hall de la carte, P73) : la vue s'ouvre
@@ -731,7 +738,10 @@ export async function mount(root, ctx) {
     if (entry.tags && entry.tags.length) add('Tags', entry.tags.join(', '));
     box.append(kv);
 
-    const ownProject = canDelete && (allScope ? entry.projectSlug === homeSlug : true);
+    // Gestes de correction : projet d'ouverture seulement. Suppression : tout
+    // projet enrôlé (lot 2), avec la modale de confirmation nommée côté API.
+    const ownProject = canCorrect && (allScope ? entry.projectSlug === homeSlug : true);
+    const mayDelete = canDelete && (allScope ? Boolean(entry.projectSlug) : true);
     const actions = el('div', 'kn-actions');
     // P42 : « Demander une correction » — résultat attendu + consigne ; une tâche est ouverte,
 // la mémoire ne bouge pas avant l'acceptation de la proposition de l'agent.
@@ -797,28 +807,36 @@ const gesture = (kind, row) => {
     });
     if (entry.kind === 'projection') {
       box.append(sourceFix(entry));
-    } else if (ownProject) {
-      // Libellés seuls, comme la maquette : les trois gestes tiennent sur une ligne.
-      const correct = el('button', 'btn', 'Corriger', { type: 'button' });
-      correct.addEventListener('click', () => gesture('correct'));
-      const replace = el('button', 'btn', 'Marquer remplacée…', { type: 'button' });
-      replace.addEventListener('click', () => gesture('supersede'));
+    } else if (ownProject || mayDelete) {
+      if (ownProject) {
+        // Libellés seuls, comme la maquette : les trois gestes tiennent sur une ligne.
+        const correct = el('button', 'btn', 'Corriger', { type: 'button' });
+        correct.addEventListener('click', () => gesture('correct'));
+        const replace = el('button', 'btn', 'Marquer remplacée…', { type: 'button' });
+        replace.addEventListener('click', () => gesture('supersede'));
+        actions.append(correct, replace);
+      }
+      // « Demander une correction » ouvre une tâche (route de la vue de
+      // travail, lot 1) : disponible sur tout projet enrôlé, comme la
+      // suppression.
       const delegate = el('button', 'btn', 'Demander une correction…', { type: 'button' });
       delegate.addEventListener('click', () => askCorrection(entry, box, ctx, (text) => {
         state.status = { key: keyOf(entry), tone: 'ok', text };
         return refresh({ stay: entry });
       }));
-      actions.append(correct, replace, delegate);
-      if (sup.state === 'retracted') {
+      actions.append(delegate);
+      if (ownProject && sup.state === 'retracted') {
         const restore = el('button', 'btn', 'Rendre au service…', { type: 'button' });
         restore.prepend(icon('undo'));
         restore.addEventListener('click', () => gesture('unretract'));
         actions.append(restore);
       }
-      // Bouton discret, comme la maquette : la suppression reste le dernier recours.
-      const remove = el('button', 'btn kn-danger kn-ghost', 'Supprimer…', { type: 'button' });
-      remove.addEventListener('click', () => confirmDelete(entry, box, actions));
-      actions.append(remove);
+      if (mayDelete) {
+        // Bouton discret, comme la maquette : la suppression reste le dernier recours.
+        const remove = el('button', 'btn kn-danger kn-ghost', 'Supprimer…', { type: 'button' });
+        remove.addEventListener('click', () => confirmDelete(entry, box, actions));
+        actions.append(remove);
+      }
       box.append(actions);
     } else {
       box.append(noteNode('readonly', readOnlyReason()));
@@ -845,7 +863,7 @@ const gesture = (kind, row) => {
   const readOnlyReason = () => {
     if (ctx.host.kind !== 'cockpit') return 'Correction depuis le cockpit seulement : lance « grimoire cockpit serve » dans ce projet.';
     if (ctx.host.readOnly) return 'Ce projet n’est pas enrôlé dans ce cockpit, ou son dossier a disparu : rien ne s’y écrit.';
-    return `Correction réservée au projet que ce cockpit sert (${homeSlug || 'projet de lancement'}) : lance « grimoire cockpit serve » dans ce projet-ci pour le corriger.`;
+    return `Correction réservée au projet que ce cockpit sert (${homeSlug || 'projet de lancement'}) : la suppression, elle, accepte tout projet enrôlé.`;
   };
 
   /** Une projection ne se corrige pas : sa source, si. */
@@ -893,7 +911,11 @@ const gesture = (kind, row) => {
           ? { tone: 'ok', text: 'Entrée supprimée.' }
           : { tone: 'bad', text: `Suppression refusée : ${failureOf(res)}` };
       } catch (error) {
-        outcome = { tone: 'bad', text: `Suppression refusée : ${error && error.message ? error.message : 'API injoignable'}` };
+        // Modale de confirmation annulée (lot 2) : rien n'est parti, ce n'est
+        // pas un refus du serveur — on le dit sans ton d'échec.
+        outcome = error && error.code === 499
+          ? { tone: 'warn', text: 'Suppression annulée.' }
+          : { tone: 'bad', text: `Suppression refusée : ${error && error.message ? error.message : 'API injoignable'}` };
       }
       if (ctx.signal.aborted) return;
       if (outcome.tone === 'ok') {
