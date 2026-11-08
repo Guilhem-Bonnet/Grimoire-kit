@@ -286,6 +286,18 @@ def body_project_refusal(project_root: Path, body: Any) -> str | None:
     return None
 
 
+def refuse_foreign_body(project_root: Path, body: Any) -> None:
+    """Lève ``ValueError`` (400) si le ``project`` du corps vise une autre racine.
+
+    Variante levante de :func:`body_project_refusal` : les routes d'écriture du
+    workspace traduisent ``ValueError`` en 400, ce qui évite de répéter le test
+    dans chaque geste d'autorité (mandat, pilote, fournisseurs) — lot 3.
+    """
+    refusal = body_project_refusal(project_root, body)
+    if refusal is not None:
+        raise ValueError(refusal)
+
+
 def primary_slug() -> str:
     projects = load_registry()
     return str(projects[0].get("slug", "")) if projects else ""

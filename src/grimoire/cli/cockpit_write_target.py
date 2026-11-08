@@ -62,6 +62,16 @@ def write_refusal_status(path: str) -> tuple[int, str]:
     return 404, "projet inconnu ou non enrôlé"
 
 
+def body_mismatch_status(path: str) -> int:
+    """Code de refus quand le ``project`` du corps contredit ``?project=``.
+
+    Une écriture d'autorité (lot 3) nomme sa cible dans le corps : le
+    contredire est une requête mal formée, donc 400. Les autres écritures
+    gardent le refus du lot 1 (403), qui ne promettait pas de cible au corps.
+    """
+    return 400 if is_authority_write(urlparse(path).path) else 403
+
+
 def query_slug(path: str) -> str:
     """Projet visé par la requête : ``?project=`` explicite, sinon la sélection.
 
