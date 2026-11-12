@@ -246,11 +246,11 @@ inconnu est un 404, et sans paramètre le cockpit garde son repli historique
 (sélection courante, sinon projet primaire). Les écritures visent le projet
 désigné par `?project=` : l'atelier l'ignore (il n'en sert qu'un), le cockpit
 le résout dans son registre — tout projet ENRÔLÉ est inscriptible, pas
-seulement celui qu'il a ouvert (lot 1, 2026-11-07). Les écritures SENSIBLES
-(fichier, override, commande, mutations mémoire) exigent en plus, sur un autre
-projet que celui d'ouverture, `confirm_project: "<slug>"` égal au slug visé
-(lot 2). Les écritures d'AUTORITÉ — mandat, pilote automatique, fournisseurs —
-nomment en plus leur projet dans le corps (lot 3, voir plus bas).
+seulement celui qu'il a ouvert (lot 1, 2026-11-07). Depuis le lot 5
+(2026-11-12), fichier, override, commande et mutations mémoire acceptent ce
+projet sans confirmation nommée : tout projet enrôlé se pilote comme le projet
+d'ouverture. Les écritures d'AUTORITÉ — mandat, pilote automatique,
+fournisseurs — nomment en plus leur projet dans le corps (lot 3, voir plus bas).
 
 ### Lectures — atelier et cockpit
 
@@ -284,9 +284,9 @@ nomment en plus leur projet dans le corps (lot 3, voir plus bas).
 | `POST /api/workspace/tasks/<id>/move` | `{to, reason?, actor?}` | idem |
 | `POST /api/workspace/tasks/<id>/block` | `{reason, actor?}` | idem |
 | `POST /api/workspace/tasks/<id>/close` | `{actor?}` | idem |
-| `POST /api/workspace/file/override` | `{path, confirm_project?}` | `{created, override_path, from?}` |
-| `POST /api/workspace/file/write` | `{path, text, confirm_project?}` | Le fichier relu |
-| `POST /api/workspace/command` | `{argv[], confirm_project?}` | `{ok, command, argv, code, stdout, stderr, output, timed_out, duration_ms}` |
+| `POST /api/workspace/file/override` | `{path}` | `{created, override_path, from?}` |
+| `POST /api/workspace/file/write` | `{path, text}` | Le fichier relu |
+| `POST /api/workspace/command` | `{argv[]}` | `{ok, command, argv, code, stdout, stderr, output, timed_out, duration_ms}` |
 | `POST /api/workspace/agents/<nom>/skill` | `{skill, action: "assign"\|"remove"}` | `{agents[], skills[], entry_point}` (la vue rafraîchie) — écrit toujours dans `overrides`, jamais dans le kit ; skill inconnu refusé avec le message que `collect_agents` produit déjà (#374) |
 | `POST /api/workspace/agents/<nom>/fields` | Un sous-ensemble de `{use_when, dont_use_when, tool_boundary, tools[], context[]}` | idem — `tools` validé contre les verbes connus, `context` contre l'existence sur disque |
 | `POST /api/workspace/assist` | `{path, text, position: {line, col}, intent: "complete-clause"\|"draft-body"\|"explain-diagnostic", diagnostic?}` | `{available, model?, intent?, suggestion?, unknown?[], reason?}` — `available: false` est une réponse normale (opt-in absent, Ollama indisponible, délai dépassé à 10 s), jamais une exception ; `unknown[]` : `{text, kind, line, start, end}`, les identifiants cités par le modèle mais absents du paquet de langage. N'écrit jamais de fichier — l'insertion reste un geste de l'éditeur |
@@ -296,21 +296,20 @@ Un gate de preuve rouge **n'est pas une erreur** : il revient en 200 avec
 l'avale pas.
 
 Codes : 400 refus explicable (commande hors liste blanche, état inconnu, skill
-ou contexte d'agent introuvable), 403 chemin hors projet, étage non éditable,
-ou écriture sensible sur un autre projet sans `confirm_project` nommant le slug
-visé, 404 tâche, agent ou route inconnue.
+ou contexte d'agent introuvable, `project` du corps qui contredit `?project=`),
+403 chemin hors projet ou étage non éditable, 404 tâche, agent, projet ou route
+inconnue.
 
-`file/write`, `file/override` et `command` sont les écritures **sensibles** :
-sur le cockpit, viser un projet autre que celui d'ouverture exige
-`confirm_project: "<slug>"` égal au slug de `?project=` (403 sinon, y compris
-quand le corps nomme un autre projet). Le front ouvre avant l'envoi une modale
-« Écrire dans <nom du projet> ? » qui pose ce champ. Le projet d'ouverture garde
-le geste sans confirmation. Chaque confirmation est inscrite dans le journal de
-la garde d'écriture (`gesture: "confirm_project"`, route, projet et valeur
-confirmée) ; si le journal n'est pas inscriptible, l'écriture est refusée (503).
-Les mutations mémoire (`delete`, `gc`, `sync` sur `/api/memory`) suivent la même
-règle : n'importe quel projet enrôlé, à condition que `project` et
-`confirm_project` nomment le même slug.
+Depuis le lot 5 (2026-11-12), `file/write`, `file/override` et `command` ne
+demandent plus de confirmation nommée : sur le cockpit, tout projet ENRÔLÉ se
+pilote comme le projet d'ouverture, résolu par le slug de `?project=`. Un slug
+absent de l'URL est un 403 « lecture seule » (rien ne dit où écrire), un slug
+inconnu du registre un 404, et un `project` de corps qui contredit l'URL un 400.
+Le journal de la garde d'écriture continue de noter le projet visé de chaque
+écriture. Les mutations et gestes mémoire (`delete`, `gc`, `sync`, geste P02 sur
+`/api/memory`) suivent la même règle : tout projet enrôlé, nommé par le
+`project` du corps (400 s'il est inconnu) ; l'application d'un geste garde son
+`confirm: true`.
 
 Les écritures d'agents (`skill`, `fields`), les mouvements de tâche, les
 blueprints et `/compile` ont suivi la même ouverture au lot 1 : tout projet

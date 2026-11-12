@@ -54,10 +54,8 @@ from grimoire.cli.cockpit_write_target import (
     body_mismatch_status,
     enrolled_write_root,
     explicit_query_slug,
-    journal_confirmation,
     query_slug,
     read_root,
-    sensitive_write_refusal,
     unresolvable_status,
     write_refusal_status,
 )
@@ -169,24 +167,16 @@ def _resolve_project_path(slug: str | None) -> Path | None:
     return Path(projects[0]["path"]) if projects else None
 
 
-# Slug du projet ouvert par défaut par CE process (#351/#356), figé au
-# démarrage. Depuis le lot 1 (2026-11-07), il ne restreint plus les écritures
-# (voir `cockpit_write_target`) ; il sert au repli de lecture (`home` de
-# `/api/status`) et, depuis le lot 2, à distinguer le projet d'ouverture (geste
-# historique) d'un autre projet enrôlé (confirmation nommée).
-_HOME_SLUG: str | None = None
+# Slug du projet d'OUVERTURE : celui que ce process sert par défaut (#351/#356),
+# figé au démarrage. Il ne restreint plus aucune écriture — tout projet ENRÔLÉ
+# se pilote comme lui (lot 5, 2026-11-12) ; il nomme le repli de lecture
+# (`home` de `/api/status`) et le projet que le registre ne laisse pas retirer.
+_OPENING_SLUG: str | None = None
 
-# Chemin du projet servi, figé au démarrage : la garde P02 compare des chemins,
-# pas un slug re-résolu (un ``remove`` puis ``add`` ne la déplace pas).
-_HOME_PATH: Path | None = None
-
-
-def _is_served_project(proot: Path) -> bool:
-    """``proot`` est le projet servi ; échec fermé sans projet servi (P02)."""
-    try:
-        return _HOME_PATH is not None and _HOME_PATH.samefile(proot)
-    except OSError:
-        return False
+# Chemin du projet d'ouverture, figé au démarrage : la garde du registre compare
+# des chemins, pas un slug re-résolu (un ``remove`` puis ``add`` ne le déplace
+# pas).
+_OPENING_PATH: Path | None = None
 
 
 _API_CACHE: dict[Path, Any] = {}
@@ -358,14 +348,6 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             return False
         return True
 
-    def _journal_confirmation(self, route: str, project: str, confirm_project: str) -> bool:
-        """Lot 2 : le journal de la garde note le slug ET la confirmation nommée."""
-        error = journal_confirmation(self.command, route, project, confirm_project)
-        if error:
-            self._send_json(503, {"ok": False, "error": error})
-            return False
-        return True
-
     def _send_json(self, code: int, payload: dict[str, object], *, etag: bool = False) -> None:
         send_json(self, code, payload, etag=etag)
 
@@ -450,7 +432,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 self._send_json(403, {"ok": False, "error": str(exc)})
             return
         if path == "/api/status":
-            readonly = unresolvable_status(self.path, _HOME_SLUG)
+            readonly = unresolvable_status(self.path, _OPENING_SLUG)
             if readonly is not None:
                 self._send_json(200, readonly)
                 return
@@ -552,7 +534,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
                 "host": "cockpit",
                 "readOnly": not slug or registered_root(slug=slug) is None,
                 "project": slug,
-                "home": _HOME_SLUG or None,
+                "home": _OPENING_SLUG or None,
             }
         self._send_json(200, payload, etag=cacheable_read(path, query, live_routes=LIVE_ROUTES))
 
@@ -620,7 +602,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError):
                 self._send_json(400, {"ok": False, "error": "bad json"})
                 return
-            self._send_json(*registry_post(path, data if isinstance(data, dict) else {}, served=_HOME_PATH))
+            self._send_json(*registry_post(path, data if isinstance(data, dict) else {}, served=_OPENING_PATH))
             return
         if path in ("/api/setup", "/api/setup/plan"):
             # Le wizard exécute (issue #171) : `grimoire serve` n'est plus
@@ -652,7 +634,7 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if path == "/api/projects/create":
             # « Nouveau projet » depuis le portefeuille (issue #172, volet
             # création) : contrairement à `/api/setup` ci-dessus, la cible
-            # n'est PAS forcément le projet de lancement (`_HOME_SLUG`) — le
+            # n'est PAS forcément le projet de lancement (`_OPENING_SLUG`) — le
             # chemin choisi est explicite dans le corps de la requête, comme
             # `/api/projects/add`. Ce n'est pas pour autant une écriture
             # libre : le chemin doit tomber sous une racine permise
@@ -690,23 +672,18 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if path.startswith(WORKSPACE_PREFIX):
             # Écritures de la vue de travail (réclamer/réaliser une tâche,
             # décider une proposition, migrer un board, écrire un fichier…).
-            # Lot 1 de l'écriture multi-projets : la cible est le projet
-            # ENRÔLÉ nommé par `?project=`, résolu par le registre seul — le
-            # cockpit peut donc écrire sur n'importe quel projet qu'il pilote,
-            # pas seulement sur celui qu'il a ouvert. Lot 2 : `file/write`,
-            # `file/override` et `command` suivent la même résolution, mais
-            # exigent `confirm_project` égal au slug visé dès que la cible
-            # n'est pas le projet d'ouverture (voir `is_sensitive_write`).
+            # La cible est le projet ENRÔLÉ nommé par `?project=`, résolu par le
+            # registre seul. Depuis le lot 5 (2026-11-12), tout projet enrôlé se
+            # pilote comme le projet d'ouverture : plus de confirmation nommée
+            # pour `file/write`, `file/override` et `command`.
             from grimoire.tools.workspace_routes import (
                 WORKSPACE_UNHANDLED,
-                is_sensitive_write,
                 workspace_post,
             )
 
-            # Lot 3 : les écritures d'autorité (mandat, pilote, fournisseurs)
-            # nomment leur projet dans le corps. Un slug d'URL non enrôlé est un
-            # 404, un corps qui contredit l'URL un 400 — les autres écritures
-            # gardent le refus générique « lecture seule » (403) du lot 1.
+            # Un slug d'URL non enrôlé est un 404, un corps qui contredit l'URL
+            # un 400 ; une écriture sans slug garde le 403 « lecture seule »
+            # (rien ne dit où écrire).
             proot = self._enrolled_write_root()
             if proot is None:
                 code, error = write_refusal_status(self.path)
@@ -721,15 +698,6 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
             if not self._body_confirms_slug(body):
                 self._send_json(body_mismatch_status(path), {"ok": False, "error": "le projet du corps ne correspond pas à l'URL"})
                 return
-            slug = self._explicit_query_slug()
-            if is_sensitive_write(path):
-                refusal = sensitive_write_refusal(body, self.path, _HOME_SLUG)
-                if refusal:
-                    self._send_json(403, {"ok": False, "error": refusal})
-                    return
-                confirmed = str(body.get("confirm_project") or "").strip() if isinstance(body, dict) else ""
-                if not self._journal_confirmation(path, slug, confirmed):
-                    return
 
             # Même traduction que l'atelier (``forge_http.py::do_POST``) : sans
             # elle, un refus métier (skill inconnu, agent introuvable, chemin
@@ -846,17 +814,10 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
         if proot is None or not proot.is_dir():
             self._send_json(400, {"ok": False, "error": "projet inconnu"})
             return
-        if (is_mutation or gesture) and not _is_served_project(proot):
-            # P02 : un geste de correction (aperçu/apply) reste réservé au
-            # projet servi. Lot 2 : une MUTATION mémoire (delete/gc/sync)
-            # accepte n'importe quel projet ENRÔLÉ, à condition que la
-            # personne l'ait nommé (`confirm_project` égal au slug visé).
-            confirmed = str(data.get("confirm_project") or "").strip()
-            if not is_mutation or not project_slug or confirmed != project_slug:
-                self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
-                return
-            if not self._journal_confirmation("/api/memory", project_slug, confirmed):
-                return
+        # Lot 5 (2026-11-12) : mutations ET gestes de correction (P02, aperçu
+        # puis application) acceptent tout projet ENRÔLÉ, comme les écritures de
+        # la vue de travail. La cible vient du `project` du corps, résolu par le
+        # registre ; `confirm` reste l'accord explicite de l'application.
         if gesture:
             from grimoire.tools.workspace_memory_gestures import handle as memory_gesture
 
@@ -1088,14 +1049,17 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     Renvoie un message à afficher quand le projet vient d'être enregistré, ou
     ``None`` si rien n'a changé.
 
-    Retient aussi ce slug dans ``_HOME_SLUG`` : c'est le projet que le
-    cockpit ouvre par défaut (``home`` de ``/api/status``) et celui qui garde
-    le geste historique pour les écritures sensibles du lot 2 (``file/write``,
-    ``command``, ``file/override``, mutations mémoire) ; un AUTRE projet
-    enrôlé exige ``confirm_project``. Son chemin résolu va dans
-    ``_HOME_PATH`` (garde P02 des gestes mémoire).
+    Retient aussi ce slug dans ``_OPENING_SLUG`` : c'est le projet que le
+    cockpit ouvre par défaut (``home`` de ``/api/status``). Son chemin résolu va
+    dans ``_OPENING_PATH`` (garde du registre). Il ne restreint plus aucune
+    écriture : tout projet enrôlé se pilote comme lui (lot 5, 2026-11-12).
+
+    Le projet n'est enregistré que s'il n'est pas jetable : lancer ``cockpit``
+    depuis ``/tmp``, ``~/.cache``, ``~/.claude/jobs`` ou un worktree
+    ``.git/grimoire/worktrees/`` ne doit pas remplir le registre. ``grimoire
+    cockpit add`` reste le geste explicite qui enrôle n'importe où.
     """
-    global _HOME_PATH, _HOME_SLUG
+    global _OPENING_PATH, _OPENING_SLUG
     if os.environ.get("GRIMOIRE_NO_COCKPIT"):
         return None
     cwd = (root or Path.cwd()).resolve()
@@ -1107,12 +1071,12 @@ def _select_cwd_project(root: Path | None = None) -> str | None:
     slug = slug_for_path(cwd)
     message = None
     if slug is None:
-        slug = register_project(cwd)
+        slug = register_project(cwd, implicit=True)
         if slug is None:
             return None
         message = f"[green]+[/green] Projet courant enregistré → [b]{slug}[/b] ({cwd})"
     set_selected_slug(slug)
-    _HOME_SLUG, _HOME_PATH = slug, cwd
+    _OPENING_SLUG, _OPENING_PATH = slug, cwd
     return message
 
 
@@ -1319,10 +1283,10 @@ def serve(
     console.print(f"[bold green]Cockpit[/bold green] → [link]{url}[/link]  [dim](Ctrl-C pour arrêter)[/dim]")
     if open_browser:
         webbrowser.open(url)
-    if _HOME_PATH is not None:
+    if _OPENING_PATH is not None:
         # P94 : la première lecture de la fiche paie imports et caches froids ;
         # elle se fait ici, avant que la page ne la demande.
-        threading.Thread(target=warm_sheet, args=(_HOME_PATH,), daemon=True).start()
+        threading.Thread(target=warm_sheet, args=(_OPENING_PATH,), daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

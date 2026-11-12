@@ -1042,16 +1042,17 @@ def _maybe_register_cockpit(target: Path, project_name: str, fmt: str, *, no_coc
     had (issue #305): a throwaway project (scratch, ``/tmp``, a recipe) had no
     way to skip enrolment short of remembering an undocumented variable.
 
-    Also refuses silently for a target under the OS temp directory: real
-    machine registries have been found polluted with entries pointing at
-    vanished ``tempfile.mkdtemp()`` directories — a manual smoke test or an
-    escaped test isolation, never a project anyone meant to keep (#492, and
-    seven more such entries found 2026-09-14). This guard is scoped to this
-    *implicit* side effect of ``init``/``up`` only — explicit commands
-    (``grimoire cockpit add``/``create``, ``grimoire serve --project-root``)
-    are unaffected, since there the caller's intent is unambiguous.
+    Also refuses silently for a *disposable* target — under the OS temp
+    directory, under ``~/.cache`` or ``~/.claude/jobs``, or inside a
+    ``.git/grimoire/worktrees/`` tree. Real machine registries have been found
+    polluted with such entries: vanished ``tempfile.mkdtemp()`` directories
+    from a manual smoke test (#492, seven more found 2026-09-14) and agent
+    worktrees/caches (twelve of fifteen entries on 2026-11-12). The guard is
+    scoped to this *implicit* side effect of ``init``/``up`` only — explicit
+    commands (``grimoire cockpit add``/``create``) are unaffected, since there
+    the caller's intent is unambiguous.
     """
-    from grimoire.tools.project_registry import is_scratch_path
+    from grimoire.tools.project_registry import is_disposable_path
 
     if no_cockpit or os.environ.get("GRIMOIRE_NO_COCKPIT"):
         # `%r` plutôt que `%s` (issue CodeQL py/log-injection) : `target` est un
@@ -1060,13 +1061,15 @@ def _maybe_register_cockpit(target: Path, project_name: str, fmt: str, *, no_coc
         # `repr()` échappe `\n`/`\r` au lieu de les émettre tels quels.
         logger.debug("cockpit auto-enrolment skipped for %r: GRIMOIRE_NO_COCKPIT/--no-cockpit", target)
         return
-    if is_scratch_path(target):
-        logger.debug("cockpit auto-enrolment skipped for %r: scratch path under the OS temp dir", target)
+    if is_disposable_path(target):
+        logger.debug(
+            "cockpit auto-enrolment skipped for %r: disposable path (temp/cache/jobs/worktree)", target
+        )
         return
     try:
         from grimoire.tools.project_registry import register_project
 
-        slug = register_project(target, project_name)
+        slug = register_project(target, project_name, implicit=True)
     except OSError:
         return
     if slug and fmt != "json":

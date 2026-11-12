@@ -325,8 +325,8 @@ def server(root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Itera
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     reg.save_registry([{"name": "Projet", "path": str(root.resolve()), "slug": "projet"}])
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "projet")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", root.resolve())
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "projet")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", root.resolve())
     cmd_cockpit._API_CACHE.clear()
     serve_dir = tmp_path / "serve"
     serve_dir.mkdir()
@@ -383,11 +383,12 @@ def test_a_chat_post_from_another_origin_is_refused_even_with_the_token(
 def test_a_chat_post_on_an_unregistered_project_is_refused(server: dict[str, Any]) -> None:
     """Depuis le lot 1, un projet simplement REGARDÉ n'est plus en lecture
     seule — il suffit qu'il soit enrôlé. Le refus ne vise donc plus que le
-    slug que le registre ne résout pas."""
+    slug que le registre ne résout pas (lot 5 : 404 « projet inconnu ou non
+    enrôlé », le 403 restant réservé aux requêtes sans projet nommé)."""
     fantome = server["root"].parent / "fantome"
     (fantome / ".git").mkdir(parents=True, exist_ok=True)
     status, body = _cockpit_http.post(server["port"], f"{SEND}?project=fantome", {"text": "bonjour"})
-    assert status == 403 and body["error"] == "hôte en lecture seule"
+    assert status == 404 and body["error"] == "projet inconnu ou non enrôlé"
     assert workspace_chat.chat_state(fantome, {})["running"] is False
 
 
