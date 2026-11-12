@@ -10,9 +10,9 @@ Depuis le lot 1 de l'écriture multi-projets (2026-11-07), une écriture vise
 n'importe quel projet ENRÔLÉ : le slug de ``?project=`` est **obligatoire** et
 sert de clé à :func:`registered_root`, jamais de chemin ; le dossier doit
 exister. Aucun repli sur ``selected_slug()`` (état partagé entre onglets).
-Depuis le lot 2 (2026-11-08), ``file/write``, ``file/override``, ``command``
-et les mutations mémoire suivent la même résolution ; leur confirmation
-nommée (``confirm_project``) est appliquée par ``cmd_cockpit``.
+Depuis le lot 5 (2026-11-12), tout projet enrôlé se pilote comme le projet
+d'ouverture : plus de confirmation nommée. Le journal de la garde
+(``write-guard.jsonl``) continue de noter le projet visé de chaque écriture.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from urllib.parse import parse_qs, urlparse
 
 from grimoire.tools.project_registry import registered_root, selected_slug
 from grimoire.tools.workspace_routes import PREFIX
-from grimoire.tools.workspace_write_guard import cockpit_journal_path, journal_event
 
 #: Écritures d'AUTORITÉ (lot 3, 2026-11-08) : le mandat, le pilote automatique
 #: et les fournisseurs. Comme toute écriture de la vue de travail, elles visent
@@ -51,25 +50,26 @@ def is_authority_write(path: str) -> bool:
 def write_refusal_status(path: str) -> tuple[int, str]:
     """``(code, message)`` quand la cible d'une écriture ne résout pas.
 
-    Les autres écritures gardent le 403 « lecture seule » du lot 1. Une écriture
-    d'autorité (lot 3) nomme sa cible : slug absent de l'URL → 400 (rien ne dit
-    où écrire), slug inconnu ou dossier disparu → 404 (le registre ne le rend pas).
+    Un slug absent de l'URL garde le refus historique — 403 « lecture seule »,
+    ou 400 « projet non nommé » pour une écriture d'autorité, qui doit nommer sa
+    cible. Un slug présent mais inconnu du registre (ou dont le dossier a
+    disparu) est un 404 : la cible n'existe pas, ce n'est pas une permission
+    manquante.
     """
-    if not is_authority_write(urlparse(path).path):
-        return 403, "hôte en lecture seule"
     if not explicit_query_slug(path):
-        return 400, "projet non nommé"
+        if is_authority_write(urlparse(path).path):
+            return 400, "projet non nommé"
+        return 403, "hôte en lecture seule"
     return 404, "projet inconnu ou non enrôlé"
 
 
 def body_mismatch_status(path: str) -> int:
     """Code de refus quand le ``project`` du corps contredit ``?project=``.
 
-    Une écriture d'autorité (lot 3) nomme sa cible dans le corps : le
-    contredire est une requête mal formée, donc 400. Les autres écritures
-    gardent le refus du lot 1 (403), qui ne promettait pas de cible au corps.
+    Le corps nomme une cible qui diffère de l'URL : requête mal formée, donc
+    400 pour toute écriture (lot 5, 2026-11-12).
     """
-    return 400 if is_authority_write(urlparse(path).path) else 403
+    return 400
 
 
 def query_slug(path: str) -> str:
@@ -146,47 +146,7 @@ def body_confirms_slug(body: Any, path: str) -> bool:
     return not wanted or wanted == explicit_query_slug(path)
 
 
-def sensitive_write_refusal(body: Any, path: str, home_slug: str | None) -> str | None:
-    """Message de refus d'une écriture sensible, ou ``None`` si elle est confirmée.
-
-    Lot 2 : ``file/write``, ``file/override`` et ``command`` acceptent n'importe
-    quel projet enrôlé, mais un projet AUTRE que celui d'ouverture exige
-    ``confirm_project`` égal au slug visé. Le projet d'ouverture garde le geste
-    historique (sans confirmation) ; un corps qui nomme un autre slug reste
-    refusé, comme pour les autres écritures.
-    """
-    slug = explicit_query_slug(path)
-    confirmed = str(body.get("confirm_project") or "").strip() if isinstance(body, dict) else ""
-    if slug == home_slug or confirmed == slug:
-        return None
-    return f"écriture sensible sur « {slug} » : `confirm_project` = « {slug} » requis"
-
-
-def journal_confirmation(method: str, route: str, project: str, confirm_project: str) -> str | None:
-    """Inscrit la confirmation nommée au journal de la garde d'écriture.
-
-    ``guard_write`` journalise avant la lecture du corps, donc il ne peut pas
-    connaître ``confirm_project``. Une écriture sensible validée ajoute cette
-    seconde ligne (geste ``confirm_project``). Fail-closed comme la garde : sur
-    ``OSError``, rend le message du 503 et l'écriture ne doit pas avoir lieu.
-    """
-    try:
-        journal_event(
-            cockpit_journal_path(),
-            {
-                "route": route,
-                "method": method,
-                "gesture": "confirm_project",
-                "project": project,
-                "confirm_project": confirm_project,
-            },
-        )
-    except OSError as exc:
-        return f"journal de la garde non inscriptible ({cockpit_journal_path()}) : écriture refusée — {exc}"
-    return None
-
-
-def unresolvable_status(path: str, home_slug: str | None) -> dict[str, object] | None:
+def unresolvable_status(path: str, opening_slug: str | None) -> dict[str, object] | None:
     """Statut minimal en lecture seule si la cible ne résout pas, sinon ``None``.
 
     Une cible non résoluble (absente du registre, dossier disparu) garde une
@@ -202,7 +162,7 @@ def unresolvable_status(path: str, home_slug: str | None) -> dict[str, object] |
         "readOnly": True,
         "project": slug,
         "slug": slug or None,
-        "home": home_slug or None,
+        "home": opening_slug or None,
         "env": "local",
         "demo": False,
     }

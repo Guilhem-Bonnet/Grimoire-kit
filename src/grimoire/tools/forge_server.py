@@ -206,7 +206,7 @@ class ForgeAPI:
         if not proot.is_dir():
             msg = f"pas un dossier : {proot}"
             raise FileNotFoundError(msg)
-        slug = register_project(proot) or slug_for_path(proot)
+        slug = register_project(proot, implicit=True) or slug_for_path(proot)
         return {"slug": slug, "path": str(proot), "added": True,
                 "is_grimoire": looks_grimoire(proot)}
 
@@ -231,7 +231,7 @@ class ForgeAPI:
         if target is None:
             msg = f"projet introuvable : {path or slug or '(vide)'}"
             raise FileNotFoundError(msg)
-        register_project(target)
+        register_project(target, implicit=True)
         resolved_slug = slug_for_path(target)
         if resolved_slug:
             set_selected_slug(resolved_slug)

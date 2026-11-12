@@ -229,8 +229,8 @@ def test_forget_selection_keeps_a_selection_still_present(registry: dict[str, Pa
 
 @pytest.fixture
 def server(registry: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "servi")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", registry["served"])
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "servi")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", registry["served"])
     cmd_cockpit._API_CACHE.clear()
     serve_dir = tmp_path / "serve"
     serve_dir.mkdir()
