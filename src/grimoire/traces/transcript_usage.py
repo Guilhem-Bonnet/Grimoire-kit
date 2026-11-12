@@ -18,12 +18,15 @@ Règles, chacune prise sur le journal réel :
   qui a grandi au milieu d'un groupe, n'écrit rien de plus. Le fichier source fait
   partie de la clé : le même ``message.id`` dans deux fichiers reste deux appels.
 * **Jamais de chiffre inventé.** Une ligne dont les compteurs sont absents ou
-  invalides est comptée dans ``invalid_usage``, pas ajoutée. Le coût d'un appel est
-  inconnu (``None``) quand le modèle n'est pas tarifé ou que des tokens de cache
-  existent : la table de tarifs (:mod:`grimoire.tools.cost_model`) ne modélise pas
-  les tarifs de cache, les chiffrer au tarif d'entrée serait faux. Le tarif
-  optionnel ``models[].pricing`` du registre du projet (issue #1152) prime quand
-  il existe, y compris pour le cache lu ; absent, le coût reste inconnu.
+  invalides est comptée dans ``invalid_usage``, pas ajoutée. Le coût d'un appel
+  est inconnu (``None``) quand le modèle n'est pas tarifé ou quand une écriture
+  en cache n'est pas répartie par durée (``usage.cache_creation.
+  ephemeral_5m_input_tokens`` / ``ephemeral_1h_input_tokens``) : la durée ne se
+  suppose jamais. La table de tarifs (:mod:`grimoire.tools.cost_model`) porte
+  les tarifs d'entrée, de sortie, de lecture et d'écriture (5 min et 1 h) du
+  cache. Le tarif optionnel ``models[].pricing`` du registre du projet
+  (issue #1152) prime quand il existe, y compris pour le cache ; absent, le
+  coût reste inconnu.
 
 * **Une tâche à la fois, sur une fenêtre.** Un journal de session peut couvrir
   plusieurs tâches successives ; ses appels n'appartiennent qu'à une seule trace
@@ -48,7 +51,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.costs import Cost
-from grimoire.tools.cost_model import rate_for
+from grimoire.tools.cost_model import rate_for_call, rates_cost_usd
 from grimoire.traces.ledger import TraceLedger
 from grimoire.traces.schemas import TokenUsage, TraceOutcome, TraceRecord
 
@@ -63,6 +66,9 @@ SOURCE_CLAUDE_TRANSCRIPT = "claude-code-transcript"
 SOURCE_TAG_PREFIX = "usage.source:"
 CACHE_READ_TAG_PREFIX = "usage.cache_read:"
 CACHE_CREATION_TAG_PREFIX = "usage.cache_creation:"
+#: Répartition de l'écriture en cache par durée ; valeur vide quand le journal ne la porte pas.
+CACHE_WRITE_5M_TAG_PREFIX = "usage.cache_write_5m:"
+CACHE_WRITE_1H_TAG_PREFIX = "usage.cache_write_1h:"
 #: Agent que le journal attribue à l'appel (``attributionAgent``). Un tag, jamais ``agent_id`` :
 #: ``agent_id`` compte un *choix* d'agent (``workspace_api._agent_usage``), or une ligne du
 #: journal est un appel API, pas un choix.
@@ -85,6 +91,9 @@ class UsageCall:
     output_tokens: int
     cache_read_tokens: int
     cache_creation_tokens: int
+    #: Répartition de ``cache_creation_tokens`` par durée, ``None`` si le journal ne la porte pas.
+    cache_write_5m_tokens: int | None
+    cache_write_1h_tokens: int | None
     timestamp: str
     agent: str
     session_id: str
@@ -148,6 +157,25 @@ def _count(value: Any) -> int | None:
     return value
 
 
+def _cache_write_breakdown(usage: dict[str, Any], cache_creation: int) -> tuple[int | None, int | None]:
+    """Répartition ``(5 min, 1 h)`` de l'écriture en cache, ``(None, None)`` si absente.
+
+    Sans écriture, la répartition vaut ``(0, 0)``. Avec une écriture, seule la
+    table ``usage.cache_creation`` du journal donne la durée : sans elle, le
+    coût reste inconnu (on ne suppose jamais 5 min plutôt que 1 h).
+    """
+    if cache_creation == 0:
+        return 0, 0
+    breakdown = usage.get("cache_creation")
+    if not isinstance(breakdown, dict):
+        return None, None
+    write_5m = _count(breakdown.get("ephemeral_5m_input_tokens"))
+    write_1h = _count(breakdown.get("ephemeral_1h_input_tokens"))
+    if write_5m is None or write_1h is None or write_5m + write_1h != cache_creation:
+        return None, None
+    return write_5m, write_1h
+
+
 def _call_from_line(line: dict[str, Any]) -> UsageCall | None:
     """L'appel porté par une ligne ``assistant``, ``None`` si les compteurs ne sont pas exploitables."""
     message = line.get("message")
@@ -163,6 +191,7 @@ def _call_from_line(line: dict[str, Any]) -> UsageCall | None:
     raw_id = _text(message.get("id") or line.get("uuid"))
     if not raw_id:
         return None
+    write_5m, write_1h = _cache_write_breakdown(usage, cache_creation)
     return UsageCall(
         message_id=raw_id,
         model=_text(message.get("model")),
@@ -170,10 +199,21 @@ def _call_from_line(line: dict[str, Any]) -> UsageCall | None:
         output_tokens=tokens_out,
         cache_read_tokens=cache_read,
         cache_creation_tokens=cache_creation,
+        cache_write_5m_tokens=write_5m,
+        cache_write_1h_tokens=write_1h,
         timestamp=_text(line.get("timestamp")),
         agent=_text(line.get("attributionAgent")),
         session_id=_text(line.get("sessionId")),
     )
+
+
+def _max_optional(first: int | None, second: int | None) -> int | None:
+    """Maximum de deux compteurs optionnels, ``None`` seulement si les deux le sont."""
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return max(first, second)
 
 
 def read_claude_transcript(path: Path) -> TranscriptRead:
@@ -217,6 +257,8 @@ def read_claude_transcript(path: Path) -> TranscriptRead:
                 output_tokens=max(first.output_tokens, call.output_tokens),
                 cache_read_tokens=max(first.cache_read_tokens, call.cache_read_tokens),
                 cache_creation_tokens=max(first.cache_creation_tokens, call.cache_creation_tokens),
+                cache_write_5m_tokens=_max_optional(first.cache_write_5m_tokens, call.cache_write_5m_tokens),
+                cache_write_1h_tokens=_max_optional(first.cache_write_1h_tokens, call.cache_write_1h_tokens),
                 timestamp=first.timestamp or call.timestamp,
                 agent=first.agent or call.agent,
                 session_id=first.session_id or call.session_id,
@@ -235,9 +277,11 @@ def call_cost_usd(call: UsageCall, pricing: ModelPricing | None = None) -> float
 
     *pricing* est le tarif catalogue que le registre du projet déclare pour ce
     modèle (``models[].pricing``, issue #1152) : quand il existe, il prime et
-    couvre aussi les tokens de cache lus. Sinon, la table versionnée
-    :mod:`grimoire.tools.cost_model` s'applique, et des tokens de cache ou un
-    modèle absent de la table donnent ``None`` — jamais ``0.0``.
+    couvre le cache lu comme les écritures 5 min / 1 h. Sinon, la table
+    versionnée :mod:`grimoire.tools.cost_model` s'applique (palier haut de
+    Haiku 5.5 choisi selon la longueur du prompt). Un modèle absent de la table,
+    ou une écriture en cache sans répartition par durée, donne ``None`` — jamais
+    ``0.0``.
     """
     if pricing is not None:
         return pricing.cost_usd(
@@ -245,13 +289,22 @@ def call_cost_usd(call: UsageCall, pricing: ModelPricing | None = None) -> float
             output_tokens=call.output_tokens,
             cache_read_tokens=call.cache_read_tokens,
             cache_creation_tokens=call.cache_creation_tokens,
+            cache_write_5m_tokens=call.cache_write_5m_tokens,
+            cache_write_1h_tokens=call.cache_write_1h_tokens,
         )
-    if call.cache_read_tokens or call.cache_creation_tokens:
-        return None
-    rates = rate_for(call.model)
+    prompt_tokens = call.input_tokens + call.cache_read_tokens + call.cache_creation_tokens
+    rates = rate_for_call(call.model, prompt_tokens)
     if rates is None:
         return None
-    return round((call.input_tokens * rates["in"] + call.output_tokens * rates["out"]) / 1_000_000, 6)
+    return rates_cost_usd(
+        rates,
+        input_tokens=call.input_tokens,
+        output_tokens=call.output_tokens,
+        cache_read_tokens=call.cache_read_tokens,
+        cache_creation_tokens=call.cache_creation_tokens,
+        cache_write_5m_tokens=call.cache_write_5m_tokens,
+        cache_write_1h_tokens=call.cache_write_1h_tokens,
+    )
 
 
 def _trace_for(
@@ -282,6 +335,8 @@ def _trace_for(
             f"{SOURCE_TAG_PREFIX}{SOURCE_CLAUDE_TRANSCRIPT}",
             f"{CACHE_READ_TAG_PREFIX}{call.cache_read_tokens}",
             f"{CACHE_CREATION_TAG_PREFIX}{call.cache_creation_tokens}",
+            f"{CACHE_WRITE_5M_TAG_PREFIX}{'' if call.cache_write_5m_tokens is None else call.cache_write_5m_tokens}",
+            f"{CACHE_WRITE_1H_TAG_PREFIX}{'' if call.cache_write_1h_tokens is None else call.cache_write_1h_tokens}",
             *((f"{AGENT_TAG_PREFIX}{call.agent}",) if call.agent else ()),
         ),
     )
@@ -386,6 +441,12 @@ def _tag_count(tags: Iterable[str], prefix: str) -> int:
     return int(value) if value.isdigit() else 0
 
 
+def _tag_optional_count(tags: Iterable[str], prefix: str) -> int | None:
+    """Compteur d'un tag d'écriture en cache ; ``None`` quand le tag est absent ou vide."""
+    value = _tag_value(tags, prefix)
+    return int(value) if value.isdigit() else None
+
+
 def _trace_cost(trace: TraceRecord, pricing_for: PricingLookup | None) -> Cost:
     """Coût d'une trace repliée, re-tarifé par le registre quand il price son modèle.
 
@@ -403,6 +464,8 @@ def _trace_cost(trace: TraceRecord, pricing_for: PricingLookup | None) -> Cost:
                     output_tokens=trace.token_usage.completion_tokens,
                     cache_read_tokens=_tag_count(trace.tags, CACHE_READ_TAG_PREFIX),
                     cache_creation_tokens=_tag_count(trace.tags, CACHE_CREATION_TAG_PREFIX),
+                    cache_write_5m_tokens=_tag_optional_count(trace.tags, CACHE_WRITE_5M_TAG_PREFIX),
+                    cache_write_1h_tokens=_tag_optional_count(trace.tags, CACHE_WRITE_1H_TAG_PREFIX),
                 )
             )
     return trace.token_usage.cost

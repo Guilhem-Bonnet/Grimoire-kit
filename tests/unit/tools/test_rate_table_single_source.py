@@ -132,7 +132,8 @@ class TestPayloadIsPerVersion:
     def test_model_rates_is_the_single_table_by_exact_version(self) -> None:
         payload = cm.cost_model()
         assert payload["modelRates"] == cm.MODEL_RATES
-        assert payload["modelRates"]["sonnet-4-6"] == {"in": 3.0, "out": 15.0}
+        sonnet = payload["modelRates"]["sonnet-4-6"]
+        assert (sonnet["in"], sonnet["out"]) == (3.0, 15.0)
         assert "opus" not in payload["modelRates"]
 
     def test_aliases_point_to_rows_of_the_table(self) -> None:
@@ -193,7 +194,7 @@ class TestCostViewReadsThePythonTable:
         aliases = cm.cost_model()["modelAliases"]
         for alias in ("opus", "sonnet", "haiku"):
             assert online[alias] == cm.MODEL_RATES[aliases[alias]]
-        assert online["opus"] == {"in": 4.0, "out": 20.0}  # et non plus 15/75 en dur
+        assert (online["opus"]["in"], online["opus"]["out"]) == (4.0, 20.0)  # et non plus 15/75 en dur
         assert online["label"] == "4/20 $ par MTok"
         # Un agent : 20 k-tokens en entrée, 9 en sortie, au tarif Python d'opus.
         assert online["usd"] == pytest.approx((20 * 4.0 + 9 * 20.0) / 1000)

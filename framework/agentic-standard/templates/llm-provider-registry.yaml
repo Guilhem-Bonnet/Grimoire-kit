@@ -19,18 +19,23 @@ metadata:
 #   pricing     : tarif catalogue optionnel d'un modèle (issue #1152), en
 #                 dollars par million de tokens :
 #                   {input_per_mtok: 0.27, output_per_mtok: 1.10,
-#                    cache_read_per_mtok: 0.07}
-#                 `cache_read_per_mtok` est facultatif, `input_per_mtok` et
-#                 `output_per_mtok` sont requis ; `grimoire task show` en chiffre
-#                 l'usage des appels repliés depuis le journal de session. Sans
-#                 pricing (ou sans tarif pour le cache lu), le coût reste
-#                 inconnu, jamais 0. Exemple commenté :
+#                    cache_read_per_mtok: 0.07,
+#                    cache_write_5m_per_mtok: 0.3375,
+#                    cache_write_1h_per_mtok: 0.54}
+#                 `input_per_mtok` et `output_per_mtok` sont requis ; les trois
+#                 tarifs de cache (lecture, écriture 5 min, écriture 1 h) sont
+#                 facultatifs. `grimoire task show` en chiffre l'usage des
+#                 appels repliés depuis le journal de session. Un tarif manquant
+#                 — ou une écriture en cache sans répartition par durée — laisse
+#                 le coût inconnu, jamais 0. Exemple commenté :
 #                   #   - id: "mon-modele"
 #                   #     tier: "mid"
 #                   #     pricing:
 #                   #       input_per_mtok: 0.27
 #                   #       output_per_mtok: 1.10
 #                   #       cache_read_per_mtok: 0.07
+#                   #       cache_write_5m_per_mtok: 0.3375
+#                   #       cache_write_1h_per_mtok: 0.54
 # Un tier ou une currency hors de ce vocabulaire est une erreur de vérification
 # (providers.model_tier_invalid / providers.currency_invalid).
 
