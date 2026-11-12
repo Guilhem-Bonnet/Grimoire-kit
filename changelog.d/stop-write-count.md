@@ -1,1 +1,1 @@
-- fix(hosts): le hook de clôture ne compte que les écritures réelles dans le projet — les lectures Bash, les écritures hors racine et les lectures d'un sous-agent ne pèsent plus sur le `Stop`
+- fix(hosts): le hook de clôture ne compte que les écritures réelles dans le projet — les lectures Bash, les écritures hors racine et les lectures d'un sous-agent ne pèsent plus sur le `Stop` (#1204)
