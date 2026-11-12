@@ -149,7 +149,7 @@ def cockpit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Host]:
     monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "ck"))
     project = _project(tmp_path)
     slug = project_registry.register_project(project)
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", slug)
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", slug)
     project_registry.set_selected_slug(slug)
     serve_dir = tmp_path / "serve"
     (serve_dir / "data").mkdir(parents=True)

@@ -216,14 +216,59 @@ def is_scratch_path(path: Path) -> bool:
     return relative is not None and len(relative.parts) <= 2
 
 
-def register_project(path: Path, name: str | None = None) -> str | None:
+#: Dossiers du répertoire personnel où une exécution (agent, cache, session)
+#: crée des projets qui ne sont pas destinés à durer.
+_DISPOSABLE_HOME_DIRS = (".cache", ".claude/jobs")
+
+#: Marqueur d'un arbre de travail git : ``<dépôt>/.git/grimoire/worktrees/<tâche>``.
+_WORKTREE_MARKERS = (".git", "grimoire", "worktrees")
+
+
+def is_disposable_path(path: Path) -> bool:
+    """Vrai si ``path`` est un dossier jetable qu'un enrôlement IMPLICITE ignore.
+
+    Trois familles, toutes trouvées dans un registre réel (2026-11-12 : douze
+    entrées parasites sur quinze) :
+
+    - la racine temporaire du système, à faible profondeur (``/tmp/tmpXXXX``) ;
+    - ``~/.cache`` et ``~/.claude/jobs``, où vivent caches et sessions d'agents ;
+    - un arbre de travail git sous ``.git/grimoire/worktrees/``.
+
+    Le garde ne vaut que pour l'enrôlement implicite (``serve``/``start``,
+    ``init``, routes de ``forge_server``). ``grimoire cockpit add`` explicite
+    reste possible partout : là, la personne a désigné le dossier.
+    """
+    if is_scratch_path(path):
+        return True
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    home = Path.home()
+    for rel in _DISPOSABLE_HOME_DIRS:
+        root = (home / rel).resolve()
+        if resolved == root or root in resolved.parents:
+            return True
+    parts = resolved.parts
+    width = len(_WORKTREE_MARKERS)
+    return any(
+        tuple(parts[i : i + width]) == _WORKTREE_MARKERS for i in range(len(parts) - width + 1)
+    )
+
+
+def register_project(path: Path, name: str | None = None, *, implicit: bool = False) -> str | None:
     """Enregistre un projet (idempotent).
 
     Renvoie le slug attribué si l'entrée est neuve, ``None`` si le chemin n'est
-    pas un dossier ou est déjà au registre.
+    pas un dossier, est déjà au registre, ou — pour un enrôlement ``implicit``
+    (``serve``/``start``/``init``/``forge_server``) — s'il s'agit d'un dossier
+    jetable au sens de :func:`is_disposable_path`. ``grimoire cockpit add``
+    garde le défaut ``implicit=False`` et n'exclut donc rien.
     """
     proot = path.expanduser().resolve()
     if not proot.is_dir():
+        return None
+    if implicit and is_disposable_path(proot):
         return None
     projects = load_registry()
     if any(p.get("path") == str(proot) for p in projects):

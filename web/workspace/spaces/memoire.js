@@ -15,9 +15,9 @@
 //   qu'en comptes (le serveur ne les rend jamais) ;
 // - aucun bouton inerte : Corriger, Marquer remplacée… (P34, `memoire-gestes.js`)
 //   et Supprimer… passent par `POST /api/memory`, gouvernée côté cockpit.
-//   Les gestes de correction restent ouverts au seul projet servi (P02) ;
-//   depuis le lot 2, la suppression accepte tout projet enrôlé, après une
-//   modale qui nomme le projet visé (`confirm_project`). Chaque geste s'ouvre
+//   Depuis le lot 5 (2026-11-12), gestes de correction (P02) et suppression
+//   acceptent tout projet enrôlé, comme le projet d'ouverture, sans confirmation
+//   nommée ; l'application d'un geste garde son accord explicite. Chaque geste s'ouvre
 //   dans le panneau, avec aperçu avant/après ou confirmation, et dit son
 //   résultat sur place ; hors de toute cible enrôlée, ils sont absents et la
 //   raison est écrite ;
@@ -267,14 +267,11 @@ export async function mount(root, ctx) {
 
   const allScope = Boolean(ctx.scope && ctx.scope.all);
   const homeSlug = (ctx.host.status && ctx.host.status.home) || ctx.host.project || '';
-  // Lot 2 : la suppression accepte tout projet ENRÔLÉ — le serveur exige
-  // `confirm_project`, et `api.memoryDelete` ouvre la modale qui nomme le
-  // projet avant l'envoi. Les gestes de correction, eux, restent réservés au
-  // projet d'ouverture (P02) : leur aperçu/application n'a pas cette
-  // confirmation nommée.
+  // Lot 5 : suppression ET gestes de correction (P02) acceptent tout projet
+  // ENRÔLÉ, comme le projet d'ouverture — le serveur résout `project` par le
+  // registre. L'application d'un geste garde son accord explicite.
   const canDelete = ctx.host.kind === 'cockpit' && !ctx.host.readOnly;
-  const canCorrect = canDelete && Boolean(homeSlug)
-    && (allScope ? false : ctx.host.project === homeSlug);
+  const canCorrect = canDelete;
   const params = ctx.params || {};
 
   // `types` dans l'URL (clic sur un hall de la carte, P73) : la vue s'ouvre
@@ -738,9 +735,8 @@ export async function mount(root, ctx) {
     if (entry.tags && entry.tags.length) add('Tags', entry.tags.join(', '));
     box.append(kv);
 
-    // Gestes de correction : projet d'ouverture seulement. Suppression : tout
-    // projet enrôlé (lot 2), avec la modale de confirmation nommée côté API.
-    const ownProject = canCorrect && (allScope ? entry.projectSlug === homeSlug : true);
+    // Gestes de correction et suppression : tout projet enrôlé (lot 5).
+    const ownProject = canCorrect && (allScope ? Boolean(entry.projectSlug) : true);
     const mayDelete = canDelete && (allScope ? Boolean(entry.projectSlug) : true);
     const actions = el('div', 'kn-actions');
     // P42 : « Demander une correction » — résultat attendu + consigne ; une tâche est ouverte,
@@ -863,7 +859,7 @@ const gesture = (kind, row) => {
   const readOnlyReason = () => {
     if (ctx.host.kind !== 'cockpit') return 'Correction depuis le cockpit seulement : lance « grimoire cockpit serve » dans ce projet.';
     if (ctx.host.readOnly) return 'Ce projet n’est pas enrôlé dans ce cockpit, ou son dossier a disparu : rien ne s’y écrit.';
-    return `Correction réservée au projet que ce cockpit sert (${homeSlug || 'projet de lancement'}) : la suppression, elle, accepte tout projet enrôlé.`;
+    return 'Aucune cible enrôlée : gestes et suppression sont indisponibles.';
   };
 
   /** Une projection ne se corrige pas : sa source, si. */
@@ -911,11 +907,9 @@ const gesture = (kind, row) => {
           ? { tone: 'ok', text: 'Entrée supprimée.' }
           : { tone: 'bad', text: `Suppression refusée : ${failureOf(res)}` };
       } catch (error) {
-        // Modale de confirmation annulée (lot 2) : rien n'est parti, ce n'est
-        // pas un refus du serveur — on le dit sans ton d'échec.
-        outcome = error && error.code === 499
-          ? { tone: 'warn', text: 'Suppression annulée.' }
-          : { tone: 'bad', text: `Suppression refusée : ${error && error.message ? error.message : 'API injoignable'}` };
+        // Plus de modale depuis le lot 5 : un échec est toujours un refus du
+        // serveur ou une API injoignable, jamais une annulation.
+        outcome = { tone: 'bad', text: `Suppression refusée : ${error && error.message ? error.message : 'API injoignable'}` };
       }
       if (ctx.signal.aborted) return;
       if (outcome.tone === 'ok') {

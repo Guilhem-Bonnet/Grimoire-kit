@@ -18,11 +18,11 @@ ENRÔLÉ, nommé par ``?project=`` et résolu par le registre seul : un seul
 cockpit écrit donc sur toute sa flotte, pas seulement sur le projet qu'il a
 ouvert (lot 1 de l'écriture multi-projets, 2026-11-07).
 
-Trois écritures sont SENSIBLES (lot 2, 2026-11-08) : écrire un fichier, créer
-un override et lancer une commande — voir :func:`is_sensitive_write`. Elles
-acceptent désormais n'importe quel projet ENRÔLÉ, à condition que le corps
-porte ``confirm_project`` égal au slug visé : l'hôte refuse une cible dont la
-confirmation est absente ou ne la nomme pas.
+Écrire un fichier, créer un override, lancer une commande et muter la mémoire
+acceptent n'importe quel projet ENRÔLÉ (lot 5, 2026-11-12) : tout projet enrôlé
+se pilote comme le projet d'ouverture, sans confirmation nommée. La garde
+d'écriture du cockpit (Origin, ``Sec-Fetch-Site``, jeton, hôte loopback) et le
+journal ``write-guard.jsonl`` — qui note le projet visé — restent inchangés.
 
 Les anciennes dérogations nommées (décider une proposition, #490 ; migrer un
 board, #559/#560 ; agir depuis le portefeuille, #638) gardent leur sens comme
@@ -90,7 +90,6 @@ __all__ = [
     "WORKSPACE_UNHANDLED",
     "is_proposal_decision",
     "is_registry_scoped_write",
-    "is_sensitive_write",
     "workspace_get",
     "workspace_post",
     "workspace_stream",
@@ -99,32 +98,6 @@ __all__ = [
 #: Tout ce que la vue de travail ajoute vit sous ce préfixe : aucune collision
 #: possible avec les routes héritées, et un seul `startswith` à câbler par hôte.
 PREFIX = "/api/workspace/"
-
-#: Écritures SENSIBLES : elles touchent des fichiers ou lancent un processus
-#: hors du contrat « tâche/proposition ». Depuis le lot 2 (2026-11-08), elles
-#: acceptent n'importe quel projet ENRÔLÉ, à condition que le corps porte
-#: ``confirm_project: "<slug>"`` égal au slug visé — le front ouvre d'abord une
-#: modale qui nomme le projet. L'hôte applique la condition ; la liste des
-#: routes concernées vit ici, près des routes qu'elle décrit.
-SENSITIVE_WRITES = frozenset(
-    {
-        f"{PREFIX}command",
-        f"{PREFIX}file/override",
-        f"{PREFIX}file/write",
-    }
-)
-
-
-def is_sensitive_write(path: str) -> bool:
-    """Vrai pour une écriture qui exige ``confirm_project`` sur un autre projet.
-
-    Le cockpit résout toute écriture de la vue de travail par le registre
-    (``enrolled_write_root``). ``file/write``, ``file/override`` et ``command``
-    y ajoutent la confirmation nommée dès que la cible n'est pas le projet
-    d'ouverture ; le projet d'ouverture garde le geste historique.
-    """
-    return path in SENSITIVE_WRITES
-
 
 #: Sentinelle, même contrat que ``forge_routes.API_GET_UNHANDLED`` : distingue
 #: « chemin inconnu » d'une route qui rendrait légitimement ``None``.
@@ -777,8 +750,7 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
     return WORKSPACE_UNHANDLED
 
 
-# ── Écritures (cible résolue par l'hôte ; confirmation nommée pour les plus
-# sensibles depuis le lot 2) ─────────────────────────────────────────────────
+# ── Écritures (cible résolue par l'hôte ; tout projet enrôlé depuis le lot 5) ─
 
 
 def _create_override(project_root: Path, body: dict[str, Any]) -> Any:
@@ -1350,13 +1322,12 @@ def _proposal_route(path: str) -> tuple[str, str] | None:
 def is_proposal_decision(path: str) -> bool:
     """Vrai pour ``proposals/<slug>/accept`` ou ``…/reject`` — jamais autre chose.
 
-    Le seul point d'entrée que ``cmd_cockpit.py`` interroge pour ouvrir, pour
-    cette écriture précise, la même porte que ``POST /api/projects/update``
-    plutôt que la garde ``_HOME_SLUG`` générale (issue #490, voir le docstring
-    du module). Volontairement étroit : un chemin qui ressemble à une
-    proposition sans être exactement un ``accept``/``reject`` (une future
-    action, une faute de frappe côté client) reste soumis à la garde par
-    défaut plutôt que de s'y dérober par accident.
+    Historiquement, le seul point d'entrée que ``cmd_cockpit.py`` interrogeait
+    pour ouvrir, pour cette écriture précise, la même porte que ``POST
+    /api/projects/update`` plutôt que l'ancienne garde « projet d'ouverture »
+    (issue #490, voir le docstring du module). Depuis le lot 5, toute écriture
+    passe par la porte commune ; le prédicat reste étroit pour que les tests
+    distinguent ces gestes sans qu'une faute de frappe se dérobe par accident.
     """
     if not path.startswith(f"{PREFIX}proposals/"):
         return False
@@ -1380,8 +1351,8 @@ def is_registry_scoped_write(path: str) -> bool:
     """Vrai pour ``tasks/migrate-standard`` et pour une action du portefeuille
     ``portfolio/tasks/<id>/<claim|move|block|close>``.
 
-    Historiquement, les dérogations nommées à la garde ``_HOME_SLUG`` (issue
-    #559 suite, #560, #638). Depuis le lot 1 de l'écriture multi-projets,
+    Historiquement, les dérogations nommées à la garde « projet d'ouverture »
+    (issue #559 suite, #560, #638). Depuis le lot 1 de l'écriture multi-projets,
     toutes ces routes passent par la porte commune des projets enrôlés ; le
     prédicat reste le point d'entrée qui nomme ces écritures et les tests
     s'en servent pour les distinguer. Le ``TaskService`` du projet
