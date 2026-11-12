@@ -56,6 +56,8 @@ class ModelPricing:
     input_per_mtok: float
     output_per_mtok: float
     cache_read_per_mtok: float | None = None
+    cache_write_5m_per_mtok: float | None = None
+    cache_write_1h_per_mtok: float | None = None
 
     def cost_usd(
         self,
@@ -64,19 +66,37 @@ class ModelPricing:
         output_tokens: int,
         cache_read_tokens: int = 0,
         cache_creation_tokens: int = 0,
+        cache_write_5m_tokens: int | None = None,
+        cache_write_1h_tokens: int | None = None,
     ) -> float | None:
         """Coût $ de l'appel, ou ``None`` dès qu'un compteur n'a pas de tarif déclaré.
 
-        Les tokens de cache lus sont facturés à ``cache_read_per_mtok`` ; sans ce
-        tarif (ou avec des tokens de cache écrits, que ce champ ne modélise pas),
-        l'appel reste inconnu plutôt que de prendre le tarif d'entrée — un
-        chiffre faux ferait croire à une facture qu'on n'a pas (#1152).
+        Les tokens de cache lus sont facturés à ``cache_read_per_mtok`` ; les
+        écritures à ``cache_write_5m_per_mtok`` / ``cache_write_1h_per_mtok``,
+        selon la répartition de durée de l'appel. Un tarif absent laisse l'appel
+        inconnu plutôt que de prendre le tarif d'entrée — un chiffre faux ferait
+        croire à une facture qu'on n'a pas (#1152). Une écriture sans répartition
+        5 min / 1 h reste inconnue : la durée ne se suppose jamais.
         """
-        if cache_creation_tokens or (cache_read_tokens and self.cache_read_per_mtok is None):
+        if cache_read_tokens and self.cache_read_per_mtok is None:
+            return None
+        if cache_creation_tokens > 0 and (cache_write_5m_tokens is None or cache_write_1h_tokens is None):
+            return None
+        write_5m = cache_write_5m_tokens or 0
+        write_1h = cache_write_1h_tokens or 0
+        rate_5m = self.cache_write_5m_per_mtok
+        rate_1h = self.cache_write_1h_per_mtok
+        if write_5m and rate_5m is None:
+            return None
+        if write_1h and rate_1h is None:
             return None
         total = input_tokens * self.input_per_mtok + output_tokens * self.output_per_mtok
         if cache_read_tokens and self.cache_read_per_mtok is not None:
             total += cache_read_tokens * self.cache_read_per_mtok
+        if write_5m and rate_5m is not None:
+            total += write_5m * rate_5m
+        if write_1h and rate_1h is not None:
+            total += write_1h * rate_1h
         return round(total / 1_000_000, 6)
 
 
@@ -163,7 +183,8 @@ def _model_pricing(value: Any) -> ModelPricing | None:
 
     Un tarif invalide (champ manquant, négatif, non numérique) n'est pas une
     erreur de lecture : le modèle reste utilisable, simplement non chiffré — le
-    pire des deux maux serait un coût inventé.
+    pire des deux maux serait un coût inventé. Les tarifs d'écriture en cache
+    sont optionnels : absents, un appel qui écrit le cache reste inconnu.
     """
     if not isinstance(value, dict):
         return None
@@ -171,11 +192,14 @@ def _model_pricing(value: Any) -> ModelPricing | None:
     output_rate = _rate(value.get("output_per_mtok"))
     if input_rate is None or output_rate is None:
         return None
-    raw_cache_read = value.get("cache_read_per_mtok")
-    cache_read_rate = None if raw_cache_read is None else _rate(raw_cache_read)
-    if raw_cache_read is not None and cache_read_rate is None:
-        return None
-    return ModelPricing(input_rate, output_rate, cache_read_rate)
+    optional: list[float | None] = []
+    for name in ("cache_read_per_mtok", "cache_write_5m_per_mtok", "cache_write_1h_per_mtok"):
+        raw = value.get(name)
+        rate = None if raw is None else _rate(raw)
+        if raw is not None and rate is None:
+            return None
+        optional.append(rate)
+    return ModelPricing(input_rate, output_rate, *optional)
 
 
 def _model_specs(value: Any) -> tuple[ModelSpec, ...]:
