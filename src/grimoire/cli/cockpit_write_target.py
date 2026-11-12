@@ -117,8 +117,17 @@ def read_root(path: str) -> Path | None:
     Sans paramètre, le repli historique reste en place : la sélection courante
     (``selected_slug``, elle-même retombant sur le projet primaire), pour que
     les liens ouverts avant le lot 4 continuent de marcher.
+
+    ``project=*`` (Flotte en direct, issue #1193) n'est pas un slug : c'est la
+    demande de TOUS les projets enrôlés. La route n'en a pas besoin pour
+    servir — elle lit le registre elle-même — mais l'hôte doit lui donner une
+    racine pour passer le contrôle d'existence : la sélection courante, comme
+    une lecture sans paramètre. Les autres lectures refusent toujours ``*`` :
+    une étoile ne désigne pas de projet qu'on pourrait lire fichier par fichier.
     """
     slug = explicit_query_slug(path)
+    if slug == "*" and urlparse(path).path == f"{PREFIX}fleet/live":
+        return registered_root(slug=selected_slug())
     return registered_root(slug=slug or selected_slug())
 
 
