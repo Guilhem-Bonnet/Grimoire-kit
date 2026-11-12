@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.84.0] - 2026-11-12
+
+- feat(cockpit): tout accepter les tâches fusionnées en un geste (#1186)
+- feat(cockpit): mandat, pilote et fournisseurs de n'importe quel projet (lot 3) (#1187)
+- feat(cockpit): un projet par onglet, chat compris (lot 4) (#1188)
+
 ## [3.83.0] - 2026-11-08
 
 - perf(cockpit): la lecture du journal de session qui nourrit le payload `work` est bornée à 1 Mio par passe (1,9 s → 188 ms sur cinq journaux de 20 Mo), et la palette de la coque demande `annotations=0` pour que le montage de la Flotte ne paie plus jamais cette lecture (#1010) (#1171)
