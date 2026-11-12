@@ -757,8 +757,7 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
     return WORKSPACE_UNHANDLED
 
 
-# ── Écritures (cible résolue par l'hôte ; confirmation nommée pour les plus
-# sensibles depuis le lot 2) ─────────────────────────────────────────────────
+# ── Écritures (cible résolue par l'hôte ; tout projet enrôlé depuis le lot 5) ─
 
 
 def _create_override(project_root: Path, body: dict[str, Any]) -> Any:
