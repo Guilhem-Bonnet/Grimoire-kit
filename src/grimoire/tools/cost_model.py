@@ -25,13 +25,14 @@ from grimoire.tools.model_windows import MODEL_WINDOWS, resolve_window
 
 COST_MODEL_SCHEMA_VERSION = "grimoire-cost-model/v1"
 
-# Tarifs publics par version de modèle, en $ par million de tokens (in / out).
-# Source et date : relevées le 2026-10-16 sur RATE_CARD_SOURCE. Une version non
+# Tarifs publics par version de modèle, en $ par million de tokens : entrée,
+# sortie, lecture du cache, écriture en cache 5 min et 1 h.
+# Source et date : relevées le 2026-11-12 sur RATE_CARD_SOURCE. Une version non
 # listée n'a pas de tarif (``rate_for`` rend None) : jamais de repli sur une
-# famille. Haiku 5.5 n'est pas listé : son tarif dépend de la taille du prompt,
-# que le total de tokens ne donne pas. Les tarifs cache ne sont pas modélisés.
+# famille. Le palier haut de Haiku 5.5 (prompt > 100 000 jetons) est la ligne
+# ``haiku-5-5-long``, choisie par appel par :func:`rate_for_call`.
 RATE_CARD_SOURCE = "https://platform.claude.com/docs/en/about-claude/pricing"
-RATE_CARD_AS_OF = date(2026, 10, 16)
+RATE_CARD_AS_OF = date(2026, 11, 12)
 RATE_CARD_MAX_AGE_DAYS = 90
 
 # Coût par pattern du catalogue : k-tokens ``{in, out, runs}`` par run complet.
@@ -69,11 +70,16 @@ ROLE_COST: dict[str, dict[str, float]] = {
     "sub": {"in": 5.5, "out": 2.2, "runs": 1},
 }
 
-_RATE_KEYS = ("in", "out")
+_RATE_KEYS = ("in", "out", "cache_read", "cache_write_5m", "cache_write_1h")
 
 
 def validate_rate_table(table: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
-    """Rend la table si chaque prix est un réel fini et positif ou nul, sinon lève ValueError."""
+    """Rend la table si chaque ligne porte les cinq tarifs, réels finis et positifs ou nuls.
+
+    Les cinq colonnes sont obligatoires : une ligne qui n'aurait pas le tarif
+    d'écriture en cache ferait passer un appel caché pour « non chiffré » alors
+    que le prix est publié, ou pire, pour un prix d'entrée inventé.
+    """
     for key, row in table.items():
         for field in _RATE_KEYS:
             value = row.get(field)
@@ -89,24 +95,30 @@ def validate_rate_table(table: dict[str, dict[str, float]]) -> dict[str, dict[st
 
 # Table unique : clés = identifiants de version normalisés (voir normalize_model_id).
 # Ordre : plus récent d'abord dans chaque famille (la vue par famille en dépend).
+# Les cinq colonnes suivent la règle publiée (écriture 5 min = 1,25 × entrée,
+# écriture 1 h = 2 × entrée, lecture = 0,1 × entrée) sauf pour les lignes du
+# tableau de tarifs du 2026-11-12, reprises telles quelles.
 MODEL_RATES: dict[str, dict[str, float]] = validate_rate_table({
-    "opus-5-5": {"in": 4.0, "out": 20.0},
-    "opus-5": {"in": 5.0, "out": 25.0},
-    "opus-4-8": {"in": 5.0, "out": 25.0},
-    "opus-4-7": {"in": 5.0, "out": 25.0},
-    "opus-4-6": {"in": 5.0, "out": 25.0},
-    "opus-4-5": {"in": 5.0, "out": 25.0},
-    "opus-4-1": {"in": 15.0, "out": 75.0},
-    "opus-4": {"in": 15.0, "out": 75.0},
-    "sonnet-5-5": {"in": 2.0, "out": 10.0},
-    "sonnet-5": {"in": 2.0, "out": 10.0},
-    "sonnet-4-6": {"in": 3.0, "out": 15.0},
-    "sonnet-4-5": {"in": 3.0, "out": 15.0},
-    "sonnet-4": {"in": 3.0, "out": 15.0},
-    "haiku-4-5": {"in": 1.0, "out": 5.0},
-    "haiku-3-5": {"in": 0.8, "out": 4.0},
-    "fable-5-1": {"in": 10.0, "out": 50.0},
-    "fable-5": {"in": 10.0, "out": 50.0},
+    "opus-5-5": {"in": 4.0, "out": 20.0, "cache_read": 0.20, "cache_write_5m": 5.0, "cache_write_1h": 8.0},
+    "opus-5": {"in": 5.0, "out": 25.0, "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.0},
+    "opus-4-8": {"in": 5.0, "out": 25.0, "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.0},
+    "opus-4-7": {"in": 5.0, "out": 25.0, "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.0},
+    "opus-4-6": {"in": 5.0, "out": 25.0, "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.0},
+    "opus-4-5": {"in": 5.0, "out": 25.0, "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.0},
+    "opus-4-1": {"in": 15.0, "out": 75.0, "cache_read": 1.50, "cache_write_5m": 18.75, "cache_write_1h": 30.0},
+    "opus-4": {"in": 15.0, "out": 75.0, "cache_read": 1.50, "cache_write_5m": 18.75, "cache_write_1h": 30.0},
+    "sonnet-5-5": {"in": 2.0, "out": 10.0, "cache_read": 0.10, "cache_write_5m": 2.50, "cache_write_1h": 4.0},
+    "sonnet-5": {"in": 2.0, "out": 10.0, "cache_read": 0.20, "cache_write_5m": 2.50, "cache_write_1h": 4.0},
+    "sonnet-4-6": {"in": 3.0, "out": 15.0, "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.0},
+    "sonnet-4-5": {"in": 3.0, "out": 15.0, "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.0},
+    "sonnet-4": {"in": 3.0, "out": 15.0, "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.0},
+    "haiku-5-5": {"in": 0.10, "out": 0.50, "cache_read": 0.01, "cache_write_5m": 0.125, "cache_write_1h": 0.20},
+    "haiku-5-5-long": {"in": 0.50, "out": 2.50, "cache_read": 0.05, "cache_write_5m": 0.625, "cache_write_1h": 1.0},
+    "haiku-4-5": {"in": 1.0, "out": 5.0, "cache_read": 0.10, "cache_write_5m": 1.25, "cache_write_1h": 2.0},
+    "haiku-3-5": {"in": 0.8, "out": 4.0, "cache_read": 0.08, "cache_write_5m": 1.0, "cache_write_1h": 1.6},
+    "fable-5-2": {"in": 8.0, "out": 40.0, "cache_read": 0.20, "cache_write_5m": 10.0, "cache_write_1h": 16.0},
+    "fable-5-1": {"in": 10.0, "out": 50.0, "cache_read": 0.25, "cache_write_5m": 12.50, "cache_write_1h": 20.0},
+    "fable-5": {"in": 10.0, "out": 50.0, "cache_read": 1.0, "cache_write_5m": 12.50, "cache_write_1h": 20.0},
 })
 
 # Repli de estimate_usd pour un modèle non listé (comportement historique du gate).
@@ -123,10 +135,61 @@ def normalize_model_id(model: str) -> str:
 
 
 def rate_for(model: str | None) -> dict[str, float] | None:
-    """Tarif ``{in, out}`` ($/MTok) de la version exacte, ou None si non listée."""
+    """Ligne de tarifs ($/MTok) de la version exacte, ou None si non listée.
+
+    Rend le palier bas de Haiku 5.5 : le choix du palier dépend de la longueur du
+    prompt, que seul un appel connaît (voir :func:`rate_for_call`).
+    """
     if not model:
         return None
     return MODEL_RATES.get(normalize_model_id(model))
+
+
+#: Longueur de prompt (entrée + cache lu + cache écrit) au-delà de laquelle
+#: Haiku 5.5 passe au palier haut.
+HAIKU_5_5_LONG_PROMPT_TOKENS = 100_000
+
+
+def rate_for_call(model: str | None, prompt_tokens: int) -> dict[str, float] | None:
+    """Ligne de tarifs d'un appel : Haiku 5.5 bascule au palier haut par appel.
+
+    *prompt_tokens* compte toutes les entrées de l'appel (``input + cache_read +
+    cache_creation``) : c'est la longueur que publie le tarif de Haiku 5.5.
+    """
+    if not model:
+        return None
+    key = normalize_model_id(model)
+    if key == "haiku-5-5" and prompt_tokens > HAIKU_5_5_LONG_PROMPT_TOKENS:
+        key = "haiku-5-5-long"
+    return MODEL_RATES.get(key)
+
+
+def rates_cost_usd(
+    rates: dict[str, float],
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    cache_write_5m_tokens: int | None = None,
+    cache_write_1h_tokens: int | None = None,
+) -> float | None:
+    """Coût $ d'un appel à une ligne de :data:`MODEL_RATES`, ``None`` si la durée d'écriture manque.
+
+    Une écriture en cache sans répartition 5 min / 1 h reste inconnue : la durée
+    ne se suppose jamais, même quand le total ``cache_creation_input_tokens`` et
+    les tarifs sont présents.
+    """
+    if cache_creation_tokens > 0 and (cache_write_5m_tokens is None or cache_write_1h_tokens is None):
+        return None
+    total = (
+        input_tokens * rates["in"]
+        + output_tokens * rates["out"]
+        + cache_read_tokens * rates["cache_read"]
+        + (cache_write_5m_tokens or 0) * rates["cache_write_5m"]
+        + (cache_write_1h_tokens or 0) * rates["cache_write_1h"]
+    )
+    return round(total / 1_000_000, 6)
 
 
 def rate_card_age_warning(today: date) -> str | None:
