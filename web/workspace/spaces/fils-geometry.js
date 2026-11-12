@@ -123,14 +123,66 @@ function shortId(id) {
 export function threadName(session) {
   if (!session || typeof session !== 'object') return 'session inconnue';
   if (session.task_id) return String(session.task_id);
+  // Un sous-agent hérite de la branche de son parent : son nom est ce qu'on
+  // lui a demandé, sinon sa persona.
+  if (session.role === 'subagent') {
+    const agent = session.agent && typeof session.agent === 'object' ? session.agent : {};
+    if (agent.description) return String(agent.description);
+    if (agent.type) return String(agent.type);
+    return `sous-agent ${shortId(session.id)}`;
+  }
   if (session.branch) return String(session.branch);
-  if (session.role === 'subagent') return `sous-agent ${shortId(session.id)}`;
   return session.id ? shortId(session.id) : 'session inconnue';
+}
+
+/** Largeur approchée d'un texte en px (police UI, ~0,56 em par signe). */
+export function textWidth(text, size = 12) {
+  return Math.ceil(String(text || '').length * size * 0.56);
+}
+
+/** Tronque un nom pour qu'il tienne dans `maxWidth` px, avec une ellipse. */
+export function fitLabel(text, maxWidth, size = 13) {
+  const value = String(text || '');
+  if (textWidth(value, size) <= maxWidth) return value;
+  const keep = Math.max(1, Math.floor(maxWidth / (size * 0.56)) - 1);
+  return `${value.slice(0, keep)}…`;
+}
+
+/**
+ * Place des étiquettes sans recouvrement : chacune garde son `x` et prend la
+ * première rangée libre (au-dessus du fil, puis en dessous, puis plus haut).
+ * Rend les étiquettes avec `{ x, y, anchor, box }`, `box` = `[x0, y0, x1, y1]`.
+ */
+export function placeLabels(items, { clampLeft = 0, clampRight = Infinity, size = 11 } = {}) {
+  const placed = [];
+  const rows = [-8, 16, -22, 30];
+  // 10 px d'air entre deux étiquettes d'une même rangée : collées, elles se
+  // lisent comme une seule (« Fable → Opus Opus → Fable »).
+  const gap = 10;
+  const overlaps = (a, b) => a[0] < b[2] + gap && b[0] < a[2] + gap && a[1] < b[3] && b[1] < a[3];
+  for (const item of items) {
+    const width = textWidth(item.text, size);
+    // Ancré à droite du repère, sauf s'il déborderait de la zone de tracé.
+    const anchorEnd = item.x + 8 + width > clampRight;
+    const x0 = anchorEnd ? Math.max(clampLeft, Math.min(item.x, clampRight) - 8 - width) : Math.max(clampLeft, item.x + 8);
+    let chosen = null;
+    for (const dy of rows) {
+      const y = item.y + dy;
+      const box = [x0, y - size, x0 + width, y + 3];
+      if (!placed.some((other) => overlaps(other.box, box)) && !(item.avoid || []).some((zone) => overlaps(zone, box))) {
+        chosen = { ...item, x: round(anchorEnd ? x0 + width : x0), y: round(y), anchor: anchorEnd ? 'end' : 'start', box };
+        break;
+      }
+    }
+    if (!chosen) continue; // plus de place : l'infobulle du repère porte le libellé
+    placed.push(chosen);
+  }
+  return placed;
 }
 
 /** Un fil : `M x y C …` d'un point à un autre, pour une arête qui change de ligne. */
 function curve(fromX, fromY, toX, toY) {
-  const pull = Math.max(24, Math.abs(toX - fromX) * 0.5 + 24);
+  const pull = Math.max(4, Math.abs(toX - fromX) * 0.5);
   return `M ${round(fromX)} ${round(fromY)} C ${round(fromX + pull)} ${round(fromY)}, `
     + `${round(toX - pull)} ${round(toY)}, ${round(toX)} ${round(toY)}`;
 }
@@ -154,11 +206,11 @@ export function layoutFleetThreads(payload, options = {}) {
   const data = payload && typeof payload === 'object' ? payload : {};
   const sessions = Array.isArray(data.sessions) ? data.sessions.filter((row) => row && row.id) : [];
   const width = number(options.width, 960);
-  const laneHeight = number(options.laneHeight, 34);
+  const laneHeight = number(options.laneHeight, 48);
   const projectGap = number(options.projectGap, 22);
   const paddingTop = number(options.paddingTop, 18);
   const labelWidth = number(options.labelWidth, 150);
-  const rightPad = number(options.rightPad, 170);
+  const rightPad = number(options.rightPad, 200);
 
   const nowMs = parseTime(data.generated_at);
   const endMs = nowMs === null ? Date.now() : nowMs;
@@ -214,8 +266,16 @@ export function layoutFleetThreads(payload, options = {}) {
     const endX = Math.max(startedX, continues ? plotRight : lastX);
 
     // Segments de modèle : celui d'avant chaque bascule est plus pâle.
+    // Hors fenêtre, un repère n'a pas de place sur la ligne de temps : le
+    // borner au bord gauche le ferait mentir (un changement du 06/11 dessiné
+    // au début d'une fenêtre de 4 h). Le parcours du modèle, dans le détail,
+    // garde l'historique complet.
+    const inWindow = (iso) => {
+      const at = parseTime(iso);
+      return at !== null && at >= startMs && at <= endMs;
+    };
     const modelChanges = (Array.isArray(session.model_changes) ? session.model_changes : [])
-      .filter((change) => change && parseTime(change.at) !== null)
+      .filter((change) => change && inWindow(change.at))
       .sort(byTime);
     const segments = [];
     let from = startedX;
@@ -256,7 +316,7 @@ export function layoutFleetThreads(payload, options = {}) {
     // changements de modèle ont déjà leur losange — on ne les redouble pas.
     const threadMarkers = [];
     for (const marker of Array.isArray(session.markers) ? session.markers : []) {
-      if (!marker || marker.kind === 'model_change' || parseTime(marker.at) === null) continue;
+      if (!marker || marker.kind === 'model_change' || !inWindow(marker.at)) continue;
       const entry = {
         session_id: session.id,
         kind: marker.kind || 'marker',
@@ -305,6 +365,7 @@ export function layoutFleetThreads(payload, options = {}) {
         x: round(Math.min(width - 4, plotRight + 10)),
         y,
         name: threadName(session),
+        short: fitLabel(threadName(session), Math.max(60, rightPad - 24)),
         model: modelLabel(model.current || model.requested),
         model_id: model.current || model.requested || null,
         provider: model.provider || 'inconnu',
@@ -319,6 +380,21 @@ export function layoutFleetThreads(payload, options = {}) {
     });
   }
 
+  // Étiquettes directes (bascules de modèle, boucles, fin muette) : une seule
+  // par repère, placées sans recouvrement, jamais dans la colonne des noms.
+  const nameColumn = [plotRight - 12, 0, width, height];
+  const labelItems = [];
+  for (const thread of threads) {
+    const base = { session_id: thread.id, avoid: [nameColumn] };
+    for (const change of thread.changes) labelItems.push({ ...base, kind: 'change', x: change.x, y: thread.y, text: change.label });
+    for (const loop of loops.filter((entry) => entry.session_id === thread.id)) labelItems.push({ ...base, kind: 'loop', x: loop.x, y: thread.y, text: loop.label });
+    if (thread.end.kind === 'silent') labelItems.push({ ...base, kind: 'silent', x: thread.end.x, y: thread.y, text: thread.end.label });
+  }
+  // Les boucles d'abord : ce sont elles qu'on doit voir.
+  labelItems.sort((a, b) => (a.kind === 'loop' ? 0 : 1) - (b.kind === 'loop' ? 0 : 1));
+  const labels = placeLabels(labelItems, { clampLeft: plotLeft, clampRight: plotRight - 14 })
+    .map((item) => ({ kind: item.kind, session_id: item.session_id, x: item.x, y: item.y, anchor: item.anchor, text: item.text, box: item.box }));
+
   const edges = [];
   for (const edge of Array.isArray(data.edges) ? data.edges : []) {
     if (!edge || !edge.from || !edge.to) continue;
@@ -326,8 +402,12 @@ export function layoutFleetThreads(payload, options = {}) {
     const child = laneOf.get(edge.to);
     if (!parent || !child) continue;
     const childSession = child.session;
+    // Le départ quitte le fil parent un peu avant le début du fils et le
+    // rejoint à son début : une courbe vers l'avant, jamais une boucle
+    // verticale quand les deux points ont le même x.
     const startX = x(childSession.started_at || childSession.last_at);
-    const departure = curve(startX, parent.y, startX, child.y);
+    const lead = Math.min(28, Math.max(10, startX - plotLeft));
+    const departure = curve(startX - lead, parent.y, startX, child.y);
     if (edge.kind === 'spawned') {
       const joinX = Math.min(plotRight, Math.max(startX, x(childSession.last_at || childSession.started_at)));
       edges.push({
@@ -335,8 +415,8 @@ export function layoutFleetThreads(payload, options = {}) {
         to: edge.to,
         kind: 'spawned',
         departure,
-        return: curve(joinX, child.y, joinX, parent.y),
-        return_point: { x: round(joinX), y: round(parent.y) },
+        return: curve(joinX, child.y, Math.min(plotRight, joinX + lead), parent.y),
+        return_point: { x: round(Math.min(plotRight, joinX + lead)), y: round(parent.y) },
         label: 'rapport rendu',
       });
     } else {
@@ -366,5 +446,6 @@ export function layoutFleetThreads(payload, options = {}) {
     changes,
     markers,
     loops,
+    labels,
   };
 }

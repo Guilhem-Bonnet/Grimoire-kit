@@ -150,12 +150,12 @@
    * la puce du terminal — jamais par un état. Le nom du fournisseur reste
    * écrit à côté, la couleur ne le remplace pas. Valeurs claires en sombre,
    * assombries en clair : chacune tient 4,5:1 sur `--panel` dans son thème. */
-  --p-anthropic: #e9967a;
+  --p-anthropic: #b07ce8;
   --p-openai: #6ee7b7;
   --p-google: #8ab4f8;
-  --p-deepseek: #a5b4fc;
+  --p-deepseek: #4c9be8;
   --p-mistral: #fcd34d;
-  --p-local: #a8b3c2;
+  --p-local: #d99a2b;
   --p-inconnu: var(--ink3);
 
   /* ── Identité d'espace : filet sous l'onglet actif, liseré de panneau ──── *
@@ -320,12 +320,12 @@
     --s1: #1f6fbf;
     --s2: #6b48c4;
     --s3: #9a6a08;
-    --p-anthropic: #a13f20;
+    --p-anthropic: #7a43c0;
     --p-openai: #046b4a;
     --p-google: #1a56b4;
-    --p-deepseek: #4b3fb0;
+    --p-deepseek: #1f6fc0;
     --p-mistral: #7a4a00;
-    --p-local: #4a515c;
+    --p-local: #9a6510;
     --p-inconnu: var(--ink3);
     --id-piloter: #4d6f90;
     --id-concevoir: #3c8177;
@@ -386,12 +386,12 @@
   --s1: #1f6fbf;
   --s2: #6b48c4;
   --s3: #9a6a08;
-  --p-anthropic: #a13f20;
+  --p-anthropic: #7a43c0;
   --p-openai: #046b4a;
   --p-google: #1a56b4;
-  --p-deepseek: #4b3fb0;
+  --p-deepseek: #1f6fc0;
   --p-mistral: #7a4a00;
-  --p-local: #4a515c;
+  --p-local: #9a6510;
   --p-inconnu: var(--ink3);
   --id-piloter: #4d6f90;
   --id-concevoir: #3c8177;

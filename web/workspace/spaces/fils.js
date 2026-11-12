@@ -24,7 +24,7 @@ import {
 } from '../shell.js';
 import { agoText, costText } from '../live.js';
 import {
-  WINDOW_CHOICES, WINDOW_DEFAULT_MINUTES, clockLabel, layoutFleetThreads, modelLabel, providerToken,
+  WINDOW_CHOICES, WINDOW_DEFAULT_MINUTES, clockLabel, layoutFleetThreads, modelLabel, providerToken, threadName,
 } from './fils-geometry.js';
 
 const STYLE_ID = 'fl-styles';
@@ -151,24 +151,14 @@ function livenessIcon(session) {
   return icon(state.icon);
 }
 
-/** Le libellé d'une erreur répétée trois fois, ou `null` (une boucle). */
-function repeatedError(session) {
-  const counts = new Map();
-  for (const marker of Array.isArray(session.markers) ? session.markers : []) {
-    if (!marker || marker.kind !== 'error') continue;
-    const label = marker.label || 'échec';
-    counts.set(label, (counts.get(label) || 0) + 1);
-  }
-  for (const [label, count] of counts) if (count >= 3) return label;
-  return null;
-}
-
 /** Le point d'attention : un seul, le plus net, avec une action. */
 function attentionFor(data) {
   const sessions = data.sessions || [];
-  for (const session of sessions) {
-    if (repeatedError(session)) return { session, text: 'Une session tourne en boucle : même échec, trois fois.' };
-  }
+  // Une boucle ne compte que dans la fenêtre affichée : la géométrie l'a déjà
+  // détectée (trois erreurs au même libellé), le bandeau ne la recompte pas.
+  const loop = layoutFleetThreads(data).loops[0];
+  const looping = loop && sessions.find((session) => session.id === loop.session_id);
+  if (looping) return { session: looping, text: 'Une session tourne en boucle : même échec, trois fois.' };
   const waiting = sessions.find((session) => session.liveness === 'waiting');
   if (waiting) return { session: waiting, text: 'Une session attend ta réponse.' };
   const silent = sessions.find((session) => session.liveness === 'silent');
@@ -271,7 +261,7 @@ function renderDetail(ctx, session) {
 
   const head = el('div');
   const h3 = el('h3');
-  h3.append(el('span', null, session.task_id || session.id), livenessBadge(session));
+  h3.append(el('span', null, threadName(session)), livenessBadge(session));
   head.append(h3);
   const facts = el('div');
 
@@ -399,8 +389,11 @@ function directiveForm(ctx, session, status) {
 }
 
 /** Le board des fils : SVG pour la géométrie, HTML/SVG focalisable pour les noms. */
-function renderThreads(ctx, data, state) {
-  const layout = layoutFleetThreads(data, { paddingTop: 30 });
+function renderThreads(ctx, data, state, rootWidth) {
+  // Le viewBox suit la largeur réelle du board : sans ça, un SVG de 960 étiré
+  // sur 1 200 px grossit tout le texte de 25 %.
+  const available = rootWidth || (typeof window !== 'undefined' ? window.innerWidth - 280 : 960);
+  const layout = layoutFleetThreads(data, { paddingTop: 30, width: Math.max(720, Math.min(1400, available - 64)) });
   const board = el('div', 'fl-board');
   board.dataset.role = 'fils-board';
   board.style.setProperty('--fl-height', `${layout.height}px`);
@@ -458,14 +451,9 @@ function renderThreads(ctx, data, state) {
         d: `M ${change.x - 5} ${change.y} L ${change.x} ${change.y - 5} L ${change.x + 5} ${change.y} L ${change.x} ${change.y + 5} Z`,
         'data-session': thread.id,
       }));
-      const label = svg('text', {
-        class: 'fl-change-label',
-        x: change.x + 8,
-        y: change.y - 7,
-        'text-anchor': change.x > layout.width - 220 ? 'end' : 'start',
-      });
-      label.textContent = change.label;
-      drawing.append(label);
+      const tip = svg('title');
+      tip.textContent = change.label;
+      drawing.lastChild.append(tip);
     }
     // Les repères du journal (une infobulle native porte le libellé).
     for (const marker of thread.markers) {
@@ -477,18 +465,12 @@ function renderThreads(ctx, data, state) {
     }
     // Une boucle : nœud rouge et une seule étiquette.
     for (const loop of layout.loops.filter((entry) => entry.session_id === thread.id)) {
-      drawing.append(svg('circle', { class: 'fl-loop', cx: loop.x, cy: loop.y, r: 5 }));
-      const label = svg('text', { class: 'fl-loop-label', x: loop.x + 9, y: loop.y - 8 });
-      label.textContent = loop.label;
-      drawing.append(label);
+      drawing.append(svg('circle', { class: 'fl-loop', cx: loop.x, cy: loop.y, r: 5, 'data-session': thread.id }));
     }
     // Fin du fil : un cercle vide pour une muette, plein pour une terminée,
     // rien pour une vivante (elle touche la ligne « maintenant »).
     if (thread.end.kind === 'silent') {
-      drawing.append(svg('circle', { class: 'fl-end-silent', cx: thread.end.x, cy: thread.end.y, r: 5 }));
-      const label = svg('text', { class: 'fl-change-label', x: thread.end.x - 8, y: thread.end.y + 17, 'text-anchor': 'end' });
-      label.textContent = thread.end.label;
-      drawing.append(label);
+      drawing.append(svg('circle', { class: 'fl-end-silent', cx: thread.end.x, cy: thread.end.y, r: 5, 'data-session': thread.id }));
     } else if (thread.end.kind === 'ended') {
       drawing.append(svg('circle', { class: 'fl-end-ended', cx: thread.end.x, cy: thread.end.y, r: 3.5 }));
     } else {
@@ -503,11 +485,11 @@ function renderThreads(ctx, data, state) {
       'aria-label': `${thread.label.name}, ${thread.label.model}`,
     });
     name.append(svg('rect', {
-      class: 'fl-name-hit', x: layout.plot_right + 6, y: thread.y - 13, width: 158, height: 26, rx: 6,
+      class: 'fl-name-hit', x: layout.plot_right + 6, y: thread.y - 17, width: layout.width - layout.plot_right - 10, height: 34, rx: 6,
     }));
     const ring = svg('circle', { class: 'fl-name-ring', cx: layout.plot_right - 5, cy: thread.y, r: 5, style: `stroke: ${tint}` });
     const nameText = svg('text', { class: 'fl-name-text', x: layout.plot_right + 12, y: thread.y - 3 });
-    nameText.textContent = thread.label.name;
+    nameText.textContent = thread.label.short;
     const modelText = svg('text', { class: 'fl-name-model', x: layout.plot_right + 12, y: thread.y + 11 });
     modelText.textContent = thread.label.model;
     name.append(ring, nameText, modelText);
@@ -516,6 +498,19 @@ function renderThreads(ctx, data, state) {
     name.append(title);
     name.addEventListener('click', () => select(thread.id, { open: true }));
     drawing.append(name);
+  }
+
+  // Les étiquettes directes, placées sans recouvrement par la géométrie.
+  for (const label of layout.labels) {
+    const text = svg('text', {
+      class: label.kind === 'loop' ? 'fl-loop-label' : 'fl-change-label',
+      x: label.x,
+      y: label.y,
+      'text-anchor': label.anchor,
+      'data-session': label.session_id,
+    });
+    text.textContent = label.text;
+    drawing.append(text);
   }
 
   // La ligne « maintenant », à droite.
@@ -574,11 +569,11 @@ function renderTerminals(ctx, data, state) {
     card.dataset.session = session.id;
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
-    card.setAttribute('aria-label', `Terminal de ${session.task_id || session.id}`);
+    card.setAttribute('aria-label', `Terminal de ${threadName(session)}`);
     const head = el('div', 'fl-term-head');
     const dot = el('span', 'fl-dot');
     dot.style.background = `var(${providerToken(session.model && session.model.provider)})`;
-    head.append(dot, el('span', 'fl-term-name', session.task_id || session.id));
+    head.append(dot, el('span', 'fl-term-name', threadName(session)));
     head.append(el('span', 'fl-term-model', modelLabel(session.model && (session.model.current || session.model.requested))));
     head.append(livenessIcon(session));
     card.append(head);
@@ -613,6 +608,7 @@ export async function mount(root, ctx) {
   let data = null;
   let error = null;
   let sequence = 0;
+  let drawnWidth = 0;
 
   ctx.live.on(() => { load({ quiet: true }); }, { scope: () => (ctx.scope.all ? 'portfolio' : 'project') });
 
@@ -660,7 +656,7 @@ export async function mount(root, ctx) {
       const line = el('div', 'fl-attention');
       line.append(icon('alert'));
       line.append(el('span', null, attention.text));
-      line.append(el('strong', null, attention.session.task_id || attention.session.id));
+      line.append(el('strong', null, threadName(attention.session)));
       const see = el('button', 'btn', 'Voir le fil');
       see.type = 'button';
       see.addEventListener('click', () => {
@@ -680,7 +676,8 @@ export async function mount(root, ctx) {
     } else if (!(data.sessions || []).length) {
       wrap.append(el('p', 'fl-note', 'Aucun fil dans la fenêtre : aucune session Claude Code n’a écrit de journal récemment.'));
     } else {
-      wrap.append(renderThreads(ctx, data, state));
+      drawnWidth = root.clientWidth;
+      wrap.append(renderThreads(ctx, data, state, drawnWidth));
     }
     root.replaceChildren(wrap);
 
@@ -690,6 +687,21 @@ export async function mount(root, ctx) {
       renderDetail(ctx, still);
       ctx.openPanel('inspector', { detail: true });
     }
+  }
+
+  // Le panneau de détail rétrécit la toile : le viewBox est recalculé à la
+  // nouvelle largeur (sinon le dessin est réduit et le texte devient
+  // illisible). Seuil de 40 px pour ne pas redessiner à chaque pixel.
+  if (typeof ResizeObserver !== 'undefined') {
+    let pending = 0;
+    const observer = new ResizeObserver(() => {
+      if (!data || view !== 'fils' || !drawnWidth) return;
+      if (Math.abs(root.clientWidth - drawnWidth) < 40) return;
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(() => draw());
+    });
+    observer.observe(root);
+    if (ctx.signal) ctx.signal.addEventListener('abort', () => observer.disconnect(), { once: true });
   }
 
   if (ctx.signal) {

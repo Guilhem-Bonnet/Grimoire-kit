@@ -16,6 +16,7 @@ directement, comme `tests/unit/test_workspace_score.py` le fait pour le score.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import shutil
@@ -120,14 +121,27 @@ EXAMPLE = {
             "last_at": "2026-11-12T14:58:00+00:00",
             "liveness": "active",
             "model": {
-                "current": "claude-opus-5-5", "requested": "claude-sonnet-5-5",
-                "provider": "anthropic", "tier": "strong", "effort": "high",
+                "current": "claude-opus-5-5",
+                "requested": "claude-sonnet-5-5",
+                "provider": "anthropic",
+                "tier": "strong",
+                "effort": "high",
             },
             "model_changes": [
-                {"at": "2026-11-12T14:24:00+00:00", "from": "claude-sonnet-5-5",
-                 "to": "claude-opus-5-5", "kind": "upgrade", "turn": 2},
-                {"at": "2026-11-12T14:40:00+00:00", "from": "claude-opus-5-5",
-                 "to": "deepseek-flash", "kind": "fallback", "turn": 5},
+                {
+                    "at": "2026-11-12T14:24:00+00:00",
+                    "from": "claude-sonnet-5-5",
+                    "to": "claude-opus-5-5",
+                    "kind": "upgrade",
+                    "turn": 2,
+                },
+                {
+                    "at": "2026-11-12T14:40:00+00:00",
+                    "from": "claude-opus-5-5",
+                    "to": "deepseek-flash",
+                    "kind": "fallback",
+                    "turn": 5,
+                },
             ],
             "turns": {"count": 8, "by_origin": {"human": 8}},
             "usage": {"input": 90000, "output": 5000, "cache_read": 0, "cost_usd": 1.25},
@@ -138,8 +152,13 @@ EXAMPLE = {
                 {"at": "2026-11-12T14:34:00+00:00", "kind": "error", "label": "gate"},
             ],
             "tail": [
-                {"at": "2026-11-12T14:56:00+00:00", "tool": "Bash",
-                 "summary": "pytest -q tests/unit", "status": "done", "excerpt": "…"},
+                {
+                    "at": "2026-11-12T14:56:00+00:00",
+                    "tool": "Bash",
+                    "summary": "pytest -q tests/unit",
+                    "status": "done",
+                    "excerpt": "…",
+                },
             ],
             "subagents": ["agent-1"],
             "links": {
@@ -162,8 +181,11 @@ EXAMPLE = {
             "last_at": "2026-11-12T14:30:00+00:00",
             "liveness": "ended",
             "model": {
-                "current": "claude-haiku-4-5", "requested": "claude-haiku-4-5",
-                "provider": "anthropic", "tier": "cheap", "effort": None,
+                "current": "claude-haiku-4-5",
+                "requested": "claude-haiku-4-5",
+                "provider": "anthropic",
+                "tier": "cheap",
+                "effort": None,
             },
             "model_changes": [],
             "turns": {"count": 2, "by_origin": {"agent": 2}},
@@ -187,8 +209,11 @@ EXAMPLE = {
             "last_at": "2026-11-12T14:59:00+00:00",
             "liveness": "waiting",
             "model": {
-                "current": "deepseek-flash", "requested": "deepseek-flash",
-                "provider": "deepseek", "tier": "cheap", "effort": None,
+                "current": "deepseek-flash",
+                "requested": "deepseek-flash",
+                "provider": "deepseek",
+                "tier": "cheap",
+                "effort": None,
             },
             "model_changes": [],
             "turns": {"count": 1, "by_origin": {"agent": 1}},
@@ -216,7 +241,10 @@ def _layout(payload: dict[str, object], options: dict[str, object] | None = None
     )
     out = subprocess.run(
         ["node", "-e", script, GEOMETRY.as_uri(), json.dumps(payload), json.dumps(options or {})],
-        capture_output=True, text=True, check=True, timeout=30,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
     )
     return dict(json.loads(out.stdout))
 
@@ -272,3 +300,77 @@ def test_une_boucle_et_l_epaisseur_des_jetons() -> None:
     child = next(thread for thread in layout["threads"] if thread["id"] == "agent-1")
     assert parent["label"]["stroke"] == 3  # 95 000 jetons
     assert child["label"]["stroke"] == 1.5  # 1 500 jetons
+
+
+# ── Revue visuelle de #1199 contre l'artboard « Tissage » ────────────────────
+
+
+def _with_parent(**changes: object) -> dict[str, object]:
+    payload = copy.deepcopy(EXAMPLE)
+    payload["sessions"][0].update(changes)  # type: ignore[index]
+    return payload
+
+
+def test_un_repere_hors_fenetre_n_est_pas_dessine_au_bord_gauche() -> None:
+    """Un changement du 06/11 dans une fenêtre de 4 h était borné au bord
+    gauche avec son étiquette ; la boucle comptait des erreurs hors fenêtre."""
+    old = "2026-11-06T01:06:10+00:00"
+    payload = _with_parent(
+        model_changes=[{"at": old, "from": "claude-sonnet-5", "to": "claude-opus-5-5", "kind": "upgrade", "turn": 1}],
+        markers=[{"at": old, "kind": "error", "label": "gate"}] * 3,
+    )
+
+    layout = _layout(payload)
+
+    assert layout["changes"] == []
+    assert layout["loops"] == []
+    parent = next(thread for thread in layout["threads"] if thread["id"] == "sess-parent")
+    assert parent["markers"] == []
+    assert all(not segment["pale"] for segment in parent["segments"])
+
+
+def test_aucune_etiquette_ne_se_recouvre_ni_ne_deborde_dans_la_colonne_des_noms() -> None:
+    """Deux bascules, une boucle et une fin muette sur des fils voisins."""
+    payload = copy.deepcopy(EXAMPLE)
+    payload["sessions"][2].update(liveness="silent", last_at="2026-11-12T14:59:00+00:00")  # type: ignore[index]
+
+    layout = _layout(payload)
+
+    labels = layout["labels"]
+    kinds = sorted(label["kind"] for label in labels)
+    assert kinds == ["change", "change", "loop", "silent"], kinds
+    boxes = [label["box"] for label in labels]
+    for i, a in enumerate(boxes):
+        assert a[2] <= float(layout["plot_right"]) - 12, ("dans la colonne des noms", labels[i])
+        for b in boxes[i + 1 :]:
+            assert not (a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]), (a, b)
+    # Une seule étiquette de boucle, jamais répétée.
+    assert sum(1 for label in labels if label["text"] == "même échec, trois fois") == 1
+
+
+def test_un_nom_trop_long_est_tronque_avec_une_ellipse() -> None:
+    name = "work/harmonisation-followup-20260703"
+    payload = _with_parent(task_id=None, branch=name)
+
+    layout = _layout(payload)
+
+    label = next(thread for thread in layout["threads"] if thread["id"] == "sess-parent")["label"]
+    assert label["name"] == name
+    assert label["short"].endswith("…")
+    assert len(label["short"]) < len(name)
+
+
+def test_un_sous_agent_se_nomme_par_sa_demande_et_pas_par_la_branche_du_parent() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("node absent")
+    script = (
+        "import(process.argv[1]).then(m => console.log(JSON.stringify(["
+        "m.threadName({role:'subagent', branch:'work/x', agent:{type:'Explore', description:'Angle santé technique'}}),"
+        "m.threadName({role:'subagent', branch:'work/x', agent:{type:'Explore', description:null}}),"
+        "m.threadName({role:'subagent', id:'a83e24234221cd19a', branch:'work/x'}),"
+        "m.threadName({role:'worker', task_id:'GAO-x', branch:'work/x'})])))"
+    )
+    out = subprocess.run(
+        ["node", "-e", script, GEOMETRY.as_uri()], capture_output=True, text=True, check=True, timeout=30
+    )
+    assert json.loads(out.stdout) == ["Angle santé technique", "Explore", "sous-agent a83e2423", "GAO-x"]
