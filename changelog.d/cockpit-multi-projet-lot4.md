@@ -1,1 +1,0 @@
-- feat(cockpit): un projet par onglet, chat compris (lot 4)
