@@ -831,6 +831,10 @@ def _session_cost(state: _FileState, pricing: dict[str, Any]) -> float | None:
             output_tokens=group.output_tokens,
             cache_read_tokens=group.cache_read,
             cache_creation_tokens=group.cache_creation,
+            # L'agrégat ne garde que le total des écritures ; sans la répartition
+            # 5 min / 1 h, leur coût reste inconnu plutôt que supposé.
+            cache_write_5m_tokens=None,
+            cache_write_1h_tokens=None,
             timestamp="",
             agent="",
             session_id="",
