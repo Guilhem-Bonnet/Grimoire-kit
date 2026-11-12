@@ -25,10 +25,12 @@ fichier la rend caduque sans réponse fabriquée, et l'ancre qui n'attendait plu
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import hashlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from grimoire.core.cadrage import DEFAULT_CHANTIER
 from grimoire.core.cadrage_requirements import CadrageRequirements, Requirement, read_requirements
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions.questions import ANSWERED, OPEN, QuestionSpec, records_of, status_of
@@ -70,9 +72,25 @@ _TERMINAL = (TaskState.CLOSED, TaskState.CANCELLED)
 
 
 def covers_of(task: MissionTask) -> list[str]:
-    """Les exigences qu'une tâche déclare couvrir (``extra.covers``)."""
+    """Les exigences qu'une tâche déclare couvrir (``extra.covers``).
+
+    Hors chantier ``principal``, la clé est préfixée par le slug (``atelier-de-spec/REQ-001``) : deux chantiers
+    qui portent chacun un REQ-001 ne se confondent pas. Le chantier par défaut garde les clés nues."""
     raw = (task.extra or {}).get("covers")
     return [str(x) for x in raw if str(x).strip()] if isinstance(raw, list) else []
+
+
+def _chantier_covers(task: MissionTask, chantier: str | None) -> list[str]:
+    """Les exigences (clés nues) que *task* couvre dans *chantier* ; celles d'un autre chantier sont ignorées."""
+    named = chantier not in (None, DEFAULT_CHANTIER)
+    out = []
+    for key in covers_of(task):
+        prefix, sep, bare = key.rpartition("/")
+        if named and sep and prefix == chantier:
+            out.append(bare)
+        elif not named and not sep:
+            out.append(key)
+    return out
 
 
 def is_anchor(task: MissionTask) -> bool:
@@ -218,6 +236,13 @@ class CadragePlan:
     anchor: str = ""
     applied: bool = False
     notes: list[str] = field(default_factory=list)
+    chantier: str | None = None  # None : le chantier par défaut
+    mission: str = ""  # la mission du chantier : les tâches créées la portent
+
+    @property
+    def prefix(self) -> str:
+        """Préfixe des clés de couverture : vide pour ``principal``, ``<slug>/`` sinon."""
+        return "" if self.chantier in (None, DEFAULT_CHANTIER) else f"{self.chantier}/"
 
     # ── lectures ──
     @property
@@ -274,6 +299,7 @@ class CadragePlan:
                 row["status"] = "missing_criterion"
             reqs.append(row)
         return {
+            "chantier": self.chantier or DEFAULT_CHANTIER,
             "convention": "REQ-NNN",
             "files_read": list(self.requirements.files_read),
             "identified": self.requirements.identified,
@@ -342,22 +368,42 @@ def _proposal(req: Requirement, criteria: list[str], origin: str) -> Proposal:
     )
 
 
-def build_plan(root: Path, service: TaskService) -> CadragePlan:
-    """Le plan du cadrage de *root*, sans rien écrire (le ledger absent n'est pas créé)."""
-    reqs = read_requirements(root)
-    plan = CadragePlan(reqs)
+def _scope_key(amb: Ambiguity, chantier: str) -> Ambiguity:
+    """Clé de question propre au chantier : ``cadrage:<slug>:REQ-003:…`` (deux chantiers, deux REQ-003)."""
+    return dataclasses.replace(amb, key=amb.key.replace("cadrage:", f"cadrage:{chantier}:", 1))
+
+
+def _anchor_chantier(task: MissionTask) -> str | None:
+    value = (task.extra or {}).get("chantier")
+    return str(value) if value and value != DEFAULT_CHANTIER else None
+
+
+def build_plan(
+    root: Path, service: TaskService, chantier: str | None = None, mission: str = ""
+) -> CadragePlan:
+    """Le plan du cadrage de *root* (ou de son *chantier*), sans rien écrire (le ledger absent n'est pas créé).
+
+    *mission* : la mission du chantier ; les tâches créées par :func:`apply_plan` la portent."""
+    chantier = None if chantier == DEFAULT_CHANTIER else chantier
+    reqs = read_requirements(root, chantier)
+    plan = CadragePlan(reqs, chantier=chantier, mission=mission)
     tasks = _ledger_tasks(service)
     live = [t for t in tasks if t.status is not TaskState.CANCELLED]
     known = set(reqs.by_id())
     for task in live:
-        for req_id in covers_of(task):
+        covers = _chantier_covers(task, chantier)
+        for req_id in covers:
             plan.covered.setdefault(req_id, []).append(task.id)
-        unknown = [r for r in covers_of(task) if r not in known]
+        unknown = [r for r in covers if r not in known]
         if unknown:
-            plan.orphans.append({"task_id": task.id, "title": task.title, "covers": unknown})
-        elif not covers_of(task) and not is_anchor(task) and task.status not in _TERMINAL and reqs.identified:
+            plan.orphans.append({"task_id": task.id, "title": task.title, "covers": [plan.prefix + r for r in unknown]})
+        elif (
+            not covers_of(task) and not is_anchor(task) and task.status not in _TERMINAL and reqs.identified
+        ):
             plan.unlinked.append({"task_id": task.id, "title": task.title})
     found = find_ambiguities(reqs)
+    if chantier:
+        found = [_scope_key(a, chantier) for a in found]
     plan.questions = _question_states(tasks, found)
     answers = {q.ambiguity.requirements[0]: q for q in plan.questions
                if q.ambiguity.kind == "sans-critere" and q.status == "answered"}
@@ -372,7 +418,7 @@ def build_plan(root: Path, service: TaskService) -> CadragePlan:
             plan.notes.append(
                 f"{req.id} : critère pris de la réponse humaine à {state.question_id} — reportez-le dans le cadrage"
             )
-    anchors = [t for t in tasks if is_anchor(t) and t.status in _LIVE_ANCHOR]
+    anchors = [t for t in tasks if is_anchor(t) and _anchor_chantier(t) == chantier and t.status in _LIVE_ANCHOR]
     plan.anchor = anchors[-1].id if anchors else ""
     return plan
 
@@ -380,14 +426,20 @@ def build_plan(root: Path, service: TaskService) -> CadragePlan:
 # ── appliquer (écritures, toutes par TaskService) ────────────────────────────
 
 
+def _check_command(plan: CadragePlan) -> str:
+    return CHECK_COMMAND + (f" --chantier {plan.chantier}" if plan.prefix else "")
+
+
 def _anchor_task(service: TaskService, plan: CadragePlan, actor: str) -> MissionTask:
     if plan.anchor:
         return service.require(plan.anchor)
     added = service.add(
-        "Cadrage : trancher les questions des exigences",
+        "Cadrage : trancher les questions des exigences" + (f" ({plan.chantier})" if plan.prefix else ""),
         ("Les réponses sont reportées dans _grimoire/cadrage/ et le cadrage est planifié : "
-         f"`{CHECK_COMMAND}` rend 0",),
-        actor=actor, owner=actor, checks=(TaskCheck(cmd=CHECK_COMMAND),), extra={"cadrage": ANCHOR},
+         f"`{_check_command(plan)}` rend 0",),
+        actor=actor, owner=actor, checks=(TaskCheck(cmd=_check_command(plan)),),
+        extra={"cadrage": ANCHOR, **({"chantier": plan.chantier} if plan.prefix else {})},
+        mission_id=plan.mission,
     )
     plan.anchor = added.task.id
     return added.task
@@ -447,7 +499,8 @@ def apply_plan(service: TaskService, plan: CadragePlan, actor: str) -> CadragePl
     for proposal in plan.proposals:
         added = service.add(
             proposal.title, proposal.acceptance, actor=actor, checks=proposal.checks, priority=proposal.priority,
-            extra={"cadrage": PLANNED, "covers": [proposal.requirement]},
+            extra={"cadrage": PLANNED, "covers": [plan.prefix + proposal.requirement]},
+            mission_id=plan.mission,
         )
         proposal.task_id = added.task.id
         plan.covered.setdefault(proposal.requirement, []).append(added.task.id)
