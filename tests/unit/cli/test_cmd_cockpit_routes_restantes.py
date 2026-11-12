@@ -51,8 +51,8 @@ def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             {"name": "Foreign", "path": str(foreign), "slug": "foreign"},
         ]
     )
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "home")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", home.resolve())
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "home")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", home.resolve())
     cmd_cockpit._API_CACHE.clear()
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
@@ -281,15 +281,16 @@ def test_memory_confirm_doit_valoir_true_exactement(duo_server: Any) -> None:
 
 
 @pytest.mark.parametrize("action", ["delete", "gc", "sync"])
-def test_memory_mutation_sur_un_autre_projet_du_registre_est_un_403(
+def test_memory_mutation_sur_un_autre_projet_du_registre_est_acceptee(
     duo_server: Any, monkeypatch: pytest.MonkeyPatch, action: str
 ) -> None:
-    """P02 : delete/gc/sync n'agissent que sur le projet servi (``_HOME_SLUG``)."""
-    port, _home, _foreign = duo_server
-    appels: list[list[str]] = []
+    """Lot 5 : delete/gc/sync acceptent tout projet enrôlé — le projet nommé
+    par le corps est résolu par le registre, jamais par le projet d'ouverture."""
+    port, _home, foreign = duo_server
+    vus: list[Path] = []
 
     def _invoke(proot: Path, argv: list[str]) -> cmd_cockpit._CliResult:
-        appels.append(argv)
+        vus.append(proot)
         return cmd_cockpit._CliResult(0, "{}", "")
 
     monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _invoke)
@@ -297,9 +298,8 @@ def test_memory_mutation_sur_un_autre_projet_du_registre_est_un_403(
         port, "/api/memory", {"action": action, "project": "foreign", "confirm": True, "id": "dec-01"}
     )
 
-    assert status == 403, body
-    assert body["ok"] is False
-    assert appels == [], "aucune commande ne doit partir vers le projet étranger"
+    assert status == 200, body
+    assert vus and vus[0] == foreign.resolve()
 
 
 @pytest.mark.parametrize("action", ["delete", "gc", "sync"])
@@ -317,19 +317,20 @@ def test_memory_mutation_sur_le_projet_servi_reste_permise(
     assert status == 200, body
 
 
-def test_memory_mutation_sans_projet_servi_echoue_ferme(
+def test_memory_mutation_ne_depend_plus_du_projet_servi(
     duo_server: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pas de projet servi identifié = aucune mutation, même sur un projet connu."""
+    """Lot 5 : la cible est le slug du corps, résolu par le registre. Un process
+    sans projet d'ouverture identifié n'en refuse pas moins un projet enrôlé."""
     port, _home, _foreign = duo_server
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", None)
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", None)
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", None)
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", None)
     monkeypatch.setattr(
         cmd_cockpit, "_invoke_memory_cli", lambda proot, argv: cmd_cockpit._CliResult(0, "{}", "")
     )
     status, _ = _post(port, "/api/memory", {"action": "gc", "project": "home", "confirm": True})
 
-    assert status == 403
+    assert status == 200
 
 
 def test_memory_lecture_sur_un_autre_projet_reste_permise(
@@ -351,40 +352,44 @@ def _registre(*entrees: tuple[str, Path]) -> None:
 @pytest.mark.parametrize(
     "cas,attendu",
     [
-        ("slug_vide_etranger_en_premier", 403),
-        ("dotdot_vers_l_etranger", 403),
-        ("slug_repris_apres_remove_add", 403),
-        ("registre_sans_le_projet_servi", 403),
-        ("dotdot_vers_le_projet_servi", 200),
-        ("lien_symbolique_vers_le_projet_servi", 200),
-        ("casse_differente", 400),
+        ("slug_vide_premier_du_registre", "foreign"),
+        ("dotdot_dans_le_registre", "foreign"),
+        ("slug_repris_apres_remove_add", "foreign"),
+        ("registre_sans_le_projet_d_ouverture", "foreign"),
+        ("lien_symbolique_dans_le_registre", "home"),
+        # Le corps ne fournit qu'un slug : un chemin écrit à la main n'existe pas
+        # dans le registre, donc rien n'est résolu (le chemin client n'est jamais
+        # accepté, il n'est même pas lu).
+        ("casse_differente", None),
     ],
 )
-def test_memory_la_garde_compare_les_chemins_pas_les_slugs(
-    duo_server: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cas: str, attendu: int
+def test_memory_resout_le_slug_du_corps_par_le_registre(
+    duo_server: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cas: str, attendu: str | None
 ) -> None:
-    """P02 : le projet servi est figé au démarrage (``_HOME_PATH``) ; le registre
-    peut bouger en cours de session sans déplacer la garde."""
+    """Lot 5 : la cible d'une mutation mémoire est le slug du corps, résolu par
+    le registre — jamais un chemin fourni par le client, jamais le seul projet
+    d'ouverture. Le registre peut bouger en cours de session : la cible suit."""
     port, home, foreign = duo_server
-    monkeypatch.setattr(
-        cmd_cockpit, "_invoke_memory_cli", lambda proot, argv: cmd_cockpit._CliResult(0, "{}", "")
-    )
+    vus: list[Path] = []
+
+    def _invoke(proot: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        vus.append(proot)
+        return cmd_cockpit._CliResult(0, "{}", "")
+
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _invoke)
     project = "home"
-    if cas == "slug_vide_etranger_en_premier":
+    if cas == "slug_vide_premier_du_registre":
         _registre(("foreign", foreign), ("home", home))
         project = ""
-    elif cas == "dotdot_vers_l_etranger":
+    elif cas == "dotdot_dans_le_registre":
         (home / "sub").mkdir()
         _registre(("home", home / "sub" / ".." / ".." / "foreign"))
     elif cas == "slug_repris_apres_remove_add":
         _registre(("home", foreign))  # le slug « home » désigne maintenant un autre dossier
-    elif cas == "registre_sans_le_projet_servi":
+    elif cas == "registre_sans_le_projet_d_ouverture":
         _registre(("foreign", foreign))
         project = "foreign"
-    elif cas == "dotdot_vers_le_projet_servi":
-        (home / "sub").mkdir()
-        _registre(("home", home / "sub" / ".."))
-    elif cas == "lien_symbolique_vers_le_projet_servi":
+    elif cas == "lien_symbolique_dans_le_registre":
         lien = tmp_path / "lien"
         try:
             lien.symlink_to(home, target_is_directory=True)
@@ -398,7 +403,12 @@ def test_memory_la_garde_compare_les_chemins_pas_les_slugs(
 
     status, body = _post(port, "/api/memory", {"action": "gc", "project": project, "confirm": True})
 
-    assert status == attendu, body
+    if attendu is None:
+        assert status == 400, body
+        assert vus == [], "aucune commande ne part quand le registre ne résout rien"
+    else:
+        assert status == 200, body
+        assert vus and vus[0].resolve() == (foreign if attendu == "foreign" else home).resolve()
 
 
 def test_memory_une_action_inconnue_est_un_400(duo_server: Any) -> None:

@@ -86,8 +86,8 @@ def test_tasks_response_on_the_wire_is_under_half_of_before(
     monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "home"))
     proj, before = ledger
     project_registry.save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "served")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", proj.resolve())
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "served")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", proj.resolve())
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
     )

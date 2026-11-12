@@ -35,7 +35,7 @@ def home_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     home = tmp_path / "home"
     (home / ".git").mkdir(parents=True)
     project_registry.save_registry([{"name": "Home", "path": str(home), "slug": "home"}])
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "home")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "home")
     cmd_cockpit._API_CACHE.clear()
 
     from grimoire.missions.service import TaskService

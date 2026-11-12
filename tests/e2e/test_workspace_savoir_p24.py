@@ -2,8 +2,8 @@
 
 Le cockpit sert deux projets initialisés pour de vrai. Le store du second est
 le même fichier que celui du premier (lien symbolique) : un emplacement
-partagé. Le cockpit est lancé depuis le premier projet, seul projet où il
-accepte d'écrire.
+partagé. Le cockpit est lancé depuis le premier projet ; depuis le lot 5, il
+pilote aussi le second comme son projet d'ouverture.
 
 Prouvé par navigateur :
 
@@ -13,8 +13,8 @@ Prouvé par navigateur :
 - en portée « Projet X », les entrées de l'autre projet du même fichier ne
   sont que comptées, jamais montrées ;
 - la suppression demande une confirmation dans la page (aucune boîte native)
-  et dit son résultat sur place ; depuis le lot 2, elle est proposée sur tout
-  projet enrôlé, derrière une modale qui nomme le projet visé.
+  et dit son résultat sur place ; depuis le lot 5, elle est proposée sur tout
+  projet enrôlé, sans modale qui nomme le projet visé.
 """
 
 from __future__ import annotations
@@ -348,24 +348,23 @@ def test_la_suppression_se_confirme_dans_la_page(savoir: tuple[Page, dict[str, s
     assert not [e for e in after["entries"] if "6333" in e["text"]], "l'entrée a quitté le store"
 
 
-def test_hors_du_projet_servi_la_suppression_est_proposee_avec_confirmation_nommee(
+def test_hors_du_projet_servi_la_suppression_s_accepte_sans_confirmation_nommee(
     savoir: tuple[Page, dict[str, str]],
 ) -> None:
-    """Lot 2 : la suppression accepte tout projet enrôlé, derrière une modale
-    qui nomme le projet visé ; annuler ne supprime rien."""
+    """Lot 5 : la suppression accepte tout projet enrôlé, sans modale qui nomme
+    le projet visé ; la confirmation dans la page suffit."""
     page, srv = savoir
     _open(page, srv["base"], f"project={srv['poste']}")
-    page.locator(".kn-res").first.click()
+    row = page.locator(".kn-res").first
+    row.click()
     page.wait_for_selector("#inspector-body .kn-detail")
     remove = page.locator("#inspector-body button", has_text="Supprimer…")
     assert remove.count() == 1
 
     remove.click()
     page.locator("#inspector-body .kn-confirm button", has_text="Supprimer définitivement").click()
-    dialog = page.locator("dialog.kn-confirm-project")
-    dialog.wait_for()
-    assert "poste" in dialog.inner_text(), "la modale doit nommer le projet visé"
-    dialog.locator("button", has_text="Annuler").click()
-    assert page.locator("dialog.kn-confirm-project").count() == 0
-    assert page.locator(".kn-res").count() >= 1, "annuler ne supprime rien"
+    page.wait_for_selector("#inspector-body .kn-status[data-tone='ok']", timeout=30_000)
+    assert "Entrée supprimée." in page.locator("#inspector-body .kn-status").inner_text()
+    assert page.locator("dialog.kn-confirm-project").count() == 0, "plus de modale de confirmation nommée (lot 5)"
+    assert page.locator(".kn-res").count() == 0, "l'entrée a quitté la portée du projet visé"
 

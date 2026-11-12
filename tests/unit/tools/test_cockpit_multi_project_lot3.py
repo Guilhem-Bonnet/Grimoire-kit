@@ -114,8 +114,8 @@ def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tupl
         ]
     )
     project_registry.set_selected_slug("home")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "home")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", home.resolve())
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "home")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", home.resolve())
     cmd_cockpit._API_CACHE.clear()
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))

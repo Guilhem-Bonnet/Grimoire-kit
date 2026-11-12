@@ -74,7 +74,7 @@ def test_ouvrir_le_fichier_d_une_reparation_selectionne_la_ligne_citee(workspace
 def test_accepter_une_proposition_depuis_un_projet_enrole_qui_n_est_pas_le_projet_de_lancement(
     cockpit_upgrade_workspace: Page, served_cockpit_upgrade: tuple[str, str, Path]
 ) -> None:
-    """Le cockpit est lancé sans projet de lancement (``_HOME_SLUG`` vide) : le
+    """Le cockpit est lancé sans projet de lancement (``_OPENING_SLUG`` vide) : le
     projet regardé est enrôlé, donc inscriptible depuis le lot 1 de l'écriture
     multi-projets. Le clic « Accepter » doit écrire l'artefact."""
     from grimoire.proposals import create_manual_proposal

@@ -2,7 +2,7 @@
 
 Constat du premier test réel par le cockpit (projet Terraform) : le flow
 `upgrade-flow` lancé par « Mettre à jour » produit des propositions, mais
-Accepter/Refuser restaient `disabled` — la garde `_HOME_SLUG` de
+Accepter/Refuser restaient `disabled` — la garde `_OPENING_SLUG` de
 `workspace_post` (#356) couvrait aussi ces deux boutons, alors que
 `POST /api/projects/update` (le bouton juste au-dessus, dans le même écran)
 écrit déjà dans n'importe quel projet du registre. Décision de Guilhem
@@ -14,7 +14,7 @@ Le moteur (seuil, type, accepter, refuser) est couvert par
 ``tests/unit/test_proposals.py`` ; le branchement pur (sans HTTP) par
 ``tests/unit/test_workspace_proposals.py``. Ce module est le seul des trois à
 passer par ``_CockpitHandler.do_POST`` : c'est la seule couche où la garde
-``_HOME_SLUG`` vit, donc la seule où sa dérogation nommée peut casser.
+``_OPENING_SLUG`` vit, donc la seule où sa dérogation nommée peut casser.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def _cockpit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def duo_server(tmp_path: Path) -> Any:
-    """Deux projets enregistrés, aucun n'est `_HOME_SLUG` — comme la Flotte,
+    """Deux projets enregistrés, aucun n'est `_OPENING_SLUG` — comme la Flotte,
     ou un `?project=` explicite vers un projet qu'on ne fait que regarder."""
     alpha, beta = _project(tmp_path, "alpha"), _project(tmp_path, "beta")
     project_registry.save_registry(
@@ -110,7 +110,7 @@ def _seed_pending_proposal(project: Path) -> str:
 
 def test_accept_writes_the_artifact_on_a_non_home_registry_project(duo_server: Any) -> None:
     """Le contrat de #490 : Accepter fonctionne pour Beta bien qu'il ne soit
-    jamais `_HOME_SLUG` de ce process — c'est le point que ce module entier
+    jamais `_OPENING_SLUG` de ce process — c'est le point que ce module entier
     existe pour prouver, faute de quoi ce test échoue en 403."""
     port, _alpha, beta = duo_server
     slug = _seed_pending_proposal(beta)
@@ -134,10 +134,11 @@ def test_reject_marks_without_writing_an_artifact(duo_server: Any) -> None:
 
 def test_a_project_outside_the_registry_is_refused(duo_server: Any) -> None:
     """Depuis le lot 1, le slug doit être ENRÔLÉ : la garde commune répond
-    403 avant même de chercher la proposition."""
+    404 avant même de chercher la proposition (lot 5 : un slug inconnu n'est
+    pas une permission manquante)."""
     port, _alpha, _beta = duo_server
     status, body = _post(port, "/api/workspace/proposals/whatever/accept?project=ghost")
-    assert status == 403
+    assert status == 404
     assert body["ok"] is False
 
 
@@ -163,11 +164,11 @@ def test_accept_works_on_a_non_home_project_even_when_another_is_home(
     duo_server: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Le cas le plus proche du test réel du 2026-09-14 : le cockpit est
-    lancé depuis Alpha (`_HOME_SLUG`), mais l'humain décide une proposition
+    lancé depuis Alpha (`_OPENING_SLUG`), mais l'humain décide une proposition
     sur Beta, ouvert depuis la Flotte. Avant #490, cette requête recevait un
     403 — écrire depuis Alpha ne rendait pas Beta inscriptible."""
     port, _alpha, beta = duo_server
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "alpha")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "alpha")
     slug = _seed_pending_proposal(beta)
 
     status, body = _post(port, f"/api/workspace/proposals/{slug}/accept?project=beta")
@@ -175,14 +176,15 @@ def test_accept_works_on_a_non_home_project_even_when_another_is_home(
     assert body["ok"] is True
 
 
-def test_file_write_on_another_project_requires_a_named_confirmation(duo_server: Any) -> None:
-    """Lot 2 de l'écriture multi-projets : ``file/write`` accepte un autre
-    projet enrôlé, mais seulement quand le corps nomme la cible
-    (``confirm_project``). Sans cela, la Flotte ne devient pas éditable
-    fichier par fichier à distance sur un simple clic."""
-    port, _alpha, _beta = duo_server
-    status, body = _post(
-        port, "/api/workspace/file/write?project=beta", {"path": "README.md", "text": "x"}
+def test_file_write_on_another_project_needs_no_named_confirmation(duo_server: Any) -> None:
+    """Lot 5 de l'écriture multi-projets : ``file/write`` accepte un autre
+    projet enrôlé sans ``confirm_project`` — il se pilote comme le projet
+    d'ouverture. (Le refus qui reste est celui de l'étage, pas de la cible.)"""
+    port, _alpha, beta = duo_server
+    status, _body = _post(
+        port,
+        "/api/workspace/file/write?project=beta",
+        {"path": "_grimoire/overrides/note.md", "text": "x"},
     )
-    assert status == 403
-    assert "confirm_project" in body["error"]
+    assert status == 200
+    assert (beta / "_grimoire" / "overrides" / "note.md").read_text(encoding="utf-8") == "x"

@@ -24,8 +24,8 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-
     proj = tmp_path / "served"
     (proj / "_grimoire").mkdir(parents=True)
     project_registry.save_registry([{"name": "Served", "path": str(proj), "slug": "served"}])
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "served")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", proj.resolve())
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "served")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", proj.resolve())
     web = tmp_path / "web"
     web.mkdir()
     (web / "app.js").write_bytes(BIG_JS.encode())

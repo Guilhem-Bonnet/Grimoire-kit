@@ -1,7 +1,7 @@
 """``POST /api/projects/create`` — nouveau projet depuis le portefeuille (#172).
 
 Contrairement à `/api/setup` (issue #171), cette route ne dépend pas du
-projet de lancement direct (`_HOME_SLUG`) : le chemin cible est explicite
+projet de lancement direct (`_OPENING_SLUG`) : le chemin cible est explicite
 dans le corps de la requête, exactement comme `/api/projects/add`. Elle
 donne naissance à un projet — un dossier qui EST DÉJÀ un projet, ou un
 chemin hors des racines permises, est refusé ; jamais de mutation d'un

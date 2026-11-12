@@ -1,8 +1,9 @@
 """``POST /api/memory`` avec ``action: "gesture"`` sur un vrai cockpit (P34).
 
 La correction directe d'une entrée passe par la route de gouvernance existante
-— aucune nouvelle route — donc par les mêmes gardes : seul le projet servi
-accepte un geste (P02), même pour un aperçu ; l'application exige ``confirm``.
+— aucune nouvelle route — donc par les mêmes gardes. Depuis le lot 5
+(2026-11-12), P02 accepte tout projet enrôlé, comme le projet d'ouverture ;
+l'application exige toujours ``confirm``.
 """
 
 from __future__ import annotations
@@ -50,8 +51,8 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         {"name": "Home", "path": str(home), "slug": "home"},
         {"name": "Other", "path": str(other), "slug": "other"},
     ])
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "home")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", home.resolve())
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "home")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", home.resolve())
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
     )
@@ -79,10 +80,11 @@ def test_preview_then_apply_on_the_served_project(server: Any) -> None:
     assert status == 200 and done["message"] == "Étiquettes corrigées."
 
 
-def test_another_project_is_read_only_even_for_a_preview(server: Any) -> None:
+def test_another_project_accepts_a_preview(server: Any) -> None:
     port, _, other = server
     eid = _store(other, "Décision d'un autre projet.")
     status, body = _cockpit_http.post(port, "/api/memory", {
         "action": "gesture", "project": "other", "gesture": "tags", "id": eid, "params": {"tags": "b"},
     })
-    assert status == 403 and body["error"] == "hôte en lecture seule"
+    assert status == 200 and body["ok"] is True
+    assert body["changes"][0]["after"] == "b"

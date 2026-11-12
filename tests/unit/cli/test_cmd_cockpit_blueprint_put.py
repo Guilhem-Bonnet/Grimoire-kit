@@ -63,7 +63,7 @@ def _cockpit_home_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Deux projets enregistrés ; ``home`` est ``_HOME_SLUG``, ``foreign`` ne
+    """Deux projets enregistrés ; ``home`` est ``_OPENING_SLUG``, ``foreign`` ne
     l'est pas — comme la Flotte, ou un ``?project=`` explicite vers un projet
     qu'on ne fait que regarder."""
     home, foreign = _project(tmp_path, "home"), _project(tmp_path, "foreign")
@@ -73,7 +73,7 @@ def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             {"name": "Foreign", "path": str(foreign), "slug": "foreign"},
         ]
     )
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "home")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "home")
     cmd_cockpit._API_CACHE.clear()
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
@@ -88,7 +88,7 @@ def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 def test_put_writes_the_blueprint_on_the_home_project(duo_server: Any) -> None:
     """Le contrat que ce module existe pour prouver : sans `do_PUT`, cet
-    appel échouait 501 avant même d'atteindre la garde `_HOME_SLUG`."""
+    appel échouait 501 avant même d'atteindre la garde `_OPENING_SLUG`."""
     port, home, _foreign = duo_server
     blueprint = {"id": "demo", "nodes": [], "edges": []}
 
