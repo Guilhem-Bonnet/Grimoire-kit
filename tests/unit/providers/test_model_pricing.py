@@ -4,8 +4,10 @@ Le registre portait des modèles (``id``/``tier``) mais aucun prix : l'usage d'u
 worker routé vers un fournisseur externe (DeepSeek...) s'affichait « coût
 inconnu ». Le champ optionnel ``models[].pricing`` est lu par
 :mod:`grimoire.providers.registry` et injecté là où ``cmd_task_usage`` chiffre
-l'usage. Un modèle sans tarif — ou un tarif de cache lu absent alors que des
-tokens de cache existent — garde un coût inconnu, jamais ``0``.
+l'usage. Un modèle sans tarif — ou un tarif de cache (lu, écriture 5 min ou
+1 h) absent alors que des tokens correspondants existent — garde un coût
+inconnu, jamais ``0``. Une écriture en cache sans répartition par durée reste
+inconnue elle aussi.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -50,6 +53,14 @@ providers:
         pricing:
           input_per_mtok: 1.0
           output_per_mtok: 2.0
+      - id: cache-write-priced
+        tier: mid
+        pricing:
+          input_per_mtok: 1.0
+          output_per_mtok: 2.0
+          cache_read_per_mtok: 0.1
+          cache_write_5m_per_mtok: 1.25
+          cache_write_1h_per_mtok: 2.0
       - id: invalid-price
         tier: cheap
         pricing:
@@ -78,7 +89,20 @@ def _line(
     output_tokens: int = 500,
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
+    cache_write_5m: int | None = None,
+    cache_write_1h: int | None = None,
 ) -> str:
+    usage: dict[str, Any] = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_input_tokens": cache_read_tokens,
+        "cache_creation_input_tokens": cache_creation_tokens,
+    }
+    if cache_write_5m is not None or cache_write_1h is not None:
+        usage["cache_creation"] = {
+            "ephemeral_5m_input_tokens": cache_write_5m or 0,
+            "ephemeral_1h_input_tokens": cache_write_1h or 0,
+        }
     return json.dumps(
         {
             "type": "assistant",
@@ -90,12 +114,7 @@ def _line(
                 "model": model,
                 "role": "assistant",
                 "content": [{"type": "text"}],
-                "usage": {
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "cache_read_input_tokens": cache_read_tokens,
-                    "cache_creation_input_tokens": cache_creation_tokens,
-                },
+                "usage": usage,
             },
         }
     )
@@ -115,6 +134,7 @@ def test_read_model_pricing_ne_garde_que_les_tarifs_valides(tmp_path: Path) -> N
     pricing = read_model_pricing(project)
 
     assert pricing["deepseek-chat"] == ModelPricing(0.27, 1.10, 0.07)
+    assert pricing["cache-write-priced"] == ModelPricing(1.0, 2.0, 0.1, 1.25, 2.0)
     assert "deepseek-reasoner" not in pricing, "un modèle sans pricing ne doit pas être tarifé par défaut"
     assert "invalid-price" not in pricing, "un tarif négatif est ignoré, jamais replié sur 0"
 
@@ -193,16 +213,56 @@ def test_un_tarif_de_cache_lu_absent_laisse_l_appel_inconnu(tmp_path: Path) -> N
     assert usage["cost_status"] == "unknown"
 
 
-def test_un_tarif_de_cache_ecrit_laisse_l_appel_inconnu(tmp_path: Path) -> None:
-    """Le champ ne modélise pas le cache écrit : un appel qui en porte reste inconnu."""
+def test_une_ecriture_sans_repartition_laisse_l_appel_inconnu(tmp_path: Path) -> None:
+    """Le journal dit qu'on a écrit 100 jetons, sans dire 5 min ni 1 h : on ne suppose pas la durée."""
     project = _project(tmp_path)
     pricing = read_model_pricing(project)
-    traces = _fold(project, _line("msg_1", "deepseek-chat", cache_creation_tokens=100), pricing=pricing)
+    traces = _fold(project, _line("msg_1", "cache-write-priced", cache_creation_tokens=100), pricing=pricing)
 
     usage = task_usage(traces, pricing_for=pricing.get)
 
     assert usage["cost_usd"] is None
     assert usage["cost_status"] == "unknown"
+
+
+def test_un_tarif_d_ecriture_absent_laisse_l_appel_inconnu(tmp_path: Path) -> None:
+    """La répartition est là, mais le registre ne déclare pas le tarif d'écriture : inconnu, jamais 0."""
+    project = _project(tmp_path)
+    pricing = read_model_pricing(project)
+    traces = _fold(
+        project,
+        _line("msg_1", "deepseek-chat", cache_creation_tokens=100, cache_write_5m=100, cache_write_1h=0),
+        pricing=pricing,
+    )
+
+    usage = task_usage(traces, pricing_for=pricing.get)
+
+    assert usage["cost_usd"] is None
+    assert usage["cost_status"] == "unknown"
+
+
+def test_une_ecriture_avec_repartition_est_chiffree_par_le_registre(tmp_path: Path) -> None:
+    """Écriture 5 min et 1 h aux tarifs déclarés, plus l'entrée, la sortie et le cache lu."""
+    project = _project(tmp_path)
+    pricing = read_model_pricing(project)
+    traces = _fold(
+        project,
+        _line(
+            "msg_1",
+            "cache-write-priced",
+            cache_read_tokens=500,
+            cache_creation_tokens=300,
+            cache_write_5m=200,
+            cache_write_1h=100,
+        ),
+        pricing=pricing,
+    )
+
+    usage = task_usage(traces, pricing_for=pricing.get)
+
+    attendu = (1000 * 1.0 + 500 * 2.0 + 500 * 0.1 + 200 * 1.25 + 100 * 2.0) / 1_000_000
+    assert usage["cost_usd"] == pytest.approx(attendu)
+    assert usage["cost_status"] == "exact"
 
 
 def test_le_repli_avec_tarif_ecrit_un_cout_exact_dans_la_trace(tmp_path: Path) -> None:
