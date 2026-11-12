@@ -7,6 +7,8 @@ apparaître le projet, et une sonde qui expirait le faisait sortir de la liste.
 Ce module rassemble côté serveur, pour un projet ou pour tout le registre, ce
 qui attend un humain :
 
+- le disjoncteur de l'orchestrateur ouvert, en tête (rien ne se lance plus ;
+  le geste ``reset`` est un geste humain, #1192) ;
 - checkpoints de flow non décidés (tous les runs, pas le dernier — P07) et
   questions posées par ``task ask`` ;
 - revues dont le gate refuse la clôture, tâches bloquées, consignes non
@@ -78,6 +80,7 @@ __all__ = [
 
 SCHEMA_VERSION = "grimoire-workspace-attention/v1"
 
+BREAKER = "breaker"
 CHECKPOINT = "checkpoint"
 QUESTION = "question"
 PROPOSAL = "proposal"
@@ -95,7 +98,7 @@ SERVICE_RESOLVED = "service_resolved"
 #: Les sections, de la plus urgente à la moins urgente, et les types de chacune
 #: dans leur ordre. Un type n'apparaît que dans une section.
 SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("decide", "À décider", (CHECKPOINT, QUESTION, PROPOSAL)),
+    ("decide", "À décider", (BREAKER, CHECKPOINT, QUESTION, PROPOSAL)),
     ("review", "PR à revoir", (PR_REVIEW,)),
     ("unblock", "À débloquer", (REVIEW_BLOCKED, TASK_BLOCKED, CLAIM_ORPHANED)),
     ("repair", "À réparer", (SERVICE, UNREADABLE, PROBE_FAILED)),
@@ -376,6 +379,28 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
                   since=since, task_id=task.id, unread=unread)
 
 
+def _collect_breaker(read: _ProjectRead) -> None:
+    """Un disjoncteur ouvert gèle toute l'autonomie : en tête d'« À traiter », avec le geste humain qui le referme.
+
+    Le drapeau vit à la racine d'origine (jamais celle du worktree de la tâche), comme la pause (#1192).
+    """
+    from grimoire.missions.breaker import read_breaker
+    from grimoire.missions.pause import home_root
+
+    root = read.home_root or (home_root(read.root) if read.root is not None else None)
+    if root is None:
+        return
+    state = read_breaker(root)
+    if not state.open:
+        return
+    opened = f" depuis le {state.opened_at}" if state.opened_at else ""
+    _item(read, BREAKER, "breaker", "disjoncteur ouvert — aucune session n'est lancée",
+          f"{state.reason or 'raison inconnue'}{opened}",
+          since=state.opened_at or None,
+          gesture={"command": "grimoire orchestrate breaker reset", "note": "Refermer le disjoncteur (geste humain)"},
+          source=state.source or "inconnu")
+
+
 def _collect_checkpoints(read: _ProjectRead) -> None:
     from grimoire.tools.flow_runs import flow_runs_view
 
@@ -543,6 +568,7 @@ def _read_project(
         read.row["state"] = "unreadable"
         read.row["reason"] = f"ledger illisible : {exc}"
         _item(read, UNREADABLE, "ledger", "projet illisible", read.row["reason"])
+    _guarded(read, "disjoncteur", lambda: _collect_breaker(read))
     if not read.activity and _live_journal(read.root, now):
         read.activity = "session vivante"
     _guarded(read, "checkpoints", lambda: _collect_checkpoints(read))

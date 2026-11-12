@@ -111,6 +111,7 @@ const CSS = `
 /** Chaque type d'élément (`workspace_attention.KINDS`) : son icône, son mot,
  *  le verbe de son action en ligne. Un type inconnu prend `FALLBACK`. */
 const KINDS = {
+  breaker: { word: 'disjoncteur ouvert', icon: 'stop', tone: 'bad', action: 'Refermer' },
   checkpoint: { word: 'checkpoint', icon: 'gate', tone: 'warn', action: 'Examiner' },
   question: { word: 'question', icon: 'chat', tone: 'warn', action: 'Répondre' },
   proposal: { word: 'proposition', icon: 'agent', tone: 'warn', action: 'Examiner' },

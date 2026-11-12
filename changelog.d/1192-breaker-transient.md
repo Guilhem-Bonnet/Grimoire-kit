@@ -1,0 +1,1 @@
+- fix(missions): un délai réseau du merger n'ouvre plus le disjoncteur ; un disjoncteur ouvert se voit dans « À traiter » et dans `autonomy autopilot status` (#1192)
