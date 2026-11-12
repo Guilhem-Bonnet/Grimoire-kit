@@ -1,1 +1,0 @@
-- feat(cockpit): tout accepter les tâches fusionnées en un geste
