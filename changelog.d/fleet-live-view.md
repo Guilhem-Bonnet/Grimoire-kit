@@ -1,0 +1,1 @@
+- feat(cockpit): la Flotte en direct montre chaque session comme un fil, son détail et ses terminaux (lot B, #1193)

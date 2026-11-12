@@ -80,8 +80,13 @@ const SPACES = [
     sections: [{ id: 'travail', module: 'executer', label: 'Tâches',
       skeleton: (p) => (['liste', 'sessions', 'timeline', 'decisions'].includes(p.view) ? 'table' : 'board') }] },
   { id: 'flotte', label: 'Flotte', icon: 'i-space-flotte', term: 'flotte',
-    sections: [{ id: 'flotte', module: 'piloter', label: 'Flotte',
-      skeleton: () => (host.kind === 'cockpit' && scope.all ? 'table' : 'kpi') }] },
+    sections: [
+      { id: 'flotte', module: 'piloter', label: 'Flotte',
+        skeleton: () => (host.kind === 'cockpit' && scope.all ? 'table' : 'kpi') },
+      // Lot B (2026-11-12) : la Flotte en direct, en fils (artboard
+      // « Proposition A : Tissage »). Données : `GET fleet/live` du lot A.
+      { id: 'en-direct', module: 'fils', label: 'En direct', skeleton: 'lines' },
+    ] },
   { id: FOURTH_SPACE.id, label: FOURTH_SPACE.label, icon: FOURTH_SPACE.icon, term: 'memoire',
     // Entrée par la Recherche (P24) ; la Santé (P25) est la vue voisine.
     landing: 'memoire',
