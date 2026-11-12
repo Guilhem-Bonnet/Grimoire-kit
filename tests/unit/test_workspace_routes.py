@@ -9,9 +9,10 @@ lui a désigné — jamais pour l'autre, jamais pour « le dernier sélectionné
 Le second volet est le contraire : le cockpit n'est en lecture seule que sur
 une cible qu'il ne peut pas résoudre. Depuis le lot 1 de l'écriture
 multi-projets (2026-11-07), tout projet ENRÔLÉ accepte une écriture, même
-s'il n'est pas le projet d'ouverture (``_HOME_SLUG``, résolu au lancement).
-Depuis le lot 2 (2026-11-08), ``file/write``, ``file/override`` et
-``command`` y ajoutent une confirmation nommée (``confirm_project``).
+s'il n'est pas le projet d'ouverture (``_OPENING_SLUG``, résolu au lancement).
+Depuis le lot 5 (2026-11-12), ``file/write``, ``file/override``, ``command``
+et les mutations mémoire n'ajoutent plus de confirmation nommée : un projet
+enrôlé se pilote comme celui d'ouverture.
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ from grimoire.tools.workspace_routes import (
     PREFIX,
     is_proposal_decision,
     is_registry_scoped_write,
-    is_sensitive_write,
     workspace_get,
 )
 
@@ -103,13 +103,13 @@ def cockpit_home(
 ) -> Iterator[int]:
     """Le même cockpit, mais lancé depuis ``projet-a`` (#351/#356).
 
-    ``monkeypatch.setattr`` sur ``_HOME_SLUG`` mime ce que ``serve()`` ferait
+    ``monkeypatch.setattr`` sur ``_OPENING_SLUG`` mime ce que ``serve()`` ferait
     via ``_select_cwd_project`` sans passer par un vrai ``cwd`` ni écrire
     l'état persistant du registre — et s'annule tout seul en fin de test, pour
     qu'aucun autre test de ce fichier n'hérite d'un projet de lancement.
     """
     monkeypatch.setenv("GRIMOIRE_COCKPIT_HOME", str(tmp_path / "cockpit-home"))
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "projet-a")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "projet-a")
     cmd_cockpit._API_CACHE.clear()
     reg.register_project(real_project, "projet-a")
     reg.register_project(second_project, "projet-b")
@@ -187,26 +187,23 @@ def _is_missing_confirmation(payload: dict[str, Any]) -> bool:
 
 
 @pytest.mark.parametrize("route", sorted(POST_ROUTES))
-def test_le_cockpit_ecrit_sur_tout_projet_enrole_les_sensibles_sur_confirmation(
+def test_le_cockpit_ecrit_sur_tout_projet_enrole_sans_confirmation(
     route: str, cockpit: int
 ) -> None:
-    """Lot 1 et lot 2 de l'écriture multi-projets : tout projet ENRÔLÉ est
-    inscriptible.
+    """Lot 1 et lot 5 de l'écriture multi-projets : tout projet ENRÔLÉ est
+    inscriptible, sans confirmation nommée.
 
     Cette fixture n'a pas de projet d'ouverture (`_select_cwd_project` n'a
     jamais tourné) : `projet-a` et `projet-b` sont deux entrées du registre,
-    et le cockpit doit pourtant accepter d'écrire chez elles. Depuis le lot 2,
-    les écritures de :data:`SENSITIVE_WRITES` acceptent aussi un autre projet,
-    à condition que le corps porte ``confirm_project`` ; sans lui, elles
-    refusent en le nommant — pas le refus métier de la route.
+    et le cockpit doit pourtant accepter d'écrire chez elles. Depuis le lot 5,
+    aucune route n'exige ``confirm_project`` : le refus ne peut plus être que
+    le refus métier de la route, jamais « lecture seule » ni une confirmation
+    manquante.
     """
     code, payload = _post(cockpit, f"{route}?project=projet-a", {"path": "x", "argv": ["version"]})
 
-    if is_sensitive_write(route):
-        assert code == 403
-        assert _is_missing_confirmation(payload)
-    else:
-        assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
+    assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
+    assert not _is_missing_confirmation(payload), f"{route} exige encore confirm_project ({code})"
 
 
 @pytest.mark.parametrize("route", sorted(POST_ROUTES))
@@ -216,17 +213,13 @@ def test_l_autre_projet_enrole_reste_inscriptible_meme_avec_un_lancement_direct(
     """`cockpit_home` sert `projet-a` en direct — et `projet-b` reste inscriptible.
 
     Le lot 1 a remplacé la garde « projet d'ouverture » par « projet enrôlé » :
-    un cockpit ouvert sur `projet-a` n'est plus le seul à pouvoir écrire. Les
-    trois écritures sensibles (lot 2) acceptent aussi `projet-b`, mais
-    seulement sur confirmation nommée.
+    un cockpit ouvert sur `projet-a` n'est plus le seul à pouvoir écrire. Le
+    lot 5 a retiré la confirmation nommée : `projet-b` s'écrit comme `projet-a`.
     """
     code, payload = _post(cockpit_home, f"{route}?project=projet-b", {"path": "x", "argv": ["version"]})
 
-    if is_sensitive_write(route):
-        assert code == 403
-        assert _is_missing_confirmation(payload)
-    else:
-        assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
+    assert not _is_guard_refusal(payload), f"{route} est resté en lecture seule ({code})"
+    assert not _is_missing_confirmation(payload), f"{route} exige encore confirm_project ({code})"
 
 
 def test_le_cockpit_execute_une_commande_de_la_liste_blanche_sur_son_projet_de_lancement(
@@ -443,7 +436,7 @@ def agents_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[int]:
     """Un cockpit qui sert en direct un projet dédié aux tests d'agents.
 
     Portée module, sans ``monkeypatch`` (fonction seulement par défaut) :
-    l'environnement et ``_HOME_SLUG`` sont posés et restaurés à la main.
+    l'environnement et ``_OPENING_SLUG`` sont posés et restaurés à la main.
     """
     import os
     import subprocess
@@ -460,9 +453,9 @@ def agents_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[int]:
 
     tmp_path = tmp_path_factory.mktemp("agents-home-cockpit")
     previous_env = os.environ.get("GRIMOIRE_COCKPIT_HOME")
-    previous_home_slug = cmd_cockpit._HOME_SLUG
+    previous_home_slug = cmd_cockpit._OPENING_SLUG
     os.environ["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path / "cockpit")
-    cmd_cockpit._HOME_SLUG = "projet-agents-home"
+    cmd_cockpit._OPENING_SLUG = "projet-agents-home"
     cmd_cockpit._API_CACHE.clear()
     reg.register_project(root, "projet-agents-home")
     serve_dir = tmp_path / "serve"
@@ -477,7 +470,7 @@ def agents_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[int]:
         httpd.shutdown()
         httpd.server_close()
         cmd_cockpit._API_CACHE.clear()
-        cmd_cockpit._HOME_SLUG = previous_home_slug
+        cmd_cockpit._OPENING_SLUG = previous_home_slug
         if previous_env is None:
             os.environ.pop("GRIMOIRE_COCKPIT_HOME", None)
         else:
@@ -574,9 +567,9 @@ def tasks_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[int, 
 
     tmp_path = tmp_path_factory.mktemp("tasks-home-cockpit")
     previous_env = os.environ.get("GRIMOIRE_COCKPIT_HOME")
-    previous_home_slug = cmd_cockpit._HOME_SLUG
+    previous_home_slug = cmd_cockpit._OPENING_SLUG
     os.environ["GRIMOIRE_COCKPIT_HOME"] = str(tmp_path / "cockpit")
-    cmd_cockpit._HOME_SLUG = "projet-tasks-home"
+    cmd_cockpit._OPENING_SLUG = "projet-tasks-home"
     cmd_cockpit._API_CACHE.clear()
     reg.register_project(home_root, "projet-tasks-home")
     reg.register_project(away_root, "projet-tasks-away")
@@ -592,7 +585,7 @@ def tasks_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[int, 
         httpd.shutdown()
         httpd.server_close()
         cmd_cockpit._API_CACHE.clear()
-        cmd_cockpit._HOME_SLUG = previous_home_slug
+        cmd_cockpit._OPENING_SLUG = previous_home_slug
         if previous_env is None:
             os.environ.pop("GRIMOIRE_COCKPIT_HOME", None)
         else:
@@ -707,7 +700,7 @@ def test_post_migrate_standard_importe_le_board_non_migre_sur_le_projet_de_lance
     """Bouton « Migrer les tâches » de l'espace Exécuter (ADR-007, issue #559) :
     même moteur que ``grimoire task migrate-standard``. Depuis #560, cette
     route suit la dérogation nommée ``is_registry_scoped_write`` plutôt que la
-    garde ``_HOME_SLUG`` générale — prouvée pour CETTE route par la section
+    garde ``_OPENING_SLUG`` générale — prouvée pour CETTE route par la section
     3bis plus bas, pas par les deux tests paramétrés sur :data:`POST_ROUTES`
     (qui l'excluent désormais explicitement). Ce test-ci prouve seulement le
     moteur de migration lui-même, sur le projet de lancement.
@@ -743,11 +736,12 @@ def test_post_migrate_standard_importe_le_board_non_migre_sur_le_projet_de_lance
 def test_post_migrate_standard_fonctionne_sur_un_projet_du_registre_hors_lancement(
     tasks_home: tuple[int, Path],
 ) -> None:
-    """`projet-tasks-away` n'est que regardé par ce cockpit (`_HOME_SLUG` vaut
-    `projet-tasks-home`) — la garde générale le refuserait en 403 pour
-    n'importe quelle autre écriture (voir la section 2 ci-dessus). Migrer ses
-    tâches doit malgré tout réussir et écrire réellement son ledger : la même
-    dérogation que `POST /api/projects/update` accepte déjà pour ce projet.
+    """`projet-tasks-away` n'est pas le projet d'ouverture de ce cockpit
+    (`_OPENING_SLUG` vaut `projet-tasks-home`) mais il est ENRÔLÉ : depuis le
+    lot 1, toutes les écritures de la vue de travail le visent comme le projet
+    d'ouverture (le lot 5 a retiré la confirmation nommée des écritures
+    sensibles). Migrer ses tâches doit réussir et écrire réellement son ledger,
+    comme `POST /api/projects/update` le fait déjà pour ce projet.
 
     Retire d'abord son ledger (même patron que le test du projet de lancement
     ci-dessus) pour que la migration ait effectivement quelque chose à
@@ -779,14 +773,15 @@ def test_post_migrate_standard_fonctionne_sur_un_projet_du_registre_hors_lanceme
 def test_post_migrate_standard_sur_un_slug_inconnu_est_refuse(cockpit: int) -> None:
     """Le slug sert de clé au registre : absent, aucune racine n'est résolue.
 
-    Depuis le lot 1, la garde commune des écritures répond 403 « lecture
-    seule » — le même refus fermé que pour tout slug inconnu — au lieu de
-    laisser la route résoudre elle-même un 404.
+    Depuis le lot 5, la garde commune des écritures distingue les refus : un
+    slug nommé mais inconnu du registre est un 404 « projet inconnu ou non
+    enrôlé » — pas une permission manquante (403), qui reste réservée au cas
+    où la requête ne nomme aucun projet.
     """
     code, payload = _post(cockpit, f"{PREFIX}tasks/migrate-standard?project=projet-fantome", {})
 
-    assert code == 403
-    assert "lecture seule" in payload["error"].lower()
+    assert code == 404
+    assert "inconnu" in payload["error"].lower()
 
 
 def test_post_migrate_standard_sur_un_slug_malforme_reste_refuse(cockpit: int) -> None:
@@ -796,7 +791,7 @@ def test_post_migrate_standard_sur_un_slug_malforme_reste_refuse(cockpit: int) -
         cockpit, f"{PREFIX}tasks/migrate-standard?project=Not_a-Valid--Slug!", {}
     )
 
-    assert code == 403
+    assert code == 404
     assert payload.get("error")
 
 
@@ -864,7 +859,7 @@ def test_flow_runs_route_lists_a_run_by_blueprint(tmp_path: Path) -> None:
 # les projets du registre. Une action du portefeuille est une dérogation
 # nommée de plus (`is_registry_scoped_write`), limitée au chemin
 # `portfolio/tasks/<id>/<action>` : le chemin historique `tasks/<id>/<action>`
-# reste `_HOME_SLUG` seulement, et un `project` du corps qui ne désigne pas la
+# reste `_OPENING_SLUG` seulement, et un `project` du corps qui ne désigne pas la
 # racine résolue est refusé — jamais une écriture sur le mauvais dépôt.
 
 
@@ -917,7 +912,8 @@ def test_post_portfolio_avec_un_projet_du_corps_qui_ne_correspond_pas_est_refuse
 ) -> None:
     """Fail-closed : `?project=` résout la racine, le `project` du corps doit
     la confirmer — sinon un client qui se tromperait de slug écrirait ailleurs
-    que là où il croit."""
+    que là où il croit. Depuis le lot 5 c'est un 400 (corps contradictoire),
+    plus une permission manquante : les deux slugs sont enrôlés."""
     from grimoire.missions.service import TaskService
 
     task_id = _open_ready_task(second_project, "Tâche protégée du portefeuille")
@@ -928,7 +924,7 @@ def test_post_portfolio_avec_un_projet_du_corps_qui_ne_correspond_pas_est_refuse
         {"reason": "x", "project": "projet-a"},
     )
 
-    assert code == 403
+    assert code == 400
     assert TaskService(second_project).require(task_id).status.value == "ready"
 
 

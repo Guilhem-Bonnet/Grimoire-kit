@@ -1,19 +1,20 @@
-"""Lot 1 et lot 2 — un seul cockpit écrit sur n'importe quel projet enrôlé.
+"""Lots 1 et 5 — un seul cockpit écrit sur n'importe quel projet enrôlé.
 
 La garde historique comparait la requête au projet d'ouverture
-(``_HOME_SLUG``) : naviguer vers un autre projet du registre rendait le
+(``_OPENING_SLUG``) : naviguer vers un autre projet du registre rendait le
 cockpit en lecture seule, ce qui obligeait à ouvrir un cockpit par projet.
 Le lot 1 remplace cette garde par une résolution ENRÔLÉE : le slug de
 ``?project=`` sert de clé au registre (``registered_root``), jamais de chemin,
-et le dossier doit exister. Une écriture sans slug, un slug inconnu ou un
-``project`` de corps qui contredit l'URL sont refusés.
+et le dossier doit exister. Une écriture sans slug garde le 403 « lecture
+seule » ; un slug inconnu est un 404 ; un ``project`` de corps qui contredit
+l'URL est un 400.
 
-Le lot 2 ouvre les écritures SENSIBLES — ``file/write``, ``file/override``,
-``command`` et les mutations mémoire (``delete``/``gc``/``sync``) — à tout
-projet enrôlé, sous confirmation NOMMÉE : le corps doit porter
-``confirm_project`` égal au slug visé. Le projet d'ouverture garde son geste
-historique (sans confirmation). Chaque acceptation laisse une ligne
-``confirm_project`` dans le journal de la garde.
+Le lot 2 avait ouvert les écritures SENSIBLES — ``file/write``,
+``file/override``, ``command`` et les mutations mémoire — sous confirmation
+NOMMÉE (``confirm_project``). Le lot 5 (2026-11-12) supprime cette
+confirmation : tout projet enrôlé se pilote comme le projet d'ouverture, et un
+``confirm_project`` résiduel dans le corps est simplement ignoré. Le journal
+de la garde continue de noter le projet visé.
 """
 
 from __future__ import annotations
@@ -27,9 +28,11 @@ from typing import Any
 
 import pytest
 
-from grimoire.cli import cmd_cockpit, cockpit_write_target
+from grimoire.cli import cmd_cockpit
+from grimoire.core.config import GrimoireConfig
+from grimoire.memory.manager import MemoryManager
 from grimoire.missions.service import TaskService
-from grimoire.tools import project_registry, workspace_exec
+from grimoire.tools import project_registry, workspace_exec, workspace_write_guard
 from grimoire.tools.workspace_routes import PREFIX
 from grimoire.tools.workspace_write_guard import cockpit_journal_path
 
@@ -47,6 +50,9 @@ def _project(tmp_path: Path, name: str) -> Path:
     root = tmp_path / name
     (root / ".git").mkdir(parents=True)
     (root / "_grimoire" / "overrides").mkdir(parents=True)
+    (root / "project-context.yaml").write_text(
+        f"project:\n  name: {name}\nmemory:\n  backend: local\n", encoding="utf-8",
+    )
     return root
 
 
@@ -100,8 +106,8 @@ def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tupl
         ]
     )
     project_registry.set_selected_slug("home")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "home")
-    monkeypatch.setattr(cmd_cockpit, "_HOME_PATH", home.resolve())
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "home")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_PATH", home.resolve())
     cmd_cockpit._API_CACHE.clear()
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
@@ -146,12 +152,12 @@ def test_a_write_without_a_slug_is_refused_without_falling_back_to_the_selection
     assert _tasks(home) == [] and _tasks(foreign) == []
 
 
-def test_a_write_on_an_unknown_slug_is_refused(duo_server: tuple[int, Path, Path]) -> None:
+def test_a_write_on_an_unknown_slug_is_a_404(duo_server: tuple[int, Path, Path]) -> None:
     port, home, foreign = duo_server
 
     status, body = _cockpit_http.post(port, f"{TASK_ADD}?project=ghost", {"title": "Fantôme", "acceptance": ["aucune"]})
 
-    assert status == 403, body
+    assert status == 404, body
     assert _tasks(home) == [] and _tasks(foreign) == []
 
 
@@ -168,41 +174,62 @@ def test_a_body_project_that_disagrees_with_the_url_is_refused(
         {"project": "home", "title": "Mauvais projet", "acceptance": ["aucune"]},
     )
 
-    assert status == 403, body
+    assert status == 400, body
     assert "ne correspond pas" in body["error"]
     assert _tasks(home) == [] and _tasks(foreign) == []
 
 
-# ── Lot 2 : écritures sensibles sur un autre projet, sur confirmation nommée ──
+# ── Lot 5 : écritures « sensibles » sur un autre projet, sans confirmation ──
 
 
 @pytest.mark.parametrize("route", SENSITIVE_ROUTES)
-def test_sans_confirm_project_une_ecriture_sensible_sur_un_autre_projet_est_refusee(
-    duo_server: tuple[int, Path, Path], route: str
+def test_une_ecriture_sensible_sur_un_autre_projet_est_acceptee(
+    duo_server: tuple[int, Path, Path], route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     port, _home, foreign = duo_server
+    if route == f"{PREFIX}command":
+        monkeypatch.setattr(
+            workspace_exec,
+            "run_command",
+            lambda project_root, argv, **kwargs: {
+                "ok": True, "command": "grimoire version", "argv": argv, "code": 0, "output": "0.0.0",
+            },
+        )
 
     status, payload = _cockpit_http.post(port, f"{route}?project=foreign", _body(route, foreign))
 
-    assert status == 403, payload
-    assert "confirm_project" in payload["error"]
-    assert not (foreign / "_grimoire" / "overrides" / "note.md").exists()
+    assert status == 200, payload
+    if route != f"{PREFIX}command":
+        assert (foreign / "_grimoire" / "overrides" / "note.md").is_file()
 
 
 @pytest.mark.parametrize("route", SENSITIVE_ROUTES)
-def test_une_confirmation_d_un_autre_slug_est_refusee(duo_server: tuple[int, Path, Path], route: str) -> None:
+def test_un_confirm_project_residuel_est_ignore(
+    duo_server: tuple[int, Path, Path], route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La clé du lot 2 ne gate plus rien : un client qui l'envoie encore (avec
+    n'importe quelle valeur) n'est ni refusé ni détourné vers un autre projet."""
     port, _home, foreign = duo_server
+    if route == f"{PREFIX}command":
+        monkeypatch.setattr(
+            workspace_exec,
+            "run_command",
+            lambda project_root, argv, **kwargs: {
+                "ok": True, "command": "grimoire version", "argv": argv, "code": 0, "output": "0.0.0",
+            },
+        )
+        body = {"argv": ["version"], "confirm_project": "home"}
+    else:
+        body = {**_body(route, foreign), "confirm_project": "home"}
 
-    status, payload = _cockpit_http.post(
-        port, f"{route}?project=foreign", {**_body(route, foreign), "confirm_project": "home"}
-    )
+    status, payload = _cockpit_http.post(port, f"{route}?project=foreign", body)
 
-    assert status == 403, payload
-    assert "confirm_project" in payload["error"]
-    assert not (foreign / "_grimoire" / "overrides" / "note.md").exists()
+    assert status == 200, payload
+    if route != f"{PREFIX}command":
+        assert (foreign / "_grimoire" / "overrides" / "note.md").is_file()
 
 
-def test_une_bonne_confirmation_ecrit_le_fichier_sur_la_bonne_racine(
+def test_une_ecriture_de_fichier_ecrit_sur_la_bonne_racine_sans_confirmation(
     duo_server: tuple[int, Path, Path],
 ) -> None:
     port, home, foreign = duo_server
@@ -210,20 +237,19 @@ def test_une_bonne_confirmation_ecrit_le_fichier_sur_la_bonne_racine(
     status, body = _cockpit_http.post(
         port,
         f"{PREFIX}file/write?project=foreign",
-        {"path": "_grimoire/overrides/note.md", "text": "chez foreign", "confirm_project": "foreign"},
+        {"path": "_grimoire/overrides/note.md", "text": "chez foreign"},
     )
 
     assert status == 200, body
     assert (foreign / "_grimoire" / "overrides" / "note.md").read_text(encoding="utf-8") == "chez foreign"
     assert not (home / "_grimoire" / "overrides" / "note.md").exists()
 
-    gestures = [line for line in _journal_lines() if line.get("gesture") == "confirm_project"]
-    assert gestures, "le journal de la garde doit garder la confirmation"
-    assert gestures[-1]["project"] == "foreign"
-    assert gestures[-1]["confirm_project"] == "foreign"
+    # Le journal de la garde note toujours le projet visé, sans geste nommé.
+    wrote = [line for line in _journal_lines() if line.get("route") == f"{PREFIX}file/write"]
+    assert wrote and wrote[-1]["project"] == "foreign"
 
 
-def test_une_bonne_confirmation_cree_l_override_sur_la_bonne_racine(
+def test_un_override_se_cree_sur_la_bonne_racine_sans_confirmation(
     duo_server: tuple[int, Path, Path],
 ) -> None:
     port, home, foreign = duo_server
@@ -232,7 +258,7 @@ def test_une_bonne_confirmation_cree_l_override_sur_la_bonne_racine(
     status, body = _cockpit_http.post(
         port,
         f"{PREFIX}file/override?project=foreign",
-        {"path": rel, "confirm_project": "foreign"},
+        {"path": rel},
     )
 
     assert status == 200, body
@@ -241,7 +267,7 @@ def test_une_bonne_confirmation_cree_l_override_sur_la_bonne_racine(
     assert not (home / "_grimoire" / "overrides" / "note.md").exists()
 
 
-def test_une_bonne_confirmation_lance_la_commande_dans_la_bonne_racine(
+def test_une_commande_lance_dans_la_bonne_racine_sans_confirmation(
     duo_server: tuple[int, Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """La liste blanche et le délai restent ceux de ``workspace_exec`` ; on
@@ -259,7 +285,7 @@ def test_une_bonne_confirmation_lance_la_commande_dans_la_bonne_racine(
     status, body = _cockpit_http.post(
         port,
         f"{PREFIX}command?project=foreign",
-        {"argv": ["version"], "confirm_project": "foreign"},
+        {"argv": ["version"]},
     )
 
     assert status == 200, body
@@ -268,7 +294,7 @@ def test_une_bonne_confirmation_lance_la_commande_dans_la_bonne_racine(
 
 
 @pytest.mark.parametrize("path", ["../evade.md", "/tmp/evade.md", "_grimoire/overrides/../../evade.md"])
-def test_la_traversee_de_chemin_reste_refusee_meme_confirmee(
+def test_la_traversee_de_chemin_reste_refusee(
     duo_server: tuple[int, Path, Path], tmp_path: Path, path: str
 ) -> None:
     port, _home, _foreign = duo_server
@@ -276,7 +302,7 @@ def test_la_traversee_de_chemin_reste_refusee_meme_confirmee(
     status, body = _cockpit_http.post(
         port,
         f"{PREFIX}file/write?project=foreign",
-        {"path": path, "text": "x", "confirm_project": "foreign"},
+        {"path": path, "text": "x"},
     )
 
     assert status == 403, body
@@ -284,11 +310,10 @@ def test_la_traversee_de_chemin_reste_refusee_meme_confirmee(
     assert not Path("/tmp/evade.md").exists()
 
 
-def test_le_projet_d_ouverture_garde_son_geste_sans_confirmation(
+def test_le_projet_d_ouverture_garde_son_geste(
     duo_server: tuple[int, Path, Path],
 ) -> None:
-    """La confirmation nommée est la condition pour un AUTRE projet ; le
-    projet d'ouverture garde le geste historique (aucune régression)."""
+    """Le projet d'ouverture n'a rien perdu : il écrit sans confirmation."""
     port, home, _foreign = duo_server
 
     status, body = _cockpit_http.post(
@@ -301,7 +326,7 @@ def test_le_projet_d_ouverture_garde_son_geste_sans_confirmation(
     assert (home / "_grimoire" / "overrides" / "note.md").read_text(encoding="utf-8") == "chez home"
 
 
-# ── Lot 2 : mutations mémoire (delete/gc/sync) sur un autre projet ──────────
+# ── Lot 5 : mutations et gestes mémoire sur un autre projet, sans confirmation ──
 
 
 MEMORY_MUTATIONS = (
@@ -312,35 +337,40 @@ MEMORY_MUTATIONS = (
 
 
 @pytest.mark.parametrize(("action", "extra"), MEMORY_MUTATIONS)
-def test_une_mutation_memoire_sans_confirmation_nommee_est_refusee(
-    duo_server: tuple[int, Path, Path], action: str, extra: dict[str, Any]
+def test_une_mutation_memoire_sur_un_autre_projet_est_acceptee(
+    duo_server: tuple[int, Path, Path], action: str, extra: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     port, _home, _foreign = duo_server
+
+    def _fake_invoke(project_root: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        return cmd_cockpit._CliResult(0, "{}", "")
+
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
 
     status, body = _cockpit_http.post(
         port, "/api/memory", {"action": action, "project": "foreign", "confirm": True, **extra}
     )
 
-    assert status == 403, body
-    assert body["error"] == "hôte en lecture seule"
+    assert status == 200, body
+    assert body["ok"] is True
 
 
-def test_un_journal_non_inscriptible_refuse_l_ecriture_sensible(
+def test_un_journal_non_inscriptible_refuse_l_ecriture(
     duo_server: tuple[int, Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fail-closed du lot 2 : la confirmation ne compte que si le journal peut
-    la garder. Sans journal, la route répond 503 et n'écrit rien."""
+    """Fail-closed de la garde commune : sans journal, la route répond 503 et
+    n'écrit rien — que l'écriture soit sensible ou non."""
     port, home, foreign = duo_server
 
     def _broken(*_args: Any, **_kwargs: Any) -> None:
         raise OSError("disque plein")
 
-    monkeypatch.setattr(cockpit_write_target, "journal_event", _broken)
+    monkeypatch.setattr(workspace_write_guard, "journal_event", _broken)
 
     status, body = _cockpit_http.post(
         port,
         f"{PREFIX}file/write?project=foreign",
-        {"path": "_grimoire/overrides/note.md", "text": "x", "confirm_project": "foreign"},
+        {"path": "_grimoire/overrides/note.md", "text": "x"},
     )
 
     assert status == 503, body
@@ -357,12 +387,12 @@ def test_un_journal_non_inscriptible_refuse_la_mutation_memoire(
     def _broken(*_args: Any, **_kwargs: Any) -> None:
         raise OSError("disque plein")
 
-    monkeypatch.setattr(cockpit_write_target, "journal_event", _broken)
+    monkeypatch.setattr(workspace_write_guard, "journal_event", _broken)
 
     status, body = _cockpit_http.post(
         port,
         "/api/memory",
-        {"action": "gc", "project": "foreign", "confirm": True, "confirm_project": "foreign"},
+        {"action": "gc", "project": "foreign", "confirm": True},
     )
 
     assert status == 503, body
@@ -370,7 +400,7 @@ def test_un_journal_non_inscriptible_refuse_la_mutation_memoire(
 
 
 @pytest.mark.parametrize(("action", "extra"), MEMORY_MUTATIONS)
-def test_une_mutation_memoire_avec_confirmation_nommee_vise_la_bonne_racine(
+def test_une_mutation_memoire_vise_la_bonne_racine(
     duo_server: tuple[int, Path, Path],
     monkeypatch: pytest.MonkeyPatch,
     action: str,
@@ -389,28 +419,24 @@ def test_une_mutation_memoire_avec_confirmation_nommee_vise_la_bonne_racine(
     status, body = _cockpit_http.post(
         port,
         "/api/memory",
-        {
-            "action": action,
-            "project": "foreign",
-            "confirm": True,
-            "confirm_project": "foreign",
-            **extra,
-        },
+        {"action": action, "project": "foreign", "confirm": True, **extra},
     )
 
     assert status == 200, body
     assert body["ok"] is True
     assert seen["root"] == foreign
 
-    gestures = [line for line in _journal_lines() if line.get("gesture") == "confirm_project"]
-    assert gestures[-1]["project"] == "foreign"
-    assert gestures[-1]["confirm_project"] == "foreign"
 
-
-def test_une_mutation_memoire_avec_un_mauvais_slug_reste_refusee(
-    duo_server: tuple[int, Path, Path],
+def test_un_confirm_project_residuel_sur_la_memoire_est_ignore(
+    duo_server: tuple[int, Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """La clé du lot 2 ne gate plus rien sur la mémoire non plus."""
     port, _home, _foreign = duo_server
+
+    def _fake_invoke(project_root: Path, argv: list[str]) -> cmd_cockpit._CliResult:
+        return cmd_cockpit._CliResult(0, "{}", "")
+
+    monkeypatch.setattr(cmd_cockpit, "_invoke_memory_cli", _fake_invoke)
 
     status, body = _cockpit_http.post(
         port,
@@ -418,15 +444,19 @@ def test_une_mutation_memoire_avec_un_mauvais_slug_reste_refusee(
         {"action": "gc", "project": "foreign", "confirm": True, "confirm_project": "home"},
     )
 
-    assert status == 403, body
+    assert status == 200, body
 
 
-def test_un_geste_memoire_reste_reserve_au_projet_d_ouverture(
+def test_un_geste_memoire_est_accepte_sur_un_autre_projet(
     duo_server: tuple[int, Path, Path],
 ) -> None:
-    """Le lot 2 ouvre delete/gc/sync ; les gestes de correction gardent leur
-    contrat d'aperçu/application, réservé au projet servi (P02)."""
-    port, _home, _foreign = duo_server
+    """P02 : le geste de correction (aperçu/application) suit désormais la même
+    règle que le reste — tout projet enrôlé, sans confirmation nommée."""
+    port, _home, foreign = duo_server
+    mgr = MemoryManager.from_config(
+        GrimoireConfig.from_yaml(foreign / "project-context.yaml"), project_root=foreign
+    )
+    entry_id = mgr.store("Décision d'un autre projet.", tags=("a",)).id
 
     status, body = _cockpit_http.post(
         port,
@@ -435,14 +465,13 @@ def test_un_geste_memoire_reste_reserve_au_projet_d_ouverture(
             "action": "gesture",
             "project": "foreign",
             "gesture": "tags",
-            "id": "dec-01",
-            "params": {"tags": "b"},
-            "confirm_project": "foreign",
+            "id": entry_id,
+            "params": {"tags": "a, b"},
         },
     )
 
-    assert status == 403, body
-    assert body["error"] == "hôte en lecture seule"
+    assert status == 200, body
+    assert body["ok"] is True
 
 
 # ── La lecture reste inchangée ──────────────────────────────────────────────

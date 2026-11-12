@@ -98,7 +98,7 @@ class TestForgeAPI:
     ) -> None:
         """Régression CodeQL py/path-injection : `n["ref"]` vient du corps d'une
         requête HTTP cockpit (`blueprint_validate`/`lint`, ouvertes en lecture
-        sur toute la flotte, sans garde `_HOME_SLUG`). Avant confinement,
+        sur toute la flotte, sans garde `_OPENING_SLUG`). Avant confinement,
         `(self.project_root / ref).exists()` servait d'oracle d'existence de
         fichier arbitraire sur la machine — un `ref` qui s'échappe du projet
         mais désigne un fichier réel (``/etc/passwd`` existe toujours sur

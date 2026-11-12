@@ -11,7 +11,7 @@ vérifié contre un vrai ``_CockpitHandler`` — le même défaut qui a touché
   l'écriture multi-projets), et ``/compile`` y écrit réellement (artefact
   ``.prompt.md`` + section ``compiled`` persistée dans le blueprint).
 - ``/validate`` et ``/simulate`` étaient déjà câblés et volontairement SANS
-  garde ``_HOME_SLUG`` (calcul pur, jamais d'écriture — voir le commentaire
+  garde ``_OPENING_SLUG`` (calcul pur, jamais d'écriture — voir le commentaire
   de ``do_POST``) : ce module le confirme avec le même test paramétré,
   plutôt que de le supposer, pour ne pas découvrir un défaut équivalent
   route par route.
@@ -55,7 +55,7 @@ def _cockpit_home_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Deux projets enregistrés ; ``home`` est ``_HOME_SLUG``, ``foreign`` ne
+    """Deux projets enregistrés ; ``home`` est ``_OPENING_SLUG``, ``foreign`` ne
     l'est pas — même montage que ``test_cmd_cockpit_blueprint_put.py``
     (issue #535/#543)."""
     home, foreign = _project(tmp_path, "home"), _project(tmp_path, "foreign")
@@ -65,7 +65,7 @@ def duo_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             {"name": "Foreign", "path": str(foreign), "slug": "foreign"},
         ]
     )
-    monkeypatch.setattr(cmd_cockpit, "_HOME_SLUG", "home")
+    monkeypatch.setattr(cmd_cockpit, "_OPENING_SLUG", "home")
     cmd_cockpit._API_CACHE.clear()
     httpd = cmd_cockpit.ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(cmd_cockpit._CockpitHandler, directory=str(tmp_path))
@@ -166,7 +166,7 @@ def test_compile_refuses_a_blocked_blueprint_with_400(duo_server: Any) -> None:
     assert body["ok"] is False
 
 
-# ── `/validate` et `/simulate` restent volontairement SANS garde `_HOME_SLUG` ──
+# ── `/validate` et `/simulate` restent volontairement SANS garde `_OPENING_SLUG` ──
 # (calcul pur, jamais d'écriture — voir le commentaire de `do_POST`) : prouvé
 # ici plutôt que supposé, pour ne pas découvrir un défaut équivalent plus tard.
 

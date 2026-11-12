@@ -411,7 +411,7 @@ def test_portfolio_action_on_an_unregistered_project_is_refused_and_writes_nothi
             "/api/workspace/portfolio/tasks/T-1/claim?project=" + urllib.parse.quote(key, safe=""),
             {"project": key, "actor": "x"},
         )
-        assert status == 403, key  # la garde exige un slug ENRÔLÉ, jamais un chemin
+        assert status == 404, key  # la garde exige un slug ENRÔLÉ, jamais un chemin
     assert files() == before
     assert not list(tmp_path.rglob("events.jsonl"))
     assert alpha.is_dir() and beta.is_dir()
