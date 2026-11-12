@@ -73,7 +73,8 @@ def task_fold_usage(
 
     Idempotent : rejouer la commande, ou la rejouer sur un journal qui a grandi,
     n'ajoute que les appels nouveaux. Un appel dont le coût ne peut pas être
-    affirmé (modèle non tarifé, tokens de cache) est replié avec un coût inconnu.
+    affirmé (modèle non tarifé, écriture en cache sans répartition par durée) est
+    replié avec un coût inconnu.
 
     Un appel n'appartient qu'à une tâche : un journal qui en couvre plusieurs se
     répartit avec ``--since`` / ``--until`` (sinon la première tâche repliée
