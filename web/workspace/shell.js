@@ -2107,7 +2107,11 @@ let appliedHash = '';
 
 function locationHash(section, params) {
   const space = section.space;
-  let hash = '#' + space.id + (space.sections.length > 1 ? '/' + section.id : '');
+  // La rubrique qui porte l'identifiant de son espace reste le fragment nu
+  // (`#flotte`) même quand une deuxième rubrique s'ajoute : les liens d'avant
+  // ne changent pas, et `#flotte` rouvre la rubrique d'arrivée.
+  const suffix = space.sections.length > 1 && section.id !== space.id ? '/' + section.id : '';
+  let hash = '#' + space.id + suffix;
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
     if (value === null || value === undefined || value === '' || typeof value === 'object') continue;
