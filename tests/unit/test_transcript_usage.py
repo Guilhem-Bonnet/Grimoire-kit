@@ -134,10 +134,17 @@ def test_usage_source_et_cache_sont_exposes(tmp_path: Path, ledger: TraceLedger)
     assert usage["output_tokens"] == usage_k0["output_tokens"]
     assert usage["cache_read_tokens"] == usage_k0["cache_read_input_tokens"]
     assert usage["cache_creation_tokens"] == usage_k0["cache_creation_input_tokens"]
-    # La table de tarifs ne modélise pas le cache : le coût est inconnu, pas un prix d'entrée inventé.
-    assert usage["cost_known"] is False
-    assert usage["cost_usd"] is None
-    assert usage["cost_status"] == "unknown"
+    # Sonnet 5.5 (2 / 10 $ par MTok, cache lu 0.10, écriture 1 h 4.00) : la répartition
+    # du journal permet de chiffrer l'écriture, sans supposer sa durée.
+    attendu = (
+        usage_k0["input_tokens"] * 2.0
+        + usage_k0["output_tokens"] * 10.0
+        + usage_k0["cache_read_input_tokens"] * 0.10
+        + usage_k0["cache_creation"]["ephemeral_1h_input_tokens"] * 4.0
+    ) / 1_000_000
+    assert usage["cost_known"] is True
+    assert usage["cost_usd"] == round(attendu, 6)
+    assert usage["cost_status"] == "exact"
 
 
 def test_cout_connu_seulement_si_tout_est_tarife(tmp_path: Path, ledger: TraceLedger) -> None:
@@ -244,7 +251,7 @@ def test_cli_fold_usage_puis_task_show_json_expose_tokens_et_cost_known(tmp_path
     assert usage["usage_source"] == SOURCE_CLAUDE_TRANSCRIPT
     assert usage["calls"] == 2
     assert usage["input_tokens"] == 1000 + _k0_usage()["input_tokens"]
-    assert usage["cost_known"] is False  # le second appel a du cache
+    assert usage["cost_known"] is True  # le second appel a du cache, mais sa répartition par durée
 
 
 def test_cli_fold_usage_refuse_une_tache_inconnue_et_un_journal_absent(tmp_path: Path) -> None:
