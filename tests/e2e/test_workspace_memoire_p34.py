@@ -16,8 +16,8 @@ Prouvé par navigateur, et par le journal des écritures (P14) relu sur disque :
 - une application sur une entrée qui a changé depuis l'aperçu est refusée, et
   l'aperçu se recalcule ;
 - une projection montre « Corriger la source » au lieu des gestes d'édition ;
-- hors du projet servi, les gestes de correction sont absents et la raison est
-  écrite ; la suppression (lot 2), elle, reste offerte sur tout projet enrôlé.
+- hors du projet d'ouverture, gestes de correction (P02) et suppression sont
+  offerts sur tout projet enrôlé, sans confirmation nommée (lot 5).
 """
 
 from __future__ import annotations
@@ -406,21 +406,20 @@ def test_une_projection_montre_corriger_la_source(page_p34: tuple[Page, dict[str
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'source'", timeout=30_000)
 
 
-def test_hors_du_projet_servi_les_gestes_de_correction_sont_absents_la_suppression_reste(
+def test_hors_du_projet_d_ouverture_les_gestes_sont_offerts_comme_au_projet_d_ouverture(
     page_p34: tuple[Page, dict[str, Any]],
 ) -> None:
+    """Lot 5 : un projet enrôlé se pilote comme le projet d'ouverture — les
+    gestes de correction (P02) et la suppression y sont offerts, sans modale."""
     page, srv = page_p34
     word = _word()
-    _seed(srv, [{"key": "e", "text": f"Ailleurs {word}, en lecture seule."}], project="other")
+    _seed(srv, [{"key": "e", "text": f"Ailleurs {word}, pilotable."}], project="other")
     _open_entry(page, srv, word, f"Ailleurs {word}", project="other_slug")
     detail = page.locator("#inspector-body .kn-detail")
-    assert detail.locator("button", has_text="Corriger").count() == 0
-    assert detail.locator("button", has_text="Marquer remplacée").count() == 0
-    # Lot 1 : le projet est enrôlé, donc plus « lecture seule ». Lot 2 : la
-    # suppression accepte tout projet enrôlé (modale de confirmation nommée) ;
-    # les gestes de correction, eux, restent réservés au projet d'ouverture.
-    assert detail.locator(".kn-actions button", has_text="Supprimer…").count() == 1
+    actions = [b.strip() for b in detail.locator(".kn-actions button").all_inner_texts()]
+    assert actions == ["Corriger", "Marquer remplacée…", "Demander une correction…", "Supprimer…"]
     assert detail.locator(".kn-note[data-note='readonly']").count() == 0
+    assert page.locator("dialog.kn-confirm-project").count() == 0
 
 
 def test_p42_captures_de_relecture(browser: Browser, served_p34: dict[str, Any]) -> None:
