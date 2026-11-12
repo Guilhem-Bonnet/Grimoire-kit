@@ -70,6 +70,7 @@ from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import create_task_worktree
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.missions.worker_provider import WorkerRoute, route_refusal, route_worker, settings_path
+from grimoire.providers.data_policy import hosted_fallback_refusal
 from grimoire.tools.workspace_work import transcript_path
 
 if TYPE_CHECKING:
@@ -84,6 +85,7 @@ __all__ = [
     "MAX_PROVIDER_RESUMES",
     "PROVIDER_ERROR_CAUSE",
     "WORKER_ACTOR",
+    "WORKER_DEFERRED_EVENT",
     "ExecResult",
     "LaunchOutcome",
     "ProviderResume",
@@ -110,6 +112,9 @@ LAUNCH_FAILED_EVENT = "task.session_launch_failed"
 WORKER_HALTED_EVENT = "task.worker_session_halted"
 #: La session du worker, reprise (``claude --bg --resume``) ou repartie à neuf sur le même worktree après un renvoi.
 WORKER_RESUMED_EVENT = "task.worker_session_resumed"
+#: Le repli sur le modèle de l'hôte a été refusé (classe de données sans fournisseur hébergé admis) : la tâche
+#: retourne en ``ready`` avec son motif, sans question à l'humain et sans compter au disjoncteur.
+WORKER_DEFERRED_EVENT = "task.worker_deferred"
 #: La reprise automatique qui suit une erreur transitoire du fournisseur (#1158) : sa cause au ledger.
 PROVIDER_ERROR_CAUSE = "provider_error"
 #: Plafond des reprises automatiques après une erreur du fournisseur ; au-delà, la tâche se gare.
@@ -170,7 +175,8 @@ def default_exec(argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None =
 
 @dataclass(frozen=True, slots=True)
 class LaunchOutcome:
-    """``launched`` (session détachée posée), ``skipped`` (une garde a refusé, rien n'est écrit) ou ``failed``."""
+    """``launched`` (session détachée posée), ``skipped`` (une garde a refusé, rien n'est écrit), ``deferred`` (le
+    repli sur l'hôte est fermé par la classe de données, la tâche retourne en ``ready``) ou ``failed``."""
 
     task_id: str
     status: str
@@ -804,9 +810,12 @@ class WorkerLauncher:
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
-        tier = self._tier_for(service.require(tid))
-        route = route_worker(service.home_root, self._policy.worker.provider, tier, service.require(tid))
-        data_refusal = route_refusal(service.home_root, self._policy.worker.provider, service.require(tid))
+        task = service.require(tid)
+        if refusal := hosted_fallback_refusal(service.home_root, task.data_class):
+            return self._deferred(tid, refusal)
+        tier = self._tier_for(task)
+        route = route_worker(service.home_root, self._policy.worker.provider, tier, task)
+        data_refusal = route_refusal(service.home_root, self._policy.worker.provider, task)
         model = route.model if route is not None else self._model_for(admit, tier)
         result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
@@ -895,6 +904,22 @@ class WorkerLauncher:
                 detail += " — disjoncteur ouvert"
             return LaunchOutcome(tid, "failed", detail, short)
         return LaunchOutcome(tid, "skipped", detail, short)
+
+    def _deferred(self, tid: str, reason: str) -> LaunchOutcome:
+        """Refuse le repli sur l'hôte : rend le claim, note le motif, et la tâche attend un fournisseur admis.
+
+        Ce n'est pas une panne : rien n'est compté au disjoncteur et aucune question n'est posée. Le motif est
+        écrit au ledger (``task.worker_deferred``) pour que ``task show`` le rende, et la sortie du tick le
+        reprend en note d'attention.
+        """
+        service = self._service
+        detail = f"repli sur le modèle de l'hôte refusé : {reason}"
+        try:
+            service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=detail)
+        except GrimoireError as exc:
+            detail += f" (claim non rendu : {exc})"
+        service.ledger.append_event(WORKER_DEFERRED_EVENT, tid, "task", WORKER_ACTOR, {"reason": reason})
+        return LaunchOutcome(tid, "deferred", detail)
 
     def _failed(self, tid: str, detail: str) -> LaunchOutcome:
         """Rend le claim, note l'échec, et le compte au disjoncteur."""
