@@ -370,6 +370,7 @@ class ReviewStage:
         try:
             return choose_second_reviewer(
                 root, first_model=str(first.get("model") or ""), worker_models=worker_models(root, tid),
+                min_tier=self._policy.merger.second_reviewer_min_tier,
             )
         except Exception as exc:  # journal ou registre illisible : rien n'est lancé
             return None, f"choix du second relecteur en erreur ({type(exc).__name__}: {str(exc)[:160]})"

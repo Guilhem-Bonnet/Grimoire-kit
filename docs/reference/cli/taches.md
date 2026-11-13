@@ -565,6 +565,7 @@ orchestrator:
       protected_paths: []           # chemins qui reviennent à l'humain, en plus des défauts
       protected_gate: human         # human (défaut) | dual_review ; toute autre valeur rend la politique invalide
       human_only_paths: []          # chemins qui restent à l'humain quel que soit protected_gate, en plus des défauts
+      second_reviewer_min_tier: strong  # dual_review : palier minimal du second relecteur (cheap | mid | strong)
 ```
 
 La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
@@ -613,8 +614,13 @@ dans cet ordre, et chaque garde échoue fermée :
   inscrit la demande d'une seconde relecture au journal
   d'autorité ; le relecteur la lance au tick suivant et **choisit lui-même son modèle**, dans le registre de
   fournisseurs : un modèle que l'hôte du relecteur sait lancer (fournisseur `anthropic`, `claude` ou `claude-code`,
-  sans route), distinct de celui du premier relecteur, d'une autre famille que le worker ; une famille différente de
-  celle du premier relecteur est préférée, puis le palier le plus fort. La fusion et l'acceptation exigent deux sceaux
+  sans route), distinct de celui du premier relecteur, d'une autre famille que le worker. Parmi eux, **le plus fort**
+  est pris, d'après le palier que le registre déclare (`strong`, puis `mid`, puis `cheap`), jamais d'après le nom ; une
+  famille différente de celle du premier relecteur ne départage qu'à palier égal. `second_reviewer_min_tier` (défaut
+  `strong`) est le palier en dessous duquel personne n'est pris : sans candidat à ce palier, la PR va à l'humain avec
+  la raison, sans repli sur un modèle plus faible. Avec un registre à trois alias (`haiku`, `sonnet`, `opus`), un
+  worker `sonnet` relu par `opus` n'a donc pas de second relecteur sous le défaut : déclarer un second modèle fort,
+  ou abaisser le seuil en connaissance de cause. La fusion et l'acceptation exigent deux sceaux
   `READY` du journal d'autorité, de deux sessions et de deux modèles distincts, aucun du worker, sur la même tête et le
   même arbre, et la CI verte (`task.merge_dual_review` au ledger). Rien de cela ne se lit dans le ledger
   d'événements, qu'un worker peut écrire. Échec fermé : un second `NOT-READY` suit le circuit normal et défait le

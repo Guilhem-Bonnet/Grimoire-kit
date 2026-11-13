@@ -137,17 +137,24 @@ def write_registry(projet: Path, models: tuple[tuple[str, str], ...] = HOST_MODE
     path.write_text(f"providers:\n  - id: {provider}\n    enabled: true\n    models:\n{rows}\n{extra}", encoding="utf-8")
 
 
-def dual_policy(projet: Path, extra: str = "") -> None:
+def dual_policy(projet: Path, extra: str = "", *, min_tier: str | None = "cheap") -> None:
+    """``dual_review`` réglé. *min_tier* : ``second_reviewer_min_tier`` ; ``None`` laisse le défaut (``strong``).
+
+    Le registre à trois alias de ces tests n'offre aucun second modèle fort quand le worker est ``sonnet`` et le premier
+    relecteur ``opus`` : les scénarios qui suivent une seconde relecture jusqu'au bout abaissent donc le seuil à
+    ``cheap``, en le disant. Le défaut a ses propres tests (escalade sans repli, second modèle fort).
+    """
+    tier = f"      second_reviewer_min_tier: {min_tier}\n" if min_tier is not None else ""
     write_policy(
         projet,
-        merger=f"    merger:\n      enabled: true\n      protected_gate: dual_review\n{extra}",
+        merger=f"    merger:\n      enabled: true\n      protected_gate: dual_review\n{tier}{extra}",
         escalation=DELEGATED,
     )
 
 
-def dual_projet(projet: Path, models: tuple[tuple[str, str], ...] = HOST_MODELS) -> None:
+def dual_projet(projet: Path, models: tuple[tuple[str, str], ...] = HOST_MODELS, *, min_tier: str | None = "cheap") -> None:
     """``dual_review`` réglé, registre écrit, mandat accordé : avant tout lancement, pour que le worker soit scellé."""
-    dual_policy(projet)
+    dual_policy(projet, min_tier=min_tier)
     write_registry(projet, models)
     grant(projet)
 
@@ -218,10 +225,16 @@ def test_valeur_inconnue_du_reglage_rend_la_politique_invalide(projet: Path) -> 
     write_policy(projet, merger="    merger:\n      enabled: true\n")
     role = load_orchestrator_policy(projet).policy.merger  # type: ignore[union-attr]
     assert role.protected_gate == "human" and role.human_only_paths == ()
-    dual_policy(projet, extra="      human_only_paths: [\"infra/*\"]\n")
+    assert role.second_reviewer_min_tier == "strong"  # le défaut : jamais un second relecteur faible sans le demander
+    dual_policy(projet, extra="      human_only_paths: [\"infra/*\"]\n", min_tier="mid")
     role = load_orchestrator_policy(projet).policy.merger  # type: ignore[union-attr]
     assert role.protected_gate == "dual_review" and role.human_only_paths == ("infra/*",)
     assert role.to_dict()["protected_gate"] == "dual_review" and role.to_dict()["human_only_paths"] == ["infra/*"]
+    assert role.second_reviewer_min_tier == "mid" and role.to_dict()["second_reviewer_min_tier"] == "mid"
+    for unknown in ("fort", "Strong", "\"\"", "3", "[strong]"):  # valeur inconnue ou pas du texte : politique invalide
+        dual_policy(projet, min_tier=unknown)
+        read = load_orchestrator_policy(projet)
+        assert read.policy is None and "second_reviewer_min_tier" in read.error, unknown
     dual_policy(projet, extra="      human_only_paths: \"infra/*\"\n")  # pas une liste : politique invalide
     assert load_orchestrator_policy(projet).policy is None
 
@@ -588,16 +601,77 @@ def _registry_root(tmp_path: Path, body: str) -> Path:
     return root
 
 
-def test_le_choix_prefere_une_autre_famille_que_le_premier_relecteur(tmp_path: Path) -> None:
-    root = _registry_root(tmp_path, "providers:\n  - id: anthropic\n    enabled: true\n    models:\n"
-                          "      - {id: haiku, tier: cheap}\n      - {id: sonnet, tier: mid}\n      - {id: opus, tier: strong}\n")
-    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",))
-    assert why == "" and choice == DualReviewChoice("haiku", "haiku", BASIS_OTHER_FAMILY, "opus", ("sonnet",))
+THREE_ALIASES = ("providers:\n  - id: anthropic\n    enabled: true\n    models:\n"
+                 "      - {id: haiku, tier: cheap}\n      - {id: sonnet, tier: mid}\n      - {id: opus, tier: strong}\n")
+
+
+def test_le_choix_ecarte_le_modele_du_premier_relecteur_et_les_familles_du_worker(tmp_path: Path) -> None:
+    root = _registry_root(tmp_path, THREE_ALIASES)
+    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",), min_tier="cheap")
+    assert why == "" and choice == DualReviewChoice("haiku", "haiku", BASIS_OTHER_FAMILY, "opus", ("sonnet",), "cheap")
     choice, _ = choose_second_reviewer(root, first_model="sonnet", worker_models=("haiku",))
     assert choice is not None and choice.model == "opus"
     # Plusieurs lancements de worker : aucune de leurs familles n'est admise.
     choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet", "haiku"))
     assert choice is None and "famille différente de celle du worker" in why
+
+
+def test_le_second_relecteur_est_le_plus_fort_des_candidats(tmp_path: Path) -> None:
+    root = _registry_root(tmp_path, THREE_ALIASES)
+    # Worker hors famille Claude, premier relecteur de palier moyen : le second est le modèle fort, pas le moins cher
+    # (haiku est admissible lui aussi, et d'une autre famille que le premier relecteur).
+    choice, why = choose_second_reviewer(root, first_model="sonnet", worker_models=("deepseek-reasoner",))
+    assert why == "" and choice == DualReviewChoice(
+        "opus", "opus", BASIS_OTHER_FAMILY, "sonnet", ("deepseek-reasoner",), "strong")
+    assert choice.to_dict()["tier"] == "strong"
+    # Un seuil plus bas ne change pas l'ordre : le plus fort d'abord.
+    for floor in ("mid", "cheap"):
+        choice, _ = choose_second_reviewer(root, first_model="sonnet", worker_models=("deepseek-reasoner",), min_tier=floor)
+        assert choice is not None and choice.model == "opus", floor
+    choice, _ = choose_second_reviewer(root, first_model="opus", worker_models=("deepseek-reasoner",), min_tier="cheap")
+    assert choice is not None and (choice.model, choice.tier) == ("sonnet", "mid")  # mid avant cheap
+    # Le palier est celui que le registre déclare, pas celui que le nom suggère.
+    root = _registry_root(tmp_path, "providers:\n  - id: anthropic\n    enabled: true\n    models:\n"
+                          "      - {id: opus, tier: cheap}\n      - {id: sonnet, tier: mid}\n      - {id: haiku, tier: strong}\n")
+    choice, _ = choose_second_reviewer(root, first_model="sonnet", worker_models=("deepseek-reasoner",))
+    assert choice is not None and (choice.model, choice.tier) == ("haiku", "strong")
+
+
+def test_a_palier_egal_seulement_une_autre_famille_que_le_premier_relecteur_departage(tmp_path: Path) -> None:
+    models = ("      - {id: claude-sonnet-4-6, tier: mid}\n      - {id: claude-opus-4-6, tier: strong}\n"
+              "      - {id: claude-opus-4-7, tier: strong}\n")
+    head = "providers:\n  - id: anthropic\n    enabled: true\n    models:\n"
+    # Deux candidats forts : celui d'une autre famille que le premier relecteur passe devant, quel que soit l'ordre.
+    root = _registry_root(tmp_path, head + models + "      - {id: atlas-1, tier: strong}\n")
+    choice, why = choose_second_reviewer(root, first_model="claude-opus-4-6", worker_models=("claude-sonnet-4-6",))
+    assert why == "" and choice is not None
+    assert (choice.model, choice.basis, choice.tier) == ("atlas-1", BASIS_OTHER_FAMILY, "strong")
+    # La famille ne passe jamais devant le palier : un candidat d'une autre famille mais moins fort n'est pas pris.
+    root = _registry_root(tmp_path, head + models + "      - {id: atlas-1, tier: mid}\n")
+    choice, why = choose_second_reviewer(
+        root, first_model="claude-opus-4-6", worker_models=("claude-sonnet-4-6",), min_tier="cheap")
+    assert why == "" and choice is not None
+    assert (choice.model, choice.basis, choice.tier) == ("claude-opus-4-7", BASIS_SAME_FAMILY, "strong")
+
+
+def test_aucun_candidat_au_palier_minimal_ne_choisit_rien_sans_repli(tmp_path: Path) -> None:
+    root = _registry_root(tmp_path, THREE_ALIASES)
+    # Worker sonnet, premier relecteur opus : seul haiku est admissible, et il est faible.
+    for floor in ("strong", "mid"):
+        choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",), min_tier=floor)
+        assert choice is None and f"aucun candidat au palier {floor} ou au-dessus" in why, floor
+        assert "haiku (cheap)" in why and "pas de repli" in why and "second_reviewer_min_tier" in why
+    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",))  # le défaut est strong
+    assert choice is None and "aucun candidat au palier strong" in why
+    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",), min_tier="cheap")
+    assert why == "" and choice is not None and (choice.model, choice.tier) == ("haiku", "cheap")
+    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",), min_tier="fort")
+    assert choice is None and "palier minimal du second relecteur inconnu" in why
+    # Un palier que le registre nomme autrement n'atteint aucun seuil, même le plus bas.
+    root = _registry_root(tmp_path, "providers:\n  - id: anthropic\n    enabled: true\n    models:\n"
+                          "      - {id: haiku, tier: premium}\n")
+    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",), min_tier="cheap")
+    assert choice is None and "haiku (premium)" in why
 
 
 def test_le_choix_se_replie_sur_un_autre_modele_de_la_famille_du_premier(tmp_path: Path) -> None:
@@ -644,7 +718,7 @@ def test_seuls_les_modeles_que_l_hote_du_relecteur_sait_lancer_sont_candidats(tm
     root = _registry_root(tmp_path, "providers:\n" + foreign
                           + "  - id: Anthropic\n    enabled: true\n    models:\n      - {id: haiku, tier: cheap}\n"
                             "      - {id: \"--dangerously-skip-permissions\", tier: strong}\n")
-    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",))
+    choice, why = choose_second_reviewer(root, first_model="opus", worker_models=("sonnet",), min_tier="cheap")
     assert why == "" and choice is not None and choice.model == "haiku"  # un nom qui serait une option n'est pas un modèle
 
 
@@ -669,6 +743,44 @@ def test_aucun_candidat_escalade_a_l_humain_avec_la_raison(projet: Path, host: F
     assert "aucun modèle distinct" in escalated.payload["why"] and escalated.payload["gesture"] == "merge"
     assert journal(projet, DUAL_REQUEST_ENTRY) == [] and host.of("gh", "pr", "merge") == []
     assert tick(projet, host).reviews == () and review_models(host, tid) == ["opus"]
+
+
+def test_par_defaut_un_seul_candidat_faible_escalade_a_l_humain_sans_repli(projet: Path, host: FakeHost) -> None:
+    dual_projet(projet, min_tier=None)  # le défaut : strong. Worker sonnet, premier relecteur opus : reste haiku, faible.
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    report = first_ready(projet, host, tid, wt)
+    assert merges(report) == [("escalate", "done")], report.merges
+    assert "aucun candidat au palier strong ou au-dessus" in report.merges[0].detail
+    [escalated] = ledger(projet, tid, MERGE_ESCALATED_EVENT)
+    assert "haiku (cheap)" in escalated.payload["why"] and "pas de repli" in escalated.payload["why"]
+    assert escalated.payload["gesture"] == "merge"
+    assert journal(projet, DUAL_REQUEST_ENTRY) == [] and host.of("gh", "pr", "merge") == []
+    assert tick(projet, host).reviews == () and review_models(host, tid) == ["opus"]  # aucun second relecteur faible
+
+
+def test_par_defaut_le_second_relecteur_est_le_modele_fort_et_la_pr_fusionne(projet: Path, host: FakeHost) -> None:
+    # Le registre déclare un second modèle fort, d'une autre famille que le premier relecteur (opus) et que le worker
+    # (sonnet) : sous le défaut, c'est lui qui relit, pas haiku.
+    dual_projet(projet, models=(*HOST_MODELS, ("atlas-1", "strong")), min_tier=None)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    both_ready(projet, host, tid, wt)
+    assert review_models(host, tid) == ["opus", "atlas-1"]
+    [_first, second] = ledger(projet, tid, REVIEW_LAUNCHED_EVENT)
+    assert second.payload["tier"] == "strong" and second.payload["model"] == "atlas-1"
+    assert merges(tick(projet, host)) == [("accept", "done")]
+    assert questions(projet, tid) == [] and len(host.of("gh", "pr", "merge")) == 1
+    [event] = ledger(projet, tid, MERGE_DUAL_REVIEW_EVENT)
+    assert (event.payload["first_model"], event.payload["second_model"]) == ("opus", "atlas-1")
+
+
+def test_le_seuil_abaisse_a_cheap_par_le_projet_accepte_le_modele_faible(projet: Path, host: FakeHost) -> None:
+    dual_projet(projet, min_tier="cheap")  # le registre à trois alias, sans modèle fort disponible : haiku, en le sachant
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    both_ready(projet, host, tid, wt)
+    assert review_models(host, tid) == ["opus", "haiku"]
+    [_first, second] = ledger(projet, tid, REVIEW_LAUNCHED_EVENT)
+    assert second.payload["tier"] == "cheap"
+    assert merges(tick(projet, host)) == [("accept", "done")] and questions(projet, tid) == []
 
 
 def test_registre_illisible_escalade_a_l_humain(projet: Path, host: FakeHost) -> None:
@@ -910,7 +1022,7 @@ def test_un_second_modele_egal_au_premier_ne_fusionne_pas(projet: Path, host: Fa
     dual_projet(projet)
     tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
 
-    def subverted(_root: Path, *, first_model: str, worker_models: Any) -> tuple[DualReviewChoice, str]:
+    def subverted(_root: Path, *, first_model: str, worker_models: Any, min_tier: str = "") -> tuple[DualReviewChoice, str]:
         """Un choix détourné chez le relecteur : il rend le modèle du premier. La décision de fusion ne s'y fie pas."""
         return DualReviewChoice(first_model, "opus", BASIS_SAME_FAMILY, "opus", ("sonnet",)), ""
 

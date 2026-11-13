@@ -41,7 +41,10 @@ janitor :
                                   # toute autre valeur rend la politique illisible
           human_only_paths: []    # chemins qui restent à l'humain quel que soit protected_gate, en plus de
                                   # HUMAN_ONLY_PATHS : la liste s'étend, elle ne se réduit pas
-        orchestrator:             # #962 : une session qui répond sous mandat aux questions des workers lancés
+          second_reviewer_min_tier: strong  # dual_review : palier minimal du second relecteur (cheap, mid, strong),
+                                  # lu au registre de fournisseurs ; aucun candidat à ce palier : l'humain tranche,
+                                  # sans repli ; toute autre valeur rend la politique illisible
+        orchestrator:           # #962 : une session qui répond sous mandat aux questions des workers lancés
           enabled: false
           model: sonnet           # vide : sonnet
           wip: 1                  # sessions orchestrateur en même temps
@@ -76,7 +79,12 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.standard_generation import STANDARD_DIR
-from grimoire.missions.dual_review import PROTECTED_GATE_HUMAN, PROTECTED_GATES
+from grimoire.missions.dual_review import (
+    DEFAULT_SECOND_REVIEWER_MIN_TIER,
+    PROTECTED_GATE_HUMAN,
+    PROTECTED_GATES,
+    SECOND_REVIEWER_TIERS,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -105,7 +113,8 @@ _WORKER_KEYS = frozenset(
 _REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean"})
 DEFAULT_MAX_CYCLES = 2
 _MERGER_KEYS = frozenset(
-    {"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate", "human_only_paths"}
+    {"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate", "human_only_paths",
+     "second_reviewer_min_tier"}
 )
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
 #: Le modèle de la session orchestrateur quand la politique n'en nomme pas.
@@ -168,11 +177,13 @@ class MergerRole:
     protected_paths: tuple[str, ...] = ()
     protected_gate: str = PROTECTED_GATE_HUMAN
     human_only_paths: tuple[str, ...] = ()
+    second_reviewer_min_tier: str = DEFAULT_SECOND_REVIEWER_MIN_TIER
 
     def to_dict(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "realign_max": self.realign_max, "ignored_checks": list(self.ignored_checks),
                 "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths),
-                "protected_gate": self.protected_gate, "human_only_paths": list(self.human_only_paths)}
+                "protected_gate": self.protected_gate, "human_only_paths": list(self.human_only_paths),
+                "second_reviewer_min_tier": self.second_reviewer_min_tier}
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,6 +341,11 @@ def _parse_merger(raw: Any) -> MergerRole:
         raise _InvalidPolicyError(
             f"{where}.protected_gate : {gate!r} inconnu (admis : {', '.join(PROTECTED_GATES)})"
         )
+    min_tier = _text(data.get("second_reviewer_min_tier", DEFAULT_SECOND_REVIEWER_MIN_TIER), f"{where}.second_reviewer_min_tier")
+    if min_tier not in SECOND_REVIEWER_TIERS:
+        raise _InvalidPolicyError(
+            f"{where}.second_reviewer_min_tier : {min_tier!r} inconnu (admis : {', '.join(SECOND_REVIEWER_TIERS)})"
+        )
     return MergerRole(
         enabled=enabled,
         realign_max=_positive(data.get("realign_max", 1), f"{where}.realign_max"),
@@ -338,6 +354,7 @@ def _parse_merger(raw: Any) -> MergerRole:
         protected_paths=globs["protected_paths"],
         protected_gate=gate,
         human_only_paths=globs["human_only_paths"],
+        second_reviewer_min_tier=min_tier,
     )
 
 

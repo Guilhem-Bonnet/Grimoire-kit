@@ -11,8 +11,10 @@ quel que soit le réglage.
 - *Le choix du second relecteur* (:func:`choose_second_reviewer`) se fait dans le code du tick, au lancement : le modèle
   du premier relecteur vient de son sceau, celui du worker de son lancement scellé, les candidats du registre de
   fournisseurs — ceux que l'hôte du relecteur sait lancer (:data:`HOST_PROVIDERS`), jamais un modèle d'un fournisseur
-  étranger. Le modèle choisi diffère de celui du premier relecteur et sa famille de celle du worker ; une famille
-  différente de celle du premier relecteur est préférée. Aucun candidat : rien n'est lancé, l'humain tranche.
+  étranger. Le modèle choisi diffère de celui du premier relecteur et sa famille de celle du worker ; c'est le plus
+  fort des candidats (palier du registre), une famille différente de celle du premier relecteur ne départageant qu'à
+  palier égal, et jamais en dessous de ``merger.second_reviewer_min_tier`` (défaut ``strong``). Aucun candidat : rien
+  n'est lancé, l'humain tranche, sans repli sur un palier inférieur.
 - *La demande de seconde relecture* est une entrée du journal d'autorité écrite par le merger
   (:data:`~grimoire.missions.review_seal.DUAL_REQUEST_ENTRY`) ; le relecteur la lit là (:func:`pending_second_review`),
   et seulement en ``dual_review``. Elle ne porte aucun modèle.
@@ -65,6 +67,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BASIS_OTHER_FAMILY",
     "BASIS_SAME_FAMILY",
+    "DEFAULT_SECOND_REVIEWER_MIN_TIER",
     "DUAL_MISSING",
     "DUAL_OK",
     "DUAL_REFUSED",
@@ -79,6 +82,7 @@ __all__ = [
     "PROTECTED_GATE_DUAL_REVIEW",
     "PROTECTED_GATE_HUMAN",
     "SECOND_LAUNCH_GRACE",
+    "SECOND_REVIEWER_TIERS",
     "DualReviewChoice",
     "DualReviewMixin",
     "DualVerdict",
@@ -140,8 +144,14 @@ HOST_PROVIDERS: frozenset[str] = frozenset({"anthropic", "claude", "claude-code"
 
 #: Les familles que le nom d'un modèle peut porter, dans l'ordre où on les reconnaît.
 _FAMILY_ALIASES: tuple[str, ...] = ("opus", "sonnet", "haiku")
-#: Le palier d'un modèle du registre : une relecture de chemin réservé prend le plus fort des candidats.
+#: Le palier d'un modèle, tel que le registre de fournisseurs le déclare (jamais déduit du nom) : une relecture de
+#: chemin réservé prend le plus fort des candidats. Un palier que le registre nomme autrement n'atteint aucun seuil.
 _TIER_ORDER = {"strong": 0, "mid": 1, "cheap": 2}
+#: Les valeurs admises de ``merger.second_reviewer_min_tier``, du plus faible au plus fort.
+SECOND_REVIEWER_TIERS: tuple[str, ...] = ("cheap", "mid", "strong")
+#: Le palier en dessous duquel aucun second relecteur n'est pris, sauf réglage contraire : une seconde relecture par
+#: un modèle faible n'ajoute rien à la première. Aucun candidat à ce palier : l'humain tranche, sans repli.
+DEFAULT_SECOND_REVIEWER_MIN_TIER = "strong"
 #: Secondes relectures lancées pour un même premier READY (la première, puis ses relances) avant de rendre la PR à
 #: l'humain : jamais une boucle de lancements, même si un READY ne se scelle pas.
 MAX_SECOND_LAUNCHES = 3
@@ -152,9 +162,9 @@ SECOND_LAUNCH_GRACE = timedelta(hours=2)
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
 _VARIANT = re.compile(r"\[[^\]]*\]$")
 
-#: Le registre offrait une famille différente de celle du premier relecteur : elle a été préférée.
+#: Le second relecteur choisi est d'une autre famille que le premier.
 BASIS_OTHER_FAMILY = "other_family"
-#: Le registre n'offrait pas d'autre famille : un autre modèle de la famille du premier relecteur a été pris.
+#: Le plus fort des candidats était un autre modèle de la famille du premier relecteur.
 BASIS_SAME_FAMILY = "same_family"
 
 #: Les deux READY scellés tiennent sur la tête : la fusion et l'acceptation peuvent suivre.
@@ -207,29 +217,30 @@ def matched_paths(files: Sequence[str], patterns: Sequence[str]) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class DualReviewChoice:
-    """Le modèle de la seconde relecture, sa famille, et la règle qui l'a fait choisir."""
+    """Le modèle de la seconde relecture, sa famille, la règle qui l'a fait choisir, et son palier au registre."""
 
     model: str
     family: str
     basis: str
     first_family: str
     worker_families: tuple[str, ...]
+    tier: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "model": self.model, "family": self.family, "family_basis": self.basis,
+            "model": self.model, "family": self.family, "family_basis": self.basis, "tier": self.tier,
             "first_family": self.first_family, "worker_families": list(self.worker_families),
         }
 
 
-def _host_models(root: Path) -> tuple[tuple[str, ...], str]:
-    """``(modèles, "")`` : les modèles des fournisseurs activés que l'hôte du relecteur sait lancer, les plus forts
-    d'abord ; ``((), raison)`` si le registre ne se lit pas. Échec fermé."""
+def _host_models(root: Path) -> tuple[tuple[tuple[str, str], ...], str]:
+    """``(((modèle, palier), …), "")`` : les modèles des fournisseurs activés que l'hôte du relecteur sait lancer, dans
+    l'ordre du registre, avec le palier que le registre leur donne ; ``((), raison)`` s'il ne se lit pas. Échec fermé."""
     try:
         providers = read_registry(root)
     except Exception as exc:  # registre illisible : aucun candidat, l'humain tranche
         return (), f"le registre de fournisseurs est illisible ({type(exc).__name__}: {str(exc)[:160]})"
-    found: list[tuple[int, int, str]] = []
+    found: list[tuple[str, str]] = []
     seen: set[str] = set()
     for provider in providers:
         if not provider.enabled or provider.id.casefold() not in HOST_PROVIDERS or provider.anthropic_base_url:
@@ -239,21 +250,26 @@ def _host_models(root: Path) -> tuple[tuple[str, ...], str]:
             if key in seen or not _MODEL_ID.fullmatch(model.id):
                 continue
             seen.add(key)
-            found.append((_TIER_ORDER.get(model.tier, len(_TIER_ORDER)), len(found), model.id))
-    return tuple(model_id for _order, _rank, model_id in sorted(found)), ""
+            found.append((model.id, str(model.tier or "")))
+    return tuple(found), ""
 
 
 def choose_second_reviewer(
-    root: Path, *, first_model: str, worker_models: Sequence[str],
+    root: Path, *, first_model: str, worker_models: Sequence[str], min_tier: str = DEFAULT_SECOND_REVIEWER_MIN_TIER,
 ) -> tuple[DualReviewChoice | None, str]:
     """``(choix, "")`` ou ``(None, raison)`` : le modèle de la seconde relecture, choisi dans le registre.
 
     *first_model* : le modèle du premier relecteur, lu dans son sceau ; *worker_models* : ceux des lancements du
-    worker, lus au journal d'autorité (:func:`worker_models`). Contraintes dures : un modèle que l'hôte du relecteur
-    sait lancer, sûrement distinct de celui du premier relecteur (:func:`models_distinct`), d'une famille différente
-    de chacune de celles du worker. Parmi les admissibles, une famille différente de celle du premier relecteur est
-    préférée, puis le palier le plus fort. Sans candidat, rien n'est choisi : l'appelant escalade à l'humain.
+    worker, lus au journal d'autorité (:func:`worker_models`) ; *min_tier* : ``merger.second_reviewer_min_tier``.
+    Contraintes dures : un modèle que l'hôte du relecteur sait lancer, sûrement distinct de celui du premier relecteur
+    (:func:`models_distinct`), d'une famille différente de chacune de celles du worker, et d'un palier au moins égal à
+    *min_tier*. Parmi les admissibles, **le palier le plus fort** l'emporte (celui que le registre déclare, pas celui
+    que le nom suggère) ; une famille différente de celle du premier relecteur ne départage qu'à palier égal, puis
+    l'ordre du registre. Sans candidat, rien n'est choisi, et jamais par repli sur un palier inférieur : l'appelant
+    escalade à l'humain.
     """
+    if min_tier not in _TIER_ORDER:
+        return None, f"palier minimal du second relecteur inconnu ({min_tier!r}) : aucun modèle n'est choisi"
     if not first_model.strip():
         return None, "le sceau du premier relecteur ne porte pas son modèle : l'indépendance n'est pas prouvable"
     if not worker_models or any(not m.strip() for m in worker_models):
@@ -267,14 +283,20 @@ def choose_second_reviewer(
     if not models:
         return None, ("le registre de fournisseurs n'offre aucun modèle que l'hôte du relecteur sait lancer "
                       f"(fournisseurs activés parmi {', '.join(sorted(HOST_PROVIDERS))})")
-    eligible = [m for m in models if models_distinct(first_model, m) and model_family(m) not in worker_families]
+    eligible = [(m, t) for m, t in models if models_distinct(first_model, m) and model_family(m) not in worker_families]
     if not eligible:
         return None, (f"le registre n'offre aucun modèle distinct de celui du premier relecteur ({first_model}) et "
                       f"d'une famille différente de celle du worker ({', '.join(worker_families)})")
-    other = [m for m in eligible if model_family(m) != first_family]
-    chosen = (other or eligible)[0]
-    basis = BASIS_OTHER_FAMILY if other else BASIS_SAME_FAMILY
-    return DualReviewChoice(chosen, model_family(chosen), basis, first_family, worker_families), ""
+    floor = _TIER_ORDER[min_tier]
+    strong_enough = [(m, t) for m, t in eligible if _TIER_ORDER.get(t, len(_TIER_ORDER)) <= floor]
+    if not strong_enough:
+        offered = ", ".join(f"{m} ({t or 'sans palier'})" for m, t in eligible[:6])
+        return None, (f"aucun candidat au palier {min_tier} ou au-dessus pour la seconde relecture (candidats : {offered}) ; "
+                      "pas de repli sur un palier inférieur (merger.second_reviewer_min_tier)")
+    # Le plus fort d'abord ; à palier égal, une autre famille que le premier relecteur ; puis l'ordre du registre.
+    chosen, tier = min(strong_enough, key=lambda c: (_TIER_ORDER[c[1]], model_family(c[0]) == first_family))
+    basis = BASIS_SAME_FAMILY if model_family(chosen) == first_family else BASIS_OTHER_FAMILY
+    return DualReviewChoice(chosen, model_family(chosen), basis, first_family, worker_families, tier), ""
 
 
 # ── Lecture du journal d'autorité ──────────────────────────────────────────────
@@ -669,6 +691,7 @@ class DualReviewMixin:
                                    "désactivé : aucune seconde relecture ne peut être lancée", pr.number)
         choice, why = choose_second_reviewer(
             self._home, first_model=str(first.get("model") or ""), worker_models=worker_models(self._home, tid),
+            min_tier=self._policy.merger.second_reviewer_min_tier,
         )
         if choice is None:
             return self._ask_human(task, wt, "merge", judged.id, f"double relecture exigée, mais {why}", pr.number)
