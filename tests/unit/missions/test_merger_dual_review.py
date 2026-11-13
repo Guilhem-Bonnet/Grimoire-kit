@@ -371,7 +371,8 @@ def test_en_human_une_demande_presente_au_ledger_est_ignoree_et_rien_ne_la_lit(
         monkeypatch.setattr(module, name, called)
 
     for module, name in ((reviewer, "pending_second_review"), (reviewer, "choose_second_reviewer"),
-                         (merger, "judge_dual_seals"), (merger, "choose_second_reviewer"), (merger, "worker_models"),
+                         (dual_review, "judge_dual_seals"), (dual_review, "choose_second_reviewer"),
+                         (dual_review, "worker_models"), (dual_review, "pending_second_review"),
                          (review_seal, "request_second_review"), (review_seal, "seal_worker_launch"),
                          (review_seal, "void_second_review")):
         spy(module, name)
@@ -1071,7 +1072,7 @@ def test_une_exception_dans_la_double_relecture_va_a_l_humain_avec_la_raison(
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("sceaux en panne")
 
-    monkeypatch.setattr(merger, "judge_dual_seals", boom)
+    monkeypatch.setattr(dual_review, "judge_dual_seals",boom)
     report = first_ready(projet, host, tid, wt)
     assert merges(report) == [("escalate", "done")], report.merges
     assert "double relecture en erreur (RuntimeError: sceaux en panne)" in report.merges[0].detail
@@ -1089,7 +1090,7 @@ def test_une_exception_au_choix_du_second_relecteur_va_a_l_humain(
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise OSError("registre arraché")
 
-    monkeypatch.setattr(merger, "choose_second_reviewer", boom)
+    monkeypatch.setattr(dual_review, "choose_second_reviewer", boom)
     report = first_ready(projet, host, tid, wt)
     assert merges(report) == [("escalate", "done")] and "double relecture en erreur (OSError" in report.merges[0].detail
     assert host.of("gh", "pr", "merge") == [] and journal(projet, DUAL_REQUEST_ENTRY) == []
@@ -1167,14 +1168,14 @@ def test_les_deux_sceaux_sont_relus_juste_avant_le_geste_de_fusion(
     tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
     both_ready(projet, host, tid, wt)
     calls: list[str] = []
-    real = merger.judge_dual_seals
+    real = dual_review.judge_dual_seals
 
     def once_then_refused(root: Path, task_id: str, head: str) -> Any:
         """La paire tient au début du tick, plus au moment du geste (un sceau défait entre-temps)."""
         calls.append(head)
         return real(root, task_id, head) if len(calls) == 1 else dual_review.DualVerdict(DUAL_REFUSED, "sceau défait entre-temps")
 
-    monkeypatch.setattr(merger, "judge_dual_seals", once_then_refused)
+    monkeypatch.setattr(dual_review, "judge_dual_seals",once_then_refused)
     report = tick(projet, host)
     assert len(calls) == 2 and merges(report) == [("escalate", "done")], (calls, report.merges)
     assert "sceau défait entre-temps" in report.merges[0].detail and host.of("gh", "pr", "merge") == []
