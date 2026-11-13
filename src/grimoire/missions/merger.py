@@ -1387,8 +1387,7 @@ class MergeStage:
         """Un READY qui ne tient plus : la tâche repart à la relecture (une nouvelle entrée en revue), une fois par READY."""
         events = self._service.ledger.events_for(task.id)
         if _last(events, MERGE_REQUEUED_EVENT, _index(events, judged)) is None:
-            # Double relecture : le READY périmé est défait au journal d'autorité AVANT d'être noté périmé (ou escaladé).
-            # Sans cette entrée, un premier READY qui ne tient plus resterait la moitié d'une paire.
+            # Double relecture : défait au journal d'autorité AVANT d'être noté périmé, sinon il resterait la moitié d'une paire.
             if not self._void_second(task.id, why):
                 return MergerOutcome(task.id, "stale", "failed", f"READY périmé ({why}), mais l'annulation de la seconde "
                                      "relecture n'a pas pu être inscrite au journal d'autorité : revu au tick suivant", pr)
@@ -1398,11 +1397,8 @@ class MergeStage:
         return MergerOutcome(task.id, "stale", "done", f"READY périmé ({why}) : relu de nouveau", pr)
 
     def _void_second(self, tid: str, why: str) -> bool:
-        """Double relecture : un READY périmé défait aussi la seconde relecture demandée — les deux seront refaites.
-
-        ``True`` : l'annulation est au journal d'autorité, ou il n'y avait rien à annuler (toujours le cas en ``human``,
-        où rien n'est lu ni écrit). ``False`` : le journal a refusé l'écriture — l'appelant ne note pas le READY périmé
-        (échec fermé) et y revient au tick suivant."""
+        """Double relecture : un READY périmé défait aussi la seconde relecture demandée. ``False`` : le journal d'autorité
+        a refusé l'écriture, l'appelant s'arrête (échec fermé) ; ``True`` sinon, et toujours en ``human`` (rien n'est lu)."""
         if not self._dual():
             return True
         from grimoire.missions.review_seal import void_second_review
