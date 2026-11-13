@@ -19,6 +19,7 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+from grimoire.core.fsio import lock_files
 from grimoire.evidence import EvidenceItem, EvidenceKind, EvidenceProfile, EvidenceService
 from grimoire.missions import review_receipt as rr
 from grimoire.missions.gates import GATES_FILE
@@ -191,6 +192,31 @@ def test_les_ecritures_du_kit_ne_perime_pas_le_recu(tmp_path: Path) -> None:
     service.transition(autre, TaskState.READY, "amelia")  # reprojette task-board.yaml
     assert (root / STANDARD / "task-board.yaml").is_file()
 
+    assert service.transition(tid, TaskState.CLOSED, "amelia").task.status is TaskState.CLOSED
+
+
+@pytest.mark.parametrize("git", [False, True], ids=["fs", "git"])
+def test_le_verrou_du_board_ne_perime_pas_le_recu(tmp_path: Path, git: bool) -> None:
+    """Le board est écrit sous verrou : le fichier posé à côté ne périme pas le reçu (revue de la PR #1236).
+
+    Reproduit la régression : ``write_board_bytes`` prend ``fsio.locked(dest)``,
+    qui laisse ``.task-board.yaml.lock`` (POSIX) ou ``.xlock`` (repli Windows)
+    dans ``_grimoire/standard`` — un fichier neuf au moment du gate, donc un
+    arbre qui « a changé » sans qu'une ligne de code ait bougé.
+    """
+    root = _projet(tmp_path)
+    if git:
+        _git(root, "init", "-q")
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "base")
+    service, tid = _a_relire(root)
+    write_receipt(root, tid, "READY", reviewer_id="relecteur")
+    assert check_receipt(root, service.require(tid)) is None
+
+    for lock in lock_files(root / STANDARD / "task-board.yaml"):
+        lock.write_text("", encoding="utf-8")
+
+    assert check_receipt(root, service.require(tid)) is None
     assert service.transition(tid, TaskState.CLOSED, "amelia").task.status is TaskState.CLOSED
 
 

@@ -39,7 +39,7 @@ try:  # POSIX
 except ImportError:  # Windows
     _fcntl = None  # type: ignore[assignment]
 
-__all__ = ["atomic_write", "locked"]
+__all__ = ["atomic_write", "lock_files", "locked"]
 
 #: Un verrou de repli plus vieux que cela est tenu pour abandonné (processus tué).
 _STALE_AFTER_S = 60.0
@@ -72,6 +72,18 @@ def _lock_path(path: Path) -> Path:
     """Fichier de la branche de repli (création exclusive). Nom distinct de ``_flock_path`` : le repli,
     qui casse un verrou « vieux » de 60 s, ne doit jamais casser ni attendre le fichier d'un porteur ``flock``."""
     return path.with_name(f".{path.name}.xlock")
+
+
+def lock_files(path: str | os.PathLike[str]) -> tuple[Path, Path]:
+    """Les deux fichiers qu'un verrou de *path* peut laisser à côté de lui.
+
+    ``locked`` prend l'un ou l'autre selon la plateforme (``flock`` en POSIX,
+    repli à création exclusive sous Windows) : un appelant qui doit ignorer
+    l'empreinte d'un verrou — le reçu de revue, dont le board verrouillé ne
+    doit pas périmer l'empreinte — exclut les deux, sans recopier leur nom.
+    """
+    target = Path(path)
+    return _flock_path(target), _lock_path(target)
 
 
 def _pid_dead(content: str) -> bool:

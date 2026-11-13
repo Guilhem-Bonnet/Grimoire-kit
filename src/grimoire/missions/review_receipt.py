@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.core.exceptions import GrimoireMissionError
-from grimoire.core.fsio import atomic_write
+from grimoire.core.fsio import atomic_write, lock_files
 from grimoire.core.standard_checks.tree_fingerprint import compute_tree_fingerprint
 from grimoire.core.standard_generation import STANDARD_DIR, normalize_task_id
 from grimoire.core.standard_profile_manifest import read_profile
@@ -100,11 +100,18 @@ CRITERION_STATUSES: tuple[str, ...] = (CRITERION_MET, CRITERION_UNMET, CRITERION
 #: qu'il en projette et la mémoire du projet (``_grimoire/_memory``, que la
 #: clôture, le blocage ou l'échec d'une tâche consolide, quel que soit le
 #: backend : ``grimoire.json``, ``grimoire_lexical.sqlite3``...).
-#: ``_grimoire-output`` (le reçu lui-même) est déjà exclu.
+#: ``_grimoire-output`` (le reçu lui-même) est déjà exclu. Le board est écrit
+#: sous verrou (:func:`grimoire.missions.board.write_board_bytes`) : les
+#: fichiers de verrou que ``fsio.locked`` pose à côté de lui (``.lock`` en
+#: POSIX, ``.xlock`` en repli Windows) apparaissent après le reçu et n'en
+#: changent pas le code — sans leur exclusion, toute reprojection du board
+#: périmerait le reçu.
+_BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 RECEIPT_FINGERPRINT_EXCLUDES: tuple[str, ...] = (
     "_grimoire-runtime-output",
     "_grimoire/_memory",
-    (STANDARD_DIR / "task-board.yaml").as_posix(),
+    _BOARD_RELPATH.as_posix(),
+    *(lock.as_posix() for lock in lock_files(_BOARD_RELPATH)),
 )
 
 #: Profils où même une tâche V0 doit être relue avant de fermer.
