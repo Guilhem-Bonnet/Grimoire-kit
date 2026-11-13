@@ -1,1 +1,0 @@
-- fix(hosts): le hook Gemini sort en code 2 sur toute entrée injugeable (JSON invalide, événement inconnu ou absent, `tool_name` vide, outil inconnu sans commande ni chemin) au lieu de laisser passer l'action ; un outil inconnu qui porte un chemin est jugé comme une écriture sur ce chemin
