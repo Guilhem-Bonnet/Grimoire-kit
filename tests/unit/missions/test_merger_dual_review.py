@@ -259,10 +259,17 @@ def test_les_deux_listes_couvrent_exactement_les_chemins_reserves_de_main() -> N
     # Tout motif réservé de main est à l'humain ou en double relecture : aucun ne devient libre.
     assert reserved <= human | dual
     assert dual == reserved - human == {"src/grimoire/missions/*", "src/grimoire/core/*"}
-    # Rien de plus : ce que HUMAN_ONLY_PATHS ajoute aux motifs de main (le mécanisme) était déjà réservé par eux.
+    # HUMAN_ONLY_PATHS peut nommer des chemins en plus : des fichiers déjà réservés par un motif de main (le mécanisme),
+    # et des dépendances directes du mécanisme que main ne réservait pas (elles vont à l'humain en dual_review).
     added = human - reserved
-    assert added and all(matched_paths([path], MAIN_PROTECTED_PATHS) == [path] for path in added), added
-    assert all(matched_paths([path], DUAL_REVIEW_PATHS) == [path] for path in added)
+    beyond_main = sorted(path for path in added if not matched_paths([path], MAIN_PROTECTED_PATHS))
+    assert beyond_main == [
+        "src/grimoire/__init__.py", "src/grimoire/bridges/__init__.py", "src/grimoire/bridges/schemas.py",
+        "src/grimoire/evidence/__init__.py", "src/grimoire/evidence/service.py", "src/grimoire/flows/__init__.py",
+        "src/grimoire/flows/autonomy.py", "src/grimoire/hosts/__init__.py", "src/grimoire/hosts/host_version.py",
+        "src/grimoire/hosts/sync.py", "src/grimoire/providers/*", "src/grimoire/tools/__init__.py",
+        "src/grimoire/tools/workspace_work.py",
+    ]
     samples = (
         "src/grimoire/missions/merger.py", "src/grimoire/missions/dual_review.py", "src/grimoire/missions/review_seal.py",
         "src/grimoire/missions/reviewer.py", "src/grimoire/missions/mandate.py", "src/grimoire/missions/autopilot.py",
@@ -275,28 +282,48 @@ def test_les_deux_listes_couvrent_exactement_les_chemins_reserves_de_main() -> N
         "pyproject.toml", "setup.py", "setup.cfg", ".pre-commit-config.yaml", ".githooks/pre-push", ".husky/pre-commit",
         "framework/hooks/pre-commit.sh", "CODEOWNERS", "docs/CODEOWNERS", ".gitmodules", ".gitattributes",
         "src/x/mod.cpython-312.pyc", "lib/native.so", "dist/kit.whl", "src/sitecustomize.py", "src/a.pth",
-        "src/grimoire/missions/janitor.py", "src/grimoire/missions/ledger.py", "src/grimoire/core/safe_git.py",
-        "src/grimoire/core/sub/deep.py", "src/app/route.py", "docs/guide.md", "tests/unit/test_x.py",
-        "src/grimoire/providers/registry.py",
+        # les dépendances directes du mécanisme, réservées sur main (core/, missions/)…
+        "src/grimoire/core/safe_git.py", "src/grimoire/core/fsio.py", "src/grimoire/core/standard_generation.py",
+        "src/grimoire/core/standard_state.py", "src/grimoire/core/exceptions.py", "src/grimoire/core/__init__.py",
+        "src/grimoire/missions/review_receipt.py", "src/grimoire/missions/service.py",
+        "src/grimoire/missions/schemas.py", "src/grimoire/missions/task_worktree.py",
+        "src/grimoire/missions/orchestrate.py", "src/grimoire/missions/human_acceptance.py",
+        "src/grimoire/missions/manual_review.py", "src/grimoire/missions/waiting.py",
+        # … et celles que main laissait libres
+        "src/grimoire/providers/registry.py", "src/grimoire/providers/keystore.py", "src/grimoire/flows/autonomy.py",
+        "src/grimoire/__init__.py", "src/grimoire/evidence/service.py", "src/grimoire/hosts/sync.py",
+        # le reste de missions/ et de core/ : double relecture
+        "src/grimoire/missions/janitor.py", "src/grimoire/missions/ledger.py", "src/grimoire/core/project.py",
+        "src/grimoire/core/sub/deep.py",
+        # libres sur main, libres ici
+        "src/app/route.py", "docs/guide.md", "tests/unit/test_x.py", "src/grimoire/cli/app.py",
+        "src/grimoire/flows/runner.py", "src/grimoire/hosts/claude.py",
     )
     for path in samples:
         on_main = bool(matched_paths([path], MAIN_PROTECTED_PATHS))
         to_human = bool(matched_paths([path], HUMAN_ONLY_PATHS))
         to_dual = bool(matched_paths([path], DUAL_REVIEW_PATHS)) and not to_human
-        assert on_main == (to_human or to_dual), path
+        # Aucun chemin réservé de main ne devient libre ; rien de libre sur main ne passe en double relecture.
+        assert not on_main or to_human or to_dual, path
+        assert not to_dual or on_main, path
     to_human = [p for p in samples if matched_paths([p], HUMAN_ONLY_PATHS)]
     to_dual = [p for p in samples if matched_paths([p], DUAL_REVIEW_PATHS) and p not in to_human]
-    assert to_human == list(samples[:37])  # politique, hôte, CI, tests, binaires, mécanisme : à l'humain
+    assert to_human == list(samples[:57])  # politique, hôte, CI, tests, binaires, mécanisme et ses dépendances directes
+    assert [p for p in to_human if not matched_paths([p], MAIN_PROTECTED_PATHS)] == list(samples[51:57])  # en plus de main
     assert to_dual == ["src/grimoire/missions/janitor.py", "src/grimoire/missions/ledger.py",
-                       "src/grimoire/core/safe_git.py", "src/grimoire/core/sub/deep.py"]  # le reste de missions/ et core/
+                       "src/grimoire/core/project.py", "src/grimoire/core/sub/deep.py"]  # le reste de missions/ et core/
     assert [p for p in samples if p not in to_human and p not in to_dual] == [  # libres sur main, libres ici
-        "src/app/route.py", "docs/guide.md", "tests/unit/test_x.py", "src/grimoire/providers/registry.py"]
+        "src/app/route.py", "docs/guide.md", "tests/unit/test_x.py", "src/grimoire/cli/app.py",
+        "src/grimoire/flows/runner.py", "src/grimoire/hosts/claude.py"]
 
 
 @pytest.mark.parametrize("path", [
     ".github/workflows/ci.yml", "tests/conftest.py", "pyproject.toml", ".mcp.json", "src/grimoire/missions/merger.py",
     "src/grimoire/missions/dual_review.py", "src/grimoire/hosts/decisions/zone.py", ".pre-commit-config.yaml",
     "src/grimoire/missions/merger/__init__.py", "src/grimoire/missions/__init__.py",
+    # les dépendances directes du mécanisme, réservées sur main ou non
+    "src/grimoire/core/fsio.py", "src/grimoire/missions/service.py", "src/grimoire/flows/autonomy.py",
+    "src/grimoire/__init__.py",
 ])
 def test_un_chemin_human_only_escalade_meme_en_dual_review(projet: Path, host: FakeHost, path: str) -> None:
     dual_projet(projet)
@@ -310,6 +337,111 @@ def test_un_chemin_human_only_escalade_meme_en_dual_review(projet: Path, host: F
     assert journal(projet, DUAL_REQUEST_ENTRY) == [] and ledger(projet, tid, MERGE_DUAL_REVIEW_REQUESTED_EVENT) == []
     assert len(ledger(projet, tid, REVIEW_LAUNCHED_EVENT)) == 1
     assert tick(projet, host).reviews == ()  # aucune seconde relecture, même aux ticks suivants
+
+
+@pytest.mark.parametrize("dual", [True, False])
+def test_le_registre_de_fournisseurs_va_a_l_humain_en_dual_review_et_suit_main_en_human(
+    projet: Path, host: FakeHost, dual: bool,
+) -> None:
+    """``providers/*`` n'est pas réservé sur main : en ``human`` rien ne change, en ``dual_review`` l'humain décide."""
+    if dual:
+        dual_projet(projet)
+    else:
+        write_registry(projet)
+        grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("src/grimoire/providers/registry.py", "TIERS = ()\n"))
+    first = first_ready(projet, host, tid, wt)
+    assert merges(first) == [("wait", "waiting")] and "à confirmer" in first.merges[0].detail, first.merges
+    report = tick(projet, host)
+    if dual:
+        assert merges(report) == [("escalate", "done")], report.merges
+        assert "quel que soit le réglage" in report.merges[0].detail
+        assert "src/grimoire/providers/registry.py" in report.merges[0].detail
+        assert host.of("gh", "pr", "merge") == [] and journal(projet, DUAL_REQUEST_ENTRY) == []
+        assert tick(projet, host).reviews == ()  # ni seconde relecture ni fusion : la question est posée
+    else:
+        assert merges(report) == [("accept", "done")], report.merges  # le circuit de main : une relecture, fusion
+        assert questions(projet, tid) == [] and len(host.of("gh", "pr", "merge")) == 1
+    assert review_models(host, tid) == ["opus"]
+
+
+#: Les neuf modules du mécanisme : ceux dont les imports de premier rang doivent rester à l'humain.
+MECHANISM = ("dual_review", "review_seal", "mandate", "merger", "reviewer", "launcher", "autopilot", "breaker",
+             "orchestrator_policy")
+#: Modules de ``src/grimoire/`` que le mécanisme importe et qu'on laisse hors de ``HUMAN_ONLY_PATHS`` parce qu'ils sont
+#: manifestement inertes — chemin → raison. Vide : aujourd'hui tout ce que le mécanisme importe reste à l'humain.
+INERT_IMPORTS: dict[str, str] = {}
+
+
+def _first_rank_imports() -> dict[str, set[str]]:
+    """``chemin → modules du mécanisme qui l'importent`` : chaque module de ``src/grimoire/`` qu'un des neuf modules
+    importe (au chargement, tardivement dans une fonction, ou sous ``TYPE_CHECKING``), lu par ``ast``, avec les
+    ``__init__.py`` qui s'exécutent avant lui. Premier rang seulement : pas les imports de ces modules."""
+    import ast
+
+    package = Path(dual_review.__file__).resolve().parents[1]  # …/grimoire
+
+    def file_of(dotted: str) -> Path | None:
+        parts = dotted.split(".")[1:]
+        for candidate in (package.joinpath(*parts).with_suffix(".py") if parts else package / "__init__.py",
+                          package.joinpath(*parts, "__init__.py")):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    found: dict[str, set[str]] = {}
+    for name in MECHANISM:
+        source = package / "missions" / f"{name}.py"
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:  # import relatif : résolu depuis grimoire.missions
+                    up = ["grimoire", "missions"][: 3 - node.level]
+                    base = ".".join([*up, base] if base else up)
+                names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
+            else:
+                continue
+            for dotted in names:
+                if dotted.split(".")[0] != "grimoire" or (path := file_of(dotted)) is None:
+                    continue
+                touched = [path, *(parent / "__init__.py" for parent in path.parents
+                                   if parent == package or package in parent.parents)]
+                for file in touched:
+                    if file.is_file():
+                        found.setdefault(f"src/grimoire/{file.relative_to(package).as_posix()}", set()).add(name)
+    return found
+
+
+def _unlisted_imports(patterns: tuple[str, ...]) -> dict[str, set[str]]:
+    return {path: users for path, users in _first_rank_imports().items()
+            if not matched_paths([path], patterns) and path not in INERT_IMPORTS}
+
+
+def test_tout_module_que_le_mecanisme_importe_reste_a_l_humain() -> None:
+    """Garde : le jour où un des neuf modules importe un module de ``src/grimoire/`` que ``HUMAN_ONLY_PATHS`` ne nomme
+    pas, ce test échoue — il faut l'ajouter à la liste, ou l'inscrire dans ``INERT_IMPORTS`` avec sa raison."""
+    imported = _first_rank_imports()
+    # La lecture voit les trois sortes d'imports : au chargement, tardif dans une fonction, sous TYPE_CHECKING.
+    assert "dual_review" in imported["src/grimoire/providers/registry.py"]
+    assert "launcher" in imported["src/grimoire/hosts/sync.py"]
+    assert {"merger", "reviewer", "launcher"} <= imported["src/grimoire/missions/service.py"]
+    assert set(imported["src/grimoire/__init__.py"]) == set(MECHANISM)  # exécuté avant chacun d'eux
+    assert all(f"src/grimoire/missions/{name}.py" in imported for name in MECHANISM if name != "autopilot")
+    unlisted = _unlisted_imports(HUMAN_ONLY_PATHS)
+    assert unlisted == {}, {path: sorted(users) for path, users in sorted(unlisted.items())}
+    # Une exception se justifie, et ne survit pas à ce qu'elle excuse.
+    for path, reason in INERT_IMPORTS.items():
+        assert reason.strip() and path in imported and not matched_paths([path], HUMAN_ONLY_PATHS), path
+    # La garde mord : sans un motif de la liste, le module qu'il couvrait est dénoncé, avec qui l'importe.
+    without = tuple(p for p in HUMAN_ONLY_PATHS if p not in ("src/grimoire/providers/*", "src/grimoire/core/fsio.py"))
+    assert _unlisted_imports(without) == {
+        "src/grimoire/core/fsio.py": {"breaker", "mandate"},
+        "src/grimoire/providers/__init__.py": {"dual_review", "launcher"},
+        "src/grimoire/providers/data_policy.py": {"launcher"},
+        "src/grimoire/providers/registry.py": {"dual_review"},
+    }
 
 
 def test_un_chemin_human_only_l_emporte_sur_un_chemin_a_double_relecture(projet: Path, host: FakeHost) -> None:

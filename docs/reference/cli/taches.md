@@ -598,16 +598,24 @@ dans cet ordre, et chaque garde échoue fermée :
 - **Double relecture** (`protected_gate: dual_review`, `missions/dual_review.py`) : par défaut (`human`), tout chemin
   réservé escalade, comme ci-dessus. En `dual_review`, les chemins réservés se partagent en deux listes, et aucun ne
   devient libre.
-- **Double relecture, ce qui reste à l'humain quel que soit le réglage** : la politique et la configuration d'hôte
+- **Double relecture, ce qui reste à l'humain dès que le réglage vaut `dual_review`** : la politique et la configuration d'hôte
   (`_grimoire/standard/*`, `.claude/*`, `.mcp.json`, `.vscode/*`) ; ce qui définit la CI et les tests (`.github/*`, les
   fichiers conftest de pytest, `pyproject.toml`, `setup.cfg` et le script setup de setuptools,
   `.pre-commit-config.yaml`, `.githooks/*`, `.husky/*`, `framework/hooks/*`, `codeowners`, `.gitmodules`,
   `.gitattributes`) ; les fichiers compilés ; le mécanisme lui-même (`merger.py`, `dual_review.py`, `review_seal.py`,
   `reviewer.py`, `mandate.py`, `autopilot.py`, `breaker.py`, `launcher.py`, `orchestrator_policy.py` de
   `src/grimoire/missions/`, un paquet du même nom que l'un d'eux, `src/grimoire/missions/__init__.py`,
-  `src/grimoire/hosts/decisions/*`, l'attestation des flows). « CI verte » est l'autre
+  `src/grimoire/hosts/decisions/*`, l'attestation des flows) ; et les **dépendances directes** du mécanisme, c'est-à-dire
+  les modules de `src/grimoire/` que ces neuf modules importent, avec les `__init__.py` qui s'exécutent avant eux :
+  `src/grimoire/providers/*` (le registre décide le palier du second relecteur), une partie de `src/grimoire/core/`
+  (dossier du standard, verrou et écriture du journal, git du tick, identité de session, exceptions), une partie de
+  `src/grimoire/missions/` (reçus, acceptation, service, schémas, worktree de la tâche, le tick lui-même…), les flows
+  d'autonomie, le service de preuve, la synchronisation d'hôte. La liste exacte est `HUMAN_ONLY_PATHS` dans
+  `missions/dual_review.py`. Elle couvre le premier rang d'imports, pas la fermeture transitive ; un test lit ces
+  imports et échoue le jour où le mécanisme importe un module qu'elle ne nomme pas. « CI verte » est l'autre
   condition de fusion : un fichier capable de la rendre verte à tort, ou de changer ce que la relecture juge, ne se
-  relit pas par deux agents. La clé `human_only_paths` étend cette liste ; rien ne la réduit.
+  relit pas par deux agents. La clé `human_only_paths` étend cette liste ; rien ne la réduit. Certains de ces chemins
+  ne sont pas réservés en `human` (`src/grimoire/providers/*`, par exemple) : là, rien ne change par rapport à avant.
 - **Double relecture, ce qui y passe** : le reste de `src/grimoire/missions/*`, `src/grimoire/core/*`, et les
   `protected_paths` du projet.
 - **Double relecture, second relecteur et décision** : dès que le premier `READY` tient et sous mandat actif, le merger

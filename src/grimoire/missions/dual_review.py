@@ -104,9 +104,16 @@ MERGE_DUAL_REVIEW_REQUESTED_EVENT = "task.merge_dual_review_requested"
 #: Les deux READY scellés (sessions et modèles distincts, aucun du worker) tiennent sur la tête : la fusion suit.
 MERGE_DUAL_REVIEW_EVENT = "task.merge_dual_review"
 
-#: Les chemins qui restent à l'humain quel que soit ``protected_gate``. « CI verte » est l'autre condition de fusion :
-#: tout fichier capable de rendre la CI verte à tort, ou de changer ce que la relecture juge, y figure. La politique du
-#: projet peut étendre cette liste (``merger.human_only_paths``), jamais la réduire.
+#: Les chemins qui restent à l'humain dès que ``protected_gate`` vaut ``dual_review`` (en ``human``, la liste réservée
+#: de main décide seule, inchangée). « CI verte » est l'autre condition de fusion : tout fichier capable de rendre la
+#: CI verte à tort, ou de changer ce que la relecture juge, y figure. La politique du projet peut étendre cette liste
+#: (``merger.human_only_paths``), jamais la réduire.
+#:
+#: Elle couvre le mécanisme et ses **dépendances directes** — les modules de ``src/grimoire/`` que ses neuf modules
+#: importent, au chargement ou tardivement, et les ``__init__.py`` qui s'exécutent avant eux — pas la fermeture
+#: transitive de leurs imports. Une partie de ces chemins n'est pas réservée sur main (``providers/*``,
+#: ``flows/autonomy.py``, ``__init__.py``…) : en ``dual_review`` ils vont à l'humain quand même. Un test lit ces
+#: imports et échoue le jour où le mécanisme importe un module que la liste ne nomme pas.
 HUMAN_ONLY_PATHS: tuple[str, ...] = (
     # la politique et la configuration d'hôte
     "_grimoire/standard/*", ".claude/*", ".mcp.json", ".vscode/*",
@@ -129,6 +136,32 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/reviewer/*", "src/grimoire/missions/mandate/*", "src/grimoire/missions/autopilot/*",
     "src/grimoire/missions/breaker/*", "src/grimoire/missions/launcher/*",
     "src/grimoire/missions/orchestrator_policy/*",
+    # les dépendances directes du mécanisme. Le registre de fournisseurs décide le palier du second relecteur ; routage,
+    # politique de données et magasin de clés vont avec
+    "src/grimoire/providers/*",
+    # … le dossier où se lisent la politique, le registre et l'escalade ; le verrou et l'écriture atomique du journal ;
+    # le git neutralisé du tick ; l'identité de la session ; les exceptions que les gardes rattrapent
+    "src/grimoire/core/standard_generation.py", "src/grimoire/core/fsio.py", "src/grimoire/core/safe_git.py",
+    "src/grimoire/core/standard_state.py", "src/grimoire/core/exceptions.py",
+    # … les reçus, le dépôt de la CI, l'acceptation, les checks scellés, les schémas, le service et le ledger qu'il
+    # porte, le worktree de la tâche, le tick lui-même
+    "src/grimoire/missions/review_receipt.py", "src/grimoire/missions/ci_slots.py",
+    "src/grimoire/missions/human_acceptance.py", "src/grimoire/missions/check_gate.py",
+    "src/grimoire/missions/schemas.py", "src/grimoire/missions/service.py", "src/grimoire/missions/task_worktree.py",
+    "src/grimoire/missions/orchestrate.py",
+    # … et le reste de ce que les neuf modules importent dans missions/
+    "src/grimoire/missions/admission.py", "src/grimoire/missions/ended.py", "src/grimoire/missions/gates.py",
+    "src/grimoire/missions/liveness.py", "src/grimoire/missions/manual_review.py", "src/grimoire/missions/pause.py",
+    "src/grimoire/missions/provider_failure.py", "src/grimoire/missions/questions.py",
+    "src/grimoire/missions/verifiability.py", "src/grimoire/missions/waiting.py",
+    "src/grimoire/missions/worker_provider.py",
+    # … hors de missions/ : les flows d'autonomie, la preuve, l'hôte, les schémas de pont, le transcript de session
+    "src/grimoire/flows/autonomy.py", "src/grimoire/evidence/service.py", "src/grimoire/hosts/host_version.py",
+    "src/grimoire/hosts/sync.py", "src/grimoire/bridges/schemas.py", "src/grimoire/tools/workspace_work.py",
+    # … et les ``__init__.py`` qui s'exécutent avant chacun de ces modules
+    "src/grimoire/__init__.py", "src/grimoire/core/__init__.py", "src/grimoire/flows/__init__.py",
+    "src/grimoire/evidence/__init__.py", "src/grimoire/hosts/__init__.py", "src/grimoire/bridges/__init__.py",
+    "src/grimoire/tools/__init__.py",
 )
 
 #: Les chemins réservés qu'une double relecture peut juger : le reste de
