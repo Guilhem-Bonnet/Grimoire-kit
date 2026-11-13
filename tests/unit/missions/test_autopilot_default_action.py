@@ -357,7 +357,8 @@ def test_une_fusion_ou_une_permission_ne_se_tranche_pas_par_defaut(project: Path
     pilot(project, APPLY)
     text = "Fusionner la branche de la tâche ?" if kind == "merge" else f"Écrire dans {project / 'src' / 'app.py'} ?"
     service, tid, qid = asks(project, text, kind=kind, options=("oui", "non"), recommended="oui")
-    with pytest.raises(GrimoireMissionError, match="confiance"):
+    # Selon le poste, le chemin cité peut en plus tomber dans la liste fermée : dans les deux cas rien n'est décidé.
+    with pytest.raises(GrimoireMissionError, match=r"confiance|réservée"):
         answer(service, tid, qid, "non", confidence="low")
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
 
