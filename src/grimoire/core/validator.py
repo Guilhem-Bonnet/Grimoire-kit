@@ -106,6 +106,7 @@ _VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini
 # Known keys per section for unknown-key detection
 _KNOWN_TOP_KEYS = frozenset({
     "project", "user", "memory", "agents", "hosts", "needs", "installed_archetypes", "proposals", "source",
+    "cockpit",
 })
 
 _KNOWN_PROJECT_KEYS = frozenset({

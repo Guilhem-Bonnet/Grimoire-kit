@@ -117,8 +117,31 @@ const SPACES = [
       // sur l'onglet : il serait lu une fois par portée, donc faux dès le premier retrait.
       { id: 'projets', module: 'registre', label: 'Projets', skeleton: 'table' },
       { id: 'preferences', module: null, label: 'Préférences' },
+      // Les fonctions en test (drapeaux de projet `cockpit.test_features.*`) : s'allument ici, une par une.
+      { id: 'fonctions-test', module: 'fonctions-test', label: 'Fonctions en test' },
     ] },
 ];
+
+// L'Atelier de spec (en test) : absent de SPACES tant que le drapeau du projet est éteint. Il s'insère entre
+// Savoir et Configuration quand `GET features` répond `atelier: true` (voir `applyFeatures`).
+const ATELIER_SPACE = {
+  id: 'atelier', label: 'Atelier', icon: 'i-space-atelier', test: true,
+  sections: [{ id: 'atelier', module: 'atelier', label: 'Atelier', skeleton: 'table' }],
+};
+
+async function applyFeatures() {
+  let on = false;
+  try { on = (await api.testFeatures()).atelier === true; } catch { /* hôte sans la route : fonction éteinte */ }
+  const present = SPACES.includes(ATELIER_SPACE);
+  if (on === present) return;
+  if (on) SPACES.splice(SPACES.findIndex((sp) => sp.id === 'configuration'), 0, ATELIER_SPACE);
+  else SPACES.splice(SPACES.indexOf(ATELIER_SPACE), 1);
+  SECTIONS.clear();
+  for (const space of SPACES) {
+    for (const section of space.sections) SECTIONS.set(section.id, Object.assign(section, { space }));
+  }
+  buildSpaces();
+}
 
 const SECTIONS = new Map();
 for (const space of SPACES) {
@@ -2051,6 +2074,7 @@ function buildSpaces() {
     button.setAttribute('aria-label', space.label);
     button.title = `${space.label} — ⌘${index + 1}`;
     button.addEventListener('click', () => goto(space.id));
+    if (space.test) button.append(badge('Test', 'warn', 'Fonction en test'));
     if (space.id === 'a-traiter') {
       // Le compteur de décisions vit sur l'onglet (maquette Douce), pas dans une pastille à part.
       const count = badge('0', 'warn');
@@ -3049,7 +3073,7 @@ function bindShortcuts() {
     if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); openPalette(); return; }
     if (meta && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); toggleFocus(); return; }
     if (meta && event.shiftKey && event.key.toLowerCase() === 'l') { event.preventDefault(); toggleAtelier(); return; }
-    if (meta && /^[1-5]$/.test(event.key)) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
+    if (meta && /^[1-6]$/.test(event.key) && SPACES[Number(event.key) - 1]) { event.preventDefault(); goto(SPACES[Number(event.key) - 1].id); return; }
 
     if (!$('palette').open && event.key === 'Escape' && isNarrow() && leaveDrawer()) {
       event.preventDefault();
@@ -3154,6 +3178,7 @@ async function main() {
 
   hostKnown = true;
   if (status) {
+    await applyFeatures();
     // `applyPreferences()` a déjà tourné une fois plus haut, avant que
     // `host.project` ne soit connu (pour éviter un flash de mauvais thème
     // pendant l'aller-retour réseau) — avec la clé de repli `atelier`. Tant
