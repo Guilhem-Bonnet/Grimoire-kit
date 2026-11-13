@@ -21,7 +21,15 @@ from rich.table import Table
 from grimoire.bridges.host import HostBridge
 from grimoire.bridges.schemas import HostId
 from grimoire.hosts import gemini_wire
-from grimoire.hosts.capabilities import all_profiles, gaps_for, profile_for, resolve_host
+from grimoire.hosts.capabilities import (
+    GOVERNANCE_FUNCTIONS,
+    GOVERNANCE_LABELS,
+    ParityLevel,
+    all_profiles,
+    gaps_for,
+    profile_for,
+    resolve_host,
+)
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
 from grimoire.hosts.emitters import (
@@ -479,6 +487,31 @@ def host_matrix(
     console.print(table)
     for cell in matrix.failing:
         console.print(f"  [red][!][/red] {cell.host} {cell.subject} — {cell.status} : {cell.reason}")
+
+    # État de chaque fonction de gouvernance, par hôte (GAO-parit-d-h-te-001) :
+    # la matrice des règles dit ce que le rendu promet ; celle-ci dit ce que
+    # l'hôte fait d'une fonction livrée ailleurs, et pourquoi.
+    parity = Table(title="Fonctions de gouvernance × hôte")
+    parity.add_column("Fonction")
+    for host_id in matrix.hosts:
+        parity.add_column(profile_for(host_id).display_name)
+    styles = {
+        ParityLevel.RICH: "[green]rich[/green]",
+        ParityLevel.DEGRADED: "[yellow]degraded[/yellow]",
+        ParityLevel.ABSENT: "[red]absent[/red]",
+    }
+    for function in GOVERNANCE_FUNCTIONS:
+        row = [GOVERNANCE_LABELS[function]]
+        for host_id in matrix.hosts:
+            function_cell = matrix.function_for(host_id, function)
+            row.append(styles.get(ParityLevel(function_cell.state), function_cell.state))
+        parity.add_row(*row)
+    console.print(parity)
+    for field_cell in matrix.functions:
+        if not field_cell.rich:
+            console.print(
+                f"  [dim]{field_cell.host} {field_cell.label} — {field_cell.state} : {field_cell.reason}[/dim]"
+            )
     raise typer.Exit(0 if matrix.ok else 1)
 
 
