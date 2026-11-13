@@ -487,6 +487,41 @@ _ARGUMENT_CHECKS = {
 }
 
 
+# ── Arguments que le shell développe ─────────────────────────────────────────
+#
+# La règle d'un verbe ci-dessus lit ses arguments tels qu'ils sont écrits. Le shell, lui,
+# les développe avant de lancer la commande : une variable (que le découpage en mots
+# scinde en plusieurs arguments), des accolades (``{a,b}``, ``{1..3}``), un motif de
+# fichiers. L'argument développé peut être une option que la règle refuse. Pour ces
+# verbes, un argument que le shell développe n'est pas lu : la commande est une mutation.
+# ``gh`` hors ``gh api`` garde sa lecture d'avant (``gh pr view $PR``).
+
+#: Dans un mot résolu : une variable ou une substitution. Les guillemets sont déjà
+#: retirés, un dollar cité entre guillemets simples est donc refusé lui aussi.
+_SHELL_VALUE_RE = re.compile(r"[$`]")
+#: Sur la surface, donc hors guillemets : des accolades qui portent une virgule ou un
+#: intervalle. ``{owner}`` ne se développe pas.
+_BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*(?:,|\.\.)")
+#: Sur la surface, mot par mot : un motif de fichiers. Un ``?`` derrière une barre oblique
+#: ne rend que des chemins sous un dossier nommé, jamais une option (``pulls?per_page=5``).
+_GLOB_WORD_RE = re.compile(r"[*\[]|^[^/]*\?")
+
+
+def _arguments_are_written_out(verb: str, args: list[str], segment: str) -> bool:
+    """Les arguments de *verb* arrivent à la commande tels que *segment* les écrit.
+
+    *args* sont les mots résolus par ``shlex``, *segment* le texte brut dont ils viennent :
+    la sous-commande se lit sur les premiers, ce que le shell développe hors guillemets
+    sur la surface du second.
+    """
+    if verb == "gh" and args[:1] != ["api"]:
+        return True
+    if any(_SHELL_VALUE_RE.search(word) for word in args):
+        return False
+    surface = _read_surface(segment)
+    return not _BRACE_EXPANSION_RE.search(surface) and not any(_GLOB_WORD_RE.search(word) for word in surface.split())
+
+
 def _git_subcommand(words: list[str]) -> tuple[str, list[str]]:
     """Sous-commande git et ses arguments, après ``-C <dir>`` / ``--no-pager``."""
     i = 0
@@ -840,7 +875,9 @@ def _without_read_only_scripts(command: str, depth: int) -> str | None:
                 return None
             scripts += 1
             kept.append("true")
-        elif verb in _ARGUMENT_CHECKS and not _ARGUMENT_CHECKS[verb](args):
+        elif verb in _ARGUMENT_CHECKS and not (
+            _arguments_are_written_out(verb, args, segment) and _ARGUMENT_CHECKS[verb](args)
+        ):
             return None
         else:
             kept.append(segment)
@@ -1006,6 +1043,10 @@ def is_read_only_command(command: str) -> bool:
     (:func:`_assignment_is_inert` — stricter than before, when any
     ``VAR=value`` prefix was dropped); and a ``curl`` whose URL is not a
     plainly written ``http://`` or ``https://`` one (:data:`_CURL_URL_RE`).
+    Behind a verb whose read-only status is decided on its arguments
+    (``curl``, ``journalctl``, ``systemctl``, ``ss``, ``gh api``), an argument
+    the shell expands — a variable, braces, a file pattern — is not read
+    either (:func:`_arguments_are_written_out`).
     """
     return _command_is_read_only(command, 0)
 

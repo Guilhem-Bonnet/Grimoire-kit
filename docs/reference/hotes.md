@@ -426,9 +426,12 @@ le ledger. Depuis le lot A de l'issue #638 :
   `PYTHONIOENCODING`, `PYTHONUTF8`, `PYTHONDONTWRITEBYTECODE`, et `PAGER` ou
   `GH_PAGER` vides ou égaux à `cat`) ; un `curl` dont une URL n'est pas écrite
   en clair en `http://` ou `https://` (autre schéma, schéma absent, accolades
-  ou crochets, variable, identifiant devant `@`). Une redirection qui n'écrit
-  aucun fichier (`2>&1`, `>&2`, `2>&-`, et toute sortie vers `/dev/null` écrit exactement
-  ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
+  ou crochets, variable, identifiant devant `@`). Derrière `curl`,
+  `journalctl`, `systemctl`, `ss` et `gh api`, dont la lecture se décide sur
+  les arguments, un argument que le shell développe hors guillemets (variable,
+  accolades `{a,b}` ou `{1..3}`, motif de fichiers) classe aussi la commande en
+  écriture. Une redirection qui n'écrit aucun fichier (`2>&1`, `>&2`, `2>&-`,
+  et toute sortie vers `/dev/null` écrit exactement ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
   commande en écriture, y compris vers `/dev/stdout` ou vers un descripteur
   autre que 1 et 2 (`>&3`). Un motif entre
   guillemets est une donnée, antislash compris (`grep "a\|b" f` lit) ;
