@@ -14,6 +14,10 @@ qui attend un humain :
 - revues dont le gate refuse la clôture, tâches bloquées, consignes non
   accusées, claims dont plus aucune session ne tient la tâche ;
 - propositions en attente ;
+- décisions que le pilote automatique a prises **par défaut** (``autopilot.decided`` de source ``default``, sous
+  ``autopilot.default_action: apply_recommended``) : un bloc à part, « Décisions à revoir » (``defaultDecisions``),
+  avec la question, l'option appliquée et la justification. Le pilote a déjà tranché : elles n'entrent dans aucune
+  section, ni dans ``count``, ``maintainCount`` ou ``counts`` — rien n'y attend l'humain ;
 - PR ouvertes à revoir (P48), avec l'état de leur CI et la tâche du ledger
   liée — la lecture ``gh`` est bornée et partagée
   (:mod:`grimoire.tools.workspace_reviews`), un ``gh`` absent est un « état
@@ -94,6 +98,13 @@ UNREADABLE = "unreadable"
 PROBE_FAILED = "probe_failed"
 KIT_BEHIND = "kit_behind"
 SERVICE_RESOLVED = "service_resolved"
+#: Une décision prise par défaut par le pilote : hors des sections, dans le bloc « Décisions à revoir ».
+DEFAULT_DECISION = "default_decision"
+DEFAULT_DECISIONS_LABEL = "Décisions à revoir"
+#: Le bloc montre les décisions par défaut récentes et non reprises, jamais un historique sans fin (le journal
+#: « Décidé par le pilote » les garde toutes).
+DEFAULT_DECISION_VISIBLE = timedelta(days=7)
+MAX_DEFAULT_DECISIONS = 20
 
 #: Les sections, de la plus urgente à la moins urgente, et les types de chacune
 #: dans leur ordre. Un type n'apparaît que dans une section.
@@ -249,6 +260,8 @@ class _ProjectRead:
     home_root: Path | None = None
     #: Ce que vaut la lecture des PR du projet : ``{state, detail, repo, count}``.
     reviews: dict[str, Any] = field(default_factory=dict)
+    #: Les décisions récentes que le pilote a prises par défaut (bloc « Décisions à revoir »), hors de ``items``.
+    default_decisions: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _hm(moment: datetime) -> str:
@@ -290,13 +303,63 @@ def _guarded(read: _ProjectRead, source: str, collect: Callable[[], None]) -> No
         _item(read, PROBE_FAILED, source, f"{source} illisible", f"{source} illisible : {exc}")
 
 
-def _last_events(ledger: Any) -> dict[str, str]:
-    """Horodatage du dernier événement de chaque tâche, en une passe."""
+def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any]]:
+    """Horodatage du dernier événement de chaque tâche et événements du pilote (décidé, repris), en une passe."""
+    from grimoire.missions.autopilot import DECIDED_EVENT
+    from grimoire.missions.autopilot_view import REVERTED_EVENT
+
     last: dict[str, str] = {}
+    pilot: list[Any] = []
     for event in ledger.list_events():
         if event.created_at and event.created_at > last.get(event.entity_id, ""):
             last[event.entity_id] = event.created_at
-    return last
+        if event.event_type in (DECIDED_EVENT, REVERTED_EVENT):
+            pilot.append(event)
+    return last, pilot
+
+
+def _default_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime) -> list[dict[str, Any]]:
+    """Les décisions que le pilote a prises par défaut, la plus récente d'abord : à relire, jamais à trancher.
+
+    Seulement la source ``default`` : une recommandation d'auteur appliquée ou un jugement assumé n'en sont pas. Une
+    décision que l'humain a reprise (« Revenir ») sort du bloc, comme celles de plus de
+    :data:`DEFAULT_DECISION_VISIBLE` ; au plus :data:`MAX_DEFAULT_DECISIONS`.
+    """
+    from grimoire.missions.autopilot import DECIDED_EVENT, DEFAULT_SOURCE
+
+    def key(event: Any) -> tuple[str, str]:
+        return str(event.payload.get("task_id") or event.entity_id or ""), str(event.payload.get("question_id") or "")
+
+    reverted = {key(event) for event in pilot_events if event.event_type != DECIDED_EVENT}
+    found: list[dict[str, Any]] = []
+    for event in pilot_events:
+        payload = event.payload
+        if event.event_type != DECIDED_EVENT or payload.get("recommendation_source") != DEFAULT_SOURCE:
+            continue
+        if key(event) in reverted:
+            continue
+        try:
+            at = datetime.fromisoformat(str(event.created_at))
+        except ValueError:
+            continue
+        if now - (at if at.tzinfo is not None else at.replace(tzinfo=UTC)) > DEFAULT_DECISION_VISIBLE:
+            continue
+        task_id, question_id = key(event)
+        slug = read.row["slug"]
+        found.append({
+            "id": f"{DEFAULT_DECISION}:{slug}:{task_id}:{question_id}",
+            "kind": DEFAULT_DECISION,
+            "project": {"slug": slug, "name": read.row["name"]},
+            "title": str(read.tasks.get(task_id, {}).get("title") or task_id),
+            "task_id": task_id,
+            "question_id": question_id,
+            "question": str(payload.get("question") or ""),
+            "option": str(payload.get("option") or ""),
+            "justification": str(payload.get("justification") or ""),
+            "since": str(event.created_at),
+        })
+    found.sort(key=lambda item: item["since"], reverse=True)
+    return found[:MAX_DEFAULT_DECISIONS]
 
 
 def _orphan_reason(task: Any, card: dict[str, Any], now: datetime) -> str:
@@ -333,7 +396,8 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
     read.tasks = {task.id: {"title": task.title, "status": task.status.value} for task in tasks}
     cards = [_task_json(task) for task in tasks]
     annotate_cards(read.root, service, tasks, cards, now=now, probe=host_probe)
-    last = _last_events(service.ledger)
+    last, pilot_events = _last_events(service.ledger)
+    read.default_decisions = _default_decisions(read, pilot_events, now)
 
     pilot_on, held = partition(service)
     held_by_task = {h.decision.task_id: h for h in held}
@@ -693,6 +757,10 @@ def attention_view(
     counts: dict[str, int] = {}
     for item in active:
         counts[item["kind"]] = counts.get(item["kind"], 0) + 1
+    # Hors de `items` : une décision par défaut est déjà prise, elle ne pèse sur aucun compteur d'attente.
+    defaults = sorted(
+        (item for read in reads for item in read.default_decisions), key=lambda item: item["since"], reverse=True
+    )[:MAX_DEFAULT_DECISIONS]
     return {
         "schemaVersion": SCHEMA_VERSION,
         "generated_at": moment.isoformat(),
@@ -703,6 +771,7 @@ def attention_view(
         "count": len(gestures),
         "maintainCount": len(active) - len(gestures),
         "counts": counts,
+        "defaultDecisions": {"label": DEFAULT_DECISIONS_LABEL, "count": len(defaults), "items": defaults},
         "projects": [read.row for read in reads],
         "reviews": [{"project": read.row["slug"], **read.reviews} for read in reads if read.reviews],
         "summary": {

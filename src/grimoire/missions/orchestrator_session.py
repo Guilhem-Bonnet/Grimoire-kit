@@ -118,7 +118,7 @@ from grimoire.missions.schemas import TaskState
 from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, QUESTION_ASKED_EVENT
 
 if TYPE_CHECKING:
-    from grimoire.missions.autopilot import Decision
+    from grimoire.missions.autopilot import AutopilotPolicy, Decision
     from grimoire.missions.launcher import Exec
     from grimoire.missions.mandate import MandateStore
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
@@ -129,6 +129,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ALLOWED_TOOLS",
     "ANSWER_REFUSED_EVENT",
+    "MAX_DEFAULT_DECISIONS",
     "MAX_PRESENTATIONS",
     "MAX_RESUMES",
     "ORCHESTRATOR_ACTOR",
@@ -144,7 +145,9 @@ __all__ = [
     "OrchestratorStage",
     "answer_gesture",
     "answer_plan",
+    "default_plan",
     "eligible_questions",
+    "kit_written",
     "mandate_gesture",
     "question_source",
     "record_answer_refused",
@@ -166,6 +169,9 @@ _ENTITY = "orchestrator"
 SESSION_TIMEOUT = timedelta(minutes=30)
 #: Reprises (geste ``resume``) qu'une tâche reçoit de l'orchestrateur depuis la dernière réponse humaine ; au-delà, l'humain.
 MAX_RESUMES = 2
+#: Décisions par défaut (``autopilot.default_action: apply_recommended``) qu'une tâche reçoit depuis la dernière réponse
+#: humaine ; au-delà, la question se juge comme sous ``ask``. Borne les escalades du merger, dont le geste n'est pas ``resume``.
+MAX_DEFAULT_DECISIONS = 2
 #: Présentations d'une même question à l'orchestrateur : une session terminée sans y répondre en vaut une seconde.
 MAX_PRESENTATIONS = 2
 #: Pilote activé : sans progrès sur la tâche, une question attend ce délai multiplié par ses présentations.
@@ -212,6 +218,16 @@ def question_source(events: list[LedgerEvent], question: Question) -> str:
     ):
         return "reap"
     return ""
+
+
+def kit_written(events: list[LedgerEvent], question: Question) -> bool:
+    """Vrai si le kit a écrit *question* lui-même — établi par ce que seul son code écrit, jamais par ce qu'elle dit.
+
+    Posée par le tick (``origin == "tick"`` : la récolte, la tâche garée sur une erreur du fournisseur ; aucune commande
+    ni outil MCP ne laisse un agent déclarer cette origine), ou nommée par l'événement d'escalade du relecteur ou du
+    merger. La nature et les options d'une question ne prouvent rien : un agent les choisit.
+    """
+    return question.origin == "tick" or question_source(events, question) in ("reap", "reviewer", "merger")
 
 
 def mandate_gesture(question: Question, source: str, *, pilot: bool = False) -> tuple[str, str]:
@@ -275,6 +291,46 @@ def _classify(events: list[LedgerEvent], question: Question, *, pilot: bool = Fa
     return gesture, why
 
 
+def _defaults_taken(events: list[LedgerEvent]) -> int:
+    """Les décisions par défaut prises sur la tâche depuis la dernière réponse humaine (seul l'humain remet à zéro)."""
+    from grimoire.missions.autopilot import DECIDED_EVENT, DEFAULT_SOURCE
+
+    count = 0
+    for event in events:
+        if event.event_type == HUMAN_ANSWERED_EVENT and event.payload.get("origin") == "human":
+            count = 0
+        elif event.event_type == DECIDED_EVENT and event.payload.get("recommendation_source") == DEFAULT_SOURCE:
+            count += 1
+    return count
+
+
+def default_plan(
+    service: TaskService, task: MissionTask, question: Question, events: list[LedgerEvent], policy: AutopilotPolicy,
+) -> tuple[str, str]:
+    """L'option qu'une décision par défaut appliquerait à *question* : ``(option, "")``, ou ``("", pourquoi aucune)``.
+
+    Aucune sans le réglage ``autopilot.default_action: apply_recommended`` : un projet qui ne règle rien ne change pas.
+    Sinon l'option recommandée de la question (:func:`~.autopilot.default_option` : l'une de ses options, ni fusion ni
+    permission, jamais « abandonner »), si la liste fermée ne la garde pas — jugée ici titre de la tâche compris tant
+    que le kit n'a pas lui-même écrit la question (:func:`kit_written`) — et sous :data:`MAX_DEFAULT_DECISIONS`.
+    """
+    from grimoire.missions.autopilot import APPLY_RECOMMENDED, default_option, reserved_reason
+
+    if policy.error or policy.default_action != APPLY_RECOMMENDED:
+        return "", "action par défaut du projet : demander (`autopilot.default_action`)"
+    option, why = default_option(question)
+    if not option:
+        return "", why
+    if kept := reserved_reason(
+        question, task, service.project_root, policy, kit_written=kit_written(events, question)
+    ):
+        return "", kept
+    if _defaults_taken(events) >= MAX_DEFAULT_DECISIONS:
+        return "", (f"{MAX_DEFAULT_DECISIONS} décisions par défaut déjà prises sur cette tâche depuis la dernière "
+                    "réponse humaine")
+    return option, ""
+
+
 def answer_gesture(service: TaskService, task: MissionTask, question: Question, answer: str) -> str:
     """Le geste qu'une réponse d'origine ``orchestrator`` prend sur *question* (:func:`answer_plan` sans la décision)."""
     return answer_plan(service, task, question, answer)[0]
@@ -293,9 +349,10 @@ def answer_plan(
     **Pilote activé** : la liste fermée est jugée d'abord (:func:`~.autopilot.reserved_reason`), puis la réponse cite sa
     source ou sa justification et sa confiance (:func:`~.autopilot.judge`) ; « abandonner » est permis avec sa raison
     (la tâche est annulée, la raison au ledger). Une question laissée à l'humain faute de confiance est inscrite
-    (:data:`~.autopilot.DEFERRED_EVENT`).
+    (:data:`~.autopilot.DEFERRED_EVENT`) — sauf sous ``autopilot.default_action: apply_recommended``, où l'option
+    recommandée tranche à la place de la réponse soumise quand :func:`default_plan` en rend une (source ``default``).
     """
-    from grimoire.missions.autopilot import AutopilotStore, judge, reserved_reason
+    from grimoire.missions.autopilot import AutopilotStore, judge, load_autopilot_policy, reserved_reason
     from grimoire.missions.mandate import acting_in_process
 
     events = service.ledger.events_for(task.id)
@@ -303,7 +360,8 @@ def answer_plan(
     gesture, why = _classify(events, question, pilot=pilot)
     if not gesture:
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {why}")
-    if pilot and (kept := reserved_reason(question, task, service.project_root)):
+    policy = load_autopilot_policy(service.project_root) if pilot else None
+    if policy is not None and (kept := reserved_reason(question, task, service.project_root, policy)):
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {kept}")
     abandoning = answer.strip().lower() == ABANDON
     if abandoning and not pilot:
@@ -312,14 +370,18 @@ def answer_plan(
         )
     if not acting_in_process():
         _check_caller(service, task, question, events, pilot=pilot)
-    if not pilot:
+    if policy is None:
         return gesture, None
     try:
-        decision = judge(question, answer, justification=justification, confidence=confidence)
+        decision = judge(
+            question, answer, justification=justification, confidence=confidence,
+            kit_written=kit_written(events, question), default=default_plan(service, task, question, events, policy)[0],
+        )
     except GrimoireMissionError as exc:
         _defer(service, task.id, question.id, str(exc))
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {exc}") from exc
-    if abandoning and len(decision.justification) < _MIN_ABANDON_REASON:
+    # Une décision par défaut n'est jamais « abandonner » (:func:`~.autopilot.default_option`) : la réponse soumise est écartée.
+    if abandoning and not decision.by_default and len(decision.justification) < _MIN_ABANDON_REASON:
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : annuler cite sa raison (--why, une phrase)")
     return gesture, decision
 
@@ -468,7 +530,9 @@ def eligible_questions(service: TaskService, store: MandateStore) -> list[OpenQu
     """Les questions ouvertes des tâches lancées par le tick qu'un geste du mandat actif couvre (voir le module).
 
     Pilote activé : toutes les tâches en attente d'un humain, faites à la main comprises, hors la liste fermée et hors
-    les questions que le pilote a déjà laissées à l'humain faute de confiance.
+    les questions que le pilote a déjà laissées à l'humain faute de confiance. L'option recommandée d'une question que
+    le kit a écrite (:func:`kit_written`) n'est pas présentée : c'est son option par défaut, que le tick applique ou
+    non selon ``autopilot.default_action`` ; une session qui la reçoit juge par elle-même, comme avant.
     """
     from grimoire.missions.autopilot import AutopilotStore, last_deferral, load_autopilot_policy, reserved_reason
     from grimoire.missions.mandate import MandateRefusedError
@@ -493,7 +557,8 @@ def eligible_questions(service: TaskService, store: MandateStore) -> list[OpenQu
                 store.authorize(gesture, task, {"kind": "rule", "ref": "eligibilite"}, record=False)
             except MandateRefusedError:
                 continue
-            found.append(OpenQuestion(tid, q.id, q.kind, q.text, q.options, gesture, q.recommended, q.why))
+            pick = "" if kit_written(events, q) else q.recommended
+            found.append(OpenQuestion(tid, q.id, q.kind, q.text, q.options, gesture, pick, q.why))
     return found
 
 
@@ -676,17 +741,24 @@ class OrchestratorStage:
             str(a["id"]): str(a.get("status") or "") for a in agents if a.get("kind") == "background" and a.get("id")
         }
         outcomes = self._sweep(status)
-        outcomes.extend(self._apply_recommendations())
+        outcomes.extend(self._apply_recommendations(status))
         launched = self._maybe_launch(status)
         return (*outcomes, *((launched,) if launched is not None else ()))
 
-    def _apply_recommendations(self) -> list[OrchestratorOutcome]:
+    def _apply_recommendations(self, status: dict[str, str] | None = None) -> list[OrchestratorOutcome]:
         """Pilote activé : une question qui porte sa recommandation reçoit cette option, sans session (le tick l'applique).
 
         La recommandation est une donnée de l'auteur de la question : elle passe par les mêmes gardes que toute réponse
         d'origine ``orchestrator`` (:func:`answer_plan` : mandat, liste fermée, geste). Un refus laisse la question à
         l'humain ou à la session qui suit.
+
+        Une question que le kit a écrite (:func:`kit_written`) ne porte pas l'avis d'un auteur mais une option par
+        défaut : le tick ne l'applique que si :func:`default_plan` en rend une (``autopilot.default_action:
+        apply_recommended``, hors liste fermée, sous la borne) et, pour une reprise, que si *status* (``claude agents``)
+        montre que la session du worker n'est plus au travail — illisible, rien n'est repris. Sinon la question va à la
+        session qui suit, comme avant.
         """
+        from grimoire.missions.autopilot import load_autopilot_policy
         from grimoire.missions.mandate import MandateStore, acting_as_orchestrator
         from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR
 
@@ -696,27 +768,43 @@ class OrchestratorStage:
         try:
             store = MandateStore(self._root)
             candidates = eligible_questions(self._service, store)
+            policy = load_autopilot_policy(self._service.project_root)
         except Exception as exc:  # une lecture qui échoue ne tranche rien
             return [OrchestratorOutcome("pilot", "skipped", f"questions illisibles ({type(exc).__name__})")]
         for q in candidates:
             task = self._service.ledger.get_task(q.task_id)
             record = next((r for r in open_in_group(task) if r.question.id == q.question_id), None) if task else None
-            if record is None or not record.question.recommended:
+            if task is None or record is None or not record.question.recommended:
                 continue
+            events = self._service.ledger.events_for(q.task_id)
+            by_default = kit_written(events, record.question)
+            if by_default and (
+                not default_plan(self._service, task, record.question, events, policy)[0]
+                or (q.gesture == "resume" and self._worker_at_work(q.task_id, status))
+            ):
+                continue
+            ref, said = ("autopilot-default", "option par défaut") if by_default else ("autopilot-recommended", "option recommandée")
             try:
                 with acting_as_orchestrator():
                     self._service.answer(
                         q.task_id, record.question.recommended, ORCHESTRATOR_ACTOR, origin=ORIGIN_ORCHESTRATOR,
-                        question_id=q.question_id, provenance={"kind": "rule", "ref": "autopilot-recommended"},
+                        question_id=q.question_id, provenance={"kind": "rule", "ref": ref},
                     )
             except Exception as exc:  # refusée par le kit : le ledger l'a noté, la question reste ouverte
                 outcomes.append(OrchestratorOutcome("pilot", "failed", f"{q.task_id}/{q.question_id} : {exc}"[:300]))
                 continue
             outcomes.append(OrchestratorOutcome(
-                "pilot", "done", f"{q.task_id}/{q.question_id} : option recommandée appliquée", "", "",
+                "pilot", "done", f"{q.task_id}/{q.question_id} : {said} appliquée", "", "",
                 (f"{q.task_id}/{q.question_id}",),
             ))
         return outcomes
+
+    def _worker_at_work(self, task_id: str, status: dict[str, str] | None) -> bool:
+        """Vrai si la session du worker de *task_id* travaille encore, ou si rien ne permet de le dire (échec fermé)."""
+        if status is None:
+            return True
+        launch = launched_sessions(self._service).get(task_id, {})
+        return status.get(str(launch.get("session") or "")) == "busy"
 
     def _sweep(self, status: dict[str, str] | None) -> list[OrchestratorOutcome]:
         """Termine les sessions finies, arrête celles qui dépassent :data:`SESSION_TIMEOUT`, retente les arrêts."""

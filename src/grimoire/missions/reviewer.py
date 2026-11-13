@@ -982,6 +982,7 @@ class ReviewStage:
                 REVIEWER_ACTOR,
                 kind="choice",
                 options=("reprendre", "abandonner"),
+                recommended="reprendre",  # l'option par défaut : réversible, là où abandonner annule la tâche
                 question_id=qid,
                 title="Reprendre la tâche ou l'abandonner ?",
                 context=clip_context(

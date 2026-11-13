@@ -91,6 +91,15 @@ const CSS = `
 .at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
+.at-defaults > .at-hint { margin: var(--sp-2) 0 0; color: var(--ink3); }
+.at-default-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; }
+.at-default { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) 0; border-top: 1px solid var(--line);
+  font-size: var(--t-s); overflow-wrap: anywhere; }
+.at-default-head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.at-default-head .at-project { color: var(--ink3); }
+.at-default-q { color: var(--ink2); }
+.at-default-k { color: var(--ink3); margin-right: var(--sp-2); }
+.at-default-why { color: var(--ink2); }
 @container canvas (max-width: 720px) {
   .at-wrap { padding: var(--sp-4); }
   .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
@@ -629,6 +638,38 @@ export async function mount(root, ctx) {
       fold.append(
         node('summary', null, `Relues par le pilote : ${piloted} en cours`),
         node('p', 'at-hint', 'Le relecteur du tick relit ces PR sous mandat, le merger les fusionne : rien à faire de ton côté.'),
+      );
+      wrap.append(fold);
+    }
+    // Décisions que le pilote a prises par défaut (`autopilot.default_action: apply_recommended`) : déjà tranchées,
+    // elles ne sont dans aucune section ni aucun compteur — un bloc replié, à relire quand on veut.
+    const defaults = (data.defaultDecisions && data.defaultDecisions.items) || [];
+    if (defaults.length) {
+      const fold = node('details', 'at-piloted at-defaults');
+      fold.dataset.role = 'default-decisions';
+      const list = node('ul', 'at-default-list');
+      for (const decision of defaults) {
+        const li = node('li', 'at-default');
+        li.dataset.role = 'default-decision';
+        li.dataset.task = decision.task_id;
+        li.dataset.question = decision.question_id;
+        const head = node('span', 'at-default-head');
+        head.append(node('span', 'at-title', decision.title || decision.task_id), node('span', 'at-project', projectName(decision)));
+        const option = node('span', 'at-default-option');
+        option.append(node('span', 'at-default-k', 'Option appliquée'), node('b', null, decision.option));
+        li.append(head, node('span', 'at-default-q', decision.question), option);
+        if (decision.justification) {
+          const why = node('span', 'at-default-why');
+          why.append(node('span', 'at-default-k', 'Justification'), decision.justification);
+          li.append(why);
+        }
+        list.append(li);
+      }
+      const label = data.defaultDecisions.label || 'Décisions à revoir';
+      fold.append(
+        node('summary', null, `${label} : ${defaults.length} prise${defaults.length > 1 ? 's' : ''} par défaut`),
+        node('p', 'at-hint', 'Le pilote a appliqué l’option recommandée sans attendre de réponse, puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans Travail › Décisions, sous « Décidé par le pilote ».'),
+        list,
       );
       wrap.append(fold);
     }

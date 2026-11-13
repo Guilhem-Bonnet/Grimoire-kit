@@ -32,6 +32,39 @@ def _fmt(ctx: typer.Context) -> str:
     return str((ctx.obj or {}).get("output", "text"))
 
 
+def _agent_session() -> bool:
+    """Vrai si un signal positif dit qu'un agent pose la question : session d'hôte, exécution sans humain, entrée sans terminal.
+
+    Les signaux de :func:`grimoire.cli.cmd_task._comment_origin`, sans sa confirmation à l'écran : ici on avertit
+    seulement, aucune autorité n'en découle.
+    """
+    import os
+    import sys
+
+    from grimoire.core.standard_state import agent_marker, current_session_id
+
+    if os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" or current_session_id() or agent_marker():
+        return True
+    try:
+        return not (sys.stdin.isatty() and sys.stderr.isatty())
+    except (AttributeError, ValueError):
+        return True
+
+
+def _warn_no_recommendation(recommended: bool, flag: str = "--recommended") -> None:
+    """Avertit l'agent qui pose une question bloquante sans dire l'option qu'il recommande ; la question est posée.
+
+    Sans option recommandée, le pilote automatique n'a rien à appliquer par défaut : la question attend un humain.
+    """
+    if recommended or not _agent_session():
+        return
+    console.print(
+        f"[yellow]![/yellow] question sans option recommandée : repose-la avec `{flag} <option>` (l'une des options "
+        "proposées) et `--why \"<raison>\"` — le pilote automatique peut alors l'appliquer puis informer, au lieu "
+        "d'attendre une réponse humaine."
+    )
+
+
 def register(task_app: typer.Typer) -> None:
     """Pose les commandes d'attente sur ``grimoire task``."""
     from grimoire.cli import cmd_task as ct
@@ -138,6 +171,7 @@ def register(task_app: typer.Typer) -> None:
             except (GrimoireError, ValueError) as exc:
                 console.print(f"[red]✗[/red] {exc}")
                 raise typer.Exit(1) from exc
+            _warn_no_recommendation(bool(recommended.strip() or fields.get("recommendation")), "--recommend")
             return
         if not from_file and not (non_blocking or why or key or recommended):
             if not text.strip():
@@ -145,6 +179,7 @@ def register(task_app: typer.Typer) -> None:
                 raise typer.Exit(1)
             run(ctx, project_root, ledger_root, task_id,
                 lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch), parking=True)
+            _warn_no_recommendation(False)
             return
         from grimoire.cli.cmd_task_questions import emit_batch, read_specs
         from grimoire.core.exceptions import GrimoireError
@@ -169,6 +204,7 @@ def register(task_app: typer.Typer) -> None:
             console.print(f"[red]✗[/red] {exc}")
             raise typer.Exit(1) from exc
         emit_batch(ctx, outcome)
+        _warn_no_recommendation(all(s.recommended.strip() for s in specs if s.blocking and not s.answer.strip()))
 
     @task_app.command("answer")
     def task_answer(

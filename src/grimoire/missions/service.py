@@ -981,7 +981,7 @@ class TaskService:
 
                 record_answer_refused(self, task_id, asked.id if asked is not None else question_id, exc)
             raise
-        answer = text.strip()
+        answer, answer_data = (decision.answer, None) if decision and decision.by_default else (text.strip(), answer_data)
         if not answer:
             raise ValueError("`text` requis : une réponse vide ne tranche rien")
         self.ledger.append_event(
