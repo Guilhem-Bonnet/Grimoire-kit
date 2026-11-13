@@ -378,10 +378,13 @@ class Janitor:
         status = self._service.require(tid).status
         root = self._service.home_root
         if status is TaskState.CLOSED:
-            record_success(root)
+            record_success(root, task_id=tid)
             return "done", "tâche close : compteur du disjoncteur remis à zéro"
         if status is TaskState.FAILED and tid in launched_sessions(self._service):
-            state = record_failure(root, self._policy.breaker_threshold, f"{tid} : session échouée")
+            state = record_failure(
+                root, self._policy.breaker_threshold, f"{tid} : session échouée",
+                task_id=tid, cooldown_minutes=self._policy.breaker_cooldown_minutes,
+            )
             return "done", f"session échouée comptée au disjoncteur ({state.failures}{', ouvert' if state.open else ''})"
         return "skipped", "rien à compter"
 

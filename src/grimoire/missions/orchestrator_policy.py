@@ -46,6 +46,8 @@ janitor :
                                   # modèle payants, une seule fois par version) ; faux : jamais, la reprise reste humaine
       breaker:
         threshold: 3              # échecs consécutifs avant l'ouverture du disjoncteur
+        cooldown_minutes: 30      # ouvert par comptage : délai avant de passer semi-ouvert (une sonde admise) ;
+                                  # chaque échec de la sonde double le délai, plafond 4 h
       janitor:
         close_issue: false        # fermer l'issue liée (``Closes #N`` dans la description) une fois fusionnée
 
@@ -71,11 +73,13 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.missions.breaker import DEFAULT_COOLDOWN_MINUTES
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "DEFAULT_BREAKER_COOLDOWN_MINUTES",
     "DEFAULT_BREAKER_THRESHOLD",
     "ORCHESTRATION_FILE",
     "MergerRole",
@@ -89,6 +93,8 @@ __all__ = [
 
 ORCHESTRATION_FILE = STANDARD_DIR / "orchestration-policy.yaml"
 DEFAULT_BREAKER_THRESHOLD = 3
+#: Le délai par défaut avant qu'un disjoncteur ouvert par comptage ne passe semi-ouvert (voir ``breaker``).
+DEFAULT_BREAKER_COOLDOWN_MINUTES = DEFAULT_COOLDOWN_MINUTES
 TIERS = ("cheap", "mid", "strong")
 _BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
@@ -188,6 +194,7 @@ class OrchestratorPolicy:
     worker: WorkerRole = field(default_factory=WorkerRole)
     base: str = ""
     breaker_threshold: int = DEFAULT_BREAKER_THRESHOLD
+    breaker_cooldown_minutes: int = DEFAULT_BREAKER_COOLDOWN_MINUTES
     close_issue: bool = False
     probe_host: bool = False
     reviewer: ReviewerRole = field(default_factory=ReviewerRole)
@@ -200,6 +207,7 @@ class OrchestratorPolicy:
             "orchestrator": self.orchestrator.to_dict(),
             "base": self.base,
             "breaker_threshold": self.breaker_threshold, "close_issue": self.close_issue,
+            "breaker_cooldown_minutes": self.breaker_cooldown_minutes,
             "probe_host": self.probe_host,
         }
 
@@ -347,7 +355,7 @@ def _parse_orchestrator(raw: Any) -> OrchestratorRole:
 def _parse(block: Any) -> OrchestratorPolicy:
     top = _table(block, "orchestrator", frozenset({"base", "roles", "breaker", "janitor", "probe_host"}))
     roles = _table(top.get("roles", {}), "orchestrator.roles", frozenset({"worker", "reviewer", "merger", "orchestrator"}))
-    breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold"}))
+    breaker = _table(top.get("breaker", {}), "orchestrator.breaker", frozenset({"threshold", "cooldown_minutes"}))
     janitor = _table(top.get("janitor", {}), "orchestrator.janitor", frozenset({"close_issue"}))
     close_issue = janitor.get("close_issue", False)
     if not isinstance(close_issue, bool):
@@ -365,6 +373,10 @@ def _parse(block: Any) -> OrchestratorPolicy:
         orchestrator=_parse_orchestrator(roles["orchestrator"]) if "orchestrator" in roles else OrchestratorRole(),
         base=base,
         breaker_threshold=_positive(breaker.get("threshold", DEFAULT_BREAKER_THRESHOLD), "orchestrator.breaker.threshold"),
+        breaker_cooldown_minutes=_positive(
+            breaker.get("cooldown_minutes", DEFAULT_BREAKER_COOLDOWN_MINUTES),
+            "orchestrator.breaker.cooldown_minutes",
+        ),
         close_issue=close_issue,
         probe_host=probe_host,
     )

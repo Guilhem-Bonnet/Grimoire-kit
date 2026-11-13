@@ -85,7 +85,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
 from grimoire.evidence.service import EvidenceService
-from grimoire.missions.breaker import read_breaker, record_failure, record_transient
+from grimoire.missions.breaker import admit, record_failure, record_transient
 from grimoire.missions.human_acceptance import EVIDENCE_RELPATH
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
@@ -371,9 +371,11 @@ class MergeStage:
         self._manual = {tid: self._sealed_manual(tid, p) for tid, p in manual_reviews(self._service).items() if tid not in launched}
         launched = {**self._manual, **launched}
         merged, queue = self._classify(launched)
-        breaker = read_breaker(self._home)
-        if breaker.open:
-            why = f"disjoncteur ouvert : {breaker.reason}"
+        if not merged and not queue:
+            return ()  # rien à fusionner : une sonde semi-ouverte ne se consomme pas pour du vide
+        admission = admit(self._home, cooldown_minutes=self._policy.breaker_cooldown_minutes)
+        if not admission.allowed:
+            why = admission.reason
             return tuple(MergerOutcome(tid, "wait", "skipped", why) for tid in (*merged, *(t for t, _ in queue)))
         outcomes = [self._guarded(tid, lambda t: self._accept(t)) for tid in merged]
         position = 0  # le rang des seules tâches qui restent dans la file : une tête refusée ou à l'humain ne bloque pas
@@ -1273,5 +1275,8 @@ class MergeStage:
             self._note(MERGE_TRANSIENT_EVENT, tid, {"action": action, "detail": detail[:600], "pr": pr,
                                                     "transients": state.transients})
             return MergerOutcome(tid, action, "transient", detail + " — panne réseau passagère, rejoué au tick suivant", pr)
-        state = record_failure(self._home, self._policy.breaker_threshold, f"{tid} : merger ({action}) : {detail}")
+        state = record_failure(
+            self._home, self._policy.breaker_threshold, f"{tid} : merger ({action}) : {detail}",
+            task_id=tid, cooldown_minutes=self._policy.breaker_cooldown_minutes,
+        )
         return MergerOutcome(tid, action, "failed", detail + (" — disjoncteur ouvert" if state.open else ""), pr)

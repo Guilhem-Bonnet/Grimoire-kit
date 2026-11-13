@@ -1,0 +1,1 @@
+- feat(missions): un disjoncteur ouvert par comptage repasse semi-ouvert après `breaker.cooldown_minutes` (défaut 30 min, délai doublé à chaque échec jusqu'à 4 h) ; une même tâche qui échoue trois fois est mise à l'écart avec sa raison et ne compte que pour un échec global (GAO-disjoncteur-002)

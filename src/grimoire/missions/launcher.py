@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
+from grimoire.missions.breaker import admit as breaker_admit
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.liveness import probe_status
 from grimoire.missions.provider_failure import transient_api_error
@@ -772,8 +773,8 @@ class WorkerLauncher:
                 outcomes.append(LaunchOutcome(tid, "skipped", "rôle worker désactivé"))
                 continue
             breaker = read_breaker(root)
-            if breaker.open:
-                outcomes.append(LaunchOutcome(tid, "skipped", f"disjoncteur ouvert : {breaker.reason}"))
+            if why := breaker.parked_reason(tid):
+                outcomes.append(LaunchOutcome(tid, "skipped", f"mise à l'écart : {why}"))
                 continue
             active = self._active()
             if active >= role.wip:
@@ -782,6 +783,10 @@ class WorkerLauncher:
             today = self._launched_today()
             if today >= role.sessions_per_day:
                 outcomes.append(LaunchOutcome(tid, "skipped", f"plafond de sessions du jour atteint ({today}/{role.sessions_per_day})"))
+                continue
+            admission = breaker_admit(root, cooldown_minutes=self._policy.breaker_cooldown_minutes)
+            if not admission.allowed:
+                outcomes.append(LaunchOutcome(tid, "skipped", admission.reason))
                 continue
             outcomes.append(self._launch(admit))
         return tuple(outcomes)
@@ -891,7 +896,10 @@ class WorkerLauncher:
              "lease_epoch": epoch},
         )
         if count or not halted:
-            if record_failure(service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}").open:
+            if record_failure(
+                service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}",
+                task_id=tid, cooldown_minutes=self._policy.breaker_cooldown_minutes,
+            ).open:
                 detail += " — disjoncteur ouvert"
             return LaunchOutcome(tid, "failed", detail, short)
         return LaunchOutcome(tid, "skipped", detail, short)
@@ -904,7 +912,10 @@ class WorkerLauncher:
         except GrimoireError as exc:
             detail += f" (claim non rendu : {exc})"
         service.ledger.append_event(LAUNCH_FAILED_EVENT, tid, "task", WORKER_ACTOR, {"detail": detail})
-        state = record_failure(service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}")
+        state = record_failure(
+            service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}",
+            task_id=tid, cooldown_minutes=self._policy.breaker_cooldown_minutes,
+        )
         if state.open:
             detail += " — disjoncteur ouvert"
         return LaunchOutcome(tid, "failed", detail)

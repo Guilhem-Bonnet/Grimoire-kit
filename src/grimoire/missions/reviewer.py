@@ -70,7 +70,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
-from grimoire.missions.breaker import read_breaker, record_failure, trip
+from grimoire.missions.breaker import admit, record_failure, trip
 from grimoire.missions.launcher import (
     _BG_ID,
     _TIER_ALIAS,
@@ -334,12 +334,12 @@ class ReviewStage:
 
         tid, role = task.id, self._policy.reviewer
         root = self._service.home_root
-        breaker = read_breaker(root)
-        if breaker.open:
-            return ReviewOutcome(tid, "launch", "skipped", f"disjoncteur ouvert : {breaker.reason}")
         open_reviews = self._open_reviews()
         if open_reviews >= role.wip:
             return ReviewOutcome(tid, "launch", "skipped", f"WIP du relecteur atteint ({open_reviews}/{role.wip})")
+        admission = admit(root, cooldown_minutes=self._policy.breaker_cooldown_minutes)
+        if not admission.allowed:
+            return ReviewOutcome(tid, "launch", "skipped", admission.reason)
         from grimoire.core.safe_git import same_repo
         from grimoire.missions.review_seal import branch_head, seal_review_launch
 
@@ -382,7 +382,10 @@ class ReviewStage:
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
             detail = (result.stderr or result.stdout).strip()[:300] or f"sortie {result.returncode}"
-            state = record_failure(root, self._policy.breaker_threshold, f"{tid} : relecteur non lancé : {detail}")
+            state = record_failure(
+                root, self._policy.breaker_threshold, f"{tid} : relecteur non lancé : {detail}",
+                task_id=tid, cooldown_minutes=self._policy.breaker_cooldown_minutes,
+            )
             return ReviewOutcome(tid, "launch", "failed", f"claude --bg a échoué : {detail}" + (" — disjoncteur ouvert" if state.open else ""))
         short = match.group(1)
         # #966 : l'identité du relecteur se lit après le lancement ; c'est elle qui s'inscrit et se scelle.
@@ -479,7 +482,10 @@ class ReviewStage:
             REVIEW_LAUNCH_FAILED_EVENT, tid, "task", REVIEWER_ACTOR,
             {"task_id": tid, "session": short, "cwd": str(cwd), "halted": halted, "reason": reason, "detail": detail[:600]},
         )
-        state = record_failure(self._service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}")
+        state = record_failure(
+            self._service.home_root, self._policy.breaker_threshold, f"{tid} : {detail}",
+            task_id=tid, cooldown_minutes=self._policy.breaker_cooldown_minutes,
+        )
         return ReviewOutcome(tid, "launch", "failed", detail + (" — disjoncteur ouvert" if state.open else ""), short)
 
     @staticmethod
@@ -782,9 +788,6 @@ class ReviewStage:
         """``NOT-READY`` : retour au worker avec les constats (*notes*, à défaut ceux du reçu), ou escalade au cycle
         ``max_cycles``. *extra* s'ajoute au jugement noté (une CI rouge qui défait un READY, #993)."""
         tid, max_cycles = task.id, self._policy.reviewer.max_cycles
-        breaker = read_breaker(self._service.home_root)
-        if breaker.open:
-            return ReviewOutcome(tid, "bounce", "skipped", f"disjoncteur ouvert : {breaker.reason}")
         cycle, notes = self._cycle(tid), notes or (_findings_text(receipt) if receipt is not None else "aucun reçu")
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:
@@ -794,6 +797,9 @@ class ReviewStage:
                 self._record_judged(task, review, NOT_READY, cycle, extra)
                 self._stop(review)
             return escalated
+        admission = admit(self._service.home_root, cooldown_minutes=self._policy.breaker_cooldown_minutes)
+        if not admission.allowed:  # seule une reprise réelle consomme la sonde semi-ouverte
+            return ReviewOutcome(tid, "bounce", "skipped", admission.reason)
         ledger = self._service.ledger
         try:
             ledger.transition_task(
@@ -810,7 +816,10 @@ class ReviewStage:
         if result.returncode != 0:
             # Personne ne reprend la tâche : elle revient en revue, la reprise sera retentée au tick suivant.
             ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id=REVIEWER_ACTOR, reason="reprise du worker échouée")
-            state = record_failure(self._service.home_root, self._policy.breaker_threshold, f"{tid} : reprise du worker : {result.stderr[:200]}")
+            state = record_failure(
+                self._service.home_root, self._policy.breaker_threshold, f"{tid} : reprise du worker : {result.stderr[:200]}",
+                task_id=tid, cooldown_minutes=self._policy.breaker_cooldown_minutes,
+            )
             return ReviewOutcome(tid, "bounce", "failed", "worker non repris, tâche remise en revue" + (" — disjoncteur ouvert" if state.open else ""))
         self._record_judged(task, review, NOT_READY, cycle, extra)
         self._stop(review)

@@ -391,13 +391,24 @@ def _collect_breaker(read: _ProjectRead) -> None:
     if root is None:
         return
     state = read_breaker(root)
-    if not state.open:
+    if not state.open and not state.parked:
         return
+    if state.half_open:
+        title = "disjoncteur semi-ouvert — une seule tentative admise"
+    elif state.open:
+        title = "disjoncteur ouvert — aucune session n'est lancée"
+    else:
+        title = "disjoncteur fermé — tâche(s) mise(s) à l'écart"
     opened = f" depuis le {state.opened_at}" if state.opened_at else ""
-    _item(read, BREAKER, "breaker", "disjoncteur ouvert — aucune session n'est lancée",
-          f"{state.reason or 'raison inconnue'}{opened}",
+    reason = f"{state.reason or 'raison inconnue'}{opened}"
+    if state.open and state.source == "count" and not state.half_open:
+        reason += f" — prochaine tentative après {state.next_attempt_at()} (semi-ouvert)"
+    if state.parked:
+        reason += " ; mise à l'écart : " + " ; ".join(f"{tid} ({why})" for tid, why in state.parked)
+    _item(read, BREAKER, "breaker", title, reason,
           since=state.opened_at or None,
-          gesture={"command": "grimoire orchestrate breaker reset", "note": "Refermer le disjoncteur (geste humain)"},
+          gesture={"command": "grimoire orchestrate breaker reset",
+                   "note": "Refermer le disjoncteur et lever les mises à l'écart (geste humain)"},
           source=state.source or "inconnu")
 
 

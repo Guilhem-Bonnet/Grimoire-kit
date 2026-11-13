@@ -308,9 +308,12 @@ def _one_pass(
     from grimoire.missions.breaker import read_breaker
 
     state_of_breaker = read_breaker(service.home_root)
-    breaker = state_of_breaker if (state_of_breaker.open or state_of_breaker.failures) else None  # fermé et intact : rien à dire
+    # ouvert, compteur en cours, ou des tâches mises à l'écart : il y a quelque chose à dire ; fermé et intact : rien
+    breaker = state_of_breaker if (state_of_breaker.open or state_of_breaker.failures or state_of_breaker.parked) else None
     if breaker is not None and breaker.open:
         attention.append(f"disjoncteur {breaker.describe()}")
+    for parked_tid, parked_why in state_of_breaker.parked:
+        attention.append(f"mise à l'écart : {parked_tid} ({parked_why})")
     for swept in cleanup:
         if swept.status in ("failed", "refused"):
             attention.append(f"janitor : {swept.action} de {swept.task_id} {swept.status} ({swept.detail})")

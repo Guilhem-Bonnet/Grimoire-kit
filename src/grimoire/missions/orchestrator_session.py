@@ -102,7 +102,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireMissionError
-from grimoire.missions.breaker import read_breaker, record_failure
+from grimoire.missions.breaker import admit, record_failure
 from grimoire.missions.launcher import (
     _BG_ID,
     LAUNCHED_EVENT,
@@ -788,9 +788,6 @@ class OrchestratorStage:
         questions = [q for q in eligible_questions(self._service, store) if (q.task_id, q.question_id) not in skipped]
         if not questions:
             return None
-        breaker = read_breaker(self._root)
-        if breaker.open:
-            return OrchestratorOutcome("launch", "skipped", f"disjoncteur ouvert : {breaker.reason}")
         active = len(self._open()) + len(self._unhalted())
         if active >= role.wip:
             return OrchestratorOutcome("launch", "skipped", f"WIP de l'orchestrateur atteint ({active}/{role.wip})")
@@ -799,6 +796,9 @@ class OrchestratorStage:
         today = self._launched_today()
         if today >= role.sessions_per_day:
             return OrchestratorOutcome("launch", "skipped", f"plafond de sessions du jour atteint ({today}/{role.sessions_per_day})")
+        admission = admit(self._root, cooldown_minutes=self._policy.breaker_cooldown_minutes)
+        if not admission.allowed:  # la sonde semi-ouverte ne se consomme que pour un lancement réel
+            return OrchestratorOutcome("launch", "skipped", admission.reason)
         return self._launch(questions[:MAX_LISTED], state.mandate.id, status)
 
     def _launch(self, questions: list[OpenQuestion], mandate_id: str, status: dict[str, str]) -> OrchestratorOutcome:
@@ -853,7 +853,10 @@ class OrchestratorStage:
             ORCH_LAUNCH_FAILED_EVENT, _ENTITY, _ENTITY, ORCHESTRATOR_ACTOR,
             {"session": short, "reason": reason, "halted": halted, "detail": detail[:600]},
         )
-        state = record_failure(self._root, self._policy.breaker_threshold, f"orchestrateur : {detail}")
+        state = record_failure(
+            self._root, self._policy.breaker_threshold, f"orchestrateur : {detail}",
+            cooldown_minutes=self._policy.breaker_cooldown_minutes,
+        )
         return OrchestratorOutcome("launch", "failed", detail + (" — disjoncteur ouvert" if state.open else ""), short)
 
     # -- consigne ------------------------------------------------------------

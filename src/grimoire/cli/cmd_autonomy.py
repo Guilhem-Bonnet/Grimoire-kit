@@ -328,9 +328,22 @@ def autopilot_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -
     else:
         console.print(f"pilote inactif ({state.reason})")
     if breaker.open:
-        console.print(
-            f"[red]disjoncteur ouvert[/red] : {escape(breaker.reason)} — aucune session n'est lancée ; "
-            "`grimoire orchestrate breaker reset` le referme (geste humain)"
-        )
+        if breaker.half_open:
+            console.print(
+                f"[yellow]disjoncteur semi-ouvert[/yellow] : une seule tentative est admise après le délai de "
+                f"{breaker.cooldown_minutes} min ; son succès le referme, son échec double le délai — {escape(breaker.reason)}"
+            )
+        elif breaker.source == "count":
+            console.print(
+                f"[red]disjoncteur ouvert[/red] : {escape(breaker.reason)} — aucune session n'est lancée ; "
+                f"prochaine tentative après {breaker.next_attempt_at()} (semi-ouvert)"
+            )
+        else:
+            console.print(
+                f"[red]disjoncteur ouvert[/red] : {escape(breaker.reason)} — aucune session n'est lancée"
+            )
+        console.print("`grimoire orchestrate breaker reset` le referme (geste humain)")
+    for parked_tid, parked_why in breaker.parked:
+        console.print(f"[yellow]mise à l'écart[/yellow] : {parked_tid} — {escape(parked_why)}")
     if policy.error:
         console.print(f"[red]politique du pilote invalide[/red] : {policy.error}", markup=True)
