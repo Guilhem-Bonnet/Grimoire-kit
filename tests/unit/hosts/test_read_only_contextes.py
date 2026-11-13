@@ -375,3 +375,42 @@ def test_une_boucle_sur_un_motif_reste_refusee_hors_de_ce_cas(command: str) -> N
 )
 def test_une_substitution_echappee_entre_guillemets_reste_un_texte(command: str) -> None:
     assert _classe(command) is LECTURE
+
+
+# ── Le drapeau d'une autre commande ne fait pas une poussée forcée ───────────
+
+POUSSE = "git push"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Lue avec ses guillemets exacts, la ligne montre un ``-f`` qui appartient à la commande suivante.
+        'printf "c\'est fait\\n" > m.txt && git commit -q -F m.txt && ' + POUSSE + ' -q origin HEAD:x 2>&1 | tail -1; pgrep -f "boucle"',
+        POUSSE + " origin HEAD:x ; pgrep -f boucle",
+        POUSSE + " origin HEAD:x && tail -f journal.log",
+        POUSSE + " origin HEAD:x | grep -f motifs.txt",
+    ],
+)
+def test_le_drapeau_d_une_autre_commande_ne_fait_pas_une_poussee_forcee(command: str) -> None:
+    facts = classify_tool("Bash", {"command": command})
+    assert facts.mutation is MutationClass.MUTATION_CONTROLLED, command
+    assert not facts.destructive_reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        POUSSE + " origin HEAD:x --force",
+        POUSSE + " -f origin HEAD:x",
+        "git status && " + POUSSE + " origin HEAD:x --force-with-lease",
+        "ls ; " + POUSSE + " --force",
+        POUSSE + " origin HEAD:x --force ; ls",
+        POUSSE + ' origin "HEAD:x" -f',
+        # une redirection sans fichier ne finit pas la commande
+        POUSSE + " origin HEAD:x 2>&1 --force",
+        POUSSE + " origin HEAD:x &>/dev/null -f",
+    ],
+)
+def test_une_poussee_forcee_reste_destructive(command: str) -> None:
+    assert classify_tool("Bash", {"command": command}).mutation is DESTRUCTIVE
