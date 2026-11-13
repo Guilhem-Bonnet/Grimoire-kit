@@ -129,7 +129,7 @@ def _douce_symbols() -> list[tuple[str, dict[str, str], str]]:
 
 #: Familles Douce du sprite et leur effectif : chaque `i-*` en relève d'une.
 FAMILIES = {
-    "i-space-": 5,
+    "i-space-": 6,  # cinq espaces + l'Atelier, en test
     "i-ui-": 9,
     "i-task-": 9,
     "i-store-": 8,
@@ -145,7 +145,7 @@ FAMILIES = {
 def test_le_sprite_porte_cinq_icones_d_espace_et_neuf_de_chrome() -> None:
     ids = [sid for sid, _, _ in _douce_symbols()]
     assert len(ids) == len(set(ids)), "identifiants en double"
-    assert sum(i.startswith("i-space-") for i in ids) == 5
+    assert sum(i.startswith("i-space-") for i in ids) == 6
     assert sum(i.startswith("i-ui-") for i in ids) == 9
     assert all(i.startswith(tuple(FAMILIES)) for i in ids)
 

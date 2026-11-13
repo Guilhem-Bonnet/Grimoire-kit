@@ -306,6 +306,12 @@ class _ForgeHandler(BaseHTTPRequestHandler):
                 saved = self.api.blueprint_put(bp_id, self._body())
                 self._governed_event("blueprint.put", id=bp_id)
                 self._json(saved)
+            elif path.startswith("/api/workspace/atelier/"):
+                from grimoire.tools import workspace_atelier  # Atelier en test : 404 tant que le drapeau est éteint
+
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                code, payload = workspace_atelier.put_http(self.api.project_root, path, self.rfile.read(length))
+                self._json(payload, code)
             else:
                 self._error("route inconnue", 404)
         except (ValueError, json.JSONDecodeError) as exc:

@@ -887,12 +887,19 @@ class _CockpitHandler(SimpleHTTPRequestHandler):
     def _do_put(self) -> None:
         """Le corps de ``do_PUT``, appelé une fois la garde d'écriture passée."""
         path = urlparse(self.path).path
-        if not path.startswith("/api/blueprints/"):
+        from grimoire.tools import workspace_atelier
+
+        atelier = workspace_atelier.handles(path)
+        if not atelier and not path.startswith("/api/blueprints/"):
             self._send_json(404, {"ok": False, "error": "route inconnue"})
             return
         proot = self._enrolled_write_root()
         if proot is None:
             self._send_json(403, {"ok": False, "error": "hôte en lecture seule"})
+            return
+        if atelier:  # Atelier en test : écriture d'un bloc, 409 si le fichier a changé depuis la lecture
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            self._send_json(*workspace_atelier.put_http(proot, path, raw))
             return
         try:
             length = int(self.headers.get("Content-Length", 0))

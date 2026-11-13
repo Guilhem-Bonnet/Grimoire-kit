@@ -55,6 +55,7 @@ from grimoire.tools import (
     workspace_accept_merged,
     workspace_actions,
     workspace_api,
+    workspace_atelier,
     workspace_attention,
     workspace_autopilot,
     workspace_chat,
@@ -724,6 +725,8 @@ def workspace_get(project_root: Path, path: str, query: _Query) -> Any:
     """
     if not path.startswith(PREFIX):
         return WORKSPACE_UNHANDLED
+    if workspace_atelier.handles(path):  # Atelier en test : drapeau lu par le module, 404 quand il est éteint
+        return workspace_atelier.get(project_root, path, query)
     from grimoire.core.exceptions import GrimoireError
 
     try:
@@ -1425,6 +1428,8 @@ def workspace_post(project_root: Path, path: str, body: dict[str, Any]) -> Any:
     """
     if not path.startswith(PREFIX):
         return WORKSPACE_UNHANDLED
+    if workspace_atelier.handles(path):
+        return workspace_atelier.post(project_root, path, body)
     from grimoire.core.exceptions import GrimoireError
     from grimoire.missions.service import TaskRefusedError
 

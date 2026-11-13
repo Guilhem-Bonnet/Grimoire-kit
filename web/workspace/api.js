@@ -589,6 +589,16 @@ export const api = {
   // « Une idée ? » (I2) : propositions de l'intake déterministe (aucune écriture), puis création des cochées.
   taskIntake: (text) => post(WS + 'tasks/intake', { text }),
   taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),
+  // Fonctions en test : `GET features` lit les drapeaux du projet, `POST features` allume l'Atelier de spec.
+  features: () => get(WS + 'features'),
+  setFeature: (name, on) => post(WS + 'features', { [name]: on }),
+  // Atelier de spec (en test) : 404 tant que le drapeau est éteint. L'écriture d'un bloc envoie l'empreinte du
+  // fichier de phase lue avec le chantier ; un fichier changé depuis répond 409.
+  atelierChantiers: () => get(WS + 'atelier/chantiers'),
+  atelierNouveau: (titre) => post(WS + 'atelier/chantiers', { titre }),
+  atelierChantier: (slug) => get(WS + 'atelier/chantiers/' + encodeURIComponent(slug)),
+  atelierBloc: (slug, id, text, expected) =>
+    put(WS + 'atelier/chantiers/' + encodeURIComponent(slug) + '/blocs/' + encodeURIComponent(id), { text, expected }),
   // Boîte à idées (I13) : garder sans trier ; « annuler » d'un écart est `undo: true`, un événement de plus.
   ideas: () => get(WS + 'ideas'),
   ideaAdd: (text) => post(WS + 'ideas/add', { text }),
