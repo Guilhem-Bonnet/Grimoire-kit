@@ -73,6 +73,7 @@ __all__ = [
     "home_of_worktree",
     "mark_worktree",
     "merge_task",
+    "tick_worktree_path",
     "unpushed_work",
 ]
 
@@ -300,6 +301,12 @@ def find_task_worktree(service: TaskService, task_id: str) -> TaskWorktree | Non
     return None
 
 
+def tick_worktree_path(repo: Path, task_id: str) -> Path:
+    """Où le worktree ``task/<id>`` est créé quand aucun chemin n'est donné (ce que fait le tick) : sous le dossier
+    d'état du dépôt. Calculé depuis le dépôt lui-même, jamais lu au ledger d'événements."""
+    return (_state_dir(repo.resolve()) / "worktrees" / normalize_task_id(task_id)).resolve()
+
+
 def create_task_worktree(
     service: TaskService, task_id: str, *, repo: Path, base: str = "HEAD", into: str = "",
     path: Path | None = None, actor: str = "cli",
@@ -331,7 +338,7 @@ def create_task_worktree(
         raise GrimoireMissionError(f"Branche cible introuvable : {into!r}")
     if _rev(repo, f"refs/heads/{branch}"):
         raise GrimoireMissionError(f"La branche {branch} existe déjà sans worktree noté au ledger : rien n'est écrasé")
-    target = (path or _state_dir(repo) / "worktrees" / task_id).resolve()
+    target = (path or tick_worktree_path(repo, task_id)).resolve()
     _refuse_temp_target(repo, target)
     target.parent.mkdir(parents=True, exist_ok=True)
     _git(repo, "worktree", "add", "--quiet", "-b", branch, str(target), base_sha)

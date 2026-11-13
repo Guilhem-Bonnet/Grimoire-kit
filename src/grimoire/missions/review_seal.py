@@ -15,6 +15,16 @@ chaîné par hash, refusé en écriture aux outils d'agent) ce qui a été relu,
   du dernier pack (qui doivent être ceux que le reçu déclare) ;
 - **à chaque réalignement du merger** (:func:`seal_realignment`) : ``from`` → ``to`` et l'arbre git produit.
 
+Pour la double relecture (:mod:`.dual_review`, ``protected_gate: dual_review``), le journal porte aussi ce que la
+décision de fusion compare, et que le ledger d'événements ne peut pas porter (un worker l'écrit) :
+
+- le lancement de chaque relecteur garde le **modèle que le tick a lancé** (``model``) et, pour une seconde relecture,
+  le sceau du premier READY qu'elle double (``second_of``) ; le jugement READY les recopie de ce lancement, jamais du
+  reçu que la session écrit, avec son verdict et la session du relecteur ;
+- le lancement de chaque worker en ``dual_review`` (:func:`seal_worker_launch`) : son modèle et l'empreinte de sa session ;
+- la demande de seconde relecture du merger (:func:`request_second_review`), et l'annulation des relectures scellées
+  d'une tâche (:func:`void_task_reviews`) par un NOT-READY, un READY périmé ou un retour du merger au worker.
+
 :func:`verify` compare une tête (celle de la PR pour le merger, celle de la branche sinon) à cette chaîne : la tête
 scellée avec son arbre, ou un descendant noté par un réalignement du merger. Un dépôt sans git retombe sur l'empreinte
 de contenu du reçu. Dans le tick, ses git sont neutralisés par :mod:`grimoire.core.safe_git`.
@@ -44,29 +54,44 @@ if TYPE_CHECKING:
     from grimoire.missions.schemas import MissionTask
 
 __all__ = [
+    "DUAL_REQUEST_ENTRY",
+    "DUAL_VOID_ENTRY",
     "LAUNCH_ENTRY",
     "PROJECT_PIN_ENTRY",
     "REALIGN_ENTRY",
     "REPOSITORY_ENTRY",
     "SEAL_ENTRY",
+    "WORKER_ENTRY",
     "branch_head",
+    "covered_by",
     "freeze_repository",
     "frozen_repository",
     "launch_entry",
     "pin_project_repository",
     "project_repository_pin",
     "receipt_digest",
+    "request_second_review",
     "seal_judgment",
     "seal_realignment",
     "seal_review_launch",
+    "seal_worker_launch",
+    "task_entries",
     "tree_of",
     "verify",
+    "void_task_reviews",
 ]
 
 LAUNCH_ENTRY = "review_launch"
 REPOSITORY_ENTRY = "task_repository"
 SEAL_ENTRY = "review_judgment"
 REALIGN_ENTRY = "merge_realignment"
+#: Double relecture : le lancement d'un worker (modèle, empreinte de session), scellé par le lanceur.
+WORKER_ENTRY = "worker_launch"
+#: Double relecture : le merger demande la seconde relecture d'un premier READY (``first_seq`` : son sceau).
+DUAL_REQUEST_ENTRY = "dual_review_request"
+#: Double relecture : les sceaux de la tâche jusqu'à ``upto`` (``seq``) sont défaits ; aucun ne fonde plus de paire.
+DUAL_VOID_ENTRY = "dual_review_void"
+_READY = "READY"
 #: #994 : le dépôt du projet figé à l'octroi d'un mandat, avant toute relecture d'une tâche faite à la main.
 PROJECT_PIN_ENTRY = "project_repository"
 _BRANCH_PREFIX = "task/"
@@ -186,14 +211,78 @@ def project_repository_pin(project_root: Path, mandate_id: str = "") -> tuple[di
 
 def seal_review_launch(
     project_root: Path, task_id: str, session_sha256: str, head: str, target: dict[str, Any] | None = None,
+    *, model: str = "", second_of: int | None = None,
 ) -> None:
     """Note au journal d'autorité la tête que le relecteur lancé va relire ; *target* (#994) : la PR d'une tâche faite à
-    la main (``pr``, ``base``, ``branch``, ``repo``, ``origin_url``, ``cwd``), que le jugement et le merger comparent."""
+    la main (``pr``, ``base``, ``branch``, ``repo``, ``origin_url``, ``cwd``), que le jugement et le merger comparent.
+
+    *model* : le modèle que le tick vient de passer à la session (jamais celui qu'elle déclare) ; *second_of* : le
+    ``seq`` du sceau du premier READY dont cette session est la seconde relecture (:mod:`.dual_review`).
+    """
     store = _store(project_root)
     store.journal.append({
         "type": LAUNCH_ENTRY, "project": store.project, "task_id": task_id, "session_sha256": session_sha256,
-        "head": head, **(target or {}), "ts": datetime.now(UTC).isoformat(),
+        "head": head, **(target or {}), **({"model": model} if model else {}),
+        **({"second_of": second_of} if second_of is not None else {}), "ts": datetime.now(UTC).isoformat(),
     })
+
+
+def seal_worker_launch(
+    project_root: Path, task_id: str, session_sha256: str, model: str, provider: str = "", *, relaunch: bool = False,
+) -> None:
+    """Note au journal d'autorité le lancement d'un worker : le modèle que le tick lui a donné et l'empreinte de sa
+    session. C'est ce que la double relecture compare (:mod:`.dual_review`) : jamais le ledger d'événements.
+
+    *relaunch* : une session neuve repartie après une reprise ratée. Son modèle est celui du lancement noté au
+    ledger : il s'ajoute à ceux que la seconde relecture écarte, mais ne remplace jamais le lancement d'origine —
+    sans lancement d'origine scellé, aucune double relecture ne tient.
+    """
+    store = _store(project_root)
+    store.journal.append({
+        "type": WORKER_ENTRY, "project": store.project, "task_id": task_id, "session_sha256": session_sha256,
+        "model": model, "provider": provider, **({"relaunch": True} if relaunch else {}),
+        "ts": datetime.now(UTC).isoformat(),
+    })
+
+
+def request_second_review(project_root: Path, task_id: str, first_seq: int, head: str, pr: int) -> bool:
+    """Le merger demande la seconde relecture du premier READY scellé à *first_seq* ; ``True`` si la demande vient
+    d'être inscrite, ``False`` si elle l'était déjà. La demande ne porte aucun modèle : le relecteur le choisit au
+    lancement (:func:`~grimoire.missions.dual_review.choose_second_reviewer`)."""
+    store = _store(project_root)
+    asked = any(
+        e.get("type") == DUAL_REQUEST_ENTRY and e.get("project") == store.project and e.get("task_id") == task_id
+        and e.get("first_seq") == first_seq for e in store.journal.read()
+    )
+    if asked:
+        return False
+    store.journal.append({
+        "type": DUAL_REQUEST_ENTRY, "project": store.project, "task_id": task_id, "first_seq": first_seq, "head": head,
+        "pr": pr, "ts": datetime.now(UTC).isoformat(),
+    })
+    return True
+
+
+def void_task_reviews(project_root: Path, task_id: str, reason: str) -> int | None:
+    """Défait, pour la double relecture, **toutes** les relectures scellées de la tâche jusqu'ici : un NOT-READY, un
+    READY périmé, un retour du merger au worker ou une remise en file. Aucun de ces sceaux ne fonde plus de paire ni
+    n'appelle de seconde relecture ; il faudra deux relectures fraîches. Rend le ``seq`` du dernier sceau annulé
+    (``upto``), ou ``None`` s'il n'y avait rien à annuler — rien n'est alors écrit."""
+    mine = task_entries(project_root, task_id)
+
+    def rank(value: object) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) else -1
+
+    done = max((rank(e.get("upto")) for e in mine if e.get("type") == DUAL_VOID_ENTRY), default=-1)
+    live = [rank(e.get("seq")) for e in mine if e.get("type") == SEAL_ENTRY and rank(e.get("seq")) > done]
+    if not live:
+        return None
+    store = _store(project_root)
+    store.journal.append({
+        "type": DUAL_VOID_ENTRY, "project": store.project, "task_id": task_id, "upto": max(live),
+        "reason": reason[:200], "ts": datetime.now(UTC).isoformat(),
+    })
+    return max(live)
 
 
 def launch_entry(project_root: Path, task_id: str, session_sha256: str) -> dict[str, Any] | None:
@@ -208,13 +297,8 @@ def launch_entry(project_root: Path, task_id: str, session_sha256: str) -> dict[
 
 
 def _launch_head(project_root: Path, task_id: str, session_sha256: str) -> str | None:
-    store = _store(project_root)
-    found = [
-        e for e in store.journal.read()
-        if e.get("type") == LAUNCH_ENTRY and e.get("project") == store.project and e.get("task_id") == task_id
-        and e.get("session_sha256") == session_sha256
-    ]
-    return str(found[-1].get("head", "")) if found else None
+    found = launch_entry(project_root, task_id, session_sha256)
+    return str(found.get("head", "")) if found is not None else None
 
 
 def _dirty(proofs_root: Path) -> str:
@@ -246,10 +330,12 @@ def seal_judgment(
         raise ValueError("aucune tête de PR notée au lancement de cette relecture : un sceau sans tête ne couvre rien")
     if not head and _rev(proofs_root, "HEAD^{commit}"):
         raise ValueError(f"aucune branche {_BRANCH_PREFIX}{task_id} dans un worktree git : un sceau sans tête ne couvre rien")
+    sealed_launch: dict[str, Any] = {}
     if head:
-        launched = _launch_head(project_root, task_id, session_sha256)
-        if launched is None:
+        found = launch_entry(project_root, task_id, session_sha256)
+        if found is None:
             raise ValueError("aucune tête scellée au lancement de cette relecture")
+        sealed_launch, launched = found, str(found.get("head", ""))
         if launched != head:
             raise ValueError(f"la branche a bougé pendant la relecture ({launched[:12]} → {head[:12]})")
         if _rev(proofs_root, "HEAD^{commit}") != head:
@@ -258,11 +344,16 @@ def seal_judgment(
         if dirty := _dirty(proofs_root):
             raise ValueError(f"{dirty} : la relecture ne porte pas sur la tête")
     store = _store(project_root)
+    # Double relecture : ce que le tick a décidé au lancement de cette session (son modèle, le premier READY qu'elle
+    # double) est recopié du lancement scellé, jamais du reçu que la session écrit.
+    decided: dict[str, Any] = {k: sealed_launch[k] for k in ("model", "second_of") if k in sealed_launch}
+    if "seq" in sealed_launch:
+        decided["launch_seq"] = sealed_launch["seq"]
     entry: dict[str, Any] = store.journal.append({
         "type": SEAL_ENTRY, "project": store.project, "task_id": task_id, "review": review_id,
         "head": head, "tree": tree_of(project_root, head), "tree_fingerprint": tree, "evidence_pack_sha256": pack or "",
         "receipt_sha256": receipt_digest(proofs_root, task_id), "reviewer_session": receipt.reviewer_session,
-        "ts": datetime.now(UTC).isoformat(),
+        "verdict": _READY, **decided, "ts": datetime.now(UTC).isoformat(),
     })
     return entry
 
@@ -276,15 +367,34 @@ def seal_realignment(project_root: Path, task_id: str, review_id: str, source: s
     })
 
 
-def _sealed(project_root: Path, task_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def task_entries(project_root: Path, task_id: str) -> list[dict[str, Any]]:
+    """Les entrées du journal d'autorité de cette tâche, dans l'ordre où elles ont été écrites."""
     store = _store(project_root)
-    mine = [e for e in store.journal.read() if e.get("project") == store.project and e.get("task_id") == task_id]
+    return [e for e in store.journal.read() if e.get("project") == store.project and e.get("task_id") == task_id]
+
+
+def _sealed(project_root: Path, task_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    mine = task_entries(project_root, task_id)
     seals = [i for i, e in enumerate(mine) if e.get("type") == SEAL_ENTRY]
     if not seals:
         return None, []
     seal = mine[seals[-1]]
     realigns = [e for e in mine[seals[-1] + 1:] if e.get("type") == REALIGN_ENTRY and e.get("review") == seal.get("review")]
     return seal, realigns
+
+
+def covered_by(mine: list[dict[str, Any]], index: int, seal: dict[str, Any]) -> set[tuple[str, str]]:
+    """Les ``(tête, arbre)`` couverts par le sceau à *index* : sa tête, puis ses réalignements notés après lui."""
+    if not seal.get("head"):
+        return set()
+    found = {(str(seal["head"]), str(seal.get("tree", "")))}
+    heads = {str(seal["head"])}
+    for step in mine[index + 1:]:
+        if (step.get("type") == REALIGN_ENTRY and step.get("review") == seal.get("review")
+                and str(step.get("from")) in heads):
+            heads.add(str(step.get("to")))
+            found.add((str(step.get("to")), str(step.get("tree", ""))))
+    return found
 
 
 def reachable(project_root: Path, task_id: str) -> set[tuple[str, str]]:

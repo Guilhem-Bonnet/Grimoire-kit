@@ -563,6 +563,9 @@ orchestrator:
       ignored_checks: ["codecov/*"] # hors du verdict, seulement quand gh dit qu'aucun check n'est requis
       max_cycles: 2                 # retours au worker (CI rouge, conflit) avant l'escalade
       protected_paths: []           # chemins qui reviennent à l'humain, en plus des défauts
+      protected_gate: human         # human (défaut) | dual_review ; toute autre valeur rend la politique invalide
+      human_only_paths: []          # chemins qui restent à l'humain quel que soit protected_gate, en plus des défauts
+      second_reviewer_min_tier: strong  # dual_review : palier minimal du second relecteur (cheap | mid | strong)
 ```
 
 La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
@@ -579,8 +582,8 @@ dans cet ordre, et chaque garde échoue fermée :
 | READY | la tête GitHub est la tête **scellée** au jugement (ou un réalignement noté au même journal) ; reçu et pack inchangés à l'octet | tête relue pas encore poussée : attente ; sinon nouvelle relecture |
 | CI | checks requis (`gh pr checks --required`) ; tous hors `ignored_checks` seulement si gh dit qu'aucun n'est requis ; au moins un `pass` ; vert au tick précédent aussi | rouge : retour au worker ; en attente, sans check ou gh en panne : attente |
 | Cible | la base GitHub contenue dans la tête | réalignement en plomberie, poussé sans forcer, puis nouvelle CI |
-| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun fichier qui escalade, reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
-| Acceptation | fusion revérifiée, tête fusionnée couverte par le sceau, aucun fichier qui escalade, mandat qui couvre `accept` | question non bloquante « accepter ? » avec la commande `task accept` |
+| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun fichier qui escalade (en `dual_review` : aucun fichier qui reste à l'humain, et deux READY scellés pour les autres chemins réservés), reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
+| Acceptation | fusion revérifiée, tête fusionnée couverte par le sceau, aucun fichier qui escalade (en `dual_review` : les deux sceaux tenus sur la tête fusionnée), mandat qui couvre `accept` | question non bloquante « accepter ? » avec la commande `task accept` |
 
 - **Sceau du READY** (`missions/review_seal.py`) : au lancement du relecteur, la tête de `task/<id>` est notée au journal
   d'autorité (`~/.grimoire/control/`). Au jugement, sont scellés la même tête (une branche qui a bougé pendant la
@@ -592,6 +595,53 @@ dans cet ordre, et chaque garde échoue fermée :
   `.gitmodules`, les fichiers conftest de pytest, `.claude/*`, `.mcp.json`, `.vscode/*`, `.pre-commit-config.yaml` et les
   fichiers compilés. La clé `protected_paths` s'y ajoute. La
   comparaison se fait en `casefold()`, sur la liste de fichiers que GitHub annonce ; une liste tronquée fait escalader.
+- **Double relecture** (`protected_gate: dual_review`, `missions/dual_review.py`) : par défaut (`human`), tout chemin
+  réservé escalade, comme ci-dessus. En `dual_review`, les chemins réservés se partagent en deux listes, et aucun ne
+  devient libre.
+- **Double relecture, ce qui reste à l'humain dès que le réglage vaut `dual_review`** : la politique et la configuration d'hôte
+  (`_grimoire/standard/*`, `.claude/*`, `.mcp.json`, `.vscode/*`) ; ce qui définit la CI et les tests (`.github/*`, les
+  fichiers conftest de pytest, `pyproject.toml`, `setup.cfg` et le script setup de setuptools,
+  `.pre-commit-config.yaml`, `.githooks/*`, `.husky/*`, `framework/hooks/*`, `codeowners`, `.gitmodules`,
+  `.gitattributes`) ; les fichiers compilés ; le mécanisme lui-même (`merger.py`, `dual_review.py`, `review_seal.py`,
+  `reviewer.py`, `mandate.py`, `autopilot.py`, `breaker.py`, `launcher.py`, `orchestrator_policy.py` de
+  `src/grimoire/missions/`, un paquet du même nom que l'un d'eux, `src/grimoire/missions/__init__.py`,
+  `src/grimoire/hosts/decisions/*`, l'attestation des flows) ; et les **dépendances directes** du mécanisme, c'est-à-dire
+  les modules de `src/grimoire/` que ces neuf modules importent, avec les `__init__.py` qui s'exécutent avant eux :
+  `src/grimoire/providers/*` (le registre décide le palier du second relecteur), une partie de `src/grimoire/core/`
+  (dossier du standard, verrou et écriture du journal, git du tick, identité de session, exceptions), une partie de
+  `src/grimoire/missions/` (reçus, acceptation, service, schémas, worktree de la tâche, le tick lui-même…), les flows
+  d'autonomie, le service de preuve, la synchronisation d'hôte. La liste exacte est `HUMAN_ONLY_PATHS` dans
+  `missions/dual_review.py`. Elle couvre le premier rang d'imports, pas la fermeture transitive ; un test lit ces
+  imports et échoue le jour où le mécanisme importe un module qu'elle ne nomme pas. « CI verte » est l'autre
+  condition de fusion : un fichier capable de la rendre verte à tort, ou de changer ce que la relecture juge, ne se
+  relit pas par deux agents. La clé `human_only_paths` étend cette liste ; rien ne la réduit. Certains de ces chemins
+  ne sont pas réservés en `human` (`src/grimoire/providers/*`, par exemple) : là, rien ne change par rapport à avant.
+- **Double relecture, ce qui y passe** : le reste de `src/grimoire/missions/*`, `src/grimoire/core/*`, et les
+  `protected_paths` du projet.
+- **Double relecture, second relecteur et décision** : dès que le premier `READY` tient et sous mandat actif, le merger
+  inscrit la demande d'une seconde relecture au journal
+  d'autorité ; le relecteur la lance au tick suivant et **choisit lui-même son modèle**, dans le registre de
+  fournisseurs : un modèle que l'hôte du relecteur sait lancer (fournisseur `anthropic`, `claude` ou `claude-code`,
+  sans route), distinct de celui du premier relecteur, d'une autre famille que le worker. Parmi eux, **le plus fort**
+  est pris, d'après le palier que le registre déclare (`strong`, puis `mid`, puis `cheap`), jamais d'après le nom ; une
+  famille différente de celle du premier relecteur ne départage qu'à palier égal. `second_reviewer_min_tier` (défaut
+  `strong`) est le palier en dessous duquel personne n'est pris : sans candidat à ce palier, la PR va à l'humain avec
+  la raison, sans repli sur un modèle plus faible. Avec un registre à trois alias (`haiku`, `sonnet`, `opus`), un
+  worker `sonnet` relu par `opus` n'a donc pas de second relecteur sous le défaut : déclarer un second modèle fort,
+  ou abaisser le seuil en connaissance de cause. La fusion et l'acceptation exigent deux sceaux
+  `READY` du journal d'autorité, de deux sessions et de deux modèles distincts, aucun du worker, sur la même tête et le
+  même arbre, et la CI verte (`task.merge_dual_review` au ledger). Rien de cela ne se lit dans le ledger
+  d'événements, qu'un worker peut écrire. Échec fermé : un `NOT-READY`, un `READY` périmé, tout retour au
+  worker ou remise en file par le merger (CI rouge, conflit) défont d'abord, au journal d'autorité, les relectures
+  scellées de la tâche : il faut ensuite deux relectures fraîches, même sans nouveau commit, et si cette annulation ne
+  peut pas s'inscrire rien n'est appliqué ; des sceaux qui ne couvrent plus la tête renvoient à la relecture ; aucun candidat au registre,
+  registre ou journal illisible, identités ou modèles en défaut, erreur : question « fusionner ? » à l'humain, avec la
+  raison. Une tâche faite à la main, ou lancée avant le réglage, n'a pas de worker scellé : sa PR reste à l'humain.
+- **Double relecture, limite connue** : la double relecture repose sur l'isolation entre le worker et le tick. Tant
+  que le worker, les relecteurs et le tick tournent sous le même utilisateur du système, elle protège contre un worker
+  qui se trompe, pas contre un worker hostile ; en `dual_review`, cette limite (celle du verrou 7) porte sur des
+  chemins réservés qu'en `human` elle n'atteint pas. Seule une isolation par utilisateur du système la fermerait :
+  ne passer en `dual_review` que si les workers sont tenus pour honnêtes sur ces chemins.
 - **Réalignement** : `git merge-tree`, puis `commit-tree -p <tête GitHub> -p <base GitHub>`, sur objets : le worktree du
   worker n'est pas touché. Les objets sont récupérés à refspec explicite vers `refs/grimoire/tick/…`, depuis l'URL de
   `origin` vérifiée égale au dépôt de la PR. Un conflit limité à `CHANGELOG.md` est résolu par l'union des deux côtés,

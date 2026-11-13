@@ -55,6 +55,22 @@ qu'il obtient à ce que GitHub annonce. Il ne lance aucune commande dans le work
    :func:`~grimoire.missions.human_acceptance.accept_task`, puis clôture (gates déclarées par le projet) ; sinon une
    question non bloquante « accepter ? » donne la commande ``grimoire task accept``.
 
+**Double relecture d'une partie des chemins réservés (``protected_gate: dual_review``, :mod:`.dual_review`).** Par
+défaut (``human``), rien de ce qui suit n'existe : aucun chemin de code ne lit de demande de seconde relecture. En
+``dual_review``, une PR qui touche un chemin de la liste « double relecture » (le reste de
+:data:`DEFAULT_PROTECTED_PATHS` une fois ôtés :data:`~grimoire.missions.dual_review.HUMAN_ONLY_PATHS`, plus
+``protected_paths``) n'est plus escaladée. Dès que son premier READY tient (étape 3) et sous mandat actif, le merger
+inscrit au **journal d'autorité** la demande d'une seconde relecture (``task.merge_dual_review_requested`` au ledger
+n'en est que la trace : personne ne le relit) ; le relecteur du tick la lance avec un modèle qu'il choisit lui-même.
+La fusion (étape 6) et l'acceptation (étape 7) exigent que :func:`~grimoire.missions.dual_review.judge_dual_seals`
+tienne sur la tête : deux sceaux READY du journal d'autorité, de deux sessions et de deux modèles distincts, aucun du
+worker, sur la même tête et le même arbre (``task.merge_dual_review``). Un réalignement (étape 5) prolonge les deux
+sceaux par la même règle que le premier, ou aucun des deux n'est tenu. Tout échec est fermé : sceaux qui ne couvrent
+plus la tête → nouvelle relecture (``task.merge_requeued``) ; identités, modèles, registre ou journal en défaut,
+aucun candidat, erreur → question « fusionner ? » à l'humain, avec la raison. Les chemins de ``HUMAN_ONLY_PATHS``
+(plus ``human_only_paths``) restent à l'humain quel que soit le réglage, et une PR en brouillon qui touche un chemin
+réservé n'est jamais sortie du brouillon par le merger.
+
 **Tâche faite à la main (#994).** Une tâche sans lancement de worker que le relecteur du tick a relue sous mandat
 (:mod:`.manual_review`) entre dans la même file : son « worktree » est le worktree détaché de vérification, sa branche
 celle de la PR, sa cible la base de la PR, et chaque ``gh pr view`` la vise par son numéro. Le dépôt est celui figé à sa
@@ -86,6 +102,13 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure, record_transient
+from grimoire.missions.dual_review import (
+    HUMAN_ONLY_PATHS,
+    MERGE_DUAL_REVIEW_EVENT,
+    MERGE_DUAL_REVIEW_REQUESTED_EVENT,
+    DualReviewMixin,
+    matched_paths,
+)
 from grimoire.missions.human_acceptance import EVIDENCE_RELPATH
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
@@ -102,6 +125,7 @@ from grimoire.missions.task_worktree import MERGED_EVENT, TASK_BRANCH_PREFIX, fi
 from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, Attachment, Choice, clip_context, new_question_id
 
 if TYPE_CHECKING:
+    from grimoire.missions.dual_review import DualVerdict
     from grimoire.missions.launcher import Exec
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.review_receipt import ReviewReceipt
@@ -116,6 +140,8 @@ __all__ = [
     "MERGE_ACCEPTED_EVENT",
     "MERGE_BOUNCED_EVENT",
     "MERGE_CI_EVENT",
+    "MERGE_DUAL_REVIEW_EVENT",
+    "MERGE_DUAL_REVIEW_REQUESTED_EVENT",
     "MERGE_ESCALATED_EVENT",
     "MERGE_PUSHED_EVENT",
     "MERGE_QUEUED_EVENT",
@@ -286,8 +312,9 @@ def _last_launch(events: list[LedgerEvent]) -> int:
     return max((i for i, e in enumerate(events) if e.event_type == LAUNCHED_EVENT), default=-1)
 
 
-class MergeStage:
-    """L'étape ``merger`` du tick : accepte les tâches fusionnées, avance la file."""
+class MergeStage(DualReviewMixin):
+    """L'étape ``merger`` du tick : accepte les tâches fusionnées, avance la file. La double relecture des chemins
+    réservés (``_dual_step``, ``_dual_unproven``, ``_dual_paths``…) vient de :class:`.dual_review.DualReviewMixin`."""
 
     def __init__(
         self, service: TaskService, policy: OrchestratorPolicy, *, exec_: Exec = default_exec,
@@ -493,6 +520,10 @@ class MergeStage:
             return self._requeue(task, judged, why, pr.number)
         if pr.draft:  # après le sceau : seule une tête couverte par le READY attesté sort du brouillon
             return self._draft(task, wt, judged, pr)
+        # Double relecture (``dual_review`` seulement) : la seconde relecture est demandée dès que le premier READY
+        # tient, avant la CI et tout réalignement — les deux sceaux portent alors sur la même tête du worker.
+        if (held := self._dual_step(task, wt, judged, pr)) is not None:
+            return held
         ci, detail = self._stable_ci(tid, pr, wt.branch)
         if ci == "unknown":
             return self._failed(tid, "wait", f"CI illisible : {detail}", pr.number)
@@ -591,7 +622,9 @@ class MergeStage:
         """Une PR en brouillon au READY scellé : chemins qui escaladent → question ; déjà sortie pour cette tête → un
         humain l'y a remise, elle y reste ; sinon elle sort du brouillon."""
         tid = task.id
-        if kept := self._kept_to_human(task, pr):
+        # Un chemin réservé garde la PR en brouillon quel que soit ``protected_gate`` : la double relecture ne donne pas
+        # au merger le geste de la sortir du brouillon.
+        if kept := self._kept_to_human(task, pr) or self._reserved_reason(self._dual_paths(pr)):
             return self._ask_human(task, wt, "merge", judged.id, f"{kept} ; PR en brouillon, le merger ne l'en sort pas "
                                    f"(`gh pr ready {pr.number}` d'abord)", pr.number)
         events = self._service.ledger.events_for(tid)
@@ -889,7 +922,10 @@ class MergeStage:
             return self._failed(tid, "realign", f"git commit-tree : {_err(made)}", pr.number)
         review = str(judged.payload.get("review") or "")
         produced = tree_of(self._home, new)
-        seal_realignment(self._home, tid, review, head, new, produced)  # au journal d'autorité : ce que le sceau couvre
+        # Au journal d'autorité : ce que le sceau couvre. En double relecture, la même règle vaut pour les deux sceaux
+        # qui tenaient sur la tête réalignée ; un sceau qui n'y tenait pas n'est jamais prolongé.
+        for sealed_review in self._reviews_to_extend(tid, head, review):
+            seal_realignment(self._home, tid, sealed_review, head, new, produced)
         self._note(MERGE_REALIGNED_EVENT, tid, {
             "from": head, "to": new, "into": wt.into, "into_sha": target, "changelog_union": union, "review": review, "tree": produced,
         })
@@ -945,7 +981,9 @@ class MergeStage:
     def _kept_to_human(self, task: MissionTask, pr: _PullRequest) -> str:
         """Pourquoi ce geste reste humain quoi que dise le mandat : catégorie gardée, chemin qui escalade ; ``""`` sinon.
 
-        Les chemins sont ceux que GitHub annonce pour la PR, jamais un diff de refs locales.
+        Les chemins sont ceux que GitHub annonce pour la PR, jamais un diff de refs locales. En ``dual_review``, seuls
+        ceux de :data:`~grimoire.missions.dual_review.HUMAN_ONLY_PATHS` (plus ``human_only_paths``) y restent ; les
+        autres chemins réservés (:meth:`_dual_paths`) exigent la double relecture (:meth:`_dual_step`).
         """
         from grimoire.missions.mandate import load_escalation, task_categories
 
@@ -955,11 +993,33 @@ class MergeStage:
             return f"catégorie gardée à l'humain : {', '.join(guarded)}"
         if pr.changed != pr.entries:
             return f"GitHub annonce {pr.changed} fichier(s) et en liste {pr.entries} : liste incomplète, non vérifiable"
-        patterns = tuple(p.casefold() for p in (*DEFAULT_PROTECTED_PATHS, *self._policy.merger.protected_paths))
+        role = self._policy.merger
+        if self._dual():
+            kept = matched_paths(pr.files, (*HUMAN_ONLY_PATHS, *role.human_only_paths))
+            if kept:
+                return ("la PR touche des chemins qui reviennent à l'humain quel que soit le réglage : "
+                        f"{', '.join(_clean(p, 120) for p in kept[:8])}")
+            return ""
+        patterns = tuple(p.casefold() for p in (*DEFAULT_PROTECTED_PATHS, *role.protected_paths, *role.human_only_paths))
         kept = sorted(p for p in pr.files if any(fnmatch.fnmatchcase(p.casefold(), pat) for pat in patterns))
+        return self._reserved_reason(kept)
+
+    @staticmethod
+    def _reserved_reason(kept: list[str]) -> str:
         if kept:
             return f"la PR touche des chemins qui reviennent à l'humain : {', '.join(_clean(p, 120) for p in kept[:8])}"
         return ""
+
+    def _note_dual(self, tid: str, pr: _PullRequest, verdict: DualVerdict) -> None:
+        """``task.merge_dual_review`` : la paire tenue sur cette tête, une fois par tête et par second sceau."""
+        summary = verdict.summary()
+        events = self._service.ledger.events_for(tid)
+        if any(e.event_type == MERGE_DUAL_REVIEW_EVENT and e.payload.get("head") == pr.head
+               and e.payload.get("second_seal") == summary["second_seal"] for e in events):
+            return
+        self._note(MERGE_DUAL_REVIEW_EVENT, tid, {"head": pr.head, "pr": pr.number, **summary})
+
+    # -- fusion (suite) ------------------------------------------------------
 
     def _merge(self, task: MissionTask, wt: TaskWorktree, judged: LedgerEvent, receipt: ReviewReceipt, pr: _PullRequest) -> MergerOutcome:
         from grimoire.missions.mandate import (
@@ -985,6 +1045,9 @@ class MergeStage:
             MandateStore(self._home).check_receipt_provenance(task, receipt)  # verrou 7 : la relecture qui fonde la fusion
         except (MandateRefusedError, GrimoireError) as exc:
             return self._ask_human(task, wt, "merge", judged.id, str(exc), pr.number)
+        # Double relecture : les deux sceaux sont relus ici, juste avant le geste, sur la tête que ``gh pr merge`` exige.
+        if (held := self._dual_step(task, wt, judged, pr, at_merge=True)) is not None:
+            return held
         self._note(MERGE_REQUESTED_EVENT, tid, {
             "pr": pr.number, "head": head, "origin": ORIGIN_ORCHESTRATOR, "mandate_id": auth.mandate_id, "provenance": provenance,
         })
@@ -1083,6 +1146,8 @@ class MergeStage:
             reasons.append(sealed)
         if kept := self._kept_to_human(task, pr):
             reasons.append(kept)
+        elif unproven := self._dual_unproven(tid, pr):
+            reasons.append(unproven)
         if reasons:
             return self._ask_human(task, wt, "accept", pr.merge_commit, " ; ".join(reasons), pr.number)
         if tid in self._manual and not EvidenceService(wt.path / _EVIDENCE).list_packs(tid):
@@ -1181,6 +1246,10 @@ class MergeStage:
         """Un READY qui ne tient plus : la tâche repart à la relecture (une nouvelle entrée en revue), une fois par READY."""
         events = self._service.ledger.events_for(task.id)
         if _last(events, MERGE_REQUEUED_EVENT, _index(events, judged)) is None:
+            # Double relecture : défait au journal d'autorité AVANT d'être noté périmé, sinon il resterait la moitié d'une paire.
+            if not self._void_reviews(task.id, f"READY périmé : {why}"):
+                return MergerOutcome(task.id, "stale", "failed", f"READY périmé ({why}), mais l'annulation des relectures "
+                                     "n'a pas pu être inscrite au journal d'autorité : revu au tick suivant", pr)
             if self._cycle(events, MERGE_REQUEUED_EVENT) >= self._policy.merger.max_cycles:
                 return self._escalate(task, f"READY périmé à répétition ({why})", pr)
             self._note(MERGE_REQUEUED_EVENT, task.id, {"judged": judged.id, "why": why})
@@ -1197,6 +1266,11 @@ class MergeStage:
         """CI rouge, conflit, désaccord persistant : retour au worker (reprise de sa session), ou escalade au cycle
         ``max_cycles``. *hint* : le geste attendu du worker (fusionner la cible, pousser sa branche)."""
         tid, max_cycles = task.id, self._policy.merger.max_cycles
+        # Double relecture : tout retour au worker (ou son escalade) défait d'abord, au journal d'autorité, les relectures
+        # scellées de la tâche. Remise en revue sans nouveau commit, elle devra obtenir deux relectures fraîches.
+        if not self._void_reviews(tid, f"retour au worker par le merger ({reason})"):
+            return MergerOutcome(tid, "bounce", "failed", "retour au worker non appliqué : l'annulation des relectures n'a "
+                                 "pas pu être inscrite au journal d'autorité, revu au tick suivant", pr)
         events = self._service.ledger.events_for(tid)
         cycle, worker = self._cycle(events, MERGE_BOUNCED_EVENT), str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker:

@@ -36,7 +36,15 @@ janitor :
           max_cycles: 2           # retours au worker (CI rouge, conflit) avant l'escalade à l'humain
           protected_paths: []     # chemins qui reviennent à l'humain, en plus des défauts (code des gardes, politique,
                                   # workflows et hooks, pyproject, fichiers compilés) ; comparaison en casefold()
-        orchestrator:             # #962 : une session qui répond sous mandat aux questions des workers lancés
+          protected_gate: human   # human (défaut) : tout chemin réservé escalade ; dual_review : une seconde relecture
+                                  # indépendante remplace l'humain sur une partie d'entre eux (missions/dual_review.py) ;
+                                  # toute autre valeur rend la politique illisible
+          human_only_paths: []    # chemins qui restent à l'humain quel que soit protected_gate, en plus de
+                                  # HUMAN_ONLY_PATHS : la liste s'étend, elle ne se réduit pas
+          second_reviewer_min_tier: strong  # dual_review : palier minimal du second relecteur (cheap, mid, strong),
+                                  # lu au registre de fournisseurs ; aucun candidat à ce palier : l'humain tranche,
+                                  # sans repli ; toute autre valeur rend la politique illisible
+        orchestrator:           # #962 : une session qui répond sous mandat aux questions des workers lancés
           enabled: false
           model: sonnet           # vide : sonnet
           wip: 1                  # sessions orchestrateur en même temps
@@ -71,6 +79,12 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.missions.dual_review import (
+    DEFAULT_SECOND_REVIEWER_MIN_TIER,
+    PROTECTED_GATE_HUMAN,
+    PROTECTED_GATES,
+    SECOND_REVIEWER_TIERS,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -98,7 +112,10 @@ _WORKER_KEYS = frozenset(
 )
 _REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean"})
 DEFAULT_MAX_CYCLES = 2
-_MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths"})
+_MERGER_KEYS = frozenset(
+    {"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate", "human_only_paths",
+     "second_reviewer_min_tier"}
+)
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
 #: Le modèle de la session orchestrateur quand la politique n'en nomme pas.
 DEFAULT_ORCHESTRATOR_MODEL = "sonnet"
@@ -158,10 +175,15 @@ class MergerRole:
     ignored_checks: tuple[str, ...] = DEFAULT_IGNORED_CHECKS
     max_cycles: int = DEFAULT_MAX_CYCLES
     protected_paths: tuple[str, ...] = ()
+    protected_gate: str = PROTECTED_GATE_HUMAN
+    human_only_paths: tuple[str, ...] = ()
+    second_reviewer_min_tier: str = DEFAULT_SECOND_REVIEWER_MIN_TIER
 
     def to_dict(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "realign_max": self.realign_max, "ignored_checks": list(self.ignored_checks),
-                "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths)}
+                "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths),
+                "protected_gate": self.protected_gate, "human_only_paths": list(self.human_only_paths),
+                "second_reviewer_min_tier": self.second_reviewer_min_tier}
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,17 +331,30 @@ def _parse_merger(raw: Any) -> MergerRole:
     if not isinstance(enabled, bool):
         raise _InvalidPolicyError(f"{where}.enabled doit être un booléen, pas {enabled!r}")
     globs: dict[str, tuple[str, ...]] = {}
-    for key, default in (("ignored_checks", DEFAULT_IGNORED_CHECKS), ("protected_paths", ())):
+    for key, default in (("ignored_checks", DEFAULT_IGNORED_CHECKS), ("protected_paths", ()), ("human_only_paths", ())):
         raw_globs = data.get(key, list(default))
         if not isinstance(raw_globs, list) or not all(isinstance(g, str) and g.strip() for g in raw_globs):
             raise _InvalidPolicyError(f"{where}.{key} doit être une liste de motifs non vides, pas {raw_globs!r}")
         globs[key] = tuple(g.strip() for g in raw_globs)
+    gate = _text(data.get("protected_gate", PROTECTED_GATE_HUMAN), f"{where}.protected_gate")
+    if gate not in PROTECTED_GATES:
+        raise _InvalidPolicyError(
+            f"{where}.protected_gate : {gate!r} inconnu (admis : {', '.join(PROTECTED_GATES)})"
+        )
+    min_tier = _text(data.get("second_reviewer_min_tier", DEFAULT_SECOND_REVIEWER_MIN_TIER), f"{where}.second_reviewer_min_tier")
+    if min_tier not in SECOND_REVIEWER_TIERS:
+        raise _InvalidPolicyError(
+            f"{where}.second_reviewer_min_tier : {min_tier!r} inconnu (admis : {', '.join(SECOND_REVIEWER_TIERS)})"
+        )
     return MergerRole(
         enabled=enabled,
         realign_max=_positive(data.get("realign_max", 1), f"{where}.realign_max"),
         ignored_checks=globs["ignored_checks"],
         max_cycles=_positive(data.get("max_cycles", DEFAULT_MAX_CYCLES), f"{where}.max_cycles"),
         protected_paths=globs["protected_paths"],
+        protected_gate=gate,
+        human_only_paths=globs["human_only_paths"],
+        second_reviewer_min_tier=min_tier,
     )
 
 
