@@ -1,1 +1,0 @@
-- feat(cockpit): la Flotte en direct lit les sessions, sous-agents, modèle et effort par tour (#1193)
