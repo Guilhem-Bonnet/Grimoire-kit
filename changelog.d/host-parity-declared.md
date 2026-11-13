@@ -1,1 +1,0 @@
-- feat(hosts): chaque fonction de gouvernance déclare son état (`rich`, `degraded` ou `absent`, avec sa raison) pour chaque hôte ; `grimoire host matrix` et `grimoire up` l'affichent, et un test exige la déclaration complète
