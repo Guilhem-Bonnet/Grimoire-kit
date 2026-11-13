@@ -657,10 +657,12 @@ LIVE_ROUTES = frozenset(
         # GAO-cockpit-lect-001 : les trois lectures lourdes du rail et de la
         # Flotte passaient hors cache (mesures du 2026-11-12 : ``evidence`` 6,8 s,
         # ``capacity`` jusqu'à 7,6 s sous charge). Elles sont dérivées du ledger
-        # et de l'hôte, comme ``attention`` : même empreinte, même réponse, et
-        # ``MAX_AGE_SECONDS`` borne ce qui dépend de l'instant (vivacité, bail,
-        # fenêtre). ``fleet/live?project=*`` reste hors cache — agrégat du
-        # registre sous l'empreinte d'un seul projet, comme le portefeuille.
+        # et de l'hôte, comme ``attention`` : même empreinte, même réponse.
+        # GAO-cockpit-les-001 : ce qu'elles lisent hors de l'empreinte du pouls
+        # (journaux de session et sonde d'hôte, board et gates, horloge) leur vaut
+        # l'âge court ``FRESH_MAX_AGE_SECONDS`` (3 s), pas ``MAX_AGE_SECONDS``.
+        # ``fleet/live?project=*`` reste hors cache — agrégat du registre sous
+        # l'empreinte d'un seul projet, comme le portefeuille.
         f"{PREFIX}evidence",
         f"{PREFIX}capacity",
         f"{PREFIX}fleet/live",
