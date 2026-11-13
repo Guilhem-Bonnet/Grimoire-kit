@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
+from grimoire.hosts.capabilities import GOVERNANCE_FUNCTIONS
 from grimoire.hosts.sync import sync_host_surfaces
 
 pytestmark = pytest.mark.covers("cli:host matrix", "cli:host probe")
@@ -70,3 +71,25 @@ def test_matrix_texte_affiche_les_statuts(project: Path) -> None:
     code, out = _invoke(["host", "matrix", "--project-root", str(project)])
     assert code == 0
     assert "enforced" in out
+
+
+def test_matrix_json_declare_chaque_fonction_par_hote(project: Path) -> None:
+    """GAO-parit-d-h-te-001 : la matrice porte la parité, hôte par hôte."""
+    code, out = _invoke(["-o", "json", "host", "matrix", "--project-root", str(project), "--host", "gemini"])
+    payload = json.loads(out)
+    assert code == 0
+    assert len(payload["functions"]) == len(payload["hosts"]) * len(GOVERNANCE_FUNCTIONS)
+    assert {f["function"] for f in payload["functions"]} == {f.value for f in GOVERNANCE_FUNCTIONS}
+    for cell in payload["functions"]:
+        if cell["state"] != "rich":
+            assert cell["reason"].strip(), cell
+
+
+def test_matrix_texte_dit_les_etats_et_leurs_raisons(project: Path) -> None:
+    code, out = _invoke(["host", "matrix", "--project-root", str(project), "--host", "gemini"])
+    assert code == 0
+    assert "Fonctions de gouvernance" in out
+    assert "garde avant outil" in out
+    assert "degraded" in out
+    # La raison est écrite sous la table, pas seulement un état colorié.
+    assert "BeforeTool" in out

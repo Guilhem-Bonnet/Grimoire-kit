@@ -30,7 +30,14 @@ from typing import Any
 from grimoire.bridges.schemas import HostId
 from grimoire.core.layered_rules import LAYERS, Rule, analyze
 from grimoire.core.rule_resolution import emitted_rules, resolve_rules
-from grimoire.hosts.capabilities import HostProfile, profile_for
+from grimoire.hosts.capabilities import (
+    GOVERNANCE_LABELS,
+    GovernanceFunction,
+    HostProfile,
+    ParityLevel,
+    function_entries,
+    profile_for,
+)
 from grimoire.hosts.detection import preserved_paths
 from grimoire.hosts.emitters import emitter_for, supported_hosts
 from grimoire.hosts.emitters.base import Degradation, EmitPlan
@@ -56,7 +63,9 @@ DEGRADED = "degraded"  # règle non écrite, et l'émetteur le dit
 UNDECLARED = "undeclared"  # ni écrit ni déclaré dégradé : l'émetteur ment par omission
 INERT = "inert"  # écrit pour un événement que l'hôte ne déclenche pas
 MISSCOPED = "misscoped"  # règle scopée écrite sans sa portée
-PRESERVED = "preserved"  # fichier déclaré à l'utilisateur (`hosts.preserve`) : l'élément du kit qu'il porterait n'est pas livré
+PRESERVED = (
+    "preserved"  # fichier déclaré à l'utilisateur (`hosts.preserve`) : l'élément du kit qu'il porterait n'est pas livré
+)
 
 #: Une cellule dans l'un de ces statuts rend la matrice, donc la sonde, non conforme.
 FAILING = frozenset({UNDECLARED, INERT, MISSCOPED})
@@ -99,10 +108,35 @@ class Cell:
 
 
 @dataclass(frozen=True, slots=True)
+class FunctionParityCell:
+    """Une fonction de gouvernance sur un hôte : son état déclaré, et la raison si elle n'est pas riche."""
+
+    function: GovernanceFunction
+    label: str
+    host: str
+    state: str
+    reason: str = ""
+
+    @property
+    def rich(self) -> bool:
+        return self.state == ParityLevel.RICH.value
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "function": self.function.value,
+            "label": self.label,
+            "host": self.host,
+            "state": self.state,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class Matrix:
     hosts: tuple[HostId, ...]
     cells: tuple[Cell, ...]
     plans: dict[HostId, EmitPlan] = field(default_factory=dict, compare=False, repr=False)
+    functions: tuple[FunctionParityCell, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -115,11 +149,15 @@ class Matrix:
     def for_host(self, host: HostId) -> tuple[Cell, ...]:
         return tuple(c for c in self.cells if c.host == host.value)
 
+    def function_for(self, host: HostId, function: GovernanceFunction) -> FunctionParityCell:
+        return next(c for c in self.functions if c.host == host.value and c.function is function)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "hosts": [h.value for h in self.hosts],
             "cells": [c.to_dict() for c in self.cells],
+            "functions": [c.to_dict() for c in self.functions],
         }
 
 
@@ -166,23 +204,36 @@ def _declares(plan: EmitPlan, *surfaces: str) -> Degradation | None:
     return next((d for d in plan.degradations if d.surface in surfaces), None)
 
 
-def _hook_cell(hook: HookSpec, host: HostId, profile: HostProfile, plan: EmitPlan, texts: list[tuple[str, str]]) -> Cell:
+def _hook_cell(
+    hook: HookSpec, host: HostId, profile: HostProfile, plan: EmitPlan, texts: list[tuple[str, str]]
+) -> Cell:
     event = hook.event.value
     subject = f"hook:{event}"
     wire = _norm(event)
     carriers = tuple(path for path, text in texts if wire in {_norm(m) for m in _EVENT_ARG.findall(text)})
     if carriers:
         if not profile.supports_event(hook.event):
-            return Cell("hook", subject, host.value, INERT, carriers=carriers,
-                        reason=f"écrit, mais {profile.display_name} ne déclenche pas l'événement {event}")
+            return Cell(
+                "hook",
+                subject,
+                host.value,
+                INERT,
+                carriers=carriers,
+                reason=f"écrit, mais {profile.display_name} ne déclenche pas l'événement {event}",
+            )
         if hook.enforcement is Enforcement.BLOCKING and profile.blocking_hooks:
             return Cell("hook", subject, host.value, ENFORCED, Enforcement.BLOCKING.value, carriers)
         why = "l'hôte ne sait pas bloquer" if hook.enforcement is Enforcement.BLOCKING else ""
         return Cell("hook", subject, host.value, ADVISORY, Enforcement.ADVISORY.value, carriers, why)
     degradation = _declares(plan, "hooks", f"hook {event}")
     if degradation is None:
-        return Cell("hook", subject, host.value, UNDECLARED,
-                    reason=f"aucun fichier de {profile.display_name} ne l'exécute et aucune limite ne le dit")
+        return Cell(
+            "hook",
+            subject,
+            host.value,
+            UNDECLARED,
+            reason=f"aucun fichier de {profile.display_name} ne l'exécute et aucune limite ne le dit",
+        )
     prose = tuple(path for path, text in texts if f"**{event}**" in text)
     status = PROSE if prose else ABSENT
     return Cell("hook", subject, host.value, status, carriers=prose, reason=degradation.fallback)
@@ -269,4 +320,9 @@ def build_matrix(
         host_cells = [_hook_cell(hook, host, profile, plan, texts) for hook in surf.hooks]
         host_cells.extend(_rule_cells(host, plan, texts, root))
         cells.extend(_with_preserved(host_cells, host, plan, preserved))
-    return Matrix(hosts=hosts, cells=tuple(cells), plans=plans)
+    functions = tuple(
+        FunctionParityCell(function, GOVERNANCE_LABELS[function], host.value, state.level.value, state.reason)
+        for host in hosts
+        for function, state in function_entries(host)
+    )
+    return Matrix(hosts=hosts, cells=tuple(cells), plans=plans, functions=functions)
