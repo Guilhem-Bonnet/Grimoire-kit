@@ -1385,13 +1385,16 @@ class ProjectScaffolder:
         v = self._tpl_vars()
         name = v["project_name"]
         canonical = ".github/copilot-instructions.md"
+        # Le CLAUDE.md de Claude Code n'est plus un pointeur vers les
+        # instructions Copilot : il porte le contenu court de `host sync`
+        # (langue, contrat de complétion, règle « non vérifié », pointeurs de
+        # mémoire). Le poser déjà en bloc géré rend le premier sync idempotent ;
+        # le reste du fichier, s'il existe, reste au projet.
+        from grimoire.hosts.emitters.base import render_block
+        from grimoire.hosts.emitters.claude_code import claude_md_content
+
         bridges = {
-            "CLAUDE.md": (
-                f"# {name} — Claude Code\n\n"
-                "Ce projet utilise **Grimoire Kit**. Les instructions agent canoniques "
-                f"sont dans `{canonical}` (importées ci-dessous).\n\n"
-                f"@{canonical}\n"
-            ),
+            "CLAUDE.md": render_block(claude_md_content(name, v["language"])),
             "AGENTS.md": (
                 # Marked as generated: `grimoire host sync` replaces this
                 # pointer with the full catalog on hosts that read AGENTS.md.

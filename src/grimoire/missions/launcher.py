@@ -563,7 +563,16 @@ def _worktree_hooks(wt_path: Path) -> str:
 
     if armed():
         return ""
-    outcome = sync_host_surfaces(wt_path, only=frozenset({HostId.CLAUDE_CODE_CLI}))
+    outcome = sync_host_surfaces(
+        wt_path,
+        only=frozenset({HostId.CLAUDE_CODE_CLI}),
+        # `CLAUDE.md` n'est pas émis ici : non suivi à la racine du worktree,
+        # il compterait comme du travail non commité (sceau de relecture,
+        # collecte du janitor). Le `.gitignore` posé dans `.claude/` ne couvre
+        # pas la racine ; le worker reçoit son contexte par le hook
+        # SessionStart armé juste après.
+        skip_files=frozenset({"CLAUDE.md"}),
+    )
     if armed():
         # Fichiers générés, propres à ce worktree : ignorés par lui seul, sinon le relecteur et le janitor y verraient
         # des « modifications non commitées » et refuseraient de relire ou de ranger.
