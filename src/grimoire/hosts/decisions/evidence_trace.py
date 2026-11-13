@@ -104,7 +104,13 @@ def _record_observed_actions(hook: HookInput, facts: ToolFacts, task_id: str) ->
     try:
         if facts.command:
             append_evidence_event(
-                hook.project_root, task_id, build_bash_event(facts.command, exit_code=_exit_code(hook.tool_response))
+                hook.project_root,
+                task_id,
+                build_bash_event(
+                    facts.command,
+                    exit_code=_exit_code(hook.tool_response),
+                    read_only=facts.mutation is MutationClass.READ_ONLY,
+                ),
             )
         elif facts.kind is ActionKind.FILE_WRITE:
             for target in facts.targets:

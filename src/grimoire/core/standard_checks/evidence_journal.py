@@ -62,6 +62,7 @@ __all__ = [
     "GUARD_ERROR_EVENT",
     "GUARD_EVENTS_FILENAME",
     "GUARD_EVENTS_MAX",
+    "TRUNCATION_MARKER",
     "append_evidence_event",
     "append_guard_event",
     "describe_guard_errors",
@@ -135,11 +136,15 @@ def guard_events_relpath(task_id: str) -> Path:
     return RUNS_DIR / "evidence" / normalize_task_id(task_id) / GUARD_EVENTS_FILENAME
 
 
+#: Ce que le journal ajoute à une commande qu'il a coupée.
+TRUNCATION_MARKER = "… (tronqué)"
+
+
 def _truncate_command(command: str) -> str:
     command = " ".join(command.split())
     if len(command) <= _COMMAND_TRUNCATE_AT:
         return command
-    return command[:_COMMAND_TRUNCATE_AT] + "… (tronqué)"
+    return command[:_COMMAND_TRUNCATE_AT] + TRUNCATION_MARKER
 
 
 def is_test_command(command: str) -> bool:
@@ -147,8 +152,13 @@ def is_test_command(command: str) -> bool:
     return bool(command) and bool(_TEST_COMMAND_PATTERN.search(command))
 
 
-def build_bash_event(command: str, *, exit_code: int | None) -> dict[str, Any]:
-    """Build the JSONL event for one observed Bash-shaped tool call."""
+def build_bash_event(command: str, *, exit_code: int | None, read_only: bool | None = None) -> dict[str, Any]:
+    """Build the JSONL event for one observed Bash-shaped tool call.
+
+    *read_only* est le classement que le hook a rendu sur la commande ENTIÈRE. Le texte
+    consigné, lui, est aplati sur une ligne et coupé : le reclasser plus tard répondrait
+    à une autre question (un saut de ligne qui séparait deux commandes n'y est plus).
+    """
     kind = "test_run" if is_test_command(command) else "bash"
     event: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
@@ -157,6 +167,8 @@ def build_bash_event(command: str, *, exit_code: int | None) -> dict[str, Any]:
     }
     if exit_code is not None:
         event["exit_code"] = exit_code
+    if read_only is not None:
+        event["read_only"] = read_only
     return event
 
 
