@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.88.0] - 2026-11-13
+
+- feat(missions): le pilote automatique peut appliquer l'option recommandée puis informer au lieu d'attendre une réponse (`autopilot.default_action: apply_recommended`, défaut `ask`) : décision de source `default`, bloc « Décisions à revoir » dans « À traiter », questions du kit avec option recommandée, avertissement de `task ask` sans `--recommended` ; la liste fermée reste à l'humain (#1248)
+- fix(missions): pilote actif, le tick n'applique plus la recommandation qu'un agent s'écrit pour une question `permission` ou `merge`, pour « abandonner » ou un choix dangereux, ni quand le titre de la tâche touche la liste fermée ; une recommandation en texte libre est jugée par la liste fermée, et une demande de fusion, de publication, de déploiement ou d'autorisation rédigée en choix ordinaire n'est plus auto-répondue ; ces questions se jugent, elles ne se recopient plus (#1248)
+- fix(missions): l'étape orchestrateur lit l'état des sessions de fond par `probe_status` (`state: working`) : une session au travail n'est plus tenue pour finie par le balayage ni dite « absente » dans la consigne (#1248)
+
 ## [3.87.0] - 2026-11-13
 
 - fix(cockpit): une action faite dans le cockpit ne laisse plus la page sur l'état d'avant — le cache des lectures était vidé après l'envoi de la réponse d'une écriture ; la page, qui relit dès la réponse reçue, pouvait rejoindre un calcul commencé avant l'écriture et ne jamais voir son propre changement (carte non déplacée, tâche migrée absente). Il est maintenant vidé avant que la réponse parte (#1246)
