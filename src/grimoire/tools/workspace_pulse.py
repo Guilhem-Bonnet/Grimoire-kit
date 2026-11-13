@@ -53,6 +53,7 @@ from typing import Any
 from grimoire.core.standard_generation import PROPOSALS_DIR, TRACES_DIR
 from grimoire.core.standard_state import LEDGER_RELPATH
 from grimoire.missions.lease import LEASES_DIRNAME, parse_instant
+from grimoire.missions.mandate import AuthorityJournal
 from grimoire.tools.project_registry import load_registry, slug_for_path
 from grimoire.tools.workspace_portfolio import DEFAULT_LIVE_MINUTES, RUNS_RELPATH
 
@@ -152,6 +153,9 @@ def _watched(root: Path) -> list[Path]:
     reviews = root / REVIEWS_RELPATH
     if reviews.is_dir():
         files.extend(sorted(reviews.glob(f"*/{REVIEW_RECEIPT_NAME}")))
+    # Le pilote automatique et le mandat vivent dans le journal d'autorité (hors du projet) : un geste fait
+    # par la CLI change ce que « À traiter » doit montrer.
+    files.append(AuthorityJournal().path)
     return files
 
 
@@ -161,7 +165,8 @@ def _root_fingerprint(slug: str, root: Path, window_start: float) -> str:
     digest.update(f"{slug}\0{root}\0".encode())
     for path in _watched(root):
         stamp = _stat(path)
-        digest.update(repr((str(path.relative_to(root)), stamp)).encode())
+        shown = path.relative_to(root) if path.is_relative_to(root) else path  # le journal d'autorité est hors projet
+        digest.update(repr((str(shown), stamp)).encode())
         if stamp is not None and path.name.startswith("session-") and stamp[1] / 1e9 >= window_start:
             in_window += 1
     digest.update(f"window={in_window}".encode())

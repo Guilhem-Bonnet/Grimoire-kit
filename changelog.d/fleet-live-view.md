@@ -1,0 +1,2 @@
+- feat(cockpit): la Flotte en direct montre chaque session comme un fil, son détail et ses terminaux (lot B, #1193) (#1199)
+- fix(cockpit): un modèle `claude-*` absent du registre du projet compte pour Anthropic, et un sous-agent prend le nom de ce qu'on lui a demandé au lieu de la branche de son parent (#1199)
