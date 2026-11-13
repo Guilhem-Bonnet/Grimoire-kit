@@ -299,12 +299,24 @@ class HostsConfig:
     #: Fichiers hôtes (chemins relatifs à la racine, ``/``) que le projet garde pour lui : le kit
     #: ne les écrit jamais, ne les compte ni en conflit ni en synchronisés (D-07).
     preserve: tuple[str, ...] = ()
+    #: #1179 — intégrer le corps de la fiche de persona dans la définition
+    #: d'agent (``true`` par défaut, plafond de 16 Ko), plutôt que d'imposer à
+    #: chaque session de sous-agent un tour de lecture. ``false`` restaure le
+    #: pointeur seul.
+    inline_persona: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HostsConfig:
         preserve = _parse_preserve(data.get("preserve"))
+        raw_inline = data.get("inline_persona")
+        if raw_inline is not None and not isinstance(raw_inline, bool):
+            raise GrimoireConfigError(
+                "'hosts.inline_persona' must be a boolean",
+                error_code=CONFIG_PARSE_ERROR.code,
+            )
+        inline_persona = True if raw_inline is None else raw_inline
         if "enabled" not in data or data.get("enabled") is None:
-            return cls(enabled=None, preserve=preserve)
+            return cls(enabled=None, preserve=preserve, inline_persona=inline_persona)
         raw = data["enabled"]
         if not isinstance(raw, list):
             raise GrimoireConfigError(
@@ -319,7 +331,7 @@ class HostsConfig:
                 f"expected a subset of {sorted(_VALID_HOST_ALIASES)}",
                 error_code=CONFIG_PARSE_ERROR.code,
             )
-        return cls(enabled=values, preserve=preserve)
+        return cls(enabled=values, preserve=preserve, inline_persona=inline_persona)
 
 
 def _parse_preserve(raw: Any) -> tuple[str, ...]:

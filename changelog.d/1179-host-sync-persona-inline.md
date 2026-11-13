@@ -1,0 +1,1 @@
+- perf(hosts): `host sync` intègre le corps de la fiche de persona dans la définition d'agent (plafond de 16 Ko, `hosts.inline_persona: false` pour revenir au pointeur) et présente le contexte déclaré « à consulter au besoin » avec la taille de chaque document — une session de sous-agent n'a plus à payer un tour de lecture (~10 Ko) pour recevoir sa propre persona (#1179)

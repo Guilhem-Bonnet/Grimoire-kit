@@ -218,6 +218,9 @@ def test_une_session_et_deux_sous_agents_donnent_trois_sessions_et_deux_aretes(
     assert by_id["a1"]["model"]["picked"] == "claude-haiku-4-5"
     assert by_id["a2"]["model"]["requested"] == "claude-opus-5-5"
     assert by_id["a2"]["model"]["picked"] == "claude-opus-5-5"
+    # Le nom du fil d'un sous-agent : ce qu'on lui a demandé, et sa persona.
+    assert by_id["a1"]["agent"] == {"type": "explorer", "description": "sous-agent a1"}
+    assert by_id[parent]["agent"] is None
 
 
 def test_le_fournisseur_et_le_palier_viennent_du_registre(project: Path, claude_home: Path) -> None:
@@ -236,6 +239,22 @@ def test_le_fournisseur_et_le_palier_viennent_du_registre(project: Path, claude_
     # Le dernier modèle servi est l'inconnu ; sa provenance n'est pas devinée.
     assert first["model"]["current"] == "modele-fantome"
     assert first["model"]["provider"] == "inconnu"
+    assert first["model"]["tier"] is None
+
+
+def test_un_modele_claude_absent_du_registre_vaut_anthropic_par_son_prefixe(project: Path, claude_home: Path) -> None:
+    """Le gabarit du registre ne déclare aucun modèle : ``claude-fable-5-2``
+    tombait en ``inconnu`` et la vue en fils peignait tout en gris (#1199)."""
+    session = "abababab-bbbb-cccc-dddd-eeeeeeeeeeee"
+    _write(
+        _journal_dir(claude_home, project) / f"{session}.jsonl",
+        [_assistant(session, "m1", "claude-fable-5-2")],
+    )
+
+    first = fleet.fleet_live_view(project, now=NOW)["sessions"][0]
+
+    assert first["model"]["provider"] == "anthropic"
+    # Le palier, lui, n'est déclaré que par le registre : pas de devinette.
     assert first["model"]["tier"] is None
 
 
@@ -467,7 +486,9 @@ def test_project_etoile_couvre_tous_les_projets_enroles(project: Path, tmp_path:
 
     assert set(view["projects"]) == {"projet", "second"}
     assert {session["id"] for session in view["sessions"]} == {first_session, second_session}
-    assert view["totals"]["by_provider"] == {"anthropic": 1, "inconnu": 1}
+    # Le second projet n'a pas de registre : le préfixe publié par le
+    # fournisseur suffit, ``deepseek-flash`` n'est plus « inconnu ».
+    assert view["totals"]["by_provider"] == {"anthropic": 1, "deepseek": 1}
 
 
 def test_la_fenetre_est_bornee_et_les_journaux_trop_vieux_sont_ignores(project: Path, claude_home: Path) -> None:
