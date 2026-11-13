@@ -630,7 +630,11 @@ def _opaque_args_allowed(verb: str, args: list[_Word]) -> bool:
         fixed = next((i + 1 for i, text in enumerate(texts) if text in SYSTEMCTL_READ_SUBCOMMANDS), fixed)
     elif verb == "printf":
         fixed = 1  # seul le premier mot peut être l'option qui affecte ; la suite est le format et ses arguments
-    return not any(arg.opaque for arg in args[:fixed])
+    # Devant le verbe de ``gh``, un motif de fichiers compte aussi : deux fichiers trouvés
+    # font la ressource et son verbe, et repoussent le verbe de lecture écrit derrière.
+    # ``gh api`` a sa règle pour les motifs (:func:`_arguments_are_written_out`).
+    resource = verb == "gh" and texts[:1] != ["api"]
+    return not any(arg.opaque or (resource and arg.globbed) for arg in args[:fixed])
 
 
 #: Verbes dont la règle ne cherche qu'un mot interdit, où qu'il soit, sans compter les

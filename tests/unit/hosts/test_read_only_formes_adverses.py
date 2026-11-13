@@ -168,6 +168,9 @@ def test_une_expansion_qui_ne_fait_que_lire_reste_une_lecture(command: str) -> N
         "awk -v a* '{print}' f",
         # l'argument d'une enveloppe : le second fichier trouvé devient la commande
         "env -u N* ls",
+        # la ressource de gh : deux fichiers trouvés font la ressource et son verbe
+        "gh r* view",
+        "gh pr v* 12",
         # derrière le proxy et dans un script
         "rtk proxy uniq a*",
         "bash -c 'sort -* f'",
@@ -195,6 +198,8 @@ def test_un_motif_de_fichiers_n_est_pas_admis_la_ou_il_change_ce_que_fait_la_com
         "find src/* -name x",
         "find . -name '*.py'",
         "uniq 'a*'",
+        "gh pr list --search is:open*",
+        "gh pr view 12 --json files --jq '.files[].path'",
     ],
 )
 def test_un_motif_de_fichiers_en_operande_reste_une_lecture(command: str) -> None:
