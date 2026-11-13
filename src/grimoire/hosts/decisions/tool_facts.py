@@ -88,9 +88,9 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
 #: Leading verbs whose blast radius never survives the session — the read
 #: half of the destructive/mutation split above. Matched against the first
 #: *word* of a command (or of one ``&&``/``;``/``|`` segment of it), after
-#: stripping ``VAR=value`` assignments and the transparent wrappers
-#: (:func:`_inner_words`: ``sudo``, ``env``, ``nice``, ``timeout 30``, ``rtk``…)
-#: — never against the whole line, and
+#: stripping the ``VAR=value`` assignments of an inert variable and the
+#: transparent wrappers (:func:`_inner_words`: ``sudo``, ``env``, ``nice``,
+#: ``timeout 30``, ``rtk``…) — never against the whole line, and
 #: never enough on its own: :func:`is_read_only_command` also refuses any
 #: output redirection (``>``, ``>>``, ``| tee``), which is what tells
 #: ``cat file`` from ``cat >> file`` apart. Deliberately narrow: an
@@ -140,6 +140,44 @@ _FIND_MUTATING_PRIMARIES = frozenset(
 _READ_ONLY_GH_VERBS = frozenset({"view", "list", "status", "diff", "show", "checks"})
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# ── Affectations de variables ────────────────────────────────────────────────
+#
+# ``NOM=valeur commande`` et ``env NOM=valeur commande`` règlent l'environnement de la
+# commande portée, et ``NOM=valeur`` seul celui des commandes qui suivent. Une variable
+# peut faire exécuter du code au shell porté dès son démarrage, ou changer ce que fera un
+# outil de la liste blanche : son fichier de configuration, son afficheur, le chargeur de
+# bibliothèques, la recherche des exécutables. Le classement ne sait pas ce qu'une
+# variable quelconque déclenche : liste blanche. Une affectation dont le nom n'est pas
+# ici n'est pas retirée, et la commande n'est pas une lecture.
+
+#: Variables qui ne règlent que la langue, le fuseau, les couleurs, les dimensions du
+#: terminal, les invites et l'encodage de Python. ``LC_*`` est lu par :data:`_LOCALE_RE`.
+_INERT_VARIABLES = frozenset(
+    {
+        "LANG", "LANGUAGE", "TZ", "NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR", "TERM",
+        "COLUMNS", "LINES", "GIT_TERMINAL_PROMPT", "GH_PROMPT_DISABLED",
+        "PYTHONIOENCODING", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
+    }
+)
+_LOCALE_RE = re.compile(r"LC_[A-Z]+")
+#: Un afficheur est une commande que l'outil lance : il n'est inerte que neutralisé.
+_PAGER_VARIABLES = frozenset({"PAGER", "GH_PAGER"})
+_NEUTRAL_PAGERS = frozenset({"", "cat"})
+
+
+def _assignment_is_inert(word: str) -> bool:
+    """*word* (``NOM=valeur``) affecte une variable de la liste blanche.
+
+    Sur la surface, une valeur entre guillemets est effacée et paraît vide : la valeur
+    d'un afficheur est relue sur les mots résolus par ``shlex``, où elle est entière.
+    """
+    name, _, value = word.partition("=")
+    if name in _PAGER_VARIABLES:
+        return value in _NEUTRAL_PAGERS
+    return name in _INERT_VARIABLES or _LOCALE_RE.fullmatch(name) is not None
+
+
 #: Output redirection or a ``tee`` in the pipeline: the one shell-level
 #: signal that turns an otherwise read-only pipeline into a write, checked
 #: against the quote-stripped surface so a literal ``>`` inside a commit
@@ -202,19 +240,26 @@ def _after_env_options(words: list[str], i: int) -> int:
     return i
 
 
-def _inner_words(words: list[str]) -> list[str]:
-    """Les mots de la commande portée, une fois retirés affectations, mots-clés et enveloppes.
+def _inner_words(words: list[str]) -> list[str] | None:
+    """Les mots de la commande portée, une fois retirés affectations inertes, mots-clés et enveloppes.
 
-    Une liste vide : il ne restait que des affectations ou des mots neutres, rien à
-    muter. ``rtk`` ou ``timeout`` suivis de rien restent en tête de la liste rendue :
-    une enveloppe qui ne porte aucune commande n'est pas une lecture.
+    ``None`` : une affectation hors de la liste blanche (:func:`_assignment_is_inert`)
+    précède la commande, à quelque niveau d'enveloppe que ce soit (``timeout 5 env X=1
+    …``) — la commande n'est pas une lecture, quoi qu'elle porte. Une liste vide : il ne
+    restait que des affectations inertes ou des mots neutres, rien à muter. ``rtk`` ou
+    ``timeout`` suivis de rien restent en tête de la liste rendue : une enveloppe qui ne
+    porte aucune commande n'est pas une lecture.
     """
     i, n = 0, len(words)
     wrapper = -1  # premier ``rtk``/``timeout`` retiré
     while i < n:
         word = words[i]
         following = words[i + 1 : i + 2]
-        if _ENV_ASSIGNMENT_RE.match(word) or word in _PLAIN_PREFIX_WORDS:
+        if _ENV_ASSIGNMENT_RE.match(word):
+            if not _assignment_is_inert(word):
+                return None
+            i += 1
+        elif word in _PLAIN_PREFIX_WORDS:
             i += 1
         elif word == "command":
             if following in (["-v"], ["-V"]):
@@ -313,6 +358,11 @@ def _ss_is_read_only(args: list[str]) -> bool:
 #: en sont absents à dessein : un en-tête peut changer ce que fait la requête
 #: (``X-HTTP-Method-Override: DELETE``), et un appel authentifié reste évalué et tracé
 #: comme avant. Seul le GET anonyme, sans en-tête choisi, est une lecture.
+#:
+#: Ce qui change de protocole, d'hôte ou de chemin réseau en cours de route en est absent
+#: aussi : ``--proto*``, ``--connect-to``, ``--resolve``, ``-x``/``--proxy``, ``--socks*``,
+#: ``--unix-socket``, ``--location-trusted``. ``-L`` y reste : sans ``--proto-redir``, curl
+#: borne lui-même les protocoles qu'une redirection peut atteindre.
 _CURL_SHORT_FLAGS = frozenset("sSfLiIvk46gN#")
 _CURL_SHORT_VALUED = frozenset("mwX")
 _CURL_LONG_FLAGS = frozenset(
@@ -325,9 +375,21 @@ _CURL_LONG_FLAGS = frozenset(
 _CURL_LONG_VALUED = frozenset(
     {
         "--max-time", "--connect-timeout", "--retry", "--retry-delay", "--retry-max-time", "--max-redirs",
-        "--url", "--resolve", "--cacert", "--write-out", "--request",
+        "--url", "--cacert", "--write-out", "--request",
     }
 )
+#: Une URL que ``curl`` lira en HTTP, et elle seule. Le schéma est écrit en clair : un
+#: autre schéma envoie des octets choisis à un service qui n'est pas un serveur web
+#: (``gopher``, ``dict``, ``smtp``…) ou lit hors du réseau (``file``), et sans schéma curl
+#: devine le protocole d'après le nom d'hôte. L'hôte est nu : ni identifiant devant ``@``
+#: (un appel authentifié reste évalué), ni littéral entre crochets. Rien de ce que le
+#: globbing de curl (accolades, crochets) ou le shell (``$``, backtick, antislash)
+#: développerait en une autre URL.
+_CURL_URL_RE = re.compile(r"https?://[A-Za-z0-9._-]+(?::[0-9]+)?(?:[/?#][^\s{}\[\]$`\\]*)?", re.IGNORECASE)
+
+
+def _curl_reads_url(url: str) -> bool:
+    return _CURL_URL_RE.fullmatch(url) is not None
 
 
 def _curl_value_reads(option: str, value: str) -> bool:
@@ -335,21 +397,28 @@ def _curl_value_reads(option: str, value: str) -> bool:
         return value.upper() == "GET"
     if option in {"w", "--write-out"}:
         return "%output" not in value and not value.startswith("@")  # ``%output{f}`` écrit ``f``
+    if option == "--url":
+        return _curl_reads_url(value)
     return True
 
 
 def _curl_is_read_only(args: list[str]) -> bool:
-    """``curl`` en lecture : un GET (ou HEAD) anonyme dont la réponse va sur la sortie standard.
+    """``curl`` en lecture : un GET (ou HEAD) anonyme en HTTP dont la réponse va sur la sortie standard.
 
-    Une option à valeur en fin de ligne passe : sur la surface, sa valeur était entre
-    guillemets et a été effacée ; sur les mots résolus, ``curl`` s'arrête sans rien faire.
+    Chaque URL, en opérande ou valeur de ``--url``, doit être une URL ``http://`` ou
+    ``https://`` écrite en clair (:data:`_CURL_URL_RE`). Une option à valeur en fin de
+    ligne passe, et une URL entre guillemets n'est pas vue ici : sur la surface, l'une et
+    l'autre ont été effacées ; elles sont relues sur les mots résolus, où ``curl`` sans
+    valeur s'arrête sans rien faire.
     """
     i, n = 0, len(args)
     while i < n:
         word = args[i]
         i += 1
         if word == "-" or not word.startswith("-"):
-            continue  # une URL
+            if not _curl_reads_url(word):
+                return False
+            continue
         if word.startswith("--"):
             if word in _CURL_LONG_FLAGS:
                 continue
@@ -455,8 +524,10 @@ def _is_read_only_git(words: list[str]) -> bool:
 
 def _is_read_only_segment(segment: str) -> bool:
     words = _inner_words(segment.split())
+    if words is None:
+        return False  # une affectation hors liste blanche : pas une lecture
     if not words:
-        return True  # nothing left but assignments/neutral words: nothing to mutate
+        return True  # nothing left but inert assignments/neutral words: nothing to mutate
     verb = words[0]
     args = words[1:]
     if verb == "command":
@@ -687,10 +758,11 @@ def _raw_segments_read_only(command: str) -> bool:
         return False
     for segment in segments:
         try:
-            words = shlex.split(segment)
+            words = _inner_words(shlex.split(segment))  # ``rtk sed -i`` et ``timeout 5 awk`` portent un sed, un awk
         except ValueError:
             return False  # guillemet non fermé : incertain donc mutation
-        words = _inner_words(words)  # ``rtk sed -i`` et ``timeout 5 awk`` portent un sed, un awk
+        if words is None:
+            return False  # affectation hors liste blanche, valeur entre guillemets comprise
         if not words:
             continue
         verb, args = words[0], words[1:]
@@ -756,6 +828,8 @@ def _without_read_only_scripts(command: str, depth: int) -> str | None:
             words = _inner_words(shlex.split(segment))
         except ValueError:
             return None  # guillemet non fermé
+        if words is None:
+            return None  # affectation hors liste blanche, valeur entre guillemets comprise
         if not words:
             kept.append(segment)
             continue
@@ -837,6 +911,25 @@ def _opaque_spans(text: str) -> list[tuple[int, int, bool]]:
     return spans
 
 
+def _opens_dollar_quote(text: str) -> bool:
+    """Vrai si *text* ouvre, hors guillemets, une chaîne ``$'…'`` (ANSI-C) ou ``$"…"`` (localisée).
+
+    :func:`_opaque_spans` ne modélise ni l'une ni l'autre. Dans ``$'…'``, ``\\'`` est un
+    guillemet échappé qui ne ferme rien ; le balayage, lui, ferme la chaîne là et prend la
+    suite, que le shell exécute, pour un texte cité. La forme n'est pas modélisée : elle
+    est refusée. S'arrêter à la première suffit, puisque le balayage et le shell lisent la
+    même chose jusqu'à elle. Entre guillemets simples ou doubles, ou derrière un antislash,
+    ``$'`` est un texte (``grep 'a$' f``).
+    """
+    cursor = 0
+    for start, end, _ in _opaque_spans(text):
+        # ``start > cursor`` : le dollar n'appartient pas à la zone précédente (``\\$'a'``).
+        if text[start] in "'\"" and start > cursor and text[start - 1] == "$":
+            return True
+        cursor = end
+    return False
+
+
 def _without_fileless_redirections(command: str) -> str:
     """*command* sans ses redirections de la liste blanche, chacune remplacée par une espace.
 
@@ -904,6 +997,15 @@ def is_read_only_command(command: str) -> bool:
     the verb is looked up (:func:`_inner_words` — ``rtk git status``,
     ``timeout 30 ls``), and a ``bash -c '<script>'`` is read-only when every
     segment of its script is (:func:`_without_read_only_scripts`).
+
+    Three shapes are never a read, whatever they carry, because this
+    classifier cannot tell what they run: ANSI-C quoting (``$'…'``) or a
+    localized string (``$"…"``) outside quotes (:func:`_opens_dollar_quote`);
+    a variable assignment in front of a command, directly or through ``env``,
+    unless the variable is one of a short list of inert ones
+    (:func:`_assignment_is_inert` — stricter than before, when any
+    ``VAR=value`` prefix was dropped); and a ``curl`` whose URL is not a
+    plainly written ``http://`` or ``https://`` one (:data:`_CURL_URL_RE`).
     """
     return _command_is_read_only(command, 0)
 
@@ -911,6 +1013,10 @@ def is_read_only_command(command: str) -> bool:
 def _command_is_read_only(command: str, depth: int) -> bool:
     """:func:`is_read_only_command` pour *command*, script de niveau *depth* (0 : la ligne elle-même)."""
     if not command.strip():
+        return False
+    # Lue telle qu'écrite puis sans ses corps de heredoc : une apostrophe dans un corps
+    # décale le balayage de la première lecture, la seconde ne la voit pas.
+    if _opens_dollar_quote(command) or _opens_dollar_quote(_strip_heredoc_bodies(command)):
         return False
     command = _without_fileless_redirections(command)
     reduced = _without_read_only_scripts(command, depth)

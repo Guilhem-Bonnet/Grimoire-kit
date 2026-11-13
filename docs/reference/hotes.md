@@ -413,10 +413,21 @@ le ledger. Depuis le lot A de l'issue #638 :
   écrit ou édité, commande Bash mutante ou destructive ; jamais le contenu.
   Une commande enveloppée est classée sur la commande qu'elle porte : `rtk git
   status` (la forme qu'un proxy de terminal donne à `git status` avant le
-  `post_tool_use`), `timeout 30 ls`, `env X=1 git log` et `bash -c '<script>'`
+  `post_tool_use`), `timeout 30 ls`, `env LC_ALL=C git log` et `bash -c '<script>'`
   dont chaque segment lit sont des lectures ; la même enveloppe autour d'une
-  écriture reste une écriture. Une redirection qui n'écrit aucun fichier
-  (`2>&1`, `>&2`, `2>&-`, et toute sortie vers `/dev/null` écrit exactement
+  écriture reste une écriture. Trois formes ne sont jamais des lectures, quoi
+  qu'elles portent, parce que le classement ne sait pas ce qu'elles lancent :
+  des guillemets ANSI-C (`$'…'`) ou une chaîne localisée (`$"…"`) hors
+  guillemets ; une affectation de variable devant une commande
+  (`NOM=valeur commande`, `env NOM=valeur commande`, `NOM=valeur` seul) dont
+  le nom n'est pas dans la liste des variables inertes (`LC_*`, `LANG`,
+  `LANGUAGE`, `TZ`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`,
+  `TERM`, `COLUMNS`, `LINES`, `GIT_TERMINAL_PROMPT`, `GH_PROMPT_DISABLED`,
+  `PYTHONIOENCODING`, `PYTHONUTF8`, `PYTHONDONTWRITEBYTECODE`, et `PAGER` ou
+  `GH_PAGER` vides ou égaux à `cat`) ; un `curl` dont une URL n'est pas écrite
+  en clair en `http://` ou `https://` (autre schéma, schéma absent, accolades
+  ou crochets, variable, identifiant devant `@`). Une redirection qui n'écrit
+  aucun fichier (`2>&1`, `>&2`, `2>&-`, et toute sortie vers `/dev/null` écrit exactement
   ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
   commande en écriture, y compris vers `/dev/stdout` ou vers un descripteur
   autre que 1 et 2 (`>&3`). Un motif entre
