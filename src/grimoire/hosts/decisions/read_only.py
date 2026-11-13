@@ -340,10 +340,6 @@ class _Word:
     #: mot trouvé garde ce préfixe, donc le NOM de l'option ne change pas. Admis derrière une
     #: recherche, dont la règle juge l'option à son nom.
     valued: bool = False
-    #: Variable de boucle suivie de deux-points (``$rev:chemin``) : zsh peut y lire un
-    #: modificateur et rendre autre chose que ``valeur:chemin``, mais toujours un seul mot,
-    #: sans tiret. Admis derrière ``git`` et les verbes sans option qui écrive.
-    reshaped: bool = False
 
     @property
     def opaque(self) -> bool:
@@ -358,10 +354,11 @@ _BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
 
 
 #: ``${NOM}``, ou ``$NOM`` sans indice ni modificateur derrière (``$W[1]``, ``$W:t`` de zsh).
-#: Le nom est pris en entier : ``$fo`` n'est pas ``$f`` suivi de ``o``.
+#: Le nom est pris en entier : ``$fo`` n'est pas ``$f`` suivi de ``o``. ``$NOM:suite`` n'est
+#: jamais remplacée : zsh lit la suite comme des modificateurs de la valeur, et ceux qui
+#: résolvent un chemin puis en gardent la fin (``:A:t``) rendent le nom que porte un lien
+#: du dossier courant — un mot qui peut commencer par un tiret. ``${NOM}:suite`` l'est.
 _PLAIN_EXPANSION_RE = re.compile(r"\$(?:([A-Za-z_]\w*)(?![\w\[:])|\{([A-Za-z_]\w*)\})")
-#: ``$NOM:suite`` jusqu'à la fin du mot, hors guillemets, la suite sans tiret ni opérateur.
-_COLON_EXPANSION_RE = re.compile(r"\$([A-Za-z_]\w*)(:[\w./:~@%,=]*)(?=$|[\s;|&])")
 #: ``--nom=`` : ce qu'un motif de fichiers écrit derrière ne peut pas changer.
 _LONG_OPTION_VALUE_RE = re.compile(r"--[A-Za-z][\w-]*=")
 
@@ -392,15 +389,28 @@ _LOOP_VALUE_RE = re.compile(_LOOP_VALUE)
 _LOOP_PATTERN_RE = re.compile(_LOOP_VALUE + r"[*?\[][\w./@%:,=~*?\[\]-]*")
 _GLOB_CHARS = frozenset("*?[")
 _LOCAL_NAME_RE = re.compile(r"[a-z][a-z0-9]*")
-#: Noms en minuscules que le shell lit ou lie à une variable qu'il lit (zsh surtout).
+#: Noms en minuscules, sans tiret bas, que le shell lit ou lie à une variable qu'il lit.
+#: Relevés dans le manuel de zsh 5.9 : ``zshparam(1)`` (paramètres posés ou lus par le shell,
+#: dont les tableaux liés ``path``, ``cdpath``, ``fpath``, ``manpath``, ``mailpath``,
+#: ``fignore``, ``psvar``), ``zshmodules(1)`` (tableaux spéciaux de ``zsh/parameter``,
+#: ``zsh/mapfile`` — dont l'affectation écrit un fichier —, ``zsh/system``, ``zsh/datetime``,
+#: ``zsh/langinfo``, ``zsh/termcap``, ``zsh/terminfo``, ``zsh/watch``) et ``zshzle(1)`` ;
+#: ``ignoreeof`` vient de bash. Les noms qui portent un tiret bas (``module_path``,
+#: ``dis_aliases``, ``zsh_eval_context``…) sont déjà écartés par :data:`_LOCAL_NAME_RE`.
 _SHELL_LOWERCASE_NAMES = frozenset(
     {
-        "path", "cdpath", "fpath", "manpath", "mailpath", "fignore", "psvar", "prompt", "status", "argv", "watch",
-        "histchars", "signals", "pipestatus", "aliases", "galiases", "saliases", "functions", "commands", "builtins",
-        "options", "parameters", "modules", "nameddirs", "userdirs", "usergroups", "dirstack", "history",
-        "historywords", "jobdirs", "jobtexts", "jobstates", "keymaps", "widgets", "mapfile", "termcap", "terminfo",
-        "langinfo", "errnos", "sysparams", "reswords", "patchars", "funcstack", "functrace", "funcfiletrace",
-        "funcsourcetrace", "epochtime", "match", "mbegin", "mend", "reply", "ignoreeof",
+        # Manuel des paramètres de zsh.
+        "argv", "cdpath", "fignore", "fpath", "histchars", "mailpath", "manpath", "match", "mbegin", "mend",
+        "path", "pipestatus", "prompt", "psvar", "reply", "signals", "status",
+        # Manuel des modules de zsh.
+        "aliases", "builtins", "commands", "dirstack", "epochtime", "errnos", "funcfiletrace", "funcsourcetrace",
+        "funcstack", "functions", "functrace", "galiases", "history", "historywords", "jobdirs", "jobstates",
+        "jobtexts", "keymaps", "langinfo", "mapfile", "modules", "nameddirs", "options", "parameters", "patchars",
+        "reswords", "saliases", "sysparams", "termcap", "terminfo", "userdirs", "usergroups", "watch", "widgets",
+        # Édition de ligne et complétion de zsh.
+        "killring", "registers", "words", "compstate",
+        # Variable de bash.
+        "ignoreeof",
     }
 )
 _LOOP_OPENERS = frozenset({"for", "while", "until", "select"})
@@ -537,15 +547,15 @@ def _resolve_words(
     values = values or {}
     words: list[_Word] = []
     text: list[str] = []
-    splits = leading = globbed = valued = reshaped = in_word = False
+    splits = leading = globbed = valued = in_word = False
     i, n = 0, len(segment)
     while i < n:
         c = segment[i]
         if c in " \t\n":
             if in_word:
-                words.append(_Word("".join(text), splits, leading, globbed, valued, reshaped))
+                words.append(_Word("".join(text), splits, leading, globbed, valued))
                 text, in_word = [], False
-                splits = leading = globbed = valued = reshaped = False
+                splits = leading = globbed = valued = False
             i += 1
             continue
         in_word = True
@@ -598,14 +608,6 @@ def _resolve_words(
                 text.append(values[name])
                 i = known.end() if known is not None else i
                 continue
-            colon = _COLON_EXPANSION_RE.match(segment, i) if c == "$" and strict else None
-            if colon is not None and _GLOB_CHARS.isdisjoint(values.get(colon.group(1), "*")):
-                value = values[colon.group(1)]
-                if "-" not in value and "+" not in value:
-                    text.append(value + colon.group(2))
-                    reshaped = True
-                    i = colon.end()
-                    continue
             if c == "$" and _EXPANSION_RE.match(segment, i):
                 splits, leading = True, leading or at_start
             elif c in "*?[":
@@ -621,7 +623,7 @@ def _resolve_words(
             text.append(c)
             i += 1
     if in_word:
-        words.append(_Word("".join(text), splits, leading, globbed, valued, reshaped))
+        words.append(_Word("".join(text), splits, leading, globbed, valued))
     return words
 
 
@@ -647,7 +649,7 @@ def _prefix_is_readable(prefix: list[_Word]) -> bool:
         if assignments and (_ENV_ASSIGNMENT_RE.match(word.text) or word.text in _SHELL_LEADING_KEYWORDS):
             continue
         assignments = False
-        if word.opaque or word.globbed or word.valued or word.reshaped:
+        if word.opaque or word.globbed or word.valued:
             return False  # ``env -u N* ls`` : le second fichier trouvé devient la commande
     return True
 
@@ -713,8 +715,6 @@ def _globs_allowed(verb: str, args: list[_Word]) -> bool:
     free = verb in _READ_ONLY_LEADING_COMMANDS
     if any(arg.valued for arg in args) and not (free or verb == "rg"):
         return False  # la valeur d'une option : admise derrière une recherche, qui juge l'option à son nom
-    if any(arg.reshaped for arg in args) and not (free or verb == "git"):
-        return False  # ``$nom:suite`` : le texte reçu peut différer de celui qui est jugé ici
     if not any(arg.globbed for arg in args):
         return True
     if (
@@ -826,7 +826,7 @@ def _segment_is_script(segment: str, values: dict[str, str], depth: int) -> bool
         return None
     if not inner:
         return False
-    if words[offset].opaque or words[offset].reshaped:
+    if words[offset].opaque:
         return None  # le verbe lui-même vient d'une variable ou d'un joker
     verb = inner[0]
     if verb in _INNER_SHELLS:
@@ -910,8 +910,10 @@ def executed_surfaces(command: str) -> tuple[str, ...]:
     for comments in _readings(command):
         read = _code_and_bodies(command, comments=comments)
         code = command if read is None else read[0]
-        # Illisible ou guillemets non décodés : le texte brut, dont rien n'est effacé.
-        surfaces.append(code if read is None or _opens_dollar_quote(code) else _read_surface(code))
+        # Illisible, guillemets non décodés, textes cités dont la fin ne se lit pas : le
+        # texte brut, dont rien n'est effacé.
+        raw = read is None or not read[2] or _opens_dollar_quote(code)
+        surfaces.append(code if raw else _read_surface(code))
         surfaces.append(_unquoted(code, prose=False))
     return tuple(dict.fromkeys(surfaces))
 
@@ -938,8 +940,10 @@ def _unquoted(code: str, *, prose: bool) -> str:
     comme sur les autres surfaces. Un segment qui ne se lit pas est rendu tel quel.
     """
     parts: list[str] = []
-    for _operators, segment in _split_segments(code):
+    for operators, segment in _split_segments(code):
         words = _resolve_words(segment, strict=False)
+        # Les opérateurs sont gardés tels qu'ils sont écrits : deux lignes restent deux lignes.
+        parts.append(operators)
         if words is None:
             parts.append(segment)
         else:
@@ -948,7 +952,7 @@ def _unquoted(code: str, *, prose: bool) -> str:
                     word.text if prose or not any(char.isspace() for char in word.text) else " " for word in words
                 )
             )
-    return " ; ".join(parts)
+    return " ".join(parts)
 
 
 def _without_fileless_redirections(command: str) -> str:
@@ -1039,7 +1043,7 @@ def _command_is_read_only(command: str, depth: int) -> bool:
     # La commande ne lit que si elle lit sous chaque lecture d'un ``#`` (:func:`_readings`).
     for comments in _readings(command):
         read = _code_and_bodies(command, comments=comments)
-        if read is None or not _reading_is_read_only(*read, depth):
+        if read is None or not _reading_is_read_only(read[0], read[1], depth):
             return False
     return True
 

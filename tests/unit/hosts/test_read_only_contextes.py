@@ -380,7 +380,6 @@ def test_une_variable_de_boucle_derriere_git_reste_une_lecture(command: str) -> 
         "for c in 0753d01 020ba30; do git show $c:tools/o.py; done",
         "for f in lien; do git log $f:A:t; done",
         "for f in lien; do git log $f:P:t; done",
-        "for f in lien; do cat $f:A:t | git log; done",
         "for f in a; do sort $f:s/a/-o/ x; done",
         "for f in a; do git show $f:s/a/--output=x/; done",
         "for f in a-b; do git show $f:x; done",

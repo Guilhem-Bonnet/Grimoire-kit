@@ -497,8 +497,10 @@ le ledger. Depuis le lot A de l'issue #638 :
   que si ce qui le précède est une suite de commandes simples. La détection
   des commandes destructives lit la
   même ligne : un corps de heredoc n'est une donnée que là où le shell ouvre
-  et ferme un heredoc (le message d'un commit écrit par
-  `"$(cat <<'EOF' … EOF)"` en est une), un guillemet échappé ou un commentaire ne cache pas une
+  et ferme un heredoc (le message écrit par `"$(cat <<'EOF' … EOF)"` en est
+  une derrière une commande qui ne prend que du texte — `git commit`,
+  `git tag`, `git notes`, `gh pr|issue|release create|edit|comment…`, `echo`,
+  `printf` —, pas devant un interpréteur), un guillemet échappé ou un commentaire ne cache pas une
   commande, et un verbe ou un drapeau écrit entre guillemets est le mot que
   le shell lance (un texte cité qui porte des blancs reste une donnée) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce

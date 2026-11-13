@@ -129,9 +129,14 @@ def _opens_dollar_quote(text: str) -> bool:
 # Entre guillemets doubles, une substitution est du code et peut porter ses propres
 # guillemets : le balayage ne sait alors plus où le texte cité finit. Une seule forme y
 # est lue, celle d'un message écrit par heredoc — ``"$(cat <<'EOF'`` en fin de ligne, le
-# corps, ``EOF``, puis ``)"``. Toute autre substitution qui porte un guillemet, un
-# antislash, une parenthèse ou une redirection rend la ligne irrégulière : s'il s'y
-# trouve un ``<<`` hors texte cité, elle est illisible.
+# corps, ``EOF``, puis ``)"`` — et seulement en argument d'une commande connue pour ne
+# prendre que du texte (:data:`_TEXT_CONSUMER_RE`) : le message d'un commit, le corps
+# d'une PR, un texte affiché. Devant un interpréteur (``bash -c``, ``eval``, ``ssh``) ou
+# une commande qui lit le fichier que le corps nomme, le corps est du code ou un nom : il
+# reste inspecté. Toute autre substitution qui porte un guillemet, un antislash, une
+# parenthèse ou une redirection rend la ligne irrégulière : aucun texte cité n'y est
+# effacé pour ce qui inspecte, et s'il s'y trouve un ``<<`` hors texte cité elle est
+# illisible.
 #
 # Un ``#`` se lit de deux façons : commentaire jusqu'à la fin de la ligne (``sh -c``, un
 # script), ou caractère ordinaire (zsh interactif, où ``echo a # b ; rm f`` supprime
@@ -160,6 +165,8 @@ class _Layout:
     bodies: tuple[tuple[int, int, int, bool], ...]
     #: La ligne ne se lit pas : un ``<<`` là où ce balayage ne sait pas ce que le shell en fait.
     unreadable: bool
+    #: Le balayage ne sait pas où finissent les textes cités : rien n'en est effacé pour ce qui inspecte.
+    irregular: bool
 
 
 def _readings(command: str) -> tuple[bool, ...]:
@@ -231,6 +238,20 @@ def _flat_step(state: tuple[bool, bool], text: str) -> tuple[bool, bool] | None:
 _CLOSERS = {"(": ")", "[": "]", "{": "}"}
 #: ``"$(cat <<'EOF'`` en fin de ligne : le message écrit par heredoc.
 _QUOTED_HEREDOC_RE = re.compile(r"\"\$\(cat[ \t]+<<(-?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2[ \t]*\n")
+#: Les commandes dont l'argument n'est qu'un texte : il n'est ni exécuté, ni lu comme le
+#: nom d'un fichier. Liste blanche courte, lue sur le début de la commande simple :
+#: ``git commit|tag|notes`` (message), les sous-commandes de ``gh`` qui prennent un titre,
+#: un corps, des notes ou un commentaire, ``echo`` et ``printf`` (texte affiché). ``git``
+#: n'admet devant sa sous-commande que ``-C <dossier>`` : ``-c`` y pose une configuration.
+_TEXT_CONSUMER_RE = re.compile(
+    r"[ \t]*(?:rtk[ \t]+(?:proxy[ \t]+)?)?(?:"
+    r"git(?:[ \t]+-C[ \t]+[\w./~-]+)?[ \t]+(?:commit|tag|notes)"
+    r"|gh[ \t]+(?:pr|issue|release)[ \t]+(?:create|edit|comment|review|close|merge|reopen)"
+    r"|(?P<prints>echo|printf)"
+    r")(?=[ \t])"
+)
+#: Derrière un texte affiché, ce qui le confie à un autre programme : tube, substitution de processus.
+_HANDS_OVER_RE = re.compile(r"[|()`]")
 #: Ce qui doit suivre sa ligne de fermeture : la fin de la substitution et du texte cité.
 _QUOTED_HEREDOC_END_RE = re.compile(r"\n?[ \t]*\)\"")
 #: Une substitution entre guillemets doubles dont le contenu n'est fait que de mots écrits
@@ -252,14 +273,18 @@ def substitutes(text: str) -> bool:
     return False
 
 
-def _quoted_heredoc(command: str, i: int) -> tuple[int, int, int, bool, int] | None:
+def _quoted_heredoc(command: str, i: int, consumer: str) -> tuple[int, int, int, bool, int] | None:
     """Le message écrit par heredoc ouvert en *i*, ou ``None`` : corps, fermeture, développé, indice suivant.
 
-    La première ligne qui commence par l'étiquette doit être la fermeture exacte : un
-    shell qui fermerait sur ``EOF)`` ne finit pas le corps où ce balayage le finit.
+    *consumer* est le début de la commande simple qui le reçoit : elle doit ne prendre
+    que du texte, et un texte affiché ne doit pas être confié à un autre programme sur la
+    même ligne. La première ligne qui commence par l'étiquette doit être la fermeture
+    exacte : un shell qui fermerait sur ``EOF)`` ne finit pas le corps où ce balayage le
+    finit.
     """
-    opening = _QUOTED_HEREDOC_RE.match(command, i)
-    if opening is None:
+    taker = _TEXT_CONSUMER_RE.match(consumer)
+    opening = _QUOTED_HEREDOC_RE.match(command, i) if taker is not None else None
+    if taker is None or opening is None:
         return None
     indent = r"\t*" if opening.group(1) else ""
     tag = re.escape(opening.group(3))
@@ -271,6 +296,10 @@ def _quoted_heredoc(command: str, i: int) -> tuple[int, int, int, bool, int] | N
     after = _QUOTED_HEREDOC_END_RE.match(command, closing.end())
     if after is None:
         return None
+    if taker.group("prints"):
+        line_end = command.find("\n", after.end())
+        if _HANDS_OVER_RE.search(command, after.end(), len(command) if line_end < 0 else line_end):
+            return None
     return start, closing.start(), closing.end(), not opening.group(2), after.end()
 
 
@@ -312,6 +341,7 @@ def _layout(command: str, *, comments: bool) -> _Layout:
     pending: list[tuple[str, bool, bool]] = []
     stack: list[str] = []  # fermants attendus des constructions ouvertes
     unreadable = irregular = False
+    command_start = 0  # début de la commande simple en cours
     skeleton: list[str] = []  # le code depuis la dernière ligne jugée, textes cités réduits à un mot
     flat: tuple[bool, bool] | None = (True, False)  # état de :func:`_flat_step`, ``None`` : forme perdue
 
@@ -334,7 +364,8 @@ def _layout(command: str, *, comments: bool) -> _Layout:
             i += 2
         elif c in "'\"":
             skeleton.append("x")
-            written = _quoted_heredoc(command, i) if c == '"' and not stack and not pending else None
+            idiom = c == '"' and not stack and not pending
+            written = _quoted_heredoc(command, i, command[command_start:i]) if idiom else None
             if written is not None:
                 unreadable = not safe(line_ends=False) or unreadable
                 bodies.append(written[:4])
@@ -402,6 +433,7 @@ def _layout(command: str, *, comments: bool) -> _Layout:
             # ligne — avec tout ce qui la précède — qu'il ne rejettera pas.
             unreadable = not safe(line_ends=True) or unreadable
             i += 1
+            command_start = i
             for tag, tabbed, expands in pending:
                 indent = r"\t*" if tabbed else ""
                 closing = re.compile(rf"^{indent}{re.escape(tag)}$", re.MULTILINE).search(command, i)
@@ -413,7 +445,9 @@ def _layout(command: str, *, comments: bool) -> _Layout:
         else:
             skeleton.append(c)
             i += 1
-    return _Layout(tuple(comment_spans), tuple(bodies), unreadable)
+            if c in ";|&\n" and not stack:
+                command_start = i
+    return _Layout(tuple(comment_spans), tuple(bodies), unreadable, irregular or bool(stack))
 
 
 def _without_spans(text: str, spans: list[tuple[int, int]]) -> str:
@@ -426,13 +460,18 @@ def _without_spans(text: str, spans: list[tuple[int, int]]) -> str:
     return "".join(out)
 
 
-def _code_and_bodies(command: str, *, comments: bool) -> tuple[str, list[str]] | None:
-    """Le code de *command* sans ses commentaires ni ses corps de heredoc, et ces corps ; ``None`` s'il ne se lit pas."""
+def _code_and_bodies(command: str, *, comments: bool) -> tuple[str, list[str], bool] | None:
+    """Le code de *command* sans commentaires ni corps de heredoc, ces corps, et si ses textes cités se lisent.
+
+    ``None`` si la ligne ne se lit pas. Le troisième élément est faux quand le balayage ne
+    sait pas où finissent les textes cités : ce qui inspecte la ligne n'en efface alors aucun.
+    """
     layout = _layout(command, comments=comments)
     if layout.unreadable:
         return None
     removed = [*layout.comments, *((start, closed) for start, _end, closed, _expands in layout.bodies)]
-    return _without_spans(command, removed), [command[start:end] for start, end, _closed, _expands in layout.bodies]
+    bodies = [command[start:end] for start, end, _closed, _expands in layout.bodies]
+    return _without_spans(command, removed), bodies, not layout.irregular
 
 
 def strip_heredoc_bodies(command: str) -> str:

@@ -56,14 +56,15 @@ _WEB_MARKERS = ("fetch", "websearch", "web_search", "browser", "navigate", "http
 #: read as discarding the whole tree. ``(?=\s|$)`` requires an actual token
 #: boundary — whitespace or end of string — instead.
 #:
-#: Le drapeau d'une poussée forcée est cherché dans SA commande, pas jusqu'à la
-#: fin de la ligne : ``git push … ; pgrep -f x`` ne force rien. La commande finit
-#: à ``;``, ``|`` ou ``&`` ; l'esperluette d'une redirection (``2>&1``, ``&>``)
-#: n'en est pas une fin.
+#: Le drapeau d'une poussée forcée est cherché jusqu'à la fin de la ligne, donc aussi
+#: dans la commande suivante (``git push … ; pgrep -f x``). C'est voulu : le texte brut
+#: ne dit pas où une commande finit (séparateur échappé, dans une expansion ou une
+#: substitution, redirection par descripteur), et un faux « destructif » est un échec
+#: fermé.
 _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\brm\s+(-[a-z]*[rf][a-z]*\s+)+", "recursive/forced delete"),
     (
-        r"\bgit\s+push\b(?:[^;|&\n]|(?<=>)&|&(?=>))*(?:^|\s)"
+        r"\bgit\s+push\b.*(?:^|\s)"
         r"(--force|--force-with-lease(?:=\S+)?|--force-if-includes|-[a-z]*f[a-z]*)"
         r"(?=\s|$)",
         "force push",
