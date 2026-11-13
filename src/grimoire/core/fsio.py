@@ -39,7 +39,7 @@ try:  # POSIX
 except ImportError:  # Windows
     _fcntl = None  # type: ignore[assignment]
 
-__all__ = ["atomic_write", "locked"]
+__all__ = ["atomic_write", "lock_files", "locked"]
 
 #: Un verrou de repli plus vieux que cela est tenu pour abandonné (processus tué).
 _STALE_AFTER_S = 60.0
@@ -51,6 +51,12 @@ _KEEPALIVE_S = _STALE_AFTER_S / 4
 #: Attente entre deux tentatives de libération refusée (Windows : un lecteur concurrent tient le fichier).
 _RELEASE_DELAY_S = 0.05
 _RELEASE_TRIES = 20
+#: Windows : ``os.replace`` refuse (``PermissionError``) tant qu'un lecteur tient la cible. Quelques
+#: tentatives espacées, puis une erreur qui dit que le fichier est tenu. Ailleurs, un refus n'est
+#: jamais un lecteur : il est levé tout de suite.
+_REPLACE_TRIES = 20
+_REPLACE_DELAY_S = 0.05
+_WIN32_REPLACE_DENIED = os.name == "nt"
 #: Le test de pid n'existe qu'en POSIX ; ailleurs on ne relit pas un verrou frais (la lecture gêne le ``unlink`` du porteur).
 #: Le repli n'est pris que sans ``fcntl`` ou sous win32 : sous Windows (le seul repli réel) ``os.name`` vaut « nt »,
 #: donc seule la péremption par l'âge s'applique ; la reprise sur pid mort ne sert qu'à un POSIX sans ``fcntl``.
@@ -66,6 +72,18 @@ def _lock_path(path: Path) -> Path:
     """Fichier de la branche de repli (création exclusive). Nom distinct de ``_flock_path`` : le repli,
     qui casse un verrou « vieux » de 60 s, ne doit jamais casser ni attendre le fichier d'un porteur ``flock``."""
     return path.with_name(f".{path.name}.xlock")
+
+
+def lock_files(path: str | os.PathLike[str]) -> tuple[Path, Path]:
+    """Les deux fichiers qu'un verrou de *path* peut laisser à côté de lui.
+
+    ``locked`` prend l'un ou l'autre selon la plateforme (``flock`` en POSIX,
+    repli à création exclusive sous Windows) : un appelant qui doit ignorer
+    l'empreinte d'un verrou — le reçu de revue, dont le board verrouillé ne
+    doit pas périmer l'empreinte — exclut les deux, sans recopier leur nom.
+    """
+    target = Path(path)
+    return _flock_path(target), _lock_path(target)
 
 
 def _pid_dead(content: str) -> bool:
@@ -254,6 +272,31 @@ def locked(path: str | os.PathLike[str], *, timeout: float = 30.0, keepalive: bo
         _release(lock, token)
 
 
+def _replace(tmp: Path, target: Path) -> None:
+    """``os.replace`` du temporaire sur *target*, avec les tentatives qu'exige Windows.
+
+    Windows refuse le remplacement tant qu'un lecteur tient *target*
+    (``PermissionError`` : partage de fichier). Quelques tentatives espacées
+    suffisent — un lecteur du board lit en quelques millisecondes — puis
+    l'erreur dit que le fichier est tenu plutôt que de laisser un
+    ``PermissionError`` nu. Ailleurs, un refus n'est pas transitoire : il est
+    levé tel quel.
+    """
+    for attempt in range(_REPLACE_TRIES):
+        try:
+            tmp.replace(target)
+            return
+        except PermissionError as exc:
+            if not _WIN32_REPLACE_DENIED:
+                raise
+            if attempt == _REPLACE_TRIES - 1:
+                raise PermissionError(
+                    f"remplacement de {target} impossible après {_REPLACE_TRIES} tentatives "
+                    f"({_REPLACE_DELAY_S * (_REPLACE_TRIES - 1):g} s) : un autre processus tient le fichier"
+                ) from exc
+            time.sleep(_REPLACE_DELAY_S)
+
+
 def atomic_write(path: str | os.PathLike[str], data: str | bytes) -> None:
     """Remplace *path* par *data* de façon atomique (temporaire, ``fsync``, ``os.replace``).
 
@@ -276,7 +319,7 @@ def atomic_write(path: str | os.PathLike[str], data: str | bytes) -> None:
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
-        tmp.replace(target)
+        _replace(tmp, target)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()

@@ -27,7 +27,8 @@ from typing import Any
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import invalidate_cache, is_standard_enrolled
-from grimoire.missions.board import build_board, task_state_of, write_board
+from grimoire.core.yaml_io import load_yaml_mapping_or_empty
+from grimoire.missions.board import build_board, task_state_of, write_board, write_board_bytes
 from grimoire.missions.ledger import MissionLedger
 from grimoire.missions.schemas import MissionState, TaskState
 from grimoire.missions.service import DEFAULT_LEDGER_RELPATH
@@ -118,20 +119,11 @@ def _new_stamp() -> str:
 def _load_board(path: Path) -> dict[str, Any]:
     """Lit un board YAML, ou ``{}`` — jamais d'exception (frontière de migration).
 
-    Même discipline que ``standard_state._load_mapping`` (import ``ruamel``
-    paresseux, échec silencieux) mais déclarée ici plutôt qu'importée : cette
-    fonction privée n'est pas exportée par ce module-là.
+    Même discipline que ``standard_state._load_mapping`` : les deux passent par
+    :mod:`grimoire.core.yaml_io`, qui retente une erreur d'analyse passagère
+    (un board peut être en cours de remplacement) avant de rendre ``{}``.
     """
-    if not path.is_file():
-        return {}
-    from ruamel.yaml import YAML
-    from ruamel.yaml.error import YAMLError
-
-    try:
-        data = YAML(typ="safe").load(path)
-    except (OSError, ValueError, YAMLError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    return load_yaml_mapping_or_empty(path)
 
 
 def _board_task_ids(board: dict[str, Any]) -> list[str]:
@@ -313,7 +305,9 @@ def restore_task_unification(project_root: Path, stamp: str) -> list[str]:
     if board_relpath:
         board_dest = Path(board_relpath) if Path(board_relpath).is_absolute() else root / board_relpath
         if manifest.get("board_existed"):
-            shutil.copy2(files_dir / "task-board.yaml", board_dest)
+            # Même geste disque que la projection : un lecteur du board ne doit
+            # pas voir la restauration à moitié écrite.
+            write_board_bytes(board_dest, (files_dir / "task-board.yaml").read_bytes())
             restored.append(str(board_dest))
         else:
             board_dest.unlink(missing_ok=True)

@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from grimoire.core.fsio import atomic_write, locked
 from grimoire.missions.schemas import DependencyKind, RiskProfile, TaskState
 from grimoire.missions.verifiability import as_dict as verifiability_as_dict
 from grimoire.missions.waiting import attention_rank
@@ -35,6 +36,7 @@ __all__ = [
     "priority_rank",
     "task_state_of",
     "write_board",
+    "write_board_bytes",
 ]
 
 # Ordre normatif du cycle de vie, tel que le vérificateur du standard l'attend.
@@ -278,6 +280,23 @@ _TRANSITIONS: dict[str, dict[str, list[str]]] = {
 }
 
 
+def write_board_bytes(dest: Path, payload: str | bytes) -> None:
+    """Remplace le board par *payload* : verrou d'écriture, puis ``atomic_write``.
+
+    Le seul geste disque du board. Un lecteur concurrent (tick d'orchestration,
+    hook, cockpit) voit l'ancienne projection ou la nouvelle, jamais un fichier
+    tronqué — c'était le défaut : ``Path.write_text`` tronque avant d'écrire, et
+    sur un board de plus de treize mille lignes la fenêtre dure.
+
+    Le verrou sérialise deux écrivains ; il ne les fait pas converger, et c'est
+    voulu : le board est une projection idempotente du ledger, la prochaine
+    écriture le recompose en entier depuis la source. Le verrou du ledger, lui,
+    reste ce qui empêche deux gestes de se perdre une mise à jour.
+    """
+    with locked(dest):
+        atomic_write(dest, payload)
+
+
 def write_board(dest: Path, board: dict[str, Any]) -> None:
     """Écrit une projection là où on la demande, en YAML lisible.
 
@@ -293,5 +312,4 @@ def write_board(dest: Path, board: dict[str, Any]) -> None:
     yaml.width = 120
     stream = io.StringIO()
     yaml.dump(board, stream)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(stream.getvalue(), encoding="utf-8")
+    write_board_bytes(dest, stream.getvalue())

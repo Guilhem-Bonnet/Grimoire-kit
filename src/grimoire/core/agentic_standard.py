@@ -82,6 +82,7 @@ from grimoire.core.standard_generation import (
 )
 from grimoire.core.standard_profile_manifest import read_artifact_paths, read_profile
 from grimoire.core.standard_state import board_omits_task, invalidate_cache, task_from_board
+from grimoire.core.yaml_io import load_yaml_with_retry
 from grimoire.data import framework_path
 
 PROFILE_MAP_PATH = Path("agentic-standard/profile-map.yaml")
@@ -919,7 +920,7 @@ def _read_yaml_mapping(root: Path, rel_path: Path) -> dict[str, Any]:
     path = root / rel_path
     if not path.is_file():
         return {}
-    data = _yaml().load(path)
+    data = load_yaml_with_retry(path)
     if data is None:
         return {}
     if not isinstance(data, dict):
