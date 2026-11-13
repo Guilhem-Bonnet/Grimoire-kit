@@ -478,9 +478,9 @@ def _sqlite3(args: list[str], host: Host, stdin: str | None) -> bool:
     return bool(operands) and not readonly and bool(_SQL_WRITES.search(sql)) and host.hit(operands[0])
 
 
-_ED_WRITE = re.compile(r"^\s*[0-9.,$;+\-'a-z]*?\s*[wW]q?(?:\s+(\S.*))?$")
+_ED_WRITE = re.compile(r"^\s*(?:[0-9.,$;+\-'a-vx-z]+\s*)?[wW]q?(?:\s+(\S.*))?$")
 _EX_WRITE = re.compile(
-    r"^[:\s]*[0-9.,$%'<>+\-]*\s*(?:w|write|wq|x|xit|exit|wa|wall|wqa|wqall|xa|xall|up|update|sav|saveas)!?"
+    r"^[:\s]*(?:[0-9.,$%'<>+\-]+\s*)?(?:w|write|wq|x|xit|exit|wa|wall|wqa|wqall|xa|xall|up|update|sav|saveas)!?"
     r"(?:\s+(?:>>\s*)?(\S.*))?$"
 )
 _EDITORS = frozenset({"ex", "vi", "vim", "nvim", "view", "gvim", "vim.basic", "vim.tiny"})
