@@ -131,7 +131,7 @@ const ATELIER_SPACE = {
 
 async function applyFeatures() {
   let on = false;
-  try { on = (await api.features()).atelier === true; } catch { /* hôte sans la route : fonction éteinte */ }
+  try { on = (await api.testFeatures()).atelier === true; } catch { /* hôte sans la route : fonction éteinte */ }
   const present = SPACES.includes(ATELIER_SPACE);
   if (on === present) return;
   if (on) SPACES.splice(SPACES.findIndex((sp) => sp.id === 'configuration'), 0, ATELIER_SPACE);

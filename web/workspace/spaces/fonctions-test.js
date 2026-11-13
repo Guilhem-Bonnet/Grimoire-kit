@@ -44,7 +44,7 @@ export async function mount(root, ctx) {
   root.replaceChildren();
   let state;
   try {
-    state = await ctx.api.features();
+    state = await ctx.api.testFeatures();
   } catch (error) {
     if (ctx.signal.aborted) return;
     root.append(ctx.empty('Fonctions en test indisponibles', String(error.message || error)));

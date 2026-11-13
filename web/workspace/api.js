@@ -590,7 +590,7 @@ export const api = {
   taskIntake: (text) => post(WS + 'tasks/intake', { text }),
   taskIntakeCreate: (tasks) => post(WS + 'tasks/intake/create', { tasks }),
   // Fonctions en test : `GET features` lit les drapeaux du projet, `POST features` allume l'Atelier de spec.
-  features: () => get(WS + 'features'),
+  testFeatures: () => get(WS + 'features'),
   setFeature: (name, on) => post(WS + 'features', { [name]: on }),
   // Atelier de spec (en test) : 404 tant que le drapeau est éteint. L'écriture d'un bloc envoie l'empreinte du
   // fichier de phase lue avec le chantier ; un fichier changé depuis répond 409.
