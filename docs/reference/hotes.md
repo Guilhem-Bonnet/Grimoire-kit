@@ -444,7 +444,31 @@ le ledger. Depuis le lot A de l'issue #638 :
   `task_context`, `task_claim`, ou `GRIMOIRE_TASK_ID` ;
 - `post_tool_use` compte dans `session-<session_id>.json` (champ `mutations`)
   chaque outil dont la classification n'est pas lecture seule — fichier
-  écrit ou édité, commande Bash mutante ou destructive ; jamais le contenu ;
+  écrit ou édité, commande Bash mutante ou destructive ; jamais le contenu.
+  Une commande enveloppée est classée sur la commande qu'elle porte : `rtk git
+  status` (la forme qu'un proxy de terminal donne à `git status` avant le
+  `post_tool_use`), `timeout 30 ls`, `env LC_ALL=C git log` et `bash -c '<script>'`
+  dont chaque segment lit sont des lectures ; la même enveloppe autour d'une
+  écriture reste une écriture. Trois formes ne sont jamais des lectures, quoi
+  qu'elles portent, parce que le classement ne sait pas ce qu'elles lancent :
+  des guillemets ANSI-C (`$'…'`) ou une chaîne localisée (`$"…"`) hors
+  guillemets ; une affectation de variable devant une commande
+  (`NOM=valeur commande`, `env NOM=valeur commande`, `NOM=valeur` seul) dont
+  le nom n'est pas dans la liste des variables inertes (`LC_*`, `LANG`,
+  `LANGUAGE`, `TZ`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`,
+  `TERM`, `COLUMNS`, `LINES`, `GIT_TERMINAL_PROMPT`, `GH_PROMPT_DISABLED`,
+  `PYTHONIOENCODING`, `PYTHONUTF8`, `PYTHONDONTWRITEBYTECODE`, et `PAGER` ou
+  `GH_PAGER` vides ou égaux à `cat`) ; un `curl` dont une URL n'est pas écrite
+  en clair en `http://` ou `https://` (autre schéma, schéma absent, accolades
+  ou crochets, variable, identifiant devant `@`). Derrière `curl`,
+  `journalctl`, `systemctl`, `ss` et `gh api`, dont la lecture se décide sur
+  les arguments, un argument que le shell développe hors guillemets (variable,
+  accolades `{a,b}` ou `{1..3}`, motif de fichiers) classe aussi la commande en
+  écriture. Une redirection qui n'écrit aucun fichier (`2>&1`, `>&2`, `2>&-`,
+  et toute sortie vers `/dev/null` écrit exactement ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
+  commande en écriture, y compris vers `/dev/stdout` ou vers un descripteur
+  autre que 1 et 2 (`>&3`). Un motif entre
+  guillemets est une donnée, antislash compris (`grep "a\|b" f` lit) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
   sur les profils `governed` et `production` ; les autres profils reçoivent

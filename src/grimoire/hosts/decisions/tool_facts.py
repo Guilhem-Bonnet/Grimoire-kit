@@ -15,6 +15,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any
 
+from grimoire.hosts.decisions.read_only_arguments import ARGUMENT_CHECKS
 from grimoire.hosts.secrets import SECRET_RULES
 from grimoire.policies.schemas import ActionKind, MutationClass
 
@@ -88,8 +89,9 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
 #: Leading verbs whose blast radius never survives the session — the read
 #: half of the destructive/mutation split above. Matched against the first
 #: *word* of a command (or of one ``&&``/``;``/``|`` segment of it), after
-#: stripping ``VAR=value`` assignments and a leading ``sudo``/``command``/
-#: ``time``/``nice``/``ionice``/``env`` — never against the whole line, and
+#: stripping the ``VAR=value`` assignments of an inert variable and the
+#: transparent wrappers (:func:`_inner_words`: ``sudo``, ``env``, ``nice``,
+#: ``timeout 30``, ``rtk``…) — never against the whole line, and
 #: never enough on its own: :func:`is_read_only_command` also refuses any
 #: output redirection (``>``, ``>>``, ``| tee``), which is what tells
 #: ``cat file`` from ``cat >> file`` apart. Deliberately narrow: an
@@ -108,6 +110,7 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
         # :func:`_is_read_only_segment`.
         "cd", "pushd", "popd", "sort", "uniq", "cut", "tr", "jq", "column", "nl", "comm", "paste",
         "sed", "awk", "gawk", "mawk",
+        "pgrep",  # ne fait que lister : signaler est le rôle de ``pkill``
     }
 )
 
@@ -131,13 +134,45 @@ _FIND_MUTATING_PRIMARIES = frozenset(
     {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 )
 
-#: ``gh <resource> <verb> ...`` — the verb (second or third word) decides,
-#: independently of the resource (``pr``, ``issue``, ``repo``, ``run``…):
-#: ``gh pr view``, ``gh issue list``, ``gh run view`` never mutate.
-_READ_ONLY_GH_VERBS = frozenset({"view", "list", "status", "diff", "show"})
-
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_LEADING_NEUTRAL_WORDS = frozenset({"sudo", "command", "time", "nice", "ionice", "env"})
+
+# ── Affectations de variables ────────────────────────────────────────────────
+#
+# ``NOM=valeur commande`` et ``env NOM=valeur commande`` règlent l'environnement de la
+# commande portée, et ``NOM=valeur`` seul celui des commandes qui suivent. Une variable
+# peut faire exécuter du code au shell porté dès son démarrage, ou changer ce que fera un
+# outil de la liste blanche : son fichier de configuration, son afficheur, le chargeur de
+# bibliothèques, la recherche des exécutables. Le classement ne sait pas ce qu'une
+# variable quelconque déclenche : liste blanche. Une affectation dont le nom n'est pas
+# ici n'est pas retirée, et la commande n'est pas une lecture.
+
+#: Variables qui ne règlent que la langue, le fuseau, les couleurs, les dimensions du
+#: terminal, les invites et l'encodage de Python. ``LC_*`` est lu par :data:`_LOCALE_RE`.
+_INERT_VARIABLES = frozenset(
+    {
+        "LANG", "LANGUAGE", "TZ", "NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR", "TERM",
+        "COLUMNS", "LINES", "GIT_TERMINAL_PROMPT", "GH_PROMPT_DISABLED",
+        "PYTHONIOENCODING", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
+    }
+)
+_LOCALE_RE = re.compile(r"LC_[A-Z]+")
+#: Un afficheur est une commande que l'outil lance : il n'est inerte que neutralisé.
+_PAGER_VARIABLES = frozenset({"PAGER", "GH_PAGER"})
+_NEUTRAL_PAGERS = frozenset({"", "cat"})
+
+
+def _assignment_is_inert(word: str) -> bool:
+    """*word* (``NOM=valeur``) affecte une variable de la liste blanche.
+
+    Sur la surface, une valeur entre guillemets est effacée et paraît vide : la valeur
+    d'un afficheur est relue sur les mots résolus par ``shlex``, où elle est entière.
+    """
+    name, _, value = word.partition("=")
+    if name in _PAGER_VARIABLES:
+        return value in _NEUTRAL_PAGERS
+    return name in _INERT_VARIABLES or _LOCALE_RE.fullmatch(name) is not None
+
+
 #: Output redirection or a ``tee`` in the pipeline: the one shell-level
 #: signal that turns an otherwise read-only pipeline into a write, checked
 #: against the quote-stripped surface so a literal ``>`` inside a commit
@@ -151,6 +186,142 @@ _WRITE_REDIRECTION_RE = re.compile(r">>?(?!=)|\btee\b")
 _SHELL_LEADING_KEYWORDS = frozenset({"do", "then", "else", "elif", "while", "until", "if", "!"})
 _SHELL_CLOSING_KEYWORDS = frozenset({"done", "fi", "esac"})
 _SUBSTITUTION_RE = re.compile(r"\$\(|`")
+
+# ── Enveloppes transparentes ─────────────────────────────────────────────────
+#
+# Une commande arrive souvent enveloppée : par l'agent (``timeout 30 git status``,
+# ``env LC_ALL=C ls``) ou par un autre hook qui la réécrit avant le ``PostToolUse``
+# (un proxy de terminal rend ``git status`` en ``rtk git status`` et ``cat f`` en
+# ``rtk read f``). L'enveloppe ne change pas ce que fait la commande portée : on la
+# retire, puis la commande portée est classée par les règles de toujours. Une
+# enveloppe dont la forme n'est pas reconnue n'est pas retirée : elle devient le
+# verbe, qui n'est pas un verbe de lecture.
+#
+# ``nohup`` n'en fait pas partie : il écrit ``nohup.out`` dès que la sortie est un
+# terminal (c'est le cas de ``run_in_terminal``).
+
+#: Mots sans option qui précèdent une commande sans rien y changer.
+_PLAIN_PREFIX_WORDS = frozenset({"sudo", "ionice"}) | _SHELL_LEADING_KEYWORDS
+_DURATION_RE = re.compile(r"\d+(?:\.\d+)?[smhd]?")
+_NICE_ADJUSTMENT_RE = re.compile(r"-\d+|-n-?\d+|--adjustment=-?\d+")
+_TIMEOUT_FLAGS = frozenset({"--preserve-status", "--foreground", "-v", "--verbose"})
+_TIMEOUT_VALUED = frozenset({"-s", "--signal", "-k", "--kill-after"})
+
+
+def _after_timeout(words: list[str], i: int) -> int:
+    """Indice de la commande portée par ``timeout [options] <durée>``, ou -1 (forme non reconnue)."""
+    n = len(words)
+    while i < n and words[i].startswith("-"):
+        word = words[i]
+        if word in _TIMEOUT_FLAGS or word.startswith(("--signal=", "--kill-after=")):
+            i += 1
+        elif word in _TIMEOUT_VALUED and i + 1 < n:
+            i += 2
+        else:
+            return -1
+    return i + 1 if i < n and _DURATION_RE.fullmatch(words[i]) else -1
+
+
+def _after_env_options(words: list[str], i: int) -> int:
+    """Indice du premier mot après les options de ``env`` qui ne font que régler l'environnement."""
+    n = len(words)
+    while i < n:
+        if words[i] in {"-i", "-", "--ignore-environment"} or words[i].startswith("--unset="):
+            i += 1
+        elif words[i] == "-u" and i + 1 < n:
+            i += 2
+        else:
+            break
+    return i
+
+
+def _inner_words(words: list[str]) -> list[str] | None:
+    """Les mots de la commande portée, une fois retirés affectations inertes, mots-clés et enveloppes.
+
+    ``None`` : une affectation hors de la liste blanche (:func:`_assignment_is_inert`)
+    précède la commande, à quelque niveau d'enveloppe que ce soit (``timeout 5 env X=1
+    …``) — la commande n'est pas une lecture, quoi qu'elle porte. Une liste vide : il ne
+    restait que des affectations inertes ou des mots neutres, rien à muter. ``rtk`` ou
+    ``timeout`` suivis de rien restent en tête de la liste rendue : une enveloppe qui ne
+    porte aucune commande n'est pas une lecture.
+    """
+    i, n = 0, len(words)
+    wrapper = -1  # premier ``rtk``/``timeout`` retiré
+    while i < n:
+        word = words[i]
+        following = words[i + 1 : i + 2]
+        if _ENV_ASSIGNMENT_RE.match(word):
+            if not _assignment_is_inert(word):
+                return None
+            i += 1
+        elif word in _PLAIN_PREFIX_WORDS:
+            i += 1
+        elif word == "command":
+            if following in (["-v"], ["-V"]):
+                break  # ``command -v gh`` : une recherche, lue par l'appelant
+            i += 2 if following == ["-p"] else 1
+        elif word == "time":
+            i += 2 if following == ["-p"] else 1
+        elif word == "nice":
+            i += 1
+            if following == ["-n"] and re.fullmatch(r"-?\d+", "".join(words[i + 1 : i + 2])):
+                i += 2
+            elif following and _NICE_ADJUSTMENT_RE.fullmatch(following[0]):
+                i += 1
+        elif word == "env":
+            i = _after_env_options(words, i + 1)
+        elif word == "rtk":
+            wrapper = i if wrapper < 0 else wrapper
+            if following == ["read"]:
+                return ["cat", *words[i + 2 :]]  # la réécriture de ``cat``/``head``/``tail`` : aucune option n'écrit
+            i += 2 if following == ["proxy"] else 1
+        elif word == "timeout":
+            after = _after_timeout(words, i + 1)
+            if after < 0:
+                break
+            wrapper = i if wrapper < 0 else wrapper
+            i = after
+        else:
+            break
+    return words[wrapper:] if i >= n and wrapper >= 0 else words[i:]
+
+
+# ── Arguments que le shell développe ─────────────────────────────────────────
+#
+# ``journalctl``, ``systemctl``, ``ss``, ``curl`` et ``gh`` ne lisent que selon leurs
+# arguments : chacun a sa règle dans :mod:`.read_only_arguments` (``ARGUMENT_CHECKS``).
+# Une règle lit les arguments du verbe tels qu'ils sont écrits. Le shell, lui,
+# les développe avant de lancer la commande : une variable (que le découpage en mots
+# scinde en plusieurs arguments), des accolades (``{a,b}``, ``{1..3}``), un motif de
+# fichiers. L'argument développé peut être une option que la règle refuse. Pour ces
+# verbes, un argument que le shell développe n'est pas lu : la commande est une mutation.
+# ``gh`` hors ``gh api`` garde sa lecture d'avant (``gh pr view $PR``).
+
+#: Dans un mot résolu : une variable ou une substitution. Les guillemets sont déjà
+#: retirés, un dollar cité entre guillemets simples est donc refusé lui aussi.
+_SHELL_VALUE_RE = re.compile(r"[$`]")
+#: Sur la surface, donc hors guillemets : des accolades qui portent une virgule ou un
+#: intervalle. ``{owner}`` ne se développe pas.
+_BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*(?:,|\.\.)")
+#: Sur la surface, mot par mot : un motif de fichiers. Un ``?`` derrière une barre oblique
+#: ne rend que des chemins sous un dossier nommé, jamais une option (``pulls?per_page=5``).
+_GLOB_WORD_RE = re.compile(r"[*\[]|^[^/]*\?")
+
+
+def _arguments_are_written_out(verb: str, args: list[str], segment: str) -> bool:
+    """Les arguments de *verb* arrivent à la commande tels que *segment* les écrit.
+
+    *args* sont les mots résolus par ``shlex``, *segment* le texte brut dont ils viennent :
+    la sous-commande se lit sur les premiers, ce que le shell développe hors guillemets
+    sur la surface du second.
+    """
+    if verb == "gh" and args[:1] != ["api"]:
+        return True
+    if any(_SHELL_VALUE_RE.search(word) for word in args):
+        return False
+    surface = _read_surface(segment)
+    return not _BRACE_EXPANSION_RE.search(surface) and not any(_GLOB_WORD_RE.search(word) for word in surface.split())
+
 
 def _git_subcommand(words: list[str]) -> tuple[str, list[str]]:
     """Sous-commande git et ses arguments, après ``-C <dir>`` / ``--no-pager``."""
@@ -188,29 +359,23 @@ def _is_read_only_git(words: list[str]) -> bool:
 
 
 def _is_read_only_segment(segment: str) -> bool:
-    words = segment.split()
-    idx = 0
-    while idx < len(words) and (
-        _ENV_ASSIGNMENT_RE.match(words[idx])
-        or words[idx] in _LEADING_NEUTRAL_WORDS
-        or words[idx] in _SHELL_LEADING_KEYWORDS
-    ):
-        if words[idx] == "command" and idx + 1 < len(words) and words[idx + 1] in {"-v", "-V"}:
-            return True  # ``command -v gh`` : une recherche, jamais une exécution
-        idx += 1
-    if idx >= len(words):
-        return True  # nothing left but assignments/neutral words: nothing to mutate
-    verb = words[idx]
-    args = words[idx + 1 :]
+    words = _inner_words(segment.split())
+    if words is None:
+        return False  # une affectation hors liste blanche : pas une lecture
+    if not words:
+        return True  # nothing left but inert assignments/neutral words: nothing to mutate
+    verb = words[0]
+    args = words[1:]
+    if verb == "command":
+        return args[:1] in (["-v"], ["-V"])  # ``command -v gh`` : une recherche, jamais une exécution
     if verb in _SHELL_CLOSING_KEYWORDS:
         return True
     if verb == "for":
         return not _SUBSTITUTION_RE.search(segment)  # ``for x in a b`` n'exécute que son corps
     if verb == "git":
         return _is_read_only_git(args)
-    if verb == "gh":
-        tail = words[idx + 1 : idx + 3]
-        return any(word in _READ_ONLY_GH_VERBS for word in tail)
+    if verb in ARGUMENT_CHECKS:
+        return ARGUMENT_CHECKS[verb](args)
     if verb == "find":
         return not any(word in _FIND_MUTATING_PRIMARIES for word in args)
     # ``sed`` et ``awk`` : leur script est quoté donc invisible ici ; la liste
@@ -235,7 +400,6 @@ def _is_read_only_segment(segment: str) -> bool:
 # fonctionne en liste blanche : tout ce qui n'est pas explicitement reconnu comme
 # une lecture est une mutation.
 
-_NEUTRAL_PREFIX = _LEADING_NEUTRAL_WORDS | _SHELL_LEADING_KEYWORDS
 _SED_FLAG_CLUSTER_RE = re.compile(r"^-[nErz]*e?$")
 _SED_ADDR_STEP_RE = re.compile(r"\d+(?:~\d+)?|\+\d+|~\d+")
 _SED_S_FLAGS = frozenset("gpiImM0123456789")
@@ -430,22 +594,215 @@ def _raw_segments_read_only(command: str) -> bool:
         return False
     for segment in segments:
         try:
-            words = shlex.split(segment)
+            words = _inner_words(shlex.split(segment))  # ``rtk sed -i`` et ``timeout 5 awk`` portent un sed, un awk
         except ValueError:
             return False  # guillemet non fermé : incertain donc mutation
-        idx = 0
-        while idx < len(words) and (
-            _ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _NEUTRAL_PREFIX
-        ):
-            idx += 1
-        if idx >= len(words):
+        if words is None:
+            return False  # affectation hors liste blanche, valeur entre guillemets comprise
+        if not words:
             continue
-        verb, args = words[idx], words[idx + 1 :]
+        verb, args = words[0], words[1:]
         if verb == "sed" and not _sed_is_read_only(args):
             return False
         if verb in {"awk", "gawk", "mawk"} and not _awk_is_read_only(args):
             return False
     return True
+
+
+# ── Passe sur les mots résolus : scripts ``bash -c`` et verbes à arguments ───
+#
+# ``bash -c '<script>'`` exécute son script : il n'est une lecture que si le script,
+# reclassé par les mêmes règles, n'est fait que de lectures. La passe relit donc la
+# commande segment par segment sur les mots que ``shlex`` résout, retire les scripts
+# en lecture seule, et rend ce qu'il reste à classer.
+
+_INNER_SHELLS = frozenset({"bash", "sh", "zsh"})
+#: Un script dans un script est encore relu ; au-delà, il reste une mutation.
+_MAX_SCRIPT_DEPTH = 2
+_PLAIN_SCRIPT_RE = re.compile(r"[\w./-]+")
+#: Dans des guillemets doubles, le shell appelant réécrit le script avant de le passer.
+_OUTER_EXPANSION_RE = re.compile(r'["$`\\]')
+#: ``${ cmd }`` et ``${| cmd }`` : substitution de commande sans sous-shell (bash 5.3, zsh).
+_INLINE_SUBSTITUTION_RE = re.compile(r"\$\{[\s|]")
+
+
+def _inner_script(shell: str, segment: str, args: list[str]) -> str | None:
+    """Le script de ``<shell> -c <script>`` tel que le shell porté le recevra, ou ``None``.
+
+    Seule la forme exacte ``-c`` suivie du script est lue (``-lc``, un fichier, un
+    argument de plus : mutation). Le script doit arriver intact : entre guillemets
+    simples, entre guillemets doubles sans rien que le shell appelant développe
+    (``"ls $DIR"`` devient ``ls ; rm x`` si ``DIR`` le dit), ou en un mot nu.
+    """
+    if len(args) != 2 or args[0] != "-c":
+        return None
+    script = args[1]
+    raw = segment.rstrip()
+    intact = (
+        ("'" not in script and raw.endswith(f"'{script}'"))
+        or (not _OUTER_EXPANSION_RE.search(script) and raw.endswith(f'"{script}"'))
+        or (_PLAIN_SCRIPT_RE.fullmatch(script) is not None and raw.endswith(script))
+    )
+    if not intact or "<<" in script or _INLINE_SUBSTITUTION_RE.search(script):
+        return None
+    if shell == "zsh" and "(" in script:
+        return None  # ``*(e:'cmd':)`` et ``=(cmd)`` exécutent : hors de ce que la passe sait lire
+    return script
+
+
+def _without_read_only_scripts(command: str, depth: int) -> str | None:
+    """*command* sans ses ``bash -c`` en lecture seule ; ``None`` si la commande écrit ou ne se lit pas.
+
+    Sans ``bash -c``, *command* est rendue telle quelle. Les corps de heredoc sont
+    écartés avant le découpage : ce sont des données, pas des segments.
+    """
+    segments, substitution = _scan_raw(_strip_heredoc_bodies(command))
+    kept: list[str] = []
+    scripts = 0
+    for segment in segments:
+        try:
+            words = _inner_words(shlex.split(segment))
+        except ValueError:
+            return None  # guillemet non fermé
+        if words is None:
+            return None  # affectation hors liste blanche, valeur entre guillemets comprise
+        if not words:
+            kept.append(segment)
+            continue
+        verb, args = words[0], words[1:]
+        if verb in _INNER_SHELLS:
+            script = _inner_script(verb, segment, args)
+            if script is None or depth >= _MAX_SCRIPT_DEPTH or not _command_is_read_only(script, depth + 1):
+                return None
+            scripts += 1
+            kept.append("true")
+        elif verb in ARGUMENT_CHECKS and not (
+            _arguments_are_written_out(verb, args, segment) and ARGUMENT_CHECKS[verb](args)
+        ):
+            return None
+        else:
+            kept.append(segment)
+    if not scripts:
+        return command
+    if substitution or "<<" in command:
+        return None  # un script à côté d'une substitution ou d'un heredoc : la ligne n'est pas recomposée
+    return " ; ".join(kept)
+
+
+# ── Redirections qui n'écrivent aucun fichier ────────────────────────────────
+#
+# ``2>&1`` duplique un descripteur, ``2>/dev/null`` jette une sortie : ni l'une ni
+# l'autre n'écrit de fichier, et une lecture qui les porte reste une lecture. Liste
+# blanche de formes exactes, lues hors guillemets : la duplication vers la sortie
+# standard ou d'erreur, ou la fermeture (``>&2``, ``2>&1``, ``2>&-``), et la sortie vers
+# ``/dev/null`` écrit exactement ainsi (``>``, ``>>``, ``N>``, ``&>``, ``&>>``, avec ou
+# sans espace avant la cible). Chaque forme doit finir sur une frontière de mot.
+# Tout le reste garde son ``>`` et reste une mutation : un autre périphérique
+# (``/dev/stdout``), une autre graphie (``/dev//null``, guillemets), un chemin qui
+# commence pareil (``/dev/null/../x``), ``>|``, ``<>``, une cible portée par une
+# variable, et la duplication vers un autre descripteur (``>&3`` : un shell qui dure
+# a pu l'ouvrir sur un fichier par un ``exec 3>f`` antérieur).
+
+_REDIRECTION_END = r"(?=$|[\s;|&)])"
+_FILELESS_TARGET = r"(?:&[12-]|>?[ \t]*/dev/null)"
+#: ``2>&1``, ``2>/dev/null`` : un descripteur d'un chiffre en début de mot.
+_FILELESS_FD_RE = re.compile(r"[0-9]>" + _FILELESS_TARGET + _REDIRECTION_END)
+#: ``>&2``, ``>/dev/null``, ``>>/dev/null``.
+_FILELESS_OUT_RE = re.compile(r">" + _FILELESS_TARGET + _REDIRECTION_END)
+#: ``&>/dev/null``, ``&>>/dev/null``.
+_FILELESS_BOTH_RE = re.compile(r"&>>?[ \t]*/dev/null" + _REDIRECTION_END)
+
+
+def _opaque_spans(text: str) -> list[tuple[int, int, bool]]:
+    """Les morceaux de *text* que le shell ne lit pas comme de la syntaxe : ``(début, fin, cité)``.
+
+    ``cité`` est vrai pour un texte entre guillemets fermés. Il est faux pour un caractère
+    échappé hors guillemets (``\\"`` n'ouvre aucun texte cité) et pour un guillemet jamais
+    fermé, qui couvre alors tout le reste. Dans des guillemets doubles, un antislash
+    échappe le caractère qui le suit, comme pour le shell.
+    """
+    spans: list[tuple[int, int, bool]] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            spans.append((i, min(i + 2, n), False))
+            i += 2
+        elif c == "'":
+            end = text.find("'", i + 1)
+            if end < 0:
+                spans.append((i, n, False))
+                break
+            spans.append((i, end + 1, True))
+            i = end + 1
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            if j >= n:
+                spans.append((i, n, False))
+                break
+            spans.append((i, j + 1, True))
+            i = j + 1
+        else:
+            i += 1
+    return spans
+
+
+def _opens_dollar_quote(text: str) -> bool:
+    """Vrai si *text* ouvre, hors guillemets, une chaîne ``$'…'`` (ANSI-C) ou ``$"…"`` (localisée).
+
+    :func:`_opaque_spans` ne modélise ni l'une ni l'autre. Dans ``$'…'``, ``\\'`` est un
+    guillemet échappé qui ne ferme rien ; le balayage, lui, ferme la chaîne là et prend la
+    suite, que le shell exécute, pour un texte cité. La forme n'est pas modélisée : elle
+    est refusée. S'arrêter à la première suffit, puisque le balayage et le shell lisent la
+    même chose jusqu'à elle. Entre guillemets simples ou doubles, ou derrière un antislash,
+    ``$'`` est un texte (``grep 'a$' f``).
+    """
+    cursor = 0
+    for start, end, _ in _opaque_spans(text):
+        # ``start > cursor`` : le dollar n'appartient pas à la zone précédente (``\\$'a'``).
+        if text[start] in "'\"" and start > cursor and text[start - 1] == "$":
+            return True
+        cursor = end
+    return False
+
+
+def _without_fileless_redirections(command: str) -> str:
+    """*command* sans ses redirections de la liste blanche, chacune remplacée par une espace.
+
+    Le texte entre guillemets et un caractère échappé sont recopiés tels quels : une
+    redirection citée est une donnée. Un chiffre n'est un descripteur qu'en début de mot
+    (``cat fichier2>/dev/null`` lit ``fichier2``).
+    """
+    if ">" not in command:
+        return command
+    out: list[str] = []
+    spans = iter(_opaque_spans(command))
+    span = next(spans, None)
+    i, n = 0, len(command)
+    while i < n:
+        if span is not None and i == span[0]:
+            out.append(command[i : span[1]])
+            i = span[1]
+            span = next(spans, None)
+            continue
+        c = command[i]
+        previous = command[i - 1] if i else " "
+        match = None
+        if c.isdigit() and (previous.isspace() or previous in ";|&("):
+            match = _FILELESS_FD_RE.match(command, i)
+        elif c == "&" and previous not in "&<>":
+            match = _FILELESS_BOTH_RE.match(command, i)
+        elif c == ">" and previous not in "&<>":
+            match = _FILELESS_OUT_RE.match(command, i)
+        if match is not None:
+            out.append(" ")
+            i = match.end()
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def is_read_only_command(command: str) -> bool:
@@ -461,23 +818,60 @@ def is_read_only_command(command: str) -> bool:
 
     Conservative by construction, in every direction: an unrecognised
     leading verb, an ambiguous ``git``/``gh`` subcommand, any output
-    redirection or ``tee`` anywhere in the line, or an unparseable segment
-    all fall back to "not read-only" — the pre-existing (safe) behaviour.
-    Only a command every one of whose ``&&``/``;``/``|``/``||`` segments is a
-    *known* read verb, with no redirection anywhere in the line, is
-    read-only. Quoted text is stripped first (:func:`command_surface`), the
-    same pass the destructive-pattern check above already relies on, so a
-    literal ``>`` or ``rm`` inside a commit message never flips the verdict.
+    redirection to a file or ``tee`` anywhere in the line, or an unparseable
+    segment all fall back to "not read-only" — the pre-existing (safe)
+    behaviour. Only a command every one of whose ``&&``/``;``/``|``/``||``
+    segments is a *known* read verb, with no redirection to a file anywhere
+    in the line, is read-only. Quoted text is stripped first, so a literal
+    ``>`` or ``rm`` inside a commit message never flips the verdict.
+
+    Two things are read on this path only, never for the destructive check:
+    a redirection that writes no file (``2>&1``, ``2>/dev/null`` —
+    :func:`_without_fileless_redirections`) is dropped, and quotes are read
+    the way the shell reads them (:func:`_read_surface`), so a double-quoted
+    string carrying a backslash (``grep "a\\|b" f``) is data like any other.
+
+    A wrapped read is still a read: a transparent wrapper is stripped before
+    the verb is looked up (:func:`_inner_words` — ``rtk git status``,
+    ``timeout 30 ls``), and a ``bash -c '<script>'`` is read-only when every
+    segment of its script is (:func:`_without_read_only_scripts`).
+
+    Three shapes are never a read, whatever they carry, because this
+    classifier cannot tell what they run: ANSI-C quoting (``$'…'``) or a
+    localized string (``$"…"``) outside quotes (:func:`_opens_dollar_quote`);
+    a variable assignment in front of a command, directly or through ``env``,
+    unless the variable is one of a short list of inert ones
+    (:func:`_assignment_is_inert` — stricter than before, when any
+    ``VAR=value`` prefix was dropped); and a ``curl`` whose URL is not a
+    plainly written ``http://`` or ``https://`` one (:mod:`.read_only_arguments`).
+    Behind a verb whose read-only status is decided on its arguments
+    (``curl``, ``journalctl``, ``systemctl``, ``ss``, ``gh api``), an argument
+    the shell expands — a variable, braces, a file pattern — is not read
+    either (:func:`_arguments_are_written_out`).
     """
+    return _command_is_read_only(command, 0)
+
+
+def _command_is_read_only(command: str, depth: int) -> bool:
+    """:func:`is_read_only_command` pour *command*, script de niveau *depth* (0 : la ligne elle-même)."""
     if not command.strip():
         return False
-    surface = command_surface(command)
+    # Lue telle qu'écrite puis sans ses corps de heredoc : une apostrophe dans un corps
+    # décale le balayage de la première lecture, la seconde ne la voit pas.
+    if _opens_dollar_quote(command) or _opens_dollar_quote(_strip_heredoc_bodies(command)):
+        return False
+    command = _without_fileless_redirections(command)
+    reduced = _without_read_only_scripts(command, depth)
+    if reduced is None:
+        return False
+    command = reduced
+    surface = _read_surface(command)
     if _WRITE_REDIRECTION_RE.search(surface):
         return False
     if not _raw_segments_read_only(command):
         return False
     # ``&`` seul (arrière-plan) sépare aussi deux commandes : ``ls & rm f``.
-    # ``2>&1`` et ``&>`` n'arrivent jamais ici, toute redirection est refusée plus haut.
+    # ``2>&1`` et ``&>/dev/null`` ont été retirés plus haut ; toute autre redirection est refusée.
     segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\||&|\n", surface)]
     segments = [seg for seg in segments if seg]
     return bool(segments) and all(_is_read_only_segment(seg) for seg in segments)
@@ -537,15 +931,33 @@ def command_surface(command: str) -> str:
     follows ``bash -c``, ``eval`` or ``xargs`` is executed and stays inspected.
     """
     surface = _strip_heredoc_bodies(command)
+    return _blank_quoted(surface, [quoted.span() for quoted in _QUOTED_RE.finditer(surface)])
+
+
+def _read_surface(command: str) -> str:
+    """La surface du classement lecture / mutation : les guillemets y sont lus comme le shell les lit.
+
+    :data:`_QUOTED_RE` exige deux antislashs pour un échappement : ``"a\\|b"`` lui échappe
+    et reste sur la surface, où son ``|`` coupe la commande. Elle prend aussi un guillemet
+    échappé hors guillemets pour l'ouverture d'un texte cité. :func:`_opaque_spans` lit les
+    deux comme le shell. Cette surface ne sert qu'à :func:`_command_is_read_only` : la
+    détection destructive garde :func:`command_surface` et ce qu'elle inspecte aujourd'hui.
+    """
+    surface = _strip_heredoc_bodies(command)
+    return _blank_quoted(surface, [(start, end) for start, end, quoted in _opaque_spans(surface) if quoted])
+
+
+def _blank_quoted(surface: str, spans: list[tuple[int, int]]) -> str:
+    """*surface* sans ses textes cités (*spans*), sauf là où un shell va les exécuter."""
     out: list[str] = []
     cursor = 0
-    for quoted in _QUOTED_RE.finditer(surface):
-        preceding = surface[cursor:quoted.start()]
+    for start, end in spans:
+        preceding = surface[cursor:start]
         out.append(preceding)
         # Keep the quotes as a word boundary so ``rm -rf`` cannot be spliced
         # together out of two neighbouring fragments.
-        out.append(quoted.group(0) if _EVAL_INTRODUCER.search(preceding.rstrip()) else " ")
-        cursor = quoted.end()
+        out.append(surface[start:end] if _EVAL_INTRODUCER.search(preceding.rstrip()) else " ")
+        cursor = end
     out.append(surface[cursor:])
     return "".join(out)
 
