@@ -469,8 +469,15 @@ def test_les_options_de_texte_de_grimoire_sont_des_chaines_dans_toute_la_cli() -
     _subcommands, text_options = ag._MENTION_GRAMMAR["grimoire"]
     seen: set[str] = set()
 
-    # Lecture par attributs : selon sa version, Typer s'appuie sur click ou sur sa copie embarquée, et
-    # ``isinstance`` contre l'un ne reconnaît pas l'autre.
+    # Lecture par attributs : selon sa version, Typer s'appuie sur click ou sur sa copie embarquée
+    # (``isinstance`` contre l'un ne reconnaît pas l'autre), et porte le type d'une option sous ``type``
+    # (un ``StringParamType``) ou sous ``type_descriptor.annotation`` (le type Python déclaré, ``str``).
+    def is_text(param: object) -> bool:
+        descriptor = getattr(param, "type_descriptor", None)
+        if descriptor is not None:
+            return getattr(descriptor, "annotation", None) is str
+        return type(getattr(param, "type", None)).__name__ == "StringParamType"
+
     def walk(command: object, trail: str) -> None:
         for param in getattr(command, "params", []):
             named = text_options & set(getattr(param, "opts", []))
@@ -478,7 +485,7 @@ def test_les_options_de_texte_de_grimoire_sont_des_chaines_dans_toute_la_cli() -
                 seen.update(named)
                 where = f"{trail} {param.opts}"
                 assert not param.is_flag and param.nargs == 1 and not param.multiple, where
-                assert type(param.type).__name__ == "StringParamType", where
+                assert is_text(param), where
         if hasattr(command, "list_commands"):
             context = command.context_class(command)  # type: ignore[attr-defined]
             for name in command.list_commands(context):  # la CLI charge ses groupes à la demande
