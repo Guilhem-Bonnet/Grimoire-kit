@@ -730,7 +730,7 @@ class _Script:
             return False
         if k + 1 < len(toks) and toks[k + 1].kind == "o" and toks[k + 1].text == "(":
             args = _split_commas(toks[k + 2 : _group(toks, k + 1) - 1])
-        elif self.lang in _NO_PAREN_LANGS and k + 1 < len(toks) and toks[k + 1].kind in ("s", "n"):
+        elif self.lang in _NO_PAREN_LANGS and k + 1 < len(toks) and toks[k + 1].kind in ("s", "n", "u", "c"):
             end = k + 1
             while end < len(toks) and not (toks[end].kind in ("n", "o") and toks[end].text in _STOP_WORDS):
                 end += 1
