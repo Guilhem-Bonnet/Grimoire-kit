@@ -309,3 +309,56 @@ def test_une_duree_qu_on_ne_peut_pas_calculer_n_est_pas_zero(tmp_path: Path) -> 
     service.attach_session(tid, "S-abimee", session_host="claude-code-cli", actor="agent-a")
 
     assert _card(tmp_path, tid)["session"]["duration_s"] is None
+
+
+# ── Le coût du pouls (mesuré le 2026-11-13) ─────────────────────────────────
+
+
+def test_les_decisions_ne_sont_rejouees_que_quand_le_ledger_a_bouge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché : chaque pouls « changé » rejouait le ledger de chaque projet pour compter les décisions,
+    même quand seul un journal de session avait battu."""
+    import grimoire.missions.decisions as decisions
+
+    service, pairs = _with_two_decisions(tmp_path)
+    calls: list[int] = []
+    real = decisions.pending_decisions
+    monkeypatch.setattr(decisions, "pending_decisions", lambda ledger: calls.append(1) or real(ledger))
+
+    assert _pulse(tmp_path)["decisions"]["pending"] == 2
+    assert _pulse(tmp_path)["decisions"]["pending"] == 2
+    assert len(calls) == 1, "ledger immobile : le compte gardé est resservi"
+
+    service.answer(pairs[0][0], "fusionner", "guilhem", origin=ORIGIN_HUMAN, question_id=pairs[0][1])
+    assert _pulse(tmp_path)["decisions"]["pending"] == 1, "le ledger a bougé : le compte est refait"
+    assert len(calls) == 2
+
+
+def test_un_journal_ancien_et_immobile_n_est_pas_relu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché : 2 113 fichiers relus et hachés toutes les 0,5 s par onglet, alors que leur date suffisait."""
+    old = datetime.now(UTC) - timedelta(hours=3)
+    journal = _journal(tmp_path, "s-vieux", task_id="T-1", started=old, updated=old)
+    stamp = old.timestamp()
+    os.utime(journal, (stamp, stamp))
+    first = _pulse(tmp_path)["fingerprint"]
+    reads: list[Path] = []
+    real = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda self: reads.append(self) or real(self))
+
+    assert _pulse(tmp_path)["fingerprint"] == first
+    assert journal not in reads, "date, taille et inode inchangés depuis plus de 2 s : le contenu n'est pas relu"
+
+
+def test_une_reecriture_dans_le_meme_pas_d_horloge_reste_vue(tmp_path: Path) -> None:
+    """La mémoire du contenu ne doit pas rouvrir le défaut de Windows : réécrit à date et taille égales,
+    un journal récent est toujours relu, donc son changement se voit."""
+    now = datetime.now(UTC)
+    journal = _journal(tmp_path, "s-frais", task_id="T-1", started=now, updated=now)
+    info = journal.stat()
+    first = _pulse(tmp_path)["fingerprint"]
+
+    text = journal.read_text(encoding="utf-8").replace("T-1", "T-2")
+    journal.write_text(text, encoding="utf-8")
+    os.utime(journal, ns=(info.st_atime_ns, info.st_mtime_ns))
+
+    assert journal.stat().st_size == info.st_size
+    assert _pulse(tmp_path)["fingerprint"] != first
