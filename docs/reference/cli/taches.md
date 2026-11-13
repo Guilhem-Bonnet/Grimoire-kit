@@ -629,12 +629,11 @@ dans cet ordre, et chaque garde échoue fermée :
   peut pas s'inscrire rien n'est appliqué ; des sceaux qui ne couvrent plus la tête renvoient à la relecture ; aucun candidat au registre,
   registre ou journal illisible, identités ou modèles en défaut, erreur : question « fusionner ? » à l'humain, avec la
   raison. Une tâche faite à la main, ou lancée avant le réglage, n'a pas de worker scellé : sa PR reste à l'humain.
-- **Double relecture, limite** : un sceau prouve qu'une session lancée par le tick existe, pas qu'elle a rendu le
-  verdict. Worker, relecteurs et tick tournent sous le même utilisateur du système : un worker hostile qui écrit un
-  reçu `READY` au nom de chaque relecteur lancé obtient deux sceaux valides. La double relecture lui demande de le
-  faire deux fois, elle ne l'en empêche pas, et en `dual_review` cette voie atteint des chemins réservés qu'en
-  `human` elle n'atteint pas. Seule une isolation par utilisateur du système la fermerait : ne passer en
-  `dual_review` que si les workers sont tenus pour honnêtes sur ces chemins.
+- **Double relecture, limite connue** : la double relecture repose sur l'isolation entre le worker et le tick. Tant
+  que le worker, les relecteurs et le tick tournent sous le même utilisateur du système, elle protège contre un worker
+  qui se trompe, pas contre un worker hostile ; en `dual_review`, cette limite (celle du verrou 7) porte sur des
+  chemins réservés qu'en `human` elle n'atteint pas. Seule une isolation par utilisateur du système la fermerait :
+  ne passer en `dual_review` que si les workers sont tenus pour honnêtes sur ces chemins.
 - **Réalignement** : `git merge-tree`, puis `commit-tree -p <tête GitHub> -p <base GitHub>`, sur objets : le worktree du
   worker n'est pas touché. Les objets sont récupérés à refspec explicite vers `refs/grimoire/tick/…`, depuis l'URL de
   `origin` vérifiée égale au dépôt de la PR. Un conflit limité à `CHANGELOG.md` est résolu par l'union des deux côtés,

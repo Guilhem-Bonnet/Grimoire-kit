@@ -29,14 +29,12 @@ Deux noms de la même famille ne sont tenus pour deux modèles que si aucun n'es
 
 **Limites.**
 
-- *Un sceau prouve qu'une session lancée par le tick existe, pas qu'elle a rendu le verdict.* Le READY vient du reçu,
-  un fichier du worktree, rattaché à son relecteur par l'identifiant de session qu'il porte ; worker, relecteurs et
-  tick tournent sous le même utilisateur du système, et cet identifiant se lit (liste des sessions de l'hôte, reçu une
-  fois écrit). Un worker hostile qui laisse un processus écrire un reçu READY au nom de chaque relecteur lancé obtient
-  deux sceaux valides : la double relecture lui demande de le faire deux fois, elle ne l'en empêche pas. C'est la
-  limite du verrou 7 (:mod:`.reviewer`, :mod:`.launcher`), et en ``dual_review`` elle atteint des chemins réservés
-  qu'en ``human`` elle n'atteint pas. Seule une isolation par utilisateur du système la fermerait ; le journal
-  d'autorité lui-même vit sous ce même utilisateur (:mod:`.review_seal`).
+- *La double relecture repose sur l'isolation entre le worker et le tick.* Tant que worker, relecteurs et tick
+  tournent sous le même utilisateur du système, elle protège contre un worker qui se trompe, pas contre un worker
+  hostile : un sceau prouve qu'une session lancée par le tick existe, pas qu'elle a rendu le verdict. C'est la limite
+  du verrou 7 (:mod:`.reviewer`, :mod:`.launcher`), et en ``dual_review`` elle porte sur des chemins réservés qu'en
+  ``human`` elle n'atteint pas. Seule une isolation par utilisateur du système la fermerait ; le journal d'autorité
+  lui-même vit sous ce même utilisateur (:mod:`.review_seal`).
 - Les deux relecteurs tournent dans le worktree du worker, avec les réglages d'hôte qui s'y trouvent.
 - L'indépendance est celle de deux sessions et de deux modèles, pas de deux personnes.
 - Le premier relecteur est celui de main : son modèle et sa consigne dépendent encore du lancement et du worktree
