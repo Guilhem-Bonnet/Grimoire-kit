@@ -143,5 +143,6 @@ cache de lecture, remplir 64 clés distinctes et sommer
 
 Les tests qui bornent ces états sont
 `tests/unit/tools/test_workspace_read_cache.py` (taille totale plafonnée, plus ancienne
-évincée) et `tests/unit/tools/test_fleet_live.py` (lecture par blocs, `MAX_CALLS`,
-`MAX_FILE_STATES`).
+évincée, réponse hors budget jamais gardée) et `tests/unit/tools/test_fleet_live.py`
+(lecture par blocs, `MAX_CALLS`, `MAX_FILE_STATES`, `_MAX_OPEN_TOOLS`, `_MAX_SEEN_TOOLS`,
+ligne démesurée sautée avec ou sans saut, ligne vide ignorée).
