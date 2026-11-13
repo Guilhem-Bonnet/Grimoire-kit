@@ -59,6 +59,7 @@ import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
 import { createChat } from './chat.js';
 import { createNotify } from './notify.js';
+import { createAutopilot } from './autopilot.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -80,8 +81,13 @@ const SPACES = [
     sections: [{ id: 'travail', module: 'executer', label: 'Tâches',
       skeleton: (p) => (['liste', 'sessions', 'timeline', 'decisions'].includes(p.view) ? 'table' : 'board') }] },
   { id: 'flotte', label: 'Flotte', icon: 'i-space-flotte', term: 'flotte',
-    sections: [{ id: 'flotte', module: 'piloter', label: 'Flotte',
-      skeleton: () => (host.kind === 'cockpit' && scope.all ? 'table' : 'kpi') }] },
+    sections: [
+      { id: 'flotte', module: 'piloter', label: 'Flotte',
+        skeleton: () => (host.kind === 'cockpit' && scope.all ? 'table' : 'kpi') },
+      // Lot B (2026-11-12) : la Flotte en direct, en fils (artboard
+      // « Proposition A : Tissage »). Données : `GET fleet/live` du lot A.
+      { id: 'en-direct', module: 'fils', label: 'En direct', skeleton: 'lines' },
+    ] },
   { id: FOURTH_SPACE.id, label: FOURTH_SPACE.label, icon: FOURTH_SPACE.icon, term: 'memoire',
     // Entrée par la Recherche (P24) ; la Santé (P25) est la vue voisine.
     landing: 'memoire',
@@ -2102,7 +2108,11 @@ let appliedHash = '';
 
 function locationHash(section, params) {
   const space = section.space;
-  let hash = '#' + space.id + (space.sections.length > 1 ? '/' + section.id : '');
+  // La rubrique qui porte l'identifiant de son espace reste le fragment nu
+  // (`#flotte`) même quand une deuxième rubrique s'ajoute : les liens d'avant
+  // ne changent pas, et `#flotte` rouvre la rubrique d'arrivée.
+  const suffix = space.sections.length > 1 && section.id !== space.id ? '/' + section.id : '';
+  let hash = '#' + space.id + suffix;
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
     if (value === null || value === undefined || value === '' || typeof value === 'object') continue;
@@ -2557,6 +2567,23 @@ function renderLiveStamp() {
 }
 
 let stampTimer = null;
+// ── Pilote automatique (P83) ────────────────────────────────────────────────
+// L'interrupteur relit l'état au serveur : au démarrage, après chaque geste, toutes les 15 s et au retour
+// sur l'onglet (un mandat révoqué ailleurs coupe le pilote sans que la page le sache autrement).
+let autopilot = null;
+function startAutopilot() {
+  autopilot = createAutopilot({
+    scopeAll: host.scopeAll,
+    onChange: () => {
+      refreshAttentionCount();
+      if (current) goto(current, { ...currentParams });
+    },
+  });
+  autopilot.refresh();
+  setInterval(() => { if (!document.hidden) autopilot.refresh(); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) autopilot.refresh(); });
+}
+
 function startStampTicker() {
   const tick = () => { renderLiveStamp(); refreshSince(document); };
   const arm = () => {
@@ -3125,6 +3152,7 @@ async function main() {
     // précède les données de l'espace, donc un changement survenu pendant son
     // chargement est vu au sondage suivant au lieu d'être perdu.
     await live.start();
+    startAutopilot();
     // « À traiter » est l'accueil (⌘1) ; un lien profond ouvre son écran.
     const { target, params } = parseHash(location.hash || '#' + SPACES[0].id);
     await goto(target, params, { fromUrl: true });
@@ -3155,6 +3183,7 @@ async function main() {
     setAtelier,
     get paletteOpen() { return $('palette').open; },
     toast: toastProbe,
+    refreshAutopilot: () => autopilot && autopilot.refresh(),
   };
   document.body.dataset.ready = '1';
 }
