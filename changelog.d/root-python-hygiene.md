@@ -1,0 +1,1 @@
+- chore: retirer les scripts ponctuels sans appelant (`_gen_tests.py`, `dismiss-codeql-false-positives.py`) et garder la racine sans script Python
