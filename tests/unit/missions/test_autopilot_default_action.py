@@ -671,6 +671,103 @@ def test_ce_qu_un_agent_peut_se_recommander(fields: dict[str, Any], expected: st
     assert option == expected and bool(why) is not bool(expected)
 
 
+#: Une recommandation en texte libre qui touche la liste fermée (identifiants, secrets, dépense).
+RESERVED_FREE_TEXT = "copie le token d'API dans .env puis lance le banc payant"
+
+
+def test_une_recommandation_en_texte_libre_est_jugee_par_la_liste_fermee(project: Path) -> None:
+    """Sans options, la recommandation est le seul texte que l'agent écrit librement : elle ne contourne pas la réserve.
+    La question entière reste à l'humain — ni le tick ni une session ne recopient ce texte en décision."""
+    from grimoire.missions.autopilot import reserved_reason
+
+    pilot(project)
+    service, tid, qid = asks(project, "Quelle suite ?", recommended=RESERVED_FREE_TEXT)
+    task = service.require(tid)
+    assert "réservée" in reserved_reason(task.waiting.question, task, project)  # type: ignore[union-attr]
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
+    assert eligible_questions(service, MandateStore(project)) == []
+    with pytest.raises(GrimoireMissionError, match="réservée à l'humain"):
+        answer(service, tid, qid, RESERVED_FREE_TEXT)
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, HUMAN_ANSWERED_EVENT)
+
+
+#: Fusionner, publier, déployer, accorder : ce qu'un agent ne se répond pas, où que le mot se trouve.
+ENGAGING: dict[str, dict[str, Any]] = {
+    "fusion-texte": {"text": "Je fusionne la PR #12 moi-même ?"},
+    "merge-texte": {"text": "Should I merge the branch now?"},
+    "release-texte": {"text": "Je coupe la release 3.88 ?"},
+    "publier-texte": {"text": "Je publie le paquet maintenant ?"},
+    "deployer-texte": {"text": "Je déploie sur le serveur de recette ?"},
+    "autoriser-texte": {"text": "Tu m'autorises à écrire hors du dossier de la tâche ?"},
+    "tag-texte": {"text": "Je pose le tag v3.88.0 ?"},
+    "option": {"text": "Quelle suite ?", "options": ("continuer", "fusionner tout de suite"), "recommended": "continuer"},
+    "pourquoi": {"text": "Quelle suite ?", "why": "la publication peut partir dès maintenant"},
+    "titre-de-tache": {"text": "Quelle suite ?", "title": "Déployer le service de recette"},
+    "reco-libre": {"text": "Quelle suite ?", "options": (), "recommended": "merge la branche puis tag la version"},
+}
+
+
+def engaging(root: Path, case: str, policy: str = "") -> tuple[TaskService, str, str]:
+    fields = {"title": "Correctif", "options": ("oui", "non"), "recommended": "oui", "why": "", **ENGAGING[case]}
+    pilot(root, policy)
+    return asks(root, fields.pop("text"), title=fields.pop("title"), **fields)
+
+
+@pytest.mark.parametrize("case", ENGAGING)
+def test_un_agent_ne_se_repond_pas_une_fusion_une_publication_ni_une_autorisation(project: Path, case: str) -> None:
+    """Rédigée en choix ordinaire, la demande n'est ni appliquée par le tick ni recopiée par une session."""
+    service, tid, qid = engaging(project, case)
+    asked = service.require(tid).waiting.question  # type: ignore[union-attr]
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+    (open_question,) = eligible_questions(service, MandateStore(project))
+    assert open_question.question_id == qid and open_question.recommended == ""
+    with pytest.raises(GrimoireMissionError, match="confiance"):
+        answer(service, tid, qid, asked.recommended)
+    assert not events(service, tid, DECIDED_EVENT)
+    # Le jugement assumé d'une session pilote reste ce qu'il était.
+    answer(service, tid, qid, asked.recommended, justification=WHY, confidence="high")
+    assert events(service, tid, DECIDED_EVENT)[0].payload["recommendation_source"] == "judgment"
+
+
+@pytest.mark.parametrize("case", ["fusion-texte", "publier-texte", "titre-de-tache"])
+def test_apply_recommended_ne_tranche_pas_par_defaut_une_fusion_ou_une_publication_demandee_par_un_agent(
+    project: Path, case: str
+) -> None:
+    service, tid, qid = engaging(project, case, APPLY)
+    with pytest.raises(GrimoireMissionError, match="confiance"):
+        answer(service, tid, qid, "non", confidence="low")
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Quel nom donner au module ?",
+        "L'API publique garde-t-elle son nom ?",  # « publique » n'est pas « publier »
+        "La confusion vient-elle du cache ? Je vide le cache ?",  # « confusion » n'est pas « fusion »
+        "J'ajoute le champ émergent au schéma ?",  # « émergent » n'est pas « merge »
+    ],
+)
+def test_une_question_ordinaire_d_agent_reste_appliquee(project: Path, text: str) -> None:
+    pilot(project)
+    service, tid, _qid = asks(project, text, options=("oui", "non"), recommended="oui")
+    (outcome,) = stage(service, project)._apply_recommendations(AT_REST)
+    assert outcome.status == "done" and service.require(tid).status is TaskState.READY
+
+
+def test_l_escalade_du_merger_parle_de_fusion_et_reste_tranchee_par_defaut(project: Path) -> None:
+    """Ces mots ne valent que pour une question d'agent : celle que le kit écrit n'est pas concernée."""
+    pilot(project, APPLY)
+    service, tid, qid = escalated(
+        project, MERGE_ESCALATED, title="Fusionner et publier le module de release",
+        text="La fusion de la tâche échoue à répétition (merge refusé, CI rouge) — reprendre la tâche ou l'abandonner ?",
+    )
+    (outcome,) = stage(service, project)._apply_recommendations(AT_REST)
+    assert outcome.status == "done" and f"{tid}/{qid}" in outcome.questions
+    assert events(service, tid, DECIDED_EVENT)[0].payload["recommendation_source"] == "default"
+
+
 def test_une_recommandation_hors_des_options_proposees_n_entre_pas_au_ledger(project: Path) -> None:
     """Quand des options existent, la recommandation en fait partie : refusée dès ``task ask``, seule ou en lot."""
     from grimoire.missions.questions import QuestionSpec

@@ -358,16 +358,17 @@ def default_plan(
     permission, jamais « abandonner »), si la liste fermée ne la garde pas — jugée ici titre de la tâche compris tant
     que le kit n'a pas lui-même écrit la question (:func:`kit_written`) — et sous :data:`MAX_DEFAULT_DECISIONS`.
     """
-    from grimoire.missions.autopilot import APPLY_RECOMMENDED, default_option, reserved_reason
+    from grimoire.missions.autopilot import APPLY_RECOMMENDED, default_option, engaging_reason, reserved_reason
 
     if policy.error or policy.default_action != APPLY_RECOMMENDED:
         return "", "action par défaut du projet : demander (`autopilot.default_action`)"
     option, why = default_option(question)
     if not option:
         return "", why
-    if kept := reserved_reason(
-        question, task, service.project_root, policy, kit_written=kit_written(events, question)
-    ):
+    kit = kit_written(events, question)
+    if kept := reserved_reason(question, task, service.project_root, policy, kit_written=kit):
+        return "", kept
+    if not kit and (kept := engaging_reason(question, task)):  # une question d'agent : rien par défaut non plus
         return "", kept
     if _defaults_taken(events) >= MAX_DEFAULT_DECISIONS:
         return "", (f"{MAX_DEFAULT_DECISIONS} décisions par défaut déjà prises sur cette tâche depuis la dernière "
@@ -384,15 +385,19 @@ def author_plan(
     Un agent écrit la question, ses options et sa recommandation : sans cette garde, il se répond à lui-même. Rien
     n'est pris pour une permission ou une fusion, pour « abandonner » ou un choix ``danger``, pour une recommandation
     absente des options proposées (:func:`~.autopilot.author_option`), ni quand la liste fermée garde la question —
-    jugée titre de la tâche compris, puisque l'auteur est un agent. Un choix ordinaire, ou une réponse libre sans
-    options, reste pris. Ne dépend d'aucun réglage.
+    jugée titre de la tâche compris, puisque l'auteur est un agent —, ni quand la question, même rédigée en choix
+    ordinaire, touche à une fusion, une publication, un déploiement ou une autorisation
+    (:func:`~.autopilot.engaging_reason`). Un choix ordinaire, ou une réponse libre sans options, reste pris. Ne
+    dépend d'aucun réglage.
     """
-    from grimoire.missions.autopilot import author_option, reserved_reason
+    from grimoire.missions.autopilot import author_option, engaging_reason, reserved_reason
 
     option, why = author_option(question)
     if not option:
         return "", why
     if kept := reserved_reason(question, task, service.project_root, policy, kit_written=False):
+        return "", kept
+    if kept := engaging_reason(question, task):
         return "", kept
     return option, ""
 

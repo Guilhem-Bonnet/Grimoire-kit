@@ -90,6 +90,7 @@ __all__ = [
     "author_option",
     "decided_payload",
     "default_option",
+    "engaging_reason",
     "judge",
     "last_deferral",
     "load_autopilot_policy",
@@ -159,6 +160,13 @@ _KIT_CONDUCT_KINDS = frozenset({"resume_branch", "resume_unfenced", "retry_exhau
 #: relecteur est un ``choice`` « reprendre / abandonner » (``reviewer.py``), les tentatives épuisées « réessayer /
 #: abandonner ». Une question libre, aux options propres à son auteur, n'en fait pas partie.
 _KIT_CONDUCT_OPTIONS = (frozenset({"reprendre", "abandonner"}), frozenset({"reessayer", "abandonner"}))
+#: Ce qu'un agent ne se répond pas à lui-même, en plus de la liste fermée : fusionner, publier, déployer, accorder (texte
+#: plié, français et anglais). Hors de :data:`RESERVED` à dessein : l'escalade du merger, que le kit écrit, parle de
+#: fusion et doit rester tranchable. Ne vaut que pour une question dont l'auteur est un agent (:func:`engaging_reason`).
+_AUTHOR_ENGAGING = re.compile(
+    r"\bfusion|\bmerg|\brelease|\bpubli(?:e|er|ee|ees|es|ons|ez|cation|cations|sh|shed|shing)\b|\b(?:re)?deploi|"
+    r"\b(?:re)?deploy|permission|\bautoris|\bauthori[sz]|\btags?\b|\btagu|\btagg"
+)
 #: Les natures qu'une décision par défaut peut trancher : jamais une fusion (``merge``) ni une ``permission``.
 _DEFAULT_KINDS = frozenset({"choice"}) | _KIT_CONDUCT_KINDS
 
@@ -265,7 +273,8 @@ def reserved_reason(
     policy = load_autopilot_policy(project_root) if policy is None else policy
     if policy.error:
         return f"politique du pilote invalide ({policy.error}) : tout reste à l'humain"
-    texts = [question.text, question.why, *question.options]
+    # La recommandation est jugée comme les options : sans options, c'est un texte libre que l'auteur écrit seul.
+    texts = [question.text, question.why, *question.options, question.recommended]
     # #1159 : une question de conduite écrite par le kit ne se juge pas sur le titre de la tâche.
     if kit_written is False or not _kit_conduct(question):
         texts.append(task.title)
@@ -281,6 +290,28 @@ def reserved_reason(
     for extra in policy.extra:
         if extra in categories or extra in folded:
             return f"réservé par la politique du projet (`autopilot.reserved` : {extra})"
+    return ""
+
+
+def engaging_reason(question: Question, task: MissionTask) -> str:
+    """Pourquoi un agent ne peut pas se répondre *question* par sa propre recommandation (``""`` : rien ne s'y oppose).
+
+    Une demande de fusion, de publication, de déploiement ou d'autorisation rédigée en choix ordinaire reste une
+    demande qui engage : le mot est cherché dans tout ce que l'agent écrit (texte, titre, contexte, raison, options et
+    leurs libellés, recommandation) et dans le titre de la tâche, plié comme pour la liste fermée. L'appelant ne
+    l'applique qu'à une question dont l'auteur est un agent, et seulement à la prise sans jugement (tick, recopie de la
+    recommandation, décision par défaut) : le jugement assumé d'une session n'en dépend pas.
+    """
+    labels = [text for c in question.choices for text in (c.value, c.label, c.consequence)]
+    folded = _fold(" ".join([
+        question.text, question.title, question.context, question.why, *question.options, *labels,
+        question.recommended, task.title,
+    ]))
+    if _LOOKALIKE.search(folded):
+        return "texte aux lettres non latines (homoglyphes possibles) : un agent ne se le répond pas"
+    if found := _AUTHOR_ENGAGING.search(folded):
+        return (f"la question touche à une fusion, une publication, un déploiement ou une autorisation "
+                f"(« {found.group(0)} ») : un agent ne se la répond pas")
     return ""
 
 
