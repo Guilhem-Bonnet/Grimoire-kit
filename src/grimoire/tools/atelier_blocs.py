@@ -63,8 +63,12 @@ class Block:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "id": self.id, "kind": self.kind, "text": self.text, "section": self.section,
-            "editable": self.editable, **self.data,
+            "id": self.id,
+            "kind": self.kind,
+            "text": self.text,
+            "section": self.section,
+            "editable": self.editable,
+            **self.data,
         }
 
 
@@ -169,9 +173,7 @@ def _requirement(raw: str) -> dict[str, Any] | None:
     if not match:
         return None
     head = match.group(3).split("\n", 1)[0].strip()
-    criteres = [
-        _item_text(line) for line in raw.split("\n")[1:] if line.strip() and _ITEM.match(line.strip())
-    ]
+    criteres = [_item_text(line) for line in raw.split("\n")[1:] if line.strip() and _ITEM.match(line.strip())]
     return {"req": match.group(1), "priorite": (match.group(2) or "").strip(), "titre": head, "criteres": criteres}
 
 
@@ -246,7 +248,7 @@ def split(phase: str, text: str) -> list[Block]:
 
 def recompose(text: str, blocks: list[Block]) -> str:
     """Le fichier, reconstruit depuis ses blocs et les blancs qui les séparent (le reste de *text* est la queue)."""
-    tail = text[blocks[-1].end:] if blocks else text
+    tail = text[blocks[-1].end :] if blocks else text
     return "".join(b.gap + b.text for b in blocks) + tail
 
 
@@ -264,4 +266,4 @@ def replace_block(text: str, block: Block, new_text: str) -> str:
     """
     if "\r\n" in text:
         new_text = new_text.replace("\r\n", "\n").replace("\n", "\r\n")
-    return text[:block.start] + new_text.rstrip() + text[block.end:]
+    return text[: block.start] + new_text.rstrip() + text[block.end :]

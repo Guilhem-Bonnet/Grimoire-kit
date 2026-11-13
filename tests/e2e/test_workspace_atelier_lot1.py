@@ -154,7 +154,12 @@ def test_block_edit_only_changes_its_range(browser: Browser, project_on: tuple[s
         after = path.read_bytes()
         start = before.index(b"- Bouton maintenu")
         end = before.index(b"- Repli sur le navigateur.") + len(b"- Repli sur le navigateur.")
-        assert after == before[:start] + b"- Bouton maintenu pour parler, transcription locale.\n- Repli sur le navigateur." + before[end:]
+        assert (
+            after
+            == before[:start]
+            + b"- Bouton maintenu pour parler, transcription locale.\n- Repli sur le navigateur."
+            + before[end:]
+        )
 
 
 def test_concurrent_write_is_409(browser: Browser, project_on: tuple[str, Path]) -> None:

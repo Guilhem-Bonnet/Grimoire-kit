@@ -50,7 +50,7 @@ def test_flag_write_keeps_comments_and_round_trips(project: Path) -> None:
 
 
 def test_flag_must_be_exactly_true(project: Path) -> None:
-    (project / "project-context.yaml").write_text(CONTEXT + "cockpit:\n  test_features:\n    atelier: \"true\"\n")
+    (project / "project-context.yaml").write_text(CONTEXT + 'cockpit:\n  test_features:\n    atelier: "true"\n')
     assert wa.enabled(project) is False
     (project / "project-context.yaml").write_text("cockpit: 3\n")
     assert wa.enabled(project) is False
@@ -76,7 +76,13 @@ def test_document_has_five_phases_with_blocks(project: Path) -> None:
     _on(project)
     workspace_post(project, f"{P}atelier/chantiers", {"titre": "Un"})
     doc = workspace_get(project, f"{P}atelier/chantiers/un", {})
-    assert [p["id"] for p in doc["phases"]] == ["brief", "brainstorm", "comprehension", "exigences", "cahier-des-charges"]
+    assert [p["id"] for p in doc["phases"]] == [
+        "brief",
+        "brainstorm",
+        "comprehension",
+        "exigences",
+        "cahier-des-charges",
+    ]
     brief = doc["phases"][0]
     assert brief["fingerprint"] and any(b["kind"] == "rubrique" for b in brief["blocks"])
     with pytest.raises(FileNotFoundError):

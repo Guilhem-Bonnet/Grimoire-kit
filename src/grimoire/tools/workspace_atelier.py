@@ -120,12 +120,12 @@ def _slug(raw: str) -> str:
 
 
 def _chantier_row(root: Path, chantier: Any) -> dict[str, Any]:
-    row = chantier.to_dict()
+    row: dict[str, Any] = chantier.to_dict()
     name = None if chantier.default else chantier.slug
     row["phases"] = [r["state"] for r in cadrage_status(root, name)["phases"]]
     if chantier.error:
         row["chemin"] = (cadrage_dir(root, name).relative_to(root) / "chantier.yaml").as_posix()
-    return row
+    return dict(row)
 
 
 def list_view(root: Path) -> dict[str, Any]:
@@ -154,8 +154,14 @@ def _phase_view(root: Path, slug: str, phase: Any) -> dict[str, Any]:
     report = phase_report(root, phase, name)
     path = root / report["file"]
     out: dict[str, Any] = {
-        "id": phase.id, "title": phase.title, "file": report["file"], "state": report["state"],
-        "sections": report["sections"], "fingerprint": "", "blocks": [], "readable": True,
+        "id": phase.id,
+        "title": phase.title,
+        "file": report["file"],
+        "state": report["state"],
+        "sections": report["sections"],
+        "fingerprint": "",
+        "blocks": [],
+        "readable": True,
     }
     if not path.is_file():
         return out
@@ -233,7 +239,7 @@ def get(root: Path, path: str, _query: dict[str, list[str]]) -> Any:
     if path == FEATURES:
         return features(root)
     _need_flag(root)
-    rest = path[len(ATELIER):].strip("/").split("/")
+    rest = path[len(ATELIER) :].strip("/").split("/")
     if rest == ["chantiers"]:
         return list_view(root)
     if len(rest) == 2 and rest[0] == "chantiers":
@@ -257,7 +263,7 @@ def put_http(root: Path, path: str, raw: bytes) -> tuple[int, dict[str, Any]]:
         if not isinstance(body, dict):
             raise ValueError("corps JSON attendu : un objet")
         _need_flag(root)
-        rest = path[len(ATELIER):].strip("/").split("/") if path.startswith(ATELIER) else []
+        rest = path[len(ATELIER) :].strip("/").split("/") if path.startswith(ATELIER) else []
         if len(rest) != 4 or rest[0] != "chantiers" or rest[2] != "blocs":
             raise FileNotFoundError(f"route inconnue : {path}")
         return 200, edit_block(root, rest[1], rest[3], body)

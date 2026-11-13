@@ -62,8 +62,16 @@ def test_roundtrip_every_scaffold_phase(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "text",
-    [SAMPLE, SAMPLE.replace("\n", "\r\n"), "", "\n\n", "pas de fin de ligne", "# T\n\n\n\n## S\n\n\n- a\n\n\n",
-     "﻿---\nphase: x\n---\n## S\ntexte", "- seul\n"],
+    [
+        SAMPLE,
+        SAMPLE.replace("\n", "\r\n"),
+        "",
+        "\n\n",
+        "pas de fin de ligne",
+        "# T\n\n\n\n## S\n\n\n- a\n\n\n",
+        "﻿---\nphase: x\n---\n## S\ntexte",
+        "- seul\n",
+    ],
 )
 def test_roundtrip_byte_exact(text: str) -> None:
     assert ab.recompose(text, ab.split("brainstorm", text)) == text
@@ -111,7 +119,7 @@ def test_replace_block_touches_only_its_range() -> None:
     target = next(b for b in blocks if b.kind == "question")
     out = ab.replace_block(SAMPLE, target, "- Autre question ?\n")
     assert out[: target.start] == SAMPLE[: target.start]
-    assert out[target.start + len("- Autre question ?"):] == SAMPLE[target.end:]
+    assert out[target.start + len("- Autre question ?") :] == SAMPLE[target.end :]
     assert out.replace("- Autre question ?", target.text) == SAMPLE
 
 
