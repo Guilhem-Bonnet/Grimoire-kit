@@ -1,1 +1,0 @@
-- docs(audits): `maxTurns` borne un sous-agent mais pas une session `claude -p --agent`, où seul `--max-turns` / `CLAUDE_CODE_MAX_TURNS` plafonne — décision consignée
