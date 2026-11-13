@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(site): la vitrine décrit la version publiée — le bloc « Ce qui n'est pas prouvé » ne nie plus le worktree, la relecture, la fusion ni le lancement de sessions (opt-in), le tableau de bord n'est plus « en cours de refonte », opencode et Gemini CLI rejoignent les outils cités, le plan six dit ce que tranche le pilote automatique et sa liste fermée, le contrôle refuse « en profil governed et au-dessus » ; relevé daté du 2026-11-13
+
 ## [3.90.0] - 2026-11-13
 
 - feat(missions): les réponses humaines font jurisprudence (`autopilot.precedents: on`, `off` par défaut) : la dernière réponse humaine à une question de conduite écrite par le kit tranche les questions de la même classe (source `precedent`), sous les mêmes refus que la décision par défaut ; les précédents se relisent au ledger, expirent (`autopilot.precedent_days`), se listent et s'oublient par `grimoire task questions --precedents` / `--forget <id>` (canal humain), et chaque application apparaît dans « Décisions à revoir » (#1252)
