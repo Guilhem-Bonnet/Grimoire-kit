@@ -238,26 +238,158 @@ def _flat_step(state: tuple[bool, bool], text: str) -> tuple[bool, bool] | None:
 _CLOSERS = {"(": ")", "[": "]", "{": "}"}
 #: ``"$(cat <<'EOF'`` en fin de ligne : le message écrit par heredoc.
 _QUOTED_HEREDOC_RE = re.compile(r"\"\$\(cat[ \t]+<<(-?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2[ \t]*\n")
-#: Les commandes dont l'argument n'est qu'un texte : il n'est ni exécuté, ni lu comme le
-#: nom d'un fichier. Liste blanche courte, lue sur le début de la commande simple :
-#: ``git commit|tag|notes`` (message), les sous-commandes de ``gh`` qui prennent un titre,
-#: un corps, des notes ou un commentaire, ``echo`` et ``printf`` (texte affiché). ``git``
-#: n'admet devant sa sous-commande que ``-C <dossier>`` : ``-c`` y pose une configuration.
+#: Les commandes dont une option prend un texte qui n'est ni exécuté, ni lu comme le nom
+#: d'un fichier : ``git commit|tag|notes`` (message), les sous-commandes de ``gh`` qui
+#: prennent un titre, un corps, des notes ou un commentaire, ``echo`` et ``printf`` (texte
+#: affiché). ``git`` n'admet devant sa sous-commande que ``-C <dossier>`` : ``-c`` y pose
+#: une configuration. La commande ne suffit pas — ``git commit`` lit aussi son message dans
+#: un fichier, ``gh release create`` téléverse ses arguments : c'est la place du message
+#: qui décide (:func:`_takes_text`).
 _TEXT_CONSUMER_RE = re.compile(
     r"[ \t]*(?:rtk[ \t]+(?:proxy[ \t]+)?)?(?:"
-    r"git(?:[ \t]+-C[ \t]+[\w./~-]+)?[ \t]+(?:commit|tag|notes)"
-    r"|gh[ \t]+(?:pr|issue|release)[ \t]+(?:create|edit|comment|review|close|merge|reopen)"
+    r"(?P<git>git)(?:[ \t]+-C[ \t]+[\w./~-]+)?[ \t]+(?:commit|tag|notes)"
+    r"|gh[ \t]+(?:pr|issue|release)[ \t]+(?P<verb>create|edit|comment|review|close|merge|reopen)"
     r"|(?P<prints>echo|printf)"
     r")(?=[ \t])"
 )
+
+# Options relevées dans l'aide de git 2.56.0 (``git commit -h``, ``git tag -h``,
+# ``git notes add -h``) et de gh 2.103.3 (``gh pr|issue|release <verbe> --help``). Trois
+# listes par outil : les options dont la valeur est un texte ; les drapeaux sans valeur ;
+# les options dont la valeur n'est ni un fichier ni un message réutilisé. Tout ce qui lit
+# un fichier (``-F``, ``--file``, ``--template``, ``--body-file``, ``--notes-file``,
+# ``--attach``, ``--recover``, ``--pathspec-from-file``) ou réutilise un message
+# (``-C``, ``-c``, ``--fixup``, ``--squash``, ``--trailer``) est absent des trois : une
+# option absente rend la place du message illisible, et le corps reste inspecté.
+_GIT_TEXT_OPTIONS = frozenset({"-m", "--message"})
+_GIT_FLAGS = frozenset(
+    {
+        "--all", "--quiet", "--signoff", "--no-signoff", "--no-verify", "--verify", "--verbose", "--edit",
+        "--no-edit", "--amend", "--allow-empty", "--allow-empty-message", "--only", "--include", "--no-gpg-sign",
+        "--no-post-rewrite", "--reset-author", "--dry-run", "--annotate", "--sign", "--no-sign", "--force",
+    }
+)
+#: Drapeaux courts sans valeur, seuls ou agglutinés (``-a``, ``-q``, ``-s``, ``-n``, ``-v``,
+#: ``-e``, ``-o``, ``-i``, ``-f``), et le même groupe fini par ``-m`` (``-am``).
+_GIT_SHORT_FLAGS_RE = re.compile(r"-[aqsnveoif]+")
+_GIT_SHORT_TEXT_RE = re.compile(r"-[aqsnveoif]*m")
+_GIT_VALUED_OPTIONS = frozenset({"--author", "--date", "--cleanup", "--ref"})
+_GH_TEXT_OPTIONS = frozenset({"--title", "-t", "--body", "-b", "--notes", "-n", "--subject"})
+#: ``--comment`` prend un texte pour fermer ou rouvrir ; c'est un drapeau de ``gh pr review``.
+_GH_CLOSING_TEXT_OPTIONS = frozenset({"--comment", "-c"})
+_GH_FLAGS = frozenset(
+    {
+        "--draft", "-d", "--dry-run", "--editor", "-e", "--fill", "-f", "--fill-first", "--fill-verbose",
+        "--no-maintainer-edit", "--web", "-w", "--create-if-none", "--delete-last", "--edit-last", "--yes",
+        "--approve", "--request-changes", "--delete-branch", "--admin", "--auto", "--disable-auto", "--merge",
+        "--rebase", "--squash", "--remove-milestone", "--remove-parent", "--remove-type", "--fail-on-no-commits",
+        "--generate-notes", "--latest", "--notes-from-tag", "--prerelease", "--verify-tag",
+    }
+)
+_GH_VALUED_OPTIONS = frozenset(
+    {
+        "--assignee", "--base", "-B", "--head", "-H", "--label", "-l", "--milestone", "--project", "--reviewer",
+        "--repo", "-R", "--add-assignee", "--add-label", "--add-project", "--add-reviewer", "--remove-assignee",
+        "--remove-label", "--remove-project", "--remove-reviewer", "--author-email", "-A", "--match-head-commit",
+        "--blocked-by", "--blocking", "--parent", "--type", "--add-blocked-by", "--add-blocking",
+        "--add-sub-issue", "--remove-blocked-by", "--remove-blocking", "--remove-sub-issue", "--duplicate-of",
+        "--reason", "--discussion-category", "--notes-start-tag", "--target", "--tag",
+    }
+)
+#: Un argument entier : un texte cité (sans substitution ni antislash) ou un mot écrit en clair.
+_ARGUMENT_RE = re.compile(r"'[^']*'|\"(?:[^\"\\`$]|\$(?!\())*\"|[^\s'\"\\`()<>;|&{}]+")
+
+
+def _takes_text(taker: re.Match[str], rest: str) -> bool:
+    """Vrai si le message qui suit *rest* est la valeur d'une option qui prend un texte.
+
+    *rest* est ce qui sépare la commande du message. Il doit se lire en entier, mot par
+    mot : drapeaux connus, options connues avec leur valeur, arguments positionnels — et
+    finir sur une option de texte. Une option absente des listes, ``--``, un mot que le
+    shell peut développer en option, une option citée : la place ne se lit pas, et le
+    message n'est pas tenu pour un texte.
+    """
+    words: list[str] = []
+    position, end = 0, len(rest)
+    while position < end:
+        if rest[position] in " \t":
+            position += 1
+            continue
+        argument = _ARGUMENT_RE.match(rest, position)
+        if argument is None or (argument.end() < end and rest[argument.end()] not in " \t"):
+            return False
+        word = argument.group()
+        bare = word[1:-1] if word[0] in "'\"" else word
+        # Un mot cité qui commence par un tiret est une option pour le programme ; une
+        # variable ou un motif peuvent en devenir une.
+        if (bare is not word and bare.startswith("-")) or bare[:1] in {"$", "*", "?", "["} or (bare is word and "$" in word):
+            return False
+        words.append(word)
+        position = argument.end()
+    if not words:
+        return False
+    if taker.group("git"):
+        text, flags, valued = _GIT_TEXT_OPTIONS, _GIT_FLAGS, _GIT_VALUED_OPTIONS
+        short_flags, short_text = _GIT_SHORT_FLAGS_RE, _GIT_SHORT_TEXT_RE
+    else:
+        closing = taker.group("verb") in {"close", "reopen"}
+        text = _GH_TEXT_OPTIONS | (_GH_CLOSING_TEXT_OPTIONS if closing else frozenset())
+        flags, valued, short_flags, short_text = _GH_FLAGS, _GH_VALUED_OPTIONS, None, None
+
+    def is_text(word: str) -> bool:
+        return word in text or (short_text is not None and short_text.fullmatch(word) is not None)
+
+    last = words.pop()
+    glued = rest[-1] not in " \t"
+    if last.endswith("="):
+        if not (glued and last[:-1] in text and last.startswith("--")):
+            return False  # ``--message=`` collé au message, rien d'autre
+    elif not is_text(last) or (glued and last.startswith("--")):
+        return False
+    index = 0
+    while index < len(words):
+        word = words[index]
+        long_with_value = "=" in word and word.startswith("--") and word.partition("=")[0] in text | valued
+        is_flag = word in flags or (short_flags is not None and short_flags.fullmatch(word) is not None)
+        if word[0] != "-" or is_flag or long_with_value:
+            index += 1  # argument positionnel, drapeau, ou option longue qui porte sa valeur
+        elif (is_text(word) or word in valued) and index + 1 < len(words) and words[index + 1][0] != "-":
+            index += 2
+        else:
+            return False
+    return True
+
+
 #: Derrière un texte affiché, ce qui le confie à un autre programme : tube, substitution de processus.
 _HANDS_OVER_RE = re.compile(r"[|()`]")
+#: Derrière un texte affiché et redirigé vers un fichier, ce qui exécute un fichier : un
+#: interpréteur, ``source``, ``eval``, ``exec``, et en tête de commande ``.`` ou ``./chemin``.
+_RUNS_A_FILE_RE = re.compile(
+    r"(?:^|[\s;&])(?:\S*/)?(?:python[0-9.]*|node|nodejs|deno|bun|perl|ruby|php|bash|sh|zsh|dash|ksh|ash"
+    r"|source|eval|exec)(?=[ \t])"
+    r"|(?:^|[;&\n])[ \t]*(?:\.(?=[ \t])|\./)"
+)
 #: Ce qui doit suivre sa ligne de fermeture : la fin de la substitution et du texte cité.
 _QUOTED_HEREDOC_END_RE = re.compile(r"\n?[ \t]*\)\"")
 #: Une substitution entre guillemets doubles dont le contenu n'est fait que de mots écrits
 #: en clair : ni guillemet, ni opérateur, ni redirection. Le texte cité finit bien où le
 #: balayage le voit, et la ligne ne peut pas être rejetée pour ce qu'elle porte.
 _PLAIN_SUBSTITUTION_RE = re.compile(r"\$\([\w ./:=+%@,*?~-]*\)")
+
+
+def expanded_bodies(command: str) -> tuple[str, ...]:
+    """Les corps de heredoc que le shell développe et qui portent une substitution.
+
+    Étiquette nue : le shell exécute ce que le corps substitue avant de le passer, même
+    quand ce corps est le message d'une commande qui ne prend que du texte. Ce qui inspecte
+    la ligne les lit donc à part, tels qu'ils sont écrits.
+    """
+    found: list[str] = []
+    for comments in _readings(command):
+        for start, end, _closed, expands in _layout(command, comments=comments).bodies:
+            if expands and _ACTIVE_EXPANSION_RE.search(command, start, end):
+                found.append(command[start:end])
+    return tuple(dict.fromkeys(found))
 
 
 def substitutes(text: str) -> bool:
@@ -276,15 +408,18 @@ def substitutes(text: str) -> bool:
 def _quoted_heredoc(command: str, i: int, consumer: str) -> tuple[int, int, int, bool, int] | None:
     """Le message écrit par heredoc ouvert en *i*, ou ``None`` : corps, fermeture, développé, indice suivant.
 
-    *consumer* est le début de la commande simple qui le reçoit : elle doit ne prendre
-    que du texte, et un texte affiché ne doit être confié à aucun autre programme dans
-    la suite de la ligne de commande. La première ligne qui commence par l'étiquette doit être la fermeture
-    exacte : un shell qui fermerait sur ``EOF)`` ne finit pas le corps où ce balayage le
-    finit.
+    *consumer* est le début de la commande simple qui le reçoit. Le message doit y être
+    la valeur d'une option qui prend un texte (:func:`_takes_text`) ; derrière ``echo`` ou
+    ``printf``, le texte affiché ne doit être confié à aucun autre programme dans la suite
+    de la ligne de commande, ni écrit dans un fichier qu'elle exécute. La première ligne
+    qui commence par l'étiquette doit être la fermeture exacte : un shell qui fermerait
+    sur ``EOF)`` ne finit pas le corps où ce balayage le finit.
     """
     taker = _TEXT_CONSUMER_RE.match(consumer)
     opening = _QUOTED_HEREDOC_RE.match(command, i) if taker is not None else None
     if taker is None or opening is None:
+        return None
+    if not taker.group("prints") and not _takes_text(taker, consumer[taker.end() :]):
         return None
     indent = r"\t*" if opening.group(1) else ""
     tag = re.escape(opening.group(3))
@@ -296,8 +431,12 @@ def _quoted_heredoc(command: str, i: int, consumer: str) -> tuple[int, int, int,
     after = _QUOTED_HEREDOC_END_RE.match(command, closing.end())
     if after is None:
         return None
-    if taker.group("prints") and _HANDS_OVER_RE.search(command, after.end()):
-        return None  # jusqu'à la fin de la ligne de commande : une ligne continuée porte le tube plus bas
+    if taker.group("prints"):
+        if _HANDS_OVER_RE.search(command, after.end()):
+            return None  # jusqu'à la fin de la ligne de commande : une ligne continuée porte le tube plus bas
+        written = command.find(">", after.end())
+        if written >= 0 and _RUNS_A_FILE_RE.search(command, written):
+            return None  # écrit dans un fichier, puis un interpréteur : le texte est peut-être ce qu'il exécute
     return start, closing.start(), closing.end(), not opening.group(2), after.end()
 
 

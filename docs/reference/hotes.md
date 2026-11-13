@@ -497,10 +497,20 @@ le ledger. Depuis le lot A de l'issue #638 :
   que si ce qui le précède est une suite de commandes simples. La détection
   des commandes destructives lit la
   même ligne : un corps de heredoc n'est une donnée que là où le shell ouvre
-  et ferme un heredoc (le message écrit par `"$(cat <<'EOF' … EOF)"` en est
-  une derrière une commande qui ne prend que du texte — `git commit`,
-  `git tag`, `git notes`, `gh pr|issue|release create|edit|comment…`, `echo`,
-  `printf` —, pas devant un interpréteur), un guillemet échappé ou un commentaire ne cache pas une
+  et ferme un heredoc. Le message écrit par `"$(cat <<'EOF' … EOF)"` en est
+  une quand il est la valeur d'une option qui prend un texte — `-m` ou
+  `--message` de `git commit`, `git tag`, `git notes` ; `--title`, `--body`,
+  `--notes`, `--subject` (et `--comment` pour fermer ou rouvrir) des
+  sous-commandes `create`, `edit`, `comment`, `review`, `close`, `merge`,
+  `reopen` de `gh pr`, `gh issue`, `gh release` — ou le texte d'un `echo` ou
+  d'un `printf` qui n'est confié à aucun programme. En toute autre place
+  (option qui lit un fichier, argument positionnel, option inconnue, devant
+  un interpréteur) il reste inspecté, comme le corps d'un heredoc à étiquette
+  nue qui porte une substitution. Limite connue : un texte écrit dans un
+  fichier que la même ligne n'exécute pas — un script lancé par un appel
+  suivant, un fichier de démarrage du shell — reste une écriture ordinaire,
+  son contenu n'est pas lu comme une commande ; de même un drapeau destructif
+  porté par une variable ou une substitution. Enfin, un guillemet échappé ou un commentaire ne cache pas une
   commande, et un verbe ou un drapeau écrit entre guillemets est le mot que
   le shell lance (un texte cité qui porte des blancs reste une donnée) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce

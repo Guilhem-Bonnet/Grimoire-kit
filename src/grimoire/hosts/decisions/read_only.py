@@ -35,6 +35,7 @@ from grimoire.hosts.decisions.read_only_layout import (
     _opaque_spans,
     _opens_dollar_quote,
     _readings,
+    expanded_bodies,
     substitutes,
 )
 
@@ -915,6 +916,7 @@ def executed_surfaces(command: str) -> tuple[str, ...]:
         raw = read is None or not read[2] or _opens_dollar_quote(code)
         surfaces.append(code if raw else _read_surface(code))
         surfaces.append(_unquoted(code, prose=False))
+    surfaces.extend(expanded_bodies(command))
     return tuple(dict.fromkeys(surfaces))
 
 

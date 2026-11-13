@@ -118,6 +118,10 @@ def test_la_surface_lue_par_les_freins_garde_ce_qui_suit_une_fausse_ouverture(ou
         'echo "`' + EFFACE + '`"',
         # le corps d'un heredoc à étiquette nue est développé avant d'être passé
         "cat <<EOF\n$(" + EFFACE + ")\nEOF",
+        # y compris quand ce heredoc est le message d'une commande qui ne prend que du texte
+        'git commit -m "$(cat <<EOF\n$(' + EFFACE + ')\nEOF\n)"',
+        'echo "$(cat <<EOF\nfait : `' + EFFACE + '`\nEOF\n)"',
+        'gh pr create --title t --body "$(cat <<-EOF\n\t$(' + EFFACE + ')\n\tEOF\n)"',
     ],
 )
 def test_une_commande_destructive_dans_une_substitution_est_vue(command: str) -> None:
