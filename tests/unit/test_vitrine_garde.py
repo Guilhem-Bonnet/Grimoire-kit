@@ -39,6 +39,10 @@ FAUSSES_AFFIRMATIONS = [
     "ROADMAP · Q3",
     "Multi-LLM",
     "Trust scoring",
+    # Démentis par la 3.90.0 (#1260) : worktree par tâche, relecteur, lanceur de workers, profil production.
+    "ne crée pas de copie du dépôt",
+    "ne lance pas de session d'agent",
+    "seulement en profil governed",
 ]
 
 RESTES_D_OUTIL = [

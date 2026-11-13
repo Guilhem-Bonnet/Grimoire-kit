@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Grimoire : tableau de bord, tâches, mémoire et contrôle des preuves pour tes agents</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à des agents (Claude Code, Copilot), un tableau de bord local, des tâches, la mémoire du projet et un contrôle des preuves.">
+<meta name="description" content="Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à des agents (Claude Code, Copilot, opencode, Gemini CLI), un tableau de bord local, des tâches, la mémoire du projet et un contrôle des preuves.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23b4441d'/%3E%3Cpath d='M25 17l16 15-16 15' fill='none' stroke='%23fff' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="canonical" href="https://guilhem-bonnet.github.io/Grimoire-kit/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Grimoire">
 <meta property="og:title" content="Grimoire : tableau de bord, tâches, mémoire et contrôle des preuves pour tes agents">
-<meta property="og:description" content="Dashboard, task board, project memory and evidence check for code you delegate to agents (Claude Code, Copilot).">
+<meta property="og:description" content="Dashboard, task board, project memory and evidence check for code you delegate to agents (Claude Code, Copilot, opencode, Gemini CLI).">
 <meta property="og:url" content="https://guilhem-bonnet.github.io/Grimoire-kit/">
 <meta property="og:image" content="https://guilhem-bonnet.github.io/Grimoire-kit/media/teaser-poster.jpg">
 <meta property="og:image:alt" content="Image d'ouverture du film de présentation de Grimoire">
@@ -303,7 +303,7 @@ footer .sp{flex:1}
 </section>
 <section class="cmd5">
   <div class="install"><code><span class="p">$ </span>uv tool install grimoire-kit</code><button class="btn copy" type="button" id="copy-top" data-copy="uv tool install grimoire-kit"><span class="i i-copy"></span><span class="lbl">Copier</span></button></div>
-  <p class="micro">Open source · Claude Code · Copilot</p>
+  <p class="micro">Open source · Claude Code · Copilot · opencode · Gemini CLI</p>
 </section>
 
 <main class="plans" id="recit">
@@ -338,7 +338,7 @@ footer .sp{flex:1}
 </div></section>
 <section class="plan" id="p6" aria-labelledby="p6t"><div class="stick wrap scene">
   <div><p class="nb" data-plan="6">la décision humaine</p><h2 id="p6t">L'agent pose la question, l'humain répond.</h2>
-  <p class="txt">Seule la réponse du canal humain rend la tâche. Une réponse d'agent ne compte pas.</p></div>
+  <p class="txt">Seule la réponse du canal humain rend la tâche. Une réponse d'agent ne compte pas. Si tu actives le pilote automatique, il tranche à ta place, sauf une liste fermée qui reste à toi (identifiants, secrets, dépense payante, accès hors du dépôt, suppression de données, mandat, réglages du dépôt), et tu revois ses décisions dans le tableau de bord.</p></div>
   <div class="term reel" data-reel="decision-humaine-attestee" data-frames="2-4" data-verbatim><div class="head"><span class="cap">décision attestée · bobine enregistrée</span></div><p class="miss">Rejeu de la bobine <a href="data/reels/decision-humaine-attestee.html">decision-humaine-attestee</a> (ouvre la bobine complète si le rejeu ne s'affiche pas).</p></div>
 </div></section>
 <section class="plan" id="p7" aria-labelledby="p7t"><div class="stick wrap scene">
@@ -355,17 +355,16 @@ footer .sp{flex:1}
 </main>
 <section class="capot plan" id="p9" aria-labelledby="capot-t">
 <h2 class="h5" id="capot" style="margin-top:0"><span id="capot-t">Ce que tu as sous la main</span></h2>
-<p class="h5s">Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à des agents (Claude Code, Copilot), un tableau de bord local, des tâches, la mémoire du projet et un contrôle des preuves.</p>
+<p class="h5s">Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à des agents (Claude Code, Copilot, opencode, Gemini CLI), un tableau de bord local, des tâches, la mémoire du projet et un contrôle des preuves.</p>
 <div class="wrap tools">
   <article class="tool"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="4.5" height="16" rx="1"/><rect x="9.75" y="4" width="4.5" height="11" rx="1"/><rect x="16" y="4" width="4.5" height="13.5" rx="1"/></svg></span><h3>Le tableau de bord</h3>
-    <p>Tes projets et leurs tâches sur une seule page, dans ton navigateur, sur ta machine. Tu vois où en est chaque tâche.</p>
-    <span class="tag">en cours de refonte</span></article>
+    <p>Tes projets, un par onglet, dans ton navigateur, sur ta machine. Tu vois où en est chaque tâche et chaque session qui tourne, tu lances une tâche et tu actives ou coupes le pilote automatique.</p></article>
   <article class="tool"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13l2.4-7.2A2.5 2.5 0 0 1 7.8 4h8.4a2.5 2.5 0 0 1 2.4 1.8L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg></span><h3>Les tâches</h3>
-    <p>Tu écris une tâche. Une session d'agent la prend, avance seule dessus et te rend son travail à relire.</p></article>
+    <p>Tu écris une tâche. Une session d'agent la prend, avance seule dessus et rend son travail à relire. Si tu actives l'orchestration, le kit lance lui-même la session dans une copie isolée du dépôt (un worktree git), la fait relire par un autre agent et fusionne quand la CI est verte.</p></article>
   <article class="tool"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/><path d="M6.5 8h2M15.5 8h2"/></svg></span><h3>La mémoire du projet</h3>
-    <p>Ce que le projet a décidé reste d'une session à l'autre. Sur Claude Code et Copilot, une session qui démarre le retrouve au lieu de repartir de zéro.</p></article>
+    <p>Ce que le projet a décidé reste d'une session à l'autre. Sur Claude Code, Copilot et Gemini CLI, une session qui démarre le retrouve au lieu de repartir de zéro.</p></article>
   <article class="tool wide"><span class="pict"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V9a7 7 0 0 1 14 0v11M3.5 20h17M9.5 20v-5.5h5V20"/></svg></span><h3>Le contrôle des preuves</h3>
-    <p>Une tâche ne peut pas être déclarée finie sans sa preuve : un test qui passe, une relecture faite. Le contrôle refuse et dit ce qui manque. Il refuse pour de bon en profil governed, il prévient ailleurs.</p>
+    <p>Une tâche ne peut pas être déclarée finie sans sa preuve : un test qui passe, une relecture faite. Le contrôle refuse et dit ce qui manque. Il refuse pour de bon en profil governed et au-dessus, il prévient ailleurs.</p>
     <details class="replay" id="replay-box"><summary>Voir un refus, rejoué tel quel dans un terminal</summary>
 <div class="proof5" data-verbatim>
 <div class="wrap"><p class="legend">Une tâche refusée faute de preuve, puis acceptée.</p>
@@ -406,21 +405,21 @@ footer .sp{flex:1}
       </div>
     </details></article>
 </div>
-<p class="hosts">Claude Code · Copilot. Le manuel dit ce que prend en charge chaque outil.</p>
+<p class="hosts">Claude Code · Copilot · opencode · Gemini CLI. Codex et Cursor lisent les consignes du projet, sans contrôle bloquant. Le manuel dit ce que prend en charge chaque outil.</p>
 </section>
 
 <section class="blk wrap plan" id="p10" aria-labelledby="limites">
   <p class="nb" data-plan="10">ce qui reste à prouver</p>
   <h2 id="limites">Ce qui n'est pas prouvé</h2>
   <ul class="limits">
-    <li>Le kit ne crée pas de copie du dépôt et ne propose pas lui-même le travail à relire : c'est ton outil (Claude Code, Copilot) et git.</li>
-    <li>Le tableau de bord ne lance pas de session d'agent.</li>
+    <li>Le kit ne lance de session d'agent que si tu actives l'orchestration : par défaut, c'est toi qui ouvres la session dans ton outil.</li>
+    <li>Les sessions que le kit lance sont des sessions Claude Code. Copilot, opencode et Gemini CLI en reçoivent les contrôles, pas le lancement.</li>
     <li>Une consigne que tu donnes est lue par la session au tour suivant, pas tout de suite.</li>
-    <li>La mémoire est celle d'un projet : elle n'est pas partagée entre projets, et le rappel au démarrage demande un outil qui sait exécuter des contrôles (Claude Code, Copilot).</li>
+    <li>La mémoire est celle d'un projet : elle n'est pas partagée entre projets, et le rappel au démarrage demande un outil qui sait exécuter des contrôles (Claude Code, Copilot, Gemini CLI).</li>
     <li>Aucun gain n'est mesuré.</li>
   </ul>
-  <p class="cond">Le tableau de bord est en cours de refonte : ce qu'en décrit ce bloc n'est pas entièrement dans la version publiée<span data-source="version" data-format=" ({})"></span>. Le contrôle des preuves refuse pour de bon seulement en profil governed. Le reste est dans la version publiée, que tu peux installer maintenant.</p>
-  <p class="cite">Relevé le 2026-10-28 sur la version publiée<span data-source="version" data-format=" ({})"></span>, d'après <a href="docs/hosts/">les outils pris en charge</a> et <a href="docs/standard/">le contrôle des preuves</a> du manuel. Les bobines du plan huit montrent ce que le kit a fait sur un projet jetable, pas sur ton dépôt.</p>
+  <p class="cond">Le contrôle des preuves refuse pour de bon en profil governed et au-dessus. L'orchestration (lancement, relecture, fusion) et le pilote automatique restent coupés tant que tu ne les actives pas. Tout ce que décrit cette page est dans la version publiée<span data-source="version" data-format=" ({})"></span>, que tu peux installer maintenant.</p>
+  <p class="cite">Relevé le 2026-11-13 sur la version publiée<span data-source="version" data-format=" ({})"></span>, d'après <a href="docs/hosts/">les outils pris en charge</a>, <a href="docs/standard/">le contrôle des preuves</a> et <a href="docs/reference/cli/taches/">les commandes de tâches</a> du manuel. Les bobines du plan huit montrent ce que le kit a fait sur un projet jetable, pas sur ton dépôt.</p>
 </section>
 
 <section class="blk wrap" aria-labelledby="capot-lien">
