@@ -45,3 +45,17 @@ paths = [
 regexes = [
   '''s3cr3t-valeur-neo4j''',
 ]
+
+# Identifiants factices d'un `curl -u` cité comme commande à classer (#1229) : le test
+# vérifie qu'un `curl` porteur d'identifiants reste une mutation. La ligne est entrée par
+# un commit de la branche, qu'un `gitleaks:allow` posé après coup ne couvrirait pas.
+# Même bornage : ce fichier ET cette valeur exacte.
+[[allowlists]]
+description = "Identifiants factices d'un curl -u dans les tests du classement lecture/mutation"
+condition = "AND"
+paths = [
+  '''^tests/unit/hosts/test_mutation_class_wrappers\.py$''',
+]
+regexes = [
+  '''nom:secret''',
+]
