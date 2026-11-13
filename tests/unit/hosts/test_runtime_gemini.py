@@ -60,9 +60,20 @@ def project(tmp_path: Path) -> Path:
     return root
 
 
+def _json_string(path: Path) -> str:
+    """*path* prêt pour une chaîne JSON, sans les guillemets englobants.
+
+    Les fixtures portent des marqueurs ``<PROJECT>``/``<HOME>`` **à l'intérieur
+    de chaînes JSON** : y interpoler ``str(path)`` donne des `\\U`/`\\u`
+    invalides dès que le chemin est Windows (`C:\\Users\\…`), et ``json.loads``
+    lève alors ``Invalid \\escape``. ``json.dumps`` échappe pour nous.
+    """
+    return json.dumps(str(path))[1:-1]
+
+
 def _payload(name: str, project: Path) -> dict[str, object]:
     raw = (FIXTURES / f"{name}.json").read_text(encoding="utf-8")
-    raw = raw.replace("<PROJECT>", str(project)).replace("<HOME>", str(project.parent / "home"))
+    raw = raw.replace("<PROJECT>", _json_string(project)).replace("<HOME>", _json_string(project.parent / "home"))
     return json.loads(raw)
 
 
