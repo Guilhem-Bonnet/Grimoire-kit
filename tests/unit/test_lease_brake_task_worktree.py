@@ -248,3 +248,73 @@ def test_stale_epoch_message_on_cache_miss_names_the_ledger(home: Path) -> None:
     assert reason.index("epoch 1") < reason.index("epoch 3")
     assert str(session_state_path(home, SESSION)) in reason
     assert str(TaskService(home).ledger_root / "events.jsonl") in reason
+
+
+# ── Le marqueur désigne un ledger sans journal (relecture adverse de #1258) ──
+
+
+def _displaced(home: Path, tid: str, wt: Path) -> None:
+    """La session tient l'epoch 3 depuis le worktree, puis récolte (4) et autre titulaire (5) : elle est périmée."""
+    _reclaimed_at_epoch_3(home, tid, cwd=wt)
+    _reap(home, tid)
+    TaskService(home).claim(tid, "autre", host="local")
+
+
+def _retarget_marker(wt: Path, ledger_root: Path) -> None:
+    """Projet déplacé, ``git worktree repair`` : le marqueur garde un chemin absolu qui ne mène plus au ledger."""
+    marker = Path((wt / ".git").read_text(encoding="utf-8").split(":", 1)[1].strip()) / MARKER_NAME
+    raw = json.loads(marker.read_text(encoding="utf-8"))
+    marker.write_text(json.dumps({**raw, "ledger_root": str(ledger_root)}), encoding="utf-8")
+
+
+def _asks_for_a_missing_ledger(decision: object, ledger_root: Path) -> None:
+    assert decision is not None and decision.outcome is Outcome.ASK  # type: ignore[attr-defined]
+    assert decision.detail["lease_brake"] == "ledger_missing"  # type: ignore[attr-defined]
+    reason = decision.reason  # type: ignore[attr-defined]
+    assert str(ledger_root / "events.jsonl") in reason and "epoch 3" in reason
+
+
+def test_marker_to_a_missing_ledger_asks_instead_of_holding(home: Path, tmp_path: Path) -> None:
+    """Avant : le dossier désigné n'a ni bail ni journal → ``held``, alors que la copie locale (epoch 5) refusait."""
+    tid = _ready(home)
+    wt = _worktree(home, tid)
+    _displaced(home, tid, wt)
+    shutil.copytree(TaskService(home).ledger_root, wt / "_grimoire-runtime-output" / "ledger")
+    nowhere = tmp_path / "ailleurs" / "ledger"
+    _retarget_marker(wt, nowhere)
+
+    _asks_for_a_missing_ledger(_brake(wt), nowhere)
+    assert held_task_id(_edit(wt)) == ""
+
+
+def test_marker_to_an_empty_ledger_folder_asks(home: Path, tmp_path: Path) -> None:
+    tid = _ready(home)
+    wt = _worktree(home, tid)
+    _reclaimed_at_epoch_3(home, tid, cwd=wt)
+    empty = tmp_path / "vide" / "ledger"
+    empty.mkdir(parents=True)
+    _retarget_marker(wt, empty)
+
+    _asks_for_a_missing_ledger(_brake(wt), empty)
+
+
+def test_deleted_origin_ledger_asks(home: Path) -> None:
+    tid = _ready(home)
+    wt = _worktree(home, tid)
+    _displaced(home, tid, wt)
+    origin = TaskService(home).ledger_root
+    shutil.rmtree(origin)
+
+    _asks_for_a_missing_ledger(_brake(wt), origin)
+
+
+def test_a_session_without_a_claim_is_not_braked_by_a_missing_ledger(home: Path, tmp_path: Path) -> None:
+    """Témoin : sans epoch au journal, la session ne tient aucun bail — le frein n'a rien à protéger et se tait."""
+    tid = _ready(home)
+    wt = _worktree(home, tid)
+    note_session_task(wt, SESSION, tid, now_iso="")  # tâche notée, aucun epoch : pas de claim
+    assert load_session_state(wt, SESSION, now_iso="").lease_epoch == 0
+    _retarget_marker(wt, tmp_path / "ailleurs" / "ledger")
+
+    assert _brake(wt) is None
+    assert held_task_id(_edit(wt)) == ""

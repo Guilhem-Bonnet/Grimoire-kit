@@ -95,14 +95,19 @@ def ledger_root_of(project_root: Path) -> Path:
     absente, elle taisait le frein devant un titulaire périmé. Un marqueur illisible lève
     (:class:`~grimoire.core.exceptions.GrimoireMissionError`) : jamais de repli sur la copie locale.
     """
+    return _designated_ledger(project_root)[0]
+
+
+def _designated_ledger(project_root: Path) -> tuple[Path, bool]:
+    """``(ledger, désigné par un marqueur de worktree)`` — voir :func:`ledger_root_of`."""
     root = project_root.resolve()
     if (root / ".git").is_file():
         from grimoire.missions.task_worktree import home_of_worktree
 
         home = home_of_worktree(root)
         if home is not None:
-            return home[1]
-    return root / LEDGER_RELPATH
+            return home[1], True
+    return root / LEDGER_RELPATH, False
 
 
 def _lease_holder(hook: HookInput) -> tuple[str, int]:
@@ -284,6 +289,20 @@ def _deny(hook: HookInput, task_id: str, epoch: int, what: str, detail_kind: str
     )
 
 
+def _ledger_missing(hook: HookInput, task_id: str, epoch: int, root: Path, journal: Path) -> Decision:
+    return Decision(
+        outcome=Outcome.ASK,
+        reason=(
+            f"[Grimoire lease] bail invérifiable pour {hook.tool_name or 'cet appel'} — la session tient l'epoch "
+            f"{epoch} de {task_id} (journal de session {journal}), mais le ledger que désigne le marqueur du "
+            f"worktree n'a pas de journal ({root / 'events.jsonl'} absent : projet déplacé, worktree réparé, "
+            "ledger supprimé ?). À toi de décider ; le marqueur se répare en recréant le worktree "
+            "(`grimoire task worktree`)."
+        ),
+        detail={"tool": hook.tool_name, "lease_brake": "ledger_missing", "task_id": task_id, "lease_epoch": epoch},
+    )
+
+
 def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
     """Le refus du bail pour cet appel d'outil, ou ``None`` : la session tient son bail (ou n'en tient aucun).
 
@@ -299,8 +318,14 @@ def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
             return None
         from grimoire.policies.session_state import session_state_path
 
-        root = ledger_root_of(hook.project_root)
+        root, marked = _designated_ledger(hook.project_root)
         journal = session_state_path(hook.project_root, hook.session_id)
+        if marked and not (root / "events.jsonl").is_file():
+            # Relecture adverse de #1258 : la session tient un epoch (claim fait), mais le ledger que le
+            # marqueur désigne n'a pas de journal (projet déplacé, ``git worktree repair``, ledger supprimé).
+            # « Absent → held » vaut pour un projet sans ledger, pas pour un ledger désigné et perdu :
+            # le bail est invérifiable, l'humain tranche. Jamais ``held``, jamais la copie locale.
+            return _ledger_missing(hook, task_id, epoch, root, journal)
         state, reason = _lease_state(root, task_id, epoch, journal)
         if state == _RELEASED:
             return None
