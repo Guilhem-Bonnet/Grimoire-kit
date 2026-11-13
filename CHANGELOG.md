@@ -7,6 +7,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.87.0] - 2026-11-13
+
+- fix(cockpit): une action faite dans le cockpit ne laisse plus la page sur l'état d'avant — le cache des lectures était vidé après l'envoi de la réponse d'une écriture ; la page, qui relit dès la réponse reçue, pouvait rejoindre un calcul commencé avant l'écriture et ne jamais voir son propre changement (carte non déplacée, tâche migrée absente). Il est maintenant vidé avant que la réponse parte (#1246)
+- perf(cockpit): le pouls ne fait plus attendre la page ni tourner le serveur à vide — l'empreinte est calculée une fois par tour pour tous les onglets ouverts sur un même périmètre, un fichier ancien et immobile n'est plus relu pour son contenu, les décisions ne sont recomptées que quand un ledger a bougé, et l'empreinte n'utilise plus `pathlib` dans sa boucle chaude : sur un poste à quatre projets (2 400 fichiers surveillés), le premier pouls passe de ~5 s à ~0,3 s et le serveur, trois onglets ouverts, de 124 % à 19 % de CPU (GAO-cockpit-char-001) (#1242)
+- perf(core): `grimoire.core.file_memo` garde ce qu'on tire d'un fichier (hash, YAML lu) tant que sa date, sa taille et son inode tiennent, et seulement quand sa date est assez ancienne pour qu'une réécriture la change forcément ; l'alignement du kit ne rehache plus ~300 fichiers et `gates.yaml` n'est plus reparsé pour chaque tâche (`attention` à chaud : ~4 s → ~3,2 s) (GAO-cockpit-char-001) (#1242)
+- fix(cockpit): « À traiter » ne ramène plus la page en haut à chaque actualisation — la ligne choisie au clic retrouve son focus sans défilement quand un rechargement en direct la recrée (GAO-cockpit-char-001) (#1242)
+- feat(missions): double relecture indépendante sur une partie des chemins réservés, au choix du projet (`orchestrator.roles.merger.protected_gate: dual_review`, défaut `human` inchangé). Le second relecteur est choisi par le tick au lancement (registre de fournisseurs, sceaux du journal d'autorité) : le plus fort des candidats, jamais sous `second_reviewer_min_tier` (défaut `strong`, sans repli) ; la fusion et l'acceptation comparent les deux sceaux, et ce qui définit la CI, la politique, la configuration d'hôte le mécanisme lui-même et ses dépendances directes reste à l'humain (`HUMAN_ONLY_PATHS`, extensible par `human_only_paths`) (#1238)
+- fix(cockpit): la palette n'annonce plus « Aucun résultat » pendant que la liste des fichiers arrive — depuis le chargement à la première ouverture (3.85.0), une recherche de chemin tapée tout de suite affichait ce faux verdict un instant ; elle dit maintenant qu'elle cherche dans les fichiers, puis les montre. Le test de la palette attend l'entrée « Fichier » au lieu de compter les lignes : c'est cette course qui faisait échouer la CI par intermittence (#1245)
+
 ## [3.86.0] - 2026-11-13
 
 - feat(missions): le worker route vers un fournisseur `provider_type: local` en `http://` sur une boucle locale (127.0.0.1, localhost, ::1), sans clé ; un seul worker à la fois par fournisseur local et le motif d'un refus se lit dans `task show` (#1154) (#1230)
