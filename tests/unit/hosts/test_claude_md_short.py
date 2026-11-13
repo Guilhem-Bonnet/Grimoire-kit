@@ -21,7 +21,7 @@ from grimoire.core.archetype_resolver import ResolvedArchetype
 from grimoire.core.scaffold import ProjectScaffolder, ScaffoldPlan
 from grimoire.hosts.collect import build_surface
 from grimoire.hosts.emitters import apply_plan, emitter_for
-from grimoire.hosts.emitters.claude_code import claude_md_content
+from grimoire.hosts.emitters.claude_code import claude_md_content, project_language
 
 SHORT_LIMIT = 1500
 
@@ -137,6 +137,11 @@ def test_le_contenu_ne_depend_pas_du_nom_du_projet_pour_la_taille(tmp_path: Path
     """Deux noms de projet de tailles très différentes restent sous le plafond."""
     assert len(claude_md_content("p", "Français")) < SHORT_LIMIT
     assert len(claude_md_content("projet-" * 20, "Français")) < SHORT_LIMIT
+
+
+def test_la_langue_par_defaut_est_le_francais_sans_config(tmp_path: Path) -> None:
+    """Une config absente ne fait pas échouer l'émission : on retombe sur le défaut du kit."""
+    assert project_language(tmp_path) == "Français"
 
 
 def test_le_fichier_d_instructions_copilot_reste_planifie(tmp_path: Path) -> None:
