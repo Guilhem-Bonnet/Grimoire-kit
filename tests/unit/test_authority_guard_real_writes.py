@@ -393,6 +393,12 @@ MENTIONS = {
     "heredoc-de-documentation": "cat > notes.md <<'EOF'\nsed -n 'w {Z}/f' ; git clone /src {Z}/x\nEOF",
     "message-de-commit-par-heredoc": "git commit -q -F - <<'EOF'\nfix: git init {Z}/x n'est plus possible\nEOF",
     "echo-d-une-commande": "echo \"git clone /src {Z}/x\"",
+    "corps-de-pr-par-substitution-qui-cite-des-ecritures": (
+        "gh pr create --title t --body \"$(cat <<'EOF'\ngit clone /src {Z}/x\nawk '{print > \"{Z}/f\"}'\n"
+        "perl -e 'unlink \"{Z}/f\"'\nEOF\n)\""
+    ),
+    "python-qui-affiche-une-recette": "python3 -c \"print(\\\"logging.FileHandler('{Z}/f')\\\")\"",
+    "node-qui-affiche-une-recette": "node -e \"console.log(\\\"fs.writeFileSync('{Z}/f')\\\")\"",
     "vim-qui-cherche-le-chemin": "vim -es -c '/{Z}' -c 'q' notes.md",
 }
 
