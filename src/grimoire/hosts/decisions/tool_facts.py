@@ -55,10 +55,15 @@ _WEB_MARKERS = ("fetch", "websearch", "web_search", "browser", "navigate", "http
 #: read as ``git push -f``, and would equally let ``git checkout -- .gitignore``
 #: read as discarding the whole tree. ``(?=\s|$)`` requires an actual token
 #: boundary — whitespace or end of string — instead.
+#:
+#: Le drapeau d'une poussée forcée est cherché dans SA commande, pas jusqu'à la
+#: fin de la ligne : ``git push … ; pgrep -f x`` ne force rien. La commande finit
+#: à ``;``, ``|`` ou ``&`` ; l'esperluette d'une redirection (``2>&1``, ``&>``)
+#: n'en est pas une fin.
 _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\brm\s+(-[a-z]*[rf][a-z]*\s+)+", "recursive/forced delete"),
     (
-        r"\bgit\s+push\b.*(?:^|\s)"
+        r"\bgit\s+push\b(?:[^;|&\n]|(?<=>)&|&(?=>))*(?:^|\s)"
         r"(--force|--force-with-lease(?:=\S+)?|--force-if-includes|-[a-z]*f[a-z]*)"
         r"(?=\s|$)",
         "force push",
