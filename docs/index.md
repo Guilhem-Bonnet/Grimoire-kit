@@ -10,7 +10,7 @@ Grimoire s'installe dans ton dépôt et te donne, pour le code que tu confies à
 
 ```bash
 uv tool install grimoire-kit
-grimoire init . --lite -y
+grimoire init . -y   # démarre la pile mémoire complète si Docker répond
 grimoire standard init . --profile governed
 ```
 
