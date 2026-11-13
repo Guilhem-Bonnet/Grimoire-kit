@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.87.0] - 2026-11-13
+
+- feat(missions): double relecture indépendante sur une partie des chemins réservés, au choix du projet (`orchestrator.roles.merger.protected_gate: dual_review`, défaut `human` inchangé). Le second relecteur est choisi par le tick au lancement (registre de fournisseurs, sceaux du journal d'autorité) : le plus fort des candidats, jamais sous `second_reviewer_min_tier` (défaut `strong`, sans repli) ; la fusion et l'acceptation comparent les deux sceaux, et ce qui définit la CI, la politique, la configuration d'hôte le mécanisme lui-même et ses dépendances directes reste à l'humain (`HUMAN_ONLY_PATHS`, extensible par `human_only_paths`) (#1238)
+
 ## [3.86.0] - 2026-11-13
 
 - feat(missions): le worker route vers un fournisseur `provider_type: local` en `http://` sur une boucle locale (127.0.0.1, localhost, ::1), sans clé ; un seul worker à la fois par fournisseur local et le motif d'un refus se lit dans `task show` (#1154) (#1230)
