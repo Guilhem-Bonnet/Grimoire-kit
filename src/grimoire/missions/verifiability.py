@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -44,14 +45,19 @@ if TYPE_CHECKING:
 __all__ = [
     "JUDGE_PATTERNS",
     "MECHANICAL_PATTERNS",
+    "PERSON_VALIDATION_PATTERNS",
     "VERDICT_MARKER",
+    "CriterionAdvice",
     "Verifiability",
     "as_dict",
+    "awaits_person_validation",
     "classify",
     "classify_criteria",
+    "diagnose",
     "explain",
     "is_bare_command",
     "reason_for_criteria",
+    "requires_paid_spend",
 ]
 
 
@@ -177,6 +183,14 @@ MECHANICAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
     )
 )
 
+#: Les formulations qui attendent qu'une personne rende le verdict — partagées
+#: par le vocabulaire de revue (V1) et par le diagnostic (:data:`PERSON_VALIDATION_PATTERNS`),
+#: pour qu'elles ne puissent pas diverger.
+_VALIDATION_HUMAINE = (
+    r"valid[ée]e?s? par|validation par|relu(?:e)?s? par|accord (?:de|du)|"
+    r"approuv[ée]e?s? par|approval by|approved by|reviewed by|sign[ée]e?s? par"
+)
+
 #: Vocabulaire d'une revue : le verdict passe par une personne, ou un agent
 #: qui en tient lieu — jamais par un programme seul, quel que soit ce que le
 #: reste du critère mentionne par ailleurs (d'où sa priorité de lecture dans
@@ -195,11 +209,157 @@ JUDGE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
         ),
         (
             "validation_humaine",
-            r"\b(valid[ée]e? par|validation par|approuv[ée]e? par|approval by|"
-            r"approved by|reviewed by|sign[- ]?off|sign[ée]e? par)\b",
+            rf"\b(?:{_VALIDATION_HUMAINE}|sign[- ]?off)\b",
         ),
     )
 )
+
+
+#: Un critère qui attend qu'une personne nommée rende le verdict (« validé par
+#: le PO », « relu par le tech lead », « accord de la direction », « captures
+#: validées par Alice »). Le classement le reconnaît comme une revue (V1) —
+#: jamais comme un verdict mécanique, et jamais comme une attente à garder :
+#: une personne nommée dans un critère ne se transforme pas en question posée
+#: à cette personne. :func:`diagnose` le signale pour qu'on le reformule.
+PERSON_VALIDATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _motifs(
+    (("validation_personne", rf"\b(?:{_VALIDATION_HUMAINE})\b"),)
+)
+
+#: Ce que dit un critère qui attend une personne : reformuler en vérification
+#: reproductible ou en revue par le relecteur, jamais en question à cette personne.
+_REFORMULER_ATTENTE_PERSONNE = (
+    "attente d'une personne nommée : reformulez en vérification (test, capture comparée à une "
+    "image de référence) ou en revue par le relecteur — la validation par une personne n'est pas "
+    "un verdict reproductible"
+)
+
+#: Ce que dit un critère qui exige une dépense payante : le verdict doit rester
+#: rejouable sans facture (doublure, fixture) ou la dépense se décide hors tâche.
+_REFORMULER_DEPENSE = (
+    "dépense payante : remplacez le banc ou l'API facturée par un contrôle gratuit (fixture, "
+    "doublure) ou faites arbitrer la dépense hors de la tâche"
+)
+
+#: Reformulation proposée pour un critère ambigu — celui qui fait tomber en V2.
+_REFORMULER_AMBIGU = (
+    "reformulez en verdict mécanique (test, lint, code de sortie, fichier attendu) ou en revue "
+    "par le relecteur, par exemple « pytest tests/unit/... passe » ou « `<commande>` retourne 0 »"
+)
+
+#: Les avertissements qu'un critère peut porter, avec leur consigne lisible.
+_WARNING_MESSAGES: dict[str, str] = {
+    "validation_personne": _REFORMULER_ATTENTE_PERSONNE,
+    "depense_payante": _REFORMULER_DEPENSE,
+}
+
+#: Un critère qui attend la validation d'une personne est une revue (V1), jamais
+#: un verdict mécanique : le vocabulaire de revue prime déjà dans
+#: :func:`_classer_critere`. Cette fonction ne sert qu'au diagnostic.
+_VERDICT_MECANIQUE = "mecanique"
+_VERDICT_REVUE = "revue"
+_VERDICT_AMBIGU = "ambigu"
+_CATEGORIE_VERS_VERDICT: dict[_Categorie, str] = {
+    _Categorie.MECANIQUE: _VERDICT_MECANIQUE,
+    _Categorie.JUGE: _VERDICT_REVUE,
+    _Categorie.AMBIGU: _VERDICT_AMBIGU,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class CriterionAdvice:
+    """Ce qu'un critère vaut au classement, ce qu'il faut en faire, et ce qu'il coûte.
+
+    *verdict* : ``mecanique``, ``revue`` ou ``ambigu`` (seul ``ambigu`` fait
+    tomber la tâche en V2). *reformulation* : la consigne qui ferait descendre
+    un critère ambigu — vide quand il n'y a rien à corriger. *warnings* : les
+    catégories d'avertissement (``validation_personne``, ``depense_payante``),
+    quel que soit le verdict.
+    """
+
+    criterion: str
+    pattern: str | None
+    verdict: str
+    reformulation: str = ""
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def warning_messages(self) -> tuple[str, ...]:
+        """Les consignes lisibles des avertissements, dans l'ordre déclaré."""
+        return tuple(_WARNING_MESSAGES[code] for code in self.warnings)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "criterion": self.criterion,
+            "pattern": self.pattern,
+            "verdict": self.verdict,
+            "reformulation": self.reformulation,
+            "warnings": [{"code": code, "message": _WARNING_MESSAGES[code]} for code in self.warnings],
+        }
+
+
+def _plie(texte: str) -> str:
+    """Le texte comparé par les motifs du pilote : sans accents ni casse, espaces réduits."""
+    decompose = unicodedata.normalize("NFKD", texte)
+    sans_accents = "".join(c for c in decompose if not unicodedata.combining(c))
+    return " ".join(sans_accents.lower().split())
+
+
+def awaits_person_validation(texte: str) -> str | None:
+    """Le motif d'attente d'une personne reconnu dans *texte*, ou ``None``."""
+    for motif, motif_re in PERSON_VALIDATION_PATTERNS:
+        if motif_re.search(texte):
+            return motif
+    return None
+
+
+def requires_paid_spend(texte: str) -> str | None:
+    """Le motif de dépense payante reconnu dans *texte*, ou ``None``.
+
+    Réutilise la liste fermée du pilote (:data:`grimoire.missions.autopilot.RESERVED`,
+    catégorie ``depense``) plutôt que d'en recopier une seconde, qui divergerait.
+    Import paresseux : ``autopilot`` importe le ledger et le mandat, jamais ce module.
+    """
+    from grimoire.missions.autopilot import RESERVED
+
+    if RESERVED["depense"].search(_plie(texte)):
+        return "depense"
+    return None
+
+
+def diagnose(task: MissionTask) -> list[CriterionAdvice]:
+    """Le diagnostic critère par critère : verdict, reformulation et avertissements.
+
+    Même périmètre que :func:`explain` (``acceptance`` puis ``expected_evidence``)
+    et même classement que :func:`classify` — jamais une seconde lecture du
+    texte. C'est ce que ``task add``, ``task show`` et ``task classify
+    --explain`` rendent : nommer le critère qui fait tomber en V2, proposer sa
+    reformulation, et signaler une attente de personne ou une dépense payante.
+    """
+    commandes = _commandes(task)
+    conseils: list[CriterionAdvice] = []
+    for critere in _criteres(task):
+        verdict = _classer_critere(critere, commandes)
+        warnings: list[str] = []
+        if awaits_person_validation(critere) is not None:
+            warnings.append("validation_personne")
+        if requires_paid_spend(critere) is not None:
+            warnings.append("depense_payante")
+        if verdict.categorie is _Categorie.AMBIGU:
+            reformulation = _REFORMULER_AMBIGU
+        elif "validation_personne" in warnings:
+            reformulation = _REFORMULER_ATTENTE_PERSONNE
+        else:
+            reformulation = ""
+        conseils.append(
+            CriterionAdvice(
+                criterion=critere,
+                pattern=verdict.motif,
+                verdict=_CATEGORIE_VERS_VERDICT[verdict.categorie],
+                reformulation=reformulation,
+                warnings=tuple(warnings),
+            )
+        )
+    return conseils
 
 
 #: Marqueur d'un verdict : un critère mécanique doit dire ce qui est attendu
@@ -361,6 +521,28 @@ def _couvert_par_commande(texte: str, commandes: Sequence[str]) -> str | None:
     return None
 
 
+#: Une commande citée entre accents graves dans le texte d'un critère.
+_ENTRE_ACCENTS = re.compile(r"`([^`]+)`")
+
+
+def _commande_citee(texte: str, commandes: Sequence[str]) -> str | None:
+    """La commande entre accents graves identique à une ``--check`` déclarée, ou ``None``.
+
+    Règle de l'issue GAO-crit-res-dir-001 : citer entre accents graves la
+    commande déclarée, exactement, dit que le verdict est son code de sortie —
+    inutile d'ajouter « passe » ou « retourne 0 » à côté. La comparaison est
+    exacte (espaces normalisés, casse ignorée) : une commande voisine ou un
+    fragment de prose entre accents graves ne suffit pas.
+    """
+    if not commandes:
+        return None
+    citees = {" ".join(m.group(1).split()).casefold() for m in _ENTRE_ACCENTS.finditer(texte)}
+    for commande in commandes:
+        if " ".join(commande.split()).casefold() in citees:
+            return commande.strip()
+    return None
+
+
 def _classer_critere(texte: str, commandes: Sequence[str] = ()) -> _Verdict:
     """Classe un critère isolé — la revue prime sur le mécanique.
 
@@ -375,6 +557,10 @@ def _classer_critere(texte: str, commandes: Sequence[str] = ()) -> _Verdict:
             return _Verdict(_Categorie.JUGE, motif)
     if _est_commande_nue(texte):
         return _Verdict(_Categorie.MECANIQUE, "commande_nue")
+    # Citer entre accents graves la commande déclarée, à l'identique, vaut verdict
+    # mécanique : c'est le code de sortie de cette commande qui conclut.
+    if _commande_citee(texte, commandes) is not None:
+        return _Verdict(_Categorie.MECANIQUE, "commande_citee")
     for motif, motif_re in MECHANICAL_PATTERNS:
         if motif_re.search(texte) and (motif in _MOTIFS_AUTO_VERDICT or VERDICT_MARKER.search(texte)):
             return _Verdict(_Categorie.MECANIQUE, motif)
@@ -515,11 +701,30 @@ def as_dict(task: MissionTask) -> dict[str, Any]:
     autrement ou par oublier un critère dans son explication.
     """
     klass = classify(task)
+    conseils = diagnose(task)
     data: dict[str, Any] = {
         "class": klass.value,
         "explanation": klass.explanation,
         "reason": reason_for_criteria(_criteres(task), _commandes(task)),
         "criteria": [{"criterion": critere, "pattern": motif} for critere, motif in explain(task)],
+        # Ce qui fait tomber en V2, avec la reformulation qui le ferait descendre :
+        # sans les nommer, la classe ne dit pas quoi corriger (GAO-crit-res-dir-001).
+        "v2_causes": [
+            {"criterion": conseil.criterion, "reformulation": conseil.reformulation}
+            for conseil in conseils
+            if conseil.verdict == _VERDICT_AMBIGU
+        ],
+        # Un avertissement ne change pas la classe : il signale un critère à
+        # reformuler même quand il a un verdict reconnu (attente de personne, dépense).
+        "warnings": [
+            {
+                "criterion": conseil.criterion,
+                "code": code,
+                "message": _WARNING_MESSAGES[code],
+            }
+            for conseil in conseils
+            for code in conseil.warnings
+        ],
     }
     textual = classify_criteria(_criteres(task), _commandes(task))
     if klass is not textual:

@@ -56,6 +56,7 @@ from grimoire.tools import (
     workspace_actions,
     workspace_api,
     workspace_attention,
+    workspace_autopilot,
     workspace_chat,
     workspace_config,
     workspace_exec,
@@ -168,14 +169,20 @@ def _tasks(project_root: Path, query: _Query) -> Any:
     # ``annotations=0`` (issue #1010) : la palette de commandes de la coque ne
     # lit que ``id``/``title`` — inutile de payer la vivacité, les coûts, le
     # payload ``work`` (journaux de session) et les gates à chaque amorçage.
+    # ``fields=id,title`` (GAO-cockpit-lect-001) borne en plus chaque carte à ces
+    # clés : la palette ne télécharge plus la fiche entière. Un nom inconnu lève
+    # une ``ValueError`` que le transport traduit en 400.
     raw = _one(query, "annotations")
     annotations = raw is None or raw.strip().lower() not in ("0", "false", "no", "off")
+    raw_fields = _one(query, "fields")
+    fields = [part.strip() for part in raw_fields.split(",") if part.strip()] if raw_fields is not None else None
     return workspace_api.tasks_view(
         project_root,
         mission=_one(query, "mission"),
         status=_one(query, "status"),
         probe=_host_probe,
         annotations=annotations,
+        fields=fields,
     )
 
 
@@ -576,19 +583,9 @@ def _mandate_state(project_root: Path, _query: _Query) -> Any:
     }
 
 
-def _autopilot_state(project_root: Path, _query: _Query) -> Any:
-    """État du pilote automatique (P82) : lecture seule, jamais d'activation ici ; les décisions sont au ledger."""
-    from grimoire.missions.autopilot import RESERVED, AutopilotStore, load_autopilot_policy
-
-    policy = load_autopilot_policy(project_root.resolve())
-    return {
-        **AutopilotStore(project_root).state().to_dict(),
-        "reserved": sorted(RESERVED), "extra_reserved": list(policy.extra), "policy_error": policy.error,
-    }
-
-
 GET_ROUTES: dict[str, _GetHandler] = {
-f"{PREFIX}autonomy/autopilot": _autopilot_state,
+f"{PREFIX}autonomy/autopilot/decisions": workspace_autopilot.decisions,
+f"{PREFIX}autonomy/autopilot": workspace_autopilot.state,
 f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}tasks/accept-merged": workspace_accept_merged.accept_merged_view,
     f"{PREFIX}glossary": _glossary,
@@ -648,7 +645,28 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 #: rechargement du direct, reste accepté (et retiré) : il ne change jamais la réponse.
 PULSE_RELOAD = "pulse_reload"
 LIVE_ROUTES = frozenset(
-    {f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet", f"{PREFIX}tasks/accept-merged"}
+    {
+        f"{PREFIX}tasks",
+        f"{PREFIX}attention",
+        f"{PREFIX}sessions",
+        f"{PREFIX}sheet",
+        f"{PREFIX}tasks/accept-merged",
+        # Le parcours de l'arbre est la lecture la plus chère de la page : borné
+        # en temps et en nombre, il n'a pas à être repayé à chaque onglet.
+        f"{PREFIX}files",
+        # GAO-cockpit-lect-001 : les trois lectures lourdes du rail et de la
+        # Flotte passaient hors cache (mesures du 2026-11-12 : ``evidence`` 6,8 s,
+        # ``capacity`` jusqu'à 7,6 s sous charge). Elles sont dérivées du ledger
+        # et de l'hôte, comme ``attention`` : même empreinte, même réponse.
+        # GAO-cockpit-les-001 : ce qu'elles lisent hors de l'empreinte du pouls
+        # (journaux de session et sonde d'hôte, board et gates, horloge) leur vaut
+        # l'âge court ``FRESH_MAX_AGE_SECONDS`` (3 s), pas ``MAX_AGE_SECONDS``.
+        # ``fleet/live?project=*`` reste hors cache — agrégat du registre sous
+        # l'empreinte d'un seul projet, comme le portefeuille.
+        f"{PREFIX}evidence",
+        f"{PREFIX}capacity",
+        f"{PREFIX}fleet/live",
+    }
 )
 
 
@@ -987,6 +1005,7 @@ def _autopilot_set(project_root: Path, body: dict[str, Any]) -> Any:
 #: Écritures à chemin fixe. Les actions de tâche sont paramétrées, cf. plus bas.
 POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}autonomy/autopilot": _autopilot_set,
+    f"{PREFIX}autonomy/autopilot/revert": workspace_autopilot.revert,
     # Chat de l'orchestrateur (ACP2) : un tour humain relayé à l'agent ; le cockpit n'écrit rien (ADR-007).
     f"{PREFIX}chat/send": workspace_chat.chat_send,
     f"{PREFIX}chat/permission": workspace_chat.chat_permission,

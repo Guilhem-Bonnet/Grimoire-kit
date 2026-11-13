@@ -27,6 +27,21 @@ from typing import Any
 
 CADRAGE_DIR = Path("_grimoire") / "cadrage"
 PLACEHOLDER = "> À compléter —"
+#: Le chantier par défaut : les fichiers historiques, posés à la racine de ``_grimoire/cadrage/``.
+DEFAULT_CHANTIER = "principal"
+
+
+def _rel_dir(chantier: str | None) -> Path:
+    if chantier is None or chantier == DEFAULT_CHANTIER:
+        return CADRAGE_DIR
+    if not chantier or chantier != Path(chantier).name or chantier in {".", ".."}:
+        raise ValueError(f"chantier invalide : {chantier!r}")
+    return CADRAGE_DIR / chantier
+
+
+def cadrage_dir(root: Path, chantier: str | None = None) -> Path:
+    """Le dossier d'un chantier ; ``None`` ou ``principal`` rendent le dossier historique."""
+    return root / _rel_dir(chantier)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,9 +152,11 @@ def _template(phase: Phase, project_name: str) -> str:
     return "\n".join(lines)
 
 
-def scaffold(root: Path, *, project_name: str, force: bool = False) -> list[Path]:
+def scaffold(
+    root: Path, *, project_name: str, force: bool = False, chantier: str | None = None
+) -> list[Path]:
     """Écrit les gabarits des cinq phases. Ne réécrit jamais sans ``force``."""
-    target = root / CADRAGE_DIR
+    target = cadrage_dir(root, chantier)
     target.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for phase in PHASES:
@@ -159,12 +176,13 @@ def _section_filled(body_lines: list[str]) -> bool:
     )
 
 
-def phase_report(root: Path, phase: Phase) -> dict[str, Any]:
+def phase_report(root: Path, phase: Phase, chantier: str | None = None) -> dict[str, Any]:
     """État d'une phase : absent / vide / partiel / rempli, par section."""
-    path = root / CADRAGE_DIR / phase.filename
+    rel = _rel_dir(chantier)
+    path = root / rel / phase.filename
     report: dict[str, Any] = {
         "phase": phase.id,
-        "file": (CADRAGE_DIR / phase.filename).as_posix(),
+        "file": (rel / phase.filename).as_posix(),
         "state": "missing",
         "sections": {},
         "gate": phase.gate,
@@ -195,9 +213,9 @@ def phase_report(root: Path, phase: Phase) -> dict[str, Any]:
     return report
 
 
-def status(root: Path) -> dict[str, Any]:
+def status(root: Path, chantier: str | None = None) -> dict[str, Any]:
     """Progression du cadrage, phase par phase."""
-    reports = [phase_report(root, p) for p in PHASES]
+    reports = [phase_report(root, p, chantier) for p in PHASES]
     done = sum(1 for r in reports if r["state"] == "rempli")
     return {
         "phases": reports,
@@ -206,7 +224,7 @@ def status(root: Path) -> dict[str, Any]:
     }
 
 
-def check(root: Path) -> tuple[list[str], list[str]]:
+def check(root: Path, chantier: str | None = None) -> tuple[list[str], list[str]]:
     """Gate du cadrage : erreurs (phases `gate`) et avertissements (les autres).
 
     Un cahier des charges incomplet est une **erreur** — on ne construit pas
@@ -216,7 +234,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     for phase in PHASES:
-        report = phase_report(root, phase)
+        report = phase_report(root, phase, chantier)
         if report["state"] == "rempli":
             continue
         missing = [

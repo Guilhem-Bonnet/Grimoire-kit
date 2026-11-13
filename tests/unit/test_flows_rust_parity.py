@@ -426,6 +426,48 @@ def test_resume_with_node_that_is_not_current_still_targets_the_real_current_nod
     assert outcome.node_id == "a"
 
 
+@requires_rust_core
+def test_a_refusal_of_the_rust_resume_decision_is_a_named_error_that_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La décision « termine / avance » du cœur Rust peut refuser (node courant
+    absent de l'ordre — un invariant que rien ne viole aujourd'hui). ``resume()``
+    rend alors ce refus tel quel, en ``GrimoireRuntimeError``, AVANT d'enregistrer
+    l'empreinte du node et de checkpointer : rien n'est écrit.
+
+    Aucun test ne tenait cette branche (mesure ``--cov-branch`` avec le cœur
+    compilé, avant le découpage de ``_resume_core``). Seul le refus est simulé :
+    tout le reste du cœur compilé reste réel.
+    """
+    from grimoire.flows import engine as flows_engine
+
+    real_core = flows_engine._rust_core
+    seen: list[tuple[Any, ...]] = []
+
+    class _RefusingCore:
+        def __getattr__(self, name: str) -> Any:
+            return getattr(real_core, name)
+
+        def resume_outcome(self, *args: Any) -> Any:
+            seen.append(args)
+            raise ValueError("node courant 'a' absent de l'ordre du run")
+
+    _with_backend("rust", monkeypatch)
+    engine = _engine(tmp_path)
+    bp = _write_three_node_blueprint(tmp_path)
+    wfi, _ = engine.run(bp, executor=InteractiveNodeExecutor(stream=io.StringIO()))
+    monkeypatch.setattr(flows_engine, "_rust_core", _RefusingCore())
+    before = {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file() and p.suffix != ".lock"}
+
+    with pytest.raises(GrimoireRuntimeError) as raised:
+        engine.resume(wfi.id, output={"pins": {"out": {"contract": "c1"}}})
+
+    assert str(raised.value) == "node courant 'a' absent de l'ordre du run"
+    assert seen == [(["a", "b", "c"], "a", [])]
+    after = {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file() and p.suffix != ".lock"}
+    assert after == before
+
+
 # ── Corpus réel : les blueprints livrés, rejoués sur la grille de transitions ──
 
 _REGISTRY_BLUEPRINTS = Path(__file__).resolve().parents[2] / "registry" / "blueprints"

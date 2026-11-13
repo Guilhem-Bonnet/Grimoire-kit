@@ -59,6 +59,7 @@ import glossary, { FOURTH_SPACE } from './glossary.js';
 import { agoText, createLive, refreshSince } from './live.js';
 import { createChat } from './chat.js';
 import { createNotify } from './notify.js';
+import { createAutopilot } from './autopilot.js';
 
 // Fin du premier montage d'espace : la première lecture du compteur d'attention
 // l'attend, pour ne pas disputer le serveur au premier rendu (voir onPulseDecisions).
@@ -80,8 +81,13 @@ const SPACES = [
     sections: [{ id: 'travail', module: 'executer', label: 'Tâches',
       skeleton: (p) => (['liste', 'sessions', 'timeline', 'decisions'].includes(p.view) ? 'table' : 'board') }] },
   { id: 'flotte', label: 'Flotte', icon: 'i-space-flotte', term: 'flotte',
-    sections: [{ id: 'flotte', module: 'piloter', label: 'Flotte',
-      skeleton: () => (host.kind === 'cockpit' && scope.all ? 'table' : 'kpi') }] },
+    sections: [
+      { id: 'flotte', module: 'piloter', label: 'Flotte',
+        skeleton: () => (host.kind === 'cockpit' && scope.all ? 'table' : 'kpi') },
+      // Lot B (2026-11-12) : la Flotte en direct, en fils (artboard
+      // « Proposition A : Tissage »). Données : `GET fleet/live` du lot A.
+      { id: 'en-direct', module: 'fils', label: 'En direct', skeleton: 'lines' },
+    ] },
   { id: FOURTH_SPACE.id, label: FOURTH_SPACE.label, icon: FOURTH_SPACE.icon, term: 'memoire',
     // Entrée par la Recherche (P24) ; la Santé (P25) est la vue voisine.
     landing: 'memoire',
@@ -2102,7 +2108,11 @@ let appliedHash = '';
 
 function locationHash(section, params) {
   const space = section.space;
-  let hash = '#' + space.id + (space.sections.length > 1 ? '/' + section.id : '');
+  // La rubrique qui porte l'identifiant de son espace reste le fragment nu
+  // (`#flotte`) même quand une deuxième rubrique s'ajoute : les liens d'avant
+  // ne changent pas, et `#flotte` rouvre la rubrique d'arrivée.
+  const suffix = space.sections.length > 1 && section.id !== space.id ? '/' + section.id : '';
+  let hash = '#' + space.id + suffix;
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
     if (value === null || value === undefined || value === '' || typeof value === 'object') continue;
@@ -2557,6 +2567,23 @@ function renderLiveStamp() {
 }
 
 let stampTimer = null;
+// ── Pilote automatique (P83) ────────────────────────────────────────────────
+// L'interrupteur relit l'état au serveur : au démarrage, après chaque geste, toutes les 15 s et au retour
+// sur l'onglet (un mandat révoqué ailleurs coupe le pilote sans que la page le sache autrement).
+let autopilot = null;
+function startAutopilot() {
+  autopilot = createAutopilot({
+    scopeAll: host.scopeAll,
+    onChange: () => {
+      refreshAttentionCount();
+      if (current) goto(current, { ...currentParams });
+    },
+  });
+  autopilot.refresh();
+  setInterval(() => { if (!document.hidden) autopilot.refresh(); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) autopilot.refresh(); });
+}
+
 function startStampTicker() {
   const tick = () => { renderLiveStamp(); refreshSince(document); };
   const arm = () => {
@@ -2572,6 +2599,12 @@ function startStampTicker() {
 
 let paletteItems = [];
 let paletteIndex = 0;
+// Entrées « Fichiers » de la palette : `null` tant qu'elles n'ont pas été
+// demandées. Les charger à l'amorçage coûtait le parcours de l'arbre du projet
+// à chaque ouverture de page, pour une section que la plupart des ⌘K ne lisent
+// pas — Source les lit à son montage, la palette à sa première ouverture.
+let paletteFiles = null;
+let paletteFilesLoading = null;
 // Ouverte depuis le raccourci ⌘K, la palette n'a pas de section prioritaire ;
 // ouverte depuis la puce de portée (#project-chip), elle ne montre QUE la
 // section « Projets » — c'est le sélecteur de portée — voir `openPalette()`.
@@ -2613,11 +2646,13 @@ async function buildPalette() {
     command: 'grimoire task add --intake "<idée>" --create', run: () => goto('travail', { idee: '1' }),
   });
 
-  const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
-    // La palette ne lit que ``id``/``title`` : sans annotations (vivacité,
-    // coût, payload ``work`` des journaux de session, gates), la Flotte mount
-    // plus tôt — cet appel est sur son chemin critique (issue #1010).
-    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ annotations: 0 }), api.files()]);
+  const [commandsResult, projectsResult, blueprintsResult, tasksResult] =
+    // La palette ne lit que ``id``/``title`` : `fields=id,title` borne chaque
+    // carte à ces deux clés (GAO-cockpit-lect-001) — donc ni annotations
+    // (vivacité, coût, payload ``work`` des journaux de session, gates), ni fiche
+    // entière. Cet appel est sur le chemin critique du montage de la Flotte
+    // (issue #1010).
+    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ fields: 'id,title' })]);
 
   const catalogue = settle(commandsResult, {}).commands || [];
   consoleCatalogue = new Map(catalogue.map((c) => [c.key, { flags: new Set(c.flags || []), positionals: c.positionals || 0 }]));
@@ -2664,7 +2699,18 @@ async function buildPalette() {
     run: () => runCommand(['task', 'show', t.id]),
   }));
 
-  const files = (settle(filesResult, {}).tiers || []).flatMap((tier) =>
+  paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks];
+  // Les fichiers ont pu arriver avant la fin de l'amorçage (palette ouverte
+  // très tôt) : `ensurePaletteFiles` les a posés sur l'ancien tableau, que
+  // l'affectation ci-dessus vient de remplacer.
+  if (paletteFiles) paletteItems = [...paletteItems, ...paletteFiles];
+  // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
+  if ($('palette').open) renderPalette($('palette-input').value);
+}
+
+/** Les entrées « Fichiers » d'une réponse de `api.files()`, bornées comme avant. */
+function filesPaletteItems(tree) {
+  return (tree.tiers || []).flatMap((tier) =>
     (tier.files || []).map((f) => ({
       section: 'Fichiers', label: f.path, hint: `Fichier · ${tier.label || tier.id}`, command: `grimoire # source ${f.path}`,
       // `goto('source', { file })` : sans le second argument, `shell.js`
@@ -2673,10 +2719,25 @@ async function buildPalette() {
       run: () => goto('source', { file: f.path }),
     })),
   ).slice(0, 500);
+}
 
-  paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks, ...files];
-  // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
-  if ($('palette').open) renderPalette($('palette-input').value);
+/** Demande les fichiers à la première ouverture de la palette (une seule fois). */
+function ensurePaletteFiles() {
+  if (paletteFiles !== null) return paletteFilesLoading || Promise.resolve();
+  if (paletteFilesLoading === null) {
+    paletteFilesLoading = api.files()
+      .then((tree) => {
+        paletteFiles = filesPaletteItems(tree);
+        paletteItems = [...paletteItems, ...paletteFiles];
+        if ($('palette').open) renderPalette($('palette-input').value);
+      })
+      .catch(() => {
+        // Route en erreur : l'ouverture suivante réessaiera, sans vider les
+        // autres sections.
+        paletteFilesLoading = null;
+      });
+  }
+  return paletteFilesLoading;
 }
 
 /** Pastille d'un projet : suivi par Grimoire, dossier sans Grimoire, ou disparu. */
@@ -2743,6 +2804,9 @@ function openPalette(sectionFirst = null, { only = false } = {}) {
   placePalette();
   renderPalette('');
   if (!palette.open) palette.showModal();
+  // Première ouverture : les fichiers de Source arrivent après coup et sont
+  // ajoutés à la liste, sans bloquer l'ouverture ni les autres sections.
+  void ensurePaletteFiles();
 }
 
 function closePalette() {
@@ -3125,6 +3189,7 @@ async function main() {
     // précède les données de l'espace, donc un changement survenu pendant son
     // chargement est vu au sondage suivant au lieu d'être perdu.
     await live.start();
+    startAutopilot();
     // « À traiter » est l'accueil (⌘1) ; un lien profond ouvre son écran.
     const { target, params } = parseHash(location.hash || '#' + SPACES[0].id);
     await goto(target, params, { fromUrl: true });
@@ -3155,6 +3220,7 @@ async function main() {
     setAtelier,
     get paletteOpen() { return $('palette').open; },
     toast: toastProbe,
+    refreshAutopilot: () => autopilot && autopilot.refresh(),
   };
   document.body.dataset.ready = '1';
 }

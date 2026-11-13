@@ -56,13 +56,22 @@ ne sort de la machine.
   son origine.
 - **Admettre :** la classe figure dans `data_policy.allowed_data_classes` du
   fournisseur et pas dans `forbidden_data_classes`.
-- **Sans déclaration, ou classe non admise :** pas de route. Le worker garde le
-  modèle de l'hôte et le motif s'inscrit dans `provider_refused` de son
-  événement de lancement. `task dispatch` s'arrête avec le refus `data_policy`
-  et son motif, ou passe au fournisseur suivant si un autre est admis.
+- **Sans déclaration, ou classe non admise :** pas de route vers ce
+  fournisseur. `task dispatch` s'arrête avec le refus `data_policy` et son
+  motif, ou passe au fournisseur suivant si un autre est admis.
+- **Le repli du worker sur le modèle de l'hôte est un appel hébergé.** Si la
+  classe déclarée n'est admise par **aucun** fournisseur hébergé activé, le
+  worker ne se rabat pas dessus : la tâche retourne en `ready` avec son motif
+  (`task.worker_deferred`), visible dans `task show` et dans la note
+  d'attention du tick, sans question bloquante à l'humain. Si la classe est
+  admise par au moins un fournisseur hébergé, le repli reste possible et son
+  motif s'inscrit dans `provider_refused` de l'événement de lancement, que
+  `task show` affiche aussi. Sans classe déclarée, le comportement est
+  inchangé : le worker garde le modèle de l'hôte.
 
 **Ce que cette règle garantit :** une tâche déclarée interdite n'est pas confiée
-à ce fournisseur.
+à ce fournisseur, et une classe qu'aucun fournisseur hébergé n'admet ne part pas
+non plus sur le modèle de l'hôte.
 
 **Ce qu'elle ne garantit pas :** une classe n'est qu'une déclaration, personne ne
 vérifie ce que contient le projet. Une fois routé, un worker lit avec Bash tout

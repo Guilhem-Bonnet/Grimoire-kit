@@ -31,7 +31,7 @@ from typing import Any
 from grimoire.bridges.schemas import HostId
 from grimoire.core.fsio import atomic_write
 from grimoire.hosts.hook_launcher import HookLauncher
-from grimoire.hosts.surface import AgentSpec, ProjectSurface, ToolVerb
+from grimoire.hosts.surface import AgentSpec, ProjectSurface, ToolVerb, format_bytes
 
 #: Marker identifying a kit-generated artifact. Present in every managed file.
 MANAGED_MARKER = "grimoire:managed"
@@ -652,21 +652,56 @@ class Emitter:
 DEFAULT_CONTEXT_INSTRUCTION = "Lis `_grimoire/_memory/shared-context.md` s'il existe, pour l'état courant du projet."
 
 
+def persona_section(agent: AgentSpec) -> str:
+    """La persona dans la définition d'agent : corps intégré ou pointeur (#1179).
+
+    Sous :data:`~grimoire.hosts.surface.MAX_INLINE_PERSONA_BYTES`, le corps
+    est écrit dans la définition générée : la session de sous-agent le reçoit
+    d'emblée au lieu de payer un tour d'outil et ~10 Ko de lecture. Le fichier
+    source n'est plus cité que pour sa mise à jour. Au-delà du plafond — ou
+    quand la persona n'a pas de corps — on garde la consigne de lecture, et
+    ``grimoire host sync`` signale le dépassement (``ProjectSurface.notes``).
+    """
+    body = agent.inline_body()
+    if body is None:
+        return (
+            f"Lis `{agent.definition_ref}` en entier : ce fichier porte la persona, ses\n"
+            "règles et son protocole d'activation. Applique-les sans les résumer."
+        )
+    return (
+        f"Le corps de la persona est intégré ci-dessous, repris de `{agent.definition_ref}`.\n"
+        "Modifie ce fichier source puis relance `grimoire host sync` pour mettre la\n"
+        "définition à jour.\n\n"
+        f"{body}"
+    )
+
+
 def context_load_instruction(agent: AgentSpec) -> str:
     """L'étape « charge ton contexte » émise dans le fichier d'agent.
 
-    Un agent qui déclare ``context:`` charge ces chemins-là, et eux seuls —
+    Un agent qui déclare ``context:`` voit ces chemins-là, et eux seuls —
     plus le contexte partagé par défaut qu'il n'a pas demandé. Un agent qui ne
     déclare rien reçoit exactement :data:`DEFAULT_CONTEXT_INSTRUCTION`, à
     l'identique d'avant #379 : la déclaration est un rétrécissement
     volontaire, jamais une amputation par défaut (issue #379, critère 2).
+
+    Depuis #1179, le contexte déclaré n'est plus un ordre de lecture : il est
+    présenté « à consulter au besoin », avec la taille de chaque document.
+    Des workers avaient lu des fichiers déclarés de 28 à 782 Ko sans besoin ;
+    la taille les aide à juger, et « au besoin » rend la lecture facultative.
     """
     if not agent.context:
         return DEFAULT_CONTEXT_INSTRUCTION
+    sizes = dict(agent.context_sizes)
+
+    def _listed(path: str) -> str:
+        size = sizes.get(path)
+        return f"`{path}` ({format_bytes(size)})" if size is not None else f"`{path}`"
+
+    listed = ", ".join(_listed(path) for path in agent.context)
     if len(agent.context) == 1:
-        return f"Lis `{agent.context[0]}` s'il existe : c'est le seul contexte que tu déclares."
-    paths = ", ".join(f"`{p}`" for p in agent.context)
-    return f"Lis ton contexte déclaré, et lui seul, s'il existe : {paths}."
+        return f"Contexte déclaré, à consulter au besoin : {listed}."
+    return f"Contexte déclaré, à consulter au besoin (et seulement si la tâche le demande) : {listed}."
 
 
 def map_verbs(verbs: tuple[ToolVerb, ...], table: dict[ToolVerb, tuple[str, ...]]) -> tuple[str, ...]:

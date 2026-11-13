@@ -7,6 +7,41 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.85.0] - 2026-11-12
+
+- feat(cadrage): plusieurs chantiers par projet — `grimoire cadrage list/new/state/link` et `--chantier` sur `init/status/check/plan` (lot 0 de l'Atelier de spec, #1200)
+- fix(hosts): une lecture ou une mention de la zone de contrôle est refusée sans révoquer le mandat (#1173) (#1227)
+  - **Constat** : la garde d'autorité refusait toute commande Bash qui nomme la zone de contrôle et révoquait presque toujours le mandat du projet ; un `tail` du journal, un corps de PR passé par heredoc ou une commande illisible arrêtaient toute l'autonomie, alors que la commande était de toute façon refusée avant exécution.
+  - **Conséquence, pas ouverture** : le refus ne change pas. La révocation n'a plus lieu que pour une écriture prouvée visant la zone (`src/grimoire/hosts/decisions/write_proof.py`) : redirection de sortie, `tee`, `sed -i`, `cp`/`mv`/`install`/`rsync`/`ln` vers la zone, `dd of=`, `truncate`, `touch`, `mkdir`, `rm`, `rmdir`, `chmod`, `chown`, `find -delete`/`-exec`, `python` qui ouvre en écriture ou appelle `write_text`/`write_bytes`/`unlink`/`rename`. Préfixes d'affectation et enveloppes (`env`, `sudo`, `nohup`, `timeout`, `nice`, `command`) sont retirés avant de classer ; l'analyse traverse variables, `sh -c`, `eval`, tubes vers un shell, `xargs` et script écrit puis lancé.
+  - **Tout le reste** (lecture, mention, forme incertaine ou illisible, langage non lu) : refus sans révocation, avec un message qui dit que rien n'a été révoqué et renvoie à `grimoire autonomy mandate status` et `grimoire autonomy autopilot status`.
+  - **Simple mention** : une seule forme passe, par liste blanche — un segment unique `gh`, `git` ou `grimoire` (sans enveloppe) où la zone n'apparaît que dans la valeur d'une option de texte (`--body`, `--title`, `-m`/`--message`, `--reason`, `--description`, `--comment`).
+  - **Lecture seule** : une commande classée en lecture seule (`ls`, `cat`, `wc`…) dont un opérande atteint la zone de ce poste est désormais refusée elle aussi, sans révocation ; l'outil Read n'est pas concerné.
+  - **Indépendance** : l'écriture du journal des tours humains, l'écriture de l'instantané du ledger, le rejeu du hook et la reprise de session sont jugés à part, avant toute autorisation ; leur comportement ne change pas.
+- perf(hosts): `host sync` intègre le corps de la fiche de persona dans la définition d'agent (plafond de 16 Ko, `hosts.inline_persona: false` pour revenir au pointeur) et présente le contexte déclaré « à consulter au besoin » avec la taille de chaque document — une session de sous-agent n'a plus à payer un tour de lecture (~10 Ko) pour recevoir sa propre persona (#1179) (#1183)
+- fix(missions): un délai réseau du merger n'ouvre plus le disjoncteur ; un disjoncteur ouvert se voit dans « À traiter » et dans `autonomy autopilot status` (#1192) (#1194)
+- perf(cockpit): lectures lourdes en vol unique (evidence, capacity, fleet/live gardés comme tâches et sessions) et palette servie par `tasks?fields=id,title` au lieu de 488 Ko de tâches (GAO-cockpit-lect-001) (#1221)
+- feat(cockpit): interrupteur « Pilote automatique » dans la barre du haut (`role="switch"`, clavier, clé du cockpit à l'activation), « À traiter » réduit au réservé à l'humain et aux questions en confiance basse (chacune avec sa raison), journal « Décidé par le pilote » dans Travail › Décisions avec « Revenir » (rouvre la tâche ou la rend à l'humain), état « activé depuis … » dans la barre d'état (GAO-p83-pilote-001)
+- docs(reference): statuts de la section 10 revérifiés contre `main`, toute ligne ouverte porte une issue ou une décision « hors périmètre » (#637)
+- feat(cockpit): piloter tout projet enrôlé sans confirmation nommée (lot 5) (#1196)
+- fix(cockpit): les lectures qui dépendent de l'instant (`fleet/live`, `capacity`, `evidence`) ne sont plus servies vieilles de plus de 3 secondes — une session morte ne reste plus affichée vivante jusqu'à 15 s (GAO-cockpit-les-001) (#1225)
+- fix(costs): chiffrer le cache des sessions Claude (lecture, écriture 5 min et 1 h) et ajouter Haiku 5.5 et Fable 5.2 (#1198)
+- refactor(tools): `make_handler` découpé en étapes nommées — le handler HTTP de l'atelier devient la classe de module `_ForgeHandler`, les corps de route de `do_POST` des méthodes `_post_*` ; aucun changement de comportement, et un test de caractérisation par branche jusque-là non testée (`tests/unit/tools/test_forge_http.py`)
+- refactor(flows): `FlowEngine._resume_core` découpé en étapes nommées, rangées dans `grimoire.flows.engine_resume` (`resume_terminal`, `resume_all_checkpointed`, `resume_judge`, `resume_refuse`, `resume_accept`) — aucun changement de comportement ; `engine.py` passe de 1450 à 1283 lignes ; les branches jusque-là sans test sont figées par `tests/unit/flows/test_resume_core.py`, et la garde des refus postérieurs à la réconciliation lit les étapes dans leur module
+- feat(missions): expliquer le classement V2 (critère fautif et reformulation), reconnaître une commande citée entre accents graves, et signaler à `task add` les critères qui attendent une personne ou une dépense payante (#1210)
+- perf(cockpit): la liste des fichiers du Source s'arrête à 2000 fichiers et à 2 s au lieu de parcourir tout l'arbre du projet ; sa réponse passe par le cache de lecture et la palette ne la demande qu'à sa première ouverture (#1217)
+- docs: les commandes d'accroche du README, du README.fr et de docs/index n'utilisent plus le drapeau déprécié `--lite`
+- feat(cockpit): la Flotte en direct lit les sessions, sous-agents, modèle et effort par tour (#1193) (#1195)
+- feat(cockpit): la Flotte en direct montre chaque session comme un fil, son détail et ses terminaux (lot B, #1193) (#1199)
+- fix(cockpit): un modèle `claude-*` absent du registre du projet compte pour Anthropic, et un sous-agent prend le nom de ce qu'on lui a demandé au lieu de la branche de son parent (#1199)
+- chore(ci): `make lint-js` et le job `lint` contrôlent la syntaxe de chaque fichier JavaScript suivi sous `web/` (`node --check`, `scripts/check-js-syntax.py`) puis passent ESLint en configuration minimale (`eslint.config.mjs` : `no-undef`, `no-dupe-keys`, `no-unreachable`, `no-redeclare`, `no-unused-vars` en avertissement), sans dépendance installée dans le dépôt ni dans la roue
+- fix(cockpit): l'interrupteur du pilote automatique nomme de nouveau son projet dans le corps de la requête ; une seconde clé `autopilotSet` de `web/workspace/api.js` (P83, #1085) écrasait en silence celle du lot 3, défaut relevé par `no-dupe-keys`
+- fix(hosts): le hook Gemini sort en code 2 sur toute entrée injugeable (JSON invalide, événement inconnu ou absent, `tool_name` vide, outil inconnu sans commande ni chemin) au lieu de laisser passer l'action ; un outil inconnu qui porte un chemin est jugé comme une écriture sur ce chemin (#1226)
+- feat(hosts): le hook du kit parle le protocole de Gemini CLI (BeforeTool, BeforeAgent, SessionStart, PreCompress), avec échec fermé sur les événements bloquants (#1209)
+- docs(audits): `maxTurns` borne un sous-agent mais pas une session `claude -p --agent`, où seul `--max-turns` / `CLAUDE_CODE_MAX_TURNS` plafonne — décision consignée
+- chore: retirer les scripts ponctuels sans appelant (`_gen_tests.py`, `dismiss-codeql-false-positives.py`) et garder la racine sans script Python
+- perf(hosts): SessionStart ne rend plus deux fois une note de tâche, n'emballe qu'une fois un bloc de notes non humaines et tait les lignes fournisseurs/propositions d'une session de worker (#1211)
+- fix(missions): le repli du worker sur le modèle de l'hôte respecte la classe de données — sans fournisseur hébergé qui l'admet, la tâche est différée en `ready` avec son motif dans `task show` et l'attention du tick, au lieu de partir en silence sur l'hôte (#1208)
+
 ## [3.84.0] - 2026-11-12
 
 - feat(cockpit): tout accepter les tâches fusionnées en un geste (#1186)
