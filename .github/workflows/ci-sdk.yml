@@ -16,6 +16,10 @@ on:
       # L'E2E peut être sauté sur une PR : main reste son filet, il doit donc tourner ici.
       - "web/**"
       - "tests/e2e/**"
+      # Gouvernent `make lint-js` (règles et globales d'ESLint, version épinglée) :
+      # les modifier doit relancer le job lint qui les applique à web/.
+      - "eslint.config.mjs"
+      - "Makefile"
       # Lus par les gardes du dépôt (`grimoire gates repo`) : les modifier sans
       # relancer le job qui les juge rendrait la garde décorative.
       - "docs/**"
@@ -95,6 +99,14 @@ jobs:
       # tenets, audience et commandes citées de la documentation, chiffres de vitrine.
       - name: Repo gates
         run: grimoire gates repo
+
+      # web/ n'a ni build ni package.json : `node --check` sur chaque fichier
+      # suivi (scripts/check-js-syntax.py), puis ESLint à la version épinglée
+      # dans le Makefile (eslint.config.mjs : défauts réels, aucune règle de
+      # style). Node et npx sont ceux de l'image du runner, comme le `npm
+      # install` d'axe-core du job e2e : pas d'action supplémentaire.
+      - name: JavaScript (web/) syntax + lint
+        run: make lint-js
 
   typecheck:
     name: "mypy --strict"
