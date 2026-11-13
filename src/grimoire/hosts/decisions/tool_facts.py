@@ -781,16 +781,18 @@ def _without_read_only_scripts(command: str, depth: int) -> str | None:
 #
 # ``2>&1`` duplique un descripteur, ``2>/dev/null`` jette une sortie : ni l'une ni
 # l'autre n'écrit de fichier, et une lecture qui les porte reste une lecture. Liste
-# blanche de formes exactes, lues hors guillemets : la duplication vers un descripteur
-# d'un chiffre ou sa fermeture (``>&2``, ``2>&1``, ``2>&-``), et la sortie vers
+# blanche de formes exactes, lues hors guillemets : la duplication vers la sortie
+# standard ou d'erreur, ou la fermeture (``>&2``, ``2>&1``, ``2>&-``), et la sortie vers
 # ``/dev/null`` écrit exactement ainsi (``>``, ``>>``, ``N>``, ``&>``, ``&>>``, avec ou
 # sans espace avant la cible). Chaque forme doit finir sur une frontière de mot.
 # Tout le reste garde son ``>`` et reste une mutation : un autre périphérique
 # (``/dev/stdout``), une autre graphie (``/dev//null``, guillemets), un chemin qui
-# commence pareil (``/dev/null/../x``), ``>|``, ``<>``, une cible portée par une variable.
+# commence pareil (``/dev/null/../x``), ``>|``, ``<>``, une cible portée par une
+# variable, et la duplication vers un autre descripteur (``>&3`` : un shell qui dure
+# a pu l'ouvrir sur un fichier par un ``exec 3>f`` antérieur).
 
 _REDIRECTION_END = r"(?=$|[\s;|&)])"
-_FILELESS_TARGET = r"(?:&[0-9-]|>?[ \t]*/dev/null)"
+_FILELESS_TARGET = r"(?:&[12-]|>?[ \t]*/dev/null)"
 #: ``2>&1``, ``2>/dev/null`` : un descripteur d'un chiffre en début de mot.
 _FILELESS_FD_RE = re.compile(r"[0-9]>" + _FILELESS_TARGET + _REDIRECTION_END)
 #: ``>&2``, ``>/dev/null``, ``>>/dev/null``.

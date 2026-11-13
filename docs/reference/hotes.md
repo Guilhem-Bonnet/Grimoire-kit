@@ -418,7 +418,8 @@ le ledger. Depuis le lot A de l'issue #638 :
   écriture reste une écriture. Une redirection qui n'écrit aucun fichier
   (`2>&1`, `>&2`, `2>&-`, et toute sortie vers `/dev/null` écrit exactement
   ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
-  commande en écriture, y compris vers `/dev/stdout`. Un motif entre
+  commande en écriture, y compris vers `/dev/stdout` ou vers un descripteur
+  autre que 1 et 2 (`>&3`). Un motif entre
   guillemets est une donnée, antislash compris (`grep "a\|b" f` lit) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,

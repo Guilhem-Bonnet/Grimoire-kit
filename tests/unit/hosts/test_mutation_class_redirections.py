@@ -54,6 +54,7 @@ SANS_FICHIER = [
     "{} 1>&2",
     "{} >&2",
     "{} 2>&-",
+    "{} 3>&1",
     "{} >/dev/null",
     "{} > /dev/null",
     "{} 1>/dev/null",
@@ -137,6 +138,11 @@ def test_la_liste_blanche_vaut_dans_un_script_et_autour(command: str) -> None:
         "ls >&fichier",
         "ls >&2fichier",
         "ls >&10",
+        # Un descripteur autre que 1 et 2 a pu être ouvert sur un fichier par une commande antérieure.
+        "ls >&3",
+        "ls 2>&3",
+        "ls 1>&9",
+        "ls >&0",
         "ls 3>fichier",
         "ls 2>fichier",
         # Une cible que le classement ne lit pas.
