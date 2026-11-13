@@ -1,0 +1,1 @@
+- fix(cockpit): les lectures qui dépendent de l'instant (`fleet/live`, `capacity`, `evidence`) ne sont plus servies vieilles de plus de 3 secondes — une session morte ne reste plus affichée vivante jusqu'à 15 s (GAO-cockpit-les-001)

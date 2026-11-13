@@ -5,6 +5,12 @@ commit par heredoc, corps d'issue). Un premier correctif reconnaissait les *écr
 revue adversariale a montré qu'il échouait ouvert (variable, ``$(…)``, ``| bash``, préfixe ``sudo -u``, écrivain
 non listé, ``cd`` hors projet). La charge est inversée : on révoque **sauf** si la mention passe une liste blanche
 stricte. Le refus, lui, ne change pas.
+
+#1173 : la révocation ne suit plus cette liste blanche mais la preuve d'écriture — un refus ne révoque que pour
+une écriture prouvée visant la zone ; lecture, mention et forme illisible restent refusées, sans révocation. Les
+attentes de **révocation** de ce fichier qui portaient sur autre chose qu'une écriture prouvée sont adaptées
+(:data:`NOT_A_PROVEN_WRITE`, le test de panne du lecteur) ; aucune attente de **refus** n'a changé. Les formes
+nouvelles sont dans ``test_authority_guard_read_only.py``.
 """
 
 from __future__ import annotations
@@ -136,12 +142,42 @@ REVOKED = {
 }
 
 
-@pytest.mark.parametrize("command", REVOKED.values(), ids=REVOKED.keys())
-def test_what_is_not_proven_harmless_revokes(command: str) -> None:
+#: #1173 : les entrées de :data:`REVOKED` qui ne sont pas une écriture prouvée visant la zone. Elles restent
+#: refusées ; seule l'attente de révocation a changé (vrai → faux). Code dans un langage que la garde ne lit pas
+#: ou appel python hors liste (forme incertaine), écrivain hors liste, lecture, mention, commande illisible.
+NOT_A_PROVEN_WRITE = frozenset(
+    {
+        "py-fileinput",  # python : `fileinput.input(..., inplace=True)` n'est pas une des écritures reconnues
+        "py-logging",  # python : `logging.FileHandler`, idem
+        "py-sqlite",  # python : `sqlite3.connect`, idem
+        "node-open",  # langage non lu
+        "awk",  # langage non lu
+        "sed-w",  # commande `w` d'un script sed : non lue (seul `sed -i` est reconnu)
+        "perl-open",  # langage non lu
+        "echo-mention",  # mention
+        "git-other-sub",  # `git clone` vers la zone : écrivain hors liste
+        "gh-api",  # `gh api --input` lit le fichier, il ne l'écrit pas
+        "unclosed",  # guillemet jamais fermé : illisible
+    }
+)
+
+
+@pytest.mark.parametrize(("key", "command"), REVOKED.items(), ids=REVOKED.keys())
+def test_what_is_not_proven_harmless_revokes(key: str, command: str) -> None:
     vector = _vector(command)
     if vector is not None:  # un appel classé en lecture seule n'est pas un refus de cette garde
-        assert vector.code == "control-zone" and vector.revokes is True, command
+        assert vector.code == "control-zone" and vector.revokes is (key not in NOT_A_PROVEN_WRITE), command
     assert not ag.is_harmless_mention(command), command
+
+
+@pytest.mark.parametrize("key", sorted(NOT_A_PROVEN_WRITE))
+def test_what_is_not_a_proven_write_is_still_refused_end_to_end(tmp_path: Path, key: str) -> None:
+    """#1173 : refusé par l'entrée réelle du frein, mandat toujours actif."""
+    proj = _project(tmp_path / "proj")
+    decision = _pre(proj, {"command": REVOKED[key]})
+    assert decision.outcome is Outcome.DENY, key
+    assert decision.detail["authority_vector"] == "control-zone" and decision.detail["authority_revokes"] is False
+    assert MandateStore(proj).state().active, key
 
 
 @pytest.mark.parametrize(
@@ -155,7 +191,9 @@ def test_the_review_bypasses_are_refused_and_revoked_end_to_end(tmp_path: Path, 
     assert not MandateStore(proj).state().active, command
 
 
-# ── B. Échec fermé : une exception révoque, et le refus reste un refus ───────────────────────────
+# ── B. Échec fermé : une exception ne devient jamais une autorisation ────────────────────────────
+#    (#1173 : elle ne révoque plus — une forme illisible est refusée sans révocation ; une révocation en panne
+#    n'adoucit toujours pas le refus)
 
 
 def _project(root: Path, *, grant: bool = True) -> Path:
@@ -177,18 +215,25 @@ def _pre(root: Path, tool_input: dict[str, object], *, tool: str = "Bash", sessi
     )
 
 
-def test_a_parser_error_revokes_and_still_denies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_parser_error_still_denies_without_revoking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anciennement ``test_a_parser_error_revokes_and_still_denies`` : le refus tient, la révocation non (#1173).
+
+    Sans la panne, cette commande est une simple mention que la garde laisse passer (règle 4) : le lecteur en
+    panne la fait refuser, il ne la fait pas passer.
+    """
     from grimoire.hosts.decisions import authority_guard
 
     def boom(_command: str) -> list[object]:
         raise RuntimeError("panne du lecteur")
 
+    assert ag.is_text_only_mention(HARMLESS[0]) is True
     monkeypatch.setattr(authority_guard, "_parse_strict", boom)
     assert ag.is_harmless_mention(HARMLESS[0]) is False
+    assert ag.is_text_only_mention(HARMLESS[0]) is False
     proj = _project(tmp_path / "proj")  # aucun profil déclaré : pas governed
     decision = _pre(proj, {"command": HARMLESS[0]})
-    assert decision.outcome is Outcome.DENY and decision.detail["authority_revokes"] is True
-    assert not MandateStore(proj).state().active
+    assert decision.outcome is Outcome.DENY and decision.detail["authority_revokes"] is False
+    assert MandateStore(proj).state().active
 
 
 def test_a_targeted_revocation_error_falls_back_to_every_mandate(

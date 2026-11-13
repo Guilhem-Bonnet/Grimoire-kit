@@ -350,16 +350,24 @@ Les noms d'outils sont rapprochés des classes du kit par une table explicite :
 `read_file`, `read_many_files`, `list_directory`, `glob`, `grep_search`,
 `search_file_content`, `google_web_search` et `web_fetch` → lecture ;
 `write_file`, `replace`, `write_todos` et `save_memory` → écriture de
-fichier ; `run_shell_command` → commande shell. Un outil inconnu prend la
-classe commande shell, la plus stricte. Un `ask` du kit devient `deny` :
-Gemini ne permet pas d'interroger l'humain depuis un hook.
+fichier ; `run_shell_command` → commande shell. Un outil inconnu est routé par
+sa charge utile : un champ de chemin (`file_path`, `absolute_path`, `path`,
+`target`) en fait une écriture sur ce chemin ; un champ de commande
+(`command`, `cmd`, `commandLine`, `script`) en fait une commande shell ; sans
+ni l'un ni l'autre, le hook refuse de deviner et sort en code 2. Un `ask` du
+kit devient `deny` : Gemini ne permet pas d'interroger l'humain depuis un hook.
 
-Échec fermé : sur `BeforeTool` et `BeforeAgent`, une erreur interne du hook
-sort en code 2 avec la raison sur stderr ; sur les autres événements elle est
-seulement signalée et laisse passer l'action. Le kit sait traduire ce
-protocole, mais il n'écrit pas encore `.gemini/settings.json` : l'émetteur
-prose reste en place, donc aucun hook n'est câblé automatiquement sur cet
-hôte.
+Échec fermé : le hook ne sort en 0 avec `{}` que lorsqu'il a réellement jugé
+l'entrée. Sur `BeforeTool` et `BeforeAgent`, une entrée vide, un JSON invalide
+ou une charge utile qui n'est pas un objet sort en code 2 avec la raison sur
+stderr, comme une erreur interne ; un `BeforeTool` sans `tool_name` aussi. Un
+événement inconnu ou absent sort toujours en code 2 : il n'y a pas de repli sur
+`SessionStart`. Sur les autres événements, une erreur interne est seulement
+signalée et laisse passer l'action. `grimoire host hook` suit la même règle
+pour Gemini (code 2 sur un événement bloquant, pas le code 1 de Typer). Le kit
+sait traduire ce protocole, mais il n'écrit pas encore `.gemini/settings.json` :
+l'émetteur prose reste en place, donc aucun hook n'est câblé automatiquement
+sur cet hôte.
 
 **Non vérifié** (geminicli.com/docs lue le 2026-11-12, dernière version
 annoncée v0.64.0 ; la CLI n'est pas installée sur le poste) : un événement de

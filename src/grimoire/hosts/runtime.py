@@ -103,6 +103,49 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def payload_event_name(payload: dict[str, Any]) -> str:
+    """The event name a payload carries, in either key spelling."""
+    return str(_pick(payload, "hook_event_name", "hookEventName", "event", default="") or "")
+
+
+def decode_hook_payload(raw: str) -> tuple[dict[str, Any], str]:
+    """Decode stdin into ``(payload, problem)``.
+
+    ``problem`` names why the input cannot be judged — empty stdin, invalid
+    JSON, or a JSON value that is not an object — and is empty when the payload
+    is usable. The entry points decide what a problem means for their host: a
+    non-blocking Gemini event keeps the legacy ``{}``, a blocking one fails
+    closed.
+    """
+    if not raw.strip():
+        return {}, "stdin vide"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {}, f"JSON invalide ({exc.msg})"
+    if not isinstance(parsed, dict):
+        return {}, f"charge utile de type {type(parsed).__name__}, pas un objet"
+    return parsed, ""
+
+
+def gemini_fail_closed_reason(
+    host_id: HostId, event: HookEvent | None, payload_problem: str
+) -> str:
+    """Why a Gemini hook must exit 2 before deciding, or ``""`` to proceed.
+
+    Two cases have no verdict to render: an event the host never named (no
+    fallback to ``SessionStart``), and an unreadable payload on an event that
+    can block. Both are refusals, not silent passes.
+    """
+    if host_id is not HostId.GEMINI_CLI:
+        return ""
+    if event is None:
+        return "événement inconnu ou absent : aucun verdict ne peut être rendu"
+    if payload_problem and event in gemini_wire.BLOCKING_EVENTS:
+        return f"entrée injugeable ({payload_problem}) sur un événement bloquant"
+    return ""
+
+
 #: Le marqueur d'un projet Grimoire : le dossier qu'on trouve à sa racine.
 PROJECT_MARKER = "_grimoire"
 _ROOT_PAYLOAD_KEYS = ("cwd", "workspaceFolder", "workspace_folder", "project_root", "projectRoot")
@@ -164,24 +207,33 @@ def normalize_input(
     host_id: HostId | None = None,
 ) -> HookInput:
     """Flatten a host payload into the neutral :class:`HookInput`."""
-    wire_event = _pick(payload, "hook_event_name", "hookEventName", "event", default="")
-    resolved = (
-        event
-        or (parse_event(str(wire_event), host_id=host_id) if wire_event else None)
-        or HookEvent.SESSION_START
-    )
+    wire_event = payload_event_name(payload)
+    resolved = event or (parse_event(wire_event, host_id=host_id) if wire_event else None)
+    if resolved is None:
+        if host_id is HostId.GEMINI_CLI:
+            # Pas de repli sur le début de session : un événement que l'hôte ne
+            # nomme pas n'est pas un `SessionStart`, c'est une entrée injugeable.
+            raise gemini_wire.UnjudgeableInputError(
+                f"événement inconnu ou absent ({wire_event or 'aucun nom dans la charge utile'})"
+            )
+        resolved = HookEvent.SESSION_START
     stop_active = bool(_pick(payload, "stop_hook_active", "stopHookActive", default=False))
     tool_name = str(_pick(payload, "tool_name", "toolName", "tool", default="") or "")
+    tool_input = _as_dict(_pick(payload, "tool_input", "toolInput", "input", "arguments"))
     if host_id is HostId.GEMINI_CLI:
         # Gemini names its tools `write_file`/`replace`/`run_shell_command`; the
-        # policy engine classifies on the kit's classes. An unknown tool is the
-        # shell class, never an implicit read (see `gemini_wire`).
-        tool_name = gemini_wire.canonical_tool_name(tool_name)
+        # policy engine classifies on the kit's classes. On a pending tool call,
+        # an unknown tool is routed by its payload (path -> write, command ->
+        # shell); empty or field-less input fails closed (see `gemini_wire`).
+        if resolved is HookEvent.PRE_TOOL_USE:
+            tool_name, tool_input = gemini_wire.route_tool_call(tool_name, tool_input)
+        else:
+            tool_name = gemini_wire.canonical_tool_name(tool_name)
     return HookInput(
         event=resolved,
         project_root=resolve_project_root(payload, project_root),
         tool_name=tool_name,
-        tool_input=_as_dict(_pick(payload, "tool_input", "toolInput", "input", "arguments")),
+        tool_input=tool_input,
         tool_response=_as_dict(_pick(payload, "tool_response", "toolResponse", "result")),
         prompt=str(_pick(payload, "prompt", "userPrompt", "user_prompt", default="") or ""),
         # Issue #716 : ``agent_type`` (session ouverte par ``claude --agent``,
@@ -464,9 +516,11 @@ def main(argv: list[str] | None = None) -> int:
     Gemini CLI is the exception, and only where it must be: its hook protocol
     treats a non-zero exit as "let the action through" unless the event can
     block, where exit 2 plus a reason on stderr is the documented refusal. So
-    an internal error on ``BeforeTool``/``BeforeAgent`` exits 2 (fail closed)
-    instead of printing a verdict nobody asked for; on the advisory events it
-    warns and stays out of the way.
+    an unjudgeable input (empty or malformed payload, unknown event, empty tool
+    name, unknown tool with no command or path) and an internal error on
+    ``BeforeTool``/``BeforeAgent`` exit 2 (fail closed) instead of printing a
+    verdict nobody asked for; on the advisory events an internal error warns
+    and stays out of the way.
     """
     from grimoire.core.console_encoding import enable_utf8_output
 
@@ -497,19 +551,20 @@ def main(argv: list[str] | None = None) -> int:
         raw = sys.stdin.read()
     except (OSError, ValueError):
         raw = ""
-    try:
-        payload = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
+    payload, payload_problem = decode_hook_payload(raw)
 
-    wire_event = str(_pick(payload, "hook_event_name", "hookEventName", default="") or "")
+    wire_event = payload_event_name(payload)
     if event is None and wire_event:
         # Fail-closed must hold even when the host's configuration forgets
         # ``--event``: the payload still names it.
         event = parse_event(wire_event, host_id=host_id)
     label = event_name or wire_event or "événement inconnu"
+
+    if refusal := gemini_fail_closed_reason(host_id, event, payload_problem):
+        # No decision can be rendered: exit 2 is Gemini's documented refusal,
+        # and the reason says why. Never a silent pass on an unjudgeable input.
+        sys.stderr.write(f"[Grimoire] hook Gemini en échec sur {label} ({refusal}) : action refusée par défaut.\n")
+        return 2
 
     try:
         result, _decision, _hook = run_hook(
