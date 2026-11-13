@@ -55,6 +55,7 @@ make lint        # ruff check
 make typecheck   # mypy --strict
 make test        # pytest unit
 make format      # ruff format
+make lint-js     # JavaScript de web/ : node --check puis ESLint minimal (Node et npx requis)
 ```
 
 ## Conventions

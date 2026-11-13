@@ -375,9 +375,13 @@ def _verify_cadrage(root: Path, result: StandardVerificationResult) -> None:
     """
     from grimoire.core.cadrage import CADRAGE_DIR
     from grimoire.core.cadrage import check as cadrage_check
+    from grimoire.core.chantiers import has_only_named_chantiers
     from grimoire.core.standard_profile_manifest import read_install_manifest_needs
 
     if not (root / CADRAGE_DIR).is_dir():
+        return
+    # Un projet qui n'a que des chantiers nommés n'a pas de cadrage par défaut à gater : pas de faux échec.
+    if has_only_named_chantiers(root):
         return
     errors, warnings = cadrage_check(root)
     if not errors and not warnings:

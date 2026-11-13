@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- feat(cadrage): plusieurs chantiers par projet — `grimoire cadrage list/new/state/link` et `--chantier` sur `init/status/check/plan` (lot 0 de l'Atelier de spec, #1200)
+
 ## [3.84.0] - 2026-11-12
 
 - feat(cockpit): tout accepter les tâches fusionnées en un geste (#1186)

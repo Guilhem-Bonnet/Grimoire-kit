@@ -15,6 +15,7 @@ from typing import Annotated, Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from grimoire.core.exceptions import GrimoireRuntimeError
 from grimoire.flows.attestation import ATTEST_FROM_HINT, Attestation
@@ -309,17 +310,27 @@ def autopilot_off(ctx: typer.Context, project_root: _PROJECT_ROOT = Path(), atte
 
 @autopilot_app.command("status")
 def autopilot_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -> None:
-    """Relire l'état du pilote, réévalué maintenant (mandat compris)."""
+    """Relire l'état du pilote, réévalué maintenant (mandat et disjoncteur compris)."""
     from grimoire.missions.autopilot import AutopilotStore, load_autopilot_policy
+    from grimoire.missions.breaker import read_breaker
+    from grimoire.missions.pause import home_root
 
+    root = project_root.resolve()
     state = AutopilotStore(project_root).state()
-    policy = load_autopilot_policy(project_root.resolve())
-    _emit(ctx, {**state.to_dict(), "policy_error": policy.error, "extra_reserved": list(policy.extra)})
+    policy = load_autopilot_policy(root)
+    breaker = read_breaker(home_root(root))
+    _emit(ctx, {**state.to_dict(), "policy_error": policy.error, "extra_reserved": list(policy.extra),
+                "breaker": breaker.to_dict()})
     if _fmt(ctx) == "json":
         return
     if state.active:
         console.print(f"[green]pilote actif[/green] — mandat {state.mandate_id}, depuis {state.since} ({state.via})")
     else:
         console.print(f"pilote inactif ({state.reason})")
+    if breaker.open:
+        console.print(
+            f"[red]disjoncteur ouvert[/red] : {escape(breaker.reason)} — aucune session n'est lancée ; "
+            "`grimoire orchestrate breaker reset` le referme (geste humain)"
+        )
     if policy.error:
         console.print(f"[red]politique du pilote invalide[/red] : {policy.error}", markup=True)

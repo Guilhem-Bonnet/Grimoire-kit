@@ -42,7 +42,9 @@ absente.
 from __future__ import annotations
 
 import difflib
-from collections.abc import Callable
+import os
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
     from grimoire.traces.ledger import AgentFreshness
 
 __all__ = [
+    "FILES_BUDGET_SECONDS",
     "FILE_TEXT_LIMIT",
     "MAX_FILES_PER_TIER",
     "TIERS",
@@ -79,6 +82,31 @@ __all__ = [
 FILE_TEXT_LIMIT = 512 * 1024
 #: Plafond d'énumération par étage. Un `.claude/` peuplé dépasse vite le millier.
 MAX_FILES_PER_TIER = 2000
+#: Borne de temps du calcul de la vue Source (secondes). Au-delà, la réponse est
+#: partielle et le dit (``truncated``), comme :func:`evidence_view`. Le parcours
+#: s'arrête aussi à la limite d'énumération : borner la réponse ne suffisait pas.
+FILES_BUDGET_SECONDS = 2.0
+
+#: Dossiers qui ne sont jamais des sources : les parcourir ne rend que du bruit
+#: (le `.git` d'un clone imbriqué, les `node_modules` d'une extension, les caches
+#: d'outils). Ils ne sont jamais visités, quel que soit l'étage.
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        ".cache",
+    }
+)
 
 #: Les étages de la spécification §4, dans l'ordre où l'espace Source les montre.
 #: ``roots`` est relatif à la racine du projet ; ``editable`` dit si écrire là
@@ -306,6 +334,52 @@ def annotate_gates(project_root: Path, tasks: list[Any], cards: list[dict[str, A
 _CARD_DROPPED = ("directives", "description", "guardrails", "dependencies")
 
 
+#: Ce qu'une tâche peut porter dans ``/api/workspace/tasks`` : le schéma, les
+#: champs dérivés (colonne, priorité effective, session, classe de route) et la
+#: couche d'annotations. ``fields=id,title`` borne chaque carte à ces clés — la
+#: palette de la coque ne télécharge plus 488 Ko pour lire deux champs.
+TASK_FIELDS: frozenset[str] = frozenset({
+    # schéma de la tâche (``MissionTask.to_dict``)
+    "id", "schema_version", "mission_id", "title", "description", "status", "type",
+    "risk_profile", "surface", "owner", "acceptance", "guardrails", "expected_evidence",
+    "dependencies", "created_at", "claim", "finition", "priority", "agent_roles",
+    "remediation_ref", "extra", "directives", "accepted_risks", "checks", "waiting",
+    "test_depth", "data_class", "questions",
+    # dérivés par la carte (``_task_json``)
+    "board", "effective_priority", "directives_pending", "directives_unacknowledged",
+    "session_id", "host", "resume_command", "logs_command", "verifiability_class",
+    "recommended_model", "model_tier",
+    # couche d'annotations (vivacité, coût, fil, présence, gates)
+    "session", "cost", "feed_last", "in_state_since", "blocked_reason", "presence",
+    "work", "next_gate",
+})
+#: Les seuls champs que la couche d'annotations ajoute : demander l'un d'eux est
+#: la seule raison de la payer quand ``fields`` est posé.
+_ANNOTATED_FIELDS: frozenset[str] = frozenset({
+    "session", "cost", "feed_last", "in_state_since", "blocked_reason", "presence",
+    "work", "next_gate",
+})
+
+
+def _requested_fields(fields: Sequence[str] | None) -> tuple[str, ...] | None:
+    """Les champs demandés, dédoublonnés dans l'ordre reçu ; ``None`` si aucun.
+
+    Un nom inconnu est une demande invalide (400) : filtrer silencieusement
+    laisserait croire que la tâche ne porte pas le champ.
+    """
+    if not fields:
+        return None
+    requested = tuple(dict.fromkeys(fields))
+    unknown = [name for name in requested if name not in TASK_FIELDS]
+    if unknown:
+        available = ", ".join(sorted(TASK_FIELDS))
+        raise ValueError(
+            f"champ(s) inconnu(s) dans `fields` : {', '.join(sorted(unknown))} — "
+            f"champs disponibles : {available}"
+        )
+    return requested
+
+
 def _task_card(task: Any) -> dict[str, Any]:
     """:func:`_task_json` sans le poids que seule la fiche détaillée affiche."""
     card = _task_json(task)
@@ -330,6 +404,7 @@ def tasks_view(
     probe: SessionProbe | None = None,
     now: datetime | None = None,
     annotations: bool = True,
+    fields: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Les tâches du projet et les colonnes du board gouverné.
 
@@ -347,14 +422,16 @@ def tasks_view(
 
     ``annotations=False`` sert la même liste sans la couche chère que seule la
     vue Exécuter affiche (vivacité, coût, fil d'activité, payload ``work`` lu
-    dans les journaux de session, gates de preuve). La palette de commandes de
-    la coque n'a besoin que de ``id``/``title`` : depuis l'issue #1010 elle
-    demande cette forme, pour que le chargement de la Flotte — elles sont sur
-    le même chemin — ne paie jamais la lecture d'un journal de session.
+    dans les journaux de session, gates de preuve). ``fields=`` borne chaque
+    carte aux clés demandées (``fields=id,title`` pour la palette de commandes,
+    qui n'a besoin que de ces deux-là) ; un nom inconnu lève une
+    :class:`ValueError`, traduite en 400 par le transport. Demander uniquement
+    des champs de base ne paie pas la couche d'annotations.
     """
     from grimoire.missions.board import BOARD_LIFECYCLE, PRIORITIES
     from grimoire.missions.schemas import TaskState
 
+    requested = _requested_fields(fields)
     service = _service(project_root)
     payload: dict[str, Any] = {
         "columns": list(BOARD_LIFECYCLE),
@@ -378,14 +455,20 @@ def tasks_view(
             payload["note"] = "aucun Mission Ledger — `grimoire task add` en ouvre un"
         return payload
     tasks = service.list_tasks(mission or None, status or None)
-    cards = [_task_card(t) for t in tasks]
-    if annotations:
+    # ``fields`` sert la carte filtrée : le texte long et les dépendances ne sont
+    # retirés que de la carte complète (P94) — un champ explicitement demandé se
+    # rend, même si la carte de la vue Exécuter le masque.
+    cards = [_task_json(t) for t in tasks] if requested else [_task_card(t) for t in tasks]
+    annotate = annotations and (requested is None or bool(_ANNOTATED_FIELDS.intersection(requested)))
+    if annotate:
         # UI-3 : la vivacité, le dernier signe de vie, la durée et le coût de chaque
         # carte — la même arithmétique que le portefeuille, pas une seconde copie.
         from grimoire.tools.workspace_portfolio import annotate_cards
 
         annotate_cards(project_root, service, tasks, cards, now=now or datetime.now(UTC), probe=probe)
         annotate_gates(service.project_root, tasks, cards)
+    if requested is not None:
+        cards = [{name: card[name] for name in requested if name in card} for card in cards]
     payload["tasks"] = cards
     payload["count"] = len(tasks)
     return payload
@@ -645,45 +728,107 @@ def _override_for(project_root: Path, rel: str) -> Path | None:
     return Path(layout.OVERRIDES_DIR) / rel[len(prefix) :]
 
 
-def _walk(root: Path, limit: int) -> tuple[list[Path], bool]:
-    if not root.is_dir():
+def _walk(
+    root: Path,
+    limit: int,
+    *,
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[list[Path], bool]:
+    """Les fichiers sous *root*, au plus *limit*, et si le parcours a été coupé.
+
+    `os.scandir` dossier par dossier, entrées triées à chaque niveau : le
+    parcours s'arrête dès que la limite est atteinte au lieu d'énumérer et de
+    trier tout le sous-arbre avant de borner la réponse (27 à 31 s mesurées sur
+    un projet dont un clone imbriqué porte ~200 worktrees). Les dossiers de
+    :data:`_SKIP_DIRS` et les liens symboliques ne sont jamais suivis. Au-delà
+    de *deadline* (``monotonic``), la réponse est partielle et ``cut`` le dit.
+
+    Le résultat est trié par chemin, exactement comme le `sorted(rglob("*"))`
+    qu'il remplace : un petit arbre rend la même liste, dans le même ordre.
+    """
+    if not root.is_dir() or root.is_symlink():
         return [], False
+    if limit <= 0:
+        return [], True
     found: list[Path] = []
-    for path in sorted(root.rglob("*")):
-        if len(found) >= limit:
-            return found, True
-        if path.is_file() and not path.is_symlink():
-            found.append(path)
-    return found, False
+    cut = False
+    pending = [root]
+    while pending and not cut:
+        directory = pending.pop()
+        if deadline is not None and clock() >= deadline:
+            cut = True
+            break
+        try:
+            with os.scandir(directory) as scan:
+                entries = sorted(scan, key=lambda entry: entry.name)
+        except OSError:
+            continue
+        for entry in entries:
+            if len(found) >= limit:
+                cut = True
+                break
+            if deadline is not None and clock() >= deadline:
+                cut = True
+                break
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name not in _SKIP_DIRS:
+                        pending.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    found.append(Path(entry.path))
+            except OSError:
+                continue
+        if not cut and len(found) >= limit:
+            # Limite atteinte sur la dernière entrée du dossier : il en reste
+            # peut-être dans les dossiers en attente.
+            cut = bool(pending)
+    found.sort()
+    return found, cut
 
 
-def files_view(project_root: Path, *, tier: str | None = None) -> dict[str, Any]:
+def files_view(
+    project_root: Path, *, tier: str | None = None, budget: float = FILES_BUDGET_SECONDS
+) -> dict[str, Any]:
     """L'arbre de l'espace Source : chaque étage, ses racines, ses fichiers.
 
     Un étage dont aucune racine n'existe est rendu avec ``exists: false`` et
     zéro fichier — il reste visible, parce que « ce projet n'a pas d'override »
     est une information, pas une absence de section.
+
+    Au-delà de ``budget`` secondes la réponse est partielle et le dit
+    (``truncated``), comme :func:`evidence_view` : l'entrée dans un fichier
+    (empreinte, appartenance au kit) compte dans le même budget.
     """
     root = project_root.resolve()
     catalog = _catalog()
     wanted = [_TIER_BY_ID[tier]] if tier and tier in _TIER_BY_ID else list(TIERS)
     if tier and tier not in _TIER_BY_ID:
         raise WorkspacePathError(f"étage inconnu : {tier}")
+    deadline = time.monotonic() + budget
     tiers: list[dict[str, Any]] = []
     for spec in wanted:
         files: list[dict[str, Any]] = []
         truncated = False
         exists = False
-        budget = MAX_FILES_PER_TIER
+        remaining = MAX_FILES_PER_TIER
         for tier_root in spec["roots"]:
             base = root / tier_root
             exists = exists or base.is_dir()
-            found, cut = _walk(base, budget)
-            truncated = truncated or cut
-            budget -= len(found)
-            files.extend(_file_entry(root, p, spec, catalog) for p in found)
-            if budget <= 0:
+            if remaining <= 0 or time.monotonic() >= deadline:
                 truncated = True
+                break
+            found, cut = _walk(base, remaining, deadline=deadline)
+            truncated = truncated or cut
+            remaining -= len(found)
+            for path in found:
+                if time.monotonic() >= deadline:
+                    truncated = True
+                    break
+                files.append(_file_entry(root, path, spec, catalog))
+            if truncated:
                 break
         tiers.append(
             {

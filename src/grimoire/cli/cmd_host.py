@@ -20,6 +20,7 @@ from rich.table import Table
 
 from grimoire.bridges.host import HostBridge
 from grimoire.bridges.schemas import HostId
+from grimoire.hosts import gemini_wire
 from grimoire.hosts.capabilities import all_profiles, gaps_for, profile_for, resolve_host
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
@@ -33,7 +34,13 @@ from grimoire.hosts.emitters import (
 )
 from grimoire.hosts.matrix import build_matrix
 from grimoire.hosts.probe import probe_hosts
-from grimoire.hosts.runtime import parse_event, run_hook
+from grimoire.hosts.runtime import (
+    decode_hook_payload,
+    gemini_fail_closed_reason,
+    parse_event,
+    payload_event_name,
+    run_hook,
+)
 from grimoire.hosts.surface import Enforcement
 
 host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes et hooks par hôte.")
@@ -288,10 +295,17 @@ def host_sync(
 
     if _get_fmt(ctx) == "json":
         payload: dict[str, Any] = {"hosts": [r.to_dict() for r in results]}
+        if surface.notes:
+            # #1179 : le dépassement de plafond d'intégration, comme les autres
+            # constats non bloquants, doit être lisible sans relancer `host surface`.
+            payload["notes"] = list(surface.notes)
         if prune_disabled:
             payload["pruned"] = pruned
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         raise typer.Exit(0 if all(r.ok for r in results) else 1)
+
+    for note in surface.notes:
+        console.print(f"[dim][!][/dim] {note}")
 
     action = "Écrirait" if dry_run else "Écrit"
     for result in results:
@@ -529,19 +543,36 @@ def host_hook(
 ) -> None:
     """Exécuter une décision de gouvernance sur une charge utile de hook (stdin -> stdout).
 
-    Toujours en sortie 0 : le verdict est dans le JSON. Un code non nul ferait
-    passer une décision de politique pour une panne du hook.
+    Sortie 0 quand un verdict est rendu : il est dans le JSON. Pour Gemini,
+    une entrée injugeable ou une panne sur un événement bloquant sort en code 2
+    avec la raison sur stderr (échec fermé, comme ``grimoire-hook``) ; sur les
+    autres hôtes, une panne remonte comme avant.
     """
     host_id = resolve_host(host) or HostId.UNKNOWN
-    parsed = parse_event(event)
+    parsed = parse_event(event, host_id=host_id)
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    payload, payload_problem = decode_hook_payload(raw)
+    wire_event = payload_event_name(payload)
+    if parsed is None and wire_event:
+        parsed = parse_event(wire_event, host_id=host_id)
+    if refusal := gemini_fail_closed_reason(host_id, parsed, payload_problem):
+        typer.echo(f"[Grimoire] hook Gemini en échec sur {event} ({refusal}) : action refusée par défaut.", err=True)
+        raise typer.Exit(code=2)
     try:
-        payload = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    result, _decision, _hook_input = run_hook(
-        payload, host_id=host_id, event=parsed, project_root=project_root, decision_id=decision
-    )
+        result, _decision, _hook_input = run_hook(
+            payload, host_id=host_id, event=parsed, project_root=project_root, decision_id=decision
+        )
+    except Exception as exc:
+        if host_id is not HostId.GEMINI_CLI:
+            raise
+        blocked_event = parsed if parsed in gemini_wire.BLOCKING_EVENTS else None
+        cause = f"{type(exc).__name__}: {exc}"
+        typer.echo(
+            f"[Grimoire] hook Gemini en échec sur {event} ({cause}) : "
+            f"{'action refusée par défaut' if blocked_event else 'action laissée passer (événement non bloquant)'}.",
+            err=True,
+        )
+        if blocked_event is not None:
+            raise typer.Exit(code=2) from exc
+        result = {}
     typer.echo(json.dumps(result, ensure_ascii=False), nl=False)

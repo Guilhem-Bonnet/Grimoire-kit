@@ -1,0 +1,1 @@
+- perf(hosts): SessionStart ne rend plus deux fois une note de tâche, n'emballe qu'une fois un bloc de notes non humaines et tait les lignes fournisseurs/propositions d'une session de worker

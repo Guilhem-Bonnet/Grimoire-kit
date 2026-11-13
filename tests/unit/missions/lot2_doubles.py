@@ -51,6 +51,8 @@ class FakeHost:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], Path, Mapping[str, str] | None]] = []
         self.bg_fails = False
+        #: Le message que rend un ``claude --bg`` refusé ; un échec de session, jamais une panne réseau.
+        self.bg_error = "claude : échec simulé"
         self.version = ""  # ``claude --version`` ; vide : le faux binaire ne sait pas dire sa version
         #: ``claude agents --json`` ; ``None`` : les sessions ``--bg`` que ce double a lancées et pas arrêtées.
         self.agents: list[dict[str, str]] | None = None
@@ -63,6 +65,8 @@ class FakeHost:
         self.pr_heads: dict[str, str] = {}  # branche → headRefOid ; absente : la tête locale de la branche
         self.pr_no_head = False  # JSON partiel : ni headRefOid
         self.gh_broken = False
+        #: Le message que rend un ``gh`` en panne : « réseau indisponible » par défaut, un vrai délai réseau au besoin.
+        self.gh_error = "gh : réseau indisponible"
         self.closed_issues: list[str] = []
         self._next = 0
         # Lot 4 (merger) : checks, protection de branche et fusion de la PR.
@@ -110,7 +114,7 @@ class FakeHost:
             return ExecResult(0, f"{self.version} (Claude Code)\n") if self.version else ExecResult(2, "", "version inconnue")
         if argv[1] == "--bg":
             if self.bg_fails:
-                return ExecResult(1, "", "claude : échec simulé")
+                return ExecResult(1, "", self.bg_error)
             self._next += 1
             short = f"{self._next:08x}"
             # Comme Claude Code 2.1.310 : ``--session-id`` est ignoré, l'identité commence par l'id court imprimé ;
@@ -154,7 +158,7 @@ class FakeHost:
 
     def _gh(self, argv: list[str], cwd: Path) -> ExecResult:
         if self.gh_broken:
-            return ExecResult(1, "", "gh : réseau indisponible")
+            return ExecResult(1, "", self.gh_error)
         if argv[1:3] == ["auth", "status"]:
             # Le préflight d'assignation (P47) sonde l'authentification avant de lancer.
             return ExecResult(0, "Logged in to github.com")

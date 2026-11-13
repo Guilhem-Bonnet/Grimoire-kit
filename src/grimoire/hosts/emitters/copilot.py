@@ -28,6 +28,7 @@ from grimoire.hosts.emitters.base import (
     managed_header,
     map_verbs,
     parallel_brainstorm_section,
+    persona_section,
 )
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
@@ -156,19 +157,21 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         if agent.entry_point
         else "Agent routé en interne : tu traites une tranche de travail, tu ne clos pas la tâche globale."
     )
+    persona = persona_section(agent)
     content = f"""{header}
 {managed_header(".md")}
 
 Tu actives la persona Grimoire **{agent.name}** du projet {surface.project_name}.
 
-1. Lis `{agent.definition_ref}` en entier — persona, règles, protocole d'activation.
-2. {context_load_instruction(agent)}
-3. {role}
-4. Frontière d'outils : {boundary}. N'en sors pas.
-5. {GROUNDING_RULE}
+{persona}
+
+1. {context_load_instruction(agent)}
+2. {role}
+3. Frontière d'outils : {boundary}. N'en sors pas.
+4. {GROUNDING_RULE}
 """
     content = (
-        f"{content}\n{_dispatch_policy_section()}" if agent.entry_point else f"{content}6. {UNCERTAINTIES_BLOCK_RULE}\n"
+        f"{content}\n{_dispatch_policy_section()}" if agent.entry_point else f"{content}5. {UNCERTAINTIES_BLOCK_RULE}\n"
     )
     for skill in owned_skills:
         content = f"{content}\n{_attached_skill_section(skill)}"

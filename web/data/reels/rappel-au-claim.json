@@ -14,15 +14,15 @@
     "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
     "grimoire task recall GAO-ecrire-la-do-002"
   ],
-  "kit_version": "3.80.1",
-  "recorded_at": "2026-11-07T06:21:04Z",
-  "output_sha256": "652bbe35b1498cb6525002a7ccec427605c666aafc72596d9ed98e929aa74b43",
+  "kit_version": "3.84.0",
+  "recorded_at": "2026-11-13T00:35:28Z",
+  "output_sha256": "9e0cc8314d85eadaf67fe6de790dca3f1c2d486971362983dfe60fbb893a9d29",
   "frames": [
     {
       "kind": "run",
       "command": "grimoire task add \"Ecrire la doc de l API\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
       "exit_code": 0,
-      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready)\n  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict"
+      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready)\n  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict\n    - le test passe → test"
     },
     {
       "kind": "run",
@@ -64,7 +64,7 @@
       "kind": "run",
       "command": "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
       "exit_code": 0,
-      "output": "OK GAO-ecrire-la-do-002 — Ecrire la doc du CLI (ready)\n  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict"
+      "output": "OK GAO-ecrire-la-do-002 — Ecrire la doc du CLI (ready)\n  vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict\n    - le test passe → test"
     },
     {
       "kind": "run",

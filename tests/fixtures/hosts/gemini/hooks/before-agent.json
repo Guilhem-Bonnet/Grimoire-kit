@@ -1,0 +1,8 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000104",
+  "transcript_path": "<HOME>/.gemini/tmp/<PROJECT>/chats/session-104.jsonl",
+  "cwd": "<PROJECT>",
+  "hook_event_name": "BeforeAgent",
+  "timestamp": "2026-11-12T10:03:00.000Z",
+  "prompt": "Continue la tâche GAO-gemini-cli-l-001."
+}
