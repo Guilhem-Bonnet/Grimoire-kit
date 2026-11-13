@@ -1,1 +1,0 @@
-- feat(missions): expliquer le classement V2 (critère fautif et reformulation), reconnaître une commande citée entre accents graves, et signaler à `task add` les critères qui attendent une personne ou une dépense payante

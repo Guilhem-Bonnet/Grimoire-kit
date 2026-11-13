@@ -1,1 +1,0 @@
-- feat(hosts): le hook du kit parle le protocole de Gemini CLI (BeforeTool, BeforeAgent, SessionStart, PreCompress), avec échec fermé sur les événements bloquants

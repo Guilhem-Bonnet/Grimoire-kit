@@ -243,6 +243,7 @@ def _layout(payload: dict[str, object], options: dict[str, object] | None = None
         ["node", "-e", script, GEOMETRY.as_uri(), json.dumps(payload), json.dumps(options or {})],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
         timeout=30,
     )
@@ -371,6 +372,11 @@ def test_un_sous_agent_se_nomme_par_sa_demande_et_pas_par_la_branche_du_parent()
         "m.threadName({role:'worker', task_id:'GAO-x', branch:'work/x'})])))"
     )
     out = subprocess.run(
-        ["node", "-e", script, GEOMETRY.as_uri()], capture_output=True, text=True, check=True, timeout=30
+        ["node", "-e", script, GEOMETRY.as_uri()],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        timeout=30,
     )
     assert json.loads(out.stdout) == ["Angle santé technique", "Explore", "sous-agent a83e2423", "GAO-x"]

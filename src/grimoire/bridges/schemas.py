@@ -208,10 +208,25 @@ CURSOR_MANIFEST = HostCapabilityManifest(
     tool_policy_native=False,
 )
 
+# Gemini CLI (geminicli.com/docs, lue le 2026-11-12, v0.64.0 annoncée ; CLI non
+# installée sur le poste de développement) documente ces événements dans le
+# bloc `hooks` de `.gemini/settings.json`. Le manifeste dit ce que l'hôte
+# **déclenche** ; il ne dit pas que chacun peut refuser — BeforeTool et
+# BeforeAgent seuls sont des points de blocage documentés, et le blocage de
+# AfterAgent n'est pas vérifié (voir HostProfile.blocking_events).
 GEMINI_CLI_MANIFEST = HostCapabilityManifest(
     host_id=HostId.GEMINI_CLI,
     display_name="Gemini CLI",
-    hooks=HostHooks(),
+    hooks=HostHooks(
+        session_start=True,
+        user_prompt_submit=True,
+        pre_tool_use=True,
+        post_tool_use=True,
+        pre_compact=True,
+        # AfterAgent (fin de tour) et SessionEnd (fin de session) alimentent
+        # tous deux la décision neutre `stop`.
+        stop=True,
+    ),
     fallback=HostFallback(
         mode=FallbackMode.PREVIEW_ONLY,
         required_controls=("preview_before_write", "explicit_proof_for_risky_changes"),

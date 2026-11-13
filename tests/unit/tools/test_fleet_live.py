@@ -22,6 +22,7 @@ import json
 import os
 import re
 import time
+import tracemalloc
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -457,6 +458,159 @@ def test_un_journal_qui_grandit_est_relu_depuis_son_decalage(project: Path, clau
 
     changes = view["sessions"][0]["model_changes"]
     assert [change["kind"] for change in changes] == ["upgrade"]
+
+
+# ── 5 bis. Mémoire bornée (audit 2026-11) ───────────────────────────────────
+
+
+def test_l_etat_par_session_ne_garde_pas_un_appel_par_message(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché (audit mémoire 2026-11) : ``_FileState.calls`` gardait un objet par ``message.id`` de tout
+    le journal — 115 à 195 Mo par session sur le poste. Les compteurs restent agrégés par modèle, donc le coût
+    affiché ne change pas ; seuls les identifiants au-delà de :data:`fleet.MAX_CALLS` sont oubliés."""
+    monkeypatch.setattr(fleet, "MAX_CALLS", 50)
+    session = "10000000-0000-0000-0000-000000000001"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, f"m{index}", "claude-sonnet-5-5") for index in range(200)])
+
+    state = fleet._state_for(path)
+
+    assert len(state.calls) <= 50
+    usage = state.usage_by_model["claude-sonnet-5-5"]
+    assert usage.input_tokens == 200 * 10 and usage.output_tokens == 200 * 5, "l'usage total n'est pas perdu"
+
+
+def test_un_gros_journal_est_lu_par_blocs(project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché (audit mémoire 2026-11) : ``handle.read()`` chargeait le journal entier — 195 Mo, plus le
+    JSON parsé. La lecture par blocs borne le pic d'allocation bien sous la taille du fichier."""
+    monkeypatch.setattr(fleet, "READ_CHUNK_BYTES", 64 * 1024)
+    monkeypatch.setattr(fleet, "MAX_CALLS", 100)
+    session = "20000000-0000-0000-0000-000000000002"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, f"m{index}", "claude-sonnet-5-5") for index in range(16000)])
+    size = path.stat().st_size
+    assert size > 4 * 1024 * 1024, "le journal de test doit dépasser largement un bloc"
+
+    tracemalloc.start()
+    try:
+        fleet._state_for(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < size / 2, f"pic {peak / 1e6:.1f} Mo pour un journal de {size / 1e6:.1f} Mo : lu d'un bloc ?"
+
+
+def test_le_nombre_de_journaux_gardes_est_borne(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché : un état par journal lu, pour toujours — un serveur ouvert des jours accumulait les
+    sessions terminées. Le journal le plus anciennement lu sort ; relu, il repart de zéro sans double compter."""
+    monkeypatch.setattr(fleet, "MAX_FILE_STATES", 2)
+    directory = _journal_dir(claude_home, project)
+    paths = []
+    for index in range(3):
+        session = f"40000000-0000-0000-0000-00000000000{index}"
+        path = directory / f"{session}.jsonl"
+        _write(path, [_assistant(session, f"m{index}", "claude-sonnet-5-5")])
+        paths.append(path)
+        fleet._state_for(path)
+
+    assert len(fleet._FILES) == 2
+    assert str(paths[0]) not in fleet._FILES
+
+
+def test_une_ligne_a_cheval_sur_deux_blocs_est_repliee_une_seule_fois(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché : la lecture par blocs ne doit ni perdre ni compter deux fois une ligne coupée en deux."""
+    monkeypatch.setattr(fleet, "READ_CHUNK_BYTES", 32)
+    session = "30000000-0000-0000-0000-000000000003"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, "m1", "claude-sonnet-5-5")])
+
+    state = fleet._state_for(path)
+    assert len(state.calls) == 1
+    assert state.usage_by_model["claude-sonnet-5-5"].input_tokens == 10
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_assistant(session, "m2", "claude-sonnet-5-5")) + "\n")
+    state = fleet._state_for(path)
+    assert len(state.calls) == 2
+    assert state.usage_by_model["claude-sonnet-5-5"].input_tokens == 20
+
+
+def test_les_outils_ouverts_et_vus_sont_bornes_par_session(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un fil de session ne retient pas un objet par appel d'outil de tout le journal : au-delà des bornes,
+    l'identifiant le plus ancien sort — un même identifiant ne réapparaît qu'à quelques lignes d'écart."""
+    monkeypatch.setattr(fleet, "_MAX_OPEN_TOOLS", 2)
+    monkeypatch.setattr(fleet, "_MAX_SEEN_TOOLS", 2)
+    session = "50000000-0000-0000-0000-000000000005"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    tools = tuple(_tool("Read", f"tool-{index}", {"file_path": "/x"}) for index in range(3))
+    _write(path, [_assistant(session, "m1", "claude-sonnet-5-5", tools=tools)])
+
+    state = fleet._state_for(path)
+
+    assert list(state.open_tools) == ["tool-1", "tool-2"]
+    assert list(state.seen_tools) == ["tool-1", "tool-2"]
+    assert [tool.id for tool in state.tools] == ["tool-0", "tool-1", "tool-2"], "le fil garde les trois appels"
+
+
+def test_une_ligne_demesuree_sans_saut_est_sautee_par_blocs(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une ligne plus longue que :data:`fleet._MAX_LINE_BYTES` est abandonnée sans jamais tenir la mémoire :
+    ses blocs déjà lus sont comptés puis oubliés, en attendant le prochain saut."""
+    monkeypatch.setattr(fleet, "READ_CHUNK_BYTES", 64)
+    monkeypatch.setattr(fleet, "_MAX_LINE_BYTES", 16)
+    session = "60000000-0000-0000-0000-000000000006"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    path.write_bytes(b"x" * 100)
+
+    state = fleet._state_for(path)
+
+    assert state.offset == 100, "les octets de la ligne démesurée sont sautés"
+    assert fleet._STATS["lines"] == 0
+
+
+def test_un_reliquat_demesure_apres_un_saut_est_saute(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Après une ligne complète, un reliquat sans saut plus gros que :data:`fleet._MAX_LINE_BYTES` est oublié :
+    la ligne suivante, quand elle arrivera, ne sera pas repliée sur un tampon démesuré."""
+    monkeypatch.setattr(fleet, "READ_CHUNK_BYTES", 4096)
+    monkeypatch.setattr(fleet, "_MAX_LINE_BYTES", 16)
+    session = "70000000-0000-0000-0000-000000000007"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    line = json.dumps(_assistant(session, "m1", "claude-sonnet-5-5")).encode("utf-8")
+    data = line + b"\n" + b"y" * 5000
+    path.write_bytes(data)
+
+    state = fleet._state_for(path)
+
+    assert state.offset == len(data)
+    assert len(state.calls) == 1, "la ligne complète avant le reliquat a bien été repliée"
+
+
+def test_une_ligne_vide_entre_deux_appels_est_ignoree(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un saut isolé (ligne vide) ne casse pas la lecture : il est ignoré et les deux appels voisins, dans le
+    même bloc, sont tous deux repliés."""
+    session = "80000000-0000-0000-0000-000000000008"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    first = json.dumps(_assistant(session, "m1", "claude-sonnet-5-5"))
+    second = json.dumps(_assistant(session, "m2", "claude-sonnet-5-5"))
+    path.write_text(f"{first}\n\n{second}\n", encoding="utf-8")
+
+    state = fleet._state_for(path)
+
+    assert len(state.calls) == 2
+    assert state.usage_by_model["claude-sonnet-5-5"].input_tokens == 20
 
 
 # ── 6. Fenêtre et portée ────────────────────────────────────────────────────

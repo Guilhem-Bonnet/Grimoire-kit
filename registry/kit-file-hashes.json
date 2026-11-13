@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.84.0",
+ "generated_for": "3.85.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -33,6 +33,10 @@
   "03126a473e8ef1a8db7d097eb8b79314e0f535cab82e22783f8a466eecccb286": {
    "version": "3.35.4",
    "path": "framework/teams/team-vision.yaml"
+  },
+  "0346eae1ba015da380799f164910eae5de12cbb6129dbe5013bdbfa0eebd90fb": {
+   "version": "3.85.0",
+   "path": "framework/agentic-standard/templates/llm-provider-registry.yaml"
   },
   "0377e32fa32e66cf30d88c42339ef119f5a4b1231ee2876ef45ad60b502a54b6": {
    "version": "3.4.2",
@@ -3225,6 +3229,10 @@
   "bfbb095e170247e2a3260862278e3d25cd3231854871390c5f3ee8820d50daf1": {
    "version": "3.35.0",
    "path": "framework/memory/network-topology.tpl.md"
+  },
+  "bfbc20e266e31106ac29c60d7c0d7022906bc3d7a90430f1b0dfe831c5962aa1": {
+   "version": "3.85.0",
+   "path": "framework/agentic-industry-reference.md"
   },
   "bfcd3b3a71e6b014c5ce633e5d00b05ed4a39ac51a765927b608d677893a0fc2": {
    "version": "3.64.0",

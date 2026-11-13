@@ -10,7 +10,7 @@ learned it by going to look. One writer, one outcome, one explicit failure.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,12 @@ class HostSyncOutcome:
         return {"ok": self.ok, "written": list(self.written), "error": self.error, "conflicts": list(self.conflicts), "preserved": list(self.preserved)}
 
 
-def sync_host_surfaces(project_root: Path, *, only: frozenset[HostId] | None = None) -> HostSyncOutcome:
+def sync_host_surfaces(
+    project_root: Path,
+    *,
+    only: frozenset[HostId] | None = None,
+    skip_files: frozenset[str] = frozenset(),
+) -> HostSyncOutcome:
     """Render the project onto every known host. Never raises, never hides.
 
     An emitter problem must not fail an otherwise successful install or
@@ -63,6 +68,12 @@ def sync_host_surfaces(project_root: Path, *, only: frozenset[HostId] | None = N
     stderr, so that a caller in JSON mode cannot swallow it either. The write
     is one transaction: on failure ``written`` is empty because nothing was
     kept, not because nothing was tried.
+
+    *skip_files* : chemins relatifs (forme POSIX) qu'un appelant ne veut pas
+    voir émis dans cet arbre. Le lanceur de worktree s'en sert pour ne pas
+    poser ``CLAUDE.md`` à la racine d'un worktree éphémère : un fichier généré
+    non suivi y passerait pour du travail non commité et ferait refuser le
+    sceau de relecture.
     """
     out: list[str] = []
     conflicts: list[str] = []
@@ -81,7 +92,10 @@ def sync_host_surfaces(project_root: Path, *, only: frozenset[HostId] | None = N
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - registry is complete
                 continue
-            plans.append(emitter.plan(surface, project_root))
+            plan = emitter.plan(surface, project_root)
+            if skip_files:
+                plan = replace(plan, files=tuple(f for f in plan.files if f.relpath.as_posix() not in skip_files))
+            plans.append(plan)
         # Une seule transaction pour tous les hôtes : une panne laisse l'arbre comme il était.
         for result in apply_plans(plans, project_root):
             out.extend(result.written)
