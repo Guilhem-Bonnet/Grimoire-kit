@@ -439,9 +439,10 @@ def test_les_decisions_par_defaut_d_une_tache_sont_bornees(project: Path) -> Non
         answer(service, tid, qid, "reprendre", confidence="low")
 
 
-def test_une_reprise_par_defaut_attend_que_le_worker_ne_travaille_plus(project: Path) -> None:
+@pytest.mark.parametrize("event", [REVIEW_ESCALATED, MERGE_ESCALATED])
+def test_une_reprise_par_defaut_attend_que_le_worker_ne_travaille_plus(project: Path, event: str) -> None:
     pilot(project, APPLY)
-    service, tid, _qid = escalated(project)
+    service, tid, _qid = escalated(project, event)
     service.ledger.append_event(
         "task.session_launched", tid, "task", "tick", {"task_id": tid, "session": "abcd1234", "session_id": "s-1"}
     )

@@ -754,9 +754,9 @@ class OrchestratorStage:
 
         Une question que le kit a écrite (:func:`kit_written`) ne porte pas l'avis d'un auteur mais une option par
         défaut : le tick ne l'applique que si :func:`default_plan` en rend une (``autopilot.default_action:
-        apply_recommended``, hors liste fermée, sous la borne) et, pour une reprise, que si *status* (``claude agents``)
-        montre que la session du worker n'est plus au travail — illisible, rien n'est repris. Sinon la question va à la
-        session qui suit, comme avant.
+        apply_recommended``, hors liste fermée, sous la borne) et que si *status* (``claude agents``) montre que la
+        session du worker n'est plus au travail — illisible, rien n'est repris : ces options relancent toutes la tâche.
+        Sinon la question va à la session qui suit, comme avant.
         """
         from grimoire.missions.autopilot import load_autopilot_policy
         from grimoire.missions.mandate import MandateStore, acting_as_orchestrator
@@ -780,7 +780,7 @@ class OrchestratorStage:
             by_default = kit_written(events, record.question)
             if by_default and (
                 not default_plan(self._service, task, record.question, events, policy)[0]
-                or (q.gesture == "resume" and self._worker_at_work(q.task_id, status))
+                or self._worker_at_work(q.task_id, status)
             ):
                 continue
             ref, said = ("autopilot-default", "option par défaut") if by_default else ("autopilot-recommended", "option recommandée")

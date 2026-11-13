@@ -100,6 +100,7 @@ const CSS = `
 .at-default-q { color: var(--ink2); }
 .at-default-k { color: var(--ink3); margin-right: var(--sp-2); }
 .at-default-why { color: var(--ink2); }
+.at-defaults > .btn { margin-top: var(--sp-2); }
 @container canvas (max-width: 720px) {
   .at-wrap { padding: var(--sp-4); }
   .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
@@ -668,9 +669,17 @@ export async function mount(root, ctx) {
       const label = data.defaultDecisions.label || 'Décisions à revoir';
       fold.append(
         node('summary', null, `${label} : ${defaults.length} prise${defaults.length > 1 ? 's' : ''} par défaut`),
-        node('p', 'at-hint', 'Le pilote a appliqué l’option recommandée sans attendre de réponse, puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans Travail › Décisions, sous « Décidé par le pilote ».'),
+        node('p', 'at-hint', 'Le pilote a appliqué l’option recommandée sans attendre de réponse, puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans le journal « Décidé par le pilote ».'),
         list,
       );
+      if (!ctx.scope.all) {
+        // Le journal (et son « Revenir ») est celui du projet servi : hors portée « tous les projets ».
+        const journal = node('button', 'btn', 'Ouvrir le journal du pilote');
+        journal.type = 'button';
+        journal.dataset.role = 'default-journal';
+        journal.addEventListener('click', () => ctx.goto('travail', { view: 'decisions' }));
+        fold.append(journal);
+      }
       wrap.append(fold);
     }
     applyFilter();
