@@ -16,9 +16,12 @@ Retouches après relecture adverse du classement en lecture seule :
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from grimoire.hosts.decisions import classify_tool, command_surface
+from grimoire.hosts.decisions.read_only_layout import strip_heredoc_bodies
 from grimoire.policies.schemas import ActionKind, MutationClass
 
 LECTURE = MutationClass.READ_ONLY
@@ -624,3 +627,161 @@ def test_la_surface_lue_par_les_freins_suit_la_meme_regle(gabarit: str) -> None:
     """Derrière ce qui exécute son argument (``bash -c``, ``eval``, ``ssh``…), le corps reste sur la surface."""
     surface = command_surface(gabarit.format("touch drapeau"))
     assert ("touch drapeau" not in surface) is (gabarit in CONSOMMATEURS_DE_TEXTE), gabarit
+
+
+# ── Le message n'est un texte que là où l'option prend un texte ──────────────
+#
+# La commande ne suffit pas : ``git commit`` lit aussi son message dans un fichier, et
+# ``gh release create`` téléverse ses arguments. Le corps n'est une donnée que s'il est la
+# VALEUR d'une option qui prend un texte, tout ce qui la précède étant lu. Ailleurs il
+# nomme peut-être un fichier : il reste inspecté.
+
+VALEURS_D_UNE_OPTION_DE_TEXTE = [
+    "git commit -m " + MESSAGE,
+    "git commit -m" + MESSAGE,
+    "git commit --message " + MESSAGE,
+    "git commit --message=" + MESSAGE,
+    "git commit -am " + MESSAGE,
+    "git commit -qam " + MESSAGE,
+    "git commit -q --amend --no-verify -m " + MESSAGE,
+    "git commit -m 'titre' -m " + MESSAGE,
+    "git commit notes.md src/app.py -m " + MESSAGE,
+    "git commit --author 'A <a@b>' --date=2026-01-01 -m " + MESSAGE,
+    "git tag -a v1 -m " + MESSAGE,
+    "git tag -s -f v1 --message=" + MESSAGE,
+    "git notes add -m " + MESSAGE,
+    "git notes --ref=revue add -f -m " + MESSAGE,
+    'gh pr create --title "nettoyage" --body ' + MESSAGE,
+    "gh pr create -t titre -b " + MESSAGE,
+    "gh pr create --draft --base main --head ma-branche --label fix --title t --body=" + MESSAGE,
+    "gh pr edit 12 --add-label fix --body " + MESSAGE,
+    "gh pr comment 12 --body " + MESSAGE,
+    "gh pr review 12 --approve --body " + MESSAGE,
+    "gh pr merge 12 --squash --delete-branch --subject 'titre' --body " + MESSAGE,
+    "gh pr close 12 --comment " + MESSAGE,
+    "gh issue create -t titre -l bug -b " + MESSAGE,
+    "gh issue comment 12 -b " + MESSAGE,
+    "gh issue close 12 -c " + MESSAGE,
+    "gh release create v1 --title v1 --notes " + MESSAGE,
+    "gh release create v1 paquet.tar.gz -n " + MESSAGE,
+    "gh release edit v1 --notes " + MESSAGE,
+    "gh pr comment 12 -R o/r --body " + MESSAGE,
+]
+
+AUTRES_POSITIONS = [
+    # le message lu dans un fichier, un gabarit, un commit réutilisé
+    "git commit -F " + MESSAGE,
+    "git commit --file " + MESSAGE,
+    "git commit --file=" + MESSAGE,
+    "git commit -t " + MESSAGE,
+    "git commit --template " + MESSAGE,
+    "git commit -C " + MESSAGE,
+    "git commit -c " + MESSAGE,
+    "git commit --reuse-message=" + MESSAGE,
+    "git commit --reedit-message " + MESSAGE,
+    "git commit --fixup " + MESSAGE,
+    "git commit --squash " + MESSAGE,
+    "git commit --trailer " + MESSAGE,
+    "git commit --pathspec-from-file " + MESSAGE,
+    "git tag -a v1 -F " + MESSAGE,
+    "git tag -a v1 --file=" + MESSAGE,
+    "git notes add -F " + MESSAGE,
+    "git notes add --file " + MESSAGE,
+    "git notes add -C " + MESSAGE,
+    # un argument positionnel, ou ce qui suit ``--``
+    "git commit " + MESSAGE,
+    "git commit -m titre " + MESSAGE,
+    "git commit -m titre -- " + MESSAGE,
+    "git commit -- -m " + MESSAGE,
+    # une option de fichier qui avale l'option de texte
+    "git commit -F -m " + MESSAGE,
+    "git commit -m -F " + MESSAGE,
+    "gh release create v1 -F -n " + MESSAGE,
+    # une option que ce classement ne sait pas lire
+    "git commit -Sam " + MESSAGE,
+    "git commit -um " + MESSAGE,
+    "git commit --mess=" + MESSAGE,
+    "git commit -m $(date) -m " + MESSAGE,
+    "git commit \\\n -m " + MESSAGE,
+    # gh : corps, notes, gabarit et pièces jointes lus dans un fichier
+    "gh pr create --body-file " + MESSAGE,
+    "gh pr create -F " + MESSAGE,
+    "gh pr create --title t -F " + MESSAGE,
+    "gh pr create --template " + MESSAGE,
+    "gh pr create -T " + MESSAGE,
+    "gh pr create --attach " + MESSAGE,
+    "gh pr create --recover " + MESSAGE,
+    "gh issue comment 12 -F " + MESSAGE,
+    "gh issue comment 12 --body-file=" + MESSAGE,
+    "gh release create v1 -F " + MESSAGE,
+    "gh release create v1 --notes-file " + MESSAGE,
+    "gh release create v1 " + MESSAGE,
+    "gh release create v1 --notes texte " + MESSAGE,
+    "gh pr review 12 --comment " + MESSAGE,
+    "gh pr create -m " + MESSAGE,
+]
+
+
+@pytest.mark.parametrize("gabarit", VALEURS_D_UNE_OPTION_DE_TEXTE)
+@pytest.mark.parametrize("corps", [EFFACE, "voir .env et " + POUSSE + " --force", 'un "mot" et un `accent`'])
+def test_la_valeur_d_une_option_de_texte_reste_une_donnee(gabarit: str, corps: str) -> None:
+    facts = classify_tool("Bash", {"command": gabarit.format(corps)})
+    assert not facts.destructive_reason, gabarit
+    assert facts.kind is not ActionKind.SECRET_ACCESS, gabarit
+
+
+@pytest.mark.parametrize("gabarit", AUTRES_POSITIONS)
+def test_un_secret_nomme_hors_d_une_option_de_texte_reste_vu(gabarit: str) -> None:
+    facts = classify_tool("Bash", {"command": gabarit.format(".env")})
+    assert facts.kind is ActionKind.SECRET_ACCESS, gabarit
+    assert facts.secret_target
+
+
+@pytest.mark.parametrize("gabarit", AUTRES_POSITIONS)
+def test_une_commande_destructive_hors_d_une_option_de_texte_reste_vue(gabarit: str) -> None:
+    assert classify_tool("Bash", {"command": gabarit.format(EFFACE)}).mutation is DESTRUCTIVE, gabarit
+
+
+@pytest.mark.parametrize("gabarit", AUTRES_POSITIONS)
+def test_le_texte_fourni_a_la_garde_d_autorite_garde_le_chemin(gabarit: str, tmp_path: Path) -> None:
+    """La garde d'autorité lit la ligne sans ses corps de heredoc : un chemin en position de fichier doit y rester."""
+    chemin = str(tmp_path / "zone" / "journal.jsonl")
+    assert chemin in strip_heredoc_bodies(gabarit.format(chemin)), gabarit
+
+
+@pytest.mark.parametrize("gabarit", VALEURS_D_UNE_OPTION_DE_TEXTE)
+def test_le_texte_fourni_a_la_garde_d_autorite_ne_garde_pas_un_message(gabarit: str, tmp_path: Path) -> None:
+    chemin = str(tmp_path / "zone" / "journal.jsonl")
+    assert chemin not in strip_heredoc_bodies(gabarit.format("voir " + chemin)), gabarit
+
+
+# ── Un texte affiché, écrit dans un fichier, puis exécuté ────────────────────
+
+
+@pytest.mark.parametrize(
+    "gabarit",
+    [
+        "echo " + MESSAGE + " > x.sh && bash x.sh",
+        "echo " + MESSAGE + " > x.sh ; sh x.sh",
+        "printf '%s\\n' " + MESSAGE + " > x.sh\n. x.sh",
+        "echo " + MESSAGE + " > x.sh && source x.sh",
+        "echo " + MESSAGE + " > x.sh ; chmod +x x.sh ; ./x.sh",
+        "echo " + MESSAGE + " >> x.py && python3 x.py",
+        "echo " + MESSAGE + " > x.sh && timeout 5 bash x.sh",
+    ],
+)
+def test_un_texte_affiche_puis_execute_reste_inspecte(gabarit: str) -> None:
+    assert classify_tool("Bash", {"command": gabarit.format(EFFACE)}).mutation is DESTRUCTIVE, gabarit
+
+
+@pytest.mark.parametrize(
+    "gabarit",
+    [
+        "echo " + MESSAGE + " > notes.md",
+        "echo " + MESSAGE + " > notes.md && git add notes.md",
+        "printf '%s\\n' " + MESSAGE + " >> journal.md ; wc -l journal.md",
+        "echo " + MESSAGE + " && bash -n autre.sh",
+    ],
+)
+def test_un_texte_affiche_ou_ecrit_sans_etre_execute_reste_une_donnee(gabarit: str) -> None:
+    assert not classify_tool("Bash", {"command": gabarit.format(EFFACE)}).destructive_reason, gabarit
