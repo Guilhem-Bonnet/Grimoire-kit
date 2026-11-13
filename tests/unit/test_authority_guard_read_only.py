@@ -269,10 +269,11 @@ UNREADABLE = {
     "python-a-la-syntaxe-invalide": "python3 -c \"open('{Z}/f', 'w'\"",
     "python-au-mode-calcule": "python3 -c \"m = 'w'; open('{Z}/f', m)\"",
     "decoupage-d-env-illisible": "env -S \"tee '{Z}/f\"",
-    "langage-non-lu-node": "node -e \"require('fs').writeFileSync('{Z}/f', 'x')\"",
-    "langage-non-lu-perl": "perl -e 'open(F, \">>{Z}/f\")'",
-    "langage-non-lu-awk": "awk 'BEGIN{print 1 > \"{Z}/f\"}'",
-    "ecrivain-hors-liste": "git clone /src {Z}/x",
+    # #1233 : node, perl, awk et `git clone` sont désormais lus ; restent illisibles un langage non lu et un
+    # chemin que le programme reçoit en argument.
+    "langage-non-lu": "pwsh -c \"Set-Content {Z}/f x\"",
+    "chemin-recu-en-argument": "node -e \"require('fs').writeFileSync(process.argv[1], 'x')\" {Z}/f",
+    "ecrivain-hors-liste": "make -C {Z} install",
 }
 
 
@@ -430,7 +431,7 @@ REFUSED_MENTIONS = {
     "fin-des-options": "git commit -m x -- {Z}/f",
     "git-c-majuscule": 'git -C {Z} commit -m "x"',
     "git-sous-commande-hors-liste": "git checkout -m {Z}/f",
-    "git-clone": "git clone /src {Z}/x",
+    "git-clone-branche": "git clone -b {Z} /src ailleurs",  # #1233 : `git clone` vers la zone révoque désormais
     "gh-sous-commande-hors-liste": "gh pr review --comment {Z}",
     "gh-api": "gh api repos/x --input {Z}/f",
     "option-courte-groupee": 'git commit -am "{Z}"',
@@ -713,7 +714,6 @@ ADVERSE_REFUSED = [
     'git commit -qm "{Z}"',
     'git -c core.editor=true commit -m "{Z}"',
     'git -c core.hooksPath={Z} commit -m "{Z}"',
-    'git --git-dir={Z} commit -m "{Z}"',
     'git --work-tree {Z} commit -m "{Z}"',
     "git commit --message {Z} --message",
     "git tag -F {Z}/f v1",
@@ -723,8 +723,6 @@ ADVERSE_REFUSED = [
     'git merge -m "{Z}" x',
     "git branch -m {Z} x",
     "git mv -m {Z}/a {Z}/b",
-    "git init --initial-branch -m {Z}",
-    "git clone --origin -m src {Z}/x",
     'git commit -m "{Z}"\x0c',
     'git commit -m "{Z}"\u2028rm -rf {Z}',
     'git commit -m "{Z}"\x85',
@@ -777,6 +775,10 @@ ADVERSE_REFUSED = [
     f"awk '{{print}}' {{Z}}/{PROOF}",
 ]
 ADVERSE_WRITES = [
+    # #1233 : la mention cache une écriture git que la preuve lit désormais (valeur d'option prise pour texte)
+    'git --git-dir={Z} commit -m "{Z}"',
+    "git init --initial-branch -m {Z}",
+    "git clone --origin -m src {Z}/x",
     # une écriture derrière une mention
     "gh pr create --title t --body '{Z}' #; true\nrm -rf {Z}",
     'gh pr create --title t --body "{Z}" --body "`rm -rf {Z}`"',
@@ -986,6 +988,7 @@ class _Vault:
         "export F=/vault/f\necho x >> $F",
         "source <(echo 'cp a /vault/f')",
         "echo `echo x > /vault/f`",
+        "sed -n 'w /vault/f' /etc/passwd",  # #1233
         # antislash hors guillemets : séparateur d'un chemin Windows, ou échappement POSIX
         "echo x > \\vault\\f",
         "echo x > /vau\\lt/f",
@@ -1013,7 +1016,7 @@ def test_la_preuve_reconnait_une_ecriture(command: str) -> None:
         "python3 -c \"s = '/vault/f'.replace('a', 'b'); print(s)\"",
         "python3 -m http.server --directory /vault",
         "echo x > \"$UNSET\"",
-        "sed -n 'w /vault/f' /etc/passwd",
+        "sed -n 'w /tmp/out' /vault/f",
         "ssh host 'cat /vault/f'",
         "echo x \\> /vault/f",  # chevron échappé : un mot, pas une redirection
     ],
