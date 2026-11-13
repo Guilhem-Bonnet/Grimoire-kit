@@ -133,13 +133,13 @@ temps CPU ne bougent presque pas d'une passe à l'autre (`parse_frontmatter` :
 
 | Crate | Ce qu'elle double | Parité testée | Gain mesuré | Rust (`src/`) | CI (lignes ; durée) | Recommandation |
 |---|---|---|---|---:|---|---|
-| `policies` | `grimoire.policies.engine`, `grimoire.policies.temporal` | oui, `test_policies_rust_parity.py` | Aucun : 0,53× à 0,59× (plus lent) ; hook `PreToolUse` indiscernable | 1 505 | 76 ; 1 794 s | **archiver** |
-| `schema` | `grimoire.core.schema`, `grimoire.core.validator` | oui, `test_schema_validator_rust_parity.py` | Aucun : `generate_schema` 0,13× ; `validate_config` indiscernable ; `grimoire check` indiscernable | 2 304 | 80 ; 1 554 s | **archiver** |
-| `hosts` | `grimoire.hosts.collect`, `grimoire.hosts.surface` | oui, `test_hosts_rust_parity.py` | Oui : frontmatter 34× ; `build_surface` 2,8× (−24 ms) ; `host sync` +27 ms en médiane | 1 381 | 80 ; 5 044 s | **garder** |
-| `flows` | `grimoire.flows.engine`, `grimoire.runtime.kernel` | oui, `test_flows_rust_parity.py` | Aucun : contrôle de contrat 0,53× ; run complet indiscernable | 1 417 | 83 ; 3 347 s | **geler** |
-| `dispatch` | `grimoire.missions.dispatch`, `grimoire.providers.routing` | oui, `test_dispatch_rust_parity.py` | En dixièmes de milliseconde : 2,8× et 4,1× sur les fonctions pures ; routage indiscernable | 1 630 | 90 ; 6 988 s | **geler** |
-| `traces` | `grimoire.traces.ledger`, `grimoire.proposals` | oui, `test_traces_rust_parity.py` | Aucun : indiscernable (0,97×) | 2 467 | 91 ; 2 421 s | **geler** |
-| `acp` | `grimoire.acp.machine` | oui, dans `test_acp.py` (pas de fichier `*_rust_parity*`) | Aucun : 0,27× ; jamais chargé par défaut | 831 | 83 ; 1 824 s | **geler** |
+| `policies` | `grimoire.policies.engine`, `grimoire.policies.temporal` | oui, `tests/unit/test_policies_rust_parity.py` | Aucun : 0,53× à 0,59× (plus lent) ; hook `PreToolUse` indiscernable | 1 505 | 76 ; 1 794 s | **archiver** |
+| `schema` | `grimoire.core.schema`, `grimoire.core.validator` | oui, `tests/unit/test_schema_validator_rust_parity.py` | Aucun : `generate_schema` 0,13× ; `validate_config` indiscernable ; `grimoire check` indiscernable | 2 304 | 80 ; 1 554 s | **archiver** |
+| `hosts` | `grimoire.hosts.collect`, `grimoire.hosts.surface` | oui, `tests/unit/test_hosts_rust_parity.py` | Oui : frontmatter 34× ; `build_surface` 2,8× (−24 ms) ; `host sync` +27 ms en médiane | 1 381 | 80 ; 5 044 s | **garder** |
+| `flows` | `grimoire.flows.engine`, `grimoire.runtime.kernel` | oui, `tests/unit/test_flows_rust_parity.py` | Aucun : contrôle de contrat 0,53× ; run complet indiscernable | 1 417 | 83 ; 3 347 s | **geler** |
+| `dispatch` | `grimoire.missions.dispatch`, `grimoire.providers.routing` | oui, `tests/unit/test_dispatch_rust_parity.py` | En dixièmes de milliseconde : 2,8× et 4,1× sur les fonctions pures ; routage indiscernable | 1 630 | 90 ; 6 988 s | **geler** |
+| `traces` | `grimoire.traces.ledger`, `grimoire.proposals` | oui, `tests/unit/test_traces_rust_parity.py` | Aucun : indiscernable (0,97×) | 2 467 | 91 ; 2 421 s | **geler** |
+| `acp` | `grimoire.acp.machine` | oui, dans `tests/unit/test_acp.py` (pas de fichier `*_rust_parity*`) | Aucun : 0,27× ; jamais chargé par défaut | 831 | 83 ; 1 824 s | **geler** |
 
 La colonne CI donne les lignes de `rust-cores.yml` propres au crate (ses deux
 jobs) puis la durée cumulée de ces deux jobs sur les 299 exécutions du
@@ -437,7 +437,7 @@ l'interprète diffèrent).
 | Rust, `src/*.rs` | 11 535 lignes |
 | Manifestes (`Cargo.toml`, `pyproject.toml`) | 396 lignes |
 | `rust-cores.yml` | 779 lignes, 16 jobs ; 583 lignes propres aux crates, 196 communes |
-| Tests de parité | 3 652 lignes (les six `*_rust_parity.py` et `test_acp.py`) |
+| Tests de parité | 3 652 lignes (les six `*_rust_parity.py` et `tests/unit/test_acp.py`) |
 | Binaires construits | 5,3 Mo pour les sept (0,65 à 0,98 Mo chacun) |
 | Construction locale à froid | 15 à 19 s par crate, une mesure chacune |
 
