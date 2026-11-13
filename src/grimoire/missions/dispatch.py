@@ -855,6 +855,14 @@ def _run_provider_call(
     # secrets (grimoire.providers.secrets, `~/.env-store/`), jamais du registre ni d'un
     # argument — fusionnée ici pour que le script d'invocation n'ait rien à en savoir.
     env = {**os.environ, **env_for_provider(provider.id)}
+    # Le pipe est relu en UTF-8 juste en dessous : un fournisseur Python doit
+    # donc écrire en UTF-8, pas dans l'encodage de la console Windows (cp1252),
+    # qui rendrait les accents illisibles à la relecture. On impose la valeur
+    # (au lieu d'un `setdefault`) : le contrat de lecture est ici, pas dans
+    # l'environnement hérité de l'appelant. `PYTHONUTF8` couvre aussi les
+    # fichiers que le script du fournisseur lirait ou écrirait lui-même.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     try:
         completed = subprocess.run(
             argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace",
