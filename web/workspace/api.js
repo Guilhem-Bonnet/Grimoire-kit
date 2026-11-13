@@ -366,6 +366,17 @@ export const api = {
   // tout le registre (`portfolio`) — état, tâches tenues, dernier signe, consignes
   // en attente, activité des 15 dernières minutes, commande de reprise à copier.
   sessions: (portfolio) => get(WS + 'sessions', portfolio ? { scope: 'portfolio' } : undefined),
+  // Flotte en direct (lot B, #1193) : les sessions Claude Code du projet — et
+  // de ses worktrees — sur la fenêtre demandée, avec leurs sous-agents, les
+  // changements de modèle, les repères du journal et les liens. En portée
+  // « Tous les projets » du cockpit, `project=*` couvre tout le registre (même
+  // convention que le lot A) ; `window` s'exprime en minutes.
+  fleetLive: (windowMinutes) => {
+    const params = {};
+    if (windowMinutes) params.window = String(windowMinutes);
+    if (host.kind === 'cockpit' && host.scopeAll) params.project = '*';
+    return get(WS + 'fleet/live', Object.keys(params).length ? params : undefined);
+  },
   // PR à revoir (P48) : les PR ouvertes, l'état de leur CI et la tâche liée,
   // les plus prêtes d'abord. Lecture seule : le cockpit ne fusionne jamais.
   reviews: (portfolio) => get(WS + 'reviews', portfolio ? { scope: 'portfolio' } : undefined),
