@@ -54,14 +54,15 @@ def _agent_session() -> bool:
 def _warn_no_recommendation(recommended: bool, flags: tuple[str, str] = ("--recommended", "--why")) -> None:
     """Avertit l'agent qui a posé une question bloquante sans dire l'option qu'il recommande ; la question est posée.
 
-    Sans option recommandée, le pilote automatique n'a rien à appliquer par défaut : la question attend un humain.
+    Ne promet rien de ce qui suivra : qui tranche, et quand, dépend des réglages du projet. Une option recommandée
+    aide dans tous les cas celui qui tranche.
     """
     if recommended or not _agent_session():
         return
     console.print(
-        "[yellow]![/yellow] question sans option recommandée : elle attendra une réponse humaine. Avec "
-        f"`{flags[0]} <option>` (l'une des options proposées) et `{flags[1]} \"<raison>\"`, le pilote automatique "
-        "peut l'appliquer puis informer."
+        "[yellow]![/yellow] question sans option recommandée. Avec "
+        f"`{flags[0]} <option>` (l'une des options proposées) et `{flags[1]} \"<raison>\"`, celui qui tranchera sait "
+        "ce que tu conseilles."
     )
 
 
