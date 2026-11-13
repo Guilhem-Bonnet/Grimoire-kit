@@ -88,8 +88,9 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
 #: Leading verbs whose blast radius never survives the session — the read
 #: half of the destructive/mutation split above. Matched against the first
 #: *word* of a command (or of one ``&&``/``;``/``|`` segment of it), after
-#: stripping ``VAR=value`` assignments and a leading ``sudo``/``command``/
-#: ``time``/``nice``/``ionice``/``env`` — never against the whole line, and
+#: stripping ``VAR=value`` assignments and the transparent wrappers
+#: (:func:`_inner_words`: ``sudo``, ``env``, ``nice``, ``timeout 30``, ``rtk``…)
+#: — never against the whole line, and
 #: never enough on its own: :func:`is_read_only_command` also refuses any
 #: output redirection (``>``, ``>>``, ``| tee``), which is what tells
 #: ``cat file`` from ``cat >> file`` apart. Deliberately narrow: an
@@ -108,6 +109,7 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
         # :func:`_is_read_only_segment`.
         "cd", "pushd", "popd", "sort", "uniq", "cut", "tr", "jq", "column", "nl", "comm", "paste",
         "sed", "awk", "gawk", "mawk",
+        "pgrep",  # ne fait que lister : signaler est le rôle de ``pkill``
     }
 )
 
@@ -133,11 +135,11 @@ _FIND_MUTATING_PRIMARIES = frozenset(
 
 #: ``gh <resource> <verb> ...`` — the verb (second or third word) decides,
 #: independently of the resource (``pr``, ``issue``, ``repo``, ``run``…):
-#: ``gh pr view``, ``gh issue list``, ``gh run view`` never mutate.
-_READ_ONLY_GH_VERBS = frozenset({"view", "list", "status", "diff", "show"})
+#: ``gh pr view``, ``gh issue list``, ``gh run view``, ``gh pr checks`` never
+#: mutate. ``gh api`` is read apart (:func:`_gh_api_is_read_only`).
+_READ_ONLY_GH_VERBS = frozenset({"view", "list", "status", "diff", "show", "checks"})
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_LEADING_NEUTRAL_WORDS = frozenset({"sudo", "command", "time", "nice", "ionice", "env"})
 #: Output redirection or a ``tee`` in the pipeline: the one shell-level
 #: signal that turns an otherwise read-only pipeline into a write, checked
 #: against the quote-stripped surface so a literal ``>`` inside a commit
@@ -151,6 +153,270 @@ _WRITE_REDIRECTION_RE = re.compile(r">>?(?!=)|\btee\b")
 _SHELL_LEADING_KEYWORDS = frozenset({"do", "then", "else", "elif", "while", "until", "if", "!"})
 _SHELL_CLOSING_KEYWORDS = frozenset({"done", "fi", "esac"})
 _SUBSTITUTION_RE = re.compile(r"\$\(|`")
+
+# ── Enveloppes transparentes ─────────────────────────────────────────────────
+#
+# Une commande arrive souvent enveloppée : par l'agent (``timeout 30 git status``,
+# ``env LC_ALL=C ls``) ou par un autre hook qui la réécrit avant le ``PostToolUse``
+# (un proxy de terminal rend ``git status`` en ``rtk git status`` et ``cat f`` en
+# ``rtk read f``). L'enveloppe ne change pas ce que fait la commande portée : on la
+# retire, puis la commande portée est classée par les règles de toujours. Une
+# enveloppe dont la forme n'est pas reconnue n'est pas retirée : elle devient le
+# verbe, qui n'est pas un verbe de lecture.
+#
+# ``nohup`` n'en fait pas partie : il écrit ``nohup.out`` dès que la sortie est un
+# terminal (c'est le cas de ``run_in_terminal``).
+
+#: Mots sans option qui précèdent une commande sans rien y changer.
+_PLAIN_PREFIX_WORDS = frozenset({"sudo", "ionice"}) | _SHELL_LEADING_KEYWORDS
+_DURATION_RE = re.compile(r"\d+(?:\.\d+)?[smhd]?")
+_NICE_ADJUSTMENT_RE = re.compile(r"-\d+|-n-?\d+|--adjustment=-?\d+")
+_TIMEOUT_FLAGS = frozenset({"--preserve-status", "--foreground", "-v", "--verbose"})
+_TIMEOUT_VALUED = frozenset({"-s", "--signal", "-k", "--kill-after"})
+
+
+def _after_timeout(words: list[str], i: int) -> int:
+    """Indice de la commande portée par ``timeout [options] <durée>``, ou -1 (forme non reconnue)."""
+    n = len(words)
+    while i < n and words[i].startswith("-"):
+        word = words[i]
+        if word in _TIMEOUT_FLAGS or word.startswith(("--signal=", "--kill-after=")):
+            i += 1
+        elif word in _TIMEOUT_VALUED and i + 1 < n:
+            i += 2
+        else:
+            return -1
+    return i + 1 if i < n and _DURATION_RE.fullmatch(words[i]) else -1
+
+
+def _after_env_options(words: list[str], i: int) -> int:
+    """Indice du premier mot après les options de ``env`` qui ne font que régler l'environnement."""
+    n = len(words)
+    while i < n:
+        if words[i] in {"-i", "-", "--ignore-environment"} or words[i].startswith("--unset="):
+            i += 1
+        elif words[i] == "-u" and i + 1 < n:
+            i += 2
+        else:
+            break
+    return i
+
+
+def _inner_words(words: list[str]) -> list[str]:
+    """Les mots de la commande portée, une fois retirés affectations, mots-clés et enveloppes.
+
+    Une liste vide : il ne restait que des affectations ou des mots neutres, rien à
+    muter. ``rtk`` ou ``timeout`` suivis de rien restent en tête de la liste rendue :
+    une enveloppe qui ne porte aucune commande n'est pas une lecture.
+    """
+    i, n = 0, len(words)
+    wrapper = -1  # premier ``rtk``/``timeout`` retiré
+    while i < n:
+        word = words[i]
+        following = words[i + 1 : i + 2]
+        if _ENV_ASSIGNMENT_RE.match(word) or word in _PLAIN_PREFIX_WORDS:
+            i += 1
+        elif word == "command":
+            if following in (["-v"], ["-V"]):
+                break  # ``command -v gh`` : une recherche, lue par l'appelant
+            i += 2 if following == ["-p"] else 1
+        elif word == "time":
+            i += 2 if following == ["-p"] else 1
+        elif word == "nice":
+            i += 1
+            if following == ["-n"] and re.fullmatch(r"-?\d+", "".join(words[i + 1 : i + 2])):
+                i += 2
+            elif following and _NICE_ADJUSTMENT_RE.fullmatch(following[0]):
+                i += 1
+        elif word == "env":
+            i = _after_env_options(words, i + 1)
+        elif word == "rtk":
+            wrapper = i if wrapper < 0 else wrapper
+            if following == ["read"]:
+                return ["cat", *words[i + 2 :]]  # la réécriture de ``cat``/``head``/``tail`` : aucune option n'écrit
+            i += 2 if following == ["proxy"] else 1
+        elif word == "timeout":
+            after = _after_timeout(words, i + 1)
+            if after < 0:
+                break
+            wrapper = i if wrapper < 0 else wrapper
+            i = after
+        else:
+            break
+    return words[wrapper:] if i >= n and wrapper >= 0 else words[i:]
+
+
+# ── Verbes dont la lecture dépend des arguments ──────────────────────────────
+#
+# ``journalctl``, ``systemctl``, ``ss``, ``curl`` et ``gh`` lisent dans leurs formes
+# courantes et écrivent dans d'autres. Chacun a sa règle, appliquée deux fois : sur
+# la surface (guillemets effacés) et sur les mots résolus par ``shlex``
+# (:func:`_without_read_only_scripts`), où un drapeau écrit entre guillemets
+# (``curl "-o" f``) redevient visible. Une forme non reconnue est une mutation.
+
+#: Options longues de ``journalctl`` qui écrivent : rotation, purge, vidage,
+#: clés de scellement, catalogue, et ``--cursor-file`` qui met son fichier à jour.
+_JOURNALCTL_WRITING_OPTIONS = (
+    "--cursor-file", "--flush", "--force", "--relinquish-var", "--rotate", "--setup-keys",
+    "--smart-relinquish-var", "--sync", "--update-catalog", "--vacuum-files", "--vacuum-size", "--vacuum-time",
+)
+
+
+def _abbreviates(word: str, options: tuple[str, ...]) -> bool:
+    """*word* (``--nom`` ou ``--nom=valeur``) désigne une des *options*, abréviation de getopt comprise."""
+    name = word.split("=", 1)[0]
+    return len(name) > 2 and name.startswith("--") and any(option.startswith(name) for option in options)
+
+
+def _journalctl_is_read_only(args: list[str]) -> bool:
+    # ``--cursor`` (lecture) est le préfixe exact de ``--cursor-file`` (écriture).
+    return not any(
+        word.split("=", 1)[0] != "--cursor" and _abbreviates(word, _JOURNALCTL_WRITING_OPTIONS) for word in args
+    )
+
+
+_SYSTEMCTL_READ_SUBCOMMANDS = frozenset(
+    {"status", "is-active", "is-enabled", "list-timers", "list-units", "show", "cat"}
+)
+#: Options sans valeur admises AVANT la sous-commande. Une option à valeur séparée
+#: (``-H hôte``, ``-n 20``) avalerait le mot suivant : ``systemctl -H status restart x``
+#: redémarre ``x``. Écrite ``--nom=valeur``, elle n'avale rien.
+_SYSTEMCTL_LEADING_FLAGS = frozenset(
+    {"--user", "--system", "--no-pager", "--full", "-l", "--all", "-a", "--failed", "--no-legend", "--plain",
+     "--quiet", "-q"}
+)
+
+
+def _systemctl_is_read_only(args: list[str]) -> bool:
+    for word in args:
+        if word in _SYSTEMCTL_LEADING_FLAGS or (word.startswith("--") and "=" in word):
+            continue
+        return word in _SYSTEMCTL_READ_SUBCOMMANDS
+    return True  # sans sous-commande, ``systemctl`` est ``list-units``
+
+
+def _ss_is_read_only(args: list[str]) -> bool:
+    """``ss`` lit, sauf ``-K``/``--kill`` (ferme des sockets) et ``-D``/``--diag`` (écrit un fichier)."""
+    for word in args:
+        if word.startswith("--"):
+            if _abbreviates(word, ("--kill", "--diag")):
+                return False
+        elif word.startswith("-") and ("K" in word or "D" in word):
+            return False
+    return True
+
+
+#: ``curl`` : liste blanche. Tant d'options écrivent un fichier ou envoient un corps
+#: (``-o``, ``-O``, ``-d``, ``-F``, ``-T``, ``-c``, ``-D``, ``--json``, ``-K``,
+#: ``--trace``, ``--libcurl``…) qu'une liste noire en oublierait : une option absente
+#: d'ici est une mutation. Les en-têtes et les identifiants (``-H``, ``-u``, ``-b``)
+#: en sont absents à dessein : un en-tête peut changer ce que fait la requête
+#: (``X-HTTP-Method-Override: DELETE``), et un appel authentifié reste évalué et tracé
+#: comme avant. Seul le GET anonyme, sans en-tête choisi, est une lecture.
+_CURL_SHORT_FLAGS = frozenset("sSfLiIvk46gN#")
+_CURL_SHORT_VALUED = frozenset("mwX")
+_CURL_LONG_FLAGS = frozenset(
+    {
+        "--silent", "--show-error", "--fail", "--fail-with-body", "--location", "--include", "--head",
+        "--verbose", "--insecure", "--compressed", "--globoff", "--no-buffer", "--no-progress-meter",
+        "--ipv4", "--ipv6", "--http1.1", "--http2",
+    }
+)
+_CURL_LONG_VALUED = frozenset(
+    {
+        "--max-time", "--connect-timeout", "--retry", "--retry-delay", "--retry-max-time", "--max-redirs",
+        "--url", "--resolve", "--cacert", "--write-out", "--request",
+    }
+)
+
+
+def _curl_value_reads(option: str, value: str) -> bool:
+    if option in {"X", "--request"}:
+        return value.upper() == "GET"
+    if option in {"w", "--write-out"}:
+        return "%output" not in value and not value.startswith("@")  # ``%output{f}`` écrit ``f``
+    return True
+
+
+def _curl_is_read_only(args: list[str]) -> bool:
+    """``curl`` en lecture : un GET (ou HEAD) anonyme dont la réponse va sur la sortie standard.
+
+    Une option à valeur en fin de ligne passe : sur la surface, sa valeur était entre
+    guillemets et a été effacée ; sur les mots résolus, ``curl`` s'arrête sans rien faire.
+    """
+    i, n = 0, len(args)
+    while i < n:
+        word = args[i]
+        i += 1
+        if word == "-" or not word.startswith("-"):
+            continue  # une URL
+        if word.startswith("--"):
+            if word in _CURL_LONG_FLAGS:
+                continue
+            if word not in _CURL_LONG_VALUED:
+                return False
+            if i < n and not _curl_value_reads(word, args[i]):
+                return False
+            i += 1
+            continue
+        for position, flag in enumerate(word[1:], start=2):
+            if flag in _CURL_SHORT_FLAGS:
+                continue
+            if flag not in _CURL_SHORT_VALUED:
+                return False
+            value = word[position:] or None  # ``-XGET`` : la valeur suit dans le même mot
+            if value is None and i < n:
+                value = args[i]
+                i += 1
+            if value is not None and not _curl_value_reads(flag, value):
+                return False
+            break
+    return True
+
+
+def _gh_api_is_read_only(args: list[str]) -> bool:
+    """``gh api`` en lecture : méthode GET (le défaut sans champ) et aucun corps envoyé."""
+    i, n = 0, len(args)
+    while i < n:
+        word = args[i]
+        i += 1
+        if word.startswith("--"):
+            name, has_value, value = word.partition("=")
+            if name in {"--field", "--raw-field", "--input"}:
+                return False
+            if name == "--method":
+                if not has_value:
+                    value = args[i] if i < n else ""
+                    i += 1
+                if value.upper() != "GET":
+                    return False
+        elif word.startswith("-") and any(flag in word for flag in "XfF"):
+            if word == "-X":
+                value = args[i] if i < n else ""
+                i += 1
+            elif word.startswith("-X"):
+                value = word[2:]
+            else:
+                return False  # ``-f``, ``-F``, ou un groupe d'options qui en porte un
+            if value.upper() != "GET":
+                return False
+    return True
+
+
+def _gh_is_read_only(args: list[str]) -> bool:
+    if args[:1] == ["api"]:
+        return _gh_api_is_read_only(args[1:])
+    return any(word in _READ_ONLY_GH_VERBS for word in args[:2])
+
+
+_ARGUMENT_CHECKS = {
+    "curl": _curl_is_read_only,
+    "gh": _gh_is_read_only,
+    "journalctl": _journalctl_is_read_only,
+    "ss": _ss_is_read_only,
+    "systemctl": _systemctl_is_read_only,
+}
+
 
 def _git_subcommand(words: list[str]) -> tuple[str, list[str]]:
     """Sous-commande git et ses arguments, après ``-C <dir>`` / ``--no-pager``."""
@@ -188,29 +454,21 @@ def _is_read_only_git(words: list[str]) -> bool:
 
 
 def _is_read_only_segment(segment: str) -> bool:
-    words = segment.split()
-    idx = 0
-    while idx < len(words) and (
-        _ENV_ASSIGNMENT_RE.match(words[idx])
-        or words[idx] in _LEADING_NEUTRAL_WORDS
-        or words[idx] in _SHELL_LEADING_KEYWORDS
-    ):
-        if words[idx] == "command" and idx + 1 < len(words) and words[idx + 1] in {"-v", "-V"}:
-            return True  # ``command -v gh`` : une recherche, jamais une exécution
-        idx += 1
-    if idx >= len(words):
+    words = _inner_words(segment.split())
+    if not words:
         return True  # nothing left but assignments/neutral words: nothing to mutate
-    verb = words[idx]
-    args = words[idx + 1 :]
+    verb = words[0]
+    args = words[1:]
+    if verb == "command":
+        return args[:1] in (["-v"], ["-V"])  # ``command -v gh`` : une recherche, jamais une exécution
     if verb in _SHELL_CLOSING_KEYWORDS:
         return True
     if verb == "for":
         return not _SUBSTITUTION_RE.search(segment)  # ``for x in a b`` n'exécute que son corps
     if verb == "git":
         return _is_read_only_git(args)
-    if verb == "gh":
-        tail = words[idx + 1 : idx + 3]
-        return any(word in _READ_ONLY_GH_VERBS for word in tail)
+    if verb in _ARGUMENT_CHECKS:
+        return _ARGUMENT_CHECKS[verb](args)
     if verb == "find":
         return not any(word in _FIND_MUTATING_PRIMARIES for word in args)
     # ``sed`` et ``awk`` : leur script est quoté donc invisible ici ; la liste
@@ -235,7 +493,6 @@ def _is_read_only_segment(segment: str) -> bool:
 # fonctionne en liste blanche : tout ce qui n'est pas explicitement reconnu comme
 # une lecture est une mutation.
 
-_NEUTRAL_PREFIX = _LEADING_NEUTRAL_WORDS | _SHELL_LEADING_KEYWORDS
 _SED_FLAG_CLUSTER_RE = re.compile(r"^-[nErz]*e?$")
 _SED_ADDR_STEP_RE = re.compile(r"\d+(?:~\d+)?|\+\d+|~\d+")
 _SED_S_FLAGS = frozenset("gpiImM0123456789")
@@ -433,19 +690,91 @@ def _raw_segments_read_only(command: str) -> bool:
             words = shlex.split(segment)
         except ValueError:
             return False  # guillemet non fermé : incertain donc mutation
-        idx = 0
-        while idx < len(words) and (
-            _ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _NEUTRAL_PREFIX
-        ):
-            idx += 1
-        if idx >= len(words):
+        words = _inner_words(words)  # ``rtk sed -i`` et ``timeout 5 awk`` portent un sed, un awk
+        if not words:
             continue
-        verb, args = words[idx], words[idx + 1 :]
+        verb, args = words[0], words[1:]
         if verb == "sed" and not _sed_is_read_only(args):
             return False
         if verb in {"awk", "gawk", "mawk"} and not _awk_is_read_only(args):
             return False
     return True
+
+
+# ── Passe sur les mots résolus : scripts ``bash -c`` et verbes à arguments ───
+#
+# ``bash -c '<script>'`` exécute son script : il n'est une lecture que si le script,
+# reclassé par les mêmes règles, n'est fait que de lectures. La passe relit donc la
+# commande segment par segment sur les mots que ``shlex`` résout, retire les scripts
+# en lecture seule, et rend ce qu'il reste à classer.
+
+_INNER_SHELLS = frozenset({"bash", "sh", "zsh"})
+#: Un script dans un script est encore relu ; au-delà, il reste une mutation.
+_MAX_SCRIPT_DEPTH = 2
+_PLAIN_SCRIPT_RE = re.compile(r"[\w./-]+")
+#: Dans des guillemets doubles, le shell appelant réécrit le script avant de le passer.
+_OUTER_EXPANSION_RE = re.compile(r'["$`\\]')
+#: ``${ cmd }`` et ``${| cmd }`` : substitution de commande sans sous-shell (bash 5.3, zsh).
+_INLINE_SUBSTITUTION_RE = re.compile(r"\$\{[\s|]")
+
+
+def _inner_script(shell: str, segment: str, args: list[str]) -> str | None:
+    """Le script de ``<shell> -c <script>`` tel que le shell porté le recevra, ou ``None``.
+
+    Seule la forme exacte ``-c`` suivie du script est lue (``-lc``, un fichier, un
+    argument de plus : mutation). Le script doit arriver intact : entre guillemets
+    simples, entre guillemets doubles sans rien que le shell appelant développe
+    (``"ls $DIR"`` devient ``ls ; rm x`` si ``DIR`` le dit), ou en un mot nu.
+    """
+    if len(args) != 2 or args[0] != "-c":
+        return None
+    script = args[1]
+    raw = segment.rstrip()
+    intact = (
+        ("'" not in script and raw.endswith(f"'{script}'"))
+        or (not _OUTER_EXPANSION_RE.search(script) and raw.endswith(f'"{script}"'))
+        or (_PLAIN_SCRIPT_RE.fullmatch(script) is not None and raw.endswith(script))
+    )
+    if not intact or "<<" in script or _INLINE_SUBSTITUTION_RE.search(script):
+        return None
+    if shell == "zsh" and "(" in script:
+        return None  # ``*(e:'cmd':)`` et ``=(cmd)`` exécutent : hors de ce que la passe sait lire
+    return script
+
+
+def _without_read_only_scripts(command: str, depth: int) -> str | None:
+    """*command* sans ses ``bash -c`` en lecture seule ; ``None`` si la commande écrit ou ne se lit pas.
+
+    Sans ``bash -c``, *command* est rendue telle quelle. Les corps de heredoc sont
+    écartés avant le découpage : ce sont des données, pas des segments.
+    """
+    segments, substitution = _scan_raw(_strip_heredoc_bodies(command))
+    kept: list[str] = []
+    scripts = 0
+    for segment in segments:
+        try:
+            words = _inner_words(shlex.split(segment))
+        except ValueError:
+            return None  # guillemet non fermé
+        if not words:
+            kept.append(segment)
+            continue
+        verb, args = words[0], words[1:]
+        if verb in _INNER_SHELLS:
+            script = _inner_script(verb, segment, args)
+            if script is None or depth >= _MAX_SCRIPT_DEPTH or not _command_is_read_only(script, depth + 1):
+                return None
+            scripts += 1
+            kept.append("true")
+        elif verb in _ARGUMENT_CHECKS and not _ARGUMENT_CHECKS[verb](args):
+            return None
+        else:
+            kept.append(segment)
+    if not scripts:
+        return command
+    if substitution or "<<" in command:
+        return None  # un script à côté d'une substitution ou d'un heredoc : la ligne n'est pas recomposée
+    return " ; ".join(kept)
 
 
 def is_read_only_command(command: str) -> bool:
@@ -468,9 +797,23 @@ def is_read_only_command(command: str) -> bool:
     read-only. Quoted text is stripped first (:func:`command_surface`), the
     same pass the destructive-pattern check above already relies on, so a
     literal ``>`` or ``rm`` inside a commit message never flips the verdict.
+
+    A wrapped read is still a read: a transparent wrapper is stripped before
+    the verb is looked up (:func:`_inner_words` — ``rtk git status``,
+    ``timeout 30 ls``), and a ``bash -c '<script>'`` is read-only when every
+    segment of its script is (:func:`_without_read_only_scripts`).
     """
+    return _command_is_read_only(command, 0)
+
+
+def _command_is_read_only(command: str, depth: int) -> bool:
+    """:func:`is_read_only_command` pour *command*, script de niveau *depth* (0 : la ligne elle-même)."""
     if not command.strip():
         return False
+    reduced = _without_read_only_scripts(command, depth)
+    if reduced is None:
+        return False
+    command = reduced
     surface = command_surface(command)
     if _WRITE_REDIRECTION_RE.search(surface):
         return False

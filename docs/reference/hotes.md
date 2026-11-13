@@ -402,7 +402,13 @@ le ledger. Depuis le lot A de l'issue #638 :
   `task_context`, `task_claim`, ou `GRIMOIRE_TASK_ID` ;
 - `post_tool_use` compte dans `session-<session_id>.json` (champ `mutations`)
   chaque outil dont la classification n'est pas lecture seule — fichier
-  écrit ou édité, commande Bash mutante ou destructive ; jamais le contenu ;
+  écrit ou édité, commande Bash mutante ou destructive ; jamais le contenu.
+  Une commande enveloppée est classée sur la commande qu'elle porte : `rtk git
+  status` (la forme qu'un proxy de terminal donne à `git status` avant le
+  `post_tool_use`), `timeout 30 ls`, `env X=1 git log` et `bash -c '<script>'`
+  dont chaque segment lit sont des lectures ; la même enveloppe autour d'une
+  écriture reste une écriture. Une redirection de sortie (`2>&1` et
+  `2>/dev/null` compris) classe toujours la commande en écriture ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
   sur les profils `governed` et `production` ; les autres profils reçoivent
