@@ -639,7 +639,16 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
 #: rechargement du direct, reste accepté (et retiré) : il ne change jamais la réponse.
 PULSE_RELOAD = "pulse_reload"
 LIVE_ROUTES = frozenset(
-    {f"{PREFIX}tasks", f"{PREFIX}attention", f"{PREFIX}sessions", f"{PREFIX}sheet", f"{PREFIX}tasks/accept-merged"}
+    {
+        f"{PREFIX}tasks",
+        f"{PREFIX}attention",
+        f"{PREFIX}sessions",
+        f"{PREFIX}sheet",
+        f"{PREFIX}tasks/accept-merged",
+        # Le parcours de l'arbre est la lecture la plus chère de la page : borné
+        # en temps et en nombre, il n'a pas à être repayé à chaque onglet.
+        f"{PREFIX}files",
+    }
 )
 
 
