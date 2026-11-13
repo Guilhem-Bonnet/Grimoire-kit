@@ -623,8 +623,10 @@ dans cet ordre, et chaque garde échoue fermée :
   ou abaisser le seuil en connaissance de cause. La fusion et l'acceptation exigent deux sceaux
   `READY` du journal d'autorité, de deux sessions et de deux modèles distincts, aucun du worker, sur la même tête et le
   même arbre, et la CI verte (`task.merge_dual_review` au ledger). Rien de cela ne se lit dans le ledger
-  d'événements, qu'un worker peut écrire. Échec fermé : un second `NOT-READY` suit le circuit normal et défait le
-  premier `READY` ; des sceaux qui ne couvrent plus la tête renvoient à la relecture ; aucun candidat au registre,
+  d'événements, qu'un worker peut écrire. Échec fermé : un `NOT-READY`, un `READY` périmé, tout retour au
+  worker ou remise en file par le merger (CI rouge, conflit) défont d'abord, au journal d'autorité, les relectures
+  scellées de la tâche : il faut ensuite deux relectures fraîches, même sans nouveau commit, et si cette annulation ne
+  peut pas s'inscrire rien n'est appliqué ; des sceaux qui ne couvrent plus la tête renvoient à la relecture ; aucun candidat au registre,
   registre ou journal illisible, identités ou modèles en défaut, erreur : question « fusionner ? » à l'humain, avec la
   raison. Une tâche faite à la main, ou lancée avant le réglage, n'a pas de worker scellé : sa PR reste à l'humain.
 - **Double relecture, limite** : un sceau prouve qu'une session lancée par le tick existe, pas qu'elle a rendu le

@@ -331,10 +331,14 @@ def _is_second(seal: dict[str, Any]) -> bool:
     return "second_of" in seal
 
 
-def _voided(mine: list[dict[str, Any]], first_seq: int) -> bool:
+def _voided(mine: list[dict[str, Any]], seal_seq: int) -> bool:
+    """Le sceau de rang *seal_seq* a été défait (:func:`~grimoire.missions.review_seal.void_task_reviews`) : une
+    annulation couvre tous les sceaux de la tâche jusqu'à son ``upto``."""
     from grimoire.missions.review_seal import DUAL_VOID_ENTRY
 
-    return any(e.get("type") == DUAL_VOID_ENTRY and e.get("first_seq") == first_seq for e in mine)
+    return any(
+        e.get("type") == DUAL_VOID_ENTRY and (upto := _seq(e.get("upto"))) is not None and seal_seq <= upto for e in mine
+    )
 
 
 def _second_launches(mine: list[dict[str, Any]], first_seq: int) -> int:
@@ -493,8 +497,8 @@ def _judge(project_root: Path, task_id: str, head: str) -> DualVerdict:
             return DualVerdict(DUAL_REFUSED, "le READY scellé ne porte pas son verdict : il ne peut pas fonder une "
                                              "double relecture", first=dict(second))
         if _voided(mine, only):  # plus aucune seconde relecture ne sera lancée pour lui : pas d'attente sans fin non plus
-            return DualVerdict(DUAL_REFUSED, "ce READY a été annulé (NOT-READY ou READY périmé depuis) : il ne fonde "
-                                             "plus de double relecture", first=dict(second))
+            return DualVerdict(DUAL_REFUSED, "ce READY a été annulé (NOT-READY, READY périmé ou retour du merger depuis) : "
+                                             "il ne fonde plus de double relecture", first=dict(second))
         return DualVerdict(DUAL_MISSING, f"un seul READY scellé couvre la tête {head[:12]} : la seconde relecture manque",
                            first=dict(second))
     first_seq, second_seq = _seq(second.get("second_of")), _seq(second.get("seq"))
@@ -511,8 +515,8 @@ def _judge(project_root: Path, task_id: str, head: str) -> DualVerdict:
     if first.get("verdict") != _READY or second.get("verdict") != _READY:
         return DualVerdict(DUAL_REFUSED, "un des deux sceaux ne porte pas le verdict READY", **pair)
     if _voided(mine, first_seq if first_seq is not None else -1):
-        return DualVerdict(DUAL_REFUSED, "ce premier READY a été annulé (NOT-READY ou READY périmé depuis) : la paire "
-                                         "ne vaut plus", **pair)
+        return DualVerdict(DUAL_REFUSED, "ce premier READY a été annulé (NOT-READY, READY périmé ou retour du merger "
+                                         "depuis) : la paire ne vaut plus", **pair)
     # Les sessions : distinctes, lancées par le tick, inscrites comme relecteurs, jamais celles d'un worker.
     one, two = str(first.get("reviewer_session") or "").strip(), str(second.get("reviewer_session") or "").strip()
     if not one or not two:
@@ -728,15 +732,17 @@ class DualReviewMixin:
         return MergerOutcome(tid, "wait", "waiting", "seconde relecture indépendante demandée sur un chemin réservé : "
                              "le relecteur la lance et choisit son modèle au registre", pr.number)
 
-    def _void_second(self, tid: str, why: str) -> bool:
-        """Double relecture : un READY périmé défait aussi la seconde relecture demandée. ``False`` : le journal d'autorité
-        a refusé l'écriture, l'appelant s'arrête (échec fermé) ; ``True`` sinon, et toujours en ``human`` (rien n'est lu)."""
+    def _void_reviews(self, tid: str, why: str) -> bool:
+        """Double relecture : tout retour au worker et toute remise en file par le merger défont, au journal d'autorité
+        et AVANT l'effet, les relectures scellées de la tâche — il faudra deux relectures fraîches, même si la tâche
+        revient en revue sans nouveau commit. ``False`` : le journal a refusé l'écriture, l'appelant s'arrête (échec
+        fermé) ; ``True`` sinon, et toujours en ``human``, où rien n'est lu ni écrit."""
         if not self._dual():
             return True
-        from grimoire.missions.review_seal import void_second_review
+        from grimoire.missions.review_seal import void_task_reviews
 
         try:
-            void_second_review(self._home, tid, f"READY périmé : {why}")
+            void_task_reviews(self._home, tid, why)
         except Exception:  # journal rompu ou verrou tenu : l'appelant s'arrête (échec fermé)
             return False
         return True

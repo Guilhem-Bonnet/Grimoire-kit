@@ -83,7 +83,7 @@ from grimoire.missions.review_seal import (
     seal_review_launch,
     seal_worker_launch,
     tree_of,
-    void_second_review,
+    void_task_reviews,
 )
 from grimoire.missions.reviewer import REVIEW_JUDGED_EVENT, REVIEW_LAUNCHED_EVENT
 from grimoire.missions.schemas import TaskState
@@ -387,7 +387,7 @@ def test_en_human_une_demande_presente_au_ledger_est_ignoree_et_rien_ne_la_lit(
                          (dual_review, "judge_dual_seals"), (dual_review, "choose_second_reviewer"),
                          (dual_review, "worker_models"), (dual_review, "pending_second_review"),
                          (review_seal, "request_second_review"), (review_seal, "seal_worker_launch"),
-                         (review_seal, "void_second_review")):
+                         (review_seal, "void_task_reviews")):
         spy(module, name)
     write_registry(projet)  # un registre existe : seul le réglage retient la double relecture
     grant(projet)
@@ -865,7 +865,7 @@ def craft_pair(projet: Path, tid: str = "GAO-paire-001", **over: Any) -> dict[st
         seal_review_launch(projet, tid, sha(two), head, model=over.get("second_launch_model", "haiku"),
                            second_of=first["seq"] if over.get("launched_as_second", True) else None)
     if over.get("void"):
-        void_second_review(projet, tid, "NOT-READY")
+        void_task_reviews(projet, tid, "NOT-READY")
     second = seal("r2", two, over.get("second_model", "haiku"), second_of=over.get("second_of", first["seq"]),
                   **over.get("second_fields", {}))
     return {"head": head, "first": first, "second": second, "tid": tid}
@@ -979,14 +979,14 @@ def test_la_seconde_relecture_n_est_due_que_sur_demande_du_journal(projet: Path)
 def test_un_not_ready_annule_la_demande_et_le_premier_ready(projet: Path) -> None:
     grant(projet)
     store, tid, head = MandateStore(projet), "GAO-annule-001", git(projet, "rev-parse", "HEAD")
-    assert void_second_review(projet, tid, "rien à annuler") is None
+    assert void_task_reviews(projet, tid, "rien à annuler") is None
     first = store.journal.append({"type": SEAL_ENTRY, "project": store.project, "task_id": tid, "review": "r1",
                                   "head": head, "tree": tree_of(projet, head), "reviewer_session": "s1",
                                   "verdict": "READY", "model": "opus", "ts": datetime.now(UTC).isoformat()})
     request_second_review(projet, tid, first["seq"], head, 7)
     assert judge_dual_seals(projet, tid, head).kind == DUAL_MISSING
-    assert void_second_review(projet, tid, "NOT-READY") == first["seq"]
-    assert void_second_review(projet, tid, "NOT-READY") is None  # une fois
+    assert void_task_reviews(projet, tid, "NOT-READY") == first["seq"]
+    assert void_task_reviews(projet, tid, "NOT-READY") is None  # une fois
     assert pending_second_review(projet, tid, head) is None
     verdict = judge_dual_seals(projet, tid, head)  # ni seconde relecture à attendre, ni paire : à l'humain
     assert verdict.kind == DUAL_REFUSED and "annulé" in verdict.reason
@@ -1166,7 +1166,7 @@ def test_un_second_not_ready_suit_le_circuit_normal_et_annule_le_premier_ready(p
     assert [(o.action, o.status) for o in report.reviews] == [("bounce", "done")] and report.merges == ()
     assert TaskService(projet).require(tid).status is TaskState.RUNNING and host.of("gh", "pr", "merge") == []
     [void] = journal(projet, DUAL_VOID_ENTRY, tid)
-    assert void["first_seq"] == first_seal["seq"]
+    assert void["upto"] == first_seal["seq"]
     # Le worker remet la tâche en revue sans rien changer : le premier READY ne se réutilise pas, tout est relu.
     TaskService(projet).ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")
     report = tick(projet, host)
@@ -1324,8 +1324,8 @@ def test_un_not_ready_dont_l_annulation_ne_s_inscrit_pas_n_est_pas_applique(
         wt, tid, NOT_READY, reviewer_id="reviewer", reviewer_session=reviewer_sid(host),
         findings=[ReviewFinding("la garde ne tient pas", "pytest -q tests/unit/x.py")],
     )
-    real = review_seal.void_second_review
-    monkeypatch.setattr(review_seal, "void_second_review", _journal_locked)
+    real = review_seal.void_task_reviews
+    monkeypatch.setattr(review_seal, "void_task_reviews", _journal_locked)
     report = tick(projet, host)
     assert [(o.action, o.status) for o in report.reviews] == [("bounce", "failed")], report.reviews
     assert "n'a pas pu être inscrite au journal d'autorité" in report.reviews[0].detail
@@ -1335,11 +1335,11 @@ def test_un_not_ready_dont_l_annulation_ne_s_inscrit_pas_n_est_pas_applique(
     assert [e.payload["verdict"] for e in ledger(projet, tid, REVIEW_JUDGED_EVENT)] == ["READY"]
     assert journal(projet, DUAL_VOID_ENTRY, tid) == [] and host.of("claude", "--bg", "--resume") == []
     assert report.merges == () and host.of("gh", "pr", "merge") == []
-    monkeypatch.setattr(review_seal, "void_second_review", real)  # le journal répond de nouveau : le jugement est refait
+    monkeypatch.setattr(review_seal, "void_task_reviews", real)  # le journal répond de nouveau : le jugement est refait
     report = tick(projet, host)
     assert [(o.action, o.status) for o in report.reviews] == [("bounce", "done")], report.reviews
     [void] = journal(projet, DUAL_VOID_ENTRY, tid)
-    assert void["first_seq"] == first_seal["seq"]
+    assert void["upto"] == first_seal["seq"]
     assert [e.payload["verdict"] for e in ledger(projet, tid, REVIEW_JUDGED_EVENT)] == ["READY", NOT_READY]
     assert TaskService(projet).require(tid).status is TaskState.RUNNING
 
@@ -1350,23 +1350,119 @@ def test_un_ready_perime_dont_l_annulation_ne_s_inscrit_pas_n_est_pas_remis_en_r
     dual_projet(projet)
     tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
     both_ready(projet, host, tid, wt)
-    [first_seal, _second_seal] = journal(projet, SEAL_ENTRY, tid)
+    [_first_seal, second_seal] = journal(projet, SEAL_ENTRY, tid)
     # Le reçu est réécrit après le second sceau : le READY de la file ne tient plus.
     write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session="une-autre-session")
-    real = review_seal.void_second_review
-    monkeypatch.setattr(review_seal, "void_second_review", _journal_locked)
+    real = review_seal.void_task_reviews
+    monkeypatch.setattr(review_seal, "void_task_reviews", _journal_locked)
     report = tick(projet, host)
     assert merges(report) == [("stale", "failed")], report.merges
     assert "reçu réécrit" in report.merges[0].detail and "n'a pas pu être inscrite" in report.merges[0].detail
     assert ledger(projet, tid, MERGE_REQUEUED_EVENT) == [] and journal(projet, DUAL_VOID_ENTRY, tid) == []
     assert host.of("gh", "pr", "merge") == []
-    monkeypatch.setattr(review_seal, "void_second_review", real)
+    monkeypatch.setattr(review_seal, "void_task_reviews", real)
     report = tick(projet, host)
     assert merges(report) == [("stale", "done")], report.merges
     [void] = journal(projet, DUAL_VOID_ENTRY, tid)
-    assert void["first_seq"] == first_seal["seq"] and len(ledger(projet, tid, MERGE_REQUEUED_EVENT)) == 1
+    assert void["upto"] == second_seal["seq"] and len(ledger(projet, tid, MERGE_REQUEUED_EVENT)) == 1  # les deux sceaux
     assert not judge_dual_seals(projet, tid, git(wt, "rev-parse", "HEAD")).ok  # la paire ne vaut plus
     assert host.of("gh", "pr", "merge") == []
+
+
+def test_un_retour_du_merger_au_worker_defait_la_paire_avant_l_effet(projet: Path, host: FakeHost) -> None:
+    from test_merger import GREEN
+
+    dual_projet(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    both_ready(projet, host, tid, wt)  # deux READY scellés sur la tête, CI verte vue une première fois
+    head = git(wt, "rev-parse", "HEAD")
+    [first_seal, second_seal] = journal(projet, SEAL_ENTRY, tid)
+    assert judge_dual_seals(projet, tid, head).ok
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]  # la CI retombe rouge avant la fusion
+    report = tick(projet, host)
+    assert merges(report) == [("bounce", "done")], report.merges
+    assert TaskService(projet).require(tid).status is TaskState.RUNNING and host.of("gh", "pr", "merge") == []
+    # Le retour au worker a défait les deux sceaux au journal d'autorité : la paire ne vaut plus, sur la même tête.
+    [void] = journal(projet, DUAL_VOID_ENTRY, tid)
+    assert void["upto"] == second_seal["seq"] and "retour au worker" in void["reason"]
+    verdict = judge_dual_seals(projet, tid, head)
+    assert verdict.kind == DUAL_REFUSED and "annulé" in verdict.reason
+    assert pending_second_review(projet, tid, head) is None
+    # Le worker remet la tâche en revue SANS nouveau commit, la CI repasse verte : rien de l'ancienne paire ne sert.
+    host.checks[f"task/{tid}"] = list(GREEN)
+    TaskService(projet).ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")
+    report = tick(projet, host)
+    assert [(o.action, o.status, o.model) for o in report.reviews] == [("launch", "launched", "opus")], report.reviews
+    assert "second_of" not in journal(projet, LAUNCH_ENTRY, tid)[-1] and report.merges == ()
+    give_ready(host, tid, wt)
+    report = tick(projet, host)  # un premier READY frais : la seconde relecture est demandée de nouveau
+    assert merges(report) == [("wait", "waiting")] and "seconde relecture" in report.merges[0].detail, report.merges
+    report = tick(projet, host)
+    assert [(o.action, o.status, o.model) for o in report.reviews] == [("launch", "launched", "haiku")], report.reviews
+    give_ready(host, tid, wt)
+    tick(projet, host)
+    assert merges(tick(projet, host)) == [("accept", "done")]
+    seals = journal(projet, SEAL_ENTRY, tid)
+    assert len(seals) == 4 and seals[3]["second_of"] == seals[2]["seq"] and seals[2]["seq"] > void["upto"]
+    fresh = ledger(projet, tid, MERGE_DUAL_REVIEW_EVENT)[-1]
+    assert (fresh.payload["first_seal"], fresh.payload["second_seal"]) == (seals[2]["seq"], seals[3]["seq"])
+    assert first_seal["seq"] not in (fresh.payload["first_seal"], fresh.payload["second_seal"])
+
+
+def test_un_retour_du_merger_dont_l_annulation_ne_s_inscrit_pas_n_est_pas_applique(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dual_projet(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    both_ready(projet, host, tid, wt)
+    host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
+    real = review_seal.void_task_reviews
+    monkeypatch.setattr(review_seal, "void_task_reviews", _journal_locked)
+    report = tick(projet, host)
+    assert merges(report) == [("bounce", "failed")], report.merges
+    assert "n'a pas pu être inscrite au journal d'autorité" in report.merges[0].detail
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION  # ni retour ni reprise du worker
+    assert host.of("claude", "--bg", "--resume") == [] and journal(projet, DUAL_VOID_ENTRY, tid) == []
+    monkeypatch.setattr(review_seal, "void_task_reviews", real)
+    assert merges(tick(projet, host)) == [("bounce", "done")]
+    assert len(journal(projet, DUAL_VOID_ENTRY, tid)) == 1 and len(host.of("claude", "--bg", "--resume")) == 1
+
+
+def test_en_human_un_retour_du_merger_n_ecrit_aucune_annulation(projet: Path, host: FakeHost) -> None:
+    from test_merger import red_after_ready
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host)
+    assert merges(red_after_ready(projet, host, tid, wt)) == [("bounce", "done")]
+    assert journal(projet, DUAL_VOID_ENTRY) == [] and len(journal(projet, SEAL_ENTRY, tid)) == 1
+
+
+def test_une_annulation_couvre_tous_les_sceaux_de_la_tache_et_eux_seuls(projet: Path) -> None:
+    grant(projet)
+    store, tid, head = MandateStore(projet), "GAO-tous-001", git(projet, "rev-parse", "HEAD")
+
+    def seal(review: str, task: str = tid) -> dict[str, Any]:
+        entry: dict[str, Any] = store.journal.append({
+            "type": SEAL_ENTRY, "project": store.project, "task_id": task, "review": review, "head": head,
+            "tree": tree_of(projet, head), "reviewer_session": f"s-{review}", "verdict": "READY", "model": "opus",
+            "ts": datetime.now(UTC).isoformat()})
+        return entry
+
+    # Un premier READY que personne n'a encore demandé de doubler est annulé lui aussi (retour du merger sans demande).
+    first = seal("r1")
+    other = seal("r9", task="GAO-autre-001")
+    assert void_task_reviews(projet, tid, "retour au worker") == first["seq"]
+    request_second_review(projet, tid, first["seq"], head, 7)  # une demande arrivée après coup ne le ranime pas
+    assert pending_second_review(projet, tid, head) is None
+    assert judge_dual_seals(projet, tid, head).kind == DUAL_REFUSED
+    assert judge_dual_seals(projet, "GAO-autre-001", head).kind == DUAL_MISSING and other["seq"] > first["seq"]
+    fresh = seal("r2")  # un sceau posé après l'annulation n'est pas touché
+    assert judge_dual_seals(projet, tid, head).kind == DUAL_MISSING
+    request_second_review(projet, tid, fresh["seq"], head, 7)
+    assert pending_second_review(projet, tid, head) == fresh
+    assert void_task_reviews(projet, tid, "READY périmé") == fresh["seq"]
+    assert void_task_reviews(projet, tid, "encore") is None and len(journal(projet, DUAL_VOID_ENTRY, tid)) == 2
+    assert pending_second_review(projet, tid, head) is None
 
 
 def test_un_commit_relu_sans_date_lisible_refuse_la_paire(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -22,8 +22,8 @@ décision de fusion compare, et que le ledger d'événements ne peut pas porter 
   le sceau du premier READY qu'elle double (``second_of``) ; le jugement READY les recopie de ce lancement, jamais du
   reçu que la session écrit, avec son verdict et la session du relecteur ;
 - le lancement de chaque worker en ``dual_review`` (:func:`seal_worker_launch`) : son modèle et l'empreinte de sa session ;
-- la demande de seconde relecture du merger (:func:`request_second_review`) et son annulation par un NOT-READY
-  (:func:`void_second_review`).
+- la demande de seconde relecture du merger (:func:`request_second_review`), et l'annulation des relectures scellées
+  d'une tâche (:func:`void_task_reviews`) par un NOT-READY, un READY périmé ou un retour du merger au worker.
 
 :func:`verify` compare une tête (celle de la PR pour le merger, celle de la branche sinon) à cette chaîne : la tête
 scellée avec son arbre, ou un descendant noté par un réalignement du merger. Un dépôt sans git retombe sur l'empreinte
@@ -78,7 +78,7 @@ __all__ = [
     "task_entries",
     "tree_of",
     "verify",
-    "void_second_review",
+    "void_task_reviews",
 ]
 
 LAUNCH_ENTRY = "review_launch"
@@ -89,7 +89,7 @@ REALIGN_ENTRY = "merge_realignment"
 WORKER_ENTRY = "worker_launch"
 #: Double relecture : le merger demande la seconde relecture d'un premier READY (``first_seq`` : son sceau).
 DUAL_REQUEST_ENTRY = "dual_review_request"
-#: Double relecture : un NOT-READY a annulé la demande ; ce premier READY ne fonde plus aucune paire.
+#: Double relecture : les sceaux de la tâche jusqu'à ``upto`` (``seq``) sont défaits ; aucun ne fonde plus de paire.
 DUAL_VOID_ENTRY = "dual_review_void"
 _READY = "READY"
 #: #994 : le dépôt du projet figé à l'octroi d'un mandat, avant toute relecture d'une tâche faite à la main.
@@ -263,21 +263,26 @@ def request_second_review(project_root: Path, task_id: str, first_seq: int, head
     return True
 
 
-def void_second_review(project_root: Path, task_id: str, reason: str) -> int | None:
-    """Un NOT-READY annule la seconde relecture demandée : le premier READY concerné ne fonde plus aucune paire, les
-    deux relectures sont à refaire. Rend le ``seq`` du premier sceau annulé, ou ``None`` s'il n'y avait rien à annuler."""
+def void_task_reviews(project_root: Path, task_id: str, reason: str) -> int | None:
+    """Défait, pour la double relecture, **toutes** les relectures scellées de la tâche jusqu'ici : un NOT-READY, un
+    READY périmé, un retour du merger au worker ou une remise en file. Aucun de ces sceaux ne fonde plus de paire ni
+    n'appelle de seconde relecture ; il faudra deux relectures fraîches. Rend le ``seq`` du dernier sceau annulé
+    (``upto``), ou ``None`` s'il n'y avait rien à annuler — rien n'est alors écrit."""
     mine = task_entries(project_root, task_id)
-    done = {e.get("first_seq") for e in mine if e.get("type") == DUAL_VOID_ENTRY}
-    asked = [e.get("first_seq") for e in mine if e.get("type") == DUAL_REQUEST_ENTRY and e.get("first_seq") not in done]
-    if not asked:
+
+    def rank(value: object) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) else -1
+
+    done = max((rank(e.get("upto")) for e in mine if e.get("type") == DUAL_VOID_ENTRY), default=-1)
+    live = [rank(e.get("seq")) for e in mine if e.get("type") == SEAL_ENTRY and rank(e.get("seq")) > done]
+    if not live:
         return None
     store = _store(project_root)
-    first_seq = asked[-1]
     store.journal.append({
-        "type": DUAL_VOID_ENTRY, "project": store.project, "task_id": task_id, "first_seq": first_seq,
+        "type": DUAL_VOID_ENTRY, "project": store.project, "task_id": task_id, "upto": max(live),
         "reason": reason[:200], "ts": datetime.now(UTC).isoformat(),
     })
-    return first_seq if isinstance(first_seq, int) else None
+    return max(live)
 
 
 def launch_entry(project_root: Path, task_id: str, session_sha256: str) -> dict[str, Any] | None:

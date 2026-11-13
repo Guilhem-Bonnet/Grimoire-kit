@@ -1247,9 +1247,9 @@ class MergeStage(DualReviewMixin):
         events = self._service.ledger.events_for(task.id)
         if _last(events, MERGE_REQUEUED_EVENT, _index(events, judged)) is None:
             # Double relecture : défait au journal d'autorité AVANT d'être noté périmé, sinon il resterait la moitié d'une paire.
-            if not self._void_second(task.id, why):
-                return MergerOutcome(task.id, "stale", "failed", f"READY périmé ({why}), mais l'annulation de la seconde "
-                                     "relecture n'a pas pu être inscrite au journal d'autorité : revu au tick suivant", pr)
+            if not self._void_reviews(task.id, f"READY périmé : {why}"):
+                return MergerOutcome(task.id, "stale", "failed", f"READY périmé ({why}), mais l'annulation des relectures "
+                                     "n'a pas pu être inscrite au journal d'autorité : revu au tick suivant", pr)
             if self._cycle(events, MERGE_REQUEUED_EVENT) >= self._policy.merger.max_cycles:
                 return self._escalate(task, f"READY périmé à répétition ({why})", pr)
             self._note(MERGE_REQUEUED_EVENT, task.id, {"judged": judged.id, "why": why})
@@ -1266,6 +1266,11 @@ class MergeStage(DualReviewMixin):
         """CI rouge, conflit, désaccord persistant : retour au worker (reprise de sa session), ou escalade au cycle
         ``max_cycles``. *hint* : le geste attendu du worker (fusionner la cible, pousser sa branche)."""
         tid, max_cycles = task.id, self._policy.merger.max_cycles
+        # Double relecture : tout retour au worker (ou son escalade) défait d'abord, au journal d'autorité, les relectures
+        # scellées de la tâche. Remise en revue sans nouveau commit, elle devra obtenir deux relectures fraîches.
+        if not self._void_reviews(tid, f"retour au worker par le merger ({reason})"):
+            return MergerOutcome(tid, "bounce", "failed", "retour au worker non appliqué : l'annulation des relectures n'a "
+                                 "pas pu être inscrite au journal d'autorité, revu au tick suivant", pr)
         events = self._service.ledger.events_for(tid)
         cycle, worker = self._cycle(events, MERGE_BOUNCED_EVENT), str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker:

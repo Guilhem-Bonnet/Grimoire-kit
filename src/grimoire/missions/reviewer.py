@@ -376,18 +376,19 @@ class ReviewStage:
             return None, f"choix du second relecteur en erreur ({type(exc).__name__}: {str(exc)[:160]})"
 
     def _void_second(self, tid: str, reason: str) -> bool:
-        """Un NOT-READY annule la seconde relecture demandée : les deux relectures seront refaites.
+        """Un NOT-READY défait les relectures scellées de la tâche (:func:`.review_seal.void_task_reviews`, le même
+        mécanisme que le merger) : aucune ne fonde plus de paire, les deux relectures seront refaites.
 
         ``True`` : l'annulation est au journal d'autorité, ou il n'y avait rien à annuler (toujours le cas en ``human``,
         où rien n'est lu ni écrit). ``False`` : le journal a refusé l'écriture deux fois de suite — l'appelant
         n'applique alors pas le NOT-READY (échec fermé)."""
         if not self._dual():
             return True
-        from grimoire.missions.review_seal import void_second_review
+        from grimoire.missions.review_seal import void_task_reviews
 
         def void() -> bool:
             try:
-                void_second_review(self._service.home_root, tid, reason)
+                void_task_reviews(self._service.home_root, tid, reason)
             except Exception:  # journal rompu ou verrou tenu : l'appelant s'arrête (échec fermé)
                 return False
             return True
