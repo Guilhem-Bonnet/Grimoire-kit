@@ -57,6 +57,30 @@ recommandation, et le merger ne lit aucune réponse. Le risque résiduel 1 vaut 
 « déployer » ne sont pas dans la liste fermée ; un projet qui règle `apply_recommended` les ajoute par
 `autopilot.reserved` s'il ne veut pas qu'un worker agisse sur une telle réponse.
 
+## Jurisprudence (`autopilot.precedents`)
+
+Sous `on`, la dernière réponse humaine à une question que le kit a écrite tranche les questions de la même classe
+(source `precedent`). C'est une extension d'autorité : une réponse donnée une fois décide ensuite seule. Sans le
+réglage, `precedent_plan` ne rend rien ; seule la cause codée des escalades est écrite en plus au ledger. Le mandat
+n'est pas touché : ni geste, ni provenance, ni empreinte. Les tests cités sont dans
+`tests/unit/missions/test_precedents.py`.
+
+| # | Menace | Réponse | Test |
+|---|---|---|---|
+| 18 | Un agent rédige sa question pour tomber sous un précédent favorable | La classe ne lit ni le texte, ni les options, ni la raison : elle vient de la cause codée de l'événement d'escalade qui nomme la question, ou de la nature d'une question d'origine `tick` attestée par la récolte. Une question d'agent n'a pas de classe | `test_une_question_d_agent_n_a_ni_classe_ni_precedent`, `test_la_classe_d_une_escalade_ne_passe_pas_a_une_autre_question_de_la_meme_tache` |
+| 19 | Un agent se fabrique un précédent | Aucun fichier de précédents : ils sont relus au ledger, d'une réponse dont l'origine `human` est posée par le canal de réponse. Forger un précédent, c'est forger une réponse humaine — la surface existante, pas une de plus | `test_une_reponse_d_une_autre_origine_ne_fait_pas_precedent` |
+| 20 | Jurisprudence en chaîne : une décision du pilote devient précédent | Seul `task.human_answered` d'origine `human` compte ; jugement, option par défaut et précédent appliqué sont d'origine `orchestrator` | `test_ni_une_decision_du_pilote_ni_un_precedent_applique_ne_font_precedent` |
+| 21 | « Fusionne » ou « accepte », dit une fois, vaut pour toujours | Les questions « fusionner ? » et « accepter ? » du merger, comme les escalades sur pack de preuve absent, clôture refusée ou relecteur non inscrit, sont hors de la liste fermée des classes ; nature `merge` ou `permission` : jamais | `test_une_reponse_humaine_a_une_question_de_fusion_ou_d_acceptation_ne_fait_jamais_jurisprudence`, `test_une_escalade_sans_cause_reconnue_ne_fait_pas_precedent` |
+| 22 | Un précédent applique ce que la décision par défaut refuse | Mêmes filtres : liste fermée, option encore proposée, jamais « abandonner » ni un choix `danger`, worker prouvé à l'arrêt (tick et session), borne par tâche partagée avec le défaut | `test_un_precedent_abandonner_ne_s_applique_jamais…`, `test_un_precedent_ne_s_applique_jamais_a_une_categorie_reservee`, `test_un_precedent_attend_la_preuve_que_le_worker_ne_travaille_plus`, `test_les_precedents_appliques_partagent_la_borne_des_decisions_par_defaut` |
+| 23 | Une vieille réponse gouverne indéfiniment, ou contre l'avis de l'humain | Péremption (`precedent_days`, 30 jours) ; la dernière réponse de la classe l'emporte, même « abandonner » ; `--forget` (canal humain) et « Revenir » sur une application la retirent, sans ressusciter une réponse plus ancienne | `test_un_precedent_expire`, `test_oublier_un_precedent_le_retire_sans_ressusciter_le_precedent`, `test_revenir_sur_une_application_la_defait_et_retire_le_precedent` |
+| 24 | Un agent oublie un précédent, ou l'orchestrateur sous mandat | `forget` refuse toute origine autre que `human`, établie comme pour `task answer` ; aucun mandat n'ouvre ce geste | `test_seul_le_canal_humain_oublie_un_precedent`, `test_cli_forget_est_refuse_a_un_agent` |
+| 25 | Lecture incertaine des précédents | Ledger illisible, oubli ou application sans identifiant : aucun précédent appliqué, et le tick comme la raison de la question laissée le disent | `test_des_precedents_illisibles_n_appliquent_rien_et_le_tick_le_dit` |
+
+Risque résiduel propre à la jurisprudence : la classe dit *pourquoi* le kit escalade, pas *sur quoi*. « Reprendre »
+après deux relectures refusées sur une tâche vaut ensuite pour une autre tâche, dont le désaccord peut être d'une
+autre nature. Les garde-fous sont la liste fermée (jugée sur le texte de la nouvelle question), la borne par tâche,
+la péremption et la visibilité (« Décisions à revoir », « Revenir ») ; l'option appliquée ne peut être que la reprise.
+
 ## Risques résiduels (assumés, à connaître)
 
 1. **Classement lexical.** La liste fermée repose sur des motifs, pas sur une compréhension. Une question qui dit

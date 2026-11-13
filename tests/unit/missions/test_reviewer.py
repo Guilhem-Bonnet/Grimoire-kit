@@ -30,6 +30,7 @@ from grimoire.missions.launcher import launched_sessions
 from grimoire.missions.mandate import ORIGIN_HUMAN, MandateRequest, MandateStore
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_session import kit_written
+from grimoire.missions.precedents import question_class
 from grimoire.missions.review_receipt import (
     CRITERIA_CHANGED,
     CriterionVerdict,
@@ -347,6 +348,8 @@ def test_not_ready_renvoie_au_worker_puis_escalade_au_cycle_max(projet: Path, ho
     assert all(c.consequence for c in v2.choices) and v2.options == ("reprendre", "abandonner")
     # GAO-pilote-appli-001 : l'escalade porte son option par défaut, et le ledger établit que le kit l'a écrite.
     assert v2.recommended == "reprendre" and kit_written(TaskService(projet).ledger.events_for(tid), v2)
+    # GAO-jurisprudenc-001 : l'escalade écrit sa cause codée, d'où le kit calcule la classe de la question.
+    assert question_class(TaskService(projet).ledger.events_for(tid), v2) == "review:not_ready_cycles"
     assert len(host.of("claude", "--bg", "--resume")) == 1  # pas de troisième tour sans l'humain
     cycles = [e.payload["cycle"] for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_JUDGED_EVENT]
     assert cycles == [1, 2]

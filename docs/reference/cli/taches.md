@@ -88,6 +88,8 @@ prochain export l'écrase.
 | `grimoire task ask <id> --from <lot.yaml\|->` | Poser un lot de questions (JSON ou YAML) en **une** interruption et une notification ; une question déjà répondue (même clé) n'est pas reposée |
 | `grimoire task answer <id> "<réponse>" [--question <q-…>]` | Répondre (canal humain seulement) ; la tâche n'est rendue que quand toutes les bloquantes du lot ont leur réponse |
 | `grimoire task questions [<id>] [--open]` | Le registre des questions : statut, bloquante ou non, pourquoi, qui a répondu, par quel canal ou sur quelle source, et le nombre d'interruptions |
+| `grimoire task questions --precedents` | Les précédents du projet (jurisprudence du pilote automatique) : classe, option, date, question d'origine, état |
+| `grimoire task questions --forget <id>` | Retire un précédent — canal humain seulement, comme `task answer` |
 | `grimoire task resolve <id> <q-…> "<réponse>" --source <d'où>` | Déduire la réponse d'une question **non bloquante**, source citée ; une bloquante est refusée |
 | `grimoire task decisions` | Les décisions qui attendent un humain (un lot = une décision, ses questions ouvertes listées) |
 | `grimoire task context <id>` | Produire le context bundle d'une tâche réelle |
@@ -469,9 +471,9 @@ grimoire autonomy autopilot off       # même canal humain (révoquer le mandat 
 - **Liste fermée, dans le code** : identifiants, secrets, dépense payante, accès hors du dépôt (`permission` hors
   du dépôt ou sans chemin), suppression de données utilisateur, mandat, réglages du dépôt. Le classement lit la
   question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot` de
-  `orchestration-policy.yaml` accepte deux clés : `reserved`, qui peut seulement **ajouter** des réservations
-  (catégories d'escalade ou mots), et `default_action` (ci-dessous) ; toute autre clé, forme ou valeur rend la
-  politique invalide et le pilote ne décide plus rien.
+  `orchestration-policy.yaml` accepte quatre clés : `reserved`, qui peut seulement **ajouter** des réservations
+  (catégories d'escalade ou mots), `default_action`, `precedents` et `precedent_days` (ci-dessous) ; toute autre
+  clé, forme ou valeur rend la politique invalide et le pilote ne décide plus rien.
 - **Comment il décide** : d'abord l'option recommandée par la question (`task ask --recommended <option> --why
   "…"`, ou le champ `recommended` d'un lot), appliquée par le tick sans session — sauf ce qu'un agent ne peut pas
   se répondre à lui-même : une question `permission` ou `merge`, « abandonner » ou un choix marqué dangereux, une
@@ -497,8 +499,32 @@ grimoire autonomy autopilot off       # même canal humain (révoquer le mandat 
   deux décisions par défaut sur une même tâche depuis la dernière réponse humaine. Dans tous ces cas la question se juge comme sous
   `ask`. Répondre n'est jamais fusionner, accepter ni publier : la réponse rend la tâche `ready`, et ces gestes
   gardent leurs propres contrôles (merger, double relecture, mandat).
+- **Jurisprudence** (`autopilot.precedents`, `off` par défaut) : sous `on`, la dernière réponse **humaine** à
+  une question de conduite écrite par le kit vaut pour les questions de la même classe. Quand personne n'assume
+  de décision, son option tranche : `autopilot.decided` porte la source `precedent` et la référence de cette
+  réponse (identifiant, classe, question d'origine, date), et le cockpit la range dans « Décisions à revoir »
+  (« d'après ta réponse »). Le précédent passe avant l'option par défaut, qui reste le repli sous
+  `apply_recommended`.
+  - **La classe est calculée par le kit**, jamais déclarée : la cause codée que le relecteur ou le merger écrit
+    dans son événement d'escalade (`review:not_ready_cycles`, `review:no_worker_session`,
+    `review:unjudgeable_reviews`, `merge:ci_red`, `merge:conflict`, `merge:desync`, `merge:stale_ready`,
+    `merge:no_worker_session`), la nature d'une question de la récolte (`reap:resume_branch`,
+    `reap:resume_unfenced`, `reap:retry_exhausted`) ou la tâche garée sur une erreur du fournisseur
+    (`launcher:provider_error`). La liste est fermée. Une question d'agent n'a pas de classe, donc pas de
+    précédent ; une question « fusionner ? » ou « accepter ? », une escalade sur un pack de preuve absent ou une
+    clôture refusée, non plus.
+  - **Aucun fichier à part** : les précédents se relisent au ledger (réponse d'origine `human`, oubli, « Revenir »).
+    Seule la dernière réponse humaine d'une classe compte ; une décision du pilote — précédent appliqué compris —
+    n'en est jamais une. Oubliée (`task questions --forget <id>`), reprise par « Revenir » sur l'une de ses
+    applications, ou vieille de plus de `autopilot.precedent_days` jours (30 par défaut, 1 à 365), elle ne
+    s'applique plus, et une réponse plus ancienne ne revient pas à sa place. À l'activation, les réponses humaines
+    encore dans ce délai comptent : `task questions --precedents` les montre avant.
+  - **Mêmes refus que la décision par défaut** : liste fermée, option encore proposée par la question, jamais
+    « abandonner » ni un choix dangereux, worker prouvé à l'arrêt, et la même borne de deux options appliquées sans
+    jugement par tâche (précédents et défauts ensemble). Précédents illisibles : aucun n'est appliqué, et le tick
+    comme la question laissée à l'humain le disent.
 - **Traçabilité** : chaque décision est un événement `autopilot.decided` (question, option, justification,
-  confiance, source — `recommended`, `judgment` ou `default` —, mandat). Sans borne de présentations (le plafond de sessions du jour et
+  confiance, source — `recommended`, `judgment`, `default` ou `precedent` —, mandat). Sans borne de présentations (le plafond de sessions du jour et
   le disjoncteur bornent encore).
 - **Limites** : une annulation décidée par le pilote est terminale (l'état `cancelled` n'a pas de sortie) ; la
   raison est au ledger. L'acceptation sous dérogation n'est pas traitée (aucune dérogation n'existe dans le kit).

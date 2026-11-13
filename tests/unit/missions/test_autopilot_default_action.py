@@ -426,6 +426,16 @@ def test_une_decision_par_defaut_n_abandonne_jamais(project: Path) -> None:
     assert decided.payload["option"] == "reprendre" and decided.payload["recommendation_source"] == "default"
 
 
+def test_un_abandon_ecarte_par_defaut_n_exige_pas_la_raison_d_un_abandon(project: Path) -> None:
+    """La raison exigée d'un abandon vaut pour l'abandon décidé, pas pour la réponse « abandonner » que le défaut écarte."""
+    pilot(project, APPLY)
+    service, tid, qid = asks(project, "Je continue ?", options=("continuer", "abandonner"), recommended="continuer", why="oui")
+    move = answer(service, tid, qid, "abandonner", confidence="low")
+    assert move.task.status is TaskState.READY
+    (decided,) = events(service, tid, DECIDED_EVENT)
+    assert decided.payload["option"] == "continuer" and decided.payload["justification"] == "oui"
+
+
 @pytest.mark.parametrize("kind", ["resume_branch", "choice"])
 def test_une_question_d_agent_ne_sort_pas_de_la_liste_fermee_en_imitant_le_kit(project: Path, kind: str) -> None:
     """Le couple d'options du kit (#1159) ne fait pas ignorer le titre de la tâche à une décision par défaut : seul un

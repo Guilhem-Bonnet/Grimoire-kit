@@ -981,7 +981,7 @@ class TaskService:
 
                 record_answer_refused(self, task_id, asked.id if asked is not None else question_id, exc)
             raise
-        answer, answer_data = (decision.answer, None) if decision and decision.by_default else (text.strip(), answer_data)
+        answer, answer_data = (decision.answer, None) if decision and decision.substituted else (text.strip(), answer_data)
         if not answer:
             raise ValueError("`text` requis : une réponse vide ne tranche rien")
         if decision is not None and authority is not None:  # P82 : la décision est au ledger avant la réponse

@@ -223,7 +223,11 @@ const toneOf = (item) => (item.kind === 'pr_review'
 const isReview = (item) => item.kind === 'pr_review'
   || (item.kind === 'probe_failed' && String(item.id || '').endsWith(':pr'));
 // D'où vient l'option que le pilote a appliquée sans jugement (bloc « Décisions à revoir »).
-const REVIEW_SOURCES = { default: 'appliquée par défaut', recommended: 'recommandée par l’agent' };
+const REVIEW_SOURCES = {
+  default: 'appliquée par défaut',
+  recommended: 'recommandée par l’agent',
+  precedent: 'd’après ta réponse',
+};
 const projectName = (item) => (item.project && (item.project.name || item.project.slug)) || '';
 
 function hm(iso) {
@@ -667,7 +671,19 @@ export async function mount(root, ctx) {
         const option = node('span', 'at-default-option');
         option.append(node('span', 'at-default-k', 'Option appliquée'), node('b', null, decision.option));
         li.append(head, node('span', 'at-default-q', decision.question), option);
-        if (decision.justification) {
+        if (decision.precedent) {
+          // Jurisprudence : la réponse humaine dont cette décision est l'application, avec sa date.
+          const origin = node('span', 'at-default-why');
+          origin.dataset.role = 'review-precedent';
+          const day = decision.precedent.answered_at ? new Date(decision.precedent.answered_at) : null;
+          const when = day && !Number.isNaN(day.getTime())
+            ? day.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+          origin.append(
+            node('span', 'at-default-k', when ? `Ta réponse du ${when}` : 'Ta réponse'),
+            `à « ${decision.precedent.question} »`,
+          );
+          li.append(origin);
+        } else if (decision.justification) {
           const why = node('span', 'at-default-why');
           why.append(node('span', 'at-default-k', 'Justification'), decision.justification);
           li.append(why);
@@ -677,7 +693,7 @@ export async function mount(root, ctx) {
       const label = data.reviewDecisions.label || 'Décisions à revoir';
       fold.append(
         node('summary', null, `${label} : ${reviewed.length} appliquée${reviewed.length > 1 ? 's' : ''} sans attendre`),
-        node('p', 'at-hint', 'Le pilote a appliqué ces options sans attendre de réponse — l’option par défaut d’une question, ou celle que l’agent recommandait — puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans le journal « Décidé par le pilote ».'),
+        node('p', 'at-hint', 'Le pilote a appliqué ces options sans attendre de réponse — l’option par défaut d’une question, celle que l’agent recommandait, ou celle que tu avais donnée à une question de la même classe — puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans le journal « Décidé par le pilote ».'),
         list,
       );
       if (!ctx.scope.all) {

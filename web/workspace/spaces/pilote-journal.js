@@ -11,6 +11,7 @@ const SOURCES = {
   recommended: 'option recommandée par la question',
   judgment: 'jugement du pilote',
   default: 'option recommandée, appliquée par défaut',
+  precedent: 'réponse humaine antérieure à une question de la même classe',
 };
 const CONFIDENCES = { high: 'confiance haute', medium: 'confiance moyenne', low: 'confiance basse' };
 const REVERTS = { reopen: 'Revenir · rouvrir la tâche', hold: 'Revenir · rendre à l’humain' };
@@ -49,6 +50,9 @@ function card(entry, reload) {
   add('Question', entry.question, 'pj-question');
   add('Option prise', entry.option, 'pj-option');
   add('Justification', entry.justification, 'pj-why');
+  if (entry.precedent) {
+    add('Précédent', `${entry.precedent.id} — « ${entry.precedent.question} »`, 'pj-precedent');
+  }
   const source = SOURCES[entry.source] || entry.source;
   add('Source', [source, CONFIDENCES[entry.confidence]].filter(Boolean).join(' · '), 'pj-source');
   li.append(head, rows);

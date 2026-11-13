@@ -38,6 +38,12 @@ lui-même (« reprendre ou abandonner ? ») portent une option recommandée : c'
 permission, n'annule jamais une tâche, et ne lit jamais la question sur parole : le titre de la tâche compte dans le
 classement tant que le kit n'a pas lui-même écrit la question. Toute autre valeur rend la politique invalide.
 
+**Jurisprudence** (``autopilot.precedents``, ``off`` par défaut ; :mod:`grimoire.missions.precedents`) — sous ``on``,
+la dernière réponse **humaine** à une question que le kit a écrite vaut pour les questions de la même classe : quand
+personne n'assume de décision, son option tranche, source ``precedent``, avec la référence de cette réponse. Les
+précédents se lisent au ledger (aucun fichier à part), expirent (``autopilot.precedent_days``), et passent par les
+mêmes refus que la décision par défaut. Toute autre valeur rend la politique invalide.
+
 **Traçabilité** — chaque décision du pilote est un événement du ledger (:data:`DECIDED_EVENT`) : question, option,
 justification, confiance, source de la recommandation, mandat.
 """
@@ -79,13 +85,16 @@ __all__ = [
     "CONFIDENCES",
     "DECIDED_EVENT",
     "DEFAULT_ACTIONS",
+    "DEFAULT_PRECEDENT_DAYS",
     "DEFAULT_SOURCE",
     "DEFERRED_EVENT",
+    "PRECEDENT_SOURCE",
     "RESERVED",
     "AutopilotPolicy",
     "AutopilotState",
     "AutopilotStore",
     "Decision",
+    "PrecedentRef",
     "assumes",
     "author_option",
     "decided_payload",
@@ -95,6 +104,7 @@ __all__ = [
     "last_deferral",
     "load_autopilot_policy",
     "reserved_reason",
+    "safe_option",
 ]
 
 AUTOPILOT_ENTRY = "autopilot"
@@ -109,6 +119,12 @@ APPLY_RECOMMENDED = "apply_recommended"
 DEFAULT_ACTIONS: tuple[str, ...] = (ASK, APPLY_RECOMMENDED)
 #: La source d'une décision que personne n'a assumée : l'option recommandée, appliquée par défaut.
 DEFAULT_SOURCE = "default"
+#: La source d'une décision prise d'après une réponse humaine antérieure de la même classe (jurisprudence).
+PRECEDENT_SOURCE = "precedent"
+#: Durée de vie d'un précédent, en jours, sans réglage : assez pour couvrir un chantier, assez court pour qu'une
+#: réponse oubliée ne gouverne pas le projet indéfiniment. Réglable (``autopilot.precedent_days``, 1 à 365).
+DEFAULT_PRECEDENT_DAYS = 30
+_MAX_PRECEDENT_DAYS = 365
 _DEFAULT_WHY = "option recommandée par la question, appliquée par défaut : personne n'a assumé de décision"
 #: Les niveaux de confiance qu'une réponse déclare ; ``low`` (et le silence) laisse la question à l'humain.
 CONFIDENCES: tuple[str, ...] = ("high", "medium", "low")
@@ -220,10 +236,14 @@ class AutopilotPolicy:
     extra: tuple[str, ...] = ()
     error: str = ""
     default_action: str = ASK
+    #: La jurisprudence : faux sans réglage (``autopilot.precedents: on``) ; *precedent_days* : sa durée de vie.
+    precedents: bool = False
+    precedent_days: int = DEFAULT_PRECEDENT_DAYS
 
 
 def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
-    """La section ``autopilot`` de ``orchestration-policy.yaml`` : ``reserved`` (liste de textes) et ``default_action``."""
+    """La section ``autopilot`` de ``orchestration-policy.yaml`` : ``reserved`` (liste de textes), ``default_action``,
+    ``precedents`` (``on`` ou ``off``) et ``precedent_days``."""
     path = project_root / ORCHESTRATION_FILE
     if not path.is_file():
         return AutopilotPolicy()
@@ -240,11 +260,11 @@ def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
         return AutopilotPolicy()
     if not isinstance(section, Mapping):
         return AutopilotPolicy(error="`autopilot` doit être une table")
-    unknown = sorted(str(k) for k in section if k not in ("reserved", "default_action"))
+    unknown = sorted(str(k) for k in section if k not in ("reserved", "default_action", "precedents", "precedent_days"))
     if unknown:
         return AutopilotPolicy(
             error=f"`autopilot` : clé inconnue {', '.join(unknown)} — seules `reserved` (elle ajoute des "
-            "réservations, jamais n'en retire) et `default_action` existent"
+            "réservations, jamais n'en retire), `default_action`, `precedents` et `precedent_days` existent"
         )
     raw = section.get("reserved", [])
     if not isinstance(raw, list) or not all(isinstance(r, str) and _fold(r) for r in raw):
@@ -254,7 +274,19 @@ def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
         return AutopilotPolicy(
             error=f"`autopilot.default_action` : valeur inconnue {action!r} — parmi {', '.join(DEFAULT_ACTIONS)}"
         )
-    return AutopilotPolicy(tuple(dict.fromkeys(_fold(r) for r in raw)), default_action=action)
+    # `on` / `off` (un chargeur YAML 1.1 les lit en booléens : même sens) ; rien d'autre, ni casse ni synonyme.
+    switch = section.get("precedents", "off")
+    if not (isinstance(switch, bool) or (isinstance(switch, str) and switch in ("on", "off"))):
+        return AutopilotPolicy(error=f"`autopilot.precedents` : valeur inconnue {switch!r} — `on` ou `off`")
+    days = section.get("precedent_days", DEFAULT_PRECEDENT_DAYS)
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= _MAX_PRECEDENT_DAYS:
+        return AutopilotPolicy(
+            error=f"`autopilot.precedent_days` : {days!r} — un nombre entier de jours, de 1 à {_MAX_PRECEDENT_DAYS}"
+        )
+    return AutopilotPolicy(
+        tuple(dict.fromkeys(_fold(r) for r in raw)), default_action=action,
+        precedents=switch is True or switch == "on", precedent_days=days,
+    )
 
 
 def reserved_reason(
@@ -319,18 +351,37 @@ def engaging_reason(question: Question, task: MissionTask) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class PrecedentRef:
+    """La réponse humaine qu'une décision de source ``precedent`` applique : ce que :data:`DECIDED_EVENT` en garde."""
+
+    id: str
+    question_class: str
+    question: str
+    answered_at: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "id": self.id, "class": self.question_class, "question": self.question[:_TEXT_SIZE],
+            "answered_at": self.answered_at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class Decision:
     """Ce que le pilote a décidé : l'option, d'où elle vient, avec quelle confiance et pourquoi."""
 
     answer: str
-    source: str  # ``recommended`` | ``judgment`` | ``default``
+    source: str  # ``recommended`` | ``judgment`` | ``default`` | ``precedent``
     confidence: str
     justification: str
+    #: La réponse humaine dont cette décision est l'application (source ``precedent``), sinon ``None``.
+    precedent: PrecedentRef | None = None
 
     @property
-    def by_default(self) -> bool:
-        """Personne n'a assumé cette décision : c'est l'option recommandée, appliquée à la place de la réponse soumise."""
-        return self.source == DEFAULT_SOURCE
+    def substituted(self) -> bool:
+        """Personne n'a assumé cette décision : une option (par défaut, ou d'un précédent) est appliquée à la place de
+        la réponse soumise."""
+        return self.source in (DEFAULT_SOURCE, PRECEDENT_SOURCE)
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -341,14 +392,15 @@ class Decision:
         }
 
 
-def _safe_option(question: Question, *, free_text: bool) -> tuple[str, str]:
-    """L'option recommandée de *question* si elle peut être prise sans jugement : ``(option, "")`` ou ``("", pourquoi)``.
+def safe_option(question: Question, wanted: str, *, free_text: bool = False) -> tuple[str, str]:
+    """L'option *wanted* si elle peut être appliquée à *question* sans jugement : ``(option, "")`` ou ``("", pourquoi)``.
 
-    Jamais pour une fusion ni une permission, pour « abandonner » ni un choix ``danger``. L'option est rendue telle
-    que la question l'écrit parmi ses options ; *free_text* admet en plus la réponse libre d'une question qui n'en
-    propose aucune (jamais une recommandation étrangère aux options proposées).
+    *wanted* : l'option recommandée de la question, ou celle d'un précédent. Jamais pour une fusion ni une permission,
+    pour « abandonner » ni un choix ``danger``. L'option est rendue telle que la question l'écrit parmi ses options ;
+    *free_text* admet en plus la réponse libre d'une question qui n'en propose aucune (jamais un texte étranger aux
+    options proposées).
     """
-    pick = " ".join(question.recommended.split())
+    pick = " ".join(wanted.split())
     if not pick:
         return "", "la question ne recommande aucune option"
     if question.kind not in _DEFAULT_KINDS:
@@ -356,12 +408,12 @@ def _safe_option(question: Question, *, free_text: bool) -> tuple[str, str]:
     option = next((o for o in question.options if " ".join(o.split()).lower() == pick.lower()), "")
     if not option:
         if question.options or not free_text:
-            return "", "l'option recommandée n'est pas l'une des options de la question"
+            return "", "l'option n'est pas l'une des options de la question"
         option = pick
     if pick.lower() == ABANDON or any(
         c.danger and " ".join(c.value.split()).lower() == pick.lower() for c in question.choices
     ):
-        return "", "l'option recommandée annule la tâche ou est marquée dangereuse : jamais sans jugement"
+        return "", "l'option annule la tâche ou est marquée dangereuse : jamais sans jugement"
     return option, ""
 
 
@@ -373,7 +425,7 @@ def default_option(question: Question) -> tuple[str, str]:
     annule la tâche (« abandonner ») ou que son choix porte le drapeau ``danger``. Ne juge ni la liste fermée ni le
     réglage du projet : l'appelant le fait (:func:`reserved_reason`, ``autopilot.default_action``).
     """
-    return _safe_option(question, free_text=False)
+    return safe_option(question, question.recommended)
 
 
 def author_option(question: Question) -> tuple[str, str]:
@@ -384,7 +436,7 @@ def author_option(question: Question) -> tuple[str, str]:
     « abandonner » ni un choix ``danger``, ni une option absente de celles qu'il propose. Un choix ordinaire, ou la
     réponse libre d'une question sans options, reste pris. Ne juge pas la liste fermée : l'appelant le fait.
     """
-    return _safe_option(question, free_text=True)
+    return safe_option(question, question.recommended, free_text=True)
 
 
 def assumes(confidence: str) -> bool:
@@ -394,7 +446,7 @@ def assumes(confidence: str) -> bool:
 
 def judge(
     question: Question, answer: str, *, justification: str = "", confidence: str = "", recommendation_decides: bool = True,
-    default: str = "",
+    default: str = "", precedent: PrecedentRef | None = None,
 ) -> Decision:
     """La décision du pilote sur *question* ; lève :class:`GrimoireMissionError` si elle reste à l'humain.
 
@@ -407,6 +459,8 @@ def judge(
     par l'appelant (``""`` : aucune — réglage ``ask``, liste fermée, borne atteinte). Quand personne n'assume de
     décision (confiance basse ou non déclarée), c'est elle qui tranche, à la place de la réponse soumise, avec la
     source :data:`DEFAULT_SOURCE` ; sa justification est celle de la question, jamais celle de la réponse écartée.
+    *precedent* : *default* est l'option d'une réponse humaine antérieure de la même classe ; la décision porte alors
+    la source :data:`PRECEDENT_SOURCE` et la référence de cette réponse.
     """
     text = " ".join(answer.split())
     recommended = " ".join(question.recommended.split())
@@ -415,6 +469,14 @@ def judge(
     level = confidence.strip().lower()
     why = " ".join(justification.split())
     if not assumes(confidence):
+        if default and precedent is not None:
+            said = " ".join(precedent.question.split())[:160]
+            return Decision(
+                default, PRECEDENT_SOURCE, level or "low",
+                f"réponse humaine du {precedent.answered_at[:10]} à une question de la même classe "
+                f"({precedent.question_class}) : « {said} »",
+                precedent=precedent,
+            )
         if default:
             reason = question.why or (question.recommendation.reason if question.recommendation is not None else "")
             return Decision(default, DEFAULT_SOURCE, level or "low", " ".join(reason.split()) or _DEFAULT_WHY)
@@ -633,6 +695,7 @@ def decided_payload(
         "gesture": gesture,
         "mandate_id": mandate_id,
         "reversible": True,  # « abandonner » range la tâche en failed : `task move --to ready` la rouvre
+        **({"precedent": decision.precedent.to_dict()} if decision.precedent is not None else {}),
     }
 
 
