@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,19 +39,19 @@ from grimoire.missions.admission import (
     read_host,
     ready_since,
     release_capacity,
-    wip_claim_guard,
 )
 from grimoire.missions.board import PRIORITIES, board_status_of, build_board, priority_of, write_board
 from grimoire.missions.gates import GateRefusal, GateVerdict, check_transition
 from grimoire.missions.intake import IntakeRequest, MissionIntakeService
 from grimoire.missions.ledger import MissionLedger, ReapReport
 from grimoire.missions.mandate import ANSWER_CHANNEL, require_authority
-from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, pause_claim_guard, read_pause
+from grimoire.missions.pause import PAUSE_LIFTED_CAUSE, PauseState, read_pause
+from grimoire.missions.precedents import Precedent, note_human_answer
 from grimoire.missions.question_gestures import BatchOutcome
 from grimoire.missions.question_rounds import compose_question
 from grimoire.missions.questions import OPEN, QuestionSpec, group_settled, open_in_group, records_of
 from grimoire.missions.recall import DEFAULT_TOKEN_BUDGET, TaskRecall, build_task_recall, consolidate_task_memory
-from grimoire.missions.reservation import find_conflict, reservation_refusal
+from grimoire.missions.reservation import claim_guards, find_conflict
 from grimoire.missions.schemas import (
     DIRECTIVE_KINDS,
     ORIGIN_AGENT,
@@ -251,16 +251,6 @@ class WakeDecision:
         }
 
 
-def _claim_guards(root: Path, ledger_root: Path | None = None) -> Callable[..., str]:
-    """Les gardes que le ledger appelle sous son verrou : la pause (K11), le WIP (K10) des claims vivants, puis les fichiers exclusifs (W1-07)."""
-    pause, wip = pause_claim_guard(root), wip_claim_guard(root, ledger_root=ledger_root)
-
-    def guard(tasks: Mapping[str, MissionTask], task: MissionTask, claim: TaskClaim | None = None) -> str:
-        return pause(tasks, task) or wip(tasks, task) or reservation_refusal(tasks, task, claim)
-
-    return guard
-
-
 class TaskService:
     """Lire, réclamer et déplacer les tâches d'un projet, gates compris."""
 
@@ -296,7 +286,7 @@ class TaskService:
         if self._ledger is None:
             self._ledger = MissionLedger(self.ledger_root)
             self._ledger.project_root = self.project_root  # le frein d'hôte se juge sur les réglages de CE projet (#886)
-            self._ledger.claim_guard = _claim_guards(self.home_root, self.ledger_root)  # K10 WIP + K11 pause, sous le verrou
+            self._ledger.claim_guard = claim_guards(self.home_root, self.ledger_root)  # K10 WIP + K11 pause, sous le verrou
         return self._ledger
 
     def refresh(self) -> None:
@@ -937,6 +927,7 @@ class TaskService:
         self, task_id: str, text: str, actor: str, *, origin: str, question_id: str = "",
         attested_by_flow: bool = False, provenance: Mapping[str, Any] | None = None,
         justification: str = "", confidence: str = "", answer_data: Mapping[str, Any] | None = None,
+        precedent: Precedent | None = None,
     ) -> TaskMove:
         """Répond à la question en attente — **canal humain seulement** — puis réveille la tâche.
 
@@ -946,7 +937,8 @@ class TaskService:
         (``task.human_answered``, qui remet le compteur de tentatives à zéro) ; le réveil
         suit, et le tick le rejoue si le processus s'interrompt entre les deux. La réponse
         est aussi remise à la prochaine session de la tâche comme consigne humaine.
-        ``abandonner`` (quand c'est une option) annule la tâche au lieu de la rendre.
+        ``abandonner`` (quand c'est une option) annule la tâche au lieu de la rendre. Une réponse humaine
+        devient un précédent du projet ; *precedent* : celui que le pilote applique à la place d'une hésitation.
 
         Une question posée par un checkpoint de flow (``origin == "flow"``) ne se tranche pas ici : la
         décision doit être attestée dans le flux (W2-01), et c'est le flux qui répond, avec
@@ -960,7 +952,8 @@ class TaskService:
 
                 asked = self._question_to_answer(task, question_id)
                 gesture, decision = answer_plan(
-                    self, task, asked, text, justification=justification, confidence=confidence
+                    self, task, asked, text, justification=justification, confidence=confidence,
+                    precedent=precedent,
                 )
             # Sous mandat (#876, verrou 6) : l'origine `orchestrator` répond si un mandat valide couvre ce geste
             # et ce type de tâche ; sans mandat, elle est refusée comme toute origine non humaine.
@@ -981,7 +974,7 @@ class TaskService:
 
                 record_answer_refused(self, task_id, asked.id if asked is not None else question_id, exc)
             raise
-        answer = text.strip()
+        answer = decision.answer if decision is not None else text.strip()
         if not answer:
             raise ValueError("`text` requis : une réponse vide ne tranche rien")
         self.ledger.append_event(
@@ -993,6 +986,8 @@ class TaskService:
                     "gesture": authority.gesture} if authority else {}),
             },
         )
+        if origin == ORIGIN_HUMAN:  # jurisprudence : la réponse humaine vaut pour la classe de la question
+            note_human_answer(self, task_id, question, answer)
         self.ledger.add_directive(
             task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor,
             kind="comment" if authority else "directive", origin=origin,

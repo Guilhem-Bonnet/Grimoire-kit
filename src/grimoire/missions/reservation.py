@@ -10,15 +10,29 @@ Fonctions sans état ni écriture.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from grimoire.missions.schemas import MissionTask, TaskClaim, TaskState
 from grimoire.missions.waiting import answer_hint
 
-__all__ = ["ReservationConflict", "find_conflict", "reservation_refusal"]
+__all__ = ["ReservationConflict", "claim_guards", "find_conflict", "reservation_refusal"]
 
 _HOLDING = (TaskState.CLAIMED, TaskState.RUNNING, TaskState.WAITING)
+
+
+def claim_guards(root: Path, ledger_root: Path | None = None) -> Callable[..., str]:
+    """Les gardes que le ledger appelle sous son verrou : la pause (K11), le WIP (K10) des claims vivants, puis les fichiers exclusifs (W1-07)."""
+    from grimoire.missions.admission import wip_claim_guard
+    from grimoire.missions.pause import pause_claim_guard
+
+    pause, wip = pause_claim_guard(root), wip_claim_guard(root, ledger_root=ledger_root)
+
+    def guard(tasks: Mapping[str, MissionTask], task: MissionTask, claim: TaskClaim | None = None) -> str:
+        return pause(tasks, task) or wip(tasks, task) or reservation_refusal(tasks, task, claim)
+
+    return guard
 
 
 @dataclass(frozen=True, slots=True)

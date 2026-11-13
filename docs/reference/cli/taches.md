@@ -535,7 +535,7 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
   relecteur figure au journal d'autorité ; les `--check` doivent être ceux scellés à la création de la
   tâche, un check modifié depuis ouvre un événement « disjoncteur ».
 - **Principal** : en CLI, `GRIMOIRE_PRINCIPAL=orchestrator` *revendique* le principal et
-  `GRIMOIRE_PROVENANCE=<rule|verdict|receipt>:<réf>` cite la provenance ; la revendication ne vaut que si la
+  `GRIMOIRE_PROVENANCE=<rule|verdict|receipt|precedent>:<réf>` cite la provenance ; la revendication ne vaut que si la
   session appelante est inscrite au journal d'autorité en rôle `orchestrator`
   (`register_orchestrator_session(projet, session_id)`, appelée par l'étape orchestrateur du tick, voir
   « Session orchestrateur » plus bas) et n'est celle d'aucun worker ni relecteur de la tâche. Sans session

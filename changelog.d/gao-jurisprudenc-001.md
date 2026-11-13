@@ -1,0 +1,1 @@
+- feat(missions): une réponse humaine vaut pour toutes les questions de la même classe — le pilote applique un précédent (`autopilot.precedents`), et `task questions --precedents|--forget` les liste et les retire

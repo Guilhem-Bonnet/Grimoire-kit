@@ -80,6 +80,50 @@ def emit_batch(ctx: typer.Context, outcome: Any) -> None:
         console.print(f"  - {r['question']['id']} déjà au registre, non reposée : {r['question']['text']}")
 
 
+def list_precedents(ctx: typer.Context, project_root: Path) -> None:
+    """``task questions --precedents`` : les réponses humaines retenues par classe, la plus récente d'abord."""
+    from grimoire.missions.precedents import PrecedentError, load
+
+    try:
+        entries = load(project_root)
+    except PrecedentError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps([entry.to_dict() for entry in entries], indent=2, ensure_ascii=False))
+        return
+    if not entries:
+        console.print("[green]OK[/green] Aucun précédent enregistré.")
+        return
+    for entry in reversed(entries):
+        console.print(
+            f"  - {entry.id} — classe {entry.question_class} — « {entry.option} » — "
+            f"{entry.answered_at or 'date inconnue'} [dim](question : {entry.question})[/dim]"
+        )
+
+
+def forget_precedent(ctx: typer.Context, project_root: Path, precedent_id: str) -> None:
+    """``task questions --forget <p-…>`` : retire un précédent — le canal humain seul le peut."""
+    from grimoire.cli import cmd_task as ct
+    from grimoire.core.exceptions import GrimoireMissionError
+    from grimoire.missions.precedents import PrecedentError, forget
+    from grimoire.missions.schemas import ORIGIN_HUMAN
+
+    origin = ct._comment_origin()
+    if origin != ORIGIN_HUMAN:
+        console.print("[red]✗[/red] retirer un précédent est un geste d'humain (canal interactif attesté).")
+        raise typer.Exit(1)
+    try:
+        removed = forget(project_root, precedent_id)
+    except (GrimoireMissionError, PrecedentError) as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(removed.to_dict(), indent=2, ensure_ascii=False))
+        return
+    console.print(f"[green]OK[/green] précédent {removed.id} retiré ({removed.question_class}).")
+
+
 def register(task_app: typer.Typer) -> None:
     """Pose ``task questions`` et ``task resolve`` sur ``grimoire task``."""
     from grimoire.cli import cmd_task as ct
@@ -89,12 +133,31 @@ def register(task_app: typer.Typer) -> None:
         ctx: typer.Context,
         task_id: Annotated[str, typer.Argument(help="Une tâche (défaut : toutes celles qui ont des questions).")] = "",
         open_only: Annotated[bool, typer.Option("--open", help="Seulement les questions encore sans réponse.")] = False,
+        precedents: Annotated[
+            bool, typer.Option("--precedents", help="Lister les précédents du projet (réponses humaines par classe).")
+        ] = False,
+        forget: Annotated[
+            str, typer.Option("--forget", help="Retirer un précédent (p-…) — canal humain seulement.")
+        ] = "",
         project_root: _PROJECT_ROOT = Path(),
         ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     ) -> None:
-        """Le registre des questions : statut, bloquante ou non, pourquoi, qui a répondu et sur quelle source."""
+        """Le registre des questions : statut, bloquante ou non, pourquoi, qui a répondu et sur quelle source.
+
+        ``--precedents`` liste les réponses humaines retenues pour le projet, par classe de question ;
+        ``--forget <id>`` en retire une (canal humain).
+        """
         from grimoire.missions.questions import OPEN, questions_summary
 
+        if precedents and forget:
+            console.print("[red]✗[/red] `--precedents` et `--forget` ne vont pas ensemble.")
+            raise typer.Exit(1)
+        if forget:
+            forget_precedent(ctx, project_root, forget)
+            return
+        if precedents:
+            list_precedents(ctx, project_root)
+            return
         service = ct._service(project_root, ledger_root)
         tasks = [ct._require_task(service, task_id)] if task_id else service.ledger.list_tasks()
         summaries = []

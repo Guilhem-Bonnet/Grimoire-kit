@@ -122,6 +122,7 @@ if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
     from grimoire.missions.mandate import MandateStore
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
+    from grimoire.missions.precedents import Precedent
     from grimoire.missions.schemas import LedgerEvent, MissionTask
     from grimoire.missions.service import TaskService
     from grimoire.missions.waiting import Question
@@ -282,7 +283,7 @@ def answer_gesture(service: TaskService, task: MissionTask, question: Question, 
 
 def answer_plan(
     service: TaskService, task: MissionTask, question: Question, answer: str, *, justification: str = "",
-    confidence: str = "",
+    confidence: str = "", precedent: Precedent | None = None,
 ) -> tuple[str, Decision | None]:
     """Le geste qu'une réponse d'origine ``orchestrator`` prend sur *question*, et la décision du pilote le cas échéant.
 
@@ -294,8 +295,13 @@ def answer_plan(
     source ou sa justification et sa confiance (:func:`~.autopilot.judge`) ; « abandonner » est permis avec sa raison
     (la tâche est annulée, la raison au ledger). Une question laissée à l'humain faute de confiance est inscrite
     (:data:`~.autopilot.DEFERRED_EVENT`).
+
+    **Précédents** (politique ``autopilot.precedents``, désactivée par défaut) : avant de laisser la question à
+    l'humain, un précédent de la même classe s'applique s'il en existe un (:func:`~.precedents.find`) — source
+    ``precedent``, référence au ledger. *precedent* est celui que l'appelant a déjà résolu (le tick) ; sinon la
+    recherche a lieu ici. Un fichier illisible ne fait rien appliquer et sa raison accompagne le report.
     """
-    from grimoire.missions.autopilot import AutopilotStore, judge, reserved_reason
+    from grimoire.missions.autopilot import AutopilotStore, judge, load_autopilot_policy, reserved_reason
     from grimoire.missions.mandate import acting_in_process
 
     events = service.ledger.events_for(task.id)
@@ -303,7 +309,8 @@ def answer_plan(
     gesture, why = _classify(events, question, pilot=pilot)
     if not gesture:
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {why}")
-    if pilot and (kept := reserved_reason(question, task, service.project_root)):
+    policy = load_autopilot_policy(service.project_root) if pilot else None
+    if pilot and (kept := reserved_reason(question, task, service.project_root, policy)):
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {kept}")
     abandoning = answer.strip().lower() == ABANDON
     if abandoning and not pilot:
@@ -314,12 +321,35 @@ def answer_plan(
         _check_caller(service, task, question, events, pilot=pilot)
     if not pilot:
         return gesture, None
+    lookup = None
+    decision: Decision | None = None
     try:
-        decision = judge(question, answer, justification=justification, confidence=confidence)
+        decision = judge(
+            question, answer, justification=justification, confidence=confidence,
+            precedent_id=precedent.id if precedent is not None else "",
+            precedent_option=precedent.option if precedent is not None else "",
+        )
     except GrimoireMissionError as exc:
-        _defer(service, task.id, question.id, str(exc))
-        raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {exc}") from exc
-    if abandoning and len(decision.justification) < _MIN_ABANDON_REASON:
+        if precedent is None and policy is not None and policy.precedents:
+            from grimoire.missions.precedents import find
+
+            lookup = find(
+                service.project_root, question, question_source(events, question), task=task, policy=policy
+            )
+            if lookup.precedent is not None:
+                found = lookup.precedent
+                decision = judge(
+                    question, found.option, precedent_id=found.id, precedent_option=found.option,
+                )
+            else:
+                decision = None
+        else:
+            decision = None
+        if decision is None:
+            reason = str(exc) + (f" ; {lookup.error}" if lookup is not None and lookup.error else "")
+            _defer(service, task.id, question.id, reason)
+            raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {reason}") from exc
+    if decision.answer.casefold() == ABANDON and len(decision.justification) < _MIN_ABANDON_REASON:
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : annuler cite sa raison (--why, une phrase)")
     return gesture, decision
 
@@ -681,13 +711,17 @@ class OrchestratorStage:
         return (*outcomes, *((launched,) if launched is not None else ()))
 
     def _apply_recommendations(self) -> list[OrchestratorOutcome]:
-        """Pilote activé : une question qui porte sa recommandation reçoit cette option, sans session (le tick l'applique).
+        """Pilote activé : la recommandation de la question, sinon un précédent de sa classe, sans session (le tick).
 
-        La recommandation est une donnée de l'auteur de la question : elle passe par les mêmes gardes que toute réponse
-        d'origine ``orchestrator`` (:func:`answer_plan` : mandat, liste fermée, geste). Un refus laisse la question à
-        l'humain ou à la session qui suit.
+        La recommandation est une donnée de l'auteur de la question ; un précédent est une réponse humaine antérieure
+        de la même classe (:func:`~.precedents.find`, politique ``autopilot.precedents`` désactivée par défaut). Les
+        deux passent par les mêmes gardes que toute réponse d'origine ``orchestrator`` (:func:`answer_plan` : mandat,
+        liste fermée, geste). Un refus laisse la question à l'humain ou à la session qui suit ; un fichier de
+        précédents illisible ne fait rien appliquer et le tick le dit.
         """
+        from grimoire.missions.autopilot import load_autopilot_policy
         from grimoire.missions.mandate import MandateStore, acting_as_orchestrator
+        from grimoire.missions.precedents import find
         from grimoire.missions.schemas import ORIGIN_ORCHESTRATOR
 
         if not self._pilot():
@@ -698,24 +732,56 @@ class OrchestratorStage:
             candidates = eligible_questions(self._service, store)
         except Exception as exc:  # une lecture qui échoue ne tranche rien
             return [OrchestratorOutcome("pilot", "skipped", f"questions illisibles ({type(exc).__name__})")]
+        policy = load_autopilot_policy(self._root)
         for q in candidates:
             task = self._service.ledger.get_task(q.task_id)
-            record = next((r for r in open_in_group(task) if r.question.id == q.question_id), None) if task else None
-            if record is None or not record.question.recommended:
+            if task is None:
                 continue
-            try:
-                with acting_as_orchestrator():
-                    self._service.answer(
-                        q.task_id, record.question.recommended, ORCHESTRATOR_ACTOR, origin=ORIGIN_ORCHESTRATOR,
-                        question_id=q.question_id, provenance={"kind": "rule", "ref": "autopilot-recommended"},
+            record = next((r for r in open_in_group(task) if r.question.id == q.question_id), None)
+            if record is None:
+                continue
+            question = record.question
+            source = question_source(self._service.ledger.events_for(q.task_id), question)
+            candidates_answers: list[tuple[str, dict[str, str], Any]] = []
+            if question.recommended:
+                candidates_answers.append(
+                    (question.recommended, {"kind": "rule", "ref": "autopilot-recommended"}, None)
+                )
+            error = ""
+            if policy.precedents:
+                lookup = find(self._root, question, source, task=task, policy=policy)
+                error = lookup.error
+                if lookup.precedent is not None:
+                    found = lookup.precedent
+                    candidates_answers.append(
+                        (found.option, {"kind": "precedent", "ref": found.id}, found)
                     )
-            except Exception as exc:  # refusée par le kit : le ledger l'a noté, la question reste ouverte
-                outcomes.append(OrchestratorOutcome("pilot", "failed", f"{q.task_id}/{q.question_id} : {exc}"[:300]))
+            if not candidates_answers:
+                if error:
+                    outcomes.append(OrchestratorOutcome(
+                        "pilot", "failed", f"{q.task_id}/{q.question_id} : précédents illisibles — {error}"[:300]
+                    ))
                 continue
-            outcomes.append(OrchestratorOutcome(
-                "pilot", "done", f"{q.task_id}/{q.question_id} : option recommandée appliquée", "", "",
-                (f"{q.task_id}/{q.question_id}",),
-            ))
+            detail = ""
+            for text, provenance, precedent in candidates_answers:
+                try:
+                    with acting_as_orchestrator():
+                        self._service.answer(
+                            q.task_id, text, ORCHESTRATOR_ACTOR, origin=ORIGIN_ORCHESTRATOR,
+                            question_id=q.question_id, provenance=provenance, precedent=precedent,
+                        )
+                except Exception as exc:  # refusée par le kit : le ledger l'a noté, la question reste ouverte
+                    detail = f"{q.task_id}/{q.question_id} : {exc}"[:300]
+                    continue
+                label = "précédent appliqué" if precedent is not None else "option recommandée appliquée"
+                outcomes.append(OrchestratorOutcome(
+                    "pilot", "done", f"{q.task_id}/{q.question_id} : {label}", "", "",
+                    (f"{q.task_id}/{q.question_id}",),
+                ))
+                detail = ""
+                break
+            if detail:
+                outcomes.append(OrchestratorOutcome("pilot", "failed", detail))
         return outcomes
 
     def _sweep(self, status: dict[str, str] | None) -> list[OrchestratorOutcome]:

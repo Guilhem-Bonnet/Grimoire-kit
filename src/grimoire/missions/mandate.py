@@ -113,7 +113,7 @@ ESCALATION_CATEGORIES: tuple[str, ...] = ("release", "secrets", "paid", "securit
 #: Catégorie propre à un geste (les autres gestes n'en ont pas : seule la tâche en porte).
 _GESTURE_CATEGORY = {"accept": "accept", "merge": "merge"}
 #: D'où vient la décision prise sous mandat.
-PROVENANCE_KINDS: tuple[str, ...] = ("rule", "verdict", "receipt")
+PROVENANCE_KINDS: tuple[str, ...] = ("rule", "verdict", "receipt", "precedent")
 
 JOURNAL_NAME = "mandates.authority.jsonl"
 KEY_NAME = "cockpit-key"

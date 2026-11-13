@@ -29,6 +29,12 @@ divergeant, la réponse cite sa justification et déclare sa confiance (``high``
 déclarée laisse la question à l'humain, avec la raison, et le pilote l'inscrit (:data:`DEFERRED_EVENT`) pour que le
 cockpit la signale.
 
+**Précédents** (:mod:`grimoire.missions.precedents`, désactivés par défaut) — avant de laisser une question à
+l'humain, le pilote cherche une réponse humaine de la même classe (``merge:protected_paths``,
+``review:not_ready_cycles``…) et l'applique, source ``precedent``, référence du précédent dans
+:data:`DECIDED_EVENT`. Jamais pour une catégorie réservée ; fichier illisible : aucun précédent, échec fermé. Le
+projet l'active par ``autopilot.precedents: true``.
+
 **Traçabilité** — chaque décision du pilote est un événement du ledger (:data:`DECIDED_EVENT`) : question, option,
 justification, confiance, source de la recommandation, mandat.
 """
@@ -179,14 +185,18 @@ def _outside_repo(texts: list[str], project_root: Path) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class AutopilotPolicy:
-    """Ce que le projet ajoute à la liste fermée ; il ne peut rien en retirer. *error* : invalide, le pilote ne décide rien."""
+    """Ce que le projet ajoute à la liste fermée ; il ne peut rien en retirer. *error* : invalide, le pilote ne décide rien.
+
+    *precedents* : le pilote applique les réponses humaines de la même classe — **désactivé par défaut**.
+    """
 
     extra: tuple[str, ...] = ()
+    precedents: bool = False
     error: str = ""
 
 
 def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
-    """La section ``autopilot`` de ``orchestration-policy.yaml`` : seule la clé ``reserved`` (liste de textes) existe."""
+    """La section ``autopilot`` de ``orchestration-policy.yaml`` : ``reserved`` (textes) et ``precedents`` (booléen)."""
     path = project_root / ORCHESTRATION_FILE
     if not path.is_file():
         return AutopilotPolicy()
@@ -203,16 +213,19 @@ def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
         return AutopilotPolicy()
     if not isinstance(section, Mapping):
         return AutopilotPolicy(error="`autopilot` doit être une table")
-    unknown = sorted(str(k) for k in section if k != "reserved")
+    unknown = sorted(str(k) for k in section if k not in ("reserved", "precedents"))
     if unknown:
         return AutopilotPolicy(
-            error=f"`autopilot` : clé inconnue {', '.join(unknown)} — seule `reserved` existe (elle ajoute des "
-            "réservations, jamais n'en retire)"
+            error=f"`autopilot` : clé inconnue {', '.join(unknown)} — `reserved` (elle ajoute des réservations, "
+            "jamais n'en retire) et `precedents` existent"
         )
     raw = section.get("reserved", [])
     if not isinstance(raw, list) or not all(isinstance(r, str) and _fold(r) for r in raw):
         return AutopilotPolicy(error="`autopilot.reserved` doit être une liste de textes non vides")
-    return AutopilotPolicy(tuple(dict.fromkeys(_fold(r) for r in raw)))
+    precedents = section.get("precedents", False)
+    if not isinstance(precedents, bool):
+        return AutopilotPolicy(error="`autopilot.precedents` doit être `true` ou `false`")
+    return AutopilotPolicy(tuple(dict.fromkeys(_fold(r) for r in raw)), precedents=precedents)
 
 
 def reserved_reason(
@@ -251,26 +264,47 @@ class Decision:
     """Ce que le pilote a décidé : l'option, d'où elle vient, avec quelle confiance et pourquoi."""
 
     answer: str
-    source: str  # ``recommended`` | ``judgment``
+    source: str  # ``recommended`` | ``judgment`` | ``precedent``
     confidence: str
     justification: str
+    #: L'identifiant du précédent appliqué (source ``precedent``), sinon ``""``.
+    precedent: str = ""
 
     def to_dict(self) -> dict[str, str]:
-        return {
+        data = {
             "answer": self.answer[:_TEXT_SIZE],
             "source": self.source,
             "confidence": self.confidence,
             "justification": self.justification[:_TEXT_SIZE],
         }
+        if self.precedent:
+            data["precedent"] = self.precedent
+        return data
 
 
-def judge(question: Question, answer: str, *, justification: str = "", confidence: str = "") -> Decision:
+def judge(
+    question: Question,
+    answer: str,
+    *,
+    justification: str = "",
+    confidence: str = "",
+    precedent_id: str = "",
+    precedent_option: str = "",
+) -> Decision:
     """La décision du pilote sur *question* ; lève :class:`GrimoireMissionError` si elle reste à l'humain.
 
-    Une réponse égale à l'option recommandée (casse et espaces mis à part) est la recommandation appliquée. Toute autre
-    réponse est un jugement : elle cite sa justification et déclare une confiance ``high`` ou ``medium``.
+    Une réponse égale à l'option recommandée (casse et espaces mis à part) est la recommandation appliquée. Une
+    réponse égale à l'option d'un précédent (``precedent_id``) est ce précédent appliqué. Toute autre réponse est un
+    jugement : elle cite sa justification et déclare une confiance ``high`` ou ``medium``.
     """
     text = " ".join(answer.split())
+    if precedent_id and precedent_option and _fold(text) == _fold(precedent_option):
+        why = " ".join(justification.split())
+        return Decision(
+            text, "precedent", "high",
+            why or f"précédent {precedent_id} : une réponse humaine vaut pour cette classe",
+            precedent=precedent_id,
+        )
     recommended = " ".join(question.recommended.split())
     if recommended and text.lower() == recommended.lower():
         return Decision(text, "recommended", "high", " ".join((justification or question.why).split()))
@@ -492,6 +526,7 @@ def decided_payload(
         "gesture": gesture,
         "mandate_id": mandate_id,
         "reversible": True,  # « abandonner » range la tâche en failed : `task move --to ready` la rouvre
+        **({"precedent": decision.precedent} if decision.precedent else {}),
     }
 
 
