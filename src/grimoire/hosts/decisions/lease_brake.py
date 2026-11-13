@@ -17,7 +17,9 @@ sien. Les refus, dans l'ordre où on les lit :
 
 Le contrôle d'epoch lit le fichier de bail, jamais le journal : un ``stat`` et
 une lecture, et aucune dépendance à l'horloge. Le fichier absent renvoie au
-ledger, relu une fois. Le journal de la session (``session-<id>.json``) dit
+ledger, relu une fois. Fichier et ledger sont ceux que ``TaskService`` écrit
+(:func:`ledger_root_of`) : dans un worktree de tâche, ceux du projet d'origine
+(#1235), jamais une copie restée dans le worktree. Le journal de la session (``session-<id>.json``) dit
 quelle tâche et quel epoch la session tient : sans lui, la session ne tient
 aucun bail et le frein se tait.
 
@@ -82,6 +84,27 @@ def _simple_grimoire_task(command: str) -> bool:
     return bool(_GRIMOIRE_TASK.match(surface)) and not _SHELL_COMPOSITION.search(surface)
 
 
+def ledger_root_of(project_root: Path) -> Path:
+    """Le ledger que :class:`~grimoire.missions.service.TaskService` ouvre pour *project_root* (W5-02, #1235).
+
+    Dans un worktree de tâche, le marqueur de son dossier git désigne le ledger du projet
+    d'origine : c'est là que claim, renouvellement et rattachement écrivent l'epoch, et que
+    la session l'apprend. Lire ``<worktree>/_grimoire-runtime-output/ledger`` comparait le
+    journal de la session à une copie restée dans le worktree (suivie par git, ou copiée) :
+    figée à un epoch passé, elle refusait le titulaire courant (« epoch 3 périmé, bail à 2 ») ;
+    absente, elle taisait le frein devant un titulaire périmé. Un marqueur illisible lève
+    (:class:`~grimoire.core.exceptions.GrimoireMissionError`) : jamais de repli sur la copie locale.
+    """
+    root = project_root.resolve()
+    if (root / ".git").is_file():
+        from grimoire.missions.task_worktree import home_of_worktree
+
+        home = home_of_worktree(root)
+        if home is not None:
+            return home[1]
+    return root / LEDGER_RELPATH
+
+
 def _lease_holder(hook: HookInput) -> tuple[str, int]:
     """``(tâche, epoch)`` que le journal de la session dit tenir ; ``("", 0)`` sinon."""
     if not hook.session_id:
@@ -110,7 +133,7 @@ def held_task_id(hook: HookInput) -> str:
         task_id, epoch = _lease_holder(hook)
         if not task_id:
             return ""
-        cached = read_lease(lease_path(hook.project_root.resolve() / LEDGER_RELPATH, task_id))
+        cached = read_lease(lease_path(ledger_root_of(hook.project_root), task_id))
         if cached is None or not cached.holder or cached.epoch != epoch or cached.waiting:
             return ""
         if cached.is_lost(datetime.now(UTC)):
@@ -126,7 +149,7 @@ _STALE = "stale_epoch"
 _CANCELLED = "cancelled"
 
 
-def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
+def _lease_state(root: Path, task_id: str, epoch: int, journal: Path | None = None) -> tuple[str, str]:
     """``(état, motif)`` du bail que la session croit tenir : ``held``, ``released``, ``stale_epoch`` ou ``cancelled``.
 
     ``released`` : la session a quitté son bail par la porte — release, blocage, échec,
@@ -135,9 +158,12 @@ def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
     (K3-S1-01). Une barrière posée par la récolte, un autre titulaire, un autre epoch ou
     une annulation restent des refus.
 
-    Fichier d'abord ; absent ou illisible, le ledger relu une fois (``check_holder``).
+    Fichier d'abord ; absent ou illisible, le ledger relu une fois (``check_holder``). Le motif d'un
+    epoch périmé nomme l'epoch de la session puis celui du bail, chacun avec le fichier d'où il vient
+    (*journal* : le journal de la session, ``None`` s'il n'est pas connu de l'appelant) — #1235.
     """
-    cached = read_lease(lease_path(root, task_id))
+    path = lease_path(root, task_id)
+    cached = read_lease(path)
     if cached is not None:
         if cached.holder and cached.epoch == epoch:
             return _HELD, ""
@@ -145,7 +171,10 @@ def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
             return _CANCELLED, f"la tâche {task_id} a été annulée (bail rendu, epoch {cached.epoch})"
         if not cached.holder and cached.origin == ORIGIN_HAND_BACK and cached.epoch == epoch + 1:
             return _RELEASED, ""
-        return _STALE, f"epoch {epoch} périmé : le bail de {task_id} est à l'epoch {cached.epoch}"
+        return _STALE, (
+            f"epoch {epoch} périmé : la session tient l'epoch {epoch} ({_journal(journal)}), "
+            f"le bail de {task_id} est à l'epoch {cached.epoch} (fichier de bail {path})"
+        )
     if not (root / "events.jsonl").is_file():
         return _HELD, ""
     from grimoire.missions.ledger import MissionLedger
@@ -168,7 +197,17 @@ def _lease_state(root: Path, task_id: str, epoch: int) -> tuple[str, str]:
         # transition garde le claim (le titulaire a remis sa preuve), mais ``check_holder`` ne la tient
         # plus pour un bail — fichier de bail absent, la session était gelée (#1117). Un autre epoch reste refusé.
         return _RELEASED, ""
-    return _STALE, check.reason
+    events = root / "events.jsonl"
+    return _STALE, f"{check.reason} — {_sources(journal, f'journal du ledger {events}, fichier de bail absent')}"
+
+
+def _journal(journal: Path | None) -> str:
+    return f"journal de session {journal}" if journal is not None else "journal de session"
+
+
+def _sources(journal: Path | None, lease_source: str) -> str:
+    """D'où viennent les deux epochs comparés : le journal de la session, puis *lease_source* (#1235)."""
+    return f"epoch de la session lu dans son {_journal(journal)}, epoch du bail lu dans le {lease_source}"
 
 
 def _no_verify(facts: ToolFacts) -> str:
@@ -258,8 +297,11 @@ def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
         task_id, epoch = _lease_holder(hook)
         if not task_id:
             return None
-        root = hook.project_root.resolve() / LEDGER_RELPATH
-        state, reason = _lease_state(root, task_id, epoch)
+        from grimoire.policies.session_state import session_state_path
+
+        root = ledger_root_of(hook.project_root)
+        journal = session_state_path(hook.project_root, hook.session_id)
+        state, reason = _lease_state(root, task_id, epoch, journal)
         if state == _RELEASED:
             return None
         if state != _HELD:
@@ -285,7 +327,7 @@ def lease_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
             return None
         refused = _mark_busy(root, task_id, epoch, cached, _declared_timeout_ms(hook, facts))
         if refused and not _handed_to_review(root, task_id, epoch):
-            return _deny(hook, task_id, epoch, refused, "stale_epoch")
+            return _deny(hook, task_id, epoch, f"{refused} — {_sources(journal, f'ledger {root}')}", "stale_epoch")
     except Exception as exc:
         return Decision(
             outcome=Outcome.ASK,
