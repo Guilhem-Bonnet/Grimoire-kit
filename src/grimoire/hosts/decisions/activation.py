@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.claude_activation import activation_context_text
-from grimoire.core.standard_state import resolve_active_task
+from grimoire.core.standard_state import TASK_ENV, resolve_active_task
 from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
@@ -138,8 +139,15 @@ def _claimed_task_recall(project_root: Path, task_id: str) -> str:
     material for a task that has not started, not the reminder a claim earns.
     ``task.claim`` is set once by :meth:`TaskService.claim` and survives every
     later transition, so its presence is the one honest signal here.
+
+    Pending notes are left out (:func:`build_task_recall`'s
+    ``include_pending_directives=False``): they are about to be delivered,
+    marked and acknowledged by :func:`_steering` in the same ``SessionStart``.
+    Rendering them here too was the duplication GAO-hook-session-001 measured.
+    Only already-delivered notes remain — they are the task's durable context.
     """
     try:
+        from grimoire.missions.recall import build_task_recall
         from grimoire.missions.service import TaskService
 
         service = TaskService(project_root)
@@ -148,7 +156,16 @@ def _claimed_task_recall(project_root: Path, task_id: str) -> str:
         task = service.ledger.get_task(task_id)
         if task is None or task.claim is None:
             return ""
-        return service.recall(task_id).text
+        # Appel direct à ``build_task_recall`` : ``TaskService.recall`` n'expose
+        # pas ce drapeau (``service.py`` est sous cliquet de taille), et le
+        # chemin ci-dessus a déjà vérifié le ledger et le claim.
+        return build_task_recall(
+            project_root,
+            task_id,
+            ledger_root=service.ledger_root,
+            memory_manager=service.memory,
+            include_pending_directives=False,
+        ).text
     except Exception:
         return ""
 
@@ -351,6 +368,11 @@ def decide_activation(hook: HookInput) -> Decision:
     operational rather than protocol — and is silent just as often (no
     proposal ever crossed the repetition threshold).
 
+    GAO-hook-session-001: on a worker session (``GRIMOIRE_TASK_ID`` set), both
+    the providers and proposals lines are omitted — a worker cannot act on
+    either, and on a 37-hook sample they were pure per-session noise. An
+    interactive session with no task keeps them.
+
     It also resets the temporal-policy session state (issue #429, point 3):
     a new session starts with empty budgets, no cooldown history and no
     rule marked "already approved" — that is the whole point of scoping
@@ -431,8 +453,13 @@ def decide_activation(hook: HookInput) -> Decision:
         "\n".join(active_flow_lines(hook.project_root)) if str(hook.raw.get("source") or "") == "compact" else ""
     )
     steering, steering_detail = _steering(hook, task_id)
-    providers_line = _providers_status_line(hook.project_root)
-    proposals_line = _proposals_status_line(hook.project_root)
+    # GAO-hook-session-001 : une session de worker (``GRIMOIRE_TASK_ID`` posé)
+    # ne peut rien faire des fournisseurs disponibles ni des propositions
+    # d'artefact en attente — c'est du pilotage de projet, pas son travail.
+    # Une session interactive sans tâche les garde : c'est là qu'ils servent.
+    worker_session = bool(os.environ.get(TASK_ENV, "").strip())
+    providers_line = "" if worker_session else _providers_status_line(hook.project_root)
+    proposals_line = "" if worker_session else _proposals_status_line(hook.project_root)
     decisions_line = _decisions_line(hook.project_root)
     pause_line = _pause_line(hook, task_id)
     # #667 : les fichiers d'instructions que l'hôte charge, classés par

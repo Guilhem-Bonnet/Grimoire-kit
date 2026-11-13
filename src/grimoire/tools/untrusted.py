@@ -34,7 +34,7 @@ import logging
 import secrets
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -49,6 +49,7 @@ __all__ = [
     "fetch_untrusted",
     "tag_event_payload",
     "wrap_untrusted",
+    "wrap_untrusted_block",
 ]
 
 #: Outils dont la sortie brute est du contenu externe, et la commande à appeler
@@ -141,6 +142,19 @@ def wrap_untrusted(body: str, *, source: str, nonce: str | None = None) -> Untru
         )
         body = body.replace(SENTINEL, _NEUTRALIZED)
     return UntrustedContent(source=source, body=body, nonce=token, tampering=tampering)
+
+
+def wrap_untrusted_block(entries: Iterable[tuple[str, str]], *, source: str) -> UntrustedContent:
+    """Emballer plusieurs entrées en **un seul** bloc de données externes.
+
+    Chaque entrée est ``(en-tête, texte)`` : l'en-tête (auteur, date, origine)
+    reste lisible dans le corps, mais la bannière et les marqueurs ne coûtent
+    qu'une fois pour tout le bloc — pas une fois par note (GAO-hook-session-001).
+    Le nonce, lui, reste tiré par appel : un bloc est une unité d'emballage,
+    pas une unité de confiance.
+    """
+    body = "\n".join(f"- {head} : {text}" if head else f"- {text}" for head, text in entries)
+    return wrap_untrusted(body, source=source)
 
 
 def tag_event_payload(payload: dict[str, Any], *, origin: str) -> dict[str, Any]:
