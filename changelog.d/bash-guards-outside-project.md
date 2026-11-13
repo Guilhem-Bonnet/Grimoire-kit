@@ -1,0 +1,1 @@
+- fix(hosts): une suppression forcée non récursive d'un fichier du dossier temporaire du système ou du scratchpad de la session, hors du projet, n'est plus refusée comme `rm -rf` ; la notice « code python interprété » n'est plus injectée qu'une fois par session

@@ -53,6 +53,54 @@ def _risk_profile(hook: HookInput) -> str:
     return _RISK_BY_PROFILE.get(session_profile(hook, journal=False), "light")
 
 
+def _scratchpad_dir(hook: HookInput) -> str:
+    """Le dossier jetable que l'hôte donne à cette session (payload ``scratchpad_dir``).
+
+    Claude Code l'envoie à la racine du payload ; les autres hôtes n'en ont
+    pas, et un payload absent ne change rien (seules les racines temporaires
+    du système comptent alors).
+    """
+    for key in ("scratchpad_dir", "scratchpadDir"):
+        value = hook.raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def _classify(hook: HookInput) -> ToolFacts:
+    """Classification du prochain appel, avec le contexte de chemin des gardes.
+
+    ``_record_hold`` reclassifie sans ce contexte : il ne décide pas, il
+    journalise une empreinte, et une suppression temporaire autorisée n'y
+    arrive jamais (elle donne ``allow``).
+    """
+    return classify_tool(
+        hook.tool_name,
+        hook.tool_input,
+        project_root=hook.project_root,
+        scratchpad_dir=_scratchpad_dir(hook) or None,
+    )
+
+
+def _interpreted_notice_once(hook: HookInput) -> bool:
+    """Vrai la première fois que cette session exécute du code interprété.
+
+    L'état de session existant porte le fait (``interpreted_notice_shown``),
+    remis à zéro par :func:`grimoire.policies.session_state.reset_session_state`
+    au ``SessionStart``. Un hôte sans ``session_id`` — ou un état illisible —
+    ne peut pas retenir la première fois : la notice est alors émise comme
+    avant, à chaque appel.
+    """
+    if not hook.session_id:
+        return True
+    from grimoire.policies.session_state import note_interpreted_notice_once
+
+    try:
+        return note_interpreted_notice_once(hook.project_root, hook.session_id, now_iso=datetime.now(UTC).isoformat())
+    except Exception:  # une notice manquante ne change jamais un verdict
+        return True
+
+
 #: The engine's built-in ``no-destructive-without-strict`` rule blocks
 #: destructive mutations below the strict profile — and therefore *allows* them
 #: silently at strict, which is where the most damage is possible. A project
@@ -431,7 +479,7 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     so :func:`_record_hold` can wrap it without duplicating its five return
     sites.
     """
-    facts = classify_tool(hook.tool_name, hook.tool_input)
+    facts = _classify(hook)
     forged = _authority_guard(hook, facts)
     if forged is not None:
         return forged
@@ -478,13 +526,11 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     # n'est rejoué que pour une session sans bail noté (PreToolUse p95 ≤ 50 ms, D21).
     from grimoire.hosts.decisions.lease_brake import held_task_id
 
-    task_id = held_task_id(hook) or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
-    risk = _risk_profile(hook)
-    base_verdict = (
-        _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk))
-        if not read_only
-        else None
+    task_id = held_task_id(hook) or active_task_id(
+        hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id
     )
+    risk = _risk_profile(hook)
+    base_verdict = _engine(base_rules).evaluate(_policy_request(hook, facts, task_id, risk)) if not read_only else None
     temporal_verdict, temporal_reason, temporal_rule_ids = _evaluate_temporal_layer(hook, custom_rules, facts)
 
     verdict_kind = base_verdict.verdict if base_verdict is not None else VerdictKind.ALLOW
@@ -508,6 +554,8 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     # Issue #724 §2 : du code interprété (heredoc sur stdin de python/node/…,
     # `-c`/`-e`) n'est lu que contre les appels destructifs connus ; le reste
     # est nommé, jamais tu, pour que l'asymétrie avec `rm -rf` soit visible.
+    # La notice ne dit rien de nouveau après la première fois : l'état de
+    # session la retient, le détail garde la langue à chaque appel.
     interpreted_warning = ""
     if facts.interpreted_code:
         detail["interpreted_code"] = facts.interpreted_code
@@ -531,8 +579,12 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
             reason=f"[Grimoire policy] {reason or 'action sensible'} (profil {risk}).",
             detail=detail,
         )
-    return (
-        _untrusted_escalation(hook, facts)
-        or _profile_downgrade_check(hook, facts)
-        or Decision(detail=detail, context=interpreted_warning)
-    )
+    # La notice n'est consommée que sur le chemin qui l'émet : un premier appel
+    # refusé (ou escaladé) pour une autre raison ne la fait pas taire pour la
+    # session.
+    escalated = _untrusted_escalation(hook, facts) or _profile_downgrade_check(hook, facts)
+    if escalated is not None:
+        return escalated
+    if interpreted_warning and not _interpreted_notice_once(hook):
+        interpreted_warning = ""
+    return Decision(detail=detail, context=interpreted_warning)

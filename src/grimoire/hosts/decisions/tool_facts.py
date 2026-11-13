@@ -9,10 +9,14 @@ Needs :mod:`grimoire.policies.schemas` for ``ActionKind``/``MutationClass``
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
 import shlex
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from grimoire.hosts.secrets import SECRET_RULES
@@ -51,8 +55,13 @@ _WEB_MARKERS = ("fetch", "websearch", "web_search", "browser", "navigate", "http
 #: read as ``git push -f``, and would equally let ``git checkout -- .gitignore``
 #: read as discarding the whole tree. ``(?=\s|$)`` requires an actual token
 #: boundary — whitespace or end of string — instead.
+#: The one destructive pattern that the outside-the-project allowance below
+#: can neutralise (see :func:`_forced_rm_outside_project`). Kept as its own
+#: constant so the scan in :func:`classify_tool` never has to compare labels.
+_FORCED_RM_PATTERN = r"\brm\s+(-[a-z]*[rf][a-z]*\s+)+"
+
 _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\brm\s+(-[a-z]*[rf][a-z]*\s+)+", "recursive/forced delete"),
+    (_FORCED_RM_PATTERN, "recursive/forced delete"),
     (
         r"\bgit\s+push\b.*(?:^|\s)"
         r"(--force|--force-with-lease(?:=\S+)?|--force-if-includes|-[a-z]*f[a-z]*)"
@@ -85,6 +94,144 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\b(?:format-volume|clear-disk|initialize-disk)\b", "disk format or wipe (PowerShell)"),
 )
 
+
+#: Caractères qu'un opérande de ``rm`` ne doit pas porter : le shell les
+#: développerait en autre chose que le chemin écrit, que cette analyse ne sait
+#: pas résoudre. L'allowance échoue alors fermée (destructif, comme avant).
+_OPAQUE_RM_TARGET_CHARS = frozenset("$`~*?[]{}")
+
+#: Options de ``rm`` dont la présence ne change pas l'allowance ci-dessous.
+#: Toute autre option la fait échouer fermée plutôt que de deviner.
+_RM_SHORT_FLAGS = frozenset("fRrviId")
+_RM_LONG_FLAGS = frozenset(
+    {
+        "--force",
+        "--recursive",
+        "--verbose",
+        "--interactive",
+        "--dir",
+        "--one-file-system",
+        "--no-preserve-root",
+        "--preserve-root",
+    }
+)
+#: Un jeton de redirection (``2>/dev/null``, ``>/tmp/log``, ``2>&1``) n'est pas
+#: un opérande de ``rm`` : le laisser passer comme chemin ferait échouer
+#: l'allowance sur une commande aussi banale que ``rm -f /tmp/x 2>/dev/null``.
+_REDIRECTION_ARG_RE = re.compile(r"^(?:[0-9]*(?:>>?|<)|\|&|&>>?)")
+
+
+def _system_temp_roots() -> tuple[Path, ...]:
+    """Les dossiers que le système vide : ``tempfile.gettempdir()`` (suit ``TMPDIR``) **et** les racines fixes.
+
+    Même règle que :func:`grimoire.missions.task_worktree._temp_roots` : un
+    ``TMPDIR`` pointé ailleurs ne rend pas ``/tmp`` étranger au système.
+    """
+    raw = [tempfile.gettempdir()]
+    if os.name == "posix":
+        raw += ["/tmp", "/var/tmp", "/dev/shm"]  # noqa: S108 - racines à autoriser, rien n'y est écrit
+    else:
+        raw += [os.environ.get(var, "") for var in ("TEMP", "TMP")]
+    return tuple({Path(r).resolve() for r in raw if r})
+
+
+def _allowed_delete_roots(scratchpad_dir: Path | str | None) -> tuple[Path, ...]:
+    """Racines hors du dépôt où une suppression forcée simple est du travail jetable."""
+    roots = list(_system_temp_roots())
+    if scratchpad_dir:
+        with contextlib.suppress(OSError):  # resolve() n'échoue que sur un lien illisible
+            roots.append(Path(scratchpad_dir).resolve())
+    return tuple(dict.fromkeys(roots))
+
+
+def _rm_operand_is_allowed(operand: str, project_root: Path, allowed_roots: tuple[Path, ...]) -> bool:
+    """Un opérande de ``rm`` se résout hors du projet et sous une racine autorisée."""
+    if not operand or operand.startswith("-") or any(ch in _OPAQUE_RM_TARGET_CHARS for ch in operand):
+        return False
+    try:
+        resolved = Path(operand).resolve()
+    except OSError:
+        return False
+    if resolved.is_relative_to(project_root):
+        return False
+    return any(resolved == root or resolved.is_relative_to(root) for root in allowed_roots)
+
+
+def _rm_arguments_are_allowed(args: list[str], project_root: Path, allowed_roots: tuple[Path, ...]) -> bool:
+    """Une invocation ``rm`` est une suppression simple si elle n'est ni récursive ni opaque."""
+    recursive = False
+    operands: list[str] = []
+    after_separator = False
+    for arg in args:
+        if after_separator:
+            operands.append(arg)
+            continue
+        if arg == "--":
+            after_separator = True
+            continue
+        if _REDIRECTION_ARG_RE.match(arg):
+            continue
+        if arg.startswith("--"):
+            if arg == "--recursive":
+                recursive = True
+            elif arg not in _RM_LONG_FLAGS:
+                return False
+            continue
+        if arg.startswith("-") and arg != "-":
+            cluster = arg[1:]
+            if any(flag not in _RM_SHORT_FLAGS for flag in cluster):
+                return False
+            if "r" in cluster or "R" in cluster:
+                recursive = True
+            continue
+        operands.append(arg)
+    if recursive or not operands:
+        return False
+    return all(_rm_operand_is_allowed(operand, project_root, allowed_roots) for operand in operands)
+
+
+def _forced_rm_outside_project(command: str, project_root: Path | None, allowed_roots: tuple[Path, ...]) -> bool:
+    """Vrai si les ``rm`` de *command* ne visent que des fichiers hors du projet, sous une racine jetable.
+
+    L'allowance est volontairement étroite : un ``rm -rf`` quelque part, un
+    opérande que le shell pourrait développer (glob, variable, ``~``), une
+    invocation cachée derrière ``xargs``/``bash -c`` ou une seule cible qui se
+    résout dans le projet gardent l'ancienne classification destructive.
+    ``False`` est la réponse d'échec fermé, jamais « probablement anodin ».
+    """
+    if project_root is None or not allowed_roots:
+        return False
+    project_root = project_root.resolve()
+    body = _strip_heredoc_bodies(command)
+    if _SUBSTITUTION_RE.search(body):
+        return False
+    segments, substitution = _scan_raw(body)
+    if substitution:
+        return False
+    found = False
+    for segment in segments:
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            return False
+        idx = 0
+        while idx < len(words) and (_ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _NEUTRAL_PREFIX):
+            idx += 1
+        if idx >= len(words):
+            continue
+        if words[idx] == "rm":
+            if not _rm_arguments_are_allowed(words[idx + 1 :], project_root, allowed_roots):
+                return False
+            found = True
+            continue
+        # Un ``rm -f`` que le découpage ne montre pas comme la commande du
+        # segment (``xargs rm -f``, ``bash -c '…'``…) reste hors de
+        # l'allowance : on ne sait pas ce que le shell en fera.
+        if re.search(_FORCED_RM_PATTERN, segment, flags=re.IGNORECASE):
+            return False
+    return found
+
+
 #: Leading verbs whose blast radius never survives the session — the read
 #: half of the destructive/mutation split above. Matched against the first
 #: *word* of a command (or of one ``&&``/``;``/``|`` segment of it), after
@@ -97,17 +244,70 @@ _DESTRUCTIVE_PATTERNS: tuple[tuple[str, str], ...] = (
 #: safe default), never the reverse.
 _READ_ONLY_LEADING_COMMANDS = frozenset(
     {
-        "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "ag",
-        "find", "ls", "wc", "diff", "file", "stat", "pwd", "whoami", "printenv",
-        "which", "type", "date", "ps", "df", "du", "tree", "od", "hexdump", "xxd",
-        "sha256sum", "sha1sum", "md5sum", "echo", "printf", "true", "false",
-        "basename", "dirname", "readlink", "realpath", "nproc", "uptime", "id", "uname",
+        "cat",
+        "head",
+        "tail",
+        "less",
+        "more",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "ag",
+        "find",
+        "ls",
+        "wc",
+        "diff",
+        "file",
+        "stat",
+        "pwd",
+        "whoami",
+        "printenv",
+        "which",
+        "type",
+        "date",
+        "ps",
+        "df",
+        "du",
+        "tree",
+        "od",
+        "hexdump",
+        "xxd",
+        "sha256sum",
+        "sha1sum",
+        "md5sum",
+        "echo",
+        "printf",
+        "true",
+        "false",
+        "basename",
+        "dirname",
+        "readlink",
+        "realpath",
+        "nproc",
+        "uptime",
+        "id",
+        "uname",
         # Issue #875 : se déplacer et filtrer un flux ne modifient rien ; les
         # formes qui écrivent (``sort -o``, ``uniq in out``, ``sed -i``,
         # ``awk -i``) sont écartées par :func:`_raw_segments_read_only` et
         # :func:`_is_read_only_segment`.
-        "cd", "pushd", "popd", "sort", "uniq", "cut", "tr", "jq", "column", "nl", "comm", "paste",
-        "sed", "awk", "gawk", "mawk",
+        "cd",
+        "pushd",
+        "popd",
+        "sort",
+        "uniq",
+        "cut",
+        "tr",
+        "jq",
+        "column",
+        "nl",
+        "comm",
+        "paste",
+        "sed",
+        "awk",
+        "gawk",
+        "mawk",
     }
 )
 
@@ -118,8 +318,18 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
 #: layer down. Only genuinely read-only-in-every-form subcommands qualify.
 _READ_ONLY_GIT_SUBCOMMANDS = frozenset(
     {
-        "status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog",
-        "grep", "cat-file", "ls-tree",  # issue #875
+        "status",
+        "diff",
+        "log",
+        "show",
+        "blame",
+        "ls-files",
+        "rev-parse",
+        "describe",
+        "shortlog",
+        "grep",
+        "cat-file",
+        "ls-tree",  # issue #875
     }
 )
 
@@ -151,6 +361,7 @@ _WRITE_REDIRECTION_RE = re.compile(r">>?(?!=)|\btee\b")
 _SHELL_LEADING_KEYWORDS = frozenset({"do", "then", "else", "elif", "while", "until", "if", "!"})
 _SHELL_CLOSING_KEYWORDS = frozenset({"done", "fi", "esac"})
 _SUBSTITUTION_RE = re.compile(r"\$\(|`")
+
 
 def _git_subcommand(words: list[str]) -> tuple[str, list[str]]:
     """Sous-commande git et ses arguments, après ``-C <dir>`` / ``--no-pager``."""
@@ -434,9 +645,7 @@ def _raw_segments_read_only(command: str) -> bool:
         except ValueError:
             return False  # guillemet non fermé : incertain donc mutation
         idx = 0
-        while idx < len(words) and (
-            _ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _NEUTRAL_PREFIX
-        ):
+        while idx < len(words) and (_ENV_ASSIGNMENT_RE.match(words[idx]) or words[idx] in _NEUTRAL_PREFIX):
             idx += 1
         if idx >= len(words):
             continue
@@ -540,7 +749,7 @@ def command_surface(command: str) -> str:
     out: list[str] = []
     cursor = 0
     for quoted in _QUOTED_RE.finditer(surface):
-        preceding = surface[cursor:quoted.start()]
+        preceding = surface[cursor : quoted.start()]
         out.append(preceding)
         # Keep the quotes as a word boundary so ``rm -rf`` cannot be spliced
         # together out of two neighbouring fragments.
@@ -623,8 +832,8 @@ def interpreted_bodies(command: str) -> tuple[tuple[str, str], ...]:
         line_end = command.find("\n", match.end())
         if line_end < 0:
             continue
-        opening = command[:match.start()]
-        rest_of_line = command[match.end():line_end]
+        opening = command[: match.start()]
+        rest_of_line = command[match.end() : line_end]
         tag = re.escape(match.group(2))
         body_re = re.compile(rf"^(.*?)^[ \t]*{tag}[ \t]*$", re.DOTALL | re.MULTILINE)
         body_match = body_re.match(command, line_end + 1)
@@ -640,7 +849,7 @@ def interpreted_bodies(command: str) -> tuple[tuple[str, str], ...]:
     surface_source = _strip_heredoc_bodies(command)
     cursor = 0
     for quoted in _QUOTED_RE.finditer(surface_source):
-        preceding = surface_source[cursor:quoted.start()]
+        preceding = surface_source[cursor : quoted.start()]
         cursor = quoted.end()
         inline = _INLINE_INTERPRETER_RE.search(preceding.rstrip())
         inner = quoted.group(0)[1:-1]
@@ -658,16 +867,36 @@ _EXEC_CALL_RE = re.compile(
 )
 
 
-def interpreted_destructive_reason(bodies: tuple[tuple[str, str], ...]) -> str:
-    """The first destructive call found in interpreted *bodies*, or ``""``."""
+def interpreted_destructive_reason(
+    bodies: tuple[tuple[str, str], ...],
+    *,
+    project_root: Path | None = None,
+    allowed_roots: tuple[Path, ...] = (),
+) -> str:
+    """The first destructive call found in interpreted *bodies*, or ``""``.
+
+    A shell body (``bash <<'EOF' … rm -f … EOF``) gets the same
+    outside-the-project allowance as a bare command — that is what makes a
+    heredoc redirected into the temporary folder usable for scratch work. A
+    non-shell body keeps the old answer: its strings are not parsed into
+    paths here, so ``os.remove``/``shutil.rmtree`` stay destructive whether
+    the path looks temporary or not.
+    """
     for language, body in bodies:
         for lang, pattern, label in _INTERPRETED_DESTRUCTIVE:
             if lang == language and re.search(pattern, body):
                 return f"{label} — code {language} interprété"
         if language == "shell" or _EXEC_CALL_RE.search(body):
             for pattern, label in _DESTRUCTIVE_PATTERNS:
-                if re.search(pattern, body, flags=re.IGNORECASE):
-                    return f"{label} — code {language} interprété"
+                if not re.search(pattern, body, flags=re.IGNORECASE):
+                    continue
+                if (
+                    language == "shell"
+                    and pattern == _FORCED_RM_PATTERN
+                    and _forced_rm_outside_project(body, project_root, allowed_roots)
+                ):
+                    continue
+                return f"{label} — code {language} interprété"
     return ""
 
 
@@ -703,7 +932,7 @@ def extract_c_bodies(command: str) -> tuple[str, ...]:
     bodies: list[str] = []
     cursor = 0
     for quoted in _QUOTED_RE.finditer(surface_source):
-        preceding = surface_source[cursor:quoted.start()]
+        preceding = surface_source[cursor : quoted.start()]
         cursor = quoted.end()
         if _C_BODY_INTRODUCER.search(preceding.rstrip()):
             inner = quoted.group(0)[1:-1]
@@ -890,8 +1119,20 @@ def _declared_profile(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> ToolFacts:
-    """Describe a pending tool call in host-neutral policy terms."""
+def classify_tool(
+    tool_name: str,
+    tool_input: dict[str, Any] | None = None,
+    *,
+    project_root: Path | None = None,
+    scratchpad_dir: Path | str | None = None,
+) -> ToolFacts:
+    """Describe a pending tool call in host-neutral policy terms.
+
+    *project_root* and *scratchpad_dir* (the host payload's ``scratchpad_dir``)
+    are optional context for the forced-deletion allowance: without them every
+    ``rm -f`` keeps the historical destructive classification, which is what
+    the callers that do not decide policy (evidence, calibration) want.
+    """
     payload = tool_input or {}
     name = tool_name.lower()
     command = _first_str(payload, "command", "cmd", "commandLine", "script")
@@ -938,12 +1179,22 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     destructive_reason = ""
     if command:
         surface = command_surface(command)
+        allowed_delete_roots = _allowed_delete_roots(scratchpad_dir)
         for pattern, label in _DESTRUCTIVE_PATTERNS:
-            if re.search(pattern, surface, flags=re.IGNORECASE):
-                destructive_reason = label
-                break
+            if not re.search(pattern, surface, flags=re.IGNORECASE):
+                continue
+            if pattern == _FORCED_RM_PATTERN and _forced_rm_outside_project(
+                command, project_root, allowed_delete_roots
+            ):
+                # Hors du projet et sous le dossier temporaire / le scratchpad :
+                # supprimer ce fichier jetable ne détruit aucun travail.
+                continue
+            destructive_reason = label
+            break
         if not destructive_reason and interpreted:
-            destructive_reason = interpreted_destructive_reason(interpreted)
+            destructive_reason = interpreted_destructive_reason(
+                interpreted, project_root=project_root, allowed_roots=allowed_delete_roots
+            )
     interpreted_code = ", ".join(sorted({language for language, _ in interpreted}))
 
     is_execute = bool(command) or any(marker in name for marker in _EXECUTE_MARKERS)

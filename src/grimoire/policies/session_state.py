@@ -130,6 +130,10 @@ class SessionState:
     #: Des chemins, des tailles, des digests et des codes de motif — jamais un
     #: extrait de contenu.
     instruction_scan: dict[str, Any] = field(default_factory=dict)
+    #: La notice « code interprété » a déjà été émise dans cette session (#724
+    #: §2) : elle ne dit rien de nouveau ensuite. Un booléen, jamais la
+    #: commande ni la langue qui l'a déclenchée.
+    interpreted_notice_shown: bool = False
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -149,16 +153,21 @@ class SessionState:
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
             "armed": dict(self.armed),
             "instruction_scan": dict(self.instruction_scan),
+            "interpreted_notice_shown": self.interpreted_notice_shown,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], *, session_id: str, started_at: str) -> SessionState:
         rules_raw = d.get("rules", {})
-        rules = {
-            str(rule_id): RuleState.from_dict(state)
-            for rule_id, state in rules_raw.items()
-            if isinstance(state, dict)
-        } if isinstance(rules_raw, dict) else {}
+        rules = (
+            {
+                str(rule_id): RuleState.from_dict(state)
+                for rule_id, state in rules_raw.items()
+                if isinstance(state, dict)
+            }
+            if isinstance(rules_raw, dict)
+            else {}
+        )
         mutations = d.get("mutations", 0)
         acked = d.get("acknowledged_mutations", 0)
         pending_raw = d.get("pending_approvals", {})
@@ -173,9 +182,7 @@ class SessionState:
                     "rules": [str(r) for r in rule_ids if isinstance(r, str)] if isinstance(rule_ids, list) else [],
                 }
         armed_raw = d.get("armed", {})
-        armed = (
-            {str(k): v for k, v in armed_raw.items() if isinstance(v, str)} if isinstance(armed_raw, dict) else {}
-        )
+        armed = {str(k): v for k, v in armed_raw.items() if isinstance(v, str)} if isinstance(armed_raw, dict) else {}
         return cls(
             session_id=session_id,
             started_at=str(d.get("started_at") or started_at),
@@ -189,6 +196,7 @@ class SessionState:
             pending_approvals=pending,
             armed=armed,
             instruction_scan=dict(d["instruction_scan"]) if isinstance(d.get("instruction_scan"), dict) else {},
+            interpreted_notice_shown=bool(d.get("interpreted_notice_shown", False)),
         )
 
     @classmethod
@@ -254,6 +262,28 @@ def reset_session_state(project_root: Path, session_id: str) -> None:
         path.unlink(missing_ok=True)
 
 
+def note_interpreted_notice_once(project_root: Path, session_id: str, *, now_iso: str) -> bool:
+    """Vrai la première fois que *session_id* déclenche la notice « code interprété » (issue #724 §2).
+
+    La notice ne porte aucune information nouvelle après la première : la
+    session note qu'elle l'a eue et les appels suivants ne la reçoivent plus.
+    Un ``session_id`` vide ne peut rien retenir — l'appelant émet alors la
+    notice comme avant. Best-effort : un état illisible rend ``True`` (notice
+    émise), jamais une exception.
+    """
+    if not session_id:
+        return True
+    try:
+        state = load_session_state(project_root, session_id, now_iso=now_iso)
+        if state.interpreted_notice_shown:
+            return False
+        state.interpreted_notice_shown = True
+        save_session_state(project_root, state, now_iso=now_iso)
+    except Exception:  # l'observabilité ne décide jamais d'un verdict
+        return True
+    return True
+
+
 def note_session_mutation(project_root: Path, session_id: str, *, task_id: str, now_iso: str) -> None:
     """Compte une action d'écriture de plus pour *session_id* (issue #638, lot A).
 
@@ -287,7 +317,9 @@ def note_session_task(
     if not session_id or not task_id or task_id == "bootstrap":
         return False
     state = load_session_state(project_root, session_id, now_iso=now_iso)
-    wanted = _epoch_of(lease_epoch) if lease_epoch is not None else (state.lease_epoch if state.task_id == task_id else 0)
+    wanted = (
+        _epoch_of(lease_epoch) if lease_epoch is not None else (state.lease_epoch if state.task_id == task_id else 0)
+    )
     if state.task_id == task_id and state.lease_epoch == wanted:
         return False
     state.task_id = task_id
