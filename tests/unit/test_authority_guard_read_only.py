@@ -19,7 +19,7 @@ Tous les tests travaillent sous ``tmp_path`` avec un HOME isolé : la zone est c
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -57,15 +57,15 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def zone(home: Path) -> Path:
-    """La zone de contrôle du HOME de test."""
-    return control_key_path().parent
+def zone(home: Path) -> PurePosixPath:
+    """La zone de contrôle du HOME de test, telle qu'une commande l'écrit : barres obliques sur tout système."""
+    return PurePosixPath(control_key_path().parent.as_posix())
 
 
-def _spell(template: str, zone: Path, spelling: str = "absolu") -> str:
+def _spell(template: str, zone: PurePosixPath, spelling: str = "absolu") -> str:
     """*template* où ``{Z}`` devient le chemin de la zone, écrit selon *spelling*."""
-    relative = zone.relative_to(Path.home()).as_posix()
-    path = {"absolu": zone.as_posix(), "tilde": f"~/{relative}", "variable-home": f"$HOME/{relative}"}[spelling]
+    relative = control_key_path().parent.relative_to(Path.home()).as_posix()
+    path = {"absolu": str(zone), "tilde": f"~/{relative}", "variable-home": f"$HOME/{relative}"}[spelling]
     return template.replace("{Z}", path)
 
 
@@ -177,39 +177,39 @@ PREFIXES = {
 
 @pytest.mark.parametrize("spelling", SPELLINGS)
 @pytest.mark.parametrize("template", WRITES.values(), ids=WRITES.keys())
-def test_une_ecriture_prouvee_est_refusee_et_revoque(tmp_path: Path, zone: Path, template: str, spelling: str) -> None:
+def test_une_ecriture_prouvee_est_refusee_et_revoque(tmp_path: Path, zone: PurePosixPath, template: str, spelling: str) -> None:
     _assert_refused_and_revoked(_project(tmp_path / "proj"), _spell(template, zone, spelling))
 
 
 @pytest.mark.parametrize("prefix", PREFIXES.values(), ids=PREFIXES.keys())
 @pytest.mark.parametrize("template", WRITES.values(), ids=WRITES.keys())
 def test_une_ecriture_sous_affectation_ou_enveloppe_est_refusee_et_revoque(
-    tmp_path: Path, zone: Path, template: str, prefix: str
+    tmp_path: Path, zone: PurePosixPath, template: str, prefix: str
 ) -> None:
     _assert_refused_and_revoked(_project(tmp_path / "proj"), prefix + _spell(template, zone))
 
 
-def test_une_ecriture_par_lien_symbolique_ou_cd_est_prouvee_par_le_chemin_resolu(tmp_path: Path, zone: Path) -> None:
-    alias = tmp_path / "alias"
-    alias.symlink_to(zone)
+def test_une_ecriture_par_lien_symbolique_ou_cd_est_prouvee_par_le_chemin_resolu(tmp_path: Path, zone: PurePosixPath) -> None:
+    (tmp_path / "alias").symlink_to(control_key_path().parent)
+    alias = (tmp_path / "alias").as_posix()
     commands = (f"echo x > {alias}/f", f"cd {zone} && echo x > f", f"cd {zone.parent} && rm -rf {zone.name}")
     for index, command in enumerate(commands):
         _assert_refused_and_revoked(_project(tmp_path / f"proj{index}"), command)
 
 
-def test_supprimer_ou_deplacer_le_dossier_qui_porte_la_zone_revoque(tmp_path: Path, zone: Path) -> None:
+def test_supprimer_ou_deplacer_le_dossier_qui_porte_la_zone_revoque(tmp_path: Path, zone: PurePosixPath) -> None:
     commands = (f"rm -rf {zone.parent}", f"mv {zone.parent} elsewhere", f"mv forged {zone.parent}")
     for index, command in enumerate(commands):
         _assert_refused_and_revoked(_project(tmp_path / f"proj{index}"), command)
 
 
-def test_viser_le_journal_du_mandat_fait_tomber_tous_les_mandats(tmp_path: Path, zone: Path) -> None:
+def test_viser_le_journal_du_mandat_fait_tomber_tous_les_mandats(tmp_path: Path, zone: PurePosixPath) -> None:
     proj, other = _project(tmp_path / "proj"), _project(tmp_path / "other")
     _assert_refused_and_revoked(proj, f"echo x >> {zone}/{JOURNAL}")
     assert not MandateStore(other).state().active
 
 
-def test_ecrire_la_preuve_d_hote_ne_revoque_que_le_projet_de_la_session(tmp_path: Path, zone: Path) -> None:
+def test_ecrire_la_preuve_d_hote_ne_revoque_que_le_projet_de_la_session(tmp_path: Path, zone: PurePosixPath) -> None:
     proj, other = _project(tmp_path / "proj"), _project(tmp_path / "other")
     _assert_refused_and_revoked(proj, f"cp forged {zone}/{PROOF}")
     assert MandateStore(other).state().active
@@ -278,29 +278,29 @@ UNREADABLE = {
 
 @pytest.mark.parametrize("spelling", SPELLINGS)
 @pytest.mark.parametrize("template", READS.values(), ids=READS.keys())
-def test_une_lecture_est_refusee_sans_revoquer(tmp_path: Path, zone: Path, template: str, spelling: str) -> None:
+def test_une_lecture_est_refusee_sans_revoquer(tmp_path: Path, zone: PurePosixPath, template: str, spelling: str) -> None:
     _assert_refused_not_revoked(_project(tmp_path / "proj"), _spell(template, zone, spelling))
 
 
 @pytest.mark.parametrize("template", MENTIONS.values(), ids=MENTIONS.keys())
-def test_une_mention_hors_liste_blanche_est_refusee_sans_revoquer(tmp_path: Path, zone: Path, template: str) -> None:
+def test_une_mention_hors_liste_blanche_est_refusee_sans_revoquer(tmp_path: Path, zone: PurePosixPath, template: str) -> None:
     _assert_refused_not_revoked(_project(tmp_path / "proj"), _spell(template, zone))
 
 
 @pytest.mark.parametrize("template", UNREADABLE.values(), ids=UNREADABLE.keys())
-def test_une_forme_illisible_est_refusee_sans_revoquer(tmp_path: Path, zone: Path, template: str) -> None:
+def test_une_forme_illisible_est_refusee_sans_revoquer(tmp_path: Path, zone: PurePosixPath, template: str) -> None:
     _assert_refused_not_revoked(_project(tmp_path / "proj"), _spell(template, zone))
 
 
-def test_une_lecture_par_lien_symbolique_ou_cd_est_refusee_sans_revoquer(tmp_path: Path, zone: Path) -> None:
-    alias = tmp_path / "alias"
-    alias.symlink_to(zone)
+def test_une_lecture_par_lien_symbolique_ou_cd_est_refusee_sans_revoquer(tmp_path: Path, zone: PurePosixPath) -> None:
+    (tmp_path / "alias").symlink_to(control_key_path().parent)
+    alias = (tmp_path / "alias").as_posix()
     commands = (f"cat {alias}/x", f"ls {alias}", f"cd {zone} && cat x", f"cd {zone.parent} && ls {zone.name}")
     for index, command in enumerate(commands):
         _assert_refused_not_revoked(_project(tmp_path / f"proj{index}"), command)
 
 
-def test_le_refus_sans_revocation_dit_quoi_lancer_a_la_place(tmp_path: Path, zone: Path) -> None:
+def test_le_refus_sans_revocation_dit_quoi_lancer_a_la_place(tmp_path: Path, zone: PurePosixPath) -> None:
     decision = _pre(_project(tmp_path / "proj"), f"tail -n 5 {zone}/{JOURNAL}")
     assert decision.outcome is Outcome.DENY
     assert "rien n'a été révoqué" in decision.reason and "pas révoqué" in decision.reason
@@ -309,7 +309,7 @@ def test_le_refus_sans_revocation_dit_quoi_lancer_a_la_place(tmp_path: Path, zon
     assert "Limite" in decision.reason
 
 
-def test_le_refus_d_une_ecriture_dit_que_le_mandat_est_revoque(tmp_path: Path, zone: Path) -> None:
+def test_le_refus_d_une_ecriture_dit_que_le_mandat_est_revoque(tmp_path: Path, zone: PurePosixPath) -> None:
     decision = _pre(_project(tmp_path / "proj"), f"mkdir -p {zone}/d")
     assert decision.outcome is Outcome.DENY
     assert "le mandat est révoqué" in decision.reason and "rien n'a été révoqué" not in decision.reason
@@ -365,11 +365,11 @@ BYPASS_WRITES = {
 
 
 @pytest.mark.parametrize("template", BYPASS_WRITES.values(), ids=BYPASS_WRITES.keys())
-def test_un_contournement_qui_ecrit_est_refuse_et_revoque(tmp_path: Path, zone: Path, template: str) -> None:
+def test_un_contournement_qui_ecrit_est_refuse_et_revoque(tmp_path: Path, zone: PurePosixPath, template: str) -> None:
     _assert_refused_and_revoked(_project(tmp_path / "proj"), _spell(template, zone))
 
 
-def test_ecrire_le_journal_des_tours_en_citant_la_zone_reste_refuse(tmp_path: Path, zone: Path) -> None:
+def test_ecrire_le_journal_des_tours_en_citant_la_zone_reste_refuse(tmp_path: Path, zone: PurePosixPath) -> None:
     """Défaut 1 : la mention de la zone ne sort pas la commande des autres contrôles.
 
     Aucune écriture ne vise la zone : le mandat tient (règle 2), le refus demeure.
@@ -439,7 +439,7 @@ REFUSED_MENTIONS = {
 
 
 @pytest.mark.parametrize("template", ALLOWED_MENTIONS.values(), ids=ALLOWED_MENTIONS.keys())
-def test_la_simple_mention_dans_une_option_de_texte_passe(tmp_path: Path, zone: Path, template: str) -> None:
+def test_la_simple_mention_dans_une_option_de_texte_passe(tmp_path: Path, zone: PurePosixPath, template: str) -> None:
     proj = _project(tmp_path / "proj")
     command = _spell(template, zone)
     assert ag.is_text_only_mention(command), command
@@ -450,7 +450,7 @@ def test_la_simple_mention_dans_une_option_de_texte_passe(tmp_path: Path, zone: 
 
 
 @pytest.mark.parametrize("template", REFUSED_MENTIONS.values(), ids=REFUSED_MENTIONS.keys())
-def test_tout_ecart_a_la_simple_mention_est_refuse_sans_revoquer(tmp_path: Path, zone: Path, template: str) -> None:
+def test_tout_ecart_a_la_simple_mention_est_refuse_sans_revoquer(tmp_path: Path, zone: PurePosixPath, template: str) -> None:
     command = _spell(template, zone)
     assert not ag.is_text_only_mention(command), command
     _assert_refused_not_revoked(_project(tmp_path / "proj"), command)
@@ -508,7 +508,7 @@ OTHER_CONTROLS = {
 
 
 @pytest.mark.parametrize(("template", "_code"), OTHER_CONTROLS.values(), ids=OTHER_CONTROLS.keys())
-def test_citer_la_zone_apres_un_autre_vecteur_reste_refuse(tmp_path: Path, zone: Path, template: str, _code: str) -> None:
+def test_citer_la_zone_apres_un_autre_vecteur_reste_refuse(tmp_path: Path, zone: PurePosixPath, template: str, _code: str) -> None:
     proj = _project(tmp_path / "proj", profile="governed")
     decision = _pre(proj, _spell(template, zone))
     assert decision.outcome is Outcome.DENY, decision
@@ -517,7 +517,7 @@ def test_citer_la_zone_apres_un_autre_vecteur_reste_refuse(tmp_path: Path, zone:
 
 @pytest.mark.parametrize(("template", "code"), OTHER_CONTROLS.values(), ids=OTHER_CONTROLS.keys())
 def test_les_autres_controles_sont_rendus_meme_si_la_zone_laissait_tout_passer(
-    tmp_path: Path, zone: Path, monkeypatch: pytest.MonkeyPatch, template: str, code: str
+    tmp_path: Path, zone: PurePosixPath, monkeypatch: pytest.MonkeyPatch, template: str, code: str
 ) -> None:
     """Indépendance : même une exception de mention qui dirait oui à tout ne sort pas la commande des autres contrôles."""
     monkeypatch.setattr(ag, "is_text_only_mention", lambda _command: True)
@@ -526,14 +526,14 @@ def test_les_autres_controles_sont_rendus_meme_si_la_zone_laissait_tout_passer(
     assert decision.detail["authority_vector"] == code
 
 
-def test_une_simple_mention_qui_rejoue_le_hook_reste_refusee(tmp_path: Path, zone: Path) -> None:
+def test_une_simple_mention_qui_rejoue_le_hook_reste_refusee(tmp_path: Path, zone: PurePosixPath) -> None:
     command = f'grimoire host hook --host claude --event UserPromptSubmit --reason "{zone}"'
     assert ag.is_text_only_mention(command)
     decision = _pre(_project(tmp_path / "proj", profile="governed"), command)
     assert decision.outcome is Outcome.DENY and decision.detail["authority_vector"] == "hook-replay"
 
 
-def test_une_simple_mention_qui_cite_aussi_le_journal_des_tours_reste_refusee(tmp_path: Path, zone: Path) -> None:
+def test_une_simple_mention_qui_cite_aussi_le_journal_des_tours_reste_refusee(tmp_path: Path, zone: PurePosixPath) -> None:
     command = f'gh pr create --title t --body "{zone} et {TURNS}"'
     assert ag.is_text_only_mention(command)
     decision = _pre(_project(tmp_path / "proj"), command)
@@ -616,7 +616,7 @@ def _boom(*_args: object, **_kwargs: object) -> None:
 
 
 def test_une_panne_du_lecteur_strict_refuse_la_simple_mention(
-    tmp_path: Path, zone: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, zone: PurePosixPath, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     command = f'gh pr create --title t --body "{zone}"'
     assert ag.is_text_only_mention(command)
@@ -626,7 +626,7 @@ def test_une_panne_du_lecteur_strict_refuse_la_simple_mention(
 
 
 def test_une_panne_de_la_resolution_des_chemins_refuse(
-    tmp_path: Path, zone: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, zone: PurePosixPath, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Chemins illisibles : ni la lecture, ni l'écriture, ni la simple mention ne deviennent une autorisation."""
     monkeypatch.setattr(ag, "_resolutions", _boom)
@@ -646,7 +646,7 @@ def test_une_panne_de_la_detection_de_la_zone_refuse_meme_une_commande_inconnue(
 
 
 def test_une_panne_de_la_preuve_d_ecriture_refuse_sans_revoquer(
-    tmp_path: Path, zone: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, zone: PurePosixPath, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(write_proof._Lexer, "run", _boom)
     assert write_proof.proves_write(f"echo x > {zone}/f", ag._ZoneTarget()) is False
@@ -654,14 +654,14 @@ def test_une_panne_de_la_preuve_d_ecriture_refuse_sans_revoquer(
 
 
 def test_une_panne_de_la_simple_mention_ne_devient_pas_une_autorisation(
-    tmp_path: Path, zone: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, zone: PurePosixPath, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(ag, "is_text_only_mention", _boom)
     _assert_refused_not_revoked(_project(tmp_path / "proj"), f'gh pr create --title t --body "{zone}"')
 
 
 @pytest.mark.parametrize("tail", ["\x00", "\udcff", "\x1b[0m", "\\", "\x0b", "\x7f", "\x85", " "])
-def test_un_encodage_inattendu_reste_un_refus(tmp_path: Path, zone: Path, tail: str) -> None:
+def test_un_encodage_inattendu_reste_un_refus(tmp_path: Path, zone: PurePosixPath, tail: str) -> None:
     _assert_refused_not_revoked(_project(tmp_path / "proj"), f'gh pr create --title t --body "{zone}"{tail}')
     _assert_refused_not_revoked(_project(tmp_path / "proj2"), f"cat {zone}/f{tail}")
 
@@ -911,14 +911,14 @@ def _vector(command: str):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.parametrize("template", ADVERSE_REFUSED)
-def test_batterie_adverse_refus_sans_revocation(zone: Path, template: str) -> None:
+def test_batterie_adverse_refus_sans_revocation(zone: PurePosixPath, template: str) -> None:
     vector = _vector(_spell(template, zone))
     assert vector is not None and vector.code == "control-zone", template
     assert vector.revokes is False and vector.revokes_all is False, template
 
 
 @pytest.mark.parametrize("template", ADVERSE_WRITES)
-def test_batterie_adverse_ecriture_revoquee(zone: Path, template: str) -> None:
+def test_batterie_adverse_ecriture_revoquee(zone: PurePosixPath, template: str) -> None:
     vector = _vector(_spell(template, zone))
     assert vector is not None and vector.code == "control-zone" and vector.revokes is True, template
 
@@ -936,7 +936,7 @@ def test_batterie_adverse_ecriture_revoquee(zone: Path, template: str) -> None:
         'git tag -m "{Z}" -d v1',
     ],
 )
-def test_batterie_adverse_simple_mention(zone: Path, template: str) -> None:
+def test_batterie_adverse_simple_mention(zone: PurePosixPath, template: str) -> None:
     """Ce qui passe est bien une simple mention : la zone n'y est que le texte d'une option, en un seul mot."""
     command = _spell(template, zone)
     assert ag.is_text_only_mention(command), template
@@ -979,6 +979,11 @@ class _Vault:
         "export F=/vault/f\necho x >> $F",
         "source <(echo 'cp a /vault/f')",
         "echo `echo x > /vault/f`",
+        # antislash hors guillemets : séparateur d'un chemin Windows, ou échappement POSIX
+        "echo x > \\vault\\f",
+        "echo x > /vau\\lt/f",
+        "\\rm -rf /srv",
+        "echo echo\\ x\\ \\>\\ /vault/f | sh",
     ],
 )
 def test_la_preuve_reconnait_une_ecriture(command: str) -> None:
@@ -1003,6 +1008,7 @@ def test_la_preuve_reconnait_une_ecriture(command: str) -> None:
         "echo x > \"$UNSET\"",
         "sed -n 'w /vault/f' /etc/passwd",
         "ssh host 'cat /vault/f'",
+        "echo x \\> /vault/f",  # chevron échappé : un mot, pas une redirection
     ],
 )
 def test_la_preuve_ne_voit_pas_d_ecriture_dans_une_lecture_ou_une_forme_non_lue(command: str) -> None:
@@ -1016,7 +1022,7 @@ def test_une_imbrication_sans_fin_n_est_pas_une_preuve() -> None:
     assert write_proof.proves_write(nested, _Vault()) is False
 
 
-def test_le_classement_en_lecture_seule_ne_dispense_pas_du_refus(zone: Path) -> None:
+def test_le_classement_en_lecture_seule_ne_dispense_pas_du_refus(zone: PurePosixPath) -> None:
     """Une commande classée en lecture seule qui nomme la zone par son chemin porte un vecteur, sans révocation."""
     facts = classify_tool("Bash", {"command": f"ls {zone}"})
     vector = ag.forgery_vector(facts)

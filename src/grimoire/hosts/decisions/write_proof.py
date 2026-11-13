@@ -65,6 +65,8 @@ _MAX_DEPTH = 6
 _UNKNOWN = "\x00"
 #: Préfixe d'un mot qui est une substitution de processus : ``\x01<n>`` renvoie à ``_Proof.procsubs[n]``.
 _PROCSUB = "\x01"
+#: Marque d'un antislash lu hors guillemets, devant le caractère qu'il précède (voir :func:`_readings`).
+_ESCAPED = "\x02"
 #: ``%s`` d'un format ``printf`` (``%%`` n'en est pas un).
 _PRINTF_STRING = re.compile(r"(?<!%)%s")
 
@@ -222,7 +224,7 @@ class _Lexer:
             if not redirect:
                 cmd.words.append(value)
             elif redirect == "<<<":
-                cmd.stdin = value + "\n"
+                cmd.stdin = value.replace(_ESCAPED, "") + "\n"
             elif redirect == "<":
                 cmd.stdin_file = value
             elif redirect != "<&" and not (redirect == ">&" and (value.isdigit() or value == "-")):
@@ -268,7 +270,9 @@ class _Lexer:
                 if text.startswith("\\\n", i):
                     i += 2
                     continue
-                word.append(text[i + 1 : i + 2])
+                # L'antislash hors guillemets est marqué, pas tranché : échappement POSIX ou séparateur d'un
+                # chemin Windows, le mot sera lu des deux façons (:func:`_readings`).
+                word.append(_ESCAPED + text[i + 1 : i + 2])
                 in_word = True
                 i += 2
             elif ch == "#" and not in_word:
@@ -400,6 +404,23 @@ class _Lexer:
         return i
 
 
+def _plain(word: str) -> str:
+    """*word* tel qu'un shell POSIX le remet au programme : l'antislash hors guillemets est consommé."""
+    return word.replace(_ESCAPED, "")
+
+
+def _readings(word: str) -> tuple[str, ...]:
+    """Les lectures d'un mot comme chemin : échappement consommé (POSIX), ou séparateur de dossier (Windows)."""
+    if _ESCAPED not in word:
+        return (word,)
+    return (_plain(word), word.replace(_ESCAPED, "/"))
+
+
+def _program(word: str) -> str:
+    """Le nom du programme lancé par *word* : sans échappement (``\\rm``) ni dossier (``/bin/rm``)."""
+    return _plain(word).rsplit("/", 1)[-1]
+
+
 def _unwrap(words: list[str]) -> list[str]:
     """Les mots d'une commande sans mots-clés, préfixes d'affectation ni enveloppes ; ``[]`` s'il ne reste rien."""
     rest = list(words)
@@ -408,7 +429,7 @@ def _unwrap(words: list[str]) -> list[str]:
             rest.pop(0)
         if not rest:
             return []
-        name = rest[0].rsplit("/", 1)[-1]
+        name = _program(rest[0])
         spec = _WRAPPERS.get(name)
         if spec is None:
             return rest
@@ -441,7 +462,7 @@ def _unwrap(words: list[str]) -> list[str]:
 
 def _file_key(path: str) -> str:
     """Le nom sous lequel un fichier écrit par la commande est retrouvé (``./s.sh`` et ``s.sh`` sont le même)."""
-    return path.removeprefix("./")
+    return _plain(path).removeprefix("./")
 
 
 def _operands(args: list[str], valued: frozenset[str] = frozenset()) -> list[str]:
@@ -503,10 +524,14 @@ class _Proof:
     # ── Prédicats sur un mot ────────────────────────────────────────────────
 
     def hit(self, word: str) -> bool:
-        return bool(word) and not word.startswith(_PROCSUB) and self.target.names(word, tuple(self.cd))
+        if not word or word.startswith(_PROCSUB):
+            return False
+        return any(self.target.names(reading, tuple(self.cd)) for reading in _readings(word))
 
     def carried(self, word: str) -> bool:
-        return self.hit(word) or (bool(word) and self.target.carries(word, tuple(self.cd)))
+        if not word or word.startswith(_PROCSUB):
+            return False
+        return self.hit(word) or any(self.target.carries(reading, tuple(self.cd)) for reading in _readings(word))
 
     def expand(self, word: str) -> str:
         """*word* avec les variables que la commande a affectées ; les autres restent telles quelles."""
@@ -559,7 +584,8 @@ class _Proof:
         words = _unwrap([self.expand(w) for w in cmd.words])
         if not words:
             return None
-        program, args = words[0].rsplit("/", 1)[-1], words[1:]
+        # Ce que le shell remet au programme : les échappements hors guillemets sont consommés.
+        program, args = _program(words[0]), [_plain(w) for w in words[1:]]
         if program == "echo":
             while args and re.fullmatch(r"-[neE]+", args[0]):
                 args = args[1:]
@@ -585,7 +611,7 @@ class _Proof:
 
     def launch(self, words: list[str], cmd: _Simple, stdin: str | None, depth: int) -> bool:
         """Vrai si le programme lancé (*words*, enveloppes retirées) écrit sur la cible."""
-        program, args = words[0].rsplit("/", 1)[-1], words[1:]
+        program, args = _program(words[0]), words[1:]
         if program in ("cd", "pushd"):
             operands = _operands(args)
             self.cd.append(operands[0] if operands else "~")
@@ -606,7 +632,7 @@ class _Proof:
         if program in _SHELLS:
             return self.shell(args, stdin, depth)
         if program == "eval":
-            return self.script(" ".join(args), stdin, depth + 1)
+            return self.script(" ".join(_plain(a) for a in args), stdin, depth + 1)
         if program in ("source", "."):
             text = self.source(args[0]) if args else None
             return text is not None and self.script(text, stdin, depth + 1)
@@ -626,7 +652,7 @@ class _Proof:
         while i < len(args):
             arg = args[i]
             if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]:
-                return i + 1 < len(args) and self.script(args[i + 1], stdin, depth + 1)
+                return i + 1 < len(args) and self.script(_plain(args[i + 1]), stdin, depth + 1)
             if arg in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file"):
                 i += 2
             elif arg[:1] in ("-", "+") and len(arg) > 1:
@@ -648,7 +674,7 @@ class _Proof:
             if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]:
                 attached = arg[arg.index("c", 1) + 1 :]
                 body = attached or (args[i + 1] if i + 1 < len(args) else "")
-                return self.python(body, depth)
+                return self.python(_plain(body), depth)
             if arg in ("-W", "-X"):
                 i += 2
             elif arg.startswith("-") and len(arg) > 1:
