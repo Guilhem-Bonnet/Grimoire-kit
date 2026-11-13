@@ -17,7 +17,7 @@ mécaniques répondent.
 from __future__ import annotations
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, Route, expect
 
 from .conftest import open_atelier, open_tree_space
 
@@ -525,10 +525,42 @@ def test_la_palette_atteint_les_fichiers_de_source(workspace: Page) -> None:
     workspace.locator("body").press("ControlOrMeta+k")
     workspace.wait_for_selector("#palette:not([hidden])")
     workspace.locator("#palette-input").fill("_grimoire/kit/agents")
-    workspace.wait_for_function("() => document.querySelectorAll('#palette-list li').length > 0")
+    # Les fichiers sont demandés à la première ouverture : la liste porte une
+    # ligne d'attente avant eux, compter les `li` ne prouve donc rien.
+    workspace.wait_for_function(
+        "() => [...document.querySelectorAll('#palette-list .lbl')].some((el) => el.textContent.startsWith('Fichier'))"
+    )
 
-    hints = workspace.locator("#palette-list .lbl").all_inner_texts()
-    assert any(hint.startswith("Fichier") for hint in hints)
+    workspace.locator("body").press("Escape")
+
+
+def test_la_palette_ne_dit_pas_aucun_resultat_tant_que_les_fichiers_arrivent(workspace: Page) -> None:
+    """Tant que la liste des fichiers est en route, une recherche de chemin
+    sans autre correspondance annonce l'attente, pas « Aucun résultat » ; les
+    fichiers remplacent la ligne d'attente dès leur arrivée."""
+    held: list[Route] = []
+    workspace.route("**/api/workspace/files*", lambda route: held.append(route))
+
+    workspace.locator("body").press("ControlOrMeta+k")
+    workspace.wait_for_selector("#palette:not([hidden])")
+    workspace.locator("#palette-input").fill("_grimoire/kit/agents")
+
+    waiting = workspace.locator("#palette-list li.pal-empty")
+    expect(waiting).to_have_attribute("data-pending", "files")
+    expect(waiting).not_to_contain_text("Aucun résultat")
+
+    for _ in range(100):
+        if held:
+            break
+        workspace.wait_for_timeout(50)
+    assert held, "la palette n'a pas demandé la liste des fichiers"
+    for route in held:
+        route.continue_()
+    workspace.unroute("**/api/workspace/files*")
+    workspace.wait_for_function(
+        "() => [...document.querySelectorAll('#palette-list .lbl')].some((el) => el.textContent.startsWith('Fichier'))"
+    )
+    assert workspace.locator("#palette-list li.pal-empty").count() == 0
 
     workspace.locator("body").press("Escape")
 

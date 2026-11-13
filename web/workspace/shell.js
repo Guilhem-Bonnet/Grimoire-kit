@@ -2952,9 +2952,16 @@ function renderPalette(query) {
     }
   }
   if (!matches.length) {
-    list.append(mk('li', { role: 'presentation', class: 'pal-empty', text: query.trim()
-      ? `Aucun résultat pour « ${query.trim()} ».`
-      : 'Rien à proposer pour le moment.' }));
+    // Les fichiers arrivent à la première ouverture : tant que leur liste est
+    // en route, « Aucun résultat » serait faux pour qui cherche un chemin.
+    const filesPending = paletteFiles === null && paletteFilesLoading !== null;
+    let text = 'Rien à proposer pour le moment.';
+    if (query.trim()) {
+      text = filesPending ? 'Recherche dans les fichiers…' : `Aucun résultat pour « ${query.trim()} ».`;
+    }
+    const empty = mk('li', { role: 'presentation', class: 'pal-empty', text });
+    if (filesPending) empty.dataset.pending = 'files';
+    list.append(empty);
   }
   list._matches = matches;
   selectPaletteIndex(0, { scroll: false });
