@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.90.0] - 2026-11-13
+
+- feat(missions): les réponses humaines font jurisprudence (`autopilot.precedents: on`, `off` par défaut) : la dernière réponse humaine à une question de conduite écrite par le kit tranche les questions de la même classe (source `precedent`), sous les mêmes refus que la décision par défaut ; les précédents se relisent au ledger, expirent (`autopilot.precedent_days`), se listent et s'oublient par `grimoire task questions --precedents` / `--forget <id>` (canal humain), et chaque application apparaît dans « Décisions à revoir » (#1252)
+
 ## [3.89.0] - 2026-11-13
 
 - fix(hosts): le classement en lecture seule relit les mots résolus et refuse les formes qu'il ne sait pas lire — chaque segment est jugé sur ses mots une fois les guillemets retirés, donc un mot cité n'échappe plus à la règle de son verbe ; un mot que le shell peut encore changer (variable, joker ou accolades en tête, rappel d'historique) n'est admis que là où il ne peut pas devenir une option qui écrit, sauf la variable d'une boucle `for` dont les valeurs sont écrites en clair, dans le corps de cette boucle ; guillemets `$'…'`, parenthèse nue, substitution et antislash en fin de ligne font une mutation ; un `#` est lu comme commentaire et comme caractère ; `find`, `sort`, `uniq`, `tree`, `xxd`, `rg`, `ag`, `date` et `file` ont une règle d'options, `less` et `more` ne sont plus des verbes de lecture (#1249)
