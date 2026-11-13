@@ -21,7 +21,7 @@ pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; 
 <main>
 <h1>Décision humaine attestée</h1>
 <p>L&#x27;agent pose une question ; seule la réponse du canal humain rend la tâche.</p>
-<p class="meta">kit 3.84.0 · enregistrée le 2026-11-13T00:34:50Z · empreinte de sortie <code>8debd5c301f461e819b295aa79c2cf2e2c78ae55d6e31369f2d7618e91a32a83</code></p>
+<p class="meta">kit 3.87.0 · enregistrée le 2026-11-13T17:12:27Z · empreinte de sortie <code>1c2eff2020d6711d9d7e8f17f6f31d0ea3e1ff8a29088cd64afdc9c2ee332389</code></p>
 <section class="frame"><p class="cmd">$ grimoire task add &quot;Choisir base&quot; -a &quot;le choix est tranche par un humain&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
 OK GAO-choisir-base-001 — Choisir base (ready)
   vérifiabilité : V2 — critère sans verdict reconnu : &#x27;le choix est tranche par un humain&#x27;
@@ -32,7 +32,10 @@ retourne 0 »</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task claim GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → aucun — omets le paramètre model,
 garde celui de la session</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task ask GAO-choisir-base-001 &quot;Quelle base de données ?&quot; --option sqlite --option postgres<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,
-garde celui de la session</pre></section>
+garde celui de la session
+! question sans option recommandée : elle attendra une réponse humaine. Avec `--recommended
+&lt;option&gt;` (l&#x27;une des options proposées) et `--why &quot;&lt;raison&gt;&quot;`, le pilote automatique peut
+l&#x27;appliquer puis informer.</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task show GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>GAO-choisir-base-001 — Choisir base
   état    : waiting (board : blocked)
   accepte : le choix est tranche par un humain

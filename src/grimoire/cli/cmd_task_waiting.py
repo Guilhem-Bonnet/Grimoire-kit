@@ -51,17 +51,17 @@ def _agent_session() -> bool:
         return True
 
 
-def _warn_no_recommendation(recommended: bool, flag: str = "--recommended") -> None:
-    """Avertit l'agent qui pose une question bloquante sans dire l'option qu'il recommande ; la question est posée.
+def _warn_no_recommendation(recommended: bool, flags: tuple[str, str] = ("--recommended", "--why")) -> None:
+    """Avertit l'agent qui a posé une question bloquante sans dire l'option qu'il recommande ; la question est posée.
 
     Sans option recommandée, le pilote automatique n'a rien à appliquer par défaut : la question attend un humain.
     """
     if recommended or not _agent_session():
         return
     console.print(
-        f"[yellow]![/yellow] question sans option recommandée : repose-la avec `{flag} <option>` (l'une des options "
-        "proposées) et `--why \"<raison>\"` — le pilote automatique peut alors l'appliquer puis informer, au lieu "
-        "d'attendre une réponse humaine."
+        "[yellow]![/yellow] question sans option recommandée : elle attendra une réponse humaine. Avec "
+        f"`{flags[0]} <option>` (l'une des options proposées) et `{flags[1]} \"<raison>\"`, le pilote automatique "
+        "peut l'appliquer puis informer."
     )
 
 
@@ -171,7 +171,7 @@ def register(task_app: typer.Typer) -> None:
             except (GrimoireError, ValueError) as exc:
                 console.print(f"[red]✗[/red] {exc}")
                 raise typer.Exit(1) from exc
-            _warn_no_recommendation(bool(recommended.strip() or fields.get("recommendation")), "--recommend")
+            _warn_no_recommendation(bool(recommended.strip() or fields.get("recommendation")), ("--recommend", "--because"))
             return
         if not from_file and not (non_blocking or why or key or recommended):
             if not text.strip():

@@ -9,8 +9,8 @@
     "grimoire task add \"Tri sans check\" -a \"le rendu est elegant\" --ready",
     "grimoire task list"
   ],
-  "kit_version": "3.84.0",
-  "recorded_at": "2026-11-13T00:35:47Z",
+  "kit_version": "3.87.0",
+  "recorded_at": "2026-11-13T17:13:15Z",
   "output_sha256": "5e72c8fe32c9c1066b42298c838c6dccc73b9e16bf8cc7009ab0d52cd328d624",
   "frames": [
     {

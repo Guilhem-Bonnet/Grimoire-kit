@@ -5,40 +5,40 @@
       "id": "cloture-refusee-puis-acceptee",
       "title": "Clôture refusée, puis acceptée",
       "summary": "Sans reçu de revue, la clôture d'une tâche V2 est refusée ; elle passe une fois la revue écrite.",
-      "kit_version": "3.84.0",
-      "recorded_at": "2026-11-13T00:34:31Z",
+      "kit_version": "3.87.0",
+      "recorded_at": "2026-11-13T17:12:11Z",
       "output_sha256": "43d4c9bd6bd71f65641ff9fec9c6fa20600d7e7a71e822dad37199b5d8243b68"
     },
     {
       "id": "decision-humaine-attestee",
       "title": "Décision humaine attestée",
       "summary": "L'agent pose une question ; seule la réponse du canal humain rend la tâche.",
-      "kit_version": "3.84.0",
-      "recorded_at": "2026-11-13T00:34:50Z",
-      "output_sha256": "8debd5c301f461e819b295aa79c2cf2e2c78ae55d6e31369f2d7618e91a32a83"
+      "kit_version": "3.87.0",
+      "recorded_at": "2026-11-13T17:12:27Z",
+      "output_sha256": "1c2eff2020d6711d9d7e8f17f6f31d0ea3e1ff8a29088cd64afdc9c2ee332389"
     },
     {
       "id": "supersession",
       "title": "Supersession d'une décision",
       "summary": "Une décision remplacée n'est plus servie, mais reste lisible.",
-      "kit_version": "3.84.0",
-      "recorded_at": "2026-11-13T00:35:08Z",
+      "kit_version": "3.87.0",
+      "recorded_at": "2026-11-13T17:12:43Z",
       "output_sha256": "373a530818bf20f177d7206ff3fddf17301754edbad40ccc193b5294cdc9005a"
     },
     {
       "id": "rappel-au-claim",
       "title": "Rappel au claim",
       "summary": "Réclamer une tâche voisine d'une tâche close rappelle ce que le projet en sait.",
-      "kit_version": "3.84.0",
-      "recorded_at": "2026-11-13T00:35:28Z",
+      "kit_version": "3.87.0",
+      "recorded_at": "2026-11-13T17:13:00Z",
       "output_sha256": "9e0cc8314d85eadaf67fe6de790dca3f1c2d486971362983dfe60fbb893a9d29"
     },
     {
       "id": "tri-v0-v1-v2",
       "title": "Tri V0 / V1 / V2",
       "summary": "La vérifiabilité d'une tâche se lit à ses critères et à ses checks.",
-      "kit_version": "3.84.0",
-      "recorded_at": "2026-11-13T00:35:47Z",
+      "kit_version": "3.87.0",
+      "recorded_at": "2026-11-13T17:13:15Z",
       "output_sha256": "5e72c8fe32c9c1066b42298c838c6dccc73b9e16bf8cc7009ab0d52cd328d624"
     }
   ]

@@ -11,9 +11,9 @@
     "grimoire task answer GAO-choisir-base-001 sqlite",
     "grimoire task show GAO-choisir-base-001"
   ],
-  "kit_version": "3.84.0",
-  "recorded_at": "2026-11-13T00:34:50Z",
-  "output_sha256": "8debd5c301f461e819b295aa79c2cf2e2c78ae55d6e31369f2d7618e91a32a83",
+  "kit_version": "3.87.0",
+  "recorded_at": "2026-11-13T17:12:27Z",
+  "output_sha256": "1c2eff2020d6711d9d7e8f17f6f31d0ea3e1ff8a29088cd64afdc9c2ee332389",
   "frames": [
     {
       "kind": "run",
@@ -31,7 +31,7 @@
       "kind": "run",
       "command": "grimoire task ask GAO-choisir-base-001 \"Quelle base de données ?\" --option sqlite --option postgres",
       "exit_code": 0,
-      "output": "OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,\ngarde celui de la session"
+      "output": "OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,\ngarde celui de la session\n! question sans option recommandée : elle attendra une réponse humaine. Avec `--recommended\n<option>` (l'une des options proposées) et `--why \"<raison>\"`, le pilote automatique peut\nl'appliquer puis informer."
     },
     {
       "kind": "run",
