@@ -10,8 +10,10 @@ three points, and this module is the only place that knows them:
 - **tool names** — Gemini writes ``write_file``/``replace``/``read_file``/
   ``run_shell_command`` where the kit's policy engine classifies on its own
   Claude-shaped names (``Write``/``Edit``/``Read``/``Bash``). The table below is
-  explicit on purpose: an unknown tool is mapped to the shell class, the
-  strictest, rather than to an apparently harmless read;
+  explicit on purpose; an unknown tool is routed by its payload
+  (:func:`route_tool_call`) — a path field is a write on that path, a command
+  field is a shell call — and refused when it carries neither, rather than
+  being guessed into an apparently harmless read;
 - **verdicts** — a refusal is a top-level ``{"decision": "deny", "reason": …}``
   on stdout, and session-start context is ``additionalContext``.
 
@@ -81,6 +83,25 @@ GEMINI_TOOL_CLASSES: dict[str, str] = {
 #: anything a read or a write can, so refusing conservatively stays possible.
 UNKNOWN_TOOL_CLASS = TOOL_CLASS_EXECUTE
 
+#: Fields that carry a pending call's target path. Gemini's documented tools
+#: use ``file_path``; a third-party tool may name it ``absolute_path`` or
+#: ``target``. All of them denote an intended write, never a read.
+PATH_FIELDS: tuple[str, ...] = ("file_path", "absolute_path", "path", "target")
+
+#: Fields that carry a command line (the shell class's own evidence).
+COMMAND_FIELDS: tuple[str, ...] = ("command", "cmd", "commandLine", "script")
+
+
+class UnjudgeableInputError(ValueError):
+    """A hook payload the wire layer refuses to translate into a decision.
+
+    Raised only for Gemini, and only where the alternative is silently letting
+    an action through: an event the host did not name, a tool event without a
+    tool, or a tool with neither a command line nor a target path. The hook
+    entry points turn it into exit code 2 on a blocking event (fail closed).
+    """
+
+
 #: Reason carried when a decision refuses without wording one. Gemini requires
 #: ``reason`` on a denial, and an empty one would be a refusal nobody can read.
 DEFAULT_DENY_REASON = "[Grimoire] action refusée par la politique du projet."
@@ -98,13 +119,56 @@ def event_from_gemini(name: str) -> HookEvent | None:
 def canonical_tool_name(name: str) -> str:
     """Map a Gemini tool name to the kit's tool class.
 
-    Unknown names — and an empty name, which the host only sends outside tool
-    events — map to :data:`UNKNOWN_TOOL_CLASS`. The caller keeps the original
-    name in ``HookInput.raw`` for the trace.
+    Unknown names map to :data:`UNKNOWN_TOOL_CLASS`; an empty name — which the
+    host only sends outside tool events — stays empty. On a tool event, prefer
+    :func:`route_tool_call`, which reads the payload and refuses to guess.
+    The caller keeps the original name in ``HookInput.raw`` for the trace.
     """
     if not name.strip():
         return ""
     return GEMINI_TOOL_CLASSES.get(name.strip().lower(), UNKNOWN_TOOL_CLASS)
+
+
+def route_tool_call(tool_name: str, tool_input: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Route a pending ``BeforeTool`` call to a kit class, or refuse to guess.
+
+    A known Gemini tool maps through :data:`GEMINI_TOOL_CLASSES`. For a tool the
+    table does not know, the *payload* decides the class rather than the name:
+
+    - a path field (:data:`PATH_FIELDS`) means a file write on that path — the
+      path is copied to ``file_path`` so the policy engine and the authority
+      guard see the target they already know how to read;
+    - a command field (:data:`COMMAND_FIELDS`) means a shell command, as before;
+    - neither means the call cannot be judged: :class:`UnjudgeableInputError` is
+      raised, and the hook fails closed instead of letting it through.
+
+    An empty ``tool_name`` on a tool event is the same refusal: there is no
+    class to route to. The caller decides what an unjudgeable input means
+    (exit 2 on a blocking event).
+    """
+    name = tool_name.strip()
+    if not name:
+        raise UnjudgeableInputError("tool_name vide ou absent sur un événement d'outil")
+    known = GEMINI_TOOL_CLASSES.get(name.lower())
+    if known is not None:
+        return known, tool_input
+    target = next(
+        (
+            value.strip()
+            for key in PATH_FIELDS
+            if isinstance(value := tool_input.get(key), str) and value.strip()
+        ),
+        "",
+    )
+    if target:
+        declared = tool_input.get("file_path")
+        file_path = declared if isinstance(declared, str) and declared.strip() else target
+        return TOOL_CLASS_WRITE, {**tool_input, "file_path": file_path}
+    if any(isinstance(tool_input.get(key), str) and tool_input[key].strip() for key in COMMAND_FIELDS):
+        return UNKNOWN_TOOL_CLASS, tool_input
+    raise UnjudgeableInputError(
+        f"outil inconnu « {name} » sans commande ni chemin : aucune classe ne peut être déduite"
+    )
 
 
 def is_refusal(decision: Decision) -> bool:

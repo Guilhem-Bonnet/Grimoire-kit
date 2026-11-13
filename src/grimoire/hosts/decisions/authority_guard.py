@@ -30,13 +30,16 @@ vecteurs connus pour fabriquer cette preuve :
   d'autorité du mandat de l'orchestrateur et la clé de contrôle du cockpit. Refusé quel que soit le profil, par
   les mêmes voies d'écriture que le journal (Write, Edit, NotebookEdit, redirection, ``cp``/``mv``/``tee``/
   ``sed -i``, ``python -c``). Le kit y écrit par son propre code, hors outil d'agent ; la limite résiduelle (un
-  script arbitraire) est écrite à :data:`CONTROL_ZONE`. Le refus reste large : une commande qui ne fait que
-  *citer* la zone (message de commit, corps d'issue, heredoc écrit vers un autre fichier) est refusée aussi,
-  par prudence. Un refus révoque le mandat (``revokes``) **sauf** si la mention est prouvée inoffensive par une
-  liste blanche stricte (:func:`is_harmless_mention` : valeur d'une option de prose de ``git``/``gh``, corps de
-  heredoc vers ``cat > f``/``git commit -F -``/``gh --body-file -``, opérande d'un lecteur pur) ; tout ce
-  qu'elle ne sait pas lire révoque (#982). Viser le journal du mandat ou la clé du cockpit révoque tous les
-  mandats du poste (``revokes_all``, :func:`touches_mandate_authority`) ;
+  script arbitraire) est écrite à :data:`CONTROL_ZONE`. Le refus reste large : une commande qui lit la zone ou
+  ne fait que la *citer* (message de commit par heredoc, corps d'issue, ``ls``, ``tail``) est refusée aussi.
+  Depuis #1173, c'est la **conséquence** qui dépend de ce que fait la commande : le refus ne révoque le mandat
+  (``revokes``) que pour une écriture **prouvée** visant la zone (:func:`grimoire.hosts.decisions.write_proof
+  .proves_write` : redirection, ``tee``, ``sed -i``, ``cp``/``mv``/``rm``…, ``python`` qui écrit) ; tout le
+  reste — lecture, mention, forme incertaine ou illisible — est refusé **sans** révocation, et le message le
+  dit. Une seule forme passe, par liste blanche (:func:`is_text_only_mention`) : un segment unique ``gh``,
+  ``git`` ou ``grimoire`` où la zone n'apparaît que dans la valeur d'une option de texte. Viser le journal du
+  mandat ou la clé du cockpit par une écriture prouvée révoque tous les mandats du poste (``revokes_all``,
+  :func:`touches_mandate_authority`) ;
 - ``ledger-snapshot`` (K13) — écrire ``ledger.snapshot.json``, l'instantané du rejeu du
   ledger : refusé quel que soit le profil. Ce n'est pas une preuve d'autorité, c'est un
   cache que le ledger restaure *sans rejouer* le préfixe qu'il couvre ; son hash ne lie que
@@ -57,6 +60,7 @@ import ast
 import contextlib
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from itertools import pairwise
@@ -81,6 +85,7 @@ __all__ = [
     "ForgeryVector",
     "forgery_vector",
     "is_harmless_mention",
+    "is_text_only_mention",
     "names_zone_secret",
     "touches_mandate_authority",
 ]
@@ -163,9 +168,11 @@ _USER_PROMPT_KEY = "userpromptsubmit"
 class ForgeryVector:
     """Un vecteur reconnu : son code, ce qu'il viserait, s'il ne compte qu'en governed, et s'il révoque.
 
-    ``revokes`` (#982) : vrai pour tout refus dans la zone de contrôle, sauf une mention prouvée inoffensive
-    (:func:`is_harmless_mention`) — refusée, mais le mandat tient. ``revokes_all`` : la cible peut être le journal
-    du mandat ou la clé du cockpit, qui forgent un mandat pour n'importe quel projet ; tous les mandats tombent.
+    ``revokes`` (#982, #1173) : vrai seulement pour une écriture prouvée dans la zone de contrôle — le chemin
+    d'un outil d'écriture, ou une commande que :func:`grimoire.hosts.decisions.write_proof.proves_write`
+    reconnaît. Une lecture, une mention ou une forme illisible est refusée, mais le mandat tient.
+    ``revokes_all`` : la cible peut être le journal du mandat ou la clé du cockpit, qui forgent un mandat pour
+    n'importe quel projet ; tous les mandats tombent.
     """
 
     code: str
@@ -370,13 +377,13 @@ def _names_control_zone_command(command: str) -> bool:
     return False
 
 
-# ── Mention inoffensive : la seule qui ne révoque pas (#982) ─────────────────
+# ── Mention prouvée inoffensive (#982, #1125) ────────────────────────────────
 #
-# Le refus lit la commande entière, heredocs et textes cités compris (échec fermé). La révocation, elle, coupe
-# toute l'autonomie jusqu'à un tour humain ; une prose (message de commit, corps d'issue) qui cite la zone ne doit
-# pas la déclencher. Mais reconnaître une *écriture* par analyse de texte échoue ouvert : variable, ``$(…)``,
-# ``| bash``, préfixe ``sudo -u``, écrivain non listé. On inverse donc la charge : on révoque **sauf** si la
-# mention est prouvée inoffensive par une liste blanche stricte. Tout ce qu'elle ne sait pas lire révoque.
+# Liste blanche stricte de ce qu'une commande peut faire d'un fichier protégé sans l'écrire : le citer dans de
+# la prose, le lire. Elle décide aujourd'hui d'une seule chose : laisser passer la lecture ou la citation de
+# l'instantané du ledger (``snapshot=True``, #1125). Pour la zone de contrôle, elle ne décide plus de la
+# révocation (#1173) : celle-ci suit la preuve d'écriture (:mod:`.write_proof`), et la commande qui nomme la
+# zone reste refusée sauf simple mention (:func:`is_text_only_mention`). Le prédicat reste public et testé.
 
 #: Lecteurs purs : la zone peut être un de leurs opérandes (``cat`` seulement sans redirection en écriture).
 _READERS = frozenset({"grep", "egrep", "fgrep", "rg", "cat", "ls", "head", "tail", "wc"})
@@ -737,7 +744,8 @@ def is_harmless_mention(command: str, *, snapshot: bool = False) -> bool:
     écriture). Chaque segment est un programme de la liste blanche, sans préfixe ni assignation ; ``cd`` ne mène
     pas sous ``~/.grimoire`` ; aucune redirection en écriture ne l'atteint. Tout le reste — ``$``, ``$(…)``,
     backtick, ``eval``, ``| bash``, ``<(…)``, ``source``, guillemet non fermé, programme ou préfixe inconnu —
-    rend faux : l'appelant révoque (échec fermé). Une exception ici rend faux aussi.
+    rend faux (échec fermé). Une exception ici rend faux aussi. Depuis #1173 ce verdict ne décide plus de la
+    révocation du mandat (voir :func:`forgery_vector`) ; il décide encore de la lecture de l'instantané.
 
     ``snapshot=True`` (#1125) : même liste blanche, appliquée à l'instantané du ledger — ``reaches`` y compte les
     mots qui nomment un fichier protégé, et un script python lu sur stdin (heredoc quoté) passe s'il est prouvé
@@ -771,8 +779,243 @@ def is_harmless_mention(command: str, *, snapshot: bool = False) -> bool:
             if not _harmless_segment(seg, [reaches(w) for w in seg.words], python_reads=snapshot):
                 return False
         return True
-    except Exception:  # _Unreadable compris : ce qu'on ne sait pas lire révoque
+    except Exception:  # _Unreadable compris : ce qu'on ne sait pas lire n'est pas prouvé inoffensif
         return False
+
+
+# ── Simple mention : la seule commande nommant la zone qui passe (#1173) ─────
+#
+# Une commande qui nomme la zone est refusée. L'exception est étroite et en liste blanche : le texte qui cite
+# la zone est la valeur d'une option de texte de ``gh``, ``git`` ou ``grimoire``, dans un segment unique que le
+# shell ne réinterprète pas. Retirer la mention donne alors une commande que la garde laissait déjà passer ;
+# la mention elle-même est inerte. Tout écart rend faux, et l'appelant refuse (sans révoquer).
+
+#: ``programme -> (sous-commandes admises, options dont la valeur est du texte)``. Les sous-commandes sont
+#: celles où ces options prennent bien une chaîne : ``-m`` est un booléen pour ``git checkout``/``git branch``,
+#: ``--comment`` pour ``gh pr review``. Pour ``grimoire``, les trois options sont des ``str`` dans toute la CLI.
+_MENTION_GRAMMAR: dict[str, tuple[frozenset[tuple[str, ...]], frozenset[str]]] = {
+    "git": (frozenset({("commit",), ("tag",)}), frozenset({"-m", "--message"})),
+    "gh": (
+        frozenset((resource, verb) for resource in ("pr", "issue") for verb in ("create", "comment", "edit", "close")),
+        frozenset({"--body", "--title", "--comment", "--reason"}),
+    ),
+    "grimoire": (frozenset(), frozenset({"--reason", "--description", "--title"})),
+}
+#: Options qui lisent un fichier : leur valeur n'est jamais un texte, et ne nomme jamais la zone.
+_MENTION_FILE_OPTIONS = frozenset({"--body-file", "-F", "--file", "--description-file", "--template", "--from"})
+#: Hors guillemets, un de ces caractères fait plus d'un segment, une redirection ou un joker que le shell développe.
+_MENTION_FORBIDDEN = frozenset(";|&<>*?[")
+
+
+def _bare_metachar(command: str) -> bool:
+    """Vrai si *command* porte un caractère de contrôle (saut de ligne compris) ou n'est pas de l'UTF-8, ou porte
+    hors guillemets un séparateur, une redirection ou un joker."""
+    command.encode("utf-8")  # un substitut isolé lève : l'appelant rend faux
+    # Caractères de contrôle (C0, DEL, C1) et séparateurs de ligne Unicode : jamais dans une simple mention.
+    if any(ch != "\t" and unicodedata.category(ch) in ("Cc", "Zl", "Zp") for ch in command):
+        return True
+    quote = ""
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch in _MENTION_FORBIDDEN:
+            return True
+        i += 1
+    return bool(quote)  # guillemet jamais fermé : illisible
+
+
+def is_text_only_mention(command: str) -> bool:
+    """Vrai seulement si *command* ne fait que citer la zone dans la valeur d'une option de texte (#1173).
+
+    Toutes ces conditions tiennent, sinon faux : un seul segment — ni ``;``, ``&&``, ``||``, ``|``, ``&``, saut de
+    ligne, redirection, substitution de commande ou de processus, heredoc, variable, joker ; le premier mot est
+    exactement ``gh``, ``git`` ou ``grimoire`` (une enveloppe ``env``/``sudo``/… ou un préfixe ``VAR=x`` : pas
+    d'exception) suivi d'une sous-commande de :data:`_MENTION_GRAMMAR` ; chaque mot qui nomme la zone (par son
+    texte ou par son chemin résolu, ``~/.grimoire`` compris) est la valeur d'une option de texte connue
+    (``--body texte``, ``--body=texte``) ; aucune option de fichier (``--body-file``, ``-F``,
+    ``--description-file``) ne la nomme ; pas de ``--`` ; une option inconnue ne précède jamais directement une
+    option de texte (elle pourrait la prendre pour valeur, et le texte deviendrait un opérande).
+
+    Une exception d'analyse, une commande vide ou sans mot qui nomme la zone rendent faux : jamais une
+    autorisation par défaut.
+    """
+    try:
+        if _bare_metachar(command):
+            return False
+        segments = _parse_strict(command)
+        if len(segments) != 1 or segments[0].redirects or segments[0].heredocs:
+            return False
+        words = segments[0].words
+        grammar = _MENTION_GRAMMAR.get(words[0]) if words else None
+        if grammar is None:
+            return False
+        subcommands, text_options = grammar
+        if subcommands and not any(tuple(words[1 : 1 + len(sub)]) == sub for sub in subcommands):
+            return False
+        long_text = tuple(o + "=" for o in text_options if o.startswith("--"))
+        zones, grimoire, home = _control_zones()
+        dirs = [_cwd()]
+
+        def names(word: str) -> bool:
+            if _names_protected(word) == CONTROL_ZONE_MARKER:
+                return True
+            return any(
+                any(_reaches(normal, real, z) for z in zones) or _inside(normal, grimoire) or _inside(real, grimoire)
+                for normal, real in _resolutions(word, dirs, home)
+            )
+
+        text_values: set[int] = set()
+        i = 1
+        while i < len(words):
+            word = words[i]
+            if word == "--":
+                return False
+            if word in text_options:
+                if i + 1 >= len(words):
+                    return False
+                text_values.add(i + 1)
+                i += 2
+            elif word.startswith(long_text):
+                text_values.add(i)
+                i += 1
+            elif word in _MENTION_FILE_OPTIONS:
+                i += 2  # sa valeur est un fichier lu : jamais dans ``text_values``
+            else:
+                following = words[i + 1] if i + 1 < len(words) else ""
+                if word.startswith("-") and "=" not in word and (following in text_options or following.startswith(long_text)):
+                    return False  # option inconnue : l'option de texte qui suit serait peut-être sa valeur
+                i += 1
+        mentions = {index for index, word in enumerate(words) if names(word)}
+        return bool(mentions) and mentions <= text_values
+    except Exception:  # _Unreadable compris : ce qu'on ne sait pas lire reste refusé
+        return False
+
+
+class _ZoneTarget:
+    """La zone de contrôle vue par :mod:`.write_proof` : un mot la désigne par son texte ou son chemin résolu."""
+
+    def __init__(self) -> None:
+        self.zones, self.grimoire, self.home = _control_zones()
+        self.cwd = _cwd()
+
+    def _dirs(self, cd: tuple[str, ...]) -> list[str]:
+        dirs = [self.cwd]
+        for target in cd:
+            dirs.extend(real for _normal, real in _resolutions(target, list(dirs), self.home))
+        return list(dict.fromkeys(dirs))
+
+    def names(self, word: str, cd: tuple[str, ...]) -> bool:
+        if _names_protected(word) == CONTROL_ZONE_MARKER:
+            return True
+        resolved = _resolutions(word, self._dirs(cd), self.home)
+        return any(_reaches(normal, real, z) for normal, real in resolved for z in self.zones)
+
+    def carries(self, word: str, cd: tuple[str, ...]) -> bool:
+        return any(self.grimoire in pair for pair in _resolutions(word, self._dirs(cd), self.home))
+
+
+#: Ce que dit tout refus sans révocation (#1173) : rien n'est tombé, et où lire ce que la commande cherchait.
+_NOT_REVOKED_NOTE = (
+    "rien n'a été révoqué, le mandat n'est pas révoqué. L'état du mandat se lit par `grimoire autonomy mandate "
+    "status`, celui du pilote automatique par `grimoire autonomy autopilot status` ; un texte qui cite la zone "
+    "s'écrit par l'outil Write puis se passe en fichier (`git commit -F`, `--body-file`)"
+)
+
+
+def _names_zone_text(command: str) -> bool:
+    """Vrai si le texte de *command* porte le chemin de la zone de ce poste : absolu, résolu, ``~/…``, ``$HOME/…``.
+
+    Plus étroit que :data:`CONTROL_ZONE` (qui reconnaît la zone de n'importe quel HOME et les noms de ses
+    fichiers) : c'est ce qui vaut aussi pour une commande classée en lecture seule, que la garde ne lisait pas.
+    """
+    zones, _grimoire, home = _control_zones()
+    text = _norm(command)
+    spellings = {_norm(zone) for zone in zones}
+    for zone in zones:
+        if _inside(zone, home) and zone != home:
+            relative = _norm(zone[len(home) :]).lstrip("/")
+            spellings.update(f"{prefix}/{relative}" for prefix in ("~", "$HOME", "${HOME}"))
+    return any(re.search(re.escape(spelling) + r"(?![A-Za-z0-9_.-])", text) for spelling in spellings)
+
+
+def _zone_vector(command: str, *, mutating: bool) -> ForgeryVector | None:
+    """Le vecteur ``control-zone`` de *command*, ou ``None`` si elle ne nomme pas la zone ou ne fait que la citer.
+
+    La zone est nommée : par le motif large :data:`CONTROL_ZONE` ou le nom d'un de ses fichiers (commande qui
+    peut muter, heredocs et textes cités compris — comme avant #1173) ; par le chemin de la zone de ce poste
+    dans le texte, ou par un opérande dont le chemin résolu l'atteint (toute commande, lecture seule comprise).
+    Nommée : écriture prouvée, refus et révocation ; simple mention en liste blanche
+    (:func:`is_text_only_mention`), ``None`` ; tout le reste, refus sans révocation. Une erreur de lecture rend
+    un refus sans révocation, jamais ``None``.
+    """
+    marker = CONTROL_ZONE_MARKER
+    unproven = _write_vector(
+        marker,
+        f"commande qui nomme la zone de contrôle ({marker}) sans écriture prouvée (lecture, mention ou forme "
+        f"illisible) — refusée, {_NOT_REVOKED_NOTE}",
+        revokes=False,
+    )
+    try:
+        textual = (mutating and _names_protected(command) == marker) or _names_zone_text(command)
+        if not (textual or _names_control_zone_command(command)):
+            return None
+        from grimoire.hosts.decisions.write_proof import proves_write
+
+        if proves_write(command, _ZoneTarget()):
+            return _write_vector(
+                marker,
+                "commande qui écrit dans la zone de contrôle — écriture prouvée, le mandat est révoqué et un nouvel "
+                f"octroi demande un tour humain ({marker})",
+                revokes=True,
+                revokes_all=touches_mandate_authority(command),
+            )
+        return None if is_text_only_mention(command) else unproven
+    except Exception:  # illisible : refus sans révocation, jamais une autorisation
+        return unproven
+
+
+def _other_vector(command: str, *, mutating: bool) -> ForgeryVector | None:
+    """Les contrôles qui ne sont pas la zone de contrôle : journaux d'autorité, instantané, rejeu, reprise.
+
+    Évalués sur la commande entière, sans rien savoir de ce que la zone a décidé (#1173) : une commande qui cite
+    la zone et écrit le journal des tours humains est jugée ici comme si elle ne citait rien.
+    """
+    if mutating:
+        normalized = _norm(command)
+        marker = next((name for name in _PROTECTED if name in normalized), "")
+        # #1125 : l'instantané seulement lu ou cité dans de la prose, prouvé par la liste blanche, n'est pas refusé.
+        if marker == SNAPSHOT_FILENAME and is_harmless_mention(command, snapshot=True):
+            marker = ""
+        if marker:
+            return _write_vector(
+                marker,
+                f"commande qui écrit (ou peut écrire) un journal d'autorité ou l'instantané du ledger ({marker})",
+                revokes=False,
+            )
+    executed = [command_surface(command), *extract_c_bodies(command)]
+    if mutating and any(_names_hook_module(text) for text in executed):
+        return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
+    # Les programmes visés se lisent sur le texte non blanchi : un nom cité reste le nom lancé.
+    for text in (_strip_heredoc_bodies(command), *extract_c_bodies(command)):
+        for segment in _command_words(text):
+            for words in _word_variants(segment):
+                for name, args in _launched(words):
+                    if name == "grimoire-hook" or (
+                        name == "grimoire" and _is_host_hook(args) and _replays_prompt_event(command)
+                    ):
+                        return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
+                    if name == "claude" and any(_is_resume_flag(arg) for arg in args):
+                        return ForgeryVector(
+                            "session-resume", "reprise de session claude (--resume/-c/--session-id)", governed_only=True
+                        )
+    return None
 
 
 #: Ce qui, nommé par l'appel, peut frapper un mandat de *n'importe quel* projet : le journal du mandat (sa tête,
@@ -989,42 +1232,10 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
     command = facts.command
     if not command:
         return None
-    if facts.mutation is not MutationClass.READ_ONLY:
-        marker = _names_protected(command) or (CONTROL_ZONE_MARKER if _names_control_zone_command(command) else "")
-        if marker == CONTROL_ZONE_MARKER and is_harmless_mention(command):
-            # #982 : la zone n'est citée que dans de la prose ou une lecture, prouvé par la liste blanche. Refus
-            # prudent, sans révocation : le mandat reste actif.
-            return _write_vector(
-                marker,
-                f"commande qui cite la zone de contrôle ({marker}) dans un texte ou une lecture — refus prudent, "
-                "le mandat n'est pas révoqué ; écris ce texte par l'outil Write puis passe le fichier "
-                "(`git commit -F`, `--body-file`)",
-                revokes=False,
-            )
-        # #1125 : l'instantané seulement lu ou cité dans de la prose, prouvé par la liste blanche, n'est pas refusé.
-        if marker == SNAPSHOT_FILENAME and is_harmless_mention(command, snapshot=True):
-            marker = ""
-        if marker:
-            return _write_vector(
-                marker,
-                f"commande qui écrit (ou peut écrire) un journal d'autorité ou l'instantané du ledger ({marker})",
-                revokes=True,
-                revokes_all=touches_mandate_authority(command),
-            )
-    executed = [command_surface(command), *extract_c_bodies(command)]
-    if facts.mutation is not MutationClass.READ_ONLY and any(_names_hook_module(text) for text in executed):
-        return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
-    # Les programmes visés se lisent sur le texte non blanchi : un nom cité reste le nom lancé.
-    for text in (_strip_heredoc_bodies(command), *extract_c_bodies(command)):
-        for segment in _command_words(text):
-            for words in _word_variants(segment):
-                for name, args in _launched(words):
-                    if name == "grimoire-hook" or (
-                        name == "grimoire" and _is_host_hook(args) and _replays_prompt_event(command)
-                    ):
-                        return ForgeryVector("hook-replay", "rejeu du hook UserPromptSubmit", governed_only=True)
-                    if name == "claude" and any(_is_resume_flag(arg) for arg in args):
-                        return ForgeryVector(
-                            "session-resume", "reprise de session claude (--resume/-c/--session-id)", governed_only=True
-                        )
-    return None
+    mutating = facts.mutation is not MutationClass.READ_ONLY
+    # #1173 : deux verdicts indépendants. Les autres contrôles (journaux d'autorité, instantané, rejeu du hook,
+    # reprise de session) sont rendus d'abord et ne savent rien de la zone : la simple mention que la zone laisse
+    # passer (``None``) ne peut donc en court-circuiter aucun. Un refus de la zone prime — il vaut quel que soit
+    # le profil, et lui seul peut révoquer.
+    other = _other_vector(command, mutating=mutating)
+    return _zone_vector(command, mutating=mutating) or other

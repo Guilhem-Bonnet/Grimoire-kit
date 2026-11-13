@@ -12,8 +12,11 @@ Deux règles, sans changer ce que la page reçoit :
 - **même empreinte, même réponse** : la réponse est gardée avec l'empreinte du pouls
   (:func:`grimoire.tools.workspace_pulse.fingerprint_of`, des ``stat`` seulement) ; tant qu'elle ne bouge pas,
   elle est resservie. Une réponse n'a jamais plus de :data:`MAX_AGE_SECONDS` : ce qui dépend de l'horloge
-  (vivacité d'une session, « depuis ») reste vrai. Jamais de délai minimal : une page qui relit après un
-  changement doit le voir, elle ne redemandera pas ;
+  (vivacité d'une session, « depuis ») reste vrai. Les lectures dont la source n'est pas dans l'empreinte du
+  pouls — journaux de session et sonde d'hôte de ``fleet/live``, sonde et horloge de ``capacity``, board et
+  gates de ``evidence`` — sont bornées plus court, à :data:`FRESH_MAX_AGE_SECONDS`
+  (:func:`max_age_seconds`) : une session morte ne reste pas « vivante » quinze secondes. Jamais de délai
+  minimal : une page qui relit après un changement doit le voir, elle ne redemandera pas ;
 - **un seul calcul en vol par clé** : deux onglets qui demandent la même lecture au même moment attendent le
   même calcul, et reçoivent la même réponse — ou la même erreur. Les rafales, elles, sont regroupées par la
   page (``web/workspace/live.js``).
@@ -39,22 +42,38 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "FRESH_MAX_AGE_SECONDS",
     "MAX_AGE_SECONDS",
     "MAX_ENTRIES",
     "MAX_TOTAL_BYTES",
     "cacheable_read",
     "cached_read",
     "clear",
+    "max_age_seconds",
     "stats",
 ]
 
 #: Âge au-delà duquel une réponse est recalculée, empreinte immobile ou non.
 MAX_AGE_SECONDS = 15.0
+#: Âge des lectures qui suivent l'instant et l'hôte, pas seulement le disque : ce que lisent ``fleet/live``
+#: (journaux de session de l'hôte, sonde des agents vivants), ``capacity`` (sonde et horloge) et ``evidence``
+#: (board et gates) n'est pas dans l'empreinte du pouls. Sans borne courte, une session morte resterait
+#: « vivante » jusqu'à :data:`MAX_AGE_SECONDS`.
+FRESH_MAX_AGE_SECONDS = 3.0
+#: Suffixes des routes ci-dessus : la route complète porte le préfixe de l'API.
+FRESH_ROUTE_SUFFIXES = ("/fleet/live", "/capacity", "/evidence")
 #: Clés gardées au plus (route, projet, paramètres) ; la plus ancienne sort.
 MAX_ENTRIES = 64
 #: Octets gardés au plus, toutes réponses confondues (estimation récursive : conteneurs, chaînes, scalaires).
 #: 48 Mio laissent tenir le board annoté de quatre projets enrôlés (~1 Mo chacun) et bornent le reste.
 MAX_TOTAL_BYTES = 48 * 1024 * 1024
+
+
+def max_age_seconds(route: str) -> float:
+    """L'âge maximal d'une réponse de *route* : court si elle suit l'instant, :data:`MAX_AGE_SECONDS` sinon."""
+    if any(route.endswith(suffix) for suffix in FRESH_ROUTE_SUFFIXES):
+        return FRESH_MAX_AGE_SECONDS
+    return MAX_AGE_SECONDS
 
 
 def _first(query: Mapping[str, list[str]], key: str) -> str | None:
@@ -151,21 +170,23 @@ def stats() -> dict[str, int]:
         return {"entries": len(_entries), "bytes": _total_bytes}
 
 
-def _fresh(entry: _Entry | None, fingerprint: str, now: float) -> bool:
-    return entry is not None and entry.fingerprint == fingerprint and now - entry.at < MAX_AGE_SECONDS
+def _fresh(entry: _Entry | None, fingerprint: str, now: float, max_age: float) -> bool:
+    return entry is not None and entry.fingerprint == fingerprint and now - entry.at < max_age
 
 
 def _compute_and_store(
     key: tuple[str, ...],
     compute: Callable[[], Any],
     fingerprint: Callable[[], str],
+    max_age: float,
+    clock: Callable[[], float],
 ) -> Any:
     """Le calcul du vol : sert l'entrée fraîche s'il y en a une, sinon calcule puis la garde."""
     global _total_bytes
     mark = fingerprint()
     with _lock:
         entry = _entries.get(key)
-        if _fresh(entry, mark, time.monotonic()):
+        if _fresh(entry, mark, clock(), max_age):
             _entries.move_to_end(key)
             return entry.value  # type: ignore[union-attr]
         started = _generation
@@ -177,7 +198,7 @@ def _compute_and_store(
         previous = _entries.pop(key, None)
         if previous is not None:
             _total_bytes -= previous.size
-        _entries[key] = _Entry(mark, time.monotonic(), value, size)
+        _entries[key] = _Entry(mark, clock(), value, size)
         _total_bytes += size
         _entries.move_to_end(key)
         # Deux bornes : le nombre d'entrées et les octets gardés. L'entrée la plus ancienne sort d'abord ; une
@@ -196,8 +217,14 @@ def cached_read(
     query: dict[str, list[str]],
     compute: Callable[[], Any],
     fingerprint: Callable[[], str],
+    *,
+    clock: Callable[[], float] | None = None,
 ) -> Any:
     """La réponse de *route* pour *project_root* et *query* : gardée si l'empreinte n'a pas bougé, sinon *compute*.
+
+    L'âge maximal dépend de la route (:func:`max_age_seconds`) : :data:`FRESH_MAX_AGE_SECONDS` pour ce qui suit
+    l'instant et l'hôte, :data:`MAX_AGE_SECONDS` pour le reste. *clock* est injectable — les tests ne
+    dépendent jamais de l'horloge réelle ; par défaut ``time.monotonic``, résolu à l'appel.
 
     Un seul vol par clé : les appelants arrivés pendant le calcul attendent sa réponse — ou son erreur, la même
     pour tous — au lieu de recalculer chacun de leur côté. Le vol n'est jamais une entrée du cache : une erreur
@@ -218,7 +245,9 @@ def cached_read(
             raise flight.error
         return flight.value
     try:
-        value = _compute_and_store(key, compute, fingerprint)
+        value = _compute_and_store(
+            key, compute, fingerprint, max_age_seconds(route), clock if clock is not None else time.monotonic
+        )
         flight.value = value
         return value
     except BaseException as exc:
