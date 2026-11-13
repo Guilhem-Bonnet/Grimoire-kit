@@ -28,7 +28,6 @@ from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
-from rich.table import Table
 
 from grimoire.cli import cmd_setup
 from grimoire.cli.doctor_acp import check_acp_hosts
@@ -36,6 +35,7 @@ from grimoire.cli.doctor_hooks import check_hook_commands, check_hook_path
 from grimoire.cli.doctor_instructions import check_instruction_files
 from grimoire.cli.doctor_mcp import check_mcp_processes, check_mcp_spec_http
 from grimoire.cli.env_checks import EnvCheck
+from grimoire.cli.up_report import render_report
 from grimoire.core import layout
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError, GrimoireError
@@ -1230,45 +1230,6 @@ def _step_doctor_summary(state: _UpState, target: Path, *, dry_run: bool, blocke
     return checks
 
 
-_STATUS_STYLE = {
-    "done": "[green]done[/green]",
-    "skipped": "[yellow]skipped[/yellow]",
-    "failed": "[red]failed[/red]",
-    "planned": "[cyan]planned[/cyan]",
-}
-
-
-def _render_report(
-    state: _UpState,
-    checks: list[EnvCheck],
-    *,
-    project_name: str,
-    dry_run: bool,
-) -> None:
-    """Text report: step table, project summary, next actions only on failure."""
-    table = Table(title="grimoire up — summary", show_header=True, padding=(0, 2))
-    table.add_column("Step", style="bold")
-    table.add_column("Status")
-    table.add_column("Detail")
-    for step in state.steps:
-        table.add_row(step.step, _STATUS_STYLE.get(step.status, step.status), step.detail)
-    console.print(table)
-    console.print(f"\n[bold]Project:[/bold] {project_name}")
-
-    if dry_run:
-        console.print("[dim]dry-run: nothing was written.[/dim]")
-
-    failed_steps = [s for s in state.steps if s.status == "failed"]
-    if failed_steps:
-        console.print("\n[bold]Next actions:[/bold]")
-        for step in failed_steps:
-            console.print(f"  [red]FAIL[/red] {step.step}: {step.detail}")
-        for chk in checks:
-            if not chk.passed and chk.remedy:
-                console.print(f"       remedy: [cyan]{chk.remedy}[/cyan]")
-        console.print("  Run [cyan]grimoire doctor .[/cyan] for the full diagnosis.")
-
-
 _up_path_arg = typer.Argument(Path(), help="Project root.")
 _up_interactive_opt = typer.Option(False, "--interactive", "-i", help="Run the full init wizard instead of express mode.")
 _up_name_opt = typer.Option("", "--name", help="Project name (default: directory name).")
@@ -1460,6 +1421,10 @@ def up(
 
         proof = run_prove_step(state, target, started=started, dry_run=dry_run, no_standard=no_standard)
 
+    from grimoire.hosts.parity import detected_host_parity
+
+    host_parity = detected_host_parity(target)
+
     # Legacy status info (kept for JSON consumers of the previous `up`).
     agents_count = 0
     directories_missing: list[str] = []
@@ -1483,6 +1448,7 @@ def up(
             "steps": [{"step": s.step, "status": s.status, "detail": s.detail} for s in state.steps],
             "agents_count": agents_count,
             "directories_missing": directories_missing,
+            "host_parity": host_parity,
             "project_kind": detect_project_kind(target).to_dict(),
             "env": [
                 {"name": c.name, "passed": c.passed, "level": c.level, "detail": c.detail, "remedy": c.remedy}
@@ -1492,7 +1458,14 @@ def up(
         }
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _render_report(state, checks, project_name=project_name, dry_run=dry_run)
+        render_report(
+            state,
+            checks,
+            project_name=project_name,
+            dry_run=dry_run,
+            console=console,
+            host_parity=str(host_parity.get("line", "")),
+        )
 
     if state.failed:
         raise typer.Exit(1)

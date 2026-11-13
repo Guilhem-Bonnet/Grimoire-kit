@@ -342,6 +342,264 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
 
 
 # ---------------------------------------------------------------------------
+# Parité des fonctions de gouvernance : ce que chaque hôte fait réellement de
+# chacune. Une fonction livrée pour Claude Code peut rester absente ailleurs
+# sans que rien ne le dise ; cette table est ce « dire ». Trois états :
+#
+# - ``rich`` : la fonction est pleinement disponible sur cet hôte ;
+# - ``degraded`` : elle existe sous une forme réduite, la raison nomme la limite ;
+# - ``absent`` : elle n'y est pas exécutée, la raison nomme ce qui reste.
+#
+# La table est écrite à la main, pas déduite des profils : c'est le contrat
+# qu'un test exige (``tests/unit/hosts/test_host_parity_declared.py``). Ajouter
+# une fonction à :class:`GovernanceFunction` sans lui déclarer un état pour
+# chaque :class:`HostId` fait échouer la CI, et :func:`function_states` lève
+# ``KeyError`` au premier appel plutôt que de laisser un trou passer.
+# ---------------------------------------------------------------------------
+
+
+class GovernanceFunction(StrEnum):
+    """Une fonction de gouvernance attendue d'un hôte, nommée une fois pour tous."""
+
+    TOOL_GUARD = "tool_guard"
+    WRITE_TRACE = "write_trace"
+    TASK_RECALL = "task_recall"
+    COMMANDS = "commands"
+    PERSONAS = "personas"
+    MCP_SERVER = "mcp_server"
+    WORKER_LAUNCH = "worker_launch"
+    REVIEW = "review"
+    ARBITER = "arbiter"
+    PILOT = "pilot"
+
+
+GOVERNANCE_FUNCTIONS: tuple[GovernanceFunction, ...] = tuple(GovernanceFunction)
+
+#: Libellés affichés par ``grimoire host matrix`` et ``grimoire up``.
+GOVERNANCE_LABELS: dict[GovernanceFunction, str] = {
+    GovernanceFunction.TOOL_GUARD: "garde avant outil",
+    GovernanceFunction.WRITE_TRACE: "compteur d'écritures et clôture",
+    GovernanceFunction.TASK_RECALL: "rappel de tâche au début de session",
+    GovernanceFunction.COMMANDS: "commandes",
+    GovernanceFunction.PERSONAS: "personas",
+    GovernanceFunction.MCP_SERVER: "serveur MCP",
+    GovernanceFunction.WORKER_LAUNCH: "lancement de worker",
+    GovernanceFunction.REVIEW: "relecture",
+    GovernanceFunction.ARBITER: "arbitre",
+    GovernanceFunction.PILOT: "pilote",
+}
+
+
+class ParityLevel(StrEnum):
+    """Niveau de disponibilité d'une fonction de gouvernance sur un hôte."""
+
+    RICH = "rich"
+    DEGRADED = "degraded"
+    ABSENT = "absent"
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionState:
+    """État d'une fonction sur un hôte ; ``degraded`` et ``absent`` exigent leur raison."""
+
+    level: ParityLevel
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.level is not ParityLevel.RICH and not self.reason.strip():
+            msg = f"un état {self.level.value} sans raison ne dit rien : la raison est obligatoire"
+            raise ValueError(msg)
+        if self.level is ParityLevel.RICH and self.reason.strip():
+            msg = "un état rich n'a pas de raison : une limite se déclare degraded ou absent"
+            raise ValueError(msg)
+
+    @property
+    def rich(self) -> bool:
+        return self.level is ParityLevel.RICH
+
+    def to_dict(self) -> dict[str, str]:
+        return {"state": self.level.value, "reason": self.reason}
+
+
+_RICH = FunctionState(ParityLevel.RICH)
+
+
+def _degraded(reason: str) -> FunctionState:
+    return FunctionState(ParityLevel.DEGRADED, reason)
+
+
+def _absent(reason: str) -> FunctionState:
+    return FunctionState(ParityLevel.ABSENT, reason)
+
+
+#: Le kit ne lance des sessions de fond que par ``claude --bg`` (worker, relecteur, arbitre).
+_NO_FOREIGN_WORKER = "le kit ne lance des sessions de fond que par `claude --bg` : aucun worker sur cet hôte"
+_NO_FOREIGN_REVIEW = "la relecture s'exécute dans une session `claude --bg` : aucun relecteur sur cet hôte"
+_NO_FOREIGN_ARBITER = "l'arbitre est une session `claude --bg` : aucune session d'arbitrage sur cet hôte"
+_PILOT_SHARED = (
+    "le pilote du cockpit est un processus du kit, mais les sessions qu'il lance passent par `claude --bg`, "
+    "pas par cet hôte"
+)
+_NO_MCP_CONFIG = (
+    "le serveur est déclaré dans `.mcp.json` ; l'émetteur de cet hôte ne traduit pas cette configuration, "
+    "le branchement reste côté client"
+)
+
+
+def _prose_states(entrypoint: str) -> dict[GovernanceFunction, FunctionState]:
+    """État des fonctions sur un hôte en prose (Codex, Cursor) : règles écrites, rien d'exécuté."""
+    return {
+        GovernanceFunction.TOOL_GUARD: _absent(
+            f"aucun hook de cycle de vie : la politique d'outils n'est énoncée que dans {entrypoint}, opposable en CI"
+        ),
+        GovernanceFunction.WRITE_TRACE: _absent(
+            "ni PostToolUse ni Stop : aucun comptage d'écritures, aucune clôture bloquée"
+        ),
+        GovernanceFunction.TASK_RECALL: _absent("aucun SessionStart : le rappel de tâche n'est pas émis"),
+        GovernanceFunction.COMMANDS: _degraded(
+            f"pas de commandes natives ; chaque commande est l'invocation `grimoire host run <slug>` décrite dans {entrypoint}"
+        ),
+        GovernanceFunction.PERSONAS: _degraded(
+            f"pas de fichiers d'agent chargés ; les personas sont listées dans {entrypoint}, à lire et appliquer"
+        ),
+        GovernanceFunction.MCP_SERVER: _degraded(_NO_MCP_CONFIG),
+        GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+        GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+        GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+        GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+    }
+
+
+_CODEX_STATES = _prose_states("AGENTS.md")
+_CURSOR_STATES = _prose_states("les règles Cursor")
+
+_GEMINI_STATES: dict[GovernanceFunction, FunctionState] = {
+    # L'émetteur Gemini écrit `.gemini/settings.json` : BeforeTool refuse une
+    # action (`{"decision": "deny"}`), SessionStart informe, et les commandes
+    # TOML, sous-agents et `mcpServers` sont écrits (geminicli.com/docs lue le
+    # 2026-11-12, v0.64.0 annoncée ; la CLI n'est pas installée sur le poste).
+    GovernanceFunction.TOOL_GUARD: _RICH,
+    GovernanceFunction.WRITE_TRACE: _degraded(
+        "`AfterTool` compte les écritures, mais `AfterAgent`/`SessionEnd` ne bloquent pas la clôture "
+        "(non vérifié : la CLI n'est pas installée) — le rappel de clôture reste consultatif"
+    ),
+    GovernanceFunction.TASK_RECALL: _RICH,
+    GovernanceFunction.COMMANDS: _RICH,
+    GovernanceFunction.PERSONAS: _RICH,
+    GovernanceFunction.MCP_SERVER: _RICH,
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
+
+_COPILOT_STATES: dict[GovernanceFunction, FunctionState] = {
+    GovernanceFunction.TOOL_GUARD: _RICH,
+    GovernanceFunction.WRITE_TRACE: _RICH,
+    GovernanceFunction.TASK_RECALL: _RICH,
+    GovernanceFunction.COMMANDS: _RICH,
+    GovernanceFunction.PERSONAS: _RICH,
+    GovernanceFunction.MCP_SERVER: _degraded(_NO_MCP_CONFIG),
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
+
+_OPENCODE_STATES: dict[GovernanceFunction, FunctionState] = {
+    GovernanceFunction.TOOL_GUARD: _RICH,
+    GovernanceFunction.WRITE_TRACE: _absent(
+        "seul `tool.execute.before` est exposé : ni comptage des écritures (PostToolUse) ni refus de clôture (Stop)"
+    ),
+    GovernanceFunction.TASK_RECALL: _absent(
+        "aucun SessionStart ni UserPromptSubmit : le rappel de tâche n'est pas émis"
+    ),
+    GovernanceFunction.COMMANDS: _RICH,
+    GovernanceFunction.PERSONAS: _RICH,
+    GovernanceFunction.MCP_SERVER: _RICH,
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
+
+_CLAUDE_CODE_STATES: dict[GovernanceFunction, FunctionState] = dict.fromkeys(GOVERNANCE_FUNCTIONS, _RICH)
+
+#: Hôte inconnu : on ne lui prête aucune fonction ; le client MCP reste indéterminé.
+_UNKNOWN_STATES: dict[GovernanceFunction, FunctionState] = {
+    function: _absent("hôte inconnu : aucune fonction de gouvernance n'est constatée")
+    for function in GOVERNANCE_FUNCTIONS
+}
+_UNKNOWN_STATES[GovernanceFunction.MCP_SERVER] = _degraded("hôte inconnu : client MCP ni affirmé ni exclu")
+
+_FUNCTION_STATES: dict[HostId, dict[GovernanceFunction, FunctionState]] = {
+    HostId.CLAUDE_CODE_CLI: _CLAUDE_CODE_STATES,
+    HostId.GITHUB_COPILOT: _COPILOT_STATES,
+    HostId.CODEX: _CODEX_STATES,
+    HostId.CURSOR: _CURSOR_STATES,
+    HostId.GEMINI_CLI: _GEMINI_STATES,
+    HostId.OPENCODE: _OPENCODE_STATES,
+    HostId.UNKNOWN: _UNKNOWN_STATES,
+}
+
+
+def undeclared_functions(host_id: HostId) -> tuple[GovernanceFunction, ...]:
+    """Fonctions de :class:`GovernanceFunction` sans état déclaré pour *host_id*."""
+    declared = _FUNCTION_STATES.get(host_id, {})
+    return tuple(f for f in GOVERNANCE_FUNCTIONS if f not in declared)
+
+
+def function_states(host_id: HostId) -> dict[GovernanceFunction, FunctionState]:
+    """États de toutes les fonctions pour *host_id* ; ``KeyError`` nommé si un état manque."""
+    declared = _FUNCTION_STATES.get(host_id)
+    if declared is None:
+        msg = f"aucun état de gouvernance déclaré pour {host_id.value}"
+        raise KeyError(msg)
+    missing = [f.value for f in undeclared_functions(host_id)]
+    if missing:
+        msg = f"{host_id.value} ne déclare pas : {', '.join(missing)}"
+        raise KeyError(msg)
+    return declared
+
+
+def function_entries(host_id: HostId) -> tuple[tuple[GovernanceFunction, FunctionState], ...]:
+    """Les couples (fonction, état) dans l'ordre de :data:`GOVERNANCE_FUNCTIONS`."""
+    states = function_states(host_id)
+    return tuple((function, states[function]) for function in GOVERNANCE_FUNCTIONS)
+
+
+def parity_line(host_id: HostId) -> str:
+    """Une ligne : pour *host_id*, ce qui est dégradé et ce qui est absent."""
+    profile = profile_for(host_id)
+    degraded = [GOVERNANCE_LABELS[f] for f, s in function_entries(host_id) if s.level is ParityLevel.DEGRADED]
+    absent = [GOVERNANCE_LABELS[f] for f, s in function_entries(host_id) if s.level is ParityLevel.ABSENT]
+    if not degraded and not absent:
+        return (
+            f"{profile.display_name} — gouvernance complète : les {len(GOVERNANCE_FUNCTIONS)} fonctions "
+            "sont disponibles."
+        )
+    parts: list[str] = []
+    if degraded:
+        parts.append(f"dégradé : {', '.join(degraded)}")
+    if absent:
+        parts.append(f"absent : {', '.join(absent)}")
+    return f"{profile.display_name} — " + " ; ".join(parts) + "."
+
+
+def parity_report(host_id: HostId) -> dict[str, Any]:
+    """Forme sérialisable de la parité d'un hôte, pour ``grimoire up -o json``."""
+    return {
+        "host_id": host_id.value,
+        "display_name": profile_for(host_id).display_name,
+        "line": parity_line(host_id),
+        "functions": [
+            {"function": function.value, "label": GOVERNANCE_LABELS[function], **state.to_dict()}
+            for function, state in function_entries(host_id)
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Contrats réels (K0, #765) : ce qui a été observé sur l'hôte, pas ce qu'il
 # documente. ``HostProfile`` ci-dessus décrit les surfaces que le kit sait
 # écrire ; ce qui suit décrit ce que le kit a *vu* faire. Le fencing d'un bail
