@@ -14,7 +14,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from grimoire.hosts.decisions.read_only import _HEREDOC_OPEN_RE, _blank_quoted
+from grimoire.hosts.decisions.read_only import (
+    _HEREDOC_OPEN_RE,
+    _blank_quoted,
+    executed_surfaces,
+    strip_heredoc_bodies,
+)
 
 # Le classement lecture / mutation vit dans :mod:`.read_only` ; il reste importable d'ici.
 from grimoire.hosts.decisions.read_only import is_read_only_command as is_read_only_command
@@ -102,16 +107,12 @@ def _strip_heredoc_bodies(command: str) -> str:
     ``<<TAG``. A redirection can follow ``<<TAG`` on that same line (``cat
     <<EOF > file``), and matching from ``<<TAG`` swallowed it along with the
     body it precedes — turning a classified write into a false read-only.
+
+    Un corps n'est retiré que là où le shell ouvre et ferme un heredoc
+    (:func:`.read_only.strip_heredoc_bodies`) : un ``<<`` cité, échappé ou
+    dans un commentaire n'ouvre rien, et ce qui le suit reste inspecté.
     """
-    out = command
-    for match in _HEREDOC_OPEN_RE.finditer(command):
-        tag = re.escape(match.group(2))
-        body = re.compile(
-            rf"({re.escape(match.group(0))}[^\n]*\n).*?^[ \t]*{tag}[ \t]*$",
-            re.DOTALL | re.MULTILINE,
-        )
-        out = body.sub(r"\1", out, count=1)
-    return out
+    return strip_heredoc_bodies(command)
 
 
 def command_surface(command: str) -> str:
@@ -517,11 +518,18 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
 
     destructive_reason = ""
     if command:
-        surface = command_surface(command)
-        for pattern, label in _DESTRUCTIVE_PATTERNS:
-            if re.search(pattern, surface, flags=re.IGNORECASE):
-                destructive_reason = label
-                break
+        # La surface historique, puis la ligne telle que le shell la lit : un guillemet
+        # échappé, une chaîne ``$'…'`` ou un commentaire ne cachent pas une commande.
+        # Chaque surface ne fait qu'ajouter : ce que l'une voit n'est jamais retiré par l'autre.
+        surfaces = dict.fromkeys((command_surface(command), *executed_surfaces(command)))
+        destructive_reason = next(
+            (
+                label
+                for pattern, label in _DESTRUCTIVE_PATTERNS
+                if any(re.search(pattern, surface, flags=re.IGNORECASE) for surface in surfaces)
+            ),
+            "",
+        )
         if not destructive_reason and interpreted:
             destructive_reason = interpreted_destructive_reason(interpreted)
     interpreted_code = ", ".join(sorted({language for language, _ in interpreted}))

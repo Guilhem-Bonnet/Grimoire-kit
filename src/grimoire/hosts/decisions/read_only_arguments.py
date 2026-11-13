@@ -228,12 +228,17 @@ def _sort_is_read_only(args: list[str]) -> bool:
 
 
 def _uniq_is_read_only(args: list[str]) -> bool:
-    return len([word for word in args if not word.startswith("-")]) < 2  # ``uniq in out`` écrit ``out``
+    """``uniq`` lit un fichier au plus : un second est sa sortie. ``-`` est un opérande, l'entrée standard."""
+    return len([word for word in args if word == "-" or not word.startswith("-")]) < 2
 
 
 def _tree_is_read_only(args: list[str]) -> bool:
-    """``tree`` lit, sauf ``-o fichier`` et ``-R`` (qui relance ``tree -o`` dans chaque dossier)."""
-    return not any(word.startswith("-") and not word.startswith("--") and ("o" in word or "R" in word) for word in args)
+    """``tree`` lit, sauf ``-o fichier``, sa forme longue, et ``-R`` (qui relance ``tree -o`` dans chaque dossier)."""
+    return not any(
+        _abbreviates(word, ("--output",))
+        or (word.startswith("-") and not word.startswith("--") and ("o" in word or "R" in word))
+        for word in args
+    )
 
 
 _XXD_FLAGS = frozenset(
@@ -332,8 +337,10 @@ def _writes_to_file(arg: str) -> bool:
 
 def git_is_read_only(words: list[str]) -> bool:
     sub, args = _git_subcommand(words)
-    if sub in {"diff", "log", "show"} and any(_writes_to_file(a) for a in args):
-        return False  # ``git log --output=f`` écrit ``f`` (``format-patch`` et ``archive`` ne sont pas dans la liste)
+    if any(_writes_to_file(a) for a in args):
+        # ``git log --output=f`` écrit ``f``. L'option est lue avec les options de diff, que prennent
+        # aussi ``blame`` et ``shortlog`` : elle est refusée quelle que soit la sous-commande.
+        return False
     if sub == "grep":
         return not any(a.startswith("-O") or _abbreviates(a, ("--open-files-in-pager",)) for a in args)
     if sub == "remote":
@@ -348,8 +355,9 @@ def git_is_read_only(words: list[str]) -> bool:
         return len(names) == 1 and all(a in {"--push", "--all"} for a in rest if a.startswith("-"))
     if sub == "branch":
         # ``--list`` rend les autres arguments motifs de recherche ; sans lui, un nom nu crée une branche.
-        listing = "--list" in args or "-l" in args
-        flags = {"--show-current", "-a", "-r", "-v", "-vv", "--list", "-l", "--all", "--remotes"}
+        # ``-l`` n'en est pas le synonyme partout : avant git 2.20 il créait la branche avec son journal.
+        listing = "--list" in args
+        flags = {"--show-current", "-a", "-r", "-v", "-vv", "--list", "--all", "--remotes"}
         return all(a in flags or (listing and not a.startswith("-")) for a in args)
     return sub in _READ_ONLY_GIT_SUBCOMMANDS
 
@@ -364,8 +372,14 @@ def git_is_read_only(words: list[str]) -> bool:
 _SED_FLAG_CLUSTER_RE = re.compile(r"^-[nErz]*e?$")
 _SED_ADDR_STEP_RE = re.compile(r"\d+(?:~\d+)?|\+\d+|~\d+")
 _SED_S_FLAGS = frozenset("gpiImM0123456789")
-_AWK_FORBIDDEN_RE = re.compile(r"system|getline|>|\||@load|close\s*\(")
-_AWK_FORBIDDEN_OPTIONS = ("-f", "-i", "-E", "-l", "--f", "--i", "--e", "--l")
+#: Ce qu'un programme ``awk`` ne doit pas porter : commande, tube, sortie vers un fichier, et
+#: ``@`` — source incluse, extension chargée, appel indirect d'une fonction nommée par une chaîne.
+_AWK_FORBIDDEN_RE = re.compile(r"system|getline|>|\||@|close\s*\(")
+_AWK_VALUED = frozenset({"-F", "-v", "--field-separator", "--assign"})
+_AWK_VALUED_PREFIXES = ("-F", "-v", "--field-separator=", "--assign=")
+_AWK_FLAGS = frozenset(
+    {"--posix", "--traditional", "--re-interval", "--sandbox", "--characters-as-bytes", "-b", "-c", "-P", "-r", "-S"}
+)
 
 
 def _sed_script_is_read_only(script: str) -> bool:
@@ -484,14 +498,34 @@ def _sed_is_read_only(args: list[str]) -> bool:
 def _awk_is_read_only(args: list[str]) -> bool:
     """``awk`` en lecture seule : ni fichier de programme, ni sortie, ni commande.
 
-    Un ``>`` de comparaison (``$1 > 3``) est lui aussi refusé : c'est le côté sûr.
+    Les options sont en liste blanche jusqu'au programme, premier mot qui n'en est pas
+    une : séparateur, affectation, et quelques drapeaux de dialecte. Toute autre option
+    est une mutation — un fichier de programme ou une extension (``-f``, ``-i``, ``-l``,
+    ``-E``), et celles qui écrivent un fichier (vidage des variables, programme remis en
+    forme, profil) ou ouvrent le débogueur. Un ``>`` de comparaison (``$1 > 3``) est lui
+    aussi refusé : c'est le côté sûr.
     """
-    for word in args:
-        if word.startswith(_AWK_FORBIDDEN_OPTIONS) and word.startswith("-"):
+    i, n = 0, len(args)
+    while i < n and args[i].startswith("-") and args[i] != "-":
+        word = args[i]
+        i += 1
+        if word == "--":
+            break
+        if word in _AWK_VALUED:
+            i += 1
+        elif not (word in _AWK_FLAGS or word.startswith(_AWK_VALUED_PREFIXES)):
             return False
-        if _AWK_FORBIDDEN_RE.search(word):
-            return False
-    return True
+    return not any(_AWK_FORBIDDEN_RE.search(word) for word in args)
+
+
+def _printf_is_read_only(args: list[str]) -> bool:
+    """``printf`` écrit sur sa sortie, sauf ``-v nom`` qui affecte une variable du shell.
+
+    Une affectation hors de la liste blanche n'est pas une lecture, quel que soit le
+    verbe qui la fait. En tête, seul ``--`` est admis : un format qui commence par un
+    tiret sans lui est une option pour le shell.
+    """
+    return not args or args[0] == "--" or not args[0].startswith("-")
 
 
 #: Verbes dont la lecture dépend des arguments, jugés sur la surface comme sur les mots résolus.
@@ -511,11 +545,12 @@ ARGUMENT_CHECKS = {
     "uniq": _uniq_is_read_only,
     "xxd": _xxd_is_read_only,
 }
-#: Verbes dont l'argument décisif est cité (le script de ``sed``, le programme de ``awk``) :
-#: la surface l'a effacé, seuls les mots résolus peuvent le juger.
+#: Verbes dont l'argument décisif est cité (le script de ``sed``, le programme de ``awk``,
+#: le format de ``printf``) : la surface l'a effacé, seuls les mots résolus peuvent le juger.
 RESOLVED_ONLY_CHECKS = {
     "awk": _awk_is_read_only,
     "gawk": _awk_is_read_only,
     "mawk": _awk_is_read_only,
+    "printf": _printf_is_read_only,
     "sed": _sed_is_read_only,
 }

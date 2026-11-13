@@ -40,8 +40,9 @@ _EVAL_INTRODUCER = re.compile(
 
 #: ``<<TAG`` / ``<<'TAG'`` / ``<<-TAG``, opening a body the command *writes*.
 #: Pas ``<<<`` : une chaîne passée sur l'entrée n'a pas de corps, les lignes qui la
-#: suivent sont des commandes.
-_HEREDOC_OPEN_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+#: suivent sont des commandes. L'étiquette doit finir le mot : ``<<'EO'F`` attend ``EOF``,
+#: et ce que ce motif ne lit pas en entier n'est pas une ouverture reconnue.
+_HEREDOC_OPEN_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1(?=$|[\s;|&<>()])")
 
 
 #: Leading verbs whose blast radius never survives the session — the read
@@ -66,7 +67,7 @@ _READ_ONLY_LEADING_COMMANDS = frozenset(
         "cat", "head", "tail", "grep", "egrep", "fgrep",
         "ls", "wc", "diff", "stat", "pwd", "whoami", "printenv",
         "which", "type", "ps", "df", "du", "od", "hexdump",
-        "sha256sum", "sha1sum", "md5sum", "echo", "printf", "true", "false",
+        "sha256sum", "sha1sum", "md5sum", "echo", "true", "false",
         "basename", "dirname", "readlink", "realpath", "nproc", "uptime", "id", "uname",
         # Issue #875 : se déplacer et filtrer un flux ne modifient rien.
         "cd", "pushd", "popd", "cut", "tr", "jq", "column", "nl", "comm", "paste",
@@ -116,8 +117,9 @@ def _assignment_is_inert(word: str) -> bool:
 #: Output redirection or a ``tee`` in the pipeline: the one shell-level
 #: signal that turns an otherwise read-only pipeline into a write, checked
 #: against the quote-stripped surface so a literal ``>`` inside a commit
-#: message or a grep pattern is never mistaken for one.
-_WRITE_REDIRECTION_RE = re.compile(r">>?(?!=)|\btee\b")
+#: message or a grep pattern is never mistaken for one. Any ``>`` left there
+#: is one, whatever follows it: ``>=f`` writes the file ``=f``.
+_WRITE_REDIRECTION_RE = re.compile(r">|\btee\b")
 
 
 #: Mots-clés de structure du shell (issue #875) : ils précèdent une commande
@@ -214,6 +216,10 @@ def _inner_words(words: list[str]) -> list[str] | None:
             wrapper = i if wrapper < 0 else wrapper
             if following == ["read"]:
                 return ["cat", *words[i + 2 :]]  # la réécriture de ``cat``/``head``/``tail`` : aucune option n'écrit
+            if following == ["grep"]:
+                # Le proxy confie la recherche à ``rg`` et lui passe les options telles
+                # quelles : c'est sa règle qui vaut, pas celle de ``grep``.
+                return ["rg", *words[i + 2 :]]
             i += 2 if following == ["proxy"] else 1
         elif word == "timeout":
             after = _after_timeout(words, i + 1)
@@ -315,8 +321,14 @@ class _Word:
     text: str
     #: Peut devenir plusieurs mots : expansion hors guillemets, accolades d'expansion.
     splits: bool = False
-    #: Peut commencer autrement qu'il s'écrit, donc devenir une option : expansion ou joker en tête.
+    #: Peut commencer autrement qu'il s'écrit, donc devenir une option : expansion ou joker en
+    #: tête, ou motif de fichiers dans un mot qui commence par un tiret (``-*`` rend les
+    #: fichiers du dossier dont le nom est une option).
     leading: bool = False
+    #: Motif de fichiers ailleurs qu'en tête : autant de mots que de fichiers trouvés, chacun
+    #: commençant comme le mot s'écrit. Sans danger en opérande, pas là où le nombre ou la
+    #: place des mots décide (:func:`_globs_allowed`).
+    globbed: bool = False
 
     @property
     def opaque(self) -> bool:
@@ -328,15 +340,27 @@ _EXPANSION_RE = re.compile(r"\$(?:[A-Za-z_{]|[0-9@*#?$!=~^-])")
 #: ``{a,b}``, ``{1..3}``, ``{"-x",y}`` : un mot écrit, plusieurs mots lancés. Sans virgule ni
 #: ``..`` entre les accolades, rien n'est développé : ``{}``, ``HEAD@{1}``, ``v1^{commit}``.
 _BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
-#: ``!!``, ``!$``, ``!mot`` : dans un shell interactif, le mot devient un morceau d'une commande passée.
-_HISTORY_RE = re.compile(r"![!$*^#?\w-]")
-#: Ce que le shell exécute ou décode en lisant le mot : substitution de commande (avec ou
-#: sans sous-shell), guillemets ANSI-C ou traduits. Les parenthèses nues sont traitées à part.
-_EXECUTED_STARTS = ("$(", "${ ", "${|", "${\t", "${\n", "$'", '$"')
+#: ``!!``, ``!$``, ``!mot``, ``!:1`` : dans un shell interactif, le rappel est remplacé par un
+#: morceau d'une ligne passée AVANT que la ligne soit lue — opérateurs compris. Ce que la
+#: ligne devient ne se lit pas ici : un rappel n'est admis derrière aucun verbe.
+_HISTORY_RE = re.compile(r"![!$*^#?:\w-]")
+#: Ce que le shell exécute ou affecte en développant un texte, entre guillemets doubles et
+#: dans le corps d'un heredoc comme hors guillemets : substitution de commande (avec ou sans
+#: sous-shell), arithmétique à l'ancienne (``$[…]`` affecte et évalue ce que portent les
+#: variables), drapeaux d'expansion de zsh (``${(e)X}`` développe la valeur de ``X``),
+#: expansion qui affecte (``${X=v}``, ``${X:=v}``, ``${X::=v}`` : la liste blanche des
+#: affectations ne se contourne pas par là), opérateur ``@P`` (développe la valeur comme une
+#: invite, substitutions comprises).
+_ACTIVE_EXPANSION_RE = re.compile(
+    r"`|\$\(|\$\[|\$\{[\s|(]|\$\{[A-Za-z_]\w*(?:\[[^\]]*\])?:{0,2}=|\$\{[^{}]*@P\}"
+)
+#: Guillemets ANSI-C ou traduits : hors guillemets, le shell les décode, ce balayage non.
+_DOLLAR_QUOTES = ("$'", '$"')
 
 
 #: ``${NOM}``, ou ``$NOM`` sans indice ni modificateur derrière (``$W[1]``, ``$W:t`` de zsh).
-_PLAIN_EXPANSION_RE = re.compile(r"\$(?:([A-Za-z_]\w*)(?![\[:])|\{([A-Za-z_]\w*)\})")
+#: Le nom est pris en entier : ``$fo`` n'est pas ``$f`` suivi de ``o``.
+_PLAIN_EXPANSION_RE = re.compile(r"\$(?:([A-Za-z_]\w*)(?![\w\[:])|\{([A-Za-z_]\w*)\})")
 
 # ── Variable de boucle ───────────────────────────────────────────────────────
 #
@@ -348,9 +372,10 @@ _PLAIN_EXPANSION_RE = re.compile(r"\$(?:([A-Za-z_]\w*)(?![\[:])|\{([A-Za-z_]\w*)
 # (boucle dans un tube, boucle jamais exécutée).
 
 #: Une valeur écrite en clair, que ni le découpage en mots ni les motifs ne changent : pas
-#: de blanc, pas de guillemet, pas de joker, et un tiret ou un plus seulement derrière une
-#: lettre ou un chiffre (ni en tête, ni derrière un séparateur).
-_LOOP_VALUE_RE = re.compile(r"(?:[\w./@%:,=~]|(?<=[A-Za-z0-9_])[-+])+")
+#: de blanc, pas de guillemet, pas de joker, pas de signe égal en tête (zsh y lit le chemin
+#: d'une commande), et un tiret ou un plus seulement derrière une lettre ou un chiffre (ni
+#: en tête, ni derrière un séparateur).
+_LOOP_VALUE_RE = re.compile(r"(?!=)(?:[\w./@%:,=~]|(?<=[A-Za-z0-9_])[-+])+")
 _NAME_RE = re.compile(r"[A-Za-z_]\w*")
 _LOOP_OPENERS = frozenset({"for", "while", "until", "select"})
 _BEFORE_A_LOOP = frozenset({"do", "then", "else", "elif", "if", "!", "time"})
@@ -409,15 +434,22 @@ def _loop_values(segments: list[tuple[str, str]]) -> dict[str, tuple[int, int, t
 
 
 def _loop_end(segments: list[tuple[str, str]], start: int) -> int | None:
-    """Rang du ``done`` qui ferme la boucle ouverte au segment *start*, ou ``None``."""
+    """Rang du ``done`` qui ferme la boucle ouverte au segment *start*, ou ``None``.
+
+    Un mot-clé de fermeture en suit un autre sans séparateur (``fi done``) : chaque
+    ``done`` de la tête du segment compte.
+    """
     depth = 1
     for index in range(start + 1, len(segments)):
         words = segments[index][1].split()
-        if words[0] == "done":
-            depth -= 1
-            if depth == 0:
-                return index
-        elif _opens_loop(words):
+        closers = 0
+        while closers < len(words) and words[closers] in _SHELL_CLOSING_KEYWORDS:
+            if words[closers] == "done":
+                depth -= 1
+                if depth == 0:
+                    return index
+            closers += 1
+        if not closers and _opens_loop(words):
             depth += 1
     return None
 
@@ -443,22 +475,24 @@ def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_
     """Les mots de *segment* tels que le programme les recevra, ou ``None`` s'il ne se lit pas.
 
     Ne se lit pas : un guillemet jamais fermé, une substitution de commande ou de
-    processus, des guillemets ANSI-C, une parenthèse nue (sous-shell, fonction,
-    qualificatif de glob et substitution de zsh), un antislash en fin de ligne (le mot
+    processus, une expansion qui affecte ou exécute (:data:`_ACTIVE_EXPANSION_RE`), des
+    guillemets ANSI-C, une parenthèse nue (sous-shell, fonction, qualificatif de glob et
+    substitution de zsh), un rappel d'historique, une redirection de sortie (celles qui
+    n'écrivent aucun fichier ont été retirées avant), un antislash en fin de ligne (le mot
     continue sur la ligne suivante). Un ``\\"`` hors guillemets est un caractère, pas
     l'ouverture d'un texte cité. Une variable de *values* est remplacée par sa valeur.
     """
     values = values or {}
     words: list[_Word] = []
     text: list[str] = []
-    splits = leading = in_word = False
+    splits = leading = globbed = in_word = False
     i, n = 0, len(segment)
     while i < n:
         c = segment[i]
         if c in " \t\n":
             if in_word:
-                words.append(_Word("".join(text), splits, leading))
-                text, splits, leading, in_word = [], False, False, False
+                words.append(_Word("".join(text), splits, leading, globbed))
+                text, splits, leading, globbed, in_word = [], False, False, False, False
             i += 1
             continue
         in_word = True
@@ -484,7 +518,7 @@ def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_
                     text.append(segment[j + 1] if segment[j + 1] in '"\\$`' else segment[j : j + 2])
                     j += 2
                     continue
-                if d == "`" or segment.startswith(_EXECUTED_STARTS[:5], j):
+                if _is_unreadable_at(segment, j):
                     return None
                 known = _PLAIN_EXPANSION_RE.match(segment, j) if d == "$" else None
                 if known is not None and (known.group(1) or known.group(2)) in values:
@@ -493,14 +527,12 @@ def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_
                     continue
                 if d == "$" and _EXPANSION_RE.match(segment, j) and not any(text):
                     leading = True
-                elif d == "!" and _HISTORY_RE.match(segment, j):
-                    splits = leading = True
                 text.append(d)
                 j += 1
             if j >= n:
                 return None
             i = j + 1
-        elif c in "`()" or segment.startswith(_EXECUTED_STARTS, i):
+        elif c in "()>" or _is_unreadable_at(segment, i) or segment.startswith(_DOLLAR_QUOTES, i):
             return None
         else:
             known = _PLAIN_EXPANSION_RE.match(segment, i) if c == "$" else None
@@ -510,17 +542,29 @@ def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_
                 continue
             if c == "$" and _EXPANSION_RE.match(segment, i):
                 splits, leading = True, leading or at_start
-            elif c == "!" and _HISTORY_RE.match(segment, i):
-                splits = leading = True
-            elif c in "*?[" and at_start:
-                leading = True
+            elif c in "*?[":
+                if at_start or "".join(text).startswith("-"):
+                    leading = True
+                else:
+                    globbed = True
             elif c == "{" and _BRACE_EXPANSION_RE.match(segment, i):
                 splits, leading = True, leading or at_start
             text.append(c)
             i += 1
     if in_word:
-        words.append(_Word("".join(text), splits, leading))
+        words.append(_Word("".join(text), splits, leading, globbed))
     return words
+
+
+def _is_unreadable_at(segment: str, i: int) -> bool:
+    """Vrai si le shell exécute, affecte ou rappelle une ligne passée en lisant ce qui commence en *i*.
+
+    Vaut hors guillemets comme entre guillemets doubles, où le shell développe encore.
+    """
+    c = segment[i]
+    if c == "!":
+        return _HISTORY_RE.match(segment, i) is not None
+    return c in "`$" and _ACTIVE_EXPANSION_RE.match(segment, i) is not None
 
 
 def _prefix_is_readable(prefix: list[_Word]) -> bool:
@@ -534,8 +578,8 @@ def _prefix_is_readable(prefix: list[_Word]) -> bool:
         if assignments and (_ENV_ASSIGNMENT_RE.match(word.text) or word.text in _SHELL_LEADING_KEYWORDS):
             continue
         assignments = False
-        if word.opaque:
-            return False
+        if word.opaque or word.globbed:
+            return False  # ``env -u N* ls`` : le second fichier trouvé devient la commande
     return True
 
 
@@ -573,7 +617,46 @@ def _opaque_args_allowed(verb: str, args: list[_Word]) -> bool:
         fixed = next((i + 1 for i, text in enumerate(texts[:2]) if text in READ_ONLY_GH_VERBS), fixed)
     elif verb == "systemctl":
         fixed = next((i + 1 for i, text in enumerate(texts) if text in SYSTEMCTL_READ_SUBCOMMANDS), fixed)
+    elif verb == "printf":
+        fixed = 1  # seul le premier mot peut être l'option qui affecte ; la suite est le format et ses arguments
     return not any(arg.opaque for arg in args[:fixed])
+
+
+#: Verbes dont la règle ne cherche qu'un mot interdit, où qu'il soit, sans compter les
+#: opérandes ni lire leur place : un motif de fichiers en opérande n'y change rien.
+_COUNT_BLIND_VERBS = frozenset({"ag", "file", "find", "git", "printf", "rg", "sort", "tree"})
+
+
+def _globs_allowed(verb: str, args: list[_Word]) -> bool:
+    """Un motif de fichiers ailleurs qu'en tête de mot n'est admis que là où ni le nombre ni la place des mots ne décide.
+
+    Il devient autant de mots que de fichiers trouvés, chacun commençant comme il est
+    écrit : jamais une option, mais ``uniq a*`` a deux opérandes dès que deux fichiers
+    répondent, et le second est sa sortie. Pour ``sed`` et ``awk``, il n'est admis qu'en
+    opérande : après un mot écrit en clair (le script, le programme), et pas derrière une
+    option dont il serait la valeur. Les verbes qui parlent au système ont leur propre
+    règle (:func:`_arguments_are_written_out`).
+    """
+    if not any(arg.globbed for arg in args):
+        return True
+    if (
+        verb in _READ_ONLY_LEADING_COMMANDS
+        or verb in _SHELL_CLOSING_KEYWORDS
+        or verb in {"for", "command"}
+        or verb in _COUNT_BLIND_VERBS
+        or verb in _WRITTEN_OUT_VERBS
+    ):
+        return True
+    if verb not in {"sed", "awk", "gawk", "mawk"}:
+        return False  # ``uniq``, ``xxd``, ``date`` : le nombre d'opérandes décide
+    anchored = False
+    previous = ""
+    for arg in args:
+        if arg.globbed and (not anchored or previous.startswith("-")):
+            return False
+        anchored = anchored or not (arg.globbed or arg.text.startswith("-"))
+        previous = arg.text
+    return True
 
 
 # ── Arguments que le shell développe, pour les verbes qui parlent au système ─
@@ -673,7 +756,12 @@ def _segment_is_script(segment: str, values: dict[str, str], depth: int) -> bool
         if script is None or depth >= _MAX_SCRIPT_DEPTH or not _command_is_read_only(script, depth + 1):
             return None
         return True
-    if not (_words_read_only(inner, segment, resolved=True) and _opaque_args_allowed(verb, words[offset + 1 :])):
+    args = words[offset + 1 :]
+    if not (
+        _words_read_only(inner, segment, resolved=True)
+        and _opaque_args_allowed(verb, args)
+        and _globs_allowed(verb, args)
+    ):
         return None
     if verb in _WRITTEN_OUT_VERBS:
         written = words if not values else _resolve_words(segment)
@@ -793,51 +881,150 @@ def _opens_dollar_quote(text: str) -> bool:
     return False
 
 
-def _code_and_bodies(command: str, *, comments: bool) -> tuple[str, list[str]]:
-    """Le code de *command* sans ses corps de heredoc, et ces corps.
+# ── Ce que le shell ne lit pas comme du code : commentaires et corps de heredoc ──
+#
+# Un heredoc n'est reconnu que là où le shell en ouvre un : hors guillemets, non échappé,
+# hors commentaire, et pas dans un ``<<<`` (une chaîne passée sur l'entrée, dont les lignes
+# suivantes sont des commandes). Son corps commence après la fin de la ligne qui l'ouvre
+# et s'arrête à la ligne qui porte son étiquette, écrite exactement : rien devant (des
+# tabulations pour ``<<-``), rien derrière. Une ligne en retrait ne ferme rien pour le
+# shell ; la prendre pour la fermeture ferait lire comme du code la suite du corps, et ce
+# qu'elle cite ouvrirait un autre « heredoc » sur les commandes qui suivent la vraie fin.
+# Sans ligne de fermeture, rien n'est retiré.
+#
+# Un ``<<`` dont l'étiquette ne se lit pas (``<<\EOF``, ``<<'EO'F``, ``<<$X``) ouvre quand
+# même un heredoc pour le shell : ce balayage ne sait pas où il finit, la ligne entière
+# ne se lit pas.
+#
+# Un ``#`` se lit de deux façons : commentaire jusqu'à la fin de la ligne (``sh -c``, un
+# script), ou caractère ordinaire (zsh interactif, où ``echo a # b ; rm f`` supprime
+# ``f``). Chaque lecture a ses commentaires et ses corps ; ce qui dépend de la ligne vaut
+# sous les deux.
 
-    Un heredoc n'est reconnu que là où le shell en ouvre un : hors guillemets, non
-    échappé, et pas dans un ``<<<`` (une chaîne passée sur l'entrée, dont les lignes
-    suivantes sont des commandes). Son corps commence après la fin de la ligne qui
-    l'ouvre et s'arrête à la ligne qui porte son étiquette ; sans cette ligne, rien n'est
-    retiré. Avec *comments*, un ``#`` en début de mot ouvre un commentaire jusqu'à la fin
-    de la ligne : il est retiré, et ni ses apostrophes ni un ``<<`` qu'il cite ne comptent.
-    """
-    out: list[str] = []
-    bodies: list[str] = []
-    pending: list[str] = []
+
+@dataclass(frozen=True, slots=True)
+class _Layout:
+    """Les morceaux d'une ligne de commande que le shell ne lit pas comme du code."""
+
+    #: ``(début, fin)`` de chaque commentaire, sans le retour à la ligne qui le termine.
+    comments: tuple[tuple[int, int], ...]
+    #: ``(début du corps, fin du corps, fin de la ligne de fermeture)`` de chaque heredoc.
+    bodies: tuple[tuple[int, int, int], ...]
+    #: Un ``<<`` dont l'étiquette ne se lit pas : la ligne entière ne se lit pas.
+    unreadable: bool
+
+
+def _readings(command: str) -> tuple[bool, ...]:
+    """Les lectures d'un ``#`` sous lesquelles juger *command* : avec commentaires, puis sans."""
+    return (True, False) if "#" in command else (False,)
+
+
+def _layout(command: str, *, comments: bool) -> _Layout:
+    """Commentaires et corps de heredoc de *command*, lue avec ou sans commentaires."""
+    comment_spans: list[tuple[int, int]] = []
+    bodies: list[tuple[int, int, int]] = []
+    pending: list[tuple[str, bool]] = []
+    unreadable = False
     i, n = 0, len(command)
     while i < n:
         c = command[i]
         if c == "\\":
-            out.append(command[i : i + 2])
             i += 2
         elif c in "'\"":
             end = _quoted_end(command, i)
-            end = n if end < 0 else end
-            out.append(command[i:end])
-            i = end
+            i = n if end < 0 else end
         elif comments and c == "#" and (i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|("):
             end = command.find("\n", i)
-            i = n if end < 0 else end
-        elif c == "<" and (opening := _HEREDOC_OPEN_RE.match(command, i)) is not None:
-            pending.append(opening.group(2))
-            out.append(opening.group(0))
-            i = opening.end()
+            end = n if end < 0 else end
+            comment_spans.append((i, end))
+            i = end
+        elif command.startswith("<<<", i):
+            i += 3
+        elif command.startswith("<<", i):
+            opening = _HEREDOC_OPEN_RE.match(command, i)
+            if opening is None:
+                unreadable = True
+                i += 2
+            else:
+                pending.append((opening.group(2), opening.group(0).startswith("<<-")))
+                i = opening.end()
         elif c == "\n" and pending:
-            out.append(c)
             i += 1
-            for tag in pending:
-                closing = re.compile(rf"^[ \t]*{re.escape(tag)}[ \t]*$", re.MULTILINE).search(command, i)
+            for tag, tabbed in pending:
+                indent = r"\t*" if tabbed else ""
+                closing = re.compile(rf"^{indent}{re.escape(tag)}$", re.MULTILINE).search(command, i)
                 if closing is None:
                     break  # jamais fermé : la suite reste du code, donc inspectée
-                bodies.append(command[i : closing.start()])
+                bodies.append((i, closing.start(), closing.end()))
                 i = closing.end()
             pending.clear()
         else:
-            out.append(c)
             i += 1
-    return "".join(out), bodies
+    return _Layout(tuple(comment_spans), tuple(bodies), unreadable)
+
+
+def _without_spans(text: str, spans: list[tuple[int, int]]) -> str:
+    out: list[str] = []
+    cursor = 0
+    for start, end in sorted(spans):
+        out.append(text[cursor:start])
+        cursor = max(cursor, end)
+    out.append(text[cursor:])
+    return "".join(out)
+
+
+def _code_and_bodies(command: str, *, comments: bool) -> tuple[str, list[str]] | None:
+    """Le code de *command* sans ses commentaires ni ses corps de heredoc, et ces corps ; ``None`` s'il ne se lit pas."""
+    layout = _layout(command, comments=comments)
+    if layout.unreadable:
+        return None
+    removed = [*layout.comments, *((start, closed) for start, _end, closed in layout.bodies)]
+    return _without_spans(command, removed), [command[start:end] for start, end, _closed in layout.bodies]
+
+
+def strip_heredoc_bodies(command: str) -> str:
+    """*command* sans les corps de heredoc que le shell ne lira comme du code sous aucune lecture.
+
+    Pour ce qui inspecte la ligne (détection destructive, secrets, garde d'autorité) :
+    un corps est une donnée, mais seulement s'il en est une sous les deux lectures d'un
+    ``#``. Si la ligne ne se lit pas, rien n'est retiré : tout reste inspecté.
+    """
+    if "<<" not in command:
+        return command
+    layouts = [_layout(command, comments=comments) for comments in _readings(command)]
+    if any(layout.unreadable for layout in layouts):
+        return command
+    spans = [(start, closed) for start, _end, closed in layouts[0].bodies]
+    for other in layouts[1:]:
+        others = [(start, closed) for start, _end, closed in other.bodies]
+        spans = [
+            (max(start, other_start), min(end, other_end))
+            for start, end in spans
+            for other_start, other_end in others
+            if max(start, other_start) < min(end, other_end)
+        ]
+    return _without_spans(command, spans)
+
+
+def executed_surfaces(command: str) -> tuple[str, ...]:
+    """Ce que le shell exécutera de *command*, guillemets lus comme lui, sous chaque lecture d'un ``#``.
+
+    Pour la détection destructive, à côté de la surface historique
+    (:func:`.tool_facts.command_surface`) qui lit les guillemets par un motif : un
+    guillemet échappé hors guillemets n'ouvre aucun texte cité, et un commentaire n'en
+    ouvre pas non plus. Là où la ligne ne se lit pas — étiquette de heredoc illisible,
+    guillemets ``$'…'`` que ce balayage ne décode pas — aucun texte cité n'est effacé.
+    """
+    surfaces: list[str] = []
+    for comments in _readings(command):
+        read = _code_and_bodies(command, comments=comments)
+        if read is None:
+            surfaces.append(command)
+        elif _opens_dollar_quote(read[0]):
+            surfaces.append(read[0])
+        else:
+            surfaces.append(_read_surface(read[0]))
+    return tuple(dict.fromkeys(surfaces))
 
 
 def _without_fileless_redirections(command: str) -> str:
@@ -925,17 +1112,18 @@ def _command_is_read_only(command: str, depth: int) -> bool:
     """:func:`is_read_only_command` pour *command*, script de niveau *depth* (0 : la ligne elle-même)."""
     if _opens_dollar_quote(command):
         return False
-    # Un ``#`` se lit de deux façons : commentaire jusqu'à la fin de la ligne (``sh -c``, un script), ou
-    # caractère ordinaire (zsh interactif, où ``echo a # b ; rm f`` supprime ``f``). La commande ne lit
-    # que si elle lit sous les deux.
-    readings = [True, False] if "#" in command else [False]
-    return all(_reading_is_read_only(*_code_and_bodies(command, comments=comments), depth) for comments in readings)
+    # La commande ne lit que si elle lit sous chaque lecture d'un ``#`` (:func:`_readings`).
+    for comments in _readings(command):
+        read = _code_and_bodies(command, comments=comments)
+        if read is None or not _reading_is_read_only(*read, depth):
+            return False
+    return True
 
 
 def _reading_is_read_only(command: str, bodies: list[str], depth: int) -> bool:
     """:func:`_command_is_read_only` pour une lecture de la ligne : son code, et les corps de ses heredocs."""
-    # Le corps d'un heredoc est une donnée, sauf ce que le shell y développe avant de la passer.
-    if any(_SUBSTITUTION_RE.search(body) or _INLINE_SUBSTITUTION_RE.search(body) for body in bodies):
+    # Le corps d'un heredoc est une donnée, sauf ce que le shell y exécute ou y affecte en le développant.
+    if any(_ACTIVE_EXPANSION_RE.search(body) for body in bodies):
         return False
     # Lue telle qu'écrite (plus haut) puis sans ses corps de heredoc : une apostrophe dans
     # un corps décale le balayage de la première lecture, la seconde ne la voit pas.

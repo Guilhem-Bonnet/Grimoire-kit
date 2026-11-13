@@ -476,7 +476,17 @@ le ledger. Depuis le lot A de l'issue #638 :
   dans les arguments de `find`, `sort`, `sed` ou `git`), compte comme une
   écriture — sauf la variable d'une boucle `for` dont les valeurs sont écrites
   en clair sur la ligne, dans le corps de cette boucle
-  (`for f in a b; do sed -n 1,5p $f; done` lit) ;
+  (`for f in a b; do sed -n 1,5p $f; done` lit). Un motif de fichiers en
+  opérande reste une lecture (`rg motif src/*.py`), pas là où le nombre ou la
+  place des mots décide (les opérandes de `uniq` et `xxd`, le script de `sed`),
+  ni dans un mot qui commence par un tiret. Un rappel d'historique (`!!`,
+  `!$`), une expansion qui affecte une variable ou exécute en se développant,
+  et un heredoc dont l'étiquette ne se lit pas comptent comme une écriture.
+  Sous le proxy de terminal, `rtk grep` suit la règle de `rg`, à qui il confie
+  la recherche. La détection des commandes destructives lit la même ligne :
+  un corps de heredoc n'est une donnée que là où le shell ouvre et ferme un
+  heredoc, et un guillemet échappé ou un commentaire ne cache pas une
+  commande ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
   sur les profils `governed` et `production` ; les autres profils reçoivent
