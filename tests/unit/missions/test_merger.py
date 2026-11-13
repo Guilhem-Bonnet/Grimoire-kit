@@ -32,6 +32,7 @@ from grimoire.missions.merger import (
     MERGE_REALIGNED_EVENT,
     MERGE_REQUEUED_EVENT,
     MERGE_RERUN_EVENT,
+    MERGE_TRANSIENT_EVENT,
 )
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
@@ -778,12 +779,15 @@ def test_un_refus_de_fusion_du_depot_va_a_l_humain_sans_compter_au_disjoncteur(p
     assert read_breaker(projet).failures == 0 and events(projet, tid, MERGED_EVENT) == []
 
 
-def test_une_panne_de_gh_pr_merge_compte_au_disjoncteur(projet: Path, host: FakeHost) -> None:
+def test_une_panne_reseau_de_gh_pr_merge_reste_transiente_sans_disjoncteur(projet: Path, host: FakeHost) -> None:
+    """#1192 : une panne réseau n'est pas un échec de session — comptée à part, rejouée au tick suivant."""
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     host.merge_fails, host.merge_error = True, "error connecting to api.github.com"
     report = merged_after_review(projet, host, tid, wt)
-    assert merges(report) == [("merge", "failed")] and read_breaker(projet).failures == 1
+    state = read_breaker(projet)
+    assert merges(report) == [("merge", "transient")] and state.failures == 0 and not state.open
+    assert state.transients == 1
     assert questions(projet, tid) == []
 
 
@@ -965,7 +969,9 @@ def test_une_fusion_faite_et_non_notee_est_constatee_au_tick_suivant_jamais_refa
     tid, wt = launch_and_work(projet, host)
     host.broken_after_merge = True
     report = merged_after_review(projet, host, tid, wt)
-    assert merges(report) == [("unconfirmed", "failed")] and read_breaker(projet).failures == 1
+    state = read_breaker(projet)
+    assert merges(report) == [("unconfirmed", "transient")]  # #1192 : réseau, pas un échec de session
+    assert state.transients == 1 and state.failures == 0 and not state.open
     assert events(projet, tid, MERGED_EVENT) == []
     host.gh_broken = False
     assert merges(tick(projet, host)) == [("accept", "done")]
@@ -1019,15 +1025,18 @@ def test_une_coupure_apres_l_acceptation_ne_refait_ni_geste_ni_pack(
     assert TaskService(projet).require(tid).status is TaskState.CLOSED
 
 
-def test_un_gh_en_panne_est_rapporte_compte_et_rejoue(projet: Path, host: FakeHost) -> None:
+def test_un_gh_en_panne_est_note_transient_non_compte_et_rejoue(projet: Path, host: FakeHost) -> None:
+    """#1192 : « GitHub injoignable » n'est pas un échec de session — ni disjoncteur, ni bruit d'attention."""
     grant(projet)
     tid, wt = launch_and_work(projet, host)
     tick(projet, host)
     give_ready(host, tid, wt)
     host.gh_broken = True
     report = tick(projet, host)
-    assert merges(report) == [("wait", "failed")] and any(a.startswith("merger :") for a in report.attention)
-    assert read_breaker(projet).failures == 1
+    state = read_breaker(projet)
+    assert merges(report) == [("wait", "transient")] and not any(a.startswith("merger :") for a in report.attention)
+    assert state.transients == 1 and state.failures == 0 and not state.open
+    assert len(events(projet, tid, MERGE_TRANSIENT_EVENT)) == 1
     host.gh_broken = False
     tick(projet, host)
     assert merges(tick(projet, host)) == [("accept", "done")]
