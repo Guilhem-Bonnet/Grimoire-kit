@@ -377,6 +377,49 @@ def _names_control_zone_command(command: str) -> bool:
     return False
 
 
+#: Programmes qui lisent le CONTENU de tout ce qu'un dossier contient : leur donner un dossier parent de la zone,
+#: c'est lire la zone sans la nommer. ``ls``, ``du`` ou ``find`` seuls ne rendent que des noms.
+_RECURSIVE_READERS = frozenset({"rg", "ag", "ack", "tar", "zip", "7z"})
+_GREPS = frozenset({"grep", "egrep", "fgrep", "zgrep"})
+_FIND_RUNNERS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+
+
+def _recurses(names: set[str], words: list[str], piped_to_xargs: bool) -> bool:
+    """Le segment lit-il le contenu d'une arborescence ? ``grep -r``, ``rg``, ``diff -r``, une archive, ``find`` qui lance."""
+    if names & _RECURSIVE_READERS:
+        return True
+    short = [w for w in words if w.startswith("-") and not w.startswith("--")]
+    if names & _GREPS:
+        return any("r" in w or "R" in w for w in short) or any(
+            w.startswith(("--recursive", "--dereference-recursive", "--directories")) or w == "recurse" for w in words
+        )
+    if "diff" in names:
+        return any("r" in w for w in short) or "--recursive" in words
+    return "find" in names and (piped_to_xargs or any(w in _FIND_RUNNERS for w in words))
+
+
+def _reads_zone_through_a_parent(command: str) -> bool:
+    """Une lecture récursive dont un opérande est un dossier PARENT de la zone : son contenu est lu sans être nommé.
+
+    Le programme est cherché dans tous les mots du segment, pas seulement en tête : une enveloppe
+    (``timeout 5 grep -r …``) ne le cache pas. ``rg``, ``ag`` et ``ack`` sans chemin lisent le répertoire courant.
+    Hors de portée : une liste de fichiers produite puis lue ailleurs (``$(…)``, une boucle), comme pour le reste.
+    """
+    zones, _grimoire, home = _control_zones()
+    segments, dirs = _segments_and_dirs([_strip_heredoc_bodies(command), *extract_c_bodies(command)], home)
+    piped_to_xargs = any(word.rsplit("/", 1)[-1] == "xargs" for words in segments for word in words)
+    for words in segments:
+        names = {word.rsplit("/", 1)[-1] for word in words}
+        if not _recurses(names, words, piped_to_xargs):
+            continue
+        reached = [r for word in words[1:] for r in _resolutions(word, dirs, home)]
+        if names & {"rg", "ag", "ack"}:
+            reached.extend((d, d) for d in dirs)
+        if any(_inside(zone, path) for normal, real in reached for path in (normal, real) for zone in zones):
+            return True
+    return False
+
+
 # ── Mention prouvée inoffensive (#982, #1125) ────────────────────────────────
 #
 # Liste blanche stricte de ce qu'une commande peut faire d'un fichier protégé sans l'écrire : le citer dans de
@@ -964,7 +1007,7 @@ def _zone_vector(command: str, *, mutating: bool) -> ForgeryVector | None:
     )
     try:
         textual = (mutating and _names_protected(command) == marker) or _names_zone_text(command)
-        if not (textual or _names_control_zone_command(command)):
+        if not (textual or _names_control_zone_command(command) or _reads_zone_through_a_parent(command)):
             return None
         from grimoire.hosts.decisions.write_proof import proves_write
 

@@ -468,7 +468,15 @@ le ledger. Depuis le lot A de l'issue #638 :
   et toute sortie vers `/dev/null` écrit exactement ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
   commande en écriture, y compris vers `/dev/stdout` ou vers un descripteur
   autre que 1 et 2 (`>&3`). Un motif entre
-  guillemets est une donnée, antislash compris (`grep "a\|b" f` lit) ;
+  guillemets est une donnée, antislash compris (`grep "a\|b" f` lit).
+  Chaque commande est jugée sur ses mots une fois les guillemets retirés, et
+  le classement échoue fermé : une forme qu'il ne sait pas lire (substitution
+  de commande, guillemets `$'…'`, parenthèse nue), ou un mot que le shell peut
+  encore changer là où il pourrait devenir une option qui écrit (une variable
+  dans les arguments de `find`, `sort`, `sed` ou `git`), compte comme une
+  écriture — sauf la variable d'une boucle `for` dont les valeurs sont écrites
+  en clair sur la ligne, dans le corps de cette boucle
+  (`for f in a b; do sed -n 1,5p $f; done` lit) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
   sur les profils `governed` et `production` ; les autres profils reçoivent
