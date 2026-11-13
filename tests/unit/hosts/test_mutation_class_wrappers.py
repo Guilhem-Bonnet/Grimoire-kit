@@ -189,7 +189,7 @@ ENVELOPPES = [
     "timeout --signal=KILL --preserve-status 1.5 {}",
     "env LC_ALL=C {}",
     "env -u GRIMOIRE_TASK_ID {}",
-    "env -i PATH=/usr/bin {}",
+    "env -i LC_ALL=C {}",
     "nice {}",
     "nice -n 10 {}",
     "command {}",
@@ -197,7 +197,7 @@ ENVELOPPES = [
     "time {}",
     "time -p {}",
     # Combinaisons, dont celles que le proxy produit vraiment.
-    "FOO=1 rtk {}",
+    "LC_ALL=C rtk {}",
     "sudo rtk {}",
     "cd /tmp && rtk {}",
     "rtk {} | head -5",
@@ -206,11 +206,20 @@ ENVELOPPES = [
     "rtk git status && rtk {}",
 ]
 
+#: Enveloppes qui affectent une variable hors de la liste blanche des variables inertes :
+#: la commande portée n'est plus une lecture, quelle qu'elle soit. Ces deux formes
+#: figuraient parmi les enveloppes transparentes ; une variable quelconque (``FOO``) ou
+#: la recherche des exécutables (``PATH``) peut changer ce que la commande portée lance.
+ENVELOPPES_A_VARIABLE = [
+    "env -i PATH=/usr/bin {}",
+    "FOO=1 rtk {}",
+]
+
 SHELLS = ["bash", "sh", "zsh"]
 
 
-def _formes_enveloppees(commands: list[str]) -> list[str]:
-    formes = [enveloppe.format(command) for command in commands for enveloppe in ENVELOPPES]
+def _formes_enveloppees(commands: list[str], enveloppes: list[str] | None = None) -> list[str]:
+    formes = [enveloppe.format(command) for command in commands for enveloppe in enveloppes or ENVELOPPES]
     for command in commands:
         formes.extend(_sous_shell(shell, command) for shell in SHELLS)
         formes.append(_sous_shell("bash", f"git status ; {command}"))
@@ -258,12 +267,21 @@ def test_une_lecture_enveloppee_est_read_only(command: str) -> None:
         "rtk git -C /tmp/depot log",
         "rtk git log | head -5",
         "cd /tmp && rtk ls",
-        "FOO=1 rtk git status",
+        "LC_ALL=C rtk git status",
         "sudo rtk ls",
     ],
 )
 def test_les_reecritures_reelles_du_proxy_sont_read_only(command: str) -> None:
     assert _classe(command) is MutationClass.READ_ONLY
+
+
+@pytest.mark.parametrize(
+    "command",
+    [enveloppe.format(command) for command in LECTURES for enveloppe in ENVELOPPES_A_VARIABLE],
+)
+def test_une_lecture_sous_une_affectation_hors_liste_blanche_n_est_plus_read_only(command: str) -> None:
+    """Attente corrigée : ces formes étaient attendues en lecture, elles sont des mutations."""
+    assert _classe(command) is MutationClass.MUTATION_CONTROLLED
 
 
 @pytest.mark.parametrize(
@@ -291,7 +309,7 @@ def test_une_ecriture_nue_n_est_jamais_read_only(command: str) -> None:
     assert _classe(command) is not MutationClass.READ_ONLY
 
 
-@pytest.mark.parametrize("command", _formes_enveloppees(ECRITURES))
+@pytest.mark.parametrize("command", _formes_enveloppees(ECRITURES, ENVELOPPES + ENVELOPPES_A_VARIABLE))
 def test_une_ecriture_enveloppee_n_est_jamais_read_only(command: str) -> None:
     assert _classe(command) is not MutationClass.READ_ONLY
 
