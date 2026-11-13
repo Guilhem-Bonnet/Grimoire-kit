@@ -585,6 +585,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "lease_brake": (GUARD, ""),
     "pause_brake": (GUARD, ""),
     "profile_floor": (SUPPORT, "plancher de profil lu par evidence_gate, activation, tool_policy et context_capsule : panne couverte par leurs cas"),
+    "read_only_arguments": (SUPPORT, "règles de lecture par verbe (curl, gh, journalctl, ss, systemctl) appelées par tool_facts dans classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),
     "record": (SUPPORT, "journal d'observation (agent.dispatch / agent.miss) : ne change jamais une décision"),
     "repetition_guard": (GUARD, ""),
     "session_memory": (GUARD, ""),
