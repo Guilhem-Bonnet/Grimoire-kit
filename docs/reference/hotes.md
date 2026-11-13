@@ -468,7 +468,51 @@ le ledger. Depuis le lot A de l'issue #638 :
   et toute sortie vers `/dev/null` écrit exactement ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
   commande en écriture, y compris vers `/dev/stdout` ou vers un descripteur
   autre que 1 et 2 (`>&3`). Un motif entre
-  guillemets est une donnée, antislash compris (`grep "a\|b" f` lit) ;
+  guillemets est une donnée, antislash compris (`grep "a\|b" f` lit).
+  Chaque commande est jugée sur ses mots une fois les guillemets retirés, et
+  le classement échoue fermé : une forme qu'il ne sait pas lire (substitution
+  de commande, guillemets `$'…'`, parenthèse nue), ou un mot que le shell peut
+  encore changer là où il pourrait devenir une option qui écrit (une variable
+  dans les arguments de `find`, `sort`, `sed` ou `git`), compte comme une
+  écriture — sauf la variable d'une boucle `for` dont les valeurs sont écrites
+  en clair sur la ligne, dans le corps de cette boucle
+  (`for f in a b; do sed -n 1,5p $f; done` lit). Une boucle affecte sa
+  variable : son nom doit être celui d'une variable inerte ou un nom local
+  (minuscules et chiffres, hors noms que le shell lit, comme `path` sous zsh),
+  sinon la boucle compte comme une écriture (`for PATH in …`). Un motif de fichiers en
+  opérande reste une lecture (`rg motif src/*.py`), pas là où le nombre ou la
+  place des mots décide (les opérandes de `uniq` et `xxd`, le script de `sed`),
+  ni dans un mot qui commence par un tiret — sauf derrière le `=` d'une
+  option longue d'une recherche (`grep … --include=*.py`), où il ne peut pas
+  changer le nom de l'option. Un rappel d'historique (`!!`,
+  `!$`), une expansion qui affecte une variable ou exécute en se développant,
+  et un heredoc dont l'étiquette ne se lit pas comptent comme une écriture.
+  Sous le proxy de terminal, `rtk grep` suit la règle de `rg`, à qui il confie
+  la recherche. Un heredoc n'est reconnu que dans une commande simple : un
+  `<<` écrit dans une expansion, une expression arithmétique, un test, un
+  indice ou une substitution n'ouvre rien pour le shell, et la ligne compte
+  alors comme une écriture. De même derrière une ligne qu'un terminal
+  interactif rejetterait (mot réservé hors de sa place, commande vide,
+  redirection sans cible, rappel d'historique) : le corps n'est une donnée
+  que si ce qui le précède est une suite de commandes simples. La détection
+  des commandes destructives lit la
+  même ligne : un corps de heredoc n'est une donnée que là où le shell ouvre
+  et ferme un heredoc. Le message écrit par `"$(cat <<'EOF' … EOF)"` en est
+  une quand il est la valeur d'une option qui prend un texte — `-m` ou
+  `--message` de `git commit`, `git tag`, `git notes` ; `--title`, `--body`,
+  `--notes`, `--subject` (et `--comment` pour fermer ou rouvrir) des
+  sous-commandes `create`, `edit`, `comment`, `review`, `close`, `merge`,
+  `reopen` de `gh pr`, `gh issue`, `gh release` — ou le texte d'un `echo` ou
+  d'un `printf` qui n'est confié à aucun programme. En toute autre place
+  (option qui lit un fichier, argument positionnel, option inconnue, devant
+  un interpréteur) il reste inspecté, comme le corps d'un heredoc à étiquette
+  nue qui porte une substitution. Limite connue : un texte écrit dans un
+  fichier que la même ligne n'exécute pas — un script lancé par un appel
+  suivant, un fichier de démarrage du shell — reste une écriture ordinaire,
+  son contenu n'est pas lu comme une commande ; de même un drapeau destructif
+  porté par une variable ou une substitution. Enfin, un guillemet échappé ou un commentaire ne cache pas une
+  commande, et un verbe ou un drapeau écrit entre guillemets est le mot que
+  le shell lance (un texte cité qui porte des blancs reste une donnée) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
   sur les profils `governed` et `production` ; les autres profils reçoivent
