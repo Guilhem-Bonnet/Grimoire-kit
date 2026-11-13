@@ -389,6 +389,11 @@ _UNSTABLE_NAMES = frozenset(
 _MAX_LOOP_COMBINATIONS = 32
 
 
+def _shell_words(segment: str) -> list[str]:
+    """Les mots bruts de *segment*, coupés aux seuls blancs que le shell lit comme tels."""
+    return [word for word in re.split(r"[ \t\n]+", segment) if word]
+
+
 def _opens_loop(words: list[str]) -> bool:
     for word in words:
         if word not in _BEFORE_A_LOOP:
@@ -407,7 +412,7 @@ def _loop_values(segments: list[tuple[str, str]]) -> dict[str, tuple[int, int, t
     found: dict[str, tuple[int, int, tuple[str, ...]]] = {}
     seen: set[str] = set()
     for index, (_operators, segment) in enumerate(segments):
-        words = segment.split()
+        words = _shell_words(segment)
         while words and words[0] in _BEFORE_A_LOOP:
             words = words[1:]
         if len(words) < 2 or words[0] != "for":
@@ -441,7 +446,7 @@ def _loop_end(segments: list[tuple[str, str]], start: int) -> int | None:
     """
     depth = 1
     for index in range(start + 1, len(segments)):
-        words = segments[index][1].split()
+        words = _shell_words(segments[index][1])
         closers = 0
         while closers < len(words) and words[closers] in _SHELL_CLOSING_KEYWORDS:
             if words[closers] == "done":
@@ -471,7 +476,9 @@ def _loop_bindings(
     return [dict(zip(bound, combination, strict=True)) for combination in product(*bound.values())]
 
 
-def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_Word] | None:
+def _resolve_words(
+    segment: str, values: dict[str, str] | None = None, *, strict: bool = True
+) -> list[_Word] | None:
     """Les mots de *segment* tels que le programme les recevra, ou ``None`` s'il ne se lit pas.
 
     Ne se lit pas : un guillemet jamais fermé, une substitution de commande ou de
@@ -481,6 +488,10 @@ def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_
     n'écrivent aucun fichier ont été retirées avant), un antislash en fin de ligne (le mot
     continue sur la ligne suivante). Un ``\\"`` hors guillemets est un caractère, pas
     l'ouverture d'un texte cité. Une variable de *values* est remplacée par sa valeur.
+
+    Sans *strict*, pour ce qui inspecte la ligne au lieu de la classer : seuls un
+    guillemet jamais fermé et un antislash en fin de ligne rendent ``None`` ; le reste
+    est recopié tel qu'il est écrit.
     """
     values = values or {}
     words: list[_Word] = []
@@ -518,7 +529,7 @@ def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_
                     text.append(segment[j + 1] if segment[j + 1] in '"\\$`' else segment[j : j + 2])
                     j += 2
                     continue
-                if _is_unreadable_at(segment, j):
+                if strict and _is_unreadable_at(segment, j):
                     return None
                 known = _PLAIN_EXPANSION_RE.match(segment, j) if d == "$" else None
                 if known is not None and (known.group(1) or known.group(2)) in values:
@@ -532,7 +543,7 @@ def _resolve_words(segment: str, values: dict[str, str] | None = None) -> list[_
             if j >= n:
                 return None
             i = j + 1
-        elif c in "()>" or _is_unreadable_at(segment, i) or segment.startswith(_DOLLAR_QUOTES, i):
+        elif strict and (c in "()>" or _is_unreadable_at(segment, i) or segment.startswith(_DOLLAR_QUOTES, i)):
             return None
         else:
             known = _PLAIN_EXPANSION_RE.match(segment, i) if c == "$" else None
@@ -1024,7 +1035,40 @@ def executed_surfaces(command: str) -> tuple[str, ...]:
             surfaces.append(read[0])
         else:
             surfaces.append(_read_surface(read[0]))
+            surfaces.append(_unquoted(read[0], prose=False))
     return tuple(dict.fromkeys(surfaces))
+
+
+def unquoted_text(command: str) -> str:
+    """*command* mot par mot, guillemets et antislashs retirés comme le shell les retire.
+
+    Pour la détection des lectures de secret, à côté de la ligne brute : un nom de
+    fichier coupé par des guillemets (``.e"n"v``) est le nom que le programme reçoit.
+    """
+    texts = [read[0] for comments in _readings(command) if (read := _code_and_bodies(command, comments=comments))]
+    return "\n".join(dict.fromkeys(_unquoted(text, prose=True) for text in texts if not _opens_dollar_quote(text)))
+
+
+def _unquoted(code: str, *, prose: bool) -> str:
+    """*code* segment par segment, chaque mot tel que le programme le reçoit.
+
+    Un verbe ou un drapeau cité (``'rm' "-rf"``), ou coupé par des guillemets ou un
+    antislash, est le mot que le shell lance. Sans *prose*, un mot qui porte un blanc —
+    un message, une description, un motif de recherche — est une donnée : il est effacé,
+    comme sur les autres surfaces. Un segment qui ne se lit pas est rendu tel quel.
+    """
+    parts: list[str] = []
+    for _operators, segment in _split_segments(code):
+        words = _resolve_words(segment, strict=False)
+        if words is None:
+            parts.append(segment)
+        else:
+            parts.append(
+                " ".join(
+                    word.text if prose or not any(char.isspace() for char in word.text) else " " for word in words
+                )
+            )
+    return " ; ".join(parts)
 
 
 def _without_fileless_redirections(command: str) -> str:

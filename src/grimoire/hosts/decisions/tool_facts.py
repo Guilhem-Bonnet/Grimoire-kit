@@ -19,6 +19,7 @@ from grimoire.hosts.decisions.read_only import (
     _blank_quoted,
     executed_surfaces,
     strip_heredoc_bodies,
+    unquoted_text,
 )
 
 # Le classement lecture / mutation vit dans :mod:`.read_only` ; il reste importable d'ici.
@@ -488,6 +489,9 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     interpreted = interpreted_bodies(command) if command else ()
     candidates = [c for c in (_strip_heredoc_bodies(command) if command else "", *targets) if c]
     candidates.extend(body for _, body in interpreted)
+    if command:
+        # Le nom que le programme reçoit, guillemets retirés : ``.e"n"v`` est ``.env``.
+        candidates.append(unquoted_text(command))
 
     secret_target = ""
     for candidate in candidates:

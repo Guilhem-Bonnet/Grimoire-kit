@@ -485,8 +485,9 @@ le ledger. Depuis le lot A de l'issue #638 :
   Sous le proxy de terminal, `rtk grep` suit la règle de `rg`, à qui il confie
   la recherche. La détection des commandes destructives lit la même ligne :
   un corps de heredoc n'est une donnée que là où le shell ouvre et ferme un
-  heredoc, et un guillemet échappé ou un commentaire ne cache pas une
-  commande ;
+  heredoc, un guillemet échappé ou un commentaire ne cache pas une
+  commande, et un verbe ou un drapeau écrit entre guillemets est le mot que
+  le shell lance (un texte cité qui porte des blancs reste une donnée) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
   sur les profils `governed` et `production` ; les autres profils reçoivent
