@@ -29,9 +29,10 @@ import pytest
 
 from grimoire.missions import dispatch, dispatch_provider_env
 from grimoire.providers.registry import ProviderSpec
-from tests.unit.hosts.test_runtime_gemini import _payload as _gemini_payload
-from tests.unit.test_workspace_live_view import EXAMPLE as LIVE_EXAMPLE
-from tests.unit.test_workspace_live_view import _layout as _live_layout
+
+from .hosts.test_runtime_gemini import _payload as _gemini_payload
+from .test_workspace_live_view import EXAMPLE as LIVE_EXAMPLE
+from .test_workspace_live_view import _layout as _live_layout
 
 
 def _simulate_windows_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
