@@ -1,1 +1,0 @@
-- perf(cockpit): la liste des fichiers du Source s'arrête à 2000 fichiers et à 2 s au lieu de parcourir tout l'arbre du projet ; sa réponse passe par le cache de lecture et la palette ne la demande qu'à sa première ouverture

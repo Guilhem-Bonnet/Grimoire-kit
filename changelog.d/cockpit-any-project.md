@@ -1,1 +1,0 @@
-- feat(cockpit): piloter tout projet enrôlé sans confirmation nommée (lot 5)

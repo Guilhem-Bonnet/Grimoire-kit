@@ -1,1 +1,0 @@
-- refactor(tools): `make_handler` découpé en étapes nommées — le handler HTTP de l'atelier devient la classe de module `_ForgeHandler`, les corps de route de `do_POST` des méthodes `_post_*` ; aucun changement de comportement, et un test de caractérisation par branche jusque-là non testée (`tests/unit/tools/test_forge_http.py`)
