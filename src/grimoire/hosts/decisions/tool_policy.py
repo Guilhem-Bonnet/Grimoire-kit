@@ -284,7 +284,7 @@ _AUTHORITY_PROFILES = frozenset({"governed", "production"})
 
 
 def _revoke_on_protected_write(hook: HookInput, facts: ToolFacts, vector: ForgeryVector) -> None:
-    """#982 : révoque après un refus dans la zone protégée ; une révocation ciblée en erreur devient large."""
+    """#982, #1173 : révoque après une écriture prouvée dans la zone protégée ; une révocation ciblée en erreur devient large."""
     from grimoire.missions.mandate import (
         REVOKE_PROTECTED_WRITE,
         revocation_cause,
@@ -327,10 +327,11 @@ def _authority_guard(hook: HookInput, facts: ToolFacts) -> Decision | None:
         if vector.governed_only and profile not in _AUTHORITY_PROFILES:
             return None
         if vector.revokes:
-            # #876 lot 1, #982 : un refus dans la zone protégée révoque, sauf mention prouvée inoffensive
-            # (``vector.revokes`` faux). La cible peut être le journal ou la clé (``revokes_all``) : tous les mandats
-            # du poste ; sinon ceux du projet de la session et de la session elle-même (repli : tous). Best effort :
-            # le refus, lui, ne dépend pas de la révocation.
+            # #876 lot 1, #982, #1173 : seule une écriture prouvée dans la zone protégée révoque ; une lecture, une
+            # mention ou une forme illisible est refusée sans révocation (``vector.revokes`` faux). La cible peut
+            # être le journal ou la clé (``revokes_all``) : tous les mandats du poste ; sinon ceux du projet de la
+            # session et de la session elle-même (repli : tous). Best effort : le refus, lui, ne dépend pas de la
+            # révocation.
             with contextlib.suppress(Exception):
                 _revoke_on_protected_write(hook, facts, vector)
         why = (

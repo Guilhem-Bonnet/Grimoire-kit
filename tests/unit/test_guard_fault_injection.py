@@ -159,6 +159,25 @@ def _pre_forgery(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     return _pre(root, "Bash", {"command": f"echo '{{\"session_id\":\"S1\"}}' >> {_JOURNAL}"})
 
 
+def _zone() -> str:
+    """Le chemin de la zone de contrôle, tel qu'une commande l'écrit (sous le HOME isolé de la suite)."""
+    from grimoire.hosts.decisions.authority_guard import CONTROL_ZONE_MARKER
+
+    return CONTROL_ZONE_MARKER
+
+
+def _pre_zone_write(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    """#1173 : une écriture dans la zone de contrôle — refusée, que la preuve d'écriture tienne ou tombe."""
+    _governed(root)
+    return _pre(root, "Bash", {"command": f"echo forged >> {_zone()}/proof.json"})
+
+
+def _pre_zone_mention(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    """#1173 : la simple mention, seule commande nommant la zone qui passe — une panne doit la faire refuser."""
+    _governed(root)
+    return _pre(root, "Bash", {"command": f'git commit -m "la garde refuse {_zone()}"'})
+
+
 def _pre_destructive(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     _governed(root)
     return _pre(root, "Bash", {"command": "rm -rf /home/x/project"})
@@ -383,6 +402,8 @@ def _task_completed(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
 SCENARIOS: dict[str, tuple[Scenario, str]] = {
     # nom -> (préparation, résultat sain attendu : la preuve que le scénario discrimine)
     "pre_forgery": (_pre_forgery, "deny"),
+    "pre_zone_write": (_pre_zone_write, "deny"),
+    "pre_zone_mention": (_pre_zone_mention, "allow"),
     "pre_destructive": (_pre_destructive, "deny"),
     "pre_untrusted": (_pre_untrusted, "ask"),
     "pre_stale_lease": (_pre_stale_lease, "deny"),
@@ -443,6 +464,12 @@ CASES: tuple[FaultCase, ...] = (
     # ── PreToolUse : la garde d'autorité refuse (governed), le reste rend la main à l'humain
     _closed(_TP, "authority_guard", "pre_forgery", _P + "authority_guard.forgery_vector", "deny"),
     _closed(_TP, "authority_guard", "pre_forgery", _P + "tool_policy.active_profile_id", "deny", "ask"),
+    # #1173 : la preuve d'écriture en panne ne lève pas le refus ; la simple mention en panne est refusée
+    _closed(_TP, "write_proof", "pre_zone_write", _P + "write_proof.proves_write", "deny"),
+    _closed(_TP, "authority_guard", "pre_zone_write", _P + "authority_guard._names_protected", "deny"),
+    _closed(_TP, "authority_guard", "pre_zone_mention", _P + "authority_guard.is_text_only_mention", "deny"),
+    _closed(_TP, "authority_guard", "pre_zone_mention", _P + "authority_guard._parse_strict", "deny"),
+    _closed(_TP, "authority_guard", "pre_zone_mention", _P + "authority_guard._resolutions", "deny"),
     _closed(_TP, "tool_facts", "pre_destructive", _P + "tool_policy.classify_tool", "ask"),
     _closed(_TP, "tool_policy", "pre_destructive", _P + "tool_policy._engine", "ask"),
     _closed(_TP, "tool_policy", "pre_destructive", _P + "tool_policy.load_custom_rules", "ask"),
@@ -567,6 +594,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "task_context": (GUARD, ""),
     "tool_facts": (GUARD, ""),
     "tool_policy": (GUARD, ""),
+    "write_proof": (GUARD, ""),
 }
 #: Modules qui ne sont pas des décisions : le vocabulaire commun et le registre.
 INFRASTRUCTURE = frozenset({"__init__", "_shared"})
