@@ -981,7 +981,7 @@ class TaskService:
 
                 record_answer_refused(self, task_id, asked.id if asked is not None else question_id, exc)
             raise
-        answer = text.strip()
+        answer = decision.answer if decision is not None else text.strip()  # le pilote peut avoir substitué la recommandation
         if not answer:
             raise ValueError("`text` requis : une réponse vide ne tranche rien")
         self.ledger.append_event(

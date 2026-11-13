@@ -29,6 +29,12 @@ divergeant, la réponse cite sa justification et déclare sa confiance (``high``
 déclarée laisse la question à l'humain, avec la raison, et le pilote l'inscrit (:data:`DEFERRED_EVENT`) pour que le
 cockpit la signale.
 
+**Action par défaut** (``autopilot.default_action``) — ``ask`` (le défaut, et le comportement d'un projet qui ne règle
+rien) laisse cette question à l'humain. ``apply_recommended`` applique l'option recommandée *avant* de renoncer : une
+confiance basse ou non déclarée sur une question hors liste réservée qui porte une recommandation tranche par cette
+option, avec la source ``default``. Une question sans recommandation, ou réservée, reste à l'humain dans les deux cas.
+Toute autre valeur rend la politique invalide (échec fermé).
+
 **Traçabilité** — chaque décision du pilote est un événement du ledger (:data:`DECIDED_EVENT`) : question, option,
 justification, confiance, source de la recommandation, mandat.
 """
@@ -67,6 +73,7 @@ __all__ = [
     "AUTOPILOT_ENTRY",
     "CONFIDENCES",
     "DECIDED_EVENT",
+    "DEFAULT_ACTIONS",
     "DEFERRED_EVENT",
     "RESERVED",
     "AutopilotPolicy",
@@ -86,6 +93,10 @@ _CHALLENGE = "autopilot_challenge"
 DECIDED_EVENT = "autopilot.decided"
 #: Une question que le pilote laisse à l'humain faute de confiance : le cockpit la signale.
 DEFERRED_EVENT = "autopilot.deferred"
+#: Les valeurs de ``autopilot.default_action`` : demander (défaut), ou appliquer l'option recommandée.
+DEFAULT_ACTIONS: tuple[str, ...] = ("ask", "apply_recommended")
+_ASK = "ask"
+_APPLY_RECOMMENDED = "apply_recommended"
 #: Les niveaux de confiance qu'une réponse déclare ; ``low`` (et le silence) laisse la question à l'humain.
 CONFIDENCES: tuple[str, ...] = ("high", "medium", "low")
 _DECIDING = frozenset({"high", "medium"})
@@ -179,14 +190,19 @@ def _outside_repo(texts: list[str], project_root: Path) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class AutopilotPolicy:
-    """Ce que le projet ajoute à la liste fermée ; il ne peut rien en retirer. *error* : invalide, le pilote ne décide rien."""
+    """Ce que le projet ajoute à la liste fermée, et son action par défaut.
+
+    *extra* ne peut rien retirer de la liste ; *default_action* vaut ``ask`` (défaut) ou ``apply_recommended`` ;
+    *error* : invalide, le pilote ne décide rien.
+    """
 
     extra: tuple[str, ...] = ()
+    default_action: str = _ASK
     error: str = ""
 
 
 def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
-    """La section ``autopilot`` de ``orchestration-policy.yaml`` : seule la clé ``reserved`` (liste de textes) existe."""
+    """La section ``autopilot`` de ``orchestration-policy.yaml`` : ``reserved`` (liste de textes) et ``default_action``."""
     path = project_root / ORCHESTRATION_FILE
     if not path.is_file():
         return AutopilotPolicy()
@@ -203,16 +219,23 @@ def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
         return AutopilotPolicy()
     if not isinstance(section, Mapping):
         return AutopilotPolicy(error="`autopilot` doit être une table")
-    unknown = sorted(str(k) for k in section if k != "reserved")
+    unknown = sorted(str(k) for k in section if k not in ("reserved", "default_action"))
     if unknown:
         return AutopilotPolicy(
-            error=f"`autopilot` : clé inconnue {', '.join(unknown)} — seule `reserved` existe (elle ajoute des "
-            "réservations, jamais n'en retire)"
+            error=f"`autopilot` : clé inconnue {', '.join(unknown)} — seules `reserved` et `default_action` existent "
+            "(`reserved` ajoute des réservations, jamais n'en retire)"
         )
     raw = section.get("reserved", [])
     if not isinstance(raw, list) or not all(isinstance(r, str) and _fold(r) for r in raw):
         return AutopilotPolicy(error="`autopilot.reserved` doit être une liste de textes non vides")
-    return AutopilotPolicy(tuple(dict.fromkeys(_fold(r) for r in raw)))
+    action = section.get("default_action", _ASK)
+    if not isinstance(action, str) or action.strip().lower() not in DEFAULT_ACTIONS:
+        shown = "absent" if action is None else repr(action)
+        return AutopilotPolicy(
+            error=f"`autopilot.default_action` vaut {shown} — parmi {', '.join(DEFAULT_ACTIONS)}"
+        )
+    return AutopilotPolicy(tuple(dict.fromkeys(_fold(r) for r in raw)), action.strip().lower())
+
 
 
 def reserved_reason(
@@ -251,7 +274,7 @@ class Decision:
     """Ce que le pilote a décidé : l'option, d'où elle vient, avec quelle confiance et pourquoi."""
 
     answer: str
-    source: str  # ``recommended`` | ``judgment``
+    source: str  # ``recommended`` | ``judgment`` | ``default``
     confidence: str
     justification: str
 
@@ -264,11 +287,15 @@ class Decision:
         }
 
 
-def judge(question: Question, answer: str, *, justification: str = "", confidence: str = "") -> Decision:
+def judge(
+    question: Question, answer: str, *, justification: str = "", confidence: str = "", default_action: str = _ASK
+) -> Decision:
     """La décision du pilote sur *question* ; lève :class:`GrimoireMissionError` si elle reste à l'humain.
 
     Une réponse égale à l'option recommandée (casse et espaces mis à part) est la recommandation appliquée. Toute autre
-    réponse est un jugement : elle cite sa justification et déclare une confiance ``high`` ou ``medium``.
+    réponse est un jugement : elle cite sa justification et déclare une confiance ``high`` ou ``medium``. Sous
+    ``default_action: apply_recommended``, une confiance basse ou non déclarée applique plutôt l'option recommandée,
+    source ``default`` (la liste réservée, elle, est jugée avant : :func:`reserved_reason`).
     """
     text = " ".join(answer.split())
     recommended = " ".join(question.recommended.split())
@@ -277,6 +304,11 @@ def judge(question: Question, answer: str, *, justification: str = "", confidenc
     level = confidence.strip().lower()
     why = " ".join(justification.split())
     if level not in _DECIDING:
+        if default_action == _APPLY_RECOMMENDED and recommended:
+            return Decision(
+                recommended, "default", level or "low",
+                why or " ".join(question.why.split()) or "action par défaut : la question recommande cette option",
+            )
         shown = level or "non déclarée"
         raise GrimoireMissionError(
             f"pilote automatique : confiance {shown} — la question reste à l'humain "

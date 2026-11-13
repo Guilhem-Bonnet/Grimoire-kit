@@ -32,6 +32,41 @@ def _fmt(ctx: typer.Context) -> str:
     return str((ctx.obj or {}).get("output", "text"))
 
 
+def _agent_session() -> bool:
+    """Vrai si la commande tourne dans une session d'agent (identifiant, marqueur d'hôte, ou entrée non interactive).
+
+    Même signal positif que :func:`grimoire.cli.cmd_task._comment_origin`, sans la question de confirmation humaine :
+    ici on ne fait qu'avertir, jamais décider.
+    """
+    import os
+    import sys
+
+    from grimoire.core.standard_state import agent_marker, current_session_id
+
+    if os.environ.get("GRIMOIRE_UNATTENDED", "").strip() == "1" or current_session_id() or agent_marker():
+        return True
+    try:
+        return not (sys.stdin.isatty() and sys.stderr.isatty())
+    except (AttributeError, ValueError):
+        return True
+
+
+def _warn_missing_recommendation(kind: str, *, options: bool) -> None:
+    """Avertit une session d'agent qui pose une question à options sans dire laquelle elle recommande.
+
+    L'option recommandée est ce qui permet au pilote automatique de trancher par défaut (`apply_recommended`) au lieu
+    d'attendre un humain : l'omettre coûte une décision. Avertissement seulement — la question se pose quand même.
+    """
+    if not options or not _agent_session():
+        return
+    flag = "--recommend" if kind == "v2" else "--recommended"
+    console.print(
+        f"[yellow]![/yellow] question sans option recommandée : ajoute `{flag} <option>` — c'est l'option que le "
+        "pilote automatique applique par défaut, au lieu d'attendre un humain (`autopilot.default_action: "
+        "apply_recommended`)."
+    )
+
+
 def register(task_app: typer.Typer) -> None:
     """Pose les commandes d'attente sur ``grimoire task``."""
     from grimoire.cli import cmd_task as ct
@@ -103,6 +138,8 @@ def register(task_app: typer.Typer) -> None:
             from grimoire.core.exceptions import GrimoireError
             from grimoire.missions.question_v2 import ask_kwargs
 
+            if not (recommended or recommend or spec):
+                _warn_missing_recommendation("v2", options=bool(option or choice))
             try:
                 raw = read_mapping(spec) if spec else {}
                 fields = ask_kwargs(
@@ -143,6 +180,7 @@ def register(task_app: typer.Typer) -> None:
             if not text.strip():
                 console.print("[red]✗[/red] une question (texte) ou un lot (`--from`)")
                 raise typer.Exit(1)
+            _warn_missing_recommendation("v1", options=bool(option))
             run(ctx, project_root, ledger_root, task_id,
                 lambda s: s.ask(task_id, text, actor, kind=kind, options=tuple(option or ()), epoch=epoch), parking=True)
             return
@@ -151,6 +189,8 @@ def register(task_app: typer.Typer) -> None:
         from grimoire.missions.questions import QuestionSpec
         from grimoire.missions.service import TaskRefusedError
 
+        if not from_file and not recommended:
+            _warn_missing_recommendation("v1", options=bool(option))
         try:
             specs = read_specs(from_file) if from_file else [
                 QuestionSpec(text, kind, tuple(option or ()), blocking=not non_blocking, why=why, key=key,

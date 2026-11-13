@@ -292,10 +292,12 @@ def answer_plan(
 
     **Pilote activé** : la liste fermée est jugée d'abord (:func:`~.autopilot.reserved_reason`), puis la réponse cite sa
     source ou sa justification et sa confiance (:func:`~.autopilot.judge`) ; « abandonner » est permis avec sa raison
-    (la tâche est annulée, la raison au ledger). Une question laissée à l'humain faute de confiance est inscrite
+    (la tâche est annulée, la raison au ledger). ``autopilot.default_action: apply_recommended`` applique l'option
+    recommandée d'une question hors liste réservée au lieu de la laisser à l'humain quand la confiance est basse ou
+    absente (source ``default``). Une question laissée à l'humain faute de confiance est inscrite
     (:data:`~.autopilot.DEFERRED_EVENT`).
     """
-    from grimoire.missions.autopilot import AutopilotStore, judge, reserved_reason
+    from grimoire.missions.autopilot import AutopilotStore, judge, load_autopilot_policy, reserved_reason
     from grimoire.missions.mandate import acting_in_process
 
     events = service.ledger.events_for(task.id)
@@ -303,10 +305,10 @@ def answer_plan(
     gesture, why = _classify(events, question, pilot=pilot)
     if not gesture:
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {why}")
-    if pilot and (kept := reserved_reason(question, task, service.project_root)):
+    policy = load_autopilot_policy(service.project_root) if pilot else None
+    if policy is not None and (kept := reserved_reason(question, task, service.project_root, policy)):
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {kept}")
-    abandoning = answer.strip().lower() == ABANDON
-    if abandoning and not pilot:
+    if answer.strip().lower() == ABANDON and not pilot:
         raise GrimoireMissionError(
             f"Réponse refusée pour {task.id} : « {ABANDON} » annule la tâche — geste d'humain, jamais de l'orchestrateur"
         )
@@ -315,11 +317,14 @@ def answer_plan(
     if not pilot:
         return gesture, None
     try:
-        decision = judge(question, answer, justification=justification, confidence=confidence)
+        decision = judge(
+            question, answer, justification=justification, confidence=confidence,
+            default_action=policy.default_action if policy is not None else "",
+        )
     except GrimoireMissionError as exc:
         _defer(service, task.id, question.id, str(exc))
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {exc}") from exc
-    if abandoning and len(decision.justification) < _MIN_ABANDON_REASON:
+    if decision.answer.strip().lower() == ABANDON and len(decision.justification) < _MIN_ABANDON_REASON:
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : annuler cite sa raison (--why, une phrase)")
     return gesture, decision
 

@@ -1,0 +1,1 @@
+- feat(missions): le pilote applique l'option recommandée puis informe (`autopilot.default_action`), au lieu d'attendre une réponse

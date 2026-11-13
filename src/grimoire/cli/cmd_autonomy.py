@@ -314,7 +314,8 @@ def autopilot_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -
 
     state = AutopilotStore(project_root).state()
     policy = load_autopilot_policy(project_root.resolve())
-    _emit(ctx, {**state.to_dict(), "policy_error": policy.error, "extra_reserved": list(policy.extra)})
+    _emit(ctx, {**state.to_dict(), "policy_error": policy.error, "extra_reserved": list(policy.extra),
+                "default_action": policy.default_action})
     if _fmt(ctx) == "json":
         return
     if state.active:

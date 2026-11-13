@@ -328,7 +328,7 @@ def _park_provider_error(service: TaskService, task: MissionTask, error: str, tr
     try:
         service.ask(
             task.id, question, "tick", kind="retry_exhausted",
-            options=("réessayer", "abandonner"), epoch=claim.lease_epoch,
+            options=("réessayer", "abandonner"), recommended="réessayer", epoch=claim.lease_epoch,
         )
     except GrimoireError:
         return False  # la récolte ordinaire jugera à l'expiration du bail

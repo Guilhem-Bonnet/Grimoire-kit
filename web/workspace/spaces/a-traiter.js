@@ -90,6 +90,12 @@ const CSS = `
 .at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
+.at-defaults { list-style: none; margin: var(--sp-2) 0 0; padding: 0 var(--sp-4) var(--sp-2); display: flex;
+  flex-direction: column; gap: var(--sp-2); }
+.at-default { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
+.at-default .at-title { font-weight: 600; }
+.at-default .at-reason { color: var(--ink2); }
+.at-default-answer { color: var(--rub); font-family: var(--mono); font-size: var(--t-s); }
 @container canvas (max-width: 720px) {
   .at-wrap { padding: var(--sp-4); }
   .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
@@ -610,6 +616,27 @@ export async function mount(root, ctx) {
       fold.append(
         node('summary', null, `Relues par le pilote : ${piloted} en cours`),
         node('p', 'at-hint', 'Le relecteur du tick relit ces PR sous mandat, le merger les fusionne : rien à faire de ton côté.'),
+      );
+      wrap.append(fold);
+    }
+    // Les décisions prises par défaut (pilote `apply_recommended`) : à relire, jamais une attente de l'humain.
+    const defaults = data.defaultDecisions || { items: [] };
+    if (defaults.count) {
+      const fold = node('details', 'at-piloted');
+      const list = node('ul', 'at-defaults');
+      for (const d of defaults.items || []) {
+        const li = node('li', 'at-default');
+        li.append(
+          node('span', 'at-title', d.question || d.title),
+          node('span', 'at-default-answer', `→ ${d.option}`),
+          node('span', 'at-reason', d.justification || ''),
+        );
+        list.append(li);
+      }
+      fold.append(
+        node('summary', null, `Décisions à revoir : ${defaults.count} prise${defaults.count > 1 ? 's' : ''} par défaut`),
+        node('p', 'at-hint', 'Le pilote a appliqué l’option recommandée sans attendre de réponse. Rien ne bloque ici : relis-les, et reprends la main si l’une ne convient pas.'),
+        list,
       );
       wrap.append(fold);
     }

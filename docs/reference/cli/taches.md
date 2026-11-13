@@ -468,14 +468,23 @@ grimoire autonomy autopilot off       # même canal humain (révoquer le mandat 
   mandat révoqué, expiré ou remplacé, il est coupé, et un nouveau mandat ne le rallume pas.
 - **Liste fermée, dans le code** : identifiants, secrets, dépense payante, accès hors du dépôt (`permission` hors
   du dépôt ou sans chemin), suppression de données utilisateur, mandat, réglages du dépôt. Le classement lit la
-  question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot.reserved` de
-  `orchestration-policy.yaml` peut **ajouter** des réservations (catégories d'escalade ou mots) ; toute autre clé
-  ou forme rend la politique invalide et le pilote ne décide plus rien.
+  question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot` de
+  `orchestration-policy.yaml` accepte `reserved` (qui **ajoute** des réservations — catégories d'escalade ou mots)
+  et `default_action` (`ask` ou `apply_recommended`) ; toute autre clé ou forme rend la politique invalide et le
+  pilote ne décide plus rien.
 - **Comment il décide** : d'abord l'option recommandée par la question (`task ask --recommended <option> --why
   "…"`, ou le champ `recommended` d'un lot), appliquée par le tick sans session. Sinon une session tranche avec les
   critères, les directives et la mémoire, et chaque réponse porte `--why "<justification>" --confidence
   high|medium|low` (`task answer`). Confiance basse, non déclarée ou sans justification : la question reste à
-  l'humain (`autopilot.deferred`, que le cockpit signale).
+  l'humain (`autopilot.deferred`, que le cockpit la signale). Les questions de conduite que le kit écrit lui-même
+  (« reprendre ou abandonner ? » après retours de fusion ou relectures répétées, tâche garée) portent toutes une
+  option recommandée ; `task ask` avertit une session d'agent qui n'en donne pas.
+- **Action par défaut** (`autopilot.default_action`) : `ask` (défaut, comportement d'un projet qui ne règle rien)
+  laisse la question à l'humain. `apply_recommended` applique l'option recommandée d'une question hors liste fermée
+  avant de renoncer, même en confiance basse ou absente : la décision porte la source `default` (et `reversible`),
+  et le cockpit la range dans « Décisions à revoir », un bloc non bloquant qui ne compte pas comme une attente de
+  l'humain. Sans option recommandée, ou dans une catégorie réservée, la question reste à l'humain. Une valeur
+  inconnue rend la politique invalide (échec fermé).
 - **Traçabilité** : chaque décision est un événement `autopilot.decided` (question, option, justification,
   confiance, source de la recommandation, mandat). Sans borne de présentations (le plafond de sessions du jour et
   le disjoncteur bornent encore).

@@ -1225,6 +1225,7 @@ class MergeStage:
                 MERGER_ACTOR,
                 kind="choice",
                 options=("reprendre", ABANDON),
+                recommended="reprendre",
                 question_id=qid,
                 title="Reprendre la tâche ou l'abandonner ?",
                 context=clip_context(f"La fusion de la pull request échoue à répétition : {_clean(why, 160)}"),

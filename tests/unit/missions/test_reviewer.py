@@ -344,6 +344,7 @@ def test_not_ready_renvoie_au_worker_puis_escalade_au_cycle_max(projet: Path, ho
     assert v2.title == "Reprendre la tâche ou l'abandonner ?" and tid not in v2.title + v2.context  # P92 : sans identifiant
     assert [(c.value, c.danger) for c in v2.choices] == [("reprendre", False), ("abandonner", True)]
     assert all(c.consequence for c in v2.choices) and v2.options == ("reprendre", "abandonner")
+    assert v2.recommended == "reprendre"  # GAO-pilote-appli-001 : le kit recommande la reprise
     assert len(host.of("claude", "--bg", "--resume")) == 1  # pas de troisième tour sans l'humain
     cycles = [e.payload["cycle"] for e in TaskService(projet).ledger.events_for(tid) if e.event_type == REVIEW_JUDGED_EVENT]
     assert cycles == [1, 2]

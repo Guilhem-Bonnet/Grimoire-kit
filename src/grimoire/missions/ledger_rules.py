@@ -139,9 +139,9 @@ def deferred_waiting(
             f"{task.id} a perdu son bail {attempts} fois (plafond {MAX_ATTEMPTS}) : "
             "la relancer encore, ou l'abandonner ?"
         )
-        options, kind = ("réessayer", "abandonner"), "retry_exhausted"
+        options, kind, pick = ("réessayer", "abandonner"), "retry_exhausted", "réessayer"
     else:  # resume_unfenced (hôte sans frein) ou resume_branch (commits non poussés, K12) : le texte est fourni
-        text, options, kind = question, ("reprendre", "abandonner"), cause
+        text, options, kind, pick = question, ("reprendre", "abandonner"), cause, "reprendre"
     if kind == "retry_exhausted":
         title, retry = (
             "Relancer la tâche ou l'abandonner ?",
@@ -169,6 +169,7 @@ def deferred_waiting(
         title=title,
         context=clip_context(context),
         choices=choices,
+        recommended=pick,
     )
     return Waiting("human", "", asked, hint, since)
 

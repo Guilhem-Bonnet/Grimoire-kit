@@ -1124,6 +1124,7 @@ def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost)
     v2 = task.waiting.question  # type: ignore[union-attr]
     assert v2.title == "Reprendre la tâche ou l'abandonner ?" and tid not in v2.title + v2.context
     assert [c.value for c in v2.choices] == ["reprendre", "abandonner"] and v2.options == ("reprendre", "abandonner")
+    assert v2.recommended == "reprendre"  # GAO-pilote-appli-001 : le kit recommande la reprise
     assert len(host.of("claude", "--bg", "--resume")) == 1
     assert [e.payload.get("escalated", False) for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == [False, True]
     assert len(events(projet, tid, MERGE_ESCALATED_EVENT)) == 1

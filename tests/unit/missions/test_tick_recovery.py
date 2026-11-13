@@ -280,7 +280,7 @@ def test_unpushed_commits_ask_human(repo: Path) -> None:
     question = task.waiting.question
     assert question is not None and question.kind == "resume_branch" and question.origin == "tick"
     assert "1 commit(s) non poussé(s)" in question.text and f"task/{tid}" in question.text
-    assert question.options == ("reprendre", "abandonner")
+    assert question.options == ("reprendre", "abandonner") and question.recommended == "reprendre"
 
 
 def test_pushed_branch_is_reaped_and_a_dirty_tree_asks(repo: Path, tmp_path: Path) -> None:

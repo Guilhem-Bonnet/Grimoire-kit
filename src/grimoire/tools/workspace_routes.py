@@ -584,6 +584,7 @@ def _autopilot_state(project_root: Path, _query: _Query) -> Any:
     return {
         **AutopilotStore(project_root).state().to_dict(),
         "reserved": sorted(RESERVED), "extra_reserved": list(policy.extra), "policy_error": policy.error,
+        "default_action": policy.default_action,
     }
 
 
