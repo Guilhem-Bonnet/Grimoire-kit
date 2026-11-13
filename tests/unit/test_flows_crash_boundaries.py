@@ -750,16 +750,31 @@ def test_a_refusal_without_a_repair_keeps_its_message(tmp_path: Path, caplog: py
 def test_every_refusal_raised_after_the_reconcile_goes_through_the_repair_note() -> None:
     """Les quatre `raise` de `resume` postérieurs à `_reconcile` (dont le refus d'un run en pause, K11) passent par `_refusal` : aucun ne perd `repaired_notes`.
 
-    La garde suit le code là où il vit : la fin de `_resume_core` après la réconciliation, plus le corps entier de
-    chaque étape `_resume_*` qui y est appelée — une étape extraite ne sort pas du champ de la garde.
+    La garde suit le code là où il vit : la fin de `_resume_core` après la réconciliation, plus le corps entier des
+    étapes de `grimoire.flows.engine_resume`. Toute fonction de ce module est lue par défaut ; seule en sort celle
+    que `_resume_core` appelle AVANT la réconciliation (`resume_terminal` : rien n'est encore réparé, son refus nu
+    est légitime). Une étape ajoutée ou renommée ne sort donc pas du champ de la garde.
     """
     import inspect
     import re
 
-    source = inspect.getsource(FlowEngine._resume_core)
-    after = source.split("self._reconcile(wfi, ctx)", 1)[1]
-    steps = sorted(set(re.findall(r"self\.(_resume_\w+)\(", after)))
-    scanned = after + "".join(inspect.getsource(getattr(FlowEngine, name)) for name in steps)
+    from grimoire.flows import engine_resume
+
+    before, after = inspect.getsource(FlowEngine._resume_core).split("self._reconcile(wfi, ctx)", 1)
+    step_call = re.compile(r"engine_resume\.(\w+)\(")
+    before_reconcile = set(step_call.findall(before))
+    steps = {
+        name: fn
+        for name, fn in vars(engine_resume).items()
+        if inspect.isfunction(fn) and fn.__module__ == engine_resume.__name__ and name not in before_reconcile
+    }
+    assert set(step_call.findall(after)) <= set(steps), "une étape appelée après la réconciliation échappe à la lecture"
+    methods = sorted(set(re.findall(r"self\.(_resume_\w+)\(", after)))
+    scanned = (
+        after
+        + "".join(inspect.getsource(getattr(FlowEngine, name)) for name in methods)
+        + "".join(inspect.getsource(fn) for fn in steps.values())
+    )
     assert not re.search(r"raise GrimoireRuntimeError\(", scanned), "un refus de resume ignore les réparations déjà écrites"
     assert scanned.count("raise _refusal(") == 4
 
