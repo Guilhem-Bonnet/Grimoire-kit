@@ -729,11 +729,19 @@ def test_une_nouvelle_reponse_humaine_remplace_un_precedent_repris(project: Path
 def unreadable(service: TaskService, monkeypatch: pytest.MonkeyPatch, how: str, ruling: pr.Precedent) -> None:
     if how == "oubli-sans-identifiant":
         service.ledger.append_event(pr.FORGOTTEN_EVENT, ruling.task_id, "task", "guilhem", {"origin": ORIGIN_HUMAN})
-    elif how == "decision-sans-precedent":
+    elif how in ("decision-sans-precedent", "decision-identifiant-vide"):
+        named = {} if how == "decision-sans-precedent" else {"precedent": {"id": "  "}}
         service.ledger.append_event(
             DECIDED_EVENT, ruling.task_id, "task", "orchestrator",
-            {"task_id": ruling.task_id, "question_id": "q-x", "recommendation_source": "precedent"},
+            {"task_id": ruling.task_id, "question_id": "q-x", "recommendation_source": "precedent", **named},
         )
+    elif how == "oubli-identifiant-vide":
+        service.ledger.append_event(pr.FORGOTTEN_EVENT, ruling.task_id, "task", "guilhem", {"precedent": "  "})
+    elif how == "question-illisible":
+        def broken_question(_events: Any) -> Any:
+            raise ValueError("question qui ne se relit pas")
+
+        monkeypatch.setattr(pr, "_asked", broken_question)
     else:
         real = service.ledger.list_events
 
@@ -745,7 +753,11 @@ def unreadable(service: TaskService, monkeypatch: pytest.MonkeyPatch, how: str, 
         monkeypatch.setattr(service.ledger, "list_events", broken)
 
 
-@pytest.mark.parametrize("how", ["oubli-sans-identifiant", "decision-sans-precedent", "ledger"])
+@pytest.mark.parametrize(
+    "how",
+    ["oubli-sans-identifiant", "oubli-identifiant-vide", "decision-sans-precedent", "decision-identifiant-vide",
+     "question-illisible", "ledger"],
+)
 def test_des_precedents_illisibles_n_appliquent_rien_et_le_tick_le_dit(
     project: Path, monkeypatch: pytest.MonkeyPatch, how: str
 ) -> None:

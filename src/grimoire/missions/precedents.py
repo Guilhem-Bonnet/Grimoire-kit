@@ -225,9 +225,15 @@ def precedents(
     ou date illisible), sinon :data:`ACTIVE`. Lève :class:`PrecedentsUnreadableError` si la lecture n'est pas sûre.
     """
     try:
-        events = service.ledger.list_events()
-    except Exception as exc:  # un ledger qui ne se lit pas n'applique rien
+        return _derive(service.ledger.list_events(), days, now or datetime.now(UTC))
+    except PrecedentsUnreadableError:
+        raise
+    except Exception as exc:  # un ledger qui ne se lit pas, un événement qui ne se relit pas : rien n'est appliqué
         raise PrecedentsUnreadableError(f"précédents illisibles (ledger : {type(exc).__name__})") from exc
+
+
+def _derive(events: list[LedgerEvent], days: int, moment: datetime) -> list[Precedent]:
+    """Les précédents lus dans *events* (voir :func:`precedents`)."""
     by_task: dict[str, list[LedgerEvent]] = {}
     forgotten: set[str] = set()
     applied: dict[tuple[str, str], str] = {}
@@ -251,7 +257,6 @@ def precedents(
             reverted_keys.add(key)
     reverted = {ref for key, ref in applied.items() if key in reverted_keys}
 
-    moment = now or datetime.now(UTC)
     found: list[Precedent] = []
     questions: dict[str, dict[str, Question]] = {}
     for event in events:
