@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.standard_state import ACTOR_ENV, LEDGER_RELPATH
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from grimoire.missions.ledger import MissionLedger
     from grimoire.missions.schemas import MissionTask, TaskDirective
 
@@ -78,7 +80,7 @@ def _deliver_directives(ledger: MissionLedger, task_id: str) -> tuple[str, list[
     if not pending:
         return None
     ledger.mark_directives_delivered(task_id, tuple(d.id for d in pending), actor_id="hook")
-    lines = [_render_directive(d) for d in pending]
+    lines = _render_directives(pending)
     first = pending[0].id
     lines.append(
         f"Accuse réception quand tu l'as prise en compte : `grimoire task ack {task_id} {first}` "
@@ -87,17 +89,39 @@ def _deliver_directives(ledger: MissionLedger, task_id: str) -> tuple[str, list[
     return "\n".join(lines), [d.id for d in pending]
 
 
-def _render_directive(directive: TaskDirective) -> str:
-    """Une note selon son canal et sa nature : seule une consigne humaine dirige."""
-    stamp = f"{directive.author}, {directive.created_at[:16]}"
-    if directive.is_human:
-        prefix = DIRECTIVE_PREFIX if directive.kind == "directive" else COMMENT_PREFIX
-        return f"{prefix} {stamp} : {directive.text}"
-    from grimoire.tools.untrusted import wrap_untrusted
+def _render_directives(directives: Sequence[TaskDirective]) -> list[str]:
+    """Les notes à livrer : humaines telles quelles, non humaines en **un** emballage.
 
-    origin = "provenance inconnue" if directive.origin == "unverified" else "origine agent"
-    wrapped = wrap_untrusted(directive.text, source=f"task-note:{directive.id} ({origin})")
-    return f"{UNTRUSTED_NOTE_PREFIX} {stamp} ({origin}) :\n{wrapped.render()}"
+    GAO-hook-session-001 : chaque note non humaine portait son propre emballage
+    « donnée externe » (~400 caractères), soit plus cher que les notes. Toutes
+    les notes non humaines d'un même lot sont regroupées à la place de la
+    première, sous une seule bannière ; leurs en-têtes (auteur, date, origine)
+    restent lisibles dans le corps emballé.
+    """
+    untrusted = [d for d in directives if not d.is_human]
+    block = _render_untrusted_notes(untrusted) if untrusted else ""
+    lines: list[str] = []
+    inserted = False
+    for directive in directives:
+        if directive.is_human:
+            prefix = DIRECTIVE_PREFIX if directive.kind == "directive" else COMMENT_PREFIX
+            lines.append(f"{prefix} {directive.author}, {directive.created_at[:16]} : {directive.text}")
+        elif not inserted:
+            lines.append(block)
+            inserted = True
+    return lines
+
+
+def _render_untrusted_notes(notes: Sequence[TaskDirective]) -> str:
+    from grimoire.tools.untrusted import wrap_untrusted_block
+
+    entries = []
+    for note in notes:
+        origin = "provenance inconnue" if note.origin == "unverified" else "origine agent"
+        entries.append((f"{note.author}, {note.created_at[:16]} ({origin})", note.text))
+    wrapped = wrap_untrusted_block(entries, source="task-notes:" + ",".join(d.id for d in notes))
+    plural = "notes" if len(notes) > 1 else "note"
+    return f"{UNTRUSTED_NOTE_PREFIX} {len(notes)} {plural} :\n{wrapped.render()}"
 
 
 def _announce_cancellations(ledger: MissionLedger, session_id: str) -> tuple[str, list[str]] | None:

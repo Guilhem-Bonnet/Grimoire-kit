@@ -26,6 +26,7 @@ from typing import Any
 from grimoire.bridges.schemas import HostId
 from grimoire.core.standard_generation import CONTEXT_DIR
 from grimoire.core.standard_state import active_task_id, suspended_state_writes
+from grimoire.hosts import gemini_wire
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (
     DEFAULT_DECISION_BY_EVENT,
@@ -67,8 +68,17 @@ def wire_event_name(event: HookEvent, host_id: HostId | None = None) -> str:
     return _WIRE_EVENT_NAMES[event]
 
 
-def parse_event(name: str) -> HookEvent | None:
-    """Accept ``PreToolUse``, ``pre_tool_use`` or ``pre-tool-use`` alike."""
+def parse_event(name: str, host_id: HostId | None = None) -> HookEvent | None:
+    """Accept ``PreToolUse``, ``pre_tool_use`` or ``pre-tool-use`` alike.
+
+    A host whose event names are not the Claude Code spelling is asked first:
+    Gemini CLI writes ``BeforeTool``, ``BeforeAgent``, ``PreCompress`` and so
+    on (see :mod:`grimoire.hosts.gemini_wire`).
+    """
+    if host_id is HostId.GEMINI_CLI:
+        gemini = gemini_wire.event_from_gemini(name)
+        if gemini is not None:
+            return gemini
     key = name.strip().replace("-", "_").replace(" ", "").lower()
     if key in _EVENT_BY_WIRE_NAME:
         return _EVENT_BY_WIRE_NAME[key]
@@ -155,12 +165,22 @@ def normalize_input(
 ) -> HookInput:
     """Flatten a host payload into the neutral :class:`HookInput`."""
     wire_event = _pick(payload, "hook_event_name", "hookEventName", "event", default="")
-    resolved = event or (parse_event(str(wire_event)) if wire_event else None) or HookEvent.SESSION_START
+    resolved = (
+        event
+        or (parse_event(str(wire_event), host_id=host_id) if wire_event else None)
+        or HookEvent.SESSION_START
+    )
     stop_active = bool(_pick(payload, "stop_hook_active", "stopHookActive", default=False))
+    tool_name = str(_pick(payload, "tool_name", "toolName", "tool", default="") or "")
+    if host_id is HostId.GEMINI_CLI:
+        # Gemini names its tools `write_file`/`replace`/`run_shell_command`; the
+        # policy engine classifies on the kit's classes. An unknown tool is the
+        # shell class, never an implicit read (see `gemini_wire`).
+        tool_name = gemini_wire.canonical_tool_name(tool_name)
     return HookInput(
         event=resolved,
         project_root=resolve_project_root(payload, project_root),
-        tool_name=str(_pick(payload, "tool_name", "toolName", "tool", default="") or ""),
+        tool_name=tool_name,
         tool_input=_as_dict(_pick(payload, "tool_input", "toolInput", "input", "arguments")),
         tool_response=_as_dict(_pick(payload, "tool_response", "toolResponse", "result")),
         prompt=str(_pick(payload, "prompt", "userPrompt", "user_prompt", default="") or ""),
@@ -206,6 +226,10 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
 
 def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, Any]:
     """Render *decision* into the JSON *host_id* understands for this event."""
+    if host_id is HostId.GEMINI_CLI:
+        # Gemini's dialect is a top-level `decision`/`reason` and
+        # `additionalContext`, not Claude Code's `hookSpecificOutput`.
+        return gemini_wire.render(decision, hook)
     event_name = wire_event_name(hook.event, host_id)
     payload: dict[str, Any] = {}
     specific: dict[str, Any] = {"hookEventName": event_name}
@@ -433,9 +457,16 @@ def run_hook(
 def main(argv: list[str] | None = None) -> int:
     """Entry point used by generated hook configurations.
 
-    Reads the host payload on stdin, writes the host verdict on stdout, and
-    always exits 0: the verdict lives in the JSON, and a non-zero exit is how a
-    hook turns a policy decision into an unexplained host error.
+    Reads the host payload on stdin and writes the host verdict on stdout.
+    Exits 0 for every host that reads its verdict from the JSON — a non-zero
+    exit would turn a policy decision into an unexplained host error.
+
+    Gemini CLI is the exception, and only where it must be: its hook protocol
+    treats a non-zero exit as "let the action through" unless the event can
+    block, where exit 2 plus a reason on stderr is the documented refusal. So
+    an internal error on ``BeforeTool``/``BeforeAgent`` exits 2 (fail closed)
+    instead of printing a verdict nobody asked for; on the advisory events it
+    warns and stays out of the way.
     """
     from grimoire.core.console_encoding import enable_utf8_output
 
@@ -461,7 +492,7 @@ def main(argv: list[str] | None = None) -> int:
     from grimoire.hosts.capabilities import resolve_host
 
     host_id = resolve_host(host_name) or HostId.UNKNOWN
-    event = parse_event(event_name) if event_name else None
+    event = parse_event(event_name, host_id=host_id) if event_name else None
     try:
         raw = sys.stdin.read()
     except (OSError, ValueError):
@@ -473,10 +504,34 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(payload, dict):
         payload = {}
 
-    result, _decision, _hook = run_hook(
-        payload, host_id=host_id, event=event, project_root=root, decision_id=decision_id
-    )
-    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    wire_event = str(_pick(payload, "hook_event_name", "hookEventName", default="") or "")
+    if event is None and wire_event:
+        # Fail-closed must hold even when the host's configuration forgets
+        # ``--event``: the payload still names it.
+        event = parse_event(wire_event, host_id=host_id)
+    label = event_name or wire_event or "événement inconnu"
+
+    try:
+        result, _decision, _hook = run_hook(
+            payload, host_id=host_id, event=event, project_root=root, decision_id=decision_id
+        )
+        rendered = json.dumps(result, ensure_ascii=False)
+    except Exception as exc:
+        if host_id is not HostId.GEMINI_CLI:
+            # Claude Code, Copilot and opencode read the verdict from stdout and
+            # treat a crash exactly as before: let it surface, never as a verdict.
+            raise
+        cause = f"{type(exc).__name__}: {exc}"
+        blocked_event = event if event in gemini_wire.BLOCKING_EVENTS else None
+        sys.stderr.write(
+            f"[Grimoire] hook Gemini en échec sur {label} ({cause}) : "
+            f"{'action refusée par défaut' if blocked_event else 'action laissée passer (événement non bloquant)'}.\n"
+        )
+        if blocked_event is None:
+            rendered = "{}"
+        else:
+            return 2
+    sys.stdout.write(rendered)
     return 0
 
 

@@ -14,27 +14,27 @@
     "grimoire task review GAO-livrer-fichi-001 --verdict READY --reviewer fixture",
     "grimoire task close GAO-livrer-fichi-001"
   ],
-  "kit_version": "3.80.1",
-  "recorded_at": "2026-11-07T06:20:23Z",
-  "output_sha256": "493b0203db612bc5104420aaf8d51a825426916f07d2b4b389afdeccc83b2c8f",
+  "kit_version": "3.84.0",
+  "recorded_at": "2026-11-13T00:34:31Z",
+  "output_sha256": "43d4c9bd6bd71f65641ff9fec9c6fa20600d7e7a71e822dad37199b5d8243b68",
   "frames": [
     {
       "kind": "run",
       "command": "grimoire task add \"Livrer fichier\" -a \"le livrable est relu par un humain\" --check \"test -f livrable.txt\" --ready",
       "exit_code": 0,
-      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-livrer-fichi-001 — Livrer fichier (ready)\n  vérifiabilité : V2 — critère sans verdict reconnu : 'le livrable est relu par un humain'\n    non reconnu : le livrable est relu par un humain"
+      "output": "Mission créée : MIS-travaux-courants-001 (aucune n'existait).\nOK GAO-livrer-fichi-001 — Livrer fichier (ready)\n  vérifiabilité : V1 — critère de revue (validation_humaine) : 'le livrable est relu par un humain'\n    - le livrable est relu par un humain → validation_humaine\n      ! attente d'une personne nommée : reformulez en vérification (test, capture comparée à une\nimage de référence) ou en revue par le relecteur — la validation par une personne n'est pas un\nverdict reproductible"
     },
     {
       "kind": "run",
       "command": "grimoire task claim GAO-livrer-fichi-001",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (ready → claimed) · V2 → aucun — omets le paramètre model,\ngarde celui de la session"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (ready → claimed) · V1 → sonnet"
     },
     {
       "kind": "run",
       "command": "grimoire task move GAO-livrer-fichi-001 --to running",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (claimed → running) · V2 → aucun — omets le paramètre\nmodel, garde celui de la session"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (claimed → running) · V1 → sonnet"
     },
     {
       "kind": "write",
@@ -46,7 +46,7 @@
       "kind": "run",
       "command": "grimoire task move GAO-livrer-fichi-001 --to needs_verification",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (running → needs_verification) · V2 → aucun — omets le\nparamètre model, garde celui de la session"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (running → needs_verification) · V1 → sonnet"
     },
     {
       "kind": "run",
@@ -70,7 +70,7 @@
       "kind": "run",
       "command": "grimoire task close GAO-livrer-fichi-001",
       "exit_code": 0,
-      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (needs_verification → closed) · V2 → aucun — omets le\nparamètre model, garde celui de la session"
+      "output": "OK GAO-livrer-fichi-001 — Livrer fichier (needs_verification → closed) · V1 → sonnet"
     }
   ]
 }

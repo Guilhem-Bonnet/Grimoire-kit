@@ -66,7 +66,8 @@ Ce qui fait foi est le lancement scellé au journal d'autorité (PR, base, branc
 
 Le merger ne lit aucune réponse humaine du ledger. Ce qu'une question cite de la PR est échappé. Chaque étape est notée
 au ledger et n'est faite qu'une fois ; le tick est rejouable. Un échec technique de ``gh`` ou de ``git`` est compté au
-disjoncteur ; un refus de fusion du dépôt ne l'est pas. Disjoncteur ouvert : rien n'est fait.
+disjoncteur, sauf une panne réseau passagère (``transient``, #1192) qui est comptée à part et rejouée ; un refus de
+fusion du dépôt n'est pas compté. Disjoncteur ouvert : rien n'est fait.
 """
 
 from __future__ import annotations
@@ -84,7 +85,7 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
 from grimoire.evidence.service import EvidenceService
-from grimoire.missions.breaker import read_breaker, record_failure
+from grimoire.missions.breaker import read_breaker, record_failure, record_transient
 from grimoire.missions.human_acceptance import EVIDENCE_RELPATH
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
@@ -122,6 +123,7 @@ __all__ = [
     "MERGE_REQUESTED_EVENT",
     "MERGE_REQUEUED_EVENT",
     "MERGE_RERUN_EVENT",
+    "MERGE_TRANSIENT_EVENT",
     "MERGE_UNDRAFTED_EVENT",
     "MERGE_WAITED_EVENT",
     "MergeStage",
@@ -146,6 +148,8 @@ MERGE_ACCEPTED_EVENT = "task.merge_accepted"
 MERGE_UNDRAFTED_EVENT = "task.merge_undrafted"
 #: Une attente « la remote et GitHub ne disent pas la même chose » ; ``cleared`` : le désaccord a cessé (#993).
 MERGE_WAITED_EVENT = "task.merge_waited"
+#: Une panne réseau passagère (#1192) : notée, jamais comptée au disjoncteur, l'étape est rejouée au tick suivant.
+MERGE_TRANSIENT_EVENT = "task.merge_transient"
 #: Attentes de désaccord consécutives tolérées avant le renvoi au worker : jamais une attente sans fin (#993).
 MAX_DESYNC_WAITS = 3
 #: Ce que GitHub dit d'une PR en conflit avec sa cible (``mergeable``, ``mergeStateStatus``).
@@ -180,6 +184,14 @@ _GREEN_BUCKETS = frozenset({"pass", "skipping"})
 #: Ce qui fait d'un échec de ``gh pr merge`` une panne (comptée) plutôt qu'un refus du dépôt (escaladé).
 _TECHNICAL = ("could not resolve", "timeout", "timed out", "connection", "network", "http 5", "error connecting",
               "authentication", "gh auth login", "rate limit", "unexpected eof", "binaire introuvable", "délai")
+#: Ce qui distingue une panne réseau passagère (#1192) d'un échec de session : jamais comptée au disjoncteur.
+_TRANSIENT = (
+    "i/o timeout", "timed out", "timeout", "dial tcp", "context deadline exceeded", "deadline exceeded",
+    "temporary failure in name resolution", "no such host", "network is unreachable",
+    "network unreachable", "connection reset", "connection refused", "connection aborted", "error connecting",
+    "unexpected eof", "tls handshake", "http 502", "http 503", "http 504", "bad gateway", "service unavailable",
+    "github injoignable", "réseau indisponible", "réseau injoignable", "délai",
+)
 _PUSH_TIMEOUT_S = 600
 _EVIDENCE = EVIDENCE_RELPATH
 #: Les refs du tick : jamais ``refs/remotes/…``, que le worker peut écrire et que ``remote.*.fetch`` redirige.
@@ -251,6 +263,12 @@ def _merge_hint(into: str) -> str:
 
 def _err(done: subprocess.CompletedProcess[Any] | Any) -> str:
     return (str(done.stderr or "") or str(done.stdout or "")).strip()[:300] or f"sortie {done.returncode}"
+
+
+def _is_transient(detail: str) -> bool:
+    """Vrai pour une panne réseau passagère (#1192) : à rejouer, jamais à compter comme un échec de session."""
+    said = detail.casefold()
+    return any(word in said for word in _TRANSIENT)
 
 
 def _index(events: list[LedgerEvent], event: LedgerEvent | None) -> int:
@@ -362,7 +380,7 @@ class MergeStage:
         for tid, judged in queue:
             outcome = self._guarded(tid, lambda t, j=judged, p=position: self._advance(t, j, p, launched[t]))
             outcomes.append(outcome)
-            if (outcome.status in ("waiting", "failed") and outcome.action != "human") or outcome.action in ("realign", "undraft"):
+            if (outcome.status in ("waiting", "failed", "transient") and outcome.action != "human") or outcome.action in ("realign", "undraft"):
                 position += 1
         return tuple(outcomes)
 
@@ -1244,6 +1262,16 @@ class MergeStage:
         self._service.ledger.append_event(kind, tid, "task", MERGER_ACTOR, {"task_id": tid, **payload})
 
     def _failed(self, tid: str, action: str, detail: str, pr: int = 0) -> MergerOutcome:
-        """Un échec technique de ``gh`` ou de ``git`` : rapporté, compté au disjoncteur, rejoué au tick suivant."""
+        """Un échec technique de ``gh`` ou de ``git`` : rapporté, rejoué au tick suivant.
+
+        Une panne réseau passagère (#1192) est **transiente** : notée au journal et comptée à part, elle ne touche pas
+        le disjoncteur. Seul un vrai échec l'alimente, et un disjoncteur ouvert reste ouvert. Une reprise de worker
+        refusée reste un échec de session même si son message parle de délai : ``claude --bg`` ne relève pas du réseau.
+        """
+        if action != "bounce" and _is_transient(detail):
+            state = record_transient(self._home, f"{tid} : merger ({action}) : {detail}")
+            self._note(MERGE_TRANSIENT_EVENT, tid, {"action": action, "detail": detail[:600], "pr": pr,
+                                                    "transients": state.transients})
+            return MergerOutcome(tid, action, "transient", detail + " — panne réseau passagère, rejoué au tick suivant", pr)
         state = record_failure(self._home, self._policy.breaker_threshold, f"{tid} : merger ({action}) : {detail}")
         return MergerOutcome(tid, action, "failed", detail + (" — disjoncteur ouvert" if state.open else ""), pr)

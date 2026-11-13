@@ -25,6 +25,7 @@ from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 from grimoire.data import framework_path
 from grimoire.hosts.secrets import secret_read_globs
 from grimoire.hosts.surface import (
+    MAX_INLINE_PERSONA_BYTES,
     AgentSpec,
     CommandSpec,
     Enforcement,
@@ -38,6 +39,7 @@ from grimoire.hosts.surface import (
     ToolVerb,
     _partition_duplicate_pairs,
     body_fingerprint,
+    format_bytes,
 )
 
 try:
@@ -186,6 +188,18 @@ def _tool_verbs_with_rejects(raw: Any) -> tuple[tuple[ToolVerb, ...], tuple[str,
     return tuple(verbs), tuple(rejected_list)
 
 
+def _file_size(path: Path) -> int:
+    """Size in bytes, ``0`` when the file vanished between check and read.
+
+    The context path was just verified to exist; a race against a concurrent
+    delete must not fail the whole surface build for a size annotation.
+    """
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def _str_tuple(raw: Any) -> tuple[str, ...]:
     """Read a frontmatter list-of-strings key, tolerant of a single string."""
     if _use_rust_backend():
@@ -290,6 +304,25 @@ def entry_agent_name(project_root: Path) -> str:
         return GrimoireConfig.from_yaml(path).agents.entry
     except GrimoireConfigError:
         return DEFAULT_ENTRY_AGENT
+
+
+def _inline_persona_enabled(project_root: Path) -> bool:
+    """``hosts.inline_persona``, ``True`` when absent or unreadable.
+
+    A config that fails to parse is reported by ``lint``/``doctor``; host sync
+    falls back to its default rather than turning a surface build into a crash
+    — same tolerance as :func:`entry_agent_name`.
+    """
+    path = project_root / "project-context.yaml"
+    if not path.is_file():
+        return True
+    from grimoire.core.config import GrimoireConfig
+    from grimoire.core.exceptions import GrimoireConfigError
+
+    try:
+        return GrimoireConfig.from_yaml(path).hosts.inline_persona
+    except GrimoireConfigError:
+        return True
 
 
 #: Frontmatter keys a partial override (``extends: kit``) may redefine — the
@@ -419,6 +452,7 @@ def collect_agents(
     entry_point: str | None = None,
     known_skills: frozenset[str] | None = None,
     notes: list[str] | None = None,
+    inline_persona: bool = True,
 ) -> tuple[AgentSpec, ...]:
     """Read the project's personas into host-neutral specs.
 
@@ -452,6 +486,14 @@ def collect_agents(
     existing callers that do not care about diagnostics see no behaviour
     change; :func:`build_surface` passes a list and folds it into
     :attr:`ProjectSurface.notes`.
+
+    *inline_persona* carries the persona body into
+    :attr:`AgentSpec.definition_body` so emitters can fold it into the host
+    definition instead of asking every session to read it (#1179). ``True``
+    by default; ``False`` (``hosts.inline_persona: false``) restores the
+    pointer-only definition. The size cap itself lives in
+    :meth:`AgentSpec.inline_body`, so this flag only decides whether the body
+    is available at all.
     """
     if entry_point is None:
         entry_point = entry_agent_name(project_root)
@@ -523,6 +565,10 @@ def collect_agents(
                 f"L'agent « {name} » ({definition_ref}) déclare un contexte inexistant sur "
                 f"disque : {', '.join(missing_context)}."
             )
+        # #1179 : la définition émise annonce la taille de chaque document
+        # déclaré, pour que le sous-agent décide de l'ouvrir ou non au lieu de
+        # recevoir un ordre de lecture indifférencié.
+        context_sizes = tuple((c, _file_size(project_root / c)) for c in context)
         specs.append(
             AgentSpec(
                 name=name,
@@ -535,6 +581,8 @@ def collect_agents(
                 max_turns=_max_turns(meta.get("max_turns")),
                 skills=skills,
                 context=context,
+                definition_body=body.strip() if inline_persona else "",
+                context_sizes=context_sizes,
                 override_ref=override_ref,
                 override_kind=override_kind,
                 body_fingerprint=body_fingerprint(body),
@@ -819,7 +867,12 @@ def build_surface(
     governed = is_standard_enrolled(root)
     skills = collect_skills(root, governed=governed)
     tool_notes: list[str] = []
-    agents = collect_agents(root, known_skills=frozenset(s.slug for s in skills), notes=tool_notes)
+    agents = collect_agents(
+        root,
+        known_skills=frozenset(s.slug for s in skills),
+        notes=tool_notes,
+        inline_persona=_inline_persona_enabled(root),
+    )
     # Deux régimes, parce que deux responsabilités. Un agent créé dans les
     # overrides du projet qui partage le faisceau *et* la fiche d'un autre est
     # une erreur de l'utilisateur, et le système émergent repose sur ce refus :
@@ -846,6 +899,17 @@ def build_surface(
             "fusionnez-les ou distinguez leur périmètre réel (outils, contexte, skills ou corps)."
         )
     notes: tuple[str, ...] = tuple(tool_notes)
+    # #1179 : une persona au-delà du plafond garde le pointeur. Ce n'est pas
+    # une erreur — la définition reste utilisable — mais l'utilisateur doit
+    # savoir pourquoi celle-là seule n'est pas intégrée.
+    for agent in agents:
+        if agent.definition_body and agent.inline_body() is None:
+            notes = (
+                *notes,
+                f"Persona « {agent.name} » : corps de {format_bytes(agent.body_size())} au-delà du "
+                f"plafond d'intégration ({format_bytes(MAX_INLINE_PERSONA_BYTES)}) — la définition "
+                f"garde un pointeur vers `{agent.definition_ref}`.",
+            )
     if duplicates:
         pairs = ", ".join(f"{a} == {b}" for a, b in duplicates)
         notes = (

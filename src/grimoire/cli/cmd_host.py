@@ -288,10 +288,17 @@ def host_sync(
 
     if _get_fmt(ctx) == "json":
         payload: dict[str, Any] = {"hosts": [r.to_dict() for r in results]}
+        if surface.notes:
+            # #1179 : le dépassement de plafond d'intégration, comme les autres
+            # constats non bloquants, doit être lisible sans relancer `host surface`.
+            payload["notes"] = list(surface.notes)
         if prune_disabled:
             payload["pruned"] = pruned
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         raise typer.Exit(0 if all(r.ok for r in results) else 1)
+
+    for note in surface.notes:
+        console.print(f"[dim][!][/dim] {note}")
 
     action = "Écrirait" if dry_run else "Écrit"
     for result in results:
@@ -533,7 +540,7 @@ def host_hook(
     passer une décision de politique pour une panne du hook.
     """
     host_id = resolve_host(host) or HostId.UNKNOWN
-    parsed = parse_event(event)
+    parsed = parse_event(event, host_id=host_id)
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     try:
         payload = json.loads(raw) if raw.strip() else {}

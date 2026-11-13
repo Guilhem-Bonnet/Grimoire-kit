@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from grimoire.core.cadrage import CADRAGE_DIR, PLACEHOLDER
+from grimoire.core.cadrage import PLACEHOLDER, cadrage_dir
 
 __all__ = [
     "REQUIREMENT_FILES",
@@ -311,19 +311,19 @@ def parse_requirements(texts: dict[str, str]) -> CadrageRequirements:
     return CadrageRequirements(tuple(reqs), tuple(read))
 
 
-def read_requirements(root: Path) -> CadrageRequirements:
+def read_requirements(root: Path, chantier: str | None = None) -> CadrageRequirements:
     """Lit ``04-exigences.md`` et ``05-cahier-des-charges.md`` sous ``_grimoire/cadrage/`` (absents : ignorés)."""
     texts: dict[str, str] = {}
     for filename in REQUIREMENT_FILES:
-        path = root / CADRAGE_DIR / filename
+        path = cadrage_dir(root, chantier) / filename
         if path.is_file():
             texts[filename] = path.read_text(encoding="utf-8", errors="replace")
     return parse_requirements(texts)
 
 
-def cdc_accepted(root: Path) -> bool:
+def cdc_accepted(root: Path, chantier: str | None = None) -> bool:
     """Le cahier des charges est marqué accepté (front matter ``status: accepted|accepté|validé``)."""
-    path = root / CADRAGE_DIR / REQUIREMENT_FILES[-1]
+    path = cadrage_dir(root, chantier) / REQUIREMENT_FILES[-1]
     if not path.is_file():
         return False
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()

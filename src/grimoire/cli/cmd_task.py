@@ -330,9 +330,9 @@ def task_show(
             f"  [yellow]risque accepté[/yellow] : {escape(str(risque.get('reason', '')))} "
             f"[dim]({risque.get('amendments')}/{risque.get('cap')} amendements, run {risque.get('run_id')})[/dim]"
         )
-    for entree in verifiabilite["criteria"]:
-        motif = entree["pattern"] or "non reconnu"
-        out.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
+    from grimoire.cli.cmd_task_add import print_criterion_diagnostics
+
+    print_criterion_diagnostics(task, out)
     if last_dispatch is not None:
         if last_dispatch.get("review") is not None:
             _print_review(

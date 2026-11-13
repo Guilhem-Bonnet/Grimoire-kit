@@ -17,8 +17,9 @@ from rich.markup import escape
 
 
 def register_add_command(app: typer.Typer) -> None:
-    """Accroche ``add`` au groupe *app*."""
+    """Accroche ``add`` et ``classify`` au groupe *app*."""
     app.command("add")(task_add)
+    app.command("classify")(task_classify)
 
 
 def task_add(
@@ -206,16 +207,89 @@ def _create_intake(
         console.print(f"[yellow]·[/yellow] non créée (risque critique, à décider à la main) : {escape(name)}")
 
 
+def print_criterion_diagnostics(task: Any, target: Any) -> None:
+    """Rend chaque critère : motif reconnu, reformulation s'il fait V2, et avertissements.
+
+    Partagé par ``task add``, ``task show`` et ``task classify --explain`` —
+    une seule lecture du classement (:func:`~grimoire.missions.verifiability.diagnose`),
+    pour que les trois surfaces nomment le même critère fautif.
+    """
+    from grimoire.missions.verifiability import diagnose
+
+    for conseil in diagnose(task):
+        motif = conseil.pattern or "non reconnu"
+        target.print(f"    [dim]- {escape(conseil.criterion)} → {motif}[/dim]")
+        if conseil.verdict == "ambigu":
+            target.print(f"      [yellow]fait tomber en V2[/yellow] : {escape(conseil.reformulation)}")
+        for message in conseil.warning_messages:
+            target.print(f"      [yellow]![/yellow] {escape(message)}")
+
+
 def _print_verifiability(task: Any) -> None:
-    """Affiche la classe de vérifiabilité calculée et nomme chaque critère non reconnu (#876)."""
+    """Affiche la classe de vérifiabilité calculée et son diagnostic par critère (#876)."""
     from grimoire.cli.cmd_task import console
     from grimoire.missions.verifiability import as_dict
 
     verifiabilite = as_dict(task)
     console.print(f"  vérifiabilité : {verifiabilite['class']} — {escape(verifiabilite['reason'])}")
-    for entree in verifiabilite["criteria"]:
-        if entree["pattern"] is None:
-            console.print(f"    [yellow]non reconnu[/yellow] : {escape(entree['criterion'])}")
+    print_criterion_diagnostics(task, console)
+
+
+def task_classify(
+    ctx: typer.Context,
+    task_id: Annotated[str, typer.Argument(help="Identifiant de la tâche.")],
+    explain: Annotated[
+        bool,
+        typer.Option(
+            "--explain",
+            help="Détail critère par critère : motif, verdict, reformulation et avertissements.",
+        ),
+    ] = False,
+    project_root: Annotated[Path, typer.Option("--project-root", help="Racine du projet.")] = Path(),
+    ledger_root: Annotated[Path, typer.Option("--ledger-root", help="Racine du Mission Ledger.")] = Path("_grimoire-runtime-output/ledger"),
+) -> None:
+    """Explique le classement de vérifiabilité d'une tâche (texte et JSON).
+
+    Nomme les critères qui font tomber la tâche en V2, propose leur
+    reformulation, et signale ceux qui attendent une personne ou une dépense
+    payante. Même calcul que ``task show`` et ``task dispatch`` — jamais une
+    seconde classification. Sans ``--explain``, le résumé suffit ; avec, le
+    diagnostic critère par critère est rendu.
+    """
+    from grimoire.cli.cmd_task import _fmt, _require_task, _service, console
+    from grimoire.missions.dispatch_advice import dispatch_advice, model_hint
+    from grimoire.missions.verifiability import as_dict, diagnose
+
+    task = _require_task(_service(project_root, ledger_root), task_id)
+    advice = dispatch_advice(task)
+    verifiabilite = as_dict(task)
+    if _fmt(ctx) == "json":
+        payload = {
+            "task_id": task.id,
+            "class": verifiabilite["class"],
+            "explanation": verifiabilite["explanation"],
+            "reason": verifiabilite["reason"],
+            "recommended_model": advice["recommended_model"],
+            "model_tier": advice["model_tier"],
+            "v2_causes": verifiabilite["v2_causes"],
+            "warnings": verifiabilite["warnings"],
+            "criteria": [conseil.to_dict() for conseil in diagnose(task)],
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    console.print(f"[bold]{task.id}[/bold] — vérifiabilité {verifiabilite['class']}")
+    console.print(f"  {escape(verifiabilite['explanation'])}")
+    console.print(f"  motif : {escape(verifiabilite['reason'])}")
+    console.print(f"  modèle recommandé : {model_hint(advice)} [dim](palier : {advice['model_tier']})[/dim]")
+    if explain:
+        print_criterion_diagnostics(task, console)
+    else:
+        for cause in verifiabilite["v2_causes"]:
+            console.print(
+                f"  [yellow]→ V2[/yellow] : {escape(cause['criterion'])} — {escape(cause['reformulation'])}"
+            )
+    for warning in verifiabilite["warnings"]:
+        console.print(f"  [yellow]![/yellow] {escape(warning['criterion'])} : {escape(warning['message'])}")
 
 
 def _auto_test_depth(

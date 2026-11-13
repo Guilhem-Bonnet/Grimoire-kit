@@ -127,7 +127,10 @@ def test_an_edited_generated_file_is_a_conflict_not_an_overwrite(project: Path) 
     assert emitter is not None
     apply_plan(emitter.plan(build_surface(project), project), project)
     target = project / ".claude/agents/concierge.md"
-    edited = target.read_text(encoding="utf-8").replace("Applique-les sans les résumer.", "Fais ce que je veux.")
+    # Le contenu exact importe peu : c'est la marque « modifié après génération »
+    # qui doit faire conflit (#1179 a retiré la phrase de lecture intégrale que
+    # ce test remplaçait ; on ajoute une ligne au fichier généré).
+    edited = target.read_text(encoding="utf-8") + "\nFais ce que je veux.\n"
     assert "Fais ce que je veux." in edited and MANAGED_MARKER in edited  # en-tête conservé, corps changé
     target.write_text(edited, encoding="utf-8")
 
