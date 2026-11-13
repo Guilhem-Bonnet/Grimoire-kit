@@ -415,8 +415,11 @@ le ledger. Depuis le lot A de l'issue #638 :
   status` (la forme qu'un proxy de terminal donne à `git status` avant le
   `post_tool_use`), `timeout 30 ls`, `env X=1 git log` et `bash -c '<script>'`
   dont chaque segment lit sont des lectures ; la même enveloppe autour d'une
-  écriture reste une écriture. Une redirection de sortie (`2>&1` et
-  `2>/dev/null` compris) classe toujours la commande en écriture ;
+  écriture reste une écriture. Une redirection qui n'écrit aucun fichier
+  (`2>&1`, `>&2`, `2>&-`, et toute sortie vers `/dev/null` écrit exactement
+  ainsi) ne change pas la classe ; toute autre redirection de sortie classe la
+  commande en écriture, y compris vers `/dev/stdout`. Un motif entre
+  guillemets est une donnée, antislash compris (`grep "a\|b" f` lit) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
   compteur est non nul **et** que la tâche résolue est encore `bootstrap`,
   sur les profils `governed` et `production` ; les autres profils reçoivent

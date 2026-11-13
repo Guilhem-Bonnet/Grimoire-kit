@@ -777,6 +777,101 @@ def _without_read_only_scripts(command: str, depth: int) -> str | None:
     return " ; ".join(kept)
 
 
+# ── Redirections qui n'écrivent aucun fichier ────────────────────────────────
+#
+# ``2>&1`` duplique un descripteur, ``2>/dev/null`` jette une sortie : ni l'une ni
+# l'autre n'écrit de fichier, et une lecture qui les porte reste une lecture. Liste
+# blanche de formes exactes, lues hors guillemets : la duplication vers un descripteur
+# d'un chiffre ou sa fermeture (``>&2``, ``2>&1``, ``2>&-``), et la sortie vers
+# ``/dev/null`` écrit exactement ainsi (``>``, ``>>``, ``N>``, ``&>``, ``&>>``, avec ou
+# sans espace avant la cible). Chaque forme doit finir sur une frontière de mot.
+# Tout le reste garde son ``>`` et reste une mutation : un autre périphérique
+# (``/dev/stdout``), une autre graphie (``/dev//null``, guillemets), un chemin qui
+# commence pareil (``/dev/null/../x``), ``>|``, ``<>``, une cible portée par une variable.
+
+_REDIRECTION_END = r"(?=$|[\s;|&)])"
+_FILELESS_TARGET = r"(?:&[0-9-]|>?[ \t]*/dev/null)"
+#: ``2>&1``, ``2>/dev/null`` : un descripteur d'un chiffre en début de mot.
+_FILELESS_FD_RE = re.compile(r"[0-9]>" + _FILELESS_TARGET + _REDIRECTION_END)
+#: ``>&2``, ``>/dev/null``, ``>>/dev/null``.
+_FILELESS_OUT_RE = re.compile(r">" + _FILELESS_TARGET + _REDIRECTION_END)
+#: ``&>/dev/null``, ``&>>/dev/null``.
+_FILELESS_BOTH_RE = re.compile(r"&>>?[ \t]*/dev/null" + _REDIRECTION_END)
+
+
+def _opaque_spans(text: str) -> list[tuple[int, int, bool]]:
+    """Les morceaux de *text* que le shell ne lit pas comme de la syntaxe : ``(début, fin, cité)``.
+
+    ``cité`` est vrai pour un texte entre guillemets fermés. Il est faux pour un caractère
+    échappé hors guillemets (``\\"`` n'ouvre aucun texte cité) et pour un guillemet jamais
+    fermé, qui couvre alors tout le reste. Dans des guillemets doubles, un antislash
+    échappe le caractère qui le suit, comme pour le shell.
+    """
+    spans: list[tuple[int, int, bool]] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            spans.append((i, min(i + 2, n), False))
+            i += 2
+        elif c == "'":
+            end = text.find("'", i + 1)
+            if end < 0:
+                spans.append((i, n, False))
+                break
+            spans.append((i, end + 1, True))
+            i = end + 1
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            if j >= n:
+                spans.append((i, n, False))
+                break
+            spans.append((i, j + 1, True))
+            i = j + 1
+        else:
+            i += 1
+    return spans
+
+
+def _without_fileless_redirections(command: str) -> str:
+    """*command* sans ses redirections de la liste blanche, chacune remplacée par une espace.
+
+    Le texte entre guillemets et un caractère échappé sont recopiés tels quels : une
+    redirection citée est une donnée. Un chiffre n'est un descripteur qu'en début de mot
+    (``cat fichier2>/dev/null`` lit ``fichier2``).
+    """
+    if ">" not in command:
+        return command
+    out: list[str] = []
+    spans = iter(_opaque_spans(command))
+    span = next(spans, None)
+    i, n = 0, len(command)
+    while i < n:
+        if span is not None and i == span[0]:
+            out.append(command[i : span[1]])
+            i = span[1]
+            span = next(spans, None)
+            continue
+        c = command[i]
+        previous = command[i - 1] if i else " "
+        match = None
+        if c.isdigit() and (previous.isspace() or previous in ";|&("):
+            match = _FILELESS_FD_RE.match(command, i)
+        elif c == "&" and previous not in "&<>":
+            match = _FILELESS_BOTH_RE.match(command, i)
+        elif c == ">" and previous not in "&<>":
+            match = _FILELESS_OUT_RE.match(command, i)
+        if match is not None:
+            out.append(" ")
+            i = match.end()
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def is_read_only_command(command: str) -> bool:
     """Whether *command* — a Bash-shaped call's full command line — only reads.
 
@@ -790,13 +885,18 @@ def is_read_only_command(command: str) -> bool:
 
     Conservative by construction, in every direction: an unrecognised
     leading verb, an ambiguous ``git``/``gh`` subcommand, any output
-    redirection or ``tee`` anywhere in the line, or an unparseable segment
-    all fall back to "not read-only" — the pre-existing (safe) behaviour.
-    Only a command every one of whose ``&&``/``;``/``|``/``||`` segments is a
-    *known* read verb, with no redirection anywhere in the line, is
-    read-only. Quoted text is stripped first (:func:`command_surface`), the
-    same pass the destructive-pattern check above already relies on, so a
-    literal ``>`` or ``rm`` inside a commit message never flips the verdict.
+    redirection to a file or ``tee`` anywhere in the line, or an unparseable
+    segment all fall back to "not read-only" — the pre-existing (safe)
+    behaviour. Only a command every one of whose ``&&``/``;``/``|``/``||``
+    segments is a *known* read verb, with no redirection to a file anywhere
+    in the line, is read-only. Quoted text is stripped first, so a literal
+    ``>`` or ``rm`` inside a commit message never flips the verdict.
+
+    Two things are read on this path only, never for the destructive check:
+    a redirection that writes no file (``2>&1``, ``2>/dev/null`` —
+    :func:`_without_fileless_redirections`) is dropped, and quotes are read
+    the way the shell reads them (:func:`_read_surface`), so a double-quoted
+    string carrying a backslash (``grep "a\\|b" f``) is data like any other.
 
     A wrapped read is still a read: a transparent wrapper is stripped before
     the verb is looked up (:func:`_inner_words` — ``rtk git status``,
@@ -810,17 +910,18 @@ def _command_is_read_only(command: str, depth: int) -> bool:
     """:func:`is_read_only_command` pour *command*, script de niveau *depth* (0 : la ligne elle-même)."""
     if not command.strip():
         return False
+    command = _without_fileless_redirections(command)
     reduced = _without_read_only_scripts(command, depth)
     if reduced is None:
         return False
     command = reduced
-    surface = command_surface(command)
+    surface = _read_surface(command)
     if _WRITE_REDIRECTION_RE.search(surface):
         return False
     if not _raw_segments_read_only(command):
         return False
     # ``&`` seul (arrière-plan) sépare aussi deux commandes : ``ls & rm f``.
-    # ``2>&1`` et ``&>`` n'arrivent jamais ici, toute redirection est refusée plus haut.
+    # ``2>&1`` et ``&>/dev/null`` ont été retirés plus haut ; toute autre redirection est refusée.
     segments = [seg.strip() for seg in re.split(r"&&|\|\||;|\||&|\n", surface)]
     segments = [seg for seg in segments if seg]
     return bool(segments) and all(_is_read_only_segment(seg) for seg in segments)
@@ -880,15 +981,33 @@ def command_surface(command: str) -> str:
     follows ``bash -c``, ``eval`` or ``xargs`` is executed and stays inspected.
     """
     surface = _strip_heredoc_bodies(command)
+    return _blank_quoted(surface, [quoted.span() for quoted in _QUOTED_RE.finditer(surface)])
+
+
+def _read_surface(command: str) -> str:
+    """La surface du classement lecture / mutation : les guillemets y sont lus comme le shell les lit.
+
+    :data:`_QUOTED_RE` exige deux antislashs pour un échappement : ``"a\\|b"`` lui échappe
+    et reste sur la surface, où son ``|`` coupe la commande. Elle prend aussi un guillemet
+    échappé hors guillemets pour l'ouverture d'un texte cité. :func:`_opaque_spans` lit les
+    deux comme le shell. Cette surface ne sert qu'à :func:`_command_is_read_only` : la
+    détection destructive garde :func:`command_surface` et ce qu'elle inspecte aujourd'hui.
+    """
+    surface = _strip_heredoc_bodies(command)
+    return _blank_quoted(surface, [(start, end) for start, end, quoted in _opaque_spans(surface) if quoted])
+
+
+def _blank_quoted(surface: str, spans: list[tuple[int, int]]) -> str:
+    """*surface* sans ses textes cités (*spans*), sauf là où un shell va les exécuter."""
     out: list[str] = []
     cursor = 0
-    for quoted in _QUOTED_RE.finditer(surface):
-        preceding = surface[cursor:quoted.start()]
+    for start, end in spans:
+        preceding = surface[cursor:start]
         out.append(preceding)
         # Keep the quotes as a word boundary so ``rm -rf`` cannot be spliced
         # together out of two neighbouring fragments.
-        out.append(quoted.group(0) if _EVAL_INTRODUCER.search(preceding.rstrip()) else " ")
-        cursor = quoted.end()
+        out.append(surface[start:end] if _EVAL_INTRODUCER.search(preceding.rstrip()) else " ")
+        cursor = end
     out.append(surface[cursor:])
     return "".join(out)
 
