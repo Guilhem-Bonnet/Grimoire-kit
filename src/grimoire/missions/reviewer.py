@@ -104,7 +104,7 @@ from grimoire.missions.launcher import (
 from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_reviews, manual_tasks
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
 from grimoire.missions.schemas import TaskState
-from grimoire.missions.task_worktree import find_task_worktree
+from grimoire.missions.task_worktree import find_task_worktree, tick_worktree_path
 from grimoire.missions.waiting import HUMAN_ANSWERED_EVENT, Choice, clip_context, new_question_id
 
 if TYPE_CHECKING:
@@ -459,6 +459,17 @@ class ReviewStage:
             if isinstance(target, ReviewOutcome):
                 return target
             manual, cwd = target, Path(str(target["cwd"]))
+        elif second is not None:
+            # Double relecture : le dossier de la seconde session est celui où le tick crée le worktree de la tâche,
+            # calculé depuis le dépôt. Ni le lancement ni le worktree notés au ledger d'événements n'y entrent.
+            try:
+                place: Path | None = tick_worktree_path(root, tid)
+            except Exception:  # dépôt illisible : rien n'est lancé
+                place = None
+            if place is None or not place.is_dir():
+                return ReviewOutcome(tid, "launch", "failed", "worktree de la tâche introuvable là où le tick le crée : "
+                                     "seconde relecture non lancée")
+            cwd = place
         else:
             cwd = Path(str(launch.get("cwd") or ""))
             try:
@@ -492,7 +503,8 @@ class ReviewStage:
             prompt = self._manual_prompt(tid, manual, model) if manual else self._prompt(tid, into, base_sha, model)
         # #994 : les réglages, hooks et serveurs MCP que la PR apporte (.claude/, .mcp.json) ne s'appliquent pas au
         # relecteur d'une tâche faite à la main ; il garde son dossier dans le worktree pour rejouer les preuves.
-        isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual else []
+        # Double relecture : la seconde session non plus ne charge rien de ce que le worktree du worker règle.
+        isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual or second is not None else []
         if role.lean:
             isolate += [arg for arg in LEAN_SESSION_ARGS if arg not in isolate]
         argv = [self._claude, "--bg", "--name", f"grimoire-review-{tid}", "--model", model,

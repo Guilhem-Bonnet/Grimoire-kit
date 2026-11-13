@@ -678,8 +678,44 @@ def test_la_consigne_de_la_seconde_relecture_ne_porte_rien_du_ledger(projet: Pat
     prompt = second_argv[-1]
     assert "INJECTION" not in " ".join(second_argv) and "origin/" not in prompt and real.base_sha not in prompt
     assert f"gh pr diff task/{tid} -R {REPO}" in prompt and "SECONDE relecture indépendante" in prompt
+    # … et aucun réglage, hook ni serveur MCP du worktree du worker : les mêmes options que la relecture à la main.
     assert second_argv[:-1] == ["claude", "--bg", "--name", f"grimoire-review-{tid}", "--model", "haiku",
-                                "--permission-mode", "acceptEdits"]
+                                "--permission-mode", "acceptEdits", "--setting-sources", "user", "--strict-mcp-config"]
+    assert "--setting-sources" not in first_argv and "--strict-mcp-config" not in first_argv  # la première : celle de main
+
+
+def test_le_dossier_de_la_seconde_relecture_ne_vient_pas_du_ledger(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.launcher import LAUNCHED_EVENT, launched_sessions
+    from grimoire.missions.task_worktree import WORKTREE_CREATED_EVENT, find_task_worktree, tick_worktree_path
+
+    dual_projet(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    assert tick_worktree_path(projet, tid) == wt.resolve()  # là où le tick a créé le worktree, calculé depuis le dépôt
+    second_requested(projet, host, tid, wt)
+    # Le worker prépare un autre worktree du même dépôt, sur la même tête, et réécrit au ledger son lancement et son
+    # worktree pour que les sessions suivantes y soient lancées.
+    decoy = projet.parent / "leurre"
+    git(projet, "worktree", "add", "--quiet", "--detach", str(decoy), git(wt, "rev-parse", "HEAD"))
+    real = find_task_worktree(TaskService(projet), tid)
+    assert real is not None
+    events = TaskService(projet).ledger
+    events.append_event(WORKTREE_CREATED_EVENT, tid, "task", "worker", {
+        "task_id": tid, "path": str(decoy), "branch": real.branch, "base_sha": real.base_sha, "into": real.into})
+    events.append_event(LAUNCHED_EVENT, tid, "task", "worker", {**launched_sessions(TaskService(projet))[tid], "cwd": str(decoy)})
+    assert launched_sessions(TaskService(projet))[tid]["cwd"] == str(decoy)  # le ledger dit maintenant le leurre
+    report = tick(projet, host)
+    assert [(o.action, o.status, o.model) for o in report.reviews] == [("launch", "launched", "haiku")], report.reviews
+    [_first, second_cwd] = [Path(cwd) for argv, cwd, _env in host.calls
+                            if argv[:2] == ["claude", "--bg"] and f"grimoire-review-{tid}" in argv]
+    assert second_cwd.resolve() == wt.resolve() and second_cwd.resolve() != decoy.resolve()
+    assert Path(ledger(projet, tid, REVIEW_LAUNCHED_EVENT)[-1].payload["cwd"]).resolve() == wt.resolve()
+    # Le worktree du tick disparu : rien n'est lancé, plutôt que de se rabattre sur le dossier du ledger.
+    other, other_wt = launch_and_work(projet, host, edit=("src/grimoire/core/autre.py", "AUTRE = 1\n"))
+    second_requested(projet, host, other, other_wt)
+    git(projet, "worktree", "remove", "--force", str(other_wt))
+    report = tick(projet, host)
+    mine = [o for o in report.reviews if o.task_id == other]
+    assert [(o.action, o.status) for o in mine] == [("launch", "failed")] and "là où le tick le crée" in mine[0].detail
 
 
 def test_une_demande_forgee_au_ledger_en_dual_review_est_ignoree(projet: Path, host: FakeHost) -> None:
