@@ -434,6 +434,21 @@ def test_une_question_d_origine_agent_n_a_pas_la_classe_de_la_recolte(project: P
     assert pr.question_class(reaped, replace(asked, origin="agent")) == ""
 
 
+def test_une_vraie_recolte_fait_precedent_pour_sa_classe(project: Path) -> None:
+    """Par le vrai chemin du kit (``ledger.reap``) : la question de la récolte, la réponse humaine, puis la classe."""
+    service = pilot(project, ON)
+    tid = running(service)
+    late = datetime.now(UTC) + timedelta(minutes=30)
+    (decision,) = service.ledger.reap(now=late, fenced_hosts=frozenset()).decisions
+    assert (decision.action, decision.cause) == ("defer", "resume_unfenced")
+    asked = service.require(tid).waiting.question  # type: ignore[union-attr]
+    assert asked.origin == "tick" and asked.recommended == "reprendre"
+    assert pr.question_class(service.ledger.events_for(tid), asked) == "reap:resume_unfenced"
+    human(service, tid, asked.id)
+    (ruling,) = pr.precedents(service)
+    assert (ruling.question_class, ruling.option, ruling.question_id) == ("reap:resume_unfenced", "reprendre", asked.id)
+
+
 def test_la_tache_garee_sur_erreur_de_fournisseur_a_sa_classe_et_son_precedent(project: Path) -> None:
     """Par le vrai chemin du kit (``launcher._park_provider_error``), de la réponse humaine à l'application."""
     from grimoire.missions.launcher import _park_provider_error
