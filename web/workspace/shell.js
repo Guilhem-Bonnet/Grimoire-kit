@@ -2572,6 +2572,12 @@ function startStampTicker() {
 
 let paletteItems = [];
 let paletteIndex = 0;
+// Entrées « Fichiers » de la palette : `null` tant qu'elles n'ont pas été
+// demandées. Les charger à l'amorçage coûtait le parcours de l'arbre du projet
+// à chaque ouverture de page, pour une section que la plupart des ⌘K ne lisent
+// pas — Source les lit à son montage, la palette à sa première ouverture.
+let paletteFiles = null;
+let paletteFilesLoading = null;
 // Ouverte depuis le raccourci ⌘K, la palette n'a pas de section prioritaire ;
 // ouverte depuis la puce de portée (#project-chip), elle ne montre QUE la
 // section « Projets » — c'est le sélecteur de portée — voir `openPalette()`.
@@ -2613,11 +2619,11 @@ async function buildPalette() {
     command: 'grimoire task add --intake "<idée>" --create', run: () => goto('travail', { idee: '1' }),
   });
 
-  const [commandsResult, projectsResult, blueprintsResult, tasksResult, filesResult] =
+  const [commandsResult, projectsResult, blueprintsResult, tasksResult] =
     // La palette ne lit que ``id``/``title`` : sans annotations (vivacité,
     // coût, payload ``work`` des journaux de session, gates), la Flotte mount
     // plus tôt — cet appel est sur son chemin critique (issue #1010).
-    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ annotations: 0 }), api.files()]);
+    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ annotations: 0 })]);
 
   const catalogue = settle(commandsResult, {}).commands || [];
   consoleCatalogue = new Map(catalogue.map((c) => [c.key, { flags: new Set(c.flags || []), positionals: c.positionals || 0 }]));
@@ -2664,7 +2670,18 @@ async function buildPalette() {
     run: () => runCommand(['task', 'show', t.id]),
   }));
 
-  const files = (settle(filesResult, {}).tiers || []).flatMap((tier) =>
+  paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks];
+  // Les fichiers ont pu arriver avant la fin de l'amorçage (palette ouverte
+  // très tôt) : `ensurePaletteFiles` les a posés sur l'ancien tableau, que
+  // l'affectation ci-dessus vient de remplacer.
+  if (paletteFiles) paletteItems = [...paletteItems, ...paletteFiles];
+  // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
+  if ($('palette').open) renderPalette($('palette-input').value);
+}
+
+/** Les entrées « Fichiers » d'une réponse de `api.files()`, bornées comme avant. */
+function filesPaletteItems(tree) {
+  return (tree.tiers || []).flatMap((tier) =>
     (tier.files || []).map((f) => ({
       section: 'Fichiers', label: f.path, hint: `Fichier · ${tier.label || tier.id}`, command: `grimoire # source ${f.path}`,
       // `goto('source', { file })` : sans le second argument, `shell.js`
@@ -2673,10 +2690,25 @@ async function buildPalette() {
       run: () => goto('source', { file: f.path }),
     })),
   ).slice(0, 500);
+}
 
-  paletteItems = [...spaces, ...commands, ...projects, ...workflows, ...tasks, ...files];
-  // Ouverte pendant l'amorçage, la palette restait vide jusqu'à la frappe suivante.
-  if ($('palette').open) renderPalette($('palette-input').value);
+/** Demande les fichiers à la première ouverture de la palette (une seule fois). */
+function ensurePaletteFiles() {
+  if (paletteFiles !== null) return paletteFilesLoading || Promise.resolve();
+  if (paletteFilesLoading === null) {
+    paletteFilesLoading = api.files()
+      .then((tree) => {
+        paletteFiles = filesPaletteItems(tree);
+        paletteItems = [...paletteItems, ...paletteFiles];
+        if ($('palette').open) renderPalette($('palette-input').value);
+      })
+      .catch(() => {
+        // Route en erreur : l'ouverture suivante réessaiera, sans vider les
+        // autres sections.
+        paletteFilesLoading = null;
+      });
+  }
+  return paletteFilesLoading;
 }
 
 /** Pastille d'un projet : suivi par Grimoire, dossier sans Grimoire, ou disparu. */
@@ -2743,6 +2775,9 @@ function openPalette(sectionFirst = null, { only = false } = {}) {
   placePalette();
   renderPalette('');
   if (!palette.open) palette.showModal();
+  // Première ouverture : les fichiers de Source arrivent après coup et sont
+  // ajoutés à la liste, sans bloquer l'ouverture ni les autres sections.
+  void ensurePaletteFiles();
 }
 
 function closePalette() {

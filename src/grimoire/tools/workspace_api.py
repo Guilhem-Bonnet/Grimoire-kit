@@ -42,6 +42,8 @@ absente.
 from __future__ import annotations
 
 import difflib
+import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
     from grimoire.traces.ledger import AgentFreshness
 
 __all__ = [
+    "FILES_BUDGET_SECONDS",
     "FILE_TEXT_LIMIT",
     "MAX_FILES_PER_TIER",
     "TIERS",
@@ -79,6 +82,31 @@ __all__ = [
 FILE_TEXT_LIMIT = 512 * 1024
 #: Plafond d'énumération par étage. Un `.claude/` peuplé dépasse vite le millier.
 MAX_FILES_PER_TIER = 2000
+#: Borne de temps du calcul de la vue Source (secondes). Au-delà, la réponse est
+#: partielle et le dit (``truncated``), comme :func:`evidence_view`. Le parcours
+#: s'arrête aussi à la limite d'énumération : borner la réponse ne suffisait pas.
+FILES_BUDGET_SECONDS = 2.0
+
+#: Dossiers qui ne sont jamais des sources : les parcourir ne rend que du bruit
+#: (le `.git` d'un clone imbriqué, les `node_modules` d'une extension, les caches
+#: d'outils). Ils ne sont jamais visités, quel que soit l'étage.
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        ".cache",
+    }
+)
 
 #: Les étages de la spécification §4, dans l'ordre où l'espace Source les montre.
 #: ``roots`` est relatif à la racine du projet ; ``editable`` dit si écrire là
@@ -645,45 +673,107 @@ def _override_for(project_root: Path, rel: str) -> Path | None:
     return Path(layout.OVERRIDES_DIR) / rel[len(prefix) :]
 
 
-def _walk(root: Path, limit: int) -> tuple[list[Path], bool]:
-    if not root.is_dir():
+def _walk(
+    root: Path,
+    limit: int,
+    *,
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[list[Path], bool]:
+    """Les fichiers sous *root*, au plus *limit*, et si le parcours a été coupé.
+
+    `os.scandir` dossier par dossier, entrées triées à chaque niveau : le
+    parcours s'arrête dès que la limite est atteinte au lieu d'énumérer et de
+    trier tout le sous-arbre avant de borner la réponse (27 à 31 s mesurées sur
+    un projet dont un clone imbriqué porte ~200 worktrees). Les dossiers de
+    :data:`_SKIP_DIRS` et les liens symboliques ne sont jamais suivis. Au-delà
+    de *deadline* (``monotonic``), la réponse est partielle et ``cut`` le dit.
+
+    Le résultat est trié par chemin, exactement comme le `sorted(rglob("*"))`
+    qu'il remplace : un petit arbre rend la même liste, dans le même ordre.
+    """
+    if not root.is_dir() or root.is_symlink():
         return [], False
+    if limit <= 0:
+        return [], True
     found: list[Path] = []
-    for path in sorted(root.rglob("*")):
-        if len(found) >= limit:
-            return found, True
-        if path.is_file() and not path.is_symlink():
-            found.append(path)
-    return found, False
+    cut = False
+    pending = [root]
+    while pending and not cut:
+        directory = pending.pop()
+        if deadline is not None and clock() >= deadline:
+            cut = True
+            break
+        try:
+            with os.scandir(directory) as scan:
+                entries = sorted(scan, key=lambda entry: entry.name)
+        except OSError:
+            continue
+        for entry in entries:
+            if len(found) >= limit:
+                cut = True
+                break
+            if deadline is not None and clock() >= deadline:
+                cut = True
+                break
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name not in _SKIP_DIRS:
+                        pending.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    found.append(Path(entry.path))
+            except OSError:
+                continue
+        if not cut and len(found) >= limit:
+            # Limite atteinte sur la dernière entrée du dossier : il en reste
+            # peut-être dans les dossiers en attente.
+            cut = bool(pending)
+    found.sort()
+    return found, cut
 
 
-def files_view(project_root: Path, *, tier: str | None = None) -> dict[str, Any]:
+def files_view(
+    project_root: Path, *, tier: str | None = None, budget: float = FILES_BUDGET_SECONDS
+) -> dict[str, Any]:
     """L'arbre de l'espace Source : chaque étage, ses racines, ses fichiers.
 
     Un étage dont aucune racine n'existe est rendu avec ``exists: false`` et
     zéro fichier — il reste visible, parce que « ce projet n'a pas d'override »
     est une information, pas une absence de section.
+
+    Au-delà de ``budget`` secondes la réponse est partielle et le dit
+    (``truncated``), comme :func:`evidence_view` : l'entrée dans un fichier
+    (empreinte, appartenance au kit) compte dans le même budget.
     """
     root = project_root.resolve()
     catalog = _catalog()
     wanted = [_TIER_BY_ID[tier]] if tier and tier in _TIER_BY_ID else list(TIERS)
     if tier and tier not in _TIER_BY_ID:
         raise WorkspacePathError(f"étage inconnu : {tier}")
+    deadline = time.monotonic() + budget
     tiers: list[dict[str, Any]] = []
     for spec in wanted:
         files: list[dict[str, Any]] = []
         truncated = False
         exists = False
-        budget = MAX_FILES_PER_TIER
+        remaining = MAX_FILES_PER_TIER
         for tier_root in spec["roots"]:
             base = root / tier_root
             exists = exists or base.is_dir()
-            found, cut = _walk(base, budget)
-            truncated = truncated or cut
-            budget -= len(found)
-            files.extend(_file_entry(root, p, spec, catalog) for p in found)
-            if budget <= 0:
+            if remaining <= 0 or time.monotonic() >= deadline:
                 truncated = True
+                break
+            found, cut = _walk(base, remaining, deadline=deadline)
+            truncated = truncated or cut
+            remaining -= len(found)
+            for path in found:
+                if time.monotonic() >= deadline:
+                    truncated = True
+                    break
+                files.append(_file_entry(root, path, spec, catalog))
+            if truncated:
                 break
         tiers.append(
             {
