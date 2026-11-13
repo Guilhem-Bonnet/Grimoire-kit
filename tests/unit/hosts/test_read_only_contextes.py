@@ -155,6 +155,67 @@ def test_un_message_ecrit_par_heredoc_reste_une_donnee(command: str) -> None:
     assert not facts.destructive_reason
 
 
+# ── Une ligne que le shell refuse n'ouvre pas de heredoc ─────────────────────
+#
+# Dans un terminal interactif, une ligne mal formée est rejetée seule : son heredoc
+# n'est jamais ouvert, et les lignes suivantes sont lues comme des commandes. Un corps
+# n'est donc retiré que derrière une ligne dont la forme est sûre : une suite de
+# commandes simples, sans mot réservé, sans commande vide, sans redirection sans cible,
+# sans rappel d'historique, sans parenthèse.
+
+LIGNES_REFUSEES = [
+    "echo a ;; cat <<mot",
+    "cat <<mot ; ;",
+    "| cat <<mot",
+    "cat a && && cat <<mot",
+    "cat a | | cat <<mot",
+    "cat <<mot >",
+    "cat <<mot 2>",
+    "cat < <<mot",
+    "do cat <<mot",
+    "done <<mot",
+    "then cat <<mot",
+    "fi ; cat <<mot",
+    "} ; cat <<mot",
+    "for x in a\ncat <<mot",
+    "for x in <<mot ; do ls; done",
+    "select x in <<mot ; do ls; done",
+    "f() cat <<mot",
+    "cat ) <<mot",
+    "echo !rien <<mot",
+    'echo "!rien" <<mot',
+    'echo "$(a ;; b)" <<mot',
+    "echo $(a ;; b) <<mot",
+    "cat <<mot <<",
+]
+
+
+@pytest.mark.parametrize("ecriture", ["touch drapeau", "PATH=x ls"])
+@pytest.mark.parametrize("ligne", LIGNES_REFUSEES)
+def test_ce_qui_suit_une_ligne_refusee_reste_juge(ligne: str, ecriture: str) -> None:
+    assert _classe(f"{ligne}\n{ecriture}\nmot") is not LECTURE
+
+
+@pytest.mark.parametrize("ligne", LIGNES_REFUSEES)
+def test_une_commande_destructive_derriere_une_ligne_refusee_est_vue(ligne: str) -> None:
+    facts = classify_tool("Bash", {"command": f"{ligne}\n{EFFACE}\nmot"})
+    assert facts.mutation is DESTRUCTIVE, ligne
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd docs && cat <<EOF\nune ligne\nEOF",
+        "cat <<EOF | grep -c ligne | head -1\nune ligne\nEOF",
+        "cat <<EOF ; ls\nune ligne\nEOF",
+        "cat <<EOF 2>/dev/null\nune ligne\nEOF\ngit status ; ls",
+        "LC_ALL=C sort <<EOF\nb\na\nEOF",
+    ],
+)
+def test_un_heredoc_derriere_une_suite_de_commandes_simples_reste_une_lecture(command: str) -> None:
+    assert _classe(command) is LECTURE
+
+
 # ── Une expansion dont l'indice ou le décalage affecte une variable ──────────
 
 
