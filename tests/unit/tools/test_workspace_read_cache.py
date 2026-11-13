@@ -87,9 +87,7 @@ def test_deux_get_sans_pulse_reload_font_un_seul_calcul(tmp_path: Path, monkeypa
     assert len(calls) == 1
 
 
-def test_une_ecriture_hors_cockpit_dans_traces_fait_recalculer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_une_ecriture_hors_cockpit_dans_traces_fait_recalculer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Défaut empêché : une trace écrite par le tick ou un hook reste invisible jusqu'à MAX_AGE_SECONDS."""
     calls = _counted(monkeypatch)
     workspace_get(tmp_path, TASKS, {})
@@ -141,6 +139,55 @@ def test_une_reponse_trop_vieille_est_recalculee(tmp_path: Path, monkeypatch: py
     assert len(calls) == 2
 
 
+def test_une_reponse_trop_grosse_pour_la_borne_n_est_jamais_gardee(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché (audit mémoire 2026-11) : une seule réponse dépassant le budget d'octets occupait le cache
+    pour toujours — la borne en entrées (64) ne voyait pas sa taille. Elle est rendue, jamais retenue."""
+    workspace_read_cache.clear()
+    calls: list[int] = []
+    big = {"payload": "x" * 512}
+    monkeypatch.setattr(workspace_read_cache, "MAX_TOTAL_BYTES", workspace_read_cache._size_of(big) - 1)
+
+    def compute() -> dict[str, Any]:
+        calls.append(1)
+        return big
+
+    for _ in range(2):
+        assert workspace_read_cache.cached_read("grosse", tmp_path, {}, compute, lambda: "même") == big
+
+    assert len(calls) == 2, "une réponse hors budget doit être recalculée, jamais resservie"
+    assert workspace_read_cache.stats() == {"entries": 0, "bytes": 0}
+
+
+def test_la_taille_totale_des_reponses_gardees_est_plafonnee_et_la_plus_ancienne_sort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché (audit mémoire 2026-11, 64 réponses de board annoté ≈ 60 Mo) : la borne en entrées ne
+    bornait pas les octets. Le budget total est respecté et l'entrée la plus ancienne est évincée."""
+    workspace_read_cache.clear()
+    budget_entry = {"payload": "x" * 200}
+    entry_size = workspace_read_cache._size_of(budget_entry)
+    monkeypatch.setattr(workspace_read_cache, "MAX_TOTAL_BYTES", entry_size * 3)
+
+    for index in range(5):
+        workspace_read_cache.cached_read(f"route-{index}", tmp_path, {}, lambda: budget_entry, lambda: "même")
+
+    state = workspace_read_cache.stats()
+    routes = {key[0] for key in workspace_read_cache._entries}
+    assert state["bytes"] <= entry_size * 3
+    assert state["entries"] == 3
+    assert routes == {"route-2", "route-3", "route-4"}, "les plus anciennes sont sorties, les récentes restent"
+
+
+def test_clear_remet_le_compteur_d_octets_a_zero(tmp_path: Path) -> None:
+    workspace_read_cache.clear()
+    workspace_read_cache.cached_read("r", tmp_path, {}, lambda: {"payload": "x" * 100}, lambda: "même")
+    assert workspace_read_cache.stats()["bytes"] > 0
+    workspace_read_cache.clear()
+    assert workspace_read_cache.stats() == {"entries": 0, "bytes": 0}
+
+
 def test_une_erreur_n_est_pas_gardee(tmp_path: Path) -> None:
     attempts: list[int] = []
 
@@ -168,8 +215,9 @@ def test_deux_appels_simultanes_attendent_le_meme_calcul(tmp_path: Path) -> None
 
     results: list[Any] = []
     threads = [
-        threading.Thread(target=lambda: results.append(
-            workspace_read_cache.cached_read("r", tmp_path, {}, slow, lambda: "même")))
+        threading.Thread(
+            target=lambda: results.append(workspace_read_cache.cached_read("r", tmp_path, {}, slow, lambda: "même"))
+        )
         for _ in range(4)
     ]
     for thread in threads:
@@ -203,7 +251,9 @@ def test_un_calcul_en_vol_pendant_une_ecriture_n_est_pas_garde(tmp_path: Path) -
         workspace_read_cache.clear()  # l'écriture du cockpit arrive pendant le calcul
         return "avant l'écriture"
 
-    assert workspace_read_cache.cached_read("r", tmp_path, {}, compute_during_write, lambda: "même") == "avant l'écriture"
+    assert (
+        workspace_read_cache.cached_read("r", tmp_path, {}, compute_during_write, lambda: "même") == "avant l'écriture"
+    )
     assert workspace_read_cache.cached_read("r", tmp_path, {}, lambda: "après", lambda: "même") == "après"
 
 
@@ -216,7 +266,9 @@ def test_une_lecture_du_portefeuille_n_est_jamais_gardee(tmp_path: Path, monkeyp
     assert len(calls) == 2
 
 
-def test_le_marqueur_du_direct_ne_filtre_jamais_le_portefeuille(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_le_marqueur_du_direct_ne_filtre_jamais_le_portefeuille(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Défaut empêché (CI de main, 2026-10-29) : le marqueur s'appelait `live`, le filtre « Sessions vivantes » de la
     liste du portefeuille ; un rechargement du direct ne gardait que les tâches tenues par une session vivante."""
     from grimoire.tools import workspace_portfolio
