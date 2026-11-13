@@ -86,6 +86,7 @@ __all__ = [
     "AutopilotState",
     "AutopilotStore",
     "Decision",
+    "assumes",
     "decided_payload",
     "default_option",
     "judge",
@@ -329,6 +330,11 @@ def default_option(question: Question) -> tuple[str, str]:
     return option, ""
 
 
+def assumes(confidence: str) -> bool:
+    """Vrai si *confidence* déclare une décision assumée (``high`` ou ``medium``) ; basse ou absente, personne n'assume."""
+    return confidence.strip().lower() in _DECIDING
+
+
 def judge(
     question: Question, answer: str, *, justification: str = "", confidence: str = "", kit_written: bool = False,
     default: str = "",
@@ -350,7 +356,7 @@ def judge(
         return Decision(text, "recommended", "high", " ".join((justification or question.why).split()))
     level = confidence.strip().lower()
     why = " ".join(justification.split())
-    if level not in _DECIDING:
+    if not assumes(confidence):
         if default:
             reason = question.why or (question.recommendation.reason if question.recommendation is not None else "")
             return Decision(default, DEFAULT_SOURCE, level or "low", " ".join(reason.split()) or _DEFAULT_WHY)

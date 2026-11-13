@@ -96,6 +96,7 @@ import contextlib
 import hashlib
 import json
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -108,11 +109,13 @@ from grimoire.missions.launcher import (
     LAUNCHED_EVENT,
     _halt,
     _read_agents,
+    _session_marks,
     default_exec,
     launched_sessions,
     resolve_background_session,
     session_env,
 )
+from grimoire.missions.liveness import probe_status
 from grimoire.missions.questions import open_in_group
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.waiting import ABANDON, HUMAN_ANSWERED_EVENT, QUESTION_ASKED_EVENT
@@ -151,6 +154,8 @@ __all__ = [
     "mandate_gesture",
     "question_source",
     "record_answer_refused",
+    "session_states",
+    "worker_at_work",
 ]
 
 ORCHESTRATOR_ACTOR = "orchestrator"
@@ -172,6 +177,10 @@ MAX_RESUMES = 2
 #: Décisions par défaut (``autopilot.default_action: apply_recommended``) qu'une tâche reçoit depuis la dernière réponse
 #: humaine ; au-delà, la question se juge comme sous ``ask``. Borne les escalades du merger, dont le geste n'est pas ``resume``.
 MAX_DEFAULT_DECISIONS = 2
+#: Les statuts de sonde qui prouvent qu'une session ne travaille plus : tour rendu, en attente, terminée.
+_AT_REST = frozenset({"idle", "waiting", "ended"})
+#: L'état des sessions de fond lu par le tick, le temps qu'il applique une option : :func:`answer_plan` ne le relit pas.
+_TICK_STATES: ContextVar[tuple[dict[str, str] | None] | None] = ContextVar("grimoire_tick_session_states", default=None)
 #: Présentations d'une même question à l'orchestrateur : une session terminée sans y répondre en vaut une seconde.
 MAX_PRESENTATIONS = 2
 #: Pilote activé : sans progrès sur la tâche, une question attend ce délai multiplié par ses présentations.
@@ -291,6 +300,40 @@ def _classify(events: list[LedgerEvent], question: Question, *, pilot: bool = Fa
     return gesture, why
 
 
+def session_states(agents: list[dict[str, Any]] | None) -> dict[str, str] | None:
+    """``claude agents --json`` → ``{identifiant court: statut de sonde}`` des sessions de fond ; ``None`` : illisible.
+
+    Le statut passe par :func:`~grimoire.missions.liveness.probe_status` : selon la version de l'hôte, une session de
+    fond au travail rend ``status: "busy"`` ou ``state: "working"`` sans champ ``status``. Un état non reconnu vaut
+    ``""`` — ni « au travail » ni « à l'arrêt » : à l'appelant de dire ce qu'il en conclut.
+    """
+    if agents is None:
+        return None
+    return {str(a["id"]): probe_status(a) or "" for a in agents if a.get("kind") == "background" and a.get("id")}
+
+
+def worker_at_work(service: TaskService, task_id: str, states: dict[str, str] | None) -> bool:
+    """Vrai tant que rien ne prouve que la session du worker de *task_id* ne travaille plus (échec fermé).
+
+    Prouvée à l'arrêt : *states* est lisible, le tick a noté une session pour la tâche (lancement ou reprise), et
+    cette session y figure dans un état de repos reconnu (:data:`_AT_REST`). Liste illisible, aucune session notée
+    (tâche faite à la main, hôte que le kit n'a pas lancé), session introuvable, état inconnu ou vide : au travail —
+    reprendre lancerait une seconde session sur la même branche.
+    """
+    if states is None:
+        return True
+    short = _session_marks(service, task_id)[0]
+    return not short or states.get(short) not in _AT_REST
+
+
+def _states(service: TaskService, claude_bin: str = "claude") -> dict[str, str] | None:
+    """L'état des sessions de fond : celui que le tick a déjà lu s'il est en train d'appliquer, sinon lu ici."""
+    held = _TICK_STATES.get()
+    if held is not None:
+        return held[0]
+    return session_states(_read_agents(default_exec, service.home_root, claude_bin))
+
+
 def _defaults_taken(events: list[LedgerEvent]) -> int:
     """Les décisions par défaut prises sur la tâche depuis la dernière réponse humaine (seul l'humain remet à zéro)."""
     from grimoire.missions.autopilot import DECIDED_EVENT, DEFAULT_SOURCE
@@ -351,8 +394,10 @@ def answer_plan(
     (la tâche est annulée, la raison au ledger). Une question laissée à l'humain faute de confiance est inscrite
     (:data:`~.autopilot.DEFERRED_EVENT`) — sauf sous ``autopilot.default_action: apply_recommended``, où l'option
     recommandée tranche à la place de la réponse soumise quand :func:`default_plan` en rend une (source ``default``).
+    Comme le tick, cette voie ne reprend pas par défaut une tâche dont rien ne prouve que le worker ne travaille plus
+    (:func:`worker_at_work`) : question écrite par le kit ou geste ``resume``, la question reste alors à l'humain.
     """
-    from grimoire.missions.autopilot import AutopilotStore, judge, load_autopilot_policy, reserved_reason
+    from grimoire.missions.autopilot import AutopilotStore, assumes, judge, load_autopilot_policy, reserved_reason
     from grimoire.missions.mandate import acting_in_process
 
     events = service.ledger.events_for(task.id)
@@ -372,10 +417,14 @@ def answer_plan(
         _check_caller(service, task, question, events, pilot=pilot)
     if policy is None:
         return gesture, None
+    kit, fallback = kit_written(events, question), ""
+    if not assumes(confidence):  # personne n'assume : l'option par défaut, si le réglage et les gardes en rendent une
+        fallback = default_plan(service, task, question, events, policy)[0]
+        if fallback and (kit or gesture == "resume") and worker_at_work(service, task.id, _states(service)):
+            fallback = ""
     try:
         decision = judge(
-            question, answer, justification=justification, confidence=confidence,
-            kit_written=kit_written(events, question), default=default_plan(service, task, question, events, policy)[0],
+            question, answer, justification=justification, confidence=confidence, kit_written=kit, default=fallback,
         )
     except GrimoireMissionError as exc:
         _defer(service, task.id, question.id, str(exc))
@@ -736,10 +785,7 @@ class OrchestratorStage:
     def __call__(self) -> tuple[OrchestratorOutcome, ...]:
         if not self._policy.orchestrator.enabled:
             return ()
-        agents = _read_agents(self._exec, self._root, self._claude)
-        status = None if agents is None else {
-            str(a["id"]): str(a.get("status") or "") for a in agents if a.get("kind") == "background" and a.get("id")
-        }
+        status = session_states(_read_agents(self._exec, self._root, self._claude))
         outcomes = self._sweep(status)
         outcomes.extend(self._apply_recommendations(status))
         launched = self._maybe_launch(status)
@@ -754,9 +800,9 @@ class OrchestratorStage:
 
         Une question que le kit a écrite (:func:`kit_written`) ne porte pas l'avis d'un auteur mais une option par
         défaut : le tick ne l'applique que si :func:`default_plan` en rend une (``autopilot.default_action:
-        apply_recommended``, hors liste fermée, sous la borne) et que si *status* (``claude agents``) montre que la
-        session du worker n'est plus au travail — illisible, rien n'est repris : ces options relancent toutes la tâche.
-        Sinon la question va à la session qui suit, comme avant.
+        apply_recommended``, hors liste fermée, sous la borne) et que si *status* (:func:`session_states`) prouve que
+        la session du worker ne travaille plus (:func:`worker_at_work`, échec fermé) : ces options relancent toutes la
+        tâche. Sinon la question va à la session qui suit, comme avant.
         """
         from grimoire.missions.autopilot import load_autopilot_policy
         from grimoire.missions.mandate import MandateStore, acting_as_orchestrator
@@ -780,10 +826,11 @@ class OrchestratorStage:
             by_default = kit_written(events, record.question)
             if by_default and (
                 not default_plan(self._service, task, record.question, events, policy)[0]
-                or self._worker_at_work(q.task_id, status)
+                or worker_at_work(self._service, q.task_id, status)
             ):
                 continue
             ref, said = ("autopilot-default", "option par défaut") if by_default else ("autopilot-recommended", "option recommandée")
+            held = _TICK_STATES.set((status,))  # la garde de `answer_plan` juge sur la lecture de ce tick
             try:
                 with acting_as_orchestrator():
                     self._service.answer(
@@ -793,18 +840,13 @@ class OrchestratorStage:
             except Exception as exc:  # refusée par le kit : le ledger l'a noté, la question reste ouverte
                 outcomes.append(OrchestratorOutcome("pilot", "failed", f"{q.task_id}/{q.question_id} : {exc}"[:300]))
                 continue
+            finally:
+                _TICK_STATES.reset(held)
             outcomes.append(OrchestratorOutcome(
                 "pilot", "done", f"{q.task_id}/{q.question_id} : {said} appliquée", "", "",
                 (f"{q.task_id}/{q.question_id}",),
             ))
         return outcomes
-
-    def _worker_at_work(self, task_id: str, status: dict[str, str] | None) -> bool:
-        """Vrai si la session du worker de *task_id* travaille encore, ou si rien ne permet de le dire (échec fermé)."""
-        if status is None:
-            return True
-        launch = launched_sessions(self._service).get(task_id, {})
-        return status.get(str(launch.get("session") or "")) == "busy"
 
     def _sweep(self, status: dict[str, str] | None) -> list[OrchestratorOutcome]:
         """Termine les sessions finies, arrête celles qui dépassent :data:`SESSION_TIMEOUT`, retente les arrêts."""

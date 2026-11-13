@@ -25,6 +25,7 @@ from typer.testing import CliRunner
 from grimoire.cli.app import app
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.missions import mandate as md
+from grimoire.missions import orchestrator_session as osess
 from grimoire.missions.autopilot import (
     DECIDED_EVENT,
     DEFERRED_EVENT,
@@ -58,6 +59,10 @@ APPLY = "autopilot:\n  default_action: apply_recommended\n"
 TARIFF = "Tarif par modèle dans le registre pour chiffrer un worker routé"
 REVIEW_ESCALATED = "task.review_escalated"
 MERGE_ESCALATED = "task.merge_escalated"
+#: L'identifiant court de la session de fond du worker, tel que le tick le note au lancement.
+WORKER = "abcd1234"
+#: Ce que le tick a lu de ``claude agents`` quand la session du worker est prouvée à l'arrêt.
+AT_REST = {WORKER: "ended"}
 
 runner = CliRunner()
 
@@ -84,6 +89,16 @@ def _tick() -> Any:
     """L'appelant est le code du tick (``acting_as_orchestrator``), pas une session d'agent."""
     with md.acting_as_orchestrator():
         yield
+
+
+@pytest.fixture(autouse=True)
+def _agents(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``claude agents --json`` n'est jamais lancé pour de vrai : par défaut, la session du worker y est arrêtée."""
+    monkeypatch.setattr(osess, "_read_agents", lambda *_a, **_k: [{"id": WORKER, "kind": "background", "state": "stopped"}])
+
+
+def no_process(argv: Any, _cwd: Any, _env: Any = None) -> Any:
+    raise AssertionError(f"aucun processus externe attendu dans ces tests : {list(argv)}")
 
 
 @pytest.fixture
@@ -124,11 +139,15 @@ def asks(root: Path, text: str = "Quelle voie ?", *, title: str = "Correctif", *
 
 
 def escalated(
-    root: Path, event: str = REVIEW_ESCALATED, *, title: str = "Correctif", text: str = "", **ask: Any
+    root: Path, event: str = REVIEW_ESCALATED, *, title: str = "Correctif", text: str = "", session: str = WORKER,
+    **ask: Any,
 ) -> tuple[TaskService, str, str]:
     """La question « reprendre ou abandonner ? » telle que le relecteur ou le merger l'écrit : nommée par son
-    événement d'escalade (ce que seul le code du kit écrit), puis posée avec son option recommandée."""
+    événement d'escalade (ce que seul le code du kit écrit), puis posée avec son option recommandée. *session* : la
+    session de fond que le tick a lancée sur la tâche (``""`` : aucune, une tâche faite à la main)."""
     service, tid = running(root, title)
+    if session:
+        launched(service, tid, session)
     qid = "q-escalade-1"
     service.ledger.append_event(event, tid, "task", "tick", {"task_id": tid, "question_id": qid, "why": "2 retours"})
     service.ask(
@@ -147,7 +166,28 @@ def events(service: TaskService, tid: str, kind: str) -> list[Any]:
 
 
 def stage(service: TaskService, root: Path) -> OrchestratorStage:
-    return OrchestratorStage(service, load_orchestrator_policy(root).policy)  # type: ignore[arg-type]
+    return OrchestratorStage(service, load_orchestrator_policy(root).policy, exec_=no_process)  # type: ignore[arg-type]
+
+
+def launched(service: TaskService, tid: str, short: str = WORKER) -> None:
+    """Le tick a lancé la session de fond *short* sur la tâche (``task.session_launched``)."""
+    service.ledger.append_event(
+        "task.session_launched", tid, "task", "tick", {"task_id": tid, "session": short, "session_id": "s-1"}
+    )
+
+
+def tick(service: TaskService, root: Path, monkeypatch: pytest.MonkeyPatch, agents: list[dict[str, Any]] | None) -> Any:
+    """L'étape orchestrateur réelle (``__call__``), ``claude agents --json`` rendant *agents* (``None`` : illisible).
+
+    Seul le lancement d'une session est neutralisé : la lecture des sessions, leur traduction et le balayage sont
+    ceux du kit.
+    """
+    orchestrator = stage(service, root)
+    policy = orchestrator._policy
+    monkeypatch.setattr(orchestrator, "_policy", replace(policy, orchestrator=replace(policy.orchestrator, enabled=True)))
+    monkeypatch.setattr(osess, "_read_agents", lambda *_a, **_k: agents)
+    monkeypatch.setattr(orchestrator, "_maybe_launch", lambda _status: None)
+    return orchestrator()
 
 
 def question(**fields: Any) -> Question:
@@ -193,7 +233,7 @@ def test_une_politique_devenue_invalide_reserve_tout_pilote_actif(project: Path)
     write_policy(project, "autopilot:\n  default_action: always\n")
     with pytest.raises(GrimoireMissionError, match="politique du pilote invalide"):
         answer(service, tid, qid, "A", confidence="low")
-    assert stage(service, project)._apply_recommendations({}) == []
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
 
 
@@ -215,7 +255,7 @@ def test_ask_laisse_une_confiance_basse_ou_absente_a_l_humain(project: Path, pol
 def test_ask_la_recommandation_d_un_agent_est_toujours_prise_par_le_tick(project: Path, policy: str) -> None:
     pilot(project, policy)
     service, tid, _qid = asks(project, options=("A", "B"), recommended="B", why="plus simple")
-    (outcome,) = stage(service, project)._apply_recommendations({})
+    (outcome,) = stage(service, project)._apply_recommendations(AT_REST)
     assert outcome.status == "done"
     (decided,) = events(service, tid, DECIDED_EVENT)
     assert decided.payload["option"] == "B" and decided.payload["recommendation_source"] == "recommended"
@@ -229,7 +269,7 @@ def test_ask_l_option_par_defaut_d_une_question_du_kit_n_engage_pas_le_pilote(
     """Rien ne change sans le réglage : le tick ne l'applique pas, la session ne la reçoit pas et juge comme avant."""
     pilot(project, policy)
     service, tid, qid = escalated(project, event)
-    assert stage(service, project)._apply_recommendations({}) == []
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
     (open_question,) = eligible_questions(service, MandateStore(project))
     assert open_question.question_id == qid and open_question.recommended == ""
@@ -246,7 +286,7 @@ def test_sans_pilote_le_reglage_ne_decide_rien(project: Path) -> None:
     request = MandateRequest.build(("answer", "resume"), ("implementation",), 10, "+1d")
     MandateStore(project).grant(request, origin=ORIGIN_HUMAN, via="test")
     service, tid, _qid = escalated(project, MERGE_ESCALATED)
-    assert stage(service, project)._apply_recommendations({}) == []
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
 
 
@@ -287,7 +327,7 @@ def test_apply_recommended_sans_option_recommandee_la_question_reste_a_l_humain(
     service, tid, qid = asks(project, options=("A", "B"))
     with pytest.raises(GrimoireMissionError, match="confiance"):
         answer(service, tid, qid, "A", justification=WHY, confidence="low")
-    assert stage(service, project)._apply_recommendations({}) == []
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
     assert service.require(tid).status is TaskState.WAITING
     assert events(service, tid, DEFERRED_EVENT) and not events(service, tid, DECIDED_EVENT)
 
@@ -307,7 +347,7 @@ def test_apply_recommended_ne_tranche_jamais_une_categorie_reservee(project: Pat
     service, tid, qid = asks(project, text, options=("oui", "non"), recommended="oui")
     with pytest.raises(GrimoireMissionError, match="réservée à l'humain"):
         answer(service, tid, qid, "oui", confidence="low")
-    assert stage(service, project)._apply_recommendations({}) == []
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
 
 
@@ -382,14 +422,16 @@ def test_une_decision_par_defaut_n_abandonne_jamais(project: Path) -> None:
     assert decided.payload["option"] == "reprendre" and decided.payload["recommendation_source"] == "default"
 
 
-def test_une_question_d_agent_ne_sort_pas_de_la_liste_fermee_en_imitant_le_kit(project: Path) -> None:
+@pytest.mark.parametrize("kind", ["resume_branch", "choice"])
+def test_une_question_d_agent_ne_sort_pas_de_la_liste_fermee_en_imitant_le_kit(project: Path, kind: str) -> None:
     """Le couple d'options du kit (#1159) ne fait pas ignorer le titre de la tâche à une décision par défaut : seul un
     événement écrit par le kit établit que la question est la sienne."""
     pilot(project, APPLY)
     service, tid, qid = asks(
         project, "Je continue sur cette voie ?", title=TARIFF, options=("reprendre", "abandonner"),
-        recommended="reprendre", kind="resume_branch",
+        recommended="reprendre", kind=kind,
     )
+    launched(service, tid)  # la session du worker est prouvée à l'arrêt : seule la liste fermée retient la question
     task = service.require(tid)
     assert not kit_written(service.ledger.events_for(tid), task.waiting.question)  # type: ignore[union-attr]
     with pytest.raises(GrimoireMissionError, match="confiance"):
@@ -414,7 +456,7 @@ def test_le_texte_d_une_question_du_kit_reste_juge_par_la_liste_fermee(project: 
     service, tid, qid = escalated(
         project, text="Désaccord persistant (le relecteur demande de régénérer le token d'API) — reprendre ou abandonner ?"
     )
-    assert stage(service, project)._apply_recommendations({}) == []
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
     with pytest.raises(GrimoireMissionError, match="réservée à l'humain"):
         answer(service, tid, qid, "reprendre", confidence="low")
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
@@ -424,12 +466,13 @@ def test_les_decisions_par_defaut_d_une_tache_sont_bornees(project: Path) -> Non
     """Une escalade du merger se répète (son geste n'est pas une reprise bornée) : après la borne, plus rien par défaut."""
     pilot(project, APPLY)
     service, tid = running(project)
+    launched(service, tid)
     for n in range(MAX_DEFAULT_DECISIONS + 1):
         qid = f"q-escalade-{n}"
         service.ledger.append_event(MERGE_ESCALATED, tid, "task", "tick", {"task_id": tid, "question_id": qid})
         service.ask(tid, "La fusion échoue à répétition — reprendre la tâche ou l'abandonner ?", "tick",
                     options=("reprendre", "abandonner"), recommended="reprendre", question_id=qid)
-        outcomes = stage(service, project)._apply_recommendations({})
+        outcomes = stage(service, project)._apply_recommendations(AT_REST)
         if n < MAX_DEFAULT_DECISIONS:
             assert [o.status for o in outcomes] == ["done"]
             service.claim(tid, "w")
@@ -440,18 +483,111 @@ def test_les_decisions_par_defaut_d_une_tache_sont_bornees(project: Path) -> Non
         answer(service, tid, qid, "reprendre", confidence="low")
 
 
+#: Ce que ``claude agents --json`` peut rendre de la session du worker, et ce que la garde doit en conclure.
+AT_WORK = {
+    "state-working": [{"id": WORKER, "kind": "background", "state": "working"}],  # Claude Code récent : pas de `status`
+    "state-running": [{"id": WORKER, "kind": "background", "state": "running"}],
+    "status-busy": [{"id": WORKER, "kind": "background", "status": "busy"}],
+    "etat-inconnu": [{"id": WORKER, "kind": "background", "state": "mystere"}],
+    "sans-etat": [{"id": WORKER, "kind": "background"}],
+    "introuvable": [{"id": "ffff0000", "kind": "background", "state": "stopped"}],
+    "liste-vide": [],
+    "illisible": None,
+}
+NOT_AT_WORK = {
+    "state-stopped": [{"id": WORKER, "kind": "background", "state": "stopped"}],
+    "state-done": [{"id": WORKER, "kind": "background", "state": "done"}],
+    "state-failed": [{"id": WORKER, "kind": "background", "state": "failed"}],
+    "state-blocked": [{"id": WORKER, "kind": "background", "state": "blocked"}],
+    "status-idle": [{"id": WORKER, "kind": "background", "status": "idle"}],
+}
+
+
+@pytest.mark.parametrize("event", [REVIEW_ESCALATED, MERGE_ESCALATED])
+@pytest.mark.parametrize("agents", AT_WORK.values(), ids=AT_WORK.keys())
+def test_le_tick_n_applique_rien_par_defaut_tant_que_le_worker_n_est_pas_prouve_a_l_arret(
+    project: Path, monkeypatch: pytest.MonkeyPatch, event: str, agents: list[dict[str, Any]] | None
+) -> None:
+    """Échec fermé, par l'étape réelle : au travail, état inconnu, session introuvable ou liste illisible — rien."""
+    pilot(project, APPLY)
+    service, tid, _qid = escalated(project, event)
+    tick(service, project, monkeypatch, agents)
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+
+
+@pytest.mark.parametrize("agents", NOT_AT_WORK.values(), ids=NOT_AT_WORK.keys())
+def test_le_tick_applique_l_option_par_defaut_quand_le_worker_est_a_l_arret(
+    project: Path, monkeypatch: pytest.MonkeyPatch, agents: list[dict[str, Any]]
+) -> None:
+    pilot(project, APPLY)
+    service, tid, _qid = escalated(project)
+    outcomes = tick(service, project, monkeypatch, agents)
+    assert [(o.action, o.status) for o in outcomes] == [("pilot", "done")]
+    assert service.require(tid).status is TaskState.READY
+    assert events(service, tid, DECIDED_EVENT)[0].payload["recommendation_source"] == "default"
+
+
+def test_sans_session_notee_par_le_tick_rien_ne_prouve_que_le_worker_est_a_l_arret(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La récolte d'un hôte que le kit n'a pas lancé (``resume_unfenced``) : aucune session à sonder, rien par défaut."""
+    pilot(project, APPLY)
+    service, tid, _qid = escalated(project, session="")
+    tick(service, project, monkeypatch, NOT_AT_WORK["state-stopped"])
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+
+
+@pytest.mark.parametrize("agents", [AT_WORK["state-working"], AT_WORK["etat-inconnu"], AT_WORK["introuvable"], None])
+def test_une_session_en_confiance_basse_ne_reprend_pas_par_defaut_un_worker_au_travail(
+    project: Path, monkeypatch: pytest.MonkeyPatch, agents: list[dict[str, Any]] | None
+) -> None:
+    """La voie de la session pilote porte la même garde que le tick : sans preuve d'arrêt, la question reste à l'humain."""
+    pilot(project, APPLY)
+    service, tid, qid = escalated(project)
+    monkeypatch.setattr(osess, "_read_agents", lambda *_a, **_k: agents)
+    with pytest.raises(GrimoireMissionError, match="confiance"):
+        answer(service, tid, qid, "reprendre", confidence="low")
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+
+
+def test_la_consigne_de_la_session_dit_au_travail_pour_une_session_de_fond_recente(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``worker_session`` lit le même état traduit : ``state: working`` n'est pas « absente »."""
+    pilot(project)
+    service, _tid, _qid = escalated(project)
+    orchestrator = stage(service, project)
+    (open_question,) = eligible_questions(service, MandateStore(project))
+    assert open_question.gesture == "resume"
+    states = osess.session_states(AT_WORK["state-working"])
+    assert states == {WORKER: "busy"} and orchestrator._item(open_question, states)["worker_session"] == "au travail"
+    assert orchestrator._item(open_question, osess.session_states(NOT_AT_WORK["state-stopped"]))["worker_session"] == "absente"
+
+
+def test_le_balayage_ne_termine_pas_une_session_orchestrateur_de_fond_au_travail(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Même lecture dans ``_sweep`` : une session ``state: working`` n'a pas rendu son tour."""
+    pilot(project)
+    service, _tid = running(project)
+    service.ledger.append_event(
+        osess.ORCH_LAUNCHED_EVENT, "orchestrator", "orchestrator", "orchestrator",
+        {"session": WORKER, "session_sha256": "d1", "questions": [], "mandate_id": "x"},
+    )
+    outcomes = tick(service, project, monkeypatch, AT_WORK["state-working"])
+    assert not [o for o in outcomes if o.action == "end"]
+    assert not [e for e in service.ledger.events_for("orchestrator") if e.event_type == osess.ORCH_ENDED_EVENT]
+
+
 @pytest.mark.parametrize("event", [REVIEW_ESCALATED, MERGE_ESCALATED])
 def test_une_reprise_par_defaut_attend_que_le_worker_ne_travaille_plus(project: Path, event: str) -> None:
     pilot(project, APPLY)
     service, tid, _qid = escalated(project, event)
-    service.ledger.append_event(
-        "task.session_launched", tid, "task", "tick", {"task_id": tid, "session": "abcd1234", "session_id": "s-1"}
-    )
     orchestrator = stage(service, project)
-    assert orchestrator._apply_recommendations(None) == []  # `claude agents` illisible : rien n'est repris
-    assert orchestrator._apply_recommendations({"abcd1234": "busy"}) == []
+    for unproven in (None, {}, {WORKER: "busy"}, {WORKER: ""}, {"ffff0000": "ended"}):
+        assert orchestrator._apply_recommendations(unproven) == []
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
-    (outcome,) = orchestrator._apply_recommendations({"abcd1234": "idle"})
+    (outcome,) = orchestrator._apply_recommendations({WORKER: "idle"})
     assert outcome.status == "done" and "par défaut" in outcome.detail
     assert service.require(tid).status is TaskState.READY
 
@@ -488,7 +624,7 @@ def test_une_tache_garee_sur_erreur_de_fournisseur_recommande_de_reessayer(proje
 def test_apply_recommended_le_tick_applique_l_option_par_defaut_d_une_escalade(project: Path, event: str) -> None:
     pilot(project, APPLY)
     service, tid, qid = escalated(project, event)
-    (outcome,) = stage(service, project)._apply_recommendations({})
+    (outcome,) = stage(service, project)._apply_recommendations(AT_REST)
     assert outcome.status == "done" and f"{tid}/{qid}" in outcome.questions
     (decided,) = events(service, tid, DECIDED_EVENT)
     assert decided.payload["option"] == "reprendre" and decided.payload["recommendation_source"] == "default"
@@ -586,7 +722,7 @@ def test_le_bloc_ne_montre_ni_jugement_ni_recommandation_d_auteur_ni_decision_re
     service, tid, qid = asks(project, options=("A", "B"), recommended="A")
     answer(service, tid, qid, "B", justification=WHY, confidence="high")  # jugement assumé
     service, tid, qid = asks(project, options=("A", "B"), recommended="A")
-    stage(service, project)._apply_recommendations({})  # recommandation d'auteur, prise par le tick
+    stage(service, project)._apply_recommendations(AT_REST)  # recommandation d'auteur, prise par le tick
     assert attention(project)["defaultDecisions"]["count"] == 0
 
     service, tid, qid = asks(project, options=("A", "B"), recommended="A")
