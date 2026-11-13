@@ -36,8 +36,11 @@ janitor :
           max_cycles: 2           # retours au worker (CI rouge, conflit) avant l'escalade à l'humain
           protected_paths: []     # chemins qui reviennent à l'humain, en plus des défauts (code des gardes, politique,
                                   # workflows et hooks, pyproject, fichiers compilés) ; comparaison en casefold()
-          protected_gate: human   # human (défaut) : un chemin réservé escalade ; dual_review : une seconde relecture
-                                  # (session et famille distinctes) remplace l'humain, sauf HUMAN_ONLY_PATHS
+          protected_gate: human   # human (défaut) : tout chemin réservé escalade ; dual_review : une seconde relecture
+                                  # indépendante remplace l'humain sur une partie d'entre eux (missions/dual_review.py) ;
+                                  # toute autre valeur rend la politique illisible
+          human_only_paths: []    # chemins qui restent à l'humain quel que soit protected_gate, en plus de
+                                  # HUMAN_ONLY_PATHS : la liste s'étend, elle ne se réduit pas
         orchestrator:             # #962 : une session qui répond sous mandat aux questions des workers lancés
           enabled: false
           model: sonnet           # vide : sonnet
@@ -101,7 +104,9 @@ _WORKER_KEYS = frozenset(
 )
 _REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean"})
 DEFAULT_MAX_CYCLES = 2
-_MERGER_KEYS = frozenset({"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate"})
+_MERGER_KEYS = frozenset(
+    {"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate", "human_only_paths"}
+)
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
 #: Le modèle de la session orchestrateur quand la politique n'en nomme pas.
 DEFAULT_ORCHESTRATOR_MODEL = "sonnet"
@@ -162,11 +167,12 @@ class MergerRole:
     max_cycles: int = DEFAULT_MAX_CYCLES
     protected_paths: tuple[str, ...] = ()
     protected_gate: str = PROTECTED_GATE_HUMAN
+    human_only_paths: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "realign_max": self.realign_max, "ignored_checks": list(self.ignored_checks),
                 "max_cycles": self.max_cycles, "protected_paths": list(self.protected_paths),
-                "protected_gate": self.protected_gate}
+                "protected_gate": self.protected_gate, "human_only_paths": list(self.human_only_paths)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,7 +320,7 @@ def _parse_merger(raw: Any) -> MergerRole:
     if not isinstance(enabled, bool):
         raise _InvalidPolicyError(f"{where}.enabled doit être un booléen, pas {enabled!r}")
     globs: dict[str, tuple[str, ...]] = {}
-    for key, default in (("ignored_checks", DEFAULT_IGNORED_CHECKS), ("protected_paths", ())):
+    for key, default in (("ignored_checks", DEFAULT_IGNORED_CHECKS), ("protected_paths", ()), ("human_only_paths", ())):
         raw_globs = data.get(key, list(default))
         if not isinstance(raw_globs, list) or not all(isinstance(g, str) and g.strip() for g in raw_globs):
             raise _InvalidPolicyError(f"{where}.{key} doit être une liste de motifs non vides, pas {raw_globs!r}")
@@ -331,6 +337,7 @@ def _parse_merger(raw: Any) -> MergerRole:
         max_cycles=_positive(data.get("max_cycles", DEFAULT_MAX_CYCLES), f"{where}.max_cycles"),
         protected_paths=globs["protected_paths"],
         protected_gate=gate,
+        human_only_paths=globs["human_only_paths"],
     )
 
 

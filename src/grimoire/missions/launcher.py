@@ -52,6 +52,7 @@ c'est sans effet sur la garde, l'inscription précède tout tick qui jugerait se
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import re
 import subprocess
@@ -657,6 +658,30 @@ def halt_idle_workers(service: TaskService, exec_: Exec, claude_bin: str = "clau
     return tuple(halted)
 
 
+def _seal_worker_for_dual_review(
+    service: TaskService, task_id: str, session_id: str, model: str, provider: str, policy: OrchestratorPolicy | None = None,
+) -> None:
+    """En ``protected_gate: dual_review`` seulement : le modèle et l'empreinte de session d'un worker qui vient d'être
+    lancé vont au journal d'autorité, où la double relecture les compare (:mod:`.dual_review`) — le ledger, que le
+    worker écrit, n'y suffit pas. En ``human``, rien n'est écrit. Une politique illisible ou un journal qui refuse
+    l'écriture ne retiennent pas le lancement : sans cette entrée, aucune double relecture ne tiendra pour la tâche et
+    sa PR ira à l'humain (échec fermé).
+
+    Sans *policy* (:func:`resume_worker`, une session neuve après une reprise ratée), l'entrée est notée ``relaunch`` :
+    son modèle vient du lancement noté au ledger, elle ne vaut donc jamais lancement d'origine."""
+    from grimoire.missions.dual_review import PROTECTED_GATE_DUAL_REVIEW
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+    from grimoire.missions.review_seal import seal_worker_launch
+
+    with contextlib.suppress(Exception):
+        relaunch = policy is None
+        policy = policy if policy is not None else load_orchestrator_policy(service.home_root).policy
+        if policy is None or policy.merger.protected_gate != PROTECTED_GATE_DUAL_REVIEW:
+            return
+        seal_worker_launch(service.home_root, task_id, hashlib.sha256(session_id.encode("utf-8")).hexdigest(), model,
+                           provider, relaunch=relaunch)
+
+
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
     permission_mode: str = "", cause: str = "",
@@ -702,6 +727,7 @@ def resume_worker(
         if refused:
             _halt(exec_, cwd, short, claude_bin)
             return ExecResult(1, "", refused)
+        _seal_worker_for_dual_review(service, task_id, session_id, str(launch.get("model") or ""), str(launch.get("provider") or ""))
         current = service.require(task_id).claim
         service.ledger.append_event(
             LAUNCHED_EVENT, task_id, "task", WORKER_ACTOR,
@@ -868,6 +894,7 @@ class WorkerLauncher:
 
             # Un refus de plafond révoque déjà le mandat ; un rôle en conflit ou un journal en erreur est une panne.
             return self._abandon(tid, session, wt.path, refused, count=code != CAP_EXCEEDED)
+        _seal_worker_for_dual_review(service, tid, session_id, model, route.provider if route is not None else "", self._policy)
         version = self._host_version()
         if version:
             # P86 : la session est nommée au claim avec la version de l'hôte ; sans elle le frein n'est jamais prouvé.
