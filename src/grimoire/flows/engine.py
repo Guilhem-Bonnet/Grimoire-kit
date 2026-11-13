@@ -53,7 +53,7 @@ from grimoire.runtime.schemas import Checkpoint, ExecutionContext, RunEventType,
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from grimoire.flows.attestation import CheckpointJournal
+    from grimoire.flows.attestation import CheckpointGate, CheckpointJournal
     from grimoire.flows.autonomy import GrantJournal
 
 __all__ = [
@@ -998,29 +998,7 @@ class FlowEngine:
         if wfi is None:
             raise GrimoireRuntimeError(f"run introuvable côté kernel : {run_id}")
         if _is_flow_terminal(wfi.status):
-            if allow_replay and wfi.status in (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED):
-                # Le dernier node a été accepté puis la réponse s'est perdue :
-                # le même renvoi sur un run terminé réussi est un rejeu.
-                digest = _output_digest(output)
-                crossed = self._crossed_node_for_digest(wfi, digest) if digest is not None else None
-                if crossed is not None:
-                    repaired: tuple[str, ...] = ()
-                    if not any(
-                        e.event_type is RunEventType.WORKFLOW_COMPLETED for e in self._kernel.get_run_events(wfi.id)
-                    ):
-                        # Le statut COMPLETED est écrit avant son événement : un
-                        # crash entre les deux laisse le journal sans clôture.
-                        self._kernel.complete(wfi.id, self._ctx_for(wfi))
-                        repaired = ("événement workflow.completed manquant rétabli",)
-                    return ResumeOutcome(
-                        ok=True,
-                        finished=True,
-                        node_id=meta.order[-1],
-                        replay=True,
-                        replay_of=crossed,
-                        repaired=repaired,
-                    )
-            raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
+            return self._resume_terminal(run_id, wfi, meta, output, allow_replay)
 
         order = list(meta.order)
         blueprint = load_blueprint(self._blueprint_file(meta), self._project_root)
@@ -1070,30 +1048,9 @@ class FlowEngine:
 
         current_id = self._current_node(wfi, order)
         if current_id is None and wfi.status is WorkflowStatus.CHECKPOINTED:
-            last_checkpoint = self._kernel.list_checkpoints(wfi.id)[-1:]
-            if last_checkpoint and not last_checkpoint[0].state.pending_steps:
-                # Tous les nodes sont checkpointés ; seul ``complete`` n'a pas eu
-                # lieu. Terminer sur la foi de la dernière sortie ACCEPTÉE : la
-                # renvoyer suffit, toute autre est refusée (jamais de clôture
-                # sur une sortie que ce run n'a pas vue).
-                last = last_checkpoint[0]
-                if allow_replay and digest is not None and digest == _checkpoint_digest(last):
-                    self._kernel.complete(wfi.id, ctx)
-                    return ResumeOutcome(
-                        ok=True,
-                        finished=True,
-                        node_id=last.step_id,
-                        replay=True,
-                        replay_of=last.step_id,
-                        repaired=(*repaired_notes, "run terminé : tous les nodes étaient déjà checkpointés"),
-                    )
-                raise _refusal(
-                    f"run {run_id} : tous les nodes sont déjà validés (dernier : {last.step_id}) mais le run n'est pas "
-                    f"terminé ; renvoyer la sortie acceptée du node {last.step_id} pour le terminer, "
-                    "ou `grimoire flow doctor` / `grimoire flow abort`",
-                    run_id,
-                    repaired_notes,
-                )
+            closed = self._resume_all_checkpointed(run_id, wfi, ctx, digest, allow_replay, repaired_notes)
+            if closed is not None:
+                return closed
         if current_id is None or current_id not in contracts:
             raise _refusal(
                 f"run {run_id} : aucun node courant résoluble (status={wfi.status.value})", run_id, repaired_notes
@@ -1106,6 +1063,106 @@ class FlowEngine:
                 repaired_notes,
             )
         contract = contracts[current_id]
+        faults, contract_faults, gate = self._resume_judge(run_id, wfi, blueprint, contract, current_id, output, digest)
+        attestation = gate.attestation.to_dict() if gate is not None else None
+        warnings = (gate.warning,) if gate is not None and gate.warning else ()
+        if faults and allow_replay and digest is not None:
+            # Vérification pure, avant toute écriture : un rejeu ne doit ni
+            # rouvrir le node courant (STEP_STARTED) ni le bloquer.
+            crossed = self._crossed_node_for_digest(wfi, digest)
+            if crossed is not None:
+                return ResumeOutcome(
+                    ok=True,
+                    finished=False,
+                    node_id=current_id,
+                    contract=contract,
+                    replay=True,
+                    replay_of=crossed,
+                    repaired=repaired_notes,
+                )
+        resumed_from_pause = wfi.status is WorkflowStatus.PAUSED
+        if resumed_from_pause:
+            # K11 : la pause est levée (sinon on a refusé plus haut) ; le challenge d'un checkpoint a été émis
+            # plus haut, pour la session qui reprend — celle qui a posé la pause n'est plus forcément là.
+            wfi = self._kernel.unpause(wfi.id, ctx)
+        if wfi.status is not WorkflowStatus.RUNNING or resumed_from_pause:
+            # (Le docteur s'appuie sur ce test : un run déjà RUNNING n'est pas rouvert,
+            # voir `doctor.resume_realigns_status`.)
+            # CHECKPOINTED (crash avant le advance_step du node suivant) ou
+            # BLOCKED (retentative après correction de l'hôte) : les deux
+            # ramènent au même point, ouvrir l'exécution du node courant.
+            wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
+        if faults:
+            return self._resume_refuse(
+                run_id, wfi, ctx, blueprint, contract, current_id, faults, contract_faults, gate, repaired_notes, attestation
+            )
+        return self._resume_accept(
+            run_id, wfi, ctx, meta, blueprint, contracts, order, current_id, digest, gate, executor,
+            repaired_notes, attestation, warnings,
+        )
+
+    def _resume_terminal(
+        self, run_id: str, wfi: WorkflowInstance, meta: FlowRunMeta, output: dict[str, Any], allow_replay: bool
+    ) -> ResumeOutcome:
+        """Run déjà terminal : renvoyer la dernière sortie acceptée est un rejeu, tout autre appel est refusé."""
+        if allow_replay and wfi.status in (WorkflowStatus.COMPLETED, WorkflowStatus.VERIFIED):
+            # Le dernier node a été accepté puis la réponse s'est perdue :
+            # le même renvoi sur un run terminé réussi est un rejeu.
+            digest = _output_digest(output)
+            crossed = self._crossed_node_for_digest(wfi, digest) if digest is not None else None
+            if crossed is not None:
+                repaired: tuple[str, ...] = ()
+                if not any(e.event_type is RunEventType.WORKFLOW_COMPLETED for e in self._kernel.get_run_events(wfi.id)):
+                    # Le statut COMPLETED est écrit avant son événement : un
+                    # crash entre les deux laisse le journal sans clôture.
+                    self._kernel.complete(wfi.id, self._ctx_for(wfi))
+                    repaired = ("événement workflow.completed manquant rétabli",)
+                return ResumeOutcome(
+                    ok=True,
+                    finished=True,
+                    node_id=meta.order[-1],
+                    replay=True,
+                    replay_of=crossed,
+                    repaired=repaired,
+                )
+        raise GrimoireRuntimeError(f"run {run_id} est {wfi.status.value}, rien à reprendre")
+
+    def _resume_all_checkpointed(
+        self, run_id: str, wfi: WorkflowInstance, ctx: ExecutionContext, digest: str | None, allow_replay: bool,
+        repaired_notes: tuple[str, ...],
+    ) -> ResumeOutcome | None:
+        """Run CHECKPOINTED sans node courant : le clôt sur sa dernière sortie acceptée ; ``None`` s'il reste des nodes."""
+        last_checkpoint = self._kernel.list_checkpoints(wfi.id)[-1:]
+        if last_checkpoint and not last_checkpoint[0].state.pending_steps:
+            # Tous les nodes sont checkpointés ; seul ``complete`` n'a pas eu
+            # lieu. Terminer sur la foi de la dernière sortie ACCEPTÉE : la
+            # renvoyer suffit, toute autre est refusée (jamais de clôture
+            # sur une sortie que ce run n'a pas vue).
+            last = last_checkpoint[0]
+            if allow_replay and digest is not None and digest == _checkpoint_digest(last):
+                self._kernel.complete(wfi.id, ctx)
+                return ResumeOutcome(
+                    ok=True,
+                    finished=True,
+                    node_id=last.step_id,
+                    replay=True,
+                    replay_of=last.step_id,
+                    repaired=(*repaired_notes, "run terminé : tous les nodes étaient déjà checkpointés"),
+                )
+            raise _refusal(
+                f"run {run_id} : tous les nodes sont déjà validés (dernier : {last.step_id}) mais le run n'est pas "
+                f"terminé ; renvoyer la sortie acceptée du node {last.step_id} pour le terminer, "
+                "ou `grimoire flow doctor` / `grimoire flow abort`",
+                run_id,
+                repaired_notes,
+            )
+        return None
+
+    def _resume_judge(
+        self, run_id: str, wfi: WorkflowInstance, blueprint: dict[str, Any], contract: NodeContract, current_id: str,
+        output: dict[str, Any], digest: str | None,
+    ) -> tuple[list[str], tuple[str, ...], CheckpointGate | None]:
+        """Les défauts de la sortie soumise, ceux du seul contrat, et le classement de la décision d'un checkpoint."""
         faults = check_output_against_contract(contract, output)
         #: Le gate du node : une sortie refusée par son contrat révoque les octrois qui couvrent le run (W5-06).
         contract_faults = tuple(faults)
@@ -1141,63 +1198,49 @@ class FlowEngine:
                 faults.append(gate.refusal)
         else:
             gate = None
-        attestation = gate.attestation.to_dict() if gate is not None else None
-        warnings = (gate.warning,) if gate is not None and gate.warning else ()
-        if faults and allow_replay and digest is not None:
-            # Vérification pure, avant toute écriture : un rejeu ne doit ni
-            # rouvrir le node courant (STEP_STARTED) ni le bloquer.
-            crossed = self._crossed_node_for_digest(wfi, digest)
-            if crossed is not None:
-                return ResumeOutcome(
-                    ok=True,
-                    finished=False,
-                    node_id=current_id,
-                    contract=contract,
-                    replay=True,
-                    replay_of=crossed,
-                    repaired=repaired_notes,
-                )
-        resumed_from_pause = wfi.status is WorkflowStatus.PAUSED
-        if resumed_from_pause:
-            # K11 : la pause est levée (sinon on a refusé plus haut) ; le challenge d'un checkpoint a été émis
-            # plus haut, pour la session qui reprend — celle qui a posé la pause n'est plus forcément là.
-            wfi = self._kernel.unpause(wfi.id, ctx)
-        if wfi.status is not WorkflowStatus.RUNNING or resumed_from_pause:
-            # (Le docteur s'appuie sur ce test : un run déjà RUNNING n'est pas rouvert,
-            # voir `doctor.resume_realigns_status`.)
-            # CHECKPOINTED (crash avant le advance_step du node suivant) ou
-            # BLOCKED (retentative après correction de l'hôte) : les deux
-            # ramènent au même point, ouvrir l'exécution du node courant.
-            wfi = self._kernel.advance_step(wfi.id, ctx, step_id=current_id)
-        if faults:
-            wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
-            if contract_faults:
-                self._grants().revoke_on_red_gate(run_id, current_id, contract_faults)
-            if gate is not None and (gate.decision in ("reject", "amend") or gate.drifted):
-                # Un refus, un amendement ou une dérive de plan (W2-11) est une
-                # décision : il consomme son challenge, la présentation suivante
-                # en émet un neuf (sur le plan courant, pour une dérive).
-                self._authority(run_id).record_decision(
-                    current_id,
-                    "plan_drifted" if gate.drifted else gate.decision,
-                    gate.refusal if gate.drifted else gate.reason,
-                    gate.attestation,
-                )
-                if gate.attestation.attested:
-                    self._settle_linked_question(wfi, run_id, current_id, gate.decision)
-            if gate is not None and gate.refusal and gate.refusal.startswith("awaiting_human"):
-                self._ask_linked_task(wfi, run_id, current_id, gate.attestation.explain())
-            self._present(run_id, contract, blueprint)
-            return ResumeOutcome(
-                ok=False,
-                finished=False,
-                node_id=current_id,
-                faults=tuple(faults),
-                contract=contract,
-                repaired=repaired_notes,
-                attestation=attestation,
-            )
+        return faults, contract_faults, gate
 
+    def _resume_refuse(
+        self, run_id: str, wfi: WorkflowInstance, ctx: ExecutionContext, blueprint: dict[str, Any], contract: NodeContract,
+        current_id: str, faults: list[str], contract_faults: tuple[str, ...], gate: CheckpointGate | None,
+        repaired_notes: tuple[str, ...], attestation: dict[str, Any] | None,
+    ) -> ResumeOutcome:
+        """Sortie refusée : bloque le node courant, révoque les octrois, consigne la décision et présente de nouveau le node."""
+        wfi = self._kernel.fail_step(wfi.id, ctx, step_id=current_id, reason="; ".join(faults))
+        if contract_faults:
+            self._grants().revoke_on_red_gate(run_id, current_id, contract_faults)
+        if gate is not None and (gate.decision in ("reject", "amend") or gate.drifted):
+            # Un refus, un amendement ou une dérive de plan (W2-11) est une
+            # décision : il consomme son challenge, la présentation suivante
+            # en émet un neuf (sur le plan courant, pour une dérive).
+            self._authority(run_id).record_decision(
+                current_id,
+                "plan_drifted" if gate.drifted else gate.decision,
+                gate.refusal if gate.drifted else gate.reason,
+                gate.attestation,
+            )
+            if gate.attestation.attested:
+                self._settle_linked_question(wfi, run_id, current_id, gate.decision)
+        if gate is not None and gate.refusal and gate.refusal.startswith("awaiting_human"):
+            self._ask_linked_task(wfi, run_id, current_id, gate.attestation.explain())
+        self._present(run_id, contract, blueprint)
+        return ResumeOutcome(
+            ok=False,
+            finished=False,
+            node_id=current_id,
+            faults=tuple(faults),
+            contract=contract,
+            repaired=repaired_notes,
+            attestation=attestation,
+        )
+
+    def _resume_accept(
+        self, run_id: str, wfi: WorkflowInstance, ctx: ExecutionContext, meta: FlowRunMeta, blueprint: dict[str, Any],
+        contracts: dict[str, NodeContract], order: list[str], current_id: str, digest: str | None,
+        gate: CheckpointGate | None, executor: NodeExecutor | None, repaired_notes: tuple[str, ...],
+        attestation: dict[str, Any] | None, warnings: tuple[str, ...],
+    ) -> ResumeOutcome:
+        """Sortie acceptée : checkpointe le node, puis termine le run, le pose en pause (hold) ou ouvre le node suivant."""
         # Décision "termine / avance vers quel node" déléguée à
         # grimoire_flows_core.resume_outcome (issue #354) quand le backend
         # Rust est actif : elle nomme explicitement le cas "current_id
