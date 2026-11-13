@@ -84,6 +84,13 @@ class EmittedFile:
     #: Fichier que l'utilisateur partage avec le kit : le kit n'en possède qu'un
     #: bloc délimité, le reste est préservé à l'octet près.
     block: bool = False
+    #: Rendu exact (texte entier, fins de ligne normalisées en LF) qu'une
+    #: version antérieure du kit écrivait pour ce fichier avant qu'il ne passe
+    #: au bloc géré. Un fichier qui correspond est reconnu comme celui du kit
+    #: et remplacé par le bloc — sans quoi une mise à jour le prendrait pour un
+    #: fichier étranger et le préserverait indéfiniment. Vide, un fichier à
+    #: bloc sans bornes reste étranger.
+    legacy_pattern: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,14 +268,30 @@ def _file_ownership(text: str, emitted: EmittedFile) -> str | None:
     return CONFLICT_FOREIGN
 
 
-def _block_ownership(text: str) -> str | None:
+def _block_ownership(text: str, emitted: EmittedFile) -> str | None:
     """Même question pour un fichier à bloc géré ; seul le contenu *du bloc* compte."""
     found = _BLOCK.search(text)
     if found is not None:
         return None if _block_body_digest(found.group(2)) == found.group(1) else CONFLICT_EDITED
     if _BEGIN_LINE.search(text) is not None:
         return CONFLICT_EDITED  # un BEGIN sans END exact : bloc abîmé, rien de ce qui suit n'est au kit
-    return None if _is_legacy_whole_file(text) else CONFLICT_FOREIGN
+    if _is_legacy_whole_file(text) or _is_legacy_seed(text, emitted):
+        return None
+    return CONFLICT_FOREIGN
+
+
+def _is_legacy_seed(text: str, emitted: EmittedFile) -> bool:
+    """Le fichier est-il *exactement* un rendu qu'une version antérieure du kit a écrit en entier ?
+
+    Le motif doit couvrir tout le fichier, pas un fragment : un projet qui a
+    étendu l'ancien fichier (règles maison ajoutées, import retiré) ne
+    correspond plus et reste à lui. C'est ce qui distingue une migration d'un
+    écrasement.
+    """
+    if not emitted.legacy_pattern:
+        return False
+    normalized = text.replace("\r\n", "\n").rstrip("\n")
+    return re.fullmatch(emitted.legacy_pattern, normalized) is not None
 
 
 def _kit_owns(path: Path, emitted: EmittedFile) -> bool:
@@ -283,7 +306,7 @@ def _kit_owns(path: Path, emitted: EmittedFile) -> bool:
     found = _BLOCK.fullmatch(text)
     if found is not None:
         return _block_body_digest(found.group(2)) == found.group(1)
-    return _is_legacy_whole_file(text)
+    return _is_legacy_whole_file(text) or _is_legacy_seed(text, emitted)
 
 
 def owned_managed_paths(plan: EmitPlan, project_root: Path) -> list[Path]:
@@ -311,7 +334,7 @@ def _decide_block(current: str | None, emitted: EmittedFile, force: bool) -> tup
     block = render_block(emitted.content)
     if current is None:
         return block, "written"
-    cause = _block_ownership(current)
+    cause = _block_ownership(current, emitted)
     if cause is not None and not force:
         return None, cause
     nl = "\r\n" if "\r\n" in current else "\n"
@@ -320,7 +343,9 @@ def _decide_block(current: str | None, emitted: EmittedFile, force: bool) -> tup
     found = _BLOCK.search(current)
     if found is not None:  # le bloc seul est remplacé : le reste est à l'utilisateur, même avec --force
         new = current[: found.start()] + block + current[found.end() :]
-    elif _is_legacy_whole_file(current):  # version précédente : tout le fichier était au kit
+    elif _is_legacy_whole_file(current) or _is_legacy_seed(current, emitted):
+        # Version précédente, entièrement au kit : le bloc la remplace, il ne
+        # s'ajoute pas à un ancien pointeur qu'elle rendrait caduc.
         new = block
     elif _BEGIN_LINE.search(current) is not None:  # bloc abîmé : même --force ne devine pas où il finit
         return None, CONFLICT_EDITED

@@ -146,7 +146,9 @@ cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
 supprime au premier `grimoire up` qui suit une mise à jour du kit.
 `grimoire init` écrit la clé avec le résultat de cette détection, pour que le
 comportement soit explicite dès le premier jour : un répertoire vierge
-n'obtient que `claude` et son pont `CLAUDE.md`.
+n'obtient que `claude`, et `host sync` y émet son `CLAUDE.md` court (langue,
+contrat de complétion, règle « non vérifié », pointeurs de mémoire) — pas un
+import des instructions Copilot.
 
 **Émission** : `grimoire host sync` (et donc `grimoire up`) n'écrit que les
 hôtes activés.
