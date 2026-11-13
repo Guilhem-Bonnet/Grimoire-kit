@@ -81,6 +81,7 @@ from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.costs import POLICY_STOP, Cost, cap_reason, validate_policy
 from grimoire.missions.diff_fingerprint import signal_if_stuck
 from grimoire.missions.dispatch_history import recommend_start_tier
+from grimoire.missions.dispatch_provider_env import provider_env
 from grimoire.missions.dispatch_worktree import changed_since, worktree_fingerprint
 from grimoire.missions.empty_green import classify_empty_green, invokes_test_runner
 from grimoire.missions.route_dispatch import record_route
@@ -90,7 +91,6 @@ from grimoire.providers.data_policy import split_by_data_policy
 from grimoire.providers.quota import QuotaSignal, classify_failure, observe_window
 from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderSpec
 from grimoire.providers.routing import candidates as provider_candidates
-from grimoire.providers.secrets import env_for_provider
 from grimoire.providers.state import (
     available_models,
     load_state,
@@ -851,18 +851,7 @@ def _run_provider_call(
     """
     argv = render_invocation(provider.invocation or "", prompt=prompt, model=model)
     started = time.monotonic()
-    # Issue #310 suite : la clé d'un fournisseur `currency: api` vient du magasin de
-    # secrets (grimoire.providers.secrets, `~/.env-store/`), jamais du registre ni d'un
-    # argument — fusionnée ici pour que le script d'invocation n'ait rien à en savoir.
-    env = {**os.environ, **env_for_provider(provider.id)}
-    # Le pipe est relu en UTF-8 juste en dessous : un fournisseur Python doit
-    # donc écrire en UTF-8, pas dans l'encodage de la console Windows (cp1252),
-    # qui rendrait les accents illisibles à la relecture. On impose la valeur
-    # (au lieu d'un `setdefault`) : le contrat de lecture est ici, pas dans
-    # l'environnement hérité de l'appelant. `PYTHONUTF8` couvre aussi les
-    # fichiers que le script du fournisseur lirait ou écrirait lui-même.
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
+    env = provider_env(provider.id)
     try:
         completed = subprocess.run(
             argv, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace",

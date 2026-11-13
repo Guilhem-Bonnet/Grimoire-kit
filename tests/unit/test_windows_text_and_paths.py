@@ -27,7 +27,7 @@ from pathlib import Path, PureWindowsPath
 
 import pytest
 
-from grimoire.missions import dispatch
+from grimoire.missions import dispatch, dispatch_provider_env
 from grimoire.providers.registry import ProviderSpec
 from tests.unit.hosts.test_runtime_gemini import _payload as _gemini_payload
 from tests.unit.test_workspace_live_view import EXAMPLE as LIVE_EXAMPLE
@@ -60,7 +60,7 @@ def test_un_fournisseur_python_ecrit_en_utf8_malgre_une_console_cp1252(
     cp1252 et « résumé » revient en ``r\\ufffdsum\\ufffd``.
     """
     _simulate_windows_encoding(monkeypatch)
-    monkeypatch.setattr(dispatch, "env_for_provider", lambda provider_id: {})
+    monkeypatch.setattr(dispatch_provider_env, "env_for_provider", lambda provider_id: {})
 
     script = tmp_path / "fournisseur.py"
     script.write_text(
