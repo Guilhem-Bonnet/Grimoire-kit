@@ -2824,7 +2824,7 @@ _AGENT_AUTOSTART_BY_HOST: dict[HostId, tuple[bool, str]] = {
     HostId.GITHUB_COPILOT: (False, "un agent `.github/agents/*.agent.md` ne s'ouvre que par le sélecteur de chat"),
     HostId.CODEX: (False, "`codex` n'a pas d'option d'agent nommé (AGENTS.md seulement)"),
     HostId.CURSOR: (False, "Cursor charge des règles et des sous-agents, pas une session dans un agent"),
-    HostId.GEMINI_CLI: (False, "`gemini` n'a pas d'option d'agent nommé (GEMINI.md seulement)"),
+    HostId.GEMINI_CLI: (False, "`gemini` n'a pas d'option d'agent nommé (sous-agents `.gemini/agents/`, pas de session ouverte dans un agent)"),
     HostId.OPENCODE: (False, "opencode charge des agents par `opencode.json`, pas une session dans un agent"),
 }
 

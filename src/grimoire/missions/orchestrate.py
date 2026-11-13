@@ -318,7 +318,7 @@ def _one_pass(
         if swept.status in ("failed", "refused"):
             attention.append(f"janitor : {swept.action} de {swept.task_id} {swept.status} ({swept.detail})")
     for launch in launches:
-        if launch.status == "failed":
+        if launch.status in ("failed", "deferred"):
             attention.append(f"lanceur : {launch.task_id} non lancée ({launch.detail})")
     for review in reviews:
         if review.status == "failed" or review.action in ("forged", "escalate", "no_pr", "pr_refused"):  # #994 : pas de PR à relire

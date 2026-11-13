@@ -20,7 +20,7 @@ Grimoire installs into your repository and gives you, for the code you delegate 
 
 ```bash
 uv tool install grimoire-kit                   # or: pipx install grimoire-kit
-grimoire init . --lite -y                      # sets up the current repository, light profile (no service)
+grimoire init . -y                             # sets up the current repository; starts the complete memory stack if Docker answers
 grimoire standard init . --profile governed    # makes the evidence check blocking
 ```
 

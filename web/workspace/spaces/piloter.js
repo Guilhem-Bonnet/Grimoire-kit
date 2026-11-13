@@ -143,7 +143,11 @@ function injectStyles() {
     .pl-step-bar[data-tone="acc"] { background: var(--acc); }
     .pl-step-name { font-size: var(--t-min); font-weight: 500; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .pl-up-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-    @container canvas (max-width: 900px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
+    /* Le volet des rubriques ampute la toile de 200 px dès que l'espace en a
+       plusieurs (Flotte depuis « En direct ») : à 1440 la toile fait ~794 px.
+       Le seuil passe sous cette largeur pour garder les deux colonnes de
+       l'artboard, et s'aligne sur les autres paliers de l'écran (760 px). */
+    @container canvas (max-width: 760px) { .pl-up-cols { grid-template-columns: minmax(0, 1fr); } }
     .pl-upcard { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; min-width: 0; }
     .pl-upcard-h { padding: 12px 16px; display: flex; align-items: center; gap: var(--sp-2); background: var(--e1); }
     .pl-upcard-h h3 { margin: 0; font-size: var(--t-s); font-weight: 600; color: var(--ink); }

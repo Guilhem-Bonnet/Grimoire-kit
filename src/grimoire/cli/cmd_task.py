@@ -278,12 +278,23 @@ def task_show(
     from grimoire.missions.board import board_status_of
     from grimoire.missions.dispatch_advice import dispatch_advice, model_hint
     from grimoire.missions.gates import GatesFileError, declared_transitions
+    from grimoire.missions.launcher import LAUNCHED_EVENT, WORKER_DEFERRED_EVENT
     from grimoire.providers.data_policy import declared_data_class
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
     advice = dispatch_advice(task)
     verifiabilite = advice["verifiability"]
+    # Le dernier lancement (ou refus de repli) dit pourquoi le worker tourne sur l'hôte, ou pourquoi il n'a pas été
+    # lancé : `provider_refused` est le motif du repli (#1133), `task.worker_deferred` celui d'un repli fermé.
+    last_launch = next(
+        (
+            event
+            for event in reversed(service.ledger.list_events(task_id))
+            if event.event_type in (LAUNCHED_EVENT, WORKER_DEFERRED_EVENT)
+        ),
+        None,
+    )
     # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
     # l'outil `Agent` — #662) ; `model_tier` reste toujours
     # renseigné. Le JSON garde les deux champs bruts, le texte passe par
@@ -300,6 +311,7 @@ def task_show(
         payload["recommended_model"] = advice["recommended_model"]
         payload["model_tier"] = advice["model_tier"]
         payload["last_dispatch"] = last_dispatch
+        payload["last_launch"] = last_launch.payload if last_launch is not None else None
         payload["usage"] = usage
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
@@ -318,9 +330,9 @@ def task_show(
             f"  [yellow]risque accepté[/yellow] : {escape(str(risque.get('reason', '')))} "
             f"[dim]({risque.get('amendments')}/{risque.get('cap')} amendements, run {risque.get('run_id')})[/dim]"
         )
-    for entree in verifiabilite["criteria"]:
-        motif = entree["pattern"] or "non reconnu"
-        out.print(f"    [dim]- {escape(entree['criterion'])} → {motif}[/dim]")
+    from grimoire.cli.cmd_task_add import print_criterion_diagnostics
+
+    print_criterion_diagnostics(task, out)
     if last_dispatch is not None:
         if last_dispatch.get("review") is not None:
             _print_review(
@@ -339,6 +351,11 @@ def task_show(
         out.print(f"  données : {escape(data_class)} [dim](déclarée par : {data_class_source})[/dim]")
     else:
         out.print("  données : classe non déclarée [dim](aucun fournisseur externe)[/dim]")
+    if last_launch is not None:
+        if last_launch.event_type == WORKER_DEFERRED_EVENT:
+            out.print(f"  différée : {escape(str(last_launch.payload.get('reason', '')))}")
+        elif last_launch.payload.get("provider_refused"):
+            out.print(f"  repli sur l'hôte : {escape(str(last_launch.payload['provider_refused']))}")
     if task.owner or task.claim:
         out.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:
