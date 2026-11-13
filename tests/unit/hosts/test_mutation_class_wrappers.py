@@ -456,10 +456,11 @@ def test_la_classe_destructive_ne_change_pas(command: str) -> None:
 
 # ── Garde d'autorité : elle lit aussi la classe de mutation ──────────────────
 #
-# Avant le correctif, une lecture enveloppée qui citait la zone de contrôle était
-# refusée comme une écriture possible. Reclassée en lecture, elle suit le sort de la
-# même lecture nue : les secrets de la zone restent refusés (détection de secret,
-# indépendante de la classe), et une écriture enveloppée reste un vecteur.
+# Une lecture enveloppée est maintenant classée lecture. Ce que la garde en fait ne doit
+# pas s'ouvrir pour autant : les secrets de la zone de contrôle restent refusés
+# (détection de secret, indépendante de la classe), une lecture qui atteint la zone est
+# refusée sans révocation comme la même lecture nue (#1173), et une écriture enveloppée
+# reste un vecteur.
 
 #: Assemblé : le chemin n'est jamais écrit d'un bloc, comme dans une commande.
 _ZONE = "~/." + "grimoire" + "/" + "control"
@@ -528,12 +529,27 @@ def test_une_ecriture_enveloppee_dans_la_zone_de_controle_reste_un_vecteur(home_
     assert vector is not None and vector.code == "control-zone", command
 
 
-@pytest.mark.parametrize("gabarit", ["cat {}", "rtk read {}", "timeout 5 cat {}", "bash -c 'cat {}'"])
-def test_la_preuve_de_contrat_se_lit_enveloppee_comme_nue(home_reel: Path, gabarit: str) -> None:
-    """Sur main, seule la forme nue passait ; les autres étaient prises pour des écritures."""
-    facts = classify_tool("Bash", {"command": gabarit.format(f"{_ZONE}/host-contracts.json")})
-    assert forgery_vector(facts) is None
-    assert not facts.secret_target
+@pytest.mark.parametrize(
+    ("gabarit", "cible"),
+    [
+        ("cat {}", "/host-contracts.json"),
+        ("rtk read {}", "/host-contracts.json"),
+        ("timeout 5 cat {}", "/host-contracts.json"),
+        ("bash -c 'cat {}'", "/host-contracts.json"),
+        ("grep -r motif {}", ""),
+        ("rtk grep -r motif {}", ""),
+        ("bash -c 'grep -r motif {}'", ""),
+    ],
+)
+def test_une_lecture_de_la_zone_de_controle_est_refusee_sans_revocation_enveloppee_comme_nue(
+    home_reel: Path, gabarit: str, cible: str
+) -> None:
+    """#1173 : une lecture qui atteint la zone est refusée sans révoquer, quelle que soit sa classe."""
+    facts = classify_tool("Bash", {"command": gabarit.format(_ZONE + cible)})
+    assert facts.mutation is MutationClass.READ_ONLY
+    vector = forgery_vector(facts)
+    assert vector is not None and vector.code == "control-zone"
+    assert vector.revokes is False
 
 
 # ── De bout en bout : le compteur de la session et Stop ──────────────────────
