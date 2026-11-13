@@ -456,6 +456,69 @@ def test_une_commande_destructive_citee_reste_une_donnee(command: str) -> None:
     assert not classify_tool("Bash", {"command": command}).destructive_reason
 
 
+# ── Un verbe ou un drapeau cité reste le verbe ou le drapeau que le shell lance ──
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "'rm' -rf build",
+        '"rm" -rf build',
+        'rm "-rf" build',
+        "rm '-r' '-f' build",
+        "r\\m -rf build",
+        'rm -r""f build',
+        "r''m -rf build",
+        "timeout 5 'rm' -rf build",
+        "ls ; 'rm' -rf build > journal",
+        'git reset "--hard"',
+        '"git" reset --hard',
+        "git 'reset' --hard HEAD~1",
+        'git push "--force" origin main',
+        "git push origin main '-f'",
+        "git clean '-fd'",
+        'git checkout -- "."',
+    ],
+)
+def test_un_verbe_ou_un_drapeau_cite_reste_destructif(command: str) -> None:
+    facts = classify_tool("Bash", {"command": command})
+    assert facts.mutation is DESTRUCTIVE, command
+    assert facts.destructive_reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # un texte cité qui porte des blancs est une prose, pas un mot de commande
+        'git commit -m "retire rm -rf du script"',
+        "git commit -m 'git reset --hard est interdit ici'",
+        'grep -rn "rm -rf" docs/',
+        "echo 'voir git push --force'",
+        'gh pr create --title "retire rm -rf" --body "plus de git clean -fd"',
+        # un mot cité qui ne suit aucun verbe destructif
+        "grep -n '--force' notes.md",
+        'git log --grep "reset"',
+    ],
+)
+def test_une_prose_citee_reste_une_donnee(command: str) -> None:
+    assert not classify_tool("Bash", {"command": command}).destructive_reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cat .e"n"v',
+        "cat .en\\v",
+        "cat '.e'nv",
+        'head -3 "."env',
+    ],
+)
+def test_un_nom_de_secret_coupe_par_des_guillemets_reste_une_lecture_de_secret(command: str) -> None:
+    facts = classify_tool("Bash", {"command": command})
+    assert facts.kind is ActionKind.SECRET_ACCESS, command
+    assert facts.secret_target
+
+
 # ── Non-régression : les lectures de tous les jours restent des lectures ─────
 
 LECTURES_COURANTES = [
