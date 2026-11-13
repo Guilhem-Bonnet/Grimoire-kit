@@ -141,7 +141,7 @@ def _opens_dollar_quote(text: str) -> bool:
 # Enfin, un terminal interactif rejette seule une ligne mal formée : son heredoc n'est
 # jamais ouvert, et les lignes suivantes sont lues comme des commandes. Ce balayage ne
 # connaît pas la grammaire du shell ; il ne retire donc un corps que d'une ligne de
-# commande dont la forme est sûre (:func:`_is_flat`) : une suite de commandes simples,
+# commande dont la forme est sûre (:func:`_flat_step`) : une suite de commandes simples,
 # sans mot réservé en tête de commande, sans commande vide entre deux opérateurs, sans
 # redirection sans cible, sans parenthèse ni substitution hors guillemets, sans rappel
 # d'historique. C'est ce qui précède le corps qui compte, ligne d'ouverture comprise : une
@@ -188,47 +188,46 @@ _SKELETON_TOKEN_RE = re.compile(
     r"|(?P<blank>[ \t]+)"
     r"|(?P<word>[^ \t\n;|&<>]+)"
 )
-#: Opérateurs derrière lesquels la commande suivante peut commencer sur la ligne d'après.
-_CONTINUING_OPERATORS = frozenset({"&&", "||", "|", "|&"})
 
 
-def _is_flat(skeleton: str) -> bool:
-    """Vrai si *skeleton* — le code, textes cités réduits à un mot — est une suite de commandes simples.
+def _flat_step(state: tuple[bool, bool], text: str) -> tuple[bool, bool] | None:
+    """L'état de la lecture après *text*, ou ``None`` si ce n'est plus une suite de commandes simples.
 
     La seule forme dont ce balayage sait qu'un shell ne la rejettera pas : chaque
     commande a un premier mot qui n'est pas réservé, chaque redirection sa cible, aucun
     opérateur n'en suit un autre, et rien n'ouvre de parenthèse ni de substitution.
+    *text* est le code, textes cités réduits à un mot. L'état — (aucun mot de la commande
+    en cours n'a été lu, une redirection attend sa cible) — se reprend d'une ligne à la
+    suivante : la lecture reste linéaire quel que soit le nombre de heredocs.
     """
-    starting = True  # aucun mot de la commande en cours n'a encore été lu
-    target = False  # une redirection attend sa cible
-    for token in _SKELETON_TOKEN_RE.finditer(skeleton):
-        kind, text = token.lastgroup, token.group()
+    starting, target = state
+    for token in _SKELETON_TOKEN_RE.finditer(text):
+        kind, word = token.lastgroup, token.group()
         if kind == "blank":
             continue
         if kind == "newline":
             if target:
-                return False
-            # Derrière ``|`` ou ``&&``, la commande continue ; sinon une nouvelle commence.
-            continue
+                return None
+            continue  # derrière ``|`` ou ``&&`` la commande continue ; sinon une nouvelle commence
         if kind == "operator":
-            if target or starting or text == ";;":
-                return False  # commande vide, ou opérateur en tête de ligne
+            if target or starting or word == ";;":
+                return None  # commande vide, ou opérateur en tête de ligne
             starting = True
             continue
         if kind == "redirection":
             if target:
-                return False
+                return None
             target = True
             continue
-        if "(" in text or ")" in text or "`" in text:
-            return False
+        if "(" in word or ")" in word or "`" in word:
+            return None
         if target:
             target = False
         elif starting:
-            if text in _RESERVED_WORDS:
-                return False
+            if word in _RESERVED_WORDS:
+                return None
             starting = False
-    return not target
+    return starting, target
 _CLOSERS = {"(": ")", "[": "]", "{": "}"}
 #: ``"$(cat <<'EOF'`` en fin de ligne : le message écrit par heredoc.
 _QUOTED_HEREDOC_RE = re.compile(r"\"\$\(cat[ \t]+<<(-?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2[ \t]*\n")
@@ -313,11 +312,19 @@ def _layout(command: str, *, comments: bool) -> _Layout:
     pending: list[tuple[str, bool, bool]] = []
     stack: list[str] = []  # fermants attendus des constructions ouvertes
     unreadable = irregular = False
-    skeleton: list[str] = []  # le code, textes cités réduits à un mot, pour :func:`_is_flat`
+    skeleton: list[str] = []  # le code depuis la dernière ligne jugée, textes cités réduits à un mot
+    flat: tuple[bool, bool] | None = (True, False)  # état de :func:`_flat_step`, ``None`` : forme perdue
 
-    def safe() -> bool:
+    def safe(*, line_ends: bool) -> bool:
         """Vrai si tout ce qui précède le corps, ligne d'ouverture comprise, a une forme sûre."""
-        return not (stack or irregular) and _is_flat("".join(skeleton))
+        nonlocal flat
+        if flat is None:
+            return False
+        # Ce qui est jugé ne sera pas relu. Au milieu d'une ligne, la coupe tombe juste après
+        # le mot qui tient lieu du texte cité : la suite du mot, s'il y en a une, n'est qu'un mot.
+        flat = _flat_step(flat, "".join(skeleton) + ("\n" if line_ends else ""))
+        skeleton.clear()
+        return flat is not None and not (stack or irregular)
 
     i, n = 0, len(command)
     while i < n:
@@ -329,7 +336,7 @@ def _layout(command: str, *, comments: bool) -> _Layout:
             skeleton.append("x")
             written = _quoted_heredoc(command, i) if c == '"' and not stack and not pending else None
             if written is not None:
-                unreadable = unreadable or not safe()
+                unreadable = not safe(line_ends=False) or unreadable
                 bodies.append(written[:4])
                 i = written[4]
                 continue
@@ -393,7 +400,7 @@ def _layout(command: str, *, comments: bool) -> _Layout:
         elif c == "\n" and pending:
             # Le corps n'est lu que si le shell ouvre bien le heredoc : rien d'ouvert, et une
             # ligne — avec tout ce qui la précède — qu'il ne rejettera pas.
-            unreadable = unreadable or not safe()
+            unreadable = not safe(line_ends=True) or unreadable
             i += 1
             for tag, tabbed, expands in pending:
                 indent = r"\t*" if tabbed else ""
@@ -403,7 +410,6 @@ def _layout(command: str, *, comments: bool) -> _Layout:
                 bodies.append((i, closing.start(), closing.end(), expands))
                 i = closing.end()
             pending.clear()
-            skeleton.append("\n")
         else:
             skeleton.append(c)
             i += 1
