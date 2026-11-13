@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
+from grimoire.core.config import GrimoireConfig
+from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
@@ -100,6 +102,63 @@ _MATCHERLESS = {
 #: Alias local vers la liste partagée : la reconnaissance d'un hook écrit par
 #: le kit est la même question ici et chez Copilot, elle ne doit pas diverger.
 _OWNED_COMMAND_MARKERS = OWNED_COMMAND_MARKERS
+
+#: Rendu exact du ``CLAUDE.md`` que le kit écrivait avant d'en avoir un bloc
+#: géré (scaffold seul, jusqu'à 3.84.x) : un titre et l'import du fichier
+#: d'instructions Copilot. Reconnu comme sien — et remplacé par le bloc court —
+#: pour qu'une mise à jour migre au lieu de préserver ce pointeur indéfiniment.
+#: Le motif couvre le fichier entier : un projet qui l'a étendu garde le sien.
+LEGACY_CLAUDE_MD_PATTERN = (
+    r"# .+ — Claude Code\n\n"
+    r"Ce projet utilise \*\*Grimoire Kit\*\*\. Les instructions agent canoniques "
+    r"sont dans `\.github/copilot-instructions\.md` \(importées ci-dessous\)\.\n\n"
+    r"@\.github/copilot-instructions\.md"
+)
+
+
+def project_language(project_root: Path) -> str:
+    """La langue déclarée par le projet, ou le défaut du kit si la config manque ou se lit mal."""
+    try:
+        return GrimoireConfig.from_yaml(project_root / "project-context.yaml").user.language
+    except (GrimoireConfigError, OSError):
+        return "Français"
+
+
+def claude_md_content(project_name: str, language: str) -> str:
+    """Le ``CLAUDE.md`` court : ce qu'une session sans interface a besoin de savoir.
+
+    Les instructions Copilot (démarrage ``@concierge``, tableau des workflows,
+    registre des agents, arborescence) visent une interface de chat, pas un
+    worker : elles coûtaient ~5,8 k caractères relus à chaque tour. Ce fichier
+    ne garde que la langue, le contrat de complétion, la règle « non vérifié »
+    et les pointeurs de mémoire — le détail reste dans les fichiers cités,
+    lus à la demande par les agents.
+    """
+    return f"""{managed_header(".md")}
+
+# {project_name} — Claude Code
+
+Tu travailles dans un projet **Grimoire Kit**. Réponds en {language}.
+
+## Contrat de complétion
+
+Avant de conclure, lance la vérification du projet et corrige tout échec :
+`grimoire standard gate check --strict` pour un projet gouverné,
+sinon `bash _grimoire/kit/framework/cc-verify.sh` avant un commit.
+Une clôture sans vérification verte est une tâche non terminée.
+
+## Règle « non vérifié »
+
+{GROUNDING_RULE}
+
+## Mémoire du projet
+
+- `_grimoire/_memory/shared-context.md` — état courant, à lire au démarrage
+- `_grimoire/_memory/decisions-log.md` — décisions prises
+- `_grimoire/_memory/failure-museum.md` — erreurs passées
+- `_grimoire/_memory/session-state.md` — état de session
+- `project-context.yaml` — configuration du projet
+"""
 
 
 def _model_for(agent: AgentSpec) -> str:
@@ -450,6 +509,9 @@ class ClaudeCodeEmitter(Emitter):
         # only skills nobody declared stay transversal, at project scope.
         files.extend(_skill_file(skill) for skill in surface.skills if skill.slug not in attached_slugs)
         files.extend(_command_file(command) for command in surface.commands)
+        # Entre les commandes et le README : le fichier que Claude Code lit à
+        # chaque session d'abord, la documentation de la surface ensuite.
+        files.append(_claude_md(surface, project_root))
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking))
         return with_rule_layers(
@@ -461,6 +523,16 @@ class ClaudeCodeEmitter(Emitter):
             ),
             project_root,
         )
+
+
+def _claude_md(surface: ProjectSurface, project_root: Path) -> EmittedFile:
+    """Le ``CLAUDE.md`` court, bloc géré : le reste du fichier reste au projet."""
+    return EmittedFile(
+        relpath=Path("CLAUDE.md"),
+        content=claude_md_content(surface.project_name, project_language(project_root)),
+        block=True,
+        legacy_pattern=LEGACY_CLAUDE_MD_PATTERN,
+    )
 
 
 def _readme(surface: ProjectSurface, blocking: list[HookSpec]) -> EmittedFile:

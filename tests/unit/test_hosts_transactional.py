@@ -208,7 +208,9 @@ def test_user_content_around_the_managed_block_survives_a_sync(project: Path, ho
     assert entry in result.written
     assert text.startswith("# Règles de mon équipe\n\nNe jamais déployer le vendredi.\n")
     assert text.rstrip().endswith("## Notes perso\n\nÀ garder.")
-    assert "archiviste" in text  # le bloc, lui, a bien été régénéré
+    # Le bloc, lui, a bien été régénéré — le catalogue Codex nomme la persona,
+    # l'entrypoint Gemini (court) met à jour son décompte d'agents.
+    assert ("archiviste" if host is HostId.CODEX else "**Sous-agents** : 3") in text
     assert text.count("<!-- grimoire:begin") == 1
 
 

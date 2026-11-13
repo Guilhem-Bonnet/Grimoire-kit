@@ -62,6 +62,12 @@ class HostProfile:
     commands_native: bool = False
     #: Hooks can refuse a tool call or a turn closure, not merely inject text.
     blocking_hooks: bool = False
+    #: When set, the only events that can actually refuse something. Some hosts
+    #: block an action without documenting any way to refuse the end of a turn
+    #: (Gemini CLI: ``BeforeTool``/``BeforeAgent`` block, ``AfterAgent`` does
+    #: not); a single boolean would turn the second case into a claim nobody
+    #: observed. ``None`` means "trust :attr:`blocking_hooks`".
+    blocking_events: frozenset[HookEvent] | None = None
     #: Can be told to open a session *inside* a named agent.
     #: True only where the host documents it (issue #716): Claude Code with
     #: ``claude --agent <name>`` (CLI reference, "Specify an agent for the
@@ -103,6 +109,12 @@ class HostProfile:
             # hôte ne le reçoit, donc aucun émetteur ne l'écrit.
             return False
         return bool(getattr(manifest.hooks, field_name, False))
+
+    def blocks(self, event: HookEvent) -> bool:
+        """Cet hôte peut-il **refuser** *event*, ou seulement l'informer ?"""
+        if self.blocking_events is not None:
+            return event in self.blocking_events
+        return self.blocking_hooks
 
     def supported_events(self) -> tuple[HookEvent, ...]:
         return tuple(e for e in HookEvent if self.supports_event(e))
@@ -198,10 +210,13 @@ CURSOR_PROFILE = HostProfile(
 GEMINI_PROFILE = HostProfile(
     host_id=HostId.GEMINI_CLI,
     display_name="Gemini CLI",
-    subagents_native=False,
+    subagents_native=True,
     skills_native=False,
-    commands_native=False,
-    blocking_hooks=False,
+    commands_native=True,
+    blocking_hooks=True,
+    # BeforeTool et BeforeAgent documentent un refus ; AfterAgent/SessionEnd
+    # sont des hooks, pas des points de blocage (non vérifié, CLI absente).
+    blocking_events=frozenset({HookEvent.PRE_TOOL_USE, HookEvent.USER_PROMPT_SUBMIT}),
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint="GEMINI.md",
@@ -211,7 +226,13 @@ GEMINI_PROFILE = HostProfile(
         "`gemini --acp` reste valable tant que la CLI est installée ; sur un compte gratuit, "
         "migrer vers Antigravity CLI et mettre à jour la commande ACP du profil."
     ),
-    notes="Prose entrypoint plus MCP; no lifecycle hooks, so governance is advisory only.",
+    notes=(
+        "Hooks, commandes TOML, sous-agents et MCP sont écrits d'après geminicli.com/docs "
+        "(lue le 2026-11-12, v0.64.0 annoncée ; CLI non installée sur le poste). "
+        "BeforeTool et BeforeAgent refusent une action ; SessionStart/AfterTool/PreCompress "
+        "informent ; le blocage de fin de tour (AfterAgent) et le format des fichiers de "
+        "session ne sont pas vérifiés. Aucune session d'agent détachée documentée."
+    ),
 )
 
 OPENCODE_PROFILE = HostProfile(
@@ -453,27 +474,19 @@ _CODEX_STATES = _prose_states("AGENTS.md")
 _CURSOR_STATES = _prose_states("les règles Cursor")
 
 _GEMINI_STATES: dict[GovernanceFunction, FunctionState] = {
-    GovernanceFunction.TOOL_GUARD: _degraded(
-        "BeforeTool et son refus JSON sont traduits par `grimoire-hook --host gemini`, mais l'émetteur prose "
-        "n'écrit pas `.gemini/settings.json` : aucun hook n'est câblé automatiquement"
-    ),
+    # L'émetteur Gemini écrit `.gemini/settings.json` : BeforeTool refuse une
+    # action (`{"decision": "deny"}`), SessionStart informe, et les commandes
+    # TOML, sous-agents et `mcpServers` sont écrits (geminicli.com/docs lue le
+    # 2026-11-12, v0.64.0 annoncée ; la CLI n'est pas installée sur le poste).
+    GovernanceFunction.TOOL_GUARD: _RICH,
     GovernanceFunction.WRITE_TRACE: _degraded(
-        "AfterTool et AfterAgent sont documentés, mais les hooks ne sont pas émis ; le blocage d'une clôture "
-        "par AfterAgent n'est pas vérifié"
+        "`AfterTool` compte les écritures, mais `AfterAgent`/`SessionEnd` ne bloquent pas la clôture "
+        "(non vérifié : la CLI n'est pas installée) — le rappel de clôture reste consultatif"
     ),
-    GovernanceFunction.TASK_RECALL: _degraded(
-        "SessionStart est documenté (contexte consultatif), mais `.gemini/settings.json` n'est pas émis"
-    ),
-    GovernanceFunction.COMMANDS: _degraded(
-        "le format TOML de `.gemini/commands/` est documenté mais l'émetteur ne l'écrit pas ; repli "
-        "`grimoire host run <slug>`"
-    ),
-    GovernanceFunction.PERSONAS: _degraded(
-        "le format `.gemini/agents/*.md` est documenté mais l'émetteur ne l'écrit pas ; personas listées dans GEMINI.md"
-    ),
-    GovernanceFunction.MCP_SERVER: _degraded(
-        "le serveur est déclaré dans `.mcp.json` ; l'émetteur n'écrit pas `mcpServers` dans `.gemini/settings.json`"
-    ),
+    GovernanceFunction.TASK_RECALL: _RICH,
+    GovernanceFunction.COMMANDS: _RICH,
+    GovernanceFunction.PERSONAS: _RICH,
+    GovernanceFunction.MCP_SERVER: _RICH,
     GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
     GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
     GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),

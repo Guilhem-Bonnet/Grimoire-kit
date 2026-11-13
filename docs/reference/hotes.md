@@ -24,7 +24,8 @@ projet (agents, standard, mémoire)
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
         ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
-        └──▶ émetteur prose        → AGENTS.md · GEMINI.md · .cursor/rules
+        ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, GEMINI.md
+        └──▶ émetteur prose        → AGENTS.md · .cursor/rules
 ```
 
 La règle de gouvernance, elle, n'est écrite qu'une fois. Le module de décisions
@@ -57,7 +58,7 @@ ajouté ou modifié une persona.
 | opencode | oui | oui | oui | oui (plugin `tool.execute.before`, vérifié) | non (non prouvé) |
 | Codex | non | non | non | non | non |
 | Cursor | non | non | non | non | non |
-| Gemini CLI | non | non | non | non | non |
+| Gemini CLI | oui | non | oui | oui (`BeforeTool`, `BeforeAgent` ; fin de tour non vérifiée) | non |
 
 Rien n'est abandonné en silence. Ce qu'un hôte ne sait pas exécuter est déclaré
 comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
@@ -72,9 +73,17 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   introuvable, le plugin refuse l'outil en profil `governed`/`production` (lu dans
   `_grimoire/standard/standard-profile.yaml`) et se contente d'un avertissement
   unique sur stderr sinon.
-- Les hôtes en prose n'ont pas de hooks : la gouvernance y est énoncée comme
-  règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le catalogue le
-  dit explicitement plutôt que de laisser croire à une protection.
+- Gemini CLI écrit des hooks, des commandes TOML, des sous-agents et un serveur
+  MCP. Ce qui reste dégradé, et pourquoi : pas de blocage au début de session
+  (`SessionStart` n'est que consultatif), fin de tour non vérifiée
+  (`AfterAgent`/`SessionEnd` reçoivent la décision de clôture mais aucun verdict
+  bloquant n'est promis), aucune session d'agent détachée documentée, et pas de
+  chargement de compétences à la demande (leurs corps sont copiés sous
+  `_grimoire/hosts/skills/`). Les règles de permissions passent par le hook
+  `BeforeTool`, faute de table déclarative.
+- Les hôtes en prose (Codex, Cursor) n'ont pas de hooks : la gouvernance y est
+  énoncée comme règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le
+  catalogue le dit explicitement plutôt que de laisser croire à une protection.
 
 ## Ce que le kit a observé (contrats réels)
 
@@ -146,7 +155,9 @@ cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
 supprime au premier `grimoire up` qui suit une mise à jour du kit.
 `grimoire init` écrit la clé avec le résultat de cette détection, pour que le
 comportement soit explicite dès le premier jour : un répertoire vierge
-n'obtient que `claude` et son pont `CLAUDE.md`.
+n'obtient que `claude`, et `host sync` y émet son `CLAUDE.md` court (langue,
+contrat de complétion, règle « non vérifié », pointeurs de mémoire) — pas un
+import des instructions Copilot.
 
 **Émission** : `grimoire host sync` (et donc `grimoire up`) n'écrit que les
 hôtes activés.
@@ -160,8 +171,8 @@ hôtes activés.
   désactivé », listés par `grimoire host status --host all` (JSON : clé
   `orphans`). `grimoire host sync --prune-disabled` les retire — opt-in
   explicite, jamais par défaut. Les fusions JSON (`.claude/settings.json`,
-  `.mcp.json`) ne sont jamais retirées : elles portent aussi la configuration
-  propre du projet.
+  `.gemini/settings.json`, `.mcp.json`) ne sont jamais retirées : elles portent
+  aussi la configuration propre du projet.
 - Une entrée `type: http` de `.mcp.json` (le serveur partagé de
   `grimoire mcp start`, voir [la référence CLI](cli/tableau-de-bord.md#serveur-mcp-partagé))
   est portée telle quelle vers les hôtes qui distinguent local et distant
@@ -364,10 +375,33 @@ stderr, comme une erreur interne ; un `BeforeTool` sans `tool_name` aussi. Un
 événement inconnu ou absent sort toujours en code 2 : il n'y a pas de repli sur
 `SessionStart`. Sur les autres événements, une erreur interne est seulement
 signalée et laisse passer l'action. `grimoire host hook` suit la même règle
-pour Gemini (code 2 sur un événement bloquant, pas le code 1 de Typer). Le kit
-sait traduire ce protocole, mais il n'écrit pas encore `.gemini/settings.json` :
-l'émetteur prose reste en place, donc aucun hook n'est câblé automatiquement
-sur cet hôte.
+pour Gemini (code 2 sur un événement bloquant, pas le code 1 de Typer).
+
+L'émetteur Gemini (`grimoire.hosts.emitters.gemini`) câble ce protocole dans
+`.gemini/settings.json`, sous les clés Gemini (`BeforeTool`, `AfterTool`,
+`BeforeAgent`, `SessionStart`, `SessionEnd`, `AfterAgent`, `PreCompress`).
+`--event` y garde la graphie neutre du kit (`PreToolUse`, `Stop`), que
+`parse_event` accepte aussi pour cet hôte : la matrice règle × hôte reconnaît un
+hook par cet argument, et deux graphies feraient passer un hook câblé pour non
+déclaré. Le `timeout` de l'entrée est écrit en millisecondes (le neutre est en
+secondes) — l'écrire en secondes refuserait un appel au bout de quelques
+millisecondes. Le fichier est fusionné sans perdre les clés de l'utilisateur :
+les entrées écrites par le kit sont remplacées, une entrée du kit devenue
+obsolète est retirée, le reste est préservé. `mcpServers` reçoit le serveur MCP
+du projet, commande résolue en absolu faute d'expansion documentée d'une
+variable de racine par Gemini CLI.
+
+Le reste de la surface suit : `.gemini/commands/grimoire/*.toml` (champ
+`prompt` requis, `{{args}}` pour les arguments), `.gemini/agents/*.md` avec le
+frontmatter de l'hôte (`name`, `description`, `tools`, `max_turns` ; `model`
+n'est pas émis, faute de correspondance documentée entre l'affinité neutre du
+kit et un nom de modèle), et `GEMINI.md` réduit à un bloc court portant les
+imports `@` des fichiers de mémoire présents. Les compétences, sans chargement
+à la demande sur cet hôte, sont copiées sous `_grimoire/hosts/skills/` et
+listées là. Les chemins émis sont gérés par les mêmes mécanismes que les autres
+émetteurs (marqueur et empreinte, conflits `edited`/`foreign`, nettoyage des
+fichiers périmés) ; `grimoire doctor` et `grimoire host probe` les contrôlent
+comme ceux des autres hôtes.
 
 **Non vérifié** (geminicli.com/docs lue le 2026-11-12, dernière version
 annoncée v0.64.0 ; la CLI n'est pas installée sur le poste) : un événement de

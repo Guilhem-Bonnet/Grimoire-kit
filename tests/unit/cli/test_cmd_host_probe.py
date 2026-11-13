@@ -92,4 +92,4 @@ def test_matrix_texte_dit_les_etats_et_leurs_raisons(project: Path) -> None:
     assert "garde avant outil" in out
     assert "degraded" in out
     # La raison est écrite sous la table, pas seulement un état colorié.
-    assert "BeforeTool" in out
+    assert "AfterTool" in out
