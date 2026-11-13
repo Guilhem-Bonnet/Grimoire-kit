@@ -1,0 +1,1 @@
+- fix(hosts): une lecture ou une simple mention de la zone de contrôle ne révoque plus le mandat ; seule une écriture prouvée révoque (#1173)

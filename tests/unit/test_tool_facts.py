@@ -290,10 +290,16 @@ def test_the_cockpit_key_cannot_be_read_by_an_agent(tool: str, tool_input: dict[
     assert classify_tool(tool, tool_input).secret_target.endswith("cockpit-key")
 
 
-def test_reading_the_control_zone_proof_stays_allowed() -> None:
+def test_reading_the_control_zone_proof_is_refused_without_revoking() -> None:
+    """#1173 : lire un fichier de la zone est refusé (la clé du cockpit y vit) mais ne révoque plus.
+
+    L'outil ``Read`` n'est pas jugé par la garde d'autorité : c'est ``secret_target``/le moteur de règles qui
+    décident d'un secret ; ici seule la commande shell est classée.
+    """
     from grimoire.hosts.decisions.authority_guard import forgery_vector
 
-    assert forgery_vector(classify_tool("Bash", {"command": f"cat {_PROOF}"})) is None
+    shell = forgery_vector(classify_tool("Bash", {"command": f"cat {_PROOF}"}))
+    assert shell is not None and shell.code == "control-zone" and shell.revokes is False
     assert forgery_vector(classify_tool("Read", {"file_path": _PROOF})) is None
 
 

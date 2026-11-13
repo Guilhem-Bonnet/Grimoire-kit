@@ -30,13 +30,16 @@ vecteurs connus pour fabriquer cette preuve :
   d'autorité du mandat de l'orchestrateur et la clé de contrôle du cockpit. Refusé quel que soit le profil, par
   les mêmes voies d'écriture que le journal (Write, Edit, NotebookEdit, redirection, ``cp``/``mv``/``tee``/
   ``sed -i``, ``python -c``). Le kit y écrit par son propre code, hors outil d'agent ; la limite résiduelle (un
-  script arbitraire) est écrite à :data:`CONTROL_ZONE`. Le refus reste large : une commande qui ne fait que
-  *citer* la zone (message de commit, corps d'issue, heredoc écrit vers un autre fichier) est refusée aussi,
-  par prudence. Un refus révoque le mandat (``revokes``) **sauf** si la mention est prouvée inoffensive par une
-  liste blanche stricte (:func:`is_harmless_mention` : valeur d'une option de prose de ``git``/``gh``, corps de
-  heredoc vers ``cat > f``/``git commit -F -``/``gh --body-file -``, opérande d'un lecteur pur) ; tout ce
-  qu'elle ne sait pas lire révoque (#982). Viser le journal du mandat ou la clé du cockpit révoque tous les
-  mandats du poste (``revokes_all``, :func:`touches_mandate_authority`) ;
+  script arbitraire) est écrite à :data:`CONTROL_ZONE`. Depuis #1173, la **révocation** du mandat est réservée
+  à une écriture *prouvée* (redirection ``>``/``>>`` vers la zone, ``tee``, ``sed -i``, ``cp``/``mv`` dont la
+  destination est la zone, ``python`` qui ouvre en ``w``/``a``) : elle n'ajoute aucune protection quand la
+  commande est déjà refusée avant exécution, et transformait un faux positif en arrêt général. Une **lecture**
+  de la zone (``cat``, ``tail``, ``head``, ``grep``, ``ls``, ``find``, ``wc``, ``jq``, ``python`` en mode
+  ``r``) reste refusée — la clé du cockpit y vit — mais ne révoque plus. Une simple **mention** du chemin,
+  dans un heredoc, une chaîne ou un argument de texte et sans redirection vers la zone, n'est ni refusée ni
+  révoquée. Une nature incertaine (variable, substitution, ``eval``, ``| bash``) est refusée sans révoquer
+  (:func:`_control_zone_effect`). Viser le journal du mandat ou la clé du cockpit par une écriture prouvée
+  révoque tous les mandats du poste (``revokes_all``, :func:`touches_mandate_authority`) ;
 - ``ledger-snapshot`` (K13) — écrire ``ledger.snapshot.json``, l'instantané du rejeu du
   ledger : refusé quel que soit le profil. Ce n'est pas une preuve d'autorité, c'est un
   cache que le ledger restaure *sans rejouer* le préfixe qu'il couvre ; son hash ne lie que
@@ -382,6 +385,9 @@ def _names_control_zone_command(command: str) -> bool:
 _READERS = frozenset({"grep", "egrep", "fgrep", "rg", "cat", "ls", "head", "tail", "wc"})
 #: Programmes admis dans une commande qui cite la zone, à condition qu'eux-mêmes ne la nomment pas.
 _PLAIN = frozenset({"echo", "printf", "pwd", "true", "false", "test", "sort", "uniq", "diff", "date", "sleep"})
+#: Ceux de :data:`_PLAIN` dont un opérande qui cite la zone ne peut qu'être une donnée écrite en sortie : la
+#: mention y est admise (#1173). ``sort``, ``uniq`` et ``diff`` lisent leurs opérandes comme des fichiers.
+_PLAIN_MENTION = frozenset({"echo", "printf", "pwd", "true", "false", "test", "date", "sleep"})
 _GIT_SUBCOMMANDS = frozenset(
     {"add", "commit", "tag", "status", "log", "diff", "show", "push", "fetch", "rev-parse", "branch", "ls-files"}
 )
@@ -687,6 +693,20 @@ def _python_stdin_segment(seg: _Segment) -> bool:
     return body is not None and _python_reads_only(body)
 
 
+def _python_c_segment(seg: _Segment) -> bool:
+    """``python[3] [-I|-B|-u|-S|-E]… -c <code>`` dont le code est prouvé en lecture seule (#1173).
+
+    Même preuve que :func:`_python_stdin_segment` : le corps est lu sur l'AST, jamais exécuté ici.
+    """
+    words = seg.words
+    if not words or not _PYTHON.match(words[0]) or seg.redirects or seg.heredocs or "-c" not in words:
+        return False
+    at = words.index("-c")
+    if any(f not in ("-I", "-B", "-u", "-S", "-E", "-s") for f in words[1:at]) or at + 1 >= len(words):
+        return False
+    return _python_reads_only(words[at + 1])
+
+
 def _harmless_segment(seg: _Segment, reaches: list[bool], *, python_reads: bool = False) -> bool:
     """Le segment cite la zone seulement là où la liste blanche l'admet (voir :func:`is_harmless_mention`)."""
     words = seg.words
@@ -721,9 +741,13 @@ def _harmless_segment(seg: _Segment, reaches: list[bool], *, python_reads: bool 
             return False
         return mentions <= _prose_positions(words, 3, _GH_PROSE)
     if program in _PLAIN:
-        return not mentions and not seg.heredocs
-    if python_reads and _PYTHON.match(program):  # #1125 : lecture python prouvée (heredoc quoté lu sur l'AST)
-        return _python_stdin_segment(seg)
+        if seg.heredocs:
+            return False
+        if program in _PLAIN_MENTION:  # #1173 : la zone dans une chaîne de `echo` est une donnée, pas une cible
+            return True
+        return not mentions
+    if python_reads and _PYTHON.match(program):  # #1125 / #1173 : lecture python prouvée (heredoc ou `-c`)
+        return _python_stdin_segment(seg) or _python_c_segment(seg)
     return False
 
 
@@ -734,10 +758,13 @@ def is_harmless_mention(command: str, *, snapshot: bool = False) -> bool:
     d'une option de prose (``git commit|tag -m/--message``, ``gh issue|pr create|comment|edit --body/--title``) ;
     le corps d'un heredoc consommé par ``cat > <hors zone>``, ``git commit -F -`` ou ``gh … --body-file -`` ; un
     opérande de lecture pure (``grep``, ``rg``, ``ls``, ``head``, ``tail``, ``wc``, ``cat`` sans redirection en
-    écriture). Chaque segment est un programme de la liste blanche, sans préfixe ni assignation ; ``cd`` ne mène
-    pas sous ``~/.grimoire`` ; aucune redirection en écriture ne l'atteint. Tout le reste — ``$``, ``$(…)``,
-    backtick, ``eval``, ``| bash``, ``<(…)``, ``source``, guillemet non fermé, programme ou préfixe inconnu —
-    rend faux : l'appelant révoque (échec fermé). Une exception ici rend faux aussi.
+    écriture) ; une chaîne d'un programme d'affichage (``echo``, ``printf``, …). Chaque segment est un programme
+    de la liste blanche, sans préfixe ni assignation ; ``cd`` ne mène pas sous ``~/.grimoire`` ; aucune
+    redirection en écriture ne l'atteint. Tout le reste — ``$``, ``$(…)``, backtick, ``eval``, ``| bash``,
+    ``<(…)``, ``source``, guillemet non fermé, programme ou préfixe inconnu — rend faux. Depuis #1173,
+    :func:`_control_zone_effect` distingue ce qui est refusé sans révoquer (lecture, nature incertaine) de ce
+    qui révoque (écriture prouvée) ; cette fonction ne répond que « prouvé sans écriture ». Une exception rend
+    faux aussi.
 
     ``snapshot=True`` (#1125) : même liste blanche, appliquée à l'instantané du ledger — ``reaches`` y compte les
     mots qui nomment un fichier protégé, et un script python lu sur stdin (heredoc quoté) passe s'il est prouvé
@@ -773,6 +800,260 @@ def is_harmless_mention(command: str, *, snapshot: bool = False) -> bool:
         return True
     except Exception:  # _Unreadable compris : ce qu'on ne sait pas lire révoque
         return False
+
+
+# ── Effet d'une commande sur la zone de contrôle (#1173) ─────────────────────
+#
+# Une lecture est refusée (la clé du cockpit y vit) mais ne révoque plus ; une simple mention du chemin est
+# admise ; seule une écriture *prouvée* révoque. Le classement est un tri par segment : écriture explicite,
+# lecture prouvée, mention de la liste blanche, sinon incertain — refusé sans révoquer. Une commande composée
+# dont les segments étrangers à la zone sont anodins n'est plus refusée pour un segment qui ne la nomme pas.
+
+_ZONE_WRITE = "write"
+_ZONE_READ = "read"
+_ZONE_MENTION = "mention"
+_ZONE_UNCERTAIN = "uncertain"
+
+#: Lecteurs purs dont un opérande de fichier qui atteint la zone est une lecture (#1173).
+_ZONE_READERS = frozenset({"grep", "egrep", "fgrep", "rg", "cat", "ls", "head", "tail", "wc", "find", "jq"})
+#: Ce qu'un segment qui ne cite pas la zone ne doit pas être : il consommerait le texte d'un autre segment, où
+#: la zone n'était qu'une donnée (`echo '… > zone' | bash`).
+_STDIN_INTERPRETERS = frozenset(
+    {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "xargs", "awk", "perl", "ruby", "node",
+     "python", "python2", "python3", "pypy", "pypy3"}
+)
+#: Méthodes d'écriture d'un chemin en Python (``Path(...).write_text``, ``os.remove``, …).
+_PY_WRITE_METHODS = frozenset(
+    {"write_text", "write_bytes", "touch", "unlink", "remove", "rmdir", "rmtree", "rename", "replace"}
+)
+
+
+def _python_program(words: list[str]) -> bool:
+    return bool(words) and bool(_PYTHON.match(words[0].rsplit("/", 1)[-1]))
+
+
+def _python_body(seg: _Segment) -> str | None:
+    """Le corps python d'un segment : le code de ``-c``, ou le heredoc quoté lu sur stdin ; ``None`` sinon."""
+    words = seg.words
+    if not _python_program(words):
+        return None
+    if "-c" in words:
+        at = words.index("-c")
+        return words[at + 1] if at + 1 < len(words) else ""
+    if seg.heredocs == 1 and seg.bodies and words[-1] == "-":
+        return seg.bodies[0]
+    return None
+
+
+def _reaches_control_zone(word: str, dirs: list[str], home: str, zones: list[str]) -> bool:
+    """Vrai si *word* nomme la zone (chemin, nom d'un de ses fichiers) ou s'y résout."""
+    if _names_protected(word) == CONTROL_ZONE_MARKER:
+        return True
+    return any(
+        _reaches(normal, real, zone) for normal, real in _resolutions(word, dirs, home) for zone in zones
+    )
+
+
+def _zone_constant(node: ast.AST | None, dirs: list[str], home: str, zones: list[str]) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and _reaches_control_zone(node.value, dirs, home, zones)
+    )
+
+
+def _python_zone_effect(body: str, dirs: list[str], home: str, zones: list[str]) -> str | None:
+    """L'effet du script *body* sur la zone : écriture, lecture, mention, incertain ; ``None`` s'il ne la nomme pas."""
+    try:
+        tree = ast.parse(body)
+    except SyntaxError:
+        return _ZONE_UNCERTAIN if _names_protected(body) == CONTROL_ZONE_MARKER else None
+    writes = reads = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else ""
+        first = node.args[0] if node.args else None
+        receiver = fn.value.args[0] if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Call) and fn.value.args else None
+        if name == "open" and _zone_constant(first, dirs, home, zones):
+            modes = list(node.args[1:2]) + [kw.value for kw in node.keywords if kw.arg == "mode"]
+            if any(isinstance(m, ast.Constant) and m.value not in _PY_READ_MODES for m in modes):
+                writes = True
+            elif all(isinstance(m, ast.Constant) and m.value in _PY_READ_MODES for m in modes):
+                reads = True  # aucun mode : ``r`` par défaut
+        elif name in _PY_WRITE_METHODS and (
+            _zone_constant(first, dirs, home, zones) or _zone_constant(receiver, dirs, home, zones)
+        ):
+            writes = True
+        elif name in {"open", "read_text", "read_bytes"} and _zone_constant(receiver, dirs, home, zones):
+            reads = True
+    if writes:
+        return _ZONE_WRITE
+    if reads:
+        return _ZONE_READ
+    if _names_protected(body) == CONTROL_ZONE_MARKER:
+        # Le chemin n'est qu'une donnée du script : admis si le script est prouvé sans effet de bord.
+        return _ZONE_MENTION if _python_reads_only(body) else _ZONE_UNCERTAIN
+    return None
+
+
+def _reader_operands(program: str, words: list[str]) -> list[str]:
+    """Les opérandes de *program* qui désignent un fichier lu (le motif de ``grep``/le filtre de ``jq`` exclus)."""
+    rest = [w for w in words[1:] if not w.startswith("-")]
+    if program in {"grep", "egrep", "fgrep", "rg"}:
+        if not any(
+            w in ("-e", "--regexp", "-f", "--file") or w.startswith(("--regexp=", "--file=")) for w in words[1:]
+        ):
+            rest = rest[1:]
+    elif program == "jq":
+        rest = rest[1:]
+    elif program == "find":
+        cut = next((i for i, w in enumerate(words[1:]) if w.startswith("-")), len(words) - 1)
+        return words[1 : 1 + cut]
+    return rest
+
+
+def _segment_reads_zone(seg: _Segment, dirs: list[str], home: str, zones: list[str]) -> bool:
+    words = seg.words
+    if not words:
+        return False
+    program = words[0].rsplit("/", 1)[-1]
+    return program in _ZONE_READERS and any(
+        _reaches_control_zone(w, dirs, home, zones) for w in _reader_operands(program, words)
+    )
+
+
+def _sed_in_place(words: list[str]) -> bool:
+    return any(
+        w in ("-i", "--in-place") or w.startswith("--in-place=") or (w.startswith("-") and not w.startswith("--") and "i" in w[1:])
+        for w in words[1:]
+    )
+
+
+def _segment_writes_zone(
+    seg: _Segment, dirs: list[str], home: str, zones: list[str], grimoire: str
+) -> bool:
+    """Écriture prouvée vers la zone : redirection, ``tee``, ``sed -i``, ``cp``/``mv`` dont la destination y est."""
+    if any(op in _OUT_REDIRECTS and _reaches_control_zone(target, dirs, home, zones) for op, target in seg.redirects):
+        return True
+    words = seg.words
+    if not words:
+        return False
+    program = words[0].rsplit("/", 1)[-1]
+    operands = [w for w in words[1:] if not w.startswith("-")]
+    if program == "tee":
+        return any(_reaches_control_zone(w, dirs, home, zones) for w in operands)
+    if program == "sed" and _sed_in_place(words):
+        return any(_reaches_control_zone(w, dirs, home, zones) for w in operands)
+    if program in _RELOCATORS and any(
+        grimoire in {normal, real} for w in operands for normal, real in _resolutions(w, dirs, home)
+    ):
+        return True  # déplacer/supprimer ~/.grimoire emporte la zone de contrôle
+    if program == "ln" and any(
+        home in {normal, real} or grimoire in {normal, real}
+        for w in operands
+        for normal, real in _resolutions(w, dirs, home)
+    ):
+        return True  # un lien vers le home ou ~/.grimoire exposerait la zone sous un autre nom
+    if program in ("cp", "mv", "install", "ln"):
+        for i, word in enumerate(words):
+            if word in ("-t", "--target-directory") and i + 1 < len(words) and _reaches_control_zone(
+                words[i + 1], dirs, home, zones
+            ):
+                return True
+            if word.startswith("--target-directory=") and _reaches_control_zone(word.split("=", 1)[1], dirs, home, zones):
+                return True
+        return bool(operands) and _reaches_control_zone(operands[-1], dirs, home, zones)
+    return False
+
+
+def _consumes_stdin(words: list[str]) -> bool:
+    """Vrai si le segment peut exécuter en stdin le texte d'un autre segment (`echo '… > zone' | bash`).
+
+    Un interpréteur lancé avec ``-c`` ou sur un fichier ``.py`` ne consomme pas stdin ; un segment qui ne cite
+    pas la zone et ne lit pas stdin ne peut pas la toucher (limite du code arbitraire mise à part).
+    """
+    if not words:
+        return False
+    program = words[0].rsplit("/", 1)[-1]
+    if program not in _STDIN_INTERPRETERS:
+        return False
+    return not (
+        "-c" in words[1:] or any(w.endswith(".py") for w in words[1:] if not w.startswith("-"))
+    )
+
+
+def _segment_touches_zone(seg: _Segment, dirs: list[str], home: str, zones: list[str]) -> bool:
+    if any(_reaches_control_zone(w, dirs, home, zones) for w in seg.words):
+        return True
+    if any(_reaches_control_zone(target, dirs, home, zones) for _op, target in seg.redirects):
+        return True
+    return any(isinstance(body, str) and _names_protected(body) == CONTROL_ZONE_MARKER for body in seg.bodies)
+
+
+def _control_zone_effect(command: str) -> str:
+    """Ce que *command* ferait à ``~/.grimoire/control`` : écriture, lecture, mention ou incertain (#1173).
+
+    Seul :data:`_ZONE_WRITE` révoque le mandat. Un segment qui ne nomme pas la zone et n'est pas un interpréteur
+    de stdin ne change rien ; tout ce que la liste blanche ne sait pas lire est incertain (échec fermé, sans
+    révocation). Une exception rend incertain.
+    """
+    try:
+        segments = _parse_strict(command)
+    except Exception:  # _Unreadable compris : ce qu'on ne sait pas lire est incertain, jamais permis
+        return _ZONE_UNCERTAIN
+    try:
+        zones, grimoire, home = _control_zones()
+        dirs = [_cwd()]
+        reads = False
+        for seg in segments:
+            words = seg.words
+            if words and words[0] in ("cd", "pushd"):
+                targets = words[1:]
+                if len(targets) > 1 or seg.redirects or seg.heredocs or (targets and targets[0].startswith("-")):
+                    return _ZONE_UNCERTAIN
+                target = targets[0] if targets else "~"
+                if _reaches_control_zone(target, dirs, home, zones):
+                    reads = True
+                dirs.extend(real for _normal, real in _resolutions(target, list(dirs), home))
+                continue
+            # ``-C``/``--directory``/``-t`` déplacent les chemins relatifs du segment (``tar -C ~/.grimoire``).
+            seg_dirs = list(dirs)
+            for prev, word in pairwise(words):
+                if prev in _DIR_FLAGS:
+                    seg_dirs.extend(real for _normal, real in _resolutions(word, list(seg_dirs), home))
+            for word in words:
+                if word.startswith(("--directory=", "--target-directory=")):
+                    seg_dirs.extend(
+                        real for _normal, real in _resolutions(word.split("=", 1)[1], list(seg_dirs), home)
+                    )
+            if _python_program(words):
+                body = _python_body(seg)
+                effect = _python_zone_effect(body, seg_dirs, home, zones) if body is not None else None
+                if effect == _ZONE_WRITE:
+                    return _ZONE_WRITE
+                if effect == _ZONE_READ:
+                    reads = True
+                    continue
+                if effect == _ZONE_UNCERTAIN:
+                    return _ZONE_UNCERTAIN
+                if effect == _ZONE_MENTION:
+                    continue
+            if _segment_writes_zone(seg, seg_dirs, home, zones, grimoire):
+                return _ZONE_WRITE
+            if _segment_reads_zone(seg, seg_dirs, home, zones):
+                reads = True
+                continue
+            if not _segment_touches_zone(seg, seg_dirs, home, zones):
+                if _consumes_stdin(words):
+                    return _ZONE_UNCERTAIN
+                continue
+            if not _harmless_segment(seg, [_reaches_control_zone(w, seg_dirs, home, zones) for w in words]):
+                return _ZONE_UNCERTAIN
+        return _ZONE_READ if reads else _ZONE_MENTION
+    except Exception:  # analyse de texte : ce qu'on ne sait pas classer est incertain, jamais permis
+        return _ZONE_UNCERTAIN
 
 
 #: Ce qui, nommé par l'appel, peut frapper un mandat de *n'importe quel* projet : le journal du mandat (sa tête,
@@ -989,18 +1270,28 @@ def forgery_vector(facts: ToolFacts) -> ForgeryVector | None:
     command = facts.command
     if not command:
         return None
-    if facts.mutation is not MutationClass.READ_ONLY:
-        marker = _names_protected(command) or (CONTROL_ZONE_MARKER if _names_control_zone_command(command) else "")
-        if marker == CONTROL_ZONE_MARKER and is_harmless_mention(command):
-            # #982 : la zone n'est citée que dans de la prose ou une lecture, prouvé par la liste blanche. Refus
-            # prudent, sans révocation : le mandat reste actif.
+    marker = _names_protected(command) or (CONTROL_ZONE_MARKER if _names_control_zone_command(command) else "")
+    if marker == CONTROL_ZONE_MARKER:
+        # #1173 : seule une écriture *prouvée* révoque le mandat. Une lecture de la zone reste refusée (la clé du
+        # cockpit y vit) sans révoquer ; une simple mention (heredoc, chaîne, argument de texte) est admise ; une
+        # nature incertaine est refusée sans révoquer.
+        effect = _control_zone_effect(command)
+        if effect == _ZONE_MENTION:
+            return None
+        if effect == _ZONE_WRITE:
             return _write_vector(
                 marker,
-                f"commande qui cite la zone de contrôle ({marker}) dans un texte ou une lecture — refus prudent, "
-                "le mandat n'est pas révoqué ; écris ce texte par l'outil Write puis passe le fichier "
-                "(`git commit -F`, `--body-file`)",
-                revokes=False,
+                f"commande qui écrit dans la zone de contrôle ({marker})",
+                revokes=True,
+                revokes_all=touches_mandate_authority(command),
             )
+        verbs = "lit" if effect == _ZONE_READ else "pourrait toucher"
+        return _write_vector(
+            marker,
+            f"commande qui {verbs} la zone de contrôle ({marker}) — refus prudent, le mandat n'est pas révoqué",
+            revokes=False,
+        )
+    if marker and facts.mutation is not MutationClass.READ_ONLY:
         # #1125 : l'instantané seulement lu ou cité dans de la prose, prouvé par la liste blanche, n'est pas refusé.
         if marker == SNAPSHOT_FILENAME and is_harmless_mention(command, snapshot=True):
             marker = ""
