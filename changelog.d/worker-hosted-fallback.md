@@ -1,0 +1,1 @@
+- fix(missions): le repli du worker sur le modèle de l'hôte respecte la classe de données — sans fournisseur hébergé qui l'admet, la tâche est différée en `ready` avec son motif dans `task show` et l'attention du tick, au lieu de partir en silence sur l'hôte
