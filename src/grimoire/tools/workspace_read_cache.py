@@ -17,11 +17,18 @@ Deux règles, sans changer ce que la page reçoit :
 - **un seul calcul en vol par clé** : deux onglets qui demandent la même lecture au même moment attendent le
   même calcul. Les rafales, elles, sont regroupées par la page (``web/workspace/live.js``).
 
+Le cache est borné deux fois : par le nombre d'entrées (:data:`MAX_ENTRIES`) **et** par la taille totale des
+réponses gardées (:data:`MAX_TOTAL_BYTES`). Le nombre seul ne suffisait pas : 64 réponses de board annoté
+pèsent ~60 Mo mesurés (audit ``docs/audits/cockpit-memoire-2026-11.md``). Quand la taille dépasse la borne,
+l'entrée la plus ancienne sort — même la réponse qui vient d'être calculée si elle est à elle seule plus
+grosse que la borne : elle n'est alors simplement pas gardée.
+
 Une erreur n'est jamais gardée : l'appel suivant recalcule.
 """
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -30,12 +37,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__all__ = ["MAX_AGE_SECONDS", "MAX_ENTRIES", "cacheable_read", "cached_read", "clear"]
+__all__ = [
+    "MAX_AGE_SECONDS",
+    "MAX_ENTRIES",
+    "MAX_TOTAL_BYTES",
+    "cacheable_read",
+    "cached_read",
+    "clear",
+    "stats",
+]
 
 #: Âge au-delà duquel une réponse est recalculée, empreinte immobile ou non.
 MAX_AGE_SECONDS = 15.0
 #: Clés gardées au plus (route, projet, paramètres) ; la plus ancienne sort.
 MAX_ENTRIES = 64
+#: Octets gardés au plus, toutes réponses confondues (estimation récursive : conteneurs, chaînes, scalaires).
+#: 48 Mio laissent tenir le board annoté de quatre projets enrôlés (~1 Mo chacun) et bornent le reste.
+MAX_TOTAL_BYTES = 48 * 1024 * 1024
 
 
 def _first(query: Mapping[str, list[str]], key: str) -> str | None:
@@ -64,11 +82,37 @@ class _Entry:
     fingerprint: str
     at: float
     value: Any
+    size: int = 0
+
+
+def _size_of(value: Any, seen: set[int] | None = None) -> int:
+    """Taille récursive approximative d'une réponse JSON-like, en octets.
+
+    ``sys.getsizeof`` seul ne voit pas ce que retiennent les conteneurs : un board de 300 cartes ne pèse que
+    quelques octets pour son ``dict`` racine. On descend donc dans les dictionnaires et séquences partagés par
+    les réponses du cockpit, en coupant les cycles. Une même chaîne référencée deux fois est comptée deux fois :
+    l'estimation reste une borne haute du poids des valeurs gardées, jamais une sous-estimation.
+    """
+    if seen is None:
+        seen = set()
+    if id(value) in seen:
+        return 0
+    seen.add(id(value))
+    total = sys.getsizeof(value)
+    if isinstance(value, dict):
+        for key, item in value.items():
+            total += _size_of(key, seen) + _size_of(item, seen)
+    elif isinstance(value, list | tuple | set | frozenset):
+        for item in value:
+            total += _size_of(item, seen)
+    return total
 
 
 _lock = threading.Lock()
 _entries: OrderedDict[tuple[str, ...], _Entry] = OrderedDict()
 _flights: dict[tuple[str, ...], threading.Lock] = {}
+#: Somme des :attr:`_Entry.size` gardés — maintenue sous :data:`_lock`.
+_total_bytes = 0
 #: Monte à chaque :func:`clear` : un calcul commencé avant (une lecture en vol pendant une écriture du cockpit) rend
 #: sa réponse à son appelant mais ne la garde pas ; sinon l'état d'avant l'écriture serait resservi.
 _generation = 0
@@ -76,11 +120,18 @@ _generation = 0
 
 def clear() -> None:
     """Oublie toutes les réponses gardées (tests, rechargement du serveur)."""
-    global _generation
+    global _generation, _total_bytes
     with _lock:
         _entries.clear()
         _flights.clear()
+        _total_bytes = 0
         _generation += 1
+
+
+def stats() -> dict[str, int]:
+    """Ce que le cache retient : nombre d'entrées et octets estimés gardés (observabilité, tests)."""
+    with _lock:
+        return {"entries": len(_entries), "bytes": _total_bytes}
 
 
 def _fresh(entry: _Entry | None, fingerprint: str, now: float) -> bool:
@@ -95,6 +146,7 @@ def cached_read(
     fingerprint: Callable[[], str],
 ) -> Any:
     """La réponse de *route* pour *project_root* et *query* : gardée si l'empreinte n'a pas bougé, sinon *compute*."""
+    global _total_bytes
     key = (route, str(project_root), *(f"{k}={','.join(v)}" for k, v in sorted(query.items())))
     with _lock:
         flight = _flights.setdefault(key, threading.Lock())
@@ -107,12 +159,21 @@ def cached_read(
                 return entry.value  # type: ignore[union-attr]
             started = _generation
         value = compute()
+        size = _size_of(value)
         with _lock:
             if started != _generation:
                 return value  # une écriture a vidé le cache pendant le calcul : cette réponse peut la précéder
-            _entries[key] = _Entry(mark, time.monotonic(), value)
+            previous = _entries.pop(key, None)
+            if previous is not None:
+                _total_bytes -= previous.size
+            _entries[key] = _Entry(mark, time.monotonic(), value, size)
+            _total_bytes += size
             _entries.move_to_end(key)
-            while len(_entries) > MAX_ENTRIES:
-                old, _ = _entries.popitem(last=False)
+            # Deux bornes : le nombre d'entrées et les octets gardés. L'entrée la plus ancienne sort d'abord ;
+            # une réponse seule plus grosse que la borne n'est jamais gardée (elle resservirait à chaque appel
+            # en occupant à elle seule plus que le budget).
+            while _entries and (len(_entries) > MAX_ENTRIES or _total_bytes > MAX_TOTAL_BYTES):
+                old, old_entry = _entries.popitem(last=False)
+                _total_bytes -= old_entry.size
                 _flights.pop(old, None)
         return value

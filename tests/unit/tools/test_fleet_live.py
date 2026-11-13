@@ -22,6 +22,7 @@ import json
 import os
 import re
 import time
+import tracemalloc
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -438,6 +439,87 @@ def test_un_journal_qui_grandit_est_relu_depuis_son_decalage(project: Path, clau
 
     changes = view["sessions"][0]["model_changes"]
     assert [change["kind"] for change in changes] == ["upgrade"]
+
+
+# ── 5 bis. Mémoire bornée (audit 2026-11) ───────────────────────────────────
+
+
+def test_l_etat_par_session_ne_garde_pas_un_appel_par_message(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché (audit mémoire 2026-11) : ``_FileState.calls`` gardait un objet par ``message.id`` de tout
+    le journal — 115 à 195 Mo par session sur le poste. Les compteurs restent agrégés par modèle, donc le coût
+    affiché ne change pas ; seuls les identifiants au-delà de :data:`fleet.MAX_CALLS` sont oubliés."""
+    monkeypatch.setattr(fleet, "MAX_CALLS", 50)
+    session = "10000000-0000-0000-0000-000000000001"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, f"m{index}", "claude-sonnet-5-5") for index in range(200)])
+
+    state = fleet._state_for(path)
+
+    assert len(state.calls) <= 50
+    usage = state.usage_by_model["claude-sonnet-5-5"]
+    assert usage.input_tokens == 200 * 10 and usage.output_tokens == 200 * 5, "l'usage total n'est pas perdu"
+
+
+def test_un_gros_journal_est_lu_par_blocs(project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Défaut empêché (audit mémoire 2026-11) : ``handle.read()`` chargeait le journal entier — 195 Mo, plus le
+    JSON parsé. La lecture par blocs borne le pic d'allocation bien sous la taille du fichier."""
+    monkeypatch.setattr(fleet, "READ_CHUNK_BYTES", 64 * 1024)
+    monkeypatch.setattr(fleet, "MAX_CALLS", 100)
+    session = "20000000-0000-0000-0000-000000000002"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, f"m{index}", "claude-sonnet-5-5") for index in range(16000)])
+    size = path.stat().st_size
+    assert size > 4 * 1024 * 1024, "le journal de test doit dépasser largement un bloc"
+
+    tracemalloc.start()
+    try:
+        fleet._state_for(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < size / 2, f"pic {peak / 1e6:.1f} Mo pour un journal de {size / 1e6:.1f} Mo : lu d'un bloc ?"
+
+
+def test_le_nombre_de_journaux_gardes_est_borne(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché : un état par journal lu, pour toujours — un serveur ouvert des jours accumulait les
+    sessions terminées. Le journal le plus anciennement lu sort ; relu, il repart de zéro sans double compter."""
+    monkeypatch.setattr(fleet, "MAX_FILE_STATES", 2)
+    directory = _journal_dir(claude_home, project)
+    paths = []
+    for index in range(3):
+        session = f"40000000-0000-0000-0000-00000000000{index}"
+        path = directory / f"{session}.jsonl"
+        _write(path, [_assistant(session, f"m{index}", "claude-sonnet-5-5")])
+        paths.append(path)
+        fleet._state_for(path)
+
+    assert len(fleet._FILES) == 2
+    assert str(paths[0]) not in fleet._FILES
+
+
+def test_une_ligne_a_cheval_sur_deux_blocs_est_repliee_une_seule_fois(
+    project: Path, claude_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché : la lecture par blocs ne doit ni perdre ni compter deux fois une ligne coupée en deux."""
+    monkeypatch.setattr(fleet, "READ_CHUNK_BYTES", 32)
+    session = "30000000-0000-0000-0000-000000000003"
+    path = _journal_dir(claude_home, project) / f"{session}.jsonl"
+    _write(path, [_assistant(session, "m1", "claude-sonnet-5-5")])
+
+    state = fleet._state_for(path)
+    assert len(state.calls) == 1
+    assert state.usage_by_model["claude-sonnet-5-5"].input_tokens == 10
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_assistant(session, "m2", "claude-sonnet-5-5")) + "\n")
+    state = fleet._state_for(path)
+    assert len(state.calls) == 2
+    assert state.usage_by_model["claude-sonnet-5-5"].input_tokens == 20
 
 
 # ── 6. Fenêtre et portée ────────────────────────────────────────────────────

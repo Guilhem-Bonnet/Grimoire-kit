@@ -46,7 +46,7 @@ import hashlib
 import json
 import re
 import threading
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -63,7 +63,10 @@ from grimoire.tools.workspace_work import claude_projects_dir, model_tier
 
 __all__ = [
     "DEFAULT_WINDOW_MINUTES",
+    "MAX_CALLS",
+    "MAX_FILE_STATES",
     "MAX_WINDOW_MINUTES",
+    "READ_CHUNK_BYTES",
     "SCHEMA_VERSION",
     "TAIL_CALLS",
     "fleet_live_route",
@@ -84,6 +87,22 @@ EXCERPT_CHARS = 240
 #: Au-delà, les marqueurs et changements de modèle les plus anciens sont oubliés.
 _MAX_MARKERS = 200
 _MAX_CHANGES = 200
+
+#: Bloc lu au plus en une passe : un journal de session de 195 Mo ne se charge jamais d'un coup. Seuls les
+#: octets complets (terminés par un saut de ligne) sont consommés ; le reliquat attend la passe suivante.
+READ_CHUNK_BYTES = 1 << 20
+#: Une ligne plus longue est abandonnée jusqu'au prochain saut : une ligne pathologique ne tient pas la mémoire.
+_MAX_LINE_BYTES = 4 << 20
+#: Appels gardés par session pour fusionner les compteurs d'un même ``message.id``. Un identifiant ne réapparaît
+#: qu'à quelques lignes d'écart (une écriture en plusieurs blocs) : au-delà, le garder ne sert plus à rien.
+#: Les totaux d'usage sont déjà agrégés dans ``usage_by_model``, rien n'est perdu du coût affiché.
+MAX_CALLS = 512
+#: Journaux dont l'état incrémental est gardé. Au-delà, le plus anciennement lu sort ; s'il redevient actif, il
+#: est relu depuis zéro (chunké) et ses agrégats sont recalculés — aucun coût n'est compté deux fois.
+MAX_FILE_STATES = 512
+#: Identifiants d'outils gardés (anti-doublon du fil) et outils encore ouverts, par session.
+_MAX_SEEN_TOOLS = 8192
+_MAX_OPEN_TOOLS = 256
 
 SCHEMA_VERSION = "grimoire-workspace-fleet-live/v1"
 
@@ -254,7 +273,7 @@ class _FileState:
     branch: str = ""
     started_at: str = ""
     last_at: str = ""
-    calls: dict[str, _Call] = field(default_factory=dict)
+    calls: OrderedDict[str, _Call] = field(default_factory=OrderedDict)
     current_model: str = ""
     requested_model: str = ""
     effort: str = ""
@@ -267,7 +286,7 @@ class _FileState:
     markers: list[dict[str, Any]] = field(default_factory=list)
     tools: deque[_Tool] = field(default_factory=lambda: deque(maxlen=TAIL_CALLS))
     open_tools: dict[str, _Tool] = field(default_factory=dict)
-    seen_tools: set[str] = field(default_factory=set)
+    seen_tools: dict[str, None] = field(default_factory=dict)
     pr: dict[str, Any] | None = None
 
 
@@ -317,7 +336,7 @@ class _Registry:
 # ── Cache (un par processus, comme l'index des traces) ──────────────────────
 
 _LOCK = threading.RLock()
-_FILES: dict[str, _FileState] = {}
+_FILES: OrderedDict[str, _FileState] = OrderedDict()
 _METAS: dict[str, _MetaState] = {}
 _STATS = {"opens": 0, "lines": 0}
 
@@ -506,6 +525,10 @@ def _fold_assistant(state: _FileState, line: dict[str, Any]) -> None:
     if call is None:
         call = _Call(message_id, stamp, model, requested, effort, origin, counters or (0, 0, 0, 0))
         state.calls[message_id] = call
+        # Les compteurs sont déjà agrégés par :func:`_add_usage` : garder tous les appels d'un journal de
+        # plusieurs centaines de Mo ne sert qu'à fusionner un identifiant réécrit à quelques lignes d'écart.
+        while len(state.calls) > MAX_CALLS:
+            state.calls.popitem(last=False)
         _record_call(state, call)
     else:
         delta = _grow(call, counters)
@@ -533,8 +556,21 @@ def _fold_assistant(state: _FileState, line: dict[str, Any]) -> None:
         if name in _QUESTION_TOOLS:
             _note_marker(state, stamp, "question", tool.summary or name)
         if tool_id:
-            state.seen_tools.add(tool_id)
+            _remember_tool(state, tool_id)
             state.open_tools[tool_id] = tool
+            while len(state.open_tools) > _MAX_OPEN_TOOLS:
+                state.open_tools.pop(next(iter(state.open_tools)))
+
+
+def _remember_tool(state: _FileState, tool_id: str) -> None:
+    """Retient l'identifiant d'un outil vu ; le plus ancien sort au-delà de :data:`_MAX_SEEN_TOOLS`.
+
+    Un même identifiant ne réapparaît que dans les blocs d'un même message, donc à quelques lignes d'écart :
+    oublier les plus anciens ne rouvre pas de doublon dans le fil.
+    """
+    state.seen_tools[tool_id] = None
+    while len(state.seen_tools) > _MAX_SEEN_TOOLS:
+        state.seen_tools.pop(next(iter(state.seen_tools)))
 
 
 def _fold_user(state: _FileState, line: dict[str, Any]) -> None:
@@ -589,6 +625,11 @@ def _consume(state: _FileState, path: Path) -> None:
 
     La signature ``(taille, mtime_ns)`` se lit par ``stat`` : un fichier
     inchangé n'est jamais ouvert, il n'est même pas touché en lecture.
+
+    Le journal est lu par blocs de :data:`READ_CHUNK_BYTES`, jamais d'un coup :
+    un journal de session peut peser 195 Mo, et le serveur du cockpit vit des
+    heures. Seules les lignes terminées par un saut sont repliées et consommées ;
+    le reliquat (écriture en cours) attend la passe suivante.
     """
     try:
         stat = path.stat()
@@ -601,15 +642,31 @@ def _consume(state: _FileState, path: Path) -> None:
     if state.file_id is not None and (state.file_id != file_id or stat.st_size < state.offset):
         _reset_state(state)
     _STATS["opens"] += 1
+    consumed = state.offset
+    pending = b""
     with path.open("rb") as handle:
         handle.seek(state.offset)
-        data = handle.read()
-    cut = data.rfind(b"\n")
-    if cut >= 0:
-        for raw in data[:cut].split(b"\n"):
-            if raw.strip():
-                _fold_line(state, raw)
-        state.offset += cut + 1
+        while chunk := handle.read(READ_CHUNK_BYTES):
+            data = pending + chunk
+            cut = data.rfind(b"\n")
+            if cut < 0:
+                pending = data
+                if len(pending) > _MAX_LINE_BYTES:
+                    # Ligne démesurée : ses octets déjà lus sont sautés jusqu'au prochain saut.
+                    consumed += len(pending)
+                    state.offset = consumed
+                    pending = b""
+                continue
+            for raw in data[:cut].split(b"\n"):
+                if raw.strip():
+                    _fold_line(state, raw)
+            consumed += cut + 1
+            state.offset = consumed
+            pending = data[cut + 1 :]
+            if len(pending) > _MAX_LINE_BYTES:
+                consumed += len(pending)
+                state.offset = consumed
+                pending = b""
     state.signature = signature
     state.file_id = file_id
 
@@ -620,6 +677,10 @@ def _state_for(path: Path) -> _FileState:
     if state is None:
         state = _FileState()
         _FILES[key] = state
+        while len(_FILES) > MAX_FILE_STATES:
+            _FILES.popitem(last=False)
+    else:
+        _FILES.move_to_end(key)
     _consume(state, path)
     return state
 
