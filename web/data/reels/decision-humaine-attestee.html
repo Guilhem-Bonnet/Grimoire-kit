@@ -21,11 +21,14 @@ pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; 
 <main>
 <h1>Décision humaine attestée</h1>
 <p>L&#x27;agent pose une question ; seule la réponse du canal humain rend la tâche.</p>
-<p class="meta">kit 3.80.1 · enregistrée le 2026-11-07T06:20:37Z · empreinte de sortie <code>34d20df0a030aee0a5a2e3bfbca4bf3d7b21591e3313697b55282a97033b7184</code></p>
+<p class="meta">kit 3.84.0 · enregistrée le 2026-11-13T00:34:50Z · empreinte de sortie <code>8debd5c301f461e819b295aa79c2cf2e2c78ae55d6e31369f2d7618e91a32a83</code></p>
 <section class="frame"><p class="cmd">$ grimoire task add &quot;Choisir base&quot; -a &quot;le choix est tranche par un humain&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
 OK GAO-choisir-base-001 — Choisir base (ready)
   vérifiabilité : V2 — critère sans verdict reconnu : &#x27;le choix est tranche par un humain&#x27;
-    non reconnu : le choix est tranche par un humain</pre></section>
+    - le choix est tranche par un humain → non reconnu
+      fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier
+attendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `&lt;commande&gt;`
+retourne 0 »</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task claim GAO-choisir-base-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (ready → claimed) · V2 → aucun — omets le paramètre model,
 garde celui de la session</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task ask GAO-choisir-base-001 &quot;Quelle base de données ?&quot; --option sqlite --option postgres<span class="rc ok">sortie 0</span></p><pre>OK GAO-choisir-base-001 — Choisir base (claimed → waiting) · V2 → aucun — omets le paramètre model,
@@ -37,6 +40,9 @@ garde celui de la session</pre></section>
 ou la tâche n&#x27;a aucun critère : sa vérifiabilité reste à démontrer.
   modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)
     - le choix est tranche par un humain → non reconnu
+      fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier
+attendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `&lt;commande&gt;`
+retourne 0 »
   usage   : none
   données : classe non déclarée (aucun fournisseur externe)
   porté par : cli</pre></section>
@@ -50,6 +56,9 @@ garde celui de la session</pre></section>
 ou la tâche n&#x27;a aucun critère : sa vérifiabilité reste à démontrer.
   modèle recommandé : aucun — omets le paramètre model, garde celui de la session (palier : session)
     - le choix est tranche par un humain → non reconnu
+      fait tomber en V2 : reformulez en verdict mécanique (test, lint, code de sortie, fichier
+attendu) ou en revue par le relecteur, par exemple « pytest tests/unit/... passe » ou « `&lt;commande&gt;`
+retourne 0 »
   usage   : none
   données : classe non déclarée (aucun fournisseur externe)
   porté par : cli
