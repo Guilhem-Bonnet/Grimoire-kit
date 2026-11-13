@@ -2,7 +2,7 @@
 
 Une commande classée ``READ_ONLY`` saute le moteur de règles, les freins de bail et de
 pause, et le compteur d'écritures de la clôture : classer en lecture une commande qui
-écrit ou exécute est le seul sens dangereux. Trois familles de formes que le classement
+écrit ou exécute est le seul sens dangereux. Quatre familles de formes que le classement
 prenait pour des lectures, fermées par échec fermé :
 
 - les guillemets ANSI-C (``$'…'``) et la chaîne localisée (``$"…"``) : le balayage des
@@ -11,7 +11,10 @@ prenait pour des lectures, fermées par échec fermé :
   NOM=valeur commande``) : certaines variables font exécuter du code au shell à son
   démarrage ou changent ce que fera un outil de la liste blanche. Seule une courte liste
   de variables inertes laisse la commande en lecture ;
-- ``curl`` : seule une URL ``http://`` ou ``https://`` écrite en clair est une lecture.
+- ``curl`` : seule une URL ``http://`` ou ``https://`` écrite en clair est une lecture ;
+- un argument que le shell développe (variable, accolades, motif de fichiers) derrière un
+  verbe dont la lecture se décide sur ses arguments : la règle du verbe lit l'argument
+  écrit, pas ce qu'il devient.
 
 Les chaînes de ce fichier ne sont jamais exécutées : elles sont passées à
 ``classify_tool`` et rien d'autre.
@@ -659,3 +662,131 @@ def test_la_classe_destructive_ne_change_pas(command: str) -> None:
     facts = classify_tool("Bash", {"command": command})
     assert facts.mutation is MutationClass.DESTRUCTIVE
     assert facts.destructive_reason
+
+
+# ── Arguments que le shell développe ─────────────────────────────────────────
+#
+# ``curl``, ``journalctl``, ``systemctl``, ``ss`` et ``gh api`` ne sont des lectures que
+# selon leurs arguments, lus tels qu'ils sont écrits. Le shell, lui, développe un argument
+# avant de lancer la commande : une variable (que le découpage en mots scinde), des
+# accolades, un motif de fichiers. L'argument développé peut être une option que la règle
+# du verbe refuse. Pour ces verbes, un argument que le shell développe n'est pas lu.
+
+#: ``{}`` reçoit l'argument développé, à une place où un argument écrit en clair se lit.
+VERBES_A_ARGUMENTS = [
+    "curl -s -m {} https://example.com",
+    "curl -s https://example.com -w {}",
+    "journalctl -n 5 {}",
+    "journalctl {} -n 5",
+    "systemctl status {}",
+    "systemctl {} status x",
+    "ss -ltn {}",
+    "gh api repos/o/r/pulls {}",
+    "gh api {} repos/o/r/pulls",
+]
+
+ARGUMENTS_DEVELOPPES = [
+    # Variable : sa valeur n'est pas connue, et hors guillemets elle se scinde en mots.
+    "$X",
+    "${X}",
+    '"$X"',
+    '"${X}"',
+    "a$X",
+    "$1",
+    "$@",
+    # Accolades.
+    "{a,b}",
+    "{1..3}",
+    "a{b,c}",
+    '{"a",b}',
+    "{a,'b'}",
+    "{a,b,c}d",
+    # Motif de fichiers.
+    "*",
+    "a*",
+    "[ab]",
+    "??",
+    "a?",
+]
+
+
+@pytest.mark.parametrize("forme", VERBES_A_ARGUMENTS)
+@pytest.mark.parametrize("argument", ARGUMENTS_DEVELOPPES)
+def test_un_argument_que_le_shell_developpe_fait_une_mutation(argument: str, forme: str) -> None:
+    assert _classe(forme.format(argument)) is MUTATION
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # La variable d'une boucle porte ce que la liste lui donne.
+        "for o in a b; do journalctl $o; done",
+        "for o in a; do gh api $o repos/o/r/pulls; done",
+        "for o in 5; do curl -s -m $o https://example.com; done",
+        "for o in a; do systemctl status $o; done",
+        "for o in a; do ss $o; done",
+        # Sous une enveloppe et dans un script.
+        "rtk journalctl $X",
+        "timeout 5 ss {a,b}",
+        "env LC_ALL=C systemctl status {a,b}",
+        "bash -c 'journalctl $X'",
+        "sh -c 'gh api {a,b} repos/o/r/pulls'",
+        "bash -c 'for o in a; do journalctl $o; done'",
+        # Quelle que soit la graphie de la sous-commande et du point d'entrée.
+        "gh api view {a,b}",
+        "gh 'api' repos/o/r/pulls {a,b}",
+        'gh "api" view {a,b}',
+    ],
+)
+def test_un_argument_developpe_est_refuse_dans_une_boucle_une_enveloppe_ou_un_script(command: str) -> None:
+    assert _classe(command) is MUTATION
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Entre guillemets, accolades et motifs sont des données.
+        "gh api repos/o/r/pulls --jq '.[] | {a, b}'",
+        "gh api repos/o/r/pulls --jq '.[0].a'",
+        "systemctl list-units 'ssh*'",
+        'journalctl -u x -g "a[bc]"',
+        "journalctl -u x --since '1 hour ago'",
+        "ss -ltn 'sport = :22'",
+        "curl -s -w '%{http_code} %{time_total}' https://example.com",
+        # Des accolades sans virgule ni intervalle ne se développent pas.
+        "gh api repos/{owner}/{repo}/pulls",
+        "curl -s -w %{http_code} https://example.com",
+        # Un point d'interrogation derrière une barre oblique : un chemin, jamais une option.
+        "gh api repos/o/r/pulls?per_page=5",
+        "curl -s https://example.com/a?b=1",
+        "systemctl show -p ActiveState,SubState x",
+    ],
+)
+def test_un_argument_ecrit_en_clair_reste_une_lecture(command: str) -> None:
+    assert _classe(command) is LECTURE
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Un dollar entre guillemets simples est un texte pour le shell, mais les mots
+        # résolus ne disent pas quels guillemets le portaient : refusé aussi.
+        "journalctl -u x -g 'a$'",
+        "gh api repos/o/r/pulls --jq '.[] | select(.a == $b)'",
+    ],
+)
+def test_un_dollar_cite_dans_un_argument_de_ces_verbes_est_refuse_aussi(command: str) -> None:
+    assert _classe(command) is MUTATION
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh pr view $PR",
+        "gh pr list --author $USER",
+        "gh issue view $1",
+        "gh run view $ID",
+    ],
+)
+def test_gh_hors_gh_api_garde_sa_lecture_d_avant(command: str) -> None:
+    assert _classe(command) is LECTURE
