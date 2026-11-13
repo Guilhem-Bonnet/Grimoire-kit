@@ -55,6 +55,12 @@ qu'il obtient à ce que GitHub annonce. Il ne lance aucune commande dans le work
    :func:`~grimoire.missions.human_acceptance.accept_task`, puis clôture (gates déclarées par le projet) ; sinon une
    question non bloquante « accepter ? » donne la commande ``grimoire task accept``.
 
+**Double relecture des chemins réservés (``protected_gate: dual_review``).** Au lieu d'escalader, le merger demande
+une seconde relecture (``task.merge_dual_review_requested``) au relecteur du tick suivant, avec un modèle choisi dans
+le registre de fournisseurs dont la famille diffère de celle du worker. La fusion n'a lieu que si les **deux**
+verdicts sont READY, scellés sur la même tête (``task.merge_dual_review``), et la CI verte ; deux verdicts d'une même
+session sont refusés. Les chemins de :data:`~grimoire.missions.dual_review.HUMAN_ONLY_PATHS` restent à l'humain.
+
 **Tâche faite à la main (#994).** Une tâche sans lancement de worker que le relecteur du tick a relue sous mandat
 (:mod:`.manual_review`) entre dans la même file : son « worktree » est le worktree détaché de vérification, sa branche
 celle de la PR, sa cible la base de la PR, et chaque ``gh pr view`` la vise par son numéro. Le dépôt est celui figé à sa
@@ -85,6 +91,12 @@ from grimoire.core.exceptions import GrimoireError
 from grimoire.core.safe_git import git_env, same_repo
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions.breaker import read_breaker, record_failure
+from grimoire.missions.dual_review import (
+    HUMAN_ONLY_PATHS,
+    PROTECTED_GATE_DUAL_REVIEW,
+    choose_second_reviewer,
+    model_family,
+)
 from grimoire.missions.human_acceptance import EVIDENCE_RELPATH
 from grimoire.missions.launcher import LAUNCHED_EVENT, default_exec, launched_sessions, resume_worker
 from grimoire.missions.review_receipt import READY, read_receipt
@@ -115,6 +127,8 @@ __all__ = [
     "MERGE_ACCEPTED_EVENT",
     "MERGE_BOUNCED_EVENT",
     "MERGE_CI_EVENT",
+    "MERGE_DUAL_REVIEW_EVENT",
+    "MERGE_DUAL_REVIEW_REQUESTED_EVENT",
     "MERGE_ESCALATED_EVENT",
     "MERGE_PUSHED_EVENT",
     "MERGE_QUEUED_EVENT",
@@ -141,6 +155,10 @@ MERGE_RERUN_EVENT = "task.merge_rerun"
 RERUN_SETTLE = timedelta(minutes=3)
 MERGE_REQUESTED_EVENT = "task.merge_requested"
 MERGE_ESCALATED_EVENT = "task.merge_escalated"
+#: Le merger demande une seconde relecture d'une PR qui touche un chemin réservé (``protected_gate: dual_review``).
+MERGE_DUAL_REVIEW_REQUESTED_EVENT = "task.merge_dual_review_requested"
+#: Les deux verdicts READY (sessions et familles distinctes) tiennent sur la même tête : la fusion peut suivre.
+MERGE_DUAL_REVIEW_EVENT = "task.merge_dual_review"
 MERGE_ACCEPTED_EVENT = "task.merge_accepted"
 #: Une PR en brouillon sortie du brouillon par le merger, sa tête couverte par le READY scellé (#993).
 MERGE_UNDRAFTED_EVENT = "task.merge_undrafted"
@@ -871,7 +889,16 @@ class MergeStage:
             return self._failed(tid, "realign", f"git commit-tree : {_err(made)}", pr.number)
         review = str(judged.payload.get("review") or "")
         produced = tree_of(self._home, new)
-        seal_realignment(self._home, tid, review, head, new, produced)  # au journal d'autorité : ce que le sceau couvre
+        # Le réalignement étend tous les READY scellés qui couvraient la tête relue : une double relecture garde ses
+        # deux sceaux valides sur la nouvelle tête, sans qu'aucun ne soit rejoué.
+        try:
+            from grimoire.missions.review_seal import covering_reviews
+
+            sealed_reviews = covering_reviews(self._home, tid, head) or (review,)
+        except Exception:  # journal illisible : seul le verdict de la file est étendu, comme avant
+            sealed_reviews = (review,)
+        for sealed_review in sealed_reviews:
+            seal_realignment(self._home, tid, sealed_review, head, new, produced)  # au journal d'autorité
         self._note(MERGE_REALIGNED_EVENT, tid, {
             "from": head, "to": new, "into": wt.into, "into_sha": target, "changelog_union": union, "review": review, "tree": produced,
         })
@@ -927,7 +954,9 @@ class MergeStage:
     def _kept_to_human(self, task: MissionTask, pr: _PullRequest) -> str:
         """Pourquoi ce geste reste humain quoi que dise le mandat : catégorie gardée, chemin qui escalade ; ``""`` sinon.
 
-        Les chemins sont ceux que GitHub annonce pour la PR, jamais un diff de refs locales.
+        Les chemins sont ceux que GitHub annonce pour la PR, jamais un diff de refs locales. En ``dual_review``, les
+        seuls chemins réservés qui restent à l'humain sont ceux qu'aucune relecture ne peut juger
+        (:data:`~grimoire.missions.dual_review.HUMAN_ONLY_PATHS`) ; les autres passent par la seconde relecture.
         """
         from grimoire.missions.mandate import load_escalation, task_categories
 
@@ -937,11 +966,40 @@ class MergeStage:
             return f"catégorie gardée à l'humain : {', '.join(guarded)}"
         if pr.changed != pr.entries:
             return f"GitHub annonce {pr.changed} fichier(s) et en liste {pr.entries} : liste incomplète, non vérifiable"
-        patterns = tuple(p.casefold() for p in (*DEFAULT_PROTECTED_PATHS, *self._policy.merger.protected_paths))
-        kept = sorted(p for p in pr.files if any(fnmatch.fnmatchcase(p.casefold(), pat) for pat in patterns))
-        if kept:
-            return f"la PR touche des chemins qui reviennent à l'humain : {', '.join(_clean(p, 120) for p in kept[:8])}"
+        human_only = self._matched(pr.files, HUMAN_ONLY_PATHS)
+        if self._policy.merger.protected_gate != PROTECTED_GATE_DUAL_REVIEW:
+            kept = self._matched(
+                pr.files, (*DEFAULT_PROTECTED_PATHS, *self._policy.merger.protected_paths)
+            )
+            if kept:
+                return f"la PR touche des chemins qui reviennent à l'humain : {', '.join(_clean(p, 120) for p in kept[:8])}"
+            return ""
+        if human_only:
+            return (f"la PR touche des chemins qu'aucune relecture ne peut juger : "
+                    f"{', '.join(_clean(p, 120) for p in human_only[:8])}")
         return ""
+
+    @staticmethod
+    def _matched(files: tuple[str, ...], patterns: tuple[str, ...]) -> list[str]:
+        """Les fichiers de la PR qu'un des motifs désigne, en ``casefold()``."""
+        folded = tuple(p.casefold() for p in patterns)
+        return sorted(f for f in files if any(fnmatch.fnmatchcase(f.casefold(), pat) for pat in folded))
+
+    def _reserved(self, extra: tuple[str, ...], files: tuple[str, ...]) -> list[str]:
+        """Les chemins réservés touchés par la PR, hors de ceux que seule une personne peut juger."""
+        human_only = {p.casefold() for p in self._matched(files, HUMAN_ONLY_PATHS)}
+        return [p for p in self._matched(files, (*DEFAULT_PROTECTED_PATHS, *extra)) if p.casefold() not in human_only]
+
+    def _dual_gate(self, task: MissionTask, pr: _PullRequest) -> bool:
+        """``True`` : ``dual_review`` est réglé et cette PR touche un chemin réservé qu'une relecture peut juger."""
+        if self._policy.merger.protected_gate != PROTECTED_GATE_DUAL_REVIEW:
+            return False
+        from grimoire.missions.mandate import load_escalation, task_categories
+
+        policy = load_escalation(self._home)
+        if any(c not in _GESTURE_CATEGORIES and not policy.delegates(c) for c in task_categories(task)):
+            return False  # catégorie gardée : la question à l'humain passe avant, sans seconde relecture inutile
+        return bool(self._reserved(self._policy.merger.protected_paths, pr.files))
 
     def _merge(self, task: MissionTask, wt: TaskWorktree, judged: LedgerEvent, receipt: ReviewReceipt, pr: _PullRequest) -> MergerOutcome:
         from grimoire.missions.mandate import (
@@ -955,6 +1013,10 @@ class MergeStage:
         kept = self._kept_to_human(task, pr)
         if kept:
             return self._ask_human(task, wt, "merge", judged.id, kept, pr.number)
+        if self._dual_gate(task, pr):
+            blocked = self._dual_review(task, wt, judged, pr)
+            if blocked is not None:
+                return blocked
         provenance = {"kind": "receipt", "ref": f"{tid}:review={judged.payload.get('review')}:head={head[:12]}"}
         try:
             with acting_as_orchestrator():
@@ -981,6 +1043,137 @@ class MergeStage:
         if error or after is None:
             return self._failed(tid, "unconfirmed", f"fusion demandée, non constatée : {error or 'PR introuvable'}", pr.number)
         return self._confirm(task, wt, judged, after)
+
+    # -- double relecture des chemins réservés (``protected_gate: dual_review``) --------------------------
+
+    def _dual_review(self, task: MissionTask, wt: TaskWorktree, judged: LedgerEvent, pr: _PullRequest) -> MergerOutcome | None:
+        """``None`` : les deux verdicts READY scellés sur la même tête tiennent ; sinon l'attente ou le refus.
+
+        La demande est notée au ledger une fois ; le relecteur la lit au tick suivant et lance la seconde session avec
+        le modèle choisi ici, dans le registre. Un verdict invalide (même session, famille du worker, tête différente)
+        ne fusionne jamais : la PR reste à l'humain.
+        """
+        tid = task.id
+        events = self._service.ledger.events_for(tid)
+        entered = entered_review_at(self._service, tid)
+        request = next(
+            (e for e in reversed(events)
+             if e.event_type == MERGE_DUAL_REVIEW_REQUESTED_EVENT and e.created_at >= entered), None,
+        )
+        if request is None:
+            return self._request_dual(task, wt, judged, pr, events)
+        if not self._policy.reviewer.enabled:
+            return self._ask_human(
+                task, wt, "merge", judged.id,
+                "une seconde relecture était demandée, mais le rôle reviewer est désactivé : la PR reste à l'humain",
+                pr.number,
+            )
+        first_review = str(request.payload.get("review") or "")
+        launches = [e for e in events if e.event_type == REVIEW_LAUNCHED_EVENT and e.created_at >= request.created_at]
+        if not launches:
+            return MergerOutcome(
+                tid, "wait", "waiting",
+                f"seconde relecture demandée (modèle {_clean(str(request.payload.get('model') or '?'), 80)}) : "
+                "le relecteur la lance au tick suivant", pr.number,
+            )
+        second = launches[-1]
+        second_verdict = next(
+            (e for e in reversed(events)
+             if e.event_type == REVIEW_JUDGED_EVENT and e.payload.get("review") == second.id), None,
+        )
+        if second_verdict is None:
+            return MergerOutcome(tid, "wait", "waiting", "seconde relecture en cours", pr.number)
+        if second_verdict.payload.get("verdict") != READY:
+            return self._ask_human(
+                task, wt, "merge", judged.id,
+                f"la seconde relecture rend {second_verdict.payload.get('verdict')} : la PR reste à l'humain", pr.number,
+            )
+        first_launch = next((e for e in events if e.event_type == REVIEW_LAUNCHED_EVENT and e.id == first_review), None)
+        first_verdict = next(
+            (e for e in reversed(events)
+             if e.event_type == REVIEW_JUDGED_EVENT and e.payload.get("review") == first_review), None,
+        )
+        if first_launch is None or first_verdict is None or first_verdict.payload.get("verdict") != READY:
+            return self._ask_human(
+                task, wt, "merge", judged.id, "le premier verdict READY n'est plus au ledger : rien ne fonde la fusion",
+                pr.number,
+            )
+        first_session = str(first_launch.payload.get("session_sha256") or "")
+        second_session = str(second.payload.get("session_sha256") or "")
+        same_digest = bool(first_session) and first_session == second_session
+        same_short = bool(first_launch.payload.get("session")) and first_launch.payload.get("session") == second.payload.get("session")
+        if same_digest or same_short:
+            return self._ask_human(
+                task, wt, "merge", judged.id,
+                "les deux verdicts viennent de la même session : la seconde relecture doit être indépendante", pr.number,
+            )
+        worker_model = str(second.payload.get("worker_model") or first_launch.payload.get("worker_model") or "")
+        first_model = str(first_launch.payload.get("model") or "")
+        second_model = str(second.payload.get("model") or "")
+        worker_family = model_family(worker_model) if worker_model else ""
+        first_family = model_family(first_model) if first_model else ""
+        second_family = model_family(second_model) if second_model else ""
+        if not worker_family or second_family == worker_family:
+            return self._ask_human(
+                task, wt, "merge", judged.id,
+                f"la seconde relecture ({second_model or 'modèle inconnu'}, famille {second_family or 'inconnue'}) n'a pas "
+                f"une famille différente de celle du worker ({worker_family or 'inconnue'})", pr.number,
+            )
+        from grimoire.missions.review_seal import verify_review
+
+        sealed = verify_review(self._home, task, wt.path, first_review, head=pr.head, check_receipt=False)
+        if sealed:
+            return self._ask_human(
+                task, wt, "merge", judged.id,
+                f"le premier verdict READY ne couvre pas la tête {pr.head[:12]} : {sealed}", pr.number,
+            )
+        if not any(e.event_type == MERGE_DUAL_REVIEW_EVENT and e.payload.get("second_judged") == second_verdict.id
+                   for e in events):
+            self._note(MERGE_DUAL_REVIEW_EVENT, tid, {
+                "review": first_review, "judged": first_verdict.id, "second_review": second.id,
+                "second_judged": second_verdict.id, "head": pr.head, "pr": pr.number,
+                "first_family": first_family, "second_family": second_family, "worker_family": worker_family,
+                "first_model": first_model, "second_model": second_model,
+                "family_basis": str(request.payload.get("family_basis") or ""),
+            })
+        return None
+
+    def _request_dual(
+        self, task: MissionTask, wt: TaskWorktree, judged: LedgerEvent, pr: _PullRequest, events: list[LedgerEvent],
+    ) -> MergerOutcome:
+        """Demande la seconde relecture, une fois, avec le modèle que le registre désigne ; sans modèle, l'humain tranche."""
+        tid = task.id
+        if not self._policy.reviewer.enabled:
+            return self._ask_human(
+                task, wt, "merge", judged.id,
+                "relecture double demandée, mais le rôle reviewer est désactivé : aucune seconde relecture ne peut être "
+                "lancée", pr.number,
+            )
+        review_id = str(judged.payload.get("review") or "")
+        launch = next((e for e in events if e.event_type == REVIEW_LAUNCHED_EVENT and e.id == review_id), None)
+        if launch is None:
+            return self._ask_human(
+                task, wt, "merge", judged.id, "le READY de la file n'a pas de lancement au ledger : seconde relecture impossible",
+                pr.number,
+            )
+        first_model = str(launch.payload.get("model") or "")
+        worker_model = str(launch.payload.get("worker_model") or "")
+        choice, why = choose_second_reviewer(
+            self._home, first_model=first_model, worker_model=worker_model, tier=self._policy.reviewer.tier,
+        )
+        if choice is None:
+            return self._ask_human(task, wt, "merge", judged.id, f"relecture double demandée, mais {why}", pr.number)
+        if not any(e.event_type == MERGE_DUAL_REVIEW_REQUESTED_EVENT and e.payload.get("review") == review_id for e in events):
+            self._note(MERGE_DUAL_REVIEW_REQUESTED_EVENT, tid, {
+                "review": review_id, "judged": judged.id, "head": pr.head, "pr": pr.number,
+                "first_model": first_model, "worker_model": worker_model,
+                **choice.to_dict(),
+            })
+        return MergerOutcome(
+            tid, "wait", "waiting",
+            f"seconde relecture demandée sur un chemin réservé : modèle {choice.model} "
+            f"(famille {choice.family}, règle {choice.basis})", pr.number,
+        )
 
     def _merged_on_remote(self, wt: TaskWorktree, pr: _PullRequest) -> tuple[str, str]:
         """``("yes"|"no"|"error", détail)`` : PR ``MERGED`` et commit de fusion contenu dans la base récupérée."""

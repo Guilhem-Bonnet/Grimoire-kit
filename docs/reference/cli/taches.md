@@ -563,6 +563,7 @@ orchestrator:
       ignored_checks: ["codecov/*"] # hors du verdict, seulement quand gh dit qu'aucun check n'est requis
       max_cycles: 2                 # retours au worker (CI rouge, conflit) avant l'escalade
       protected_paths: []           # chemins qui reviennent à l'humain, en plus des défauts
+      protected_gate: human         # human (défaut) | dual_review : une seconde relecture remplace l'humain
 ```
 
 La file prend les tâches lancées par le tick, en revue, dont la dernière relecture est jugée `READY`, dans
@@ -579,7 +580,7 @@ dans cet ordre, et chaque garde échoue fermée :
 | READY | la tête GitHub est la tête **scellée** au jugement (ou un réalignement noté au même journal) ; reçu et pack inchangés à l'octet | tête relue pas encore poussée : attente ; sinon nouvelle relecture |
 | CI | checks requis (`gh pr checks --required`) ; tous hors `ignored_checks` seulement si gh dit qu'aucun n'est requis ; au moins un `pass` ; vert au tick précédent aussi | rouge : retour au worker ; en attente, sans check ou gh en panne : attente |
 | Cible | la base GitHub contenue dans la tête | réalignement en plomberie, poussé sans forcer, puis nouvelle CI |
-| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun fichier qui escalade, reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
+| Fusion | tête de file seulement (WIP 1), mandat qui couvre `merge`, politique qui le délègue, aucune catégorie gardée, aucun fichier qui escalade (ou deux READY scellés en `dual_review`), reçu attesté au journal d'autorité | question non bloquante « fusionner ? » : l'humain fusionne lui-même |
 | Acceptation | fusion revérifiée, tête fusionnée couverte par le sceau, aucun fichier qui escalade, mandat qui couvre `accept` | question non bloquante « accepter ? » avec la commande `task accept` |
 
 - **Sceau du READY** (`missions/review_seal.py`) : au lancement du relecteur, la tête de `task/<id>` est notée au journal
@@ -592,6 +593,13 @@ dans cet ordre, et chaque garde échoue fermée :
   `.gitmodules`, les fichiers conftest de pytest, `.claude/*`, `.mcp.json`, `.vscode/*`, `.pre-commit-config.yaml` et les
   fichiers compilés. La clé `protected_paths` s'y ajoute. La
   comparaison se fait en `casefold()`, sur la liste de fichiers que GitHub annonce ; une liste tronquée fait escalader.
+- **Double relecture** (`protected_gate: dual_review`) : une PR qui touche un chemin réservé n'escalade plus. Le merger
+  demande une seconde relecture, par une session distincte dont la famille de modèle diffère de celle du worker ; le
+  modèle vient du registre de fournisseurs (famille différente de celle du premier relecteur préférée, sinon autre
+  modèle de sa famille), et le lancement le note au ledger. La fusion exige les deux verdicts `READY` scellés sur la
+  même tête et la CI verte ; un second `NOT-READY` suit le circuit normal, et deux verdicts d'une même session sont
+  refusés. `_grimoire/standard/*`, `.claude/*`, `.mcp.json` et les fichiers compilés restent à l'humain quel que soit
+  le réglage.
 - **Réalignement** : `git merge-tree`, puis `commit-tree -p <tête GitHub> -p <base GitHub>`, sur objets : le worktree du
   worker n'est pas touché. Les objets sont récupérés à refspec explicite vers `refs/grimoire/tick/…`, depuis l'URL de
   `origin` vérifiée égale au dépôt de la PR. Un conflit limité à `CHANGELOG.md` est résolu par l'union des deux côtés,
