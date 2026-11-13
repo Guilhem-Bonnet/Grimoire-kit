@@ -69,7 +69,7 @@ from grimoire.missions.provider_failure import transient_api_error
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import create_task_worktree
 from grimoire.missions.verifiability import Verifiability, classify
-from grimoire.missions.worker_provider import WorkerRoute, route_refusal, route_worker, settings_path
+from grimoire.missions.worker_provider import WorkerRoute, is_local_provider, route_denial, route_worker, settings_path
 from grimoire.providers.data_policy import hosted_fallback_refusal
 from grimoire.tools.workspace_work import transcript_path
 
@@ -736,6 +736,20 @@ class WorkerLauncher:
         """Les sessions de worker qui occupent une place : celles qui travaillent (:func:`active_worker_ids`)."""
         return len(active_worker_ids(self._service))
 
+    def _busy_providers(self) -> frozenset[str]:
+        """Les fournisseurs qu'un worker au travail tient déjà (``claimed``/``running``), lus au ledger.
+
+        Sert la règle « un seul worker à la fois par fournisseur local » (#1154) : un serveur local n'a pas
+        la capacité d'un hébergé, et deux sessions sur le même modèle local se ralentiraient sans le dire.
+        """
+        busy: set[str] = set()
+        for tid, payload in launched_sessions(self._service).items():
+            provider = str(payload.get("provider") or "")
+            task = self._service.ledger.get_task(tid)
+            if provider and task is not None and task.status in (TaskState.CLAIMED, TaskState.RUNNING):
+                busy.add(provider)
+        return frozenset(busy)
+
     def _launched_today(self) -> int:
         today = _day((self._now or datetime.now(UTC)).isoformat())
         return sum(
@@ -820,11 +834,20 @@ class WorkerLauncher:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
         task = service.require(tid)
-        if refusal := hosted_fallback_refusal(service.home_root, task.data_class):
-            return self._deferred(tid, refusal)
         tier = self._tier_for(task)
-        route = route_worker(service.home_root, self._policy.worker.provider, tier, task)
-        data_refusal = route_refusal(service.home_root, self._policy.worker.provider, task)
+        provider_id = self._policy.worker.provider
+        busy = self._busy_providers()
+        route = route_worker(service.home_root, provider_id, tier, task, busy_providers=busy)
+        denial = ""
+        if route is None:
+            # Un fournisseur local déjà occupé fait attendre la tâche : elle ne retombe pas en silence sur
+            # l'hôte, qui est un modèle hébergé (#1154). Le repli fermé de #1133 passe avant, pour garder son
+            # motif : une classe qu'aucun hébergé n'admet ne part pas sur l'hôte.
+            if refusal := hosted_fallback_refusal(service.home_root, task.data_class):
+                return self._deferred(tid, refusal)
+            denial = route_denial(service.home_root, provider_id, tier, task, busy_providers=busy)
+            if denial and provider_id in busy and is_local_provider(service.home_root, provider_id):
+                return self._deferred(tid, denial)
         model = route.model if route is not None else self._model_for(admit, tier)
         result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
@@ -856,7 +879,7 @@ class WorkerLauncher:
             {
                 "session": session, "session_id": session_id, "name": f"grimoire-{tid}", "model": model,
                 "provider": route.provider if route is not None else "",
-                "provider_refused": data_refusal,
+                "provider_refused": denial,
                 "lean": self._policy.worker.lean,
                 "permission_mode": self._policy.worker.permission_mode,
                 "cwd": str(wt.path), "branch": wt.branch,
