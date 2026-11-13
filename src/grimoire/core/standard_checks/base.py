@@ -14,6 +14,8 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core.yaml_io import load_yaml_with_retry
+
 BOARD_STATES = {
     "proposed",
     "ready",
@@ -170,7 +172,8 @@ def _load_yaml_file(root: Path, rel_path: Path, result: StandardVerificationResu
     if not path.is_file():
         return None
     try:
-        data = _yaml().load(path)
+        # Une erreur passagère (board en cours de remplacement) est retentée ; la persistance reste une erreur.
+        data = load_yaml_with_retry(path)
     except YAMLError as exc:
         result.invalid_yaml.append(rel_path)
         result.checks.append(

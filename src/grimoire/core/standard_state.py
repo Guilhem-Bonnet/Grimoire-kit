@@ -30,6 +30,7 @@ from grimoire.core.standard_generation import (
     STANDARD_PROFILE_FILE,
     normalize_task_id,
 )
+from grimoire.core.yaml_io import load_yaml_mapping_or_empty, load_yaml_with_retry
 
 TASK_BOARD_RELPATH = STANDARD_DIR / "task-board.yaml"
 
@@ -161,20 +162,18 @@ def invalidate_cache(project_root: Path) -> None:
 def _load_mapping(path: Path) -> dict[str, Any]:
     """Read a YAML mapping, or an empty one — never raise at a hook boundary.
 
-    ``ruamel.yaml`` is imported here, not at module scope: a warm cache means
-    neither this function nor the parser it needs ever runs, and the whole
-    point of the cache is to keep ``ruamel`` off that path.
-    """
-    if not path.is_file():
-        return {}
-    from ruamel.yaml import YAML
-    from ruamel.yaml.error import YAMLError
+    Une erreur d'analyse est retentée avant d'être tenue pour définitive
+    (:mod:`grimoire.core.yaml_io`) : le board peut être en cours de
+    remplacement par un écrivain d'une version antérieure du kit, resté non
+    atomique. Ce qui échoue encore vaut ``{}`` ici, mais n'est pas tu : la
+    résolution de tâche le rend « illisible » (``_board_problem``) plutôt que
+    « aucune tâche ».
 
-    try:
-        data = YAML(typ="safe").load(path)
-    except (OSError, ValueError, YAMLError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    ``ruamel`` est importé par :mod:`grimoire.core.yaml_io` à l'appel, pas au
+    chargement des modules : un cache chaud ne paie aucun parseur, et le
+    chemin du hook reste léger.
+    """
+    return load_yaml_mapping_or_empty(path)
 
 
 def _board_problem(path: Path) -> str:
@@ -186,12 +185,11 @@ def _board_problem(path: Path) -> str:
     """
     if not path.is_file():
         return _not_a_file(path, f"board {TASK_BOARD_RELPATH.as_posix()}")
-    from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError
 
     name = f"board {TASK_BOARD_RELPATH.as_posix()}"
     try:
-        data = YAML(typ="safe").load(path)
+        data = load_yaml_with_retry(path)
     except (OSError, ValueError, YAMLError) as exc:
         return f"{name} illisible ({type(exc).__name__})"
     if data is None:
