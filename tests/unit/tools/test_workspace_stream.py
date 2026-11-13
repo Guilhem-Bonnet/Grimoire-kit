@@ -142,6 +142,32 @@ def test_un_changement_part_au_tour_suivant_sans_attendre_l_intervalle(
     assert after["data"]["fingerprint"] != before["data"]["fingerprint"]
 
 
+def test_deux_flux_du_meme_perimetre_partagent_l_empreinte_d_un_tour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Défaut empêché (mesuré le 2026-11-13) : chaque onglet recalculait l'empreinte de tout le portefeuille
+    toutes les 0,5 s ; à quatre projets et quelques onglets, le serveur tournait à 110 % de CPU sans personne devant."""
+    from grimoire.tools import workspace_pulse
+
+    monkeypatch.setenv("GRIMOIRE_PULSE_SECONDS", "300")
+    root = _project(tmp_path)
+    clock = _Clock()
+    first = _stream(root, clock, tick=0.5)
+    # Le second onglet vit sur la même horloge, sans la faire avancer : il tourne au même instant que le premier.
+    second = pulse_stream(root, sleep=lambda _s: None, clock=lambda: clock.now, tick=0.5)
+    for stream in (first, second):
+        next(stream)
+        next(stream)
+    calls: list[Path] = []
+    watched = workspace_pulse._watched
+    monkeypatch.setattr(workspace_pulse, "_watched", lambda r: calls.append(r) or watched(r))
+    clock.on_sleep = lambda: TaskService(root).add("Carte née pendant le flux", ("critère",), actor="t", ready=True)
+
+    assert _parse(next(first))["data"]["changed"] is True
+    assert _parse(next(second))["data"]["changed"] is True, "le second onglet voit le même changement"
+    assert len(calls) == 1, "un seul calcul d'empreinte pour les deux onglets au même tour"
+
+
 def test_le_flux_n_est_pas_une_lecture_de_la_table() -> None:
     """Les lectures de ``GET_ROUTES`` rendent une charge utile ; un flux sans fin n'y a pas sa place."""
     assert STREAM_PATH not in GET_ROUTES

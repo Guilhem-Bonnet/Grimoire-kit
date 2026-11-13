@@ -37,19 +37,37 @@ Events. Le serveur recalcule l'empreinte toutes les :data:`STREAM_TICK_SECONDS`
 vers la page en moins de deux secondes, sans attendre l'intervalle. Ledger
 immobile, le flux ne dit rien de plus qu'un battement par intervalle déclaré :
 c'est lui qui garde « mis à jour il y a N s » vrai.
+
+Le coût, mesuré sur un vrai poste le 2026-11-13 (quatre projets, 2 113 fichiers
+surveillés) : 0,3 s par empreinte, recalculée toutes les 0,5 s par CHAQUE flux
+ouvert, plus les décisions rejouées à chaque changement — le serveur tournait à
+110 % de CPU sans personne devant, et le premier pouls de la page attendait ~5 s.
+Trois mémoires, sans rien changer à ce que la page reçoit :
+
+- **le contenu d'un fichier n'est relu que si sa date a pu mentir** : un hash est
+  gardé avec (date, taille, inode) seulement quand la date avait déjà plus de
+  deux secondes au moment de la lecture (:mod:`grimoire.core.file_memo`) ; passé
+  ce délai, toute réécriture change forcément la date ;
+- **les décisions sont gardées par empreinte** : elles ne dépendent que du ledger,
+  que l'empreinte couvre ;
+- **les flux partagent l'empreinte** : un seul calcul par tour pour un même
+  périmètre, quel que soit le nombre d'onglets (:func:`pulse_stream`).
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
+import threading
 import time
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
 from grimoire.core.standard_generation import PROPOSALS_DIR, TRACES_DIR
 from grimoire.core.standard_state import LEDGER_RELPATH
 from grimoire.missions.lease import LEASES_DIRNAME, parse_instant
@@ -122,7 +140,7 @@ def _stat(path: Path) -> tuple[str, int, int, str] | None:
         # d'événements, lui, ne fait que croître.
         content = ""
         if path.suffix in (".json", ".yaml") and info.st_size <= _CONTENT_HASH_MAX_BYTES:
-            content = hashlib.blake2b(path.read_bytes(), digest_size=8).hexdigest()
+            content = file_memo.derived(path, "blake2b-8", lambda data: hashlib.blake2b(data, digest_size=8).hexdigest(), info=info)
     except OSError:
         return None  # absent ou illisible : l'absence fait elle-même partie de l'empreinte
     return (path.name, info.st_mtime_ns, info.st_size, content)
@@ -133,13 +151,13 @@ def _watched(root: Path) -> list[Path]:
     files = [ledger / "events.jsonl", ledger / "incidents.jsonl"]
     leases = ledger / LEASES_DIRNAME
     if leases.is_dir():
-        files.extend(sorted(leases.glob("*.json")))
+        files.extend(sorted(leases.glob("*.json"), key=str))
     runs = root / RUNS_RELPATH
     if runs.is_dir():
-        files.extend(sorted(runs.glob("session-*.json")))
+        files.extend(sorted(runs.glob("session-*.json"), key=str))
     proposals = root / PROPOSALS_DIR
     if proposals.is_dir():
-        files.extend(sorted(proposals.glob("*.yaml")))
+        files.extend(sorted(proposals.glob("*.yaml"), key=str))
     # Hors du cockpit, le tick et les commandes humaines écrivent aussi : sans ces fichiers dans
     # l'empreinte, une lecture gardée (page ouverte, direct) resservirait l'état d'avant.
     files.append(root / TRACES_RELPATH)
@@ -147,12 +165,12 @@ def _watched(root: Path) -> list[Path]:
     files.extend(runtime / name for name in RUNTIME_JOURNALS)
     flows = root / FLOWS_RELPATH
     if flows.is_dir():
-        files.extend(sorted(flows.glob("*.json")))
+        files.extend(sorted(flows.glob("*.json"), key=str))
     evidence = root / EVIDENCE_RELPATH
     files.extend(evidence / name for name in EVIDENCE_JOURNALS)
     reviews = root / REVIEWS_RELPATH
     if reviews.is_dir():
-        files.extend(sorted(reviews.glob(f"*/{REVIEW_RECEIPT_NAME}")))
+        files.extend(sorted(reviews.glob(f"*/{REVIEW_RECEIPT_NAME}"), key=str))
     # Le pilote automatique et le mandat vivent dans le journal d'autorité (hors du projet) : un geste fait
     # par la CLI change ce que « À traiter » doit montrer.
     files.append(AuthorityJournal().path)
@@ -163,10 +181,14 @@ def _root_fingerprint(slug: str, root: Path, window_start: float) -> str:
     digest = hashlib.sha256()
     in_window = 0
     digest.update(f"{slug}\0{root}\0".encode())
+    # En chaînes, pas en `Path` : `is_relative_to` et `relative_to` coûtaient 0,2 s par empreinte sur 2 400 fichiers,
+    # vingt fois le prix des `stat` eux-mêmes.
+    prefix = f"{root}{os.sep}"
     for path in _watched(root):
         stamp = _stat(path)
-        shown = path.relative_to(root) if path.is_relative_to(root) else path  # le journal d'autorité est hors projet
-        digest.update(repr((str(shown), stamp)).encode())
+        text = str(path)
+        shown = text.removeprefix(prefix)  # le journal d'autorité est hors projet
+        digest.update(repr((shown, stamp)).encode())
         if stamp is not None and path.name.startswith("session-") and stamp[1] / 1e9 >= window_start:
             in_window += 1
     digest.update(f"window={in_window}".encode())
@@ -237,6 +259,50 @@ def _decisions(roots: list[tuple[str, Path]], *, portfolio: bool) -> dict[str, A
     return out
 
 
+_DECISIONS_MEMO_MAX = 64
+_decisions_memo: dict[tuple[bool, tuple[str, ...]], tuple[str, dict[str, Any]]] = {}
+
+
+def _scope_key(roots: list[tuple[str, Path]]) -> tuple[str, ...]:
+    return tuple(f"{slug}\0{root}" for slug, root in roots)
+
+
+def _decisions_for(roots: list[tuple[str, Path]], fingerprint: str, *, portfolio: bool) -> dict[str, Any]:
+    """Les décisions de *roots*, recalculées seulement quand l'empreinte (qui couvre chaque ledger) a bougé."""
+    key = (portfolio, _scope_key(roots))
+    known = _decisions_memo.get(key)
+    if known is None or known[0] != fingerprint:
+        known = (fingerprint, _decisions(roots, portfolio=portfolio))
+        if len(_decisions_memo) >= _DECISIONS_MEMO_MAX:
+            _decisions_memo.clear()
+        _decisions_memo[key] = known
+    return copy.deepcopy(known[1])  # une copie : l'appelant peut la modifier sans toucher la mémoire
+
+
+#: Fraction du tour pendant laquelle une empreinte calculée pour un flux sert aux autres flux du même périmètre.
+_SHARE_FRACTION = 0.8
+_shared_lock = threading.Lock()
+_shared_flights: dict[tuple[str, ...], threading.Lock] = {}
+_shared: dict[tuple[str, ...], tuple[float, dict[str, str]]] = {}
+
+
+def _shared_fingerprints(
+    roots: list[tuple[str, Path]], *, tick: float, clock: Callable[[], float]
+) -> dict[str, str]:
+    """Les empreintes de *roots*, calculées une fois par tour pour tous les flux ouverts sur ce périmètre."""
+    key = _scope_key(roots)
+    with _shared_lock:
+        flight = _shared_flights.setdefault(key, threading.Lock())
+    with flight:  # deux flux au même tour : le second lit le calcul du premier
+        now = clock()
+        known = _shared.get(key)
+        if known is not None and 0 <= now - known[0] < tick * _SHARE_FRACTION:
+            return known[1]
+        value = _project_fingerprints(roots, datetime.now(UTC))
+        _shared[key] = (now, value)
+        return value
+
+
 def pulse_view(
     project_root: Path,
     *,
@@ -251,7 +317,17 @@ def pulse_view(
     """
     moment = now or datetime.now(UTC)
     roots = _roots(project_root, portfolio)
-    per_project = _project_fingerprints(roots, moment)
+    return _view(roots, _project_fingerprints(roots, moment), since=since, portfolio=portfolio, moment=moment)
+
+
+def _view(
+    roots: list[tuple[str, Path]],
+    per_project: dict[str, str],
+    *,
+    since: str | None,
+    portfolio: bool,
+    moment: datetime,
+) -> dict[str, Any]:
     fingerprint = _combine(per_project)
     payload: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
@@ -259,11 +335,11 @@ def pulse_view(
         "interval_seconds": pulse_interval(),
         "scope": "portfolio" if portfolio else "project",
         "fingerprint": fingerprint,
-        "projects": per_project,
+        "projects": dict(per_project),
         "changed": since != fingerprint,
     }
     if payload["changed"]:
-        payload["decisions"] = _decisions(roots, portfolio=portfolio)
+        payload["decisions"] = _decisions_for(roots, fingerprint, portfolio=portfolio)
     return payload
 
 
@@ -299,6 +375,9 @@ def pulse_stream(
         sent_at = clock()
         while True:
             sleep(tick)
-            view = pulse_view(project_root, since=known, portfolio=portfolio)
+            # Les tours suivants partagent l'empreinte entre flux du même périmètre : N onglets, un calcul.
+            roots = _roots(project_root, portfolio)
+            per_project = _shared_fingerprints(roots, tick=tick, clock=clock)
+            view = _view(roots, per_project, since=known, portfolio=portfolio, moment=datetime.now(UTC))
             if view["changed"] or clock() - sent_at >= view["interval_seconds"]:
                 break

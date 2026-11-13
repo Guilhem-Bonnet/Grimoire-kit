@@ -26,6 +26,8 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
+from grimoire.core import file_memo
+
 _CATALOG_NAME = "kit-file-hashes.json"
 
 
@@ -57,7 +59,8 @@ def load_catalog() -> dict[str, dict[str, Any]]:
 def digest_of(path: Path) -> str:
     """SHA-256 of *path*, or ``""`` when it cannot be read."""
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        # Gardé par (date, taille, inode) : l'alignement hache ~300 fichiers du kit à chaque lecture du cockpit.
+        return file_memo.derived(path, "sha256", lambda data: hashlib.sha256(data).hexdigest())
     except OSError:
         return ""
 

@@ -681,3 +681,37 @@ def test_une_raison_d_annulation_saisie_survit_au_battement_d_une_session(
         "la raison saisie a été perdue au battement de la session"
     )
     assert page.evaluate("() => document.activeElement.dataset.role") == "cancel-submit", "le focus a été volé"
+
+
+# ── Défilement gardé ────────────────────────────────────────────────────────
+
+
+def test_un_rechargement_en_direct_ne_ramene_pas_la_page_en_haut(browser: Browser, live_url: str, service) -> None:  # type: ignore[no-untyped-def]
+    """Défaut rapporté le 2026-11-13 : « une sorte de refresh qui fait revenir tout en haut de la page ».
+
+    Cause : la ligne choisie au clic garde le focus ; chaque rechargement la recrée et lui rendait le
+    focus avec `scrollIntoView`, ce qui ramenait la page sur elle — souvent tout en haut.
+    """
+    _answer_all(service)
+    for index in range(14):
+        _ask(service, _running(service, f"Décision de défilement {index:02d}"), f"Fusionner la PR {index} ?")
+    opened, context = _open(browser, live_url, viewport={"width": 1280, "height": 420})
+    try:
+        _goto(opened, "a-traiter")
+        opened.locator(".at-row").filter(has_text="Décision de défilement 13").wait_for(timeout=APPEAR_MS)
+        # Une ligne du haut choisie au clic garde le focus ; puis on descend lire à la molette.
+        opened.locator(".at-row").first.click()
+        canvas = opened.locator("#canvas")
+        top = canvas.evaluate("(el) => { el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2); return el.scrollTop; }")
+        assert top > 100, "le contenu doit déborder pour que le test dise quelque chose"
+        reloads = opened.evaluate("() => window.GrimoireWorkspace.live.state.reloadAts.length")
+
+        _ask(service, _running(service, "Décision arrivée pendant la lecture"), "Fusionner la PR du milieu ?")
+
+        opened.locator(".at-row").filter(has_text="Décision arrivée pendant la lecture").wait_for(timeout=APPEAR_MS)
+        assert opened.evaluate("() => window.GrimoireWorkspace.live.state.reloadAts.length") > reloads
+        opened.wait_for_timeout(200)
+        assert canvas.evaluate("(el) => el.scrollTop") >= top - 2, "le rechargement a ramené la page en haut"
+    finally:
+        context.close()  # type: ignore[attr-defined]
+        _answer_all(service)

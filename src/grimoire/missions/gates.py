@@ -22,6 +22,7 @@ Deux règles portent tout le reste :
 
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from grimoire.core import file_memo
 from grimoire.core.exceptions import GrimoireMissionError
 from grimoire.core.standard_generation import STANDARD_DIR
 from grimoire.core.standard_state import active_profile_id
@@ -107,13 +109,18 @@ class GatesFileError(GrimoireMissionError):
         super().__init__(f"{rel.as_posix()} illisible : {cause}")
 
 
+def _parse_yaml(data: bytes) -> Any:
+    return YAML(typ="safe").load(data.decode("utf-8"))
+
+
 def _yaml_mapping(root: Path, rel: Path) -> dict[str, Any]:
     """Le fichier *rel* comme table ; ``{}`` s'il n'existe pas, erreur s'il est cassé."""
     path = root / rel
     if not path.is_file():
         return {}
     try:
-        data = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
+        # Gardé par (date, taille, inode) : relu pour chaque tâche d'une vue, et `YAML()` coûte ~25 ms à construire.
+        data = copy.deepcopy(file_memo.derived(path, "gates-yaml", _parse_yaml))
     except (YAMLError, OSError, UnicodeDecodeError) as exc:
         raise GatesFileError(rel, f"{type(exc).__name__}: {exc}") from exc
     if data is None:

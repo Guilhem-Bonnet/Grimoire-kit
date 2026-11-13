@@ -468,7 +468,10 @@ export async function mount(root, ctx) {
 
   const load = (probe) => ctx.api.attention(ctx.scope.all, probe ? { probe: true } : undefined);
 
-  const select = (id, { focus = false, remember = true } = {}) => {
+  // `reveal` : faire défiler jusqu'à la ligne. Vrai pour un geste (clic, j / k), faux quand un rechargement
+  // en direct rend le focus à la ligne recréée : sinon la page sautait sur la ligne choisie, souvent tout
+  // en haut, alors que Guilhem lisait plus bas (2026-11-13).
+  const select = (id, { focus = false, remember = true, reveal = true } = {}) => {
     const row = rows.find((r) => r.group.id === id && !r.el.closest('[hidden]')) || rows.find((r) => !r.el.closest('[hidden]'));
     if (!row) return;
     selected = row.group.id;
@@ -482,8 +485,8 @@ export async function mount(root, ctx) {
     }
     renderDetail(ctx, row.item);
     if (focus) {
-      row.el.focus();
-      row.el.scrollIntoView({ block: 'nearest' });
+      row.el.focus({ preventScroll: !reveal });
+      if (reveal) row.el.scrollIntoView({ block: 'nearest' });
     }
     if (remember) ctx.setItem?.({ item: row.group.id });
   };
@@ -630,8 +633,8 @@ export async function mount(root, ctx) {
       wrap.append(fold);
     }
     applyFilter();
-    if (tileFocus) wrap.querySelector(`.at-tile[data-section="${tileFocus}"]`)?.focus();
-    if (rows.length) select(selected, { focus: hadFocus, remember: Boolean(ctx.params.item) || hadFocus });
+    if (tileFocus) wrap.querySelector(`.at-tile[data-section="${tileFocus}"]`)?.focus({ preventScroll: true });
+    if (rows.length) select(selected, { focus: hadFocus, reveal: false, remember: Boolean(ctx.params.item) || hadFocus });
     else ctx.inspector.replaceChildren();
   };
 
