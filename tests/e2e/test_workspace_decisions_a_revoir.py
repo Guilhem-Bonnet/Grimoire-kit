@@ -76,16 +76,18 @@ def test_a_traiter_montre_la_decision_par_defaut_sans_la_compter(workspace: Page
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'a-traiter'")
     page.wait_for_selector(".at-wrap")
 
-    fold = page.locator("[data-role='default-decisions']")
+    fold = page.locator("[data-role='review-decisions']")
     expect(fold.locator("summary")).to_contain_text("Décisions à revoir")
     expect(fold).not_to_have_attribute("open", "")  # replié : rien n'y attend
     fold.locator("summary").click()
-    item = fold.locator(f"[data-role='default-decision'][data-task='{tid}'][data-question='{qid}']")
+    item = fold.locator(f"[data-role='review-decision'][data-task='{tid}'][data-question='{qid}']")
     expect(item).to_be_visible()
     expect(item).to_contain_text(TITLE)
     expect(item).to_contain_text("Quelle voie pour le correctif ?")
     expect(item.locator(".at-default-option b")).to_have_text("b")
     expect(item.locator(".at-default-why")).to_contain_text("les critères disent b")
+    expect(item).to_have_attribute("data-source", "default")
+    expect(item.locator(".at-chip")).to_have_text("appliquée par défaut")
 
     # Aucune attente de l'humain : pas de ligne « à décider » pour cette tâche, et le compteur ne compte que les gestes.
     deciding = page.locator(".at-section[data-section='decide'] .at-row .at-title").all_inner_texts()
@@ -96,7 +98,7 @@ def test_a_traiter_montre_la_decision_par_defaut_sans_la_compter(workspace: Page
     assert int(page.locator("#decisions-count").get_attribute("data-pending") or "0") == gestures
 
     # Le bloc mène au journal, où la décision dit sa source et se reprend (« Revenir »).
-    fold.locator("[data-role='default-journal']").click()
+    fold.locator("[data-role='review-journal']").click()
     page.wait_for_selector("[data-role='pilot-journal']")
     card = page.locator(f"[data-role='pilot-decision'][data-task='{tid}']")
     expect(card.locator("[data-role='pj-option']")).to_have_text("b")
@@ -108,4 +110,4 @@ def test_a_traiter_montre_la_decision_par_defaut_sans_la_compter(workspace: Page
     page.evaluate("() => window.GrimoireWorkspace.goto('a-traiter')")
     page.wait_for_function("() => window.GrimoireWorkspace.module === 'a-traiter'")
     page.wait_for_selector(".at-wrap")
-    expect(page.locator(f"[data-role='default-decision'][data-task='{tid}']")).to_have_count(0)  # reprise : sortie du bloc
+    expect(page.locator(f"[data-role='review-decision'][data-task='{tid}']")).to_have_count(0)  # reprise : sortie du bloc

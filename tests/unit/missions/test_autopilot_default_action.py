@@ -309,6 +309,10 @@ def test_apply_recommended_tranche_par_l_option_recommandee_sans_confiance(proje
     assert given.payload["answer"] == "B"  # la décision, pas le texte soumis
     assert not events(service, tid, DEFERRED_EVENT)
     assert any("B" in d.text for d in service.require(tid).directives)  # le worker reçoit l'option appliquée
+    # La décision est au ledger avant la réponse : un arrêt entre les deux ne laisse pas une réponse sans décision
+    # (elle manquerait au journal et à la borne des décisions par défaut).
+    kinds = [e.event_type for e in service.ledger.events_for(tid)]
+    assert kinds.index(DECIDED_EVENT) < kinds.index(HUMAN_ANSWERED_EVENT)
 
 
 def test_apply_recommended_ecarte_aussi_les_donnees_de_choix_de_la_reponse_soumise(project: Path) -> None:
@@ -799,33 +803,68 @@ def test_la_route_d_attention_rend_le_bloc_des_decisions_a_revoir(project: Path)
         project, "Rendre 404 ou 410 ?", options=("404", "410"), recommended="410", why="les critères disent 410"
     )
     before = attention(project)
-    assert before["defaultDecisions"] == {"label": "Décisions à revoir", "count": 0, "items": []}
+    assert before["reviewDecisions"] == {"label": "Décisions à revoir", "count": 0, "sources": {}, "items": []}
 
     answer(service, tid, qid, "404", confidence="low")
     view = attention(project)
-    block = view["defaultDecisions"]
-    assert block["label"] == "Décisions à revoir" and block["count"] == 1
+    block = view["reviewDecisions"]
+    assert block["label"] == "Décisions à revoir" and block["count"] == 1 and block["sources"] == {"default": 1}
     (item,) = block["items"]
+    assert item["source"] == "default"
     assert item["task_id"] == tid and item["question_id"] == qid and item["title"] == "Correctif"
     assert item["question"] == "Rendre 404 ou 410 ?" and item["option"] == "410"
     assert item["justification"] == "les critères disent 410"
     # Non bloquant : hors de toute section et de tout compteur — aucun geste n'attend l'humain.
     kinds = {i["kind"] for section in view["sections"] for i in section["items"]}
-    assert wa.DEFAULT_DECISION not in kinds and wa.QUESTION not in kinds
-    assert wa.DEFAULT_DECISION not in view["counts"] and view["count"] == 0
+    assert wa.REVIEW_DECISION not in kinds and wa.QUESTION not in kinds
+    assert wa.REVIEW_DECISION not in view["counts"] and view["count"] == 0
 
 
-def test_le_bloc_ne_montre_ni_jugement_ni_recommandation_d_auteur_ni_decision_reprise_ou_ancienne(project: Path) -> None:
+def test_le_bloc_montre_aussi_la_recommandation_d_un_agent_appliquee_sans_la_compter_dans_la_borne(project: Path) -> None:
+    """« Applique puis informe » vaut pour l'option qu'un agent recommandait : dans le bloc, distinguée, hors borne."""
+    pilot(project, APPLY)
+    service, tid = running(project)
+    launched(service, tid)
+    for n in range(MAX_DEFAULT_DECISIONS + 2):  # plus que la borne des décisions par défaut
+        service.ask(tid, f"Quelle voie pour l'étape {n} ?", "w", options=("A", "B"), recommended="A", why="plus simple")
+        (outcome,) = stage(service, project)._apply_recommendations(AT_REST)
+        assert outcome.status == "done"
+        service.claim(tid, "w")
+        service.transition(tid, TaskState.RUNNING, "w")
+    decided = events(service, tid, DECIDED_EVENT)
+    assert {e.payload["recommendation_source"] for e in decided} == {"recommended"} and len(decided) == MAX_DEFAULT_DECISIONS + 2
+    # Aucune n'a entamé la borne : l'option par défaut d'une escalade est encore appliquée.
+    service.ledger.append_event(MERGE_ESCALATED, tid, "task", "tick", {"task_id": tid, "question_id": "q-escalade-1"})
+    service.ask(tid, "La fusion échoue à répétition — reprendre la tâche ou l'abandonner ?", "tick",
+                options=("reprendre", "abandonner"), recommended="reprendre", question_id="q-escalade-1")
+    assert [o.status for o in stage(service, project)._apply_recommendations(AT_REST)] == ["done"]
+
+    block = attention(project)["reviewDecisions"]
+    assert block["sources"] == {"recommended": MAX_DEFAULT_DECISIONS + 2, "default": 1}
+    assert block["count"] == MAX_DEFAULT_DECISIONS + 3 and block["items"][0]["source"] == "default"
+    assert {i["source"] for i in block["items"][1:]} == {"recommended"}
+
+
+def test_une_decision_ecrite_deux_fois_ne_figure_qu_une_fois_dans_le_bloc(project: Path) -> None:
+    """Une écriture interrompue puis rejouée laisse deux ``autopilot.decided`` pour la même question."""
+    pilot(project, APPLY)
+    service, tid, qid = asks(project, options=("A", "B"), recommended="A")
+    answer(service, tid, qid, "B", confidence="low")
+    (decided,) = events(service, tid, DECIDED_EVENT)
+    service.ledger.append_event(DECIDED_EVENT, tid, "task", "orchestrator", dict(decided.payload))
+    block = attention(project)["reviewDecisions"]
+    assert block["count"] == 1 and [i["question_id"] for i in block["items"]] == [qid]
+
+
+def test_le_bloc_ne_montre_ni_jugement_ni_decision_reprise_ou_ancienne(project: Path) -> None:
     pilot(project, APPLY)
     service, tid, qid = asks(project, options=("A", "B"), recommended="A")
     answer(service, tid, qid, "B", justification=WHY, confidence="high")  # jugement assumé
-    service, tid, qid = asks(project, options=("A", "B"), recommended="A")
-    stage(service, project)._apply_recommendations(AT_REST)  # recommandation d'auteur, prise par le tick
-    assert attention(project)["defaultDecisions"]["count"] == 0
+    assert attention(project)["reviewDecisions"]["count"] == 0
 
     service, tid, qid = asks(project, options=("A", "B"), recommended="A")
     answer(service, tid, qid, "B", confidence="low")
-    assert attention(project)["defaultDecisions"]["count"] == 1
-    assert attention(project, datetime.now(UTC) + wa.DEFAULT_DECISION_VISIBLE + timedelta(hours=1))["defaultDecisions"]["count"] == 0
+    assert attention(project)["reviewDecisions"]["count"] == 1
+    assert attention(project, datetime.now(UTC) + wa.REVIEW_DECISION_VISIBLE + timedelta(hours=1))["reviewDecisions"]["count"] == 0
     revert(service, tid, qid, "guilhem")  # « Revenir » : l'humain a repris la décision
-    assert attention(project)["defaultDecisions"]["count"] == 0
+    assert attention(project)["reviewDecisions"]["count"] == 0

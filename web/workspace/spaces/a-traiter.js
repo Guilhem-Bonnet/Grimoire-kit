@@ -222,6 +222,8 @@ const toneOf = (item) => (item.kind === 'pr_review'
 /** Une ligne qui mène à l'écran de revue : une PR, ou la lecture des PR en échec. */
 const isReview = (item) => item.kind === 'pr_review'
   || (item.kind === 'probe_failed' && String(item.id || '').endsWith(':pr'));
+// D'où vient l'option que le pilote a appliquée sans jugement (bloc « Décisions à revoir »).
+const REVIEW_SOURCES = { default: 'appliquée par défaut', recommended: 'recommandée par l’agent' };
 const projectName = (item) => (item.project && (item.project.name || item.project.slug)) || '';
 
 function hm(iso) {
@@ -642,20 +644,26 @@ export async function mount(root, ctx) {
       );
       wrap.append(fold);
     }
-    // Décisions que le pilote a prises par défaut (`autopilot.default_action: apply_recommended`) : déjà tranchées,
-    // elles ne sont dans aucune section ni aucun compteur — un bloc replié, à relire quand on veut.
-    const defaults = (data.defaultDecisions && data.defaultDecisions.items) || [];
-    if (defaults.length) {
+    // Options que le pilote a appliquées sans jugement assumé — l'option par défaut d'une question du kit
+    // (`autopilot.default_action: apply_recommended`) ou celle qu'un agent recommandait : déjà tranchées, elles ne
+    // sont dans aucune section ni aucun compteur — un bloc replié, à relire quand on veut.
+    const reviewed = (data.reviewDecisions && data.reviewDecisions.items) || [];
+    if (reviewed.length) {
       const fold = node('details', 'at-piloted at-defaults');
-      fold.dataset.role = 'default-decisions';
+      fold.dataset.role = 'review-decisions';
       const list = node('ul', 'at-default-list');
-      for (const decision of defaults) {
+      for (const decision of reviewed) {
         const li = node('li', 'at-default');
-        li.dataset.role = 'default-decision';
+        li.dataset.role = 'review-decision';
         li.dataset.task = decision.task_id;
         li.dataset.question = decision.question_id;
+        li.dataset.source = decision.source || '';
         const head = node('span', 'at-default-head');
-        head.append(node('span', 'at-title', decision.title || decision.task_id), node('span', 'at-project', projectName(decision)));
+        head.append(
+          node('span', 'at-title', decision.title || decision.task_id),
+          node('span', 'at-project', projectName(decision)),
+          node('span', 'at-chip', REVIEW_SOURCES[decision.source] || decision.source || ''),
+        );
         const option = node('span', 'at-default-option');
         option.append(node('span', 'at-default-k', 'Option appliquée'), node('b', null, decision.option));
         li.append(head, node('span', 'at-default-q', decision.question), option);
@@ -666,17 +674,17 @@ export async function mount(root, ctx) {
         }
         list.append(li);
       }
-      const label = data.defaultDecisions.label || 'Décisions à revoir';
+      const label = data.reviewDecisions.label || 'Décisions à revoir';
       fold.append(
-        node('summary', null, `${label} : ${defaults.length} prise${defaults.length > 1 ? 's' : ''} par défaut`),
-        node('p', 'at-hint', 'Le pilote a appliqué l’option recommandée sans attendre de réponse, puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans le journal « Décidé par le pilote ».'),
+        node('summary', null, `${label} : ${reviewed.length} appliquée${reviewed.length > 1 ? 's' : ''} sans attendre`),
+        node('p', 'at-hint', 'Le pilote a appliqué ces options sans attendre de réponse — l’option par défaut d’une question, ou celle que l’agent recommandait — puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans le journal « Décidé par le pilote ».'),
         list,
       );
       if (!ctx.scope.all) {
         // Le journal (et son « Revenir ») est celui du projet servi : hors portée « tous les projets ».
         const journal = node('button', 'btn', 'Ouvrir le journal du pilote');
         journal.type = 'button';
-        journal.dataset.role = 'default-journal';
+        journal.dataset.role = 'review-journal';
         journal.addEventListener('click', () => ctx.goto('travail', { view: 'decisions' }));
         fold.append(journal);
       }
