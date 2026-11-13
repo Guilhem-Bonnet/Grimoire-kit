@@ -14,16 +14,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from grimoire.hosts.decisions.read_only import (
-    _HEREDOC_OPEN_RE,
-    _blank_quoted,
-    executed_surfaces,
-    strip_heredoc_bodies,
-    unquoted_text,
-)
+from grimoire.hosts.decisions.read_only import _blank_quoted, executed_surfaces, unquoted_text
 
 # Le classement lecture / mutation vit dans :mod:`.read_only` ; il reste importable d'ici.
 from grimoire.hosts.decisions.read_only import is_read_only_command as is_read_only_command
+from grimoire.hosts.decisions.read_only_layout import _HEREDOC_OPEN_RE, strip_heredoc_bodies
 from grimoire.hosts.secrets import SECRET_RULES
 from grimoire.policies.schemas import ActionKind, MutationClass
 
@@ -110,7 +105,7 @@ def _strip_heredoc_bodies(command: str) -> str:
     body it precedes — turning a classified write into a false read-only.
 
     Un corps n'est retiré que là où le shell ouvre et ferme un heredoc
-    (:func:`.read_only.strip_heredoc_bodies`) : un ``<<`` cité, échappé ou
+    (:func:`.read_only_layout.strip_heredoc_bodies`) : un ``<<`` cité, échappé ou
     dans un commentaire n'ouvre rien, et ce qui le suit reste inspecté.
     """
     return strip_heredoc_bodies(command)

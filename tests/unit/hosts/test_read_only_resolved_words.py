@@ -259,8 +259,8 @@ def test_une_variable_de_boucle_est_lue_avec_les_valeurs_de_sa_liste(command: st
         "for o in a; do ls; done; find . $o",
         "find . $o; for o in a; do ls; done",
         "for o in a; do ls; done | cat; find . $o",
-        # portée par deux boucles
-        "for o in a; do ls; done; for o in b; do find . $o; done",
+        # portée par deux boucles imbriquées
+        "for o in a; do for o in b; do ls; done; find . $o; done",
         # indice, modificateur, autre nom, affectation dans le corps
         "for o in a; do find . $o[1]; done",
         "for o in a; do find . $o:t; done",

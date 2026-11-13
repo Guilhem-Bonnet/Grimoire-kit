@@ -26,6 +26,16 @@ from grimoire.hosts.decisions.read_only_arguments import (
     SYSTEMCTL_READ_SUBCOMMANDS,
     git_is_read_only,
 )
+from grimoire.hosts.decisions.read_only_layout import (
+    _ACTIVE_EXPANSION_RE,
+    _DOLLAR_QUOTES,
+    _QUOTED,
+    _code_and_bodies,
+    _opaque_spans,
+    _opens_dollar_quote,
+    _readings,
+    substitutes,
+)
 
 #: Where a quoted string stops being data and becomes a command again: whatever
 #: is handed to these is executed, so it stays under inspection.
@@ -38,11 +48,6 @@ _EVAL_INTRODUCER = re.compile(
     r"|(?i:\bcmd(?:\.exe)?(?:\s+/\S+)*?\s+/[ck]))\s*$"
 )
 
-#: ``<<TAG`` / ``<<'TAG'`` / ``<<-TAG``, opening a body the command *writes*.
-#: Pas ``<<<`` : une chaîne passée sur l'entrée n'a pas de corps, les lignes qui la
-#: suivent sont des commandes. L'étiquette doit finir le mot : ``<<'EO'F`` attend ``EOF``,
-#: et ce que ce motif ne lit pas en entier n'est pas une ouverture reconnue.
-_HEREDOC_OPEN_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1(?=$|[\s;|&<>()])")
 
 
 #: Leading verbs whose blast radius never survives the session — the read
@@ -251,7 +256,8 @@ def _words_read_only(words: list[str] | None, segment: str, *, resolved: bool) -
     if verb in _SHELL_CLOSING_KEYWORDS:
         return True
     if verb == "for":
-        return not _SUBSTITUTION_RE.search(segment)  # ``for x in a b`` n'exécute que son corps
+        # ``for x in a b`` n'exécute que son corps, mais affecte ``x``.
+        return _for_is_read_only(args) and not _SUBSTITUTION_RE.search(segment)
     if verb == "git":
         return git_is_read_only(args)
     if verb in ARGUMENT_CHECKS:
@@ -329,6 +335,14 @@ class _Word:
     #: commençant comme le mot s'écrit. Sans danger en opérande, pas là où le nombre ou la
     #: place des mots décide (:func:`_globs_allowed`).
     globbed: bool = False
+    #: Motif de fichiers derrière le ``=`` d'une option longue (``--include=*.py``) : chaque
+    #: mot trouvé garde ce préfixe, donc le NOM de l'option ne change pas. Admis derrière une
+    #: recherche, dont la règle juge l'option à son nom.
+    valued: bool = False
+    #: Variable de boucle suivie de deux-points (``$rev:chemin``) : zsh peut y lire un
+    #: modificateur et rendre autre chose que ``valeur:chemin``, mais toujours un seul mot,
+    #: sans tiret. Admis derrière ``git`` et les verbes sans option qui écrive.
+    reshaped: bool = False
 
     @property
     def opaque(self) -> bool:
@@ -344,23 +358,15 @@ _BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
 #: morceau d'une ligne passée AVANT que la ligne soit lue — opérateurs compris. Ce que la
 #: ligne devient ne se lit pas ici : un rappel n'est admis derrière aucun verbe.
 _HISTORY_RE = re.compile(r"![!$*^#?:\w-]")
-#: Ce que le shell exécute ou affecte en développant un texte, entre guillemets doubles et
-#: dans le corps d'un heredoc comme hors guillemets : substitution de commande (avec ou sans
-#: sous-shell), arithmétique à l'ancienne (``$[…]`` affecte et évalue ce que portent les
-#: variables), drapeaux d'expansion de zsh (``${(e)X}`` développe la valeur de ``X``),
-#: expansion qui affecte (``${X=v}``, ``${X:=v}``, ``${X::=v}`` : la liste blanche des
-#: affectations ne se contourne pas par là), opérateur ``@P`` (développe la valeur comme une
-#: invite, substitutions comprises).
-_ACTIVE_EXPANSION_RE = re.compile(
-    r"`|\$\(|\$\[|\$\{[\s|(]|\$\{[A-Za-z_]\w*(?:\[[^\]]*\])?:{0,2}=|\$\{[^{}]*@P\}"
-)
-#: Guillemets ANSI-C ou traduits : hors guillemets, le shell les décode, ce balayage non.
-_DOLLAR_QUOTES = ("$'", '$"')
 
 
 #: ``${NOM}``, ou ``$NOM`` sans indice ni modificateur derrière (``$W[1]``, ``$W:t`` de zsh).
 #: Le nom est pris en entier : ``$fo`` n'est pas ``$f`` suivi de ``o``.
 _PLAIN_EXPANSION_RE = re.compile(r"\$(?:([A-Za-z_]\w*)(?![\w\[:])|\{([A-Za-z_]\w*)\})")
+#: ``$NOM:suite`` jusqu'à la fin du mot, hors guillemets, la suite sans tiret ni opérateur.
+_COLON_EXPANSION_RE = re.compile(r"\$([A-Za-z_]\w*)(:[\w./:~@%,=]*)(?=$|[\s;|&])")
+#: ``--nom=`` : ce qu'un motif de fichiers écrit derrière ne peut pas changer.
+_LONG_OPTION_VALUE_RE = re.compile(r"--[A-Za-z][\w-]*=")
 
 # ── Variable de boucle ───────────────────────────────────────────────────────
 #
@@ -370,23 +376,55 @@ _PLAIN_EXPANSION_RE = re.compile(r"\$(?:([A-Za-z_]\w*)(?![\w\[:])|\{([A-Za-z_]\w
 # connue : une affectation (``W=/chemin``) n'est pas une lecture (liste blanche des
 # variables inertes), et hors du corps de sa boucle la variable peut valoir autre chose
 # (boucle dans un tube, boucle jamais exécutée).
+#
+# Une boucle AFFECTE sa variable. Comme pour une affectation, le classement ne sait pas
+# ce qu'une variable quelconque déclenche : ``for PATH in …`` change où le shell cherche
+# ses commandes. Le nom doit donc être inerte (:func:`_assignment_is_inert`, afficheurs
+# exclus) ou avoir la forme d'un nom local — minuscules et chiffres, sans tiret bas — que
+# ni le shell ni un outil ne lit (:data:`_SHELL_LOWERCASE_NAMES` : zsh lie ``path`` à
+# ``PATH``). Tout autre nom : la boucle n'est pas une lecture.
 
 #: Une valeur écrite en clair, que ni le découpage en mots ni les motifs ne changent : pas
 #: de blanc, pas de guillemet, pas de joker, pas de signe égal en tête (zsh y lit le chemin
 #: d'une commande), et un tiret ou un plus seulement derrière une lettre ou un chiffre (ni
 #: en tête, ni derrière un séparateur).
-_LOOP_VALUE_RE = re.compile(r"(?!=)(?:[\w./@%:,=~]|(?<=[A-Za-z0-9_])[-+])+")
-_NAME_RE = re.compile(r"[A-Za-z_]\w*")
+_LOOP_VALUE = r"(?!=)(?:[\w./@%:,=~]|(?<=[A-Za-z0-9_])[-+])+"
+_LOOP_VALUE_RE = re.compile(_LOOP_VALUE)
+#: Un motif de fichiers derrière un préfixe écrit en clair : chaque fichier trouvé commence
+#: par ce préfixe, et le motif lui-même est la valeur si rien ne répond.
+_LOOP_PATTERN_RE = re.compile(_LOOP_VALUE + r"[*?\[][\w./@%:,=~*?\[\]-]*")
+_GLOB_CHARS = frozenset("*?[")
+_LOCAL_NAME_RE = re.compile(r"[a-z][a-z0-9]*")
+#: Noms en minuscules que le shell lit ou lie à une variable qu'il lit (zsh surtout).
+_SHELL_LOWERCASE_NAMES = frozenset(
+    {
+        "path", "cdpath", "fpath", "manpath", "mailpath", "fignore", "psvar", "prompt", "status", "argv", "watch",
+        "histchars", "signals", "pipestatus", "aliases", "galiases", "saliases", "functions", "commands", "builtins",
+        "options", "parameters", "modules", "nameddirs", "userdirs", "usergroups", "dirstack", "history",
+        "historywords", "jobdirs", "jobtexts", "jobstates", "keymaps", "widgets", "mapfile", "termcap", "terminfo",
+        "langinfo", "errnos", "sysparams", "reswords", "patchars", "funcstack", "functrace", "funcfiletrace",
+        "funcsourcetrace", "epochtime", "match", "mbegin", "mend", "reply", "ignoreeof",
+    }
+)
 _LOOP_OPENERS = frozenset({"for", "while", "until", "select"})
 _BEFORE_A_LOOP = frozenset({"do", "then", "else", "elif", "if", "!", "time"})
-#: Variables que le shell réécrit lui-même entre deux commandes.
-_UNSTABLE_NAMES = frozenset(
-    {"PWD", "OLDPWD", "RANDOM", "SRANDOM", "SECONDS", "LINENO", "REPLY", "OPTARG", "OPTIND", "COLUMNS", "LINES",
-     "EPOCHSECONDS", "EPOCHREALTIME", "UID", "EUID", "PPID", "HOSTNAME", "IFS", "PATH", "HOME", "_", "status",
-     "pipestatus", "argv"}
-)
 #: Au-delà, le segment n'est pas rejugé valeur par valeur : ses variables restent opaques.
 _MAX_LOOP_COMBINATIONS = 32
+
+_Loops = dict[str, list[tuple[int, int, tuple[str, ...]]]]
+
+
+def _loop_name_is_local(name: str) -> bool:
+    return _LOCAL_NAME_RE.fullmatch(name) is not None and name not in _SHELL_LOWERCASE_NAMES
+
+
+def _for_is_read_only(args: list[str]) -> bool:
+    """``for NOM [in mot…]`` dont la variable peut être affectée sans rien déclencher."""
+    if not args or args[1:2] not in ([], ["in"]):
+        return False  # ``for a b in …`` de zsh, ``for ((…))`` : hors de ce qui se lit
+    name = args[0]
+    inert = name not in _PAGER_VARIABLES and _assignment_is_inert(f"{name}=")
+    return inert or _loop_name_is_local(name)
 
 
 def _shell_words(segment: str) -> list[str]:
@@ -401,41 +439,48 @@ def _opens_loop(words: list[str]) -> bool:
     return False
 
 
-def _loop_values(segments: list[tuple[str, str]]) -> dict[str, tuple[int, int, tuple[str, ...]]]:
-    """``{nom: (rang du for, rang de son done, valeurs)}`` des variables de boucle lisibles sur la ligne.
+def _loop_value(word: str) -> str | None:
+    """La valeur que porte un mot de la liste d'une boucle, ou ``None`` s'il ne se lit pas.
 
-    Une variable n'est connue que si UNE seule boucle de la ligne la porte, sous la forme
-    ``for NOM in mot…`` dont chaque mot est écrit en clair (:data:`_LOOP_VALUE_RE`), et si
-    le ``done`` de cette boucle se retrouve. Une variable inerte, qu'une affectation seule
-    pourrait réécrire sans faire de la ligne une mutation, n'est jamais connue.
+    Un mot écrit en clair, le même entre guillemets, ou un motif de fichiers à préfixe
+    (rendu tel quel : :func:`_resolve_words` ne le remplace qu'entre guillemets doubles).
     """
-    found: dict[str, tuple[int, int, tuple[str, ...]]] = {}
-    seen: set[str] = set()
+    if len(word) >= 2 and word[0] == word[-1] and word[0] in "'\"":
+        word = word[1:-1]
+        return word if _LOOP_VALUE_RE.fullmatch(word) else None
+    if _LOOP_VALUE_RE.fullmatch(word) or _LOOP_PATTERN_RE.fullmatch(word):
+        return word
+    return None
+
+
+def _loop_values(segments: list[tuple[str, str]]) -> _Loops:
+    """``{nom: [(rang du for, rang de son done, valeurs), …]}`` des variables de boucle lisibles sur la ligne.
+
+    Une boucle n'est retenue que sous la forme ``for NOM in mot…`` dont chaque mot se lit
+    (:func:`_loop_value`), si son ``done`` se retrouve et si son nom est celui d'une
+    variable locale. Deux boucles qui se suivent peuvent porter le même nom ; deux boucles
+    imbriquées non : après la boucle intérieure, la variable garde sa dernière valeur.
+    """
+    found: _Loops = {}
+    nested: set[str] = set()
     for index, (_operators, segment) in enumerate(segments):
         words = _shell_words(segment)
         while words and words[0] in _BEFORE_A_LOOP:
             words = words[1:]
         if len(words) < 2 or words[0] != "for":
             continue
-        name, values = words[1], words[3:]
-        if name in seen:
-            found.pop(name, None)  # portée par deux boucles : aucune ne fait foi
-            continue
-        seen.add(name)
+        name = words[1]
         end = _loop_end(segments, index)
-        if (
-            end is not None
-            and words[2:3] == ["in"]
-            and values
-            and _NAME_RE.fullmatch(name)
-            and name not in _UNSTABLE_NAMES
-            and not name.startswith(("BASH", "ZSH"))
-            and not _assignment_is_inert(f"{name}=")
-            and name not in _PAGER_VARIABLES
-            and all(_LOOP_VALUE_RE.fullmatch(value) for value in values)
-        ):
-            found[name] = (index, end, tuple(values))
-    return found
+        values = [_loop_value(word) for word in words[3:]]
+        readable = end is not None and words[2:3] == ["in"] and bool(values) and None not in values
+        if not readable or not _loop_name_is_local(name):
+            nested.add(name)  # une boucle illisible sur ce nom : aucune autre ne fait foi
+            continue
+        assert end is not None
+        if any(start < end and index < stop for start, stop, _values in found.get(name, [])):
+            nested.add(name)
+        found.setdefault(name, []).append((index, end, tuple(value for value in values if value is not None)))
+    return {name: loops for name, loops in found.items() if name not in nested}
 
 
 def _loop_end(segments: list[tuple[str, str]], start: int) -> int | None:
@@ -459,13 +504,12 @@ def _loop_end(segments: list[tuple[str, str]], start: int) -> int | None:
     return None
 
 
-def _loop_bindings(
-    loops: dict[str, tuple[int, int, tuple[str, ...]]], index: int, segment: str
-) -> list[dict[str, str]]:
+def _loop_bindings(loops: _Loops, index: int, segment: str) -> list[dict[str, str]]:
     """Les jeux de valeurs sous lesquels juger le segment de rang *index* : un par combinaison, au moins un."""
     bound = {
         name: values
-        for name, (start, end, values) in loops.items()
+        for name, ranges in loops.items()
+        for start, end, values in ranges
         if start < index < end and re.search(rf"\$\{{?{name}\b", segment)
     }
     count = 1
@@ -496,14 +540,15 @@ def _resolve_words(
     values = values or {}
     words: list[_Word] = []
     text: list[str] = []
-    splits = leading = globbed = in_word = False
+    splits = leading = globbed = valued = reshaped = in_word = False
     i, n = 0, len(segment)
     while i < n:
         c = segment[i]
         if c in " \t\n":
             if in_word:
-                words.append(_Word("".join(text), splits, leading, globbed))
-                text, splits, leading, globbed, in_word = [], False, False, False, False
+                words.append(_Word("".join(text), splits, leading, globbed, valued, reshaped))
+                text, in_word = [], False
+                splits = leading = globbed = valued = reshaped = False
             i += 1
             continue
         in_word = True
@@ -533,7 +578,10 @@ def _resolve_words(
                     return None
                 known = _PLAIN_EXPANSION_RE.match(segment, j) if d == "$" else None
                 if known is not None and (known.group(1) or known.group(2)) in values:
-                    text.append(values[known.group(1) or known.group(2)])
+                    value = values[known.group(1) or known.group(2)]
+                    # Un motif à préfixe : entre guillemets, un seul mot qui commence par ce préfixe.
+                    globbed = globbed or not _GLOB_CHARS.isdisjoint(value)
+                    text.append(value)
                     j = known.end()
                     continue
                 if d == "$" and _EXPANSION_RE.match(segment, j) and not any(text):
@@ -547,15 +595,28 @@ def _resolve_words(
             return None
         else:
             known = _PLAIN_EXPANSION_RE.match(segment, i) if c == "$" else None
-            if known is not None and (known.group(1) or known.group(2)) in values:
-                text.append(values[known.group(1) or known.group(2)])
-                i = known.end()
+            name = (known.group(1) or known.group(2)) if known is not None else ""
+            # Hors guillemets, la valeur d'un motif se redécoupe : elle n'est pas remplacée.
+            if name in values and _GLOB_CHARS.isdisjoint(values[name]):
+                text.append(values[name])
+                i = known.end() if known is not None else i
                 continue
+            colon = _COLON_EXPANSION_RE.match(segment, i) if c == "$" and strict else None
+            if colon is not None and _GLOB_CHARS.isdisjoint(values.get(colon.group(1), "*")):
+                value = values[colon.group(1)]
+                if "-" not in value and "+" not in value:
+                    text.append(value + colon.group(2))
+                    reshaped = True
+                    i = colon.end()
+                    continue
             if c == "$" and _EXPANSION_RE.match(segment, i):
                 splits, leading = True, leading or at_start
             elif c in "*?[":
-                if at_start or "".join(text).startswith("-"):
+                written = "".join(text)
+                if at_start or (written.startswith("-") and not _LONG_OPTION_VALUE_RE.match(written)):
                     leading = True
+                elif written.startswith("-"):
+                    valued = True
                 else:
                     globbed = True
             elif c == "{" and _BRACE_EXPANSION_RE.match(segment, i):
@@ -563,7 +624,7 @@ def _resolve_words(
             text.append(c)
             i += 1
     if in_word:
-        words.append(_Word("".join(text), splits, leading, globbed))
+        words.append(_Word("".join(text), splits, leading, globbed, valued, reshaped))
     return words
 
 
@@ -589,7 +650,7 @@ def _prefix_is_readable(prefix: list[_Word]) -> bool:
         if assignments and (_ENV_ASSIGNMENT_RE.match(word.text) or word.text in _SHELL_LEADING_KEYWORDS):
             continue
         assignments = False
-        if word.opaque or word.globbed:
+        if word.opaque or word.globbed or word.valued or word.reshaped:
             return False  # ``env -u N* ls`` : le second fichier trouvé devient la commande
     return True
 
@@ -652,6 +713,11 @@ def _globs_allowed(verb: str, args: list[_Word]) -> bool:
     option dont il serait la valeur. Les verbes qui parlent au système ont leur propre
     règle (:func:`_arguments_are_written_out`).
     """
+    free = verb in _READ_ONLY_LEADING_COMMANDS
+    if any(arg.valued for arg in args) and not (free or verb == "rg"):
+        return False  # la valeur d'une option : admise derrière une recherche, qui juge l'option à son nom
+    if any(arg.reshaped for arg in args) and not (free or verb == "git"):
+        return False  # ``$nom:suite`` : le texte reçu peut différer de celui qui est jugé ici
     if not any(arg.globbed for arg in args):
         return True
     if (
@@ -763,7 +829,7 @@ def _segment_is_script(segment: str, values: dict[str, str], depth: int) -> bool
         return None
     if not inner:
         return False
-    if words[offset].opaque:
+    if words[offset].opaque or words[offset].reshaped:
         return None  # le verbe lui-même vient d'une variable ou d'un joker
     verb = inner[0]
     if verb in _INNER_SHELLS:
@@ -834,193 +900,6 @@ _FILELESS_OUT_RE = re.compile(r">" + _FILELESS_TARGET + _REDIRECTION_END)
 _FILELESS_BOTH_RE = re.compile(r"&>>?[ \t]*/dev/null" + _REDIRECTION_END)
 
 
-_QUOTED, _ESCAPED, _UNCLOSED = "cité", "échappé", "non fermé"
-
-
-def _quoted_end(text: str, i: int) -> int:
-    """Indice qui suit le texte cité ouvert en *i* (``'`` ou ``"``), ou -1 s'il n'est jamais fermé.
-
-    Dans des guillemets doubles, un antislash échappe le caractère qui le suit, comme pour le shell.
-    """
-    if text[i] == "'":
-        end = text.find("'", i + 1)
-        return end + 1 if end >= 0 else -1
-    j, n = i + 1, len(text)
-    while j < n and text[j] != '"':
-        j += 2 if text[j] == "\\" else 1
-    return j + 1 if j < n else -1
-
-
-def _opaque_spans(text: str) -> list[tuple[int, int, str]]:
-    """Les morceaux de *text* que le shell ne lit pas comme de la syntaxe : ``(début, fin, nature)``.
-
-    :data:`_QUOTED` : un texte entre guillemets fermés. :data:`_ESCAPED` : un caractère
-    échappé hors guillemets (``\\"`` n'ouvre aucun texte cité). :data:`_UNCLOSED` : un
-    guillemet jamais fermé, qui couvre tout le reste.
-    """
-    spans: list[tuple[int, int, str]] = []
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "\\":
-            spans.append((i, min(i + 2, n), _ESCAPED))
-            i += 2
-        elif c in "'\"":
-            end = _quoted_end(text, i)
-            if end < 0:
-                spans.append((i, n, _UNCLOSED))
-                break
-            spans.append((i, end, _QUOTED))
-            i = end
-        else:
-            i += 1
-    return spans
-
-
-def _opens_dollar_quote(text: str) -> bool:
-    """Vrai si *text* ouvre, hors guillemets, une chaîne ``$'…'`` (ANSI-C) ou ``$"…"`` (localisée).
-
-    :func:`_opaque_spans` ne modélise ni l'une ni l'autre. Dans ``$'…'``, ``\\'`` est un
-    guillemet échappé qui ne ferme rien ; le balayage, lui, ferme la chaîne là et prend la
-    suite, que le shell exécute, pour un texte cité. La forme n'est pas modélisée : elle
-    est refusée. S'arrêter à la première suffit, puisque le balayage et le shell lisent la
-    même chose jusqu'à elle. Entre guillemets simples ou doubles, ou derrière un antislash,
-    ``$'`` est un texte (``grep 'a$' f``).
-    """
-    cursor = 0
-    for start, end, _kind in _opaque_spans(text):
-        # ``start > cursor`` : le dollar n'appartient pas à la zone précédente (``\\$'a'``).
-        if text[start] in "'\"" and start > cursor and text[start - 1] == "$":
-            return True
-        cursor = end
-    return False
-
-
-# ── Ce que le shell ne lit pas comme du code : commentaires et corps de heredoc ──
-#
-# Un heredoc n'est reconnu que là où le shell en ouvre un : hors guillemets, non échappé,
-# hors commentaire, et pas dans un ``<<<`` (une chaîne passée sur l'entrée, dont les lignes
-# suivantes sont des commandes). Son corps commence après la fin de la ligne qui l'ouvre
-# et s'arrête à la ligne qui porte son étiquette, écrite exactement : rien devant (des
-# tabulations pour ``<<-``), rien derrière. Une ligne en retrait ne ferme rien pour le
-# shell ; la prendre pour la fermeture ferait lire comme du code la suite du corps, et ce
-# qu'elle cite ouvrirait un autre « heredoc » sur les commandes qui suivent la vraie fin.
-# Sans ligne de fermeture, rien n'est retiré.
-#
-# Un ``<<`` dont l'étiquette ne se lit pas (``<<\EOF``, ``<<'EO'F``, ``<<$X``) ouvre quand
-# même un heredoc pour le shell : ce balayage ne sait pas où il finit, la ligne entière
-# ne se lit pas.
-#
-# Un ``#`` se lit de deux façons : commentaire jusqu'à la fin de la ligne (``sh -c``, un
-# script), ou caractère ordinaire (zsh interactif, où ``echo a # b ; rm f`` supprime
-# ``f``). Chaque lecture a ses commentaires et ses corps ; ce qui dépend de la ligne vaut
-# sous les deux.
-
-
-@dataclass(frozen=True, slots=True)
-class _Layout:
-    """Les morceaux d'une ligne de commande que le shell ne lit pas comme du code."""
-
-    #: ``(début, fin)`` de chaque commentaire, sans le retour à la ligne qui le termine.
-    comments: tuple[tuple[int, int], ...]
-    #: ``(début du corps, fin du corps, fin de la ligne de fermeture)`` de chaque heredoc.
-    bodies: tuple[tuple[int, int, int], ...]
-    #: Un ``<<`` dont l'étiquette ne se lit pas : la ligne entière ne se lit pas.
-    unreadable: bool
-
-
-def _readings(command: str) -> tuple[bool, ...]:
-    """Les lectures d'un ``#`` sous lesquelles juger *command* : avec commentaires, puis sans."""
-    return (True, False) if "#" in command else (False,)
-
-
-def _layout(command: str, *, comments: bool) -> _Layout:
-    """Commentaires et corps de heredoc de *command*, lue avec ou sans commentaires."""
-    comment_spans: list[tuple[int, int]] = []
-    bodies: list[tuple[int, int, int]] = []
-    pending: list[tuple[str, bool]] = []
-    unreadable = False
-    i, n = 0, len(command)
-    while i < n:
-        c = command[i]
-        if c == "\\":
-            i += 2
-        elif c in "'\"":
-            end = _quoted_end(command, i)
-            i = n if end < 0 else end
-        elif comments and c == "#" and (i == 0 or command[i - 1].isspace() or command[i - 1] in ";&|("):
-            end = command.find("\n", i)
-            end = n if end < 0 else end
-            comment_spans.append((i, end))
-            i = end
-        elif command.startswith("<<<", i):
-            i += 3
-        elif command.startswith("<<", i):
-            opening = _HEREDOC_OPEN_RE.match(command, i)
-            if opening is None:
-                unreadable = True
-                i += 2
-            else:
-                pending.append((opening.group(2), opening.group(0).startswith("<<-")))
-                i = opening.end()
-        elif c == "\n" and pending:
-            i += 1
-            for tag, tabbed in pending:
-                indent = r"\t*" if tabbed else ""
-                closing = re.compile(rf"^{indent}{re.escape(tag)}$", re.MULTILINE).search(command, i)
-                if closing is None:
-                    break  # jamais fermé : la suite reste du code, donc inspectée
-                bodies.append((i, closing.start(), closing.end()))
-                i = closing.end()
-            pending.clear()
-        else:
-            i += 1
-    return _Layout(tuple(comment_spans), tuple(bodies), unreadable)
-
-
-def _without_spans(text: str, spans: list[tuple[int, int]]) -> str:
-    out: list[str] = []
-    cursor = 0
-    for start, end in sorted(spans):
-        out.append(text[cursor:start])
-        cursor = max(cursor, end)
-    out.append(text[cursor:])
-    return "".join(out)
-
-
-def _code_and_bodies(command: str, *, comments: bool) -> tuple[str, list[str]] | None:
-    """Le code de *command* sans ses commentaires ni ses corps de heredoc, et ces corps ; ``None`` s'il ne se lit pas."""
-    layout = _layout(command, comments=comments)
-    if layout.unreadable:
-        return None
-    removed = [*layout.comments, *((start, closed) for start, _end, closed in layout.bodies)]
-    return _without_spans(command, removed), [command[start:end] for start, end, _closed in layout.bodies]
-
-
-def strip_heredoc_bodies(command: str) -> str:
-    """*command* sans les corps de heredoc que le shell ne lira comme du code sous aucune lecture.
-
-    Pour ce qui inspecte la ligne (détection destructive, secrets, garde d'autorité) :
-    un corps est une donnée, mais seulement s'il en est une sous les deux lectures d'un
-    ``#``. Si la ligne ne se lit pas, rien n'est retiré : tout reste inspecté.
-    """
-    if "<<" not in command:
-        return command
-    layouts = [_layout(command, comments=comments) for comments in _readings(command)]
-    if any(layout.unreadable for layout in layouts):
-        return command
-    spans = [(start, closed) for start, _end, closed in layouts[0].bodies]
-    for other in layouts[1:]:
-        others = [(start, closed) for start, _end, closed in other.bodies]
-        spans = [
-            (max(start, other_start), min(end, other_end))
-            for start, end in spans
-            for other_start, other_end in others
-            if max(start, other_start) < min(end, other_end)
-        ]
-    return _without_spans(command, spans)
-
-
 def executed_surfaces(command: str) -> tuple[str, ...]:
     """Ce que le shell exécutera de *command*, guillemets lus comme lui, sous chaque lecture d'un ``#``.
 
@@ -1033,13 +912,10 @@ def executed_surfaces(command: str) -> tuple[str, ...]:
     surfaces: list[str] = []
     for comments in _readings(command):
         read = _code_and_bodies(command, comments=comments)
-        if read is None:
-            surfaces.append(command)
-        elif _opens_dollar_quote(read[0]):
-            surfaces.append(read[0])
-        else:
-            surfaces.append(_read_surface(read[0]))
-            surfaces.append(_unquoted(read[0], prose=False))
+        code = command if read is None else read[0]
+        # Illisible ou guillemets non décodés : le texte brut, dont rien n'est effacé.
+        surfaces.append(code if read is None or _opens_dollar_quote(code) else _read_surface(code))
+        surfaces.append(_unquoted(code, prose=False))
     return tuple(dict.fromkeys(surfaces))
 
 
@@ -1049,8 +925,11 @@ def unquoted_text(command: str) -> str:
     Pour la détection des lectures de secret, à côté de la ligne brute : un nom de
     fichier coupé par des guillemets (``.e"n"v``) est le nom que le programme reçoit.
     """
-    texts = [read[0] for comments in _readings(command) if (read := _code_and_bodies(command, comments=comments))]
-    return "\n".join(dict.fromkeys(_unquoted(text, prose=True) for text in texts if not _opens_dollar_quote(text)))
+    texts: list[str] = []
+    for comments in _readings(command):
+        read = _code_and_bodies(command, comments=comments)
+        texts.append(_unquoted(command if read is None else read[0], prose=True))  # illisible : rien n'est retiré
+    return "\n".join(dict.fromkeys(texts))
 
 
 def _unquoted(code: str, *, prose: bool) -> str:
@@ -1202,7 +1081,15 @@ def _read_surface(command: str) -> str:
     détection destructive garde :func:`command_surface` et ce qu'elle inspecte aujourd'hui.
     *command* arrive sans corps de heredoc (:func:`_code_and_bodies`) : rien n'en est retiré ici.
     """
-    return _blank_quoted(command, [(start, end) for start, end, kind in _opaque_spans(command) if kind == _QUOTED])
+    return _blank_quoted(
+        command,
+        [
+            (start, end)
+            for start, end, kind in _opaque_spans(command)
+            # Une substitution entre guillemets doubles est exécutée : elle reste sur la surface.
+            if kind == _QUOTED and not (command[start] == '"' and substitutes(command[start:end]))
+        ],
+    )
 
 
 def _blank_quoted(surface: str, spans: list[tuple[int, int]]) -> str:

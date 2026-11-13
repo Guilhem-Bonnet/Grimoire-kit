@@ -360,3 +360,18 @@ def test_une_boucle_sur_un_motif_a_prefixe_variable_citee_reste_une_lecture(comm
 )
 def test_une_boucle_sur_un_motif_reste_refusee_hors_de_ce_cas(command: str) -> None:
     assert _classe(command) is not LECTURE
+
+
+# ── Une substitution échappée entre guillemets doubles est un texte ──────────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'grep -n "^- fix(hosts): la \\`classe\\` de lecture\\|^- feat" CHANGELOG.md | cut -c1-60',
+        'grep -h "Lis \\`notes" docs/*.md | head -5',
+        'echo "prix : \\$(5)"',
+    ],
+)
+def test_une_substitution_echappee_entre_guillemets_reste_un_texte(command: str) -> None:
+    assert _classe(command) is LECTURE

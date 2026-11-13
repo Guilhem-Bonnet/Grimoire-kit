@@ -476,16 +476,25 @@ le ledger. Depuis le lot A de l'issue #638 :
   dans les arguments de `find`, `sort`, `sed` ou `git`), compte comme une
   écriture — sauf la variable d'une boucle `for` dont les valeurs sont écrites
   en clair sur la ligne, dans le corps de cette boucle
-  (`for f in a b; do sed -n 1,5p $f; done` lit). Un motif de fichiers en
+  (`for f in a b; do sed -n 1,5p $f; done` lit). Une boucle affecte sa
+  variable : son nom doit être celui d'une variable inerte ou un nom local
+  (minuscules et chiffres, hors noms que le shell lit, comme `path` sous zsh),
+  sinon la boucle compte comme une écriture (`for PATH in …`). Un motif de fichiers en
   opérande reste une lecture (`rg motif src/*.py`), pas là où le nombre ou la
   place des mots décide (les opérandes de `uniq` et `xxd`, le script de `sed`),
-  ni dans un mot qui commence par un tiret. Un rappel d'historique (`!!`,
+  ni dans un mot qui commence par un tiret — sauf derrière le `=` d'une
+  option longue d'une recherche (`grep … --include=*.py`), où il ne peut pas
+  changer le nom de l'option. Un rappel d'historique (`!!`,
   `!$`), une expansion qui affecte une variable ou exécute en se développant,
   et un heredoc dont l'étiquette ne se lit pas comptent comme une écriture.
   Sous le proxy de terminal, `rtk grep` suit la règle de `rg`, à qui il confie
-  la recherche. La détection des commandes destructives lit la même ligne :
-  un corps de heredoc n'est une donnée que là où le shell ouvre et ferme un
-  heredoc, un guillemet échappé ou un commentaire ne cache pas une
+  la recherche. Un heredoc n'est reconnu que dans une commande simple : un
+  `<<` écrit dans une expansion, une expression arithmétique, un test, un
+  indice ou une substitution n'ouvre rien pour le shell, et la ligne compte
+  alors comme une écriture. La détection des commandes destructives lit la
+  même ligne : un corps de heredoc n'est une donnée que là où le shell ouvre
+  et ferme un heredoc (le message d'un commit écrit par
+  `"$(cat <<'EOF' … EOF)"` en est une), un guillemet échappé ou un commentaire ne cache pas une
   commande, et un verbe ou un drapeau écrit entre guillemets est le mot que
   le shell lance (un texte cité qui porte des blancs reste une donnée) ;
 - `stop` refuse la clôture (`decision: block`, remède dans `reason`) quand ce
