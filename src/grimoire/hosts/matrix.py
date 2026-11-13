@@ -175,7 +175,7 @@ def _hook_cell(hook: HookSpec, host: HostId, profile: HostProfile, plan: EmitPla
         if not profile.supports_event(hook.event):
             return Cell("hook", subject, host.value, INERT, carriers=carriers,
                         reason=f"écrit, mais {profile.display_name} ne déclenche pas l'événement {event}")
-        if hook.enforcement is Enforcement.BLOCKING and profile.blocking_hooks:
+        if hook.enforcement is Enforcement.BLOCKING and profile.blocks(hook.event):
             return Cell("hook", subject, host.value, ENFORCED, Enforcement.BLOCKING.value, carriers)
         why = "l'hôte ne sait pas bloquer" if hook.enforcement is Enforcement.BLOCKING else ""
         return Cell("hook", subject, host.value, ADVISORY, Enforcement.ADVISORY.value, carriers, why)

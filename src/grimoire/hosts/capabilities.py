@@ -62,6 +62,12 @@ class HostProfile:
     commands_native: bool = False
     #: Hooks can refuse a tool call or a turn closure, not merely inject text.
     blocking_hooks: bool = False
+    #: When set, the only events that can actually refuse something. Some hosts
+    #: block an action without documenting any way to refuse the end of a turn
+    #: (Gemini CLI: ``BeforeTool``/``BeforeAgent`` block, ``AfterAgent`` does
+    #: not); a single boolean would turn the second case into a claim nobody
+    #: observed. ``None`` means "trust :attr:`blocking_hooks`".
+    blocking_events: frozenset[HookEvent] | None = None
     #: Can be told to open a session *inside* a named agent.
     #: True only where the host documents it (issue #716): Claude Code with
     #: ``claude --agent <name>`` (CLI reference, "Specify an agent for the
@@ -103,6 +109,12 @@ class HostProfile:
             # hôte ne le reçoit, donc aucun émetteur ne l'écrit.
             return False
         return bool(getattr(manifest.hooks, field_name, False))
+
+    def blocks(self, event: HookEvent) -> bool:
+        """Cet hôte peut-il **refuser** *event*, ou seulement l'informer ?"""
+        if self.blocking_events is not None:
+            return event in self.blocking_events
+        return self.blocking_hooks
 
     def supported_events(self) -> tuple[HookEvent, ...]:
         return tuple(e for e in HookEvent if self.supports_event(e))
@@ -198,10 +210,13 @@ CURSOR_PROFILE = HostProfile(
 GEMINI_PROFILE = HostProfile(
     host_id=HostId.GEMINI_CLI,
     display_name="Gemini CLI",
-    subagents_native=False,
+    subagents_native=True,
     skills_native=False,
-    commands_native=False,
-    blocking_hooks=False,
+    commands_native=True,
+    blocking_hooks=True,
+    # BeforeTool et BeforeAgent documentent un refus ; AfterAgent/SessionEnd
+    # sont des hooks, pas des points de blocage (non vérifié, CLI absente).
+    blocking_events=frozenset({HookEvent.PRE_TOOL_USE, HookEvent.USER_PROMPT_SUBMIT}),
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint="GEMINI.md",
@@ -211,7 +226,13 @@ GEMINI_PROFILE = HostProfile(
         "`gemini --acp` reste valable tant que la CLI est installée ; sur un compte gratuit, "
         "migrer vers Antigravity CLI et mettre à jour la commande ACP du profil."
     ),
-    notes="Prose entrypoint plus MCP; no lifecycle hooks, so governance is advisory only.",
+    notes=(
+        "Hooks, commandes TOML, sous-agents et MCP sont écrits d'après geminicli.com/docs "
+        "(lue le 2026-11-12, v0.64.0 annoncée ; CLI non installée sur le poste). "
+        "BeforeTool et BeforeAgent refusent une action ; SessionStart/AfterTool/PreCompress "
+        "informent ; le blocage de fin de tour (AfterAgent) et le format des fichiers de "
+        "session ne sont pas vérifiés. Aucune session d'agent détachée documentée."
+    ),
 )
 
 OPENCODE_PROFILE = HostProfile(
