@@ -25,6 +25,49 @@ _DEFAULT_LEDGER = Path("_grimoire-runtime-output/ledger")
 _STATUS_LABEL = {
     "open": "ouverte", "answered": "répondue", "deduced": "déduite", "not_awaited": "sans réponse, plus attendue",
 }
+_PRECEDENT_LABEL = {
+    "active": "en vigueur", "expired": "expiré", "forgotten": "oublié", "reverted": "repris par « Revenir »",
+    "superseded": "remplacé par une réponse plus récente",
+}
+
+
+def _precedents(ctx: typer.Context, service: Any, forget_id: str, actor: str, origin: str) -> None:
+    """``task questions --precedents`` (liste) et ``--forget <id>`` (retrait, canal humain) — la jurisprudence du pilote."""
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.autopilot import load_autopilot_policy
+    from grimoire.missions.precedents import forget, precedents
+
+    policy = load_autopilot_policy(service.project_root)
+    try:
+        if forget_id:
+            gone = forget(service, forget_id, actor, origin=origin)
+            if _fmt(ctx) == "json":
+                typer.echo(json.dumps({"forgotten": gone.to_dict()}, indent=2, ensure_ascii=False))
+            else:
+                console.print(f"[green]OK[/green] précédent {gone.id} oublié ({gone.question_class} : « {gone.option} »)")
+            return
+        found = precedents(service, days=policy.precedent_days)
+    except GrimoireError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if _fmt(ctx) == "json":
+        typer.echo(json.dumps(
+            {"enabled": policy.precedents, "days": policy.precedent_days, "policy_error": policy.error,
+             "precedents": [p.to_dict() for p in found]},
+            indent=2, ensure_ascii=False,
+        ))
+        return
+    switch = "activée" if policy.precedents and not policy.error else "désactivée : rien n'est appliqué"
+    console.print(f"Jurisprudence {switch} (`autopilot.precedents`), durée de vie {policy.precedent_days} jour(s).")
+    if not found:
+        console.print("[green]OK[/green] Aucun précédent : aucune réponse humaine à une question écrite par le kit.")
+        return
+    for p in reversed(found):
+        console.print(
+            f"  - {p.id} ({_PRECEDENT_LABEL.get(p.state, p.state)}) {p.question_class} → « {p.option} » — "
+            f"{p.answered_at[:10]}, {p.task_id}"
+        )
+        console.print(f"    [dim]question d'origine : {p.question}[/dim]")
 
 
 def _fmt(ctx: typer.Context) -> str:
@@ -89,13 +132,27 @@ def register(task_app: typer.Typer) -> None:
         ctx: typer.Context,
         task_id: Annotated[str, typer.Argument(help="Une tâche (défaut : toutes celles qui ont des questions).")] = "",
         open_only: Annotated[bool, typer.Option("--open", help="Seulement les questions encore sans réponse.")] = False,
+        precedents: Annotated[
+            bool, typer.Option("--precedents", help="Les précédents : les réponses humaines qui font jurisprudence pour le pilote.")
+        ] = False,
+        forget: Annotated[
+            str, typer.Option("--forget", help="Retirer un précédent par son identifiant (canal humain seulement).")
+        ] = "",
         project_root: _PROJECT_ROOT = Path(),
         ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
+        actor: _ACTOR = "cli",
     ) -> None:
         """Le registre des questions : statut, bloquante ou non, pourquoi, qui a répondu et sur quelle source."""
         from grimoire.missions.questions import OPEN, questions_summary
 
         service = ct._service(project_root, ledger_root)
+        if precedents or forget:
+            from grimoire.missions.mandate import gesture_origin
+
+            # L'origine n'est établie que pour un retrait : lister ne demande rien à personne.
+            origin = gesture_origin(ct._comment_origin())[0] if forget else ""
+            _precedents(ctx, service, forget.strip(), actor, origin)
+            return
         tasks = [ct._require_task(service, task_id)] if task_id else service.ledger.list_tasks()
         summaries = []
         for task in tasks:

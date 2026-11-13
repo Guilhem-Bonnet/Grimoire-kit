@@ -15,8 +15,9 @@ qui attend un humain :
   accusées, claims dont plus aucune session ne tient la tâche ;
 - propositions en attente ;
 - décisions que le pilote automatique a prises **sans qu'un jugement les assume** (``autopilot.decided``) : l'option
-  par défaut d'une question du kit (source ``default``, sous ``autopilot.default_action: apply_recommended``) et
-  l'option qu'un agent recommandait (source ``recommended``). Un bloc à part, « Décisions à revoir »
+  par défaut d'une question du kit (source ``default``, sous ``autopilot.default_action: apply_recommended``),
+  l'option qu'un agent recommandait (source ``recommended``) et celle d'une réponse humaine antérieure de la même
+  classe (source ``precedent``, sous ``autopilot.precedents: on``). Un bloc à part, « Décisions à revoir »
   (``reviewDecisions``), avec la question, l'option appliquée, la justification et la source. Le pilote a déjà
   tranché : elles n'entrent dans aucune section, ni dans ``count``, ``maintainCount`` ou ``counts`` — rien n'y attend
   l'humain ;
@@ -323,13 +324,14 @@ def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any]]:
 def _review_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime) -> list[dict[str, Any]]:
     """Les options que le pilote a appliquées sans jugement assumé, la plus récente d'abord : à relire, jamais à trancher.
 
-    Deux sources, dites dans ``source`` : ``default`` (l'option par défaut d'une question du kit, ou le repli d'une
-    réponse sans confiance) et ``recommended`` (l'option que l'agent recommandait, prise telle quelle). Un jugement
-    assumé (``judgment``) n'en est pas. Une décision que l'humain a reprise (« Revenir ») sort du bloc, comme celles de
+    Trois sources, dites dans ``source`` : ``default`` (l'option par défaut d'une question du kit, ou le repli d'une
+    réponse sans confiance), ``recommended`` (l'option que l'agent recommandait, prise telle quelle) et ``precedent``
+    (la dernière réponse humaine de la même classe, avec ``precedent`` : son identifiant, la question d'origine et la
+    date de la réponse). Un jugement assumé (``judgment``) n'en est pas. Une décision que l'humain a reprise (« Revenir ») sort du bloc, comme celles de
     plus de :data:`REVIEW_DECISION_VISIBLE` ; une question décidée deux fois (écriture rejouée) n'y figure qu'une
     fois ; au plus :data:`MAX_REVIEW_DECISIONS`.
     """
-    from grimoire.missions.autopilot import DECIDED_EVENT, DEFAULT_SOURCE
+    from grimoire.missions.autopilot import DECIDED_EVENT, DEFAULT_SOURCE, PRECEDENT_SOURCE
 
     def key(event: Any) -> tuple[str, str]:
         return str(event.payload.get("task_id") or event.entity_id or ""), str(event.payload.get("question_id") or "")
@@ -339,7 +341,7 @@ def _review_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime
     for event in pilot_events:
         payload = event.payload
         source = payload.get("recommendation_source")
-        if event.event_type != DECIDED_EVENT or source not in (DEFAULT_SOURCE, "recommended"):
+        if event.event_type != DECIDED_EVENT or source not in (DEFAULT_SOURCE, "recommended", PRECEDENT_SOURCE):
             continue
         if key(event) in reverted:
             continue
@@ -364,6 +366,12 @@ def _review_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime
             "justification": str(payload.get("justification") or ""),
             "since": str(event.created_at),
         }
+        ruling = payload.get("precedent")
+        if source == PRECEDENT_SOURCE and isinstance(ruling, dict):
+            found[key(event)]["precedent"] = {
+                "id": str(ruling.get("id") or ""), "class": str(ruling.get("class") or ""),
+                "question": str(ruling.get("question") or ""), "answered_at": str(ruling.get("answered_at") or ""),
+            }
     return sorted(found.values(), key=lambda item: item["since"], reverse=True)[:MAX_REVIEW_DECISIONS]
 
 

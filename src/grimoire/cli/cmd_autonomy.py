@@ -320,7 +320,8 @@ def autopilot_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -
     policy = load_autopilot_policy(root)
     breaker = read_breaker(home_root(root))
     _emit(ctx, {**state.to_dict(), "policy_error": policy.error, "extra_reserved": list(policy.extra),
-                "default_action": policy.default_action, "breaker": breaker.to_dict()})
+                "default_action": policy.default_action, "precedents": policy.precedents,
+                "precedent_days": policy.precedent_days, "breaker": breaker.to_dict()})
     if _fmt(ctx) == "json":
         return
     if state.active:
@@ -328,6 +329,10 @@ def autopilot_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -
     else:
         console.print(f"pilote inactif ({state.reason})")
     console.print(f"action par défaut : {policy.default_action} (`autopilot.default_action`)")
+    console.print(
+        f"jurisprudence : {'on' if policy.precedents else 'off'} (`autopilot.precedents`), "
+        f"{policy.precedent_days} jour(s) (`grimoire task questions --precedents`)"
+    )
     if breaker.open:
         console.print(
             f"[red]disjoncteur ouvert[/red] : {escape(breaker.reason)} — aucune session n'est lancée ; "

@@ -37,6 +37,7 @@ from grimoire.missions.merger import (
 from grimoire.missions.orchestrate import run_tick
 from grimoire.missions.orchestrator_policy import load_orchestrator_policy
 from grimoire.missions.orchestrator_session import kit_written
+from grimoire.missions.precedents import question_class
 from grimoire.missions.review_receipt import write_receipt
 from grimoire.missions.reviewer import REVIEW_LAUNCHED_EVENT
 from grimoire.missions.schemas import TaskState
@@ -1136,6 +1137,9 @@ def test_ci_rouge_a_repetition_escalade_a_l_humain(projet: Path, host: FakeHost)
     assert [c.value for c in v2.choices] == ["reprendre", "abandonner"] and v2.options == ("reprendre", "abandonner")
     # GAO-pilote-appli-001 : l'escalade porte son option par défaut, et le ledger établit que le kit l'a écrite.
     assert v2.recommended == "reprendre" and kit_written(TaskService(projet).ledger.events_for(tid), v2)
+    # GAO-jurisprudenc-001 : l'escalade écrit sa cause codée, d'où le kit calcule la classe de la question.
+    assert [e.payload["cause"] for e in events(projet, tid, MERGE_ESCALATED_EVENT)] == ["ci_red"]
+    assert question_class(TaskService(projet).ledger.events_for(tid), v2) == "merge:ci_red"
     assert len(host.of("claude", "--bg", "--resume")) == 1
     assert [e.payload.get("escalated", False) for e in events(projet, tid, MERGE_BOUNCED_EVENT)] == [False, True]
     assert len(events(projet, tid, MERGE_ESCALATED_EVENT)) == 1

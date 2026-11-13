@@ -125,6 +125,7 @@ if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
     from grimoire.missions.mandate import MandateStore
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
+    from grimoire.missions.precedents import PrecedentPlan
     from grimoire.missions.schemas import LedgerEvent, MissionTask
     from grimoire.missions.service import TaskService
     from grimoire.missions.waiting import Question
@@ -153,6 +154,7 @@ __all__ = [
     "eligible_questions",
     "kit_written",
     "mandate_gesture",
+    "precedent_plan",
     "question_source",
     "record_answer_refused",
     "session_states",
@@ -336,16 +338,81 @@ def _states(service: TaskService, claude_bin: str = "claude") -> dict[str, str] 
 
 
 def _defaults_taken(events: list[LedgerEvent]) -> int:
-    """Les décisions par défaut prises sur la tâche depuis la dernière réponse humaine (seul l'humain remet à zéro)."""
-    from grimoire.missions.autopilot import DECIDED_EVENT, DEFAULT_SOURCE
+    """Les options appliquées sans jugement à la place d'une réponse (par défaut, ou d'un précédent) sur la tâche
+    depuis la dernière réponse humaine (seul l'humain remet à zéro)."""
+    from grimoire.missions.autopilot import DECIDED_EVENT, DEFAULT_SOURCE, PRECEDENT_SOURCE
 
     count = 0
     for event in events:
         if event.event_type == HUMAN_ANSWERED_EVENT and event.payload.get("origin") == "human":
             count = 0
-        elif event.event_type == DECIDED_EVENT and event.payload.get("recommendation_source") == DEFAULT_SOURCE:
+        elif (
+            event.event_type == DECIDED_EVENT
+            and event.payload.get("recommendation_source") in (DEFAULT_SOURCE, PRECEDENT_SOURCE)
+        ):
             count += 1
     return count
+
+
+def precedent_plan(
+    service: TaskService, task: MissionTask, question: Question, events: list[LedgerEvent], policy: AutopilotPolicy,
+    *, now: datetime | None = None,
+) -> PrecedentPlan:
+    """Ce que la jurisprudence applique à *question* : l'option de la dernière réponse humaine de sa classe, ou
+    pourquoi aucune (:mod:`grimoire.missions.precedents`).
+
+    Rien sans le réglage ``autopilot.precedents: on`` : un projet qui ne règle rien ne change pas. Sinon, dans l'ordre :
+
+    - la question est **écrite par le kit** (:func:`kit_written`) et sa classe est calculée sur ce qu'il a écrit
+      (:func:`~.precedents.question_class`) — une question d'agent n'a ni classe ni précédent ;
+    - la liste fermée ne la garde pas (:func:`~.autopilot.reserved_reason`) ;
+    - un précédent en vigueur existe pour la classe ; illisibles, aucun n'est appliqué et le plan le dit
+      (``unreadable``) ;
+    - son option passe les refus de la décision par défaut (:func:`~.autopilot.safe_option` : encore l'une des
+      options de la question, ni fusion ni permission, jamais « abandonner » ni un choix dangereux) ; « abandonner »
+      en dernier mot de l'humain pour la classe rend le plan ``contrary`` : l'option par défaut ne reprend pas non plus ;
+    - la borne :data:`MAX_DEFAULT_DECISIONS` n'est pas atteinte — partagée avec la décision par défaut : les deux
+      relancent la tâche, et la même boucle escalade → reprise les guette.
+
+    La preuve que le worker ne travaille plus (:func:`worker_at_work`) reste à l'appelant, comme pour le défaut.
+    """
+    from grimoire.missions.autopilot import reserved_reason, safe_option
+    from grimoire.missions.precedents import (
+        ACTIVE,
+        PrecedentPlan,
+        PrecedentsUnreadableError,
+        precedents,
+        question_class,
+    )
+
+    if policy.error or not policy.precedents:
+        return PrecedentPlan(reason="jurisprudence désactivée (`autopilot.precedents`)")
+    if not kit_written(events, question):
+        return PrecedentPlan(reason="question écrite par un agent : aucun précédent ne s'y applique")
+    klass = question_class(events, question)
+    if not klass:
+        return PrecedentPlan(reason="question sans classe de précédent")
+    if kept := reserved_reason(question, task, service.project_root, policy, kit_written=True):
+        return PrecedentPlan(reason=kept)
+    try:
+        listed = precedents(service, days=policy.precedent_days, now=now)
+    except PrecedentsUnreadableError as exc:
+        return PrecedentPlan(reason=f"{exc} : aucun précédent appliqué", unreadable=True)
+    found = next((p for p in listed if p.question_class == klass and p.state == ACTIVE), None)
+    if found is None or found.kind != question.kind:
+        return PrecedentPlan(reason=f"aucun précédent en vigueur pour la classe {klass}")
+    option, why = safe_option(question, found.option)
+    if not option:
+        return PrecedentPlan(
+            reason=f"précédent {found.id} ({klass}, « {found.option} ») non appliqué : {why}",
+            contrary=" ".join(found.option.split()).lower() == ABANDON,  # le dernier mot de l'humain : pas de reprise par défaut
+        )
+    if _defaults_taken(events) >= MAX_DEFAULT_DECISIONS:
+        return PrecedentPlan(reason=(
+            f"{MAX_DEFAULT_DECISIONS} options déjà appliquées sans jugement sur cette tâche depuis la dernière "
+            "réponse humaine"
+        ))
+    return PrecedentPlan(option=option, precedent=found)
 
 
 def default_plan(
@@ -420,8 +487,10 @@ def answer_plan(
     **Pilote activé** : la liste fermée est jugée d'abord (:func:`~.autopilot.reserved_reason`), puis la réponse cite sa
     source ou sa justification et sa confiance (:func:`~.autopilot.judge`) ; « abandonner » est permis avec sa raison
     (la tâche est annulée, la raison au ledger). Une question laissée à l'humain faute de confiance est inscrite
-    (:data:`~.autopilot.DEFERRED_EVENT`) — sauf sous ``autopilot.default_action: apply_recommended``, où l'option
-    recommandée tranche à la place de la réponse soumise quand :func:`default_plan` en rend une (source ``default``).
+    (:data:`~.autopilot.DEFERRED_EVENT`) — sauf quand une option peut trancher à la place de la réponse soumise :
+    celle de la dernière réponse humaine de la même classe (``autopilot.precedents: on``, :func:`precedent_plan`,
+    source ``precedent``), sinon l'option recommandée sous ``autopilot.default_action: apply_recommended``
+    (:func:`default_plan`, source ``default``).
     Comme le tick, cette voie ne reprend pas par défaut une tâche dont rien ne prouve que le worker ne travaille plus
     (:func:`worker_at_work`) : question écrite par le kit ou geste ``resume``, la question reste alors à l'humain.
     """
@@ -445,21 +514,26 @@ def answer_plan(
         _check_caller(service, task, question, events, pilot=pilot)
     if policy is None:
         return gesture, None
-    kit, fallback = kit_written(events, question), ""
-    if not assumes(confidence):  # personne n'assume : l'option par défaut, si le réglage et les gardes en rendent une
-        fallback = default_plan(service, task, question, events, policy)[0]
+    kit, fallback, ruling, unread = kit_written(events, question), "", None, ""
+    if not assumes(confidence):  # personne n'assume : un précédent, sinon l'option par défaut, si les gardes en rendent
+        plan = precedent_plan(service, task, question, events, policy)
+        fallback, ruling, unread = plan.option, plan.precedent, plan.reason if plan.unreadable else ""
+        if not fallback and not plan.contrary:
+            fallback = default_plan(service, task, question, events, policy)[0]
         if fallback and (kit or gesture == "resume") and worker_at_work(service, task.id, _states(service)):
-            fallback = ""
+            fallback, ruling = "", None
     try:
         decision = judge(
             question, answer, justification=justification, confidence=confidence, default=fallback,
             recommendation_decides=not kit and bool(author_plan(service, task, question, policy)[0]),
+            precedent=ruling.ref() if ruling is not None else None,
         )
     except GrimoireMissionError as exc:
-        _defer(service, task.id, question.id, str(exc))
-        raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {exc}") from exc
-    # Une décision par défaut n'est jamais « abandonner » (:func:`~.autopilot.default_option`) : la réponse soumise est écartée.
-    if abandoning and not decision.by_default and len(decision.justification) < _MIN_ABANDON_REASON:
+        reason = f"{exc} ; {unread}" if unread else str(exc)  # des précédents illisibles : le dire à l'humain
+        _defer(service, task.id, question.id, reason)
+        raise GrimoireMissionError(f"Réponse refusée pour {task.id} : {reason}") from exc
+    # Une option appliquée à la place de la réponse n'est jamais « abandonner » (:func:`~.autopilot.safe_option`).
+    if abandoning and not decision.substituted and len(decision.justification) < _MIN_ABANDON_REASON:
         raise GrimoireMissionError(f"Réponse refusée pour {task.id} : annuler cite sa raison (--why, une phrase)")
     return gesture, decision
 
@@ -836,6 +910,10 @@ class OrchestratorStage:
         apply_recommended``, hors liste fermée, sous la borne) et que si *status* (:func:`session_states`) prouve que
         la session du worker ne travaille plus (:func:`worker_at_work`, échec fermé) : ces options relancent toutes la
         tâche. Sinon la question va à la session qui suit, comme avant.
+
+        Jurisprudence (``autopilot.precedents: on``) : pour une question du kit, l'option de la dernière réponse humaine
+        de sa classe passe avant l'option par défaut (:func:`precedent_plan`), sous la même preuve d'arrêt du worker.
+        Des précédents illisibles n'appliquent rien, et l'étape le dit une fois.
         """
         from grimoire.missions.autopilot import load_autopilot_policy
         from grimoire.missions.mandate import MandateStore, acting_as_orchestrator
@@ -850,6 +928,7 @@ class OrchestratorStage:
             policy = load_autopilot_policy(self._service.project_root)
         except Exception as exc:  # une lecture qui échoue ne tranche rien
             return [OrchestratorOutcome("pilot", "skipped", f"questions illisibles ({type(exc).__name__})")]
+        unread = False
         for q in candidates:
             task = self._service.ledger.get_task(q.task_id)
             record = next((r for r in open_in_group(task) if r.question.id == q.question_id), None) if task else None
@@ -859,17 +938,23 @@ class OrchestratorStage:
             by_default = kit_written(events, record.question)
             if not by_default and not author_plan(self._service, task, record.question, policy)[0]:
                 continue  # l'agent ne s'auto-répond pas : permission, fusion, abandon, option dangereuse, liste fermée
-            if by_default and (
-                not default_plan(self._service, task, record.question, events, policy)[0]
-                or worker_at_work(self._service, q.task_id, status)
-            ):
-                continue
-            ref, said = ("autopilot-default", "option par défaut") if by_default else ("autopilot-recommended", "option recommandée")
+            text, ref, said = record.question.recommended, "autopilot-recommended", "option recommandée"
+            if by_default:
+                ruling = precedent_plan(self._service, task, record.question, events, policy, now=self._now)
+                if ruling.unreadable and not unread:
+                    unread = True
+                    outcomes.append(OrchestratorOutcome("pilot", "skipped", ruling.reason[:300]))
+                text, ref, said = ruling.option, "autopilot-precedent", "précédent"
+                if not text and not ruling.contrary:
+                    text = default_plan(self._service, task, record.question, events, policy)[0]
+                    ref, said = "autopilot-default", "option par défaut"
+                if not text or worker_at_work(self._service, q.task_id, status):
+                    continue
             held = _TICK_STATES.set((status,))  # la garde de `answer_plan` juge sur la lecture de ce tick
             try:
                 with acting_as_orchestrator():
                     self._service.answer(
-                        q.task_id, record.question.recommended, ORCHESTRATOR_ACTOR, origin=ORIGIN_ORCHESTRATOR,
+                        q.task_id, text, ORCHESTRATOR_ACTOR, origin=ORIGIN_ORCHESTRATOR,
                         question_id=q.question_id, provenance={"kind": "rule", "ref": ref},
                     )
             except Exception as exc:  # refusée par le kit : le ledger l'a noté, la question reste ouverte
@@ -878,7 +963,7 @@ class OrchestratorStage:
             finally:
                 _TICK_STATES.reset(held)
             outcomes.append(OrchestratorOutcome(
-                "pilot", "done", f"{q.task_id}/{q.question_id} : {said} appliquée", "", "",
+                "pilot", "done", f"{q.task_id}/{q.question_id} : {said} appliqué{'' if ref == 'autopilot-precedent' else 'e'}", "", "",
                 (f"{q.task_id}/{q.question_id}",),
             ))
         return outcomes

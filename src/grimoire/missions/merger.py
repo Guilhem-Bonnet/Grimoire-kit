@@ -1152,7 +1152,8 @@ class MergeStage(DualReviewMixin):
             return self._ask_human(task, wt, "accept", pr.merge_commit, " ; ".join(reasons), pr.number)
         if tid in self._manual and not EvidenceService(wt.path / _EVIDENCE).list_packs(tid):
             return self._escalate(task, f"PR #{pr.number} fusionnée et relue READY, mais aucun pack de preuve dans le "
-                                  f"worktree de relecture ({wt.path}) : la clôture ne peut pas l'accepter", pr.number)
+                                  f"worktree de relecture ({wt.path}) : la clôture ne peut pas l'accepter", pr.number,
+                                  cause="no_evidence_pack")
         reason = f"PR #{pr.number} fusionnée à {pr.merge_commit[:12]}, relue READY (sceau tenu), CI verte"
         try:
             with acting_as_orchestrator():
@@ -1183,7 +1184,7 @@ class MergeStage(DualReviewMixin):
         if refusals:
             shown = "; ".join(str(r) for r in refusals)[:400]
             if tid in self._manual:  # #994 : une tâche faite à la main ne reste pas bloquée en revue
-                return self._escalate(task, f"acceptée, clôture refusée : {shown}", pr)
+                return self._escalate(task, f"acceptée, clôture refusée : {shown}", pr, cause="close_refused")
             return MergerOutcome(tid, "close", "failed", f"acceptée, clôture refusée : {shown}", pr)
         try:
             moved = self._service.ledger.transition_task(
@@ -1251,7 +1252,7 @@ class MergeStage(DualReviewMixin):
                 return MergerOutcome(task.id, "stale", "failed", f"READY périmé ({why}), mais l'annulation des relectures "
                                      "n'a pas pu être inscrite au journal d'autorité : revu au tick suivant", pr)
             if self._cycle(events, MERGE_REQUEUED_EVENT) >= self._policy.merger.max_cycles:
-                return self._escalate(task, f"READY périmé à répétition ({why})", pr)
+                return self._escalate(task, f"READY périmé à répétition ({why})", pr, cause="stale_ready")
             self._note(MERGE_REQUEUED_EVENT, task.id, {"judged": judged.id, "why": why})
         return MergerOutcome(task.id, "stale", "done", f"READY périmé ({why}) : relu de nouveau", pr)
 
@@ -1275,7 +1276,7 @@ class MergeStage(DualReviewMixin):
         cycle, worker = self._cycle(events, MERGE_BOUNCED_EVENT), str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker:
             why = f"{detail} — {cycle} retour(s) de fusion" if worker else f"{detail} — aucune session de worker à reprendre"
-            escalated = self._escalate(task, why, pr)
+            escalated = self._escalate(task, why, pr, cause=reason if worker else "no_worker_session")
             if escalated.status == "done":
                 self._note(MERGE_BOUNCED_EVENT, tid, {"reason": reason, "detail": detail[:600], "cycle": cycle, "escalated": True})
             return escalated
@@ -1301,11 +1302,15 @@ class MergeStage(DualReviewMixin):
         self._service.comment(tid, f"Fusion refusée (cycle {cycle}/{max_cycles}) : {detail}", MERGER_ACTOR)
         return MergerOutcome(tid, "bounce", "done", f"retour au worker ({reason}, cycle {cycle}/{max_cycles}) : {detail}", pr)
 
-    def _escalate(self, task: MissionTask, why: str, pr: int) -> MergerOutcome:
-        """Échecs répétés : ``needs_verification → running → waiting(human)`` « reprendre ou abandonner »."""
+    def _escalate(self, task: MissionTask, why: str, pr: int, *, cause: str = "") -> MergerOutcome:
+        """Échecs répétés : ``needs_verification → running → waiting(human)`` « reprendre ou abandonner ».
+
+        *cause* : le code de l'escalade (``ci_red``, ``conflict``, ``stale_ready``…), écrit dans l'événement — la classe
+        de la question pour la jurisprudence (:func:`grimoire.missions.precedents.question_class`)."""
         tid, ledger = task.id, self._service.ledger
         qid = new_question_id()
-        self._note(MERGE_ESCALATED_EVENT, tid, {"gesture": "bounce", "question_id": qid, "why": why[:600], "pr": pr, "blocking": True})
+        self._note(MERGE_ESCALATED_EVENT, tid, {"gesture": "bounce", "question_id": qid, "why": why[:600], "pr": pr,
+                                                "blocking": True, "cause": cause})
         try:
             ledger.transition_task(tid, TaskState.RUNNING, actor_id=MERGER_ACTOR, reason=f"escalade : {why[:200]}")
         except GrimoireError as exc:

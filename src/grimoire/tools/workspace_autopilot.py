@@ -16,6 +16,7 @@ def state(project_root: Path, _query: dict[str, list[str]]) -> Any:
         **AutopilotStore(project_root).state().to_dict(),
         "reserved": sorted(RESERVED), "extra_reserved": list(policy.extra), "policy_error": policy.error,
         "default_action": policy.default_action,
+        "precedents": policy.precedents, "precedent_days": policy.precedent_days,
     }
 
 

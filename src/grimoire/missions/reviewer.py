@@ -334,10 +334,13 @@ class ReviewStage:
                                  "aucune relance tant que l'arrêt n'est pas confirmé")
         if refused := [e for e in failures if e.payload.get("reason") == "refused"]:
             why = f"relecteur non inscrit au journal d'autorité ({str(refused[-1].payload.get('detail') or '')[:300]})"
-            return self._escalate(task, why, "")
+            return self._escalate(task, why, "", cause="reviewer_unregistered")
         relaunched = sum(1 for r in reviews if verdicts.get(r.id) in _RELAUNCH and verdicts[r.id] != CI_PENDING) + len(failures)
         if relaunched > MAX_RELAUNCHES:
-            return self._escalate(task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "")
+            return self._escalate(
+                task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "",
+                cause="unjudgeable_reviews",
+            )
         return self._launch(task, launch, second=second)
 
     # -- double relecture (``protected_gate: dual_review``) --------------------
@@ -933,7 +936,9 @@ class ReviewStage:
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:
             why = f"{cycle} relecture(s) NOT-READY" if worker_session else "aucune session de worker à reprendre"
-            escalated = self._escalate(task, why, notes)
+            escalated = self._escalate(
+                task, why, notes, cause="not_ready_cycles" if worker_session else "no_worker_session"
+            )
             if escalated.status == "done":
                 self._record_judged(task, review, NOT_READY, cycle, extra)
                 self._stop(review)
@@ -961,8 +966,13 @@ class ReviewStage:
         self._service.comment(tid, f"Relecture NOT-READY (cycle {cycle}/{max_cycles}) : {notes}", REVIEWER_ACTOR)
         return ReviewOutcome(tid, "bounce", "done", f"retour au worker (cycle {cycle}/{max_cycles})")
 
-    def _escalate(self, task: MissionTask, why: str, notes: str) -> ReviewOutcome:
-        """``needs_verification → running → waiting(human)`` avec la question ; une question non posée remet en revue."""
+    def _escalate(self, task: MissionTask, why: str, notes: str, *, cause: str = "") -> ReviewOutcome:
+        """``needs_verification → running → waiting(human)`` avec la question ; une question non posée remet en revue.
+
+        *cause* : le code de l'escalade, écrit dans l'événement — la classe de la question pour la jurisprudence
+        (:func:`grimoire.missions.precedents.question_class`), que ni le texte ni les constats du relecteur ne choisissent.
+        Sans cause, la question n'a pas de classe : aucun précédent ne s'y applique.
+        """
         tid, ledger = task.id, self._service.ledger
         try:
             ledger.transition_task(tid, TaskState.RUNNING, actor_id=REVIEWER_ACTOR, reason=f"escalade : {why}")
@@ -973,7 +983,8 @@ class ReviewStage:
         # Avant la question, comme le merger : un tick tué entre les deux ne laisse pas une question du relecteur que
         # l'étape orchestrateur (#962) prendrait pour celle du worker.
         self._service.ledger.append_event(
-            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR, {"task_id": tid, "question_id": qid, "why": why[:300]}
+            REVIEW_ESCALATED_EVENT, tid, "task", REVIEWER_ACTOR,
+            {"task_id": tid, "question_id": qid, "why": why[:300], "cause": cause},
         )
         try:
             self._service.ask(

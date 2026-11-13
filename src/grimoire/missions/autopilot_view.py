@@ -131,6 +131,7 @@ def journal(service: TaskService, limit: int = 200) -> list[dict[str, Any]]:
                 "confidence": p.get("confidence", ""),
                 "source": p.get("recommendation_source", ""),
                 "recommended": p.get("recommended", ""),
+                "precedent": p.get("precedent") if isinstance(p.get("precedent"), dict) else None,
                 "reverted_at": reverted.get(key, ""),
                 "revert": undo,
             }
