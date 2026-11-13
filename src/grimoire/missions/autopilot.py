@@ -29,6 +29,15 @@ divergeant, la réponse cite sa justification et déclare sa confiance (``high``
 déclarée laisse la question à l'humain, avec la raison, et le pilote l'inscrit (:data:`DEFERRED_EVENT`) pour que le
 cockpit la signale.
 
+**Action par défaut** (``autopilot.default_action``) — ``ask`` (le défaut, et tout projet qui ne règle rien) garde ce
+comportement. ``apply_recommended`` applique l'option recommandée au lieu de renoncer : une question hors liste fermée
+dont la recommandation est l'une de ses options est tranchée par elle quand personne n'assume de décision (confiance
+basse ou non déclarée), avec la source ``default`` (:func:`default_option`). Les questions de conduite que le kit écrit
+lui-même (« reprendre ou abandonner ? ») portent une option recommandée : c'est leur option par défaut, que seul
+``apply_recommended`` applique — sous ``ask`` elle n'engage pas le pilote. Une décision par défaut ne tranche ni fusion ni
+permission, n'annule jamais une tâche, et ne lit jamais la question sur parole : le titre de la tâche compte dans le
+classement tant que le kit n'a pas lui-même écrit la question. Toute autre valeur rend la politique invalide.
+
 **Traçabilité** — chaque décision du pilote est un événement du ledger (:data:`DECIDED_EVENT`) : question, option,
 justification, confiance, source de la recommandation, mandat.
 """
@@ -57,6 +66,7 @@ from grimoire.missions.mandate import (
     task_categories,
 )
 from grimoire.missions.schemas import ORIGIN_HUMAN
+from grimoire.missions.waiting import ABANDON
 
 if TYPE_CHECKING:
     from grimoire.flows.attestation import Attestation
@@ -64,16 +74,23 @@ if TYPE_CHECKING:
     from grimoire.missions.waiting import Question
 
 __all__ = [
+    "APPLY_RECOMMENDED",
     "AUTOPILOT_ENTRY",
     "CONFIDENCES",
     "DECIDED_EVENT",
+    "DEFAULT_ACTIONS",
+    "DEFAULT_SOURCE",
     "DEFERRED_EVENT",
     "RESERVED",
     "AutopilotPolicy",
     "AutopilotState",
     "AutopilotStore",
     "Decision",
+    "assumes",
+    "author_option",
     "decided_payload",
+    "default_option",
+    "engaging_reason",
     "judge",
     "last_deferral",
     "load_autopilot_policy",
@@ -86,6 +103,13 @@ _CHALLENGE = "autopilot_challenge"
 DECIDED_EVENT = "autopilot.decided"
 #: Une question que le pilote laisse à l'humain faute de confiance : le cockpit la signale.
 DEFERRED_EVENT = "autopilot.deferred"
+#: ``autopilot.default_action`` : demander (le défaut), ou appliquer l'option recommandée puis informer.
+ASK = "ask"
+APPLY_RECOMMENDED = "apply_recommended"
+DEFAULT_ACTIONS: tuple[str, ...] = (ASK, APPLY_RECOMMENDED)
+#: La source d'une décision que personne n'a assumée : l'option recommandée, appliquée par défaut.
+DEFAULT_SOURCE = "default"
+_DEFAULT_WHY = "option recommandée par la question, appliquée par défaut : personne n'a assumé de décision"
 #: Les niveaux de confiance qu'une réponse déclare ; ``low`` (et le silence) laisse la question à l'humain.
 CONFIDENCES: tuple[str, ...] = ("high", "medium", "low")
 _DECIDING = frozenset({"high", "medium"})
@@ -136,6 +160,15 @@ _KIT_CONDUCT_KINDS = frozenset({"resume_branch", "resume_unfenced", "retry_exhau
 #: relecteur est un ``choice`` « reprendre / abandonner » (``reviewer.py``), les tentatives épuisées « réessayer /
 #: abandonner ». Une question libre, aux options propres à son auteur, n'en fait pas partie.
 _KIT_CONDUCT_OPTIONS = (frozenset({"reprendre", "abandonner"}), frozenset({"reessayer", "abandonner"}))
+#: Ce qu'un agent ne se répond pas à lui-même, en plus de la liste fermée : fusionner, publier, déployer, accorder (texte
+#: plié, français et anglais). Hors de :data:`RESERVED` à dessein : l'escalade du merger, que le kit écrit, parle de
+#: fusion et doit rester tranchable. Ne vaut que pour une question dont l'auteur est un agent (:func:`engaging_reason`).
+_AUTHOR_ENGAGING = re.compile(
+    r"\bfusion|\bmerg|\brelease|\bpubli(?:e|er|ee|ees|es|ons|ez|cation|cations|sh|shed|shing)\b|\b(?:re)?deploi|"
+    r"\b(?:re)?deploy|permission|\bautoris|\bauthori[sz]|\btags?\b|\btagu|\btagg"
+)
+#: Les natures qu'une décision par défaut peut trancher : jamais une fusion (``merge``) ni une ``permission``.
+_DEFAULT_KINDS = frozenset({"choice"}) | _KIT_CONDUCT_KINDS
 
 
 def _fold(text: object) -> str:
@@ -179,14 +212,18 @@ def _outside_repo(texts: list[str], project_root: Path) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class AutopilotPolicy:
-    """Ce que le projet ajoute à la liste fermée ; il ne peut rien en retirer. *error* : invalide, le pilote ne décide rien."""
+    """Ce que le projet règle : ses ajouts à la liste fermée (il ne peut rien en retirer) et son action par défaut.
+
+    *default_action* : :data:`ASK` sans réglage. *error* : politique invalide, le pilote ne décide rien.
+    """
 
     extra: tuple[str, ...] = ()
     error: str = ""
+    default_action: str = ASK
 
 
 def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
-    """La section ``autopilot`` de ``orchestration-policy.yaml`` : seule la clé ``reserved`` (liste de textes) existe."""
+    """La section ``autopilot`` de ``orchestration-policy.yaml`` : ``reserved`` (liste de textes) et ``default_action``."""
     path = project_root / ORCHESTRATION_FILE
     if not path.is_file():
         return AutopilotPolicy()
@@ -203,30 +240,43 @@ def load_autopilot_policy(project_root: Path) -> AutopilotPolicy:
         return AutopilotPolicy()
     if not isinstance(section, Mapping):
         return AutopilotPolicy(error="`autopilot` doit être une table")
-    unknown = sorted(str(k) for k in section if k != "reserved")
+    unknown = sorted(str(k) for k in section if k not in ("reserved", "default_action"))
     if unknown:
         return AutopilotPolicy(
-            error=f"`autopilot` : clé inconnue {', '.join(unknown)} — seule `reserved` existe (elle ajoute des "
-            "réservations, jamais n'en retire)"
+            error=f"`autopilot` : clé inconnue {', '.join(unknown)} — seules `reserved` (elle ajoute des "
+            "réservations, jamais n'en retire) et `default_action` existent"
         )
     raw = section.get("reserved", [])
     if not isinstance(raw, list) or not all(isinstance(r, str) and _fold(r) for r in raw):
         return AutopilotPolicy(error="`autopilot.reserved` doit être une liste de textes non vides")
-    return AutopilotPolicy(tuple(dict.fromkeys(_fold(r) for r in raw)))
+    action = section.get("default_action", ASK)
+    if not isinstance(action, str) or action not in DEFAULT_ACTIONS:  # ni casse ni synonyme : une valeur exacte
+        return AutopilotPolicy(
+            error=f"`autopilot.default_action` : valeur inconnue {action!r} — parmi {', '.join(DEFAULT_ACTIONS)}"
+        )
+    return AutopilotPolicy(tuple(dict.fromkeys(_fold(r) for r in raw)), default_action=action)
 
 
 def reserved_reason(
-    question: Question, task: MissionTask, project_root: Path, policy: AutopilotPolicy | None = None
+    question: Question, task: MissionTask, project_root: Path, policy: AutopilotPolicy | None = None, *,
+    kit_written: bool | None = None,
 ) -> str:
     """Pourquoi *question* reste à l'humain pilote activé (``""`` : le pilote peut la trancher).
 
     La liste fermée d'abord, puis les ajouts de la politique. Une politique invalide réserve tout.
+
+    *kit_written* : ce que l'appelant sait de l'auteur de la question par les traces que le kit écrit lui-même, jamais
+    par ce qu'elle dit. ``False`` : écrite par un agent, elle est jugée titre de la tâche compris, quelles que soient
+    sa nature et ses options (elle ne se déclare pas « de conduite » sur parole). ``None`` : l'auteur n'est pas établi,
+    la question de conduite se reconnaît à sa forme (#1159).
     """
     policy = load_autopilot_policy(project_root) if policy is None else policy
     if policy.error:
         return f"politique du pilote invalide ({policy.error}) : tout reste à l'humain"
-    texts = [question.text, question.why, *question.options]
-    if not _kit_conduct(question):  # #1159 : une question de conduite écrite par le kit ne se juge pas sur le titre
+    # La recommandation est jugée comme les options : sans options, c'est un texte libre que l'auteur écrit seul.
+    texts = [question.text, question.why, *question.options, question.recommended]
+    # #1159 : une question de conduite écrite par le kit ne se juge pas sur le titre de la tâche.
+    if kit_written is False or not _kit_conduct(question):
         texts.append(task.title)
     folded = _fold(" ".join(texts))
     if _LOOKALIKE.search(folded):
@@ -243,6 +293,28 @@ def reserved_reason(
     return ""
 
 
+def engaging_reason(question: Question, task: MissionTask) -> str:
+    """Pourquoi un agent ne peut pas se répondre *question* par sa propre recommandation (``""`` : rien ne s'y oppose).
+
+    Une demande de fusion, de publication, de déploiement ou d'autorisation rédigée en choix ordinaire reste une
+    demande qui engage : le mot est cherché dans tout ce que l'agent écrit (texte, titre, contexte, raison, options et
+    leurs libellés, recommandation) et dans le titre de la tâche, plié comme pour la liste fermée. L'appelant ne
+    l'applique qu'à une question dont l'auteur est un agent, et seulement à la prise sans jugement (tick, recopie de la
+    recommandation, décision par défaut) : le jugement assumé d'une session n'en dépend pas.
+    """
+    labels = [text for c in question.choices for text in (c.value, c.label, c.consequence)]
+    folded = _fold(" ".join([
+        question.text, question.title, question.context, question.why, *question.options, *labels,
+        question.recommended, task.title,
+    ]))
+    if _LOOKALIKE.search(folded):
+        return "texte aux lettres non latines (homoglyphes possibles) : un agent ne se le répond pas"
+    if found := _AUTHOR_ENGAGING.search(folded):
+        return (f"la question touche à une fusion, une publication, un déploiement ou une autorisation "
+                f"(« {found.group(0)} ») : un agent ne se la répond pas")
+    return ""
+
+
 # ── Décision ─────────────────────────────────────────────────────────────────
 
 
@@ -251,9 +323,14 @@ class Decision:
     """Ce que le pilote a décidé : l'option, d'où elle vient, avec quelle confiance et pourquoi."""
 
     answer: str
-    source: str  # ``recommended`` | ``judgment``
+    source: str  # ``recommended`` | ``judgment`` | ``default``
     confidence: str
     justification: str
+
+    @property
+    def by_default(self) -> bool:
+        """Personne n'a assumé cette décision : c'est l'option recommandée, appliquée à la place de la réponse soumise."""
+        return self.source == DEFAULT_SOURCE
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -264,19 +341,83 @@ class Decision:
         }
 
 
-def judge(question: Question, answer: str, *, justification: str = "", confidence: str = "") -> Decision:
+def _safe_option(question: Question, *, free_text: bool) -> tuple[str, str]:
+    """L'option recommandée de *question* si elle peut être prise sans jugement : ``(option, "")`` ou ``("", pourquoi)``.
+
+    Jamais pour une fusion ni une permission, pour « abandonner » ni un choix ``danger``. L'option est rendue telle
+    que la question l'écrit parmi ses options ; *free_text* admet en plus la réponse libre d'une question qui n'en
+    propose aucune (jamais une recommandation étrangère aux options proposées).
+    """
+    pick = " ".join(question.recommended.split())
+    if not pick:
+        return "", "la question ne recommande aucune option"
+    if question.kind not in _DEFAULT_KINDS:
+        return "", f"une question de nature {question.kind!r} ne se tranche pas sans jugement"
+    option = next((o for o in question.options if " ".join(o.split()).lower() == pick.lower()), "")
+    if not option:
+        if question.options or not free_text:
+            return "", "l'option recommandée n'est pas l'une des options de la question"
+        option = pick
+    if pick.lower() == ABANDON or any(
+        c.danger and " ".join(c.value.split()).lower() == pick.lower() for c in question.choices
+    ):
+        return "", "l'option recommandée annule la tâche ou est marquée dangereuse : jamais sans jugement"
+    return option, ""
+
+
+def default_option(question: Question) -> tuple[str, str]:
+    """L'option qu'une décision par défaut appliquerait à *question* : ``(option, "")``, ou ``("", pourquoi aucune)``.
+
+    C'est l'option ``recommended``, rendue telle que la question l'écrit parmi ses options. Aucune par défaut : sans
+    recommandation, pour une fusion ou une permission, quand la recommandation n'est pas l'une des options, quand elle
+    annule la tâche (« abandonner ») ou que son choix porte le drapeau ``danger``. Ne juge ni la liste fermée ni le
+    réglage du projet : l'appelant le fait (:func:`reserved_reason`, ``autopilot.default_action``).
+    """
+    return _safe_option(question, free_text=False)
+
+
+def author_option(question: Question) -> tuple[str, str]:
+    """La recommandation de l'auteur de *question* que le pilote peut prendre telle quelle : ``(option, "")``, ou
+    ``("", pourquoi pas)``.
+
+    Un agent écrit sa question et sa recommandation : il ne s'auto-répond ni une permission ni une fusion, ni
+    « abandonner » ni un choix ``danger``, ni une option absente de celles qu'il propose. Un choix ordinaire, ou la
+    réponse libre d'une question sans options, reste pris. Ne juge pas la liste fermée : l'appelant le fait.
+    """
+    return _safe_option(question, free_text=True)
+
+
+def assumes(confidence: str) -> bool:
+    """Vrai si *confidence* déclare une décision assumée (``high`` ou ``medium``) ; basse ou absente, personne n'assume."""
+    return confidence.strip().lower() in _DECIDING
+
+
+def judge(
+    question: Question, answer: str, *, justification: str = "", confidence: str = "", recommendation_decides: bool = True,
+    default: str = "",
+) -> Decision:
     """La décision du pilote sur *question* ; lève :class:`GrimoireMissionError` si elle reste à l'humain.
 
     Une réponse égale à l'option recommandée (casse et espaces mis à part) est la recommandation appliquée. Toute autre
     réponse est un jugement : elle cite sa justification et déclare une confiance ``high`` ou ``medium``.
+
+    *recommendation_decides* : faux quand la recommandation ne vaut pas décision à elle seule — le kit a écrit la
+    question (c'est son option par défaut, pas l'avis d'un auteur), ou l'agent recommande ce qu'il ne peut pas
+    s'auto-répondre (:func:`author_option`, liste fermée). La réponse se juge alors comme toute autre. *default* : l'option qu'une décision par défaut applique, déjà contrôlée
+    par l'appelant (``""`` : aucune — réglage ``ask``, liste fermée, borne atteinte). Quand personne n'assume de
+    décision (confiance basse ou non déclarée), c'est elle qui tranche, à la place de la réponse soumise, avec la
+    source :data:`DEFAULT_SOURCE` ; sa justification est celle de la question, jamais celle de la réponse écartée.
     """
     text = " ".join(answer.split())
     recommended = " ".join(question.recommended.split())
-    if recommended and text.lower() == recommended.lower():
+    if recommended and recommendation_decides and text.lower() == recommended.lower():
         return Decision(text, "recommended", "high", " ".join((justification or question.why).split()))
     level = confidence.strip().lower()
     why = " ".join(justification.split())
-    if level not in _DECIDING:
+    if not assumes(confidence):
+        if default:
+            reason = question.why or (question.recommendation.reason if question.recommendation is not None else "")
+            return Decision(default, DEFAULT_SOURCE, level or "low", " ".join(reason.split()) or _DEFAULT_WHY)
         shown = level or "non déclarée"
         raise GrimoireMissionError(
             f"pilote automatique : confiance {shown} — la question reste à l'humain "

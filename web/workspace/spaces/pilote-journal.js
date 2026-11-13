@@ -7,7 +7,11 @@
 
 import { api } from '../api.js';
 
-const SOURCES = { recommended: 'option recommandée par la question', judgment: 'jugement du pilote' };
+const SOURCES = {
+  recommended: 'option recommandée par la question',
+  judgment: 'jugement du pilote',
+  default: 'option recommandée, appliquée par défaut',
+};
 const CONFIDENCES = { high: 'confiance haute', medium: 'confiance moyenne', low: 'confiance basse' };
 const REVERTS = { reopen: 'Revenir · rouvrir la tâche', hold: 'Revenir · rendre à l’humain' };
 

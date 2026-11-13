@@ -14,8 +14,8 @@
     "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
     "grimoire task recall GAO-ecrire-la-do-002"
   ],
-  "kit_version": "3.84.0",
-  "recorded_at": "2026-11-13T00:35:28Z",
+  "kit_version": "3.87.0",
+  "recorded_at": "2026-11-13T18:20:18Z",
   "output_sha256": "9e0cc8314d85eadaf67fe6de790dca3f1c2d486971362983dfe60fbb893a9d29",
   "frames": [
     {

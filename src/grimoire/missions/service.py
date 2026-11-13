@@ -981,9 +981,16 @@ class TaskService:
 
                 record_answer_refused(self, task_id, asked.id if asked is not None else question_id, exc)
             raise
-        answer = text.strip()
+        answer, answer_data = (decision.answer, None) if decision and decision.by_default else (text.strip(), answer_data)
         if not answer:
             raise ValueError("`text` requis : une réponse vide ne tranche rien")
+        if decision is not None and authority is not None:  # P82 : la décision est au ledger avant la réponse
+            from grimoire.missions.autopilot import DECIDED_EVENT, decided_payload
+
+            self.ledger.append_event(
+                DECIDED_EVENT, task_id, "task", actor,
+                decided_payload(task_id, question, decision, gesture, authority.mandate_id),
+            )
         self.ledger.append_event(
             HUMAN_ANSWERED_EVENT, task_id, "task", actor,
             {
@@ -997,13 +1004,6 @@ class TaskService:
             task_id, f"Réponse à « {question.text} » : {answer}", actor_id=actor,
             kind="comment" if authority else "directive", origin=origin,
         )
-        if decision is not None and authority is not None:  # P82 : chaque décision du pilote est au ledger
-            from grimoire.missions.autopilot import DECIDED_EVENT, decided_payload
-
-            self.ledger.append_event(
-                DECIDED_EVENT, task_id, "task", actor,
-                decided_payload(task_id, question, decision, gesture, authority.mandate_id),
-            )
         task = self.require(task_id)
         abandon = answer.lower() == ABANDON and ABANDON in (o.lower() for o in question.options)
         if task.status is TaskState.WAITING and not abandon and not group_settled(task):

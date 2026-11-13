@@ -468,16 +468,37 @@ grimoire autonomy autopilot off       # même canal humain (révoquer le mandat 
   mandat révoqué, expiré ou remplacé, il est coupé, et un nouveau mandat ne le rallume pas.
 - **Liste fermée, dans le code** : identifiants, secrets, dépense payante, accès hors du dépôt (`permission` hors
   du dépôt ou sans chemin), suppression de données utilisateur, mandat, réglages du dépôt. Le classement lit la
-  question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot.reserved` de
-  `orchestration-policy.yaml` peut **ajouter** des réservations (catégories d'escalade ou mots) ; toute autre clé
-  ou forme rend la politique invalide et le pilote ne décide plus rien.
+  question, ses options, sa raison et la tâche, sans accents ni casse. La section `autopilot` de
+  `orchestration-policy.yaml` accepte deux clés : `reserved`, qui peut seulement **ajouter** des réservations
+  (catégories d'escalade ou mots), et `default_action` (ci-dessous) ; toute autre clé, forme ou valeur rend la
+  politique invalide et le pilote ne décide plus rien.
 - **Comment il décide** : d'abord l'option recommandée par la question (`task ask --recommended <option> --why
-  "…"`, ou le champ `recommended` d'un lot), appliquée par le tick sans session. Sinon une session tranche avec les
+  "…"`, ou le champ `recommended` d'un lot), appliquée par le tick sans session — sauf ce qu'un agent ne peut pas
+  se répondre à lui-même : une question `permission` ou `merge`, « abandonner » ou un choix marqué dangereux, une
+  question que la liste fermée garde (titre de la tâche compris). Sinon une session tranche avec les
   critères, les directives et la mémoire, et chaque réponse porte `--why "<justification>" --confidence
   high|medium|low` (`task answer`). Confiance basse, non déclarée ou sans justification : la question reste à
   l'humain (`autopilot.deferred`, que le cockpit signale).
+- **Action par défaut** (`autopilot.default_action`) : `ask` (le défaut ; un projet qui ne règle rien ne change
+  pas) ou `apply_recommended`. Sous `apply_recommended`, quand personne n'assume de décision (confiance basse ou
+  non déclarée), l'option recommandée de la question tranche à la place de la réponse soumise : l'événement
+  `autopilot.decided` porte la source `default` et `reversible`, et le cockpit la range dans « Décisions à
+  revoir » (« À traiter »), un bloc replié qui ne compte pas comme une attente ; il montre aussi, distinguées, les
+  options qu'un agent recommandait et que le pilote a prises telles quelles (source `recommended`). Les questions de conduite que le
+  kit écrit lui-même (« reprendre ou abandonner ? » après des retours de fusion ou des relectures répétées,
+  récolte, tâche garée sur une erreur du fournisseur) portent toutes une option recommandée : c'est leur option
+  par défaut, que le tick applique sous `apply_recommended` seulement — sous `ask`, elle n'engage pas le pilote.
+  `task ask` avertit l'agent qui pose une question sans `--recommended`.
+- **Ce qu'une décision par défaut ne fait jamais** : trancher une question de la liste fermée (jugée titre de la
+  tâche compris, sauf si le kit a lui-même écrit la question) ; appliquer autre chose que l'une des options de la
+  question ; répondre « abandonner » ou un choix marqué dangereux ; trancher une question de nature `merge` ou
+  `permission` ; reprendre une tâche tant que rien ne prouve que la session du worker ne travaille plus (liste des
+  sessions illisible, session inconnue du tick, introuvable ou d'état inconnu : rien n'est appliqué) ; dépasser
+  deux décisions par défaut sur une même tâche depuis la dernière réponse humaine. Dans tous ces cas la question se juge comme sous
+  `ask`. Répondre n'est jamais fusionner, accepter ni publier : la réponse rend la tâche `ready`, et ces gestes
+  gardent leurs propres contrôles (merger, double relecture, mandat).
 - **Traçabilité** : chaque décision est un événement `autopilot.decided` (question, option, justification,
-  confiance, source de la recommandation, mandat). Sans borne de présentations (le plafond de sessions du jour et
+  confiance, source — `recommended`, `judgment` ou `default` —, mandat). Sans borne de présentations (le plafond de sessions du jour et
   le disjoncteur bornent encore).
 - **Limites** : une annulation décidée par le pilote est terminale (l'état `cancelled` n'a pas de sortie) ; la
   raison est au ledger. L'acceptation sous dérogation n'est pas traitée (aucune dérogation n'existe dans le kit).

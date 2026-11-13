@@ -320,13 +320,14 @@ def autopilot_status(ctx: typer.Context, project_root: _PROJECT_ROOT = Path()) -
     policy = load_autopilot_policy(root)
     breaker = read_breaker(home_root(root))
     _emit(ctx, {**state.to_dict(), "policy_error": policy.error, "extra_reserved": list(policy.extra),
-                "breaker": breaker.to_dict()})
+                "default_action": policy.default_action, "breaker": breaker.to_dict()})
     if _fmt(ctx) == "json":
         return
     if state.active:
         console.print(f"[green]pilote actif[/green] — mandat {state.mandate_id}, depuis {state.since} ({state.via})")
     else:
         console.print(f"pilote inactif ({state.reason})")
+    console.print(f"action par défaut : {policy.default_action} (`autopilot.default_action`)")
     if breaker.open:
         console.print(
             f"[red]disjoncteur ouvert[/red] : {escape(breaker.reason)} — aucune session n'est lancée ; "

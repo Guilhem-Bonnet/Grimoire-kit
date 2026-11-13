@@ -142,6 +142,8 @@ def deferred_waiting(
         options, kind = ("réessayer", "abandonner"), "retry_exhausted"
     else:  # resume_unfenced (hôte sans frein) ou resume_branch (commits non poussés, K12) : le texte est fourni
         text, options, kind = question, ("reprendre", "abandonner"), cause
+    # L'option par défaut de la question : celle qui ne ferme rien. Elle n'engage le pilote automatique que sous
+    # `autopilot.default_action: apply_recommended` (`orchestrator_session.default_plan`).
     if kind == "retry_exhausted":
         title, retry = (
             "Relancer la tâche ou l'abandonner ?",
@@ -169,6 +171,7 @@ def deferred_waiting(
         title=title,
         context=clip_context(context),
         choices=choices,
+        recommended=options[0],
     )
     return Waiting("human", "", asked, hint, since)
 

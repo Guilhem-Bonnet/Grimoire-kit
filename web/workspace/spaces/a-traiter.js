@@ -91,6 +91,16 @@ const CSS = `
 .at-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .at-equiv { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .at-refusals { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
+.at-defaults > .at-hint { margin: var(--sp-2) 0 0; color: var(--ink3); }
+.at-default-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; }
+.at-default { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) 0; border-top: 1px solid var(--line);
+  font-size: var(--t-s); overflow-wrap: anywhere; }
+.at-default-head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.at-default-head .at-project { color: var(--ink3); }
+.at-default-q { color: var(--ink2); }
+.at-default-k { color: var(--ink3); margin-right: var(--sp-2); }
+.at-default-why { color: var(--ink2); }
+.at-defaults > .btn { margin-top: var(--sp-2); }
 @container canvas (max-width: 720px) {
   .at-wrap { padding: var(--sp-4); }
   .at-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); }
@@ -212,6 +222,8 @@ const toneOf = (item) => (item.kind === 'pr_review'
 /** Une ligne qui mène à l'écran de revue : une PR, ou la lecture des PR en échec. */
 const isReview = (item) => item.kind === 'pr_review'
   || (item.kind === 'probe_failed' && String(item.id || '').endsWith(':pr'));
+// D'où vient l'option que le pilote a appliquée sans jugement (bloc « Décisions à revoir »).
+const REVIEW_SOURCES = { default: 'appliquée par défaut', recommended: 'recommandée par l’agent' };
 const projectName = (item) => (item.project && (item.project.name || item.project.slug)) || '';
 
 function hm(iso) {
@@ -630,6 +642,52 @@ export async function mount(root, ctx) {
         node('summary', null, `Relues par le pilote : ${piloted} en cours`),
         node('p', 'at-hint', 'Le relecteur du tick relit ces PR sous mandat, le merger les fusionne : rien à faire de ton côté.'),
       );
+      wrap.append(fold);
+    }
+    // Options que le pilote a appliquées sans jugement assumé — l'option par défaut d'une question du kit
+    // (`autopilot.default_action: apply_recommended`) ou celle qu'un agent recommandait : déjà tranchées, elles ne
+    // sont dans aucune section ni aucun compteur — un bloc replié, à relire quand on veut.
+    const reviewed = (data.reviewDecisions && data.reviewDecisions.items) || [];
+    if (reviewed.length) {
+      const fold = node('details', 'at-piloted at-defaults');
+      fold.dataset.role = 'review-decisions';
+      const list = node('ul', 'at-default-list');
+      for (const decision of reviewed) {
+        const li = node('li', 'at-default');
+        li.dataset.role = 'review-decision';
+        li.dataset.task = decision.task_id;
+        li.dataset.question = decision.question_id;
+        li.dataset.source = decision.source || '';
+        const head = node('span', 'at-default-head');
+        head.append(
+          node('span', 'at-title', decision.title || decision.task_id),
+          node('span', 'at-project', projectName(decision)),
+          node('span', 'at-chip', REVIEW_SOURCES[decision.source] || decision.source || ''),
+        );
+        const option = node('span', 'at-default-option');
+        option.append(node('span', 'at-default-k', 'Option appliquée'), node('b', null, decision.option));
+        li.append(head, node('span', 'at-default-q', decision.question), option);
+        if (decision.justification) {
+          const why = node('span', 'at-default-why');
+          why.append(node('span', 'at-default-k', 'Justification'), decision.justification);
+          li.append(why);
+        }
+        list.append(li);
+      }
+      const label = data.reviewDecisions.label || 'Décisions à revoir';
+      fold.append(
+        node('summary', null, `${label} : ${reviewed.length} appliquée${reviewed.length > 1 ? 's' : ''} sans attendre`),
+        node('p', 'at-hint', 'Le pilote a appliqué ces options sans attendre de réponse — l’option par défaut d’une question, ou celle que l’agent recommandait — puis t’en informe ici. Rien ne bloque : pour en reprendre une, « Revenir » est dans le journal « Décidé par le pilote ».'),
+        list,
+      );
+      if (!ctx.scope.all) {
+        // Le journal (et son « Revenir ») est celui du projet servi : hors portée « tous les projets ».
+        const journal = node('button', 'btn', 'Ouvrir le journal du pilote');
+        journal.type = 'button';
+        journal.dataset.role = 'review-journal';
+        journal.addEventListener('click', () => ctx.goto('travail', { view: 'decisions' }));
+        fold.append(journal);
+      }
       wrap.append(fold);
     }
     applyFilter();
