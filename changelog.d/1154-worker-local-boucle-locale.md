@@ -1,0 +1,1 @@
+- feat(missions): le worker route vers un fournisseur `provider_type: local` en `http://` sur une boucle locale (127.0.0.1, localhost, ::1), sans clé ; un seul worker à la fois par fournisseur local et le motif d'un refus se lit dans `task show` (#1154)
