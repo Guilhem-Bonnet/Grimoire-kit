@@ -18,7 +18,8 @@ rédige pas sa question pour tomber sous une réponse favorable. La liste des cl
 refusée) ou au journal d'autorité, comme toute question « fusionner ? » ou « accepter ? », n'en fait pas partie.
 
 **Seule la dernière réponse humaine d'une classe compte**, et seulement tant qu'elle est en vigueur
-(:func:`precedents`) : oubliée (``task questions --forget``), reprise (« Revenir » sur l'une de ses applications) ou
+(:func:`precedents`). « Abandonner » n'est jamais appliqué d'après un précédent, mais tant que c'est le dernier mot de
+l'humain pour la classe, l'option par défaut ne reprend pas contre lui : la question se juge. Par ailleurs : oubliée (``task questions --forget``), reprise (« Revenir » sur l'une de ses applications) ou
 expirée (``autopilot.precedent_days``), elle ne s'applique plus, et une réponse plus ancienne ne revient pas à sa
 place. Une décision du pilote — recommandation, jugement, option par défaut, précédent appliqué — n'est jamais une
 réponse humaine : pas de jurisprudence en chaîne.
@@ -136,13 +137,16 @@ class PrecedentPlan:
     """Ce que le pilote tire de la jurisprudence pour une question : l'option à appliquer, ou pourquoi aucune.
 
     *unreadable* : les précédents ne se lisent pas — rien n'est appliqué et *reason* le dit, pour que l'appelant le
-    porte à l'humain (issue de l'étape du tick, raison de la question laissée).
+    porte à l'humain (issue de l'étape du tick, raison de la question laissée). *contrary* : la dernière réponse
+    humaine de la classe est « abandonner » — elle ne s'applique jamais d'elle-même, mais l'option par défaut ne
+    reprend pas contre elle : la question se juge.
     """
 
     option: str = ""
     precedent: Precedent | None = None
     reason: str = ""
     unreadable: bool = False
+    contrary: bool = False
 
 
 def question_class(events: list[LedgerEvent], question: Question) -> str:

@@ -515,7 +515,8 @@ grimoire autonomy autopilot off       # même canal humain (révoquer le mandat 
     clôture refusée, non plus.
   - **Aucun fichier à part** : les précédents se relisent au ledger (réponse d'origine `human`, oubli, « Revenir »).
     Seule la dernière réponse humaine d'une classe compte ; une décision du pilote — précédent appliqué compris —
-    n'en est jamais une. Oubliée (`task questions --forget <id>`), reprise par « Revenir » sur l'une de ses
+    n'en est jamais une. « Abandonner » n'est jamais appliqué d'après un précédent ; tant que c'est le dernier
+    mot de l'humain pour la classe, l'option par défaut ne reprend pas non plus et la question se juge. Oubliée (`task questions --forget <id>`), reprise par « Revenir » sur l'une de ses
     applications, ou vieille de plus de `autopilot.precedent_days` jours (30 par défaut, 1 à 365), elle ne
     s'applique plus, et une réponse plus ancienne ne revient pas à sa place. À l'activation, les réponses humaines
     encore dans ce délai comptent : `task questions --precedents` les montre avant.

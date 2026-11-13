@@ -529,6 +529,33 @@ def test_un_precedent_abandonner_ne_s_applique_jamais_et_efface_le_precedent_plu
     assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
 
 
+def test_l_option_par_defaut_ne_reprend_pas_contre_un_abandon_humain_de_la_classe(project: Path) -> None:
+    """Sous `apply_recommended`, le défaut reprendrait : tant que « abandonner » est le dernier mot de l'humain pour
+    la classe, il s'abstient et la question se juge. Une autre classe garde son option par défaut."""
+    service = pilot(project, ON_AND_DEFAULT)
+    ruled(service, MERGE, "abandonner")
+    tid, qid = again(service, MERGE)
+    assert apply(service, project) == []
+    with pytest.raises(GrimoireMissionError, match="confiance"):
+        answer(service, tid, qid, "reprendre", confidence="low")
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+    answer(service, tid, qid, "reprendre", justification=WHY, confidence="high")  # un jugement assumé reste possible
+    assert events(service, tid, DECIDED_EVENT)[0].payload["recommendation_source"] == "judgment"
+    other, _ = again(service, REVIEW, title="Troisième tâche")
+    assert [o.status for o in apply(service, project)] == ["done"]
+    assert events(service, other, DECIDED_EVENT)[0].payload["recommendation_source"] == "default"
+
+
+def test_un_abandon_humain_oublie_ou_expire_ne_retient_plus_l_option_par_defaut(project: Path) -> None:
+    service = pilot(project, ON_AND_DEFAULT)
+    ruling = ruled(service, MERGE, "abandonner")
+    tid, _qid = again(service, MERGE)
+    assert apply(service, project) == []
+    pr.forget(service, ruling.id, "guilhem", origin=ORIGIN_HUMAN)
+    assert [o.status for o in apply(service, project)] == ["done"]
+    assert events(service, tid, DECIDED_EVENT)[0].payload["recommendation_source"] == "default"
+
+
 def test_un_precedent_dont_l_option_n_est_plus_proposee_ne_s_applique_pas(project: Path) -> None:
     service = pilot(project, ON)
     ruled(service)
@@ -539,6 +566,7 @@ def test_un_precedent_dont_l_option_n_est_plus_proposee_ne_s_applique_pas(projec
         service, task, task.waiting.question, service.ledger.events_for(tid), load_autopilot_policy(project)  # type: ignore[union-attr]
     )
     assert plan.option == "" and "n'est pas l'une des options" in plan.reason and qid
+    assert plan.contrary is False  # seul « abandonner » retient l'option par défaut
 
 
 def test_un_precedent_ne_s_applique_jamais_a_une_categorie_reservee(project: Path) -> None:

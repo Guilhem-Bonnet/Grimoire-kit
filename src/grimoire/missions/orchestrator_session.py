@@ -369,7 +369,8 @@ def precedent_plan(
     - un précédent en vigueur existe pour la classe ; illisibles, aucun n'est appliqué et le plan le dit
       (``unreadable``) ;
     - son option passe les refus de la décision par défaut (:func:`~.autopilot.safe_option` : encore l'une des
-      options de la question, ni fusion ni permission, jamais « abandonner » ni un choix dangereux) ;
+      options de la question, ni fusion ni permission, jamais « abandonner » ni un choix dangereux) ; « abandonner »
+      en dernier mot de l'humain pour la classe rend le plan ``contrary`` : l'option par défaut ne reprend pas non plus ;
     - la borne :data:`MAX_DEFAULT_DECISIONS` n'est pas atteinte — partagée avec la décision par défaut : les deux
       relancent la tâche, et la même boucle escalade → reprise les guette.
 
@@ -402,7 +403,10 @@ def precedent_plan(
         return PrecedentPlan(reason=f"aucun précédent en vigueur pour la classe {klass}")
     option, why = safe_option(question, found.option)
     if not option:
-        return PrecedentPlan(reason=f"précédent {found.id} ({klass}, « {found.option} ») non appliqué : {why}")
+        return PrecedentPlan(
+            reason=f"précédent {found.id} ({klass}, « {found.option} ») non appliqué : {why}",
+            contrary=" ".join(found.option.split()).lower() == ABANDON,  # le dernier mot de l'humain : pas de reprise par défaut
+        )
     if _defaults_taken(events) >= MAX_DEFAULT_DECISIONS:
         return PrecedentPlan(reason=(
             f"{MAX_DEFAULT_DECISIONS} options déjà appliquées sans jugement sur cette tâche depuis la dernière "
@@ -514,7 +518,7 @@ def answer_plan(
     if not assumes(confidence):  # personne n'assume : un précédent, sinon l'option par défaut, si les gardes en rendent
         plan = precedent_plan(service, task, question, events, policy)
         fallback, ruling, unread = plan.option, plan.precedent, plan.reason if plan.unreadable else ""
-        if not fallback:
+        if not fallback and not plan.contrary:
             fallback = default_plan(service, task, question, events, policy)[0]
         if fallback and (kit or gesture == "resume") and worker_at_work(service, task.id, _states(service)):
             fallback, ruling = "", None
@@ -941,7 +945,7 @@ class OrchestratorStage:
                     unread = True
                     outcomes.append(OrchestratorOutcome("pilot", "skipped", ruling.reason[:300]))
                 text, ref, said = ruling.option, "autopilot-precedent", "précédent"
-                if not text:
+                if not text and not ruling.contrary:
                     text = default_plan(self._service, task, record.question, events, policy)[0]
                     ref, said = "autopilot-default", "option par défaut"
                 if not text or worker_at_work(self._service, q.task_id, status):
