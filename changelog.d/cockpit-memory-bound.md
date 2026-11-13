@@ -1,0 +1,1 @@
+- perf(cockpit): borner la mémoire du serveur — journaux de session lus par blocs dans la Flotte en direct, états par session plafonnés et cache de lecture borné en octets (audit `docs/audits/cockpit-memoire-2026-11.md`)
