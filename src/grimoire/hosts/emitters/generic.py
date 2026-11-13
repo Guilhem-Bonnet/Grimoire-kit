@@ -1,11 +1,13 @@
 """Emitter for hosts whose only executable surface is an instructions file.
 
-Codex, Cursor and Gemini CLI read a prose entrypoint and speak MCP; they do not
-load sub-agent files, skill folders, slash commands, or lifecycle hooks. The
-honest move is not to write files they will ignore, but to write **one** file
-that says what exists and how to reach it — every persona by path, every skill
-by trigger, every command as the CLI invocation it wraps — and to state plainly
-that governance here is a rule, not a constraint.
+Codex and Cursor read a prose entrypoint and speak MCP; they do not load
+sub-agent files, skill folders, slash commands, or lifecycle hooks. (Gemini CLI
+used to be in this group; it has its own rich emitter now —
+:mod:`grimoire.hosts.emitters.gemini`.) The honest move is not to write files
+they will ignore, but to write **one** file that says what exists and how to
+reach it — every persona by path, every skill by trigger, every command as the
+CLI invocation it wraps — and to state plainly that governance here is a rule,
+not a constraint.
 
 That last sentence is the point of the degradation list: a project that cannot
 enforce its gates in the host should know that CI is the only place left where

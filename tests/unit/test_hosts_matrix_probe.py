@@ -69,10 +69,35 @@ class TestMatrix:
         assert _cell(project, HostId.CLAUDE_CODE_CLI, "hook:session_start").status == ADVISORY
 
     def test_un_hote_de_prose_enonce_la_regle_sans_l_executer(self, project: Path) -> None:
-        for host in (HostId.CODEX, HostId.CURSOR, HostId.GEMINI_CLI):
+        for host in (HostId.CODEX, HostId.CURSOR):
             cell = _cell(project, host, "hook:pre_tool_use")
             assert cell.status == PROSE, host
             assert cell.carriers  # l'entrypoint porte la règle, c'est vérifiable sur disque
+
+    def test_gemini_bloque_sur_les_evenements_d_action_et_pas_sur_la_cloture(self, project: Path) -> None:
+        """Depuis l'émetteur riche, Gemini n'est plus un hôte de prose : BeforeTool et
+        BeforeAgent refusent, mais AfterAgent/SessionEnd ne sont documentés que comme
+        hooks (blocage non vérifié), donc la clôture reste `advisory`."""
+        from grimoire.hosts.collect import build_surface
+        from grimoire.hosts.events import Enforcement as EnforcementEvent
+        from grimoire.hosts.events import HookEvent
+        from grimoire.hosts.surface import HookSpec
+
+        surface = build_surface(project)
+        extra = (
+            HookSpec(HookEvent.USER_PROMPT_SUBMIT, "grimoire.task-context", EnforcementEvent.BLOCKING),
+            HookSpec(HookEvent.STOP, "grimoire.evidence-gate", EnforcementEvent.BLOCKING),
+        )
+        matrix = build_matrix(project, (HostId.GEMINI_CLI,), surface=replace(surface, hooks=(*surface.hooks, *extra)))
+        pre = _cell(project, HostId.GEMINI_CLI, "hook:pre_tool_use", matrix=matrix)
+        assert pre.status == ENFORCED and pre.enforcement == "blocking"
+        assert pre.carriers == (".gemini/settings.json",)
+        submit = _cell(project, HostId.GEMINI_CLI, "hook:user_prompt_submit", matrix=matrix)
+        assert submit.status == ENFORCED and submit.enforcement == "blocking"
+        assert _cell(project, HostId.GEMINI_CLI, "hook:session_start", matrix=matrix).status == ADVISORY
+        stop = _cell(project, HostId.GEMINI_CLI, "hook:stop", matrix=matrix)
+        assert stop.status == ADVISORY
+        assert "ne sait pas bloquer" in stop.reason
 
     def test_opencode_garde_pre_tool_use_et_declare_le_reste_absent(self, project: Path) -> None:
         assert _cell(project, HostId.OPENCODE, "hook:pre_tool_use").status == ENFORCED

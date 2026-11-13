@@ -19,6 +19,7 @@ from grimoire.hosts.emitters.base import (
 )
 from grimoire.hosts.emitters.claude_code import ClaudeCodeEmitter
 from grimoire.hosts.emitters.copilot import CopilotEmitter
+from grimoire.hosts.emitters.gemini import GeminiEmitter
 from grimoire.hosts.emitters.generic import GenericEmitter
 from grimoire.hosts.emitters.opencode import OpenCodeEmitter
 
@@ -27,7 +28,7 @@ _EMITTERS: dict[HostId, Emitter] = {
     HostId.GITHUB_COPILOT: CopilotEmitter(),
     HostId.CODEX: GenericEmitter(HostId.CODEX),
     HostId.CURSOR: GenericEmitter(HostId.CURSOR),
-    HostId.GEMINI_CLI: GenericEmitter(HostId.GEMINI_CLI),
+    HostId.GEMINI_CLI: GeminiEmitter(),
     HostId.OPENCODE: OpenCodeEmitter(),
 }
 
@@ -49,6 +50,7 @@ __all__ = [
     "EmitResult",
     "EmittedFile",
     "Emitter",
+    "GeminiEmitter",
     "GenericEmitter",
     "JsonMerge",
     "OpenCodeEmitter",
