@@ -71,6 +71,7 @@ from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
 from grimoire.missions.breaker import read_breaker, record_failure, trip
+from grimoire.missions.dual_review import model_family as _family
 from grimoire.missions.launcher import (
     _BG_ID,
     _TIER_ALIAS,
@@ -193,11 +194,6 @@ def entered_review_at(service: TaskService, task_id: str) -> str:
     return moves[-1] if moves else ""
 
 
-def _family(model: str) -> str:
-    lowered = model.lower()
-    return next((alias for alias in _ALTERNATE if alias in lowered), lowered)
-
-
 def _parse(stamp: str) -> datetime | None:
     try:
         moment = datetime.fromisoformat(stamp)
@@ -304,6 +300,21 @@ class ReviewStage:
         last = reviews[-1] if reviews else None
         if last is not None and last.id not in verdicts:
             return self._judge(task, launch, last)
+        dual = self._dual_request(task.id, entered)
+        if dual is not None and not self._dual_fulfilled(dual, reviews, verdicts):
+            # Le merger a demandé une seconde relecture sur un chemin réservé : elle se lance avec le modèle qu'il a
+            # choisi au registre, même quand le premier verdict est READY (aucune relance à compter pour la première).
+            if pending := self._unhalted(task.id):
+                shorts = ", ".join(str(e.payload.get("session")) for e in pending)
+                return ReviewOutcome(task.id, "launch", "skipped", f"relecteur(s) {shorts} lancé(s) et non arrêté(s) : "
+                                     "aucune relance tant que l'arrêt n'est pas confirmé")
+            if refused := [e for e in failures if e.payload.get("reason") == "refused"]:
+                why = f"relecteur non inscrit au journal d'autorité ({str(refused[-1].payload.get('detail') or '')[:300]})"
+                return self._escalate(task, why, "")
+            relaunched = sum(1 for r in reviews if verdicts.get(r.id) in _RELAUNCH and verdicts[r.id] != CI_PENDING) + len(failures)
+            if relaunched > MAX_RELAUNCHES:
+                return self._escalate(task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "")
+            return self._launch(task, launch, dual=dual)
         if last is not None and verdicts[last.id] not in _RELAUNCH:
             return None  # jugée : READY (lots suivants), forgée ou refusée — rien de plus à faire ici
         if pending := self._unhalted(task.id):
@@ -318,6 +329,21 @@ class ReviewStage:
             return self._escalate(task, f"{relaunched} relecture(s) sans reçu jugeable (muettes, périmées ou non attestées)", "")
         return self._launch(task, launch)
 
+    def _dual_request(self, task_id: str, entered: str) -> LedgerEvent | None:
+        """La demande de seconde relecture du merger pour l'entrée en revue en cours, s'il y en a une."""
+        from grimoire.missions.merger import MERGE_DUAL_REVIEW_REQUESTED_EVENT
+
+        requests = [e for e in self._events(task_id, MERGE_DUAL_REVIEW_REQUESTED_EVENT) if e.created_at >= entered]
+        return requests[-1] if requests else None
+
+    @staticmethod
+    def _dual_fulfilled(request: LedgerEvent, reviews: list[LedgerEvent], verdicts: dict[str, str]) -> bool:
+        """Une relecture lancée après la demande a rendu un verdict qui clôt la seconde relecture (pas une relance)."""
+        return any(
+            review.id in verdicts and verdicts[review.id] not in _RELAUNCH
+            for review in reviews if review.created_at >= request.created_at
+        )
+
     # -- lancement -----------------------------------------------------------
 
     def _model(self, worker_model: str) -> str:
@@ -329,7 +355,7 @@ class ReviewStage:
             return _ALTERNATE.get(_family(worker_model), _DEFAULT_MODEL)
         return chosen or _DEFAULT_MODEL
 
-    def _launch(self, task: MissionTask, launch: dict[str, Any]) -> ReviewOutcome:
+    def _launch(self, task: MissionTask, launch: dict[str, Any], *, dual: LedgerEvent | None = None) -> ReviewOutcome:
         from grimoire.missions.mandate import MandateStore
 
         tid, role = task.id, self._policy.reviewer
@@ -369,8 +395,18 @@ class ReviewStage:
         if blocked := mandate_precheck(self._service, REVIEWER_ACTOR):
             return ReviewOutcome(tid, "launch", "skipped", blocked)
         under_mandate = MandateStore(root).state().active
-        model = self._model(str(launch.get("model") or ""))
+        if dual is not None:
+            model = str(dual.payload.get("model") or "")
+            if not model:
+                return ReviewOutcome(tid, "launch", "failed", "seconde relecture demandée sans modèle choisi : rien n'est lancé")
+        else:
+            model = self._model(str(launch.get("model") or ""))
         prompt = self._manual_prompt(tid, manual, model) if manual else self._prompt(tid, into, base_sha, model)
+        if dual is not None:
+            prompt = (
+                "Tu es la SECONDE relecture indépendante de cette tâche, demandée parce que la PR touche un chemin "
+                "réservé. Relis le résultat sans t'appuyer sur le premier verdict : " + prompt
+            )
         # #994 : les réglages, hooks et serveurs MCP que la PR apporte (.claude/, .mcp.json) ne s'appliquent pas au
         # relecteur d'une tâche faite à la main ; il garde son dossier dans le worktree pour rejouer les preuves.
         isolate = ["--setting-sources", "user", "--strict-mcp-config"] if manual else []
@@ -402,11 +438,18 @@ class ReviewStage:
             launch_sealed = True
         except Exception:  # journal rompu : le jugement refusera de sceller (échec fermé)
             launch_sealed = False
+        dual_payload = (
+            {"dual_review": True, "dual_first_review": str(dual.payload.get("review") or ""),
+             "dual_family": _family(model), "dual_family_basis": str(dual.payload.get("family_basis") or ""),
+             "dual_worker_family": str(dual.payload.get("worker_family") or "")}
+            if dual is not None else {}
+        )
         self._service.ledger.append_event(
             REVIEW_LAUNCHED_EVENT, tid, "task", REVIEWER_ACTOR,
             {"task_id": tid, "session": short, "session_sha256": session_digest(session_id), "model": model,
              "worker_model": str(launch.get("model") or ""), "cwd": str(cwd), "under_mandate": under_mandate,
              "head": head, "launch_sealed": launch_sealed,
+             **dual_payload,
              **({MANUAL_KEY: True, "pr": manual["pr"], "branch": manual["branch"], "into": manual["into"]} if manual else {})},
         )
         return ReviewOutcome(tid, "launch", "launched", f"relecteur {short} dans {cwd}", short, model)

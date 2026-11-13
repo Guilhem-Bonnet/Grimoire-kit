@@ -50,6 +50,7 @@ __all__ = [
     "REPOSITORY_ENTRY",
     "SEAL_ENTRY",
     "branch_head",
+    "covering_reviews",
     "freeze_repository",
     "frozen_repository",
     "launch_entry",
@@ -61,6 +62,7 @@ __all__ = [
     "seal_review_launch",
     "tree_of",
     "verify",
+    "verify_review",
 ]
 
 LAUNCH_ENTRY = "review_launch"
@@ -276,15 +278,88 @@ def seal_realignment(project_root: Path, task_id: str, review_id: str, source: s
     })
 
 
-def _sealed(project_root: Path, task_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def _mine(project_root: Path, task_id: str) -> list[dict[str, Any]]:
+    """Les entrées du journal d'autorité de cette tâche, dans l'ordre où elles ont été écrites."""
     store = _store(project_root)
-    mine = [e for e in store.journal.read() if e.get("project") == store.project and e.get("task_id") == task_id]
+    return [e for e in store.journal.read() if e.get("project") == store.project and e.get("task_id") == task_id]
+
+
+def _sealed(project_root: Path, task_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    mine = _mine(project_root, task_id)
     seals = [i for i, e in enumerate(mine) if e.get("type") == SEAL_ENTRY]
     if not seals:
         return None, []
     seal = mine[seals[-1]]
     realigns = [e for e in mine[seals[-1] + 1:] if e.get("type") == REALIGN_ENTRY and e.get("review") == seal.get("review")]
     return seal, realigns
+
+
+def _reachable_from(mine: list[dict[str, Any]], index: int, seal: dict[str, Any]) -> set[tuple[str, str]]:
+    """Les ``(tête, arbre)`` couverts par le sceau à *index* : sa tête, puis ses réalignements notés après lui."""
+    if not seal.get("head"):
+        return set()
+    found = {(str(seal["head"]), str(seal.get("tree", "")))}
+    heads = {str(seal["head"])}
+    for step in mine[index + 1:]:
+        if (step.get("type") == REALIGN_ENTRY and step.get("review") == seal.get("review")
+                and str(step.get("from")) in heads):
+            heads.add(str(step.get("to")))
+            found.add((str(step.get("to")), str(step.get("tree", ""))))
+    return found
+
+
+def covering_reviews(project_root: Path, task_id: str, head: str) -> tuple[str, ...]:
+    """Les relectures dont le sceau couvre *head* (directement ou après un réalignement du merger)."""
+    if not head:
+        return ()
+    try:
+        mine = _mine(project_root, task_id)
+        target = (head, tree_of(project_root, head))
+        found: list[str] = []
+        for index, entry in enumerate(mine):
+            if entry.get("type") != SEAL_ENTRY or target not in _reachable_from(mine, index, entry):
+                continue
+            review_id = str(entry.get("review") or "")
+            if review_id and review_id not in found:
+                found.append(review_id)
+        return tuple(found)
+    except Exception:  # journal illisible : aucun réalignement n'est extensible (échec fermé)
+        return ()
+
+
+def verify_review(
+    project_root: Path, task: MissionTask, proofs_root: Path, review_id: str, *, head: str | None = None,
+    check_receipt: bool = True,
+) -> str:
+    """``""`` si le sceau de *review_id* couvre *head* ; sinon la raison.
+
+    La fusion d'une double relecture vérifie chaque verdict séparément : le second (dernier) avec le reçu et le pack
+    présents, le premier sans eux — la seconde relecture a réécrit le reçu, et c'est le sceau, chaîné au journal
+    d'autorité, qui atteste ce qui a été jugé. Fermé comme :func:`verify`.
+    """
+    try:
+        mine = _mine(project_root, task.id)
+    except Exception as exc:  # une garde qui ne lit pas son journal refuse
+        return f"journal d'autorité illisible ({type(exc).__name__}) : jugement READY non vérifiable"
+    positions = [i for i, e in enumerate(mine) if e.get("type") == SEAL_ENTRY and e.get("review") == review_id]
+    if not positions:
+        return "aucun jugement READY scellé au journal d'autorité pour cette relecture"
+    index, seal = positions[-1], mine[positions[-1]]
+    if check_receipt:
+        if receipt_digest(proofs_root, task.id) != seal.get("receipt_sha256"):
+            return "reçu réécrit depuis le jugement READY scellé"
+        if (evidence_pack_digest(proofs_root, task.id) or "") != seal.get("evidence_pack_sha256"):
+            return "le pack de preuve a changé depuis le jugement READY scellé"
+    if not seal.get("head") and head is not None:
+        return "le jugement scellé ne porte aucune tête : il ne couvre pas la tête demandée"
+    if not seal.get("head"):  # dépôt sans git : l'empreinte de contenu du reçu, faute d'objets
+        if receipt_fingerprint(proofs_root) != seal.get("tree_fingerprint"):
+            return "l'arbre a changé depuis le jugement READY scellé"
+        return ""
+    target = head if head is not None else branch_head(project_root, task.id)
+    if target and (target, tree_of(project_root, target)) in _reachable_from(mine, index, seal):
+        return ""
+    return "la tête n'est pas celle du jugement READY scellé, ni un réalignement noté par le merger"
 
 
 def reachable(project_root: Path, task_id: str) -> set[tuple[str, str]]:
