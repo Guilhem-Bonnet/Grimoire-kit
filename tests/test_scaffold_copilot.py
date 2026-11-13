@@ -362,6 +362,9 @@ class TestTemplateVariableSubstitution:
         quatre hôtes comme déjà présents pour vérifier le mécanisme complet,
         indépendamment du filtrage — un projet réellement vierge n'obtient,
         lui, que ``CLAUDE.md`` (voir ``test_fresh_project_only_bridges_claude``).
+
+        ``CLAUDE.md`` fait exception : Claude Code reçoit le contenu court
+        généré par ``host sync``, pas l'import des instructions Copilot.
         """
         (temp_project / ".claude").mkdir()
         (temp_project / "AGENTS.md").touch()
@@ -375,7 +378,11 @@ class TestTemplateVariableSubstitution:
         labels = {t.label for t in plan.templates}
         assert {"CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"} <= labels
         for template in plan.templates:
-            assert ".github/copilot-instructions.md" in template.content
+            if template.label == "CLAUDE.md":
+                assert ".github/copilot-instructions.md" not in template.content
+                assert "grimoire:begin" in template.content
+            else:
+                assert ".github/copilot-instructions.md" in template.content
         agents = next(t for t in plan.templates if t.label == "AGENTS.md")
         assert "test-project" in agents.content
 

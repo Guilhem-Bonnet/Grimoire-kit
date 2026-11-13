@@ -40,9 +40,9 @@ from pathlib import Path
 prompt = sys.argv[1] if len(sys.argv) > 1 else ""
 log = Path(os.environ["FAKE_LOG"])
 calls = Path(os.environ["FAKE_CALLS"])
-count = int(log.read_text().strip() or 0) if log.exists() else 0
+count = int(log.read_text(encoding="utf-8").strip() or 0) if log.exists() else 0
 count += 1
-log.write_text(str(count))
+log.write_text(str(count), encoding="utf-8")
 with calls.open("a", encoding="utf-8") as fh:
     fh.write(json.dumps({"n": count, "script": os.path.abspath(__file__), "prompt": prompt}) + "\n")
 mode = os.environ.get("FAKE_MODE", "summary")

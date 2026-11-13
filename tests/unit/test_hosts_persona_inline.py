@@ -27,6 +27,11 @@ from grimoire.hosts.emitters import apply_plan, emitter_for
 from grimoire.hosts.surface import MAX_INLINE_PERSONA_BYTES
 
 AGENT_DIR = Path("_grimoire/_config/custom/agents")
+#: Le pointeur est écrit dans un Markdown émis : le produit le cite toujours en
+#: POSIX (`AgentSpec.definition_ref`), y compris sous Windows. Comparer à
+#: `str(AGENT_DIR)` y injecterait des `\` et ferait échouer le test pour une
+#: raison d'hôte, pas de comportement.
+AGENT_REF = AGENT_DIR.as_posix()
 CONTEXT_PATH = "_grimoire/_memory/project-notes.md"
 
 #: Chemin de la définition générée, par hôte. Le texte testé est le même : la
@@ -78,8 +83,8 @@ def test_the_definition_embeds_the_persona_body_instead_of_a_pointer(
     text = _definition(tmp_path, host)
 
     assert persona_body in text, "le corps de la fiche doit être intégré dans la définition"
-    assert f"Lis `{AGENT_DIR}/scribe.md` en entier" not in text, "plus de mandat de lecture intégrale"
-    assert f"{AGENT_DIR}/scribe.md" in text, "le fichier source reste cité pour sa mise à jour"
+    assert f"Lis `{AGENT_REF}/scribe.md` en entier" not in text, "plus de mandat de lecture intégrale"
+    assert f"{AGENT_REF}/scribe.md" in text, "le fichier source reste cité pour sa mise à jour"
     assert "grimoire host sync" in text
 
 
@@ -146,7 +151,7 @@ def test_an_oversized_persona_keeps_the_pointer_and_warns_on_sync(tmp_path: Path
 
     _emit(tmp_path, HostId.CLAUDE_CODE_CLI)
     text = _definition(tmp_path, HostId.CLAUDE_CODE_CLI)
-    assert f"Lis `{AGENT_DIR}/scribe.md` en entier" in text, "au-delà du plafond, le pointeur reste"
+    assert f"Lis `{AGENT_REF}/scribe.md` en entier" in text, "au-delà du plafond, le pointeur reste"
     assert "détail détail détail" not in text, "le corps trop lourd n'est pas recopié"
 
 
@@ -212,5 +217,5 @@ def test_inline_persona_can_be_switched_off(tmp_path: Path, persona_body: str) -
 
     _emit(tmp_path, HostId.CLAUDE_CODE_CLI)
     text = _definition(tmp_path, HostId.CLAUDE_CODE_CLI)
-    assert f"Lis `{AGENT_DIR}/scribe.md` en entier" in text
+    assert f"Lis `{AGENT_REF}/scribe.md` en entier" in text
     assert persona_body not in text
