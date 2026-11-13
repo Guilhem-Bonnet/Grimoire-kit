@@ -10,9 +10,12 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from grimoire.core.cadrage import PHASES, check, scaffold, status
+from grimoire.core.cadrage import PHASES, cadrage_dir, check, scaffold, status
+from grimoire.core.exceptions import GrimoireError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from grimoire.missions.cadrage_plan import CadragePlan
 
 console = Console()
@@ -20,16 +23,30 @@ cadrage_app = typer.Typer(help="Cadrage produit : brief → brainstorm → compr
 
 _path_arg = typer.Argument(Path(), help="Racine du projet.")
 _force_opt = typer.Option(False, "--force", "-f", help="Réécrire les gabarits existants.")
+_chantier_opt = typer.Option(None, "--chantier", "-c", help="Chantier visé (défaut : le cadrage principal).")
 _name_opt = typer.Option("", "--name", help="Nom du projet (défaut : nom du dossier).")
+
+
+def _guard[T](fn: Callable[[], T]) -> T:
+    """Un nom de chantier invalide ou une erreur du kit : message net, code 1, pas de trace."""
+    try:
+        return fn()
+    except (ValueError, GrimoireError) as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise typer.Exit(1) from exc
 
 
 @cadrage_app.command("init")
 def cadrage_init(
-    path: Path = _path_arg, name: str = _name_opt, force: bool = _force_opt
+    path: Path = _path_arg, name: str = _name_opt, force: bool = _force_opt, chantier: str | None = _chantier_opt
 ) -> None:
-    """Pose les cinq phases du cadrage sous _grimoire/cadrage/."""
+    """Pose les cinq phases du cadrage sous _grimoire/cadrage/ (ou de --chantier)."""
     root = path.resolve()
-    written = scaffold(root, project_name=name or root.name, force=force)
+    try:
+        written = scaffold(root, project_name=name or root.name, force=force, chantier=chantier)
+    except ValueError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise typer.Exit(1) from exc
     if written:
         console.print(f"[green]cadrage initialisé[/green] — {len(written)} gabarit(s) :")
         for p in written:
@@ -44,10 +61,10 @@ def cadrage_init(
 
 
 @cadrage_app.command("status")
-def cadrage_status(ctx: typer.Context, path: Path = _path_arg) -> None:
+def cadrage_status(ctx: typer.Context, path: Path = _path_arg, chantier: str | None = _chantier_opt) -> None:
     """Progression du cadrage, phase par phase."""
     root = path.resolve()
-    report = status(root)
+    report = _guard(lambda: status(root, chantier))
     if not report["initialized"]:
         console.print(
             "[yellow]cadrage non initialisé[/yellow] — lancez "
@@ -70,10 +87,10 @@ def cadrage_status(ctx: typer.Context, path: Path = _path_arg) -> None:
 
 
 @cadrage_app.command("check")
-def cadrage_check(path: Path = _path_arg) -> None:
+def cadrage_check(path: Path = _path_arg, chantier: str | None = _chantier_opt) -> None:
     """Gate de complétude : exigences + cahier des charges doivent être remplis."""
     root = path.resolve()
-    errors, warnings = check(root)
+    errors, warnings = _guard(lambda: check(root, chantier))
     for w in warnings:
         console.print(f"[yellow]avertissement[/yellow] : {w}")
     for e in errors:
@@ -111,22 +128,25 @@ def cadrage_plan(
     ),
     output: str = typer.Option("", "--output", "-o", help="text ou json (remplace le --output global)."),
     actor: str = typer.Option("cli", "--actor", help="Qui écrit (tâches et questions)."),
+    chantier: str | None = _chantier_opt,
 ) -> None:
     """Du cadrage aux tâches du ledger : une tâche par exigence REQ-NNN, ambiguïtés posées en questions."""
     import json
     import sys
 
-    from grimoire.core.cadrage import CADRAGE_DIR
+    from grimoire.core.chantiers import read_chantier
     from grimoire.missions.cadrage_plan import apply_plan, build_plan
     from grimoire.missions.service import TaskService
 
     root = path.resolve()
     fmt = output or str((ctx.obj or {}).get("output", "text"))
-    if not (root / CADRAGE_DIR).is_dir():
+    target = _guard(lambda: cadrage_dir(root, chantier))
+    if not target.is_dir():
         console.print("[yellow]pas de cadrage[/yellow] — lancez [cyan]grimoire cadrage init[/cyan]")
         raise typer.Exit(1)
+    mission = _guard(lambda: read_chantier(root, chantier).mission) if chantier else ""
     service = TaskService(root)
-    plan = build_plan(root, service)
+    plan = build_plan(root, service, chantier, mission)
     writes = bool(plan.proposals) or any(q.status in ("new", "unanswered") for q in plan.questions)
     shown = False
     if writes and not (dry_run or check_only):
@@ -204,3 +224,80 @@ def _print_plan(plan: CadragePlan, *, check_only: bool = False, writes: bool = F
             "[red]incomplet[/red] — sans critère vérifiable : " + (", ".join(data["missing"]) or "aucune")
             + (f" ; conflits : {', '.join(data['conflicts'])}" if data["conflicts"] else "")
         )
+
+
+# ── chantiers : plusieurs cadrages nommés par projet ─────────────────────────
+
+
+@cadrage_app.command("list")
+def cadrage_list(
+    ctx: typer.Context,
+    path: Path = _path_arg,
+    output: str = typer.Option("", "--output", "-o", help="text ou json (remplace le --output global)."),
+) -> None:
+    """Les chantiers du projet : slug, titre, état, phases remplies, mission."""
+    import json
+
+    from grimoire.core.chantiers import list_chantiers
+
+    chantiers = list_chantiers(path.resolve())
+    fmt = output or str((ctx.obj or {}).get("output", "text"))
+    if fmt == "json":
+        typer.echo(json.dumps([c.to_dict() for c in chantiers], indent=2, ensure_ascii=False))
+        return
+    if not chantiers:
+        console.print("[yellow]aucun chantier[/yellow] — [cyan]grimoire cadrage new \"<titre>\"[/cyan]")
+        return
+    table = Table(title="Chantiers du cadrage")
+    for col in ("Slug", "Titre", "État", "Phases", "Mission"):
+        table.add_column(col)
+    for c in chantiers:
+        table.add_row(
+            c.slug, escape(c.titre), f"[red]erreur[/red] {escape(c.error)}" if c.error else c.etat,
+            c.progress, c.mission or "—",
+        )
+    console.print(table)
+
+
+@cadrage_app.command("new")
+def cadrage_new(
+    titre: str = typer.Argument(..., help="Titre du chantier."),
+    path: Path = _path_arg,
+    slug: str | None = typer.Option(None, "--slug", help="Slug (défaut : tiré du titre)."),
+    mission: str = typer.Option("", "--mission", help="Mission du ledger à rattacher."),
+) -> None:
+    """Crée un chantier : son dossier, les cinq gabarits et chantier.yaml."""
+    from grimoire.core.chantiers import new_chantier
+
+    root = path.resolve()
+    created = _guard(lambda: new_chantier(root, titre, slug=slug, mission=mission))
+    console.print(f"[green]chantier créé[/green] — {created.slug} ({created.etat})")
+    console.print(f"[dim]Remplissez-le, puis :[/dim] [cyan]grimoire cadrage check --chantier {created.slug}[/cyan]")
+
+
+@cadrage_app.command("state")
+def cadrage_state(
+    slug: str = typer.Argument(..., help="Slug du chantier (principal : le cadrage par défaut)."),
+    etat: str = typer.Argument(..., help="idee | en-discussion | pret-a-valider | valide | en-cours | livre | archive"),
+    path: Path = _path_arg,
+) -> None:
+    """Change l'état d'un chantier (transitions permises seulement)."""
+    from grimoire.core.chantiers import set_state
+
+    root = path.resolve()
+    updated = _guard(lambda: set_state(root, slug, etat))
+    console.print(f"[green]{updated.slug}[/green] → {updated.etat}")
+
+
+@cadrage_app.command("link")
+def cadrage_link(
+    slug: str = typer.Argument(..., help="Slug du chantier."),
+    mission: str = typer.Argument(..., help="Id de mission du ledger (vide : détacher)."),
+    path: Path = _path_arg,
+) -> None:
+    """Rattache un chantier à une mission du ledger."""
+    from grimoire.core.chantiers import link_mission
+
+    root = path.resolve()
+    updated = _guard(lambda: link_mission(root, slug, mission))
+    console.print(f"[green]{updated.slug}[/green] ↔ {updated.mission or 'aucune mission'}")

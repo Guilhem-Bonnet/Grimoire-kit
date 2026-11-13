@@ -3,6 +3,8 @@ VENV ?= .venv
 # Auto-detect venv Python to avoid PEP 668 errors on Ubuntu/Debian
 PYTHON ?= $(shell [ -f "$(VENV)/bin/python3" ] && echo "$(VENV)/bin/python3" || echo "python3")
 PYTEST_ARGS ?=
+# ESLint n'est pas une dépendance du dépôt : `npx` le prend à cette version exacte, hors de l'arbre.
+ESLINT_VERSION ?= 10.14.0
 
 ## ─── Environment ────────────────────────────────────────────────
 .PHONY: venv
@@ -33,6 +35,11 @@ lint: ## Run ruff linter
 .PHONY: lint-fix
 lint-fix: ## Run ruff linter with auto-fix
 	$(PYTHON) -m ruff check src/ tests/ framework/tools/ framework/memory/ --fix
+
+.PHONY: lint-js
+lint-js: ## Syntaxe (node --check) et lint minimal (ESLint) du JavaScript de web/
+	$(PYTHON) scripts/check-js-syntax.py
+	npx --yes eslint@$(ESLINT_VERSION) web/
 
 .PHONY: ratchet
 ratchet: ## Code-size ratchet (framework frozen, src oversize guard)

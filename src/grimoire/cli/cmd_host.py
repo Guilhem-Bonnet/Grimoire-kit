@@ -540,7 +540,7 @@ def host_hook(
     passer une décision de politique pour une panne du hook.
     """
     host_id = resolve_host(host) or HostId.UNKNOWN
-    parsed = parse_event(event)
+    parsed = parse_event(event, host_id=host_id)
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     try:
         payload = json.loads(raw) if raw.strip() else {}

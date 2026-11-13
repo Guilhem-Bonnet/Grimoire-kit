@@ -331,6 +331,43 @@ l'événement est documenté ; l'absence d'entrée dans `.claude/settings.json`
 n'était pas un choix mais un oubli — la table du wire format ne les
 connaissait pas encore.
 
+### Le protocole de hooks de Gemini CLI
+
+`grimoire-hook --host gemini --event <événement>` lit la charge utile JSON de
+Gemini CLI sur stdin et la traduit vers les événements neutres ; les décisions
+du kit sont réutilisées telles quelles (`grimoire.hosts.gemini_wire`).
+
+| Événement Gemini | Événement neutre | Sortie du hook |
+|---|---|---|
+| `BeforeTool` | `pre_tool_use` | refus : `{"decision": "deny", "reason": …}` |
+| `BeforeAgent` | `user_prompt_submit` | refus : `{"decision": "deny", "reason": …}` |
+| `SessionStart` | `session_start` | contexte : `{"additionalContext": …}` |
+| `AfterTool` | `post_tool_use` | aucun verdict |
+| `AfterAgent`, `SessionEnd` | `stop` | aucun verdict (voir « non vérifié ») |
+| `PreCompress` | `pre_compact` | aucun verdict ; la capsule est écrite sur disque |
+
+Les noms d'outils sont rapprochés des classes du kit par une table explicite :
+`read_file`, `read_many_files`, `list_directory`, `glob`, `grep_search`,
+`search_file_content`, `google_web_search` et `web_fetch` → lecture ;
+`write_file`, `replace`, `write_todos` et `save_memory` → écriture de
+fichier ; `run_shell_command` → commande shell. Un outil inconnu prend la
+classe commande shell, la plus stricte. Un `ask` du kit devient `deny` :
+Gemini ne permet pas d'interroger l'humain depuis un hook.
+
+Échec fermé : sur `BeforeTool` et `BeforeAgent`, une erreur interne du hook
+sort en code 2 avec la raison sur stderr ; sur les autres événements elle est
+seulement signalée et laisse passer l'action. Le kit sait traduire ce
+protocole, mais il n'écrit pas encore `.gemini/settings.json` : l'émetteur
+prose reste en place, donc aucun hook n'est câblé automatiquement sur cet
+hôte.
+
+**Non vérifié** (geminicli.com/docs lue le 2026-11-12, dernière version
+annoncée v0.64.0 ; la CLI n'est pas installée sur le poste) : un événement de
+fin de tour capable de bloquer (`AfterAgent` est documenté comme hook, pas
+comme point de blocage) ; le format des fichiers de session
+(`transcript_path`). Aucune sortie de refus n'est donc émise pour
+`AfterAgent`/`SessionEnd`, et leurs fixtures ne prouvent pas un blocage.
+
 ### Le hook `stop`
 
 C'est le seul endroit où la règle du kit — « une clôture sans gates verts est une

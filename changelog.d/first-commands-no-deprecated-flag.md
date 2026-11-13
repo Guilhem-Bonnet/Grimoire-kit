@@ -1,0 +1,1 @@
+- docs: les commandes d'accroche du README, du README.fr et de docs/index n'utilisent plus le drapeau déprécié `--lite`

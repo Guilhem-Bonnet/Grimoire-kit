@@ -5,41 +5,41 @@
       "id": "cloture-refusee-puis-acceptee",
       "title": "Clôture refusée, puis acceptée",
       "summary": "Sans reçu de revue, la clôture d'une tâche V2 est refusée ; elle passe une fois la revue écrite.",
-      "kit_version": "3.80.1",
-      "recorded_at": "2026-11-07T06:20:23Z",
-      "output_sha256": "493b0203db612bc5104420aaf8d51a825426916f07d2b4b389afdeccc83b2c8f"
+      "kit_version": "3.84.0",
+      "recorded_at": "2026-11-13T00:34:31Z",
+      "output_sha256": "43d4c9bd6bd71f65641ff9fec9c6fa20600d7e7a71e822dad37199b5d8243b68"
     },
     {
       "id": "decision-humaine-attestee",
       "title": "Décision humaine attestée",
       "summary": "L'agent pose une question ; seule la réponse du canal humain rend la tâche.",
-      "kit_version": "3.80.1",
-      "recorded_at": "2026-11-07T06:20:37Z",
-      "output_sha256": "34d20df0a030aee0a5a2e3bfbca4bf3d7b21591e3313697b55282a97033b7184"
+      "kit_version": "3.84.0",
+      "recorded_at": "2026-11-13T00:34:50Z",
+      "output_sha256": "8debd5c301f461e819b295aa79c2cf2e2c78ae55d6e31369f2d7618e91a32a83"
     },
     {
       "id": "supersession",
       "title": "Supersession d'une décision",
       "summary": "Une décision remplacée n'est plus servie, mais reste lisible.",
-      "kit_version": "3.80.1",
-      "recorded_at": "2026-11-07T06:20:50Z",
+      "kit_version": "3.84.0",
+      "recorded_at": "2026-11-13T00:35:08Z",
       "output_sha256": "373a530818bf20f177d7206ff3fddf17301754edbad40ccc193b5294cdc9005a"
     },
     {
       "id": "rappel-au-claim",
       "title": "Rappel au claim",
       "summary": "Réclamer une tâche voisine d'une tâche close rappelle ce que le projet en sait.",
-      "kit_version": "3.80.1",
-      "recorded_at": "2026-11-07T06:21:04Z",
-      "output_sha256": "652bbe35b1498cb6525002a7ccec427605c666aafc72596d9ed98e929aa74b43"
+      "kit_version": "3.84.0",
+      "recorded_at": "2026-11-13T00:35:28Z",
+      "output_sha256": "9e0cc8314d85eadaf67fe6de790dca3f1c2d486971362983dfe60fbb893a9d29"
     },
     {
       "id": "tri-v0-v1-v2",
       "title": "Tri V0 / V1 / V2",
       "summary": "La vérifiabilité d'une tâche se lit à ses critères et à ses checks.",
-      "kit_version": "3.80.1",
-      "recorded_at": "2026-11-07T06:21:16Z",
-      "output_sha256": "829c760f88e3c8ad5960f782bbb237e2d33b4545b7869c65a27580162712c72b"
+      "kit_version": "3.84.0",
+      "recorded_at": "2026-11-13T00:35:47Z",
+      "output_sha256": "5e72c8fe32c9c1066b42298c838c6dccc73b9e16bf8cc7009ab0d52cd328d624"
     }
   ]
 }

@@ -48,6 +48,9 @@ secrets.yml
 **/secrets/
 
 # Dev / CI artifacts
+# `make lint-js` passe par npx (cache npm, hors dépôt) : aucun node_modules n'a
+# à exister ici, et `web/` part en entier dans la roue (force-include).
+node_modules/
 .coverage
 coverage.xml
 htmlcov/

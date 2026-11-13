@@ -21,7 +21,7 @@ contrôle des preuves.
 
 ```bash
 uv tool install grimoire-kit                   # ou : pipx install grimoire-kit
-grimoire init . --lite -y                      # équipe le dépôt courant, en profil léger (aucun service)
+grimoire init . -y                             # équipe le dépôt courant ; démarre la pile mémoire complète si Docker répond
 grimoire standard init . --profile governed    # rend le contrôle des preuves bloquant
 ```
 

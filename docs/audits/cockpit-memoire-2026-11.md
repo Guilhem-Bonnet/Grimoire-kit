@@ -52,7 +52,7 @@ correctif** (commit `faa33529` pour les numéros de ligne).
 | `fleet/live`, première lecture d'un journal | 71,4 Mo | `workspace_fleet_live.py:606` : `data = handle.read()` lit **tout** le journal d'un bloc (50 Mo ici, 115–195 Mo sur le poste) |
 | `tasks` | 86,4 Mo | inclut la construction de l'index des traces (20 000 `TraceRecord`) |
 | `sheet` | 102,6 Mo | recalcul complet du board annoté |
-| `files` (30 150 fichiers) | 36,0 Mo, 5,7 s | `workspace_api._walk` matérialise `sorted(root.rglob("*"))` **avant** d'appliquer `MAX_FILES_PER_TIER` ; 3,8 Mo retenus (digests) |
+| `files` (30 150 fichiers) | 36,0 Mo, 5,7 s | `workspace_api._walk` matérialisait `sorted(root.rglob("*"))` **avant** d'appliquer `MAX_FILES_PER_TIER` ; 3,8 Mo retenus (digests). Corrigé en amont par #1217 (parcours `os.scandir` borné à 2 000 fichiers / 2 s), fusionné dans cette branche. |
 
 ## Cause retenue
 
@@ -105,9 +105,10 @@ Mesuré après correctif, même banc :
   décision de produit, hors des deux causes que la tâche autorise à corriger. Piste :
   compacter par tâche les seules grandeurs que `task_usage` replie (tokens, cache,
   recettes, statut de coût) au lieu de garder chaque `TraceRecord`.
-- **`files_view`** (pic transitoire) : borner `_walk` demande un parcours incrémental
-  qui conserve l'ordre lexicographique exact de `sorted(rglob())` ; le pic est
-  transitoire, pas une rétention.
+
+`files_view` (pic transitoire de 36 Mo mesuré ci-dessus) n'est pas corrigé *par cette
+PR* : #1217 l'a borné en amont (`os.scandir`, 2 000 fichiers / 2 s), et sa fusion est
+incluse ici.
 
 ## Reproduction
 

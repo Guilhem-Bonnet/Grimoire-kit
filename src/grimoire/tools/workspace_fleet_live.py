@@ -23,8 +23,11 @@ Cinq sources, toutes déjà existantes :
 - **vivacité** : :func:`grimoire.missions.liveness.liveness`, la seule
   définition de « vivante » du kit ;
 - **fournisseur d'un modèle** : le registre ``llm-provider-registry.yaml`` du
-  projet. Un modèle absent du registre vaut ``inconnu``, jamais une
-  supposition.
+  projet d'abord, puis le préfixe que chaque fournisseur publie dans ses
+  identifiants (``claude-`` chez Anthropic, ``deepseek-`` chez DeepSeek…,
+  :data:`_VENDOR_PREFIXES`). Le gabarit du registre ne déclare aucun modèle :
+  sans ce repli, tout modèle Claude valait ``inconnu``. Un modèle qui ne répond
+  à aucun des deux vaut ``inconnu``, jamais une supposition.
 
 Lecture incrémentale : l'état d'un journal est gardé par
 ``(chemin, taille, mtime_ns)``. Un fichier dont la signature n'a pas changé
@@ -115,6 +118,17 @@ _WORKTREE_MARKERS = (".git-grimoire-worktrees-", "--claude-worktrees-")
 #: Une PR liée dans la description ou une consigne.
 _PR_URL_RE = re.compile(r"github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)", re.IGNORECASE)
 _HAS_GLOB = re.compile(r"[*?[]")
+
+# Préfixes que les fournisseurs publient eux-mêmes dans leurs identifiants de
+# modèle : un repli quand le registre du projet ne déclare pas le modèle, pas
+# une devinette (un identifiant ``claude-…`` est un modèle Anthropic par
+# construction). Le palier reste inconnu : seul le registre le déclare.
+_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("claude-", "anthropic"),
+    ("deepseek-", "deepseek"),
+    ("gemini-", "google-gemini"),
+    ("gpt-", "openai"),
+)
 #: Outils qui posent une question à l'humain : un marqueur du fil, pas un appel ordinaire.
 _QUESTION_TOOLS = frozenset({"AskUserQuestion", "ask_user_question"})
 #: Ordre d'affichage des états de vivacité (les vivantes d'abord).
@@ -330,6 +344,9 @@ class _Registry:
         for pattern, provider, tier in self.patterns:
             if fnmatch.fnmatchcase(lowered, pattern):
                 return provider, tier
+        for prefix, provider in _VENDOR_PREFIXES:
+            if lowered.startswith(prefix):
+                return provider, None
         return "inconnu", None
 
 
@@ -968,6 +985,13 @@ def _assemble(
         "worktree": worktree,
         "branch": state.branch or _text(launch.get("branch")) or None,
         "entrypoint": state.entrypoint or None,
+        # Un sous-agent se nomme par ce qu'on lui a demandé (``description``
+        # du lancement), sinon par sa persona : la branche est celle du parent.
+        "agent": (
+            {"type": meta.agent_type or None, "description": _clip(meta.description, 80) or None}
+            if meta is not None
+            else None
+        ),
         "started_at": state.started_at or None,
         "last_at": state.last_at or None,
         "liveness": _liveness_value(live, waiting=status == "waiting"),
