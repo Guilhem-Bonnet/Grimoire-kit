@@ -133,6 +133,28 @@ def test_un_ancien_pointeur_du_kit_est_migre_vers_le_fichier_court(tmp_path: Pat
     assert migrated.lstrip().startswith("<!-- grimoire:begin")
 
 
+def test_le_kit_reconnait_le_claude_md_qu_il_a_ecrit(tmp_path: Path) -> None:
+    """Un `CLAUDE.md` émis par le kit est « sien » (prunable), pas un fichier étranger."""
+    from grimoire.hosts.emitters.base import owned_managed_paths
+
+    project = _project(tmp_path)
+    apply_plan(_plan(project), project)
+
+    owned = [p.relative_to(project).as_posix() for p in owned_managed_paths(_plan(project), project)]
+    assert "CLAUDE.md" in owned
+
+
+def test_le_kit_reconnait_l_ancien_pointeur_comme_sien(tmp_path: Path) -> None:
+    """L'ancien rendu est reconnu pour la migration (et donc pour l'élagage d'un hôte désactivé)."""
+    from grimoire.hosts.emitters.base import owned_managed_paths
+
+    project = _project(tmp_path)
+    (project / "CLAUDE.md").write_text(LEGACY_POINTER, encoding="utf-8")
+
+    owned = [p.relative_to(project).as_posix() for p in owned_managed_paths(_plan(project), project)]
+    assert "CLAUDE.md" in owned
+
+
 def test_le_contenu_ne_depend_pas_du_nom_du_projet_pour_la_taille(tmp_path: Path) -> None:
     """Deux noms de projet de tailles très différentes restent sous le plafond."""
     assert len(claude_md_content("p", "Français")) < SHORT_LIMIT
