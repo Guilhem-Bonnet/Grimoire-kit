@@ -592,6 +592,104 @@ def test_une_reprise_par_defaut_attend_que_le_worker_ne_travaille_plus(project: 
     assert service.require(tid).status is TaskState.READY
 
 
+# ── La recommandation d'un agent : ce que le tick n'applique jamais, avec ou sans réglage ───────────────
+
+
+def agent_recommends(root: Path, case: str) -> tuple[TaskService, str, str]:
+    """Une question posée par un agent (``task ask``), avec l'option qu'il recommande, pilote actif sans réglage."""
+    pilot(root)
+    why = "les critères de la tâche vont dans ce sens"
+    if case == "permission":
+        return asks(root, f"Écrire dans {root / 'src' / 'app.py'} ?", kind="permission", options=("oui", "non"),
+                    recommended="oui", why=why)
+    if case == "merge":
+        return asks(root, "Fusionner la branche de la tâche ?", kind="merge", options=("oui", "non"),
+                    recommended="oui", why=why)
+    if case == "danger":
+        return asks(root, choices=(Choice("a", "Voie A"), Choice("b", "Voie B", danger=True)), recommended="b", why=why)
+    if case == "abandon":
+        return asks(root, "Je continue ?", options=("continuer", "abandonner"), recommended="abandonner", why=why)
+    if case == "texte-reserve":
+        return asks(root, "Renouveler le token de publication ?", options=("oui", "non"), recommended="oui", why=why)
+    if case == "titre-reserve":  # les options du kit, imitées : le titre de la tâche, lui, touche la liste fermée
+        return asks(root, "Je continue sur cette voie ?", title=TARIFF, options=("reprendre", "abandonner"),
+                    recommended="reprendre", why=why)
+    raise AssertionError(case)
+
+
+@pytest.mark.parametrize("case", ["permission", "merge", "danger", "abandon", "texte-reserve", "titre-reserve"])
+def test_le_tick_n_applique_pas_la_recommandation_d_un_agent_qui_engage(project: Path, case: str) -> None:
+    """Permission, fusion, option dangereuse ou abandon, question réservée (titre compris) : l'agent ne s'auto-répond pas."""
+    service, tid, qid = agent_recommends(project, case)
+    assert stage(service, project)._apply_recommendations(AT_REST) == []
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+    assert not [e for e in events(service, tid, HUMAN_ANSWERED_EVENT) if e.payload.get("question_id") == qid]
+
+
+@pytest.mark.parametrize("case", ["permission", "merge", "danger", "titre-reserve"])
+def test_la_session_ne_recopie_pas_la_recommandation_d_un_agent_qui_engage(project: Path, case: str) -> None:
+    """La session ne reçoit pas cette recommandation, et la répondre sans rien assumer ne décide rien ; l'assumer
+    (justification et confiance) reste le jugement du pilote, comme avant."""
+    service, tid, qid = agent_recommends(project, case)
+    asked = service.require(tid).waiting.question  # type: ignore[union-attr]
+    (open_question,) = eligible_questions(service, MandateStore(project))
+    assert open_question.question_id == qid and asked.recommended and open_question.recommended == ""
+    with pytest.raises(GrimoireMissionError, match="confiance"):
+        answer(service, tid, qid, asked.recommended)
+    assert service.require(tid).status is TaskState.WAITING and not events(service, tid, DECIDED_EVENT)
+
+    other = project.parent / "autre"
+    other.mkdir()
+    service, tid, qid = agent_recommends(other, case)
+    answer(service, tid, qid, service.require(tid).waiting.question.recommended,  # type: ignore[union-attr]
+           justification=WHY, confidence="high")
+    assert events(service, tid, DECIDED_EVENT)[0].payload["recommendation_source"] == "judgment"
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"options": ("A", "B"), "recommended": "B"}, "B"),
+        ({"options": (), "recommended": "  nom   libre "}, "nom libre"),  # réponse libre : aucune option proposée
+        ({"options": ("A", "B"), "recommended": "C"}, ""),  # des options existent : la recommandation en fait partie
+        ({"options": ("continuer", "abandonner"), "recommended": "abandonner"}, ""),
+        ({"options": (), "recommended": "abandonner"}, ""),
+        ({"choices": (Choice("A", "A"), Choice("B", "B", danger=True)), "recommended": "B"}, ""),
+        ({"kind": "merge"}, ""),
+        ({"kind": "permission"}, ""),
+        ({"recommended": ""}, ""),
+    ],
+)
+def test_ce_qu_un_agent_peut_se_recommander(fields: dict[str, Any], expected: str) -> None:
+    from grimoire.missions.autopilot import author_option
+
+    option, why = author_option(question(**fields))
+    assert option == expected and bool(why) is not bool(expected)
+
+
+def test_une_recommandation_hors_des_options_proposees_n_entre_pas_au_ledger(project: Path) -> None:
+    """Quand des options existent, la recommandation en fait partie : refusée dès ``task ask``, seule ou en lot."""
+    from grimoire.missions.questions import QuestionSpec
+
+    service, tid = running(project)
+    with pytest.raises(ValueError, match="recommandation"):
+        service.ask(tid, "Quelle voie ?", "w", options=("A", "B"), recommended="C")
+    with pytest.raises(ValueError, match="recommand"):
+        service.ask_batch(tid, [QuestionSpec("Quelle voie ?", options=("A", "B"), recommended="C")], "w")
+    assert service.require(tid).status is TaskState.RUNNING
+
+
+@pytest.mark.parametrize("options", [("A", "B"), ()], ids=["choix-ordinaire", "texte-libre-sans-options"])
+def test_le_tick_applique_toujours_la_recommandation_ordinaire_d_un_agent(project: Path, options: tuple[str, ...]) -> None:
+    """Ce qui ne change pas : un choix ordinaire, ou une réponse libre sans options, reste appliqué sans réglage."""
+    pilot(project)
+    service, tid, _qid = asks(project, "Quel nom donner au module ?", options=options, recommended="B")
+    (outcome,) = stage(service, project)._apply_recommendations(AT_REST)
+    assert outcome.status == "done" and service.require(tid).status is TaskState.READY
+    (decided,) = events(service, tid, DECIDED_EVENT)
+    assert decided.payload["option"] == "B" and decided.payload["recommendation_source"] == "recommended"
+
+
 # ── Les questions écrites par le kit portent une option recommandée ─────────
 
 

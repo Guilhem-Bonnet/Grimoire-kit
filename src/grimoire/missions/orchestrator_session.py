@@ -148,6 +148,7 @@ __all__ = [
     "OrchestratorStage",
     "answer_gesture",
     "answer_plan",
+    "author_plan",
     "default_plan",
     "eligible_questions",
     "kit_written",
@@ -374,6 +375,28 @@ def default_plan(
     return option, ""
 
 
+def author_plan(
+    service: TaskService, task: MissionTask, question: Question, policy: AutopilotPolicy,
+) -> tuple[str, str]:
+    """La recommandation qu'un agent a écrite sur *question*, si le pilote peut la prendre sans jugement :
+    ``(option, "")``, ou ``("", pourquoi pas)``.
+
+    Un agent écrit la question, ses options et sa recommandation : sans cette garde, il se répond à lui-même. Rien
+    n'est pris pour une permission ou une fusion, pour « abandonner » ou un choix ``danger``, pour une recommandation
+    absente des options proposées (:func:`~.autopilot.author_option`), ni quand la liste fermée garde la question —
+    jugée titre de la tâche compris, puisque l'auteur est un agent. Un choix ordinaire, ou une réponse libre sans
+    options, reste pris. Ne dépend d'aucun réglage.
+    """
+    from grimoire.missions.autopilot import author_option, reserved_reason
+
+    option, why = author_option(question)
+    if not option:
+        return "", why
+    if kept := reserved_reason(question, task, service.project_root, policy, kit_written=False):
+        return "", kept
+    return option, ""
+
+
 def answer_gesture(service: TaskService, task: MissionTask, question: Question, answer: str) -> str:
     """Le geste qu'une réponse d'origine ``orchestrator`` prend sur *question* (:func:`answer_plan` sans la décision)."""
     return answer_plan(service, task, question, answer)[0]
@@ -424,7 +447,8 @@ def answer_plan(
             fallback = ""
     try:
         decision = judge(
-            question, answer, justification=justification, confidence=confidence, kit_written=kit, default=fallback,
+            question, answer, justification=justification, confidence=confidence, default=fallback,
+            recommendation_decides=not kit and bool(author_plan(service, task, question, policy)[0]),
         )
     except GrimoireMissionError as exc:
         _defer(service, task.id, question.id, str(exc))
@@ -581,7 +605,8 @@ def eligible_questions(service: TaskService, store: MandateStore) -> list[OpenQu
     Pilote activé : toutes les tâches en attente d'un humain, faites à la main comprises, hors la liste fermée et hors
     les questions que le pilote a déjà laissées à l'humain faute de confiance. L'option recommandée d'une question que
     le kit a écrite (:func:`kit_written`) n'est pas présentée : c'est son option par défaut, que le tick applique ou
-    non selon ``autopilot.default_action`` ; une session qui la reçoit juge par elle-même, comme avant.
+    non selon ``autopilot.default_action`` ; une session qui la reçoit juge par elle-même, comme avant. Celle qu'un
+    agent ne peut pas se répondre (:func:`author_plan`) ne l'est pas non plus : la session juge, elle ne recopie pas.
     """
     from grimoire.missions.autopilot import AutopilotStore, last_deferral, load_autopilot_policy, reserved_reason
     from grimoire.missions.mandate import MandateRefusedError
@@ -606,7 +631,9 @@ def eligible_questions(service: TaskService, store: MandateStore) -> list[OpenQu
                 store.authorize(gesture, task, {"kind": "rule", "ref": "eligibilite"}, record=False)
             except MandateRefusedError:
                 continue
-            pick = "" if kit_written(events, q) else q.recommended
+            # Pilote activé, la recommandation n'est présentée que si elle peut valoir décision (:func:`author_plan`).
+            taken = policy is None or (not kit_written(events, q) and bool(author_plan(service, task, q, policy)[0]))
+            pick = q.recommended if taken else ""
             found.append(OpenQuestion(tid, q.id, q.kind, q.text, q.options, gesture, pick, q.why))
     return found
 
@@ -795,8 +822,9 @@ class OrchestratorStage:
         """Pilote activé : une question qui porte sa recommandation reçoit cette option, sans session (le tick l'applique).
 
         La recommandation est une donnée de l'auteur de la question : elle passe par les mêmes gardes que toute réponse
-        d'origine ``orchestrator`` (:func:`answer_plan` : mandat, liste fermée, geste). Un refus laisse la question à
-        l'humain ou à la session qui suit.
+        d'origine ``orchestrator`` (:func:`answer_plan` : mandat, liste fermée, geste), et n'est prise que si l'agent
+        peut se la répondre (:func:`author_plan` : ni permission, ni fusion, ni abandon, ni option dangereuse, liste
+        fermée jugée titre compris). Un refus laisse la question à l'humain ou à la session qui suit.
 
         Une question que le kit a écrite (:func:`kit_written`) ne porte pas l'avis d'un auteur mais une option par
         défaut : le tick ne l'applique que si :func:`default_plan` en rend une (``autopilot.default_action:
@@ -824,6 +852,8 @@ class OrchestratorStage:
                 continue
             events = self._service.ledger.events_for(q.task_id)
             by_default = kit_written(events, record.question)
+            if not by_default and not author_plan(self._service, task, record.question, policy)[0]:
+                continue  # l'agent ne s'auto-répond pas : permission, fusion, abandon, option dangereuse, liste fermée
             if by_default and (
                 not default_plan(self._service, task, record.question, events, policy)[0]
                 or worker_at_work(self._service, q.task_id, status)

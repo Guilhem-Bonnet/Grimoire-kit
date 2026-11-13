@@ -87,6 +87,7 @@ __all__ = [
     "AutopilotStore",
     "Decision",
     "assumes",
+    "author_option",
     "decided_payload",
     "default_option",
     "judge",
@@ -309,6 +310,30 @@ class Decision:
         }
 
 
+def _safe_option(question: Question, *, free_text: bool) -> tuple[str, str]:
+    """L'option recommandée de *question* si elle peut être prise sans jugement : ``(option, "")`` ou ``("", pourquoi)``.
+
+    Jamais pour une fusion ni une permission, pour « abandonner » ni un choix ``danger``. L'option est rendue telle
+    que la question l'écrit parmi ses options ; *free_text* admet en plus la réponse libre d'une question qui n'en
+    propose aucune (jamais une recommandation étrangère aux options proposées).
+    """
+    pick = " ".join(question.recommended.split())
+    if not pick:
+        return "", "la question ne recommande aucune option"
+    if question.kind not in _DEFAULT_KINDS:
+        return "", f"une question de nature {question.kind!r} ne se tranche pas sans jugement"
+    option = next((o for o in question.options if " ".join(o.split()).lower() == pick.lower()), "")
+    if not option:
+        if question.options or not free_text:
+            return "", "l'option recommandée n'est pas l'une des options de la question"
+        option = pick
+    if pick.lower() == ABANDON or any(
+        c.danger and " ".join(c.value.split()).lower() == pick.lower() for c in question.choices
+    ):
+        return "", "l'option recommandée annule la tâche ou est marquée dangereuse : jamais sans jugement"
+    return option, ""
+
+
 def default_option(question: Question) -> tuple[str, str]:
     """L'option qu'une décision par défaut appliquerait à *question* : ``(option, "")``, ou ``("", pourquoi aucune)``.
 
@@ -317,17 +342,18 @@ def default_option(question: Question) -> tuple[str, str]:
     annule la tâche (« abandonner ») ou que son choix porte le drapeau ``danger``. Ne juge ni la liste fermée ni le
     réglage du projet : l'appelant le fait (:func:`reserved_reason`, ``autopilot.default_action``).
     """
-    pick = " ".join(question.recommended.split()).lower()
-    if not pick:
-        return "", "la question ne recommande aucune option"
-    if question.kind not in _DEFAULT_KINDS:
-        return "", f"une question de nature {question.kind!r} ne se tranche pas par défaut"
-    option = next((o for o in question.options if " ".join(o.split()).lower() == pick), "")
-    if not option:
-        return "", "l'option recommandée n'est pas l'une des options de la question"
-    if pick == ABANDON or any(c.danger and " ".join(c.value.split()).lower() == pick for c in question.choices):
-        return "", "l'option recommandée annule la tâche ou est marquée dangereuse : jamais par défaut"
-    return option, ""
+    return _safe_option(question, free_text=False)
+
+
+def author_option(question: Question) -> tuple[str, str]:
+    """La recommandation de l'auteur de *question* que le pilote peut prendre telle quelle : ``(option, "")``, ou
+    ``("", pourquoi pas)``.
+
+    Un agent écrit sa question et sa recommandation : il ne s'auto-répond ni une permission ni une fusion, ni
+    « abandonner » ni un choix ``danger``, ni une option absente de celles qu'il propose. Un choix ordinaire, ou la
+    réponse libre d'une question sans options, reste pris. Ne juge pas la liste fermée : l'appelant le fait.
+    """
+    return _safe_option(question, free_text=True)
 
 
 def assumes(confidence: str) -> bool:
@@ -336,7 +362,7 @@ def assumes(confidence: str) -> bool:
 
 
 def judge(
-    question: Question, answer: str, *, justification: str = "", confidence: str = "", kit_written: bool = False,
+    question: Question, answer: str, *, justification: str = "", confidence: str = "", recommendation_decides: bool = True,
     default: str = "",
 ) -> Decision:
     """La décision du pilote sur *question* ; lève :class:`GrimoireMissionError` si elle reste à l'humain.
@@ -344,15 +370,16 @@ def judge(
     Une réponse égale à l'option recommandée (casse et espaces mis à part) est la recommandation appliquée. Toute autre
     réponse est un jugement : elle cite sa justification et déclare une confiance ``high`` ou ``medium``.
 
-    *kit_written* : le kit a écrit la question ; sa recommandation est une option par défaut, pas l'avis d'un auteur —
-    elle ne vaut pas décision à elle seule. *default* : l'option qu'une décision par défaut applique, déjà contrôlée
+    *recommendation_decides* : faux quand la recommandation ne vaut pas décision à elle seule — le kit a écrit la
+    question (c'est son option par défaut, pas l'avis d'un auteur), ou l'agent recommande ce qu'il ne peut pas
+    s'auto-répondre (:func:`author_option`, liste fermée). La réponse se juge alors comme toute autre. *default* : l'option qu'une décision par défaut applique, déjà contrôlée
     par l'appelant (``""`` : aucune — réglage ``ask``, liste fermée, borne atteinte). Quand personne n'assume de
     décision (confiance basse ou non déclarée), c'est elle qui tranche, à la place de la réponse soumise, avec la
     source :data:`DEFAULT_SOURCE` ; sa justification est celle de la question, jamais celle de la réponse écartée.
     """
     text = " ".join(answer.split())
     recommended = " ".join(question.recommended.split())
-    if recommended and not kit_written and text.lower() == recommended.lower():
+    if recommended and recommendation_decides and text.lower() == recommended.lower():
         return Decision(text, "recommended", "high", " ".join((justification or question.why).split()))
     level = confidence.strip().lower()
     why = " ".join(justification.split())
