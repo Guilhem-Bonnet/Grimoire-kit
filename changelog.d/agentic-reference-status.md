@@ -1,0 +1,1 @@
+- docs(reference): statuts de la section 10 revérifiés contre `main`, toute ligne ouverte porte une issue ou une décision « hors périmètre » (#637)
