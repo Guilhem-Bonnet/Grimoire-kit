@@ -29,6 +29,7 @@ from grimoire.hosts.decisions.read_only_arguments import (
 from grimoire.hosts.decisions.read_only_layout import (
     _ACTIVE_EXPANSION_RE,
     _DOLLAR_QUOTES,
+    _HISTORY_RE,
     _QUOTED,
     _code_and_bodies,
     _opaque_spans,
@@ -354,10 +355,6 @@ _EXPANSION_RE = re.compile(r"\$(?:[A-Za-z_{]|[0-9@*#?$!=~^-])")
 #: ``{a,b}``, ``{1..3}``, ``{"-x",y}`` : un mot écrit, plusieurs mots lancés. Sans virgule ni
 #: ``..`` entre les accolades, rien n'est développé : ``{}``, ``HEAD@{1}``, ``v1^{commit}``.
 _BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
-#: ``!!``, ``!$``, ``!mot``, ``!:1`` : dans un shell interactif, le rappel est remplacé par un
-#: morceau d'une ligne passée AVANT que la ligne soit lue — opérateurs compris. Ce que la
-#: ligne devient ne se lit pas ici : un rappel n'est admis derrière aucun verbe.
-_HISTORY_RE = re.compile(r"![!$*^#?:\w-]")
 
 
 #: ``${NOM}``, ou ``$NOM`` sans indice ni modificateur derrière (``$W[1]``, ``$W:t`` de zsh).

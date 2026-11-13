@@ -137,6 +137,16 @@ def _opens_dollar_quote(text: str) -> bool:
 # script), ou caractère ordinaire (zsh interactif, où ``echo a # b ; rm f`` supprime
 # ``f``). Chaque lecture a ses commentaires et ses corps ; ce qui dépend de la ligne vaut
 # sous les deux.
+#
+# Enfin, un terminal interactif rejette seule une ligne mal formée : son heredoc n'est
+# jamais ouvert, et les lignes suivantes sont lues comme des commandes. Ce balayage ne
+# connaît pas la grammaire du shell ; il ne retire donc un corps que d'une ligne de
+# commande dont la forme est sûre (:func:`_is_flat`) : une suite de commandes simples,
+# sans mot réservé en tête de commande, sans commande vide entre deux opérateurs, sans
+# redirection sans cible, sans parenthèse ni substitution hors guillemets, sans rappel
+# d'historique. C'est ce qui précède le corps qui compte, ligne d'ouverture comprise : une
+# fois le corps lu, la suite ne défait pas le heredoc. Un corps ouvert derrière autre chose
+# rend la ligne illisible.
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,16 +169,75 @@ def _readings(command: str) -> tuple[bool, ...]:
 
 #: Devant ``<<``, ce qui en fait une redirection : un blanc ou un opérateur de commande.
 _BEFORE_A_HEREDOC = frozenset(" \t\n;|&")
-#: Sur la ligne d'un ``<<``, un mot qui lit sa suite autrement qu'une commande simple.
-_NOT_A_SIMPLE_COMMAND_RE = re.compile(r"(?:^|[\s;|&])(?:let|case)(?=\s)")
+#: ``!!``, ``!$``, ``!mot``, ``!:1`` : dans un shell interactif, le rappel est remplacé par un
+#: morceau d'une ligne passée AVANT que la ligne soit lue — opérateurs compris. Ce que la
+#: ligne devient ne se lit pas ici : un rappel n'est admis derrière aucun verbe.
+_HISTORY_RE = re.compile(r"![!$*^#?:\w-]")
+#: Mots qui, en tête de commande, ouvrent ou ferment une commande composée, ou lisent leur
+#: suite autrement qu'une commande simple. Hors de leur place, le shell rejette la ligne.
+_RESERVED_WORDS = frozenset(
+    {
+        "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "select", "in",
+        "function", "time", "coproc", "let", "repeat", "foreach", "end", "always", "{", "}", "!", "[[", "]]",
+    }
+)
+_SKELETON_TOKEN_RE = re.compile(
+    r"(?P<redirection>[0-9]*(?:<<<|<<-?|>>|>\||<>|[<>]&|&>>?|[<>]))"
+    r"|(?P<operator>&&|\|\||\|&|;;|[;|&])"
+    r"|(?P<newline>\n)"
+    r"|(?P<blank>[ \t]+)"
+    r"|(?P<word>[^ \t\n;|&<>]+)"
+)
+#: Opérateurs derrière lesquels la commande suivante peut commencer sur la ligne d'après.
+_CONTINUING_OPERATORS = frozenset({"&&", "||", "|", "|&"})
+
+
+def _is_flat(skeleton: str) -> bool:
+    """Vrai si *skeleton* — le code, textes cités réduits à un mot — est une suite de commandes simples.
+
+    La seule forme dont ce balayage sait qu'un shell ne la rejettera pas : chaque
+    commande a un premier mot qui n'est pas réservé, chaque redirection sa cible, aucun
+    opérateur n'en suit un autre, et rien n'ouvre de parenthèse ni de substitution.
+    """
+    starting = True  # aucun mot de la commande en cours n'a encore été lu
+    target = False  # une redirection attend sa cible
+    for token in _SKELETON_TOKEN_RE.finditer(skeleton):
+        kind, text = token.lastgroup, token.group()
+        if kind == "blank":
+            continue
+        if kind == "newline":
+            if target:
+                return False
+            # Derrière ``|`` ou ``&&``, la commande continue ; sinon une nouvelle commence.
+            continue
+        if kind == "operator":
+            if target or starting or text == ";;":
+                return False  # commande vide, ou opérateur en tête de ligne
+            starting = True
+            continue
+        if kind == "redirection":
+            if target:
+                return False
+            target = True
+            continue
+        if "(" in text or ")" in text or "`" in text:
+            return False
+        if target:
+            target = False
+        elif starting:
+            if text in _RESERVED_WORDS:
+                return False
+            starting = False
+    return not target
 _CLOSERS = {"(": ")", "[": "]", "{": "}"}
 #: ``"$(cat <<'EOF'`` en fin de ligne : le message écrit par heredoc.
 _QUOTED_HEREDOC_RE = re.compile(r"\"\$\(cat[ \t]+<<(-?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2[ \t]*\n")
 #: Ce qui doit suivre sa ligne de fermeture : la fin de la substitution et du texte cité.
 _QUOTED_HEREDOC_END_RE = re.compile(r"\n?[ \t]*\)\"")
-#: Une substitution entre guillemets doubles dont le contenu ne porte ni guillemet, ni
-#: antislash, ni parenthèse, ni redirection : le texte cité finit bien où le balayage le voit.
-_PLAIN_SUBSTITUTION_RE = re.compile(r"\$\([^'\"\\`()<>]*\)")
+#: Une substitution entre guillemets doubles dont le contenu n'est fait que de mots écrits
+#: en clair : ni guillemet, ni opérateur, ni redirection. Le texte cité finit bien où le
+#: balayage le voit, et la ligne ne peut pas être rejetée pour ce qu'elle porte.
+_PLAIN_SUBSTITUTION_RE = re.compile(r"\$\([\w ./:=+%@,*?~-]*\)")
 
 
 def substitutes(text: str) -> bool:
@@ -218,7 +287,7 @@ def _quoted_text_is_regular(span: str) -> bool:
         if span[j] == "\\":
             j += 2  # un caractère échappé : ``\``` et ``\$(`` sont du texte
             continue
-        if span[j] == "`":
+        if span[j] == "`" or _HISTORY_RE.match(span, j):
             return False
         if span.startswith("$(", j):
             plain = _PLAIN_SUBSTITUTION_RE.match(span, j)
@@ -244,16 +313,23 @@ def _layout(command: str, *, comments: bool) -> _Layout:
     pending: list[tuple[str, bool, bool]] = []
     stack: list[str] = []  # fermants attendus des constructions ouvertes
     unreadable = irregular = False
-    operators = 0  # ``<<`` rencontrés hors texte cité
+    skeleton: list[str] = []  # le code, textes cités réduits à un mot, pour :func:`_is_flat`
+
+    def safe() -> bool:
+        """Vrai si tout ce qui précède le corps, ligne d'ouverture comprise, a une forme sûre."""
+        return not (stack or irregular) and _is_flat("".join(skeleton))
+
     i, n = 0, len(command)
     while i < n:
         c = command[i]
         if c == "\\":
+            skeleton.append("x")
             i += 2
         elif c in "'\"":
+            skeleton.append("x")
             written = _quoted_heredoc(command, i) if c == '"' and not stack and not pending else None
             if written is not None:
-                operators += 1  # une irrégularité ailleurs sur la ligne rend aussi ce corps illisible
+                unreadable = unreadable or not safe()
                 bodies.append(written[:4])
                 i = written[4]
                 continue
@@ -272,46 +348,52 @@ def _layout(command: str, *, comments: bool) -> _Layout:
             comment_spans.append((i, end))
             i = end
         elif command.startswith("<<<", i):
+            skeleton.append("<<<")
             i += 3
         elif command.startswith("<<", i):
-            operators += 1
             opening = _HEREDOC_OPEN_RE.match(command, i)
-            line = command[command.rfind("\n", 0, i) + 1 : i]
-            if (
-                opening is None
-                or stack
-                or (i > 0 and command[i - 1] not in _BEFORE_A_HEREDOC)
-                or _NOT_A_SIMPLE_COMMAND_RE.search(line)
-            ):
+            if opening is None or stack or (i > 0 and command[i - 1] not in _BEFORE_A_HEREDOC):
                 unreadable = True
                 i += 2
             else:
+                skeleton.append("<< x")  # la redirection et sa cible
                 pending.append((opening.group(2), opening.group(0).startswith("<<-"), not opening.group(1)))
                 i = opening.end()
         elif c == "$" and command.startswith(_DOLLAR_QUOTES, i):
             irregular = True  # guillemets que ce balayage ne décode pas
             i += 1
+        elif (c == "!" and _HISTORY_RE.match(command, i)) or (c == "^" and (i == 0 or command[i - 1] == "\n")):
+            irregular = True  # rappel d'historique : la ligne lue par le shell n'est pas celle-ci
+            i += 1
+        elif c == "$" and (plain := _PLAIN_SUBSTITUTION_RE.match(command, i)) is not None:
+            skeleton.append("x")  # une substitution faite de mots écrits en clair : un mot comme un autre
+            i = plain.end()
         elif c == "$" and command[i + 1 : i + 2] in _CLOSERS and command[i + 1 : i + 2]:
             stack.append(_CLOSERS[command[i + 1]])
+            skeleton.append(command[i : i + 2])
             i += 2
         elif c in "([" or (c == "{" and stack):
             stack.append(_CLOSERS[c])  # une accolade nue n'ouvre rien : groupe de commandes, ``{a,b}``
+            skeleton.append(c)
             i += 1
         elif c in ")]" or (c == "}" and stack):
             if stack and stack[-1] == c:
                 stack.pop()
             else:
                 irregular = True  # motif de ``case``, crochet seul : la structure ne se lit pas
+            skeleton.append(c)
             i += 1
         elif c == "`":
             if stack and stack[-1] == "`":
                 stack.pop()
             else:
                 stack.append("`")
+            skeleton.append(c)
             i += 1
         elif c == "\n" and pending:
-            if stack:
-                unreadable = True  # le corps commencerait à l'intérieur d'une construction ouverte
+            # Le corps n'est lu que si le shell ouvre bien le heredoc : rien d'ouvert, et une
+            # ligne — avec tout ce qui la précède — qu'il ne rejettera pas.
+            unreadable = unreadable or not safe()
             i += 1
             for tag, tabbed, expands in pending:
                 indent = r"\t*" if tabbed else ""
@@ -321,10 +403,11 @@ def _layout(command: str, *, comments: bool) -> _Layout:
                 bodies.append((i, closing.start(), closing.end(), expands))
                 i = closing.end()
             pending.clear()
+            skeleton.append("\n")
         else:
+            skeleton.append(c)
             i += 1
-    irregular = irregular or bool(stack)
-    return _Layout(tuple(comment_spans), tuple(bodies), unreadable or (irregular and operators > 0))
+    return _Layout(tuple(comment_spans), tuple(bodies), unreadable)
 
 
 def _without_spans(text: str, spans: list[tuple[int, int]]) -> str:

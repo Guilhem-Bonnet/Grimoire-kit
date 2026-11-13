@@ -491,7 +491,11 @@ le ledger. Depuis le lot A de l'issue #638 :
   la recherche. Un heredoc n'est reconnu que dans une commande simple : un
   `<<` écrit dans une expansion, une expression arithmétique, un test, un
   indice ou une substitution n'ouvre rien pour le shell, et la ligne compte
-  alors comme une écriture. La détection des commandes destructives lit la
+  alors comme une écriture. De même derrière une ligne qu'un terminal
+  interactif rejetterait (mot réservé hors de sa place, commande vide,
+  redirection sans cible, rappel d'historique) : le corps n'est une donnée
+  que si ce qui le précède est une suite de commandes simples. La détection
+  des commandes destructives lit la
   même ligne : un corps de heredoc n'est une donnée que là où le shell ouvre
   et ferme un heredoc (le message d'un commit écrit par
   `"$(cat <<'EOF' … EOF)"` en est une), un guillemet échappé ou un commentaire ne cache pas une
