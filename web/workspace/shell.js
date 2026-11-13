@@ -2647,10 +2647,12 @@ async function buildPalette() {
   });
 
   const [commandsResult, projectsResult, blueprintsResult, tasksResult] =
-    // La palette ne lit que ``id``/``title`` : sans annotations (vivacité,
-    // coût, payload ``work`` des journaux de session, gates), la Flotte mount
-    // plus tôt — cet appel est sur son chemin critique (issue #1010).
-    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ annotations: 0 })]);
+    // La palette ne lit que ``id``/``title`` : `fields=id,title` borne chaque
+    // carte à ces deux clés (GAO-cockpit-lect-001) — donc ni annotations
+    // (vivacité, coût, payload ``work`` des journaux de session, gates), ni fiche
+    // entière. Cet appel est sur le chemin critique du montage de la Flotte
+    // (issue #1010).
+    await Promise.allSettled([api.commands(), api.projects(), api.blueprints(), api.tasks({ fields: 'id,title' })]);
 
   const catalogue = settle(commandsResult, {}).commands || [];
   consoleCatalogue = new Map(catalogue.map((c) => [c.key, { flags: new Set(c.flags || []), positionals: c.positionals || 0 }]));

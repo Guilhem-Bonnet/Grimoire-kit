@@ -44,7 +44,7 @@ from __future__ import annotations
 import difflib
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -334,6 +334,52 @@ def annotate_gates(project_root: Path, tasks: list[Any], cards: list[dict[str, A
 _CARD_DROPPED = ("directives", "description", "guardrails", "dependencies")
 
 
+#: Ce qu'une tâche peut porter dans ``/api/workspace/tasks`` : le schéma, les
+#: champs dérivés (colonne, priorité effective, session, classe de route) et la
+#: couche d'annotations. ``fields=id,title`` borne chaque carte à ces clés — la
+#: palette de la coque ne télécharge plus 488 Ko pour lire deux champs.
+TASK_FIELDS: frozenset[str] = frozenset({
+    # schéma de la tâche (``MissionTask.to_dict``)
+    "id", "schema_version", "mission_id", "title", "description", "status", "type",
+    "risk_profile", "surface", "owner", "acceptance", "guardrails", "expected_evidence",
+    "dependencies", "created_at", "claim", "finition", "priority", "agent_roles",
+    "remediation_ref", "extra", "directives", "accepted_risks", "checks", "waiting",
+    "test_depth", "data_class", "questions",
+    # dérivés par la carte (``_task_json``)
+    "board", "effective_priority", "directives_pending", "directives_unacknowledged",
+    "session_id", "host", "resume_command", "logs_command", "verifiability_class",
+    "recommended_model", "model_tier",
+    # couche d'annotations (vivacité, coût, fil, présence, gates)
+    "session", "cost", "feed_last", "in_state_since", "blocked_reason", "presence",
+    "work", "next_gate",
+})
+#: Les seuls champs que la couche d'annotations ajoute : demander l'un d'eux est
+#: la seule raison de la payer quand ``fields`` est posé.
+_ANNOTATED_FIELDS: frozenset[str] = frozenset({
+    "session", "cost", "feed_last", "in_state_since", "blocked_reason", "presence",
+    "work", "next_gate",
+})
+
+
+def _requested_fields(fields: Sequence[str] | None) -> tuple[str, ...] | None:
+    """Les champs demandés, dédoublonnés dans l'ordre reçu ; ``None`` si aucun.
+
+    Un nom inconnu est une demande invalide (400) : filtrer silencieusement
+    laisserait croire que la tâche ne porte pas le champ.
+    """
+    if not fields:
+        return None
+    requested = tuple(dict.fromkeys(fields))
+    unknown = [name for name in requested if name not in TASK_FIELDS]
+    if unknown:
+        available = ", ".join(sorted(TASK_FIELDS))
+        raise ValueError(
+            f"champ(s) inconnu(s) dans `fields` : {', '.join(sorted(unknown))} — "
+            f"champs disponibles : {available}"
+        )
+    return requested
+
+
 def _task_card(task: Any) -> dict[str, Any]:
     """:func:`_task_json` sans le poids que seule la fiche détaillée affiche."""
     card = _task_json(task)
@@ -358,6 +404,7 @@ def tasks_view(
     probe: SessionProbe | None = None,
     now: datetime | None = None,
     annotations: bool = True,
+    fields: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Les tâches du projet et les colonnes du board gouverné.
 
@@ -375,14 +422,16 @@ def tasks_view(
 
     ``annotations=False`` sert la même liste sans la couche chère que seule la
     vue Exécuter affiche (vivacité, coût, fil d'activité, payload ``work`` lu
-    dans les journaux de session, gates de preuve). La palette de commandes de
-    la coque n'a besoin que de ``id``/``title`` : depuis l'issue #1010 elle
-    demande cette forme, pour que le chargement de la Flotte — elles sont sur
-    le même chemin — ne paie jamais la lecture d'un journal de session.
+    dans les journaux de session, gates de preuve). ``fields=`` borne chaque
+    carte aux clés demandées (``fields=id,title`` pour la palette de commandes,
+    qui n'a besoin que de ces deux-là) ; un nom inconnu lève une
+    :class:`ValueError`, traduite en 400 par le transport. Demander uniquement
+    des champs de base ne paie pas la couche d'annotations.
     """
     from grimoire.missions.board import BOARD_LIFECYCLE, PRIORITIES
     from grimoire.missions.schemas import TaskState
 
+    requested = _requested_fields(fields)
     service = _service(project_root)
     payload: dict[str, Any] = {
         "columns": list(BOARD_LIFECYCLE),
@@ -406,14 +455,20 @@ def tasks_view(
             payload["note"] = "aucun Mission Ledger — `grimoire task add` en ouvre un"
         return payload
     tasks = service.list_tasks(mission or None, status or None)
-    cards = [_task_card(t) for t in tasks]
-    if annotations:
+    # ``fields`` sert la carte filtrée : le texte long et les dépendances ne sont
+    # retirés que de la carte complète (P94) — un champ explicitement demandé se
+    # rend, même si la carte de la vue Exécuter le masque.
+    cards = [_task_json(t) for t in tasks] if requested else [_task_card(t) for t in tasks]
+    annotate = annotations and (requested is None or bool(_ANNOTATED_FIELDS.intersection(requested)))
+    if annotate:
         # UI-3 : la vivacité, le dernier signe de vie, la durée et le coût de chaque
         # carte — la même arithmétique que le portefeuille, pas une seconde copie.
         from grimoire.tools.workspace_portfolio import annotate_cards
 
         annotate_cards(project_root, service, tasks, cards, now=now or datetime.now(UTC), probe=probe)
         annotate_gates(service.project_root, tasks, cards)
+    if requested is not None:
+        cards = [{name: card[name] for name in requested if name in card} for card in cards]
     payload["tasks"] = cards
     payload["count"] = len(tasks)
     return payload

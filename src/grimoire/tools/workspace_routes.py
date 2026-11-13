@@ -169,14 +169,20 @@ def _tasks(project_root: Path, query: _Query) -> Any:
     # ``annotations=0`` (issue #1010) : la palette de commandes de la coque ne
     # lit que ``id``/``title`` — inutile de payer la vivacité, les coûts, le
     # payload ``work`` (journaux de session) et les gates à chaque amorçage.
+    # ``fields=id,title`` (GAO-cockpit-lect-001) borne en plus chaque carte à ces
+    # clés : la palette ne télécharge plus la fiche entière. Un nom inconnu lève
+    # une ``ValueError`` que le transport traduit en 400.
     raw = _one(query, "annotations")
     annotations = raw is None or raw.strip().lower() not in ("0", "false", "no", "off")
+    raw_fields = _one(query, "fields")
+    fields = [part.strip() for part in raw_fields.split(",") if part.strip()] if raw_fields is not None else None
     return workspace_api.tasks_view(
         project_root,
         mission=_one(query, "mission"),
         status=_one(query, "status"),
         probe=_host_probe,
         annotations=annotations,
+        fields=fields,
     )
 
 
@@ -648,6 +654,16 @@ LIVE_ROUTES = frozenset(
         # Le parcours de l'arbre est la lecture la plus chère de la page : borné
         # en temps et en nombre, il n'a pas à être repayé à chaque onglet.
         f"{PREFIX}files",
+        # GAO-cockpit-lect-001 : les trois lectures lourdes du rail et de la
+        # Flotte passaient hors cache (mesures du 2026-11-12 : ``evidence`` 6,8 s,
+        # ``capacity`` jusqu'à 7,6 s sous charge). Elles sont dérivées du ledger
+        # et de l'hôte, comme ``attention`` : même empreinte, même réponse, et
+        # ``MAX_AGE_SECONDS`` borne ce qui dépend de l'instant (vivacité, bail,
+        # fenêtre). ``fleet/live?project=*`` reste hors cache — agrégat du
+        # registre sous l'empreinte d'un seul projet, comme le portefeuille.
+        f"{PREFIX}evidence",
+        f"{PREFIX}capacity",
+        f"{PREFIX}fleet/live",
     }
 )
 

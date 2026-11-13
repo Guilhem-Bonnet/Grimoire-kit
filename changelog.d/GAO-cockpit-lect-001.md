@@ -1,0 +1,1 @@
+- perf(cockpit): lectures lourdes en vol unique (evidence, capacity, fleet/live gardés comme tâches et sessions) et palette servie par `tasks?fields=id,title` au lieu de 488 Ko de tâches (GAO-cockpit-lect-001)
