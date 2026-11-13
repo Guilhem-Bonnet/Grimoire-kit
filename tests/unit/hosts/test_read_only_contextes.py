@@ -576,6 +576,8 @@ INTERPRETEURS = [
     "echo " + MESSAGE + " | bash",
     "printf %s " + MESSAGE + " | sh",
     "echo " + MESSAGE + " > >(sh)",
+    "echo " + MESSAGE + " \\\n| sh",
+    "echo " + MESSAGE + " ; ls |& sh",
     # une commande qui n'est pas dans la liste
     "xargs -I% " + MESSAGE,
     "git -c core.editor=true commit -m " + MESSAGE,

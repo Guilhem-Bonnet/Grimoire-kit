@@ -277,8 +277,8 @@ def _quoted_heredoc(command: str, i: int, consumer: str) -> tuple[int, int, int,
     """Le message écrit par heredoc ouvert en *i*, ou ``None`` : corps, fermeture, développé, indice suivant.
 
     *consumer* est le début de la commande simple qui le reçoit : elle doit ne prendre
-    que du texte, et un texte affiché ne doit pas être confié à un autre programme sur la
-    même ligne. La première ligne qui commence par l'étiquette doit être la fermeture
+    que du texte, et un texte affiché ne doit être confié à aucun autre programme dans
+    la suite de la ligne de commande. La première ligne qui commence par l'étiquette doit être la fermeture
     exacte : un shell qui fermerait sur ``EOF)`` ne finit pas le corps où ce balayage le
     finit.
     """
@@ -296,10 +296,8 @@ def _quoted_heredoc(command: str, i: int, consumer: str) -> tuple[int, int, int,
     after = _QUOTED_HEREDOC_END_RE.match(command, closing.end())
     if after is None:
         return None
-    if taker.group("prints"):
-        line_end = command.find("\n", after.end())
-        if _HANDS_OVER_RE.search(command, after.end(), len(command) if line_end < 0 else line_end):
-            return None
+    if taker.group("prints") and _HANDS_OVER_RE.search(command, after.end()):
+        return None  # jusqu'à la fin de la ligne de commande : une ligne continuée porte le tube plus bas
     return start, closing.start(), closing.end(), not opening.group(2), after.end()
 
 
