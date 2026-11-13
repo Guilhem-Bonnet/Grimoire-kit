@@ -374,21 +374,25 @@ class ReviewStage:
         except Exception as exc:  # journal ou registre illisible : rien n'est lancé
             return None, f"choix du second relecteur en erreur ({type(exc).__name__}: {str(exc)[:160]})"
 
-    def _void_second(self, tid: str, reason: str) -> None:
-        """Un NOT-READY annule la seconde relecture demandée : les deux relectures seront refaites."""
+    def _void_second(self, tid: str, reason: str) -> bool:
+        """Un NOT-READY annule la seconde relecture demandée : les deux relectures seront refaites.
+
+        ``True`` : l'annulation est au journal d'autorité, ou il n'y avait rien à annuler (toujours le cas en ``human``,
+        où rien n'est lu ni écrit). ``False`` : le journal a refusé l'écriture deux fois de suite — l'appelant
+        n'applique alors pas le NOT-READY (échec fermé)."""
         if not self._dual():
-            return
+            return True
         from grimoire.missions.review_seal import void_second_review
 
         def void() -> bool:
             try:
                 void_second_review(self._service.home_root, tid, reason)
-            except Exception:  # journal rompu : plus rien ne se fusionne de toute façon (les gardes en aval refusent)
+            except Exception:  # journal rompu ou verrou tenu : l'appelant s'arrête (échec fermé)
                 return False
             return True
 
-        if not void():  # un verrou du journal tenu un instant par un autre projet : une seconde tentative, pas plus
-            void()
+        # Un verrou du journal tenu un instant par un autre projet : une seconde tentative, pas plus.
+        return void() or void()
 
     def _frozen_slug(self, tid: str) -> str:
         """Le dépôt GitHub de la tâche, figé au journal d'autorité à son lancement ; ``""`` s'il n'y est pas ou ne
@@ -872,8 +876,6 @@ class ReviewStage:
         if not extra or "ci" not in extra:
             ci, detail = self._head_ci(task, review)
             ci_read = {"ci": ci, "ci_detail": detail[:300]}
-        if verdict == NOT_READY:  # double relecture : ce NOT-READY défait le premier READY en attente de son second
-            self._void_second(task.id, f"relecture {review.id} jugée NOT-READY")
         self._service.ledger.append_event(
             REVIEW_JUDGED_EVENT, task.id, "task", REVIEWER_ACTOR,
             {"task_id": task.id, "review": review.id, "verdict": verdict, "cycle": cycle, **ci_read, **(extra or {})},
@@ -906,6 +908,13 @@ class ReviewStage:
         breaker = read_breaker(self._service.home_root)
         if breaker.open:
             return ReviewOutcome(tid, "bounce", "skipped", f"disjoncteur ouvert : {breaker.reason}")
+        # Double relecture : ce NOT-READY défait le premier READY en attente de son second, au journal d'autorité, AVANT
+        # tout effet. Une annulation non inscrite ne laisse rien passer : ni retour au worker ni verdict noté, le
+        # jugement est refait au tick suivant — sinon une remise en revue sans nouveau commit rejouerait une seconde
+        # relecture sur un premier READY que ce NOT-READY contredit.
+        if not self._void_second(tid, f"relecture {review.id} jugée NOT-READY"):
+            return ReviewOutcome(tid, "bounce", "failed", "NOT-READY non appliqué : l'annulation de la seconde relecture "
+                                 "n'a pas pu être inscrite au journal d'autorité, jugement refait au tick suivant")
         cycle, notes = self._cycle(tid), notes or (_findings_text(receipt) if receipt is not None else "aucun reçu")
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:

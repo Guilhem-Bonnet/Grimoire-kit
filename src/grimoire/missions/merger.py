@@ -1387,22 +1387,31 @@ class MergeStage:
         """Un READY qui ne tient plus : la tâche repart à la relecture (une nouvelle entrée en revue), une fois par READY."""
         events = self._service.ledger.events_for(task.id)
         if _last(events, MERGE_REQUEUED_EVENT, _index(events, judged)) is None:
+            # Double relecture : le READY périmé est défait au journal d'autorité AVANT d'être noté périmé (ou escaladé).
+            # Sans cette entrée, un premier READY qui ne tient plus resterait la moitié d'une paire.
+            if not self._void_second(task.id, why):
+                return MergerOutcome(task.id, "stale", "failed", f"READY périmé ({why}), mais l'annulation de la seconde "
+                                     "relecture n'a pas pu être inscrite au journal d'autorité : revu au tick suivant", pr)
             if self._cycle(events, MERGE_REQUEUED_EVENT) >= self._policy.merger.max_cycles:
                 return self._escalate(task, f"READY périmé à répétition ({why})", pr)
             self._note(MERGE_REQUEUED_EVENT, task.id, {"judged": judged.id, "why": why})
-            self._void_second(task.id, why)
         return MergerOutcome(task.id, "stale", "done", f"READY périmé ({why}) : relu de nouveau", pr)
 
-    def _void_second(self, tid: str, why: str) -> None:
-        """Double relecture : un READY périmé défait aussi la seconde relecture demandée — les deux seront refaites."""
+    def _void_second(self, tid: str, why: str) -> bool:
+        """Double relecture : un READY périmé défait aussi la seconde relecture demandée — les deux seront refaites.
+
+        ``True`` : l'annulation est au journal d'autorité, ou il n'y avait rien à annuler (toujours le cas en ``human``,
+        où rien n'est lu ni écrit). ``False`` : le journal a refusé l'écriture — l'appelant ne note pas le READY périmé
+        (échec fermé) et y revient au tick suivant."""
         if not self._dual():
-            return
+            return True
         from grimoire.missions.review_seal import void_second_review
 
         try:
             void_second_review(self._home, tid, f"READY périmé : {why}")
-        except Exception:  # journal rompu : plus rien ne se fusionne de toute façon (les gardes en aval refusent)
-            return
+        except Exception:  # journal rompu ou verrou tenu : l'appelant s'arrête (échec fermé)
+            return False
+        return True
 
     @staticmethod
     def _cycle(events: list[LedgerEvent], kind: str) -> int:

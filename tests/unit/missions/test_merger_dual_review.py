@@ -58,6 +58,7 @@ from grimoire.missions.dual_review import (
     matched_paths,
     models_distinct,
     pending_second_review,
+    second_review_stalled,
     second_reviews_exhausted,
     worker_models,
 )
@@ -747,8 +748,9 @@ def craft_pair(projet: Path, tid: str = "GAO-paire-001", **over: Any) -> dict[st
         request_second_review(projet, tid, first["seq"], head, 7)
     if two not in (one, worker) and over.get("second_registered", True):
         store.register_session(two, "reviewer", tid)
-    seal_review_launch(projet, tid, sha(two), head, model=over.get("second_launch_model", "haiku"),
-                       second_of=first["seq"] if over.get("launched_as_second", True) else None)
+    if over.get("second_launched", True):
+        seal_review_launch(projet, tid, sha(two), head, model=over.get("second_launch_model", "haiku"),
+                           second_of=first["seq"] if over.get("launched_as_second", True) else None)
     if over.get("void"):
         void_second_review(projet, tid, "NOT-READY")
     second = seal("r2", two, over.get("second_model", "haiku"), second_of=over.get("second_of", first["seq"]),
@@ -778,6 +780,7 @@ def test_la_paire_valide_tient_et_ne_lit_que_le_journal(projet: Path, monkeypatc
     ({"worker_sealed": False}, DUAL_REFUSED, "lancement du worker n'est pas scellé"),
     ({"worker_model": ""}, DUAL_REFUSED, "modèle du worker n'est pas scellé"),
     ({"second_registered": False}, DUAL_REFUSED, "pas inscrit au journal d'autorité comme relecteur"),
+    ({"second_launched": False}, DUAL_REFUSED, "n'a pas de lancement scellé par le tick"),
     ({"launched_as_second": False}, DUAL_REFUSED, "pas été lancé par le tick comme seconde relecture"),
     ({"first_launch_second_of": 0}, DUAL_REFUSED, "pas été lancé par le tick comme seconde relecture"),
     ({"first_launch_model": "sonnet"}, DUAL_REFUSED, "n'est pas celui que le tick a lancé"),
@@ -1191,6 +1194,166 @@ def test_une_pr_realignee_avant_la_seconde_relecture_va_a_l_humain(projet: Path,
     assert merges(report) == [("escalate", "done")], report.merges
     assert "a été réalignée" in report.merges[0].detail and head[:12] in report.merges[0].detail
     assert journal(projet, DUAL_REQUEST_ENTRY) == [] and review_models(host, tid) == ["opus"]
+    assert host.of("gh", "pr", "merge") == []
+
+
+def _journal_locked(*_args: Any, **_kwargs: Any) -> Any:
+    raise OSError("verrou du journal d'autorité tenu")
+
+
+def test_un_not_ready_dont_l_annulation_ne_s_inscrit_pas_n_est_pas_applique(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dual_projet(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    first_seal = second_launched(projet, host, tid, wt)
+    write_receipt(
+        wt, tid, NOT_READY, reviewer_id="reviewer", reviewer_session=reviewer_sid(host),
+        findings=[ReviewFinding("la garde ne tient pas", "pytest -q tests/unit/x.py")],
+    )
+    real = review_seal.void_second_review
+    monkeypatch.setattr(review_seal, "void_second_review", _journal_locked)
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("bounce", "failed")], report.reviews
+    assert "n'a pas pu être inscrite au journal d'autorité" in report.reviews[0].detail
+    # Rien n'a bougé : ni verdict noté, ni retour au worker. Sans l'annulation, ce NOT-READY laisserait le premier READY
+    # fonder une paire avec une autre seconde relecture, sur la même tête.
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+    assert [e.payload["verdict"] for e in ledger(projet, tid, REVIEW_JUDGED_EVENT)] == ["READY"]
+    assert journal(projet, DUAL_VOID_ENTRY, tid) == [] and host.of("claude", "--bg", "--resume") == []
+    assert report.merges == () and host.of("gh", "pr", "merge") == []
+    monkeypatch.setattr(review_seal, "void_second_review", real)  # le journal répond de nouveau : le jugement est refait
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("bounce", "done")], report.reviews
+    [void] = journal(projet, DUAL_VOID_ENTRY, tid)
+    assert void["first_seq"] == first_seal["seq"]
+    assert [e.payload["verdict"] for e in ledger(projet, tid, REVIEW_JUDGED_EVENT)] == ["READY", NOT_READY]
+    assert TaskService(projet).require(tid).status is TaskState.RUNNING
+
+
+def test_un_ready_perime_dont_l_annulation_ne_s_inscrit_pas_n_est_pas_remis_en_relecture(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dual_projet(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    both_ready(projet, host, tid, wt)
+    [first_seal, _second_seal] = journal(projet, SEAL_ENTRY, tid)
+    # Le reçu est réécrit après le second sceau : le READY de la file ne tient plus.
+    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session="une-autre-session")
+    real = review_seal.void_second_review
+    monkeypatch.setattr(review_seal, "void_second_review", _journal_locked)
+    report = tick(projet, host)
+    assert merges(report) == [("stale", "failed")], report.merges
+    assert "reçu réécrit" in report.merges[0].detail and "n'a pas pu être inscrite" in report.merges[0].detail
+    assert ledger(projet, tid, MERGE_REQUEUED_EVENT) == [] and journal(projet, DUAL_VOID_ENTRY, tid) == []
+    assert host.of("gh", "pr", "merge") == []
+    monkeypatch.setattr(review_seal, "void_second_review", real)
+    report = tick(projet, host)
+    assert merges(report) == [("stale", "done")], report.merges
+    [void] = journal(projet, DUAL_VOID_ENTRY, tid)
+    assert void["first_seq"] == first_seal["seq"] and len(ledger(projet, tid, MERGE_REQUEUED_EVENT)) == 1
+    assert not judge_dual_seals(projet, tid, git(wt, "rev-parse", "HEAD")).ok  # la paire ne vaut plus
+    assert host.of("gh", "pr", "merge") == []
+
+
+def test_un_commit_relu_sans_date_lisible_refuse_la_paire(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pair = craft_pair(projet)
+    monkeypatch.setattr(dual_review, "_commit_time", lambda _root, _commit: None)
+    verdict = judge_dual_seals(projet, pair["tid"], pair["head"])
+    assert verdict.kind == DUAL_REFUSED and "date d'un sceau ou du commit relu illisible" in verdict.reason
+
+
+def test_une_attente_sans_date_lisible_vaut_un_blocage(projet: Path) -> None:
+    grant(projet)
+    store, tid, head = MandateStore(projet), "GAO-attente-001", git(projet, "rev-parse", "HEAD")
+    now = datetime.now(UTC)
+    assert second_review_stalled(projet, tid, 0, now) is False  # rien de demandé : rien n'attend
+    store.journal.append({"type": DUAL_REQUEST_ENTRY, "project": store.project, "task_id": tid, "first_seq": 0,
+                          "head": head, "pr": 7, "ts": "pas-une-date"})
+    assert second_review_stalled(projet, tid, 0, now) is True
+    assert second_review_stalled(projet, tid, 1, now) is False  # un autre premier READY n'est pas concerné
+
+
+def test_une_preuve_illisible_a_l_acceptation_pose_la_question(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dual_policy(projet)
+    write_registry(projet)
+    grant(projet, gestures=("accept",))  # le mandat ne couvre pas la fusion : l'humain la fera
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    both_ready(projet, host, tid, wt)
+    assert merges(tick(projet, host)) == [("escalate", "done")]
+    human_merges(projet, host, tid)
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("chemins en panne")
+
+    monkeypatch.setattr(merger.MergeStage, "_dual_paths", boom)
+    report = tick(projet, host)
+    assert merges(report) == [("escalate", "done")], report.merges
+    assert "double relecture non vérifiable (RuntimeError: chemins en panne)" in report.merges[0].detail
+    assert questions(projet, tid)[-1].text.startswith(f"Accepter {tid}")
+    assert [g["gesture"] for g in MandateStore(projet).gestures_taken(tid)] == []
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_le_role_reviewer_desactive_rend_la_pr_a_l_humain(projet: Path, host: FakeHost) -> None:
+    from test_merger import POLICY
+
+    dual_policy(projet)
+    write_registry(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    first = first_ready(projet, host, tid, wt)  # sans mandat : aucune seconde relecture n'est encore demandée
+    assert merges(first) == [("wait", "waiting")] and journal(projet, DUAL_REQUEST_ENTRY) == []
+    grant(projet)
+    enabled = "    reviewer:\n      enabled: true\n"
+    policy = (projet / POLICY).read_text(encoding="utf-8")
+    assert enabled in policy
+    (projet / POLICY).write_text(policy.replace(enabled, "    reviewer:\n      enabled: false\n"), encoding="utf-8")
+    assert load_orchestrator_policy(projet).policy.reviewer.enabled is False  # type: ignore[union-attr]
+    report = tick(projet, host)
+    assert report.reviews == () and merges(report) == [("escalate", "done")], report.merges
+    assert "le rôle reviewer est désactivé" in report.merges[0].detail
+    assert journal(projet, DUAL_REQUEST_ENTRY) == [] and host.of("gh", "pr", "merge") == []
+
+
+def test_une_exception_au_choix_du_modele_au_lancement_ne_lance_rien(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dual_projet(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    second_requested(projet, host, tid, wt)
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise OSError("registre arraché")
+
+    monkeypatch.setattr(reviewer, "choose_second_reviewer", boom)
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("launch", "skipped")], report.reviews
+    assert "choix du second relecteur en erreur (OSError" in report.reviews[0].detail
+    assert review_models(host, tid) == ["opus"] and host.of("gh", "pr", "merge") == []
+    assert len(journal(projet, LAUNCH_ENTRY, tid)) == 1
+
+
+@pytest.mark.parametrize("frozen", ["illisible", "pas un dépôt ; rm -rf /"])
+def test_la_consigne_de_la_seconde_relecture_n_accepte_qu_un_depot_fige_bien_forme(
+    projet: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch, frozen: str,
+) -> None:
+    dual_projet(projet)
+    tid, wt = launch_and_work(projet, host, edit=DUAL_EDIT)
+    second_requested(projet, host, tid, wt)
+
+    def frozen_repository(_root: Path, _tid: str) -> dict[str, str]:
+        if frozen == "illisible":
+            raise RuntimeError("journal rompu")
+        return {"repo": frozen, "origin_url": "https://example.invalid/x.git"}
+
+    monkeypatch.setattr(review_seal, "frozen_repository", frozen_repository)
+    report = tick(projet, host)
+    assert [(o.action, o.status, o.model) for o in report.reviews] == [("launch", "launched", "haiku")], report.reviews
+    prompt = [argv for argv, _cwd, _env in host.calls
+              if argv[:2] == ["claude", "--bg"] and f"grimoire-review-{tid}" in argv][-1][-1]
+    assert f"`gh pr diff task/{tid}`" in prompt and " -R " not in prompt and "rm -rf" not in prompt
     assert host.of("gh", "pr", "merge") == []
 
 
