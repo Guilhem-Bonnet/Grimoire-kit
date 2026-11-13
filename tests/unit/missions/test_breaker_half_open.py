@@ -7,13 +7,14 @@ qui échoue en boucle pouvait l'ouvrir pour tout le monde. Les contrats vérifi�
    lancement est admis ; son succès referme, son échec rouvre et double le délai (plafond 4 h) ;
 2. ouvert par ``trip``, il reste fermé à la main : ni le temps ni un succès ne le referment ;
 3. une même tâche qui échoue trois fois est mise à l'écart avec sa raison et ne compte que pour **un** échec global ;
-   elle sort de la file d'admission, et ``reset`` lève la mise à l'écart ;
+   le lanceur ne la relance plus, et ``reset`` lève la mise à l'écart ;
 4. ``autonomy autopilot status``, ``breaker status`` et la carte d'attention disent l'état (ouvert, semi-ouvert,
    prochaine tentative) et les tâches écartées.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -236,6 +237,106 @@ def test_la_carte_d_attention_dit_semi_ouvert_et_mise_a_l_ecart(projet: Path) ->
     assert "semi-ouvert" in first["title"].lower()
     assert "GAO-1" in first["reason"] and "mise à l'écart" in first["reason"].lower()
     assert first["ref"]["gesture"]["command"] == "grimoire orchestrate breaker reset"
+
+
+def test_la_carte_d_attention_dit_les_taches_ecartees_meme_disjoncteur_ferme(projet: Path) -> None:
+    """Une tâche peut rester écartée une fois le compteur global revenu à zéro : la carte le dit quand même."""
+    for _ in range(3):
+        record_failure(projet, 3, "boucle", task_id="GAO-1", now=T0)
+    assert not read_breaker(projet).open
+
+    view = wa.attention_view(
+        projet, service_probe=lambda _s, _u: "", watch=wa.ServiceWatch(),
+        pr_reader=lambda _repo, _cwd: [], review_cache=ReviewCache(), pr_wait=1.0,
+    )
+    first = view["sections"][0]["items"][0]
+
+    assert first["kind"] == wa.BREAKER
+    assert "fermé" in first["title"].lower() and "écart" in first["title"].lower()
+    assert "GAO-1" in first["reason"]
+
+
+def test_le_statut_autopilot_dit_un_trip_sans_prochaine_tentative(projet: Path) -> None:
+    """Un `trip` ne se rouvre pas au temps : le statut ne promet aucune « prochaine tentative »."""
+    trip(projet, "check modifié après la création de GAO-1", source="lot1")
+
+    result = runner.invoke(app, ["autonomy", "autopilot", "status", "--project-root", str(projet)])
+
+    assert result.exit_code == 0, result.output
+    assert "disjoncteur ouvert" in result.output.lower()
+    assert "prochaine tentative après" not in result.output.lower()
+
+
+# ── Défense : un état partiellement illisible ne gèle pas le disjoncteur ────────
+
+
+def _write_state(root: Path, **fields: object) -> None:
+    path = root / brk.BREAKER_RELPATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "$schema": "grimoire-orchestrator-breaker/v1", "open": True, "failures": 1,
+        "reason": "3 échecs", "source": "count", "opened_at": T0.isoformat(timespec="seconds"),
+        "history": [], "transients": 0, "half_open": False, "half_open_at": "", "cooldown_minutes": 30,
+    }
+    path.write_text(json.dumps({**payload, **fields}), encoding="utf-8")
+
+
+def test_un_etat_partiellement_illisible_reste_lisible_et_ne_gele_pas(projet: Path) -> None:
+    _write_state(
+        projet, opened_at="pas-une-date",
+        task_failures={"bool": True, "objet": {"x": 1}, "valide": 2}, parked="pas une table",
+    )
+
+    state = read_breaker(projet)
+
+    assert state.open and dict(state.task_failures) == {"valide": 2} and state.parked == ()
+    assert state.next_attempt_at()  # date illisible : la prochaine tentative est maintenant
+    assert admit(projet, cooldown_minutes=30).probe  # et elle est bien admise
+
+
+def test_un_etat_sans_date_ni_compteurs_lisibles_ne_bloque_pas(projet: Path) -> None:
+    _write_state(projet, opened_at="", task_failures=[], parked={})
+
+    state = read_breaker(projet)
+
+    assert state.task_failures == () and state.parked == ()
+    assert state.next_attempt_at()
+    assert brk.BreakerState().next_attempt_at() == ""  # fermé : aucune tentative à nommer
+    payload = brk.Admission(True, False, state).to_dict()
+    assert payload["allowed"] is True and payload["state"]["open"] is True
+
+
+# ── Les relecteurs ne lancent rien sous un disjoncteur ouvert ───────────────────
+
+
+def test_un_disjoncteur_ouvert_ne_lance_pas_de_relecteur(projet: Path) -> None:
+    from test_reviewer import launched_and_in_review, tick, write_policy  # doubles du lot 3
+
+    write_policy(projet)
+    host = FakeHost()
+    tid, _launch = launched_and_in_review(projet, host)
+    trip(projet, "autre tâche")
+
+    report = tick(projet, host)
+
+    (review,) = [o for o in report.reviews if o.action == "launch"]
+    assert review.status == "skipped" and "disjoncteur ouvert" in review.detail
+    assert tid not in {o.task_id for o in report.reviews if o.status == "launched"}
+
+
+def test_une_relecture_non_lancee_compte_au_disjoncteur(projet: Path) -> None:
+    from test_reviewer import launched_and_in_review, tick, write_policy  # doubles du lot 3
+
+    write_policy(projet)
+    host = FakeHost()
+    launched_and_in_review(projet, host)
+    host.bg_fails = True
+
+    report = tick(projet, host)
+
+    (review,) = [o for o in report.reviews if o.action == "launch"]
+    assert review.status == "failed" and "claude --bg a échoué" in review.detail
+    assert read_breaker(projet).failures == 1 and not read_breaker(projet).open
 
 
 # ── Réglage : cooldown_minutes ───────────────────────────────────────────────
