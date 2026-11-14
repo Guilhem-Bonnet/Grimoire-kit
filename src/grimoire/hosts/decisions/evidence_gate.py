@@ -12,6 +12,7 @@ from grimoire.core.standard_state import active_profile_id, is_standard_enrolled
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.enrolment import (
     BLOCKING_PROFILES,
+    LEDGER_UNVERIFIABLE,
     NO_ACTIVE_TASK,
     TASK_UNPARKED,
     acknowledge_mutations,
@@ -148,7 +149,13 @@ def _decide_stop(hook: HookInput) -> Decision:
             # Une session qui a écrit sans tâche est déjà refusée plus haut (_no_task_closure). Ici elle n'a
             # rien écrit : un ledger durablement corrompu ne bloque pas chaque session à vide, il le dit.
             # Le board illisible garde son refus d'origine (gates non évaluables), une fois.
-            if profile in _BLOCKING_PROFILES and any(item.startswith("board") for item in active.unreadable):
+            if profile in _BLOCKING_PROFILES and (
+                any(item.startswith("board") for item in active.unreadable)
+                or (_designated_ledger_lost(active.unreadable) and _session_held_a_lease(hook))
+            ):
+                # #1259 : un ledger désigné par le marqueur d'un worktree mais invérifiable, alors que la session
+                # a tenu un bail (epoch noté à son journal), cache peut-être une tâche encore tenue : même refus
+                # unique qu'un board illisible, jamais le silence d'un « aucune tâche ».
                 return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
             return Decision(context=reason, detail=detail)
         if active.source == "ambiguous":
@@ -276,12 +283,16 @@ def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str,
     """
     if active.source not in ("session_claim", "env", "ledger_claim"):
         return None
+    from grimoire.core.standard_state import ledger_location
+
+    location = ledger_location(hook.project_root)  # #1259 : le ledger du projet d'origine dans un worktree de tâche
+    if location.root is None:
+        return _unverifiable_hold(active.task_id, location.problem, profile, detail)
     try:
-        from grimoire.core.standard_state import LEDGER_RELPATH
         from grimoire.missions.ledger import MissionLedger
         from grimoire.missions.schemas import TaskState
 
-        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+        events = location.root / "events.jsonl"
         task = MissionLedger(events.parent).get_task(active.task_id) if events.is_file() else None
     except Exception:
         return None
@@ -306,6 +317,37 @@ def _unparked_task(hook: HookInput, active: Any, profile: str, detail: dict[str,
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=message, detail=info)
     return Decision(context=message, detail=info)
+
+
+def _unverifiable_hold(task_id: str, problem: str, profile: str, detail: dict[str, Any]) -> Decision:
+    """#1259 : la tâche nommée est peut-être encore tenue, mais son ledger est invérifiable — refus unique, jamais le silence."""
+    message = (
+        f"[Grimoire] Tâche {task_id} : impossible de vérifier qu'elle est fermée ou garée — {problem}.\n"
+        "Recrée le worktree (`grimoire task worktree`) ou travaille depuis le projet d'origine, puis rends la tâche ; "
+        "si elle doit rester en cours, dis-le explicitement à l'utilisateur au lieu de conclure."
+    )
+    info = {**detail, "blocked_on": LEDGER_UNVERIFIABLE, "task_id": task_id, "ledger_problem": problem}
+    if profile in _BLOCKING_PROFILES:
+        return Decision(outcome=Outcome.BLOCK, reason=message, detail=info)
+    return Decision(context=message, detail=info)
+
+
+def _designated_ledger_lost(unreadable: tuple[str, ...]) -> bool:
+    from grimoire.core.standard_state import DESIGNATED_LEDGER_PROBLEM
+
+    return any(item.startswith(DESIGNATED_LEDGER_PROBLEM) for item in unreadable)
+
+
+def _session_held_a_lease(hook: HookInput) -> bool:
+    """Le journal de la session note un epoch : elle a réclamé une tâche (#1259). Illisible : ``False``."""
+    if not hook.session_id:
+        return False
+    try:
+        from grimoire.policies.session_state import load_session_state
+
+        return load_session_state(hook.project_root, hook.session_id, now_iso="").lease_epoch > 0
+    except Exception:
+        return False
 
 
 def _signature_of(hook: HookInput, task_id: str, summary: str, detail: dict[str, Any]) -> str:
