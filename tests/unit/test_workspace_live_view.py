@@ -380,3 +380,48 @@ def test_un_sous_agent_se_nomme_par_sa_demande_et_pas_par_la_branche_du_parent()
         timeout=30,
     )
     assert json.loads(out.stdout) == ["Angle santé technique", "Explore", "sous-agent a83e2423", "GAO-x"]
+
+
+# ── Le rechargement en direct garde le défilement du canevas ────────────────
+
+EXECUTER = WORKSPACE / "spaces" / "executer.js"
+
+
+def test_le_rechargement_en_direct_garde_le_defilement_du_canevas() -> None:
+    """`captureView` lit le défilement du canevas avant l'actualisation,
+    `restoreView` le remet après : un canevas défilé ne revient pas en haut."""
+    if shutil.which("node") is None:
+        pytest.skip("node absent")
+    source = EXECUTER.read_text(encoding="utf-8")
+    start = source.index("const FOCUS_CARDS")
+    end = source.index("export async function mount")
+    script = (
+        "const src = process.argv[1];"
+        "global.document = {activeElement: null};"
+        "const canvas = {scrollTop: 480};"
+        "const board = {scrollLeft: 30, scrollTop: 12};"
+        "const wrap = {parentElement: canvas, scrollTop: 7, contains: () => false,"
+        " querySelector: () => board, querySelectorAll: () => []};"
+        "const api = new Function(src + '; return {captureView, restoreView};')();"
+        "const kept = api.captureView(wrap);"
+        # L'actualisation reconstruit le DOM : tout retombe à zéro.
+        "canvas.scrollTop = 0; wrap.scrollTop = 0; board.scrollLeft = 0; board.scrollTop = 0;"
+        "api.restoreView(wrap, kept);"
+        "console.log(JSON.stringify([canvas.scrollTop, wrap.scrollTop, board.scrollLeft, board.scrollTop]))"
+    )
+    out = subprocess.run(
+        ["node", "-e", script, source[start:end]],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        timeout=30,
+    )
+    assert json.loads(out.stdout) == [480, 7, 30, 12]
+
+
+def test_l_actualisation_en_direct_passe_par_la_capture_du_defilement() -> None:
+    source = EXECUTER.read_text(encoding="utf-8")
+
+    assert "const kept = captureView(wrap);" in source
+    assert source.count("restoreView(wrap, kept);") >= 2
