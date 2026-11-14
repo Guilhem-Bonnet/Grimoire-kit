@@ -15,18 +15,25 @@ Formes d'écriture reconnues, la cible étant donnée par un :class:`Target` :
 - ``curl -o``, ``wget -O/-P``, ``sort -o`` vers la cible ;
 - ``python`` qui ouvre en ``w``/``a``/``x``/``+``, appelle ``write_text``/``write_bytes``/``unlink``/``rename``/
   ``touch``/``mkdir``/``rmdir``/``chmod``/``symlink_to``, ``os.remove``/``os.rename``/``shutil.rmtree``/… ou
-  ``shutil.copy*`` vers un chemin de la cible, ou lance une des commandes ci-dessus par ``subprocess``/``os.system``.
+  ``shutil.copy*`` vers un chemin de la cible, ou lance une des commandes ci-dessus par ``subprocess``/``os.system`` ;
+  ``fileinput`` en place, un gestionnaire de journal sur fichier, ``sqlite3.connect``, ``os.open`` qui écrit,
+  ``zipfile``/``tarfile``/``shelve``/``dbm`` ouverts en écriture, une extraction d'archive, ``os.symlink``/
+  ``os.link``, un fichier temporaire créé dans la cible (#1233) ;
+- ``sed`` (``w``, ``W``, ``s///w``), ``awk`` (redirection dans le programme), ``perl``/``node``/``ruby``/``php``/
+  ``lua``/``deno``/``bun`` à exécution en ligne : voir :mod:`.write_proof_languages` (#1233) ;
+- ``git``, archives et compresseurs, ``scp``, ``mktemp``, éditeurs en mode script, ``sqlite3``… : voir
+  :mod:`.write_proof_programs` (#1233) ; ``mkfifo``, ``mknod``, ``fallocate``, ``shuf -o``, ``iconv -o``,
+  ``pandoc -o``.
 
 Ce que l'analyse traverse pour atteindre ces formes : préfixes d'affectation (``VAR=x cmd``) et enveloppes
-(``env``, ``sudo``, ``nohup``, ``timeout``, ``nice``, ``command``, ``exec``, ``time``, ``flock``, ``strace``…) ;
-variables affectées dans la commande (``F=…; echo x > "$F"``) ; ``cd``/``pushd`` ; substitutions de commande et de
-processus ; ``sh -c``, ``eval``, ``source`` ; un script littéral envoyé à un shell ou à python (tube depuis
-``echo``/``printf``, heredoc, here-string, fichier écrit plus tôt dans la même commande) ; ``read`` sur une entrée
-littérale ; ``xargs``.
+(``env``, ``sudo``, ``nohup``, ``timeout``, ``nice``, ``command``, ``exec``, ``time``, ``flock``, ``strace``,
+``rtk``, ``rtk proxy``…) ; variables affectées dans la commande (``F=…; echo x > "$F"``) ; ``cd``/``pushd`` ;
+substitutions de commande et de processus ; ``sh -c``, ``eval``, ``source`` ; un script littéral envoyé à un shell
+ou à python (tube depuis ``echo``/``printf``, heredoc, here-string, fichier écrit plus tôt dans la même commande) ;
+``read`` sur une entrée littérale ; ``xargs``.
 
-Ce qui n'est **pas** reconnu tombe en refus sans révocation : les autres langages (``node -e``, ``perl -e``,
-``awk``, la commande ``w`` de ``sed``), les écrivains hors liste (``git clone``, ``tar -C``, ``unzip -d``,
-``sqlite3``…), une variable que la commande n'affecte pas, un chemin que du code calcule.
+Ce qui n'est **pas** reconnu tombe en refus sans révocation : les langages non lus (PowerShell, ``osascript``…),
+les écrivains hors liste, une variable que la commande n'affecte pas, un chemin que du code calcule.
 
 Analyse de texte pure : aucune E/S ici (la résolution des chemins est le fait du :class:`Target`).
 """
@@ -40,6 +47,9 @@ import textwrap
 from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import TYPE_CHECKING, Protocol
+
+from grimoire.hosts.decisions.write_proof_languages import language_writes
+from grimoire.hosts.decisions.write_proof_programs import program_writes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,6 +111,7 @@ _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
     "stdbuf": (frozenset({"-i", "-o", "-e"}), 0),
     "flock": (frozenset({"-w", "--timeout", "-E", "--conflict-exit-code"}), 1),
     "strace": (frozenset({"-o", "-e", "-p", "-s", "-a", "-u", "-E", "-P", "-I", "-O", "-S", "-X"}), 0),
+    "busybox": (frozenset(), 0),
 }
 
 #: Programmes dont tout opérande est écrit : ``nom -> options dont la valeur séparée n'est pas un fichier écrit``.
@@ -119,6 +130,9 @@ _ANY_OPERAND: dict[str, frozenset[str]] = {
     "chgrp": frozenset(),
     "mv": frozenset({"-S", "--suffix"}),
     "rename": frozenset(),
+    "mkfifo": frozenset({"-m", "--mode"}),
+    "mknod": frozenset({"-m", "--mode"}),
+    "fallocate": frozenset({"-l", "--length", "-o", "--offset"}),
 }
 #: Parmi eux, ceux pour qui nommer le dossier qui porte la cible suffit (``rm -rf``, ``mv``, ``chmod -R``).
 _CARRIERS = frozenset({"rm", "rmdir", "mv", "rename", "chmod", "chown", "chgrp"})
@@ -137,6 +151,9 @@ _OUTPUT_OPTIONS: dict[str, frozenset[str]] = {
         {"-O", "--output-document", "-P", "--directory-prefix", "-o", "--output-file", "-a", "--append-output"}
     ),
     "sort": frozenset({"-o", "--output"}),
+    "shuf": frozenset({"-o", "--output"}),
+    "iconv": frozenset({"-o", "--output"}),
+    "pandoc": frozenset({"-o", "--output"}),
 }
 _FIND_ACTIONS = frozenset({"-delete", "-exec", "-execdir", "-ok", "-okdir"})
 _FIND_OUTPUTS = frozenset({"-fprint", "-fprint0", "-fprintf", "-fls"})
@@ -430,6 +447,15 @@ def _unwrap(words: list[str]) -> list[str]:
         if not rest:
             return []
         name = _program(rest[0])
+        if name == "rtk":  # proxy de terminal : ``rtk git …``, ``rtk proxy cmd``, ``rtk read f`` (= ``cat``)
+            rest = rest[1:]
+            while rest and rest[0].startswith("-") and rest[0] != "-":
+                rest.pop(0)
+            if rest[:1] == ["proxy"]:
+                rest = rest[1:]
+            elif rest[:1] in (["read"], ["grep"]):
+                rest = ["cat" if rest[0] == "read" else "rg", *rest[1:]]
+            continue
         spec = _WRAPPERS.get(name)
         if spec is None:
             return rest
@@ -510,6 +536,91 @@ def _keyword(call: ast.Call, name: str) -> ast.AST | None:
     return next((kw.value for kw in call.keywords if kw.arg == name), None)
 
 
+def _py_aliases(tree: ast.AST) -> dict[str, str]:
+    """Les noms liés par les ``import`` du script : ``h -> logging.handlers``, ``FileHandler -> logging.FileHandler``."""
+    found: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update({a.asname: a.name for a in node.names if a.asname})
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found.update({a.asname or a.name: f"{node.module}.{a.name}" for a in node.names})
+    return found
+
+
+def _py_dotted(node: ast.AST, aliases: dict[str, str]) -> str:
+    """Le nom qualifié d'un appelé (``logging.handlers.RotatingFileHandler``), ou ``""`` s'il n'est pas nommé."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(aliases.get(node.id, node.id))
+    return ".".join(reversed(parts))
+
+
+def _py_true(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and bool(node.value)
+
+
+def _py_constant(node: ast.AST | None, allowed: tuple[str, ...]) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value[:1] in allowed
+
+
+_PY_WRITE_FLAGS = re.compile(r"O_(?:WRONLY|RDWR|CREAT|APPEND|TRUNC)")
+_PY_ARCHIVES = frozenset(
+    {"zipfile.ZipFile", "zipfile.PyZipFile", "tarfile.open", "tarfile.TarFile", "tarfile.TarFile.open"}
+)
+_PY_DESTINATION_FUNCTIONS = frozenset({"os.symlink", "os.link"})
+_PY_PATH_FUNCTIONS = frozenset({"os.mkfifo", "os.mknod", "os.utime", "os.lchown", "os.lchmod", "os.chflags"})
+
+
+def _py_more(call: ast.Call, names: Callable[[ast.AST | None], bool], aliases: dict[str, str]) -> bool:
+    """Les écritures python reconnues depuis #1233 : en place, journal, base, archive, lien, fichier temporaire."""
+    dotted = _py_dotted(call.func, aliases)
+    args = call.args
+    last = call.func.attr if isinstance(call.func, ast.Attribute) else dotted
+
+    def arg(index: int, keyword: str) -> ast.AST | None:
+        return args[index] if len(args) > index else _keyword(call, keyword)
+
+    if dotted in ("fileinput.input", "fileinput.FileInput"):
+        return _py_true(arg(1, "inplace")) and names(arg(0, "files"))
+    if dotted.startswith("logging.") and last.endswith("FileHandler"):
+        return not _py_true(arg(3, "delay")) and names(arg(0, "filename"))
+    if dotted == "logging.basicConfig":
+        return names(_keyword(call, "filename"))
+    if dotted in ("sqlite3.connect", "sqlite3.dbapi2.connect"):
+        database = arg(0, "database")
+        text = ast.unparse(database) if database is not None else ""
+        read_only = (_py_true(_keyword(call, "uri")) and "mode=ro" in text) or ":memory:" in text
+        return not read_only and names(database)
+    if dotted == "os.open":
+        flags = arg(1, "flags")
+        return flags is not None and bool(_PY_WRITE_FLAGS.search(ast.unparse(flags))) and names(arg(0, "path"))
+    if dotted in _PY_ARCHIVES:
+        return _py_constant(arg(1, "mode"), ("w", "a", "x")) and names(arg(0, "name") or _keyword(call, "file"))
+    if dotted in ("shelve.open", "dbm.open", "dbm.gnu.open", "dbm.ndbm.open", "dbm.dumb.open", "dbm.sqlite3.open"):
+        flag = arg(1, "flag")
+        created = (flag is None and dotted == "shelve.open") or _py_constant(flag, ("c", "n"))
+        return created and names(arg(0, "filename") or _keyword(call, "file"))
+    if dotted == "shutil.unpack_archive":
+        return names(arg(1, "extract_dir"))
+    if dotted == "shutil.make_archive":
+        return names(arg(0, "base_name"))
+    if dotted in _PY_DESTINATION_FUNCTIONS:
+        return names(arg(1, "dst"))
+    if dotted in _PY_PATH_FUNCTIONS:
+        return names(arg(0, "path"))
+    if dotted.startswith("tempfile."):
+        return names(_keyword(call, "dir"))
+    if last == "extractall":
+        return names(arg(0, "path"))
+    if last == "extract" and isinstance(call.func, ast.Attribute):
+        return names(args[1] if len(args) > 1 else _keyword(call, "path"))
+    return False
+
+
 class _Proof:
     """L'analyse d'une commande : variables affectées, ``cd`` lus, fichiers écrits avec un contenu littéral."""
 
@@ -520,13 +631,16 @@ class _Proof:
         self.cd: list[str] = []
         #: Substitutions de processus de tous les scripts lus : un mot ``\x01<n>`` y renvoie.
         self.procsubs: list[list[_Simple]] = []
+        #: Affectations en préfixe de la commande en cours (``GIT_DIR=x git …``).
+        self.local_env: dict[str, str] = {}
 
     # ── Prédicats sur un mot ────────────────────────────────────────────────
 
-    def hit(self, word: str) -> bool:
+    def hit(self, word: str, dirs: tuple[str, ...] = ()) -> bool:
+        """Vrai si *word* désigne la cible, relu après les ``cd`` lus puis les dossiers *dirs* (``git -C``…)."""
         if not word or word.startswith(_PROCSUB):
             return False
-        return any(self.target.names(reading, tuple(self.cd)) for reading in _readings(word))
+        return any(self.target.names(reading, (*self.cd, *dirs)) for reading in _readings(word))
 
     def carried(self, word: str) -> bool:
         if not word or word.startswith(_PROCSUB):
@@ -561,7 +675,15 @@ class _Proof:
             self.assign(words)
             return False
         launched = _unwrap(words)
-        return bool(launched) and self.launch(launched, cmd, stdin, depth)
+        if not launched:
+            return False
+        prefix = words[: max(0, len(words) - len(launched))]
+        outer_env = self.local_env  # ``GIT_DIR=x sh -c 'git …'`` : le shell lancé hérite du préfixe
+        self.local_env = {**outer_env, **dict(w.split("=", 1) for w in prefix if _ASSIGNMENT.match(w))}
+        try:
+            return self.launch(launched, cmd, stdin, depth)
+        finally:
+            self.local_env = outer_env
 
     def assign(self, words: list[str]) -> None:
         for word in words:
@@ -628,6 +750,9 @@ class _Proof:
             self.env[args[0]] = next((item for item in args[2:] if self.hit(item)), args[2])
             return False
         if self.writer(program, args):
+            return True
+        host = _Host(self, depth)
+        if language_writes(program, args, host) or program_writes(program, args, host, stdin):
             return True
         if program in _SHELLS:
             return self.shell(args, stdin, depth)
@@ -805,7 +930,11 @@ class _Proof:
                     changed = bind(node.target) or changed
             if not changed:
                 break
-        return any(isinstance(node, ast.Call) and self.python_call(node, names, depth) for node in ast.walk(tree))
+        aliases = _py_aliases(tree)
+        return any(
+            isinstance(node, ast.Call) and (_py_more(node, names, aliases) or self.python_call(node, names, depth))
+            for node in ast.walk(tree)
+        )
 
     def python_call(self, call: ast.Call, names: Callable[[ast.AST | None], bool], depth: int) -> bool:
         fn = call.func
@@ -841,6 +970,29 @@ class _Proof:
         if name in _PY_PATH_METHODS:
             return names(receiver) or (name in ("rename", "symlink_to", "hardlink_to") and any(names(a) for a in args))
         return False
+
+
+class _Host:
+    """Ce que :mod:`.write_proof_languages` et :mod:`.write_proof_programs` voient d'une analyse en cours."""
+
+    def __init__(self, proof: _Proof, depth: int) -> None:
+        self.proof, self.depth = proof, depth
+
+    def hit(self, word: str, dirs: tuple[str, ...] = ()) -> bool:
+        return self.proof.hit(word, dirs)
+
+    def run_script(self, text: str, stdin: str | None = None) -> bool:
+        return self.proof.script(text, stdin, self.depth + 1)
+
+    def run_words(self, words: list[str]) -> bool:
+        launched = _unwrap(words)
+        return bool(launched) and self.proof.launch(launched, _Simple(), None, self.depth + 1)
+
+    def source(self, operand: str) -> str | None:
+        return self.proof.source(operand)
+
+    def variable(self, name: str) -> str | None:
+        return self.proof.local_env.get(name, self.proof.env.get(name))
 
 
 def proves_write(command: str, target: Target) -> bool:

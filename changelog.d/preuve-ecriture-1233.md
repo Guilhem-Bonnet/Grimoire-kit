@@ -1,0 +1,1 @@
+- fix(hosts): la garde d'autorité reconnaît d'autres écritures réelles dans la zone de contrôle (scripts `sed` et `awk`, interpréteurs à exécution en ligne, appels Python, destinations `git`, archives, éditeurs en mode script…) : toujours refusées, elles révoquent de nouveau le mandat ; une lecture ou une mention de la zone reste refusée sans révoquer (#1233)

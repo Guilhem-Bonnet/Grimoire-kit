@@ -598,6 +598,8 @@ MODULES: dict[str, tuple[str, str]] = {
     "tool_facts": (GUARD, ""),
     "tool_policy": (GUARD, ""),
     "write_proof": (GUARD, ""),
+    "write_proof_languages": (SUPPORT, "preuve d'écriture dans sed, awk et les interpréteurs, appelée par write_proof.proves_write sous son filet : une panne y lève dans proves_write, qui rend faux (refus sans révocation), couverte par le cas write_proof"),
+    "write_proof_programs": (SUPPORT, "preuve d'écriture de git, des archives et des outils à fichier de sortie, appelée par write_proof.proves_write sous son filet : une panne y lève dans proves_write, qui rend faux (refus sans révocation), couverte par le cas write_proof"),
 }
 #: Modules qui ne sont pas des décisions : le vocabulaire commun et le registre.
 INFRASTRUCTURE = frozenset({"__init__", "_shared"})
