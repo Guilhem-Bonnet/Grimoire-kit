@@ -55,11 +55,19 @@ def _is_fenced(hook: HookInput) -> bool:
     return is_fenced(host_id, detect_host_version(host_id, hook.raw), project_root=hook.project_root)
 
 
-def _task_status(root: Path, task_id: str) -> str:
-    from grimoire.core.standard_state import LEDGER_RELPATH
+def _task_status(project_root: Path, task_id: str) -> str:
+    """L'état de *task_id* au ledger que ``TaskService`` ouvre (#1259 : celui que désigne le marqueur d'un worktree).
+
+    Invérifiable, lève : le frein rend alors ``ask`` avec la cause, jamais un faux « point de reprise déjà déposé ».
+    """
+    from grimoire.core.exceptions import GrimoireMissionError
+    from grimoire.core.standard_state import ledger_location
     from grimoire.missions.ledger import MissionLedger
 
-    task = MissionLedger(root / LEDGER_RELPATH).get_task(task_id)
+    location = ledger_location(project_root)
+    if location.root is None:
+        raise GrimoireMissionError(location.problem)
+    task = MissionLedger(location.root).get_task(task_id)
     return task.status.value if task is not None else ""
 
 
@@ -113,7 +121,7 @@ def pause_brake(hook: HookInput, facts: ToolFacts) -> Decision | None:
         if facts.command and _READS.match(command_surface(facts.command)):
             return None
         if _checkpoint_call(hook, facts, task_id):
-            if _task_status(root, task_id) in ("claimed", "running"):
+            if _task_status(hook.project_root, task_id) in ("claimed", "running"):
                 return None
             return _deny(hook, task_id, "pause : le point de reprise est déjà déposé, une seule écriture était permise", "checkpoint_used")
         return _deny(hook, task_id, "pause : dépose ton point de reprise", "hold")
@@ -166,14 +174,15 @@ def pause_lifted_notices(project_root: Path, session_id: str) -> str:
     if not session:
         return ""
     try:
-        from grimoire.core.standard_state import LEDGER_RELPATH
+        from grimoire.core.standard_state import ledger_location
         from grimoire.missions.ledger import SESSION_ATTACHED_EVENT, WOKEN_KEY, MissionLedger
         from grimoire.missions.pause import PAUSE_LIFTED_CAUSE
 
-        root = home_root(project_root)
-        if not (root / LEDGER_RELPATH / "events.jsonl").is_file():
+        # #1259 : le ledger que désigne le marqueur ; invérifiable, rien à annoncer (une annonce, pas une garde).
+        location = ledger_location(project_root)
+        if location.root is None or not (location.root / "events.jsonl").is_file():
             return ""
-        ledger = MissionLedger(root / LEDGER_RELPATH)
+        ledger = MissionLedger(location.root)
         holder: dict[str, str] = {}
         lifted: set[str] = set()
         for evt in ledger.list_events():

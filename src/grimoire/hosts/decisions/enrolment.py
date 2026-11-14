@@ -28,7 +28,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from grimoire.core.standard_state import LEDGER_RELPATH, ActiveTask
+from grimoire.core.standard_state import ActiveTask, ledger_location
 from grimoire.hosts.decisions._shared import HookInput
 
 #: Profiles whose ``Stop`` hook refuses a closure — red gates, unevaluable
@@ -43,6 +43,9 @@ NO_ACTIVE_TASK = "no_active_task"
 #: Marqueur de ``Decision.detail["blocked_on"]`` quand la session tient encore une
 #: tâche ``claimed``/``running`` qu'elle n'a ni fermée ni garée (K3, §5.1).
 TASK_UNPARKED = "task_unparked"
+#: ... quand la tâche nommée est peut-être encore tenue mais que son ledger (désigné par le marqueur
+#: d'un worktree de tâche) est invérifiable (#1259).
+LEDGER_UNVERIFIABLE = "ledger_unverifiable"
 
 _REMEDY_LINES = (
     '  grimoire task add "<titre>" -a "<critère d\'acceptation>" --owner <nom> --ready',
@@ -335,8 +338,11 @@ def parked_task_of_session(hook: HookInput) -> Any:
         from grimoire.policies.session_state import load_session_state
 
         task_id = load_session_state(hook.project_root, hook.session_id, now_iso="").task_id
-        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
-        if not task_id or not events.is_file():
+        # #1259 : le ledger du projet d'origine dans un worktree de tâche. Invérifiable (marqueur illisible,
+        # ledger désigné absent) : aucune tâche garée ne couvre la session — l'exemption manque, rien ne s'ouvre.
+        location = ledger_location(hook.project_root)
+        events = location.root / "events.jsonl" if location.root is not None else None
+        if not task_id or events is None or not events.is_file():
             return None
         task = MissionLedger(events.parent).get_task(task_id)
     except Exception:
@@ -380,8 +386,10 @@ def stop_scope(hook: HookInput, active: ActiveTask) -> ActiveTask:
     try:
         from grimoire.missions.ledger import MissionLedger
 
-        events = hook.project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
-        if not events.is_file():
+        # #1259 : invérifiable, la tâche reste jugée — le Stop ne retire jamais une tâche qu'il ne peut pas lire.
+        location = ledger_location(hook.project_root)
+        events = location.root / "events.jsonl" if location.root is not None else None
+        if events is None or not events.is_file():
             return active
         task = MissionLedger(events.parent).get_task(active.task_id)
     except Exception:

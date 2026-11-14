@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from grimoire.core.standard_state import ACTOR_ENV, LEDGER_RELPATH
+from grimoire.core.standard_state import ACTOR_ENV, ledger_location
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -50,13 +50,22 @@ def steering_context(project_root: Path, task_id: str, session_id: str = "") -> 
     Best-effort comme tout le contexte de hook : un ledger absent ou illisible
     rend ``("", {})``, jamais une session cassée.
     """
-    root = project_root.resolve()
-    if not (root / LEDGER_RELPATH / "events.jsonl").is_file():
+    location = ledger_location(project_root)  # #1259 : le ledger du projet d'origine dans un worktree de tâche
+    if location.root is None:
+        # Invérifiable : une consigne humaine peut attendre au ledger d'origine sans être livrée. Le dire,
+        # jamais lire la copie du worktree (ni y écrire la livraison). Pas une garde : une annulation est
+        # refusée aux outils par le frein du bail, qui rend lui-même ``ask`` dans ce cas.
+        notice = (
+            f"[Grimoire] Consignes et annonces d'annulation non lues : {location.problem}. "
+            "Une consigne humaine peut attendre ; préviens l'utilisateur."
+        )
+        return notice, {"ledger_unverifiable": location.problem}
+    if not (location.root / "events.jsonl").is_file():
         return "", {}
     try:
         from grimoire.missions.ledger import MissionLedger
 
-        ledger = MissionLedger(root / LEDGER_RELPATH)
+        ledger = MissionLedger(location.root)
         parts: list[str] = []
         detail: dict[str, Any] = {}
         delivered = _deliver_directives(ledger, task_id)
