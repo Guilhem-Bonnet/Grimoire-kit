@@ -340,3 +340,27 @@ def test_pause_task_status_raises_when_unverifiable(home: Path, tmp_path: Path, 
     root, tid = _setup(home, tmp_path, state)
     with pytest.raises(Exception, match=r"projet d'origine|marqueur"):
         _task_status(root, tid)
+
+
+# ── Le board fait foi au projet d'origine (projection de TaskService.project_board) ──
+
+
+@pytest.mark.parametrize("state", [*GOOD, "origine"])
+def test_stop_judges_the_real_gates_not_a_stale_board_copy(home: Path, tmp_path: Path, state: str) -> None:
+    """Sans patch des gates : la tâche est sur le board du projet d'origine, ses vrais manques sont nommés."""
+    root, tid = _setup(home, tmp_path, state)
+    decision = _stop(root)
+    assert "is not on the board" not in decision.reason
+    assert decision.detail.get("task_id") == tid and decision.detail.get("state") == "in_progress"
+
+
+@pytest.mark.parametrize("state", GOOD)
+def test_a_stale_board_card_in_the_worktree_names_no_task(home: Path, tmp_path: Path, state: str) -> None:
+    tid = _task(home)
+    wt = _worktree(home, tid, copy=state == "copie_figee")
+    board = wt / "_grimoire/standard/task-board.yaml"
+    board.write_text(
+        "tasks:\n  - task_id: CARTE-PERIMEE\n    status: in_progress\n    title: copie figée\n", encoding="utf-8"
+    )
+    active = resolve_active_task(wt, session_id=SESSION, env={})
+    assert active.task_id != "CARTE-PERIMEE"

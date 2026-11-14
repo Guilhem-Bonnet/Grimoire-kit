@@ -81,7 +81,7 @@ from grimoire.core.standard_generation import (
     normalize_task_id,
 )
 from grimoire.core.standard_profile_manifest import read_artifact_paths, read_profile
-from grimoire.core.standard_state import board_omits_task, invalidate_cache, task_from_board
+from grimoire.core.standard_state import board_home, board_omits_task, invalidate_cache, task_from_board
 from grimoire.core.yaml_io import load_yaml_with_retry
 from grimoire.data import framework_path
 
@@ -1456,12 +1456,13 @@ def check_evidence_gates(
         msg = f"Unknown target state {target_state!r}. Available: {', '.join(sorted(BOARD_STATES))}"
         raise ValueError(msg)
     board_path = STANDARD_DIR / "task-board.yaml"
-    board = _read_yaml_mapping(root, board_path)
+    board_root = board_home(root)  # #1259 : dans un worktree de tâche, le board projeté au projet d'origine
+    board = _read_yaml_mapping(board_root, board_path)
     task = task_from_board(board, normalized_task_id)
     state = str(target_state or task.get("status") or "")
     missing: list[str] = []
     checks: list[StandardCheck] = []
-    if board_omits_task(root, task):
+    if board_omits_task(board_root, task):
         checks.append(StandardCheck(
             id="gate.task_not_on_board",
             severity="error",

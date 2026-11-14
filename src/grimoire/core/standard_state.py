@@ -351,6 +351,24 @@ def designated_ledger(project_root: Path) -> tuple[Path, bool]:
     return root / LEDGER_RELPATH, False
 
 
+def board_home(project_root: Path) -> Path:
+    """La racine dont le board du standard fait foi : le projet d'origine dans un worktree de tâche (#1259).
+
+    Le board est une projection du ledger que :meth:`~grimoire.missions.service.TaskService.project_board`
+    écrit au projet d'origine ; la copie suivie par git dans le worktree reste figée à sa base.
+    Les artefacts de preuve, eux, restent lus à la racine du worktree, où la session les écrit.
+    Un marqueur illisible lève, comme :func:`designated_ledger`.
+    """
+    root = project_root.resolve()
+    if (root / ".git").is_file():
+        from grimoire.missions.task_worktree import home_of_worktree
+
+        home = home_of_worktree(root)
+        if home is not None:
+            return home[0]
+    return root
+
+
 def ledger_location(project_root: Path) -> LedgerLocation:
     """:func:`designated_ledger` sans exception, pour les décisions de hook (#1259).
 
@@ -709,7 +727,12 @@ def resolve_active_task(
             pass
     expired = tuple(c.task_id for c in held if c.expired and c.session_id in ("", session))
 
-    root = project_root.resolve()
+    if ledger_problem.startswith(DESIGNATED_LEDGER_PROBLEM):
+        # #1259 : ledger désigné invérifiable (marqueur illisible, journal absent). Le board n'en est que la
+        # projection, et sans les claims on ne sait plus écarter ceux des autres sessions : aucune carte n'est crue.
+        return ActiveTask("bootstrap", "unreadable", expired=expired, unreadable=ledger_unreadable)
+    # #1259 : le board que TaskService projette au projet d'origine, pas la copie figée du worktree.
+    root = board_home(project_root)
 
     def compute() -> dict[str, Any]:
         board_path = root / TASK_BOARD_RELPATH
