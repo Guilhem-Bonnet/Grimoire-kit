@@ -339,6 +339,12 @@ def _bash_targets_all_outside_root(command: str, project_root: Path) -> bool:
     return all(_is_outside_root(target, resolved_root) for target in targets)
 
 
+def bash_targets_all_outside_root(command: str, project_root: Path) -> bool:
+    """Public face of :func:`_bash_targets_all_outside_root` — the session write counter
+    (:mod:`.session_writes`) applies the very same rule as this gate."""
+    return _bash_targets_all_outside_root(command, project_root)
+
+
 def _file_write_target_outside_root(path: str, project_root: Path) -> bool:
     """Same guarantee as :func:`_bash_targets_all_outside_root`, for a ``file_write``
     entry's own ``path``. A relative path is never excluded (ambiguous ->

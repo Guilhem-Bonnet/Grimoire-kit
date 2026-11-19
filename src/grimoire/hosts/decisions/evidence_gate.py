@@ -27,6 +27,7 @@ from grimoire.hosts.decisions.enrolment import (
 )
 from grimoire.hosts.decisions.gate_summary import _gate_summary
 from grimoire.hosts.decisions.profile_floor import session_profile
+from grimoire.policies.session_state import say_once
 
 #: Board states that owe no evidence artifact yet. A task parked here passes
 #: every gate by construction — see ``check_evidence_gates``.
@@ -186,7 +187,10 @@ def _decide_stop(hook: HookInput) -> Decision:
             )
         if detail.get("state") in _STATES_WITHOUT_EVIDENCE:
             # Green because nothing is owed yet, not because the work is proven.
-            # Saying so is the difference between a guardrail and a placebo.
+            # Saying so is the difference between a guardrail and a placebo —
+            # once per session and state (« dire une fois »), not at every Stop.
+            if not say_once(hook.project_root, hook.session_id, f"stop.no_evidence:{task_id}", str(detail.get("state"))):
+                return Decision(detail={**detail, "reminder": "already_said"})
             return Decision(
                 context=(
                     f"[Grimoire] Tâche {task_id} encore en état « {detail.get('state') or 'non défini'} » : "
@@ -421,6 +425,10 @@ def _with_done_gate(decision: Decision, hook: HookInput, task_id: str, profile: 
             reason += f"\n(Gate « fini » armé depuis le {verdict.armed_from} ; au plus 3 refus par session.)"
         return replace(decision, outcome=Outcome.BLOCK, reason=reason, detail=detail)
     if profile in _BLOCKING_PROFILES and decision.outcome is not Outcome.BLOCK:
+        # « Dire une fois » : l'avertissement shadow n'est redit que pour une nouvelle mutation.
+        mutation_key = verdict.last_mutation_ts or "?"
+        if not say_once(hook.project_root, hook.session_id, f"stop.done_gate_shadow:{task_id}", mutation_key):
+            return replace(decision, detail={**detail, "reminder": "already_said"})
         warning = (
             f"[Grimoire] Avertissement (gate « fini », shadow) : une mutation pour {task_id} est postérieure "
             f"au dernier check vert. Relance `{verdict.command_hint}` avant de conclure."
@@ -578,12 +586,26 @@ def _no_task_closure(
     goes through. Returns ``None`` when there is nothing to say.
     """
     mutations = session_mutation_count(hook)
-    if mutations <= 0 or mutations <= acknowledged_mutation_count(hook):
+    acknowledged = acknowledged_mutation_count(hook)
+    if mutations <= 0 or mutations <= acknowledged:
         return None  # rien écrit, ou rappel déjà rendu pour ces écritures (issue #1126)
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
     detail["unattached_work"] = record_unattached_work(hook, mutations)
-    reason = no_task_stop_reason(profile, mutations, candidates, expired, unreadable)
     acknowledge_mutations(hook, mutations)
+    if acknowledged > 0:
+        # Le refus, avec son remède, a déjà été rendu dans cette session : le redire à l'identique
+        # coûte un tour entier sans rien apprendre de neuf à l'agent. Les écritures suivantes sont
+        # signalées, en une ligne, sans bloquer — le journal ``session.unattached_work`` les garde.
+        detail["repeat"] = True
+        return Decision(
+            context=(
+                f"[Grimoire] Toujours hors tâche (profil {profile}) : {mutations - acknowledged} écriture(s) "
+                f"de plus depuis le refus précédent ({mutations} au total). Enrôle le chantier, ou dis "
+                "explicitement à l'utilisateur qu'il reste hors ledger."
+            ),
+            detail=detail,
+        )
+    reason = no_task_stop_reason(profile, mutations, candidates, expired, unreadable)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)

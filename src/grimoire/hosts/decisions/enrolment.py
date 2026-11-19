@@ -44,6 +44,11 @@ NO_ACTIVE_TASK = "no_active_task"
 #: tâche ``claimed``/``running`` qu'elle n'a ni fermée ni garée (K3, §5.1).
 TASK_UNPARKED = "task_unparked"
 
+#: Clé « dire une fois » (:func:`grimoire.policies.session_state.say_once`) de la ligne de tâche
+#: que ``SessionStart`` et ``UserPromptSubmit`` injectent : rendue une fois, puis seulement quand
+#: elle change (tâche ouverte, claim expiré, ledger illisible…).
+PROMPT_TASK_KEY = "prompt.task"
+
 _REMEDY_LINES = (
     '  grimoire task add "<titre>" -a "<critère d\'acceptation>" --owner <nom> --ready',
     "  grimoire task context <id>   # le context bundle que le gate ready_to_in_progress exige",

@@ -296,11 +296,13 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
             # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
         if decision.context and decision.outcome is Outcome.ALLOW:
-            # Issue #724 : un avertissement non bloquant (code interprété non
-            # lu) accompagne un `allow` — `additionalContext` pour l'agent,
-            # `systemMessage` pour l'humain, puisque rien d'autre ne le porte.
+            # Issue #724 : un avertissement non bloquant accompagne un `allow`,
+            # dans `additionalContext` pour l'agent. L'avertissement de code
+            # interprété n'est plus recopié en `systemMessage` : l'agent le
+            # reçoit déjà, le doublon ne faisait que l'afficher deux fois.
             specific["additionalContext"] = decision.context
-            payload["systemMessage"] = decision.context
+            if not decision.detail.get("interpreted_code"):
+                payload["systemMessage"] = decision.context
         payload["hookSpecificOutput"] = specific
         return payload
 

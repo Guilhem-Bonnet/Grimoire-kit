@@ -12,7 +12,7 @@ from grimoire.core.claude_activation import activation_context_text
 from grimoire.core.standard_state import TASK_ENV, resolve_active_task
 from grimoire.flows.live_runs import active_flow_lines
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, link_session, no_task_context
+from grimoire.hosts.decisions.enrolment import BLOCKING_PROFILES, PROMPT_TASK_KEY, link_session, no_task_context
 from grimoire.hosts.decisions.profile_floor import session_profile
 from grimoire.hosts.decisions.record import _record_agent_dispatch
 
@@ -416,6 +416,10 @@ def decide_activation(hook: HookInput) -> Decision:
             # Une source illisible se dit quel que soit le profil : ce n'est pas « aucune tâche ».
             if profile in BLOCKING_PROFILES or active.unreadable:
                 enrolment = no_task_context(profile, active.candidates, active.expired, active.unreadable)
+                # « Dire une fois » : le premier prompt ne redit pas ce que le démarrage vient de dire.
+                from grimoire.policies.session_state import say_once
+
+                say_once(hook.project_root, hook.session_id, PROMPT_TASK_KEY, enrolment)
         else:
             link = link_session(hook, active)
     directive = (

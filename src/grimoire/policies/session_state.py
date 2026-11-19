@@ -130,6 +130,10 @@ class SessionState:
     #: Des chemins, des tailles, des digests et des codes de motif — jamais un
     #: extrait de contenu.
     instruction_scan: dict[str, Any] = field(default_factory=dict)
+    #: Rappels déjà rendus dans cette session (« dire une fois ») : ``{clé: empreinte}``.
+    #: Un rappel n'est rendu de nouveau que si son empreinte change (l'état qu'il décrit
+    #: a changé). Des clés et des hachages courts — jamais le texte du rappel.
+    said: dict[str, str] = field(default_factory=dict)
 
     def rule_state(self, rule_id: str) -> RuleState:
         return self.rules.setdefault(rule_id, RuleState())
@@ -149,6 +153,7 @@ class SessionState:
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
             "armed": dict(self.armed),
             "instruction_scan": dict(self.instruction_scan),
+            "said": dict(self.said),
         }
 
     @classmethod
@@ -176,6 +181,8 @@ class SessionState:
         armed = (
             {str(k): v for k, v in armed_raw.items() if isinstance(v, str)} if isinstance(armed_raw, dict) else {}
         )
+        said_raw = d.get("said", {})
+        said = {str(k): v for k, v in said_raw.items() if isinstance(v, str)} if isinstance(said_raw, dict) else {}
         return cls(
             session_id=session_id,
             started_at=str(d.get("started_at") or started_at),
@@ -189,6 +196,7 @@ class SessionState:
             pending_approvals=pending,
             armed=armed,
             instruction_scan=dict(d["instruction_scan"]) if isinstance(d.get("instruction_scan"), dict) else {},
+            said=said,
         )
 
     @classmethod
@@ -330,3 +338,30 @@ def note_acknowledged_mutations(project_root: Path, session_id: str, mutations: 
         return
     state.acknowledged_mutations = mutations
     save_session_state(project_root, state, now_iso=now_iso)
+
+
+def say_once(project_root: Path, session_id: str, key: str, state: str, *, now_iso: str | None = None) -> bool:
+    """« Dire une fois » : ``True`` si le rappel *key* doit être rendu pour l'état *state*.
+
+    Le premier appel d'une session pour *key* rend ``True`` et retient l'empreinte de
+    *state* ; les suivants rendent ``False`` tant que *state* ne change pas. *state* est ce
+    que le rappel décrit (le texte du rappel lui-même, ou la tâche qu'il nomme) : un rappel
+    dont l'état a changé est dit de nouveau. Sans ``session_id`` (hôte qui n'en envoie pas),
+    rien ne peut être retenu : toujours ``True``, comme avant. ``SessionStart`` remet le
+    journal à zéro (:func:`reset_session_state`) : après une compaction, chaque rappel est
+    redit une fois. Jamais une exception : le journal est best-effort dans les deux sens
+    (illisible, le rappel est redit ; non inscriptible, il le sera au prochain appel).
+    """
+    if not session_id:
+        return True
+    if now_iso is None:
+        from datetime import UTC, datetime
+
+        now_iso = datetime.now(UTC).isoformat()
+    digest = hashlib.sha256(state.encode("utf-8")).hexdigest()[:16]
+    loaded = load_session_state(project_root, session_id, now_iso=now_iso)
+    if loaded.said.get(key) == digest:
+        return False
+    loaded.said[key] = digest
+    save_session_state(project_root, loaded, now_iso=now_iso)
+    return True
