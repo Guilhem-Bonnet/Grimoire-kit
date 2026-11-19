@@ -581,6 +581,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "gate_override": (SUPPORT, "levée d'un refus de clôture appelée par evidence_gate DANS son filet W2-08 : une panne devient un refus tracé, couverte par les cas evidence_gate"),
     "gate_summary": (SUPPORT, "résumé de gates lu par evidence_gate, subagent_gate et context_capsule : panne couverte par leurs cas"),
     "human_turns": (GUARD, ""),
+    "resume_capsule": (SUPPORT, "état de reprise écrit au PreCompact et relu par activation : best-effort, chaque source illisible disparaît de la capsule, rend \"\" en cas de panne, aucune décision, aucun refus (la capsule n'est jamais une autorisation)"),
     "instruction_scan": (SUPPORT, "scan des fichiers d'instructions livré en contexte par activation (#667) : best-effort, rend \"\" en cas de panne, aucune décision, aucun refus"),
     "lease_brake": (GUARD, ""),
     "pause_brake": (GUARD, ""),
