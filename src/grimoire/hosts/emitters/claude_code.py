@@ -18,6 +18,7 @@ from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
+    Degradation,
     EmitPlan,
     EmittedFile,
     Emitter,
@@ -378,20 +379,52 @@ def _hook_program(launcher: HookLauncher) -> str:
     return Emitter.quoted_program(launcher.posix)
 
 
+#: Événements dont un hook de garde échoue fermé (``"onFailure": "block"``,
+#: Claude Code v2.1.295+, champ du gestionnaire ``command``). Sans lui, un hook
+#: qui plante, sort hors de 0/2 ou dépasse son ``timeout`` laisse passer l'outil.
+#: Seul ``PreToolUse`` : la référence exclut ``Stop``/``SubagentStop`` (sans
+#: effet), et un ``SessionStart``, un ``UserPromptSubmit`` ou un ``PostToolUse``
+#: consultatif qui bloquerait sur une panne gênerait sans rien protéger.
+_FAIL_CLOSED_EVENTS = frozenset({HookEvent.PRE_TOOL_USE})
+
+
+def fails_closed(hook: HookSpec) -> bool:
+    """Le hook *hook* est-il une garde à émettre en échec fermé ?"""
+    return hook.enforcement is Enforcement.BLOCKING and hook.event in _FAIL_CLOSED_EVENTS
+
+
 def _hook_entry(hook: HookSpec, launcher: HookLauncher = BARE) -> dict[str, Any]:
     entry: dict[str, Any] = {}
     if hook.event not in _MATCHERLESS:
         matcher = _matcher(hook, covered=_DECLARATIVELY_COVERED)
         if matcher:
             entry["matcher"] = matcher
-    entry["hooks"] = [
-        {
-            "type": "command",
-            "command": Emitter.hook_command(HOST_ALIAS, _WIRE_NAMES[hook.event], _hook_program(launcher)),
-            "timeout": hook.timeout,
-        }
-    ]
+    handler: dict[str, Any] = {
+        "type": "command",
+        "command": Emitter.hook_command(HOST_ALIAS, _WIRE_NAMES[hook.event], _hook_program(launcher)),
+        "timeout": hook.timeout,
+    }
+    # Un lanceur introuvable bloquerait tout appel d'outil gardé : la garde reste
+    # alors en échec ouvert, et le plan le dit (:func:`_fail_closed_degradations`).
+    if launcher.found and fails_closed(hook):
+        handler["onFailure"] = "block"
+    entry["hooks"] = [handler]
     return entry
+
+
+def _fail_closed_degradations(surface: ProjectSurface, launcher: HookLauncher) -> tuple[Degradation, ...]:
+    if launcher.found or not any(fails_closed(hook) for hook in surface.hooks):
+        return ()
+    return (
+        Degradation(
+            surface="hook onFailure",
+            reason=(
+                "grimoire-hook est introuvable : la garde PreToolUse est émise sans "
+                '"onFailure": "block", sinon chaque appel d\'outil gardé serait refusé.'
+            ),
+            fallback="installer le kit (`uv tool install grimoire-kit` ou pipx) puis relancer `grimoire up`.",
+        ),
+    )
 
 
 def _permission_rules(surface: ProjectSurface) -> dict[str, list[str]]:
@@ -519,7 +552,10 @@ class ClaudeCodeEmitter(Emitter):
                 host_id=self.host_id,
                 files=tuple(files),
                 merges=(_settings_merge(surface, launcher),),
-                degradations=Emitter.launcher_degradations(launcher),
+                degradations=(
+                    *Emitter.launcher_degradations(launcher),
+                    *_fail_closed_degradations(surface, launcher),
+                ),
             ),
             project_root,
         )
