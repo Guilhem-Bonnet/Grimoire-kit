@@ -506,6 +506,13 @@ def run_hook(
     return render(decision, hook, host_id), decision, hook
 
 
+def guard_failure_verdict(cause: str) -> dict[str, Any]:
+    """Le refus ``PreToolUse`` rendu quand la garde elle-même est en panne (voir :mod:`.hook_entry`)."""
+    from grimoire.hosts.hook_entry import guard_failure_payload
+
+    return guard_failure_payload(cause)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point used by generated hook configurations.
 
@@ -572,11 +579,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         rendered = json.dumps(result, ensure_ascii=False)
     except Exception as exc:
-        if host_id is not HostId.GEMINI_CLI:
-            # Claude Code, Copilot and opencode read the verdict from stdout and
-            # treat a crash exactly as before: let it surface, never as a verdict.
-            raise
         cause = f"{type(exc).__name__}: {exc}"
+        if host_id is not HostId.GEMINI_CLI:
+            if event is not HookEvent.PRE_TOOL_USE:
+                # Événements consultatifs : la panne remonte comme avant (erreur
+                # non bloquante de l'hôte), jamais déguisée en verdict.
+                raise
+            # La garde est émise en échec fermé (``onFailure: block``) : un
+            # plantage refuserait l'outil avec un message de l'hôte qui ne dit
+            # pas quoi faire. Le refus explicite dit d'où vient la panne.
+            sys.stdout.write(json.dumps(guard_failure_verdict(cause), ensure_ascii=False))
+            return 0
         blocked_event = event if event in gemini_wire.BLOCKING_EVENTS else None
         sys.stderr.write(
             f"[Grimoire] hook Gemini en échec sur {label} ({cause}) : "

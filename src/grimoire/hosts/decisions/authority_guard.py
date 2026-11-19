@@ -129,6 +129,7 @@ _NEUTRAL = frozenset({"sudo", "command", "exec", "nohup", "env", "time", "nice",
 #: nommer dans le code exécuté, c'est rejouer un ``UserPromptSubmit``.
 _HOOK_MODULE_MARKERS = (
     "grimoire.hosts.runtime",
+    "grimoire.hosts.hook_entry",
     "hosts.decisions.human_turns",
     "record_human_turn",
     "cli.cmd_host",
@@ -331,29 +332,50 @@ def _command_paths(command: str, home: str) -> list[tuple[str, list[tuple[str, s
     comme si elle ne l'avait pas fait.
     """
     segments, dirs = _segments_and_dirs([_strip_heredoc_bodies(command), *extract_c_bodies(command)], home)
+    # Un mot répété se résout à l'identique : le résoudre une fois suffit (un mot = des appels au système de
+    # fichiers par répertoire possible ; une enveloppe répétée des milliers de fois les multipliait d'autant).
     return [
-        (launched[0].rsplit("/", 1)[-1], [r for word in launched[1:] for r in _resolutions(word, dirs, home)])
+        (
+            launched[0].rsplit("/", 1)[-1],
+            [r for word in dict.fromkeys(launched[1:]) for r in _resolutions(word, dirs, home)],
+        )
         for launched in segments
         if launched
     ]
 
 
 def _segments_and_dirs(texts: list[str], home: str) -> tuple[list[list[str]], list[str]]:
-    """Les segments de *texts* (sans préfixes neutres) et chaque répertoire où la commande peut se placer."""
+    """Les segments de *texts* (sans préfixes neutres) et chaque répertoire où la commande peut se placer.
+
+    Les répertoires sont dédoublonnés au fil de l'eau, et une cible déjà résolue contre la même liste ne l'est
+    pas deux fois : la liste ne fait que croître, sa longueur suffit à la reconnaître. Avant, chaque ``-C`` copiait
+    la liste entière, doublons compris, et refaisait les mêmes résolutions : un coût quadratique en la longueur
+    d'une ligne qui répète son enveloppe.
+    """
     segments = [_without_neutral(seg) for text in texts for seg in _command_words(text)]
-    dirs = [_cwd()]
+    dirs: dict[str, None] = {_cwd(): None}
+    done: set[tuple[str, int]] = set()
+
+    def place(target: str) -> None:
+        key = (target, len(dirs))
+        if key in done:
+            return
+        done.add(key)
+        for _normal, real in _resolutions(target, list(dirs), home):
+            dirs.setdefault(real, None)
+
     for launched in segments:
         if launched and launched[0].rsplit("/", 1)[-1] in _DIR_PROGRAMS:
             args = [w for w in launched[1:] if not w.startswith("-")]
             for target in args[:1] or ["~"]:
-                dirs.extend(real for _normal, real in _resolutions(target, list(dirs), home))
+                place(target)
         for prev, word in pairwise(launched):
             if prev in _DIR_FLAGS:
-                dirs.extend(real for _normal, real in _resolutions(word, list(dirs), home))
+                place(word)
         for word in launched:
             if word.startswith(("--directory=", "--target-directory=")):
-                dirs.extend(real for _normal, real in _resolutions(word.split("=", 1)[1], list(dirs), home))
-    return segments, list(dict.fromkeys(dirs))
+                place(word.split("=", 1)[1])
+    return segments, list(dirs)
 
 
 def _reaches(normal: str, real: str, target: str) -> bool:
@@ -412,7 +434,7 @@ def _reads_zone_through_a_parent(command: str) -> bool:
         names = {word.rsplit("/", 1)[-1] for word in words}
         if not _recurses(names, words, piped_to_xargs):
             continue
-        reached = [r for word in words[1:] for r in _resolutions(word, dirs, home)]
+        reached = [r for word in dict.fromkeys(words[1:]) for r in _resolutions(word, dirs, home)]
         if names & {"rg", "ag", "ack"}:
             reached.extend((d, d) for d in dirs)
         if any(_inside(zone, path) for normal, real in reached for path in (normal, real) for zone in zones):
@@ -1105,12 +1127,14 @@ def names_zone_secret(command: str, targets: tuple[str, ...] = ()) -> str:
 
 
 _OPERATORS = ("&&", "||", "$(", ";", "|", "\n", "`", "(", ")")
+_OPERATOR_STARTS = frozenset(op[0] for op in _OPERATORS)
 _ESCAPE = re.compile(r"\\(.)", re.DOTALL)
 #: Modules dont ``python -m`` est l'entrée du hook : les nommer, c'est le rejouer.
 #: Tout module du paquet ``grimoire.hosts.decisions`` en fait partie (voir
 #: :func:`_is_hook_module`).
 _HOOK_MODULES = (
     "grimoire.hosts.runtime",
+    "grimoire.hosts.hook_entry",
     "hosts.decisions.human_turns",
     "grimoire.cli.cmd_host",
 )
@@ -1179,7 +1203,8 @@ def _command_words(text: str) -> list[list[str]]:
         elif ch.isspace() and ch != "\n":
             end_word()
         else:
-            operator = next((op for op in _OPERATORS if text.startswith(op, i)), "")
+            # Le premier caractère filtre d'abord : neuf comparaisons par caractère sinon.
+            operator = next((op for op in _OPERATORS if text.startswith(op, i)), "") if ch in _OPERATOR_STARTS else ""
             if operator:
                 end_segment()
                 i += len(operator) - 1

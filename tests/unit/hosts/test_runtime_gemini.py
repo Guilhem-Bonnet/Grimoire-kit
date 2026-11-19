@@ -257,7 +257,12 @@ def test_internal_error_on_an_advisory_event_stays_out_of_the_way(
 def test_internal_error_keeps_the_existing_behaviour_for_other_hosts(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Claude Code, Copilot et opencode ne changent pas : l'erreur remonte."""
+    """Claude Code, Copilot et opencode : l'erreur remonte, sauf sur la garde ``PreToolUse``.
+
+    La garde est émise en échec fermé (``onFailure: block``) : son plantage
+    refuserait l'outil sans motif. Elle rend donc un refus explicite
+    (voir ``test_garde_panne.py``) ; les événements consultatifs, eux, ne changent pas.
+    """
 
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("panne simulée")
@@ -265,4 +270,4 @@ def test_internal_error_keeps_the_existing_behaviour_for_other_hosts(
     monkeypatch.setattr(runtime, "run_hook", _boom)
 
     with pytest.raises(RuntimeError, match="panne simulée"):
-        _run_main(monkeypatch, ["--host", "claude", "--event", "PreToolUse"], {"cwd": str(project)})
+        _run_main(monkeypatch, ["--host", "claude", "--event", "PostToolUse"], {"cwd": str(project)})

@@ -37,15 +37,18 @@ def _launches_grimoire_hook(command: str) -> bool:
     return name in _HOOK_PROGRAMS
 
 
-def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
-    """``(fichier, commande)`` de chaque hook du kit, pour l'OS courant.
+def _generated_hook_commands(target: Path) -> list[tuple[str, str, bool]]:
+    """``(fichier, commande, échec fermé)`` de chaque hook du kit, pour l'OS courant.
+
+    *échec fermé* : le gestionnaire porte ``"onFailure": "block"`` (Claude Code) ;
+    un programme introuvable y refuse alors chaque appel d'outil gardé.
 
     Copilot porte une variante ``windows``/``linux``/``osx`` par entrée ; c'est
     elle que l'hôte lance sur cet OS quand elle existe.
     """
     os_key = {"nt": "windows"}.get(os.name, "osx" if sys.platform == "darwin" else "linux")
     sources = [*sorted((target / ".github" / "hooks").glob("*.json")), target / ".claude" / "settings.json"]
-    found: list[tuple[str, str]] = []
+    found: list[tuple[str, str, bool]] = []
     for path in sources:
         if not path.is_file():
             continue
@@ -65,7 +68,8 @@ def _generated_hook_commands(target: Path) -> list[tuple[str, str]]:
                         continue
                     command = str(spec.get(os_key) or spec.get("command") or "")
                     if _launches_grimoire_hook(command):
-                        found.append((path.relative_to(target).as_posix(), command))
+                        fails_closed = spec.get("onFailure") == "block"
+                        found.append((path.relative_to(target).as_posix(), command, fails_closed))
     return found
 
 
@@ -80,11 +84,12 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
     if not commands:
         return []
     problems: set[str] = set()
-    for relpath, command in commands:
+    for relpath, command, fails_closed in commands:
         program = _program(command)
         reason = hook_program_problem(program, target)
         if reason:
-            problems.add(f"{relpath}: {program} ({reason})")
+            closed = ", onFailure: block — every guarded tool call will be refused" if fails_closed else ""
+            problems.add(f"{relpath}: {program} ({reason}{closed})")
     broken = sorted(problems)
     if broken:
         return [EnvCheck(

@@ -465,6 +465,29 @@ Le serveur MCP suit la même règle. Un projet créé ensuite reçoit dans `.mcp
 
 <img src="../assets/divider.svg" width="100%" alt="">
 
+## 19. Si toutes les actions sont refusées (Claude Code)
+
+**Symptôme** : chaque `Bash`, `Edit` ou `Write` est refusé, avec « [Grimoire] garde avant outil en panne », « hook indisponible » ou le message de Claude Code `failed; blocking because onFailure is "block"`.
+
+**Cause** : la garde `PreToolUse` est émise en échec fermé (`"onFailure": "block"`, Claude Code 2.1.295 ou plus) : quand elle ne peut pas juger un appel, elle le refuse au lieu de le laisser passer. Trois cas :
+
+- le kit répond mais une panne interne l'empêche de juger : le refus nomme la panne ;
+- le runtime du kit ne s'importe plus (mise à jour cassée, dépendance absente) : `grimoire-hook` répond quand même par un refus « hook indisponible » ;
+- `grimoire-hook` est introuvable, ou le paquet `grimoire` lui-même ne s'importe plus : le script ne peut rien répondre, et c'est Claude Code qui refuse, avec sa propre erreur.
+
+L'agent ne peut pas se réparer seul, puisque ses outils sont refusés : la suite se fait dans un terminal.
+
+**Fix** (dans l'ordre) :
+
+```bash
+grimoire doctor   # le contrôle hook_commands nomme la commande qui ne se lance pas
+grimoire up       # réinstalle les hooks avec le lanceur trouvé sur ce poste
+```
+
+Si `grimoire` lui-même ne se lance plus, réinstaller le kit (`uv tool install --force grimoire-kit` ou `pipx reinstall grimoire-kit`). En dernier recours, retirer à la main la ligne `"onFailure": "block"` du hook `PreToolUse` dans `.claude/settings.json` : la garde repasse en échec ouvert, et le prochain `grimoire up` la remet.
+
+<img src="../assets/divider.svg" width="100%" alt="">
+
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide
 
 Si le problème persiste :

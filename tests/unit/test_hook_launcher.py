@@ -105,7 +105,9 @@ def test_venv_outside_the_project_gives_a_machine_specific_path(tmp_path: Path) 
 
 def test_nothing_found_falls_back_to_the_bare_name(tmp_path: Path) -> None:
     launcher = resolve_hook_launcher(tmp_path, environ={"PATH": ""}, executable=str(tmp_path / "python"))
-    assert launcher is BARE
+    # Le même nom nu, marqué introuvable : la garde ne passe pas en échec fermé sur un lanceur absent.
+    assert launcher.posix == BARE.posix
+    assert not launcher.found
     assert Emitter.launcher_degradations(launcher) == ()
 
 
