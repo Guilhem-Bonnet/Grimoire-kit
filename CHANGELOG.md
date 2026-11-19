@@ -7,7 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.91.0] - 2026-11-19
+
 - fix(site): la vitrine décrit la version publiée — le bloc « Ce qui n'est pas prouvé » ne nie plus le worktree, la relecture, la fusion ni le lancement de sessions (opt-in), le tableau de bord n'est plus « en cours de refonte », opencode et Gemini CLI rejoignent les outils cités, le plan six dit ce que tranche le pilote automatique et sa liste fermée, le contrôle refuse « en profil governed et au-dessus » ; relevé daté du 2026-11-13
+- fix(hosts): dans un worktree de tâche, le frein du bail lit le fichier de bail et le ledger du projet d'origine, ceux où claim, renouvellement et rattachement écrivent l'epoch ; il ne refuse plus le titulaire courant sur une copie du ledger restée dans le worktree (« epoch 3 périmé, bail à 2 »), et ne se tait plus devant un titulaire périmé quand le worktree n'a aucune copie. Le refus nomme l'epoch de la session puis celui du bail, chacun avec le fichier d'où il vient (#1235) (#1258)
+- fix(hosts): la garde d'autorité reconnaît d'autres écritures réelles dans la zone de contrôle (scripts `sed` et `awk`, interpréteurs à exécution en ligne, appels Python, destinations `git`, archives, éditeurs en mode script…) : toujours refusées, elles révoquent de nouveau le mandat ; une lecture ou une mention de la zone reste refusée sans révoquer (#1233) (#1262)
 
 ## [3.90.0] - 2026-11-13
 
