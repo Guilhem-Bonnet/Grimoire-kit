@@ -16,15 +16,22 @@ from typing import Any
 
 import pytest
 
+from grimoire.bridges.schemas import HostId
 from grimoire.cli.doctor_hooks import check_hook_commands
 from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.hosts import hook_entry, runtime
+from grimoire.hosts.capabilities import resolve_host
 from grimoire.hosts.decisions import HookInput, decide_tool_policy, tool_policy
 from grimoire.hosts.events import HookEvent
 
 pytestmark = pytest.mark.covers("host:claude-code-cli", level="integration")
 
 _PAYLOAD = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git status"}})
+
+
+def test_the_claude_alias_is_the_claude_code_host() -> None:
+    """Les tests ci-dessous passent ``--host claude`` : c'est bien l'hôte Claude Code CLI."""
+    assert resolve_host("claude") is HostId.CLAUDE_CODE_CLI
 
 
 def _run(
