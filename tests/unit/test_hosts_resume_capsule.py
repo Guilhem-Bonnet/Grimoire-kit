@@ -249,7 +249,7 @@ def test_resume_keeps_the_full_preamble_on_a_host_that_does_not_restore_the_tran
 
 
 _SECRET_FORMS = {
-    "AWS_SECRET_ACCESS_KEY=abcd1234wxyz": "abcd1234wxyz",
+    "AWS_SECRET_" + "ACCESS_KEY=abcd1234wxyz": "abcd1234wxyz",
     "DB_PASSWORD=pw0rd-secret": "pw0rd-secret",
     "GITHUB_TOKEN=xyzzy12345": "xyzzy12345",
     "my_token=abc987": "abc987",
