@@ -104,12 +104,12 @@ _FR_RE = re.compile(r"(?i)\b(mot de passe|mdp|jeton|cl[ée] api)\b(\s*[=:]\s*|\s
 _BARE_RE = re.compile(r"(?i)\b(token|secret|passw(?:or)?d|api[_-]?key)\b(\s+(?:is\s+)?)(?![=:])" + _VALUE)
 _URL_CRED_RE = re.compile(r"(\b[A-Za-z][A-Za-z0-9+.-]*://)[^\s/@:]+:[^\s/@]*@")
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]*)?")
-_MASK_TOKEN_RE = re.compile(
+_SECRET_TOKEN_RE = re.compile(
     r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
     r"|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{30,})\b"
 )
 _BLOB_RE = re.compile(r"\b[A-Za-z0-9+/_=-]{48,}\b")
-_MASK_FILE_RE = re.compile(
+_SECRET_FILE_RE = re.compile(
     r"[\w./~-]*(?:\.ssh/[\w.-]+|\bid_(?:rsa|dsa|ecdsa|ed25519)\b[\w.-]*|\.aws/credentials|\.netrc|\.npmrc|\.pgpass"
     r"|\.pypirc|\.git-credentials|(?<![\w-])\.env(?:\.[\w-]+)?\b)"
 )
@@ -128,9 +128,9 @@ def scrub(text: str) -> str:
     text = _BARE_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}***", text)
     text = _BEARER_RE.sub("Bearer ***", text)
     text = _JWT_RE.sub("***", text)
-    text = _MASK_TOKEN_RE.sub("***", text)
+    text = _SECRET_TOKEN_RE.sub("***", text)
     text = _BLOB_RE.sub("***", text)
-    text = _MASK_FILE_RE.sub("[fichier secret]", text)
+    text = _SECRET_FILE_RE.sub("[fichier secret]", text)
     try:
         home = str(Path.home())
     except (RuntimeError, KeyError):
@@ -208,9 +208,9 @@ def _journal_events(project_root: Path, task_id: str) -> list[dict[str, Any]]:
 
 def _relative_files(project_root: Path, events: list[dict[str, Any]]) -> tuple[list[str], int]:
     """Fichiers écrits, du plus récent au plus ancien, sans doublon ni fichier hors projet ou secret."""
-    from grimoire.hosts.secrets import secret_patterns as blocked_path_patterns
+    from grimoire.hosts.secrets import secret_patterns
 
-    blocked_res = [re.compile(p) for p in blocked_path_patterns()]
+    secret_res = [re.compile(p) for p in secret_patterns()]
     root = project_root.resolve()
     seen: list[str] = []
     for event in reversed(events):
@@ -225,7 +225,7 @@ def _relative_files(project_root: Path, events: list[dict[str, Any]]) -> tuple[l
                 raw = candidate.resolve().relative_to(root).as_posix()
             except (OSError, ValueError):
                 continue  # hors du projet : ni nommé ni compté
-        if any(r.search(raw) for r in blocked_res) or _CONTROL_RE.search(raw) or _MASK_FILE_RE.search(raw):
+        if any(r.search(raw) for r in secret_res) or _CONTROL_RE.search(raw) or _SECRET_FILE_RE.search(raw):
             continue
         if raw not in seen:
             seen.append(raw)
