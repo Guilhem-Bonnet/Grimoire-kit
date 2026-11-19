@@ -56,7 +56,7 @@ def citations(text: str) -> Iterator[str]:
             continue
         if in_fence:
             stripped = line.strip()
-            yield stripped[2:] if stripped.startswith("$ ") else stripped
+            yield stripped.removeprefix("$ ")
         else:
             for span in _CODE_SPAN.finditer(line):
                 yield span.group(1).strip()

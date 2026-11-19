@@ -270,7 +270,7 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
 
     dest = capsule_path(hook.project_root, task_id)
     try:
-        write_capsule(hook.project_root, task_id, decision.context)
+        write_capsule(hook.project_root, task_id, decision.context, session_id=hook.session_id)
     except OSError as exc:
         return None, f"{dest}: {type(exc).__name__}: {exc}"
     return dest, ""

@@ -434,15 +434,19 @@ def decide_activation(hook: HookInput) -> Decision:
     source = str(hook.raw.get("source") or "")
     resumed = source in ("compact", "resume")
     live_flow = resumed and bool(active_flow_lines(hook.project_root))
-    resume_part = _resume_capsule(hook.project_root, task_id, source, task_is_real=not active.is_fallback, live_flow=live_flow)
+    resume_part = _resume_capsule(
+        hook.project_root, task_id, source, session_id=hook.session_id, task_is_real=not active.is_fallback, live_flow=live_flow
+    )
     # Issue #716 : une session ouverte dans un agent nommé (``claude --agent
     # <nom>``, clé ``agent``) l'a déjà pour identité — lui remettre en plus la
     # persona d'entrée et la politique de dispatch de la boucle principale,
     # c'est deux identités pour une session. La substitution par persona reste
     # pour les sessions démarrées sans ``--agent`` (``agent_type`` vide).
-    # Sur `resume`, le transcript est restauré avec la persona et la politique de
-    # dispatch déjà injectées : les redonner serait payer ~900 tokens pour rien.
-    if hook.agent_type or (resume_part and source == "resume"):
+    # Sur `resume` d'un hôte qui restaure le transcript (Claude Code), la persona et la
+    # politique de dispatch y sont déjà : les redonner serait payer ~900 tokens pour rien.
+    # Tout autre hôte garde le préambule complet.
+    transcript_restored = bool(resume_part) and source == "resume" and hook.host == HostId.CLAUDE_CODE_CLI.value
+    if hook.agent_type or transcript_restored:
         persona, entry_name = "", ""
         dispatch_context = ""
     else:
@@ -517,13 +521,15 @@ def decide_activation(hook: HookInput) -> Decision:
     )
 
 
-def _resume_capsule(project_root: Path, task_id: str, source: str, *, task_is_real: bool, live_flow: bool) -> str:
+def _resume_capsule(
+    project_root: Path, task_id: str, source: str, *, session_id: str, task_is_real: bool, live_flow: bool
+) -> str:
     """La capsule de reprise de la tâche (voir :func:`read_resume_capsule` pour la règle), best-effort."""
     try:
         from grimoire.hosts.decisions.resume_capsule import read_resume_capsule
 
         return read_resume_capsule(
-            project_root, task_id, source=source, task_is_real=task_is_real, live_flow=live_flow
+            project_root, task_id, source=source, session_id=session_id, task_is_real=task_is_real, live_flow=live_flow
         )
     except Exception:
         return ""

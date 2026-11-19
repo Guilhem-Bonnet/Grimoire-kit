@@ -644,7 +644,7 @@ def host_handoff(
         console.print("[red]Rien à écrire : aucune capsule n'a pu être assemblée.[/red]")
         raise typer.Exit(code=1)
     try:
-        dest = write_capsule(project_root, task_id, decision.context)
+        dest = write_capsule(project_root, task_id, decision.context, session_id=sid)
     except OSError as exc:
         console.print(f"[red]Capsule non écrite : {type(exc).__name__}: {exc}[/red]")
         raise typer.Exit(code=1) from exc
