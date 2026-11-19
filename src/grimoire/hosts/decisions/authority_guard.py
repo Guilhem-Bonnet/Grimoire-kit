@@ -129,6 +129,7 @@ _NEUTRAL = frozenset({"sudo", "command", "exec", "nohup", "env", "time", "nice",
 #: nommer dans le code exécuté, c'est rejouer un ``UserPromptSubmit``.
 _HOOK_MODULE_MARKERS = (
     "grimoire.hosts.runtime",
+    "grimoire.hosts.hook_entry",
     "hosts.decisions.human_turns",
     "record_human_turn",
     "cli.cmd_host",
@@ -1133,6 +1134,7 @@ _ESCAPE = re.compile(r"\\(.)", re.DOTALL)
 #: :func:`_is_hook_module`).
 _HOOK_MODULES = (
     "grimoire.hosts.runtime",
+    "grimoire.hosts.hook_entry",
     "hosts.decisions.human_turns",
     "grimoire.cli.cmd_host",
 )
