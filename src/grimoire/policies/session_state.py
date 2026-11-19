@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -113,6 +114,10 @@ class SessionState:
     #: (issue #1126). Le rappel n'est relancé que si le compteur dépasse cette valeur :
     #: une session qui a répondu au rappel sans écrire de nouveau n'est pas relancée à chaque tour.
     acknowledged_mutations: int = 0
+    #: Compteur ``mutations`` au dernier refus COMPLET « Clôture hors tâche ». Entre deux refus,
+    #: les écritures sont signalées sans bloquer ; le refus revient quand l'écart dépasse le seuil
+    #: (:func:`grimoire.hosts.decisions.evidence_gate._no_task_closure`).
+    no_task_blocked_at: int = 0
     #: Approbations en attente, par identifiant d'appel d'outil de l'hôte :
     #: ``{"fingerprint": ..., "rules": [...]}`` posé au PreToolUse, repris au
     #: PostToolUse (W1-09). Le PostToolUse peut recevoir une entrée réécrite par
@@ -150,6 +155,7 @@ class SessionState:
             "unattached_work": dict(self.unattached_work),
             "mutations": self.mutations,
             "acknowledged_mutations": self.acknowledged_mutations,
+            "no_task_blocked_at": self.no_task_blocked_at,
             "pending_approvals": {key: dict(value) for key, value in self.pending_approvals.items()},
             "armed": dict(self.armed),
             "instruction_scan": dict(self.instruction_scan),
@@ -166,6 +172,7 @@ class SessionState:
         } if isinstance(rules_raw, dict) else {}
         mutations = d.get("mutations", 0)
         acked = d.get("acknowledged_mutations", 0)
+        blocked_at = d.get("no_task_blocked_at", 0)
         pending_raw = d.get("pending_approvals", {})
         pending: dict[str, dict[str, Any]] = {}
         if isinstance(pending_raw, dict):
@@ -193,6 +200,9 @@ class SessionState:
             unattached_work=dict(d["unattached_work"]) if isinstance(d.get("unattached_work"), dict) else {},
             mutations=int(mutations) if isinstance(mutations, int | float) and not isinstance(mutations, bool) else 0,
             acknowledged_mutations=int(acked) if isinstance(acked, int | float) and not isinstance(acked, bool) else 0,
+            no_task_blocked_at=(
+                int(blocked_at) if isinstance(blocked_at, int | float) and not isinstance(blocked_at, bool) else 0
+            ),
             pending_approvals=pending,
             armed=armed,
             instruction_scan=dict(d["instruction_scan"]) if isinstance(d.get("instruction_scan"), dict) else {},
@@ -207,6 +217,24 @@ class SessionState:
 def _epoch_of(value: Any) -> int:
     """Un epoch lu du journal : entier >= 0, sinon ``0`` (illisible = aucun bail connu)."""
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+@contextlib.contextmanager
+def _session_lock(project_root: Path, session_id: str) -> Iterator[bool]:
+    """Verrou inter-processus sur le journal de *session_id* (:func:`grimoire.core.fsio.locked`).
+
+    Rend ``True`` sous verrou, ``False`` s'il n'a pas été obtenu à temps ou ne peut pas l'être :
+    l'appelant continue sans exclusion (un hook ne se bloque jamais sur son journal), comme avant.
+    """
+    from grimoire.core.fsio import locked
+
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(locked(session_state_path(project_root, session_id), timeout=2.0))
+        except (OSError, TimeoutError):
+            yield False
+            return
+        yield True
 
 
 def load_session_state(project_root: Path, session_id: str, *, now_iso: str) -> SessionState:
@@ -272,13 +300,14 @@ def note_session_mutation(project_root: Path, session_id: str, *, task_id: str, 
     """
     if not session_id:
         return
-    state = load_session_state(project_root, session_id, now_iso=now_iso)
-    state.mutations += 1
-    if task_id and task_id != "bootstrap":
-        if state.task_id != task_id:
-            state.lease_epoch = 0  # l'epoch tenu portait une autre tâche
-        state.task_id = task_id
-    save_session_state(project_root, state, now_iso=now_iso)
+    with _session_lock(project_root, session_id):  # deux PostToolUse parallèles ne perdent pas un incrément
+        state = load_session_state(project_root, session_id, now_iso=now_iso)
+        state.mutations += 1
+        if task_id and task_id != "bootstrap":
+            if state.task_id != task_id:
+                state.lease_epoch = 0  # l'epoch tenu portait une autre tâche
+            state.task_id = task_id
+        save_session_state(project_root, state, now_iso=now_iso)
 
 
 def note_session_task(
@@ -359,9 +388,28 @@ def say_once(project_root: Path, session_id: str, key: str, state: str, *, now_i
 
         now_iso = datetime.now(UTC).isoformat()
     digest = hashlib.sha256(state.encode("utf-8")).hexdigest()[:16]
-    loaded = load_session_state(project_root, session_id, now_iso=now_iso)
-    if loaded.said.get(key) == digest:
-        return False
-    loaded.said[key] = digest
-    save_session_state(project_root, loaded, now_iso=now_iso)
+    with _session_lock(project_root, session_id):
+        loaded = load_session_state(project_root, session_id, now_iso=now_iso)
+        if loaded.said.get(key) == digest:
+            return False
+        loaded.said[key] = digest
+        save_session_state(project_root, loaded, now_iso=now_iso)
     return True
+
+
+def note_no_task_block(project_root: Path, session_id: str, mutations: int, *, now_iso: str) -> None:
+    """Mémorise le compteur au refus complet « Clôture hors tâche » (et l'acquitte)."""
+    if not session_id:
+        return
+    with _session_lock(project_root, session_id):
+        state = load_session_state(project_root, session_id, now_iso=now_iso)
+        state.no_task_blocked_at = mutations
+        state.acknowledged_mutations = max(state.acknowledged_mutations, mutations)
+        save_session_state(project_root, state, now_iso=now_iso)
+
+
+def session_no_task_blocked_at(project_root: Path, session_id: str) -> int:
+    """Le compteur au dernier refus complet hors tâche — ``0`` sans journal ou sans id."""
+    if not session_id:
+        return 0
+    return load_session_state(project_root, session_id, now_iso="").no_task_blocked_at

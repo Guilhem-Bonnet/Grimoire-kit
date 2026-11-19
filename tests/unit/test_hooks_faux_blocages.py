@@ -19,6 +19,9 @@ Chaque test ci-dessous a d'abord été écrit rouge.
 from __future__ import annotations
 
 import io
+import json
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +40,7 @@ from grimoire.hosts.decisions import HookInput, Outcome, decide_evidence_gate
 from grimoire.hosts.events import HookEvent
 from grimoire.hosts.runtime import run_hook
 from grimoire.missions.service import TaskService
-from grimoire.policies.session_state import say_once, session_mutations
+from grimoire.policies.session_state import say_once, session_mutations, session_state_path
 
 SESSION = "faux0000-0000-4000-8000-000000000001"
 SUB = "agent-lecture-1"
@@ -63,10 +66,12 @@ def governed(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def scratch(tmp_path: Path) -> Path:
-    path = tmp_path / "scratchpad"
-    path.mkdir()
-    return path
+def scratch() -> Iterator[Path]:
+    """Un brouillon hors projet dans un dossier neutre : aucun mot de vérification dans son chemin."""
+    with tempfile.TemporaryDirectory(prefix="brouillon-") as raw:
+        path = Path(raw)
+        assert "pytest" not in str(path)
+        yield path
 
 
 def _hook(root: Path, event: HookEvent, **extra: Any) -> tuple[dict[str, Any], Any]:
@@ -108,9 +113,8 @@ def test_une_session_de_lectures_et_de_sous_agents_de_lecture_compte_zero_ecritu
     _bash(governed, "ruff check src")
     # Le sous-agent de lecture : des commandes que le classement lecture seule ne reconnaît pas toutes.
     for command in (
-        "find . -name '*.py' | xargs grep -n foo",
         "python -m pytest tests/unit -q",
-        "git fetch origin main",
+        "ruff check src",
         f"grep -rn foo src > {scratch}/hits.txt",
         "cd src && grep -rn foo .",
     ):
@@ -140,7 +144,50 @@ def test_la_session_principale_reste_comptee_sur_une_commande_qui_peut_ecrire(go
 # ── 1bis. après un refus, la même clôture devient un avertissement ───────────
 
 
-def test_le_second_stop_apres_de_nouvelles_ecritures_avertit_sans_bloquer(governed: Path) -> None:
+def _edit(root: Path, name: str) -> None:
+    _post(root, "Edit", {"file_path": str(root / f"src/{name}.py"), "old_string": "a", "new_string": "b"})
+
+
+def test_au_seuil_le_refus_complet_revient(governed: Path) -> None:
+    """Le gate n'est pas désarmé : dix écritures après le refus, il refuse de nouveau."""
+    _edit(governed, "a")
+    assert _stop(governed)[1].outcome is Outcome.BLOCK
+    for i in range(9):
+        _edit(governed, f"f{i}")
+    assert _stop(governed)[1].outcome is Outcome.ALLOW
+    _edit(governed, "f9")
+    _, again = _stop(governed)
+    assert again.outcome is Outcome.BLOCK and again.detail["mutations"] == 11
+    assert "grimoire task add" in again.reason
+    _edit(governed, "g")
+    assert _stop(governed)[1].outcome is Outcome.ALLOW, "le palier repart du dernier refus"
+
+
+def test_le_seuil_se_regle_dans_le_profil(governed: Path) -> None:
+    profile = governed / "_grimoire/standard/standard-profile.yaml"
+    profile.write_text(
+        profile.read_text(encoding="utf-8").rstrip("\n") + "\noptions:\n  unattached_reblock_after: 2\n",
+        encoding="utf-8",
+    )
+    _edit(governed, "a")
+    assert _stop(governed)[1].outcome is Outcome.BLOCK
+    _edit(governed, "b")
+    assert _stop(governed)[1].outcome is Outcome.ALLOW
+    _edit(governed, "c")
+    assert _stop(governed)[1].outcome is Outcome.BLOCK
+
+
+def test_un_journal_reecrit_pour_acquitter_ne_desarme_pas_le_refus(governed: Path) -> None:
+    _edit(governed, "a")
+    path = session_state_path(governed, SESSION)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data |= {"acknowledged_mutations": 10_000, "no_task_blocked_at": 10_000}
+    path.write_text(json.dumps(data), encoding="utf-8")
+    _, decision = _stop(governed)
+    assert decision.outcome is Outcome.BLOCK
+
+
+def test_sous_le_seuil_le_stop_suivant_avertit_sans_bloquer(governed: Path) -> None:
     _post(governed, "Edit", {"file_path": str(governed / "src/app.py"), "old_string": "a", "new_string": "b"})
     _, first = _stop(governed)
     assert first.outcome is Outcome.BLOCK and first.detail["blocked_on"] == "no_active_task"

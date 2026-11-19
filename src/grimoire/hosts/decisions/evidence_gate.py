@@ -18,8 +18,11 @@ from grimoire.hosts.decisions.enrolment import (
     acknowledged_mutation_count,
     ambiguity_text,
     expired_text,
+    no_task_blocked_at,
     no_task_stop_reason,
     parked_task_of_session,
+    reblock_after,
+    record_no_task_block,
     record_unattached_work,
     session_mutation_count,
     stop_scope,
@@ -587,25 +590,32 @@ def _no_task_closure(
     """
     mutations = session_mutation_count(hook)
     acknowledged = acknowledged_mutation_count(hook)
+    blocked_at = no_task_blocked_at(hook)
+    if acknowledged > mutations or blocked_at > mutations:
+        # Le journal dit avoir acquitté plus d'écritures qu'il n'en compte : il a été réécrit
+        # (il est modifiable par l'agent). Un marqueur incohérent ne vaut rien : refus complet.
+        acknowledged = blocked_at = 0
     if mutations <= 0 or mutations <= acknowledged:
         return None  # rien écrit, ou rappel déjà rendu pour ces écritures (issue #1126)
     detail = {"task_id": "bootstrap", "profile": profile, "blocked_on": NO_ACTIVE_TASK, "mutations": mutations}
     detail["unattached_work"] = record_unattached_work(hook, mutations)
-    acknowledge_mutations(hook, mutations)
-    if acknowledged > 0:
-        # Le refus, avec son remède, a déjà été rendu dans cette session : le redire à l'identique
-        # coûte un tour entier sans rien apprendre de neuf à l'agent. Les écritures suivantes sont
-        # signalées, en une ligne, sans bloquer — le journal ``session.unattached_work`` les garde.
-        detail["repeat"] = True
+    threshold = reblock_after(hook)
+    if blocked_at > 0 and mutations - blocked_at < threshold:
+        # Le refus complet, remède compris, a été rendu il y a moins de *threshold* écritures : le
+        # redire à l'identique coûte un tour sans rien apprendre de neuf. Signalé en une ligne ;
+        # au-delà du seuil, le refus complet revient (le gate n'est pas désarmé).
+        acknowledge_mutations(hook, mutations)
+        detail |= {"repeat": True, "reblock_after": threshold, "since_block": mutations - blocked_at}
         return Decision(
             context=(
-                f"[Grimoire] Toujours hors tâche (profil {profile}) : {mutations - acknowledged} écriture(s) "
-                f"de plus depuis le refus précédent ({mutations} au total). Enrôle le chantier, ou dis "
-                "explicitement à l'utilisateur qu'il reste hors ledger."
+                f"[Grimoire] Toujours hors tâche (profil {profile}) : {mutations - blocked_at} écriture(s) "
+                f"depuis le refus précédent ({mutations} au total) ; le refus revient à {threshold}. "
+                "Enrôle le chantier, ou dis explicitement à l'utilisateur qu'il reste hors ledger."
             ),
             detail=detail,
         )
     reason = no_task_stop_reason(profile, mutations, candidates, expired, unreadable)
+    record_no_task_block(hook, mutations)
     if profile in _BLOCKING_PROFILES:
         return Decision(outcome=Outcome.BLOCK, reason=reason, detail=detail)
     return Decision(context=reason, detail=detail)
