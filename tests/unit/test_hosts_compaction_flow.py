@@ -78,7 +78,9 @@ def test_the_capsule_without_a_run_keeps_its_exact_text(tmp_path: Path) -> None:
     project = _governed(tmp_path)
     decision = decide_context_capsule(HookInput(event=HookEvent.PRE_COMPACT, project_root=project))
     assert "flow actif" not in decision.context
-    assert decision.context.endswith("à compléter avant toute clôture.")
+    # L'état de reprise vient APRÈS le bloc de gouvernance, qui reste intact.
+    governance, _, _resume = decision.context.partition("à compléter avant toute clôture.")
+    assert governance.startswith("[Grimoire — capsule] Tâche bootstrap")
 
 
 def test_a_settled_run_is_not_reinjected(tmp_path: Path) -> None:

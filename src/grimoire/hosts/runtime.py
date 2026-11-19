@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
-from grimoire.core.standard_generation import CONTEXT_DIR
 from grimoire.core.standard_state import active_task_id, suspended_state_writes
 from grimoire.hosts import gemini_wire
 from grimoire.hosts.capabilities import profile_for
@@ -267,10 +266,11 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
     if hook.event is not HookEvent.PRE_COMPACT or not decision.context:
         return None, ""
     task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id))
-    dest = hook.project_root / CONTEXT_DIR / task_id / "compaction-capsule.md"
+    from grimoire.hosts.decisions.resume_capsule import capsule_path, write_capsule
+
+    dest = capsule_path(hook.project_root, task_id)
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(decision.context + "\n", encoding="utf-8")
+        write_capsule(hook.project_root, task_id, decision.context)
     except OSError as exc:
         return None, f"{dest}: {type(exc).__name__}: {exc}"
     return dest, ""

@@ -1,0 +1,1 @@
+- feat(hosts): la capsule de compaction devient un état de reprise borné (1 500 caractères : objectif, fichiers touchés, dernier test, branche et PR, prochaine étape), relue au SessionStart `compact`/`resume` et offerte à une session neuve sur la même tâche (< 24 h) ; `grimoire host handoff` l'écrit à la demande et imprime la ligne pour repartir
