@@ -10,7 +10,10 @@ of it.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import os
+import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -390,10 +393,88 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     temporal rule pays one ``Path.is_file()`` check more than before and
     behaves exactly as it did before this change.
     """
-    decision = _evaluate_tool_policy(hook)
-    if decision.outcome is not Outcome.ALLOW and state_writes_allowed():
+    oversized = _oversized_refusal(hook)
+    if oversized is not None:
+        return oversized
+    decision = _evaluate_within_budget(hook)
+    if (
+        decision.detail.get("policy_budget") is None
+        and decision.outcome is not Outcome.ALLOW
+        and state_writes_allowed()
+    ):
         _record_hold(hook, decision)
     return decision
+
+
+#: Borne de taille d'une commande analysée (caractères, mots séparés par des blancs). Au-delà, refus sans
+#: analyse : le coût de l'analyse croît avec la ligne, et une garde qui dépasse le délai de son hook laisse
+#: passer l'outil. Choisies sur 30 000 commandes réelles (centile 99,99 : 20 893 caractères, 1 826 mots ;
+#: maximum : 21 964 caractères, 2 314 mots), avec une marge d'environ trois fois le maximum.
+MAX_COMMAND_CHARS = 65_536
+MAX_COMMAND_WORDS = 8_192
+#: Budget de temps de la décision (secondes), nettement sous le délai émis du hook (10 s) : au-delà, refus.
+#: Mesuré sur les mêmes 30 000 commandes : centile 99,99 à 0,23 s, maximum 0,31 s.
+POLICY_BUDGET_S = 3.0
+
+_COMMAND_KEYS = ("command", "cmd", "commandLine", "script")
+
+
+def _oversized_refusal(hook: HookInput) -> Decision | None:
+    """Refus sans analyse d'une commande hors des bornes de taille, ``None`` sinon."""
+    payload = hook.tool_input or {}
+    command = next((payload[key] for key in _COMMAND_KEYS if isinstance(payload.get(key), str)), "")
+    if not command:
+        return None
+    chars = len(command)
+    words = len(command.split()) if chars > MAX_COMMAND_WORDS else 0
+    if chars <= MAX_COMMAND_CHARS and words <= MAX_COMMAND_WORDS:
+        return None
+    return Decision(
+        outcome=Outcome.DENY,
+        reason=(
+            f"[Grimoire policy] {hook.tool_name or 'action'} refusé — commande trop longue pour être analysée "
+            f"({chars} caractères, plafond {MAX_COMMAND_CHARS} ; plafond de {MAX_COMMAND_WORDS} mots). "
+            "Découpe-la, ou écris le contenu avec l'outil d'écriture de fichiers."
+        ),
+        detail={"tool": hook.tool_name, "policy_budget": "oversized", "chars": chars, "words": words},
+    )
+
+
+def _evaluate_within_budget(hook: HookInput) -> Decision:
+    """:func:`_evaluate_tool_policy` borné par :data:`POLICY_BUDGET_S` ; au-delà, un refus.
+
+    L'analyse tourne dans un fil démon (contexte copié : la suspension des écritures d'état suit) ; un fil ne
+    s'interrompt pas, il est abandonné et meurt avec le processus du hook. Le refus ne révoque aucun mandat :
+    rien n'a été prouvé, seulement rien n'a pu être jugé à temps. Sur un hôte qui ne sait pas refuser, le rendu
+    du refus devient un avertissement (:func:`grimoire.hosts.runtime.render`).
+    """
+    box: list[Decision | BaseException] = []
+    context = contextvars.copy_context()
+
+    def work() -> None:
+        try:
+            box.append(context.run(_evaluate_tool_policy, hook))
+        except BaseException as exc:  # rendu au fil appelant, qui le relève tel quel
+            box.append(exc)
+
+    worker = threading.Thread(target=work, name="grimoire-tool-policy", daemon=True)
+    started = time.monotonic()
+    worker.start()
+    worker.join(POLICY_BUDGET_S)
+    if not box:
+        elapsed = time.monotonic() - started
+        return Decision(
+            outcome=Outcome.DENY,
+            reason=(
+                f"[Grimoire policy] {hook.tool_name or 'action'} refusé — analyse non terminée dans son budget "
+                f"({elapsed:.1f} s, plafond {POLICY_BUDGET_S:g} s). Simplifie ou découpe la commande."
+            ),
+            detail={"tool": hook.tool_name, "policy_budget": "exceeded", "elapsed_s": round(elapsed, 3)},
+        )
+    result = box[0]
+    if isinstance(result, BaseException):
+        raise result
+    return result
 
 
 def _record_hold(hook: HookInput, decision: Decision) -> None:
