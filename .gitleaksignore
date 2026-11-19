@@ -24,5 +24,3 @@
 # donc pas listée.)
 a2fc1ab9de72362804b5b9eb1118f06c57028190:tests/unit/test_hook_ledger.py:curl-auth-header:82
 e28d68e958d4bfba3aeb7bbae99c074a202fbf84:src/grimoire/memory/validation.py:generic-api-key:142
-1da8a78601efec3a4ad672cd9a1efee8a04729ce:tests/unit/test_hosts_resume_capsule.py:generic-api-key:252
-ccb02f73f0c27e2ba6df117bf358c6561b755b72:tests/unit/test_hosts_resume_capsule.py:generic-api-key:252
