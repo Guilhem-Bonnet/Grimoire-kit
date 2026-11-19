@@ -135,5 +135,22 @@ def test_block_edit_refusals(project: Path) -> None:
     assert wa.put_http(project, f"{P}atelier/autre", b"{}")[0] == 404
 
 
+def test_block_edit_stays_inside_the_cadrage_folder(project: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Un chantier inconnu ou dont le dossier est un lien qui sort du cadrage : refusé, rien n'est écrit dehors."""
+    _on(project)
+    workspace_post(project, f"{P}atelier/chantiers", {"titre": "Un"})
+    phase = workspace_get(project, f"{P}atelier/chantiers/un", {})["phases"][0]
+    editable = next(b for b in phase["blocks"] if b["editable"])
+    body = {"text": "x", "expected": phase["fingerprint"]}
+    assert _put(project, "deux", editable["id"], body)[0] == 404
+    outside = tmp_path_factory.mktemp("dehors")
+    inside = project / "_grimoire/cadrage/un"
+    inside.rename(outside / "un")
+    inside.symlink_to(outside / "un", target_is_directory=True)
+    before = {f.name: f.read_bytes() for f in (outside / "un").iterdir()}
+    assert _put(project, "un", editable["id"], body)[0] == 404
+    assert {f.name: f.read_bytes() for f in (outside / "un").iterdir()} == before
+
+
 def test_unhandled_paths_stay_unhandled(project: Path) -> None:
     assert workspace_get(project, "/api/autre", {}) is WORKSPACE_UNHANDLED

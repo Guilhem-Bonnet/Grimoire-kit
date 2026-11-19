@@ -119,6 +119,28 @@ def _slug(raw: str) -> str:
     return raw
 
 
+def _phase_path(root: Path, slug: str, filename: str) -> Path:
+    """Chemin d'un fichier de phase, confiné au dossier des cadrages.
+
+    Le slug sert seulement à retrouver un chantier existant ; le chemin est
+    construit depuis le slug que rend :func:`list_chantiers`, puis vérifié sous
+    ``cadrage_dir`` une fois résolu (un lien symbolique ne le fait pas sortir).
+    """
+    from grimoire.core.chantiers import list_chantiers
+
+    if slug == "principal":
+        known: str | None = None
+    else:
+        known = next((c.slug for c in list_chantiers(root) if c.slug == slug), None)
+        if known is None:
+            raise FileNotFoundError(f"chantier inconnu : {slug!r}")
+    base = cadrage_dir(root, None).resolve()
+    path = (cadrage_dir(root, known) / filename).resolve()
+    if not path.is_relative_to(base):
+        raise FileNotFoundError(f"chantier inconnu : {slug!r}")
+    return path
+
+
 def _chantier_row(root: Path, chantier: Any) -> dict[str, Any]:
     row: dict[str, Any] = chantier.to_dict()
     name = None if chantier.default else chantier.slug
@@ -210,7 +232,7 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
         raise ValueError(f"`text` trop long ({MAX_BLOCK_CHARS} caractères au plus)")
     if not isinstance(expected, str) or not expected:
         raise ValueError("`expected` requis : l'empreinte du fichier de phase lue avec le chantier")
-    path = cadrage_dir(root, None if slug == "principal" else slug) / phase.filename
+    path = _phase_path(root, slug, phase.filename)
     if not path.is_file():
         raise FileNotFoundError(f"phase absente : {phase.filename}")
     with locked(path):
