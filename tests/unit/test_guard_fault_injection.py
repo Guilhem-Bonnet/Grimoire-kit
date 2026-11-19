@@ -591,6 +591,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "record": (SUPPORT, "journal d'observation (agent.dispatch / agent.miss) : ne change jamais une décision"),
     "repetition_guard": (GUARD, ""),
     "session_memory": (GUARD, ""),
+    "session_writes": (SUPPORT, "règle du compteur d'écritures appelée par evidence_trace (PostToolUse) : une panne y rend « compte » (échec fermé, counts_as_session_write), le refus hors tâche reste jugé par evidence_gate, couvert par ses cas"),
     "self_view": (SUPPORT, "ligne de vue de soi (bail, reprise) livrée en contexte par task_context : best-effort, rend \"\" en cas de panne, aucun refus"),
     "steering": (SUPPORT, "consignes du cockpit livrées en contexte : aucune décision, aucun refus"),
     "subagent_gate": (GUARD, ""),

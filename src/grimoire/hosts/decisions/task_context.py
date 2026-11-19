@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from grimoire.core.standard_state import is_standard_enrolled, resolve_active_task
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
-from grimoire.hosts.decisions.enrolment import link_session, no_task_context
+from grimoire.hosts.decisions.enrolment import PROMPT_TASK_KEY, link_session, no_task_context
 from grimoire.hosts.decisions.profile_floor import record_lowering_request, session_profile
 
 
@@ -81,11 +81,19 @@ def decide_task_context(hook: HookInput) -> Decision:
             f"[Grimoire] Tâche courante : {active.task_id} (profil {profile}). "
             f"Toute preuve va dans _grimoire-output/evidence/{active.task_id}/."
         )
+    # « Dire une fois » : la ligne de tâche (« aucune tâche… » avec son remède, ou « tâche courante… »)
+    # n'est réinjectée que si elle a changé depuis le dernier tour de la session. Le reste du
+    # contexte (vue de soi, reprise, pause, consignes) ne sort déjà que lorsqu'il a quelque chose à dire.
+    from grimoire.policies.session_state import say_once
+
+    if not say_once(hook.project_root, hook.session_id, PROMPT_TASK_KEY, context):
+        detail["task_line"] = "already_said"
+        context = ""
     if self_view:
-        context = f"{context}\n{self_view}"
+        context = f"{context}\n{self_view}" if context else self_view
     takeover = takeover_notices(hook.project_root, hook.session_id)
     if takeover:
-        context = f"{context}\n{takeover}"
+        context = f"{context}\n{takeover}" if context else takeover
     # W2-06 : la phrase « Override Gate <tâche>: <raison> » — après le rattachement de session ci-dessus.
     from grimoire.hosts.decisions.gate_override import record_override_request
 

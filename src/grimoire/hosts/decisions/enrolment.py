@@ -44,6 +44,11 @@ NO_ACTIVE_TASK = "no_active_task"
 #: tâche ``claimed``/``running`` qu'elle n'a ni fermée ni garée (K3, §5.1).
 TASK_UNPARKED = "task_unparked"
 
+#: Clé « dire une fois » (:func:`grimoire.policies.session_state.say_once`) de la ligne de tâche
+#: que ``SessionStart`` et ``UserPromptSubmit`` injectent : rendue une fois, puis seulement quand
+#: elle change (tâche ouverte, claim expiré, ledger illisible…).
+PROMPT_TASK_KEY = "prompt.task"
+
 _REMEDY_LINES = (
     '  grimoire task add "<titre>" -a "<critère d\'acceptation>" --owner <nom> --ready',
     "  grimoire task context <id>   # le context bundle que le gate ready_to_in_progress exige",
@@ -448,3 +453,46 @@ def record_unattached_work(hook: HookInput, mutations: int) -> dict[str, Any]:
             hook.project_root, hook.session_id, mutations=mutations, files=files, now_iso=datetime.now(UTC).isoformat()
         )
     return {"files": list(files), "mutations": mutations}
+
+
+#: Écritures hors tâche, depuis le dernier refus complet, au-delà desquelles ``Stop`` refuse de
+#: nouveau (option de profil ``options.unattached_reblock_after``). Dix : un lot de travail réel
+#: (quelques fichiers édités, un commit) redéclenche le refus ; une ou deux retouches après le
+#: premier refus, déjà vu avec son remède, sont signalées sans coûter un tour entier.
+DEFAULT_REBLOCK_AFTER = 10
+
+
+def reblock_after(hook: HookInput) -> int:
+    """Le seuil de nouveau refus hors tâche : l'option de profil si elle est un entier >= 1, sinon le défaut."""
+    try:
+        from ruamel.yaml import YAML
+
+        from grimoire.core.standard_generation import STANDARD_PROFILE_FILE
+
+        profile = hook.project_root.resolve() / STANDARD_PROFILE_FILE
+        data = YAML(typ="safe").load(profile) if profile.is_file() else None
+        options = data.get("options") if isinstance(data, dict) else None
+        value = options.get("unattached_reblock_after") if isinstance(options, dict) else None
+    except Exception:
+        return DEFAULT_REBLOCK_AFTER
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else DEFAULT_REBLOCK_AFTER
+
+
+def no_task_blocked_at(hook: HookInput) -> int:
+    """Le compteur d'écritures au dernier refus complet hors tâche — ``0`` sans journal."""
+    if not hook.session_id:
+        return 0
+    try:
+        from grimoire.policies.session_state import session_no_task_blocked_at
+
+        return session_no_task_blocked_at(hook.project_root, hook.session_id)
+    except Exception:
+        return 0
+
+
+def record_no_task_block(hook: HookInput, mutations: int) -> None:
+    """Best-effort : retient *mutations* comme compteur du refus complet qui vient d'être rendu."""
+    with contextlib.suppress(Exception):
+        from grimoire.policies.session_state import note_no_task_block
+
+        note_no_task_block(hook.project_root, hook.session_id, mutations, now_iso=datetime.now(UTC).isoformat())

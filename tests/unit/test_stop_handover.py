@@ -199,12 +199,23 @@ def test_the_no_task_reminder_is_not_repeated_without_new_writes(governed: Path)
     assert again.outcome is Outcome.ALLOW, again.reason
 
 
-def test_a_new_write_after_the_acknowledgement_is_refused_again(governed: Path) -> None:
+def test_a_new_write_after_the_acknowledgement_is_refused_again_past_the_threshold(governed: Path) -> None:
+    """Sous le seuil (10 écritures depuis le refus), la suite est signalée en une ligne ; au seuil, refus.
+
+    Avant : chaque nouvelle écriture rebloquait avec le même texte (~700 caractères), soit un tour
+    de plus à chaque fois — 185 refus en 14 jours sur un poste réel.
+    """
     _unattached(governed)
     _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
     _unattached(governed)
     _, decision = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
-    assert decision.outcome is Outcome.BLOCK and decision.detail["mutations"] == 2
+    assert decision.outcome is Outcome.ALLOW and decision.detail["mutations"] == 2
+    assert decision.detail["blocked_on"] == "no_active_task" and decision.detail["repeat"] is True
+    assert "hors tâche" in decision.context
+    for _ in range(9):
+        _unattached(governed)
+    _, again = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert again.outcome is Outcome.BLOCK and again.detail["mutations"] == 11
 
 
 # --- Compteur d'écritures acquittées : bornes du journal et de l'adaptateur (issue #1126) ---
@@ -286,7 +297,7 @@ def test_acknowledged_mutation_adapter_round_trips(tmp_path: Path) -> None:
 
 
 def test_each_further_write_after_an_acknowledgement_brings_the_reminder_back(governed: Path) -> None:
-    """Le gate n'est pas désarmé : rappel, silence, nouvelle écriture, rappel, silence."""
+    """Le gate n'est pas désarmé : refus, silence, signal, silence, puis refus de nouveau au seuil, silence."""
     _unattached(governed)
     _, first = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
     assert first.outcome is Outcome.BLOCK
@@ -294,7 +305,15 @@ def test_each_further_write_after_an_acknowledgement_brings_the_reminder_back(go
     assert quiet.outcome is Outcome.ALLOW
 
     _unattached(governed)
-    _, back = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
-    assert back.outcome is Outcome.BLOCK and back.detail["mutations"] == 2
+    _, signal = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert signal.outcome is Outcome.ALLOW and signal.detail["mutations"] == 2
+    assert signal.detail["blocked_on"] == "no_active_task" and "hors tâche" in signal.context
     _, quiet_again = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
-    assert quiet_again.outcome is Outcome.ALLOW
+    assert quiet_again.outcome is Outcome.ALLOW and not quiet_again.detail.get("blocked_on")
+
+    for _ in range(9):
+        _unattached(governed)
+    _, back = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert back.outcome is Outcome.BLOCK and back.detail["mutations"] == 11
+    _, silent = _hook(governed, HookEvent.STOP, session="libre", stop_hook_active=False)
+    assert silent.outcome is Outcome.ALLOW

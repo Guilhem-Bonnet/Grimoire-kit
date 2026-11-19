@@ -22,7 +22,6 @@ before this issue.
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from grimoire.core.standard_checks.evidence_journal import (
@@ -32,6 +31,11 @@ from grimoire.core.standard_checks.evidence_journal import (
 )
 from grimoire.core.standard_state import active_task_id, is_standard_enrolled
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
+from grimoire.hosts.decisions.session_writes import (
+    counts_as_session_write,
+    is_session_bookkeeping,
+    writes_outside_project,
+)
 from grimoire.hosts.decisions.tool_facts import ToolFacts, approval_fingerprint, classify_tool, policy_tool_detail
 from grimoire.policies.schemas import ActionKind, MutationClass
 
@@ -275,38 +279,16 @@ def _record_delegation(hook: HookInput, task_id: str) -> None:
         return
 
 
-def _writes_outside_project(hook: HookInput, facts: ToolFacts) -> bool:
-    """Issue #875 : vrai si l'appel n'écrit que hors de ``project_root``.
-
-    Brouillon sous le répertoire temporaire, mémoire de l'utilisateur sous
-    ``~/.claude`` : ce n'est pas du travail du projet, ni pour le compteur de
-    ``Stop`` ni pour le rappel de preuve. Une cible relative se lit depuis
-    ``project_root`` ; une cible illisible reste comptée (fail-closed).
-    """
-    if facts.kind is not ActionKind.FILE_WRITE or not facts.targets:
-        return False
-    try:
-        root = hook.project_root.resolve()
-        for target in facts.targets:
-            path = Path(target).expanduser()
-            if not (path if path.is_absolute() else root / path).resolve().is_relative_to(root):
-                continue
-            return False
-        return True
-    except Exception:
-        return False
-
-
 def _record_session_mutation(hook: HookInput, facts: ToolFacts, task_id: str) -> None:
     """Issue #638 lot A : la session compte ses écritures, jamais leur contenu.
 
     C'est ce compteur que ``Stop`` lit pour refuser une clôture hors tâche
     (``_no_task_closure``) sans jamais bloquer une session qui n'a fait que
-    lire : seule une classification autre que lecture seule — fichier écrit
-    ou édité, commande Bash mutante ou destructive — compte. Best-effort,
-    comme le journal de preuve juste au-dessus.
+    lire : seule une écriture réelle dans le projet compte, selon la règle de
+    :func:`grimoire.hosts.decisions.session_writes.counts_as_session_write`.
+    Best-effort, comme le journal de preuve juste au-dessus.
     """
-    if facts.mutation is MutationClass.READ_ONLY or not hook.session_id or _writes_outside_project(hook, facts):
+    if not hook.session_id or not counts_as_session_write(hook, facts):
         return
     try:
         from datetime import UTC, datetime
@@ -434,6 +416,17 @@ def _with_repetition(decision: Decision, verdict: RepetitionVerdict | None) -> D
     return replace(decision, context=context, detail=detail)
 
 
+def _evidence_reminder_due(hook: HookInput, task_id: str) -> bool:
+    """« Dire une fois » : le rappel de preuve n'est rendu qu'à la première écriture de chaque tâche de la session.
+
+    Le journal de preuve (:func:`_record_observed_actions`) consigne déjà chaque écriture ; le
+    rappel n'apporte rien de plus à la deuxième. Il revient quand la tâche change.
+    """
+    from grimoire.policies.session_state import say_once
+
+    return say_once(hook.project_root, hook.session_id, "post.evidence", task_id)
+
+
 def decide_evidence_trace(hook: HookInput) -> Decision:
     """Post tool use: remind the agent that a write owes a line of proof."""
     facts = classify_tool(hook.tool_name, hook.tool_input)
@@ -454,8 +447,12 @@ def decide_evidence_trace(hook: HookInput) -> Decision:
     _record_session_mutation(hook, facts, task_id)
     if _is_delegation_tool(hook.tool_name):
         _record_delegation(hook, task_id)
-    if facts.kind is not ActionKind.FILE_WRITE or _writes_outside_project(hook, facts):
+    if facts.kind is not ActionKind.FILE_WRITE or is_session_bookkeeping(facts) or writes_outside_project(hook, facts):
         return _with_repetition(Decision(), repetition)
+    if not _evidence_reminder_due(hook, task_id):
+        return _with_repetition(
+            Decision(detail={"task_id": task_id, "targets": list(facts.targets), "reminder": "already_said"}), repetition
+        )
     touched = ", ".join(facts.targets[:3]) or "le fichier modifié"
     context = (
         f"[Grimoire] Écriture enregistrée ({touched}). Ajoute la preuve correspondante à "

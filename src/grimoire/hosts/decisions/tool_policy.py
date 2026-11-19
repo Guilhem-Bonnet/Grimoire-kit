@@ -594,13 +594,18 @@ def _evaluate_tool_policy(hook: HookInput) -> Decision:
     # Issue #724 §2 : du code interprété (heredoc sur stdin de python/node/…,
     # `-c`/`-e`) n'est lu que contre les appels destructifs connus ; le reste
     # est nommé, jamais tu, pour que l'asymétrie avec `rm -rf` soit visible.
+    # « Dire une fois » : l'avertissement est rendu à la première commande de chaque langage de la session.
     interpreted_warning = ""
     if facts.interpreted_code:
         detail["interpreted_code"] = facts.interpreted_code
-        interpreted_warning = (
-            f"[Grimoire policy] code {facts.interpreted_code} interprété : seuls les appels destructifs "
-            "connus (shutil.rmtree, os.remove, fs.rm…) sont inspectés, le reste n'est pas lu."
-        )
+        from grimoire.policies.session_state import say_once
+
+        key = f"pre.interpreted:{facts.interpreted_code}"
+        if say_once(hook.project_root, hook.session_id, key, key):
+            interpreted_warning = (
+                f"[Grimoire policy] code {facts.interpreted_code} interprété : seuls les appels destructifs "
+                "connus (shutil.rmtree, os.remove, fs.rm…) sont inspectés, le reste n'est pas lu."
+            )
 
     if verdict_kind is VerdictKind.BLOCK:
         what = facts.destructive_reason or facts.secret_target or facts.kind.value
