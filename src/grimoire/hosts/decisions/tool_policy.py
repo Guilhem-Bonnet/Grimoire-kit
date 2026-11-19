@@ -395,13 +395,11 @@ def decide_tool_policy(hook: HookInput) -> Decision:
     """
     oversized = _oversized_refusal(hook)
     if oversized is not None:
+        if state_writes_allowed():
+            _record_hold(hook, oversized)
         return oversized
     decision = _evaluate_within_budget(hook)
-    if (
-        decision.detail.get("policy_budget") is None
-        and decision.outcome is not Outcome.ALLOW
-        and state_writes_allowed()
-    ):
+    if decision.outcome is not Outcome.ALLOW and state_writes_allowed():
         _record_hold(hook, decision)
     return decision
 
@@ -492,15 +490,21 @@ def _record_hold(hook: HookInput, decision: Decision) -> None:
     try:
         from grimoire.hosts.decisions.calibration import action_fingerprint, record_policy_hold, target_key
 
-        facts = classify_tool(hook.tool_name, hook.tool_input)
-        detail = policy_tool_detail(facts)
+        budget = decision.detail.get("policy_budget")
+        if budget:
+            # Refus de borne ou de budget : la ligne n'a pas été (ou pas fini d'être) analysée, et la
+            # reclassifier ici coûterait ce que le refus a évité. La commande brute sert d'empreinte.
+            payload = hook.tool_input or {}
+            detail = next((str(payload[key]) for key in _COMMAND_KEYS if isinstance(payload.get(key), str)), "")
+        else:
+            detail = policy_tool_detail(classify_tool(hook.tool_name, hook.tool_input))
         tool_name = hook.tool_name or ""
         record_policy_hold(
             hook.project_root,
             session_id=hook.session_id,
             task_id=str(decision.detail.get("task_id") or active_task_id(hook.project_root)),
             hook_id="grimoire.tool-policy",
-            reason=f"tool_policy:{decision.outcome.value}",
+            reason=f"tool_policy:{decision.outcome.value}" + (f":{budget}" if budget else ""),
             fingerprint=action_fingerprint(tool_name, detail),
             target=target_key(tool_name, detail),
         )
