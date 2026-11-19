@@ -277,7 +277,7 @@ def test_cd_vers_le_projet_ou_son_worktree_n_est_pas_refuse(governed: Path, suff
     worktree = governed / ".claude/worktrees/x"
     worktree.mkdir(parents=True)
     for where in (governed, worktree):
-        rendered, decision = _hook(
+        _, decision = _hook(
             governed, HookEvent.PRE_TOOL_USE, tool_name="Bash", tool_input={"command": f"cd {where} && {suffix}"}
         )
         assert decision.outcome is Outcome.ALLOW, decision.reason
