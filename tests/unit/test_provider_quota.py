@@ -643,7 +643,8 @@ def _invoke(*args: str) -> object:
 
 def test_providers_status_text_shows_dated_and_unknown_suspensions(tmp_path: Path) -> None:
     _registry(tmp_path)
-    record_suspension(tmp_path, "anthropic", until=T0 + timedelta(days=30), source="resets_at")
+    # La commande lit l'horloge réelle : une date fixe (T0 + 30 j) a expiré le 2026-11-15 et rendait le test rouge.
+    record_suspension(tmp_path, "anthropic", until=datetime.now(UTC) + timedelta(days=30), source="resets_at")
     record_suspension(tmp_path, "local", until=None, source="unknown")
     state = load_state(tmp_path)
     state["local"] = replace(state["local"], suspension=Suspension(until=None, source="unknown"))
