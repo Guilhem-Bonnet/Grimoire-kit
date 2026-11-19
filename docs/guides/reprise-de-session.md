@@ -1,3 +1,7 @@
+---
+audience: utilisateur
+---
+
 # Reprise de session sans perte
 
 Une session longue relit tout son contexte à chaque appel. Repartir d'une session
