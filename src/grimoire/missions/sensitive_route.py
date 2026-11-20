@@ -40,8 +40,10 @@ __all__ = [
     "SENSITIVE_ROUTES",
     "SENSITIVE_ROUTE_OFF",
     "SENSITIVE_ROUTE_STRONG",
+    "SENSITIVE_TOPIC_STEMS",
     "SensitiveRoute",
     "cited_paths",
+    "mentions_sensitive_topic",
     "sensitive_patterns",
     "sensitive_route_for",
 ]
@@ -98,6 +100,36 @@ _EXTENSIONS = frozenset(
 _TOKEN = re.compile(r"[A-Za-z0-9_.*~/-]+")
 _URL_BEFORE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S*$")
 _MAX_PATHS = 64
+
+#: Le même périmètre dit en mots, pour un texte libre qui ne cite aucun chemin (la description d'un appel ``Agent``,
+#: voir ``hosts.decisions.dispatch_model``) : gardes, hooks, politique, autorité, relecture adversariale, CI, sécurité,
+#: failles. Racines en minuscules et sans accents ; une racine de 4 lettres ou plus matche en préfixe, plus courte elle
+#: doit être le mot entier (``ci``). Une seule liste : la décision de dispatch ne garde pas la sienne.
+SENSITIVE_TOPIC_STEMS: tuple[str, ...] = (
+    "garde",
+    "guard",
+    "hook",
+    "polic",
+    "politi",
+    "autorit",
+    "authori",
+    "adversari",
+    "ci",
+    "secu",
+    "securit",
+    "faille",
+    "vulnerab",
+)
+_ACCENTS = str.maketrans("àâäéèêëîïôöùûüç", "aaaeeeeiioouuuc")
+
+
+def mentions_sensitive_topic(text: str) -> bool:
+    """Le texte parle-t-il d'une garde, d'un hook, de la politique, de la CI, de la sécurité ou d'une faille ?"""
+    for word in re.findall(r"[a-z]+", (text or "").lower().translate(_ACCENTS)):
+        for stem in SENSITIVE_TOPIC_STEMS:
+            if word == stem or (len(stem) >= 4 and word.startswith(stem)):
+                return True
+    return False
 
 
 @dataclass(frozen=True, slots=True)
