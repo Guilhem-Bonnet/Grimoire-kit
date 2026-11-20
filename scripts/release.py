@@ -55,7 +55,9 @@ class ReleaseError(RuntimeError):
 
 def run(cmd: Sequence[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
     # Chemins littéraux : un nom de fichier ne devient jamais un motif ou une « magic pathspec ».
-    env = {**os.environ, "GIT_LITERAL_PATHSPECS": "1"}
+    # Les sous-processus Python écrivent en UTF-8 : sous Windows, la page de code locale (cp1252) donnerait des
+    # accents illisibles une fois décodés ci-dessous.
+    env = {**os.environ, "GIT_LITERAL_PATHSPECS": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     done = subprocess.run(
         list(cmd), cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=env
     )
