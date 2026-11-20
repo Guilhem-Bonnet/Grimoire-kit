@@ -1,0 +1,1 @@
+- fix(hosts): la garde avant outil ne jugeait pas les appels groupés de Copilot ; elle juge désormais chaque appel d'un lot et rend le verdict le plus restrictif, refuse un appel qu'elle ne sait pas lire, et n'autorise jamais un `PreToolUse` sans nom d'outil exploitable (#1280)

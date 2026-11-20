@@ -124,9 +124,40 @@ de modèle réel n'a été fait. Ce qui est chargé par l'hôte (instructions vi
 été vérifié avec `opencode debug config|agent|skill` et une requête réelle vers le
 fournisseur factice ; ce qui ne l'est pas : le plugin sur les sous-agents, une
 table `permission` (un refus de lecture en glob n'a pas arrêté une lecture), les
-autres événements de cycle de vie, un MCP effectivement lancé. Copilot (VS Code), Codex, Cursor et Gemini n'ont pas été
+autres événements de cycle de vie, un MCP effectivement lancé. Codex, Cursor et Gemini n'ont pas été
 lancés : leurs manifestes disent « non vérifié » et la capture reste à faire au
-poste. Les fixtures remplacent les chemins personnels, l'utilisateur et les
+poste.
+
+Copilot (VS Code) n'a pas été lancé non plus, mais ses journaux locaux ont été
+relus le 20 novembre 2026 (#1280). Le journal de session du harness **Copilot**
+(mai à juillet 2026) consigne les entrées de hooks en camelCase
+(`sessionId`, `toolName`/`toolArgs`, `toolResult`, `initialPrompt`…), et un
+`preToolUse` y porte une **liste** `toolCalls` (jusqu'à dix appels par
+invocation). Les sessions de chat du harness **Local** (avril 2026) ne gardent
+que les sorties affichées (`systemMessage`, `stopReason`). Ni sortie de garde
+acceptée, ni refus, ni version d'hôte (`copilotVersion: "unknown"`) n'y figurent :
+les fixtures sont rattachées au manifeste, mais toutes les capacités restent
+« non vérifié ». Les hooks lisent désormais cette forme camelCase, et
+`grimoire.hosts.copilot_wire.detect_dialect` dit ce que la forme permet
+d'affirmer : camelCase signifie harness Copilot ; snake_case peut venir du
+harness Local comme d'un hook Copilot déclaré en PascalCase.
+
+La garde avant outil juge **chaque appel** d'un lot et rend le verdict le plus
+restrictif : un refus l'emporte sur une demande, une demande sur une
+autorisation, et la raison nomme l'appel en cause. Elle échoue fermé : un appel
+qu'elle ne sait pas lire (nom absent, arguments illisibles) est refusé, et un
+`PreToolUse` sans nom d'outil exploitable n'est jamais autorisé, quel que soit
+l'hôte. Une réécriture d'arguments ne s'applique pas à un appel isolé d'un lot :
+la garde demande alors la décision à l'utilisateur.
+
+Une charge ambiguë est refusée : celle qui décrit l'appel à la fois en camelCase
+(`toolCalls`, `toolName`/`toolArgs`) et sous une autre forme, ou dont un appel
+porte deux champs de nom ou d'arguments, ou des arguments nuls. La saisie que
+`write_bash` envoie à un shell déjà ouvert est jugée comme une commande. Dans un
+lot, la trace de chaque appel porte l'issue du lot (`batch_outcome:<verdict>`) :
+un appel autorisé d'un lot refusé n'a pas été exécuté.
+
+Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
 ou jeton.
 

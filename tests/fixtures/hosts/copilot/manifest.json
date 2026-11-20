@@ -1,73 +1,82 @@
 {
   "host": "copilot",
   "host_version": "",
-  "captured_on": "",
+  "captured_on": "2026-11-20",
   "capabilities": {
     "pretooluse_deny": {
       "status": "unverified",
-      "fixtures": [],
-      "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "fixtures": [
+        "copilot/copilot-harness/pretooluse-single.json",
+        "copilot/copilot-harness/pretooluse-batch.json"
+      ],
+      "channel": "journal de session (hook.start.data.input, preToolUse)",
+      "note": "Non vérifié : seules les entrées preToolUse du harness Copilot sont vues (liste toolCalls) ; la sortie du hook n'est pas journalisée et aucun refus n'a été observé, sur aucun des deux harness. Version de l'hôte inconnue."
     },
     "session_end": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     },
     "quota_signal": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     },
     "liveness_probe": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     },
     "subagent_model": {
       "status": "unverified",
-      "fixtures": [],
-      "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "fixtures": [
+        "copilot/copilot-harness/subagent-model.json"
+      ],
+      "channel": "journal de session (assistant.message.model, rattaché par parentToolCallId)",
+      "note": "Non vérifié : le modèle du sous-agent est vu dans le journal du harness Copilot (une partie des messages seulement), mais la version de l'hôte est inconnue."
     },
     "resume_after_quota": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     },
     "bg_workspace_trust": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     },
     "bg_cost_source": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     },
     "bg_wake": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     },
     "local_token_usage": {
       "status": "unverified",
-      "fixtures": [],
-      "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "fixtures": [
+        "copilot/copilot-harness/session-shutdown-usage.json"
+      ],
+      "channel": "journal de session (session.shutdown.modelMetrics)",
+      "note": "Non vérifié : l'usage par modèle est vu dans le journal du harness Copilot, mais la version de l'hôte est inconnue."
     },
     "systemd_user_linger": {
       "status": "unverified",
       "fixtures": [],
       "channel": "",
-      "note": "Non vérifié : aucune capture de GitHub Copilot (VS Code) (Guilhem absent le 2026-10-16, pas de session de l'hôte lancée)."
+      "note": "Non vérifié : rien d'observable dans les journaux lus le 2026-11-20 (journal de session du harness Copilot, sessions de chat du harness Local) ; aucune session de l'hôte lancée pour le capturer."
     }
-  }
+  },
+  "source": "lecture en lecture seule, le 2026-11-20, des journaux locaux d'un poste de développement : journal de session de Copilot dans VS Code (harness Copilot, 2026-05-19..2026-07-13) et sessions de chat de VS Code (harness Local, 2026-04). Aucune session lancée pour l'occasion.",
+  "version_note": "Aucune version d'hôte n'est établie : le journal du harness Copilot porte copilotVersion=\"unknown\", et les journaux de VS Code de la période ont tourné (les plus anciens conservés : Copilot Chat 0.72.0 / VS Code 1.144.0, 2026-11). Sans version, rien n'est vérifié."
 }
