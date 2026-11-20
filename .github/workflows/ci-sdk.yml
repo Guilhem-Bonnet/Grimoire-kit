@@ -201,6 +201,8 @@ jobs:
   test:
     name: "Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    # Sur push main le job disparaît : son check n'est requis que sur une PR.
+    if: github.event_name != 'push'
     # Sans borne, un test qui se bloque sous Windows garde le job six heures
     # (défaut GitHub). Windows tenait 62-93 min tant que chaque `init -y` payait
     # ~43 s de sondes localhost sans réponse (#857) ; borné depuis, la jambe
@@ -211,9 +213,10 @@ jobs:
     env:
       # Ubuntu 3.12 passe par test-shard. Sur une PR, les autres jambes rendent leur check
       # requis sans lancer la suite (le nom du job reste, la protection de main l'exige).
-      # Ubuntu 3.13 (main, nuit, PR de release) passe par test-shard-313 : une seule jambe lourde
-      # tenait ~30 min, soit le goulet de la PR de release.
-      FULL_SUITE: "${{ github.event_name != 'pull_request' }}"
+      # Ubuntu (3.12 et 3.13) passe par test-shard / test-shard-313. Windows et macOS ne passent la suite que
+      # la nuit et à la demande (2026-11-20) : ~55 min de Windows par push sur main occupaient les runners
+      # sans bloquer personne. Sur une PR, les jambes rendent leur check requis sans lancer la suite.
+      FULL_SUITE: "${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}"
     strategy:
       fail-fast: false
       matrix:
