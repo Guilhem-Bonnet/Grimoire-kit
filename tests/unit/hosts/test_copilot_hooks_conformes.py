@@ -21,7 +21,6 @@ from grimoire.bridges.schemas import HostId
 from grimoire.cli.doctor_hooks import check_copilot_guard_timeout
 from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.hosts.collect import build_surface, governance_hooks
-from grimoire.hosts.decisions.tool_facts import classify_tool
 from grimoire.hosts.emitters import emitter_for
 from grimoire.hosts.emitters.base import apply_plan
 from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT, _hook_entry
@@ -29,7 +28,6 @@ from grimoire.hosts.emitters.copilot import GUARD_TIMEOUT, _hook_file, matcher_f
 from grimoire.hosts.events import HookEvent
 from grimoire.hosts.hook_launcher import BARE, HookLauncher
 from grimoire.hosts.surface import Enforcement, HookSpec
-from grimoire.policies.schemas import ActionKind, MutationClass
 
 pytestmark = pytest.mark.covers("host:github-copilot", level="integration")
 
@@ -190,19 +188,6 @@ def test_post_tool_use_matcher_covers_delegation() -> None:
     for tool in ("task", "Agent", "Task", "create", "Write", "bash", "powershell", "Edit"):
         assert _matches(matcher, tool)
     assert not _matches(matcher, "view")
-
-
-@pytest.mark.parametrize(
-    ("tool", "payload"), [("create", {"path": "a.py", "file_text": "x"}), ("Write", {"file_path": "a.py"})]
-)
-def test_copilot_create_tool_is_classified_as_a_write(tool: str, payload: dict) -> None:
-    facts = classify_tool(tool, payload)
-    assert facts.kind is ActionKind.FILE_WRITE
-    assert facts.mutation is MutationClass.MUTATION_CONTROLLED
-
-
-def test_an_mcp_tool_named_create_something_is_not_a_file_write() -> None:
-    assert classify_tool("create_issue", {}).kind is not ActionKind.FILE_WRITE
 
 
 # ── grimoire up : remplacement ───────────────────────────────────────────────

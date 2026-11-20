@@ -45,6 +45,10 @@ _WRITE_MARKERS = (
 #: Comparé au nom entier, il ne capture pas un outil MCP ``create_issue``.
 _WRITE_NAMES = frozenset({"create"})
 _READ_MARKERS = ("read", "cat_file", "view", "open_file", "openfile")
+
+#: Argument qui porte le texte écrit : ``content``/``new_string`` (Claude Code),
+#: ``file_text`` (``create``) et ``new_str`` (``edit``) du harness Copilot (#1280).
+_CONTENT_KEYS = ("content", "new_string", "file_text", "new_str")
 _WEB_MARKERS = ("fetch", "websearch", "web_search", "browser", "navigate", "http")
 
 #: Commands whose blast radius survives the session. Matched case-insensitively
@@ -573,7 +577,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     # call actually mutates it.
     standard_profile_write: str | None = None
     if is_write and any(_targets_standard_profile_file(t) for t in targets):
-        proposed_content = _first_str(payload, "content", "new_string")
+        proposed_content = _first_str(payload, *_CONTENT_KEYS)
         standard_profile_write = _declared_profile(proposed_content) if proposed_content else None
     elif (
         not is_write
@@ -589,7 +593,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
 
     profile_floor_write: str | None = None
     if is_write and any(t.replace("\\", "/").rstrip("/").endswith(_PROFILE_FLOOR_SUFFIX) for t in targets):
-        floor_text = _first_str(payload, "content", "new_string")
+        floor_text = _first_str(payload, *_CONTENT_KEYS)
         floor_match = _FLOOR_FIELD_RE.search(floor_text) if floor_text else None
         profile_floor_write = floor_match.group(1) if floor_match else ""
     elif (
