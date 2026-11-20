@@ -1,4 +1,4 @@
-"""``grimoire memory retract|unretract|tags|show|reads`` — corriger la mémoire sans la perdre (P23, P13).
+"""``grimoire memory retract|unretract|tags|show|reads|prune`` — corriger la mémoire sans la perdre (P23, P13).
 
 Module voisin de :mod:`grimoire.cli.cmd_memory` (au plafond du cliquet de
 lignes), câblé sur ``memory_app`` à l'import par ``cmd_memory_lexical``. Chaque
@@ -12,6 +12,8 @@ journal des écritures (``_grimoire-output/memory-changes.jsonl``).
 * ``tags`` : ajoute, retire ou remplace les étiquettes.
 * ``show`` : lit un souvenir par identifiant, retiré ou non, avec son état.
 * ``reads`` : ce que le journal des lectures dit des derniers jours.
+* ``prune`` : retire en lot ce qui n'est pas une leçon — fiches de clôture
+  recopiées du ledger, entrées de tests/fixtures, doublons exacts (levier 6).
 """
 
 from __future__ import annotations
@@ -148,3 +150,40 @@ def memory_reads(
     console.print(f"{counts.reads} lecture(s) sur {days} jour(s), dont {counts.reads_with_results} avec résultat.")
     for entry_id, n in ranked[:top]:
         console.print(f"  {n:>4}  {entry_id}")
+
+
+@memory_app.command("prune")
+def memory_prune(
+    ctx: typer.Context,
+    apply: Annotated[bool, typer.Option("--apply", help="Retirer pour de bon (sans : liste seulement).")] = False,
+    show: Annotated[int, typer.Option("--show", min=0, help="Candidats affichés en sortie texte.")] = 20,
+) -> None:
+    """Retire ce qui n'est pas une leçon : fiches de clôture recopiées, entrées de tests, doublons exacts.
+
+    Sans --apply, rien n'est écrit : la commande compte et liste. Avec --apply,
+    chaque candidat est retiré par le geste `retract` (plus servi, jamais
+    supprimé, réversible par `memory unretract`). Relancer ne retire rien de
+    plus : un souvenir retiré n'est plus candidat.
+    """
+    from grimoire.memory.lessons import apply_prune, plan_prune
+
+    mgr = cmd_memory._load_manager()
+    plan = plan_prune(mgr.get_all())
+    if apply and plan.candidates:
+        apply_prune(mgr, plan)
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps(plan.to_dict(), indent=2, ensure_ascii=False))
+        return
+    counts = plan.counts()
+    verb = "retiré(s)" if plan.applied else "à retirer"
+    console.print(
+        f"{plan.before} souvenir(s) servis — {len(plan.candidates)} {verb} : "
+        f"{counts['ledger_copy']} fiche(s) de clôture recopiée(s), {counts['fixture']} de test/fixture, "
+        f"{counts['duplicate']} doublon(s) exact(s) — après : {plan.after}."
+    )
+    for candidate in plan.candidates[:show]:
+        console.print(f"  [dim]{candidate.kind:<11}[/dim] {candidate.id}  {candidate.text[:80]}")
+    for entry_id, why in plan.skipped.items():
+        console.print(f"  [yellow]non retiré[/yellow] {entry_id} : {why}")
+    if plan.candidates and not plan.applied:
+        console.print("[dim]Rien n'a été écrit. Relancer avec --apply pour retirer ces souvenirs.[/dim]")

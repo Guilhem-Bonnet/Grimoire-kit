@@ -16,6 +16,9 @@ janitor :
           provider: ""            # fournisseur du registre avec anthropic_base_url : route ses tâches V0/V1
           lean: false             # session allégée : outils de fichiers et Bash seuls, sans MCP ni skills
           model_by_class: false   # une tâche V0 part au palier cheap, le reste au palier du rôle
+          sensitive_route: off    # strong : une tâche qui cite un chemin sensible part sur l'hôte au palier fort
+                                  # (opus), sans route de fournisseur (missions/sensitive_route.py) ; off : inchangé
+          sensitive_paths: []     # motifs sensibles en plus des chemins réservés du merger et de la double relecture
           tier: ""                # cheap | mid | strong (repli quand ni model ni route ne donnent de modèle)
           wip: 1                  # sessions de worker en même temps
           sessions_per_day: 5     # plafond de lancements par jour (UTC)
@@ -85,6 +88,7 @@ from grimoire.missions.dual_review import (
     PROTECTED_GATES,
     SECOND_REVIEWER_TIERS,
 )
+from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_OFF, SENSITIVE_ROUTES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,7 +112,8 @@ _BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
 _WORKER_KEYS = frozenset(
-    {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class"}
+    {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class",
+     "sensitive_route", "sensitive_paths"}
 )
 _REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean"})
 DEFAULT_MAX_CYCLES = 2
@@ -138,12 +143,15 @@ class WorkerRole:
     provider: str = ""
     lean: bool = False
     model_by_class: bool = False
+    sensitive_route: str = SENSITIVE_ROUTE_OFF
+    sensitive_paths: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
             "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode,
             "provider": self.provider, "lean": self.lean, "model_by_class": self.model_by_class,
+            "sensitive_route": self.sensitive_route, "sensitive_paths": list(self.sensitive_paths),
         }
 
 
@@ -297,6 +305,16 @@ def _flag(data: dict[str, Any], key: str, where: str) -> bool:
 def _parse_worker(raw: Any) -> WorkerRole:
     data = _table(raw, "orchestrator.roles.worker", _WORKER_KEYS)
     enabled, model, tier, mode = _session_role(data, "worker")
+    route = _text(data.get("sensitive_route", SENSITIVE_ROUTE_OFF), "orchestrator.roles.worker.sensitive_route")
+    if route not in SENSITIVE_ROUTES:
+        raise _InvalidPolicyError(
+            f"orchestrator.roles.worker.sensitive_route : {route!r} inconnu (admis : {', '.join(SENSITIVE_ROUTES)})"
+        )
+    raw_paths = data.get("sensitive_paths", [])
+    if not isinstance(raw_paths, list) or not all(isinstance(g, str) and g.strip() for g in raw_paths):
+        raise _InvalidPolicyError(
+            f"orchestrator.roles.worker.sensitive_paths doit être une liste de motifs non vides, pas {raw_paths!r}"
+        )
     return WorkerRole(
         enabled=enabled,
         model=model,
@@ -307,6 +325,8 @@ def _parse_worker(raw: Any) -> WorkerRole:
         provider=_text(data.get("provider", ""), "orchestrator.roles.worker.provider"),
         lean=_flag(data, "lean", "orchestrator.roles.worker"),
         model_by_class=_flag(data, "model_by_class", "orchestrator.roles.worker"),
+        sensitive_route=route,
+        sensitive_paths=tuple(g.strip() for g in raw_paths),
     )
 
 

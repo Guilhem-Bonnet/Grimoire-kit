@@ -41,7 +41,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from grimoire.core.standard_generation import normalize_task_id
-from grimoire.core.standard_state import LEDGER_RELPATH, TASK_ENV
+from grimoire.core.standard_state import TASK_ENV, designated_ledger
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.decisions.tool_facts import ToolFacts, command_surface
 from grimoire.missions.lease import ORIGIN_CANCEL, ORIGIN_HAND_BACK, LeaseFile, lease_path, read_lease
@@ -99,15 +99,8 @@ def ledger_root_of(project_root: Path) -> Path:
 
 
 def _designated_ledger(project_root: Path) -> tuple[Path, bool]:
-    """``(ledger, désigné par un marqueur de worktree)`` — voir :func:`ledger_root_of`."""
-    root = project_root.resolve()
-    if (root / ".git").is_file():
-        from grimoire.missions.task_worktree import home_of_worktree
-
-        home = home_of_worktree(root)
-        if home is not None:
-            return home[1], True
-    return root / LEDGER_RELPATH, False
+    """``(ledger, désigné par un marqueur de worktree)`` — :func:`grimoire.core.standard_state.designated_ledger`."""
+    return designated_ledger(project_root)
 
 
 def _lease_holder(hook: HookInput) -> tuple[str, int]:

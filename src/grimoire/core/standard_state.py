@@ -315,6 +315,82 @@ def active_profile_id(project_root: Path, *, write_cache: bool = True) -> str:
 #: module missions tant que le fichier n'existe pas : le chemin des hooks reste
 #: léger sur un projet qui n'a jamais ouvert de tâche.
 LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
+#: Début du problème d'un ledger que le marqueur d'un worktree de tâche désigne sans qu'on puisse le lire
+#: (#1259) : marqueur illisible, ou ledger désigné sans ``events.jsonl``. Les décisions le reconnaissent à ce préfixe.
+DESIGNATED_LEDGER_PROBLEM = "ledger du projet d'origine invérifiable"
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerLocation:
+    """Où lire le Mission Ledger d'une racine de hook (:func:`ledger_location`).
+
+    ``root`` vaut ``None`` quand le ledger désigné est invérifiable : ``problem`` dit pourquoi, et
+    l'appelant n'a *aucun* ledger à lire — surtout pas la copie restée dans le worktree.
+    """
+
+    root: Path | None
+    marked: bool = False
+    problem: str = ""
+
+
+def designated_ledger(project_root: Path) -> tuple[Path, bool]:
+    """``(ledger, désigné par un marqueur)`` : le ledger que :class:`~grimoire.missions.service.TaskService` ouvre.
+
+    Dans un worktree de tâche (W5-02), le marqueur du dossier git désigne le ledger du projet
+    d'origine : claim, renouvellement, rattachement, consignes et questions y sont écrits.
+    Ailleurs, ``<racine>/_grimoire-runtime-output/ledger``. Un marqueur illisible lève
+    (:class:`~grimoire.core.exceptions.GrimoireMissionError`) : jamais de repli sur la copie locale.
+    """
+    root = project_root.resolve()
+    if (root / ".git").is_file():
+        from grimoire.missions.task_worktree import home_of_worktree
+
+        home = home_of_worktree(root)
+        if home is not None:
+            return home[1], True
+    return root / LEDGER_RELPATH, False
+
+
+def board_home(project_root: Path) -> Path:
+    """La racine dont le board du standard fait foi : le projet d'origine dans un worktree de tâche (#1259).
+
+    Le board est une projection du ledger que :meth:`~grimoire.missions.service.TaskService.project_board`
+    écrit au projet d'origine ; la copie suivie par git dans le worktree reste figée à sa base.
+    Les artefacts de preuve, eux, restent lus à la racine du worktree, où la session les écrit.
+    Un marqueur illisible lève, comme :func:`designated_ledger`.
+    """
+    root = project_root.resolve()
+    if (root / ".git").is_file():
+        from grimoire.missions.task_worktree import home_of_worktree
+
+        home = home_of_worktree(root)
+        if home is not None:
+            return home[0]
+    return root
+
+
+def ledger_location(project_root: Path) -> LedgerLocation:
+    """:func:`designated_ledger` sans exception, pour les décisions de hook (#1259).
+
+    Hors worktree de tâche, un ledger absent reste légitime (projet qui n'a jamais ouvert de
+    tâche) : ``root`` est rendu, l'appelant teste ``events.jsonl`` comme avant. Désigné par un
+    marqueur, il ne l'est plus : marqueur illisible ou ledger sans ``events.jsonl`` (projet
+    déplacé, ``git worktree repair``, ledger supprimé) rendent ``root=None`` et le problème.
+    """
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    try:
+        root, marked = designated_ledger(project_root)
+    except GrimoireMissionError as exc:
+        return LedgerLocation(None, True, f"{DESIGNATED_LEDGER_PROBLEM} : marqueur du worktree de tâche illisible ({exc})")
+    if marked and not (root / "events.jsonl").is_file():
+        return LedgerLocation(
+            None,
+            True,
+            f"{DESIGNATED_LEDGER_PROBLEM} : {root / 'events.jsonl'} absent, alors que le marqueur du worktree "
+            "de tâche le désigne (projet déplacé, worktree réparé, ledger supprimé ?)",
+        )
+    return LedgerLocation(root, marked)
 #: Un opérateur ou un agent dit qui il est ; les claims des autres ne comptent plus.
 ACTOR_ENV = "GRIMOIRE_ACTOR"
 TASK_ENV = "GRIMOIRE_TASK_ID"
@@ -460,7 +536,10 @@ def _held_claims_checked(project_root: Path, *, actor: str = "") -> tuple[list[_
     le rejeu ne peut pas lire du tout, est signalé : l'appelant ne doit pas le
     prendre pour « aucune tâche ».
     """
-    events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+    location = ledger_location(project_root)  # #1259 : le ledger du projet d'origine dans un worktree de tâche
+    if location.root is None:
+        return [], location.problem, {}
+    events = location.root / "events.jsonl"
     if not events.is_file():
         return [], _not_a_file(events, f"ledger {LEDGER_RELPATH.as_posix()}/events.jsonl"), {}
     try:
@@ -648,7 +727,12 @@ def resolve_active_task(
             pass
     expired = tuple(c.task_id for c in held if c.expired and c.session_id in ("", session))
 
-    root = project_root.resolve()
+    if ledger_problem.startswith(DESIGNATED_LEDGER_PROBLEM):
+        # #1259 : ledger désigné invérifiable (marqueur illisible, journal absent). Le board n'en est que la
+        # projection, et sans les claims on ne sait plus écarter ceux des autres sessions : aucune carte n'est crue.
+        return ActiveTask("bootstrap", "unreadable", expired=expired, unreadable=ledger_unreadable)
+    # #1259 : le board que TaskService projette au projet d'origine, pas la copie figée du worktree.
+    root = board_home(project_root)
 
     def compute() -> dict[str, Any]:
         board_path = root / TASK_BOARD_RELPATH

@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.92.0",
+ "generated_for": "3.93.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -3597,6 +3597,10 @@
   "d3946adf7164c450a80ceb1623b642fd527c143b881869a81ce257766bf16ac4": {
    "version": "3.4.2",
    "path": "framework/hooks/.pre-commit-config.tpl.yaml"
+  },
+  "d3a44dc2e641c328f38fb9873f3ce361b55b367ea5b09beaf3a515e6095c255b": {
+   "version": "3.92.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "d3be1f7812edd4d4f7a43671da2edcdb2aa9064b58288d4a83602540e4cfbe79": {
    "version": "3.64.0",

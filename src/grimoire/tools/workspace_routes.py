@@ -874,7 +874,9 @@ def _task_action(project_root: Path, task_id: str, action: str, body: dict[str, 
     if action == "claim":
         move = service.claim(task_id, actor, str(body.get("host") or "workspace"))
     elif action == "close":
-        move = service.transition(task_id, TaskState.CLOSED, actor, str(body.get("reason") or ""))
+        move = service.transition(
+            task_id, TaskState.CLOSED, actor, str(body.get("reason") or ""), lesson=str(body.get("lesson") or ""),
+        )
     elif action == "block":
         reason = str(body.get("reason") or "")
         if not reason:

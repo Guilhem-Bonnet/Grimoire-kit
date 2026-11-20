@@ -28,6 +28,7 @@ from grimoire.core.standard_state import active_task_id, suspended_state_writes
 from grimoire.hosts import gemini_wire
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (
+    ADVISORY_PRE_TOOL_DECISIONS,
     DEFAULT_DECISION_BY_EVENT,
     Decision,
     HookInput,
@@ -278,6 +279,9 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
 
 def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, Any]:
     """Render *decision* into the JSON *host_id* understands for this event."""
+    if decision.abstain:
+        # Pas d'avis : rien à rendre, l'hôte poursuit comme sans hook.
+        return {}
     if host_id is HostId.GEMINI_CLI:
         # Gemini's dialect is a top-level `decision`/`reason` and
         # `additionalContext`, not Claude Code's `hookSpecificOutput`.
@@ -292,6 +296,9 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
             specific["permissionDecision"] = mapping.get(decision.outcome, "allow")
             if decision.reason:
                 specific["permissionDecisionReason"] = decision.reason
+            if decision.updated_input is not None and decision.outcome is Outcome.ALLOW:
+                # L'entrée complète : Claude Code remplace ``tool_input``, il ne fusionne pas.
+                specific["updatedInput"] = dict(decision.updated_input)
         elif decision.reason:
             # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
@@ -365,7 +372,12 @@ _LEDGER_LOCK_TIMEOUT_S = 2.0
 
 
 def _record_decision(
-    hook: HookInput, decision: Decision, host_id: HostId, latency_ms: float, started_at: str | None = None
+    hook: HookInput,
+    decision: Decision,
+    host_id: HostId,
+    latency_ms: float,
+    started_at: str | None = None,
+    decision_id: str = "",
 ) -> None:
     """Append what the decision did to the project's trace ledger.
 
@@ -416,7 +428,7 @@ def _record_decision(
             workflow_instance_id="",
             mission_id="",
             task_id=task_id,
-            recipe_id=DEFAULT_DECISION_BY_EVENT.get(hook.event, hook.event.value),
+            recipe_id=decision_id or DEFAULT_DECISION_BY_EVENT.get(hook.event, hook.event.value),
             outcome=TraceOutcome.FAILURE if decision.is_refusal else TraceOutcome.SUCCESS,
             started_at=record_started_at,
             # Quel agent était en jeu, pour que le cockpit puisse répondre à
@@ -429,11 +441,25 @@ def _record_decision(
             tool_calls=tool_calls,
             evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],
             latency_ms=latency_ms,
-            tags=[hook.event.value, verdict, *_refusal_tags(decision), *done_gate_mode_tags(detail.get("done_gate"))],
+            tags=[
+                hook.event.value,
+                verdict,
+                *_refusal_tags(decision),
+                *done_gate_mode_tags(detail.get("done_gate")),
+                *_dispatch_model_tags(detail),
+            ],
             lock_timeout=_LEDGER_LOCK_TIMEOUT_S,
         )
     except Exception:
         return
+
+
+def _dispatch_model_tags(detail: dict[str, Any]) -> list[str]:
+    """``dispatch_model:<modèle>`` et ``dispatch_source:<class|heuristic>`` : le modèle imposé à un sous-agent, relisible au ledger."""
+    model = detail.get("imposed_model")
+    if not model:
+        return []
+    return [f"dispatch_model:{model}", f"dispatch_source:{detail.get('dispatch_source') or 'unknown'}"]
 
 
 def _refusal_tags(decision: Decision) -> list[str]:
@@ -501,7 +527,7 @@ def run_hook(
         decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
     latency_ms = (time.perf_counter() - started) * 1000
     if recognized:
-        _record_decision(hook, decision, host_id, latency_ms, started_at)
+        _record_decision(hook, decision, host_id, latency_ms, started_at, resolved_decision)
         capsule, capsule_error = _persist_capsule(hook, decision)
     else:
         capsule, capsule_error = None, ""
@@ -557,7 +583,9 @@ def main(argv: list[str] | None = None) -> int:
             event_name = nxt
         elif arg == "--project-root":
             root = Path(nxt)
-        elif arg == "--decision":
+        elif arg == "--decision" and decision_id is None:
+            # Première occurrence, comme ``hook_entry._option`` : les deux lectures
+            # doivent désigner la même décision (consultative ou garde).
             decision_id = nxt
 
     from grimoire.hosts.capabilities import resolve_host
@@ -590,6 +618,11 @@ def main(argv: list[str] | None = None) -> int:
         rendered = json.dumps(result, ensure_ascii=False)
     except Exception as exc:
         cause = f"{type(exc).__name__}: {exc}"
+        if decision_id in ADVISORY_PRE_TOOL_DECISIONS:
+            # Décision consultative (imposer un modèle à un sous-agent) : sa panne
+            # laisse passer l'appel tel quel, jamais un refus de garde.
+            sys.stdout.write("{}")
+            return 0
         if host_id is not HostId.GEMINI_CLI:
             if event is not HookEvent.PRE_TOOL_USE:
                 # Événements consultatifs : la panne remonte comme avant (erreur

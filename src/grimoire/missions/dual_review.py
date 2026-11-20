@@ -154,7 +154,7 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/liveness.py", "src/grimoire/missions/manual_review.py", "src/grimoire/missions/pause.py",
     "src/grimoire/missions/provider_failure.py", "src/grimoire/missions/questions.py",
     "src/grimoire/missions/verifiability.py", "src/grimoire/missions/waiting.py",
-    "src/grimoire/missions/worker_provider.py",
+    "src/grimoire/missions/worker_provider.py", "src/grimoire/missions/sensitive_route.py",
     # … hors de missions/ : les flows d'autonomie, la preuve, l'hôte, les schémas de pont, le transcript de session
     "src/grimoire/flows/autonomy.py", "src/grimoire/evidence/service.py", "src/grimoire/hosts/host_version.py",
     "src/grimoire/hosts/sync.py", "src/grimoire/bridges/schemas.py", "src/grimoire/tools/workspace_work.py",

@@ -239,6 +239,9 @@ def register(task_app: typer.Typer) -> None:
         close: Annotated[
             bool, typer.Option("--close/--no-close", help="Fermer la tâche une fois le verdict rangé.")
         ] = True,
+        lesson: Annotated[
+            str, typer.Option("--lesson", help="La leçon à garder en mémoire à la clôture (décision, piège).")
+        ] = "",
         project_root: _PROJECT_ROOT = Path(),
         ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
         evidence_root: Annotated[
@@ -290,7 +293,7 @@ def register(task_app: typer.Typer) -> None:
         if close:
             # La clôture relit la preuve et le reçu là où l'acceptation vient de les écrire : dans le
             # worktree noté, un TaskService posé là retrouve le ledger du projet par son marqueur.
-            ct._transition(ctx, task_id, TaskState.CLOSED, proof_root, ledger_root, actor)
+            ct._transition(ctx, task_id, TaskState.CLOSED, proof_root, ledger_root, actor, lesson=lesson)
 
     @task_app.command("wait")
     def task_wait(
