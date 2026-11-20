@@ -11,8 +11,8 @@
     "grimoire task answer GAO-choisir-base-001 sqlite",
     "grimoire task show GAO-choisir-base-001"
   ],
-  "kit_version": "3.87.0",
-  "recorded_at": "2026-11-13T18:19:51Z",
+  "kit_version": "3.92.0",
+  "recorded_at": "2026-11-20T05:42:54Z",
   "output_sha256": "1ed9923823318aab7921b508a88d6aa335cf9ab99c86dd71ca78ca08ec9a330f",
   "frames": [
     {

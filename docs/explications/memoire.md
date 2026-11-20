@@ -486,6 +486,10 @@ laissent une ligne dans `_grimoire-output/memory-changes.jsonl` :
   la relecture ne confirme pas est défaite puis signalée.
 - **Remplacer** (`supersede`) : inchangé, avec une raison optionnelle.
 - **Réétiqueter** (`grimoire memory tags`, outil `grimoire_memory_update_tags`).
+- **Faire le ménage** (`grimoire memory prune`) : retire en lot, par le même
+  geste `retract`, ce qui n'est pas une leçon — fiches de clôture recopiées du
+  ledger, entrées de tests ou de fixtures, doublons exacts. Liste sans écrire
+  par défaut, retire sur `--apply`, ne retire rien de plus au second passage.
 
 Aucun geste n'agit sur le souvenir d'un autre projet (`metadata.project_name`
 différent). **Limite** : un souvenir écrit avant la provenance, sans

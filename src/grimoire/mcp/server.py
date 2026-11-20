@@ -1006,7 +1006,7 @@ def task_update(
         actor: Who acts (default: "mcp-agent").
         project_path: Path to project root (default: current directory).
         ledger_root: Mission Ledger directory, relative to the project root.
-        text: The comment or directive for "comment".
+        text: The comment/directive for "comment"; for "close"/"block"/"move", the lesson kept in memory.
         kind: "comment" (informs) or "directive" (steers) for "comment".
         directive_id: The directive to acknowledge for "ack" (as listed by task_show / task_recall).
         force: For "cancel": cancel even if another session holds the task.
@@ -1041,7 +1041,7 @@ def task_update(
     else:
         target = TaskState.CLOSED
     try:
-        move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason)
+        move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason, lesson=text)
         return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)

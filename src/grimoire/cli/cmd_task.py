@@ -144,7 +144,7 @@ def _refuse(ctx: typer.Context, refused: Any) -> None:
 
 def _transition(
     ctx: typer.Context, task_id: str, target: Any, project_root: Path, ledger_root: Path,
-    actor: str, reason: str = "", *, claim: Any = None,
+    actor: str, reason: str = "", *, claim: Any = None, lesson: str = "",
 ) -> None:
     from grimoire.core.exceptions import GrimoireError
     from grimoire.missions.service import TaskRefusedError
@@ -152,7 +152,7 @@ def _transition(
     service = _service(project_root, ledger_root)
     _require_task(service, task_id)
     try:
-        move = service.transition(task_id, target, actor, reason, claim=claim)
+        move = service.transition(task_id, target, actor, reason, claim=claim, lesson=lesson)
     except TaskRefusedError as refused:
         _refuse(ctx, refused)
     except GrimoireError as exc:
@@ -542,12 +542,19 @@ def task_fence(
     console.print(f"[green]OK[/green] fence posée (epoch {claim.lease_epoch}) : {hook}")
 
 
+#: Levier 6 : seule la leçon va en mémoire — le titre, les critères et l'historique sont déjà au ledger.
+_LESSON = Annotated[
+    str, typer.Option("--lesson", help="La leçon à garder en mémoire : décision prise, piège rencontré (sinon rien).")
+]
+
+
 @task_app.command("move")
 def task_move(
     ctx: typer.Context,
     task_id: Annotated[str, typer.Argument()],
     to: Annotated[str, typer.Option("--to", help="État ledger visé (ready, running, needs_verification…).")],
     reason: Annotated[str, typer.Option("--reason", help="Pourquoi.")] = "",
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -561,7 +568,7 @@ def task_move(
         console.print(f"[red]✗[/red] État inconnu : {to}")
         console.print("[dim]états : " + ", ".join(s.value for s in TARGETABLE_TASK_STATES) + "[/dim]")
         raise typer.Exit(1) from None
-    _transition(ctx, task_id, target, project_root, ledger_root, actor, reason)
+    _transition(ctx, task_id, target, project_root, ledger_root, actor, reason, lesson=lesson)
 
 
 @task_app.command("block")
@@ -569,6 +576,7 @@ def task_block(
     ctx: typer.Context,
     task_id: Annotated[str, typer.Argument()],
     reason: Annotated[str, typer.Option("--reason", help="Ce qui bloque.")],
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -576,13 +584,14 @@ def task_block(
     """Bloque une tâche en disant pourquoi."""
     from grimoire.missions.schemas import TaskState
 
-    _transition(ctx, task_id, TaskState.BLOCKED, project_root, ledger_root, actor, reason)
+    _transition(ctx, task_id, TaskState.BLOCKED, project_root, ledger_root, actor, reason, lesson=lesson)
 
 
 @task_app.command("close")
 def task_close(
     ctx: typer.Context,
     task_id: Annotated[str, typer.Argument()],
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
@@ -592,10 +601,13 @@ def task_close(
     Le gate `review → accepted` exige un verdict de vérification accepté : sans
     lui, la fermeture est refusée. C'est la seule garantie qui empêche un board
     entièrement vert de ne rien prouver.
+
+    Sans `--lesson`, rien n'est écrit en mémoire : le ledger garde déjà le titre,
+    les critères et l'historique. La leçon, c'est ce qu'il ne sait pas.
     """
     from grimoire.missions.schemas import TaskState
 
-    _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor)
+    _transition(ctx, task_id, TaskState.CLOSED, project_root, ledger_root, actor, lesson=lesson)
 
 
 def _emit_note(ctx: typer.Context, note: Any) -> None:
@@ -697,12 +709,14 @@ def task_cancel(
     task_id: Annotated[str, typer.Argument()],
     reason: Annotated[str, typer.Option("--reason", help="Pourquoi la tâche s'arrête (obligatoire).")],
     force: Annotated[bool, typer.Option("--force", help="Annuler même si une autre session la tient.")] = False,
+    lesson: _LESSON = "",
     project_root: _PROJECT_ROOT = Path(),
     ledger_root: _LEDGER_ROOT = _DEFAULT_LEDGER,
     actor: _ACTOR = "cli",
 ) -> None:
     """Annule une tâche avec sa raison ; tenue par une autre session, elle exige --force."""
-    _steer(ctx, project_root, ledger_root, task_id, lambda s: s.cancel(task_id, reason, actor, force=force))
+    _steer(ctx, project_root, ledger_root, task_id,
+           lambda s: s.cancel(task_id, reason, actor, force=force, lesson=lesson))
 
 
 @task_app.command("ack")
