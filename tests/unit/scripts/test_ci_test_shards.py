@@ -141,7 +141,7 @@ def test_l_agregateur_porte_le_check_requis_et_refuse_un_job_non_vert() -> None:
 
     assert aggregate["name"] == "Tests (Python 3.12, ubuntu-latest)"
     assert aggregate["if"] == "always()"
-    assert aggregate["needs"] == ["test-shard"]
+    assert set(aggregate["needs"]) == {"test-shard", "changes"}
     first = aggregate["steps"][0]
     assert "needs.test-shard.result" in str(first["env"]) and 'success' in str(first["run"])
     assert any("--fail-under=75" in str(s.get("run", "")) for s in aggregate["steps"])
@@ -156,3 +156,45 @@ def test_une_part_passe_les_memes_options_que_les_autres_systemes() -> None:
         assert option in shard_run
     assert "-x" not in shard_run.split()
     assert "--cov-fail-under=0" in shard_run  # le plancher se juge sur la couverture recombinée
+
+
+def test_le_sous_ensemble_documentaire_ne_garde_que_les_tests_qui_citent_un_document(tmp_path: Path) -> None:
+    root = tmp_path
+    for name, body in {
+        "tests/test_agentic_standard.py": "x = 1\n",
+        "tests/unit/test_lit_docs.py": "P = 'docs/guide.md'\n",
+        "tests/unit/test_lit_readme.py": "P = 'README.md'\n",
+        "tests/unit/test_pur.py": "def test_ok():\n    assert 1\n",
+    }.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(body, encoding="utf-8")
+    module = _module()
+    assert module.docs_subset(root) == ["tests/unit/test_lit_docs.py", "tests/unit/test_lit_readme.py"]
+    parts = module.shards(root, 2, docs_only=True)
+    assert sorted(n for part in parts for n in part) == module.docs_subset(root)
+
+
+def test_le_sous_ensemble_documentaire_du_depot_inclut_les_gardes_de_documentation() -> None:
+    subset = set(_module().docs_subset(_REPO))
+    assert {"tests/unit/scripts/test_repo_gates.py", "tests/unit/test_doc_reference.py"} <= subset
+    framework = _module().docs_subset(_REPO, "framework")
+    assert framework and all(n.startswith("tests/test_") for n in framework)
+    assert "tests/test_background_tasks.py" not in framework
+
+
+def test_shard_sans_of_est_refuse() -> None:
+    done = subprocess.run([sys.executable, str(_SCRIPT), "--shard", "1"], capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode != 0
+
+
+def test_une_pr_documentaire_garde_les_checks_requis_et_reduit_les_parts() -> None:
+    jobs = _jobs()
+    assert jobs["test-shard"]["needs"] == ["changes"]
+    assert "--docs-subset" in jobs["test-shard"]["env"]["DOCS_SUBSET"]
+    assert "$DOCS_SUBSET" in next(str(s["run"]) for s in jobs["test-shard"]["steps"] if "ci-test-shards.py" in str(s.get("run", "")))
+    # Le plancher de couverture ne se juge que sur la suite complète.
+    combine = next(s for s in jobs["test-aggregate"]["steps"] if s.get("name") == "Combine coverage")
+    assert combine["if"] == "env.FULL == 'true'"
+    # Neo4j sauté ne saute pas le build (check requis « Build package »).
+    assert jobs["neo4j-service"]["if"] == "needs.changes.outputs.full == 'true'"
+    assert "!cancelled()" in jobs["build"]["if"] and "failure" in jobs["build"]["if"]

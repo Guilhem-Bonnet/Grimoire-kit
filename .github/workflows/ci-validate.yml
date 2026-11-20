@@ -27,6 +27,30 @@ permissions:
   contents: read
 
 jobs:
+  # Même décision que ci-sdk.yml (scripts/ci-scope.py) : une PR purement
+  # documentaire ne lance des tests du framework que ceux qui lisent un document.
+  changes:
+    name: "Périmètre de la PR"
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 2
+
+      - name: Décider
+        id: scope
+        shell: bash
+        env:
+          ALWAYS_FULL: "${{ github.event_name != 'pull_request' || startsWith(github.event.pull_request.title, 'chore: release') }}"
+        run: |
+          if [ "$ALWAYS_FULL" = "true" ]; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/ci-scope.py --base HEAD^1 --head HEAD | tee -a "$GITHUB_OUTPUT"
+          fi
+
   # ── 1. Syntaxe bash ─────────────────────────────────────────────────────────
   bash-syntax:
     name: "Bash syntax check"
@@ -184,7 +208,7 @@ jobs:
     # par la CI. Un outil livré sur les deux plateformes se teste sur les deux.
     name: "Framework Tools Tests (pytest, ${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
-    needs: bash-syntax
+    needs: [bash-syntax, changes]
     # Un job qui pend consomme un runner jusqu'à la limite de six heures sans
     # rien apprendre. Celui-ci a tenu quarante minutes sur une invite
     # interactive de `grimoire-init.sh`, quand ubuntu finissait en secondes :
@@ -195,6 +219,8 @@ jobs:
       # Sur une PR, Windows rend son check requis sans lancer la suite (~14 min), sauf
       # pour une release : dernier passage avant la publication.
       FULL_SUITE: "${{ github.event_name != 'pull_request' || matrix.os == 'ubuntu-latest' || startsWith(github.event.pull_request.title, 'chore: release') }}"
+      # PR purement documentaire : la jambe ubuntu ne lance que les tests qui citent un document.
+      DOCS_SUBSET: "${{ needs.changes.outputs.full != 'true' && '--docs-subset' || '' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -245,7 +271,12 @@ jobs:
           # d'encodage en cache le suivant, et un `-x` transforme la remise en
           # état en une boucle d'un échec par cycle de CI. Une exécution doit
           # rendre la liste complète de ce qu'il reste à traiter.
-          python -m pytest tests/test_*.py -q --tb=short --maxfail=20 --durations=25 \
+          if [ -n "$DOCS_SUBSET" ]; then
+            mapfile -t TARGETS < <(python scripts/ci-test-shards.py --suite framework --docs-subset)
+          else
+            TARGETS=(tests/test_*.py)
+          fi
+          python -m pytest "${TARGETS[@]}" -q --tb=short --maxfail=20 --durations=25 \
             --ignore=tests/test_background_tasks.py \
             2>&1 | tee framework-test-output.txt || rc=$?
           {

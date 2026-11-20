@@ -5,6 +5,20 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Hors checks requis : une PR qui ne touche que de la prose n'a rien à analyser.
+    # Même liste que scripts/ci-scope.py (DOC_ONLY_PATTERNS) ; push et la passe
+    # hebdomadaire analysent tout.
+    paths-ignore:
+      - "docs/**"
+      - "changelog.d/**"
+      - "README.md"
+      - "README.fr.md"
+      - "CONTRIBUTING.md"
+      - "ARCHITECTURE.md"
+      - "CODE_OF_CONDUCT.md"
+      - "SECURITY.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
   schedule:
     - cron: "0 6 * * 0" # Weekly Sunday 06:00 UTC
 
