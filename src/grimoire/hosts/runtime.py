@@ -357,6 +357,13 @@ _RECORDED_EVENTS = {
 }
 
 
+#: Attente maximale (s) du verrou du journal de traces depuis un hook. La trace
+#: est best-effort, la réponse à l'hôte ne l'est pas : avec le délai par défaut
+#: de 30 s, des hooks concurrents s'empilaient derrière le verrou et la garde
+#: ``PreToolUse`` en échec fermé dépassait son ``timeout`` (refus de l'hôte).
+_LEDGER_LOCK_TIMEOUT_S = 2.0
+
+
 def _record_decision(
     hook: HookInput, decision: Decision, host_id: HostId, latency_ms: float, started_at: str | None = None
 ) -> None:
@@ -423,6 +430,7 @@ def _record_decision(
             evidence_refs=[f"_grimoire-output/evidence/{task_id}"] if task_id else [],
             latency_ms=latency_ms,
             tags=[hook.event.value, verdict, *_refusal_tags(decision), *done_gate_mode_tags(detail.get("done_gate"))],
+            lock_timeout=_LEDGER_LOCK_TIMEOUT_S,
         )
     except Exception:
         return
