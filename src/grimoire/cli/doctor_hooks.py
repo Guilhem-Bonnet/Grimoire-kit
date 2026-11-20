@@ -111,6 +111,57 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
     )]
 
 
+def check_guard_timeout(target: Path) -> list[EnvCheck]:
+    """Une garde Claude Code en échec fermé a-t-elle un délai tenable sous charge ?
+
+    Avec ``"onFailure": "block"``, un dépassement du ``timeout`` (secondes)
+    refuse l'outil : un délai court, celui des projets installés en 3.92.0
+    (10 s), refuse des commandes anodines sur une machine chargée. Rien à dire
+    sans garde en échec fermé.
+    """
+    from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT
+
+    settings = target / ".claude" / "settings.json"
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    short: list[str] = []
+    guarded = 0
+    for entry in entries if isinstance(entries, list) else []:
+        inner = entry.get("hooks") if isinstance(entry, dict) else None
+        for spec in inner if isinstance(inner, list) else []:
+            if not isinstance(spec, dict) or spec.get("onFailure") != "block":
+                continue
+            if not _launches_grimoire_hook(str(spec.get("command") or "")):
+                continue
+            guarded += 1
+            timeout = spec.get("timeout")
+            if isinstance(timeout, int | float) and timeout < FAIL_CLOSED_TIMEOUT:
+                short.append(f"{timeout:g} s")
+    if not guarded:
+        return []
+    if short:
+        return [EnvCheck(
+            "hook_timeout",
+            passed=False,
+            level="warn",
+            detail=(
+                f".claude/settings.json: PreToolUse guard fails closed with timeout {', '.join(short)} "
+                f"(< {FAIL_CLOSED_TIMEOUT} s) — a slow answer under load is refused by Claude Code"
+            ),
+            remedy="run `grimoire up` to re-emit the guard with its current timeout",
+        )]
+    return [EnvCheck(
+        "hook_timeout",
+        passed=True,
+        level="ok",
+        detail=f"fail-closed PreToolUse guard timeout >= {FAIL_CLOSED_TIMEOUT} s",
+    )]
+
+
 def _unresolvable_hooks(target: Path, unit_path: str) -> list[str]:
     """Les hooks utilisateur/projet dont le programme ne se résout pas dans *unit_path*.
 

@@ -157,6 +157,63 @@ def test_the_claude_emitter_makes_only_the_pretooluse_guard_fail_closed(governed
                     assert "onFailure" not in handler, f"{event} : {json.dumps(handler)}"
 
 
+def test_the_fail_closed_guard_gets_a_timeout_that_holds_under_load(governed: Path) -> None:
+    """Un dépassement vaut refus : 10 s refusaient un ``ls`` sur une machine chargée (3.92.0).
+
+    Le ``timeout`` de Claude Code est en secondes ; les hooks consultatifs gardent le leur.
+    """
+    from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT
+
+    assert FAIL_CLOSED_TIMEOUT == 30
+    hooks, _ = _claude_hooks(governed)
+    guards = [h for entry in hooks["PreToolUse"] for h in entry["hooks"]]
+    assert guards
+    assert all(h["timeout"] == FAIL_CLOSED_TIMEOUT for h in guards), json.dumps(guards)
+    advisory = [h for entry in hooks["UserPromptSubmit"] for h in entry["hooks"]]
+    assert all(h["timeout"] == 10 for h in advisory), json.dumps(advisory)
+
+
+def test_an_open_guard_keeps_its_declared_timeout(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sans ``onFailure: block`` un dépassement laisse passer : rien à rallonger."""
+    monkeypatch.setattr("grimoire.hosts.emitters.claude_code.resolve_hook_launcher", lambda _root: UNRESOLVED)
+    hooks, _ = _claude_hooks(governed)
+    assert all(h["timeout"] == 10 for entry in hooks["PreToolUse"] for h in entry["hooks"])
+
+
+def _settings_with_guard(root: Path, timeout: int) -> None:
+    settings = root / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    handler = {
+        "type": "command",
+        "command": "grimoire-hook --host claude --event PreToolUse",
+        "timeout": timeout,
+        "onFailure": "block",
+    }
+    settings.write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [handler]}]}}), encoding="utf-8"
+    )
+
+
+def test_doctor_warns_about_a_short_fail_closed_timeout(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_hooks import check_guard_timeout
+
+    _settings_with_guard(tmp_path, 10)
+    (check,) = check_guard_timeout(tmp_path)
+    assert (check.name, check.passed, check.level) == ("hook_timeout", False, "warn")
+    assert "10 s" in check.detail
+    assert "grimoire up" in check.remedy
+
+    _settings_with_guard(tmp_path, 30)
+    (check,) = check_guard_timeout(tmp_path)
+    assert check.passed
+
+
+def test_doctor_says_nothing_without_a_fail_closed_guard(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_hooks import check_guard_timeout
+
+    assert check_guard_timeout(tmp_path) == []
+
+
 def test_an_unresolved_launcher_keeps_the_guard_open_and_says_so(
     governed: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
