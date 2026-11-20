@@ -84,6 +84,28 @@ class FakeManager:
         return self.entries.pop(entry_id, None) is not None
 
 
+def _services_fixes(**_kw: Any) -> dict[str, Any]:
+    """Sondes mémoire figées : Qdrant serveur seul joignable, rien d'autre.
+
+    Sans cela, ``memory.compose`` sonde la vraie machine (ports TCP locaux, extras
+    installés, moteur d'embedding) : le bloc ``memory:`` visé, et donc l'effet de
+    l'étape, dépendait de l'hôte et de sa charge.
+    """
+    from grimoire.tools.memory_setup import ServiceProbe
+
+    ids = ("weaviate", "qdrant", "neo4j", "redis", "ollama")
+    return {
+        i: ServiceProbe(id=i, url=f"http://127.0.0.1:{i}", reachable=(i == "qdrant"), extra=i, extra_installed=True)
+        for i in ids
+    }
+
+
+def _plan_deterministe(project_root: Path, *, profile: str = "complet") -> Any:
+    from grimoire.tools import memory_setup
+
+    return memory_setup.build_memory_plan(project_root, profile=profile, services=_services_fixes())
+
+
 def _docker_muet(_argv: list[str]) -> tuple[int, str, str]:
     return 1, "", "Cannot connect to the Docker daemon"
 
@@ -103,6 +125,7 @@ def _env(manager: FakeManager | None = None, doctor: dict[str, Any] | None = Non
         sessions=lambda _r: [],
         memory_dir=lambda: Path("/nonexistent"),
         now=lambda: NOW,
+        build_memory_plan=_plan_deterministe,
     )
     view = doctor or {"ok": True, "code": 0, "timed_out": False, "lines": ["✓ tout va bien"]}
     mgr = manager or FakeManager()
