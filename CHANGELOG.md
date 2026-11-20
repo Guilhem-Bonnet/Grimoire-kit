@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.94.0] - 2026-11-20
+
+- feat(hosts): contrat GitHub Copilot relevé sur des traces réelles des deux harness de VS Code (fixtures rédigées) ; les hooks lisent la forme camelCase du harness Copilot (`toolCalls`, `toolName`/`toolArgs`, `toolResult`, `userPromptSubmitted`, `agentStop`) et `copilot_wire.detect_dialect` dit ce que la forme d'une charge permet d'affirmer ; aucune capacité n'est déclarée vérifiée, faute de version d'hôte et de refus observé (#1280) (#1283)
+- fix(hosts): la garde avant outil ne jugeait pas les appels groupés de Copilot ; elle juge désormais chaque appel d'un lot et rend le verdict le plus restrictif, refuse un appel qu'elle ne sait pas lire, et n'autorise jamais un `PreToolUse` sans nom d'outil exploitable (#1280) (#1283)
+- fix(hosts): charges ambiguës refusées par la garde avant outil : une charge Copilot qui décrit un appel d'outil de deux façons, ou dont un champ d'arguments est nul ou doublé, est refusée ; chaque appel inspecté est jugé, même seul ; la saisie envoyée par `write_bash` à un shell ouvert est jugée comme une commande ; la trace de chaque appel d'un lot porte l'issue du lot (#1280) (#1283)
+- feat(hosts): les hooks Copilot suivent le format du harness « Copilot » (`version: 1`, `bash`/`powershell`, `timeoutSec`) et la garde PreToolUse porte un `matcher` sur les outils intégrés qui écrivent, exécutent ou lisent un fichier, plus une entrée qui rattrape tout outil non intégré (MCP) ; délai de la garde porté à 30 s, et `grimoire doctor` (contrôle `hook_timeout_copilot`) rappelle que Copilot laisse passer un appel quand un hook dépasse son délai (#1280) (#1282)
+
 ## [3.93.1] - 2026-11-20
 
 - fix(hosts): la garde `PreToolUse` en échec fermé ne refuse plus un `ls` sur une machine chargée — délai émis porté de 10 à 30 s pour Claude Code, attente du verrou du journal de traces bornée à 2 s depuis un hook (la trace est alors perdue, la réponse non), identifiant de trace compté sans relire ni reconstruire tout le journal (5 s sur un journal de 88 000 lignes), registre des missions chargé à l'usage (142 modules au lieu de 166 au démarrage) ; `grimoire doctor` signale une garde en échec fermé dont le délai est inférieur à 30 s (contrôle `hook_timeout`, remède `grimoire up`) (#1276)
