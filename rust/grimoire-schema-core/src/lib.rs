@@ -268,6 +268,7 @@ const KNOWN_TOP_KEYS: &[&str] = &[
     "installed_archetypes",
     "proposals",
     "source",
+    "cockpit",
 ];
 const VALID_HOST_ALIASES: &[&str] = &["claude", "copilot", "codex", "cursor", "gemini", "opencode"];
 const KNOWN_HOSTS_KEYS: &[&str] = &["enabled", "preserve"];
