@@ -10,6 +10,18 @@ on:
       - "tests/**"
       - "grimoire-init.sh"
       - ".github/workflows/ci-validate.yml"
+      # Chemins qu'une PR documentaire ne paie pas en entier (scripts/ci-scope.py) :
+      # main rejoue derrière elle les tests du framework qui lisent un document.
+      - "docs/**"
+      - "changelog.d/**"
+      - "README.md"
+      - "README.fr.md"
+      - "CONTRIBUTING.md"
+      - "ARCHITECTURE.md"
+      - "CODE_OF_CONDUCT.md"
+      - "SECURITY.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
   pull_request:
     branches: [main]
     # `edited` : un titre de PR de release décide si Windows tourne.
@@ -220,7 +232,7 @@ jobs:
       # pour une release : dernier passage avant la publication.
       FULL_SUITE: "${{ github.event_name != 'pull_request' || matrix.os == 'ubuntu-latest' || startsWith(github.event.pull_request.title, 'chore: release') }}"
       # PR purement documentaire : la jambe ubuntu ne lance que les tests qui citent un document.
-      DOCS_SUBSET: "${{ needs.changes.outputs.full != 'true' && '--docs-subset' || '' }}"
+      DOCS_SUBSET: "${{ needs.changes.outputs.full == 'false' && '--docs-subset' || '' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -272,7 +284,11 @@ jobs:
           # état en une boucle d'un échec par cycle de CI. Une exécution doit
           # rendre la liste complète de ce qu'il reste à traiter.
           if [ -n "$DOCS_SUBSET" ]; then
-            mapfile -t TARGETS < <(python scripts/ci-test-shards.py --suite framework --docs-subset)
+            # Capture sous `set -e` : un script en échec fait échouer le job ; une liste vide aussi
+            # (pytest lancerait alors tout `testpaths`).
+            LIST="$(python scripts/ci-test-shards.py --suite framework --docs-subset)"
+            test -n "$LIST"
+            mapfile -t TARGETS <<< "$LIST"
           else
             TARGETS=(tests/test_*.py)
           fi

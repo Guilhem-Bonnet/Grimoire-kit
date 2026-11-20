@@ -191,10 +191,14 @@ def test_une_pr_documentaire_garde_les_checks_requis_et_reduit_les_parts() -> No
     jobs = _jobs()
     assert jobs["test-shard"]["needs"] == ["changes"]
     assert "--docs-subset" in jobs["test-shard"]["env"]["DOCS_SUBSET"]
+    shard_run = next(str(s["run"]) for s in jobs["test-shard"]["steps"] if "ci-test-shards.py" in str(s.get("run", "")))
+    assert "< <(" not in shard_run, "une substitution de processus avale le code de sortie du script"
+    assert 'LIST="$(python scripts/ci-test-shards.py' in shard_run and 'if [ -n "$DOCS_SUBSET" ]' in shard_run
     assert "$DOCS_SUBSET" in next(str(s["run"]) for s in jobs["test-shard"]["steps"] if "ci-test-shards.py" in str(s.get("run", "")))
     # Le plancher de couverture ne se juge que sur la suite complète.
     combine = next(s for s in jobs["test-aggregate"]["steps"] if s.get("name") == "Combine coverage")
-    assert combine["if"] == "env.FULL == 'true'"
+    assert combine["if"] == "env.FULL != 'false'", "échec fermé : seule une décision explicite réduit"
     # Neo4j sauté ne saute pas le build (check requis « Build package »).
-    assert jobs["neo4j-service"]["if"] == "needs.changes.outputs.full == 'true'"
+    assert jobs["neo4j-service"]["if"] == "needs.changes.outputs.full != 'false'"
+    assert "full == 'false'" in jobs["test-shard"]["env"]["DOCS_SUBSET"]
     assert "!cancelled()" in jobs["build"]["if"] and "failure" in jobs["build"]["if"]

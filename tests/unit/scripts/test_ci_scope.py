@@ -93,6 +93,45 @@ def test_diff_reel_sur_un_depot_jetable(tmp_path: Path) -> None:
     assert scope() == "full=true"
 
 
+def test_un_renommage_de_src_vers_docs_rend_la_ci_complete(tmp_path: Path) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=tmp_path, check=True, capture_output=True
+        )
+
+    git("init", "-q")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "mod.py").write_text("".join(f"ligne_{i} = {i}\n" for i in range(40)), encoding="utf-8")
+    git("add", "src/mod.py")
+    git("commit", "-q", "-m", "base")
+    (tmp_path / "docs").mkdir()
+    git("mv", "src/mod.py", "docs/mod.py")
+    git("commit", "-q", "-m", "déplacement")
+    done = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--base", "HEAD^1", "--head", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=tmp_path,
+        check=True,
+    )
+    assert done.stdout.strip() == "full=true", done.stderr
+
+
+@pytest.mark.parametrize("name", ["ci-sdk.yml", "ci-validate.yml"])
+def test_main_rejoue_tout_derriere_une_pr_documentaire(name: str) -> None:
+    """Le filet d'une PR documentaire réduite est le push sur main : ses chemins doivent le déclencher."""
+    triggers = _workflow(name).get("on") or _workflow(name)[True]
+    push = {p.replace("/**", "/*") for p in triggers["push"]["paths"]}
+    assert set(_module().DOC_ONLY_PATTERNS) <= push, set(_module().DOC_ONLY_PATTERNS) - push
+
+
+@pytest.mark.parametrize("name", ["ci-sdk.yml", "ci-validate.yml"])
+def test_seule_une_decision_explicite_reduit_la_ci(name: str) -> None:
+    text = (_WORKFLOWS / name).read_text(encoding="utf-8")
+    assert "outputs.full != 'true'" not in text and "outputs.full == 'false'" in text
+
+
 @pytest.mark.parametrize("name", ["ci-sdk.yml", "ci-validate.yml"])
 def test_le_job_de_perimetre_ne_reduit_jamais_main_ni_une_release(name: str) -> None:
     job = _workflow(name)["jobs"]["changes"]

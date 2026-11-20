@@ -54,10 +54,14 @@ def needs_full_ci(paths: Iterable[str]) -> bool:
 
 
 def changed_files(base: str, head: str) -> list[str] | None:
-    """Fichiers modifiés entre deux révisions, ``None`` si git échoue."""
+    """Fichiers modifiés entre deux révisions, ``None`` si git échoue.
+
+    ``--no-renames`` : un renommage détecté n'afficherait que sa destination, et
+    déplacer ``src/x.py`` vers ``docs/`` passerait pour une PR documentaire.
+    """
     try:
         done = subprocess.run(
-            ["git", "diff", "--name-only", base, head],
+            ["git", "diff", "--name-only", "--no-renames", base, head],
             capture_output=True,
             text=True,
             encoding="utf-8",
