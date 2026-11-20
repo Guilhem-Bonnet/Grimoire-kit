@@ -150,6 +150,13 @@ qu'elle ne sait pas lire (nom absent, arguments illisibles) est refusé, et un
 l'hôte. Une réécriture d'arguments ne s'applique pas à un appel isolé d'un lot :
 la garde demande alors la décision à l'utilisateur.
 
+Une charge ambiguë est refusée : celle qui décrit l'appel à la fois en camelCase
+(`toolCalls`, `toolName`/`toolArgs`) et sous une autre forme, ou dont un appel
+porte deux champs de nom ou d'arguments, ou des arguments nuls. La saisie que
+`write_bash` envoie à un shell déjà ouvert est jugée comme une commande. Dans un
+lot, la trace de chaque appel porte l'issue du lot (`batch_outcome:<verdict>`) :
+un appel autorisé d'un lot refusé n'a pas été exécuté.
+
 Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
 ou jeton.
