@@ -31,6 +31,12 @@ remplace sans fusionner) avec ``permissionDecision: allow`` ; l'agent principal
 en est averti par ``additionalContext`` et le journal des traces le note
 (étiquette ``dispatch_model:<modèle>``).
 
+GitHub Copilot (#1280, P1-4) : mêmes règles sur ``task``, ``runSubagent`` et
+``Agent``/``Task`` ; le palier n'est réécrit que si le projet nomme le modèle
+Copilot correspondant (``dispatch.copilot_models``), sinon il est seulement dit
+à l'agent. La décision y est marquée consultative (``detail["advisory"]``) : le
+rendu Copilot n'affirme aucune permission (voir ``runtime``).
+
 Défensive par construction : le hook est consultatif (sans ``onFailure:
 block``), et toute exception ici rend une abstention — l'appel ``Agent`` passe
 tel quel. Un bug de cette décision ne doit jamais bloquer une délégation.
@@ -49,7 +55,28 @@ from grimoire.hosts.decisions._shared import Decision, HookInput
 DECISION_ID = "grimoire.dispatch-model"
 
 #: L'outil de délégation de Claude Code : ``Agent`` aujourd'hui, ``Task`` avant 2.1.63.
-DELEGATION_TOOLS = frozenset({"Agent", "Task"})
+CLAUDE_DELEGATION_TOOLS = frozenset({"Agent", "Task"})
+
+#: Les outils de délégation de GitHub Copilot (#1280, P1-4) : ``task`` (harness
+#: Copilot, rapporté ``Agent`` — ``Task`` accepté — dans une charge PascalCase,
+#: référence GitHub) et ``runSubagent`` (harness Local, référence VS Code des
+#: sous-agents : un ``model`` explicite y prime sur celui de l'agent).
+COPILOT_DELEGATION_TOOLS = frozenset({"task", "runSubagent", *CLAUDE_DELEGATION_TOOLS})
+
+#: Tous les noms de délégation reconnus, quel que soit l'hôte.
+DELEGATION_TOOLS = COPILOT_DELEGATION_TOOLS
+
+#: Où l'appel nomme l'agent délégué : ``subagent_type`` (Claude Code) ; les autres
+#: clés sont des candidates pour Copilot, dont le schéma des arguments n'est pas
+#: documenté (« Tool names and input schemas differ between harnesses »).
+_SUBAGENT_KEYS = ("subagent_type", "agent_type", "agentName", "agent_name", "agent")
+
+#: Alias de palier de la politique (ceux de Claude Code) -> clé de réglage Copilot.
+#: Copilot nomme ses modèles autrement (``claude-haiku-4.5`` dans son journal de
+#: session, fixture ``copilot-harness/subagent-model.json``) et ne documente pas les
+#: valeurs que ``task`` accepte : aucune correspondance n'est inventée. Le projet la
+#: déclare sous ``dispatch.copilot_models`` ; sans elle, rien n'est réécrit.
+COPILOT_MODELS_KEY = "copilot_models"
 
 #: Le seul ``subagent_type`` qui hérite toujours du modèle parent.
 FORK = "fork"
@@ -224,12 +251,36 @@ def impose_model_enabled(project_root: Path) -> bool:
     return str(value).strip().lower() in _ON_VALUES
 
 
-def _persona_declares_model(project_root: Path, subagent_type: str) -> bool:
+def copilot_model_for(project_root: Path, tier: str) -> str:
+    """Le nom de modèle Copilot que le projet associe au palier *tier*, ou ``""``.
+
+    Lu sous ``dispatch.copilot_models.<palier>`` de la politique d'orchestration
+    (par exemple ``haiku: claude-haiku-4.5``). Absent, vide ou illisible : ``""``,
+    et la décision reste consultative.
+    """
+    path = project_root / POLICY_FILE
+    if not path.is_file():
+        return ""
+    try:
+        from ruamel.yaml import YAML
+
+        data = YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return ""
+    block = data.get("dispatch") if isinstance(data, dict) else None
+    models = block.get(COPILOT_MODELS_KEY) if isinstance(block, dict) else None
+    value = models.get(tier) if isinstance(models, dict) else None
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _persona_declares_model(project_root: Path, subagent_type: str, *, copilot: bool = False) -> bool:
     """La persona appelée a-t-elle déjà son modèle, ou ne peut-on pas le savoir ?
 
     Vrai — donc abstention — pour un agent de plugin (``plugin:agent``, sa
     définition n'est pas lue ici) et pour une définition ``.claude/agents/<nom>.md``
     du projet ou de l'utilisateur qui déclare un ``model:`` autre que ``inherit``.
+    Sous Copilot (*copilot*) seulement, aussi ``.github/agents/<nom>.agent.md`` :
+    Claude Code ne lit pas ce fichier, son ``model:`` n'y change rien.
     """
     if not subagent_type:
         return False
@@ -240,7 +291,11 @@ def _persona_declares_model(project_root: Path, subagent_type: str) -> bool:
     roots = [project_root]
     with contextlib.suppress(RuntimeError, KeyError, OSError):
         roots.append(Path.home())
-    return any(_definition_declares_model(root / ".claude" / "agents" / f"{subagent_type}.md") for root in roots)
+    candidates = [root / ".claude" / "agents" / f"{subagent_type}.md" for root in roots]
+    if copilot:
+        # Agent personnalisé VS Code / Copilot : son `model:` est sa préférence.
+        candidates += [root / ".github" / "agents" / f"{subagent_type}.agent.md" for root in roots]
+    return any(_definition_declares_model(path) for path in candidates)
 
 
 def _definition_declares_model(path: Path) -> bool:
@@ -292,21 +347,35 @@ def decide_dispatch_model(hook: HookInput) -> Decision:
         return Decision(abstain=True, detail={"dispatch_model": "error", "error": f"{type(exc).__name__}: {exc}"})
 
 
+def _is_copilot(hook: HookInput) -> bool:
+    from grimoire.bridges.schemas import HostId
+
+    return hook.host == HostId.GITHUB_COPILOT.value
+
+
+def _subagent_type(tool_input: dict[str, Any], *, copilot: bool) -> str:
+    for key in _SUBAGENT_KEYS if copilot else _SUBAGENT_KEYS[:1]:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _decide(hook: HookInput) -> Decision:
-    if hook.tool_name not in DELEGATION_TOOLS:
+    copilot = _is_copilot(hook)
+    if hook.tool_name not in (COPILOT_DELEGATION_TOOLS if copilot else CLAUDE_DELEGATION_TOOLS):
         return Decision(abstain=True)
     tool_input = hook.tool_input
     if not isinstance(tool_input, dict) or not tool_input:
         return Decision(abstain=True)
     if tool_input.get("model") not in (None, ""):
         return Decision(abstain=True)
-    subagent_type = tool_input.get("subagent_type")
-    subagent_type = subagent_type.strip() if isinstance(subagent_type, str) else ""
+    subagent_type = _subagent_type(tool_input, copilot=copilot)
     if subagent_type == FORK:
         return Decision(abstain=True)
     if not impose_model_enabled(hook.project_root):
         return Decision(abstain=True)
-    if _persona_declares_model(hook.project_root, subagent_type):
+    if _persona_declares_model(hook.project_root, subagent_type, copilot=copilot):
         return Decision(abstain=True)
 
     model, detail = _class_model(hook)
@@ -330,6 +399,10 @@ def _decide(hook: HookInput) -> Decision:
         if source == "class"
         else "heuristique sur la description de l'appel"
     )
+    if copilot:
+        return _copilot_decision(
+            hook, tool_input, model, why, {**detail, "dispatch_source": source, "subagent_type": subagent_type}
+        )
     context = (
         f"[Grimoire] model={model} imposé au sous-agent ({why}) : l'appel Agent n'avait pas de model. "
         "Passe model= explicitement pour un autre choix ; `dispatch.impose_model: off` dans "
@@ -339,4 +412,39 @@ def _decide(hook: HookInput) -> Decision:
         context=context,
         updated_input={**tool_input, "model": model},
         detail={**detail, "imposed_model": model, "dispatch_source": source, "subagent_type": subagent_type},
+    )
+
+
+def _copilot_decision(
+    hook: HookInput, tool_input: dict[str, Any], tier: str, why: str, detail: dict[str, Any]
+) -> Decision:
+    """Le même palier, rendu pour Copilot : réécrit seulement si le projet a nommé le modèle Copilot.
+
+    Toujours consultatif (``detail["advisory"]``) : le rendu Copilot n'affirme
+    aucune permission, il propose l'entrée réécrite (``modifiedArgs`` /
+    ``updatedInput`` selon le dialecte, voir ``runtime``).
+    """
+    from grimoire.hosts.hook_entry import ADVISORY_DETAIL_KEY
+
+    copilot_model = copilot_model_for(hook.project_root, tier)
+    base = {**detail, ADVISORY_DETAIL_KEY: True, "recommended_model": tier}
+    tool = hook.tool_name
+    if not copilot_model:
+        return Decision(
+            context=(
+                f"[Grimoire] palier {tier} recommandé pour ce sous-agent ({why}) : l'appel {tool} n'avait pas de "
+                "model, et aucun nom de modèle Copilot n'est associé à ce palier — rien n'est imposé. "
+                f"Déclare `dispatch.{COPILOT_MODELS_KEY}.{tier}: <modèle Copilot>` dans "
+                "_grimoire/standard/orchestration-policy.yaml pour l'imposer, ou passe model= explicitement."
+            ),
+            detail={**base, "dispatch_model": f"no_{COPILOT_MODELS_KEY}"},
+        )
+    return Decision(
+        context=(
+            f"[Grimoire] model={copilot_model} (palier {tier}) proposé au sous-agent ({why}) : l'appel {tool} "
+            "n'avait pas de model. Passe model= explicitement pour un autre choix ; `dispatch.impose_model: off` "
+            "dans _grimoire/standard/orchestration-policy.yaml désactive ce réglage."
+        ),
+        updated_input={**tool_input, "model": copilot_model},
+        detail={**base, "imposed_model": copilot_model},
     )

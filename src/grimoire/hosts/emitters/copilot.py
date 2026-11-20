@@ -30,7 +30,7 @@ from grimoire.hosts.emitters.base import (
     parallel_brainstorm_section,
     persona_section,
 )
-from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT
+from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
@@ -291,24 +291,26 @@ def _powershell_program(program: str) -> str:
     return f"& {program}" if program.startswith('"') else program
 
 
-def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
-    """Un fichier ``.github/hooks/grimoire-<événement>.json`` au format du harness Copilot.
+def _dispatch_entry(launcher: HookLauncher = BARE) -> dict[str, Any]:
+    """L'entrée consultative ``grimoire.dispatch-model`` du fichier ``PreToolUse`` (#1280, P1-4).
 
-    ``{"version": 1, "hooks": {"<Événement>": [entrée]}}``, entrée portant
-    ``bash`` (Unix) et ``powershell`` (Windows), plus ``command`` comme repli.
-    Pas de ``windows`` (issue #760) : le harness Copilot ne le documente que
-    pour les hooks propres à un agent, et le harness Local prend ``powershell``
-    comme repli de ``windows`` — la forme Windows du lanceur passe donc par
-    ``powershell``, lu par les deux harness. ``command`` porte la forme Unix :
-    le harness Copilot le copie dans ``bash``/``powershell`` seulement quand
-    ceux-ci manquent, il ne sert qu'aux VS Code antérieurs aux deux replis.
-    ``windows`` n'est pas réintroduit pour ces derniers : la référence GitHub ne
-    le liste pas pour un fichier de hook, ne dit rien d'un champ inconnu, et
-    écarte un élément malformé — l'élément ici, c'est la garde elle-même.
-
-    Le délai s'écrit ``timeoutSec`` seul : les deux harness le lisent, et ils
-    donnent des priorités opposées à ``timeout`` et ``timeoutSec`` posés ensemble.
+    Même lanceur que la garde, ``--decision`` en plus, matcher sur les seuls
+    outils de délégation, délai court (3 s) : un dépassement laisse passer
+    l'appel tel quel, ce qui est le comportement voulu d'un hook consultatif.
+    Elle vient *après* les entrées de la garde et ne la remplace pas ; elle
+    n'affirme jamais de permission (voir ``runtime._render_copilot_advisory_pre_tool``).
+    Le harness Local ignore ``matcher`` : elle y part sur chaque outil, et la
+    décision s'abstient hors délégation (dégradation déclarée par le plan).
     """
+    spec = DISPATCH_MODEL_HOOK
+    (entry,) = _hook_entries(spec, launcher)
+    for key in ("command", "bash", "powershell"):
+        entry[key] = f"{entry[key]} --decision {spec.decision}"
+    return {**entry, "matcher": matcher_for(spec)}
+
+
+def _hook_entries(hook: HookSpec, launcher: HookLauncher = BARE) -> list[dict[str, Any]]:
+    """Les entrées de *hook* : une, ou deux pour un hook à matcher (outils connus, puis inconnus)."""
     event = _WIRE_NAMES[hook.event]
     entry: dict[str, Any] = {"type": "command"}
     if launcher.project_relative and launcher.windows:
@@ -328,12 +330,41 @@ def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
     if cwd:
         entry["cwd"] = cwd
     entry["timeoutSec"] = _hook_timeout(hook)
-    entries = [entry]
+    if hook.decision == DISPATCH_MODEL_HOOK.decision:
+        return [entry]
     matcher = matcher_for(hook)
     if matcher:
         # Avant les matchers, chaque appel passait par la décision : la seconde
         # entrée garde ce comportement pour les outils que le kit ne connaît pas.
-        entries = [{**entry, "matcher": matcher}, {**entry, "matcher": UNKNOWN_TOOL_MATCHER}]
+        return [{**entry, "matcher": matcher}, {**entry, "matcher": UNKNOWN_TOOL_MATCHER}]
+    return [entry]
+
+
+def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE, *, dispatch: bool = False) -> EmittedFile:
+    """Un fichier ``.github/hooks/grimoire-<événement>.json`` au format du harness Copilot.
+
+    ``{"version": 1, "hooks": {"<Événement>": [entrée]}}``, entrée portant
+    ``bash`` (Unix) et ``powershell`` (Windows), plus ``command`` comme repli.
+    Pas de ``windows`` (issue #760) : le harness Copilot ne le documente que
+    pour les hooks propres à un agent, et le harness Local prend ``powershell``
+    comme repli de ``windows`` — la forme Windows du lanceur passe donc par
+    ``powershell``, lu par les deux harness. ``command`` porte la forme Unix :
+    le harness Copilot le copie dans ``bash``/``powershell`` seulement quand
+    ceux-ci manquent, il ne sert qu'aux VS Code antérieurs aux deux replis.
+    ``windows`` n'est pas réintroduit pour ces derniers : la référence GitHub ne
+    le liste pas pour un fichier de hook, ne dit rien d'un champ inconnu, et
+    écarte un élément malformé — l'élément ici, c'est la garde elle-même.
+
+    Le délai s'écrit ``timeoutSec`` seul : les deux harness le lisent, et ils
+    donnent des priorités opposées à ``timeout`` et ``timeoutSec`` posés ensemble.
+
+    *dispatch* ajoute, après les entrées de *hook* (``PreToolUse`` seulement),
+    l'entrée consultative du modèle imposé aux sous-agents (:func:`_dispatch_entry`).
+    """
+    event = _WIRE_NAMES[hook.event]
+    entries = _hook_entries(hook, launcher)
+    if dispatch and hook.event is HookEvent.PRE_TOOL_USE:
+        entries.append(_dispatch_entry(launcher))
     payload: dict[str, Any] = {"version": 1, "hooks": {event: entries}}
     slug = hook.event.value.replace("_", "-")
     return EmittedFile(
@@ -424,7 +455,7 @@ class CopilotEmitter(Emitter):
         # make two writers for one path, and every sync would report a
         # conflict on a file nobody actually edited.
         files.extend(_prompt_file(c) for c in surface.commands if c.source != "workflow")
-        files.extend(_hook_file(hook, launcher) for hook in surface.hooks)
+        files.extend(_hook_file(hook, launcher, dispatch=True) for hook in surface.hooks)
 
         degradations: list[Degradation] = list(Emitter.launcher_degradations(launcher))
         if not surface.permissions.is_empty():
@@ -465,6 +496,26 @@ class CopilotEmitter(Emitter):
                         "garde PreToolUse comprise (seule une sortie non nulle refuse)."
                     ),
                     fallback=f"délai de la garde porté à {GUARD_TIMEOUT} s ; `grimoire doctor` le rappelle.",
+                )
+            )
+        if any(h.event is HookEvent.PRE_TOOL_USE for h in surface.hooks):
+            degradations.append(
+                Degradation(
+                    surface="dispatch model",
+                    reason=(
+                        "Le modèle de la politique de dispatch est proposé aux sous-agents (`task`, "
+                        "`runSubagent`, `Agent`/`Task`) par une entrée consultative du hook PreToolUse, "
+                        "mais Copilot nomme ses modèles autrement que les paliers de la politique et ne "
+                        "documente pas les valeurs que `task` accepte : aucune correspondance n'est inventée. "
+                        "L'entrée réécrite (`modifiedArgs`, ou aussi `updatedInput` pour une charge snake_case) "
+                        "est rendue sans `permissionDecision` ; un lot de plusieurs appels n'est jamais réécrit. "
+                        "Le harness Local ignore `matcher` : l'entrée y part sur chaque outil (3 s au plus)."
+                    ),
+                    fallback=(
+                        "sans `dispatch.copilot_models.<palier>` dans la politique d'orchestration du standard, "
+                        "le palier recommandé est seulement dit à l'agent (additionalContext) ; "
+                        "`dispatch.impose_model: off` coupe la décision."
+                    ),
                 )
             )
         degradations.append(

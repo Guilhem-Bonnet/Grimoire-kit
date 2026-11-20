@@ -195,7 +195,11 @@ def check_copilot_guard_timeout(target: Path) -> list[EnvCheck]:
             if not isinstance(spec, dict):
                 continue
             commands = (spec.get(key) for key in ("command", "bash", "powershell", "windows", "linux", "osx"))
-            if not any(_launches_grimoire_hook(str(c)) for c in commands if c):
+            launched = [str(c) for c in commands if c and _launches_grimoire_hook(str(c))]
+            if not launched:
+                continue
+            if any("--decision grimoire.dispatch-model" in c for c in launched):
+                # Entrée consultative (modèle des sous-agents, #1280 P1-4) : délai court voulu, pas une garde.
                 continue
             # Même priorité que le harness Copilot : `timeoutSec`, puis son alias, puis 30 s.
             raw = spec.get("timeoutSec", spec.get("timeout", 30))

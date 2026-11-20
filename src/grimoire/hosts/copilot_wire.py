@@ -31,6 +31,7 @@ from grimoire.hosts.events import HookEvent
 
 __all__ = [
     "EVENT_ALIASES",
+    "STOP_BLOCK_LIMIT",
     "PayloadDialect",
     "ToolCall",
     "detect_dialect",
@@ -81,7 +82,8 @@ _SNAKE_KEYS = frozenset(
         "tool_use_id",
         "tool_response",
         "transcript_path",
-        "stop_hook_active",
+        # Pas `stop_hook_active` : la référence GitHub l'écrit en snake_case dans
+        # l'entrée camelCase d'`agentStop` aussi, il ne dit rien du dialecte.
         "initial_prompt",
         "custom_instructions",
     }
@@ -98,6 +100,15 @@ def detect_dialect(payload: Mapping[str, Any]) -> PayloadDialect:
     if snake and not camel:
         return PayloadDialect.SNAKE
     return PayloadDialect.UNKNOWN
+
+
+#: Refus consécutifs d'un ``agentStop`` que le harness Copilot honore : « After 8
+#: consecutive ``block`` continuations, the CLI overrides the hook and ends the
+#: turn anyway » (https://docs.github.com/en/copilot/reference/hooks-reference).
+#: Le harness Local ne documente aucune borne. Le kit ne compte jamais au-delà :
+#: la chaîne de refus du ``Stop`` (``done_gate._STOP_CAPS``) plafonne en dessous
+#: ou à cette valeur, et le rendu Copilot n'émet pas un refus de plus.
+STOP_BLOCK_LIMIT = 8
 
 
 #: Noms d'événements camelCase de Copilot que l'orthographe Claude Code ne
