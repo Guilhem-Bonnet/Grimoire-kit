@@ -378,9 +378,16 @@ Le script part de `main` propre (aucune modification suivie) et identique à
    venv vierge, et exécute `grimoire --version` et `grimoire ceremony budget` ;
 6. commite `chore: release x.y.z`.
 
-Il ne fusionne pas et ne tague pas : il imprime la suite (fusion de la PR,
-`git tag -a vx.y.z` sur le commit de fusion, push du tag). En cas d'échec,
-rien n'est commité et le message donne les commandes pour revenir sur `main`.
+Il refuse aussi un fichier non suivi ou un lien symbolique dans `changelog.d/`
+(l'assemblage le supprimerait sans qu'il puisse être commité). La roue vérifiée
+est construite depuis l'arbre de travail : un fichier non suivi du paquet peut
+y entrer sans être dans le commit, et le script le signale.
+
+Il ne pousse rien sans `--open-pr`, ne fusionne pas et ne tague pas : il
+imprime la suite (fusion de la PR, `git tag -a vx.y.z` sur le commit de fusion,
+push du tag). En cas d'échec, le message dit où en est le dépôt (rien d'écrit,
+branche modifiée non commitée, commit local, branche poussée sans PR) et la
+commande pour reprendre ou revenir sur `main`.
 `make release` reste la variante sans branche ni numérotation des fragments.
 
 ### Entrées de CHANGELOG : un fragment par PR

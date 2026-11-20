@@ -37,7 +37,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-(?:rc|a|b)\d+)?$")
+VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(?:rc|a|b)\d+)?")  # toujours en fullmatch
 PR_SUFFIX = re.compile(r"\(#(\d+)\)\s*$")
 MAX_CALIBRATION_MINOR_LAG = 2  # grimoire.missions.ceremony_budget.MAX_CALIBRATION_MINOR_LAG
 CEREMONY_FILE = "evals/ceremony-budget.yaml"
@@ -45,13 +45,19 @@ VERSION_PY = "src/grimoire/__version__.py"
 HASHES = "registry/kit-file-hashes.json"
 
 
+# Étapes franchies, du plus tôt au plus tard : le message d'échec dépend de la dernière.
+STAGE_CHECKED, STAGE_BRANCH, STAGE_COMMITTED, STAGE_PUSHED = "vérifié", "branche", "commité", "poussé"
+
+
 class ReleaseError(RuntimeError):
-    """Une précondition ou une étape a échoué : rien n'est commité."""
+    """Une précondition ou une étape a échoué."""
 
 
 def run(cmd: Sequence[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    # Chemins littéraux : un nom de fichier ne devient jamais un motif ou une « magic pathspec ».
+    env = {**os.environ, "GIT_LITERAL_PATHSPECS": "1"}
     done = subprocess.run(
-        list(cmd), cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        list(cmd), cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=env
     )
     if check and done.returncode != 0:
         detail = (done.stderr or done.stdout).strip()
@@ -71,7 +77,7 @@ def say(message: str) -> None:
 
 
 def parse_version(text: str) -> tuple[int, int, int]:
-    match = VERSION_RE.match(text)
+    match = VERSION_RE.fullmatch(text)
     if not match:
         raise ReleaseError(f"version invalide : {text!r} (attendu X.Y.Z ou X.Y.Z-rcN, sans « v »)")
     return int(match.group(1)), int(match.group(2)), int(match.group(3))
@@ -107,6 +113,26 @@ def check_clean_main(repo: Path, remote: str, base: str, *, fetch: bool = True) 
         )
 
 
+def check_fragments_tracked(repo: Path) -> None:
+    """Un fragment non suivi serait assemblé puis supprimé sans pouvoir être stagé : le brouillon serait perdu."""
+    untracked = git(repo, "ls-files", "--others", "--exclude-standard", "--", "changelog.d")
+    if untracked:
+        raise ReleaseError(f"changelog.d/ porte des fichiers non suivis (commiter ou déplacer d'abord) :\n{untracked}")
+    root = repo.resolve()
+    for path in fragments(repo):
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise ReleaseError(
+                f"changelog.d/{path.name} est un lien symbolique : changelog-assemble.py lirait sa cible et le "
+                "supprimerait ; le remplacer par un fichier"
+            )
+
+
+def check_ref_names(remote: str, base: str) -> None:
+    for label, value in (("--remote", remote), ("--base", base)):
+        if not value or value.startswith("-") or any(c.isspace() for c in value):
+            raise ReleaseError(f"{label} invalide : {value!r}")
+
+
 def check_branch_absent(repo: Path, branch: str, remote: str) -> None:
     for ref in (f"refs/heads/{branch}", f"refs/remotes/{remote}/{branch}"):
         if run(["git", "show-ref", "--verify", "--quiet", ref], repo, check=False).returncode == 0:
@@ -124,7 +150,7 @@ def fragments(repo: Path) -> list[Path]:
     return sorted(
         p
         for p in directory.glob("*.md")
-        if p.is_file() and p.name.lower() != "readme.md" and not p.name.startswith(".")
+        if (p.is_file() or p.is_symlink()) and p.name.lower() != "readme.md" and not p.name.startswith(".")
     )
 
 
@@ -245,15 +271,20 @@ def release(
     fetch: bool = True,
     today: str | None = None,
     check_wheel: Callable[[Path, str], None] = wheel_check,
+    progress: list[str] | None = None,
 ) -> int:
+    progress = progress if progress is not None else []
     today = today or datetime.date.today().isoformat()
     branch = f"release/{version}"
     prefix = "[dry-run] " if dry_run else ""
 
     parse_version(version)
+    check_ref_names(remote, base)
     current = check_version_moves_forward(repo, version)
     check_clean_main(repo, remote, base, fetch=fetch)
+    check_fragments_tracked(repo)
     check_branch_absent(repo, branch, remote)
+    progress.append(STAGE_CHECKED)
     say(f"{prefix}{base} propre et à jour ; {current} -> {version}")
 
     lag = ceremony_lag(repo, version)
@@ -284,6 +315,7 @@ def release(
         return 0
 
     git(repo, "switch", "--quiet", "-c", branch)
+    progress.append(STAGE_BRANCH)
     say(f"branche {branch}")
     say("numéros de PR des fragments :")
     consumed = [p.relative_to(repo).as_posix() for p in fragments(repo)]
@@ -307,6 +339,12 @@ def release(
     run(script(repo, "check-changelog-release.py"), repo)
     say("check-changelog-release.py : CHANGELOG conforme")
 
+    untracked = git(repo, "ls-files", "--others", "--exclude-standard")
+    if untracked:
+        say(
+            f"  ! la roue se construit depuis l'arbre de travail : {len(untracked.splitlines())} fichier(s) non "
+            "suivi(s) peuvent y entrer sans être dans le commit"
+        )
     check_wheel(repo, version)
 
     paths = ["CHANGELOG.md", "version.txt", VERSION_PY, HASHES, *consumed]
@@ -315,11 +353,13 @@ def release(
     present = [p for p in paths if (repo / p).exists() or p in consumed]
     git(repo, "add", "--", *present)
     git(repo, "commit", "--quiet", "-m", f"chore: release {version}")
+    progress.append(STAGE_COMMITTED)
     say(f"commit « chore: release {version} » sur {branch}")
 
     pr_ref = "<numéro>"
     if open_pr:
         git(repo, "push", "--quiet", "-u", remote, branch)
+        progress.append(STAGE_PUSHED)
         url = run(
             [
                 "gh",
@@ -378,27 +418,49 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", default="main")
     parser.add_argument("--no-fetch", action="store_true", help="ne pas rafraîchir la référence distante")
     args = parser.parse_args(argv)
+    version = args.version.removeprefix("v")
+    progress: list[str] = []
     try:
         return release(
             args.repo.resolve(),
-            args.version.removeprefix("v"),
+            version,
             dry_run=args.dry_run,
             open_pr=args.open_pr,
             redate=args.redate_ceremony,
             remote=args.remote,
             base=args.base,
             fetch=not args.no_fetch,
+            progress=progress,
         )
     except ReleaseError as exc:
         print(f"::error::{exc}", file=sys.stderr)
-        branch = f"release/{args.version.removeprefix('v')}"
-        if not args.dry_run and git(args.repo.resolve(), "rev-parse", "--abbrev-ref", "HEAD", check=False) == branch:
-            print(
-                f"Rien n'est commité. Pour repartir : git restore --staged --worktree . && git switch {args.base} "
-                f"&& git branch -D {branch}",
-                file=sys.stderr,
-            )
-        return 1
+    except Exception as exc:
+        print(f"::error::erreur inattendue : {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(recovery_hint(progress[-1] if progress else None, version, args.base, args.remote), file=sys.stderr)
+    return 1
+
+
+def recovery_hint(stage: str | None, version: str, base: str, remote: str) -> str:
+    """Ce qu'il reste à faire selon la dernière étape franchie."""
+    branch = f"release/{version}"
+    if stage in (None, STAGE_CHECKED):
+        return "Rien n'a été écrit."
+    if stage == STAGE_BRANCH:
+        return (
+            f"Rien n'est commité, la branche {branch} porte des modifications. Pour repartir : "
+            f"git restore --staged --worktree . && git switch {base} && git branch -D {branch}"
+        )
+    if stage == STAGE_COMMITTED:
+        return (
+            f"Le commit « chore: release {version} » existe sur {branch}, rien n'est poussé. Reprendre à la main "
+            f"(git push -u {remote} {branch}, puis gh pr create) ou abandonner : "
+            f"git switch {base} && git branch -D {branch}"
+        )
+    return (
+        f"{branch} est commitée et poussée sur {remote} ; seule l'ouverture de la PR a échoué. "
+        f'La reprendre : gh pr create --base {base} --head {branch} --title "chore: release {version}". '
+        "Ne pas supprimer la branche distante sans vérifier qu'aucune PR n'existe."
+    )
 
 
 if __name__ == "__main__":

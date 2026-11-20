@@ -154,7 +154,8 @@ def test_release_complete_jusqu_au_commit(repo: Path, capsys: pytest.CaptureFixt
         "changelog.d/truc.md",
     } <= committed
     assert "evals/ceremony-budget.yaml" not in committed, "calibration à une mineure : rien à redater"
-    # Ne fusionne pas, ne tague pas : imprime la suite.
+    # Ne pousse pas sans --open-pr, ne fusionne pas, ne tague pas : imprime la suite.
+    assert _git(repo, "ls-remote", "origin", "refs/heads/release/*") == "", "aucun push sans --open-pr"
     assert _git(repo, "tag") == ""
     assert 'git tag -a v1.3.0 -m "Release 1.3.0"' in out and "gh pr merge" in out
 
@@ -195,7 +196,7 @@ def test_une_version_qui_n_avance_pas_est_refusee(repo: Path, version: str) -> N
         _release(repo, version)
 
 
-@pytest.mark.parametrize("version", ["v1.3.0", "1.3", "1.3.0.1", "latest"])
+@pytest.mark.parametrize("version", ["v1.3.0", "1.3", "1.3.0.1", "latest", "1.3.0\n", "1.3.0-rc1\n"])
 def test_une_version_mal_formee_est_refusee(repo: Path, version: str) -> None:
     with pytest.raises(_module().ReleaseError, match="version invalide"):
         _release(repo, version)
@@ -280,3 +281,73 @@ def test_open_pr_pousse_la_branche_et_ouvre_la_pr(
     assert "--draft" not in args
     out = capsys.readouterr().out
     assert "gh pr merge 4242 --squash" in out
+
+
+def test_un_fragment_non_suivi_est_refuse_avant_toute_ecriture(repo: Path) -> None:
+    (repo / "changelog.d" / "brouillon.md").write_text("- feat: pas encore commité\n", encoding="utf-8")
+    with pytest.raises(_module().ReleaseError, match="non suivis"):
+        _release(repo)
+    assert (repo / "changelog.d" / "brouillon.md").exists(), "le brouillon n'est pas perdu"
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="liens symboliques")
+def test_un_fragment_lien_symbolique_est_refuse(repo: Path, tmp_path: Path) -> None:
+    cible = tmp_path / "ailleurs.md"
+    cible.write_text("- feat: hors dépôt\n", encoding="utf-8")
+    (repo / "changelog.d" / "lien.md").symlink_to(cible)
+    _commit(repo, "chore: lien", "changelog.d/lien.md")
+    _git(repo, "push", "-q", "origin", "main")
+    with pytest.raises(_module().ReleaseError, match="lien symbolique"):
+        _release(repo)
+    assert cible.exists()
+
+
+@pytest.mark.parametrize(("remote", "base"), [("-oProxy", "main"), ("origin", "--upload-pack=x"), ("", "main")])
+def test_remote_et_base_ne_sont_pas_des_options(repo: Path, remote: str, base: str) -> None:
+    with pytest.raises(_module().ReleaseError, match="invalide"):
+        _release(repo, remote=remote, base=base)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="faux gh en script shell")
+def test_un_echec_apres_push_le_dit_et_ne_conseille_pas_de_supprimer(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text("#!/bin/sh\necho refus >&2\nexit 1\n", encoding="utf-8")
+    (bin_dir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    module = _module()
+    progress: list[str] = []
+    with pytest.raises(module.ReleaseError, match="gh pr create"):
+        module.release(
+            repo, "1.3.0", today="2026-02-02", check_wheel=lambda _r, _v: None, open_pr=True, progress=progress
+        )
+    assert progress[-1] == module.STAGE_PUSHED
+    hint = module.recovery_hint(progress[-1], "1.3.0", "main", "origin")
+    assert "poussée" in hint and "Rien n'" not in hint and "branch -D" not in hint
+
+
+def test_les_consignes_suivent_l_etape_atteinte() -> None:
+    module = _module()
+    assert module.recovery_hint(None, "1.3.0", "main", "origin") == "Rien n'a été écrit."
+    branche = module.recovery_hint(module.STAGE_BRANCH, "1.3.0", "main", "origin")
+    assert "Rien n'est commité" in branche and "git branch -D release/1.3.0" in branche
+    commite = module.recovery_hint(module.STAGE_COMMITTED, "1.3.0", "main", "origin")
+    assert "Rien n'est commité" not in commite and "existe sur release/1.3.0" in commite and "git push" in commite
+
+
+def test_une_exception_inattendue_donne_aussi_une_consigne(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _module()
+
+    def boom(*_a: object, progress: list[str], **_k: object) -> int:
+        progress.extend([module.STAGE_CHECKED, module.STAGE_BRANCH])
+        raise OSError("disque plein")
+
+    monkeypatch.setattr(module, "release", boom)
+    assert module.main(["1.3.0", "--repo", str(repo), "--no-fetch"]) == 1
+    err = capsys.readouterr().err
+    assert "OSError: disque plein" in err and "git branch -D release/1.3.0" in err
