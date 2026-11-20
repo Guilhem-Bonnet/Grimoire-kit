@@ -461,6 +461,7 @@ def _record_decision(
                 *_refusal_tags(decision),
                 *done_gate_mode_tags(detail.get("done_gate")),
                 *_dispatch_model_tags(detail),
+                *([f"batch_outcome:{detail['batch_outcome']}"] if detail.get("batch_outcome") else []),
             ],
             lock_timeout=_LEDGER_LOCK_TIMEOUT_S,
         )
@@ -541,6 +542,8 @@ def _unreadable_call_decision(problem: str) -> Decision:
 def _combine_batch(judged: list[tuple[HookInput, Decision]]) -> Decision:
     """Le verdict d'un lot d'appels : refus > demande > autorisation, jamais le premier seul."""
     size = len(judged)
+    if size == 1:
+        return judged[0][1]
     tools = [sub.tool_name for sub, _ in judged]
     for refusal_wanted in (True, False):
         for index, (sub, decision) in enumerate(judged, start=1):
@@ -591,8 +594,7 @@ def run_hook(
     # La garde : la politique d'outils sur un appel en attente. Une décision consultative
     # (modèle imposé) ou une autre décision nommée par ``--decision`` n'est pas concernée.
     guard = (
-        hook.event is HookEvent.PRE_TOOL_USE
-        and resolved_decision == DEFAULT_DECISION_BY_EVENT[HookEvent.PRE_TOOL_USE]
+        hook.event is HookEvent.PRE_TOOL_USE and resolved_decision == DEFAULT_DECISION_BY_EVENT[HookEvent.PRE_TOOL_USE]
     )
     batch = copilot_wire.inspect_tool_calls(payload) if guard else None
     judged: list[tuple[HookInput, Decision]]
@@ -600,13 +602,26 @@ def run_hook(
         # Échec fermé : une charge qui annonce des appels sans qu'on puisse tous les lire.
         decision = _unreadable_call_decision(batch[1])
         judged = [(hook, decision)]
-    elif batch is not None and len(batch[0]) > 1:
-        # Appels groupés (Copilot) : chaque appel est jugé, le plus restrictif l'emporte.
+    elif batch is not None:
+        # Forme camelCase (Copilot) : chaque appel inspecté est jugé, même seul, et
+        # le plus restrictif l'emporte. Le hook normalisé n'est jamais jugé à sa place.
         judged = [
             (sub, _decide(sub, resolved_decision, recognized))
-            for sub in (replace(hook, tool_name=name, tool_input=args) for name, args in batch[0])
+            for sub in (
+                replace(hook, tool_name=call.name, tool_input=call.args, tool_use_id=call.call_id or hook.tool_use_id)
+                for call in batch[0]
+            )
         ]
         decision = _combine_batch(judged)
+        if len(judged) > 1:
+            # La trace de chaque appel dit ce qu'il est advenu du lot (un `allow` d'un lot refusé n'a pas été exécuté).
+            judged = [
+                (
+                    sub,
+                    replace(d, detail={**d.detail, "batch_outcome": decision.outcome.value, "batch_size": len(judged)}),
+                )
+                for sub, d in judged
+            ]
     elif guard and not hook.tool_name:
         # Sans nom d'outil, la politique n'a rien à juger : ce n'est pas une autorisation.
         decision = _unreadable_call_decision("aucun nom d'outil exploitable dans la charge")

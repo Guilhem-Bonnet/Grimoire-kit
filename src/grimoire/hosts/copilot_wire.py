@@ -25,13 +25,14 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any
+from typing import Any, NamedTuple
 
 from grimoire.hosts.events import HookEvent
 
 __all__ = [
     "EVENT_ALIASES",
     "PayloadDialect",
+    "ToolCall",
     "detect_dialect",
     "event_from_alias",
     "inspect_tool_calls",
@@ -149,46 +150,79 @@ def tool_calls(payload: Mapping[str, Any]) -> tuple[tuple[str, dict[str, Any]], 
     return ()
 
 
-def inspect_tool_calls(payload: Mapping[str, Any]) -> tuple[tuple[tuple[str, dict[str, Any]], ...], str] | None:
+class ToolCall(NamedTuple):
+    """Un appel d'outil lu dans une charge camelCase."""
+
+    name: str
+    args: dict[str, Any]
+    #: ``id`` de l'entrée ``toolCalls`` ; vide pour le couple ``toolName``/``toolArgs``.
+    call_id: str = ""
+
+
+#: Clés d'appel d'outil d'un autre dialecte que le camelCase de Copilot. Une charge
+#: qui en porte en même temps que ``toolCalls``/``toolName``/``toolArgs`` dit deux
+#: choses différentes de l'appel : la garde la refuse comme ambiguë.
+_OTHER_CALL_KEYS = frozenset({"tool_name", "tool_input", "tool", "input", "arguments", "toolInput"})
+
+
+def inspect_tool_calls(payload: Mapping[str, Any]) -> tuple[tuple[ToolCall, ...], str] | None:
     """Les appels d'une charge camelCase et, s'il y en a un, le défaut qui la rend injugeable.
 
     ``None`` : la charge n'a pas la forme camelCase d'un appel d'outil (ni
     ``toolCalls`` ni ``toolName``/``toolArgs``) — elle relève d'un autre dialecte.
     Sinon ``(appels, problème)`` : ``problème`` est vide quand chaque appel a un
-    nom et des arguments lisibles. La garde refuse une charge à problème : un
-    appel qu'on ne sait pas lire n'est pas un appel autorisé (échec fermé).
+    nom et des arguments lisibles et que la charge ne décrit l'appel qu'une fois.
+    La garde refuse une charge à problème : un appel qu'on ne sait pas lire, ou
+    qu'on peut lire de deux façons, n'est pas un appel autorisé (échec fermé).
     """
-    if "toolCalls" in payload:
+    has_list = "toolCalls" in payload
+    has_pair = "toolName" in payload or "toolArgs" in payload
+    if not has_list and not has_pair:
+        return None
+    other = sorted(_OTHER_CALL_KEYS & set(payload))
+    if other or (has_list and has_pair):
+        named = ", ".join(other or ["toolName/toolArgs"])
+        return (), f"charge ambiguë : `toolCalls`/`toolName`/`toolArgs` et {named} décrivent l'appel deux fois"
+    if has_list:
         raw_calls = payload["toolCalls"]
         if not isinstance(raw_calls, list) or not raw_calls:
             return (), "`toolCalls` n'est pas une liste d'appels non vide"
-        calls: list[tuple[str, dict[str, Any]]] = []
-        for index, entry in enumerate(raw_calls):
+        calls: list[ToolCall] = []
+        for index, entry in enumerate(raw_calls, start=1):
             if not isinstance(entry, Mapping):
-                return tuple(calls), f"appel {index + 1} : pas un objet"
+                return tuple(calls), f"appel {index} : pas un objet"
+            if "name" in entry and "toolName" in entry:
+                return tuple(calls), f"appel {index} : `name` et `toolName` à la fois"
             name = entry.get("name", entry.get("toolName"))
             if not isinstance(name, str) or not name.strip():
-                return tuple(calls), f"appel {index + 1} : nom d'outil absent"
-            args, problem = _strict_args(entry.get("args", entry.get("toolArgs")))
+                return tuple(calls), f"appel {index} : nom d'outil absent"
+            if "args" in entry and "toolArgs" in entry:
+                return tuple(calls), f"appel {index} ({name}) : `args` et `toolArgs` à la fois"
+            key = "args" if "args" in entry else "toolArgs"
+            args, problem = _strict_args(entry.get(key), present=key in entry)
             if problem:
-                return tuple(calls), f"appel {index + 1} ({name}) : {problem}"
-            calls.append((name, args))
+                return tuple(calls), f"appel {index} ({name}) : {problem}"
+            call_id = entry.get("id")
+            calls.append(ToolCall(name, args, call_id if isinstance(call_id, str) else ""))
         return tuple(calls), ""
-    if "toolName" in payload or "toolArgs" in payload:
-        name = payload.get("toolName")
-        if not isinstance(name, str) or not name.strip():
-            return (), "nom d'outil absent"
-        args, problem = _strict_args(payload.get("toolArgs"))
-        if problem:
-            return (), f"{name} : {problem}"
-        return ((name, args),), ""
-    return None
+    name = payload.get("toolName")
+    if not isinstance(name, str) or not name.strip():
+        return (), "nom d'outil absent"
+    args, problem = _strict_args(payload.get("toolArgs"), present="toolArgs" in payload)
+    if problem:
+        return (), f"{name} : {problem}"
+    return (ToolCall(name, args),), ""
 
 
-def _strict_args(raw: Any) -> tuple[dict[str, Any], str]:
-    """Arguments lisibles ou la raison pour laquelle ils ne le sont pas (absents = aucun argument)."""
-    if raw is None:
+def _strict_args(raw: Any, *, present: bool) -> tuple[dict[str, Any], str]:
+    """Arguments lisibles ou la raison pour laquelle ils ne le sont pas.
+
+    Absents : aucun argument. Présents mais ``null`` : illisibles, pas « aucun ».
+    """
+    if not present:
         return {}, ""
+    if raw is None:
+        return {}, "arguments illisibles (null)"
     if isinstance(raw, dict):
         return dict(raw), ""
     if isinstance(raw, str):

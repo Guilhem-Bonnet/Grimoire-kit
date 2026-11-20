@@ -174,16 +174,113 @@ def test_advisory_decision_is_not_turned_into_a_refusal(governed: Path) -> None:
     assert decision.outcome is not Outcome.DENY
 
 
-def test_batch_decisions_are_traced_per_call(governed: Path) -> None:
+def test_batch_decisions_are_traced_per_call_with_the_batch_outcome(governed: Path) -> None:
     _pre(governed, [_call(1, "view", {"path": "README.md"}), _call(2, "bash", {"command": DESTRUCTIVE})])
     traces = list(governed.rglob("traces.jsonl"))
     assert traces, "la décision doit laisser une trace"
-    tools = [
-        call["tool"]
-        for line in traces[0].read_text(encoding="utf-8").splitlines()
-        for call in json.loads(line).get("tool_calls", [])
-    ]
-    assert "bash" in tools
+    per_call = {}
+    for line in traces[0].read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        for call in record.get("tool_calls", []):
+            per_call[call["tool"]] = (call["verdict"], record.get("tags", []))
+    assert set(per_call) == {"view", "bash"}
+    assert per_call["bash"][0] == "block"
+    # L'appel autorisé d'un lot refusé n'a pas été exécuté : sa trace le dit.
+    assert per_call["view"][0] == "allow"
+    assert "batch_outcome:deny" in per_call["view"][1]
+    assert "batch_outcome:deny" in per_call["bash"][1]
+
+
+def test_each_sub_call_keeps_its_own_tool_use_id(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.hosts import runtime
+
+    seen: list[str] = []
+    real = runtime._decide
+
+    def spy(hook, decision_id, recognized):  # type: ignore[no-untyped-def]
+        seen.append(hook.tool_use_id)
+        return real(hook, decision_id, recognized)
+
+    monkeypatch.setattr(runtime, "_decide", spy)
+    _pre(governed, [_call(1, "view", {"path": "README.md"}), _call(2, "view", {"path": "docs"})])
+    assert seen == ["toolu_REDACTED_01", "toolu_REDACTED_02"]
+
+
+SAFE = {"command": "ls"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tool_name": "Read", "toolCalls": [_call(1, "bash", {"command": DESTRUCTIVE})]},
+        {"toolName": "view", "toolCalls": [_call(1, "bash", {"command": DESTRUCTIVE})]},
+        {"tool": "view", "toolCalls": [_call(1, "bash", {"command": DESTRUCTIVE})]},
+        {"toolName": "bash", "toolArgs": json.dumps({"command": DESTRUCTIVE}), "tool_input": SAFE},
+        {"toolName": "bash", "toolArgs": json.dumps({"command": DESTRUCTIVE}), "input": SAFE},
+        {"toolName": "bash", "toolArgs": json.dumps({"command": DESTRUCTIVE}), "toolInput": SAFE},
+    ],
+    ids=[
+        "tool_name+toolCalls",
+        "toolName+toolCalls",
+        "tool+toolCalls",
+        "toolArgs+tool_input",
+        "toolArgs+input",
+        "toolArgs+toolInput",
+    ],
+)
+def test_an_ambiguous_payload_is_denied(governed: Path, payload: dict) -> None:
+    full = {"sessionId": "s", "cwd": str(governed), **payload}
+    rendered, decision, _ = run_hook(full, host_id=HostId.GITHUB_COPILOT, event=HookEvent.PRE_TOOL_USE)
+    assert decision.outcome is Outcome.DENY
+    assert _verdict(rendered) == "deny"
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"id": "toolu_REDACTED_01", "name": "bash", "args": None, "toolArgs": json.dumps({"command": DESTRUCTIVE})},
+        {
+            "id": "toolu_REDACTED_01",
+            "name": "bash",
+            "args": json.dumps(SAFE),
+            "toolArgs": json.dumps({"command": DESTRUCTIVE}),
+        },
+        {"id": "toolu_REDACTED_01", "name": "bash", "args": None},
+        {"id": "toolu_REDACTED_01", "name": "view", "toolName": "bash", "args": json.dumps({"command": DESTRUCTIVE})},
+    ],
+    ids=["args-null+toolArgs", "args+toolArgs", "args-null", "name+toolName"],
+)
+def test_conflicting_or_null_call_fields_are_denied(governed: Path, entry: dict) -> None:
+    rendered, decision = _pre(governed, [entry])
+    assert decision.outcome is Outcome.DENY
+    assert _verdict(rendered) == "deny"
+
+
+def test_tool_args_null_is_denied(governed: Path) -> None:
+    payload = {"sessionId": "s", "cwd": str(governed), "toolName": "bash", "toolArgs": None}
+    rendered, _, _ = run_hook(payload, host_id=HostId.GITHUB_COPILOT, event=HookEvent.PRE_TOOL_USE)
+    assert _verdict(rendered) == "deny"
+
+
+@pytest.mark.parametrize("batched", [False, True], ids=["seul", "en-lot"])
+def test_write_bash_input_is_judged_as_a_shell_command(governed: Path, batched: bool) -> None:
+    calls = [_call(1, "write_bash", {"shellId": "1", "input": DESTRUCTIVE + "\n"})]
+    if batched:
+        calls.insert(0, _call(0, "view", {"path": "README.md"}))
+    rendered, _ = _pre(governed, calls)
+    assert _verdict(rendered) == "deny"
+
+
+def test_write_bash_classified_as_execution_not_file_write() -> None:
+    from grimoire.hosts.decisions.tool_facts import classify_tool
+    from grimoire.policies.schemas import ActionKind, MutationClass
+
+    facts = classify_tool("write_bash", {"shellId": "1", "input": DESTRUCTIVE})
+    assert facts.command == DESTRUCTIVE
+    assert facts.kind is not ActionKind.FILE_WRITE
+    assert facts.mutation is MutationClass.DESTRUCTIVE
+    read = classify_tool("read_bash", {"shellId": "1", "delay": 5})
+    assert read.command == ""
 
 
 def test_post_tool_use_with_a_batch_payload_does_not_crash(governed: Path) -> None:
