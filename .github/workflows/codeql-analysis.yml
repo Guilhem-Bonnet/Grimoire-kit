@@ -22,6 +22,11 @@ on:
   schedule:
     - cron: "0 6 * * 0" # Weekly Sunday 06:00 UTC
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Seules les PR annulent le run précédent ; push main, tag et nuit vont au bout.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   security-events: write
 
