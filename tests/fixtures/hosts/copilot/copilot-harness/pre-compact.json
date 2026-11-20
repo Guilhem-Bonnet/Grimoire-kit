@@ -1,0 +1,27 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": null,
+  "captured_on": "2026-06-10..2026-06-12",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (events.jsonl, `hook.start`, `data.input`). 6 entrées preCompact : trigger=auto, customInstructions vide ; transcriptPath vide 5 fois, renseigné 1 fois (journal de session).",
+  "version_note": "Version de l'hôte non établie (copilotVersion=\"unknown\", journaux VS Code de la période non conservés).",
+  "wire_caveat": "Hooks déclarés en PascalCase (`PreCompact`) : la charge reçue sur stdin peut différer de celle journalisée.",
+  "observed": {"hook_end_success": true, "hook_output": "non journalisée"},
+  "redaction": "identifiant, chemin et horodatage remplacés.",
+  "payloads": [
+    {
+      "hookType": "preCompact",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "timestamp": 1781000000000,
+        "cwd": "<PROJECT>",
+        "transcriptPath": "",
+        "trigger": "auto",
+        "customInstructions": ""
+      },
+      "expect": {"event": "pre_compact"}
+    }
+  ]
+}

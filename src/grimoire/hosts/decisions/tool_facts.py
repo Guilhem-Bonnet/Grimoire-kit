@@ -45,6 +45,9 @@ _WRITE_MARKERS = (
 #: Comparé au nom entier, il ne capture pas un outil MCP ``create_issue``.
 _WRITE_NAMES = frozenset({"create"})
 _READ_MARKERS = ("read", "cat_file", "view", "open_file", "openfile")
+#: Copilot ``write_bash`` envoie ``input`` à un shell déjà ouvert : c'est une
+#: commande à juger comme Bash, pas une écriture de fichier.
+_SHELL_INPUT_TOOLS = frozenset({"write_bash"})
 
 #: Argument qui porte le texte écrit : ``content``/``new_string`` (Claude Code),
 #: ``file_text`` (``create``) et ``new_str`` (``edit``) du harness Copilot (#1280).
@@ -486,6 +489,8 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     payload = tool_input or {}
     name = tool_name.lower()
     command = _first_str(payload, "command", "cmd", "commandLine", "script")
+    if not command and name in _SHELL_INPUT_TOOLS:
+        command = _first_str(payload, "input")
     targets = _target_paths(payload)
     # Each candidate is matched on its own: joining them first turns the start
     # of a path into the middle of a blob, and ``.env`` stops looking like a
@@ -548,7 +553,9 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     interpreted_code = ", ".join(sorted({language for language, _ in interpreted}))
 
     is_execute = bool(command) or any(marker in name for marker in _EXECUTE_MARKERS)
-    is_write = name in _WRITE_NAMES or any(marker in name for marker in _WRITE_MARKERS)
+    is_write = name not in _SHELL_INPUT_TOOLS and (
+        name in _WRITE_NAMES or any(marker in name for marker in _WRITE_MARKERS)
+    )
     is_web = any(marker in name for marker in _WEB_MARKERS)
     is_read = any(marker in name for marker in _READ_MARKERS)
 

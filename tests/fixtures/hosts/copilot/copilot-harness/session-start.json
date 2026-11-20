@@ -1,0 +1,37 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": null,
+  "captured_on": "2026-06-10..2026-06-16",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (events.jsonl, `hook.start`, `data.input`). 17 entrées sessionStart : source=resume (14), source=new (3), initialPrompt toujours présent.",
+  "version_note": "Version de l'hôte non établie (copilotVersion=\"unknown\", journaux VS Code de la période non conservés).",
+  "wire_caveat": "Hooks déclarés en PascalCase (`SessionStart`) : la charge reçue sur stdin peut différer de celle journalisée.",
+  "observed": {"hook_end_success": true, "hook_output": "non journalisée"},
+  "redaction": "identifiants, chemins, horodatages et invite remplacés ; clés et types conservés.",
+  "payloads": [
+    {
+      "hookType": "sessionStart",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "timestamp": 1781000000000,
+        "cwd": "<PROJECT>",
+        "source": "resume",
+        "initialPrompt": "<PROMPT>"
+      },
+      "expect": {"event": "session_start"}
+    },
+    {
+      "hookType": "sessionStart",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c2",
+        "timestamp": 1781000000000,
+        "cwd": "<PROJECT>",
+        "source": "new",
+        "initialPrompt": "<PROMPT>"
+      },
+      "expect": {"event": "session_start"}
+    }
+  ]
+}

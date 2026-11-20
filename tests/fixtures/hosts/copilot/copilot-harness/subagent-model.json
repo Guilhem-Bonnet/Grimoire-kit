@@ -1,0 +1,40 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": "subagent_model",
+  "captured_on": "2026-06-15..2026-06-16",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (events.jsonl). `subagent.started` porte le `toolCallId` de l'appel `task` ; les `assistant.message` du sous-agent portent `parentToolCallId` égal à ce `toolCallId`, et `model` sur 997 messages sur 2098 (1101 sans).",
+  "version_note": "Version de l'hôte non établie (copilotVersion=\"unknown\", journaux VS Code de la période non conservés). Statut : non vérifié, faute de version.",
+  "wire_caveat": "Canal = journal de session local de l'hôte, pas une charge de hook : aucun hook SubagentStart/SubagentStop n'apparaît dans ce journal.",
+  "observed": {
+    "parent_link": "assistant.message.parentToolCallId == subagent.started.toolCallId (2098/2098)",
+    "model_present": {"with_model": 997, "without_model": 1101},
+    "task_args_may_carry_model": true
+  },
+  "redaction": "identifiants d'appel, noms d'agents du projet et contenus remplacés ; identifiants de modèle conservés (publics).",
+  "events": [
+    {
+      "type": "subagent.started",
+      "data": {"toolCallId": "toolu_REDACTED_21", "agentName": "<AGENT>", "agentDisplayName": "<AGENT>", "agentDescription": "<DESCRIPTION>"}
+    },
+    {
+      "type": "assistant.message",
+      "data": {
+        "messageId": "00000000-0000-4000-8000-0000000000d1",
+        "interactionId": "00000000-0000-4000-8000-0000000000d2",
+        "requestId": "<REQUEST>",
+        "parentToolCallId": "toolu_REDACTED_21",
+        "model": "claude-haiku-4.5",
+        "content": "<CONTENT>",
+        "outputTokens": 120,
+        "toolRequests": []
+      }
+    },
+    {
+      "type": "subagent.completed",
+      "data": {"toolCallId": "toolu_REDACTED_21", "agentName": "<AGENT>", "agentDisplayName": "<AGENT>"}
+    }
+  ]
+}
