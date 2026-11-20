@@ -208,8 +208,14 @@ table de permissions refuse la lecture des secrets), et Copilot n'a pas de
 table de permissions.
 
 La recherche (`Grep`/`Glob` de Claude Code, `grep`/`glob`/`rg` de Copilot) est
-jugée comme une lecture pour le refus des secrets. La garde lit le chemin
-cherché, le filtre de fichiers (`glob`) et le motif de `Glob`. Elle ne lit
+jugée comme une lecture pour le refus des secrets. La garde lit le ou les
+chemins cherchés (`path`, `paths`), le filtre de fichiers (`glob`) et le motif
+de `Glob`. Un motif de fichiers est aussi développé (accolades) et confronté à
+des noms de secrets tirés des familles protégées et à des fichiers ordinaires
+(`main.py`, `README.md`, `package.json`…). Il est refusé s'il attrape un nom de
+secret sans attraper aucun fichier ordinaire : `.env.*` ou `*.{pem,p12}` le
+sont, `**/*`, `*.py` ou `*.json` restent permis. `.env.example` est refusé,
+comme pour une lecture : il relève de la famille `.env.*`. La garde ne lit
 jamais le motif de contenu d'un `Grep` : chercher `\.env` dans le code reste
 permis. Le matcher de la garde Copilot inclut ces outils. Celui de Claude Code
 ne change pas : sous Claude Code, la table de permissions applique les refus

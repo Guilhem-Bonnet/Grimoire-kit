@@ -211,12 +211,50 @@ def test_doctor_reads_the_declared_hosts(tmp_path: Path) -> None:
         ("grep", {"pattern": "KEY", "path": "app/.env"}),
         ("glob", {"pattern": "**/id_rsa"}),
         ("rg", {"pattern": "KEY", "path": ".npmrc"}),
+        ("Grep", {"pattern": "KEY", "paths": ["src", "config/secrets"]}),
+        # `.env.example` est refusé comme par la lecture (`Read`), famille dotenv-variant.
+        ("Glob", {"pattern": ".env.example"}),
     ],
 )
 def test_a_search_into_secrets_is_a_secret_read(tool: str, args: dict[str, Any]) -> None:
     facts = classify_tool(tool, args)
     assert facts.kind is ActionKind.SECRET_ACCESS, facts
     assert facts.secret_target
+
+
+#: Globs de secrets courants que le retrait des jokers ne reconnaissait pas (relecture de #1295).
+_SECRET_GLOBS = (
+    ".env.*",
+    "**/.env.*",
+    "*.{pem,p12}",
+    "**/*.{pem,key}",
+    "{secrets,x}/**",
+    ".e?v",
+    ".e*",
+    "id_*",
+    ".npm*",
+    "credential*",
+    "cred*.json",
+    "*.p?m",
+)
+
+
+@pytest.mark.parametrize("glob", _SECRET_GLOBS)
+@pytest.mark.parametrize(
+    ("tool", "key"), [("Glob", "pattern"), ("glob", "pattern"), ("Grep", "glob"), ("grep", "glob")]
+)
+def test_a_file_glob_aimed_at_secrets_is_a_secret_read(tool: str, key: str, glob: str) -> None:
+    args = {key: glob} if key == "pattern" else {"pattern": "KEY", key: glob}
+    facts = classify_tool(tool, args)
+    assert facts.kind is ActionKind.SECRET_ACCESS, (glob, facts)
+
+
+def test_brace_expansion() -> None:
+    from grimoire.hosts.decisions.search_globs import expand_braces
+
+    assert set(expand_braces("*.{pem,p12}")) == {"*.pem", "*.p12"}
+    assert set(expand_braces("{a,{b,c}}/x")) == {"a/x", "b/x", "c/x"}
+    assert expand_braces("plain") == ("plain",)
 
 
 @pytest.mark.parametrize(
@@ -228,6 +266,14 @@ def test_a_search_into_secrets_is_a_secret_read(tool: str, args: dict[str, Any])
         ("Glob", {"pattern": "**/*.py"}),
         ("Glob", {"pattern": "src/**/*.ts", "path": "."}),
         ("grep", {"pattern": "TODO"}),
+        ("Glob", {"pattern": "**/*"}),
+        ("Glob", {"pattern": "*"}),
+        ("Glob", {"pattern": "*.json"}),
+        ("Glob", {"pattern": ".*"}),
+        ("Glob", {"pattern": "*.{yml,yaml}"}),
+        ("Grep", {"pattern": "x", "glob": "*.md"}),
+        ("Grep", {"pattern": "x", "glob": "src/**"}),
+        ("Grep", {"pattern": "x", "paths": ["src", "tests"]}),
     ],
 )
 def test_legitimate_searches_stay_read_only(tool: str, args: dict[str, Any]) -> None:
