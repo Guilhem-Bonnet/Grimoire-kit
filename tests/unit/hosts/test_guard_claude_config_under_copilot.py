@@ -61,10 +61,13 @@ def governed(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _entry(host: str, root: Path, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:
-    """Le point d'entrée réel (``hook_entry.main``), comme le lance l'hôte, dans un sous-processus."""
+def _entry(host: str, root: Path, payload: dict[str, Any], pre: str = "") -> subprocess.CompletedProcess[str]:
+    """Le point d'entrée réel (``hook_entry.main``), comme le lance l'hôte, dans un sous-processus.
+
+    *pre* : code exécuté avant le point d'entrée (simuler une panne de la garde).
+    """
     probe = (
-        "import sys\n"
+        pre + "import sys\n"
         f"sys.argv = ['entry', '--host', {host!r}, '--event', 'PreToolUse', '--project-root', {str(root)!r}]\n"
         "from grimoire.hosts.hook_entry import main\n"
         "raise SystemExit(main())\n"
@@ -160,6 +163,50 @@ def test_an_allowed_call_never_exits_2_nor_gains_a_flat_verdict(governed: Path, 
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout) if proc.stdout.strip() else {}
     assert "permissionDecision" not in out
+
+
+#: Fait planter la décision de la garde dans le sous-processus (panne simulée).
+_CRASH = (
+    "import grimoire.hosts.runtime as _rt\n"
+    "def _boom(*_a, **_k):\n"
+    "    raise RuntimeError('panne simulée')\n"
+    "_rt.run_hook = _boom\n"
+)
+
+
+@pytest.mark.parametrize("shape", [_pascal, _camel])
+def test_a_crashing_guard_under_claude_config_run_by_copilot_exits_2(governed: Path, shape: Any) -> None:
+    proc = _entry("claude-code", governed, shape(governed, "ls"), pre=_CRASH)
+    assert proc.returncode == 2, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["permissionDecision"] == "deny"
+    assert "garde avant outil en panne (RuntimeError: panne simulée)" in proc.stderr
+
+
+@pytest.mark.parametrize("shape", [_claude, _undecidable])
+def test_a_crashing_guard_under_claude_code_keeps_exit_0(governed: Path, shape: Any) -> None:
+    proc = _entry("claude-code", governed, shape(governed, "ls"), pre=_CRASH)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert_claude_render(out, "deny")
+    assert out["permissionDecision"] == "deny"
+
+
+def test_an_ask_on_an_undecidable_payload_is_flat_with_exit_0(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import io
+
+    from grimoire.hosts import runtime
+    from grimoire.hosts.decisions import Decision, Outcome
+
+    monkeypatch.setattr(runtime, "_decide", lambda *_a: Decision(outcome=Outcome.ASK, reason="[Grimoire] à toi."))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_undecidable(governed, "make deploy"))))
+    code = runtime.main(["--host", "claude-code", "--event", "PreToolUse", "--project-root", str(governed)])
+    out = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert_claude_render(out, "ask")
+    assert out["permissionDecision"] == "ask" and out["permissionDecisionReason"] == "[Grimoire] à toi."
 
 
 def test_payload_markers() -> None:
