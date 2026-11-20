@@ -338,6 +338,19 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
                 # mentionne pas `hookSpecificOutput`, que lit le harness Local. Les
                 # deux formes portent le même verdict ; le refus sort aussi en code 2.
                 payload.update(copilot_flat_verdict(specific))
+            elif (
+                host_id is HostId.CLAUDE_CODE_CLI
+                and (decision.is_refusal or decision.outcome is Outcome.ASK)
+                and not copilot_wire.claude_code_payload(hook.raw)
+            ):
+                # Charge de `--host claude` qui ne prouve pas Claude Code (snake_case sans
+                # clé propre à Claude Code) : peut-être le harness Copilot qui exécute
+                # `.claude/settings.json` (une charge qui le prouve est rendue pour Copilot,
+                # voir ``main``). Le verdict part aussi à plat, en code 0. Claude Code analyse
+                # la sortie avec un schéma qui ignore une clé inconnue (« Hook JSON output had
+                # unrecognized keys (ignored) », relevé dans le binaire 2.1.330 ; sa
+                # documentation n'en dit rien) : il lit toujours `hookSpecificOutput`.
+                payload.update(copilot_flat_verdict(specific))
         elif decision.reason:
             # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
@@ -864,6 +877,15 @@ def main(argv: list[str] | None = None) -> int:
         # ``--event``: the payload still names it.
         event = parse_event(wire_event, host_id=host_id)
     label = event_name or wire_event or "événement inconnu"
+    if (
+        host_id is HostId.CLAUDE_CODE_CLI
+        and event is HookEvent.PRE_TOOL_USE
+        and copilot_wire.copilot_harness_payload(payload)
+    ):
+        # Hook de `.claude/settings.json` exécuté par le harness Copilot (la charge le
+        # prouve) : le verdict est rendu pour le harness qui le lit (forme à plat + code 2
+        # sur un refus), Claude Code ne recevant jamais cette charge.
+        host_id = HostId.GITHUB_COPILOT
 
     if refusal := gemini_fail_closed_reason(host_id, event, payload_problem):
         # No decision can be rendered: exit 2 is Gemini's documented refusal,
@@ -894,6 +916,9 @@ def main(argv: list[str] | None = None) -> int:
             verdict = guard_failure_verdict(cause)
             if host_id is HostId.GITHUB_COPILOT:
                 return _copilot_refusal_exit(copilot_guard_refusal(verdict))
+            if host_id is HostId.CLAUDE_CODE_CLI and not copilot_wire.claude_code_payload(payload):
+                # Même règle que ``render`` : charge indécidable, verdict aussi à plat, code 0.
+                verdict = copilot_guard_refusal(verdict)
             sys.stdout.write(json.dumps(verdict, ensure_ascii=False))
             return 0
         blocked_event = event if event in gemini_wire.BLOCKING_EVENTS else None

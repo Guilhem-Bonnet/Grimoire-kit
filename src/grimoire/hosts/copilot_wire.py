@@ -34,6 +34,8 @@ __all__ = [
     "STOP_BLOCK_LIMIT",
     "PayloadDialect",
     "ToolCall",
+    "claude_code_payload",
+    "copilot_harness_payload",
     "detect_dialect",
     "event_from_alias",
     "inspect_tool_calls",
@@ -100,6 +102,43 @@ def detect_dialect(payload: Mapping[str, Any]) -> PayloadDialect:
     if snake and not camel:
         return PayloadDialect.SNAKE
     return PayloadDialect.UNKNOWN
+
+
+#: Clés que seul Claude Code envoie à ses hooks : ``permission_mode`` est un champ
+#: commun de toutes ses entrées d'outil (https://code.claude.com/docs/en/hooks,
+#: « Common input fields »), ``effort``/``prompt_id``/``scratchpad_dir`` aussi.
+#: Aucune n'apparaît dans les entrées documentées par GitHub (harness Copilot,
+#: camelCase comme PascalCase) ni dans celles du harness Local.
+_CLAUDE_CODE_KEYS = frozenset({"permission_mode", "effort", "prompt_id", "scratchpad_dir"})
+
+
+def claude_code_payload(payload: Mapping[str, Any]) -> bool:
+    """*payload* porte-t-il une clé que seul Claude Code envoie ?"""
+    return bool(_CLAUDE_CODE_KEYS & set(payload))
+
+
+def copilot_harness_payload(payload: Mapping[str, Any]) -> bool:
+    """*payload* vient-il d'un harness Copilot, d'après une marque sourcée de sa forme ?
+
+    Sert quand la commande du hook dit ``--host claude`` : Copilot exécute aussi
+    les hooks de ``.claude/settings.json`` (référence GitHub : « Cross-tool
+    ``.claude/settings.json`` and ``.claude/settings.local.json`` files in the
+    repository are also read »). Deux marques :
+
+    - le dialecte camelCase (:func:`detect_dialect`), que Claude Code n'envoie jamais ;
+    - une charge snake_case qui porte ``timestamp`` : la référence GitHub le donne
+      dans l'entrée PascalCase (« ISO 8601 string ») et l'entrée de Claude Code ne
+      l'a pas (« Common input fields »). Une charge qui porte aussi une clé propre
+      à Claude Code (:func:`claude_code_payload`) n'est jamais attribuée à Copilot.
+
+    Une charge snake_case sans l'une ni l'autre reste indécidable : ``False``.
+    """
+    if claude_code_payload(payload):
+        return False
+    dialect = detect_dialect(payload)
+    if dialect is PayloadDialect.COPILOT:
+        return True
+    return dialect is PayloadDialect.SNAKE and "timestamp" in payload
 
 
 #: Refus consécutifs d'un ``agentStop`` que le harness Copilot honore : « After 8

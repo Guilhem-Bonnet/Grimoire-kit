@@ -53,13 +53,11 @@ _WRITE_OR_EXECUTE = (
     "Edit",  # modification de fichier
 )
 
+#: Lecture et recherche de fichiers : gardées pour le refus des secrets (pas de table de permissions).
+_FILE_READS = ("view", "Read", "grep", "rg", "Grep", "glob", "Glob")
+
 #: Outils qui ne lisent ni n'écrivent de fichier et n'exécutent rien : hors garde.
 _NOT_GUARDED = (
-    "grep",
-    "rg",
-    "Grep",
-    "glob",
-    "Glob",
     "web_fetch",
     "WebFetch",
     "web_search",
@@ -200,7 +198,7 @@ def test_guard_matcher_covers_every_write_or_execute_tool(tool: str) -> None:
     assert _matches(matcher_for(_guard()), tool)
 
 
-@pytest.mark.parametrize("tool", ["view", "Read"])
+@pytest.mark.parametrize("tool", _FILE_READS)
 def test_guard_matcher_covers_file_reads_for_secret_refusal(tool: str) -> None:
     """Sans table de permissions, le refus de lecture d'un secret n'existe que dans la garde."""
     assert _matches(matcher_for(_guard()), tool)
@@ -216,7 +214,7 @@ def test_guard_skips_builtin_tools_that_neither_write_nor_execute(tool: str) -> 
     assert not _guarded(tool)
 
 
-@pytest.mark.parametrize("tool", (*_WRITE_OR_EXECUTE, "view", "Read"))
+@pytest.mark.parametrize("tool", (*_WRITE_OR_EXECUTE, *_FILE_READS))
 def test_builtin_guarded_tools_run_the_decision_once(tool: str) -> None:
     assert re.fullmatch(f"(?:{UNKNOWN_TOOL_MATCHER})", tool) is None
 

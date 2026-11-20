@@ -45,6 +45,19 @@ _WRITE_MARKERS = (
 #: Comparé au nom entier, il ne capture pas un outil MCP ``create_issue``.
 _WRITE_NAMES = frozenset({"create"})
 _READ_MARKERS = ("read", "cat_file", "view", "open_file", "openfile")
+#: Recherche de contenu ou de fichiers : elle lit ce qu'elle parcourt, elle est donc
+#: jugée comme une lecture pour le refus des secrets. Noms entiers (``glob`` en
+#: sous-chaîne prendrait un outil MCP ``set_global_…``) : ``Grep``/``Glob`` (Claude
+#: Code), ``grep``/``glob`` et ``rg`` (harness Copilot, référence GitHub).
+_SEARCH_NAMES = frozenset({"grep", "glob", "rg"})
+#: Arguments qui désignent *où* une recherche lit, jamais le motif de contenu d'un
+#: ``Grep`` (``pattern`` y est une regex : chercher ``\.env`` dans le code est légitime) :
+#: ``glob`` (filtre de fichiers de ``Grep``) et ``pattern`` de ``Glob`` (motif de chemin).
+_SEARCH_GLOB_KEYS = ("glob",)
+_GLOB_TOOL_PATTERN_KEYS = ("pattern",)
+#: Méta-caractères d'un motif de fichiers retirés avant la comparaison aux familles
+#: de secrets : ``**/*.pem`` se lit ``/.pem``, ``.env*`` se lit ``.env``.
+_GLOB_META = str.maketrans({"*": "", "?": "", "[": "", "]": "", "!": "", "{": " ", "}": " ", ",": " "})
 #: Copilot ``write_bash`` envoie ``input`` à un shell déjà ouvert : c'est une
 #: commande à juger comme Bash, pas une écriture de fichier.
 _SHELL_INPUT_TOOLS = frozenset({"write_bash"})
@@ -447,6 +460,23 @@ def _target_paths(tool_input: dict[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(paths))
 
 
+def _search_locations(name: str, payload: dict[str, Any], targets: tuple[str, ...]) -> list[str]:
+    """Ce qu'une recherche parcourt, sous une forme que les familles de secrets reconnaissent.
+
+    Le chemin cherché est un dossier autant qu'un fichier : il est aussi testé suivi
+    d'un séparateur (un dossier de secrets nommé sans ``/`` final reste reconnu). Les
+    motifs de fichiers (``glob`` de ``Grep``, ``pattern`` de ``Glob``) sont testés tels
+    quels puis sans leurs jokers. Le motif de contenu d'un ``Grep`` n'est jamais lu.
+    """
+    keys = _SEARCH_GLOB_KEYS + (_GLOB_TOOL_PATTERN_KEYS if name == "glob" else ())
+    found = [f"{t.rstrip('/')}/" for t in targets]
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            found.extend((value, value.translate(_GLOB_META)))
+    return found
+
+
 #: The one file the profile-downgrade guard watches — deliberately just this
 #: path, not the rest of ``_grimoire/standard/`` (``policies.yaml``,
 #: ``task-board.yaml``, ...), which this guard has no opinion on.
@@ -503,6 +533,9 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     interpreted = interpreted_bodies(command) if command else ()
     candidates = [c for c in (_strip_heredoc_bodies(command) if command else "", *targets) if c]
     candidates.extend(body for _, body in interpreted)
+    is_search = name in _SEARCH_NAMES
+    if is_search:
+        candidates.extend(_search_locations(name, payload, targets))
     if command:
         # Le nom que le programme reçoit, guillemets retirés : ``.e"n"v`` est ``.env``.
         candidates.append(unquoted_text(command))
@@ -557,7 +590,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
         name in _WRITE_NAMES or any(marker in name for marker in _WRITE_MARKERS)
     )
     is_web = any(marker in name for marker in _WEB_MARKERS)
-    is_read = any(marker in name for marker in _READ_MARKERS)
+    is_read = is_search or any(marker in name for marker in _READ_MARKERS)
 
     if secret_target and (is_read or is_execute or not name):
         kind = ActionKind.SECRET_ACCESS

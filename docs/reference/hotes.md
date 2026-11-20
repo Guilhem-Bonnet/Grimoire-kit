@@ -182,6 +182,39 @@ et donne stderr au modèle. Le refus tient donc même si un harness ignore la
 forme JSON. Une demande (`ask`) reçoit la même forme au premier niveau, sans
 code de refus. Sous Claude Code, rien ne change : code 0 et JSON.
 
+Un projet câblé pour Claude Code seul peut tourner sous Copilot : Copilot
+exécute aussi les hooks de `.claude/settings.json`, avec `--host claude-code`
+dans la commande. La garde regarde alors la charge reçue :
+
+- si la charge prouve le harness Copilot, le refus est rendu pour Copilot
+  (forme à plat et code 2). Deux formes le prouvent : le camelCase, ou une
+  charge snake_case qui porte `timestamp` (la référence GitHub le donne pour un
+  événement PascalCase, pas l'entrée de Claude Code) ;
+- si la charge porte une clé que seul Claude Code envoie (`permission_mode`,
+  `effort`, `prompt_id`, `scratchpad_dir`), le rendu Claude Code reste
+  strictement le même ;
+- si la charge ne permet pas de trancher, le refus et la demande portent en plus
+  `permissionDecision` et `permissionDecisionReason` au premier niveau, avec le
+  code 0. La documentation de Claude Code ne dit rien des clés inconnues. Le
+  binaire 2.1.330 les ignore et note « unrecognized keys (ignored) » dans son
+  journal de débogage : le verdict lu par Claude Code reste celui de
+  `hookSpecificOutput`.
+
+`grimoire doctor` le signale (`copilot_claude_hooks_only`, WARN) quand Copilot est
+activé ou détecté pour le projet, que `.claude/settings.json` lance le kit et
+qu'aucun fichier `.github/hooks/grimoire-*.json` n'existe. Le matcher de ces
+hooks Claude Code ne couvre ni la lecture ni la recherche (sous Claude Code, la
+table de permissions refuse la lecture des secrets), et Copilot n'a pas de
+table de permissions.
+
+La recherche (`Grep`/`Glob` de Claude Code, `grep`/`glob`/`rg` de Copilot) est
+jugée comme une lecture pour le refus des secrets. La garde lit le chemin
+cherché, le filtre de fichiers (`glob`) et le motif de `Glob`. Elle ne lit
+jamais le motif de contenu d'un `Grep` : chercher `\.env` dans le code reste
+permis. Le matcher de la garde Copilot inclut ces outils. Celui de Claude Code
+ne change pas : sous Claude Code, la table de permissions applique les refus
+`Read(...)` à la recherche, au mieux selon la documentation de Claude Code.
+
 Le refus de clôture (`Stop`, `SubagentStop`) est rendu dans la forme que lit
 chaque harness. Le harness Copilot lit `decision`/`reason` au premier niveau
 (`agentStop`, `subagentStop`) ; le harness Local lit

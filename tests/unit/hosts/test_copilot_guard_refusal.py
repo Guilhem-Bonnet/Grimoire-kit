@@ -65,6 +65,15 @@ def _snake(root: Path, command: str) -> dict[str, Any]:
     return {"hook_event_name": "PreToolUse", "cwd": str(root), "tool_name": "Bash", "tool_input": {"command": command}}
 
 
+def _claude(root: Path, command: str) -> dict[str, Any]:
+    """Une charge de Claude Code réel : ``permission_mode`` est un champ commun de ses entrées d'outil."""
+    return {**_snake(root, command), "session_id": "s", "transcript_path": "/t.jsonl", "permission_mode": "default"}
+
+
+def _for(host: str, root: Path, command: str) -> dict[str, Any]:
+    return _claude(root, command) if host == "claude" else _snake(root, command)
+
+
 def _camel_batch(root: Path) -> dict[str, Any]:
     return {
         "sessionId": "s",
@@ -110,7 +119,7 @@ def test_copilot_allow_is_unchanged_and_exits_0(governed: Path) -> None:
 
 
 def test_claude_code_refusal_is_strictly_unchanged(governed: Path) -> None:
-    proc = _entry("claude", governed, _snake(governed, DESTRUCTIVE))
+    proc = _entry("claude", governed, _claude(governed, DESTRUCTIVE))
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout)
     assert set(out) == {"hookSpecificOutput"}
@@ -132,7 +141,7 @@ def test_copilot_ask_is_flat_without_exit_2(governed: Path, monkeypatch: pytest.
     assert decision.outcome is Outcome.ASK
     assert rendered["permissionDecision"] == "ask" and rendered["permissionDecisionReason"] == "[Grimoire] à toi."
     assert rendered["hookSpecificOutput"]["permissionDecision"] == "ask"
-    rendered, _, _ = run_hook(_snake(governed, "make deploy"), host_id=HostId.CLAUDE_CODE_CLI)
+    rendered, _, _ = run_hook(_claude(governed, "make deploy"), host_id=HostId.CLAUDE_CODE_CLI)
     assert set(rendered) == {"hookSpecificOutput"}
 
 
@@ -144,7 +153,7 @@ def test_runtime_main_returns_2_only_on_a_copilot_refusal(
     from grimoire.hosts.runtime import main
 
     for host, expected in (("copilot", 2), ("claude", 0)):
-        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_snake(governed, DESTRUCTIVE))))
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_for(host, governed, DESTRUCTIVE))))
         code = main(["--host", host, "--event", "PreToolUse", "--project-root", str(governed)])
         capsys.readouterr()
         assert code == expected, host
@@ -158,6 +167,7 @@ def test_import_failure_refuses_with_exit_2_under_copilot(capsys: pytest.Capture
     out = json.loads(captured.out)
     assert out["permissionDecision"] == "deny" and out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "garde avant outil en panne" in captured.err
+    raw = json.dumps({"hook_event_name": "PreToolUse", "permission_mode": "default"})
     code = hook_entry.import_failure(["--host", "claude", "--event", "PreToolUse"], raw, "ImportError: x")
     assert code == 0 and "permissionDecision" not in json.loads(capsys.readouterr().out)
 
@@ -186,7 +196,7 @@ def test_a_block_outcome_exits_2_under_copilot(
 
     monkeypatch.setattr(runtime, "_decide", lambda *_a: Decision(outcome=Outcome.BLOCK, reason="[Grimoire] non."))
     for host, expected in (("copilot", 2), ("claude", 0)):
-        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_snake(governed, "ls"))))
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_for(host, governed, "ls"))))
         code = runtime.main(["--host", host, "--event", "PreToolUse", "--project-root", str(governed)])
         out = json.loads(capsys.readouterr().out)
         assert code == expected, host
@@ -206,7 +216,7 @@ def test_a_crashing_guard_exits_2_with_its_reason_on_stderr_under_copilot(
 
     monkeypatch.setattr(runtime, "run_hook", boom)
     for host, expected in (("copilot", 2), ("claude", 0)):
-        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_snake(governed, "ls"))))
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_for(host, governed, "ls"))))
         code = runtime.main(["--host", host, "--event", "PreToolUse", "--project-root", str(governed)])
         captured = capsys.readouterr()
         out = json.loads(captured.out)

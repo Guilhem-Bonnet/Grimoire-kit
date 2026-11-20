@@ -9,6 +9,8 @@ Trois constats, tous tirés des fichiers du projet et de la documentation GitHub
   version antérieure est à régénérer par ``grimoire up``. Le délai de la garde
   n'est pas contrôlé ici : ``hook_timeout_copilot`` s'en charge.
 - ``copilot_hooks_doubled`` : Claude Code et Copilot sont tous deux câblés.
+- ``copilot_claude_hooks_only`` : Copilot est activé ou détecté, mais seuls les hooks
+  Claude Code (``.claude/settings.json``) lancent le kit.
 - ``copilot_harness`` : ce que les fichiers permettent de dire du harness.
 
 Séparé de :mod:`grimoire.cli.doctor_hooks` pour tenir sous le plafond de taille.
@@ -126,6 +128,40 @@ def check_copilot_hooks_doubled(target: Path) -> list[EnvCheck]:
     ]
 
 
+def check_copilot_claude_hooks_only(target: Path) -> list[EnvCheck]:
+    """Copilot activé ou détecté, mais seul ``.claude/settings.json`` lance le kit ?
+
+    Copilot exécute aussi ces hooks (référence GitHub), avec ``--host claude-code``.
+    Leur matcher est celui de Claude Code : ni la lecture ni la recherche n'y sont,
+    car sous Claude Code la table de permissions refuse la lecture des secrets ;
+    Copilot n'a pas de telle table. Le refus de la garde lui-même est rendu lisible
+    par Copilot quand la charge le permet (``runtime.main``), pas cette couverture.
+    """
+    if _kit_hook_files(target):
+        return []
+    if not any(rel.startswith(".claude/") for rel, _, _ in _generated_hook_commands(target)):
+        return []
+    from grimoire.hosts.detection import resolve_enabled_hosts
+
+    if "copilot" not in resolve_enabled_hosts(target):
+        return []
+    return [
+        EnvCheck(
+            "copilot_claude_hooks_only",
+            passed=True,
+            level="warn",
+            detail=(
+                "Copilot is enabled or detected for this project but only .claude/settings.json launches the "
+                "kit: Copilot also runs those hooks (GitHub hooks reference), with Claude Code's matcher, which "
+                "leaves file reads and searches to Claude Code's permission table — Copilot has none, so the "
+                "secret-read refusal does not run under Copilot"
+            ),
+            remedy="enable the copilot host (`hosts.enabled` in project-context.yaml) and run `grimoire up` "
+            "to write .github/hooks/grimoire-*.json",
+        )
+    ]
+
+
 def check_copilot_harness(target: Path) -> list[EnvCheck]:
     """Ce que le projet permet de dire du harness Copilot (information seule)."""
     files = _kit_hook_files(target)
@@ -146,5 +182,6 @@ def check_copilot_hooks(target: Path) -> list[EnvCheck]:
     return [
         *check_copilot_hook_format(target),
         *check_copilot_hooks_doubled(target),
+        *check_copilot_claude_hooks_only(target),
         *check_copilot_harness(target),
     ]
