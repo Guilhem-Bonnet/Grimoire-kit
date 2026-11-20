@@ -488,6 +488,8 @@ grimoire up       # réinstalle les hooks avec le lanceur trouvé sur ce poste e
 
 Si `grimoire` lui-même ne se lance plus, réinstaller le kit (`uv tool install --force grimoire-kit` ou `pipx reinstall grimoire-kit`). En dernier recours, retirer à la main la ligne `"onFailure": "block"` du hook `PreToolUse` dans `.claude/settings.json` : la garde repasse en échec ouvert, et le prochain `grimoire up` la remet.
 
+**Sous GitHub Copilot**, le contrat diffère : une erreur de la garde (sortie non nulle) refuse l'appel, mais un dépassement de délai le laisse toujours passer, garde comprise — c'est le comportement de l'hôte, aucun champ ne le change. `grimoire up` écrit donc `.github/hooks/grimoire-pre-tool-use.json` au format du harness Copilot (`"version": 1`, `bash`/`powershell`, une entrée dont le `matcher` nomme les outils intégrés qui lisent un fichier, l'écrivent ou exécutent une commande, et une seconde qui rattrape tout outil non intégré, MCP compris ; ce qui reste hors garde est listé dans `.github/hooks/README.md`) avec `"timeoutSec": 30`, pour que ce cas reste rare sous charge. `grimoire doctor` le rappelle (contrôle `hook_timeout_copilot`) et avertit quand le délai est plus court, comme sur les fichiers écrits par les versions précédentes du kit (`"timeout": 10`).
+
 <img src="../assets/divider.svg" width="100%" alt="">
 
 ## <img src="../assets/icons/lightbulb.svg" width="28" height="28" alt=""> Obtenir de l'aide
