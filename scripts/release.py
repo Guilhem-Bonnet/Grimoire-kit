@@ -5,7 +5,7 @@ Enchaîne la procédure jusque-là faite à la main (PR « chore: release » #12
 
 1. ``main`` propre (aucune modification suivie) et à jour d'``origin/main`` ;
 2. branche ``release/X.Y.Z`` ;
-3. numéro de PR ``(#NNNN)`` ajouté à chaque puce de fragment qui n'en a pas — le
+3. numéro de PR ``(#NNNN)`` ajouté à chaque puce de fragment qui ne finit pas déjà par lui — le
    numéro du commit qui a ajouté le fragment. Sans lui, ``check-changelog-release.py``
    refuse un commit ``feat``/``fix``/``perf`` qui n'a touché que ``changelog.d/`` ;
 4. ``version.txt``, ``scripts/changelog-assemble.py X.Y.Z``, ``__version__`` ;
@@ -165,7 +165,10 @@ def fragment_pr(repo: Path, path: Path) -> str | None:
 
 
 def with_pr_number(body: str, number: str) -> str:
-    """Ajoute `` (#N)`` à la dernière ligne de chaque puce qui n'en porte pas."""
+    """Ajoute `` (#N)`` à la dernière ligne de chaque puce dont le dernier ``(#…)`` n'est pas ``N``.
+
+    Une référence d'issue finale (``(#1280)``) n'est jamais retirée : la PR vient après.
+    """
     lines = body.rstrip("\n").split("\n")
     ends: list[int] = []
     for index, line in enumerate(lines):
@@ -174,7 +177,8 @@ def with_pr_number(body: str, number: str) -> str:
         elif ends and line.strip() and line.startswith((" ", "\t")):
             ends[-1] = index
     for index in ends:
-        if not PR_SUFFIX.search(lines[index]):
+        last = PR_SUFFIX.search(lines[index])
+        if last is None or last.group(1) != number:
             lines[index] = f"{lines[index].rstrip()} (#{number})"
     return "\n".join(lines) + "\n"
 
