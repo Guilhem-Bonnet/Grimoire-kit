@@ -300,6 +300,6 @@ def test_windows_framework_tourne_hors_pr_et_sur_les_releases() -> None:
     gate = job["env"]["FULL_SUITE"]
     assert "github.event_name != 'pull_request'" in gate and "matrix.os == 'ubuntu-latest'" in gate
     assert "chore: release" in gate
-    suite = next(s for s in job["steps"] if "pytest tests/test_" in str(s.get("run", "")))
+    suite = next(s for s in job["steps"] if "TARGETS=(tests/test_*.py)" in str(s.get("run", "")))
     assert suite["if"] == "env.FULL_SUITE == 'true'"
     assert "windows-latest" in job["strategy"]["matrix"]["os"]  # le nom du check requis reste

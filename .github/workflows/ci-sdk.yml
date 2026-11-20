@@ -28,6 +28,13 @@ on:
       - "CONTRIBUTING.md"
       - "CHANGELOG.md"
       - ".github/PULL_REQUEST_TEMPLATE.md"
+      # Le reste des chemins qu'une PR documentaire ne paie pas en entier
+      # (scripts/ci-scope.py) : main doit rejouer la suite complète derrière elle.
+      - "changelog.d/**"
+      - "ARCHITECTURE.md"
+      - "CODE_OF_CONDUCT.md"
+      - "SECURITY.md"
+      - ".github/ISSUE_TEMPLATE/**"
       - ".pre-commit-config.yaml"
       # Lus par tests/unit/test_evals_collect.py : une PR evals-only qui
       # modifie les suites doit exécuter le SDK CI (cf. main rouge du
@@ -65,6 +72,34 @@ permissions:
   contents: read
 
 jobs:
+  # Une PR purement documentaire (scripts/ci-scope.py) ne paie ni la suite répartie
+  # complète, ni Neo4j : les jobs restent déclarés et se prononcent (sautés ou réduits
+  # aux tests qui lisent la documentation), jamais absents — un check requis par la
+  # protection de main qui ne se déclare pas bloque la fusion. main, la nuit, la
+  # demande et les PR de release passent toujours tout.
+  changes:
+    name: "Périmètre de la PR"
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # Le commit de fusion de la PR et son premier parent (la base) suffisent.
+          fetch-depth: 2
+
+      - name: Décider
+        id: scope
+        shell: bash
+        env:
+          ALWAYS_FULL: "${{ github.event_name != 'pull_request' || startsWith(github.event.pull_request.title, 'chore: release') }}"
+        run: |
+          if [ "$ALWAYS_FULL" = "true" ]; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/ci-scope.py --base HEAD^1 --head HEAD | tee -a "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: "Ruff lint"
     runs-on: ubuntu-latest
@@ -240,8 +275,12 @@ jobs:
   # plusieurs jobs réduit l'attente d'une PR. Le nombre de jobs vit ici et dans --of.
   test-shard:
     name: "Tests 3.12 ubuntu (${{ matrix.shard }}/4)"
+    needs: [changes]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # PR documentaire : seuls les fichiers de test qui citent un document, répartis pareil.
+      DOCS_SUBSET: "${{ needs.changes.outputs.full == 'false' && '--docs-subset' || '' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -262,7 +301,14 @@ jobs:
         # toujours échouer, il s'applique à la couverture recombinée dans test-aggregate.
         shell: bash
         run: |
-          mapfile -t FILES < <(python scripts/ci-test-shards.py --shard ${{ matrix.shard }} --of 4)
+          # Capture sous `set -e` : un script en échec fait échouer la part (une substitution de processus avalerait son code).
+          LIST="$(python scripts/ci-test-shards.py $DOCS_SUBSET --shard ${{ matrix.shard }} --of 4)"
+          if [ -z "$LIST" ]; then
+            # Une liste vide laisserait pytest lancer tout `testpaths` ; tolérée seulement pour le sous-ensemble doc.
+            if [ -n "$DOCS_SUBSET" ]; then echo "Aucun fichier documentaire dans cette part."; : > .coverage; exit 0; fi
+            echo "::error::part ${{ matrix.shard }}/4 vide hors sous-ensemble documentaire"; exit 1
+          fi
+          mapfile -t FILES <<< "$LIST"
           pytest "${FILES[@]}" -q --tb=short -n auto --dist loadfile \
             --timeout=300 --timeout-method=thread --durations=10 \
             --cov=src/grimoire --cov-report= --cov-fail-under=0
@@ -277,32 +323,50 @@ jobs:
 
   test-aggregate:
     name: "Tests (Python 3.12, ubuntu-latest)"
-    needs: [test-shard]
+    needs: [test-shard, changes]
     if: always()
     runs-on: ubuntu-latest
+    env:
+      FULL: ${{ needs.changes.outputs.full }}
     steps:
       - name: Tous les jobs de la suite doivent être verts
         shell: bash
         env:
           SHARDS_RESULT: ${{ needs.test-shard.result }}
-        run: test "$SHARDS_RESULT" = "success"
+          SCOPE_RESULT: ${{ needs.changes.result }}
+        run: |
+          test "$SCOPE_RESULT" = "success"
+          test "$SHARDS_RESULT" = "success"
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      # PR documentaire : les parts n'ont couru qu'une fraction de la suite, le plancher
+      # de couverture ne s'y juge pas ; le push sur main (chemins documentaires compris
+      # dans `on.push.paths`) et la passe de nuit le rejugent sur la suite complète.
+      - name: Suite réduite aux tests qui lisent la documentation
+        if: env.FULL == 'false'
+        shell: bash
+        run: echo "PR documentaire, couverture non recombinée ; main et la passe de nuit rejouent la suite complète."
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+      - if: env.FULL != 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - if: env.FULL != 'false'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
 
       - name: Install package + dev deps
+        if: env.FULL != 'false'
         run: pip install -e ".[dev]"
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+      - if: env.FULL != 'false'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
         with:
           pattern: coverage-shard-*
           path: coverage-shards
 
       - name: Combine coverage
+        if: env.FULL != 'false'
         shell: bash
         run: |
           coverage combine coverage-shards/coverage-shard-*/.coverage
@@ -310,6 +374,7 @@ jobs:
           coverage report --fail-under=75
 
       - name: Upload coverage
+        if: env.FULL != 'false'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: coverage-report
@@ -317,6 +382,7 @@ jobs:
           retention-days: 14
 
       - name: Upload coverage reports to Codecov
+        if: env.FULL != 'false'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -438,6 +504,8 @@ jobs:
 
   neo4j-service:
     name: "Neo4j 5.26 (service)"
+    needs: [changes]
+    if: needs.changes.outputs.full != 'false'
     # P15/P15b : la clé de projet et le rattrapage s'éprouvent sur une vraie base,
     # pas sur un pilote factice. Le service vit le temps du job.
     runs-on: ubuntu-latest
@@ -516,6 +584,9 @@ jobs:
     name: "Build package"
     runs-on: ubuntu-latest
     needs: [lint, typecheck, dep-audit, test, test-aggregate, neo4j-service]
+    # Neo4j sauté sur une PR documentaire ne doit pas sauter le build : seul un échec
+    # ou une annulation en amont l'empêche, comme avant.
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
