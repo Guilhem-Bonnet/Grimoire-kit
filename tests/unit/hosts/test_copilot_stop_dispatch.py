@@ -67,7 +67,16 @@ def _fixture_input(name: str) -> dict[str, Any]:
 
 # ── P1-3 : refus de clôture ─────────────────────────────────────────────────
 
-_CAMEL_STOP = {"sessionId": "s", "cwd": "/p", "stopHookActive": False, "hookEventName": "agentStop"}
+#: Entrée `agentStop` camelCase telle que la référence GitHub la décrit : clés camelCase,
+#: sauf `stop_hook_active`, écrit en snake_case dans les deux configurations.
+_CAMEL_STOP = {
+    "sessionId": "s",
+    "timestamp": 1,
+    "cwd": "/p",
+    "transcriptPath": "/t",
+    "stopReason": "end_turn",
+    "stop_hook_active": False,
+}
 _SNAKE_STOP = {"session_id": "s", "cwd": "/p", "stop_hook_active": False, "hook_event_name": "Stop"}
 
 
@@ -119,11 +128,20 @@ def test_the_kit_stop_chain_never_exceeds_the_copilot_limit() -> None:
     assert max(*_STOP_CAPS.values(), _STOP_CAP_DEFAULT) <= copilot_wire.STOP_BLOCK_LIMIT
 
 
+def test_the_documented_camel_agent_stop_is_detected_as_copilot() -> None:
+    """R5a : `stop_hook_active` (snake_case dans les deux configurations) ne rend pas le dialecte indécidable."""
+    assert copilot_wire.detect_dialect(_CAMEL_STOP) is copilot_wire.PayloadDialect.COPILOT
+    assert copilot_wire.detect_dialect(_SNAKE_STOP) is copilot_wire.PayloadDialect.SNAKE
+
+
 def test_camel_stop_hook_active_is_read() -> None:
     from grimoire.hosts.runtime import normalize_input
 
     hook = normalize_input(
-        {**_CAMEL_STOP, "stopHookActive": True}, project_root=Path("/p"), host_id=HostId.GITHUB_COPILOT
+        {**_CAMEL_STOP, "stop_hook_active": True},
+        event=HookEvent.STOP,
+        project_root=Path("/p"),
+        host_id=HostId.GITHUB_COPILOT,
     )
     assert hook.event is HookEvent.STOP and hook.stop_active
 

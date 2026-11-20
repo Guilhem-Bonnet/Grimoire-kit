@@ -82,7 +82,8 @@ _SNAKE_KEYS = frozenset(
         "tool_use_id",
         "tool_response",
         "transcript_path",
-        "stop_hook_active",
+        # Pas `stop_hook_active` : la référence GitHub l'écrit en snake_case dans
+        # l'entrée camelCase d'`agentStop` aussi, il ne dit rien du dialecte.
         "initial_prompt",
         "custom_instructions",
     }
