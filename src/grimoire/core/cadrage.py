@@ -21,6 +21,7 @@ sessions d'agents, guidées par ces gabarits.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -180,6 +181,11 @@ def phase_report(root: Path, phase: Phase, chantier: str | None = None) -> dict[
     """État d'une phase : absent / vide / partiel / rempli, par section."""
     rel = _rel_dir(chantier)
     path = root / rel / phase.filename
+    # Confinement explicite (même motif que `_phase_path`) : un nom de chantier
+    # ne sort jamais de `_grimoire/cadrage/`, lien symbolique compris.
+    base = os.path.realpath(root / CADRAGE_DIR)
+    real = os.path.realpath(path)
+    path = Path(real)
     report: dict[str, Any] = {
         "phase": phase.id,
         "file": (rel / phase.filename).as_posix(),
@@ -187,8 +193,8 @@ def phase_report(root: Path, phase: Phase, chantier: str | None = None) -> dict[
         "sections": {},
         "gate": phase.gate,
     }
-    if not path.is_file():
-        return report
+    if not real.startswith(base + os.sep) or not path.is_file():
+        return report  # absent, ou hors du dossier des cadrages : traité comme absent
     # Un fichier corrompu ou sauvé dans un autre encodage ne doit pas casser
     # `cadrage status`/`check` : on remplace les octets invalides.
     text = path.read_text(encoding="utf-8", errors="replace")
