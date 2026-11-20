@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.93.1] - 2026-11-20
+
+- fix(hosts): la garde `PreToolUse` en échec fermé ne refuse plus un `ls` sur une machine chargée — délai émis porté de 10 à 30 s pour Claude Code, attente du verrou du journal de traces bornée à 2 s depuis un hook (la trace est alors perdue, la réponse non), identifiant de trace compté sans relire ni reconstruire tout le journal (5 s sur un journal de 88 000 lignes), registre des missions chargé à l'usage (142 modules au lieu de 166 au démarrage) ; `grimoire doctor` signale une garde en échec fermé dont le délai est inférieur à 30 s (contrôle `hook_timeout`, remède `grimoire up`) (#1276)
+
 ## [3.93.0] - 2026-11-20
 
 - fix(hosts): dans un worktree de tâche, les décisions de hook lisent le ledger du projet d'origine, celui que désigne le marqueur du worktree. C'est le cas de la résolution de la tâche active, de la garde de clôture « tâche encore tenue », de la tâche garée qui couvre le travail de la session, du `Stop` limité à la tâche de la session, du contournement humain, de la vue de soi, des consignes, des décisions en attente et du frein de pause. Avant, un worker retombait sur `bootstrap` et le `Stop` se taisait sur une tâche encore tenue. Quand le marqueur est illisible ou que le ledger désigné n'a pas de journal, chaque décision échoue fermé : refus unique au `Stop`, aucune exemption ni contournement, `ask` au frein de pause, consignes signalées non lues (#1259) (#1263)
