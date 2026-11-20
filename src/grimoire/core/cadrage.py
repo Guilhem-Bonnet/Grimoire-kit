@@ -185,7 +185,6 @@ def phase_report(root: Path, phase: Phase, chantier: str | None = None) -> dict[
     # ne sort jamais de `_grimoire/cadrage/`, lien symbolique compris.
     base = os.path.realpath(root / CADRAGE_DIR)
     real = os.path.realpath(path)
-    path = Path(real)
     report: dict[str, Any] = {
         "phase": phase.id,
         "file": (rel / phase.filename).as_posix(),
@@ -193,8 +192,11 @@ def phase_report(root: Path, phase: Phase, chantier: str | None = None) -> dict[
         "sections": {},
         "gate": phase.gate,
     }
-    if not real.startswith(base + os.sep) or not path.is_file():
-        return report  # absent, ou hors du dossier des cadrages : traité comme absent
+    if not real.startswith(base + os.sep):
+        return report  # hors du dossier des cadrages : traité comme absent
+    path = Path(real)
+    if not path.is_file():
+        return report
     # Un fichier corrompu ou sauvé dans un autre encodage ne doit pas casser
     # `cadrage status`/`check` : on remplace les octets invalides.
     text = path.read_text(encoding="utf-8", errors="replace")
