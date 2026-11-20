@@ -191,3 +191,30 @@ def test_a_block_outcome_exits_2_under_copilot(
         out = json.loads(capsys.readouterr().out)
         assert code == expected, host
         assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_a_crashing_guard_exits_2_with_its_reason_on_stderr_under_copilot(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """R5b : `run_hook` qui plante sous `--host copilot` → refus, code 2, raison sur stderr ; Claude : code 0."""
+    import io
+
+    from grimoire.hosts import runtime
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("panne simulée")
+
+    monkeypatch.setattr(runtime, "run_hook", boom)
+    for host, expected in (("copilot", 2), ("claude", 0)):
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_snake(governed, "ls"))))
+        code = runtime.main(["--host", host, "--event", "PreToolUse", "--project-root", str(governed)])
+        captured = capsys.readouterr()
+        out = json.loads(captured.out)
+        assert code == expected, host
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "panne simulée" in out["hookSpecificOutput"]["permissionDecisionReason"]
+        if host == "copilot":
+            assert out["permissionDecision"] == "deny"
+            assert "garde avant outil en panne (RuntimeError: panne simulée)" in captured.err
+        else:
+            assert "permissionDecision" not in out and captured.err == ""
