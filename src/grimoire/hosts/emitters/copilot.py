@@ -233,6 +233,28 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
     "delegation": ("Agent", "Task", "task"),
 }
 
+#: Les outils intégrés que la référence documente, sous leurs deux nommages,
+#: qu'ils soient ou non dans un matcher du kit. Tout autre nom (outil MCP, outil
+#: propre à VS Code, outil futur) est inconnu : le kit ne sait pas s'il écrit.
+_BUILTIN_TOOLS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        [
+            *(tool for tools in _MATCHER_TABLE.values() for tool in tools),
+            *("Grep", "grep", "rg", "Glob", "glob"),
+            *("AskUserQuestion", "ask_user", "TodoWrite", "update_todo"),
+        ]
+    )
+)
+
+#: Seconde entrée d'un hook à matcher : tout outil dont le nom n'est *pas* un
+#: outil intégré connu. Une valeur qui n'est ni un nom ni une liste ``a|b`` est,
+#: selon la référence, une regex sensible à la casse ancrée en ``^(?:…)$``,
+#: testée sur le nom Claude (ou runtime faute d'équivalent). Le motif exclut des
+#: noms exacts et accepte tout le reste : un nom inconnu, quelle que soit sa
+#: casse, passe par la décision. Les deux nommages sont exclus, pour que les
+#: outils intégrés ne lancent pas la décision deux fois quel que soit le nom testé.
+UNKNOWN_TOOL_MATCHER = "(?!(?:" + "|".join(_BUILTIN_TOOLS) + ")$).*"
+
 #: Événements dont l'entrée accepte un ``matcher`` dans le harness Copilot et
 #: pour lesquels le kit en déclare un. Le harness « Local » (déprécié) ignore ce
 #: champ : tout outil y déclenche le hook, comme avant, et la décision filtre.
@@ -280,6 +302,9 @@ def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
     ``powershell``, lu par les deux harness. ``command`` porte la forme Unix :
     le harness Copilot le copie dans ``bash``/``powershell`` seulement quand
     ceux-ci manquent, il ne sert qu'aux VS Code antérieurs aux deux replis.
+    ``windows`` n'est pas réintroduit pour ces derniers : la référence GitHub ne
+    le liste pas pour un fichier de hook, ne dit rien d'un champ inconnu, et
+    écarte un élément malformé — l'élément ici, c'est la garde elle-même.
 
     Le délai s'écrit ``timeoutSec`` seul : les deux harness le lisent, et ils
     donnent des priorités opposées à ``timeout`` et ``timeoutSec`` posés ensemble.
@@ -302,11 +327,14 @@ def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
     entry["powershell"] = windows
     if cwd:
         entry["cwd"] = cwd
+    entry["timeoutSec"] = _hook_timeout(hook)
+    entries = [entry]
     matcher = matcher_for(hook)
     if matcher:
-        entry["matcher"] = matcher
-    entry["timeoutSec"] = _hook_timeout(hook)
-    payload: dict[str, Any] = {"version": 1, "hooks": {event: [entry]}}
+        # Avant les matchers, chaque appel passait par la décision : la seconde
+        # entrée garde ce comportement pour les outils que le kit ne connaît pas.
+        entries = [{**entry, "matcher": matcher}, {**entry, "matcher": UNKNOWN_TOOL_MATCHER}]
+    payload: dict[str, Any] = {"version": 1, "hooks": {event: entries}}
     slug = hook.event.value.replace("_", "-")
     return EmittedFile(
         relpath=GH_DIR / "hooks" / f"grimoire-{slug}.json",
@@ -405,6 +433,27 @@ class CopilotEmitter(Emitter):
                     surface="permissions",
                     reason="Copilot n'expose pas de table de permissions déclarative.",
                     fallback="règles appliquées par le hook PreToolUse (mêmes refus, même formulation).",
+                )
+            )
+        if any(matcher_for(h) for h in surface.hooks):
+            degradations.append(
+                Degradation(
+                    surface="hook matchers",
+                    reason=(
+                        "Les hooks à matcher (garde PreToolUse, trace PostToolUse) nomment les outils "
+                        "intégrés de Copilot qu'ils jugent, et une seconde entrée rattrape tout outil "
+                        "non intégré (MCP, outils propres à VS Code). Restent hors garde : les outils "
+                        "intégrés de recherche, web, question, liste de tâches et délégation (Grep, Glob, "
+                        "WebFetch, WebSearch, AskUserQuestion, TodoWrite, Agent/Task), un outil tiers "
+                        "homonyme de l'un d'eux, et la seconde entrée si l'hôte ne compile pas son motif "
+                        "(entrée sautée, la première reste). Le harness Local ignore `matcher` : tout "
+                        "outil y passe par la décision."
+                    ),
+                    fallback=(
+                        "aucun de ces outils n'écrit ni n'exécute : une écriture ou une commande passe "
+                        "par `edit`/`create`/`bash`, jugés. La recherche (Grep/Glob) parcourt des fichiers "
+                        "sans le refus de lecture des secrets, que la décision ne leur applique pas non plus."
+                    ),
                 )
             )
         if any(h.event is HookEvent.PRE_TOOL_USE and h.enforcement is Enforcement.BLOCKING for h in surface.hooks):

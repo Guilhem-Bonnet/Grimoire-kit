@@ -22,9 +22,9 @@ from grimoire.cli.doctor_hooks import check_copilot_guard_timeout
 from grimoire.core.agentic_standard import setup_standard_profile
 from grimoire.hosts.collect import build_surface, governance_hooks
 from grimoire.hosts.emitters import emitter_for
-from grimoire.hosts.emitters.base import apply_plan
+from grimoire.hosts.emitters.base import apply_plan, apply_plans
 from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT, _hook_entry
-from grimoire.hosts.emitters.copilot import GUARD_TIMEOUT, _hook_file, matcher_for
+from grimoire.hosts.emitters.copilot import GUARD_TIMEOUT, UNKNOWN_TOOL_MATCHER, _hook_file, matcher_for
 from grimoire.hosts.events import HookEvent
 from grimoire.hosts.hook_launcher import BARE, HookLauncher
 from grimoire.hosts.surface import Enforcement, HookSpec
@@ -105,6 +105,20 @@ def _hook_files(project: Path) -> dict[str, dict]:
 # ── Schéma ───────────────────────────────────────────────────────────────────
 
 
+def _check_entry(name: str, event: str, entry: dict) -> None:
+    assert set(entry) <= _DOCUMENTED_ENTRY_FIELDS, (
+        f"{name}: champ non documenté {set(entry) - _DOCUMENTED_ENTRY_FIELDS}"
+    )
+    assert entry["type"] == "command"
+    assert entry["bash"] and entry["powershell"] and entry["command"] == entry["bash"]
+    # Un seul des deux alias : les harness Copilot et Local leur donnent des priorités opposées.
+    assert "timeout" not in entry and isinstance(entry["timeoutSec"], int), name
+    assert "windows" not in entry and "linux" not in entry and "osx" not in entry, name
+    if "matcher" in entry:
+        assert event in _MATCHER_EVENTS, f"{name}: matcher sur un événement qui n'en prend pas"
+        re.compile(entry["matcher"])  # une regex invalide fait sauter l'entrée chez l'hôte
+
+
 def test_every_emitted_hook_file_follows_the_copilot_schema(governed: Path) -> None:
     files = _hook_files(governed)
     assert len(files) >= 6
@@ -112,30 +126,24 @@ def test_every_emitted_hook_file_follows_the_copilot_schema(governed: Path) -> N
         assert set(payload) == {"version", "hooks"}, name
         assert payload["version"] == 1, name
         ((event, entries),) = payload["hooks"].items()
-        (entry,) = entries
-        assert set(entry) <= _DOCUMENTED_ENTRY_FIELDS, (
-            f"{name}: champ non documenté {set(entry) - _DOCUMENTED_ENTRY_FIELDS}"
-        )
-        assert entry["type"] == "command"
-        assert entry["bash"] and entry["powershell"] and entry["command"] == entry["bash"]
-        # Un seul des deux alias : les harness Copilot et Local leur donnent des priorités opposées.
-        assert "timeout" not in entry and isinstance(entry["timeoutSec"], int), name
-        assert "windows" not in entry and "linux" not in entry and "osx" not in entry, name
-        if "matcher" in entry:
-            assert event in _MATCHER_EVENTS, f"{name}: matcher sur un événement qui n'en prend pas"
+        assert len(entries) in (1, 2), name
+        for entry in entries:
+            _check_entry(name, event, entry)
 
 
 def test_guard_carries_matcher_and_raised_timeout(governed: Path) -> None:
-    entry = _hook_files(governed)["grimoire-pre-tool-use.json"]["hooks"]["PreToolUse"][0]
-    assert entry["matcher"] == matcher_for(_guard())
-    assert entry["timeoutSec"] == GUARD_TIMEOUT == FAIL_CLOSED_TIMEOUT == 30
+    named, unknown = _hook_files(governed)["grimoire-pre-tool-use.json"]["hooks"]["PreToolUse"]
+    assert named["matcher"] == matcher_for(_guard())
+    assert unknown["matcher"] == UNKNOWN_TOOL_MATCHER
+    assert {k: v for k, v in named.items() if k != "matcher"} == {k: v for k, v in unknown.items() if k != "matcher"}
+    assert named["timeoutSec"] == GUARD_TIMEOUT == FAIL_CLOSED_TIMEOUT == 30
 
 
 def test_events_without_tool_carry_no_matcher(governed: Path) -> None:
     for name, payload in _hook_files(governed).items():
-        ((event, (entry,)),) = payload["hooks"].items()
+        ((event, entries),) = payload["hooks"].items()
         if event not in {"PreToolUse", "PostToolUse"}:
-            assert "matcher" not in entry, name
+            assert len(entries) == 1 and "matcher" not in entries[0], name
 
 
 def test_advisory_hooks_keep_their_timeout() -> None:
@@ -151,14 +159,39 @@ def test_quoted_absolute_launcher_uses_the_call_operator_under_powershell() -> N
     assert entry["bash"].startswith('"C:/Program Files/kit/grimoire-hook.exe" --host copilot')
 
 
-def test_no_matcher_degradation_and_timeout_gap_declared(governed: Path) -> None:
+def test_matcher_and_timeout_gaps_are_declared(governed: Path) -> None:
     plan = emitter_for(HostId.GITHUB_COPILOT).plan(build_surface(governed), governed)
-    surfaces = {g.surface for g in plan.degradations}
-    assert "hook matchers" not in surfaces
-    assert "hook timeout" in surfaces
+    gaps = {g.surface: g for g in plan.degradations}
+    assert "hook timeout" in gaps
+    # Ce qui reste hors garde est dit, outil par outil.
+    reason = gaps["hook matchers"].reason
+    for tool in ("Grep", "Glob", "WebFetch", "WebSearch", "AskUserQuestion", "TodoWrite", "Agent/Task", "Local"):
+        assert tool in reason
 
 
 # ── Matcher de la garde ──────────────────────────────────────────────────────
+
+
+def _guarded(tool: str) -> bool:
+    """L'appel *tool* déclenche-t-il la garde ? Première entrée (liste) ou seconde (regex ancrée)."""
+    named = matcher_for(_guard())
+    return _matches(named, tool) or re.fullmatch(f"(?:{UNKNOWN_TOOL_MATCHER})", tool) is not None
+
+
+#: Outils non intégrés : MCP (deux formes de nom), outil propre à VS Code, nom inconnu,
+#: et noms d'outils intégrés dans une autre casse (la regex est sensible à la casse).
+_UNKNOWN_TOOLS = (
+    "filesystem-write_file",
+    "mcp__filesystem__write_file",
+    "github-create_pull_request",
+    "run_in_terminal",
+    "replace_string_in_file",
+    "outil_inconnu",
+    "BASH",
+    "grep2",
+    "Readme",
+    "write",
+)
 
 
 @pytest.mark.parametrize("tool", _WRITE_OR_EXECUTE)
@@ -172,9 +205,19 @@ def test_guard_matcher_covers_file_reads_for_secret_refusal(tool: str) -> None:
     assert _matches(matcher_for(_guard()), tool)
 
 
+@pytest.mark.parametrize("tool", _UNKNOWN_TOOLS)
+def test_guard_catches_every_tool_it_does_not_know(tool: str) -> None:
+    assert _guarded(tool)
+
+
 @pytest.mark.parametrize("tool", _NOT_GUARDED)
-def test_guard_matcher_skips_tools_that_neither_write_nor_execute(tool: str) -> None:
-    assert not _matches(matcher_for(_guard()), tool)
+def test_guard_skips_builtin_tools_that_neither_write_nor_execute(tool: str) -> None:
+    assert not _guarded(tool)
+
+
+@pytest.mark.parametrize("tool", (*_WRITE_OR_EXECUTE, "view", "Read"))
+def test_builtin_guarded_tools_run_the_decision_once(tool: str) -> None:
+    assert re.fullmatch(f"(?:{UNKNOWN_TOOL_MATCHER})", tool) is None
 
 
 def test_guard_matcher_is_a_plain_literal_list() -> None:
@@ -188,6 +231,9 @@ def test_post_tool_use_matcher_covers_delegation() -> None:
     for tool in ("task", "Agent", "Task", "create", "Write", "bash", "powershell", "Edit"):
         assert _matches(matcher, tool)
     assert not _matches(matcher, "view")
+    # La trace voyait chaque appel avant les matchers : un outil MCP y passe encore.
+    entries = json.loads(_hook_file(trace, BARE).content)["hooks"]["PostToolUse"]
+    assert [e["matcher"] for e in entries] == [matcher, UNKNOWN_TOOL_MATCHER]
 
 
 # ── grimoire up : remplacement ───────────────────────────────────────────────
@@ -220,6 +266,44 @@ def test_sync_replaces_a_legacy_local_format_file_and_spares_a_foreign_hook(gove
     assert rewritten["version"] == 1
     assert "windows" not in rewritten["hooks"]["PreToolUse"][0]
     assert (hooks / "maison.json").read_text(encoding="utf-8") == foreign
+
+
+def _user_edited_guard(project: Path) -> tuple[Path, str]:
+    """Le fichier de garde du kit, retouché à la main : délai raccourci, entrée maison ajoutée."""
+    plan = emitter_for(HostId.GITHUB_COPILOT).plan(build_surface(project), project)
+    apply_plan(plan, project)
+    target = project / ".github" / "hooks" / "grimoire-pre-tool-use.json"
+    data = json.loads(target.read_text(encoding="utf-8"))
+    data["hooks"]["PreToolUse"][0]["timeoutSec"] = 5
+    data["hooks"]["PreToolUse"].append({"type": "command", "bash": "./maison.sh", "timeoutSec": 5})
+    edited = json.dumps(data, indent=2) + "\n"
+    target.write_text(edited, encoding="utf-8")
+    return target, edited
+
+
+def test_sync_rewrites_a_kit_hook_file_the_user_edited(governed: Path) -> None:
+    """Contrat inchangé (README des hooks) : un fichier qui lance ``grimoire-hook`` est au kit et réécrit."""
+    target, _ = _user_edited_guard(governed)
+    plan = emitter_for(HostId.GITHUB_COPILOT).plan(build_surface(governed), governed)
+
+    result = apply_plan(plan, governed)
+
+    assert target.relative_to(governed).as_posix() in result.written
+    entries = json.loads(target.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+    assert [e["timeoutSec"] for e in entries] == [GUARD_TIMEOUT, GUARD_TIMEOUT]
+    assert not any("maison" in json.dumps(e) for e in entries)
+
+
+def test_sync_keeps_an_edited_kit_hook_file_the_project_preserves(governed: Path) -> None:
+    """La sortie documentée pour garder ses retouches : ``hosts.preserve``."""
+    target, edited = _user_edited_guard(governed)
+    plan = emitter_for(HostId.GITHUB_COPILOT).plan(build_surface(governed), governed)
+    relpath = target.relative_to(governed).as_posix()
+
+    (result,) = apply_plans([plan], governed, preserve=frozenset({relpath}))
+
+    assert target.read_text(encoding="utf-8") == edited
+    assert relpath in result.preserved
 
 
 # ── doctor ───────────────────────────────────────────────────────────────────
