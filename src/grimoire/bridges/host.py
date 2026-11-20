@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from typing import Any
 
 from grimoire.bridges.schemas import (
     _HOST_REGISTRY,
@@ -17,6 +19,7 @@ from grimoire.bridges.schemas import (
     HostHooks,
     HostId,
 )
+from grimoire.hosts.copilot_wire import PayloadDialect, detect_dialect
 
 
 class HostBridge:
@@ -33,14 +36,19 @@ class HostBridge:
     def __init__(self, override_host_id: HostId | None = None) -> None:
         self._override = override_host_id
 
-    def detect(self) -> HostCapabilityManifest:
+    def detect(self, payload: Mapping[str, Any] | None = None) -> HostCapabilityManifest:
         """Detect the current host environment and return its manifest.
 
         Detection order:
         1. Override (for testing)
         2. GRIMOIRE_HOST_ID env var
-        3. Heuristics from environment variables
-        4. Fallback: UNKNOWN → minimal manifest
+        3. The shape of a hook *payload*, when given: camelCase keys can only
+           come from the GitHub Copilot harness (``copilot_wire.detect_dialect``).
+           snake_case keys say nothing (Claude Code and the Copilot "Local"
+           harness both send them), so they fall through.
+        4. Environment variables: ``COPILOT_AGENT_PROMPT`` (documented for the
+           Copilot cloud agent); the other markers are heuristics.
+        5. Fallback: UNKNOWN → minimal manifest
         """
         if self._override is not None:
             return _HOST_REGISTRY.get(self._override, self._unknown_manifest())
@@ -51,6 +59,8 @@ class HostBridge:
                 return _HOST_REGISTRY.get(host_id, self._unknown_manifest())
             except ValueError:
                 pass
+        if payload is not None and detect_dialect(payload) is PayloadDialect.COPILOT:
+            return GITHUB_COPILOT_MANIFEST
         # Heuristic detection. Markers must identify the *host process*: an API
         # key says which vendor pays for the tokens, not which host is running,
         # and keying on one misroutes every session that exports both.
@@ -58,7 +68,11 @@ class HostBridge:
             return CLAUDE_CODE_CLI_MANIFEST
         if os.environ.get("CODEX_ENV") or os.environ.get("CODEX_SANDBOX"):
             return CODEX_MANIFEST
-        if os.environ.get("COPILOT_AGENT") or os.environ.get("GITHUB_COPILOT_AGENT"):
+        # Copilot: no variable identifies the host in VS Code or the CLI (the VS Code
+        # hooks reference lists none). Only the cloud agent documents one: it passes
+        # its prompt in COPILOT_AGENT_PROMPT (docs.github.com/en/copilot/reference/hooks-reference).
+        # The former COPILOT_AGENT / GITHUB_COPILOT_AGENT had no documented source.
+        if os.environ.get("COPILOT_AGENT_PROMPT"):
             return GITHUB_COPILOT_MANIFEST
         if os.environ.get("CURSOR_AGENT") or os.environ.get("CURSOR_TRACE_ID"):
             return CURSOR_MANIFEST
