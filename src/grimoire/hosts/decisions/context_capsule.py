@@ -37,4 +37,29 @@ def decide_context_capsule(hook: HookInput) -> Decision:
     if flow_lines:
         # Sans run en vol, la capsule reste identique au caractère près.
         context += "\n" + "\n".join(flow_lines)
+    context = _with_resume_state(hook, task_id, context, ok=ok, summary=summary)
     return Decision(outcome=Outcome.ALLOW, context=context, detail=detail)
+
+
+def _with_resume_state(hook: HookInput, task_id: str, context: str, *, ok: bool, summary: str) -> str:
+    """Ajoute l'état de reprise (objectif, fichiers, test, git…) sous le bloc de gouvernance.
+
+    Le total reste sous ``MAX_CAPSULE_CHARS`` quand la gouvernance le permet ; elle
+    n'est jamais amputée, l'état de reprise reçoit au moins 400 caractères. Sans
+    aucune source (ni ledger, ni journal, ni git), le texte est celui d'avant.
+    """
+    from grimoire.hosts.decisions.resume_capsule import MAX_CAPSULE_CHARS, build_resume_state
+
+    try:
+        hint = next((ln.strip(" -") for ln in summary.splitlines() if ln.strip()), "")
+        state = build_resume_state(
+            hook.project_root,
+            task_id,
+            session_id=hook.session_id,
+            gates_ok=ok,
+            gates_hint=hint,
+            budget=max(MAX_CAPSULE_CHARS - len(context) - 1, 400),
+        )
+    except Exception:
+        return context
+    return f"{context}\n{state}" if state else context

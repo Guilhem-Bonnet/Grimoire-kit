@@ -7,7 +7,18 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.92.0] - 2026-11-19
+
+- fix(hosts): le `Stop` d'un profil gouverné ne refuse plus une session qui n'a fait que lire, et compte toujours ses vraies écritures. Ne comptent plus : une redirection vers un brouillon hors projet faite par un lecteur ou un écrivain connu (`cat >`, `cp`, `tee`…), une commande dont chaque segment est une vérification (`pytest`, `ruff check`, `tsc --noEmit`…, jamais avec `--fix`, `format` ou `--basetemp`), `TodoWrite`. Comptent toujours, pour la session comme pour ses sous-agents : `make`, un script, `git apply`, `patch`, un interpréteur, un mot illisible, une écriture relative quel que soit le `cwd`. Le refus « Clôture hors tâche » revient tous les 10 nouvelles écritures (option de profil `options.unattached_reblock_after`) ; entre deux, une ligne non bloquante ; un journal de session réécrit pour acquitter plus qu'il ne compte ne désarme rien. Les rappels identiques (« aucune tâche en cours », « Écriture enregistrée », « code interprété », « gate fini, shadow », « tâche encore proposed ») ne sont dits qu'une fois par session ou quand leur état change ; l'avertissement de code interprété n'est plus doublé en `systemMessage` (#1265)
+- fix(hosts): la garde avant outil échoue fermé quand son analyse dépasse son budget — l'émetteur Claude Code pose `"onFailure": "block"` sur la garde `PreToolUse` (lanceur trouvé seulement), la décision refuse une commande hors bornes de taille sans l'analyser et refuse, sans révoquer de mandat, une analyse qui dépasse 3 s ; la résolution des chemins d'une commande ne refait plus les mêmes résolutions pour un mot répété (#1266)
+- fix(hosts): une garde en panne refuse avec un motif et un remède (`grimoire doctor`, `grimoire up`) au lieu de planter, même si le runtime du kit ne s'importe plus ; `grimoire doctor` signale une garde en échec fermé dont le programme ne se lance pas (#1266)
+- feat(hosts): la capsule de compaction devient un état de reprise borné (1 500 caractères : objectif, fichiers touchés, dernier test, branche et PR, prochaine étape), relue au SessionStart `compact`/`resume` et offerte à une session neuve sur la même tâche (< 24 h) ; `grimoire host handoff` l'écrit à la demande et imprime la ligne pour repartir (#1264)
+
+## [3.91.0] - 2026-11-19
+
 - fix(site): la vitrine décrit la version publiée — le bloc « Ce qui n'est pas prouvé » ne nie plus le worktree, la relecture, la fusion ni le lancement de sessions (opt-in), le tableau de bord n'est plus « en cours de refonte », opencode et Gemini CLI rejoignent les outils cités, le plan six dit ce que tranche le pilote automatique et sa liste fermée, le contrôle refuse « en profil governed et au-dessus » ; relevé daté du 2026-11-13
+- fix(hosts): dans un worktree de tâche, le frein du bail lit le fichier de bail et le ledger du projet d'origine, ceux où claim, renouvellement et rattachement écrivent l'epoch ; il ne refuse plus le titulaire courant sur une copie du ledger restée dans le worktree (« epoch 3 périmé, bail à 2 »), et ne se tait plus devant un titulaire périmé quand le worktree n'a aucune copie. Le refus nomme l'epoch de la session puis celui du bail, chacun avec le fichier d'où il vient (#1235) (#1258)
+- fix(hosts): la garde d'autorité reconnaît d'autres écritures réelles dans la zone de contrôle (scripts `sed` et `awk`, interpréteurs à exécution en ligne, appels Python, destinations `git`, archives, éditeurs en mode script…) : toujours refusées, elles révoquent de nouveau le mandat ; une lecture ou une mention de la zone reste refusée sans révoquer (#1233) (#1262)
 
 ## [3.90.0] - 2026-11-13
 

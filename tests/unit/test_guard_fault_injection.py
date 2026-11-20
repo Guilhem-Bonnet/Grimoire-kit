@@ -581,6 +581,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "gate_override": (SUPPORT, "levée d'un refus de clôture appelée par evidence_gate DANS son filet W2-08 : une panne devient un refus tracé, couverte par les cas evidence_gate"),
     "gate_summary": (SUPPORT, "résumé de gates lu par evidence_gate, subagent_gate et context_capsule : panne couverte par leurs cas"),
     "human_turns": (GUARD, ""),
+    "resume_capsule": (SUPPORT, "état de reprise écrit au PreCompact et relu par activation : best-effort, chaque source illisible disparaît de la capsule, rend \"\" en cas de panne, aucune décision, aucun refus (la capsule n'est jamais une autorisation)"),
     "instruction_scan": (SUPPORT, "scan des fichiers d'instructions livré en contexte par activation (#667) : best-effort, rend \"\" en cas de panne, aucune décision, aucun refus"),
     "lease_brake": (GUARD, ""),
     "pause_brake": (GUARD, ""),
@@ -591,6 +592,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "record": (SUPPORT, "journal d'observation (agent.dispatch / agent.miss) : ne change jamais une décision"),
     "repetition_guard": (GUARD, ""),
     "session_memory": (GUARD, ""),
+    "session_writes": (SUPPORT, "règle du compteur d'écritures appelée par evidence_trace (PostToolUse) : une panne y rend « compte » (échec fermé, counts_as_session_write), le refus hors tâche reste jugé par evidence_gate, couvert par ses cas"),
     "self_view": (SUPPORT, "ligne de vue de soi (bail, reprise) livrée en contexte par task_context : best-effort, rend \"\" en cas de panne, aucun refus"),
     "steering": (SUPPORT, "consignes du cockpit livrées en contexte : aucune décision, aucun refus"),
     "subagent_gate": (GUARD, ""),
@@ -598,6 +600,8 @@ MODULES: dict[str, tuple[str, str]] = {
     "tool_facts": (GUARD, ""),
     "tool_policy": (GUARD, ""),
     "write_proof": (GUARD, ""),
+    "write_proof_languages": (SUPPORT, "preuve d'écriture dans sed, awk et les interpréteurs, appelée par write_proof.proves_write sous son filet : une panne y lève dans proves_write, qui rend faux (refus sans révocation), couverte par le cas write_proof"),
+    "write_proof_programs": (SUPPORT, "preuve d'écriture de git, des archives et des outils à fichier de sortie, appelée par write_proof.proves_write sous son filet : une panne y lève dans proves_write, qui rend faux (refus sans révocation), couverte par le cas write_proof"),
 }
 #: Modules qui ne sont pas des décisions : le vocabulaire commun et le registre.
 INFRASTRUCTURE = frozenset({"__init__", "_shared"})

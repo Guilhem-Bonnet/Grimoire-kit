@@ -165,7 +165,8 @@ def test_uninspected_interpreted_code_is_named_when_allowed(governed: Path) -> N
     assert "code python interprété" in decision.context
     rendered = render(decision, hook, HostId.CLAUDE_CODE_CLI)
     assert rendered["hookSpecificOutput"]["permissionDecision"] == "allow"
-    assert "interprété" in rendered["systemMessage"]
+    # L'agent reçoit l'avertissement ; il n'est plus recopié en `systemMessage` (doublon à l'écran).
+    assert "systemMessage" not in rendered
     assert "interprété" in rendered["hookSpecificOutput"]["additionalContext"]
 
 

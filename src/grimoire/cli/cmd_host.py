@@ -609,3 +609,47 @@ def host_hook(
             raise typer.Exit(code=2) from exc
         result = {}
     typer.echo(json.dumps(result, ensure_ascii=False), nl=False)
+
+
+@host_app.command("handoff")
+def host_handoff(
+    project_root: Path = _PROJECT_ROOT_OPTION,
+    task: str = typer.Option("", "--task", help="Tâche à reprendre (défaut : la tâche active du projet)."),
+    session_id: str = typer.Option("", "--session-id", help="Session dont lire le dernier message (défaut : GRIMOIRE_SESSION_ID, sinon la plus récente)."),
+) -> None:
+    """Écrire la capsule de reprise maintenant et imprimer la ligne pour repartir en session neuve.
+
+    La capsule (~1 500 caractères : objectif, fichiers touchés, dernier test, branche et PR,
+    prochaine étape) est celle que le hook PreCompact écrit ; une session neuve ouverte sur
+    la même tâche la reçoit au démarrage, dans les 24 h.
+    """
+    import shlex
+
+    from grimoire.core.standard_state import current_session_id, is_standard_enrolled, resolve_active_task
+    from grimoire.hosts.decisions.resume_capsule import capsule_path, latest_memory_session, write_capsule
+    from grimoire.hosts.events import HookEvent
+
+    if not is_standard_enrolled(project_root):
+        console.print("[red]Projet non gouverné : pas de capsule de reprise (grimoire standard init).[/red]")
+        raise typer.Exit(code=1)
+    sid = session_id.strip() or current_session_id() or latest_memory_session(project_root)
+    task_id = task.strip() or resolve_active_task(project_root, session_id=sid).task_id
+    from grimoire.hosts.decisions._shared import HookInput
+    from grimoire.hosts.decisions.context_capsule import decide_context_capsule
+
+    decision = decide_context_capsule(
+        HookInput(event=HookEvent.PRE_COMPACT, project_root=project_root, session_id=sid)
+    )
+    if not decision.context:
+        console.print("[red]Rien à écrire : aucune capsule n'a pu être assemblée.[/red]")
+        raise typer.Exit(code=1)
+    try:
+        dest = write_capsule(project_root, task_id, decision.context, session_id=sid)
+    except OSError as exc:
+        console.print(f"[red]Capsule non écrite : {type(exc).__name__}: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    rel = capsule_path(project_root, task_id).relative_to(project_root).as_posix()
+    typer.echo(f"Capsule écrite : {dest} ({dest.stat().st_size} octets)")
+    prompt = f"Reprise de la tâche {task_id} : lis {rel} (état de reprise) puis continue sans refaire ce qui est fait."
+    typer.echo("Pour repartir dans une session neuve :")
+    typer.echo(f"claude {shlex.quote(prompt)}")

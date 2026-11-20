@@ -48,9 +48,14 @@ class HookLauncher:
     windows: str | None = None
     project_relative: bool = False
     machine_specific: bool = False
+    found: bool = True
+    """Faux quand rien n'a été trouvé et que le nom nu est écrit faute de mieux :
+    l'hôte ne saura sans doute pas lancer le hook (``grimoire doctor`` le signale)."""
 
 
 BARE = HookLauncher(posix=HOOK_SCRIPT)
+#: Le nom nu écrit faute de mieux : ni dans le PATH ni à côté de l'interpréteur.
+UNRESOLVED = HookLauncher(posix=HOOK_SCRIPT, found=False)
 
 
 def _venv_script_dirs(prefix: str, base_prefix: str, environ: Mapping[str, str]) -> set[str]:
@@ -118,7 +123,8 @@ def resolve_hook_launcher(
         return bare
     found = _script_next_to(sys.executable if executable is None else executable, script)
     if found is None:
-        return bare  # rien de mieux à écrire ; ``grimoire doctor`` le signale
+        # rien de mieux à écrire ; ``grimoire doctor`` le signale
+        return UNRESOLVED if script == HOOK_SCRIPT else HookLauncher(posix=script, found=False)
     venv_root = found.parent.parent
     try:
         rel = venv_root.resolve().relative_to(project_root.resolve())

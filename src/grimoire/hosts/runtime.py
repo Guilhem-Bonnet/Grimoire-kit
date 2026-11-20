@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
-from grimoire.core.standard_generation import CONTEXT_DIR
 from grimoire.core.standard_state import active_task_id, suspended_state_writes
 from grimoire.hosts import gemini_wire
 from grimoire.hosts.capabilities import profile_for
@@ -267,10 +266,11 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
     if hook.event is not HookEvent.PRE_COMPACT or not decision.context:
         return None, ""
     task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id))
-    dest = hook.project_root / CONTEXT_DIR / task_id / "compaction-capsule.md"
+    from grimoire.hosts.decisions.resume_capsule import capsule_path, write_capsule
+
+    dest = capsule_path(hook.project_root, task_id)
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(decision.context + "\n", encoding="utf-8")
+        write_capsule(hook.project_root, task_id, decision.context, session_id=hook.session_id)
     except OSError as exc:
         return None, f"{dest}: {type(exc).__name__}: {exc}"
     return dest, ""
@@ -296,11 +296,13 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
             # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
         if decision.context and decision.outcome is Outcome.ALLOW:
-            # Issue #724 : un avertissement non bloquant (code interprété non
-            # lu) accompagne un `allow` — `additionalContext` pour l'agent,
-            # `systemMessage` pour l'humain, puisque rien d'autre ne le porte.
+            # Issue #724 : un avertissement non bloquant accompagne un `allow`,
+            # dans `additionalContext` pour l'agent. L'avertissement de code
+            # interprété n'est plus recopié en `systemMessage` : l'agent le
+            # reçoit déjà, le doublon ne faisait que l'afficher deux fois.
             specific["additionalContext"] = decision.context
-            payload["systemMessage"] = decision.context
+            if not decision.detail.get("interpreted_code"):
+                payload["systemMessage"] = decision.context
         payload["hookSpecificOutput"] = specific
         return payload
 
@@ -506,6 +508,13 @@ def run_hook(
     return render(decision, hook, host_id), decision, hook
 
 
+def guard_failure_verdict(cause: str) -> dict[str, Any]:
+    """Le refus ``PreToolUse`` rendu quand la garde elle-même est en panne (voir :mod:`.hook_entry`)."""
+    from grimoire.hosts.hook_entry import guard_failure_payload
+
+    return guard_failure_payload(cause)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point used by generated hook configurations.
 
@@ -572,11 +581,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         rendered = json.dumps(result, ensure_ascii=False)
     except Exception as exc:
-        if host_id is not HostId.GEMINI_CLI:
-            # Claude Code, Copilot and opencode read the verdict from stdout and
-            # treat a crash exactly as before: let it surface, never as a verdict.
-            raise
         cause = f"{type(exc).__name__}: {exc}"
+        if host_id is not HostId.GEMINI_CLI:
+            if event is not HookEvent.PRE_TOOL_USE:
+                # Événements consultatifs : la panne remonte comme avant (erreur
+                # non bloquante de l'hôte), jamais déguisée en verdict.
+                raise
+            # La garde est émise en échec fermé (``onFailure: block``) : un
+            # plantage refuserait l'outil avec un message de l'hôte qui ne dit
+            # pas quoi faire. Le refus explicite dit d'où vient la panne.
+            sys.stdout.write(json.dumps(guard_failure_verdict(cause), ensure_ascii=False))
+            return 0
         blocked_event = event if event in gemini_wire.BLOCKING_EVENTS else None
         sys.stderr.write(
             f"[Grimoire] hook Gemini en échec sur {label} ({cause}) : "
