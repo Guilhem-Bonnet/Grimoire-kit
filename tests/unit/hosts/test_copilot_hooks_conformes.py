@@ -126,13 +126,14 @@ def test_every_emitted_hook_file_follows_the_copilot_schema(governed: Path) -> N
         assert set(payload) == {"version", "hooks"}, name
         assert payload["version"] == 1, name
         ((event, entries),) = payload["hooks"].items()
-        assert len(entries) in (1, 2), name
+        # 3 pour PreToolUse : la garde (outils connus, puis inconnus) et le modèle des sous-agents.
+        assert len(entries) in ((1, 2, 3) if event == "PreToolUse" else (1, 2)), name
         for entry in entries:
             _check_entry(name, event, entry)
 
 
 def test_guard_carries_matcher_and_raised_timeout(governed: Path) -> None:
-    named, unknown = _hook_files(governed)["grimoire-pre-tool-use.json"]["hooks"]["PreToolUse"]
+    named, unknown, _dispatch = _hook_files(governed)["grimoire-pre-tool-use.json"]["hooks"]["PreToolUse"]
     assert named["matcher"] == matcher_for(_guard())
     assert unknown["matcher"] == UNKNOWN_TOOL_MATCHER
     assert {k: v for k, v in named.items() if k != "matcher"} == {k: v for k, v in unknown.items() if k != "matcher"}
@@ -290,7 +291,11 @@ def test_sync_rewrites_a_kit_hook_file_the_user_edited(governed: Path) -> None:
 
     assert target.relative_to(governed).as_posix() in result.written
     entries = json.loads(target.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
-    assert [e["timeoutSec"] for e in entries] == [GUARD_TIMEOUT, GUARD_TIMEOUT]
+    assert [e["timeoutSec"] for e in entries] == [
+        GUARD_TIMEOUT,
+        GUARD_TIMEOUT,
+        3,
+    ]  # garde x2, puis modèle des sous-agents
     assert not any("maison" in json.dumps(e) for e in entries)
 
 

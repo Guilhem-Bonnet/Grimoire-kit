@@ -41,6 +41,7 @@ from grimoire.hosts.decisions import (
 # the hook entry point, invoked on every tool call — pulling the full
 # agent/model IR for one enum was the tax the split removes.
 from grimoire.hosts.events import NOT_EMITTED_EVENTS, HookEvent
+from grimoire.hosts.hook_entry import ADVISORY_DETAIL_KEY
 
 #: Neutral event -> the name a host writes in its configuration and payloads.
 #: Claude Code and VS Code Copilot happen to share the spelling; the table is
@@ -133,9 +134,7 @@ def decode_hook_payload(raw: str) -> tuple[dict[str, Any], str]:
     return parsed, ""
 
 
-def gemini_fail_closed_reason(
-    host_id: HostId, event: HookEvent | None, payload_problem: str
-) -> str:
+def gemini_fail_closed_reason(host_id: HostId, event: HookEvent | None, payload_problem: str) -> str:
     """Why a Gemini hook must exit 2 before deciding, or ``""`` to proceed.
 
     Two cases have no verdict to render: an event the host never named (no
@@ -280,7 +279,10 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
     """
     if hook.event is not HookEvent.PRE_COMPACT or not decision.context:
         return None, ""
-    task_id = str(decision.detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id))
+    task_id = str(
+        decision.detail.get("task_id")
+        or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
+    )
     from grimoire.hosts.decisions.resume_capsule import capsule_path, write_capsule
 
     dest = capsule_path(hook.project_root, task_id)
@@ -303,6 +305,12 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
     event_name = wire_event_name(hook.event, host_id)
     payload: dict[str, Any] = {}
     specific: dict[str, Any] = {"hookEventName": event_name}
+    copilot = host_id is HostId.GITHUB_COPILOT
+
+    if copilot and hook.event is HookEvent.PRE_TOOL_USE and decision.detail.get(ADVISORY_DETAIL_KEY):
+        return _render_copilot_advisory_pre_tool(decision, hook)
+    if copilot and hook.event in {HookEvent.STOP, HookEvent.SUBAGENT_STOP} and decision.outcome is Outcome.BLOCK:
+        return _render_copilot_stop_block(decision, hook)
 
     if hook.event is HookEvent.PRE_TOOL_USE:
         if profile_for(host_id).blocking_hooks:
@@ -354,6 +362,84 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
             if capsule_error
             else "[Grimoire] capsule de gouvernance écrite avant compaction."
         )
+    return payload
+
+
+def _render_copilot_advisory_pre_tool(decision: Decision, hook: HookInput) -> dict[str, Any]:
+    """Une décision consultative ``PreToolUse`` (#1280, P1-4) dans le dialecte du harness Copilot.
+
+    Aucune ``permissionDecision`` : un hook consultatif n'a rien à autoriser, et
+    le harness Copilot ne documente que la priorité d'un ``deny`` entre hooks —
+    un ``allow`` ici pourrait couvrir une demande (``ask``) de la garde. La
+    réécriture suit le dialecte de la charge :
+
+    - camelCase (harness Copilot, seul à l'envoyer) : ``modifiedArgs`` au
+      premier niveau, seul champ de réécriture que sa référence documente ;
+    - snake_case ou indécidable (harness Local, ou harness Copilot déclaré en
+      PascalCase) : les deux — ``hookSpecificOutput.updatedInput`` que lit le
+      harness Local, ``modifiedArgs`` que lit le harness Copilot. Chacun ignore
+      l'autre champ ; les deux portent la même entrée complète.
+
+    L'explication part en ``additionalContext`` et ``systemMessage``, comme ailleurs.
+    """
+    payload: dict[str, Any] = {}
+    specific: dict[str, Any] = {"hookEventName": wire_event_name(HookEvent.PRE_TOOL_USE)}
+    if decision.updated_input is not None:
+        args = dict(decision.updated_input)
+        payload["modifiedArgs"] = args
+        if copilot_wire.detect_dialect(hook.raw) is not copilot_wire.PayloadDialect.COPILOT:
+            specific["updatedInput"] = dict(args)
+    if decision.context:
+        specific["additionalContext"] = decision.context
+        payload["systemMessage"] = decision.context
+    if len(specific) > 1:
+        payload["hookSpecificOutput"] = specific
+    return payload
+
+
+def _stop_block_count(decision: Decision) -> int:
+    """Rang du refus dans la chaîne du ``Stop`` (``done_gate.stop_step``), 1 pour un premier refus."""
+    signature = decision.detail.get("stop_signature")
+    blocks = signature.get("blocks") if isinstance(signature, dict) else None
+    return blocks if isinstance(blocks, int) and blocks > 0 else 1
+
+
+def _render_copilot_stop_block(decision: Decision, hook: HookInput) -> dict[str, Any]:
+    """Un refus de clôture (``Stop``/``SubagentStop``) dans le dialecte du harness qui le lira (#1280, P1-3).
+
+    - Harness Copilot (``agentStop``/``subagentStop``) : ``decision``/``reason``
+      au premier niveau, mêmes noms en camelCase et en PascalCase (référence GitHub).
+    - Harness Local : ``Stop`` lit ``hookSpecificOutput.decision``/``reason``,
+      ``SubagentStop`` les lit au premier niveau (référence VS Code).
+
+    Charge camelCase : seul le harness Copilot l'envoie, le premier niveau suffit.
+    Charge snake_case ou indécidable sur ``Stop`` : les deux formes, qui disent la
+    même chose — chaque harness lit la sienne.
+
+    Limite : le harness Copilot cesse d'honorer le refus après
+    :data:`copilot_wire.STOP_BLOCK_LIMIT` refus consécutifs et termine le tour.
+    La chaîne du kit plafonne à cette valeur ou en dessous ; si un refus la
+    dépassait malgré tout, il n'est pas émis : la clôture passe, et le message
+    dit que les gates restent rouges au lieu de promettre un refus ignoré.
+    """
+    if _stop_block_count(decision) > copilot_wire.STOP_BLOCK_LIMIT:
+        return {
+            "systemMessage": (
+                f"[Grimoire] limite de {copilot_wire.STOP_BLOCK_LIMIT} refus de clôture consécutifs atteinte "
+                "(au-delà, le harness Copilot termine le tour) : clôture laissée passer, gates toujours rouges.\n"
+                f"{decision.reason}"
+            )
+        }
+    payload: dict[str, Any] = {"decision": "block", "reason": decision.reason}
+    if (
+        hook.event is HookEvent.STOP
+        and copilot_wire.detect_dialect(hook.raw) is not copilot_wire.PayloadDialect.COPILOT
+    ):
+        payload["hookSpecificOutput"] = {
+            "hookEventName": wire_event_name(HookEvent.STOP),
+            "decision": "block",
+            "reason": decision.reason,
+        }
     return payload
 
 
@@ -419,7 +505,10 @@ def _record_decision(
         # pas dans son détail, donc chaque refus d'outil était journalisé sous
         # un task_id vide et `grimoire task trace` ne pouvait pas le retrouver.
         # Le gateway est l'unique écrivain de ce ledger ; c'est lui qui résout.
-        task_id = str(detail.get("task_id") or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id))
+        task_id = str(
+            detail.get("task_id")
+            or active_task_id(hook.project_root, session_id=hook.session_id, agent_id=hook.agent_id)
+        )
         verdict = _LEDGER_VERDICT.get(decision.outcome, "allow")
         record_started_at = started_at or _now_iso()
         tool_calls = []
@@ -573,6 +662,35 @@ def _combine_batch(judged: list[tuple[HookInput, Decision]]) -> Decision:
     )
 
 
+def _advisory_batch(judged: list[tuple[HookInput, Decision]]) -> Decision:
+    """Le verdict consultatif d'un lot : jamais de réécriture, la recommandation en contexte seulement."""
+    size = len(judged)
+    lines: list[str] = []
+    recommended: list[dict[str, Any]] = []
+    for index, (sub, decision) in enumerate(judged, start=1):
+        if decision.abstain or not (decision.context or decision.updated_input is not None):
+            continue
+        model = decision.detail.get("imposed_model") or decision.detail.get("recommended_model") or ""
+        recommended.append({"index": index, "tool": sub.tool_name, "model": model})
+        advice = f"model={model} recommandé, " if model else ""
+        lines.append(
+            f"[Grimoire] appel {index}/{size} d'un lot ({sub.tool_name}) : {advice}non réécrit — l'hôte ne sait "
+            "pas modifier un seul appel d'un lot. Passe model= explicitement dans l'appel."
+            + ("" if model else f" {decision.context}")
+        )
+    if not lines:
+        return Decision(abstain=True)
+    return Decision(
+        context="\n".join(lines),
+        detail={
+            ADVISORY_DETAIL_KEY: True,
+            "batch_size": size,
+            "batch_tools": [s.tool_name for s, _ in judged],
+            "batch_recommended": recommended,
+        },
+    )
+
+
 def run_hook(
     payload: dict[str, Any],
     *,
@@ -596,9 +714,23 @@ def run_hook(
     guard = (
         hook.event is HookEvent.PRE_TOOL_USE and resolved_decision == DEFAULT_DECISION_BY_EVENT[HookEvent.PRE_TOOL_USE]
     )
-    batch = copilot_wire.inspect_tool_calls(payload) if guard else None
+    advisory = hook.event is HookEvent.PRE_TOOL_USE and resolved_decision in ADVISORY_PRE_TOOL_DECISIONS
+    batch = copilot_wire.inspect_tool_calls(payload) if guard or advisory else None
     judged: list[tuple[HookInput, Decision]]
-    if batch is not None and batch[1]:
+    if advisory:
+        calls = batch[0] if batch is not None and not batch[1] else ()
+        if len(calls) > 1:
+            # Un lot `toolCalls` : l'hôte ne sait pas appliquer une réécriture à un seul
+            # de ses appels. Chaque appel est jugé, aucun n'est réécrit (consultatif).
+            subs = [
+                replace(hook, tool_name=call.name, tool_input=call.args, tool_use_id=call.call_id or hook.tool_use_id)
+                for call in calls
+            ]
+            decision = _advisory_batch([(sub, _decide(sub, resolved_decision, recognized)) for sub in subs])
+        else:
+            decision = _decide(hook, resolved_decision, recognized)
+        judged = [(hook, decision)]
+    elif batch is not None and batch[1]:
         # Échec fermé : une charge qui annonce des appels sans qu'on puisse tous les lire.
         decision = _unreadable_call_decision(batch[1])
         judged = [(hook, decision)]

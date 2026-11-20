@@ -157,6 +157,38 @@ porte deux champs de nom ou d'arguments, ou des arguments nuls. La saisie que
 lot, la trace de chaque appel porte l'issue du lot (`batch_outcome:<verdict>`) :
 un appel autorisé d'un lot refusé n'a pas été exécuté.
 
+Le refus de clôture (`Stop`, `SubagentStop`) est rendu dans la forme que lit
+chaque harness. Le harness Copilot lit `decision`/`reason` au premier niveau
+(`agentStop`, `subagentStop`) ; le harness Local lit
+`hookSpecificOutput.decision` sur `Stop` et `decision` au premier niveau sur
+`SubagentStop`. Une charge camelCase ne vient que du harness Copilot : elle
+reçoit le premier niveau seul. Une charge snake_case ou indécidable reçoit les
+deux formes sur `Stop`, qui disent le même verdict. Le harness Copilot cesse
+d'honorer le refus après 8 refus consécutifs et termine le tour ; la chaîne de
+refus du kit plafonne à 8 au plus (profil `production`, 4 en `governed`), puis
+laisse passer la clôture. Un refus qui dépasserait cette limite n'est pas
+émis : la clôture passe et un message dit que les gates restent rouges.
+
+Le modèle des sous-agents (politique de dispatch, voir
+[Créer un agent](../guides/creer-un-agent.md)) est aussi proposé sous Copilot,
+par une entrée consultative du fichier `grimoire-pre-tool-use.json` placée après
+la garde (matcher `Agent|Task|task`, 3 s). Elle couvre `task` (harness
+Copilot), `runSubagent` (harness Local) et `Agent`/`Task`, et ne rend jamais de
+`permissionDecision`. L'entrée réécrite part en `modifiedArgs` pour une charge
+camelCase, et aussi en `hookSpecificOutput.updatedInput` pour une charge
+snake_case. Un lot de plusieurs appels n'est jamais réécrit : la
+recommandation part en `additionalContext`. Copilot nomme ses modèles
+autrement que les paliers `haiku`/`sonnet` : sans correspondance déclarée par
+le projet, rien n'est réécrit et le palier est seulement dit à l'agent.
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+dispatch:
+  copilot_models:
+    haiku: claude-haiku-4.5    # nom vu dans le journal de session de Copilot
+    sonnet: <modèle Copilot>
+```
+
 Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
 ou jeton.

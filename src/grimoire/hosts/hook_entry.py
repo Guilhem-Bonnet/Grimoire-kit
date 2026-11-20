@@ -35,6 +35,10 @@ _GUARD_EVENTS = frozenset({"pretooluse", "pre_tool_use", "beforetool"})
 #: :mod:`grimoire.hosts.decisions` et :mod:`grimoire.hosts.runtime`.
 ADVISORY_PRE_TOOL_DECISIONS = frozenset({"grimoire.dispatch-model"})
 
+#: Clé de ``Decision.detail`` d'une décision ``PreToolUse`` consultative : chez
+#: Copilot, son rendu n'affirme aucune permission (``runtime``, #1280 P1-4).
+ADVISORY_DETAIL_KEY = "advisory"
+
 
 def guard_failure_payload(cause: str) -> dict[str, Any]:
     """Le refus ``PreToolUse`` d'une garde en panne, au format lu par Claude Code et Copilot."""

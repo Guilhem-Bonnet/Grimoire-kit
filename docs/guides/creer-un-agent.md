@@ -169,6 +169,14 @@ dispatch:
 Toute valeur autre que `on`/`true`/`yes`, ou un fichier illisible, désactive le
 réglage : dans le doute, le hook n'impose rien.
 
+Sous GitHub Copilot, la même décision s'applique aux outils `task` et
+`runSubagent` (et `Agent`/`Task`), avec les mêmes exclusions. Elle garde aussi
+le `model:` d'un agent `.github/agents/<nom>.agent.md`. Copilot ne connaît pas
+les alias `haiku`/`sonnet` : le modèle n'est imposé que si le projet nomme le
+modèle Copilot de chaque palier sous `dispatch.copilot_models`. Sinon le palier
+recommandé est seulement dit à l'agent. Le détail par harness est dans
+[Hôtes](../reference/hotes.md).
+
 **Ce que `context:` change à l'émission (issue #379) :** sans cette clé, le
 fichier d'agent émis dit toujours à l'hôte de lire `_grimoire/_memory/shared-
 context.md` s'il existe — le comportement d'avant #379, inchangé bit à bit.
