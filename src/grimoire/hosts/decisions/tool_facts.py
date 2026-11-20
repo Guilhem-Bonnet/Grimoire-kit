@@ -41,6 +41,9 @@ _WRITE_MARKERS = (
     "notebook",
 )
 _READ_MARKERS = ("read", "cat_file", "view", "open_file", "openfile")
+#: Copilot ``write_bash`` envoie ``input`` à un shell déjà ouvert : c'est une
+#: commande à juger comme Bash, pas une écriture de fichier.
+_SHELL_INPUT_TOOLS = frozenset({"write_bash"})
 _WEB_MARKERS = ("fetch", "websearch", "web_search", "browser", "navigate", "http")
 
 #: Commands whose blast radius survives the session. Matched case-insensitively
@@ -478,6 +481,8 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     payload = tool_input or {}
     name = tool_name.lower()
     command = _first_str(payload, "command", "cmd", "commandLine", "script")
+    if not command and name in _SHELL_INPUT_TOOLS:
+        command = _first_str(payload, "input")
     targets = _target_paths(payload)
     # Each candidate is matched on its own: joining them first turns the start
     # of a path into the middle of a blob, and ``.env`` stops looking like a
@@ -540,7 +545,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     interpreted_code = ", ".join(sorted({language for language, _ in interpreted}))
 
     is_execute = bool(command) or any(marker in name for marker in _EXECUTE_MARKERS)
-    is_write = any(marker in name for marker in _WRITE_MARKERS)
+    is_write = name not in _SHELL_INPUT_TOOLS and any(marker in name for marker in _WRITE_MARKERS)
     is_web = any(marker in name for marker in _WEB_MARKERS)
     is_read = any(marker in name for marker in _READ_MARKERS)
 
