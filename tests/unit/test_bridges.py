@@ -58,8 +58,7 @@ def test_detect_unknown_env_var_returns_unknown(monkeypatch):
         "CLAUDE_CODE_ENTRYPOINT",
         "CODEX_ENV",
         "CODEX_SANDBOX",
-        "COPILOT_AGENT",
-        "GITHUB_COPILOT_AGENT",
+        "COPILOT_AGENT_PROMPT",
         "CURSOR_AGENT",
         "CURSOR_TRACE_ID",
         "GEMINI_CLI",
@@ -94,7 +93,7 @@ def test_api_key_alone_does_not_identify_a_host(monkeypatch):
     """A vendor key says who pays for the tokens, not which host is running."""
     monkeypatch.delenv("GRIMOIRE_HOST_ID", raising=False)
     for var in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CODEX_ENV", "CODEX_SANDBOX",
-                "COPILOT_AGENT", "GITHUB_COPILOT_AGENT", "CURSOR_AGENT", "CURSOR_TRACE_ID",
+                "COPILOT_AGENT_PROMPT", "CURSOR_AGENT", "CURSOR_TRACE_ID",
                 "GEMINI_CLI", "GEMINI_CLI_VERSION"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
