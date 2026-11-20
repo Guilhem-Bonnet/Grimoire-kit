@@ -40,7 +40,9 @@ SESSION = "aaaaaaaa-0000-4000-8000-0000000000l3"
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
     # Les définitions d'agents de l'utilisateur sont lues sous HOME : jamais celui du poste.
-    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+    home = str(tmp_path_factory.mktemp("home"))
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)  # Path.home() lit USERPROFILE sous Windows
     for var in (
         "GRIMOIRE_TASK_ID",
         "GRIMOIRE_ACTOR",

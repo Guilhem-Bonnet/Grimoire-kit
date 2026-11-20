@@ -132,7 +132,7 @@ def test_un_chemin_hors_projet_ne_fait_pas_sortir_une_ecriture(
     lieux: tuple[Path, Path], template: str, agent: str
 ) -> None:
     root, out = lieux
-    assert _counts(root, template.format(out=out, root=root), agent=agent)
+    assert _counts(root, template.format(out=out.as_posix(), root=root.as_posix()), agent=agent)
 
 
 def test_un_cwd_hors_projet_ne_fait_pas_sortir_une_ecriture_relative(lieux: tuple[Path, Path]) -> None:
@@ -160,7 +160,7 @@ def test_un_brouillon_hors_projet_ou_une_verification_ne_compte_pas(
     lieux: tuple[Path, Path], template: str, agent: str
 ) -> None:
     root, out = lieux
-    assert not _counts(root, template.format(out=out), agent=agent)
+    assert not _counts(root, template.format(out=out.as_posix()), agent=agent)
 
 
 # ── Stop, de bout en bout ────────────────────────────────────────────────────
@@ -197,7 +197,7 @@ def _stop(root: Path) -> Any:
 
 def test_des_ecritures_illisibles_bloquent_le_stop(gouverne: tuple[Path, Path]) -> None:
     root, out = gouverne
-    _post(root, "Bash", {"command": f"git apply {out}/p.patch"})
+    _post(root, "Bash", {"command": f"git apply {out.as_posix()}/p.patch"})
     _post(root, "Bash", {"command": "ruff check --fix src/ && ruff format src/"})
     _post(root, "Bash", {"command": "./regen.sh  # pytest"})
     _post(root, "Bash", {"command": "make gen"}, agent="sous-agent-1")
@@ -217,5 +217,5 @@ def test_quarante_ecritures_apres_le_refus_rebloquent(gouverne: tuple[Path, Path
 
 def test_une_redirection_vers_le_brouillon_neutre_ne_compte_pas(gouverne: tuple[Path, Path]) -> None:
     root, out = gouverne
-    _post(root, "Bash", {"command": f"cat > {out}/notes.md <<'EOF'\nvoir src/app.py\nEOF"})
+    _post(root, "Bash", {"command": f"cat > {out.as_posix()}/notes.md <<'EOF'\nvoir src/app.py\nEOF"})
     assert session_mutations(root, SESSION) == 0

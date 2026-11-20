@@ -108,14 +108,14 @@ def test_une_session_de_lectures_et_de_sous_agents_de_lecture_compte_zero_ecritu
     _post(governed, "Read", {"file_path": str(governed / "README.md")})
     _post(governed, "Agent", {"prompt": "cherche X", "subagent_type": "Explore"})
     _post(governed, "TodoWrite", {"todos": [{"content": "lire", "status": "pending"}]})
-    _bash(governed, f"cat > {scratch}/notes.md <<'EOF'\nvoir src/app.py\nEOF")
+    _bash(governed, f"cat > {scratch.as_posix()}/notes.md <<'EOF'\nvoir src/app.py\nEOF")
     _bash(governed, "python -m pytest tests -q")
     _bash(governed, "ruff check src")
     # Le sous-agent de lecture : des commandes que le classement lecture seule ne reconnaît pas toutes.
     for command in (
         "python -m pytest tests/unit -q",
         "ruff check src",
-        f"grep -rn foo src > {scratch}/hits.txt",
+        f"grep -rn foo src > {scratch.as_posix()}/hits.txt",
         "cd src && grep -rn foo .",
     ):
         _bash(governed, command, agent=SUB)

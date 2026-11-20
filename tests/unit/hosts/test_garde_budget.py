@@ -118,7 +118,9 @@ def test_an_exceeded_budget_refuses_without_revoking(
     assert decision.outcome is Outcome.DENY
     assert decision.detail["policy_budget"] == "exceeded"
     assert "budget" in decision.reason
-    assert elapsed < 0.5
+    # Le budget posé est de 10 ms : il s'agit de prouver que la garde rend la main sans attendre le budget réel
+    # (POLICY_BUDGET_S = 3 s). Les runners Windows partagés ont mesuré 0,68 s ; 2 s reste sous le budget réel.
+    assert elapsed < 2.0
     assert not revocations
 
 

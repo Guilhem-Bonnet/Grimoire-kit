@@ -40,6 +40,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() lit USERPROFILE sous Windows
     monkeypatch.delenv("GRIMOIRE_TASK_ID", raising=False)
     root = tmp_path / "proj"
     root.mkdir()
