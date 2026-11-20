@@ -273,12 +273,14 @@ def copilot_model_for(project_root: Path, tier: str) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _persona_declares_model(project_root: Path, subagent_type: str) -> bool:
+def _persona_declares_model(project_root: Path, subagent_type: str, *, copilot: bool = False) -> bool:
     """La persona appelée a-t-elle déjà son modèle, ou ne peut-on pas le savoir ?
 
     Vrai — donc abstention — pour un agent de plugin (``plugin:agent``, sa
     définition n'est pas lue ici) et pour une définition ``.claude/agents/<nom>.md``
     du projet ou de l'utilisateur qui déclare un ``model:`` autre que ``inherit``.
+    Sous Copilot (*copilot*) seulement, aussi ``.github/agents/<nom>.agent.md`` :
+    Claude Code ne lit pas ce fichier, son ``model:`` n'y change rien.
     """
     if not subagent_type:
         return False
@@ -289,15 +291,11 @@ def _persona_declares_model(project_root: Path, subagent_type: str) -> bool:
     roots = [project_root]
     with contextlib.suppress(RuntimeError, KeyError, OSError):
         roots.append(Path.home())
-    return any(
-        _definition_declares_model(path)
-        for root in roots
-        for path in (
-            root / ".claude" / "agents" / f"{subagent_type}.md",
-            # Agent personnalisé VS Code / Copilot : son `model:` est sa préférence.
-            root / ".github" / "agents" / f"{subagent_type}.agent.md",
-        )
-    )
+    candidates = [root / ".claude" / "agents" / f"{subagent_type}.md" for root in roots]
+    if copilot:
+        # Agent personnalisé VS Code / Copilot : son `model:` est sa préférence.
+        candidates += [root / ".github" / "agents" / f"{subagent_type}.agent.md" for root in roots]
+    return any(_definition_declares_model(path) for path in candidates)
 
 
 def _definition_declares_model(path: Path) -> bool:
@@ -377,7 +375,7 @@ def _decide(hook: HookInput) -> Decision:
         return Decision(abstain=True)
     if not impose_model_enabled(hook.project_root):
         return Decision(abstain=True)
-    if _persona_declares_model(hook.project_root, subagent_type):
+    if _persona_declares_model(hook.project_root, subagent_type, copilot=copilot):
         return Decision(abstain=True)
 
     model, detail = _class_model(hook)

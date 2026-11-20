@@ -305,3 +305,14 @@ def test_doctor_does_not_mistake_the_dispatch_entry_for_a_short_guard(governed: 
     apply_plan(emitter_for(HostId.GITHUB_COPILOT).plan(build_surface(governed), governed), governed)
     checks = check_copilot_guard_timeout(governed)
     assert checks and all(c.passed for c in checks), [c.detail for c in checks]
+
+
+def test_claude_code_ignores_a_copilot_agent_file_model(project: Path) -> None:
+    """R1 : sous Claude Code, `.github/agents/*.agent.md` n'est pas lu (Claude ne charge pas ce fichier)."""
+    agents = project / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "explorer.agent.md").write_text("---\nmodel: GPT-5 mini\n---\nCorps\n", encoding="utf-8")
+    rendered, _ = _dispatch(
+        project, _snake(project, "Agent", {**_RESEARCH, "subagent_type": "explorer"}), HostId.CLAUDE_CODE_CLI
+    )
+    assert rendered["hookSpecificOutput"]["updatedInput"]["model"] == "haiku"
