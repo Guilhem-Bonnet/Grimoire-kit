@@ -1,1 +1,0 @@
-- feat(hosts): détection du harness Copilot par la forme du payload (clés camelCase), variables d'environnement non documentées retirées, et `grimoire doctor` contrôle le format des hooks Copilot (version, matcher de la garde) et signale les hooks doublés avec `.claude/settings.json`
