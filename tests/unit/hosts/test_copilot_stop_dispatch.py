@@ -316,3 +316,12 @@ def test_claude_code_ignores_a_copilot_agent_file_model(project: Path) -> None:
         project, _snake(project, "Agent", {**_RESEARCH, "subagent_type": "explorer"}), HostId.CLAUDE_CODE_CLI
     )
     assert rendered["hookSpecificOutput"]["updatedInput"]["model"] == "haiku"
+
+
+def test_an_unreadable_batch_is_never_rewritten(project: Path) -> None:
+    """R2 : un lot dont un appel est illisible ne rend aucune réécriture, même si un appel `task` y est lisible."""
+    _set_models(project, _MAPPED)
+    payload = _camel_task(project, _RESEARCH)
+    payload["toolCalls"].append({"id": "toolu_REDACTED_10", "args": "{}"})  # appel sans nom
+    rendered, decision = _dispatch(project, payload)
+    assert rendered == {} and decision.abstain

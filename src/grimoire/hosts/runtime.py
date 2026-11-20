@@ -732,8 +732,14 @@ def run_hook(
     advisory = hook.event is HookEvent.PRE_TOOL_USE and resolved_decision in ADVISORY_PRE_TOOL_DECISIONS
     batch = copilot_wire.inspect_tool_calls(payload) if guard or advisory else None
     judged: list[tuple[HookInput, Decision]]
-    if advisory:
-        calls = batch[0] if batch is not None and not batch[1] else ()
+    if advisory and batch is not None and batch[1]:
+        # Lot illisible : la lecture tolérante du hook normalisé pourrait n'en garder
+        # qu'un appel et le réécrire. Une décision consultative s'abstient (la garde,
+        # elle, refuse ce lot).
+        decision = Decision(abstain=True, detail={"unreadable_tool_call": batch[1]})
+        judged = [(hook, decision)]
+    elif advisory:
+        calls = batch[0] if batch is not None else ()
         if len(calls) > 1:
             # Un lot `toolCalls` : l'hôte ne sait pas appliquer une réécriture à un seul
             # de ses appels. Chaque appel est jugé, aucun n'est réécrit (consultatif).
