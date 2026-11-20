@@ -33,7 +33,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Jamais d'annulation sur main, tag ou nuit : seules les PR sont remplacées par leur dernier commit.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
