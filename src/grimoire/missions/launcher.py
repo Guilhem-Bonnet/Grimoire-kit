@@ -68,6 +68,7 @@ from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.liveness import probe_status
 from grimoire.missions.provider_failure import transient_api_error
 from grimoire.missions.schemas import TaskState
+from grimoire.missions.sensitive_route import SensitiveRoute, sensitive_route_for
 from grimoire.missions.task_worktree import create_task_worktree
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.missions.worker_provider import WorkerRoute, is_local_provider, route_denial, route_worker, settings_path
@@ -788,6 +789,10 @@ class WorkerLauncher:
         role = self._policy.worker
         return "cheap" if role.model_by_class and classify(task) is Verifiability.V0 else role.tier
 
+    def routing_for(self, task: MissionTask) -> SensitiveRoute:
+        """La décision ``sensitive_route`` pour *task* : ce que le lancement fera, lisible sans rien lancer."""
+        return sensitive_route_for(task, self._policy)
+
     def _model_for(self, admit: Admit, tier: str | None = None) -> str:
         role = self._policy.worker
         if role.model:
@@ -860,8 +865,11 @@ class WorkerLauncher:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
         task = service.require(tid)
-        tier = self._tier_for(task)
-        provider_id = self._policy.worker.provider
+        sensitive = self.routing_for(task)
+        tier = "strong" if sensitive.strong else self._tier_for(task)
+        # Une tâche qui vise un chemin sensible ne prend pas la route du fournisseur bon marché : elle part sur
+        # l'hôte, au palier fort, plutôt que de voir sa PR rejetée puis réécrite (``sensitive_route``).
+        provider_id = "" if sensitive.strong else self._policy.worker.provider
         busy = self._busy_providers()
         route = route_worker(service.home_root, provider_id, tier, task, busy_providers=busy)
         denial = ""
@@ -874,7 +882,10 @@ class WorkerLauncher:
             denial = route_denial(service.home_root, provider_id, tier, task, busy_providers=busy)
             if denial and provider_id in busy and is_local_provider(service.home_root, provider_id):
                 return self._deferred(tid, denial)
-        model = route.model if route is not None else self._model_for(admit, tier)
+        if sensitive.strong:
+            model = _TIER_ALIAS["strong"]
+        else:
+            model = route.model if route is not None else self._model_for(admit, tier)
         result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:
@@ -911,9 +922,13 @@ class WorkerLauncher:
                 "permission_mode": self._policy.worker.permission_mode,
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
+                **({"sensitive_route": sensitive.to_dict()} if sensitive.strong else {}),
             },
         )
-        return LaunchOutcome(tid, "launched", f"session {session} dans {wt.path}", session, model)
+        detail = f"session {session} dans {wt.path}"
+        if sensitive.strong:
+            detail += f" — routage fort ({model}) : {sensitive.reason}"
+        return LaunchOutcome(tid, "launched", detail, session, model)
 
     def _base(self) -> tuple[str, str, str]:
         """``(base, cible, raison)`` : la clé ``orchestrator.base``, à défaut ``origin/HEAD`` ; jamais la branche extraite.

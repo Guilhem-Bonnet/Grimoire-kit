@@ -356,6 +356,12 @@ def task_show(
             out.print(f"  différée : {escape(str(last_launch.payload.get('reason', '')))}")
         elif last_launch.payload.get("provider_refused"):
             out.print(f"  repli sur l'hôte : {escape(str(last_launch.payload['provider_refused']))}")
+        routed = last_launch.payload.get("sensitive_route")
+        if isinstance(routed, dict) and routed.get("route"):
+            out.print(
+                f"  routage fort : {escape(str(last_launch.payload.get('model') or ''))} — "
+                f"{escape(str(routed.get('reason') or ''))}"
+            )
     if task.owner or task.claim:
         out.print(f"  porté par : {task.owner or (task.claim.actor_id if task.claim else '—')}")
     if task.directives:

@@ -1327,3 +1327,107 @@ def test_une_classe_de_donnees_non_declaree_garde_le_worker_sur_l_hote(route_pre
     (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
     assert lancement.payload["provider"] == ""
     assert "aucune classe de données" in lancement.payload["provider_refused"]
+
+
+# ── Routage fort des tâches qui visent des chemins sensibles (sensitive_route) ─
+
+
+def _route_sensible(projet: Path, *, route: str = "strong", extra: str = "") -> None:
+    write_policy(
+        projet,
+        extra=f"      provider: deepseek\n      tier: cheap\n      model_by_class: true\n      sensitive_route: {route}\n{extra}",
+    )
+
+
+def ready_v0_decrite(service: TaskService, title: str, description: str) -> str:
+    mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Lot", origin="t", created_by="t")
+    task = service.ledger.create_task(
+        mission.id, title, acceptance=("pytest tests/x.py : le code de sortie vaut 0",), owner="amelia",
+        description=description, checks=(TaskCheck(cmd="pytest tests/x.py"),),
+    )
+    service.ledger.transition_task(task.id, TaskState.READY)
+    return task.id
+
+
+def test_une_tache_hors_chemins_sensibles_garde_le_worker_bon_marche(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete)
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "doc", "Corriger la coquille dans `docs/guide.md`.")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "deepseek-chat"
+    assert "--settings" in argv
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["provider"] == "deepseek"
+    assert "sensitive_route" not in lancement.payload
+
+
+def test_une_tache_qui_cite_un_hook_part_sur_le_modele_fort(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete)
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "garde", "Durcir le hook `.github/hooks/scripts/gate.sh` et `src/grimoire/missions/launcher.py`.")
+
+    report = tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert "--settings" not in argv
+    assert "deepseek-chat" not in argv
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["provider"] == ""
+    assert lancement.payload["model"] == "opus"
+    routed = lancement.payload["sensitive_route"]
+    assert routed["route"] == "strong"
+    assert ".github/hooks/scripts/gate.sh" in routed["paths"]
+    assert "src/grimoire/missions/launcher.py" in routed["paths"]
+    (outcome,) = report.launches
+    assert "routage fort (opus)" in outcome.detail
+    shown = runner.invoke(app, ["task", "show", tid, "--project-root", str(route_prete)])
+    assert "routage fort : opus" in shown.output, shown.output
+
+
+def test_politique_off_une_tache_sensible_reste_sur_le_worker_bon_marche(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete, route="off")
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "garde", "Durcir `.github/workflows/ci.yml`.")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "deepseek-chat"
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert "sensitive_route" not in lancement.payload
+
+
+def test_un_motif_sensible_de_la_politique_s_ajoute_aux_chemins_reserves(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete, extra='      sensitive_paths: ["src/grimoire/policies/*"]\n')
+    service = TaskService(route_prete)
+    ready_v0_decrite(service, "politique", "Revoir src/grimoire/policies/engine.py")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+
+
+def test_le_plan_du_tick_montre_le_routage_prevu_sans_rien_lancer(route_prete: Path, host: FakeHost) -> None:
+    _route_sensible(route_prete)
+    service = TaskService(route_prete)
+    sensible = ready_v0_decrite(service, "garde", "Toucher pyproject.toml")
+    banale = ready_v0_decrite(service, "banale", "Rien de précis")
+
+    report = run_tick(route_prete, apply=False, exec_=host)
+
+    assert not host.of("claude", "--bg")
+    routes = dict(report.routes)
+    assert routes[sensible].strong
+    assert "pyproject.toml" in routes[sensible].reason
+    assert not routes[banale].strong
+    assert "aucun sensible" in routes[banale].reason  # ses critères citent tests/x.py, hors chemins sensibles
+    assert {r["task_id"] for r in report.to_dict()["routes"]} == {sensible, banale}
+
+    result = runner.invoke(app, ["orchestrate", "tick", "--project-root", str(route_prete)])
+    assert result.exit_code == 0, result.output
+    assert f"Routage prévu : {sensible} — fort" in result.output
