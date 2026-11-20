@@ -75,8 +75,10 @@ if TYPE_CHECKING:
     from grimoire.missions.janitor import JanitorOutcome
     from grimoire.missions.launcher import Exec, LaunchOutcome
     from grimoire.missions.merger import MergerOutcome
+    from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.orchestrator_session import OrchestratorOutcome
     from grimoire.missions.reviewer import ReviewOutcome
+    from grimoire.missions.sensitive_route import SensitiveRoute
     from grimoire.missions.service import TaskService, WakeDecision
 
 __all__ = ["TICK_LOCK_RELPATH", "TickReport", "run_tick"]
@@ -112,6 +114,8 @@ class TickReport:
     orchestrator: tuple[OrchestratorOutcome, ...] = ()
     usage: tuple[Any, ...] = ()  # GAO-i12 : les journaux repliés à ce tick (FoldOutcome)
     external_merges: tuple[ExternalMergeOutcome, ...] = ()  # #1162 : les PR fusionnées hors merger, soldées
+    #: En plan, sous ``worker.sensitive_route: strong`` : ``(tâche, décision)`` pour chaque tâche admise.
+    routes: tuple[tuple[str, SensitiveRoute], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -144,6 +148,8 @@ class TickReport:
             payload["usage"] = [o.to_dict() for o in self.usage]
         if self.external_merges:  # #1162 : même règle
             payload["external_merges"] = [o.to_dict() for o in self.external_merges]
+        if self.routes:  # sensitive_route : même règle
+            payload["routes"] = [{"task_id": tid, **decision.to_dict()} for tid, decision in self.routes]
         return payload
 
 
@@ -293,6 +299,7 @@ def _one_pass(
         result = dispatcher(plan.admitted)
         launches = tuple(result) if isinstance(result, (tuple, list)) else ()
         dispatched = tuple(o.task_id for o in launches if o.status == "launched") if launches else tuple(a.task_id for a in plan.admitted)
+    routes = _planned_routes(service, policy, plan.admitted) if mode == "plan" else ()
     reviews: tuple[ReviewOutcome, ...] = ()
     if mode == "apply" and policy is not None and policy.reviewer.enabled:
         from grimoire.missions.launcher import default_exec
@@ -344,8 +351,24 @@ def _one_pass(
     notes = tuple(f"{t} : en pause ({state.mode_for(t)})" for t in sorted({tid for f in state.flags for tid in f.tasks}))
     return TickReport(
         "ran", state, tuple(attention), woken, tuple(report.decisions), plan, dispatched, notes, effects, mode, ci,
-        launches, cleanup, breaker, reviews, merges, answers, usage, external_merges,
+        launches, cleanup, breaker, reviews, merges, answers, usage, external_merges, routes=routes,
     )
+
+
+def _planned_routes(
+    service: TaskService, policy: OrchestratorPolicy | None, admitted: tuple[Admit, ...],
+) -> tuple[tuple[str, SensitiveRoute], ...]:
+    """Le routage que le lanceur appliquerait aux tâches admises (``sensitive_route``), rendu par le plan."""
+    from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_STRONG, sensitive_route_for
+
+    if policy is None or policy.worker.sensitive_route != SENSITIVE_ROUTE_STRONG:
+        return ()
+    routes: list[tuple[str, SensitiveRoute]] = []
+    for admit in admitted:
+        task = service.ledger.get_task(admit.task_id)
+        if task is not None:
+            routes.append((admit.task_id, sensitive_route_for(task, policy)))
+    return tuple(routes)
 
 
 def _usage_stage(service: TaskService, mode: str, attention: list[str]) -> tuple[Any, ...]:

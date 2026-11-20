@@ -597,6 +597,43 @@ grimoire autonomy mandate revoke --reason "fin du pilote"
   Limite : un agent qui lance un script arbitraire, ou dont le chemin est assemblé par le shell (`$X`),
   contourne une garde de chemin.
 
+### Routage fort des chemins sensibles (worker)
+
+Sous `model_by_class` et un `provider` bon marché, le worker du tick écrit les tâches V0/V1 avec un modèle peu cher.
+Sur les chemins sensibles (gardes, hooks, autorité, politique, relecture, CI), ses PR sont souvent rejetées puis
+réécrites par un modèle fort : on paie deux fois. Avec `sensitive_route: strong`, une telle tâche part d'emblée sur
+l'hôte, au palier fort (`opus`), sans route de fournisseur :
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  roles:
+    worker:
+      provider: deepseek
+      model_by_class: true
+      sensitive_route: strong   # off (défaut) : inchangé ; toute autre valeur rend la politique invalide
+      sensitive_paths: []       # motifs ajoutés aux chemins réservés ci-dessous
+```
+
+- **Chemins sensibles** : il n'y a pas de seconde liste. Ce sont les chemins qui escaladent au merger (voir plus bas,
+  `DEFAULT_PROTECTED_PATHS` plus `merger.protected_paths`), ceux qui restent à l'humain en double relecture
+  (`HUMAN_ONLY_PATHS` plus `merger.human_only_paths`), et les motifs de `worker.sensitive_paths`. Comparaison en
+  `casefold()`.
+- **Chemins visés par la tâche** : seulement ce que la tâche cite, lu sans réseau ni modèle. Sont lus son titre, sa
+  description, sa surface, ses critères, ses garde-fous, ses preuves attendues et les consignes de l'orchestrateur.
+  Le context bundle ne porte rien de plus. L'issue liée n'est pas lue, pour ne pas faire dépendre le lancement du
+  réseau. Un jeton compte comme chemin s'il contient un `/`, commence par un `.` ou finit par une extension de
+  fichier connue. Une URL, un chemin absolu ou un chemin sous `~` n'en est pas un. Un nom de fichier nu
+  (`launcher.py`) vaut le chemin réservé qui finit par ce nom.
+- **En cas de doute, rien ne change** : si la tâche ne cite aucun chemin, ou aucun chemin sensible, elle part comme
+  avant (`model_by_class`, `provider`). Le routage ne fait que monter. Une tâche dont la classe de données ferme
+  les modèles hébergés reste différée, comme pour tout repli sur l'hôte.
+- **Trace** : l'événement `task.session_launched` porte `sensitive_route` (route, chemins, raison) et le modèle.
+  `grimoire task show` affiche `routage fort : opus — chemins sensibles cités : …`. La sortie du tick le dit dans
+  le détail du lancement.
+- **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
+  | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
+
 ### Fusion par le merger (#876, lot 4)
 
 Le rôle `merger` est une étape de `orchestrate tick --apply`, après le relecteur. Il est désactivé par défaut :
