@@ -338,18 +338,13 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
                 # mentionne pas `hookSpecificOutput`, que lit le harness Local. Les
                 # deux formes portent le même verdict ; le refus sort aussi en code 2.
                 payload.update(copilot_flat_verdict(specific))
-            elif (
-                host_id is HostId.CLAUDE_CODE_CLI
-                and (decision.is_refusal or decision.outcome is Outcome.ASK)
-                and not copilot_wire.claude_code_payload(hook.raw)
-            ):
-                # Charge de `--host claude` qui ne prouve pas Claude Code (snake_case sans
-                # clé propre à Claude Code) : peut-être le harness Copilot qui exécute
-                # `.claude/settings.json` (une charge qui le prouve est rendue pour Copilot,
-                # voir ``main``). Le verdict part aussi à plat, en code 0. Claude Code analyse
-                # la sortie avec un schéma qui ignore une clé inconnue (« Hook JSON output had
-                # unrecognized keys (ignored) », relevé dans le binaire 2.1.330 ; sa
-                # documentation n'en dit rien) : il lit toujours `hookSpecificOutput`.
+            elif host_id is HostId.CLAUDE_CODE_CLI and (decision.is_refusal or decision.outcome is Outcome.ASK):
+                # `--host claude` : le hook peut être exécuté par le harness Copilot, qui lit
+                # aussi `.claude/settings.json`. Le verdict part donc toujours aussi à plat
+                # (une charge qui prouve Copilot reçoit en plus le code 2, voir ``main``).
+                # Claude Code analyse la sortie avec un schéma qui ignore une clé inconnue
+                # (« Hook JSON output had unrecognized keys (ignored) », relevé dans le binaire
+                # 2.1.330 ; sa documentation n'en dit rien) : il lit toujours `hookSpecificOutput`.
                 payload.update(copilot_flat_verdict(specific))
         elif decision.reason:
             # A host that cannot refuse or ask is at least told why it should.
@@ -916,8 +911,8 @@ def main(argv: list[str] | None = None) -> int:
             verdict = guard_failure_verdict(cause)
             if host_id is HostId.GITHUB_COPILOT:
                 return _copilot_refusal_exit(copilot_guard_refusal(verdict))
-            if host_id is HostId.CLAUDE_CODE_CLI and not copilot_wire.claude_code_payload(payload):
-                # Même règle que ``render`` : charge indécidable, verdict aussi à plat, code 0.
+            if host_id is HostId.CLAUDE_CODE_CLI:
+                # Même règle que ``render`` : verdict aussi à plat, code 0.
                 verdict = copilot_guard_refusal(verdict)
             sys.stdout.write(json.dumps(verdict, ensure_ascii=False))
             return 0

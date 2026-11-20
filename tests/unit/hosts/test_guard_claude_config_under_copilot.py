@@ -40,6 +40,21 @@ pytestmark = pytest.mark.covers("host:github-copilot", level="real")
 DESTRUCTIVE = "rm -rf /"
 
 
+def assert_claude_render(out: dict[str, Any], verdict: str) -> None:
+    """Rendu Claude Code : `hookSpecificOutput` intact ; seul ajout permis, le même verdict à plat.
+
+    Claude Code ignore une clé inconnue de premier niveau (binaire 2.1.330) : le verdict à
+    plat ajouté sous `--host claude` ne change pas ce qu'il lit.
+    """
+    specific = out["hookSpecificOutput"]
+    assert specific["hookEventName"] == "PreToolUse"
+    assert specific["permissionDecision"] == verdict
+    assert set(out) <= {"hookSpecificOutput", "permissionDecision", "permissionDecisionReason"}
+    for key in ("permissionDecision", "permissionDecisionReason"):
+        if key in out:
+            assert out[key] == specific[key]
+
+
 @pytest.fixture
 def governed(tmp_path: Path) -> Path:
     setup_standard_profile(tmp_path, profile_id="governed", task_id="bootstrap")
@@ -117,12 +132,16 @@ def test_claude_config_run_by_copilot_refuses_the_copilot_way(governed: Path, sh
 
 @pytest.mark.parametrize("extra", [{}, {"timestamp": "2026-11-20T10:00:00.000Z"}])
 def test_real_claude_code_refusal_is_strictly_unchanged(governed: Path, extra: dict[str, Any]) -> None:
-    """Une clé propre à Claude Code l'emporte, même à côté d'un ``timestamp``."""
+    """Une clé propre à Claude Code l'emporte, même à côté d'un ``timestamp`` : code 0, rendu Claude Code.
+
+    Le verdict à plat est là aussi : une charge Copilot qui porterait un jour une clé de
+    Claude Code garderait un refus lisible par Copilot.
+    """
     proc = _entry("claude-code", governed, {**_claude(governed, DESTRUCTIVE), **extra})
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout)
-    assert set(out) == {"hookSpecificOutput"}
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert_claude_render(out, "deny")
+    assert out["permissionDecision"] == "deny"
     assert proc.stderr == ""
 
 
@@ -158,7 +177,7 @@ def test_import_failure_follows_the_payload_under_claude(capsys: pytest.CaptureF
     assert json.loads(capsys.readouterr().out)["permissionDecision"] == "deny"
     raw = json.dumps({"hook_event_name": "PreToolUse", "permission_mode": "default"})
     assert hook_entry.import_failure(args, raw, "ImportError: x") == 0
-    assert set(json.loads(capsys.readouterr().out)) == {"hookSpecificOutput"}
+    assert_claude_render(json.loads(capsys.readouterr().out), "deny")
     assert hook_entry.import_failure(args, json.dumps({"hook_event_name": "PreToolUse"}), "ImportError: x") == 0
     assert json.loads(capsys.readouterr().out)["permissionDecision"] == "deny"
 

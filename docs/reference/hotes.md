@@ -184,21 +184,22 @@ code de refus. Sous Claude Code, rien ne change : code 0 et JSON.
 
 Un projet câblé pour Claude Code seul peut tourner sous Copilot : Copilot
 exécute aussi les hooks de `.claude/settings.json`, avec `--host claude-code`
-dans la commande. La garde regarde alors la charge reçue :
+dans la commande. Sous `--host claude`, un refus ou une demande porte donc
+toujours, en plus de `hookSpecificOutput`, `permissionDecision` et
+`permissionDecisionReason` au premier niveau. La documentation de Claude Code
+ne dit rien des clés inconnues. Le binaire 2.1.330 les ignore et note
+« unrecognized keys (ignored) » dans son journal de débogage : le verdict lu par
+Claude Code reste celui de `hookSpecificOutput`. Seul le code de sortie dépend
+de la charge reçue :
 
-- si la charge prouve le harness Copilot, le refus est rendu pour Copilot
-  (forme à plat et code 2). Deux formes le prouvent : le camelCase, ou une
-  charge snake_case qui porte `timestamp` (la référence GitHub le donne pour un
-  événement PascalCase, pas l'entrée de Claude Code) ;
-- si la charge porte une clé que seul Claude Code envoie (`permission_mode`,
-  `effort`, `prompt_id`, `scratchpad_dir`), le rendu Claude Code reste
-  strictement le même ;
-- si la charge ne permet pas de trancher, le refus et la demande portent en plus
-  `permissionDecision` et `permissionDecisionReason` au premier niveau, avec le
-  code 0. La documentation de Claude Code ne dit rien des clés inconnues. Le
-  binaire 2.1.330 les ignore et note « unrecognized keys (ignored) » dans son
-  journal de débogage : le verdict lu par Claude Code reste celui de
-  `hookSpecificOutput`.
+- si la charge prouve le harness Copilot, le refus sort en code 2, raison sur
+  stderr, comme sous `--host copilot`. Deux formes le prouvent : le camelCase,
+  ou une charge snake_case qui porte `timestamp` (la référence GitHub le donne
+  pour un événement PascalCase, pas l'entrée de Claude Code) ;
+- sinon (charge de Claude Code, qui porte `permission_mode`, `effort`,
+  `prompt_id` ou `scratchpad_dir`, ou charge indécidable), code 0, comme
+  Claude Code l'attend. Une charge qui porte une clé de Claude Code n'est jamais
+  attribuée à Copilot.
 
 `grimoire doctor` le signale (`copilot_claude_hooks_only`, WARN) quand Copilot est
 activé ou détecté pour le projet, que `.claude/settings.json` lance le kit et

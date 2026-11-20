@@ -118,12 +118,22 @@ def test_copilot_allow_is_unchanged_and_exits_0(governed: Path) -> None:
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def assert_claude_render(out: dict[str, Any], verdict: str) -> None:
+    """Rendu Claude Code : `hookSpecificOutput` intact ; seul ajout permis, le même verdict à plat (ignoré par Claude Code)."""
+    specific = out["hookSpecificOutput"]
+    assert specific["hookEventName"] == "PreToolUse"
+    assert specific["permissionDecision"] == verdict
+    assert set(out) <= {"hookSpecificOutput", "permissionDecision", "permissionDecisionReason"}
+    for key in ("permissionDecision", "permissionDecisionReason"):
+        if key in out:
+            assert out[key] == specific[key]
+
+
 def test_claude_code_refusal_is_strictly_unchanged(governed: Path) -> None:
     proc = _entry("claude", governed, _claude(governed, DESTRUCTIVE))
     assert proc.returncode == 0, proc.stderr
-    out = json.loads(proc.stdout)
-    assert set(out) == {"hookSpecificOutput"}
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert_claude_render(json.loads(proc.stdout), "deny")
+    assert proc.stderr == ""
 
 
 def test_copilot_advisory_dispatch_never_exits_2(governed: Path) -> None:
@@ -142,7 +152,7 @@ def test_copilot_ask_is_flat_without_exit_2(governed: Path, monkeypatch: pytest.
     assert rendered["permissionDecision"] == "ask" and rendered["permissionDecisionReason"] == "[Grimoire] à toi."
     assert rendered["hookSpecificOutput"]["permissionDecision"] == "ask"
     rendered, _, _ = run_hook(_claude(governed, "make deploy"), host_id=HostId.CLAUDE_CODE_CLI)
-    assert set(rendered) == {"hookSpecificOutput"}
+    assert_claude_render(rendered, "ask")
 
 
 def test_runtime_main_returns_2_only_on_a_copilot_refusal(
@@ -169,7 +179,8 @@ def test_import_failure_refuses_with_exit_2_under_copilot(capsys: pytest.Capture
     assert "garde avant outil en panne" in captured.err
     raw = json.dumps({"hook_event_name": "PreToolUse", "permission_mode": "default"})
     code = hook_entry.import_failure(["--host", "claude", "--event", "PreToolUse"], raw, "ImportError: x")
-    assert code == 0 and "permissionDecision" not in json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert_claude_render(json.loads(capsys.readouterr().out), "deny")
 
 
 @pytest.mark.parametrize("host", [HostId.GITHUB_COPILOT, HostId.CLAUDE_CODE_CLI])
@@ -227,4 +238,5 @@ def test_a_crashing_guard_exits_2_with_its_reason_on_stderr_under_copilot(
             assert out["permissionDecision"] == "deny"
             assert "garde avant outil en panne (RuntimeError: panne simulée)" in captured.err
         else:
-            assert "permissionDecision" not in out and captured.err == ""
+            assert_claude_render(out, "deny")
+            assert captured.err == ""

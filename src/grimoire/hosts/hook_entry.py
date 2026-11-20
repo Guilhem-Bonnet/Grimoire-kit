@@ -104,25 +104,25 @@ def _event_name(args: list[str], raw: str) -> str:
     return name
 
 
-def _claude_hook_origin(host: str, raw: str) -> str:
-    """Sous ``--host claude…`` : ``"copilot"``, ``"claude"`` ou ``"unknown"`` selon la charge ; ``""`` sinon.
+def _is_claude_host(host: str) -> bool:
+    return host.startswith("claude")
 
-    Lit :mod:`grimoire.hosts.copilot_wire` (feuille, bibliothèque standard) à l'abri :
-    s'il ne s'importe pas non plus, le rendu Claude Code reste tel quel.
+
+def _copilot_runs_claude_hook(host: str, raw: str) -> bool:
+    """Sous ``--host claude…``, la charge prouve-t-elle le harness Copilot ?
+
+    Lit :mod:`grimoire.hosts.copilot_wire` à l'abri : s'il ne s'importe pas non plus,
+    rien n'est prouvé (le refus garde le rendu Claude Code, verdict à plat compris).
     """
-    if not host.startswith("claude"):
-        return ""
+    if not _is_claude_host(host):
+        return False
     try:
         from grimoire.hosts import copilot_wire
 
         payload = json.loads(raw) if raw.strip() else {}
-        if not isinstance(payload, dict):
-            return "unknown"
-        if copilot_wire.copilot_harness_payload(payload):
-            return "copilot"
-        return "claude" if copilot_wire.claude_code_payload(payload) else "unknown"
+        return isinstance(payload, dict) and copilot_wire.copilot_harness_payload(payload)
     except Exception:
-        return "claude"
+        return False
 
 
 def import_failure(args: list[str], raw: str, cause: str) -> int:
@@ -138,16 +138,15 @@ def import_failure(args: list[str], raw: str, cause: str) -> int:
         sys.stderr.write(message + "\n")
         # Gemini : le code 2 est le refus documenté sur un événement bloquant.
         return 2 if guard else 0
-    origin = _claude_hook_origin(host, raw) if guard else ""
-    if guard and (is_copilot_host(host) or origin == "copilot"):
+    if guard and (is_copilot_host(host) or _copilot_runs_claude_hook(host, raw)):
         refusal = guard_failure_payload(cause)
         sys.stdout.write(json.dumps(copilot_guard_refusal(refusal), ensure_ascii=False))
         sys.stderr.write(refusal["hookSpecificOutput"]["permissionDecisionReason"] + "\n")
         return COPILOT_DENY_EXIT
     if guard:
         refusal = guard_failure_payload(cause)
-        if origin == "unknown":
-            # Charge indécidable sous `--host claude` : verdict aussi à plat, code 0 (voir ``runtime.render``).
+        if _is_claude_host(host):
+            # Sous `--host claude`, verdict aussi à plat, code 0 (voir ``runtime.render``).
             refusal = copilot_guard_refusal(refusal)
         sys.stdout.write(json.dumps(refusal, ensure_ascii=False))
     else:
