@@ -1,1 +1,0 @@
-- fix(hosts): charges ambiguës refusées par la garde avant outil : une charge Copilot qui décrit un appel d'outil de deux façons, ou dont un champ d'arguments est nul ou doublé, est refusée ; chaque appel inspecté est jugé, même seul ; la saisie envoyée par `write_bash` à un shell ouvert est jugée comme une commande ; la trace de chaque appel d'un lot porte l'issue du lot (#1280)
