@@ -14,14 +14,17 @@ Cette décision rend la règle mécanique, et seulement là où elle est sûre :
    modèle parent, l'hôte ignore ``model``).
 3. Politique du projet à ``off`` (``dispatch.impose_model`` dans
    ``_grimoire/standard/orchestration-policy.yaml``) : rien n'est touché.
-4. Persona du projet qui déclare son propre ``model:`` (autre que ``inherit``)
-   dans ``.claude/agents/<nom>.md`` : son choix est gardé.
+4. Persona qui déclare son propre ``model:`` (autre que ``inherit``) dans
+   ``.claude/agents/<nom>.md`` du projet ou de l'utilisateur, ou agent de plugin
+   (``plugin:agent``) : son choix est gardé.
 5. Tâche réclamée de classe V0 ou V1 : le ``recommended_model`` de
    :func:`grimoire.missions.dispatch_advice.dispatch_advice`, le même calcul que
    ``task_claim`` — jamais une seconde classification.
-6. Sinon, une heuristique sur la description de l'appel (voir
+   Tâche réclamée de classe V2 : rien n'est imposé (le modèle de la session).
+6. Sans classe calculée, une heuristique sur la description de l'appel (voir
    :func:`heuristic_model`) : recherche, lecture ou mesure → ``haiku`` ; revue
-   ou analyse → ``sonnet`` ; écriture ou rien de reconnu → rien n'est imposé.
+   ou analyse → ``sonnet`` ; écriture, jugement fort (audit, sécurité,
+   architecture, plan, conception) ou rien de reconnu → rien n'est imposé.
 
 Le modèle imposé est rendu en ``updatedInput`` (l'entrée complète, l'hôte la
 remplace sans fusionner) avec ``permissionDecision: allow`` ; l'agent principal
@@ -35,6 +38,7 @@ tel quel. Un bug de cette décision ne doit jamais bloquer une délégation.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from pathlib import Path
 from typing import Any
@@ -100,7 +104,6 @@ _REVIEW_STEMS = (
     "relecture",
     "analys",
     "analyz",
-    "audit",
     "evalu",
     "compar",
     "diagnos",
@@ -113,9 +116,19 @@ _REVIEW_STEMS = (
     "juge",
     "judge",
     "arbitr",
-    "design",
+)
+#: Jugement fort : un audit, une question de sécurité, d'architecture, de plan ou
+#: de conception ne descend pas d'un palier sur la foi de trois mots.
+_STRONG_JUDGMENT_STEMS = (
+    "audit",
+    "secu",
+    "securit",
+    "vulnerab",
     "architect",
     "plan",
+    "design",
+    "concept",
+    "strateg",
 )
 _RESEARCH_STEMS = (
     "recherch",
@@ -169,13 +182,13 @@ def heuristic_model(description: str, prompt: str = "") -> str | None:
 
     Lit la description (3 à 5 mots, ce que l'appelant dit de la tâche) ; faute de
     description, le début du prompt. Ordre de priorité, du plus prudent au moins
-    prudent : un verbe d'écriture → ``None`` (une production exige le jugement de
-    la session) ; un verbe de revue ou d'analyse → ``sonnet`` ; un verbe de
+    prudent : un verbe d'écriture, ou un sujet de jugement fort (audit, sécurité,
+    architecture, plan, conception) → ``None`` (le jugement de la session) ; un verbe de revue ou d'analyse → ``sonnet`` ; un verbe de
     recherche, de lecture ou de mesure → ``haiku`` ; rien de reconnu → ``None``.
     """
     text = (description or "").strip() or (prompt or "")[:_MAX_HEURISTIC_CHARS]
     words = _words(text[:_MAX_HEURISTIC_CHARS])
-    if not words or _hits(words, _WRITE_STEMS):
+    if not words or _hits(words, _WRITE_STEMS) or _hits(words, _STRONG_JUDGMENT_STEMS):
         return None
     if _hits(words, _REVIEW_STEMS):
         return "sonnet"
@@ -212,10 +225,25 @@ def impose_model_enabled(project_root: Path) -> bool:
 
 
 def _persona_declares_model(project_root: Path, subagent_type: str) -> bool:
-    """La définition ``.claude/agents/<nom>.md`` du projet porte-t-elle un ``model:`` explicite ?"""
-    if not subagent_type or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", subagent_type) or ".." in subagent_type:
+    """La persona appelée a-t-elle déjà son modèle, ou ne peut-on pas le savoir ?
+
+    Vrai — donc abstention — pour un agent de plugin (``plugin:agent``, sa
+    définition n'est pas lue ici) et pour une définition ``.claude/agents/<nom>.md``
+    du projet ou de l'utilisateur qui déclare un ``model:`` autre que ``inherit``.
+    """
+    if not subagent_type:
         return False
-    path = project_root / ".claude" / "agents" / f"{subagent_type}.md"
+    if ":" in subagent_type:
+        return True
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", subagent_type) or ".." in subagent_type:
+        return False
+    roots = [project_root]
+    with contextlib.suppress(RuntimeError, KeyError, OSError):
+        roots.append(Path.home())
+    return any(_definition_declares_model(root / ".claude" / "agents" / f"{subagent_type}.md") for root in roots)
+
+
+def _definition_declares_model(path: Path) -> bool:
     try:
         if not path.is_file():
             return False
@@ -231,7 +259,11 @@ def _persona_declares_model(project_root: Path, subagent_type: str) -> bool:
 
 
 def _class_model(hook: HookInput) -> tuple[str | None, dict[str, Any]]:
-    """Le ``recommended_model`` de la tâche réclamée, ou ``None`` (pas de tâche, V2, rien de lisible)."""
+    """Le ``recommended_model`` de la tâche réclamée, ou ``None`` (pas de tâche, V2, rien de lisible).
+
+    ``detail["task_class"]`` dit si une classe a été calculée : une tâche V2 en a
+    une, sans modèle — l'appelant s'abstient alors au lieu de tenter l'heuristique.
+    """
     from grimoire.core.standard_state import is_standard_enrolled, resolve_active_task
 
     if not is_standard_enrolled(hook.project_root):
@@ -278,6 +310,9 @@ def _decide(hook: HookInput) -> Decision:
         return Decision(abstain=True)
 
     model, detail = _class_model(hook)
+    if not model and detail.get("task_class"):
+        # Classe calculée sans modèle (V2) : la politique veut le modèle de la session.
+        return Decision(abstain=True)
     source = "class" if model else ""
     if not model:
         description = tool_input.get("description")

@@ -575,7 +575,9 @@ def main(argv: list[str] | None = None) -> int:
             event_name = nxt
         elif arg == "--project-root":
             root = Path(nxt)
-        elif arg == "--decision":
+        elif arg == "--decision" and decision_id is None:
+            # Première occurrence, comme ``hook_entry._option`` : les deux lectures
+            # doivent désigner la même décision (consultative ou garde).
             decision_id = nxt
 
     from grimoire.hosts.capabilities import resolve_host

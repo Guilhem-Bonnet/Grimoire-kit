@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ from grimoire.hosts.decisions import dispatch_model as dm
 from grimoire.hosts.emitters import emitter_for
 from grimoire.hosts.events import HookEvent
 from grimoire.hosts.runtime import main as runtime_main
-from grimoire.hosts.runtime import run_hook
+from grimoire.hosts.runtime import render, run_hook
 from grimoire.missions.dispatch_advice import dispatch_advice
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.service import TaskService
@@ -37,7 +38,9 @@ SESSION = "aaaaaaaa-0000-4000-8000-0000000000l3"
 
 
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
+    # Les définitions d'agents de l'utilisateur sont lues sous HOME : jamais celui du poste.
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
     for var in (
         "GRIMOIRE_TASK_ID",
         "GRIMOIRE_ACTOR",
@@ -137,6 +140,32 @@ def test_the_class_of_the_claimed_task_wins_over_the_heuristic(tmp_path: Path) -
     assert decision.detail["task_id"] == tid
 
 
+def test_a_claimed_v2_task_imposes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """V2 : la politique veut le modèle de la session, l'heuristique n'est pas tentée."""
+    monkeypatch.setattr(dm, "_class_model", lambda _hook: (None, {"task_id": "GAO-x-001", "task_class": "V2"}))
+    rendered, decision = _run(tmp_path, {"description": "Find hook emitters", "prompt": "x"})
+    assert rendered == {}
+    assert decision.abstain
+
+
+def test_a_claimed_v2_task_from_the_ledger_imposes_nothing(tmp_path: Path) -> None:
+    setup_standard_profile(tmp_path, profile_id="governed", task_id="bootstrap")
+    registry = tmp_path / "_grimoire/standard/llm-provider-registry.yaml"
+    registry.write_text(
+        registry.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1), encoding="utf-8"
+    )
+    service = TaskService(tmp_path)
+    tid = service.add("Travail", ("le code est propre",), owner="guilhem", actor="claude", ready=True).task.id
+    assert dispatch_advice(service.require(tid))["verifiability"]["class"] == "V2"
+    service.context(tid)
+    service.claim(tid, "claude", host="claude-code-cli")
+    service.transition(tid, TaskState.RUNNING, "claude")
+    service.attach_session(tid, SESSION, session_host="claude-code-cli", actor="claude")
+    rendered, decision = _run(tmp_path, {"description": "Find hook emitters", "prompt": "x"}, session=SESSION)
+    assert rendered == {}
+    assert decision.abstain
+
+
 def test_an_unrecognised_or_writing_call_is_left_alone(project: Path) -> None:
     for description in ("Implémente le lot B", "Corrige le test rouge", "Lot 4", ""):
         rendered, decision = _run(
@@ -165,9 +194,28 @@ def test_a_persona_that_declares_its_model_keeps_it(project: Path) -> None:
     agents.mkdir(parents=True)
     (agents / "architect.md").write_text("---\nname: architect\nmodel: opus\n---\nCorps\n", encoding="utf-8")
     (agents / "helper.md").write_text("---\nname: helper\nmodel: 'inherit'\n---\nCorps\n", encoding="utf-8")
-    assert _run(project, {"description": "Analyse the design", "prompt": "x", "subagent_type": "architect"})[0] == {}
-    rendered, _ = _run(project, {"description": "Analyse the design", "prompt": "x", "subagent_type": "helper"})
+    assert _run(project, {"description": "Analyse the diff", "prompt": "x", "subagent_type": "architect"})[0] == {}
+    rendered, _ = _run(project, {"description": "Analyse the diff", "prompt": "x", "subagent_type": "helper"})
     assert rendered["hookSpecificOutput"]["updatedInput"]["model"] == "sonnet"
+
+
+def test_a_user_level_persona_that_declares_its_model_keeps_it(project: Path, tmp_path: Path) -> None:
+    home = Path(os.environ["HOME"])
+    agents = home / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "reviewer.md").write_text("---\nname: reviewer\nmodel: sonnet\n---\nCorps\n", encoding="utf-8")
+    rendered, decision = _run(
+        project, {"description": "Find hook emitters", "prompt": "x", "subagent_type": "reviewer"}
+    )
+    assert rendered == {}
+    assert decision.abstain
+
+
+def test_a_plugin_agent_is_left_intact(project: Path) -> None:
+    rendered, _ = _run(
+        project, {"description": "Find hook emitters", "prompt": "x", "subagent_type": "myplugin:finder"}
+    )
+    assert rendered == {}
 
 
 @pytest.mark.parametrize("value", ["off", "false", "no", "désactivé"])
@@ -202,13 +250,18 @@ def test_other_tools_are_ignored(project: Path) -> None:
 
 @pytest.mark.parametrize(
     "tool_input",
-    [None, [], "texte", {}, {"description": 42, "prompt": ["x"]}, {"subagent_type": {"a": 1}, "description": "Find"}],
+    [None, [], "texte", {}, {"description": 42, "prompt": ["x"]}, {"subagent_type": {"a": 1}, "description": ["Find"]}],
 )
 def test_malformed_input_never_crashes_nor_blocks(project: Path, tool_input: Any) -> None:
     rendered, decision = _run(project, tool_input)
-    specific = rendered.get("hookSpecificOutput", {})
-    assert specific.get("permissionDecision", "allow") == "allow"
-    assert decision.outcome.value == "allow"
+    assert rendered == {}
+    assert decision.abstain
+
+
+def test_a_malformed_subagent_type_is_ignored_not_fatal(project: Path) -> None:
+    rendered, _ = _run(project, {"subagent_type": {"a": 1}, "description": "Find hook emitters"})
+    assert rendered["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert rendered["hookSpecificOutput"]["updatedInput"]["model"] == "haiku"
 
 
 def test_an_internal_error_abstains(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,7 +287,7 @@ def test_run_decision_turns_a_crash_into_an_abstention_not_an_ask(
     hook = HookInput(event=HookEvent.PRE_TOOL_USE, project_root=project, tool_name="Agent", tool_input={"prompt": "x"})
     decision = run_decision(DECISION, hook)
     assert decision.abstain
-    assert decision.outcome.value == "allow"
+    assert render(decision, hook, HostId.CLAUDE_CODE_CLI) == {}
 
 
 def test_the_entry_point_lets_the_call_through_when_the_runtime_crashes(
@@ -267,7 +320,11 @@ def test_an_import_failure_lets_the_call_through(capsys: pytest.CaptureFixture[s
         ("Find hook emitters", "", "haiku"),
         ("Mesure du coût", "", "haiku"),
         ("Lis le changelog", "", "haiku"),
-        ("Audit sécurité", "", "sonnet"),
+        ("Audit sécurité", "", None),
+        ("Revue d'architecture", "", None),
+        ("Plan de migration", "", None),
+        ("Analyse du design", "", None),
+        ("Revue du diff", "", "sonnet"),
         ("Analyse puis liste", "", "sonnet"),
         ("Cherche et corrige", "", None),
         ("", "Recherche les appels de la fonction", "haiku"),
@@ -296,6 +353,41 @@ def test_the_claude_emitter_adds_an_advisory_bounded_dispatch_hook(tmp_path: Pat
     # La garde, elle, ne change pas : même commande, pas de --decision.
     guards = [e for e in entries if e is not dispatch[0]]
     assert guards and all("--decision" not in e["hooks"][0]["command"] for e in guards)
+
+
+def test_the_guard_stays_fail_closed_next_to_the_dispatch_hook(tmp_path: Path) -> None:
+    """La garde (sans ``--decision``) garde ``onFailure: block`` après l'ajout du hook consultatif."""
+    setup_standard_profile(tmp_path, profile_id="governed", task_id="bootstrap")
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    (merge,) = emitter.plan(build_surface(tmp_path), tmp_path).merges
+    handlers = [h for e in merge.merge({})["hooks"]["PreToolUse"] for h in e["hooks"]]
+    guards = [h for h in handlers if "--decision" not in h["command"]]
+    assert guards
+    assert all(h.get("onFailure") == "block" for h in guards)
+
+
+def test_runtime_and_entry_point_read_the_same_decision_option() -> None:
+    """Deux ``--decision`` : la première gagne des deux côtés."""
+    args = ["--host", "claude", "--event", "PreToolUse", "--decision", DECISION, "--decision", "grimoire.tool-policy"]
+    assert hook_entry._option(args, "--decision") == DECISION
+
+
+def test_runtime_main_takes_the_first_decision_option(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: list[str | None] = []
+
+    def spy(*_args: Any, decision_id: str | None = None, **_kwargs: Any) -> Any:
+        seen.append(decision_id)
+        raise RuntimeError("arrêt")
+
+    monkeypatch.setattr("grimoire.hosts.runtime.run_hook", spy)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_agent_payload(project, {"prompt": "x"}))))
+    args = ["--host", "claude", "--event", "PreToolUse", "--decision", DECISION, "--decision", "grimoire.tool-policy"]
+    assert runtime_main(args) == 0
+    assert seen == [DECISION]
+    assert json.loads(capsys.readouterr().out) == {}
 
 
 def test_other_hosts_do_not_get_the_dispatch_hook(tmp_path: Path) -> None:
