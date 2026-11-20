@@ -104,6 +104,27 @@ def _event_name(args: list[str], raw: str) -> str:
     return name
 
 
+def _is_claude_host(host: str) -> bool:
+    return host.startswith("claude")
+
+
+def _copilot_runs_claude_hook(host: str, raw: str) -> bool:
+    """Sous ``--host claude…``, la charge prouve-t-elle le harness Copilot ?
+
+    Lit :mod:`grimoire.hosts.copilot_wire` à l'abri : s'il ne s'importe pas non plus,
+    rien n'est prouvé (le refus garde le rendu Claude Code, verdict à plat compris).
+    """
+    if not _is_claude_host(host):
+        return False
+    try:
+        from grimoire.hosts import copilot_wire
+
+        payload = json.loads(raw) if raw.strip() else {}
+        return isinstance(payload, dict) and copilot_wire.copilot_harness_payload(payload)
+    except Exception:
+        return False
+
+
 def import_failure(args: list[str], raw: str, cause: str) -> int:
     """Ce que rend le hook quand le runtime ne s'importe pas : refus sur la garde, message ailleurs."""
     host = _option(args, "--host").lower()
@@ -117,13 +138,17 @@ def import_failure(args: list[str], raw: str, cause: str) -> int:
         sys.stderr.write(message + "\n")
         # Gemini : le code 2 est le refus documenté sur un événement bloquant.
         return 2 if guard else 0
-    if guard and is_copilot_host(host):
+    if guard and (is_copilot_host(host) or _copilot_runs_claude_hook(host, raw)):
         refusal = guard_failure_payload(cause)
         sys.stdout.write(json.dumps(copilot_guard_refusal(refusal), ensure_ascii=False))
         sys.stderr.write(refusal["hookSpecificOutput"]["permissionDecisionReason"] + "\n")
         return COPILOT_DENY_EXIT
     if guard:
-        sys.stdout.write(json.dumps(guard_failure_payload(cause), ensure_ascii=False))
+        refusal = guard_failure_payload(cause)
+        if _is_claude_host(host):
+            # Sous `--host claude`, verdict aussi à plat, code 0 (voir ``runtime.render``).
+            refusal = copilot_guard_refusal(refusal)
+        sys.stdout.write(json.dumps(refusal, ensure_ascii=False))
     else:
         sys.stdout.write(json.dumps({"systemMessage": message}, ensure_ascii=False))
     return 0
