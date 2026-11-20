@@ -160,6 +160,69 @@ def test_the_claude_emitter_makes_only_the_pretooluse_guard_fail_closed(governed
                     assert "onFailure" not in handler, f"{event} : {json.dumps(handler)}"
 
 
+def test_the_fail_closed_guard_gets_a_timeout_that_holds_under_load(governed: Path) -> None:
+    """Un dépassement vaut refus : 10 s refusaient un ``ls`` sur une machine chargée (3.92.0).
+
+    Le ``timeout`` de Claude Code est en secondes ; les hooks consultatifs gardent le leur.
+    """
+    from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT
+
+    assert FAIL_CLOSED_TIMEOUT == 30
+    hooks, _ = _claude_hooks(governed)
+    handlers = [h for entry in hooks["PreToolUse"] for h in entry["hooks"]]
+    guards = [h for h in handlers if h.get("onFailure") == "block"]
+    assert guards
+    assert all(h["timeout"] == FAIL_CLOSED_TIMEOUT for h in guards), json.dumps(guards)
+    # Le conseil de modèle (#1274) n'est pas une garde : il garde son délai court.
+    open_handlers = [h for h in handlers if "onFailure" not in h]
+    assert all(h["timeout"] < FAIL_CLOSED_TIMEOUT for h in open_handlers), json.dumps(open_handlers)
+    advisory = [h for entry in hooks["UserPromptSubmit"] for h in entry["hooks"]]
+    assert all(h["timeout"] == 10 for h in advisory), json.dumps(advisory)
+
+
+def test_an_open_guard_keeps_its_declared_timeout(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sans ``onFailure: block`` un dépassement laisse passer : rien à rallonger."""
+    monkeypatch.setattr("grimoire.hosts.emitters.claude_code.resolve_hook_launcher", lambda _root: UNRESOLVED)
+    hooks, _ = _claude_hooks(governed)
+    guards = [h for entry in hooks["PreToolUse"] for h in entry["hooks"] if "--decision" not in h["command"]]
+    assert guards
+    assert all(h["timeout"] == 10 for h in guards), json.dumps(guards)
+
+
+def _settings_with_guard(root: Path, timeout: int) -> None:
+    settings = root / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    handler = {
+        "type": "command",
+        "command": "grimoire-hook --host claude --event PreToolUse",
+        "timeout": timeout,
+        "onFailure": "block",
+    }
+    settings.write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [handler]}]}}), encoding="utf-8"
+    )
+
+
+def test_doctor_warns_about_a_short_fail_closed_timeout(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_hooks import check_guard_timeout
+
+    _settings_with_guard(tmp_path, 10)
+    (check,) = check_guard_timeout(tmp_path)
+    assert (check.name, check.passed, check.level) == ("hook_timeout", False, "warn")
+    assert "10 s" in check.detail
+    assert "grimoire up" in check.remedy
+
+    _settings_with_guard(tmp_path, 30)
+    (check,) = check_guard_timeout(tmp_path)
+    assert check.passed
+
+
+def test_doctor_says_nothing_without_a_fail_closed_guard(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_hooks import check_guard_timeout
+
+    assert check_guard_timeout(tmp_path) == []
+
+
 def test_an_unresolved_launcher_keeps_the_guard_open_and_says_so(
     governed: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -170,3 +233,30 @@ def test_an_unresolved_launcher_keeps_the_guard_open_and_says_so(
     assert handlers
     assert all("onFailure" not in h for h in handlers)
     assert "hook onFailure" in {d.surface for d in plan.degradations}
+
+
+def test_the_guard_still_refuses_in_time_when_the_trace_ledger_stays_locked(tmp_path: Path) -> None:
+    """Le journal de traces tenu par un autre hook coûte au plus le délai court, jamais le refus.
+
+    Avant, ``_record_decision`` attendait le verrou jusqu'à 30 s : la garde dépassait son
+    ``timeout`` et l'hôte refusait même un ``ls``. Retirer le ``lock_timeout`` du runtime
+    fait échouer la borne de temps ci-dessous.
+    """
+    from grimoire.core.fsio import locked
+
+    (tmp_path / "_grimoire").mkdir()
+    traces = tmp_path / "_grimoire-output" / "traces" / "traces.jsonl"
+    traces.parent.mkdir(parents=True)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force origin main"},
+        "cwd": str(tmp_path),
+    }
+    with locked(traces):
+        started = time.perf_counter()
+        rendered, _decision, _hook = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI, project_root=tmp_path)
+        elapsed = time.perf_counter() - started
+    assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny", json.dumps(rendered)
+    assert elapsed < 10, f"la garde a attendu le verrou {elapsed:.1f} s"
+    assert not traces.exists() or traces.read_text(encoding="utf-8") == ""

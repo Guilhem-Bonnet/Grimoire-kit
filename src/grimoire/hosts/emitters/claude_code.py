@@ -388,6 +388,16 @@ def _hook_program(launcher: HookLauncher) -> str:
 #: consultatif qui bloquerait sur une panne gênerait sans rien protéger.
 _FAIL_CLOSED_EVENTS = frozenset({HookEvent.PRE_TOOL_USE})
 
+#: Délai minimal (secondes, unité du champ ``timeout`` de Claude Code) d'une
+#: garde en échec fermé. Un dépassement y vaut refus : le délai doit couvrir le
+#: pire cas réaliste et non le cas moyen. Au repos, ``grimoire-hook`` répond en
+#: ~0,2 s ; son pire cas borné est l'analyse (budget interne de 3 s) plus
+#: l'attente du verrou du journal de traces (2 s, voir ``runtime``), soit ~5 s
+#: de travail, qu'une machine saturée (charge ≥ cœurs) étire d'un facteur 3 à 5.
+#: 30 s couvre ce pire cas et reste loin des 600 s par défaut de l'hôte : une
+#: garde réellement bloquée refuse encore en un temps supportable.
+FAIL_CLOSED_TIMEOUT = 30
+
 
 def fails_closed(hook: HookSpec) -> bool:
     """Le hook *hook* est-il une garde à émettre en échec fermé ?"""
@@ -437,6 +447,7 @@ def _hook_entry(hook: HookSpec, launcher: HookLauncher = BARE) -> dict[str, Any]
     # alors en échec ouvert, et le plan le dit (:func:`_fail_closed_degradations`).
     if launcher.found and fails_closed(hook):
         handler["onFailure"] = "block"
+        handler["timeout"] = max(hook.timeout, FAIL_CLOSED_TIMEOUT)
     entry["hooks"] = [handler]
     return entry
 
