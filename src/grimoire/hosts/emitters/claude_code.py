@@ -16,6 +16,7 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core.config import GrimoireConfig
 from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
+from grimoire.hosts.decisions import DEFAULT_DECISION_BY_EVENT
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
     Degradation,
@@ -393,15 +394,43 @@ def fails_closed(hook: HookSpec) -> bool:
     return hook.enforcement is Enforcement.BLOCKING and hook.event in _FAIL_CLOSED_EVENTS
 
 
+#: Le hook qui rend mécanique la « Politique de dispatch » (leviers 2-3 de
+#: l'audit de coût) : un appel ``Agent`` sans ``model`` reçoit le modèle de la
+#: classe de la tâche, ou celui d'une heuristique — voir
+#: :mod:`grimoire.hosts.decisions.dispatch_model`. Propre à Claude Code : les
+#: autres hôtes n'ont pas d'outil ``Agent`` dont on puisse réécrire l'entrée, et
+#: un matcher ``delegation`` sans nom d'outil y élargirait le hook à tous les
+#: outils. Consultatif — jamais ``onFailure: block`` — et borné à 3 s : un
+#: dépassement ou une panne laisse passer l'appel tel quel.
+DISPATCH_MODEL_HOOK = HookSpec(
+    event=HookEvent.PRE_TOOL_USE,
+    decision="grimoire.dispatch-model",
+    enforcement=Enforcement.ADVISORY,
+    matcher=("delegation",),
+    timeout=3,
+    rationale=(
+        "Impose au sous-agent le modèle de la politique de dispatch quand l'appel Agent omet model= "
+        "(classe de la tâche, sinon heuristique) ; `dispatch.impose_model: off` le désactive."
+    ),
+)
+
+
 def _hook_entry(hook: HookSpec, launcher: HookLauncher = BARE) -> dict[str, Any]:
     entry: dict[str, Any] = {}
     if hook.event not in _MATCHERLESS:
         matcher = _matcher(hook, covered=_DECLARATIVELY_COVERED)
         if matcher:
             entry["matcher"] = matcher
+    wire = _WIRE_NAMES[hook.event]
+    program = _hook_program(launcher)
+    command = (
+        Emitter.hook_command(HOST_ALIAS, wire, program)
+        if hook.decision == DEFAULT_DECISION_BY_EVENT.get(hook.event)
+        else Emitter.hook_command_for_decision(HOST_ALIAS, wire, program, hook.decision)
+    )
     handler: dict[str, Any] = {
         "type": "command",
-        "command": Emitter.hook_command(HOST_ALIAS, _WIRE_NAMES[hook.event], _hook_program(launcher)),
+        "command": command,
         "timeout": hook.timeout,
     }
     # Un lanceur introuvable bloquerait tout appel d'outil gardé : la garde reste
@@ -454,9 +483,14 @@ def _permission_rules(surface: ProjectSurface) -> dict[str, list[str]]:
     return out
 
 
+def claude_hooks(surface: ProjectSurface) -> tuple[HookSpec, ...]:
+    """Les hooks que Claude Code reçoit : ceux de la surface, plus :data:`DISPATCH_MODEL_HOOK`."""
+    return (*surface.hooks, DISPATCH_MODEL_HOOK)
+
+
 def _settings_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> JsonMerge:
     hooks_by_event: dict[str, list[dict[str, Any]]] = {}
-    for hook in surface.hooks:
+    for hook in claude_hooks(surface):
         hooks_by_event.setdefault(_WIRE_NAMES[hook.event], []).append(_hook_entry(hook, launcher))
     permissions = _permission_rules(surface)
 
@@ -590,7 +624,7 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec]) -> EmittedFile:
         f"| Skills transversales | {transversal} — `.claude/skills/`, chargées toutes sessions |",
         f"| Skills attachées | {attached} — repliées dans le fichier de leur agent, payées seulement quand il tourne |",
         f"| Commandes | {len(surface.commands)} — `.claude/commands/` |",
-        f"| Hooks | {len(surface.hooks)} — `.claude/settings.json` |",
+        f"| Hooks | {len(claude_hooks(surface))} — `.claude/settings.json` |",
         "",
     ]
     if blocking:

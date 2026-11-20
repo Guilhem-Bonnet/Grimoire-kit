@@ -399,6 +399,18 @@ def _task_completed(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     return measure
 
 
+def _pre_dispatch_model(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    _governed(root)
+    tool_input = {"description": "Find hook emitters", "prompt": "x", "subagent_type": "general-purpose"}
+
+    def measure(fault: Fault) -> str:
+        with fault:
+            hook = _hook(root, HookEvent.PRE_TOOL_USE, tool_name="Agent", tool_input=tool_input)
+            return _label(run_decision("grimoire.dispatch-model", hook))
+
+    return measure
+
+
 SCENARIOS: dict[str, tuple[Scenario, str]] = {
     # nom -> (préparation, résultat sain attendu : la preuve que le scénario discrimine)
     "pre_forgery": (_pre_forgery, "deny"),
@@ -418,6 +430,7 @@ SCENARIOS: dict[str, tuple[Scenario, str]] = {
     "pre_compact": (_pre_compact, "allow"),
     "session_start": (_session_start, "allow"),
     "task_completed": (_task_completed, "allow"),
+    "pre_dispatch_model": (_pre_dispatch_model, "allow"),
 }
 
 
@@ -556,6 +569,14 @@ CASES: tuple[FaultCase, ...] = (
         "événement déclaré non émis (R31) : la décision n'en refuse aucun, elle ne fait que tracer ; sa panne perd la ligne de trace",
     ),
     _open(
+        "grimoire.dispatch-model",
+        "dispatch_model",
+        "pre_dispatch_model",
+        _P + "dispatch_model.impose_model_enabled",
+        "consultative : elle ne fait que compléter le model= omis d'un appel Agent, jamais un refus ; sa panne laisse "
+        "passer l'appel inchangé (abstention), le hook est émis sans onFailure: block",
+    ),
+    _open(
         "grimoire.activation",
         "activation",
         "session_start",
@@ -573,6 +594,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "calibration": (SUPPORT, "journal d'observation (policy.hold) : ne change jamais une décision"),
     "context_capsule": (GUARD, ""),
     "chain_ack": (SUPPORT, "phrase d'explication d'une rupture du journal de preuve, appelée par task_context (UserPromptSubmit) : une panne y est couverte par les cas task_context ; sans phrase tapée, elle ne fait rien"),
+    "dispatch_model": (GUARD, ""),
     "done_gate": (GUARD, ""),
     "enrolment": (GUARD, ""),
     "event_trace": (GUARD, ""),

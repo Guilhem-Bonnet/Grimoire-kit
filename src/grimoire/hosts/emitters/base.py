@@ -604,6 +604,11 @@ class Emitter:
         return f"{program} --host {host_alias} --event {wire_event}"
 
     @staticmethod
+    def hook_command_for_decision(host_alias: str, wire_event: str, program: str, decision: str) -> str:
+        """:meth:`hook_command` qui nomme sa décision (``--decision``), pour un hook dont la décision n'est pas celle par défaut de l'événement."""
+        return f"{Emitter.hook_command(host_alias, wire_event, program)} --decision {decision}"
+
+    @staticmethod
     def quoted_program(program: str) -> str:
         """Entourer de guillemets un chemin qui contient une espace."""
         return f'"{program}"' if " " in program and not program.startswith('"') else program

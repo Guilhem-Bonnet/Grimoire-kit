@@ -51,7 +51,12 @@ from typing import Any
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
 from grimoire.hosts.events import HookEvent
 
+# Défini dans le point d'entrée (bibliothèque standard seule), qui doit le lire
+# même quand ce paquet ne s'importe plus.
+from grimoire.hosts.hook_entry import ADVISORY_PRE_TOOL_DECISIONS
+
 __all__ = [
+    "ADVISORY_PRE_TOOL_DECISIONS",
     "DECISIONS",
     "DEFAULT_DECISION_BY_EVENT",
     "Decision",
@@ -84,7 +89,11 @@ _DECISION_FUNCS: dict[str, tuple[str, str]] = {
     "grimoire.subagent-gate": ("subagent_gate", "decide_subagent_gate"),
     "grimoire.context-capsule": ("context_capsule", "decide_context_capsule"),
     "grimoire.event-trace": ("event_trace", "decide_event_trace"),
+    # Consultative : jamais l'unique décision d'un événement, toujours nommée par
+    # ``--decision`` dans le hook qui la porte (Claude Code, matcher Agent|Task).
+    "grimoire.dispatch-model": ("dispatch_model", "decide_dispatch_model"),
 }
+
 
 #: Which decision answers which event when the caller only names an event.
 DEFAULT_DECISION_BY_EVENT: dict[HookEvent, str] = {
@@ -174,6 +183,8 @@ def _failed_decision(decision_id: str, hook: HookInput, exc: Exception) -> Decis
     """
     cause = f"{type(exc).__name__}: {exc}"
     detail = {"error": cause, "decision": decision_id}
+    if decision_id in ADVISORY_PRE_TOOL_DECISIONS:
+        return Decision(abstain=True, detail=detail)
     if hook.event is HookEvent.PRE_TOOL_USE:
         return Decision(
             outcome=Outcome.ASK,

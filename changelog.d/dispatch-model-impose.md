@@ -1,0 +1,1 @@
+- feat(hosts): sous Claude Code, un appel `Agent` sans `model` reçoit le modèle de la politique de dispatch (classe de la tâche réclamée, sinon heuristique sur la description) par un hook `PreToolUse` consultatif borné à 3 s ; `model` explicite, fork et persona au modèle déclaré restent intacts, `dispatch.impose_model: off` le désactive
