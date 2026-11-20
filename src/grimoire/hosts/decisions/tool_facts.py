@@ -40,6 +40,10 @@ _WRITE_MARKERS = (
     "applypatch",
     "notebook",
 )
+#: Outils d'écriture nommés d'un mot trop générique pour une sous-chaîne :
+#: ``create`` est l'outil de création de fichier du harness Copilot (#1280).
+#: Comparé au nom entier, il ne capture pas un outil MCP ``create_issue``.
+_WRITE_NAMES = frozenset({"create"})
 _READ_MARKERS = ("read", "cat_file", "view", "open_file", "openfile")
 _WEB_MARKERS = ("fetch", "websearch", "web_search", "browser", "navigate", "http")
 
@@ -540,7 +544,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     interpreted_code = ", ".join(sorted({language for language, _ in interpreted}))
 
     is_execute = bool(command) or any(marker in name for marker in _EXECUTE_MARKERS)
-    is_write = any(marker in name for marker in _WRITE_MARKERS)
+    is_write = name in _WRITE_NAMES or any(marker in name for marker in _WRITE_MARKERS)
     is_web = any(marker in name for marker in _WEB_MARKERS)
     is_read = any(marker in name for marker in _READ_MARKERS)
 

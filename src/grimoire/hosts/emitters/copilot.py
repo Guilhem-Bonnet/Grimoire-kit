@@ -30,6 +30,7 @@ from grimoire.hosts.emitters.base import (
     parallel_brainstorm_section,
     persona_section,
 )
+from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
@@ -206,19 +207,106 @@ def _prompt_file(command: CommandSpec) -> EmittedFile:
     return EmittedFile(relpath=GH_DIR / "prompts" / f"{command.slug}.prompt.md", content=content)
 
 
+#: Famille d'outils neutre -> noms d'outils du harness « Copilot » (référence :
+#: https://docs.github.com/en/copilot/reference/hooks-reference). Les fichiers
+#: portent des noms d'événements PascalCase : l'hôte y rapporte le nom d'outil
+#: façon Claude (``Bash``, ``Edit``…), et un matcher en liste littérale
+#: ``a|b|c`` se déclenche quand un jeton égale le nom runtime *ou* son nom
+#: Claude. Les deux nommages sont écrits quand même : la garde ne doit pas
+#: dépendre de la table de correspondance de l'hôte.
+#:
+#: Pas de ``MultiEdit``/``NotebookEdit`` : ces outils n'existent pas chez Copilot,
+#: et le fichier n'écrit que des noms que la référence documente.
+_MATCHER_TABLE: dict[str, tuple[str, ...]] = {
+    # `bash` et `powershell` (Windows) sont tous deux rapportés `Bash`.
+    "execute": ("Bash", "bash", "powershell"),
+    # `create` (rapporté `Write`) crée un fichier ; `edit`, `str_replace_editor`
+    # et `apply_patch` sont tous rapportés `Edit`.
+    "write": ("Edit", "Write", "edit", "create", "str_replace_editor", "apply_patch"),
+    # Copilot n'a pas de table de permissions déclarative (dégradation
+    # « permissions ») : le refus de lecture d'un secret n'existe que dans la
+    # garde. La lecture de fichier reste donc dans le matcher, contrairement à
+    # Claude Code où la table de refus la couvre sans processus.
+    "secret": ("Read", "view"),
+    "network": ("WebFetch", "WebSearch", "web_fetch", "web_search"),
+    # Délégation à un sous-agent : `task`, rapporté `Agent` (`Task` accepté).
+    "delegation": ("Agent", "Task", "task"),
+}
+
+#: Événements dont l'entrée accepte un ``matcher`` dans le harness Copilot et
+#: pour lesquels le kit en déclare un. Le harness « Local » (déprécié) ignore ce
+#: champ : tout outil y déclenche le hook, comme avant, et la décision filtre.
+_MATCHED_EVENTS = frozenset({HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE})
+
+#: Délai de la garde avant outil (secondes). Chez Copilot un hook qui dépasse son
+#: délai laisse passer l'appel (échec ouvert, garde comprise) alors qu'une sortie
+#: non nulle le refuse : un délai court élargit le cas où la garde ne juge pas.
+#: Même pire cas borné que Claude Code (voir ``claude_code.FAIL_CLOSED_TIMEOUT``,
+#: #1276), donc même plancher.
+GUARD_TIMEOUT = FAIL_CLOSED_TIMEOUT
+
+
+def matcher_for(hook: HookSpec) -> str:
+    """Le ``matcher`` Copilot de *hook* : liste littérale de noms, ou ``""`` (tous les outils)."""
+    if hook.event not in _MATCHED_EVENTS:
+        return ""
+    tools: list[str] = []
+    for family in hook.matcher:
+        for tool in _MATCHER_TABLE.get(family, ()):
+            if tool not in tools:
+                tools.append(tool)
+    return "|".join(tools)
+
+
+def _hook_timeout(hook: HookSpec) -> int:
+    if hook.event is HookEvent.PRE_TOOL_USE and hook.enforcement is Enforcement.BLOCKING:
+        return max(hook.timeout, GUARD_TIMEOUT)
+    return hook.timeout
+
+
+def _powershell_program(program: str) -> str:
+    """Un chemin entre guillemets ne se lance sous PowerShell qu'avec l'opérateur ``&``."""
+    return f"& {program}" if program.startswith('"') else program
+
+
 def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
+    """Un fichier ``.github/hooks/grimoire-<événement>.json`` au format du harness Copilot.
+
+    ``{"version": 1, "hooks": {"<Événement>": [entrée]}}``, entrée portant
+    ``bash`` (Unix) et ``powershell`` (Windows), plus ``command`` comme repli.
+    Pas de ``windows`` (issue #760) : le harness Copilot ne le documente que
+    pour les hooks propres à un agent, et le harness Local prend ``powershell``
+    comme repli de ``windows`` — la forme Windows du lanceur passe donc par
+    ``powershell``, lu par les deux harness. ``command`` porte la forme Unix :
+    le harness Copilot le copie dans ``bash``/``powershell`` seulement quand
+    ceux-ci manquent, il ne sert qu'aux VS Code antérieurs aux deux replis.
+
+    Le délai s'écrit ``timeoutSec`` seul : les deux harness le lisent, et ils
+    donnent des priorités opposées à ``timeout`` et ``timeoutSec`` posés ensemble.
+    """
     event = _WIRE_NAMES[hook.event]
     entry: dict[str, Any] = {"type": "command"}
     if launcher.project_relative and launcher.windows:
         # Issue #760 : un venv du projet n'est pas dans le PATH de VS Code. Le
         # chemin part de la racine (``cwd``), et Windows a sa propre forme.
-        entry["command"] = Emitter.hook_command(HOST_ALIAS, event, f"./{launcher.posix}")
-        entry["windows"] = Emitter.hook_command(HOST_ALIAS, event, f".\\{launcher.windows}")
-        entry["cwd"] = "."
+        posix = Emitter.hook_command(HOST_ALIAS, event, f"./{launcher.posix}")
+        windows = Emitter.hook_command(HOST_ALIAS, event, f".\\{launcher.windows}")
+        cwd: str | None = "."
     else:
-        entry["command"] = Emitter.hook_command(HOST_ALIAS, event, Emitter.quoted_program(launcher.posix))
-    entry["timeout"] = hook.timeout
-    payload: dict[str, Any] = {"hooks": {event: [entry]}}
+        program = Emitter.quoted_program(launcher.posix)
+        posix = Emitter.hook_command(HOST_ALIAS, event, program)
+        windows = Emitter.hook_command(HOST_ALIAS, event, _powershell_program(program))
+        cwd = None
+    entry["command"] = posix
+    entry["bash"] = posix
+    entry["powershell"] = windows
+    if cwd:
+        entry["cwd"] = cwd
+    matcher = matcher_for(hook)
+    if matcher:
+        entry["matcher"] = matcher
+    entry["timeoutSec"] = _hook_timeout(hook)
+    payload: dict[str, Any] = {"version": 1, "hooks": {event: [entry]}}
     slug = hook.event.value.replace("_", "-")
     return EmittedFile(
         relpath=GH_DIR / "hooks" / f"grimoire-{slug}.json",
@@ -319,13 +407,17 @@ class CopilotEmitter(Emitter):
                     fallback="règles appliquées par le hook PreToolUse (mêmes refus, même formulation).",
                 )
             )
-        degradations.append(
-            Degradation(
-                surface="hook matchers",
-                reason="Les hooks VS Code ne filtrent pas par outil dans leur configuration.",
-                fallback="le filtrage se fait dans la décision : un appel en lecture seule sort en `allow` sans effet.",
+        if any(h.event is HookEvent.PRE_TOOL_USE and h.enforcement is Enforcement.BLOCKING for h in surface.hooks):
+            degradations.append(
+                Degradation(
+                    surface="hook timeout",
+                    reason=(
+                        "Chez Copilot, un hook qui dépasse son délai laisse passer l'appel d'outil, "
+                        "garde PreToolUse comprise (seule une sortie non nulle refuse)."
+                    ),
+                    fallback=f"délai de la garde porté à {GUARD_TIMEOUT} s ; `grimoire doctor` le rappelle.",
+                )
             )
-        )
         degradations.append(
             Degradation(
                 surface="model affinity",

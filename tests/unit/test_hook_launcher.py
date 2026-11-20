@@ -117,17 +117,22 @@ _RELATIVE = HookLauncher(
 
 
 def test_copilot_hook_file_carries_a_windows_variant_and_cwd() -> None:
+    # #1280 : la forme Windows du lanceur (#760) passe par `powershell`, que les
+    # harness Copilot et Local lisent tous deux ; `windows` n'est plus écrit.
     payload = json.loads(_hook_file(HookSpec(event=HookEvent.PRE_TOOL_USE, decision="grimoire.tool-policy", timeout=10), _RELATIVE).content)
     (entry,) = payload["hooks"]["PreToolUse"]
     assert entry["command"] == "./.venv/bin/grimoire-hook --host copilot --event PreToolUse"
-    assert entry["windows"] == ".\\.venv\\Scripts\\grimoire-hook.exe --host copilot --event PreToolUse"
+    assert entry["bash"] == entry["command"]
+    assert entry["powershell"] == ".\\.venv\\Scripts\\grimoire-hook.exe --host copilot --event PreToolUse"
+    assert "windows" not in entry
     assert entry["cwd"] == "."
 
 
 def test_copilot_hook_file_unchanged_for_a_global_install() -> None:
     payload = json.loads(_hook_file(HookSpec(event=HookEvent.PRE_TOOL_USE, decision="grimoire.tool-policy", timeout=10), BARE).content)
     (entry,) = payload["hooks"]["PreToolUse"]
-    assert entry == {"type": "command", "command": "grimoire-hook --host copilot --event PreToolUse", "timeout": 10}
+    command = "grimoire-hook --host copilot --event PreToolUse"
+    assert entry == {"type": "command", "command": command, "bash": command, "powershell": command, "timeoutSec": 10}
 
 
 def test_claude_hook_entry_starts_from_the_project_dir() -> None:
