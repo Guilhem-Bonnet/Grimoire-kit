@@ -41,7 +41,12 @@ from grimoire.hosts.decisions import (
 # the hook entry point, invoked on every tool call — pulling the full
 # agent/model IR for one enum was the tax the split removes.
 from grimoire.hosts.events import NOT_EMITTED_EVENTS, HookEvent
-from grimoire.hosts.hook_entry import ADVISORY_DETAIL_KEY
+from grimoire.hosts.hook_entry import (
+    ADVISORY_DETAIL_KEY,
+    COPILOT_DENY_EXIT,
+    copilot_flat_verdict,
+    copilot_guard_refusal,
+)
 
 #: Neutral event -> the name a host writes in its configuration and payloads.
 #: Claude Code and VS Code Copilot happen to share the spelling; the table is
@@ -321,6 +326,13 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
             if decision.updated_input is not None and decision.outcome is Outcome.ALLOW:
                 # L'entrée complète : Claude Code remplace ``tool_input``, il ne fusionne pas.
                 specific["updatedInput"] = dict(decision.updated_input)
+            if copilot and decision.outcome in {Outcome.DENY, Outcome.ASK}:
+                # Le harness Copilot documente une sortie `preToolUse` à plat (« The
+                # `preToolUse` hook can control tool execution by writing a JSON object
+                # to stdout » : `permissionDecision`, `permissionDecisionReason`) et ne
+                # mentionne pas `hookSpecificOutput`, que lit le harness Local. Les
+                # deux formes portent le même verdict ; le refus sort aussi en code 2.
+                payload.update(copilot_flat_verdict(specific))
         elif decision.reason:
             # A host that cannot refuse or ask is at least told why it should.
             specific["additionalContext"] = decision.reason
@@ -868,7 +880,10 @@ def main(argv: list[str] | None = None) -> int:
             # La garde est émise en échec fermé (``onFailure: block``) : un
             # plantage refuserait l'outil avec un message de l'hôte qui ne dit
             # pas quoi faire. Le refus explicite dit d'où vient la panne.
-            sys.stdout.write(json.dumps(guard_failure_verdict(cause), ensure_ascii=False))
+            verdict = guard_failure_verdict(cause)
+            if host_id is HostId.GITHUB_COPILOT:
+                return _copilot_refusal_exit(copilot_guard_refusal(verdict))
+            sys.stdout.write(json.dumps(verdict, ensure_ascii=False))
             return 0
         blocked_event = event if event in gemini_wire.BLOCKING_EVENTS else None
         sys.stderr.write(
@@ -879,8 +894,27 @@ def main(argv: list[str] | None = None) -> int:
             rendered = "{}"
         else:
             return 2
+    if (
+        host_id is HostId.GITHUB_COPILOT
+        and _hook.event is HookEvent.PRE_TOOL_USE
+        and decision_id not in ADVISORY_PRE_TOOL_DECISIONS
+        and _decision.outcome is Outcome.DENY
+    ):
+        return _copilot_refusal_exit(result)
     sys.stdout.write(rendered)
     return 0
+
+
+def _copilot_refusal_exit(result: dict[str, Any]) -> int:
+    """Un refus de la garde sous Copilot : JSON sur stdout, raison sur stderr, code 2.
+
+    Voir :data:`grimoire.hosts.hook_entry.COPILOT_DENY_EXIT` : le harness Copilot
+    fusionne le JSON au refus du code 2, le harness Local donne stderr au modèle.
+    """
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    reason = result.get("permissionDecisionReason") or "[Grimoire] appel d'outil refusé par la garde."
+    sys.stderr.write(f"{reason}\n")
+    return COPILOT_DENY_EXIT
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point

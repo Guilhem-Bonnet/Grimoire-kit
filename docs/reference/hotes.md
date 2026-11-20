@@ -157,6 +157,16 @@ porte deux champs de nom ou d'arguments, ou des arguments nuls. La saisie que
 lot, la trace de chaque appel porte l'issue du lot (`batch_outcome:<verdict>`) :
 un appel autorisé d'un lot refusé n'a pas été exécuté.
 
+Un refus de la garde sous Copilot porte `permissionDecision` et
+`permissionDecisionReason` au premier niveau, comme le documente la référence
+GitHub. Il garde aussi `hookSpecificOutput`, la forme que lit le harness Local.
+Le hook sort en plus avec le code 2, la raison sur stderr. Sur un `preToolUse`,
+le harness Copilot traite le code 2 comme un refus et fusionne le JSON de
+stdout avec lui. Le harness Local traite le code 2 comme une erreur bloquante
+et donne stderr au modèle. Le refus tient donc même si un harness ignore la
+forme JSON. Une demande (`ask`) reçoit la même forme au premier niveau, sans
+code de refus. Sous Claude Code, rien ne change : code 0 et JSON.
+
 Le refus de clôture (`Stop`, `SubagentStop`) est rendu dans la forme que lit
 chaque harness. Le harness Copilot lit `decision`/`reason` au premier niveau
 (`agentStop`, `subagentStop`) ; le harness Local lit

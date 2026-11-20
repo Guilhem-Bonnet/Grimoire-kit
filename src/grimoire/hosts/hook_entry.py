@@ -40,6 +40,38 @@ ADVISORY_PRE_TOOL_DECISIONS = frozenset({"grimoire.dispatch-model"})
 ADVISORY_DETAIL_KEY = "advisory"
 
 
+#: Code de sortie d'un refus de la garde sous GitHub Copilot. Harness Copilot :
+#: « For `permissionRequest` and `preToolUse`, exit `2` is treated as a deny: any
+#: `stdout` JSON is merged with the deny decision and the tool call is denied even
+#: if that JSON reports `permissionDecision: "allow"` »
+#: (https://docs.github.com/en/copilot/reference/hooks-reference). Harness Local :
+#: « Exit code `2`: Treat stderr as a blocking error and provide it to the model »
+#: (https://code.visualstudio.com/docs/agents/reference/hooks-reference). Le refus
+#: tient donc sous les deux harness même si l'un ignore la forme JSON : le JSON
+#: reste sur stdout (fusionné par le harness Copilot), la raison va sur stderr
+#: (donnée au modèle par le harness Local). Claude Code garde exit 0 + JSON.
+COPILOT_DENY_EXIT = 2
+
+#: Hôtes qui reçoivent ce rendu (``--host``, voir ``capabilities.resolve_host``).
+_COPILOT_HOST_NAMES = frozenset({"copilot", "github-copilot", "host-github-copilot"})
+
+
+def is_copilot_host(name: str) -> bool:
+    """``--host`` désigne-t-il GitHub Copilot ? (lecture stdlib, pour le repli sans runtime)."""
+    return name.strip().lower() in _COPILOT_HOST_NAMES
+
+
+def copilot_flat_verdict(specific: dict[str, Any]) -> dict[str, Any]:
+    """``permissionDecision``/``permissionDecisionReason`` au premier niveau, forme du harness Copilot."""
+    return {key: specific[key] for key in ("permissionDecision", "permissionDecisionReason") if key in specific}
+
+
+def copilot_guard_refusal(payload: dict[str, Any]) -> dict[str, Any]:
+    """*payload* (forme ``hookSpecificOutput``) augmenté de la forme à plat du harness Copilot."""
+    specific = payload.get("hookSpecificOutput")
+    return {**payload, **copilot_flat_verdict(specific if isinstance(specific, dict) else {})}
+
+
 def guard_failure_payload(cause: str) -> dict[str, Any]:
     """Le refus ``PreToolUse`` d'une garde en panne, au format lu par Claude Code et Copilot."""
     return {
@@ -85,6 +117,11 @@ def import_failure(args: list[str], raw: str, cause: str) -> int:
         sys.stderr.write(message + "\n")
         # Gemini : le code 2 est le refus documenté sur un événement bloquant.
         return 2 if guard else 0
+    if guard and is_copilot_host(host):
+        refusal = guard_failure_payload(cause)
+        sys.stdout.write(json.dumps(copilot_guard_refusal(refusal), ensure_ascii=False))
+        sys.stderr.write(refusal["hookSpecificOutput"]["permissionDecisionReason"] + "\n")
+        return COPILOT_DENY_EXIT
     if guard:
         sys.stdout.write(json.dumps(guard_failure_payload(cause), ensure_ascii=False))
     else:
