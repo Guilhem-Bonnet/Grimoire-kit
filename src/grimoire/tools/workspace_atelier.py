@@ -168,13 +168,13 @@ def create(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     return {"chantier": _chantier_row(root, made)}
 
 
-def _phase_view(root: Path, slug: str, phase: Any) -> dict[str, Any]:
+def _phase_view(root: Path, name: str | None, phase: Any) -> dict[str, Any]:
     from grimoire.core.cadrage import phase_report
     from grimoire.tools import atelier_blocs
 
-    name = None if slug == "principal" else slug
+    # Le nom vient du chantier retrouvé par `list_chantiers`, jamais de l'URL.
     report = phase_report(root, phase, name)
-    path = root / report["file"]
+    path = _phase_path(root, name or "principal", phase.filename)
     out: dict[str, Any] = {
         "id": phase.id,
         "title": phase.title,
@@ -210,7 +210,7 @@ def document(root: Path, slug: str) -> dict[str, Any]:
         found = read_chantier(root)
     if found is None:
         raise FileNotFoundError(f"chantier inconnu : {slug!r}")
-    return {"chantier": _chantier_row(root, found), "phases": [_phase_view(root, slug, p) for p in PHASES]}
+    return {"chantier": _chantier_row(root, found), "phases": [_phase_view(root, None if found.default else found.slug, p) for p in PHASES]}
 
 
 # ── Édition d'un bloc ───────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ def edit_block(root: Path, slug: str, block_id: str, body: dict[str, Any]) -> di
         updated = atelier_blocs.replace_block(current, block, text)
         if updated != current:
             atomic_write(path, updated.encode("utf-8"))
-    return {"ok": True, "phase": _phase_view(root, slug, phase)}
+    return {"ok": True, "phase": _phase_view(root, None if slug == "principal" else slug, phase)}
 
 
 # ── Branchement des hôtes ───────────────────────────────────────────────────
