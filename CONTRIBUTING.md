@@ -75,6 +75,19 @@ make lint-js     # JavaScript de web/ : node --check puis ESLint minimal (Node e
 - Viser > 90% de couverture sur le code nouveau
 - Pattern : `TestClassName.test_specific_behavior`
 
+#### CI d'une PR purement documentaire
+
+Une PR qui ne touche que `docs/`, `changelog.d/`, les README, `CONTRIBUTING.md`,
+`ARCHITECTURE.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` ou les modèles d'issue et
+de PR (liste dans `scripts/ci-scope.py`) ne lance pas la suite complète : les
+parts de la suite SDK et le job framework ubuntu n'exécutent que les tests qui
+citent un document (`scripts/ci-test-shards.py --docs-subset`), Neo4j et CodeQL
+sont sautés, et la couverture n'est pas recombinée. Tout autre chemin, une PR
+`chore: release`, `main`, la passe de nuit et un lancement manuel gardent la CI
+complète. Les checks requis par la protection de `main` se prononcent toujours
+(succès ou saut) : aucun workflow requis n'est filtré par `paths:` sur
+`pull_request`.
+
 ### Commits
 
 ```
