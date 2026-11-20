@@ -7,6 +7,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.95.0] - 2026-11-20
+
+- feat(hosts): détection du harness Copilot par la forme du payload (clés camelCase), variables d'environnement non documentées retirées, et `grimoire doctor` contrôle le format des hooks Copilot (version, matcher de la garde) et signale les hooks doublés avec `.claude/settings.json` (#1287)
+- feat(hosts): sous Copilot, le refus de clôture est rendu dans la forme que lit chaque harness (`decision` au premier niveau pour le harness Copilot, `hookSpecificOutput.decision` aussi sur `Stop` pour le harness Local), sans dépasser les 8 refus consécutifs que le harness Copilot honore ; le modèle de la politique de dispatch est proposé aux sous-agents `task`/`runSubagent`/`Agent` par une entrée consultative du hook PreToolUse (`modifiedArgs` ou `updatedInput` selon le dialecte, jamais de `permissionDecision`, jamais dans un lot `toolCalls`), seulement quand le projet nomme le modèle Copilot de chaque palier (`dispatch.copilot_models`) (#1288)
+- fix(hosts): un refus de la garde sous Copilot est rendu sous la forme documentée par GitHub (`permissionDecision`/`permissionDecisionReason` au premier niveau, en plus de la forme du harness Local) et par le code de sortie de refus (2, raison sur stderr) ; une demande (`ask`) reçoit la même forme sans code de refus ; Claude Code inchangé (#1288)
+
 ## [3.94.0] - 2026-11-20
 
 - feat(hosts): contrat GitHub Copilot relevé sur des traces réelles des deux harness de VS Code (fixtures rédigées) ; les hooks lisent la forme camelCase du harness Copilot (`toolCalls`, `toolName`/`toolArgs`, `toolResult`, `userPromptSubmitted`, `agentStop`) et `copilot_wire.detect_dialect` dit ce que la forme d'une charge permet d'affirmer ; aucune capacité n'est déclarée vérifiée, faute de version d'hôte et de refus observé (#1280) (#1283)
