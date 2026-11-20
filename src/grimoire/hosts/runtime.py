@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -513,6 +514,62 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _decide(hook: HookInput, decision_id: str, recognized: bool) -> Decision:
+    """Une décision sur *hook* ; hors racine reconnue, la garde décide sans écrire d'état (#717)."""
+    if not recognized and hook.event is not HookEvent.PRE_TOOL_USE:
+        return Decision()
+    if not decision_id:
+        return Decision()
+    if not recognized:
+        with suspended_state_writes():
+            return run_decision(decision_id, hook)
+    return run_decision(decision_id, hook)
+
+
+def _unreadable_call_decision(problem: str) -> Decision:
+    """Le refus d'un appel d'outil que la garde ne sait pas lire."""
+    return Decision(
+        outcome=Outcome.DENY,
+        reason=(
+            f"[Grimoire policy] appel d'outil refusé — {problem} : "
+            "un appel que la garde ne sait pas lire n'est pas un appel autorisé."
+        ),
+        detail={"tool": "", "unreadable_tool_call": problem, "blocked_on": "unreadable_tool_call"},
+    )
+
+
+def _combine_batch(judged: list[tuple[HookInput, Decision]]) -> Decision:
+    """Le verdict d'un lot d'appels : refus > demande > autorisation, jamais le premier seul."""
+    size = len(judged)
+    tools = [sub.tool_name for sub, _ in judged]
+    for refusal_wanted in (True, False):
+        for index, (sub, decision) in enumerate(judged, start=1):
+            hit = decision.is_refusal if refusal_wanted else decision.outcome is Outcome.ASK
+            if hit:
+                return Decision(
+                    outcome=Outcome.DENY if refusal_wanted else Outcome.ASK,
+                    reason=f"{decision.reason} (appel {index}/{size} d'un lot : {sub.tool_name})",
+                    detail={**decision.detail, "batch_size": size, "batch_index": index, "batch_tools": tools},
+                )
+    for index, (sub, decision) in enumerate(judged, start=1):
+        if decision.updated_input is not None:
+            # Une réécriture vise un appel ; l'hôte ne sait pas l'appliquer à un seul appel d'un lot.
+            return Decision(
+                outcome=Outcome.ASK,
+                reason=(
+                    f"[Grimoire policy] {sub.tool_name} (appel {index}/{size} d'un lot) : la politique "
+                    "réécrirait cet appel, ce qu'un lot ne permet pas — à toi de décider."
+                ),
+                detail={**decision.detail, "batch_size": size, "batch_index": index, "batch_tools": tools},
+            )
+    contexts = list(dict.fromkeys(d.context for _, d in judged if d.context))
+    return Decision(
+        outcome=Outcome.ALLOW,
+        context="\n".join(contexts),
+        detail={"batch_size": size, "batch_tools": tools},
+    )
+
+
 def run_hook(
     payload: dict[str, Any],
     *,
@@ -531,16 +588,36 @@ def run_hook(
     # sont inertes ; PreToolUse, le garde-fou, garde sa décision mais en lecture
     # seule : ni cache d'état, ni hold, ni trace, ni capsule (#717).
     recognized = locate_project_root(payload, project_root)[1]
-    if not recognized and hook.event is not HookEvent.PRE_TOOL_USE:
-        decision = Decision()
-    elif not recognized:
-        with suspended_state_writes():
-            decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
+    # La garde : la politique d'outils sur un appel en attente. Une décision consultative
+    # (modèle imposé) ou une autre décision nommée par ``--decision`` n'est pas concernée.
+    guard = (
+        hook.event is HookEvent.PRE_TOOL_USE
+        and resolved_decision == DEFAULT_DECISION_BY_EVENT[HookEvent.PRE_TOOL_USE]
+    )
+    batch = copilot_wire.inspect_tool_calls(payload) if guard else None
+    judged: list[tuple[HookInput, Decision]]
+    if batch is not None and batch[1]:
+        # Échec fermé : une charge qui annonce des appels sans qu'on puisse tous les lire.
+        decision = _unreadable_call_decision(batch[1])
+        judged = [(hook, decision)]
+    elif batch is not None and len(batch[0]) > 1:
+        # Appels groupés (Copilot) : chaque appel est jugé, le plus restrictif l'emporte.
+        judged = [
+            (sub, _decide(sub, resolved_decision, recognized))
+            for sub in (replace(hook, tool_name=name, tool_input=args) for name, args in batch[0])
+        ]
+        decision = _combine_batch(judged)
+    elif guard and not hook.tool_name:
+        # Sans nom d'outil, la politique n'a rien à juger : ce n'est pas une autorisation.
+        decision = _unreadable_call_decision("aucun nom d'outil exploitable dans la charge")
+        judged = [(hook, decision)]
     else:
-        decision = run_decision(resolved_decision, hook) if resolved_decision else Decision()
+        decision = _decide(hook, resolved_decision, recognized)
+        judged = [(hook, decision)]
     latency_ms = (time.perf_counter() - started) * 1000
     if recognized:
-        _record_decision(hook, decision, host_id, latency_ms, started_at, resolved_decision)
+        for judged_hook, judged_decision in judged:
+            _record_decision(judged_hook, judged_decision, host_id, latency_ms, started_at, resolved_decision)
         capsule, capsule_error = _persist_capsule(hook, decision)
     else:
         capsule, capsule_error = None, ""

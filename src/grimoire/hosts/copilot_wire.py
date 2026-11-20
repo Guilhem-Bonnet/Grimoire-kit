@@ -34,6 +34,7 @@ __all__ = [
     "PayloadDialect",
     "detect_dialect",
     "event_from_alias",
+    "inspect_tool_calls",
     "parse_tool_args",
     "single_tool_call",
     "tool_calls",
@@ -146,6 +147,61 @@ def tool_calls(payload: Mapping[str, Any]) -> tuple[tuple[str, dict[str, Any]], 
     if name:
         return ((name, parse_tool_args(payload.get("toolArgs"))),)
     return ()
+
+
+def inspect_tool_calls(payload: Mapping[str, Any]) -> tuple[tuple[tuple[str, dict[str, Any]], ...], str] | None:
+    """Les appels d'une charge camelCase et, s'il y en a un, le défaut qui la rend injugeable.
+
+    ``None`` : la charge n'a pas la forme camelCase d'un appel d'outil (ni
+    ``toolCalls`` ni ``toolName``/``toolArgs``) — elle relève d'un autre dialecte.
+    Sinon ``(appels, problème)`` : ``problème`` est vide quand chaque appel a un
+    nom et des arguments lisibles. La garde refuse une charge à problème : un
+    appel qu'on ne sait pas lire n'est pas un appel autorisé (échec fermé).
+    """
+    if "toolCalls" in payload:
+        raw_calls = payload["toolCalls"]
+        if not isinstance(raw_calls, list) or not raw_calls:
+            return (), "`toolCalls` n'est pas une liste d'appels non vide"
+        calls: list[tuple[str, dict[str, Any]]] = []
+        for index, entry in enumerate(raw_calls):
+            if not isinstance(entry, Mapping):
+                return tuple(calls), f"appel {index + 1} : pas un objet"
+            name = entry.get("name", entry.get("toolName"))
+            if not isinstance(name, str) or not name.strip():
+                return tuple(calls), f"appel {index + 1} : nom d'outil absent"
+            args, problem = _strict_args(entry.get("args", entry.get("toolArgs")))
+            if problem:
+                return tuple(calls), f"appel {index + 1} ({name}) : {problem}"
+            calls.append((name, args))
+        return tuple(calls), ""
+    if "toolName" in payload or "toolArgs" in payload:
+        name = payload.get("toolName")
+        if not isinstance(name, str) or not name.strip():
+            return (), "nom d'outil absent"
+        args, problem = _strict_args(payload.get("toolArgs"))
+        if problem:
+            return (), f"{name} : {problem}"
+        return ((name, args),), ""
+    return None
+
+
+def _strict_args(raw: Any) -> tuple[dict[str, Any], str]:
+    """Arguments lisibles ou la raison pour laquelle ils ne le sont pas (absents = aucun argument)."""
+    if raw is None:
+        return {}, ""
+    if isinstance(raw, dict):
+        return dict(raw), ""
+    if isinstance(raw, str):
+        if not raw.strip():
+            return {}, ""
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}, "arguments illisibles (JSON invalide)"
+        if isinstance(parsed, dict):
+            return dict(parsed), ""
+        return {}, f"arguments illisibles ({type(parsed).__name__}, pas un objet)"
+    return {}, f"arguments illisibles ({type(raw).__name__})"
 
 
 def single_tool_call(payload: Mapping[str, Any]) -> tuple[str, dict[str, Any]] | None:
