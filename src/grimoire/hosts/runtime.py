@@ -322,14 +322,16 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
 
     if hook.event is HookEvent.PRE_TOOL_USE:
         if profile_for(host_id).blocking_hooks:
-            mapping = {Outcome.DENY: "deny", Outcome.ASK: "ask", Outcome.ALLOW: "allow"}
+            # BLOCK (refus de clôture) n'est rendu par aucune décision PreToolUse aujourd'hui ;
+            # s'il l'était, c'est un refus, jamais une autorisation.
+            mapping = {Outcome.DENY: "deny", Outcome.BLOCK: "deny", Outcome.ASK: "ask", Outcome.ALLOW: "allow"}
             specific["permissionDecision"] = mapping.get(decision.outcome, "allow")
             if decision.reason:
                 specific["permissionDecisionReason"] = decision.reason
             if decision.updated_input is not None and decision.outcome is Outcome.ALLOW:
                 # L'entrée complète : Claude Code remplace ``tool_input``, il ne fusionne pas.
                 specific["updatedInput"] = dict(decision.updated_input)
-            if copilot and decision.outcome in {Outcome.DENY, Outcome.ASK}:
+            if copilot and (decision.is_refusal or decision.outcome is Outcome.ASK):
                 # Le harness Copilot documente une sortie `preToolUse` à plat (« The
                 # `preToolUse` hook can control tool execution by writing a JSON object
                 # to stdout » : `permissionDecision`, `permissionDecisionReason`) et ne
@@ -907,7 +909,7 @@ def main(argv: list[str] | None = None) -> int:
         host_id is HostId.GITHUB_COPILOT
         and _hook.event is HookEvent.PRE_TOOL_USE
         and decision_id not in ADVISORY_PRE_TOOL_DECISIONS
-        and _decision.outcome is Outcome.DENY
+        and _decision.is_refusal
     ):
         return _copilot_refusal_exit(result)
     sys.stdout.write(rendered)

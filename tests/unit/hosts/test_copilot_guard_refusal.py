@@ -160,3 +160,34 @@ def test_import_failure_refuses_with_exit_2_under_copilot(capsys: pytest.Capture
     assert "garde avant outil en panne" in captured.err
     code = hook_entry.import_failure(["--host", "claude", "--event", "PreToolUse"], raw, "ImportError: x")
     assert code == 0 and "permissionDecision" not in json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("host", [HostId.GITHUB_COPILOT, HostId.CLAUDE_CODE_CLI])
+def test_a_block_outcome_on_pre_tool_use_is_a_deny(host: HostId) -> None:
+    """R3 : BLOCK sur PreToolUse est rendu `deny`, jamais `allow` (aucune décision PreToolUse ne le rend aujourd'hui)."""
+    from grimoire.hosts.decisions import Decision, HookInput, Outcome
+    from grimoire.hosts.events import HookEvent
+    from grimoire.hosts.runtime import render
+
+    hook = HookInput(event=HookEvent.PRE_TOOL_USE, project_root=Path("/p"), tool_name="Bash")
+    out = render(Decision(outcome=Outcome.BLOCK, reason="[Grimoire] non."), hook, host)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    if host is HostId.GITHUB_COPILOT:
+        assert out["permissionDecision"] == "deny"
+
+
+def test_a_block_outcome_exits_2_under_copilot(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import io
+
+    from grimoire.hosts import runtime
+    from grimoire.hosts.decisions import Decision, Outcome
+
+    monkeypatch.setattr(runtime, "_decide", lambda *_a: Decision(outcome=Outcome.BLOCK, reason="[Grimoire] non."))
+    for host, expected in (("copilot", 2), ("claude", 0)):
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_snake(governed, "ls"))))
+        code = runtime.main(["--host", host, "--event", "PreToolUse", "--project-root", str(governed)])
+        out = json.loads(capsys.readouterr().out)
+        assert code == expected, host
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
