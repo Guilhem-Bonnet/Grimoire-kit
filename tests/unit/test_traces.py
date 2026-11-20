@@ -436,12 +436,14 @@ class TestTraceLedger:
             tags=['"run_id": "RUN-a"'],
         )
 
+        _make_trace(ledger, run_id="RUN-é")
+
         def no_rebuild(_data):
             raise AssertionError("_next_id ne doit pas reconstruire les traces")
 
         monkeypatch.setattr(TraceRecord, "from_dict", staticmethod(no_rebuild))
         assert ledger._next_id("RUN-a") == "TRC-RUN-a-002"
-        assert ledger._next_id("RUN-é") == "TRC-RUN-é-001"
+        assert ledger._next_id("RUN-é") == "TRC-RUN-é-002"
 
     def test_record_gives_up_when_the_lock_stays_held(self, tmp_path) -> None:
         """Un hook passe un délai court : la trace est perdue, la réponse à l'hôte non."""

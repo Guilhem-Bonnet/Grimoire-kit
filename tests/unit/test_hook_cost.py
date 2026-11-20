@@ -165,6 +165,7 @@ _BASH_GUARD_FORBIDDEN = (
 
 
 def test_the_bash_guard_does_not_load_the_mission_ledger(tmp_path: Path) -> None:
+    (tmp_path / "_grimoire").mkdir()  # projet reconnu : la trace de décision est aussi écrite
     probe = (
         "import sys, os\n"
         "sys.argv = ['grimoire-hook', '--host', 'claude', '--event', 'PreToolUse', "
@@ -176,13 +177,14 @@ def test_the_bash_guard_does_not_load_the_mission_ledger(tmp_path: Path) -> None
         "os.dup2(r, 0)\n"
         "from grimoire.hosts.hook_entry import main\n"
         "main()\n"
+        "assert 'grimoire.missions.lease' in sys.modules, 'le bail n a pas été lu : sonde vide'\n"
         f"print(','.join(m for m in {_BASH_GUARD_FORBIDDEN!r} if m in sys.modules), file=sys.stderr)\n"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True, env=env, encoding="utf-8"
     )
-    assert "permissionDecision" in result.stdout or result.stdout.strip() in {"", "{}"}, result.stdout
+    assert "permissionDecision" in result.stdout, result.stdout
     leaked = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
     assert not leaked, f"un PreToolUse Bash a chargé {leaked} — importer à l'usage, pas au module"
 

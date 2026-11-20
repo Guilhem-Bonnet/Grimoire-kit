@@ -233,3 +233,30 @@ def test_an_unresolved_launcher_keeps_the_guard_open_and_says_so(
     assert handlers
     assert all("onFailure" not in h for h in handlers)
     assert "hook onFailure" in {d.surface for d in plan.degradations}
+
+
+def test_the_guard_still_refuses_in_time_when_the_trace_ledger_stays_locked(tmp_path: Path) -> None:
+    """Le journal de traces tenu par un autre hook coûte au plus le délai court, jamais le refus.
+
+    Avant, ``_record_decision`` attendait le verrou jusqu'à 30 s : la garde dépassait son
+    ``timeout`` et l'hôte refusait même un ``ls``. Retirer le ``lock_timeout`` du runtime
+    fait échouer la borne de temps ci-dessous.
+    """
+    from grimoire.core.fsio import locked
+
+    (tmp_path / "_grimoire").mkdir()
+    traces = tmp_path / "_grimoire-output" / "traces" / "traces.jsonl"
+    traces.parent.mkdir(parents=True)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force origin main"},
+        "cwd": str(tmp_path),
+    }
+    with locked(traces):
+        started = time.perf_counter()
+        rendered, _decision, _hook = run_hook(payload, host_id=HostId.CLAUDE_CODE_CLI, project_root=tmp_path)
+        elapsed = time.perf_counter() - started
+    assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny", json.dumps(rendered)
+    assert elapsed < 10, f"la garde a attendu le verrou {elapsed:.1f} s"
+    assert not traces.exists() or traces.read_text(encoding="utf-8") == ""
