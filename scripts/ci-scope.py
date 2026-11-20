@@ -42,15 +42,36 @@ DOC_ONLY_PATTERNS: tuple[str, ...] = (
 )
 
 
+# Ce que touche une PR de release (``grimoire release``) : version, notes, catalogue de
+# digests, budget de cérémonie. Le code qu'elle publie vient d'être testé par le push sur
+# main ; un seul autre fichier dans son diff remet la suite complète.
+RELEASE_PATTERNS: tuple[str, ...] = (
+    "CHANGELOG.md",
+    "changelog.d/*",
+    "version.txt",
+    "src/grimoire/__version__.py",
+    "registry/kit-file-hashes.json",
+    "evals/ceremony-budget.yaml",
+)
+
+
 def is_doc_only_path(path: str) -> bool:
     """``fnmatch`` : ``*`` traverse les ``/``, donc ``docs/*`` couvre tout l'arbre."""
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in DOC_ONLY_PATTERNS)
 
 
-def needs_full_ci(paths: Iterable[str]) -> bool:
-    """Vrai sauf si la liste est non vide et entièrement documentaire."""
+def is_release_path(path: str) -> bool:
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in RELEASE_PATTERNS)
+
+
+def needs_full_ci(paths: Iterable[str], *, release: bool = False) -> bool:
+    """Vrai sauf si la liste est non vide et entièrement documentaire.
+
+    ``release`` : les fichiers de :data:`RELEASE_PATTERNS` comptent aussi comme légers.
+    """
     changed = [p.strip() for p in paths if p.strip()]
-    return not changed or not all(is_doc_only_path(p) for p in changed)
+    light = (lambda p: is_doc_only_path(p) or is_release_path(p)) if release else is_doc_only_path
+    return not changed or not all(light(p) for p in changed)
 
 
 def changed_files(base: str, head: str) -> list[str] | None:
@@ -79,12 +100,14 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--base", help="révision de départ (avec --head)")
     source.add_argument("--files", nargs="*", help="liste explicite des fichiers modifiés")
     parser.add_argument("--head", default="HEAD")
+    parser.add_argument("--release", action="store_true", help="PR de release : ses fichiers propres sont légers")
     args = parser.parse_args(argv)
 
     files = args.files if args.files is not None else changed_files(args.base, args.head)
-    full = True if files is None else needs_full_ci(files)
+    full = True if files is None else needs_full_ci(files, release=args.release)
     for name in files or []:
-        print(f"  {'doc ' if is_doc_only_path(name) else 'code'}  {name}", file=sys.stderr)
+        light = is_doc_only_path(name) or (args.release and is_release_path(name))
+        print(f"  {'doc ' if light else 'code'}  {name}", file=sys.stderr)
     print(f"full={'true' if full else 'false'}")
     return 0
 

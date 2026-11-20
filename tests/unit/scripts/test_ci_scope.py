@@ -133,12 +133,34 @@ def test_seule_une_decision_explicite_reduit_la_ci(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", ["ci-sdk.yml", "ci-validate.yml"])
-def test_le_job_de_perimetre_ne_reduit_jamais_main_ni_une_release(name: str) -> None:
+def test_le_job_de_perimetre_ne_reduit_jamais_main_et_ne_reduit_une_release_que_par_son_diff(name: str) -> None:
     job = _workflow(name)["jobs"]["changes"]
     decide = next(s for s in job["steps"] if s.get("id") == "scope")
-    always = decide["env"]["ALWAYS_FULL"]
-    assert "github.event_name != 'pull_request'" in always and "chore: release" in always
-    assert "scripts/ci-scope.py" in decide["run"]
+    assert decide["env"]["ALWAYS_FULL"] == "${{ github.event_name != 'pull_request' }}"  # main, nuit, demande : tout
+    release = decide["env"]["RELEASE"]
+    assert "chore: release" in release and "release/" in release
+    assert "scripts/ci-scope.py" in decide["run"] and "--release" in decide["run"]
+
+
+@pytest.mark.parametrize(
+    ("files", "full"),
+    [
+        (["CHANGELOG.md", "changelog.d/x.md", "version.txt", "src/grimoire/__version__.py"], False),
+        (["registry/kit-file-hashes.json", "evals/ceremony-budget.yaml", "docs/a.md"], False),
+        (["version.txt", "src/grimoire/core/x.py"], True),  # du code dans la release : suite complète
+        (["version.txt", ".github/workflows/ci-sdk.yml"], True),
+        ([], True),
+    ],
+)
+def test_une_release_n_est_legere_que_si_son_diff_ne_touche_que_des_fichiers_de_release(
+    files: list[str], full: bool
+) -> None:
+    assert _module().needs_full_ci(files, release=True) is full
+
+
+def test_hors_release_un_fichier_de_release_reste_du_code() -> None:
+    assert _module().needs_full_ci(["version.txt"]) is True
+    assert _module().needs_full_ci(["registry/kit-file-hashes.json"]) is True
 
 
 def test_aucun_declencheur_pr_des_workflows_requis_n_est_filtre_par_chemin() -> None:
