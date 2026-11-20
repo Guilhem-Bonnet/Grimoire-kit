@@ -169,9 +169,13 @@ def test_the_fail_closed_guard_gets_a_timeout_that_holds_under_load(governed: Pa
 
     assert FAIL_CLOSED_TIMEOUT == 30
     hooks, _ = _claude_hooks(governed)
-    guards = [h for entry in hooks["PreToolUse"] for h in entry["hooks"]]
+    handlers = [h for entry in hooks["PreToolUse"] for h in entry["hooks"]]
+    guards = [h for h in handlers if h.get("onFailure") == "block"]
     assert guards
     assert all(h["timeout"] == FAIL_CLOSED_TIMEOUT for h in guards), json.dumps(guards)
+    # Le conseil de modèle (#1274) n'est pas une garde : il garde son délai court.
+    open_handlers = [h for h in handlers if "onFailure" not in h]
+    assert all(h["timeout"] < FAIL_CLOSED_TIMEOUT for h in open_handlers), json.dumps(open_handlers)
     advisory = [h for entry in hooks["UserPromptSubmit"] for h in entry["hooks"]]
     assert all(h["timeout"] == 10 for h in advisory), json.dumps(advisory)
 
@@ -180,7 +184,9 @@ def test_an_open_guard_keeps_its_declared_timeout(governed: Path, monkeypatch: p
     """Sans ``onFailure: block`` un dépassement laisse passer : rien à rallonger."""
     monkeypatch.setattr("grimoire.hosts.emitters.claude_code.resolve_hook_launcher", lambda _root: UNRESOLVED)
     hooks, _ = _claude_hooks(governed)
-    assert all(h["timeout"] == 10 for entry in hooks["PreToolUse"] for h in entry["hooks"])
+    guards = [h for entry in hooks["PreToolUse"] for h in entry["hooks"] if "--decision" not in h["command"]]
+    assert guards
+    assert all(h["timeout"] == 10 for h in guards), json.dumps(guards)
 
 
 def _settings_with_guard(root: Path, timeout: int) -> None:
