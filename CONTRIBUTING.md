@@ -355,6 +355,34 @@ commentaire en tête du `Cargo.toml` du crate.
 
 ## Publier une release
 
+### En une commande : `scripts/release.py`
+
+```bash
+scripts/release.py x.y.z --dry-run   # vérifie l'état, annonce chaque étape, n'écrit rien
+scripts/release.py x.y.z --open-pr   # prépare, commite, pousse release/x.y.z et ouvre la PR
+```
+
+Le script part de `main` propre (aucune modification suivie) et identique à
+`origin/main`, puis, sur une branche `release/x.y.z` :
+
+1. ajoute `(#NNNN)` à chaque puce de fragment qui n'en porte pas — le numéro
+   du commit qui a ajouté le fragment. Sans lui, `check-changelog-release.py`
+   refuse un commit `feat`/`fix`/`perf` qui n'a touché que `changelog.d/` ;
+2. écrit `version.txt`, lance `scripts/changelog-assemble.py x.y.z`, met à jour
+   `__version__` ;
+3. lance `scripts/gen-kit-hashes.py` puis `scripts/check-changelog-release.py` ;
+4. refuse de continuer si la calibration de `evals/ceremony-budget.yaml` a plus
+   de deux versions mineures de retard (la CI échouerait) ; `--redate-ceremony`
+   la redate, et l'étape suivante rejoue le budget sur la roue ;
+5. construit la roue hors de l'arbre (`uv build --wheel`), l'installe dans un
+   venv vierge, et exécute `grimoire --version` et `grimoire ceremony budget` ;
+6. commite `chore: release x.y.z`.
+
+Il ne fusionne pas et ne tague pas : il imprime la suite (fusion de la PR,
+`git tag -a vx.y.z` sur le commit de fusion, push du tag). En cas d'échec,
+rien n'est commité et le message donne les commandes pour revenir sur `main`.
+`make release` reste la variante sans branche ni numérotation des fragments.
+
 ### Entrées de CHANGELOG : un fragment par PR
 
 Une PR `feat:`, `fix:` ou `perf:` ne touche plus l'en-tête de `CHANGELOG.md` :
