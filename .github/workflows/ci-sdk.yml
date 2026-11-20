@@ -94,13 +94,24 @@ jobs:
         id: scope
         shell: bash
         env:
-          ALWAYS_FULL: "${{ github.event_name != 'pull_request' || startsWith(github.event.pull_request.title, 'chore: release') }}"
+          ALWAYS_FULL: "${{ github.event_name != 'pull_request' }}"
+          # PR de release : la suite a tourné sur le push main qui la précède ; elle ne repasse que si le diff
+          # sort des fichiers de release (scripts/ci-scope.py --release).
+          RELEASE: "${{ startsWith(github.event.pull_request.title, 'chore: release') || startsWith(github.head_ref, 'release/') }}"
         run: |
-          echo "always_full=$ALWAYS_FULL" >> "$GITHUB_OUTPUT"
           if [ "$ALWAYS_FULL" = "true" ]; then
+            echo "always_full=true" >> "$GITHUB_OUTPUT"
             echo "full=true" >> "$GITHUB_OUTPUT"
           else
-            python3 scripts/ci-scope.py --base HEAD^1 --head HEAD | tee -a "$GITHUB_OUTPUT"
+            ARGS=()
+            if [ "$RELEASE" = "true" ]; then ARGS+=(--release); fi
+            python3 scripts/ci-scope.py "${ARGS[@]}" --base HEAD^1 --head HEAD | tee scope.out >> "$GITHUB_OUTPUT"
+            # Le 3.13 complet (parts) ne tourne que hors PR, ou sur une release dont le diff sort des fichiers de release.
+            if [ "$RELEASE" = "true" ] && grep -qx "full=true" scope.out; then
+              echo "always_full=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "always_full=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
   lint:
@@ -400,7 +411,7 @@ jobs:
           fail_ci_if_error: false
 
   # Ubuntu 3.13 : même découpe que 3.12 (la suite entière tenait ~30 min sur une jambe). Elle ne
-  # tourne que sur main, la nuit, à la demande et sur une PR de release (always_full) ; sur toute
+  # tourne que sur main, la nuit, à la demande et sur une PR de release dont le diff sort des fichiers de release (always_full) ; sur toute
   # autre PR les parts sont sautées et l'agrégateur rend son check requis sans rien lancer.
   test-shard-313:
     name: "Tests 3.13 ubuntu (${{ matrix.shard }}/4)"
@@ -520,13 +531,13 @@ jobs:
               - "pyproject.toml"
               - ".github/workflows/ci-sdk.yml"
 
-      # Une PR qui ne touche pas au cockpit rend le check requis sans la suite ; main,
-      # la nuit et les PR de release la passent toujours.
+      # Une PR qui ne touche pas au cockpit rend le check requis sans la suite ; main
+      # et la nuit la passent toujours (une PR de release ne touche pas au cockpit).
       - name: Décider
         id: gate
         shell: bash
         env:
-          RUN_E2E: "${{ github.event_name != 'pull_request' || steps.filter.outputs.ui == 'true' || startsWith(github.event.pull_request.title, 'chore: release') }}"
+          RUN_E2E: "${{ github.event_name != 'pull_request' || steps.filter.outputs.ui == 'true' }}"
         run: echo "run=$RUN_E2E" >> "$GITHUB_OUTPUT"
 
   # ~20 min en série : réparti comme la suite SDK. Le nombre de jobs vit ici et dans --of.
@@ -692,11 +703,24 @@ jobs:
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # check-changelog-release lit les commits depuis le dernier tag.
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: "pip"
+
+      # PR de release : la suite complète n'y repasse pas (elle a tourné sur le push main précédent) ;
+      # ce que la release change se vérifie ici, comme le fera publish.yml au tag.
+      - name: Garde de release (catalogue de digests, CHANGELOG)
+        if: "startsWith(github.event.pull_request.title, 'chore: release') || startsWith(github.head_ref, 'release/')"
+        run: |
+          pip install -e .
+          python scripts/gen-kit-hashes.py --check
+          python scripts/check-changelog-release.py
 
       - name: Install build
         run: pip install build
