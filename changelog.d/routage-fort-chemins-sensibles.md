@@ -1,1 +1,0 @@
-- feat(missions): `orchestrator.roles.worker.sensitive_route: strong` envoie d'emblée au modèle fort de l'hôte (`opus`, sans route de fournisseur) une tâche qui cite un chemin réservé (merger, double relecture, `sensitive_paths`) ; la décision est notée au lancement, rendue par `task show` et annoncée par le plan du tick (`Routage prévu`) ; `off` par défaut, comportement inchangé
