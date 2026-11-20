@@ -242,7 +242,7 @@ def test_la_memoire_ecrite_a_la_cloture_d_une_autre_tache_ne_perime_pas_le_recu(
     write_receipt(root, premiere, "READY", reviewer_id="relecteur")
     write_receipt(root, seconde, "READY", reviewer_id="relecteur")
 
-    service.transition(premiere, TaskState.CLOSED, "amelia")
+    service.transition(premiere, TaskState.CLOSED, "amelia", lesson="le reçu de revue suit l empreinte du code")
 
     ecrits = [p for p in (root / "_grimoire/_memory").rglob("*") if p.is_file()]
     assert ecrits, "la clôture de la première tâche doit avoir écrit la mémoire (sinon le test ne prouve rien)"

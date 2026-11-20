@@ -1019,7 +1019,7 @@ class TaskService:
 
     def accept(
         self, task_id: str, reason: str, actor: str, *, origin: str, provenance: Mapping[str, Any] | None = None,
-        evidence_root: Path | None = None,
+        evidence_root: Path | None = None, lesson: str = "",
     ) -> TaskMove:
         """Accepte la preuve déclarative d'une tâche en revue — canal humain — puis la ferme (#865, P88).
 
@@ -1040,7 +1040,7 @@ class TaskService:
             task_id, f"Acceptation humaine ({outcome.verdict.id}, pack {outcome.pack.id}) : {reason.strip()}",
             actor, origin=origin,
         )
-        return self.transition(task_id, TaskState.CLOSED, actor, reason.strip())
+        return self.transition(task_id, TaskState.CLOSED, actor, reason.strip(), lesson=lesson)
 
     def _question_to_answer(self, task: MissionTask, question_id: str) -> Question:
         """La question visée par une réponse humaine : celle du lot en attente, ou une non bloquante encore ouverte.
@@ -1252,6 +1252,7 @@ class TaskService:
         claim: TaskClaim | None = None,
         extra_payload: dict[str, Any] | None = None,
         lease_epoch: int | None = None,
+        lesson: str = "",
     ) -> TaskMove:
         """Déplace une tâche : machine à états, verrou de fichiers, gate, puis ledger, puis board.
 
@@ -1279,6 +1280,7 @@ class TaskService:
         # `expected_from` : le gate a jugé `task.status` ; si l'état a bougé
         # depuis (autre session, autre processus), le ledger refuse sous son
         # verrou au lieu d'écrire une transition jugée sur un état périmé (#710).
+        extra_payload = {**(extra_payload or {}), "lesson": lesson.strip()} if lesson.strip() else extra_payload
         moved = self.ledger.transition_task(
             task_id,
             target,
@@ -1289,7 +1291,7 @@ class TaskService:
             expected_from=task.status,
             lease_epoch=lease_epoch,
         )
-        self._consolidate(moved, target, actor=actor, reason=reason)
+        self._consolidate(moved, target, actor=actor, reason=reason, lesson=lesson)
         return TaskMove(task=moved, previous=task.status, verdict=verdict, board_path=self.project_board())
 
     # ── Pilotage humain (issue #638, lot B) ────────────────────────────────
@@ -1349,7 +1351,7 @@ class TaskService:
         self.ledger.mark_directives_delivered(task_id, tuple(d.id for d in pending), actor_id=actor)
         return pending
 
-    def cancel(self, task_id: str, reason: str, actor: str, *, force: bool = False) -> TaskMove:
+    def cancel(self, task_id: str, reason: str, actor: str, *, force: bool = False, lesson: str = "") -> TaskMove:
         """Annule une tâche : la raison est obligatoire, et une tâche qu'une autre
         session tient (claim actif d'un autre acteur) exige *force* explicite.
 
@@ -1388,7 +1390,7 @@ class TaskService:
             raise TaskRefusedError(task_id, verdict)
         return self.transition(
             task_id, TaskState.CANCELLED, actor, cleaned,
-            extra_payload={"forced": bool(force and held_by_other), "cancelled_by": actor},
+            extra_payload={"forced": bool(force and held_by_other), "cancelled_by": actor}, lesson=lesson,
         )
 
     def _check_exclusive_files(self, task: MissionTask, target: TaskState, claim: TaskClaim) -> None:
@@ -1407,20 +1409,18 @@ class TaskService:
         self._record_refusal(task, target, verdict, claim.actor_id)
         raise TaskRefusedError(task.id, verdict)
 
-    def _consolidate(self, task: MissionTask, target: TaskState, *, actor: str, reason: str) -> None:
-        """Clôture ou blocage : ce que la roadmap Memory OS autorise à écrire.
+    def _consolidate(self, task: MissionTask, target: TaskState, *, actor: str, reason: str, lesson: str = "") -> None:
+        """Clôture, blocage ou abandon : ce que la roadmap Memory OS autorise à écrire (leçon seule, levier 6).
 
         Rien d'autre n'appelle :func:`consolidate_task_memory` — c'est le seul
         point d'écriture, comme :meth:`project_board` l'est pour le board.
-        Best-effort : la transition est déjà au ledger, qui est la source ;
-        une mémoire indisponible n'y change rien.
+        Best-effort : la transition est déjà au ledger (la source) ; une mémoire indisponible n'y change rien.
         """
-        if target not in (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED) or not self.writes_projections:
+        stops = (TaskState.CLOSED, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED)
+        if target not in stops or not self.writes_projections:
             return
-        # best-effort : la transition est déjà au ledger, qui est la source ;
-        # une mémoire indisponible n'y change rien.
         with contextlib.suppress(Exception):
-            consolidate_task_memory(self.memory, self.ledger, task, target, actor=actor, reason=reason)
+            consolidate_task_memory(self.memory, self.ledger, task, target, actor=actor, reason=reason, lesson=lesson)
 
     def _record_refusal(self, task: MissionTask, target: TaskState, verdict: GateVerdict, actor: str) -> None:
         """Journaliser un gate rouge dans le TraceLedger — le journal d'observabilité, pas la source.

@@ -15,11 +15,15 @@ Deux gestes symétriques :
     c'est un rappel, pas un rapport.
 
 ``consolidate_task_memory``
-    Écrit à la clôture ou au blocage — les seuls moments où la roadmap
-    (``planning/memory-os-roadmap.md``, étape 6) autorise une écriture
+    Écrit à la clôture, au blocage ou à l'abandon — les seuls moments où la
+    roadmap (``planning/memory-os-roadmap.md``, étape 6) autorise une écriture
     durable : *« Ne pas stocker chaque micro-action comme connaissance
     durable. Promouvoir seulement décisions, preuves, blocages, patterns et
     erreurs répétées. »* Rien n'est écrit sur un ``move`` ordinaire.
+
+    Levier 6 : n'est écrit que ce qui ne se déduit pas du ledger. Une clôture
+    sans leçon (``--lesson``) n'écrit plus rien — l'ancienne fiche « Tâche X
+    clôturée : titre, critères » recopiait le ledger et encombrait le rappel.
 
 Aucune des deux fonctions n'exige de backend mémoire configuré : sans lui, le
 rappel reste utile depuis le seul Mission Ledger (historique propre, tâches
@@ -59,6 +63,8 @@ DEFAULT_LEDGER_RELPATH = Path("_grimoire-runtime-output/ledger")
 #: ``MemoryManager._trim_to_budget``. Un rappel est un paragraphe qu'une
 #: session lit avant de commencer, pas un rapport qu'elle dépouille.
 DEFAULT_TOKEN_BUDGET = 400
+#: Un souvenir servi par le rappel tient en une ligne lisible : au-delà, il est coupé.
+MAX_HIT_CHARS = 280
 
 #: Types typés (voir ``grimoire.memory.manager.MEMORY_TYPES``) que le rappel
 #: interroge — les deux seuls que :func:`consolidate_task_memory` écrit.
@@ -248,10 +254,14 @@ def task_recall_entries(
 ) -> list[tuple[str, MemoryEntry]]:
     """Les souvenirs que le rappel de tâche sert pour *query* : ``(type, entrée)``, sans doublon.
 
+    Seules les leçons sont servies (:func:`grimoire.memory.lessons.is_lesson`) :
+    ni fiche de clôture recopiée du ledger, ni entrée de test ou de fixture.
     Un type par passe (:data:`_RECALL_MEMORY_TYPES`), au plus *limit* par type,
     et aucun reçu écrit ici : l'appelant écrit le sien (le rappel de tâche) ou
     n'en écrit aucun (le rejeu du cockpit, P27). Une passe en erreur est sautée.
     """
+    from grimoire.memory.lessons import is_lesson
+
     served: list[tuple[str, MemoryEntry]] = []
     seen: set[str] = set()
     for type_ in _RECALL_MEMORY_TYPES:
@@ -260,8 +270,8 @@ def task_recall_entries(
         except Exception:  # noqa: S112 — la mémoire est une couche optionnelle du rappel
             continue
         for entry in entries:
-            if not entry.id or entry.id in seen:
-                continue
+            if not entry.id or entry.id in seen or not is_lesson(entry):
+                continue  # levier 6 : une recopie du ledger ou un reste de test n'est pas une leçon
             seen.add(entry.id)
             served.append((type_, entry))
     return served
@@ -291,13 +301,19 @@ def _memory_hits(
         return []
     # Un seul reçu pour tout le rappel (écrit plus bas), pas un par type.
     pairs = task_recall_entries(memory_manager, query, limit=limit)
-    hits = [MemoryHit(id=e.id, type=t, text=e.text, tags=tuple(e.tags)) for t, e in pairs]
+    hits = [MemoryHit(id=e.id, type=t, text=_clip(e.text), tags=tuple(e.tags)) for t, e in pairs]
     served = [e for _t, e in pairs]
     journal = getattr(memory_manager, "journal_read", None)
     if callable(journal):
         # Reçu de rappel (P13) : ce que le rappel de tâche a réellement servi, jamais son texte.
         journal("task_recall", query, served[:limit], task_ref=task.id, filters={"limit": limit})
     return hits[:limit]
+
+
+def _clip(text: str) -> str:
+    """Un souvenir servi est une ligne, pas un document : borné à :data:`MAX_HIT_CHARS`."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= MAX_HIT_CHARS else flat[: MAX_HIT_CHARS - 1].rstrip() + "…"
 
 
 def _trim_to_budget(text: str, token_budget: int) -> str:
@@ -465,19 +481,14 @@ def build_task_recall(
     )
 
 
-def _closure_summary(task: MissionTask, own_history: list[str]) -> str:
-    lines = [f"Tâche {task.id} clôturée : {task.title}."]
-    if task.acceptance:
-        lines.append("Critères : " + "; ".join(task.acceptance) + ".")
-    if own_history:
-        lines.append("Avant d'y arriver : " + " | ".join(own_history) + ".")
-    return " ".join(lines)
+def _lesson_summary(task: MissionTask, lesson: str) -> str:
+    """La leçon d'une clôture : la décision ou le piège, rattaché à sa tâche — pas le titre recopié."""
+    return f"Leçon de {task.id} ({task.title}) : {lesson}"
 
 
-def _blocker_summary(task: MissionTask, target: TaskState, reason: str) -> str:
-    verb = "bloquée" if target is TaskState.BLOCKED else "échouée"
-    text = f"Tâche {task.id} ({task.title}) {verb}"
-    return f"{text} : {reason}." if reason else f"{text}."
+def _blocker_summary(task: MissionTask, target: TaskState, why: str) -> str:
+    verb = {TaskState.BLOCKED: "bloquée", TaskState.FAILED: "échouée"}.get(target, "abandonnée")
+    return f"Tâche {task.id} ({task.title}) {verb} : {why}"
 
 
 def consolidate_task_memory(
@@ -488,29 +499,40 @@ def consolidate_task_memory(
     *,
     actor: str,
     reason: str = "",
+    lesson: str = "",
 ) -> MemoryEntry | None:
-    """Écrit ce qu'une clôture ou un blocage enseigne — et rien d'autre.
+    """Écrit ce qu'une clôture, un blocage ou un abandon enseigne — et rien d'autre.
 
     Les garde-fous de la roadmap sont la forme de cette fonction, pas un
     commentaire à côté : elle n'a pas de branche pour ``ready``, ``running``,
-    ou tout autre mouvement de travail ordinaire. ``remember`` est idempotent
+    ou tout autre mouvement de travail ordinaire.
+
+    Ce qui se déduit du ledger n'est pas écrit (levier 6) : le titre, les
+    critères, l'historique y sont déjà. Une clôture n'écrit que sa *lesson*
+    (décision prise, piège rencontré) ; un blocage ou un échec, sa *lesson* ou
+    à défaut sa raison ; un abandon, sa seule *lesson*. Rien à dire, rien
+    d'écrit. ``remember`` est idempotent
     sur (agent, texte) — reclôturer ou rebloquer sur le même motif n'écrit pas
     de doublon. Best-effort : une mémoire indisponible n'annule jamais la
     transition déjà actée au ledger.
     """
+    from grimoire.memory.lessons import LESSON_TAG
+
+    del ledger  # le ledger reste la source des faits : rien n'en est recopié
+    lesson = " ".join(lesson.split())
     if memory_manager is None:
         return None
-    if target is TaskState.CLOSED:
-        text = _closure_summary(task, _own_history(ledger, task.id))
-        type_ = "decisions"
-    elif target in (TaskState.BLOCKED, TaskState.FAILED):
-        text = _blocker_summary(task, target, reason)
-        type_ = "failures"
+    if target is TaskState.CLOSED and lesson:
+        text, type_ = _lesson_summary(task, lesson), "decisions"
+    elif target in (TaskState.BLOCKED, TaskState.FAILED) and (lesson or reason.strip()):
+        text, type_ = _blocker_summary(task, target, lesson or " ".join(reason.split())), "failures"
+    elif target is TaskState.CANCELLED and lesson:
+        text, type_ = _blocker_summary(task, target, lesson), "failures"
     else:
         return None
     try:
         return memory_manager.remember(
-            type_, actor, text, tags=(task.id, task.mission_id, "task-recall"), source=f"task:{task.id}",
+            type_, actor, text, tags=(task.id, task.mission_id, "task-recall", LESSON_TAG), source=f"task:{task.id}",
         )
     except Exception:  # consolidation best-effort, jamais au prix de la transition déjà actée
         return None

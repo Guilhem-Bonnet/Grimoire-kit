@@ -72,12 +72,12 @@ prochain export l'écrase.
 | `grimoire task wave-checkpoint <mission> <vague> [--action status\|request\|require\|approve\|reject] [--fingerprint <empreinte>]` | Checkpoint humain d'une vague, lié à l'empreinte du contenu fusionné (arbres base, tête et merge de chaque tâche). `request` présente l'empreinte, `approve`/`reject` la citent et exigent un tour humain attesté postérieur (W2-01) ; `require` ferme le claim des vagues suivantes tant que la vague n'est pas `approved`. Une vague dont le contenu change devient `stale`. Le numéro de vague est celui de `task waves` (niveau absolu, vagues closes comprises) ; le verrou s'applique à toute transition vers `claimed` |
 | `grimoire task show <id>` | Détailler une tâche et ce que chaque prochain pas exigera |
 | `grimoire task claim <id> [--actor <qui>] [--host <où>]` | Réclamer une tâche prête (`ready → claimed`). Une tâche `claimed`/`running` dont le bail est perdu (`expires_at` passé, battement de cœur perdu) se réclame directement : barrière du bail, retour `ready` journalisé (`reclaimed`), nouveau claim au nouvel epoch ; un autre acteur que le titulaire seulement si l'hôte du claim a un frein vérifié, sinon `grimoire task reap` pose la question à l'humain. Le WIP ne compte que les claims vivants |
-| `grimoire task move <id> --to <état>` | Déplacer une tâche, si la machine à états et le gate le permettent |
-| `grimoire task block <id> --reason "<motif>"` | Bloquer en disant pourquoi |
-| `grimoire task close <id>` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé) |
+| `grimoire task move <id> --to <état> [--lesson "<leçon>"]` | Déplacer une tâche, si la machine à états et le gate le permettent |
+| `grimoire task block <id> --reason "<motif>" [--lesson "<leçon>"]` | Bloquer en disant pourquoi ; la raison (ou la leçon si donnée) est gardée en mémoire |
+| `grimoire task close <id> [--lesson "<leçon>"]` | Fermer une tâche vérifiée (verdict accepté exigé ; depuis `needs_verification`, reçu de revue frais exigé). Seule la leçon (décision prise, piège rencontré) va en mémoire ; sans `--lesson`, rien n'y est écrit — voir [Ce que la clôture garde en mémoire](#ce-que-la-cloture-garde-en-memoire) |
 | `grimoire task review <id> --verdict READY\|NOT-READY [--finding "résumé :: commande"]` | Écrire le reçu de revue, lié à l'empreinte présente de l'arbre (`_grimoire-output/reviews/<id>/review-receipt.json`) |
 | `grimoire task verify <id> [--evidence <fichier> ...]` | Lancer les commandes déclarées de la tâche, écrire le pack et le verdict (0 `passed`, 1 `failed`, 2 aucune commande, 3 commandes non approuvées). Pour une tâche **sans** commande, `--evidence` (répétable) écrit un pack **déclaratif** : chaque fichier doit exister sous la racine du projet, il entre haché (SHA-256, taille, URI `file:<chemin>`), le verdict est `skipped` (`created_by: declarative`, contrôle `declarative-only`) et le code de sortie 4 : la revue peut s'ouvrir (`needs_verification`), la clôture reste refusée (`review_gate`) — une preuve déclarative n'est jamais un vert mécanique |
-| `grimoire task accept <id> --reason "<ce qui a été relu>" [--no-close]` | Accepter la preuve **déclarative** d'une tâche en revue (canal humain seulement, refusé depuis une session d'agent comme `task answer`) : pack d'attestation (les éléments du dernier pack plus l'acceptation, qui nomme chaque critère), verdict `passed` signé `created_by: human:<acteur>`, reçu de revue `READY` (`reviewer_id: human:<acteur>`), puis clôture ; `--no-close` s'arrête avant (issue #865) |
+| `grimoire task accept <id> --reason "<ce qui a été relu>" [--no-close] [--lesson "<leçon>"]` | Accepter la preuve **déclarative** d'une tâche en revue (canal humain seulement, refusé depuis une session d'agent comme `task answer`) : pack d'attestation (les éléments du dernier pack plus l'acceptation, qui nomme chaque critère), verdict `passed` signé `created_by: human:<acteur>`, reçu de revue `READY` (`reviewer_id: human:<acteur>`), puis clôture ; `--no-close` s'arrête avant (issue #865) |
 | `grimoire task prioritize <id> --to low\|medium\|high\|critical [--reason "<motif>"]` | Changer la priorité (issue #638) — l'historique reste au ledger, le board se retrie |
 | `grimoire task comment <id> "<texte>" [--kind comment\|directive]` | Poser un commentaire ou une consigne ; la session qui tient la tâche la lit au prochain `UserPromptSubmit` |
 | `grimoire task cancel <id> --reason "<motif>" [--force]` | Annuler avec sa raison (obligatoire) ; tenue par une autre session, elle exige `--force` |
@@ -98,6 +98,33 @@ prochain export l'écrase.
 | `grimoire task trace-export [<dest>] [--format otel\|langfuse\|otlp] [--endpoint <url>] [--header NOM=VALEUR] [--mission-id <id>]` | Exporte le TraceLedger (plus, pour OTel et OTLP, les spans des runs de flow lus dans le journal du kernel, avec `parentSpanId`) : JSONL aux conventions OTel GenAI ou Langfuse, ou `--format otlp --endpoint` vers un collecteur OTLP/HTTP (échoue si le lot n'est pas accepté) |
 | `grimoire task recall <id>` | Ce que la mémoire du projet sait de cette tâche et de ses voisines — borné en tokens |
 | `grimoire task dispatch <id> --check "<commande>" [--check ...] [--dry-run] [--max-tier cheap\|mid\|strong] [--start-tier cheap\|mid\|strong] [--provider <id>] [--timeout <s>]` | Déléguer la tâche en cascade par palier de fournisseur |
+
+### Ce que la clôture garde en mémoire
+
+Le Mission Ledger est la source des faits : titre, critères, historique,
+transitions. La mémoire du projet ne garde que ce qu'il ne sait pas :
+
+- à la clôture (`task close`, `task accept`, `task move --to closed`), la
+  **leçon** passée par `--lesson` — la décision prise, le piège rencontré. Sans
+  `--lesson`, rien n'est écrit en mémoire ;
+- au blocage ou à l'échec, la leçon si elle est donnée, sinon la raison ;
+- à l'abandon (`task cancel`), la seule leçon : la raison d'annulation reste au
+  ledger.
+
+La leçon est aussi tracée au ledger (`lesson` dans l'événement de transition).
+Par MCP, `task_update` la prend dans `text` pour `close`, `block` et `move` ; la
+route du cockpit, dans le champ `lesson`.
+
+```bash
+grimoire task close GAO-webhook-002 \
+  --lesson "le certificat TLS du staging expire chaque lundi : le renouveler avant la recette"
+```
+
+Le rappel de tâche (`task recall`, injecté au `SessionStart`) ne sert que ces
+leçons, chacune coupée à 280 caractères, le tout borné en tokens. Les anciennes
+fiches de clôture qui recopiaient le ledger ne sont plus servies ;
+`grimoire memory prune --apply` les retire du store
+([référence](memoire.md)).
 
 ### Une attente porte sur sa tâche, pas sur la session
 
