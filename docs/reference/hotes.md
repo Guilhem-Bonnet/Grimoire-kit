@@ -142,6 +142,21 @@ les fixtures sont rattachées au manifeste, mais toutes les capacités restent
 d'affirmer : camelCase signifie harness Copilot ; snake_case peut venir du
 harness Local comme d'un hook Copilot déclaré en PascalCase.
 
+`HostBridge.detect(payload)` s'appuie sur cette forme : des clés camelCase
+identifient Copilot, du snake_case n'identifie personne (Claude Code l'envoie
+aussi). Côté environnement, seule `COPILOT_AGENT_PROMPT` (agent cloud) est
+documentée par GitHub ; les anciennes `COPILOT_AGENT` / `GITHUB_COPILOT_AGENT`
+n'avaient pas de source et sont retirées. `COPILOT_WORKSPACE_FOLDER` (racine du
+projet) reste une heuristique non documentée, bornée par le marqueur `_grimoire/`.
+
+`grimoire doctor` contrôle les fichiers `.github/hooks/grimoire-*.json` :
+`copilot_hook_format` (WARN si le format est ancien : sans `version: 1`, sans
+`matcher` sur la garde, `timeout` au lieu de `timeoutSec` ; remède `grimoire up`)
+et `copilot_hooks_doubled` (WARN quand Claude Code et Copilot sont câblés : GitHub
+documente que Copilot lit aussi `.claude/settings.json` et exécute toutes les
+entrées de toutes les sources, sans dire si deux entrées identiques sont
+dédoublonnées).
+
 La garde avant outil juge **chaque appel** d'un lot et rend le verdict le plus
 restrictif : un refus l'emporte sur une demande, une demande sur une
 autorisation, et la raison nomme l'appel en cause. Elle échoue fermé : un appel

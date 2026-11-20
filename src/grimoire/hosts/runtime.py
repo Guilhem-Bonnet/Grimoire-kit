@@ -154,6 +154,9 @@ def gemini_fail_closed_reason(
 #: Le marqueur d'un projet Grimoire : le dossier qu'on trouve à sa racine.
 PROJECT_MARKER = "_grimoire"
 _ROOT_PAYLOAD_KEYS = ("cwd", "workspaceFolder", "workspace_folder", "project_root", "projectRoot")
+#: ``COPILOT_WORKSPACE_FOLDER`` : heuristique, aucune source documentée (les références
+#: GitHub et VS Code des hooks ne la citent pas) ; le candidat reste borné par le
+#: marqueur ``_grimoire/``.
 _ROOT_ENV_VARS = ("GRIMOIRE_PROJECT_ROOT", "COPILOT_WORKSPACE_FOLDER")
 
 
