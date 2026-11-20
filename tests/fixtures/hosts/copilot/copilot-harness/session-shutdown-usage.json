@@ -1,0 +1,36 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": "local_token_usage",
+  "captured_on": "2026-05-19..2026-07-13",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (events.jsonl). 321 événements `session.shutdown` portent `modelMetrics` (par modèle : requests.count/cost, usage.inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens/reasoningTokens) et `totalPremiumRequests` ; chaque `assistant.message` porte `outputTokens`.",
+  "version_note": "Version de l'hôte non établie (copilotVersion=\"unknown\", journaux VS Code de la période non conservés). Statut : non vérifié, faute de version.",
+  "wire_caveat": "Canal = journal de session local de l'hôte, pas une charge de hook ni une sortie de commande.",
+  "observed": {"shutdown_events": 321},
+  "redaction": "valeurs numériques et liste de fichiers remplacées ; clés et types conservés.",
+  "events": [
+    {
+      "type": "session.shutdown",
+      "data": {
+        "shutdownType": "routine",
+        "totalPremiumRequests": 7.5,
+        "totalApiDurationMs": 100000,
+        "sessionStartTime": 1781000000000,
+        "codeChanges": {"linesAdded": 0, "linesRemoved": 0, "filesModified": []},
+        "modelMetrics": {
+          "claude-sonnet-4.6": {
+            "requests": {"count": 10, "cost": 1},
+            "usage": {"inputTokens": 1000, "outputTokens": 100, "cacheReadTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0}
+          }
+        },
+        "currentModel": "claude-sonnet-4.6",
+        "currentTokens": 50000,
+        "systemTokens": 10000,
+        "conversationTokens": 30000,
+        "toolDefinitionsTokens": 10000
+      }
+    }
+  ]
+}

@@ -124,9 +124,26 @@ de modèle réel n'a été fait. Ce qui est chargé par l'hôte (instructions vi
 été vérifié avec `opencode debug config|agent|skill` et une requête réelle vers le
 fournisseur factice ; ce qui ne l'est pas : le plugin sur les sous-agents, une
 table `permission` (un refus de lecture en glob n'a pas arrêté une lecture), les
-autres événements de cycle de vie, un MCP effectivement lancé. Copilot (VS Code), Codex, Cursor et Gemini n'ont pas été
+autres événements de cycle de vie, un MCP effectivement lancé. Codex, Cursor et Gemini n'ont pas été
 lancés : leurs manifestes disent « non vérifié » et la capture reste à faire au
-poste. Les fixtures remplacent les chemins personnels, l'utilisateur et les
+poste.
+
+Copilot (VS Code) n'a pas été lancé non plus, mais ses journaux locaux ont été
+relus le 20 novembre 2026 (#1280). Le journal de session du harness **Copilot**
+(mai à juillet 2026) consigne les entrées de hooks en camelCase
+(`sessionId`, `toolName`/`toolArgs`, `toolResult`, `initialPrompt`…), et un
+`preToolUse` y porte une **liste** `toolCalls` (jusqu'à dix appels par
+invocation). Les sessions de chat du harness **Local** (avril 2026) ne gardent
+que les sorties affichées (`systemMessage`, `stopReason`). Ni sortie de garde
+acceptée, ni refus, ni version d'hôte (`copilotVersion: "unknown"`) n'y figurent :
+les fixtures sont rattachées au manifeste, mais toutes les capacités restent
+« non vérifié ». Les hooks lisent désormais cette forme camelCase (un lot de
+plusieurs appels n'est pas réduit à son premier), et
+`grimoire.hosts.copilot_wire.detect_dialect` dit ce que la forme permet
+d'affirmer : camelCase signifie harness Copilot ; snake_case peut venir du
+harness Local comme d'un hook Copilot déclaré en PascalCase.
+
+Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
 ou jeton.
 

@@ -1,0 +1,32 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "local",
+  "capability": null,
+  "captured_on": "2026-04-04..2026-04-23",
+  "read_on": "2026-11-20",
+  "source": "sessions de chat de VS Code (fichiers chatSessions/*.jsonl du stockage d'espace de travail), parties de réponse `{\"kind\": \"hook\"}`. Ce sont les sorties de hook que l'hôte a affichées, pas les charges reçues par les hooks : aucune entrée de hook du harness Local n'est journalisée là.",
+  "version_note": "Version de l'hôte non établie : ces sessions ne portent pas de version et les journaux de VS Code d'avril 2026 n'existent plus.",
+  "observed": {
+    "parts": {
+      "PreToolUse/systemMessage": 3048,
+      "PostToolUse/systemMessage": 2820,
+      "PostToolUse/stopReason": 1,
+      "SessionStart/systemMessage": 39,
+      "UserPromptSubmit/systemMessage": 21,
+      "UserPromptSubmit/stopReason": 3
+    },
+    "subagent_marker": "une partie peut porter `subAgentInvocationId` (hook déclenché dans un sous-agent)",
+    "stop_reason_prefix": "A hook prevented chat from continuing. Please check the GitHub Copilot Chat Hooks output channel for more details.",
+    "deny_observed": false,
+    "inputs_observed": false
+  },
+  "redaction": "messages remplacés ; clés, types et préfixe fixe de l'hôte conservés.",
+  "parts": [
+    {"kind": "hook", "hookType": "SessionStart", "systemMessage": "<MESSAGE>"},
+    {"kind": "hook", "hookType": "PreToolUse", "systemMessage": "<MESSAGE>"},
+    {"kind": "hook", "hookType": "PostToolUse", "systemMessage": "<MESSAGE>"},
+    {"kind": "hook", "hookType": "UserPromptSubmit", "systemMessage": "<MESSAGE>", "subAgentInvocationId": "call_REDACTED_01"},
+    {"kind": "hook", "hookType": "UserPromptSubmit", "stopReason": "A hook prevented chat from continuing. Please check the GitHub Copilot Chat Hooks output channel for more details. \nError message: <MESSAGE>"}
+  ]
+}

@@ -174,7 +174,12 @@ COPILOT_PROFILE = HostProfile(
         "Copilot CLI (`copilot --acp`) est en preview : le protocole peut changer. "
         "Copilot dans VS Code n'a aucune interface externe : le chat écrit alors dans le kanban."
     ),
-    notes="No declarative permission table: permissions are enforced by the pre_tool_use hook instead.",
+    notes=(
+        "No declarative permission table: permissions are enforced by the pre_tool_use hook instead. "
+        "Contrat réel (#1280, P1-0) : entrées de hooks du harness Copilot relues dans son journal de session "
+        "(camelCase, preToolUse en liste `toolCalls`), sorties affichées du harness Local ; aucun refus observé, "
+        "version d'hôte inconnue : rien n'est vérifié (voir `grimoire.hosts.copilot_wire`)."
+    ),
 )
 
 CODEX_PROFILE = HostProfile(
@@ -736,11 +741,45 @@ _OPENCODE_CONTRACT = HostContract(
     },
 )
 
+_U = ContractStatus.UNVERIFIED
+
+#: Copilot (P1-0, #1280) : traces réelles relues le 2026-11-20 — journal de session
+#: du harness Copilot dans VS Code (2026-05..07) et sessions de chat du harness Local
+#: (2026-04). Elles montrent des entrées de hooks et des journaux d'usage, mais
+#: aucune sortie de hook acceptée ni aucun refus, et aucune version d'hôte
+#: (``copilotVersion: "unknown"``). Les fixtures sont rattachées, rien n'est vérifié :
+#: ``host_version`` reste vide, donc :func:`contract_for` ne retient jamais rien.
+_COPILOT_CONTRACT = HostContract(
+    host_id=HostId.GITHUB_COPILOT,
+    host_version="",
+    evidence={
+        **{key: ContractEvidence() for key in CONTRACT_KEYS},
+        "pretooluse_deny": ContractEvidence(
+            _U,
+            (
+                "copilot/copilot-harness/pretooluse-single.json",
+                "copilot/copilot-harness/pretooluse-batch.json",
+            ),
+            "journal de session (hook.start.data.input, preToolUse)",
+        ),
+        "subagent_model": ContractEvidence(
+            _U,
+            ("copilot/copilot-harness/subagent-model.json",),
+            "journal de session (assistant.message.model, rattaché par parentToolCallId)",
+        ),
+        "local_token_usage": ContractEvidence(
+            _U,
+            ("copilot/copilot-harness/session-shutdown-usage.json",),
+            "journal de session (session.shutdown.modelMetrics)",
+        ),
+    },
+)
+
 _CONTRACTS: dict[HostId, HostContract] = {
     HostId.CLAUDE_CODE_CLI: _CLAUDE_CODE_CONTRACT,
-    # Copilot, Codex, Cursor, Gemini : aucune capture (K0 du 2026-10-16, poste sans
+    # Codex, Cursor, Gemini : aucune capture (K0 du 2026-10-16, poste sans
     # opérateur). Tout est « non vérifié », donc faux, donc hôte non fencé.
-    HostId.GITHUB_COPILOT: _unverified_contract(HostId.GITHUB_COPILOT),
+    HostId.GITHUB_COPILOT: _COPILOT_CONTRACT,
     HostId.CODEX: _unverified_contract(HostId.CODEX),
     HostId.CURSOR: _unverified_contract(HostId.CURSOR),
     HostId.GEMINI_CLI: _unverified_contract(HostId.GEMINI_CLI),

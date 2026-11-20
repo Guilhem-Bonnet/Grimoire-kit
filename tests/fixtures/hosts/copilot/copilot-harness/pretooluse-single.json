@@ -1,0 +1,64 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": "pretooluse_deny",
+  "captured_on": "2026-06-10..2026-06-16",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (fichier events.jsonl du dossier de session, enregistrement `hook.start`, champ `data.input` ; session.start : producer=copilot-agent, vscode.metadata.json : origin=vscode). 396 entrées preToolUse, toutes dans un même projet gouverné.",
+  "version_note": "Version de l'hôte non établie : session.start porte copilotVersion=\"unknown\" et les journaux de VS Code de cette période ont tourné (les plus anciens conservés datent de 2026-11 : Copilot Chat 0.72.0, VS Code 1.144.0).",
+  "wire_caveat": "Les hooks du projet étaient déclarés en PascalCase (`PreToolUse`, clés `command`/`timeout`). La référence GitHub dit qu'un événement PascalCase reçoit une charge snake_case sur stdin : ce journal montre l'entrée telle que l'hôte la consigne, pas les octets que la commande a lus.",
+  "observed": {
+    "hook_end_success": true,
+    "hook_output": "non journalisée (hook.end ne porte que `success`)",
+    "deny_observed": false,
+    "tool_names_seen_in_toolCalls": ["bash", "edit", "view", "report_intent", "create", "sql", "task_complete", "ask_user", "grep", "read_bash", "exit_plan_mode", "github-create_pull_request", "github-pull_request_read"]
+  },
+  "redaction": "identifiants de session et d'appel, chemins, commandes et contenus remplacés ; clés, types, noms d'outils et forme des arguments conservés.",
+  "payloads": [
+    {
+      "hookType": "preToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "cwd": "<PROJECT>",
+        "toolCalls": [
+          {"id": "toolu_REDACTED_01", "name": "bash", "args": "{\"command\":\"git status\",\"description\":\"<DESCRIPTION>\"}"}
+        ]
+      },
+      "expect": {"event": "pre_tool_use", "tool_name": "bash", "tool_input_keys": ["command", "description"]}
+    },
+    {
+      "hookType": "preToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "cwd": "<PROJECT>",
+        "toolCalls": [
+          {"id": "toolu_REDACTED_02", "name": "view", "args": "{\"path\":\"<PROJECT>/README.md\",\"view_range\":[1,40]}"}
+        ]
+      },
+      "expect": {"event": "pre_tool_use", "tool_name": "view", "tool_input_keys": ["path", "view_range"]}
+    },
+    {
+      "hookType": "preToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "cwd": "<PROJECT>",
+        "toolCalls": [
+          {"id": "toolu_REDACTED_03", "name": "edit", "args": "{\"path\":\"<PROJECT>/src/app.py\",\"old_str\":\"<OLD>\",\"new_str\":\"<NEW>\"}"}
+        ]
+      },
+      "expect": {"event": "pre_tool_use", "tool_name": "edit", "tool_input_keys": ["new_str", "old_str", "path"]}
+    },
+    {
+      "hookType": "preToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "cwd": "<PROJECT>",
+        "toolCalls": [
+          {"id": "toolu_REDACTED_04", "name": "create", "args": "{\"path\":\"<PROJECT>/notes.md\",\"file_text\":\"<CONTENT>\"}"}
+        ]
+      },
+      "expect": {"event": "pre_tool_use", "tool_name": "create", "tool_input_keys": ["file_text", "path"]}
+    }
+  ]
+}

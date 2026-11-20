@@ -25,7 +25,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.standard_state import active_task_id, suspended_state_writes
-from grimoire.hosts import gemini_wire
+from grimoire.hosts import copilot_wire, gemini_wire
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (
     ADVISORY_PRE_TOOL_DECISIONS,
@@ -86,6 +86,10 @@ def parse_event(name: str, host_id: HostId | None = None) -> HookEvent | None:
     for wire, event in _EVENT_BY_WIRE_NAME.items():
         if wire.replace("_", "") == compact:
             return event
+    # Copilot écrit ``userPromptSubmitted`` et ``agentStop`` (dialecte camelCase).
+    copilot = copilot_wire.event_from_alias(compact)
+    if copilot is not None:
+        return copilot
     try:
         return HookEvent(key)
     except ValueError:
@@ -220,6 +224,15 @@ def normalize_input(
     stop_active = bool(_pick(payload, "stop_hook_active", "stopHookActive", default=False))
     tool_name = str(_pick(payload, "tool_name", "toolName", "tool", default="") or "")
     tool_input = _as_dict(_pick(payload, "tool_input", "toolInput", "input", "arguments"))
+    if not tool_name:
+        # Dialecte camelCase de Copilot : ``toolCalls`` (un seul appel) ou
+        # ``toolName`` déjà lu ci-dessus ; un lot de plusieurs appels reste sans nom.
+        call = copilot_wire.single_tool_call(payload)
+        if call is not None:
+            tool_name, tool_input = call
+    elif not tool_input and "toolArgs" in payload:
+        # ``toolArgs`` : objet ou chaîne JSON selon l'événement (journal de l'hôte).
+        tool_input = copilot_wire.parse_tool_args(payload["toolArgs"])
     if host_id is HostId.GEMINI_CLI:
         # Gemini names its tools `write_file`/`replace`/`run_shell_command`; the
         # policy engine classifies on the kit's classes. On a pending tool call,
@@ -234,7 +247,7 @@ def normalize_input(
         project_root=resolve_project_root(payload, project_root),
         tool_name=tool_name,
         tool_input=tool_input,
-        tool_response=_as_dict(_pick(payload, "tool_response", "toolResponse", "result")),
+        tool_response=_as_dict(_pick(payload, "tool_response", "toolResponse", "toolResult", "result")),
         prompt=str(_pick(payload, "prompt", "userPrompt", "user_prompt", default="") or ""),
         # Issue #716 : ``agent_type`` (session ouverte par ``claude --agent``,
         # ou événement d'un sous-agent) est l'identité que l'hôte fournit

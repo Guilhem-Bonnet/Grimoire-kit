@@ -1,0 +1,62 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "harness": "copilot",
+  "capability": null,
+  "captured_on": "2026-06-04..2026-07-13",
+  "read_on": "2026-11-20",
+  "source": "journal de session de Copilot dans VS Code (events.jsonl, `hook.start`, `data.input`). 8775 entrées postToolUse ; `toolArgs` est un objet, sauf pour apply_patch (chaîne) et 3 appels bash (chaîne) ; resultType toujours \"success\".",
+  "version_note": "Version de l'hôte non établie (copilotVersion=\"unknown\", journaux VS Code de la période non conservés).",
+  "wire_caveat": "Une partie des projets déclarait ses hooks en PascalCase : la charge reçue sur stdin peut différer de celle journalisée.",
+  "observed": {
+    "hook_end_success": true,
+    "hook_output": "non journalisée",
+    "tool_names_seen": ["bash", "view", "edit", "report_intent", "sql", "read_bash", "create", "grep", "task_complete", "apply_patch", "web_fetch", "stop_bash", "ask_user", "rg", "task", "glob", "write_bash", "exit_plan_mode", "skill", "list_bash", "<serveur-mcp>-<outil>"],
+    "task_args_keys": [["agent_type", "description", "name", "prompt"], ["agent_type", "description", "model", "name", "prompt"]]
+  },
+  "redaction": "identifiants, chemins, horodatages, commandes, sorties et contenus remplacés ; clés, types et noms d'outils conservés.",
+  "payloads": [
+    {
+      "hookType": "postToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "timestamp": 1781000000000,
+        "cwd": "<PROJECT>",
+        "toolName": "bash",
+        "toolArgs": {"command": "git status", "description": "<DESCRIPTION>", "initial_wait": 30},
+        "toolResult": {
+          "textResultForLlm": "<OUTPUT>",
+          "resultType": "success",
+          "sessionLog": "<LOG>",
+          "toolTelemetry": {"metrics": {}, "properties": {}},
+          "binaryResultsForLlm": []
+        }
+      },
+      "expect": {"event": "post_tool_use", "tool_name": "bash", "tool_input_keys": ["command", "description", "initial_wait"], "tool_response_keys": ["binaryResultsForLlm", "resultType", "sessionLog", "textResultForLlm", "toolTelemetry"]}
+    },
+    {
+      "hookType": "postToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "timestamp": 1781000000000,
+        "cwd": "<PROJECT>",
+        "toolName": "bash",
+        "toolArgs": "{\"command\":\"git status\",\"description\":\"<DESCRIPTION>\"}",
+        "toolResult": {"textResultForLlm": "<OUTPUT>", "resultType": "success", "toolTelemetry": {}}
+      },
+      "expect": {"event": "post_tool_use", "tool_name": "bash", "tool_input_keys": ["command", "description"], "tool_response_keys": ["resultType", "textResultForLlm", "toolTelemetry"]}
+    },
+    {
+      "hookType": "postToolUse",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c1",
+        "timestamp": 1781000000000,
+        "cwd": "<PROJECT>",
+        "toolName": "task",
+        "toolArgs": {"agent_type": "<AGENT>", "description": "<DESCRIPTION>", "model": "<MODEL>", "name": "<NAME>", "prompt": "<PROMPT>"},
+        "toolResult": {"textResultForLlm": "<OUTPUT>", "resultType": "success", "sessionLog": "<LOG>", "toolTelemetry": {}}
+      },
+      "expect": {"event": "post_tool_use", "tool_name": "task", "tool_input_keys": ["agent_type", "description", "model", "name", "prompt"], "tool_response_keys": ["resultType", "sessionLog", "textResultForLlm", "toolTelemetry"]}
+    }
+  ]
+}
