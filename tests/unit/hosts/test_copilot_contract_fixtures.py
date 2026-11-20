@@ -86,7 +86,7 @@ def test_batched_tool_calls_are_all_listed_and_not_reduced_to_the_first(tmp_path
     assert [name for name, _ in tool_calls(payload)] == case["expect"]["tool_calls"]
     assert single_tool_call(payload) is None
     hook = normalize_input(payload, event=HookEvent.PRE_TOOL_USE, project_root=tmp_path, host_id=HostId.GITHUB_COPILOT)
-    # Un lot n'est pas jugé sur son premier appel ; la garde par appel est un lot ultérieur de #1280.
+    # Un lot n'est pas réduit à son premier appel : `run_hook` juge chaque appel (test_copilot_batch_guard.py).
     assert hook.tool_name == ""
 
 

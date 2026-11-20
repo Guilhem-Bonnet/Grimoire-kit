@@ -137,11 +137,18 @@ invocation). Les sessions de chat du harness **Local** (avril 2026) ne gardent
 que les sorties affichées (`systemMessage`, `stopReason`). Ni sortie de garde
 acceptée, ni refus, ni version d'hôte (`copilotVersion: "unknown"`) n'y figurent :
 les fixtures sont rattachées au manifeste, mais toutes les capacités restent
-« non vérifié ». Les hooks lisent désormais cette forme camelCase (un lot de
-plusieurs appels n'est pas réduit à son premier), et
+« non vérifié ». Les hooks lisent désormais cette forme camelCase, et
 `grimoire.hosts.copilot_wire.detect_dialect` dit ce que la forme permet
 d'affirmer : camelCase signifie harness Copilot ; snake_case peut venir du
 harness Local comme d'un hook Copilot déclaré en PascalCase.
+
+La garde avant outil juge **chaque appel** d'un lot et rend le verdict le plus
+restrictif : un refus l'emporte sur une demande, une demande sur une
+autorisation, et la raison nomme l'appel en cause. Elle échoue fermé : un appel
+qu'elle ne sait pas lire (nom absent, arguments illisibles) est refusé, et un
+`PreToolUse` sans nom d'outil exploitable n'est jamais autorisé, quel que soit
+l'hôte. Une réécriture d'arguments ne s'applique pas à un appel isolé d'un lot :
+la garde demande alors la décision à l'utilisateur.
 
 Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
