@@ -251,7 +251,11 @@ def test_main_rend_1_et_dit_comment_repartir(repo: Path, capsys: pytest.CaptureF
     ("body", "expected"),
     [
         ("- a\n", "- a (#9)\n"),
-        ("- a (#3)\n", "- a (#3)\n"),
+        ("- a (#9)\n", "- a (#9)\n"),
+        ("- a (#1280)\n", "- a (#1280) (#9)\n"),
+        ("- a (#1280) (#9)\n", "- a (#1280) (#9)\n"),
+        ("- a (#3)\n- b\n- c (#9)\n", "- a (#3) (#9)\n- b (#9)\n- c (#9)\n"),
+        ("- a\n  suite (#1280)\n", "- a\n  suite (#1280) (#9)\n"),
         ("- a\n  suite\n- b\n", "- a\n  suite (#9)\n- b (#9)\n"),
         ("Texte libre\n- a\n", "Texte libre\n- a (#9)\n"),
     ],
