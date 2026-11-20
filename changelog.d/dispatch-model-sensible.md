@@ -1,0 +1,1 @@
+- fix(hosts): la décision dispatch-model s'abstient quand la description d'un appel `Agent` sans `model` parle d'une garde, d'un hook, de la politique, de la CI, de la sécurité ou d'une faille, au lieu d'y deviner `haiku` ; le vocabulaire vient de `missions/sensitive_route.py` (`mentions_sensitive_topic`), la classe V0/V1 d'une tâche réclamée prime toujours

@@ -91,7 +91,7 @@ def _set_policy(root: Path, text: str) -> None:
 
 
 def test_a_research_call_without_model_gets_haiku_with_the_full_input(project: Path) -> None:
-    tool_input = {"description": "Find hook emitters", "prompt": "Locate the code.", "subagent_type": "general-purpose"}
+    tool_input = {"description": "Find the emitters", "prompt": "Locate the code.", "subagent_type": "general-purpose"}
     rendered, decision = _run(project, tool_input)
     specific = rendered["hookSpecificOutput"]
     assert specific["permissionDecision"] == "allow"
@@ -132,7 +132,7 @@ def test_the_class_of_the_claimed_task_wins_over_the_heuristic(tmp_path: Path) -
     expected = advice["recommended_model"]
     assert expected  # V0 ou V1 : un modèle existe
     # La description contredit la classe : l'heuristique dirait l'autre palier.
-    description = "Revue du diff" if expected == "haiku" else "Find hook emitters"
+    description = "Revue du diff" if expected == "haiku" else "Find the emitters"
     assert dm.heuristic_model(description) not in (None, expected)
 
     rendered, decision = _run(tmp_path, {"description": description, "prompt": "x"}, session=SESSION)
@@ -145,7 +145,7 @@ def test_the_class_of_the_claimed_task_wins_over_the_heuristic(tmp_path: Path) -
 def test_a_claimed_v2_task_imposes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """V2 : la politique veut le modèle de la session, l'heuristique n'est pas tentée."""
     monkeypatch.setattr(dm, "_class_model", lambda _hook: (None, {"task_id": "GAO-x-001", "task_class": "V2"}))
-    rendered, decision = _run(tmp_path, {"description": "Find hook emitters", "prompt": "x"})
+    rendered, decision = _run(tmp_path, {"description": "Find the emitters", "prompt": "x"})
     assert rendered == {}
     assert decision.abstain
 
@@ -163,7 +163,7 @@ def test_a_claimed_v2_task_from_the_ledger_imposes_nothing(tmp_path: Path) -> No
     service.claim(tid, "claude", host="claude-code-cli")
     service.transition(tid, TaskState.RUNNING, "claude")
     service.attach_session(tid, SESSION, session_host="claude-code-cli", actor="claude")
-    rendered, decision = _run(tmp_path, {"description": "Find hook emitters", "prompt": "x"}, session=SESSION)
+    rendered, decision = _run(tmp_path, {"description": "Find the emitters", "prompt": "x"}, session=SESSION)
     assert rendered == {}
     assert decision.abstain
 
@@ -181,13 +181,13 @@ def test_an_unrecognised_or_writing_call_is_left_alone(project: Path) -> None:
 
 
 def test_an_explicit_model_is_never_replaced(project: Path) -> None:
-    rendered, decision = _run(project, {"description": "Find hook emitters", "prompt": "x", "model": "opus"})
+    rendered, decision = _run(project, {"description": "Find the emitters", "prompt": "x", "model": "opus"})
     assert rendered == {}
     assert decision.abstain and decision.updated_input is None
 
 
 def test_a_fork_is_left_intact(project: Path) -> None:
-    rendered, _ = _run(project, {"description": "Find hook emitters", "prompt": "x", "subagent_type": "fork"})
+    rendered, _ = _run(project, {"description": "Find the emitters", "prompt": "x", "subagent_type": "fork"})
     assert rendered == {}
 
 
@@ -206,24 +206,20 @@ def test_a_user_level_persona_that_declares_its_model_keeps_it(project: Path, tm
     agents = home / ".claude" / "agents"
     agents.mkdir(parents=True)
     (agents / "reviewer.md").write_text("---\nname: reviewer\nmodel: sonnet\n---\nCorps\n", encoding="utf-8")
-    rendered, decision = _run(
-        project, {"description": "Find hook emitters", "prompt": "x", "subagent_type": "reviewer"}
-    )
+    rendered, decision = _run(project, {"description": "Find the emitters", "prompt": "x", "subagent_type": "reviewer"})
     assert rendered == {}
     assert decision.abstain
 
 
 def test_a_plugin_agent_is_left_intact(project: Path) -> None:
-    rendered, _ = _run(
-        project, {"description": "Find hook emitters", "prompt": "x", "subagent_type": "myplugin:finder"}
-    )
+    rendered, _ = _run(project, {"description": "Find the emitters", "prompt": "x", "subagent_type": "myplugin:finder"})
     assert rendered == {}
 
 
 @pytest.mark.parametrize("value", ["off", "false", "no", "désactivé"])
 def test_policy_off_leaves_the_call_intact(project: Path, value: str) -> None:
     _set_policy(project, f"dispatch:\n  impose_model: {value}\n")
-    rendered, _ = _run(project, {"description": "Find hook emitters", "prompt": "x"})
+    rendered, _ = _run(project, {"description": "Find the emitters", "prompt": "x"})
     assert rendered == {}
 
 
@@ -261,7 +257,7 @@ def test_malformed_input_never_crashes_nor_blocks(project: Path, tool_input: Any
 
 
 def test_a_malformed_subagent_type_is_ignored_not_fatal(project: Path) -> None:
-    rendered, _ = _run(project, {"subagent_type": {"a": 1}, "description": "Find hook emitters"})
+    rendered, _ = _run(project, {"subagent_type": {"a": 1}, "description": "Find the emitters"})
     assert rendered["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert rendered["hookSpecificOutput"]["updatedInput"]["model"] == "haiku"
 
@@ -271,7 +267,7 @@ def test_an_internal_error_abstains(project: Path, monkeypatch: pytest.MonkeyPat
         raise RuntimeError("panne simulée")
 
     monkeypatch.setattr(dm, "impose_model_enabled", boom)
-    rendered, decision = _run(project, {"description": "Find hook emitters", "prompt": "x"})
+    rendered, decision = _run(project, {"description": "Find the emitters", "prompt": "x"})
     assert rendered == {}
     assert decision.abstain
     assert "panne simulée" in decision.detail["error"]
@@ -319,7 +315,13 @@ def test_an_import_failure_lets_the_call_through(capsys: pytest.CaptureFixture[s
 @pytest.mark.parametrize(
     ("description", "prompt", "expected"),
     [
-        ("Find hook emitters", "", "haiku"),
+        ("Find the emitters", "", "haiku"),
+        ("Lire les fichiers de config", "", "haiku"),
+        ("Garde : Claude-only sous Copilot, grep/glob", "", None),
+        ("Relecture adversariale PR 12", "", None),
+        ("Corriger le hook", "", None),
+        ("Cherche la faille", "", None),
+        ("CI : lire les logs", "", None),
         ("Mesure du coût", "", "haiku"),
         ("Lis le changelog", "", "haiku"),
         ("Audit sécurité", "", None),
@@ -335,6 +337,35 @@ def test_an_import_failure_lets_the_call_through(capsys: pytest.CaptureFixture[s
 )
 def test_heuristic(description: str, prompt: str, expected: str | None) -> None:
     assert dm.heuristic_model(description, prompt) == expected
+
+
+SENSITIVE = (
+    "Garde : Claude-only sous Copilot, grep/glob",
+    "Relecture adversariale PR 1293",
+    "Corriger le hook",
+    "Chercher la faille",
+    "CI : lire les logs",
+)
+
+
+@pytest.mark.parametrize("description", SENSITIVE)
+@pytest.mark.parametrize("host", [HostId.CLAUDE_CODE_CLI, HostId.GITHUB_COPILOT])
+def test_a_sensitive_description_abstains_under_both_hosts(project: Path, description: str, host: HostId) -> None:
+    """#1293 : garde, hook, politique, CI, faille — jamais un palier faible deviné sur la description."""
+    tool = "Agent" if host == HostId.CLAUDE_CODE_CLI else "task"
+    hook = HookInput(
+        event=HookEvent.PRE_TOOL_USE,
+        project_root=project,
+        tool_name=tool,
+        tool_input={"description": description, "prompt": "x"},
+        host=host.value,
+    )
+    assert dm.decide_dispatch_model(hook).abstain
+
+
+def test_a_plain_research_description_still_gets_haiku_under_both_hosts(project: Path) -> None:
+    rendered, _ = _run(project, {"description": "Lire les fichiers de config", "prompt": "x"})
+    assert rendered["hookSpecificOutput"]["updatedInput"]["model"] == "haiku"
 
 
 # ── émission ───────────────────────────────────────────────────────────────

@@ -24,7 +24,10 @@ Cette décision rend la règle mécanique, et seulement là où elle est sûre :
 6. Sans classe calculée, une heuristique sur la description de l'appel (voir
    :func:`heuristic_model`) : recherche, lecture ou mesure → ``haiku`` ; revue
    ou analyse → ``sonnet`` ; écriture, jugement fort (audit, sécurité,
-   architecture, plan, conception) ou rien de reconnu → rien n'est imposé.
+   architecture, plan, conception), sujet sensible (garde, hook, politique, CI,
+   faille — le vocabulaire de ``missions.sensitive_route``) ou rien de reconnu →
+   rien n'est imposé. Une tâche réclamée de classe V0/V1 prime sur cette
+   abstention : sa classe décide, même si la description cite une garde.
 
 Le modèle imposé est rendu en ``updatedInput`` (l'entrée complète, l'hôte la
 remplace sans fusionner) avec ``permissionDecision: allow`` ; l'agent principal
@@ -50,6 +53,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.hosts.decisions._shared import Decision, HookInput
+from grimoire.missions.sensitive_route import mentions_sensitive_topic
 
 #: Identifiant de la décision, référencé par l'émetteur Claude Code.
 DECISION_ID = "grimoire.dispatch-model"
@@ -216,6 +220,8 @@ def heuristic_model(description: str, prompt: str = "") -> str | None:
     text = (description or "").strip() or (prompt or "")[:_MAX_HEURISTIC_CHARS]
     words = _words(text[:_MAX_HEURISTIC_CHARS])
     if not words or _hits(words, _WRITE_STEMS) or _hits(words, _STRONG_JUDGMENT_STEMS):
+        return None
+    if mentions_sensitive_topic(text[:_MAX_HEURISTIC_CHARS]):
         return None
     if _hits(words, _REVIEW_STEMS):
         return "sonnet"

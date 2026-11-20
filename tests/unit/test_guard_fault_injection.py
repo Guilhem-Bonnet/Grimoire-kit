@@ -401,7 +401,7 @@ def _task_completed(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
 
 def _pre_dispatch_model(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     _governed(root)
-    tool_input = {"description": "Find hook emitters", "prompt": "x", "subagent_type": "general-purpose"}
+    tool_input = {"description": "Find the emitters", "prompt": "x", "subagent_type": "general-purpose"}
 
     def measure(fault: Fault) -> str:
         with fault:

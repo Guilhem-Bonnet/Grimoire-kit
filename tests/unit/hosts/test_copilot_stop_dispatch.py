@@ -158,7 +158,7 @@ def _set_models(root: Path, body: str) -> None:
 _MAPPED = (
     "dispatch:\n  impose_model: on\n  copilot_models:\n    haiku: claude-haiku-4.5\n    sonnet: claude-sonnet-4.5\n"
 )
-_RESEARCH = {"description": "Find hook emitters", "prompt": "Locate the code."}
+_RESEARCH = {"description": "Find the emitters", "prompt": "Locate the code."}
 
 
 def _camel_task(root: Path, args: dict[str, Any], *, name: str = "task") -> dict[str, Any]:
