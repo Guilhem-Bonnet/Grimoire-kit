@@ -115,11 +115,15 @@ def _append(project_root: Path, task_id: str, entry: dict[str, Any]) -> None:
 def _held_claim(project_root: Path, task_id: str) -> Any:
     """Le claim vivant de *task_id* (``claimed``/``running``, bail non expiré), ``None`` sinon ou sur erreur."""
     try:
-        from grimoire.core.standard_state import LEDGER_RELPATH
+        from grimoire.core.standard_state import ledger_location
         from grimoire.missions.ledger import MissionLedger
         from grimoire.missions.schemas import TaskState
 
-        events = project_root.resolve() / LEDGER_RELPATH / "events.jsonl"
+        # #1259 : le ledger du projet d'origine ; invérifiable, aucun claim — donc aucun contournement.
+        location = ledger_location(project_root)
+        if location.root is None:
+            return None
+        events = location.root / "events.jsonl"
         if not events.is_file():
             return None
         task = MissionLedger(events.parent).get_task(task_id)

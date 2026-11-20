@@ -22,14 +22,27 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from grimoire.core.standard_state import LEDGER_RELPATH
+from grimoire.core.standard_state import ledger_location
 
 __all__ = ["self_view_context", "takeover_notices"]
 
 
+def _ledger_dir(project_root: Path) -> Path | None:
+    """Le ledger à lire (#1259 : celui du projet d'origine dans un worktree de tâche), ``None`` s'il n'y en a pas.
+
+    Invérifiable, la vue de soi se tait : c'est une ligne d'état, pas une garde — la reprise de la
+    tâche par un autre titulaire est refusée par le frein du bail, qui rend ``ask`` dans ce cas.
+    """
+    location = ledger_location(project_root)
+    if location.root is None or not (location.root / "events.jsonl").is_file():
+        return None
+    return location.root
+
+
 def self_view_context(project_root: Path, task_id: str, session_id: str = "", *, now: datetime | None = None) -> str:
     root = project_root.resolve()
-    if not (root / LEDGER_RELPATH / "events.jsonl").is_file():
+    ledger_dir = _ledger_dir(project_root)
+    if ledger_dir is None:
         return ""
     try:
         from grimoire.missions.ledger import MissionLedger
@@ -43,7 +56,7 @@ def self_view_context(project_root: Path, task_id: str, session_id: str = "", *,
         from grimoire.missions.schemas import TaskState
 
         moment = now or datetime.now(UTC)
-        ledger = MissionLedger(root / LEDGER_RELPATH)
+        ledger = MissionLedger(ledger_dir)
         task = ledger.get_task(task_id)
         if task is None or task.claim is None or task.status not in (TaskState.CLAIMED, TaskState.RUNNING):
             return ""
@@ -84,13 +97,13 @@ def takeover_notices(project_root: Path, session_id: str) -> str:
     périmé) ne comptent pas. Best-effort : ``""`` sur tout échec.
     """
     session = session_id.strip()
-    root = project_root.resolve()
-    if not session or not (root / LEDGER_RELPATH / "events.jsonl").is_file():
+    ledger_dir = _ledger_dir(project_root)
+    if not session or ledger_dir is None:
         return ""
     try:
         from grimoire.missions.ledger import LEASE_LOST_KEY, SESSION_ATTACHED_EVENT, MissionLedger
 
-        ledger = MissionLedger(root / LEDGER_RELPATH)
+        ledger = MissionLedger(ledger_dir)
         rejected = ledger.rejected_events()
         holder: dict[str, str] = {}
         taken: dict[str, int] = {}
