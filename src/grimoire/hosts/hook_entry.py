@@ -29,6 +29,12 @@ REMEDY = (
 #: Noms de l'événement ``PreToolUse`` selon l'hôte (Claude Code, Copilot, Gemini CLI).
 _GUARD_EVENTS = frozenset({"pretooluse", "pre_tool_use", "beforetool"})
 
+#: Décisions ``PreToolUse`` consultatives (``--decision``), émises sans
+#: ``onFailure: block`` : leur panne laisse passer l'appel inchangé, jamais un
+#: refus de garde — elles n'ont rien à garder. Source unique, relue par
+#: :mod:`grimoire.hosts.decisions` et :mod:`grimoire.hosts.runtime`.
+ADVISORY_PRE_TOOL_DECISIONS = frozenset({"grimoire.dispatch-model"})
+
 
 def guard_failure_payload(cause: str) -> dict[str, Any]:
     """Le refus ``PreToolUse`` d'une garde en panne, au format lu par Claude Code et Copilot."""
@@ -65,6 +71,10 @@ def _event_name(args: list[str], raw: str) -> str:
 def import_failure(args: list[str], raw: str, cause: str) -> int:
     """Ce que rend le hook quand le runtime ne s'importe pas : refus sur la garde, message ailleurs."""
     host = _option(args, "--host").lower()
+    if _option(args, "--decision") in ADVISORY_PRE_TOOL_DECISIONS:
+        # Rien à garder : l'appel passe tel quel, sans bruit.
+        sys.stdout.write("{}")
+        return 0
     guard = _event_name(args, raw).lower() in _GUARD_EVENTS
     message = f"[Grimoire] hook indisponible ({cause}). {REMEDY}"
     if host == "gemini":

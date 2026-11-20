@@ -151,7 +151,10 @@ def test_the_claude_emitter_makes_only_the_pretooluse_guard_fail_closed(governed
     for event, entries in hooks.items():
         for entry in entries:
             for handler in entry["hooks"]:
-                if event == "PreToolUse":
+                if "--decision grimoire.dispatch-model" in handler["command"]:
+                    # Consultatif : imposer un modèle n'a rien à garder, sa panne laisse passer l'appel.
+                    assert "onFailure" not in handler, json.dumps(handler)
+                elif event == "PreToolUse":
                     assert handler["onFailure"] == "block", json.dumps(handler)
                 else:
                     assert "onFailure" not in handler, f"{event} : {json.dumps(handler)}"

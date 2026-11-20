@@ -137,6 +137,38 @@ sous-agent doit clore sa réponse par un bloc ```grimoire-uncertainties``` ;
 Copilot documente la même règle sans nom de modèle dans son README de
 surface, pour la raison ci-dessus.
 
+**La politique de dispatch est appliquée, pas seulement écrite.** Sous Claude
+Code, `grimoire host sync` (et donc `grimoire up`) émet un hook `PreToolUse`
+consultatif sur l'outil `Agent` (et `Task`, son ancien nom). Quand un appel
+omet `model`, le hook le complète :
+
+1. tâche réclamée de classe V0 ou V1 : le `recommended_model` de la classe,
+   le même que rendent `task_claim` et `task_context` ; classe V2 : rien n'est
+   imposé, le sous-agent garde le modèle de la session ;
+2. sans classe calculée, une heuristique sur la description de l'appel :
+   recherche, lecture ou mesure → `haiku` ; revue ou analyse simple →
+   `sonnet` ; écriture, sujet de jugement fort (audit, sécurité, architecture,
+   plan, conception) ou rien de reconnu → aucun modèle n'est imposé.
+
+Le hook ne remplace jamais un `model` explicite, ne touche pas un
+`subagent_type: "fork"` (qui hérite toujours du modèle parent) ni un agent de
+plugin (`plugin:agent`), et garde le `model:` d'une persona qui en déclare un
+autre que `inherit`, dans `.claude/agents/` du projet ou de l'utilisateur. Chaque
+modèle imposé est signalé à l'agent principal (`additionalContext`), affiché à
+l'utilisateur et noté au journal des traces (étiquettes `dispatch_model:<modèle>`
+et `dispatch_source:class|heuristic`). Le hook est borné à 3 s et sans
+`onFailure: block` : une panne ou un dépassement laisse passer l'appel tel quel.
+
+Pour le désactiver, dans `_grimoire/standard/orchestration-policy.yaml` :
+
+```yaml
+dispatch:
+  impose_model: off   # défaut : on
+```
+
+Toute valeur autre que `on`/`true`/`yes`, ou un fichier illisible, désactive le
+réglage : dans le doute, le hook n'impose rien.
+
 **Ce que `context:` change à l'émission (issue #379) :** sans cette clé, le
 fichier d'agent émis dit toujours à l'hôte de lire `_grimoire/_memory/shared-
 context.md` s'il existe — le comportement d'avant #379, inchangé bit à bit.

@@ -3598,6 +3598,10 @@
    "version": "3.4.2",
    "path": "framework/hooks/.pre-commit-config.tpl.yaml"
   },
+  "d3a44dc2e641c328f38fb9873f3ce361b55b367ea5b09beaf3a515e6095c255b": {
+   "version": "3.92.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
+  },
   "d3be1f7812edd4d4f7a43671da2edcdb2aa9064b58288d4a83602540e4cfbe79": {
    "version": "3.64.0",
    "path": "framework/agent2agent.md"
