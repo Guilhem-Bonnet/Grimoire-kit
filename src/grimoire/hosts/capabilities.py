@@ -504,7 +504,10 @@ _COPILOT_STATES: dict[GovernanceFunction, FunctionState] = {
     GovernanceFunction.TASK_RECALL: _RICH,
     GovernanceFunction.COMMANDS: _RICH,
     GovernanceFunction.PERSONAS: _RICH,
-    GovernanceFunction.MCP_SERVER: _degraded(_NO_MCP_CONFIG),
+    # L'émetteur Copilot écrit `.vscode/mcp.json` (clé `servers`, VS Code) ; la CLI lit
+    # le `.mcp.json` du scaffolder (docs.github.com, lue le 2026-11-21). L'agent cloud ne
+    # lit aucun fichier : sa limite est déclarée dans les dégradations du plan.
+    GovernanceFunction.MCP_SERVER: _RICH,
     GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
     GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
     GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
