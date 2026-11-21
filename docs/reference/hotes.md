@@ -213,7 +213,7 @@ jugée comme une lecture pour le refus des secrets. La garde lit le ou les
 chemins cherchés (`path`, `paths`), le filtre de fichiers (`glob`) et le motif
 de `Glob`. Un motif de fichiers est aussi développé (accolades) et confronté à
 des noms de secrets tirés des familles protégées et à des fichiers ordinaires
-(`main.py`, `README.md`, `package.json`…). Il est refusé s'il attrape un nom de
+(un fichier source Python, `README.md`, `package.json`…). Il est refusé s'il attrape un nom de
 secret sans attraper aucun fichier ordinaire : `.env.*` ou `*.{pem,p12}` le
 sont, `**/*`, `*.py` ou `*.json` restent permis. `.env.example` est refusé,
 comme pour une lecture : il relève de la famille `.env.*`. La garde ne lit
