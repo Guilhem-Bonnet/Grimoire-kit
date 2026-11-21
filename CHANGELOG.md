@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.96.0] - 2026-11-21
+
+- fix(hosts): la décision dispatch-model s'abstient quand la description d'un appel `Agent` sans `model` parle d'une garde, d'un hook, de la politique, de la CI, de la sécurité ou d'une faille, au lieu d'y deviner `haiku` ; le vocabulaire vient de `missions/sensitive_route.py` (`mentions_sensitive_topic`), la classe V0/V1 d'une tâche réclamée prime toujours (#1294)
+- fix(hosts): un hook de `.claude/settings.json` exécuté par Copilot refuse désormais d'une façon que Copilot lit : sous `--host claude`, un refus ou une demande porte toujours aussi le verdict à plat (Claude Code ignore cette clé et lit toujours `hookSpecificOutput`), et le refus sort en code 2 quand la charge prouve le harness Copilot, en code 0 sinon ; `grimoire doctor` signale (`copilot_claude_hooks_only`) un projet où Copilot est activé ou détecté mais où seuls les hooks Claude Code lancent le kit (#1295)
+- fix(hosts): la recherche de contenu et de fichiers (`Grep`/`Glob`, `grep`/`glob`/`rg`) est jugée comme une lecture pour le refus des secrets, sur les chemins cherchés et les motifs de fichiers (un motif qui n'attrape que des noms de secrets est refusé, un motif large reste permis), jamais sur le motif de contenu ; la garde Copilot la couvre dans son matcher (#1295)
+- fix(tools): `scripts/release.py` ajoute le numéro de PR d'un fragment même quand l'entrée se termine par une référence d'issue (outillage mainteneur, non livré dans la roue) (#1292)
+
 ## [3.95.0] - 2026-11-20
 
 - feat(hosts): détection du harness Copilot par la forme du payload (clés camelCase), variables d'environnement non documentées retirées, et `grimoire doctor` contrôle le format des hooks Copilot (version, matcher de la garde) et signale les hooks doublés avec `.claude/settings.json` (#1287)
