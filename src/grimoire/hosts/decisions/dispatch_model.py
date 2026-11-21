@@ -82,6 +82,12 @@ _SUBAGENT_KEYS = ("subagent_type", "agent_type", "agentName", "agent_name", "age
 #: déclare sous ``dispatch.copilot_models`` ; sans elle, rien n'est réécrit.
 COPILOT_MODELS_KEY = "copilot_models"
 
+#: Même règle pour Cursor : le champ ``model`` d'un sous-agent ``.cursor/agents/*.md``
+#: prend ``inherit`` ou un identifiant de modèle Cursor (https://cursor.com/docs/context/subagents),
+#: qui ne correspond à aucun palier du kit. Le projet déclare la correspondance sous
+#: ``dispatch.cursor_models`` ; sans elle, ``model`` n'est pas écrit.
+CURSOR_MODELS_KEY = "cursor_models"
+
 #: Le seul ``subagent_type`` qui hérite toujours du modèle parent.
 FORK = "fork"
 
@@ -264,6 +270,16 @@ def copilot_model_for(project_root: Path, tier: str) -> str:
     (par exemple ``haiku: claude-haiku-4.5``). Absent, vide ou illisible : ``""``,
     et la décision reste consultative.
     """
+    return declared_model_for(project_root, COPILOT_MODELS_KEY, tier)
+
+
+def cursor_model_for(project_root: Path, tier: str) -> str:
+    """Le nom de modèle Cursor que le projet associe au palier *tier* (``dispatch.cursor_models``), ou ``""``."""
+    return declared_model_for(project_root, CURSOR_MODELS_KEY, tier)
+
+
+def declared_model_for(project_root: Path, key: str, tier: str) -> str:
+    """``dispatch.<key>.<tier>`` de la politique d'orchestration, ou ``""`` (absent, vide, illisible)."""
     path = project_root / POLICY_FILE
     if not path.is_file():
         return ""
@@ -274,7 +290,7 @@ def copilot_model_for(project_root: Path, tier: str) -> str:
     except Exception:
         return ""
     block = data.get("dispatch") if isinstance(data, dict) else None
-    models = block.get(COPILOT_MODELS_KEY) if isinstance(block, dict) else None
+    models = block.get(key) if isinstance(block, dict) else None
     value = models.get(tier) if isinstance(models, dict) else None
     return value.strip() if isinstance(value, str) else ""
 

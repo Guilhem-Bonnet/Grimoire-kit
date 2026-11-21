@@ -26,8 +26,8 @@ REMEDY = (
     "alors en échec ouvert."
 )
 
-#: Noms de l'événement ``PreToolUse`` selon l'hôte (Claude Code, Copilot, Gemini CLI).
-_GUARD_EVENTS = frozenset({"pretooluse", "pre_tool_use", "beforetool"})
+#: Noms de l'événement ``PreToolUse`` selon l'hôte (Claude Code, Copilot, Gemini CLI, Cursor).
+_GUARD_EVENTS = frozenset({"pretooluse", "pre_tool_use", "beforetool", "beforeshellexecution"})
 
 #: Décisions ``PreToolUse`` consultatives (``--decision``), émises sans
 #: ``onFailure: block`` : leur panne laisse passer l'appel inchangé, jamais un
@@ -70,6 +70,32 @@ def copilot_guard_refusal(payload: dict[str, Any]) -> dict[str, Any]:
     """*payload* (forme ``hookSpecificOutput``) augmenté de la forme à plat du harness Copilot."""
     specific = payload.get("hookSpecificOutput")
     return {**payload, **copilot_flat_verdict(specific if isinstance(specific, dict) else {})}
+
+
+#: Hôtes qui reçoivent le rendu Cursor (``--host``, voir ``capabilities.resolve_host``).
+_CURSOR_HOST_NAMES = frozenset({"cursor", "host-cursor"})
+
+
+def is_cursor_host(name: str) -> bool:
+    """``--host`` désigne-t-il Cursor ? (lecture stdlib, pour le repli sans runtime)."""
+    return name.strip().lower() in _CURSOR_HOST_NAMES
+
+
+def cursor_guard_refusal(payload: dict[str, Any]) -> dict[str, Any]:
+    """Le refus *payload* (forme ``hookSpecificOutput``) dans la forme à plat de Cursor.
+
+    ``permission``/``user_message``/``agent_message`` : les seuls champs que
+    https://cursor.com/docs/hooks documente pour ``preToolUse`` et
+    ``beforeShellExecution`` ; une sortie hors schéma y bloque l'action, d'où
+    rien de plus.
+    """
+    specific = payload.get("hookSpecificOutput")
+    reason = str((specific if isinstance(specific, dict) else {}).get("permissionDecisionReason") or "")
+    out: dict[str, Any] = {"permission": "deny"}
+    if reason:
+        out["user_message"] = reason
+        out["agent_message"] = reason
+    return out
 
 
 def guard_failure_payload(cause: str) -> dict[str, Any]:
@@ -138,6 +164,14 @@ def import_failure(args: list[str], raw: str, cause: str) -> int:
         sys.stderr.write(message + "\n")
         # Gemini : le code 2 est le refus documenté sur un événement bloquant.
         return 2 if guard else 0
+    if is_cursor_host(host):
+        # Cursor : refus à plat, code 0 (le JSON porte le message) ; ailleurs un message, rien de bloqué.
+        if guard:
+            sys.stdout.write(json.dumps(cursor_guard_refusal(guard_failure_payload(cause)), ensure_ascii=False))
+        else:
+            sys.stdout.write("{}")
+            sys.stderr.write(message + "\n")
+        return 0
     if guard and (is_copilot_host(host) or _copilot_runs_claude_hook(host, raw)):
         refusal = guard_failure_payload(cause)
         sys.stdout.write(json.dumps(copilot_guard_refusal(refusal), ensure_ascii=False))

@@ -69,10 +69,17 @@ class TestMatrix:
         assert _cell(project, HostId.CLAUDE_CODE_CLI, "hook:session_start").status == ADVISORY
 
     def test_un_hote_de_prose_enonce_la_regle_sans_l_executer(self, project: Path) -> None:
-        for host in (HostId.CODEX, HostId.CURSOR):
-            cell = _cell(project, host, "hook:pre_tool_use")
-            assert cell.status == PROSE, host
-            assert cell.carriers  # l'entrypoint porte la règle, c'est vérifiable sur disque
+        cell = _cell(project, HostId.CODEX, "hook:pre_tool_use")
+        assert cell.status == PROSE
+        assert cell.carriers  # l'entrypoint porte la règle, c'est vérifiable sur disque
+
+    def test_cursor_ecrit_la_garde_mais_la_declare_advisory_non_verifiee(self, project: Path) -> None:
+        """#1281 L1 : la garde Cursor est écrite dans `.cursor/hooks.json`, mais le refus est
+        seulement documenté (aucune capture) : `advisory`, jamais `enforced`."""
+        cell = _cell(project, HostId.CURSOR, "hook:pre_tool_use")
+        assert cell.status == ADVISORY
+        assert cell.carriers == (".cursor/hooks.json",)
+        assert "non vérifié" in cell.reason
 
     def test_gemini_bloque_sur_les_evenements_d_action_et_pas_sur_la_cloture(self, project: Path) -> None:
         """Depuis l'émetteur riche, Gemini n'est plus un hôte de prose : BeforeTool et
@@ -125,17 +132,17 @@ class TestMatrix:
     def test_un_hook_ecrit_pour_un_evenement_que_l_hote_ignore_est_inert(
         self, project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        real = emitter_for(HostId.CURSOR)
+        real = emitter_for(HostId.CODEX)
         assert real is not None
 
         class Wired:
             def plan(self, surface: object, root: Path) -> EmitPlan:
                 plan = real.plan(surface, root)  # type: ignore[arg-type]
-                fake = EmittedFile(Path("hooks.json"), '{"command": "grimoire-hook --host cursor --event PreToolUse"}')
+                fake = EmittedFile(Path("hooks.json"), '{"command": "grimoire-hook --host codex --event PreToolUse"}')
                 return replace(plan, files=(*plan.files, fake))
 
-        monkeypatch.setattr(matrix_mod, "emitter_for", lambda h: Wired() if h is HostId.CURSOR else emitter_for(h))
-        assert _cell(project, HostId.CURSOR, "hook:pre_tool_use", matrix=build_matrix(project, (HostId.CURSOR,))).status == INERT
+        monkeypatch.setattr(matrix_mod, "emitter_for", lambda h: Wired() if h is HostId.CODEX else emitter_for(h))
+        assert _cell(project, HostId.CODEX, "hook:pre_tool_use", matrix=build_matrix(project, (HostId.CODEX,))).status == INERT
 
 
 class TestRuleCells:
