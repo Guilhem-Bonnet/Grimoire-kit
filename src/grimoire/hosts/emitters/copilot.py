@@ -31,6 +31,7 @@ from grimoire.hosts.emitters.base import (
     persona_section,
 )
 from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT
+from grimoire.hosts.emitters.copilot_mcp import vscode_mcp_merge
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
@@ -395,6 +396,7 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         f"| Skills attachées | {attached} — repliées dans le fichier de leur agent |",
         f"| Prompts | {len([c for c in surface.commands if c.source != 'workflow'])} — `.github/prompts/` |",
         f"| Hooks | {len(surface.hooks)} — `.github/hooks/` |",
+        f"| Serveurs MCP | {len(surface.mcp_servers)} — `.vscode/mcp.json` |",
         "",
         "Les fichiers de hook ne portent pas de marqueur de gestion : ce sont des",
         "JSON purs. C'est la commande invoquée qui dit à qui le fichier",
@@ -532,7 +534,23 @@ class CopilotEmitter(Emitter):
                 fallback="`model` n'est pas émis ; le modèle actuel du sélecteur VS Code s'applique à chaque agent.",
             )
         )
+        degradations.append(
+            Degradation(
+                surface="mcp cloud agent",
+                reason=(
+                    "`.vscode/mcp.json` (VS Code) est écrit, et la CLI Copilot lit `.mcp.json` à la racine ; "
+                    "l'agent cloud de GitHub ne lit aucun fichier du dépôt : sa configuration MCP se saisit "
+                    "dans les réglages du dépôt (Settings > Copilot > MCP servers), avec `tools` obligatoire."
+                ),
+                fallback=(
+                    "la configuration à saisir est dans docs/reference/hotes.md ; un serveur stdio local "
+                    "du poste n'y existe pas, le kit n'y écrit donc rien."
+                ),
+            )
+        )
         blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         files.append(_readme(surface, blocking, degradations))
-        plan = EmitPlan(host_id=self.host_id, files=tuple(files), merges=(), degradations=tuple(degradations))
+        mcp_merge = vscode_mcp_merge(surface.mcp_servers)
+        merges = (mcp_merge,) if mcp_merge is not None else ()
+        plan = EmitPlan(host_id=self.host_id, files=tuple(files), merges=merges, degradations=tuple(degradations))
         return with_rule_layers(plan, project_root)

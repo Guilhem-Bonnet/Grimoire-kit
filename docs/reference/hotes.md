@@ -22,7 +22,7 @@ projet (agents, standard, mémoire)
   ProjectSurface  ← description host-neutre, construite une fois
         │
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
-        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}
+        ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
         ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, GEMINI.md
         └──▶ émetteur prose        → AGENTS.md · .cursor/rules
@@ -84,6 +84,51 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
 - Les hôtes en prose (Codex, Cursor) n'ont pas de hooks : la gouvernance y est
   énoncée comme règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le
   catalogue le dit explicitement plutôt que de laisser croire à une protection.
+
+## MCP sous Copilot
+
+Copilot n'a pas une seule configuration MCP mais trois, une par surface
+(sources : documentation VS Code « MCP configuration reference » et
+documentation GitHub Copilot, lues le 2026-11-21).
+
+| Surface | Où | Ce que fait le kit |
+|---|---|---|
+| VS Code | `.vscode/mcp.json`, clé `servers`, entrée `{"type": "stdio", "command", "args"}`, `${workspaceFolder}` documenté | `grimoire up` / `grimoire host sync --host copilot` y ajoute le serveur du projet |
+| CLI Copilot | `.mcp.json` à la racine (clé `mcpServers`) ou `.github/mcp.json` ; `~/.copilot/mcp-config.json` côté utilisateur. `.vscode/mcp.json` n'est **pas** lu | rien de plus : le `.mcp.json` que le scaffolder écrit pour Claude Code est celui-là |
+| Agent cloud | réglages du dépôt, pas de fichier | rien, à saisir (ci-dessous) |
+
+`.vscode/mcp.json` est fusionné, jamais réécrit : un serveur déjà déclaré (même
+nommé `grimoire`, écrit à la main avec une autre commande) est conservé tel quel,
+les autres clés (`inputs`…) aussi, et le kit ne retire aucune entrée. Un fichier
+listé dans `hosts.preserve` n'est pas touché. Le chemin venv du projet s'écrit
+`${workspaceFolder}/…` (la forme `${CLAUDE_PROJECT_DIR:-.}` de `.mcp.json` n'est
+pas une variable VS Code). `grimoire doctor` émet `copilot_mcp` quand Copilot est
+activé ou détecté : WARN si le fichier ou l'entrée `grimoire` manque, INFO si
+l'entrée diffère de ce que le kit écrirait (elle reste la vôtre).
+
+Pour l'**agent cloud**, saisir dans Settings > Copilot > MCP servers du
+dépôt, section « MCP configuration » (`tools` et `type` sont
+obligatoires, `*` active tous les outils : préférer une liste d'outils en lecture
+seule, l'agent les utilise sans confirmation) :
+
+```json
+{
+  "mcpServers": {
+    "grimoire": {
+      "type": "local",
+      "command": "grimoire-mcp",
+      "args": [],
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+Le serveur doit exister dans l'environnement de l'agent (le kit installé par une
+étape d'installation du dépôt). Un secret se déclare en secret ou variable
+d'environnement « Agents » préfixé `COPILOT_MCP_` et se référence par
+`$COPILOT_MCP_NOM` ou `${COPILOT_MCP_NOM}` dans `env` ; aucune valeur ne se
+commite.
 
 ## Ce que le kit a observé (contrats réels)
 

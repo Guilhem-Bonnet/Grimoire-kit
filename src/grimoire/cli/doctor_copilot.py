@@ -178,8 +178,63 @@ def check_copilot_harness(target: Path) -> list[EnvCheck]:
     return [EnvCheck("copilot_harness", passed=True, level="info", detail=detail)]
 
 
+def check_copilot_mcp(target: Path) -> list[EnvCheck]:
+    """Le serveur MCP du kit est-il déclaré dans ``.vscode/mcp.json`` quand Copilot est activé ou détecté ?
+
+    Absent (fichier, clé ``servers`` ou entrée ``grimoire``) : WARN, ``grimoire up`` l'écrit.
+    Présent mais différent de ce que l'émetteur écrirait : INFO, l'entrée est celle de l'utilisateur
+    et n'est jamais réécrite. La résolution de la commande reste le travail de ``check_mcp_json``.
+    """
+    from grimoire.hosts.detection import resolve_enabled_hosts
+
+    if "copilot" not in resolve_enabled_hosts(target):
+        return []
+    from grimoire.hosts.collect import collect_mcp_servers
+    from grimoire.hosts.emitters.copilot_mcp import VSCODE_MCP, server_entry
+
+    rel = VSCODE_MCP.as_posix()
+    remedy = "run `grimoire up` (or `grimoire host sync --host copilot`) to write it; existing servers are kept"
+    path = target / VSCODE_MCP
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, json.JSONDecodeError):
+        return [
+            EnvCheck(
+                "copilot_mcp",
+                passed=True,
+                level="warn",
+                detail=f"{rel} is not valid JSON",
+                remedy=f"fix its syntax, then {remedy}",
+            )
+        ]
+    servers = data.get("servers") if isinstance(data, dict) else None
+    entry = servers.get("grimoire") if isinstance(servers, dict) else None
+    if not isinstance(entry, dict):
+        return [
+            EnvCheck(
+                "copilot_mcp",
+                passed=True,
+                level="warn",
+                detail=f"Copilot is enabled or detected but {rel} declares no `grimoire` MCP server (VS Code reads `servers` there)",
+                remedy=remedy,
+            )
+        ]
+    expected = next((server_entry(s) for s in collect_mcp_servers(target) if s.name == "grimoire"), None)
+    if expected is not None and entry != expected:
+        return [
+            EnvCheck(
+                "copilot_mcp",
+                passed=True,
+                level="info",
+                detail=f"{rel} `grimoire` server differs from what `grimoire up` would write; kept as is (yours)",
+            )
+        ]
+    return [EnvCheck("copilot_mcp", passed=True, level="ok", detail=f"{rel} declares the `grimoire` MCP server")]
+
+
 def check_copilot_hooks(target: Path) -> list[EnvCheck]:
     return [
+        *check_copilot_mcp(target),
         *check_copilot_hook_format(target),
         *check_copilot_hooks_doubled(target),
         *check_copilot_claude_hooks_only(target),
