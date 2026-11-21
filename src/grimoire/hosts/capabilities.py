@@ -233,7 +233,7 @@ CURSOR_PROFILE = HostProfile(
         "Hooks (.cursor/hooks.json), sous-agents (.cursor/agents/), compétences (.cursor/skills/) et "
         "règles écrits d'après cursor.com/docs (hooks, context/subagents, context/skills ; lue le "
         "2026-11-21, Cursor non installé). preToolUse et beforeShellExecution documentent un refus, "
-        "stop une relance par followup_message (loop_limit 5) ; rien n'est vérifié, la garde est "
+        "stop une relance par followup_message (loop_limit 5, compté par conversation) ; rien n'est vérifié, la garde est "
         "advisory. Mode headless `agent -p` documenté, non utilisé par le kit."
     ),
 )
@@ -523,8 +523,9 @@ _CURSOR_STATES: dict[GovernanceFunction, FunctionState] = {
         f"la doc ; {_CURSOR_UNVERIFIED} — déclarée advisory, opposable en CI"
     ),
     GovernanceFunction.WRITE_TRACE: _degraded(
-        "`postToolUse` compte les écritures ; `stop` ne refuse pas la clôture, il relance l'agent par "
-        f"`followup_message` au plus 5 fois (`loop_limit`) ; {_CURSOR_UNVERIFIED}"
+        "`postToolUse` compte les écritures ; `stop` ne refuse pas la clôture : tant que les gates sont "
+        "rouges il relance l'agent par `followup_message`, jusqu'à la limite de 5 relances automatiques que "
+        f"Cursor compte par conversation (`loop_limit`), plus aucune ensuite ; {_CURSOR_UNVERIFIED}"
     ),
     GovernanceFunction.TASK_RECALL: _degraded(
         f"`sessionStart` injecte la directive (`additional_context`) ; `beforeSubmitPrompt` n'a pas de canal "

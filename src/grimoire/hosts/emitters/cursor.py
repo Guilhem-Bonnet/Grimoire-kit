@@ -34,7 +34,7 @@ de l'appel dans la charge (``hook_event_name``), voir :mod:`grimoire.hosts.curso
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from grimoire.bridges.schemas import HostId
@@ -43,12 +43,12 @@ from grimoire.hosts.cursor_wire import LOOP_LIMIT
 from grimoire.hosts.decisions import DEFAULT_DECISION_BY_EVENT
 from grimoire.hosts.decisions.dispatch_model import cursor_model_for
 from grimoire.hosts.emitters.base import (
-    OWNED_COMMAND_MARKERS,
     Degradation,
     EmitPlan,
     EmittedFile,
     Emitter,
     JsonMerge,
+    MergeRefusedError,
     context_load_instruction,
     managed_header,
     persona_section,
@@ -189,12 +189,45 @@ def hook_entries(surface: ProjectSurface, launcher: HookLauncher = BARE) -> dict
     return by_event
 
 
+#: Une commande écrite par le kit : le programme de lancement (``grimoire-hook``, nu,
+#: entre guillemets ou en chemin), ``--host cursor``, l'événement, une décision éventuelle.
+#: La seule sous-chaîne ``grimoire-hook`` prendrait pour sienne une commande du projet
+#: (``./my-grimoire-hook-wrapper.sh``) et la supprimerait.
+_KIT_COMMAND = re.compile(
+    r'^(?:"(?P<quoted>[^"]+)"|(?P<bare>\S+))\s+--host\s+cursor\s+--event\s+[A-Za-z]+'
+    r"(?:\s+--decision\s+\S+)?\s*$"
+)
+_LEGACY_COMMAND = re.compile(r"^grimoire\s+host\s+hook\s+--host\s+cursor\b")
+_KIT_PROGRAMS = frozenset({"grimoire-hook", "grimoire-hook.exe"})
+
+
 def _owned_entry(entry: Any) -> bool:
-    """Une entrée que le kit a écrite, reconnue à ce qu'elle lance (un JSON n'a pas de marqueur)."""
+    """Une entrée que le kit a écrite, reconnue à sa commande exacte (un JSON n'a pas de marqueur)."""
     if not isinstance(entry, dict):
         return False
     command = entry.get("command")
-    return isinstance(command, str) and any(marker in command for marker in OWNED_COMMAND_MARKERS)
+    if not isinstance(command, str):
+        return False
+    command = command.strip()
+    if _LEGACY_COMMAND.match(command):
+        return True
+    match = _KIT_COMMAND.match(command)
+    if match is None:
+        return False
+    program = match.group("quoted") or match.group("bare") or ""
+    return PureWindowsPath(program).name.lower() in _KIT_PROGRAMS
+
+
+def _check_structure(data: dict[str, Any]) -> None:
+    """Refuser une fusion sur un ``hooks.json`` dont la forme n'est pas celle de la doc."""
+    hooks = data.get("hooks")
+    if hooks is None:
+        return
+    if not isinstance(hooks, dict):
+        raise MergeRefusedError("`hooks` n'est pas un objet")
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            raise MergeRefusedError(f"`hooks.{event}` n'est pas une liste")
 
 
 def _hooks_merge(surface: ProjectSurface, launcher: HookLauncher) -> JsonMerge:
@@ -202,17 +235,16 @@ def _hooks_merge(surface: ProjectSurface, launcher: HookLauncher) -> JsonMerge:
     ours = hook_entries(surface, launcher)
 
     def merge(data: dict[str, Any]) -> dict[str, Any]:
+        _check_structure(data)
         if not isinstance(data.get("version"), int) or isinstance(data.get("version"), bool):
             data["version"] = HOOKS_VERSION
-        hooks = data.get("hooks")
-        hooks = hooks if isinstance(hooks, dict) else {}
+        hooks: dict[str, Any] = data.get("hooks") or {}
         for event, entries in ours.items():
-            existing = hooks.get(event)
-            kept = [entry for entry in (existing if isinstance(existing, list) else []) if not _owned_entry(entry)]
+            kept = [entry for entry in hooks.get(event, []) if not _owned_entry(entry)]
             hooks[event] = kept + entries
         # Un événement que le kit ne câble plus perd son entrée périmée, rien d'autre.
         for event, existing in list(hooks.items()):
-            if event in ours or not isinstance(existing, list):
+            if event in ours:
                 continue
             kept = [entry for entry in existing if not _owned_entry(entry)]
             if kept:
@@ -381,9 +413,11 @@ def _entrypoint(
         lines += [
             "",
             "La garde avant outil tourne dans `preToolUse` et `beforeShellExecution`, qui",
-            "peuvent refuser un appel ; la fin de tour (`stop`) ne refuse pas, elle relance",
-            f"au plus {LOOP_LIMIT} fois avec le motif. **Non vérifié** : aucun refus n'a été",
-            "observé sur un Cursor réel ; la CI reste l'autorité.",
+            "peuvent refuser un appel. La fin de tour (`stop`) ne refuse pas : tant que les",
+            "gates sont rouges, elle relance l'agent avec le motif, jusqu'à ce que Cursor",
+            f"atteigne sa limite de {LOOP_LIMIT} relances automatiques par conversation.",
+            "**Non vérifié** : aucun refus n'a été observé sur un Cursor réel ; la CI reste",
+            "l'autorité.",
             "",
         ]
         if surface.governed and any(h.enforcement is Enforcement.BLOCKING for h in surface.hooks):
@@ -458,10 +492,21 @@ def _degradations(
             surface="hook matchers",
             reason=(
                 "La garde `preToolUse` nomme `Write`, `Delete`, `Read` et `Grep` ; les commandes passent "
-                "par `beforeShellExecution`. `Task`, les outils `MCP:<outil>` et tout outil que la doc ne "
-                "nomme pas ne passent pas par la garde."
+                "par `beforeShellExecution`. `Task`, les outils `MCP:<outil>` (`beforeMCPExecution` n'est "
+                "pas câblé) et tout outil que la doc ne nomme pas ne passent pas par la garde."
             ),
             fallback="une écriture ou une commande passe par `Write`/`Delete`/`Shell`, jugés ; la CI reste l'autorité.",
+        ),
+        Degradation(
+            surface="hook abstention",
+            reason=(
+                "La doc ne dit pas si une sortie sans `permission` (`{}`) laisse Cursor appliquer ses "
+                "propres confirmations : elle dit seulement qu'une sortie hors schéma bloque l'action."
+            ),
+            fallback=(
+                'une abstention de la garde est rendue `{"permission": "allow"}`, qui ne couvre jamais '
+                "le refus d'un autre hook (« deny » l'emporte) mais peut court-circuiter une confirmation de Cursor."
+            ),
         ),
         Degradation(
             surface="commands",
@@ -501,8 +546,12 @@ def _degradations(
             Degradation(
                 surface="hook stop",
                 reason=(
-                    "`stop` ne peut pas refuser la fin d'un tour : un `followup_message` relance l'agent "
-                    f"avec le motif, au plus {LOOP_LIMIT} fois (`loop_limit`), et seulement sur un tour terminé."
+                    "`stop` ne peut pas refuser la fin d'un tour : un `followup_message` relance l'agent avec "
+                    "le motif, seulement sur un tour terminé (`status` `aborted`/`error` : aucune relance). "
+                    "Tant que les gates sont rouges, chaque fin de tour relance ; un `stop` qui suit une relance "
+                    "émise par le kit (gardée sur disque par conversation) suit la chaîne de refus du kit. "
+                    f"`loop_limit` ({LOOP_LIMIT}) est compté par Cursor « for this conversation » : au-delà, "
+                    "plus aucune relance dans la conversation."
                 ),
                 fallback="au-delà de la limite, la clôture passe ; les gates restent rouges et opposables en CI.",
             )

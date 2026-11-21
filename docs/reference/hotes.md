@@ -634,10 +634,26 @@ Choix et limites, tous déclarés comme dégradations :
   messages que dans la sortie JSON. Le refus sort donc en JSON, code 0 : même
   blocage, et un motif que l'utilisateur et l'agent lisent.
 - **Fin de tour.** `stop` ne refuse pas : un `followup_message` relance l'agent
-  avec le motif, seulement sur un tour terminé (`status` `completed`) et au plus
-  5 fois (`loop_limit`, la valeur par défaut documentée, écrite explicitement).
-  `loop_count` > 0 est traité comme un `Stop` continué (`stop_hook_active` chez
-  Claude Code).
+  avec le motif, seulement sur un tour terminé (`status` `completed` ; rien sur
+  `aborted`/`error`). Tant que les gates sont rouges, chaque fin de tour relance.
+  `loop_count` est compté par Cursor « for this conversation » et ne dit pas qui a
+  relancé : un `stop` n'est « continué » (`stop_hook_active` chez Claude Code) que
+  s'il suit une relance émise par le kit, gardée sur disque par conversation
+  (`_grimoire-output/.runs/cursor-followup-<conversation>.json`, avec le
+  `generation_id`) ; il suit alors la chaîne de refus du kit. `loop_limit: 5` (la
+  valeur par défaut documentée, écrite explicitement) borne les relances par
+  conversation : au-delà, Cursor n'en honore plus aucune dans cette conversation.
+- **Racine du projet.** Sous Cursor, `CURSOR_PROJECT_DIR` puis `workspace_roots[0]`
+  passent avant le `cwd` de la charge, comme `CLAUDE_PROJECT_DIR` (#717).
+- **Événement inconnu.** Une charge dont l'événement n'est ni nommé ni déductible
+  de sa forme est refusée (`permission: deny`, code 2), jamais traitée comme un
+  `sessionStart`.
+- **Abstention.** La doc ne dit pas si `{}` est une sortie valide d'un hook de
+  permission : une abstention de la garde est rendue `{"permission": "allow"}`.
+- **Fusion.** Une entrée est au kit si sa commande est exactement celle qu'il
+  écrit (`grimoire-hook --host cursor --event …`) ; un `hooks.json` dont `hooks`
+  n'est pas un objet, ou un événement pas une liste, est préservé et signalé, pas
+  écrasé.
 - **Pas de rappel par message.** `beforeSubmitPrompt` ne rend que
   `continue`/`user_message` : aucun contexte ne peut y être injecté, le hook
   `user_prompt_submit` n'est pas câblé.

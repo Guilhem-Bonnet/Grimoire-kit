@@ -24,9 +24,11 @@ module est le seul à les connaître :
   documentés pour chaque événement sont écrits ;
 - **fin de tour** — ``stop`` ne refuse pas : un ``followup_message`` non vide est
   soumis comme message utilisateur suivant, dans la limite ``loop_limit`` (5 par
-  défaut pour un hook Cursor). ``loop_count`` dit combien de relances ont déjà eu
-  lieu : au-delà de zéro, c'est un ``Stop`` continué (l'équivalent de
-  ``stop_hook_active`` chez Claude Code).
+  défaut pour un hook Cursor, « per script »). ``loop_count`` compte les relances
+  automatiques « for this conversation » : il ne dit pas *qui* a relancé, ni si
+  c'est ce tour-ci. Un ``Stop`` n'est donc « continué » (``stop_hook_active`` chez
+  Claude Code) que si le kit a lui-même émis la relance qui le précède : il la
+  garde sur disque (:func:`record_followup`) et la retrouve (:func:`kit_relaunched`).
 
 Code de sortie : la doc dit « 2 : bloque l'action, équivalent à ``permission:
 "deny"`` », mais ne documente les messages (``user_message``, ``agent_message``)
@@ -41,7 +43,11 @@ capacités tant qu'aucun refus n'a été observé.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from grimoire.hosts.decisions._shared import Decision, HookInput, Outcome
@@ -54,10 +60,12 @@ __all__ = [
     "LOOP_LIMIT",
     "cursor_event_name",
     "event_from_cursor",
+    "followup_state_path",
+    "kit_relaunched",
     "normalize_tool_call",
+    "record_followup",
     "render",
     "session_id",
-    "stop_active",
 ]
 
 #: Nom d'événement Cursor (compacté, minuscules) -> événement neutre que les décisions savent juger.
@@ -230,10 +238,78 @@ def session_id(payload: dict[str, Any]) -> str:
     return ""
 
 
-def stop_active(payload: dict[str, Any]) -> bool:
-    """Un ``stop`` relancé par un ``followup_message`` précédent (``loop_count`` > 0)."""
-    count = payload.get("loop_count")
-    return isinstance(count, int) and not isinstance(count, bool) and count > 0
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _safe_id(value: str) -> str:
+    value = value.strip() or "unknown"
+    return value if _SAFE_ID.match(value) else "h-" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+
+
+def followup_state_path(project_root: Path, conversation_id: str) -> Path:
+    """La dernière relance émise par le kit pour *conversation_id*, à côté des ``policy-holds-*``."""
+    from grimoire.core.standard_generation import RUNS_DIR
+
+    return project_root / RUNS_DIR / f"cursor-followup-{_safe_id(conversation_id)}.json"
+
+
+def _generation(payload: dict[str, Any]) -> str:
+    value = payload.get("generation_id")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def kit_relaunched(project_root: Path, payload: dict[str, Any]) -> bool:
+    """Ce ``stop`` suit-il une relance que **le kit** a émise dans cette conversation ?
+
+    Vrai seulement si l'état disque de la conversation existe, que la relance a été
+    émise au ``loop_count`` immédiatement précédent (``loop_count`` courant - 1), et
+    que ce n'est pas le même tour rejoué (même ``generation_id``, quand Cursor
+    l'envoie). Une relance d'un autre hook, un ``loop_count`` hérité d'une relance
+    ancienne ou un état illisible : pas de continuation, la garde juge normalement.
+    """
+    conversation = session_id(payload)
+    count = _loop_count(payload)
+    if not conversation or count < 1:
+        return False
+    try:
+        state = json.loads(followup_state_path(project_root, conversation).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(state, dict) or state.get("conversation_id") != conversation:
+        return False
+    emitted = state.get("loop_count")
+    if not isinstance(emitted, int) or isinstance(emitted, bool) or emitted != count - 1:
+        return False
+    generation = _generation(payload)
+    return not (generation and state.get("generation_id") == generation)
+
+
+def record_followup(project_root: Path, payload: dict[str, Any], *, emitted: bool) -> None:
+    """Garder (``emitted``) ou effacer la relance du kit pour la conversation de *payload*.
+
+    Au mieux : un disque qui refuse n'empêche jamais de rendre le verdict ; la
+    conséquence est seulement qu'un ``stop`` suivant sera jugé comme un premier.
+    """
+    conversation = session_id(payload)
+    if not conversation:
+        return
+    path = followup_state_path(project_root, conversation)
+    try:
+        if not emitted:
+            path.unlink(missing_ok=True)
+            return
+        from grimoire.core.fsio import atomic_write
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "conversation_id": conversation,
+            "generation_id": _generation(payload),
+            "loop_count": _loop_count(payload),
+            "emitted_at": datetime.now(UTC).isoformat(),
+        }
+        atomic_write(path, json.dumps(state, ensure_ascii=False))
+    except OSError:
+        return
 
 
 def _loop_count(payload: dict[str, Any]) -> int:

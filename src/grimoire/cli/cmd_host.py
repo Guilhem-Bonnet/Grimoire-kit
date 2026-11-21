@@ -43,6 +43,8 @@ from grimoire.hosts.emitters import (
 from grimoire.hosts.matrix import build_matrix
 from grimoire.hosts.probe import probe_hosts
 from grimoire.hosts.runtime import (
+    cursor_fail_closed_output,
+    cursor_fail_closed_reason,
     decode_hook_payload,
     gemini_fail_closed_reason,
     parse_event,
@@ -585,9 +587,14 @@ def host_hook(
     parsed = parse_event(event, host_id=host_id)
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     payload, payload_problem = decode_hook_payload(raw)
-    wire_event = payload_event_name(payload)
+    wire_event = payload_event_name(payload, host_id)
     if parsed is None and wire_event:
         parsed = parse_event(wire_event, host_id=host_id)
+    if refusal := cursor_fail_closed_reason(host_id, parsed, payload_problem):
+        output = cursor_fail_closed_output(refusal, event or wire_event or "événement inconnu")
+        typer.echo(json.dumps(output, ensure_ascii=False), nl=False)
+        typer.echo(output["user_message"], err=True)
+        raise typer.Exit(code=2)
     if refusal := gemini_fail_closed_reason(host_id, parsed, payload_problem):
         typer.echo(f"[Grimoire] hook Gemini en échec sur {event} ({refusal}) : action refusée par défaut.", err=True)
         raise typer.Exit(code=2)

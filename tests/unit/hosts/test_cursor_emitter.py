@@ -94,6 +94,9 @@ PROFILE_WRITE = 'echo "$X" > _grimoire/standard/standard-profile.yaml'
 def _bare_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
     # Lanceur déterministe : le nom nu, quelle que soit l'installation du poste.
     monkeypatch.setenv(ENV_OVERRIDE, "grimoire-hook")
+    # Racine du projet : seulement ce que chaque test pose (la session de test peut en exporter une).
+    for var in ("CLAUDE_PROJECT_DIR", "CURSOR_PROJECT_DIR", "GRIMOIRE_PROJECT_ROOT", "COPILOT_WORKSPACE_FOLDER"):
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture
@@ -206,7 +209,7 @@ def test_unresolved_launcher_keeps_the_guard_fail_open_and_says_so(
 def test_merge_keeps_unmanaged_hooks_and_replaces_only_kit_entries(governed: Path) -> None:
     user_pre = {"command": ".cursor/hooks/audit.sh", "matcher": "Shell"}
     user_other = {"command": "./format.sh"}
-    stale = {"command": "grimoire-hook --host cursor --event PreToolUse --old", "timeout": 3}
+    stale = {"command": "grimoire-hook --host cursor --event PreToolUse --decision grimoire.old", "timeout": 3}
     gone = {"command": "grimoire-hook --host cursor --event SessionEnd"}
     existing = {
         "version": 1,
@@ -359,7 +362,7 @@ def _pre(root: Path, tool: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _entry(root: Path, payload: dict[str, Any], event: str = "PreToolUse") -> subprocess.CompletedProcess[str]:
+def _entry(root: Path, payload: dict[str, Any], event: str | None = "PreToolUse") -> subprocess.CompletedProcess[str]:
     """Le vrai point d'entrée ``grimoire-hook``, lancé comme Cursor le lance (cwd = racine du projet)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GRIMOIRE_", "CLAUDE_", "CURSOR_"))}
     env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
@@ -370,8 +373,7 @@ def _entry(root: Path, payload: dict[str, Any], event: str = "PreToolUse") -> su
             "from grimoire.hosts.hook_entry import main; raise SystemExit(main())",
             "--host",
             "cursor",
-            "--event",
-            event,
+            *(("--event", event) if event else ()),
         ],
         input=json.dumps(payload),
         capture_output=True,
@@ -464,7 +466,8 @@ def test_cursor_payload_is_normalised_to_kit_terms(tmp_path: Path) -> None:
         {**_common(tmp_path), "hook_event_name": "stop", "status": "completed", "loop_count": 1},
         host_id=HostId.CURSOR,
     )
-    assert again.stop_active is True
+    # `loop_count` seul ne fait pas un Stop continué : il faut une relance émise par le kit.
+    assert again.stop_active is False
 
 
 def test_session_start_context_uses_the_documented_field(tmp_path: Path) -> None:
@@ -487,3 +490,139 @@ def test_abstention_keeps_a_permission_on_pre_tool_use(tmp_path: Path) -> None:
     pre = HookInput(event=HookEvent.PRE_TOOL_USE, project_root=tmp_path, raw={"hook_event_name": "preToolUse"})
     assert render(Decision(abstain=True), pre, HostId.CURSOR) == {"permission": "allow"}
     assert render(Decision(abstain=True), _stop_hook(tmp_path), HostId.CURSOR) == {}
+
+
+# ── relecture adversariale de #1301 ──────────────────────────────────────────
+
+
+def _fake_evidence_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La garde de clôture réduite à sa règle d'entrée : un premier ``Stop`` aux gates rouges refuse,
+    un ``Stop`` continué passe (``stop_hook_already_active``)."""
+    from grimoire.hosts import runtime
+
+    def decide(decision_id: str, hook: HookInput) -> Decision:
+        if hook.event is not HookEvent.STOP:
+            return Decision()
+        if hook.stop_active:
+            return Decision(detail={"skipped": "stop_hook_already_active"})
+        return Decision(outcome=Outcome.BLOCK, reason="gates rouges", detail={"ok": False})
+
+    monkeypatch.setattr(runtime, "run_decision", decide)
+
+
+def _cursor_stop(root: Path, loop_count: int, generation: str) -> dict[str, Any]:
+    return {
+        **_common(root),
+        "generation_id": generation,
+        "hook_event_name": "stop",
+        "status": "completed",
+        "loop_count": loop_count,
+    }
+
+
+def test_stop_with_loop_count_but_no_kit_followup_still_refuses(
+    governed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``loop_count`` compte les relances de la conversation, pas celles du kit : un autre hook ou une
+    relance ancienne ne doit pas éteindre la garde de clôture."""
+    from grimoire.hosts.runtime import run_hook
+
+    _fake_evidence_gate(monkeypatch)
+    out, _decision, hook = run_hook(_cursor_stop(governed, 1, "gen-9"), host_id=HostId.CURSOR)
+    assert hook.stop_active is False
+    assert out == {"followup_message": "gates rouges"}
+
+
+def test_a_stop_after_the_kits_own_followup_is_continued(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.hosts.runtime import run_hook
+
+    _fake_evidence_gate(monkeypatch)
+    first, _, _ = run_hook(_cursor_stop(governed, 0, "gen-1"), host_id=HostId.CURSOR)
+    assert first == {"followup_message": "gates rouges"}
+    assert cursor_wire.followup_state_path(governed, "conv-1").is_file()
+    # Le même tour rejoué (même generation_id) n'est pas la suite de la relance.
+    replay, _, replay_hook = run_hook(_cursor_stop(governed, 1, "gen-1"), host_id=HostId.CURSOR)
+    assert replay_hook.stop_active is False and "followup_message" in replay
+    # Le tour qui suit la relance du kit (loop_count + 1, nouvelle génération) est continué.
+    run_hook(_cursor_stop(governed, 0, "gen-1"), host_id=HostId.CURSOR)
+    after, _, after_hook = run_hook(_cursor_stop(governed, 1, "gen-2"), host_id=HostId.CURSOR)
+    assert after_hook.stop_active is True and after == {}
+    # Sans relance émise, l'état est effacé : le stop suivant est un premier stop.
+    assert not cursor_wire.followup_state_path(governed, "conv-1").exists()
+
+
+def test_cursor_project_dir_wins_over_a_subfolder_cwd(governed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.hosts.runtime import locate_project_root, normalize_input
+
+    sub = governed / "vendor" / "lib"
+    (sub / "_grimoire").mkdir(parents=True)
+    payload = _pre(sub, "Read", {"file_path": str(sub / "README.md")})
+    payload["workspace_roots"] = []
+    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(governed))
+    assert normalize_input(payload, host_id=HostId.CURSOR).project_root == governed.resolve()
+    assert locate_project_root(payload, host_id=HostId.CURSOR) == (governed.resolve(), True)
+    monkeypatch.delenv("CURSOR_PROJECT_DIR")
+    payload["workspace_roots"] = [str(governed)]
+    assert normalize_input(payload, host_id=HostId.CURSOR).project_root == governed.resolve()
+
+
+def test_unknown_cursor_event_fails_closed(governed: Path) -> None:
+    from grimoire.hosts.gemini_wire import UnjudgeableInputError
+    from grimoire.hosts.runtime import normalize_input
+
+    payload = {**_common(governed), "tool_name": "Write", "tool_input": {"file_path": "a.py"}}
+    with pytest.raises(UnjudgeableInputError):
+        normalize_input(payload, host_id=HostId.CURSOR)
+    proc = _entry(governed, payload, event=None)
+    assert proc.returncode == 2, proc.stdout
+    out = json.loads(proc.stdout)
+    assert out["permission"] == "deny" and "événement inconnu" in out["user_message"]
+    assert set(out) <= PERMISSION_OUTPUT["beforeShellExecution"]
+
+
+def test_shell_payload_without_event_name_is_still_judged_as_shell(governed: Path) -> None:
+    payload = {k: v for k, v in _shell(governed, DESTRUCTIVE).items() if k != "hook_event_name"}
+    out = _verdict(_entry(governed, payload, event=None), "beforeShellExecution")
+    assert out["permission"] == "deny"
+
+
+def test_merge_keeps_a_user_wrapper_whose_name_contains_grimoire_hook(governed: Path) -> None:
+    wrapper = {"command": "./my-grimoire-hook-wrapper.sh --host cursor"}
+    lookalike = {"command": "grimoire-hook --host claude --event PreToolUse"}
+    data = _hooks(_plan(governed), {"version": 1, "hooks": {"preToolUse": [wrapper, lookalike]}})
+    assert data["hooks"]["preToolUse"][:2] == [wrapper, lookalike]
+    quoted = {"command": '"/opt/my tools/grimoire-hook" --host cursor --event Stop', "timeout": 9}
+    data = _hooks(_plan(governed), {"version": 1, "hooks": {"stop": [quoted]}})
+    assert quoted not in data["hooks"]["stop"]  # commande exacte du kit : remplacée
+
+
+@pytest.mark.parametrize(
+    "hooks",
+    [["not", "an", "object"], {"preToolUse": {"command": "./audit.sh"}}],
+    ids=["hooks-not-object", "event-not-list"],
+)
+def test_malformed_hooks_json_is_preserved_not_overwritten(governed: Path, hooks: Any) -> None:
+    hooks_file = governed / ".cursor/hooks.json"
+    hooks_file.parent.mkdir(parents=True)
+    original = json.dumps({"version": 1, "hooks": hooks})
+    hooks_file.write_text(original, encoding="utf-8")
+    result = apply_plan(_plan(governed), governed)
+    assert hooks_file.read_text(encoding="utf-8") == original
+    assert any(label.startswith(".cursor/hooks.json") for label in result.skipped)
+
+
+def test_other_emitters_merge_behaviour_is_unchanged(governed: Path) -> None:
+    """Seule une fusion qui lève ``MergeRefusedError`` est préservée : Claude Code réécrit toujours un
+    `hooks` qui n'est pas un objet, comme avant."""
+    settings = governed / ".claude/settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"hooks": []}), encoding="utf-8")
+    emitter = emitter_for(HostId.CLAUDE_CODE_CLI)
+    assert emitter is not None
+    result = apply_plan(emitter.plan(build_surface(governed), governed), governed)
+    assert ".claude/settings.json" in result.written
+    assert isinstance(json.loads(settings.read_text(encoding="utf-8"))["hooks"], dict)
+
+
+def test_abstention_choice_is_declared(governed: Path) -> None:
+    assert any(d.surface == "hook abstention" for d in _plan(governed).degradations)

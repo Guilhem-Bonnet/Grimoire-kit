@@ -93,6 +93,15 @@ class EmittedFile:
     legacy_pattern: str = ""
 
 
+class MergeRefusedError(ValueError):
+    """Une fusion qui refuse d'écrire : la structure du fichier existant n'est pas celle qu'elle sait fusionner.
+
+    Levée par la fonction ``merge`` d'un :class:`JsonMerge` ; :func:`apply_plan` préserve alors
+    le fichier et le signale (conflit ``unreadable``) au lieu de l'écraser. Les fusions qui ne
+    la lèvent pas gardent leur comportement.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class JsonMerge:
     """A surgical merge into a JSON file the project also owns.
@@ -420,7 +429,11 @@ def _decide_merges(
         if not isinstance(loaded, dict):
             result.skip(f"{label} (racine JSON inattendue — fichier préservé)", CONFLICT_UNREADABLE)
             continue
-        merged = merge.merge(json.loads(json.dumps(loaded)))
+        try:
+            merged = merge.merge(json.loads(json.dumps(loaded)))
+        except MergeRefusedError as exc:
+            result.skip(f"{label} ({exc} — fichier préservé)", CONFLICT_UNREADABLE)
+            continue
         rendered = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
         if text is not None and text == rendered:
             result.unchanged.append(label)
