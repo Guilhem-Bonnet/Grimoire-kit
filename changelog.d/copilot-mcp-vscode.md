@@ -1,1 +1,0 @@
-- feat(hosts): l'émetteur Copilot écrit le serveur MCP du projet dans `.vscode/mcp.json` (fusion sans écraser vos serveurs), `MCP_SERVER` n'est plus dégradé pour Copilot, `doctor` signale la configuration absente ; la configuration de la CLI et de l'agent cloud est documentée
