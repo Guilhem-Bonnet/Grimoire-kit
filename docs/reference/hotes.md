@@ -93,11 +93,14 @@ documentation GitHub Copilot, lues le 2026-11-21).
 
 | Surface | Où | Ce que fait le kit |
 |---|---|---|
-| VS Code | `.vscode/mcp.json`, clé `servers`, entrée `{"type": "stdio", "command", "args"}`, `${workspaceFolder}` documenté | `grimoire up` / `grimoire host sync --host copilot` y ajoute le serveur du projet |
+| VS Code | `.vscode/mcp.json`, clé `servers`, entrée `{"type": "stdio", "command", "args"}`, `${workspaceFolder}` documenté | `grimoire up` / `grimoire host sync --host copilot` y ajoute le seul serveur du kit (`grimoire`) |
 | CLI Copilot | `.mcp.json` à la racine (clé `mcpServers`) ou `.github/mcp.json` ; `~/.copilot/mcp-config.json` côté utilisateur. `.vscode/mcp.json` n'est **pas** lu | rien de plus : le `.mcp.json` que le scaffolder écrit pour Claude Code est celui-là |
 | Agent cloud | réglages du dépôt, pas de fichier | rien, à saisir (ci-dessous) |
 
-`.vscode/mcp.json` est fusionné, jamais réécrit : un serveur déjà déclaré (même
+`.vscode/mcp.json` est fusionné, jamais réécrit. Seul le serveur du kit
+(`grimoire`) y est écrit : les autres serveurs de `.mcp.json` sont les vôtres,
+prévus pour Claude Code, et ne sont pas copiés (sans `env`, ils seraient cassés
+ou exposés à un hôte non voulu). un serveur déjà déclaré (même
 nommé `grimoire`, écrit à la main avec une autre commande) est conservé tel quel,
 les autres clés (`inputs`…) aussi, et le kit ne retire aucune entrée. Un fichier
 listé dans `hosts.preserve` n'est pas touché. Le chemin venv du projet s'écrit

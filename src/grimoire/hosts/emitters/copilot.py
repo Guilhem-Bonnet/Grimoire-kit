@@ -31,7 +31,7 @@ from grimoire.hosts.emitters.base import (
     persona_section,
 )
 from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT
-from grimoire.hosts.emitters.copilot_mcp import vscode_mcp_merge
+from grimoire.hosts.emitters.copilot_mcp import KIT_SERVERS, vscode_mcp_merge
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.surface import (
@@ -396,7 +396,7 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         f"| Skills attachées | {attached} — repliées dans le fichier de leur agent |",
         f"| Prompts | {len([c for c in surface.commands if c.source != 'workflow'])} — `.github/prompts/` |",
         f"| Hooks | {len(surface.hooks)} — `.github/hooks/` |",
-        f"| Serveurs MCP | {len(surface.mcp_servers)} — `.vscode/mcp.json` |",
+        f"| Serveurs MCP | {len([m for m in surface.mcp_servers if m.name in KIT_SERVERS])} — `.vscode/mcp.json` |",
         "",
         "Les fichiers de hook ne portent pas de marqueur de gestion : ce sont des",
         "JSON purs. C'est la commande invoquée qui dit à qui le fichier",

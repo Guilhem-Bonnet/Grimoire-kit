@@ -6,6 +6,7 @@ clé ``servers`` ; un serveur stdio y est ``{"type": "stdio", "command", "args",
 et ``${workspaceFolder}`` y est une variable documentée. Un serveur distant y est
 ``{"type": "http", "url"}``.
 
+Seuls les serveurs du kit (:data:`KIT_SERVERS`) sont écrits.
 Le fichier appartient aussi à l'utilisateur (autres serveurs, ``inputs``) : la fusion
 ne fait qu'ajouter un serveur absent, jamais remplacer ni retirer une entrée — comme
 ``.gemini/settings.json`` et ``opencode.json``. Sans marqueur de propriété possible
@@ -24,6 +25,9 @@ from grimoire.hosts.surface import McpServerSpec
 
 VSCODE_MCP = Path(".vscode") / "mcp.json"
 WORKSPACE_FOLDER = "${workspaceFolder}"
+#: Serveurs que le kit gère : les autres de `.mcp.json` sont ceux de l'utilisateur, prévus pour
+#: Claude Code ; les copier sans `env` les casserait ou les exposerait à un hôte non voulu.
+KIT_SERVERS = frozenset({"grimoire"})
 
 
 def workspace_command(command: str) -> str:
@@ -45,10 +49,10 @@ def server_entry(server: McpServerSpec) -> dict[str, Any]:
 
 
 def vscode_mcp_merge(servers: tuple[McpServerSpec, ...]) -> JsonMerge | None:
-    """La fusion dans ``.vscode/mcp.json``, ou ``None`` quand le projet ne déclare aucun serveur."""
-    if not servers:
+    """La fusion dans ``.vscode/mcp.json`` des seuls serveurs du kit, ou ``None`` s'il n'y en a pas."""
+    entries = {server.name: server_entry(server) for server in servers if server.name in KIT_SERVERS}
+    if not entries:
         return None
-    entries = {server.name: server_entry(server) for server in servers}
 
     def merge(data: dict[str, Any]) -> dict[str, Any]:
         current = data.get("servers")

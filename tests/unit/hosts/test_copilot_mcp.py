@@ -145,3 +145,17 @@ class TestDoctor:
 
     def test_no_check_without_copilot(self, tmp_path: Path) -> None:
         assert check_copilot_mcp(tmp_path) == []
+
+
+def test_user_servers_of_mcp_json_are_not_copied(project: Path) -> None:
+    seed = {
+        "mcpServers": {
+            "grimoire": {"command": "grimoire-mcp", "args": [], "env": {}},
+            "perso": {"command": "mon-serveur", "env": {"TOKEN": "x"}},
+            "distant": {"type": "http", "url": "https://exemple.test/mcp"},
+        }
+    }
+    (project / ".mcp.json").write_text(json.dumps(seed), encoding="utf-8")
+    _sync(project)
+    assert set(_servers(project)) == {"grimoire"}
+    assert "TOKEN" not in (project / MCP).read_text(encoding="utf-8")
