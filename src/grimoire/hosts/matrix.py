@@ -197,6 +197,7 @@ def _texts(plan: EmitPlan) -> list[tuple[str, str]]:
     """Ce que le plan écrit, fichier par fichier ; un fusion JSON est rendue sur un objet vide."""
     out = [(f.relpath.as_posix(), f.content) for f in plan.files]
     out.extend((m.relpath.as_posix(), json.dumps(m.merge({}), ensure_ascii=False)) for m in plan.merges)
+    out.extend((m.relpath.as_posix(), m.merge(None)) for m in plan.text_merges)
     return out
 
 
@@ -227,6 +228,7 @@ def _hook_cell(
         if hook.enforcement is Enforcement.BLOCKING:
             why = (
                 "refus documenté par l'hôte mais non vérifié (aucune capture réelle) : advisory, jamais enforced"
+                + (f" ({profile.hook_approval})" if profile.hook_approval else "")
                 if profile.documents_unverified_block(hook.event)
                 else "l'hôte ne sait pas bloquer"
             )

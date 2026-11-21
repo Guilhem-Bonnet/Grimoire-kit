@@ -24,6 +24,7 @@ from grimoire.hosts import gemini_wire
 from grimoire.hosts.capabilities import (
     GOVERNANCE_FUNCTIONS,
     GOVERNANCE_LABELS,
+    HostProfile,
     ParityLevel,
     all_profiles,
     gaps_for,
@@ -51,7 +52,7 @@ from grimoire.hosts.runtime import (
     payload_event_name,
     run_hook,
 )
-from grimoire.hosts.surface import Enforcement
+from grimoire.hosts.surface import Enforcement, HookEvent
 
 host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes et hooks par hôte.")
 console = Console()
@@ -114,6 +115,10 @@ class _HostStatus:
     #: Version d'hôte installée et preuve du frein qui la couvre (#876) ; vides si l'hôte n'est pas sondable.
     host_version: str = ""
     brake_proof: dict[str, Any] = field(default_factory=dict)
+    #: Ce que l'utilisateur doit faire pour que l'hôte exécute les hooks du projet
+    #: (Codex : approbation via /hooks) ; vide si l'hôte n'en demande pas ou si
+    #: aucun hook n'est émis. Le kit ne lit pas cette approbation : il la rappelle.
+    hook_approval: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +137,7 @@ class _HostStatus:
             "entry_agent_declared": self.entry_agent_declared,
             "host_version": self.host_version,
             "brake_proof": self.brake_proof,
+            "hook_approval": self.hook_approval,
         }
 
 
@@ -217,6 +223,13 @@ def host_list(ctx: typer.Context) -> None:
     def mark(value: bool) -> str:
         return "[green]oui[/green]" if value else "[yellow]non[/yellow]"
 
+    def mark_blocking(profile: HostProfile) -> str:
+        # Un hôte qui documente des refus sans qu'aucun ne soit tenu pour bloquant
+        # (``blocking_events`` vide, Codex) est consultatif, pas « oui ».
+        if profile.blocking_hooks and not any(profile.blocks(event) for event in HookEvent):
+            return "[yellow]consultatif[/yellow]"
+        return mark(profile.blocking_hooks)
+
     for profile in profiles:
         name = profile.display_name + (" [cyan](détecté)[/cyan]" if profile.host_id == detected else "")
         table.add_row(
@@ -224,7 +237,7 @@ def host_list(ctx: typer.Context) -> None:
             mark(profile.subagents_native),
             mark(profile.skills_native),
             mark(profile.commands_native),
-            mark(profile.blocking_hooks),
+            mark_blocking(profile),
             mark(profile.permissions_native),
         )
     console.print(table)
@@ -375,6 +388,7 @@ def host_status(
                 entry_agent_declared=entry_agent_name(project_root),
                 host_version=host_version,
                 brake_proof=brake_proof,
+                hook_approval=profile.hook_approval if plan.merges and surface.hooks else "",
             )
         )
 
@@ -427,6 +441,8 @@ def host_status(
             when = f", sondé le {proof['probed_at']}" if proof.get("probed_at") else ""
             label = {"verified": "prouvé", "failed": "[red]sonde échouée[/red]", "unverified": "[yellow]non prouvé[/yellow]"}[proof["status"]]
             console.print(f"  frein PreToolUse {label} pour la version {proof['version']}{when}")
+        if item.hook_approval:
+            console.print(f"  [yellow]hooks non exécutés sans approbation[/yellow] — {item.hook_approval} (non vérifiable par le kit)")
         if item.blocking_hooks:
             console.print(f"  hooks bloquants : {', '.join(item.blocking_hooks)}")
         if item.unsupported_events:

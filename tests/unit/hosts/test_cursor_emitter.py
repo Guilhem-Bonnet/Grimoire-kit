@@ -838,6 +838,8 @@ def test_invalid_skill_slug_falls_back_to_a_readable_copy(governed: Path) -> Non
     assert "Mauvais_Slug" in gap.reason
 
 
-def test_codex_keeps_the_prose_blocking_gap() -> None:
-    gap = next(g for g in gaps_for(profile_for(HostId.CODEX)) if g.surface == "blocking_hooks")
-    assert gap.fallback == "governance stated as instructions, enforced by CI only"
+def test_codex_declares_its_hook_approval_gap_not_a_prose_one() -> None:
+    """Codex a désormais son émetteur riche (#1281 L2) : plus de lacune « prose », l'approbation /hooks à la place."""
+    surfaces = {g.surface: g for g in gaps_for(profile_for(HostId.CODEX))}
+    assert "hook_approval" in surfaces
+    assert surfaces.get("blocking_hooks") is None or "instructions" not in surfaces["blocking_hooks"].fallback

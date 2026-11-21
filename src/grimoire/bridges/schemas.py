@@ -165,18 +165,23 @@ GITHUB_COPILOT_MANIFEST = HostCapabilityManifest(
     tool_policy_native=False,
 )
 
+# Codex (learn.chatgpt.com/docs/hooks, lue le 2026-11-21 ; CLI non installée sur
+# le poste) documente ces événements dans `.codex/hooks.json`. Le manifeste dit ce
+# que l'hôte **déclenche**, pas que chacun refuse : un hook de projet n'y tourne
+# qu'approuvé via /hooks, et aucun refus n'a été observé (voir
+# HostProfile.documented_blocking_events).
 CODEX_MANIFEST = HostCapabilityManifest(
     host_id=HostId.CODEX,
     display_name="Codex",
     hooks=HostHooks(
-        session_start=False,
-        user_prompt_submit=False,
-        pre_tool_use=False,
-        post_tool_use=False,
+        session_start=True,
+        user_prompt_submit=True,
+        pre_tool_use=True,
+        post_tool_use=True,
         subagent_start=True,
         subagent_stop=True,
-        pre_compact=False,
-        stop=False,
+        pre_compact=True,
+        stop=True,
     ),
     fallback=HostFallback(
         mode=FallbackMode.CLI_GUARDED,
