@@ -19,6 +19,7 @@ from grimoire.hosts.decisions.read_only import _blank_quoted, executed_surfaces,
 # Le classement lecture / mutation vit dans :mod:`.read_only` ; il reste importable d'ici.
 from grimoire.hosts.decisions.read_only import is_read_only_command as is_read_only_command
 from grimoire.hosts.decisions.read_only_layout import _HEREDOC_OPEN_RE, strip_heredoc_bodies
+from grimoire.hosts.decisions.search_globs import SEARCH_NAMES, file_globs, glob_secret, search_locations
 from grimoire.hosts.secrets import SECRET_RULES
 from grimoire.policies.schemas import ActionKind, MutationClass
 
@@ -503,6 +504,10 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
     interpreted = interpreted_bodies(command) if command else ()
     candidates = [c for c in (_strip_heredoc_bodies(command) if command else "", *targets) if c]
     candidates.extend(body for _, body in interpreted)
+    # Une recherche lit ce qu'elle parcourt : chemins et motifs de fichiers (voir :mod:`.search_globs`).
+    is_search = name in SEARCH_NAMES
+    if is_search:
+        candidates.extend(search_locations(name, payload, targets))
     if command:
         # Le nom que le programme reçoit, guillemets retirés : ``.e"n"v`` est ``.env``.
         candidates.append(unquoted_text(command))
@@ -524,6 +529,9 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
             break
         if secret_target:
             break
+
+    if not secret_target and is_search:
+        secret_target = next((hit for glob in file_globs(name, payload) if (hit := glob_secret(glob))), "")
 
     if not secret_target:
         # #876 lot 1 : la clé du cockpit et le journal du mandat se lisent aussi par joker, `cd`, `..` ou lien.
@@ -557,7 +565,7 @@ def classify_tool(tool_name: str, tool_input: dict[str, Any] | None = None) -> T
         name in _WRITE_NAMES or any(marker in name for marker in _WRITE_MARKERS)
     )
     is_web = any(marker in name for marker in _WEB_MARKERS)
-    is_read = any(marker in name for marker in _READ_MARKERS)
+    is_read = is_search or any(marker in name for marker in _READ_MARKERS)
 
     if secret_target and (is_read or is_execute or not name):
         kind = ActionKind.SECRET_ACCESS

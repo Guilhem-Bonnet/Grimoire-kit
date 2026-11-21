@@ -608,6 +608,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "lease_brake": (GUARD, ""),
     "pause_brake": (GUARD, ""),
     "profile_floor": (SUPPORT, "plancher de profil lu par evidence_gate, activation, tool_policy et context_capsule : panne couverte par leurs cas"),
+    "search_globs": (SUPPORT, "confrontation des motifs de fichiers d'une recherche aux familles de secrets, appelée par tool_facts.classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),
     "read_only": (SUPPORT, "classement lecture / mutation d'une ligne de commande, appelé par tool_facts.classify_tool : une panne y lève dans classify_tool, couverte par le cas pre_destructive de tool_facts"),
     "read_only_arguments": (SUPPORT, "règles de lecture par verbe (curl, gh, git, find, sed, awk…) appelées par read_only dans classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),
     "read_only_layout": (SUPPORT, "guillemets, commentaires et corps de heredoc d'une ligne de commande, lus par read_only et tool_facts dans classify_tool : une panne y remonte par classify_tool, couverte par le cas tool_facts"),

@@ -226,8 +226,10 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
     # Copilot n'a pas de table de permissions déclarative (dégradation
     # « permissions ») : le refus de lecture d'un secret n'existe que dans la
     # garde. La lecture de fichier reste donc dans le matcher, contrairement à
-    # Claude Code où la table de refus la couvre sans processus.
-    "secret": ("Read", "view"),
+    # Claude Code où la table de refus la couvre sans processus. La recherche
+    # (`grep`/`rg` rapportés `Grep`, `glob` rapporté `Glob`) lit ce qu'elle parcourt :
+    # même garde que la lecture.
+    "secret": ("Read", "view", "Grep", "grep", "rg", "Glob", "glob"),
     "network": ("WebFetch", "WebSearch", "web_fetch", "web_search"),
     # Délégation à un sous-agent : `task`, rapporté `Agent` (`Task` accepté).
     "delegation": ("Agent", "Task", "task"),
