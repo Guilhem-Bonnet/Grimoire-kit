@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.97.0] - 2026-11-21
+
+- feat(hosts): les agents Copilot reçoivent `model:` quand la persona a une affinité de modèle et que `dispatch.copilot_models.<palier>` nomme le modèle Copilot du palier ; les skills et prompts Copilot émettent `argument-hint`, `user-invocable` et `disable-model-invocation` quand leur source les déclare ; `agents:` est déclaré « Local only » dans le plan (#1298)
+- feat(hosts): l'émetteur Copilot écrit le serveur MCP du projet dans `.vscode/mcp.json` (fusion sans écraser vos serveurs), `MCP_SERVER` n'est plus dégradé pour Copilot, `doctor` signale la configuration absente ; la configuration de la CLI et de l'agent cloud est documentée (#1297)
+
 ## [3.96.0] - 2026-11-21
 
 - fix(hosts): la décision dispatch-model s'abstient quand la description d'un appel `Agent` sans `model` parle d'une garde, d'un hook, de la politique, de la CI, de la sécurité ou d'une faille, au lieu d'y deviner `haiku` ; le vocabulaire vient de `missions/sensitive_route.py` (`mentions_sensitive_topic`), la classe V0/V1 d'une tâche réclamée prime toujours (#1294)
