@@ -26,7 +26,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.standard_state import active_task_id, suspended_state_writes
-from grimoire.hosts import copilot_wire, gemini_wire
+from grimoire.hosts import copilot_wire, cursor_wire, gemini_wire
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (
     ADVISORY_PRE_TOOL_DECISIONS,
@@ -46,6 +46,7 @@ from grimoire.hosts.hook_entry import (
     COPILOT_DENY_EXIT,
     copilot_flat_verdict,
     copilot_guard_refusal,
+    cursor_guard_refusal,
 )
 
 #: Neutral event -> the name a host writes in its configuration and payloads.
@@ -86,6 +87,11 @@ def parse_event(name: str, host_id: HostId | None = None) -> HookEvent | None:
         gemini = gemini_wire.event_from_gemini(name)
         if gemini is not None:
             return gemini
+    if host_id is HostId.CURSOR:
+        # Cursor écrit ``beforeShellExecution``, ``beforeSubmitPrompt``… (voir ``cursor_wire``).
+        cursor = cursor_wire.event_from_cursor(name)
+        if cursor is not None:
+            return cursor
     key = name.strip().replace("-", "_").replace(" ", "").lower()
     if key in _EVENT_BY_WIRE_NAME:
         return _EVENT_BY_WIRE_NAME[key]
@@ -161,7 +167,9 @@ _ROOT_PAYLOAD_KEYS = ("cwd", "workspaceFolder", "workspace_folder", "project_roo
 #: ``COPILOT_WORKSPACE_FOLDER`` : heuristique, aucune source documentée (les références
 #: GitHub et VS Code des hooks ne la citent pas) ; le candidat reste borné par le
 #: marqueur ``_grimoire/``.
-_ROOT_ENV_VARS = ("GRIMOIRE_PROJECT_ROOT", "COPILOT_WORKSPACE_FOLDER")
+#: ``CURSOR_PROJECT_DIR`` : documentée par Cursor (https://cursor.com/docs/hooks), qui exporte
+#: aussi ``CLAUDE_PROJECT_DIR`` comme alias de compatibilité.
+_ROOT_ENV_VARS = ("GRIMOIRE_PROJECT_ROOT", "CURSOR_PROJECT_DIR", "COPILOT_WORKSPACE_FOLDER")
 
 
 def _nearest_project_root(start: Path) -> Path | None:
@@ -250,6 +258,16 @@ def normalize_input(
             tool_name, tool_input = gemini_wire.route_tool_call(tool_name, tool_input)
         else:
             tool_name = gemini_wire.canonical_tool_name(tool_name)
+    session = str(_pick(payload, "session_id", "sessionId", default="") or "")
+    if host_id is HostId.CURSOR:
+        # Outils `Shell`/`Write`/`Delete`… ramenés aux classes du kit ; `beforeShellExecution`
+        # porte sa commande hors de `tool_input`. Un appel sans nom ni chemin lisible
+        # reste sans nom : la garde le refuse (voir `cursor_wire.normalize_tool_call`).
+        if resolved in {HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE, HookEvent.POST_TOOL_USE_FAILURE}:
+            tool_name, tool_input = cursor_wire.normalize_tool_call(payload, resolved)
+        # `loop_count` > 0 : `stop` relancé par un `followup_message`, l'équivalent de `stop_hook_active`.
+        stop_active = stop_active or cursor_wire.stop_active(payload)
+        session = cursor_wire.session_id(payload)
     return HookInput(
         event=resolved,
         project_root=resolve_project_root(payload, project_root),
@@ -266,7 +284,7 @@ def normalize_input(
         ),
         agent_type=str(_pick(payload, "agent_type", "agentType", default="") or ""),
         agent_id=str(_pick(payload, "agent_id", "agentId", default="") or ""),
-        session_id=str(_pick(payload, "session_id", "sessionId", default="") or ""),
+        session_id=session,
         stop_active=stop_active,
         host=host_id.value if host_id is not None and host_id is not HostId.UNKNOWN else "",
         tool_use_id=str(_pick(payload, "tool_use_id", "toolUseId", "tool_call_id", "toolCallId", default="") or ""),
@@ -303,6 +321,11 @@ def _persist_capsule(hook: HookInput, decision: Decision) -> tuple[Path | None, 
 
 def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, Any]:
     """Render *decision* into the JSON *host_id* understands for this event."""
+    if host_id is HostId.CURSOR:
+        # Cursor : verdict à plat (`permission`, `user_message`, `agent_message`),
+        # relance de fin de tour par `followup_message` ; une abstention y garde une
+        # `permission` (voir `cursor_wire.render`).
+        return cursor_wire.render(decision, hook)
     if decision.abstain:
         # Pas d'avis : rien à rendre, l'hôte poursuit comme sans hook.
         return {}
@@ -909,6 +932,9 @@ def main(argv: list[str] | None = None) -> int:
             # plantage refuserait l'outil avec un message de l'hôte qui ne dit
             # pas quoi faire. Le refus explicite dit d'où vient la panne.
             verdict = guard_failure_verdict(cause)
+            if host_id is HostId.CURSOR:
+                # Forme à plat de Cursor, code 0 : le refus et sa cause restent lisibles.
+                verdict = cursor_guard_refusal(verdict)
             if host_id is HostId.GITHUB_COPILOT:
                 return _copilot_refusal_exit(copilot_guard_refusal(verdict))
             if host_id is HostId.CLAUDE_CODE_CLI:

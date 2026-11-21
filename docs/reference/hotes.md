@@ -25,7 +25,8 @@ projet (agents, standard, mémoire)
         ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
         ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, GEMINI.md
-        └──▶ émetteur prose        → AGENTS.md · .cursor/rules
+        ├──▶ émetteur Cursor       → .cursor/{hooks.json,agents,skills,rules}
+        └──▶ émetteur prose        → AGENTS.md
 ```
 
 La règle de gouvernance, elle, n'est écrite qu'une fois. Le module de décisions
@@ -57,7 +58,7 @@ ajouté ou modifié une persona.
 | GitHub Copilot | oui | oui | oui | oui | non |
 | opencode | oui | oui | oui | oui (plugin `tool.execute.before`, vérifié) | non (non prouvé) |
 | Codex | non | non | non | non | non |
-| Cursor | non | non | non | non | non |
+| Cursor | oui | oui | non | écrits, non vérifiés (`preToolUse`, `beforeShellExecution` : advisory) | non |
 | Gemini CLI | oui | non | oui | oui (`BeforeTool`, `BeforeAgent` ; fin de tour non vérifiée) | non |
 
 Rien n'est abandonné en silence. Ce qu'un hôte ne sait pas exécuter est déclaré
@@ -81,7 +82,11 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   chargement de compétences à la demande (leurs corps sont copiés sous
   `_grimoire/hosts/skills/`). Les règles de permissions passent par le hook
   `BeforeTool`, faute de table déclarative.
-- Les hôtes en prose (Codex, Cursor) n'ont pas de hooks : la gouvernance y est
+- Cursor reçoit des hooks, des sous-agents et des compétences (voir « Le protocole
+  de hooks de Cursor »). La garde est écrite d'après la documentation de Cursor,
+  mais aucun refus n'a été observé sur un Cursor réel : elle reste déclarée
+  `advisory` dans la matrice, jamais `enforced`, et la CI reste l'autorité.
+- L'hôte en prose (Codex) n'a pas de hooks : la gouvernance y est
   énoncée comme règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le
   catalogue le dit explicitement plutôt que de laisser croire à une protection.
 
@@ -587,6 +592,74 @@ fin de tour capable de bloquer (`AfterAgent` est documenté comme hook, pas
 comme point de blocage) ; le format des fichiers de session
 (`transcript_path`). Aucune sortie de refus n'est donc émise pour
 `AfterAgent`/`SessionEnd`, et leurs fixtures ne prouvent pas un blocage.
+
+### Le protocole de hooks de Cursor
+
+Sources : [hooks](https://cursor.com/docs/hooks),
+[sous-agents](https://cursor.com/docs/context/subagents),
+[compétences](https://cursor.com/docs/context/skills) et
+[mode headless](https://cursor.com/docs/cli/headless), lues le 21 novembre 2026.
+Cursor n'est pas installé sur le poste de développement : aucune capture réelle,
+tout ce qui suit est écrit d'après la documentation (`grimoire.hosts.cursor_wire`).
+
+L'émetteur Cursor (`grimoire.hosts.emitters.cursor`) fusionne
+`.cursor/hooks.json` (`{"version": 1, "hooks": {…}}`), lancé par Cursor depuis la
+racine du projet :
+
+| Événement Cursor | Événement neutre | Sortie du hook |
+|---|---|---|
+| `beforeShellExecution` | `pre_tool_use` (famille `execute`) | `{"permission": "allow" \| "deny" \| "ask", "user_message", "agent_message"}` |
+| `preToolUse` (matcher `Write\|Delete\|Read\|Grep`) | `pre_tool_use` | même forme ; un `ask` du kit devient `deny` motivé |
+| `sessionStart` | `session_start` | `{"additional_context": …}` |
+| `postToolUse` (matcher `Write\|Delete\|Task\|Shell`) | `post_tool_use` | `{"additional_context": …}` |
+| `preCompact` | `pre_compact` | `{"user_message": …}` (observationnel) ; la capsule est écrite sur disque |
+| `subagentStop` | `subagent_stop` | aucun verdict (un `followup_message` relancerait le sous-agent) |
+| `stop` | `stop` | refus de clôture → `{"followup_message": …}` |
+
+Choix et limites, tous déclarés comme dégradations :
+
+- **Deux événements pour la garde.** `ask` est « accepté par le schéma mais non
+  appliqué » sur `preToolUse` ; `beforeShellExecution` l'applique. Les commandes
+  passent donc par `beforeShellExecution`, où une demande de confirmation reste
+  une demande, et le reste par `preToolUse`, où elle devient un refus motivé
+  (échec fermé). `Task`, les outils `MCP:<outil>` et les outils que la doc ne
+  nomme pas ne passent pas par la garde.
+- **Échec fermé.** La garde porte `"failClosed": true` (un plantage, un délai
+  dépassé ou une sortie vide bloquent l'action) et un délai de 30 s ; sans
+  `grimoire-hook` trouvable, elle est écrite sans `failClosed` et le plan le dit.
+  Un `Write`/`Read`/`Delete` sans chemin lisible est refusé : la doc ne donne pas
+  les clés d'entrée de ces outils, le kit lit `file_path`, `path`, `target_file`,
+  `filePath`, `targetFile`, `absolute_path`, et ne devine rien d'autre.
+- **Code de sortie.** La doc dit que le code 2 vaut `deny`, mais ne documente les
+  messages que dans la sortie JSON. Le refus sort donc en JSON, code 0 : même
+  blocage, et un motif que l'utilisateur et l'agent lisent.
+- **Fin de tour.** `stop` ne refuse pas : un `followup_message` relance l'agent
+  avec le motif, seulement sur un tour terminé (`status` `completed`) et au plus
+  5 fois (`loop_limit`, la valeur par défaut documentée, écrite explicitement).
+  `loop_count` > 0 est traité comme un `Stop` continué (`stop_hook_active` chez
+  Claude Code).
+- **Pas de rappel par message.** `beforeSubmitPrompt` ne rend que
+  `continue`/`user_message` : aucun contexte ne peut y être injecté, le hook
+  `user_prompt_submit` n'est pas câblé.
+- **Double garde.** Cursor charge aussi les hooks de `.claude/settings.json`
+  (import tiers, actif par défaut) : un projet qui émet aussi pour Claude Code
+  voit la garde tourner deux fois sous Cursor ; le refus l'emporte.
+
+Le reste de la surface : `.cursor/agents/<nom>.md` (`name`, `description`,
+`readonly: true` pour une persona sans écriture ni exécution, `model` seulement
+pour un palier que le projet nomme sous `dispatch.cursor_models.<palier>` de la
+politique d'orchestration, sinon le défaut documenté `inherit`) ;
+`.cursor/skills/<slug>/SKILL.md` (`name` égal au dossier, minuscules, chiffres et
+tirets ; un slug hors de cette forme est copié sous `_grimoire/hosts/skills/`) ;
+les règles `.cursor/rules/grimoire.mdc` et `grimoire-rules*.mdc` inchangées. Le
+mode headless (`agent -p`) est documenté, mais le kit ne lance aucun worker
+Cursor.
+
+**Non vérifié** : un refus réel sous `preToolUse` ou `beforeShellExecution`, la
+lecture du JSON sur un code 2, les clés d'entrée de `Read`/`Write`/`Delete`, la
+correspondance entre `conversation_id` et `session_id`, et la relance par
+`followup_message`. La matrice rend donc la garde `advisory` (« refus documenté
+par l'hôte mais non vérifié ») tant qu'aucune capture n'existe.
 
 ### Le hook `stop`
 

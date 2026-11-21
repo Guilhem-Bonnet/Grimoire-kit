@@ -223,7 +223,13 @@ def _hook_cell(
             )
         if hook.enforcement is Enforcement.BLOCKING and profile.blocks(hook.event):
             return Cell("hook", subject, host.value, ENFORCED, Enforcement.BLOCKING.value, carriers)
-        why = "l'hôte ne sait pas bloquer" if hook.enforcement is Enforcement.BLOCKING else ""
+        why = ""
+        if hook.enforcement is Enforcement.BLOCKING:
+            why = (
+                "refus documenté par l'hôte mais non vérifié (aucune capture réelle) : advisory, jamais enforced"
+                if profile.documents_unverified_block(hook.event)
+                else "l'hôte ne sait pas bloquer"
+            )
         return Cell("hook", subject, host.value, ADVISORY, Enforcement.ADVISORY.value, carriers, why)
     degradation = _declares(plan, "hooks", f"hook {event}")
     if degradation is None:
