@@ -1,0 +1,1 @@
+- feat(hosts): les agents Copilot reçoivent `model:` quand la persona a une affinité de modèle et que `dispatch.copilot_models.<palier>` nomme le modèle Copilot du palier ; les skills et prompts Copilot émettent `argument-hint`, `user-invocable` et `disable-model-invocation` quand leur source les déclare ; `agents:` est déclaré « Local only » dans le plan

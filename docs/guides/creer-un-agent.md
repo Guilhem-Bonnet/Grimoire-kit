@@ -125,11 +125,14 @@ et `cost` pour choisir un modèle (`reasoning: high` → `opus` quoi qu'il arriv
 sinon `cost: low` → `haiku` ; sinon `reasoning: low` → `haiku` ; sinon `inherit`,
 le modèle de la session). Le concierge illustre le premier cas : raisonnement
 élevé pour trier juste, mais invoqué à chaque tour — `cost: low` ne le
-rétrograde pas. Copilot, lui, ne reçoit pas cette affinité : son contrat
-`.github/agents/*.agent.md` n'accepte qu'un nom de modèle explicite ou une
-liste de repli, sans équivalent documenté de `inherit` ; `grimoire host sync
---host copilot` ne devine donc aucun nom de modèle et signale l'écart comme
-dégradation plutôt que de le taire. Le fichier de l'agent d'entrée émis pour
+rétrograde pas. Copilot reçoit la même affinité, traduite : `model:` n'est émis dans
+`.github/agents/*.agent.md` que si la persona a un palier (`opus`, `sonnet`,
+`haiku`) ET que `dispatch.copilot_models.<palier>` donne le nom Copilot de ce
+palier. Sans correspondance, ou pour `inherit`, rien n'est émis (le modèle du
+sélecteur s'applique) et `grimoire host sync --host copilot` signale l'écart
+comme dégradation « model affinity ». `model-policy` n'est pas émis : sa valeur
+par défaut (`preferred`) laisse l'utilisateur changer de modèle, et le harness
+Copilot ne le transmet pas à son SDK (référence du fichier d'agent VS Code). Le fichier de l'agent d'entrée émis pour
 Claude Code porte en plus une « Politique de dispatch » (issue #329) : le
 modèle d'un sous-agent suit la classe de vérifiabilité de sa tâche
 (V0 → `haiku`, V1 → `sonnet`, V2 → le modèle de la session) et chaque

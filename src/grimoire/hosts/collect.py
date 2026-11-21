@@ -620,6 +620,17 @@ def _max_turns(value: Any) -> int | None:
     return None
 
 
+def _optional_bool(meta: dict[str, Any], *keys: str) -> bool | None:
+    """Un booléen de frontmatter, ou ``None`` quand la source ne le déclare pas (ou pas en booléen)."""
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+            return value.strip().lower() == "true"
+    return None
+
+
 def _bundled(kind: str) -> list[Path]:
     directory = framework_path() / "hosts" / kind
     if not directory.is_dir():
@@ -670,6 +681,9 @@ def collect_skills(project_root: Path, *, governed: bool | None = None) -> tuple
             tools=_tool_verbs(meta.get("tools")),
             license=str(meta.get("license") or ""),
             compatibility=str(meta.get("compatibility") or ""),
+            user_invocable=_optional_bool(meta, "user-invocable", "user_invocable"),
+            disable_model_invocation=_optional_bool(meta, "disable-model-invocation", "disable_model_invocation"),
+            argument_hint=str(meta.get("argument-hint") or meta.get("argument_hint") or ""),
         )
     return tuple(by_slug.values())
 

@@ -2821,7 +2821,12 @@ _AGENT_AUTOSTART_BY_HOST: dict[HostId, tuple[bool, str]] = {
         "`claude --agent <name>` (code.claude.com/docs/en/cli-reference), clé `agent` "
         "(code.claude.com/docs/en/settings-reference), `agent_type` au SessionStart (code.claude.com/docs/en/hooks)",
     ),
-    HostId.GITHUB_COPILOT: (False, "un agent `.github/agents/*.agent.md` ne s'ouvre que par le sélecteur de chat"),
+    HostId.GITHUB_COPILOT: (
+        False,
+        "VS Code : sélecteur de chat seulement ; la CLI a `copilot --agent <id>` (docs.github.com, agents "
+        "personnalisés de Copilot CLI) mais le profil décrit VS Code et aucune source ne dit que les hooks "
+        "Copilot portent l'identité de l'agent",
+    ),
     HostId.CODEX: (False, "`codex` n'a pas d'option d'agent nommé (AGENTS.md seulement)"),
     HostId.CURSOR: (False, "Cursor charge des règles et des sous-agents, pas une session dans un agent"),
     HostId.GEMINI_CLI: (False, "`gemini` n'a pas d'option d'agent nommé (sous-agents `.gemini/agents/`, pas de session ouverte dans un agent)"),

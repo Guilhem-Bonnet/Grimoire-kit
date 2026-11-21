@@ -416,6 +416,12 @@ class SkillSpec:
     # Champs optionnels de la spec Agent Skills (#874), émis seulement quand renseignés.
     license: str = ""
     compatibility: str = ""
+    # Invocation (doc VS Code « Agent Skills ») : ``None`` = la source ne dit rien,
+    # l'émetteur n'écrit alors rien et l'hôte applique son défaut documenté
+    # (``user-invocable: true``, ``disable-model-invocation: false``).
+    user_invocable: bool | None = None
+    disable_model_invocation: bool | None = None
+    argument_hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {

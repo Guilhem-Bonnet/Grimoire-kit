@@ -18,6 +18,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
+from grimoire.hosts.decisions.dispatch_model import copilot_model_for
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
     Degradation,
@@ -30,7 +31,7 @@ from grimoire.hosts.emitters.base import (
     parallel_brainstorm_section,
     persona_section,
 )
-from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT
+from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT, _model_for
 from grimoire.hosts.emitters.copilot_mcp import KIT_SERVERS, vscode_mcp_merge
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
@@ -117,17 +118,48 @@ non vérifié, quel que soit son ton.
 {parallel_brainstorm_section("résultat relu selon la classe ci-dessus")}"""
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:
-    # Pas de `model` ici : le contrat documenté pour .github/agents/*.agent.md
-    # (https://code.visualstudio.com/docs/copilot/customization/custom-agents)
-    # accepte un nom de modèle explicite ou une liste de repli, mais ne
-    # documente aucune valeur de sélection automatique équivalente à
-    # `inherit` côté Claude Code. Inventer un nom de modèle serait mentir sur
-    # ce que l'hôte sait faire ; la lacune est déclarée en toutes lettres dans
-    # la dégradation « model affinity » du plan plutôt que d'être tue.
+def _agent_model(agent: AgentSpec, copilot_models: dict[str, str]) -> str:
+    """Le ``model`` Copilot de *agent*, ou ``""`` (rien n'est émis).
+
+    Même affinité que Claude Code (:func:`_model_for`, reasoning x cost -> palier
+    ``opus``/``sonnet``/``haiku``), traduite par ``dispatch.copilot_models.<palier>``
+    de la politique d'orchestration : le nom est celui que le projet déclare,
+    jamais un nom que le kit aurait deviné. Palier ``inherit`` (aucun signal
+    fort) ou palier sans correspondance : pas de ``model``, le modèle du
+    sélecteur s'applique.
+
+    Doc « Custom agent file reference » (code.visualstudio.com/docs/agents/reference/
+    custom-agent-file-reference) : ``model`` accepte un modèle ou une liste ordonnée,
+    harness Local et Copilot ; ``model-policy`` vaut ``preferred`` par défaut. Il
+    n'est pas émis : ``preferred`` est déjà le défaut, ``required`` enlèverait à
+    l'utilisateur le choix d'un autre modèle, et la référence dit que le harness
+    Copilot ne le transmet pas à son SDK.
+    """
+    tier = _model_for(agent)
+    return copilot_models.get(tier, "") if tier != "inherit" else ""
+
+
+def _model_tiers(project_root: Path) -> dict[str, str]:
+    """Les paliers de la politique que le projet traduit en nom de modèle Copilot."""
+    models = {tier: copilot_model_for(project_root, tier) for tier in ("opus", "sonnet", "haiku")}
+    return {tier: name for tier, name in models.items() if name}
+
+
+def _agent_file(
+    agent: AgentSpec,
+    surface: ProjectSurface,
+    owned_skills: tuple[SkillSpec, ...] = (),
+    copilot_models: dict[str, str] | None = None,
+) -> EmittedFile:
+    # `model` n'est émis que si l'affinité de la persona donne un palier ET que
+    # le projet déclare le nom Copilot de ce palier (voir `_agent_model`). Aucune
+    # valeur de sélection automatique équivalente à `inherit` n'est documentée :
+    # sans correspondance, la lacune reste déclarée par la dégradation
+    # « model affinity » du plan plutôt que comblée par un nom inventé.
     fields: dict[str, Any] = {
         "description": agent.description,
         "tools": list(map_verbs(agent.tools, _TOOL_TABLE)),
+        "model": _agent_model(agent, copilot_models or {}),
         "user-invocable": agent.entry_point,
     }
     routed = [other for other in surface.agents if not other.entry_point and other.name != agent.name]
@@ -139,8 +171,13 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[S
         # d'un modèle qui appelle l'outil. Décision (2026-09-25) : il reçoit
         # l'union des outils des personas qu'il route, plus `agent` — sur une
         # demande directe et bornée il agit lui-même, sinon il délègue
-        # (#656). Sur VS Code, déléguer exige l'outil `agent`
-        # ET une liste `agents:`. Pas de `handoffs:` : un bouton par persona
+        # (#656). Sur VS Code (harness Local), déléguer exige l'outil `agent`
+        # ET une liste `agents:` : la référence du fichier d'agent classe `agents`
+        # « Local only » ; le harness Copilot délègue par son outil natif `task`
+        # sans cette liste. Le fichier est unique pour les deux : `agents:` reste
+        # (c'est lui qui borne la délégation tant que Local existe, retiré en
+        # février 2027), et le plan le déclare (dégradation « agents allow-list »).
+        # Pas de `handoffs:` : un bouton par persona
         # après chaque réponse n'aide pas.
         union: list[str] = list(fields["tools"])
         for other in routed:
@@ -185,6 +222,11 @@ def _skill_file(skill: SkillSpec) -> EmittedFile:
         {
             "name": skill.slug,
             "description": skill.description,
+            # Champs d'invocation documentés (code.visualstudio.com/docs/copilot/
+            # customization/agent-skills), écrits seulement quand la source les déclare.
+            "argument-hint": skill.argument_hint,
+            "user-invocable": skill.user_invocable,
+            "disable-model-invocation": skill.disable_model_invocation,
             "license": skill.license,
             "compatibility": skill.compatibility,
         }
@@ -197,6 +239,7 @@ def _prompt_file(command: CommandSpec) -> EmittedFile:
     header = Emitter.frontmatter(
         {
             "description": command.description,
+            "argument-hint": command.argument_hint,
             "agent": "agent",
             "tools": list(map_verbs(command.tools, _TOOL_TABLE)),
         }
@@ -414,8 +457,9 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         f"- **V1** — {Verifiability.V1.explanation}",
         f"- **V2** — {Verifiability.V2.explanation}",
         "",
-        "Cet hôte ne documente aucun nom de modèle par palier : voir la",
-        "dégradation « model affinity » ci-dessous, le contrat",
+        "Cet hôte ne documente aucun nom de modèle par palier : `model` n'est",
+        "émis que pour un palier déclaré sous `dispatch.copilot_models` (voir la",
+        "dégradation « model affinity » ci-dessous), le contrat",
         "`.github/agents/*.agent.md` n'offre rien d'équivalent à `inherit`.",
         "Ce qui reste vrai partout : toute persona routée doit clore sa",
         "réponse par un bloc ```grimoire-uncertainties``` — une liste JSON",
@@ -443,11 +487,13 @@ class CopilotEmitter(Emitter):
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
+        copilot_models = _model_tiers(project_root)
         files.extend(
             _agent_file(
                 agent,
                 surface,
                 owned_skills=tuple(by_slug[slug] for slug in agent.skills if slug in by_slug),
+                copilot_models=copilot_models,
             )
             for agent in surface.agents
         )
@@ -522,18 +568,45 @@ class CopilotEmitter(Emitter):
                     ),
                 )
             )
-        degradations.append(
-            Degradation(
-                surface="model affinity",
-                reason=(
-                    "L'agent personnalisé VS Code (.github/agents/*.agent.md) accepte un nom de "
-                    "modèle explicite ou une liste de repli via `model`, mais aucune valeur de "
-                    "sélection automatique équivalente à `inherit` n'y est documentée (source : "
-                    "https://code.visualstudio.com/docs/copilot/customization/custom-agents)."
-                ),
-                fallback="`model` n'est pas émis ; le modèle actuel du sélecteur VS Code s'applique à chaque agent.",
-            )
+        unmapped = sorted(
+            agent.name
+            for agent in surface.agents
+            if (tier := _model_for(agent)) != "inherit" and tier not in copilot_models
         )
+        if unmapped:
+            degradations.append(
+                Degradation(
+                    surface="model affinity",
+                    reason=(
+                        "L'agent personnalisé VS Code (.github/agents/*.agent.md) accepte un nom de "
+                        "modèle explicite ou une liste de repli via `model`, mais aucune valeur de "
+                        "sélection automatique équivalente à `inherit` n'y est documentée, et Copilot "
+                        "nomme ses modèles autrement que les paliers du kit. Personas dont le palier n'a "
+                        f"pas de nom Copilot déclaré : {', '.join(unmapped)}."
+                    ),
+                    fallback=(
+                        "`model` n'est émis que pour un palier déclaré sous `dispatch.copilot_models.<palier>` "
+                        "de la politique d'orchestration ; les autres personas n'ont pas de `model` et le "
+                        "modèle actuel du sélecteur VS Code s'applique."
+                    ),
+                )
+            )
+        if any(a.entry_point for a in surface.agents) and any(not a.entry_point for a in surface.agents):
+            degradations.append(
+                Degradation(
+                    surface="agents allow-list",
+                    reason=(
+                        "`agents:` (liste des sous-agents que l'agent d'entrée peut lancer) est « Local only » "
+                        "dans la référence du fichier d'agent VS Code ; le harness Copilot délègue par son "
+                        "outil natif `task`, sans cette liste, et le harness Local sera retiré en février 2027."
+                    ),
+                    fallback=(
+                        "`agents:` reste émis (un seul fichier sert les deux harness, la liste borne la "
+                        "délégation sous Local) ; sous le harness Copilot la délégation n'est pas bornée "
+                        "par cette liste."
+                    ),
+                )
+            )
         degradations.append(
             Degradation(
                 surface="mcp cloud agent",
