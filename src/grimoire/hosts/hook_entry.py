@@ -27,9 +27,7 @@ REMEDY = (
 )
 
 #: Noms de l'événement ``PreToolUse`` selon l'hôte (Claude Code, Copilot, Gemini CLI, Cursor).
-_GUARD_EVENTS = frozenset(
-    {"pretooluse", "pre_tool_use", "beforetool", "beforeshellexecution", "beforemcpexecution", "beforereadfile"}
-)
+_GUARD_EVENTS = frozenset({"pretooluse", "pre_tool_use", "beforetool", "beforeshellexecution"})
 
 #: Décisions ``PreToolUse`` consultatives (``--decision``), émises sans
 #: ``onFailure: block`` : leur panne laisse passer l'appel inchangé, jamais un

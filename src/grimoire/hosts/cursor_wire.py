@@ -5,9 +5,9 @@ lue le 2026-11-21). Son vocabulaire diffère de celui du kit en quatre points, e
 module est le seul à les connaître :
 
 - **événements** — camelCase et plus fins que les neutres : ``preToolUse`` (tout
-  outil), ``beforeShellExecution`` (une commande shell), ``beforeMCPExecution``,
-  ``beforeReadFile``, ``beforeSubmitPrompt``, ``stop``, ``subagentStop``… La
-  commande écrite par l'émetteur porte le nom neutre (``--event PreToolUse``) ; le
+  outil), ``beforeShellExecution`` (une commande shell), ``beforeSubmitPrompt``,
+  ``stop``, ``subagentStop``… (``beforeMCPExecution``/``beforeReadFile`` ne sont pas
+  câblés : refusés comme événements inconnus). La commande écrite par l'émetteur porte le nom neutre (``--event PreToolUse``) ; le
   nom Cursor de l'appel est relu dans ``hook_event_name`` (champ commun documenté),
   ou déduit de la forme de la charge ;
 - **outils** — ``Shell``, ``Read``, ``Write``, ``Grep``, ``Delete``, ``Task``,
@@ -19,7 +19,7 @@ module est le seul à les connaître :
 - **verdicts** — à plat : ``permission`` (``allow``/``deny``/``ask``),
   ``user_message``, ``agent_message``. ``ask`` est « accepté par le schéma mais
   non appliqué » sur ``preToolUse`` : il y est rendu en refus (échec fermé).
-  ``beforeShellExecution`` et ``beforeMCPExecution`` l'appliquent. Une sortie qui
+  ``beforeShellExecution`` l'applique. Une sortie qui
   ne respecte pas le schéma de l'événement bloque l'action : seuls les champs
   documentés pour chaque événement sont écrits ;
 - **fin de tour** — ``stop`` ne refuse pas : un ``followup_message`` non vide est
@@ -74,8 +74,6 @@ EVENT_BY_CURSOR_NAME: dict[str, HookEvent] = {
     "beforesubmitprompt": HookEvent.USER_PROMPT_SUBMIT,
     "pretooluse": HookEvent.PRE_TOOL_USE,
     "beforeshellexecution": HookEvent.PRE_TOOL_USE,
-    "beforemcpexecution": HookEvent.PRE_TOOL_USE,
-    "beforereadfile": HookEvent.PRE_TOOL_USE,
     "posttooluse": HookEvent.POST_TOOL_USE,
     "posttoolusefailure": HookEvent.POST_TOOL_USE_FAILURE,
     "subagentstart": HookEvent.SUBAGENT_START,
@@ -84,18 +82,17 @@ EVENT_BY_CURSOR_NAME: dict[str, HookEvent] = {
     "stop": HookEvent.STOP,
 }
 
-#: Événements où ``permission: "ask"`` est appliqué (doc : « allow, deny, or ask »).
-#: Ailleurs (``preToolUse`` : « accepted by the schema but not enforced » ;
-#: ``beforeReadFile`` : non listé), une demande est rendue en refus.
-ASK_EVENTS: frozenset[str] = frozenset({"beforeshellexecution", "beforemcpexecution"})
+#: Événements câblés où ``permission: "ask"`` est appliqué (doc : « allow, deny, or ask »).
+#: Sur ``preToolUse`` (« accepted by the schema but not enforced »), une demande est
+#: rendue en refus. ``beforeMCPExecution`` et ``beforeReadFile`` ne sont pas câblés :
+#: un hook qui les enverrait tomberait sur un événement inconnu, refusé (échec fermé).
+ASK_EVENTS: frozenset[str] = frozenset({"beforeshellexecution"})
 
 #: Champs de sortie documentés par événement de permission. Un champ de plus serait
 #: un écart de schéma, que Cursor traite comme un blocage.
 _PERMISSION_FIELDS: dict[str, tuple[str, ...]] = {
     "pretooluse": ("permission", "user_message", "agent_message"),
     "beforeshellexecution": ("permission", "user_message", "agent_message"),
-    "beforemcpexecution": ("permission", "user_message", "agent_message"),
-    "beforereadfile": ("permission", "user_message"),
 }
 
 #: ``loop_limit`` documenté par défaut pour un hook Cursor (« default 5 »). L'émetteur
@@ -151,8 +148,6 @@ def cursor_event_name(payload: dict[str, Any]) -> str:
         return _compact(name)
     if isinstance(payload.get("command"), str) and not payload.get("tool_name"):
         return "beforeshellexecution"
-    if isinstance(payload.get("file_path"), str) and not payload.get("tool_name"):
-        return "beforereadfile"
     return ""
 
 
@@ -193,16 +188,8 @@ def normalize_tool_call(payload: dict[str, Any], event: HookEvent) -> tuple[str,
         if isinstance(cwd, str) and cwd:
             tool_input["working_directory"] = cwd
         return "Bash", tool_input
-    if sub == "beforereadfile":
-        path = payload.get("file_path")
-        if not isinstance(path, str) or not path.strip():
-            return "", {}
-        return "Read", {"file_path": path}
     name = str(payload.get("tool_name") or "").strip()
     tool_input = _parse_json_object(raw_input)
-    if sub == "beforemcpexecution":
-        # Outil MCP : son nom est celui du serveur, jugé tel quel par le moteur (sous-chaînes).
-        return name, tool_input
     if not name:
         return "", tool_input
     key = name.lower()

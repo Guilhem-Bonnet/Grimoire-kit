@@ -626,3 +626,218 @@ def test_other_emitters_merge_behaviour_is_unchanged(governed: Path) -> None:
 
 def test_abstention_choice_is_declared(governed: Path) -> None:
     assert any(d.surface == "hook abstention" for d in _plan(governed).degradations)
+
+
+# ── branches du dialecte, en processus (couverture des refus et des cas limites) ──
+
+
+@pytest.mark.parametrize(
+    ("payload", "event", "expected"),
+    [
+        ({"hook_event_name": "beforeShellExecution", "command": "  "}, HookEvent.PRE_TOOL_USE, ("", {})),
+        ({"hook_event_name": "preToolUse", "tool_name": "Shell", "tool_input": {}}, HookEvent.PRE_TOOL_USE, ("", {})),
+        (
+            {"hook_event_name": "postToolUse", "tool_name": "Shell", "tool_input": {}},
+            HookEvent.POST_TOOL_USE,
+            ("Bash", {}),
+        ),
+        ({"hook_event_name": "preToolUse", "tool_input": {"path": "a"}}, HookEvent.PRE_TOOL_USE, ("", {"path": "a"})),
+        (
+            {"hook_event_name": "preToolUse", "tool_name": "MCP:create_issue", "tool_input": '{"title": "x"}'},
+            HookEvent.PRE_TOOL_USE,
+            ("MCP:create_issue", {"title": "x"}),
+        ),
+        (
+            {"hook_event_name": "preToolUse", "tool_name": "Foo", "tool_input": "pas du json"},
+            HookEvent.PRE_TOOL_USE,
+            ("Foo", {}),
+        ),
+        (
+            {"hook_event_name": "preToolUse", "tool_name": "Grep", "tool_input": '["liste"]'},
+            HookEvent.PRE_TOOL_USE,
+            ("Grep", {}),
+        ),
+        (
+            {"hook_event_name": "preToolUse", "tool_name": "Read", "tool_input": {"target_file": "src/a.py"}},
+            HookEvent.PRE_TOOL_USE,
+            ("Read", {"target_file": "src/a.py", "file_path": "src/a.py"}),
+        ),
+        (
+            {"hook_event_name": "postToolUse", "tool_name": "Write", "tool_input": {}},
+            HookEvent.POST_TOOL_USE,
+            ("Write", {}),
+        ),
+    ],
+    ids=[
+        "shell-sans-commande",
+        "preToolUse-shell-sans-commande",
+        "postToolUse-shell-sans-commande",
+        "sans-nom",
+        "mcp-entree-chaine-json",
+        "outil-inconnu-entree-illisible",
+        "entree-json-non-objet",
+        "read-target-file",
+        "postToolUse-write-sans-chemin",
+    ],
+)
+def test_normalize_tool_call_branches(payload: dict[str, Any], event: HookEvent, expected: tuple[str, Any]) -> None:
+    assert cursor_wire.normalize_tool_call(payload, event) == expected
+
+
+def test_unwired_cursor_events_are_unknown_and_fail_closed() -> None:
+    from grimoire.hosts.runtime import cursor_fail_closed_output, cursor_fail_closed_reason
+
+    assert parse_event("beforeReadFile", host_id=HostId.CURSOR) is None
+    assert parse_event("beforeMCPExecution", host_id=HostId.CURSOR) is None
+    assert "inconnu" in cursor_fail_closed_reason(HostId.CURSOR, None, "")
+    assert "injugeable" in cursor_fail_closed_reason(HostId.CURSOR, HookEvent.PRE_TOOL_USE, "stdin vide")
+    assert cursor_fail_closed_reason(HostId.CURSOR, HookEvent.STOP, "stdin vide") == ""
+    assert cursor_fail_closed_reason(HostId.CLAUDE_CODE_CLI, None, "") == ""
+    out = cursor_fail_closed_output("motif", "PreToolUse")
+    assert out["permission"] == "deny"
+    assert "motif" in out["user_message"]
+    assert out["agent_message"] == out["user_message"]
+
+
+def test_session_id_falls_back_to_session_id() -> None:
+    assert cursor_wire.session_id({"session_id": " s-1 "}) == "s-1"
+    assert cursor_wire.session_id({}) == ""
+
+
+def test_kit_relaunched_rejects_every_unproven_state(tmp_path: Path) -> None:
+    payload = {"conversation_id": "c", "generation_id": "g2", "loop_count": 1}
+    path = cursor_wire.followup_state_path(tmp_path, "c")
+    assert cursor_wire.kit_relaunched(tmp_path, payload) is False  # aucun état
+    path.parent.mkdir(parents=True)
+    path.write_text("{illisible", encoding="utf-8")
+    assert cursor_wire.kit_relaunched(tmp_path, payload) is False
+    path.write_text(json.dumps({"conversation_id": "autre", "loop_count": 0}), encoding="utf-8")
+    assert cursor_wire.kit_relaunched(tmp_path, payload) is False
+    path.write_text(json.dumps({"conversation_id": "c", "loop_count": 3}), encoding="utf-8")
+    assert cursor_wire.kit_relaunched(tmp_path, payload) is False  # relance ancienne
+    path.write_text(json.dumps({"conversation_id": "c", "loop_count": 0, "generation_id": "g1"}), encoding="utf-8")
+    assert cursor_wire.kit_relaunched(tmp_path, payload) is True
+    assert cursor_wire.kit_relaunched(tmp_path, {**payload, "conversation_id": ""}) is False
+    assert cursor_wire.kit_relaunched(tmp_path, {**payload, "loop_count": 0}) is False
+    # Un identifiant de conversation non sûr pour un nom de fichier est haché, jamais utilisé tel quel.
+    assert "/" not in cursor_wire.followup_state_path(tmp_path, "../x/y").name
+
+
+def test_record_followup_is_best_effort(tmp_path: Path) -> None:
+    from grimoire.core.standard_generation import RUNS_DIR
+
+    cursor_wire.record_followup(tmp_path, {"loop_count": 0}, emitted=True)  # sans conversation : rien
+    assert not (tmp_path / RUNS_DIR).exists()
+    # Le dossier d'état est un fichier : l'écriture échoue sans lever.
+    (tmp_path / RUNS_DIR).parent.mkdir(parents=True)
+    (tmp_path / RUNS_DIR).write_text("pas un dossier", encoding="utf-8")
+    cursor_wire.record_followup(tmp_path, {"conversation_id": "c", "loop_count": 0}, emitted=True)
+
+
+@pytest.mark.parametrize(
+    ("decision", "sub", "expected"),
+    [
+        (Decision(outcome=Outcome.DENY), "pretooluse", {"permission": "deny"}),
+        (Decision(context="attention"), "pretooluse", {"permission": "allow", "agent_message": "attention"}),
+        (Decision(outcome=Outcome.ASK, reason="sûr ?"), "beforeShellExecution", {"permission": "ask"}),
+    ],
+    ids=["refus-sans-motif", "allow-avec-avertissement", "ask-shell"],
+)
+def test_permission_rendering_branches(tmp_path: Path, decision: Decision, sub: str, expected: dict[str, Any]) -> None:
+    hook = HookInput(event=HookEvent.PRE_TOOL_USE, project_root=tmp_path, raw={"hook_event_name": sub})
+    out = render(decision, hook, HostId.CURSOR)
+    assert {k: out[k] for k in expected} == expected
+    if decision.outcome is Outcome.DENY:
+        assert out["user_message"] == cursor_wire.DEFAULT_DENY_REASON
+
+
+def test_context_and_compaction_rendering(tmp_path: Path) -> None:
+    post = HookInput(event=HookEvent.POST_TOOL_USE, project_root=tmp_path, raw={})
+    assert render(Decision(context="trace"), post, HostId.CURSOR) == {"additional_context": "trace"}
+    assert render(Decision(), post, HostId.CURSOR) == {}
+    compact = HookInput(event=HookEvent.PRE_COMPACT, project_root=tmp_path, raw={})
+    assert "écrite" in render(Decision(context="capsule"), compact, HostId.CURSOR)["user_message"]
+    failed = Decision(context="capsule", detail={"capsule_error": "disque plein"})
+    assert "disque plein" in render(failed, compact, HostId.CURSOR)["user_message"]
+    other = HookInput(event=HookEvent.USER_PROMPT_SUBMIT, project_root=tmp_path, raw={})
+    assert render(Decision(context="x"), other, HostId.CURSOR) == {}
+
+
+def test_guard_crash_is_rendered_as_a_flat_cursor_refusal(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from grimoire.hosts import runtime
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("panne")
+
+    monkeypatch.setattr(runtime, "run_hook", boom)
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps(_shell(governed, "ls"))))
+    code = runtime.main(["--host", "cursor", "--event", "PreToolUse"])
+    out = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert out["permission"] == "deny" and "panne" in out["user_message"]
+    assert set(out) <= PERMISSION_OUTPUT["beforeShellExecution"]
+
+
+def test_unknown_event_fails_closed_in_process(
+    governed: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from grimoire.hosts import runtime
+
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps({"conversation_id": "c"})))
+    assert runtime.main(["--host", "cursor"]) == 2
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["permission"] == "deny"
+    assert "événement inconnu" in captured.err
+
+
+def test_host_hook_command_fails_closed_on_unknown_cursor_event(governed: Path) -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+
+    result = CliRunner().invoke(
+        app, ["host", "hook", "--host", "cursor", "--event", "nimporte"], input=json.dumps({"conversation_id": "c"})
+    )
+    assert result.exit_code == 2
+    assert '"permission": "deny"' in result.output
+
+
+def test_import_failure_on_a_non_guard_cursor_event_blocks_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    from grimoire.hosts import hook_entry
+
+    assert hook_entry.import_failure(["--host", "cursor", "--event", "Stop"], "{}", "ImportError: x") == 0
+    captured = capsys.readouterr()
+    assert captured.out == "{}" and "hook indisponible" in captured.err
+
+
+def test_ownership_rejects_non_string_and_non_kit_programs(governed: Path) -> None:
+    legacy = {"command": "grimoire host hook --host cursor --event Stop"}
+    odd = {"command": ["grimoire-hook"]}
+    other_program = {"command": "./audit --host cursor --event Stop"}
+    data = _hooks(_plan(governed), {"version": 1, "hooks": {"stop": [legacy, odd, other_program, "texte"]}})
+    stop = data["hooks"]["stop"]
+    assert legacy not in stop  # ancienne commande du kit : migrée
+    assert stop[:3] == [odd, other_program, "texte"]
+
+
+def test_invalid_skill_slug_falls_back_to_a_readable_copy(governed: Path) -> None:
+    from dataclasses import replace
+
+    from grimoire.hosts.surface import SkillSpec
+
+    surface = build_surface(governed)
+    bad = SkillSpec(slug="Mauvais_Slug", name="Mauvais", description="quand X", body="corps")
+    plan = CursorEmitter().plan(replace(surface, skills=(*surface.skills, bad)), governed)
+    files = {f.relpath.as_posix(): f.content for f in plan.files}
+    assert "_grimoire/hosts/skills/Mauvais_Slug.md" in files
+    assert not any("Mauvais_Slug/SKILL.md" in path for path in files)
+    assert "`Mauvais_Slug`" in files[".cursor/rules/grimoire.mdc"]
+    gap = next(d for d in plan.degradations if d.surface == "skills")
+    assert "Mauvais_Slug" in gap.reason
+
+
+def test_codex_keeps_the_prose_blocking_gap() -> None:
+    gap = next(g for g in gaps_for(profile_for(HostId.CODEX)) if g.surface == "blocking_hooks")
+    assert gap.fallback == "governance stated as instructions, enforced by CI only"
