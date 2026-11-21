@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.98.0] - 2026-11-21
+
+- feat(hosts): émetteur riche Codex — hooks dans `.codex/hooks.json` (garde `PreToolUse`, gate `Stop` par `decision: block`), compétences sous `.agents/skills/`, sous-agents `.codex/agents/*.toml`, serveurs MCP ajoutés à `.codex/config.toml` sans réécrire le fichier ; verdicts rendus au format Codex (refus en code 2, `ask` refusé avec son motif, `apply_patch` jugé fichier par fichier, un déplacement ou une suppression jugé aussi comme le `mv`/`rm` équivalent, toute ligne de contrôle inconnue refusée) ; `host status` et `doctor` rappellent l'approbation requise via `/hooks`, la garde reste consultative faute de preuve et les outils MCP ne sont pas gardés (dégradation déclarée) (#1300)
+- feat(hosts): émetteur riche Cursor : `.cursor/hooks.json` (garde sur `beforeShellExecution` et `preToolUse` en échec fermé, relance de fin de tour par `followup_message` dans la limite `loop_limit`), sous-agents `.cursor/agents/` (`model` seulement pour un palier nommé sous `dispatch.cursor_models`), compétences `.cursor/skills/` ; verdicts rendus au format Cursor ; la garde reste déclarée advisory, non vérifiée faute de capture réelle (#1301)
+
 ## [3.97.0] - 2026-11-21
 
 - feat(hosts): les agents Copilot reçoivent `model:` quand la persona a une affinité de modèle et que `dispatch.copilot_models.<palier>` nomme le modèle Copilot du palier ; les skills et prompts Copilot émettent `argument-hint`, `user-invocable` et `disable-model-invocation` quand leur source les déclare ; `agents:` est déclaré « Local only » dans le plan (#1298)
