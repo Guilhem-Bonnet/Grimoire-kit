@@ -29,10 +29,14 @@ Outils : la page nomme ``Bash`` et ``apply_patch`` (« ``apply_patch`` also matc
 ``Edit`` or ``Write`` »). Le correctif d'``apply_patch`` arrive en chaîne dans
 ``tool_input.command`` ; lu tel quel, la politique y chercherait des commandes
 shell. Chaque fichier qu'il touche devient donc un appel ``Write``/``Edit`` jugé à
-part (:func:`patch_calls`), et le plus restrictif l'emporte. **Supposé** : la
-grammaire des en-têtes (``*** Add File:``, ``*** Update File:``, ``*** Delete
-File:``, ``*** Move to:``) n'est pas sur la page des hooks ; c'est celle de l'outil
-``apply_patch`` de Codex. Un correctif dont aucun fichier ne se lit est refusé.
+part (:func:`patch_calls`), et le plus restrictif l'emporte. Une suppression ou
+un déplacement est aussi jugé sous sa forme shell (``rm``, ``mv``) : sans cela, un
+déplacement ou une suppression par ``apply_patch`` échappait à la règle qui
+refuse le même effet par ``Bash``. **Supposé** : la grammaire des en-têtes
+(``*** Add File:``, ``*** Update File:``, ``*** Delete File:``, ``*** Move to:``)
+n'est pas sur la page des hooks ; c'est celle de l'outil ``apply_patch`` de Codex.
+Un correctif dont aucun fichier ne se lit, ou qui porte une ligne de contrôle
+``*** `` inconnue, est refusé (échec fermé).
 
 Ce module ne décide rien et n'embarque aucune règle. Bibliothèque standard
 seulement : il est importé à chaque appel de hook.
@@ -41,6 +45,7 @@ seulement : il est importé à chaque appel de hook.
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Mapping
 from typing import Any
 
@@ -69,8 +74,21 @@ APPLY_PATCH = "apply_patch"
 #: page nomme (``updatedInput`` d'``apply_patch``) ; les deux autres sont tolérés.
 PATCH_INPUT_KEYS: tuple[str, ...] = ("command", "input", "patch")
 
-#: En-têtes de fichier d'un correctif ``apply_patch`` (grammaire supposée, voir le module).
-_PATCH_HEADER = re.compile(r"^\*\*\* (Add File|Update File|Delete File|Move to): (.+?)\s*$", re.MULTILINE)
+#: En-tête de fichier d'un correctif ``apply_patch`` (grammaire supposée, voir le
+#: module), lu sur une ligne débarrassée de ses espaces de tête.
+_PATCH_HEADER = re.compile(r"^\*\*\* (Add File|Update File|Delete File|Move to): (.+?)\s*$")
+
+#: Lignes de contrôle connues qui ne nomment aucun fichier.
+_PATCH_MARKERS = frozenset({"*** Begin Patch", "*** End Patch", "*** End of File"})
+
+#: Préfixe d'une ligne de contrôle : toute autre ligne qui le porte est inconnue.
+_CONTROL_PREFIX = "*** "
+
+#: Outils dont l'entrée peut porter un correctif : ``apply_patch`` « also matches
+#: ``Edit`` or ``Write`` » (page Hooks) ; ils ne sont lus comme correctif que si
+#: ``command`` en est un (:data:`_PATCH_BEGIN`).
+_PATCH_ALIASES = frozenset({"edit", "write"})
+_PATCH_BEGIN = "*** Begin Patch"
 
 #: Raison d'un refus qui n'en porte pas : ``permissionDecisionReason`` vide ne dit rien.
 DEFAULT_DENY_REASON = "[Grimoire] action refusée par la politique du projet."
@@ -100,41 +118,89 @@ def _patch_text(tool_input: Mapping[str, Any]) -> str:
     )
 
 
-def _added_lines(section: str) -> str:
-    """Les lignes ajoutées d'une section de correctif, sans leur ``+`` : le texte écrit."""
-    return "\n".join(line[1:] for line in section.splitlines() if line.startswith("+"))
+def _is_patch_call(tool_name: str, tool_input: Mapping[str, Any]) -> bool:
+    name = tool_name.strip().lower()
+    if name == APPLY_PATCH:
+        return True
+    command = tool_input.get("command")
+    return name in _PATCH_ALIASES and isinstance(command, str) and command.lstrip().startswith(_PATCH_BEGIN)
+
+
+class _FileOp:
+    """Un fichier touché par le correctif : son en-tête, sa destination éventuelle, ses lignes ajoutées."""
+
+    __slots__ = ("added", "kind", "move_to", "path")
+
+    def __init__(self, kind: str, path: str) -> None:
+        self.kind = kind
+        self.path = path
+        self.move_to = ""
+        self.added: list[str] = []
+
+    def calls(self) -> list[ToolCall]:
+        body = "\n".join(self.added)
+        if self.kind == "Add File":
+            return [ToolCall("Write", {"file_path": self.path, "content": body})]
+        if self.kind == "Delete File":
+            # Le même effet que `rm` : jugé aussi sous cette forme, pour que la règle shell s'applique.
+            return [
+                ToolCall("Write", {"file_path": self.path, "content": ""}),
+                ToolCall("Bash", {"command": f"rm -- {shlex.quote(self.path)}"}),
+            ]
+        if self.move_to:
+            # Le contenu écrit arrive à la destination, et la source disparaît : l'effet d'un `mv`.
+            return [
+                ToolCall("Edit", {"file_path": self.move_to, "new_string": body}),
+                ToolCall("Bash", {"command": f"mv -- {shlex.quote(self.path)} {shlex.quote(self.move_to)}"}),
+            ]
+        return [ToolCall("Edit", {"file_path": self.path, "new_string": body})]
 
 
 def patch_calls(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[tuple[ToolCall, ...], str] | None:
-    """Les écritures d'un appel ``apply_patch``, une par fichier, et le défaut qui le rend illisible.
+    """Les effets d'un appel ``apply_patch``, fichier par fichier, et le défaut qui le rend illisible.
 
-    ``None`` : l'appel n'est pas un ``apply_patch``, il se juge tel quel. Sinon
-    ``(appels, problème)`` : chaque fichier ajouté ou réécrit devient un ``Write``
-    (``content`` = lignes ajoutées), chaque fichier modifié un ``Edit``
-    (``new_string`` = lignes ajoutées), chaque suppression ou destination de
-    déplacement un ``Write`` sans contenu. ``problème`` est non vide quand le
-    correctif manque ou ne nomme aucun fichier : la garde refuse alors l'appel.
+    ``None`` : l'appel n'est pas un correctif, il se juge tel quel. Un ``Edit`` ou
+    un ``Write`` dont ``command`` commence par ``*** Begin Patch`` en est un (Codex
+    les fait correspondre à ``apply_patch``). Sinon ``(appels, problème)`` :
+
+    - un fichier ajouté devient un ``Write`` (``content`` = lignes ajoutées) ;
+    - un fichier modifié, un ``Edit`` (``new_string`` = lignes ajoutées) ;
+    - un fichier déplacé (``*** Move to:``), un ``Edit`` de la **destination**
+      avec les lignes ajoutées, plus le ``mv -- source destination`` équivalent ;
+    - un fichier supprimé, un ``Write`` vide plus le ``rm -- chemin`` équivalent.
+
+    ``problème`` est non vide quand le correctif manque, ne nomme aucun fichier,
+    porte un ``*** Move to:`` hors d'un ``*** Update File:`` ou une ligne de
+    contrôle inconnue : la garde refuse alors l'appel.
     """
-    if tool_name.strip().lower() != APPLY_PATCH:
+    if not _is_patch_call(tool_name, tool_input):
         return None
     text = _patch_text(tool_input)
     if not text:
         return (), "apply_patch sans correctif lisible (ni `command`, ni `input`, ni `patch`)"
-    headers = list(_PATCH_HEADER.finditer(text))
-    if not headers:
+    ops: list[_FileOp] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(_CONTROL_PREFIX):
+            # En-tête reconnu même indenté ; toute autre ligne de contrôle refuse le correctif.
+            if stripped in _PATCH_MARKERS:
+                continue
+            header = _PATCH_HEADER.match(stripped)
+            if header is None:
+                return (), f"apply_patch avec une ligne de contrôle inconnue : {stripped[:80]!r}"
+            kind, path = header.group(1), header.group(2).strip()
+            if kind != "Move to":
+                ops.append(_FileOp(kind, path))
+                continue
+            current = ops[-1] if ops else None
+            if current is None or current.kind != "Update File" or current.move_to or current.added:
+                return (), "apply_patch avec un `*** Move to:` qui ne suit pas un `*** Update File:`"
+            current.move_to = path
+        elif line.startswith("+") and ops:
+            ops[-1].added.append(line[1:])
+    if not ops:
         return (), "apply_patch dont aucun en-tête de fichier ne se lit"
-    calls: list[ToolCall] = []
-    for index, match in enumerate(headers):
-        kind, path = match.group(1), match.group(2).strip()
-        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
-        body = _added_lines(text[match.end() : end])
-        if kind == "Add File":
-            calls.append(ToolCall("Write", {"file_path": path, "content": body}))
-        elif kind == "Update File":
-            calls.append(ToolCall("Edit", {"file_path": path, "new_string": body}))
-        else:  # suppression, ou destination d'un déplacement : une écriture sur ce chemin
-            calls.append(ToolCall("Write", {"file_path": path, "content": ""}))
-    return tuple(calls), ""
+    return tuple(call for op in ops for call in op.calls()), ""
 
 
 def refusal_reason(decision: Decision) -> str:

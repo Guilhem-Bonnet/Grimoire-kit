@@ -189,6 +189,50 @@ def test_foreign_hooks_survive_and_stale_kit_entries_go(governed: Path) -> None:
     assert "Interrupt" not in data["hooks"]  # entrée du kit pour un événement qu'il ne câble plus
 
 
+def test_a_project_handler_sharing_a_group_with_the_kit_is_kept(governed: Path) -> None:
+    """Filtrage gestionnaire par gestionnaire, sur la commande exacte du kit (jamais une sous-chaîne)."""
+    mine = {"type": "command", "command": "python3 check.py", "timeout": 5}
+    mentions = {"type": "command", "command": "echo grimoire-hook --host codex --event Stop >> log", "timeout": 5}
+    kit = {"type": "command", "command": "grimoire-hook --host codex --event PreToolUse", "timeout": 30}
+    (governed / ".codex").mkdir()
+    (governed / ".codex/hooks.json").write_text(
+        json.dumps(
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [mine, kit]}], "Stop": [{"hooks": [mentions]}]}}
+        ),
+        encoding="utf-8",
+    )
+    _sync(governed)
+    hooks = _hooks(governed)
+    assert hooks["PreToolUse"][0] == {"matcher": "Bash", "hooks": [mine]}
+    assert {"hooks": [mentions]} in hooks["Stop"]
+    assert not _sync(governed).written
+
+
+def test_hooks_that_is_not_an_object_is_preserved(governed: Path) -> None:
+    (governed / ".codex").mkdir()
+    original = json.dumps({"hooks": ["mes hooks"]})
+    (governed / ".codex/hooks.json").write_text(original, encoding="utf-8")
+    result = _sync(governed)
+    assert any(label.startswith(".codex/hooks.json") for label in result.skipped)
+    assert (governed / ".codex/hooks.json").read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("inline", ["mcp_servers = {}\n", 'mcp_servers = { context7 = { command = "npx" } }\n'])
+def test_an_inline_mcp_servers_table_is_preserved_not_broken(governed: Path, inline: str) -> None:
+    """Ajouter `[mcp_servers.<nom>]` après une table en ligne produirait un TOML invalide."""
+    original = f'model = "gpt-5.5"\n{inline}'
+    (governed / ".codex").mkdir()
+    (governed / ".codex/config.toml").write_text(original, encoding="utf-8")
+    result = _sync(governed)
+    assert any(label.startswith(".codex/config.toml") and "table en ligne" in label for label in result.skipped)
+    assert (governed / ".codex/config.toml").read_text(encoding="utf-8") == original
+
+
+def test_toml_strings_escape_every_forbidden_control_character() -> None:
+    text = "".join(chr(c) for c in [*range(0x20), 0x7F]) + "fin"
+    assert tomllib.loads(f"k = {codex_mod._toml_string(text)}")["k"] == text
+
+
 def test_config_toml_is_appended_never_rewritten(governed: Path) -> None:
     original = '# réglages perso\nmodel = "gpt-5.5"\n\n[mcp_servers.context7]\ncommand = "npx"\nargs = ["-y", "@upstash/context7-mcp"]\n'
     (governed / ".codex").mkdir()
@@ -266,6 +310,7 @@ def test_degradations_are_declared(governed: Path) -> None:
         "commands",
         "model affinity",
         "mcp trust",
+        "mcp tools unguarded",
     } <= surfaces
 
 
@@ -281,6 +326,23 @@ def test_host_status_says_approval_is_required(governed: Path) -> None:
     )
     payload = json.loads(result.output)
     assert payload[0]["hook_approval"].startswith("approbation requise via /hooks")
+
+
+def test_host_list_does_not_claim_blocking_hooks_for_codex() -> None:
+    from grimoire.cli.app import app
+
+    result = CliRunner().invoke(app, ["host", "list"], env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.output
+    row = next(line for line in result.output.splitlines() if "Codex" in line)
+    assert "consultatif" in row
+
+
+def test_import_failure_recognises_codex_by_its_full_id(capsys: pytest.CaptureFixture[str]) -> None:
+    from grimoire.hosts import hook_entry
+
+    code = hook_entry.import_failure(["--host", "host-codex", "--event", "PreToolUse"], "{}", "ImportError: x")
+    out = json.loads(capsys.readouterr().out)
+    assert code == 2 and set(out) == {"hookSpecificOutput"}
 
 
 def test_doctor_warns_that_codex_hooks_need_approval(governed: Path) -> None:

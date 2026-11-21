@@ -46,7 +46,6 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.decisions import DEFAULT_DECISION_BY_EVENT
 from grimoire.hosts.emitters.base import (
-    OWNED_COMMAND_MARKERS,
     Degradation,
     EmitPlan,
     EmittedFile,
@@ -135,8 +134,13 @@ _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _toml_string(text: str) -> str:
-    """TOML basic string for *text* — JSON escaping is a subset of TOML's (see ``gemini._toml_string``)."""
-    return json.dumps(text, ensure_ascii=False)
+    """TOML basic string for *text*.
+
+    JSON escaping is a subset of TOML's (see ``gemini._toml_string``), except that
+    JSON leaves ``\\x7f`` (DEL) raw while TOML forbids it in a basic string: it is
+    escaped as ``\\u007f``. JSON already escapes ``\\x00``-``\\x1f``.
+    """
+    return json.dumps(text, ensure_ascii=False).replace("\x7f", "\\u007f")
 
 
 def _toml_key(name: str) -> str:
@@ -189,16 +193,40 @@ def _hook_entry(hook: HookSpec, launcher: HookLauncher = BARE) -> dict[str, Any]
     return entry
 
 
-def _owned_entry(entry: Any) -> bool:
-    """A matcher group the kit wrote, recognised by what it invokes (JSON has no marker)."""
-    if not isinstance(entry, dict):
-        return False
-    handlers = entry.get("hooks")
-    for handler in handlers if isinstance(handlers, list) else []:
-        command = handler.get("command") if isinstance(handler, dict) else ""
-        if isinstance(command, str) and any(marker in command for marker in OWNED_COMMAND_MARKERS):
-            return True
-    return False
+#: A handler command the kit wrote for Codex: the hook program (bare, absolute,
+#: quoted, or from the git root, see :func:`_hook_program`), then exactly
+#: ``--host codex --event <Event>`` and an optional ``--decision``. Matched on the
+#: whole command, never as a substring: a project command that merely mentions
+#: ``grimoire-hook`` stays the project's.
+_OWNED_COMMAND = re.compile(
+    r'^(?:"\$\(git rev-parse --show-toplevel\)"/(?:\S*/)?|"[^"]*[/\\]|\S*[/\\])?'
+    r'(?:grimoire-hook(?:\.exe)?"?|grimoire host hook)'
+    rf" --host {HOST_ALIAS} --event [A-Za-z]+(?: --decision [A-Za-z0-9_.-]+)?$"
+)
+
+
+def _owned_handler(handler: Any) -> bool:
+    """A handler the kit wrote, recognised by its exact command (JSON has no marker)."""
+    command = handler.get("command") if isinstance(handler, dict) else None
+    return isinstance(command, str) and _OWNED_COMMAND.fullmatch(command.strip()) is not None
+
+
+def _without_owned(entries: list[Any]) -> list[Any]:
+    """*entries* minus the kit's handlers; a group left with none of its own handlers is dropped.
+
+    Filtered handler by handler: a project handler sharing a matcher group with
+    the kit's one is kept, in its group.
+    """
+    kept: list[Any] = []
+    for entry in entries:
+        handlers = entry.get("hooks") if isinstance(entry, dict) else None
+        if not isinstance(handlers, list) or not any(_owned_handler(h) for h in handlers):
+            kept.append(entry)
+            continue
+        remaining = [h for h in handlers if not _owned_handler(h)]
+        if remaining:
+            kept.append({**entry, "hooks": remaining})
+    return kept
 
 
 def codex_hooks(surface: ProjectSurface) -> tuple[HookSpec, ...]:
@@ -212,17 +240,22 @@ def _hooks_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> Json
         hooks_by_event.setdefault(_CODEX_EVENTS[hook.event], []).append(_hook_entry(hook, launcher))
 
     def merge(data: dict[str, Any]) -> dict[str, Any]:
-        hooks = data.get("hooks")
-        hooks = hooks if isinstance(hooks, dict) else {}
+        hooks = data.get("hooks", {})
+        if not isinstance(hooks, dict):
+            # Le remplacer effacerait la configuration du projet : fichier préservé, conflit signalé.
+            msg = "`hooks` n'est pas un objet"
+            raise ValueError(msg)
         for event, entries in hooks_by_event.items():
             existing = hooks.get(event)
-            kept = [entry for entry in (existing if isinstance(existing, list) else []) if not _owned_entry(entry)]
-            hooks[event] = kept + entries
+            if existing is not None and not isinstance(existing, list):
+                msg = f"`hooks.{event}` n'est pas une liste"
+                raise ValueError(msg)
+            hooks[event] = _without_owned(existing or []) + entries
         # Un événement que la surface ne câble plus perd l'entrée du kit, jamais celles du projet.
         for event, existing in list(hooks.items()):
             if event in hooks_by_event or not isinstance(existing, list):
                 continue
-            kept = [entry for entry in existing if not _owned_entry(entry)]
+            kept = _without_owned(existing)
             if kept:
                 hooks[event] = kept
             else:
@@ -251,8 +284,10 @@ def _config_merge(servers: tuple[McpServerSpec, ...], project_root: Path) -> Tex
 
     Le fichier est lu (TOML invalide : ``ValueError``, fichier préservé), jamais
     réécrit : les tables manquantes sont ajoutées en fin de fichier, ce qui
-    garde chaque octet existant, commentaires compris. Un serveur déjà déclaré
-    est celui du projet ; le kit n'y touche pas.
+    garde chaque octet existant, commentaires compris. Le résultat est relu ; s'il
+    n'est pas du TOML valide (``mcp_servers`` en table en ligne), ``ValueError`` :
+    rien n'est écrit. Un serveur déjà déclaré est celui du projet ; le kit n'y
+    touche pas.
     """
 
     def merge(text: str | None) -> str:
@@ -272,7 +307,19 @@ def _config_merge(servers: tuple[McpServerSpec, ...], project_root: Path) -> Tex
             for server in missing
         ]
         head = current.rstrip("\n")
-        return (f"{head}\n\n" if head else "") + "\n\n".join(blocks) + "\n"
+        merged = (f"{head}\n\n" if head else "") + "\n\n".join(blocks) + "\n"
+        # Relu avant écriture : un ajout qui rendrait le fichier invalide n'est jamais écrit.
+        # Cas connu : `mcp_servers = {...}` en table en ligne, fermée à tout `[mcp_servers.<nom>]`
+        # ajouté ensuite ; la réécrire toucherait à la configuration du projet.
+        try:
+            tomllib.loads(merged)
+        except tomllib.TOMLDecodeError as exc:
+            msg = (
+                f"l'ajout de [mcp_servers.<nom>] rendrait le TOML invalide ({exc}) ; "
+                "`mcp_servers` en table en ligne ? Déclarez les serveurs du kit à la main"
+            )
+            raise ValueError(msg) from exc
+        return merged
 
     return TextMerge(relpath=CONFIG_FILE, merge=merge, label=CONFIG_FILE.as_posix())
 
@@ -446,6 +493,17 @@ def _degradations(surface: ProjectSurface) -> list[Degradation]:
             surface="mcp trust",
             reason="`.codex/config.toml` de projet n'est lu que pour un projet approuvé (trusted).",
             fallback="approuver le projet dans Codex, ou déclarer le serveur dans `~/.codex/config.toml`.",
+        ),
+        Degradation(
+            surface="mcp tools unguarded",
+            reason=(
+                "La garde PreToolUse ne correspond qu'à `Bash|apply_patch` : les appels d'outils MCP "
+                "n'y passent pas (aucun nom d'outil MCP pour un matcher n'est documenté par la page Hooks)."
+            ),
+            fallback=(
+                "outils MCP non gardés sur Codex ; n'exposer au projet que des serveurs dont les outils "
+                "sont acceptables sans garde."
+            ),
         ),
     ]
     for hook in surface.hooks:

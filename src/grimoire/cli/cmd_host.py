@@ -24,6 +24,7 @@ from grimoire.hosts import gemini_wire
 from grimoire.hosts.capabilities import (
     GOVERNANCE_FUNCTIONS,
     GOVERNANCE_LABELS,
+    HostProfile,
     ParityLevel,
     all_profiles,
     gaps_for,
@@ -49,7 +50,7 @@ from grimoire.hosts.runtime import (
     payload_event_name,
     run_hook,
 )
-from grimoire.hosts.surface import Enforcement
+from grimoire.hosts.surface import Enforcement, HookEvent
 
 host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes et hooks par hôte.")
 console = Console()
@@ -220,6 +221,13 @@ def host_list(ctx: typer.Context) -> None:
     def mark(value: bool) -> str:
         return "[green]oui[/green]" if value else "[yellow]non[/yellow]"
 
+    def mark_blocking(profile: HostProfile) -> str:
+        # Un hôte qui documente des refus sans qu'aucun ne soit tenu pour bloquant
+        # (``blocking_events`` vide, Codex) est consultatif, pas « oui ».
+        if profile.blocking_hooks and not any(profile.blocks(event) for event in HookEvent):
+            return "[yellow]consultatif[/yellow]"
+        return mark(profile.blocking_hooks)
+
     for profile in profiles:
         name = profile.display_name + (" [cyan](détecté)[/cyan]" if profile.host_id == detected else "")
         table.add_row(
@@ -227,7 +235,7 @@ def host_list(ctx: typer.Context) -> None:
             mark(profile.subagents_native),
             mark(profile.skills_native),
             mark(profile.commands_native),
-            mark(profile.blocking_hooks),
+            mark_blocking(profile),
             mark(profile.permissions_native),
         )
     console.print(table)

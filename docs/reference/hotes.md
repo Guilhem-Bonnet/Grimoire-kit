@@ -148,10 +148,10 @@ le poste du kit : tout ce qui suit est documenté, rien n'est vérifié.
 
 | Fichier | Contenu | Fusion |
 |---|---|---|
-| `.codex/hooks.json` | `SessionStart`, `UserPromptSubmit`, `PreToolUse` (matcher `Bash\|apply_patch`, délai 30 s), `PostToolUse`, `PreCompact`, `SubagentStop`, `Stop` (délai 60 s), chacun lançant `grimoire-hook --host codex` | les entrées du projet sont gardées ; seules celles qui lancent `grimoire-hook` sont réécrites |
+| `.codex/hooks.json` | `SessionStart`, `UserPromptSubmit`, `PreToolUse` (matcher `Bash\|apply_patch`, délai 30 s), `PostToolUse`, `PreCompact`, `SubagentStop`, `Stop` (délai 60 s), chacun lançant `grimoire-hook --host codex` | les entrées du projet sont gardées, gestionnaire par gestionnaire : seul celui dont la commande est exactement `grimoire-hook --host codex --event …` est réécrit ; un `hooks` qui n'est pas un objet est préservé et signalé |
 | `.agents/skills/<slug>/SKILL.md` | `name` et `description`, puis le corps | fichiers du kit (marqueur géré) |
 | `.codex/agents/<nom>.toml` | `name`, `description`, `developer_instructions` | fichiers du kit (marqueur géré) |
-| `.codex/config.toml` | `[mcp_servers.<nom>]` pour chaque serveur de `.mcp.json` absent du fichier | ajout en fin de fichier, rien n'est réécrit ; un serveur déjà déclaré reste le vôtre ; un TOML invalide est préservé et signalé |
+| `.codex/config.toml` | `[mcp_servers.<nom>]` pour chaque serveur de `.mcp.json` absent du fichier | ajout en fin de fichier, rien n'est réécrit ; un serveur déjà déclaré reste le vôtre ; un TOML invalide est préservé et signalé, de même qu'un ajout qui le rendrait invalide (`mcp_servers` en table en ligne : à compléter à la main) |
 | `AGENTS.md` | bloc géré : personas, compétences, commandes `grimoire host run`, gouvernance | le reste du fichier est à vous |
 
 **Approbation des hooks.** Codex n'exécute un hook de projet qu'une fois approuvé
@@ -170,13 +170,19 @@ et le hook échouerait en laissant passer l'outil. Une réécriture d'entrée so
 `permissionDecision: "allow"` plus `updatedInput`. `Stop` refuse la clôture par
 `decision: "block"` plus `reason` (Codex relance l'agent avec cette raison).
 Un `apply_patch` est jugé fichier par fichier (en-têtes `*** Add File:`,
-`*** Update File:`, `*** Delete File:`, `*** Move to:`) et le verdict le plus
-strict l'emporte ; un correctif dont aucun fichier ne se lit est refusé.
+`*** Update File:`, `*** Delete File:`, `*** Move to:`, même indentés) et le
+verdict le plus strict l'emporte. Un déplacement est jugé comme une écriture de la
+destination **et** comme le `mv` équivalent, une suppression comme le `rm`
+équivalent : le même effet est refusé qu'il passe par `Bash` ou par
+`apply_patch`. Un correctif dont aucun fichier ne se lit, ou qui porte une ligne
+`*** ` inconnue, est refusé. Un `Edit` ou un `Write` dont `command` est un
+correctif (`*** Begin Patch`) est lu de la même façon.
 
 **Dégradations déclarées** (`grimoire host status`) : garde et gate de clôture
 consultatifs tant que non prouvés ; pas d'échec fermé documenté (un hook qui ne
 démarre pas ou dépasse son délai laisse a priori passer l'outil) ; `WebSearch` ne
-déclenche aucun hook ; pas de commandes de projet (chaque commande reste
+déclenche aucun hook ; les outils MCP ne sont pas gardés (le matcher de la garde
+est `Bash|apply_patch`, aucun nom d'outil MCP n'est documenté pour un matcher) ; pas de commandes de projet (chaque commande reste
 `grimoire host run <slug>`) ; pas de `model` par agent ; `PermissionRequest`
 n'est pas câblé.
 

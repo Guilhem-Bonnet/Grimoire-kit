@@ -56,6 +56,21 @@ COPILOT_DENY_EXIT = 2
 _COPILOT_HOST_NAMES = frozenset({"copilot", "github-copilot", "host-github-copilot"})
 
 
+def is_codex_host(name: str) -> bool:
+    """``--host`` désigne-t-il Codex ? Lu par ``capabilities.resolve_host``.
+
+    Repli sur l'alias seul si ce module ne s'importe pas non plus : on est ici
+    parce que le runtime est en panne, la reconnaissance de l'hôte ne doit pas
+    en dépendre.
+    """
+    try:
+        from grimoire.bridges.schemas import HostId
+        from grimoire.hosts.capabilities import resolve_host
+    except Exception:
+        return name.strip().lower() in {"codex", "host-codex"}
+    return resolve_host(name) is HostId.CODEX
+
+
 def is_copilot_host(name: str) -> bool:
     """``--host`` désigne-t-il GitHub Copilot ? (lecture stdlib, pour le repli sans runtime)."""
     return name.strip().lower() in _COPILOT_HOST_NAMES
@@ -138,11 +153,12 @@ def import_failure(args: list[str], raw: str, cause: str) -> int:
         sys.stderr.write(message + "\n")
         # Gemini : le code 2 est le refus documenté sur un événement bloquant.
         return 2 if guard else 0
-    if guard and (is_copilot_host(host) or host == "codex" or _copilot_runs_claude_hook(host, raw)):
+    codex = guard and is_codex_host(host)
+    if guard and (is_copilot_host(host) or codex or _copilot_runs_claude_hook(host, raw)):
         # Copilot et Codex documentent le code 2 comme refus de `PreToolUse` ; Codex
         # ne reçoit que `hookSpecificOutput` (seule forme que sa page des hooks décrit).
         refusal = guard_failure_payload(cause)
-        rendered = refusal if host == "codex" else copilot_guard_refusal(refusal)
+        rendered = refusal if codex else copilot_guard_refusal(refusal)
         sys.stdout.write(json.dumps(rendered, ensure_ascii=False))
         sys.stderr.write(refusal["hookSpecificOutput"]["permissionDecisionReason"] + "\n")
         return COPILOT_DENY_EXIT

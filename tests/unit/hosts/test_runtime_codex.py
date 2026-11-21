@@ -200,21 +200,90 @@ def test_a_patch_without_a_readable_file_is_refused(tmp_path: Path) -> None:
 def test_patch_calls_reads_every_documented_header() -> None:
     patch = _patch(
         "*** Add File: a.txt\n+x\n",
-        "*** Update File: b.txt\n*** Move to: c.txt\n@@\n-y\n+z\n",
+        "*** Update File: b.txt\n*** Move to: c d.txt\n@@\n-y\n+z\n",
+        "*** Update File: e.txt\n@@\n-u\n+v\n",
         "*** Delete File: d.txt\n",
     )
     parsed = codex_wire.patch_calls("apply_patch", {"command": patch})
     assert parsed is not None
     calls, problem = parsed
     assert problem == ""
-    assert [(c.name, c.args["file_path"]) for c in calls] == [
-        ("Write", "a.txt"),
-        ("Edit", "b.txt"),
-        ("Write", "c.txt"),
-        ("Write", "d.txt"),
+    assert [(c.name, c.args) for c in calls] == [
+        ("Write", {"file_path": "a.txt", "content": "x"}),
+        # Un déplacement : les lignes ajoutées vont à la destination, et la source disparaît.
+        ("Edit", {"file_path": "c d.txt", "new_string": "z"}),
+        ("Bash", {"command": "mv -- b.txt 'c d.txt'"}),
+        ("Edit", {"file_path": "e.txt", "new_string": "v"}),
+        # Une suppression : écriture vide et `rm` équivalent.
+        ("Write", {"file_path": "d.txt", "content": ""}),
+        ("Bash", {"command": "rm -- d.txt"}),
     ]
-    assert calls[0].args["content"] == "x"
     assert codex_wire.patch_calls("Bash", {"command": "ls"}) is None
+    assert codex_wire.patch_calls("Edit", {"file_path": "a.txt", "new_string": "x"}) is None
+
+
+_PROFILE = "_grimoire/standard/standard-profile.yaml"
+
+
+def _judge(root: Path, tool_name: str, tool_input: dict[str, Any]) -> tuple[dict[str, Any], Decision]:
+    rendered, decision, _ = run_hook(
+        _codex_pre_tool(root, tool_name, tool_input), host_id=HostId.CODEX, project_root=root
+    )
+    return rendered, decision
+
+
+def _assert_patch_refused(root: Path, patch: str, tool_name: str = "apply_patch") -> Decision:
+    rendered, decision = _judge(root, tool_name, {"command": patch})
+    assert codex_wire.is_pre_tool_refusal(decision), decision
+    assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
+    return decision
+
+
+@pytest.mark.parametrize("profile", ["governed", "production"])
+def test_moving_a_file_onto_the_profile_is_refused_like_mv(tmp_path: Path, profile: str) -> None:
+    """Un déplacement par apply_patch échappait à la garde qui refuse le même `mv` par Bash."""
+    root = _profile(tmp_path, profile)
+    assert codex_wire.is_pre_tool_refusal(_judge(root, "Bash", {"command": f"mv notes.md {_PROFILE}"})[1])
+    _assert_patch_refused(root, _patch(f"*** Update File: notes.md\n*** Move to: {_PROFILE}\n@@\n+profile: minimal\n"))
+    # Même sans contenu qui abaisse le profil : le `mv` équivalent suffit à refuser.
+    _assert_patch_refused(root, _patch(f"*** Update File: notes.md\n*** Move to: {_PROFILE}\n"))
+
+
+@pytest.mark.parametrize("profile", ["governed", "production"])
+def test_deleting_the_profile_is_refused_like_rm(tmp_path: Path, profile: str) -> None:
+    """Une suppression par apply_patch échappait à la garde qui refuse le même `rm` par Bash."""
+    root = _profile(tmp_path, profile)
+    assert codex_wire.is_pre_tool_refusal(_judge(root, "Bash", {"command": f"rm -- {_PROFILE}"})[1])
+    _assert_patch_refused(root, _patch(f"*** Delete File: {_PROFILE}\n"))
+
+
+def test_an_indented_header_is_still_judged(tmp_path: Path) -> None:
+    root = _profile(tmp_path, "governed")
+    _assert_patch_refused(
+        root,
+        _patch(
+            "*** Add File: notes.md\n+x\n",
+            f"   *** Update File: {_PROFILE}\n@@\n-profile: governed\n+profile: minimal\n",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["*** Frobnicate File: _grimoire/standard/standard-profile.yaml", "  *** Rename to: x", "*** Move to: x"],
+)
+def test_an_unknown_control_line_fails_closed(tmp_path: Path, line: str) -> None:
+    """Une ligne `*** ` inconnue (ou un Move hors d'un Update) refuse le correctif."""
+    root = _profile(tmp_path, "governed")
+    decision = _assert_patch_refused(root, _patch("*** Add File: notes.md\n+x\n", f"{line}\n"))
+    assert "apply_patch" in decision.reason
+
+
+@pytest.mark.parametrize("tool_name", ["Edit", "Write"])
+def test_a_patch_carried_by_edit_or_write_is_read_as_a_patch(tmp_path: Path, tool_name: str) -> None:
+    """Codex fait correspondre Edit/Write à apply_patch : le correctif porté par `command` est jugé."""
+    root = _profile(tmp_path, "governed")
+    _assert_patch_refused(root, _patch(f"*** Delete File: {_PROFILE}\n"), tool_name=tool_name)
 
 
 # ── rendu : seuls les champs documentés par événement ────────────────────────

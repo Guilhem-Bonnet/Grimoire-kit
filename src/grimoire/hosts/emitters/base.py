@@ -442,7 +442,12 @@ def _decide_merges(
         if not isinstance(loaded, dict):
             result.skip(f"{label} (racine JSON inattendue — fichier préservé)", CONFLICT_UNREADABLE)
             continue
-        merged = merge.merge(json.loads(json.dumps(loaded)))
+        try:
+            merged = merge.merge(json.loads(json.dumps(loaded)))
+        except ValueError as exc:
+            # La fusion refuse une forme qu'elle ne saurait garder intacte : fichier préservé.
+            result.skip(f"{label} ({exc} — fichier préservé)", CONFLICT_UNREADABLE)
+            continue
         rendered = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
         if text is not None and text == rendered:
             result.unchanged.append(label)
@@ -469,8 +474,8 @@ def _decide_text_merges(
         try:
             text = _read(dest, overlay)
             rendered = merge.merge(text)
-        except (OSError, ValueError):
-            result.skip(f"{label} (fichier illisible — préservé)", CONFLICT_UNREADABLE)
+        except (OSError, ValueError) as exc:
+            result.skip(f"{label} (fichier illisible ou non fusionnable : {exc} — préservé)", CONFLICT_UNREADABLE)
             continue
         if text is not None and text == rendered:
             result.unchanged.append(label)
