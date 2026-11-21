@@ -26,7 +26,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.standard_state import active_task_id, suspended_state_writes
-from grimoire.hosts import copilot_wire, gemini_wire
+from grimoire.hosts import codex_wire, copilot_wire, gemini_wire
 from grimoire.hosts.capabilities import profile_for
 from grimoire.hosts.decisions import (
     ADVISORY_PRE_TOOL_DECISIONS,
@@ -310,6 +310,10 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
         # Gemini's dialect is a top-level `decision`/`reason` and
         # `additionalContext`, not Claude Code's `hookSpecificOutput`.
         return gemini_wire.render(decision, hook)
+    if host_id is HostId.CODEX:
+        # Codex documente ses propres champs par événement ; un champ non pris en
+        # charge sur PreToolUse fait échouer le hook et laisse passer l'outil.
+        return codex_wire.render(decision, hook)
     event_name = wire_event_name(hook.event, host_id)
     payload: dict[str, Any] = {}
     specific: dict[str, Any] = {"hookEventName": event_name}
@@ -741,6 +745,9 @@ def run_hook(
     )
     advisory = hook.event is HookEvent.PRE_TOOL_USE and resolved_decision in ADVISORY_PRE_TOOL_DECISIONS
     batch = copilot_wire.inspect_tool_calls(payload) if guard or advisory else None
+    if batch is None and guard and host_id is HostId.CODEX:
+        # Un `apply_patch` de Codex porte un correctif : chaque fichier touché est jugé à part.
+        batch = codex_wire.patch_calls(hook.tool_name, hook.tool_input)
     judged: list[tuple[HookInput, Decision]]
     if advisory and batch is not None and batch[1]:
         # Lot illisible : la lecture tolérante du hook normalisé pourrait n'en garder
@@ -832,6 +839,9 @@ def main(argv: list[str] | None = None) -> int:
     ``BeforeTool``/``BeforeAgent`` exit 2 (fail closed) instead of printing a
     verdict nobody asked for; on the advisory events an internal error warns
     and stays out of the way.
+
+    Copilot and Codex: a guard refusal also exits 2 with its reason on stderr
+    (their documented blocking exit code), the JSON verdict staying on stdout.
     """
     from grimoire.core.console_encoding import enable_utf8_output
 
@@ -911,6 +921,8 @@ def main(argv: list[str] | None = None) -> int:
             verdict = guard_failure_verdict(cause)
             if host_id is HostId.GITHUB_COPILOT:
                 return _copilot_refusal_exit(copilot_guard_refusal(verdict))
+            if host_id is HostId.CODEX:
+                return _codex_refusal_exit(verdict)
             if host_id is HostId.CLAUDE_CODE_CLI:
                 # Même règle que ``render`` : verdict aussi à plat, code 0.
                 verdict = copilot_guard_refusal(verdict)
@@ -932,8 +944,29 @@ def main(argv: list[str] | None = None) -> int:
         and _decision.is_refusal
     ):
         return _copilot_refusal_exit(result)
+    if (
+        host_id is HostId.CODEX
+        and _hook.event is HookEvent.PRE_TOOL_USE
+        and decision_id not in ADVISORY_PRE_TOOL_DECISIONS
+        and codex_wire.is_pre_tool_refusal(_decision)
+    ):
+        return _codex_refusal_exit(result)
     sys.stdout.write(rendered)
     return 0
+
+
+def _codex_refusal_exit(result: dict[str, Any]) -> int:
+    """Un refus de la garde sous Codex : JSON sur stdout, raison sur stderr, code 2.
+
+    Page Hooks de Codex : « Exit 2: Blocking. The reason goes to stderr », valable
+    pour ``PreToolUse``. Le refus tient par le code de sortie, même si le JSON
+    n'était pas relu ; le JSON (``permissionDecision: "deny"``) dit la même chose.
+    """
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    specific = result.get("hookSpecificOutput")
+    reason = specific.get("permissionDecisionReason") if isinstance(specific, dict) else ""
+    sys.stderr.write(f"{reason or codex_wire.DEFAULT_DENY_REASON}\n")
+    return codex_wire.DENY_EXIT
 
 
 def _copilot_refusal_exit(result: dict[str, Any]) -> int:

@@ -108,6 +108,22 @@ class JsonMerge:
 
 
 @dataclass(frozen=True, slots=True)
+class TextMerge:
+    """A surgical edit of a text file the project also owns, when JSON does not apply.
+
+    ``.codex/config.toml`` carries the user's settings, comments included; parsing
+    and re-serialising it would drop them. *merge* receives the current text
+    (``None`` when the file does not exist) and returns the new text, touching
+    only what it is about. It raises ``ValueError`` on a file it cannot read
+    safely: the file is then preserved and reported as unreadable.
+    """
+
+    relpath: Path
+    merge: Callable[[str | None], str]
+    label: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class EmitPlan:
     host_id: HostId
     files: tuple[EmittedFile, ...] = ()
@@ -118,9 +134,15 @@ class EmitPlan:
     #: correspond à un motif sans être dans ``files`` est périmé (règle retirée,
     #: portée renommée) et ``apply_plan`` le supprime. Jamais un fichier sans marqueur.
     owned_globs: tuple[str, ...] = ()
+    #: Fusions dans un fichier texte non JSON (``.codex/config.toml``), voir :class:`TextMerge`.
+    text_merges: tuple[TextMerge, ...] = ()
 
     def labels(self) -> list[str]:
-        return [f.relpath.as_posix() for f in self.files] + [m.relpath.as_posix() for m in self.merges]
+        return (
+            [f.relpath.as_posix() for f in self.files]
+            + [m.relpath.as_posix() for m in self.merges]
+            + [m.relpath.as_posix() for m in self.text_merges]
+        )
 
 
 @dataclass
@@ -430,6 +452,34 @@ def _decide_merges(
         result.written.append(label)
 
 
+def _decide_text_merges(
+    plan: EmitPlan,
+    root: Path,
+    result: EmitResult,
+    overlay: dict[Path, str],
+    writes: list[tuple[Path, str]],
+    preserved: frozenset[str] = frozenset(),
+) -> None:
+    for merge in plan.text_merges:
+        dest = _target(root / merge.relpath)
+        label = merge.label or merge.relpath.as_posix()
+        if merge.relpath.as_posix() in preserved:
+            result.preserved.append(merge.relpath.as_posix())
+            continue
+        try:
+            text = _read(dest, overlay)
+            rendered = merge.merge(text)
+        except (OSError, ValueError):
+            result.skip(f"{label} (fichier illisible — préservé)", CONFLICT_UNREADABLE)
+            continue
+        if text is not None and text == rendered:
+            result.unchanged.append(label)
+            continue
+        overlay[dest] = rendered
+        writes.append((dest, rendered))
+        result.written.append(label)
+
+
 def _is_managed(path: Path) -> bool:
     try:
         head = path.read_text(encoding="utf-8")[:4096]
@@ -532,6 +582,7 @@ def apply_plans(
         result = EmitResult(host_id=plan.host_id, degradations=list(plan.degradations), dry_run=dry_run)
         _decide_files(plan, root, result, overlay, writes, force, kept)
         _decide_merges(plan, root, result, overlay, writes, kept)
+        _decide_text_merges(plan, root, result, overlay, writes, kept)
         for path in _stale_files(plan, root):
             if path.relative_to(root).as_posix() in kept:
                 continue

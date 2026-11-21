@@ -56,7 +56,7 @@ ajouté ou modifié une persona.
 | Claude Code | oui | oui | oui | oui | oui |
 | GitHub Copilot | oui | oui | oui | oui | non |
 | opencode | oui | oui | oui | oui (plugin `tool.execute.before`, vérifié) | non (non prouvé) |
-| Codex | non | non | non | non | non |
+| Codex | oui (`.codex/agents/*.toml`) | oui (`.agents/skills/`) | non | consultatifs (documentés, approbation `/hooks`, non prouvés) | non |
 | Cursor | non | non | non | non | non |
 | Gemini CLI | oui | non | oui | oui (`BeforeTool`, `BeforeAgent` ; fin de tour non vérifiée) | non |
 
@@ -81,7 +81,11 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   chargement de compétences à la demande (leurs corps sont copiés sous
   `_grimoire/hosts/skills/`). Les règles de permissions passent par le hook
   `BeforeTool`, faute de table déclarative.
-- Les hôtes en prose (Codex, Cursor) n'ont pas de hooks : la gouvernance y est
+- Codex écrit des hooks, des compétences, des sous-agents et un serveur MCP
+  (détail dans « Codex » ci-dessous). Ses hooks restent **consultatifs** : un hook
+  de projet ne s'exécute qu'après approbation via `/hooks`, et aucun refus n'a été
+  observé sur un Codex réel.
+- Les hôtes en prose (Cursor) n'ont pas de hooks : la gouvernance y est
   énoncée comme règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le
   catalogue le dit explicitement plutôt que de laisser croire à une protection.
 
@@ -132,6 +136,54 @@ Le serveur doit exister dans l'environnement de l'agent (le kit installé par un
 d'environnement « Agents » préfixé `COPILOT_MCP_` et se référence par
 `$COPILOT_MCP_NOM` ou `${COPILOT_MCP_NOM}` dans `env` ; aucune valeur ne se
 commite.
+
+## Codex
+
+Sources : documentation Codex lue le 2026-11-21 —
+[Hooks](https://learn.chatgpt.com/docs/hooks),
+[Skills](https://learn.chatgpt.com/docs/build-skills),
+[Sous-agents](https://learn.chatgpt.com/docs/agent-configuration/subagents),
+[MCP](https://learn.chatgpt.com/docs/extend/mcp). La CLI n'est pas installée sur
+le poste du kit : tout ce qui suit est documenté, rien n'est vérifié.
+
+| Fichier | Contenu | Fusion |
+|---|---|---|
+| `.codex/hooks.json` | `SessionStart`, `UserPromptSubmit`, `PreToolUse` (matcher `Bash\|apply_patch`, délai 30 s), `PostToolUse`, `PreCompact`, `SubagentStop`, `Stop` (délai 60 s), chacun lançant `grimoire-hook --host codex` | les entrées du projet sont gardées ; seules celles qui lancent `grimoire-hook` sont réécrites |
+| `.agents/skills/<slug>/SKILL.md` | `name` et `description`, puis le corps | fichiers du kit (marqueur géré) |
+| `.codex/agents/<nom>.toml` | `name`, `description`, `developer_instructions` | fichiers du kit (marqueur géré) |
+| `.codex/config.toml` | `[mcp_servers.<nom>]` pour chaque serveur de `.mcp.json` absent du fichier | ajout en fin de fichier, rien n'est réécrit ; un serveur déjà déclaré reste le vôtre ; un TOML invalide est préservé et signalé |
+| `AGENTS.md` | bloc géré : personas, compétences, commandes `grimoire host run`, gouvernance | le reste du fichier est à vous |
+
+**Approbation des hooks.** Codex n'exécute un hook de projet qu'une fois approuvé
+par `/hooks` (dans l'application : *Review hooks*), et l'approbation suit
+l'empreinte du hook : chaque `grimoire host sync` qui modifie `.codex/hooks.json`
+demande une nouvelle revue. Le kit ne sait pas lire cette approbation :
+`grimoire host status` affiche « approbation requise via /hooks » et `grimoire
+doctor` émet `codex_hooks` (WARN) dès que le fichier porte des hooks du kit.
+`.codex/config.toml` de projet n'est lu, lui aussi, que pour un projet approuvé.
+
+**Rendu des verdicts.** Un refus `PreToolUse` sort en
+`hookSpecificOutput.permissionDecision: "deny"` avec sa raison, **et** en code 2
+avec la raison sur stderr (le refus documenté par code de sortie). Une décision
+`ask` est rendue comme refus motivé : Codex ne prend pas `ask` sur `PreToolUse`,
+et le hook échouerait en laissant passer l'outil. Une réécriture d'entrée sort en
+`permissionDecision: "allow"` plus `updatedInput`. `Stop` refuse la clôture par
+`decision: "block"` plus `reason` (Codex relance l'agent avec cette raison).
+Un `apply_patch` est jugé fichier par fichier (en-têtes `*** Add File:`,
+`*** Update File:`, `*** Delete File:`, `*** Move to:`) et le verdict le plus
+strict l'emporte ; un correctif dont aucun fichier ne se lit est refusé.
+
+**Dégradations déclarées** (`grimoire host status`) : garde et gate de clôture
+consultatifs tant que non prouvés ; pas d'échec fermé documenté (un hook qui ne
+démarre pas ou dépasse son délai laisse a priori passer l'outil) ; `WebSearch` ne
+déclenche aucun hook ; pas de commandes de projet (chaque commande reste
+`grimoire host run <slug>`) ; pas de `model` par agent ; `PermissionRequest`
+n'est pas câblé.
+
+Si le kit est installé dans le venv du projet, la commande de hook s'écrit
+depuis la racine git (`"$(git rev-parse --show-toplevel)"/.venv/bin/grimoire-hook`),
+forme que la page des hooks donne en exemple : Codex lance ses hooks dans le
+dossier courant de la session, qui peut être un sous-dossier.
 
 ## Ce que le kit a observé (contrats réels)
 

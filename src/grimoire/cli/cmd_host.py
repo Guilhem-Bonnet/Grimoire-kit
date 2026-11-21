@@ -112,6 +112,10 @@ class _HostStatus:
     #: Version d'hôte installée et preuve du frein qui la couvre (#876) ; vides si l'hôte n'est pas sondable.
     host_version: str = ""
     brake_proof: dict[str, Any] = field(default_factory=dict)
+    #: Ce que l'utilisateur doit faire pour que l'hôte exécute les hooks du projet
+    #: (Codex : approbation via /hooks) ; vide si l'hôte n'en demande pas ou si
+    #: aucun hook n'est émis. Le kit ne lit pas cette approbation : il la rappelle.
+    hook_approval: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -130,6 +134,7 @@ class _HostStatus:
             "entry_agent_declared": self.entry_agent_declared,
             "host_version": self.host_version,
             "brake_proof": self.brake_proof,
+            "hook_approval": self.hook_approval,
         }
 
 
@@ -373,6 +378,7 @@ def host_status(
                 entry_agent_declared=entry_agent_name(project_root),
                 host_version=host_version,
                 brake_proof=brake_proof,
+                hook_approval=profile.hook_approval if plan.merges and surface.hooks else "",
             )
         )
 
@@ -425,6 +431,8 @@ def host_status(
             when = f", sondé le {proof['probed_at']}" if proof.get("probed_at") else ""
             label = {"verified": "prouvé", "failed": "[red]sonde échouée[/red]", "unverified": "[yellow]non prouvé[/yellow]"}[proof["status"]]
             console.print(f"  frein PreToolUse {label} pour la version {proof['version']}{when}")
+        if item.hook_approval:
+            console.print(f"  [yellow]hooks non exécutés sans approbation[/yellow] — {item.hook_approval} (non vérifiable par le kit)")
         if item.blocking_hooks:
             console.print(f"  hooks bloquants : {', '.join(item.blocking_hooks)}")
         if item.unsupported_events:

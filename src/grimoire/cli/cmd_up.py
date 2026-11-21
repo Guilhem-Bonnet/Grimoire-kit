@@ -31,6 +31,7 @@ from rich.console import Console
 
 from grimoire.cli import cmd_setup
 from grimoire.cli.doctor_acp import check_acp_hosts
+from grimoire.cli.doctor_codex import check_codex_hooks
 from grimoire.cli.doctor_copilot import check_copilot_hooks
 from grimoire.cli.doctor_hooks import (
     check_copilot_guard_timeout,
@@ -514,6 +515,7 @@ def run_env_checks(target: Path) -> list[EnvCheck]:
         *check_guard_timeout(target),
         *check_copilot_guard_timeout(target),
         *check_copilot_hooks(target),
+        *check_codex_hooks(target),
         *check_hook_path(target),
         *check_acp_hosts(target),
         *check_instruction_files(target),

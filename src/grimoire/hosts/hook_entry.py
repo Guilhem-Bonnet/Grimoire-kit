@@ -138,9 +138,12 @@ def import_failure(args: list[str], raw: str, cause: str) -> int:
         sys.stderr.write(message + "\n")
         # Gemini : le code 2 est le refus documenté sur un événement bloquant.
         return 2 if guard else 0
-    if guard and (is_copilot_host(host) or _copilot_runs_claude_hook(host, raw)):
+    if guard and (is_copilot_host(host) or host == "codex" or _copilot_runs_claude_hook(host, raw)):
+        # Copilot et Codex documentent le code 2 comme refus de `PreToolUse` ; Codex
+        # ne reçoit que `hookSpecificOutput` (seule forme que sa page des hooks décrit).
         refusal = guard_failure_payload(cause)
-        sys.stdout.write(json.dumps(copilot_guard_refusal(refusal), ensure_ascii=False))
+        rendered = refusal if host == "codex" else copilot_guard_refusal(refusal)
+        sys.stdout.write(json.dumps(rendered, ensure_ascii=False))
         sys.stderr.write(refusal["hookSpecificOutput"]["permissionDecisionReason"] + "\n")
         return COPILOT_DENY_EXIT
     if guard:

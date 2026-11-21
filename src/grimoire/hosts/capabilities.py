@@ -68,6 +68,14 @@ class HostProfile:
     #: not); a single boolean would turn the second case into a claim nobody
     #: observed. ``None`` means "trust :attr:`blocking_hooks`".
     blocking_events: frozenset[HookEvent] | None = None
+    #: Events the host *documents* as able to refuse, absent from
+    #: :attr:`blocking_events` because the kit has not proven it (no capture, or
+    #: hooks that need an approval the kit cannot read). Their hooks stay
+    #: ``advisory`` in the matrix, with that reason rather than "cannot block".
+    unproven_blocking_events: frozenset[HookEvent] = frozenset()
+    #: What the user must do before the host runs the project's hooks at all
+    #: (Codex: review them through ``/hooks``). Empty: the hooks run as written.
+    hook_approval: str = ""
     #: Can be told to open a session *inside* a named agent.
     #: True only where the host documents it (issue #716): Claude Code with
     #: ``claude --agent <name>`` (CLI reference, "Specify an agent for the
@@ -136,6 +144,7 @@ class HostProfile:
                 "permissions": self.permissions_native,
                 "mcp": self.mcp_native,
             },
+            "hook_approval": self.hook_approval,
             "hook_events": [e.value for e in self.supported_events()],
             "instructions_entrypoint": self.instructions_entrypoint,
             "notes": self.notes,
@@ -191,17 +200,37 @@ COPILOT_PROFILE = HostProfile(
 CODEX_PROFILE = HostProfile(
     host_id=HostId.CODEX,
     display_name="Codex",
-    subagents_native=False,
-    skills_native=False,
+    subagents_native=True,
+    skills_native=True,
     commands_native=False,
-    blocking_hooks=False,
+    blocking_hooks=True,
+    # Refus PreToolUse, relance Stop/SubagentStop, blocage UserPromptSubmit et
+    # PostToolUse documentés (learn.chatgpt.com/docs/hooks, lue le 2026-11-21),
+    # mais rien de prouvé : CLI absente du poste, et un hook de projet ne
+    # s'exécute qu'approuvé via /hooks. Aucun événement n'est donc tenu pour bloquant.
+    blocking_events=frozenset(),
+    unproven_blocking_events=frozenset(
+        {
+            HookEvent.PRE_TOOL_USE,
+            HookEvent.USER_PROMPT_SUBMIT,
+            HookEvent.POST_TOOL_USE,
+            HookEvent.SUBAGENT_STOP,
+            HookEvent.STOP,
+        }
+    ),
+    hook_approval="approbation requise via /hooks : Codex n'exécute un hook de projet qu'une fois approuvé",
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint="AGENTS.md",
     acp_command=("npx", "-y", "@agentclientprotocol/codex-acp"),
     acp_binary="codex",
     acp_note="Adaptateur ACP de Codex lancé par npx (@agentclientprotocol/codex-acp) : exige Node.js et la CLI `codex`.",
-    notes="Prose entrypoint plus MCP: agents, skills and commands degrade to a described catalog.",
+    notes=(
+        "Hooks (.codex/hooks.json), skills (.agents/skills), sous-agents (.codex/agents/*.toml) et MCP "
+        "(.codex/config.toml) écrits d'après learn.chatgpt.com/docs (lue le 2026-11-21 ; CLI non installée). "
+        "Hooks de projet exécutés seulement après approbation via /hooks ; aucun refus observé : "
+        "garde et gate de clôture consultatifs. Pas de commandes de projet documentées."
+    ),
 )
 
 CURSOR_PROFILE = HostProfile(
@@ -344,6 +373,8 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
             gaps.append(CapabilityGap("mcp", "non déterminé : hôte inconnu, client MCP ni affirmé ni exclu"))
         else:
             gaps.append(CapabilityGap("mcp", "outils du kit atteints par la CLI `grimoire`, sans client MCP"))
+    if profile.hook_approval:
+        gaps.append(CapabilityGap("hook_approval", profile.hook_approval))
     if not profile.blocking_hooks:
         missing = tuple(e.value for e in _HOOK_FIELDS if not profile.supports_event(e))
         gaps.append(CapabilityGap("blocking_hooks", "governance stated as instructions, enforced by CI only", missing))
@@ -481,7 +512,35 @@ def _prose_states(entrypoint: str) -> dict[GovernanceFunction, FunctionState]:
     }
 
 
-_CODEX_STATES = _prose_states("AGENTS.md")
+_CODEX_UNPROVEN = "approbation requise via /hooks et aucune capture sur un Codex réel"
+
+_CODEX_STATES: dict[GovernanceFunction, FunctionState] = {
+    # L'émetteur Codex écrit `.codex/hooks.json`, `.agents/skills/`, `.codex/agents/*.toml`
+    # et `.codex/config.toml` (learn.chatgpt.com/docs, lue le 2026-11-21 ; CLI non installée).
+    GovernanceFunction.TOOL_GUARD: _degraded(
+        "garde PreToolUse écrite dans `.codex/hooks.json` (refus documenté), consultative tant que non prouvée : "
+        + _CODEX_UNPROVEN
+    ),
+    GovernanceFunction.WRITE_TRACE: _degraded(
+        "PostToolUse compte les écritures et Stop reçoit la décision de clôture (`decision: block` documenté), "
+        "sans preuve : " + _CODEX_UNPROVEN
+    ),
+    GovernanceFunction.TASK_RECALL: _degraded(
+        "SessionStart injecte le rappel (`additionalContext`) une fois les hooks approuvés via /hooks"
+    ),
+    GovernanceFunction.COMMANDS: _degraded(
+        "aucun emplacement de commande de projet documenté ; chaque commande est l'invocation "
+        "`grimoire host run <slug>` décrite dans AGENTS.md"
+    ),
+    GovernanceFunction.PERSONAS: _RICH,
+    GovernanceFunction.MCP_SERVER: _degraded(
+        "serveurs ajoutés à `.codex/config.toml`, que Codex ne lit que pour un projet approuvé (trusted)"
+    ),
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
 _CURSOR_STATES = _prose_states("les règles Cursor")
 
 _GEMINI_STATES: dict[GovernanceFunction, FunctionState] = {

@@ -69,10 +69,16 @@ class TestMatrix:
         assert _cell(project, HostId.CLAUDE_CODE_CLI, "hook:session_start").status == ADVISORY
 
     def test_un_hote_de_prose_enonce_la_regle_sans_l_executer(self, project: Path) -> None:
-        for host in (HostId.CODEX, HostId.CURSOR):
-            cell = _cell(project, host, "hook:pre_tool_use")
-            assert cell.status == PROSE, host
-            assert cell.carriers  # l'entrypoint porte la règle, c'est vérifiable sur disque
+        cell = _cell(project, HostId.CURSOR, "hook:pre_tool_use")
+        assert cell.status == PROSE
+        assert cell.carriers  # l'entrypoint porte la règle, c'est vérifiable sur disque
+
+    def test_codex_ecrit_la_garde_mais_la_tient_pour_consultative(self, project: Path) -> None:
+        """Codex documente le refus, mais rien n'est prouvé et un hook de projet exige /hooks :
+        la garde est écrite dans `.codex/hooks.json` et reste `advisory`, jamais `enforced`."""
+        pre = _cell(project, HostId.CODEX, "hook:pre_tool_use")
+        assert pre.status == ADVISORY and pre.carriers == (".codex/hooks.json",)
+        assert "non prouvé" in pre.reason and "/hooks" in pre.reason
 
     def test_gemini_bloque_sur_les_evenements_d_action_et_pas_sur_la_cloture(self, project: Path) -> None:
         """Depuis l'émetteur riche, Gemini n'est plus un hôte de prose : BeforeTool et
@@ -115,7 +121,12 @@ class TestMatrix:
         class Silent:
             def plan(self, surface: object, root: Path) -> EmitPlan:
                 plan = real.plan(surface, root)  # type: ignore[arg-type]
-                return replace(plan, degradations=tuple(d for d in plan.degradations if d.surface != "hooks"))
+                # Ni hook écrit, ni limite déclarée : l'émetteur ment par omission.
+                return replace(
+                    plan,
+                    merges=(),
+                    degradations=tuple(d for d in plan.degradations if not d.surface.startswith("hook")),
+                )
 
         monkeypatch.setattr(matrix_mod, "emitter_for", lambda h: Silent() if h is HostId.CODEX else emitter_for(h))
         matrix = build_matrix(project, (HostId.CODEX,))

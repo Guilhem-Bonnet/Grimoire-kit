@@ -197,6 +197,7 @@ def _texts(plan: EmitPlan) -> list[tuple[str, str]]:
     """Ce que le plan écrit, fichier par fichier ; un fusion JSON est rendue sur un objet vide."""
     out = [(f.relpath.as_posix(), f.content) for f in plan.files]
     out.extend((m.relpath.as_posix(), json.dumps(m.merge({}), ensure_ascii=False)) for m in plan.merges)
+    out.extend((m.relpath.as_posix(), m.merge(None)) for m in plan.text_merges)
     return out
 
 
@@ -223,7 +224,14 @@ def _hook_cell(
             )
         if hook.enforcement is Enforcement.BLOCKING and profile.blocks(hook.event):
             return Cell("hook", subject, host.value, ENFORCED, Enforcement.BLOCKING.value, carriers)
-        why = "l'hôte ne sait pas bloquer" if hook.enforcement is Enforcement.BLOCKING else ""
+        why = ""
+        if hook.enforcement is Enforcement.BLOCKING:
+            why = (
+                "blocage documenté mais non prouvé sur cet hôte"
+                + (f" ({profile.hook_approval})" if profile.hook_approval else "")
+                if hook.event in profile.unproven_blocking_events
+                else "l'hôte ne sait pas bloquer"
+            )
         return Cell("hook", subject, host.value, ADVISORY, Enforcement.ADVISORY.value, carriers, why)
     degradation = _declares(plan, "hooks", f"hook {event}")
     if degradation is None:
