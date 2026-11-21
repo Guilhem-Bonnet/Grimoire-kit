@@ -25,7 +25,6 @@ from grimoire.hosts.matrix import (
     INERT,
     MISSCOPED,
     NATIVE,
-    PROSE,
     UNDECLARED,
     build_matrix,
 )
@@ -68,17 +67,20 @@ class TestMatrix:
         assert pre.carriers == (".claude/settings.json",)
         assert _cell(project, HostId.CLAUDE_CODE_CLI, "hook:session_start").status == ADVISORY
 
-    def test_un_hote_de_prose_enonce_la_regle_sans_l_executer(self, project: Path) -> None:
+    def test_cursor_ecrit_la_garde_mais_la_declare_advisory_non_verifiee(self, project: Path) -> None:
+        """#1281 L1 : la garde Cursor est écrite dans `.cursor/hooks.json`, mais le refus est
+        seulement documenté (aucune capture) : `advisory`, jamais `enforced`."""
         cell = _cell(project, HostId.CURSOR, "hook:pre_tool_use")
-        assert cell.status == PROSE
-        assert cell.carriers  # l'entrypoint porte la règle, c'est vérifiable sur disque
+        assert cell.status == ADVISORY
+        assert cell.carriers == (".cursor/hooks.json",)
+        assert "non vérifié" in cell.reason
 
     def test_codex_ecrit_la_garde_mais_la_tient_pour_consultative(self, project: Path) -> None:
         """Codex documente le refus, mais rien n'est prouvé et un hook de projet exige /hooks :
         la garde est écrite dans `.codex/hooks.json` et reste `advisory`, jamais `enforced`."""
         pre = _cell(project, HostId.CODEX, "hook:pre_tool_use")
         assert pre.status == ADVISORY and pre.carriers == (".codex/hooks.json",)
-        assert "non prouvé" in pre.reason and "/hooks" in pre.reason
+        assert "non vérifié" in pre.reason and "/hooks" in pre.reason
 
     def test_gemini_bloque_sur_les_evenements_d_action_et_pas_sur_la_cloture(self, project: Path) -> None:
         """Depuis l'émetteur riche, Gemini n'est plus un hôte de prose : BeforeTool et
@@ -114,7 +116,9 @@ class TestMatrix:
         assert matrix.hosts == ALL
         assert matrix.ok, [c.to_dict() for c in matrix.failing]
 
-    def test_une_limite_oubliee_par_l_emetteur_est_undeclared(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_une_limite_oubliee_par_l_emetteur_est_undeclared(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         real = emitter_for(HostId.CODEX)
         assert real is not None
 
@@ -136,17 +140,21 @@ class TestMatrix:
     def test_un_hook_ecrit_pour_un_evenement_que_l_hote_ignore_est_inert(
         self, project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        real = emitter_for(HostId.CURSOR)
+        # opencode ne déclenche pas `SessionStart` : un hook écrit pour lui ne s'exécute jamais.
+        real = emitter_for(HostId.OPENCODE)
         assert real is not None
 
         class Wired:
             def plan(self, surface: object, root: Path) -> EmitPlan:
                 plan = real.plan(surface, root)  # type: ignore[arg-type]
-                fake = EmittedFile(Path("hooks.json"), '{"command": "grimoire-hook --host cursor --event PreToolUse"}')
+                fake = EmittedFile(
+                    Path("hooks.json"), '{"command": "grimoire-hook --host opencode --event SessionStart"}'
+                )
                 return replace(plan, files=(*plan.files, fake))
 
-        monkeypatch.setattr(matrix_mod, "emitter_for", lambda h: Wired() if h is HostId.CURSOR else emitter_for(h))
-        assert _cell(project, HostId.CURSOR, "hook:pre_tool_use", matrix=build_matrix(project, (HostId.CURSOR,))).status == INERT
+        monkeypatch.setattr(matrix_mod, "emitter_for", lambda h: Wired() if h is HostId.OPENCODE else emitter_for(h))
+        matrix = build_matrix(project, (HostId.OPENCODE,))
+        assert _cell(project, HostId.OPENCODE, "hook:session_start", matrix=matrix).status == INERT
 
 
 class TestRuleCells:
@@ -168,7 +176,9 @@ class TestRuleCells:
         assert {c.status for c in cells} == {DEGRADED}
         assert matrix.ok
 
-    def test_une_portee_perdue_par_le_fichier_est_misscoped(self, project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_une_portee_perdue_par_le_fichier_est_misscoped(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         add_rule(project, "project", "NEVER edit generated-files @src/**")
         real = emitter_for(HostId.CURSOR)
         assert real is not None
@@ -177,14 +187,20 @@ class TestRuleCells:
             def plan(self, surface: object, root: Path) -> EmitPlan:
                 plan = real.plan(surface, root)  # type: ignore[arg-type]
                 files = tuple(
-                    replace(f, content=f.content.replace("globs: src/**\n", "")) if f.relpath.name.startswith("grimoire-rules") else f
+                    replace(f, content=f.content.replace("globs: src/**\n", ""))
+                    if f.relpath.name.startswith("grimoire-rules")
+                    else f
                     for f in plan.files
                 )
                 return replace(plan, files=files)
 
         monkeypatch.setattr(matrix_mod, "emitter_for", lambda h: Unscoped() if h is HostId.CURSOR else emitter_for(h))
-        cell = _cell(project, HostId.CURSOR, "rule:project:NEVER edit generated-files @src/**",
-                     matrix=build_matrix(project, (HostId.CURSOR,)))
+        cell = _cell(
+            project,
+            HostId.CURSOR,
+            "rule:project:NEVER edit generated-files @src/**",
+            matrix=build_matrix(project, (HostId.CURSOR,)),
+        )
         assert cell.status == MISSCOPED
 
 

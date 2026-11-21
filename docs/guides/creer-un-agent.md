@@ -130,7 +130,9 @@ rétrograde pas. Copilot reçoit la même affinité, traduite : `model:` n'est �
 `haiku`) ET que `dispatch.copilot_models.<palier>` donne le nom Copilot de ce
 palier. Sans correspondance, ou pour `inherit`, rien n'est émis (le modèle du
 sélecteur s'applique) et `grimoire host sync --host copilot` signale l'écart
-comme dégradation « model affinity ». `model-policy` n'est pas émis : sa valeur
+comme dégradation « model affinity ». Cursor suit la même règle avec
+`dispatch.cursor_models.<palier>` (champ `model` de `.cursor/agents/*.md`, défaut
+`inherit`). `model-policy` n'est pas émis : sa valeur
 par défaut (`preferred`) laisse l'utilisateur changer de modèle, et le harness
 Copilot ne le transmet pas à son SDK (référence du fichier d'agent VS Code). Le fichier de l'agent d'entrée émis pour
 Claude Code porte en plus une « Politique de dispatch » (issue #329) : le

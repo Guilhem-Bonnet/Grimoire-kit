@@ -77,7 +77,7 @@ def test_detect_unknown_env_var_returns_unknown(monkeypatch):
 def test_supports_hook():
     bridge = HostBridge(override_host_id=HostId.GITHUB_COPILOT)
     assert bridge.supports_hook("user_prompt_submit", HostId.GITHUB_COPILOT) is True
-    assert bridge.supports_hook("user_prompt_submit", HostId.CURSOR) is False
+    assert bridge.supports_hook("user_prompt_submit", HostId.OPENCODE) is False
 
 
 def test_all_manifests_cover_the_registry():

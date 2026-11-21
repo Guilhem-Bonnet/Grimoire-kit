@@ -68,11 +68,11 @@ class HostProfile:
     #: not); a single boolean would turn the second case into a claim nobody
     #: observed. ``None`` means "trust :attr:`blocking_hooks`".
     blocking_events: frozenset[HookEvent] | None = None
-    #: Events the host *documents* as able to refuse, absent from
-    #: :attr:`blocking_events` because the kit has not proven it (no capture, or
-    #: hooks that need an approval the kit cannot read). Their hooks stay
-    #: ``advisory`` in the matrix, with that reason rather than "cannot block".
-    unproven_blocking_events: frozenset[HookEvent] = frozenset()
+    #: Événements dont l'hôte **documente** un refus qu'aucune capture n'a confirmé
+    #: (#1281 : « une capacité documentée mais non prouvée vaut advisory, jamais
+    #: enforced »). Le kit y écrit sa garde, mais :meth:`blocks` reste faux : la
+    #: matrice les rend ``advisory`` avec cette raison, pas ``enforced``.
+    documented_blocking_events: frozenset[HookEvent] = frozenset()
     #: What the user must do before the host runs the project's hooks at all
     #: (Codex: review them through ``/hooks``). Empty: the hooks run as written.
     hook_approval: str = ""
@@ -127,6 +127,10 @@ class HostProfile:
         if self.blocking_events is not None:
             return event in self.blocking_events
         return self.blocking_hooks
+
+    def documents_unverified_block(self, event: HookEvent) -> bool:
+        """L'hôte documente-t-il un refus sur *event* sans qu'il ait été observé ?"""
+        return not self.blocks(event) and event in self.documented_blocking_events
 
     def supported_events(self) -> tuple[HookEvent, ...]:
         return tuple(e for e in HookEvent if self.supports_event(e))
@@ -209,7 +213,7 @@ CODEX_PROFILE = HostProfile(
     # mais rien de prouvé : CLI absente du poste, et un hook de projet ne
     # s'exécute qu'approuvé via /hooks. Aucun événement n'est donc tenu pour bloquant.
     blocking_events=frozenset(),
-    unproven_blocking_events=frozenset(
+    documented_blocking_events=frozenset(
         {
             HookEvent.PRE_TOOL_USE,
             HookEvent.USER_PROMPT_SUBMIT,
@@ -236,15 +240,26 @@ CODEX_PROFILE = HostProfile(
 CURSOR_PROFILE = HostProfile(
     host_id=HostId.CURSOR,
     display_name="Cursor",
-    subagents_native=False,
-    skills_native=False,
+    subagents_native=True,
+    skills_native=True,
     commands_native=False,
+    # Refus documenté (`preToolUse`, `beforeShellExecution` : `permission: "deny"`, ou
+    # code 2), jamais observé : aucune capture, Cursor absent du poste. Tant que ce
+    # n'est pas prouvé, aucun événement ne « bloque » (matrice : advisory).
     blocking_hooks=False,
+    blocking_events=frozenset(),
+    documented_blocking_events=frozenset({HookEvent.PRE_TOOL_USE}),
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint=".cursor/rules/grimoire.mdc",
     acp_command=("agent", "acp"),
-    notes="Rule files plus MCP; no lifecycle hooks, so governance is advisory only.",
+    notes=(
+        "Hooks (.cursor/hooks.json), sous-agents (.cursor/agents/), compétences (.cursor/skills/) et "
+        "règles écrits d'après cursor.com/docs (hooks, context/subagents, context/skills ; lue le "
+        "2026-11-21, Cursor non installé). preToolUse et beforeShellExecution documentent un refus, "
+        "stop une relance par followup_message (loop_limit 5, compté par conversation) ; rien n'est vérifié, la garde est "
+        "advisory. Mode headless `agent -p` documenté, non utilisé par le kit."
+    ),
 )
 
 GEMINI_PROFILE = HostProfile(
@@ -375,7 +390,16 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
             gaps.append(CapabilityGap("mcp", "outils du kit atteints par la CLI `grimoire`, sans client MCP"))
     if profile.hook_approval:
         gaps.append(CapabilityGap("hook_approval", profile.hook_approval))
-    if not profile.blocking_hooks:
+    if not profile.blocking_hooks and profile.documented_blocking_events:
+        documented = tuple(e.value for e in _HOOK_FIELDS if e in profile.documented_blocking_events)
+        gaps.append(
+            CapabilityGap(
+                "blocking_hooks",
+                "refus documenté par l'hôte, garde écrite mais non vérifiée (aucune capture) : enforced by CI only",
+                documented,
+            )
+        )
+    elif not profile.blocking_hooks:
         missing = tuple(e.value for e in _HOOK_FIELDS if not profile.supports_event(e))
         gaps.append(CapabilityGap("blocking_hooks", "governance stated as instructions, enforced by CI only", missing))
     elif not profile.permissions_native:
@@ -489,7 +513,7 @@ _NO_MCP_CONFIG = (
 
 
 def _prose_states(entrypoint: str) -> dict[GovernanceFunction, FunctionState]:
-    """État des fonctions sur un hôte en prose (Codex, Cursor) : règles écrites, rien d'exécuté."""
+    """État des fonctions sur un hôte en prose (Codex) : règles écrites, rien d'exécuté."""
     return {
         GovernanceFunction.TOOL_GUARD: _absent(
             f"aucun hook de cycle de vie : la politique d'outils n'est énoncée que dans {entrypoint}, opposable en CI"
@@ -541,7 +565,37 @@ _CODEX_STATES: dict[GovernanceFunction, FunctionState] = {
     GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
     GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
 }
-_CURSOR_STATES = _prose_states("les règles Cursor")
+
+#: Cursor (L1 de #1281) : l'émetteur écrit `.cursor/hooks.json`, `.cursor/agents/` et
+#: `.cursor/skills/` d'après cursor.com/docs (lue le 2026-11-21). Cursor n'est pas
+#: installé sur le poste et aucun refus n'a été capturé : ce qui dépend d'un hook est
+#: dégradé (non vérifié), jamais riche.
+_CURSOR_UNVERIFIED = "Cursor non installé, aucune capture : non vérifié"
+_CURSOR_STATES: dict[GovernanceFunction, FunctionState] = {
+    GovernanceFunction.TOOL_GUARD: _degraded(
+        "garde écrite dans `.cursor/hooks.json` (`preToolUse`, `beforeShellExecution`, `failClosed`) d'après "
+        f"la doc ; {_CURSOR_UNVERIFIED} — déclarée advisory, opposable en CI"
+    ),
+    GovernanceFunction.WRITE_TRACE: _degraded(
+        "`postToolUse` compte les écritures ; `stop` ne refuse pas la clôture : tant que les gates sont "
+        "rouges il relance l'agent par `followup_message`, jusqu'à la limite de 5 relances automatiques que "
+        f"Cursor compte par conversation (`loop_limit`), plus aucune ensuite ; {_CURSOR_UNVERIFIED}"
+    ),
+    GovernanceFunction.TASK_RECALL: _degraded(
+        f"`sessionStart` injecte la directive (`additional_context`) ; `beforeSubmitPrompt` n'a pas de canal "
+        f"de contexte, le rappel de tâche par message n'est pas émis ; {_CURSOR_UNVERIFIED}"
+    ),
+    GovernanceFunction.COMMANDS: _degraded(
+        "pas de commande utilisateur émise ; chaque commande est l'invocation `grimoire host run <slug>` "
+        "décrite dans `.cursor/rules/grimoire.mdc`"
+    ),
+    GovernanceFunction.PERSONAS: _RICH,
+    GovernanceFunction.MCP_SERVER: _degraded(_NO_MCP_CONFIG),
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
 
 _GEMINI_STATES: dict[GovernanceFunction, FunctionState] = {
     # L'émetteur Gemini écrit `.gemini/settings.json` : BeforeTool refuse une

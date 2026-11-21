@@ -51,6 +51,7 @@ from grimoire.hosts.emitters.base import (
     EmittedFile,
     Emitter,
     JsonMerge,
+    MergeRefusedError,
     TextMerge,
     context_load_instruction,
     managed_header,
@@ -244,12 +245,12 @@ def _hooks_merge(surface: ProjectSurface, launcher: HookLauncher = BARE) -> Json
         if not isinstance(hooks, dict):
             # Le remplacer effacerait la configuration du projet : fichier préservé, conflit signalé.
             msg = "`hooks` n'est pas un objet"
-            raise ValueError(msg)
+            raise MergeRefusedError(msg)
         for event, entries in hooks_by_event.items():
             existing = hooks.get(event)
             if existing is not None and not isinstance(existing, list):
                 msg = f"`hooks.{event}` n'est pas une liste"
-                raise ValueError(msg)
+                raise MergeRefusedError(msg)
             hooks[event] = _without_owned(existing or []) + entries
         # Un événement que la surface ne câble plus perd l'entrée du kit, jamais celles du projet.
         for event, existing in list(hooks.items()):
@@ -296,7 +297,7 @@ def _config_merge(servers: tuple[McpServerSpec, ...], project_root: Path) -> Tex
         declared = data.get("mcp_servers", {})
         if not isinstance(declared, dict):
             msg = "`mcp_servers` n'est pas une table"
-            raise ValueError(msg)
+            raise MergeRefusedError(msg)
         missing = [server for server in servers if server.name not in declared]
         if not missing:
             return current
@@ -318,7 +319,7 @@ def _config_merge(servers: tuple[McpServerSpec, ...], project_root: Path) -> Tex
                 f"l'ajout de [mcp_servers.<nom>] rendrait le TOML invalide ({exc}) ; "
                 "`mcp_servers` en table en ligne ? Déclarez les serveurs du kit à la main"
             )
-            raise ValueError(msg) from exc
+            raise MergeRefusedError(msg) from exc
         return merged
 
     return TextMerge(relpath=CONFIG_FILE, merge=merge, label=CONFIG_FILE.as_posix())

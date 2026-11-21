@@ -227,9 +227,9 @@ def _hook_cell(
         why = ""
         if hook.enforcement is Enforcement.BLOCKING:
             why = (
-                "blocage documenté mais non prouvé sur cet hôte"
+                "refus documenté par l'hôte mais non vérifié (aucune capture réelle) : advisory, jamais enforced"
                 + (f" ({profile.hook_approval})" if profile.hook_approval else "")
-                if hook.event in profile.unproven_blocking_events
+                if profile.documents_unverified_block(hook.event)
                 else "l'hôte ne sait pas bloquer"
             )
         return Cell("hook", subject, host.value, ADVISORY, Enforcement.ADVISORY.value, carriers, why)

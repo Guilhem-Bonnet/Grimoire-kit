@@ -21,6 +21,7 @@ from grimoire.hosts.emitters.base import (
 from grimoire.hosts.emitters.claude_code import ClaudeCodeEmitter
 from grimoire.hosts.emitters.codex import CodexEmitter
 from grimoire.hosts.emitters.copilot import CopilotEmitter
+from grimoire.hosts.emitters.cursor import CursorEmitter
 from grimoire.hosts.emitters.gemini import GeminiEmitter
 from grimoire.hosts.emitters.generic import GenericEmitter
 from grimoire.hosts.emitters.opencode import OpenCodeEmitter
@@ -29,7 +30,7 @@ _EMITTERS: dict[HostId, Emitter] = {
     HostId.CLAUDE_CODE_CLI: ClaudeCodeEmitter(),
     HostId.GITHUB_COPILOT: CopilotEmitter(),
     HostId.CODEX: CodexEmitter(),
-    HostId.CURSOR: GenericEmitter(HostId.CURSOR),
+    HostId.CURSOR: CursorEmitter(),
     HostId.GEMINI_CLI: GeminiEmitter(),
     HostId.OPENCODE: OpenCodeEmitter(),
 }
@@ -48,6 +49,7 @@ __all__ = [
     "ClaudeCodeEmitter",
     "CodexEmitter",
     "CopilotEmitter",
+    "CursorEmitter",
     "Degradation",
     "EmitPlan",
     "EmitResult",

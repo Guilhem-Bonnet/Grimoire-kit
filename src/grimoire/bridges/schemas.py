@@ -169,7 +169,7 @@ GITHUB_COPILOT_MANIFEST = HostCapabilityManifest(
 # le poste) documente ces événements dans `.codex/hooks.json`. Le manifeste dit ce
 # que l'hôte **déclenche**, pas que chacun refuse : un hook de projet n'y tourne
 # qu'approuvé via /hooks, et aucun refus n'a été observé (voir
-# HostProfile.unproven_blocking_events).
+# HostProfile.documented_blocking_events).
 CODEX_MANIFEST = HostCapabilityManifest(
     host_id=HostId.CODEX,
     display_name="Codex",
@@ -197,12 +197,25 @@ CODEX_MANIFEST = HostCapabilityManifest(
     tool_policy_native=False,
 )
 
-# Editor/CLI hosts with an MCP client and an instructions file, but no agent
-# lifecycle hooks: governance can be stated there, never enforced.
+# Cursor (https://cursor.com/docs/hooks, lue le 2026-11-21 ; Cursor non installé sur
+# le poste) déclenche ces événements depuis `.cursor/hooks.json`. Le manifeste dit ce
+# que l'hôte **déclenche**, pas ce qu'il refuse : le refus de `preToolUse`/
+# `beforeShellExecution` est documenté mais non vérifié (HostProfile.documented_blocking_events),
+# d'où un repli inchangé. `beforeSubmitPrompt` alimente `user_prompt_submit`, sans canal de contexte.
 CURSOR_MANIFEST = HostCapabilityManifest(
     host_id=HostId.CURSOR,
     display_name="Cursor",
-    hooks=HostHooks(),
+    hooks=HostHooks(
+        session_start=True,
+        user_prompt_submit=True,
+        pre_tool_use=True,
+        post_tool_use=True,
+        post_tool_use_failure=True,
+        subagent_start=True,
+        subagent_stop=True,
+        pre_compact=True,
+        stop=True,
+    ),
     fallback=HostFallback(
         mode=FallbackMode.PREVIEW_ONLY,
         required_controls=("preview_before_write", "explicit_proof_for_risky_changes"),
