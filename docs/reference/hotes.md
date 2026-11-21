@@ -379,8 +379,10 @@ ouvrir une session *à l'intérieur* d'un agent nommé : Claude Code, par
 et la clé de réglage `agent` ([settings](https://code.claude.com/docs/en/settings-reference)) ;
 ses hooks portent alors `agent_type` au `SessionStart`, et `agent_id` /
 `agent_type` dans un appel de sous-agent ([hooks](https://code.claude.com/docs/en/hooks)).
-Copilot n'instancie un agent que par le sélecteur de chat, les autres hôtes
-n'ont pas d'équivalent. Le catalogue le déclare : `agent_autostart` est vrai
+Copilot n'instancie un agent que par le sélecteur de chat dans VS Code ; sa CLI
+sait le faire (`copilot --agent <id>`, docs.github.com), mais le profil décrit
+VS Code et reste à faux, aucune source ne disant que les hooks Copilot portent
+l'identité de l'agent. Les autres hôtes n'ont pas d'équivalent. Le catalogue le déclare : `agent_autostart` est vrai
 pour Claude Code, faux sur les quatre autres profils, et `grimoire host list`
 remonte ce manque comme une dégradation avec son substitut (#716).
 

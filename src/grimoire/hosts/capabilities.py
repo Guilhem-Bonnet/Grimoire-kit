@@ -73,9 +73,13 @@ class HostProfile:
     #: ``claude --agent <name>`` (CLI reference, "Specify an agent for the
     #: current session"), ``claude --agent <name> --bg`` (agent view) and the
     #: ``agent`` setting ("Run the main thread as a named subagent"); its hooks
-    #: then carry ``agent_type``. Copilot instantiates an agent file only
-    #: through the chat dropdown, the others have no equivalent — for them the
-    #: substitute below is a declared degradation rather than folklore.
+    #: then carry ``agent_type``. Copilot CLI documents ``copilot --agent <id>
+    #: --prompt ...`` and ``/agent`` (docs.github.com, "Creating custom agents
+    #: for Copilot CLI"), but the profile stays False: it describes the VS Code
+    #: host, where an agent file opens only through the chat dropdown, and no
+    #: source says the Copilot hook payloads carry the agent's identity (what
+    #: lets Claude Code's session_start skip the entry persona). The others have
+    #: no equivalent — the substitute below is a declared degradation, not folklore.
     agent_autostart: bool = False
     #: Has a declarative allow/deny/ask permission table.
     permissions_native: bool = False
@@ -176,6 +180,8 @@ COPILOT_PROFILE = HostProfile(
     ),
     notes=(
         "No declarative permission table: permissions are enforced by the pre_tool_use hook instead. "
+        "Starting inside an agent: `copilot --agent <id>` in the CLI (docs.github.com, custom agents for "
+        "Copilot CLI), the chat dropdown in VS Code; not wired here, the session_start hook injects the entry persona. "
         "Contrat réel (#1280, P1-0) : entrées de hooks du harness Copilot relues dans son journal de session "
         "(camelCase, preToolUse en liste `toolCalls`), sorties affichées du harness Local ; aucun refus observé, "
         "version d'hôte inconnue : rien n'est vérifié (voir `grimoire.hosts.copilot_wire`)."
