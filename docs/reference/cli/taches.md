@@ -22,6 +22,7 @@ réussit-elle systématiquement ?
 | Commande | Description |
 | --- | --- |
 | `grimoire dispatch stats [--since 30d] [--json]` | Coût par tâche résolue, taux d'escalade, part d'inexécutable — pour l'ensemble, par classe de vérifiabilité, par fournisseur et par flow — et pass^k sur les nœuds rejoués |
+| `grimoire dispatch models [--json]` | Table palier → modèle résolue pour le projet, avec la provenance de chaque choix (voir [Fournisseurs](fournisseurs.md#table-palier-modele-hote-fournisseur)) |
 
 **Coût par tâche résolue** : le coût total de toutes les tentatives (vertes
 et rouges confondues, un check rouge a quand même coûté un appel) divisé

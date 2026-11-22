@@ -376,10 +376,15 @@ le projet, rien n'est réécrit et le palier est seulement dit à l'agent.
 ```yaml
 # _grimoire/standard/orchestration-policy.yaml
 dispatch:
-  copilot_models:
-    haiku: claude-haiku-4.5    # nom vu dans le journal de session de Copilot
-    sonnet: <modèle Copilot>
+  models:
+    copilot:
+      cheap: claude-haiku-4.5  # nom vu dans le journal de session de Copilot
+      mid: <modèle Copilot>
 ```
+
+L'ancienne forme `dispatch.copilot_models` (clés `haiku`, `sonnet`, `opus`)
+reste lue comme alias. La table complète et son ordre de résolution sont
+décrits dans [Fournisseurs](cli/fournisseurs.md#table-palier-modele-hote-fournisseur).
 
 Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
