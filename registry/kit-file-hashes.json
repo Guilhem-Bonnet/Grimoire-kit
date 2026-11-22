@@ -1,6 +1,6 @@
 {
  "schema": "grimoire-kit-file-hashes/v1",
- "generated_for": "3.99.0",
+ "generated_for": "3.100.0",
  "digests": {
   "002d1e68ce00769ee09d1e94f4af260b952837f7d1557080c2fd505216c23ac0": {
    "version": "3.11.2",
@@ -1989,6 +1989,10 @@
   "7b28c28e3c94190a1bbabffe65ec703f0aeff3f4f1f67050809597cdff5ed010": {
    "version": "3.4.2",
    "path": "framework/tools/agent-darwinism.py"
+  },
+  "7bbccc93692ae4617c21d0195a0311bad13f8c24405b1b304b8a4f0183c4487d": {
+   "version": "3.100.0",
+   "path": "framework/agentic-standard/templates/orchestration-policy.yaml"
   },
   "7c4450af96dae1cf3ef8c24988ab87c85af2366f5856c049b08b0cf451c65690": {
    "version": "3.32.0",
