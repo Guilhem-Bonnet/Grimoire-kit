@@ -41,7 +41,6 @@ from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.cursor_wire import LOOP_LIMIT
 from grimoire.hosts.decisions import DEFAULT_DECISION_BY_EVENT
-from grimoire.hosts.decisions.dispatch_model import cursor_model_for
 from grimoire.hosts.emitters.base import (
     Degradation,
     EmitPlan,
@@ -53,10 +52,11 @@ from grimoire.hosts.emitters.base import (
     managed_header,
     persona_section,
 )
-from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT, _model_for
+from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT, tier_for
 from grimoire.hosts.emitters.copilot import _dispatch_policy_section
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
+from grimoire.hosts.model_table import TIERS, load_model_table, resolve_model
 from grimoire.hosts.surface import (
     AgentSpec,
     Enforcement,
@@ -265,18 +265,20 @@ def _readonly(agent: AgentSpec) -> bool:
 def _agent_model(agent: AgentSpec, cursor_models: dict[str, str]) -> str:
     """Le ``model`` Cursor de *agent*, ou ``""`` : seulement un nom que le projet déclare.
 
-    Même affinité que Claude Code (palier ``opus``/``sonnet``/``haiku``), traduite par
-    ``dispatch.cursor_models.<palier>`` ; aucun nom de modèle Cursor n'est deviné.
+    Même affinité que Claude Code (palier ``strong``/``mid``/``cheap``), traduite par la table
+    palier x hôte x fournisseur (``dispatch.models.cursor.<palier>``, alias historique
+    ``dispatch.cursor_models``) ; aucun nom de modèle Cursor n'est deviné.
     Sans correspondance, rien n'est écrit et Cursor applique son défaut documenté
     (``inherit`` : le modèle de l'agent parent).
     """
-    tier = _model_for(agent)
+    tier = tier_for(agent)
     return cursor_models.get(tier, "") if tier != "inherit" else ""
 
 
 def _model_tiers(project_root: Path) -> dict[str, str]:
-    models = {tier: cursor_model_for(project_root, tier) for tier in ("opus", "sonnet", "haiku")}
-    return {tier: name for tier, name in models.items() if name}
+    table = load_model_table(project_root)
+    choices = (resolve_model(tier, "cursor", table=table) for tier in TIERS)
+    return {choice.tier: choice.model for choice in choices if choice.model}
 
 
 def _attached_skill_section(skill: SkillSpec) -> str:
@@ -589,7 +591,7 @@ def _degradations(
                     f"pas de nom Cursor déclaré : {', '.join(unmapped)}."
                 ),
                 fallback=(
-                    "`model` n'est écrit que pour un palier déclaré sous `dispatch.cursor_models.<palier>` "
+                    "`model` n'est écrit que pour un palier déclaré sous `dispatch.models.cursor.<palier>` (alias `dispatch.cursor_models`) "
                     "de la politique d'orchestration ; sinon Cursor applique `inherit`."
                 ),
             )
@@ -634,7 +636,7 @@ class CursorEmitter(Emitter):
         unmapped = sorted(
             agent.name
             for agent in surface.agents
-            if (tier := _model_for(agent)) != "inherit" and tier not in cursor_models
+            if (tier := tier_for(agent)) != "inherit" and tier not in cursor_models
         )
         plan = EmitPlan(
             host_id=self.host_id,

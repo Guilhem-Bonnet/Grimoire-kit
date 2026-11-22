@@ -254,7 +254,8 @@ def test_une_politique_invalide_ne_fusionne_rien(projet: Path, host: FakeHost) -
 
 
 def test_les_deux_listes_couvrent_exactement_les_chemins_reserves_de_main() -> None:
-    assert DEFAULT_PROTECTED_PATHS == MAIN_PROTECTED_PATHS  # la liste réservée n'a pas bougé
+    # La liste réservée n'a fait que grandir : la table palier → modèle (L5) remplace des alias qui y étaient.
+    assert (*MAIN_PROTECTED_PATHS, "src/grimoire/hosts/model_table.py") == DEFAULT_PROTECTED_PATHS
     reserved, human, dual = set(MAIN_PROTECTED_PATHS), set(HUMAN_ONLY_PATHS), set(DUAL_REVIEW_PATHS)
     # Tout motif réservé de main est à l'humain ou en double relecture : aucun ne devient libre.
     assert reserved <= human | dual
@@ -267,7 +268,7 @@ def test_les_deux_listes_couvrent_exactement_les_chemins_reserves_de_main() -> N
         "src/grimoire/__init__.py", "src/grimoire/bridges/__init__.py", "src/grimoire/bridges/schemas.py",
         "src/grimoire/evidence/__init__.py", "src/grimoire/evidence/service.py", "src/grimoire/flows/__init__.py",
         "src/grimoire/flows/autonomy.py", "src/grimoire/hosts/__init__.py", "src/grimoire/hosts/host_version.py",
-        "src/grimoire/hosts/sync.py", "src/grimoire/providers/*", "src/grimoire/tools/__init__.py",
+        "src/grimoire/hosts/model_table.py", "src/grimoire/hosts/sync.py", "src/grimoire/providers/*", "src/grimoire/tools/__init__.py",
         "src/grimoire/tools/workspace_work.py",
     ]
     samples = (
@@ -439,6 +440,9 @@ def test_tout_module_que_le_mecanisme_importe_reste_a_l_humain() -> None:
     assert _unlisted_imports(without) == {
         "src/grimoire/core/fsio.py": {"breaker", "mandate"},
         "src/grimoire/providers/__init__.py": {"dual_review", "launcher"},
+        # La table palier → modèle (L5) : le lanceur lit les capacités du fournisseur de l'hôte.
+        "src/grimoire/providers/capabilities.py": {"launcher"},
+        "src/grimoire/providers/capability_probe.py": {"launcher"},
         "src/grimoire/providers/data_policy.py": {"launcher"},
         "src/grimoire/providers/registry.py": {"dual_review"},
     }
@@ -488,6 +492,20 @@ def test_une_pr_en_brouillon_sur_un_chemin_reserve_n_est_pas_sortie_du_brouillon
 
 
 # ── D1 : le défaut ``human`` est celui de main, même face à un ledger hostile ──
+
+
+def test_en_human_la_table_palier_modele_escalade_vers_l_humain(projet: Path, host: FakeHost) -> None:
+    """L5 : une PR qui ne touche que la table palier → modèle revient à l'humain en ``protected_gate: human``."""
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, edit=("src/grimoire/hosts/model_table.py", "KIT_DEFAULTS = {}\n"))
+    first = first_ready(projet, host, tid, wt)
+    assert merges(first) == [("wait", "waiting")], first.merges
+    report = tick(projet, host)
+    assert merges(report) == [("escalate", "done")], report.merges
+    assert report.merges[0].detail.endswith(
+        "la PR touche des chemins qui reviennent à l'humain : src/grimoire/hosts/model_table.py"
+    )
+    assert host.of("gh", "pr", "merge") == []
 
 
 def test_human_par_defaut_escalade_un_chemin_reserve(projet: Path, host: FakeHost) -> None:

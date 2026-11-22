@@ -140,6 +140,89 @@ est sondé sur `<anthropic_base_url>/v1/models` si cette URL est en `https://`.
   Le registre n'est jamais écrit. Une nouvelle sonde remplace la précédente du
   même fournisseur : une valeur qu'on ne mesure plus ne reste pas « sondée ».
 
+## Table palier → modèle : hôte × fournisseur
+
+Le kit raisonne en paliers : `cheap`, `mid` et `strong`. Une tâche V0 part au
+palier `cheap`, une V1 au palier `mid`, une V2 reste sur le modèle de la
+session. Un palier ne nomme aucun modèle : une table le traduit pour un hôte et
+un fournisseur donnés. Elle sert au hook `dispatch-model`, à la politique de
+dispatch injectée au `SessionStart`, au `model:` des personas émises, au worker
+(`tier`, `model_by_class`) et à la route forte (`sensitive_route: strong`).
+
+La classe V0, V1 ou V2 d'une tâche ne change pas : seule la traduction du palier
+en nom de modèle passe par la table.
+
+| Commande | Description |
+| --- | --- |
+| `grimoire dispatch models [--json]` | Table résolue pour le projet : hôte, fournisseur, palier, modèle et provenance du choix |
+
+**Défauts livrés par le kit.** Seulement là où le nom est connu de l'hôte :
+
+| Hôte | Fournisseur | `cheap` | `mid` | `strong` |
+| --- | --- | --- | --- | --- |
+| Claude Code | `anthropic` | `haiku` | `sonnet` | `opus` |
+
+Sous Claude Code, sans surcharge, le comportement est celui d'avant la table, à
+l'octet près : un test compare la sortie du hook et les fiches émises à celles
+de la version précédente.
+
+**Surcharge par projet.** Elle se déclare dans la politique d'orchestration du
+standard :
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+dispatch:
+  impose_model: on
+  models:
+    claude:                    # hôte : claude, copilot, cursor, codex, gemini, opencode
+      anthropic:               # fournisseur du registre, ou "*" pour tout fournisseur
+        cheap: claude-haiku-4-5
+    copilot:
+      cheap: claude-haiku-4.5  # un palier posé sous l'hôte vaut pour tout fournisseur
+      mid: gpt-5.4
+```
+
+**Ordre de résolution**, du plus fort au plus faible :
+
+1. `dispatch.models.<hôte>.<fournisseur>.<palier>` (provenance `project`) ;
+2. `dispatch.models.<hôte>.<palier>` ou `dispatch.models.<hôte>."*".<palier>`
+   (`project`) ;
+3. les alias historiques `dispatch.copilot_models` et `dispatch.cursor_models`,
+   toujours lus, avec les clés `haiku`, `sonnet` et `opus` ou les noms de
+   paliers (`legacy`) ;
+4. les défauts du kit (`kit`).
+
+**Aucune correspondance inventée.** Un palier qu'aucune couche ne nomme pour cet
+hôte et ce fournisseur n'a pas de modèle. L'appelant omet alors `model` : le
+modèle de la session, de l'agent parent ou du sélecteur s'applique. C'est le cas
+de Copilot et de Cursor tant que le projet ne déclare rien.
+
+**Capacités.** Le worker et le relecteur exigent l'appel d'outils (`tools`). Un
+modèle du projet dont cette capacité est connue à « non » dans le registre
+(déclarée ou sondée, voir la section précédente) est écarté, et la couche
+suivante prend le relais. Une capacité inconnue n'écarte jamais un modèle, et un
+défaut du kit n'est jamais écarté : ni la sonde ni le registre ne peuvent vider
+la table.
+
+**Ce que la table ne peut pas faire descendre.**
+
+- La route sensible (`sensitive_route: strong`) garde le défaut fort du kit,
+  `opus` sous Claude Code, quelle que soit la surcharge du projet.
+- Le relecteur prend, dans l'ordre, le palier du rôle, `mid`, puis `strong`,
+  `mid` et `cheap`. Il retient le premier modèle que la double relecture tient
+  pour distinct de celui du worker. Si aucun ne l'est, la relecture n'est pas
+  lancée et la tâche revient à l'humain avec ce motif.
+- Un palier demandé au worker que la table ne traduit pas ne lance rien : la
+  tâche attend, avec le motif, au lieu de tourner sur le modèle de la session.
+- `orchestrator.roles.worker.tier` n'accepte que `cheap`, `mid` ou `strong`.
+
+**Valeurs illisibles.** Un hôte inconnu, un palier hors `cheap`, `mid` ou
+`strong`, un nom de modèle hors `[A-Za-z0-9._:[]/@-]`, ou un nom que YAML
+relirait comme un autre type (`null`, `true`, `1.5`) sont ignorés. Ils
+apparaissent sous la table de `grimoire dispatch models` et dans `errors` de la
+sortie `--json`. Le hook ne lève jamais : une politique illisible vaut une table
+vide.
+
 ## Politique de données : ce qui peut partir chez un fournisseur
 
 Une tâche ne part sur un fournisseur que si sa classe de données est déclarée et

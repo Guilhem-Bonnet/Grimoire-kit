@@ -893,7 +893,7 @@ def _task_action(project_root: Path, task_id: str, action: str, body: dict[str, 
         move = service.transition(task_id, state, actor, str(body.get("reason") or ""))
     else:  # pragma: no cover — garde de complétude
         raise ValueError(f"action inconnue : {action}")
-    return move.to_dict()
+    return move.to_dict(service.home_root)
 
 
 def _task_migrate_standard(project_root: Path, _body: dict[str, Any]) -> Any:

@@ -32,6 +32,7 @@ from grimoire.hosts.emitters.base import (
 )
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
+from grimoire.hosts.model_table import CLAUDE_CODE, TIERS, load_model_table, resolve_model
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -42,7 +43,7 @@ from grimoire.hosts.surface import (
     SkillSpec,
     ToolVerb,
 )
-from grimoire.missions.dispatch_advice import RECOMMENDED_MODEL_BY_CLASS
+from grimoire.missions.dispatch_advice import TIER_BY_CLASS
 from grimoire.missions.verifiability import Verifiability
 
 HOST_ALIAS = "claude"
@@ -70,11 +71,13 @@ _MATCHER_TABLE: dict[str, tuple[str, ...]] = {
     "delegation": ("Task", "Agent"),
 }
 
-#: Reasoning demand -> model tier, avant croisement avec ``cost`` dans
-#: :func:`_model_for`. ``inherit`` reste le défaut honnête du milieu : sans
+#: Reasoning demand -> palier, avant croisement avec ``cost`` dans
+#: :func:`tier_for`. ``inherit`` reste le défaut honnête du milieu : sans
 #: signal fort dans un sens ou dans l'autre, le modèle de la session est une
 #: meilleure estimation que la nôtre.
-_MODEL_BY_REASONING = {"high": "opus", "medium": "inherit", "low": "haiku"}
+_TIER_BY_REASONING = {"high": "strong", "medium": "inherit", "low": "cheap"}
+#: Pas un palier : le modèle de la session (ou de l'agent parent).
+INHERIT = "inherit"
 
 #: Budget de tours par défaut d'un sous-agent, faute d'un ``max_turns:``
 #: déclaré dans sa fiche — assez pour une tranche de travail bornée (lire,
@@ -163,13 +166,23 @@ Une clôture sans vérification verte est une tâche non terminée.
 """
 
 
-def _model_for(agent: AgentSpec) -> str:
+def claude_models(project_root: Path | None = None) -> dict[str, str]:
+    """Palier -> modèle Claude Code, lu dans la table du projet (défaut du kit : ``haiku``/``sonnet``/``opus``).
+
+    Un palier sans correspondance est absent du résultat (jamais un nom inventé).
+    """
+    table = load_model_table(project_root) if project_root is not None else None
+    choices = (resolve_model(tier, CLAUDE_CODE, table=table) for tier in TIERS)
+    return {choice.tier: choice.model for choice in choices if choice.model}
+
+
+def tier_for(agent: AgentSpec) -> str:
     """Croise ``reasoning`` et ``cost`` : le premier signal fort gagne.
 
-    ``reasoning: high`` donne ``opus``, sauf s'il est aussi déclaré
-    ``cost: low`` : un agent invoqué souvent (le concierge, qui trie en
-    lecture seule) prend alors ``sonnet``, le palier qui raisonne sans payer
-    ``opus`` à chaque appel — mesuré le 2026-10-12, 54 % des délégations sans
+    ``reasoning: high`` donne ``strong`` (``opus`` sous Claude Code), sauf s'il est aussi
+    déclaré ``cost: low`` : un agent invoqué souvent (le concierge, qui trie en
+    lecture seule) prend alors ``mid`` (``sonnet``), le palier qui raisonne sans payer
+    le palier fort à chaque appel — mesuré le 2026-10-12, 54 % des délégations sans
     ``model=`` tombaient sur ce défaut (#740). En dessous de ce plancher,
     `cost: low` prime sur `reasoning` : un agent qu'on veut bon marché doit
     rester bon marché même à raisonnement moyen. Ce n'est qu'en l'absence de
@@ -179,10 +192,22 @@ def _model_for(agent: AgentSpec) -> str:
     """
     reasoning = agent.affinity.reasoning.lower()
     if reasoning == "high":
-        return "sonnet" if agent.affinity.cost.lower() == "low" else "opus"
+        return "mid" if agent.affinity.cost.lower() == "low" else "strong"
     if agent.affinity.cost.lower() == "low":
-        return "haiku"
-    return _MODEL_BY_REASONING.get(reasoning, "inherit")
+        return "cheap"
+    return _TIER_BY_REASONING.get(reasoning, INHERIT)
+
+
+def _model_for(agent: AgentSpec, models: dict[str, str] | None = None) -> str:
+    """Le ``model:`` Claude Code de *agent* : son palier (:func:`tier_for`) traduit par *models*.
+
+    *models* vient de :func:`claude_models` (table du projet) ; absent, les défauts du kit.
+    Palier ``inherit`` ou sans correspondance : ``inherit``.
+    """
+    tier = tier_for(agent)
+    if tier == INHERIT:
+        return INHERIT
+    return (models if models is not None else claude_models()).get(tier, INHERIT)
 
 
 def _effort_for(agent: AgentSpec) -> str:
@@ -199,13 +224,16 @@ def _max_turns_for(agent: AgentSpec) -> int:
     return agent.max_turns if agent.max_turns is not None else _DEFAULT_MAX_TURNS
 
 
-def _model_label(verifiability: Verifiability) -> str:
-    """Le modèle d'une classe, lu dans ``RECOMMENDED_MODEL_BY_CLASS`` (#654) — une seule table dans le kit."""
-    model = RECOMMENDED_MODEL_BY_CLASS[verifiability]
-    return "le modèle de la session (le tien)" if model == "session" else f"`{model}`"
+_SESSION_LABEL = "le modèle de la session (le tien)"
 
 
-def _dispatch_policy_section() -> str:
+def _model_label(verifiability: Verifiability, models: dict[str, str] | None = None) -> str:
+    """Le modèle d'une classe : son palier (``TIER_BY_CLASS``, #654) traduit par la table (lot L5)."""
+    model = (models if models is not None else claude_models()).get(TIER_BY_CLASS[verifiability], "")
+    return f"`{model}`" if model else _SESSION_LABEL
+
+
+def _dispatch_policy_section(models: dict[str, str] | None = None) -> str:
     """Section "Politique de dispatch" (issue #329, révisée #655) — quel
     modèle pour quelle tâche.
 
@@ -232,7 +260,18 @@ def _dispatch_policy_section() -> str:
     ``SessionStart`` — the one the main loop actually sees on every session,
     not only when it reads this file in full — so the two can never drift
     apart either.
+
+    *models* : palier -> modèle de la table du projet (:func:`claude_models`) ; absent,
+    les défauts du kit (``haiku``, ``sonnet``).
     """
+    models = models if models is not None else claude_models()
+    cheap = models.get("cheap", "")
+    mid = models.get("mid", "")
+    fallback = (
+        f"une recherche, une lecture ou une mesure part en `{cheap}`, une revue ou une analyse\nen `{mid}`."
+        if cheap and mid
+        else "choisis le palier le plus bas qui suffit (recherche, lecture, mesure : cheap ;\nrevue, analyse : mid)."
+    )
     return f"""## Politique de dispatch
 
 Avant de dispatcher un sous-agent — ou, si cette persona tourne elle-même en
@@ -240,14 +279,13 @@ sous-agent sans l'outil `Agent`, avant de recommander une persona dans ta
 réponse finale — choisis son modèle selon la classe de
 vérifiabilité de la tâche (celle que `grimoire task dispatch` calcule) :
 
-- **V0** — {Verifiability.V0.explanation} → {_model_label(Verifiability.V0)}.
-- **V1** — {Verifiability.V1.explanation} → {_model_label(Verifiability.V1)}.
-- **V2** — {Verifiability.V2.explanation} → {_model_label(Verifiability.V2)}.
+- **V0** — {Verifiability.V0.explanation} → {_model_label(Verifiability.V0, models)}.
+- **V1** — {Verifiability.V1.explanation} → {_model_label(Verifiability.V1, models)}.
+- **V2** — {Verifiability.V2.explanation} → {_model_label(Verifiability.V2, models)}.
 
 Sur une tâche réclamée, `task_claim` et `task_context` rendent déjà cette classe
 et `recommended_model` : suis-les plutôt que de reclasser. Sans classe calculée,
-une recherche, une lecture ou une mesure part en `haiku`, une revue ou une analyse
-en `sonnet`. N'omets `model=` que si la sous-tâche exige ton propre jugement :
+{fallback} N'omets `model=` que si la sous-tâche exige ton propre jugement :
 l'omettre la fait tourner sur ton modèle, ou sur le défaut de la persona.
 
 Exige de chaque sous-agent, en fin de réponse, un bloc ```grimoire-uncertainties```
@@ -286,13 +324,19 @@ def _attached_skill_section(skill: SkillSpec) -> str:
 {skill.body}"""
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...] = ()) -> EmittedFile:
+def _agent_file(
+    agent: AgentSpec,
+    surface: ProjectSurface,
+    owned_skills: tuple[SkillSpec, ...] = (),
+    models: dict[str, str] | None = None,
+) -> EmittedFile:
     tools = map_verbs(agent.tools, _TOOL_TABLE)
+    models = models if models is not None else claude_models()
     fields: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
         "tools": ", ".join(tools),
-        "model": _model_for(agent),
+        "model": _model_for(agent, models),
         "effort": _effort_for(agent),
         "maxTurns": _max_turns_for(agent),
     }
@@ -320,7 +364,9 @@ Tu incarnes la persona Grimoire **{agent.name}** du projet {surface.project_name
 3. Ne sors pas de ta frontière d'outils : {", ".join(v.value for v in agent.tools)}.
 4. {GROUNDING_RULE}
 """
-    body = f"{body}\n{_dispatch_policy_section()}" if agent.entry_point else f"{body}5. {UNCERTAINTIES_BLOCK_RULE}\n"
+    body = (
+        f"{body}\n{_dispatch_policy_section(models)}" if agent.entry_point else f"{body}5. {UNCERTAINTIES_BLOCK_RULE}\n"
+    )
     for skill in owned_skills:
         body = f"{body}\n{_attached_skill_section(skill)}"
     return EmittedFile(relpath=CLAUDE_DIR / "agents" / f"{agent.name}.md", content=body)
@@ -574,11 +620,13 @@ class ClaudeCodeEmitter(Emitter):
         files: list[EmittedFile] = []
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached_slugs = {slug for agent in surface.agents for slug in agent.skills}
+        models = claude_models(project_root)
         files.extend(
             _agent_file(
                 agent,
                 surface,
                 owned_skills=tuple(by_slug[slug] for slug in agent.skills if slug in by_slug),
+                models=models,
             )
             for agent in surface.agents
         )

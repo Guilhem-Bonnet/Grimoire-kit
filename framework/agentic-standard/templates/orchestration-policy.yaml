@@ -80,5 +80,10 @@ escalation:
 # Dispatch (hook Claude Code sur l'outil Agent) : un appel sans `model` reçoit le modèle de la classe de la
 # tâche réclamée (V0 → haiku, V1 → sonnet), sinon celui d'une heuristique sur sa description ; un `model`
 # explicite, un fork et le `model:` d'une persona ne sont jamais remplacés. `off` désactive le réglage.
+# `models` traduit les paliers (cheap, mid, strong) par hôte et fournisseur ; sans lui, seul Claude Code ×
+# Anthropic a un défaut (haiku, sonnet, opus) et aucun autre nom n'est deviné (`grimoire dispatch models`).
 dispatch:
   impose_model: on
+  # models:
+  #   copilot:
+  #     cheap: claude-haiku-4.5

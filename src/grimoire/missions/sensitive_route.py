@@ -3,7 +3,8 @@
 Constat d'origine : sous ``model_by_class`` et un ``provider`` bon marché, les PR de workers qui touchaient le code des
 gardes, les hooks, l'autorité, la politique, la relecture ou la CI étaient rejetées puis réécrites par un modèle fort.
 Le coût était payé deux fois. Avec ``sensitive_route: strong``, le lanceur envoie d'emblée ces tâches au modèle de
-l'hôte au palier fort (``opus``), sans route de fournisseur.
+l'hôte au palier fort (``strong`` : ``opus`` sous Claude Code, table palier x hôte x fournisseur), sans route de
+fournisseur.
 
 **Quels chemins sont sensibles.** Aucune seconde liste : ce sont ceux que le merger réserve déjà
 (:data:`~grimoire.missions.merger.DEFAULT_PROTECTED_PATHS`, plus ``merger.protected_paths``), ceux qui restent à

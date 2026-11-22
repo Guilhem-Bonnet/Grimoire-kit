@@ -248,13 +248,13 @@ def _pr_ouverte(repo: Path, files: tuple[str, ...], exec_: Exec) -> dict[str, st
 # ── Modèle, worktree, commande ───────────────────────────────────────────────
 
 
-def _model_for(role: WorkerRole, route: RouteRef | None) -> tuple[str, str]:
+def _model_for(role: WorkerRole, route: RouteRef | None, root: Path) -> tuple[str, str]:
     """``(modèle, source)`` — la même cascade que ``WorkerLauncher._model_for``, jamais recopiée ailleurs."""
     if role.model:
         return role.model, "worker.model de la politique d'orchestration"
     if route is not None and route.outcome == "route" and route.model and route.provider.lower() in {"anthropic", "claude", "claude-code"}:
         return route.model, "route du routeur (K9)"
-    alias = launcher._TIER_ALIAS.get(role.tier, "")
+    alias = launcher.tier_model(root, role.tier)
     if alias:
         return alias, f"palier {role.tier} de la politique d'orchestration"
     return "", "aucun — ni modèle, ni route, ni palier : la session garderait son défaut"
@@ -269,16 +269,16 @@ def _route_of(plan: QueuePlan, tid: str) -> RouteRef | None:
     return None
 
 
-def _modele(read: PolicyRead, route: RouteRef | None, task: MissionTask) -> tuple[dict[str, Any], str]:
+def _modele(read: PolicyRead, route: RouteRef | None, task: MissionTask, root: Path) -> tuple[dict[str, Any], str]:
     """Le bloc « modèle » de la maquette, et le modèle que la commande équivalente porterait."""
-    advice = dispatch_advice(task)
+    advice = dispatch_advice(task, root)
     verifiability = advice["verifiability"]
     if read.policy is None:
         model = advice["recommended_model"] or ""
         source = "classe de vérifiabilité (politique d'orchestration illisible)"
         palier = advice["model_tier"]
     else:
-        model, source = _model_for(read.policy.worker, route)
+        model, source = _model_for(read.policy.worker, route, root)
         palier = read.policy.worker.tier or advice["model_tier"]
     bloc = {
         "recommande": model or None,
@@ -439,7 +439,7 @@ def launch_preflight_full(
         _gh_app(service.home_root, exec_),
         _pr_ouverte(service.home_root, tuple(requested), exec_),
     ]
-    modele, model = _modele(read, _route_of(plan, task.id), task)
+    modele, model = _modele(read, _route_of(plan, task.id), task, service.home_root)
     bad = [v for v in verifications if v["verdict"] in _NOT_READY]
     pret = not bad
     raison = "toutes les vérifications passent" if pret else f"{bad[0]['libelle']} : {bad[0]['detail']}"

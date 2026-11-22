@@ -418,7 +418,7 @@ def test_une_route_hors_anthropic_retombe_sur_le_palier_puis_sur_rien(
     )
     task = _pret(service, mission, "routée ailleurs")
     plan = _plan(projet, task.id, route_of=lambda _t: RouteRef("route", "ollama", "qwen3"))
-    assert plan["modele"]["recommande"] == "opus"  # _TIER_ALIAS du lanceur : strong → opus
+    assert plan["modele"]["recommande"] == "opus"  # tier_model du lanceur : strong → opus (défaut du kit)
     assert plan["modele"]["source"] == "palier strong de la politique d'orchestration"
     assert plan["modele"]["palier"] == "strong"
 

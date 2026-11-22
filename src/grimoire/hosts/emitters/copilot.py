@@ -18,7 +18,6 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
-from grimoire.hosts.decisions.dispatch_model import copilot_model_for
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
     Degradation,
@@ -31,10 +30,11 @@ from grimoire.hosts.emitters.base import (
     parallel_brainstorm_section,
     persona_section,
 )
-from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT, _model_for
+from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT, tier_for
 from grimoire.hosts.emitters.copilot_mcp import KIT_SERVERS, vscode_mcp_merge
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
+from grimoire.hosts.model_table import TIERS, load_model_table, resolve_model
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -121,9 +121,10 @@ non vérifié, quel que soit son ton.
 def _agent_model(agent: AgentSpec, copilot_models: dict[str, str]) -> str:
     """Le ``model`` Copilot de *agent*, ou ``""`` (rien n'est émis).
 
-    Même affinité que Claude Code (:func:`_model_for`, reasoning x cost -> palier
-    ``opus``/``sonnet``/``haiku``), traduite par ``dispatch.copilot_models.<palier>``
-    de la politique d'orchestration : le nom est celui que le projet déclare,
+    Même affinité que Claude Code (:func:`tier_for`, reasoning x cost -> palier
+    ``strong``/``mid``/``cheap``), traduite par la table palier x hôte x fournisseur
+    (``dispatch.models.copilot.<palier>``, alias historique ``dispatch.copilot_models``) :
+    le nom est celui que le projet déclare,
     jamais un nom que le kit aurait deviné. Palier ``inherit`` (aucun signal
     fort) ou palier sans correspondance : pas de ``model``, le modèle du
     sélecteur s'applique.
@@ -135,14 +136,15 @@ def _agent_model(agent: AgentSpec, copilot_models: dict[str, str]) -> str:
     l'utilisateur le choix d'un autre modèle, et la référence dit que le harness
     Copilot ne le transmet pas à son SDK.
     """
-    tier = _model_for(agent)
+    tier = tier_for(agent)
     return copilot_models.get(tier, "") if tier != "inherit" else ""
 
 
 def _model_tiers(project_root: Path) -> dict[str, str]:
     """Les paliers de la politique que le projet traduit en nom de modèle Copilot."""
-    models = {tier: copilot_model_for(project_root, tier) for tier in ("opus", "sonnet", "haiku")}
-    return {tier: name for tier, name in models.items() if name}
+    table = load_model_table(project_root)
+    choices = (resolve_model(tier, "copilot", table=table) for tier in TIERS)
+    return {choice.tier: choice.model for choice in choices if choice.model}
 
 
 def _agent_file(
@@ -562,7 +564,7 @@ class CopilotEmitter(Emitter):
                         "Le harness Local ignore `matcher` : l'entrée y part sur chaque outil (3 s au plus)."
                     ),
                     fallback=(
-                        "sans `dispatch.copilot_models.<palier>` dans la politique d'orchestration du standard, "
+                        "sans `dispatch.models.copilot.<palier>` (alias `dispatch.copilot_models`) dans la politique d'orchestration du standard, "
                         "le palier recommandé est seulement dit à l'agent (additionalContext) ; "
                         "`dispatch.impose_model: off` coupe la décision."
                     ),
@@ -571,7 +573,7 @@ class CopilotEmitter(Emitter):
         unmapped = sorted(
             agent.name
             for agent in surface.agents
-            if (tier := _model_for(agent)) != "inherit" and tier not in copilot_models
+            if (tier := tier_for(agent)) != "inherit" and tier not in copilot_models
         )
         if unmapped:
             degradations.append(
@@ -585,7 +587,7 @@ class CopilotEmitter(Emitter):
                         f"pas de nom Copilot déclaré : {', '.join(unmapped)}."
                     ),
                     fallback=(
-                        "`model` n'est émis que pour un palier déclaré sous `dispatch.copilot_models.<palier>` "
+                        "`model` n'est émis que pour un palier déclaré sous `dispatch.models.copilot.<palier>` (alias `dispatch.copilot_models`) "
                         "de la politique d'orchestration ; les autres personas n'ont pas de `model` et le "
                         "modèle actuel du sélecteur VS Code s'applique."
                     ),

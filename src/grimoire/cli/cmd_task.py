@@ -158,12 +158,12 @@ def _transition(
     except GrimoireError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
-    _emit_move(ctx, move)
+    _emit_move(ctx, move, service.home_root)
 
 
-def _emit_move(ctx: typer.Context, move: Any) -> None:
+def _emit_move(ctx: typer.Context, move: Any, root: Path | None = None) -> None:
     if _fmt(ctx) == "json":
-        typer.echo(json.dumps(move.to_dict(), indent=2, ensure_ascii=False))
+        typer.echo(json.dumps(move.to_dict(root), indent=2, ensure_ascii=False))
         return
     if move.advisories:
         console.print(f"[yellow]![/yellow] Gate de preuve « {move.verdict.transition_id} » : "
@@ -172,7 +172,7 @@ def _emit_move(ctx: typer.Context, move: Any) -> None:
             console.print(f"  - {line}")
         console.print(f"[dim]Profil « {move.verdict.strictness} » : signalé, non bloquant.[/dim]")
     task = move.task
-    move_dict = move.to_dict()
+    move_dict = move.to_dict(root)
     verifiabilite = move_dict.get("verifiability") or {}
     # `recommended_model` est `None` sur V2 (aucun nom de modèle valide pour
     # l'outil `Agent` — #662) ; `model_hint` rend alors le palier
@@ -283,7 +283,7 @@ def task_show(
 
     service = _service(project_root, ledger_root)
     task = _require_task(service, task_id)
-    advice = dispatch_advice(task)
+    advice = dispatch_advice(task, service.home_root)
     verifiabilite = advice["verifiability"]
     # Le dernier lancement (ou refus de repli) dit pourquoi le worker tourne sur l'hôte, ou pourquoi il n'a pas été
     # lancé : `provider_refused` est le motif du repli (#1133), `task.worker_deferred` celui d'un repli fermé.
@@ -635,7 +635,7 @@ def _steer(ctx: typer.Context, project_root: Path, ledger_root: Path, task_id: s
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(1) from exc
     if hasattr(result, "previous"):
-        _emit_move(ctx, result)
+        _emit_move(ctx, result, service.home_root)
     else:
         _emit_note(ctx, result)
 

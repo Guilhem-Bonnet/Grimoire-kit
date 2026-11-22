@@ -741,7 +741,7 @@ def _task_service(project_path: str, ledger_root: str) -> Any:
     return TaskService(Path(project_path).resolve(), Path(ledger_root))
 
 
-def _task_json(task: Any) -> dict[str, Any]:
+def _task_json(task: Any, project_root: Path | None = None) -> dict[str, Any]:
     from grimoire.missions.board import board_status_of, priority_of
     from grimoire.missions.dispatch_advice import dispatch_advice
     from grimoire.missions.session_link import session_fields
@@ -754,7 +754,7 @@ def _task_json(task: Any) -> dict[str, Any]:
     # est `None` sur V2 (aucun nom de modèle valide pour l'outil `Agent` —
     # #662) ; `model_tier` ("cheap"/"mid"/"session"), lui, est
     # toujours renseigné.
-    advice = dispatch_advice(task)
+    advice = dispatch_advice(task, project_root)
     data["verifiability"] = advice["verifiability"]
     data["recommended_model"] = advice["recommended_model"]
     data["model_tier"] = advice["model_tier"]
@@ -869,7 +869,7 @@ def task_list_ready(
         if not service.has_ledger:
             return json.dumps({"tasks": [], "count": 0, "note": "no Mission Ledger yet — `task add` opens one"})
         tasks = service.list_ready(mission or None)
-        return json.dumps({"tasks": [_task_json(t) for t in tasks], "count": len(tasks)}, indent=2, ensure_ascii=False)
+        return json.dumps({"tasks": [_task_json(t, service.home_root) for t in tasks], "count": len(tasks)}, indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 
@@ -919,7 +919,7 @@ def task_show(task_id: str, project_path: str = ".", ledger_root: str = "_grimoi
             for (src, to), entry in declared_transitions(service.project_root).items()
             if src == here
         }
-        payload = _task_json(task)
+        payload = _task_json(task, service.home_root)
         payload["next_moves_require"] = requires
         # W5-05 : le motif exact que `task_claim` opposerait (checkpoint de vague requis et non validé), vide sinon.
         payload["claim_blocked_by"] = claim_refusal(service, task_id)
@@ -953,7 +953,7 @@ def task_claim(
     try:
         service = _task_service(project_path, ledger_root)
         move = service.claim(task_id, actor, host)
-        payload = move.to_dict()
+        payload = move.to_dict(service.home_root)
         # Issue #680 : le claim d'une session lui appartient (session lue dans
         # l'environnement du serveur MCP, quand l'hôte l'y exporte).
         session = service.attach_current_session(task_id, actor=actor)
@@ -1041,8 +1041,9 @@ def task_update(
     else:
         target = TaskState.CLOSED
     try:
-        move = _task_service(project_path, ledger_root).transition(task_id, target, actor, reason, lesson=text)
-        return json.dumps(move.to_dict(), indent=2, ensure_ascii=False)
+        service = _task_service(project_path, ledger_root)
+        move = service.transition(task_id, target, actor, reason, lesson=text)
+        return json.dumps(move.to_dict(service.home_root), indent=2, ensure_ascii=False)
     except (GrimoireError, OSError, ValueError) as exc:
         return _task_error(exc)
 
@@ -1155,7 +1156,7 @@ def task_context(
             payload["note"] = "several claims, none attached to this session — `grimoire task attach <id>`"
         task = service.ledger.get_task(resolved) if service.has_ledger else None
         if task is not None:
-            payload["task"] = _task_json(task)
+            payload["task"] = _task_json(task, service.home_root)
             payload["mission_scope"] = service.mission_scope(task.mission_id)  # R25 : le périmètre posé à `mission open`
             artifact = service.context(resolved)
             payload["context_bundle_path"] = str(artifact.path)

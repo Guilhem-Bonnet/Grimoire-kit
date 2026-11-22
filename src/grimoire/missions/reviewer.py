@@ -84,12 +84,12 @@ from grimoire.missions.breaker import read_breaker, record_failure, trip
 from grimoire.missions.dual_review import (
     PROTECTED_GATE_DUAL_REVIEW,
     choose_second_reviewer,
+    models_distinct,
     pending_second_review,
     worker_models,
 )
 from grimoire.missions.launcher import (
     _BG_ID,
-    _TIER_ALIAS,
     LEAN_SESSION_ARGS,
     _halt,
     _read_agents,
@@ -100,6 +100,7 @@ from grimoire.missions.launcher import (
     resolve_background_session,
     resume_worker,
     session_env,
+    tier_model,
 )
 from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_reviews, manual_tasks
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
@@ -168,8 +169,12 @@ SILENT = "silent"
 
 _RELAUNCH = frozenset({"timeout", "stale", CI_PENDING, SILENT})
 #: Un autre modèle que celui du worker, quand la politique ne l'impose pas.
-_ALTERNATE = {"opus": "sonnet", "sonnet": "opus", "haiku": "sonnet"}
-_DEFAULT_MODEL = "sonnet"
+#: Le palier du relecteur quand la politique n'en nomme pas.
+_DEFAULT_TIER = "mid"
+#: Paliers essayés, du plus fort au plus faible, quand ni le palier du rôle ni le défaut ne diffèrent du worker.
+_FALLBACK_TIERS = ("strong", "mid", "cheap")
+#: Motif d'escalade : aucun modèle de la table ne diffère de celui du worker.
+NO_DISTINCT_MODEL = "review_model_not_distinct"
 #: Un dépôt GitHub ``owner/repo`` : ce que la consigne de la seconde relecture accepte du journal d'autorité.
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+")
 
@@ -210,11 +215,6 @@ def entered_review_at(service: TaskService, task_id: str) -> str:
         or e.event_type == MERGE_REQUEUED_EVENT
     ]
     return moves[-1] if moves else ""
-
-
-def _family(model: str) -> str:
-    lowered = model.lower()
-    return next((alias for alias in _ALTERNATE if alias in lowered), lowered)
 
 
 def _parse(stamp: str) -> datetime | None:
@@ -429,13 +429,22 @@ class ReviewStage:
     # -- lancement -----------------------------------------------------------
 
     def _model(self, worker_model: str) -> str:
+        """Le modèle du relecteur, ou ``""`` si aucun modèle de la table ne diffère sûrement de celui du worker.
+
+        ``reviewer.model`` l'emporte. Sinon, dans l'ordre : le palier du rôle, le palier ``mid``, puis les paliers du
+        plus fort au plus faible, chacun traduit par la table (lot L5) ; le premier que
+        :func:`~grimoire.missions.dual_review.models_distinct` tient pour un autre modèle que celui du worker est
+        retenu. Sans modèle du worker connu, le premier qui existe.
+        """
         role = self._policy.reviewer
         if role.model:
             return role.model
-        chosen = _TIER_ALIAS.get(role.tier, "")
-        if worker_model and (not chosen or _family(chosen) == _family(worker_model)):
-            return _ALTERNATE.get(_family(worker_model), _DEFAULT_MODEL)
-        return chosen or _DEFAULT_MODEL
+        root = self._service.home_root
+        for tier in (role.tier, _DEFAULT_TIER, *_FALLBACK_TIERS):
+            candidate = tier_model(root, tier)
+            if candidate and (not worker_model or models_distinct(candidate, worker_model)):
+                return candidate
+        return ""
 
     def _launch(
         self, task: MissionTask, launch: dict[str, Any], *, second: dict[str, Any] | None = None,
@@ -494,7 +503,16 @@ class ReviewStage:
         under_mandate = MandateStore(root).state().active
         choice: DualReviewChoice | None = None
         if second is None:
-            model = self._model(str(launch.get("model") or ""))
+            worker_model = str(launch.get("model") or "")
+            model = self._model(worker_model)
+            if not model:  # la relecture ne serait pas indépendante : l'humain tranche, rien n'est lancé
+                return self._escalate(
+                    task,
+                    f"aucun modèle de relecture distinct de celui du worker ({worker_model or 'inconnu'}) dans la table "
+                    "palier → modèle (`grimoire dispatch models`)",
+                    "",
+                    cause=NO_DISTINCT_MODEL,
+                )
         else:
             choice, why = self._second_model(tid, second)
             if choice is None:  # aucun candidat : rien n'est lancé, le merger rend la PR à l'humain avec cette raison

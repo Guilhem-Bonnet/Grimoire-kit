@@ -192,6 +192,8 @@ DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
     "pyproject.toml", "setup.py", "setup.cfg", ".gitattributes", ".gitmodules", "*conftest.py",
     "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dll", "*.dylib", "*.exe", "*.whl", "*.egg", "*.pth", "*sitecustomize*",
     "*usercustomize*",
+    # La table palier → modèle (L5) : les alias qu'elle remplace vivaient sous missions/ et hosts/decisions/.
+    "src/grimoire/hosts/model_table.py",
 )
 #: Catégories propres aux gestes : le mandat et la politique les tranchent ; les autres sont celles de la tâche.
 _GESTURE_CATEGORIES = frozenset({"merge", "accept"})
