@@ -1257,15 +1257,18 @@ def grimoire_providers_status(project_path: str = ".") -> str:
     et dernier `grimoire providers audit`, issue #330) : quels fournisseurs
     sont activés, avec quels modèles par palier (cheap/mid/strong), lequel
     `choose()` retiendrait maintenant pour chaque palier, et ce que l'audit a
-    vu (`available`, `probed_at`, `models_seen`, `probe_note`) — la même
-    question que `grimoire providers status`, pour un client MCP qui n'a pas
-    de terminal.
+    vu (`available`, `probed_at`, `models_seen`, `probe_note`), et les
+    capacités de chaque fournisseur et modèle avec leur provenance
+    (`capabilities`, #1281 L3) — la même charge que `grimoire providers
+    status --json`, pour un client MCP qui n'a pas de terminal.
 
     Args:
         project_path: Path to project root (default: current directory).
     """
     from datetime import UTC, datetime
 
+    from grimoire.cli.cmd_providers import _provider_json
+    from grimoire.providers.capability_probe import load_probes
     from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, read_registry
     from grimoire.providers.routing import choose
     from grimoire.providers.state import load_state
@@ -1277,30 +1280,12 @@ def grimoire_providers_status(project_path: str = ".") -> str:
         return _tool_error({"error": str(exc)})
 
     now = datetime.now(UTC)
-    state = load_state(target)
-
-    def _provider_payload(provider: Any) -> dict[str, Any]:
-        entry = state.get(provider.id)
-        cooling_down = entry is not None and entry.is_cooling_down(now=now)
-        return {
-            "id": provider.id,
-            "enabled": provider.enabled,
-            "currency": provider.currency,
-            "invocation": provider.invocation,
-            "models": [{"id": model.id, "tier": model.tier} for model in provider.models],
-            "cooling_down": cooling_down,
-            "cooldown_until": entry.cooldown_until.isoformat() if entry and entry.cooldown_until else None,
-            # Issue #330 : dernier résultat de `grimoire providers audit`.
-            "available": entry.available if entry is not None else True,
-            "probed_at": entry.probed_at if entry is not None else None,
-            "models_seen": list(entry.models_seen) if entry is not None else [],
-            "probe_note": entry.probe_note if entry is not None else None,
-        }
-
+    state, probes = load_state(target), load_probes(target)
     next_choice = {tier: choose(target, tier, now=now) for tier in SUPPORTED_MODEL_TIERS}
+    payload = [_provider_json(p, state, now=now, probe=probes.get(p.id)) for p in providers]
     return json.dumps(
         {
-            "providers": [_provider_payload(provider) for provider in providers],
+            "providers": payload,
             "next_choice": {tier: (spec.id if spec is not None else None) for tier, spec in next_choice.items()},
         },
         indent=2,
