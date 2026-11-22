@@ -14,6 +14,7 @@ never read.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -189,6 +190,13 @@ CLAUDE_CODE_PROFILE = HostProfile(
     skills_native=True,
     commands_native=True,
     blocking_hooks=True,
+    # Seul le refus PreToolUse est capturé (2.1.301). Le kit écrit aussi les refus
+    # documentés (`decision: block` sur Stop/SubagentStop/UserPromptSubmit/PostToolUse,
+    # code.claude.com/docs/en/hooks) : rendus à l'identique, annoncés advisory.
+    blocking_events=frozenset({HookEvent.PRE_TOOL_USE}),
+    documented_blocking_events=frozenset(
+        {HookEvent.USER_PROMPT_SUBMIT, HookEvent.POST_TOOL_USE, HookEvent.SUBAGENT_STOP, HookEvent.STOP}
+    ),
     blocking_captures=(
         "claude-code/01-pretooluse-control-allow.json",
         "claude-code/01-pretooluse-deny-exit2.json",
@@ -337,6 +345,8 @@ OPENCODE_PROFILE = HostProfile(
     subagents_native=True,
     skills_native=True,
     commands_native=True,
+    # Pas de ``blocking_events`` : opencode ne déclenche que `tool.execute.before`
+    # (PreToolUse), le seul événement prouvé ; le rendu des autres reste inchangé.
     blocking_hooks=True,
     blocking_captures=(
         "opencode/01-pretooluse-control-allow.json",
@@ -1041,25 +1051,73 @@ def claim_host_is_fenced(host: str, host_version: str | None, *, project_root: P
     return host_id is not None and is_fenced(host_id, host_version, project_root=project_root)
 
 
+#: Clé de contrat (:data:`CONTRACT_KEYS`) dont la preuve vérifiée établit qu'un refus
+#: arrête réellement l'action sur cet événement. Un événement absent d'ici ne peut pas
+#: être prouvé bloquant : aucune capture de refus de fin de tour (`decision: block`
+#: sur Stop) n'est versée sous ``tests/fixtures/hosts/``, donc Stop reste documenté.
+PROVING_KEYS: dict[HookEvent, str] = {HookEvent.PRE_TOOL_USE: "pretooluse_deny"}
+
+
+def capture_shows_refusal(capture: Mapping[str, Any]) -> bool:
+    """La capture montre-t-elle un **refus** honoré par l'hôte, pas une autorisation ?
+
+    Il faut que l'action ne se soit pas exécutée (``observed.tool_executed`` faux) et
+    qu'un verdict de refus soit lu : code 2, ``permissionDecision: deny`` sur stdout,
+    ou exception levée par le plugin (opencode). Une capture témoin (allow) ne prouve rien.
+    """
+    observed = capture.get("observed")
+    if not isinstance(observed, Mapping) or observed.get("tool_executed") is not False:
+        return False
+    stdout = observed.get("hook_stdout")
+    specific = stdout.get("hookSpecificOutput") if isinstance(stdout, Mapping) else None
+    denied = isinstance(specific, Mapping) and specific.get("permissionDecision") == "deny"
+    return observed.get("hook_exit_code") == 2 or denied or bool(observed.get("hook_throws"))
+
+
+def _read_capture(path: Path) -> Mapping[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, Mapping) else {}
+
+
 def unproven_blocking_claims(profile: HostProfile, fixtures_root: Path) -> tuple[str, ...]:
     """Ce qui manque pour que les refus déclarés de *profile* soient prouvés (#1281).
 
-    Un hôte qui tient un événement pour bloquant (:meth:`HostProfile.enforces_blocking`)
-    doit nommer ses captures (:attr:`HostProfile.blocking_captures`) ; chacune existe
-    sous *fixtures_root* (``tests/fixtures/hosts/``) et appartient à la preuve vérifiée
-    ``pretooluse_deny`` de son contrat enregistré. Vide : rien d'orphelin.
+    Chaque événement tenu pour bloquant (:meth:`HostProfile.proven_blocking_events`)
+    doit être rattaché à une clé de contrat (:data:`PROVING_KEYS`) vérifiée, et
+    :attr:`HostProfile.blocking_captures` doit nommer au moins une fixture de cette
+    preuve, présente sous *fixtures_root* (``tests/fixtures/hosts/``), dont le verdict
+    lu est un refus (:func:`capture_shows_refusal`). Vide : rien d'orphelin.
     """
-    if not profile.enforces_blocking:
+    host = profile.host_id.value
+    proven = profile.proven_blocking_events()
+    if not proven:
         return ()
-    events = ", ".join(e.value for e in profile.proven_blocking_events())
     if not profile.blocking_captures:
-        return (f"{profile.host_id.value} : refus tenu pour prouvé ({events}) sans aucune capture référencée",)
-    evidence = recorded_contract(profile.host_id).evidence.get("pretooluse_deny")
-    verified = set(evidence.fixtures) if evidence is not None and evidence.verified else set()
+        events = ", ".join(e.value for e in proven)
+        return (f"{host} : refus tenu pour prouvé ({events}) sans aucune capture référencée",)
+    contract = recorded_contract(profile.host_id)
     problems: list[str] = []
+    proving: set[str] = set()
+    for event in proven:
+        key = PROVING_KEYS.get(event)
+        evidence = contract.evidence.get(key) if key else None
+        if key is None or evidence is None or not evidence.verified:
+            problems.append(f"{host} : {event.value} tenu pour bloquant sans clé de contrat vérifiée qui le prouve")
+            continue
+        refusals = [
+            c
+            for c in profile.blocking_captures
+            if c in evidence.fixtures and capture_shows_refusal(_read_capture(fixtures_root / c))
+        ]
+        if not refusals:
+            problems.append(f"{host} : aucune capture de {key} ne montre un refus honoré ({event.value})")
+        proving.update(evidence.fixtures)
     for capture in profile.blocking_captures:
         if not (fixtures_root / capture).is_file():
-            problems.append(f"{profile.host_id.value} : capture introuvable {capture}")
-        elif capture not in verified:
-            problems.append(f"{profile.host_id.value} : {capture} n'est pas une preuve vérifiée de pretooluse_deny")
+            problems.append(f"{host} : capture introuvable {capture}")
+        elif capture not in proving:
+            problems.append(f"{host} : {capture} n'est pas une preuve vérifiée d'un événement bloquant")
     return tuple(problems)
