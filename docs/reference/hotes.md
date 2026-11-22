@@ -67,7 +67,11 @@ sous `tests/fixtures/hosts/<hôte>/` et nommée par le profil
 déclaration sans capture. Un refus seulement documenté reste **écrit** et rendu
 par le hook (le jour où l'hôte l'honore, il s'applique), mais il est déclaré
 `advisory` partout : matrice, `grimoire host list` (« consultatif »),
-`grimoire host status` (« hooks consultatifs ») et parité.
+`grimoire host status` (« hooks consultatifs ») et parité. Une capture ne prouve
+que son événement : chez Claude Code, seul `PreToolUse` est capturé ; `Stop`,
+`SubagentStop`, `UserPromptSubmit` et `PostToolUse` sont annoncés consultatifs
+tant qu'aucune capture d'un blocage honoré n'est versée, mais le blocage lui-même
+(`decision: block`) reste émis à l'identique.
 
 Rien n'est abandonné en silence. Ce qu'un hôte ne sait pas exécuter est déclaré
 comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
