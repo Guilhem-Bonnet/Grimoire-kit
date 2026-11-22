@@ -43,7 +43,7 @@ from grimoire.providers.registry import read_registry
 from grimoire.providers.secrets import set_secret
 
 REGISTRY = Path("_grimoire/standard/llm-provider-registry.yaml")
-SECRET = "sk-ne-doit-jamais-sortir-42"  # noqa: S105 — jeton factice de test
+SECRET = "valeur-factice"  # noqa: S105 — jeton factice de test
 _KEY_VARS = (
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
