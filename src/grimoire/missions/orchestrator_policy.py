@@ -82,6 +82,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from grimoire.core.standard_generation import STANDARD_DIR
+from grimoire.hosts.model_table import kit_model
 from grimoire.missions.dual_review import (
     DEFAULT_SECOND_REVIEWER_MIN_TIER,
     PROTECTED_GATE_HUMAN,
@@ -122,8 +123,9 @@ _MERGER_KEYS = frozenset(
      "second_reviewer_min_tier"}
 )
 _ORCHESTRATOR_KEYS = frozenset({"enabled", "model", "wip", "sessions_per_day", "permission_mode"})
-#: Le modèle de la session orchestrateur quand la politique n'en nomme pas.
-DEFAULT_ORCHESTRATOR_MODEL = "sonnet"
+#: Le modèle de la session orchestrateur quand la politique n'en nomme pas : le palier ``mid`` de Claude Code
+#: (défaut du kit de la table palier x hôte x fournisseur, ``sonnet``).
+DEFAULT_ORCHESTRATOR_MODEL = kit_model("mid")
 #: Le seul mode de permission de la session orchestrateur (``orchestrator_session.PERMISSION_MODE``).
 ORCHESTRATOR_PERMISSION_MODE = "dontAsk"
 #: Les checks qui ne disent rien du code (couverture rapportée par un service tiers) : hors du verdict par défaut.

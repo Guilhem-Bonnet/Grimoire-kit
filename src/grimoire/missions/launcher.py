@@ -64,6 +64,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
+from grimoire.hosts.model_table import CLAUDE_CODE, load_model_table, resolve_model
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.liveness import probe_status
 from grimoire.missions.provider_failure import transient_api_error
@@ -80,6 +81,7 @@ if TYPE_CHECKING:
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.schemas import MissionTask
     from grimoire.missions.service import TaskService
+    from grimoire.providers.capabilities import ProviderCapabilities
 
 __all__ = [
     "LAUNCHED_EVENT",
@@ -105,6 +107,7 @@ __all__ = [
     "resume_provider_failed_workers",
     "resume_worker",
     "session_env",
+    "tier_model",
     "unhalted_sessions",
 ]
 
@@ -137,12 +140,45 @@ _SESSION_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 #: Lectures de ``claude agents`` avant de conclure qu'une session lancée est introuvable, et la pause entre deux.
 _RESOLVE_ATTEMPTS = 10
 _RESOLVE_PAUSE_S = 1.0
-#: Palier de la politique → alias de modèle que ``claude --model`` accepte.
-_TIER_ALIAS = {"cheap": "haiku", "mid": "sonnet", "strong": "opus"}
+#: Ce qu'une session de worker ou de relecteur exige de son modèle : un modèle connu sans appel d'outils est écarté.
+SESSION_REQUIRES: tuple[str, ...] = ("tools",)
 #: Mesuré le 2026-11-06 : 45 k jetons de contexte au premier tour sans ces options, 10 k avec. Sans ``Skill`` ni ``Agent``.
 #: ``--tools`` est variadique : en deux jetons, il avale la consigne qui le suit (relecteur muet, #1160).
 LEAN_TOOLS = "Bash,Read,Edit,Write,Glob,Grep"
 LEAN_SESSION_ARGS = ("--strict-mcp-config", f"--tools={LEAN_TOOLS}")
+
+
+def _host_provider_capabilities(root: Path) -> ProviderCapabilities | None:
+    """Les capacités du fournisseur de l'hôte (Anthropic) si le registre le déclare ; ``None`` sinon ou illisible."""
+    try:
+        from grimoire.providers.capabilities import canonical_provider
+        from grimoire.providers.capability_probe import read_capabilities
+
+        found = read_capabilities(root)
+    except (GrimoireError, OSError, ValueError):
+        return None
+    return next((caps for caps in found if canonical_provider(caps.provider_id) == "anthropic"), None)
+
+
+def tier_model(root: Path, tier: str) -> str:
+    """Le modèle que ``claude --model`` reçoit pour *tier* (table palier x hôte x fournisseur, lot L5) ; ``""`` sans
+    correspondance.
+
+    Claude Code x Anthropic : ``dispatch.models`` du projet, sinon le défaut du kit (``cheap`` → ``haiku``, ``mid`` →
+    ``sonnet``, ``strong`` → ``opus``). Un modèle dont l'appel d'outils est connu à « non » est écarté, jamais sur
+    une capacité inconnue.
+    """
+    if not tier:
+        return ""
+    choice = resolve_model(
+        tier,
+        CLAUDE_CODE,
+        "anthropic",
+        table=load_model_table(root),
+        capabilities=_host_provider_capabilities(root),
+        requires=SESSION_REQUIRES,
+    )
+    return choice.model or ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -798,11 +834,12 @@ class WorkerLauncher:
         if role.model:
             return role.model
         if role.model_by_class and tier == "cheap":
-            return _TIER_ALIAS["cheap"]  # un verdict mécanique juge seul : la route du routeur ne remonte pas ce palier
+            # Un verdict mécanique juge seul : la route du routeur ne remonte pas ce palier.
+            return tier_model(self._service.home_root, "cheap")
         route = admit.route
         if route is not None and route.outcome == "route" and route.model and route.provider.lower() in {"anthropic", "claude", "claude-code"}:
             return route.model
-        return _TIER_ALIAS.get(tier if tier is not None else role.tier, "")
+        return tier_model(self._service.home_root, tier if tier is not None else role.tier)
 
     def _host_version(self) -> str:
         """La version de l'hôte (``claude --version``), lue une fois par tick (P86) ; ``""`` si illisible.
@@ -883,7 +920,7 @@ class WorkerLauncher:
             if denial and provider_id in busy and is_local_provider(service.home_root, provider_id):
                 return self._deferred(tid, denial)
         if sensitive.strong:
-            model = _TIER_ALIAS["strong"]
+            model = tier_model(service.home_root, "strong")
         else:
             model = route.model if route is not None else self._model_for(admit, tier)
         result = self._exec(self._argv(tid, model, route), wt.path, session_env())

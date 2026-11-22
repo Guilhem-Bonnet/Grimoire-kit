@@ -144,7 +144,7 @@ def test_the_class_of_the_claimed_task_wins_over_the_heuristic(tmp_path: Path) -
 
 def test_a_claimed_v2_task_imposes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """V2 : la politique veut le modèle de la session, l'heuristique n'est pas tentée."""
-    monkeypatch.setattr(dm, "_class_model", lambda _hook: (None, {"task_id": "GAO-x-001", "task_class": "V2"}))
+    monkeypatch.setattr(dm, "_class_tier", lambda _hook: (None, {"task_id": "GAO-x-001", "task_class": "V2"}))
     rendered, decision = _run(tmp_path, {"description": "Find the emitters", "prompt": "x"})
     assert rendered == {}
     assert decision.abstain

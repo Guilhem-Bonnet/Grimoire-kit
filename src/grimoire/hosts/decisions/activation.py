@@ -117,14 +117,15 @@ def _claude_dispatch_context(project_root: Path, agents: tuple[AgentSpec, ...]) 
     inventaire, passé une fois par :func:`decide_activation` plutôt que
     recollecté ici (#662).
     """
-    from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for
+    from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, _model_for, claude_models
 
     routable = [agent for agent in agents if not agent.entry_point]
     if not routable:
         return ""
-    roster = "\n".join(f"- `{agent.name}` → {_model_for(agent)}" for agent in routable)
+    models = claude_models(project_root)
+    roster = "\n".join(f"- `{agent.name}` → {_model_for(agent, models)}" for agent in routable)
     return (
-        f"{_dispatch_policy_section()}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
+        f"{_dispatch_policy_section(models)}\nPersonas routables (`subagent_type` → modèle) :\n{roster}\n"
         "Ce modèle n'est que le défaut de la persona, appliqué si tu omets `model=` ; la classe "
         "de la sous-tâche déléguée prime : passe toujours `model=` selon la politique ci-dessus.\n"
     )

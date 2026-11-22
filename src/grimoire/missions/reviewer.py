@@ -89,7 +89,6 @@ from grimoire.missions.dual_review import (
 )
 from grimoire.missions.launcher import (
     _BG_ID,
-    _TIER_ALIAS,
     LEAN_SESSION_ARGS,
     _halt,
     _read_agents,
@@ -100,6 +99,7 @@ from grimoire.missions.launcher import (
     resolve_background_session,
     resume_worker,
     session_env,
+    tier_model,
 )
 from grimoire.missions.manual_review import MANUAL_KEY, claim_sessions, manual_reviews, manual_tasks
 from grimoire.missions.review_receipt import CRITERION_MET, NOT_READY, READY, check_receipt, read_receipt
@@ -168,8 +168,10 @@ SILENT = "silent"
 
 _RELAUNCH = frozenset({"timeout", "stale", CI_PENDING, SILENT})
 #: Un autre modèle que celui du worker, quand la politique ne l'impose pas.
+#: Familles de modèles Claude (alias reconnus dans un identifiant), pas du routage par palier.
 _ALTERNATE = {"opus": "sonnet", "sonnet": "opus", "haiku": "sonnet"}
-_DEFAULT_MODEL = "sonnet"
+#: Le palier du relecteur quand la politique n'en nomme pas.
+_DEFAULT_TIER = "mid"
 #: Un dépôt GitHub ``owner/repo`` : ce que la consigne de la seconde relecture accepte du journal d'autorité.
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+")
 
@@ -432,10 +434,12 @@ class ReviewStage:
         role = self._policy.reviewer
         if role.model:
             return role.model
-        chosen = _TIER_ALIAS.get(role.tier, "")
+        root = self._service.home_root
+        chosen = tier_model(root, role.tier)
+        default = tier_model(root, _DEFAULT_TIER)
         if worker_model and (not chosen or _family(chosen) == _family(worker_model)):
-            return _ALTERNATE.get(_family(worker_model), _DEFAULT_MODEL)
-        return chosen or _DEFAULT_MODEL
+            return _ALTERNATE.get(_family(worker_model), default)
+        return chosen or default
 
     def _launch(
         self, task: MissionTask, launch: dict[str, Any], *, second: dict[str, Any] | None = None,

@@ -271,7 +271,7 @@ def test_policy_off_disables_copilot_too(project: Path) -> None:
 
 def test_a_claimed_v2_task_imposes_nothing_on_copilot(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_models(project, _MAPPED)
-    monkeypatch.setattr(dm, "_class_model", lambda _hook: (None, {"task_id": "T", "task_class": "V2"}))
+    monkeypatch.setattr(dm, "_class_tier", lambda _hook: (None, {"task_id": "T", "task_class": "V2"}))
     rendered, _ = _dispatch(project, _camel_task(project, _RESEARCH))
     assert rendered == {}
 

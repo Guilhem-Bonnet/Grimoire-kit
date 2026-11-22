@@ -16,12 +16,15 @@ consulte pour poser le plancher de sa cascade de paliers. Jamais de seconde
 classification : un texte de critère n'a qu'une lecture possible dans tout le
 kit.
 
-``RECOMMENDED_MODEL_BY_CLASS`` est la table opposable — V0 → ``haiku`` (un
-verdict mécanique n'exige pas de jugement), V1 → ``sonnet`` (une revue humaine
+``TIER_BY_CLASS`` est la table opposable — V0 → palier ``cheap`` (un
+verdict mécanique n'exige pas de jugement), V1 → palier ``mid`` (une revue humaine
 suit, un modèle plus capable dès le premier essai limite les allers-retours),
 V2 → ``session`` (aucun verdict n'existe encore : seul le modèle qui tient
 déjà la session, capable de clarifier avant de déléguer, a le droit d'y
-toucher). Elle reprend exactement la prose de
+toucher). Le nom du modèle vient de la table palier x hôte x fournisseur
+(:mod:`grimoire.hosts.model_table`, lot L5) : ``RECOMMENDED_MODEL_BY_CLASS`` en
+est la lecture pour Claude Code x Anthropic, ``haiku`` et ``sonnet`` par défaut.
+Elle reprend exactement la prose de
 ``hosts.emitters.claude_code._dispatch_policy_section`` — ce module ne la
 recopie pas — et :func:`~grimoire.hosts.emitters.claude_code._model_label` la
 lit toujours telle quelle, ``"session"`` compris : c'est le contrat *interne*,
@@ -52,6 +55,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from grimoire.hosts.model_table import kit_model
 from grimoire.missions.verifiability import Verifiability, as_dict, classify
 
 if TYPE_CHECKING:
@@ -59,6 +63,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "RECOMMENDED_MODEL_BY_CLASS",
+    "TIER_BY_CLASS",
     "dispatch_advice",
     "model_hint",
     "model_tier_for",
@@ -72,10 +77,14 @@ __all__ = [
 #: ``"session"`` compris. Le contrat *externe* (:func:`recommended_model_for`,
 #: :func:`dispatch_advice`) traduit ``"session"`` en ``None`` — voir le
 #: docstring du module.
-RECOMMENDED_MODEL_BY_CLASS: dict[Verifiability, str] = {
-    Verifiability.V0: "haiku",
-    Verifiability.V1: "sonnet",
+#: Le palier de chaque classe ; ``session`` n'est pas un palier (le modèle qui tient la session).
+TIER_BY_CLASS: dict[Verifiability, str] = {
+    Verifiability.V0: "cheap",
+    Verifiability.V1: "mid",
     Verifiability.V2: "session",
+}
+RECOMMENDED_MODEL_BY_CLASS: dict[Verifiability, str] = {
+    cls: "session" if tier == "session" else kit_model(tier) for cls, tier in TIER_BY_CLASS.items()
 }
 
 

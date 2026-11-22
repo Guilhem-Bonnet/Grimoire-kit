@@ -157,7 +157,8 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/worker_provider.py", "src/grimoire/missions/sensitive_route.py",
     # … hors de missions/ : les flows d'autonomie, la preuve, l'hôte, les schémas de pont, le transcript de session
     "src/grimoire/flows/autonomy.py", "src/grimoire/evidence/service.py", "src/grimoire/hosts/host_version.py",
-    "src/grimoire/hosts/sync.py", "src/grimoire/bridges/schemas.py", "src/grimoire/tools/workspace_work.py",
+    "src/grimoire/hosts/sync.py", "src/grimoire/hosts/model_table.py", "src/grimoire/bridges/schemas.py",
+    "src/grimoire/tools/workspace_work.py",
     # … et les ``__init__.py`` qui s'exécutent avant chacun de ces modules
     "src/grimoire/__init__.py", "src/grimoire/core/__init__.py", "src/grimoire/flows/__init__.py",
     "src/grimoire/evidence/__init__.py", "src/grimoire/hosts/__init__.py", "src/grimoire/bridges/__init__.py",

@@ -267,7 +267,7 @@ def test_les_deux_listes_couvrent_exactement_les_chemins_reserves_de_main() -> N
         "src/grimoire/__init__.py", "src/grimoire/bridges/__init__.py", "src/grimoire/bridges/schemas.py",
         "src/grimoire/evidence/__init__.py", "src/grimoire/evidence/service.py", "src/grimoire/flows/__init__.py",
         "src/grimoire/flows/autonomy.py", "src/grimoire/hosts/__init__.py", "src/grimoire/hosts/host_version.py",
-        "src/grimoire/hosts/sync.py", "src/grimoire/providers/*", "src/grimoire/tools/__init__.py",
+        "src/grimoire/hosts/model_table.py", "src/grimoire/hosts/sync.py", "src/grimoire/providers/*", "src/grimoire/tools/__init__.py",
         "src/grimoire/tools/workspace_work.py",
     ]
     samples = (
@@ -439,6 +439,9 @@ def test_tout_module_que_le_mecanisme_importe_reste_a_l_humain() -> None:
     assert _unlisted_imports(without) == {
         "src/grimoire/core/fsio.py": {"breaker", "mandate"},
         "src/grimoire/providers/__init__.py": {"dual_review", "launcher"},
+        # La table palier → modèle (L5) : le lanceur lit les capacités du fournisseur de l'hôte.
+        "src/grimoire/providers/capabilities.py": {"launcher"},
+        "src/grimoire/providers/capability_probe.py": {"launcher"},
         "src/grimoire/providers/data_policy.py": {"launcher"},
         "src/grimoire/providers/registry.py": {"dual_review"},
     }

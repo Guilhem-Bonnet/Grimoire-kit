@@ -2,10 +2,11 @@
 
 La « Politique de dispatch » injectée à chaque ``SessionStart`` (voir
 ``hosts.emitters.claude_code._dispatch_policy_section``) dit déjà quel modèle
-donner à un sous-agent : V0 → ``haiku``, V1 → ``sonnet``, V2 → le modèle de la
-session. Ce n'était que du texte. Un appel ``Agent`` sans ``model`` fait tourner
-le sous-agent sur le modèle de la session — le plus cher — et la mesure du
-2026-11-05 montrait que ``model=`` restait souvent omis.
+donner à un sous-agent : V0 → palier ``cheap`` (``haiku`` sous Claude Code), V1 →
+palier ``mid`` (``sonnet``), V2 → le modèle de la session. Ce n'était que du texte.
+Un appel ``Agent`` sans ``model`` fait tourner le sous-agent sur le modèle de la
+session — le plus cher — et la mesure du 2026-11-05 montrait que ``model=``
+restait souvent omis.
 
 Cette décision rend la règle mécanique, et seulement là où elle est sûre :
 
@@ -28,6 +29,10 @@ Cette décision rend la règle mécanique, et seulement là où elle est sûre :
    faille — le vocabulaire de ``missions.sensitive_route``) ou rien de reconnu →
    rien n'est imposé. Une tâche réclamée de classe V0/V1 prime sur cette
    abstention : sa classe décide, même si la description cite une garde.
+
+Le palier devient un nom de modèle par la table palier x hôte x fournisseur
+(:mod:`grimoire.hosts.model_table`, lot L5) : défaut du kit, ``dispatch.models``
+du projet, ou alias historique ``dispatch.copilot_models``.
 
 Le modèle imposé est rendu en ``updatedInput`` (l'entrée complète, l'hôte la
 remplace sans fusionner) avec ``permissionDecision: allow`` ; l'agent principal
@@ -53,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from grimoire.hosts.decisions._shared import Decision, HookInput
+from grimoire.hosts.model_table import CLAUDE_CODE, kit_model, load_model_table, resolve_model
 from grimoire.missions.sensitive_route import mentions_sensitive_topic
 
 #: Identifiant de la décision, référencé par l'émetteur Claude Code.
@@ -215,13 +221,20 @@ def _hits(words: list[str], stems: tuple[str, ...]) -> bool:
 
 
 def heuristic_model(description: str, prompt: str = "") -> str | None:
-    """Le modèle que l'heuristique déduit d'un appel ``Agent``, ou ``None``.
+    """Le modèle Claude Code (défaut du kit) du palier de :func:`heuristic_tier`, ou ``None``."""
+    tier = heuristic_tier(description, prompt)
+    return kit_model(tier) if tier else None
+
+
+def heuristic_tier(description: str, prompt: str = "") -> str | None:
+    """Le palier que l'heuristique déduit d'un appel ``Agent``, ou ``None``.
 
     Lit la description (3 à 5 mots, ce que l'appelant dit de la tâche) ; faute de
     description, le début du prompt. Ordre de priorité, du plus prudent au moins
     prudent : un verbe d'écriture, ou un sujet de jugement fort (audit, sécurité,
-    architecture, plan, conception) → ``None`` (le jugement de la session) ; un verbe de revue ou d'analyse → ``sonnet`` ; un verbe de
-    recherche, de lecture ou de mesure → ``haiku`` ; rien de reconnu → ``None``.
+    architecture, plan, conception) → ``None`` (le jugement de la session) ; un verbe de revue ou
+    d'analyse → ``mid`` ; un verbe de recherche, de lecture ou de mesure → ``cheap`` ; rien de
+    reconnu → ``None``.
     """
     text = (description or "").strip() or (prompt or "")[:_MAX_HEURISTIC_CHARS]
     words = _words(text[:_MAX_HEURISTIC_CHARS])
@@ -230,9 +243,9 @@ def heuristic_model(description: str, prompt: str = "") -> str | None:
     if mentions_sensitive_topic(text[:_MAX_HEURISTIC_CHARS]):
         return None
     if _hits(words, _REVIEW_STEMS):
-        return "sonnet"
+        return "mid"
     if _hits(words, _RESEARCH_STEMS):
-        return "haiku"
+        return "cheap"
     return None
 
 
@@ -266,33 +279,23 @@ def impose_model_enabled(project_root: Path) -> bool:
 def copilot_model_for(project_root: Path, tier: str) -> str:
     """Le nom de modèle Copilot que le projet associe au palier *tier*, ou ``""``.
 
-    Lu sous ``dispatch.copilot_models.<palier>`` de la politique d'orchestration
-    (par exemple ``haiku: claude-haiku-4.5``). Absent, vide ou illisible : ``""``,
-    et la décision reste consultative.
+    Lu dans la table palier x hôte x fournisseur (:mod:`grimoire.hosts.model_table`) :
+    ``dispatch.models.copilot.<palier>``, ou l'alias historique
+    ``dispatch.copilot_models.<palier>`` (par exemple ``haiku: claude-haiku-4.5``).
+    *tier* accepte un palier (``cheap``) ou son alias (``haiku``). Absent, vide ou
+    illisible : ``""``, et la décision reste consultative.
     """
-    return declared_model_for(project_root, COPILOT_MODELS_KEY, tier)
+    return host_model_for(project_root, "copilot", tier)
 
 
 def cursor_model_for(project_root: Path, tier: str) -> str:
-    """Le nom de modèle Cursor que le projet associe au palier *tier* (``dispatch.cursor_models``), ou ``""``."""
-    return declared_model_for(project_root, CURSOR_MODELS_KEY, tier)
+    """Le nom de modèle Cursor du palier *tier* (``dispatch.models.cursor``, alias ``dispatch.cursor_models``), ou ``""``."""
+    return host_model_for(project_root, "cursor", tier)
 
 
-def declared_model_for(project_root: Path, key: str, tier: str) -> str:
-    """``dispatch.<key>.<tier>`` de la politique d'orchestration, ou ``""`` (absent, vide, illisible)."""
-    path = project_root / POLICY_FILE
-    if not path.is_file():
-        return ""
-    try:
-        from ruamel.yaml import YAML
-
-        data = YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return ""
-    block = data.get("dispatch") if isinstance(data, dict) else None
-    models = block.get(key) if isinstance(block, dict) else None
-    value = models.get(tier) if isinstance(models, dict) else None
-    return value.strip() if isinstance(value, str) else ""
+def host_model_for(project_root: Path, host: str, tier: str) -> str:
+    """Le modèle que la table du projet donne au palier *tier* sur *host*, ou ``""`` (aucune correspondance)."""
+    return resolve_model(tier, host, table=load_model_table(project_root)).model or ""
 
 
 def _persona_declares_model(project_root: Path, subagent_type: str, *, copilot: bool = False) -> bool:
@@ -335,8 +338,8 @@ def _definition_declares_model(path: Path) -> bool:
     return bool(match and match.group(1) and match.group(1).lower() != "inherit")
 
 
-def _class_model(hook: HookInput) -> tuple[str | None, dict[str, Any]]:
-    """Le ``recommended_model`` de la tâche réclamée, ou ``None`` (pas de tâche, V2, rien de lisible).
+def _class_tier(hook: HookInput) -> tuple[str | None, dict[str, Any]]:
+    """Le palier (``model_tier``) de la tâche réclamée, ou ``None`` (pas de tâche, V2, rien de lisible).
 
     ``detail["task_class"]`` dit si une classe a été calculée : une tâche V2 en a
     une, sans modèle — l'appelant s'abstient alors au lieu de tenter l'heuristique.
@@ -358,7 +361,8 @@ def _class_model(hook: HookInput) -> tuple[str | None, dict[str, Any]]:
     advice = dispatch_advice(task)
     verifiability = advice.get("verifiability") or {}
     cls = str(verifiability.get("class") or "")
-    return advice.get("recommended_model"), {"task_id": active.task_id, "task_class": cls}
+    tier = advice.get("model_tier") if advice.get("recommended_model") else None
+    return tier, {"task_id": active.task_id, "task_class": cls}
 
 
 def decide_dispatch_model(hook: HookInput) -> Decision:
@@ -400,20 +404,20 @@ def _decide(hook: HookInput) -> Decision:
     if _persona_declares_model(hook.project_root, subagent_type, copilot=copilot):
         return Decision(abstain=True)
 
-    model, detail = _class_model(hook)
-    if not model and detail.get("task_class"):
+    tier, detail = _class_tier(hook)
+    if not tier and detail.get("task_class"):
         # Classe calculée sans modèle (V2) : la politique veut le modèle de la session.
         return Decision(abstain=True)
-    source = "class" if model else ""
-    if not model:
+    source = "class" if tier else ""
+    if not tier:
         description = tool_input.get("description")
         prompt = tool_input.get("prompt")
-        model = heuristic_model(
+        tier = heuristic_tier(
             description if isinstance(description, str) else "",
             prompt if isinstance(prompt, str) else "",
         )
-        source = "heuristic" if model else ""
-    if not model:
+        source = "heuristic" if tier else ""
+    if not tier:
         return Decision(abstain=True)
 
     why = (
@@ -423,8 +427,12 @@ def _decide(hook: HookInput) -> Decision:
     )
     if copilot:
         return _copilot_decision(
-            hook, tool_input, model, why, {**detail, "dispatch_source": source, "subagent_type": subagent_type}
+            hook, tool_input, tier, why, {**detail, "dispatch_source": source, "subagent_type": subagent_type}
         )
+    choice = resolve_model(tier, CLAUDE_CODE, table=load_model_table(hook.project_root))
+    if choice.model is None:
+        return Decision(abstain=True, detail={**detail, "dispatch_model": "no_model", "tier": tier})
+    model = choice.model
     context = (
         f"[Grimoire] model={model} imposé au sous-agent ({why}) : l'appel Agent n'avait pas de model. "
         "Passe model= explicitement pour un autre choix ; `dispatch.impose_model: off` dans "
@@ -433,7 +441,14 @@ def _decide(hook: HookInput) -> Decision:
     return Decision(
         context=context,
         updated_input={**tool_input, "model": model},
-        detail={**detail, "imposed_model": model, "dispatch_source": source, "subagent_type": subagent_type},
+        detail={
+            **detail,
+            "imposed_model": model,
+            "dispatch_source": source,
+            "subagent_type": subagent_type,
+            "tier": tier,
+            "model_source": choice.source,
+        },
     )
 
 
@@ -448,25 +463,29 @@ def _copilot_decision(
     """
     from grimoire.hosts.hook_entry import ADVISORY_DETAIL_KEY
 
-    copilot_model = copilot_model_for(hook.project_root, tier)
-    base = {**detail, ADVISORY_DETAIL_KEY: True, "recommended_model": tier}
+    choice = resolve_model(tier, "copilot", table=load_model_table(hook.project_root))
+    copilot_model = choice.model or ""
+    # Le libellé historique du palier (``haiku``) : celui des messages et de ``recommended_model`` avant L5.
+    label = kit_model(tier) or tier
+    base = {**detail, ADVISORY_DETAIL_KEY: True, "recommended_model": label, "tier": tier}
     tool = hook.tool_name
     if not copilot_model:
         return Decision(
             context=(
-                f"[Grimoire] palier {tier} recommandé pour ce sous-agent ({why}) : l'appel {tool} n'avait pas de "
+                f"[Grimoire] palier {label} recommandé pour ce sous-agent ({why}) : l'appel {tool} n'avait pas de "
                 "model, et aucun nom de modèle Copilot n'est associé à ce palier — rien n'est imposé. "
-                f"Déclare `dispatch.{COPILOT_MODELS_KEY}.{tier}: <modèle Copilot>` dans "
+                f"Déclare `dispatch.models.copilot.{tier}: <modèle Copilot>` (alias historique "
+                f"`dispatch.{COPILOT_MODELS_KEY}.{label}`) dans "
                 "_grimoire/standard/orchestration-policy.yaml pour l'imposer, ou passe model= explicitement."
             ),
             detail={**base, "dispatch_model": f"no_{COPILOT_MODELS_KEY}"},
         )
     return Decision(
         context=(
-            f"[Grimoire] model={copilot_model} (palier {tier}) proposé au sous-agent ({why}) : l'appel {tool} "
+            f"[Grimoire] model={copilot_model} (palier {label}) proposé au sous-agent ({why}) : l'appel {tool} "
             "n'avait pas de model. Passe model= explicitement pour un autre choix ; `dispatch.impose_model: off` "
             "dans _grimoire/standard/orchestration-policy.yaml désactive ce réglage."
         ),
         updated_input={**tool_input, "model": copilot_model},
-        detail={**base, "imposed_model": copilot_model},
+        detail={**base, "imposed_model": copilot_model, "model_source": choice.source},
     )
