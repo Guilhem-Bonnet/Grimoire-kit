@@ -126,10 +126,11 @@ def providers_view(project_root: Path) -> dict[str, Any]:
     """Les fournisseurs de modèles : état, palier, modèles, et le prochain choix par palier.
 
     Reprend la charge utile de ``grimoire providers status --json`` (même
-    ``_provider_json``) et y ajoute un ``status`` lisible (``disponible``,
+    ``_provider_json``, capacités comprises, #1281 L3) et y ajoute un ``status`` lisible (``disponible``,
     ``refroidi``, ``suspendu``, ``désactivé``).
     """
     from grimoire.cli.cmd_providers import _provider_json
+    from grimoire.providers.capability_probe import load_probes
     from grimoire.providers.registry import SUPPORTED_MODEL_TIERS, ProviderRegistryError, read_registry
     from grimoire.providers.routing import choose
     from grimoire.providers.state import load_state
@@ -141,9 +142,10 @@ def providers_view(project_root: Path) -> dict[str, Any]:
         return {"registry": True, "error": str(exc), "providers": [], "next_choice": {}}
     now = datetime.now(UTC)
     state = load_state(root)
+    probes = load_probes(root)
     providers: list[dict[str, Any]] = []
     for spec in specs:
-        item = _provider_json(spec, state, now=now)
+        item = _provider_json(spec, state, now=now, probe=probes.get(spec.id))
         if not item["enabled"]:
             status, tone = "désactivé", ""
         elif item["suspended"]:

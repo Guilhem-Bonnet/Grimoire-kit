@@ -12,7 +12,15 @@ from pathlib import Path
 
 import pytest
 
-from grimoire.providers.secrets import env_for_provider, list_secrets, remove_secret, set_secret, store_dir
+from grimoire.providers.secrets import (
+    env_for_provider,
+    is_valid_provider_id,
+    list_secrets,
+    provider_key_var,
+    remove_secret,
+    set_secret,
+    store_dir,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -120,3 +128,30 @@ def test_remove_secret_unknown_var_is_a_noop(tmp_path: Path) -> None:
     remove_secret("openai", "NE_EXISTE_PAS")
 
     assert env_for_provider("openai") == {"OPENAI_API_KEY": "sk-a"}
+
+
+@pytest.mark.parametrize("provider_id", ["../../x", "a/b", "anthropıc", "Deepseek", "x\n", "", "-x", "a" * 65])
+def test_invalid_provider_id_never_reaches_the_store(tmp_path: Path, provider_id: str) -> None:
+    assert not is_valid_provider_id(provider_id)
+    assert provider_key_var(provider_id) == ""
+    with pytest.raises(ValueError, match="identifiant de fournisseur invalide"):
+        set_secret(provider_id, "X_API_KEY", "valeur")
+    with pytest.raises(ValueError, match="identifiant de fournisseur invalide"):
+        remove_secret(provider_id)
+    assert env_for_provider(provider_id) == {}
+    assert not (tmp_path / "x.env").exists()
+    assert not store_dir().exists()
+
+
+def test_provider_key_var_for_a_valid_id() -> None:
+    assert provider_key_var("open-router") == "OPEN_ROUTER_API_KEY"
+
+
+def test_remove_key_cli_refuses_an_invalid_id() -> None:
+    from typer.testing import CliRunner
+
+    from grimoire.cli.cmd_providers import providers_app
+
+    result = CliRunner().invoke(providers_app, ["remove-key", "../../x"])
+    assert result.exit_code == 1
+    assert "invalide" in result.output
