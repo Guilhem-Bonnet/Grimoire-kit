@@ -16,7 +16,8 @@ appeler maintenant, pour quel palier de coût (`cheap`/`mid`/`strong`) ?
 | `grimoire providers status [--json]` | Fournisseurs activés, modèles par palier, disponibilité (refroidissement + dernier audit), prochain choix |
 | `grimoire providers audit [--json]` | Sonder chaque fournisseur activé sans dépenser (PATH, `--version`, modèles Ollama) et journaliser `available`/`models_seen`/`probe_note` dans l'état |
 | `grimoire providers cooldown <id> --reason rate_limit\|timeout\|overloaded` | Enregistrer un échec à la main (429, timeout, 529) |
-| `grimoire providers probe [<id>] [--json]` | Sonder (comme `audit`) puis rouvrir les fournisseurs fermés par une date de forfait illisible (`unknown`) ; une suspension à date n'est jamais levée |
+| `grimoire providers probe [<id>] [--capabilities] [--json]` | Sonder (comme `audit`) puis rouvrir les fournisseurs fermés par une date de forfait illisible (`unknown`) ; une suspension à date n'est jamais levée. Avec `--capabilities`, lire aussi les capacités sur l'API du fournisseur, sans génération |
+| `grimoire providers capabilities [<id>] [--json]` | Capacités connues de chaque fournisseur et modèle, avec leur provenance, sans réseau |
 | `grimoire providers quota [--json]` | Fenêtre de forfait lue dans les flux d'appel : `lower_bound` (minorant daté) ou `unknown`, jamais 0 |
 | `grimoire providers history [--ledger-root <chemin>] [--json]` | Historique des dispatchs par couple (type de tâche, classe) et palier de départ recommandé |
 
@@ -42,6 +43,89 @@ observations à ce palier n'ont plus escaladé, et qui n'a pas retenté
 (re-sondage) — jamais sous le plancher qu'impose la classe (`mid` reste le
 plancher d'une tâche V1). La colonne « départ recommandé » est exactement
 ce que `grimoire task dispatch` retient par défaut pour ce couple.
+
+## Capacités des fournisseurs
+
+Le registre peut dire ce que chaque fournisseur et chaque modèle sait faire.
+`grimoire providers capabilities` l'affiche, `providers status --json`, l'outil
+MCP `grimoire_providers_status` et l'API du cockpit (`GET /api/workspace/providers`)
+le portent sous `capabilities`. Le routage ne s'en sert pas encore.
+
+| Capacité | Niveau | Valeur |
+| --- | --- | --- |
+| `openai_compatible` | fournisseur | l'API accepte le format OpenAI (chat completions) |
+| `anthropic_compatible` | fournisseur | l'API accepte le format Anthropic (Messages) |
+| `tools` | modèle | appel d'outils |
+| `structured_output` | modèle | sortie structurée ou mode JSON |
+| `vision` | modèle | images en entrée |
+| `context_window` | modèle | fenêtre de contexte, en tokens (entier) |
+| `thinking` | modèle | raisonnement (« thinking ») |
+| `prompt_cache` | modèle | cache de prompt |
+
+Chaque valeur porte sa **provenance**, de la plus forte à la plus faible :
+
+- `declared` : écrite dans le registre, sous `capabilities:` du fournisseur ou
+  d'un modèle. Celle du modèle l'emporte.
+- `probed` : mesurée par `grimoire providers probe --capabilities`. La source
+  cite l'URL interrogée et la date.
+- `documented` : valeur par défaut du kit, tirée de la doc du fournisseur. La
+  source est l'URL de cette doc. Elle décrit l'API entière, pas chaque modèle :
+  ce qui dépend du modèle (vision, raisonnement, contexte) n'y figure pas.
+- `unknown` : rien de ce qui précède. Une capacité absente vaut « inconnue »,
+  jamais « oui ».
+
+```yaml
+providers:
+  - id: "deepseek"
+    enabled: true
+    capabilities:            # facultatif, vaut pour tous les modèles du fournisseur
+      vision: false
+    models:
+      - id: "deepseek-flash"
+        tier: "cheap"
+        capabilities:        # facultatif, prime sur le niveau fournisseur
+          vision: true
+          context_window: 1048576
+```
+
+Un registre sans `capabilities:` se lit comme avant. Une valeur du mauvais type
+(`context_window: true`, `tools: "yes"`) est ignorée et reste inconnue.
+
+Valeurs documentées livrées par le kit (lues le 2026-11-22) :
+
+| Fournisseur (id du registre) | Documenté |
+| --- | --- |
+| `anthropic` (`claude`) | API Anthropic et OpenAI, outils, cache de prompt |
+| `openai` (`codex`) | API OpenAI, outils, sortie structurée, cache de prompt |
+| `google-gemini` (`gemini`, `google`) | API OpenAI, outils, sortie structurée, cache |
+| `deepseek` | API OpenAI et Anthropic, outils, mode JSON, raisonnement, cache |
+| `moonshot` (`kimi`) | API OpenAI et Anthropic, outils, mode JSON |
+| `local` (`ollama`, ou tout `provider_type: local`) | API OpenAI et Anthropic d'Ollama ; pas de cache de prompt |
+
+Les URL exactes sont dans `grimoire providers capabilities --json` (champ
+`source`) et dans `src/grimoire/providers/capabilities.py`. Le kit ne
+documente ni ne sonde `github-copilot` : ses capacités restent inconnues tant
+qu'elles ne sont pas déclarées.
+
+**La sonde ne dépense rien.** `providers probe --capabilities` lit la liste des
+modèles du fournisseur (`GET /models`, ou `GET /api/tags` puis `POST /api/show`
+par modèle déclaré pour Ollama) et en tire ce qu'elle porte : contexte, vision,
+raisonnement, sortie structurée selon le fournisseur. Elle ne fait aucun appel
+de génération, et aucune option ne l'y autorise : ce qu'une génération seule
+prouverait reste documenté ou inconnu. Un fournisseur sans point d'entrée connu
+est sondé sur `<anthropic_base_url>/v1/models` si cette URL est en `https://`.
+
+- **Clé** : lue dans le magasin de secrets (`grimoire providers set-key`), puis
+  dans l'environnement, sous `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY` ou
+  `<ID>_API_KEY`. Elle part en en-tête seulement, jamais dans l'URL, la sortie,
+  les notes ni le fichier écrit.
+- **Sans clé, sans réseau, ou réponse illisible** : le fournisseur est « non
+  mesuré », avec son motif (clé absente, clé refusée, injoignable). Ce n'est
+  pas une erreur : la commande sort en 0.
+- **Résultat** : `_grimoire-output/providers-capabilities.json`, état runtime.
+  Le registre n'est jamais écrit. Une nouvelle sonde remplace la précédente du
+  même fournisseur : une valeur qu'on ne mesure plus ne reste pas « sondée ».
 
 ## Politique de données : ce qui peut partir chez un fournisseur
 
