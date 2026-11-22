@@ -17,7 +17,7 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.bridges.schemas import HostId
-from grimoire.cli.cmd_dispatch import dispatch_app
+from grimoire.cli.app import app
 from grimoire.hosts.decisions.dispatch_model import copilot_model_for, cursor_model_for
 from grimoire.hosts.emitters.claude_code import _dispatch_policy_section, claude_models
 from grimoire.hosts.model_table import (
@@ -317,11 +317,11 @@ def test_the_worker_tier_model_reads_the_table_and_capabilities(tmp_path: Path) 
 def test_cli_dispatch_models_text_and_json(tmp_path: Path) -> None:
     _policy(tmp_path, "dispatch:\n  models:\n    copilot:\n      cheap: gpt-5-mini\n    nowhere: {cheap: x}\n")
     runner = CliRunner()
-    text = runner.invoke(dispatch_app, ["models", "--project-root", str(tmp_path)], terminal_width=200)
+    text = runner.invoke(app, ["dispatch", "models", "--project-root", str(tmp_path)], terminal_width=200)
     assert text.exit_code == 0, text.output
     for fragment in ("haiku", "défaut du kit", "gpt-5-mini", "projet", "model omis", "hôte inconnu"):
         assert fragment in text.output
-    raw = runner.invoke(dispatch_app, ["models", "--project-root", str(tmp_path), "--json"])
+    raw = runner.invoke(app, ["dispatch", "models", "--project-root", str(tmp_path), "--json"])
     assert raw.exit_code == 0, raw.output
     payload = json.loads(raw.output)
     assert payload["rows"][0] == resolve_model("cheap").to_dict()
