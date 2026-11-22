@@ -24,7 +24,3 @@
 # donc pas listée.)
 a2fc1ab9de72362804b5b9eb1118f06c57028190:tests/unit/test_hook_ledger.py:curl-auth-header:82
 e28d68e958d4bfba3aeb7bbae99c074a202fbf84:src/grimoire/memory/validation.py:generic-api-key:142
-# 2026-11-22 : jeton factice de tests/unit/providers/test_capabilities.py (#1281 L3), remplacé dans
-# le commit suivant par une valeur que la règle ne prend plus pour une clé ; seul le commit de branche
-# le porte.
-7f51fca11b408512b9b5d3d6837ee59aa4920cd5:tests/unit/providers/test_capabilities.py:generic-api-key:46

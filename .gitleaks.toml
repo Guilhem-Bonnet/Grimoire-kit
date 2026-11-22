@@ -73,3 +73,17 @@ paths = [
 regexes = [
   '''nom:secret''',
 ]
+
+# Clé factice des tests de la sonde de capacités (#1281 L3) : le test prouve qu'une clé lue
+# dans le magasin de secrets ne sort ni dans l'URL, ni dans la sortie, ni dans le fichier écrit.
+# Le premier commit de la PR porte la valeur en clair. Même bornage : ce fichier ET cette
+# valeur exacte.
+[[allowlists]]
+description = "Clé factice des tests de la sonde de capacités des fournisseurs"
+condition = "AND"
+paths = [
+  '''^tests/unit/providers/test_capabilities\.py$''',
+]
+regexes = [
+  '''sk-ne-doit-jamais-sortir-42''',
+]
