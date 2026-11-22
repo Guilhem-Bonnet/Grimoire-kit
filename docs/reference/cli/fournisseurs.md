@@ -198,12 +198,27 @@ modèle de la session, de l'agent parent ou du sélecteur s'applique. C'est le c
 de Copilot et de Cursor tant que le projet ne déclare rien.
 
 **Capacités.** Le worker et le relecteur exigent l'appel d'outils (`tools`). Un
-modèle dont cette capacité est connue à « non » dans le registre (déclarée ou
-sondée, voir la section précédente) est écarté, et la couche suivante prend le
-relais. Une capacité inconnue n'écarte jamais un modèle.
+modèle du projet dont cette capacité est connue à « non » dans le registre
+(déclarée ou sondée, voir la section précédente) est écarté, et la couche
+suivante prend le relais. Une capacité inconnue n'écarte jamais un modèle, et un
+défaut du kit n'est jamais écarté : ni la sonde ni le registre ne peuvent vider
+la table.
+
+**Ce que la table ne peut pas faire descendre.**
+
+- La route sensible (`sensitive_route: strong`) garde le défaut fort du kit,
+  `opus` sous Claude Code, quelle que soit la surcharge du projet.
+- Le relecteur prend, dans l'ordre, le palier du rôle, `mid`, puis `strong`,
+  `mid` et `cheap`. Il retient le premier modèle que la double relecture tient
+  pour distinct de celui du worker. Si aucun ne l'est, la relecture n'est pas
+  lancée et la tâche revient à l'humain avec ce motif.
+- Un palier demandé au worker que la table ne traduit pas ne lance rien : la
+  tâche attend, avec le motif, au lieu de tourner sur le modèle de la session.
+- `orchestrator.roles.worker.tier` n'accepte que `cheap`, `mid` ou `strong`.
 
 **Valeurs illisibles.** Un hôte inconnu, un palier hors `cheap`, `mid` ou
-`strong`, ou un nom de modèle hors `[A-Za-z0-9._:[]/@-]` sont ignorés. Ils
+`strong`, un nom de modèle hors `[A-Za-z0-9._:[]/@-]`, ou un nom que YAML
+relirait comme un autre type (`null`, `true`, `1.5`) sont ignorés. Ils
 apparaissent sous la table de `grimoire dispatch models` et dans `errors` de la
 sortie `--json`. Le hook ne lève jamais : une politique illisible vaut une table
 vide.

@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from grimoire.core.exceptions import GrimoireError
-from grimoire.hosts.model_table import CLAUDE_CODE, load_model_table, resolve_model
+from grimoire.hosts.model_table import CLAUDE_CODE, TIERS, kit_model, load_model_table, resolve_model
 from grimoire.missions.breaker import read_breaker, record_failure
 from grimoire.missions.liveness import probe_status
 from grimoire.missions.provider_failure import transient_api_error
@@ -106,6 +106,7 @@ __all__ = [
     "resolve_background_session",
     "resume_provider_failed_workers",
     "resume_worker",
+    "sensitive_model",
     "session_env",
     "tier_model",
     "unhalted_sessions",
@@ -160,15 +161,25 @@ def _host_provider_capabilities(root: Path) -> ProviderCapabilities | None:
     return next((caps for caps in found if canonical_provider(caps.provider_id) == "anthropic"), None)
 
 
+def sensitive_model() -> str:
+    """Le modèle de la route sensible (``sensitive_route: strong``) : le défaut fort du kit pour l'hôte (``opus``).
+
+    Jamais surchargé par ``dispatch.models`` : une table projet ne peut pas faire descendre une tâche qui touche un
+    chemin sensible sous le palier fort de Claude Code (``strong: haiku`` serait lu ici comme ``opus``).
+    """
+    return kit_model("strong")
+
+
 def tier_model(root: Path, tier: str) -> str:
     """Le modèle que ``claude --model`` reçoit pour *tier* (table palier x hôte x fournisseur, lot L5) ; ``""`` sans
     correspondance.
 
     Claude Code x Anthropic : ``dispatch.models`` du projet, sinon le défaut du kit (``cheap`` → ``haiku``, ``mid`` →
-    ``sonnet``, ``strong`` → ``opus``). Un modèle dont l'appel d'outils est connu à « non » est écarté, jamais sur
-    une capacité inconnue.
+    ``sonnet``, ``strong`` → ``opus``). Un modèle du projet dont l'appel d'outils est connu à « non » est écarté,
+    jamais sur une capacité inconnue ; un défaut du kit ne l'est jamais. Seuls les paliers ``cheap``, ``mid`` et
+    ``strong`` sont lus : un alias (``opus``) ou un palier vide rend ``""``, comme avant la table.
     """
-    if not tier:
+    if tier not in TIERS:
         return ""
     choice = resolve_model(
         tier,
@@ -920,9 +931,12 @@ class WorkerLauncher:
             if denial and provider_id in busy and is_local_provider(service.home_root, provider_id):
                 return self._deferred(tid, denial)
         if sensitive.strong:
-            model = tier_model(service.home_root, "strong")
+            model = sensitive_model()
         else:
             model = route.model if route is not None else self._model_for(admit, tier)
+        if tier and not model:
+            # Un palier demandé sans modèle : la session tournerait en silence sur le modèle par défaut de l'hôte.
+            return self._deferred(tid, f"aucun modèle pour le palier {tier} (table palier → modèle, `grimoire dispatch models`)")
         result = self._exec(self._argv(tid, model, route), wt.path, session_env())
         match = _BG_ID.search(result.stdout) if result.returncode == 0 else None
         if match is None:

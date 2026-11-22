@@ -274,6 +274,32 @@ def test_le_modele_impose_par_la_politique_prime(projet: Path, host: FakeHost) -
     assert review_argv[review_argv.index("--model") + 1] == "sonnet"
 
 
+def _with_worker_and_table(projet: Path, worker_model: str, table: str) -> None:
+    text = (projet / POLICY).read_text(encoding="utf-8").replace("      model: sonnet\n", f"      model: {worker_model}\n", 1)
+    (projet / POLICY).write_text(text + f"dispatch:\n  models:\n    claude:\n{table}", encoding="utf-8")
+
+
+def test_une_table_qui_donne_le_meme_modele_partout_rend_la_main_a_l_humain(projet: Path, host: FakeHost) -> None:
+    """L5 : aucun modèle distinct de celui du worker dans la table : pas de relecture « indépendante » sur le même."""
+    _with_worker_and_table(projet, "sonnet", "      cheap: sonnet\n      mid: sonnet\n      strong: sonnet\n")
+    tid, _launch = launched_and_in_review(projet, host)
+    report = tick(projet, host)
+    assert [(o.action, o.status) for o in report.reviews] == [("escalate", "done")], report.reviews
+    assert "aucun modèle de relecture distinct" in report.reviews[0].detail
+    assert len(host.of("claude", "--bg")) == 1  # seul le worker a été lancé
+    escalated = [e for e in TaskService(projet).ledger.events_for(tid) if e.payload.get("cause")]
+    assert escalated[-1].payload["cause"] == "review_model_not_distinct"
+
+
+def test_le_relecteur_prend_l_identifiant_complet_de_la_table_jamais_un_alias_nu(projet: Path, host: FakeHost) -> None:
+    """L5 : worker en claude-sonnet-4-6, palier fort claude-opus-4-1 : le relecteur reçoit claude-opus-4-1."""
+    _with_worker_and_table(projet, "claude-sonnet-4-6", "      mid: claude-sonnet-4-6\n      strong: claude-opus-4-1\n")
+    launched_and_in_review(projet, host)
+    tick(projet, host)
+    review_argv = host.of("claude", "--bg")[-1]
+    assert review_argv[review_argv.index("--model") + 1] == "claude-opus-4-1"
+
+
 def test_relecteur_desactive_rien_n_est_relu(projet: Path, host: FakeHost) -> None:
     write_policy(projet, reviewer=False)
     launched_and_in_review(projet, host)

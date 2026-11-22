@@ -1431,3 +1431,74 @@ def test_le_plan_du_tick_montre_le_routage_prevu_sans_rien_lancer(route_prete: P
     result = runner.invoke(app, ["orchestrate", "tick", "--project-root", str(route_prete)])
     assert result.exit_code == 0, result.output
     assert f"Routage prévu : {sensible} — fort" in result.output
+
+
+# ── L5 : table palier → modèle ────────────────────────────────────────────────
+
+
+def _append_dispatch(root: Path, block: str) -> None:
+    path = root / POLICY
+    path.write_text(path.read_text(encoding="utf-8") + "dispatch:\n  models:\n" + block, encoding="utf-8")
+
+
+def test_une_table_projet_ne_fait_jamais_descendre_la_route_sensible_sous_opus(route_prete: Path, host: FakeHost) -> None:
+    """`strong: haiku` dans la table du projet : la route sensible garde le défaut fort du kit (opus)."""
+    _route_sensible(route_prete)
+    _append_dispatch(route_prete, "    claude-code:\n      strong: haiku\n")
+    service = TaskService(route_prete)
+    tid = ready_v0_decrite(service, "garde", "Durcir le hook `.github/hooks/scripts/gate.sh`.")
+
+    tick(route_prete, host)
+
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"
+    (lancement,) = [e for e in service.ledger.list_events(tid) if e.event_type == LAUNCHED_EVENT]
+    assert lancement.payload["model"] == "opus"
+
+
+def test_le_palier_du_worker_suit_la_table_du_projet(projet: Path, service: TaskService, host: FakeHost) -> None:
+    write_policy(projet, extra="      tier: strong\n")
+    _append_dispatch(projet, "    claude:\n      strong: claude-opus-4-7\n")
+    ready(service, "palier")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "claude-opus-4-7"
+
+
+def test_un_palier_sans_modele_ne_tourne_pas_en_silence_sur_la_session(
+    projet: Path, service: TaskService, host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un palier demandé que la table ne traduit pas : la tâche attend, avec un motif, sans session lancée."""
+    import grimoire.missions.launcher as launcher_module
+
+    write_policy(projet, extra="      tier: strong\n")
+    monkeypatch.setattr(launcher_module, "tier_model", lambda _root, _tier: "")
+    tid = ready(service, "palier")
+    report = tick(projet, host)
+    assert host.of("claude", "--bg") == []
+    (outcome,) = report.launches
+    assert outcome.status == "deferred" and "aucun modèle pour le palier strong" in outcome.detail
+    assert service.require(tid).status is TaskState.READY
+
+
+def test_tools_false_au_fournisseur_ne_vide_pas_la_table(projet: Path, service: TaskService, host: FakeHost) -> None:
+    """Registre et sonde qui disent `tools: false` partout : les défauts du kit restent, le worker garde opus."""
+    import json
+
+    (projet / "_grimoire" / "standard" / "llm-provider-registry.yaml").write_text(
+        '$schema: "grimoire-llm-provider-registry/v1"\nproviders:\n'
+        '  - id: "anthropic"\n    enabled: true\n    provider_type: "hosted"\n    capabilities:\n      tools: false\n',
+        encoding="utf-8",
+    )
+    probes = projet / "_grimoire-output" / "providers-capabilities.json"
+    probes.parent.mkdir(parents=True, exist_ok=True)
+    models = {name: {"tools": False} for name in ("haiku", "sonnet", "opus")}
+    probes.write_text(
+        json.dumps({"providers": {"anthropic": {"measured": True, "note": "", "endpoint": "x", "models": models}}}),
+        encoding="utf-8",
+    )
+    write_policy(projet, extra="      tier: strong\n")
+    ready(service, "palier")
+    tick(projet, host)
+    (argv,) = host.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus"

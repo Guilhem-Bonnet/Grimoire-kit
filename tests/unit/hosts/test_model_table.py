@@ -327,3 +327,89 @@ def test_cli_dispatch_models_text_and_json(tmp_path: Path) -> None:
     assert payload["rows"][0] == resolve_model("cheap").to_dict()
     assert any(row["model"] == "gpt-5-mini" and row["source"] == "project" for row in payload["rows"])
     assert payload["errors"] == ["dispatch.models.nowhere : hôte inconnu"]
+
+
+def test_task_claim_and_the_hook_announce_the_same_renamed_model(tmp_path: Path) -> None:
+    """Une table projet qui renomme `cheap` : task_claim, dispatch_advice et le hook disent le même nom."""
+    from grimoire.core.agentic_standard import setup_standard_profile
+    from grimoire.missions.dispatch_advice import dispatch_advice
+    from grimoire.missions.schemas import TaskCheck, TaskState
+    from grimoire.missions.service import TaskService
+
+    setup_standard_profile(tmp_path, profile_id="governed", task_id="bootstrap")
+    registry = tmp_path / REGISTRY
+    registry.write_text(
+        registry.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1), encoding="utf-8"
+    )
+    policy = tmp_path / POLICY
+    assert "\ndispatch:\n" in policy.read_text(encoding="utf-8")
+    text = policy.read_text(encoding="utf-8").replace(
+        "dispatch:\n", "dispatch:\n  models:\n    claude:\n      cheap: claude-haiku-4-5\n", 1
+    )
+    policy.write_text(text, encoding="utf-8")
+    service = TaskService(tmp_path)
+    tid = service.add(
+        "Travail",
+        ("la suite de tests passe",),
+        owner="g",
+        actor="claude",
+        ready=True,
+        checks=(TaskCheck(cmd="pytest -q"),),
+    ).task.id
+    service.context(tid)
+    claimed = service.claim(tid, "claude", host="claude-code-cli").to_dict(tmp_path)
+    assert claimed["model_tier"] == "cheap"
+    assert claimed["recommended_model"] == "claude-haiku-4-5"
+    # Sans racine, le contrat d'origine : le défaut du kit.
+    assert dispatch_advice(service.require(tid))["recommended_model"] == "haiku"
+    assert dispatch_advice(service.require(tid), tmp_path)["recommended_model"] == "claude-haiku-4-5"
+    service.transition(tid, TaskState.RUNNING, "claude")
+    session = "aaaaaaaa-0000-4000-8000-0000000000c5"
+    service.attach_session(tid, session, session_host="claude-code-cli", actor="claude")
+    rendered, decision, _ = run_hook(
+        {
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+            "session_id": session,
+            "tool_name": "Agent",
+            "tool_input": {"description": "Revue du diff", "prompt": "x"},
+        },
+        host_id=HostId.CLAUDE_CODE_CLI,
+        project_root=tmp_path,
+        decision_id="grimoire.dispatch-model",
+    )
+    assert decision.detail["dispatch_source"] == "class"
+    assert rendered["hookSpecificOutput"]["updatedInput"]["model"] == claimed["recommended_model"]
+    # Hôte Copilot sans nom déclaré : aucun nom, jamais celui de Claude Code ; hôte inconnu : Claude Code.
+    from grimoire.missions.dispatch_advice import recommended_model_for
+    from grimoire.missions.verifiability import Verifiability
+
+    assert recommended_model_for(Verifiability.V0, tmp_path, HostId.GITHUB_COPILOT.value) is None
+    assert recommended_model_for(Verifiability.V0, tmp_path, "local") == "claude-haiku-4-5"
+    assert recommended_model_for(Verifiability.V2, tmp_path) is None
+
+
+def test_a_kit_default_is_never_skipped_by_a_capability() -> None:
+    """Une sonde ou un registre qui dit `tools: false` pour Anthropic ne vide pas la table."""
+    caps = resolve_capabilities("anthropic", declared=parse_capabilities({"tools": False}))
+    choice = resolve_model("strong", capabilities=caps, requires=("tools",))
+    assert (choice.model, choice.source, choice.skipped) == ("opus", SOURCE_KIT, ())
+    table = table_from_dispatch({"models": {"claude": {"strong": "claude-opus-4-7"}}})
+    skipped = resolve_model("strong", table=table, capabilities=caps, requires=("tools",))
+    assert skipped.model == "opus"
+    assert skipped.skipped == (("claude-opus-4-7", "tools: non (declared)"),)
+
+
+@pytest.mark.parametrize("value", ["null", "true", "False", "1.5", "2", "~", "on"])
+def test_yaml_ambiguous_model_names_are_refused(value: str) -> None:
+    table = table_from_dispatch({"models": {"claude": {"cheap": value}}})
+    assert table.entries == ()
+    assert table.errors and table.errors[0].endswith("nom de modèle illisible")
+    assert resolve_model("cheap", table=table).model == "haiku"
+
+
+def test_tier_model_reads_only_the_kit_tiers(tmp_path: Path) -> None:
+    """Comme avant la table : un alias (`opus`) ou un palier inconnu en `tier` ne donne aucun modèle."""
+    assert tier_model(tmp_path, "opus") == ""
+    assert tier_model(tmp_path, "gigantic") == ""
+    assert tier_model(tmp_path, "cheap") == "haiku"

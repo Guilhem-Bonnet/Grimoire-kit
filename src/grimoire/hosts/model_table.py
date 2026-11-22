@@ -20,7 +20,8 @@ fournisseur rend ``None``, et l'appelant omet ``model``.
 
 Capacités (lot L3) : la résolution peut écarter un modèle dont une capacité requise est connue à
 « non » (``tools: false`` pour un worker), et passe alors à la couche suivante. Une capacité
-inconnue n'écarte jamais rien.
+inconnue n'écarte jamais rien, et un défaut du kit n'est jamais écarté : une sonde ou un registre
+ne peut pas vider la table.
 
 :func:`resolve_model` est pure ; :func:`load_model_table` lit le fichier et ne lève jamais :
 une valeur illisible est ignorée et notée dans :attr:`ModelTable.errors`.
@@ -51,6 +52,7 @@ __all__ = [
     "ModelChoice",
     "ModelEntry",
     "ModelTable",
+    "host_id",
     "kit_model",
     "load_model_table",
     "normalize_tier",
@@ -85,6 +87,14 @@ LEGACY_KEYS: dict[str, str] = {"copilot_models": _COPILOT, "cursor_models": _CUR
 
 _POLICY_FILE = Path("_grimoire") / "standard" / "orchestration-policy.yaml"
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]{0,199}")
+#: Ce que YAML relirait comme un autre type dans un frontmatter (``model: true``) : refusé comme nom de modèle.
+_YAML_SCALARS = frozenset({"null", "nul", "none", "true", "false", "yes", "no", "on", "off", "y", "n"})
+_NUMERIC = re.compile(r"[0-9][0-9._]*")
+
+
+def valid_model_name(model: str) -> bool:
+    """Un nom de modèle lisible et sans ambiguïté YAML (ni ``null``, ni ``true``, ni ``1.5``)."""
+    return bool(_MODEL.fullmatch(model)) and model.lower() not in _YAML_SCALARS and not _NUMERIC.fullmatch(model)
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +162,11 @@ def _host_id(name: str) -> str:
     return host.value if host is not None else ""
 
 
+def host_id(name: str) -> str:
+    """L'identifiant d'hôte (``host-github-copilot``) de *name*, alias accepté ; ``""`` s'il est inconnu."""
+    return _host_id(name)
+
+
 def _provider_id(name: str) -> str:
     key = (name or "").strip().lower()
     if key in ("", ANY_PROVIDER, "anthropic"):
@@ -214,7 +229,8 @@ def resolve_model(
     for model, source in candidates:
         if not model:
             continue
-        if reason := _rejection(model, capabilities, requires):
+        # Les défauts du kit ne sont jamais écartés : une capacité lue dans une sonde ou un registre ne vide pas la table.
+        if source != SOURCE_KIT and (reason := _rejection(model, capabilities, requires)):
             skipped.append((model, reason))
             continue
         return ModelChoice(tier_id, host_id, provider_id, model, source, tuple(skipped))
@@ -234,7 +250,7 @@ def _tier_block(
         if raw_model in (None, ""):
             continue
         model = raw_model.strip() if isinstance(raw_model, str) else ""
-        if not _MODEL.fullmatch(model):
+        if not valid_model_name(model):
             errors.append(f"{where}.{raw_tier} : nom de modèle illisible")
             continue
         entries.append(ModelEntry(host, provider, tier, model, source))

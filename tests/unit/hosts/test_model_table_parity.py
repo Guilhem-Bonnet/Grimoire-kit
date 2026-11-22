@@ -9,7 +9,8 @@ d'avant L5 (3.99.0). Le test rejoue les mêmes scénarios avec le code courant e
   plugin) ;
 - les fiches ``.claude/agents/*.md`` émises pour l'archétype ``meta`` (``model:`` de chaque persona,
   politique de dispatch de la persona d'entrée) ;
-- la politique de dispatch et le roster injectés au ``SessionStart``.
+- la politique de dispatch et le roster injectés au ``SessionStart`` ;
+- le modèle du worker (palier, ``model_by_class``), de la route sensible et du relecteur, sans surcharge.
 
 Régénérer la fixture n'a de sens qu'avec le code d'avant L5 : la régénérer depuis la branche
 viderait la preuve.
@@ -161,7 +162,48 @@ def scenarios(base: Path) -> dict[str, Any]:
         root = base / f"claimed-{cls}"
         root.mkdir(parents=True)
         out["claimed"][cls] = _scrub(_claimed(root, criterion, description), root)
+    empty = base / "sans-politique"
+    empty.mkdir()
+    out["launcher"] = _launcher_models(empty)
     return out
+
+
+WORKER_MODELS = ("", "haiku", "sonnet", "opus", "claude-opus-4-7", "claude-sonnet-4-6", "deepseek-chat")
+
+
+def _launcher_models(root: Path) -> dict[str, Any]:
+    """Modèle du worker (palier, ``model_by_class``), de la route sensible et du relecteur, sans surcharge.
+
+    Appelle les méthodes sur un objet minimal (politique et service factices) : le même appel vaut pour le code
+    d'origin/main et pour la branche. La route sensible lit ``_TIER_ALIAS["strong"]`` là où ``sensitive_model``
+    n'existe pas encore (origin/main), qui est exactement ce que le lanceur y passait à ``--model``.
+    """
+    from types import SimpleNamespace
+
+    from grimoire.missions import launcher
+    from grimoire.missions.reviewer import ReviewStage
+
+    service = SimpleNamespace(home_root=root)
+    admit = SimpleNamespace(route=None)
+    worker: dict[str, str] = {}
+    for by_class in (False, True):
+        for tier in ("", "cheap", "mid", "strong"):
+            role = SimpleNamespace(model="", model_by_class=by_class, tier=tier)
+            fake = SimpleNamespace(_policy=SimpleNamespace(worker=role), _service=service)
+            for asked in (None, "cheap", "strong"):
+                key = f"by_class={by_class}|tier={tier}|asked={asked}"
+                worker[key] = launcher.WorkerLauncher._model_for(fake, admit, asked)  # type: ignore[arg-type]
+    sensitive = getattr(launcher, "sensitive_model", None)
+    reviewer: dict[str, str] = {}
+    for tier in ("", "cheap", "mid", "strong"):
+        fake = SimpleNamespace(_policy=SimpleNamespace(reviewer=SimpleNamespace(model="", tier=tier)), _service=service)
+        for worker_model in WORKER_MODELS:
+            reviewer[f"tier={tier}|worker={worker_model}"] = ReviewStage._model(fake, worker_model)  # type: ignore[arg-type]
+    return {
+        "worker": worker,
+        "sensitive": sensitive() if sensitive is not None else launcher._TIER_ALIAS["strong"],  # type: ignore[attr-defined]
+        "reviewer": reviewer,
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -186,6 +228,7 @@ def test_claude_code_output_is_byte_identical_to_origin_main(tmp_path: Path) -> 
     assert actual["claimed"] == expected["claimed"]
     assert actual["emitted"]["session_start"] == expected["emitted"]["session_start"]
     assert actual["emitted"]["agents"] == expected["emitted"]["agents"]
+    assert actual["launcher"] == expected["launcher"]
 
 
 def test_the_fixture_covers_every_class_and_the_sensitive_persona() -> None:
