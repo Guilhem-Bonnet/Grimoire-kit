@@ -115,11 +115,24 @@ de génération, et aucune option ne l'y autorise : ce qu'une génération seule
 prouverait reste documenté ou inconnu. Un fournisseur sans point d'entrée connu
 est sondé sur `<anthropic_base_url>/v1/models` si cette URL est en `https://`.
 
-- **Clé** : lue dans le magasin de secrets (`grimoire providers set-key`), puis
-  dans l'environnement, sous `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-  `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY` ou
-  `<ID>_API_KEY`. Elle part en en-tête seulement, jamais dans l'URL, la sortie,
-  les notes ni le fichier écrit.
+- **Clé d'un fournisseur documenté** : lue dans le magasin de secrets
+  (`grimoire providers set-key`), puis dans l'environnement, sous
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY` ou
+  `MOONSHOT_API_KEY`, et envoyée uniquement à l'hôte officiel du fournisseur.
+- **Clé d'un autre fournisseur** (hôte lu dans le registre) : lue dans le
+  magasin seulement, sous `<ID>_API_KEY`, jamais dans l'environnement. Un nom
+  qui serait celui d'un fournisseur documenté est refusé : une clé ne peut pas
+  partir vers un hôte choisi par le registre.
+- **Identifiant** : ASCII strict, `[a-z0-9][a-z0-9-]{0,63}`. Un autre
+  identifiant n'est pas sondé (« non mesuré : id invalide ») et n'a pas de
+  fichier dans le magasin.
+- **Transport** : la clé part en en-tête seulement, jamais dans l'URL, la
+  sortie, les notes ni le fichier écrit. Aucune redirection n'est suivie
+  (« redirection refusée »).
+- **Contenu borné** : une réponse de plus de 2 Mio est refusée, au plus 2000
+  modèles sont lus, et un identifiant de modèle hors de
+  `[A-Za-z0-9._:/@+-]{1,128}` est ignoré, à la sonde comme à la relecture du
+  fichier.
 - **Sans clé, sans réseau, ou réponse illisible** : le fournisseur est « non
   mesuré », avec son motif (clé absente, clé refusée, injoignable). Ce n'est
   pas une erreur : la commande sort en 0.

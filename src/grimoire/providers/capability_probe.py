@@ -8,9 +8,12 @@ génération n'existe ici : une capacité que seule une génération prouverait 
 inconnue.
 
 Sans clé, sans réseau, ou sur une réponse illisible, la sonde rend « non mesuré » avec son motif,
-jamais une erreur fatale. La clé est lue dans le magasin de secrets
-(:func:`grimoire.providers.secrets.env_for_provider`) puis dans l'environnement, envoyée en en-tête
-seulement : elle n'apparaît ni dans l'URL, ni dans les notes, ni dans le fichier écrit.
+jamais une erreur fatale. Pour un fournisseur documenté, la clé est lue dans le magasin de secrets
+(:func:`grimoire.providers.secrets.env_for_provider`) puis dans l'environnement ; pour tout autre
+fournisseur, dont l'hôte vient du registre, dans le magasin seulement, sous un nom qui ne peut pas
+être celui d'un fournisseur documenté. Elle part en en-tête seulement, jamais après une
+redirection : elle n'apparaît ni dans l'URL, ni dans les notes, ni dans le fichier écrit. Les
+réponses sont bornées (taille, nombre de modèles, forme des identifiants).
 
 Le résultat est écrit dans ``_grimoire-output/providers-capabilities.json`` (état runtime, jamais
 le registre). :func:`read_capabilities` fusionne registre, dernière sonde et doc : c'est la
@@ -21,13 +24,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from grimoire.core.fsio import atomic_write
 from grimoire.providers.audit import ollama_base_url
@@ -41,12 +45,18 @@ from grimoire.providers.capabilities import (
     resolve_capabilities,
 )
 from grimoire.providers.registry import ProviderSpec, read_registry
-from grimoire.providers.secrets import env_for_provider
+from grimoire.providers.secrets import env_for_provider, is_valid_provider_id, provider_key_var
 
 PROVIDERS_CAPABILITIES_FILE = Path("_grimoire-output/providers-capabilities.json")
 _SCHEMA = "grimoire-provider-capabilities/v1"
 _HTTP_TIMEOUT_S = 5.0
 _ANTHROPIC_VERSION = "2023-06-01"
+#: Bornes du contenu sondé : au-delà, la réponse est refusée ou tronquée, jamais lue en entier.
+_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_MODELS = 2000
+#: Forme admise d'un identifiant de modèle lu sur le réseau ou relu du fichier : ni séquence de
+#: contrôle, ni balisage, rien qui s'afficherait autrement qu'écrit.
+_MODEL_ID_RE = re.compile(r"[A-Za-z0-9._:/@+-]{1,128}", re.ASCII)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +66,8 @@ class _Endpoint:
     url: str
     key_var: str
     auth: str  # "bearer" | "anthropic" | "google"
+    #: Hôte lu dans le registre : la clé vient du magasin seulement, jamais de l'environnement.
+    store_only: bool = False
 
 
 #: Points d'entrée documentés de la liste des modèles (sources : DOCUMENTED_DEFAULTS dans ``capabilities``,
@@ -79,9 +91,27 @@ class _ProbeError(Exception):
     """Motif lisible d'une sonde non mesurée — jamais le texte brut d'une exception réseau."""
 
 
-def _key_value(provider_id: str, key_var: str) -> str:
-    """La clé de *provider_id* : magasin de secrets d'abord, puis environnement ; vide si absente."""
-    return (env_for_provider(provider_id).get(key_var) or os.environ.get(key_var, "")).strip()
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Aucune redirection suivie : urllib y recopierait les en-têtes d'authentification."""
+
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None  # la 3xx remonte en HTTPError, refusée par _http_json
+
+
+#: Ouvreur de la sonde : les gestionnaires par défaut, sauf le suivi des redirections.
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def _key_value(provider_id: str, endpoint: _Endpoint) -> str:
+    """La clé de *provider_id* ; vide si absente.
+
+    Fournisseur documenté : magasin de secrets, puis environnement. Hôte venu du registre :
+    magasin seulement — l'environnement porte les clés d'autres fournisseurs.
+    """
+    stored = env_for_provider(provider_id).get(endpoint.key_var, "")
+    if endpoint.store_only:
+        return stored.strip()
+    return (stored or os.environ.get(endpoint.key_var, "")).strip()
 
 
 def _auth_headers(endpoint: _Endpoint, key: str) -> dict[str, str]:
@@ -100,13 +130,19 @@ def _http_json(url: str, headers: Mapping[str, str], body: Mapping[str, Any] | N
         request_headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=request_headers, method="POST" if data else "GET")  # noqa: S310
     try:
-        with urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT_S) as response:  # noqa: S310 — https ou boucle locale
-            return json.loads(response.read().decode("utf-8"))
+        with _OPENER.open(request, timeout=_HTTP_TIMEOUT_S) as response:
+            raw = response.read(_MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            raise _ProbeError(f"redirection refusée (HTTP {exc.code})") from None
         reason = "clé refusée" if exc.code in {401, 403} else "réponse en erreur"
         raise _ProbeError(f"{reason} (HTTP {exc.code})") from None
     except (urllib.error.URLError, OSError, TimeoutError):
         raise _ProbeError("injoignable (réseau ou délai dépassé)") from None
+    if len(raw) > _MAX_RESPONSE_BYTES:
+        raise _ProbeError("réponse trop volumineuse (plus de 2 Mio)")
+    try:
+        return json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         raise _ProbeError("réponse illisible (JSON attendu)") from None
 
@@ -123,7 +159,7 @@ def _supported(value: Any) -> Any:
 def _parse_model_entry(entry: Mapping[str, Any]) -> ProbedModel | None:
     """Un modèle d'une liste ``/models`` : identifiant et capacités lisibles, rien de deviné."""
     raw_id = entry.get("id") or entry.get("name")
-    if not isinstance(raw_id, str) or not raw_id:
+    if not _valid_model_id(raw_id):
         return None
     model_id = raw_id.removeprefix("models/")
     found: dict[str, Any] = {}
@@ -148,6 +184,10 @@ def _parse_model_entry(entry: Mapping[str, Any]) -> ProbedModel | None:
     return ProbedModel(model_id, _pairs(found))
 
 
+def _valid_model_id(value: Any) -> TypeGuard[str]:
+    return isinstance(value, str) and _MODEL_ID_RE.fullmatch(value) is not None
+
+
 def _pairs(found: Mapping[str, Any]) -> CapabilityPairs:
     pairs: list[tuple[str, bool | int]] = []
     for name, raw in found.items():
@@ -164,7 +204,7 @@ def _parse_models_payload(payload: Any) -> tuple[ProbedModel, ...]:
     entries = payload.get("data", payload.get("models"))
     if not isinstance(entries, list):
         raise _ProbeError("réponse illisible (liste de modèles attendue)")
-    parsed = (_parse_model_entry(entry) for entry in entries if isinstance(entry, Mapping))
+    parsed = (_parse_model_entry(entry) for entry in entries[:_MAX_MODELS] if isinstance(entry, Mapping))
     return tuple(model for model in parsed if model is not None)
 
 
@@ -213,13 +253,20 @@ def _hosted_endpoint(provider: ProviderSpec) -> _Endpoint | None:
         return endpoint
     base = (provider.anthropic_base_url or "").strip().rstrip("/")
     if base.startswith("https://"):
-        return _Endpoint(f"{base}/v1/models", f"{provider.id.upper().replace('-', '_')}_API_KEY", "anthropic")
+        return _Endpoint(f"{base}/v1/models", provider_key_var(provider.id), "anthropic", store_only=True)
     return None
+
+
+def _reserved_key_vars() -> frozenset[str]:
+    """Variables des fournisseurs documentés : un hôte venu du registre n'en reçoit jamais une."""
+    return frozenset(endpoint.key_var for endpoint in _ENDPOINTS.values())
 
 
 def probe_provider_capabilities(provider: ProviderSpec, *, now: datetime | None = None) -> CapabilityProbe:
     """Sonde *provider* sans génération ; « non mesuré » (``measured=False``) plutôt qu'une exception."""
     probed_at = (now or datetime.now(UTC)).isoformat(timespec="seconds")
+    if not is_valid_provider_id(provider.id):
+        return CapabilityProbe(provider.id, False, "non mesuré : id invalide ([a-z0-9][a-z0-9-]{0,63})", probed_at)
     if canonical_provider(provider.id, provider.provider_type) == "local":
         try:
             url, models = _probe_local(provider)
@@ -229,7 +276,10 @@ def probe_provider_capabilities(provider: ProviderSpec, *, now: datetime | None 
     endpoint = _hosted_endpoint(provider)
     if endpoint is None:
         return CapabilityProbe(provider.id, False, "non mesuré : aucun point d'entrée connu", probed_at)
-    key = _key_value(provider.id, endpoint.key_var)
+    if endpoint.store_only and endpoint.key_var in _reserved_key_vars():
+        note = f"non mesuré : variable de clé réservée à un autre fournisseur ({endpoint.key_var})"
+        return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)
+    key = _key_value(provider.id, endpoint)
     if not key:
         note = f"non mesuré : clé absente ({endpoint.key_var}, voir `grimoire providers set-key`)"
         return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)
@@ -246,8 +296,8 @@ def _probe_from_dict(provider_id: str, raw: Any) -> CapabilityProbe | None:
     models_raw = _mapping(raw.get("models"))
     models = tuple(
         ProbedModel(str(model_id), _pairs(values))
-        for model_id, values in models_raw.items()
-        if isinstance(values, Mapping)
+        for model_id, values in list(models_raw.items())[:_MAX_MODELS]
+        if isinstance(values, Mapping) and _valid_model_id(model_id)
     )
     return CapabilityProbe(
         provider_id,
@@ -269,7 +319,7 @@ def load_probes(root: Path) -> dict[str, CapabilityProbe]:
     providers = data.get("providers") if isinstance(data, Mapping) else None
     if not isinstance(providers, Mapping):
         return {}
-    probes = {str(pid): _probe_from_dict(str(pid), raw) for pid, raw in providers.items()}
+    probes = {str(pid): _probe_from_dict(str(pid), raw) for pid, raw in providers.items() if is_valid_provider_id(pid)}
     return {pid: probe for pid, probe in probes.items() if probe is not None}
 
 

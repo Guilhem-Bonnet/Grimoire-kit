@@ -5,13 +5,15 @@ ne dit jamais « oui » par défaut ; les trois provenances (``declared``,
 ``probed``, ``documented``) se départagent dans cet ordre ; la sonde ne fait
 aucun appel de génération, rend « non mesuré » sans clé ni réseau, et la clé
 n'apparaît ni dans le fichier écrit ni dans la sortie. Aucun appel réseau réel :
-``urllib.request.urlopen`` est remplacé dans chaque test qui sonde.
+l'ouvreur HTTP de la sonde est remplacé dans chaque test qui sonde.
 """
 
 from __future__ import annotations
 
+import http.server
 import io
 import json
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
@@ -255,7 +257,7 @@ _DEEPSEEK = """\
 
 
 def test_probe_without_key_is_unmeasured_and_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+    monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
     probe = probe_provider_capabilities(_provider(tmp_path, _DEEPSEEK, "deepseek"))
     assert probe.measured is False
     assert "clé absente (DEEPSEEK_API_KEY" in probe.note
@@ -271,7 +273,9 @@ def test_probe_reads_model_list_with_store_key(tmp_path: Path, monkeypatch: pyte
             {"id": "deepseek-v4-pro", "context_window": 1048576, "input_modalities": ["text"]},
         ],
     }
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"https://api.deepseek.com/models": payload}, seen))
+    monkeypatch.setattr(
+        capability_probe._OPENER, "open", _fake_urlopen({"https://api.deepseek.com/models": payload}, seen)
+    )
     _write_registry(tmp_path, _DEEPSEEK)
 
     (probe,) = probe_capabilities(tmp_path)
@@ -301,7 +305,7 @@ def test_probe_falls_back_to_environment_key(tmp_path: Path, monkeypatch: pytest
             }
         ]
     }
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"https://api.moonshot.ai/v1/models": payload}))
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://api.moonshot.ai/v1/models": payload}))
     body = '  - id: "kimi"\n    enabled: true\n    models:\n      - id: "kimi-k3.1-pro"\n        tier: "mid"\n'
     probe = probe_provider_capabilities(_provider(tmp_path, body, "kimi"))
     model = probe.model("kimi-k3.1-pro")
@@ -326,7 +330,7 @@ def test_probe_parses_anthropic_models_api(tmp_path: Path, monkeypatch: pytest.M
         ]
     }
     monkeypatch.setattr(
-        urllib.request, "urlopen", _fake_urlopen({"https://api.anthropic.com/v1/models": payload}, seen)
+        capability_probe._OPENER, "open", _fake_urlopen({"https://api.anthropic.com/v1/models": payload}, seen)
     )
     probe = probe_provider_capabilities(_provider(tmp_path, _PLAIN, "anthropic"))
     assert seen[0].get_header("X-api-key") == SECRET
@@ -345,7 +349,7 @@ def test_probe_parses_gemini_models(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     set_secret("google-gemini", "GEMINI_API_KEY", SECRET)
     seen: list[urllib.request.Request] = []
     payload = {"models": [{"name": "models/gemini-2.5-pro", "inputTokenLimit": 1048576, "thinking": True}]}
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"https://generativelanguage": payload}, seen))
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://generativelanguage": payload}, seen))
     body = '  - id: "google-gemini"\n    enabled: true\n    models:\n      - id: "gemini-2.5-pro"\n        tier: "strong"\n'
     probe = probe_provider_capabilities(_provider(tmp_path, body, "google-gemini"))
     assert seen[0].get_header("X-goog-api-key") == SECRET
@@ -373,7 +377,7 @@ def test_probe_failures_are_unmeasured_without_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Any, expected: str
 ) -> None:
     set_secret("deepseek", "DEEPSEEK_API_KEY", SECRET)
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"https://api.deepseek.com/models": failure}))
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://api.deepseek.com/models": failure}))
     probe = probe_provider_capabilities(_provider(tmp_path, _DEEPSEEK, "deepseek"))
     assert probe.measured is False
     assert expected in probe.note
@@ -383,7 +387,7 @@ def test_probe_failures_are_unmeasured_without_secret(
 def test_unknown_provider_uses_anthropic_base_url_or_reports_no_endpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+    monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
     body = _PLAIN + '  - id: "relay"\n    enabled: true\n    anthropic_base_url: "https://relay.example/anthropic/"\n'
     _write_registry(tmp_path, body)
     specs = {spec.id: spec for spec in read_registry(tmp_path)}
@@ -424,7 +428,7 @@ def test_local_probe_reads_ollama_tags_and_show(tmp_path: Path, monkeypatch: pyt
             raise urllib.error.URLError("show en panne")
         return _Response(json.dumps(show).encode())
 
-    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    monkeypatch.setattr(capability_probe._OPENER, "open", opener)
     probe = probe_provider_capabilities(_provider(tmp_path, _LOCAL, "local"))
     assert probe.measured is True
     assert probe.endpoint == "http://localhost:11434/api/tags"
@@ -444,7 +448,7 @@ def test_local_probe_reads_ollama_tags_and_show(tmp_path: Path, monkeypatch: pyt
 def test_local_probe_without_ollama_is_unmeasured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OLLAMA_HOST", "127.0.0.1:11500")
     monkeypatch.setattr(
-        urllib.request, "urlopen", _fake_urlopen({"http://127.0.0.1:11500": urllib.error.URLError("x")})
+        capability_probe._OPENER, "open", _fake_urlopen({"http://127.0.0.1:11500": urllib.error.URLError("x")})
     )
     probe = probe_provider_capabilities(_provider(tmp_path, _LOCAL, "local"))
     assert probe.measured is False
@@ -452,7 +456,7 @@ def test_local_probe_without_ollama_is_unmeasured(tmp_path: Path, monkeypatch: p
 
 
 def test_probe_one_provider_keeps_previous_others(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+    monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
     _write_registry(tmp_path, _PLAIN + _DEEPSEEK)
     probe_capabilities(tmp_path)
     assert set(load_probes(tmp_path)) == {"anthropic", "acme", "deepseek"}
@@ -520,7 +524,7 @@ def test_cli_probe_capabilities_json_and_text(
 ) -> None:
     set_secret("deepseek", "DEEPSEEK_API_KEY", SECRET)
     payload = {"data": [{"id": "deepseek-flash", "context_window": 1048576}]}
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"https://api.deepseek.com/models": payload}))
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://api.deepseek.com/models": payload}))
     _write_registry(tmp_path, _DEEPSEEK)
 
     result = runner.invoke(providers_app, ["probe", "--capabilities", "--project-root", str(tmp_path), "--json"])
@@ -541,7 +545,7 @@ def test_cli_probe_capabilities_json_and_text(
 def test_cli_probe_without_flag_is_unchanged(
     tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+    monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
     _write_registry(tmp_path, _DEEPSEEK)
     result = runner.invoke(providers_app, ["probe", "--project-root", str(tmp_path), "--json"])
     assert result.exit_code == 0, result.output
@@ -575,7 +579,7 @@ def test_probe_ignores_entries_without_id_and_odd_show_payloads(
 ) -> None:
     set_secret("deepseek", "DEEPSEEK_API_KEY", SECRET)
     payload = {"data": [{"object": "model"}, "texte", {"id": "deepseek-flash"}]}
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"https://api.deepseek.com/models": payload}))
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://api.deepseek.com/models": payload}))
     probe = probe_provider_capabilities(_provider(tmp_path, _DEEPSEEK, "deepseek"))
     assert probe.models == (ProbedModel("deepseek-flash"),)
 
@@ -583,7 +587,7 @@ def test_probe_ignores_entries_without_id_and_odd_show_payloads(
         "http://localhost:11434/api/tags": {"models": [{"name": "qwen3-coder"}]},
         "http://localhost:11434/api/show": [],
     }
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(routes))
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen(routes))
     local = probe_provider_capabilities(_provider(tmp_path, _LOCAL, "local"))
     assert local.models == (ProbedModel("qwen3-coder"),)
 
@@ -593,3 +597,149 @@ def test_cli_probe_capabilities_with_broken_registry_exits_1(tmp_path: Path, run
     (tmp_path / REGISTRY).write_text("providers: [\n", encoding="utf-8")
     result = runner.invoke(providers_app, ["probe", "--capabilities", "--project-root", str(tmp_path)])
     assert result.exit_code == 1
+
+
+# ── Revue adversariale : clés, redirections, contenu borné ──────────────────
+
+
+def test_registry_chosen_host_never_receives_an_environment_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un hôte venu du registre ne reçoit ni clé de l'environnement, ni celle d'un autre fournisseur."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    monkeypatch.setenv("OPENROUTER_API_KEY", SECRET)
+    seen: list[urllib.request.Request] = []
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://": {"data": []}}, seen))
+    body = (
+        '  - id: "anthropıc"\n    enabled: true\n    anthropic_base_url: "https://hote.example"\n'
+        '  - id: "openrouter"\n    enabled: true\n    anthropic_base_url: "https://hote.example"\n'
+    )
+    _write_registry(tmp_path, body)
+
+    dotless, openrouter = probe_capabilities(tmp_path)
+
+    assert seen == []
+    assert dotless.note == "non mesuré : id invalide ([a-z0-9][a-z0-9-]{0,63})"
+    assert "clé absente (OPENROUTER_API_KEY" in openrouter.note
+
+
+def test_registry_chosen_host_uses_only_the_store_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_secret("openrouter", "OPENROUTER_API_KEY", SECRET)
+    seen: list[urllib.request.Request] = []
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://hote.example/": {"data": []}}, seen))
+    body = '  - id: "openrouter"\n    enabled: true\n    anthropic_base_url: "https://hote.example"\n'
+    _write_registry(tmp_path, body)
+    (probe,) = probe_capabilities(tmp_path)
+    assert probe.measured is True
+    assert seen[0].get_header("X-api-key") == SECRET
+
+
+def test_derived_key_variable_of_a_documented_provider_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_secret("acme", "ACME_API_KEY", SECRET)
+    endpoints = {
+        **capability_probe._ENDPOINTS,
+        "autre": capability_probe._Endpoint("https://x", "ACME_API_KEY", "bearer"),
+    }
+    monkeypatch.setattr(capability_probe, "_ENDPOINTS", endpoints)
+    monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
+    body = '  - id: "acme"\n    enabled: true\n    anthropic_base_url: "https://hote.example"\n'
+    probe = probe_provider_capabilities(_provider(tmp_path, body, "acme"))
+    assert probe.note == "non mesuré : variable de clé réservée à un autre fournisseur (ACME_API_KEY)"
+
+
+class _Recorder(http.server.BaseHTTPRequestHandler):
+    hits: list[str]
+    location = ""
+
+    def do_GET(self) -> None:
+        self.hits.append(self.path)
+        if self.location:
+            self.send_response(302)
+            self.send_header("Location", self.location)
+            self.end_headers()
+            return
+        body = b'{"models": []}'
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: Any) -> None:
+        return
+
+
+def _serve(location: str, hits: list[str]) -> http.server.HTTPServer:
+    handler = type("Handler", (_Recorder,), {"hits": hits, "location": location})
+    server = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_redirect_is_refused_and_target_receives_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    hits_b: list[str] = []
+    hits_a: list[str] = []
+    server_b = _serve("", hits_b)
+    server_a = _serve(f"http://127.0.0.1:{server_b.server_port}/api/tags", hits_a)
+    try:
+        monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{server_a.server_port}")
+        probe = probe_provider_capabilities(_provider(tmp_path, _LOCAL, "local"))
+    finally:
+        server_a.shutdown()
+        server_b.shutdown()
+    assert hits_a == ["/api/tags"]
+    assert hits_b == []
+    assert probe.measured is False
+    assert "redirection refusée (HTTP 302)" in probe.note
+
+
+def test_model_ids_with_control_sequences_or_markup_are_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    set_secret("deepseek", "DEEPSEEK_API_KEY", SECRET)
+    payload = {
+        "data": [
+            {"id": "\x1b[31mrouge\x1b[0m"},
+            {"id": "[bold red]balise[/]"},
+            {"id": "x" * 129},
+            {"id": "deepseek-flash"},
+        ]
+    }
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://api.deepseek.com/models": payload}))
+    _write_registry(tmp_path, _DEEPSEEK)
+    (probe,) = probe_capabilities(tmp_path)
+    assert [model.model_id for model in probe.models] == ["deepseek-flash"]
+    written = (tmp_path / PROVIDERS_CAPABILITIES_FILE).read_text(encoding="utf-8")
+    assert "\\u001b" not in written
+    assert "balise" not in written
+
+
+def test_oversized_response_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_secret("deepseek", "DEEPSEEK_API_KEY", SECRET)
+    huge = b'{"data": [' + b" " * (2 * 1024 * 1024) + b"]}"
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://api.deepseek.com/models": huge}))
+    probe = probe_provider_capabilities(_provider(tmp_path, _DEEPSEEK, "deepseek"))
+    assert probe.measured is False
+    assert "réponse trop volumineuse" in probe.note
+
+
+def test_model_list_is_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_secret("deepseek", "DEEPSEEK_API_KEY", SECRET)
+    payload = {"data": [{"id": f"m-{index}"} for index in range(2500)]}
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake_urlopen({"https://api.deepseek.com/models": payload}))
+    probe = probe_provider_capabilities(_provider(tmp_path, _DEEPSEEK, "deepseek"))
+    assert len(probe.models) == 2000
+
+
+def test_reloaded_probe_file_filters_ids(tmp_path: Path) -> None:
+    path = tmp_path / PROVIDERS_CAPABILITIES_FILE
+    path.parent.mkdir(parents=True)
+    models = {"\x1b[2Jefface": {"tools": True}, "[link=x]y[/link]": {"tools": True}, "ok-1": {"tools": True}}
+    path.write_text(
+        json.dumps({"providers": {"../x": {"measured": True}, "deepseek": {"measured": True, "models": models}}}),
+        encoding="utf-8",
+    )
+    probes = load_probes(tmp_path)
+    assert list(probes) == ["deepseek"]
+    assert [model.model_id for model in probes["deepseek"].models] == ["ok-1"]

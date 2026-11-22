@@ -28,7 +28,7 @@ from grimoire.missions.schemas import MissionTask
 from grimoire.missions.verifiability import Verifiability, classify
 from grimoire.providers.data_policy import data_policy_refusal
 from grimoire.providers.registry import ProviderSpec, read_registry
-from grimoire.providers.secrets import env_for_provider, store_dir
+from grimoire.providers.secrets import env_for_provider, provider_key_var, store_dir
 from grimoire.providers.state import available_models, load_state
 
 _SUBAGENT_MODEL_VARS = (
@@ -59,8 +59,8 @@ def settings_path(provider: str) -> Path:
 
 def _key_var(provider: str) -> str:
     """La variable de la clé dans le magasin, vide si elle n'y est pas."""
-    name = f"{provider.upper().replace('-', '_')}_API_KEY"
-    return name if env_for_provider(provider).get(name) else ""
+    name = provider_key_var(provider)
+    return name if name and env_for_provider(provider).get(name) else ""
 
 
 def _enabled_provider(root: Path, provider_id: str) -> ProviderSpec | None:

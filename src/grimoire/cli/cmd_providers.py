@@ -626,7 +626,11 @@ def providers_remove_key(
     ] = None,
 ) -> None:
     """Retirer une clé (ou toutes celles d'un fournisseur) du magasin de secrets."""
-    remove_secret(provider_id, env_var)
+    try:
+        remove_secret(provider_id, env_var)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
     console.print(
         f"[yellow]●[/yellow] retiré : {provider_id!r}" + (f" / {env_var}" if env_var else " (toutes les clés)")
     )
