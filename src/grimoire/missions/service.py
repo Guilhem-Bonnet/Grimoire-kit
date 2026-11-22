@@ -150,7 +150,7 @@ class TaskMove:
         """Exigences non satisfaites qu'un profil permissif a laissé passer."""
         return tuple(str(r) for r in self.verdict.refusals)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, project_root: Path | None = None) -> dict[str, Any]:
         from grimoire.missions.dispatch_advice import dispatch_advice
 
         data = self.task.to_dict()
@@ -161,7 +161,7 @@ class TaskMove:
         # réclame devait relire `task show` à part, ou deviner. Même calcul
         # que `grimoire task dispatch` (`missions.dispatch.start_tier_for`
         # part de la même classe), jamais une seconde classification.
-        advice = dispatch_advice(self.task)
+        advice = dispatch_advice(self.task, project_root)  # *project_root* : la table palier → modèle du projet (L5)
         data["verifiability"] = advice["verifiability"]
         # `None` sur V2 : aucun nom de modèle valide pour l'outil `Agent` (défaut
         # #662) — `model_tier` ("cheap"/"mid"/"session") reste toujours renseigné.

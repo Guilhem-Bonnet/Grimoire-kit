@@ -55,10 +55,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from grimoire.hosts.model_table import kit_model
+from grimoire.hosts.model_table import CLAUDE_CODE, host_id, kit_model, load_model_table, resolve_model
 from grimoire.missions.verifiability import Verifiability, as_dict, classify
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from grimoire.missions.schemas import MissionTask
 
 __all__ = [
@@ -88,15 +90,25 @@ RECOMMENDED_MODEL_BY_CLASS: dict[Verifiability, str] = {
 }
 
 
-def recommended_model_for(verifiability: Verifiability) -> str | None:
+def recommended_model_for(
+    verifiability: Verifiability, project_root: Path | None = None, host: str = ""
+) -> str | None:
     """Le nom de modèle à passer à ``model=`` pour cette classe, ``None`` si aucun (V2).
 
-    Traduit ``RECOMMENDED_MODEL_BY_CLASS[verifiability]`` : toute valeur sauf
-    ``"session"`` passe telle quelle, ``"session"`` devient ``None`` — jamais
-    une valeur qu'aucun host n'accepterait pour ce paramètre.
+    Sans *project_root* : ``RECOMMENDED_MODEL_BY_CLASS[verifiability]`` (défaut du kit
+    pour Claude Code) ; ``"session"`` devient ``None`` — jamais une valeur qu'aucun
+    host n'accepterait pour ce paramètre. Avec *project_root* : le palier de la classe
+    passe par la table du projet (:func:`grimoire.hosts.model_table.resolve_model`),
+    comme dans le hook ``dispatch-model``, pour *host* (Claude Code s'il est vide ou
+    inconnu) ; un palier sans correspondance sur cet hôte donne ``None``.
     """
-    model = RECOMMENDED_MODEL_BY_CLASS[verifiability]
-    return None if model == "session" else model
+    tier = TIER_BY_CLASS[verifiability]
+    if tier == "session":
+        return None
+    if project_root is None:
+        return RECOMMENDED_MODEL_BY_CLASS[verifiability]
+    target = host_id(host) or CLAUDE_CODE
+    return resolve_model(tier, target, table=load_model_table(project_root)).model
 
 
 def model_tier_for(verifiability: Verifiability) -> str:
@@ -120,7 +132,13 @@ def model_hint(advice: dict[str, Any]) -> str:
     return "aucun — omets le paramètre model, garde celui de la session"
 
 
-def dispatch_advice(task: MissionTask) -> dict[str, Any]:
+def _task_host(task: MissionTask) -> str:
+    """L'hôte de la session rattachée au claim (``session_host``), ou ``""``."""
+    claim = task.claim
+    return claim.session_host if claim is not None and claim.session_host else ""
+
+
+def dispatch_advice(task: MissionTask, project_root: Path | None = None) -> dict[str, Any]:
     """Vérifiabilité, modèle recommandé et palier pour *task* — un seul calcul, une seule fois.
 
     ``verifiability`` reprend le format de :func:`grimoire.missions.
@@ -135,10 +153,13 @@ def dispatch_advice(task: MissionTask) -> dict[str, Any]:
     ambigu) est V2 par construction (voir ``classify_criteria`` — un faux V0
     est pire qu'un faux V2) : elle reçoit ici le palier le plus prudent,
     ``session`` (``recommended_model: None``), jamais une exception.
+
+    *project_root* : la table palier → modèle du projet s'applique (lot L5), pour
+    l'hôte de la session rattachée au claim s'il est connu ; sans elle, le défaut du kit.
     """
     verifiability = classify(task)
     return {
         "verifiability": as_dict(task),
-        "recommended_model": recommended_model_for(verifiability),
+        "recommended_model": recommended_model_for(verifiability, project_root, _task_host(task)),
         "model_tier": model_tier_for(verifiability),
     }

@@ -271,7 +271,7 @@ def _route_of(plan: QueuePlan, tid: str) -> RouteRef | None:
 
 def _modele(read: PolicyRead, route: RouteRef | None, task: MissionTask, root: Path) -> tuple[dict[str, Any], str]:
     """Le bloc « modèle » de la maquette, et le modèle que la commande équivalente porterait."""
-    advice = dispatch_advice(task)
+    advice = dispatch_advice(task, root)
     verifiability = advice["verifiability"]
     if read.policy is None:
         model = advice["recommended_model"] or ""
