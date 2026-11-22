@@ -75,6 +75,13 @@ class TestMatrix:
         assert cell.carriers == (".cursor/hooks.json",)
         assert "non vérifié" in cell.reason
 
+    def test_copilot_ecrit_la_garde_mais_la_declare_advisory_non_verifiee(self, project: Path) -> None:
+        """#1281 : les journaux Copilot (#1280) ne montrent aucun refus : la garde est écrite
+        dans `.github/hooks/`, rendue au runtime, mais déclarée `advisory`, jamais `enforced`."""
+        pre = _cell(project, HostId.GITHUB_COPILOT, "hook:pre_tool_use")
+        assert pre.status == ADVISORY and pre.enforcement == "advisory"
+        assert "non vérifié" in pre.reason
+
     def test_codex_ecrit_la_garde_mais_la_tient_pour_consultative(self, project: Path) -> None:
         """Codex documente le refus, mais rien n'est prouvé et un hook de projet exige /hooks :
         la garde est écrite dans `.codex/hooks.json` et reste `advisory`, jamais `enforced`."""
@@ -82,10 +89,11 @@ class TestMatrix:
         assert pre.status == ADVISORY and pre.carriers == (".codex/hooks.json",)
         assert "non vérifié" in pre.reason and "/hooks" in pre.reason
 
-    def test_gemini_bloque_sur_les_evenements_d_action_et_pas_sur_la_cloture(self, project: Path) -> None:
+    def test_gemini_ecrit_sa_garde_mais_ne_la_declare_jamais_enforced(self, project: Path) -> None:
         """Depuis l'émetteur riche, Gemini n'est plus un hôte de prose : BeforeTool et
-        BeforeAgent refusent, mais AfterAgent/SessionEnd ne sont documentés que comme
-        hooks (blocage non vérifié), donc la clôture reste `advisory`."""
+        BeforeAgent documentent un refus, mais aucune capture ne le prouve (#1281) :
+        la garde est écrite et `advisory`. AfterAgent/SessionEnd ne sont documentés que
+        comme hooks, la clôture reste `advisory` sans refus documenté."""
         from grimoire.hosts.collect import build_surface
         from grimoire.hosts.events import Enforcement as EnforcementEvent
         from grimoire.hosts.events import HookEvent
@@ -98,10 +106,11 @@ class TestMatrix:
         )
         matrix = build_matrix(project, (HostId.GEMINI_CLI,), surface=replace(surface, hooks=(*surface.hooks, *extra)))
         pre = _cell(project, HostId.GEMINI_CLI, "hook:pre_tool_use", matrix=matrix)
-        assert pre.status == ENFORCED and pre.enforcement == "blocking"
+        assert pre.status == ADVISORY and pre.enforcement == "advisory"
+        assert "non vérifié" in pre.reason
         assert pre.carriers == (".gemini/settings.json",)
         submit = _cell(project, HostId.GEMINI_CLI, "hook:user_prompt_submit", matrix=matrix)
-        assert submit.status == ENFORCED and submit.enforcement == "blocking"
+        assert submit.status == ADVISORY and "non vérifié" in submit.reason
         assert _cell(project, HostId.GEMINI_CLI, "hook:session_start", matrix=matrix).status == ADVISORY
         stop = _cell(project, HostId.GEMINI_CLI, "hook:stop", matrix=matrix)
         assert stop.status == ADVISORY

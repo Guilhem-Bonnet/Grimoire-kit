@@ -14,6 +14,7 @@ never read.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -73,6 +74,11 @@ class HostProfile:
     #: enforced »). Le kit y écrit sa garde, mais :meth:`blocks` reste faux : la
     #: matrice les rend ``advisory`` avec cette raison, pas ``enforced``.
     documented_blocking_events: frozenset[HookEvent] = frozenset()
+    #: Captures réelles (chemins relatifs à ``tests/fixtures/hosts/``) qui prouvent
+    #: qu'un refus de cet hôte arrête vraiment l'action. Aucun événement n'est tenu
+    #: pour bloquant sans elles : :func:`unproven_blocking_claims` le vérifie, et un
+    #: test transverse fait échouer la CI sur toute déclaration orpheline (#1281).
+    blocking_captures: tuple[str, ...] = ()
     #: What the user must do before the host runs the project's hooks at all
     #: (Codex: review them through ``/hooks``). Empty: the hooks run as written.
     hook_approval: str = ""
@@ -132,6 +138,25 @@ class HostProfile:
         """L'hôte documente-t-il un refus sur *event* sans qu'il ait été observé ?"""
         return not self.blocks(event) and event in self.documented_blocking_events
 
+    def writes_refusal(self, event: HookEvent) -> bool:
+        """Le runtime rend-il un refus dans le dialecte de l'hôte pour *event* ?
+
+        C'est le **comportement** du kit, distinct de ce qu'il **déclare** : un refus
+        documenté mais jamais capturé est quand même écrit (sinon la garde ne servirait
+        à rien le jour où l'hôte l'honore), tout en restant ``advisory`` partout où le
+        kit annonce ses capacités (:meth:`blocks`, matrice, ``grimoire host list``).
+        """
+        return self.blocks(event) or event in self.documented_blocking_events
+
+    def proven_blocking_events(self) -> tuple[HookEvent, ...]:
+        """Événements déclenchés par l'hôte et tenus pour bloquants (refus prouvé)."""
+        return tuple(e for e in self.supported_events() if self.blocks(e))
+
+    @property
+    def enforces_blocking(self) -> bool:
+        """Au moins un hook de cet hôte refuse réellement (capture à l'appui)."""
+        return bool(self.proven_blocking_events())
+
     def supported_events(self) -> tuple[HookEvent, ...]:
         return tuple(e for e in HookEvent if self.supports_event(e))
 
@@ -143,12 +168,15 @@ class HostProfile:
                 "subagents": self.subagents_native,
                 "skills": self.skills_native,
                 "commands": self.commands_native,
-                "blocking_hooks": self.blocking_hooks,
+                "blocking_hooks": self.enforces_blocking,
                 "agent_autostart": self.agent_autostart,
                 "permissions": self.permissions_native,
                 "mcp": self.mcp_native,
             },
             "hook_approval": self.hook_approval,
+            "unverified_blocking_events": [
+                e.value for e in self.supported_events() if self.documents_unverified_block(e)
+            ],
             "hook_events": [e.value for e in self.supported_events()],
             "instructions_entrypoint": self.instructions_entrypoint,
             "notes": self.notes,
@@ -162,6 +190,18 @@ CLAUDE_CODE_PROFILE = HostProfile(
     skills_native=True,
     commands_native=True,
     blocking_hooks=True,
+    # Seul le refus PreToolUse est capturé (2.1.301). Le kit écrit aussi les refus
+    # documentés (`decision: block` sur Stop/SubagentStop/UserPromptSubmit/PostToolUse,
+    # code.claude.com/docs/en/hooks) : rendus à l'identique, annoncés advisory.
+    blocking_events=frozenset({HookEvent.PRE_TOOL_USE}),
+    documented_blocking_events=frozenset(
+        {HookEvent.USER_PROMPT_SUBMIT, HookEvent.POST_TOOL_USE, HookEvent.SUBAGENT_STOP, HookEvent.STOP}
+    ),
+    blocking_captures=(
+        "claude-code/01-pretooluse-control-allow.json",
+        "claude-code/01-pretooluse-deny-exit2.json",
+        "claude-code/01-pretooluse-deny-json.json",
+    ),
     agent_autostart=True,
     permissions_native=True,
     mcp_native=True,
@@ -181,7 +221,13 @@ COPILOT_PROFILE = HostProfile(
     subagents_native=True,
     skills_native=True,
     commands_native=True,
-    blocking_hooks=True,
+    # Refus documentés (`permissionDecision: deny` + code 2 sur preToolUse,
+    # `decision: block` sur Stop/SubagentStop) et écrits par le runtime, mais aucun
+    # n'a été observé : les journaux relus (#1280) ne montrent que des entrées de hook.
+    # Tant que ce n'est pas capturé, la garde est advisory (#1281).
+    blocking_hooks=False,
+    blocking_events=frozenset(),
+    documented_blocking_events=frozenset({HookEvent.PRE_TOOL_USE, HookEvent.STOP, HookEvent.SUBAGENT_STOP}),
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint=".github/copilot-instructions.md",
@@ -192,7 +238,8 @@ COPILOT_PROFILE = HostProfile(
         "Copilot dans VS Code n'a aucune interface externe : le chat écrit alors dans le kanban."
     ),
     notes=(
-        "No declarative permission table: permissions are enforced by the pre_tool_use hook instead. "
+        "No declarative permission table: permission rules are written into the pre_tool_use hook instead, "
+        "advisory until a refusal is captured. "
         "Starting inside an agent: `copilot --agent <id>` in the CLI (docs.github.com, custom agents for "
         "Copilot CLI), the chat dropdown in VS Code; not wired here, the session_start hook injects the entry persona. "
         "Contrat réel (#1280, P1-0) : entrées de hooks du harness Copilot relues dans son journal de session "
@@ -207,7 +254,7 @@ CODEX_PROFILE = HostProfile(
     subagents_native=True,
     skills_native=True,
     commands_native=False,
-    blocking_hooks=True,
+    blocking_hooks=False,
     # Refus PreToolUse, relance Stop/SubagentStop, blocage UserPromptSubmit et
     # PostToolUse documentés (learn.chatgpt.com/docs/hooks, lue le 2026-11-21),
     # mais rien de prouvé : CLI absente du poste, et un hook de projet ne
@@ -268,10 +315,12 @@ GEMINI_PROFILE = HostProfile(
     subagents_native=True,
     skills_native=False,
     commands_native=True,
-    blocking_hooks=True,
-    # BeforeTool et BeforeAgent documentent un refus ; AfterAgent/SessionEnd
-    # sont des hooks, pas des points de blocage (non vérifié, CLI absente).
-    blocking_events=frozenset({HookEvent.PRE_TOOL_USE, HookEvent.USER_PROMPT_SUBMIT}),
+    # BeforeTool et BeforeAgent documentent un refus (`decision: deny`, code 2) ;
+    # AfterAgent/SessionEnd sont des hooks, pas des points de blocage. Aucune capture
+    # (CLI absente du poste) : rien n'est tenu pour bloquant, la garde est advisory.
+    blocking_hooks=False,
+    blocking_events=frozenset(),
+    documented_blocking_events=frozenset({HookEvent.PRE_TOOL_USE, HookEvent.USER_PROMPT_SUBMIT}),
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint="GEMINI.md",
@@ -284,9 +333,9 @@ GEMINI_PROFILE = HostProfile(
     notes=(
         "Hooks, commandes TOML, sous-agents et MCP sont écrits d'après geminicli.com/docs "
         "(lue le 2026-11-12, v0.64.0 annoncée ; CLI non installée sur le poste). "
-        "BeforeTool et BeforeAgent refusent une action ; SessionStart/AfterTool/PreCompress "
-        "informent ; le blocage de fin de tour (AfterAgent) et le format des fichiers de "
-        "session ne sont pas vérifiés. Aucune session d'agent détachée documentée."
+        "BeforeTool et BeforeAgent documentent un refus, jamais observé : garde advisory ; "
+        "SessionStart/AfterTool/PreCompress informent ; le blocage de fin de tour (AfterAgent) et le "
+        "format des fichiers de session ne sont pas vérifiés. Aucune session d'agent détachée documentée."
     ),
 )
 
@@ -296,7 +345,13 @@ OPENCODE_PROFILE = HostProfile(
     subagents_native=True,
     skills_native=True,
     commands_native=True,
+    # Pas de ``blocking_events`` : opencode ne déclenche que `tool.execute.before`
+    # (PreToolUse), le seul événement prouvé ; le rendu des autres reste inchangé.
     blocking_hooks=True,
+    blocking_captures=(
+        "opencode/01-pretooluse-control-allow.json",
+        "opencode/01-pretooluse-deny-throw.json",
+    ),
     permissions_native=False,
     mcp_native=True,
     instructions_entrypoint=".opencode/grimoire.md",
@@ -390,7 +445,7 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
             gaps.append(CapabilityGap("mcp", "outils du kit atteints par la CLI `grimoire`, sans client MCP"))
     if profile.hook_approval:
         gaps.append(CapabilityGap("hook_approval", profile.hook_approval))
-    if not profile.blocking_hooks and profile.documented_blocking_events:
+    if not profile.enforces_blocking and profile.documented_blocking_events:
         documented = tuple(e.value for e in _HOOK_FIELDS if e in profile.documented_blocking_events)
         gaps.append(
             CapabilityGap(
@@ -399,7 +454,7 @@ def gaps_for(profile: HostProfile) -> tuple[CapabilityGap, ...]:
                 documented,
             )
         )
-    elif not profile.blocking_hooks:
+    elif not profile.enforces_blocking:
         missing = tuple(e.value for e in _HOOK_FIELDS if not profile.supports_event(e))
         gaps.append(CapabilityGap("blocking_hooks", "governance stated as instructions, enforced by CI only", missing))
     elif not profile.permissions_native:
@@ -602,7 +657,10 @@ _GEMINI_STATES: dict[GovernanceFunction, FunctionState] = {
     # action (`{"decision": "deny"}`), SessionStart informe, et les commandes
     # TOML, sous-agents et `mcpServers` sont écrits (geminicli.com/docs lue le
     # 2026-11-12, v0.64.0 annoncée ; la CLI n'est pas installée sur le poste).
-    GovernanceFunction.TOOL_GUARD: _RICH,
+    GovernanceFunction.TOOL_GUARD: _degraded(
+        "garde écrite dans `.gemini/settings.json` (`BeforeTool`, `BeforeAgent` : `decision: deny`, code 2) "
+        "d'après la doc ; CLI non installée, aucune capture : non vérifié — déclarée advisory, opposable en CI"
+    ),
     GovernanceFunction.WRITE_TRACE: _degraded(
         "`AfterTool` compte les écritures, mais `AfterAgent`/`SessionEnd` ne bloquent pas la clôture "
         "(non vérifié : la CLI n'est pas installée) — le rappel de clôture reste consultatif"
@@ -617,9 +675,18 @@ _GEMINI_STATES: dict[GovernanceFunction, FunctionState] = {
     GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
 }
 
+#: Copilot : entrées de hooks relues dans ses journaux (#1280), mais aucune sortie
+#: acceptée ni aucun refus observé, version d'hôte inconnue.
+_COPILOT_UNVERIFIED = "aucun refus capturé sur un Copilot réel (journaux #1280 : entrées seules) : non vérifié"
 _COPILOT_STATES: dict[GovernanceFunction, FunctionState] = {
-    GovernanceFunction.TOOL_GUARD: _RICH,
-    GovernanceFunction.WRITE_TRACE: _RICH,
+    GovernanceFunction.TOOL_GUARD: _degraded(
+        "garde `preToolUse` écrite (`permissionDecision: deny`, code 2) d'après la doc ; "
+        f"{_COPILOT_UNVERIFIED} — déclarée advisory, opposable en CI"
+    ),
+    GovernanceFunction.WRITE_TRACE: _degraded(
+        "`PostToolUse` compte les écritures et `Stop` rend la décision de clôture (`decision: block` "
+        f"documenté) ; {_COPILOT_UNVERIFIED}"
+    ),
     GovernanceFunction.TASK_RECALL: _RICH,
     GovernanceFunction.COMMANDS: _RICH,
     GovernanceFunction.PERSONAS: _RICH,
@@ -982,3 +1049,75 @@ def claim_host_is_fenced(host: str, host_version: str | None, *, project_root: P
     """
     host_id = resolve_host(host)
     return host_id is not None and is_fenced(host_id, host_version, project_root=project_root)
+
+
+#: Clé de contrat (:data:`CONTRACT_KEYS`) dont la preuve vérifiée établit qu'un refus
+#: arrête réellement l'action sur cet événement. Un événement absent d'ici ne peut pas
+#: être prouvé bloquant : aucune capture de refus de fin de tour (`decision: block`
+#: sur Stop) n'est versée sous ``tests/fixtures/hosts/``, donc Stop reste documenté.
+PROVING_KEYS: dict[HookEvent, str] = {HookEvent.PRE_TOOL_USE: "pretooluse_deny"}
+
+
+def capture_shows_refusal(capture: Mapping[str, Any]) -> bool:
+    """La capture montre-t-elle un **refus** honoré par l'hôte, pas une autorisation ?
+
+    Il faut que l'action ne se soit pas exécutée (``observed.tool_executed`` faux) et
+    qu'un verdict de refus soit lu : code 2, ``permissionDecision: deny`` sur stdout,
+    ou exception levée par le plugin (opencode). Une capture témoin (allow) ne prouve rien.
+    """
+    observed = capture.get("observed")
+    if not isinstance(observed, Mapping) or observed.get("tool_executed") is not False:
+        return False
+    stdout = observed.get("hook_stdout")
+    specific = stdout.get("hookSpecificOutput") if isinstance(stdout, Mapping) else None
+    denied = isinstance(specific, Mapping) and specific.get("permissionDecision") == "deny"
+    return observed.get("hook_exit_code") == 2 or denied or bool(observed.get("hook_throws"))
+
+
+def _read_capture(path: Path) -> Mapping[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, Mapping) else {}
+
+
+def unproven_blocking_claims(profile: HostProfile, fixtures_root: Path) -> tuple[str, ...]:
+    """Ce qui manque pour que les refus déclarés de *profile* soient prouvés (#1281).
+
+    Chaque événement tenu pour bloquant (:meth:`HostProfile.proven_blocking_events`)
+    doit être rattaché à une clé de contrat (:data:`PROVING_KEYS`) vérifiée, et
+    :attr:`HostProfile.blocking_captures` doit nommer au moins une fixture de cette
+    preuve, présente sous *fixtures_root* (``tests/fixtures/hosts/``), dont le verdict
+    lu est un refus (:func:`capture_shows_refusal`). Vide : rien d'orphelin.
+    """
+    host = profile.host_id.value
+    proven = profile.proven_blocking_events()
+    if not proven:
+        return ()
+    if not profile.blocking_captures:
+        events = ", ".join(e.value for e in proven)
+        return (f"{host} : refus tenu pour prouvé ({events}) sans aucune capture référencée",)
+    contract = recorded_contract(profile.host_id)
+    problems: list[str] = []
+    proving: set[str] = set()
+    for event in proven:
+        key = PROVING_KEYS.get(event)
+        evidence = contract.evidence.get(key) if key else None
+        if key is None or evidence is None or not evidence.verified:
+            problems.append(f"{host} : {event.value} tenu pour bloquant sans clé de contrat vérifiée qui le prouve")
+            continue
+        refusals = [
+            c
+            for c in profile.blocking_captures
+            if c in evidence.fixtures and capture_shows_refusal(_read_capture(fixtures_root / c))
+        ]
+        if not refusals:
+            problems.append(f"{host} : aucune capture de {key} ne montre un refus honoré ({event.value})")
+        proving.update(evidence.fixtures)
+    for capture in profile.blocking_captures:
+        if not (fixtures_root / capture).is_file():
+            problems.append(f"{host} : capture introuvable {capture}")
+        elif capture not in proving:
+            problems.append(f"{host} : {capture} n'est pas une preuve vérifiée d'un événement bloquant")
+    return tuple(problems)
