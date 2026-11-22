@@ -85,5 +85,5 @@ paths = [
   '''^tests/unit/providers/test_capabilities\.py$''',
 ]
 regexes = [
-  '''sk-ne-doit-jamais-sortir-42''',
+  '''^sk-ne-doit-jamais-sortir-42$''',
 ]
