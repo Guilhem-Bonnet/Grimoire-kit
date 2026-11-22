@@ -1,4 +1,4 @@
-"""CLI ``grimoire dispatch`` — comptabilité continue du dispatch (issue #442).
+"""CLI ``grimoire dispatch`` — comptabilité continue du dispatch (issue #442) et table palier → modèle (#1281, L5).
 
 Point 5 de l'audit de positionnement du 2026-09-12 : le kit journalise déjà
 chaque cascade (``missions.dispatch._record_dispatch_outcome``, tag
@@ -31,7 +31,10 @@ from grimoire.core.standard_generation import TRACES_DIR
 from grimoire.costs import format_usd
 from grimoire.traces.ledger import TraceLedger
 
-dispatch_app = typer.Typer(help="Comptabilité continue du dispatch : coût par tâche résolue, pass^k.", no_args_is_help=True)
+dispatch_app = typer.Typer(
+    help="Dispatch : comptabilité continue (coût par tâche résolue, pass^k) et table palier → modèle.",
+    no_args_is_help=True,
+)
 console = Console()
 
 _PROJECT_ROOT_OPTION = typer.Option("--project-root", help="Racine du projet.", show_default=False)
@@ -155,3 +158,44 @@ def dispatch_stats(
             f"pass^k : {_pct(stats.pass_k_rate)} ({stats.pass_k_fully_green}/{stats.pass_k_observations} séries "
             "entièrement vertes)"
         )
+
+
+_SOURCE_LABELS = {"kit": "défaut du kit", "project": "projet", "legacy": "alias historique"}
+
+
+@dispatch_app.command("models")
+def dispatch_models(
+    ctx: typer.Context,
+    project_root: Annotated[Path, _PROJECT_ROOT_OPTION] = Path(),
+    json_output: Annotated[bool, _JSON_OPTION] = False,
+) -> None:
+    """Table palier x hôte x fournisseur → modèle, résolue pour ce projet, avec la provenance de chaque choix.
+
+    Couches, de la plus forte à la plus faible : ``dispatch.models`` du projet, les alias historiques
+    ``dispatch.copilot_models`` / ``dispatch.cursor_models``, puis les défauts du kit (Claude Code x
+    Anthropic : ``cheap`` → ``haiku``, ``mid`` → ``sonnet``, ``strong`` → ``opus``). Un palier sans
+    correspondance n'a pas de modèle : l'appelant omet ``model``.
+    """
+    from grimoire.hosts.model_table import load_model_table, resolved_rows
+
+    root = project_root.resolve()
+    table = load_model_table(root)
+    rows = resolved_rows(table)
+    if json_output or _get_fmt(ctx) == "json":
+        payload = {"rows": [row.to_dict() for row in rows], "errors": list(table.errors)}
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    out = Table(title="Table palier → modèle")
+    for column in ("Hôte", "Fournisseur", "Palier", "Modèle", "Provenance"):
+        out.add_column(column)
+    for row in rows:
+        out.add_row(
+            row.host.removeprefix("host-"),
+            row.provider,
+            row.tier,
+            row.model or "— (model omis)",
+            _SOURCE_LABELS.get(row.source, "aucune"),
+        )
+    console.print(out)
+    for error in table.errors:
+        console.print(f"[yellow]ignoré : {error}[/yellow]")
