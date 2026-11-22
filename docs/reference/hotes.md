@@ -54,18 +54,28 @@ ajouté ou modifié une persona.
 
 | Hôte | Sous-agents | Compétences | Commandes | Hooks bloquants | Permissions |
 |---|---|---|---|---|---|
-| Claude Code | oui | oui | oui | oui | oui |
-| GitHub Copilot | oui | oui | oui | oui | non |
-| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, vérifié) | non (non prouvé) |
+| Claude Code | oui | oui | oui | oui (`PreToolUse` capturé) | oui |
+| GitHub Copilot | oui | oui | oui | écrits, non vérifiés (`preToolUse`, `Stop` : advisory) | non |
+| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, capturé) | non (non prouvé) |
 | Codex | oui (`.codex/agents/*.toml`) | oui (`.agents/skills/`) | non | consultatifs (documentés, approbation `/hooks`, non prouvés) | non |
 | Cursor | oui | oui | non | écrits, non vérifiés (`preToolUse`, `beforeShellExecution` : advisory) | non |
-| Gemini CLI | oui | non | oui | oui (`BeforeTool`, `BeforeAgent` ; fin de tour non vérifiée) | non |
+| Gemini CLI | oui | non | oui | écrits, non vérifiés (`BeforeTool`, `BeforeAgent` : advisory ; fin de tour sans refus documenté) | non |
+
+« Hooks bloquants : oui » exige une capture réelle d'un refus sur l'hôte, versée
+sous `tests/fixtures/hosts/<hôte>/` et nommée par le profil
+(`HostProfile.blocking_captures`) ; un test transverse fait échouer la CI sur toute
+déclaration sans capture. Un refus seulement documenté reste **écrit** et rendu
+par le hook (le jour où l'hôte l'honore, il s'applique), mais il est déclaré
+`advisory` partout : matrice, `grimoire host list` (« consultatif »),
+`grimoire host status` (« hooks consultatifs ») et parité.
 
 Rien n'est abandonné en silence. Ce qu'un hôte ne sait pas exécuter est déclaré
 comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
 
 - Copilot n'a pas de table de permissions déclarative : les mêmes règles sont
-  appliquées par le hook `PreToolUse`, avec la même formulation de refus.
+  écrites dans le hook `PreToolUse`, avec la même formulation de refus. Ses
+  journaux (#1280) ne montrent que des entrées de hook, aucun refus : garde et
+  gate de clôture restent `advisory` tant qu'un refus n'est pas capturé.
 - opencode n'a ni table de permissions prouvée ni autre hook sondé que
   `tool.execute.before` : exécution, écriture et lecture de secrets passent par
   le plugin `.opencode/plugin/grimoire-guard.js` (même décision, même
@@ -75,12 +85,14 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   `_grimoire/standard/standard-profile.yaml`) et se contente d'un avertissement
   unique sur stderr sinon.
 - Gemini CLI écrit des hooks, des commandes TOML, des sous-agents et un serveur
-  MCP. Ce qui reste dégradé, et pourquoi : pas de blocage au début de session
+  MCP. Ce qui reste dégradé, et pourquoi : garde `BeforeTool`/`BeforeAgent`
+  écrite d'après la documentation mais jamais observée (CLI absente du poste,
+  aucune capture), donc `advisory` ; pas de blocage au début de session
   (`SessionStart` n'est que consultatif), fin de tour non vérifiée
   (`AfterAgent`/`SessionEnd` reçoivent la décision de clôture mais aucun verdict
   bloquant n'est promis), aucune session d'agent détachée documentée, et pas de
   chargement de compétences à la demande (leurs corps sont copiés sous
-  `_grimoire/hosts/skills/`). Les règles de permissions passent par le hook
+  `_grimoire/hosts/skills/`). Les règles de permissions sont écrites dans le hook
   `BeforeTool`, faute de table déclarative.
 - Codex écrit des hooks, des compétences, des sous-agents et un serveur MCP
   (détail dans « Codex » ci-dessous). Ses hooks restent **consultatifs** : un hook
@@ -199,8 +211,8 @@ dossier courant de la session, qui peut être un sous-dossier.
 ## Ce que le kit a observé (contrats réels)
 
 Le tableau ci-dessus dit ce que le kit sait **écrire** pour un hôte. Il ne dit pas
-ce que l'hôte **fait** : « Hooks bloquants : oui » pour Copilot est une
-documentation, pas une observation. Le fencing d'un bail (refuser les effets
+ce que l'hôte **fait** : seul `pretooluse_deny` vérifié autorise « Hooks
+bloquants : oui » (Claude Code, opencode). Le fencing d'un bail (refuser les effets
 d'une session périmée) ne s'appuie donc pas sur ce tableau mais sur
 `grimoire.hosts.capabilities.contract_for`, rempli **uniquement** depuis des
 captures versées sous `tests/fixtures/hosts/<hôte>/` (un `manifest.json` par
@@ -648,8 +660,11 @@ comme ceux des autres hôtes.
 annoncée v0.64.0 ; la CLI n'est pas installée sur le poste) : un événement de
 fin de tour capable de bloquer (`AfterAgent` est documenté comme hook, pas
 comme point de blocage) ; le format des fichiers de session
-(`transcript_path`). Aucune sortie de refus n'est donc émise pour
-`AfterAgent`/`SessionEnd`, et leurs fixtures ne prouvent pas un blocage.
+(`transcript_path`) ; le refus de `BeforeTool`/`BeforeAgent` lui-même, que le
+hook émet (`decision: deny`, code 2) mais qu'aucune capture n'a observé : la
+garde est déclarée `advisory`. Aucune sortie de refus n'est émise pour
+`AfterAgent`/`SessionEnd`, et les fixtures de `tests/fixtures/hosts/gemini/hooks/`
+sont des charges d'entrée écrites d'après la doc, pas des captures.
 
 ### Le protocole de hooks de Cursor
 

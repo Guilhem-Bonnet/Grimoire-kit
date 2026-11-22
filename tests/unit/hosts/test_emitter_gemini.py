@@ -78,10 +78,14 @@ def test_the_profile_claims_only_what_the_documentation_supports() -> None:
     profile = profile_for(HostId.GEMINI_CLI)
     assert profile.subagents_native and profile.commands_native
     assert not profile.skills_native and not profile.permissions_native
-    assert profile.blocks(HookEvent.PRE_TOOL_USE)
-    assert profile.blocks(HookEvent.USER_PROMPT_SUBMIT)
+    # BeforeTool/BeforeAgent documentent un refus, mais aucune capture ne le prouve
+    # (#1281) : rien n'est tenu pour bloquant, la garde est écrite et advisory.
+    assert not profile.enforces_blocking
+    assert profile.documents_unverified_block(HookEvent.PRE_TOOL_USE)
+    assert profile.documents_unverified_block(HookEvent.USER_PROMPT_SUBMIT)
+    assert profile.writes_refusal(HookEvent.PRE_TOOL_USE)
     # AfterAgent n'est documenté que comme hook : pas de blocage de fin de tour promis.
-    assert not profile.blocks(HookEvent.STOP)
+    assert not profile.blocks(HookEvent.STOP) and not profile.documents_unverified_block(HookEvent.STOP)
     assert not profile.blocks(HookEvent.SESSION_START)
 
 

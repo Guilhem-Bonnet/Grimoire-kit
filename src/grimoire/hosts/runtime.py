@@ -407,7 +407,7 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
         return _render_copilot_stop_block(decision, hook)
 
     if hook.event is HookEvent.PRE_TOOL_USE:
-        if profile_for(host_id).blocking_hooks:
+        if profile_for(host_id).writes_refusal(hook.event):
             # BLOCK (refus de clôture) n'est rendu par aucune décision PreToolUse aujourd'hui ;
             # s'il l'était, c'est un refus, jamais une autorisation.
             mapping = {Outcome.DENY: "deny", Outcome.BLOCK: "deny", Outcome.ASK: "ask", Outcome.ALLOW: "allow"}
@@ -447,7 +447,7 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
         return payload
 
     if hook.event in {HookEvent.STOP, HookEvent.SUBAGENT_STOP}:
-        if decision.outcome is Outcome.BLOCK and profile_for(host_id).blocking_hooks:
+        if decision.outcome is Outcome.BLOCK and profile_for(host_id).writes_refusal(hook.event):
             payload["decision"] = "block"
             payload["reason"] = decision.reason
             return payload

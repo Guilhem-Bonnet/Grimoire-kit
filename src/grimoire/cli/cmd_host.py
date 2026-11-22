@@ -52,7 +52,7 @@ from grimoire.hosts.runtime import (
     payload_event_name,
     run_hook,
 )
-from grimoire.hosts.surface import Enforcement, HookEvent
+from grimoire.hosts.surface import Enforcement
 
 host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes et hooks par hôte.")
 console = Console()
@@ -102,7 +102,10 @@ class _HostStatus:
     #: Cause de chaque conflit : ``edited`` (fichier du kit modifié depuis son émission),
     #: ``foreign`` (jamais écrit par le kit) ou ``unreadable``.
     conflict_causes: dict[str, str] = field(default_factory=dict)
+    #: Hooks bloquants du projet que l'hôte refuse réellement (capture à l'appui).
     blocking_hooks: list[str] = field(default_factory=list)
+    #: Hooks bloquants du projet que l'hôte déclenche sans refus prouvé (#1281) : écrits, consultatifs.
+    advisory_blocking_hooks: list[str] = field(default_factory=list)
     unsupported_events: list[str] = field(default_factory=list)
     degradations: list[dict[str, str]] = field(default_factory=list)
     capability_gaps: list[str] = field(default_factory=list)
@@ -129,6 +132,7 @@ class _HostStatus:
             "conflicts": self.conflicts,
             "conflict_causes": self.conflict_causes,
             "blocking_hooks": self.blocking_hooks,
+            "advisory_blocking_hooks": self.advisory_blocking_hooks,
             "unsupported_events": self.unsupported_events,
             "degradations": self.degradations,
             "capability_gaps": self.capability_gaps,
@@ -224,11 +228,11 @@ def host_list(ctx: typer.Context) -> None:
         return "[green]oui[/green]" if value else "[yellow]non[/yellow]"
 
     def mark_blocking(profile: HostProfile) -> str:
-        # Un hôte qui documente des refus sans qu'aucun ne soit tenu pour bloquant
-        # (``blocking_events`` vide, Codex) est consultatif, pas « oui ».
-        if profile.blocking_hooks and not any(profile.blocks(event) for event in HookEvent):
+        # Un hôte qui documente des refus sans qu'aucune capture ne les prouve
+        # (Codex, Cursor, Gemini, Copilot) est consultatif, pas « oui » (#1281).
+        if not profile.enforces_blocking and profile.documented_blocking_events:
             return "[yellow]consultatif[/yellow]"
-        return mark(profile.blocking_hooks)
+        return mark(profile.enforces_blocking)
 
     for profile in profiles:
         name = profile.display_name + (" [cyan](détecté)[/cyan]" if profile.host_id == detected else "")
@@ -371,6 +375,7 @@ def host_status(
         plan = emitter.plan(surface, project_root)
         pending = apply_plan(plan, project_root, dry_run=True)
         host_version, brake_proof = _brake_status(host_id, probe=probe, project_root=project_root)
+        blocking = [h for h in surface.hooks if h.enforcement is Enforcement.BLOCKING]
         payload.append(
             _HostStatus(
                 host=host_id.value,
@@ -379,7 +384,10 @@ def host_status(
                 pending=[*pending.written, *pending.removed],
                 conflicts=list(pending.skipped),
                 conflict_causes=dict(pending.conflicts),
-                blocking_hooks=[h.event.value for h in surface.hooks if h.enforcement is Enforcement.BLOCKING],
+                blocking_hooks=[h.event.value for h in blocking if profile.blocks(h.event)],
+                advisory_blocking_hooks=[
+                    h.event.value for h in blocking if profile.supports_event(h.event) and not profile.blocks(h.event)
+                ],
                 unsupported_events=[h.event.value for h in surface.hooks if not profile.supports_event(h.event)],
                 degradations=[d.to_dict() for d in plan.degradations],
                 capability_gaps=[g.surface for g in gaps_for(profile)],
@@ -445,6 +453,11 @@ def host_status(
             console.print(f"  [yellow]hooks non exécutés sans approbation[/yellow] — {item.hook_approval} (non vérifiable par le kit)")
         if item.blocking_hooks:
             console.print(f"  hooks bloquants : {', '.join(item.blocking_hooks)}")
+        if item.advisory_blocking_hooks:
+            console.print(
+                "  [yellow]hooks consultatifs[/yellow] (refus non prouvé sur cet hôte) : "
+                + ", ".join(item.advisory_blocking_hooks)
+            )
         if item.unsupported_events:
             console.print(f"  [yellow]non supporté par cet hôte[/yellow] : {', '.join(item.unsupported_events)}")
         for degradation in item.degradations:
