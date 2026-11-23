@@ -38,7 +38,7 @@ from grimoire.hosts.hook_launcher import ENV_OVERRIDE
 from grimoire.hosts.matrix import ADVISORY, ENFORCED, build_matrix
 from grimoire.hosts.runtime import render
 
-pytestmark = pytest.mark.covers("host:gemini", "host:opencode", level="integration")
+pytestmark = pytest.mark.covers("host:gemini-cli", "host:opencode", level="integration")
 
 AGENT_DIR = Path("_grimoire/_config/custom/agents")
 POLICY = Path("_grimoire/standard/orchestration-policy.yaml")
