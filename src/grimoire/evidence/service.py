@@ -253,12 +253,16 @@ class EvidenceService:
             line = line.strip()
             if not line:
                 continue
-            raw: object = None
             try:
-                raw = json.loads(line)
+                raw: object = json.loads(line)
+            except json.JSONDecodeError:
+                return True
+            if not isinstance(raw, dict):
+                return True
+            try:
                 VerificationVerdict.from_dict(raw)
-            except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError):
-                if not isinstance(raw, dict) or raw.get("task_id") == task_id:
+            except (KeyError, ValueError, TypeError, AttributeError):
+                if raw.get("task_id") == task_id:
                     return True
         return False
 
