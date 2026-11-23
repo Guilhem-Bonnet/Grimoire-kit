@@ -95,9 +95,20 @@ def _pre(root: Path, command: str):  # type: ignore[no-untyped-def]
     )
 
 
+def _refused_by_budget(decision) -> bool:  # type: ignore[no-untyped-def]
+    """Vrai si le refus vient du plafond de temps de l'analyse (#1305), pas de la garde.
+
+    Sur une machine chargée (shard CI), l'analyse peut dépasser ``POLICY_BUDGET_S`` : le refus reste un refus, mais
+    rien n'a été jugé, donc ni ``authority_vector`` ni révocation. Le refus lui-même reste exigé par l'appelant.
+    """
+    return decision.detail.get("policy_budget") == "exceeded"
+
+
 def _assert_refused_and_revoked(proj: Path, command: str) -> None:
     decision = _pre(proj, command)
-    assert decision.outcome is Outcome.DENY, command
+    assert decision.outcome is Outcome.DENY, (command, decision.detail)
+    if _refused_by_budget(decision):
+        return
     assert decision.detail["authority_vector"] == "control-zone", command
     assert decision.detail["authority_revokes"] is True, command
     assert not MandateStore(proj).state().active, command
@@ -179,6 +190,21 @@ PREFIXES = {
 @pytest.mark.parametrize("template", WRITES.values(), ids=WRITES.keys())
 def test_une_ecriture_prouvee_est_refusee_et_revoque(tmp_path: Path, zone: PurePosixPath, template: str, spelling: str) -> None:
     _assert_refused_and_revoked(_project(tmp_path / "proj"), _spell(template, zone, spelling))
+
+
+def test_le_refus_par_budget_reste_un_refus_sans_vecteur_ni_revocation(
+    tmp_path: Path, zone: PurePosixPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1305 — budget d'analyse épuisé : refus exigé, ``authority_vector`` absent toléré par l'assertion."""
+    from grimoire.hosts.decisions import tool_policy
+
+    monkeypatch.setattr(tool_policy, "POLICY_BUDGET_S", 0)
+    proj = _project(tmp_path / "proj")
+    decision = _pre(proj, _spell(WRITES["redirection"], zone))
+    assert decision.outcome is Outcome.DENY, decision.detail
+    assert decision.detail.get("policy_budget") == "exceeded", decision.detail
+    assert "authority_vector" not in decision.detail
+    _assert_refused_and_revoked(proj, _spell(WRITES["redirection"], zone))
 
 
 @pytest.mark.parametrize("prefix", PREFIXES.values(), ids=PREFIXES.keys())

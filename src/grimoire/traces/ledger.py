@@ -780,7 +780,7 @@ class TraceLedger:
         records: list[TraceRecord] = []
         if not self._traces_path.exists():
             return records
-        for line in self._traces_path.read_text(encoding="utf-8").splitlines():
+        for line in self._traces_path.read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue
@@ -891,7 +891,7 @@ class TraceLedger:
         ids: set[str] = set()
         if not self._traces_path.exists():
             return ids
-        for line in self._traces_path.read_text(encoding="utf-8").splitlines():
+        for line in self._traces_path.read_text(encoding="utf-8").split("\n"):
             with contextlib.suppress(json.JSONDecodeError, AttributeError):
                 found = json.loads(line).get("id")
                 if isinstance(found, str):
