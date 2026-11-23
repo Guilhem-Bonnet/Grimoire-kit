@@ -657,7 +657,9 @@ def _probe_capabilities(ctx: typer.Context, host: str, project_root: Path, *, ru
     targets = capability_probe.select_targets(host)
     if not targets:
         known = ", ".join(t.key for t in capability_probe.TARGETS)
-        console.print(f"[red]Hôte non sondable : {escape(host)}[/red] (connus : {known})")
+        reason = capability_probe.unprobeable_reason(host)
+        detail = f" — {escape(reason)}" if reason else ""
+        console.print(f"[red]Hôte non sondable : {escape(host)}[/red]{detail} (sondables : {known})")
         raise typer.Exit(1)
     detections = capability_probe.detect(targets, project_root)
     captures: list[dict[str, Any]] = []

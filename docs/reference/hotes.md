@@ -345,6 +345,10 @@ Dégradations déclarées :
 
 Zed est un client ACP, pas un agent : il n'a pas de commande `grimoire chat`.
 
+`grimoire host probe --capabilities` déclare Kimi Code et Zed non sondables, avec la
+raison : aucun des deux n'a de hook de projet où poser le hook témoin, et la sonde
+n'écrit jamais la configuration de l'utilisateur.
+
 ## Ce que le kit a observé (contrats réels)
 
 Le tableau ci-dessus dit ce que le kit sait **écrire** pour un hôte. Il ne dit pas

@@ -29,6 +29,7 @@ from typer.testing import CliRunner
 from grimoire.bridges.schemas import HostId
 from grimoire.cli.app import app
 from grimoire.core.agentic_standard import setup_standard_profile
+from grimoire.hosts import capability_probe
 from grimoire.hosts.capabilities import (
     GovernanceFunction,
     ParityLevel,
@@ -475,3 +476,16 @@ def test_a_host_dir_linked_inside_the_project_is_kept(governed: Path) -> None:
     plan = _plan(governed, HostId.ZED)
     assert ".zed/settings.json" in plan.labels()
     assert not any(d.surface == "symlink" for d in plan.degradations)
+
+
+@pytest.mark.parametrize(("host", "words"), [("kimi", "Kimi Code"), ("kimi-code", "Kimi Code"), ("zed", "Zed")])
+def test_capability_probe_declares_kimi_and_zed_unprobeable(tmp_path: Path, host: str, words: str) -> None:
+    """La sonde de L7 n'a aucun hook de projet où poser son témoin : elle le dit, elle ne lance rien."""
+    assert capability_probe.select_targets(host) == ()
+    assert words in capability_probe.unprobeable_reason(host)
+    assert capability_probe.unprobeable_reason("claude") == ""
+    result = CliRunner().invoke(
+        app, ["host", "probe", "--capabilities", "--host", host, "--project-root", str(tmp_path)]
+    )
+    assert result.exit_code == 1
+    assert "non sondable" in result.output and words in result.output
