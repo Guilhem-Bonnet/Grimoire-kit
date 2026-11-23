@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,7 @@ from grimoire.hosts.decisions._shared import HookInput
 from grimoire.hosts.decisions.enrolment import parked_task_of_session, stop_scope
 from grimoire.hosts.decisions.evidence_gate import decide_evidence_gate
 from grimoire.hosts.decisions.pause_brake import _task_status
-from grimoire.hosts.decisions.self_view import self_view_context
+from grimoire.hosts.decisions.self_view import self_view_context, takeover_notices
 from grimoire.hosts.decisions.steering import steering_context
 from grimoire.hosts.events import HookEvent
 from grimoire.missions.decisions import decisions_summary
@@ -272,6 +273,21 @@ def test_self_view(home: Path, tmp_path: Path, state: str) -> None:
     assert (line == "") is (state in BAD)
     if state not in BAD:
         assert tid in line
+
+
+@pytest.mark.parametrize("state", [*GOOD, "origine", *BAD])
+def test_takeover_notices(home: Path, tmp_path: Path, state: str) -> None:
+    tid = _task(home)
+    root = home if state == "origine" else _worktree(home, tid, copy=state == "copie_figee")
+    _held_from(root, tid)
+    claim_host = TaskService(home).require(tid).claim.session_host  # type: ignore[union-attr]
+    TaskService(home).ledger.reap(fenced_hosts=frozenset({claim_host}), now=datetime.now(UTC) + timedelta(hours=3))
+    _break(root, state, tmp_path)
+    notice = takeover_notices(root, SESSION)
+    if state in BAD:
+        assert notice == ""  # invérifiable : l'annonce se tait, le frein du bail reste la garde
+    else:
+        assert f"Ta tâche {tid} a été reprise" in notice  # lue au ledger d'origine, pas à la copie figée
 
 
 @pytest.mark.parametrize("state", [*GOOD, "origine", *BAD])
