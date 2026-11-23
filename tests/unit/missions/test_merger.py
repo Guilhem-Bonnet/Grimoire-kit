@@ -40,7 +40,7 @@ from grimoire.missions.orchestrator_session import kit_written
 from grimoire.missions.precedents import question_class
 from grimoire.missions.review_receipt import write_receipt
 from grimoire.missions.reviewer import REVIEW_LAUNCHED_EVENT
-from grimoire.missions.schemas import TaskState
+from grimoire.missions.schemas import TaskCheck, TaskState
 from grimoire.missions.service import TaskService
 from grimoire.missions.task_worktree import MERGED_EVENT
 
@@ -129,12 +129,14 @@ def reviewer_sid(host: FakeHost) -> str:
 
 
 def launch_and_work(projet: Path, host: FakeHost, *, labels: tuple[str, ...] = (), edit: tuple[str, str] = ("src/app/route.py", "404\n"),
-                    changelog: str = "") -> tuple[str, Path]:
+                    changelog: str = "",
+                    checks: tuple[str, ...] = ()) -> tuple[str, Path]:
     """Une tâche lancée par le tick, dont le worker a commité, poussé et ouvert la PR, remise en revue."""
     service = TaskService(projet)
     mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(title="Lot 4", origin="test")
     task = service.ledger.create_task(mission.id, f"tâche {edit[0]}", acceptance=CRITERIA, owner="amelia",
-                                      extra={"labels": list(labels)} if labels else None)
+                                      extra={"labels": list(labels)} if labels else None,
+                                      checks=tuple(TaskCheck(cmd=c) for c in checks))
     service.ledger.transition_task(task.id, TaskState.READY)
     if host.real is None:  # GitHub : la remote d'origine, quoi que le worker écrive ensuite dans la configuration locale
         host.real = Path(git(projet, "remote", "get-url", "origin"))
@@ -248,6 +250,41 @@ def red_after_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: 
     ready_judged(projet, host, tid, wt)
     host.checks[f"task/{tid}"] = [{"name": "tests", "bucket": "fail"}]
     return tick(projet, host)
+
+
+# ── #1257 : --check sans verdict verify vert ───────────────────────────────────
+
+
+def _ready_with_pack(projet: Path, host: FakeHost, tid: str, wt: Path, *, verified: bool) -> None:
+    tick(projet, host)  # lance le relecteur
+    item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "pytest -> exit 0", uri="check:pytest", summary="pytest -> exit 0")
+    service = EvidenceService(wt / EVIDENCE)
+    pack = service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
+    if verified:
+        service.verify(pack)
+    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
+
+
+def test_une_tache_a_check_sans_verdict_verify_n_est_pas_fusionnee(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    _ready_with_pack(projet, host, tid, wt, verified=False)
+    tick(projet, host)  # CI vue une première fois
+    report = tick(projet, host)
+    assert not host.of("gh", "pr", "merge"), report.merges
+    [escalated] = events(projet, tid, MERGE_ESCALATED_EVENT)
+    assert "--check" in escalated.payload["why"] and "verdict" in escalated.payload["why"]
+    assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_une_tache_a_check_avec_verdict_vert_sur_son_pack_fusionne(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    _ready_with_pack(projet, host, tid, wt, verified=True)
+    tick(projet, host)
+    tick(projet, host)
+    assert host.of("gh", "pr", "merge")
+    assert not events(projet, tid, MERGE_ESCALATED_EVENT)
 
 
 # ── Chemin vert, sous mandat ───────────────────────────────────────────────────

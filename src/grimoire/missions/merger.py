@@ -1006,6 +1006,28 @@ class MergeStage(DualReviewMixin):
         kept = sorted(p for p in pr.files if any(fnmatch.fnmatchcase(p.casefold(), pat) for pat in patterns))
         return self._reserved_reason(kept)
 
+    def _unverified(self, task: MissionTask, wt: TaskWorktree, receipt: ReviewReceipt) -> str:
+        """#1257 : une tâche qui déclare ``--check`` ne fusionne pas sans pack et verdict ``passed`` mécaniques sur la tête relue.
+
+        Le pack lu est celui du worktree ; le reçu READY (scellé sur la tête) en porte l'empreinte : un pack refait ou
+        absent après la relecture ne vaut pas. ``""`` si la tâche ne déclare aucune commande ou si la preuve tient.
+        """
+        from grimoire.missions.review_receipt import evidence_pack_digest
+
+        if not task.checks:
+            return ""
+        service = EvidenceService(wt.path / _EVIDENCE)
+        packs = service.list_packs(task.id)
+        if not packs:
+            return f"{task.id} déclare des commandes (--check) mais n'a aucun pack de preuve : `grimoire task verify {task.id}` d'abord"
+        verdict = service.get_latest_verdict(task.id)
+        if verdict is None or verdict.verdict.value != "passed" or verdict.evidence_pack_id != packs[-1].id:
+            state = verdict.verdict.value if verdict is not None else "absent"
+            return f"{task.id} déclare des commandes (--check) sans verdict verify vert sur son dernier pack (verdict : {state})"
+        if receipt.evidence_pack_sha256 != evidence_pack_digest(wt.path, task.id):
+            return f"le pack de preuve de {task.id} n'est pas celui que la relecture READY a scellé sur la tête"
+        return ""
+
     @staticmethod
     def _reserved_reason(kept: list[str]) -> str:
         if kept:
@@ -1035,6 +1057,8 @@ class MergeStage(DualReviewMixin):
         kept = self._kept_to_human(task, pr)
         if kept:
             return self._ask_human(task, wt, "merge", judged.id, kept, pr.number)
+        if unverified := self._unverified(task, wt, receipt):
+            return self._ask_human(task, wt, "merge", judged.id, unverified, pr.number)
         provenance = {"kind": "receipt", "ref": f"{tid}:review={judged.payload.get('review')}:head={head[:12]}"}
         try:
             with acting_as_orchestrator():
