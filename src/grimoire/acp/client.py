@@ -145,14 +145,20 @@ class AcpClient:
             t = threading.Thread(target=target, name=name, daemon=True)
             t.start()
             self._threads.append(t)
-        self._call(
-            "initialize",
-            {
-                "protocolVersion": PROTOCOL_VERSION,
-                "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
-                "clientInfo": {"name": "grimoire", "title": "Grimoire Kit", "version": _client_version()},
-            },
-        )
+        try:
+            self._call(
+                "initialize",
+                {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
+                    "clientInfo": {"name": "grimoire", "title": "Grimoire Kit", "version": _client_version()},
+                },
+            )
+        except BaseException:
+            # `with` n'appelle pas __exit__ si __enter__ échoue : sans cela, stdin serait vidé
+            # au ramasse-miettes après la sortie de l'agent (BrokenPipeError ignorée, #1313).
+            self.close()
+            raise
 
     def close(self) -> None:
         """Arrêt propre : ferme stdin, laisse l'agent finir, puis termine, puis tue."""
@@ -164,7 +170,7 @@ class AcpClient:
         try:
             if proc.stdin is not None:
                 proc.stdin.close()
-        except OSError:
+        except (BrokenPipeError, OSError, ValueError):
             pass
         try:
             proc.wait(timeout=3)
