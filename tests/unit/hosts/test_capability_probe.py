@@ -395,6 +395,14 @@ def test_cli_run_launches_one_session_per_installed_host(tmp_path: Path, monkeyp
     assert json.loads(json_result.output)["captures"][0]["host"] == "opencode"
 
 
+def test_cli_run_without_any_installed_host_launches_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cp, "detect", lambda targets, root: (cp.Detection(_target("codex"), "", ""),))
+    monkeypatch.setattr(cp, "run_probe", lambda *a, **k: pytest.fail("aucune session attendue"))
+    result = _cli("host", "probe", "--capabilities", "--run", "--host", "codex", "--project-root", str(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert "--promote" not in result.output and "absent" in result.output
+
+
 def test_cli_rejects_run_alone_and_unknown_hosts(tmp_path: Path) -> None:
     assert _cli("host", "probe", "--run", "--project-root", str(tmp_path)).exit_code == 2
     result = _cli("host", "probe", "--capabilities", "--host", "claude", "--project-root", str(tmp_path))
