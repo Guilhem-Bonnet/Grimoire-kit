@@ -1,0 +1,1 @@
+- fix(doctor): le contrôle `hook_timeout` lit `.claude/settings.json` puis `.claude/settings.local.json` (une même garde redéclarée en local prend le délai local ; une garde déclarée seulement en local est contrôlée) et signale invalide un délai booléen ou non numérique au lieu de lire `true` comme 1 s ; test de bout en bout sur `grimoire doctor -o json` (Refs #1277)
