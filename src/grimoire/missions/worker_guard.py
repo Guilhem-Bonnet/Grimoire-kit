@@ -39,10 +39,15 @@ __all__ = [
     "RunResult",
     "exact_run",
     "expected_plugin",
+    "home_refusal",
     "hook_witness_refusal",
     "integrity_refusal",
+    "kit_dirs",
     "minimal_env",
-    "opencode_config_home",
+    "opencode_home",
+    "prepare_opencode_home",
+    "probe_dir",
+    "probe_refusal",
 ]
 
 #: Suffixes d'un fichier qu'opencode peut charger comme plugin ou outil.
@@ -50,6 +55,8 @@ CODE_SUFFIXES = frozenset({".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx",
 #: Dossiers où opencode découvre du code (noms singuliers et pluriels, https://opencode.ai/docs/config/).
 _CODE_DIRS = ("plugin", "plugins", "tool", "tools")
 _CONFIG_FILES = ("opencode.json", "opencode.jsonc", "config.json")
+#: Dossiers d'agents, de modes et de commandes : un agent y change modèle et permissions sans passer par le plugin.
+_DEFINITION_DIRS = ("agent", "agents", "mode", "modes", "command", "commands")
 #: Fichiers d'installation de paquets qu'opencode lirait dans ``.opencode/`` : un réglage du gestionnaire est refusé.
 _INSTALLER_FILES = ("bunfig.toml", ".npmrc", ".yarnrc", ".yarnrc.yml")
 #: Le seul paquet que le manifeste ``.opencode/package.json`` posé par opencode lui-même déclare.
@@ -74,13 +81,7 @@ ENV_ALLOWED = (
     "SSH_AUTH_SOCK",
     "VIRTUAL_ENV",
     "XDG_RUNTIME_DIR",
-    "XDG_DATA_HOME",
-    "XDG_STATE_HOME",
-    "XDG_CACHE_HOME",
     "SYSTEMROOT",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
 )
 #: La charge témoin du hook : une commande destructive que la politique du kit refuse dans tous les profils. Elle
 #: n'est jamais exécutée : seul le programme de garde la lit.
@@ -128,32 +129,82 @@ def exact_run(argv: Sequence[str], cwd: Path, env: Mapping[str, str], stdin: str
     return RunResult(done.returncode, done.stdout or "", done.stderr or "")
 
 
-def opencode_config_home(root: Path) -> Path:
-    """Le dossier de configuration utilisateur qu'opencode voit pour un worker (``XDG_CONFIG_HOME``) : celui du kit.
+def opencode_home(root: Path, *, source: Mapping[str, str] | None = None) -> Path:
+    """Le ``HOME`` qu'opencode voit pour un worker de *root* : un dossier du kit, hors de tout dépôt.
 
-    opencode lit sa configuration globale sous ``$XDG_CONFIG_HOME/opencode`` (vérifié par ``opencode debug paths``) :
-    un dossier du kit, vide de configuration, empêche une configuration utilisateur d'imposer un fournisseur ou un
-    plugin au worker.
+    opencode découvre des plugins sous ``$HOME/.opencode/`` et lit sa configuration, ses données (sessions,
+    authentifications) et son cache sous les dossiers XDG (vérifié sur 1.17.11 par ``opencode debug paths`` et par un
+    plugin témoin) : tous sont redirigés sous ce dossier, que le kit contrôle avant chaque commande. Il vit sous le
+    cache de l'utilisateur, une entrée par projet.
     """
-    return root / "_grimoire-output" / "control" / "opencode-config"
+    environ = os.environ if source is None else source
+    cache = Path(environ.get("XDG_CACHE_HOME") or Path(environ.get("HOME") or Path.home()) / ".cache")
+    digest = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:16]
+    return cache / "grimoire-kit" / "opencode" / digest
+
+
+def kit_dirs(home: Path) -> dict[str, str]:
+    """``HOME`` et les dossiers XDG d'opencode, tous sous *home*."""
+    return {
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "XDG_DATA_HOME": str(home / ".local" / "share"),
+        "XDG_STATE_HOME": str(home / ".local" / "state"),
+        "XDG_CACHE_HOME": str(home / ".cache"),
+    }
+
+
+def probe_dir(home: Path) -> Path:
+    """Le dossier où tournent les commandes opencode qui ne visent pas le worktree : un dépôt git vide du kit.
+
+    Sa racine git borne la découverte des dossiers ``.opencode`` d'opencode, qui remonte jusqu'à la racine du dépôt
+    (vérifié sur 1.17.11 : un ``.opencode`` au-dessus d'une racine git n'est pas chargé).
+    """
+    return home / "work"
+
+
+def prepare_opencode_home(home: Path) -> str:
+    """Crée le ``HOME`` du kit et son dossier de sondes ; ``""`` ou la raison d'un refus.
+
+    Refusé si le dossier est dans un dépôt git : la découverte d'opencode remonterait jusqu'à la racine de ce dépôt.
+    """
+    for parent in (home, *home.parents):
+        if (parent / ".git").exists():
+            return "le dossier du kit pour opencode est dans un dépôt git"
+    work = probe_dir(home)
+    work.mkdir(parents=True, exist_ok=True)
+    if not (work / ".git").exists():
+        done = subprocess.run(  # git, arguments fixes : un dépôt vide qui borne la découverte d'opencode
+            ["git", "init", "-q", str(work)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if done.returncode != 0:
+            return "dossier de sondes opencode non initialisé"
+    return ""
 
 
 def minimal_env(extra: Mapping[str, str], *, source: Mapping[str, str] | None = None) -> dict[str, str]:
     """L'environnement d'une commande opencode : la liste fermée :data:`ENV_ALLOWED`, puis *extra*.
 
-    ``gh`` et ``git`` du worker gardent leur configuration réelle quand ``XDG_CONFIG_HOME`` est redirigé :
-    ``GH_CONFIG_DIR`` pointe sur le dossier ``gh`` d'origine, et ``GIT_CONFIG_GLOBAL`` sur la configuration git XDG
-    quand elle est la seule configuration globale.
+    Quand *extra* redirige ``HOME`` (:func:`kit_dirs`), ``gh`` et ``git`` du worker gardent leur configuration
+    réelle : ``GH_CONFIG_DIR`` pointe sur le dossier ``gh`` d'origine, ``GIT_CONFIG_GLOBAL`` sur ``~/.gitconfig``,
+    à défaut sur la configuration git XDG. ``SSH_AUTH_SOCK`` passe pour qu'un worker pousse sa branche vers une
+    remote SSH dont la clé est tenue par l'agent ; ``ssh`` lit ses clés dans le dossier personnel du compte, pas
+    dans ``HOME``.
     """
     environ = os.environ if source is None else source
     env = {k: environ[k] for k in ENV_ALLOWED if environ.get(k)}
-    if "XDG_CONFIG_HOME" in extra:
-        home = Path(environ.get("HOME") or Path.home())
-        real = Path(environ.get("XDG_CONFIG_HOME") or home / ".config")
-        env["GH_CONFIG_DIR"] = environ.get("GH_CONFIG_DIR") or str(real / "gh")
-        git_xdg = real / "git" / "config"
-        if git_xdg.is_file() and not (home / ".gitconfig").exists():
-            env["GIT_CONFIG_GLOBAL"] = str(git_xdg)
+    real_home = Path(environ.get("HOME") or Path.home())
+    if extra.get("HOME") and Path(extra["HOME"]) != real_home:
+        real_config = Path(environ.get("XDG_CONFIG_HOME") or real_home / ".config")
+        env["GH_CONFIG_DIR"] = environ.get("GH_CONFIG_DIR") or str(real_config / "gh")
+        for candidate in (real_home / ".gitconfig", real_config / "git" / "config"):
+            if candidate.is_file():
+                env["GIT_CONFIG_GLOBAL"] = str(candidate)
+                break
     env.update(extra)
     return env
 
@@ -237,10 +288,51 @@ def _config_dir_refusal(base: Path, allowed: Path | None, *, empty_config_ok: bo
         found = base / name
         if found.is_symlink() or (found.exists() and not (empty_config_ok and _schema_only(found))):
             return f"fichier de configuration opencode présent dans {base.name}/"
-    return _code_refusal(base, allowed) or _package_refusal(base)
+    return _code_refusal(base, allowed) or _definition_refusal(base) or _package_refusal(base)
 
 
-def integrity_refusal(cwd: Path, *, config_home: Path | None = None) -> str:
+def _definition_refusal(base: Path) -> str:
+    """Le premier dossier d'agents, de modes ou de commandes non vide sous *base*."""
+    for name in _DEFINITION_DIRS:
+        folder = base / name
+        if folder.is_symlink():
+            return f"{name}/ est un lien symbolique"
+        if folder.is_dir() and any(entry.is_file() or entry.is_symlink() for entry in folder.rglob("*")):
+            return f"définitions d'agents, de modes ou de commandes sous {name}/"
+    return ""
+
+
+def probe_refusal(work: Path) -> str:
+    """``""`` si le dossier de sondes du kit ne porte ni configuration ni dossier ``.opencode``."""
+    if work.is_symlink():
+        return "le dossier de sondes est un lien symbolique"
+    if any((work / name).exists() or (work / name).is_symlink() for name in (".opencode", *_CONFIG_FILES)):
+        return "configuration opencode présente dans le dossier de sondes"
+    return ""
+
+
+def home_refusal(home: Path) -> str:
+    """``""`` si le ``HOME`` du kit ne porte rien qu'opencode chargerait (plugins, agents, configuration, authentifications).
+
+    Seuls sont admis ce qu'opencode y écrit lui-même : un ``opencode.jsonc`` réduit à ``$schema``, son manifeste de
+    paquets, ses journaux, sa base de sessions et son cache.
+    """
+    if home.is_symlink():
+        return "le dossier du kit est un lien symbolique"
+    for name in ("opencode.json", "opencode.jsonc", ".opencode.json"):
+        if (home / name).exists() or (home / name).is_symlink():
+            return "fichier de configuration opencode à la racine du dossier du kit"
+    if refusal := _config_dir_refusal(home / ".opencode", None):
+        return f"dossier du kit : {refusal}"
+    if refusal := _config_dir_refusal(home / ".config" / "opencode", None, empty_config_ok=True):
+        return f"configuration du kit : {refusal}"
+    auth = home / ".local" / "share" / "opencode" / "auth.json"
+    if auth.exists() or auth.is_symlink():
+        return "authentifications opencode présentes dans le dossier du kit (la clé passe par l'environnement)"
+    return ""
+
+
+def integrity_refusal(cwd: Path, *, kit_home: Path | None = None) -> str:
     """``""`` si rien d'autre que le plugin de garde du kit ne peut être chargé par opencode dans *cwd* ; sinon le motif.
 
     Ne lance jamais opencode. Un plugin de garde absent ou modifié est réécrit depuis l'émetteur, puis revérifié.
@@ -267,10 +359,8 @@ def integrity_refusal(cwd: Path, *, config_home: Path | None = None) -> str:
         return "fichier de configuration opencode à la racine du worktree"
     if refusal := _config_dir_refusal(oc_dir, plugin):
         return refusal
-    if config_home is not None and (
-        refusal := _config_dir_refusal(config_home / "opencode", None, empty_config_ok=True)
-    ):
-        return f"configuration utilisateur du kit : {refusal}"
+    if kit_home is not None and (refusal := home_refusal(kit_home)):
+        return refusal
     return ""
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -159,12 +160,35 @@ class FakeOpencode(FakeHost):
         self.hook_decision = "deny"  # ce que le programme de garde répond à la charge témoin ; "" : introuvable
         self.extra_plugins: list[str] = []  # plugins en plus que ``debug config`` résout
         self.base_url = ""  # l'URL que ``debug config`` résout pour le fournisseur ; vide : celle de la config en ligne
+        self.resolved_extra: dict[str, Any] = {}  # clés en plus dans la configuration que ``debug config`` résout
+        self.discovered: list[Path] = []  # les plugins qu'opencode aurait chargés, d'une commande à l'autre
+
+    def _discover(self, cwd: Path, env: Mapping[str, str]) -> None:
+        """Ce qu'opencode 1.17.11 ferait en démarrant : charger les plugins de ``$HOME/.opencode``, du dossier de
+        configuration, et des ``.opencode`` de *cwd* jusqu'à la racine git. Un plugin témoin « s'exécute » ici :
+        il écrit le fichier que son marqueur nomme."""
+        roots = [Path(env["HOME"]) / ".opencode"] if env.get("HOME") else []
+        if env.get("XDG_CONFIG_HOME"):
+            roots.append(Path(env["XDG_CONFIG_HOME"]) / "opencode")
+        for folder in (cwd, *cwd.parents):
+            roots.append(folder / ".opencode")
+            if (folder / ".git").exists():
+                break
+        for root in roots:
+            for sub in ("plugin", "plugins"):
+                for found in sorted((root / sub).glob("*.js")) if (root / sub).is_dir() else []:
+                    self.discovered.append(found)
+                    marker = re.search(r"MARKER:(\S+)", found.read_text(encoding="utf-8"))
+                    if marker:
+                        Path(marker.group(1)).write_text("exécuté", encoding="utf-8")
 
     def runner(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], stdin: str) -> Any:
         """Le seul lanceur des commandes opencode et du programme de garde, environnement passé tel quel."""
         from grimoire.missions.worker_guard import RunResult
 
         self.runs.append((list(argv), cwd, dict(env), stdin))
+        if argv[0] == "opencode":
+            self._discover(cwd, env)
         if argv[0] == "grimoire-hook":
             if not self.hook_decision:
                 return RunResult(127, "", "binaire introuvable")
@@ -177,7 +201,8 @@ class FakeOpencode(FakeHost):
             for entry in inline.get("provider", {}).values():
                 if self.base_url:
                     entry.setdefault("options", {})["baseURL"] = self.base_url
-            return RunResult(0, json.dumps({"plugin": plugins + self.extra_plugins, **inline}))
+            resolved = {"plugin": plugins + self.extra_plugins, "agent": {}, "command": {}, "mode": {}, **inline}
+            return RunResult(0, json.dumps({**resolved, **self.resolved_extra}))
         result = self(argv, cwd, None)
         return RunResult(result.returncode, result.stdout, result.stderr)
 
@@ -205,6 +230,7 @@ class FakeOpencode(FakeHost):
 
     def spawn(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path) -> SpawnResult:
         self.spawned.append((list(argv), cwd, dict(env), log))
+        self._discover(cwd, env)
         if self.spawn_error:
             return SpawnResult(0, self.spawn_error)
         pid = 7000 + len(self.spawned)
@@ -643,19 +669,67 @@ def test_liens_symboliques_refuses(tmp_path: Path, fake: FakeOpencode, plugin_re
     assert "lien symbolique" in integrity_refusal(wt4)
 
 
-def test_configuration_utilisateur_du_kit(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+def test_home_du_kit_controle(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
     from grimoire.missions.worker_guard import integrity_refusal
 
-    home = tmp_path / "cfg"
-    (home / "opencode").mkdir(parents=True)
-    (home / "opencode" / "opencode.jsonc").write_text('{"$schema": "https://opencode.ai/config.json"}')
-    assert integrity_refusal(tmp_path, config_home=home) == ""  # ce qu'opencode y écrit lui-même
-    (home / "opencode" / "opencode.jsonc").write_text('{"provider": {"deepseek": {}}}')
-    assert "configuration utilisateur du kit" in integrity_refusal(tmp_path, config_home=home)
-    (home / "opencode" / "opencode.jsonc").unlink()
-    (home / "opencode" / "plugin").mkdir()
-    (home / "opencode" / "plugin" / "x.js").write_text("export {}\n")
-    assert "configuration utilisateur du kit" in integrity_refusal(tmp_path, config_home=home)
+    home = tmp_path / "kit"
+    cfg = home / ".config" / "opencode"
+    cfg.mkdir(parents=True)
+    (cfg / "opencode.jsonc").write_text('{"$schema": "https://opencode.ai/config.json"}')
+    assert integrity_refusal(tmp_path, kit_home=home) == ""  # ce qu'opencode y écrit lui-même
+    (cfg / "opencode.jsonc").write_text('{"provider": {"deepseek": {}}}')
+    assert "configuration du kit" in integrity_refusal(tmp_path, kit_home=home)
+    (cfg / "opencode.jsonc").write_text("{}")
+    (cfg / "agents").mkdir()
+    (cfg / "agents" / "build.md").write_text("---\npermission:\n  bash: allow\n---\n")
+    assert "définitions d'agents" in integrity_refusal(tmp_path, kit_home=home)
+
+
+@pytest.mark.parametrize(
+    "relpath",
+    [
+        ".opencode/plugin/w.js",
+        ".opencode/agent/build.md",
+        ".opencode/commands/x.md",
+        "opencode.json",
+        ".local/share/opencode/auth.json",
+    ],
+)
+def test_home_du_kit_refuse_ce_qu_opencode_chargerait(
+    tmp_path: Path, fake: FakeOpencode, plugin_ready: None, relpath: str
+) -> None:
+    home = tmp_path / "kit"
+    (home / relpath).parent.mkdir(parents=True, exist_ok=True)
+    (home / relpath).write_text("{}", encoding="utf-8")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    assert fake.host().guard_refusal(wt, ROUTE, kit_home=home)
+    assert fake.runs == []
+
+
+@pytest.mark.parametrize(
+    "relpath",
+    [
+        ".opencode/agent/build.md",
+        ".opencode/agents/sous/x.md",
+        ".opencode/mode/m.md",
+        ".opencode/modes/m.md",
+        ".opencode/command/c.md",
+        ".opencode/commands/c.md",
+    ],
+)
+def test_definitions_d_agents_du_worktree_refusees(
+    tmp_path: Path, fake: FakeOpencode, plugin_ready: None, relpath: str
+) -> None:
+    (tmp_path / relpath).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / relpath).write_text("---\nmodel: autre/modele\npermission:\n  bash: allow\n---\n")
+    assert "définitions d'agents" in fake.host().guard_refusal(tmp_path, ROUTE)
+    assert fake.runs == []
+
+
+def test_debug_config_sans_agents_ni_commandes(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+    fake.resolved_extra = {"agent": {"build": {"permission": {"bash": "allow"}}}}
+    assert "agents, des modes ou des commandes" in fake.host().guard_refusal(tmp_path, ROUTE)
 
 
 def test_sans_plugin_attendu_rien_ne_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -775,7 +849,7 @@ def test_environnement_minimal_sans_jeton_ni_reglage_de_decouverte(
         monkeypatch.setenv(name, value)
     home = tmp_path / "cfg"
     plan = OpencodeWorkerHost().plan(
-        SessionSpec(name="n", prompt="p", permission_mode="default", opencode=ROUTE, config_home=home)
+        SessionSpec(name="n", prompt="p", permission_mode="default", opencode=ROUTE, kit_home=home)
     )
     assert isinstance(plan, LaunchPlan)
     env = plan.environ()
@@ -791,19 +865,24 @@ def test_environnement_minimal_sans_jeton_ni_reglage_de_decouverte(
     }
     assert not leaked & set(env)
     assert "fuite" not in json.dumps(env)
-    assert env["XDG_CONFIG_HOME"] == str(home) and env["GH_CONFIG_DIR"].endswith("gh")
+    assert env["HOME"] == str(home) and env["XDG_CONFIG_HOME"] == str(home / ".config")
+    assert env["XDG_DATA_HOME"] == str(home / ".local" / "share") and env["GH_CONFIG_DIR"].endswith("gh")
     assert env["DEEPSEEK_API_KEY"] == SECRET and env["PATH"] == os.environ["PATH"]
 
 
-def test_git_garde_sa_configuration_xdg(tmp_path: Path) -> None:
-    from grimoire.missions.worker_guard import minimal_env
+def test_git_garde_sa_configuration_reelle(tmp_path: Path) -> None:
+    from grimoire.missions.worker_guard import kit_dirs, minimal_env
 
     home = tmp_path / "h"
     (home / ".config" / "git").mkdir(parents=True)
     (home / ".config" / "git" / "config").write_text("[user]\n")
-    env = minimal_env({"XDG_CONFIG_HOME": "/kit"}, source={"HOME": str(home), "PATH": "/bin"})
+    env = minimal_env(kit_dirs(tmp_path / "kit"), source={"HOME": str(home), "PATH": "/bin"})
     assert env["GIT_CONFIG_GLOBAL"] == str(home / ".config" / "git" / "config")
-    assert env["GH_CONFIG_DIR"] == str(home / ".config" / "gh") and env["XDG_CONFIG_HOME"] == "/kit"
+    assert env["GH_CONFIG_DIR"] == str(home / ".config" / "gh") and env["HOME"] == str(tmp_path / "kit")
+    (home / ".gitconfig").write_text("[user]\n")
+    assert minimal_env(kit_dirs(tmp_path / "kit"), source={"HOME": str(home)})["GIT_CONFIG_GLOBAL"] == str(
+        home / ".gitconfig"
+    )
     assert "GH_CONFIG_DIR" not in minimal_env({}, source={"HOME": str(home)})
 
 
@@ -843,21 +922,48 @@ def test_prepare_le_worktree_refuse_un_ajout(tmp_path: Path, plugin_ready: None)
 
 
 def test_identite_par_titre_et_dossier(tmp_path: Path, fake: FakeOpencode) -> None:
+    from grimoire.missions.worker_guard import RunResult, prepare_opencode_home, probe_dir
+
     host = fake.host()
+    kit = tmp_path / "kit"
+    assert prepare_opencode_home(kit) == ""
     fake.sessions = [
         {"id": "ses_a", "title": "grimoire-T", "directory": str(tmp_path)},
         {"id": "ses_b", "title": "grimoire-T", "directory": "/ailleurs"},
         "pas un objet",
     ]
-    assert host.resolve(fake, tmp_path, "7001", "grimoire-T") == "ses_a"
+    assert host.resolve(fake, tmp_path, "7001", "grimoire-T", kit_home=kit) == "ses_a"
+    assert all(c == probe_dir(kit) for a, c, _e, _s in fake.runs)  # jamais dans le worktree
+    assert host.resolve(fake, tmp_path, "7001", "grimoire-T") == ""  # sans HOME du kit, rien ne tourne
     fake.sessions.append({"id": "ses_c", "title": "grimoire-T", "directory": str(tmp_path)})
-    assert host.resolve(fake, tmp_path, "7001", "grimoire-T") == ""  # deux candidates : on ne choisit pas
+    assert host.resolve(fake, tmp_path, "7001", "grimoire-T", kit_home=kit) == ""  # deux candidates
     fake.list_fails = True
-    assert host.resolve(fake, tmp_path, "7001", "grimoire-T") == ""
-    assert host.sessions(lambda *_a: ExecResult(0, "{}"), tmp_path) is None
-    assert host.sessions(lambda *_a: ExecResult(0, "x"), tmp_path) is None
+    assert host.resolve(fake, tmp_path, "7001", "grimoire-T", kit_home=kit) == ""
+    for stdout in ("{}", "x"):
+        other = OpencodeWorkerHost(runner=lambda *_a, out=stdout: RunResult(0, out))
+        assert other.sessions(fake, tmp_path, kit_home=kit) is None
     assert host.handle(" 7001\n") == "7001" and host.handle("rien") == ""
-    assert host.version(fake, tmp_path) == "1.17.11"
+    assert host.version(fake, tmp_path, kit_home=kit) == "1.17.11" and host.version(fake, tmp_path) == ""
+    (probe_dir(kit) / ".opencode").mkdir()
+    assert host.version(fake, tmp_path, kit_home=kit) == ""  # dossier de sondes altéré : rien ne tourne
+
+
+def test_dossier_du_kit_hors_de_tout_depot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions.worker_guard import opencode_home, prepare_opencode_home, probe_dir, probe_refusal
+
+    root = make_repo(tmp_path)
+    home = opencode_home(root)
+    assert root not in home.parents and home.parent.name == "opencode"
+    assert opencode_home(root, source={"XDG_CACHE_HOME": str(tmp_path / "c")}).is_relative_to(tmp_path / "c")
+    assert "dans un dépôt git" in prepare_opencode_home(root / "sous" / "kit")
+    assert prepare_opencode_home(tmp_path / "kit") == "" and (probe_dir(tmp_path / "kit") / ".git").exists()
+    assert prepare_opencode_home(tmp_path / "kit") == ""  # déjà prêt
+    (probe_dir(tmp_path / "kit") / "opencode.json").write_text("{}")
+    assert "dossier de sondes" in probe_refusal(probe_dir(tmp_path / "kit"))
+    monkeypatch.setattr(
+        "grimoire.missions.worker_guard.subprocess.run", lambda *_a, **_k: type("R", (), {"returncode": 1})()
+    )
+    assert "non initialisé" in prepare_opencode_home(tmp_path / "kit2")
 
 
 def test_etat_vivant_muet_fini(tmp_path: Path, fake: FakeOpencode) -> None:
@@ -943,7 +1049,7 @@ def test_le_worker_opencode_part_avec_sa_garde_et_sans_cle_tracee(
     assert calls.index(["opencode", "debug", "config"]) < calls.index(["opencode", "--version"])
     probes = [c for a, c, _e, _s in fake.runs if a[:2] in (["opencode", "--version"], ["opencode", "session"])]
     assert probes and all(c != wt.path for c in probes)
-    assert argv[-2] == "--" and env["XDG_CONFIG_HOME"].endswith("opencode-config")
+    assert argv[-2] == "--" and env["HOME"] != os.environ["HOME"] and "grimoire-kit" in env["HOME"]
     service = TaskService(projet)
     payload = launched_sessions(service)[tid]
     assert payload["host"] == OPENCODE_HOST and payload["session_id"] == "ses_7001" and payload["pid"] == "7001"
@@ -1247,3 +1353,91 @@ def test_sensible_maintenant_politique_illisible(projet: Path) -> None:
     assert _sensitive_now(TaskService(projet), tid) == ""
     (projet / POLICY).write_text("orchestrator: [", encoding="utf-8")
     assert "par prudence" in _sensitive_now(TaskService(projet), tid)
+
+
+# ── Plugin témoin : il ne s'exécute jamais ─────────────────────────────────────
+
+
+def _witness(where: Path, marker: Path) -> None:
+    """Un plugin qui, chargé, écrirait *marker* à l'import."""
+    where.parent.mkdir(parents=True, exist_ok=True)
+    where.write_text(
+        f"// MARKER:{marker}\n"
+        'import { writeFileSync } from "node:fs"\n'
+        f'writeFileSync({json.dumps(str(marker))}, "x")\n'
+        "export const W = async () => ({})\n",
+        encoding="utf-8",
+    )
+
+
+def test_un_plugin_temoin_du_home_reel_ne_s_execute_jamais(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, _home: Path, tmp_path: Path
+) -> None:
+    """B1 : ``$HOME/.opencode/plugin`` de l'utilisateur. Toute commande opencode du worker voit le ``HOME`` du kit."""
+    marker = tmp_path / "marqueur-home"
+    _witness(_home / ".opencode" / "plugin" / "w.js", marker)
+    tid = ready(projet)
+    assert launch(projet, fake, tid).status == "launched"
+    assert fake.runs and fake.spawned
+    assert not marker.exists()
+    assert all(not str(p).startswith(str(_home / ".opencode")) for p in fake.discovered)
+    homes = {e["HOME"] for a, _c, e, _s in fake.runs if a[0] == "opencode"} | {e["HOME"] for *_x, e, _l in fake.spawned}
+    assert len(homes) == 1 and "grimoire-kit" in homes.pop()
+
+
+def test_un_plugin_temoin_dans_le_home_du_kit_bloque_avant_toute_commande(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, tmp_path: Path
+) -> None:
+    from grimoire.missions.worker_guard import opencode_home
+
+    marker = tmp_path / "marqueur-kit"
+    _witness(opencode_home(projet) / ".opencode" / "plugin" / "w.js", marker)
+    tid = ready(projet)
+    outcome = launch(projet, fake, tid)
+    assert outcome.status == "skipped" and "dossier du kit" in outcome.detail
+    assert not marker.exists() and fake.opencode_calls() == [] and fake.spawned == []
+
+
+def test_un_plugin_temoin_du_worktree_bloque_le_lancement_et_la_reprise(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, tmp_path: Path
+) -> None:
+    tid = _launched(projet, fake)
+    service = TaskService(projet)
+    launch_payload = launched_sessions(service)[tid]
+    marker = tmp_path / "marqueur-worktree"
+    _witness(Path(launch_payload["cwd"]) / ".opencode" / "plugins" / "w.js", marker)
+    calls = len(fake.opencode_calls())
+    result = resume_worker(service, fake, "claude", tid, launch_payload, "m", opencode=fake.host())
+    assert result.returncode == 1 and "fichier de code" in result.stderr
+    assert not marker.exists() and len(fake.opencode_calls()) == calls
+
+
+def test_un_plugin_temoin_du_depot_principal_n_est_pas_decouvert(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, tmp_path: Path
+) -> None:
+    """Les sondes tournent dans un dépôt vide du kit, le worker dans son worktree : le dépôt principal reste hors champ."""
+    marker = tmp_path / "marqueur-principal"
+    _witness(projet / ".opencode" / "plugin" / "w.js", marker)
+    assert launch(projet, fake, ready(projet)).status == "launched"
+    assert not marker.exists()
+    assert all(not str(p).startswith(str(projet / ".opencode")) for p in fake.discovered)
+
+
+def test_le_plugin_emis_bloque_aussi_sur_ask(tmp_path: Path) -> None:
+    """La preuve compte « ask » comme un refus : le plugin émis lève une exception sur « deny » comme sur « ask »."""
+    from grimoire.hosts.emitters.opencode import _guard_plugin
+    from grimoire.hosts.surface import Enforcement, HookEvent, HookSpec
+
+    hook = HookSpec(event=HookEvent.PRE_TOOL_USE, decision="grimoire.guard", enforcement=Enforcement.BLOCKING)
+    content = _guard_plugin(hook).content
+    branch = content[content.index('if (decision === "deny" || decision === "ask")') :]
+    assert branch.splitlines()[2].strip().startswith("throw new Error(")
+
+
+def test_un_gitignore_present_mais_different_est_reecrit(tmp_path: Path, plugin_ready: None) -> None:
+    from grimoire.missions.worker_host import OPENCODE_IGNORED
+
+    (tmp_path / ".opencode").mkdir()
+    (tmp_path / ".opencode" / ".gitignore").write_text("*\n", encoding="utf-8")
+    assert prepare_opencode_worktree(tmp_path) == ""
+    assert (tmp_path / ".opencode" / ".gitignore").read_text(encoding="utf-8").splitlines() == list(OPENCODE_IGNORED)

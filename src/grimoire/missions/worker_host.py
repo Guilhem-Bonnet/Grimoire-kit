@@ -46,7 +46,7 @@ from urllib.parse import unquote, urlsplit
 if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
     from grimoire.missions.schemas import MissionTask
-    from grimoire.missions.worker_guard import Runner
+    from grimoire.missions.worker_guard import Runner, RunResult
     from grimoire.providers.registry import ProviderSpec
 
 __all__ = [
@@ -162,9 +162,7 @@ class SessionSpec:
     settings: Path | None = None  # Claude Code : les réglages du fournisseur compatible Anthropic (``--settings``)
     resume: str = ""
     opencode: OpencodeRoute | None = None
-    config_home: Path | None = (
-        None  # opencode : ``XDG_CONFIG_HOME`` du kit (:func:`.worker_guard.opencode_config_home`)
-    )
+    kit_home: Path | None = None  # opencode : ``HOME`` et dossiers XDG du kit (:func:`.worker_guard.opencode_home`)
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,7 +359,7 @@ class OpencodeWorkerHost:
         argv += ["--session", spec.resume] if spec.resume else ["--title", spec.name]
         # ``--`` : la consigne n'est jamais lue comme une option (``opencode run`` ajoute ``args["--"]`` au message).
         argv += ["--model", route.qualified_model, *OPENCODE_PERMISSION_ARGS[spec.permission_mode], "--", spec.prompt]
-        env = self.probe_env(route, spec.config_home)
+        env = self.probe_env(route, spec.kit_home)
         secret_keys: tuple[str, ...] = ()
         if route.key_var:
             from grimoire.providers.secrets import env_for_provider
@@ -374,15 +372,15 @@ class OpencodeWorkerHost:
         return LaunchPlan(tuple(argv), tuple(env.items()), secret_keys, detached=True)
 
     @staticmethod
-    def probe_env(route: OpencodeRoute | None, config_home: Path | None) -> dict[str, str]:
+    def probe_env(route: OpencodeRoute | None, kit_home: Path | None) -> dict[str, str]:
         """L'environnement minimal d'une commande opencode, sans la clé (:func:`.worker_guard.minimal_env`)."""
-        from grimoire.missions.worker_guard import minimal_env
+        from grimoire.missions.worker_guard import kit_dirs, minimal_env
 
         extra = {**session_env(), "OPENCODE_DISABLE_AUTOUPDATE": "1"}
         if route is not None:
             extra["OPENCODE_CONFIG_CONTENT"] = route.inline_config()
-        if config_home is not None:
-            extra["XDG_CONFIG_HOME"] = str(config_home)
+        if kit_home is not None:
+            extra.update(kit_dirs(kit_home))
         env = minimal_env(extra)
         for name in OPENCODE_FORBIDDEN_ENV:
             env.pop(name, None)
@@ -401,19 +399,32 @@ class OpencodeWorkerHost:
         """Le pid noté par :meth:`start` (``opencode run`` n'imprime pas d'identifiant à rendre la main)."""
         return output.strip() if output.strip().isdigit() else ""
 
-    def version(self, exec_: Exec, cwd: Path, *, config_home: Path | None = None) -> str:
-        """``opencode --version``, lancé hors du worktree (dans *config_home*) : aucun plugin du worktree n'est lu."""
+    def _probe(self, args: list[str], kit_home: Path | None) -> RunResult | None:
+        """Lance ``opencode <args>`` dans le dossier de sondes du kit, après le contrôle de ce dossier ; ``None`` sinon.
+
+        Jamais dans le worktree ni dans le dépôt principal : le dossier de sondes est un dépôt git vide du kit
+        (:func:`.worker_guard.probe_dir`), qui borne la découverte des plugins, avec le ``HOME`` du kit.
+        """
+        from grimoire.missions.worker_guard import home_refusal, probe_dir, probe_refusal
+
+        if kit_home is None or home_refusal(kit_home) or probe_refusal(probe_dir(kit_home)):
+            return None
+        return self.runner([self.binary, *args], probe_dir(kit_home), self.probe_env(None, kit_home), "")
+
+    def version(self, exec_: Exec, cwd: Path, *, kit_home: Path | None = None) -> str:
+        """``opencode --version``, lancé dans le dossier de sondes du kit (:meth:`_probe`)."""
         from grimoire.hosts.host_version import VERSION_PATTERN
 
-        del exec_
-        where = config_home or cwd
-        done = self.runner([self.binary, "--version"], where, self.probe_env(None, config_home), "")
+        del exec_, cwd
+        done = self._probe(["--version"], kit_home)
+        if done is None:
+            return ""
         found = VERSION_PATTERN.search(done.stdout or "") if done.returncode == 0 else None
         return found.group(0) if found else ""
 
     # -- garde -----------------------------------------------------------------
 
-    def guard_refusal(self, cwd: Path, route: OpencodeRoute, *, config_home: Path | None = None) -> str:
+    def guard_refusal(self, cwd: Path, route: OpencodeRoute, *, kit_home: Path | None = None) -> str:
         """``""`` si la garde du kit tient pour un worker opencode dans *cwd* ; sinon un motif fixe (jamais une sortie).
 
         Dans l'ordre, et rien d'opencode ne tourne avant que les deux premiers tiennent :
@@ -428,9 +439,9 @@ class OpencodeWorkerHost:
         from grimoire.hosts.emitters.opencode import PLUGIN_RELPATH
         from grimoire.missions.worker_guard import hook_witness_refusal, integrity_refusal
 
-        if refusal := integrity_refusal(cwd, config_home=config_home):
+        if refusal := integrity_refusal(cwd, kit_home=kit_home):
             return refusal
-        env = self.probe_env(route, config_home)
+        env = self.probe_env(route, kit_home)
         if refusal := hook_witness_refusal(cwd, env, self.runner):
             return refusal
         done = self.runner([self.binary, "debug", "config"], cwd, env, "")
@@ -453,18 +464,17 @@ class OpencodeWorkerHost:
         options = entry.get("options") if isinstance(entry, dict) else None
         if not isinstance(options, dict) or options.get("baseURL") != route.base_url:
             return "le fournisseur résolu par opencode ne pointe pas sur l'URL posée par le kit"
+        if any(resolved.get(key) not in (None, {}) for key in ("agent", "command", "mode")):
+            return "opencode résout des agents, des modes ou des commandes venus du projet ou de l'utilisateur"
         return ""
 
     # -- identité, fin, silence ------------------------------------------------
 
-    def sessions(self, exec_: Exec, cwd: Path, *, config_home: Path | None = None) -> list[dict[str, Any]] | None:
-        """``opencode session list`` (toutes les sessions), lancé hors du worktree, dans *config_home*."""
-        del exec_
-        where = config_home or cwd
-        done = self.runner(
-            [self.binary, "session", "list", "--format", "json"], where, self.probe_env(None, config_home), ""
-        )
-        if done.returncode != 0:
+    def sessions(self, exec_: Exec, cwd: Path, *, kit_home: Path | None = None) -> list[dict[str, Any]] | None:
+        """``opencode session list`` (toutes les sessions), lancé hors du worktree, dans *kit_home*."""
+        del exec_, cwd
+        done = self._probe(["session", "list", "--format", "json"], kit_home)
+        if done is None or done.returncode != 0:
             return None
         try:
             raw = json.loads(done.stdout)
@@ -472,7 +482,7 @@ class OpencodeWorkerHost:
             return None
         return [s for s in raw if isinstance(s, dict)] if isinstance(raw, list) else None
 
-    def resolve(self, exec_: Exec, cwd: Path, handle: str, name: str, *, config_home: Path | None = None) -> str:
+    def resolve(self, exec_: Exec, cwd: Path, handle: str, name: str, *, kit_home: Path | None = None) -> str:
         """L'identifiant de la session titrée *name* dans *cwd* (``opencode session list``) ; ``""`` sinon.
 
         Plusieurs candidates (un titre réutilisé dans le même dossier) : ``""``, on ne choisit pas.
@@ -481,7 +491,7 @@ class OpencodeWorkerHost:
         for attempt in range(max(self.resolve_attempts, 1)):
             if attempt:
                 time.sleep(self.resolve_pause_s)
-            listed = self.sessions(exec_, cwd, config_home=config_home)
+            listed = self.sessions(exec_, cwd, kit_home=kit_home)
             if listed is None:
                 continue
             found = {
@@ -667,9 +677,16 @@ def prepare_opencode_worktree(wt_path: Path) -> str:
 
     if refusal := integrity_refusal(wt_path):
         return refusal
+    from grimoire.core.fsio import atomic_write
+
     ignore = wt_path / ".opencode" / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("".join(f"{line}\n" for line in OPENCODE_IGNORED), encoding="utf-8")
+    expected = "".join(f"{line}\n" for line in OPENCODE_IGNORED)
+    try:
+        current = ignore.read_text(encoding="utf-8") if ignore.is_file() and not ignore.is_symlink() else None
+    except OSError:
+        current = None
+    if current != expected:  # absent, lien ou contenu différent : remplacé, pour qu'aucun ajout ne soit masqué
+        atomic_write(ignore, expected)
     return ""
 
 

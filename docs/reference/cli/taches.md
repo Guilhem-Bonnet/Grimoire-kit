@@ -702,22 +702,35 @@ dispatch:
   `{env:DEEPSEEK_API_KEY}` (substitution documentée, <https://opencode.ai/docs/config/>). La valeur ne passe que
   dans l'environnement du processus, jamais dans l'argv, le ledger ni le journal d'autorité. L'URL officielle du
   fournisseur hébergé est posée dans la même configuration en ligne : un autre `baseURL` ne reçoit pas la clé.
-- **Environnement** : minimal et explicite. Il contient une liste fermée de variables du système (chemins, langue,
-  dossiers XDG de données), la clé du fournisseur et la configuration en ligne. Aucun jeton, aucune autre clé,
-  aucune variable `OPENCODE_*` qui changerait la découverte de la configuration. `XDG_CONFIG_HOME` pointe sur
-  `_grimoire-output/control/opencode-config` : la configuration utilisateur d'opencode ne s'applique pas au
-  worker. `GH_CONFIG_DIR` garde le dossier `gh` d'origine.
+- **Environnement** : minimal et explicite. Il contient une liste fermée de variables du système (chemins,
+  langue), la clé du fournisseur et la configuration en ligne. Aucun jeton, aucune autre clé, aucune variable
+  `OPENCODE_*` qui changerait la découverte de la configuration.
+- **`HOME` du kit** : opencode charge des plugins sous `$HOME/.opencode/` et lit configuration, sessions,
+  authentifications et cache sous les dossiers XDG. Pour toute commande opencode du worker, `HOME` et
+  `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` pointent sous un dossier du kit, hors de
+  tout dépôt : `~/.cache/grimoire-kit/opencode/<empreinte du projet>/`.
+  - Avant chaque commande, ce dossier est contrôlé : aucun plugin, agent, mode, commande, configuration non vide
+    ni fichier d'authentification.
+  - Les commandes qui ne visent pas le worktree (`--version`, `session list`) tournent dans un dépôt git vide de
+    ce dossier. Sa racine borne la découverte d'opencode : le dépôt principal reste hors champ.
+  - Le worker reçoit `GH_CONFIG_DIR` (le dossier `gh` d'origine) et `GIT_CONFIG_GLOBAL` (`~/.gitconfig`, à défaut
+    la configuration git XDG), pour ouvrir sa PR avec la configuration réelle.
+  - Il reçoit aussi `SSH_AUTH_SOCK`, pour pousser vers une remote SSH dont la clé est tenue par l'agent. `ssh` lit
+    ses clés dans le dossier personnel du compte, pas dans `HOME`.
 - **Garde, avant toute commande opencode** : opencode exécute le code de ses plugins dès qu'il lit sa
   configuration. Rien d'opencode ne tourne donc avant ces vérifications, faites sans lui :
   - `.opencode/plugin/grimoire-guard.js` est identique à l'octet à la sortie de l'émetteur, sinon il est réécrit ;
   - aucun autre fichier de code sous `.opencode/plugin(s)/` ou `.opencode/tool(s)/` ;
   - aucun `opencode.json` ou `opencode.jsonc` à la racine ou dans `.opencode/` ;
+  - aucun agent, mode ou commande sous `.opencode/agent(s)/`, `mode(s)/`, `command(s)/` : un agent y changerait
+    modèle et permissions ;
   - aucun lien symbolique sur ces chemins ;
   - le manifeste de paquets ne déclare que le paquet de plugin d'opencode.
 
   Vient ensuite une preuve fonctionnelle : le programme de garde appelé par le plugin reçoit une charge témoin,
-  jamais exécutée, et doit la refuser. Enfin, `opencode debug config` doit résoudre ce plugin comme seul plugin,
-  avec l'URL de fournisseur posée par le kit. Sa sortie n'est jamais recopiée. Le contrôle est rejoué à chaque
+  jamais exécutée, et doit la refuser (le plugin émis bloque l'outil sur « deny » comme sur « ask »). Enfin,
+  `opencode debug config` doit résoudre ce plugin comme seul plugin, sans agent, mode ni commande, avec l'URL de
+  fournisseur posée par le kit. Sa sortie n'est jamais recopiée. Le contrôle est rejoué à chaque
   reprise. Sans cette preuve, rien ne part : la tâche revient en `ready` avec un motif fixe. Au troisième refus de
   suite, elle est garée chez l'humain. `--pure` n'est jamais passé. Le `.gitignore` de `.opencode/` ne nomme que
   le plugin émis et ce qu'opencode installe lui-même : tout ajout se voit dans `git status`.
@@ -727,7 +740,8 @@ dispatch:
 - **Restent sur Claude Code** : une tâche qui vise un chemin sensible (`sensitive_route: strong`, `opus`) et une
   tâche V2, qu'aucun verdict mécanique ne jugerait. Le lancement porte `host_fallback` avec la raison. Une tâche
   devenue sensible entre deux tours repart, à la reprise, en session Claude Code neuve au palier fort.
-- **Limite** : un dépôt qui suit un `opencode.json` à sa racine ne peut pas lancer de worker opencode.
+- **Limite** : un dépôt qui suit un `opencode.json` à sa racine, ou des agents ou commandes sous `.opencode/`, ne
+  peut pas lancer de worker opencode.
 - **Indépendance de la relecture** : le relecteur reste sur Claude Code. Son modèle doit différer de celui du
   worker (`models_distinct`). Un modèle DeepSeek ou Kimi est d'une autre famille que `sonnet` ou `opus`.
 - **Pas de repli silencieux** : sans route (fournisseur fermé, clé absente, politique de données, fournisseur local

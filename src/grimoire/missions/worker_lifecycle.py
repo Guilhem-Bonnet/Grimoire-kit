@@ -37,7 +37,7 @@ from grimoire.missions.launcher import (
     attest_session,
 )
 from grimoire.missions.schemas import TaskState
-from grimoire.missions.worker_guard import opencode_config_home
+from grimoire.missions.worker_guard import opencode_home, prepare_opencode_home
 from grimoire.missions.worker_host import OPENCODE_HOST, OpencodeWorkerHost, SessionSpec, opencode_route, worker_log
 
 if TYPE_CHECKING:
@@ -89,12 +89,11 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
     if route is None:
         return launcher._deferred(tid, f"worker opencode sans route : {why}")
     name = f"grimoire-{tid}"
-    config_home = opencode_config_home(service.home_root)
-    config_home.mkdir(parents=True, exist_ok=True)
+    kit_home = opencode_home(service.home_root)
     # La garde passe avant toute commande opencode : rien d'opencode ne tourne sur un worktree non vérifié.
-    if guard := host.guard_refusal(wt.path, route, config_home=config_home):
+    if guard := prepare_opencode_home(kit_home) or host.guard_refusal(wt.path, route, kit_home=kit_home):
         return _guard_refused(launcher, task, guard)
-    version = host.version(launcher._exec, wt.path, config_home=config_home)
+    version = host.version(launcher._exec, wt.path, kit_home=kit_home)
     spec = SessionSpec(
         name=name,
         prompt=WorkerLauncher._prompt(tid, version, attached=True),
@@ -102,7 +101,7 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
         permission_mode=role.permission_mode,
         lean=role.lean,
         opencode=route,
-        config_home=config_home,
+        kit_home=kit_home,
     )
     plan = host.plan(spec)
     if isinstance(plan, str):
@@ -112,7 +111,7 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
     if not started.pid:
         return launcher._failed(tid, f"opencode run n'a pas démarré : {started.error or 'aucun processus'}")
     pid = str(started.pid)
-    session_id = host.resolve(launcher._exec, wt.path, pid, name, config_home=config_home)
+    session_id = host.resolve(launcher._exec, wt.path, pid, name, kit_home=kit_home)
     if not session_id:
         return launcher._abandon(
             tid,
@@ -299,9 +298,8 @@ def resume_opencode_worker(
     )
     if route is None:
         return ExecResult(1, "", f"reprise opencode impossible : {why}")
-    config_home = opencode_config_home(service.home_root)
-    config_home.mkdir(parents=True, exist_ok=True)
-    if guard := host.guard_refusal(cwd, route, config_home=config_home):
+    kit_home = opencode_home(service.home_root)
+    if guard := prepare_opencode_home(kit_home) or host.guard_refusal(cwd, route, kit_home=kit_home):
         return ExecResult(1, "", f"reprise opencode refusée : {guard}")
     plan = host.plan(
         SessionSpec(
@@ -311,7 +309,7 @@ def resume_opencode_worker(
             permission_mode=permission_mode or str(launch.get("permission_mode") or ""),
             resume=str(launch.get("session_id") or ""),
             opencode=route,
-            config_home=config_home,
+            kit_home=kit_home,
         )
     )
     if isinstance(plan, str):
