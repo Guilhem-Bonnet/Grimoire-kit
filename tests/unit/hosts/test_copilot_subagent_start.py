@@ -35,18 +35,26 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPat
     home = str(tmp_path_factory.mktemp("home"))
     monkeypatch.setenv("HOME", home)
     monkeypatch.setenv("USERPROFILE", home)
-    for var in ("GRIMOIRE_TASK_ID", "GRIMOIRE_ACTOR", "GRIMOIRE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+    for var in (
+        "GRIMOIRE_TASK_ID",
+        "GRIMOIRE_ACTOR",
+        "GRIMOIRE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_PROJECT_DIR",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
 def _payload() -> dict[str, Any]:
-    return dict(json.loads(FIXTURE.read_text(encoding="utf-8"))["payloads"][0]["input"], sessionId=SESSION)
+    return dict(json.loads(FIXTURE.read_text(encoding="utf-8"))["payloads"][0]["input"], session_id=SESSION)
 
 
 def _claimed(root: Path) -> str:
     setup_standard_profile(root, profile_id="governed", task_id="bootstrap")
     registry = root / "_grimoire/standard/llm-provider-registry.yaml"
-    registry.write_text(registry.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1), encoding="utf-8")
+    registry.write_text(
+        registry.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1), encoding="utf-8"
+    )
     service = TaskService(root)
     tid = service.add("Travail", ("la suite de tests passe",), owner="guilhem", actor="copilot", ready=True).task.id
     service.context(tid)
@@ -56,9 +64,15 @@ def _claimed(root: Path) -> str:
     return tid
 
 
-def _run(root: Path, host: HostId = HostId.GITHUB_COPILOT) -> tuple[dict[str, Any], Any]:
+def _run(
+    root: Path, host: HostId = HostId.GITHUB_COPILOT, payload: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], Any]:
     rendered, decision, _ = run_hook(
-        _payload(), host_id=host, event=HookEvent.SUBAGENT_START, project_root=root, decision_id=DECISION
+        _payload() if payload is None else payload,
+        host_id=host,
+        event=HookEvent.SUBAGENT_START,
+        project_root=root,
+        decision_id=DECISION,
     )
     return rendered, decision
 
@@ -80,6 +94,31 @@ def test_other_hosts_keep_their_output(tmp_path: Path, host: HostId) -> None:
     rendered, decision = _run(tmp_path, host)
     assert rendered == {}
     assert decision.abstain
+
+
+def test_local_harness_payload_keeps_its_output(tmp_path: Path) -> None:
+    """Le harness Local exécute le même fichier : snake_case sans ``timestamp`` ⇒ rien."""
+    _claimed(tmp_path)
+    payload = {k: v for k, v in _payload().items() if k != "timestamp"}
+    rendered, decision = _run(tmp_path, payload=payload)
+    assert rendered == {}
+    assert decision.abstain
+
+
+def test_claude_code_shaped_payload_under_copilot_host_keeps_its_output(tmp_path: Path) -> None:
+    """Une charge qui porte ``permission_mode`` (Claude Code) n'est jamais attribuée à Copilot."""
+    _claimed(tmp_path)
+    rendered, decision = _run(tmp_path, payload={**_payload(), "permission_mode": "default"})
+    assert rendered == {}
+    assert decision.abstain
+
+
+def test_camel_case_copilot_payload_renders(tmp_path: Path) -> None:
+    """Hook déclaré en camelCase sous le harness Copilot : la marque camelCase suffit."""
+    tid = _claimed(tmp_path)
+    payload = {"timestamp": "2026-11-23T10:00:00.000Z", "sessionId": SESSION, "agent_id": "a", "agent_type": "Plan"}
+    rendered, _ = _run(tmp_path, payload=payload)
+    assert tid in rendered["hookSpecificOutput"]["additionalContext"]
 
 
 def test_no_claimed_task_abstains(tmp_path: Path) -> None:

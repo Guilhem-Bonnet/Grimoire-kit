@@ -3,15 +3,16 @@
   "host_version": "",
   "provenance": "documentation",
   "capability": null,
-  "source": "https://code.visualstudio.com/docs/agents/reference/hooks-reference (SubagentStart : entrée `agent_id`, `agent_type` ; sortie `hookSpecificOutput.additionalContext`). Forme documentée, pas une capture : aucune charge SubagentStart n'a été relevée sur une session réelle.",
+  "source": "https://code.visualstudio.com/docs/agents/reference/hooks-reference (entrée commune `timestamp`, `cwd`, `session_id`, `hook_event_name`, `transcript_path` ; SubagentStart : entrée `agent_id`, `agent_type` ; sortie `hookSpecificOutput.additionalContext`). Forme documentée, pas une capture : aucune charge SubagentStart n'a été relevée sur une session réelle.",
   "payloads": [
     {
       "hookType": "SubagentStart",
       "input": {
         "timestamp": "2026-11-23T10:00:00.000Z",
         "cwd": "<PROJECT>",
-        "sessionId": "00000000-0000-4000-8000-0000000000c3",
-        "hookEventName": "SubagentStart",
+        "session_id": "00000000-0000-4000-8000-0000000000c3",
+        "hook_event_name": "SubagentStart",
+        "transcript_path": "<PROJECT>/.transcript.jsonl",
         "agent_id": "subagent-REDACTED-01",
         "agent_type": "Explore"
       },

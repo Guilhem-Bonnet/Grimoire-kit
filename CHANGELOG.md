@@ -7,7 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- feat(hosts): sous Copilot, le hook `SubagentStart` rend `additionalContext` avec la classe de vérifiabilité et le palier recommandés pour le sous-agent (décision `grimoire.subagent-start`, forme de la référence VS Code ; fixture documentée, pas une capture, aucune capacité bloquante annoncée). Claude Code et les autres hôtes sont inchangés. Refs #1280.
+- feat(hosts): sous Copilot, le hook `SubagentStart` rend `additionalContext` avec la classe de vérifiabilité et le palier recommandés pour le sous-agent (décision `grimoire.subagent-start`, forme de la référence VS Code ; fixture documentée, pas une capture, aucune capacité bloquante annoncée). Claude Code, les autres hôtes et le harness Local (charge snake_case sans `timestamp`, qui exécute le même fichier) sont inchangés : la décision n'émet que sur une marque sourcée du harness Copilot. Refs #1280.
 
 - test(guard): `test_une_ecriture_prouvee_est_refusee_et_revoque` distingue le refus par dépassement de `POLICY_BUDGET_S` (`detail.policy_budget == "exceeded"`, sans `authority_vector`) du refus de la garde : le refus reste exigé, le détail est affiché dans le message d'assertion, et un test force le chemin budget (#1305)
 

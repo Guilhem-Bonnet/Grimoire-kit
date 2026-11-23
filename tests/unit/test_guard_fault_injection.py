@@ -417,7 +417,11 @@ def _subagent_start(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     def measure(fault: Fault) -> str:
         with fault:
             hook = HookInput(
-                event=HookEvent.SUBAGENT_START, project_root=root, session_id=SESSION, host="github-copilot"
+                event=HookEvent.SUBAGENT_START,
+                project_root=root,
+                session_id=SESSION,
+                host="github-copilot",
+                raw={"timestamp": "2026-11-23T10:00:00.000Z", "session_id": SESSION, "hook_event_name": "SubagentStart"},
             )
             return _label(run_decision("grimoire.subagent-start", hook))
 
