@@ -77,7 +77,8 @@ def _settings(root: Path) -> dict:
 def test_the_profile_claims_only_what_the_documentation_supports() -> None:
     profile = profile_for(HostId.GEMINI_CLI)
     assert profile.subagents_native and profile.commands_native
-    assert not profile.skills_native and not profile.permissions_native
+    # Compétences natives (`.agents/skills/`, geminicli.com/docs/cli/skills) ; pas de table de permissions.
+    assert profile.skills_native and not profile.permissions_native
     # BeforeTool/BeforeAgent documentent un refus, mais aucune capture ne le prouve
     # (#1281) : rien n'est tenu pour bloquant, la garde est écrite et advisory.
     assert not profile.enforces_blocking
@@ -98,8 +99,9 @@ def test_sync_emits_hooks_commands_agents_and_the_entrypoint(governed: Path) -> 
     assert (governed / ".gemini/commands/grimoire/grimoire-gate.toml").is_file()
     assert (governed / "GEMINI.md").is_file()
     assert (governed / ".gemini/settings.json").is_file()
-    # Aucun chargement de skills sur cet hôte : leurs corps restent lisibles.
-    assert list((governed / "_grimoire/hosts/skills").glob("*.md"))
+    # Compétences au format natif, dans le dossier que Gemini CLI et Antigravity lisent tous deux.
+    assert list((governed / ".agents/skills").glob("*/SKILL.md"))
+    assert not (governed / "_grimoire/hosts/skills").exists()
 
 
 def test_every_documented_event_is_wired_with_a_hook_command(governed: Path) -> None:
@@ -282,5 +284,6 @@ def test_the_plan_declares_what_stays_degraded(governed: Path) -> None:
     emitter = emitter_for(HostId.GEMINI_CLI)
     assert emitter is not None
     surfaces = {d.surface for d in emitter.plan(build_surface(governed), governed).degradations}
-    assert {"skills", "permissions", "model affinity", "detached session"} <= surfaces
+    assert {"permissions", "detached session", "antigravity hooks"} <= surfaces
+    assert "skills" not in surfaces
     assert "hook stop verification" in surfaces
