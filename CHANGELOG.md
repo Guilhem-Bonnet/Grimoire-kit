@@ -12,6 +12,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ### Fixed
 
 - **acp** : `AcpClient` ferme stdin et libère le sous-processus quand `start()` échoue (agent déjà sorti) ; `grimoire up` n'affiche plus « Exception ignored … BrokenPipeError » à la collecte du flux. Verdict doctor inchangé. Closes #1313.
+- **missions** : le janitor retire le `HOME` jetable d'un worker opencode (`~/.cache/grimoire-kit/opencode/<empreinte>/<tâche>-<nonce>`) quand sa tâche est terminale et son processus mort (nouvelle action `opencode_home`, rejouée tant que le worker vit), et balaie à chaque passage les dossiers orphelins inchangés depuis plus de 7 jours, hors tâche encore ouverte et worker vivant ; seul un enfant direct de la racine opencode du projet est supprimé, chemin résolu et liens symboliques refusés
 
 ## [3.104.0] - 2026-11-23
 

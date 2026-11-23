@@ -4,7 +4,8 @@ Actif dès qu'un rôle lance des sessions (le rôle ``worker`` est activé, ou l
 tâche ``closed``, ``cancelled`` ou ``failed`` qui a un worktree, une session lancée ou un créneau CI, dans cet ordre :
 
 1. ``ci_slot`` — rend le créneau ``ci.runners`` (``capacity.released``, comme ``task.ci_finished``) ;
-2. ``session`` — ``claude stop <id>`` sur la session détachée (la conversation est gardée) ;
+2. ``session`` — ``claude stop <id>`` sur la session détachée (la conversation est gardée) ; ``opencode_home`` retire
+   ensuite le ``HOME`` jetable d'un worker opencode mort (:mod:`.opencode_homes`), jamais celui d'un worker vivant ;
 3. ``worktree`` — ``git worktree remove`` **sans** ``--force`` : un arbre sale reste là, et l'échec est rapporté ; un arbre
    dont les seuls changements sont des sorties du kit non suivies (reçus du relecteur…) les voit copiées sous
    ``_grimoire-output/archive/worktrees/<id>`` puis est retiré ;
@@ -17,7 +18,7 @@ tâche ``closed``, ``cancelled`` ou ``failed`` qui a un worktree, une session la
 
 **Idempotent et journalisé.** Chaque action écrit ``janitor.action`` (``done``, ``skipped``, ``refused``, ``failed``) au ledger
 et n'est pas refaite une fois ``done``/``skipped`` ; quand plus rien ne reste à faire, ``janitor.swept`` clôt la tâche pour le
-tick suivant. **Un échec ne bloque pas le tick** : l'action est rapportée (``failed``), rejouée au tick d'après, et les autres
+tick suivant ; chaque passage retire aussi les ``HOME`` opencode orphelins de plus de 7 jours. **Un échec ne bloque pas le tick** : l'action est rapportée (``failed``), rejouée au tick d'après, et les autres
 tâches suivent leur chemin. Une branche qu'on ne peut pas dire fusionnée reste (``refused``) : pour une tâche ``closed`` le
 janitor réessaie (la PR peut se fusionner plus tard), pour ``cancelled`` ou ``failed`` la branche est gardée définitivement.
 """
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
 
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.service import TaskService
+    from grimoire.missions.worker_host import OpencodeWorkerHost
 
 __all__ = ["ACTION_EVENT", "ARCHIVE_DIR", "JANITOR_ACTOR", "SWEPT_EVENT", "WORKTREE_ARCHIVE_DIR", "Janitor", "JanitorOutcome", "janitor_active", "pending_cleanup"]
 
@@ -138,7 +140,7 @@ def pending_cleanup(service: TaskService) -> tuple[JanitorOutcome, ...]:
 class Janitor:
     def __init__(
         self, service: TaskService, policy: OrchestratorPolicy, *, exec_: Exec = default_exec, claude_bin: str = "claude",
-        remote: str = "origin",
+        remote: str = "origin", opencode: OpencodeWorkerHost | None = None,
     ) -> None:
         self._service = service
         self._policy = policy
@@ -146,13 +148,33 @@ class Janitor:
         self._claude = claude_bin
         self._remote = remote
         self._repo = service.home_root
+        self._opencode = opencode
 
     def sweep(self) -> tuple[JanitorOutcome, ...]:
         """Nettoie chaque tâche terminale ; une exception d'une action devient un ``failed`` rapporté, jamais une panne du tick."""
         outcomes: list[JanitorOutcome] = []
         for tid in _candidates(self._service):
             outcomes.extend(self._sweep_task(tid))
+        outcomes.extend(self._orphan_homes())
         return tuple(outcomes)
+
+    def _host(self) -> OpencodeWorkerHost:
+        if self._opencode is not None:
+            return self._opencode
+        from grimoire.missions.worker_host import OpencodeWorkerHost
+
+        return OpencodeWorkerHost()
+
+    def _orphan_homes(self) -> list[JanitorOutcome]:
+        """Les ``HOME`` opencode orphelins de plus de 7 jours, retirés une fois par passage ; une panne n'arrête rien."""
+        from grimoire.missions.opencode_homes import sweep_orphan_homes
+
+        opened = [t.id for t in self._service.list_tasks() if t.status not in _TERMINAL]
+        try:
+            removed = sweep_orphan_homes(self._service, opened, self._host().alive)
+        except OSError as exc:
+            return [JanitorOutcome("*", "opencode_orphans", "failed", type(exc).__name__)]
+        return [JanitorOutcome("*", "opencode_orphans", "done", f"HOME opencode orphelin retiré : {name}") for name in removed]
 
     # -- une tâche -----------------------------------------------------------
 
@@ -172,6 +194,7 @@ class Janitor:
         steps = (
             ("ci_slot", self._ci_slot),
             ("session", self._session),
+            ("opencode_home", self._opencode_home),
             ("worktree", self._worktree),
             ("branch_local", lambda t: self._branch_local(t, proof())),
             ("branch_remote", lambda t: self._branch_remote(t, proof())),
@@ -222,11 +245,10 @@ class Janitor:
             return "skipped", "aucune session lancée"
         sid = str(launch["session"])
         if launch.get("host") == "opencode":  # #1281 L4 : un processus que le kit a lancé, pas une session ``--bg``
-            from grimoire.missions.worker_host import OpencodeWorkerHost
             from grimoire.missions.worker_lifecycle import opencode_marks
 
             marks = opencode_marks(self._service, tid)
-            host = OpencodeWorkerHost()
+            host = self._host()
             if host.state(marks) == "ended" or host.stop(str(marks.get("pid") or "")):
                 return "done", f"worker opencode {sid} arrêté"
             return "failed", f"worker opencode {sid} (pid {marks.get('pid') or '?'}) non arrêté"
@@ -238,6 +260,11 @@ class Janitor:
         if result.returncode not in (124, 126, 127) and any(word in text for word in _GONE):
             return "done", f"session {sid} déjà absente"
         return "failed", f"claude stop {sid} a échoué ({result.returncode}) : {(result.stderr or result.stdout).strip()[:200]}"
+
+    def _opencode_home(self, tid: str) -> tuple[str, str]:
+        from grimoire.missions.opencode_homes import purge_task_homes
+
+        return purge_task_homes(self._service, tid, self._host().alive)
 
     def _worktree(self, tid: str) -> tuple[str, str]:
         wt = find_task_worktree(self._service, tid)
