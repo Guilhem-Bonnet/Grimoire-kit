@@ -471,7 +471,7 @@ Le serveur MCP suit la même règle. Un projet créé ensuite reçoit dans `.mcp
 
 **Cause** : la garde `PreToolUse` est émise en échec fermé (`"onFailure": "block"`, Claude Code 2.1.295 ou plus) : quand elle ne peut pas juger un appel, elle le refuse au lieu de le laisser passer. Quatre cas :
 
-- la garde répond trop tard : Claude Code l'interrompt à son `timeout` (en secondes) et refuse, avec `timed out`. Les projets installés en 3.92.0 portent `"timeout": 10`, trop court sur une machine chargée (plusieurs agents, une suite de tests en parallèle) ; `grimoire up` émet 30 s, et `grimoire doctor` signale un délai plus court (contrôle `hook_timeout`) ;
+- la garde répond trop tard : Claude Code l'interrompt à son `timeout` (en secondes) et refuse, avec `timed out`. Les projets installés en 3.92.0 portent `"timeout": 10`, trop court sur une machine chargée (plusieurs agents, une suite de tests en parallèle) ; `grimoire up` émet 30 s, et `grimoire doctor` signale un délai plus court ou invalide (contrôle `hook_timeout`, qui lit `.claude/settings.json` puis `.claude/settings.local.json`, le local primant ; `grimoire up` n'écrit pas ce dernier, un délai qui y est posé se corrige à la main) ;
 
 - le kit répond mais une panne interne l'empêche de juger : le refus nomme la panne ;
 - le runtime du kit ne s'importe plus (mise à jour cassée, dépendance absente) : `grimoire-hook` répond quand même par un refus « hook indisponible » ;

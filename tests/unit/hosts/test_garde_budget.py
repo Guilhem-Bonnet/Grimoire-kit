@@ -191,8 +191,8 @@ def test_an_open_guard_keeps_its_declared_timeout(governed: Path, monkeypatch: p
     assert all(h["timeout"] == 10 for h in guards), json.dumps(guards)
 
 
-def _settings_with_guard(root: Path, timeout: int) -> None:
-    settings = root / ".claude" / "settings.json"
+def _settings_with_guard(root: Path, timeout: object, name: str = "settings.json") -> None:
+    settings = root / ".claude" / name
     settings.parent.mkdir(parents=True, exist_ok=True)
     handler = {
         "type": "command",
@@ -217,6 +217,60 @@ def test_doctor_warns_about_a_short_fail_closed_timeout(tmp_path: Path) -> None:
     _settings_with_guard(tmp_path, 30)
     (check,) = check_guard_timeout(tmp_path)
     assert check.passed
+
+
+def test_doctor_reads_settings_local_json_which_wins(tmp_path: Path) -> None:
+    """Le délai de ``settings.local.json`` prime sur celui de ``settings.json`` (#1277)."""
+    from grimoire.cli.doctor_hooks import check_guard_timeout
+
+    _settings_with_guard(tmp_path, 30)
+    _settings_with_guard(tmp_path, 10, name="settings.local.json")
+    (check,) = check_guard_timeout(tmp_path)
+    assert (check.passed, check.level) == (False, "warn")
+    assert ".claude/settings.local.json: 10 s" in check.detail
+    assert "settings.local.json" in check.remedy
+
+    _settings_with_guard(tmp_path, 10)
+    _settings_with_guard(tmp_path, 45, name="settings.local.json")
+    (check,) = check_guard_timeout(tmp_path)
+    assert check.passed, check.detail
+
+
+def test_doctor_sees_a_guard_declared_only_in_settings_local_json(tmp_path: Path) -> None:
+    from grimoire.cli.doctor_hooks import check_guard_timeout
+
+    _settings_with_guard(tmp_path, 5, name="settings.local.json")
+    (check,) = check_guard_timeout(tmp_path)
+    assert not check.passed
+    assert "5 s" in check.detail
+
+
+@pytest.mark.parametrize("timeout", [True, False, "30"])
+def test_doctor_flags_a_non_numeric_timeout_as_invalid(tmp_path: Path, timeout: object) -> None:
+    """``bool`` sous-classe ``int`` : ``true`` n'est pas un délai de 1 s, il est invalide."""
+    from grimoire.cli.doctor_hooks import check_guard_timeout
+
+    _settings_with_guard(tmp_path, timeout)
+    (check,) = check_guard_timeout(tmp_path)
+    assert (check.name, check.passed, check.level) == ("hook_timeout", False, "warn")
+    assert "invalid timeout" in check.detail
+    assert json.dumps(timeout) in check.detail
+
+
+def test_hook_timeout_surfaces_in_grimoire_doctor(tmp_path: Path) -> None:
+    """Le contrôle remonte dans ``grimoire doctor``, pas seulement dans ``up``."""
+    from typer.testing import CliRunner
+
+    from grimoire.cli.app import app
+
+    runner = CliRunner()
+    runner.invoke(app, ["init", str(tmp_path), "--name", "hook-timeout"])
+    _settings_with_guard(tmp_path, True, name="settings.local.json")
+    result = runner.invoke(app, ["-o", "json", "doctor", str(tmp_path)])
+    checks = {c["name"]: c for c in json.loads(result.output)["checks"]}
+    assert "hook_timeout" in checks, sorted(checks)
+    assert checks["hook_timeout"]["passed"] is False
+    assert "invalid timeout" in checks["hook_timeout"]["detail"]
 
 
 def test_doctor_says_nothing_without_a_fail_closed_guard(tmp_path: Path) -> None:
