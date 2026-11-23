@@ -59,6 +59,7 @@ SECRET = "sk-secret-opencode-de-test"  # noqa: S105 - valeur factice, jamais une
 PLUGIN = Path(".opencode/plugin/grimoire-guard.js")
 KIT_PLUGIN = (
     "// grimoire:managed — régénéré\n"
+    'const GUARDED = ["bash", "edit", "write"]\n'
     'const HOOK = {"posix": "grimoire-hook", "windows": null}\n'
     'export const G = async () => ({ "tool.execute.before": async () => {} })\n'
 )
@@ -691,11 +692,24 @@ def test_programme_de_garde_illisible_ou_absent_du_plugin(tmp_path: Path) -> Non
 
     assert hook_program(tmp_path) == ""
     assert "introuvable" in hook_witness_refusal(tmp_path, {}, lambda *_a: RunResult(0))
-    _plugin(
-        tmp_path, 'const HOOK = {"posix": ".venv/bin/grimoire-hook", "windows": ".venv/Scripts/grimoire-hook.exe"}\n'
-    )
+    hook = 'const HOOK = {"posix": ".venv/bin/grimoire-hook", "windows": ".venv/Scripts/grimoire-hook.exe"}\n'
+    _plugin(tmp_path, hook)
     assert hook_program(tmp_path) == str(tmp_path / ".venv/bin/grimoire-hook")
-    assert "ne refuse pas" in hook_witness_refusal(tmp_path, {}, lambda *_a: RunResult(0, "pas du json"))
+    assert "ne soumet pas l'exécution" in hook_witness_refusal(tmp_path, {}, lambda *_a: RunResult(0))
+    seen: list[list[str]] = []
+
+    def record(argv: Sequence[str], *_a: Any) -> Any:
+        seen.append(list(argv))
+        return RunResult(0, "pas du json")
+
+    guarded = 'const GUARDED = ["bash"]\nconst HOOK = {"posix": "h"}\n'
+    spawn = 'spawnSync(hookProgram(directory), ["--host","opencode","--event","PreToolUse","--decision","d"], {\n'
+    _plugin(tmp_path, guarded + spawn)
+    assert "ne refuse pas" in hook_witness_refusal(tmp_path, {}, record)
+    assert seen[-1] == ["h", "--host", "opencode", "--event", "PreToolUse", "--decision", "d"]
+    _plugin(tmp_path, guarded + "spawnSync(hookProgram(directory), [broken], {\n")
+    assert "ne refuse pas" in hook_witness_refusal(tmp_path, {}, record)
+    assert seen[-1] == ["h", "--host", "opencode", "--event", "PreToolUse"]
 
 
 def test_le_vrai_plugin_et_le_vrai_programme_de_garde_refusent_la_charge_temoin(

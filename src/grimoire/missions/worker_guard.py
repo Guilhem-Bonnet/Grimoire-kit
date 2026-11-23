@@ -86,6 +86,9 @@ ENV_ALLOWED = (
 #: n'est jamais exécutée : seul le programme de garde la lit.
 _WITNESS_COMMAND = "git push --force origin main"
 _HOOK_DECL = re.compile(r"^const HOOK = (\{.*\})$", re.MULTILINE)
+_GUARDED_DECL = re.compile(r"^const GUARDED = (\[.*\])$", re.MULTILINE)
+_GUARD_ARGS = re.compile(r"spawnSync\(hookProgram\(directory\), (\[[^\]]*\]), \{")
+_DEFAULT_ARGS = ("--host", "opencode", "--event", "PreToolUse")
 _WITNESS_TIMEOUT_S = 30.0
 _RUN_TIMEOUT_S = 60.0
 
@@ -271,19 +274,46 @@ def integrity_refusal(cwd: Path, *, config_home: Path | None = None) -> str:
     return ""
 
 
-def hook_program(cwd: Path) -> str:
-    """Le programme que le plugin de garde de *cwd* appelle, lu dans le plugin (déjà vérifié à l'octet)."""
+def _plugin_text(cwd: Path) -> str:
     from grimoire.hosts.emitters.opencode import PLUGIN_RELPATH
 
     try:
-        match = _HOOK_DECL.search((cwd / PLUGIN_RELPATH).read_text(encoding="utf-8"))
-        decl = json.loads(match.group(1)) if match else {}
-    except (OSError, ValueError):
+        return (cwd / PLUGIN_RELPATH).read_text(encoding="utf-8")
+    except OSError:
         return ""
+
+
+def _json_decl(pattern: re.Pattern[str], text: str) -> object:
+    match = pattern.search(text)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except ValueError:
+        return None
+
+
+def hook_program(cwd: Path) -> str:
+    """Le programme que le plugin de garde de *cwd* appelle, lu dans le plugin (déjà vérifié à l'octet)."""
+    decl = _json_decl(_HOOK_DECL, _plugin_text(cwd))
     posix = str(decl.get("posix") or "") if isinstance(decl, dict) else ""
-    if posix and decl.get("windows"):
+    if posix and isinstance(decl, dict) and decl.get("windows"):
         return str(cwd / posix)  # chemin relatif à la racine du projet, comme ``hookProgram`` du plugin
     return posix
+
+
+def hook_args(cwd: Path) -> tuple[str, ...]:
+    """Les arguments que le plugin passe au programme de garde pour ``tool.execute.before``."""
+    args = _json_decl(_GUARD_ARGS, _plugin_text(cwd))
+    if isinstance(args, list) and args and all(isinstance(a, str) for a in args):
+        return tuple(args)
+    return _DEFAULT_ARGS
+
+
+def guards_execution(cwd: Path) -> bool:
+    """Vrai si le plugin de garde de *cwd* soumet l'exécution de commandes (``bash``) au programme de garde."""
+    guarded = _json_decl(_GUARDED_DECL, _plugin_text(cwd))
+    return isinstance(guarded, list) and "bash" in guarded
 
 
 def hook_witness_refusal(cwd: Path, env: Mapping[str, str], runner: Runner) -> str:
@@ -305,7 +335,9 @@ def hook_witness_refusal(cwd: Path, env: Mapping[str, str], runner: Runner) -> s
             "tool_use_id": "grimoire-witness",
         }
     )
-    done = runner([program, "--host", "opencode", "--event", "PreToolUse"], cwd, env, payload)
+    if not guards_execution(cwd):
+        return "le plugin de garde ne soumet pas l'exécution de commandes au programme de garde"
+    done = runner([program, *hook_args(cwd)], cwd, env, payload)
     if done.returncode != 0:
         return f"programme de garde indisponible (sortie {done.returncode})"
     decision = ""
