@@ -6,7 +6,7 @@ audience: référence
 
 Un projet Grimoire décrit des personas, des compétences, des commandes et une
 gouvernance. Chaque hôte agentique — Claude Code, GitHub Copilot, opencode, Codex, Cursor,
-Gemini CLI — expose une part de cela sous forme **exécutable** : fichiers de
+Gemini CLI, Kimi Code, Zed — expose une part de cela sous forme **exécutable** : fichiers de
 sous-agents chargés dans leur propre fenêtre de contexte, compétences chargées à
 la demande, commandes utilisateur, hooks de cycle de vie capables de refuser une
 action ou une clôture, table de permissions déclarative.
@@ -26,6 +26,8 @@ projet (agents, standard, mémoire)
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
         ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, .agents/skills, GEMINI.md
         ├──▶ émetteur Cursor       → .cursor/{hooks.json,agents,skills,rules}
+        ├──▶ émetteur Kimi Code    → .kimi-code/{agents,mcp.json}, .agents/skills, AGENTS.md
+        ├──▶ émetteur Zed          → .rules, .zed/{settings.json,tasks.json}, .agents/skills
         └──▶ émetteur prose        → AGENTS.md
 ```
 
@@ -62,6 +64,8 @@ ajouté ou modifié une persona.
 | Codex | oui (`.codex/agents/*.toml`) | oui (`.agents/skills/`) | non | consultatifs (documentés, approbation `/hooks`, non prouvés) | non |
 | Cursor | oui | oui | non | écrits, non vérifiés (`preToolUse`, `beforeShellExecution` : advisory) | non |
 | Gemini CLI | oui | oui (`.agents/skills/`, lu aussi par Antigravity) | oui | écrits, non vérifiés (`BeforeTool`, `BeforeAgent` : advisory ; fin de tour sans refus documenté) | non |
+| Kimi Code | oui (`.kimi-code/agents/`, `kimi --agent`) | oui (`.agents/skills/`) | non | non : hooks au niveau utilisateur seulement, aucun émis | non |
+| Zed | non (personas dans `.rules`) | oui (`.agents/skills/`) | non | non : aucun hook documenté (tâche CLI Claude Code gouvernée) | non |
 
 « Hooks bloquants : oui » exige une capture réelle d'un refus sur l'hôte, versée
 sous `tests/fixtures/hosts/<hôte>/` et nommée par le profil
@@ -111,6 +115,8 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   de hooks de Cursor »). La garde est écrite d'après la documentation de Cursor,
   mais aucun refus n'a été observé sur un Cursor réel : elle reste déclarée
   `advisory` dans la matrice, jamais `enforced`, et la CI reste l'autorité.
+- Kimi Code et Zed n'ont aucune garde, et c'est déclaré : voir « Kimi Code et
+  Zed » ci-dessous.
 - Un hôte en prose n'a pas de hooks : la gouvernance y est
   énoncée comme règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le
   catalogue le dit explicitement plutôt que de laisser croire à une protection.
@@ -268,6 +274,81 @@ hôte, et ne lit pas `.gemini/settings.json` sous Antigravity : rien de cela n'e
 émis, et chaque surface est une dégradation déclarée. Sous Antigravity, aucune
 garde ne tourne ; la CI reste l'autorité.
 
+## Kimi Code et Zed
+
+Deux hôtes de plus (#1281, lot L8 ; #725 pour Zed), tous deux **sans garde**. Rien
+n'y est annoncé bloquant, ni même consultatif : `grimoire host list` les montre
+« Hooks bloquants : non », la matrice les rend en prose et la parité déclare
+`tool_guard`, `write_trace` et `task_recall` absents. Aucun des deux n'est installé
+sur le poste du kit : ce qui suit vient de leur documentation, relue le
+22 novembre 2026.
+
+**Kimi Code** (CLI de Moonshot, binaire `kimi`, 2.7.2 annoncée ;
+[agents](https://moonshotai.github.io/kimi-code/en/customization/agents.html),
+[skills](https://moonshotai.github.io/kimi-code/en/customization/skills.html),
+[MCP](https://moonshotai.github.io/kimi-code/en/customization/mcp.html),
+[hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks.md)) :
+
+| Fichier | Ce que le kit y met |
+|---|---|
+| `.kimi-code/agents/<nom>.md` | une persona par fichier : frontmatter `name` (kebab-case, sinon refusé et déclaré) et `description`, le corps est le prompt système. Lancer par `kimi --agent <nom>` |
+| `.agents/skills/<slug>/SKILL.md` | les compétences, même écrivain que Codex et Gemini |
+| `.kimi-code/mcp.json` | `mcpServers.grimoire` s'il manque ; le reste du fichier est à l'utilisateur. Un `mcpServers` qui n'est pas un objet, ou un fichier qui n'est pas du JSON strict, est préservé et signalé |
+| `AGENTS.md` | un bloc délimité, seulement si `kimi` est déclaré dans `hosts.enabled` **sans** `codex` : Codex écrit le même bloc, et deux écrivains s'écraseraient. Sinon, dégradation `instructions` |
+
+Dégradations déclarées :
+
+- `hooks` : Kimi Code documente des hooks bloquants (`PreToolUse`,
+  `UserPromptSubmit`, `Stop`), mais seulement dans `~/.kimi-code/config.toml` ou
+  un plugin. La doc l'écrit : « there is no project-level hook file ». Le kit
+  n'écrit pas la configuration de l'utilisateur.
+- `model affinity` : le champ `model` d'un agent est ignoré par Kimi Code, il
+  n'est jamais émis, même si `dispatch.models.kimi` déclare un palier.
+- `tool boundary` : `tools` n'est pas émis, car la doc relue ne liste pas les
+  noms d'outils.
+- `subagents` : l'agent par défaut ne délègue qu'à `coder`, `explore` et `plan`.
+- `commands` : aucune commande de projet n'est documentée.
+- `mcp trust` : `.kimi-code/mcp.json` n'est chargé qu'une fois l'espace de
+  travail approuvé.
+
+ACP : `kimi acp`.
+
+**Zed** ([instructions](https://zed.dev/docs/ai/instructions),
+[skills](https://zed.dev/docs/ai/skills), [MCP](https://zed.dev/docs/ai/mcp),
+[réglages](https://zed.dev/docs/reference/all-settings),
+[tâches](https://zed.dev/docs/tasks),
+[worktree trust](https://zed.dev/docs/worktree-trust)) :
+
+| Fichier | Ce que le kit y met |
+|---|---|
+| `.rules` | un bloc délimité : personas, compétences, commandes `grimoire host run <slug>`, gouvernance énoncée. Zed ne lit que le **premier** fichier de sa liste (`.rules`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`, `AGENT.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) : `.rules` passe devant les autres, qu'il cite donc, à lire par l'agent |
+| `.agents/skills/<slug>/SKILL.md` | les compétences. Zed n'admet que `[a-z0-9-]`, 64 caractères au plus : un autre nom est écrit pour les autres hôtes et déclaré ignoré (`skill names`) |
+| `.zed/settings.json` | `context_servers.grimoire` (`command`, `args`) s'il manque ; le reste est à l'utilisateur. Zed accepte des commentaires dans ce fichier (JSONC) : un fichier qui n'est pas du JSON strict est préservé et signalé, jamais réécrit |
+| `.zed/tasks.json` | si Claude Code est déclaré (ou `.claude/` présent sans déclaration), la tâche « Claude Code (gouverné) » : `claude`, `cwd: $ZED_WORKTREE_ROOT`, `use_new_terminal: true`. Les tâches de l'utilisateur restent ; celle du kit est reconnue à son libellé et sa commande exacts |
+
+La tâche est le **mode gouverné** proposé par #725 : la CLI Claude Code dans le
+terminal de Zed garde tous ses hooks. Dans l'agent de Zed lui-même, rien n'est
+gardé. Le fil ACP « Claude Agent » n'exécuterait pas les hooks de Claude Code :
+c'est le constat de #725, toujours sans test.
+
+Dégradations déclarées :
+
+- `hooks` : aucun hook de cycle de vie documenté.
+- `subagents` : l'agent délègue par `spawn_agent`, sans fichier d'agent.
+- `commands` : aucune commande de projet.
+- `permissions` et `profiles` : `agent.tool_permissions` et `agent.profiles`
+  existent, mais leur lecture dans les réglages de projet n'est pas documentée.
+- `model affinity` : il n'y a pas de fichier d'agent où écrire un `model`.
+- `worktree trust` : réglages, serveurs MCP et tâches du projet ne s'appliquent
+  qu'à un worktree approuvé.
+- `instructions` : `.rules` passe devant les autres fichiers d'instructions.
+
+Zed est un client ACP, pas un agent : il n'a pas de commande `grimoire chat`.
+
+`grimoire host probe --capabilities` déclare Kimi Code et Zed non sondables, avec la
+raison : aucun des deux n'a de hook de projet où poser le hook témoin, et la sonde
+n'écrit jamais la configuration de l'utilisateur.
+
 ## Ce que le kit a observé (contrats réels)
 
 Le tableau ci-dessus dit ce que le kit sait **écrire** pour un hôte. Il ne dit pas
@@ -284,7 +365,7 @@ et rendent un contrat entièrement non vérifié (donc non fencé) si elle est
 absente, inconnue ou différente de la version capturée. `recorded_contract(host)`
 ne sert qu'à auditer la table.
 
-| Capacité | Claude Code 2.1.301 | opencode 1.17.11 | Copilot, Codex, Cursor, Gemini |
+| Capacité | Claude Code 2.1.301 | opencode 1.17.11 | Copilot, Codex, Cursor, Gemini, Kimi Code, Zed |
 |---|---|---|---|
 | `pretooluse_deny` : un refus arrête l'outil | vérifiée (exit 2 + stderr, ou `permissionDecision: deny` ; l'agent reçoit le motif) | **vérifiée** : un plugin lève une `Error` dans `tool.execute.before`, l'outil ne s'exécute pas, l'agent reçoit le motif (fixture) | non vérifié |
 | `session_end` | vérifiée, sortie propre de `claude -p` seulement (kill non observé) | non vérifié | non vérifié |
@@ -605,13 +686,14 @@ séparé.
 
 ```yaml
 hosts:
-  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini, opencode
+  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini, opencode, kimi, zed
 ```
 
 **Absence de la clé** : le comportement bascule en détection — un hôte est
 émis s'il a déjà des fichiers dans le dépôt (`.claude/` → claude,
 `.github/copilot-instructions.md` ou `.github/agents/` → copilot, `GEMINI.md`
-→ gemini, `.cursor/` → cursor, `.opencode/` ou `opencode.json` → opencode, `AGENTS.md` **et** `.codex` → codex), et
+→ gemini, `.cursor/` → cursor, `.opencode/` ou `opencode.json` → opencode, `AGENTS.md` **et** `.codex` → codex,
+`.kimi-code/` → kimi, `.zed/` → zed), et
 `claude` seul si rien n'est détecté. Un projet existant qui n'a jamais connu
 cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
 supprime au premier `grimoire up` qui suit une mise à jour du kit.

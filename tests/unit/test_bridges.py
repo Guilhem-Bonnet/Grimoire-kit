@@ -90,6 +90,8 @@ def test_all_manifests_cover_the_registry():
         HostId.CURSOR,
         HostId.GEMINI_CLI,
         HostId.OPENCODE,
+        HostId.KIMI_CODE,
+        HostId.ZED,
     }
 
 

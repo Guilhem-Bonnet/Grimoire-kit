@@ -67,6 +67,7 @@ __all__ = [
     "PROBES_DIR",
     "TARGETS",
     "TARGET_PREFIX",
+    "UNPROBEABLE",
     "Detection",
     "HeadlessHost",
     "PromotionRefusedError",
@@ -81,6 +82,7 @@ __all__ = [
     "select_targets",
     "session_env",
     "session_plan",
+    "unprobeable_reason",
     "verdict_of",
 ]
 
@@ -261,6 +263,25 @@ _BY_KEY = {t.key: t for t in TARGETS}
 _ALIASES = {"agent": "cursor", "cursor-agent": "cursor", "agy": "antigravity", "gemini-cli": "gemini", "github-copilot": "copilot"}
 #: Nom générique : ``agent`` n'est retenu pour Cursor que si son chemin réel nomme Cursor.
 _GENERIC_BINARIES = frozenset({"agent"})
+
+
+#: Hôtes connus du kit que la sonde ne lance pas, et pourquoi (#1281, L8). Aucun n'a de hook de
+#: projet où poser le hook témoin : rien à capturer, la garde reste absente et déclarée.
+UNPROBEABLE: Mapping[str, str] = {
+    "kimi": (
+        "Kimi Code n'accepte de hooks que dans `~/.kimi-code/config.toml` ou un plugin, aucun fichier de projet "
+        "(moonshotai.github.io/kimi-code/en/customization/hooks) : la sonde n'écrit jamais la configuration de "
+        "l'utilisateur"
+    ),
+    "zed": "Zed ne documente aucun hook de cycle de vie pour son agent ni de session non interactive (zed.dev/docs)",
+}
+_UNPROBEABLE_ALIASES = {"kimi-code": "kimi"}
+
+
+def unprobeable_reason(host: str) -> str:
+    """Pourquoi *host*, hôte connu du kit, n'est pas sondable ; ``""`` s'il n'est pas dans ce cas."""
+    key = host.strip().lower()
+    return UNPROBEABLE.get(_UNPROBEABLE_ALIASES.get(key, key), "")
 
 
 def select_targets(host: str) -> tuple[HeadlessHost, ...]:

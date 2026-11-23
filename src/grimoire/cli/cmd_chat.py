@@ -38,7 +38,7 @@ def ask_in_terminal(request: PermissionRequest) -> str | None:
 
 def chat_command(
     message: Annotated[str, typer.Argument(help="Message à envoyer à l'agent.")],
-    host: Annotated[str, typer.Option("--host", help="Hôte : claude, gemini, copilot, cursor, codex, opencode.")],
+    host: Annotated[str, typer.Option("--host", help="Hôte : claude, gemini, copilot, cursor, codex, opencode, kimi.")],
     project_root: Annotated[Path, typer.Option("--project-root", help="Dossier de travail de l'agent.")] = Path(),
     resume: Annotated[str | None, typer.Option("--resume", help="Identifiant d'une session à reprendre (session/load).")] = None,
     agent_command: Annotated[

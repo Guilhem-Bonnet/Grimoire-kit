@@ -61,8 +61,8 @@ console = Console()
 _err_console = Console(stderr=True)
 
 _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine du projet.", show_default=False)
-_HOST_ALL_OPTION = typer.Option("all", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
-_HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
+_HOST_ALL_OPTION = typer.Option("all", "--host", help="claude | copilot | codex | cursor | gemini | opencode | kimi | zed | all | auto.")
+_HOST_OPTION = typer.Option("auto", "--host", help="claude | copilot | codex | cursor | gemini | opencode | kimi | zed | all | auto.")
 _DRY_RUN_OPTION = typer.Option(False, "--dry-run", help="Montrer sans écrire.")
 _FORCE_OPTION = typer.Option(False, "--force", help="Écraser un fichier non généré occupant un chemin géré.")
 _FORCE_HOST_OPTION = typer.Option(
@@ -202,7 +202,7 @@ def _resolve_targets(host: str, project_root: Path) -> list[HostId]:
         detected = _detected_host()
         if emitter_for(detected) is None:
             console.print(
-                "[yellow]Hôte non détecté[/yellow] — précisez `--host claude|copilot|codex|cursor|gemini|opencode|all`."
+                "[yellow]Hôte non détecté[/yellow] — précisez `--host claude|copilot|codex|cursor|gemini|opencode|kimi|zed|all`."
             )
             raise typer.Exit(code=1)
         return [detected]
@@ -657,7 +657,9 @@ def _probe_capabilities(ctx: typer.Context, host: str, project_root: Path, *, ru
     targets = capability_probe.select_targets(host)
     if not targets:
         known = ", ".join(t.key for t in capability_probe.TARGETS)
-        console.print(f"[red]Hôte non sondable : {escape(host)}[/red] (connus : {known})")
+        reason = capability_probe.unprobeable_reason(host)
+        detail = f" — {escape(reason)}" if reason else ""
+        console.print(f"[red]Hôte non sondable : {escape(host)}[/red]{detail} (sondables : {known})")
         raise typer.Exit(1)
     detections = capability_probe.detect(targets, project_root)
     captures: list[dict[str, Any]] = []
