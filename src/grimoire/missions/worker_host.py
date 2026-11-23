@@ -99,6 +99,8 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 #: Lectures de ``opencode session list`` avant de conclure qu'une session lancée est introuvable, et la pause entre deux.
 _RESOLVE_ATTEMPTS = 10
 _RESOLVE_PAUSE_S = 1.0
+#: Le suivi d'un worker opencode (sonde et arrêt par pid, groupe de processus) est POSIX ; sous Windows, rien ne part.
+_POSIX = os.name == "posix"
 #: Un journal opencode muet depuis plus longtemps ne renouvelle plus le bail : la récolte juge (bail de 20 min).
 SILENCE_S = 15 * 60.0
 
@@ -271,8 +273,8 @@ class ClaudeCodeWorkerHost:
 
 def _pid_alive(pid: int) -> bool:
     """Vrai si *pid* vit et est un processus opencode (un pid recyclé par un autre programme ne compte pas)."""
-    if pid <= 0:
-        return False
+    if pid <= 0 or not _POSIX:
+        return False  # sous Windows, ``os.kill`` termine le processus : on ne sonde pas
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -288,7 +290,7 @@ def _pid_alive(pid: int) -> bool:
 
 def _kill_group(pid: int) -> bool:
     """Arrête le groupe de processus de *pid* (``SIGTERM``) ; vrai si le groupe n'existe plus ou a reçu le signal."""
-    if pid <= 0:
+    if pid <= 0 or not _POSIX:
         return False
     try:
         os.killpg(pid, signal.SIGTERM)
@@ -352,7 +354,12 @@ class OpencodeWorkerHost:
         return LaunchPlan(tuple(argv), tuple(env.items()), secret_keys, detached=True)
 
     def start(self, plan: LaunchPlan, cwd: Path, log: Path) -> SpawnResult:
-        """Lance le plan en arrière-plan ; la sortie JSON d'``opencode run`` va dans *log*."""
+        """Lance le plan en arrière-plan ; la sortie JSON d'``opencode run`` va dans *log*.
+
+        Le kit suit le processus par son pid et son groupe (POSIX) : sous Windows, le lancement est refusé.
+        """
+        if not _POSIX and self.spawn is default_spawn:
+            return SpawnResult(0, "worker opencode non pris en charge sous Windows (suivi par pid POSIX)")
         return self.spawn(plan.argv, cwd, plan.environ(), log)
 
     def handle(self, output: str) -> str:

@@ -600,12 +600,22 @@ def test_etat_vivant_muet_fini(tmp_path: Path, fake: FakeOpencode) -> None:
     assert refuse.halt(fake, tmp_path, "")[0] is False
 
 
+@pytest.mark.skipif(os.name != "posix", reason="suivi par pid POSIX")
 def test_sondes_par_defaut_du_processus() -> None:
     from grimoire.missions.worker_host import _kill_group, _pid_alive
 
     assert _pid_alive(os.getpid()) in (True, False)  # le processus de test n'est pas opencode : faux sous /proc
     assert _pid_alive(0) is False and _kill_group(0) is False
     assert _pid_alive(2**22 + 12345) is False and _kill_group(2**22 + 12345) is True
+
+
+def test_windows_refuse_le_lancement(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from grimoire.missions import worker_host as wh
+
+    monkeypatch.setattr(wh, "_POSIX", False)
+    plan = LaunchPlan(("opencode", "run"), ())
+    assert "Windows" in OpencodeWorkerHost().start(plan, tmp_path, tmp_path / "w.jsonl").error
+    assert wh._pid_alive(123) is False and wh._kill_group(123) is False
 
 
 def test_default_spawn_binaire_absent(tmp_path: Path) -> None:
@@ -615,6 +625,7 @@ def test_default_spawn_binaire_absent(tmp_path: Path) -> None:
     assert result.pid == 0 and "introuvable" in result.error
 
 
+@pytest.mark.skipif(os.name != "posix", reason="suivi par pid POSIX")
 def test_default_spawn_lance_detache(tmp_path: Path) -> None:
     import sys
 
