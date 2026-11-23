@@ -195,7 +195,11 @@ dispatch:
 **Aucune correspondance inventée.** Un palier qu'aucune couche ne nomme pour cet
 hôte et ce fournisseur n'a pas de modèle. L'appelant omet alors `model` : le
 modèle de la session, de l'agent parent ou du sélecteur s'applique. C'est le cas
-de Copilot et de Cursor tant que le projet ne déclare rien.
+de Copilot, de Cursor, de Gemini CLI et d'opencode tant que le projet ne déclare
+rien. Les fiches de sous-agent de Cursor (`.cursor/agents/`), de Gemini CLI
+(`.gemini/agents/`) et d'opencode (`.opencode/agent/`) reçoivent `model` pour le
+seul palier que la table traduit ; opencode exige la forme `provider/model-id`
+(un nom sans `/` est écarté et signalé par la dégradation `model affinity`).
 
 **Capacités.** Le worker et le relecteur exigent l'appel d'outils (`tools`). Un
 modèle du projet dont cette capacité est connue à « non » dans le registre
