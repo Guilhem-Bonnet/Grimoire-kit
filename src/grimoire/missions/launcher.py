@@ -58,7 +58,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -72,6 +72,17 @@ from grimoire.missions.schemas import TaskState
 from grimoire.missions.sensitive_route import SensitiveRoute, sensitive_route_for
 from grimoire.missions.task_worktree import create_task_worktree
 from grimoire.missions.verifiability import Verifiability, classify
+from grimoire.missions.worker_host import (
+    BG_ID,
+    OPENCODE_HOST,
+    ClaudeCodeWorkerHost,
+    OpencodeWorkerHost,
+    SessionSpec,
+    prepare_opencode_worktree,
+)
+from grimoire.missions.worker_host import LEAN_SESSION_ARGS as LEAN_SESSION_ARGS
+from grimoire.missions.worker_host import LEAN_TOOLS as LEAN_TOOLS
+from grimoire.missions.worker_host import session_env as session_env
 from grimoire.missions.worker_provider import WorkerRoute, is_local_provider, route_denial, route_worker, settings_path
 from grimoire.providers.data_policy import hosted_fallback_refusal
 from grimoire.tools.workspace_work import transcript_path
@@ -134,8 +145,7 @@ PROVIDER_RESUME_MESSAGE = (
 WORKER_ACTOR = "worker"
 _HOST = "claude-code-cli"
 _EXEC_TIMEOUT_S = 60.0
-#: ``backgrounded · 0d310bc4 (…)`` : la ligne que ``claude --bg`` imprime (vérifié avec Claude Code 2.1.310).
-_BG_ID = re.compile(r"backgrounded\s*\S?\s*([0-9a-f]{8})\b")
+_BG_ID = BG_ID
 #: Le ``sessionId`` d'une session de fond, tel que ``claude agents --json`` le rend : un uuid (le nom de son transcript).
 _SESSION_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 #: Lectures de ``claude agents`` avant de conclure qu'une session lancée est introuvable, et la pause entre deux.
@@ -143,14 +153,10 @@ _RESOLVE_ATTEMPTS = 10
 _RESOLVE_PAUSE_S = 1.0
 #: Ce qu'une session de worker ou de relecteur exige de son modèle : un modèle connu sans appel d'outils est écarté.
 SESSION_REQUIRES: tuple[str, ...] = ("tools",)
-#: Mesuré le 2026-11-06 : 45 k jetons de contexte au premier tour sans ces options, 10 k avec. Sans ``Skill`` ni ``Agent``.
-#: ``--tools`` est variadique : en deux jetons, il avale la consigne qui le suit (relecteur muet, #1160).
-LEAN_TOOLS = "Bash,Read,Edit,Write,Glob,Grep"
-LEAN_SESSION_ARGS = ("--strict-mcp-config", f"--tools={LEAN_TOOLS}")
 
 
-def _host_provider_capabilities(root: Path) -> ProviderCapabilities | None:
-    """Les capacités du fournisseur de l'hôte (Anthropic) si le registre le déclare ; ``None`` sinon ou illisible."""
+def provider_capabilities(root: Path, provider: str = "anthropic") -> ProviderCapabilities | None:
+    """Les capacités de *provider* (canonique) si le registre le déclare ; ``None`` sinon ou illisible."""
     try:
         from grimoire.providers.capabilities import canonical_provider
         from grimoire.providers.capability_probe import read_capabilities
@@ -158,7 +164,8 @@ def _host_provider_capabilities(root: Path) -> ProviderCapabilities | None:
         found = read_capabilities(root)
     except (GrimoireError, OSError, ValueError):
         return None
-    return next((caps for caps in found if canonical_provider(caps.provider_id) == "anthropic"), None)
+    wanted = canonical_provider(provider)
+    return next((caps for caps in found if canonical_provider(caps.provider_id) == wanted), None)
 
 
 def sensitive_model() -> str:
@@ -186,7 +193,7 @@ def tier_model(root: Path, tier: str) -> str:
         CLAUDE_CODE,
         "anthropic",
         table=load_model_table(root),
-        capabilities=_host_provider_capabilities(root),
+        capabilities=provider_capabilities(root),
         requires=SESSION_REQUIRES,
     )
     return choice.model or ""
@@ -264,7 +271,8 @@ def live_background_sessions(exec_: Exec, cwd: Path, claude_bin: str = "claude")
 
 
 def renew_live_workers(
-    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None
+    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None,
+    opencode: OpencodeWorkerHost | None = None,
 ) -> tuple[str, ...]:
     """Le battement des workers (#961) : renouvelle le bail de chaque tâche tenue dont la session lancée vit encore.
 
@@ -280,12 +288,17 @@ def renew_live_workers(
         if task is not None and task.status in (TaskState.CLAIMED, TaskState.RUNNING) and task.claim is not None \
                 and payload.get("lease_epoch") == task.claim.lease_epoch:
             held[tid] = (payload, task.claim.lease_epoch)
+    renewed: list[str] = []
+    if others := {tid: epoch for tid, (payload, epoch) in held.items() if payload.get("host") == OPENCODE_HOST}:
+        from grimoire.missions.worker_lifecycle import renew_opencode
+
+        renewed += renew_opencode(service, others, opencode or OpencodeWorkerHost(), now=now)
+        held = {tid: value for tid, value in held.items() if tid not in others}
     if not held:
-        return ()
+        return tuple(renewed)
     alive = live_background_sessions(exec_, service.home_root, claude_bin)
     if alive is None:
-        return ()
-    renewed: list[str] = []
+        return tuple(renewed)
     for tid, (_payload, epoch) in held.items():
         short, _started, _halted = _session_marks(service, tid)  # la dernière session, reprise comprise
         if not short or (short, f"grimoire-{tid}") not in alive:
@@ -299,7 +312,8 @@ def renew_live_workers(
 
 
 def release_ended_workers(
-    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None
+    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, now: datetime | None = None,
+    opencode: OpencodeWorkerHost | None = None,
 ) -> tuple[str, ...]:
     """P2 de la vivacité (P90) : rend ``ready`` la tâche tenue dont la session lancée est sondée terminée.
 
@@ -313,16 +327,21 @@ def release_ended_workers(
         if (task := service.ledger.get_task(tid)) is not None and task.status in (TaskState.CLAIMED, TaskState.RUNNING)
         and task.claim is not None and payload.get("lease_epoch") == task.claim.lease_epoch
     }
+    released: list[str] = []
+    if others := {tid: int(p["lease_epoch"]) for tid, p in held.items() if p.get("host") == OPENCODE_HOST}:
+        from grimoire.missions.worker_lifecycle import release_opencode
+
+        released += release_opencode(service, others, opencode or OpencodeWorkerHost(), now=now)
+        held = {tid: p for tid, p in held.items() if tid not in others}
     if not held:
-        return ()
+        return tuple(released)
     raw = _read_agents(exec_, service.home_root, claude_bin)
     if raw is None:
-        return ()
+        return tuple(released)
     ended = {
         (str(a["id"]), str(a.get("name", ""))) for a in raw
         if a.get("kind") == "background" and a.get("state") in ("done", "stopped", "failed") and a.get("id")
     }
-    released: list[str] = []
     for tid, payload in held.items():
         short, _started, _halted = _session_marks(service, tid)  # la dernière session, reprise comprise
         if not short or (short, f"grimoire-{tid}") not in ended:
@@ -417,8 +436,8 @@ def resume_provider_failed_workers(
         task = service.ledger.get_task(tid)
         if task is None or task.status not in (TaskState.CLAIMED, TaskState.RUNNING) or task.claim is None:
             continue
-        if launch.get("lease_epoch") != task.claim.lease_epoch:
-            continue
+        if launch.get("lease_epoch") != task.claim.lease_epoch or launch.get("host") == OPENCODE_HOST:
+            continue  # opencode : pas de journal Claude Code à relire, la récolte juge
         short, _started, _halted = _session_marks(service, tid)
         if not short or (short, f"grimoire-{tid}") in alive:
             continue  # elle travaille encore : rien à reprendre
@@ -530,17 +549,6 @@ def _git_out(cwd: Path, *args: str) -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
-def session_env() -> dict[str, str]:
-    """L'environnement passé à ``claude --bg`` : la seule marque « sans surveillance », jamais une identité.
-
-    Cet environnement n'atteint que le démon que le premier ``--bg`` démarre, et toutes les sessions de fond suivantes
-    héritent du sien (#966) : un identifiant posé ici serait celui de la première session pour toutes. Chaque session
-    reçoit de l'hôte son vrai identifiant (``CLAUDE_CODE_SESSION_ID``). ``GRIMOIRE_UNATTENDED`` peut, lui, fuir dans le
-    démon : c'est une marque de sûreté (elle refuse les gestes d'origine humaine), pas une identité.
-    """
-    return {"GRIMOIRE_UNATTENDED": "1"}
-
-
 #: Code d'un refus d'inscription qui n'est pas un refus du mandat : le journal d'autorité est en erreur.
 JOURNAL_ERROR = "journal_error"
 
@@ -587,11 +595,7 @@ def mandate_precheck(service: TaskService, role: str) -> str:
 
 def _halt(exec_: Exec, cwd: Path, short: str, claude_bin: str) -> tuple[bool, str]:
     """Arrête (``claude stop``) une session lancée qu'on ne peut pas attester : ``(arrêt confirmé, fin de phrase)``."""
-    result = exec_([claude_bin, "stop", short], cwd, None)
-    if result.returncode == 0:
-        return True, f", session {short} arrêtée"
-    why = (result.stderr or result.stdout).strip()[:200] or f"sortie {result.returncode}"
-    return False, f", session {short} NON arrêtée ({why})"
+    return ClaudeCodeWorkerHost(claude_bin).halt(exec_, cwd, short)
 
 
 def _worktree_hooks(wt_path: Path) -> str:
@@ -675,7 +679,9 @@ def _session_marks(service: TaskService, task_id: str) -> tuple[str, int, int]:
     return short, started, halted
 
 
-def halt_idle_workers(service: TaskService, exec_: Exec, claude_bin: str = "claude") -> tuple[str, ...]:
+def halt_idle_workers(
+    service: TaskService, exec_: Exec, claude_bin: str = "claude", *, opencode: OpencodeWorkerHost | None = None,
+) -> tuple[str, ...]:
     """Arrête (``claude stop``) la session de chaque worker dont la tâche est en revue ou en attente ; rend les tâches arrêtées.
 
     La conversation reste : un renvoi du relecteur ou du merger la reprend (:func:`resume_worker`). L'arrêt est noté au
@@ -689,6 +695,12 @@ def halt_idle_workers(service: TaskService, exec_: Exec, claude_bin: str = "clau
             continue
         short, started, last_halt = _session_marks(service, tid)
         if not short or last_halt > started:
+            continue
+        if payload.get("host") == OPENCODE_HOST:
+            from grimoire.missions.worker_lifecycle import halt_opencode
+
+            if halt_opencode(service, tid, task.status.value, opencode or OpencodeWorkerHost()):
+                halted.append(tid)
             continue
         cwd = Path(str(payload.get("cwd") or service.home_root))
         confirmed, _ = _halt(exec_, cwd, short, claude_bin)
@@ -732,7 +744,7 @@ def _seal_worker_for_dual_review(
 
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
-    permission_mode: str = "", cause: str = "",
+    permission_mode: str = "", cause: str = "", opencode: OpencodeWorkerHost | None = None,
 ) -> ExecResult:
     """Rend la tâche à son worker : reprend la session arrêtée par ``claude --bg --resume``, à défaut en lance une neuve.
 
@@ -742,24 +754,27 @@ def resume_worker(
     de nouveau dans le WIP et c'est elle que le prochain arrêt vise. *cause* nomme l'origine de la reprise
     (``provider_error`` pour le tick, #1158) ; elle est notée au ledger et plafonne les reprises automatiques.
     """
+    if launch.get("host") == OPENCODE_HOST:
+        from grimoire.missions.worker_lifecycle import resume_opencode_worker
+
+        return resume_opencode_worker(
+            service, exec_, task_id, launch, message, permission_mode=permission_mode, cause=cause, host=opencode,
+        )
     cwd = Path(str(launch.get("cwd") or "."))
-    argv = [claude_bin, "--bg", "--resume", str(launch.get("session_id") or "")]
+    host = ClaudeCodeWorkerHost(claude_bin)
     # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
-    routed = ["--settings", str(settings_path(str(launch["provider"])))] if launch.get("provider") else []
-    if launch.get("lean"):
-        routed += LEAN_SESSION_ARGS
-    argv += routed
-    if permission_mode:
-        argv += ["--permission-mode", permission_mode]
-    result = exec_([*argv, message], cwd, session_env())
+    spec = SessionSpec(
+        name=f"grimoire-{task_id}", prompt=message, model=str(launch.get("model") or ""), permission_mode=permission_mode,
+        lean=bool(launch.get("lean")), settings=settings_path(str(launch["provider"])) if launch.get("provider") else None,
+        resume=str(launch.get("session_id") or ""),
+    )
+    resumed = host.plan(spec)
+    result = exec_(list(resumed.argv), cwd, resumed.environ())
     fresh = False
     if result.returncode != 0:
-        fresh_argv = [claude_bin, "--bg", "--name", f"grimoire-{task_id}", *routed]
-        if launch.get("model"):
-            fresh_argv += ["--model", str(launch["model"])]
-        if permission_mode:
-            fresh_argv += ["--permission-mode", permission_mode]
-        retry = exec_([*fresh_argv, f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}"], cwd, session_env())
+        prompt = f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}"
+        again = host.plan(replace(spec, resume="", prompt=prompt))
+        retry = exec_(list(again.argv), cwd, again.environ())
         if retry.returncode != 0:
             return result
         result, fresh = retry, True
@@ -795,7 +810,7 @@ class WorkerLauncher:
 
     def __init__(
         self, service: TaskService, policy: OrchestratorPolicy, *, exec_: Exec = default_exec,
-        claude_bin: str = "claude", now: datetime | None = None,
+        claude_bin: str = "claude", now: datetime | None = None, opencode: OpencodeWorkerHost | None = None,
     ) -> None:
         self._service = service
         self._policy = policy
@@ -803,6 +818,8 @@ class WorkerLauncher:
         self._claude = claude_bin
         self._now = now
         self._version: str | None = None
+        self._host = ClaudeCodeWorkerHost(claude_bin)
+        self._opencode = opencode or OpencodeWorkerHost()
 
     # -- gardes -------------------------------------------------------------
 
@@ -902,18 +919,26 @@ class WorkerLauncher:
         if not base:
             return LaunchOutcome(tid, "failed", f"préparation refusée : {why}")
         try:
+            # L'hôte se choisit avant le claim (il y est noté) ; la tâche n'est que lue.
+            ahead = service.require(tid)
+            sensitive = self.routing_for(ahead)
+            host, fallback = self.host_for(ahead, sensitive)
             wt = create_task_worktree(service, tid, repo=service.home_root, base=base, into=into, actor=WORKER_ACTOR)
             service.context(tid)
-            service.claim(tid, WORKER_ACTOR, host=_HOST)
+            service.claim(tid, WORKER_ACTOR, host=self._opencode.claim_host if host == OPENCODE_HOST else _HOST)
         except (GrimoireError, ValueError, OSError) as exc:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
             return LaunchOutcome(tid, "failed", f"préparation refusée : {exc}")
-        refused = _worktree_hooks(wt.path) or _freeze_repository(service, tid)
+        task = service.require(tid)
+        prepare = prepare_opencode_worktree if host == OPENCODE_HOST else _worktree_hooks
+        refused = prepare(wt.path) or _freeze_repository(service, tid)
         if refused:
             service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=refused)
             return LaunchOutcome(tid, "skipped", refused)
-        task = service.require(tid)
-        sensitive = self.routing_for(task)
+        if host == OPENCODE_HOST:
+            from grimoire.missions.worker_lifecycle import launch_opencode
+
+            return launch_opencode(self, task, wt)
         tier = "strong" if sensitive.strong else self._tier_for(task)
         # Une tâche qui vise un chemin sensible ne prend pas la route du fournisseur bon marché : elle part sur
         # l'hôte, au palier fort, plutôt que de voir sa PR rejetée puis réécrite (``sensitive_route``).
@@ -974,6 +999,7 @@ class WorkerLauncher:
                 "cwd": str(wt.path), "branch": wt.branch,
                 "lease_epoch": current.lease_epoch if current is not None else 0,
                 **({"sensitive_route": sensitive.to_dict()} if sensitive.strong else {}),
+                **({"host_fallback": fallback} if fallback else {}),
             },
         )
         detail = f"session {session} dans {wt.path}"
@@ -1001,14 +1027,16 @@ class WorkerLauncher:
         base = remote_ref if _git_out(repo, "rev-parse", "--verify", "--quiet", f"{remote_ref}^{{commit}}") else f"refs/heads/{name}"
         return base, name, ""
 
-    def _abandon(self, tid: str, short: str, cwd: Path, detail: str, *, count: bool) -> LaunchOutcome:
+    def _abandon(
+        self, tid: str, short: str, cwd: Path, detail: str, *, count: bool, host: OpencodeWorkerHost | None = None,
+    ) -> LaunchOutcome:
         """Une session lancée qu'on n'atteste pas : arrêtée, la tentative notée, la tâche rendue.
 
         Arrêt non confirmé : la tâche reste tenue (une session qui tourne peut encore pousser sur sa branche), la
         session est nommée au ledger (``halted: false``) et l'échec compte au disjoncteur quoi qu'il arrive.
         """
         service = self._service
-        halted, said = _halt(self._exec, cwd, short, self._claude)
+        halted, said = host.halt(self._exec, cwd, short) if host is not None else _halt(self._exec, cwd, short, self._claude)
         detail += said
         claim = service.require(tid).claim
         epoch = claim.lease_epoch if claim is not None else 0
@@ -1059,27 +1087,44 @@ class WorkerLauncher:
             detail += " — disjoncteur ouvert"
         return LaunchOutcome(tid, "failed", detail)
 
+    def host_for(self, task: MissionTask, sensitive: SensitiveRoute) -> tuple[str, str]:
+        """``(hôte, motif du repli)`` du worker de *task* : ``roles.worker.host``, sauf deux cas qui restent sur Claude Code.
+
+        Une tâche qui vise un chemin sensible part sur Claude Code au palier fort (``opus``) quoi que dise la
+        politique ; une tâche V2 aussi : rien ne pourrait juger seul le travail d'un modèle tiers (même règle que la
+        route compatible Anthropic). Le repli est noté au ledger, jamais silencieux.
+        """
+        if self._policy.worker.host != OPENCODE_HOST:
+            return self._host.name, ""
+        if sensitive.strong:
+            return self._host.name, f"route sensible : Claude Code au palier fort ({sensitive.reason})"
+        if classify(task) is Verifiability.V2:
+            return self._host.name, "tâche V2 : aucun verdict mécanique, le travail reste sur Claude Code"
+        return OPENCODE_HOST, ""
+
     def _argv(self, tid: str, model: str, route: WorkerRoute | None = None) -> list[str]:
-        # Pas de ``--session-id`` : ``claude --bg`` l'ignore (#966), l'identité se lit après le lancement.
-        argv = [self._claude, "--bg", "--name", f"grimoire-{tid}"]
-        if route is not None:
-            argv += ["--settings", str(route.settings)]
-        if self._policy.worker.lean:
-            argv += LEAN_SESSION_ARGS
-        if model:
-            argv += ["--model", model]
-        if self._policy.worker.permission_mode:
-            argv += ["--permission-mode", self._policy.worker.permission_mode]
-        argv.append(self._prompt(tid, self._host_version()))
-        return argv
+        spec = SessionSpec(
+            name=f"grimoire-{tid}", prompt=self._prompt(tid, self._host_version()), model=model,
+            permission_mode=self._policy.worker.permission_mode, lean=self._policy.worker.lean,
+            settings=route.settings if route is not None else None,
+        )
+        return list(self._host.plan(spec).argv)
 
     @staticmethod
-    def _prompt(tid: str, host_version: str = "") -> str:
-        """La consigne du worker ; sa PR s'ouvre prête à relire : un brouillon n'est jamais fusionné (#993)."""
+    def _prompt(tid: str, host_version: str = "", *, attached: bool = False) -> str:
+        """La consigne du worker ; sa PR s'ouvre prête à relire : un brouillon n'est jamais fusionné (#993).
+
+        *attached* : le lanceur a déjà rattaché la session au claim (opencode n'exporte pas d'identité de session
+        aux commandes qu'il lance) ; la consigne ne demande alors pas ``grimoire task attach``.
+        """
         flag = f" --host-version {host_version}" if host_version else ""
+        attach = (
+            "Le lanceur a rattaché cette session à ton claim ; "
+            if attached else f"Rattache cette session à ton claim (`grimoire task attach {tid}{flag}`), "
+        )
         return (
             f"Tu es le worker de la tâche {tid}, dans son worktree task/{tid}. "
-            f"Rattache cette session à ton claim (`grimoire task attach {tid}{flag}`), lis `grimoire task show {tid}`, "
+            f"{attach}lis `grimoire task show {tid}`, "
             "réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR "
             "prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), "
             f"et passe la tâche en revue (`grimoire task move {tid} --to running`, puis `--to needs_verification`) : "

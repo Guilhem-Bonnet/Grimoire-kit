@@ -78,7 +78,10 @@ def _ready(root: Path, title: str, *, v0: bool = False) -> str:
     )
     if v0:
         task = service.ledger.create_task(
-            mission.id, title, acceptance=("pytest tests/x.py : le code de sortie vaut 0",), owner="amelia",
+            mission.id,
+            title,
+            acceptance=("pytest tests/x.py : le code de sortie vaut 0",),
+            owner="amelia",
             checks=(TaskCheck(cmd="pytest tests/x.py"),),
         )
     else:
@@ -136,8 +139,13 @@ def _files(root: Path, home: Path, ids: dict[str, str]) -> dict[str, Any]:
     return _scrub(found, root, home, ids)
 
 
-def _scenario(base: Path, name: str, setup: Callable[[Path], dict[str, str]], host: FakeHost | None = None,
-              after: Callable[[Path, FakeHost, dict[str, str]], None] | None = None) -> dict[str, Any]:
+def _scenario(
+    base: Path,
+    name: str,
+    setup: Callable[[Path], dict[str, str]],
+    host: FakeHost | None = None,
+    after: Callable[[Path, FakeHost, dict[str, str]], None] | None = None,
+) -> dict[str, Any]:
     home = base / name / "user-home"
     home.mkdir(parents=True)
     os.environ["HOME"] = os.environ["USERPROFILE"] = str(home)  # un magasin de secrets par scénario
@@ -189,8 +197,9 @@ def _resume(*, fail: bool) -> Callable[[Path, FakeHost, dict[str, str]], None]:
 def scenarios(base: Path) -> dict[str, Any]:
     """Tous les scénarios, chemins, identifiants de tâche et uuid remplacés : ce que la fixture contient."""
 
-    def plain(extra: str, *, v0: bool = False, title: str = "travail", provider: bool = False,
-              reviewer: str = "") -> Callable[[Path], dict[str, str]]:
+    def plain(
+        extra: str, *, v0: bool = False, title: str = "travail", provider: bool = False, reviewer: str = ""
+    ) -> Callable[[Path], dict[str, str]]:
         def setup(root: Path) -> dict[str, str]:
             if provider:
                 _deepseek(root)
@@ -209,11 +218,16 @@ def scenarios(base: Path) -> dict[str, Any]:
         "model_by_class_v0": _scenario(base, "e", plain(by_class, v0=True)),
         "model_by_class_v1": _scenario(base, "f", plain(by_class)),
         "model_by_class_v0_deepseek": _scenario(
-            base, "g", plain("      provider: deepseek\n      model_by_class: true\n      tier: mid\n", v0=True, provider=True)
+            base,
+            "g",
+            plain("      provider: deepseek\n      model_by_class: true\n      tier: mid\n", v0=True, provider=True),
         ),
         "sensitive_route": _scenario(
-            base, "h",
-            plain(f"{deepseek}      sensitive_route: strong\n", title="modifier pyproject.toml", v0=True, provider=True),
+            base,
+            "h",
+            plain(
+                f"{deepseek}      sensitive_route: strong\n", title="modifier pyproject.toml", v0=True, provider=True
+            ),
         ),
         "reviewer": _scenario(base, "i", plain("      model: sonnet\n", reviewer="      wip: 1\n"), after=_to_review),
         "reviewer_lean": _scenario(
@@ -222,9 +236,7 @@ def scenarios(base: Path) -> dict[str, Any]:
         "resume_routed_lean": _scenario(
             base, "k", plain(f"{deepseek}      lean: true\n", v0=True, provider=True), after=_resume(fail=False)
         ),
-        "resume_fallback_fresh": _scenario(
-            base, "l", plain("      tier: strong\n"), after=_resume(fail=True)
-        ),
+        "resume_fallback_fresh": _scenario(base, "l", plain("      tier: strong\n"), after=_resume(fail=True)),
     }
 
 
@@ -264,7 +276,10 @@ def test_the_fixture_covers_every_case() -> None:
     assert argv_of("worker_strong")[argv_of("worker_strong").index("--model") + 1] == "opus"
     assert "--strict-mcp-config" in argv_of("worker_lean_model")
     assert "--settings" in argv_of("provider_deepseek")
-    assert expected["provider_deepseek"]["files"]["deepseek.claude-settings.json"]["env"]["ANTHROPIC_MODEL"] == "deepseek-chat"
+    assert (
+        expected["provider_deepseek"]["files"]["deepseek.claude-settings.json"]["env"]["ANTHROPIC_MODEL"]
+        == "deepseek-chat"
+    )
     assert argv_of("model_by_class_v0")[argv_of("model_by_class_v0").index("--model") + 1] == "haiku"
     assert argv_of("model_by_class_v1")[argv_of("model_by_class_v1").index("--model") + 1] == "sonnet"
     sensitive = argv_of("sensitive_route")

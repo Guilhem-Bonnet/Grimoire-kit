@@ -662,6 +662,66 @@ orchestrator:
 - **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
   | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
 
+### Hôte du worker : Claude Code ou opencode (#1281, lot L4)
+
+Le worker du tick passe par une interface d'hôte (`WorkerHost`, `missions/worker_host.py`). Elle porte ce qui dépend
+de l'hôte : ligne de commande, environnement, modèle, mode de permission, consigne, identité de session, arrêt.
+`roles.worker.host` choisit l'hôte. Absent, c'est Claude Code, à l'identique d'avant. Le test
+`tests/unit/missions/test_worker_host_parity.py` compare argv, environnement et fichiers écrits à une fixture
+produite depuis `origin/main` 3.100.0.
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  roles:
+    worker:
+      enabled: true
+      host: opencode          # claude-code (défaut) | opencode ; toute autre valeur rend la politique invalide
+      provider: deepseek      # obligatoire avec opencode : deepseek, moonshot (ou kimi) ou un fournisseur local
+      tier: cheap
+      permission_mode: acceptEdits
+    reviewer:
+      host: claude-code       # seule valeur admise dans ce lot
+dispatch:
+  models:
+    opencode:
+      deepseek:
+        cheap: deepseek-v4-flash
+```
+
+- **Commande** : `opencode run --format json --title grimoire-<id> --model <fournisseur>/<modèle> "<consigne>"`,
+  la commande non interactive documentée (<https://opencode.ai/docs/cli/#run>). Elle ne rend pas la main : le kit
+  la lance en arrière-plan, dans son propre groupe de processus. Sa sortie JSON va dans
+  `_grimoire-output/control/workers/<id>.opencode.jsonl`, hors du worktree.
+- **Fournisseur et modèle** : `deepseek` et `moonshotai` sont les identifiants du catalogue d'opencode. Un
+  fournisseur `local` (Ollama) est déclaré en ligne (`@ai-sdk/openai-compatible`), à l'URL de boucle locale
+  `anthropic_base_url` suivie de `/v1`. Le modèle vient de `roles.worker.model`, sinon de
+  `dispatch.models.opencode.<fournisseur>.<palier>`, sinon du premier modèle non suspendu du palier dans le
+  registre (repli sur `cheap`). Sans modèle, la tâche attend : jamais de nom inventé.
+- **Clé** : lue au magasin de secrets (`grimoire providers set-key`). `OPENCODE_CONFIG_CONTENT` ne porte que
+  `{env:DEEPSEEK_API_KEY}` (substitution documentée, <https://opencode.ai/docs/config/>). La valeur ne passe que
+  dans l'environnement du processus, jamais dans l'argv, le ledger ni le journal d'autorité.
+- **Garde** : le plugin `.opencode/plugin/grimoire-guard.js` émis par le kit est posé dans le worktree s'il manque.
+  `opencode debug config` doit le lister dans `plugin`, lancé dans le worktree avec l'environnement du worker.
+  Cette commande n'appelle aucun modèle. Sans cette preuve, rien ne part : la tâche revient en `ready` avec le motif.
+  `--pure`, qui désactive les plugins, n'est jamais passé.
+- **Mode de permission** : `opencode run` rejette d'office toute demande d'autorisation. `acceptEdits`, `default`,
+  `dontAsk` et `auto` gardent la table de l'hôte. `plan` prend l'agent `plan` intégré. `bypassPermissions` passe
+  `--dangerously-skip-permissions`. Tout autre mode fait attendre la tâche, avec son motif.
+- **Restent sur Claude Code** : une tâche qui vise un chemin sensible (`sensitive_route: strong`, `opus`) et une
+  tâche V2, qu'aucun verdict mécanique ne jugerait. Le lancement porte `host_fallback` avec la raison.
+- **Indépendance de la relecture** : le relecteur reste sur Claude Code. Son modèle doit différer de celui du
+  worker (`models_distinct`). Un modèle DeepSeek ou Kimi est d'une autre famille que `sonnet` ou `opus`.
+- **Pas de repli silencieux** : sans route (fournisseur fermé, clé absente, politique de données, fournisseur local
+  occupé), la tâche est différée (`task.worker_deferred`). Elle ne part pas sur Claude Code à la place.
+- **Vie de la session** : l'identité se lit dans `opencode session list --format json` (titre et dossier). Le
+  lanceur rattache lui-même la session au claim : opencode n'exporte pas d'identité aux commandes qu'il lance. Un
+  processus vivant dont le journal a parlé dans les 15 dernières minutes renouvelle le bail. Un processus mort rend
+  la tâche. En revue ou en attente, le processus reçoit `SIGTERM`. Un renvoi reprend la conversation par
+  `opencode run --session <id>`.
+- **Limites** : la reprise automatique après une erreur transitoire du fournisseur (#1158) lit le journal de Claude
+  Code et ne s'applique pas à opencode. `lean` est sans effet sur opencode. La relecture opencode n'est pas outillée.
+
 ### Fusion par le merger (#876, lot 4)
 
 Le rôle `merger` est une étape de `orchestrate tick --apply`, après le relecteur. Il est désactivé par défaut :
