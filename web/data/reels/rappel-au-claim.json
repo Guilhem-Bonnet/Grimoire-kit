@@ -14,9 +14,9 @@
     "grimoire task add \"Ecrire la doc du CLI\" -a \"le test passe\" --check \"test -f DOC.md\" --ready",
     "grimoire task recall GAO-ecrire-la-do-002"
   ],
-  "kit_version": "3.92.0",
-  "recorded_at": "2026-11-20T05:43:27Z",
-  "output_sha256": "2a5049f39872afda8c25c1938adf114743d13d02a4d82e44827debec69889fd5",
+  "kit_version": "3.104.0",
+  "recorded_at": "2026-11-23T18:52:42Z",
+  "output_sha256": "bb5733b464881e775e701d937b50abcfb6ccbbc95057c931cc87cb4b455d69ba",
   "frames": [
     {
       "kind": "run",
@@ -52,7 +52,7 @@
       "kind": "run",
       "command": "grimoire task verify GAO-ecrire-la-do-001",
       "exit_code": 0,
-      "output": "OK GAO-ecrire-la-do-001 — verdict passed (EVD-GAO-ecrire-la-do-001-001,\nver-GAO-ecrire-la-do-001-001)"
+      "output": "OK GAO-ecrire-la-do-001 — verdict passed (EVD-GAO-ecrire-la-do-001-001,\nver-GAO-ecrire-la-do-001-001)\n  - verified-head : <hex>"
     },
     {
       "kind": "run",

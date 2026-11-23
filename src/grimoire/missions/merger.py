@@ -542,8 +542,9 @@ class MergeStage(DualReviewMixin):
         if pr.draft:  # après le sceau : seule une tête couverte par le READY attesté sort du brouillon
             return self._draft(task, wt, judged, pr)
         # Double relecture (``dual_review`` seulement) : la seconde relecture est demandée dès que le premier READY
-        # tient, avant la CI et tout réalignement — les deux sceaux portent alors sur la même tête du worker.
-        if grant is None and (held := self._dual_step(task, wt, judged, pr)) is not None:
+        # tient, avant la CI et tout réalignement — les deux sceaux portent alors sur la même tête du worker. Une
+        # dérogation d'arbitrage ne saute pas ce contrôle : les chemins protégés gardent leur paire de READY.
+        if (held := self._dual_step(task, wt, judged, pr)) is not None:
             return held
         ci, detail = self._stable_ci(tid, pr, wt.branch)
         if ci == "unknown":
@@ -1025,6 +1026,37 @@ class MergeStage(DualReviewMixin):
         kept = sorted(p for p in pr.files if any(fnmatch.fnmatchcase(p.casefold(), pat) for pat in patterns))
         return self._reserved_reason(kept)
 
+    def _unverified(self, task: MissionTask, wt: TaskWorktree, head: str) -> str:
+        """#1257 : une tâche qui déclare ``--check`` ne fusionne pas sans pack et verdict ``passed`` mécaniques sur la tête relue.
+
+        Le verdict doit porter sur le dernier pack, contenir un ``command-NN`` vert par commande déclarée et avoir été
+        rendu sur *head* ; une ligne de verdict illisible ferme l'accès. ``""`` si la tâche ne déclare aucune commande
+        ou si la preuve tient.
+        """
+        if not task.checks:
+            return ""
+        redo = f"`grimoire task verify {task.id}` d'abord"
+        service = EvidenceService(wt.path / _EVIDENCE)
+        packs = service.list_packs(task.id)
+        if not packs:
+            return f"{task.id} déclare des commandes (--check) mais n'a aucun pack de preuve : {redo}"
+        if service.has_unreadable_verdicts(task.id):
+            return f"{task.id} : une ligne de verdict est illisible, la preuve ne peut pas être établie : {redo}"
+        verdict = service.get_latest_verdict(task.id)
+        if verdict is None or verdict.verdict.value != "passed":
+            state = verdict.verdict.value if verdict is not None else "absent"
+            return f"{task.id} déclare des commandes (--check) sans verdict verify vert (verdict : {state}) : {redo}"
+        if verdict.evidence_pack_id != packs[-1].id:
+            return f"{task.id} : le verdict vert porte sur un autre pack que le dernier : {redo}"
+        green = {c.id for c in verdict.checks if c.result.value == "passed"}
+        missing = [f"command-{i:02d}" for i in range(1, len(task.checks) + 1) if f"command-{i:02d}" not in green]
+        if missing:
+            return f"{task.id} : aucun contrôle vert pour {', '.join(missing)} dans le verdict : {redo}"
+        seen = next((c.reason for c in verdict.checks if c.id == "verified-head"), "")
+        if seen != head:
+            return f"{task.id} : les commandes ont été vérifiées sur {seen[:12] or 'une tête inconnue'}, pas sur {head[:12]} : {redo}"
+        return ""
+
     @staticmethod
     def _reserved_reason(kept: list[str]) -> str:
         if kept:
@@ -1059,14 +1091,18 @@ class MergeStage(DualReviewMixin):
         kept = self._kept_to_human(task, pr)
         if kept:
             return self._ask_human(task, wt, "merge", judged.id, kept, pr.number)
+        # #1257 / #1326 : une dérogation d'arbitrage ne dispense jamais du contrôle verify des commandes déclarées.
+        if unverified := self._unverified(task, wt, head):
+            return self._ask_human(task, wt, "merge", judged.id, unverified, pr.number)
         grant = None
-        if receipt is None:  # GAO-r-le-arbitre-001 : une dérogation tient lieu de reçu, sur sa tête seulement
+        if receipt is None:  # GAO-r-le-arbitre-001 : une dérogation **scellée** tient lieu de reçu, sur sa tête seulement
             grant = arbiter.merge_grant(self._service, tid)
             if grant is None or str(grant.payload.get("head") or "") != head:
                 return MergerOutcome(tid, "wait", "waiting",
                                      "aucun reçu scellé ni dérogation d'arbitrage pour cette tête : revu au tick suivant",
                                      pr.number)
-        provenance = ({"kind": "verdict", "ref": f"{tid}:arbitration={grant.id}"} if grant is not None else
+        provenance = ({"kind": "verdict", "ref": f"{tid}:arbitration={grant.payload.get('request_id')}"}
+                      if grant is not None else
                       {"kind": "receipt", "ref": f"{tid}:review={judged.payload.get('review')}:head={head[:12]}"})
         try:
             with acting_as_orchestrator():
@@ -1081,7 +1117,8 @@ class MergeStage(DualReviewMixin):
         except (MandateRefusedError, GrimoireError) as exc:
             return self._ask_human(task, wt, "merge", judged.id, str(exc), pr.number)
         # Double relecture : les deux sceaux sont relus ici, juste avant le geste, sur la tête que ``gh pr merge`` exige.
-        if grant is None and (held := self._dual_step(task, wt, judged, pr, at_merge=True)) is not None:
+        # Une dérogation ne l'écarte pas : les chemins protégés gardent leurs deux sceaux.
+        if (held := self._dual_step(task, wt, judged, pr, at_merge=True)) is not None:
             return held
         self._note(MERGE_REQUESTED_EVENT, tid, {
             "pr": pr.number, "head": head, "origin": ORIGIN_ORCHESTRATOR, "mandate_id": auth.mandate_id, "provenance": provenance,
