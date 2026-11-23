@@ -7,6 +7,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- test(guard): `test_une_ecriture_prouvee_est_refusee_et_revoque` distingue le refus par dépassement de `POLICY_BUDGET_S` (`detail.policy_budget == "exceeded"`, sans `authority_vector`) du refus de la garde : le refus reste exigé, le détail est affiché dans le message d'assertion, et un test force le chemin budget (#1305)
+
 ### Fixed
 
 - **acp** : `AcpClient` ferme stdin et libère le sous-processus quand `start()` échoue (agent déjà sorti) ; `grimoire up` n'affiche plus « Exception ignored … BrokenPipeError » à la collecte du flux. Verdict doctor inchangé. Closes #1313.
