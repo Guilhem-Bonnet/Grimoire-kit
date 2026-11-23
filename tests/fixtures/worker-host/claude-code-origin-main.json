@@ -1,0 +1,460 @@
+{
+  "model_by_class_v0": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "haiku",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "model_by_class_v0_deepseek": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--settings",
+          "<HOME>/.env-store/deepseek.claude-settings.json",
+          "--model",
+          "deepseek-chat",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n",
+      "deepseek.claude-settings.json": {
+        "apiKeyHelper": "sed -n 's/^DEEPSEEK_API_KEY=//p' <HOME>/.env-store/deepseek.env",
+        "env": {
+          "ANTHROPIC_BASE_URL": "https://api.example.test/anthropic",
+          "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-chat",
+          "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-chat",
+          "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-chat",
+          "ANTHROPIC_MODEL": "deepseek-chat",
+          "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-chat"
+        },
+        "permissions": {
+          "deny": [
+            "Read(~/.env-store/**)",
+            "Read(~/.ssh/**)",
+            "Read(~/.aws/**)",
+            "Read(~/.config/gh/**)"
+          ]
+        }
+      }
+    }
+  },
+  "model_by_class_v1": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "sonnet",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "provider_deepseek": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--settings",
+          "<HOME>/.env-store/deepseek.claude-settings.json",
+          "--model",
+          "deepseek-chat",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n",
+      "deepseek.claude-settings.json": {
+        "apiKeyHelper": "sed -n 's/^DEEPSEEK_API_KEY=//p' <HOME>/.env-store/deepseek.env",
+        "env": {
+          "ANTHROPIC_BASE_URL": "https://api.example.test/anthropic",
+          "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-chat",
+          "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-chat",
+          "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-chat",
+          "ANTHROPIC_MODEL": "deepseek-chat",
+          "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-chat"
+        },
+        "permissions": {
+          "deny": [
+            "Read(~/.env-store/**)",
+            "Read(~/.ssh/**)",
+            "Read(~/.aws/**)",
+            "Read(~/.config/gh/**)"
+          ]
+        }
+      }
+    }
+  },
+  "resume_fallback_fresh": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "opus",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      },
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--resume",
+          "<UUID>",
+          "--permission-mode",
+          "acceptEdits",
+          "renvoi du relecteur"
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      },
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "opus",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner.\n\nReprise après un renvoi : renvoi du relecteur"
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "resume_routed_lean": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--settings",
+          "<HOME>/.env-store/deepseek.claude-settings.json",
+          "--strict-mcp-config",
+          "--tools=Bash,Read,Edit,Write,Glob,Grep",
+          "--model",
+          "deepseek-chat",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      },
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--resume",
+          "<UUID>",
+          "--settings",
+          "<HOME>/.env-store/deepseek.claude-settings.json",
+          "--strict-mcp-config",
+          "--tools=Bash,Read,Edit,Write,Glob,Grep",
+          "--permission-mode",
+          "acceptEdits",
+          "renvoi du relecteur"
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n",
+      "deepseek.claude-settings.json": {
+        "apiKeyHelper": "sed -n 's/^DEEPSEEK_API_KEY=//p' <HOME>/.env-store/deepseek.env",
+        "env": {
+          "ANTHROPIC_BASE_URL": "https://api.example.test/anthropic",
+          "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-chat",
+          "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-chat",
+          "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-chat",
+          "ANTHROPIC_MODEL": "deepseek-chat",
+          "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-chat"
+        },
+        "permissions": {
+          "deny": [
+            "Read(~/.env-store/**)",
+            "Read(~/.ssh/**)",
+            "Read(~/.aws/**)",
+            "Read(~/.config/gh/**)"
+          ]
+        }
+      }
+    }
+  },
+  "reviewer": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "sonnet",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      },
+      {
+        "argv": [
+          "claude",
+          "stop",
+          "00000001"
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": null
+      },
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-review-<T>",
+          "--model",
+          "opus",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le relecteur de la tâche <T>. Tu ne vois pas le raisonnement du worker et tu ne le cherches pas : tu juges le résultat. Lis les critères d'acceptation (`grimoire task show <T>`), le diff de la PR (`git fetch -q origin main` puis `git diff origin/main...HEAD` (depuis `git merge-base origin/main HEAD`, la base réelle de la PR, ou `gh pr diff task/<T>`), jamais depuis la base de création du worktree) et le dernier pack de preuve, puis rejoue les commandes qui montrent chaque critère. Vérifie qu'aucun fichier hors du périmètre de la tâche n'est modifié : un fichier réécrit sans raison (`uv.lock`, un fichier généré) est un constat. Ne modifie aucun fichier suivi du dépôt. Note `git status --porcelain` avant tes commandes et lance-les avec `uv run --frozen` (un `uv run` simple réécrit `uv.lock`). Avant `task review`, remets l'arbre dans l'état noté : retire les fichiers non suivis que tes commandes ont créés (un rapport rejoué…), restaure par `git checkout -- <chemin>` un fichier suivi qu'elles ont réécrit ; sinon ton verdict ne porte pas sur la tête et il est périmé. Écris ton verdict dans `_grimoire-output/reviews/<T>/verdict.json` (schéma grimoire-review-verdict/v1 : `verdict` READY ou NOT-READY ; `criteria`, un objet par critère avec `index` à partir de 1, `status` met, unmet ou unverifiable, `evidence_cmd` et `note` ; `findings` facultatifs), puis lance `grimoire task review <T> --criteria _grimoire-output/reviews/<T>/verdict.json --reviewer reviewer --model opus`. Un critère que porte un job de CI (un test e2e, un test qui a son job) se tient par le verdict de ce job sur la tête relue (`gh pr checks task/<T>`) : tu n'as pas à le rejouer ; s'il est vert, marque le critère met et cite dans `evidence_cmd` le nom du job et son URL ; s'il est encore en cours, ne rends pas de verdict dessus (la relecture sera refaite) ; rouge, il est unmet. READY seulement si chaque critère est tenu et montré, et si aucun check requis de la PR n'est en échec (`gh pr checks task/<T> --required`)."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "reviewer_lean": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "sonnet",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      },
+      {
+        "argv": [
+          "claude",
+          "stop",
+          "00000001"
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": null
+      },
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-review-<T>",
+          "--model",
+          "opus",
+          "--permission-mode",
+          "acceptEdits",
+          "--strict-mcp-config",
+          "--tools=Bash,Read,Edit,Write,Glob,Grep",
+          "Tu es le relecteur de la tâche <T>. Tu ne vois pas le raisonnement du worker et tu ne le cherches pas : tu juges le résultat. Lis les critères d'acceptation (`grimoire task show <T>`), le diff de la PR (`git fetch -q origin main` puis `git diff origin/main...HEAD` (depuis `git merge-base origin/main HEAD`, la base réelle de la PR, ou `gh pr diff task/<T>`), jamais depuis la base de création du worktree) et le dernier pack de preuve, puis rejoue les commandes qui montrent chaque critère. Vérifie qu'aucun fichier hors du périmètre de la tâche n'est modifié : un fichier réécrit sans raison (`uv.lock`, un fichier généré) est un constat. Ne modifie aucun fichier suivi du dépôt. Note `git status --porcelain` avant tes commandes et lance-les avec `uv run --frozen` (un `uv run` simple réécrit `uv.lock`). Avant `task review`, remets l'arbre dans l'état noté : retire les fichiers non suivis que tes commandes ont créés (un rapport rejoué…), restaure par `git checkout -- <chemin>` un fichier suivi qu'elles ont réécrit ; sinon ton verdict ne porte pas sur la tête et il est périmé. Écris ton verdict dans `_grimoire-output/reviews/<T>/verdict.json` (schéma grimoire-review-verdict/v1 : `verdict` READY ou NOT-READY ; `criteria`, un objet par critère avec `index` à partir de 1, `status` met, unmet ou unverifiable, `evidence_cmd` et `note` ; `findings` facultatifs), puis lance `grimoire task review <T> --criteria _grimoire-output/reviews/<T>/verdict.json --reviewer reviewer --model opus`. Un critère que porte un job de CI (un test e2e, un test qui a son job) se tient par le verdict de ce job sur la tête relue (`gh pr checks task/<T>`) : tu n'as pas à le rejouer ; s'il est vert, marque le critère met et cite dans `evidence_cmd` le nom du job et son URL ; s'il est encore en cours, ne rends pas de verdict dessus (la relecture sera refaite) ; rouge, il est unmet. READY seulement si chaque critère est tenu et montré, et si aucun check requis de la PR n'est en échec (`gh pr checks task/<T> --required`)."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "sensitive_route": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "opus",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "worker_default": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "worker_lean_model": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--strict-mcp-config",
+          "--tools=Bash,Read,Edit,Write,Glob,Grep",
+          "--model",
+          "sonnet",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  },
+  "worker_strong": {
+    "calls": [
+      {
+        "argv": [
+          "claude",
+          "--bg",
+          "--name",
+          "grimoire-<T>",
+          "--model",
+          "opus",
+          "--permission-mode",
+          "acceptEdits",
+          "Tu es le worker de la tâche <T>, dans son worktree task/<T>. Rattache cette session à ton claim (`grimoire task attach <T>`), lis `grimoire task show <T>`, réalise la tâche selon ses critères d'acceptation, vérifie-la avec ses checks, puis ouvre la PR prête à relire, jamais en brouillon (`gh pr create` sans `--draft` ; déjà en brouillon : `gh pr ready`), et passe la tâche en revue (`grimoire task move <T> --to running`, puis `--to needs_verification`) : le relecteur ne prend que les tâches en revue. Un choix réversible qui reste dans le périmètre des critères, tranche-le toi-même et note-le (`grimoire task note <T>`). Aux étapes clés (plan arrêté, difficulté rencontrée, tests verts, PR ouverte), note ta progression en une phrase (`grimoire task note <T> \"...\"`) : c'est ce que le cockpit montre de toi ; rien ne te bloque si tu l'oublies. Ne sors pas de ce worktree. Si tu es bloqué (critère inatteignable, hors périmètre, travail déjà livré), dis-le par `grimoire task ask` plutôt que de deviner."
+        ],
+        "cwd": "<ROOT>/.git/grimoire/worktrees/<T>",
+        "env": {
+          "GRIMOIRE_UNATTENDED": "1"
+        }
+      }
+    ],
+    "files": {
+      "<T>:.claude/.gitignore": "*\n"
+    }
+  }
+}
