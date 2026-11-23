@@ -318,3 +318,146 @@ def test_une_panne_du_balayage_des_orphelins_ne_fait_pas_tomber_le_tick(
     monkeypatch.setattr(opencode_homes, "sweep_orphan_homes", boom)
     outcomes = janitor(projet, Workers()).sweep()
     assert actions(outcomes, "opencode_orphans") == [("failed", "RuntimeError")]
+
+
+# --- Branches de refus et de panne, appelées directement (aucun changement de comportement) ---
+
+_NAME = "GAO-x-001-0123456789abcdef"
+
+
+@pytest.fixture
+def racine(projet: Path) -> Path:
+    root = opencode_home(projet)
+    root.mkdir(parents=True)
+    return root
+
+
+def test_purge_home_garde_un_lien_un_fichier_et_un_chemin_resolu_hors_racine(
+    racine: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions import opencode_homes
+
+    (racine / _NAME).symlink_to(tmp_path, target_is_directory=True)
+    assert opencode_homes.purge_home(racine, racine / _NAME) == (False, "lien symbolique")
+    (racine / _NAME).unlink()
+    (racine / _NAME).write_text("x", encoding="utf-8")
+    assert opencode_homes.purge_home(racine, racine / _NAME) == (False, "pas un dossier")
+    (racine / _NAME).unlink()
+    assert opencode_homes.purge_home(racine, racine / _NAME) == (False, "déjà absent")
+    (racine / _NAME).mkdir()
+    monkeypatch.setattr(Path, "resolve", lambda self, strict=False: tmp_path / "ailleurs" / self.name)
+    assert opencode_homes.purge_home(racine, racine / _NAME) == (
+        False,
+        "le chemin résolu sort de la racine opencode du projet",
+    )
+    assert (racine / _NAME).is_dir()
+
+
+def test_purge_home_garde_un_dossier_illisible_ou_sous_un_lien(racine: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import opencode_homes
+
+    (racine / _NAME).mkdir()
+    monkeypatch.setattr(opencode_homes, "_symlink_refusal", lambda _root: "lien symbolique sur le chemin")
+    assert opencode_homes.purge_home(racine, racine / _NAME) == (False, "lien symbolique sur le chemin")
+    monkeypatch.setattr(opencode_homes, "_symlink_refusal", lambda _root: "")
+    real_lstat = Path.lstat
+
+    def lstat(self: Path) -> os.stat_result:
+        if self.name == _NAME:
+            raise PermissionError("refusé")
+        return real_lstat(self)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    assert opencode_homes.purge_home(racine, racine / _NAME) == (False, "illisible")
+    assert (racine / _NAME).is_dir()
+
+
+def test_remove_child_sans_descripteur_retire_le_dossier(racine: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import opencode_homes
+
+    (racine / _NAME / "work").mkdir(parents=True)
+    monkeypatch.setattr(opencode_homes, "_fd_removal_supported", lambda: False)
+    assert opencode_homes.purge_home(racine, racine / _NAME) == (True, "")
+    assert not (racine / _NAME).exists()
+
+
+def test_remove_child_refuse_une_racine_changee_ou_un_fichier(racine: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import opencode_homes
+
+    if not opencode_homes._fd_removal_supported():
+        pytest.skip("suppression par descripteur indisponible sur cette plateforme")
+    (racine / _NAME).write_text("x", encoding="utf-8")
+    assert opencode_homes._remove_child(racine, _NAME) == "pas un dossier"
+    monkeypatch.setattr(os.path, "samestat", lambda _a, _b: False)
+    assert opencode_homes._remove_child(racine, _NAME) == "la racine opencode a changé pendant la purge"
+    assert (racine / _NAME).is_file()
+
+
+def test_purge_task_homes_rend_failed_sur_une_erreur_disque(projet: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import opencode_homes
+
+    workers = Workers()
+    tid, home = launched(projet, workers)
+    workers.live.clear()
+
+    def boom(_root: Path, _home: Path) -> tuple[bool, str]:
+        raise PermissionError("refusé")
+
+    monkeypatch.setattr(opencode_homes, "purge_home", boom)
+    status, detail = purge_task_homes(TaskService(projet), tid, workers.host().alive)
+    assert (status, detail) == ("failed", f"HOME opencode {home.name} non retiré : PermissionError")
+    assert home.is_dir()
+
+
+def test_purge_task_homes_dit_un_home_deja_absent(projet: Path) -> None:
+    import shutil
+
+    workers = Workers()
+    tid, home = launched(projet, workers)
+    workers.live.clear()
+    shutil.rmtree(home)
+    assert purge_task_homes(TaskService(projet), tid, workers.host().alive) == (
+        "skipped",
+        "HOME opencode déjà absent",
+    )
+
+
+def test_le_balayage_saute_les_entrees_illisibles_ou_refusees(
+    racine: Path, projet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions import opencode_homes
+
+    (racine / _NAME / "work").mkdir(parents=True)
+    age(racine / _NAME, ORPHAN_AGE_S + 60)
+    monkeypatch.setattr(opencode_homes, "purge_home", lambda _root, _home: (False, "la racine opencode a changé"))
+    assert sweep_orphan_homes(TaskService(projet), [], Workers().host().alive) == []
+
+    def boom(_root: Path, _home: Path) -> tuple[bool, str]:
+        raise PermissionError("refusé")
+
+    monkeypatch.setattr(opencode_homes, "purge_home", boom)
+    assert sweep_orphan_homes(TaskService(projet), [], Workers().host().alive) == []
+    assert (racine / _NAME).is_dir()
+
+
+def test_last_change_ignore_une_entree_illisible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions import opencode_homes
+
+    home = tmp_path / _NAME
+    (home / "work").mkdir(parents=True)
+    old = time.time() - 1000
+    os.utime(home, (old, old))
+
+    class Entry:
+        def stat(self, follow_symlinks: bool = True) -> os.stat_result:
+            raise PermissionError("refusé")
+
+    class Scan:
+        def __enter__(self) -> list[Entry]:
+            return [Entry()]
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(opencode_homes.os, "scandir", lambda _path: Scan())
+    assert opencode_homes._last_change(home) == pytest.approx(old)
