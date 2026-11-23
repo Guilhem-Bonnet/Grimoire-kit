@@ -1,4 +1,4 @@
-"""Contrôles ``hook_commands`` (issue #760) et ``hook_path`` (issue #1022) de ``grimoire doctor``.
+"""Contrôles ``hook_commands`` (#760), ``hook_timeout`` (#1276, #1277) et ``hook_path`` (#1022) de ``grimoire doctor``.
 
 Séparé de :mod:`grimoire.cli.cmd_up` pour tenir sous le plafond de taille des
 modules.
@@ -116,48 +116,84 @@ def check_hook_commands(target: Path) -> list[EnvCheck]:
     )]
 
 
+#: Fichiers de réglages Claude Code lus par ``hook_timeout``, du partagé au local.
+_CLAUDE_SETTINGS = (".claude/settings.json", ".claude/settings.local.json")
+
+
+def _fail_closed_guards(target: Path) -> dict[tuple[str, str], tuple[str, object]]:
+    """Gardes ``PreToolUse`` du kit en échec fermé, par ``(matcher, commande)``.
+
+    Valeur : ``(fichier, timeout brut)``. ``settings.json`` est lu, puis
+    ``settings.local.json`` : une même garde (même matcher, même commande)
+    redéclarée en local prend le délai local. Claude Code fusionne les hooks
+    des deux fichiers ; une garde présente d'un seul côté est gardée telle quelle.
+    """
+    guards: dict[tuple[str, str], tuple[str, object]] = {}
+    for relpath in _CLAUDE_SETTINGS:
+        try:
+            data = json.loads((target / relpath).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+        for entry in entries if isinstance(entries, list) else []:
+            inner = entry.get("hooks") if isinstance(entry, dict) else None
+            matcher = str(entry.get("matcher") or "") if isinstance(entry, dict) else ""
+            for spec in inner if isinstance(inner, list) else []:
+                if not isinstance(spec, dict) or spec.get("onFailure") != "block":
+                    continue
+                command = str(spec.get("command") or "")
+                if _launches_grimoire_hook(command):
+                    guards[(matcher, command)] = (relpath, spec.get("timeout"))
+    return guards
+
+
 def check_guard_timeout(target: Path) -> list[EnvCheck]:
     """Une garde Claude Code en échec fermé a-t-elle un délai tenable sous charge ?
 
     Avec ``"onFailure": "block"``, un dépassement du ``timeout`` (secondes)
     refuse l'outil : un délai court, celui des projets installés en 3.92.0
-    (10 s), refuse des commandes anodines sur une machine chargée. Rien à dire
-    sans garde en échec fermé.
+    (10 s), refuse des commandes anodines sur une machine chargée. Lit
+    ``.claude/settings.json`` puis ``.claude/settings.local.json`` (le local
+    prime, #1277). Un délai booléen ou non numérique est invalide : ``bool``
+    sous-classe ``int``, ``true`` vaudrait sinon 1 s. Rien à dire sans garde en
+    échec fermé.
     """
     from grimoire.hosts.emitters.claude_code import FAIL_CLOSED_TIMEOUT
 
-    settings = target / ".claude" / "settings.json"
-    try:
-        data = json.loads(settings.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    guards = _fail_closed_guards(target)
+    if not guards:
         return []
-    hooks = data.get("hooks") if isinstance(data, dict) else None
-    entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
     short: list[str] = []
-    guarded = 0
-    for entry in entries if isinstance(entries, list) else []:
-        inner = entry.get("hooks") if isinstance(entry, dict) else None
-        for spec in inner if isinstance(inner, list) else []:
-            if not isinstance(spec, dict) or spec.get("onFailure") != "block":
-                continue
-            if not _launches_grimoire_hook(str(spec.get("command") or "")):
-                continue
-            guarded += 1
-            timeout = spec.get("timeout")
-            if isinstance(timeout, int | float) and timeout < FAIL_CLOSED_TIMEOUT:
-                short.append(f"{timeout:g} s")
-    if not guarded:
-        return []
+    invalid: list[str] = []
+    for relpath, timeout in guards.values():
+        if timeout is None:
+            continue  # délai par défaut de Claude Code (60 s)
+        if isinstance(timeout, bool) or not isinstance(timeout, int | float):
+            invalid.append(f"{relpath}: {json.dumps(timeout)}")
+        elif timeout < FAIL_CLOSED_TIMEOUT:
+            short.append(f"{relpath}: {timeout:g} s")
+    problems: list[str] = []
+    if invalid:
+        problems.append(
+            f"PreToolUse guard fails closed with an invalid timeout ({'; '.join(invalid)}) — not a number of seconds"
+        )
     if short:
+        problems.append(
+            f"PreToolUse guard fails closed with timeout {'; '.join(short)} "
+            f"(< {FAIL_CLOSED_TIMEOUT} s) — a slow answer under load is refused by Claude Code"
+        )
+    if problems:
+        remedy = "run `grimoire up` to re-emit the guard with its current timeout"
+        if any(item.startswith(_CLAUDE_SETTINGS[1]) for item in invalid + short):
+            # `up` n'écrit pas le fichier local : la correction y reste à la main.
+            remedy += f"; set a timeout >= {FAIL_CLOSED_TIMEOUT} (seconds) in {_CLAUDE_SETTINGS[1]}"
         return [EnvCheck(
             "hook_timeout",
             passed=False,
             level="warn",
-            detail=(
-                f".claude/settings.json: PreToolUse guard fails closed with timeout {', '.join(short)} "
-                f"(< {FAIL_CLOSED_TIMEOUT} s) — a slow answer under load is refused by Claude Code"
-            ),
-            remedy="run `grimoire up` to re-emit the guard with its current timeout",
+            detail="; ".join(problems),
+            remedy=remedy,
         )]
     return [EnvCheck(
         "hook_timeout",
