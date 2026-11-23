@@ -288,3 +288,63 @@ def test_copilot_refusal_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert code == 2
     assert json.loads(captured.out)["permissionDecision"] == "deny"
     assert "[Grimoire] non." in captured.err
+
+
+# ── L7 : une capture de la sonde ne compte que si elle montre un refus ────────
+
+
+@pytest.mark.parametrize(
+    ("host", "stdout"),
+    [
+        ("cursor", {"permission": "deny"}),
+        ("copilot", {"permissionDecision": "deny"}),
+        ("gemini", {"decision": "deny"}),
+        ("antigravity", {"decision": "deny"}),
+    ],
+)
+def test_flat_deny_verdicts_count_only_in_their_dialect(host: str, stdout: dict) -> None:
+    observed = {"tool_executed": False, "hook_called": True, "hook_exit_code": 0, "hook_stdout": stdout}
+    assert capture_shows_refusal({"host": host, "observed": observed})
+    assert not capture_shows_refusal({"host": host, "observed": {**observed, "tool_executed": True}})
+    # Le champ à plat d'un autre dialecte ne prouve rien.
+    assert not capture_shows_refusal({"host": "codex", "observed": observed})
+
+
+@pytest.mark.parametrize(
+    ("host", "stdout", "exit_code"),
+    [
+        ("cursor", {"permission": "allow", "decision": "deny"}, 0),
+        ("gemini", {"permissionDecision": "allow", "decision": "deny"}, 0),
+        ("cursor", {"permission": "deny", "decision": "allow"}, 2),
+        ("codex", {"hookSpecificOutput": {"permissionDecision": "allow"}, "decision": "deny"}, 2),
+        ("copilot", {"hookSpecificOutput": {"permissionDecision": "deny"}, "permissionDecision": "ask"}, 0),
+    ],
+)
+def test_a_contradictory_decision_is_never_a_refusal(host: str, stdout: dict, exit_code: int) -> None:
+    """B3 : un seul champ de décision autre que ``deny`` invalide la capture, même avec un code 2."""
+    observed = {"tool_executed": False, "hook_called": True, "hook_exit_code": exit_code, "hook_stdout": stdout}
+    assert not capture_shows_refusal({"host": host, "observed": observed})
+
+
+@pytest.mark.parametrize("calls", [{"hook_called": None}, {"hook_called": 1}, {"hook_calls": 0}, {"hook_calls": "1"}])
+def test_hook_call_fields_must_say_the_hook_ran(calls: dict) -> None:
+    """M1 : ``hook_called`` présent doit valoir ``True`` ; ``hook_calls`` présent doit être positif."""
+    observed = {"tool_executed": False, "hook_exit_code": 2, **calls}
+    assert not capture_shows_refusal({"host": "cursor", "observed": observed})
+
+
+def test_a_probe_capture_whose_hook_was_never_called_proves_nothing() -> None:
+    """Le modèle n'a rien tenté, ou l'hôte n'a pas chargé le hook : aucun refus n'a été observé."""
+    observed = {"tool_executed": False, "hook_called": False, "hook_exit_code": 2}
+    assert not capture_shows_refusal({"observed": observed})
+
+
+@pytest.mark.parametrize("verdict", ["executed", "inconclusive", "error"])
+def test_a_promoted_probe_capture_without_refusal_is_reported(tmp_path: Path, verdict: str) -> None:
+    rel = "claude-code/01-pretooluse-deny-probe-1.0.0.json"
+    (tmp_path / "claude-code").mkdir()
+    observed = {"tool_executed": verdict == "executed", "hook_called": verdict == "executed"}
+    (tmp_path / rel).write_text(json.dumps({"verdict": verdict, "observed": observed}), encoding="utf-8")
+    profile = replace(profile_for(HostId.CLAUDE_CODE_CLI), blocking_captures=(rel,))
+    problems = unproven_blocking_claims(profile, tmp_path)
+    assert any("ne montre un refus honoré" in p for p in problems), problems
