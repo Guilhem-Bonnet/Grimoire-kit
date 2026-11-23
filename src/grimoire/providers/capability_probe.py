@@ -3,7 +3,9 @@
 ``grimoire providers probe --capabilities`` interroge, pour chaque fournisseur activé, ce que son
 API donne sans génération : la liste des modèles (``GET /models``) et, quand elle les porte, les
 métadonnées de contexte, de vision, de raisonnement ou de sortie structurée. Pour un fournisseur
-local (Ollama), ``GET /api/tags`` puis ``POST /api/show`` par modèle déclaré. Aucun appel de
+local (Ollama), ``GET /api/tags`` puis ``POST /api/show`` par modèle déclaré ; pour une passerelle
+LiteLLM (``provider_type: litellm``), ``GET <base_url>/v1/models`` puis, s'il répond,
+``GET <base_url>/v1/model/info``. Aucun appel de
 génération n'existe ici : une capacité que seule une génération prouverait reste documentée ou
 inconnue.
 
@@ -32,10 +34,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeGuard
+from urllib.parse import urlsplit
 
 from grimoire.core.fsio import atomic_write
 from grimoire.providers.audit import ollama_base_url
 from grimoire.providers.capabilities import (
+    LITELLM,
     CapabilityPairs,
     CapabilityProbe,
     ProbedModel,
@@ -85,6 +89,12 @@ _ENDPOINTS: Mapping[str, _Endpoint] = {
 
 #: Champs de contexte connus des listes de modèles (Anthropic, DeepSeek, Moonshot, Gemini, vLLM).
 _CONTEXT_KEYS = ("max_input_tokens", "context_window", "context_length", "inputTokenLimit", "max_model_len")
+#: Hôtes d'une boucle locale : seule adresse où une passerelle peut être jointe en ``http://``.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+#: ``model_info`` de ``/model/info`` (docs.litellm.ai/docs/proxy/model_discovery, providers/ollama,
+#: completion/vision, lues le 2026-11-22) : seuls ces champs y sont documentés. La doc prévient qu'un
+#: champ non renseigné vaut ``null`` : seul ``true`` est lu, jamais un ``false`` qui ne dirait rien.
+_LITELLM_FLAGS = (("supports_function_calling", "tools"), ("supports_vision", "vision"))
 
 
 class _ProbeError(Exception):
@@ -247,6 +257,77 @@ def _probe_local(provider: ProviderSpec) -> tuple[str, tuple[ProbedModel, ...]]:
     return f"{base_url}/api/tags", (*shown, *extra)
 
 
+def _gateway_base(raw: str | None) -> str:
+    """La racine admise d'une passerelle, sans ``/`` final ni ``/v1`` ; vide si elle n'est pas admise.
+
+    ``https://`` partout, ``http://`` vers une boucle locale seulement ; ni identifiants, ni requête, ni
+    fragment dans l'URL : la clé part en en-tête, et rien d'autre ne l'accompagne.
+    """
+    url = (raw or "").strip().rstrip("/")
+    try:
+        parts = urlsplit(url)
+        port_ok = parts.port is None or parts.port > 0
+    except ValueError:
+        return ""
+    host = (parts.hostname or "").lower()
+    scheme = parts.scheme.lower()
+    if not host or not port_ok or parts.username or parts.password or parts.query or parts.fragment:
+        return ""
+    if scheme != "https" and not (scheme == "http" and host in _LOOPBACK_HOSTS):
+        return ""
+    return url.removesuffix("/v1")
+
+
+def _litellm_info(base: str, headers: Mapping[str, str]) -> dict[str, CapabilityPairs]:
+    """Capacités par modèle lues sur ``/v1/model/info`` ; ``{}`` si le proxy la refuse (clé virtuelle).
+
+    La doc ne garantit cette route qu'avec la clé maître : un refus ou une réponse illisible n'empêche pas
+    la sonde, il prive seulement les modèles de leur détail.
+    """
+    try:
+        payload = _http_json(f"{base}/v1/model/info", headers)
+    except _ProbeError:
+        return {}
+    entries = payload.get("data") if isinstance(payload, Mapping) else None
+    found: dict[str, CapabilityPairs] = {}
+    for entry in entries[:_MAX_MODELS] if isinstance(entries, list) else ():
+        name = entry.get("model_name") if isinstance(entry, Mapping) else None
+        info = _mapping(entry.get("model_info")) if isinstance(entry, Mapping) else {}
+        if not _valid_model_id(name) or name in found:
+            continue
+        values: dict[str, Any] = {"context_window": info.get("max_input_tokens")}
+        values.update({cap: True for key, cap in _LITELLM_FLAGS if info.get(key) is True})
+        found[name] = _pairs(values)
+    return found
+
+
+def _probe_litellm(provider: ProviderSpec, probed_at: str) -> CapabilityProbe:
+    """Sonde d'une passerelle LiteLLM : ``/v1/models`` (liste), puis ``/v1/model/info`` (détail)."""
+    base = _gateway_base(provider.base_url)
+    if not base:
+        note = "non mesuré : base_url absente ou non admise (https://, ou http:// vers une boucle locale)"
+        return CapabilityProbe(provider.id, False, note, probed_at)
+    endpoint = _Endpoint(f"{base}/v1/models", provider_key_var(provider.id), "bearer", store_only=True)
+    if endpoint.key_var in _reserved_key_vars():
+        note = f"non mesuré : variable de clé réservée à un autre fournisseur ({endpoint.key_var})"
+        return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)
+    key = _key_value(provider.id, endpoint)
+    if not key:
+        note = f"non mesuré : clé absente ({endpoint.key_var}, voir `grimoire providers set-key`)"
+        return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)
+    headers = _auth_headers(endpoint, key)
+    try:
+        listed = _parse_models_payload(_http_json(endpoint.url, headers))
+    except _ProbeError as exc:
+        return CapabilityProbe(provider.id, False, f"non mesuré : LiteLLM {exc}", probed_at, endpoint.url)
+    info = _litellm_info(base, headers)
+    models = tuple(ProbedModel(m.model_id, info.get(m.model_id, m.values)) for m in listed)
+    detail = f", détail de {sum(m.model_id in info for m in listed)} par /model/info" if info else ""
+    return CapabilityProbe(
+        provider.id, True, f"{len(models)} modèle(s) listé(s){detail}", probed_at, endpoint.url, models
+    )
+
+
 def _hosted_endpoint(provider: ProviderSpec) -> _Endpoint | None:
     endpoint = _ENDPOINTS.get(canonical_provider(provider.id, provider.provider_type))
     if endpoint is not None:
@@ -273,6 +354,8 @@ def probe_provider_capabilities(provider: ProviderSpec, *, now: datetime | None 
         except _ProbeError as exc:
             return CapabilityProbe(provider.id, False, f"non mesuré : Ollama {exc}", probed_at, ollama_base_url())
         return CapabilityProbe(provider.id, True, f"{len(models)} modèle(s) listé(s)", probed_at, url, models)
+    if canonical_provider(provider.id, provider.provider_type) == LITELLM:
+        return _probe_litellm(provider, probed_at)
     endpoint = _hosted_endpoint(provider)
     if endpoint is None:
         return CapabilityProbe(provider.id, False, "non mesuré : aucun point d'entrée connu", probed_at)

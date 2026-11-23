@@ -272,6 +272,15 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
                     f"Enabled provider {provider_id!r} has no capabilities.",
                     path=rel_path,
                 )
+            base_url = provider.get("base_url")
+            if provider.get("provider_type") == "litellm" and (not isinstance(base_url, str) or not base_url.strip()):
+                _add_check(
+                    result,
+                    "providers.litellm_base_url_missing",
+                    "error",
+                    f"LiteLLM provider {provider_id!r} has no base_url (root of the LiteLLM proxy).",
+                    path=rel_path,
+                )
             models = provider.get("default_models")
             if not isinstance(models, list) or not models:
                 _add_check(
@@ -292,7 +301,10 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
                 )
             else:
                 forbidden = data_policy.get("forbidden_data_classes")
-                if provider.get("provider_type") == "hosted" and (not isinstance(forbidden, list) or not forbidden):
+                # Une passerelle LiteLLM transmet les prompts à ses propres fournisseurs : même exigence qu'un hébergé.
+                if provider.get("provider_type") in {"hosted", "litellm"} and (
+                    not isinstance(forbidden, list) or not forbidden
+                ):
                     _add_check(
                         result,
                         "providers.hosted_forbidden_missing",
