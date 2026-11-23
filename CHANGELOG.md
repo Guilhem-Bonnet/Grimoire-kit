@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.102.0] - 2026-11-22
+
+- feat(hosts): `grimoire host probe --capabilities` détecte les hôtes installés (Cursor, Codex, Gemini CLI, Antigravity, opencode, Copilot : binaire et version) ; avec `--run`, opt-in et payant, lance une session non interactive bornée par hôte dans un projet jetable, avec un hook témoin qui refuse, et écrit la capture (verdict, charge reçue, version, date) dans `_grimoire-output/host-probes/<hôte>/` ; `--promote` verse à la main une capture qui montre un refus sous `tests/fixtures/hosts/` ; `host status` et `host matrix` affichent la dernière sonde locale sans changer aucune annonce (#1281, L7) (#1314)
+- feat(hosts): Kimi Code devient un hôte (`kimi`) : agents `.kimi-code/agents/` (lancés par `kimi --agent <nom>`), compétences `.agents/skills/`, serveur MCP du kit dans `.kimi-code/mcp.json` (fusion qui préserve l'utilisateur), bloc `AGENTS.md` quand Codex ne le tient pas ; aucune garde, car Kimi Code ne lit de hooks qu'au niveau utilisateur, et `model` n'est jamais émis : dégradations déclarées (#1281, L8) (#1315)
+- feat(hosts): Zed devient un hôte (`zed`) : bloc `.rules` (premier fichier d'instructions lu par Zed, qui cite les autres), compétences `.agents/skills/`, `context_servers` dans `.zed/settings.json` (un fichier JSONC est préservé, jamais réécrit) et, quand Claude Code est activé, la tâche `.zed/tasks.json` « Claude Code (gouverné) » ; hôte sans garde, déclaré (#725, #1281 L8) (#1315)
+- feat(providers): passerelle LiteLLM comme type de fournisseur (`provider_type: litellm`, `base_url`) : API OpenAI et Anthropic documentées, sonde sans dépense sur `/v1/models` puis `/v1/model/info` (clé du magasin seulement, URL `https://` ou boucle locale, aucune redirection, réponse bornée), utilisable dans la table palier → modèle ; `standard verify` exige `base_url` et des classes de données interdites (#1281, L8) (#1312)
+
 ## [3.101.0] - 2026-11-22
 
 - feat(hosts): Gemini CLI écrit ses compétences au format natif `.agents/skills/` (lu aussi par Antigravity, partagé octet pour octet avec Codex) et le `model` d'un sous-agent depuis `dispatch.models.gemini` ; hooks, agents et MCP d'Antigravity déclarés en dégradation ; opencode reçoit `model` (`provider/model-id`) par agent depuis `dispatch.models.opencode` et rend la décision de clôture sur `session.idle`, journalisée et consultative, jamais annoncée bloquante (#1281, L6) (#1309)
