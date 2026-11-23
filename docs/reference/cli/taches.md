@@ -662,6 +662,104 @@ orchestrator:
 - **Avant de lancer** : `grimoire orchestrate tick` (le plan, sans `--apply`) affiche `Routage prévu : <id> — fort
   | habituel : <raison>` pour chaque tâche admise, et la clé `routes` en `--json`.
 
+### Hôte du worker : Claude Code ou opencode (#1281, lot L4)
+
+Le worker du tick passe par une interface d'hôte (`WorkerHost`, `missions/worker_host.py`). Elle porte ce qui dépend
+de l'hôte : ligne de commande, environnement, modèle, mode de permission, consigne, identité de session, arrêt.
+`roles.worker.host` choisit l'hôte. Absent, c'est Claude Code, à l'identique d'avant. Le test
+`tests/unit/missions/test_worker_host_parity.py` compare argv, environnement et fichiers écrits à une fixture
+produite depuis `origin/main` 3.100.0.
+
+```yaml
+# _grimoire/standard/orchestration-policy.yaml
+orchestrator:
+  roles:
+    worker:
+      enabled: true
+      host: opencode          # claude-code (défaut) | opencode ; toute autre valeur rend la politique invalide
+      provider: deepseek      # obligatoire avec opencode : deepseek, moonshot (ou kimi) ou un fournisseur local
+      tier: cheap
+      permission_mode: acceptEdits
+    reviewer:
+      host: claude-code       # seule valeur admise dans ce lot
+dispatch:
+  models:
+    opencode:
+      deepseek:
+        cheap: deepseek-v4-flash
+```
+
+- **Commande** : `opencode run --format json --title grimoire-<id> --model <fournisseur>/<modèle> -- "<consigne>"`,
+  la commande non interactive documentée (<https://opencode.ai/docs/cli/#run>). Elle ne rend pas la main : le kit
+  la lance en arrière-plan, dans son propre groupe de processus. Sa sortie JSON va dans
+  `_grimoire-output/control/workers/<id>.opencode.jsonl`, hors du worktree.
+- **Fournisseur et modèle** : `deepseek` et `moonshotai` sont les identifiants du catalogue d'opencode. Un
+  fournisseur `local` (Ollama) est déclaré en ligne (`@ai-sdk/openai-compatible`), à l'URL de boucle locale
+  `anthropic_base_url` suivie de `/v1`. Le modèle vient de `roles.worker.model`, sinon de
+  `dispatch.models.opencode.<fournisseur>.<palier>`, sinon du premier modèle non suspendu du palier dans le
+  registre (repli sur `cheap`). Sans modèle, la tâche attend : jamais de nom inventé.
+- **Clé** : lue au magasin de secrets (`grimoire providers set-key`). `OPENCODE_CONFIG_CONTENT` ne porte que
+  `{env:DEEPSEEK_API_KEY}` (substitution documentée, <https://opencode.ai/docs/config/>). La valeur ne passe que
+  dans l'environnement du processus, jamais dans l'argv, le ledger ni le journal d'autorité. L'URL officielle du
+  fournisseur hébergé est posée dans la même configuration en ligne : un autre `baseURL` ne reçoit pas la clé.
+- **Environnement** : minimal et explicite. Il contient une liste fermée de variables du système (chemins,
+  langue), la clé du fournisseur et la configuration en ligne. Aucun jeton, aucune autre clé, aucune variable
+  `OPENCODE_*` qui changerait la découverte de la configuration.
+- **`HOME` du kit** : opencode charge des plugins sous `$HOME/.opencode/` et lit configuration, sessions,
+  authentifications et cache sous les dossiers XDG. Pour toute commande opencode du worker, `HOME` et
+  `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` pointent sous un dossier du kit, hors de
+  tout dépôt : `~/.cache/grimoire-kit/opencode/<empreinte du projet>/<id de tâche>-<nonce>/`.
+  - Ce dossier est neuf à chaque lancement et n'est jamais partagé entre workers. Seule la reprise du même worker
+    le réutilise (il est noté au lancement) : sa base de sessions y vit, c'est là que `session list` retrouve la
+    session.
+  - Avant chaque commande, puis une dernière fois juste avant `opencode run`, ce dossier, son dossier de sondes et
+    le worktree sont contrôlés. Rien n'y doit apparaître : ni plugin, agent, mode ou commande, ni configuration
+    non vide, ni fichier d'authentification.
+  - Un lien symbolique posé par le compte sur son chemin est refusé. Un lien du superutilisateur (`/var` sous
+    macOS) est admis.
+  - Les commandes qui ne visent pas le worktree (`--version`, `session list`) tournent dans un dépôt git vide de
+    ce dossier. Sa racine borne la découverte d'opencode : le dépôt principal reste hors champ.
+  - Le worker reçoit `GH_CONFIG_DIR` (le dossier `gh` d'origine) et `GIT_CONFIG_GLOBAL` (`~/.gitconfig`, à défaut
+    la configuration git XDG), pour ouvrir sa PR avec la configuration réelle.
+  - Il reçoit aussi `SSH_AUTH_SOCK`, pour pousser vers une remote SSH dont la clé est tenue par l'agent. `ssh` lit
+    ses clés dans le dossier personnel du compte, pas dans `HOME`.
+- **Garde, avant toute commande opencode** : opencode exécute le code de ses plugins dès qu'il lit sa
+  configuration. Rien d'opencode ne tourne donc avant ces vérifications, faites sans lui :
+  - `.opencode/plugin/grimoire-guard.js` est identique à l'octet à la sortie de l'émetteur, sinon il est réécrit ;
+  - aucun autre fichier de code sous `.opencode/plugin(s)/` ou `.opencode/tool(s)/` ;
+  - aucun `opencode.json` ou `opencode.jsonc` à la racine ou dans `.opencode/` ;
+  - aucun agent, mode ou commande sous `.opencode/agent(s)/`, `mode(s)/`, `command(s)/` : un agent y changerait
+    modèle et permissions ;
+  - aucun lien symbolique sur ces chemins ;
+  - le manifeste de paquets ne déclare que le paquet de plugin d'opencode.
+
+  Vient ensuite une preuve fonctionnelle : le programme de garde appelé par le plugin reçoit une charge témoin,
+  jamais exécutée, et doit la refuser (le plugin émis bloque l'outil sur « deny » comme sur « ask »). Enfin,
+  `opencode debug config` doit résoudre ce plugin comme seul plugin, sans agent, mode ni commande, avec l'URL de
+  fournisseur posée par le kit. Sa sortie n'est jamais recopiée. Le contrôle est rejoué à chaque
+  reprise. Sans cette preuve, rien ne part : la tâche revient en `ready` avec un motif fixe. Au troisième refus de
+  suite, elle est garée chez l'humain. `--pure` n'est jamais passé. Le `.gitignore` de `.opencode/` ne nomme que
+  le plugin émis et ce qu'opencode installe lui-même : tout ajout se voit dans `git status`.
+- **Mode de permission** : `opencode run` rejette d'office toute demande d'autorisation. `acceptEdits`, `default`,
+  `dontAsk` et `auto` gardent la table de l'hôte. `plan` prend l'agent `plan` intégré. `bypassPermissions` passe
+  `--dangerously-skip-permissions`. Tout autre mode fait attendre la tâche, avec son motif.
+- **Restent sur Claude Code** : une tâche qui vise un chemin sensible (`sensitive_route: strong`, `opus`) et une
+  tâche V2, qu'aucun verdict mécanique ne jugerait. Le lancement porte `host_fallback` avec la raison. Une tâche
+  devenue sensible entre deux tours repart, à la reprise, en session Claude Code neuve au palier fort.
+- **Limite** : un dépôt qui suit un `opencode.json` à sa racine, ou des agents ou commandes sous `.opencode/`, ne
+  peut pas lancer de worker opencode.
+- **Indépendance de la relecture** : le relecteur reste sur Claude Code. Son modèle doit différer de celui du
+  worker (`models_distinct`). Un modèle DeepSeek ou Kimi est d'une autre famille que `sonnet` ou `opus`.
+- **Pas de repli silencieux** : sans route (fournisseur fermé, clé absente, politique de données, fournisseur local
+  occupé), la tâche est différée (`task.worker_deferred`). Elle ne part pas sur Claude Code à la place.
+- **Vie de la session** : l'identité se lit dans `opencode session list --format json` (titre et dossier). Le
+  lanceur rattache lui-même la session au claim : opencode n'exporte pas d'identité aux commandes qu'il lance. Un
+  processus vivant dont le journal a parlé dans les 15 dernières minutes renouvelle le bail. Un processus mort rend
+  la tâche. En revue ou en attente, le processus reçoit `SIGTERM`. Un renvoi reprend la conversation par
+  `opencode run --session <id>`.
+- **Limites** : la reprise automatique après une erreur transitoire du fournisseur (#1158) lit le journal de Claude
+  Code et ne s'applique pas à opencode. `lean` est sans effet sur opencode. La relecture opencode n'est pas outillée.
+
 ### Fusion par le merger (#876, lot 4)
 
 Le rôle `merger` est une étape de `orchestrate tick --apply`, après le relecteur. Il est désactivé par défaut :

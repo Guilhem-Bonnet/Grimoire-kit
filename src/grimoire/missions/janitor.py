@@ -221,6 +221,15 @@ class Janitor:
         if not launch or not launch.get("session"):
             return "skipped", "aucune session lancée"
         sid = str(launch["session"])
+        if launch.get("host") == "opencode":  # #1281 L4 : un processus que le kit a lancé, pas une session ``--bg``
+            from grimoire.missions.worker_host import OpencodeWorkerHost
+            from grimoire.missions.worker_lifecycle import opencode_marks
+
+            marks = opencode_marks(self._service, tid)
+            host = OpencodeWorkerHost()
+            if host.state(marks) == "ended" or host.stop(str(marks.get("pid") or "")):
+                return "done", f"worker opencode {sid} arrêté"
+            return "failed", f"worker opencode {sid} (pid {marks.get('pid') or '?'}) non arrêté"
         result = self._exec([self._claude, "stop", sid], self._repo, None)
         if result.returncode == 0:
             return "done", f"session {sid} arrêtée"

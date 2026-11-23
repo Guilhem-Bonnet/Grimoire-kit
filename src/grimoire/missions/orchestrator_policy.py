@@ -23,7 +23,9 @@ janitor :
           wip: 1                  # sessions de worker en même temps
           sessions_per_day: 5     # plafond de lancements par jour (UTC)
           permission_mode: ""     # OBLIGATOIRE quand enabled: true (acceptEdits, plan, bypassPermissions…) ; transmis à
-                                  # claude --permission-mode
+                                  # claude --permission-mode (opencode : traduit, missions/worker_host.py)
+          host: claude-code       # #1281 L4 : claude-code (défaut, absent = comportement d'avant) | opencode (exige
+                                  # provider ; route sensible et tâches V2 restent sur Claude Code)
         reviewer:                 # lot 3 : relit chaque tâche lancée qui arrive en needs_verification
           enabled: false
           model: ""               # vide : le palier, sinon un autre modèle que celui du worker
@@ -31,6 +33,7 @@ janitor :
           wip: 1                  # relectures en même temps
           max_cycles: 2           # désaccords relecteur/checks avant l'escalade à l'humain
           permission_mode: ""     # OBLIGATOIRE quand enabled: true
+          host: claude-code       # seule valeur admise dans ce lot : le relecteur reste sur Claude Code
         merger:                   # lot 4 : fusionne en série les tâches relues READY dont la PR est ouverte
           enabled: false
           realign_max: 1          # PR réalignées sur la cible (main fusionnée dans la branche) à la fois : le débit CI
@@ -90,6 +93,7 @@ from grimoire.missions.dual_review import (
     SECOND_REVIEWER_TIERS,
 )
 from grimoire.missions.sensitive_route import SENSITIVE_ROUTE_OFF, SENSITIVE_ROUTES
+from grimoire.missions.worker_host import CLAUDE_CODE_HOST, OPENCODE_HOST, WORKER_HOSTS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,9 +118,11 @@ _MODE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]/@-]*")
 _WORKER_KEYS = frozenset(
     {"enabled", "model", "provider", "tier", "wip", "sessions_per_day", "permission_mode", "lean", "model_by_class",
-     "sensitive_route", "sensitive_paths"}
+     "sensitive_route", "sensitive_paths", "host"}
 )
-_REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean"})
+_REVIEWER_KEYS = frozenset({"enabled", "model", "tier", "wip", "max_cycles", "permission_mode", "lean", "host"})
+#: Les hôtes du relecteur dans ce lot : Claude Code seul (la relecture opencode n'est pas encore outillée).
+REVIEWER_HOSTS: tuple[str, ...] = (CLAUDE_CODE_HOST,)
 DEFAULT_MAX_CYCLES = 2
 _MERGER_KEYS = frozenset(
     {"enabled", "realign_max", "ignored_checks", "max_cycles", "protected_paths", "protected_gate", "human_only_paths",
@@ -147,6 +153,7 @@ class WorkerRole:
     model_by_class: bool = False
     sensitive_route: str = SENSITIVE_ROUTE_OFF
     sensitive_paths: tuple[str, ...] = ()
+    host: str = CLAUDE_CODE_HOST
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -154,6 +161,7 @@ class WorkerRole:
             "sessions_per_day": self.sessions_per_day, "permission_mode": self.permission_mode,
             "provider": self.provider, "lean": self.lean, "model_by_class": self.model_by_class,
             "sensitive_route": self.sensitive_route, "sensitive_paths": list(self.sensitive_paths),
+            "host": self.host,
         }
 
 
@@ -168,11 +176,13 @@ class ReviewerRole:
     max_cycles: int = DEFAULT_MAX_CYCLES
     permission_mode: str = ""
     lean: bool = False
+    host: str = CLAUDE_CODE_HOST
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled, "model": self.model, "tier": self.tier, "wip": self.wip,
             "max_cycles": self.max_cycles, "permission_mode": self.permission_mode, "lean": self.lean,
+            "host": self.host,
         }
 
 
@@ -304,9 +314,24 @@ def _flag(data: dict[str, Any], key: str, where: str) -> bool:
     return value
 
 
+def _host(data: dict[str, Any], role: str, admitted: tuple[str, ...]) -> str:
+    where = f"orchestrator.roles.{role}.host"
+    host = _text(data.get("host", CLAUDE_CODE_HOST), where) or CLAUDE_CODE_HOST
+    if host not in admitted:
+        raise _InvalidPolicyError(f"{where} : {host!r} inconnu ou non pris en charge (admis : {', '.join(admitted)})")
+    return host
+
+
 def _parse_worker(raw: Any) -> WorkerRole:
     data = _table(raw, "orchestrator.roles.worker", _WORKER_KEYS)
     enabled, model, tier, mode = _session_role(data, "worker")
+    host = _host(data, "worker", WORKER_HOSTS)
+    provider = _text(data.get("provider", ""), "orchestrator.roles.worker.provider")
+    if host == OPENCODE_HOST and not provider:
+        raise _InvalidPolicyError(
+            "orchestrator.roles.worker.provider est obligatoire avec host: opencode (fournisseur du registre : "
+            "deepseek, moonshot ou un fournisseur local)"
+        )
     route = _text(data.get("sensitive_route", SENSITIVE_ROUTE_OFF), "orchestrator.roles.worker.sensitive_route")
     if route not in SENSITIVE_ROUTES:
         raise _InvalidPolicyError(
@@ -324,11 +349,12 @@ def _parse_worker(raw: Any) -> WorkerRole:
         wip=_positive(data.get("wip", 1), "orchestrator.roles.worker.wip"),
         sessions_per_day=_positive(data.get("sessions_per_day", 5), "orchestrator.roles.worker.sessions_per_day"),
         permission_mode=mode,
-        provider=_text(data.get("provider", ""), "orchestrator.roles.worker.provider"),
+        provider=provider,
         lean=_flag(data, "lean", "orchestrator.roles.worker"),
         model_by_class=_flag(data, "model_by_class", "orchestrator.roles.worker"),
         sensitive_route=route,
         sensitive_paths=tuple(g.strip() for g in raw_paths),
+        host=host,
     )
 
 
@@ -343,6 +369,7 @@ def _parse_reviewer(raw: Any) -> ReviewerRole:
         max_cycles=_positive(data.get("max_cycles", DEFAULT_MAX_CYCLES), "orchestrator.roles.reviewer.max_cycles"),
         permission_mode=mode,
         lean=_flag(data, "lean", "orchestrator.roles.reviewer"),
+        host=_host(data, "reviewer", REVIEWER_HOSTS),
     )
 
 
