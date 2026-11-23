@@ -146,12 +146,14 @@ class EmitPlan:
     #: Fusions dans un fichier texte non JSON (``.codex/config.toml``), voir :class:`TextMerge`.
     text_merges: tuple[TextMerge, ...] = ()
 
-    def labels(self) -> list[str]:
+    def labels_paths(self) -> list[Path]:
+        """Chemins relatifs que le plan écrit : fichiers, fusions JSON et fusions texte."""
         return (
-            [f.relpath.as_posix() for f in self.files]
-            + [m.relpath.as_posix() for m in self.merges]
-            + [m.relpath.as_posix() for m in self.text_merges]
+            [f.relpath for f in self.files] + [m.relpath for m in self.merges] + [m.relpath for m in self.text_merges]
         )
+
+    def labels(self) -> list[str]:
+        return [path.as_posix() for path in self.labels_paths()]
 
 
 @dataclass
@@ -560,6 +562,27 @@ def _commit(writes: list[tuple[Path, str]]) -> None:
         raise
 
 
+class UnsafePlanPathError(ValueError):
+    """Un plan nomme un chemin qui sortirait de la racine du projet (absolu, ou avec ``..``)."""
+
+
+def _escapes_root(relpath: Path) -> bool:
+    """Lecture lexicale : un chemin absolu, ancré (``C:``) ou qui remonte (``..``) sort du projet.
+
+    Un lien symbolique *existant* dans le projet reste suivi (:func:`_target`) : c'est un choix
+    de l'utilisateur, alors qu'un ``..`` dans un plan est une faute de l'émetteur.
+    """
+    return relpath.is_absolute() or bool(relpath.anchor) or ".." in relpath.parts
+
+
+def _refuse_escaping_paths(plans: Sequence[EmitPlan]) -> None:
+    for plan in plans:
+        for relpath in plan.labels_paths():
+            if _escapes_root(relpath):
+                msg = f"{plan.host_id.value} : chemin hors du projet refusé ({relpath.as_posix()})"
+                raise UnsafePlanPathError(msg)
+
+
 def apply_plans(
     plans: Sequence[EmitPlan],
     project_root: Path,
@@ -585,6 +608,8 @@ def apply_plans(
     """
     from grimoire.hosts.detection import preserved_paths
 
+    # Avant toute décision : un chemin qui sort du projet est refusé, rien n'est écrit.
+    _refuse_escaping_paths(plans)
     root = project_root.resolve()
     kept = preserve if preserve is not None else preserved_paths(root)
     overlay: dict[Path, str] = {}

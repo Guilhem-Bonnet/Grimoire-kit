@@ -58,7 +58,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
-from grimoire.hosts.emitters.agent_skills import SHARED_SKILLS_DIR, SHARED_SKILLS_GLOB, shared_skill_file
+from grimoire.hosts.emitters.agent_skills import SHARED_SKILLS_DIR, SHARED_SKILLS_GLOB, shared_skills
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
     Degradation,
@@ -458,12 +458,13 @@ class GeminiEmitter(Emitter):
         files: list[EmittedFile] = [_agent_file(agent, surface, models) for agent in surface.agents]
         files.extend(_command_file(command) for command in surface.commands)
         # Toutes les compétences, comme Codex : même octet, même motif possédé (voir ``agent_skills``).
-        files.extend(shared_skill_file(skill) for skill in surface.skills)
+        skill_files, skill_gaps = shared_skills(surface.skills)
+        files.extend(skill_files)
         files.append(_entrypoint(surface, project_root))
         unmapped = sorted(
             agent.name for agent in surface.agents if (tier := tier_for(agent)) != "inherit" and tier not in models
         )
-        degradations = [*Emitter.launcher_degradations(launcher), *_degradations(surface, unmapped)]
+        degradations = [*Emitter.launcher_degradations(launcher), *skill_gaps, *_degradations(surface, unmapped)]
         plan = EmitPlan(
             host_id=self.host_id,
             files=tuple(files),

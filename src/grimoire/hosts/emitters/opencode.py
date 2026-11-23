@@ -40,6 +40,7 @@ from typing import Any
 from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.core.standard_generation import PROFILE_LADDER
+from grimoire.hosts.decisions import DEFAULT_DECISION_BY_EVENT
 from grimoire.hosts.emitters.base import (
     MANAGED_MARKER,
     Degradation,
@@ -215,7 +216,7 @@ def _stop_hook(surface: ProjectSurface) -> HookSpec | None:
 _PLUGIN_TEMPLATE = """// __MARKER__ — régénéré par `grimoire host sync --host opencode`; éditez la source, pas ce fichier.
 // Garde PreToolUse : chaque appel d'outil concerné passe par `grimoire-hook`, et un refus
 // devient une exception dans `tool.execute.before` — opencode n'exécute alors pas l'outil.
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -270,6 +271,47 @@ function touchesSecret(args) {
   return SECRET_PATTERNS.some((pattern) => pattern.test(text))
 }
 
+async function report(client, message) {
+  try {
+    await client.app.log({ body: { service: "grimoire", level: "warn", message: `[grimoire] ${message}` } })
+  } catch {
+    console.error(`[grimoire] ${message}`)
+  }
+}
+
+// Asynchrone, à la différence de la garde : un verdict consultatif ne doit pas figer la boucle
+// d'événements d'opencode le temps du hook. Rend `{ stdout }` ou `{ problem }`, jamais ne lève.
+function runHook(directory, args, input, timeoutMs) {
+  return new Promise((resolve) => {
+    let stdout = ""
+    let settled = false
+    const done = (outcome) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(outcome)
+    }
+    let child
+    try {
+      child = spawn(hookProgram(directory), args, { stdio: ["pipe", "pipe", "ignore"] })
+    } catch (error) {
+      resolve({ problem: error.message })
+      return
+    }
+    const timer = setTimeout(() => {
+      child.kill()
+      done({ problem: `délai de ${timeoutMs} ms dépassé` })
+    }, timeoutMs)
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk
+    })
+    child.on("error", (error) => done({ problem: error.message }))
+    child.on("close", (code) => done(code === 0 ? { stdout } : { problem: `sortie ${code}` }))
+    child.stdin.on("error", () => {})
+    child.stdin.end(input)
+  })
+}
+
 async function closureVerdict(directory, client, event) {
   const payload = JSON.stringify({
     hook_event_name: "Stop",
@@ -277,30 +319,33 @@ async function closureVerdict(directory, client, event) {
     session_id: String(event.properties?.sessionID ?? ""),
     stop_hook_active: false,
   })
-  const run = spawnSync(hookProgram(directory), ["--host", "opencode", "--event", "Stop"], {
-    input: payload,
-    encoding: "utf8",
-    timeout: STOP_TIMEOUT_MS,
-  })
-  if (run.error || run.status !== 0) return
-  let verdict = {}
+  const run = await runHook(directory, __STOP_ARGS__, payload, STOP_TIMEOUT_MS)
+  if (run.problem) {
+    await report(client, `décision de clôture indisponible (${run.problem})`)
+    return
+  }
+  let verdict = null
   try {
     verdict = JSON.parse(run.stdout || "{}")
   } catch {
+    verdict = null
+  }
+  if (verdict === null || typeof verdict !== "object" || Array.isArray(verdict)) {
+    await report(client, "décision de clôture indisponible (verdict illisible)")
     return
   }
   const message = verdict.systemMessage || verdict.reason
-  if (!message) return
-  try {
-    await client.app.log({ body: { service: "grimoire", level: "warn", message: `[grimoire] clôture : ${message}` } })
-  } catch {
-    console.error(`[grimoire] clôture : ${message}`)
-  }
+  if (message) await report(client, `clôture : ${message}`)
 }
 
 export const GrimoireGuard = async ({ directory, client }) => ({
-  event: async ({ event }) => {
-    if (STOP_ENABLED && event?.type === "session.idle") await closureVerdict(directory, client, event)
+  event: async (input) => {
+    try {
+      const event = input?.event
+      if (STOP_ENABLED && event?.type === "session.idle") await closureVerdict(directory, client, event)
+    } catch (error) {
+      console.error(`[grimoire] décision de clôture indisponible (${error?.message ?? error})`)
+    }
   },
   "tool.execute.before": async (input, output) => {
     const tool = String(input.tool ?? "").toLowerCase()
@@ -314,7 +359,7 @@ export const GrimoireGuard = async ({ directory, client }) => ({
       session_id: String(input.sessionID ?? ""),
       tool_use_id: String(input.callID ?? ""),
     })
-    const run = spawnSync(hookProgram(directory), ["--host", "opencode", "--event", "PreToolUse"], {
+    const run = spawnSync(hookProgram(directory), __GUARD_ARGS__, {
       input: payload,
       encoding: "utf8",
       timeout: TIMEOUT_MS,
@@ -341,6 +386,22 @@ export const GrimoireGuard = async ({ directory, client }) => ({
 """
 
 
+#: Plafond du délai du hook de clôture, en secondes (#1309, relecture : un verdict consultatif
+#: ne doit pas faire attendre l'hôte).
+STOP_TIMEOUT_CAP = 5
+
+
+def _hook_args(wire: str, hook: HookSpec | None) -> str:
+    """Arguments de ``grimoire-hook``, avec ``--decision`` seulement hors de la décision par défaut.
+
+    Même règle que Codex : la sortie par défaut reste identique à l'octet.
+    """
+    args = ["--host", HOST_ALIAS, "--event", wire]
+    if hook is not None and hook.decision and hook.decision != DEFAULT_DECISION_BY_EVENT.get(hook.event):
+        args += ["--decision", hook.decision]
+    return json.dumps(args)
+
+
 def _guard_plugin(hook: HookSpec | None, launcher: HookLauncher = BARE, stop: HookSpec | None = None) -> EmittedFile:
     """Le plugin : garde ``tool.execute.before`` si *hook*, décision de clôture sur ``session.idle`` si *stop*."""
     tools: list[str] = []
@@ -351,12 +412,16 @@ def _guard_plugin(hook: HookSpec | None, launcher: HookLauncher = BARE, stop: Ho
                     tools.append(name)
     carrier = hook if hook is not None else stop
     timeout = carrier.timeout if carrier is not None else _DEFAULT_TIMEOUT
+    # Délai court pour la clôture : verdict consultatif, rendu en tâche de fond.
+    stop_timeout = min(stop.timeout if stop is not None else timeout, STOP_TIMEOUT_CAP)
     content = (
         _PLUGIN_TEMPLATE.replace("__MARKER__", MANAGED_MARKER)
         .replace("__GUARDED__", json.dumps(tools))
         .replace("__SECRETS__", json.dumps(list(secret_patterns()), ensure_ascii=False))
         .replace("__TIMEOUT__", str(timeout * 1000))
-        .replace("__STOP_TIMEOUT__", str((stop.timeout if stop is not None else timeout) * 1000))
+        .replace("__STOP_TIMEOUT__", str(stop_timeout * 1000))
+        .replace("__GUARD_ARGS__", _hook_args("PreToolUse", hook))
+        .replace("__STOP_ARGS__", _hook_args("Stop", stop))
         .replace("__STOP__", "true" if stop is not None else "false")
         .replace("__PROFILES__", json.dumps(list(PROFILE_LADDER)))
         .replace("__HOOK__", json.dumps({"posix": launcher.posix, "windows": launcher.windows}))
