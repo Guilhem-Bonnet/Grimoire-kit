@@ -411,6 +411,19 @@ def _pre_dispatch_model(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
     return measure
 
 
+def _subagent_start(root: Path, _mp: pytest.MonkeyPatch) -> Measure:
+    _governed(root)
+
+    def measure(fault: Fault) -> str:
+        with fault:
+            hook = HookInput(
+                event=HookEvent.SUBAGENT_START, project_root=root, session_id=SESSION, host="github-copilot"
+            )
+            return _label(run_decision("grimoire.subagent-start", hook))
+
+    return measure
+
+
 SCENARIOS: dict[str, tuple[Scenario, str]] = {
     # nom -> (préparation, résultat sain attendu : la preuve que le scénario discrimine)
     "pre_forgery": (_pre_forgery, "deny"),
@@ -431,6 +444,7 @@ SCENARIOS: dict[str, tuple[Scenario, str]] = {
     "session_start": (_session_start, "allow"),
     "task_completed": (_task_completed, "allow"),
     "pre_dispatch_model": (_pre_dispatch_model, "allow"),
+    "subagent_start": (_subagent_start, "allow"),
 }
 
 
@@ -577,6 +591,14 @@ CASES: tuple[FaultCase, ...] = (
         "passer l'appel inchangé (abstention), le hook est émis sans onFailure: block",
     ),
     _open(
+        "grimoire.subagent-start",
+        "subagent_start",
+        "subagent_start",
+        _P + "subagent_start._class_tier",
+        "consultative (Copilot seul) : elle ne fait qu'ajouter la classe et le palier au contexte du sous-agent, jamais "
+        "un refus ; sa panne laisse démarrer le sous-agent sans contexte ajouté (abstention)",
+    ),
+    _open(
         "grimoire.activation",
         "activation",
         "session_start",
@@ -595,6 +617,7 @@ MODULES: dict[str, tuple[str, str]] = {
     "context_capsule": (GUARD, ""),
     "chain_ack": (SUPPORT, "phrase d'explication d'une rupture du journal de preuve, appelée par task_context (UserPromptSubmit) : une panne y est couverte par les cas task_context ; sans phrase tapée, elle ne fait rien"),
     "dispatch_model": (GUARD, ""),
+    "subagent_start": (GUARD, ""),
     "done_gate": (GUARD, ""),
     "enrolment": (GUARD, ""),
     "event_trace": (GUARD, ""),
