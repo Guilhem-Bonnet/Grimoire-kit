@@ -315,7 +315,24 @@ class ReviewStage:
                 outcomes.append(outcome)
         return tuple(outcomes)
 
+    def _grant_current(self, tid: str, grant: LedgerEvent) -> bool:
+        """La dérogation couvre-t-elle encore la tête de la branche ? Une tête poussée depuis la dérogation est relue."""
+        from grimoire.missions.review_seal import branch_head
+
+        head = branch_head(self._service.home_root, tid)
+        sealed = str(grant.payload.get("head") or "")
+        return bool(head and sealed and head == sealed)
+
     def _step(self, task: MissionTask, launch: dict[str, Any]) -> ReviewOutcome | None:
+        # GAO-r-le-arbitre-001 : une tâche confiée à l'arbitre attend sa décision ; un critère dérogé laisse la fusion
+        # suivre son cours (le merger lit la dérogation, pas un reçu). Rien n'est relancé tant que l'un des deux tient.
+        from grimoire.missions import arbiter
+
+        if arbiter.open_request(self._service, task.id) is not None:
+            return ReviewOutcome(task.id, "arbitrate", "skipped", "arbitrage en cours : la relecture attend la décision")
+        grant = arbiter.merge_grant(self._service, task.id)
+        if grant is not None and self._grant_current(task.id, grant):
+            return ReviewOutcome(task.id, "arbitrate", "skipped", "critère dérogé par arbitrage : la fusion suit son cours")
         entered = self._entered_review_at(task.id)
         reviews = [e for e in self._events(task.id, REVIEW_LAUNCHED_EVENT) if e.created_at >= entered]
         failures = [e for e in self._events(task.id, REVIEW_LAUNCH_FAILED_EVENT) if e.created_at >= entered]
@@ -954,9 +971,14 @@ class ReviewStage:
         worker_session = str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker_session:
             why = f"{cycle} relecture(s) NOT-READY" if worker_session else "aucune session de worker à reprendre"
-            escalated = self._escalate(
-                task, why, notes, cause="not_ready_cycles" if worker_session else "no_worker_session"
-            )
+            cause = "not_ready_cycles" if worker_session else "no_worker_session"
+            if cause == "not_ready_cycles" and self._arbitrate(task, why, notes, str(review.payload.get("head") or "")):
+                # Le jugement et l'arrêt du relecteur suivent, comme pour l'escalade : le cycle compte, la session
+                # ne reste pas ouverte à côté d'un arbitrage en cours.
+                self._record_judged(task, review, NOT_READY, cycle, extra)
+                self._stop(review)
+                return ReviewOutcome(tid, "arbitrate", "done", f"arbitrage demandé ({why})")
+            escalated = self._escalate(task, why, notes, cause=cause)
             if escalated.status == "done":
                 self._record_judged(task, review, NOT_READY, cycle, extra)
                 self._stop(review)
@@ -983,6 +1005,31 @@ class ReviewStage:
         self._stop(review)
         self._service.comment(tid, f"Relecture NOT-READY (cycle {cycle}/{max_cycles}) : {notes}", REVIEWER_ACTOR)
         return ReviewOutcome(tid, "bounce", "done", f"retour au worker (cycle {cycle}/{max_cycles})")
+
+    def _arbitrate(self, task: MissionTask, why: str, notes: str, head: str) -> bool:
+        """GAO-r-le-arbitre-001 : confie l'escalade à l'arbitre quand le rôle l'accepte ; ``False`` : à l'humain.
+
+        La question de repli est exactement celle que :meth:`_escalate` poserait : si l'arbitrage échoue (JSON
+        invalide, confiance basse, session muette), l'humain la reçoit avec l'analyse de l'arbitre jointe.
+        """
+        from grimoire.missions import arbiter
+
+        tid = task.id
+        detail = f" : {notes[:600]}" if notes else ""
+        return bool(arbiter.request_arbitration(
+            self._service, task, "reviewer", "not_ready_cycles", why, notes, head=head,
+            text=f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
+            title="Reprendre la tâche ou l'abandonner ?",
+            context=clip_context(
+                f"Le relecteur refuse encore le travail rendu, malgré les reprises ({why}){detail}"
+            ),
+            options=("reprendre", "abandonner"), recommended="reprendre",
+            choices=(
+                Choice("reprendre", "Reprendre la tâche", "Relance une session sur la branche existante"),
+                Choice("abandonner", "Abandonner", "Annule la tâche : plus aucune reprise", danger=True),
+            ),
+            policy=self._policy,
+        ))
 
     def _escalate(self, task: MissionTask, why: str, notes: str, *, cause: str = "") -> ReviewOutcome:
         """``needs_verification → running → waiting(human)`` avec la question ; une question non posée remet en revue.

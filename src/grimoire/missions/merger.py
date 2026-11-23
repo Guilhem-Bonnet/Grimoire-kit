@@ -425,15 +425,19 @@ class MergeStage(DualReviewMixin):
         """``(fusionnées à accepter, file ordonnée)``."""
         merged: list[str] = []
         queue: list[tuple[str, LedgerEvent]] = []
+        from grimoire.missions import arbiter
+
         for tid in launched:
             task = self._service.ledger.get_task(tid)
             if task is None or task.status is not TaskState.NEEDS_VERIFICATION:
                 continue
+            if arbiter.open_request(self._service, tid) is not None:
+                continue  # GAO-r-le-arbitre-001 : l'escalade attend la décision de l'arbitre
             events = self._service.ledger.events_for(tid)
             if _last(events, MERGED_EVENT, _last_launch(events)) is not None:
                 merged.append(tid)
                 continue
-            judged = self._ready_judgment(tid, events)
+            judged = self._ready_judgment(tid, events) or arbiter.merge_grant(self._service, tid)
             if judged is not None:
                 queue.append((tid, judged))
         queue.sort(key=lambda item: (item[1].created_at, item[0]))
@@ -515,16 +519,31 @@ class MergeStage(DualReviewMixin):
             return MergerOutcome(tid, "refused", "refused", f"PR #{pr.number} {pr.state} sans fusion", pr.number)
         if pr.base != wt.into:
             return MergerOutcome(tid, "refused", "refused", f"PR #{pr.number} vers {_clean(pr.base, 80)}, pas vers la cible {wt.into}", pr.number)
-        receipt, kind, why = self._sealed_state(task, wt, judged, pr.head)
-        if kind == "wait":
-            return MergerOutcome(tid, "wait", "waiting", why, pr.number)
-        if kind or receipt is None:
-            return self._requeue(task, judged, why, pr.number)
+        from grimoire.missions import arbiter
+
+        # GAO-r-le-arbitre-001 : un critère dérogé par arbitrage dispense du reçu scellé, pour la tête dérogée
+        # seulement. La dérogation ne couvre ni un autre commit, ni une PR non fusionnable : CI et réalignement
+        # restent les mêmes.
+        grant = arbiter.merge_grant(self._service, tid) if judged.event_type == arbiter.ARBITRATED_EVENT else None
+        if judged.event_type == arbiter.ARBITRATED_EVENT and (
+            grant is None or str(grant.payload.get("head") or "") != pr.head
+        ):
+            # La dérogation porte sur une autre tête : une relance a poussé depuis. La relecture la redonne ou non.
+            return MergerOutcome(tid, "wait", "waiting", "la dérogation ne couvre plus cette tête : relue de nouveau",
+                                 pr.number)
+        if grant is not None:
+            receipt, kind, why = None, "", ""
+        else:
+            receipt, kind, why = self._sealed_state(task, wt, judged, pr.head)
+            if kind == "wait":
+                return MergerOutcome(tid, "wait", "waiting", why, pr.number)
+            if kind or receipt is None:
+                return self._requeue(task, judged, why, pr.number)
         if pr.draft:  # après le sceau : seule une tête couverte par le READY attesté sort du brouillon
             return self._draft(task, wt, judged, pr)
         # Double relecture (``dual_review`` seulement) : la seconde relecture est demandée dès que le premier READY
         # tient, avant la CI et tout réalignement — les deux sceaux portent alors sur la même tête du worker.
-        if (held := self._dual_step(task, wt, judged, pr)) is not None:
+        if grant is None and (held := self._dual_step(task, wt, judged, pr)) is not None:
             return held
         ci, detail = self._stable_ci(tid, pr, wt.branch)
         if ci == "unknown":
@@ -535,7 +554,7 @@ class MergeStage(DualReviewMixin):
             if self._rerun_just_sent(tid, pr.head):  # P89 : relancée à l'instant (par le relecteur), GitHub lit encore l'échec
                 return MergerOutcome(tid, "wait", "waiting", f"CI rouge ({detail}) : relance de cette tête tout juste "
                                      "demandée, son verdict est attendu", pr.number)
-            return self._bounce(task, launch, "ci_red", detail, pr.number)
+            return self._bounce(task, launch, "ci_red", detail, pr.number, head=pr.head)
         # GitHub ne lance pas la CI d'une PR en conflit : l'attendre ne finirait jamais, le réalignement passe d'abord.
         stalled = pr.conflicting and ci == "pending" and detail.startswith(_NO_CHECKS)
         if ci != "green" and not self._desync_waits(tid) and not stalled:
@@ -557,7 +576,7 @@ class MergeStage(DualReviewMixin):
             if position >= self._policy.merger.realign_max:
                 if pr.conflicting and (hard := self._hard_conflicts(pr.head, target)):
                     return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {hard}", pr.number,
-                                        hint=_merge_hint(wt.into))
+                                        hint=_merge_hint(wt.into), head=pr.head)
                 return MergerOutcome(tid, "wait", "waiting", f"en retard sur {wt.into}, en file (position {position + 1}) : "
                                      f"{self._policy.merger.realign_max} réalignement(s) à la fois", pr.number)
             return self._realign(task, wt, pr, judged, launch, target)
@@ -600,14 +619,14 @@ class MergeStage(DualReviewMixin):
         if pr.conflicting and remote_base and (hard := self._hard_conflicts(pr.head, remote_base)):
             said = _clean(pr.mergeable if pr.mergeable in _CONFLICTING else pr.merge_state, 40)
             return self._bounce(task, launch, "conflict", f"GitHub dit la PR #{pr.number} en conflit avec {wt.into} ({said}) "
-                                f"sur {hard} ; {why}", pr.number, hint=_merge_hint(wt.into))
+                                f"sur {hard} ; {why}", pr.number, hint=_merge_hint(wt.into), head=pr.head)
         waits = self._desync_waits(tid)
         if waits >= MAX_DESYNC_WAITS:
             hint = (f"La tête de {wt.branch} sur la remote n'est pas celle de la PR : vérifie qu'elle est poussée "
                     f"(`git status`, `git push origin {wt.branch}`, jamais forcé) et que la PR la suit. "
                     if side == "head" else _merge_hint(wt.into))
             return self._bounce(task, launch, "desync", f"la remote et GitHub en désaccord {waits} tick(s) de suite ({why})",
-                                pr.number, hint=hint)
+                                pr.number, hint=hint, head=pr.head)
         self._note(MERGE_WAITED_EVENT, tid, {"head": pr.head, "base": pr.base_oid, "why": why[:300], "count": waits + 1})
         return MergerOutcome(tid, "wait", "waiting", f"la remote et GitHub ne disent pas encore la même chose ({why}) : revu au "
                              f"tick suivant ({waits + 1}/{MAX_DESYNC_WAITS})", pr.number)
@@ -913,10 +932,10 @@ class MergeStage(DualReviewMixin):
             if conflicted != [CHANGELOG]:
                 shown = ", ".join(_clean(p, 120) for p in conflicted[:10])
                 return self._bounce(task, launch, "conflict", f"conflit avec {wt.into} sur {shown}", pr.number,
-                                    hint=_merge_hint(wt.into))
+                                    hint=_merge_hint(wt.into), head=pr.head)
             tree, refused = self._union_changelog(tree, head, target)
             if refused:
-                return self._bounce(task, launch, "conflict", refused, pr.number, hint=_merge_hint(wt.into))
+                return self._bounce(task, launch, "conflict", refused, pr.number, hint=_merge_hint(wt.into), head=pr.head)
             union = True
         made = self._git("commit-tree", tree, "-p", head, "-p", target, "-m", f"Merge {wt.into} into {wt.branch} (merger, #876)")
         new = made.stdout.strip()
@@ -1023,7 +1042,12 @@ class MergeStage(DualReviewMixin):
 
     # -- fusion (suite) ------------------------------------------------------
 
-    def _merge(self, task: MissionTask, wt: TaskWorktree, judged: LedgerEvent, receipt: ReviewReceipt, pr: _PullRequest) -> MergerOutcome:
+    def _merge(
+        self, task: MissionTask, wt: TaskWorktree, judged: LedgerEvent, receipt: ReviewReceipt | None,
+        pr: _PullRequest,
+    ) -> MergerOutcome:
+        """Fusionne la PR : sur un reçu scellé, ou sur une dérogation d'arbitrage qui tient lieu de READY."""
+        from grimoire.missions import arbiter
         from grimoire.missions.mandate import (
             MandateRefusedError,
             MandateStore,
@@ -1035,7 +1059,15 @@ class MergeStage(DualReviewMixin):
         kept = self._kept_to_human(task, pr)
         if kept:
             return self._ask_human(task, wt, "merge", judged.id, kept, pr.number)
-        provenance = {"kind": "receipt", "ref": f"{tid}:review={judged.payload.get('review')}:head={head[:12]}"}
+        grant = None
+        if receipt is None:  # GAO-r-le-arbitre-001 : une dérogation tient lieu de reçu, sur sa tête seulement
+            grant = arbiter.merge_grant(self._service, tid)
+            if grant is None or str(grant.payload.get("head") or "") != head:
+                return MergerOutcome(tid, "wait", "waiting",
+                                     "aucun reçu scellé ni dérogation d'arbitrage pour cette tête : revu au tick suivant",
+                                     pr.number)
+        provenance = ({"kind": "verdict", "ref": f"{tid}:arbitration={grant.id}"} if grant is not None else
+                      {"kind": "receipt", "ref": f"{tid}:review={judged.payload.get('review')}:head={head[:12]}"})
         try:
             with acting_as_orchestrator():
                 auth = require_authority(
@@ -1044,11 +1076,12 @@ class MergeStage(DualReviewMixin):
                 )
             if auth is None:  # pragma: no cover - l'origine est orchestrator : jamais None
                 raise MandateRefusedError("guard_error", "autorité sans mandat")
-            MandateStore(self._home).check_receipt_provenance(task, receipt)  # verrou 7 : la relecture qui fonde la fusion
+            if grant is None:
+                MandateStore(self._home).check_receipt_provenance(task, receipt)  # verrou 7 : la relecture qui fonde la fusion
         except (MandateRefusedError, GrimoireError) as exc:
             return self._ask_human(task, wt, "merge", judged.id, str(exc), pr.number)
         # Double relecture : les deux sceaux sont relus ici, juste avant le geste, sur la tête que ``gh pr merge`` exige.
-        if (held := self._dual_step(task, wt, judged, pr, at_merge=True)) is not None:
+        if grant is None and (held := self._dual_step(task, wt, judged, pr, at_merge=True)) is not None:
             return held
         self._note(MERGE_REQUESTED_EVENT, tid, {
             "pr": pr.number, "head": head, "origin": ORIGIN_ORCHESTRATOR, "mandate_id": auth.mandate_id, "provenance": provenance,
@@ -1254,6 +1287,8 @@ class MergeStage(DualReviewMixin):
                 return MergerOutcome(task.id, "stale", "failed", f"READY périmé ({why}), mais l'annulation des relectures "
                                      "n'a pas pu être inscrite au journal d'autorité : revu au tick suivant", pr)
             if self._cycle(events, MERGE_REQUEUED_EVENT) >= self._policy.merger.max_cycles:
+                if self._arbitrate(task, f"READY périmé à répétition ({why})", why, "stale_ready", pr):
+                    return MergerOutcome(task.id, "arbitrate", "done", "arbitrage demandé (READY périmé)", pr)
                 return self._escalate(task, f"READY périmé à répétition ({why})", pr, cause="stale_ready")
             self._note(MERGE_REQUEUED_EVENT, task.id, {"judged": judged.id, "why": why})
         return MergerOutcome(task.id, "stale", "done", f"READY périmé ({why}) : relu de nouveau", pr)
@@ -1265,7 +1300,29 @@ class MergeStage(DualReviewMixin):
                         if e.event_type == HUMAN_ANSWERED_EVENT and e.payload.get("origin") == "human"), default=-1)
         return 1 + sum(1 for e in events[answered + 1:] if e.event_type == kind)
 
-    def _bounce(self, task: MissionTask, launch: dict[str, Any], reason: str, detail: str, pr: int, *, hint: str = "") -> MergerOutcome:
+    def _arbitrate(self, task: MissionTask, why: str, detail: str, cause: str, pr: int, head: str = "") -> bool:
+        """GAO-r-le-arbitre-001 : confie l'escalade à l'arbitre quand le rôle l'accepte ; ``False`` : à l'humain.
+
+        La question de repli est celle que :meth:`_escalate` poserait : un JSON invalide, une confiance basse ou une
+        session muette la rendent à l'humain, avec l'analyse de l'arbitre jointe.
+        """
+        from grimoire.missions import arbiter
+
+        tid = task.id
+        return bool(arbiter.request_arbitration(
+            self._service, task, "merger", cause, why, detail, pr=pr, head=head,
+            text=f"La fusion de {tid} échoue à répétition ({why}) — reprendre la tâche ou l'abandonner ?",
+            title="Reprendre la tâche ou l'abandonner ?",
+            context=clip_context(f"La fusion de la pull request échoue à répétition : {_clean(why, 160)}"),
+            options=("reprendre", ABANDON), recommended="reprendre",
+            choices=(
+                Choice("reprendre", "Reprendre la tâche", "Relance une session sur la branche existante"),
+                Choice(ABANDON, "Abandonner", "Annule la tâche : plus aucune reprise", danger=True),
+            ),
+            policy=self._policy,
+        ))
+
+    def _bounce(self, task: MissionTask, launch: dict[str, Any], reason: str, detail: str, pr: int, *, hint: str = "", head: str = "") -> MergerOutcome:
         """CI rouge, conflit, désaccord persistant : retour au worker (reprise de sa session), ou escalade au cycle
         ``max_cycles``. *hint* : le geste attendu du worker (fusionner la cible, pousser sa branche)."""
         tid, max_cycles = task.id, self._policy.merger.max_cycles
@@ -1278,7 +1335,10 @@ class MergeStage(DualReviewMixin):
         cycle, worker = self._cycle(events, MERGE_BOUNCED_EVENT), str(launch.get("session_id") or "")
         if cycle >= max_cycles or not worker:
             why = f"{detail} — {cycle} retour(s) de fusion" if worker else f"{detail} — aucune session de worker à reprendre"
-            escalated = self._escalate(task, why, pr, cause=reason if worker else "no_worker_session")
+            cause = reason if worker else "no_worker_session"
+            if self._arbitrate(task, why, detail, cause, pr, head):
+                return MergerOutcome(tid, "arbitrate", "done", f"arbitrage demandé ({reason})", pr)
+            escalated = self._escalate(task, why, pr, cause=cause)
             if escalated.status == "done":
                 self._note(MERGE_BOUNCED_EVENT, tid, {"reason": reason, "detail": detail[:600], "cycle": cycle, "escalated": True})
             return escalated
