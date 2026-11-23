@@ -7,6 +7,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.103.0] - 2026-11-23
+
+- fix(cli): `grimoire up` ne synchronise plus que les hôtes de `hosts.enabled` (ou détectés quand la clé est absente), comme `grimoire host sync`, au lieu de tous les hôtes connus ; la sélection est factorisée dans `selected_host_ids`. Les fichiers déjà écrits pour un hôte non déclaré (`.kimi-code/`, `.rules`, `.zed/`, `.opencode/`…) ne sont pas supprimés : `up` les signale, et `grimoire host sync --prune-disabled` les retire (`--dry-run` pour prévisualiser). (#1317)
+
 ## [3.102.0] - 2026-11-22
 
 - feat(hosts): `grimoire host probe --capabilities` détecte les hôtes installés (Cursor, Codex, Gemini CLI, Antigravity, opencode, Copilot : binaire et version) ; avec `--run`, opt-in et payant, lance une session non interactive bornée par hôte dans un projet jetable, avec un hook témoin qui refuse, et écrit la capture (verdict, charge reçue, version, date) dans `_grimoire-output/host-probes/<hôte>/` ; `--promote` verse à la main une capture qui montre un refus sous `tests/fixtures/hosts/` ; `host status` et `host matrix` affichent la dernière sonde locale sans changer aucune annonce (#1281, L7) (#1314)
