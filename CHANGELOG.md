@@ -8,6 +8,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - fix(missions): le merger ne fusionne plus une tâche qui déclare `--check` sans pack de preuve et verdict `verify` vert sur la tête relue — la question « fusionner ? » dit pourquoi, au ledger (#1257)
+- test(guard): `test_une_ecriture_prouvee_est_refusee_et_revoque` distingue le refus par dépassement de `POLICY_BUDGET_S` (`detail.policy_budget == "exceeded"`, sans `authority_vector`) du refus de la garde : le refus reste exigé, le détail est affiché dans le message d'assertion, et un test force le chemin budget (#1305)
 
 ## [3.104.0] - 2026-11-23
 
