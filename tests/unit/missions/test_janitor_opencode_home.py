@@ -216,3 +216,105 @@ def test_le_janitor_rapporte_les_orphelins_retires_dans_son_passage(projet: Path
 
 def test_le_janitor_sans_racine_opencode_ne_balaie_rien(projet: Path) -> None:
     assert sweep_orphan_homes(TaskService(projet), [], Workers().host().alive) == []
+
+
+def _create_task(projet: Path) -> str:
+    service = TaskService(projet)
+    mission = next(iter(service.ledger.list_missions()), None) or service.ledger.create_mission(
+        title="L4", origin="test"
+    )
+    return service.ledger.create_task(mission.id, "travail", acceptance=("ok",), owner="amelia").id
+
+
+def _note(projet: Path, tid: str, home: Path, pid: str | None, event: str = LAUNCHED_EVENT) -> None:
+    payload = {"host": "opencode", "kit_home": str(home)}
+    if pid is not None:
+        payload["pid"] = pid
+    TaskService(projet).ledger.append_event(event, tid, "task", "worker", payload)
+
+
+def test_le_home_reste_si_une_autre_tache_y_note_un_worker_vivant(projet: Path) -> None:
+    workers = Workers()
+    tid, home = launched(projet, workers, pid=4242)
+    workers.live = {9999}  # le worker de la tâche purgée est mort…
+    other = _create_task(projet)
+    _note(projet, other, home, "9999")  # …mais une autre tâche a noté un worker vivant dans le même HOME
+    status, detail = purge_task_homes(TaskService(projet), tid, workers.host().alive)
+    assert status == "failed" and "pid 9999" in detail and home.is_dir()
+    workers.live.clear()
+    assert purge_task_homes(TaskService(projet), tid, workers.host().alive)[0] == "done"
+    assert not home.exists()
+
+
+def test_une_entree_sans_pid_n_efface_pas_le_pid_vivant(projet: Path) -> None:
+    workers = Workers()
+    tid, home = launched(projet, workers, pid=4242)  # 4242 vit
+    _note(projet, tid, home, None, WORKER_RESUMED_EVENT)  # une entrée plus récente sans pid
+    status, detail = purge_task_homes(TaskService(projet), tid, workers.host().alive)
+    assert status == "failed" and "pid 4242" in detail and home.is_dir()
+
+
+def test_un_home_note_sans_pid_est_garde(projet: Path) -> None:
+    workers = Workers()
+    tid = _create_task(projet)
+    home = new_opencode_home(projet, tid)
+    (home / "work").mkdir(parents=True)
+    _note(projet, tid, home, "")
+    TaskService(projet).ledger.transition_task(tid, TaskState.CANCELLED, actor_id="test")
+    status, detail = purge_task_homes(TaskService(projet), tid, workers.host().alive)
+    assert status == "skipped" and "pid inconnu" in detail and home.is_dir()
+    age(home, ORPHAN_AGE_S + 60)
+    assert sweep_orphan_homes(TaskService(projet), [], workers.host().alive) == []  # l'orphelin aussi le garde
+    assert home.is_dir()
+
+
+def test_les_pids_de_tous_les_lancements_d_un_home_sont_gardes(projet: Path) -> None:
+    workers = Workers()
+    tid, home = launched(projet, workers, pid=4242)
+    _note(projet, tid, home, "4243", WORKER_RESUMED_EVENT)  # la reprise note un autre pid, 4242 vit toujours
+    status, detail = purge_task_homes(TaskService(projet), tid, workers.host().alive)
+    assert status == "failed" and "pid 4242" in detail and home.is_dir()
+
+
+def test_l_orphelin_reste_si_une_autre_tache_y_note_un_worker_vivant(projet: Path) -> None:
+    workers = Workers()
+    tid, home = launched(projet, workers, pid=4242)
+    workers.live = {9999}
+    _note(projet, _create_task(projet), home, "9999")
+    age(home, ORPHAN_AGE_S + 60)
+    assert sweep_orphan_homes(TaskService(projet), [], workers.host().alive) == []
+    assert home.is_dir() and tid
+
+
+def test_un_echange_par_un_lien_apres_la_verification_est_refuse(
+    projet: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions import opencode_homes
+
+    if not opencode_homes._fd_removal_supported():
+        pytest.skip("suppression par descripteur indisponible sur cette plateforme")
+    root = opencode_home(projet)
+    root.mkdir(parents=True)
+    outside = tmp_path / "precieux"
+    outside.mkdir()
+    (outside / "garde.txt").write_text("à garder", encoding="utf-8")
+    swapped = root / "GAO-x-001-0123456789abcdef"
+    swapped.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(
+        opencode_homes, "_refusal", lambda _root, _home: ""
+    )  # la vérification est passée avant l'échange
+    assert opencode_homes.purge_home(root, swapped) == (False, "lien symbolique")
+    assert swapped.is_symlink() and (outside / "garde.txt").read_text(encoding="utf-8") == "à garder"
+
+
+def test_une_panne_du_balayage_des_orphelins_ne_fait_pas_tomber_le_tick(
+    projet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.missions import opencode_homes
+
+    def boom(*_args: object, **_kwargs: object) -> list[str]:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(opencode_homes, "sweep_orphan_homes", boom)
+    outcomes = janitor(projet, Workers()).sweep()
+    assert actions(outcomes, "opencode_orphans") == [("failed", "RuntimeError")]

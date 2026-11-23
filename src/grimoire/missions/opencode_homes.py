@@ -40,16 +40,41 @@ ORPHAN_AGE_S = 7 * 24 * 3600.0
 _LAUNCH_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}-[0-9a-f]{16}")
 
 
-def homes_by_task(service: TaskService) -> dict[str, dict[str, str]]:
-    """Pour chaque tâche, ses dossiers notés au ledger (lancement ou reprise) → le dernier pid qui l'a occupé."""
-    found: dict[str, dict[str, str]] = {}
+def homes_by_task(service: TaskService) -> dict[str, dict[str, set[str]]]:
+    """Pour chaque tâche, ses dossiers notés au ledger (lancement ou reprise) → **tous** les pids notés pour eux.
+
+    Une entrée sans pid y laisse ``""`` : un pid inconnu vaut un worker peut-être vivant (:func:`_holders`).
+    """
+    found: dict[str, dict[str, set[str]]] = {}
     for event in service.ledger.list_events():
         if event.event_type not in (LAUNCHED_EVENT, WORKER_RESUMED_EVENT):
             continue
         home = str(event.payload.get("kit_home") or "")
         if home:
-            found.setdefault(event.entity_id, {})[home] = str(event.payload.get("pid") or "")
+            found.setdefault(event.entity_id, {}).setdefault(home, set()).add(str(event.payload.get("pid") or ""))
     return found
+
+
+def _alive(pid: str, alive: Callable[[int], bool]) -> bool:
+    return pid.isdigit() and int(pid) > 0 and alive(int(pid))
+
+
+def _holders(notes: Mapping[str, Mapping[str, set[str]]], alive: Callable[[int], bool]) -> dict[str, str]:
+    """Les dossiers (par nom) qu'un worker occupe peut-être encore → la raison, **toutes tâches confondues**.
+
+    Un dossier est tenu dès qu'un des pids notés pour lui vit, ou qu'une entrée n'a pas de pid exploitable : sans pid,
+    on ne peut pas dire le worker mort. Le nom suffit (son nonce le rend unique) et ne peut que garder davantage.
+    """
+    held: dict[str, str] = {}
+    for homes in notes.values():
+        for home, pids in homes.items():
+            name = Path(home).name
+            living = sorted(p for p in pids if _alive(p, alive))
+            if living:
+                held[name] = f"pid {', '.join(living)}"
+            elif any(not (p.isdigit() and int(p) > 0) for p in pids):
+                held.setdefault(name, "pid inconnu")
+    return held
 
 
 def _refusal(root: Path, home: Path) -> str:
@@ -73,16 +98,44 @@ def _refusal(root: Path, home: Path) -> str:
     return ""
 
 
+def _fd_removal_supported() -> bool:
+    """Linux, macOS : la racine s'ouvre sans suivre de lien et la suppression travaille relativement à elle."""
+    return (
+        shutil.rmtree.avoids_symlink_attacks
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and os.stat in os.supports_dir_fd
+        and os.open in os.supports_dir_fd
+    )
+
+
+def _remove_child(root: Path, name: str) -> str:
+    """Retire ``root/name`` à travers un descripteur de *root* ; ``""`` ou la raison de le garder.
+
+    Entre la vérification de :func:`_refusal` et la suppression, le chemin peut changer : la racine est ouverte sans
+    suivre de lien, on s'assure que c'est bien celle vérifiée, puis l'enfant est revérifié et retiré relativement à elle.
+    """
+    if not _fd_removal_supported():  # Windows : pas de dir_fd, la vérification de :func:`_refusal` fait foi
+        shutil.rmtree(root / name)
+        return ""
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        if not os.path.samestat(os.fstat(fd), root.lstat()):
+            return "la racine opencode a changé pendant la purge"
+        info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if not stat.S_ISDIR(info.st_mode):
+            return "lien symbolique" if stat.S_ISLNK(info.st_mode) else "pas un dossier"
+        shutil.rmtree(name, dir_fd=fd)  # les liens du dossier sont retirés, jamais suivis
+    finally:
+        os.close(fd)
+    return ""
+
+
 def purge_home(root: Path, home: Path) -> tuple[bool, str]:
     """Retire le dossier de lancement *home* de la racine *root* ; ``(retiré, raison si gardé)``."""
-    if refusal := _refusal(root, home):
+    if refusal := _refusal(root, home) or _remove_child(root, home.name):
         return False, refusal
-    shutil.rmtree(home)  # les liens du dossier sont retirés, jamais suivis
     return True, ""
-
-
-def _alive(pid: str, alive: Callable[[int], bool]) -> bool:
-    return pid.isdigit() and int(pid) > 0 and alive(int(pid))
 
 
 def purge_task_homes(
@@ -94,26 +147,33 @@ def purge_task_homes(
 ) -> tuple[str, str]:
     """L'action ``opencode_home`` du janitor : ``(statut, détail)`` pour les dossiers de lancement de *task_id*.
 
-    ``failed`` tant qu'un worker vit encore (rejoué au tick suivant) ; un dossier hors de la racine ou un lien
-    symbolique est gardé et dit (``skipped``) : ce n'est pas au janitor de le retirer.
+    ``failed`` tant qu'un pid noté pour le dossier vit encore, quelle que soit la tâche qui l'a noté (rejoué au tick
+    suivant) ; un dossier noté sans pid, hors de la racine ou en lien symbolique est gardé et dit (``skipped``) : on
+    ne peut pas dire son worker mort, ou ce n'est pas au janitor de le retirer.
     """
-    homes = homes_by_task(service).get(task_id, {})
+    notes = homes_by_task(service)
+    homes = notes.get(task_id, {})
     if not homes:
         return "skipped", "aucun HOME opencode noté"
+    held = _holders(notes, alive)
     root = opencode_home(service.home_root, source=source)
     removed: list[str] = []
     kept: list[str] = []
     living: list[str] = []
-    for home, pid in homes.items():
-        if _alive(pid, alive):
-            living.append(f"{Path(home).name} (pid {pid})")
+    for home in sorted(homes):
+        name = Path(home).name
+        if (holder := held.get(name)) == "pid inconnu":
+            kept.append(f"{home} (pid inconnu)")
+            continue
+        if holder:
+            living.append(f"{name} ({holder})")
             continue
         try:
             done, why = purge_home(root, Path(home))
         except OSError as exc:
-            return "failed", f"HOME opencode {Path(home).name} non retiré : {type(exc).__name__}"
+            return "failed", f"HOME opencode {name} non retiré : {type(exc).__name__}"
         if done:
-            removed.append(Path(home).name)
+            removed.append(name)
         elif why != "déjà absent":
             kept.append(f"{home} ({why})")
     if living:
@@ -147,18 +207,17 @@ def sweep_orphan_homes(
 ) -> list[str]:
     """Retire les dossiers orphelins de la racine opencode du projet ; rend les noms retirés.
 
-    Gardé : un dossier noté pour une tâche de *open_tasks* (sa reprise le réutilise), un dossier dont le dernier pid
-    vit, un dossier changé depuis moins de :data:`ORPHAN_AGE_S`, et tout ce que :func:`purge_home` refuse.
+    Gardé : un dossier noté pour une tâche de *open_tasks* (sa reprise le réutilise), un dossier dont un pid noté
+    vit ou qui a été noté sans pid, un dossier changé depuis moins de :data:`ORPHAN_AGE_S`, et tout ce que
+    :func:`purge_home` refuse.
     """
     root = opencode_home(service.home_root, source=source)
     if _symlink_refusal(root) or not root.is_dir() or root.is_symlink():
         return []
     opened = set(open_tasks)
-    held: set[str] = set()
-    for tid, homes in homes_by_task(service).items():
-        for home, pid in homes.items():
-            if tid in opened or _alive(pid, alive):
-                held.add(Path(home).name)
+    notes = homes_by_task(service)
+    held = set(_holders(notes, alive))
+    held.update(Path(home).name for tid, homes in notes.items() if tid in opened for home in homes)
     clock = time.time() if now is None else now
     removed: list[str] = []
     for entry in sorted(root.iterdir()):

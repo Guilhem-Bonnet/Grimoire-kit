@@ -169,10 +169,10 @@ class Janitor:
         """Les ``HOME`` opencode orphelins de plus de 7 jours, retirés une fois par passage ; une panne n'arrête rien."""
         from grimoire.missions.opencode_homes import sweep_orphan_homes
 
-        opened = [t.id for t in self._service.list_tasks() if t.status not in _TERMINAL]
-        try:
+        try:  # Path.home() peut lever RuntimeError, le ledger une GrimoireError : le tick ne tombe jamais
+            opened = [t.id for t in self._service.list_tasks() if t.status not in _TERMINAL]
             removed = sweep_orphan_homes(self._service, opened, self._host().alive)
-        except OSError as exc:
+        except Exception as exc:
             return [JanitorOutcome("*", "opencode_orphans", "failed", type(exc).__name__)]
         return [JanitorOutcome("*", "opencode_orphans", "done", f"HOME opencode orphelin retiré : {name}") for name in removed]
 
