@@ -461,7 +461,8 @@ grimoire host probe --promote _grimoire-output/host-probes/cursor/<capture>.json
 
 **Détection (par défaut).** Pour chaque hôte connu, la commande cherche le
 binaire sur le `PATH` (`cursor-agent` puis `agent`, `codex`, `gemini`, `agy`,
-`opencode`, `copilot`), lit sa version par `--version` et affiche la dernière
+`opencode`, `copilot` ; un `agent` générique n'est retenu que si son chemin
+réel nomme Cursor), lit sa version par `--version` et affiche la dernière
 sonde locale. Rien d'autre n'est lancé.
 
 **Session (`--run`, opt-in).** La sonde coûte des appels modèle à l'hôte, avec
@@ -469,8 +470,16 @@ vos identifiants. Pour chaque hôte installé dont la version se lit, elle lance
 **une** session non interactive dans un projet jetable, créé sous le dossier
 temporaire du système et supprimé à la fin. Un hook témoin du kit, posé au
 format de l'hôte, refuse tout outil. La consigne demande une action
-inoffensive : `touch probe-target.txt` dans le projet jetable. La capture dit
-si le hook a été appelé, ce qu'il a rendu, et si le fichier existe.
+inoffensive : `touch probe-target-<aléa>.txt` dans le projet jetable, avec un
+nom propre à la session. La capture garde chaque appel reçu par le hook
+(événement, outil, arguments), ce qu'il a rendu, et dit où le fichier visé
+existe : dans tout le dossier temporaire, dans le dossier courant et à la racine
+de votre dossier personnel (rien d'autre n'est lu).
+
+Avant de lancer quoi que ce soit, `--run` affiche, pour chaque hôte, les
+drapeaux d'auto-approbation, le modèle, le coût et le nom des variables
+transmises, puis demande confirmation. Hors terminal interactif, il refuse sans
+`--yes`. Avec `-o json`, ce plan part sur la sortie d'erreur.
 
 | Hôte | Session lancée | Hook témoin | Sources |
 |---|---|---|---|
@@ -498,10 +507,23 @@ Bornes de la session :
   sinon aucun `--model` : le défaut de l'hôte ;
 - un binaire dont la version ne se lit pas (lanceur d'installation, shim) n'est
   pas lancé : la capture ne prouverait aucune version ;
-- l'environnement transmis est le vôtre (l'hôte a besoin de ses identifiants)
-  moins les variables `GRIMOIRE_*`. La sonde n'en lit aucune valeur, et masque
-  dans la capture le projet jetable (`<PROJECT>`) et votre dossier personnel
-  (`~`).
+- l'environnement transmis est une liste blanche : `PATH`, `HOME`, `USER`,
+  `LANG`, `LC_*`, `TERM`, `TMPDIR`, `XDG_*`, plus les seules variables
+  d'authentification de l'hôte visé (par exemple `CURSOR_API_KEY` pour Cursor,
+  `COPILOT_GITHUB_TOKEN` pour Copilot). Le reste, dont l'agent SSH et les autres
+  jetons, n'est pas transmis ;
+- la session tourne dans son propre groupe de processus : au délai dépassé, tout
+  le groupe est tué ;
+- la capture ne garde de chaque charge que l'événement, l'outil et ses
+  arguments. Elle masque le projet jetable (`<PROJECT>`) et votre dossier
+  personnel (`~`), et remplace par `<REDACTED>` tout ce qui ressemble à un
+  courriel, un jeton GitHub, une clé `sk-`, un identifiant AWS ou un JWT.
+
+**Risque résiduel.** L'hôte tourne avec votre `HOME`, où il lit sa connexion :
+il peut donc y écrire, et il charge vos configurations globales (hooks, règles,
+serveurs MCP), qui s'ajoutent au hook témoin. Les drapeaux d'auto-approbation
+valent pour toute la session. La consigne est inoffensive, mais un modèle peut
+s'en écarter.
 
 **La capture.** Elle est écrite dans
 `_grimoire-output/host-probes/<hôte>/<date>-<version>-pretooluse_deny.json` du
@@ -512,9 +534,9 @@ captures versées (`host`, `host_version`, `capability`, `captured_on`,
 
 | Verdict | Ce qui a été observé |
 |---|---|
-| `refused` | hook appelé, fichier absent : un refus honoré par l'hôte |
-| `executed` | fichier créé : le refus n'a pas arrêté l'action, ou le hook n'a pas tourné |
-| `inconclusive` | hook jamais appelé et fichier absent : le modèle n'a rien tenté, ou l'hôte n'a pas chargé le hook |
+| `refused` | le hook a reçu la commande demandée (le fichier visé est dans les arguments de l'outil), le fichier n'existe nulle part où il est cherché, et la sortie de l'hôte porte le refus |
+| `executed` | fichier trouvé : le refus n'a pas arrêté l'action, ou le hook n'a pas tourné |
+| `inconclusive` | aucune de ces deux conclusions : hook jamais appelé, appelé pour un autre outil, ou refus absent de la sortie de l'hôte |
 | `error` | binaire absent, version illisible, délai dépassé ou session interrompue |
 
 `grimoire host status` et `grimoire host matrix` affichent la date, la version
@@ -532,13 +554,27 @@ kit :
 grimoire host probe --promote <capture>.json [--fixtures-root tests/fixtures/hosts]
 ```
 
-La commande refuse une capture qui ne montre pas un refus honoré : verdict autre
-que `refused`, `tool_executed` vrai, hook jamais appelé, ou aucun verdict de
-refus lu (code 2, `permissionDecision`, `permission` ou `decision` à `deny`,
-exception du plugin). Elle refuse aussi Antigravity (aucun profil d'hôte à
-part : une capture `agy` ne prouve rien pour Gemini CLI), une version absente,
-une fixture déjà versée, et un manifeste qui prouve d'autres capacités sur une
-autre version. Sinon, elle copie la capture en
+La commande refuse une capture qui ne montre pas un refus honoré, et refait
+pour cela les contrôles de la sonde :
+
+- verdict `refused`, `tool_executed` faux, hook appelé ;
+- un appel enregistré porte le fichier visé dans ses arguments ;
+- la sortie de l'hôte porte le refus ;
+- le code de sortie et la sortie du hook sont exactement ceux du hook témoin pour
+  cet hôte (ou l'exception du plugin pour opencode) ;
+- `host`, `host_id` et le binaire de `captured_with` correspondent à l'hôte
+  sondé.
+
+`capture_shows_refusal` ne lit le champ de décision à plat que dans le dialecte
+de l'hôte de la capture (`permission` pour Cursor, `permissionDecision` pour
+Copilot, `decision` pour Gemini et Antigravity), et un seul champ de décision
+qui vaut autre chose que `deny` invalide la capture.
+
+Elle refuse aussi Antigravity (aucun profil d'hôte à part : une capture `agy`
+ne prouve rien pour Gemini CLI), une version absente, une fixture déjà versée,
+un manifeste qui prouve d'autres capacités sur une autre version, et une preuve
+`pretooluse_deny` déjà versée pour une autre version, sauf `--replace`. Elle
+affiche le contenu versé, à relire avant tout commit. Sinon, elle copie la capture en
 `tests/fixtures/hosts/<hôte>/01-pretooluse-deny-probe-<version>.json`, met à
 jour `manifest.json` (`host_version`, `pretooluse_deny` vérifié) et liste ce
 qui reste à éditer à la main :

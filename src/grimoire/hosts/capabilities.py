@@ -1068,30 +1068,52 @@ def claim_host_is_fenced(host: str, host_version: str | None, *, project_root: P
 PROVING_KEYS: dict[HookEvent, str] = {HookEvent.PRE_TOOL_USE: "pretooluse_deny"}
 
 
+#: Champ de décision à plat que chaque dialecte lit (#1281, L7) ; ``hookSpecificOutput.permissionDecision``
+#: (Claude Code, Codex, Copilot) est lu pour tout hôte. Un hôte absent d'ici n'a aucun champ à plat.
+FLAT_DECISION_FIELDS: dict[str, str] = {
+    "cursor": "permission",
+    "copilot": "permissionDecision",
+    "gemini": "decision",
+    "antigravity": "decision",
+}
+_DECISION_FIELDS = ("permission", "permissionDecision", "decision")
+
+
 def capture_shows_refusal(capture: Mapping[str, Any]) -> bool:
     """La capture montre-t-elle un **refus** honoré par l'hôte, pas une autorisation ?
 
     Il faut que l'action ne se soit pas exécutée (``observed.tool_executed`` faux) et
     qu'un verdict de refus soit lu : code 2, ``permissionDecision: deny`` sur stdout,
     ou exception levée par le plugin (opencode). Une capture témoin (allow) ne prouve rien.
-    Les verdicts à plat des autres dialectes comptent aussi (``permission``, ``permissionDecision``,
-    ``decision`` valant ``deny`` : Cursor, Copilot, Gemini/Antigravity). Une capture de la sonde
-    (#1281, L7) qui dit ``hook_called: false`` ne prouve rien : l'action n'a pas été tentée.
+
+    Le champ à plat n'est lu que dans le dialecte de l'hôte de la capture
+    (:data:`FLAT_DECISION_FIELDS`), et un seul champ de décision qui vaut autre chose que
+    ``deny`` invalide la capture : une sortie contradictoire ne prouve rien. Quand la capture
+    dit si le hook a été appelé (``hook_called``, ``hook_calls``), il faut qu'il l'ait été.
     """
     observed = capture.get("observed")
     if not isinstance(observed, Mapping) or observed.get("tool_executed") is not False:
         return False
-    if observed.get("hook_called") is False:
+    if "hook_called" in observed and observed.get("hook_called") is not True:
+        return False
+    if "hook_calls" in observed and not (isinstance(observed["hook_calls"], int) and observed["hook_calls"] > 0):
         return False
     stdout = observed.get("hook_stdout")
-    specific = stdout.get("hookSpecificOutput") if isinstance(stdout, Mapping) else None
-    denied = isinstance(specific, Mapping) and specific.get("permissionDecision") == "deny"
-    flat = isinstance(stdout, Mapping) and "deny" in (
-        stdout.get("permission"),
-        stdout.get("permissionDecision"),
-        stdout.get("decision"),
-    )
-    return observed.get("hook_exit_code") == 2 or denied or flat or bool(observed.get("hook_throws"))
+    decisions: list[Any] = []
+    if isinstance(stdout, Mapping):
+        specific = stdout.get("hookSpecificOutput")
+        if isinstance(specific, Mapping) and "permissionDecision" in specific:
+            decisions.append(specific["permissionDecision"])
+        decisions += [stdout[name] for name in _DECISION_FIELDS if name in stdout]
+    if any(value != "deny" for value in decisions):
+        return False
+    denied = False
+    if isinstance(stdout, Mapping):
+        specific = stdout.get("hookSpecificOutput")
+        denied = isinstance(specific, Mapping) and specific.get("permissionDecision") == "deny"
+        flat = FLAT_DECISION_FIELDS.get(str(capture.get("host", "")))
+        denied = denied or (flat is not None and stdout.get(flat) == "deny")
+    return observed.get("hook_exit_code") == 2 or denied or bool(observed.get("hook_throws"))
 
 
 def _read_capture(path: Path) -> Mapping[str, Any]:

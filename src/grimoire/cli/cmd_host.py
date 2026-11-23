@@ -16,6 +16,7 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from grimoire.bridges.host import HostBridge
@@ -57,6 +58,7 @@ from grimoire.hosts.surface import Enforcement
 
 host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes et hooks par hôte.")
 console = Console()
+_err_console = Console(stderr=True)
 
 _PROJECT_ROOT_OPTION = typer.Option(Path.cwd(), "--project-root", help="Racine du projet.", show_default=False)
 _HOST_ALL_OPTION = typer.Option("all", "--host", help="claude | copilot | codex | cursor | gemini | opencode | all | auto.")
@@ -559,10 +561,11 @@ def host_matrix(
 
 
 def _local_probe_lines(probes: list[dict[str, Any]]) -> list[str]:
-    """Une ligne par sonde locale : date, version, verdict ; jamais une annonce."""
+    """Une ligne par sonde locale : date, version, verdict ; jamais une annonce. Champs échappés (markup rich)."""
     return [
-        f"[dim]dernière sonde locale ({p['host']}) : {p['probed_at']}, version {p['host_version'] or 'inconnue'}, "
-        f"verdict {p['verdict']} — non versée, ne change aucune annonce[/dim]"
+        f"[dim]dernière sonde locale ({escape(str(p['host']))}) : {escape(str(p['probed_at']))}, "
+        f"version {escape(str(p['host_version'] or 'inconnue'))}, verdict {escape(str(p['verdict']))} "
+        "— non versée, ne change aucune annonce[/dim]"
         for p in probes
     ]
 
@@ -573,8 +576,12 @@ _CAPABILITIES_OPTION = typer.Option(
 _RUN_OPTION = typer.Option(
     False, "--run", help="Avec --capabilities : lancer UNE session par hôte (appels modèle payants) avec un hook témoin."
 )
+_YES_OPTION = typer.Option(False, "--yes", help="Avec --run : ne pas demander de confirmation (exigé hors terminal).")
 _PROMOTE_OPTION = typer.Option(
     None, "--promote", help="Verser une capture vérifiée sous tests/fixtures/hosts/ (geste humain, clone du kit)."
+)
+_REPLACE_OPTION = typer.Option(
+    False, "--replace", help="Avec --promote : remplacer une preuve pretooluse_deny d'une autre version."
 )
 _FIXTURES_ROOT_OPTION = typer.Option(
     None, "--fixtures-root", help="Dossier des fixtures d'hôte (défaut : <projet>/tests/fixtures/hosts)."
@@ -584,38 +591,80 @@ _TIMEOUT_OPTION = typer.Option(
 )
 
 
-def _probe_promote(ctx: typer.Context, capture: Path, project_root: Path, fixtures_root: Path | None) -> None:
+def _interactive() -> bool:
+    """Un humain peut-il répondre à une confirmation ? (stdin et stdout reliés à un terminal)"""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _probe_promote(ctx: typer.Context, capture: Path, project_root: Path, fixtures_root: Path | None, *, replace: bool) -> None:
     root = fixtures_root or project_root / "tests" / "fixtures" / "hosts"
     try:
-        result = capability_probe.promote(capture, root)
+        result = capability_probe.promote(capture, root, replace=replace)
     except capability_probe.PromotionRefusedError as exc:
         if _get_fmt(ctx) == "json":
             typer.echo(json.dumps({"promoted": False, "reason": str(exc)}, ensure_ascii=False))
         else:
-            console.print(f"[red]Promotion refusée[/red] : {exc}")
+            console.print(f"[red]Promotion refusée[/red] : {escape(str(exc))}")
         raise typer.Exit(1) from exc
     if _get_fmt(ctx) == "json":
-        payload = {"promoted": True, "fixture": result.relpath, "manifest": str(result.manifest), "todo": list(result.instructions)}
+        payload = {
+            "promoted": True,
+            "fixture": result.relpath,
+            "manifest": str(result.manifest),
+            "todo": list(result.instructions),
+            "content": json.loads(result.content),
+        }
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
-    console.print(f"[green]Capture versée[/green] : {result.relpath} ; manifeste mis à jour ({result.manifest})")
+    console.print(f"[green]Capture versée[/green] : {escape(result.relpath)} ; manifeste mis à jour ({escape(str(result.manifest))})")
+    console.print("Contenu versé, à relire avant tout commit :")
+    console.print(result.content, markup=False, highlight=False)
     console.print("Rien n'est encore annoncé : reste à faire à la main, puis relire le diff :")
     for line in result.instructions:
-        console.print(f"  - {line}")
+        console.print(f"  - {escape(line)}")
 
 
-def _probe_capabilities(ctx: typer.Context, host: str, project_root: Path, *, run: bool, timeout: int) -> None:
+def _confirm_run(plans: list[dict[str, Any]], *, yes: bool, timeout: int) -> None:
+    """Montre ce que ``--run`` va faire et demande confirmation ; refuse hors terminal sans ``--yes``.
+
+    Le plan part sur stderr : la sortie JSON de ``-o json`` reste lisible.
+    """
+    console = _err_console
+    console.print(
+        f"[bold]--run[/bold] lance {len(plans)} session(s) réelle(s), une par hôte : appels modèle payants, "
+        f"avec vos identifiants, {timeout} s au plus chacune."
+    )
+    for plan in plans:
+        flags = ", ".join(plan["auto_approve"]) or "aucun"
+        model = plan["model"] or "défaut de l'hôte"
+        console.print(f"  {escape(plan['display_name'])} : modèle {escape(model)} ; auto-approbation : {escape(flags)}")
+        console.print(f"    variables transmises : {escape(', '.join(plan['env']) or 'aucune')}")
+    console.print(
+        "[dim]Les drapeaux ne valent que pour le projet jetable ; l'hôte garde votre HOME (lecture et écriture) "
+        "et charge vos configurations globales.[/dim]"
+    )
+    if yes:
+        return
+    if not _interactive():
+        console.print("[red]Confirmation impossible hors terminal[/red] : relancez avec --yes pour accepter ces sessions.")
+        raise typer.Exit(2)
+    if not typer.confirm("Lancer ces sessions ?", default=False):
+        console.print("Rien n'a été lancé.")
+        raise typer.Exit(1)
+
+
+def _probe_capabilities(ctx: typer.Context, host: str, project_root: Path, *, run: bool, timeout: int, yes: bool) -> None:
     targets = capability_probe.select_targets(host)
     if not targets:
         known = ", ".join(t.key for t in capability_probe.TARGETS)
-        console.print(f"[red]Hôte non sondable : {host}[/red] (connus : {known})")
+        console.print(f"[red]Hôte non sondable : {escape(host)}[/red] (connus : {known})")
         raise typer.Exit(1)
     detections = capability_probe.detect(targets, project_root)
     captures: list[dict[str, Any]] = []
-    if run:
-        for found in detections:
-            if not found.installed or not found.version:
-                continue
+    runnable = [d for d in detections if d.installed and d.version]
+    if run and runnable:
+        _confirm_run([capability_probe.session_plan(d.target, project_root) for d in runnable], yes=yes, timeout=timeout)
+        for found in runnable:
             capture, path = capability_probe.run_probe(
                 found.target, project_root, binary=found.binary, version=found.version, timeout=timeout
             )
@@ -628,17 +677,18 @@ def _probe_capabilities(ctx: typer.Context, host: str, project_root: Path, *, ru
         table.add_column(column)
     for found in detections:
         last = found.to_dict()["last_probe"]
+        summary = f"{last['probed_at']} ({last['host_version'] or '?'}, {last['verdict']})" if last else ""
         table.add_row(
             found.target.display_name,
-            Path(found.binary).name if found.binary else "[dim]absent[/dim]",
-            found.version or "[dim]—[/dim]",
+            escape(Path(found.binary).name) if found.binary else "[dim]absent[/dim]",
+            escape(found.version) if found.version else "[dim]—[/dim]",
             found.target.source,
-            f"{last['probed_at']} ({last['host_version'] or '?'}, {last['verdict']})" if last else "[dim]aucune[/dim]",
+            escape(summary) if last else "[dim]aucune[/dim]",
         )
     console.print(table)
     for item in captures:
-        why = f" — {item['reason']}" if item["reason"] else ""
-        console.print(f"  {item['host']} : verdict [bold]{item['verdict']}[/bold]{why} → {item['path']}")
+        why = f" — {escape(str(item['reason']))}" if item["reason"] else ""
+        console.print(f"  {item['host']} : verdict [bold]{escape(str(item['verdict']))}[/bold]{why} → {escape(item['path'])}")
     if not run:
         console.print("[dim]`--run` lance une session par hôte installé (appels modèle payants) ; rien n'est annoncé sans promotion.[/dim]")
     elif captures:
@@ -652,7 +702,9 @@ def host_probe(
     host: str = _HOST_ALL_OPTION,
     capabilities: bool = _CAPABILITIES_OPTION,
     run: bool = _RUN_OPTION,
+    yes: bool = _YES_OPTION,
     promote: Path | None = _PROMOTE_OPTION,
+    replace: bool = _REPLACE_OPTION,
     fixtures_root: Path | None = _FIXTURES_ROOT_OPTION,
     timeout: int = _TIMEOUT_OPTION,
 ) -> None:
@@ -662,17 +714,18 @@ def host_probe(
     plus dans le fichier de l'hôte, ou si aucun hôte n'a pu être sondé (inconnu n'est pas OK).
 
     ``--capabilities`` détecte les hôtes installés (binaire, version) ; avec ``--run``, lance une
-    session minimale par hôte avec un hook témoin qui refuse, et écrit la capture dans
-    ``_grimoire-output/host-probes/<hôte>/``. ``--promote <fichier>`` verse une capture vérifiée.
+    session minimale par hôte avec un hook témoin qui refuse, après confirmation (``--yes`` hors
+    terminal), et écrit la capture dans ``_grimoire-output/host-probes/<hôte>/``.
+    ``--promote <fichier>`` verse une capture vérifiée.
     """
     if promote is not None:
-        _probe_promote(ctx, promote, project_root, fixtures_root)
+        _probe_promote(ctx, promote, project_root, fixtures_root, replace=replace)
         return
     if run and not capabilities:
         console.print("[red]--run exige --capabilities[/red] (la sonde de disque ne lance rien).")
         raise typer.Exit(2)
     if capabilities:
-        _probe_capabilities(ctx, host, project_root, run=run, timeout=timeout)
+        _probe_capabilities(ctx, host, project_root, run=run, timeout=timeout, yes=yes)
         return
     targets = tuple(_resolve_targets(host, project_root))
     report = probe_hosts(project_root, targets)
