@@ -13,9 +13,22 @@ provider; see ``tests/fixtures/hosts/opencode/`` and ``docs/hosts.md``):
   message as a failed tool state — this is what makes the host *fenced* for
   ``pretooluse_deny`` and what the guard plugin below relies on.
 
+Read from the V1 documentation on 2026-11-22, not captured:
+
+- the same plugin answers the ``session.idle`` event (end of a turn, listed under
+  "Session events" of https://opencode.ai/docs/en/plugins/) with the kit's
+  closure decision. No hook that refuses the end of a turn or forces another one
+  is documented there, nor in the V2 server hooks
+  (https://opencode.ai/docs/build/plugins/server), so a refusal is logged
+  through ``client.app.log`` and never claimed blocking;
+- an agent's ``model`` takes ``provider/model-id``, and a subagent without one
+  inherits the model of the primary agent that invoked it
+  (https://opencode.ai/docs/en/agents/). It is written only for a tier the
+  project names under ``dispatch.models.opencode`` (:mod:`grimoire.hosts.model_table`).
+
 Not emitted because not proven: a ``permission`` table (a ``read`` deny glob
-written the way the docs suggest did not stop a read of a dotenv file), any
-session/stop/post-tool hook, and a per-agent model.
+written the way the docs suggest did not stop a read of a dotenv file), and any
+session-start or post-tool hook.
 """
 
 from __future__ import annotations
@@ -38,9 +51,11 @@ from grimoire.hosts.emitters.base import (
     managed_header,
     persona_section,
 )
+from grimoire.hosts.emitters.claude_code import tier_for
 from grimoire.hosts.emitters.copilot import _dispatch_policy_section
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, expand_project_dir, resolve_hook_launcher
+from grimoire.hosts.model_table import TIERS, load_model_table, resolve_model
 from grimoire.hosts.secrets import secret_patterns
 from grimoire.hosts.surface import (
     AgentSpec,
@@ -79,6 +94,10 @@ _GUARDED: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Délai d'un plugin sans hook porteur (jamais émis seul : un garde-fou de typage).
+_DEFAULT_TIMEOUT = 30
+
+
 def _tools_map(agent: AgentSpec) -> dict[str, bool]:
     allowed: list[str] = []
     for verb in agent.tools:
@@ -99,9 +118,42 @@ def _skill_section(skill: SkillSpec) -> str:
     return f"\n## Compétence attachée : {skill.name}\n\n> {skill.description}\n\n{skill.body}"
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface, owned_skills: tuple[SkillSpec, ...]) -> EmittedFile:
+def _model_tiers(project_root: Path) -> tuple[dict[str, str], list[str]]:
+    """Palier -> ``provider/model-id`` déclaré pour opencode, et les noms écartés faute de fournisseur.
+
+    opencode documente le format ``provider/model-id`` : un nom sans ``/`` serait un modèle
+    que l'hôte ne sait pas résoudre, il n'est donc pas écrit (et la dégradation le nomme).
+    """
+    table = load_model_table(project_root)
+    models: dict[str, str] = {}
+    rejected: list[str] = []
+    for choice in (resolve_model(tier, HOST_ALIAS, table=table) for tier in TIERS):
+        if not choice.model:
+            continue
+        if "/" in choice.model.strip("/"):
+            models[choice.tier] = choice.model
+        else:
+            rejected.append(f"{choice.tier}={choice.model}")
+    return models, rejected
+
+
+def _agent_model(agent: AgentSpec, models: dict[str, str]) -> str:
+    tier = tier_for(agent)
+    return models.get(tier, "") if tier != "inherit" else ""
+
+
+def _agent_file(
+    agent: AgentSpec,
+    surface: ProjectSurface,
+    owned_skills: tuple[SkillSpec, ...],
+    models: dict[str, str] | None = None,
+) -> EmittedFile:
     header = _frontmatter(
-        {"description": agent.description, "mode": "primary" if agent.entry_point else "subagent"},
+        {
+            "description": agent.description,
+            "mode": "primary" if agent.entry_point else "subagent",
+            "model": _agent_model(agent, models or {}),
+        },
         _tools_map(agent),
     )
     role = (
@@ -156,6 +208,10 @@ def _guard_hook(surface: ProjectSurface) -> HookSpec | None:
     return None
 
 
+def _stop_hook(surface: ProjectSurface) -> HookSpec | None:
+    return next((hook for hook in surface.hooks if hook.event is HookEvent.STOP), None)
+
+
 _PLUGIN_TEMPLATE = """// __MARKER__ — régénéré par `grimoire host sync --host opencode`; éditez la source, pas ce fichier.
 // Garde PreToolUse : chaque appel d'outil concerné passe par `grimoire-hook`, et un refus
 // devient une exception dans `tool.execute.before` — opencode n'exécute alors pas l'outil.
@@ -166,6 +222,10 @@ import { join } from "node:path"
 const GUARDED = __GUARDED__
 const SECRET_PATTERNS = __SECRETS__.map((source) => new RegExp(source, "i"))
 const TIMEOUT_MS = __TIMEOUT__
+// Décision de clôture sur `session.idle` (fin de tour) : rendue et journalisée, jamais opposée —
+// opencode ne documente aucun moyen de refuser la fin d'un tour depuis un plugin.
+const STOP_ENABLED = __STOP__
+const STOP_TIMEOUT_MS = __STOP_TIMEOUT__
 const BLOCKING_PROFILES = ["governed", "production"]
 const KNOWN_PROFILES = __PROFILES__
 // Programme de garde résolu à l'émission (issue #760) : nom nu s'il est dans le PATH de l'hôte,
@@ -210,7 +270,38 @@ function touchesSecret(args) {
   return SECRET_PATTERNS.some((pattern) => pattern.test(text))
 }
 
-export const GrimoireGuard = async ({ directory }) => ({
+async function closureVerdict(directory, client, event) {
+  const payload = JSON.stringify({
+    hook_event_name: "Stop",
+    cwd: directory,
+    session_id: String(event.properties?.sessionID ?? ""),
+    stop_hook_active: false,
+  })
+  const run = spawnSync(hookProgram(directory), ["--host", "opencode", "--event", "Stop"], {
+    input: payload,
+    encoding: "utf8",
+    timeout: STOP_TIMEOUT_MS,
+  })
+  if (run.error || run.status !== 0) return
+  let verdict = {}
+  try {
+    verdict = JSON.parse(run.stdout || "{}")
+  } catch {
+    return
+  }
+  const message = verdict.systemMessage || verdict.reason
+  if (!message) return
+  try {
+    await client.app.log({ body: { service: "grimoire", level: "warn", message: `[grimoire] clôture : ${message}` } })
+  } catch {
+    console.error(`[grimoire] clôture : ${message}`)
+  }
+}
+
+export const GrimoireGuard = async ({ directory, client }) => ({
+  event: async ({ event }) => {
+    if (STOP_ENABLED && event?.type === "session.idle") await closureVerdict(directory, client, event)
+  },
   "tool.execute.before": async (input, output) => {
     const tool = String(input.tool ?? "").toLowerCase()
     if (!GUARDED.includes(tool)) return
@@ -250,24 +341,32 @@ export const GrimoireGuard = async ({ directory }) => ({
 """
 
 
-def _guard_plugin(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
+def _guard_plugin(hook: HookSpec | None, launcher: HookLauncher = BARE, stop: HookSpec | None = None) -> EmittedFile:
+    """Le plugin : garde ``tool.execute.before`` si *hook*, décision de clôture sur ``session.idle`` si *stop*."""
     tools: list[str] = []
-    for family in hook.matcher or tuple(_GUARDED):
-        for name in _GUARDED.get(family, ()):
-            if name not in tools:
-                tools.append(name)
+    if hook is not None:
+        for family in hook.matcher or tuple(_GUARDED):
+            for name in _GUARDED.get(family, ()):
+                if name not in tools:
+                    tools.append(name)
+    carrier = hook if hook is not None else stop
+    timeout = carrier.timeout if carrier is not None else _DEFAULT_TIMEOUT
     content = (
         _PLUGIN_TEMPLATE.replace("__MARKER__", MANAGED_MARKER)
         .replace("__GUARDED__", json.dumps(tools))
         .replace("__SECRETS__", json.dumps(list(secret_patterns()), ensure_ascii=False))
-        .replace("__TIMEOUT__", str(hook.timeout * 1000))
+        .replace("__TIMEOUT__", str(timeout * 1000))
+        .replace("__STOP_TIMEOUT__", str((stop.timeout if stop is not None else timeout) * 1000))
+        .replace("__STOP__", "true" if stop is not None else "false")
         .replace("__PROFILES__", json.dumps(list(PROFILE_LADDER)))
         .replace("__HOOK__", json.dumps({"posix": launcher.posix, "windows": launcher.windows}))
     )
     return EmittedFile(relpath=PLUGIN_RELPATH, content=content)
 
 
-def _instructions_file(surface: ProjectSurface, guarded: HookSpec | None, gaps: list[Degradation]) -> EmittedFile:
+def _instructions_file(
+    surface: ProjectSurface, guarded: HookSpec | None, gaps: list[Degradation], stop: HookSpec | None = None
+) -> EmittedFile:
     lines = [
         managed_header(".md"),
         "",
@@ -284,15 +383,21 @@ def _instructions_file(surface: ProjectSurface, guarded: HookSpec | None, gaps: 
         GROUNDING_RULE,
         "",
     ]
-    if guarded is not None:
-        lines += [
-            "## Gouvernance",
-            "",
-            f"- **PreToolUse** — {guarded.rationale}",
-            "",
-            "Le plugin `.opencode/plugin/grimoire-guard.js` refuse l'appel d'outil avant son exécution.",
-            "",
-        ]
+    if guarded is not None or stop is not None:
+        lines += ["## Gouvernance", ""]
+        if guarded is not None:
+            lines.append(f"- **PreToolUse** — {guarded.rationale}")
+        if stop is not None:
+            lines.append(f"- **Stop** (consultatif, `session.idle`) — {stop.rationale}")
+        lines.append("")
+        if guarded is not None:
+            lines += ["Le plugin `.opencode/plugin/grimoire-guard.js` refuse l'appel d'outil avant son exécution.", ""]
+        if stop is not None:
+            lines += [
+                "À chaque fin de tour, le même plugin rend la décision de clôture et la journalise ; "
+                "opencode ne permet pas de refuser la fin d'un tour, les gates restent opposables en CI.",
+                "",
+            ]
     if gaps:
         lines += ["## Dégradations sur cet hôte", ""]
         lines += [f"- **{g.surface}** — {g.reason} Repli : {g.fallback}" for g in gaps]
@@ -333,30 +438,50 @@ def _config_merge(surface: ProjectSurface, project_root: Path) -> JsonMerge:
     return JsonMerge(relpath=Path("opencode.json"), merge=merge, label="opencode.json")
 
 
+def _model_degradations(unmapped: list[str], rejected: list[str]) -> list[Degradation]:
+    if not unmapped and not rejected:
+        return []
+    detail = f" Personas sans nom déclaré pour leur palier : {', '.join(unmapped)}." if unmapped else ""
+    if rejected:
+        detail += f" Noms écartés, sans fournisseur (`provider/model-id` attendu) : {', '.join(rejected)}."
+    return [
+        Degradation(
+            surface="model affinity",
+            reason=f"Le champ `model` d'un agent opencode prend `provider/model-id`, sans correspondance documentée avec les paliers du kit.{detail}",
+            fallback=(
+                "`model` n'est écrit que pour un palier déclaré sous `dispatch.models.opencode.<palier>` ; "
+                "sinon un sous-agent hérite du modèle de l'agent principal qui l'invoque."
+            ),
+        )
+    ]
+
+
 class OpenCodeEmitter(Emitter):
     host_id = HostId.OPENCODE
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
         by_slug = {skill.slug: skill for skill in surface.skills}
         attached = {slug for agent in surface.agents for slug in agent.skills}
+        models, rejected = _model_tiers(project_root)
         files: list[EmittedFile] = [
-            _agent_file(agent, surface, tuple(by_slug[s] for s in agent.skills if s in by_slug))
+            _agent_file(agent, surface, tuple(by_slug[s] for s in agent.skills if s in by_slug), models)
             for agent in surface.agents
         ]
         files.extend(_skill_file(skill) for skill in surface.skills if skill.slug not in attached)
         files.extend(_command_file(c) for c in surface.commands if c.source != "workflow")
         guarded = _guard_hook(surface)
-        launcher = resolve_hook_launcher(project_root) if guarded is not None else BARE
-        if guarded is not None:
-            files.append(_guard_plugin(guarded, launcher))
+        stop = _stop_hook(surface)
+        plugged = guarded is not None or stop is not None
+        launcher = resolve_hook_launcher(project_root) if plugged else BARE
+        if plugged:
+            files.append(_guard_plugin(guarded, launcher, stop))
 
+        unmapped = sorted(
+            agent.name for agent in surface.agents if (tier := tier_for(agent)) != "inherit" and tier not in models
+        )
         degradations = [
             *Emitter.launcher_degradations(launcher),
-            Degradation(
-                surface="model affinity",
-                reason="Aucune sélection de modèle par palier n'a été sondée sur cet hôte.",
-                fallback="`model` n'est pas émis ; le modèle de la session s'applique à chaque agent.",
-            ),
+            *_model_degradations(unmapped, rejected),
             Degradation(
                 surface="permissions",
                 reason="Une table `permission` n'a pas été prouvée (un refus de lecture déclaré en glob n'a pas arrêté la lecture).",
@@ -364,13 +489,24 @@ class OpenCodeEmitter(Emitter):
             ),
         ]
         for hook in surface.hooks:
-            if hook is guarded:
+            if hook is guarded or hook is stop:
                 continue
             degradations.append(
                 Degradation(
                     surface=f"hook {hook.event.value}",
-                    reason="Seul `tool.execute.before` a été sondé sur cet hôte.",
+                    reason="Le plugin opencode ne câble que `tool.execute.before` et `session.idle`.",
                     fallback="règle énoncée dans les instructions, non opposable.",
+                )
+            )
+        if stop is not None:
+            degradations.append(
+                Degradation(
+                    surface="hook stop verification",
+                    reason=(
+                        "`session.idle` signale la fin d'un tour, mais opencode ne documente aucun moyen "
+                        "de la refuser ni de relancer l'agent depuis un plugin ; rien n'a été capturé."
+                    ),
+                    fallback="la décision de clôture est journalisée (`client.app.log`), sans blocage ; les gates restent opposables en CI.",
                 )
             )
         if guarded is not None:
@@ -381,7 +517,7 @@ class OpenCodeEmitter(Emitter):
                     fallback="une décision `ask` est refusée avec son motif (échec fermé).",
                 )
             )
-        files.append(_instructions_file(surface, guarded, degradations))
+        files.append(_instructions_file(surface, guarded, degradations, stop))
         return with_rule_layers(
             EmitPlan(
                 host_id=self.host_id,
