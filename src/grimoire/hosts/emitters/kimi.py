@@ -44,6 +44,8 @@ from grimoire.hosts.emitters.base import (
     JsonMerge,
     MergeRefusedError,
     context_load_instruction,
+    escapes_root,
+    inline_text,
     managed_header,
     persona_section,
 )
@@ -122,7 +124,7 @@ def _mcp_merge(servers: tuple[McpServerSpec, ...], project_root: Path) -> JsonMe
         data["mcpServers"] = current
         return data
 
-    return JsonMerge(relpath=MCP_FILE, merge=merge, label=MCP_FILE.as_posix())
+    return JsonMerge(relpath=MCP_FILE, merge=merge, label=MCP_FILE.as_posix(), unique_keys=True)
 
 
 def _entrypoint(surface: ProjectSurface, project_root: Path, agents: list[AgentSpec]) -> EmittedFile:
@@ -142,7 +144,7 @@ def _entrypoint(surface: ProjectSurface, project_root: Path, agents: list[AgentS
         lines += ["## Personas", ""]
         for agent in agents:
             marker = " (entrée)" if agent.entry_point else ""
-            lines.append(f"- `{agent.name}`{marker} — {agent.description} (`kimi --agent {agent.name}`)")
+            lines.append(f"- `{agent.name}`{marker} — {inline_text(agent.description)} (`kimi --agent {agent.name}`)")
         lines.append("")
     lines += [
         "## Surfaces de l'hôte",
@@ -162,7 +164,7 @@ def _entrypoint(surface: ProjectSurface, project_root: Path, agents: list[AgentS
         lines += ["## Commandes", "", "| Commande | Effet |", "|---|---|"]
         for command in surface.commands:
             hint = f" {command.argument_hint}" if command.argument_hint else ""
-            lines.append(f"| `grimoire host run {command.slug}{hint}` | {command.description} |")
+            lines.append(f"| `grimoire host run {command.slug}{hint}` | {inline_text(command.description)} |")
         lines.append("")
     if surface.hooks:
         lines += ["## Gouvernance", ""]
@@ -286,18 +288,31 @@ class KimiCodeEmitter(Emitter):
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
         agents = [agent for agent in surface.agents if _KEBAB.fullmatch(agent.name)]
         rejected = [agent.name for agent in surface.agents if not _KEBAB.fullmatch(agent.name)]
-        files: list[EmittedFile] = [_agent_file(agent, surface) for agent in agents]
+        escaping = escapes_root(project_root, KIMI_DIR)
+        # `.kimi-code/` est un lien qui sort du projet : ni agents ni MCP n'y sont écrits.
+        files: list[EmittedFile] = [] if escaping else [_agent_file(agent, surface) for agent in agents]
         skill_files, skill_gaps = shared_skills(surface.skills)
         files.extend(skill_files)
         entry_gap = _entry_owner(project_root)
         if not entry_gap:
             files.append(_entrypoint(surface, project_root, agents))
-        mcp = _mcp_merge(surface.mcp_servers, project_root)
+        mcp = None if escaping else _mcp_merge(surface.mcp_servers, project_root)
+        symlink_gap = (
+            [
+                Degradation(
+                    surface="symlink",
+                    reason="`.kimi-code/` mène hors du projet une fois les liens résolus : écriture refusée.",
+                    fallback="remplacer le lien par un dossier du projet, puis relancer `grimoire host sync`.",
+                )
+            ]
+            if escaping
+            else []
+        )
         plan = EmitPlan(
             host_id=self.host_id,
             files=tuple(files),
             merges=(mcp,) if mcp is not None else (),
-            degradations=(*skill_gaps, *_degradations(surface, rejected, entry_gap)),
+            degradations=(*skill_gaps, *_degradations(surface, rejected, entry_gap), *symlink_gap),
             owned_globs=(".kimi-code/agents/*.md", SHARED_SKILLS_GLOB),
         )
         return with_rule_layers(plan, project_root)

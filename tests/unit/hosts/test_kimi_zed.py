@@ -84,7 +84,9 @@ def governed(tmp_path: Path) -> Path:
     _agent(tmp_path, "scribe")
     setup_standard_profile(tmp_path, profile_id="governed", task_id="bootstrap")
     (tmp_path / ".mcp.json").write_text(
-        json.dumps({"mcpServers": {"grimoire": {"command": "grimoire-mcp", "args": ["serve"]}, "autre": {"command": "x"}}}),
+        json.dumps(
+            {"mcpServers": {"grimoire": {"command": "grimoire-mcp", "args": ["serve"]}, "autre": {"command": "x"}}}
+        ),
         encoding="utf-8",
     )
     return tmp_path
@@ -228,7 +230,14 @@ def test_kimi_mcp_merge_preserves_the_user(governed: Path) -> None:
     assert not again.written
 
 
-@pytest.mark.parametrize("content", ['{"mcpServers": []}', '{\n  // commentaire\n  "mcpServers": {}\n}'])
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"mcpServers": []}',
+        '{\n  // commentaire\n  "mcpServers": {}\n}',
+        '{"mcpServers": {"a": {"command": "x"}}, "mcpServers": {"b": {"command": "y"}}}',
+    ],
+)
 def test_kimi_mcp_refuses_rather_than_overwrite(governed: Path, content: str) -> None:
     mcp = governed / ".kimi-code/mcp.json"
     mcp.parent.mkdir(parents=True)
@@ -284,10 +293,8 @@ def test_zed_keeps_user_rules_settings_and_tasks(governed: Path) -> None:
     (zed / "settings.json").write_text(
         json.dumps({"theme": "One Dark", "context_servers": {"grimoire": {"command": "le-mien"}}}), encoding="utf-8"
     )
-    stale = {**GOVERNED_TASK, "use_new_terminal": False}
     user_task = {"label": "tests", "command": "pytest"}
-    neighbour = {"label": GOVERNED_TASK_LABEL, "command": "claude --dangerous"}
-    (zed / "tasks.json").write_text(json.dumps([stale, user_task, neighbour]), encoding="utf-8")
+    (zed / "tasks.json").write_text(json.dumps([GOVERNED_TASK, user_task]), encoding="utf-8")
 
     (result,) = apply_plans([_plan(governed, HostId.ZED)], governed, force=True)
     assert result.ok, result.conflicts
@@ -295,7 +302,7 @@ def test_zed_keeps_user_rules_settings_and_tasks(governed: Path) -> None:
     assert (governed / ".rules").read_text(encoding="utf-8").startswith("Règle maison.\n")
     settings = json.loads((zed / "settings.json").read_text(encoding="utf-8"))
     assert settings == {"theme": "One Dark", "context_servers": {"grimoire": {"command": "le-mien"}}}
-    assert json.loads((zed / "tasks.json").read_text(encoding="utf-8")) == [user_task, neighbour, GOVERNED_TASK]
+    assert json.loads((zed / "tasks.json").read_text(encoding="utf-8")) == [user_task, GOVERNED_TASK]
     again = apply_plans([_plan(governed, HostId.ZED)], governed)[0]
     assert not again.written and again.ok
 
@@ -307,6 +314,16 @@ def test_zed_keeps_user_rules_settings_and_tasks(governed: Path) -> None:
         (".zed/settings.json", '{"context_servers": ["grimoire"]}'),
         (".zed/tasks.json", '[\n  // commentaire\n  {"label": "a", "command": "b"}\n]\n'),
         (".zed/tasks.json", '{"label": "pas une liste"}'),
+        # Clé répétée : json.loads garderait la dernière en silence.
+        (".zed/settings.json", '{"theme": "a", "theme": "b"}'),
+        (".zed/tasks.json", '[{"label": "a", "command": "b", "command": "c"}]'),
+        # Une tâche de l'utilisateur au libellé du kit, même commande, args et env en plus.
+        (
+            ".zed/tasks.json",
+            json.dumps([{**GOVERNED_TASK, "args": ["--model", "opus"], "env": {"X": "1"}}]),
+        ),
+        (".zed/tasks.json", json.dumps([{**GOVERNED_TASK, "use_new_terminal": False}])),
+        (".zed/tasks.json", json.dumps([{"label": GOVERNED_TASK_LABEL, "command": "claude --autre"}])),
     ],
 )
 def test_zed_refuses_rather_than_overwrite(governed: Path, relpath: str, content: str) -> None:
@@ -404,3 +421,57 @@ def test_grimoire_up_real_cli_writes_kimi_and_zed_and_keeps_user_files(governed:
     assert second.returncode == 0, second.stdout + second.stderr
     plans = [_plan(governed, HostId.KIMI_CODE), _plan(governed, HostId.ZED)]
     assert all(not r.written and not r.removed for r in apply_plans(plans, governed, dry_run=True))
+
+
+def test_zed_removes_only_its_own_task_when_claude_is_no_longer_declared(governed: Path) -> None:
+    _hosts(governed, "zed")
+    tasks = governed / ".zed/tasks.json"
+    tasks.parent.mkdir()
+    user_task = {"label": "tests", "command": "pytest"}
+    tasks.write_text(json.dumps([user_task, GOVERNED_TASK]), encoding="utf-8")
+    _sync(governed, HostId.ZED)
+    assert json.loads(tasks.read_text(encoding="utf-8")) == [user_task]
+    again = apply_plans([_plan(governed, HostId.ZED)], governed)[0]
+    assert ".zed/tasks.json" in again.unchanged
+    # Une variante au libellé du kit n'est pas la tâche du kit : jamais retirée.
+    variant = {**GOVERNED_TASK, "args": ["--x"]}
+    tasks.write_text(json.dumps([variant]), encoding="utf-8")
+    _sync(governed, HostId.ZED)
+    assert json.loads(tasks.read_text(encoding="utf-8")) == [variant]
+
+
+def test_multiline_descriptions_stay_on_one_line(governed: Path) -> None:
+    _hosts(governed, "kimi", "zed")
+    surface = build_surface(governed)
+    agent = replace(surface.agents[0], description="première ligne\n| colonne | piège |\nfin")
+    odd = replace(surface, agents=(agent, *surface.agents[1:]))
+    for host, relpath in ((HostId.ZED, ".rules"), (HostId.KIMI_CODE, "AGENTS.md")):
+        emitter = emitter_for(host)
+        assert emitter is not None
+        entry = next(f for f in emitter.plan(odd, governed).files if f.relpath.as_posix() == relpath)
+        line = next(line for line in entry.content.splitlines() if "première ligne" in line)
+        assert "fin" in line
+        assert "\\| colonne \\| piège \\|" in line
+
+
+@pytest.mark.parametrize(("host", "dirname"), [(HostId.ZED, ".zed"), (HostId.KIMI_CODE, ".kimi-code")])
+def test_a_host_dir_linked_outside_the_project_is_never_written(
+    governed: Path, tmp_path_factory: pytest.TempPathFactory, host: HostId, dirname: str
+) -> None:
+    _hosts(governed, "claude", "kimi", "zed")
+    outside = tmp_path_factory.mktemp("ailleurs")
+    (governed / dirname).symlink_to(outside, target_is_directory=True)
+    plan = _plan(governed, host)
+    assert not any(label.startswith(f"{dirname}/") for label in plan.labels())
+    assert any(d.surface == "symlink" for d in plan.degradations)
+    apply_plans([plan], governed)
+    assert list(outside.iterdir()) == []
+
+
+def test_a_host_dir_linked_inside_the_project_is_kept(governed: Path) -> None:
+    _hosts(governed, "claude", "zed")
+    (governed / "config-zed").mkdir()
+    (governed / ".zed").symlink_to(governed / "config-zed", target_is_directory=True)
+    plan = _plan(governed, HostId.ZED)
+    assert ".zed/settings.json" in plan.labels()
+    assert not any(d.surface == "symlink" for d in plan.degradations)

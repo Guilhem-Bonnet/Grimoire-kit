@@ -47,6 +47,9 @@ from grimoire.hosts.emitters.base import (
     JsonMerge,
     MergeRefusedError,
     TextMerge,
+    escapes_root,
+    inline_text,
+    load_json_unique,
     managed_header,
 )
 from grimoire.hosts.emitters.copilot_mcp import KIT_SERVERS
@@ -111,7 +114,7 @@ def _entrypoint(surface: ProjectSurface, governed_task: bool) -> EmittedFile:
         lines += ["## Personas", "", "| Persona | Rôle | Définition |", "|---|---|---|"]
         for agent in surface.agents:
             marker = " (entrée)" if agent.entry_point else ""
-            lines.append(f"| `{agent.name}`{marker} | {agent.description} | `{agent.definition_ref}` |")
+            lines.append(f"| `{agent.name}`{marker} | {inline_text(agent.description)} | `{agent.definition_ref}` |")
         lines += [
             "",
             "Activer une persona = lire sa définition en entier et l'appliquer, sans la résumer.",
@@ -138,7 +141,7 @@ def _entrypoint(surface: ProjectSurface, governed_task: bool) -> EmittedFile:
         lines += ["## Commandes", "", "| Commande | Effet |", "|---|---|"]
         for command in surface.commands:
             hint = f" {command.argument_hint}" if command.argument_hint else ""
-            lines.append(f"| `grimoire host run {command.slug}{hint}` | {command.description} |")
+            lines.append(f"| `grimoire host run {command.slug}{hint}` | {inline_text(command.description)} |")
         lines.append("")
     if surface.hooks:
         lines += ["## Gouvernance", ""]
@@ -188,30 +191,59 @@ def _settings_merge(servers: tuple[McpServerSpec, ...], project_root: Path) -> J
         data["context_servers"] = current
         return data
 
-    return JsonMerge(relpath=SETTINGS_FILE, merge=merge, label=SETTINGS_FILE.as_posix())
+    return JsonMerge(relpath=SETTINGS_FILE, merge=merge, label=SETTINGS_FILE.as_posix(), unique_keys=True)
 
 
 def _is_kit_task(entry: Any) -> bool:
-    """La tâche du kit, reconnue à son libellé et sa commande exacts ; jamais une tâche voisine."""
-    return isinstance(entry, dict) and entry.get("label") == GOVERNED_TASK_LABEL and entry.get("command") == "claude"
+    """La tâche du kit : égale à :data:`GOVERNED_TASK`, champ pour champ. Rien d'autre n'est au kit."""
+    return bool(entry == GOVERNED_TASK)
+
+
+def _is_variant(entry: Any) -> bool:
+    """Une tâche qui porte le libellé du kit sans être la sienne (arguments, env, autre commande…)."""
+    return isinstance(entry, dict) and entry.get("label") == GOVERNED_TASK_LABEL and not _is_kit_task(entry)
+
+
+def _load_tasks(text: str | None) -> list[Any]:
+    current = load_json_unique(text) if text is not None and text.strip() else []
+    if not isinstance(current, list):
+        msg = "la racine de `.zed/tasks.json` n'est pas une liste"
+        raise MergeRefusedError(msg)
+    return current
+
+
+def _render_tasks(text: str | None, current: list[Any], desired: list[Any]) -> str:
+    if text is not None and current == desired:
+        return text  # déjà en place : rien n'est réécrit, pas même la mise en forme
+    return json.dumps(desired, indent=2, ensure_ascii=False) + "\n"
 
 
 def _tasks_merge() -> TextMerge:
     """Poser la tâche gouvernée dans ``.zed/tasks.json`` (liste JSON), sans toucher aux autres.
 
-    Le fichier se lit en JSON strict : des commentaires (JSONC, que Zed accepte) ou une racine
-    qui n'est pas une liste lèvent ``ValueError``, et le fichier est préservé tel quel.
+    Le fichier se lit en JSON strict : commentaires (JSONC, que Zed accepte), clé répétée, racine
+    qui n'est pas une liste, ou tâche de l'utilisateur au libellé du kit lèvent ``ValueError`` :
+    le fichier est préservé tel quel et le conflit signalé, jamais une tâche écrasée.
     """
 
     def merge(text: str | None) -> str:
-        current = json.loads(text) if text is not None and text.strip() else []
-        if not isinstance(current, list):
-            msg = "la racine de `.zed/tasks.json` n'est pas une liste"
+        current = _load_tasks(text)
+        if any(_is_variant(entry) for entry in current):
+            msg = f"une tâche « {GOVERNED_TASK_LABEL} » n'est pas celle du kit : renommez-la ou retirez-la"
             raise MergeRefusedError(msg)
         desired = [*(entry for entry in current if not _is_kit_task(entry)), GOVERNED_TASK]
-        if text is not None and current == desired:
-            return text  # déjà en place : rien n'est réécrit, pas même la mise en forme
-        return json.dumps(desired, indent=2, ensure_ascii=False) + "\n"
+        return _render_tasks(text, current, desired)
+
+    return TextMerge(relpath=TASKS_FILE, merge=merge, label=TASKS_FILE.as_posix())
+
+
+def _tasks_removal() -> TextMerge:
+    """Retirer la tâche du kit, identique à :data:`GOVERNED_TASK`, quand Claude Code n'est plus activé."""
+
+    def merge(text: str | None) -> str:
+        current = _load_tasks(text)
+        desired = [entry for entry in current if not _is_kit_task(entry)]
+        return _render_tasks(text, current, desired)
 
     return TextMerge(relpath=TASKS_FILE, merge=merge, label=TASKS_FILE.as_posix())
 
@@ -330,12 +362,30 @@ class ZedEmitter(Emitter):
         files.extend(skill_files)
         files.append(_entrypoint(surface, governed_task))
         settings = _settings_merge(surface.mcp_servers, project_root)
+        merges = (settings,) if settings is not None else ()
+        if governed_task:
+            text_merges: tuple[TextMerge, ...] = (_tasks_merge(),)
+        elif (project_root / TASKS_FILE).is_file():
+            text_merges = (_tasks_removal(),)
+        else:
+            text_merges = ()
+        degradations = [*skill_gaps, *_degradations(surface, project_root, governed_task)]
+        if escapes_root(project_root, ZED_DIR):
+            # `.zed/` est un lien qui sort du projet : rien n'y est écrit, ni réglages ni tâches.
+            merges, text_merges = (), ()
+            degradations.append(
+                Degradation(
+                    surface="symlink",
+                    reason="`.zed/` mène hors du projet une fois les liens résolus : écriture refusée.",
+                    fallback="remplacer le lien par un dossier du projet, puis relancer `grimoire host sync`.",
+                )
+            )
         plan = EmitPlan(
             host_id=self.host_id,
             files=tuple(files),
-            merges=(settings,) if settings is not None else (),
-            degradations=(*skill_gaps, *_degradations(surface, project_root, governed_task)),
+            merges=merges,
+            degradations=tuple(degradations),
             owned_globs=(SHARED_SKILLS_GLOB,),
-            text_merges=(_tasks_merge(),) if governed_task else (),
+            text_merges=text_merges,
         )
         return with_rule_layers(plan, project_root)

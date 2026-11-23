@@ -114,6 +114,38 @@ class JsonMerge:
     relpath: Path
     merge: Callable[[dict[str, Any]], dict[str, Any]]
     label: str = ""
+    #: Refuser un fichier dont un objet répète une clé : ``json.loads`` garderait la dernière en
+    #: silence, et la fusion réécrirait le fichier sans les autres. Le fichier est alors préservé.
+    unique_keys: bool = False
+
+
+def load_json_unique(text: str) -> Any:
+    """``json.loads`` qui lève :class:`MergeRefusedError` sur une clé répétée dans un même objet."""
+
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        seen: dict[str, Any] = {}
+        for key, value in items:
+            if key in seen:
+                msg = f"clé `{key}` répétée dans un même objet"
+                raise MergeRefusedError(msg)
+            seen[key] = value
+        return seen
+
+    return json.loads(text, object_pairs_hook=pairs)
+
+
+def inline_text(text: str) -> str:
+    """*text* sur une seule ligne, ``|`` échappé : une cellule de tableau ou une puce Markdown sûre."""
+    return " ".join(text.split()).replace("|", "\\|")
+
+
+def escapes_root(project_root: Path, relpath: Path) -> bool:
+    """*relpath*, liens symboliques résolus, sort-il de *project_root* ?"""
+    try:
+        target = (project_root / relpath).resolve()
+        return not target.is_relative_to(project_root.resolve())
+    except (OSError, RuntimeError):
+        return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,7 +478,11 @@ def _decide_merges(
             continue
         try:
             text = _read(dest, overlay)
-            loaded = json.loads(text) if text is not None else {}
+            parse = load_json_unique if merge.unique_keys else json.loads
+            loaded = parse(text) if text is not None else {}
+        except MergeRefusedError as exc:
+            result.skip(f"{label} ({exc} — fichier préservé)", CONFLICT_UNREADABLE)
+            continue
         except (OSError, ValueError):
             result.skip(f"{label} (JSON illisible — fichier préservé)", CONFLICT_UNREADABLE)
             continue
