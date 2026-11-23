@@ -55,6 +55,7 @@ from grimoire.hosts.runtime import (
     run_hook,
 )
 from grimoire.hosts.surface import Enforcement
+from grimoire.hosts.sync import selected_host_ids
 
 host_app = typer.Typer(help="Surfaces hôtes : agents, compétences, commandes et hooks par hôte.")
 console = Console()
@@ -196,8 +197,7 @@ def _resolve_targets(host: str, project_root: Path) -> list[HostId]:
     """
     key = host.strip().lower()
     if key == "all":
-        enabled = enabled_host_ids(project_root)
-        return [h for h in supported_hosts() if h in enabled]
+        return selected_host_ids(project_root)
     if key == "auto":
         detected = _detected_host()
         if emitter_for(detected) is None:

@@ -18,8 +18,16 @@ from grimoire.bridges.schemas import HostId
 from grimoire.hosts import collect
 from grimoire.hosts.detection import enabled_host_ids
 from grimoire.hosts.emitters import EmitPlan, EmitResult, apply_plans, conflict_exits, emitter_for, supported_hosts
+from grimoire.hosts.emitters.base import owned_managed_paths
 
-__all__ = ["HostSyncOutcome", "preserved_detail", "sync_host_surfaces", "unsynced_detail"]
+__all__ = [
+    "HostSyncOutcome",
+    "disabled_host_orphans",
+    "preserved_detail",
+    "selected_host_ids",
+    "sync_host_surfaces",
+    "unsynced_detail",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +60,42 @@ class HostSyncOutcome:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {"ok": self.ok, "written": list(self.written), "error": self.error, "conflicts": list(self.conflicts), "preserved": list(self.preserved)}
+        return {
+            "ok": self.ok,
+            "written": list(self.written),
+            "error": self.error,
+            "conflicts": list(self.conflicts),
+            "preserved": list(self.preserved),
+        }
+
+
+def selected_host_ids(project_root: Path, only: frozenset[HostId] | None = None) -> list[HostId]:
+    """Hôtes à émettre, dans l'ordre de ``supported_hosts()`` : la seule sélection de ``host sync``, ``up`` et ``init``.
+
+    Issue #177 : ``hosts.enabled`` quand le projet le déclare, la détection depuis le dépôt quand
+    la clé est absente — jamais la totalité des hôtes connus. *only* est une demande explicite : elle
+    prime sur la détection, qu'un worktree sans contexte projet rend vide.
+    """
+    wanted = only if only is not None else enabled_host_ids(project_root)
+    return [h for h in supported_hosts() if h in wanted]
+
+
+def disabled_host_orphans(project_root: Path, surface: Any) -> dict[HostId, list[str]]:
+    """Fichiers gérés par le kit (marqueur ``grimoire:managed``) qui subsistent pour un hôte hors sélection."""
+    selected = set(selected_host_ids(project_root))
+    root = project_root.resolve()
+    orphans: dict[HostId, list[str]] = {}
+    for host_id in supported_hosts():
+        emitter = emitter_for(host_id)
+        if host_id in selected or emitter is None:
+            continue
+        files = [
+            p.relative_to(root).as_posix()
+            for p in owned_managed_paths(emitter.plan(surface, project_root), project_root)
+        ]
+        if files:
+            orphans[host_id] = files
+    return orphans
 
 
 def sync_host_surfaces(
@@ -83,12 +126,8 @@ def sync_host_surfaces(
         # Issue #177 (petite version) : n'émettre que les hôtes déclarés dans
         # `hosts.enabled`, ou détectés depuis le dépôt quand la clé est
         # absente — jamais la totalité des hôtes connus par défaut.
-        enabled = enabled_host_ids(project_root)
         plans: list[EmitPlan] = []
-        for host_id in supported_hosts():
-            # `only` est une demande explicite : elle prime sur la détection, qu'un worktree sans contexte projet rend vide.
-            if host_id not in (only if only is not None else enabled):
-                continue
+        for host_id in selected_host_ids(project_root, only):
             emitter = emitter_for(host_id)
             if emitter is None:  # pragma: no cover - registry is complete
                 continue
