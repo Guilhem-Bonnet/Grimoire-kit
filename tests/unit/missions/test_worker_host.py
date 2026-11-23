@@ -58,7 +58,9 @@ REGISTRY = Path("_grimoire/standard/llm-provider-registry.yaml")
 SECRET = "sk-secret-opencode-de-test"  # noqa: S105 - valeur factice, jamais une vraie clé
 PLUGIN = Path(".opencode/plugin/grimoire-guard.js")
 KIT_PLUGIN = (
-    '// grimoire:managed — régénéré\nexport const G = async () => ({ "tool.execute.before": async () => {} })\n'
+    "// grimoire:managed — régénéré\n"
+    'const HOOK = {"posix": "grimoire-hook", "windows": null}\n'
+    'export const G = async () => ({ "tool.execute.before": async () => {} })\n'
 )
 
 _REGISTRE = """\
@@ -152,6 +154,36 @@ class FakeOpencode(FakeHost):
         self.register = True  # le lancement crée la session que ``session list`` rendra
         self.live: set[int] = set()
         self.killed: list[int] = []
+        self.runs: list[tuple[list[str], Path, dict[str, str], str]] = []
+        self.hook_decision = "deny"  # ce que le programme de garde répond à la charge témoin ; "" : introuvable
+        self.extra_plugins: list[str] = []  # plugins en plus que ``debug config`` résout
+        self.base_url = ""  # l'URL que ``debug config`` résout pour le fournisseur ; vide : celle de la config en ligne
+
+    def runner(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str], stdin: str) -> Any:
+        """Le seul lanceur des commandes opencode et du programme de garde, environnement passé tel quel."""
+        from grimoire.missions.worker_guard import RunResult
+
+        self.runs.append((list(argv), cwd, dict(env), stdin))
+        if argv[0] == "grimoire-hook":
+            if not self.hook_decision:
+                return RunResult(127, "", "binaire introuvable")
+            return RunResult(0, json.dumps({"hookSpecificOutput": {"permissionDecision": self.hook_decision}}))
+        if list(argv[1:3]) == ["debug", "config"]:
+            if self.debug_fails:
+                return RunResult(1, "", f"config illisible {SECRET}")
+            plugins = [(cwd / PLUGIN).resolve().as_uri()] if self.loaded else []
+            inline = json.loads(env.get("OPENCODE_CONFIG_CONTENT") or "{}")
+            for entry in inline.get("provider", {}).values():
+                if self.base_url:
+                    entry.setdefault("options", {})["baseURL"] = self.base_url
+            return RunResult(0, json.dumps({"plugin": plugins + self.extra_plugins, **inline}))
+        result = self(argv, cwd, None)
+        return RunResult(result.returncode, result.stdout, result.stderr)
+
+    def opencode_calls(self) -> list[list[str]]:
+        return [a for a, _c, _e, _s in self.runs if a[0] == "opencode"] + [
+            a for a, _c, _e in self.calls if a[0] == "opencode"
+        ]
 
     def __call__(self, argv: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> ExecResult:
         if argv[0] != "opencode":
@@ -201,6 +233,7 @@ class FakeOpencode(FakeHost):
             kill=self.kill,
             resolve_attempts=2,
             resolve_pause_s=0.0,
+            runner=self.runner,
         )
 
 
@@ -263,24 +296,8 @@ def launcher(root: Path, fake: FakeOpencode) -> WorkerLauncher:
 
 @pytest.fixture
 def plugin_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Le worktree reçoit le plugin de garde du kit (la synchronisation réelle est testée à part)."""
-    from grimoire.bridges.schemas import HostId
-    from grimoire.hosts import sync
-
-    real = sync.sync_host_surfaces
-
-    def fake_sync(wt: Path, **kw: Any) -> Any:
-        if HostId.OPENCODE not in (kw.get("only") or ()):
-            return real(wt, **kw)
-        (wt / PLUGIN).parent.mkdir(parents=True, exist_ok=True)
-        (wt / PLUGIN).write_text(KIT_PLUGIN, encoding="utf-8")
-        (wt / "opencode.json").write_text("{}", encoding="utf-8")
-        from grimoire.hosts.sync import HostSyncOutcome
-
-        return HostSyncOutcome(("opencode",))
-
-    monkeypatch.setattr("grimoire.hosts.sync.sync_host_surfaces", fake_sync)
-    monkeypatch.setattr("grimoire.hosts.emitters.base.MANAGED_MARKER", "grimoire:managed")
+    """L'émetteur produit :data:`KIT_PLUGIN` pour tout worktree (le vrai émetteur est testé à part)."""
+    monkeypatch.setattr("grimoire.missions.worker_guard.expected_plugin", lambda _cwd: KIT_PLUGIN)
 
 
 def launch(root: Path, fake: FakeOpencode, tid: str) -> Any:
@@ -366,7 +383,14 @@ def test_claude_code_plan_neuf_et_reprise() -> None:
 # ── OpencodeWorkerHost : argv, environnement, clé ───────────────────────────────
 
 
-ROUTE = OpencodeRoute("deepseek", "deepseek", "deepseek-v4-flash", key_var="DEEPSEEK_API_KEY", source="registry")
+ROUTE = OpencodeRoute(
+    "deepseek",
+    "deepseek",
+    "deepseek-v4-flash",
+    key_var="DEEPSEEK_API_KEY",
+    base_url="https://api.deepseek.com",
+    source="registry",
+)
 
 
 def test_opencode_plan_la_cle_ne_passe_que_par_l_environnement(projet: Path) -> None:
@@ -383,6 +407,7 @@ def test_opencode_plan_la_cle_ne_passe_que_par_l_environnement(projet: Path) -> 
         "grimoire-T",
         "--model",
         "deepseek/deepseek-v4-flash",
+        "--",
         "consigne",
     )
     assert "--pure" not in plan.argv and SECRET not in " ".join(plan.argv)
@@ -391,7 +416,9 @@ def test_opencode_plan_la_cle_ne_passe_que_par_l_environnement(projet: Path) -> 
     config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
     assert config == {
         "model": "deepseek/deepseek-v4-flash",
-        "provider": {"deepseek": {"options": {"apiKey": "{env:DEEPSEEK_API_KEY}"}}},
+        "provider": {
+            "deepseek": {"options": {"apiKey": "{env:DEEPSEEK_API_KEY}", "baseURL": "https://api.deepseek.com"}}
+        },
     }
     assert SECRET not in env["OPENCODE_CONFIG_CONTENT"] and env["GRIMOIRE_UNATTENDED"] == "1"
     assert plan.traced_env()["DEEPSEEK_API_KEY"] == "***" and plan.detached
@@ -404,7 +431,7 @@ def test_opencode_plan_la_cle_ne_passe_que_par_l_environnement(projet: Path) -> 
 def test_opencode_traduit_le_mode_de_permission(projet: Path, mode: str, args: tuple[str, ...]) -> None:
     plan = OpencodeWorkerHost().plan(SessionSpec(name="n", prompt="p", permission_mode=mode, opencode=ROUTE))
     assert isinstance(plan, LaunchPlan)
-    assert plan.argv[-1 - len(args) : -1] == args
+    assert plan.argv[-2 - len(args) : -2] == args and plan.argv[-2:] == ("--", "p")
 
 
 def test_opencode_refuse_un_mode_sans_traduction_ou_sans_route_ou_sans_cle(tmp_path: Path) -> None:
@@ -504,64 +531,298 @@ def _plugin(wt: Path, text: str = KIT_PLUGIN) -> None:
     (wt / PLUGIN).write_text(text, encoding="utf-8")
 
 
-def test_garde_prouvee_par_debug_config(tmp_path: Path, fake: FakeOpencode, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("grimoire.hosts.emitters.base.MANAGED_MARKER", "grimoire:managed")
+def test_garde_prouvee_par_debug_config(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
     host = fake.host()
-    assert "absent" in host.guard_refusal(fake, tmp_path, {})
-    _plugin(tmp_path, "export const X = 1\n")
-    assert "n'est pas le plugin" in host.guard_refusal(fake, tmp_path, {})
-    _plugin(tmp_path)
-    assert host.guard_refusal(fake, tmp_path, {"OPENCODE_CONFIG_CONTENT": "{}", "DEEPSEEK_API_KEY": SECRET}) == ""
-    (argv, _cwd, env) = fake.calls[-1]
-    assert argv == ["opencode", "debug", "config"] and env == {"OPENCODE_CONFIG_CONTENT": "{}"}  # jamais la clé
+    assert host.guard_refusal(tmp_path, ROUTE) == ""  # plugin absent : réécrit depuis l'émetteur, puis prouvé
+    assert (tmp_path / PLUGIN).read_text(encoding="utf-8") == KIT_PLUGIN
+    debug = [(a, e) for a, _c, e, _s in fake.runs if a[:3] == ["opencode", "debug", "config"]]
+    assert debug and all(SECRET not in json.dumps(e) for _a, e in debug)  # jamais la clé
     fake.loaded = False
-    assert "ne charge pas" in host.guard_refusal(fake, tmp_path, {})
+    assert "ne charge pas" in host.guard_refusal(tmp_path, ROUTE)
+    fake.loaded, fake.extra_plugins = True, ["file:///ailleurs/autre.js"]
+    assert "garde non exclusive" in host.guard_refusal(tmp_path, ROUTE)
+    fake.extra_plugins, fake.base_url = [], "https://exemple.invalid/v1"
+    assert "ne pointe pas" in host.guard_refusal(tmp_path, ROUTE)
+
+
+def test_le_motif_ne_recopie_jamais_la_sortie_de_debug_config(
+    tmp_path: Path, fake: FakeOpencode, plugin_ready: None
+) -> None:
+    """M2 : la sortie de ``debug config`` résout ``{env:VAR}`` en clair ; le motif est fixe."""
     fake.debug_fails = True
-    assert "a échoué" in host.guard_refusal(fake, tmp_path, {})
+    motif = fake.host().guard_refusal(tmp_path, ROUTE)
+    assert "a échoué (sortie 1)" in motif and SECRET not in motif and "illisible" not in motif
 
 
-def test_garde_debug_config_illisible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("grimoire.hosts.emitters.base.MANAGED_MARKER", "grimoire:managed")
-    _plugin(tmp_path)
-    host = OpencodeWorkerHost()
-    assert "illisible" in host.guard_refusal(lambda *_a: ExecResult(0, "pas du json"), tmp_path, {})
-    assert "ne charge pas" in host.guard_refusal(lambda *_a: ExecResult(0, '{"plugin": "x"}'), tmp_path, {})
-    rel = json.dumps({"plugin": [str(tmp_path / PLUGIN)]})
-    assert host.guard_refusal(lambda *_a: ExecResult(0, rel), tmp_path, {}) == ""
+def test_debug_config_illisible(tmp_path: Path, plugin_ready: None) -> None:
+    from grimoire.missions.worker_guard import RunResult
+
+    def runner(stdout: str) -> Any:
+        def run(argv: Sequence[str], _cwd: Path, _env: Mapping[str, str], _stdin: str) -> Any:
+            if argv[0] == "grimoire-hook":
+                return RunResult(0, json.dumps({"hookSpecificOutput": {"permissionDecision": "deny"}}))
+            return RunResult(0, stdout)
+
+        return run
+
+    assert "illisible" in OpencodeWorkerHost(runner=runner("pas du json")).guard_refusal(tmp_path, ROUTE)
+    assert "illisible" in OpencodeWorkerHost(runner=runner("[]")).guard_refusal(tmp_path, ROUTE)
+    assert "ne charge pas" in OpencodeWorkerHost(runner=runner('{"plugin": "x"}')).guard_refusal(tmp_path, ROUTE)
+    path_only = json.dumps({"plugin": [str(tmp_path / PLUGIN)], "provider": {"deepseek": {"options": "x"}}})
+    assert "ne pointe pas" in OpencodeWorkerHost(runner=runner(path_only)).guard_refusal(tmp_path, ROUTE)
 
 
-def test_le_vrai_plugin_emis_par_le_kit_passe_la_garde(tmp_path: Path) -> None:
-    """Le plugin que l'émetteur opencode produit porte le marqueur et ``tool.execute.before`` : il est reconnu."""
-    from grimoire.hosts.emitters.opencode import _guard_plugin
-    from grimoire.hosts.surface import Enforcement, HookEvent, HookSpec
+# ── B1 : rien d'opencode ne tourne avant l'intégrité ────────────────────────────
 
-    hook = HookSpec(
-        event=HookEvent.PRE_TOOL_USE,
-        decision="grimoire.guard",
-        enforcement=Enforcement.BLOCKING,
-        rationale="garde",
-        timeout=10,
+
+@pytest.mark.parametrize(
+    ("relpath", "content", "expected"),
+    [
+        (".opencode/plugin/side.js", "export const X = 1\n", "fichier de code"),
+        (".opencode/plugins/side.ts", "export const X = 1\n", "fichier de code"),
+        (".opencode/tools/outil.mjs", "export default {}\n", "fichier de code"),
+        (".opencode/plugin/sous/dossier.cjs", "module.exports = {}\n", "fichier de code"),
+        ("opencode.json", "{}", "racine du worktree"),
+        ("opencode.jsonc", "{}", "racine du worktree"),
+        (".opencode/opencode.jsonc", "{}", "configuration opencode"),
+        (".opencode/package.json", '{"dependencies": {"autre": "1"}}', "manifeste"),
+        (".opencode/package.json", '{"scripts": {"x": "y"}, "dependencies": {}}', "manifeste"),
+        (".opencode/package.json", "pas du json", "illisible"),
+        (".opencode/bunfig.toml", "", "gestionnaire de paquets"),
+    ],
+)
+def test_integrite_refusee_sans_lancer_opencode(
+    tmp_path: Path, fake: FakeOpencode, plugin_ready: None, relpath: str, content: str, expected: str
+) -> None:
+    target = tmp_path / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    assert expected in fake.host().guard_refusal(tmp_path, ROUTE)
+    assert fake.runs == []  # ni opencode, ni programme de garde
+
+
+def test_integrite_admet_le_manifeste_qu_opencode_pose(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+    (tmp_path / ".opencode").mkdir()
+    (tmp_path / ".opencode" / "package.json").write_text('{"dependencies": {"@opencode-ai/plugin": "1.17.11"}}')
+    (tmp_path / ".opencode" / "node_modules" / "x").mkdir(parents=True)
+    (tmp_path / ".opencode" / "node_modules" / "x" / "index.js").write_text("module.exports = 1\n")
+    assert fake.host().guard_refusal(tmp_path, ROUTE) == ""
+
+
+def test_un_plugin_de_garde_modifie_est_reecrit_depuis_l_emetteur(
+    tmp_path: Path, fake: FakeOpencode, plugin_ready: None
+) -> None:
+    _plugin(tmp_path, KIT_PLUGIN.replace("grimoire-hook", "autre-programme"))
+    assert fake.host().guard_refusal(tmp_path, ROUTE) == ""
+    assert (tmp_path / PLUGIN).read_text(encoding="utf-8") == KIT_PLUGIN
+    assert fake.runs[0][0][0] == "grimoire-hook"  # le programme lu dans le plugin réécrit
+
+
+@pytest.mark.skipif(os.name != "posix", reason="liens symboliques POSIX")
+def test_liens_symboliques_refuses(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+    from grimoire.missions.worker_guard import integrity_refusal
+
+    elsewhere = tmp_path / "ailleurs"
+    elsewhere.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (wt / ".opencode").symlink_to(elsewhere)
+    assert "lien symbolique" in integrity_refusal(wt)
+    wt2 = tmp_path / "wt2"
+    (wt2 / ".opencode" / "plugin").mkdir(parents=True)
+    (wt2 / PLUGIN).symlink_to(elsewhere / "g.js")
+    assert "lien symbolique" in integrity_refusal(wt2)
+    wt3 = tmp_path / "wt3"
+    (wt3 / ".opencode").mkdir(parents=True)
+    (wt3 / ".opencode" / "tools").symlink_to(elsewhere)
+    assert "lien symbolique" in integrity_refusal(wt3)
+    wt4 = tmp_path / "wt4"
+    (wt4 / ".opencode" / "plugins").mkdir(parents=True)
+    (wt4 / ".opencode" / "plugins" / "x.js").symlink_to(elsewhere / "g.js")
+    assert "lien symbolique" in integrity_refusal(wt4)
+
+
+def test_configuration_utilisateur_du_kit(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+    from grimoire.missions.worker_guard import integrity_refusal
+
+    home = tmp_path / "cfg"
+    (home / "opencode").mkdir(parents=True)
+    (home / "opencode" / "opencode.jsonc").write_text('{"$schema": "https://opencode.ai/config.json"}')
+    assert integrity_refusal(tmp_path, config_home=home) == ""  # ce qu'opencode y écrit lui-même
+    (home / "opencode" / "opencode.jsonc").write_text('{"provider": {"deepseek": {}}}')
+    assert "configuration utilisateur du kit" in integrity_refusal(tmp_path, config_home=home)
+    (home / "opencode" / "opencode.jsonc").unlink()
+    (home / "opencode" / "plugin").mkdir()
+    (home / "opencode" / "plugin" / "x.js").write_text("export {}\n")
+    assert "configuration utilisateur du kit" in integrity_refusal(tmp_path, config_home=home)
+
+
+def test_sans_plugin_attendu_rien_ne_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from grimoire.missions.worker_guard import integrity_refusal
+
+    monkeypatch.setattr("grimoire.missions.worker_guard.expected_plugin", lambda _cwd: None)
+    assert "aucun plugin de garde" in integrity_refusal(tmp_path)
+
+
+def test_plugin_non_reinscriptible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin_ready: None) -> None:
+    from grimoire.missions import worker_guard
+
+    monkeypatch.setattr("grimoire.core.fsio.atomic_write", lambda *_a: None)
+    assert "après réécriture" in worker_guard.integrity_refusal(tmp_path)
+
+
+# ── B2 : preuve fonctionnelle du programme de garde ─────────────────────────────
+
+
+@pytest.mark.parametrize(("decision", "expected"), [("allow", "ne refuse pas"), ("", "indisponible")])
+def test_un_programme_de_garde_qui_laisse_passer_bloque_le_lancement(
+    tmp_path: Path, fake: FakeOpencode, plugin_ready: None, decision: str, expected: str
+) -> None:
+    fake.hook_decision = decision
+    assert expected in fake.host().guard_refusal(tmp_path, ROUTE)
+    assert fake.opencode_calls() == []
+    ((argv, cwd, _env, stdin),) = fake.runs
+    assert argv == ["grimoire-hook", "--host", "opencode", "--event", "PreToolUse"] and cwd == tmp_path
+    assert json.loads(stdin)["tool_name"] == "bash"
+
+
+def test_programme_de_garde_illisible_ou_absent_du_plugin(tmp_path: Path) -> None:
+    from grimoire.missions.worker_guard import RunResult, hook_program, hook_witness_refusal
+
+    assert hook_program(tmp_path) == ""
+    assert "introuvable" in hook_witness_refusal(tmp_path, {}, lambda *_a: RunResult(0))
+    _plugin(
+        tmp_path, 'const HOOK = {"posix": ".venv/bin/grimoire-hook", "windows": ".venv/Scripts/grimoire-hook.exe"}\n'
     )
-    emitted = _guard_plugin(hook)
-    _plugin(tmp_path, emitted.content)
-    loaded = json.dumps({"plugin": [(tmp_path / PLUGIN).resolve().as_uri()]})
-    assert OpencodeWorkerHost().guard_refusal(lambda *_a: ExecResult(0, loaded), tmp_path, {}) == ""
+    assert hook_program(tmp_path) == str(tmp_path / ".venv/bin/grimoire-hook")
+    assert "ne refuse pas" in hook_witness_refusal(tmp_path, {}, lambda *_a: RunResult(0, "pas du json"))
 
 
-def test_prepare_le_worktree_pose_le_plugin_et_retire_la_racine(tmp_path: Path, plugin_ready: None) -> None:
+def test_le_vrai_plugin_et_le_vrai_programme_de_garde_refusent_la_charge_temoin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Projet gouverné réel : l'émetteur produit le plugin, et le runtime de garde (en processus) refuse le témoin."""
+    import io
+    import sys
+
+    from grimoire.core.agentic_standard import setup_standard_profile
+    from grimoire.missions.worker_guard import RunResult, expected_plugin, hook_witness_refusal, integrity_refusal
+
+    root = make_repo(tmp_path)
+    setup_standard_profile(root, profile_id="governed", task_id="bootstrap")
+    emitted = expected_plugin(root)
+    assert emitted is not None and "tool.execute.before" in emitted
+    assert integrity_refusal(root) == ""
+    assert (root / PLUGIN).read_text(encoding="utf-8") == emitted
+
+    def in_process(argv: Sequence[str], cwd: Path, _env: Mapping[str, str], stdin: str) -> Any:
+        from grimoire.hosts.hook_entry import main
+
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+        out = io.StringIO()
+        monkeypatch.setattr(sys, "stdout", out)
+        code = main(list(argv[1:]))
+        return RunResult(code, out.getvalue())
+
+    monkeypatch.setenv("GRIMOIRE_UNATTENDED", "1")
+    assert hook_witness_refusal(root, {}, in_process) == ""
+
+
+def test_exact_run_passe_l_environnement_tel_quel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from grimoire.missions.worker_guard import exact_run
+
+    monkeypatch.setenv("GRIMOIRE_FUITE_DE_TEST", "fuite")
+    code = "import os,sys; print(os.environ.get('GRIMOIRE_FUITE_DE_TEST','-')); print(sys.stdin.read())"
+    done = exact_run([sys.executable, "-c", code], tmp_path, {"PATH": os.environ.get("PATH", "")}, "entrée")
+    assert done.returncode == 0 and done.stdout.split() == ["-", "entrée"]
+    assert exact_run(["grimoire-binaire-absent"], tmp_path, {}).returncode == 127
+    assert exact_run(["true"], tmp_path / "absent", {}).returncode in (126, 127)
+
+
+# ── C2 : environnement minimal ─────────────────────────────────────────────────
+
+
+def test_environnement_minimal_sans_jeton_ni_reglage_de_decouverte(
+    projet: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name, value in (
+        ("GITHUB_TOKEN", "ghp-fuite"),
+        ("ANTHROPIC_API_KEY", "sk-fuite"),
+        ("OPENCODE_CONFIG", "/x.json"),
+        ("OPENCODE_PURE", "1"),
+        ("OPENCODE_CONFIG_DIR", "/x"),
+        ("OPENCODE_DISABLE_DEFAULT_PLUGINS", "1"),
+        ("AWS_SECRET_ACCESS_KEY", "fuite"),
+        ("GRIMOIRE_FUITE", "fuite"),
+    ):
+        monkeypatch.setenv(name, value)
+    home = tmp_path / "cfg"
+    plan = OpencodeWorkerHost().plan(
+        SessionSpec(name="n", prompt="p", permission_mode="default", opencode=ROUTE, config_home=home)
+    )
+    assert isinstance(plan, LaunchPlan)
+    env = plan.environ()
+    leaked = {
+        "GITHUB_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "OPENCODE_CONFIG",
+        "OPENCODE_PURE",
+        "OPENCODE_CONFIG_DIR",
+        "OPENCODE_DISABLE_DEFAULT_PLUGINS",
+        "AWS_SECRET_ACCESS_KEY",
+        "GRIMOIRE_FUITE",
+    }
+    assert not leaked & set(env)
+    assert "fuite" not in json.dumps(env)
+    assert env["XDG_CONFIG_HOME"] == str(home) and env["GH_CONFIG_DIR"].endswith("gh")
+    assert env["DEEPSEEK_API_KEY"] == SECRET and env["PATH"] == os.environ["PATH"]
+
+
+def test_git_garde_sa_configuration_xdg(tmp_path: Path) -> None:
+    from grimoire.missions.worker_guard import minimal_env
+
+    home = tmp_path / "h"
+    (home / ".config" / "git").mkdir(parents=True)
+    (home / ".config" / "git" / "config").write_text("[user]\n")
+    env = minimal_env({"XDG_CONFIG_HOME": "/kit"}, source={"HOME": str(home), "PATH": "/bin"})
+    assert env["GIT_CONFIG_GLOBAL"] == str(home / ".config" / "git" / "config")
+    assert env["GH_CONFIG_DIR"] == str(home / ".config" / "gh") and env["XDG_CONFIG_HOME"] == "/kit"
+    assert "GH_CONFIG_DIR" not in minimal_env({}, source={"HOME": str(home)})
+
+
+def test_le_processus_detache_ne_recoit_que_son_environnement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from grimoire.missions.worker_host import default_spawn
+
+    if os.name != "posix":
+        pytest.skip("suivi par pid POSIX")
+    monkeypatch.setenv("GRIMOIRE_FUITE_DE_TEST", "fuite")
+    log = tmp_path / "w.jsonl"
+    code = "import os; print(os.environ.get('GRIMOIRE_FUITE_DE_TEST','-'), os.environ.get('X'))"
+    result = default_spawn([sys.executable, "-c", code], tmp_path, {"X": "1"}, log)
+    os.waitpid(result.pid, 0)
+    assert log.read_text(encoding="utf-8").split() == ["-", "1"]
+
+
+def test_prepare_le_worktree_n_ignore_que_les_fichiers_emis(tmp_path: Path, plugin_ready: None) -> None:
+    from grimoire.missions.worker_host import OPENCODE_IGNORED
+
     wt = tmp_path / "wt"
     wt.mkdir()
     assert prepare_opencode_worktree(wt) == ""
-    assert (wt / PLUGIN).is_file() and not (wt / "opencode.json").exists()
-    assert (wt / ".opencode" / ".gitignore").read_text(encoding="utf-8") == "*\n"
+    assert (wt / PLUGIN).read_text(encoding="utf-8") == KIT_PLUGIN
+    lines = (wt / ".opencode" / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines == list(OPENCODE_IGNORED) and "*" not in lines
     assert prepare_opencode_worktree(wt) == ""  # déjà posé : rien à refaire
 
 
-def test_prepare_le_worktree_sans_plugin_refuse(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from grimoire.hosts.sync import HostSyncOutcome
-
-    monkeypatch.setattr("grimoire.hosts.sync.sync_host_surfaces", lambda wt, **_k: HostSyncOutcome((), "panne"))
-    assert "sans plugin de garde" in prepare_opencode_worktree(tmp_path)
+def test_prepare_le_worktree_refuse_un_ajout(tmp_path: Path, plugin_ready: None) -> None:
+    (tmp_path / "opencode.json").write_text("{}", encoding="utf-8")
+    assert "racine du worktree" in prepare_opencode_worktree(tmp_path)
 
 
 # ── Identité, fin, silence ──────────────────────────────────────────────────────
@@ -662,7 +923,13 @@ def test_le_worker_opencode_part_avec_sa_garde_et_sans_cle_tracee(
     assert env["DEEPSEEK_API_KEY"] == SECRET and SECRET not in " ".join(argv)
     assert log.is_relative_to(projet / "_grimoire-output")  # hors du worktree
     # Les gestes de garde passent par le faux opencode, jamais un vrai binaire.
-    assert ["opencode", "debug", "config"] in [a for a, _c, _e in fake.calls]
+    calls = fake.opencode_calls()
+    assert ["opencode", "debug", "config"] in calls
+    # La garde passe avant toute commande opencode, et les sondes tournent hors du worktree.
+    assert calls.index(["opencode", "debug", "config"]) < calls.index(["opencode", "--version"])
+    probes = [c for a, c, _e, _s in fake.runs if a[:2] in (["opencode", "--version"], ["opencode", "session"])]
+    assert probes and all(c != wt.path for c in probes)
+    assert argv[-2] == "--" and env["XDG_CONFIG_HOME"].endswith("opencode-config")
     service = TaskService(projet)
     payload = launched_sessions(service)[tid]
     assert payload["host"] == OPENCODE_HOST and payload["session_id"] == "ses_7001" and payload["pid"] == "7001"
@@ -874,3 +1141,95 @@ def test_un_lancement_claude_d_un_projet_opencode_garde_son_battement(
     assert renew_live_workers(TaskService(projet), fake, opencode=host) == (oc,)
     assert release_ended_workers(TaskService(projet), fake, opencode=host) == ()
     assert LAUNCHED_EVENT
+
+
+# ── M3 : un refus de garde répété gare la tâche ────────────────────────────────
+
+
+def test_refus_de_garde_repetes_garent_la_tache(projet: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+    from grimoire.missions.worker_lifecycle import GUARD_REFUSED_EVENT, MAX_GUARD_REFUSALS
+
+    fake.hook_decision = "allow"
+    tid = ready(projet)
+    for attempt in range(1, MAX_GUARD_REFUSALS):
+        outcome = launch(projet, fake, tid)
+        assert outcome.status == "skipped" and "garée" not in outcome.detail, attempt
+        assert TaskService(projet).require(tid).status is TaskState.READY
+    outcome = launch(projet, fake, tid)
+    assert outcome.status == "skipped" and f"garée après {MAX_GUARD_REFUSALS} refus" in outcome.detail
+    task = TaskService(projet).require(tid)
+    assert task.status is TaskState.WAITING and fake.spawned == []
+    refused = [e for e in TaskService(projet).ledger.events_for(tid) if e.event_type == GUARD_REFUSED_EVENT]
+    assert [e.payload["attempt"] for e in refused] == list(range(1, MAX_GUARD_REFUSALS + 1))
+    assert all("ne refuse pas" in e.payload["reason"] for e in refused)
+
+
+def test_refus_de_garde_sans_question_possible_revient_en_file(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from grimoire.core.exceptions import GrimoireError
+    from grimoire.missions.worker_lifecycle import MAX_GUARD_REFUSALS
+
+    def refuse(*_a: Any, **_k: Any) -> Any:
+        raise GrimoireError("question refusée")
+
+    monkeypatch.setattr(TaskService, "ask", refuse)
+    fake.hook_decision = "allow"
+    tid = ready(projet)
+    for _ in range(MAX_GUARD_REFUSALS):
+        launch(projet, fake, tid)
+    assert TaskService(projet).require(tid).status is TaskState.READY
+
+
+# ── Reprise : une tâche devenue sensible repart sur Claude Code ─────────────────
+
+
+def test_une_tache_devenue_sensible_reprend_sur_claude_code_en_opus(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from grimoire.missions import launcher as launcher_mod
+
+    tid = _launched(projet, fake)
+    service = TaskService(projet)
+    launch_payload = launched_sessions(service)[tid]
+    write_policy(
+        projet, "      host: opencode\n      provider: deepseek\n      tier: cheap\n      sensitive_route: strong\n"
+    )
+    original = launcher_mod.sensitive_route_for
+    # Le titre de la tâche cite désormais un chemin sensible.
+    monkeypatch.setattr(
+        launcher_mod,
+        "sensitive_route_for",
+        lambda task, policy: original(replace(task, title="modifier pyproject.toml"), policy),
+    )
+    spawned = len(fake.spawned)
+    result = resume_worker(
+        service, fake, "claude", tid, launch_payload, "renvoi", permission_mode="acceptEdits", opencode=fake.host()
+    )
+    assert result.returncode == 0 and len(fake.spawned) == spawned  # aucun opencode
+    (argv,) = fake.of("claude", "--bg")
+    assert argv[argv.index("--model") + 1] == "opus" and "--resume" not in argv and "--settings" not in argv
+    relaunch = launched_sessions(TaskService(projet))[tid]
+    assert "route sensible à la reprise" in relaunch["host_fallback"] and "host" not in relaunch
+
+
+def test_reprise_sensible_sans_hooks_claude_refusee(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tid = _launched(projet, fake)
+    service = TaskService(projet)
+    monkeypatch.setattr("grimoire.missions.launcher._sensitive_now", lambda *_a: "route sensible à la reprise")
+    monkeypatch.setattr("grimoire.missions.launcher._worktree_hooks", lambda _wt: "worktree sans hook")
+    result = resume_worker(service, fake, "claude", tid, launched_sessions(service)[tid], "m", opencode=fake.host())
+    assert result.returncode == 1 and "sans hook" in result.stderr and fake.of("claude", "--bg") == []
+
+
+def test_sensible_maintenant_politique_illisible(projet: Path) -> None:
+    from grimoire.missions.launcher import _sensitive_now
+
+    tid = ready(projet)
+    assert _sensitive_now(TaskService(projet), tid) == ""
+    (projet / POLICY).write_text("orchestrator: [", encoding="utf-8")
+    assert "par prudence" in _sensitive_now(TaskService(projet), tid)

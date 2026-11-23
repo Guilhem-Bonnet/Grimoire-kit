@@ -46,6 +46,7 @@ from urllib.parse import unquote, urlsplit
 if TYPE_CHECKING:
     from grimoire.missions.launcher import Exec
     from grimoire.missions.schemas import MissionTask
+    from grimoire.missions.worker_guard import Runner
     from grimoire.providers.registry import ProviderSpec
 
 __all__ = [
@@ -94,6 +95,20 @@ OPENCODE_PERMISSION_ARGS: Mapping[str, tuple[str, ...]] = {
 #: (catalogue models.dev, https://opencode.ai/docs/providers/ ; ``moonshotai`` pour Moonshot AI). ``local`` est un
 #: fournisseur déclaré en ligne (``@ai-sdk/openai-compatible``, section Ollama de la même page).
 OPENCODE_PROVIDERS: Mapping[str, str] = {"deepseek": "deepseek", "moonshot": "moonshotai", "local": "ollama"}
+#: L'URL officielle de chaque fournisseur hébergé (champ ``api`` du catalogue models.dev que lit opencode 1.17.11),
+#: posée explicitement dans la configuration en ligne : un ``baseURL`` venu d'ailleurs ne reçoit jamais la clé.
+OPENCODE_BASE_URLS: Mapping[str, str] = {
+    "deepseek": "https://api.deepseek.com",
+    "moonshotai": "https://api.moonshot.ai/v1",
+}
+#: Variables qui changeraient la découverte de la configuration ou des plugins d'opencode : jamais transmises.
+OPENCODE_FORBIDDEN_ENV = (
+    "OPENCODE_PURE",
+    "OPENCODE_DISABLE_DEFAULT_PLUGINS",
+    "OPENCODE_CONFIG",
+    "OPENCODE_CONFIG_DIR",
+    "OPENCODE_PERMISSION",
+)
 _OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 #: Lectures de ``opencode session list`` avant de conclure qu'une session lancée est introuvable, et la pause entre deux.
@@ -113,7 +128,7 @@ class OpencodeRoute:
     opencode_provider: str  # identifiant opencode (``deepseek``, ``moonshotai``, ``ollama``)
     model: str  # nom du modèle chez ce fournisseur (``deepseek-v4-flash``)
     key_var: str = ""  # variable de la clé dans le magasin ; vide pour un fournisseur local
-    base_url: str = ""  # seulement pour un fournisseur local (boucle locale, OpenAI-compatible)
+    base_url: str = ""  # l'URL officielle (hébergé) ou la boucle locale OpenAI-compatible (local)
     source: str = ""  # ``table`` (dispatch.models) ou ``registry`` (palier du registre) ou ``policy``
 
     @property
@@ -122,16 +137,16 @@ class OpencodeRoute:
 
     def inline_config(self) -> str:
         """Le JSON d'``OPENCODE_CONFIG_CONTENT`` : le fournisseur, sa clé par ``{env:VAR}``, jamais sa valeur."""
-        entry: dict[str, Any] = {}
-        if self.base_url:
+        entry: dict[str, Any]
+        if self.key_var:
+            entry = {"options": {"apiKey": f"{{env:{self.key_var}}}", "baseURL": self.base_url}}
+        else:
             entry = {
                 "npm": _OPENAI_COMPATIBLE_NPM,
                 "name": f"{self.provider} (local)",
                 "options": {"baseURL": self.base_url},
                 "models": {self.model: {"name": self.model}},
             }
-        elif self.key_var:
-            entry = {"options": {"apiKey": f"{{env:{self.key_var}}}"}}
         return json.dumps({"provider": {self.opencode_provider: entry}, "model": self.qualified_model}, sort_keys=True)
 
 
@@ -147,6 +162,9 @@ class SessionSpec:
     settings: Path | None = None  # Claude Code : les réglages du fournisseur compatible Anthropic (``--settings``)
     resume: str = ""
     opencode: OpencodeRoute | None = None
+    config_home: Path | None = (
+        None  # opencode : ``XDG_CONFIG_HOME`` du kit (:func:`.worker_guard.opencode_config_home`)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,16 +197,17 @@ Spawn = Callable[[Sequence[str], Path, Mapping[str, str], Path], SpawnResult]
 
 
 def default_spawn(argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path) -> SpawnResult:
-    """Lance *argv* sans shell, détaché (nouveau groupe de processus), sortie dans *log* ; jamais d'exception."""
-    from grimoire.core.safe_git import session_environ
+    """Lance *argv* sans shell, détaché (nouveau groupe de processus), sortie dans *log* ; jamais d'exception.
 
+    *env* est passé tel quel : rien de l'environnement du tick ne s'y ajoute (:func:`.worker_guard.minimal_env`).
+    """
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("ab") as out:
             proc = subprocess.Popen(  # arguments fixes, sans shell
                 list(argv),
                 cwd=cwd,
-                env=session_environ(env),
+                env=dict(env),
                 stdin=subprocess.DEVNULL,
                 stdout=out,
                 stderr=subprocess.STDOUT,
@@ -317,8 +336,12 @@ class OpencodeWorkerHost:
         kill: Callable[[int], bool] | None = None,
         resolve_attempts: int = _RESOLVE_ATTEMPTS,
         resolve_pause_s: float = _RESOLVE_PAUSE_S,
+        runner: Runner | None = None,
     ) -> None:
+        from grimoire.missions.worker_guard import exact_run
+
         self.binary = binary
+        self.runner: Runner = runner if runner is not None else exact_run
         self.spawn = spawn if spawn is not None else default_spawn
         self.alive = alive if alive is not None else _pid_alive
         self.kill = kill if kill is not None else _kill_group
@@ -336,12 +359,9 @@ class OpencodeWorkerHost:
             return f"mode de permission {spec.permission_mode!r} sans traduction pour opencode (admis : {known})"
         argv = [self.binary, "run", "--format", "json"]
         argv += ["--session", spec.resume] if spec.resume else ["--title", spec.name]
-        argv += ["--model", route.qualified_model, *OPENCODE_PERMISSION_ARGS[spec.permission_mode], spec.prompt]
-        env = {
-            **session_env(),
-            "OPENCODE_CONFIG_CONTENT": route.inline_config(),
-            "OPENCODE_DISABLE_AUTOUPDATE": "1",
-        }
+        # ``--`` : la consigne n'est jamais lue comme une option (``opencode run`` ajoute ``args["--"]`` au message).
+        argv += ["--model", route.qualified_model, *OPENCODE_PERMISSION_ARGS[spec.permission_mode], "--", spec.prompt]
+        env = self.probe_env(route, spec.config_home)
         secret_keys: tuple[str, ...] = ()
         if route.key_var:
             from grimoire.providers.secrets import env_for_provider
@@ -352,6 +372,21 @@ class OpencodeWorkerHost:
             env[route.key_var] = value
             secret_keys = (route.key_var,)
         return LaunchPlan(tuple(argv), tuple(env.items()), secret_keys, detached=True)
+
+    @staticmethod
+    def probe_env(route: OpencodeRoute | None, config_home: Path | None) -> dict[str, str]:
+        """L'environnement minimal d'une commande opencode, sans la clé (:func:`.worker_guard.minimal_env`)."""
+        from grimoire.missions.worker_guard import minimal_env
+
+        extra = {**session_env(), "OPENCODE_DISABLE_AUTOUPDATE": "1"}
+        if route is not None:
+            extra["OPENCODE_CONFIG_CONTENT"] = route.inline_config()
+        if config_home is not None:
+            extra["XDG_CONFIG_HOME"] = str(config_home)
+        env = minimal_env(extra)
+        for name in OPENCODE_FORBIDDEN_ENV:
+            env.pop(name, None)
+        return env
 
     def start(self, plan: LaunchPlan, cwd: Path, log: Path) -> SpawnResult:
         """Lance le plan en arrière-plan ; la sortie JSON d'``opencode run`` va dans *log*.
@@ -366,51 +401,69 @@ class OpencodeWorkerHost:
         """Le pid noté par :meth:`start` (``opencode run`` n'imprime pas d'identifiant à rendre la main)."""
         return output.strip() if output.strip().isdigit() else ""
 
-    def version(self, exec_: Exec, cwd: Path) -> str:
+    def version(self, exec_: Exec, cwd: Path, *, config_home: Path | None = None) -> str:
+        """``opencode --version``, lancé hors du worktree (dans *config_home*) : aucun plugin du worktree n'est lu."""
         from grimoire.hosts.host_version import VERSION_PATTERN
 
-        done = exec_([self.binary, "--version"], cwd, None)
+        del exec_
+        where = config_home or cwd
+        done = self.runner([self.binary, "--version"], where, self.probe_env(None, config_home), "")
         found = VERSION_PATTERN.search(done.stdout or "") if done.returncode == 0 else None
         return found.group(0) if found else ""
 
     # -- garde -----------------------------------------------------------------
 
-    def guard_refusal(self, exec_: Exec, cwd: Path, env: Mapping[str, str]) -> str:
-        """``""`` si le plugin de garde du kit est chargé par opencode dans *cwd* ; sinon pourquoi le worker ne part pas.
+    def guard_refusal(self, cwd: Path, route: OpencodeRoute, *, config_home: Path | None = None) -> str:
+        """``""`` si la garde du kit tient pour un worker opencode dans *cwd* ; sinon un motif fixe (jamais une sortie).
 
-        Deux preuves, sans appel modèle : le fichier ``.opencode/plugin/grimoire-guard.js`` est celui du kit
-        (marqueur de fichier géré), et ``opencode debug config`` lancé dans *cwd* avec l'environnement du worker le
-        liste dans ``plugin`` (un ``plugin`` du projet ou de ``OPENCODE_CONFIG_CONTENT`` ne peut pas l'en retirer
-        sans que ce soit vu ici).
+        Dans l'ordre, et rien d'opencode ne tourne avant que les deux premiers tiennent :
+
+        1. :func:`~grimoire.missions.worker_guard.integrity_refusal` : seul le plugin de garde du kit, à l'octet,
+           peut être chargé (vérifié sans lancer opencode) ;
+        2. :func:`~grimoire.missions.worker_guard.hook_witness_refusal` : le programme de garde refuse une charge
+           témoin ;
+        3. ``opencode debug config`` (environnement minimal, sans la clé) : le plugin du kit est le seul plugin
+           résolu, et le fournisseur garde l'URL que le kit a posée. Sa sortie n'est jamais recopiée.
         """
-        from grimoire.hosts.emitters.base import MANAGED_MARKER
         from grimoire.hosts.emitters.opencode import PLUGIN_RELPATH
+        from grimoire.missions.worker_guard import hook_witness_refusal, integrity_refusal
 
-        plugin = cwd / PLUGIN_RELPATH
-        try:
-            text = plugin.read_text(encoding="utf-8")
-        except OSError:
-            return f"plugin de garde opencode absent du worktree ({PLUGIN_RELPATH.as_posix()})"
-        if MANAGED_MARKER not in text or "tool.execute.before" not in text:
-            return f"{PLUGIN_RELPATH.as_posix()} n'est pas le plugin de garde émis par le kit"
-        safe_env = {k: v for k, v in env.items() if k in ("GRIMOIRE_UNATTENDED", "OPENCODE_CONFIG_CONTENT")}
-        done = exec_([self.binary, "debug", "config"], cwd, safe_env)
+        if refusal := integrity_refusal(cwd, config_home=config_home):
+            return refusal
+        env = self.probe_env(route, config_home)
+        if refusal := hook_witness_refusal(cwd, env, self.runner):
+            return refusal
+        done = self.runner([self.binary, "debug", "config"], cwd, env, "")
         if done.returncode != 0:
-            why = (done.stderr or done.stdout).strip()[:200] or f"sortie {done.returncode}"
-            return f"`opencode debug config` a échoué : garde non vérifiable ({why})"
+            return f"`opencode debug config` a échoué (sortie {done.returncode}) : garde non vérifiable"
         try:
             resolved = json.loads(done.stdout)
         except ValueError:
+            resolved = None
+        if not isinstance(resolved, dict):
             return "`opencode debug config` illisible : garde non vérifiable"
-        loaded = resolved.get("plugin") if isinstance(resolved, dict) else None
+        loaded = resolved.get("plugin")
+        plugin = cwd / PLUGIN_RELPATH
         if not isinstance(loaded, list) or not any(_same_file(spec, plugin) for spec in loaded):
             return f"opencode ne charge pas {PLUGIN_RELPATH.as_posix()} dans ce worktree : garde du kit inactive"
+        if len(loaded) != 1:
+            return "opencode résout d'autres plugins que celui du kit : garde non exclusive"
+        provider = resolved.get("provider")
+        entry = provider.get(route.opencode_provider) if isinstance(provider, dict) else None
+        options = entry.get("options") if isinstance(entry, dict) else None
+        if not isinstance(options, dict) or options.get("baseURL") != route.base_url:
+            return "le fournisseur résolu par opencode ne pointe pas sur l'URL posée par le kit"
         return ""
 
     # -- identité, fin, silence ------------------------------------------------
 
-    def sessions(self, exec_: Exec, cwd: Path) -> list[dict[str, Any]] | None:
-        done = exec_([self.binary, "session", "list", "--format", "json"], cwd, None)
+    def sessions(self, exec_: Exec, cwd: Path, *, config_home: Path | None = None) -> list[dict[str, Any]] | None:
+        """``opencode session list`` (toutes les sessions), lancé hors du worktree, dans *config_home*."""
+        del exec_
+        where = config_home or cwd
+        done = self.runner(
+            [self.binary, "session", "list", "--format", "json"], where, self.probe_env(None, config_home), ""
+        )
         if done.returncode != 0:
             return None
         try:
@@ -419,7 +472,7 @@ class OpencodeWorkerHost:
             return None
         return [s for s in raw if isinstance(s, dict)] if isinstance(raw, list) else None
 
-    def resolve(self, exec_: Exec, cwd: Path, handle: str, name: str) -> str:
+    def resolve(self, exec_: Exec, cwd: Path, handle: str, name: str, *, config_home: Path | None = None) -> str:
         """L'identifiant de la session titrée *name* dans *cwd* (``opencode session list``) ; ``""`` sinon.
 
         Plusieurs candidates (un titre réutilisé dans le même dossier) : ``""``, on ne choisit pas.
@@ -428,7 +481,7 @@ class OpencodeWorkerHost:
         for attempt in range(max(self.resolve_attempts, 1)):
             if attempt:
                 time.sleep(self.resolve_pause_s)
-            listed = self.sessions(exec_, cwd)
+            listed = self.sessions(exec_, cwd, config_home=config_home)
             if listed is None:
                 continue
             found = {
@@ -587,33 +640,36 @@ def opencode_route(
             None,
             f"{provider.id} : aucun modèle pour le palier {tier or 'cheap'} (table `dispatch.models.opencode` ou registre)",
         )
-    return OpencodeRoute(provider.id, oc_provider, chosen, key_var, base_url, source), ""
+    return OpencodeRoute(
+        provider.id, oc_provider, chosen, key_var, base_url or OPENCODE_BASE_URLS[oc_provider], source
+    ), ""
+
+
+#: Ce que le ``.gitignore`` posé dans ``.opencode/`` ignore : le plugin émis et ce qu'opencode installe lui-même
+#: (les mêmes entrées que le ``.gitignore`` qu'il écrit). Rien d'autre : un fichier ajouté se voit dans ``git status``.
+OPENCODE_IGNORED = (
+    "plugin/grimoire-guard.js",
+    "node_modules",
+    "package.json",
+    "package-lock.json",
+    "bun.lock",
+    ".gitignore",
+)
 
 
 def prepare_opencode_worktree(wt_path: Path) -> str:
-    """Pose le plugin de garde du kit dans un worktree qui ne le suit pas ; ``""`` ou la raison d'un refus.
+    """Pose le plugin de garde du kit dans le worktree ; ``""`` ou la raison d'un refus.
 
-    Même règle que pour Claude Code (#957) : on rejoue la synchronisation de l'hôte opencode, puis les fichiers
-    générés à la racine (``opencode.json``, qui serait du travail non commité aux yeux du relecteur et du janitor)
-    sont retirés ; ``.opencode/`` généré est ignoré par ce seul worktree. La preuve qui compte vient ensuite :
-    :meth:`OpencodeWorkerHost.guard_refusal`.
+    Le plugin est écrit depuis l'émetteur, à l'octet (:func:`.worker_guard.integrity_refusal`, qui refuse aussi tout
+    autre code ou configuration opencode). Le ``.gitignore`` de ``.opencode/`` ne nomme que :data:`OPENCODE_IGNORED`.
     """
-    from grimoire.bridges.schemas import HostId
-    from grimoire.hosts.emitters.opencode import PLUGIN_RELPATH
-    from grimoire.hosts.sync import sync_host_surfaces
+    from grimoire.missions.worker_guard import integrity_refusal
 
-    if (wt_path / PLUGIN_RELPATH).is_file():
-        return ""
-    before = {p.name for p in wt_path.iterdir()}
-    outcome = sync_host_surfaces(wt_path, only=frozenset({HostId.OPENCODE}), skip_files=frozenset({"AGENTS.md"}))
-    for entry in wt_path.iterdir():
-        if entry.name not in before and entry.is_file():
-            entry.unlink()
-    if not (wt_path / PLUGIN_RELPATH).is_file():
-        return f"worktree sans plugin de garde opencode après host sync ({outcome.error or outcome.warning or 'plugin absent'})"
+    if refusal := integrity_refusal(wt_path):
+        return refusal
     ignore = wt_path / ".opencode" / ".gitignore"
     if not ignore.exists():
-        ignore.write_text("*\n", encoding="utf-8")
+        ignore.write_text("".join(f"{line}\n" for line in OPENCODE_IGNORED), encoding="utf-8")
     return ""
 
 

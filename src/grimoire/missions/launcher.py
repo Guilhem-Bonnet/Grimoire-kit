@@ -742,6 +742,17 @@ def _seal_worker_for_dual_review(
                            provider, relaunch=relaunch)
 
 
+def _sensitive_now(service: TaskService, task_id: str) -> str:
+    """Le motif du repli sur Claude Code si *task_id* vise aujourd'hui un chemin sensible (``sensitive_route: strong``)."""
+    from grimoire.missions.orchestrator_policy import load_orchestrator_policy
+
+    policy = load_orchestrator_policy(service.home_root).policy
+    if policy is None:
+        return "politique illisible à la reprise : Claude Code au palier fort par prudence"
+    route = sensitive_route_for(service.require(task_id), policy)
+    return f"route sensible à la reprise : Claude Code au palier fort ({route.reason})" if route.strong else ""
+
+
 def resume_worker(
     service: TaskService, exec_: Exec, claude_bin: str, task_id: str, launch: Mapping[str, Any], message: str, *,
     permission_mode: str = "", cause: str = "", opencode: OpencodeWorkerHost | None = None,
@@ -754,13 +765,20 @@ def resume_worker(
     de nouveau dans le WIP et c'est elle que le prochain arrêt vise. *cause* nomme l'origine de la reprise
     (``provider_error`` pour le tick, #1158) ; elle est notée au ledger et plafonne les reprises automatiques.
     """
+    fresh_only = ""
     if launch.get("host") == OPENCODE_HOST:
-        from grimoire.missions.worker_lifecycle import resume_opencode_worker
+        if not (fresh_only := _sensitive_now(service, task_id)):
+            from grimoire.missions.worker_lifecycle import resume_opencode_worker
 
-        return resume_opencode_worker(
-            service, exec_, task_id, launch, message, permission_mode=permission_mode, cause=cause, host=opencode,
-        )
+            return resume_opencode_worker(
+                service, exec_, task_id, launch, message, permission_mode=permission_mode, cause=cause, host=opencode,
+            )
+        # Devenue sensible depuis son lancement : la tâche repart sur Claude Code, au palier fort, en session neuve.
+        launch = {**{k: v for k, v in launch.items() if k not in ("host", "pid", "log", "provider", "session_id")},
+                  "model": sensitive_model(), "lean": False, "host_fallback": fresh_only}
     cwd = Path(str(launch.get("cwd") or "."))
+    if fresh_only and (refused := _worktree_hooks(cwd)):
+        return ExecResult(1, "", refused)  # le worktree d'un worker opencode n'a pas encore les hooks de Claude Code
     host = ClaudeCodeWorkerHost(claude_bin)
     # Une conversation reprise reste chez son fournisseur : ses réglages ne sont pas gardés par la session.
     spec = SessionSpec(
@@ -769,7 +787,7 @@ def resume_worker(
         resume=str(launch.get("session_id") or ""),
     )
     resumed = host.plan(spec)
-    result = exec_(list(resumed.argv), cwd, resumed.environ())
+    result = ExecResult(1, "", fresh_only) if fresh_only else exec_(list(resumed.argv), cwd, resumed.environ())
     fresh = False
     if result.returncode != 0:
         prompt = f"{WorkerLauncher._prompt(task_id)}\n\nReprise après un renvoi : {message}"

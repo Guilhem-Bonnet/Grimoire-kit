@@ -37,6 +37,7 @@ from grimoire.missions.launcher import (
     attest_session,
 )
 from grimoire.missions.schemas import TaskState
+from grimoire.missions.worker_guard import opencode_config_home
 from grimoire.missions.worker_host import OPENCODE_HOST, OpencodeWorkerHost, SessionSpec, opencode_route, worker_log
 
 if TYPE_CHECKING:
@@ -45,7 +46,15 @@ if TYPE_CHECKING:
     from grimoire.missions.service import TaskService
     from grimoire.missions.task_worktree import TaskWorktree
 
+#: Un refus de la garde avant le lancement d'un worker opencode (motif fixe, jamais une sortie de programme).
+GUARD_REFUSED_EVENT = "task.worker_guard_refused"
+#: Refus de garde de suite avant que la tâche ne soit garée chez l'humain.
+MAX_GUARD_REFUSALS = 3
+
 __all__ = [
+    "GUARD_REFUSED_EVENT",
+    "MAX_GUARD_REFUSALS",
+    "guard_refusals",
     "halt_opencode",
     "is_opencode",
     "launch_opencode",
@@ -80,7 +89,12 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
     if route is None:
         return launcher._deferred(tid, f"worker opencode sans route : {why}")
     name = f"grimoire-{tid}"
-    version = host.version(launcher._exec, wt.path)
+    config_home = opencode_config_home(service.home_root)
+    config_home.mkdir(parents=True, exist_ok=True)
+    # La garde passe avant toute commande opencode : rien d'opencode ne tourne sur un worktree non vérifié.
+    if guard := host.guard_refusal(wt.path, route, config_home=config_home):
+        return _guard_refused(launcher, task, guard)
+    version = host.version(launcher._exec, wt.path, config_home=config_home)
     spec = SessionSpec(
         name=name,
         prompt=WorkerLauncher._prompt(tid, version, attached=True),
@@ -88,20 +102,17 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
         permission_mode=role.permission_mode,
         lean=role.lean,
         opencode=route,
+        config_home=config_home,
     )
     plan = host.plan(spec)
     if isinstance(plan, str):
         return launcher._deferred(tid, f"worker opencode : {plan}")
-    if guard := host.guard_refusal(launcher._exec, wt.path, plan.environ()):
-        detail = f"worker opencode non lancé : {guard}"
-        service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=detail)
-        return LaunchOutcome(tid, "skipped", detail)
     log = worker_log(service.home_root, tid)
     started = host.start(plan, wt.path, log)
     if not started.pid:
         return launcher._failed(tid, f"opencode run n'a pas démarré : {started.error or 'aucun processus'}")
     pid = str(started.pid)
-    session_id = host.resolve(launcher._exec, wt.path, pid, name)
+    session_id = host.resolve(launcher._exec, wt.path, pid, name, config_home=config_home)
     if not session_id:
         return launcher._abandon(
             tid,
@@ -150,6 +161,49 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
     return LaunchOutcome(
         tid, "launched", f"session opencode {session_id} (pid {pid}) dans {wt.path}", session_id, route.model
     )
+
+
+def guard_refusals(service: TaskService, task_id: str) -> int:
+    """Les refus de garde consécutifs de la tâche depuis son dernier lancement ou sa dernière reprise."""
+    count = 0
+    for event in reversed(service.ledger.events_for(task_id)):
+        if event.event_type in (LAUNCHED_EVENT, WORKER_RESUMED_EVENT):
+            break
+        if event.event_type == GUARD_REFUSED_EVENT:
+            count += 1
+    return count
+
+
+def _guard_refused(launcher: WorkerLauncher, task: MissionTask, guard: str) -> LaunchOutcome:
+    """Garde non prouvée : la tâche revient ``ready`` ; au :data:`MAX_GUARD_REFUSALS`-ième refus de suite, elle est
+    garée chez l'humain avec le motif, plutôt que de revenir en file à chaque tick."""
+    service, tid = launcher._service, task.id
+    detail = f"worker opencode non lancé : {guard}"
+    tried = guard_refusals(service, tid) + 1
+    service.ledger.append_event(GUARD_REFUSED_EVENT, tid, "task", WORKER_ACTOR, {"reason": guard, "attempt": tried})
+    claim = service.require(tid).claim
+    if tried >= MAX_GUARD_REFUSALS and claim is not None:
+        question = (
+            f"La garde du kit a refusé {tried} fois de suite le worker opencode de {tid} ({guard}). "
+            "Vérifier le worktree et relancer, ou abandonner ?"
+        )
+        try:
+            service.ask(
+                tid,
+                question,
+                "tick",
+                kind="retry_exhausted",
+                origin="tick",
+                options=("réessayer", "abandonner"),
+                recommended="réessayer",
+                epoch=claim.lease_epoch,
+            )
+        except GrimoireError:
+            pass
+        else:
+            return LaunchOutcome(tid, "skipped", f"{detail} — tâche garée après {tried} refus")
+    service.ledger.transition_task(tid, TaskState.READY, actor_id=WORKER_ACTOR, reason=detail)
+    return LaunchOutcome(tid, "skipped", detail)
 
 
 def opencode_marks(service: TaskService, task_id: str) -> dict[str, Any]:
@@ -245,6 +299,10 @@ def resume_opencode_worker(
     )
     if route is None:
         return ExecResult(1, "", f"reprise opencode impossible : {why}")
+    config_home = opencode_config_home(service.home_root)
+    config_home.mkdir(parents=True, exist_ok=True)
+    if guard := host.guard_refusal(cwd, route, config_home=config_home):
+        return ExecResult(1, "", f"reprise opencode refusée : {guard}")
     plan = host.plan(
         SessionSpec(
             name=f"grimoire-{task_id}",
@@ -253,12 +311,11 @@ def resume_opencode_worker(
             permission_mode=permission_mode or str(launch.get("permission_mode") or ""),
             resume=str(launch.get("session_id") or ""),
             opencode=route,
+            config_home=config_home,
         )
     )
     if isinstance(plan, str):
         return ExecResult(1, "", f"reprise opencode refusée : {plan}")
-    if guard := host.guard_refusal(exec_, cwd, plan.environ()):
-        return ExecResult(1, "", f"reprise opencode refusée : {guard}")
     started = host.start(plan, cwd, worker_log(service.home_root, task_id))
     if not started.pid:
         return ExecResult(1, "", f"opencode run n'a pas démarré : {started.error or 'aucun processus'}")
