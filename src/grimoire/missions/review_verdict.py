@@ -191,7 +191,10 @@ def record_review(
     met = tuple(c.criterion for c in judged if c.status == CRITERION_MET)
     covered_acceptance = () if classify(task) is Verifiability.V0 else acceptance
     pack = evidence.create_pack(task.id, EvidenceProfile.LIGHT, items, acceptance=covered_acceptance, reviewed=met)
-    commands = tuple(c for c in (last.checks if last is not None else ()) if c.id.startswith(_COMMAND_CHECK_PREFIX))
+    commands = tuple(
+        c for c in (last.checks if last is not None else ())
+        if c.id.startswith(_COMMAND_CHECK_PREFIX) or c.id == "verified-head"
+    )
     # Le verdict du pack suit la relecture : un NOT-READY ne laisse pas un verdict vert derrière lui.
     judgment = VerificationCheck(
         id="review-verdict",

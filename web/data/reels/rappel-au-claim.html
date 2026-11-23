@@ -21,7 +21,7 @@ pre { margin:0; font:.82rem/1.45 ui-monospace, monospace; white-space:pre-wrap; 
 <main>
 <h1>Rappel au claim</h1>
 <p>Réclamer une tâche voisine d&#x27;une tâche close rappelle ce que le projet en sait.</p>
-<p class="meta">kit 3.92.0 · enregistrée le 2026-11-20T05:43:27Z · empreinte de sortie <code>2a5049f39872afda8c25c1938adf114743d13d02a4d82e44827debec69889fd5</code></p>
+<p class="meta">kit 3.104.0 · enregistrée le 2026-11-23T18:52:42Z · empreinte de sortie <code>bb5733b464881e775e701d937b50abcfb6ccbbc95057c931cc87cb4b455d69ba</code></p>
 <section class="frame"><p class="cmd">$ grimoire task add &quot;Ecrire la doc de l API&quot; -a &quot;le test passe&quot; --check &quot;test -f DOC.md&quot; --ready<span class="rc ok">sortie 0</span></p><pre>Mission créée : MIS-travaux-courants-001 (aucune n&#x27;existait).
 OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready)
   vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict
@@ -31,7 +31,8 @@ OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (ready)
 <section class="frame"><p class="cmd">$ grimoire task move GAO-ecrire-la-do-001 --to needs_verification<span class="rc ok">sortie 0</span></p><pre>OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (running → needs_verification) · V0 → haiku</pre></section>
 <section class="frame"><p class="cmd">$ écrire DOC.md<span class="rc ok">sortie 0</span></p></section>
 <section class="frame"><p class="cmd">$ grimoire task verify GAO-ecrire-la-do-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-ecrire-la-do-001 — verdict passed (EVD-GAO-ecrire-la-do-001-001,
-ver-GAO-ecrire-la-do-001-001)</pre></section>
+ver-GAO-ecrire-la-do-001-001)
+  - verified-head : &lt;hex&gt;</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task close GAO-ecrire-la-do-001<span class="rc ok">sortie 0</span></p><pre>OK GAO-ecrire-la-do-001 — Ecrire la doc de l API (needs_verification → closed) · V0 → haiku</pre></section>
 <section class="frame"><p class="cmd">$ grimoire task add &quot;Ecrire la doc du CLI&quot; -a &quot;le test passe&quot; --check &quot;test -f DOC.md&quot; --ready<span class="rc ok">sortie 0</span></p><pre>OK GAO-ecrire-la-do-002 — Ecrire la doc du CLI (ready)
   vérifiabilité : V0 — 1 critère(s) mécanique(s), chacun avec un verdict
