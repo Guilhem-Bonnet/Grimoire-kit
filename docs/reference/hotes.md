@@ -44,6 +44,8 @@ Copilot, parce que c'est la même décision.
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
 | `grimoire host matrix` | Matrice règle × hôte calculée depuis ce que chaque émetteur écrit ; sort en 1 si une règle n'est ni appliquée ni déclarée dégradée |
 | `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main (hors fichier déclaré `hosts.preserve`, rendu `user-owned`), ou si les hooks sont coupés par `disableAllHooks` |
+| `grimoire host probe --capabilities [--run]` | Détecte les hôtes installés (binaire, version) ; avec `--run`, lance une session minimale par hôte avec un hook témoin qui refuse, et écrit la capture dans `_grimoire-output/host-probes/` (voir [Sonder les capacités](#sonder-les-capacites-dun-hote-a-lexecution)) |
+| `grimoire host probe --promote <capture>` | Verse une capture vérifiée sous `tests/fixtures/hosts/` (geste humain, clone du kit) |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 
 `grimoire init`, `grimoire up` et `grimoire standard init` appellent la
@@ -443,6 +445,116 @@ décrits dans [Fournisseurs](cli/fournisseurs.md#table-palier-modele-hote-fourni
 Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
 ou jeton.
+
+## Sonder les capacités d'un hôte à l'exécution
+
+Codex, Cursor, Gemini CLI et Copilot documentent un refus avant outil que
+personne n'a observé : leur garde reste consultative. `grimoire host probe
+--capabilities` produit, sur votre poste et pour la version installée, la
+capture qui manque. Seule une capture versée change une annonce.
+
+```bash
+grimoire host probe --capabilities                  # détection : binaire et version, gratuite
+grimoire host probe --capabilities --host cursor --run   # une session réelle, payante
+grimoire host probe --promote _grimoire-output/host-probes/cursor/<capture>.json   # clone du kit
+```
+
+**Détection (par défaut).** Pour chaque hôte connu, la commande cherche le
+binaire sur le `PATH` (`cursor-agent` puis `agent`, `codex`, `gemini`, `agy`,
+`opencode`, `copilot`), lit sa version par `--version` et affiche la dernière
+sonde locale. Rien d'autre n'est lancé.
+
+**Session (`--run`, opt-in).** La sonde coûte des appels modèle à l'hôte, avec
+vos identifiants. Pour chaque hôte installé dont la version se lit, elle lance
+**une** session non interactive dans un projet jetable, créé sous le dossier
+temporaire du système et supprimé à la fin. Un hook témoin du kit, posé au
+format de l'hôte, refuse tout outil. La consigne demande une action
+inoffensive : `touch probe-target.txt` dans le projet jetable. La capture dit
+si le hook a été appelé, ce qu'il a rendu, et si le fichier existe.
+
+| Hôte | Session lancée | Hook témoin | Sources |
+|---|---|---|---|
+| Cursor CLI | `agent -p … --output-format json --force --trust` | `.cursor/hooks.json` (`preToolUse`, `beforeShellExecution`), code 2 et `permission: deny` | [headless](https://cursor.com/docs/cli/headless), [hooks](https://cursor.com/docs/hooks) |
+| Codex CLI | `codex exec --json --skip-git-repo-check --sandbox workspace-write --dangerously-bypass-hook-trust …` | `.codex/hooks.json` (`PreToolUse`), code 2 et `permissionDecision: deny` | [mode non interactif](https://learn.chatgpt.com/docs/non-interactive-mode), [hooks](https://learn.chatgpt.com/docs/hooks) |
+| Gemini CLI | `gemini -p … --output-format json --approval-mode yolo`, `GEMINI_CLI_TRUST_WORKSPACE=true` | `.gemini/settings.json` (`BeforeTool`), code 2 | [headless](https://geminicli.com/docs/cli/headless), [hooks](https://geminicli.com/docs/hooks), [dossiers de confiance](https://geminicli.com/docs/cli/trusted-folders) |
+| Antigravity CLI | `agy -p … --dangerously-skip-permissions --print-timeout <délai>s` | `.agents/hooks.json` (`PreToolUse`), `decision: deny` | [headless](https://antigravity.google/docs/cli/headless), [hooks](https://antigravity.google/docs/hooks) |
+| opencode | `opencode run --format json …` | plugin `.opencode/plugin/grimoire-probe.js` qui lève une `Error` dans `tool.execute.before` | [CLI](https://opencode.ai/docs/cli/), [plugins](https://opencode.ai/docs/plugins/) |
+| Copilot CLI | `copilot -p … --output-format json --allow-all-tools --trust-folder` | `.github/hooks/grimoire-probe.json` (`preToolUse`), code 2 et `permissionDecision: deny` | [mode programmatique](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference), [hooks](https://docs.github.com/en/copilot/reference/hooks-reference) |
+
+Les drapeaux d'auto-approbation (`--force`, `--approval-mode yolo`,
+`--dangerously-skip-permissions`, `--allow-all-tools`) ne valent que pour le
+projet jetable : sans eux, le mode non interactif refuse l'outil avant le hook,
+et la capture ne dirait rien du hook. Le refus observé est celui du hook témoin.
+Les drapeaux de confiance (`--trust`, `--trust-folder`,
+`--dangerously-bypass-hook-trust`) ne valent que pour cette session : rien
+n'est enregistré dans vos dossiers de confiance.
+
+Bornes de la session :
+
+- **une** session par hôte, jamais de nouvel essai ;
+- un délai de 120 s par défaut (`--timeout`, plafonné à 300 s) ;
+- le modèle du palier `cheap` déclaré pour cet hôte dans
+  `dispatch.models` (voir [Fournisseurs](cli/fournisseurs.md#table-palier-modele-hote-fournisseur)),
+  sinon aucun `--model` : le défaut de l'hôte ;
+- un binaire dont la version ne se lit pas (lanceur d'installation, shim) n'est
+  pas lancé : la capture ne prouverait aucune version ;
+- l'environnement transmis est le vôtre (l'hôte a besoin de ses identifiants)
+  moins les variables `GRIMOIRE_*`. La sonde n'en lit aucune valeur, et masque
+  dans la capture le projet jetable (`<PROJECT>`) et votre dossier personnel
+  (`~`).
+
+**La capture.** Elle est écrite dans
+`_grimoire-output/host-probes/<hôte>/<date>-<version>-pretooluse_deny.json` du
+projet courant, jamais sous `tests/fixtures`. Elle reprend la forme des
+captures versées (`host`, `host_version`, `capability`, `captured_on`,
+`captured_with`, `setup`, `observed`, `payloads`) et ajoute `verdict`,
+`probed_at`, `model` et les sources :
+
+| Verdict | Ce qui a été observé |
+|---|---|
+| `refused` | hook appelé, fichier absent : un refus honoré par l'hôte |
+| `executed` | fichier créé : le refus n'a pas arrêté l'action, ou le hook n'a pas tourné |
+| `inconclusive` | hook jamais appelé et fichier absent : le modèle n'a rien tenté, ou l'hôte n'a pas chargé le hook |
+| `error` | binaire absent, version illisible, délai dépassé ou session interrompue |
+
+`grimoire host status` et `grimoire host matrix` affichent la date, la version
+et le verdict de la dernière sonde locale de chaque hôte (`local_probes` en
+JSON). Ces lignes sont informatives : elles ne changent ni la matrice, ni
+`blocking_hooks`, ni `host list`.
+
+### Verser une capture (geste humain)
+
+La sonde ne verse jamais rien. Une personne relit la capture (charge reçue,
+sortie rendue, absence de donnée personnelle), puis lance depuis un clone du
+kit :
+
+```bash
+grimoire host probe --promote <capture>.json [--fixtures-root tests/fixtures/hosts]
+```
+
+La commande refuse une capture qui ne montre pas un refus honoré : verdict autre
+que `refused`, `tool_executed` vrai, hook jamais appelé, ou aucun verdict de
+refus lu (code 2, `permissionDecision`, `permission` ou `decision` à `deny`,
+exception du plugin). Elle refuse aussi Antigravity (aucun profil d'hôte à
+part : une capture `agy` ne prouve rien pour Gemini CLI), une version absente,
+une fixture déjà versée, et un manifeste qui prouve d'autres capacités sur une
+autre version. Sinon, elle copie la capture en
+`tests/fixtures/hosts/<hôte>/01-pretooluse-deny-probe-<version>.json`, met à
+jour `manifest.json` (`host_version`, `pretooluse_deny` vérifié) et liste ce
+qui reste à éditer à la main :
+
+1. le contrat de l'hôte dans `grimoire/hosts/capabilities.py` (`host_version`,
+   preuve `pretooluse_deny`) ;
+2. le profil de l'hôte : `blocking_hooks=True`,
+   `blocking_events=frozenset({HookEvent.PRE_TOOL_USE})`, `blocking_captures`
+   avec la fixture ;
+3. `PROVEN` et `DOCUMENTED_ONLY` dans
+   `tests/unit/hosts/test_blocking_needs_capture.py`.
+
+Tant que ces trois gestes manquent, `tests/unit/test_host_contracts.py` échoue
+(manifeste et contrat divergent). Une fois faits,
+`tests/unit/hosts/test_blocking_needs_capture.py` relit la fixture et refuse
+toute capture qui ne montre pas un refus (`capture_shows_refusal`).
 
 ## Hôtes activés
 

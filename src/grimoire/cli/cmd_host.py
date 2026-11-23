@@ -20,7 +20,7 @@ from rich.table import Table
 
 from grimoire.bridges.host import HostBridge
 from grimoire.bridges.schemas import HostId
-from grimoire.hosts import gemini_wire
+from grimoire.hosts import capability_probe, gemini_wire
 from grimoire.hosts.capabilities import (
     GOVERNANCE_FUNCTIONS,
     GOVERNANCE_LABELS,
@@ -31,6 +31,7 @@ from grimoire.hosts.capabilities import (
     profile_for,
     resolve_host,
 )
+from grimoire.hosts.capability_probe import local_probes_for
 from grimoire.hosts.collect import build_surface, collect_commands, entry_agent_name
 from grimoire.hosts.detection import alias_for_host, enabled_host_ids
 from grimoire.hosts.emitters import (
@@ -122,6 +123,9 @@ class _HostStatus:
     #: (Codex : approbation via /hooks) ; vide si l'hôte n'en demande pas ou si
     #: aucun hook n'est émis. Le kit ne lit pas cette approbation : il la rappelle.
     hook_approval: str = ""
+    #: Dernières sondes de capacités locales (#1281, L7) : date, version, verdict. Informatif :
+    #: seule une capture versée sous ``tests/fixtures/hosts/`` change une annonce.
+    local_probes: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -142,6 +146,7 @@ class _HostStatus:
             "host_version": self.host_version,
             "brake_proof": self.brake_proof,
             "hook_approval": self.hook_approval,
+            "local_probes": self.local_probes,
         }
 
 
@@ -397,6 +402,7 @@ def host_status(
                 host_version=host_version,
                 brake_proof=brake_proof,
                 hook_approval=profile.hook_approval if plan.merges and surface.hooks else "",
+                local_probes=local_probes_for(project_root, host_id),
             )
         )
 
@@ -449,6 +455,8 @@ def host_status(
             when = f", sondé le {proof['probed_at']}" if proof.get("probed_at") else ""
             label = {"verified": "prouvé", "failed": "[red]sonde échouée[/red]", "unverified": "[yellow]non prouvé[/yellow]"}[proof["status"]]
             console.print(f"  frein PreToolUse {label} pour la version {proof['version']}{when}")
+        for probe_line in _local_probe_lines(item.local_probes):
+            console.print(f"  {probe_line}")
         if item.hook_approval:
             console.print(f"  [yellow]hooks non exécutés sans approbation[/yellow] — {item.hook_approval} (non vérifiable par le kit)")
         if item.blocking_hooks:
@@ -498,8 +506,9 @@ def host_matrix(
     """
     targets = tuple(_resolve_targets(host, project_root))
     matrix = build_matrix(project_root, targets)
+    probes = {h.value: found for h in matrix.hosts if (found := local_probes_for(project_root, h))}
     if _get_fmt(ctx) == "json":
-        typer.echo(json.dumps(matrix.to_dict(), indent=2, ensure_ascii=False))
+        typer.echo(json.dumps({**matrix.to_dict(), "local_probes": probes}, indent=2, ensure_ascii=False))
         raise typer.Exit(0 if matrix.ok and matrix.hosts else 1)
     if not matrix.hosts:
         console.print("[red]Aucun hôte activé[/red] : rien n'a été calculé.")
@@ -543,7 +552,97 @@ def host_matrix(
             console.print(
                 f"  [dim]{field_cell.host} {field_cell.label} — {field_cell.state} : {field_cell.reason}[/dim]"
             )
+    for host_value, found in probes.items():
+        for probe_line in _local_probe_lines(found):
+            console.print(f"  [dim]{host_value}[/dim] {probe_line}")
     raise typer.Exit(0 if matrix.ok else 1)
+
+
+def _local_probe_lines(probes: list[dict[str, Any]]) -> list[str]:
+    """Une ligne par sonde locale : date, version, verdict ; jamais une annonce."""
+    return [
+        f"[dim]dernière sonde locale ({p['host']}) : {p['probed_at']}, version {p['host_version'] or 'inconnue'}, "
+        f"verdict {p['verdict']} — non versée, ne change aucune annonce[/dim]"
+        for p in probes
+    ]
+
+
+_CAPABILITIES_OPTION = typer.Option(
+    False, "--capabilities", help="Détecter les hôtes installés (binaire, version) au lieu de sonder le disque."
+)
+_RUN_OPTION = typer.Option(
+    False, "--run", help="Avec --capabilities : lancer UNE session par hôte (appels modèle payants) avec un hook témoin."
+)
+_PROMOTE_OPTION = typer.Option(
+    None, "--promote", help="Verser une capture vérifiée sous tests/fixtures/hosts/ (geste humain, clone du kit)."
+)
+_FIXTURES_ROOT_OPTION = typer.Option(
+    None, "--fixtures-root", help="Dossier des fixtures d'hôte (défaut : <projet>/tests/fixtures/hosts)."
+)
+_TIMEOUT_OPTION = typer.Option(
+    capability_probe.DEFAULT_TIMEOUT, "--timeout", help=f"Délai d'une session, en secondes (plafond {capability_probe.MAX_TIMEOUT})."
+)
+
+
+def _probe_promote(ctx: typer.Context, capture: Path, project_root: Path, fixtures_root: Path | None) -> None:
+    root = fixtures_root or project_root / "tests" / "fixtures" / "hosts"
+    try:
+        result = capability_probe.promote(capture, root)
+    except capability_probe.PromotionRefusedError as exc:
+        if _get_fmt(ctx) == "json":
+            typer.echo(json.dumps({"promoted": False, "reason": str(exc)}, ensure_ascii=False))
+        else:
+            console.print(f"[red]Promotion refusée[/red] : {exc}")
+        raise typer.Exit(1) from exc
+    if _get_fmt(ctx) == "json":
+        payload = {"promoted": True, "fixture": result.relpath, "manifest": str(result.manifest), "todo": list(result.instructions)}
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    console.print(f"[green]Capture versée[/green] : {result.relpath} ; manifeste mis à jour ({result.manifest})")
+    console.print("Rien n'est encore annoncé : reste à faire à la main, puis relire le diff :")
+    for line in result.instructions:
+        console.print(f"  - {line}")
+
+
+def _probe_capabilities(ctx: typer.Context, host: str, project_root: Path, *, run: bool, timeout: int) -> None:
+    targets = capability_probe.select_targets(host)
+    if not targets:
+        known = ", ".join(t.key for t in capability_probe.TARGETS)
+        console.print(f"[red]Hôte non sondable : {host}[/red] (connus : {known})")
+        raise typer.Exit(1)
+    detections = capability_probe.detect(targets, project_root)
+    captures: list[dict[str, Any]] = []
+    if run:
+        for found in detections:
+            if not found.installed or not found.version:
+                continue
+            capture, path = capability_probe.run_probe(
+                found.target, project_root, binary=found.binary, version=found.version, timeout=timeout
+            )
+            captures.append({"host": found.target.key, "path": str(path), "verdict": capture["verdict"], "reason": capture["reason"]})
+    if _get_fmt(ctx) == "json":
+        typer.echo(json.dumps({"hosts": [d.to_dict() for d in detections], "captures": captures}, indent=2, ensure_ascii=False))
+        return
+    table = Table(title="Capacités des hôtes installés")
+    for column in ("Hôte", "Binaire", "Version", "Mode non interactif", "Dernière sonde locale"):
+        table.add_column(column)
+    for found in detections:
+        last = found.to_dict()["last_probe"]
+        table.add_row(
+            found.target.display_name,
+            Path(found.binary).name if found.binary else "[dim]absent[/dim]",
+            found.version or "[dim]—[/dim]",
+            found.target.source,
+            f"{last['probed_at']} ({last['host_version'] or '?'}, {last['verdict']})" if last else "[dim]aucune[/dim]",
+        )
+    console.print(table)
+    for item in captures:
+        why = f" — {item['reason']}" if item["reason"] else ""
+        console.print(f"  {item['host']} : verdict [bold]{item['verdict']}[/bold]{why} → {item['path']}")
+    if not run:
+        console.print("[dim]`--run` lance une session par hôte installé (appels modèle payants) ; rien n'est annoncé sans promotion.[/dim]")
+    elif captures:
+        console.print("Une capture `refused` se verse à la main : `grimoire host probe --promote <fichier>` depuis un clone du kit.")
 
 
 @host_app.command("probe")
@@ -551,12 +650,30 @@ def host_probe(
     ctx: typer.Context,
     project_root: Path = _PROJECT_ROOT_OPTION,
     host: str = _HOST_ALL_OPTION,
+    capabilities: bool = _CAPABILITIES_OPTION,
+    run: bool = _RUN_OPTION,
+    promote: Path | None = _PROMOTE_OPTION,
+    fixtures_root: Path | None = _FIXTURES_ROOT_OPTION,
+    timeout: int = _TIMEOUT_OPTION,
 ) -> None:
     """Vérifier sur le disque que ce que chaque hôte doit appliquer l'est, à jour. N'écrit rien.
 
     Sort en 1 si un fichier émis manque, est périmé ou modifié à la main, si une règle n'est
     plus dans le fichier de l'hôte, ou si aucun hôte n'a pu être sondé (inconnu n'est pas OK).
+
+    ``--capabilities`` détecte les hôtes installés (binaire, version) ; avec ``--run``, lance une
+    session minimale par hôte avec un hook témoin qui refuse, et écrit la capture dans
+    ``_grimoire-output/host-probes/<hôte>/``. ``--promote <fichier>`` verse une capture vérifiée.
     """
+    if promote is not None:
+        _probe_promote(ctx, promote, project_root, fixtures_root)
+        return
+    if run and not capabilities:
+        console.print("[red]--run exige --capabilities[/red] (la sonde de disque ne lance rien).")
+        raise typer.Exit(2)
+    if capabilities:
+        _probe_capabilities(ctx, host, project_root, run=run, timeout=timeout)
+        return
     targets = tuple(_resolve_targets(host, project_root))
     report = probe_hosts(project_root, targets)
     if _get_fmt(ctx) == "json":

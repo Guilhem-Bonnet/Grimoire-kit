@@ -1074,14 +1074,24 @@ def capture_shows_refusal(capture: Mapping[str, Any]) -> bool:
     Il faut que l'action ne se soit pas exécutée (``observed.tool_executed`` faux) et
     qu'un verdict de refus soit lu : code 2, ``permissionDecision: deny`` sur stdout,
     ou exception levée par le plugin (opencode). Une capture témoin (allow) ne prouve rien.
+    Les verdicts à plat des autres dialectes comptent aussi (``permission``, ``permissionDecision``,
+    ``decision`` valant ``deny`` : Cursor, Copilot, Gemini/Antigravity). Une capture de la sonde
+    (#1281, L7) qui dit ``hook_called: false`` ne prouve rien : l'action n'a pas été tentée.
     """
     observed = capture.get("observed")
     if not isinstance(observed, Mapping) or observed.get("tool_executed") is not False:
         return False
+    if observed.get("hook_called") is False:
+        return False
     stdout = observed.get("hook_stdout")
     specific = stdout.get("hookSpecificOutput") if isinstance(stdout, Mapping) else None
     denied = isinstance(specific, Mapping) and specific.get("permissionDecision") == "deny"
-    return observed.get("hook_exit_code") == 2 or denied or bool(observed.get("hook_throws"))
+    flat = isinstance(stdout, Mapping) and "deny" in (
+        stdout.get("permission"),
+        stdout.get("permissionDecision"),
+        stdout.get("decision"),
+    )
+    return observed.get("hook_exit_code") == 2 or denied or flat or bool(observed.get("hook_throws"))
 
 
 def _read_capture(path: Path) -> Mapping[str, Any]:
