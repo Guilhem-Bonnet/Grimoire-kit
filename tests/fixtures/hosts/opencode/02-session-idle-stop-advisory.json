@@ -1,0 +1,24 @@
+{
+  "host": "opencode",
+  "host_version": "1.17.11",
+  "point": 2,
+  "capability": "session_idle_stop_advisory",
+  "captured_on": "2026-11-22",
+  "captured_with": "opencode run --print-logs --format json \"dis bonjour\"",
+  "setup": "projet jetable gouverné, plugin <PROJECT>/.opencode/plugin/grimoire-guard.js émis par `grimoire host sync --host opencode` (#1281 L6), dont la constante HOOK pointe vers un faux grimoire-hook qui journalise sa charge et rend {\"systemMessage\": \"L6-PROBE gates rouges\"} sur Stop. Fournisseur : serveur HTTP local compatible OpenAI (aucun modèle réel) qui répond une phrase, sans appel d'outil.",
+  "observed": {
+    "session_idle_fired": true,
+    "hook_argv": ["--host", "opencode", "--event", "Stop"],
+    "hook_payload": {
+      "hook_event_name": "Stop",
+      "cwd": "<PROJECT>",
+      "session_id": "ses_<ID>",
+      "stop_hook_active": false
+    },
+    "session_id_matches_the_run": true,
+    "host_log_line": "level=WARN message=\"[grimoire] clôture : L6-PROBE gates rouges\"",
+    "turn_blocked": false,
+    "opencode_process_exit_code": 0
+  },
+  "conclusion": "`session.idle` arrive au plugin à la fin du tour avec `properties.sessionID` ; la décision de clôture est rendue et journalisée par `client.app.log`, et le tour se termine quand même : consultatif, jamais un refus."
+}
