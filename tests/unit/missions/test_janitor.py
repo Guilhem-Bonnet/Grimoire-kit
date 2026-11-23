@@ -131,7 +131,7 @@ def test_a_l_etat_terminal_le_janitor_nettoie_tout(projet: Path, host: FakeHost)
     outcomes = sweep(projet, host)
 
     assert by_action(outcomes) == {
-        "ci_slot": "done", "session": "done", "worktree": "done", "branch_local": "done", "branch_remote": "done",
+        "ci_slot": "done", "session": "done", "opencode_home": "skipped", "worktree": "done", "branch_local": "done", "branch_remote": "done",
         "evidence": "done", "issue": "skipped", "breaker": "done",
     }
     assert tid not in occupants(projet)  # le créneau CI est rendu
