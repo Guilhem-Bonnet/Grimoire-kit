@@ -13,7 +13,7 @@ import pytest
 from grimoire.hosts.decisions import authority_guard as ag
 from grimoire.hosts.decisions.tool_facts import classify_tool
 
-_ZONE = "/".join(("~", ".grimoire", "control"))
+_ZONE = "/".join(("~", ".grimoire", "control"))  # noqa: FLY002 — chemin construit par code, jamais en dur
 _JOURNAL = "mandates" + ".authority" + ".jsonl"
 
 
