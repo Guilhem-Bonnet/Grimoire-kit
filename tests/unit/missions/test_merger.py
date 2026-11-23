@@ -20,7 +20,13 @@ from pathlib import Path
 import pytest
 from lot2_doubles import FakeHost, git, make_repo
 
-from grimoire.evidence.schemas import EvidenceItem, EvidenceKind, EvidenceProfile
+from grimoire.evidence.schemas import (
+    EvidenceItem,
+    EvidenceKind,
+    EvidenceProfile,
+    VerdictResult,
+    VerificationCheck,
+)
 from grimoire.evidence.service import EvidenceService
 from grimoire.missions import mandate as md
 from grimoire.missions.breaker import read_breaker, trip
@@ -255,32 +261,45 @@ def red_after_ready(projet: Path, host: FakeHost, tid: str, wt: Path):  # type: 
 # ── #1257 : --check sans verdict verify vert ───────────────────────────────────
 
 
-def _ready_with_pack(projet: Path, host: FakeHost, tid: str, wt: Path, *, verified: bool) -> None:
+def _ready_with_pack(projet: Path, host: FakeHost, tid: str, wt: Path, *, mode: str) -> None:
+    """*mode* : ``none`` (aucun pack), ``unverified`` (pack sans verdict), ``verified`` (pack et verdict passed), ``failed`` (verdict failed)."""
     tick(projet, host)  # lance le relecteur
     item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "pytest -> exit 0", uri="check:pytest", summary="pytest -> exit 0")
     service = EvidenceService(wt / EVIDENCE)
-    pack = service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
-    if verified:
-        service.verify(pack)
+    if mode != "none":
+        pack = service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
+        if mode == "failed":
+            service.verify(pack, extra_checks=(VerificationCheck("command-01", VerdictResult.FAILED, "exit 1"),))
+        elif mode != "unverified":
+            service.verify(pack)
     write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
 
 
-def test_une_tache_a_check_sans_verdict_verify_n_est_pas_fusionnee(projet: Path, host: FakeHost) -> None:
-    grant(projet)
-    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
-    _ready_with_pack(projet, host, tid, wt, verified=False)
+def _refused_why(projet: Path, host: FakeHost, tid: str) -> str:
     tick(projet, host)  # CI vue une première fois
     report = tick(projet, host)
     assert not host.of("gh", "pr", "merge"), report.merges
     [escalated] = events(projet, tid, MERGE_ESCALATED_EVENT)
-    assert "--check" in escalated.payload["why"] and "verdict" in escalated.payload["why"]
     assert TaskService(projet).require(tid).status is TaskState.NEEDS_VERIFICATION
+    return str(escalated.payload["why"])
+
+
+@pytest.mark.parametrize(("mode", "expected"), [
+    ("none", "aucun pack de preuve"),
+    ("unverified", "verdict : absent"),
+    ("failed", "verdict : failed"),
+])
+def test_une_tache_a_check_sans_preuve_tenue_n_est_pas_fusionnee(projet: Path, host: FakeHost, mode: str, expected: str) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    _ready_with_pack(projet, host, tid, wt, mode=mode)
+    assert expected in _refused_why(projet, host, tid)
 
 
 def test_une_tache_a_check_avec_verdict_vert_sur_son_pack_fusionne(projet: Path, host: FakeHost) -> None:
     grant(projet)
     tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
-    _ready_with_pack(projet, host, tid, wt, verified=True)
+    _ready_with_pack(projet, host, tid, wt, mode="verified")
     tick(projet, host)
     tick(projet, host)
     assert host.of("gh", "pr", "merge")
