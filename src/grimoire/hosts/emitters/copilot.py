@@ -388,7 +388,65 @@ def _hook_entries(hook: HookSpec, launcher: HookLauncher = BARE) -> list[dict[st
     return [entry]
 
 
-def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE, *, dispatch: bool = False) -> EmittedFile:
+def _hook_relpath(hook: HookSpec) -> Path:
+    return GH_DIR / "hooks" / f"grimoire-{hook.event.value.replace('_', '-')}.json"
+
+
+def _entry_identity(entry: Any) -> tuple[str, str] | None:
+    """Matcher et commande sans le lanceur : ce qui désigne une entrée d'un ``up`` à l'autre."""
+    if not isinstance(entry, dict):
+        return None
+    command = entry.get("command")
+    if not isinstance(command, str) or " --host " not in command:
+        return None
+    matcher = entry.get("matcher", "")
+    return (matcher if isinstance(matcher, str) else "", command[command.index(" --host ") :])
+
+
+def _existing_timeouts(path: Path, event: str) -> dict[tuple[str, str], int]:
+    """Les ``timeoutSec`` en place dans le fichier de hook *path*, par entrée ; vide s'il est illisible."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    hooks = payload.get("hooks") if isinstance(payload, dict) else None
+    entries = hooks.get(event) if isinstance(hooks, dict) else None
+    found: dict[tuple[str, str], int] = {}
+    for entry in entries if isinstance(entries, list) else []:
+        identity = _entry_identity(entry)
+        timeout = entry.get("timeoutSec") if isinstance(entry, dict) else None
+        # ``bool`` est un ``int`` : ``true`` n'est pas un délai.
+        if identity is not None and isinstance(timeout, int) and not isinstance(timeout, bool):
+            found[identity] = max(timeout, found.get(identity, 0))
+    return found
+
+
+def _keep_raised_timeouts(hook: HookSpec, entries: list[dict[str, Any]], project_root: Path | None) -> None:
+    """Garde le ``timeoutSec`` de la garde relevé à la main au-dessus du délai émis (#1277).
+
+    Le fichier est réécrit en entier à chaque ``up`` : sans cela un délai porté
+    à 60 s pour une machine lente redescendrait au plancher :data:`GUARD_TIMEOUT`.
+    Chez Copilot un dépassement laisse passer l'appel : un délai plus long
+    resserre ce cas. Un délai plus court remonte au délai émis, et l'entrée
+    consultative (``--decision``) reprend toujours le sien.
+    """
+    if project_root is None or hook.event is not HookEvent.PRE_TOOL_USE or hook.enforcement is not Enforcement.BLOCKING:
+        return
+    existing = _existing_timeouts(project_root / _hook_relpath(hook), _WIRE_NAMES[hook.event])
+    for entry in entries:
+        identity = _entry_identity(entry)
+        if identity is None or " --decision " in identity[1]:
+            continue
+        entry["timeoutSec"] = max(entry["timeoutSec"], existing.get(identity, 0))
+
+
+def _hook_file(
+    hook: HookSpec,
+    launcher: HookLauncher = BARE,
+    *,
+    dispatch: bool = False,
+    project_root: Path | None = None,
+) -> EmittedFile:
     """Un fichier ``.github/hooks/grimoire-<événement>.json`` au format du harness Copilot.
 
     ``{"version": 1, "hooks": {"<Événement>": [entrée]}}``, entrée portant
@@ -411,12 +469,12 @@ def _hook_file(hook: HookSpec, launcher: HookLauncher = BARE, *, dispatch: bool 
     """
     event = _WIRE_NAMES[hook.event]
     entries = _hook_entries(hook, launcher)
+    _keep_raised_timeouts(hook, entries, project_root)
     if dispatch and hook.event is HookEvent.PRE_TOOL_USE:
         entries.append(_dispatch_entry(launcher))
     payload: dict[str, Any] = {"version": 1, "hooks": {event: entries}}
-    slug = hook.event.value.replace("_", "-")
     return EmittedFile(
-        relpath=GH_DIR / "hooks" / f"grimoire-{slug}.json",
+        relpath=_hook_relpath(hook),
         content=json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         managed=False,
         owned_if_contains=OWNED_COMMAND_MARKERS,
@@ -507,7 +565,7 @@ class CopilotEmitter(Emitter):
         # make two writers for one path, and every sync would report a
         # conflict on a file nobody actually edited.
         files.extend(_prompt_file(c) for c in surface.commands if c.source != "workflow")
-        files.extend(_hook_file(hook, launcher, dispatch=True) for hook in surface.hooks)
+        files.extend(_hook_file(hook, launcher, dispatch=True, project_root=project_root) for hook in surface.hooks)
 
         degradations: list[Degradation] = list(Emitter.launcher_degradations(launcher))
         if not surface.permissions.is_empty():
