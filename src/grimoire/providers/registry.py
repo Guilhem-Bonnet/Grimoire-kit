@@ -130,6 +130,8 @@ class ProviderSpec:
     invocation: str | None = None
     models: tuple[ModelSpec, ...] = field(default_factory=tuple)
     anthropic_base_url: str | None = None
+    #: Racine d'une passerelle (``provider_type: litellm`` : le proxy LiteLLM, sans ``/v1``), pour la sonde.
+    base_url: str | None = None
     allowed_data_classes: tuple[str, ...] = ()
     forbidden_data_classes: tuple[str, ...] = ()
     #: Bloc ``capabilities:`` du fournisseur (#1281 L3), validé ; vide s'il n'est pas déclaré.
@@ -250,6 +252,7 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
     currency = entry.get("currency")
     invocation = entry.get("invocation")
     base_url = entry.get("anthropic_base_url")
+    gateway_url = entry.get("base_url")
     data_policy = entry.get("data_policy")
     data_policy = data_policy if isinstance(data_policy, dict) else {}
     return ProviderSpec(
@@ -263,6 +266,7 @@ def _provider_spec(entry: dict[str, Any]) -> ProviderSpec | None:
         invocation=str(invocation) if isinstance(invocation, str) and invocation else None,
         models=_model_specs(entry.get("models")),
         anthropic_base_url=str(base_url) if isinstance(base_url, str) and base_url else None,
+        base_url=gateway_url.strip() if isinstance(gateway_url, str) and gateway_url.strip() else None,
         allowed_data_classes=_str_tuple(data_policy.get("allowed_data_classes")),
         forbidden_data_classes=_str_tuple(data_policy.get("forbidden_data_classes")),
         capabilities=parse_capabilities(entry.get("capabilities")),

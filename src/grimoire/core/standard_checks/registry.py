@@ -342,6 +342,8 @@ CHECK_DIMENSIONS: dict[str, str] = {
     "providers.id_missing": "provider_policy",
     "providers.invalid_entry": "provider_policy",
     "providers.invocation_prompt_missing": "provider_policy",
+    "providers.litellm_base_url_invalid": "provider_policy",
+    "providers.litellm_base_url_missing": "provider_policy",
     "providers.model_id_missing": "provider_policy",
     "providers.model_tier_invalid": "provider_policy",
     "providers.models_missing": "provider_policy",

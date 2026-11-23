@@ -39,6 +39,8 @@ MODEL_CAPABILITIES: tuple[str, ...] = (
 ALL_CAPABILITIES: tuple[str, ...] = API_CAPABILITIES + MODEL_CAPABILITIES
 #: Seule capacité numérique (tokens) ; les autres sont des booléens.
 _INT_CAPABILITIES = frozenset({"context_window"})
+#: Plafond d'une valeur numérique lue (registre ou sonde) : au-delà, elle ne dit rien de plausible.
+MAX_CONTEXT_WINDOW = 100_000_000
 
 DECLARED = "declared"
 PROBED = "probed"
@@ -62,6 +64,8 @@ PROVIDER_ALIASES: Mapping[str, str] = {
 _DEEPSEEK_ANTHROPIC = "https://api-docs.deepseek.com/guides/anthropic_api"
 _KIMI_AGENT = "https://platform.kimi.ai/docs/guide/agent-support"
 _OLLAMA_ANTHROPIC = "https://docs.ollama.com/api/anthropic-compatibility"
+#: Type de fournisseur d'une passerelle LiteLLM (#1281, L8) : ``provider_type: litellm`` + ``base_url``.
+LITELLM = "litellm"
 
 #: Valeurs documentées par fournisseur : ``{capacité: (valeur, URL de la doc)}``, lues le 2026-11-22.
 #: Seules y figurent les capacités que la doc affirme pour l'API entière ; ce qui dépend du modèle
@@ -104,6 +108,12 @@ DOCUMENTED_DEFAULTS: Mapping[str, Mapping[str, tuple[CapabilityValue, str]]] = {
         "anthropic_compatible": (True, _OLLAMA_ANTHROPIC),
         "prompt_cache": (False, _OLLAMA_ANTHROPIC),
     },
+    # Le proxy sert `/chat/completions` et `/models` au format OpenAI, et `/v1/messages` au format
+    # Anthropic pour tous ses modèles (lu le 2026-11-22). Le reste dépend du modèle derrière le proxy.
+    LITELLM: {
+        "openai_compatible": (True, "https://docs.litellm.ai/docs/proxy/quick_start"),
+        "anthropic_compatible": (True, "https://docs.litellm.ai/docs/proxy/client_setup/claude_code"),
+    },
 }
 
 
@@ -111,6 +121,8 @@ def canonical_provider(provider_id: str, provider_type: str = "") -> str:
     """L'identifiant de :data:`DOCUMENTED_DEFAULTS` qui décrit *provider_id* ; ``local`` pour tout fournisseur local."""
     if provider_type == "local":
         return "local"
+    if provider_type == LITELLM:
+        return LITELLM
     lowered = provider_id.strip().lower()
     return PROVIDER_ALIASES.get(lowered, lowered)
 
@@ -122,7 +134,7 @@ def coerce_capability(name: str, value: Any) -> CapabilityValue | None:
     ``tools: 1`` ne disent rien, ils restent inconnus plutôt que d'être devinés.
     """
     if name in _INT_CAPABILITIES:
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= MAX_CONTEXT_WINDOW:
             return None
         return value
     return value if isinstance(value, bool) else None
