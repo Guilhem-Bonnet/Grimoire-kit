@@ -92,6 +92,8 @@ _DECISION_FUNCS: dict[str, tuple[str, str]] = {
     # Consultative : jamais l'unique décision d'un événement, toujours nommée par
     # ``--decision`` dans le hook qui la porte (Claude Code, matcher Agent|Task).
     "grimoire.dispatch-model": ("dispatch_model", "decide_dispatch_model"),
+    # Consultative, harness Copilot seul : nommée par ``--decision`` dans le hook ``SubagentStart``.
+    "grimoire.subagent-start": ("subagent_start", "decide_subagent_start"),
 }
 
 
