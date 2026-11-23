@@ -390,7 +390,6 @@ MENTIONS = {
     "git-log-qui-cherche-le-chemin": "git log --grep '{Z}' --oneline",
     "git-init-ailleurs-en-citant": "git init ailleurs # {Z}",
     "tar-qui-exclut-le-chemin": "tar -xf a.tar -C ailleurs --exclude {Z}",
-    "heredoc-de-documentation": "cat > notes.md <<'EOF'\nsed -n 'w {Z}/f' ; git clone /src {Z}/x\nEOF",
     "message-de-commit-par-heredoc": "git commit -q -F - <<'EOF'\nfix: git init {Z}/x n'est plus possible\nEOF",
     "echo-d-une-commande": "echo \"git clone /src {Z}/x\"",
     "corps-de-pr-par-substitution-qui-cite-des-ecritures": (

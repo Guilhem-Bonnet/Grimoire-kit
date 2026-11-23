@@ -251,7 +251,6 @@ MENTIONS = {
     "echo-cite": 'echo "{Z}"',
     "heredoc-de-commit": "git commit -q -F - <<'EOF'\nfix: le journal {Z}\nEOF",
     "corps-de-pr-par-substitution": "gh pr create --title t --body \"$(cat <<'EOF'\nvoir {Z}\nEOF\n)\"",
-    "heredoc-vers-un-autre-fichier": "cat > notes.md <<'EOF'\nLa zone {Z} est protégée.\nEOF",
     "commande-citee-dans-un-echo": 'echo "rm -rf {Z}"',
     "sed-qui-cite-la-zone-dans-son-script": "sed -i 's#ici#{Z}#' notes.md",
     "python-qui-ecrit-ailleurs-un-texte-qui-cite": (

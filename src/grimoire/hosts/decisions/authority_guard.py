@@ -1010,6 +1010,39 @@ def _names_zone_text(command: str) -> bool:
     return any(re.search(re.escape(spelling) + r"(?![A-Za-z0-9_.-])", text) for spelling in spellings)
 
 
+#: Les seuls programmes dont un heredoc n'est que la donnée qu'ils recopient (stdin → fichier ou sortie).
+_DATA_SINKS = frozenset({"cat", "tee"})
+
+
+def is_data_heredoc(command: str) -> bool:
+    """Vrai si la zone n'est citée que dans le texte de heredocs recopiés tels quels (#1173).
+
+    Le texte d'un heredoc est une donnée : seule la cible compte. Toutes ces conditions tiennent, sinon faux :
+    au moins un heredoc, tous à tag quoté (un tag non quoté développe ``$(…)``) ; chaque segment de la commande
+    est un ``cat`` ou un ``tee`` nu (aucune enveloppe, aucun interpréteur, aucun ``| bash``) ; la commande
+    *privée de ses corps de heredoc* ne nomme plus la zone, ni par le texte ni par un chemin résolu (cibles de
+    redirection, ``cd`` et ``-C`` compris). Une erreur d'analyse rend faux : jamais une autorisation par défaut.
+    """
+    try:
+        segments = _parse_strict(command)
+        if not any(seg.heredocs for seg in segments):
+            return False
+        for seg in segments:
+            if not seg.words or seg.words[0] not in _DATA_SINKS:
+                return False
+            if seg.heredocs != len(seg.bodies) or any(body is None for body in seg.bodies):
+                return False
+        bare = _strip_heredoc_bodies(command)
+        return not (
+            _names_protected(bare) == CONTROL_ZONE_MARKER
+            or _names_zone_text(bare)
+            or _names_control_zone_command(bare)
+            or _reads_zone_through_a_parent(bare)
+        )
+    except Exception:
+        return False
+
+
 def _zone_vector(command: str, *, mutating: bool) -> ForgeryVector | None:
     """Le vecteur ``control-zone`` de *command*, ou ``None`` si elle ne nomme pas la zone ou ne fait que la citer.
 
@@ -1030,6 +1063,8 @@ def _zone_vector(command: str, *, mutating: bool) -> ForgeryVector | None:
     try:
         textual = (mutating and _names_protected(command) == marker) or _names_zone_text(command)
         if not (textual or _names_control_zone_command(command) or _reads_zone_through_a_parent(command)):
+            return None
+        if is_data_heredoc(command):
             return None
         from grimoire.hosts.decisions.write_proof import proves_write
 

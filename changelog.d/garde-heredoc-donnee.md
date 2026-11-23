@@ -1,0 +1,1 @@
+- fix(hosts): un heredoc dont le texte cite la zone de contrôle, écrit vers un fichier hors zone, n'est plus refusé : seule la cible de la redirection compte (#1173)
