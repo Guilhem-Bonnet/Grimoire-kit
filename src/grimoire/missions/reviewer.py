@@ -972,7 +972,9 @@ class ReviewStage:
         if cycle >= max_cycles or not worker_session:
             why = f"{cycle} relecture(s) NOT-READY" if worker_session else "aucune session de worker à reprendre"
             cause = "not_ready_cycles" if worker_session else "no_worker_session"
-            if cause == "not_ready_cycles" and self._arbitrate(task, why, notes, str(review.payload.get("head") or "")):
+            if cause == "not_ready_cycles" and self._arbitrate(
+                task, why, notes, str(review.payload.get("head") or ""), receipt,
+            ):
                 # Le jugement et l'arrêt du relecteur suivent, comme pour l'escalade : le cycle compte, la session
                 # ne reste pas ouverte à côté d'un arbitrage en cours.
                 self._record_judged(task, review, NOT_READY, cycle, extra)
@@ -1006,18 +1008,24 @@ class ReviewStage:
         self._service.comment(tid, f"Relecture NOT-READY (cycle {cycle}/{max_cycles}) : {notes}", REVIEWER_ACTOR)
         return ReviewOutcome(tid, "bounce", "done", f"retour au worker (cycle {cycle}/{max_cycles})")
 
-    def _arbitrate(self, task: MissionTask, why: str, notes: str, head: str) -> bool:
+    def _arbitrate(
+        self, task: MissionTask, why: str, notes: str, head: str, receipt: ReviewReceipt | None = None,
+    ) -> bool:
         """GAO-r-le-arbitre-001 : confie l'escalade à l'arbitre quand le rôle l'accepte ; ``False`` : à l'humain.
 
         La question de repli est exactement celle que :meth:`_escalate` poserait : si l'arbitrage échoue (JSON
         invalide, confiance basse, session muette), l'humain la reçoit avec l'analyse de l'arbitre jointe.
+
+        Les critères **refusés** par le relecteur (``unmet``/``unverifiable`` du reçu) sont scellés avec la demande :
+        seule une dérogation sur l'un d'eux a un objet, le reste de la tâche doit tenir.
         """
         from grimoire.missions import arbiter
 
         tid = task.id
         detail = f" : {notes[:600]}" if notes else ""
+        refused = tuple(c.criterion for c in receipt.criteria if c.status != CRITERION_MET) if receipt is not None else ()
         return bool(arbiter.request_arbitration(
-            self._service, task, "reviewer", "not_ready_cycles", why, notes, head=head,
+            self._service, task, "reviewer", "not_ready_cycles", why, notes, head=head, refused=refused,
             text=f"Désaccord persistant sur {tid} ({why}){detail} — reprendre la tâche ou l'abandonner ?",
             title="Reprendre la tâche ou l'abandonner ?",
             context=clip_context(

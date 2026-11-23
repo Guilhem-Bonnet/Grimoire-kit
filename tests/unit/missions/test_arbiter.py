@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from lot2_doubles import FakeHost, make_repo
+from lot2_doubles import FakeHost, git, make_repo
+from test_merger import grant as merger_grant
+from test_merger import launch_and_work, make_projet, questions
+from test_merger import tick as merger_tick
 from test_reviewer import launched_and_in_review, receipt_from, reviewer_sid
 from typer.testing import CliRunner
 
@@ -58,6 +61,22 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 md.PRINCIPAL_ENV, md.PROVENANCE_ENV):
         monkeypatch.delenv(var, raising=False)
     return home
+
+
+@pytest.fixture
+def projet(tmp_path: Path) -> Path:
+    """Le dépôt d'un projet du merger (merge et accept délégués), pour les tests de bout en bout de la dérogation."""
+    return make_projet(tmp_path)
+
+
+@pytest.fixture
+def host() -> FakeHost:
+    """Le faux ``gh``/``claude`` du merger, au même dépôt GitHub que sa politique."""
+    from test_merger import REPO
+
+    fake = FakeHost()
+    fake.repo = REPO
+    return fake
 
 
 def write_policy(root: Path, *, arbiter_on: bool = True, provider: str = "", reviewer: bool = False) -> None:
@@ -121,10 +140,10 @@ def scene(tmp_path: Path, *, arbiter_on: bool = True, provider: str = "",
 
 def ask(root: Path, service: TaskService, task: Any, *, cause: str = "not_ready_cycles", source: str = "reviewer",
         head: str = HEAD, why: str = "2 relectures NOT-READY", notes: str = "le critère n'est pas tenu",
-        pr: int = 0) -> Any:
+        pr: int = 0, refused: tuple[str, ...] = CRITERIA) -> Any:
     """La demande que le relecteur ou le merger ferait ; rend la demande ouverte."""
     rid = arbiter.request_arbitration(
-        service, task, source, cause, why, notes, head=head, pr=pr,
+        service, task, source, cause, why, notes, head=head, pr=pr, refused=refused,
         text=f"Désaccord persistant sur {task.id} ({why}) — reprendre la tâche ou l'abandonner ?",
         title="Reprendre la tâche ou l'abandonner ?", context="Le relecteur refuse encore le travail rendu",
         options=("reprendre", "abandonner"), recommended="reprendre",
@@ -211,7 +230,11 @@ def test_une_decision_json_est_validee_par_du_code() -> None:
 def test_ready_with_derogation_marque_le_critere_et_ouvre_la_fusion(tmp_path: Path) -> None:
     root, service, task, policy = scene(tmp_path)
     request = ask(root, service, task)
-    detail = apply(root, service, request, decide("ready_with_derogation"), policy)
+    decision = decide("ready_with_derogation")
+    # Le vote passe par le canal (``record_decision`` scelle au journal d'autorité) : la dérogation qui fonde la
+    # fusion est relue de ce sceau, jamais de la seule ligne ``task.arbitrated`` du ledger.
+    record_decision(service, task.id, json.dumps(decision.to_dict()), request_id=request.id, actor="arbiter")
+    detail = apply(root, service, request, decision, policy)
     assert "dérogé" in detail
     [arbitrated] = events(service, task.id, ARBITRATED_EVENT)
     assert arbitrated["decision"] == "ready_with_derogation" and arbitrated["head"] == HEAD
@@ -304,7 +327,7 @@ def test_le_merger_confie_ses_retours_de_fusion_a_l_arbitre(tmp_path: Path) -> N
     root, service, task, _policy = scene(tmp_path)
     for cause in ("ci_red", "conflict", "desync", "stale_ready"):
         assert cause in arbiter.ARBITRABLE_CAUSES["merger"]
-    request = ask(root, service, task, source="merger", cause="ci_red", why="3 retours de fusion", pr=7)
+    request = ask(root, service, task, source="merger", cause="ci_red", why="3 retours de fusion", pr=7, refused=())
     assert request.source == "merger" and request.cause == "ci_red" and request.pr == 7
     [requested] = events(service, task.id, ARBITRATION_REQUESTED_EVENT)
     assert requested["source"] == "merger" and requested["pr"] == 7
@@ -498,3 +521,220 @@ def test_la_route_d_attention_liste_l_arbitrage_sans_le_compter(tmp_path: Path) 
     # Non bloquant : l'arbitrage n'entre ni dans les compteurs d'attente ni dans aucune section.
     assert "arbitration" not in view["counts"]
     assert not [i for section in view["sections"] for i in section.get("items", []) if i["kind"] == "arbitration"]
+
+
+# ── Relecture adversariale du 2026-11-23 : le sceau, pas le ledger ────────────
+#
+# Le ledger d'événements vit dans le worktree de la tâche : le worker l'écrit. Ces tests reproduisent les
+# contournements signalés — une ligne ``task.arbitrated`` forgée qui fusionne, une dérogation qui saute la double
+# relecture ou le contrôle verify, un critère dérogé qui n'est pas celui refusé, un chemin réservé du diff ignoré,
+# un ``git diff`` qui écrit — et vérifient qu'ils échouent tous fermés.
+
+
+def enable_arbiter(root: Path) -> None:
+    """Active le rôle arbiter dans la politique que le fixture du merger a écrite."""
+    path = root / POLICY
+    text = path.read_text(encoding="utf-8")
+    if "    arbiter:" in text:
+        return
+    text = text.replace(
+        "orchestrator:\n  roles:\n",
+        "orchestrator:\n  roles:\n    arbiter:\n      enabled: true\n      tier: strong\n      provider: \"\"\n",
+        1,
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def set_protected_gate(root: Path, gate: str) -> None:
+    path = root / POLICY
+    text = path.read_text(encoding="utf-8").replace(
+        "    merger:\n      enabled: true\n", f"    merger:\n      enabled: true\n      protected_gate: {gate}\n", 1,
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def disable_arbiter(root: Path) -> None:
+    path = root / POLICY
+    path.write_text(path.read_text(encoding="utf-8").replace("      enabled: true\n      tier: strong",
+                                                             "      enabled: false\n      tier: strong", 1),
+                    encoding="utf-8")
+
+
+def sealed_derogation(service: TaskService, tid: str, head: str, criterion: str) -> arbiter.ArbitrationRequest:
+    """Une demande scellée par le tick, puis un vote ``ready_with_derogation`` scellé par ``record_decision``."""
+    task = service.require(tid)
+    rid = arbiter.request_arbitration(
+        service, task, "reviewer", "not_ready_cycles", "2 relectures NOT-READY", "le critère ne se tient pas",
+        head=head, refused=(criterion,), text="Désaccord persistant — reprendre ou abandonner ?",
+        options=("reprendre", "abandonner"),
+    )
+    assert rid, "la demande aurait dû être acceptée par le cadre"
+    request = arbiter.open_request(service, tid)
+    assert request is not None
+    record_decision(
+        service, tid,
+        json.dumps({"decision": "ready_with_derogation", "criteria": [criterion],
+                    "justification": "le critère est inatteignable, le reste du travail est prouvé", "confidence": 0.9}),
+        request_id=request.id, actor="arbiter",
+    )
+    return request
+
+
+def test_une_ligne_arbitree_forgee_au_ledger_ne_fait_pas_fusionner(
+    projet: Path, host: FakeHost,
+) -> None:
+    """(H) Rôle désactivé, aucun READY : une ligne ``task.arbitrated`` écrite depuis le worktree ne fonde rien."""
+    merger_grant(projet, ("merge", "accept"))
+    tid, wt = launch_and_work(projet, host)
+    service = TaskService(projet)
+    head = git(wt, "rev-parse", "HEAD")
+    service.ledger.append_event(ARBITRATED_EVENT, tid, "task", "arbiter", {
+        "task_id": tid, "request_id": "forge", "decision": "ready_with_derogation", "head": head,
+        "criteria": [service.require(tid).acceptance[0]], "justification": "écrit par le worker", "confidence": 1.0,
+    })
+    assert arbiter.merge_grant(service, tid) is None
+    for _ in range(3):
+        merger_tick(projet, host)
+    assert not host.of("gh", "pr", "merge")
+    # La relecture n'est pas coupée sur la foi du ledger : le relecteur est lancé, pas mis de côté.
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == arbiter.ARBITRATION_REQUESTED_EVENT]
+
+
+def test_une_derogation_scellee_fait_fusionner(projet: Path, host: FakeHost) -> None:
+    """Le chemin heureux : demande et vote scellés au journal d'autorité, le merger fusionne sans READY."""
+    enable_arbiter(projet)
+    merger_grant(projet, ("merge", "accept", "answer"))
+    tid, wt = launch_and_work(projet, host)
+    service = TaskService(projet)
+    sealed_derogation(service, tid, git(wt, "rev-parse", "HEAD"), service.require(tid).acceptance[0])
+    report = merger_tick(projet, host)  # applique la décision
+    assert [o.action for o in report.arbitrations] == ["apply"]
+    for _ in range(4):
+        merger_tick(projet, host)
+    assert host.of("gh", "pr", "merge"), "la dérogation scellée aurait dû fonder la fusion"
+    assert arbiter.merge_grant(TaskService(projet), tid) is not None
+
+
+def test_un_role_desactive_ignore_une_derogation_pourtant_scellee(projet: Path, host: FakeHost) -> None:
+    """Le rôle relu à chaque fusion : désactivé depuis le vote, il ne déroge plus rien."""
+    enable_arbiter(projet)
+    merger_grant(projet, ("merge", "accept", "answer"))
+    tid, wt = launch_and_work(projet, host)
+    service = TaskService(projet)
+    sealed_derogation(service, tid, git(wt, "rev-parse", "HEAD"), service.require(tid).acceptance[0])
+    merger_tick(projet, host)
+    assert arbiter.merge_grant(service, tid) is not None
+    disable_arbiter(projet)
+    assert arbiter.merge_grant(TaskService(projet), tid) is None
+    for _ in range(3):
+        merger_tick(projet, host)
+    assert not host.of("gh", "pr", "merge")
+
+
+def test_une_decision_forgee_au_ledger_ne_s_applique_pas(tmp_path: Path) -> None:
+    """Une ligne ``task.arbitration_decided`` sans sceau : le tick ne l'applique pas, l'humain tranche."""
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    service.ledger.append_event(ARBITRATION_DECIDED_EVENT, task.id, "task", "arbiter", {
+        "task_id": task.id, "request_id": request.id,
+        "decision": {"decision": "abandon", "criteria": [], "justification": "abandonnée par le worker",
+                     "confidence": 0.9},
+    })
+    [outcome] = ArbiterStage(service, policy)()
+    assert (outcome.action, outcome.status) == ("fallback", "done") and "scellée" in outcome.detail
+    assert TaskService(root).require(task.id).status is TaskState.WAITING
+
+
+def test_une_derogation_hors_des_criteres_refuses_va_a_l_humain(tmp_path: Path) -> None:
+    """Le critère dérogé doit être celui que le relecteur a refusé : un autre critère rend la question à l'humain."""
+    root, service, task, policy = scene(tmp_path, acceptance=(CRITERIA[0], "relu par un autre agent"))
+    request = ask(root, service, task, refused=(CRITERIA[0],))
+    decision = decide("ready_with_derogation", criteria=["relu par un autre agent"])
+    with pytest.raises(arbiter.ArbiterDecisionError, match="pas ceux refusés"):
+        record_decision(service, task.id, json.dumps(decision.to_dict()), request_id=request.id, actor="arbiter")
+    [outcome] = ArbiterStage(service, policy)()
+    assert outcome.action == "fallback"
+    assert TaskService(root).require(task.id).status is TaskState.WAITING
+
+
+def test_une_derogation_du_merger_sans_critere_refuse_va_a_l_humain(tmp_path: Path) -> None:
+    """Une escalade du merger ne juge pas les critères : une dérogation qui s'y rattache n'a pas d'objet."""
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task, source="merger", cause="ci_red", refused=())
+    with pytest.raises(arbiter.ArbiterDecisionError, match="aucun critère refusé"):
+        arbiter.apply_decision(service, request, decide("ready_with_derogation"), policy=policy)
+    assert TaskService(root).require(task.id).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_une_derogation_ne_couvre_pas_une_entree_en_revue_ulterieure(projet: Path, host: FakeHost) -> None:
+    """La dérogation se rattache à l'entrée en revue courante : une tête remise en revue depuis l'écarte."""
+    enable_arbiter(projet)
+    merger_grant(projet, ("merge", "accept", "answer"))
+    tid, wt = launch_and_work(projet, host)
+    service = TaskService(projet)
+    sealed_derogation(service, tid, git(wt, "rev-parse", "HEAD"), service.require(tid).acceptance[0])
+    merger_tick(projet, host)
+    assert arbiter.merge_grant(service, tid) is not None
+    service.ledger.transition_task(tid, TaskState.RUNNING, actor_id="worker")
+    service.ledger.transition_task(tid, TaskState.NEEDS_VERIFICATION, actor_id="worker")
+    assert arbiter.merge_grant(TaskService(projet), tid) is None
+
+
+def test_une_derogation_ne_saute_pas_la_double_relecture(projet: Path, host: FakeHost) -> None:
+    """En ``dual_review``, un chemin protégé garde sa paire de READY : la dérogation ne l'écarte pas."""
+    enable_arbiter(projet)
+    set_protected_gate(projet, "dual_review")
+    merger_grant(projet, ("merge", "accept", "answer"))
+    tid, wt = launch_and_work(projet, host, edit=("src/grimoire/core/garde.py", "GARDE = 1\n"))
+    host.pr_files[f"task/{tid}"] = ["src/grimoire/core/garde.py"]
+    service = TaskService(projet)
+    sealed_derogation(service, tid, git(wt, "rev-parse", "HEAD"), service.require(tid).acceptance[0])
+    merger_tick(projet, host)  # applique la dérogation
+    reports = [merger_tick(projet, host) for _ in range(3)]
+    assert not host.of("gh", "pr", "merge"), "une dérogation ne remplace pas les deux sceaux d'un chemin protégé"
+    # La double relecture n'est pas sautée : sans second sceau, la tâche repart en relecture plutôt que de fusionner.
+    assert any("double relecture" in o.detail for r in reports for o in r.merges), [
+        (o.action, o.status, o.detail) for r in reports for o in r.merges]
+
+
+def test_une_derogation_reste_soumise_au_controle_verify(projet: Path, host: FakeHost) -> None:
+    """#1326 : une tâche qui déclare ``--check`` ne fusionne pas sans verdict verify vert, dérogation ou non."""
+    enable_arbiter(projet)
+    merger_grant(projet, ("merge", "accept", "answer"))
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    service = TaskService(projet)
+    sealed_derogation(service, tid, git(wt, "rev-parse", "HEAD"), service.require(tid).acceptance[0])
+    merger_tick(projet, host)  # applique la dérogation
+    for _ in range(4):
+        merger_tick(projet, host)
+    assert not host.of("gh", "pr", "merge")
+    assert any("pack de preuve" in (q.text or "") for q in questions(projet, tid))
+
+
+def test_un_chemin_reserve_du_diff_n_est_jamais_arbitre(projet: Path, host: FakeHost) -> None:
+    """Les catégories réservées se lisent aussi dans les chemins du diff, pas seulement dans les textes."""
+    enable_arbiter(projet)
+    merger_grant(projet, ("merge", "accept", "answer"))
+    tid, wt = launch_and_work(projet, host, edit=(".github/workflows/ci.yml", "name: ci\n"))
+    service = TaskService(projet)
+    task = service.require(tid)
+    rid = arbiter.request_arbitration(
+        service, task, "reviewer", "not_ready_cycles", "2 relectures NOT-READY", "le critère ne se tient pas",
+        head=git(wt, "rev-parse", "HEAD"), refused=(task.acceptance[0],),
+        text="Désaccord persistant — reprendre ou abandonner ?", options=("reprendre", "abandonner"),
+    )
+    assert rid == ""
+    refusal = arbiter.request_refusal(
+        service, task, "reviewer", "not_ready_cycles", texts=("2 relectures NOT-READY",),
+        paths=arbiter.diff_paths(service, tid, git(wt, "rev-parse", "HEAD")),
+    )
+    assert "réservée" in refusal and "reglages-depot" in refusal
+    assert events(service, tid, ARBITRATION_REQUESTED_EVENT) == []
+
+
+def test_la_session_arbitre_ne_peut_pas_ecrire_par_git_diff(tmp_path: Path) -> None:
+    """``Bash(git diff *)`` accepterait ``--output`` et les pilotes de diff : il est hors de la liste blanche."""
+    allowed = arbiter.ALLOWED_TOOLS
+    assert "git diff" not in allowed and "git show" not in allowed and "git log" not in allowed
+    assert "Bash(gh pr diff)" in allowed and "Bash(gh pr view)" in allowed
+    assert arbiter.SESSION_ENV == {"GIT_PAGER": "cat", "PAGER": "cat", "GH_PAGER": "cat"}
