@@ -219,6 +219,13 @@ def _verify_provider_currency_and_tiers(
             )
 
 
+def _admitted_gateway(base_url: str | None) -> bool:
+    """La racine d'une passerelle LiteLLM est-elle une URL que la sonde contacterait ? (même règle, un seul code)"""
+    from grimoire.providers.capability_probe import admitted_gateway_url
+
+    return bool(admitted_gateway_url(base_url))
+
+
 def _verify_provider_registry(root: Path, profile: StandardProfile, result: StandardVerificationResult) -> None:
     rel_path = STANDARD_DIR / "llm-provider-registry.yaml"
     data = _load_yaml_file(root, rel_path, result)
@@ -279,6 +286,15 @@ def _verify_provider_registry(root: Path, profile: StandardProfile, result: Stan
                     "providers.litellm_base_url_missing",
                     "error",
                     f"LiteLLM provider {provider_id!r} has no base_url (root of the LiteLLM proxy).",
+                    path=rel_path,
+                )
+            elif provider.get("provider_type") == "litellm" and not _admitted_gateway(base_url):
+                _add_check(
+                    result,
+                    "providers.litellm_base_url_invalid",
+                    "error",
+                    f"LiteLLM provider {provider_id!r} base_url is not admitted "
+                    "(https://, or http:// to a loopback host; no credentials, query or fragment).",
                     path=rel_path,
                 )
             models = provider.get("default_models")

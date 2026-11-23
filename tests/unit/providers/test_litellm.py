@@ -24,7 +24,14 @@ from grimoire.cli.cmd_providers import providers_app
 from grimoire.core.agentic_standard import verify_standard_profile
 from grimoire.hosts.model_table import load_model_table, resolve_model
 from grimoire.providers import capability_probe
-from grimoire.providers.capabilities import DOCUMENTED_DEFAULTS, LITELLM, canonical_provider
+from grimoire.providers.capabilities import (
+    DOCUMENTED_DEFAULTS,
+    LITELLM,
+    MAX_CONTEXT_WINDOW,
+    PROVIDER_ALIASES,
+    canonical_provider,
+    coerce_capability,
+)
 from grimoire.providers.capability_probe import (
     PROVIDERS_CAPABILITIES_FILE,
     probe_capabilities,
@@ -32,7 +39,7 @@ from grimoire.providers.capability_probe import (
     read_capabilities,
 )
 from grimoire.providers.registry import read_registry
-from grimoire.providers.secrets import set_secret
+from grimoire.providers.secrets import is_valid_provider_id, provider_key_var, set_secret
 
 STANDARD = Path("_grimoire/standard")
 REGISTRY = STANDARD / "llm-provider-registry.yaml"
@@ -226,14 +233,40 @@ def test_probe_key_comes_from_store_only(tmp_path: Path, monkeypatch: pytest.Mon
     assert probe.note == f"non mesuré : clé absente ({KEY_VAR}, voir `grimoire providers set-key`)"
 
 
-def test_reserved_key_variable_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_secret("openai", "OPENAI_API_KEY", SECRET)
+#: Ids qui nomment un fournisseur documenté ou l'un de ses alias, quelle que soit la casse.
+_DOCUMENTED_IDS = sorted(
+    {*PROVIDER_ALIASES, *DOCUMENTED_DEFAULTS, *capability_probe._ENDPOINTS, "Claude", "OLLAMA"} - {LITELLM}
+)
+
+
+@pytest.mark.parametrize("provider_id", _DOCUMENTED_IDS)
+def test_a_documented_provider_id_is_never_a_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider_id: str
+) -> None:
+    """La clé rangée sous l'id d'un fournisseur documenté ne part jamais vers une base_url du registre."""
+    lowered = provider_id.lower()
+    if is_valid_provider_id(lowered):
+        set_secret(lowered, provider_key_var(lowered), SECRET)
     monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
 
-    probe = probe_provider_capabilities(_spec(tmp_path, _entry(provider_id="openai"), "openai"))
+    probe = probe_provider_capabilities(_spec(tmp_path, _entry(provider_id=provider_id), provider_id))
 
     assert probe.measured is False
-    assert "variable de clé réservée" in probe.note
+    # Une casse non ASCII-minuscule est refusée plus tôt (id invalide) : jamais contactée non plus.
+    assert ("fournisseur documenté" if provider_id == lowered else "id invalide") in probe.note
+    assert probe.endpoint == ""
+
+
+def test_every_reserved_key_variable_belongs_to_a_refused_id() -> None:
+    reserved = {endpoint.key_var for endpoint in capability_probe._ENDPOINTS.values()}
+    refused = {provider_key_var(pid) for pid in _DOCUMENTED_IDS if is_valid_provider_id(pid)}
+    assert reserved <= refused
+
+
+def test_litellm_id_itself_is_a_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(capability_probe._OPENER, "open", _no_network)
+    probe = probe_provider_capabilities(_spec(tmp_path, _entry(provider_id="litellm"), "litellm"))
+    assert "clé absente (LITELLM_API_KEY" in probe.note
 
 
 @pytest.mark.parametrize(
@@ -362,6 +395,44 @@ def test_verify_requires_base_url_and_forbidden_classes(tmp_path: Path) -> None:
     assert "providers.litellm_base_url_missing" in _verify(tmp_path, _entry(None))
     no_forbidden = _entry().replace('      forbidden_data_classes: ["secrets"]\n', "")
     assert "providers.hosted_forbidden_missing" in _verify(tmp_path, no_forbidden)
+
+
+@pytest.mark.parametrize(
+    ("base_url", "invalid"),
+    [
+        ("https://llm.example", False),
+        ("http://127.0.0.1:4000", False),
+        ("http://llm.example", True),
+        ("https://u:p@llm.example", True),
+        ("https://llm.example/?k=v", True),
+    ],
+)
+def test_verify_rejects_a_base_url_the_probe_would_refuse(tmp_path: Path, base_url: str, invalid: bool) -> None:
+    checks = _verify(tmp_path, _entry(base_url))
+    assert ("providers.litellm_base_url_invalid" in checks) is invalid
+    assert "providers.litellm_base_url_missing" not in checks
+
+
+def test_model_info_completes_listed_values_and_caps_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_secret("proxy", KEY_VAR, SECRET)
+    listed = {"data": [{"id": "claude-haiku", "context_window": 100000}, {"id": "qwen-coder"}]}
+    info = {
+        "data": [
+            {"model_name": "claude-haiku", "model_info": {"max_input_tokens": 200000, "supports_vision": True}},
+            {"model_name": "qwen-coder", "model_info": {"max_input_tokens": 10**12}},
+        ]
+    }
+    routes = {"https://llm.example/v1/models": listed, "https://llm.example/v1/model/info": info}
+    monkeypatch.setattr(capability_probe._OPENER, "open", _fake(routes))
+
+    probe = probe_provider_capabilities(_spec(tmp_path, _entry()))
+
+    haiku, qwen = probe.models
+    # /models garde sa valeur ; /model/info n'ajoute que ce qu'il est seul à porter.
+    assert dict(haiku.values) == {"context_window": 100000, "vision": True}
+    assert dict(qwen.values) == {}
+    assert coerce_capability("context_window", MAX_CONTEXT_WINDOW) == MAX_CONTEXT_WINDOW
+    assert coerce_capability("context_window", MAX_CONTEXT_WINDOW + 1) is None
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────

@@ -39,6 +39,8 @@ MODEL_CAPABILITIES: tuple[str, ...] = (
 ALL_CAPABILITIES: tuple[str, ...] = API_CAPABILITIES + MODEL_CAPABILITIES
 #: Seule capacité numérique (tokens) ; les autres sont des booléens.
 _INT_CAPABILITIES = frozenset({"context_window"})
+#: Plafond d'une valeur numérique lue (registre ou sonde) : au-delà, elle ne dit rien de plausible.
+MAX_CONTEXT_WINDOW = 100_000_000
 
 DECLARED = "declared"
 PROBED = "probed"
@@ -132,7 +134,7 @@ def coerce_capability(name: str, value: Any) -> CapabilityValue | None:
     ``tools: 1`` ne disent rien, ils restent inconnus plutôt que d'être devinés.
     """
     if name in _INT_CAPABILITIES:
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= MAX_CONTEXT_WINDOW:
             return None
         return value
     return value if isinstance(value, bool) else None

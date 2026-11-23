@@ -39,7 +39,9 @@ from urllib.parse import urlsplit
 from grimoire.core.fsio import atomic_write
 from grimoire.providers.audit import ollama_base_url
 from grimoire.providers.capabilities import (
+    DOCUMENTED_DEFAULTS,
     LITELLM,
+    PROVIDER_ALIASES,
     CapabilityPairs,
     CapabilityProbe,
     ProbedModel,
@@ -257,7 +259,7 @@ def _probe_local(provider: ProviderSpec) -> tuple[str, tuple[ProbedModel, ...]]:
     return f"{base_url}/api/tags", (*shown, *extra)
 
 
-def _gateway_base(raw: str | None) -> str:
+def admitted_gateway_url(raw: str | None) -> str:
     """La racine admise d'une passerelle, sans ``/`` final ni ``/v1`` ; vide si elle n'est pas admise.
 
     ``https://`` partout, ``http://`` vers une boucle locale seulement ; ni identifiants, ni requête, ni
@@ -301,16 +303,36 @@ def _litellm_info(base: str, headers: Mapping[str, str]) -> dict[str, Capability
     return found
 
 
+def _names_documented_provider(provider_id: str) -> bool:
+    """*provider_id* désigne-t-il, ou est-il l'alias d'un fournisseur documenté par le kit ?
+
+    Calculé sans ``provider_type`` : déclarer ``litellm`` ne change pas ce que l'id nomme, et la clé
+    rangée sous ce nom est celle du fournisseur documenté, pas celle d'une passerelle.
+    """
+    lowered = provider_id.strip().lower()
+    canonical = canonical_provider(provider_id)
+    if canonical == LITELLM:
+        return False
+    return lowered in PROVIDER_ALIASES or canonical in DOCUMENTED_DEFAULTS or canonical in _ENDPOINTS
+
+
+def _merged(listed: CapabilityPairs, detail: CapabilityPairs) -> CapabilityPairs:
+    """Les valeurs de ``/models``, complétées par celles de ``/model/info`` pour ce qu'elle seule porte."""
+    known = dict(listed)
+    return (*listed, *((name, value) for name, value in detail if name not in known))
+
+
 def _probe_litellm(provider: ProviderSpec, probed_at: str) -> CapabilityProbe:
     """Sonde d'une passerelle LiteLLM : ``/v1/models`` (liste), puis ``/v1/model/info`` (détail)."""
-    base = _gateway_base(provider.base_url)
+    if _names_documented_provider(provider.id):
+        note = "non mesuré : id d'un fournisseur documenté, refusé pour une passerelle (choisir un autre id)"
+        return CapabilityProbe(provider.id, False, note, probed_at)
+    base = admitted_gateway_url(provider.base_url)
     if not base:
         note = "non mesuré : base_url absente ou non admise (https://, ou http:// vers une boucle locale)"
         return CapabilityProbe(provider.id, False, note, probed_at)
+    # Les variables réservées (`_reserved_key_vars`) sont toutes celles d'un id refusé ci-dessus.
     endpoint = _Endpoint(f"{base}/v1/models", provider_key_var(provider.id), "bearer", store_only=True)
-    if endpoint.key_var in _reserved_key_vars():
-        note = f"non mesuré : variable de clé réservée à un autre fournisseur ({endpoint.key_var})"
-        return CapabilityProbe(provider.id, False, note, probed_at, endpoint.url)
     key = _key_value(provider.id, endpoint)
     if not key:
         note = f"non mesuré : clé absente ({endpoint.key_var}, voir `grimoire providers set-key`)"
@@ -321,7 +343,7 @@ def _probe_litellm(provider: ProviderSpec, probed_at: str) -> CapabilityProbe:
     except _ProbeError as exc:
         return CapabilityProbe(provider.id, False, f"non mesuré : LiteLLM {exc}", probed_at, endpoint.url)
     info = _litellm_info(base, headers)
-    models = tuple(ProbedModel(m.model_id, info.get(m.model_id, m.values)) for m in listed)
+    models = tuple(ProbedModel(m.model_id, _merged(m.values, info.get(m.model_id, ()))) for m in listed)
     detail = f", détail de {sum(m.model_id in info for m in listed)} par /model/info" if info else ""
     return CapabilityProbe(
         provider.id, True, f"{len(models)} modèle(s) listé(s){detail}", probed_at, endpoint.url, models
