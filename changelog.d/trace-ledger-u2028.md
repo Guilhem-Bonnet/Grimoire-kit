@@ -1,0 +1,1 @@
+- fix(traces): le journal de traces ne perd plus une ligne contenant U+2028 — `TraceLedger` découpe sur `\n` seulement au lieu de `splitlines()` (Refs #1277)
