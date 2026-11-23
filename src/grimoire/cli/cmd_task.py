@@ -1477,9 +1477,9 @@ register_approve_commands(task_app)
 from grimoire.cli.cmd_task_review import register_review_commands  # noqa: E402
 
 register_review_commands(task_app)
+from grimoire.cli.cmd_task_arbitrate import register_arbitrate_commands  # noqa: E402
 
-from grimoire.cli.cmd_task_arbitrate import register_arbitrate_commands as _register_arbitrate  # noqa: E402
-_register_arbitrate(task_app)  # GAO-r-le-arbitre-001 : `task arbitrate`, hors du module (cliquet de taille)
+register_arbitrate_commands(task_app)  # GAO-r-le-arbitre-001 : `task arbitrate`, hors du module (cliquet)
 
 from grimoire.cli.cmd_task_import import register_import_command  # noqa: E402
 
