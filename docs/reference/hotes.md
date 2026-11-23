@@ -24,7 +24,7 @@ projet (agents, standard, mémoire)
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
         ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
-        ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, GEMINI.md
+        ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, .agents/skills, GEMINI.md
         ├──▶ émetteur Cursor       → .cursor/{hooks.json,agents,skills,rules}
         └──▶ émetteur prose        → AGENTS.md
 ```
@@ -56,10 +56,10 @@ ajouté ou modifié une persona.
 |---|---|---|---|---|---|
 | Claude Code | oui | oui | oui | oui (`PreToolUse` capturé) | oui |
 | GitHub Copilot | oui | oui | oui | écrits, non vérifiés (`preToolUse`, `Stop` : advisory) | non |
-| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, capturé) | non (non prouvé) |
+| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, capturé ; fin de tour `session.idle` consultative) | non (non prouvé) |
 | Codex | oui (`.codex/agents/*.toml`) | oui (`.agents/skills/`) | non | consultatifs (documentés, approbation `/hooks`, non prouvés) | non |
 | Cursor | oui | oui | non | écrits, non vérifiés (`preToolUse`, `beforeShellExecution` : advisory) | non |
-| Gemini CLI | oui | non | oui | écrits, non vérifiés (`BeforeTool`, `BeforeAgent` : advisory ; fin de tour sans refus documenté) | non |
+| Gemini CLI | oui | oui (`.agents/skills/`, lu aussi par Antigravity) | oui | écrits, non vérifiés (`BeforeTool`, `BeforeAgent` : advisory ; fin de tour sans refus documenté) | non |
 
 « Hooks bloquants : oui » exige une capture réelle d'un refus sur l'hôte, versée
 sous `tests/fixtures/hosts/<hôte>/` et nommée par le profil
@@ -80,8 +80,10 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   écrites dans le hook `PreToolUse`, avec la même formulation de refus. Ses
   journaux (#1280) ne montrent que des entrées de hook, aucun refus : garde et
   gate de clôture restent `advisory` tant qu'un refus n'est pas capturé.
-- opencode n'a ni table de permissions prouvée ni autre hook sondé que
-  `tool.execute.before` : exécution, écriture et lecture de secrets passent par
+- opencode n'a pas de table de permissions prouvée. Le plugin câble deux
+  événements : `tool.execute.before` (garde prouvée) et `session.idle` (fin de
+  tour, consultative : la décision de clôture est journalisée, rien ne la
+  refuse ; voir « opencode et Gemini CLI » ci-dessous). Exécution, écriture et lecture de secrets passent par
   le plugin `.opencode/plugin/grimoire-guard.js` (même décision, même
   formulation de refus) ; une décision `ask` y est refusée avec son motif, un
   plugin ne pouvant pas interroger l'utilisateur ; si `grimoire-hook` est
@@ -94,10 +96,11 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   aucune capture), donc `advisory` ; pas de blocage au début de session
   (`SessionStart` n'est que consultatif), fin de tour non vérifiée
   (`AfterAgent`/`SessionEnd` reçoivent la décision de clôture mais aucun verdict
-  bloquant n'est promis), aucune session d'agent détachée documentée, et pas de
-  chargement de compétences à la demande (leurs corps sont copiés sous
-  `_grimoire/hosts/skills/`). Les règles de permissions sont écrites dans le hook
-  `BeforeTool`, faute de table déclarative.
+  bloquant n'est promis) et aucune session d'agent détachée documentée. Les
+  règles de permissions sont écrites dans le hook `BeforeTool`, faute de table
+  déclarative. Sous Antigravity, seuls `GEMINI.md` et les compétences de
+  `.agents/skills/` s'appliquent : ses hooks, agents et serveurs MCP ne sont pas
+  émis (dégradations `antigravity hooks`, `antigravity agents`, `antigravity mcp`).
 - Codex écrit des hooks, des compétences, des sous-agents et un serveur MCP
   (détail dans « Codex » ci-dessous). Ses hooks restent **consultatifs** : un hook
   de projet ne s'exécute qu'après approbation via `/hooks`, et aucun refus n'a été
@@ -211,6 +214,57 @@ Si le kit est installé dans le venv du projet, la commande de hook s'écrit
 depuis la racine git (`"$(git rev-parse --show-toplevel)"/.venv/bin/grimoire-hook`),
 forme que la page des hooks donne en exemple : Codex lance ses hooks dans le
 dossier courant de la session, qui peut être un sous-dossier.
+
+## opencode et Gemini CLI
+
+Sources relues le 2026-11-22 :
+[Gemini CLI — Skills](https://geminicli.com/docs/cli/skills/),
+[Creating skills](https://geminicli.com/docs/cli/creating-skills/),
+[Subagents](https://geminicli.com/docs/core/subagents/),
+[accueil de la doc](https://geminicli.com/docs/) (bascule vers Antigravity CLI le
+18 juin 2026 pour les comptes gratuits et Google One) ;
+[Antigravity — Customization discovery](https://antigravity.google/docs/customization-discovery),
+[Skills](https://antigravity.google/docs/skills),
+[Hooks](https://antigravity.google/docs/hooks) ;
+[opencode V1 — Plugins](https://opencode.ai/docs/en/plugins/),
+[Agents](https://opencode.ai/docs/en/agents/),
+[V2 — Server plugins](https://opencode.ai/docs/build/plugins/server).
+
+| Hôte | Fichier | Contenu |
+|---|---|---|
+| Gemini CLI | `.agents/skills/<slug>/SKILL.md` | `name` (égal au dossier) et `description`, puis le corps ; alias documenté de `.gemini/skills/`, qu'il prime, activé à la demande (`activate_skill`) |
+| Gemini CLI | `.gemini/agents/<nom>.md` | `model` seulement si `dispatch.models.gemini.<palier>` le nomme ; sinon `inherit` (défaut documenté : modèle de la session) |
+| Antigravity | `.agents/skills/`, `GEMINI.md` | les mêmes fichiers : Antigravity lit `.agents/skills/<nom>/SKILL.md` et prend `GEMINI.md` pour une règle |
+| opencode | `.opencode/agent/<nom>.md` | `model` (`provider/model-id`) seulement si `dispatch.models.opencode.<palier>` le nomme ; sinon un sous-agent hérite du modèle de l'agent principal |
+| opencode | `.opencode/plugin/grimoire-guard.js` | en plus de la garde `tool.execute.before`, un gestionnaire `event` qui, sur `session.idle`, lance `grimoire-hook --host opencode --event Stop` et journalise le refus de clôture par `client.app.log` (niveau `warn`) |
+
+**Un dossier, trois lecteurs.** Codex, Gemini CLI et Antigravity lisent tous
+`.agents/skills/`. Les émetteurs Codex et Gemini y écrivent le même octet (même
+frontmatter, même liste de compétences) et possèdent le même motif : synchronisés
+ensemble, aucun ne retire le fichier de l'autre, et une compétence écrite à la
+main dans ce dossier reste à vous. Les anciennes copies
+`_grimoire/hosts/skills/*.md` ne sont plus écrites pour Gemini ; elles restent sur
+le disque, car Cursor (repli) et les hôtes en prose utilisent ce dossier.
+
+**Fin de tour opencode : consultative.** La doc V1 liste `session.idle` parmi les
+événements de session, sans aucun moyen de refuser la fin d'un tour ni de relancer
+l'agent ; les hooks serveur de la V2 n'en documentent pas davantage. Le kit
+déclare donc `stop` comme déclenché (`hook_events`) mais jamais bloquant :
+`HostProfile.blocking_events` d'opencode se limite à `pre_tool_use`, la matrice
+rend `hook:stop` `advisory`, et le refus sort en `systemMessage` au lieu de
+`decision: block`. Observé le 22 novembre 2026 sur opencode 1.17.11, avec un
+fournisseur local factice (`tests/fixtures/hosts/opencode/02-session-idle-stop-advisory.json`) :
+`session.idle` arrive à la fin du tour avec `properties.sessionID`, le plugin
+journalise le verdict, et le tour se termine quand même. Ce n'est pas une capture
+de refus : elle ne figure pas dans `blocking_captures`.
+
+**Antigravity : le minimum.** Antigravity documente aussi des hooks dans
+`.agents/hooks.json` (`PreToolUse` avec `decision: deny`, `Stop` avec
+`decision: continue`), des agents dans `.agents/agents/` et des serveurs MCP dans
+`.agents/mcp_config.json`. Le kit n'a ni dialecte de hook ni capture pour cet
+hôte, et ne lit pas `.gemini/settings.json` sous Antigravity : rien de cela n'est
+émis, et chaque surface est une dégradation déclarée. Sous Antigravity, aucune
+garde ne tourne ; la CI reste l'autorité.
 
 ## Ce que le kit a observé (contrats réels)
 
@@ -655,12 +709,11 @@ variable de racine par Gemini CLI.
 
 Le reste de la surface suit : `.gemini/commands/grimoire/*.toml` (champ
 `prompt` requis, `{{args}}` pour les arguments), `.gemini/agents/*.md` avec le
-frontmatter de l'hôte (`name`, `description`, `tools`, `max_turns` ; `model`
-n'est pas émis, faute de correspondance documentée entre l'affinité neutre du
-kit et un nom de modèle), et `GEMINI.md` réduit à un bloc court portant les
-imports `@` des fichiers de mémoire présents. Les compétences, sans chargement
-à la demande sur cet hôte, sont copiées sous `_grimoire/hosts/skills/` et
-listées là. Les chemins émis sont gérés par les mêmes mécanismes que les autres
+frontmatter de l'hôte (`name`, `description`, `tools`, `max_turns`, et `model`
+pour le seul palier que `dispatch.models.gemini` traduit), et `GEMINI.md` réduit
+à un bloc court portant les imports `@` des fichiers de mémoire présents. Les
+compétences sont écrites au format natif dans `.agents/skills/<slug>/SKILL.md`
+(voir « opencode et Gemini CLI »). Les chemins émis sont gérés par les mêmes mécanismes que les autres
 émetteurs (marqueur et empreinte, conflits `edited`/`foreign`, nettoyage des
 fichiers périmés) ; `grimoire doctor` et `grimoire host probe` les contrôlent
 comme ceux des autres hôtes.

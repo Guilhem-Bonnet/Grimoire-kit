@@ -451,6 +451,13 @@ def render(decision: Decision, hook: HookInput, host_id: HostId) -> dict[str, An
             payload["decision"] = "block"
             payload["reason"] = decision.reason
             return payload
+        if decision.outcome is Outcome.BLOCK and decision.reason:
+            # Hôte qui ne sait pas refuser la fin de tour (opencode : `session.idle`) :
+            # le refus de clôture devient un message, journalisé par l'hôte, jamais tu —
+            # son contexte compris, que personne ne lirait ailleurs sur un `stop`.
+            parts = [decision.reason, decision.context] if decision.context else [decision.reason]
+            payload["systemMessage"] = "\n\n".join(parts)
+            return payload
         if decision.context:
             specific["additionalContext"] = decision.context
             payload["hookSpecificOutput"] = specific
