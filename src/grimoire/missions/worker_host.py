@@ -352,6 +352,8 @@ class OpencodeWorkerHost:
         route = spec.opencode
         if route is None:
             return "worker opencode sans fournisseur résolu"
+        if spec.kit_home is None:
+            return "worker opencode sans HOME du kit"
         if spec.permission_mode not in OPENCODE_PERMISSION_ARGS:
             known = ", ".join(OPENCODE_PERMISSION_ARGS)
             return f"mode de permission {spec.permission_mode!r} sans traduction pour opencode (admis : {known})"
@@ -372,15 +374,14 @@ class OpencodeWorkerHost:
         return LaunchPlan(tuple(argv), tuple(env.items()), secret_keys, detached=True)
 
     @staticmethod
-    def probe_env(route: OpencodeRoute | None, kit_home: Path | None) -> dict[str, str]:
+    def probe_env(route: OpencodeRoute | None, kit_home: Path) -> dict[str, str]:
         """L'environnement minimal d'une commande opencode, sans la clé (:func:`.worker_guard.minimal_env`)."""
         from grimoire.missions.worker_guard import kit_dirs, minimal_env
 
         extra = {**session_env(), "OPENCODE_DISABLE_AUTOUPDATE": "1"}
         if route is not None:
             extra["OPENCODE_CONFIG_CONTENT"] = route.inline_config()
-        if kit_home is not None:
-            extra.update(kit_dirs(kit_home))
+        extra.update(kit_dirs(kit_home))
         env = minimal_env(extra)
         for name in OPENCODE_FORBIDDEN_ENV:
             env.pop(name, None)
@@ -424,7 +425,7 @@ class OpencodeWorkerHost:
 
     # -- garde -----------------------------------------------------------------
 
-    def guard_refusal(self, cwd: Path, route: OpencodeRoute, *, kit_home: Path | None = None) -> str:
+    def guard_refusal(self, cwd: Path, route: OpencodeRoute, *, kit_home: Path) -> str:
         """``""`` si la garde du kit tient pour un worker opencode dans *cwd* ; sinon un motif fixe (jamais une sortie).
 
         Dans l'ordre, et rien d'opencode ne tourne avant que les deux premiers tiennent :

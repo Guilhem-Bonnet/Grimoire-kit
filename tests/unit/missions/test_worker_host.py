@@ -422,7 +422,9 @@ ROUTE = OpencodeRoute(
 
 def test_opencode_plan_la_cle_ne_passe_que_par_l_environnement(projet: Path) -> None:
     plan = OpencodeWorkerHost().plan(
-        SessionSpec(name="grimoire-T", prompt="consigne", permission_mode="acceptEdits", opencode=ROUTE)
+        SessionSpec(
+            name="grimoire-T", prompt="consigne", permission_mode="acceptEdits", opencode=ROUTE, kit_home=Path("/kit")
+        )
     )
     assert isinstance(plan, LaunchPlan)
     assert plan.argv == (
@@ -456,7 +458,9 @@ def test_opencode_plan_la_cle_ne_passe_que_par_l_environnement(projet: Path) -> 
     [("plan", ("--agent", "plan")), ("bypassPermissions", ("--dangerously-skip-permissions",)), ("dontAsk", ())],
 )
 def test_opencode_traduit_le_mode_de_permission(projet: Path, mode: str, args: tuple[str, ...]) -> None:
-    plan = OpencodeWorkerHost().plan(SessionSpec(name="n", prompt="p", permission_mode=mode, opencode=ROUTE))
+    plan = OpencodeWorkerHost().plan(
+        SessionSpec(name="n", prompt="p", permission_mode=mode, opencode=ROUTE, kit_home=Path("/kit"))
+    )
     assert isinstance(plan, LaunchPlan)
     assert plan.argv[-2 - len(args) : -2] == args and plan.argv[-2:] == ("--", "p")
 
@@ -464,16 +468,22 @@ def test_opencode_traduit_le_mode_de_permission(projet: Path, mode: str, args: t
 def test_opencode_refuse_un_mode_sans_traduction_ou_sans_route_ou_sans_cle(tmp_path: Path) -> None:
     host = OpencodeWorkerHost()
     assert "sans traduction" in str(
-        host.plan(SessionSpec(name="n", prompt="p", permission_mode="yolo", opencode=ROUTE))
+        host.plan(SessionSpec(name="n", prompt="p", permission_mode="yolo", opencode=ROUTE, kit_home=Path("/kit")))
     )
     assert "sans fournisseur" in str(host.plan(SessionSpec(name="n", prompt="p", permission_mode="default")))
-    assert "clé absente" in str(host.plan(SessionSpec(name="n", prompt="p", permission_mode="default", opencode=ROUTE)))
+    no_home = SessionSpec(name="n", prompt="p", permission_mode="default", opencode=ROUTE)
+    assert "sans HOME du kit" in str(host.plan(no_home))
+    assert "clé absente" in str(
+        host.plan(SessionSpec(name="n", prompt="p", permission_mode="default", opencode=ROUTE, kit_home=Path("/kit")))
+    )
 
 
 def test_opencode_reprise_et_fournisseur_local(projet: Path) -> None:
     local = OpencodeRoute("ollama", "ollama", "qwen3-coder", base_url="http://localhost:11434/v1")
     plan = OpencodeWorkerHost().plan(
-        SessionSpec(name="n", prompt="p", permission_mode="default", resume="ses_1", opencode=local)
+        SessionSpec(
+            name="n", prompt="p", permission_mode="default", resume="ses_1", opencode=local, kit_home=Path("/kit")
+        )
     )
     assert isinstance(plan, LaunchPlan)
     assert plan.argv[4:8] == ("--session", "ses_1", "--model", "ollama/qwen3-coder") and "--title" not in plan.argv
@@ -560,16 +570,18 @@ def _plugin(wt: Path, text: str = KIT_PLUGIN) -> None:
 
 def test_garde_prouvee_par_debug_config(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
     host = fake.host()
-    assert host.guard_refusal(tmp_path, ROUTE) == ""  # plugin absent : réécrit depuis l'émetteur, puis prouvé
+    assert (
+        host.guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit") == ""
+    )  # plugin absent : réécrit depuis l'émetteur, puis prouvé
     assert (tmp_path / PLUGIN).read_text(encoding="utf-8") == KIT_PLUGIN
     debug = [(a, e) for a, _c, e, _s in fake.runs if a[:3] == ["opencode", "debug", "config"]]
     assert debug and all(SECRET not in json.dumps(e) for _a, e in debug)  # jamais la clé
     fake.loaded = False
-    assert "ne charge pas" in host.guard_refusal(tmp_path, ROUTE)
+    assert "ne charge pas" in host.guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
     fake.loaded, fake.extra_plugins = True, ["file:///ailleurs/autre.js"]
-    assert "garde non exclusive" in host.guard_refusal(tmp_path, ROUTE)
+    assert "garde non exclusive" in host.guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
     fake.extra_plugins, fake.base_url = [], "https://exemple.invalid/v1"
-    assert "ne pointe pas" in host.guard_refusal(tmp_path, ROUTE)
+    assert "ne pointe pas" in host.guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
 
 
 def test_le_motif_ne_recopie_jamais_la_sortie_de_debug_config(
@@ -577,7 +589,7 @@ def test_le_motif_ne_recopie_jamais_la_sortie_de_debug_config(
 ) -> None:
     """M2 : la sortie de ``debug config`` résout ``{env:VAR}`` en clair ; le motif est fixe."""
     fake.debug_fails = True
-    motif = fake.host().guard_refusal(tmp_path, ROUTE)
+    motif = fake.host().guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
     assert "a échoué (sortie 1)" in motif and SECRET not in motif and "illisible" not in motif
 
 
@@ -592,11 +604,19 @@ def test_debug_config_illisible(tmp_path: Path, plugin_ready: None) -> None:
 
         return run
 
-    assert "illisible" in OpencodeWorkerHost(runner=runner("pas du json")).guard_refusal(tmp_path, ROUTE)
-    assert "illisible" in OpencodeWorkerHost(runner=runner("[]")).guard_refusal(tmp_path, ROUTE)
-    assert "ne charge pas" in OpencodeWorkerHost(runner=runner('{"plugin": "x"}')).guard_refusal(tmp_path, ROUTE)
+    assert "illisible" in OpencodeWorkerHost(runner=runner("pas du json")).guard_refusal(
+        tmp_path, ROUTE, kit_home=tmp_path / "kit"
+    )
+    assert "illisible" in OpencodeWorkerHost(runner=runner("[]")).guard_refusal(
+        tmp_path, ROUTE, kit_home=tmp_path / "kit"
+    )
+    assert "ne charge pas" in OpencodeWorkerHost(runner=runner('{"plugin": "x"}')).guard_refusal(
+        tmp_path, ROUTE, kit_home=tmp_path / "kit"
+    )
     path_only = json.dumps({"plugin": [str(tmp_path / PLUGIN)], "provider": {"deepseek": {"options": "x"}}})
-    assert "ne pointe pas" in OpencodeWorkerHost(runner=runner(path_only)).guard_refusal(tmp_path, ROUTE)
+    assert "ne pointe pas" in OpencodeWorkerHost(runner=runner(path_only)).guard_refusal(
+        tmp_path, ROUTE, kit_home=tmp_path / "kit"
+    )
 
 
 # ── B1 : rien d'opencode ne tourne avant l'intégrité ────────────────────────────
@@ -624,7 +644,7 @@ def test_integrite_refusee_sans_lancer_opencode(
     target = tmp_path / relpath
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
-    assert expected in fake.host().guard_refusal(tmp_path, ROUTE)
+    assert expected in fake.host().guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
     assert fake.runs == []  # ni opencode, ni programme de garde
 
 
@@ -633,14 +653,14 @@ def test_integrite_admet_le_manifeste_qu_opencode_pose(tmp_path: Path, fake: Fak
     (tmp_path / ".opencode" / "package.json").write_text('{"dependencies": {"@opencode-ai/plugin": "1.17.11"}}')
     (tmp_path / ".opencode" / "node_modules" / "x").mkdir(parents=True)
     (tmp_path / ".opencode" / "node_modules" / "x" / "index.js").write_text("module.exports = 1\n")
-    assert fake.host().guard_refusal(tmp_path, ROUTE) == ""
+    assert fake.host().guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit") == ""
 
 
 def test_un_plugin_de_garde_modifie_est_reecrit_depuis_l_emetteur(
     tmp_path: Path, fake: FakeOpencode, plugin_ready: None
 ) -> None:
     _plugin(tmp_path, KIT_PLUGIN.replace("grimoire-hook", "autre-programme"))
-    assert fake.host().guard_refusal(tmp_path, ROUTE) == ""
+    assert fake.host().guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit") == ""
     assert (tmp_path / PLUGIN).read_text(encoding="utf-8") == KIT_PLUGIN
     assert fake.runs[0][0][0] == "grimoire-hook"  # le programme lu dans le plugin réécrit
 
@@ -723,13 +743,13 @@ def test_definitions_d_agents_du_worktree_refusees(
 ) -> None:
     (tmp_path / relpath).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / relpath).write_text("---\nmodel: autre/modele\npermission:\n  bash: allow\n---\n")
-    assert "définitions d'agents" in fake.host().guard_refusal(tmp_path, ROUTE)
+    assert "définitions d'agents" in fake.host().guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
     assert fake.runs == []
 
 
 def test_debug_config_sans_agents_ni_commandes(tmp_path: Path, fake: FakeOpencode, plugin_ready: None) -> None:
     fake.resolved_extra = {"agent": {"build": {"permission": {"bash": "allow"}}}}
-    assert "agents, des modes ou des commandes" in fake.host().guard_refusal(tmp_path, ROUTE)
+    assert "agents, des modes ou des commandes" in fake.host().guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
 
 
 def test_sans_plugin_attendu_rien_ne_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -754,7 +774,7 @@ def test_un_programme_de_garde_qui_laisse_passer_bloque_le_lancement(
     tmp_path: Path, fake: FakeOpencode, plugin_ready: None, decision: str, expected: str
 ) -> None:
     fake.hook_decision = decision
-    assert expected in fake.host().guard_refusal(tmp_path, ROUTE)
+    assert expected in fake.host().guard_refusal(tmp_path, ROUTE, kit_home=tmp_path / "kit")
     assert fake.opencode_calls() == []
     ((argv, cwd, _env, stdin),) = fake.runs
     assert argv == ["grimoire-hook", "--host", "opencode", "--event", "PreToolUse"] and cwd == tmp_path
@@ -926,7 +946,7 @@ def test_identite_par_titre_et_dossier(tmp_path: Path, fake: FakeOpencode) -> No
 
     host = fake.host()
     kit = tmp_path / "kit"
-    assert prepare_opencode_home(kit) == ""
+    assert prepare_opencode_home(kit, fresh=True) == ""
     fake.sessions = [
         {"id": "ses_a", "title": "grimoire-T", "directory": str(tmp_path)},
         {"id": "ses_b", "title": "grimoire-T", "directory": "/ailleurs"},
@@ -956,14 +976,17 @@ def test_dossier_du_kit_hors_de_tout_depot(tmp_path: Path, monkeypatch: pytest.M
     assert root not in home.parents and home.parent.name == "opencode"
     assert opencode_home(root, source={"XDG_CACHE_HOME": str(tmp_path / "c")}).is_relative_to(tmp_path / "c")
     assert "dans un dépôt git" in prepare_opencode_home(root / "sous" / "kit")
-    assert prepare_opencode_home(tmp_path / "kit") == "" and (probe_dir(tmp_path / "kit") / ".git").exists()
-    assert prepare_opencode_home(tmp_path / "kit") == ""  # déjà prêt
+    assert prepare_opencode_home(tmp_path / "kit", fresh=True) == ""
+    assert (probe_dir(tmp_path / "kit") / ".git").exists()
+    assert prepare_opencode_home(tmp_path / "kit") == ""  # la reprise du même worker
+    assert "existe déjà" in prepare_opencode_home(tmp_path / "kit", fresh=True)  # jamais réutilisé pour un lancement
+    assert "introuvable" in prepare_opencode_home(tmp_path / "absent")
     (probe_dir(tmp_path / "kit") / "opencode.json").write_text("{}")
     assert "dossier de sondes" in probe_refusal(probe_dir(tmp_path / "kit"))
     monkeypatch.setattr(
         "grimoire.missions.worker_guard.subprocess.run", lambda *_a, **_k: type("R", (), {"returncode": 1})()
     )
-    assert "non initialisé" in prepare_opencode_home(tmp_path / "kit2")
+    assert "non initialisé" in prepare_opencode_home(tmp_path / "kit2", fresh=True)
 
 
 def test_etat_vivant_muet_fini(tmp_path: Path, fake: FakeOpencode) -> None:
@@ -1385,17 +1408,82 @@ def test_un_plugin_temoin_du_home_reel_ne_s_execute_jamais(
     assert len(homes) == 1 and "grimoire-kit" in homes.pop()
 
 
-def test_un_plugin_temoin_dans_le_home_du_kit_bloque_avant_toute_commande(
+def _during_version(fake: FakeOpencode, act: Any) -> None:
+    """Exécute *act(env)* juste après ``opencode --version`` : entre la garde et le lancement d'``opencode run``."""
+    original = fake.runner
+
+    def runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str], stdin: str) -> Any:
+        result = original(argv, cwd, env, stdin)
+        if list(argv[1:]) == ["--version"]:
+            act(env)
+        return result
+
+    fake.runner = runner  # type: ignore[method-assign]
+
+
+def test_un_plugin_depose_entre_la_garde_et_le_lancement_ne_s_execute_jamais(
     projet: Path, fake: FakeOpencode, plugin_ready: None, tmp_path: Path
 ) -> None:
+    """R1 : course entre le contrôle et ``opencode run`` ; le contrôle d'avant lancement l'arrête."""
+    marker = tmp_path / "marqueur-course"
+    _during_version(fake, lambda env: _witness(Path(env["HOME"]) / ".opencode" / "plugin" / "w.js", marker))
+    outcome = launch(projet, fake, ready(projet))
+    assert outcome.status == "skipped" and "dossier du kit" in outcome.detail
+    assert not marker.exists() and fake.spawned == []
+
+
+def test_un_dossier_de_sondes_pollue_refuse_le_lancement(projet: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+    """R2 : le dossier de sondes est revérifié avant le lancement ; aucune session vouée à l'abandon."""
+    _during_version(fake, lambda env: (Path(env["HOME"]) / "work" / ".opencode").mkdir())
+    outcome = launch(projet, fake, ready(projet))
+    assert outcome.status == "skipped" and "dossier de sondes" in outcome.detail and fake.spawned == []
+
+
+def test_chaque_lancement_a_son_home_du_kit(projet: Path, fake: FakeOpencode, plugin_ready: None) -> None:
     from grimoire.missions.worker_guard import opencode_home
 
-    marker = tmp_path / "marqueur-kit"
-    _witness(opencode_home(projet) / ".opencode" / "plugin" / "w.js", marker)
-    tid = ready(projet)
-    outcome = launch(projet, fake, tid)
-    assert outcome.status == "skipped" and "dossier du kit" in outcome.detail
-    assert not marker.exists() and fake.opencode_calls() == [] and fake.spawned == []
+    first, second = ready(projet, "une"), ready(projet, "deux")
+    assert launch(projet, fake, first).status == "launched"
+    assert launch(projet, fake, second).status == "launched"
+    payloads = launched_sessions(TaskService(projet))
+    homes = {payloads[t]["kit_home"] for t in (first, second)}
+    assert len(homes) == 2 and all(Path(h).parent == opencode_home(projet) for h in homes)
+    assert {e["HOME"] for *_x, e, _l in fake.spawned} == homes
+
+
+def test_la_reprise_reprend_le_home_de_son_worker(projet: Path, fake: FakeOpencode, plugin_ready: None) -> None:
+    tid = _launched(projet, fake)
+    service = TaskService(projet)
+    payload = launched_sessions(service)[tid]
+    result = resume_worker(service, fake, "claude", tid, payload, "m", opencode=fake.host())
+    assert result.returncode == 0 and fake.spawned[-1][2]["HOME"] == payload["kit_home"]
+    resumed = [e for e in service.ledger.events_for(tid) if e.event_type == WORKER_RESUMED_EVENT][-1]
+    assert resumed.payload["kit_home"] == payload["kit_home"]
+    missing = {k: v for k, v in payload.items() if k != "kit_home"}
+    refused = resume_worker(service, fake, "claude", tid, missing, "m", opencode=fake.host())
+    assert refused.returncode == 1 and "sans HOME du kit" in refused.stderr
+
+
+def test_la_reprise_revérifie_juste_avant_le_lancement(
+    projet: Path, fake: FakeOpencode, plugin_ready: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tid = _launched(projet, fake)
+    service = TaskService(projet)
+    spawned = len(fake.spawned)
+    monkeypatch.setattr("grimoire.missions.worker_lifecycle.pre_start_refusal", lambda *_a: "altéré")
+    result = resume_worker(service, fake, "claude", tid, launched_sessions(service)[tid], "m", opencode=fake.host())
+    assert result.returncode == 1 and "altéré" in result.stderr and len(fake.spawned) == spawned
+
+
+@pytest.mark.skipif(os.name != "posix", reason="liens symboliques POSIX")
+def test_un_lien_symbolique_du_compte_sur_le_chemin_du_home_est_refuse(tmp_path: Path) -> None:
+    from grimoire.missions.worker_guard import pre_start_refusal, prepare_opencode_home
+
+    real = tmp_path / "reel"
+    real.mkdir()
+    (tmp_path / "lien").symlink_to(real)
+    assert "lien symbolique" in prepare_opencode_home(tmp_path / "lien" / "kit", fresh=True)
+    assert "lien symbolique" in pre_start_refusal(tmp_path, tmp_path / "lien" / "kit")
 
 
 def test_un_plugin_temoin_du_worktree_bloque_le_lancement_et_la_reprise(

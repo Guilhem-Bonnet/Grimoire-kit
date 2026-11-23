@@ -28,6 +28,8 @@ import hashlib
 import json
 import os
 import re
+import secrets
+import stat
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -44,7 +46,9 @@ __all__ = [
     "integrity_refusal",
     "kit_dirs",
     "minimal_env",
+    "new_opencode_home",
     "opencode_home",
+    "pre_start_refusal",
     "prepare_opencode_home",
     "probe_dir",
     "probe_refusal",
@@ -80,7 +84,6 @@ ENV_ALLOWED = (
     "TMP",
     "SSH_AUTH_SOCK",
     "VIRTUAL_ENV",
-    "XDG_RUNTIME_DIR",
     "SYSTEMROOT",
 )
 #: La charge témoin du hook : une commande destructive que la politique du kit refuse dans tous les profils. Elle
@@ -163,15 +166,56 @@ def probe_dir(home: Path) -> Path:
     return home / "work"
 
 
-def prepare_opencode_home(home: Path) -> str:
-    """Crée le ``HOME`` du kit et son dossier de sondes ; ``""`` ou la raison d'un refus.
+def new_opencode_home(root: Path, task_id: str, *, source: Mapping[str, str] | None = None) -> Path:
+    """Un ``HOME`` du kit neuf pour un seul lancement : ``<racine du projet>/<id de tâche>-<nonce>``, jamais partagé.
 
-    Refusé si le dossier est dans un dépôt git : la découverte d'opencode remonterait jusqu'à la racine de ce dépôt.
+    Sa base de sessions y vit : la reprise du même worker réutilise ce dossier (noté au ledger), aucun autre worker.
     """
-    for parent in (home, *home.parents):
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", task_id)[:64] or "tache"
+    return opencode_home(root, source=source) / f"{safe}-{secrets.token_hex(8)}"
+
+
+def _symlink_refusal(home: Path) -> str:
+    """Un lien symbolique sur le chemin de *home* n'est admis que s'il appartient au superutilisateur (``/var`` sous
+    macOS, ``/home`` sur certains systèmes) : un lien posé par le compte du worker est refusé."""
+    current = Path(home.absolute().anchor)
+    for part in home.absolute().parts[1:]:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            return ""  # la suite du chemin n'existe pas encore : elle sera créée par le kit
+        except OSError:
+            return "chemin du dossier du kit illisible"
+        if stat.S_ISLNK(info.st_mode) and info.st_uid != 0:
+            return "lien symbolique sur le chemin du dossier du kit"
+    return ""
+
+
+def prepare_opencode_home(home: Path, *, fresh: bool = False) -> str:
+    """Prépare le ``HOME`` du kit et son dossier de sondes ; ``""`` ou la raison d'un refus.
+
+    *fresh* : le dossier ne doit pas exister (un lancement) ; sinon il doit exister (la reprise du même worker).
+    Refusé si un lien symbolique du compte est sur son chemin, ou s'il est dans un dépôt git : la découverte
+    d'opencode remonterait jusqu'à la racine de ce dépôt.
+    """
+    if refusal := _symlink_refusal(home):
+        return refusal
+    resolved = home.resolve()
+    for parent in (resolved, *resolved.parents):
         if (parent / ".git").exists():
             return "le dossier du kit pour opencode est dans un dépôt git"
-    work = probe_dir(home)
+    if fresh:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        if refusal := _symlink_refusal(home):
+            return refusal
+        try:
+            resolved.mkdir(mode=0o700)
+        except FileExistsError:
+            return "le dossier du kit de ce lancement existe déjà"
+    elif not resolved.is_dir():
+        return "dossier du kit de ce worker introuvable"
+    work = probe_dir(resolved)
     work.mkdir(parents=True, exist_ok=True)
     if not (work / ".git").exists():
         done = subprocess.run(  # git, arguments fixes : un dépôt vide qui borne la découverte d'opencode
@@ -184,6 +228,11 @@ def prepare_opencode_home(home: Path) -> str:
         if done.returncode != 0:
             return "dossier de sondes opencode non initialisé"
     return ""
+
+
+def pre_start_refusal(cwd: Path, kit_home: Path) -> str:
+    """Le dernier contrôle, juste avant le lancement d'``opencode run`` : worktree, ``HOME`` du kit et sondes."""
+    return _symlink_refusal(kit_home) or integrity_refusal(cwd, kit_home=kit_home) or probe_refusal(probe_dir(kit_home))
 
 
 def minimal_env(extra: Mapping[str, str], *, source: Mapping[str, str] | None = None) -> dict[str, str]:

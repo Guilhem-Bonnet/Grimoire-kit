@@ -708,9 +708,15 @@ dispatch:
 - **`HOME` du kit** : opencode charge des plugins sous `$HOME/.opencode/` et lit configuration, sessions,
   authentifications et cache sous les dossiers XDG. Pour toute commande opencode du worker, `HOME` et
   `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` pointent sous un dossier du kit, hors de
-  tout dépôt : `~/.cache/grimoire-kit/opencode/<empreinte du projet>/`.
-  - Avant chaque commande, ce dossier est contrôlé : aucun plugin, agent, mode, commande, configuration non vide
-    ni fichier d'authentification.
+  tout dépôt : `~/.cache/grimoire-kit/opencode/<empreinte du projet>/<id de tâche>-<nonce>/`.
+  - Ce dossier est neuf à chaque lancement et n'est jamais partagé entre workers. Seule la reprise du même worker
+    le réutilise (il est noté au lancement) : sa base de sessions y vit, c'est là que `session list` retrouve la
+    session.
+  - Avant chaque commande, puis une dernière fois juste avant `opencode run`, ce dossier, son dossier de sondes et
+    le worktree sont contrôlés. Rien n'y doit apparaître : ni plugin, agent, mode ou commande, ni configuration
+    non vide, ni fichier d'authentification.
+  - Un lien symbolique posé par le compte sur son chemin est refusé. Un lien du superutilisateur (`/var` sous
+    macOS) est admis.
   - Les commandes qui ne visent pas le worktree (`--version`, `session list`) tournent dans un dépôt git vide de
     ce dossier. Sa racine borne la découverte d'opencode : le dépôt principal reste hors champ.
   - Le worker reçoit `GH_CONFIG_DIR` (le dossier `gh` d'origine) et `GIT_CONFIG_GLOBAL` (`~/.gitconfig`, à défaut

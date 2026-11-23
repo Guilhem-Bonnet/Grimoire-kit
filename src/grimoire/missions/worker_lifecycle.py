@@ -37,7 +37,7 @@ from grimoire.missions.launcher import (
     attest_session,
 )
 from grimoire.missions.schemas import TaskState
-from grimoire.missions.worker_guard import opencode_home, prepare_opencode_home
+from grimoire.missions.worker_guard import new_opencode_home, pre_start_refusal, prepare_opencode_home
 from grimoire.missions.worker_host import OPENCODE_HOST, OpencodeWorkerHost, SessionSpec, opencode_route, worker_log
 
 if TYPE_CHECKING:
@@ -89,9 +89,9 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
     if route is None:
         return launcher._deferred(tid, f"worker opencode sans route : {why}")
     name = f"grimoire-{tid}"
-    kit_home = opencode_home(service.home_root)
-    # La garde passe avant toute commande opencode : rien d'opencode ne tourne sur un worktree non vérifié.
-    if guard := prepare_opencode_home(kit_home) or host.guard_refusal(wt.path, route, kit_home=kit_home):
+    # Un HOME du kit neuf pour ce seul lancement ; la garde passe avant toute commande opencode.
+    kit_home = new_opencode_home(service.home_root, tid)
+    if guard := prepare_opencode_home(kit_home, fresh=True) or host.guard_refusal(wt.path, route, kit_home=kit_home):
         return _guard_refused(launcher, task, guard)
     version = host.version(launcher._exec, wt.path, kit_home=kit_home)
     spec = SessionSpec(
@@ -106,6 +106,8 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
     plan = host.plan(spec)
     if isinstance(plan, str):
         return launcher._deferred(tid, f"worker opencode : {plan}")
+    if refusal := pre_start_refusal(wt.path, kit_home):  # rien n'a changé depuis la garde, juste avant le lancement
+        return _guard_refused(launcher, task, refusal)
     log = worker_log(service.home_root, tid)
     started = host.start(plan, wt.path, log)
     if not started.pid:
@@ -149,6 +151,7 @@ def launch_opencode(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktre
             "host": OPENCODE_HOST,
             "pid": pid,
             "log": str(log),
+            "kit_home": str(kit_home),
             "model_source": route.source,
             "lean": role.lean,
             "permission_mode": role.permission_mode,
@@ -298,7 +301,9 @@ def resume_opencode_worker(
     )
     if route is None:
         return ExecResult(1, "", f"reprise opencode impossible : {why}")
-    kit_home = opencode_home(service.home_root)
+    if not launch.get("kit_home"):
+        return ExecResult(1, "", "reprise opencode refusée : lancement sans HOME du kit noté")
+    kit_home = Path(str(launch["kit_home"]))  # celui de ce worker : sa base de sessions y vit
     if guard := prepare_opencode_home(kit_home) or host.guard_refusal(cwd, route, kit_home=kit_home):
         return ExecResult(1, "", f"reprise opencode refusée : {guard}")
     plan = host.plan(
@@ -314,6 +319,8 @@ def resume_opencode_worker(
     )
     if isinstance(plan, str):
         return ExecResult(1, "", f"reprise opencode refusée : {plan}")
+    if refusal := pre_start_refusal(cwd, kit_home):
+        return ExecResult(1, "", f"reprise opencode refusée : {refusal}")
     started = host.start(plan, cwd, worker_log(service.home_root, task_id))
     if not started.pid:
         return ExecResult(1, "", f"opencode run n'a pas démarré : {started.error or 'aucun processus'}")
@@ -323,6 +330,7 @@ def resume_opencode_worker(
         "name": f"grimoire-{task_id}",
         "host": OPENCODE_HOST,
         "pid": str(started.pid),
+        "kit_home": str(kit_home),
     }
     if cause:
         payload["cause"] = cause
