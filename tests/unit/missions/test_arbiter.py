@@ -43,6 +43,8 @@ REGISTRY = Path("_grimoire/standard/llm-provider-registry.yaml")
 CRITERIA = ("la route rend 404 sur un id inconnu",)
 HEAD = "a" * 40
 runner = CliRunner()
+#: Le seul canal d'une session arbitre : `task arbitrate` est exercé ici (vote accepté et refusé).
+pytestmark = pytest.mark.covers("cli:task arbitrate")
 
 
 @pytest.fixture(autouse=True)
