@@ -256,12 +256,13 @@ GEMINI_CLI_MANIFEST = HostCapabilityManifest(
 )
 
 # opencode : un plugin (`.opencode/plugin`) dont le hook `tool.execute.before`
-# peut refuser un outil — observé (tests/fixtures/hosts/opencode/). Aucun autre
-# événement de cycle de vie n'a été sondé, donc aucun n'est déclaré.
+# peut refuser un outil — observé (tests/fixtures/hosts/opencode/). L'événement
+# `session.idle` (fin de tour, opencode.ai/docs/en/plugins, lue le 2026-11-22)
+# alimente la décision neutre `stop`, sans refus possible documenté.
 OPENCODE_MANIFEST = HostCapabilityManifest(
     host_id=HostId.OPENCODE,
     display_name="opencode",
-    hooks=HostHooks(pre_tool_use=True),
+    hooks=HostHooks(pre_tool_use=True, stop=True),
     fallback=HostFallback(mode=FallbackMode.CLI_GUARDED, required_controls=("explicit_proof_for_risky_changes",)),
     supports_mcp=True,
     supports_streaming=True,

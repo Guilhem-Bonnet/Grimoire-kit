@@ -313,7 +313,9 @@ GEMINI_PROFILE = HostProfile(
     host_id=HostId.GEMINI_CLI,
     display_name="Gemini CLI",
     subagents_native=True,
-    skills_native=False,
+    # `.agents/skills/<slug>/SKILL.md`, activées à la demande (`activate_skill`) :
+    # geminicli.com/docs/cli/skills (lue le 2026-11-22) ; Antigravity lit le même dossier.
+    skills_native=True,
     commands_native=True,
     # BeforeTool et BeforeAgent documentent un refus (`decision: deny`, code 2) ;
     # AfterAgent/SessionEnd sont des hooks, pas des points de blocage. Aucune capture
@@ -333,6 +335,9 @@ GEMINI_PROFILE = HostProfile(
     notes=(
         "Hooks, commandes TOML, sous-agents et MCP sont écrits d'après geminicli.com/docs "
         "(lue le 2026-11-12, v0.64.0 annoncée ; CLI non installée sur le poste). "
+        "Compétences natives dans `.agents/skills/` et `model` d'un sous-agent tiré de "
+        "`dispatch.models.gemini` (relu le 2026-11-22) ; Antigravity lit ces compétences et `GEMINI.md`, "
+        "ses hooks (`.agents/hooks.json`), agents et MCP ne sont pas émis. "
         "BeforeTool et BeforeAgent documentent un refus, jamais observé : garde advisory ; "
         "SessionStart/AfterTool/PreCompress informent ; le blocage de fin de tour (AfterAgent) et le "
         "format des fichiers de session ne sont pas vérifiés. Aucune session d'agent détachée documentée."
@@ -345,9 +350,11 @@ OPENCODE_PROFILE = HostProfile(
     subagents_native=True,
     skills_native=True,
     commands_native=True,
-    # Pas de ``blocking_events`` : opencode ne déclenche que `tool.execute.before`
-    # (PreToolUse), le seul événement prouvé ; le rendu des autres reste inchangé.
+    # Seul `tool.execute.before` (PreToolUse) est prouvé bloquant. `session.idle`
+    # alimente la décision `stop` (opencode.ai/docs/en/plugins, lue le 2026-11-22), mais
+    # aucun moyen de refuser la fin de tour n'est documenté : advisory, sans capture.
     blocking_hooks=True,
+    blocking_events=frozenset({HookEvent.PRE_TOOL_USE}),
     blocking_captures=(
         "opencode/01-pretooluse-control-allow.json",
         "opencode/01-pretooluse-deny-throw.json",
@@ -358,8 +365,10 @@ OPENCODE_PROFILE = HostProfile(
     acp_command=("opencode", "acp"),
     notes=(
         "Agents, skills, commands et MCP sont chargés depuis .opencode/ et opencode.json (vérifié, 1.17.11). "
-        "Le seul hook est un plugin : tool.execute.before refuse un outil (fixture). Pas de SessionStart, "
-        "Stop ni PostToolUse sondés ; table de permissions non émise (non vérifiée)."
+        "Le plugin de garde refuse un outil dans tool.execute.before (fixture) et rend la décision de "
+        "clôture sur l'événement session.idle, journalisée sans blocage (observé le 2026-11-22 : "
+        "opencode/02-session-idle-stop-advisory.json ; aucun refus de fin de tour documenté). `model` d'un agent tiré de `dispatch.models.opencode` (format "
+        "provider/model-id). Pas de SessionStart ni PostToolUse ; table de permissions non émise (non vérifiée)."
     ),
 )
 
@@ -702,8 +711,9 @@ _COPILOT_STATES: dict[GovernanceFunction, FunctionState] = {
 
 _OPENCODE_STATES: dict[GovernanceFunction, FunctionState] = {
     GovernanceFunction.TOOL_GUARD: _RICH,
-    GovernanceFunction.WRITE_TRACE: _absent(
-        "seul `tool.execute.before` est exposé : ni comptage des écritures (PostToolUse) ni refus de clôture (Stop)"
+    GovernanceFunction.WRITE_TRACE: _degraded(
+        "la décision de clôture est rendue sur `session.idle` et journalisée (`client.app.log`), sans refus : "
+        "opencode ne documente aucun blocage de fin de tour ; pas de comptage des écritures (PostToolUse)"
     ),
     GovernanceFunction.TASK_RECALL: _absent(
         "aucun SessionStart ni UserPromptSubmit : le rappel de tâche n'est pas émis"
