@@ -135,3 +135,43 @@ def test_copilot_emitter_wires_subagent_start_only_there(tmp_path: Path) -> None
     assert f"--decision {DECISION}" in entry["bash"]
     claude = emitter_for(HostId.CLAUDE_CODE_CLI).plan(surface, tmp_path)
     assert all(DECISION not in f.content for f in claude.files if isinstance(f.content, str))
+
+
+def test_claimed_task_without_class_abstains(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une tâche résolue sans classe calculée : rien à dire au sous-agent, abstention."""
+    from grimoire.hosts.decisions import subagent_start
+
+    _claimed(tmp_path)
+    monkeypatch.setattr(subagent_start, "_class_tier", lambda hook: (None, {"task_id": "GAO-x"}))
+    rendered, decision = _run(tmp_path)
+    assert rendered == {}
+    assert decision.abstain
+
+
+def test_resolution_error_abstains_without_raising(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une erreur de résolution ne bloque jamais le démarrage du sous-agent : abstention tracée."""
+    from grimoire.hosts.decisions import subagent_start
+
+    def _boom(hook: Any) -> tuple[str | None, dict[str, Any]]:
+        raise OSError("ledger illisible")
+
+    _claimed(tmp_path)
+    monkeypatch.setattr(subagent_start, "_class_tier", _boom)
+    rendered, decision = _run(tmp_path)
+    assert rendered == {}
+    assert decision.abstain
+    assert decision.detail == {"subagent_start": "error", "error": "OSError: ledger illisible"}
+
+
+def test_v2_task_keeps_the_session_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Classe V2, aucun palier recommandé : le sous-agent garde le modèle de la session."""
+    from grimoire.hosts.decisions import subagent_start
+
+    _claimed(tmp_path)
+    monkeypatch.setattr(subagent_start, "_class_tier", lambda hook: (None, {"task_id": "GAO-x", "task_class": "V2"}))
+    rendered, decision = _run(tmp_path)
+    context = rendered["hookSpecificOutput"]["additionalContext"]
+    assert "GAO-x" in context
+    assert "V2" in context
+    assert "palier session" in context
+    assert decision.detail["tier"] == "session"
