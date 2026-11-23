@@ -18,7 +18,7 @@ from grimoire.core.exceptions import GrimoireConfigError
 from grimoire.hosts.capabilities import HOST_ALIASES, resolve_host
 
 #: Ordre canonique — celui de l'issue #177 et du texte d'aide `--host` du CLI.
-KNOWN_HOST_ALIASES: tuple[str, ...] = ("claude", "copilot", "gemini", "cursor", "codex", "opencode")
+KNOWN_HOST_ALIASES: tuple[str, ...] = ("claude", "copilot", "gemini", "cursor", "codex", "opencode", "kimi", "zed")
 
 __all__ = [
     "KNOWN_HOST_ALIASES",
@@ -51,6 +51,12 @@ def detect_enabled_hosts(project_root: Path) -> tuple[str, ...]:
         found.append("codex")
     if (root / ".opencode").is_dir() or (root / "opencode.json").is_file():
         found.append("opencode")
+    # Kimi Code : dossier de projet `.kimi-code/` (agents, compétences, `mcp.json`, `local.toml`).
+    if (root / ".kimi-code").is_dir():
+        found.append("kimi")
+    # Zed : réglages et tâches de projet sous `.zed/`.
+    if (root / ".zed").is_dir():
+        found.append("zed")
     if not found:
         found.append("claude")
     return tuple(found)

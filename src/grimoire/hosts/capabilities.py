@@ -372,9 +372,70 @@ OPENCODE_PROFILE = HostProfile(
     ),
 )
 
+KIMI_CODE_PROFILE = HostProfile(
+    host_id=HostId.KIMI_CODE,
+    display_name="Kimi Code",
+    # `.kimi-code/agents/<nom>.md` (frontmatter `name`, `description`), lancés par
+    # `kimi --agent <nom>` : moonshotai.github.io/kimi-code/en/customization/agents (lue le 2026-11-22).
+    subagents_native=True,
+    # `.agents/skills/<slug>/SKILL.md` : moonshotai.github.io/kimi-code/en/customization/skills.
+    skills_native=True,
+    commands_native=False,
+    # Hooks bloquants documentés (PreToolUse, UserPromptSubmit, Stop), mais seulement dans
+    # `~/.kimi-code/config.toml` ou un plugin : aucun fichier de hooks de projet. Le kit n'en
+    # écrit aucun, rien n'est déclaré bloquant ni même consultatif.
+    blocking_hooks=False,
+    blocking_events=frozenset(),
+    agent_autostart=True,
+    permissions_native=False,
+    mcp_native=True,
+    instructions_entrypoint="AGENTS.md",
+    acp_command=("kimi", "acp"),
+    notes=(
+        "Agents (.kimi-code/agents/), compétences (.agents/skills/), MCP (.kimi-code/mcp.json) et AGENTS.md "
+        "écrits d'après moonshotai.github.io/kimi-code/en (lue le 2026-11-22, Kimi Code 2.7.2 annoncée ; CLI "
+        "non installée). Hooks documentés au niveau utilisateur seulement (« no project-level hook file ») : "
+        "aucune garde émise. Pas de `model` par agent (champ ignoré), pas de commandes de projet ; le MCP de "
+        "projet n'est chargé qu'une fois l'espace de travail approuvé. Démarrer dans un agent : `kimi --agent <nom>`."
+    ),
+)
+
+ZED_PROFILE = HostProfile(
+    host_id=HostId.ZED,
+    display_name="Zed",
+    # L'agent de Zed délègue par `spawn_agent`, mais ne charge aucun fichier de définition d'agent.
+    subagents_native=False,
+    # `<worktree>/.agents/skills/<slug>/SKILL.md` : zed.dev/docs/ai/skills (lue le 2026-11-22).
+    skills_native=True,
+    commands_native=False,
+    # Aucun hook de cycle de vie documenté pour l'agent de Zed ; le fil ACP « Claude Agent »
+    # n'exécuterait pas les hooks de Claude Code (#725, non vérifié).
+    blocking_hooks=False,
+    blocking_events=frozenset(),
+    permissions_native=False,
+    mcp_native=True,
+    instructions_entrypoint=".rules",
+    notes=(
+        "Instructions (.rules, premier fichier de la liste que Zed lit), compétences (.agents/skills/) et "
+        "`context_servers` de .zed/settings.json écrits d'après zed.dev/docs (ai/instructions, ai/skills, "
+        "ai/mcp ; lue le 2026-11-22, Zed non installé). Aucun hook : hôte sans garde. Réglages, serveurs MCP "
+        "et tâches du projet ne s'appliquent qu'à un worktree approuvé (Restricted Mode). Mode gouverné : la "
+        "tâche .zed/tasks.json « Claude Code (gouverné) » lance la CLI dans le terminal de Zed (#725)."
+    ),
+)
+
 _PROFILES: dict[HostId, HostProfile] = {
     p.host_id: p
-    for p in (CLAUDE_CODE_PROFILE, COPILOT_PROFILE, CODEX_PROFILE, CURSOR_PROFILE, GEMINI_PROFILE, OPENCODE_PROFILE)
+    for p in (
+        CLAUDE_CODE_PROFILE,
+        COPILOT_PROFILE,
+        CODEX_PROFILE,
+        CURSOR_PROFILE,
+        GEMINI_PROFILE,
+        OPENCODE_PROFILE,
+        KIMI_CODE_PROFILE,
+        ZED_PROFILE,
+    )
 }
 
 #: Short ids accepted on the command line, mapped to their host.
@@ -390,6 +451,9 @@ HOST_ALIASES: dict[str, HostId] = {
     "gemini": HostId.GEMINI_CLI,
     "gemini-cli": HostId.GEMINI_CLI,
     "opencode": HostId.OPENCODE,
+    "kimi": HostId.KIMI_CODE,
+    "kimi-code": HostId.KIMI_CODE,
+    "zed": HostId.ZED,
 }
 
 
@@ -727,6 +791,62 @@ _OPENCODE_STATES: dict[GovernanceFunction, FunctionState] = {
     GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
 }
 
+#: Kimi Code (L8 de #1281) : hooks documentés au niveau utilisateur seulement, aucun fichier
+#: de hooks de projet (moonshotai.github.io/kimi-code/en/customization/hooks, lue le 2026-11-22).
+_KIMI_NO_PROJECT_HOOK = (
+    "Kimi Code n'accepte de hooks que dans `~/.kimi-code/config.toml` ou un plugin, aucun fichier de projet"
+)
+_KIMI_CODE_STATES: dict[GovernanceFunction, FunctionState] = {
+    GovernanceFunction.TOOL_GUARD: _absent(
+        f"{_KIMI_NO_PROJECT_HOOK} : aucune garde émise, la politique d'outils est énoncée dans AGENTS.md, "
+        "opposable en CI"
+    ),
+    GovernanceFunction.WRITE_TRACE: _absent(f"{_KIMI_NO_PROJECT_HOOK} : ni comptage d'écritures ni clôture bloquée"),
+    GovernanceFunction.TASK_RECALL: _absent(f"{_KIMI_NO_PROJECT_HOOK} : le rappel de tâche n'est pas émis"),
+    GovernanceFunction.COMMANDS: _degraded(
+        "aucun emplacement de commande de projet documenté ; chaque commande est l'invocation "
+        "`grimoire host run <slug>` décrite dans AGENTS.md"
+    ),
+    GovernanceFunction.PERSONAS: _degraded(
+        "agents écrits dans `.kimi-code/agents/` et lancés par `kimi --agent <nom>` ; l'agent par défaut ne "
+        "les délègue pas (ses sous-agents restent coder, explore, plan) et la frontière d'outils n'est "
+        "qu'énoncée"
+    ),
+    GovernanceFunction.MCP_SERVER: _degraded(
+        "serveur ajouté à `.kimi-code/mcp.json`, chargé seulement une fois l'espace de travail approuvé"
+    ),
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
+
+#: Zed (L8 de #1281, #725) : aucun hook de cycle de vie documenté pour son agent (zed.dev/docs, lue
+#: le 2026-11-22). La CLI Claude Code lancée par la tâche du kit garde ses hooks, mais c'est Claude Code.
+_ZED_NO_HOOK = "Zed ne documente aucun hook de cycle de vie pour son agent"
+_ZED_STATES: dict[GovernanceFunction, FunctionState] = {
+    GovernanceFunction.TOOL_GUARD: _absent(
+        f"{_ZED_NO_HOOK} : aucune garde ; la tâche `.zed/tasks.json` « Claude Code (gouverné) » lance la CLI "
+        "Claude Code, gardée par ses propres hooks"
+    ),
+    GovernanceFunction.WRITE_TRACE: _absent(f"{_ZED_NO_HOOK} : ni comptage d'écritures ni clôture bloquée"),
+    GovernanceFunction.TASK_RECALL: _absent(f"{_ZED_NO_HOOK} : le rappel de tâche n'est pas émis"),
+    GovernanceFunction.COMMANDS: _degraded(
+        "pas de commande de projet ; chaque commande est l'invocation `grimoire host run <slug>` décrite dans `.rules`"
+    ),
+    GovernanceFunction.PERSONAS: _degraded(
+        "aucun fichier d'agent chargé (l'agent délègue par `spawn_agent` sans définition) ; les personas sont "
+        "listées dans `.rules`, à lire et appliquer"
+    ),
+    GovernanceFunction.MCP_SERVER: _degraded(
+        "serveur ajouté aux `context_servers` de `.zed/settings.json`, lancé seulement dans un worktree approuvé"
+    ),
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
+
 _CLAUDE_CODE_STATES: dict[GovernanceFunction, FunctionState] = dict.fromkeys(GOVERNANCE_FUNCTIONS, _RICH)
 
 #: Hôte inconnu : on ne lui prête aucune fonction ; le client MCP reste indéterminé.
@@ -743,6 +863,8 @@ _FUNCTION_STATES: dict[HostId, dict[GovernanceFunction, FunctionState]] = {
     HostId.CURSOR: _CURSOR_STATES,
     HostId.GEMINI_CLI: _GEMINI_STATES,
     HostId.OPENCODE: _OPENCODE_STATES,
+    HostId.KIMI_CODE: _KIMI_CODE_STATES,
+    HostId.ZED: _ZED_STATES,
     HostId.UNKNOWN: _UNKNOWN_STATES,
 }
 
@@ -984,6 +1106,9 @@ _CONTRACTS: dict[HostId, HostContract] = {
     HostId.GEMINI_CLI: _unverified_contract(HostId.GEMINI_CLI),
     # opencode 1.17.11 : seul pretooluse_deny a été sondé (fournisseur local factice).
     HostId.OPENCODE: _OPENCODE_CONTRACT,
+    # Kimi Code, Zed (L8) : aucune capture, aucun hook de projet émis.
+    HostId.KIMI_CODE: _unverified_contract(HostId.KIMI_CODE),
+    HostId.ZED: _unverified_contract(HostId.ZED),
 }
 
 

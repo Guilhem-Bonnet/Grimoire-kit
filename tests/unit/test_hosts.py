@@ -2822,6 +2822,10 @@ def test_an_unwritable_trace_ledger_never_breaks_recording_a_miss(project: Path)
 #: chaque valeur. Vrai seulement là où l'hôte documente l'ouverture d'une
 #: session dans un agent nommé.
 _AGENT_AUTOSTART_BY_HOST: dict[HostId, tuple[bool, str]] = {
+    HostId.KIMI_CODE: (
+        True,
+        "`kimi --agent <nom>` (moonshotai.github.io/kimi-code/en/customization/agents, lue le 2026-11-22)",
+    ),
     HostId.CLAUDE_CODE_CLI: (
         True,
         "`claude --agent <name>` (code.claude.com/docs/en/cli-reference), clé `agent` "
