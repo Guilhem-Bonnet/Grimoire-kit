@@ -357,6 +357,32 @@ def _dispatch_entry(launcher: HookLauncher = BARE) -> dict[str, Any]:
     return {**entry, "matcher": matcher_for(spec)}
 
 
+#: Hook consultatif ``SubagentStart`` (#1280, P3) : le contexte de dispatch du sous-agent.
+#: Propre à Copilot (Claude Code et les autres hôtes gardent leurs hooks). Délai court :
+#: un dépassement laisse démarrer le sous-agent sans contexte ajouté.
+SUBAGENT_START_HOOK = HookSpec(
+    event=HookEvent.SUBAGENT_START,
+    decision="grimoire.subagent-start",
+    enforcement=Enforcement.ADVISORY,
+    timeout=3,
+    rationale="Dit au sous-agent la classe de vérifiabilité et le palier recommandés pour sa tâche.",
+)
+
+
+def _subagent_start_file(launcher: HookLauncher = BARE) -> EmittedFile:
+    """``grimoire-subagent-start.json`` : une entrée, ``--decision`` en plus du lanceur commun."""
+    (entry,) = _hook_entries(SUBAGENT_START_HOOK, launcher)
+    for key in ("command", "bash", "powershell"):
+        entry[key] = f"{entry[key]} --decision {SUBAGENT_START_HOOK.decision}"
+    payload: dict[str, Any] = {"version": 1, "hooks": {"SubagentStart": [entry]}}
+    return EmittedFile(
+        relpath=GH_DIR / "hooks" / "grimoire-subagent-start.json",
+        content=json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        managed=False,
+        owned_if_contains=OWNED_COMMAND_MARKERS,
+    )
+
+
 def _hook_entries(hook: HookSpec, launcher: HookLauncher = BARE) -> list[dict[str, Any]]:
     """Les entrées de *hook* : une, ou deux pour un hook à matcher (outils connus, puis inconnus)."""
     event = _WIRE_NAMES[hook.event]
@@ -565,6 +591,7 @@ class CopilotEmitter(Emitter):
         # make two writers for one path, and every sync would report a
         # conflict on a file nobody actually edited.
         files.extend(_prompt_file(c) for c in surface.commands if c.source != "workflow")
+        files.append(_subagent_start_file(launcher))
         files.extend(_hook_file(hook, launcher, dispatch=True, project_root=project_root) for hook in surface.hooks)
 
         degradations: list[Degradation] = list(Emitter.launcher_degradations(launcher))
