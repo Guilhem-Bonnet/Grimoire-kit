@@ -241,6 +241,26 @@ class EvidenceService:
                 pass
         return verdicts
 
+    def has_unreadable_verdicts(self, task_id: str) -> bool:
+        """``True`` si une ligne de ``verdicts.jsonl`` est illisible et peut concerner *task_id* (échec fermé, #1257).
+
+        ``_load_verdicts`` ignore ces lignes ; un appelant qui s'appuie sur « le dernier verdict » doit savoir qu'un
+        verdict plus récent a pu être perdu.
+        """
+        if not self._verdicts_path.exists():
+            return False
+        for line in self._verdicts_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw = json.loads(line)
+                VerificationVerdict.from_dict(raw)
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError):
+                if not isinstance(locals().get("raw"), dict) or raw.get("task_id") == task_id:
+                    return True
+        return False
+
     def get_latest_verdict(self, task_id: str) -> VerificationVerdict | None:
         verdicts = self._load_verdicts(task_id)
         return verdicts[-1] if verdicts else None

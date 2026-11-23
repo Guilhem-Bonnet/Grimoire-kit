@@ -270,8 +270,12 @@ def _ready_with_pack(projet: Path, host: FakeHost, tid: str, wt: Path, *, mode: 
         pack = service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
         if mode == "failed":
             service.verify(pack, extra_checks=(VerificationCheck("command-01", VerdictResult.FAILED, "exit 1"),))
-        elif mode != "unverified":
+        elif mode == "bare":  # verdict vert, mais sans aucun contrôle de commande
             service.verify(pack)
+        elif mode != "unverified":
+            head = git(wt, "rev-parse", "HEAD").strip()
+            service.verify(pack, extra_checks=(VerificationCheck("command-01", VerdictResult.PASSED, ""),
+                                               VerificationCheck("verified-head", VerdictResult.PASSED, head)))
     write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
 
 
@@ -304,6 +308,86 @@ def test_une_tache_a_check_avec_verdict_vert_sur_son_pack_fusionne(projet: Path,
     tick(projet, host)
     assert host.of("gh", "pr", "merge")
     assert not events(projet, tid, MERGE_ESCALATED_EVENT)
+
+
+def _ready_by_review(projet: Path, host: FakeHost, tid: str, wt: Path) -> None:
+    """Le chemin réel : le relecteur rend READY par ``record_review`` (qui recopie les commandes du dernier verdict)."""
+    from grimoire.missions.review_verdict import CriterionVerdict, StructuredVerdict, record_review
+
+    svc = TaskService(wt)
+    verdict = StructuredVerdict("READY", tuple(
+        CriterionVerdict(index=i, criterion=c, status="met", evidence_cmd="true", note="ok")
+        for i, c in enumerate(CRITERIA, start=1)))
+    record_review(svc, svc.require(tid), verdict, reviewer_id="reviewer", reviewer_session=reviewer_sid(host), human=True)
+
+
+def test_une_relecture_sans_task_verify_ne_fusionne_pas(projet: Path, host: FakeHost) -> None:
+    """Aucune commande exécutée : le verdict de relecture seul (``review-verdict`` vert) ne vaut pas preuve des --check."""
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    tick(projet, host)
+    _ready_by_review(projet, host, tid, wt)
+    assert "task verify" in _refused_why(projet, host, tid)
+
+
+def test_le_verdict_d_un_ancien_pack_ne_couvre_pas_le_dernier_pack(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    tick(projet, host)
+    item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "pytest -> exit 0", uri="check:pytest", summary="x")
+    service = EvidenceService(wt / EVIDENCE)
+    service.verify(service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA))
+    service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA)
+    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
+    assert "autre pack" in _refused_why(projet, host, tid)
+
+
+def test_une_ligne_de_verdict_illisible_ferme_l_acces(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    tick(projet, host)
+    item = EvidenceItem.from_text("check-01", EvidenceKind.TEST, "pytest -> exit 0", uri="check:pytest", summary="x")
+    service = EvidenceService(wt / EVIDENCE)
+    service.verify(service.create_pack(tid, EvidenceProfile.LIGHT, [item], acceptance=CRITERIA),
+                   extra_checks=(VerificationCheck("command-01", VerdictResult.PASSED, ""),))
+    with (wt / EVIDENCE / "verdicts.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(f'{{"task_id": "{tid}", "verdict": "failed"}}\n')
+    write_receipt(wt, tid, "READY", reviewer_id="reviewer", reviewer_session=reviewer_sid(host))
+    assert "illisible" in _refused_why(projet, host, tid)
+
+
+def test_un_verdict_vert_sans_commande_ne_suffit_pas(projet: Path, host: FakeHost) -> None:
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("pytest -q",))
+    _ready_with_pack(projet, host, tid, wt, mode="bare")  # verdict passed, aucun command-NN
+    assert "command-01" in _refused_why(projet, host, tid)
+
+
+def test_des_commandes_vertes_d_une_tete_anterieure_ne_valent_pas(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.verify import verify_task
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("true",))
+    assert verify_task(TaskService(wt).require(tid), wt, wt / EVIDENCE).passed
+    (wt / "src/app/route.py").write_text("500\n", encoding="utf-8")
+    git(wt, "commit", "-qam", "change après verify")
+    git(wt, "push", "-q", "origin", f"task/{tid}")
+    tick(projet, host)
+    _ready_by_review(projet, host, tid, wt)
+    assert "pas sur" in _refused_why(projet, host, tid)
+
+
+def test_task_verify_sur_la_tete_relue_puis_relecture_fusionne(projet: Path, host: FakeHost) -> None:
+    from grimoire.missions.verify import verify_task
+
+    grant(projet)
+    tid, wt = launch_and_work(projet, host, checks=("true",))
+    assert verify_task(TaskService(wt).require(tid), wt, wt / EVIDENCE).passed
+    tick(projet, host)
+    _ready_by_review(projet, host, tid, wt)
+    tick(projet, host)
+    tick(projet, host)
+    assert host.of("gh", "pr", "merge")
 
 
 # ── Chemin vert, sous mandat ───────────────────────────────────────────────────

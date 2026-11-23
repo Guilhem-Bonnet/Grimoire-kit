@@ -1006,21 +1006,35 @@ class MergeStage(DualReviewMixin):
         kept = sorted(p for p in pr.files if any(fnmatch.fnmatchcase(p.casefold(), pat) for pat in patterns))
         return self._reserved_reason(kept)
 
-    def _unverified(self, task: MissionTask, wt: TaskWorktree) -> str:
+    def _unverified(self, task: MissionTask, wt: TaskWorktree, head: str) -> str:
         """#1257 : une tâche qui déclare ``--check`` ne fusionne pas sans pack et verdict ``passed`` mécaniques sur la tête relue.
 
-        Le pack lu est celui du worktree ; le sceau du READY (étape 3) garantit déjà qu'il n'a pas changé depuis la relecture. ``""`` si la tâche ne déclare aucune commande ou si la preuve tient.
+        Le verdict doit porter sur le dernier pack, contenir un ``command-NN`` vert par commande déclarée et avoir été
+        rendu sur *head* ; une ligne de verdict illisible ferme l'accès. ``""`` si la tâche ne déclare aucune commande
+        ou si la preuve tient.
         """
         if not task.checks:
             return ""
+        redo = f"`grimoire task verify {task.id}` d'abord"
         service = EvidenceService(wt.path / _EVIDENCE)
         packs = service.list_packs(task.id)
         if not packs:
-            return f"{task.id} déclare des commandes (--check) mais n'a aucun pack de preuve : `grimoire task verify {task.id}` d'abord"
+            return f"{task.id} déclare des commandes (--check) mais n'a aucun pack de preuve : {redo}"
+        if service.has_unreadable_verdicts(task.id):
+            return f"{task.id} : une ligne de verdict est illisible, la preuve ne peut pas être établie : {redo}"
         verdict = service.get_latest_verdict(task.id)
         if verdict is None or verdict.verdict.value != "passed":
             state = verdict.verdict.value if verdict is not None else "absent"
-            return f"{task.id} déclare des commandes (--check) sans verdict verify vert (verdict : {state})"
+            return f"{task.id} déclare des commandes (--check) sans verdict verify vert (verdict : {state}) : {redo}"
+        if verdict.evidence_pack_id != packs[-1].id:
+            return f"{task.id} : le verdict vert porte sur un autre pack que le dernier : {redo}"
+        green = {c.id for c in verdict.checks if c.result.value == "passed"}
+        missing = [f"command-{i:02d}" for i in range(1, len(task.checks) + 1) if f"command-{i:02d}" not in green]
+        if missing:
+            return f"{task.id} : aucun contrôle vert pour {', '.join(missing)} dans le verdict : {redo}"
+        seen = next((c.reason for c in verdict.checks if c.id == "verified-head"), "")
+        if seen != head:
+            return f"{task.id} : les commandes ont été vérifiées sur {seen[:12] or 'une tête inconnue'}, pas sur {head[:12]} : {redo}"
         return ""
 
     @staticmethod
@@ -1052,7 +1066,7 @@ class MergeStage(DualReviewMixin):
         kept = self._kept_to_human(task, pr)
         if kept:
             return self._ask_human(task, wt, "merge", judged.id, kept, pr.number)
-        if unverified := self._unverified(task, wt):
+        if unverified := self._unverified(task, wt, head):
             return self._ask_human(task, wt, "merge", judged.id, unverified, pr.number)
         provenance = {"kind": "receipt", "ref": f"{tid}:review={judged.payload.get('review')}:head={head[:12]}"}
         try:
