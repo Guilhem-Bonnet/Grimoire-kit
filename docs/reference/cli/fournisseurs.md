@@ -101,6 +101,7 @@ Valeurs documentées livrées par le kit (lues le 2026-11-22) :
 | `deepseek` | API OpenAI et Anthropic, outils, mode JSON, raisonnement, cache |
 | `moonshot` (`kimi`) | API OpenAI et Anthropic, outils, mode JSON |
 | `local` (`ollama`, ou tout `provider_type: local`) | API OpenAI et Anthropic d'Ollama ; pas de cache de prompt |
+| `litellm` (tout `provider_type: litellm`) | API OpenAI (`/chat/completions`, `/models`) et Anthropic (`/v1/messages`) du proxy LiteLLM |
 
 Les URL exactes sont dans `grimoire providers capabilities --json` (champ
 `source`) et dans `src/grimoire/providers/capabilities.py`. Le kit ne
@@ -139,6 +140,59 @@ est sondé sur `<anthropic_base_url>/v1/models` si cette URL est en `https://`.
 - **Résultat** : `_grimoire-output/providers-capabilities.json`, état runtime.
   Le registre n'est jamais écrit. Une nouvelle sonde remplace la précédente du
   même fournisseur : une valeur qu'on ne mesure plus ne reste pas « sondée ».
+
+## Passerelle LiteLLM
+
+Un proxy LiteLLM se déclare comme un fournisseur de type `litellm`. `base_url`
+est la racine du proxy, avec ou sans `/v1` :
+
+```yaml
+providers:
+  - id: "proxy"
+    enabled: true
+    provider_type: "litellm"
+    base_url: "https://llm.example.com"   # ou http://127.0.0.1:4000 en boucle locale
+    allowed_capabilities: ["chat", "code"]
+    default_models: ["claude-haiku"]
+    models:
+      - id: "claude-haiku"               # un model_name du proxy
+        tier: "cheap"
+    data_policy:
+      allowed_data_classes: ["public-docs", "project-source"]
+      forbidden_data_classes: ["secrets", "credentials"]
+```
+
+- **Format.** Le proxy sert le format OpenAI (`/chat/completions`, `/models`,
+  [quick start](https://docs.litellm.ai/docs/proxy/quick_start)) et le format
+  Anthropic sur `/v1/messages`, celui que Claude Code utilise
+  ([Claude Code](https://docs.litellm.ai/docs/proxy/client_setup/claude_code)).
+  Les deux sont documentés pour tout le fournisseur. Le reste dépend du modèle
+  derrière le proxy et reste inconnu tant qu'il n'est ni sondé ni déclaré.
+- **Clé.** Une clé virtuelle ou la clé maître du proxy, rangée dans le magasin
+  sous `<ID>_API_KEY` (`grimoire providers set-key`). Elle n'est jamais lue
+  dans l'environnement et part en en-tête `Authorization: Bearer`. Un `id`
+  dont la variable serait celle d'un fournisseur documenté (`openai`) n'est
+  pas sondé.
+- **URL admise.** `https://`, ou `http://` vers `127.0.0.1`, `localhost` ou
+  `::1`. Une URL qui porte des identifiants, une requête ou un fragment n'est
+  jamais contactée.
+- **Sonde.** `providers probe --capabilities` lit `GET <base_url>/v1/models`
+  ([model discovery](https://docs.litellm.ai/docs/proxy/model_discovery)),
+  puis `GET <base_url>/v1/model/info`. De cette seconde route, seuls
+  `max_input_tokens` (contexte), `supports_function_calling` (outils) et
+  `supports_vision` sont lus, et seulement à `true` : la doc prévient qu'un
+  champ non renseigné vaut `null`. Si le proxy refuse `/model/info` à une clé
+  virtuelle (la doc ne la montre qu'avec la clé maître), les modèles restent
+  listés, sans détail. Aucune génération, aucune redirection suivie, et les
+  bornes de la section précédente s'appliquent (2 Mio, 2000 modèles,
+  identifiants filtrés).
+- **Vérification.** `grimoire standard verify` exige `base_url` et des
+  `forbidden_data_classes` : le proxy transmet les prompts à ses propres
+  fournisseurs, il est traité comme un hébergé par la politique de données.
+- **Table des modèles.** L'`id` du fournisseur sert de clé sous
+  `dispatch.models.<hôte>` comme pour tout fournisseur (voir la section
+  suivante). Le worker du tick ne passe pas encore par `base_url` : il route
+  vers `anthropic_base_url`, qui peut viser le même proxy en `https://`.
 
 ## Table palier → modèle : hôte × fournisseur
 
@@ -195,7 +249,11 @@ dispatch:
 **Aucune correspondance inventée.** Un palier qu'aucune couche ne nomme pour cet
 hôte et ce fournisseur n'a pas de modèle. L'appelant omet alors `model` : le
 modèle de la session, de l'agent parent ou du sélecteur s'applique. C'est le cas
-de Copilot et de Cursor tant que le projet ne déclare rien.
+de Copilot, de Cursor, de Gemini CLI et d'opencode tant que le projet ne déclare
+rien. Les fiches de sous-agent de Cursor (`.cursor/agents/`), de Gemini CLI
+(`.gemini/agents/`) et d'opencode (`.opencode/agent/`) reçoivent `model` pour le
+seul palier que la table traduit ; opencode exige la forme `provider/model-id`
+(un nom sans `/` est écarté et signalé par la dégradation `model affinity`).
 
 **Capacités.** Le worker et le relecteur exigent l'appel d'outils (`tools`). Un
 modèle du projet dont cette capacité est connue à « non » dans le registre

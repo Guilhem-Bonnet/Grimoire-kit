@@ -45,6 +45,7 @@ from typing import Any
 from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
 from grimoire.hosts.decisions import DEFAULT_DECISION_BY_EVENT
+from grimoire.hosts.emitters.agent_skills import SHARED_SKILLS_DIR, SHARED_SKILLS_GLOB, shared_skills
 from grimoire.hosts.emitters.base import (
     Degradation,
     EmitPlan,
@@ -67,7 +68,6 @@ from grimoire.hosts.surface import (
     HookSpec,
     McpServerSpec,
     ProjectSurface,
-    SkillSpec,
 )
 
 HOST_ALIAS = "codex"
@@ -75,7 +75,7 @@ CODEX_DIR = Path(".codex")
 HOOKS_FILE = CODEX_DIR / "hooks.json"
 CONFIG_FILE = CODEX_DIR / "config.toml"
 AGENTS_DIR = CODEX_DIR / "agents"
-SKILLS_DIR = Path(".agents/skills")
+SKILLS_DIR = SHARED_SKILLS_DIR
 
 #: Ce que l'utilisateur doit faire pour que les hooks du projet s'exécutent.
 APPROVAL_HINT = "approbation requise via /hooks"
@@ -357,15 +357,6 @@ def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:
     return EmittedFile(relpath=AGENTS_DIR / f"{agent.name}.toml", content=content)
 
 
-def _skill_file(skill: SkillSpec) -> EmittedFile:
-    # Seuls `name` et `description` sont documentés par Codex ; rien d'autre n'est émis.
-    header = Emitter.frontmatter({"name": skill.slug, "description": skill.description})
-    return EmittedFile(
-        relpath=SKILLS_DIR / skill.slug / "SKILL.md",
-        content=f"{header}\n{managed_header('.md')}\n\n{skill.body}",
-    )
-
-
 def _entrypoint(surface: ProjectSurface, project_root: Path) -> EmittedFile:
     lines = [
         managed_header(".md"),
@@ -526,15 +517,16 @@ class CodexEmitter(Emitter):
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
         launcher = resolve_hook_launcher(project_root)
         files: list[EmittedFile] = [_agent_file(agent, surface) for agent in surface.agents]
-        files.extend(_skill_file(skill) for skill in surface.skills)
+        skill_files, skill_gaps = shared_skills(surface.skills)
+        files.extend(skill_files)
         files.append(_entrypoint(surface, project_root))
         text_merges = (_config_merge(surface.mcp_servers, project_root),) if surface.mcp_servers else ()
         plan = EmitPlan(
             host_id=self.host_id,
             files=tuple(files),
             merges=(_hooks_merge(surface, launcher),),
-            degradations=(*Emitter.launcher_degradations(launcher), *_degradations(surface)),
-            owned_globs=(".codex/agents/*.toml", ".agents/skills/*/SKILL.md"),
+            degradations=(*Emitter.launcher_degradations(launcher), *skill_gaps, *_degradations(surface)),
+            owned_globs=(".codex/agents/*.toml", SHARED_SKILLS_GLOB),
             text_merges=text_merges,
         )
         return with_rule_layers(plan, project_root)

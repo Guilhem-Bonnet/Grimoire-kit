@@ -24,7 +24,9 @@ from grimoire.hosts.emitters.copilot import CopilotEmitter
 from grimoire.hosts.emitters.cursor import CursorEmitter
 from grimoire.hosts.emitters.gemini import GeminiEmitter
 from grimoire.hosts.emitters.generic import GenericEmitter
+from grimoire.hosts.emitters.kimi import KimiCodeEmitter
 from grimoire.hosts.emitters.opencode import OpenCodeEmitter
+from grimoire.hosts.emitters.zed import ZedEmitter
 
 _EMITTERS: dict[HostId, Emitter] = {
     HostId.CLAUDE_CODE_CLI: ClaudeCodeEmitter(),
@@ -33,6 +35,8 @@ _EMITTERS: dict[HostId, Emitter] = {
     HostId.CURSOR: CursorEmitter(),
     HostId.GEMINI_CLI: GeminiEmitter(),
     HostId.OPENCODE: OpenCodeEmitter(),
+    HostId.KIMI_CODE: KimiCodeEmitter(),
+    HostId.ZED: ZedEmitter(),
 }
 
 
@@ -58,8 +62,10 @@ __all__ = [
     "GeminiEmitter",
     "GenericEmitter",
     "JsonMerge",
+    "KimiCodeEmitter",
     "OpenCodeEmitter",
     "TextMerge",
+    "ZedEmitter",
     "apply_plan",
     "apply_plans",
     "conflict_exits",

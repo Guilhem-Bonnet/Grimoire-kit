@@ -21,6 +21,10 @@ from grimoire.tools import workspace_chat
 # ── La table de lancement ───────────────────────────────────────────────────
 
 
+#: Zed lance des agents ACP (zed.dev/docs/ai/external-agents), il n'en est pas un : aucun mode agent.
+ACP_CLIENTS_ONLY = frozenset({HostId.ZED})
+
+
 def test_every_host_profile_declares_its_acp_command() -> None:
     profiles = all_profiles()
     assert {p.host_id for p in profiles} >= {
@@ -32,6 +36,9 @@ def test_every_host_profile_declares_its_acp_command() -> None:
         HostId.OPENCODE,
     }
     for profile in profiles:
+        if profile.host_id in ACP_CLIENTS_ONLY:
+            assert not profile.acp_command, f"{profile.display_name} est un client ACP, pas un agent"
+            continue
         assert profile.acp_command, f"{profile.display_name} ne déclare pas d'acp_command"
 
 

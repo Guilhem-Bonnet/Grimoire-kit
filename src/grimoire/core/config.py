@@ -278,7 +278,7 @@ class SourceConfig:
         return cls(assist=SourceAssistConfig.from_dict(data.get("assist") or {}))
 
 
-_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini", "opencode"})
+_VALID_HOST_ALIASES = frozenset({"claude", "copilot", "codex", "cursor", "gemini", "opencode", "kimi", "zed"})
 
 
 @dataclass(frozen=True, slots=True)

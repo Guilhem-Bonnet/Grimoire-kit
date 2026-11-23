@@ -1,0 +1,73 @@
+{
+  "host": "zed",
+  "host_version": "",
+  "captured_on": "",
+  "capabilities": {
+    "pretooluse_deny": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "session_end": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "quota_signal": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "liveness_probe": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "subagent_model": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "resume_after_quota": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "bg_workspace_trust": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "bg_cost_source": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "bg_wake": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "local_token_usage": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    },
+    "systemd_user_linger": {
+      "status": "unverified",
+      "fixtures": [],
+      "channel": "",
+      "note": "Non vérifié : aucune capture de zed (L8 de #1281, hôte non installé sur le poste du kit le 2026-11-22)."
+    }
+  }
+}

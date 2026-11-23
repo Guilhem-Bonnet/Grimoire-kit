@@ -6,7 +6,7 @@ audience: référence
 
 Un projet Grimoire décrit des personas, des compétences, des commandes et une
 gouvernance. Chaque hôte agentique — Claude Code, GitHub Copilot, opencode, Codex, Cursor,
-Gemini CLI — expose une part de cela sous forme **exécutable** : fichiers de
+Gemini CLI, Kimi Code, Zed — expose une part de cela sous forme **exécutable** : fichiers de
 sous-agents chargés dans leur propre fenêtre de contexte, compétences chargées à
 la demande, commandes utilisateur, hooks de cycle de vie capables de refuser une
 action ou une clôture, table de permissions déclarative.
@@ -24,8 +24,10 @@ projet (agents, standard, mémoire)
         ├──▶ émetteur Claude Code  → .claude/{agents,skills,commands}, settings.json
         ├──▶ émetteur Copilot      → .github/{agents,skills,prompts,hooks}, .vscode/mcp.json
         ├──▶ émetteur opencode     → .opencode/{agent,skill,command,plugin}, opencode.json
-        ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, GEMINI.md
+        ├──▶ émetteur Gemini       → .gemini/{settings.json,commands,agents}, .agents/skills, GEMINI.md
         ├──▶ émetteur Cursor       → .cursor/{hooks.json,agents,skills,rules}
+        ├──▶ émetteur Kimi Code    → .kimi-code/{agents,mcp.json}, .agents/skills, AGENTS.md
+        ├──▶ émetteur Zed          → .rules, .zed/{settings.json,tasks.json}, .agents/skills
         └──▶ émetteur prose        → AGENTS.md
 ```
 
@@ -44,6 +46,8 @@ Copilot, parce que c'est la même décision.
 | `grimoire host status` | Écart entre ce que le projet déclare et ce que l'hôte exécute |
 | `grimoire host matrix` | Matrice règle × hôte calculée depuis ce que chaque émetteur écrit ; sort en 1 si une règle n'est ni appliquée ni déclarée dégradée |
 | `grimoire host probe` | Vérifie sur le disque que les fichiers et hooks émis sont présents et à jour, sans rien écrire ; sort en 1 si un fichier manque, est périmé ou édité à la main (hors fichier déclaré `hosts.preserve`, rendu `user-owned`), ou si les hooks sont coupés par `disableAllHooks` |
+| `grimoire host probe --capabilities [--run]` | Détecte les hôtes installés (binaire, version) ; avec `--run`, lance une session minimale par hôte avec un hook témoin qui refuse, et écrit la capture dans `_grimoire-output/host-probes/` (voir [Sonder les capacités](#sonder-les-capacites-dun-hote-a-lexecution)) |
+| `grimoire host probe --promote <capture>` | Verse une capture vérifiée sous `tests/fixtures/hosts/` (geste humain, clone du kit) |
 | `grimoire host run <slug>` | Corps d'une commande, pour un hôte sans commandes natives |
 
 `grimoire init`, `grimoire up` et `grimoire standard init` appellent la
@@ -56,10 +60,12 @@ ajouté ou modifié une persona.
 |---|---|---|---|---|---|
 | Claude Code | oui | oui | oui | oui (`PreToolUse` capturé) | oui |
 | GitHub Copilot | oui | oui | oui | écrits, non vérifiés (`preToolUse`, `Stop` : advisory) | non |
-| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, capturé) | non (non prouvé) |
+| opencode | oui | oui | oui | oui (plugin `tool.execute.before`, capturé ; fin de tour `session.idle` consultative) | non (non prouvé) |
 | Codex | oui (`.codex/agents/*.toml`) | oui (`.agents/skills/`) | non | consultatifs (documentés, approbation `/hooks`, non prouvés) | non |
 | Cursor | oui | oui | non | écrits, non vérifiés (`preToolUse`, `beforeShellExecution` : advisory) | non |
-| Gemini CLI | oui | non | oui | écrits, non vérifiés (`BeforeTool`, `BeforeAgent` : advisory ; fin de tour sans refus documenté) | non |
+| Gemini CLI | oui | oui (`.agents/skills/`, lu aussi par Antigravity) | oui | écrits, non vérifiés (`BeforeTool`, `BeforeAgent` : advisory ; fin de tour sans refus documenté) | non |
+| Kimi Code | oui (`.kimi-code/agents/`, `kimi --agent`) | oui (`.agents/skills/`) | non | non : hooks au niveau utilisateur seulement, aucun émis | non |
+| Zed | non (personas dans `.rules`) | oui (`.agents/skills/`) | non | non : aucun hook documenté (tâche CLI Claude Code gouvernée) | non |
 
 « Hooks bloquants : oui » exige une capture réelle d'un refus sur l'hôte, versée
 sous `tests/fixtures/hosts/<hôte>/` et nommée par le profil
@@ -80,8 +86,10 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   écrites dans le hook `PreToolUse`, avec la même formulation de refus. Ses
   journaux (#1280) ne montrent que des entrées de hook, aucun refus : garde et
   gate de clôture restent `advisory` tant qu'un refus n'est pas capturé.
-- opencode n'a ni table de permissions prouvée ni autre hook sondé que
-  `tool.execute.before` : exécution, écriture et lecture de secrets passent par
+- opencode n'a pas de table de permissions prouvée. Le plugin câble deux
+  événements : `tool.execute.before` (garde prouvée) et `session.idle` (fin de
+  tour, consultative : la décision de clôture est journalisée, rien ne la
+  refuse ; voir « opencode et Gemini CLI » ci-dessous). Exécution, écriture et lecture de secrets passent par
   le plugin `.opencode/plugin/grimoire-guard.js` (même décision, même
   formulation de refus) ; une décision `ask` y est refusée avec son motif, un
   plugin ne pouvant pas interroger l'utilisateur ; si `grimoire-hook` est
@@ -94,10 +102,11 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   aucune capture), donc `advisory` ; pas de blocage au début de session
   (`SessionStart` n'est que consultatif), fin de tour non vérifiée
   (`AfterAgent`/`SessionEnd` reçoivent la décision de clôture mais aucun verdict
-  bloquant n'est promis), aucune session d'agent détachée documentée, et pas de
-  chargement de compétences à la demande (leurs corps sont copiés sous
-  `_grimoire/hosts/skills/`). Les règles de permissions sont écrites dans le hook
-  `BeforeTool`, faute de table déclarative.
+  bloquant n'est promis) et aucune session d'agent détachée documentée. Les
+  règles de permissions sont écrites dans le hook `BeforeTool`, faute de table
+  déclarative. Sous Antigravity, seuls `GEMINI.md` et les compétences de
+  `.agents/skills/` s'appliquent : ses hooks, agents et serveurs MCP ne sont pas
+  émis (dégradations `antigravity hooks`, `antigravity agents`, `antigravity mcp`).
 - Codex écrit des hooks, des compétences, des sous-agents et un serveur MCP
   (détail dans « Codex » ci-dessous). Ses hooks restent **consultatifs** : un hook
   de projet ne s'exécute qu'après approbation via `/hooks`, et aucun refus n'a été
@@ -106,6 +115,8 @@ comme **dégradation**, avec son repli, et remonté par `grimoire host status` :
   de hooks de Cursor »). La garde est écrite d'après la documentation de Cursor,
   mais aucun refus n'a été observé sur un Cursor réel : elle reste déclarée
   `advisory` dans la matrice, jamais `enforced`, et la CI reste l'autorité.
+- Kimi Code et Zed n'ont aucune garde, et c'est déclaré : voir « Kimi Code et
+  Zed » ci-dessous.
 - Un hôte en prose n'a pas de hooks : la gouvernance y est
   énoncée comme règle dans le fichier d'entrée, et n'est opposable qu'en CI. Le
   catalogue le dit explicitement plutôt que de laisser croire à une protection.
@@ -212,6 +223,132 @@ depuis la racine git (`"$(git rev-parse --show-toplevel)"/.venv/bin/grimoire-hoo
 forme que la page des hooks donne en exemple : Codex lance ses hooks dans le
 dossier courant de la session, qui peut être un sous-dossier.
 
+## opencode et Gemini CLI
+
+Sources relues le 2026-11-22 :
+[Gemini CLI — Skills](https://geminicli.com/docs/cli/skills/),
+[Creating skills](https://geminicli.com/docs/cli/creating-skills/),
+[Subagents](https://geminicli.com/docs/core/subagents/),
+[accueil de la doc](https://geminicli.com/docs/) (bascule vers Antigravity CLI le
+18 juin 2026 pour les comptes gratuits et Google One) ;
+[Antigravity — Customization discovery](https://antigravity.google/docs/customization-discovery),
+[Skills](https://antigravity.google/docs/skills),
+[Hooks](https://antigravity.google/docs/hooks) ;
+[opencode V1 — Plugins](https://opencode.ai/docs/en/plugins/),
+[Agents](https://opencode.ai/docs/en/agents/),
+[V2 — Server plugins](https://opencode.ai/docs/build/plugins/server).
+
+| Hôte | Fichier | Contenu |
+|---|---|---|
+| Gemini CLI | `.agents/skills/<slug>/SKILL.md` | `name` (égal au dossier) et `description`, puis le corps ; alias documenté de `.gemini/skills/`, qu'il prime, activé à la demande (`activate_skill`) |
+| Gemini CLI | `.gemini/agents/<nom>.md` | `model` seulement si `dispatch.models.gemini.<palier>` le nomme ; sinon `inherit` (défaut documenté : modèle de la session) |
+| Antigravity | `.agents/skills/`, `GEMINI.md` | les mêmes fichiers : Antigravity lit `.agents/skills/<nom>/SKILL.md` et prend `GEMINI.md` pour une règle |
+| opencode | `.opencode/agent/<nom>.md` | `model` (`provider/model-id`) seulement si `dispatch.models.opencode.<palier>` le nomme ; sinon un sous-agent hérite du modèle de l'agent principal |
+| opencode | `.opencode/plugin/grimoire-guard.js` | en plus de la garde `tool.execute.before`, un gestionnaire `event` qui, sur `session.idle`, lance `grimoire-hook --host opencode --event Stop` et journalise le refus de clôture par `client.app.log` (niveau `warn`) |
+
+**Un dossier, trois lecteurs.** Codex, Gemini CLI et Antigravity lisent tous
+`.agents/skills/`. Les émetteurs Codex et Gemini y écrivent le même octet (même
+frontmatter, même liste de compétences) et possèdent le même motif : synchronisés
+ensemble, aucun ne retire le fichier de l'autre, et une compétence écrite à la
+main dans ce dossier reste à vous. Les anciennes copies
+`_grimoire/hosts/skills/*.md` ne sont plus écrites pour Gemini ; elles restent sur
+le disque, car Cursor (repli) et les hôtes en prose utilisent ce dossier.
+
+**Fin de tour opencode : consultative.** La doc V1 liste `session.idle` parmi les
+événements de session, sans aucun moyen de refuser la fin d'un tour ni de relancer
+l'agent ; les hooks serveur de la V2 n'en documentent pas davantage. Le kit
+déclare donc `stop` comme déclenché (`hook_events`) mais jamais bloquant :
+`HostProfile.blocking_events` d'opencode se limite à `pre_tool_use`, la matrice
+rend `hook:stop` `advisory`, et le refus sort en `systemMessage` au lieu de
+`decision: block`. Observé le 22 novembre 2026 sur opencode 1.17.11, avec un
+fournisseur local factice (`tests/fixtures/hosts/opencode/02-session-idle-stop-advisory.json`) :
+`session.idle` arrive à la fin du tour avec `properties.sessionID`, le plugin
+journalise le verdict, et le tour se termine quand même. Ce n'est pas une capture
+de refus : elle ne figure pas dans `blocking_captures`.
+
+**Antigravity : le minimum.** Antigravity documente aussi des hooks dans
+`.agents/hooks.json` (`PreToolUse` avec `decision: deny`, `Stop` avec
+`decision: continue`), des agents dans `.agents/agents/` et des serveurs MCP dans
+`.agents/mcp_config.json`. Le kit n'a ni dialecte de hook ni capture pour cet
+hôte, et ne lit pas `.gemini/settings.json` sous Antigravity : rien de cela n'est
+émis, et chaque surface est une dégradation déclarée. Sous Antigravity, aucune
+garde ne tourne ; la CI reste l'autorité.
+
+## Kimi Code et Zed
+
+Deux hôtes de plus (#1281, lot L8 ; #725 pour Zed), tous deux **sans garde**. Rien
+n'y est annoncé bloquant, ni même consultatif : `grimoire host list` les montre
+« Hooks bloquants : non », la matrice les rend en prose et la parité déclare
+`tool_guard`, `write_trace` et `task_recall` absents. Aucun des deux n'est installé
+sur le poste du kit : ce qui suit vient de leur documentation, relue le
+22 novembre 2026.
+
+**Kimi Code** (CLI de Moonshot, binaire `kimi`, 2.7.2 annoncée ;
+[agents](https://moonshotai.github.io/kimi-code/en/customization/agents.html),
+[skills](https://moonshotai.github.io/kimi-code/en/customization/skills.html),
+[MCP](https://moonshotai.github.io/kimi-code/en/customization/mcp.html),
+[hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks.md)) :
+
+| Fichier | Ce que le kit y met |
+|---|---|
+| `.kimi-code/agents/<nom>.md` | une persona par fichier : frontmatter `name` (kebab-case, sinon refusé et déclaré) et `description`, le corps est le prompt système. Lancer par `kimi --agent <nom>` |
+| `.agents/skills/<slug>/SKILL.md` | les compétences, même écrivain que Codex et Gemini |
+| `.kimi-code/mcp.json` | `mcpServers.grimoire` s'il manque ; le reste du fichier est à l'utilisateur. Un `mcpServers` qui n'est pas un objet, ou un fichier qui n'est pas du JSON strict, est préservé et signalé |
+| `AGENTS.md` | un bloc délimité, seulement si `kimi` est déclaré dans `hosts.enabled` **sans** `codex` : Codex écrit le même bloc, et deux écrivains s'écraseraient. Sinon, dégradation `instructions` |
+
+Dégradations déclarées :
+
+- `hooks` : Kimi Code documente des hooks bloquants (`PreToolUse`,
+  `UserPromptSubmit`, `Stop`), mais seulement dans `~/.kimi-code/config.toml` ou
+  un plugin. La doc l'écrit : « there is no project-level hook file ». Le kit
+  n'écrit pas la configuration de l'utilisateur.
+- `model affinity` : le champ `model` d'un agent est ignoré par Kimi Code, il
+  n'est jamais émis, même si `dispatch.models.kimi` déclare un palier.
+- `tool boundary` : `tools` n'est pas émis, car la doc relue ne liste pas les
+  noms d'outils.
+- `subagents` : l'agent par défaut ne délègue qu'à `coder`, `explore` et `plan`.
+- `commands` : aucune commande de projet n'est documentée.
+- `mcp trust` : `.kimi-code/mcp.json` n'est chargé qu'une fois l'espace de
+  travail approuvé.
+
+ACP : `kimi acp`.
+
+**Zed** ([instructions](https://zed.dev/docs/ai/instructions),
+[skills](https://zed.dev/docs/ai/skills), [MCP](https://zed.dev/docs/ai/mcp),
+[réglages](https://zed.dev/docs/reference/all-settings),
+[tâches](https://zed.dev/docs/tasks),
+[worktree trust](https://zed.dev/docs/worktree-trust)) :
+
+| Fichier | Ce que le kit y met |
+|---|---|
+| `.rules` | un bloc délimité : personas, compétences, commandes `grimoire host run <slug>`, gouvernance énoncée. Zed ne lit que le **premier** fichier de sa liste (`.rules`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`, `AGENT.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) : `.rules` passe devant les autres, qu'il cite donc, à lire par l'agent |
+| `.agents/skills/<slug>/SKILL.md` | les compétences. Zed n'admet que `[a-z0-9-]`, 64 caractères au plus : un autre nom est écrit pour les autres hôtes et déclaré ignoré (`skill names`) |
+| `.zed/settings.json` | `context_servers.grimoire` (`command`, `args`) s'il manque ; le reste est à l'utilisateur. Zed accepte des commentaires dans ce fichier (JSONC) : un fichier qui n'est pas du JSON strict est préservé et signalé, jamais réécrit |
+| `.zed/tasks.json` | si Claude Code est déclaré (ou `.claude/` présent sans déclaration), la tâche « Claude Code (gouverné) » : `claude`, `cwd: $ZED_WORKTREE_ROOT`, `use_new_terminal: true`. Les tâches de l'utilisateur restent ; celle du kit est reconnue à son libellé et sa commande exacts |
+
+La tâche est le **mode gouverné** proposé par #725 : la CLI Claude Code dans le
+terminal de Zed garde tous ses hooks. Dans l'agent de Zed lui-même, rien n'est
+gardé. Le fil ACP « Claude Agent » n'exécuterait pas les hooks de Claude Code :
+c'est le constat de #725, toujours sans test.
+
+Dégradations déclarées :
+
+- `hooks` : aucun hook de cycle de vie documenté.
+- `subagents` : l'agent délègue par `spawn_agent`, sans fichier d'agent.
+- `commands` : aucune commande de projet.
+- `permissions` et `profiles` : `agent.tool_permissions` et `agent.profiles`
+  existent, mais leur lecture dans les réglages de projet n'est pas documentée.
+- `model affinity` : il n'y a pas de fichier d'agent où écrire un `model`.
+- `worktree trust` : réglages, serveurs MCP et tâches du projet ne s'appliquent
+  qu'à un worktree approuvé.
+- `instructions` : `.rules` passe devant les autres fichiers d'instructions.
+
+Zed est un client ACP, pas un agent : il n'a pas de commande `grimoire chat`.
+
+`grimoire host probe --capabilities` déclare Kimi Code et Zed non sondables, avec la
+raison : aucun des deux n'a de hook de projet où poser le hook témoin, et la sonde
+n'écrit jamais la configuration de l'utilisateur.
+
 ## Ce que le kit a observé (contrats réels)
 
 Le tableau ci-dessus dit ce que le kit sait **écrire** pour un hôte. Il ne dit pas
@@ -228,7 +365,7 @@ et rendent un contrat entièrement non vérifié (donc non fencé) si elle est
 absente, inconnue ou différente de la version capturée. `recorded_contract(host)`
 ne sert qu'à auditer la table.
 
-| Capacité | Claude Code 2.1.301 | opencode 1.17.11 | Copilot, Codex, Cursor, Gemini |
+| Capacité | Claude Code 2.1.301 | opencode 1.17.11 | Copilot, Codex, Cursor, Gemini, Kimi Code, Zed |
 |---|---|---|---|
 | `pretooluse_deny` : un refus arrête l'outil | vérifiée (exit 2 + stderr, ou `permissionDecision: deny` ; l'agent reçoit le motif) | **vérifiée** : un plugin lève une `Error` dans `tool.execute.before`, l'outil ne s'exécute pas, l'agent reçoit le motif (fixture) | non vérifié |
 | `session_end` | vérifiée, sortie propre de `claude -p` seulement (kill non observé) | non vérifié | non vérifié |
@@ -390,6 +527,152 @@ Les fixtures remplacent les chemins personnels, l'utilisateur et les
 identifiants de session par des marqueurs ; un test refuse tout chemin, courriel
 ou jeton.
 
+## Sonder les capacités d'un hôte à l'exécution
+
+Codex, Cursor, Gemini CLI et Copilot documentent un refus avant outil que
+personne n'a observé : leur garde reste consultative. `grimoire host probe
+--capabilities` produit, sur votre poste et pour la version installée, la
+capture qui manque. Seule une capture versée change une annonce.
+
+```bash
+grimoire host probe --capabilities                  # détection : binaire et version, gratuite
+grimoire host probe --capabilities --host cursor --run   # une session réelle, payante
+grimoire host probe --promote _grimoire-output/host-probes/cursor/<capture>.json   # clone du kit
+```
+
+**Détection (par défaut).** Pour chaque hôte connu, la commande cherche le
+binaire sur le `PATH` (`cursor-agent` puis `agent`, `codex`, `gemini`, `agy`,
+`opencode`, `copilot` ; un `agent` générique n'est retenu que si son chemin
+réel nomme Cursor), lit sa version par `--version` et affiche la dernière
+sonde locale. Rien d'autre n'est lancé.
+
+**Session (`--run`, opt-in).** La sonde coûte des appels modèle à l'hôte, avec
+vos identifiants. Pour chaque hôte installé dont la version se lit, elle lance
+**une** session non interactive dans un projet jetable, créé sous le dossier
+temporaire du système et supprimé à la fin. Un hook témoin du kit, posé au
+format de l'hôte, refuse tout outil. La consigne demande une action
+inoffensive : `touch probe-target-<aléa>.txt` dans le projet jetable, avec un
+nom propre à la session. La capture garde chaque appel reçu par le hook
+(événement, outil, arguments), ce qu'il a rendu, et dit où le fichier visé
+existe : dans tout le dossier temporaire, dans le dossier courant et à la racine
+de votre dossier personnel (rien d'autre n'est lu).
+
+Avant de lancer quoi que ce soit, `--run` affiche, pour chaque hôte, les
+drapeaux d'auto-approbation, le modèle, le coût et le nom des variables
+transmises, puis demande confirmation. Hors terminal interactif, il refuse sans
+`--yes`. Avec `-o json`, ce plan part sur la sortie d'erreur.
+
+| Hôte | Session lancée | Hook témoin | Sources |
+|---|---|---|---|
+| Cursor CLI | `agent -p … --output-format json --force --trust` | `.cursor/hooks.json` (`preToolUse`, `beforeShellExecution`), code 2 et `permission: deny` | [headless](https://cursor.com/docs/cli/headless), [hooks](https://cursor.com/docs/hooks) |
+| Codex CLI | `codex exec --json --skip-git-repo-check --sandbox workspace-write --dangerously-bypass-hook-trust …` | `.codex/hooks.json` (`PreToolUse`), code 2 et `permissionDecision: deny` | [mode non interactif](https://learn.chatgpt.com/docs/non-interactive-mode), [hooks](https://learn.chatgpt.com/docs/hooks) |
+| Gemini CLI | `gemini -p … --output-format json --approval-mode yolo`, `GEMINI_CLI_TRUST_WORKSPACE=true` | `.gemini/settings.json` (`BeforeTool`), code 2 | [headless](https://geminicli.com/docs/cli/headless), [hooks](https://geminicli.com/docs/hooks), [dossiers de confiance](https://geminicli.com/docs/cli/trusted-folders) |
+| Antigravity CLI | `agy -p … --dangerously-skip-permissions --print-timeout <délai>s` | `.agents/hooks.json` (`PreToolUse`), `decision: deny` | [headless](https://antigravity.google/docs/cli/headless), [hooks](https://antigravity.google/docs/hooks) |
+| opencode | `opencode run --format json …` | plugin `.opencode/plugin/grimoire-probe.js` qui lève une `Error` dans `tool.execute.before` | [CLI](https://opencode.ai/docs/cli/), [plugins](https://opencode.ai/docs/plugins/) |
+| Copilot CLI | `copilot -p … --output-format json --allow-all-tools --trust-folder` | `.github/hooks/grimoire-probe.json` (`preToolUse`), code 2 et `permissionDecision: deny` | [mode programmatique](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference), [hooks](https://docs.github.com/en/copilot/reference/hooks-reference) |
+
+Les drapeaux d'auto-approbation (`--force`, `--approval-mode yolo`,
+`--dangerously-skip-permissions`, `--allow-all-tools`) ne valent que pour le
+projet jetable : sans eux, le mode non interactif refuse l'outil avant le hook,
+et la capture ne dirait rien du hook. Le refus observé est celui du hook témoin.
+Les drapeaux de confiance (`--trust`, `--trust-folder`,
+`--dangerously-bypass-hook-trust`) ne valent que pour cette session : rien
+n'est enregistré dans vos dossiers de confiance.
+
+Bornes de la session :
+
+- **une** session par hôte, jamais de nouvel essai ;
+- un délai de 120 s par défaut (`--timeout`, plafonné à 300 s) ;
+- le modèle du palier `cheap` déclaré pour cet hôte dans
+  `dispatch.models` (voir [Fournisseurs](cli/fournisseurs.md#table-palier-modele-hote-fournisseur)),
+  sinon aucun `--model` : le défaut de l'hôte ;
+- un binaire dont la version ne se lit pas (lanceur d'installation, shim) n'est
+  pas lancé : la capture ne prouverait aucune version ;
+- l'environnement transmis est une liste blanche : `PATH`, `HOME`, `USER`,
+  `LANG`, `LC_*`, `TERM`, `TMPDIR`, `XDG_*`, plus les seules variables
+  d'authentification de l'hôte visé (par exemple `CURSOR_API_KEY` pour Cursor,
+  `COPILOT_GITHUB_TOKEN` pour Copilot). Le reste, dont l'agent SSH et les autres
+  jetons, n'est pas transmis ;
+- la session tourne dans son propre groupe de processus : au délai dépassé, tout
+  le groupe est tué ;
+- la capture ne garde de chaque charge que l'événement, l'outil et ses
+  arguments. Elle masque le projet jetable (`<PROJECT>`) et votre dossier
+  personnel (`~`), et remplace par `<REDACTED>` tout ce qui ressemble à un
+  courriel, un jeton GitHub, une clé `sk-`, un identifiant AWS ou un JWT.
+
+**Risque résiduel.** L'hôte tourne avec votre `HOME`, où il lit sa connexion :
+il peut donc y écrire, et il charge vos configurations globales (hooks, règles,
+serveurs MCP), qui s'ajoutent au hook témoin. Les drapeaux d'auto-approbation
+valent pour toute la session. La consigne est inoffensive, mais un modèle peut
+s'en écarter.
+
+**La capture.** Elle est écrite dans
+`_grimoire-output/host-probes/<hôte>/<date>-<version>-pretooluse_deny.json` du
+projet courant, jamais sous `tests/fixtures`. Elle reprend la forme des
+captures versées (`host`, `host_version`, `capability`, `captured_on`,
+`captured_with`, `setup`, `observed`, `payloads`) et ajoute `verdict`,
+`probed_at`, `model` et les sources :
+
+| Verdict | Ce qui a été observé |
+|---|---|
+| `refused` | le hook a reçu la commande demandée (le fichier visé est dans les arguments de l'outil), le fichier n'existe nulle part où il est cherché, et la sortie de l'hôte porte le refus |
+| `executed` | fichier trouvé : le refus n'a pas arrêté l'action, ou le hook n'a pas tourné |
+| `inconclusive` | aucune de ces deux conclusions : hook jamais appelé, appelé pour un autre outil, ou refus absent de la sortie de l'hôte |
+| `error` | binaire absent, version illisible, délai dépassé ou session interrompue |
+
+`grimoire host status` et `grimoire host matrix` affichent la date, la version
+et le verdict de la dernière sonde locale de chaque hôte (`local_probes` en
+JSON). Ces lignes sont informatives : elles ne changent ni la matrice, ni
+`blocking_hooks`, ni `host list`.
+
+### Verser une capture (geste humain)
+
+La sonde ne verse jamais rien. Une personne relit la capture (charge reçue,
+sortie rendue, absence de donnée personnelle), puis lance depuis un clone du
+kit :
+
+```bash
+grimoire host probe --promote <capture>.json [--fixtures-root tests/fixtures/hosts]
+```
+
+La commande refuse une capture qui ne montre pas un refus honoré, et refait
+pour cela les contrôles de la sonde :
+
+- verdict `refused`, `tool_executed` faux, hook appelé ;
+- un appel enregistré porte le fichier visé dans ses arguments ;
+- la sortie de l'hôte porte le refus ;
+- le code de sortie et la sortie du hook sont exactement ceux du hook témoin pour
+  cet hôte (ou l'exception du plugin pour opencode) ;
+- `host`, `host_id` et le binaire de `captured_with` correspondent à l'hôte
+  sondé.
+
+`capture_shows_refusal` ne lit le champ de décision à plat que dans le dialecte
+de l'hôte de la capture (`permission` pour Cursor, `permissionDecision` pour
+Copilot, `decision` pour Gemini et Antigravity), et un seul champ de décision
+qui vaut autre chose que `deny` invalide la capture.
+
+Elle refuse aussi Antigravity (aucun profil d'hôte à part : une capture `agy`
+ne prouve rien pour Gemini CLI), une version absente, une fixture déjà versée,
+un manifeste qui prouve d'autres capacités sur une autre version, et une preuve
+`pretooluse_deny` déjà versée pour une autre version, sauf `--replace`. Elle
+affiche le contenu versé, à relire avant tout commit. Sinon, elle copie la capture en
+`tests/fixtures/hosts/<hôte>/01-pretooluse-deny-probe-<version>.json`, met à
+jour `manifest.json` (`host_version`, `pretooluse_deny` vérifié) et liste ce
+qui reste à éditer à la main :
+
+1. le contrat de l'hôte dans `grimoire/hosts/capabilities.py` (`host_version`,
+   preuve `pretooluse_deny`) ;
+2. le profil de l'hôte : `blocking_hooks=True`,
+   `blocking_events=frozenset({HookEvent.PRE_TOOL_USE})`, `blocking_captures`
+   avec la fixture ;
+3. `PROVEN` et `DOCUMENTED_ONLY` dans
+   `tests/unit/hosts/test_blocking_needs_capture.py`.
+
+Tant que ces trois gestes manquent, `tests/unit/test_host_contracts.py` échoue
+(manifeste et contrat divergent). Une fois faits,
+`tests/unit/hosts/test_blocking_needs_capture.py` relit la fixture et refuse
+toute capture qui ne montre pas un refus (`capture_shows_refusal`).
+
 ## Hôtes activés
 
 `grimoire host sync` émettait, par défaut, la surface des cinq hôtes connus —
@@ -403,13 +686,14 @@ séparé.
 
 ```yaml
 hosts:
-  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini, opencode
+  enabled: [claude, copilot]   # sous-ensemble de : claude, copilot, codex, cursor, gemini, opencode, kimi, zed
 ```
 
 **Absence de la clé** : le comportement bascule en détection — un hôte est
 émis s'il a déjà des fichiers dans le dépôt (`.claude/` → claude,
 `.github/copilot-instructions.md` ou `.github/agents/` → copilot, `GEMINI.md`
-→ gemini, `.cursor/` → cursor, `.opencode/` ou `opencode.json` → opencode, `AGENTS.md` **et** `.codex` → codex), et
+→ gemini, `.cursor/` → cursor, `.opencode/` ou `opencode.json` → opencode, `AGENTS.md` **et** `.codex` → codex,
+`.kimi-code/` → kimi, `.zed/` → zed), et
 `claude` seul si rien n'est détecté. Un projet existant qui n'a jamais connu
 cette clé garde donc exactement les fichiers qu'il a déjà — rien ne se
 supprime au premier `grimoire up` qui suit une mise à jour du kit.
@@ -655,12 +939,11 @@ variable de racine par Gemini CLI.
 
 Le reste de la surface suit : `.gemini/commands/grimoire/*.toml` (champ
 `prompt` requis, `{{args}}` pour les arguments), `.gemini/agents/*.md` avec le
-frontmatter de l'hôte (`name`, `description`, `tools`, `max_turns` ; `model`
-n'est pas émis, faute de correspondance documentée entre l'affinité neutre du
-kit et un nom de modèle), et `GEMINI.md` réduit à un bloc court portant les
-imports `@` des fichiers de mémoire présents. Les compétences, sans chargement
-à la demande sur cet hôte, sont copiées sous `_grimoire/hosts/skills/` et
-listées là. Les chemins émis sont gérés par les mêmes mécanismes que les autres
+frontmatter de l'hôte (`name`, `description`, `tools`, `max_turns`, et `model`
+pour le seul palier que `dispatch.models.gemini` traduit), et `GEMINI.md` réduit
+à un bloc court portant les imports `@` des fichiers de mémoire présents. Les
+compétences sont écrites au format natif dans `.agents/skills/<slug>/SKILL.md`
+(voir « opencode et Gemini CLI »). Les chemins émis sont gérés par les mêmes mécanismes que les autres
 émetteurs (marqueur et empreinte, conflits `edited`/`foreign`, nettoyage des
 fichiers périmés) ; `grimoire doctor` et `grimoire host probe` les contrôlent
 comme ceux des autres hôtes.

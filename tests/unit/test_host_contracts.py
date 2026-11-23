@@ -45,6 +45,8 @@ HOST_DIRS: dict[HostId, str] = {
     HostId.CURSOR: "cursor",
     HostId.GEMINI_CLI: "gemini",
     HostId.OPENCODE: "opencode",
+    HostId.KIMI_CODE: "kimi-code",
+    HostId.ZED: "zed",
 }
 
 

@@ -313,7 +313,9 @@ GEMINI_PROFILE = HostProfile(
     host_id=HostId.GEMINI_CLI,
     display_name="Gemini CLI",
     subagents_native=True,
-    skills_native=False,
+    # `.agents/skills/<slug>/SKILL.md`, activées à la demande (`activate_skill`) :
+    # geminicli.com/docs/cli/skills (lue le 2026-11-22) ; Antigravity lit le même dossier.
+    skills_native=True,
     commands_native=True,
     # BeforeTool et BeforeAgent documentent un refus (`decision: deny`, code 2) ;
     # AfterAgent/SessionEnd sont des hooks, pas des points de blocage. Aucune capture
@@ -333,6 +335,9 @@ GEMINI_PROFILE = HostProfile(
     notes=(
         "Hooks, commandes TOML, sous-agents et MCP sont écrits d'après geminicli.com/docs "
         "(lue le 2026-11-12, v0.64.0 annoncée ; CLI non installée sur le poste). "
+        "Compétences natives dans `.agents/skills/` et `model` d'un sous-agent tiré de "
+        "`dispatch.models.gemini` (relu le 2026-11-22) ; Antigravity lit ces compétences et `GEMINI.md`, "
+        "ses hooks (`.agents/hooks.json`), agents et MCP ne sont pas émis. "
         "BeforeTool et BeforeAgent documentent un refus, jamais observé : garde advisory ; "
         "SessionStart/AfterTool/PreCompress informent ; le blocage de fin de tour (AfterAgent) et le "
         "format des fichiers de session ne sont pas vérifiés. Aucune session d'agent détachée documentée."
@@ -345,9 +350,11 @@ OPENCODE_PROFILE = HostProfile(
     subagents_native=True,
     skills_native=True,
     commands_native=True,
-    # Pas de ``blocking_events`` : opencode ne déclenche que `tool.execute.before`
-    # (PreToolUse), le seul événement prouvé ; le rendu des autres reste inchangé.
+    # Seul `tool.execute.before` (PreToolUse) est prouvé bloquant. `session.idle`
+    # alimente la décision `stop` (opencode.ai/docs/en/plugins, lue le 2026-11-22), mais
+    # aucun moyen de refuser la fin de tour n'est documenté : advisory, sans capture.
     blocking_hooks=True,
+    blocking_events=frozenset({HookEvent.PRE_TOOL_USE}),
     blocking_captures=(
         "opencode/01-pretooluse-control-allow.json",
         "opencode/01-pretooluse-deny-throw.json",
@@ -358,14 +365,77 @@ OPENCODE_PROFILE = HostProfile(
     acp_command=("opencode", "acp"),
     notes=(
         "Agents, skills, commands et MCP sont chargés depuis .opencode/ et opencode.json (vérifié, 1.17.11). "
-        "Le seul hook est un plugin : tool.execute.before refuse un outil (fixture). Pas de SessionStart, "
-        "Stop ni PostToolUse sondés ; table de permissions non émise (non vérifiée)."
+        "Le plugin de garde refuse un outil dans tool.execute.before (fixture) et rend la décision de "
+        "clôture sur l'événement session.idle, journalisée sans blocage (observé le 2026-11-22 : "
+        "opencode/02-session-idle-stop-advisory.json ; aucun refus de fin de tour documenté). `model` d'un agent tiré de `dispatch.models.opencode` (format "
+        "provider/model-id). Pas de SessionStart ni PostToolUse ; table de permissions non émise (non vérifiée)."
+    ),
+)
+
+KIMI_CODE_PROFILE = HostProfile(
+    host_id=HostId.KIMI_CODE,
+    display_name="Kimi Code",
+    # `.kimi-code/agents/<nom>.md` (frontmatter `name`, `description`), lancés par
+    # `kimi --agent <nom>` : moonshotai.github.io/kimi-code/en/customization/agents (lue le 2026-11-22).
+    subagents_native=True,
+    # `.agents/skills/<slug>/SKILL.md` : moonshotai.github.io/kimi-code/en/customization/skills.
+    skills_native=True,
+    commands_native=False,
+    # Hooks bloquants documentés (PreToolUse, UserPromptSubmit, Stop), mais seulement dans
+    # `~/.kimi-code/config.toml` ou un plugin : aucun fichier de hooks de projet. Le kit n'en
+    # écrit aucun, rien n'est déclaré bloquant ni même consultatif.
+    blocking_hooks=False,
+    blocking_events=frozenset(),
+    agent_autostart=True,
+    permissions_native=False,
+    mcp_native=True,
+    instructions_entrypoint="AGENTS.md",
+    acp_command=("kimi", "acp"),
+    notes=(
+        "Agents (.kimi-code/agents/), compétences (.agents/skills/), MCP (.kimi-code/mcp.json) et AGENTS.md "
+        "écrits d'après moonshotai.github.io/kimi-code/en (lue le 2026-11-22, Kimi Code 2.7.2 annoncée ; CLI "
+        "non installée). Hooks documentés au niveau utilisateur seulement (« no project-level hook file ») : "
+        "aucune garde émise. Pas de `model` par agent (champ ignoré), pas de commandes de projet ; le MCP de "
+        "projet n'est chargé qu'une fois l'espace de travail approuvé. Démarrer dans un agent : `kimi --agent <nom>`."
+    ),
+)
+
+ZED_PROFILE = HostProfile(
+    host_id=HostId.ZED,
+    display_name="Zed",
+    # L'agent de Zed délègue par `spawn_agent`, mais ne charge aucun fichier de définition d'agent.
+    subagents_native=False,
+    # `<worktree>/.agents/skills/<slug>/SKILL.md` : zed.dev/docs/ai/skills (lue le 2026-11-22).
+    skills_native=True,
+    commands_native=False,
+    # Aucun hook de cycle de vie documenté pour l'agent de Zed ; le fil ACP « Claude Agent »
+    # n'exécuterait pas les hooks de Claude Code (#725, non vérifié).
+    blocking_hooks=False,
+    blocking_events=frozenset(),
+    permissions_native=False,
+    mcp_native=True,
+    instructions_entrypoint=".rules",
+    notes=(
+        "Instructions (.rules, premier fichier de la liste que Zed lit), compétences (.agents/skills/) et "
+        "`context_servers` de .zed/settings.json écrits d'après zed.dev/docs (ai/instructions, ai/skills, "
+        "ai/mcp ; lue le 2026-11-22, Zed non installé). Aucun hook : hôte sans garde. Réglages, serveurs MCP "
+        "et tâches du projet ne s'appliquent qu'à un worktree approuvé (Restricted Mode). Mode gouverné : la "
+        "tâche .zed/tasks.json « Claude Code (gouverné) » lance la CLI dans le terminal de Zed (#725)."
     ),
 )
 
 _PROFILES: dict[HostId, HostProfile] = {
     p.host_id: p
-    for p in (CLAUDE_CODE_PROFILE, COPILOT_PROFILE, CODEX_PROFILE, CURSOR_PROFILE, GEMINI_PROFILE, OPENCODE_PROFILE)
+    for p in (
+        CLAUDE_CODE_PROFILE,
+        COPILOT_PROFILE,
+        CODEX_PROFILE,
+        CURSOR_PROFILE,
+        GEMINI_PROFILE,
+        OPENCODE_PROFILE,
+        KIMI_CODE_PROFILE,
+        ZED_PROFILE,
+    )
 }
 
 #: Short ids accepted on the command line, mapped to their host.
@@ -381,6 +451,9 @@ HOST_ALIASES: dict[str, HostId] = {
     "gemini": HostId.GEMINI_CLI,
     "gemini-cli": HostId.GEMINI_CLI,
     "opencode": HostId.OPENCODE,
+    "kimi": HostId.KIMI_CODE,
+    "kimi-code": HostId.KIMI_CODE,
+    "zed": HostId.ZED,
 }
 
 
@@ -702,8 +775,9 @@ _COPILOT_STATES: dict[GovernanceFunction, FunctionState] = {
 
 _OPENCODE_STATES: dict[GovernanceFunction, FunctionState] = {
     GovernanceFunction.TOOL_GUARD: _RICH,
-    GovernanceFunction.WRITE_TRACE: _absent(
-        "seul `tool.execute.before` est exposé : ni comptage des écritures (PostToolUse) ni refus de clôture (Stop)"
+    GovernanceFunction.WRITE_TRACE: _degraded(
+        "la décision de clôture est rendue sur `session.idle` et journalisée (`client.app.log`), sans refus : "
+        "opencode ne documente aucun blocage de fin de tour ; pas de comptage des écritures (PostToolUse)"
     ),
     GovernanceFunction.TASK_RECALL: _absent(
         "aucun SessionStart ni UserPromptSubmit : le rappel de tâche n'est pas émis"
@@ -711,6 +785,62 @@ _OPENCODE_STATES: dict[GovernanceFunction, FunctionState] = {
     GovernanceFunction.COMMANDS: _RICH,
     GovernanceFunction.PERSONAS: _RICH,
     GovernanceFunction.MCP_SERVER: _RICH,
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
+
+#: Kimi Code (L8 de #1281) : hooks documentés au niveau utilisateur seulement, aucun fichier
+#: de hooks de projet (moonshotai.github.io/kimi-code/en/customization/hooks, lue le 2026-11-22).
+_KIMI_NO_PROJECT_HOOK = (
+    "Kimi Code n'accepte de hooks que dans `~/.kimi-code/config.toml` ou un plugin, aucun fichier de projet"
+)
+_KIMI_CODE_STATES: dict[GovernanceFunction, FunctionState] = {
+    GovernanceFunction.TOOL_GUARD: _absent(
+        f"{_KIMI_NO_PROJECT_HOOK} : aucune garde émise, la politique d'outils est énoncée dans AGENTS.md, "
+        "opposable en CI"
+    ),
+    GovernanceFunction.WRITE_TRACE: _absent(f"{_KIMI_NO_PROJECT_HOOK} : ni comptage d'écritures ni clôture bloquée"),
+    GovernanceFunction.TASK_RECALL: _absent(f"{_KIMI_NO_PROJECT_HOOK} : le rappel de tâche n'est pas émis"),
+    GovernanceFunction.COMMANDS: _degraded(
+        "aucun emplacement de commande de projet documenté ; chaque commande est l'invocation "
+        "`grimoire host run <slug>` décrite dans AGENTS.md"
+    ),
+    GovernanceFunction.PERSONAS: _degraded(
+        "agents écrits dans `.kimi-code/agents/` et lancés par `kimi --agent <nom>` ; l'agent par défaut ne "
+        "les délègue pas (ses sous-agents restent coder, explore, plan) et la frontière d'outils n'est "
+        "qu'énoncée"
+    ),
+    GovernanceFunction.MCP_SERVER: _degraded(
+        "serveur ajouté à `.kimi-code/mcp.json`, chargé seulement une fois l'espace de travail approuvé"
+    ),
+    GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
+    GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
+    GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
+    GovernanceFunction.PILOT: _degraded(_PILOT_SHARED),
+}
+
+#: Zed (L8 de #1281, #725) : aucun hook de cycle de vie documenté pour son agent (zed.dev/docs, lue
+#: le 2026-11-22). La CLI Claude Code lancée par la tâche du kit garde ses hooks, mais c'est Claude Code.
+_ZED_NO_HOOK = "Zed ne documente aucun hook de cycle de vie pour son agent"
+_ZED_STATES: dict[GovernanceFunction, FunctionState] = {
+    GovernanceFunction.TOOL_GUARD: _absent(
+        f"{_ZED_NO_HOOK} : aucune garde ; la tâche `.zed/tasks.json` « Claude Code (gouverné) » lance la CLI "
+        "Claude Code, gardée par ses propres hooks"
+    ),
+    GovernanceFunction.WRITE_TRACE: _absent(f"{_ZED_NO_HOOK} : ni comptage d'écritures ni clôture bloquée"),
+    GovernanceFunction.TASK_RECALL: _absent(f"{_ZED_NO_HOOK} : le rappel de tâche n'est pas émis"),
+    GovernanceFunction.COMMANDS: _degraded(
+        "pas de commande de projet ; chaque commande est l'invocation `grimoire host run <slug>` décrite dans `.rules`"
+    ),
+    GovernanceFunction.PERSONAS: _degraded(
+        "aucun fichier d'agent chargé (l'agent délègue par `spawn_agent` sans définition) ; les personas sont "
+        "listées dans `.rules`, à lire et appliquer"
+    ),
+    GovernanceFunction.MCP_SERVER: _degraded(
+        "serveur ajouté aux `context_servers` de `.zed/settings.json`, lancé seulement dans un worktree approuvé"
+    ),
     GovernanceFunction.WORKER_LAUNCH: _absent(_NO_FOREIGN_WORKER),
     GovernanceFunction.REVIEW: _absent(_NO_FOREIGN_REVIEW),
     GovernanceFunction.ARBITER: _absent(_NO_FOREIGN_ARBITER),
@@ -733,6 +863,8 @@ _FUNCTION_STATES: dict[HostId, dict[GovernanceFunction, FunctionState]] = {
     HostId.CURSOR: _CURSOR_STATES,
     HostId.GEMINI_CLI: _GEMINI_STATES,
     HostId.OPENCODE: _OPENCODE_STATES,
+    HostId.KIMI_CODE: _KIMI_CODE_STATES,
+    HostId.ZED: _ZED_STATES,
     HostId.UNKNOWN: _UNKNOWN_STATES,
 }
 
@@ -974,6 +1106,9 @@ _CONTRACTS: dict[HostId, HostContract] = {
     HostId.GEMINI_CLI: _unverified_contract(HostId.GEMINI_CLI),
     # opencode 1.17.11 : seul pretooluse_deny a été sondé (fournisseur local factice).
     HostId.OPENCODE: _OPENCODE_CONTRACT,
+    # Kimi Code, Zed (L8) : aucune capture, aucun hook de projet émis.
+    HostId.KIMI_CODE: _unverified_contract(HostId.KIMI_CODE),
+    HostId.ZED: _unverified_contract(HostId.ZED),
 }
 
 
@@ -1058,19 +1193,51 @@ def claim_host_is_fenced(host: str, host_version: str | None, *, project_root: P
 PROVING_KEYS: dict[HookEvent, str] = {HookEvent.PRE_TOOL_USE: "pretooluse_deny"}
 
 
+#: Champ de décision à plat que chaque dialecte lit (#1281, L7) ; ``hookSpecificOutput.permissionDecision``
+#: (Claude Code, Codex, Copilot) est lu pour tout hôte. Un hôte absent d'ici n'a aucun champ à plat.
+FLAT_DECISION_FIELDS: dict[str, str] = {
+    "cursor": "permission",
+    "copilot": "permissionDecision",
+    "gemini": "decision",
+    "antigravity": "decision",
+}
+_DECISION_FIELDS = ("permission", "permissionDecision", "decision")
+
+
 def capture_shows_refusal(capture: Mapping[str, Any]) -> bool:
     """La capture montre-t-elle un **refus** honoré par l'hôte, pas une autorisation ?
 
     Il faut que l'action ne se soit pas exécutée (``observed.tool_executed`` faux) et
     qu'un verdict de refus soit lu : code 2, ``permissionDecision: deny`` sur stdout,
     ou exception levée par le plugin (opencode). Une capture témoin (allow) ne prouve rien.
+
+    Le champ à plat n'est lu que dans le dialecte de l'hôte de la capture
+    (:data:`FLAT_DECISION_FIELDS`), et un seul champ de décision qui vaut autre chose que
+    ``deny`` invalide la capture : une sortie contradictoire ne prouve rien. Quand la capture
+    dit si le hook a été appelé (``hook_called``, ``hook_calls``), il faut qu'il l'ait été.
     """
     observed = capture.get("observed")
     if not isinstance(observed, Mapping) or observed.get("tool_executed") is not False:
         return False
+    if "hook_called" in observed and observed.get("hook_called") is not True:
+        return False
+    if "hook_calls" in observed and not (isinstance(observed["hook_calls"], int) and observed["hook_calls"] > 0):
+        return False
     stdout = observed.get("hook_stdout")
-    specific = stdout.get("hookSpecificOutput") if isinstance(stdout, Mapping) else None
-    denied = isinstance(specific, Mapping) and specific.get("permissionDecision") == "deny"
+    decisions: list[Any] = []
+    if isinstance(stdout, Mapping):
+        specific = stdout.get("hookSpecificOutput")
+        if isinstance(specific, Mapping) and "permissionDecision" in specific:
+            decisions.append(specific["permissionDecision"])
+        decisions += [stdout[name] for name in _DECISION_FIELDS if name in stdout]
+    if any(value != "deny" for value in decisions):
+        return False
+    denied = False
+    if isinstance(stdout, Mapping):
+        specific = stdout.get("hookSpecificOutput")
+        denied = isinstance(specific, Mapping) and specific.get("permissionDecision") == "deny"
+        flat = FLAT_DECISION_FIELDS.get(str(capture.get("host", "")))
+        denied = denied or (flat is not None and stdout.get(flat) == "deny")
     return observed.get("hook_exit_code") == 2 or denied or bool(observed.get("hook_throws"))
 
 

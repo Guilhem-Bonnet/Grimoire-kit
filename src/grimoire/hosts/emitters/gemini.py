@@ -7,8 +7,23 @@ Gemini CLI exposes more than an instructions file (geminicli.com/docs, read on
   **MCP** servers, next to the user's own keys, which a merge must preserve;
 - ``.gemini/commands/<dir>/*.toml`` are user-invocable commands, one TOML file
   each with a required ``prompt``;
-- ``.gemini/agents/*.md`` are sub-agents with their own context window;
+- ``.gemini/agents/*.md`` are sub-agents with their own context window; their
+  optional ``model`` defaults to ``inherit`` (the session model)
+  (https://geminicli.com/docs/core/subagents/, read on 2026-11-22);
+- ``.agents/skills/<slug>/SKILL.md`` are **skills**, discovered at session start
+  and activated on demand (``activate_skill``); ``.agents/skills/`` is the
+  documented alias of ``.gemini/skills/`` and wins over it
+  (https://geminicli.com/docs/cli/skills/, read on 2026-11-22);
 - ``GEMINI.md`` takes ``@path`` imports, so the entrypoint can stay short.
+
+Antigravity, which replaced Gemini CLI for unpaid and Google One accounts on
+2026-06-18 (https://geminicli.com/docs/), reads from the repository the same
+``.agents/skills/`` folder and ``GEMINI.md`` as a rule
+(https://antigravity.google/docs/customization-discovery, read on 2026-11-22).
+That is the whole Antigravity surface the kit emits: its hooks
+(``.agents/hooks.json``), agents and MCP file are documented, but the kit has
+neither a runtime dialect nor a capture for them, so they are declared, not
+written.
 
 The host binary is not installed on the development machine: every claim below
 rests on the documentation, not on a capture. What the documentation leaves
@@ -17,17 +32,15 @@ open is declared, never invented — see :mod:`grimoire.hosts.gemini_wire` and
 
 What stays degraded, and why:
 
-- **skills** have no on-demand loader: their bodies are copied under
-  ``_grimoire/hosts/skills/`` and listed in ``GEMINI.md``, to be read when the
-  situation calls for it;
 - **blocking** is documented only for ``BeforeTool`` and ``BeforeAgent``. The
   end-of-turn events (``AfterAgent``, ``SessionEnd``) are wired and receive
   their decision, but no verdict is claimed for them (non vérifié), and
   ``SessionStart`` is advisory (``additionalContext``);
 - **permissions** have no declarative table here: the rules go through the
   ``BeforeTool`` hook, same decision and same wording as elsewhere;
-- **model affinity** is not emitted: the agent ``model`` field takes model
-  names, and the kit has no documented neutral-affinity mapping for them;
+- **model affinity** is emitted only for a tier the project names under
+  ``dispatch.models.gemini.<tier>`` (:mod:`grimoire.hosts.model_table`): no
+  Gemini model name is guessed, and an unmapped agent keeps ``inherit``;
 - **no detached agent session** is documented for this host.
 
 The ``--event`` flag written in ``settings.json`` uses the kit's neutral wire
@@ -45,6 +58,7 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.core.grounding import GROUNDING_RULE, UNCERTAINTIES_BLOCK_RULE
+from grimoire.hosts.emitters.agent_skills import SHARED_SKILLS_DIR, SHARED_SKILLS_GLOB, shared_skills
 from grimoire.hosts.emitters.base import (
     OWNED_COMMAND_MARKERS,
     Degradation,
@@ -57,9 +71,11 @@ from grimoire.hosts.emitters.base import (
     map_verbs,
     persona_section,
 )
+from grimoire.hosts.emitters.claude_code import tier_for
 from grimoire.hosts.emitters.copilot import _dispatch_policy_section
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, expand_project_dir, resolve_hook_launcher
+from grimoire.hosts.model_table import TIERS, load_model_table, resolve_model
 from grimoire.hosts.surface import (
     AgentSpec,
     CommandSpec,
@@ -73,7 +89,7 @@ HOST_ALIAS = "gemini"
 GEMINI_DIR = Path(".gemini")
 COMMANDS_DIR = GEMINI_DIR / "commands" / "grimoire"
 AGENTS_DIR = GEMINI_DIR / "agents"
-SKILLS_DIR = Path("_grimoire/hosts/skills")
+SKILLS_DIR = SHARED_SKILLS_DIR
 
 #: Neutral tool family -> the Gemini tools that carry it. Drives both the
 #: sub-agent ``tools`` field and the hook matchers, so a hook fires on the
@@ -245,11 +261,25 @@ def _settings_merge(surface: ProjectSurface, project_root: Path, launcher: HookL
     return JsonMerge(relpath=GEMINI_DIR / "settings.json", merge=merge, label=".gemini/settings.json")
 
 
-def _agent_file(agent: AgentSpec, surface: ProjectSurface) -> EmittedFile:
+def _model_tiers(project_root: Path) -> dict[str, str]:
+    """Palier -> nom de modèle Gemini que le projet déclare (``dispatch.models.gemini``) ; rien n'est deviné."""
+    table = load_model_table(project_root)
+    choices = (resolve_model(tier, HOST_ALIAS, table=table) for tier in TIERS)
+    return {choice.tier: choice.model for choice in choices if choice.model}
+
+
+def _agent_model(agent: AgentSpec, models: dict[str, str]) -> str:
+    """Le ``model`` Gemini de *agent*, ou ``""`` : le défaut documenté ``inherit`` s'applique alors."""
+    tier = tier_for(agent)
+    return models.get(tier, "") if tier != "inherit" else ""
+
+
+def _agent_file(agent: AgentSpec, surface: ProjectSurface, models: dict[str, str] | None = None) -> EmittedFile:
     fields: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
         "tools": list(map_verbs(agent.tools, _TOOL_TABLE)),
+        "model": _agent_model(agent, models or {}),
         "max_turns": agent.max_turns if agent.max_turns is not None else _DEFAULT_MAX_TURNS,
     }
     header = Emitter.frontmatter(fields)
@@ -300,15 +330,6 @@ def _command_file(command: CommandSpec) -> EmittedFile:
     return EmittedFile(relpath=COMMANDS_DIR / f"{command.slug}.toml", content=content)
 
 
-def _skill_copies(surface: ProjectSurface) -> list[EmittedFile]:
-    """Skill bodies at a stable path, since this host loads none on demand."""
-    files: list[EmittedFile] = []
-    for skill in surface.skills:
-        content = f"{managed_header('.md')}\n\n# {skill.slug}\n\n> {skill.description}\n\n{skill.body}"
-        files.append(EmittedFile(relpath=SKILLS_DIR / f"{skill.slug}.md", content=content))
-    return files
-
-
 def _entrypoint(surface: ProjectSurface, project_root: Path) -> EmittedFile:
     """Short entrypoint: imports for what Gemini reads, a catalog for the rest."""
     imports = [rel for rel in _MEMORY_IMPORTS if (project_root / rel).is_file()]
@@ -330,8 +351,8 @@ def _entrypoint(surface: ProjectSurface, project_root: Path) -> EmittedFile:
         "",
         f"- **Sous-agents** : {len(surface.agents)} — `.gemini/agents/`, chacun dans sa fenêtre de contexte.",
         f"- **Commandes** : {len(surface.commands)} — `.gemini/commands/grimoire/`.",
-        f"- **Compétences** : {len(surface.skills)} — copies sous `_grimoire/hosts/skills/`, "
-        "aucun chargement à la demande : lire le fichier quand la situation se présente.",
+        f"- **Compétences** : {len(surface.skills)} — `.agents/skills/`, chargées à la demande "
+        "(`activate_skill`) ; Antigravity lit le même dossier.",
         "",
         "## Gouvernance",
         "",
@@ -345,13 +366,32 @@ def _entrypoint(surface: ProjectSurface, project_root: Path) -> EmittedFile:
     return EmittedFile(relpath=Path("GEMINI.md"), content="\n".join(lines), block=True)
 
 
-def _degradations(surface: ProjectSurface) -> list[Degradation]:
-    gaps: list[Degradation] = [
+def _antigravity_degradations() -> list[Degradation]:
+    """Ce qu'Antigravity documente sans que le kit l'écrive (customization-discovery, hooks)."""
+    return [
         Degradation(
-            surface="skills",
-            reason="Pas de chargement à la demande des compétences sur cet hôte.",
-            fallback="compétences copiées sous `_grimoire/hosts/skills/`, listées dans `GEMINI.md`.",
+            surface="antigravity hooks",
+            reason=(
+                "Antigravity lit ses hooks dans `.agents/hooks.json` (PreToolUse, Stop…), pas dans "
+                "`.gemini/settings.json` ; le kit n'a ni dialecte de hook ni capture pour cet hôte."
+            ),
+            fallback="aucune garde sous Antigravity : seules les règles de `GEMINI.md` s'y appliquent, la CI reste opposable.",
         ),
+        Degradation(
+            surface="antigravity agents",
+            reason="Antigravity lit ses agents dans `.agents/agents/<nom>.md`, au format qu'il documente sans que le kit l'ait relu.",
+            fallback="personas non exposées sous Antigravity ; les compétences de `.agents/skills/` le sont.",
+        ),
+        Degradation(
+            surface="antigravity mcp",
+            reason="Antigravity lit ses serveurs MCP dans `.agents/mcp_config.json`, que le kit n'écrit pas.",
+            fallback="déclarer le serveur dans la configuration MCP d'Antigravity.",
+        ),
+    ]
+
+
+def _degradations(surface: ProjectSurface, unmapped: list[str]) -> list[Degradation]:
+    gaps: list[Degradation] = [
         Degradation(
             surface="permissions",
             reason="Gemini CLI n'expose pas de table de permissions déclarative.",
@@ -376,19 +416,26 @@ def _degradations(surface: ProjectSurface) -> list[Degradation]:
             fallback="la directive de session est injectée en contexte ; elle n'est pas opposable.",
         ),
         Degradation(
-            surface="model affinity",
-            reason=(
-                "Le champ `model` d'un sous-agent prend un nom de modèle ; le kit n'a pas de "
-                "correspondance documentée entre son affinité neutre et ces noms."
-            ),
-            fallback="`model` n'est pas émis ; le modèle de la session s'applique à chaque agent.",
-        ),
-        Degradation(
             surface="detached session",
             reason="Aucune session d'agent détachée n'est documentée pour Gemini CLI.",
             fallback="un agent tourne dans la session qui l'a lancé ; la reprise passe par `--resume <uuid>`.",
         ),
     ]
+    if unmapped:
+        gaps.append(
+            Degradation(
+                surface="model affinity",
+                reason=(
+                    "Le champ `model` d'un sous-agent prend un nom de modèle Gemini, sans correspondance "
+                    "documentée avec les paliers du kit. Personas dont le palier n'a pas de nom Gemini "
+                    f"déclaré : {', '.join(unmapped)}."
+                ),
+                fallback=(
+                    "`model` n'est écrit que pour un palier déclaré sous `dispatch.models.gemini.<palier>` "
+                    "de la politique d'orchestration ; sinon Gemini applique `inherit` (modèle de la session)."
+                ),
+            )
+        )
     for hook in surface.hooks:
         if hook.event in _GEMINI_EVENTS:
             continue
@@ -399,7 +446,7 @@ def _degradations(surface: ProjectSurface) -> list[Degradation]:
                 fallback="règle énoncée dans `GEMINI.md`, non opposable sur cet hôte.",
             )
         )
-    return gaps
+    return [*gaps, *_antigravity_degradations()]
 
 
 class GeminiEmitter(Emitter):
@@ -407,11 +454,17 @@ class GeminiEmitter(Emitter):
 
     def plan(self, surface: ProjectSurface, project_root: Path) -> EmitPlan:
         launcher = resolve_hook_launcher(project_root)
-        files: list[EmittedFile] = [_agent_file(agent, surface) for agent in surface.agents]
+        models = _model_tiers(project_root)
+        files: list[EmittedFile] = [_agent_file(agent, surface, models) for agent in surface.agents]
         files.extend(_command_file(command) for command in surface.commands)
-        files.extend(_skill_copies(surface))
+        # Toutes les compétences, comme Codex : même octet, même motif possédé (voir ``agent_skills``).
+        skill_files, skill_gaps = shared_skills(surface.skills)
+        files.extend(skill_files)
         files.append(_entrypoint(surface, project_root))
-        degradations = [*Emitter.launcher_degradations(launcher), *_degradations(surface)]
+        unmapped = sorted(
+            agent.name for agent in surface.agents if (tier := tier_for(agent)) != "inherit" and tier not in models
+        )
+        degradations = [*Emitter.launcher_degradations(launcher), *skill_gaps, *_degradations(surface, unmapped)]
         plan = EmitPlan(
             host_id=self.host_id,
             files=tuple(files),
@@ -420,7 +473,9 @@ class GeminiEmitter(Emitter):
             owned_globs=(
                 ".gemini/agents/*.md",
                 ".gemini/commands/grimoire/*.toml",
-                "_grimoire/hosts/skills/*.md",
+                # Les anciennes copies `_grimoire/hosts/skills/*.md` ne sont plus possédées ici :
+                # Cursor (repli) et les hôtes en prose écrivent ce dossier, Gemini ne doit pas le vider.
+                SHARED_SKILLS_GLOB,
             ),
         )
         return with_rule_layers(plan, project_root)

@@ -74,6 +74,11 @@ def project(tmp_path: Path, runner, cli_app, hook_binary: Path) -> Path:
     target = tmp_path / "proj"
     result = runner.invoke(cli_app, ["up", str(target), "--backend", "local"])
     assert result.exit_code == 0, result.output
+    # `up` n'émet plus que les hôtes déclarés : la preuve lit les hooks Copilot, on les déclare.
+    cfg = target / "project-context.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace('enabled: ["claude"]', 'enabled: ["claude", "copilot"]'), encoding="utf-8")
+    result = runner.invoke(cli_app, ["host", "sync", "--host", "all", "--project-root", str(target)])
+    assert result.exit_code == 0, result.output
     return target
 
 
