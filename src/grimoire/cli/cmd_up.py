@@ -920,7 +920,7 @@ def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bo
     try:
         from grimoire.hosts.collect import build_surface
         from grimoire.hosts.emitters import apply_plans, emitter_for
-        from grimoire.hosts.sync import disabled_host_orphans, preserved_detail, unsynced_detail
+        from grimoire.hosts.sync import disabled_host_orphans, orphans_detail, preserved_detail, unsynced_detail
 
         surface = build_surface(target)
         orphans = disabled_host_orphans(target, surface)
@@ -939,15 +939,7 @@ def _step_host_sync(state: _UpState, target: Path, *, dry_run: bool, blocked: bo
     if problem:
         state.steps.append(StepResult("host_sync", "failed", problem))
         return
-    stale = ""
-    if orphans:
-        every = [f for fs in orphans.values() for f in fs]
-        shown = ", ".join(every[:5]) + (f", … (+{len(every) - 5})" if len(every) > 5 else "")
-        stale = (
-            f" ; {len(every)} managed file(s) left for host(s) not in hosts.enabled "
-            f"({', '.join(alias_for_host(h) for h in orphans)}): {shown} — "
-            "`grimoire host sync --prune-disabled` to remove them"
-        )
+    stale = orphans_detail(orphans)
 
     written = sum(len(r.written) for r in results)
     unchanged = sum(len(r.unchanged) for r in results)

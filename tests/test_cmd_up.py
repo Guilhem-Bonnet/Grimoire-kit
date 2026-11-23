@@ -728,11 +728,12 @@ class TestUpRespectsEnabledHosts:
 
     @staticmethod
     def _declare(target: Path, enabled: str | None) -> None:
+        import re
+
         cfg = target / "project-context.yaml"
-        lines = [ln for ln in cfg.read_text(encoding="utf-8").splitlines() if not ln.startswith("hosts:")]
-        text = "\n".join(lines) + "\n"
+        text = re.sub(r"^hosts:\n  enabled:.*\n", "", cfg.read_text(encoding="utf-8"), flags=re.MULTILINE)
         if enabled is not None:
-            text += f"hosts:\n  enabled: {enabled}\n"
+            text = text.rstrip("\n") + f"\n\nhosts:\n  enabled: {enabled}\n"
         cfg.write_text(text, encoding="utf-8")
 
     @staticmethod

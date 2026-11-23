@@ -16,13 +16,14 @@ from typing import Any
 
 from grimoire.bridges.schemas import HostId
 from grimoire.hosts import collect
-from grimoire.hosts.detection import enabled_host_ids
+from grimoire.hosts.detection import alias_for_host, enabled_host_ids
 from grimoire.hosts.emitters import EmitPlan, EmitResult, apply_plans, conflict_exits, emitter_for, supported_hosts
 from grimoire.hosts.emitters.base import owned_managed_paths
 
 __all__ = [
     "HostSyncOutcome",
     "disabled_host_orphans",
+    "orphans_detail",
     "preserved_detail",
     "selected_host_ids",
     "sync_host_surfaces",
@@ -96,6 +97,19 @@ def disabled_host_orphans(project_root: Path, surface: Any) -> dict[HostId, list
         if files:
             orphans[host_id] = files
     return orphans
+
+
+def orphans_detail(orphans: dict[HostId, list[str]]) -> str:
+    """Suffixe de détail d'étape pour les fichiers d'hôtes non déclarés (jamais supprimés) ; vide sans orphelin."""
+    if not orphans:
+        return ""
+    every = [f for fs in orphans.values() for f in fs]
+    shown = ", ".join(every[:5]) + (f", … (+{len(every) - 5})" if len(every) > 5 else "")
+    hosts = ", ".join(alias_for_host(h) for h in orphans)
+    return (
+        f" ; {len(every)} managed file(s) left for host(s) not in hosts.enabled ({hosts}): {shown}"
+        " — `grimoire host sync --prune-disabled` to remove them"
+    )
 
 
 def sync_host_surfaces(
