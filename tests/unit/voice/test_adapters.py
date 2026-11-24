@@ -1,0 +1,176 @@
+"""Adaptateurs faster-whisper et pocket-tts, contre des bibliothèques simulées (aucun modèle, aucun réseau)."""
+
+from __future__ import annotations
+
+import io
+import os
+import wave
+from types import SimpleNamespace
+from typing import Any, ClassVar
+
+import pytest
+
+from grimoire.voice.engines import EngineSlot, EngineUnavailableError, get_spec
+
+# ── faster-whisper ────────────────────────────────────────────────────────────
+
+
+class FakeWhisperModel:
+    instances: ClassVar[list[FakeWhisperModel]] = []
+    fail = False
+
+    def __init__(self, model: str, **kwargs: Any) -> None:
+        if type(self).fail:
+            raise OSError("snapshot not found in cache")
+        self.model = model
+        self.kwargs = kwargs
+        self.calls: list[dict[str, Any]] = []
+        type(self).instances.append(self)
+
+    def transcribe(self, audio: Any, **kwargs: Any) -> tuple[Any, Any]:
+        self.calls.append({"audio": audio, **kwargs})
+        segments = iter([SimpleNamespace(text=" Bonjour "), SimpleNamespace(text="le kit. ")])
+        return segments, SimpleNamespace(language="fr", duration=1.5)
+
+
+@pytest.fixture
+def fake_whisper(fake_module) -> type[FakeWhisperModel]:
+    FakeWhisperModel.instances = []
+    FakeWhisperModel.fail = False
+    fake_module("faster_whisper", WhisperModel=FakeWhisperModel)
+    return FakeWhisperModel
+
+
+def test_whisper_uses_local_cache_only_by_default(fake_whisper) -> None:
+    slot = EngineSlot(get_spec("stt", "faster-whisper"), {"language": "fr", "allow_download": False}, idle_unload_s=0)
+    transcript = slot.run(lambda e: e.transcribe(b"\x00\x01", vocabulary=["Grimoire", " ", "cockpit"]))
+    model = fake_whisper.instances[0]
+    assert model.model == "small"
+    assert model.kwargs == {"device": "cpu", "compute_type": "int8", "local_files_only": True}
+    assert transcript.text == "Bonjour le kit."
+    assert (transcript.language, transcript.duration_s) == ("fr", 1.5)
+    call = model.calls[0]
+    assert isinstance(call["audio"], io.BytesIO)
+    assert call["language"] == "fr" and call["hotwords"] == "Grimoire cockpit"
+
+
+def test_whisper_download_only_with_consent(fake_whisper) -> None:
+    EngineSlot(get_spec("stt", "faster-whisper"), {"allow_download": True, "model": "base"}, idle_unload_s=0).run(
+        lambda e: None,
+    )
+    assert fake_whisper.instances[0].kwargs["local_files_only"] is False
+
+
+def test_whisper_missing_model_is_a_readable_reason(fake_whisper) -> None:
+    fake_whisper.fail = True
+    with pytest.raises(EngineUnavailableError) as err:
+        EngineSlot(get_spec("stt", "faster-whisper"), idle_unload_s=0).run(lambda e: None)
+    assert "cache local" in err.value.reason and "voice.allow_download: true" in err.value.reason
+    assert "\n" not in err.value.reason
+
+
+# ── pocket-tts ────────────────────────────────────────────────────────────────
+
+
+class FakeTensor:
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+
+    def reshape(self, *_: Any) -> FakeTensor:
+        return self
+
+    def clamp(self, lo: float, hi: float) -> FakeTensor:
+        return FakeTensor([min(hi, max(lo, v)) for v in self.values])
+
+    def __mul__(self, k: float) -> FakeTensor:
+        return FakeTensor([v * k for v in self.values])
+
+    def to(self, dtype: Any) -> FakeTensor:
+        assert dtype == "int16"
+        return FakeTensor([int(v) for v in self.values])
+
+    def cpu(self) -> FakeTensor:
+        return self
+
+    def numpy(self) -> FakeTensor:
+        return self
+
+    def tobytes(self) -> bytes:
+        return b"".join(int(v).to_bytes(2, "little", signed=True) for v in self.values)
+
+
+class FakeTTSModel:
+    loads: ClassVar[list[dict[str, Any]]] = []
+    offline_seen: ClassVar[list[str | None]] = []
+    fail = False
+    sample_rate = 24000
+
+    @classmethod
+    def load_model(cls, language: str | None = None) -> FakeTTSModel:
+        cls.offline_seen.append(os.environ.get("HF_HUB_OFFLINE"))
+        if cls.fail:
+            raise RuntimeError("LocalEntryNotFoundError")
+        cls.loads.append({"language": language})
+        return cls()
+
+    def get_state_for_audio_prompt(self, voice: str) -> str:
+        type(self).offline_seen.append(os.environ.get("HF_HUB_OFFLINE"))
+        return f"state:{voice}"
+
+    def generate_audio(self, state: str, text: str) -> FakeTensor:
+        assert state.startswith("state:")
+        return FakeTensor([0.0, 0.5, 2.0])
+
+
+@pytest.fixture
+def fake_pocket(fake_module, monkeypatch) -> type[FakeTTSModel]:
+    FakeTTSModel.loads = []
+    FakeTTSModel.offline_seen = []
+    FakeTTSModel.fail = False
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    fake_module("pocket_tts", TTSModel=FakeTTSModel)
+    fake_module(
+        "pocket_tts.default_parameters",
+        get_default_voice_for_language=lambda language: {"french": "estelle"}.get(language, "alba"),
+    )
+    fake_module("torch", int16="int16")
+    return FakeTTSModel
+
+
+def test_pocket_loads_french_offline_and_returns_wav(fake_pocket) -> None:
+    slot = EngineSlot(get_spec("tts", "pocket-tts"), {"language": "fr", "allow_download": False}, idle_unload_s=0)
+    speech = slot.run(lambda e: e.synthesize("Bonjour."))
+    assert fake_pocket.loads == [{"language": "french"}]
+    assert fake_pocket.offline_seen == ["1", "1"]  # chargement et voix par défaut, hors ligne
+    assert "HF_HUB_OFFLINE" not in os.environ  # rendu tel quel après le chargement
+    assert speech.sample_rate == 24000 and not speech.client_side
+    with wave.open(io.BytesIO(speech.audio or b"")) as wav:
+        assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) == (1, 2, 24000)
+        frames = wav.readframes(wav.getnframes())
+    assert [int.from_bytes(frames[i : i + 2], "little", signed=True) for i in (0, 2, 4)] == [0, 16383, 32767]
+
+
+def test_pocket_with_consent_does_not_force_offline(fake_pocket) -> None:
+    EngineSlot(get_spec("tts", "pocket-tts"), {"allow_download": True, "voice": "alba"}, idle_unload_s=0).run(
+        lambda e: e.synthesize("x", voice="alba"),
+    )
+    assert fake_pocket.offline_seen == [None, None]
+
+
+def test_pocket_missing_model_is_a_readable_reason(fake_pocket) -> None:
+    fake_pocket.fail = True
+    with pytest.raises(EngineUnavailableError) as err:
+        EngineSlot(get_spec("tts", "pocket-tts"), {"language": "fr"}, idle_unload_s=0).run(lambda e: None)
+    assert "« french »" in err.value.reason and "voice.allow_download: true" in err.value.reason
+    assert "HF_HUB_OFFLINE" not in os.environ
+
+
+def test_hub_offline_flips_the_huggingface_constant(fake_module, monkeypatch) -> None:
+    from grimoire.voice._offline import hub_offline
+
+    constants = fake_module("huggingface_hub.constants", HF_HUB_OFFLINE=False)
+    fake_module("huggingface_hub", constants=constants)
+    monkeypatch.setenv("HF_HUB_OFFLINE", "0")
+    with hub_offline():
+        assert constants.HF_HUB_OFFLINE is True and os.environ["HF_HUB_OFFLINE"] == "1"
+    assert constants.HF_HUB_OFFLINE is False and os.environ["HF_HUB_OFFLINE"] == "0"
