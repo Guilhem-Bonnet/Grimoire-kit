@@ -160,7 +160,8 @@ def _detail_for(tmp_path: Path, **error: Any) -> dict[str, Any]:
 def test_pem_then_cut_ghp_leaves_no_token_fragment(tmp_path: Path) -> None:
     from grimoire.hosts.decisions.error_occurred import _SCAN_WINDOW
 
-    pem = "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----"
+    dashes = "-" * 5
+    pem = f"{dashes}BEGIN RSA PRIVATE KEY{dashes}\nAAAA\n{dashes}END RSA PRIVATE KEY{dashes}"
     token = "ghp_" + "A" * 40
     # Le jeton est coupé par la fenêtre : il n'en reste que `ghp_AAAA…` sous 30 caractères.
     filler = "x " * ((_SCAN_WINDOW - 26 - len(pem) - 1) // 2)

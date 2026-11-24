@@ -6,9 +6,15 @@ import time
 
 from grimoire.memory.validation import redact_secrets
 
+# Fixtures assemblées à l'exécution : aucun secret d'apparence réelle en clair dans le dépôt.
+_DASHES = "-" * 5
+_PEM = f"{_DASHES}BEGIN RSA PRIVATE KEY{_DASHES}\nMIIE\n{_DASHES}END RSA PRIVATE KEY{_DASHES}"
+_JWT = ".".join(("ey" + "J" + "hbGciOiJIUzI1NiJ9", "ey" + "J" + "zdWIiOiIxMjM0NTY3ODkwIn0", "abcdefghijklmnop"))
+_PAT = "github" + "_pat_" + "11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz0123456789"
+
 
 def test_github_fine_grained_pat_is_redacted() -> None:
-    text, hits = redact_secrets("token github_pat_11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz0123456789 fin")
+    text, hits = redact_secrets(f"token {_PAT} fin")
     assert "github_pat_" not in text
     assert "github-pat" in hits
 
@@ -24,21 +30,21 @@ def test_short_bearer_is_kept() -> None:
 
 
 def test_bearer_jwt_stays_a_jwt() -> None:
-    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop"
+    jwt = _JWT
     text, hits = redact_secrets(f"Authorization: Bearer {jwt}")
     assert jwt not in text
     assert hits == ("jwt",)
 
 
 def test_pem_block_is_redacted() -> None:
-    pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----"
+    pem = _PEM
     text, hits = redact_secrets(f"a {pem} b {pem} c")
     assert text == "a [redacted:private-key-block] b [redacted:private-key-block] c"
     assert hits == ("private-key-block",)
 
 
 def test_redact_secrets_is_fast_on_trapped_pem_input() -> None:
-    trap = "-----BEGIN RSA PRIVATE KEY-----" * (200_000 // 30)
+    trap = f"{_DASHES}BEGIN RSA PRIVATE KEY{_DASHES}" * (200_000 // 30)
     start = time.perf_counter()
     text, hits = redact_secrets(trap)
     assert time.perf_counter() - start < 0.1
