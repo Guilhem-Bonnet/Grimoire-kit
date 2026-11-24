@@ -296,7 +296,7 @@ class ClaudeCodeWorkerHost:
 
 def _pid_alive(pid: int, marker: bytes = b"opencode") -> bool:
     """Vrai si *pid* vit et porte *marker* dans sa ligne de commande (un pid recyclé par un autre programme ne compte
-    pas) ; *marker* vaut ``opencode`` par défaut, ``gemini`` pour :class:`~.gemini_host.GeminiWorkerHost`."""
+    pas) ; sert au worker opencode. Le worker Gemini compare l'identité exacte (:func:`.gemini_host.process_identity`)."""
     if pid <= 0 or not _POSIX:
         return False  # sous Windows, ``os.kill`` termine le processus : on ne sonde pas
     try:

@@ -15,6 +15,7 @@ Le message est caviardé (secrets du kit) puis tronqué, le nom d'outil tronqué
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from grimoire.hosts.decisions._shared import Decision, HookInput
@@ -23,18 +24,40 @@ from grimoire.memory.validation import redact_secrets
 DECISION_ID = "grimoire.error-occurred"
 MAX_MESSAGE = 200
 _MAX_FIELD = 80
+# Le dernier mot coupé, quels que soient ses caractères (« : », « ! », « @ » d'une
+# URL à authentification compris) : un fragment de secret ne survit jamais.
+_CUT_WORD = re.compile(r"\S+\Z")
+_CUT_MARK = "[truncated]"  # un seul mot plus long que la fenêtre : rien n'en est gardé
 _SCAN_WINDOW = 2000  # borne du texte passé au caviardage : un message géant ne coûte pas cher
 
 
+def _clean(value: Any, limit: int) -> str:
+    """Le texte caviardé **avant** d'être tronqué à ``limit``.
+
+    Une coupe à ``_SCAN_WINDOW`` peut laisser un bout de jeton sous la longueur
+    minimale de son motif ; si un bloc PEM caviardé avant lui le ramène dans les
+    ``limit`` caractères gardés, il fuit. On jette donc le dernier fragment
+    coupé (jusqu'à la dernière espace) : mieux vaut perdre un mot qu'un secret.
+    """
+    if not isinstance(value, str):
+        return ""
+    window = value[:_SCAN_WINDOW]
+    if len(value) > _SCAN_WINDOW and not (value[_SCAN_WINDOW].isspace() or window[-1:].isspace()):
+        # Coupé au milieu d'un mot : on retire tout le dernier mot, quel que soit
+        # le motif. Un message d'un seul mot ne garde rien (jamais une coupe fixe,
+        # qui retomberait au milieu d'un jeton) : un marqueur en tient lieu.
+        window = _CUT_WORD.sub("", window)
+        if not window.strip():
+            return _CUT_MARK
+    return redact_secrets(window)[0][:limit]
+
+
 def _text(value: Any, limit: int) -> str:
-    return value[:limit] if isinstance(value, str) else ""
+    return _clean(value, limit)
 
 
 def _message(value: Any) -> str:
-    """Le message caviardé avant d'être tronqué : une coupe ne doit pas laisser un bout de secret."""
-    if not isinstance(value, str):
-        return ""
-    return redact_secrets(value[:_SCAN_WINDOW])[0][:MAX_MESSAGE]
+    return _clean(value, MAX_MESSAGE)
 
 
 def _error_detail(hook: HookInput) -> dict[str, Any]:

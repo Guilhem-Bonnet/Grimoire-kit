@@ -7,7 +7,13 @@ que pour opencode (:func:`~.worker_lifecycle.renew_opencode`, :func:`~.worker_li
 
 - **lancement** (:func:`launch_gemini`) : modèle (politique, sinon table palier x hôte ``dispatch.models.gemini``),
   plan, processus détaché, identité lue dans l'événement ``init``, inscription au journal d'autorité, rattachement ;
-- **reprise** (:func:`resume_gemini_worker`) : ``gemini --resume <id>`` sur le même worktree, frein revérifié.
+- **reprise** (:func:`resume_gemini_worker`) : ``gemini --resume=<id>`` sur le même worktree, frein revérifié.
+
+À chaque départ, l'identité du processus (heure de démarrage, exécutable exact :
+:func:`~.gemini_host.process_identity`) est relevée aussitôt et inscrite au ledger (``pid_identity``) : c'est elle,
+pas le pid seul, que le battement, la fin et le janitor comparent. Illisible : le processus est arrêté, rien ne part.
+Au lancement, elle est relevée de nouveau à l'événement ``init`` (:meth:`~.gemini_host.GeminiWorkerHost.settled_identity`) :
+un ``gemini`` en ``#!/usr/bin/env node`` est alors devenu l'interpréteur.
 
 Le frein (refus ``BeforeTool`` prouvé pour la version exacte) est vérifié par le lanceur **avant** le claim, puis de
 nouveau à chaque reprise : sans preuve, rien ne part et la raison est dite.
@@ -92,7 +98,17 @@ def launch_gemini(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktree,
     if not started.pid:
         return launcher._failed(tid, f"gemini n'a pas démarré : {started.error or 'aucun processus'}")
     pid = str(started.pid)
-    session_id = host.resolve(launcher._exec, wt.path, pid, name, log=log, since=offset)
+    identity = host.identify(started.pid)
+    session_id = host.resolve(launcher._exec, wt.path, pid, name, log=log, since=offset, identity=identity)
+    if session_id and not identity:
+        return launcher._abandon(
+            tid,
+            pid,
+            wt.path,
+            f"processus gemini {pid} sans identité lisible : sa vie ne serait pas suivie",
+            count=True,
+            host=host,
+        )
     if not session_id:
         return launcher._abandon(
             tid,
@@ -102,6 +118,7 @@ def launch_gemini(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktree,
             count=True,
             host=host,
         )
+    identity = host.settled_identity(started.pid, identity)
     refused, code = attest_session(service, session_id, WORKER_ACTOR, tid)
     if refused:
         from grimoire.missions.mandate import CAP_EXCEEDED
@@ -129,6 +146,7 @@ def launch_gemini(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktree,
             "host": GEMINI_HOST,
             "host_version": version,
             "pid": pid,
+            "pid_identity": identity,
             "log": str(log),
             "log_offset": offset,
             "lean": False,
@@ -156,7 +174,7 @@ def resume_gemini_worker(
     cause: str = "",
     host: GeminiWorkerHost | None = None,
 ) -> ExecResult:
-    """Rend la tâche à son worker Gemini : ``gemini --resume <id>`` sur le même worktree.
+    """Rend la tâche à son worker Gemini : ``gemini --resume=<id>`` sur le même worktree.
 
     Le frein est revérifié pour la version installée à cet instant, et le hook du kit dans le worktree ; une reprise
     refusée ou qui ne démarre pas rend un échec lisible, comme une reprise Claude Code ratée.
@@ -185,6 +203,10 @@ def resume_gemini_worker(
     started = host.start(plan, cwd, log)
     if not started.pid:
         return ExecResult(1, "", f"gemini n'a pas démarré : {started.error or 'aucun processus'}")
+    identity = host.identify(started.pid)
+    if not identity:
+        host.stop(str(started.pid))
+        return ExecResult(1, "", f"processus gemini {started.pid} sans identité lisible : reprise abandonnée")
     payload: dict[str, Any] = {
         "session": session_id,
         "fresh": False,
@@ -192,6 +214,7 @@ def resume_gemini_worker(
         "host": GEMINI_HOST,
         "host_version": version,
         "pid": str(started.pid),
+        "pid_identity": identity,
         "log": str(log),
         "log_offset": offset,
     }
