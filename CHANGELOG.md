@@ -7,6 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- fix(voice): le chargement d'un moteur local ne bascule plus `HF_HUB_OFFLINE` pour tout le processus (#1343) — un autre usage Hugging Face (modèle d'embedding de la mémoire) n'est plus mis hors ligne pendant un chargement. faster-whisper reçoit `local_files_only` ; pocket-tts, qui n'en prend pas, est refusé quand son dépôt est prouvé absent du cache. « Introuvable dans le cache » ne se dit que pour `LocalEntryNotFoundError` / `OfflineModeIsEnabled` (plus pour un fichier de voix local manquant, un dépôt inexistant ou une panne enchaînée comme un manque de mémoire GPU). Un seul interrupteur de téléchargement : `voice.allow_download`.
 - feat(cadrage): `grimoire cadrage interview` rend le plan d'entretien de cadrage — sept angles (utilisateurs, existant, critères de réussite, hors périmètre, contraintes, risques et pré-mortem, alternatives) avec intention et deux questions d'amorce ; la profondeur (express, standard, approfondi) vient de l'intake déterministe et borne les questions et les angles obligatoires (`--depth` la force) ; `interview answer` consigne une réponse, un `--unknown` (hypothèse) ou un `--skip` motivé dans les fichiers du cadrage ; `cadrage check` refuse un angle obligatoire resté ouvert, écarté sans raison ou d'état inconnu, et un `entretien.json` illisible ou invalide ; les réponses sont repliées sur une ligne (#1342 M2).
 ## [3.105.0] - 2026-11-24
 
