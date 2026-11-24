@@ -108,6 +108,10 @@ REVIEW_DECISIONS_LABEL = "Décisions à revoir"
 #: pilote » les garde toutes).
 REVIEW_DECISION_VISIBLE = timedelta(days=7)
 MAX_REVIEW_DECISIONS = 20
+#: GAO-r-le-arbitre-001 : les décisions de l'arbitre, information non bloquante (elles n'attendent rien de l'humain).
+ARBITRATIONS_LABEL = "Arbitrages"
+ARBITRATION_VISIBLE = timedelta(days=7)
+MAX_ARBITRATIONS = 20
 
 #: Les sections, de la plus urgente à la moins urgente, et les types de chacune
 #: dans leur ordre. Un type n'apparaît que dans une section.
@@ -265,6 +269,8 @@ class _ProjectRead:
     reviews: dict[str, Any] = field(default_factory=dict)
     #: Les options que le pilote a appliquées sans jugement assumé (bloc « Décisions à revoir »), hors de ``items``.
     review_decisions: list[dict[str, Any]] = field(default_factory=list)
+    #: Les arbitrages rendus (« Arbitrages », GAO-r-le-arbitre-001), information non bloquante, hors de ``items``.
+    arbitrations: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _hm(moment: datetime) -> str:
@@ -306,19 +312,60 @@ def _guarded(read: _ProjectRead, source: str, collect: Callable[[], None]) -> No
         _item(read, PROBE_FAILED, source, f"{source} illisible", f"{source} illisible : {exc}")
 
 
-def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any]]:
-    """Horodatage du dernier événement de chaque tâche et événements du pilote (décidé, repris), en une passe."""
+def _last_events(ledger: Any) -> tuple[dict[str, str], list[Any], list[Any]]:
+    """Horodatage du dernier événement de chaque tâche, événements du pilote (décidé, repris) et arbitrages."""
+    from grimoire.missions.arbiter import ARBITRATED_EVENT
     from grimoire.missions.autopilot import DECIDED_EVENT
     from grimoire.missions.autopilot_view import REVERTED_EVENT
 
     last: dict[str, str] = {}
     pilot: list[Any] = []
+    arbitrated: list[Any] = []
     for event in ledger.list_events():
         if event.created_at and event.created_at > last.get(event.entity_id, ""):
             last[event.entity_id] = event.created_at
         if event.event_type in (DECIDED_EVENT, REVERTED_EVENT):
             pilot.append(event)
-    return last, pilot
+        elif event.event_type == ARBITRATED_EVENT:
+            arbitrated.append(event)
+    return last, pilot, arbitrated
+
+
+def _arbitrations(read: _ProjectRead, events: list[Any], now: datetime) -> list[dict[str, Any]]:
+    """Les décisions de l'arbitre récentes, la plus récente d'abord : à lire, jamais à trancher (GAO-r-le-arbitre-001).
+
+    Une décision n'attend rien de l'humain : elle n'entre ni dans ``items``, ni dans ``count``, ni dans ``counts``.
+    Le bloc garde :data:`ARBITRATION_VISIBLE` et au plus :data:`MAX_ARBITRATIONS` entrées.
+    """
+    found: dict[tuple[str, str], dict[str, Any]] = {}
+    for event in events:
+        payload = event.payload
+        try:
+            at = datetime.fromisoformat(str(event.created_at))
+        except ValueError:
+            continue
+        at = at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+        if now - at > ARBITRATION_VISIBLE:
+            continue
+        tid = str(payload.get("task_id") or event.entity_id or "")
+        rid = str(payload.get("request_id") or event.id)
+        found[(tid, rid)] = {
+            "id": f"arbitration:{read.row['slug']}:{tid}:{rid}",
+            "kind": "arbitration",
+            "project": {"slug": read.row["slug"], "name": read.row["name"]},
+            "title": str(read.tasks.get(tid, {}).get("title") or tid),
+            "task_id": tid,
+            "request_id": rid,
+            "decision": str(payload.get("decision") or ""),
+            "criteria": [str(c) for c in payload.get("criteria") or []],
+            "justification": str(payload.get("justification") or ""),
+            "confidence": payload.get("confidence"),
+            "model": str(payload.get("model") or ""),
+            "cause": str(payload.get("cause") or ""),
+            "source": str(payload.get("source") or ""),
+            "since": str(event.created_at),
+        }
+    return sorted(found.values(), key=lambda item: item["since"], reverse=True)[:MAX_ARBITRATIONS]
 
 
 def _review_decisions(read: _ProjectRead, pilot_events: list[Any], now: datetime) -> list[dict[str, Any]]:
@@ -409,8 +456,9 @@ def _collect_ledger(read: _ProjectRead, now: datetime, host_probe: SessionProbe 
     read.tasks = {task.id: {"title": task.title, "status": task.status.value} for task in tasks}
     cards = [_task_json(task) for task in tasks]
     annotate_cards(read.root, service, tasks, cards, now=now, probe=host_probe)
-    last, pilot_events = _last_events(service.ledger)
+    last, pilot_events, arbitration_events = _last_events(service.ledger)
     read.review_decisions = _review_decisions(read, pilot_events, now)
+    read.arbitrations = _arbitrations(read, arbitration_events, now)
 
     pilot_on, held = partition(service)
     held_by_task = {h.decision.task_id: h for h in held}
@@ -777,6 +825,10 @@ def attention_view(
     by_source: dict[str, int] = {}
     for item in reviewed:
         by_source[item["source"]] = by_source.get(item["source"], 0) + 1
+    # GAO-r-le-arbitre-001 : les arbitrages sont une information non bloquante, hors de `items` et de `count`.
+    arbitrated = sorted(
+        (item for read in reads for item in read.arbitrations), key=lambda item: item["since"], reverse=True
+    )[:MAX_ARBITRATIONS]
     return {
         "schemaVersion": SCHEMA_VERSION,
         "generated_at": moment.isoformat(),
@@ -790,6 +842,7 @@ def attention_view(
         "reviewDecisions": {
             "label": REVIEW_DECISIONS_LABEL, "count": len(reviewed), "sources": by_source, "items": reviewed,
         },
+        "arbitrations": {"label": ARBITRATIONS_LABEL, "count": len(arbitrated), "items": arbitrated},
         "projects": [read.row for read in reads],
         "reviews": [{"project": read.row["slug"], **read.reviews} for read in reads if read.reviews],
         "summary": {
