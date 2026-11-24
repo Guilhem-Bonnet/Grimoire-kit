@@ -171,10 +171,15 @@ ALLOWED_TOOLS = (
     "Read Bash(grimoire task show *) Bash(grimoire task arbitrate *) Bash(gh pr diff) Bash(gh pr diff *) "
     "Bash(gh pr view) Bash(gh pr view *)"
 )
-#: Le refus, qui l'emporte sur la liste blanche : ``--web``/``-w`` ouvre un navigateur (un motif ``gh pr diff *``
-#: l'accepterait). ``gh pr diff|view`` ne s'appelle qu'en lecture sur stdout.
+#: Le refus, qui l'emporte sur la liste blanche : ``--web``/``-w`` ouvre un navigateur, y compris groupé
+#: (``-cw``, ``-wc``) ou après une tabulation. Les motifs n'ont que ``*`` : on refuse donc toute option courte
+#: (``-<lettre>…``, ``-q`` compris : ``--jq`` existe), tout ``web``, tout guillemet ou antislash (``'--web'``) et toute
+#: tabulation après le verbe. ``gh pr diff|view`` ne s'appelle qu'en lecture sur stdout, par options longues.
+_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 DISALLOWED_TOOLS = " ".join(
-    f"Bash(gh pr {verb} {head}{flag}*)" for verb in ("diff", "view") for flag in ("--web", "-w") for head in ("", "* ")
+    [f"Bash(gh pr {verb} {head}-{letter}*)" for verb in ("diff", "view") for head in ("", "* ") for letter in _LETTERS]
+    + [f"Bash(gh pr {verb}{sep}*{bad}*)" for verb in ("diff", "view") for sep in (" ",) for bad in ("web", "'", '"', "\\")]
+    + [f"Bash(gh pr {verb}\t*)" for verb in ("diff", "view")]
 )
 #: Aucune sortie de git/gh ne passe par un paginateur : un ``core.pager`` du dépôt n'exécute rien dans la session.
 SESSION_ENV = {"GIT_PAGER": "cat", "PAGER": "cat", "GH_PAGER": "cat"}
@@ -714,8 +719,6 @@ def apply_decision(
         raise ArbiterDecisionError("split_followup retirerait le dernier critère de la tâche : à l'humain")
     if decision.decision == READY_WITH_DEROGATION and not request.head:
         raise ArbiterDecisionError("ready_with_derogation sans tête de PR connue : à l'humain")
-    _seal(service, {"type": ARBITRATION_CLOSURE_ENTRY, "task_id": task.id, "request_id": request.id,
-                    "event": ARBITRATED_EVENT})  # sans sceau, pas de clôture : l'erreur remonte, la demande reste ouverte
     service.ledger.append_event(
         ARBITRATED_EVENT, task.id, "task", ARBITER_ACTOR,
         {"task_id": task.id, "request_id": request.id, "cause": request.cause, "source": request.source,
@@ -724,6 +727,8 @@ def apply_decision(
          "mandate_id": mandate_id, "replacement": decision.replacement,
          "followup_title": decision.followup_title},
     )
+    _seal(service, {"type": ARBITRATION_CLOSURE_ENTRY, "task_id": task.id, "request_id": request.id,
+                    "event": ARBITRATED_EVENT})  # posé après l'événement : sans effets, aucune clôture ; sans sceau, la demande reste ouverte
     detail = _effects(service, task, request, decision, policy=policy, exec_=exec_, claude_bin=claude_bin)
     return detail
 

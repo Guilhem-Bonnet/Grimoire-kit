@@ -1484,8 +1484,11 @@ def test_la_session_arbitre_n_ouvre_aucun_navigateur() -> None:
     def permitted(command: str) -> bool:
         return matches(arbiter.ALLOWED_TOOLS, command) and not matches(arbiter.DISALLOWED_TOOLS, command)
 
-    for ok in ("gh pr diff", "gh pr diff 12", "gh pr view", "gh pr view 12 --json files"):
+    for ok in ("gh pr diff", "gh pr diff 12", "gh pr view", "gh pr view 12 --json files", "gh pr view 12 --json reviews --jq .reviews"):
         assert permitted(ok), ok
     for bad in ("gh pr diff --web", "gh pr view --web", "gh pr view 12 --web", "gh pr diff 12 --web",
-                "gh pr view -w", "gh pr diff 12 -w", "gh pr view 12 --json files --web"):
+                "gh pr view -w", "gh pr diff 12 -w", "gh pr view 12 --json files --web",
+                "gh pr view 1 -cw", "gh pr view 1 -wc", "gh pr view -cw", "gh pr diff 1 -cw", "gh pr view 1 -ccw",
+                "gh pr view\t-w", "gh pr view\t1 -cw", "gh pr view 1 '--web'", 'gh pr view 1 "--web"',
+                "gh pr view 1 --we\\b", "gh pr view 1 '-w'", "gh pr diff '-cw'"):
         assert not permitted(bad), bad
