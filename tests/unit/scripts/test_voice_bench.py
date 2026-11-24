@@ -136,3 +136,38 @@ def test_moteurs_reels_absents_sont_non_installes_sans_rien_charger(tmp_path: Pa
     # Aucune dépendance vocale n'est requise : l'état « installé » ne fait qu'un find_spec.
     for eng in [*vb.default_stt_engines(), *vb.default_tts_engines()]:
         assert isinstance(eng.installed(), bool)
+
+
+def test_pocket_tts_parle_avec_le_modele_et_la_voix_francais(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Régression : le premier passage réel chargeait le modèle anglais et la voix « alba »."""
+    import types
+
+    seen: dict[str, object] = {}
+
+    class FakeModel:
+        sample_rate = 24000
+
+        @classmethod
+        def load_model(cls, language: str | None = None) -> FakeModel:
+            seen["language"] = language
+            return cls()
+
+        def get_state_for_audio_prompt(self, voice: str) -> str:
+            seen["voice"] = voice
+            return voice
+
+        def generate_audio_stream(self, state: str, text: str):
+            yield [0.1, -0.1]
+            yield [0.2]
+
+    monkeypatch.setitem(sys.modules, "pocket_tts", types.SimpleNamespace(TTSModel=FakeModel))
+    engine = next(e for e in vb.default_tts_engines() if e.name == "pocket-tts-fr")
+    samples, rate, first = engine.load(False)("Bonjour.")
+    assert seen == {"language": "french", "voice": "estelle"}
+    assert list(samples) == [0.1, -0.1, 0.2] and rate == 24000 and first is not None
+
+
+def test_qwen3_tts_a_un_moteur_a_voix_decrite_en_francais() -> None:
+    names = [e.name for e in vb.default_tts_engines()]
+    assert "qwen3-tts-1.7b-design" in names
+    assert "français" in vb._VOICE_DESIGN.lower() or "française" in vb._VOICE_DESIGN.lower()
