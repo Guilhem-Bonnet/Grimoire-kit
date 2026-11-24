@@ -1,0 +1,21 @@
+{
+  "host": "copilot",
+  "host_version": "",
+  "provenance": "documentation",
+  "capability": null,
+  "source": "https://docs.github.com/en/copilot/reference/hooks-reference (errorOccurred, entrée camelCase : sessionId, timestamp, cwd, error{message,name,stack?}, errorContext, recoverable). Forme documentée, pas une capture ; la référence ne documente aucun champ d'outil sur cet événement.",
+  "payloads": [
+    {
+      "hookType": "errorOccurred",
+      "input": {
+        "sessionId": "00000000-0000-4000-8000-0000000000c4",
+        "timestamp": 1790000000000,
+        "cwd": "<PROJECT>",
+        "error": {"message": "Tool execution failed: exit code 1", "name": "ToolError", "stack": "ToolError: boom\n    at run (x.js:1:1)"},
+        "errorContext": "tool_execution",
+        "recoverable": true
+      },
+      "expect": {"event": "error_occurred"}
+    }
+  ]
+}
