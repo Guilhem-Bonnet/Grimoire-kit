@@ -12,7 +12,7 @@ from grimoire.cli.app import app
 from grimoire.core.cadrage import check, scaffold
 from grimoire.core.cadrage_interview import ANGLES, answer, check_interview, classify_depth, interview_plan
 
-pytestmark = pytest.mark.covers("cli:cadrage interview")
+pytestmark = pytest.mark.covers("cli:cadrage interview answer")
 runner = CliRunner()
 
 
