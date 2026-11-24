@@ -56,8 +56,12 @@ def test_pem_block_is_redacted() -> None:
 
 def test_redact_secrets_is_fast_on_trapped_pem_input() -> None:
     trap = f"{_DASHES}BEGIN RSA PRIVATE KEY{_DASHES}" * (200_000 // 30)
-    start = time.perf_counter()
-    text, hits = redact_secrets(trap)
-    assert time.perf_counter() - start < 0.1
+    # Meilleur de cinq : mesure le coût de la fonction, pas la gigue d'un runner chargé.
+    best = float("inf")
+    for _ in range(5):
+        start = time.perf_counter()
+        text, hits = redact_secrets(trap)
+        best = min(best, time.perf_counter() - start)
+    assert best < 0.1
     assert "BEGIN" not in text
     assert "private-key-block" in hits

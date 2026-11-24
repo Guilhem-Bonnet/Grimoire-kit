@@ -124,6 +124,12 @@ DEFAULT_ALLOWED_EMITTERS: tuple[str, ...] = (
 # journal restait rouge (alertes #342, #345, #346) alors qu'elle ne portait déjà
 # plus rien du secret. Le contenu de la table n'a pas changé ; son nom, si.
 _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # Ce motif ne détecte que l'ouverture : l'étendue du bloc se cherche en une
+    # passe (:func:`_redact_pem_blocks`). `BEGIN…(.*?)…END` en regex rescannait
+    # jusqu'à la fin du texte à chaque ouverture sans fermeture : quadratique.
+    # En tête : un bloc caviardé raccourcit le texte que les motifs suivants
+    # parcourent (un texte de blocs piégés n'est plus balayé qu'une fois).
+    ("private-key-block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     # Jetons fine-grained : `github_pat_` + 22 caractères au moins (82 en pratique).
@@ -131,10 +137,6 @@ _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{12,}\b")),
     ("anthropic-key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
     ("openai-key", re.compile(r"\bsk-(?!ant-)[A-Za-z0-9_-]{20,}\b")),
-    # Ce motif ne détecte que l'ouverture : l'étendue du bloc se cherche en une
-    # passe (:func:`_redact_pem_blocks`). `BEGIN…(.*?)…END` en regex rescannait
-    # jusqu'à la fin du texte à chaque ouverture sans fermeture : quadratique.
-    ("private-key-block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
     # Bearer opaque : placé après `jwt`, qui garde la main sur Bearer+JWT (le
     # jeton y est déjà remplacé par `[redacted:jwt]`, que ce motif ne reconnaît pas).
