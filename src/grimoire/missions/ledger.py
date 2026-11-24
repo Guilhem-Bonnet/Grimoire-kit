@@ -57,6 +57,8 @@ from grimoire.missions.ledger_files import (
     slug as _slug,
 )
 from grimoire.missions.ledger_rules import (
+    CRITERION_AMENDED_EVENT,
+    CRITERION_REMOVED_EVENT,
     UnjudgedClaimError,
     blocks_path,
     default_claim_expiry,
@@ -157,6 +159,8 @@ _STEERING_EVENTS = frozenset({
     "task.directive_added",
     "task.directive_delivered",
     "task.directive_acknowledged",
+    CRITERION_AMENDED_EVENT,
+    CRITERION_REMOVED_EVENT,
 }) | QUESTION_EVENTS  # W6-07 : questions et réponses, rejouées dans ``MissionTask.questions``
 
 #: L'événement qui rattache une session d'hôte au claim d'une tâche (issue #638).

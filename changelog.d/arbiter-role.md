@@ -1,0 +1,1 @@
+- feat(missions): rôle `arbiter` — un modèle fort tranche un désaccord worker/relecteur avant toute question à l'humain (GAO-r-le-arbitre-001)

@@ -126,7 +126,7 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     # le mécanisme lui-même et le cœur de l'autorité
     "src/grimoire/missions/merger.py", "src/grimoire/missions/dual_review.py", "src/grimoire/missions/review_seal.py",
     "src/grimoire/missions/reviewer.py", "src/grimoire/missions/mandate.py", "src/grimoire/missions/autopilot.py",
-    "src/grimoire/missions/breaker.py", "src/grimoire/missions/launcher.py",
+    "src/grimoire/missions/breaker.py", "src/grimoire/missions/launcher.py", "src/grimoire/missions/arbiter.py",
     "src/grimoire/missions/orchestrator_policy.py", "src/grimoire/hosts/decisions/*",
     "src/grimoire/flows/attestation.py",
     # … et ce qui le remplacerait sans le toucher : un paquet du même nom l'emporte sur le module à l'import, et
@@ -134,7 +134,7 @@ HUMAN_ONLY_PATHS: tuple[str, ...] = (
     "src/grimoire/missions/__init__.py",
     "src/grimoire/missions/merger/*", "src/grimoire/missions/dual_review/*", "src/grimoire/missions/review_seal/*",
     "src/grimoire/missions/reviewer/*", "src/grimoire/missions/mandate/*", "src/grimoire/missions/autopilot/*",
-    "src/grimoire/missions/breaker/*", "src/grimoire/missions/launcher/*",
+    "src/grimoire/missions/breaker/*", "src/grimoire/missions/launcher/*", "src/grimoire/missions/arbiter/*",
     "src/grimoire/missions/orchestrator_policy/*",
     # les dépendances directes du mécanisme. Le registre de fournisseurs décide le palier du second relecteur ; routage,
     # politique de données et magasin de clés vont avec
