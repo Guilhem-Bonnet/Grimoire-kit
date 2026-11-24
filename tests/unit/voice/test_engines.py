@@ -258,3 +258,12 @@ def test_unknown_engine_in_settings_is_refused_with_a_reason() -> None:
     with pytest.raises(EngineUnavailableError) as err:
         VoiceEngines.from_settings(settings_from_mapping({"voice": {"stt": "nope"}}))
     assert "« nope » inconnu" in err.value.reason
+
+
+def test_project_download_switch_overrides_the_engine_one(fake_engines, clock, timers) -> None:
+    for project, engine, expected in ((False, True, False), (True, False, True)):
+        settings = settings_from_mapping(
+            {"voice": {"allow_download": project, "stt": {"engine": "fake", "allow_download": engine}, "tts": "fake"}}
+        )
+        VoiceEngines.from_settings(settings, clock=clock, timer_factory=timers).transcribe(b"x")
+        assert FakeSTT.last_options["allow_download"] is expected

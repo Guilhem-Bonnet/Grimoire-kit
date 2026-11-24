@@ -10,6 +10,7 @@
       idle_unload_seconds: 300
       language: fr
       allow_download: false # true = l'utilisateur accepte le téléchargement des modèles
+                            # (le seul interrupteur : il prime sur toute option d'un moteur)
 
 Un réglage illisible ne casse rien : il retombe sur son défaut et le problème est
 rapporté dans :attr:`VoiceSettings.problems`, que ``grimoire doctor`` affiche.
@@ -77,12 +78,25 @@ def _engine_choice(raw: Any, key: str, default: str, problems: list[str]) -> Eng
     return EngineChoice(default)
 
 
+def _check_known(kind: str, choice: EngineChoice, problems: list[str]) -> None:
+    """Un moteur hors registre est rapporté ; le choix reste, la charge dira « inconnu » le moment venu."""
+    from grimoire.voice.engines import engine_names
+
+    known = engine_names(kind)  # type: ignore[arg-type]
+    if choice.engine not in known:
+        problems.append(f"voice.{kind}={choice.engine!r} inconnu (connus : {', '.join(known)})")
+
+
 def settings_from_mapping(data: Any) -> VoiceSettings:
     """Résout les réglages depuis le contenu de ``project-context.yaml`` (ou ``GrimoireConfig.extra``)."""
     problems: list[str] = []
     data = data if isinstance(data, dict) else {}
 
     interaction = data.get("interaction")
+    if interaction is not None and not isinstance(interaction, dict):
+        problems.append(
+            f"interaction={interaction!r} doit être une table (`interaction: {{mode: voice}}`) : text retenu"
+        )
     raw_mode = interaction.get("mode") if isinstance(interaction, dict) else None
     mode = "text"
     if raw_mode is not None:
@@ -114,10 +128,15 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         problems.append(f"voice.allow_download={allow!r} invalide (true ou false) : false retenu")
         allow = False
 
+    stt = _engine_choice(voice.get("stt"), "stt", DEFAULT_STT, problems)
+    tts = _engine_choice(voice.get("tts"), "tts", DEFAULT_TTS, problems)
+    _check_known("stt", stt, problems)
+    _check_known("tts", tts, problems)
+
     return VoiceSettings(
         mode=mode,
-        stt=_engine_choice(voice.get("stt"), "stt", DEFAULT_STT, problems),
-        tts=_engine_choice(voice.get("tts"), "tts", DEFAULT_TTS, problems),
+        stt=stt,
+        tts=tts,
         idle_unload_s=float(idle),
         language=language.strip(),
         allow_download=allow,

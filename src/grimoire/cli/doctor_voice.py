@@ -20,6 +20,7 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
         availability,
         get_spec,
         install_hint,
+        model_cache,
         voice_extra_installed,
     )
     from grimoire.voice.settings import settings_from_mapping
@@ -31,6 +32,20 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
 
     extra = voice_extra_installed()
     mode = f"interaction.mode: {settings.mode}"
+    if not settings.enabled:
+        # Mode texte : une seule ligne, quel que soit l'état de l'extra.
+        state = "installé" if extra else f"non installé — {install_hint()}"
+        entries.append(
+            {
+                "name": "voice_extra",
+                "passed": True,
+                "level": "ok" if extra else "info",
+                "detail": f"Vocal : désactivé ({mode}), extra voice {state}",
+            }
+        )
+        _emit(entries, results, fmt, console)
+        return
+
     if extra:
         entries.append(
             {"name": "voice_extra", "passed": True, "level": "ok", "detail": f"Vocal : extra voice installé ({mode})"}
@@ -40,7 +55,7 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
             {
                 "name": "voice_extra",
                 "passed": True,
-                "level": "warn" if settings.enabled else "info",
+                "level": "warn",
                 "detail": f"Vocal : extra voice non installé ({mode}) — {install_hint()}",
             }
         )
@@ -54,18 +69,25 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
         else:
             avail = availability(spec)
             ok, reason = avail.ok, avail.reason
-        level = "ok" if ok else ("warn" if settings.enabled else "info")
+            if ok and not settings.allow_download:
+                cache = model_cache(spec, dict(choice.options))
+                if cache is not None and not cache.ok:
+                    ok, reason = False, cache.reason
         entries.append(
             {
                 "name": f"voice_{kind}",
                 "passed": True,
-                "level": level,
+                "level": "ok" if ok else "warn",
                 "engine": choice.engine,
                 "available": ok,
                 "detail": f"Vocal, {label} (voice.{kind}: {choice.engine}) : {reason}",
             }
         )
 
+    _emit(entries, results, fmt, console)
+
+
+def _emit(entries: list[dict[str, Any]], results: list[dict[str, Any]], fmt: str, console: Console) -> None:
     for entry in entries:
         results.append(entry)
         if fmt != "json":

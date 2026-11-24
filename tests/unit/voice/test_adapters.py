@@ -21,7 +21,7 @@ class FakeWhisperModel:
 
     def __init__(self, model: str, **kwargs: Any) -> None:
         if type(self).fail:
-            raise OSError("snapshot not found in cache")
+            raise LocalEntryNotFoundError("snapshot not found in cache")
         self.model = model
         self.kwargs = kwargs
         self.calls: list[dict[str, Any]] = []
@@ -99,6 +99,10 @@ class FakeTensor:
         return b"".join(int(v).to_bytes(2, "little", signed=True) for v in self.values)
 
 
+class LocalEntryNotFoundError(Exception):
+    """Même nom que celui de huggingface_hub : c'est lui que le moteur reconnaît."""
+
+
 class FakeTTSModel:
     loads: ClassVar[list[dict[str, Any]]] = []
     offline_seen: ClassVar[list[str | None]] = []
@@ -109,7 +113,7 @@ class FakeTTSModel:
     def load_model(cls, language: str | None = None) -> FakeTTSModel:
         cls.offline_seen.append(os.environ.get("HF_HUB_OFFLINE"))
         if cls.fail:
-            raise RuntimeError("LocalEntryNotFoundError")
+            raise LocalEntryNotFoundError("absent du cache")
         cls.loads.append({"language": language})
         return cls()
 
@@ -173,4 +177,108 @@ def test_hub_offline_flips_the_huggingface_constant(fake_module, monkeypatch) ->
     monkeypatch.setenv("HF_HUB_OFFLINE", "0")
     with hub_offline():
         assert constants.HF_HUB_OFFLINE is True and os.environ["HF_HUB_OFFLINE"] == "1"
+    assert constants.HF_HUB_OFFLINE is False and os.environ["HF_HUB_OFFLINE"] == "0"
+
+
+def test_pocket_other_failure_is_not_called_a_cache_miss(fake_pocket) -> None:
+    fake_pocket.fail = False
+    original = fake_pocket.load_model
+    fake_pocket.load_model = classmethod(lambda cls, language=None: (_ for _ in ()).throw(MemoryError("plein")))
+    try:
+        with pytest.raises(EngineUnavailableError) as err:
+            EngineSlot(get_spec("tts", "pocket-tts"), {"language": "fr"}, idle_unload_s=0).run(lambda e: None)
+    finally:
+        fake_pocket.load_model = original
+    assert "introuvable dans le cache" not in err.value.reason and "MemoryError" in err.value.reason
+
+
+def test_whisper_other_failure_is_not_called_a_cache_miss(fake_module) -> None:
+    class Boom:
+        def __init__(self, *a, **k) -> None:
+            raise ValueError("compute type non supporté")
+
+    fake_module("faster_whisper", WhisperModel=Boom)
+    with pytest.raises(EngineUnavailableError) as err:
+        EngineSlot(get_spec("stt", "faster-whisper"), {}, idle_unload_s=0).run(lambda e: None)
+    assert "introuvable dans le cache" not in err.value.reason and "ValueError" in err.value.reason
+
+
+def test_whisper_cache_miss_keeps_its_message(fake_module) -> None:
+    class Miss:
+        def __init__(self, *a, **k) -> None:
+            raise LocalEntryNotFoundError("x")
+
+    fake_module("faster_whisper", WhisperModel=Miss)
+    with pytest.raises(EngineUnavailableError) as err:
+        EngineSlot(get_spec("stt", "faster-whisper"), {}, idle_unload_s=0).run(lambda e: None)
+    assert "introuvable dans le cache" in err.value.reason
+
+
+def test_pocket_url_voice_is_refused_without_consent(fake_pocket) -> None:
+    slot = EngineSlot(get_spec("tts", "pocket-tts"), {"voice": "https://exemple.test/v.wav"}, idle_unload_s=0)
+    with pytest.raises(EngineUnavailableError) as err:
+        slot.run(lambda e: None)
+    assert "URL" in err.value.reason and "introuvable dans le cache" not in err.value.reason
+    assert fake_pocket.offline_seen == ["1"]  # refusée avant tout appel du moteur à la voix
+
+
+def test_pocket_url_voice_is_allowed_with_consent(fake_pocket) -> None:
+    slot = EngineSlot(
+        get_spec("tts", "pocket-tts"), {"voice": "hf://kyutai/voix.wav", "allow_download": True}, idle_unload_s=0
+    )
+    slot.run(lambda e: None)
+    assert fake_pocket.offline_seen == [None, None]
+
+
+def test_overlapping_loads_never_leave_the_process_offline(fake_module, monkeypatch) -> None:
+    import threading
+
+    from grimoire.voice._offline import hub_offline
+
+    constants = fake_module("huggingface_hub.constants", HF_HUB_OFFLINE=False)
+    fake_module("huggingface_hub", constants=constants)
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    inside = threading.Barrier(2)
+    release = threading.Event()
+    first_out = threading.Event()
+
+    def worker(first: bool) -> None:
+        with hub_offline():
+            inside.wait(timeout=5)  # les deux sont dedans en même temps
+            if first:
+                release.wait(timeout=5)
+        if first:
+            first_out.set()
+
+    t1 = threading.Thread(target=worker, args=(True,))
+    t2 = threading.Thread(target=worker, args=(False,))
+    t1.start()
+    t2.start()
+    t2.join(timeout=5)  # le second sort d'abord : le premier, entré avant lui, tient encore
+    assert constants.HF_HUB_OFFLINE is True and os.environ["HF_HUB_OFFLINE"] == "1"
+    release.set()
+    t1.join(timeout=5)
+    assert first_out.is_set()
+    assert constants.HF_HUB_OFFLINE is False and "HF_HUB_OFFLINE" not in os.environ
+
+
+def test_many_threads_restore_the_original_state(fake_module, monkeypatch) -> None:
+    import threading
+
+    from grimoire.voice._offline import hub_offline
+
+    constants = fake_module("huggingface_hub.constants", HF_HUB_OFFLINE=False)
+    fake_module("huggingface_hub", constants=constants)
+    monkeypatch.setenv("HF_HUB_OFFLINE", "0")
+
+    def work() -> None:
+        for _ in range(50):
+            with hub_offline():
+                pass
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
     assert constants.HF_HUB_OFFLINE is False and os.environ["HF_HUB_OFFLINE"] == "0"

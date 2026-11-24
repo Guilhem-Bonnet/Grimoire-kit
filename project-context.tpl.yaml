@@ -244,7 +244,10 @@ installed_archetypes: []               # Rempli par grimoire-init.sh install
 # ── Messages vocaux (#1343) — désactivés par défaut ──────────────────────────
 # Moteurs locaux : pip install 'grimoire-kit[voice]'. Sans l'extra, rien d'audio
 # n'est chargé ; le repli « browser » (voix et dictée du navigateur) reste
-# possible. Aucun modèle n'est téléchargé sans allow_download: true.
+# possible. Aucun modèle n'est téléchargé sans allow_download: true (seul
+# interrupteur, y compris pour une voix donnée par URL).
+# torch CPU d'abord, pour éviter les roues CUDA (~2 Go) :
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 # `grimoire doctor` vérifie l'extra et la disponibilité des moteurs choisis.
 
 # interaction:

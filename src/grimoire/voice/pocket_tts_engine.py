@@ -6,8 +6,8 @@ import io
 import wave
 from typing import Any
 
-from grimoire.voice._offline import hub_offline
-from grimoire.voice.engines import EngineUnavailableError, Speech, TextToSpeech
+from grimoire.voice._offline import hub_offline, is_cache_miss
+from grimoire.voice.engines import EngineUnavailableError, Speech, TextToSpeech, _one_line
 
 #: Code de langue du projet → modèle de langue de pocket-tts.
 _LANGUAGES = {
@@ -50,13 +50,24 @@ class PocketTextToSpeech(TextToSpeech):
         except Exception as exc:
             if allow_download:
                 raise
+            if isinstance(exc, EngineUnavailableError):
+                raise
+            if is_cache_miss(exc):
+                raise EngineUnavailableError(
+                    f"modèle Pocket TTS « {self._language} » introuvable dans le cache local, et rien n'est "
+                    f"téléchargé sans votre accord (voice.allow_download: true) — {type(exc).__name__}"
+                ) from None
             raise EngineUnavailableError(
-                f"modèle Pocket TTS « {self._language} » introuvable dans le cache local, et rien n'est "
-                f"téléchargé sans votre accord (voice.allow_download: true) — {type(exc).__name__}"
+                f"Pocket TTS « {self._language} » n'a pas pu se charger ({_one_line(exc)})"
             ) from None
 
     def _state(self, voice: str) -> Any:
         if voice not in self._states:
+            if not self._allow_download and _is_url(voice):
+                raise EngineUnavailableError(
+                    f"la voix « {voice} » est une URL : rien n'est téléchargé sans votre accord "
+                    "(voice.allow_download: true) — nommez une voix du cache ou un fichier local"
+                )
             with hub_offline(not self._allow_download):
                 self._states[voice] = self._model.get_state_for_audio_prompt(voice)
         return self._states[voice]
@@ -78,6 +89,27 @@ class PocketTextToSpeech(TextToSpeech):
     def close(self) -> None:
         self._states.clear()
         self._model = None
+
+
+def _is_url(voice: str) -> bool:
+    return "://" in voice
+
+
+def model_cached(options: dict[str, Any]) -> bool | None:
+    """Un dépôt Pocket TTS est-il dans le cache Hugging Face ? Ne charge rien.
+
+    Le dépôt exact dépend de la langue et de la version de pocket-tts : on cherche un
+    dépôt dont le nom contient « pocket-tts », faute de mieux.
+    """
+    try:
+        from huggingface_hub import scan_cache_dir
+    except ImportError:
+        return None
+    try:
+        repos = scan_cache_dir().repos
+    except Exception:
+        return False  # pas de dossier de cache : rien n'a jamais été téléchargé
+    return any("pocket-tts" in repo.repo_id.lower() or "pocket_tts" in repo.repo_id.lower() for repo in repos)
 
 
 def _default_voice(language: str) -> str:

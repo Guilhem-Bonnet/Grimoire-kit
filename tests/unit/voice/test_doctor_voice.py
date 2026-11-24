@@ -16,16 +16,42 @@ def _run(data: dict, *, fmt: str = "json") -> dict[str, dict]:
     results: list[dict] = []
     apply_voice_check(data, results, fmt=fmt, console=Console(quiet=True))
     assert all(r["passed"] for r in results)  # jamais FAIL : le texte reste intact
-    return {r["name"]: r for r in results}
+    out: dict[str, dict] = {}
+    for r in results:  # plusieurs problèmes de réglages : on garde leurs textes ensemble
+        if r["name"] in out:
+            r = {**r, "detail": out[r["name"]]["detail"] + " | " + r["detail"]}
+        out[r["name"]] = r
+    return out
 
 
-def test_text_mode_without_extra_is_informational(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_text_mode_is_a_single_line(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: False)
     out = _run({})
+    assert set(out) == {"voice_extra"}
     assert out["voice_extra"]["level"] == "info"
     assert "grimoire-kit[voice]" in out["voice_extra"]["detail"]
-    assert out["voice_stt"]["level"] == "info" and out["voice_stt"]["available"] is False
-    assert out["voice_tts"]["engine"] == "pocket-tts"
+
+
+def test_text_mode_with_extra_is_still_a_single_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
+    assert set(_run({})) == {"voice_extra"}
+
+
+def test_voice_mode_flags_a_model_missing_from_the_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
+    monkeypatch.setattr("grimoire.voice.faster_whisper_engine.model_cached", lambda _o: False)
+    monkeypatch.setattr("grimoire.voice.pocket_tts_engine.model_cached", lambda _o: True)
+    out = _run({"interaction": {"mode": "voice"}})
+    assert out["voice_stt"]["level"] == "warn" and out["voice_stt"]["available"] is False
+    assert "absent du cache" in out["voice_stt"]["detail"]
+    assert out["voice_tts"]["level"] == "ok"
+
+
+def test_voice_mode_with_download_consent_skips_the_cache_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
+    monkeypatch.setattr("grimoire.voice.faster_whisper_engine.model_cached", lambda _o: False)
+    out = _run({"interaction": {"mode": "voice"}, "voice": {"allow_download": True}})
+    assert out["voice_stt"]["level"] == "ok"
 
 
 def test_voice_mode_without_extra_warns(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,6 +64,7 @@ def test_voice_mode_without_extra_warns(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_voice_mode_with_engines_installed_is_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("grimoire.voice.engines._module_installed", lambda _m: True)
+    monkeypatch.setattr("grimoire.voice.engines.model_cache", lambda *_a: None)
     out = _run({"interaction": {"mode": "voice"}})
     assert {out[k]["level"] for k in ("voice_extra", "voice_stt", "voice_tts")} == {"ok"}
 
@@ -58,7 +85,7 @@ def test_text_output_prints_each_line() -> None:
     console = Console(record=True, width=200)
     apply_voice_check({}, [], fmt="text", console=console)
     text = console.export_text()
-    assert "Vocal : extra voice" in text and "voice.stt: faster-whisper" in text
+    assert "Vocal : désactivé" in text and "voice.stt" not in text
 
 
 def test_grimoire_doctor_reports_voice_entries(tmp_path: Path) -> None:
