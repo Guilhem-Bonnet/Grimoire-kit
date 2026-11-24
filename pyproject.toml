@@ -223,6 +223,7 @@ module = [
     "tantivy.*",
 "faster_whisper.*",
 "pocket_tts.*",
+"torch.*",
 ]
 ignore_missing_imports = true
 
