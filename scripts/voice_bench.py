@@ -149,17 +149,49 @@ def _pocket_tts() -> TtsEngine:
         from pocket_tts import TTSModel  # type: ignore[import-not-found]
 
         try:
-            model = TTSModel.load_model()
-            state = model.get_state_for_audio_prompt("alba")
+            model = TTSModel.load_model(language="french")
+            state = model.get_state_for_audio_prompt("estelle")
         except Exception as exc:
             raise EngineUnavailableError(f"absent du cache (relancer avec --download) : {exc}") from exc
 
         def synth(text: str) -> tuple[Any, int, float | None]:
-            return model.generate_audio(state, text), int(model.sample_rate), None
+            t0 = time.perf_counter()
+            first: float | None = None
+            chunks: list[float] = []
+            for chunk in model.generate_audio_stream(state, text):
+                if first is None:
+                    first = time.perf_counter() - t0
+                chunks.extend(_flatten(chunk))
+            return chunks, int(model.sample_rate), first
 
         return synth
 
     return TtsEngine("pocket-tts-fr", "pocket_tts", load)
+
+
+_VOICE_DESIGN = (
+    "Voix féminine française, posée et professionnelle, chaleureuse sans être théâtrale, "
+    "débit naturel, diction claire, ton d'une présentatrice qui explique calmement."
+)
+
+
+def _qwen3_tts_design() -> TtsEngine:
+    def load(download: bool) -> Callable[[str], tuple[Any, int, float | None]]:
+        _offline_env(download)
+        from qwen_tts import Qwen3TTSModel  # type: ignore[import-not-found]
+
+        try:
+            model = Qwen3TTSModel.from_pretrained("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
+        except Exception as exc:
+            raise EngineUnavailableError(f"absent du cache (relancer avec --download) : {exc}") from exc
+
+        def synth(text: str) -> tuple[Any, int, float | None]:
+            wavs, rate = model.generate_voice_design(text=text, instruct=_VOICE_DESIGN, language="French")
+            return wavs[0], int(rate), None
+
+        return synth
+
+    return TtsEngine("qwen3-tts-1.7b-design", "qwen_tts", load)
 
 
 def _qwen3_tts(size: str) -> TtsEngine:
@@ -186,7 +218,7 @@ def default_stt_engines() -> list[SttEngine]:
 
 
 def default_tts_engines() -> list[TtsEngine]:
-    return [_pocket_tts(), _qwen3_tts("0.6B"), _qwen3_tts("1.7B"), _kokoro()]
+    return [_pocket_tts(), _qwen3_tts("0.6B"), _qwen3_tts("1.7B"), _qwen3_tts_design(), _kokoro()]
 
 
 # --------------------------------------------------------------------------------------------

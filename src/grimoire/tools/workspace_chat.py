@@ -579,10 +579,16 @@ def _resume_quietly(conv: Conversation) -> None:
         conv.ensure_started(resume=True)
 
 
+#: Posée à la suite d'un message dicté : l'orchestrateur sait que le texte vient d'une reconnaissance vocale.
+DICTATION_NOTICE = "(dictée vocale, erreurs de reconnaissance possibles)"
+
+
 def chat_send(root: Path, body: dict[str, Any]) -> dict[str, Any]:
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("text requis : le message ne peut pas être vide")
+    if body.get("dictation") is True:  # le texte corrigé par la personne part tel quel, la mention en plus
+        text = f"{text.rstrip()}\n\n{DICTATION_NOTICE}"
     task_id = body.get("task_id")
     target = body.get("answer_to")
     answer_to = None
