@@ -24,8 +24,10 @@ from grimoire.memory.validation import redact_secrets
 DECISION_ID = "grimoire.error-occurred"
 MAX_MESSAGE = 200
 _MAX_FIELD = 80
-_FRAGMENT_MARGIN = 64
-_TOKEN_TAIL = re.compile(r"[A-Za-z0-9_\-.+/=~]+\Z")
+# Le dernier mot coupé, quels que soient ses caractères (« : », « ! », « @ » d'une
+# URL à authentification compris) : un fragment de secret ne survit jamais.
+_CUT_WORD = re.compile(r"\S+\Z")
+_CUT_MARK = "[truncated]"  # un seul mot plus long que la fenêtre : rien n'en est gardé
 _SCAN_WINDOW = 2000  # borne du texte passé au caviardage : un message géant ne coûte pas cher
 
 
@@ -41,10 +43,12 @@ def _clean(value: Any, limit: int) -> str:
         return ""
     window = value[:_SCAN_WINDOW]
     if len(value) > _SCAN_WINDOW and not (value[_SCAN_WINDOW].isspace() or window[-1:].isspace()):
-        # Coupé au milieu d'un mot : on retire toute la suite finale de caractères
-        # de jeton, quel que soit le motif, pour qu'aucun fragment ne survive.
-        # Un message d'un seul mot : rien à garder, on recule d'une marge fixe.
-        window = _TOKEN_TAIL.sub("", window) or window[:-_FRAGMENT_MARGIN]
+        # Coupé au milieu d'un mot : on retire tout le dernier mot, quel que soit
+        # le motif. Un message d'un seul mot ne garde rien (jamais une coupe fixe,
+        # qui retomberait au milieu d'un jeton) : un marqueur en tient lieu.
+        window = _CUT_WORD.sub("", window)
+        if not window.strip():
+            return _CUT_MARK
     return redact_secrets(window)[0][:limit]
 
 

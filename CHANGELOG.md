@@ -7,7 +7,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- fix(security): `redact_secrets` masque les jetons `github_pat_` et les `Bearer` opaques (`Bearer: …` compris, pas la prose « Bearer authentication failed »), le motif de clé privée est linéaire (200 000 caractères < 100 ms) ; `ErrorOccurred` caviarde `name`, `errorContext` et `toolName` et jette toute suite de caractères de jeton coupée par la fenêtre de balayage.
+- fix(security): `redact_secrets` masque les jetons `github_pat_` et les `Bearer` opaques (`Bearer: …` compris, pas la prose « Bearer authentication failed »), le motif de clé privée est linéaire (200 000 caractères < 100 ms) ; `ErrorOccurred` caviarde `name`, `errorContext` et `toolName` et jette tout le dernier mot coupé par la fenêtre de balayage (URL à authentification comprise) ; un mot unique plus long que la fenêtre devient `[truncated]`.
 - fix(hosts): le hook `ErrorOccurred` de Copilot tronque aussi le nom d'outil (80 caractères, une trace ne grossit plus avec un `toolName` géant) et caviarde les secrets connus du kit (jetons, clés) du message avant de l'inscrire aux traces.
 - feat(hosts): un agent qui déclare `hooks:` dans son fichier reçoit, sous Copilot, un bloc `hooks:` dans son `.agent.md` (format des agents personnalisés VS Code) ; la garde globale n'y est jamais relancée, le collecteur refuse un hook d'agent qui l'appellerait (#1280 P3).
 - docs(hosts): agent cloud Copilot (#1280 P3) — la référence des hooks ne documente aucun champ de la charge qui le distingue de la CLI, la garde ne convertit donc pas `ask` en `deny` ; l'hôte le fait lui-même sous l'agent cloud.

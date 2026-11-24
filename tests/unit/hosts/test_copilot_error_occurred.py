@@ -66,11 +66,20 @@ def test_error_is_journaled_and_never_blocks(tmp_path: Path) -> None:
 
 def test_message_is_truncated_and_tool_kept_when_present(tmp_path: Path) -> None:
     payload = _payload()
-    payload["error"] = {"message": "x" * 5000, "name": "E"}
+    payload["error"] = {"message": "xy " * 2000, "name": "E"}
     payload["toolName"] = "bash"
     _, decision, _ = _run(_root(tmp_path), payload)
     assert len(decision.detail["error_message"]) == MAX_MESSAGE
     assert decision.detail["tool"] == "bash"
+
+
+def test_single_word_longer_than_window_keeps_only_a_marker(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.error_occurred import _CUT_MARK
+
+    payload = _payload()
+    payload["error"] = {"message": "x" * 5000, "name": "E"}
+    _, decision, _ = _run(_root(tmp_path), payload)
+    assert decision.detail["error_message"] == _CUT_MARK
 
 
 def test_huge_tool_name_is_bounded(tmp_path: Path) -> None:
@@ -78,7 +87,7 @@ def test_huge_tool_name_is_bounded(tmp_path: Path) -> None:
     payload = _payload()
     payload["toolName"] = "t" * 100_000
     _, decision, _ = _run(root, payload)
-    assert len(decision.detail["tool"]) <= 80
+    assert decision.detail["tool"] == "[truncated]"
     assert all(len(json.dumps(t)) < 2000 for t in _traces(root))
 
 
@@ -194,3 +203,32 @@ def test_cut_token_after_long_jwt_never_leaks_a_fragment(tmp_path: Path) -> None
         assert len(message) > _SCAN_WINDOW
         detail = _detail_for(tmp_path, message=message)["error_message"]
         assert "ghp_" not in detail, cut
+
+
+def test_single_word_message_cut_keeps_no_token_fragment(tmp_path: Path) -> None:
+    """Fenêtre faite d'un seul mot de caractères de jeton : rien n'en est gardé."""
+    from grimoire.hosts.decisions.error_occurred import _SCAN_WINDOW
+
+    secret = "Qz7" * 12
+    for jwt_len in range(1760, 1800, 4):
+        jwt = ".".join(("ey" + "J" + "k3" * (jwt_len // 2), "m4" * 5, "n5" * 5))
+        for offset in range(1900, 1940, 3):
+            message = jwt + "." * (offset - len(jwt)) + "ghp_" + secret + "." * 300
+            assert len(message) > _SCAN_WINDOW
+            detail = _detail_for(tmp_path, message=message)["error_message"]
+            assert detail == "[truncated]"
+            assert not any(secret[i : i + 8] in detail for i in range(len(secret) - 7)), (jwt_len, offset)
+
+
+def test_basic_auth_url_cut_in_password_never_leaks(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.error_occurred import _SCAN_WINDOW
+
+    dashes = "-" * 5
+    pem = f"{dashes}BEGIN RSA PRIVATE KEY{dashes}\n" + "K" * 1850 + f"\n{dashes}END RSA PRIVATE KEY{dashes}"
+    hidden = "S3cr!etPassw0rdXYZ"
+    for kept in range(2, len(hidden)):
+        pad = "z" * (_SCAN_WINDOW - len(pem) - len(" https://admin:") - kept - 2)
+        message = pem + " " + pad + " https://admin:" + hidden + "@host/x " + "y" * 50
+        assert len(message) > _SCAN_WINDOW
+        detail = _detail_for(tmp_path, message=message)["error_message"]
+        assert "admin:S3" not in detail, kept
