@@ -118,14 +118,6 @@ _QDRANT_COMPOSE_FILE = "docker-compose.memory.yml"
 
 # ── Lite profile (issue Grimoire-kit#552, phase 2 lot 2.6) ─────────────────────
 
-_CI_MARKERS = (
-    ".github/workflows",
-    ".gitlab-ci.yml",
-    ".circleci/config.yml",
-    "azure-pipelines.yml",
-    ".travis.yml",
-    "Jenkinsfile",
-)
 _TEST_DIR_MARKERS = ("tests", "test", "spec", "__tests__")
 
 
@@ -136,7 +128,9 @@ def _looks_like_a_playground(target: Path) -> bool:
     surface the ``--lite`` suggestion in the wizard. It never changes what
     gets written; a false negative just means the suggestion isn't shown.
     """
-    if any((target / marker).exists() for marker in _CI_MARKERS):
+    from grimoire.core.ci_markers import has_ci
+
+    if has_ci(target):
         return False
     for name in _TEST_DIR_MARKERS:
         candidate = target / name
