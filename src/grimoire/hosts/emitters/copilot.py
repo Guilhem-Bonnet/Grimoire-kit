@@ -32,6 +32,7 @@ from grimoire.hosts.emitters.base import (
 )
 from grimoire.hosts.emitters.claude_code import DISPATCH_MODEL_HOOK, FAIL_CLOSED_TIMEOUT, tier_for
 from grimoire.hosts.emitters.copilot_mcp import KIT_SERVERS, vscode_mcp_merge
+from grimoire.hosts.emitters.copilot_setup import SETUP_STEPS, setup_steps_file
 from grimoire.hosts.emitters.rules import with_rule_layers
 from grimoire.hosts.hook_launcher import BARE, HookLauncher, resolve_hook_launcher
 from grimoire.hosts.model_table import TIERS, load_model_table, resolve_model
@@ -564,6 +565,7 @@ def _readme(surface: ProjectSurface, blocking: list[HookSpec], gaps: list[Degrad
         f"| Prompts | {len([c for c in surface.commands if c.source != 'workflow'])} — `.github/prompts/` |",
         f"| Hooks | {len(surface.hooks)} — `.github/hooks/` |",
         f"| Serveurs MCP | {len([m for m in surface.mcp_servers if m.name in KIT_SERVERS])} — `.vscode/mcp.json` |",
+        f"| Agent cloud | installation du kit — `{SETUP_STEPS.as_posix()}` |",
         "",
         "Les fichiers de hook ne portent pas de marqueur de gestion : ce sont des",
         "JSON purs. C'est la commande invoquée qui dit à qui le fichier",
@@ -632,6 +634,8 @@ class CopilotEmitter(Emitter):
         files.append(_subagent_start_file(launcher))
         files.extend(_observation_file(h, launcher) for h in (ERROR_OCCURRED_HOOK, USER_PROMPT_TRANSFORMED_HOOK))
         files.extend(_hook_file(hook, launcher, dispatch=True, project_root=project_root) for hook in surface.hooks)
+        # Agent cloud (#1280, P3) : le kit installé avant que l'agent commence.
+        files.append(setup_steps_file())
 
         degradations: list[Degradation] = list(Emitter.launcher_degradations(launcher))
         if not surface.permissions.is_empty():
@@ -742,8 +746,8 @@ class CopilotEmitter(Emitter):
                     "dans les réglages du dépôt (Settings > Copilot > MCP servers), avec `tools` obligatoire."
                 ),
                 fallback=(
-                    "la configuration à saisir est dans docs/reference/hotes.md ; un serveur stdio local "
-                    "du poste n'y existe pas, le kit n'y écrit donc rien."
+                    "la configuration à saisir est dans docs/reference/hotes.md ; le serveur `grimoire-mcp` "
+                    f"y existe parce que `{SETUP_STEPS.as_posix()}` installe le kit avant l'agent."
                 ),
             )
         )
