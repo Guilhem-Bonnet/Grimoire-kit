@@ -79,6 +79,7 @@ from grimoire.tools import (
     workspace_since,
 )
 from grimoire.tools.project_registry import refuse_foreign_body
+from grimoire.voice import stt_service
 
 __all__ = [
     "CHAT_STREAM_PATH",
@@ -636,6 +637,7 @@ f"{PREFIX}autonomy/mandate": _mandate_state,
     f"{PREFIX}memory/recall/replay": _memory_recall_replay,
     f"{PREFIX}chat/state": workspace_chat.chat_state,
     f"{PREFIX}chat/hosts": workspace_chat.chat_hosts,
+    f"{PREFIX}voice/config": stt_service.voice_config,
 }
 
 
@@ -1014,6 +1016,7 @@ POST_ROUTES: dict[str, _PostHandler] = {
     f"{PREFIX}chat/cancel": workspace_chat.chat_cancel,
     f"{PREFIX}chat/stop": workspace_chat.chat_stop,
     f"{PREFIX}chat/host": workspace_chat.chat_host,
+    f"{PREFIX}voice/transcribe": stt_service.transcribe,
     f"{PREFIX}autonomy/mandate/grant": _mandate_grant,
     f"{PREFIX}autonomy/mandate/revoke": _mandate_revoke,
     f"{PREFIX}file/override": _create_override,
