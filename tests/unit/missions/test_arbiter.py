@@ -10,6 +10,7 @@ confie son escalade au tick, qui lance une session en lecture seule bornée au c
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -748,3 +749,702 @@ def test_la_session_arbitre_ne_peut_pas_ecrire_par_git_diff(tmp_path: Path) -> N
     assert "git diff" not in allowed and "git show" not in allowed and "git log" not in allowed
     assert "Bash(gh pr diff)" in allowed and "Bash(gh pr view)" in allowed
     assert arbiter.SESSION_ENV == {"GIT_PAGER": "cat", "PAGER": "cat", "GH_PAGER": "cat"}
+
+
+# ── Chemins d'échec : le code et le tick ne devinent jamais ──────────────────
+
+
+def test_le_contrat_json_refuse_chaque_forme_hors_schema() -> None:
+    """Chaque champ hors de sa décision est refusé par du code, pas corrigé par le tick."""
+    base = {"decision": "back_to_worker", "criteria": [], "justification": "un dernier cycle suffit",
+            "confidence": 0.8}
+    cases = [
+        ({**base, "schema": "grimoire-arbiter-decision/v2"}, "schéma"),
+        ({**base, "criteria": "un texte"}, "criteria"),
+        ({**base, "criteria": [""]}, "criteria"),
+        ({**base, "decision": "amend_criterion", "replacement": "nouveau", "criteria": ["a", "b"]},
+         "exactement un critère"),
+        ({**base, "replacement": "sans objet"}, "replacement"),
+        ({**base, "decision": "split_followup"}, "au moins un critère"),
+        ({**base, "followup_title": "sans objet"}, "followup_title"),
+        ({**base, "decision": "ready_with_derogation"}, "au moins un critère"),
+    ]
+    for payload, match in cases:
+        with pytest.raises(arbiter.ArbiterDecisionError, match=match):
+            parse_decision(payload)
+    # Le texte de remplacement et le titre de suite ne sortent que dans leur décision.
+    amended = parse_decision({**base, "decision": "amend_criterion", "criteria": ["a"], "replacement": "b"})
+    assert amended.to_dict()["replacement"] == "b"
+    split = parse_decision({**base, "decision": "split_followup", "criteria": ["a"], "followup_title": "Suite"})
+    assert split.to_dict()["followup_title"] == "Suite"
+
+
+def test_une_lecture_de_politique_en_erreur_desactive_le_role(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Échec fermé : une politique illisible n'active ni demande, ni dérogation."""
+    from grimoire.missions import orchestrator_policy as policy_read
+
+    root, service, task, _policy = scene(tmp_path)
+    ask(root, service, task)
+
+    def boom(_root: Path) -> None:
+        raise OSError("politique illisible")
+
+    monkeypatch.setattr(policy_read, "load_orchestrator_policy", boom)
+    assert not arbiter.role_enabled(service)
+    assert arbiter.open_request(service, task.id) is None
+    assert arbiter.merge_grant(service, task.id) is None
+
+
+def test_un_journal_de_sceaux_ou_d_entree_en_revue_illisible_ne_scelle_rien(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Le journal d'autorité et le ledger se lisent en échec fermé : rien ne fonde un vote ni une fusion."""
+    _root, service, task, _policy = scene(tmp_path)
+
+    class BrokenJournal:
+        @staticmethod
+        def read() -> list[dict[str, Any]]:
+            raise OSError("journal illisible")
+
+    class BrokenStore:
+        project = "projet"
+        journal = BrokenJournal()
+
+    monkeypatch.setattr(arbiter, "_store", lambda _service: BrokenStore())
+    assert arbiter.sealed_request(service, task.id, "r") is None
+    assert arbiter.sealed_decision(service, task.id, "r") is None
+
+    from grimoire.missions import reviewer
+
+    def unreadable(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("ledger illisible")
+
+    monkeypatch.setattr(reviewer, "entered_review_at", unreadable)
+    assert arbiter.merge_grant(service, task.id) is None
+
+
+def test_request_refusal_ferme_quand_le_cadre_ne_se_lit_pas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Politique illisible, journal en erreur, mandat absent ou sans ``answer`` : la question reste à l'humain."""
+    from grimoire.missions import mandate as mandate_mod
+
+    root, service, task, policy = scene(tmp_path)
+    (root / POLICY).write_text("orchestrator: [", encoding="utf-8")
+    refusal = arbiter.request_refusal(TaskService(root), TaskService(root).require(task.id),
+                                      "reviewer", "not_ready_cycles")
+    assert "politique d'orchestration illisible" in refusal
+    write_policy(root)
+
+    class BrokenStore:
+        def __init__(self, *_a: Any) -> None: ...
+
+        def state(self) -> None:
+            raise OSError("journal illisible")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mandate_mod, "MandateStore", BrokenStore)
+        refusal = arbiter.request_refusal(service, task, "reviewer", "not_ready_cycles", policy=policy)
+    assert "journal d'autorité illisible" in refusal
+
+    md.MandateStore(root).revoke()
+    refusal = arbiter.request_refusal(service, service.require(task.id), "reviewer", "not_ready_cycles",
+                                      policy=policy)
+    assert "sans mandat actif" in refusal
+
+    md.MandateStore(root).grant(MandateRequest.build(("merge",), ("implementation",), 10, "+1d"),
+                                origin=ORIGIN_HUMAN, via="test")
+    refusal = arbiter.request_refusal(service, service.require(task.id), "reviewer", "not_ready_cycles",
+                                      policy=policy)
+    assert "ne couvre pas le geste answer" in refusal
+
+
+def test_une_escalade_deja_ouverte_rend_sa_demande_au_lieu_d_en_ouvrir_une_seconde(
+    tmp_path: Path,
+) -> None:
+    """Une seconde escalade de la même cause, la première encore ouverte, ne pose pas une seconde question."""
+    root, service, task, _policy = scene(tmp_path)
+    first = ask(root, service, task)
+    again = arbiter.request_arbitration(
+        service, service.require(task.id), "reviewer", "not_ready_cycles", "2 relectures NOT-READY", "constat",
+        text="Désaccord persistant — reprendre ou abandonner ?",
+    )
+    assert again == first.id
+
+
+def test_diff_paths_ferme_sur_tout_worktree_ou_git_illisible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Les chemins du diff se lisent sans shell et en échec fermé : ``()`` plutôt qu'un diff partiel."""
+    from grimoire.missions import task_worktree as tw
+
+    _root, service, task, _policy = scene(tmp_path)
+
+    def no_worktree(*_a: Any, **_k: Any) -> None:
+        raise KeyError("aucun worktree")
+
+    monkeypatch.setattr(tw, "find_task_worktree", no_worktree)
+    assert arbiter.diff_paths(service, task.id) == ()
+
+    class Absent:
+        path = tmp_path / "absent"
+        base_sha = ""
+        into = ""
+
+    monkeypatch.setattr(tw, "find_task_worktree", lambda *_a, **_k: Absent())
+    assert arbiter.diff_paths(service, task.id) == ()
+
+    class NoBase:
+        path = tmp_path
+        base_sha = ""
+        into = ""
+
+    monkeypatch.setattr(tw, "find_task_worktree", lambda *_a, **_k: NoBase())
+    assert arbiter.diff_paths(service, task.id) == ()
+
+    class WithBase:
+        path = tmp_path
+        base_sha = "abc123"
+        into = ""
+
+    monkeypatch.setattr(tw, "find_task_worktree", lambda *_a, **_k: WithBase())
+
+    def git_missing(*_a: Any, **_k: Any) -> None:
+        raise OSError("git absent")
+
+    monkeypatch.setattr(subprocess, "run", git_missing)
+    assert arbiter.diff_paths(service, task.id) == ()
+
+    class Done:
+        returncode = 0
+        stdout = "src/a.py\n.github/workflows/ci.yml\n\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: Done())
+    assert arbiter.diff_paths(service, task.id, "head") == ("src/a.py", ".github/workflows/ci.yml")
+
+    class Failed:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: Failed())
+    assert arbiter.diff_paths(service, task.id) == ()
+
+
+def test_le_vote_refuse_une_demande_inconnue_non_scellee_close_ou_deja_votee(tmp_path: Path) -> None:
+    """Le vote ne s'attache qu'à une demande scellée, ouverte et sans vote : tout le reste est refusé."""
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    root, service, task, _policy = scene(tmp_path)
+    request = ask(root, service, task)
+    payload = json.dumps({"decision": "back_to_worker", "criteria": [],
+                          "justification": "un dernier cycle suffit", "confidence": 0.9})
+    with pytest.raises(GrimoireMissionError, match="aucune demande"):
+        record_decision(service, task.id, payload, request_id="inconnue", actor="arbiter")
+    service.ledger.append_event(ARBITRATION_REQUESTED_EVENT, task.id, "task", "arbiter",
+                                {"task_id": task.id, "request_id": "sans-sceau"})
+    with pytest.raises(GrimoireMissionError, match="pas scellée"):
+        record_decision(service, task.id, payload, request_id="sans-sceau", actor="arbiter")
+    service.ledger.append_event(ARBITRATED_EVENT, task.id, "task", "arbiter",
+                                {"task_id": task.id, "request_id": request.id, "decision": "abandon"})
+    with pytest.raises(GrimoireMissionError, match="déjà clos"):
+        record_decision(service, task.id, payload, request_id=request.id, actor="arbiter")
+
+
+def test_un_vote_deja_inscrit_et_un_sceau_en_erreur_sont_refuses(tmp_path: Path,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un second vote sur la même demande est refusé ; un sceau qui échoue ne laisse pas de vote au ledger."""
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    root, service, task, _policy = scene(tmp_path)
+    request = ask(root, service, task)
+    payload = json.dumps({"decision": "back_to_worker", "criteria": [],
+                          "justification": "un dernier cycle suffit", "confidence": 0.9})
+    record_decision(service, task.id, payload, request_id=request.id, actor="arbiter")
+    with pytest.raises(GrimoireMissionError, match="déjà son vote"):
+        record_decision(service, task.id, payload, request_id=request.id, actor="arbiter")
+    second = ask(root, service, service.require(task.id), source="merger", cause="ci_red", refused=())
+
+    def seal_fails(*_a: Any, **_k: Any) -> None:
+        raise OSError("journal en erreur")
+
+    monkeypatch.setattr(arbiter, "_seal", seal_fails)
+    with pytest.raises(GrimoireMissionError, match="non scellée"):
+        record_decision(service, task.id, payload, request_id=second.id, actor="arbiter")
+
+
+def test_apply_decision_refuse_une_politique_illisible_un_critere_inconnu_et_les_impasses(
+    tmp_path: Path,
+) -> None:
+    """Rien ne s'applique hors du périmètre des critères : politique illisible, critère inconnu, dernier critère, sans tête."""
+    from dataclasses import replace
+
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    (root / POLICY).write_text("orchestrator: [", encoding="utf-8")
+    with pytest.raises(arbiter.ArbiterDecisionError, match="politique d'orchestration illisible"):
+        arbiter.apply_decision(service, request, decide("back_to_worker", criteria=[]), policy=None)
+    write_policy(root)
+    with pytest.raises(arbiter.ArbiterDecisionError, match="absent"):
+        arbiter.apply_decision(service, request, decide("back_to_worker", criteria=["critère fantôme"]),
+                               policy=policy)
+    with pytest.raises(arbiter.ArbiterDecisionError, match="dernier critère"):
+        arbiter.apply_decision(service, request, decide("split_followup"), policy=policy)
+    with pytest.raises(arbiter.ArbiterDecisionError, match="sans tête"):
+        arbiter.apply_decision(service, replace(request, head=""), decide("ready_with_derogation"), policy=policy)
+
+
+# ── Les effets sur la tâche et la reprise du worker ──────────────────────────
+
+
+def test_un_retour_au_worker_sans_session_bloque_la_tache(tmp_path: Path) -> None:
+    """Sans session de worker à reprendre, la tâche est bloquée avec la consigne : rien ne prétend l'avoir reprise."""
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    detail = arbiter.apply_decision(service, request, decide("back_to_worker", criteria=[]), policy=policy)
+    assert "aucune session de worker" in detail
+    assert TaskService(root).require(task.id).status is TaskState.BLOCKED
+
+
+def test_une_reprise_apres_arbitrage_qui_echoue_remet_la_tache_en_revue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un worker qui ne repart pas rend la tâche en revue, disjoncteur ouvert s'il le faut."""
+    from types import SimpleNamespace
+
+    from grimoire.missions.launcher import ExecResult
+
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    _launch_event(service, task.id, root)
+    monkeypatch.setattr(arbiter, "resume_worker", lambda *_a, **_k: ExecResult(1, "", "boom"))
+    monkeypatch.setattr(arbiter, "record_failure", lambda *_a, **_k: SimpleNamespace(open=True))
+    detail = arbiter.apply_decision(service, request, decide("back_to_worker", criteria=[]), policy=policy,
+                                    exec_=lambda *_a, **_k: ExecResult(0))
+    assert "disjoncteur ouvert" in detail
+    assert TaskService(root).require(task.id).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_une_reprise_apres_arbitrage_reussie_rend_la_tache_au_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La session du worker est reprise : la tâche repart en cours pour un dernier cycle."""
+    from grimoire.missions.launcher import ExecResult
+
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    _launch_event(service, task.id, root)
+    monkeypatch.setattr(arbiter, "resume_worker", lambda *_a, **_k: ExecResult(0))
+    detail = arbiter.apply_decision(service, request, decide("back_to_worker", criteria=[]), policy=policy,
+                                    exec_=lambda *_a, **_k: ExecResult(0))
+    assert "worker repris" in detail
+    assert TaskService(root).require(task.id).status is TaskState.RUNNING
+
+
+def test_une_transition_refusee_laisse_la_tache_et_l_explique(tmp_path: Path,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une transition refusée n'est pas maquillée : le détail dit que la reprise n'a pas eu lieu."""
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    _launch_event(service, task.id, root)
+    real = service.ledger.transition_task
+
+    def refuse(tid: str, state: Any, **kw: Any) -> Any:
+        if state is TaskState.RUNNING:
+            raise GrimoireMissionError("transition refusée")
+        return real(tid, state, **kw)
+
+    monkeypatch.setattr(service.ledger, "transition_task", refuse)
+    detail = arbiter.apply_decision(service, request, decide("back_to_worker", criteria=[]), policy=policy)
+    assert "reprise refusée" in detail
+
+
+# ── Le lancement : jamais à l'aveugle, jamais deux fois ──────────────────────
+
+
+def _arbitration_launch(service: TaskService, tid: str, rid: str, session: str = "abcd1234") -> None:
+    service.ledger.append_event(
+        arbiter.ARBITRATION_LAUNCHED_EVENT, tid, "task", "arbiter",
+        {"task_id": tid, "request_id": rid, "session": session, "model": "acme-strong", "cwd": ".",
+         "mandate_id": "M-1"},
+    )
+
+
+def test_le_tick_ne_relance_pas_une_session_arbitre_en_cours(tmp_path: Path) -> None:
+    """Tant que la session lancée travaille, la demande attend : pas de seconde session."""
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    ask(root, service, task)
+    host = FakeHost()
+    assert [o.action for o in ArbiterStage(service, policy, exec_=host)()] == ["launch"]
+    assert ArbiterStage(service, policy, exec_=host)() == ()  # la session travaille encore
+
+
+def test_deux_lancements_sans_vote_rendent_la_question_a_l_humain(tmp_path: Path) -> None:
+    """Deux sessions muettes : l'arbitre ne boucle pas, la question repart à l'humain."""
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    request = ask(root, service, task)
+    for _ in range(arbiter.MAX_LAUNCHES):
+        _arbitration_launch(service, task.id, request.id)
+    host = FakeHost()
+    host.agents = []
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.action == "fallback" and "sans décision" in outcome.detail
+
+
+def test_le_plafond_du_jour_et_le_disjoncteur_ferment_le_lancement(tmp_path: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le plafond de sessions du jour et le disjoncteur arrêtent les lancements, sans question à l'humain."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    ask(root, service, task)
+    host = FakeHost()
+    host.agents = []
+    capped = replace(policy, arbiter=replace(policy.arbiter, sessions_per_day=0))
+    [outcome] = ArbiterStage(service, capped, exec_=host)()
+    assert outcome.action == "launch" and "plafond" in outcome.detail
+    monkeypatch.setattr(arbiter, "read_breaker",
+                        lambda _root: SimpleNamespace(open=True, reason="trop d'échecs"))
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.action == "launch" and "disjoncteur" in outcome.detail
+
+
+def test_sans_mandat_ou_sans_answer_le_tick_ne_lance_rien(tmp_path: Path) -> None:
+    """Mandat absent : rien n'est lancé ; mandat sans ``answer`` : la question revient à l'humain."""
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    ask(root, service, task)
+    host = FakeHost()
+    host.agents = []
+    md.MandateStore(root).revoke()
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.action == "launch" and "sans mandat" in outcome.detail
+    md.MandateStore(root).grant(MandateRequest.build(("merge",), ("implementation",), 10, "+1d"),
+                                origin=ORIGIN_HUMAN, via="test")
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.action == "fallback" and "answer" in outcome.detail
+
+
+def test_un_journal_d_autorite_illisible_ou_un_modele_absent_ne_lance_rien(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Journal en erreur : rien n'est lancé ; aucun modèle au palier : la question revient à l'humain."""
+    from dataclasses import replace
+
+    from grimoire.missions import mandate as mandate_mod
+
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    ask(root, service, task)
+    host = FakeHost()
+    host.agents = []
+
+    class BrokenStore:
+        """Le vrai journal pour tout, sauf ``state()`` qui échoue : les sceaux restent lisibles."""
+
+        def __init__(self, root: Path) -> None:
+            self._real = real_store(root)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._real, name)
+
+        def state(self) -> None:
+            raise OSError("journal illisible")
+
+    real_store = mandate_mod.MandateStore
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mandate_mod, "MandateStore", BrokenStore)
+        [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.status == "skipped" and "journal d'autorité illisible" in outcome.detail
+    no_model = replace(policy, arbiter=replace(policy.arbiter, provider="absent-du-registre"))
+    [outcome] = ArbiterStage(service, no_model, exec_=host)()
+    assert outcome.action == "fallback" and "aucun modèle" in outcome.detail
+
+
+def test_un_worktree_introuvable_rend_la_question_a_l_humain(tmp_path: Path) -> None:
+    """Sans worktree pour lire le diff, rien n'est lancé : la question reste à l'humain."""
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    ask(root, service, task)
+    host = FakeHost()
+    host.agents = []
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.action == "fallback" and "worktree" in outcome.detail
+
+
+def test_un_bg_en_echec_rend_la_question_a_l_humain(tmp_path: Path) -> None:
+    """Un ``claude --bg`` refusé est compté au disjoncteur et la question repart à l'humain."""
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    ask(root, service, task)
+    host = FakeHost()
+    host.agents = []
+    host.bg_fails = True
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert (outcome.action, outcome.status) == ("launch", "failed") and "claude --bg" in outcome.detail
+    [failed] = events(service, task.id, arbiter.ARBITRATION_LAUNCH_FAILED_EVENT)
+    assert failed["request_id"] == outcome.request_id
+
+
+def test_une_session_sans_identite_ou_non_inscrite_est_arretee(tmp_path: Path,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session non identifiée ou non inscrite au journal d'autorité : elle est arrêtée aussitôt."""
+    from grimoire.missions import mandate as mandate_mod
+
+    root, service, task, policy = scene(tmp_path, provider="acme")
+    _launch_event(service, task.id, root)
+    ask(root, service, task)
+    host = FakeHost()
+    host.agents = []  # le --bg rend un id court, mais aucune entrée ne le résout
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.status == "failed" and "identité non résolue" in outcome.detail
+    assert host.stopped
+
+    def refused(*_a: Any, **_k: Any) -> None:
+        raise md.MandateRefusedError("refus", "canal refusé")
+
+    host2 = FakeHost()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mandate_mod, "register_orchestrator_session", refused)
+        [outcome] = ArbiterStage(service, policy, exec_=host2)()
+    assert "non inscrite au journal d'autorité" in outcome.detail
+
+    def broken(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("journal cassé")
+
+    host3 = FakeHost()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mandate_mod, "register_orchestrator_session", broken)
+        [outcome] = ArbiterStage(service, policy, exec_=host3)()
+    assert "journal en erreur" in outcome.detail
+
+
+def test_une_decision_scellee_illisible_ou_hors_des_criteres_va_a_l_humain(tmp_path: Path) -> None:
+    """Ce que le tick applique est le contenu scellé : illisible ou hors critères, l'humain tranche."""
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    arbiter._seal(service, {"type": arbiter.ARBITRATION_DECISION_ENTRY, "task_id": task.id,
+                            "request_id": request.id, "decision": "pas une décision", "criteria": [],
+                            "justification": "assez longue pour être relue", "confidence": 0.9})
+    service.ledger.append_event(
+        ARBITRATION_DECIDED_EVENT, task.id, "task", "arbiter",
+        {"task_id": task.id, "request_id": request.id, "decision": {"decision": "pas une décision"}},
+    )
+    [outcome] = ArbiterStage(service, policy)()
+    assert outcome.action == "fallback" and "illisible au rejeu" in outcome.detail
+
+
+def test_une_decision_scellee_non_applicable_rend_la_question_a_l_humain(tmp_path: Path) -> None:
+    """Une décision scellée mais inapplicable (critère absent de la tâche) ne s'applique pas."""
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    record_decision(
+        service, task.id,
+        json.dumps({"decision": "back_to_worker", "criteria": ["critère fantôme"],
+                    "justification": "un dernier cycle suffit", "confidence": 0.9}),
+        request_id=request.id, actor="arbiter",
+    )
+    [outcome] = ArbiterStage(service, policy)()
+    assert outcome.action == "fallback" and "non applicable" in outcome.detail
+
+
+def test_la_session_arbitre_est_arretee_une_fois_le_sort_regle(tmp_path: Path) -> None:
+    """Une décision appliquée ne laisse pas la session en cours tourner dans le vide."""
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    _arbitration_launch(service, task.id, request.id)
+    record_decision(
+        service, task.id,
+        json.dumps({"decision": "abandon", "criteria": [],
+                    "justification": "le critère décrit une route qui n'existe pas", "confidence": 0.9}),
+        request_id=request.id, actor="arbiter",
+    )
+    host = FakeHost()
+    [outcome] = ArbiterStage(service, policy, exec_=host)()
+    assert outcome.action == "apply"
+    assert "abcd1234" in host.stopped
+
+
+def test_une_question_a_l_humain_qui_ne_peut_pas_etre_posee_est_dite(tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une tâche close entre-temps ne se remet pas en revue : l'échec de la question est rendu, pas masqué."""
+    from grimoire.core.exceptions import GrimoireMissionError
+
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    with pytest.raises(arbiter.ArbiterDecisionError):
+        record_decision(service, task.id, "pas du JSON", request_id=request.id, actor="arbiter")
+    real = service.ledger.transition_task
+
+    def refuse(tid: str, state: Any, **kw: Any) -> Any:
+        if state is TaskState.RUNNING:
+            raise GrimoireMissionError("déjà close")
+        return real(tid, state, **kw)
+
+    monkeypatch.setattr(service.ledger, "transition_task", refuse)
+    [outcome] = ArbiterStage(service, policy)()
+    assert outcome.status == "failed" and "question non posée" in outcome.detail
+
+
+def test_une_question_a_l_humain_que_le_service_refuse_est_dite(tmp_path: Path,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le service refuse la question : la tâche revient en revue et le détail le dit."""
+    root, service, task, policy = scene(tmp_path)
+    request = ask(root, service, task)
+    with pytest.raises(arbiter.ArbiterDecisionError):
+        record_decision(service, task.id, "pas du JSON", request_id=request.id, actor="arbiter")
+
+    def refused(*_a: Any, **_k: Any) -> None:
+        raise ValueError("question refusée")
+
+    monkeypatch.setattr(service, "ask", refused)
+    [outcome] = ArbiterStage(service, policy)()
+    assert outcome.status == "failed" and "non posée" in outcome.detail
+    assert TaskService(root).require(task.id).status is TaskState.NEEDS_VERIFICATION
+
+
+def test_les_sessions_lues_pour_l_arbitre_ne_comptent_que_les_fond_au_travail(tmp_path: Path) -> None:
+    """Seules les sessions de fond ``busy`` comptent : une session ``idle`` a rendu son tour."""
+    _root, service, _task, policy = scene(tmp_path)
+    host = FakeHost()
+    host.agents = [
+        {"id": "abcd1234", "kind": "background", "status": "busy"},
+        {"id": "deadbeef", "kind": "background", "status": "idle"},
+        {"kind": "background", "status": "busy"},
+    ]
+    assert ArbiterStage(service, policy, exec_=host)._busy() == {"abcd1234"}
+
+
+def test_un_lancement_sans_date_valide_ne_compte_pas_dans_le_plafond(tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une date de lancement illisible est ignorée par le plafond du jour, jamais comptée au hasard."""
+    from types import SimpleNamespace
+
+    _root, service, _task, policy = scene(tmp_path)
+    stage = ArbiterStage(service, policy)
+    monkeypatch.setattr(service.ledger, "list_events", lambda: [
+        SimpleNamespace(event_type=arbiter.ARBITRATION_LAUNCHED_EVENT, created_at="pas une date", payload={}),
+    ])
+    assert stage._launched_today() == 0
+
+
+# ── Le tick, le cockpit et les petites gardes ────────────────────────────────
+
+
+def test_la_route_d_attention_du_tick_dit_un_arbitrage_rendu_a_l_humain(tmp_path: Path) -> None:
+    """Un arbitrage rendu à l'humain est une information du tick, et le rapport le sérialise."""
+    from grimoire.missions.orchestrate import run_tick
+
+    root, service, task, _policy = scene(tmp_path)
+    request = ask(root, service, task)
+    with pytest.raises(arbiter.ArbiterDecisionError):
+        record_decision(service, task.id, "pas du JSON", request_id=request.id, actor="arbiter")
+    report = run_tick(root, apply=True, exec_=FakeHost())
+    assert [o.action for o in report.arbitrations] == ["fallback"]
+    assert any(line.startswith(f"arbitre : {task.id}") for line in report.attention)
+    assert report.to_dict()["arbitrations"][0]["action"] == "fallback"
+
+
+def test_une_etape_arbitre_en_erreur_ne_casse_pas_le_tick(tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """L'étape de l'arbitre passe après la récolte : son erreur est dite, le tick continue."""
+    from grimoire.missions import orchestrate
+
+    root, service, task, _policy = scene(tmp_path)
+    ask(root, service, task)
+
+    def boom(_self: Any) -> None:
+        raise RuntimeError("arbitre cassé")
+
+    monkeypatch.setattr(arbiter.ArbiterStage, "__call__", boom)
+    report = orchestrate.run_tick(root, apply=True, exec_=FakeHost())
+    assert any("arbitre : étape en erreur" in line for line in report.attention)
+
+
+def test_les_arbitrages_illisibles_ou_perimes_sont_ecartes_du_cockpit() -> None:
+    """Une date de décision illisible ou trop ancienne ne s'affiche pas : le bloc reste informatif."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from grimoire.tools import workspace_attention as wa
+
+    read = SimpleNamespace(row={"slug": "s", "name": "S"}, tasks={})
+    now = datetime.now(UTC)
+    stale = SimpleNamespace(created_at=(now - timedelta(days=30)).isoformat(), payload={"task_id": "t2"},
+                            entity_id="t2", id="e2")
+    broken = SimpleNamespace(created_at="pas une date", payload={}, entity_id="t1", id="e1")
+    assert wa._arbitrations(read, [broken, stale], now) == []  # type: ignore[arg-type]
+
+
+def test_un_fournisseur_nomme_mais_indisponible_ne_retombe_jamais_sur_l_hote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chaque condition de route manquante rend ``(\"\", None)`` : l'arbitre ne prend jamais l'hôte par défaut."""
+    from types import SimpleNamespace
+
+    from grimoire.missions import worker_provider as wp
+
+    root = tmp_path
+    local = SimpleNamespace(id="acme", provider_type="local")
+    monkeypatch.setattr(wp, "_enabled_provider", lambda *_a: None)
+    assert wp.model_settings(root, "acme", "strong") == ("", None)
+    monkeypatch.setattr(wp, "_enabled_provider", lambda *_a: local)
+    monkeypatch.setattr(wp, "_admitted_base_url", lambda _p: "")
+    assert wp.model_settings(root, "acme", "strong") == ("", None)
+    monkeypatch.setattr(wp, "_admitted_base_url", lambda _p: "http://127.0.0.1:8099")
+    monkeypatch.setattr(wp, "load_state", lambda _root: {})
+    monkeypatch.setattr(wp, "available_models", lambda *_a, **_k: [])
+    assert wp.model_settings(root, "acme", "strong") == ("", None)
+    remote = SimpleNamespace(id="acme", provider_type="anthropic")
+    monkeypatch.setattr(wp, "_enabled_provider", lambda *_a: remote)
+    monkeypatch.setattr(wp, "available_models", lambda *_a, **_k: [SimpleNamespace(id="m")])
+    monkeypatch.setattr(wp, "_key_var", lambda _p: "")
+    assert wp.model_settings(root, "acme", "strong") == ("", None)
+
+
+def test_la_politique_refuse_un_enabled_non_booleen_et_un_fournisseur_invalide(tmp_path: Path) -> None:
+    """Une valeur inconnue rend la politique illisible (échec fermé), jamais un défaut deviné."""
+    root = tmp_path / "p"
+    (root / POLICY).parent.mkdir(parents=True)
+    (root / POLICY).write_text('orchestrator:\n  roles:\n    arbiter:\n      enabled: "oui"\n', encoding="utf-8")
+    assert "booléen" in load_orchestrator_policy(root).error
+    (root / POLICY).write_text('orchestrator:\n  roles:\n    arbiter:\n      provider: "mauvais id!"\n',
+                               encoding="utf-8")
+    assert "identifiant de fournisseur" in load_orchestrator_policy(root).error
+
+
+def test_replay_des_criteres_amendes_et_retires(tmp_path: Path) -> None:
+    """Le rejeu ne réécrit que sur un texte neuf, et ne retire jamais le dernier critère d'une tâche."""
+    from grimoire.missions.ledger_rules import CRITERION_AMENDED_EVENT, CRITERION_REMOVED_EVENT, replay_steering
+
+    _root, service, task, _policy = scene(tmp_path)
+    tasks = {task.id: service.require(task.id)}
+    replay_steering(tasks, CRITERION_AMENDED_EVENT, {"task_id": task.id, "from": CRITERIA[0], "to": ""})
+    assert tasks[task.id].acceptance == CRITERIA
+    replay_steering(tasks, CRITERION_AMENDED_EVENT, {"task_id": task.id, "from": "absent", "to": "x"})
+    assert tasks[task.id].acceptance == CRITERIA
+    replay_steering(tasks, CRITERION_REMOVED_EVENT, {"task_id": task.id, "criterion": "absent"})
+    assert tasks[task.id].acceptance == CRITERIA
+    replay_steering(tasks, CRITERION_REMOVED_EVENT, {"task_id": task.id, "criterion": CRITERIA[0]})
+    assert tasks[task.id].acceptance == CRITERIA  # le dernier critère n'est jamais retiré
+
+
+def test_le_vote_rend_le_json_avec_output_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--output json`` : le vote rend le contrat validé, tel qu'il a été scellé."""
+    root, service, task, _policy = scene(tmp_path)
+    request = ask(root, service, task)
+    session = "c" * 8 + "-0000-0000-0000-000000000000"
+    md.register_orchestrator_session(root, session, channels=(arbiter.ARBITRATION_CHANNEL,),
+                                     expires_at="2999-01-01T00:00:00+00:00")
+    payload = json.dumps({"decision": "abandon", "criteria": [],
+                          "justification": "le critère décrit une route qui n'existe pas", "confidence": 0.9})
+    monkeypatch.setenv("GRIMOIRE_UNATTENDED", "1")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session)
+    monkeypatch.setenv(md.PRINCIPAL_ENV, "orchestrator")
+    monkeypatch.setenv(md.PROVENANCE_ENV, "rule:arbitre")
+    result = runner.invoke(app, ["--output", "json", "task", "arbitrate", task.id, "--json", payload,
+                                 "--request", request.id, "--project-root", str(root)])
+    assert result.exit_code == 0, result.output
+    rendered = json.loads(result.stdout)
+    assert rendered["decision"] == "abandon" and rendered["confidence"] == 0.9
+
