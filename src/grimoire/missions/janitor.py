@@ -35,7 +35,14 @@ from typing import TYPE_CHECKING, Any
 from grimoire.core.standard_generation import EVIDENCE_DIR
 from grimoire.missions.admission import CAPACITY_RELEASED_EVENT, derive_view, load_capacity, release_capacity
 from grimoire.missions.breaker import record_failure, record_success
-from grimoire.missions.launcher import LAUNCHED_EVENT, Exec, default_exec, launched_sessions
+from grimoire.missions.launcher import (
+    DETACHED_HOSTS,
+    LAUNCHED_EVENT,
+    Exec,
+    default_exec,
+    detached_host,
+    launched_sessions,
+)
 from grimoire.missions.schemas import TaskState
 from grimoire.missions.task_worktree import MERGED_EVENT, TASK_BRANCH_PREFIX, WORKTREE_CREATED_EVENT, find_task_worktree
 
@@ -43,6 +50,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
+    from grimoire.missions.gemini_host import GeminiWorkerHost
     from grimoire.missions.orchestrator_policy import OrchestratorPolicy
     from grimoire.missions.service import TaskService
     from grimoire.missions.worker_host import OpencodeWorkerHost
@@ -140,7 +148,7 @@ def pending_cleanup(service: TaskService) -> tuple[JanitorOutcome, ...]:
 class Janitor:
     def __init__(
         self, service: TaskService, policy: OrchestratorPolicy, *, exec_: Exec = default_exec, claude_bin: str = "claude",
-        remote: str = "origin", opencode: OpencodeWorkerHost | None = None,
+        remote: str = "origin", opencode: OpencodeWorkerHost | None = None, gemini: GeminiWorkerHost | None = None,
     ) -> None:
         self._service = service
         self._policy = policy
@@ -149,6 +157,7 @@ class Janitor:
         self._remote = remote
         self._repo = service.home_root
         self._opencode = opencode
+        self._gemini = gemini
 
     def sweep(self) -> tuple[JanitorOutcome, ...]:
         """Nettoie chaque tâche terminale ; une exception d'une action devient un ``failed`` rapporté, jamais une panne du tick."""
@@ -244,14 +253,15 @@ class Janitor:
         if not launch or not launch.get("session"):
             return "skipped", "aucune session lancée"
         sid = str(launch["session"])
-        if launch.get("host") == "opencode":  # #1281 L4 : un processus que le kit a lancé, pas une session ``--bg``
+        if launch.get("host") in DETACHED_HOSTS:  # #1281 L4 : un processus que le kit a lancé, pas une session ``--bg``
             from grimoire.missions.worker_lifecycle import opencode_marks
 
+            name = str(launch["host"])
             marks = opencode_marks(self._service, tid)
-            host = self._host()
+            host = self._host() if name == "opencode" else detached_host(name, gemini=self._gemini)
             if host.state(marks) == "ended" or host.stop(str(marks.get("pid") or "")):
-                return "done", f"worker opencode {sid} arrêté"
-            return "failed", f"worker opencode {sid} (pid {marks.get('pid') or '?'}) non arrêté"
+                return "done", f"worker {name} {sid} arrêté"
+            return "failed", f"worker {name} {sid} (pid {marks.get('pid') or '?'}) non arrêté"
         result = self._exec([self._claude, "stop", sid], self._repo, None)
         if result.returncode == 0:
             return "done", f"session {sid} arrêtée"
