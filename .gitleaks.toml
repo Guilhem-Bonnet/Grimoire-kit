@@ -87,3 +87,14 @@ paths = [
 regexes = [
   '''^sk-ne-doit-jamais-sortir-42$''',
 ]
+
+# Fixtures de redaction (GAO-masquage-des-001) : le premier commit de la PR portait un JWT et un
+# bloc PEM d'exemple en clair ; la tête les assemble à l'exécution. L'historique ne se réécrit
+# pas (pas de force-push) : on borne l'exemption à ce commit ET à ce fichier.
+[[allowlists]]
+description = "Fixtures jwt et private-key du premier commit de test_redact_secrets_rules.py"
+condition = "AND"
+commits = ["dff6976985f2629d76bd1d14279fd7419e033201"]
+paths = [
+  '''^tests/unit/memory/test_redact_secrets_rules\.py$''',
+]
