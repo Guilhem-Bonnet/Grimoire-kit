@@ -65,6 +65,8 @@ _WIRE_EVENT_NAMES: dict[HookEvent, str] = {
     HookEvent.TASK_CREATED: "TaskCreated",
     HookEvent.TASK_COMPLETED: "TaskCompleted",
     HookEvent.INSTRUCTIONS_LOADED: "InstructionsLoaded",
+    HookEvent.ERROR_OCCURRED: "ErrorOccurred",
+    HookEvent.USER_PROMPT_TRANSFORMED: "UserPromptTransformed",
 }
 
 _EVENT_BY_WIRE_NAME: dict[str, HookEvent] = {v.lower(): k for k, v in _WIRE_EVENT_NAMES.items()}
@@ -578,6 +580,8 @@ _RECORDED_EVENTS = {
     HookEvent.PRE_TOOL_USE,
     HookEvent.STOP,
     HookEvent.SUBAGENT_STOP,
+    HookEvent.ERROR_OCCURRED,
+    HookEvent.USER_PROMPT_TRANSFORMED,
     *NOT_EMITTED_EVENTS,
 }
 
@@ -668,12 +672,26 @@ def _record_decision(
                 *_refusal_tags(decision),
                 *done_gate_mode_tags(detail.get("done_gate")),
                 *_dispatch_model_tags(detail),
+                *_error_tags(detail),
                 *([f"batch_outcome:{detail['batch_outcome']}"] if detail.get("batch_outcome") else []),
             ],
             lock_timeout=_LEDGER_LOCK_TIMEOUT_S,
         )
     except Exception:
         return
+
+
+def _error_tags(detail: dict[str, Any]) -> list[str]:
+    """``error_*:<valeur>`` d'un ``errorOccurred`` Copilot : type, message tronqué, contexte, outil ; relisibles au ledger."""
+    if "error_message" not in detail:
+        return []
+    tags = []
+    for key in ("error_name", "error_message", "error_context", "tool", "recoverable"):
+        value = detail.get(key)
+        if value is None or value == "":
+            continue
+        tags.append(f"{'error_tool' if key == 'tool' else key}:{str(value).lower() if isinstance(value, bool) else value}")
+    return tags
 
 
 def _dispatch_model_tags(detail: dict[str, Any]) -> list[str]:

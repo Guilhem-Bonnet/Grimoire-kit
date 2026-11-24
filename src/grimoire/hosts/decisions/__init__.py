@@ -94,6 +94,8 @@ _DECISION_FUNCS: dict[str, tuple[str, str]] = {
     "grimoire.dispatch-model": ("dispatch_model", "decide_dispatch_model"),
     # Consultative, harness Copilot seul : nommée par ``--decision`` dans le hook ``SubagentStart``.
     "grimoire.subagent-start": ("subagent_start", "decide_subagent_start"),
+    # Observation, harness Copilot CLI : jamais bloquante, nommée par ``--decision``.
+    "grimoire.error-occurred": ("error_occurred", "decide_error_occurred"),
 }
 
 
