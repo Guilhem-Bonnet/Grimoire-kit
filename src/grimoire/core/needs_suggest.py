@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grimoire.core.ci_markers import github_ci_workflows
 from grimoire.core.scanner import ScanResult
 
 
@@ -68,7 +69,7 @@ def suggest_needs(
             )
         )
 
-    ci = _has_any(root, (".github/workflows/*.yml", ".github/workflows/*.yaml"))
+    ci = github_ci_workflows(root)[:1]
     containers = _has_any(root, ("Dockerfile", "docker-compose*.yml", "compose*.yaml"))
     if ci and containers:
         raw.append(

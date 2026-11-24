@@ -83,7 +83,14 @@ from grimoire.missions.worker_host import (
 from grimoire.missions.worker_host import LEAN_SESSION_ARGS as LEAN_SESSION_ARGS
 from grimoire.missions.worker_host import LEAN_TOOLS as LEAN_TOOLS
 from grimoire.missions.worker_host import session_env as session_env
-from grimoire.missions.worker_provider import WorkerRoute, is_local_provider, route_denial, route_worker, settings_path
+from grimoire.missions.worker_provider import (
+    WorkerRoute,
+    bundle_tokens,
+    is_local_provider,
+    route_denial,
+    route_worker,
+    settings_path,
+)
 from grimoire.providers.data_policy import hosted_fallback_refusal
 from grimoire.tools.workspace_work import transcript_path
 
@@ -942,7 +949,7 @@ class WorkerLauncher:
             sensitive = self.routing_for(ahead)
             host, fallback = self.host_for(ahead, sensitive)
             wt = create_task_worktree(service, tid, repo=service.home_root, base=base, into=into, actor=WORKER_ACTOR)
-            service.context(tid)
+            bundle = service.context(tid)
             service.claim(tid, WORKER_ACTOR, host=self._opencode.claim_host if host == OPENCODE_HOST else _HOST)
         except (GrimoireError, ValueError, OSError) as exc:
             # Ni le claude ni la tâche ne sont en cause du côté « session » : rien n'est compté au disjoncteur.
@@ -962,7 +969,8 @@ class WorkerLauncher:
         # l'hôte, au palier fort, plutôt que de voir sa PR rejetée puis réécrite (``sensitive_route``).
         provider_id = "" if sensitive.strong else self._policy.worker.provider
         busy = self._busy_providers()
-        route = route_worker(service.home_root, provider_id, tier, task, busy_providers=busy)
+        need = bundle_tokens(bundle.data)
+        route = route_worker(service.home_root, provider_id, tier, task, busy_providers=busy, context_tokens=need)
         denial = ""
         if route is None:
             # Un fournisseur local déjà occupé fait attendre la tâche : elle ne retombe pas en silence sur
@@ -970,7 +978,7 @@ class WorkerLauncher:
             # motif : une classe qu'aucun hébergé n'admet ne part pas sur l'hôte.
             if refusal := hosted_fallback_refusal(service.home_root, task.data_class):
                 return self._deferred(tid, refusal)
-            denial = route_denial(service.home_root, provider_id, tier, task, busy_providers=busy)
+            denial = route_denial(service.home_root, provider_id, tier, task, busy_providers=busy, context_tokens=need)
             if denial and provider_id in busy and is_local_provider(service.home_root, provider_id):
                 return self._deferred(tid, denial)
         if sensitive.strong:
