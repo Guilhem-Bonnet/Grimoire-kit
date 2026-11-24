@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ENGINES",
-    "INSTALL_HINT",
     "Availability",
     "EngineCallError",
     "EngineSlot",
@@ -47,12 +46,20 @@ __all__ = [
     "availability",
     "engine_names",
     "get_spec",
+    "install_hint",
     "register_engine",
     "voice_extra_installed",
 ]
 
 Kind = Literal["stt", "tts"]
-INSTALL_HINT = "pip install 'grimoire-kit[voice]'"
+VOICE_EXTRA = "voice"
+
+
+def install_hint(extra: str = VOICE_EXTRA) -> str:
+    """Remède d'un extra manquant, selon le gestionnaire qui a installé le kit (pipx, uv, pip)."""
+    from grimoire.cli.updater import extras_install_hint
+
+    return extras_install_hint([extra])
 _T = TypeVar("_T")
 
 
@@ -183,7 +190,7 @@ class EngineSpec:
     label: str
     factory: str
     modules: tuple[str, ...] = ()
-    install_hint: str = INSTALL_HINT
+    extra: str = VOICE_EXTRA
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,14 +252,14 @@ def availability(spec: EngineSpec) -> Availability:
     missing = [m for m in spec.modules if not _module_installed(m)]
     if missing:
         return Availability(
-            False, f"{spec.label} n'est pas installé ({', '.join(missing)} absent) : {spec.install_hint}"
+            False, f"{spec.label} n'est pas installé ({', '.join(missing)} absent) : {install_hint(spec.extra)}"
         )
     return Availability(True, f"{spec.label} installé")
 
 
 def voice_extra_installed() -> bool:
     """Vrai quand les moteurs locaux de l'extra ``voice`` sont tous installés."""
-    return all(availability(spec).ok for spec in ENGINES.values() if spec.install_hint == INSTALL_HINT and spec.modules)
+    return all(availability(spec).ok for spec in ENGINES.values() if spec.extra == VOICE_EXTRA and spec.modules)
 
 
 # ── Chargement à la demande ───────────────────────────────────────────────────
@@ -301,7 +308,7 @@ class EngineSlot:
             cls = getattr(importlib.import_module(module_name), attr)
         except Exception as exc:
             raise EngineUnavailableError(
-                f"{self.spec.label} ne s'importe pas ({_one_line(exc)}) : {self.spec.install_hint}"
+                f"{self.spec.label} ne s'importe pas ({_one_line(exc)}) : {install_hint(self.spec.extra)}"
             ) from None
         try:
             return cls(**self.options)

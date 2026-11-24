@@ -12,7 +12,6 @@ import pytest
 
 from grimoire.voice import engines
 from grimoire.voice.engines import (
-    INSTALL_HINT,
     EngineCallError,
     EngineSlot,
     EngineSpec,
@@ -24,6 +23,7 @@ from grimoire.voice.engines import (
     VoiceEngines,
     availability,
     get_spec,
+    install_hint,
     register_engine,
 )
 from grimoire.voice.settings import settings_from_mapping
@@ -97,7 +97,7 @@ def test_availability_reads_the_path_without_importing(isolated_registry) -> Non
     spec = EngineSpec("x", "stt", "Moteur X", f"{MISSING}:X", (MISSING,))
     avail = availability(spec)
     assert not avail.ok
-    assert MISSING in avail.reason and INSTALL_HINT in avail.reason
+    assert MISSING in avail.reason and install_hint() in avail.reason
 
 
 def test_browser_fallback_needs_no_model() -> None:
@@ -127,7 +127,7 @@ def test_not_installed_engine_raises_reason_not_traceback(isolated_registry) -> 
     slot = EngineSlot(EngineSpec("x", "stt", "Moteur X", f"{MISSING}:X", (MISSING,)), idle_unload_s=0)
     with pytest.raises(EngineUnavailableError) as err:
         slot.run(lambda e: e)
-    assert INSTALL_HINT in err.value.reason
+    assert install_hint() in err.value.reason
     assert err.value.__cause__ is None
     assert not slot.loaded
 

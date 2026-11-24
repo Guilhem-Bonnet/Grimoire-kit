@@ -16,10 +16,10 @@ _TAGS = {"ok": "[green]OK[/green]", "warn": "[yellow]WARN[/yellow]", "info": "[d
 def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: str, console: Console) -> None:
     """Jamais FAIL : un vocal indisponible laisse le texte intact. WARN seulement quand le vocal est allumé."""
     from grimoire.voice.engines import (
-        INSTALL_HINT,
         EngineUnavailableError,
         availability,
         get_spec,
+        install_hint,
         voice_extra_installed,
     )
     from grimoire.voice.settings import settings_from_mapping
@@ -41,7 +41,7 @@ def apply_voice_check(project_data: Any, results: list[dict[str, Any]], *, fmt: 
                 "name": "voice_extra",
                 "passed": True,
                 "level": "warn" if settings.enabled else "info",
-                "detail": f"Vocal : extra voice non installé ({mode}) — {INSTALL_HINT}",
+                "detail": f"Vocal : extra voice non installé ({mode}) — {install_hint()}",
             }
         )
 
