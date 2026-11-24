@@ -796,7 +796,9 @@ orchestrator:
   arrière-plan, dans son propre groupe, et écrit le flux dans `_grimoire-output/control/workers/<id>.gemini.jsonl`.
   Le pid, le journal et l'identité du processus (heure de démarrage et exécutable exact, lus dans `/proc` sous
   Linux, par `ps` ailleurs) sont notés au lancement. Un pid qui porte une autre identité compte pour mort : il n'est
-  ni renouvelé ni tué. Battement, fin, arrêt au repos et janitor suivent les règles
+  ni renouvelé ni tué. L'heure de démarrage est la clé ; le seul changement d'exécutable admis part de `env` (un
+  `gemini` installé par npm est un script `#!/usr/bin/env node` : `env` au départ, puis l'interpréteur, sous le même
+  pid), et l'identité est relevée de nouveau à l'événement `init`, une fois l'interpréteur lancé. Battement, fin, arrêt au repos et janitor suivent les règles
   d'opencode : processus vivant et journal récent, le bail est renouvelé ; processus mort, la tâche est rendue ;
   `SIGTERM` au groupe. POSIX seulement.
 - **Identité** : le `session_id` de l'événement `init` du flux. Seul compte ce que ce lancement a écrit (lecture à

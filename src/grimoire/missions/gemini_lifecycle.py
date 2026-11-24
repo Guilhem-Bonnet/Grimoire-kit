@@ -12,6 +12,8 @@ que pour opencode (:func:`~.worker_lifecycle.renew_opencode`, :func:`~.worker_li
 À chaque départ, l'identité du processus (heure de démarrage, exécutable exact :
 :func:`~.gemini_host.process_identity`) est relevée aussitôt et inscrite au ledger (``pid_identity``) : c'est elle,
 pas le pid seul, que le battement, la fin et le janitor comparent. Illisible : le processus est arrêté, rien ne part.
+Au lancement, elle est relevée de nouveau à l'événement ``init`` (:meth:`~.gemini_host.GeminiWorkerHost.settled_identity`) :
+un ``gemini`` en ``#!/usr/bin/env node`` est alors devenu l'interpréteur.
 
 Le frein (refus ``BeforeTool`` prouvé pour la version exacte) est vérifié par le lanceur **avant** le claim, puis de
 nouveau à chaque reprise : sans preuve, rien ne part et la raison est dite.
@@ -116,6 +118,7 @@ def launch_gemini(launcher: WorkerLauncher, task: MissionTask, wt: TaskWorktree,
             count=True,
             host=host,
         )
+    identity = host.settled_identity(started.pid, identity)
     refused, code = attest_session(service, session_id, WORKER_ACTOR, tid)
     if refused:
         from grimoire.missions.mandate import CAP_EXCEEDED

@@ -20,7 +20,11 @@ l'arrête par ``SIGTERM`` au groupe (POSIX seulement : sous Windows, rien ne par
 
 **Vivacité** : un pid ne suffit pas (il se recycle). L'identité du processus — heure de démarrage et exécutable
 exact (:func:`process_identity`) — est relevée au lancement, inscrite au ledger (``pid_identity``), et comparée à
-chaque sonde : un autre processus sous le même pid, ou un lancement sans identité notée, compte pour mort.
+chaque sonde (:func:`same_process_identity`) : un autre processus sous le même pid, ou un lancement sans identité
+notée, compte pour mort. L'heure de démarrage est la clé : un ``execve`` la garde, un pid recyclé non. Le seul
+changement d'exécutable admis part de ``env`` : un ``gemini`` installé par npm est un script ``#!/usr/bin/env node``,
+dont le processus est ``env`` au retour de ``Popen`` puis l'interpréteur. L'identité est relevée de nouveau dès
+l'événement ``init`` (l'interpréteur tourne alors) et c'est celle-là que le ledger garde.
 
 **Identité** : le ``session_id`` de l'événement ``init`` du flux, lu dans le journal à partir de l'octet où ce
 lancement a commencé à écrire (un lancement précédent de la même tâche ne compte pas).
@@ -47,10 +51,12 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -82,6 +88,7 @@ __all__ = [
     "gemini_worktree_refusal",
     "process_identity",
     "read_events",
+    "same_process_identity",
 ]
 
 #: Mode de permission de la politique → ``--approval-mode`` de Gemini CLI (``default|auto_edit|yolo|plan``).
@@ -174,6 +181,14 @@ def read_events(log: Path, since: int = 0) -> list[dict[str, Any]]:
     return events
 
 
+#: Sépare l'heure de démarrage de l'exécutable dans une identité ; ``lstart`` (``ps``) contient des ``:``.
+_IDENTITY_SEP = "|"
+
+
+def _has_proc() -> bool:
+    return Path("/proc/self/stat").is_file()
+
+
 def _linux_identity(pid: int) -> str:
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
@@ -183,7 +198,7 @@ def _linux_identity(pid: int) -> str:
     fields = stat[stat.rfind(")") + 2 :].split()  # le nom (champ 2) peut contenir espaces et parenthèses
     if len(fields) < 20 or fields[0] in ("Z", "X"):
         return ""
-    return f"{fields[19]}:{exe}"  # champ 22 : heure de démarrage, en tops d'horloge depuis le démarrage
+    return f"{fields[19]}{_IDENTITY_SEP}{exe}"  # champ 22 : heure de démarrage, en tops d'horloge depuis le démarrage
 
 
 def _ps_identity(pid: int) -> str:
@@ -201,20 +216,49 @@ def _ps_identity(pid: int) -> str:
     parts = done.stdout.strip().split(maxsplit=6) if done.returncode == 0 else []
     if len(parts) < 7 or parts[0].startswith("Z"):
         return ""
-    return f"{' '.join(parts[1:6])}:{parts[6]}"  # ``lstart`` (5 mots), puis le chemin de l'exécutable
+    return f"{' '.join(parts[1:6])}{_IDENTITY_SEP}{parts[6]}"  # ``lstart`` (5 mots, avec des ``:``), puis l'exécutable
 
 
 def process_identity(pid: int) -> str:
-    """``heure de démarrage:exécutable exact`` du processus *pid* ; ``""`` s'il est mort, zombie ou illisible.
+    """``heure de démarrage|exécutable exact`` du processus *pid* ; ``""`` s'il est mort, zombie ou illisible.
 
     Linux : ``/proc/<pid>/stat`` (champ 22) et ``/proc/<pid>/exe``. Autre POSIX (macOS) : ``ps -o lstart,comm``.
     Windows : ``""`` (le worker Gemini n'y part pas).
     """
     if pid <= 0 or not _POSIX:
         return ""
-    if Path("/proc/self/stat").is_file():
+    if _has_proc():
         return _linux_identity(pid)
     return _ps_identity(pid)
+
+
+@cache
+def _env_executables() -> frozenset[str]:
+    """Les chemins réels de ``env`` sur ce poste (un ``env`` multi-appel, ``coreutils``, n'y porte pas son nom)."""
+    found = {"/usr/bin/env", "/bin/env", shutil.which("env") or ""}
+    return frozenset(os.path.realpath(path) for path in found if path)
+
+
+def _is_env(exe: str) -> bool:
+    return Path(exe).name == "env" or exe in _env_executables()
+
+
+def same_process_identity(noted: str, current: str) -> bool:
+    """Vrai si *current* est encore le processus dont l'identité *noted* a été relevée.
+
+    Même heure de démarrage exigée (un pid recyclé en a une autre ; un ``execve`` la garde). Même exécutable aussi,
+    sauf s'il valait ``env`` : le shebang ``#!/usr/bin/env node`` d'un ``gemini`` installé par npm remplace ``env`` par
+    l'interpréteur dans le même processus. Une identité vide (mort, illisible, jamais relevée) ne correspond à rien.
+    """
+    if not noted or not current:
+        return False
+    if noted == current:
+        return True
+    noted_start, noted_sep, noted_exe = noted.partition(_IDENTITY_SEP)
+    current_start, current_sep, _ = current.partition(_IDENTITY_SEP)
+    if not (noted_sep and current_sep and noted_start) or noted_start != current_start:
+        return False
+    return _is_env(noted_exe)
 
 
 def _process_exists(pid: int) -> bool:
@@ -395,8 +439,20 @@ class GeminiWorkerHost:
         if not identity:
             return not required
         with contextlib.suppress(OSError, ValueError):
-            return self.identify(pid) == identity
+            return same_process_identity(identity, self.identify(pid))
         return False
+
+    def settled_identity(self, pid: int, identity: str) -> str:
+        """L'identité relevée de nouveau une fois l'événement ``init`` lu : l'interpréteur, plus ``env``.
+
+        Gardée seulement si c'est le même processus (:func:`same_process_identity`) ; sinon (mort entre-temps, pid
+        repris, lecture impossible), *identity* telle quelle : la sonde suivante tranchera.
+        """
+        with contextlib.suppress(OSError, ValueError):
+            current = self.identify(pid)
+            if current != identity and same_process_identity(identity, current):
+                return current
+        return identity
 
     @staticmethod
     def result(log: Path, since: int = 0) -> GeminiResult:

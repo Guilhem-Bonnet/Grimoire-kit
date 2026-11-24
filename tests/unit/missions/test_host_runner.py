@@ -30,6 +30,7 @@ from grimoire.missions.gemini_host import (
     gemini_worktree_refusal,
     process_identity,
     read_events,
+    same_process_identity,
 )
 from grimoire.missions.launcher import (
     WORKER_HALTED_EVENT,
@@ -125,6 +126,40 @@ def gemini_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     path.chmod(0o755)
     return path
+
+
+ENV = Path("/usr/bin/env")
+ENV_ONLY = pytest.mark.skipif(os.name != "posix" or not ENV.is_file(), reason="shebang #!/usr/bin/env")
+
+
+@pytest.fixture
+def gemini_env_bin(gemini_bin: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Le même faux ``gemini``, installé comme par npm : ``#!/usr/bin/env python3``, interpréteur trouvé dans PATH.
+
+    Le processus est d'abord ``env``, puis, sous le même pid et la même heure de démarrage, l'interpréteur.
+    """
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    (shim / "python3").symlink_to(sys.executable)
+    monkeypatch.setenv("PATH", f"{shim}{os.pathsep}{os.environ.get('PATH', '')}")
+    body = gemini_bin.read_text(encoding="utf-8").split("\n", 1)[1]
+    gemini_bin.write_text(f"#!{ENV} python3\n{body}", encoding="utf-8")
+    return gemini_bin
+
+
+class EnvFirst:
+    """``process_identity``, mais la première lecture de chaque pid voit ``env`` : ce que rend une lecture faite au
+    retour de ``Popen``, avant que ``env`` n'exécute l'interpréteur (la course réelle n'est pas reproductible)."""
+
+    def __init__(self) -> None:
+        self.seen: set[int] = set()
+
+    def __call__(self, pid: int) -> str:
+        identity = process_identity(pid)
+        if pid in self.seen or not identity:
+            return identity
+        self.seen.add(pid)
+        return f"{identity.partition('|')[0]}|{os.path.realpath(ENV)}"
 
 
 def set_mode(gemini_bin: Path, mode: str) -> None:
@@ -501,12 +536,12 @@ def test_sondes_sans_processus(tmp_path: Path) -> None:
     assert host.resolve(default_exec, tmp_path, "1", "n") == ""  # sans journal : rien à lire
     assert host.state({"pid": "x"}) == "ended" and host.stop("x") is False
     assert host.halt(default_exec, tmp_path, "") == (False, ", processus gemini ? NON arrêté")
-    alive = GeminiWorkerHost(alive=lambda _p: True, identify=lambda _p: "100:/usr/bin/node")
-    marks = {"pid": "12", "pid_identity": "100:/usr/bin/node"}
+    alive = GeminiWorkerHost(alive=lambda _p: True, identify=lambda _p: "100|/usr/bin/node")
+    marks = {"pid": "12", "pid_identity": "100|/usr/bin/node"}
     assert alive.state(marks) == "busy"  # vivant, pas encore de journal (jamais le dossier courant)
     # Le même pid, un autre processus (heure de démarrage ou exécutable différents) : mort.
-    assert alive.state({**marks, "pid_identity": "99:/usr/bin/node"}) == "ended"
-    assert alive.state({**marks, "pid_identity": "100:/usr/bin/python3"}) == "ended"
+    assert alive.state({**marks, "pid_identity": "99|/usr/bin/node"}) == "ended"
+    assert alive.state({**marks, "pid_identity": "100|/usr/bin/python3"}) == "ended"
     # Aucune identité notée au lancement : on n'affirme pas qu'il vit.
     assert alive.state({"pid": "12"}) == "ended"
     assert read_events(tmp_path / "absent.jsonl") == []
@@ -522,18 +557,148 @@ def test_l_identite_d_un_processus_est_son_heure_de_demarrage_et_son_executable(
     try:
         identity = process_identity(proc.pid)
         assert identity and identity == process_identity(proc.pid)  # stable tant que le processus vit
-        started, _, exe = identity.partition(":")
+        started, _, exe = identity.partition("|")
         assert started and Path(exe).name == Path(os.path.realpath(sys.executable)).name
         host = GeminiWorkerHost()
         assert host.state({"pid": str(proc.pid), "pid_identity": identity}) == "busy"
         # Même pid, autre heure de démarrage (pid recyclé) ou autre exécutable : mort.
-        assert host.state({"pid": str(proc.pid), "pid_identity": f"0:{exe}"}) == "ended"
-        assert host.state({"pid": str(proc.pid), "pid_identity": f"{started}:/usr/bin/gemini"}) == "ended"
+        assert host.state({"pid": str(proc.pid), "pid_identity": f"0|{exe}"}) == "ended"
+        assert host.state({"pid": str(proc.pid), "pid_identity": f"{started}|/usr/bin/gemini"}) == "ended"
         assert host.state({"pid": str(proc.pid)}) == "ended"
     finally:
         proc.kill()
         proc.wait(timeout=10)
     assert process_identity(proc.pid) == "" and process_identity(0) == ""
+
+
+@pytest.mark.parametrize(
+    ("noted", "current", "same"),
+    [
+        ("100|/usr/bin/node", "100|/usr/bin/node", True),
+        # ``#!/usr/bin/env node`` : même processus, ``env`` remplacé par l'interpréteur.
+        ("100|/usr/bin/env", "100|/usr/bin/node", True),
+        ("Mon Nov 24 14:49:00 2026|env", "Mon Nov 24 14:49:00 2026|/usr/local/bin/node", True),
+        # Aucun autre changement d'exécutable, et jamais vers ``env`` ni sans la même heure de démarrage.
+        ("100|/usr/bin/node", "100|/usr/bin/python3", False),
+        ("100|/usr/bin/node", "100|/usr/bin/env", False),
+        ("100|/usr/bin/env", "101|/usr/bin/node", False),
+        ("|/usr/bin/env", "|/usr/bin/node", False),
+        ("100", "100|/usr/bin/node", False),
+        ("100|/usr/bin/env", "100", False),
+        ("", "100|/usr/bin/node", False),
+        ("100|/usr/bin/node", "", False),
+        ("", "", False),
+    ],
+)
+def test_l_identite_admet_la_seule_transition_depuis_env(noted: str, current: str, same: bool) -> None:
+    assert same_process_identity(noted, current) is same
+
+
+def test_un_env_multi_appel_est_reconnu(monkeypatch: pytest.MonkeyPatch) -> None:
+    import grimoire.missions.gemini_host as module
+
+    monkeypatch.setattr(module, "_env_executables", lambda: frozenset({"/usr/lib/cargo/bin/coreutils"}))
+    assert same_process_identity("7|/usr/lib/cargo/bin/coreutils", "7|/usr/bin/node")
+    assert not same_process_identity("7|/usr/lib/cargo/bin/ls", "7|/usr/bin/node")
+
+
+def test_l_identite_se_releve_de_nouveau_a_l_init() -> None:
+    def host(*readings: str | Exception) -> GeminiWorkerHost:
+        queue = list(readings)
+
+        def identify(_pid: int) -> str:
+            value = queue.pop(0)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        return GeminiWorkerHost(identify=identify)
+
+    assert host("5|/usr/bin/node").settled_identity(9, "5|/usr/bin/env") == "5|/usr/bin/node"
+    assert host("5|/usr/bin/env").settled_identity(9, "5|/usr/bin/env") == "5|/usr/bin/env"
+    # Mort entre-temps, pid repris, lecture en échec : l'identité notée reste, la sonde suivante tranchera.
+    assert host("").settled_identity(9, "5|/usr/bin/env") == "5|/usr/bin/env"
+    assert host("6|/usr/bin/node").settled_identity(9, "5|/usr/bin/env") == "5|/usr/bin/env"
+    assert host(OSError("illisible")).settled_identity(9, "5|/usr/bin/env") == "5|/usr/bin/env"
+
+
+@ENV_ONLY
+def test_un_gemini_en_shebang_env_reste_vivant(tmp_path: Path, gemini_env_bin: Path, spawned: Spawned) -> None:
+    set_mode(gemini_env_bin, "hang")
+    host = host_for(gemini_env_bin, spawned)
+    host.identify = EnvFirst()
+    plan = host.plan(SessionSpec(name="n", prompt="p", permission_mode="acceptEdits"))
+    assert not isinstance(plan, str)
+    log = tmp_path / "T.gemini.jsonl"
+    started = host.start(plan, tmp_path, log)
+    noted = host.identify(started.pid)
+    assert noted.endswith(f"|{os.path.realpath(ENV)}")
+    # L'identité notée au retour de Popen (``env``) ne fait ni abandonner la résolution, ni déclarer mort le worker.
+    session = host.resolve(default_exec, tmp_path, str(started.pid), "n", log=log, identity=noted)
+    assert session
+    assert host.state({"pid": str(started.pid), "pid_identity": noted, "log": str(log)}) == "busy"
+    settled = host.settled_identity(started.pid, noted)
+    assert settled.partition("|")[0] == noted.partition("|")[0]
+    assert settled.partition("|")[2] == os.path.realpath(sys.executable)
+    assert host.state({"pid": str(started.pid), "pid_identity": settled, "log": str(log)}) == "busy"
+    assert host.stop(str(started.pid))
+    assert host.state({"pid": str(started.pid), "pid_identity": noted, "log": str(log)}) == "ended"
+
+
+LINUX_ONLY = pytest.mark.skipif(not Path("/proc/self/stat").is_file(), reason="/proc")
+
+
+@LINUX_ONLY
+def test_un_zombie_n_a_pas_d_identite() -> None:
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        assert wait_for(lambda: Path(f"/proc/{proc.pid}/stat").read_text().split(") ", 1)[1][0] == "Z")
+        assert process_identity(proc.pid) == ""  # mort, pas encore récolté : rien d'affirmé
+    finally:
+        proc.wait(timeout=10)
+
+
+@POSIX_ONLY
+def test_l_identite_par_ps_hors_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil
+
+    import grimoire.missions.gemini_host as module
+
+    if shutil.which("ps") is None:
+        pytest.skip("ps absent")
+    monkeypatch.setattr(module, "_has_proc", lambda: False)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        identity = process_identity(proc.pid)
+        started, sep, exe = identity.partition("|")
+        assert sep and ":" in started and exe  # ``lstart`` porte des ``:`` : le séparateur n'en est pas un
+        assert same_process_identity(identity, process_identity(proc.pid))
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+    assert process_identity(proc.pid) == ""
+    monkeypatch.setattr(module.subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(OSError("ps")))
+    assert process_identity(os.getpid()) == ""
+
+
+@POSIX_ONLY
+def test_l_existence_d_un_pid() -> None:
+    import grimoire.missions.gemini_host as module
+
+    assert module._process_exists(os.getpid()) and not module._process_exists(0)
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait(timeout=10)
+    assert not module._process_exists(proc.pid)  # récolté : plus personne sous ce pid
+    if os.getuid() != 0:
+        assert module._process_exists(1)  # un autre utilisateur : il existe, son identité dira s'il est le nôtre
+
+
+def test_une_identite_illisible_compte_pour_mort() -> None:
+    def broken(_pid: int) -> str:
+        raise OSError("illisible")
+
+    host = GeminiWorkerHost(alive=lambda _p: True, identify=broken)
+    assert host.state({"pid": "12", "pid_identity": "100|/usr/bin/node"}) == "ended"
 
 
 def test_windows_refuse_le_lancement(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -614,6 +779,27 @@ def test_le_worker_gemini_part_s_inscrit_et_se_rattache(
     assert argv[argv.index("--approval-mode") + 1] == "auto_edit"
 
 
+@ENV_ONLY
+def test_le_worker_gemini_en_shebang_env_part_et_garde_l_interpreteur(
+    projet: Path, gemini_env_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Relecture du 2026-11-24 : l'identité lue au retour de Popen vaut ``env`` ; le worker ne doit pas mourir."""
+    set_mode(gemini_env_bin, "hang")
+    prove(monkeypatch, tmp_path)
+    tid = ready(projet)
+    run, exec_ = launcher(projet, gemini_env_bin, spawned)
+    run._gemini.identify = EnvFirst()
+    (outcome,) = run((Admit(tid),))
+    assert outcome.status == "launched", outcome.detail
+    service = TaskService(projet)
+    payload = launched_sessions(service)[tid]
+    # Le ledger garde l'identité relevée à l'init : l'interpréteur, plus ``env``.
+    assert payload["pid_identity"].partition("|")[2] == os.path.realpath(sys.executable)
+    host = host_for(gemini_env_bin, spawned)
+    assert renew_live_workers(service, exec_, gemini=host) == (tid,)
+    assert release_ended_workers(service, exec_, gemini=host) == ()
+
+
 @POSIX_ONLY
 def test_battement_arret_au_repos_reprise_et_fin(
     projet: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -674,6 +860,32 @@ def test_reprise_refusee_sans_preuve_ou_sans_session(
     refused = resume_worker(service, exec_, "claude", tid, launch, "m", gemini=host)
     assert refused.returncode == 1 and "frein non prouvé" in refused.stderr
     assert not [a for a, _c, _e in exec_.calls if a[0] == "claude"]  # jamais un repli sur Claude Code
+
+
+@POSIX_ONLY
+def test_sans_identite_lisible_rien_ne_reste_lance(
+    projet: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    set_mode(gemini_bin, "hang")
+    prove(monkeypatch, tmp_path)
+    tid = ready(projet)
+    run, exec_ = launcher(projet, gemini_bin, spawned)
+    run._gemini.identify = lambda _pid: ""
+    (outcome,) = run((Admit(tid),))
+    assert outcome.status == "failed" and "sans identité lisible" in outcome.detail
+    assert spawned.procs and not any(spawned.alive(pid) for pid in spawned.procs)  # arrêté, pas laissé sans suivi
+    # La reprise : même règle, le processus repris est arrêté et la reprise échoue.
+    tid = _launched(projet, gemini_bin, spawned, monkeypatch, tmp_path)
+    service = TaskService(projet)
+    launch = launched_sessions(service)[tid]
+    host = host_for(gemini_bin, spawned)
+    host.identify = lambda _pid: ""
+    before = set(spawned.procs)
+    resumed = resume_worker(service, exec_, "claude", tid, launch, "renvoi", gemini=host)
+    assert resumed.returncode == 1 and "sans identité lisible" in resumed.stderr
+    (pid,) = set(spawned.procs) - before
+    assert not spawned.alive(pid)
+    assert not [e for e in service.ledger.events_for(tid) if e.event_type == WORKER_RESUMED_EVENT]
 
 
 @POSIX_ONLY
