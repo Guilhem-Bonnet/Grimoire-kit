@@ -170,3 +170,56 @@ def test_host_matrix_stays_coherent_with_models_declared(project: Path) -> None:
     _policy(project, "dispatch:\n  copilot_models:\n    haiku: claude-haiku-4.5\n")
     matrix = build_matrix(project, (HostId.CLAUDE_CODE_CLI, HostId.GITHUB_COPILOT))
     assert matrix.ok
+
+
+# --- #1280 P3 : hooks scopés par agent ---------------------------------------
+
+
+def _agent_with_hooks(root: Path, name: str, hooks: str) -> None:
+    (root / AGENT_DIR / f"{name}.md").write_text(
+        f'---\nname: "{name}"\ndescription: "{name} test"\nhooks:\n{hooks}---\n\nTu es {name}.\n',
+        encoding="utf-8",
+    )
+
+
+def test_agent_hooks_rendered_in_agent_md(project: Path) -> None:
+    import json
+
+    from ruamel.yaml import YAML
+
+    _agent_with_hooks(
+        project,
+        "scribe",
+        "  PostToolUse:\n    - command: ./scripts/fmt.sh\n      windows: ./scripts/fmt.ps1\n      timeout: 20\n",
+    )
+    files, _ = _copilot(project)
+    meta = YAML(typ="safe").load(files[".github/agents/scribe.agent.md"].split("---")[1])
+    # Forme de la référence GitHub « Agent-scoped hooks ».
+    assert meta["hooks"] == {
+        "PostToolUse": [
+            {"type": "command", "command": "./scripts/fmt.sh", "windows": "./scripts/fmt.ps1", "timeoutSec": 20}
+        ]
+    }
+    # Un agent sans hooks propres n'en reçoit pas.
+    assert "hooks:" not in files[".github/agents/architecte.agent.md"].split("---")[1]
+    # La garde globale reste dans son fichier, une seule fois, et nulle part dans un .agent.md.
+    guard = json.loads(files[".github/hooks/grimoire-pre-tool-use.json"])["hooks"]["PreToolUse"]
+    assert any("grimoire" in e["bash"] for e in guard)
+    holders = [k for k, v in files.items() if k.endswith(".agent.md") and "grimoire host hook" in v]
+    assert holders == []
+
+
+def test_agent_hook_cannot_relaunch_the_global_guard(project: Path) -> None:
+    from grimoire.core.exceptions import GrimoireAgentError
+
+    _agent_with_hooks(project, "scribe", "  PreToolUse:\n    - command: grimoire host hook PreToolUse\n")
+    with pytest.raises(GrimoireAgentError, match="garde"):
+        _copilot(project)
+
+
+def test_agent_hooks_unknown_event_refused(project: Path) -> None:
+    from grimoire.core.exceptions import GrimoireAgentError
+
+    _agent_with_hooks(project, "scribe", "  Nope:\n    - command: ./x.sh\n")
+    with pytest.raises(GrimoireAgentError, match="inconnu"):
+        _copilot(project)
