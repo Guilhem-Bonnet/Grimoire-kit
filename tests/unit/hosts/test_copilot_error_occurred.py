@@ -181,3 +181,16 @@ def test_name_context_and_tool_are_redacted(tmp_path: Path) -> None:
     detail = _run(_root(tmp_path), payload)[1].detail
     assert "ghp_" not in json.dumps(detail)
     assert "[redacted:github-token]" in detail["error_name"]
+
+
+def test_cut_token_after_long_jwt_never_leaks_a_fragment(tmp_path: Path) -> None:
+    from grimoire.hosts.decisions.error_occurred import _SCAN_WINDOW
+
+    jwt = ".".join(("ey" + "J" + "a" * 60, "b" * 60, "c" * 60))
+    token = "ghp_" + "Wq9" * 14
+    for cut in range(1, len(token) + 1):
+        prefix = jwt + " " + "z" * (_SCAN_WINDOW - len(jwt) - 1 - cut)
+        message = prefix + token + " suite"
+        assert len(message) > _SCAN_WINDOW
+        detail = _detail_for(tmp_path, message=message)["error_message"]
+        assert "ghp_" not in detail, cut

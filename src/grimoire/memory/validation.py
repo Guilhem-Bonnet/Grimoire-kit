@@ -138,7 +138,10 @@ _REDACTION_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
     # Bearer opaque : placé après `jwt`, qui garde la main sur Bearer+JWT (le
     # jeton y est déjà remplacé par `[redacted:jwt]`, que ce motif ne reconnaît pas).
-    ("bearer-token", re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}")),
+    # Jeton plausible : un chiffre (12+ caractères) ou 20+ caractères, pour ne pas
+    # masquer « Bearer authentication failed ». `Bearer: <jeton>` est couvert.
+    ("bearer-token", re.compile(
+        r"(?i)\bBearer:?\s+(?:(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{12,}|[A-Za-z0-9._~+/=-]{20,})")),
     # Authentification basique dans une URL : seul le couple identifiant/mot de
     # passe est caviardé, le hôte reste lisible.
     ("url-basic-auth", re.compile(r"(?<=://)[^\s/:@]+:[^\s/:@]{6,}(?=@)")),

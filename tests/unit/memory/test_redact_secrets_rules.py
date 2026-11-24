@@ -29,6 +29,17 @@ def test_short_bearer_is_kept() -> None:
     assert redact_secrets("Bearer short")[0] == "Bearer short"
 
 
+def test_bearer_prose_is_kept() -> None:
+    for prose in ("Bearer authentication failed", "the bearer responsibilities"):
+        assert redact_secrets(prose)[0] == prose
+
+
+def test_bearer_with_colon_is_redacted() -> None:
+    text, hits = redact_secrets("Bearer: abcDEF123456xyz")
+    assert "abcDEF123456xyz" not in text
+    assert hits == ("bearer-token",)
+
+
 def test_bearer_jwt_stays_a_jwt() -> None:
     jwt = _JWT
     text, hits = redact_secrets(f"Authorization: Bearer {jwt}")

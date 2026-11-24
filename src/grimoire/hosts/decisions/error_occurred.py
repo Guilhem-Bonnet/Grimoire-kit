@@ -15,6 +15,7 @@ Le message est caviardé (secrets du kit) puis tronqué, le nom d'outil tronqué
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from grimoire.hosts.decisions._shared import Decision, HookInput
@@ -24,6 +25,7 @@ DECISION_ID = "grimoire.error-occurred"
 MAX_MESSAGE = 200
 _MAX_FIELD = 80
 _FRAGMENT_MARGIN = 64
+_TOKEN_TAIL = re.compile(r"[A-Za-z0-9_\-.+/=~]+\Z")
 _SCAN_WINDOW = 2000  # borne du texte passé au caviardage : un message géant ne coûte pas cher
 
 
@@ -39,9 +41,10 @@ def _clean(value: Any, limit: int) -> str:
         return ""
     window = value[:_SCAN_WINDOW]
     if len(value) > _SCAN_WINDOW and not (value[_SCAN_WINDOW].isspace() or window[-1:].isspace()):
-        head = window.rsplit(None, 1)  # sans le dernier mot, coupé en deux
-        # Un seul « mot » : on recule d'une marge supérieure au plus court des motifs.
-        window = head[0] if len(head) == 2 else window[:-_FRAGMENT_MARGIN]
+        # Coupé au milieu d'un mot : on retire toute la suite finale de caractères
+        # de jeton, quel que soit le motif, pour qu'aucun fragment ne survive.
+        # Un message d'un seul mot : rien à garder, on recule d'une marge fixe.
+        window = _TOKEN_TAIL.sub("", window) or window[:-_FRAGMENT_MARGIN]
     return redact_secrets(window)[0][:limit]
 
 
