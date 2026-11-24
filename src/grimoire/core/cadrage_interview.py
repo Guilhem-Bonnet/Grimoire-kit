@@ -227,7 +227,7 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
     required, per_angle = _PROFILE[depth]
     kind = parse_kind(str(state["kind"])) if state.get("kind") else None
     profile = KIND_PROFILES[kind] if kind else None
-    if profile is not None and not profile.interview:
+    if kind is not None and profile is not None and not profile.interview:
         return {
             "kind": kind.value, "kind_label": profile.label, "kind_source": kind_source,
             "interview": False, "depth": depth, "depth_source": source, "questions_per_angle": 0,
@@ -239,7 +239,7 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
     if non_blocking:
         required = ()
     recorded = state.get("angles", {})
-    angles = []
+    angles: list[dict[str, Any]] = []
     for a in ANGLES:
         rec = recorded.get(a.id, {})
         angles.append({
@@ -265,8 +265,8 @@ def _render(state: dict[str, Any], source: str, kind_source: str = "enregistrée
         )
         if non_blocking:
             view["deferred"] = "Rétablir d'abord : l'entretien complet est reporté au post-mortem (jamais bloquant)."
-            for a in angles:
-                a["questions"] = []
+            for item in angles:
+                item["questions"] = []
             view["questions_per_angle"] = 0
     return view
 

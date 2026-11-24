@@ -15,7 +15,6 @@ from grimoire.missions.intake import intake_proposal
 from grimoire.missions.request_kind import KIND_PROFILES, RequestKind, classify_request_kind, parse_kind
 from grimoire.missions.schemas import TaskType
 
-pytestmark = pytest.mark.covers("cli:cadrage interview answer")
 runner = CliRunner()
 
 PHRASES: dict[RequestKind, tuple[str, ...]] = {
