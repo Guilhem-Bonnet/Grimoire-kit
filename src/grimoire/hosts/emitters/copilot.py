@@ -71,6 +71,11 @@ _WIRE_NAMES: dict[HookEvent, str] = {
     HookEvent.SUBAGENT_STOP: "SubagentStop",
     HookEvent.PRE_COMPACT: "PreCompact",
     HookEvent.STOP: "Stop",
+    # PascalCase comme les autres fichiers du kit : la référence GitHub donne à ces deux événements
+    # une forme « VS Code compatible » (snake_case) ; l'orthographe camelCase ferait lire au
+    # diagnostic ``copilot_harness`` tout le projet comme Copilot CLI.
+    HookEvent.ERROR_OCCURRED: "ErrorOccurred",
+    HookEvent.USER_PROMPT_TRANSFORMED: "UserPromptTransformed",
 }
 
 
@@ -383,6 +388,39 @@ def _subagent_start_file(launcher: HookLauncher = BARE) -> EmittedFile:
     )
 
 
+#: Observation ``errorOccurred`` (#1280, P3) : l'erreur est inscrite au journal de session (trace).
+ERROR_OCCURRED_HOOK = HookSpec(
+    event=HookEvent.ERROR_OCCURRED,
+    decision="grimoire.error-occurred",
+    enforcement=Enforcement.ADVISORY,
+    timeout=3,
+    rationale="Inscrit l'erreur (type, message tronqué, outil) au journal de session ; ne bloque jamais.",
+)
+
+#: ``userPromptTransformed`` : mutation seule côté Copilot ; le kit n'y réécrit rien, il trace l'événement.
+USER_PROMPT_TRANSFORMED_HOOK = HookSpec(
+    event=HookEvent.USER_PROMPT_TRANSFORMED,
+    decision="grimoire.event-trace",
+    enforcement=Enforcement.ADVISORY,
+    timeout=3,
+    rationale="Trace l'événement (jamais le texte du prompt) ; ne réécrit rien.",
+)
+
+
+def _observation_file(hook: HookSpec, launcher: HookLauncher = BARE) -> EmittedFile:
+    """``grimoire-<événement>.json`` d'un hook d'observation Copilot : une entrée, ``--decision`` nommée."""
+    (entry,) = _hook_entries(hook, launcher)
+    for key in ("command", "bash", "powershell"):
+        entry[key] = f"{entry[key]} --decision {hook.decision}"
+    payload: dict[str, Any] = {"version": 1, "hooks": {_WIRE_NAMES[hook.event]: [entry]}}
+    return EmittedFile(
+        relpath=_hook_relpath(hook),
+        content=json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        managed=False,
+        owned_if_contains=OWNED_COMMAND_MARKERS,
+    )
+
+
 def _hook_entries(hook: HookSpec, launcher: HookLauncher = BARE) -> list[dict[str, Any]]:
     """Les entrées de *hook* : une, ou deux pour un hook à matcher (outils connus, puis inconnus)."""
     event = _WIRE_NAMES[hook.event]
@@ -592,6 +630,7 @@ class CopilotEmitter(Emitter):
         # conflict on a file nobody actually edited.
         files.extend(_prompt_file(c) for c in surface.commands if c.source != "workflow")
         files.append(_subagent_start_file(launcher))
+        files.extend(_observation_file(h, launcher) for h in (ERROR_OCCURRED_HOOK, USER_PROMPT_TRANSFORMED_HOOK))
         files.extend(_hook_file(hook, launcher, dispatch=True, project_root=project_root) for hook in surface.hooks)
 
         degradations: list[Degradation] = list(Emitter.launcher_degradations(launcher))
