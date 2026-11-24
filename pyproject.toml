@@ -94,6 +94,18 @@ redis = ["redis>=5.0"]
 mempalace = ["chromadb>=0.6,<0.7"]
 ollama = ["ollama>=0.3"]
 search = ["tantivy>=0.26"]
+# Messages vocaux (#1343) : reconnaissance faster-whisper, synthèse Pocket TTS.
+# Volontairement hors de `all` (et donc de `dev` et de la CI) : pocket-tts tire
+# torch, plusieurs centaines de Mo pour une fonction que l'utilisateur active
+# lui-même. Sans cet extra, rien d'audio n'est importé (grimoire.voice ne
+# charge un moteur qu'à son premier appel) et le repli « navigateur » reste
+# disponible. Aucun modèle n'est téléchargé à l'installation ni au chargement
+# sans `voice.allow_download: true`. Bornes basses vérifiées le 2026-11-24 sur
+# les wheels : `WhisperModel(local_files_only=)` et `transcribe(hotwords=)`
+# existent en 1.1 ; `TTSModel.load_model(language="french")`,
+# `get_state_for_audio_prompt` et `get_default_voice_for_language` relus sur
+# pocket-tts 4.0.0 et 4.0.1 — en deçà, non vérifié, donc non déclaré.
+voice = ["faster-whisper>=1.1", "pocket-tts>=4.0"]
 all = ["grimoire-kit[mcp,qdrant,weaviate,neo4j,redis,mempalace,ollama,search]"]
 dev = [
     "grimoire-kit[all]",
@@ -209,6 +221,8 @@ module = [
     "ollama.*",
     "jsonschema.*",
     "tantivy.*",
+"faster_whisper.*",
+"pocket_tts.*",
 ]
 ignore_missing_imports = true
 
