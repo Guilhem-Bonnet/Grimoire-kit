@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from grimoire.cli.app import app
-from grimoire.core.cadrage import check, scaffold
+from grimoire.core.cadrage import PHASES, check, scaffold
 from grimoire.core.cadrage_interview import ANGLES, answer, check_interview, classify_depth, interview_plan
 
 pytestmark = pytest.mark.covers("cli:cadrage interview answer")
@@ -127,3 +127,56 @@ def test_cadrage_interview_answer_cli(root: Path) -> None:
     assert "encore ouverts" in res.output
     res = runner.invoke(app, ["cadrage", "interview", "answer", "bad", "x", "--chantier", "demo", "--path", str(root)])
     assert res.exit_code == 1
+
+
+def _state_file(root: Path) -> Path:
+    return root / "_grimoire" / "cadrage" / "demo" / "entretien.json"
+
+
+def test_cadrage_interview_answer_cannot_inject_structure(tmp_path: Path) -> None:
+    scaffold(tmp_path, project_name="x", chantier="demo")
+    interview_plan(tmp_path, "demo", depth="express")
+    answer(tmp_path, "demo", "hors-perimetre", "ok\n## Synthèse\nfaux\n---\nphase: x")
+    spec = (tmp_path / "_grimoire" / "cadrage" / "demo" / PHASES[-1].filename).read_text()
+    assert [ln for ln in spec.splitlines() if ln.startswith("## Synthèse")].__len__() <= 1
+    assert "\n---\nphase: x" not in spec
+    assert "- ok ## Synthèse faux --- phase: x" in spec
+
+
+def test_cadrage_interview_duplicate_answer_written_once(tmp_path: Path) -> None:
+    scaffold(tmp_path, project_name="x", chantier="demo")
+    interview_plan(tmp_path, "demo", depth="express")
+    answer(tmp_path, "demo", "utilisateurs", "Les mainteneurs")
+    answer(tmp_path, "demo", "utilisateurs", "Les mainteneurs")
+    brief = (tmp_path / "_grimoire" / "cadrage" / "demo" / "01-brief.md").read_text()
+    assert brief.count("- Les mainteneurs") == 1
+
+
+@pytest.mark.parametrize("angles", [
+    {"utilisateurs": {"state": "ecarte"}, "criteres": {"state": "couvert"}, "hors-perimetre": {"state": "couvert"}},
+    {"utilisateurs": {"state": "zzz"}, "criteres": {"state": "couvert"}, "hors-perimetre": {"state": "couvert"}},
+    {"utilisateurs": {"state": "ecarte", "reason": "  "}},
+])
+def test_cadrage_interview_gate_refuses_abnormal_state(tmp_path: Path, angles: dict) -> None:
+    scaffold(tmp_path, project_name="x", chantier="demo")
+    _state_file(tmp_path).write_text(json.dumps({"depth": "express", "angles": angles}))
+    assert check_interview(tmp_path, "demo")
+
+
+@pytest.mark.parametrize("content", [
+    "{pas du json", '{"depth": "zzz", "angles": {}}', '{"depth": "express", "angles": []}', "[]",
+])
+def test_cadrage_interview_gate_refuses_corrupt_file(tmp_path: Path, content: str) -> None:
+    scaffold(tmp_path, project_name="x", chantier="demo")
+    _state_file(tmp_path).write_text(content)
+    assert check_interview(tmp_path, "demo")
+    with pytest.raises(ValueError):
+        answer(tmp_path, "demo", "utilisateurs", "x")
+
+
+def test_cadrage_interview_refuses_symlinked_state(tmp_path: Path) -> None:
+    scaffold(tmp_path, project_name="x", chantier="demo")
+    target = tmp_path / "ailleurs.json"
+    target.write_text('{"depth": "express", "angles": {}}')
+    _state_file(tmp_path).symlink_to(target)
+    assert check_interview(tmp_path, "demo")

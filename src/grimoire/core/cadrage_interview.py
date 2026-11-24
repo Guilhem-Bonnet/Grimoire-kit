@@ -115,14 +115,35 @@ def _state_path(root: Path, chantier: str | None) -> Path:
 
 
 def _load(root: Path, chantier: str | None) -> dict[str, Any] | None:
+    """L'état enregistré ; ``None`` si aucun entretien. Un fichier présent mais invalide lève ValueError."""
     path = _state_path(root, chantier)
-    if not path.is_file():
+    if path.is_symlink():
+        raise ValueError(f"{STATE_FILE} est un lien symbolique : refusé")
+    if not path.exists():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) and data.get("depth") in DEPTHS else None
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"{STATE_FILE} illisible ({exc.__class__.__name__}) : corrigez-le ou supprimez-le") from exc
+    if not isinstance(data, dict) or data.get("depth") not in DEPTHS:
+        raise ValueError(f"{STATE_FILE} invalide : profondeur absente ou inconnue ({', '.join(DEPTHS)})")
+    angles = data.get("angles", {})
+    if not isinstance(angles, dict):
+        raise ValueError(f"{STATE_FILE} invalide : « angles » doit être un objet")
+    for aid, rec in angles.items():
+        if aid not in _BY_ID or not isinstance(rec, dict):
+            raise ValueError(f"{STATE_FILE} invalide : angle {aid!r} inconnu ou mal formé")
+        if rec.get("state", "ouvert") not in STATES:
+            raise ValueError(f"{STATE_FILE} invalide : état {rec.get('state')!r} inconnu pour {aid}")
+        if not isinstance(rec.get("answers", []), list):
+            raise ValueError(f"{STATE_FILE} invalide : « answers » de {aid} doit être une liste")
+    data["angles"] = angles
+    return data
+
+
+def _fold(text: str) -> str:
+    """Replie la saisie sur une seule ligne : une réponse ne peut ni écrire de titre ni de frontmatter."""
+    return " ".join(text.split())
 
 
 def _save(root: Path, chantier: str | None, data: dict[str, Any]) -> None:
@@ -188,7 +209,10 @@ def _render(state: dict[str, Any], source: str) -> dict[str, Any]:
             "questions": list(a.seeds[:per_angle]),
             "answers": list(rec.get("answers", [])), "reason": rec.get("reason", ""),
         })
-    open_required = [x["id"] for x in angles if x["required"] and x["state"] == "ouvert"]
+    open_required = [
+        x["id"] for x in angles
+        if x["required"] and not (x["state"] == "couvert" or (x["state"] == "ecarte" and x["reason"].strip()))
+    ]
     return {
         "depth": depth, "depth_source": source, "questions_per_angle": per_angle,
         "angles": angles, "open_required": open_required, "complete": not open_required,
@@ -218,7 +242,7 @@ def answer(
     angle = _BY_ID.get(angle_id)
     if angle is None:
         raise ValueError(f"angle inconnu : {angle_id!r} — {', '.join(_BY_ID)}")
-    text = text.strip()
+    text = _fold(text)
     if unknown and skip:
         raise ValueError("--unknown et --skip s'excluent")
     if skip and not text:
@@ -234,6 +258,7 @@ def answer(
     if not cadrage_dir(root, chantier).joinpath(PHASES[0].filename).is_file():
         scaffold(root, project_name=root.name, chantier=chantier)
     rec = state["angles"].setdefault(angle.id, {"state": "ouvert", "answers": []})
+    rec.setdefault("answers", [])
     target = cadrage_dir(root, chantier)
     if skip:
         rec.update(state="ecarte", reason=text)
@@ -241,11 +266,14 @@ def answer(
                            "Écarté (et pourquoi)", f"- Angle « {angle.title} » écarté : {text}")
     elif unknown:
         note = f"{UNKNOWN_PREFIX}{angle.title}" + (f" — {text}" if text else "")
-        rec["answers"].append(note)
+        if note not in rec["answers"]:
+            rec["answers"].append(note)
         rec["state"] = "couvert"
         _append_to_section(target / next(p.filename for p in PHASES if p.id == "comprehension"),
                            "Hypothèses", f"- {note}")
     else:
+        if text in rec["answers"]:  # même réponse redonnée : pas de doublon dans le cadrage
+            return _render(state, "enregistrée")
         rec["answers"].append(text)
         rec["state"] = "couvert"
         filename = next(p.filename for p in PHASES if p.id == angle.phase)
@@ -256,12 +284,15 @@ def answer(
 
 def check_interview(root: Path, chantier: str | None = None) -> list[str]:
     """Erreurs du gate : un angle obligatoire resté ouvert. Sans entretien entamé, rien à contrôler."""
-    state = _load(root, chantier)
+    try:
+        state = _load(root, chantier)
+    except ValueError as exc:
+        return [f"Entretien de cadrage : {exc}"]
     if state is None:
         return []
     view = _render(state, "enregistrée")
     if not view["open_required"]:
         return []
-    names = ", ".join(a["id"] for a in view["angles"] if a["id"] in view["open_required"])
+    names = ", ".join(view["open_required"])
     return [f"Entretien de cadrage ({STATE_FILE}, profondeur {view['depth']}) : angle(s) obligatoire(s) "
-            f"encore ouvert(s) — {names}"]
+            f"encore ouvert(s) ou écarté(s) sans raison — {names}"]
