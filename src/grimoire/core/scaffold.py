@@ -258,9 +258,17 @@ agents:
 
 hosts:
   enabled: [$hosts_enabled_list]
-
+$governance_block
 installed_archetypes: [$archetype_list]
 """
+
+def _governance_block(moa: str) -> str:
+    """La section ``governance.roles`` (#1342) ; vide quand aucune MOA n'est nommée : le doctor avertira."""
+    if not moa:
+        return ""
+    quoted = json.dumps(moa, ensure_ascii=False)
+    return f"\ngovernance:\n  roles:\n    moa: {quoted}\n    moe: \"orchestrateur\"\n"
+
 
 _MEMORY_CONFIG_TPL = """\
 # Grimoire Memory Configuration — auto-generated
@@ -437,7 +445,9 @@ class ProjectScaffolder:
         force: bool = False,
         profile: str = "",
         collection_prefix: str = "",
+        moa: str = "",
     ) -> None:
+        self._moa = moa.strip()
         self._offline = offline
         self._profile = profile
         self._target = target.resolve()
@@ -648,6 +658,7 @@ class ProjectScaffolder:
             "archetype": ", ".join(archetypes),
             "archetype_list": archetype_list,
             "hosts_enabled_list": hosts_enabled_list,
+            "governance_block": _governance_block(self._moa),
             "backend": self._backend,
             "memory_extra": memory_extra,
             "memory_layers": memory_layers,
