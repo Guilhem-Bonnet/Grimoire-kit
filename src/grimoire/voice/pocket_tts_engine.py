@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import wave
+from pathlib import Path
 from typing import Any
 
 from grimoire.voice._offline import is_cache_miss
@@ -43,11 +44,8 @@ class PocketTextToSpeech(TextToSpeech):
         self._language = _pocket_language(language)
         self._states: dict[str, Any] = {}
         try:
-            if not allow_download and model_cached({}) is False:  # prouvé absent : rien ne part sur le réseau
-                raise EngineUnavailableError(
-                    f"modèle Pocket TTS « {self._language} » introuvable dans le cache local, et rien n'est "
-                    "téléchargé sans votre accord (voice.allow_download: true)"
-                )
+            if not allow_download:
+                self._require_cached(voice)
             self._model = TTSModel.load_model(language=self._language)
             self._default_voice = voice or _default_voice(self._language)
             self._state(self._default_voice)
@@ -65,13 +63,32 @@ class PocketTextToSpeech(TextToSpeech):
                 f"Pocket TTS « {self._language} » n'a pas pu se charger ({_one_line(exc)})"
             ) from None
 
+    def _require_cached(self, voice: str | None) -> None:
+        """Refuse de charger tant que le modèle de la langue et la voix ne sont pas prouvés dans le cache."""
+        wanted = voice or _default_voice(self._language)
+        if _is_url(wanted):
+            return  # refusée avec son propre message par _state, après le chargement du modèle
+        cached = model_cached({"language": self._language, "voice": wanted})
+        if cached is None:
+            raise EngineUnavailableError(
+                f"cache Pocket TTS « {self._language} » invalide ou illisible : rien n'est chargé sans votre "
+                "accord de téléchargement (voice.allow_download: true)"
+            )
+        if cached is False:
+            raise EngineUnavailableError(
+                f"modèle Pocket TTS « {self._language} » ou voix « {wanted} » introuvable dans le cache local, "
+                "et rien n'est téléchargé sans votre accord (voice.allow_download: true)"
+            )
+
     def _state(self, voice: str) -> Any:
         if voice not in self._states:
-            if not self._allow_download and _is_url(voice):
-                raise EngineUnavailableError(
-                    f"la voix « {voice} » est une URL : rien n'est téléchargé sans votre accord "
-                    "(voice.allow_download: true) — nommez une voix du cache ou un fichier local"
-                )
+            if not self._allow_download:
+                if _is_url(voice):
+                    raise EngineUnavailableError(
+                        f"la voix « {voice} » est une URL : rien n'est téléchargé sans votre accord "
+                        "(voice.allow_download: true) — nommez une voix du cache ou un fichier local"
+                    )
+                self._require_cached(voice)
             self._states[voice] = self._model.get_state_for_audio_prompt(voice)
         return self._states[voice]
 
@@ -98,21 +115,80 @@ def _is_url(voice: str) -> bool:
     return "://" in voice
 
 
-def model_cached(options: dict[str, Any]) -> bool | None:
-    """Un dépôt Pocket TTS est-il dans le cache Hugging Face ? Ne charge rien.
+def _hf_cached(source: str) -> bool:
+    """Un fichier ``hf://dépôt/chemin[@révision]`` est-il déjà dans le cache local ? Aucun réseau."""
+    from huggingface_hub import try_to_load_from_cache
 
-    Le dépôt exact dépend de la langue et de la version de pocket-tts : on cherche un
-    dépôt dont le nom contient « pocket-tts », faute de mieux.
+    rest = source.removeprefix("hf://")
+    repo_id = "/".join(rest.split("/")[:2])
+    filename, _, revision = "/".join(rest.split("/")[2:]).partition("@")
+    found = try_to_load_from_cache(repo_id, filename, revision=revision or None)
+    return isinstance(found, str)
+
+
+def _sources(node: Any, *, top: bool = True) -> tuple[list[str], list[str]]:
+    """(sources toutes requises, sources dont une seule suffit) d'une configuration de modèle."""
+    required: list[str] = []
+    either: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if top and key in ("weights_path", "weights_path_without_voice_cloning"):
+                if isinstance(value, str):
+                    either.append(value)  # pocket-tts retombe sur l'autre paquet de poids
+                continue
+            sub_required, sub_either = _sources(value, top=False)
+            required += sub_required
+            either += sub_either
+    elif isinstance(node, list):
+        for item in node:
+            sub_required, sub_either = _sources(item, top=False)
+            required += sub_required
+            either += sub_either
+    elif isinstance(node, str) and node.startswith(("hf://", "http://", "https://")):
+        required.append(node)
+    return required, either
+
+
+def model_cached(options: dict[str, Any]) -> bool | None:
+    """Les fichiers exacts du modèle de la langue et de la voix sont-ils dans le cache local ? Ne charge rien.
+
+    Les fichiers viennent de la configuration livrée avec pocket-tts pour la langue demandée : chacun est
+    cherché par ``try_to_load_from_cache`` (aucun réseau). Une source ``http(s)`` n'a pas de cache vérifiable :
+    elle compte comme absente. ``None`` : on ne sait pas (bibliothèque ou configuration introuvable).
     """
     try:
-        from huggingface_hub import scan_cache_dir
+        import yaml  # type: ignore[import-untyped]  # dépendance de pocket-tts, sans stubs ici
+        from huggingface_hub import try_to_load_from_cache  # noqa: F401
+        from pocket_tts.utils.config import CONFIGS_DIR
     except ImportError:
         return None
+    language = _pocket_language(options.get("language"))
+    config = Path(CONFIGS_DIR) / f"{language}.yaml"
     try:
-        repos = scan_cache_dir().repos
+        required, either = _sources(yaml.safe_load(config.read_text(encoding="utf-8")))
+    except (OSError, yaml.YAMLError):
+        return None
+    try:
+        if not all(s.startswith("hf://") and _hf_cached(s) for s in required):
+            return False
+        if either and not any(s.startswith("hf://") and _hf_cached(s) for s in either):
+            return False
+        return _voice_cached(language, options.get("voice"))
     except Exception:
-        return False  # pas de dossier de cache : rien n'a jamais été téléchargé
-    return any("pocket-tts" in repo.repo_id.lower() or "pocket_tts" in repo.repo_id.lower() for repo in repos)
+        return False  # pas de dossier de cache lisible : rien n'a été téléchargé
+
+
+def _voice_cached(language: str, voice: Any) -> bool:
+    """Une voix nommée de pocket-tts est-elle dans le cache ? Un fichier local ou un nom inconnu ne télécharge rien."""
+    name = str(voice or "")
+    if not name or Path(name).expanduser().is_file():
+        return True
+    from pocket_tts.utils.utils import _ORIGINS_OF_PREDEFINED_VOICES, get_predefined_voice
+
+    origin = _ORIGINS_OF_PREDEFINED_VOICES.get(name)
+    if origin is None:
+        return True  # ni voix livrée ni URL : la bibliothèque la lira comme un chemin, sans réseau
+    return _hf_cached(origin) or _hf_cached(get_predefined_voice(language, name))
 
 
 def _default_voice(language: str) -> str:

@@ -169,7 +169,6 @@ def test_pocket_missing_model_is_a_readable_reason(fake_pocket) -> None:
     assert "HF_HUB_OFFLINE" not in os.environ
 
 
-
 def test_pocket_other_failure_is_not_called_a_cache_miss(fake_pocket) -> None:
     fake_pocket.fail = False
     original = fake_pocket.load_model
