@@ -248,4 +248,7 @@ def check(root: Path, chantier: str | None = None) -> tuple[list[str], list[str]
             errors.append(msg)
         else:
             warnings.append(msg)
+    from grimoire.core.cadrage_interview import check_interview
+
+    errors.extend(check_interview(root, chantier))
     return errors, warnings
