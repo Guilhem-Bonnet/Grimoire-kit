@@ -764,7 +764,7 @@ dispatch:
 
 `orchestrator.host` nomme l'hôte du projet. Absent ou `claude-code`, rien ne change. `gemini` place le worker sur
 Gemini CLI (`missions/gemini_host.py`, derrière la même interface `WorkerHost`). Toute autre valeur rend la politique
-invalide. `roles.worker.host`, s'il est posé, l'emporte pour le worker.
+invalide, y compris une clé posée vide (`host: ""`) : pour `claude-code` par défaut, omettre la clé. `roles.worker.host`, s'il est posé, l'emporte pour le worker.
 
 ```yaml
 # _grimoire/standard/orchestration-policy.yaml
@@ -782,12 +782,21 @@ orchestrator:
   (`is_fenced`). Sans preuve, rien n'est créé ni réclamé. La sortie du tick dit `worker Gemini CLI non lancé : frein
   non prouvé pour Gemini CLI <version>…`. Au 2026-11-23, aucune capture de refus Gemini n'est versée (#1304) : en
   pratique, le worker Gemini ne part pas encore.
-- **Commande** : `gemini --prompt=<consigne> --output-format stream-json --approval-mode <mode> [--model <modèle>]`.
+- **Commande** : `gemini --prompt=<consigne> --output-format stream-json --approval-mode <mode> [--model=<modèle>]`.
   La consigne passe en une seule chaîne (`--prompt=…`) : un message qui commence par `-` n'est jamais lu comme une
-  option. Reprise : la même commande avec `--resume <id>`, sur le même worktree.
+  option. Reprise : la même commande avec `--resume=<id>` (un seul jeton), sur le même worktree. L'identifiant doit
+  être un UUID : `--yolo`, `latest` ou un numéro d'ordre sont refusés, et rien ne part.
+- **Environnement** : une liste fermée, jamais celui du tick. Celle d'opencode (`PATH`, `HOME`, langue, `TMPDIR`,
+  `SSH_AUTH_SOCK`…), plus l'authentification Gemini (`GEMINI_API_KEY`, `GOOGLE_API_KEY`, masquées dans les traces ;
+  `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_GENAI_USE_VERTEXAI`,
+  `GOOGLE_GENAI_USE_GCA`), le réseau (mandataires, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_*`) et des chemins de
+  configuration (`XDG_*`, `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`). Ni `GH_TOKEN`/`GITHUB_TOKEN` (`gh` s'authentifie
+  par son fichier), ni la clé d'un autre fournisseur, ni `GEMINI_CLI_*` (qui déplacerait les réglages, donc le hook).
 - **Processus tenu par le kit** : Gemini CLI ne documente aucune session détachée. Le kit lance le processus en
   arrière-plan, dans son propre groupe, et écrit le flux dans `_grimoire-output/control/workers/<id>.gemini.jsonl`.
-  Le pid et le journal sont notés au lancement. Battement, fin, arrêt au repos et janitor suivent les règles
+  Le pid, le journal et l'identité du processus (heure de démarrage et exécutable exact, lus dans `/proc` sous
+  Linux, par `ps` ailleurs) sont notés au lancement. Un pid qui porte une autre identité compte pour mort : il n'est
+  ni renouvelé ni tué. Battement, fin, arrêt au repos et janitor suivent les règles
   d'opencode : processus vivant et journal récent, le bail est renouvelé ; processus mort, la tâche est rendue ;
   `SIGTERM` au groupe. POSIX seulement.
 - **Identité** : le `session_id` de l'événement `init` du flux. Seul compte ce que ce lancement a écrit (lecture à

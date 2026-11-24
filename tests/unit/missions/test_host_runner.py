@@ -24,9 +24,11 @@ from grimoire.bridges.schemas import HostId
 from grimoire.missions.admission import Admit
 from grimoire.missions.gemini_host import (
     GEMINI_APPROVAL_MODES,
+    GEMINI_ENV_ALLOWED,
     GeminiWorkerHost,
     gemini_log,
     gemini_worktree_refusal,
+    process_identity,
     read_events,
 )
 from grimoire.missions.launcher import (
@@ -45,27 +47,36 @@ from grimoire.missions.launcher import (
 from grimoire.missions.orchestrator_policy import claude_only_refusal, load_orchestrator_policy
 from grimoire.missions.schemas import TaskCheck, TaskState
 from grimoire.missions.service import TaskService
+from grimoire.missions.worker_guard import ENV_ALLOWED
 from grimoire.missions.worker_host import CLAUDE_CODE_HOST, GEMINI_HOST, SessionSpec, worker_host
 
 POLICY = Path("_grimoire/standard/orchestration-policy.yaml")
 VERSION = "0.64.0"
+SID = "123e4567-e89b-42d3-a456-426614174000"
 POSIX_ONLY = pytest.mark.skipif(os.name != "posix", reason="le worker Gemini est suivi par pid POSIX")
 
-#: Le faux ``gemini`` : ``--version``, puis le flux ``stream-json`` documenté. ``FAKE_GEMINI_MODE`` choisit la fin :
-#: ``done`` (rend la main), ``hang`` (reste vivant jusqu'au signal), ``crash`` (meurt sans événement ``init``).
+#: Le faux ``gemini`` : ``--version``, puis le flux ``stream-json`` documenté. Le fichier ``mode`` voisin choisit la
+#: fin : ``done`` (rend la main), ``hang`` (reste vivant jusqu'au signal), ``crash`` (meurt sans événement ``init``).
+#: Rien ne passe par l'environnement (liste fermée) : le chemin du journal des argv est écrit dans le script, et
+#: chaque lancement note aussi l'environnement reçu dans ``env.jsonl``.
 FAKE_GEMINI = r"""
-import json, os, sys, time, uuid
+import json, os, pathlib, sys, time, uuid
 args = sys.argv[1:]
 if args == ["--version"]:
     print("__VERSION__")
     sys.exit(0)
-mode = os.environ.get("FAKE_GEMINI_MODE", "done")
-with open(os.environ["FAKE_GEMINI_ARGV"], "a", encoding="utf-8") as seen:
+here = pathlib.Path(__file__).resolve().parent
+mode_file = here / "mode"
+mode = mode_file.read_text(encoding="utf-8").strip() if mode_file.is_file() else "done"
+with open(__SEEN__, "a", encoding="utf-8") as seen:
     seen.write(json.dumps(args) + "\n")
+with open(__ENV__, "a", encoding="utf-8") as seen:
+    seen.write(json.dumps(dict(os.environ)) + "\n")
 if mode == "crash":
     sys.stderr.write("panne simulée\n")
     sys.exit(3)
-session = args[args.index("--resume") + 1] if "--resume" in args else str(uuid.UUID(int=len(args) + 1))
+resume = [a.split("=", 1)[1] for a in args if a.startswith("--resume=")]
+session = resume[0] if resume else str(uuid.UUID(int=len(args) + 1))
 def emit(event):
     sys.stdout.write(json.dumps(event) + "\n")
     sys.stdout.flush()
@@ -108,11 +119,22 @@ def gemini_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     path = bin_dir / "gemini"
-    path.write_text(f"#!{sys.executable}\n{FAKE_GEMINI}", encoding="utf-8")
+    script = FAKE_GEMINI.replace("__SEEN__", repr(str(tmp_path / "argv.jsonl")))
+    path.write_text(
+        f"#!{sys.executable}\n{script.replace('__ENV__', repr(str(tmp_path / 'env.jsonl')))}", encoding="utf-8"
+    )
     path.chmod(0o755)
-    monkeypatch.setenv("FAKE_GEMINI_ARGV", str(tmp_path / "argv.jsonl"))
-    monkeypatch.setenv("FAKE_GEMINI_MODE", "done")
     return path
+
+
+def set_mode(gemini_bin: Path, mode: str) -> None:
+    """La fin du prochain lancement du faux ``gemini`` (``done``, ``hang``, ``crash``)."""
+    (gemini_bin.parent / "mode").write_text(mode, encoding="utf-8")
+
+
+def seen_env(tmp_path: Path) -> list[dict[str, str]]:
+    path = tmp_path / "env.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.is_file() else []
 
 
 def seen_argv(tmp_path: Path) -> list[list[str]]:
@@ -296,6 +318,9 @@ def test_sans_bloc_worker_le_role_herite_de_l_hote_du_projet(tmp_path: Path) -> 
         ("  host: cursor\n", "", "orchestrator.host : 'cursor' inconnu"),
         ("  host: opencode\n", "", "orchestrator.host : 'opencode' inconnu"),
         ("  host: 3\n", "", "orchestrator.host doit être du texte"),
+        ('  host: ""\n', "", "orchestrator.host : vide"),
+        ("  host: '  '\n", "", "orchestrator.host : vide"),
+        ("", '      host: ""\n', "orchestrator.roles.worker.host : vide"),
         ("  host: gemini\n", "      provider: deepseek\n", "ne s'applique pas à host: gemini"),
         ("  host: gemini\n", "      lean: true\n", "pas d'équivalent sur host: gemini"),
     ],
@@ -325,15 +350,58 @@ def test_plan_neuf_et_reprise() -> None:
         "stream-json",
         "--approval-mode",
         "auto_edit",
-        "--model",
-        "gemini-2.5-pro",
+        "--model=gemini-2.5-pro",
     )
     assert plan.environ()["GRIMOIRE_UNATTENDED"] == "1"
-    resumed = host.plan(SessionSpec(name="n", prompt="-renvoi", permission_mode="plan", resume="abc"))
+    resumed = host.plan(SessionSpec(name="n", prompt="-renvoi", permission_mode="plan", resume=SID))
     assert not isinstance(resumed, str)
-    # Un message qui commence par « - » reste la valeur de --prompt, jamais une option.
-    assert resumed.argv[1] == "--prompt=-renvoi" and resumed.argv[-2:] == ("--resume", "abc")
-    assert "--model" not in resumed.argv
+    # Un message qui commence par « - » reste la valeur de --prompt, jamais une option ; l'identifiant, un seul jeton.
+    assert resumed.argv[1] == "--prompt=-renvoi" and resumed.argv[-1] == f"--resume={SID}"
+    assert "--resume" not in resumed.argv and not any(a.startswith("--model") for a in resumed.argv)
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    ["--yolo", "-x", "abc", "latest", "1", f"{SID} --yolo", f"{SID}\n", f"x{SID}", "ses-42", " " + SID],
+)
+def test_un_identifiant_de_reprise_hors_format_est_refuse(session_id: str) -> None:
+    refusal = GeminiWorkerHost().plan(SessionSpec(name="n", prompt="p", permission_mode="plan", resume=session_id))
+    assert isinstance(refusal, str) and "hors format pour --resume" in refusal
+
+
+def test_l_environnement_du_worker_est_une_liste_fermee(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name, value in {
+        "FAKE_TOKEN_X": "t",
+        "ANTHROPIC_API_KEY": "sk-ant",
+        "OPENAI_API_KEY": "sk-oai",
+        "DEEPSEEK_API_KEY": "sk-ds",
+        "GH_TOKEN": "ghp",
+        "GITHUB_TOKEN": "ghs",
+        "AWS_SECRET_ACCESS_KEY": "aws",
+        "GEMINI_CLI_SYSTEM_SETTINGS_PATH": "/tmp/ailleurs.json",
+        "GEMINI_CLI_HOME": "/tmp/ailleurs",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.hooksPath",
+        "GIT_CONFIG_VALUE_0": "/tmp/h",
+        "GEMINI_API_KEY": "AIza-gemini",
+        "GOOGLE_CLOUD_PROJECT": "projet",
+        "HTTPS_PROXY": "http://proxy:3128",
+        "PATH": "/usr/bin",
+    }.items():
+        monkeypatch.setenv(name, value)
+    plan = GeminiWorkerHost().plan(SessionSpec(name="n", prompt="p", permission_mode="plan"))
+    assert not isinstance(plan, str)
+    env = plan.environ()
+    leaked = sorted(
+        k for k in env if k.endswith(("_API_KEY", "_TOKEN", "_SECRET_ACCESS_KEY")) and k != "GEMINI_API_KEY"
+    )
+    assert leaked == []
+    assert not any(k.startswith(("GEMINI_CLI_", "GIT_CONFIG_")) for k in env)
+    assert env["GEMINI_API_KEY"] == "AIza-gemini" and env["GOOGLE_CLOUD_PROJECT"] == "projet"
+    assert env["PATH"] == "/usr/bin" and env["HTTPS_PROXY"] == "http://proxy:3128"
+    assert env["GRIMOIRE_UNATTENDED"] == "1"
+    assert plan.secret_keys == ("GEMINI_API_KEY",) and plan.traced_env()["GEMINI_API_KEY"] == "***"
+    assert set(env) <= {*ENV_ALLOWED, *GEMINI_ENV_ALLOWED, "GRIMOIRE_UNATTENDED"}
 
 
 @pytest.mark.parametrize(("mode", "expected"), sorted(GEMINI_APPROVAL_MODES.items()))
@@ -368,7 +436,8 @@ def test_lancement_identifiant_et_resultat(tmp_path: Path, gemini_bin: Path, spa
     assert started.pid and not started.error
     session = host.resolve(default_exec, tmp_path, str(started.pid), "grimoire-T", log=log)
     assert session and session == str(read_events(log)[0]["session_id"])
-    assert wait_for(lambda: host.state({"pid": str(started.pid), "log": str(log)}) == "ended")
+    marks = {"pid": str(started.pid), "pid_identity": host.identify(started.pid), "log": str(log)}
+    assert wait_for(lambda: host.state(marks) == "ended")
     result = host.result(log)
     assert result.finished and result.status == "success" and result.text == "PR ouverte : #42"
     assert result.session_id == session and result.error == ""
@@ -381,11 +450,11 @@ def test_reprise_par_resume_ne_relit_pas_l_ancien_init(tmp_path: Path, gemini_bi
     log = tmp_path / "T.gemini.jsonl"
     log.write_text(json.dumps({"type": "init", "session_id": "ancienne"}) + "\n", encoding="utf-8")
     offset = log.stat().st_size
-    plan = host.plan(SessionSpec(name="n", prompt="renvoi", permission_mode="plan", resume="ses-42"))
+    plan = host.plan(SessionSpec(name="n", prompt="renvoi", permission_mode="plan", resume=SID))
     assert not isinstance(plan, str)
     started = host.start(plan, tmp_path, log)
-    assert host.resolve(default_exec, tmp_path, str(started.pid), "n", log=log, since=offset) == "ses-42"
-    assert seen_argv(tmp_path)[-1][-2:] == ["--resume", "ses-42"]
+    assert host.resolve(default_exec, tmp_path, str(started.pid), "n", log=log, since=offset) == SID
+    assert seen_argv(tmp_path)[-1][-1] == f"--resume={SID}"
     # Deux init différents depuis l'octet 0 : on ne choisit pas.
     assert wait_for(lambda: not spawned.alive(started.pid))
     assert host.resolve(default_exec, tmp_path, str(started.pid), "n", log=log) == ""
@@ -395,14 +464,15 @@ def test_reprise_par_resume_ne_relit_pas_l_ancien_init(tmp_path: Path, gemini_bi
 def test_arret_d_une_session_vivante(
     tmp_path: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("FAKE_GEMINI_MODE", "hang")
+    set_mode(gemini_bin, "hang")
     host = host_for(gemini_bin, spawned)
     plan = host.plan(SessionSpec(name="n", prompt="p", permission_mode="acceptEdits"))
     assert not isinstance(plan, str)
     log = tmp_path / "T.gemini.jsonl"
     started = host.start(plan, tmp_path, log)
-    assert host.resolve(default_exec, tmp_path, str(started.pid), "n", log=log)
-    marks = {"pid": str(started.pid), "log": str(log)}
+    identity = host.identify(started.pid)
+    assert identity and host.resolve(default_exec, tmp_path, str(started.pid), "n", log=log, identity=identity)
+    marks = {"pid": str(started.pid), "pid_identity": identity, "log": str(log)}
     assert host.state(marks) == "busy" and not host.result(log).finished
     assert host.state(marks, now=time.time() + 3600) == "silent"
     assert host.halt(default_exec, tmp_path, str(started.pid)) == (True, f", processus gemini {started.pid} arrêté")
@@ -413,7 +483,7 @@ def test_arret_d_une_session_vivante(
 def test_session_morte_sans_init_detectee(
     tmp_path: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("FAKE_GEMINI_MODE", "crash")
+    set_mode(gemini_bin, "crash")
     host = host_for(gemini_bin, spawned)
     plan = host.plan(SessionSpec(name="n", prompt="p", permission_mode="acceptEdits"))
     assert not isinstance(plan, str)
@@ -431,13 +501,39 @@ def test_sondes_sans_processus(tmp_path: Path) -> None:
     assert host.resolve(default_exec, tmp_path, "1", "n") == ""  # sans journal : rien à lire
     assert host.state({"pid": "x"}) == "ended" and host.stop("x") is False
     assert host.halt(default_exec, tmp_path, "") == (False, ", processus gemini ? NON arrêté")
-    alive = GeminiWorkerHost(alive=lambda _p: True)
-    assert alive.state({"pid": "12"}) == "busy"  # vivant, pas encore de journal (jamais le dossier courant)
+    alive = GeminiWorkerHost(alive=lambda _p: True, identify=lambda _p: "100:/usr/bin/node")
+    marks = {"pid": "12", "pid_identity": "100:/usr/bin/node"}
+    assert alive.state(marks) == "busy"  # vivant, pas encore de journal (jamais le dossier courant)
+    # Le même pid, un autre processus (heure de démarrage ou exécutable différents) : mort.
+    assert alive.state({**marks, "pid_identity": "99:/usr/bin/node"}) == "ended"
+    assert alive.state({**marks, "pid_identity": "100:/usr/bin/python3"}) == "ended"
+    # Aucune identité notée au lancement : on n'affirme pas qu'il vit.
+    assert alive.state({"pid": "12"}) == "ended"
     assert read_events(tmp_path / "absent.jsonl") == []
     broken = tmp_path / "x.jsonl"
     broken.write_text('pas du json\n[1]\n{"type": "error", "message": "quota"}\n', encoding="utf-8")
     assert GeminiWorkerHost.result(broken).error == "quota" and not GeminiWorkerHost.result(broken).finished
     assert GeminiWorkerHost().version(lambda *_a: ExecResult(1, "", "absent"), tmp_path) == ""
+
+
+@POSIX_ONLY
+def test_l_identite_d_un_processus_est_son_heure_de_demarrage_et_son_executable(tmp_path: Path) -> None:
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        identity = process_identity(proc.pid)
+        assert identity and identity == process_identity(proc.pid)  # stable tant que le processus vit
+        started, _, exe = identity.partition(":")
+        assert started and Path(exe).name == Path(os.path.realpath(sys.executable)).name
+        host = GeminiWorkerHost()
+        assert host.state({"pid": str(proc.pid), "pid_identity": identity}) == "busy"
+        # Même pid, autre heure de démarrage (pid recyclé) ou autre exécutable : mort.
+        assert host.state({"pid": str(proc.pid), "pid_identity": f"0:{exe}"}) == "ended"
+        assert host.state({"pid": str(proc.pid), "pid_identity": f"{started}:/usr/bin/gemini"}) == "ended"
+        assert host.state({"pid": str(proc.pid)}) == "ended"
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+    assert process_identity(proc.pid) == "" and process_identity(0) == ""
 
 
 def test_windows_refuse_le_lancement(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -496,11 +592,18 @@ def _launched(projet: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pyt
 def test_le_worker_gemini_part_s_inscrit_et_se_rattache(
     projet: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("FAKE_GEMINI_MODE", "hang")
+    set_mode(gemini_bin, "hang")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fuite")
+    monkeypatch.setenv("FAKE_TOKEN_X", "jeton-fuite")
     tid = _launched(projet, gemini_bin, spawned, monkeypatch, tmp_path)
     service = TaskService(projet)
     payload = launched_sessions(service)[tid]
     assert payload["host"] == GEMINI_HOST and payload["host_version"] == VERSION and payload["pid"].isdigit()
+    # L'identité exacte du processus est notée au lancement : c'est elle que les sondes comparent.
+    assert payload["pid_identity"] and payload["pid_identity"] == process_identity(int(payload["pid"]))
+    # Le processus détaché n'a reçu ni la clé d'un autre fournisseur ni un jeton non requis.
+    (env,) = seen_env(tmp_path)
+    assert "ANTHROPIC_API_KEY" not in env and "FAKE_TOKEN_X" not in env and env["GRIMOIRE_UNATTENDED"] == "1"
     assert payload["log"] == str(gemini_log(projet, tid)) and payload["permission_mode"] == "acceptEdits"
     assert payload["session_id"] and payload["provider"] == ""
     task = service.require(tid)
@@ -515,7 +618,7 @@ def test_le_worker_gemini_part_s_inscrit_et_se_rattache(
 def test_battement_arret_au_repos_reprise_et_fin(
     projet: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("FAKE_GEMINI_MODE", "hang")
+    set_mode(gemini_bin, "hang")
     tid = _launched(projet, gemini_bin, spawned, monkeypatch, tmp_path)
     host = host_for(gemini_bin, spawned)
     exec_ = GeminiExec(gemini_bin)
@@ -539,9 +642,10 @@ def test_battement_arret_au_repos_reprise_et_fin(
     assert result.returncode == 0, result.stderr
     assert wait_for(lambda: len(seen_argv(tmp_path)) == 2)  # le processus repris a démarré
     assert seen_argv(tmp_path)[-1][0] == "--prompt=renvoi"
-    assert seen_argv(tmp_path)[-1][-2:] == ["--resume", launch["session_id"]]
+    assert seen_argv(tmp_path)[-1][-1] == f"--resume={launch['session_id']}"
     resumed = [e for e in ledger.events_for(tid) if e.event_type == WORKER_RESUMED_EVENT][-1]
     assert resumed.payload["host"] == GEMINI_HOST and resumed.payload["pid"] == result.stdout
+    assert resumed.payload["pid_identity"] == process_identity(int(result.stdout))
     # Le processus repris meurt : la tâche, de nouveau tenue, est rendue.
     ledger.transition_task(tid, TaskState.RUNNING, actor_id="worker")
     assert host.stop(result.stdout)
@@ -560,6 +664,10 @@ def test_reprise_refusee_sans_preuve_ou_sans_session(
     exec_ = GeminiExec(gemini_bin)
     no_session = resume_worker(service, exec_, "claude", tid, {**launch, "session_id": ""}, "m", gemini=host)
     assert no_session.returncode == 1 and "aucune session" in no_session.stderr
+    launches = len(seen_argv(tmp_path))
+    forged = resume_worker(service, exec_, "claude", tid, {**launch, "session_id": "--yolo"}, "m", gemini=host)
+    assert forged.returncode == 1 and "hors format pour --resume" in forged.stderr
+    assert len(seen_argv(tmp_path)) == launches  # rien n'est parti
     bad_mode = resume_worker(service, exec_, "claude", tid, launch, "m", permission_mode="auto", gemini=host)
     assert bad_mode.returncode == 1 and "sans traduction" in bad_mode.stderr
     prove(monkeypatch, tmp_path, VERSION, ok=False)
@@ -572,7 +680,7 @@ def test_reprise_refusee_sans_preuve_ou_sans_session(
 def test_identite_introuvable_le_processus_est_arrete(
     projet: Path, gemini_bin: Path, spawned: Spawned, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("FAKE_GEMINI_MODE", "crash")
+    set_mode(gemini_bin, "crash")
     prove(monkeypatch, tmp_path)
     tid = ready(projet)
     run, _exec = launcher(projet, gemini_bin, spawned)
@@ -620,7 +728,7 @@ def test_le_janitor_arrete_le_processus_gemini(
 ) -> None:
     from grimoire.missions.janitor import Janitor
 
-    monkeypatch.setenv("FAKE_GEMINI_MODE", "hang")
+    set_mode(gemini_bin, "hang")
     tid = _launched(projet, gemini_bin, spawned, monkeypatch, tmp_path)
     policy = load_orchestrator_policy(projet).policy
     assert policy is not None
@@ -629,8 +737,12 @@ def test_le_janitor_arrete_le_processus_gemini(
     session = launched_sessions(TaskService(projet))[tid]["session"]
     assert janitor._session(tid) == ("done", f"worker gemini {session} arrêté")
     assert not spawned.alive(int(launched_sessions(TaskService(projet))[tid]["pid"]))
-    refusing = GeminiWorkerHost(alive=lambda _p: True, kill=lambda _p: False)
+    identity = str(launched_sessions(TaskService(projet))[tid]["pid_identity"])
+    refusing = GeminiWorkerHost(alive=lambda _p: True, kill=lambda _p: False, identify=lambda _p: identity)
     assert Janitor(TaskService(projet), policy, gemini=refusing)._session(tid)[0] == "failed"
+    # Le pid noté porte désormais un autre processus : il n'est pas tué, le worker est dit arrêté.
+    recycled = GeminiWorkerHost(alive=lambda _p: True, kill=lambda _p: False, identify=lambda _p: "1:/bin/autre")
+    assert Janitor(TaskService(projet), policy, gemini=recycled)._session(tid)[0] == "done"
 
 
 def test_le_tick_ne_lance_ni_relecteur_ni_arbitre_ni_orchestrateur_sur_gemini(tmp_path: Path) -> None:
