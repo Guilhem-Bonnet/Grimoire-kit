@@ -122,6 +122,30 @@ Code de sortie 1 quand une exigence reste sans critère vérifiable ou en confli
 Corriger le fichier suffit à rendre une question caduque, sans réponse
 fabriquée.
 
+## L'entretien de cadrage : `grimoire cadrage interview`
+
+Le kit n'appelle aucun modèle : il tient la structure de l'entretien, l'agent
+formule les questions. `grimoire cadrage interview --chantier <nom>` (`--json`
+disponible) rend sept angles — utilisateurs et usage réel, existant à
+réutiliser, critères de réussite, hors périmètre, contraintes, risques et
+pré-mortem, alternatives plus simples — chacun *ouvert*, *couvert* ou *écarté
+avec raison*, avec son intention et deux questions d'amorce à adapter.
+
+La profondeur vient de l'intake déterministe (type, risque, périmètre) et se
+fige au premier appel : `express` (1 question par angle, 3 angles obligatoires),
+`standard` (2 questions, 5 obligatoires), `approfondi` (les 7). `--depth` la force.
+
+```bash
+grimoire cadrage interview answer utilisateurs "Les mainteneurs du kit"
+grimoire cadrage interview answer criteres --unknown   # inscrit une hypothèse à valider
+grimoire cadrage interview answer alternatives --skip "Raison de l'écart"
+```
+
+Une réponse est repliée sur une ligne (un retour à la ligne ne peut pas créer de
+titre) ; la même réponse redonnée n'est pas dupliquée. `grimoire cadrage check`
+refuse un angle obligatoire resté ouvert, écarté sans raison, d'état inconnu, ou
+un `entretien.json` illisible, invalide ou en lien symbolique.
+
 ## Le gate, dans `standard verify`
 
 `cadrage check` (la commande) et le gate du standard (`grimoire standard
