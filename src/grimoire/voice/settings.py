@@ -10,6 +10,7 @@
       idle_unload_seconds: 300
       language: fr
       max_record_seconds: 120 # plafond d'un enregistrement (1 à 600)
+      spoken_max_seconds: 45  # durée plafond du message parlé (5 à 300)
       allow_download: false # true = l'utilisateur accepte le téléchargement des modèles
 
 Un réglage illisible ne casse rien : il retombe sur son défaut et le problème est
@@ -41,6 +42,9 @@ DEFAULT_TTS = "pocket-tts"
 #: Plafond d'un enregistrement : deux minutes tiennent dans un message, et bornent le poids de l'audio.
 DEFAULT_MAX_RECORD_S = 120.0
 MAX_RECORD_CEILING_S = 600.0
+#: Durée cible du message parlé de l'orchestrateur : au-delà, on n'écoute plus, on lit.
+DEFAULT_SPOKEN_MAX_S = 45.0
+SPOKEN_MAX_RANGE_S = (5.0, 300.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,7 @@ class VoiceSettings:
     language: str = "fr"
     allow_download: bool = False
     max_record_s: float = DEFAULT_MAX_RECORD_S
+    spoken_max_s: float = DEFAULT_SPOKEN_MAX_S
     problems: tuple[str, ...] = ()
 
     @property
@@ -127,6 +132,14 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         )
         max_record = DEFAULT_MAX_RECORD_S
 
+    spoken = voice.get("spoken_max_seconds", DEFAULT_SPOKEN_MAX_S)
+    low, high = SPOKEN_MAX_RANGE_S
+    if isinstance(spoken, bool) or not isinstance(spoken, (int, float)) or not low <= spoken <= high:
+        problems.append(
+            f"voice.spoken_max_seconds={spoken!r} invalide (entre {low:g} et {high:g}) : {DEFAULT_SPOKEN_MAX_S:g} retenu"
+        )
+        spoken = DEFAULT_SPOKEN_MAX_S
+
     return VoiceSettings(
         mode=mode,
         stt=_engine_choice(voice.get("stt"), "stt", DEFAULT_STT, problems),
@@ -135,6 +148,7 @@ def settings_from_mapping(data: Any) -> VoiceSettings:
         language=language.strip(),
         allow_download=allow,
         max_record_s=float(max_record),
+        spoken_max_s=float(spoken),
         problems=tuple(problems),
     )
 

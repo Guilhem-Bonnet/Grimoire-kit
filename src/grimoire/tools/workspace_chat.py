@@ -427,7 +427,7 @@ class Conversation:
                 return
             self._emit({"type": "turn_started"})
             self._turn_text = []
-            for event in client.prompt(text, on_permission=self._ask):
+            for event in client.prompt(self._with_spoken_brief(text), on_permission=self._ask):
                 if event["type"] == "turn_ended":
                     self._propose_gestures()
                     self._emit({"type": "turn_ended", "stop_reason": event["stop_reason"]})
@@ -444,11 +444,31 @@ class Conversation:
                 self._cond.notify_all()
             self._maybe_schedule_close()
 
+    def _with_spoken_brief(self, text: str) -> str:
+        """En mode vocal, la consigne du message parlé suit le message de la personne (le fil, lui, ne l'affiche pas)."""
+        from grimoire.voice.outbox import spoken_instruction
+        from grimoire.voice.settings import load_voice_settings
+
+        settings = load_voice_settings(self.root)
+        return f"{text}\n\n{spoken_instruction(settings.spoken_max_s)}" if settings.enabled else text
+
+    def _record_spoken(self, reply: str) -> None:
+        """Dépose le message parlé de la réponse dans la boîte d'envoi vocale ; le fil reçoit l'événement."""
+        from grimoire.voice import outbox_service
+
+        try:
+            message = outbox_service.record_reply(self.root, reply)
+        except Exception:  # le vocal est un confort : il ne casse jamais un tour
+            return
+        if message is not None:
+            self._emit({"type": "voice_message", "message": message})
+
     def _propose_gestures(self) -> None:
         """L'agent propose « active le pilote » / « coupe le pilote » : le fil en fait un bouton, rien n'est écrit ici."""
         from grimoire.tools import workspace_chat_pilot
 
         text, self._turn_text = "".join(self._turn_text), []
+        self._record_spoken(text)
         for on in dict.fromkeys(workspace_chat_pilot.proposals(text)):
             self._emit({"type": "pilot_gesture", "on": on})
 

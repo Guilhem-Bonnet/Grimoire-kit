@@ -288,6 +288,9 @@ export const api = {
   // Lot V2 : le message vocal. Le serveur local transcrit un WAV 16 kHz mono (base64) ; sans l'extra
   // `voice`, `voiceConfig` le dit (`available: false`, avec la raison) et le bouton n'existe pas.
   voiceConfig: () => get(WS + 'voice/config'),
+  // Lot V3 : le message parlé de l'orchestrateur. La synthèse n'a lieu qu'à la lecture (`play`).
+  voiceOutbox: () => get(WS + 'voice/outbox'),
+  voiceOutboxPlay: (id) => post(WS + 'voice/outbox/play', { id, ...projectBody() }),
   voiceTranscribe: (audio) => post(WS + 'voice/transcribe', { audio, ...projectBody() }),
   // ACP4 : le geste du pilote automatique. Un bouton que la personne clique, avec la clé de contrôle
   // qu'elle saisit — la page ne la garde pas ; l'agent du chat n'a ni la route ni la clé. Lot 3 : le

@@ -3525,6 +3525,39 @@ html:has(#panel-explorer[data-detail="off"]) .rail-btn[data-panel="explorer"] {
   color: var(--bad-mark);
 }
 
+.chat-voice-out {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-top: 1px solid var(--line, currentColor);
+}
+
+.chat-voice-out[hidden] {
+  display: none;
+}
+
+.chat-voice-msg {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-1) var(--sp-2);
+  align-items: center;
+}
+
+.chat-voice-msg[data-played='true'] {
+  opacity: 0.7;
+}
+
+.chat-voice-text {
+  margin: 0;
+  grid-column: 1 / -1;
+}
+
+.chat-voice-play[aria-pressed='true'] {
+  border-color: var(--bad-mark);
+  color: var(--bad-mark);
+}
+
 .chat-stop[hidden] {
   display: none;
 }

@@ -17,6 +17,7 @@
 import { api, host, projectName } from './api.js';
 import { renderMarkdown } from './markdown.js';
 import { createVoiceInput } from './voice.js';
+import { createVoiceOutbox } from './voice_outbox.js';
 
 const SAFE_HREF = /^(https?:|mailto:|#)/i;
 
@@ -95,10 +96,11 @@ export function createChat({ readOnly = () => false } = {}) {
     api, input, slot: form.querySelector('.chat-actions'), readOnly,
     note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text),
   });
+  const voiceOut = createVoiceOutbox({ note: (text, kind) => note(text, kind), setStatus: (text) => setStatus(text), api });
   const hostSelect = mk('select', { class: 'chat-host', id: 'chat-host', 'aria-label': 'Hôte de l’orchestrateur' });
   const hostBar = mk('div', { class: 'chat-hostbar' },
     mk('label', { for: 'chat-host', class: 'chat-host-label', text: 'Hôte' }), hostSelect);
-  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, form);
+  const element = mk('section', { class: 'chat', 'aria-label': 'Orchestrateur' }, hostBar, status, log, voiceOut.element, form);
 
   let stream = null;
   let lastSeq = 0;
@@ -448,6 +450,9 @@ export function createChat({ readOnly = () => false } = {}) {
       case 'question_resolved':
         questionResolved(event);
         break;
+      case 'voice_message':
+        voiceOut.receive(event.message);
+        break;
       case 'pilot_gesture':
         gesture(event);
         break;
@@ -545,6 +550,7 @@ export function createChat({ readOnly = () => false } = {}) {
           setStatus('Connexion à l’orchestrateur…');
           loadHosts();
           voice.refresh();
+          voiceOut.refresh();
           connect();
         }
       }
@@ -553,6 +559,7 @@ export function createChat({ readOnly = () => false } = {}) {
     },
     close() {
       voice.abort();
+      voiceOut.abort();
       if (stream) stream.close();
       stream = null;
       opened = false;
