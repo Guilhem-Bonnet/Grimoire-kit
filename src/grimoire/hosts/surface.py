@@ -155,6 +155,19 @@ class ModelAffinity:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentHookSpec:
+    """Un hook que la persona déclare pour elle seule (clé ``hooks:`` de son fichier, #1280 P3).
+
+    ``event`` est le nom d'événement PascalCase ; ``command`` la ligne de commande telle
+    que l'auteur l'a écrite ; ``timeout`` en secondes, ``None`` laissant le défaut de l'hôte.
+    """
+
+    event: str
+    command: str
+    timeout: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentSpec:
     """One Grimoire persona, ready to be rendered as a host sub-agent."""
 
@@ -187,6 +200,10 @@ class AgentSpec:
     :mod:`grimoire.tools.context_router`, not proof that a session actually
     loads it — the router plans context adaptively and this field only says
     what the agent claims to need."""
+    hooks: tuple[AgentHookSpec, ...] = ()
+    """Hooks propres à cette persona, lus de la clé ``hooks:`` de son fichier (#1280 P3).
+    Seul Copilot les émet (bloc ``hooks:`` du ``.agent.md``) : la garde globale reste dans
+    les fichiers de hooks du projet, jamais ici."""
     definition_body: str = ""
     """The persona file's body, frontmatter excluded (#1179).
 
@@ -319,9 +336,7 @@ def body_fingerprint(body: str) -> str:
     :class:`AgentSpec` (the IR handed to every emitter) need not carry every
     agent body in memory.
     """
-    normalized = "\n".join(
-        line.rstrip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    ).strip()
+    normalized = "\n".join(line.rstrip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")).strip()
     if not normalized:
         return ""
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -369,9 +384,7 @@ def _partition_duplicate_pairs(
         ordered = sorted(names)
         duplicates.extend((ordered[i], ordered[j]) for i in range(len(ordered)) for j in range(i + 1, len(ordered)))
     by_name = {agent.name: agent for agent in agents}
-    strict = [
-        pair for pair in duplicates if any(is_override(by_name[n]) for n in pair if n in by_name)
-    ]
+    strict = [pair for pair in duplicates if any(is_override(by_name[n]) for n in pair if n in by_name)]
     return tuple(strict), tuple(duplicates)
 
 

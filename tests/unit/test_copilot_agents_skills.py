@@ -170,3 +170,47 @@ def test_host_matrix_stays_coherent_with_models_declared(project: Path) -> None:
     _policy(project, "dispatch:\n  copilot_models:\n    haiku: claude-haiku-4.5\n")
     matrix = build_matrix(project, (HostId.CLAUDE_CODE_CLI, HostId.GITHUB_COPILOT))
     assert matrix.ok
+
+
+# --- #1280 P3 : hooks scopés par agent ---------------------------------------
+
+
+def _agent_with_hooks(root: Path, name: str, hooks: str) -> None:
+    (root / AGENT_DIR / f"{name}.md").write_text(
+        f'---\nname: "{name}"\ndescription: "{name} test"\nhooks:\n{hooks}---\n\nTu es {name}.\n',
+        encoding="utf-8",
+    )
+
+
+def test_agent_hooks_rendered_in_agent_md(project: Path) -> None:
+    import json
+
+    _agent_with_hooks(project, "scribe", "  PostToolUse:\n    - command: ./scripts/fmt.sh\n      timeout: 20\n")
+    files, _ = _copilot(project)
+    text = files[".github/agents/scribe.agent.md"]
+    front = text.split("---")[1]
+    line = next(x for x in front.splitlines() if x.startswith("hooks: "))
+    assert json.loads(line[len("hooks: ") :]) == {
+        "PostToolUse": [{"type": "command", "command": "./scripts/fmt.sh", "timeout": 20}]
+    }
+    # Un agent sans hooks propres n'en reçoit pas.
+    assert "hooks:" not in files[".github/agents/architecte.agent.md"].split("---")[1]
+    # La garde globale reste dans son fichier, une seule fois, hors de l'agent.
+    assert "grimoire" not in line
+    assert ".github/hooks/grimoire-pre-tool-use.json" in files or any(k.startswith(".github/hooks/") for k in files)
+
+
+def test_agent_hook_cannot_relaunch_the_global_guard(project: Path) -> None:
+    from grimoire.core.exceptions import GrimoireAgentError
+
+    _agent_with_hooks(project, "scribe", "  PreToolUse:\n    - command: grimoire host hook PreToolUse\n")
+    with pytest.raises(GrimoireAgentError, match="garde"):
+        _copilot(project)
+
+
+def test_agent_hooks_unknown_event_refused(project: Path) -> None:
+    from grimoire.core.exceptions import GrimoireAgentError
+
+    _agent_with_hooks(project, "scribe", "  Nope:\n    - command: ./x.sh\n")
+    with pytest.raises(GrimoireAgentError, match="inconnu"):
+        _copilot(project)

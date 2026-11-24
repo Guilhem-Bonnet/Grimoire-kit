@@ -153,6 +153,26 @@ def _model_tiers(project_root: Path) -> dict[str, str]:
     return {choice.tier: choice.model for choice in choices if choice.model}
 
 
+def _with_agent_hooks(header: str, agent: AgentSpec) -> str:
+    """Ajoute au frontmatter le bloc ``hooks:`` propre à *agent* (#1280 P3).
+
+    Format de https://code.visualstudio.com/docs/copilot/customization/custom-agents :
+    ``hooks:`` {Événement: [{type: command, command, timeout}]}, écrit en YAML de flux (JSON).
+    Il ne porte que ce que la persona déclare : la garde globale reste dans
+    ``.github/hooks/`` — le collecteur refuse un hook d'agent qui la relancerait.
+    """
+    if not agent.hooks:
+        return header
+    block: dict[str, list[dict[str, Any]]] = {}
+    for hook in agent.hooks:
+        entry: dict[str, Any] = {"type": "command", "command": hook.command}
+        if hook.timeout is not None:
+            entry["timeout"] = hook.timeout
+        block.setdefault(hook.event, []).append(entry)
+    head, _, _ = header.rpartition("\n---")
+    return f"{head}\nhooks: {json.dumps(block, ensure_ascii=False)}\n---"
+
+
 def _agent_file(
     agent: AgentSpec,
     surface: ProjectSurface,
@@ -194,7 +214,7 @@ def _agent_file(
         fields["agents"] = [other.name for other in routed]
         verbs = ", ".join(dict.fromkeys(v.value for other in (agent, *routed) for v in other.tools))
         boundary = f"{verbs} (l'union de tes personas), plus la délégation par l'outil `agent` aux personas listées dans `agents`"
-    header = Emitter.frontmatter(fields)
+    header = _with_agent_hooks(Emitter.frontmatter(fields), agent)
     role = (
         "Point d'entrée : sur une demande directe et bornée (`grimoire-agent-dispatch` en juge), tu "
         "fais le travail toi-même avec tes outils ; sinon tu délègues à la persona adaptée avec l'outil "
